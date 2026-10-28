@@ -9,7 +9,7 @@
 //!
 //! PRD: docs/ft/daemon/agent-context-sync.md § Design.
 
-use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::path::{Path, PathBuf};
 use std::sync::{LazyLock, PoisonError, RwLock};
 
@@ -102,12 +102,162 @@ pub fn matches_context_globs(rel_path: &str, globs: &[&str]) -> bool {
 
 /// Whether an already-normalized path is one [`CONTEXT_EXCLUDE_GLOBS`] withholds.
 fn is_excluded(path: &str) -> bool {
-    CONTEXT_EXCLUDE_GLOBS.iter().any(|glob| {
+    matches_any_exclusion(path, CONTEXT_EXCLUDE_GLOBS)
+}
+
+fn matches_any_exclusion(path: &str, exclusions: &[&str]) -> bool {
+    exclusions.iter().any(|glob| {
         with_compiled_pattern(glob, |pattern| {
             pattern.matches_with(path, EXCLUDE_MATCH_OPTIONS)
         })
         .unwrap_or(false)
     })
+}
+
+/// Paths a symlink may never carry into a context sync, at any depth, however its own name is
+/// spelled.
+///
+/// An allow-listed link pulls its target in even when no glob names the target (see
+/// [`walk_context_files`]), which turns every committed link under `.claude/` into a statement
+/// about what else may travel. That widening is what the agent's skills need, and it is also a path
+/// to `.claude/creds -> ../.env`, so the shapes a secret takes in a checkout are refused by name
+/// rather than left to whether some glob happens to miss them: dotenv files, private keys, and the
+/// `.git` directory — whose `config` carries remotes and credential helpers and whose objects are
+/// the whole history.
+///
+/// Matched like [`CONTEXT_EXCLUDE_GLOBS`], case-insensitively, for the same reason: an exclusion
+/// may not under-match, and on macOS `.ENV` is the same file as `.env`.
+///
+/// This gates only what a **link** reaches. A file the allow-list names outright is the project's
+/// own agent configuration and is listed as before.
+pub const CONTEXT_SECRET_GLOBS: &[&str] = &[
+    "**/.env",
+    "**/.env.*",
+    "**/*.pem",
+    "**/*.key",
+    "**/.git",
+    "**/.git/**",
+];
+
+/// Whether a link may never reach `path` (already normalized): the daemon owns it
+/// ([`CONTEXT_EXCLUDE_GLOBS`]) or it is shaped like a secret ([`CONTEXT_SECRET_GLOBS`]).
+fn is_withheld_from_links(path: &str) -> bool {
+    is_excluded(path) || matches_any_exclusion(path, CONTEXT_SECRET_GLOBS)
+}
+
+/// The normalized target of a link at `link_rel` pointing at `target_rel` (both
+/// worktree-root-relative), or `None` when that link must not travel.
+///
+/// The one rule every half applies to a link — the walk that lists it, the reader that serves what
+/// it reaches, and the syncer that recreates it from a manifest another host sent:
+///
+/// - the link's **own** path must be allow-listed. Only that makes it part of the agent's
+///   configuration; a link found anywhere else, including inside a tree another link pulled in, is
+///   not, which is what keeps pulling a target in to one hop rather than a crawl;
+/// - the **target** must be a relative path that stays inside the root — on the receiving side it
+///   is a path the peer chose, so `../../.ssh` is refused here rather than recreated;
+/// - and the target must not be withheld ([`is_withheld_from_links`]).
+pub fn allow_listed_link_target(
+    link_rel: &str,
+    target_rel: &str,
+    globs: &[&str],
+) -> Option<String> {
+    if !matches_context_globs(link_rel, globs) {
+        return None;
+    }
+    let target = normalize_context_path(target_rel)?;
+    (!is_withheld_from_links(&target)).then_some(target)
+}
+
+/// Whether `rel_path` is one of `link_targets` or lies beneath one, so an allow-listed link pulls
+/// it in although no glob names it.
+///
+/// `link_targets` must be the answers of [`allow_listed_link_target`]. Below a target, every path
+/// segment is asked the withheld question again — a pulled-in tree is somebody else's directory,
+/// and its `.git/` or `.env` is as secret there as anywhere — which is the same pruning the walk
+/// applies as it descends, so the reader and the manifest refuse the same files.
+pub fn is_reached_through_link(rel_path: &str, link_targets: &[String]) -> bool {
+    let Some(path) = normalize_context_path(rel_path) else {
+        return false;
+    };
+    link_targets.iter().any(|target| {
+        let Some(below) = path.strip_prefix(target.as_str()) else {
+            return false;
+        };
+        if !below.is_empty() && !below.starts_with('/') {
+            // `tools/agent-skills-old` is not under `tools/agent-skills`.
+            return false;
+        }
+        let mut prefix = target.clone();
+        below
+            .split('/')
+            .filter(|segment| !segment.is_empty())
+            .all(|segment| {
+                prefix.push('/');
+                prefix.push_str(segment);
+                !is_withheld_from_links(&prefix)
+            })
+    })
+}
+
+/// What to write into a symlink at `link_rel` so it resolves to `target_rel`, both
+/// worktree-root-relative: the target spelled **relative to the link's own directory**
+/// (`.claude/skills` -> `../.agents/skills`).
+///
+/// Relative rather than absolute because the link is recreated inside a context directory that is
+/// not the repository; an absolute target would point back at a path on the host that built the
+/// manifest, which on the split path is not even this machine.
+pub fn relative_link_target(link_rel: &str, target_rel: &str) -> PathBuf {
+    let link_parent: Vec<&str> = {
+        let mut segments: Vec<&str> = link_rel.split('/').filter(|s| !s.is_empty()).collect();
+        segments.pop();
+        segments
+    };
+    let target: Vec<&str> = target_rel.split('/').filter(|s| !s.is_empty()).collect();
+    let common = link_parent
+        .iter()
+        .zip(&target)
+        .take_while(|(left, right)| left == right)
+        .count();
+    let mut relative = PathBuf::new();
+    for _ in common..link_parent.len() {
+        relative.push("..");
+    }
+    for segment in &target[common..] {
+        relative.push(segment);
+    }
+    if relative.as_os_str().is_empty() {
+        // A link to its own directory (`.claude/self -> .claude`).
+        relative.push(".");
+    }
+    relative
+}
+
+/// Creates the symlink at `link_path` (the on-disk spelling of `link_rel`) pointing at
+/// `target_rel`, written relative per [`relative_link_target`].
+///
+/// Shared by the copier and the syncer so the two write the same link for the same entry.
+pub fn create_context_link(
+    link_path: &Path,
+    link_rel: &str,
+    target_rel: &str,
+) -> std::io::Result<()> {
+    let relative = relative_link_target(link_rel, target_rel);
+    #[cfg(unix)]
+    {
+        std::os::unix::fs::symlink(relative, link_path)
+    }
+    #[cfg(not(unix))]
+    {
+        // TODO(agent-context-sync): a context link on a platform without unix symlinks. Nothing
+        // here runs off unix today; refused loudly rather than flattened into a copy.
+        Err(std::io::Error::new(
+            std::io::ErrorKind::Unsupported,
+            format!(
+                "cannot create the context link {link_path:?} -> {relative:?} on this platform"
+            ),
+        ))
+    }
 }
 
 /// Every glob this process has been asked about, compiled once.
@@ -237,47 +387,84 @@ fn pattern_reaches_below(glob: &str, dir_rel: &str) -> bool {
     pattern_segments.next().is_some()
 }
 
-/// One allow-listed file in a worktree, paired with the path its bytes actually live at — which is
-/// the link target when the entry was a symlink, and the allow-list has been asked about *both*
-/// spellings (see [`walk_context_files`]).
+/// One allow-listed path in a worktree: an ordinary file, or a symlink that travels as a link.
 pub(crate) struct ContextFile {
     /// Worktree-root-relative and `/`-separated, the spelling both the manifest and the copier use.
     pub rel_path: String,
+    /// Where the bytes live. For a link this is its canonical target, which is never read through
+    /// the link — the target is listed as entries of its own.
     pub source: PathBuf,
+    /// `Some` when `rel_path` is a symlink: its target's root-relative path, canonical and
+    /// `/`-separated.
+    pub symlink_target: Option<String>,
 }
 
-/// Every allow-listed file under `root`, sorted by path.
+/// Every allow-listed path under `root`, sorted by path. **Symlinks travel as links.**
 ///
-/// A symlink is followed only when **both ends** are allow-listed: the name it is reached by *and*
-/// the place its target sits in the tree. Checking only the name is not enough and checking only
-/// containment in the root is actively wrong — `.claude/creds -> ../.env` resolves inside the root
-/// and would otherwise be published under a name every glob happily matches, handing the whole
-/// point of the allow-list away. On the split path those bytes then cross to another host and land
-/// in the agent's readable working directory.
+/// A link is not descended into or read through; it is listed as itself, with its target, and the
+/// consumer recreates it. The files behind it are listed once, under the target's own path. That is
+/// what an agent's configuration actually needs — Claude Code reads skills only under `.claude/`,
+/// and a repository that keeps them once under `.agents/` reaches them through
+/// `.claude/skills -> ../.agents/skills`. Following the link instead listed the tree under
+/// whichever of the two spellings `read_dir` reached first, which is the filesystem's order: one
+/// host synced `.claude/**`, another `.agents/**`, and an agent on the second had no skills at all.
 ///
-/// So a link out of the root (`.claude/x -> /etc/passwd`) is skipped because its target is not
-/// under `root`, and a link to a sibling inside it (`.claude/creds -> ../.env`,
-/// `.claude/x -> node_modules/…`) is skipped because its target's own root-relative path is named
-/// by no glob. Only a link between two allow-listed places — `.claude/tdd.md -> .agents/skills/tdd/SKILL.md`
-/// — survives, which is the one case an agent-config tree actually has a use for. (A link to a
-/// *directory* already inside the walk is additionally deduplicated by `visited`, so an aliased
-/// tree is listed once, under whichever spelling the walk reached first.)
+/// Which links travel, and what they bring ([`allow_listed_link_target`] is the rule):
+///
+/// - a link whose **own path** is allow-listed is listed, and its target is **pulled in** even when
+///   no glob names it — a file target as an entry, a directory target as the files under it.
+///   Recreating a link to a path the context dir does not hold would hand the agent a dangling one;
+/// - **one hop only.** A link found inside a pulled-in tree names no allow-listed place of its own
+///   and is dropped, so one committed link is not a path to any file in the checkout;
+/// - a target that resolves **outside** the root, or that is **withheld** — the daemon's own file
+///   ([`CONTEXT_EXCLUDE_GLOBS`]) or anything secret-shaped ([`CONTEXT_SECRET_GLOBS`]), at any depth
+///   of a pulled-in tree — never travels, and neither does the link to it. Containment alone is
+///   not the guard: `.claude/creds -> ../.env` resolves inside the root, and on the split path its
+///   bytes would cross to another host into the agent's readable working directory;
+/// - a link to its own ancestor (`.claude/self -> .claude`) is listed and, like every link, not
+///   descended, so the walk terminates and the files it loops over are listed once.
+///
+/// A dangling link is skipped: it has no bytes to sync and never had.
 pub(crate) fn walk_context_files(root: &Path, globs: &[&str]) -> anyhow::Result<Vec<ContextFile>> {
     let root = std::fs::canonicalize(root)?;
-    let mut found = Vec::new();
-    let mut visited = HashSet::new();
-    collect_context_files(&root, "", &root, globs, &mut visited, &mut found)?;
-    found.sort_by(|left, right| left.rel_path.cmp(&right.rel_path));
-    Ok(found)
+    let mut found = BTreeMap::new();
+    let mut links = Vec::new();
+    collect_allow_listed(&root, "", &root, globs, &mut found, &mut links)?;
+    for (target, target_rel) in links {
+        pull_in_link_target(&target, &target_rel, &mut found)?;
+    }
+    // A `BTreeMap` both sorts and de-duplicates: a pulled-in file the globs also name, or one two
+    // links both reach, is listed once.
+    Ok(found.into_values().collect())
 }
 
-fn collect_context_files(
+/// The targets of every allow-listed link under `root` — the paths [`walk_context_files`] pulls in
+/// although no glob names them, as [`is_reached_through_link`] expects them.
+///
+/// Exported for the **reader**, which is handed a caller-supplied path and has to answer "does an
+/// allow-listed link reach this?" exactly as the walk did. Asking this rather than re-deriving the
+/// rule is what keeps the manifest and the reader agreeing; it walks only the allow-listed tree, not
+/// what the links pull in.
+pub fn context_link_targets(root: &Path, globs: &[&str]) -> anyhow::Result<Vec<String>> {
+    let root = std::fs::canonicalize(root)?;
+    let mut found = BTreeMap::new();
+    let mut links = Vec::new();
+    collect_allow_listed(&root, "", &root, globs, &mut found, &mut links)?;
+    Ok(links
+        .into_iter()
+        .map(|(_, target_rel)| target_rel)
+        .collect())
+}
+
+/// The allow-listed tree: ordinary files the globs name, and the links whose own path they name.
+/// `links` collects each travelling link's `(canonical target, root-relative target)`.
+fn collect_allow_listed(
     dir: &Path,
     dir_rel: &str,
     root: &Path,
     globs: &[&str],
-    visited: &mut HashSet<PathBuf>,
-    found: &mut Vec<ContextFile>,
+    found: &mut BTreeMap<String, ContextFile>,
+    links: &mut Vec<(PathBuf, String)>,
 ) -> anyhow::Result<()> {
     for entry in std::fs::read_dir(dir)? {
         let entry = entry?;
@@ -290,36 +477,85 @@ fn collect_context_files(
         } else {
             format!("{dir_rel}/{name}")
         };
-        let Some(source) = resolve_within_root(&entry.path(), root)? else {
-            continue;
-        };
-        // Where the bytes actually sit, spelled the way the allow-list is written. For a plain
-        // entry this is `rel_path` itself; for a symlink it is the *target*'s place in the tree,
-        // and that is the half a containment-only guard never asked about.
-        let Some(source_rel) = root_relative(&source, root) else {
-            log::warn!(
-                "context_manifest: {source:?} resolved outside {root:?} after the containment \
-                 check; skipping it"
-            );
-            continue;
-        };
-        let metadata = std::fs::symlink_metadata(&source)?;
-        if metadata.is_dir() {
-            // Both ends again: the name must be able to lead somewhere allow-listed, and so must
-            // the directory the link lands in — otherwise `.claude/x -> node_modules` would be
-            // descended into under a name that matches `.claude/**`.
-            if !could_contain_matches(&rel_path, globs)
-                || !could_contain_matches(&source_rel, globs)
-                || !visited.insert(source.clone())
-            {
+        // `symlink_metadata`, so a link is seen as a link rather than as whatever it points at.
+        let file_type = std::fs::symlink_metadata(entry.path())?.file_type();
+        if file_type.is_symlink() {
+            if !matches_context_globs(&rel_path, globs) {
                 continue;
             }
-            collect_context_files(&source, &rel_path, root, globs, visited, found)?;
-        } else if metadata.is_file()
-            && matches_context_globs(&rel_path, globs)
-            && matches_context_globs(&source_rel, globs)
-        {
-            found.push(ContextFile { rel_path, source });
+            let Some((target, target_rel)) = resolve_link(&entry.path(), &rel_path, root, globs)?
+            else {
+                continue;
+            };
+            found.insert(
+                rel_path.clone(),
+                ContextFile {
+                    rel_path,
+                    source: target.clone(),
+                    symlink_target: Some(target_rel.clone()),
+                },
+            );
+            links.push((target, target_rel));
+        } else if file_type.is_dir() {
+            if could_contain_matches(&rel_path, globs) {
+                collect_allow_listed(&entry.path(), &rel_path, root, globs, found, links)?;
+            }
+        } else if file_type.is_file() && matches_context_globs(&rel_path, globs) {
+            found.insert(
+                rel_path.clone(),
+                ContextFile {
+                    rel_path,
+                    source: entry.path(),
+                    symlink_target: None,
+                },
+            );
+        }
+    }
+    Ok(())
+}
+
+/// Lists what one travelling link reaches: the file itself, or every file under the directory.
+///
+/// Nothing here consults the globs — reaching the target is the link's doing — but every path is
+/// asked [`is_withheld_from_links`] as it is reached, so a pulled-in tree's `.git/` or `.env` stays
+/// behind, and no symlink inside it is followed or listed (one hop).
+fn pull_in_link_target(
+    target: &Path,
+    target_rel: &str,
+    found: &mut BTreeMap<String, ContextFile>,
+) -> anyhow::Result<()> {
+    // `target` is canonical, so this is the target itself and never another link.
+    let file_type = std::fs::symlink_metadata(target)?.file_type();
+    if file_type.is_file() {
+        found
+            .entry(target_rel.to_string())
+            .or_insert_with(|| ContextFile {
+                rel_path: target_rel.to_string(),
+                source: target.to_path_buf(),
+                symlink_target: None,
+            });
+    } else if file_type.is_dir() {
+        for entry in std::fs::read_dir(target)? {
+            let entry = entry?;
+            let Some(name) = entry.file_name().to_str().map(str::to_string) else {
+                continue;
+            };
+            let rel_path = format!("{target_rel}/{name}");
+            if is_withheld_from_links(&rel_path) {
+                log::debug!("context_manifest: {rel_path} is withheld; not pulling it in");
+                continue;
+            }
+            if std::fs::symlink_metadata(entry.path())?
+                .file_type()
+                .is_symlink()
+            {
+                log::debug!(
+                    "context_manifest: {rel_path} is a link inside a pulled-in tree; links pull \
+                     in one hop only, so it is not listed"
+                );
+                continue;
+            }
+            pull_in_link_target(&entry.path(), &rel_path, found)?;
         }
     }
     Ok(())
@@ -328,16 +564,17 @@ fn collect_context_files(
 /// `path`'s place under `root`, `/`-separated, or `None` when it is not under `root` at all.
 ///
 /// Both must be canonical by the time this is asked — here `root` comes from
-/// [`walk_context_files`] and `path` from [`resolve_within_root`] — so a plain prefix strip is the
-/// whole of it.
+/// [`walk_context_files`] and `path` from [`resolve_link`] — so a plain prefix strip is the whole
+/// of it.
 ///
-/// Exported because the **reader** needs the identical answer. The both-ends symlink rule
-/// ([`walk_context_files`]) is only half enforced if the walk applies it and the reader does not:
-/// the reader is handed a caller-supplied name, and asking the allow-list about that name alone
-/// serves `.claude/creds -> ../.env` under a spelling every glob matches. It has to ask about the
-/// resolved target's own root-relative path too, which is this — and it has to be *this* function
-/// rather than a second prefix strip beside it, because the drift between the two halves of that
-/// rule is what made the reader serve the file the walk had already refused.
+/// Exported because the **reader** needs the identical answer. The walk asks where a link's target
+/// sits in the tree before letting it travel ([`allow_listed_link_target`]), and that rule is only
+/// half enforced if the reader does not ask the same: it is handed a caller-supplied name, and
+/// asking the allow-list about that name alone serves `.claude/creds -> ../.env` under a spelling
+/// every glob matches. It has to ask about the resolved target's own root-relative path too, which
+/// is this — and it has to be *this* function rather than a second prefix strip beside it, because
+/// the drift between the two halves of that rule is what made the reader serve the file the walk
+/// had already refused.
 pub fn root_relative(path: &Path, root: &Path) -> Option<String> {
     let rel = path.strip_prefix(root).ok()?;
     let joined = rel
@@ -348,18 +585,20 @@ pub fn root_relative(path: &Path, root: &Path) -> Option<String> {
     (!joined.is_empty()).then_some(joined)
 }
 
-/// The path to read `entry` through, or `None` when it must not be read at all.
+/// Where the link at `entry` (spelled `link_rel`) points, as `(canonical target, root-relative
+/// target)`, or `None` when it must not travel.
 ///
-/// Containment in `root` is only half the guard; the caller asks the allow-list about the resolved
-/// path as well (see [`walk_context_files`]). A missing target is the one error swallowed here: a
-/// link pointing at a file the project deleted has no bytes to sync and never had. Every other
-/// error — `EACCES`, `ELOOP`, `EIO` — is propagated, because treating it as "skip" would quietly
-/// drop a file the project still ships, and a dropped manifest entry is a *delete* in the agent's
-/// context directory: a transient error would withdraw guidance with nothing anywhere saying so.
-fn resolve_within_root(entry: &Path, root: &Path) -> anyhow::Result<Option<PathBuf>> {
-    if !std::fs::symlink_metadata(entry)?.file_type().is_symlink() {
-        return Ok(Some(entry.to_path_buf()));
-    }
+/// A missing target is the one error swallowed here: a link pointing at a file the project deleted
+/// has no bytes to sync and never had. Every other error — `EACCES`, `ELOOP`, `EIO` — is
+/// propagated, because treating it as "skip" would quietly drop a link the project still ships, and
+/// a dropped manifest entry is a *delete* in the agent's context directory: a transient error would
+/// withdraw guidance with nothing anywhere saying so.
+fn resolve_link(
+    entry: &Path,
+    link_rel: &str,
+    root: &Path,
+    globs: &[&str],
+) -> anyhow::Result<Option<(PathBuf, String)>> {
     let target = match std::fs::canonicalize(entry) {
         Ok(target) => target,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
@@ -373,11 +612,21 @@ fn resolve_within_root(entry: &Path, root: &Path) -> anyhow::Result<Option<PathB
             );
         }
     };
-    if !target.starts_with(root) {
+    // `None` for a target outside the root, and for the root itself — a link to the whole checkout
+    // is not agent configuration.
+    let Some(target_rel) = root_relative(&target, root) else {
         log::debug!("context_manifest: {entry:?} resolves outside {root:?}; skipping it");
         return Ok(None);
+    };
+    match allow_listed_link_target(link_rel, &target_rel, globs) {
+        Some(target_rel) => Ok(Some((target, target_rel))),
+        None => {
+            log::debug!(
+                "context_manifest: {link_rel} -> {target_rel} reaches a withheld path; skipping it"
+            );
+            Ok(None)
+        }
     }
-    Ok(Some(target))
 }
 
 /// Lowercase hex SHA-256, the identity a manifest entry is compared on.
@@ -422,6 +671,11 @@ pub struct ContextEntry {
     pub rel_path: String,
     pub sha256: String,
     pub size_bytes: u64,
+    /// `Some` when `rel_path` is a symlink in the repository: the worktree-root-relative path it
+    /// resolves to, `/`-separated. A link carries no bytes of its own — the consumer recreates it,
+    /// and its target is listed as entries of its own. Its `size_bytes` is `0` and its `sha256` is
+    /// [`sha256_hex`] of the target's spelling, so a retargeted link is a changed entry.
+    pub symlink_target: Option<String>,
 }
 
 /// Everything the allow-list names, in a stable order.
@@ -457,6 +711,17 @@ impl ContextManifest {
     pub fn of_worktree(root: &Path, globs: &[&str], max_bytes: u64) -> anyhow::Result<Self> {
         let mut entries = Vec::new();
         for file in walk_context_files(root, globs)? {
+            if let Some(target) = file.symlink_target {
+                // A link carries no bytes; its identity is where it points, so retargeting it
+                // changes its hash and the diff fetches it although no file's bytes moved.
+                entries.push(ContextEntry {
+                    rel_path: file.rel_path,
+                    sha256: sha256_hex(target.as_bytes()),
+                    size_bytes: 0,
+                    symlink_target: Some(target),
+                });
+                continue;
+            }
             let declared_size = std::fs::metadata(&file.source)?.len();
             if declared_size > max_bytes {
                 log::warn!(
@@ -481,6 +746,7 @@ impl ContextManifest {
                 rel_path: file.rel_path,
                 sha256,
                 size_bytes,
+                symlink_target: None,
             });
         }
         Ok(Self::from_entries(entries))

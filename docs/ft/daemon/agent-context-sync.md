@@ -117,8 +117,19 @@ closed before this reader was safe:
    the worktree's own contents point at. A containment check that accepts any symlink whose target
    lands inside the root will happily serve `.claude/creds -> ../.env`: the *name* is allow-listed,
    the *bytes* are the secret, and on the split path they cross to another host into a directory the
-   agent reads. So a resolved symlink's target must satisfy the allow-list too, not merely
-   containment. AC19 covers both the outside-root case and this in-repo sibling case.
+   agent reads. So containment alone is never enough. AC19 covers both the outside-root case and
+   this in-repo sibling case.
+
+3. **A link is part of the configuration, so it travels as a link.** A repository that keeps one
+   copy of its skills under `.agents/` and reaches them from `.claude/skills -> ../.agents/skills`
+   needs that *link* on the agent's host — Claude Code reads skills, commands and agents only under
+   `.claude/`. The manifest therefore carries a symlink as an entry naming its root-relative target
+   (`symlink_target`), the consumer recreates it as a relative link, and the files behind it are
+   listed once, under the target's own path. An allow-listed link **pulls its target in** even when
+   no glob names the target — one hop only, never a link found inside a pulled-in tree — and the
+   target is still refused when it escapes the root, is excluded (AC31), or is secret-shaped
+   (`.env*`, `*.pem`, `*.key`, `.git/**`). That secrets list, not the globs, is what keeps
+   `.claude/creds -> ../.env` from publishing `.env`.
 
 The general rule the two share: an allow-list gate is only as strong as the weakest thing permitted
 to name a path — the request, the filesystem, or the peer.
@@ -268,8 +279,17 @@ The agent is never left silently reading a stale rule it believes is current.
 - **AC17** — it excludes a **tracked** path that matches no glob (`README.md`, `src/main.rs`).
 - **AC18** — a `rel_path` containing traversal, or an absolute path, is refused.
 - **AC19** — a symlink matching a glob is not served when its target is outside the worktree root,
-  **nor when its target is an in-repo path the allow-list does not name** (`.claude/creds -> ../.env`
-  must not publish `.env`'s bytes under an allow-listed name).
+  **nor when its target is secret-shaped or excluded** (`.claude/creds -> ../.env` must not publish
+  `.env`'s bytes under an allow-listed name).
+- **AC19a** — an allow-listed symlink is listed **as a link** carrying its root-relative target, and
+  the files behind a directory link are listed once, under the target's path — never under whichever
+  spelling the walk reached first.
+- **AC19b** — an allow-listed link's target is listed and served even when no glob names it; a link
+  inside that pulled-in tree pulls nothing further in, and a sibling of the target stays refused.
+- **AC19c** — the consumer recreates a served link as a **relative** symlink, re-points it when the
+  target moves, and removes the link (never its target) when the repository drops it. A served link
+  escaping the context dir, or pointing at a secret-shaped target, fails the sync
+  `PERMISSION_DENIED`.
 - **AC20** — `StreamReadContextFile` returns byte-exact content in 48 KiB frames; a zero-byte file
   yields exactly one empty frame.
 - **AC21** — a path matching no glob is refused `PERMISSION_DENIED` **identically** whether or not a

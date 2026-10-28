@@ -11,7 +11,7 @@
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
-use crate::context_manifest::walk_context_files;
+use crate::context_manifest::{create_context_link, walk_context_files};
 
 /// Prepended to CLAUDE.md and AGENTS.md in the context dir.
 pub const MANAGED_CODEBASE_PREAMBLE: &str = r#"## Managed Codebase
@@ -247,6 +247,13 @@ pub fn copy_context_from_repo(source: &Path, dest: &Path, globs: &[&str]) -> any
         let target = dest.join(&file.rel_path);
         if let Some(parent) = target.parent() {
             std::fs::create_dir_all(parent)?;
+        }
+        // A link is recreated rather than copied through, as the syncer does, so the directory a
+        // co-located agent reads has the same shape as the one a split agent reads. Its target is
+        // listed as entries of its own and arrives in this same loop.
+        if let Some(link_target) = &file.symlink_target {
+            create_context_link(&target, &file.rel_path, link_target)?;
+            continue;
         }
         std::fs::copy(&file.source, &target)?;
         ensure_owner_writable(&target)?;

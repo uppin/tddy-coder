@@ -26,8 +26,10 @@ pub use context_dir::{
     PREAMBLE_FILES,
 };
 pub use context_manifest::{
-    diff_manifests, matches_context_globs, normalized_context_path, root_relative, sha256_hex,
-    ContextEntry, ContextManifest, ManifestDiff, CONTEXT_EXCLUDE_GLOBS,
+    allow_listed_link_target, context_link_targets, create_context_link, diff_manifests,
+    is_reached_through_link, matches_context_globs, normalized_context_path, relative_link_target,
+    root_relative, sha256_hex, ContextEntry, ContextManifest, ManifestDiff, CONTEXT_EXCLUDE_GLOBS,
+    CONTEXT_SECRET_GLOBS,
 };
 pub use error::SandboxError;
 pub use exec_reads::{

@@ -11,11 +11,14 @@
 //! ([`tddy_worktree_service::worktree_files::validate_rel_path_shape`], the canonicalize-and-contain check) and
 //! replaces only the git-listing gate with [`tddy_sandbox::matches_context_globs`].
 //!
-//! It also applies the allow-list **at both ends of a symlink** — the name a file is asked for by
-//! and the place its target sits in the tree — which is the rule
-//! [`tddy_sandbox::ContextManifest::of_worktree`]'s walk applies to the entries it advertises. The
-//! two must agree: a reader that asks only about the requested name serves `.claude/creds -> ../.env`
-//! under a spelling every glob matches, out of a manifest that correctly never listed it.
+//! It also asks about **both ends of a symlink** — the name a file is asked for by and the place
+//! its target sits in the tree — which is the rule [`tddy_sandbox::ContextManifest::of_worktree`]'s
+//! walk applies to the entries it advertises. The two must agree: a reader that asks only about the
+//! requested name serves `.claude/creds -> ../.env` under a spelling every glob matches, out of a
+//! manifest that correctly never listed it. And the reverse: a file the manifest lists because an
+//! allow-listed link pulls it in (`.claude/skills -> ../tools/agent-skills`) is one this reader
+//! serves although no glob names its path — decided by [`tddy_sandbox::context_link_targets`], the
+//! walk's own answer, rather than by a second reading of the rule here.
 //!
 //! **Why swapping that gate is safe: no caller supplies the globs.** They are compiled into
 //! `tddy_core::backend::context_globs_for_agent` and selected by the session's agent, so a request
@@ -33,7 +36,10 @@
 use std::path::{Path, PathBuf};
 
 use tddy_rpc::Status;
-use tddy_sandbox::{matches_context_globs, root_relative, ContextManifest};
+use tddy_sandbox::{
+    context_link_targets, is_reached_through_link, matches_context_globs, root_relative,
+    ContextManifest,
+};
 use tddy_service::proto::session_files::{
     ContextFileBatchChunk, ContextFileChunk, ContextManifestEntry,
 };
@@ -118,8 +124,8 @@ pub fn context_agent_for_session(meta: &tddy_core::SessionMetadata) -> &'static 
 ///
 /// The walk is [`ContextManifest::of_worktree`]'s, shared with the copier and the syncer on purpose:
 /// a second traversal with its own idea of containment is how a manifest ends up advertising a path
-/// the reader then refuses. A symlink whose target escapes the root, or lands somewhere the
-/// allow-list does not name, is skipped there, so it is absent here too.
+/// the reader then refuses. A symlink travels as a link, its `symlink_target` set; one whose target
+/// escapes the root or is withheld is skipped there, so it is absent here too.
 ///
 /// `max_bytes` is the same `max_attachment_bytes` [`read_context_file_bytes`] refuses over, and is
 /// passed for exactly that reason: a manifest advertising a path this host's own reader would then
@@ -144,6 +150,8 @@ pub fn context_manifest(
             rel_path: entry.rel_path.clone(),
             sha256: entry.sha256.clone(),
             size_bytes: entry.size_bytes,
+            // The wire spells "an ordinary file" as the empty string.
+            symlink_target: entry.symlink_target.clone().unwrap_or_default(),
         })
         .collect();
     log::info!(
@@ -169,7 +177,9 @@ pub fn read_context_file_bytes(
         "read_context_file_bytes: worktree_root={worktree_root:?} rel_path={rel_path:?} \
          max_bytes={max_bytes}"
     );
-    let canonical_file = resolve_allow_listed_context_file(worktree_root, rel_path, globs)?;
+    let mut link_targets = LinkTargets::of(worktree_root, globs);
+    let canonical_file =
+        resolve_allow_listed_context_file(worktree_root, rel_path, globs, &mut link_targets)?;
     sized_context_file(&canonical_file, rel_path, max_bytes)?;
 
     let bytes = std::fs::read(&canonical_file).map_err(|e| {
@@ -237,8 +247,11 @@ pub fn read_context_files_bytes(
     // that the first ten paths were readable from how far the call got.
     let mut resolved: Vec<(&String, PathBuf)> = Vec::with_capacity(rel_paths.len());
     let mut total_bytes: u64 = 0;
+    // One walk for the whole batch, and only if some path needs it.
+    let mut link_targets = LinkTargets::of(worktree_root, globs);
     for rel_path in rel_paths {
-        let canonical_file = resolve_allow_listed_context_file(worktree_root, rel_path, globs)?;
+        let canonical_file =
+            resolve_allow_listed_context_file(worktree_root, rel_path, globs, &mut link_targets)?;
         let byte_size = sized_context_file(&canonical_file, rel_path, max_bytes)?;
         total_bytes = total_bytes.saturating_add(byte_size);
         if total_bytes > max_bytes {
@@ -379,33 +392,76 @@ pub fn context_file_batch_frames(files: &[(String, Vec<u8>)]) -> Vec<ContextFile
     frames
 }
 
+/// The targets of the worktree's allow-listed links ([`tddy_sandbox::context_link_targets`]),
+/// walked at most once per read and only when a path the globs do not name has to be answered.
+///
+/// Lazy because nearly every read is of a path the globs name, and a walk per `CLAUDE.md` would be
+/// paid for nothing; shared across a batch because the batch is one read of one worktree.
+struct LinkTargets<'a> {
+    worktree_root: &'a Path,
+    globs: &'a [&'a str],
+    walked: Option<Vec<String>>,
+}
+
+impl<'a> LinkTargets<'a> {
+    fn of(worktree_root: &'a Path, globs: &'a [&'a str]) -> Self {
+        Self {
+            worktree_root,
+            globs,
+            walked: None,
+        }
+    }
+
+    /// Whether an allow-listed link pulls `rel_path` in ([`tddy_sandbox::is_reached_through_link`]).
+    fn reach(&mut self, rel_path: &str) -> Result<bool, Status> {
+        if self.walked.is_none() {
+            let targets = context_link_targets(self.worktree_root, self.globs).map_err(|e| {
+                log::error!(
+                    "resolve_allow_listed_context_file: listing the links under {:?} failed: {e}",
+                    self.worktree_root
+                );
+                Status::internal(format!("failed to list the context links: {e}"))
+            })?;
+            self.walked = Some(targets);
+        }
+        Ok(self
+            .walked
+            .as_deref()
+            .is_some_and(|targets| is_reached_through_link(rel_path, targets)))
+    }
+}
+
 /// The absolute path an allow-listed context file resolves to, or why it may not be read.
 ///
 /// The order of the four checks is a security property, not a preference:
 ///
 /// 1. the path's **shape** — traversal or an absolute path is `INVALID_ARGUMENT`, decided from the
 ///    string alone, before anything touches the filesystem;
-/// 2. the **allow-list, on the requested name** — a path no glob names is `PERMISSION_DENIED`, also
-///    decided from the string alone, so the refusal is byte-identical whether or not a file sits at
-///    that name. Asking the filesystem first would keep contents secret while handing out the
-///    existence map;
+/// 2. the **allow-list, on the requested name** — a path no glob names and no allow-listed link
+///    reaches is `PERMISSION_DENIED`, with the same message either way. Whether a link reaches it
+///    is answered from the links alone ([`LinkTargets`]), never from whether anything sits at the
+///    requested name, so the refusal is byte-identical whether or not a file is there. Asking the
+///    filesystem about the name first would keep contents secret while handing out the existence
+///    map;
 /// 3. then **resolution** — absence is `NOT_FOUND`, and a symlink resolving outside the root is
 ///    `PERMISSION_DENIED`, because matching a glob is not the same as living in the repository;
-/// 4. and finally the **allow-list again, on the resolved target's own root-relative path**.
+/// 4. and finally the **allow-list again, on the resolved target's own root-relative path**: a
+///    glob must name it or an allow-listed link must reach it. A path served only because a link
+///    reaches it must resolve to itself — a second link inside a pulled-in tree is a second hop, and
+///    the walk does not take it either.
 ///
-/// The fourth check is the both-ends symlink rule, and it is the same rule
-/// [`tddy_sandbox::ContextManifest::of_worktree`]'s walk applies to the entries it lists. It has to
-/// be applied here as well as there, because the walk decides what to *advertise* while this
-/// decides what to *serve*, and this one is handed a caller-supplied name.
+/// The fourth check is the rule [`tddy_sandbox::ContextManifest::of_worktree`]'s walk applies to
+/// the entries it lists. It has to be applied here as well as there, because the walk decides what
+/// to *advertise* while this decides what to *serve*, and this one is handed a caller-supplied name.
 ///
 /// Containment in the root is not a substitute for it. `.claude/creds -> ../.env` canonicalizes to
 /// a path squarely inside the worktree, so every check above passes — and the file served under
-/// that allow-listed name is the repository's `.env`. The same trick reaches any file in the
-/// checkout (`.claude/alias.json -> node_modules/…`), and it reaches
-/// [`tddy_sandbox::CONTEXT_EXCLUDE_GLOBS`] too: `.claude/hooksalias.json -> settings.local.json`
-/// would hand back the hooks file the daemon owns and this exclusion exists to withhold. On the
-/// split path those bytes then cross to another host and land in the agent's readable working
-/// directory.
+/// that allow-listed name is the repository's `.env`. Nor is "some link reaches it" a blanket
+/// pass: [`tddy_sandbox::allow_listed_link_target`] withholds secret-shaped targets and
+/// [`tddy_sandbox::CONTEXT_EXCLUDE_GLOBS`] from every link, so `.claude/creds` and
+/// `.claude/hooksalias.json -> settings.local.json` — the hooks file the daemon owns — stay
+/// refused. On the split path those bytes would cross to another host and land in the agent's
+/// readable working directory.
 ///
 /// [`tddy_sandbox::root_relative`] is shared with the walk rather than re-derived here for the
 /// blunt reason that a re-derivation is what went wrong: the rule was added to the walk alone, and
@@ -414,10 +470,12 @@ fn resolve_allow_listed_context_file(
     worktree_root: &Path,
     rel_path: &str,
     globs: &[&str],
+    link_targets: &mut LinkTargets<'_>,
 ) -> Result<PathBuf, Status> {
     let rel_slashed = validate_rel_path_shape(rel_path)?;
 
-    if !matches_context_globs(&rel_slashed, globs) {
+    let named = matches_context_globs(&rel_slashed, globs);
+    if !named && !link_targets.reach(&rel_slashed)? {
         log::warn!(
             "resolve_allow_listed_context_file: rejected path outside the allow-list: {rel_path:?}"
         );
@@ -465,10 +523,18 @@ fn resolve_allow_listed_context_file(
             "resolved path escapes worktree root",
         ));
     };
-    if !matches_context_globs(&resolved_rel, globs) {
+    let target_allowed = if named {
+        matches_context_globs(&resolved_rel, globs) || link_targets.reach(&resolved_rel)?
+    } else {
+        // Reached only through a link, so it must *be* the file the link reaches, not a further
+        // link inside the pulled-in tree.
+        tddy_sandbox::normalized_context_path(&rel_slashed).as_deref() == Some(&*resolved_rel)
+    };
+    if !target_allowed {
         log::warn!(
             "resolve_allow_listed_context_file: rejected {rel_path:?}: it resolves to \
-             {resolved_rel:?}, which the agent's context allow-list does not name"
+             {resolved_rel:?}, which the agent's context allow-list does not name and no \
+             allow-listed link reaches"
         );
         return Err(Status::permission_denied(
             "file is not named by the agent's context allow-list",

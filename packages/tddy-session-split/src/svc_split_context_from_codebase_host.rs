@@ -267,7 +267,17 @@ impl SplitSessions {
                 rel_path: entry.rel_path,
                 sha256: entry.sha256,
                 size_bytes: entry.size_bytes,
+                // The wire spells "an ordinary file" as the empty string.
+                symlink_target: (!entry.symlink_target.is_empty()).then_some(entry.symlink_target),
             })
+            .collect();
+        // A link carries no bytes — it is recreated from its target — so only the files are read,
+        // sized and verified below. Links still ride into `PrefetchedContext`, whose syncer is what
+        // vets each target before recreating it.
+        let files_to_read: Vec<tddy_sandbox::ContextEntry> = entries
+            .iter()
+            .filter(|entry| entry.symlink_target.is_none())
+            .cloned()
             .collect();
 
         // Every number below is the *peer's*, and the whole set is about to be held in memory at
@@ -276,7 +286,10 @@ impl SplitSessions {
         // `max_attachment_bytes` bounds both one file and the tree, and the refusal happens before
         // the first byte is requested. Without it a peer's manifest is an instruction to allocate.
         let max_bytes = self.config.max_attachment_bytes;
-        if let Some(oversized) = entries.iter().find(|entry| entry.size_bytes > max_bytes) {
+        if let Some(oversized) = files_to_read
+            .iter()
+            .find(|entry| entry.size_bytes > max_bytes)
+        {
             return Err(read.refusal(
                 &format!(
                     "the manifest offered {} at {} bytes, over this host's {max_bytes} byte cap; \
@@ -286,13 +299,13 @@ impl SplitSessions {
                 Status::invalid_argument("context file over the attachment cap"),
             ));
         }
-        let total_bytes: u64 = entries.iter().map(|entry| entry.size_bytes).sum();
+        let total_bytes: u64 = files_to_read.iter().map(|entry| entry.size_bytes).sum();
         if total_bytes > max_bytes {
             return Err(read.refusal(
                 &format!(
                     "the manifest offered {} path(s) totalling {total_bytes} bytes, over this \
                      host's {max_bytes} byte cap; reading them",
-                    entries.len()
+                    files_to_read.len()
                 ),
                 Status::invalid_argument("context manifest over the attachment cap"),
             ));
@@ -301,10 +314,12 @@ impl SplitSessions {
         // A repository that ships no agent configuration at all is served an empty manifest, and
         // there is nothing to ask for: the batch read refuses an empty path list rather than let a
         // caller spend a round trip on nothing, so the call is not made.
-        if entries.is_empty() {
+        if files_to_read.is_empty() {
             log::info!(
                 "split context: session {codebase_session} on daemon {codebase_daemon} serves no \
-                 allow-listed path; the context dir will hold the managed-codebase preamble alone"
+                 allow-listed file; the context dir will hold the managed-codebase preamble and \
+                 {} link(s)",
+                entries.len()
             );
             return tddy_session_files::context_sync::PrefetchedContext::new(
                 entries,
@@ -323,13 +338,13 @@ impl SplitSessions {
                 session_id: codebase_session.to_string(),
                 daemon_instance_id: codebase_daemon.to_string(),
                 agent: agent.to_string(),
-                rel_paths: entries.iter().map(|e| e.rel_path.clone()).collect(),
+                rel_paths: files_to_read.iter().map(|e| e.rel_path.clone()).collect(),
             })
             .await
             .map_err(|status| read.refusal("reading the context files", status))?;
 
         let files = read
-            .files_bounded_as_they_arrive(frames, &entries, max_bytes)
+            .files_bounded_as_they_arrive(frames, &files_to_read, max_bytes)
             .await?;
 
         // `end_of_file` is the peer's word for it, and on its own that is all truncation detection
@@ -343,7 +358,7 @@ impl SplitSessions {
         // already in memory, so both halves of that claim are checked rather than taken on trust.
         // The size first, because it names the defect precisely (a truncated stream) where a hash
         // mismatch could be either that or corruption in flight.
-        for entry in &entries {
+        for entry in &files_to_read {
             let bytes = files.get(&entry.rel_path).map(Vec::as_slice).unwrap_or(&[]);
             if bytes.len() as u64 != entry.size_bytes {
                 return Err(read.refusal(
@@ -476,6 +491,7 @@ mod the_bound_a_batch_read_is_held_to_as_it_arrives {
             rel_path: THE_ADVERTISED_PATH.to_string(),
             sha256: tddy_sandbox::sha256_hex(b"0123"),
             size_bytes: THE_ADVERTISED_SIZE,
+            symlink_target: None,
         }]
     }
 
