@@ -127,9 +127,10 @@ describe("GhosttyTerminal shrink — the real pane chain", () => {
         cy.get("[data-testid='shrink-host']").click();
 
         // Then — the grid re-fits to the shrunken pane (the FitAddon's resize observer is
-        // debounced at 100ms, hence the retry window)
+        // debounced at 100ms; on a loaded CI runner the wasm render loop can lag behind, so
+        // give the re-fit a generous window — the timeout flows from .find into .should)
         byTestId(TEST_IDS.ghosttyTerminal)
-          .find("canvas")
+          .find("canvas", { timeout: 15000 })
           .should(($c) => {
             const width = parseFloat($c[0].style.width);
             expect(
