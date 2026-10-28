@@ -10,7 +10,7 @@
 //! under a screen id of their own and takes it back by stealing it.
 //!
 //! Feature doc: docs/ft/daemon/project-concept.md § Project-home tools, docs/ft/daemon/terminal-sessions.md.
-//! Changeset: docs/dev/1-WIP/2026-10-25-home-inbox-terminal-keys.md
+//! Changeset: docs/dev/changesets/2026-10-28-home-inbox-terminal-keys.md
 
 mod support;
 

@@ -134,6 +134,17 @@ fn a_newline_in_a_paste_is_pasted_verbatim() {
 }
 
 #[test]
+fn a_paste_holding_the_paste_end_sequence_is_refused() {
+    // Given text that carries ESC[201~ and a terminal that has enabled bracketed paste
+    // When it is typed
+    let refusal = encode_keys(Some("a\x1b[201~b"), &[], true).expect_err("refused");
+    // Then nothing is produced, and the refusal names the sequence
+    assert!(refusal.contains("ESC[201~"), "{refusal}");
+    // And without bracketed paste the same text types as it is
+    assert_eq!(typing("a\x1b[201~b", false), b"a\x1b[201~b");
+}
+
+#[test]
 fn text_comes_before_the_keys() {
     // Given text and Enter
     // When they are typed into a terminal with bracketed paste on

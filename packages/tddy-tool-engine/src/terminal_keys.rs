@@ -18,7 +18,8 @@ const PASTE_END: &[u8] = b"\x1b[201~";
 /// The bytes for `text` (when given) followed by each of `keys`, or why none are produced.
 ///
 /// `text` goes first: wrapped in the bracketed-paste markers when `bracketed_paste` is true, raw
-/// otherwise, where each line break is typed as Enter. Every key name is checked before any byte is
+/// otherwise, where each line break is typed as Enter. A paste is carried verbatim, so a `text`
+/// holding the paste-end sequence is refused rather than altered. Every key name is checked before any byte is
 /// returned, so an unknown name is an error naming it and nothing is half-encoded. A request with no
 /// text and no keys is refused, since it would type nothing.
 pub fn encode_keys(
@@ -29,6 +30,13 @@ pub fn encode_keys(
     let text = text.filter(|text| !text.is_empty());
     if text.is_none() && keys.is_empty() {
         return Err("nothing to send: give text, keys or both".to_string());
+    }
+    if bracketed_paste && text.is_some_and(contains_paste_end) {
+        return Err(
+            "text contains the paste-end sequence ESC[201~, which would end the paste early and \
+             type the rest raw: send that part as keys instead"
+                .to_string(),
+        );
     }
     let key_bytes = keys
         .iter()
@@ -48,6 +56,13 @@ pub fn encode_keys(
         typed.extend(bytes);
     }
     Ok(typed)
+}
+
+/// Whether `text` carries [`PASTE_END`], which a paste cannot hold verbatim.
+fn contains_paste_end(text: &str) -> bool {
+    text.as_bytes()
+        .windows(PASTE_END.len())
+        .any(|window| window == PASTE_END)
 }
 
 /// The bytes typing `text` produces: one paste carrying it verbatim when the terminal takes one,

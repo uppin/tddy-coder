@@ -252,6 +252,8 @@ and served the four start tools, for its own project (see
 | `TerminateSession` | `session_id`, `daemon_instance_id?` | `{session_id, signal: "SIGTERM"}`: what the web UI's **Terminate** does — `SignalSession` with SIGTERM to the session's process on its host. The session's record, worktree and branch are kept, so it can be resumed; deleting them is the UI's separate Delete, which is not offered. A session whose process has already ended (or that records none) is refused as an `is_error` result saying so. See [Terminating a session](#terminating-a-session) |
 | `RefreshWorktreeDiskUsage` | `path?` (as `ListWorktrees` lists it; every worktree when empty), `daemon_instance_id?` | `{queued}`: what the Worktrees screen's **Refresh** does — queues the background size walk (`WorktreeSizeCalculator`, two walks at a time) for one worktree or all of the project's, and answers at once. Progress is read with `ListWorktrees` (`sizing {done, total}`, the screen's "{done} of {total}") or `GetWorktree` (`size_status`: `calculating` until cached). A path not in git's worktree list is refused naming it. No ledger of its own: the calculator's persisted per-path state is the record |
 | `ReadSessionTerminal` | `session_id`, `daemon_instance_id?` | `{lines, cursor: {row, col, visible}, cols, rows, offset}`: what the session's **main** terminal shows right now, as text — the visible rows of the screen it is on (the alternate screen while a full-screen TUI runs), each with trailing whitespace trimmed, and the cursor, zero-based. `offset` is the position in the terminal's output stream the text corresponds to: the same sequence point a reconnecting browser's snapshot carries. Text only: no scrollback, colours or attributes. Reading sends no input, takes no control lease and disturbs no attached screen. A session with no live terminal, or whose terminal has not reported its size, is refused naming why. See [Reading a terminal](#reading-a-terminal) |
+| `ClaimSessionTerminal` | `session_id`, `daemon_instance_id?` | `{holder}`: takes the session's terminal control lease for the screen `project-home:<home session id>`, stealing it from whoever holds it, as a browser's claim with `steal` does — the change is broadcast, so an attached browser drops to watch-only and names the new holder. The control token stays on the host that owns the terminal and is never returned. There is no release: a person takes control back by claiming it in the browser. See [Typing into a terminal](#typing-into-a-terminal) |
+| `SendSessionKeys` | `session_id`, `daemon_instance_id?`, `text?`, `keys?` | `{sent_bytes}`: types `text`, then each named key in order, into the session's **main** terminal while this home session holds its lease. Refused, naming the holder, when it does not, and nothing is sent. See [Typing into a terminal](#typing-into-a-terminal) |
 
 - **Targets.** A target is a session id in the caller's project, with a worktree, on the host the
   optional `daemon_instance_id` argument names (as `ListProjectSessions` reports it; empty or absent
@@ -268,7 +270,7 @@ and served the four start tools, for its own project (see
   limitation:** the name tie-break mirrors the browser's `localeCompare` for ASCII names (case-insensitive,
   lowercase first on a case-only difference, punctuation before digits before letters); for non-ASCII
   names it is an approximation and may order equal-sized worktrees differently from the screen.
-- **Across hosts.** A target tool call (read, diff, the two worktree tools, `DescribeSessionStartOptions`, the two follow tools, `TerminateSession`, `RefreshWorktreeDiskUsage`, `ReadSessionTerminal`, every git tool) naming another host is
+- **Across hosts.** A target tool call (read, diff, the two worktree tools, `DescribeSessionStartOptions`, the two follow tools, `TerminateSession`, `RefreshWorktreeDiskUsage`, `ReadSessionTerminal`, `ClaimSessionTerminal`, `SendSessionKeys`, every git tool) naming another host is
   forwarded whole to that host over the peer forward and runs there unchanged: that host's path
   containment, activity gate and push identity apply. The host receiving it does not hold the calling
   session, so it confirms the caller **at the daemon that owns it**: it asks every other eligible
@@ -413,6 +415,33 @@ agent and the screen cannot disagree.
   at the end, so a blank row is an empty string.
 - **Refusals** are `is_error` results: `no live terminal` (with the session id) and `terminal size is
   not known yet`, besides the target refusals every target tool shares.
+
+### Typing into a terminal
+
+`ClaimSessionTerminal` and `SendSessionKeys` act through the same single-screen control lease the
+browsers share ([Terminal sessions § Terminal Control Ownership](terminal-sessions.md#terminal-control-ownership-single-screen-mutex)).
+The rule is "type only while you hold it", since leases are never released.
+
+- **Whose lease.** The home agent holds it as the screen `project-home:<home session id>`. The token
+  is kept on the host that owns the terminal, keyed by the calling home session, the daemon that owns
+  that session, and the target, so two homes never share one — on one host or across two.
+- **Every send is checked.** The holder must be this home's screen, this home must have a remembered
+  token, and that token must verify against the lease. The check is made explicitly, so a jailed
+  terminal — whose own input path does not consult the lease — follows the same rule. A refusal names
+  the holder (or says nothing holds control) and says to claim again; nothing is typed.
+- **Text, then keys.** `text` is typed first: as one bracketed paste carried verbatim when the
+  terminal has enabled mode 2004, otherwise raw, each line break typed as Enter (`\r`). Text holding
+  the paste-end sequence `ESC[201~` is refused while pasting, since it would end the paste early.
+  Typing text reads the terminal's paste mode first, so a terminal that has not reported its size
+  refuses `text` (keys alone still go). `Enter` is never implied.
+- **Key names**, case-sensitive: `Enter` `\r`, `Escape`, `Tab`, `BTab` `ESC[Z`, `Backspace` `0x7f`,
+  `Delete` `ESC[3~`, `Up`/`Down`/`Right`/`Left` `ESC[A..D`, `Home` `ESC[H`, `End` `ESC[F`,
+  `PageUp`/`PageDown` `ESC[5~`/`ESC[6~`, `Space`, `C-a` … `C-z` (`0x01` … `0x1a`), `F1`–`F4`
+  `ESC O P..S`, `F5`–`F12` `ESC[15~` … `ESC[24~`. An unknown name refuses the whole request before
+  any byte is written; so does a request with neither text nor keys.
+- **Input offset.** Input is written with offset 0, which the terminal treats as unset and does not
+  acknowledge, so a browser's un-acknowledged-input overlay is untouched.
+- Not offered: a release tool, mouse input, resizing, or typing into the home session itself.
 
 ### Following a session
 

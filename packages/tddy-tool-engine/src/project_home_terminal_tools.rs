@@ -91,7 +91,7 @@ fn terminal_keys_tool_defs() -> Vec<ToolDef> {
         ),
         tool_def(
             SEND_SESSION_KEYS,
-            "Type into a session's main terminal while you hold its control (ClaimSessionTerminal). Refused, naming who holds control, when you do not, and nothing is sent: claim it again. `text` is typed first, as a bracketed paste when the terminal has enabled that; `keys` follow in order. Key names: Enter, Escape, Tab, BTab, Backspace, Delete, Up, Down, Left, Right, Home, End, PageUp, PageDown, Space, C-a to C-z (control keys, C-c interrupts), F1 to F12. An unknown key name is refused before anything is sent. Read the result with ReadSessionTerminal.",
+            "Type into a session's main terminal while you hold its control (ClaimSessionTerminal). Refused, naming who holds control, when you do not, and nothing is sent: claim it again. `text` is typed first, as a bracketed paste when the terminal has enabled that (text holding the paste-end sequence ESC[201~ is then refused); `keys` follow in order. Key names: Enter, Escape, Tab, BTab, Backspace, Delete, Up, Down, Left, Right, Home, End, PageUp, PageDown, Space, C-a to C-z (control keys, C-c interrupts), F1 to F12. An unknown key name is refused before anything is sent. Read the result with ReadSessionTerminal.",
             json!({
                 "type": "object",
                 "properties": {

@@ -178,6 +178,14 @@ given moment; all other connected screens are **observers** (they still receive 
 - No persistence across daemon restart (the control registry is in-memory).
 - The lease granularity is **per-session**, not per-terminal-id within a session.
 
+#### Daemon-side holders
+
+A screen need not be a browser. The project-home agent's `ClaimSessionTerminal` claims the lease
+with `steal=true` as `project-home:<home session id>`, and the daemon keeps the token on its behalf;
+`SendSessionKeys` verifies it before every write, also for a jailed terminal, which does not check the
+lease on its own input path. A browser takes control back by its own steal. See
+[Project concept § Typing into a terminal](project-concept.md#typing-into-a-terminal).
+
 ---
 
 ## Session-scoped RPC routing & daemon-direct lifecycle
