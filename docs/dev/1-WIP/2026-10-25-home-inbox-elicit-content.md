@@ -265,11 +265,59 @@ An `AskUserQuestion` call does the same, as `select` or `multi_select` with ever
   `report_agent_activity_impl` pushes a pending `call_id` that only a `PostToolUse` pops. If the
   operator denies the question, no `PostToolUse` follows, and the next unrelated tool's `PostToolUse`
   pairs with the stale id.
-  - **Green decision, open:** either (a) do not push a pending call for a `PreToolUse` of
-    `AskUserQuestion` (it reports a question, not a tool call), or (b) clear it when the question
-    resolves. (a) is the smaller change and keeps the activity log to real tool calls, but drops the
-    `running` row for the question; (b) keeps the row and needs a clear at every status that ends the
-    wait. Green picks one, and a test pins it.
+  - **Decided at green:** option (a), see "Decisions taken at green" below.
+
+## Decisions taken at green
+
+The developer was AFK during `/green`, so each call below was taken here and is recorded for review.
+
+1. **Stale pending call: option (a).** `agent_activity_request` returns `None` for a `PreToolUse` of
+   `AskUserQuestion`. Nothing is pushed as pending and no `running` row is written. Pinned by
+   `a_pre_tool_use_of_ask_user_question_is_not_reported_as_a_tool_call` (`tddy-tools`).
+   - The `PostToolUse` of `AskUserQuestion` is still reported, as it always was. It appends a
+     `completed` row under a fresh id, because nothing is pending to pair with. **Open for the human:**
+     whether that lone completed row should go too.
+2. **The question is recorded by `ReportSessionStatus`, validated before any write.** A malformed
+   `AskUserQuestion` (input that is not JSON, or names no question) is refused as `InvalidArgument`
+   before the activity status, the pending file or the flag is written.
+3. **`.session.yaml` `pending_elicitation` is now written for claude-cli.** It is true while a question
+   is recorded or kept, and false on a clear. `set_pending_elicitation` writes only when the flag
+   changes. It is new in `tddy-changeset` and is not in the contract's list.
+4. **The kept follow-up returns an empty `request_id`.** The `Notification` that follows a prompt
+   records nothing new. The hook ignores the response in any case.
+5. **Keep rule, with no message.** A `WaitingForInput` with no tool keeps a pending structured question
+   even when its message is empty. It fills the question's text from the message only when that text is
+   empty. A `WaitingForInput` with no tool and no pending structured question keeps the `#start-parity`
+   6/9 behaviour: a message is recorded, and no message clears.
+6. **Once per request, in the Telegram subscriber.** `TelegramDaemonHooks` records `question:<request_id>`
+   in its per-session last-delivered memory. The key is namespaced so it cannot collide with a status
+   text. Pinned by `a_permission_alert_names_the_tool_and_its_input_summary_once_per_request`.
+7. **Wording.** A permission reads `Run <tool>: <summary>`. An empty summary reads `Run <tool>`, with no
+   trailing colon. Drawer text is `🔔 Session {label} wants to run {tool}: {summary}`, or
+   `🔔 Session {label} asks: {first question}`.
+8. **`summary()`.** Newlines become spaces and the result is trimmed. `Bash` names its `command`;
+   `Edit`, `Write` and `Read` name their `file_path`. Any other tool, or a missing field, gives the input
+   as compact JSON. Input that is not JSON is used as the raw text.
+9. **Alert layout, as pinned.** The "(choose several)" hint is appended to a multi-select question. The
+   header line is omitted when the header is empty. Only `&`, `<` and `>` are escaped. The kernel's
+   `escape_html` also escapes `"`, which the pinned layout does not allow, so `question_alert` has a
+   local escaper.
+10. **Delivery.** The alert is sent loud (`silent: false`) with `send_html_message`, to the tracking chats
+    or else the broadcast list, as the status alert is.
+11. **Public surface added beyond the contract's list.** `tddy_changeset::session_activity::
+    {ASK_USER_QUESTION_TOOL, hook_event_asks_a_question}` and `tddy_changeset::session_metadata::
+    set_pending_elicitation`, all re-exported from `tddy-changeset`. `tddy-tools` and
+    `tddy-session-activity` need them.
+12. **`streams.rs`.** The `..Default::default()` is dropped. All twelve fields are set, `question`
+    explicitly.
+
+**Open for the human:**
+
+- **The question alert is one message.** A long question set can exceed Telegram's 4,096-byte limit.
+  The Bot API would refuse it, and the bus would log the failure. It is not split, because the pinned
+  `QuestionAlert::html()` contract is one message. Splitting with `AgentNotificationTelegram`'s
+  splitter is the follow-up.
+- The `PostToolUse` completed row for `AskUserQuestion` (decision 1).
 
 ## TODO
 
@@ -281,7 +329,7 @@ An `AskUserQuestion` call does the same, as `select` or `multi_select` with ever
 - [x] Run acceptance tests (verify they fail)
 - [x] USER REVIEW — acceptance tests (reviewed by the orchestrator, developer AFK, 2026-10-26)
 - [x] TDD Red — write failing unit/integration tests
-- [ ] TDD Green — implement with quality code
+- [x] TDD Green — implement with quality code (2026-10-28, see "Decisions taken at green")
 - [ ] Update documentation with progress
 - [ ] Repeat Red→Green→Update cycle until feature complete
 - [ ] Run the touched packages' tests (`./test -p {package}` per package) — verify 100% pass
