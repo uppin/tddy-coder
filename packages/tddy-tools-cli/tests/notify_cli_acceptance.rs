@@ -1,7 +1,7 @@
 //! `tddy-tools notify`: an agent notifying its operator, run as the agent runs it — a process whose
 //! environment names its session, against a daemon's agent-tool socket.
 //!
-//! PRD `docs/ft/daemon/1-WIP/PRD-2026-10-25-agent-notifications.md` (`#home-inbox` 1/8). The exit
+//! Feature doc `docs/ft/daemon/session-notifications.md` § Agent-written notifications (`#home-inbox` 1/8). The exit
 //! code and what the command prints are the agent's whole interface, so this suite runs the real
 //! binary and asserts on exactly those. Unlike `session-hook` it is **not** fail-quiet: an agent
 //! that asked to notify must learn when it did not.
@@ -290,4 +290,42 @@ async fn notify_exits_non_zero_when_no_session_environment_is_present() {
 
     // Then it exits non-zero, naming the variable that would have said which session it is
     ran.assert_failed_naming(notify_env::SESSION_ID);
+}
+
+#[tokio::test]
+async fn notify_exits_non_zero_naming_the_socket_when_no_daemon_listens_there() {
+    // Given a session environment whose daemon socket nobody listens on
+    let gone = tempfile::tempdir().expect("a temporary dir");
+    let socket = gone.path().join("no-daemon.sock");
+    let mut cmd = tddy_tools_without_a_session_environment();
+    cmd.env(notify_env::SESSION_ID, SESSION_ID)
+        .env(notify_env::OS_USER, OS_USER)
+        .env(notify_env::HOOK_TOKEN, HOOK_TOKEN)
+        .env(notify_env::DAEMON_SOCKET, &socket);
+
+    // When the agent notifies from it
+    let ran = run(cmd, &["notify", "Parallel run finished"]).await;
+
+    // Then it exits non-zero, naming where it tried to reach the daemon
+    ran.assert_failed_naming(&socket.display().to_string());
+}
+
+#[tokio::test]
+async fn notify_reads_a_dash_body_from_stdin() {
+    // Given a daemon's agent-tool socket that accepts notifications
+    let socket = AnAgentToolSocket::accepting("notifystdin");
+
+    // When the agent pipes the body in with `--body -`
+    let mut cmd = tddy_tools_in_a_session_reaching(&socket);
+    cmd.write_stdin("## Summary\n\n- 4 done\n- **1 blocked**\n");
+    let ran = run(cmd, &["notify", "Parallel run finished", "--body", "-"]).await;
+
+    // Then the body sent is exactly what was piped
+    ran.assert_succeeded_saying("Notification sent");
+    assert_eq!(
+        socket
+            .notification_received()
+            .map(|request| request.body_markdown),
+        Some("## Summary\n\n- 4 done\n- **1 blocked**\n".to_string())
+    );
 }

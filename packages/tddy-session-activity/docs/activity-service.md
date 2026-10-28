@@ -1,8 +1,8 @@
-# `activity.ActivityService` — the eight methods and their ports
+# `activity.ActivityService` — the nine methods and their ports
 
 ## Role
 
-`tddy-session-activity` serves the eight RPCs of families M and N: what an agent is doing, what a
+`tddy-session-activity` serves the nine RPCs of families M and N: what an agent is doing, what a
 session's status is, and the transcript of both. The coordinate and the crate both arrived with
 `#unbundle` node 7, which moved the families off `connection.ConnectionService` (50 methods → 33)
 along with the notification bus.
@@ -10,6 +10,7 @@ along with the notification bus.
 | Method | Kind | Answers from |
 |---|---|---|
 | `ReportSessionStatus` | unary | a hook's per-session `hook_token`, not a session token; a `WaitingForInput` report's `message` is recorded as the session's `pending-question.json` (`kind: permission`), and any other report — or a wait with no message — clears it |
+| `ReportOperatorNotification` | unary | the same hook token, after the same session-type check (claude-cli or cursor-cli); a session that recorded no token is refused. Validates the title (1–200 characters after trimming) and body (≤ 2,000) first — `INVALID_ARGUMENT`, never truncation — then publishes one `AttentionRequired` / `Agent` notification carrying an `AgentNotification` (`service/operator_notifications.rs`). Not routed to a peer: `tddy-tools notify` runs on the host that holds its session |
 | `ReportAgentActivity` | unary | the same hook token; mints the `call_id` pairing a PreToolUse row to its PostToolUse row |
 | `StreamSessionActivity` | server-stream | the persisted activity log, then the live hub |
 | `StreamSessionNotifications` | server-stream | this host's notification bus, scoped to the caller's OS user |

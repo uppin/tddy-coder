@@ -1,7 +1,7 @@
 //! `ReportOperatorNotification`: an agent in a claude-cli or cursor-cli session notifying its
 //! operator in its own words (`tddy-tools notify`).
 //!
-//! PRD `docs/ft/daemon/1-WIP/PRD-2026-10-25-agent-notifications.md` (`#home-inbox` 1/8). The path
+//! Feature doc `docs/ft/daemon/session-notifications.md` § Agent-written notifications (`#home-inbox` 1/8). The path
 //! under test is the real handler over a real session directory, publishing onto a real bus: the
 //! contract is the RPC, so the assertions are what the bus received — or that it received nothing.
 
@@ -59,8 +59,18 @@ struct AnActivityHost {
 impl AnActivityHost {
     /// A host holding one session of `session_type` whose `.session.yaml` records [`HOOK_TOKEN`].
     fn holding_a_session_of_type(session_type: &str) -> Self {
+        Self::holding(session_type, Some(HOOK_TOKEN))
+    }
+
+    /// A host holding one claude-cli session that recorded no hook token — one started without
+    /// hooks, as a Telegram-started session is.
+    fn holding_a_session_without_a_hook_token() -> Self {
+        Self::holding("claude-cli", None)
+    }
+
+    fn holding(session_type: &str, hook_token: Option<&str>) -> Self {
         let data_dir = tempfile::tempdir().expect("a temporary data dir");
-        write_session(data_dir.path(), session_type);
+        write_session(data_dir.path(), session_type, hook_token);
         let bus_received = Arc::new(RecordingSessionNotificationSubscriber::new());
         let bus = SessionNotificationBus::new().with_subscriber(Arc::clone(&bus_received));
         let service = ActivityServiceImpl::new(ActivityPorts {
@@ -105,7 +115,7 @@ impl AnActivityHost {
     }
 }
 
-fn write_session(sessions_base: &Path, session_type: &str) {
+fn write_session(sessions_base: &Path, session_type: &str, hook_token: Option<&str>) {
     let session_dir = sessions_base.join("sessions").join(SESSION_ID);
     std::fs::create_dir_all(&session_dir).expect("the session dir");
     let meta = SessionMetadata {
@@ -125,7 +135,7 @@ fn write_session(sessions_base: &Path, session_type: &str) {
         cursor_chat_id: None,
         harness_resume_token: None,
         activity_status: Some("Running".to_string()),
-        hook_token: Some(HOOK_TOKEN.to_string()),
+        hook_token: hook_token.map(str::to_string),
         sandbox: None,
         agent: None,
         recipe: None,
@@ -255,11 +265,15 @@ impl RefusalAssertions for Result<ReportOperatorNotificationResponse, Status> {
 // Acceptance
 // ---------------------------------------------------------------------------
 
+#[rstest]
+#[case::claude_cli("claude-cli")]
+#[case::cursor_cli("cursor-cli")]
 #[tokio::test]
-async fn an_agent_notification_from_a_claude_cli_session_is_published_with_its_title_body_level_sound_and_link(
+async fn an_agent_notification_from_a_claude_cli_or_cursor_cli_session_is_published_with_its_title_body_level_sound_and_link(
+    #[case] session_type: &str,
 ) {
-    // Given a claude-cli session on this host
-    let host = AnActivityHost::holding_a_claude_cli_session();
+    // Given a session of a type whose agent is launched with the notify environment
+    let host = AnActivityHost::holding_a_session_of_type(session_type);
 
     // When its agent notifies its operator, presenting the session's own hook token
     let response = host.notify(a_notification().build()).await;
@@ -343,5 +357,20 @@ async fn a_session_that_is_not_claude_cli_or_cursor_cli_is_refused() {
 
     // Then it is refused before the credential is considered, and nothing reached the bus
     response.assert_refused_as(Code::FailedPrecondition);
+    host.published().assert_nothing();
+}
+
+#[tokio::test]
+async fn a_session_that_recorded_no_hook_token_refuses_even_an_empty_one() {
+    // Given a claude-cli session that recorded no hook token
+    let host = AnActivityHost::holding_a_session_without_a_hook_token();
+
+    // When a notification presents an empty token, which a missing record would otherwise equal
+    let response = host
+        .notify(a_notification().with_hook_token("").build())
+        .await;
+
+    // Then it is refused as permission denied, and nothing reached the bus
+    response.assert_refused_as(Code::PermissionDenied);
     host.published().assert_nothing();
 }

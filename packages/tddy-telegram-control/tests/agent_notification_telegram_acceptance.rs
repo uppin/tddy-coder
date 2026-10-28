@@ -2,7 +2,7 @@
 //! subset, split to fit its 4,096-byte limit, sent silently unless the agent asked for a sound, and
 //! never de-duplicated.
 //!
-//! PRD `docs/ft/daemon/1-WIP/PRD-2026-10-25-agent-notifications.md` (`#home-inbox` 1/8). The path
+//! Feature doc `docs/ft/daemon/session-notifications.md` § Agent-written notifications (`#home-inbox` 1/8). The path
 //! under test is the real one from the bus onwards: the notification is published onto a
 //! `SessionNotificationBus` that has Telegram's operator channel registered, and the assertions read
 //! what an in-memory Bot API was asked to send.

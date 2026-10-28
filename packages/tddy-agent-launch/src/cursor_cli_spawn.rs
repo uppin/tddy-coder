@@ -257,13 +257,9 @@ pub(crate) async fn spawn_cursor_cli_session_reporting(
             .git_environment,
     );
 
-    session_env.extend(chat::cursor_notify_env(
-        config,
-        tddy_data_dir,
-        os_user,
-        session_id,
-        &hook_token,
-    ));
+    // And it can notify its operator (`tddy-tools notify`).
+    let notify = chat::cursor_notify_env(config, tddy_data_dir, os_user, session_id, &hook_token);
+    session_env.extend(notify);
 
     // The Cursor chat this session owns for its whole lifetime: minted here, persisted in
     // `.session.yaml` below, and passed as `--resume <id>` on every later spawn so a resume
@@ -301,20 +297,22 @@ pub(crate) async fn spawn_cursor_cli_session_reporting(
 
     log::info!(
         target: "tddy_daemon::connection_service",
-        "started cursor-cli session {} pid={} worktree={} user={}",
-        session_id,
-        pid,
-        worktree_path.display(),
-        os_user
+        "started cursor-cli session {session_id} pid={pid} worktree={} user={os_user}",
+        worktree_path.display()
     );
+    Ok(started_without_livekit(session_id))
+}
 
-    Ok(Response::new(StartSessionResponse {
+/// The answer to a cursor-cli start: the session, with no LiveKit room — its terminal is bridged
+/// when a consumer arrives.
+fn started_without_livekit(session_id: &str) -> Response<StartSessionResponse> {
+    Response::new(StartSessionResponse {
         session_id: session_id.to_string(),
         livekit_room: String::new(),
         livekit_url: String::new(),
         livekit_server_identity: String::new(),
         branch_conflict: None,
-    }))
+    })
 }
 
 fn prepare_cursor_cli_launch(

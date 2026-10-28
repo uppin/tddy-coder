@@ -21,10 +21,7 @@ pub fn install_cursor_hooks_in_worktree(
         tddy_daemon_kernel::config::resolve_cursor_cli_tddy_tools_path(config).as_deref(),
     );
 
-    // `cursor_cli.daemon_url`, then `claude_cli.daemon_url`, then this daemon's own web listener —
-    // the same last resort every hook URL falls back to.
-    let daemon_url = tddy_daemon_kernel::config::resolve_cursor_cli_daemon_url(config)
-        .unwrap_or_else(|| tddy_daemon_kernel::daemon_hook_urls::local_daemon_hook_url(config));
+    let daemon_url = cursor_hook_daemon_url(config);
 
     let hook_token = Uuid::new_v4().to_string();
     let hooks_settings = build_cursor_hooks_settings(&HookCommandParams {
@@ -56,6 +53,14 @@ pub fn install_cursor_hooks_in_worktree(
     hook_token
 }
 
+/// The URL a cursor-cli session's hooks — and its `tddy-tools notify` — report to:
+/// `cursor_cli.daemon_url`, then `claude_cli.daemon_url`, then this daemon's own web listener, the
+/// same last resort every hook URL falls back to.
+fn cursor_hook_daemon_url(config: &DaemonConfig) -> String {
+    tddy_daemon_kernel::config::resolve_cursor_cli_daemon_url(config)
+        .unwrap_or_else(|| tddy_daemon_kernel::daemon_hook_urls::local_daemon_hook_url(config))
+}
+
 /// The environment a cursor-cli agent is given so `tddy-tools notify` can reach its operator
 /// (`#home-inbox` 1/8): its session, owner, hook token and the daemon — over the agent-tool socket
 /// on an embedded daemon, which serves no HTTP RPC, and over the hooks' URL otherwise.
@@ -66,16 +71,29 @@ pub fn cursor_notify_env(
     session_id: &str,
     hook_token: &str,
 ) -> Vec<(String, String)> {
-    let daemon_url = tddy_daemon_kernel::config::resolve_cursor_cli_daemon_url(config)
-        .unwrap_or_else(|| tddy_daemon_kernel::daemon_hook_urls::local_daemon_hook_url(config));
     let daemon_socket = tddy_daemon_kernel::embedded_host_agent_tool_socket(tddy_data_dir);
     crate::notify_env::notify_env_pairs(
         session_id,
         os_user,
         hook_token,
-        &daemon_url,
+        &cursor_hook_daemon_url(config),
         daemon_socket.as_deref().map(Path::new),
     )
+}
+
+/// [`cursor_notify_env`] for a resumed session, from the hook token its `.session.yaml` recorded;
+/// a record with none is given nothing.
+pub fn resumed_cursor_notify_env(
+    config: &DaemonConfig,
+    tddy_data_dir: &Path,
+    os_user: &str,
+    meta: &tddy_core::SessionMetadata,
+) -> Vec<(String, String)> {
+    meta.hook_token
+        .as_deref()
+        .filter(|token| !token.is_empty())
+        .map(|token| cursor_notify_env(config, tddy_data_dir, os_user, &meta.session_id, token))
+        .unwrap_or_default()
 }
 
 /// The chat id printed by `cursor-agent create-chat`, or a description of what came out instead.

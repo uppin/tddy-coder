@@ -117,22 +117,14 @@ impl LaunchSessions {
             managed = Some(launch.workflow);
         }
 
-        // A resumed agent is given its notify wiring again; a session that recorded no hook token
-        // has none, and neither has one with a standing role.
-        if meta.session_role.as_deref().unwrap_or("").is_empty() {
-            let notify = crate::claude_cli_spawn_steps::resumed_agent_notify_launch(
-                &self.config,
-                &self.tddy_data_dir,
-                os_user,
-                &session_dir,
-                &meta,
-                append_system_prompt_file.as_deref(),
-            )?;
-            env_extra.extend(notify.env);
-            append_system_prompt_file = notify
-                .append_system_prompt_file
-                .or(append_system_prompt_file);
-        }
+        // A resumed agent is given its notify wiring again (`tddy-tools notify`).
+        let append_system_prompt_file = self.resumed_notify(
+            os_user,
+            &session_dir,
+            &meta,
+            append_system_prompt_file,
+            &mut env_extra,
+        )?;
 
         let handle = manager
             .resume_with_options(
@@ -164,18 +156,44 @@ impl LaunchSessions {
         tddy_core::write_session_metadata(&session_dir, &updated)
             .map_err(|e| Status::internal(format!("failed to update session metadata: {}", e)))?;
 
-        log::info!(
-            target: "tddy_daemon::connection_service",
-            "resumed claude-cli session {} pid={}",
-            session_id, pid
-        );
+        log::info!(target: "tddy_daemon::connection_service", "resumed claude-cli session {session_id} pid={pid}");
+        Ok(resumed_without_livekit(session_id))
+    }
+}
 
-        Ok(Response::new(ResumeSessionResponse {
-            session_id: session_id.to_string(),
-            livekit_room: String::new(),
-            livekit_url: String::new(),
-            livekit_server_identity: String::new(),
-        }))
+/// The answer to a claude-cli resume: the session, with no LiveKit room — its terminal is bridged
+/// when a consumer arrives, not at resume.
+fn resumed_without_livekit(session_id: &str) -> Response<ResumeSessionResponse> {
+    Response::new(ResumeSessionResponse {
+        session_id: session_id.to_string(),
+        livekit_room: String::new(),
+        livekit_url: String::new(),
+        livekit_server_identity: String::new(),
+    })
+}
+
+impl LaunchSessions {
+    /// The system-prompt file a resumed claude-cli agent appends: `managed_prompt_file` composed
+    /// with the notify guidance, and `env_extra` given the notify environment, when the session
+    /// recorded a hook token and has no standing role; `managed_prompt_file` unchanged otherwise.
+    fn resumed_notify(
+        &self,
+        os_user: &str,
+        session_dir: &Path,
+        meta: &tddy_core::SessionMetadata,
+        managed_prompt_file: Option<PathBuf>,
+        env_extra: &mut Vec<(String, String)>,
+    ) -> Result<Option<PathBuf>, Status> {
+        let notify = crate::notify_env::resumed_agent_notify_launch(
+            &self.config,
+            &self.tddy_data_dir,
+            os_user,
+            session_dir,
+            meta,
+            managed_prompt_file.as_deref(),
+        )?;
+        env_extra.extend(notify.env);
+        Ok(notify.append_system_prompt_file.or(managed_prompt_file))
     }
 }
 

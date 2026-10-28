@@ -1,7 +1,7 @@
 //! An agent notification's markdown body, rendered for Telegram's HTML parse mode and for a
 //! surface that shows plain text.
 //!
-//! PRD `docs/ft/daemon/1-WIP/PRD-2026-10-25-agent-notifications.md` (`#home-inbox` 1/8). Telegram
+//! Feature doc `docs/ft/daemon/session-notifications.md` § Agent-written notifications (`#home-inbox` 1/8). Telegram
 //! accepts `b`, `i`, `code`, `pre` and `a` and refuses a whole message over anything else, so every
 //! other construct is flattened to text and every stray `<`, `>` and `&` is escaped.
 

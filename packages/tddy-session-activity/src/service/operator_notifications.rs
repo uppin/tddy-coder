@@ -41,7 +41,7 @@ impl ActivityServiceImpl {
                 "session_type is not claude-cli or cursor-cli",
             ));
         }
-        if meta.hook_token.as_deref().unwrap_or("") != req.hook_token {
+        if !hook_token_matches(meta.hook_token.as_deref(), &req.hook_token) {
             return Err(Status::permission_denied("invalid hook_token"));
         }
 
@@ -110,4 +110,19 @@ fn level_from_wire(level: i32) -> NotificationLevel {
             NotificationLevel::Info
         }
     }
+}
+
+/// Whether `presented` is the session's recorded hook token. A session that recorded none — or an
+/// empty one — matches nothing, so an empty credential never passes for a session without hooks.
+/// Compared in constant time over the bytes, so a refusal does not time how much of it matched.
+fn hook_token_matches(recorded: Option<&str>, presented: &str) -> bool {
+    let Some(recorded) = recorded.filter(|token| !token.is_empty()) else {
+        return false;
+    };
+    recorded.len() == presented.len()
+        && recorded
+            .bytes()
+            .zip(presented.bytes())
+            .fold(0u8, |diff, (a, b)| diff | (a ^ b))
+            == 0
 }

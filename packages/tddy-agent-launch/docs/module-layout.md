@@ -121,6 +121,7 @@ build, whose SSH clones are given no helper). Behaviour:
 | `claude_cli_spawn.rs`, `claude_cli_spawn_steps.rs` | `spawn_claude_cli_session_inner`, the non-sandboxed Claude CLI spawn, and its steps (`ClaudeCliWorktreeCut`, `ManagedClaudeCliLaunch`, …) |
 | `cursor_cli_spawn.rs`, `chat.rs`, `resume.rs` | `spawn_cursor_cli_session_inner` (a public module, a wrapper over `spawn_cursor_cli_session_reporting`, which reports the start's phases) with `CursorCliSessionRecord<'a>`; hooks, `parse_created_chat_id`, `mint_cursor_chat_id`; `resume_cursor_cli_session` |
 | `hooks_and_urls.rs` | the hook and URL helpers a spawn uses |
+| `notify_env.rs`, `agent_notify_guidance.md` | what an agent is given so `tddy-tools notify` reaches its operator: `notify_env_pairs` (session, OS user, hook token, and the daemon socket **or** URL), `AGENT_NOTIFY_GUIDANCE`, and the claude-cli wiring `agent_notify_launch` / `resumed_agent_notify_launch` (`AgentNotifyLaunch` → `AgentNotifyWiring`: the env plus `<session dir>/agent-system-prompt.md`, the guidance composed with a managed recipe's prompt). Cursor-cli start and resume get the env only (`chat::cursor_notify_env`, `chat::resumed_cursor_notify_env`). A session with a standing role gets neither |
 
 ## The sandboxed starts and relaunch
 

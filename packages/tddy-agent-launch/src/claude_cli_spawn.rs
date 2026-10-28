@@ -233,26 +233,20 @@ pub(crate) async fn spawn_claude_cli_session_inner(
         )
         .await?;
 
-    // The agent can notify its operator: its environment carries the credentials `tddy-tools
-    // notify` reads, and its system prompt says when to use it, composed with the recipe's. A
-    // session with a standing role (the project's main has no shell) is not given it.
-    let append_system_prompt_file = if role.name.is_empty() {
-        let notify = claude_cli_spawn_steps::agent_notify_launch(
-            claude_cli_spawn_steps::AgentNotifyLaunch {
-                config,
-                tddy_data_dir,
-                os_user,
-                session_id,
-                hook_token: &hook_token,
-                session_dir: &session_dir,
-                managed_prompt_file: append_system_prompt_file.as_deref(),
-            },
-        )?;
-        env_extra.extend(notify.env);
-        notify.append_system_prompt_file
-    } else {
-        append_system_prompt_file
-    };
+    // The agent can notify its operator (`tddy-tools notify`), unless it has a standing role.
+    let append_system_prompt_file = crate::notify_env::agent_notify_unless_role(
+        role.name,
+        crate::notify_env::AgentNotifyLaunch {
+            config,
+            tddy_data_dir,
+            os_user,
+            session_id,
+            hook_token: &hook_token,
+            session_dir: &session_dir,
+            managed_prompt_file: append_system_prompt_file.as_deref(),
+        },
+        &mut env_extra,
+    )?;
 
     env_extra.extend(provider_route.map(|route| route.env).unwrap_or_default());
     env_extra.extend(config.claude_cli_renderer_env());
@@ -344,28 +338,31 @@ pub(crate) async fn spawn_claude_cli_session_inner(
         )
         .await;
 
-    // Where that terminal will be served once it is bridged. Derived from the session id and the
-    // deployment config rather than read off a connection, so it is the same answer whether a
-    // consumer has arrived yet or not — and deriving it contacts nothing.
-    let (lk_room, lk_url, lk_server_identity) =
-        claude_cli_spawn_steps::claude_cli_livekit_room(config, session_id);
-
     log::info!(
         target: "tddy_daemon::connection_service",
-        "started claude-cli session {} pid={} worktree={} user={}",
-        session_id,
-        pid,
-        worktree_path.display(),
-        os_user
+        "started claude-cli session {session_id} pid={pid} worktree={} user={os_user}",
+        worktree_path.display()
     );
+    Ok(started_claude_cli_response(config, session_id))
+}
 
-    Ok(Response::new(StartSessionResponse {
+/// The answer to a claude-cli start: the session, and where its terminal will be served once it is
+/// bridged. Derived from the session id and the deployment config rather than read off a
+/// connection, so it is the same answer whether a consumer has arrived yet or not — and deriving it
+/// contacts nothing.
+fn started_claude_cli_response(
+    config: &DaemonConfig,
+    session_id: &str,
+) -> Response<StartSessionResponse> {
+    let (livekit_room, livekit_url, livekit_server_identity) =
+        claude_cli_spawn_steps::claude_cli_livekit_room(config, session_id);
+    Response::new(StartSessionResponse {
         session_id: session_id.to_string(),
-        livekit_room: lk_room,
-        livekit_url: lk_url,
-        livekit_server_identity: lk_server_identity,
+        livekit_room,
+        livekit_url,
+        livekit_server_identity,
         branch_conflict: None,
-    }))
+    })
 }
 
 /// The session's provider route and its directory under `sessions_base/sessions/<id>/`, with the

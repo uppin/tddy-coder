@@ -87,8 +87,16 @@ notification text sent (`LastDeliveredPerSession`). Its `id()` is `telegram`
 | Port method | What Telegram does |
 |---|---|
 | `on_presenter_event` | locks the watcher and calls `on_server_message`. An error ends that session's presenter observer. The watcher opens and closes its per-chat elicitation queue on the core's `awaits_operator` rule, so it agrees with the drawer indicator on every mode |
-| `wants_notification` | `AttentionRequired` from the `ActivityStatus` path, while the `telegram:` block is enabled. `Activity` is declined (every tool call would become a message) and so is `Presenter` (those elicitations already arrive through `on_presenter_event`, with their keyboards — taking them twice would double-send) |
-| `on_notification` | drops a text identical to the last one sent for that session, resolves the recipients tracked-first (the chats that entered the session, else the configured broadcast list; an unreadable tracking map sends nothing), and sends the notification's text to each, failing with "N of M chat(s)" when some sends fail |
+| `wants_notification` | `AttentionRequired` from the `ActivityStatus` path or from an agent (`Agent`), while the `telegram:` block is enabled. `Activity` is declined (every tool call would become a message) and so is `Presenter` (those elicitations already arrive through `on_presenter_event`, with their keyboards — taking them twice would double-send) |
+| `on_notification` | an agent-written notification is rendered by `agent_notification_telegram::AgentNotificationTelegram` and sent as HTML (never de-duplicated); otherwise drops a text identical to the last one sent for that session, resolves the recipients tracked-first (the chats that entered the session, else the configured broadcast list; an unreadable tracking map sends nothing), and sends the notification's text to each, failing with "N of M chat(s)" when some sends fail |
+
+`agent_notification_telegram.rs` is a module of its own because rendering is a pure function of the
+notification: `AgentNotificationTelegram::render` lays out `<b>title</b>`, `<i>label</i>`, the body
+through `tddy_daemon_kernel::notification_markdown::to_telegram_html` and the link, then splits it
+into messages of at most `TELEGRAM_HTML_MESSAGE_MAX_BYTES` (4,096) — at whitespace, never inside a
+tag, entity or character, closing the tags open at a break and reopening them in the next message.
+`send_to` sends every message to each chat through `TelegramSender::send_html_message` with
+`silent = !sound`, and stops a chat at its first refused message.
 
 `tddy-daemon`'s `runtime/mount_host.rs` installs the hooks twice from one value: on
 `DaemonSessionHost::new` as its `SharedOperatorChannel`, and on the daemon's notification bus through

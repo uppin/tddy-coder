@@ -1,7 +1,7 @@
 //! How long an agent notification may be: a title of 1–200 characters after trimming, a body of
 //! at most 2,000. Over a limit is a refusal that names what was too long — never a truncation.
 //!
-//! PRD `docs/ft/daemon/1-WIP/PRD-2026-10-25-agent-notifications.md` (`#home-inbox` 1/8).
+//! Feature doc `docs/ft/daemon/session-notifications.md` § Agent-written notifications (`#home-inbox` 1/8).
 
 use rstest::rstest;
 use tddy_daemon_kernel::agent_notification_limits::validate_agent_notification;

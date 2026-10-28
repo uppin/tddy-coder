@@ -149,12 +149,13 @@ fn atoms_of(html: &str) -> Vec<Atom<'_>> {
 /// The longest entity this module's escaping emits (`&quot;`), less its `&`.
 const ENTITY_MAX_BYTES: usize = 5;
 
+/// Where a message can end at whitespace: its length there, the tags open there, and the atom to
+/// resume at.
+type LastBreak<'a> = (usize, Vec<(&'a str, &'a str)>, usize);
+
 /// `html` as messages of at most `limit` bytes, each well-formed on its own: a message that ends
 /// inside an open tag closes it, and the next reopens it. Breaks fall at whitespace when the
 /// message has any, and never inside a tag, an entity or a character.
-/// Where a message can end at whitespace: its length there, the tags open there, and the atom to resume at.
-type LastBreak<'a> = (usize, Vec<(&'a str, &'a str)>, usize);
-
 fn split_html(html: &str, limit: usize) -> Vec<String> {
     let atoms = atoms_of(html);
     let mut messages = Vec::new();
