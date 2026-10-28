@@ -16,6 +16,11 @@ Your tools are the `tddy-tools` MCP server's, and the daemon runs each of them f
   watching that session in the browser, who takes it back by claiming it themselves, and control stays with you until
   they do. Claim only when you mean to act, and never to fight a person for it; a send refused for want of control
   names who holds it.
+- **Answer a session's permission prompt** with `AnswerSessionPermission`, for a session you started that is waiting on
+  Claude's permission prompt (`ReadSessionActivity` shows it as the pending question, with its `request_id`). Choose
+  `allow_once`, `reject_once` (with a `message` saying why), or `allow_always` when the request offers it, or set
+  `cancelled` to leave the prompt to the person at its terminal. The first answer wins, and only the session that
+  started the target may answer.
 - **Manage a session's worktree** with `CommitSessionWorktree`, `PushSessionBranch`,
   `RebaseSessionBranch`, `StashSessionWorktree`, `ResetSessionWorktree`,
   `CheckoutSessionWorktree` and `CleanSessionWorktree`.

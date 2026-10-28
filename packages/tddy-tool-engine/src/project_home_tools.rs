@@ -19,6 +19,7 @@
 //! | `ReadSessionTerminal` | what a target session's main terminal shows right now, as text, with its cursor ([`crate::project_home_terminal_tools`]) |
 //! | `ClaimSessionTerminal` | takes a target session's terminal control lease for this home session ([`crate::project_home_terminal_tools`]) |
 //! | `SendSessionKeys` | types text and named keys into a target session's terminal while this home session holds the lease ([`crate::terminal_keys`]) |
+//! | `AnswerSessionPermission` | answers the permission prompt a session this one started is waiting on; its orchestrator only ([`crate::project_home_answer_tools`]) |
 //!
 //! Targets resolve through `tddy_worktree_service::session_target`. Listing and starting need the
 //! daemon's session store and start path, which reach this crate through [`ProjectHomePort`].
@@ -45,6 +46,7 @@ use tddy_worktree_service::worktree_files::{
 };
 
 use crate::catalog::{tool_catalog, ToolDef};
+use crate::project_home_answer_tools::{project_home_answer_tool_defs, ANSWER_SESSION_PERMISSION};
 use crate::project_home_diff::worktree_diff;
 use crate::project_home_disk_refresh::{
     refresh_worktree_disk_usage, refresh_worktree_disk_usage_tool_def, REFRESH_WORKTREE_DISK_USAGE,
@@ -104,6 +106,7 @@ pub fn is_project_home_tool(name: &str) -> bool {
             | READ_SESSION_TERMINAL
             | CLAIM_SESSION_TERMINAL
             | SEND_SESSION_KEYS
+            | ANSWER_SESSION_PERMISSION
     )
 }
 
@@ -145,13 +148,18 @@ pub enum SessionToolRole {
     Ordinary,
 }
 
-/// Whether `name` is one of the four start tools a [`SessionToolRole::ConversationSpawner`] is
-/// offered and served: `StartSession`, `GetSessionStart`, `CancelSessionStart` and
-/// `DescribeSessionStartOptions`.
+/// Whether `name` is one of the five tools a [`SessionToolRole::ConversationSpawner`] is offered and
+/// served: the four start tools — `StartSession`, `GetSessionStart`, `CancelSessionStart` and
+/// `DescribeSessionStartOptions` — and `AnswerSessionPermission`, the answer to a permission prompt
+/// of a session it started (`#home-inbox` 6/8).
 pub fn is_conversation_spawner_tool(name: &str) -> bool {
     matches!(
         name,
-        START_SESSION | GET_SESSION_START | CANCEL_SESSION_START | DESCRIBE_SESSION_START_OPTIONS
+        START_SESSION
+            | GET_SESSION_START
+            | CANCEL_SESSION_START
+            | DESCRIBE_SESSION_START_OPTIONS
+            | ANSWER_SESSION_PERMISSION
     )
 }
 
@@ -243,6 +251,7 @@ pub fn is_project_home_target_tool(name: &str) -> bool {
             | READ_SESSION_TERMINAL
             | CLAIM_SESSION_TERMINAL
             | SEND_SESSION_KEYS
+            | ANSWER_SESSION_PERMISSION
     ) || is_project_home_git_tool(name)
 }
 
@@ -417,6 +426,7 @@ fn project_home_tool_defs_with(start_schema: Value) -> Vec<ToolDef> {
     defs.extend(worktree_tool_defs());
     defs.extend(session_follow_tool_defs());
     defs.extend(project_home_terminal_tool_defs());
+    defs.extend(project_home_answer_tool_defs());
     defs.extend(terminate_session_tool_def());
     defs.extend(refresh_worktree_disk_usage_tool_def());
     defs
@@ -467,6 +477,9 @@ pub async fn execute_project_home_tool(
         // `execute_project_home_terminal_tool`; reaching here is a wiring mistake, named as one.
         READ_SESSION_TERMINAL | CLAIM_SESSION_TERMINAL | SEND_SESSION_KEYS => ToolOutcome::err(
             format!("{tool_name} is answered by execute_project_home_terminal_tool, not by execute_project_home_tool"),
+        ),
+        ANSWER_SESSION_PERMISSION => ToolOutcome::err(
+            format!("{tool_name} is answered by execute_project_home_answer_tool, not by execute_project_home_tool"),
         ),
         other => ToolOutcome::err(format!("unknown project-home tool: {other}")),
     }

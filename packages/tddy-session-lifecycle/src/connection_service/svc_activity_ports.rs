@@ -29,6 +29,8 @@ use tddy_service::proto::activity::{
 };
 use tddy_session_activity::orchestrator_presence::OrchestratorPresence;
 use tddy_session_activity::{ActivityPorts, ActivityServiceImpl, AnswerWaitPorts, SessionLabels};
+use tddy_terminal_rpc::bridge::MAIN_TERMINAL_ID;
+use tddy_terminal_rpc::session::TerminalSessionStore as _;
 use tddy_worktree_service::stream::MpscResultStream;
 
 use super::DaemonSessionHost;
@@ -127,10 +129,10 @@ struct ServedTerminalPresence {
 #[async_trait]
 impl OrchestratorPresence for ServedTerminalPresence {
     async fn is_active(&self, orchestrator_session_id: &str) -> bool {
-        // TODO(permission-answer): implement — `get_terminal(orchestrator_session_id, "main")` on
-        // `self.terminals` is some.
-        let _ = (&self.terminals, orchestrator_session_id);
-        false
+        self.terminals
+            .get_terminal(orchestrator_session_id, MAIN_TERMINAL_ID)
+            .await
+            .is_some()
     }
 }
 

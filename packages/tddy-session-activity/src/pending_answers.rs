@@ -14,8 +14,10 @@
 //! Feature doc: docs/ft/daemon/claude-cli-session.md.
 
 use std::collections::HashMap;
-use std::sync::Mutex;
+use std::sync::{Mutex, MutexGuard, PoisonError};
 use std::time::Duration;
+
+use tokio::sync::oneshot;
 
 use tddy_discovery::subagent::{
     AnsweredBy, PermissionAnswer, PermissionAnswering, PermissionRequestView,
@@ -46,16 +48,26 @@ pub struct OpenRequest {
     pub request: PermissionRequestView,
 }
 
+/// An open request and the order it was opened in.
+struct Opened {
+    seq: u64,
+    open: OpenRequest,
+}
+
 /// What [`PendingAnswers`] holds, behind one lock.
-// TODO(permission-answer): read by the implementation; the stubs never do.
-#[allow(dead_code)]
 #[derive(Default)]
 struct Slots {
     /// Requests a hook is waiting on, by `request_id`.
-    open: HashMap<String, OpenRequest>,
+    open: HashMap<String, Opened>,
+    /// The wake-up of each request a hook is currently [`PendingAnswers::wait`]ing on.
+    waiters: HashMap<String, oneshot::Sender<DeliveredAnswer>>,
+    /// Answers delivered before their hook began waiting; the wait takes its own.
+    delivered: HashMap<String, DeliveredAnswer>,
     /// Requests already answered, by `request_id`, with who answered first. Kept after the waiter
     /// is gone, so a second answer is refused naming the first answerer.
     answered: HashMap<String, AnsweredBy>,
+    /// The next [`Opened::seq`].
+    next_seq: u64,
 }
 
 /// Every permission prompt a hook holds open on this daemon. Shared by `AwaitQuestionAnswer` and
@@ -71,27 +83,68 @@ impl PendingAnswers {
         Self::default()
     }
 
+    /// The slots. A poisoned lock still holds consistent maps (every critical section is a few map
+    /// operations), so it is recovered rather than turned into a panic in a hook's request.
+    fn slots(&self) -> MutexGuard<'_, Slots> {
+        self.slots.lock().unwrap_or_else(PoisonError::into_inner)
+    }
+
     /// Open a waiter for `request`, asked by `session_id`'s hook. Re-opening a request id replaces
     /// the earlier waiter.
     pub fn open(&self, session_id: &str, request: PermissionRequestView) {
-        // TODO(permission-answer): implement — insert into `open` under `request.request_id`.
-        let _ = (&self.slots, session_id, request);
+        let mut slots = self.slots();
+        let seq = slots.next_seq;
+        slots.next_seq += 1;
+        let request_id = request.request_id.clone();
+        slots.waiters.remove(&request_id);
+        slots.delivered.remove(&request_id);
+        slots.open.insert(
+            request_id,
+            Opened {
+                seq,
+                open: OpenRequest {
+                    session_id: session_id.to_string(),
+                    request,
+                },
+            },
+        );
     }
 
     /// The request a hook holds open under `request_id`, if any.
     #[must_use]
     pub fn open_request(&self, request_id: &str) -> Option<OpenRequest> {
-        // TODO(permission-answer): implement — look `request_id` up in `open`.
-        let _ = (&self.slots, request_id);
-        None
+        self.slots()
+            .open
+            .get(request_id)
+            .map(|opened| opened.open.clone())
     }
 
     /// Wait until the waiter `request_id` names is answered, or `deadline` passes. A request no
     /// waiter is open for times out at once.
     pub async fn wait(&self, request_id: &str, deadline: Duration) -> WaitOutcome {
-        // TODO(permission-answer): implement — a oneshot per waiter, raced against `deadline`;
-        // on timeout the waiter is removed.
-        let _ = (&self.slots, request_id, deadline);
+        let mut woken = {
+            let mut slots = self.slots();
+            if let Some(delivered) = slots.delivered.remove(request_id) {
+                return WaitOutcome::Answered(delivered);
+            }
+            if !slots.open.contains_key(request_id) {
+                return WaitOutcome::TimedOut;
+            }
+            let (wake, woken) = oneshot::channel();
+            slots.waiters.insert(request_id.to_string(), wake);
+            woken
+        };
+        if let Ok(Ok(delivered)) = tokio::time::timeout(deadline, &mut woken).await {
+            return WaitOutcome::Answered(delivered);
+        }
+        // The deadline passed (or a re-open dropped the waiter). An answer may have landed between
+        // the deadline and this lock: it was sent under the same lock, so it is in the channel.
+        let mut slots = self.slots();
+        if let Ok(delivered) = woken.try_recv() {
+            return WaitOutcome::Answered(delivered);
+        }
+        slots.waiters.remove(request_id);
+        slots.open.remove(request_id);
         WaitOutcome::TimedOut
     }
 
@@ -106,13 +159,34 @@ impl PendingAnswers {
         by: AnsweredBy,
         message: Option<String>,
     ) -> Result<(), String> {
-        // TODO(permission-answer): implement — refuse when `answered` names the request, then take
-        // the waiter out of `open`, record `by` and wake it.
-        let _ = (&self.slots, by, message);
-        Err(format!(
-            "permission request '{}': answering is not implemented",
-            answer.request_id()
-        ))
+        let request_id = answer.request_id();
+        let mut slots = self.slots();
+        if let Some(first) = slots.answered.get(request_id) {
+            return Err(format!(
+                "permission request '{request_id}' was already answered by {first}"
+            ));
+        }
+        if slots.open.remove(request_id).is_none() {
+            return Err(format!(
+                "no hook is waiting on permission request '{request_id}'"
+            ));
+        }
+        let delivered = DeliveredAnswer {
+            answer: answer.clone(),
+            by: by.clone(),
+            message,
+        };
+        slots.answered.insert(request_id.to_string(), by);
+        match slots.waiters.remove(request_id) {
+            Some(wake) => {
+                // A dropped receiver is a wait that ended; the answer is recorded all the same.
+                let _ = wake.send(delivered);
+            }
+            None => {
+                slots.delivered.insert(request_id.to_string(), delivered);
+            }
+        }
+        Ok(())
     }
 }
 
@@ -122,9 +196,7 @@ impl PermissionAnswering for PendingAnswers {
     }
 
     fn answered_by(&self, request_id: &str) -> Option<AnsweredBy> {
-        // TODO(permission-answer): implement — look `request_id` up in `answered`.
-        let _ = (&self.slots, request_id);
-        None
+        self.slots().answered.get(request_id).cloned()
     }
 
     /// Never: a claude-cli child's request is the orchestrator's to answer, and a person answers it
@@ -135,8 +207,10 @@ impl PermissionAnswering for PendingAnswers {
 
     /// The earliest-opened request a hook is still waiting on, across this daemon's sessions.
     fn pending_request(&self) -> Option<PermissionRequestView> {
-        // TODO(permission-answer): implement — the oldest entry of `open`.
-        let _ = &self.slots;
-        None
+        self.slots()
+            .open
+            .values()
+            .min_by_key(|opened| opened.seq)
+            .map(|opened| opened.open.request.clone())
     }
 }

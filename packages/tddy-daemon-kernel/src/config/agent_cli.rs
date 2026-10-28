@@ -192,8 +192,9 @@ impl DaemonConfig {
     /// is absent (`#home-inbox` 6/8).
     #[must_use]
     pub fn claude_cli_answer_wait_secs(&self) -> u64 {
-        // TODO(permission-answer): implement — read `claude_cli.answer_wait_secs`.
-        DEFAULT_ANSWER_WAIT_SECS
+        self.claude_cli
+            .as_ref()
+            .map_or(DEFAULT_ANSWER_WAIT_SECS, |c| c.answer_wait_secs)
     }
 
     /// The environment every claude-cli launch adds so Claude runs the renderer `claude_cli.fullscreen`

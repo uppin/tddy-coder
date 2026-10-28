@@ -57,6 +57,7 @@ mod tests {
             os_user: "alice",
             hook_token: "tok-xyz",
             daemon_socket: None,
+            answer_wait_secs: 120,
         }
     }
 

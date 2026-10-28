@@ -22,7 +22,7 @@ use tddy_worktree_service::session_target::{HomeCaller, SessionTarget};
 
 use crate::catalog::ToolDef;
 use crate::project_home_tools::{
-    target_host_property, tool_def, ProjectHomePort, TARGET_DAEMON_INSTANCE_ID,
+    resolve_target, target_host_property, tool_def, ProjectHomePort, TARGET_DAEMON_INSTANCE_ID,
 };
 use crate::ToolOutcome;
 
@@ -85,10 +85,9 @@ pub trait ProjectHomeAnswerPort: ProjectHomePort {
         answer: PermissionAnswer,
         message: Option<String>,
     ) -> Result<Value, String> {
-        // TODO(permission-answer): implement — `tddy_session_activity::answers::answer_permission`
-        // over this host's `PendingAnswers`, answering the recorded `AnsweredPermission`.
+        // The daemon, which owns this host's `PendingAnswers`, implements this.
         let _ = (home, target, answer, message);
-        Err("answer_permission: not implemented".to_string())
+        Err("this host serves no permission answers".to_string())
     }
 }
 
@@ -115,8 +114,40 @@ pub async fn execute_project_home_answer_tool(
     tool_name: &str,
     args_json: &str,
 ) -> ToolOutcome {
-    // TODO(permission-answer): implement — parse `AnswerPermissionArgs` (exactly one of option_id
-    // and cancelled), `resolve_target`, then `port.answer_permission`.
-    let _ = (port, home, args_json);
-    ToolOutcome::err(format!("{tool_name}: not implemented"))
+    if !is_project_home_answer_tool(tool_name) {
+        return ToolOutcome::err(format!("unknown project-home answer tool: {tool_name}"));
+    }
+    let args: AnswerPermissionArgs = match serde_json::from_str(args_json) {
+        Ok(args) => args,
+        Err(e) => return ToolOutcome::err(format!("{tool_name}: invalid arguments: {e}")),
+    };
+    let option_id = args.option_id.as_deref().filter(|id| !id.is_empty());
+    let answer = match (option_id, args.cancelled) {
+        (Some(option_id), false) => PermissionAnswer::Selected {
+            request_id: args.request_id.clone(),
+            option_id: option_id.to_string(),
+        },
+        (None, true) => PermissionAnswer::Cancelled {
+            request_id: args.request_id.clone(),
+        },
+        (Some(_), true) => {
+            return ToolOutcome::err(format!(
+                "{tool_name}: give option_id or cancelled, not both"
+            ))
+        }
+        (None, false) => {
+            return ToolOutcome::err(format!(
+                "{tool_name}: give an option_id, or set cancelled to leave it to the person"
+            ))
+        }
+    };
+    let target = match resolve_target(port, home, &args.session_id).await {
+        Ok(target) => target,
+        Err(outcome) => return outcome,
+    };
+    let message = args.message.filter(|message| !message.is_empty());
+    match port.answer_permission(home, &target, answer, message).await {
+        Ok(answered) => ToolOutcome::ok(answered.to_string()),
+        Err(e) => ToolOutcome::err(format!("{tool_name}: {e}")),
+    }
 }

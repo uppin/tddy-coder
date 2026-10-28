@@ -13,8 +13,18 @@
 use std::sync::Arc;
 use std::time::Duration;
 
+use std::path::Path;
+
+use tddy_core::pending_question::read_pending_question;
+use tddy_core::read_changeset;
+use tddy_discovery::subagent::PermissionAnswer;
 use tddy_rpc::{Response, Status};
-use tddy_service::proto::activity::{AwaitQuestionAnswerRequest, AwaitQuestionAnswerResponse};
+use tddy_service::proto::activity::{
+    AwaitQuestionAnswerRequest, AwaitQuestionAnswerResponse, AwaitQuestionOutcome,
+};
+
+use crate::answers::permission_request_view;
+use crate::pending_answers::{DeliveredAnswer, WaitOutcome};
 
 use crate::orchestrator_presence::{NoOrchestratorIsActive, OrchestratorPresence};
 use crate::pending_answers::PendingAnswers;
@@ -48,11 +58,110 @@ impl ActivityServiceImpl {
         &self,
         req: AwaitQuestionAnswerRequest,
     ) -> Result<Response<AwaitQuestionAnswerResponse>, Status> {
-        // TODO(permission-answer): implement — authenticate as `report_session_status_impl` does,
-        // then the three steps of the module doc.
-        let _ = (&self.answers, req);
-        Err(Status::unimplemented(
-            "AwaitQuestionAnswer is not implemented yet",
-        ))
+        let (_sessions_base, session_dir) = self.hook_session_dir(&req.os_user, &req.session_id)?;
+        let meta = self.hook_session(&session_dir)?;
+        if meta.session_type.as_deref() != Some("claude-cli") {
+            return Err(Status::failed_precondition(
+                "session_type is not claude-cli",
+            ));
+        }
+        if meta.hook_token.as_deref().unwrap_or("") != req.hook_token {
+            return Err(Status::permission_denied("invalid hook_token"));
+        }
+
+        // 1. Somebody on this host must be able to answer, or the hook is told so at once.
+        if !self.orchestrator_is_present(&session_dir).await {
+            return Ok(Response::new(outcome_only(
+                AwaitQuestionOutcome::NoOrchestrator,
+            )));
+        }
+
+        // 2. The question is the one asked for, and a permission.
+        let question = read_pending_question(&session_dir)
+            .map_err(|e| Status::internal(format!("cannot read the pending question: {e}")))?
+            .filter(|question| !req.request_id.is_empty() && question.request_id == req.request_id)
+            .ok_or_else(|| {
+                Status::failed_precondition(format!(
+                    "no pending question '{}' on session {}",
+                    req.request_id, req.session_id
+                ))
+            })?;
+        if question.kind != "permission" {
+            return Err(Status::failed_precondition(format!(
+                "pending question '{}' is a {} question, not a permission",
+                req.request_id, question.kind
+            )));
+        }
+
+        // 3. Hold the hook until it is answered or the deadline passes.
+        let has_suggestions = has_permission_suggestions(&req.permission_suggestions_json);
+        let pending = &self.answers.pending;
+        pending.open(
+            &req.session_id,
+            permission_request_view(&question, has_suggestions),
+        );
+        let response = match pending.wait(&req.request_id, self.answers.wait).await {
+            WaitOutcome::Answered(delivered) => answered_response(delivered),
+            WaitOutcome::TimedOut => outcome_only(AwaitQuestionOutcome::TimedOut),
+        };
+        Ok(Response::new(response))
     }
+
+    /// Whether the session's orchestrator is on this host and served here.
+    async fn orchestrator_is_present(&self, session_dir: &Path) -> bool {
+        let changeset = match read_changeset(session_dir) {
+            Ok(changeset) => changeset,
+            Err(e) => {
+                log::debug!(
+                    target: "tddy_session_activity::question_answers",
+                    "no orchestrator for {}: {e}",
+                    session_dir.display()
+                );
+                return false;
+            }
+        };
+        let Some(orchestrator) = changeset
+            .orchestrator_session_id
+            .as_deref()
+            .filter(|id| !id.is_empty())
+        else {
+            return false;
+        };
+        let on_another_host = changeset
+            .orchestrator_daemon_instance_id
+            .as_deref()
+            .is_some_and(|host| !host.is_empty() && host != self.ports.daemon_instance_id);
+        !on_another_host && self.answers.presence.is_active(orchestrator).await
+    }
+}
+
+/// A response that only says how the wait ended.
+fn outcome_only(outcome: AwaitQuestionOutcome) -> AwaitQuestionAnswerResponse {
+    AwaitQuestionAnswerResponse {
+        outcome: outcome as i32,
+        ..Default::default()
+    }
+}
+
+fn answered_response(delivered: DeliveredAnswer) -> AwaitQuestionAnswerResponse {
+    let (option_id, cancelled) = match delivered.answer {
+        PermissionAnswer::Selected { option_id, .. } => (option_id, false),
+        PermissionAnswer::Cancelled { .. } => (String::new(), true),
+    };
+    AwaitQuestionAnswerResponse {
+        outcome: AwaitQuestionOutcome::Answered as i32,
+        option_id,
+        cancelled,
+        message: delivered.message.unwrap_or_default(),
+        answered_by: delivered.by.name(),
+    }
+}
+
+/// Whether Claude's `permission_suggestions` hold at least one entry: only then is "allow always"
+/// offered.
+fn has_permission_suggestions(permission_suggestions_json: &str) -> bool {
+    serde_json::from_str::<serde_json::Value>(permission_suggestions_json)
+        .ok()
+        .and_then(|suggestions| suggestions.as_array().map(|entries| !entries.is_empty()))
+        .unwrap_or(false)
 }

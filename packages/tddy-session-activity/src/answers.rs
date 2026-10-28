@@ -21,8 +21,14 @@
 
 use std::path::Path;
 
-use tddy_core::pending_question::PendingQuestion;
-use tddy_discovery::subagent::{PermissionAnswer, PermissionRequestView};
+use tddy_core::agent_activity::{append_agent_activity, AgentActivityRecord, STATUS_COMPLETED};
+use tddy_core::pending_question::{clear_pending_question, read_pending_question, PendingQuestion};
+use tddy_core::session_lifecycle::unified_session_dir_path;
+use tddy_core::{read_changeset, WorkflowError};
+use tddy_discovery::subagent::{
+    answered_output, permission_tool_call_id, request_input_json, AnsweredBy, PermissionAnswer,
+    PermissionAnswering, PermissionChoice, PermissionRequestView, PermissionToolCall,
+};
 
 use crate::pending_answers::PendingAnswers;
 
@@ -146,22 +152,54 @@ pub fn permission_request_view(
     question: &PendingQuestion,
     has_permission_suggestions: bool,
 ) -> PermissionRequestView {
-    // TODO(permission-answer): implement — the tool call from `tool_name` / `tool_input_json`, and
-    // the offered options.
-    let _ = has_permission_suggestions;
+    let raw_input = match question.tool_input_json.as_str() {
+        "" => None,
+        text => Some(
+            serde_json::from_str(text)
+                .unwrap_or_else(|_| serde_json::Value::String(text.to_string())),
+        ),
+    };
+    let mut options = vec![choice(ALLOW_ONCE, "Allow once")];
+    if has_permission_suggestions {
+        options.push(choice(ALLOW_ALWAYS, "Allow always"));
+    }
+    options.push(choice(REJECT_ONCE, "Reject"));
     PermissionRequestView {
         request_id: question.request_id.clone(),
-        tool_call: tddy_discovery::subagent::PermissionToolCall {
-            title: String::new(),
-            kind: String::new(),
-            raw_input: None,
+        tool_call: PermissionToolCall {
+            title: question.tool_name.clone(),
+            kind: acp_tool_kind(&question.tool_name).to_string(),
+            raw_input,
         },
-        options: Vec::new(),
+        options,
+    }
+}
+
+/// An offered option whose `kind` is its id.
+fn choice(option_id: &str, name: &str) -> PermissionChoice {
+    PermissionChoice {
+        option_id: option_id.to_string(),
+        name: name.to_string(),
+        kind: option_id.to_string(),
+    }
+}
+
+/// ACP's name for a Claude tool.
+fn acp_tool_kind(tool_name: &str) -> &'static str {
+    match tool_name {
+        "Bash" => "execute",
+        "Edit" | "MultiEdit" | "Write" | "NotebookEdit" => "edit",
+        "Read" | "Glob" | "Grep" => "read",
+        _ => "other",
     }
 }
 
 /// Deliver `caller`'s `answer` to the permission prompt `target`'s hook waits on, with `message`
 /// for a `reject_*` option. See the module doc for the checks, in order.
+///
+/// # Errors
+///
+/// The [`AnswerRefusal`] of the first check that fails; the waiting hook keeps waiting.
 pub fn answer_permission(
     context: &AnswerContext<'_>,
     caller: &AnsweringCaller,
@@ -169,13 +207,140 @@ pub fn answer_permission(
     answer: PermissionAnswer,
     message: Option<String>,
 ) -> Result<AnsweredPermission, AnswerRefusal> {
-    // TODO(permission-answer): implement — the five checks, then `answer_with_message`, the
-    // activity record (`permission_tool_call_id`, `answered_output`) and `clear_pending_question`.
-    let _ = (context, caller, message);
-    Err(AnswerRefusal::UnknownRequest {
-        request_id: format!(
-            "{} (on session {target}; answering is not implemented)",
-            answer.request_id()
-        ),
+    let request_id = answer.request_id().to_string();
+    let session_dir = unified_session_dir_path(context.sessions_base, target);
+
+    // 1. The caller is the child's orchestrator, on the host the changeset records.
+    let changeset = match read_changeset(&session_dir) {
+        Ok(changeset) => Some(changeset),
+        Err(WorkflowError::ChangesetMissing(_)) => None,
+        Err(e) => return Err(AnswerRefusal::Io(format!("cannot read the changeset: {e}"))),
+    };
+    let orchestrator = changeset
+        .as_ref()
+        .and_then(|changeset| changeset.orchestrator_session_id.clone());
+    let orchestrator_host = changeset
+        .as_ref()
+        .and_then(|changeset| changeset.orchestrator_daemon_instance_id.as_deref())
+        .filter(|host| !host.is_empty())
+        .unwrap_or(context.this_daemon_instance_id);
+    let is_orchestrator = orchestrator.as_deref() == Some(caller.session_id.as_str())
+        && orchestrator_host == caller.daemon_instance_id;
+    if !is_orchestrator {
+        return Err(AnswerRefusal::NotTheOrchestrator {
+            caller: caller.session_id.clone(),
+            target: target.to_string(),
+            orchestrator,
+        });
+    }
+
+    // 2. Nobody answered it first.
+    if let Some(first) = context.pending.answered_by(&request_id) {
+        return Err(AnswerRefusal::AlreadyAnswered {
+            request_id,
+            by: first.name(),
+        });
+    }
+
+    // 3 and 4. The child waits on exactly this question, and it is a permission.
+    let question = read_pending_question(&session_dir)
+        .map_err(|e| AnswerRefusal::Io(format!("cannot read the pending question: {e}")))?
+        .filter(|question| question.request_id == request_id)
+        .ok_or_else(|| AnswerRefusal::UnknownRequest {
+            request_id: request_id.clone(),
+        })?;
+    if question.kind != "permission" {
+        return Err(AnswerRefusal::NotAPermission {
+            request_id,
+            kind: question.kind,
+        });
+    }
+
+    // 5. A hook is waiting, and the option is one it was offered.
+    let open = context
+        .pending
+        .open_request(&request_id)
+        .filter(|open| open.session_id == target)
+        .ok_or_else(|| AnswerRefusal::UnknownRequest {
+            request_id: request_id.clone(),
+        })?;
+    let option_id = match &answer {
+        PermissionAnswer::Selected { option_id, .. } => {
+            if !open
+                .request
+                .options
+                .iter()
+                .any(|offered| &offered.option_id == option_id)
+            {
+                return Err(AnswerRefusal::UnknownOption {
+                    request_id,
+                    option_id: option_id.clone(),
+                });
+            }
+            option_id.clone()
+        }
+        PermissionAnswer::Cancelled { .. } => String::new(),
+    };
+
+    let by = AnsweredBy::Orchestrator(caller.session_id.clone());
+    context
+        .pending
+        .answer_with_message(&answer, by.clone(), message)
+        .map_err(|_| AnswerRefusal::UnknownRequest {
+            request_id: request_id.clone(),
+        })?;
+
+    let at_unix_ms = tddy_daemon_kernel::now_unix_ms();
+    record_answer(
+        &session_dir,
+        &question,
+        &open.request,
+        &answer,
+        &by,
+        at_unix_ms,
+    );
+    clear_pending_question(&session_dir)
+        .map_err(|e| AnswerRefusal::Io(format!("cannot clear the pending question: {e}")))?;
+
+    Ok(AnsweredPermission {
+        session_id: target.to_string(),
+        request_id,
+        answered_by: caller.session_id.clone(),
+        option_id,
+        cancelled: matches!(answer, PermissionAnswer::Cancelled { .. }),
+        at_unix_ms,
     })
+}
+
+/// Record in the child's activity who answered what. The answer is already delivered, so a failed
+/// write is logged and not turned into a refusal.
+fn record_answer(
+    session_dir: &Path,
+    question: &PendingQuestion,
+    request: &PermissionRequestView,
+    answer: &PermissionAnswer,
+    by: &AnsweredBy,
+    at_unix_ms: u64,
+) {
+    let record = AgentActivityRecord {
+        call_id: permission_tool_call_id(&question.request_id),
+        tool_name: question.tool_name.clone(),
+        input: request_input_json(request, false),
+        status: STATUS_COMPLETED.to_string(),
+        result: answered_output(&by.name(), answer),
+        error_message: String::new(),
+        started_unix_ms: question.at_unix_ms,
+        completed_unix_ms: at_unix_ms,
+        source: "claude-cli".to_string(),
+        head_commit: String::new(),
+        activity_seq: 0,
+        changed_paths: Vec::new(),
+    };
+    if let Err(e) = append_agent_activity(session_dir, &record) {
+        log::warn!(
+            target: "tddy_session_activity::answers",
+            "could not record the answer to permission request {}: {e}",
+            question.request_id
+        );
+    }
 }

@@ -273,6 +273,35 @@ and pending question are written directly.
   gets `NO_ORCHESTRATOR`, so Claude's own prompt appears. Asking a peer daemon whether its session is
   live is a new peer RPC, recorded as a TODO rather than built here.
 
+### Decisions taken at green (2026-10-28, developer AFK)
+
+- **`answer_permission` reads the offered options from the open waiter**, not from the pending
+  question: `allow_always` is offered only when Claude sent suggestions, and only the waiter knows
+  (`permission_suggestions_json` rides on the await request, deviation 6). A request with no waiter
+  open is `UnknownRequest`, as deviation 7 says.
+- **Check order** in `answer_permission`: orchestrator, already answered, pending question present,
+  kind, waiter and option. "Already answered" precedes the pending-question check because an answer
+  clears the question, and a second answerer must be told who answered first rather than "unknown".
+- **The orchestrator's host** is the changeset's `orchestrator_daemon_instance_id`, or this host
+  when absent; a caller on another host id is `NotTheOrchestrator`.
+- **The activity record** of an answer is one `completed` row under `permission:<request_id>`
+  (`input` = the request view, `result` = `answered_output`); its write failure is logged, not a
+  refusal, because the hook is already woken. Clearing the pending question failing *is* an `Io`.
+- **`PendingAnswers::wait`** removes the waiter on timeout (a late answer is `no hook is waiting`),
+  and an answer that lands between the deadline and the lock is returned, not lost.
+- **Hook flags and timeouts.** `HookCommandParams` gained `answer_wait_secs`; the `PermissionRequest`
+  entry runs `--await-answer --await-timeout-secs <wait + 5>` with Claude's `timeout` = wait + 10
+  (`AWAIT_CLIENT_MARGIN_SECS`, `CLAUDE_HOOK_TIMEOUT_MARGIN_SECS` in `tddy-agent-backend`). Cursor's
+  literal passes the configured value, which cursor hooks never read.
+- **The hook awaits only when its report recorded a question** (non-empty `request_id`); with none
+  it prints nothing.
+- **`AnswerSessionPermission` is also a spawn-capable session's tool**: `is_conversation_spawner_tool`
+  names it (now five tools), since the acceptance test has a grill-me orchestrator answer its child.
+- **Catalog order**: `AnswerSessionPermission` follows `SendSessionKeys`; the three pinned lists
+  (`read_only.rs`, `exec_tool_admission.rs`, `project_home_session_tools_acceptance.rs`) say so.
+- **`project_home_prompt.md`** does not mention `AnswerSessionQuestion`: that tool is `8/8`'s and is
+  not registered here.
+
 ## TODO
 
 - [x] Record initial discovery (`2026-10-25-home-inbox-permission-answer-initial-discovery.md`)
@@ -283,7 +312,7 @@ and pending question are written directly.
 - [x] Run acceptance tests (verify they fail)
 - [x] USER REVIEW — acceptance tests (reviewed by the orchestrator, developer AFK, 2026-10-28)
 - [x] TDD Red — write failing unit/integration tests
-- [ ] TDD Green — implement with quality code
+- [x] TDD Green — implement with quality code
 - [ ] Update documentation with progress
 - [ ] Repeat Red→Green→Update cycle until feature complete
 - [ ] Run the touched packages' tests (`./test -p {package}` per package) — verify 100% pass

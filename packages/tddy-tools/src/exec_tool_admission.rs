@@ -142,6 +142,7 @@ mod tests {
                 "ReadSessionTerminal",
                 "ClaimSessionTerminal",
                 "SendSessionKeys",
+                "AnswerSessionPermission",
                 "TerminateSession",
                 "CommitSessionWorktree",
                 "PushSessionBranch",

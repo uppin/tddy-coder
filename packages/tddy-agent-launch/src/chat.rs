@@ -37,6 +37,8 @@ pub fn install_cursor_hooks_in_worktree(
         // tddy-telegram-control, and neither caller hands it the daemon's resolved data dir.
         // Tracked in `docs/dev/todo/2026-10-17-desktop-cursor-hooks-reach-daemon.md`.
         daemon_socket: None,
+        // Cursor hooks never wait for an answer; the value is unread.
+        answer_wait_secs: config.claude_cli_answer_wait_secs(),
     });
     let cursor_dir = worktree_path.join(".cursor");
     if let Err(e) = std::fs::create_dir_all(&cursor_dir).and_then(|_| {

@@ -254,6 +254,7 @@ impl SplitSessions {
                 hook_token: &hook_token,
                 // An embedded daemon serves no HTTP RPC; its hooks report over this socket.
                 daemon_socket: self.agent_tool_socket_for_embedded_host().as_deref(),
+                answer_wait_secs: self.config.claude_cli_answer_wait_secs(),
             },
         );
         let handle = self
