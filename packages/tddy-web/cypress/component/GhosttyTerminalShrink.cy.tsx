@@ -127,15 +127,39 @@ describe("GhosttyTerminal shrink — the real pane chain", () => {
         cy.get("[data-testid='shrink-host']").click();
 
         // Then — the grid re-fits to the shrunken pane (the FitAddon's resize observer is
-        // debounced at 100ms, hence the retry window)
+        // debounced at 100ms; on a loaded CI runner the wasm render loop can lag behind, so
+        // give the re-fit a generous window — the timeout flows from .find into .should)
         byTestId(TEST_IDS.ghosttyTerminal)
-          .find("canvas")
+          .find("canvas", { timeout: 15000 })
           .should(($c) => {
             const width = parseFloat($c[0].style.width);
-            expect(
-              width,
-              `canvas should re-fit under the 300px pane (was ${fittedWidth}px, now ${width}px)`,
-            ).to.be.lessThan(300);
+            if (width < 300) return;
+
+            // Diagnostic: CI has failed this twice with the canvas frozen at the fitted
+            // width while the identical tree passed elsewhere. Distinguish the two
+            // candidate mechanisms in the failure message itself (no artifacts are
+            // uploaded): a container still ~fitted wide means the flex chain is stuck at
+            // min-content; a shrunken container under an unfitted canvas means the
+            // observer/fit path never ran.
+            const chain: string[] = [];
+            let node: HTMLElement | null = $c[0] as HTMLElement;
+            while (node && chain.length < 16) {
+              const cs = node.ownerDocument.defaultView!.getComputedStyle(node);
+              const r = node.getBoundingClientRect();
+              const cls =
+                typeof node.className === "string"
+                  ? node.className.trim().split(/\s+/).slice(0, 5).join(" ")
+                  : "";
+              chain.push(
+                `${node.tagName.toLowerCase()}[${cls}] w=${Math.round(r.width)} ` +
+                  `minW=${cs.minWidth} ovfX=${cs.overflowX} disp=${cs.display} pos=${cs.position}`,
+              );
+              node = node.parentElement;
+            }
+            throw new Error(
+              `canvas did not re-fit (fitted ${fittedWidth}px, still ${width}px after 15s). ` +
+                `Chain canvas→root:\n${chain.join("\n")}`,
+            );
           });
       });
   });
