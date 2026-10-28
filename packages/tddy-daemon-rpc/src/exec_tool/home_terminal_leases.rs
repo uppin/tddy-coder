@@ -13,7 +13,7 @@
 //! Feature doc: docs/ft/daemon/project-concept.md § Project-home tools.
 
 use std::collections::HashMap;
-use std::sync::Mutex;
+use std::sync::{Mutex, MutexGuard, PoisonError};
 
 /// Whose claim an entry is: the calling home session, as its owner confirms it, and the session
 /// whose terminal it claimed.
@@ -35,15 +35,19 @@ pub struct HomeTerminalLeases {
 impl HomeTerminalLeases {
     /// Remember `control_token` as `key`'s, replacing an earlier one.
     pub fn remember(&self, key: HomeTerminalClaimKey, control_token: String) {
-        // TODO(terminal-keys): implement — insert into `self.tokens`.
-        let _ = (&self.tokens, key, control_token);
+        self.tokens().insert(key, control_token);
     }
 
     /// The token `key` was issued by its last claim, or `None` when it never claimed.
     #[must_use]
     pub fn token_of(&self, key: &HomeTerminalClaimKey) -> Option<String> {
-        // TODO(terminal-keys): implement — look `key` up in `self.tokens`.
-        let _ = (&self.tokens, key);
-        None
+        self.tokens().get(key).cloned()
+    }
+
+    /// The map, locked. Each method is one insert or one lookup, so a panic on another thread
+    /// while it held the lock cannot leave the map half-updated: a poisoned lock is read through
+    /// rather than turned into a panic of the daemon's own.
+    fn tokens(&self) -> MutexGuard<'_, HashMap<HomeTerminalClaimKey, String>> {
+        self.tokens.lock().unwrap_or_else(PoisonError::into_inner)
     }
 }

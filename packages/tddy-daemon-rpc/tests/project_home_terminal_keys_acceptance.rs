@@ -385,8 +385,6 @@ async fn after_a_claim_send_session_keys_writes_the_encoded_bytes_and_the_screen
         "the bytes the child was typed"
     );
     // ... and the child's screen, read back through ReadSessionTerminal, shows them
-    // FIXME(terminal-keys): blocked on #767 (`#home-inbox` 2/8): `ReadSessionTerminal` is not yet
-    // offered to a project-home session, and `TerminalCapture::text_grid` is still its stub.
     screen_lines_eventually_include(&world, &world.on_a, "echo hello").await;
 }
 

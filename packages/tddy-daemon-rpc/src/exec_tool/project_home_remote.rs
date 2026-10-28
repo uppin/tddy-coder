@@ -62,7 +62,7 @@ impl ExecToolRpcHandler {
         if unified_session_dir_path(&sessions_base, &req.session_id).is_dir() {
             return Ok(None);
         }
-        let home = self.home_caller_confirmed_at_owner(req).await?;
+        let (home, owner) = self.home_caller_confirmed_at_owner(req).await?;
         if let Some(host) = target_daemon_instance_id(&req.args_json)
             .filter(|host| *host != local_instance_id_for_config(&self.config))
         {
@@ -72,17 +72,17 @@ impl ExecToolRpcHandler {
                 req.tool_name, req.session_id
             )));
         }
-        let port = self.project_home_port(req, os_user, &sessions_base, None)?;
+        let port = self.project_home_port(req, os_user, &sessions_base, None, owner)?;
         Ok(Some(port.execute(&home, req).await))
     }
 
     /// The calling session as the daemon that owns it reports it, when that is a project-home
-    /// session; PERMISSION_DENIED otherwise. Every other eligible daemon is asked, and only a row
-    /// the owner reports for itself is believed.
+    /// session, with that daemon's instance id; PERMISSION_DENIED otherwise. Every other eligible
+    /// daemon is asked, and only a row the owner reports for itself is believed.
     async fn home_caller_confirmed_at_owner(
         &self,
         req: &ExecuteToolRequest,
-    ) -> Result<HomeCaller, Status> {
+    ) -> Result<(HomeCaller, String), Status> {
         let local_id = local_instance_id_for_config(&self.config);
         let ask = ListSessionsRequest {
             session_token: req.session_token.clone(),
@@ -138,10 +138,11 @@ impl ExecToolRpcHandler {
                     req.tool_name, req.session_id
                 )));
             }
-            return Ok(HomeCaller {
+            let home = HomeCaller {
                 session_id: owned.session_id,
                 project_id: owned.project_id,
-            });
+            };
+            return Ok((home, peer));
         }
         Err(Status::permission_denied(format!(
             "tool {} is refused: no daemon confirms session {} as a project-home session",

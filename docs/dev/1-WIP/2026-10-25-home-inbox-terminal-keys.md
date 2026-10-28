@@ -117,27 +117,27 @@ writes them; a browser steal makes the next send fail naming the holder.
 ### Acceptance tests
 
 **`tddy-daemon-rpc`**: `packages/tddy-daemon-rpc/tests/project_home_terminal_keys_acceptance.rs`
-- [ ] `after_a_claim_send_session_keys_writes_the_encoded_bytes_and_the_screen_reflects_them`
-- [ ] `send_session_keys_without_a_claim_is_refused_and_writes_nothing`
-- [ ] `a_browser_steal_after_the_claim_refuses_the_next_send_naming_the_holder_and_a_new_claim_succeeds`
-- [ ] `an_unknown_key_name_is_refused_and_writes_nothing`
-- [ ] `the_claim_broadcasts_a_control_change_naming_the_project_home_screen`
-- [ ] `a_jailed_childs_terminal_follows_the_same_rules`
-- [ ] `a_session_on_another_host_is_claimed_and_typed_into_on_that_host` (added in pass 2: the replan's cross-host rule, which the six above never reach)
-- [ ] `another_home_that_never_claimed_cannot_type_with_the_first_homes_claim` (added in pass 2: the lease is keyed by caller)
+- [x] `after_a_claim_send_session_keys_writes_the_encoded_bytes_and_the_screen_reflects_them`
+- [x] `send_session_keys_without_a_claim_is_refused_and_writes_nothing`
+- [x] `a_browser_steal_after_the_claim_refuses_the_next_send_naming_the_holder_and_a_new_claim_succeeds`
+- [x] `an_unknown_key_name_is_refused_and_writes_nothing`
+- [x] `the_claim_broadcasts_a_control_change_naming_the_project_home_screen`
+- [x] `a_jailed_childs_terminal_follows_the_same_rules`
+- [x] `a_session_on_another_host_is_claimed_and_typed_into_on_that_host` (added in pass 2: the replan's cross-host rule, which the six above never reach)
+- [x] `another_home_that_never_claimed_cannot_type_with_the_first_homes_claim` (added in pass 2: the lease is keyed by caller)
 
-**Failing now** because `ClaimSessionTerminal` and `SendSessionKeys` are not registered: the daemon
-answers `PermissionDenied: … a project-home session is read-only`. Test 1's last step reads the child's
-screen through `ReadSessionTerminal`, which is blocked on `2/8`'s green (see `## Dependencies`); the
-other seven do not read it. The stand-in TUI is a raw-mode shell script that records every byte it is
-typed into a file; the jailed child is a registered jail whose stdin channel the test reads.
+**Green (2026-10-28):** all eight pass. Before green they failed because the tools were not registered
+(the daemon answered `PermissionDenied: … a project-home session is read-only`). The stand-in TUI is a
+raw-mode shell script that records every byte it is typed into a file; the jailed child is a registered
+jail whose stdin channel the test reads. Test 1's last step reads the screen through `ReadSessionTerminal`,
+which `2/8` has made green on this branch, so its former FIXME was stale and is removed.
 
 ### Unit tests
 
-All written and failing (pass 2, 6f); they go green with the implementation.
+Written failing (pass 2, 6f); green at pass 3.
 
-- [ ] `tddy-tool-engine`, `packages/tddy-tool-engine/tests/terminal_keys.rs` (16): every named key's bytes (editing keys, navigation keys, `C-a`…`C-z`, `F1`…`F12`); keys in the order named; text raw and as a bracketed paste; a newline in raw text is `\r`, in a paste verbatim; text before keys; an unknown or near-miss name is refused naming it; one unknown name among known ones refuses the whole request; a request with nothing to type is refused. Fail with "encode_keys: not implemented".
-- [ ] `tddy-daemon-rpc`, `packages/tddy-daemon-rpc/tests/home_terminal_leases.rs` (6): a remembered token is given back; none for a claim never made; a new claim replaces the old token; no sharing across caller session, caller daemon instance or target.
+- [x] `tddy-tool-engine`, `packages/tddy-tool-engine/tests/terminal_keys.rs` (16): every named key's bytes (editing keys, navigation keys, `C-a`…`C-z`, `F1`…`F12`); keys in the order named; text raw and as a bracketed paste; a newline in raw text is `\r`, in a paste verbatim; text before keys; an unknown or near-miss name is refused naming it; one unknown name among known ones refuses the whole request; a request with nothing to type is refused. (16 passed.)
+- [x] `tddy-daemon-rpc`, `packages/tddy-daemon-rpc/tests/home_terminal_leases.rs` (6): a remembered token is given back; none for a claim never made; a new claim replaces the old token; no sharing across caller session, caller daemon instance or target. (6 passed.)
 
 ### Test level decisions
 | Aspect | Level | Rationale |
@@ -155,6 +155,20 @@ Pass 2 (2026-10-28) deviations from the plan, each from reading the code the pla
 4. The key carries the **caller's daemon instance**, which `home_caller_confirmed_at_owner` does not yet return (see `## Dependencies`).
 5. Lease semantics the tests rely on. `TerminalControl::verify` accepts any token while a session has no lease, so a send must check the remembered token first, then verify it, and also that the holder is the home's screen (a deleted session clears its lease). The **first** claim on a session with no holder broadcasts no `ControlChange` (`control_lease.rs`: only a steal does), so the broadcast test starts with a browser holding control.
 6. `DaemonSessionHost::terminal_control()` is real code, not a stub: the acceptance tests need it, and `terminal_session_ports` now uses it.
+
+Pass 3 (green, 2026-10-28) decisions, taken with the developer AFK:
+
+7. **Defaults removed.** `claim_terminal` and `send_keys` are required methods, as deviation 1 planned. The two refusing bodies in `2/8`'s fake port (`tests/project_home_terminal_tools.rs`) are the only change to that file.
+8. **Registration.** Both tools are in `is_project_home_tool` and `is_project_home_target_tool`, so the role guard, the allowed set and `run_locally` route them with no other change. The catalog already listed their defs from the contract commit, so the offered catalog and the allowed set now agree. Pins updated: `read_only.rs`, `tddy-tools` `exec_tool_admission.rs`, `project_home_session_tools_acceptance.rs`, and `project_home_target_host.rs` (17 → 19 target tools). `project_home_prompt.md` gained a bullet.
+9. **Where the lease store lives.** `HomeTerminalLeases` is a field of `ProjectHomeHost`, the struct the handler holds to keep its field count down, not a direct field of `ExecToolRpcHandler`. It is built in `from_host` beside `terminal_control()`.
+10. **The caller's daemon instance.** `home_caller_confirmed_at_owner` now returns the owning peer's instance id with the `HomeCaller`. A caller held here is keyed by this host's instance. `project_home_port` takes that id as an argument and `DaemonProjectHome` carries it with the calling session id.
+11. **Send checks, in order.** Read the holder, then the remembered token. Refuse unless the token exists and the holder is the home's screen. Then `verify` the token explicitly, because a jailed terminal does not check the lease itself. A refusal names the holder when there is one, and says to claim again. Nothing is typed on any refusal.
+12. **Paste reads the target's mode.** `SendSessionKeys` reads `bracketed_paste` through `read_terminal` only when `text` is non-empty. A read failure refuses the send. It does not fall back to raw typing, which would be a fallback.
+13. **Input offset 0.** `send_input` is given offset `0`, which the PTY handle treats as unset and never acknowledges. Browser ACK state is untouched.
+14. **Lease-store lock.** A poisoned lock is read through (`PoisonError::into_inner`). Each method is one insert or one lookup, so a panic elsewhere cannot leave the map half-updated.
+15. **Answers.** `ClaimSessionTerminal` answers `{"holder": "<screen id>"}`. `SendSessionKeys` answers `{"sent_bytes": n}`, the bytes written. A refused send ends "nothing was sent".
+16. **Known limit, not changed.** Verbatim paste (the brief's decision) means a `text` that contains the paste-end sequence `ESC[201~` ends the paste early, and the rest is typed raw. The agent can type raw anyway, so this adds no capability. Stripping the sequence would break the verbatim rule, so it is left for a human to decide.
+17. **Known limit.** A terminal whose screen model has no size refuses `text`, because its paste mode cannot be read (`read_terminal` refuses for an unknown size). The jail test's child never reports a size, so it sends keys only, which is what that test exercises. Whether a production jail reports its size is not checked here.
 
 **Refusal wording the acceptance tests pin.** No claim and no holder: contains `ClaimSessionTerminal`. Held by another screen (including a home that never claimed): contains that screen id and `claim` (for example "control is held by `<screen>`; claim it again"). Unknown key: contains the key name.
 
@@ -174,7 +188,7 @@ Pass 2 (2026-10-28) deviations from the plan, each from reading the code the pla
 - [x] Run acceptance tests (verify they fail)
 - [x] USER REVIEW — acceptance tests — reviewed by the orchestrator, developer AFK, 2026-10-28
 - [x] TDD Red — write failing unit/integration tests
-- [ ] TDD Green — implement with quality code
+- [x] TDD Green — implement with quality code (2026-10-28: scoped gates below)
 - [ ] Update documentation with progress
 - [ ] Repeat Red→Green→Update cycle until feature complete
 - [ ] Run the touched packages' tests (`./test -p {package}` per package) — verify 100% pass
