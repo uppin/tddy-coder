@@ -91,10 +91,24 @@ pub async fn execute_project_home_terminal_tool(
         Ok(t) => t,
         Err(outcome) => return outcome,
     };
-    // TODO(terminal-read): implement — read `port.read_terminal(&target)` and answer
-    // `{lines, cursor: {row, col, visible}, cols, rows, offset}`.
-    ToolOutcome::err(format!(
-        "{READ_SESSION_TERMINAL}: not implemented (session {})",
-        target.session_id
-    ))
+    match port.read_terminal(&target).await {
+        Ok(grid) => ToolOutcome::ok(grid_answer(&grid).to_string()),
+        Err(e) => ToolOutcome::err(format!("{READ_SESSION_TERMINAL}: {e:#}")),
+    }
+}
+
+/// The answer [`READ_SESSION_TERMINAL`] gives for `grid`. `bracketed_paste` is left out: it is the
+/// input-mode state the keys tool reads, not part of what the screen shows.
+fn grid_answer(grid: &TextGrid) -> Value {
+    json!({
+        "lines": grid.lines,
+        "cursor": {
+            "row": grid.cursor.row,
+            "col": grid.cursor.col,
+            "visible": grid.cursor.visible,
+        },
+        "cols": grid.cols,
+        "rows": grid.rows,
+        "offset": grid.offset,
+    })
 }

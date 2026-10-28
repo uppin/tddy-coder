@@ -12803,6 +12803,7 @@ dependencies = [
  "tddy-session-tool-client",
  "tddy-spawn",
  "tddy-task",
+ "tddy-terminal-rpc",
  "tddy-testing-commons",
  "tddy-tool-engine",
  "tddy-workflow-recipes",

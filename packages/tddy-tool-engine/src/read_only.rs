@@ -109,6 +109,7 @@ mod tests {
                 "mcp__tddy-tools__GetWorktree",
                 "mcp__tddy-tools__ReadSessionActivity",
                 "mcp__tddy-tools__ReadSessionTranscript",
+                "mcp__tddy-tools__ReadSessionTerminal",
                 "mcp__tddy-tools__TerminateSession",
                 "mcp__tddy-tools__RefreshWorktreeDiskUsage",
                 "mcp__tddy-tools__CommitSessionWorktree",

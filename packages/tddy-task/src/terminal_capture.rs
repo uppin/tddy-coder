@@ -19,9 +19,12 @@ use crate::screen_dump::portable_dump;
 /// 1006, 1015, 1016). These are replayed in front of the raw ring ([`TerminalCapture::replay`]).
 const MOUSE_TRACKING_MODES: [u16; 7] = [1000, 1002, 1003, 1005, 1006, 1015, 1016];
 
+/// Bracketed paste (2004), read by [`TerminalCapture::text_grid`].
+const BRACKETED_PASTE_MODE: u16 = 2004;
+
 /// Focus reporting (1004) and bracketed paste (2004): input modes a client needs to drive the
 /// screen, carried by a snapshot but not by the legacy raw replay.
-const OTHER_INPUT_MODES: [u16; 2] = [1004, 2004];
+const OTHER_INPUT_MODES: [u16; 2] = [1004, BRACKETED_PASTE_MODE];
 
 /// Private modes that switch to the alternate screen buffer (`47`, `1047`, `1049`).
 const ALTERNATE_SCREEN_MODES: [u16; 3] = [47, 1047, 1049];
@@ -136,8 +139,25 @@ impl TerminalCapture {
     /// The model is read through `Vt::view()`, which is the buffer in use: the alternate screen
     /// while an application is full-screen, not the primary buffer `Vt::text()` returns.
     pub fn text_grid(&self) -> Option<TextGrid> {
-        // TODO(terminal-read): implement
-        None
+        let (rows, cols) = self.grid()?;
+        let cursor = self.screen.cursor();
+        let lines = self
+            .screen
+            .view()
+            .map(|line| line.text().trim_end().to_owned())
+            .collect();
+        Some(TextGrid {
+            lines,
+            cursor: GridCursor {
+                row: cursor.row as u16,
+                col: cursor.col as u16,
+                visible: cursor.visible,
+            },
+            cols,
+            rows,
+            offset: self.end_offset,
+            bracketed_paste: self.modes.enabled.contains(&BRACKETED_PASTE_MODE),
+        })
     }
 
     /// Record freshly produced output, updating the screen model and the mode state and evicting

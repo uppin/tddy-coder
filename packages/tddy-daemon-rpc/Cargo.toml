@@ -38,6 +38,10 @@ tddy-rpc = { path = "../tddy-rpc" }
 tddy-service = { path = "../tddy-service" }
 tddy-spawn = { path = "../tddy-spawn" }
 tddy-tool-engine = { path = "../tddy-tool-engine" }
+# `ReadSessionTerminal`'s port resolves a session's main terminal through the terminal store and
+# reads its screen as `TextGrid`s (`#home-inbox` 2/8).
+tddy-terminal-rpc = { path = "../tddy-terminal-rpc" }
+tddy-task = { path = "../tddy-task" }
 tddy-worktree-service = { path = "../tddy-worktree-service" }
 # The PR-stack family's bodies drive the stack recipe's plan mutations and its GitHub PR lookup.
 tddy-workflow-recipes = { path = "../tddy-workflow-recipes" }
@@ -86,8 +90,6 @@ tddy-livekit-testkit = { path = "../tddy-livekit-testkit" }
 livekit = "0.7"
 tddy-session-files = { path = "../tddy-session-files" }
 tddy-testing-commons = { path = "../tddy-testing-commons" }
-# `in_jail_conversation_acceptance` reads the jail's task registry; nothing in `src/` does.
-tddy-task = { path = "../tddy-task" }
 # The cross-daemon token and sandboxed-codebase suites give each daemon a signing identity of its
 # own (`DaemonSigningKey`, `SessionTokens`). An existing workspace crate the lifecycle crate
 # already depends on.
