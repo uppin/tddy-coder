@@ -19,7 +19,8 @@ Tddy Desktop shows a native notification when one of its sessions needs the oper
 - **pending question** (`#home-inbox 3/8`, once that node lands): the notification says what the session
   is asking.
 
-Clicking one brings the window to the front and opens that session.
+Clicking one is meant to bring the window to the front and open that session. **That needs a newer
+Tauri than this application is on** — see [Click](#proposed-changes) and the Out of scope list.
 
 ## Background
 
@@ -42,10 +43,16 @@ subscribers, and an embedding host can't add one.
     - **sound:** played only when the agent asked for one, or for pending questions.
   - Duplicates: the subscriber skips the notification when the window is focused and already showing
     that session. It also skips one identical to the previous notification for the same session.
-- **Click.** Clicking focuses or unminimises the main window and navigates it to
-  `#/sessions/<id>?host=<instance>`.
-- **Permission.** The first notification asks the operating system for permission. If the operator
-  refuses, nothing is shown and the refusal is logged once.
+- **Click.**
+  - Opening a session from a click is `open_session_route`: it focuses or unminimises the main
+    window and navigates it to `#/sessions/<id>?host=<instance>`.
+  - **Nothing calls it yet.** `tauri-plugin-notification` 2.4, the line that builds against the
+    Tauri this application is locked to (2.11), reports no clicks on desktop. Plugin 2.5 and later
+    report one (`on_action`, `tap`) but need Tauri 2.12 and Rust 1.90. The developer decided
+    (orchestrator, developer AFK, 2026-10-26) to ship without it and record the wiring as
+    `docs/dev/todo/2026-10-26-desktop-notification-click-needs-tauri-2-12.md`.
+- **Subtitle.** The plugin's desktop notification has no subtitle, so the notification shows the
+  session label as the first line of its body, then the body.
 
 ### What's Staying the Same
 
@@ -56,15 +63,16 @@ subscribers, and an embedding host can't add one.
 
 - **Technical.**
   - A new dependency: `tauri-plugin-notification`.
-  - A plugin permission in `capabilities/default.json`.
   - One `RuntimeOptions` hook in `tddy-daemon`.
   - A subscriber module in `tddy-desktop`.
 - **User.** Operators working in other apps are told when a session needs them.
 - **Platform.**
   - macOS and Linux.
-  - Whether a click can be delivered depends on the platform. **Risk:** the plugin's click event on
-    desktop platforms must be verified in pass 2. If it can't be delivered, the developer decides the
-    fallback.
+  - Clicks are not delivered; see Click above.
+  - **Known limit — permission.** On desktop the plugin's permission API always answers "granted"
+    and shows no prompt. macOS asks the operator on the first notification and **silently drops**
+    notifications they refuse; the desktop cannot observe that, so it neither requests permission
+    nor logs a refusal.
 
 ## Acceptance Criteria
 
@@ -73,11 +81,13 @@ subscribers, and an embedding host can't add one.
 - [ ] Finished and needs-input notifications show the fixed text. Activity notifications show
   nothing.
 - [ ] A notification for the session the focused window already shows is not repeated natively.
-- [ ] Clicking a notification focuses the window and opens that session's route.
+- [ ] The click handler focuses the window and opens that session's route. (Delivering a click to it
+  is out of scope until Tauri 2.12.)
 - [ ] Another operating-system user's session is never shown.
 
 ## Out of scope
 
+- A click on a native notification reaching the handler (needs Tauri 2.12 and plugin 2.5+).
 - Windows.
 - Notification actions (reply, approve).
 - Notifications from other daemons (peers).

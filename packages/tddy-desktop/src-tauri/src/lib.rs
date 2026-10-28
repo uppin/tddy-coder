@@ -13,6 +13,7 @@
 mod config_source;
 mod file_drop;
 mod ipc;
+pub mod native_notifications;
 mod oauth_callback;
 
 use std::path::PathBuf;

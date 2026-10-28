@@ -4,7 +4,7 @@
 **Status:** 🚧 In Progress
 **Type:** Feature
 **Complexity**: 4 — two Rust packages plus Tauri config, a new external dependency (`tauri-plugin-notification`), an embedding API on the daemon runtime, platform-dependent click delivery (unverified)
-**Stack:** `#home-inbox 4/8` — branch `feature/home-inbox/desktop-notify`, base `feature/home-inbox/elicit-content`
+**Stack:** `#home-inbox 4/8` (PR #769) — branch `feature/home-inbox/desktop-notify`, base `feature/home-inbox/elicit-content`
 **PRD:** [PRD-2026-10-25-desktop-notifications.md](../../ft/desktop/1-WIP/PRD-2026-10-25-desktop-notifications.md)
 
 ## Initial Discovery
@@ -24,16 +24,27 @@ State A below is distilled from that file. Do not duplicate grep traces or file 
 ## Affected Packages
 
 - [ ] [`tddy-daemon`](../../../packages/tddy-daemon/README.md): `RuntimeOptions::with_notification_subscriber`, appended in `mount_host`
-- [ ] [`tddy-desktop`](../../../packages/tddy-desktop/README.md): `native_notifications` subscriber, plugin, capability, click → navigate
+- [ ] [`tddy-desktop`](../../../packages/tddy-desktop/README.md): `native_notifications` subscriber, plugin, click handler
+- [ ] `flake.nix` (dev shell, macOS only): an Objective-C-only C compiler wrapper, so `mac-notification-sys` builds
 
 ## Responsibility
 
 - `tddy_daemon::runtime::RuntimeOptions::with_notification_subscriber(Arc<dyn SessionNotificationSubscriber>)`; `mount_host` appends every registered subscriber after the two built-ins.
 - `tddy_desktop::native_notifications::{DesktopNotificationSubscriber, NativeNotifier (port), DesktopNotice { title, subtitle, body, sound, route }, desktop_notice_for(&SessionNotification, &DesktopContext) -> Option<DesktopNotice>}`
   — `AttentionRequired` only; owner = the desktop operator's OS user; agent title or "`<label>` needs you"; body via `1/8`'s `to_plain_text(md, 300)` or the fixed `text`; sound when the agent asked for it or the source is `PendingQuestion`; suppression when the focused window shows that session or the notice equals the previous one for that session.
-- The Tauri `NativeNotifier` over `tauri-plugin-notification`; permission requested on first use, refusal logged once.
-- Click: focus/unminimise `MAIN_WINDOW_LABEL` and `navigate` to `#/sessions/<id>?host=<instance>`.
-- `Cargo.toml` dependency, `capabilities/default.json` notification permission.
+- The Tauri `NativeNotifier` (`TauriNotifier`) over `tauri-plugin-notification` 2.4. The plugin's desktop
+  notification has no subtitle, so the notifier shows `DesktopNotice::body_with_label()` — the label as
+  the first line, then the body. It requests no permission and logs no refusal: the plugin answers
+  "granted" without asking on desktop, and macOS silently drops a refused notification.
+- `DashboardWindow` port (`TauriDashboardWindow`): focus, current location, bring to front, navigate.
+  `SessionRoute { session_id, host }` with `fragment()` and `url_within(&Url)`.
+- Click handler `open_session_route`: bring `MAIN_WINDOW_LABEL` to the front, then `navigate` to
+  `#/sessions/<id>?host=<instance>`. **Not wired to a click** — plugin 2.4 reports none; see
+  `docs/dev/todo/2026-10-26-desktop-notification-click-needs-tauri-2-12.md`.
+- `Cargo.toml` dependencies (`tauri-plugin-notification ~2.4`, `async-trait`, `tddy-daemon-kernel`). No
+  capability: only Rust calls the plugin.
+- `flake.nix`: on macOS the dev shell exports `CC_aarch64_apple_darwin` / `CC_x86_64_apple_darwin` as a
+  wrapper that adds `-include <SDK>/usr/include/uuid/uuid.h` for `.m`/`.mm` sources only.
 
 ## Boundaries
 
@@ -50,6 +61,10 @@ State A below is distilled from that file. Do not duplicate grep traces or file 
 **Base (replan 2026-10-26).** Nothing from `#start-parity` is consumed. `mount_host.rs` gained
 `#coagents`' launcher and approval routes on `master`; the subscriber registration goes beside
 them once the `#start-parity` line is rebased onto `master`.
+
+**Sequencing (expected).** `an_agent_notification_shows_one_native_notification_with_its_title_label_and_plain_text_body`
+and the unit test `an_agent_body_is_cut_to_the_body_limit_and_ends_in_an_ellipsis` need `1/8`'s real
+`to_plain_text`, which is a stub on this branch. They cannot go green until `#766` is rebased in.
 
 `#home-inbox 3/8` sits below but is not consumed: its pending-question notifications already carry a
 human `text`, which this node shows like any other attention notification, and its `PendingQuestion`
@@ -89,25 +104,28 @@ session route.
 - `native_notifications.rs` (tddy-desktop); dependency `tauri-plugin-notification`
 ### Modified
 - `RuntimeOptions` (+subscriber list), `mount_host::open_shared`
-- `tddy-desktop/src-tauri/{src/lib.rs (start_daemon, plugin init), Cargo.toml, capabilities/default.json}`
+- `tddy-desktop/src-tauri/{src/lib.rs (start_daemon, plugin init), Cargo.toml}`
+- `flake.nix` (macOS dev shell)
 - `docs/ft/desktop/tddy-desktop-tauri.md` at wrap
 
 ## Testing Strategy
 
 ### Acceptance tests
 
-**`tddy-desktop`**: `packages/tddy-desktop/src-tauri/tests/native_notifications_acceptance.rs` (recording `NativeNotifier`)
+**`tddy-desktop`**: `packages/tddy-desktop/src-tauri/tests/native_notifications_acceptance.rs` (recording `NativeNotifier`; shared fakes in `tests/support/mod.rs`)
 - [ ] `an_agent_notification_shows_one_native_notification_with_its_title_label_and_plain_text_body`
 - [ ] `finished_and_needs_input_show_their_fixed_text_and_activity_shows_nothing`
 - [ ] `a_notification_for_the_session_the_focused_window_shows_is_not_repeated_natively`
 - [ ] `another_os_users_session_is_never_shown`
 - [ ] `a_click_navigates_the_main_window_to_the_sessions_route` (route builder + click handler over a fake window)
 
+**Unit** (`tests/native_notifications_unit.rs`, 18 tests): `desktop_notice_for` (title, 300-char body limit, sound rules, route), `SessionRoute::fragment` / `url_within`, `DesktopNotice::body_with_label`, subscriber suppression (focus, same-as-previous, per session).
+
 **`tddy-daemon`**: `packages/tddy-daemon/tests/runtime_notification_subscriber_acceptance.rs`
 - [ ] `a_subscriber_registered_on_runtime_options_receives_the_runtimes_notifications`
 
 ### Manual verification (recorded in Validation Results)
-- [ ] macOS: a real notification appears and a click opens the session (plugin click delivery — **risk**; if the platform cannot deliver clicks, stop and ask for the fallback).
+- [ ] macOS: a real notification appears (label first line, then body). Click delivery is out of scope — see the TODO file.
 
 ### Test level decisions
 | Aspect | Level | Rationale |
@@ -118,6 +136,14 @@ session route.
 ## Decisions & Trade-offs
 
 - `tauri-plugin-notification` (developer, 2026-10-25); `RuntimeOptions` hook rather than an in-process stream (developer, 2026-10-25).
+- **Click delivery (orchestrator, developer AFK, 2026-10-26).** No Tauri bump: keep `tauri-plugin-notification ~2.4` (2.5+ needs Tauri 2.12 and Rust 1.90), ship without a click callback, keep `open_session_route` and its test. Wiring it is `docs/dev/todo/2026-10-26-desktop-notification-click-needs-tauri-2-12.md`; no deferral consent is recorded — it goes to the developer at the TODO gate.
+- **Nix macOS build (orchestrator, developer AFK, 2026-10-26).** `mac-notification-sys` compiles Objective-C that imports Cocoa, and the nix SDK 14.4 headers lack `uuid_string_t`. Fixed in `flake.nix`, darwin only: a wrapper compiler for `.m`/`.mm` sources (nix clang, never Xcode's), exported per target; a global `CFLAGS` was rejected because it breaks `ring`'s `.S` files. Verified with no manual env: `cargo check -p tddy-desktop --all-targets`, `ring` rebuilt, `libsqlite3-sys` rebuilt.
+- **Dependencies (orchestrator, developer AFK, 2026-10-26).** `async-trait` and `tddy-daemon-kernel` accepted (already in the workspace).
+- **Capability (orchestrator, developer AFK, 2026-10-26).** No `notification:default` permission: only Rust calls the plugin, so the page is granted nothing.
+- **Subtitle (orchestrator, developer AFK, 2026-10-26).** `DesktopNotice.subtitle` stays; `TauriNotifier` folds the label into the body (`body_with_label`) because plugin 2.4 drops the subtitle on desktop.
+- **Permission (orchestrator, developer AFK, 2026-10-26).** "Request on first use, log a refusal once" dropped: plugin 2.4 cannot observe it. macOS silent-drop recorded in the PRD.
+- **Contract deviations from this document's first draft.** A `DashboardWindow` port and a `SessionRoute` type were added (suppression and click both need the window, which does not exist when the runtime is built); `DesktopNotice.route` is a `SessionRoute`. Green's `mount_host.rs` append needs a small forwarding adapter, because `SessionNotificationBus::with_subscriber` is generic over a sized subscriber and cannot take `Arc<dyn …>`.
+- **Acceptance-test review (orchestrator, developer AFK, 2026-10-26)** approved the six acceptance tests.
 - Body cut to 300 plain-text characters — operating-system centres truncate further anyway.
 
 ## TODO
@@ -126,10 +152,10 @@ session route.
 - [x] Cross-check `packages/*/docs/code-issues/` and `docs/dev/todo/` for items this change touches (Step 2b)
 - [x] Create/update PRD documentation
 - [x] Create changeset (this document)
-- [ ] Create failing acceptance tests
-- [ ] Run acceptance tests (verify they fail)
-- [ ] USER REVIEW — acceptance tests
-- [ ] TDD Red — write failing unit/integration tests
+- [x] Create failing acceptance tests
+- [x] Run acceptance tests (verify they fail)
+- [x] USER REVIEW — acceptance tests (orchestrator, developer AFK, 2026-10-26)
+- [x] TDD Red — write failing unit/integration tests
 - [ ] TDD Green — implement with quality code
 - [ ] Update documentation with progress
 - [ ] Repeat Red→Green→Update cycle until feature complete

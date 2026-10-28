@@ -40,6 +40,10 @@ impl BuildContext {
         // `StreamSessionNotifications` relays every event to the browsers driving the drawer's
         // indicators. Assembled here because `DaemonSessionHost::new` installs no bus of its own,
         // and because the stream subscriber must be the very one the RPC handler subscribes to.
+        // TODO(desktop-notify): implement — append `self.options.notification_subscribers` after the
+        // two built-in subscribers below, in registration order. They are `Arc<dyn …>`, which
+        // `SessionNotificationBus::with_subscriber` (generic over a sized subscriber) cannot take,
+        // so each needs a forwarding adapter.
         let session_notification_bus = {
             let bus = tddy_session_lifecycle::session_notifications::SessionNotificationBus::new()
                 .with_subscriber(Arc::new(

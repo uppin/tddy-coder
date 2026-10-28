@@ -24,6 +24,27 @@
           url = "https://buildroot.org/downloads/buildroot-2024.02.6.tar.gz";
           sha256 = "1hkr8vh670wiiw97ikh7damb1qymbzhha4cdgy1idzf86v1vqf3y";
         };
+        # The C compiler the dev shell hands to `cc-rs` on macOS, for Objective-C only.
+        #
+        # nixpkgs' apple-sdk 14.4 headers use `uuid_string_t` (`usr/include/hfs/hfs_format.h`, reached
+        # by `<CoreServices/CoreServices.h>`) without declaring it, so any C/Objective-C source that
+        # imports Cocoa fails to compile. The `CXXFLAGS` workaround in the shellHook covers C++ only,
+        # and a global `CFLAGS` carrying the same `-include` cannot stand in for it: cc-rs passes
+        # `CFLAGS` to every file, assembly included, and `ring`'s `.S` files do not survive a C header.
+        # So the header is forced in here, for `.m` / `.mm` sources only, and everything else goes to
+        # the dev shell's own clang untouched. First needed by `mac-notification-sys`
+        # (`tauri-plugin-notification`, Tddy Desktop's native notifications).
+        #
+        # Deliberately the nix clang, never Xcode's `/usr/bin/clang`: the SDK and the toolchain must
+        # agree, and the shell's `DEVELOPER_DIR` points `/usr/bin/clang` at the nix SDK anyway.
+        objcCc = pkgs.writeShellScriptBin "tddy-objc-cc" ''
+          for arg in "$@"; do
+            case "$arg" in
+              *.m|*.mm) exec ${pkgs.stdenv.cc}/bin/clang -include "$SDKROOT/usr/include/uuid/uuid.h" "$@" ;;
+            esac
+          done
+          exec ${pkgs.stdenv.cc}/bin/clang "$@"
+        '';
       in
       {
         devShells.default = pkgs.mkShell ({
@@ -117,6 +138,9 @@
             fi
           '' + pkgs.lib.optionalString pkgs.stdenv.hostPlatform.isDarwin ''
             export CXXFLAGS="-include ''${SDKROOT}/usr/include/uuid/uuid.h''${CXXFLAGS:+ $CXXFLAGS}"
+            # Objective-C sources only — see `objcCc` above. cc-rs reads the compiler per target.
+            export CC_aarch64_apple_darwin="${objcCc}/bin/tddy-objc-cc"
+            export CC_x86_64_apple_darwin="${objcCc}/bin/tddy-objc-cc"
           '';
         } // pkgs.lib.optionalAttrs pkgs.stdenv.hostPlatform.isLinux {
           LIBCLANG_PATH = "${pkgs.llvmPackages.libclang.lib}/lib";
