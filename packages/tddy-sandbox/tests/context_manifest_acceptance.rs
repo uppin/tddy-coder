@@ -869,3 +869,22 @@ fn a_file_readable_as_the_hooks_file_through_one_link_is_withheld_from_every_lin
         vec![".claude", "shared/claude/settings.json"]
     );
 }
+
+/// A path git would read as pathspec magic is still asked about literally: `:secrets` is a file
+/// the `.gitignore` names, not an instruction to git, and must not slip through the gate.
+#[cfg(unix)]
+#[test]
+fn a_gitignored_target_whose_name_starts_with_a_colon_is_not_pulled_in() {
+    // Given
+    let repo = a_target_repo()
+        .with_file(".gitignore", "/:secrets\n")
+        .with_file(":secrets", "TOKEN=hunter2\n")
+        .with_file(".claude/settings.json", "{}\n")
+        .with_symlink(".claude/notes.md", ":secrets");
+
+    // When
+    let manifest = repo.manifest();
+
+    // Then
+    assert_eq!(paths_of(&manifest), vec![".claude/settings.json"]);
+}

@@ -982,7 +982,6 @@ fn a_served_link_at_a_preamble_path_is_refused() {
     );
 }
 
-
 /// The codebase host lists the files behind a link under the target's path, never beneath the
 /// link's own name. A served file beneath a served link is therefore a defect — and written, it
 /// would land wherever the recreated link points.
@@ -1028,6 +1027,51 @@ fn nested_served_links_cannot_write_outside_the_context_dir() {
     assert_eq!(
         refusal
             .expect_err("nested links that escape the context dir must fail the build")
+            .code(),
+        tddy_rpc::Code::PermissionDenied
+    );
+}
+
+/// The co-located source answers a tick's reads from the walk its manifest was taken from, not from
+/// a fresh walk per file. Besides the cost — one walk per tick rather than one per file read — it is
+/// the consistent answer: a link committed between the manifest and the reads cannot widen what
+/// that tick serves.
+#[cfg(unix)]
+#[test]
+fn a_co_located_read_answers_from_the_manifest_it_serves() {
+    // Given
+    let worktree = tempfile::tempdir().expect("tempdir");
+    let init = std::process::Command::new("git")
+        .args(["init", "--quiet"])
+        .current_dir(worktree.path())
+        .output()
+        .expect("git must run");
+    assert!(init.status.success(), "git init failed");
+    std::fs::create_dir_all(worktree.path().join("tools/agent-skills/tdd")).expect("mkdir");
+    std::fs::write(
+        worktree.path().join("tools/agent-skills/tdd/SKILL.md"),
+        "# TDD skill\n",
+    )
+    .expect("write");
+    std::fs::create_dir_all(worktree.path().join(".claude")).expect("mkdir");
+    let source = tddy_session_files::context_sync::LocalWorktreeSource::new(
+        worktree.path().to_path_buf(),
+        CLAUDE_GLOBS,
+        A_GENEROUS_CAP,
+    );
+    ContextSource::manifest(&source).expect("manifest");
+    std::os::unix::fs::symlink(
+        "../tools/agent-skills",
+        worktree.path().join(".claude/skills"),
+    )
+    .expect("symlink");
+
+    // When
+    let read = ContextSource::read(&source, "tools/agent-skills/tdd/SKILL.md");
+
+    // Then
+    assert_eq!(
+        read.expect_err("the manifest this tick serves reached no such file")
             .code(),
         tddy_rpc::Code::PermissionDenied
     );

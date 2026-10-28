@@ -14,6 +14,16 @@ pub mod runner_env;
 mod spec;
 pub mod tool_ipc;
 
+pub use crate::context_manifest::links::allow_listed_link;
+pub use crate::context_manifest::links::create_context_link;
+pub use crate::context_manifest::links::is_reached_through_link;
+pub use crate::context_manifest::links::is_withheld_through_a_link;
+pub use crate::context_manifest::links::prepare_context_write;
+pub use crate::context_manifest::links::ContextLink;
+pub use crate::context_manifest::links::CONTEXT_SECRET_GLOBS;
+pub use crate::context_manifest::walk::context_reach;
+pub use crate::context_manifest::walk::root_relative;
+pub use crate::context_manifest::walk::ContextReach;
 pub use builder::{
     CgroupConfig, CopySpec, EnvSpec, MachPolicy, MountSpec, NetworkSpec, PolicySpec, ReadKind,
     ReadReason, ReadSpec, ResourceLimits, SandboxBuilder, SandboxPlan, SecretSource, SecretSpec,
@@ -26,10 +36,8 @@ pub use context_dir::{
     PREAMBLE_FILES,
 };
 pub use context_manifest::{
-    allow_listed_link, context_reach, create_context_link, diff_manifests, is_reached_through_link,
-    is_withheld_through_a_link, matches_context_globs, normalized_context_path,
-    prepare_context_write, root_relative, sha256_hex, ContextEntry, ContextLink, ContextManifest,
-    ContextReach, ManifestDiff, CONTEXT_EXCLUDE_GLOBS, CONTEXT_SECRET_GLOBS,
+    diff_manifests, matches_context_globs, normalized_context_path, sha256_hex, ContextEntry,
+    ContextManifest, ManifestDiff, CONTEXT_EXCLUDE_GLOBS,
 };
 pub use error::SandboxError;
 pub use exec_reads::{

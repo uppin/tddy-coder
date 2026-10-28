@@ -1172,8 +1172,8 @@ async fn a_split_sessions_context_dir_recreates_the_repos_claude_skills_link() {
 #[serial]
 async fn a_split_sessions_linked_claude_md_still_leads_with_the_managed_codebase_preamble() {
     // Given two daemons, and a codebase whose `CLAUDE.md` links to `AGENTS.md`
-    let hosts = split_hosts_over_a_repo_seeded_with(a_repo_linking_claude_skills_to_agents_skills)
-        .await;
+    let hosts =
+        split_hosts_over_a_repo_seeded_with(a_repo_linking_claude_skills_to_agents_skills).await;
 
     // When the agent host starts a session whose codebase is on the other host
     let started = hosts

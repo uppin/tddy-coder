@@ -125,13 +125,28 @@ closed before this reader was safe:
    needs that *link* on the agent's host — Claude Code reads skills, commands and agents only under
    `.claude/`. The manifest therefore carries a symlink as an entry naming its root-relative target
    (`symlink_target`), the consumer recreates it as a relative link, and the files behind it are
-   listed once, under the target's own path. An allow-listed link **pulls its target in** even when
-   no glob names the target — one hop only, never a link found inside a pulled-in tree — and the
-   target is still refused when it escapes the root, is excluded (AC31), or is secret-shaped
-   (`.env*`, `*.pem`, `*.key`, `.git/**`). That secrets list, not the globs, is what keeps
-   `.claude/creds -> ../.env` from publishing `.env`.
+   listed once, under the target's own path. A link counts as allow-listed when a glob names its
+   path or it is the root of a `dir/**` glob (`.claude -> shared/claude`). It **pulls its target
+   in** even when no glob names the target — one hop only, never a link found inside a pulled-in
+   tree — but only what **git does not ignore** (ignored files are where a checkout keeps local
+   credentials and build output; a worktree git cannot answer for pulls nothing in). A target is
+   also withheld when it escapes the root, or when it, any directory above it, or the name it would
+   be *read by* through any travelling link is excluded (AC31) or secret-shaped (`.env*`, `*.pem`,
+   `*.key`, `.git/**`).
 
-The general rule the two share: an allow-list gate is only as strong as the weakest thing permitted
+4. **A preamble file is never a link.** The consumer writes the managed-codebase preamble in front
+   of `CLAUDE.md` and `AGENTS.md`; a recreated link would put it wherever the link points. So a
+   symlink at a preamble path is *followed* — listed as an ordinary file carrying its target's
+   bytes — and a peer serving one as a link is refused. (`CLAUDE.md -> AGENTS.md` is this
+   repository's own layout.)
+
+5. **The consumer trusts no path the peer names.** Every served link is re-checked, a served entry
+   *beneath* a served link is refused (an honest walk lists the files behind a link under the
+   target's path, never under the link's), and every write verifies that its parent directory
+   resolves to exactly where its path says — so no chain of served links can place a byte outside
+   the context dir.
+
+The general rule they share: an allow-list gate is only as strong as the weakest thing permitted
 to name a path — the request, the filesystem, or the peer.
 
 Three RPCs on `session_files.SessionFilesService`
@@ -284,12 +299,17 @@ The agent is never left silently reading a stale rule it believes is current.
 - **AC19a** — an allow-listed symlink is listed **as a link** carrying its root-relative target, and
   the files behind a directory link are listed once, under the target's path — never under whichever
   spelling the walk reached first.
-- **AC19b** — an allow-listed link's target is listed and served even when no glob names it; a link
-  inside that pulled-in tree pulls nothing further in, and a sibling of the target stays refused.
+- **AC19b** — an allow-listed link's target is listed and served even when no glob names it, unless
+  git ignores it; a link inside that pulled-in tree pulls nothing further in, and a sibling of the
+  target stays refused. A directory-root link (`.claude -> shared/claude`) is allow-listed. A file
+  readable through any travelling link under an excluded or secret name is withheld, and so is a
+  target inside a secret-shaped directory.
+- **AC19d** — a symlink at `CLAUDE.md` / `AGENTS.md` is listed and written as an ordinary file
+  carrying its target's bytes, led by the preamble; a peer serving one as a link is refused.
 - **AC19c** — the consumer recreates a served link as a **relative** symlink, re-points it when the
   target moves, and removes the link (never its target) when the repository drops it. A served link
-  escaping the context dir, or pointing at a secret-shaped target, fails the sync
-  `PERMISSION_DENIED`.
+  escaping the context dir, pointing at a secret-shaped target, or an entry served beneath a served
+  link, fails the sync `PERMISSION_DENIED`; no write lands through a symlinked parent.
 - **AC20** — `StreamReadContextFile` returns byte-exact content in 48 KiB frames; a zero-byte file
   yields exactly one empty frame.
 - **AC21** — a path matching no glob is refused `PERMISSION_DENIED` **identically** whether or not a

@@ -11,7 +11,9 @@
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
-use crate::context_manifest::{create_context_link, prepare_context_write, walk_context_files};
+use crate::context_manifest::links::create_context_link;
+use crate::context_manifest::links::prepare_context_write;
+use crate::context_manifest::walk::walk_context_files;
 
 /// Prepended to CLAUDE.md and AGENTS.md in the context dir.
 pub const MANAGED_CODEBASE_PREAMBLE: &str = r#"## Managed Codebase

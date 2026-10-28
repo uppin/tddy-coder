@@ -34,11 +34,16 @@ Three properties make replacing the git gate safe, and all three are load-bearin
   disagrees. A session recording a paired split agent gets Claude's row — the codebase half of a
   split placement is persisted as `workspace` but stands in for a `claude-cli` agent on another
   host, so `session_type` alone would wrongly reduce it to the shared base.
-- **A resolved symlink's target must itself be allow-listed.** The allow-list is applied at *both*
-  ends — the name a file is asked for by, and the place its target sits in the tree — which is the
-  rule `tddy_sandbox::ContextManifest::of_worktree`'s walk applies to the entries it advertises. The
-  two must agree, or `.claude/creds -> ../.env` is served under a spelling every glob matches, out of
-  a manifest that correctly never listed it.
+- **The reader asks the walk, never its own copy of the link rule.** What a symlink may reach —
+  its target pulled in one hop, unless git ignores it, it is secret-shaped at any depth, or it is
+  readable through some travelling link under an excluded name — is decided once, by
+  `tddy_sandbox::context_reach` (the same walk `ContextManifest::of_worktree` lists from). The reader
+  serves a path no glob names only when that walk lists it, and refuses a glob-named one the walk
+  withholds through a link. The two must agree, or `.claude/creds -> ../.env` is served under a
+  spelling every glob matches, out of a manifest that correctly never listed it. The reader serves
+  one superset on purpose: a glob-named path *through* a directory link
+  (`.claude/skills/tdd/SKILL.md`), which the manifest lists only under the target's path — the
+  resolved target is still checked.
 
 One property of the sibling reader is preserved verbatim, and it constrains the order of the checks:
 a path the allow-list does not name is refused with the same code **and the same message** whether or
@@ -48,8 +53,11 @@ not a file sits there. The gate is therefore asked before anything touches the f
 
 ## The three reads
 
-- **`StreamContextManifest`** — one `ContextManifestEntry` (`rel_path`, `sha256`, `size_bytes`) per
-  allow-listed path. It streams rather than returning a repeated field so a large manifest never
+- **`StreamContextManifest`** — one `ContextManifestEntry` (`rel_path`, `sha256`, `size_bytes`,
+  `symlink_target`) per allow-listed path. A link carries its root-relative target, `size_bytes` 0
+  and the hash of the target's spelling, so retargeting is a diff like an edit; empty
+  `symlink_target` is an ordinary file. `context_entry_to_wire` / `context_entry_from_wire` are the
+  one mapping, used by the server and the split fetch alike. It streams rather than returning a repeated field so a large manifest never
   needs the transport's chunk codec. Hashing is streamed through a `BufReader`, and an over-cap file
   is left **out** of the manifest: advertising something the reader would then refuse makes a session
   unstartable.
@@ -91,7 +99,19 @@ a hop away. `LocalWorktreeSource` goes through the same `context_files` reader t
 served by, so the allow-list is enforced once, in one place, for both — and its `max_bytes` is the
 host's configured `max_attachment_bytes` passed in, not a constant, because a constant that merely
 happened to equal the shipped default would give the two halves different caps the moment an operator
-tuned theirs.
+tuned theirs. It also answers a tick's reads from the walk its manifest was taken with
+(`read_context_file_bytes_within`), so a tick costs one walk rather than one per file, and its reads
+reach nothing the manifest it serves did not.
+
+**Applying a manifest** (`context_sync`). The receiving side trusts no path the peer names:
+`manifest_gate::refuse_unlisted_paths` re-checks every served link with `tddy_sandbox::allow_listed_link`,
+accepts a path no glob names only beneath a vetted link's target, and refuses an entry beneath a
+served link, a read-as-withheld file or link, and a link at a preamble path. `context_writes`
+recreates a link relative to its parent and re-points it when its target moves, removes a dropped
+link without following it, replaces a symlink at a file's path rather than writing through it, and
+puts every write through `tddy_sandbox::prepare_context_write`, which refuses a parent that does not
+resolve to exactly its logical path. `SyncStateEntry.symlink_target` (`#[serde(default)]`) records
+held links.
 
 `ContextSource` is declared in `context_sync` and re-exported from the crate root rather than being
 declared at the root: `split_session`, which stays in `tddy-daemon`, implements the decision procedure
