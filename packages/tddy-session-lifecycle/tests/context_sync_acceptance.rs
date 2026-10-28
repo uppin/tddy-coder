@@ -935,3 +935,100 @@ fn a_tick_that_drops_a_link_removes_the_symlink_and_keeps_its_target() {
         "the target the repository still ships must survive"
     );
 }
+
+/// A link that replaces a whole allow-listed directory (`.claude -> shared/claude`) is recreated
+/// too, and the agent reads its settings through it.
+#[cfg(unix)]
+#[test]
+fn a_directory_root_link_is_recreated_so_its_files_read_through_it() {
+    // Given
+    let session_dir = a_session_dir();
+    let host = a_codebase_host()
+        .holding("shared/claude/settings.json", "{\"model\":\"opus\"}\n")
+        .linking(".claude", "shared/claude");
+
+    // When
+    let context_dir = build_split_context_dir(session_dir.path(), &[], CLAUDE_GLOBS, &host)
+        .expect("a directory-root link must be accepted");
+
+    // Then
+    assert_eq!(
+        read(&context_dir, ".claude/settings.json"),
+        "{\"model\":\"opus\"}\n"
+    );
+}
+
+/// The codebase host lists a preamble file as an ordinary file, never a link, so a peer serving
+/// `CLAUDE.md` as a link is a defect — and recreating it would put the managed-codebase preamble
+/// somewhere the agent does not read it, or nowhere. Refused rather than written.
+#[cfg(unix)]
+#[test]
+fn a_served_link_at_a_preamble_path_is_refused() {
+    // Given
+    let session_dir = a_session_dir();
+    let host = a_codebase_host()
+        .holding(".agents/rules.md", "# Project rules\n")
+        .linking("CLAUDE.md", ".agents/rules.md");
+
+    // When
+    let refusal = build_split_context_dir(session_dir.path(), &[], CLAUDE_GLOBS, &host);
+
+    // Then
+    assert_eq!(
+        refusal
+            .expect_err("a preamble file served as a link must fail the build")
+            .code(),
+        tddy_rpc::Code::PermissionDenied
+    );
+}
+
+
+/// The codebase host lists the files behind a link under the target's path, never beneath the
+/// link's own name. A served file beneath a served link is therefore a defect — and written, it
+/// would land wherever the recreated link points.
+#[cfg(unix)]
+#[test]
+fn a_served_file_beneath_a_served_link_is_refused() {
+    // Given
+    let session_dir = a_session_dir();
+    let host = a_codebase_host()
+        .holding(".agents/skills/tdd/SKILL.md", "# TDD skill\n")
+        .holding(".claude/skills/planted.md", "# planted\n")
+        .linking(".claude/skills", ".agents/skills");
+
+    // When
+    let refusal = build_split_context_dir(session_dir.path(), &[], CLAUDE_GLOBS, &host);
+
+    // Then
+    assert_eq!(
+        refusal
+            .expect_err("an entry beneath a served link must fail the build")
+            .code(),
+        tddy_rpc::Code::PermissionDenied
+    );
+}
+
+/// The escape that makes this matter: a link back up to `.claude`, a second link beneath it whose
+/// `..` steps are counted from where it is *named* but resolved from where it physically lands, and
+/// a file beneath that. Each passes a string check; together they write outside the context dir.
+#[cfg(unix)]
+#[test]
+fn nested_served_links_cannot_write_outside_the_context_dir() {
+    // Given
+    let session_dir = a_session_dir();
+    let host = a_codebase_host()
+        .linking(".claude/a/b", ".claude")
+        .linking(".claude/a/b/a/b/a/b/q", "t")
+        .holding(".claude/a/b/a/b/a/b/q/escaped.md", "# escaped\n");
+
+    // When
+    let refusal = build_split_context_dir(session_dir.path(), &[], CLAUDE_GLOBS, &host);
+
+    // Then
+    assert_eq!(
+        refusal
+            .expect_err("nested links that escape the context dir must fail the build")
+            .code(),
+        tddy_rpc::Code::PermissionDenied
+    );
+}

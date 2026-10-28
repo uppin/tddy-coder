@@ -11,7 +11,7 @@
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
-use crate::context_manifest::{create_context_link, walk_context_files};
+use crate::context_manifest::{create_context_link, prepare_context_write, walk_context_files};
 
 /// Prepended to CLAUDE.md and AGENTS.md in the context dir.
 pub const MANAGED_CODEBASE_PREAMBLE: &str = r#"## Managed Codebase
@@ -244,10 +244,8 @@ impl SandboxContextDir {
 pub fn copy_context_from_repo(source: &Path, dest: &Path, globs: &[&str]) -> anyhow::Result<()> {
     std::fs::create_dir_all(dest)?;
     for file in walk_context_files(source, globs)? {
-        let target = dest.join(&file.rel_path);
-        if let Some(parent) = target.parent() {
-            std::fs::create_dir_all(parent)?;
-        }
+        // Never through a link this loop already recreated ([`prepare_context_write`]).
+        let target = prepare_context_write(dest, &file.rel_path)?;
         // A link is recreated rather than copied through, as the syncer does, so the directory a
         // co-located agent reads has the same shape as the one a split agent reads. Its target is
         // listed as entries of its own and arrives in this same loop.

@@ -263,13 +263,7 @@ impl SplitSessions {
 
         let entries: Vec<tddy_sandbox::ContextEntry> = manifest
             .into_iter()
-            .map(|entry| tddy_sandbox::ContextEntry {
-                rel_path: entry.rel_path,
-                sha256: entry.sha256,
-                size_bytes: entry.size_bytes,
-                // The wire spells "an ordinary file" as the empty string.
-                symlink_target: (!entry.symlink_target.is_empty()).then_some(entry.symlink_target),
-            })
+            .map(tddy_session_files::context_files::context_entry_from_wire)
             .collect();
         // A link carries no bytes — it is recreated from its target — so only the files are read,
         // sized and verified below. Links still ride into `PrefetchedContext`, whose syncer is what

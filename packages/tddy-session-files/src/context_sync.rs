@@ -18,9 +18,9 @@ use std::path::{Path, PathBuf};
 
 use tddy_rpc::Status;
 use tddy_sandbox::{
-    allow_listed_link_target, clear_context_stale, diff_manifests, is_reached_through_link,
-    mark_context_stale, matches_context_globs, prepend_preamble, ContextEntry, ContextManifest,
-    PREAMBLE_FILES,
+    allow_listed_link, clear_context_stale, diff_manifests, is_reached_through_link,
+    is_withheld_through_a_link, mark_context_stale, matches_context_globs, prepare_context_write,
+    prepend_preamble, ContextEntry, ContextLink, ContextManifest, PREAMBLE_FILES,
 };
 
 use crate::context_files::read_context_file_bytes;
@@ -244,9 +244,9 @@ fn synchronize_directory(
     let state = SyncState::read(context_dir)?;
     let preamble = preamble_override.unwrap_or(&state.preamble).to_string();
     let served = source.manifest()?;
-    let served_link_targets = refuse_unlisted_paths(&served, globs)?;
-    let held_link_targets = state.link_targets(globs);
-    let held = state.held_manifest(context_dir, globs, &held_link_targets);
+    let served_links = refuse_unlisted_paths(&served, globs)?;
+    let held_links = state.links(globs);
+    let held = state.held_manifest(context_dir, globs, &held_links);
     let diff = diff_manifests(&held, &served);
 
     // The recorded preamble is as much a part of what the directory holds as the hashes are: the
@@ -275,18 +275,12 @@ fn synchronize_directory(
     // A path a link pulled in is deleted on the authority of the link that pulled it in — usually
     // one the record holds and the repository has just dropped, so the served links alone would
     // refuse to clean up after it.
-    let deletable_link_targets: Vec<String> = held_link_targets
+    let deletable_links: Vec<ContextLink> = held_links
         .into_iter()
-        .chain(served_link_targets.iter().cloned())
+        .chain(served_links.iter().cloned())
         .collect();
     for rel_path in &diff.delete {
-        remove_context_file(
-            context_dir,
-            rel_path,
-            globs,
-            &deletable_link_targets,
-            &preamble,
-        )?;
+        remove_context_file(context_dir, rel_path, globs, &deletable_links, &preamble)?;
     }
     let served_entries: std::collections::BTreeMap<&str, &ContextEntry> = served
         .entries()
@@ -315,8 +309,8 @@ fn synchronize_directory(
     SyncState::from_entries(preamble, served.entries()).write(context_dir)
 }
 
-/// Refuses a manifest naming anything the session's allow-list does not, and answers the targets
-/// its links pull in.
+/// Refuses a manifest naming anything the session's allow-list does not, and answers the links
+/// whose targets it pulls in.
 ///
 /// The split half's manifest arrives from *another host*, and every path in it is about to be
 /// joined onto a directory here and written. Re-checking it against the compiled-in list is what
@@ -325,28 +319,50 @@ fn synchronize_directory(
 /// row.
 ///
 /// Links are re-checked by the same rule the codebase host's walk applied
-/// ([`allow_listed_link_target`]), because a link target is a path *that host* chose: a link whose
-/// own path no glob names, one that climbs out of the context dir (`../../.ssh`, which recreated
-/// would be the agent's window onto this host's filesystem), or one pointing at something
-/// secret-shaped (`.claude/creds -> .env`) is refused, whatever the peer decided. A path no glob
-/// names is then accepted only when it is the target of a link that passed, or under one — the
-/// one thing a served link may pull in.
+/// ([`allow_listed_link`]), because a link target is a path *that host* chose: a link whose own
+/// path is not allow-listed (a glob names it, or it roots a `dir/**` glob, as `.claude` does), one
+/// that climbs out of the context dir (`../../.ssh`, which recreated would be the agent's window
+/// onto this host's filesystem), or one pointing at something secret-shaped (`.claude/creds ->
+/// .env`) is refused, whatever the peer decided. So is a link at a [`PREAMBLE_FILES`] path: the
+/// codebase host follows those and lists them as files, and a `CLAUDE.md` recreated as a link would
+/// carry the managed-codebase preamble somewhere the agent does not read it, or nowhere. A path no
+/// glob names is then accepted only when it is the target of a link that passed, or under one —
+/// and not withheld under the name the link exposes it by — the one thing a served link may pull
+/// in.
+///
+/// Two refusals no single entry can be judged on, because an honest walk never produces either:
+///
+/// - **an entry beneath a served link.** The walk lists a link and never descends it, and a
+///   canonical target never passes through one, so nothing it lists sits under a link's path. A
+///   served `.claude/skills/planted.md` beside a served `.claude/skills` link would be written
+///   wherever the recreated link points — and nested links (`.claude/a/b -> .claude`, then
+///   `.claude/a/b/a/b/a/b/q -> t`) count their `..` steps from where they are *named* but resolve
+///   from where they physically land, which is outside the context dir. The writers refuse a
+///   symlinked parent as well ([`prepare_context_write`]); this refuses the manifest first;
+/// - **anything readable under a withheld name through any served link**
+///   ([`is_withheld_through_a_link`]) — a file, a link's target or a link itself. `.claude ->
+///   .agents/claude` with `.agents/claude/settings.local.json` is the daemon-owned hooks file
+///   reached by another name, whatever glob names its own path.
 ///
 /// A refusal rather than a quiet skip. A peer serving something outside the list is a defect on one
 /// side or the other, and dropping it silently would leave the two halves disagreeing about what
 /// the agent is reading with nothing saying so.
-fn refuse_unlisted_paths(served: &ContextManifest, globs: &[&str]) -> Result<Vec<String>, Status> {
-    let mut link_targets = Vec::new();
+fn refuse_unlisted_paths(
+    served: &ContextManifest,
+    globs: &[&str],
+) -> Result<Vec<ContextLink>, Status> {
+    let mut links = Vec::new();
     for entry in served.entries() {
         let Some(target) = &entry.symlink_target else {
             continue;
         };
-        match allow_listed_link_target(&entry.rel_path, target, globs) {
-            Some(target) => link_targets.push(target),
+        match allow_listed_link(&entry.rel_path, target, globs) {
+            Some(link) => links.push(link),
             None => {
                 log::warn!(
                     "context_sync: refusing the served link {:?} -> {target:?}: its name is not \
-                     allow-listed, or its target leaves the context dir or is withheld",
+                     allow-listed or is a preamble file, or its target leaves the context dir or \
+                     is withheld",
                     entry.rel_path
                 );
                 return Err(Status::permission_denied(format!(
@@ -357,16 +373,59 @@ fn refuse_unlisted_paths(served: &ContextManifest, globs: &[&str]) -> Result<Vec
             }
         }
     }
+    if let Some(entry) = served
+        .entries()
+        .iter()
+        .find(|entry| lies_beneath_a_link(&entry.rel_path, &links))
+    {
+        log::warn!(
+            "context_sync: refusing the manifest: {:?} lies beneath a served link",
+            entry.rel_path
+        );
+        return Err(Status::permission_denied(format!(
+            "the context source offered {:?} beneath one of its own links, which this session may \
+             not write",
+            entry.rel_path
+        )));
+    }
+    if let Some(link) = links.iter().find(|link| {
+        is_withheld_through_a_link(&link.link, &links)
+            || is_withheld_through_a_link(&link.target, &links)
+    }) {
+        log::warn!(
+            "context_sync: refusing the served link {:?} -> {:?}: it or its target is readable \
+             under a withheld name through a served link",
+            link.link,
+            link.target
+        );
+        return Err(Status::permission_denied(format!(
+            "the context source offered the link {:?} -> {:?}, which another of its links exposes \
+             under a withheld name",
+            link.link, link.target
+        )));
+    }
     match served.entries().iter().find(|entry| {
         entry.symlink_target.is_none()
-            && !is_syncable_rel_path(&entry.rel_path, globs, &link_targets)
+            && (!is_syncable_rel_path(&entry.rel_path, globs, &links)
+                || is_withheld_through_a_link(&entry.rel_path, &links))
     }) {
         Some(entry) => Err(Status::permission_denied(format!(
             "the context source offered {:?}, which this session's allow-list does not name",
             entry.rel_path
         ))),
-        None => Ok(link_targets),
+        None => Ok(links),
     }
+}
+
+/// Whether `rel_path` has a **strict** ancestor that is one of `links`' own paths.
+fn lies_beneath_a_link(rel_path: &str, links: &[ContextLink]) -> bool {
+    let Some(path) = tddy_sandbox::normalized_context_path(rel_path) else {
+        return false;
+    };
+    links.iter().any(|link| {
+        path.strip_prefix(link.link.as_str())
+            .is_some_and(|rest| rest.starts_with('/'))
+    })
 }
 
 /// Basename of the per-directory record of what a context directory holds.
@@ -473,12 +532,12 @@ impl SyncState {
     /// A recorded link is held when a symlink sits at its path — asked with `symlink_metadata`,
     /// because `exists()` follows the link and would call a link to a target not yet written
     /// absent. A recorded file under a pulled-in target passes the allow-list on the authority of
-    /// `link_targets`, the recorded links that pulled it in ([`Self::link_targets`]).
+    /// `links`, the recorded links that pulled it in ([`Self::links`]).
     fn held_manifest(
         &self,
         context_dir: &Path,
         globs: &[&str],
-        link_targets: &[String],
+        links: &[ContextLink],
     ) -> ContextManifest {
         ContextManifest::from_entries(
             self.entries
@@ -486,12 +545,12 @@ impl SyncState {
                 .filter(|entry| match &entry.symlink_target {
                     Some(target) => {
                         validate_rel_path_shape(&entry.rel_path).is_ok()
-                            && allow_listed_link_target(&entry.rel_path, target, globs).is_some()
+                            && allow_listed_link(&entry.rel_path, target, globs).is_some()
                             && std::fs::symlink_metadata(context_dir.join(&entry.rel_path))
                                 .is_ok_and(|metadata| metadata.file_type().is_symlink())
                     }
                     None => {
-                        is_syncable_rel_path(&entry.rel_path, globs, link_targets)
+                        is_syncable_rel_path(&entry.rel_path, globs, links)
                             && context_dir.join(&entry.rel_path).exists()
                     }
                 })
@@ -505,14 +564,14 @@ impl SyncState {
         )
     }
 
-    /// The targets of the links this record holds that pass [`allow_listed_link_target`] — the
-    /// gate a served link passes, applied to a record that is as peer-writable as a manifest.
-    fn link_targets(&self, globs: &[&str]) -> Vec<String> {
+    /// The links this record holds that pass [`allow_listed_link`] — the gate a served link
+    /// passes, applied to a record that is as peer-writable as a manifest.
+    fn links(&self, globs: &[&str]) -> Vec<ContextLink> {
         self.entries
             .iter()
             .filter_map(|entry| {
                 let target = entry.symlink_target.as_deref()?;
-                allow_listed_link_target(&entry.rel_path, target, globs)
+                allow_listed_link(&entry.rel_path, target, globs)
             })
             .collect()
     }
@@ -555,6 +614,10 @@ impl SyncState {
 /// literal backslash in its name on Linux, next to the `.claude/` directory the agent actually
 /// reads. Normalizing once here means the file the gate approved and the file on disk are the same
 /// file.
+///
+/// **Never through a link above it.** Every directory between the context dir and the file must be
+/// a real directory ([`prepare_context_write`]); a symlinked one is `PERMISSION_DENIED`, so a
+/// recreated link cannot carry a write outside the context dir.
 fn write_context_file(
     context_dir: &Path,
     rel_path: &str,
@@ -570,14 +633,7 @@ fn write_context_file(
         )));
     };
     let rel_path = rel_path.as_str();
-    let target = context_dir.join(rel_path);
-    if let Some(parent) = target.parent() {
-        std::fs::create_dir_all(parent).map_err(|e| {
-            Status::internal(format!(
-                "failed to create {parent:?} in the context dir: {e}"
-            ))
-        })?;
-    }
+    let target = prepare_context_write(context_dir, rel_path).map_err(write_refusal)?;
     // A path that held a link and now holds a file: the write must replace the link, not land in
     // whatever it pointed at — for a preamble file that would be another guidance file overwritten.
     unlink_if_symlink(&target)?;
@@ -616,6 +672,10 @@ fn write_context_file(
 /// replaced — is removed first. A directory is not: a link only lands where a directory was once
 /// the delete pass has emptied it, and one still holding files is a context dir holding something
 /// no record knows about.
+///
+/// The link's parent is held to the same rule as a file's ([`prepare_context_write`]): its `..`
+/// steps are counted from the parent it is named under, so that parent must be the directory it
+/// physically lands in.
 fn write_context_link(context_dir: &Path, rel_path: &str, target: &str) -> Result<(), Status> {
     let Some(rel_path) = tddy_sandbox::normalized_context_path(rel_path) else {
         log::warn!(
@@ -626,14 +686,7 @@ fn write_context_link(context_dir: &Path, rel_path: &str, target: &str) -> Resul
             "cannot write the link {rel_path:?} into the context dir: it names no relative path"
         )));
     };
-    let link = context_dir.join(&rel_path);
-    if let Some(parent) = link.parent() {
-        std::fs::create_dir_all(parent).map_err(|e| {
-            Status::internal(format!(
-                "failed to create {parent:?} in the context dir: {e}"
-            ))
-        })?;
-    }
+    let link = prepare_context_write(context_dir, &rel_path).map_err(write_refusal)?;
     match std::fs::symlink_metadata(&link) {
         Ok(metadata) if metadata.is_dir() => {
             return Err(Status::internal(format!(
@@ -658,6 +711,16 @@ fn write_context_link(context_dir: &Path, rel_path: &str, target: &str) -> Resul
     })
 }
 
+/// A failure to prepare a write's parent ([`prepare_context_write`]): a symlinked parent is a
+/// refusal, anything else a fault on this host.
+fn write_refusal(e: std::io::Error) -> Status {
+    if e.kind() == std::io::ErrorKind::PermissionDenied {
+        Status::permission_denied(e.to_string())
+    } else {
+        Status::internal(format!("failed to prepare a write in the context dir: {e}"))
+    }
+}
+
 /// Removes `path` when it is a symlink, so the write that follows replaces the link instead of
 /// going through it.
 fn unlink_if_symlink(path: &Path) -> Result<(), Status> {
@@ -672,14 +735,14 @@ fn unlink_if_symlink(path: &Path) -> Result<(), Status> {
 ///
 /// The two gates are the same pair [`crate::context_files`] applies before it reads: the *shape*
 /// (`..`, a leading separator, an absolute component) decided from the string alone, then the
-/// compiled-in allow-list — or, for a path no glob names, whether one of `link_targets` pulls it
-/// in ([`is_reached_through_link`]). Neither consults the filesystem, so the answer is the same for
-/// a path that exists and one that does not.
-fn is_syncable_rel_path(rel_path: &str, globs: &[&str], link_targets: &[String]) -> bool {
+/// compiled-in allow-list — or, for a path no glob names, whether one of `links` pulls it in
+/// ([`is_reached_through_link`]). Neither consults the filesystem, so the answer is the same for a
+/// path that exists and one that does not.
+fn is_syncable_rel_path(rel_path: &str, globs: &[&str], links: &[ContextLink]) -> bool {
     match validate_rel_path_shape(rel_path) {
         Ok(rel_slashed) => {
             matches_context_globs(&rel_slashed, globs)
-                || is_reached_through_link(&rel_slashed, link_targets)
+                || is_reached_through_link(&rel_slashed, links)
         }
         Err(_) => false,
     }
@@ -713,12 +776,11 @@ fn remove_context_file(
     context_dir: &Path,
     rel_path: &str,
     globs: &[&str],
-    link_targets: &[String],
+    links: &[ContextLink],
     preamble: &str,
 ) -> Result<(), Status> {
     let rel_slashed = validate_rel_path_shape(rel_path)?;
-    if !matches_context_globs(&rel_slashed, globs)
-        && !is_reached_through_link(&rel_slashed, link_targets)
+    if !matches_context_globs(&rel_slashed, globs) && !is_reached_through_link(&rel_slashed, links)
     {
         log::warn!(
             "context_sync: refusing to delete {rel_path:?} from {context_dir:?}: this session's \

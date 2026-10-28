@@ -516,13 +516,15 @@ fn the_agent_context_dir_of(hosts: &SplitHosts, session_id: &str) -> PathBuf {
 }
 
 /// The layout this repository ships: skills kept once under `.agents/`, reached from `.claude/`
-/// through a committed symlink.
+/// through a committed symlink, and `CLAUDE.md -> AGENTS.md`.
 #[cfg(unix)]
 fn a_repo_linking_claude_skills_to_agents_skills(dir: &Path) {
     std::fs::create_dir_all(dir.join(".agents/skills/tdd")).expect("mkdir");
     std::fs::write(dir.join(".agents/skills/tdd/SKILL.md"), "# TDD skill\n").expect("write");
     std::fs::create_dir_all(dir.join(".claude")).expect("mkdir");
     std::os::unix::fs::symlink("../.agents/skills", dir.join(".claude/skills")).expect("symlink");
+    std::fs::write(dir.join("AGENTS.md"), "# Project rules\n").expect("write");
+    std::os::unix::fs::symlink("AGENTS.md", dir.join("CLAUDE.md")).expect("symlink");
 }
 
 fn session_metadata_on(sessions_base: &Path, session_id: &str) -> tddy_core::SessionMetadata {
@@ -1159,5 +1161,41 @@ async fn a_split_sessions_context_dir_recreates_the_repos_claude_skills_link() {
         std::fs::read_to_string(context_dir.join(".claude/skills/tdd/SKILL.md"))
             .expect("the skill must be readable through the link"),
         "# TDD skill\n"
+    );
+}
+
+/// This repository's `CLAUDE.md -> AGENTS.md` still reaches the agent as a file that opens with the
+/// managed-codebase preamble — the one rule telling it the codebase is elsewhere — followed by the
+/// project's own text.
+#[cfg(unix)]
+#[tokio::test]
+#[serial]
+async fn a_split_sessions_linked_claude_md_still_leads_with_the_managed_codebase_preamble() {
+    // Given two daemons, and a codebase whose `CLAUDE.md` links to `AGENTS.md`
+    let hosts = split_hosts_over_a_repo_seeded_with(a_repo_linking_claude_skills_to_agents_skills)
+        .await;
+
+    // When the agent host starts a session whose codebase is on the other host
+    let started = hosts
+        .agent
+        .start_session(Request::direct(a_split_session_request()))
+        .await
+        .expect("a split session must start")
+        .into_inner();
+
+    // Then CLAUDE.md is a file, led by the preamble, carrying the project's rules
+    let claude_md = the_agent_context_dir_of(&hosts, &started.session_id).join("CLAUDE.md");
+    assert!(
+        !std::fs::symlink_metadata(&claude_md)
+            .expect("CLAUDE.md must exist")
+            .file_type()
+            .is_symlink(),
+        "CLAUDE.md must be written as a file, not recreated as a link"
+    );
+    let text = std::fs::read_to_string(&claude_md).expect("CLAUDE.md must be readable");
+    assert!(
+        text.starts_with(tddy_sandbox::managed_codebase_preamble(&[]).trim_start())
+            && text.contains("# Project rules"),
+        "CLAUDE.md must lead with the preamble and carry AGENTS.md's text: {text}"
     );
 }

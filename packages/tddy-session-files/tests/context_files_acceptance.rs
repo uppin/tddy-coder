@@ -812,3 +812,32 @@ fn a_batch_naming_the_same_path_twice_is_refused() {
         tddy_rpc::Code::InvalidArgument
     );
 }
+
+/// A link pulls in only what git does not ignore, and the reader agrees: an ignored file reached
+/// through an allow-listed link is refused like any unlisted path.
+#[cfg(unix)]
+#[test]
+fn a_gitignored_file_reached_through_an_allow_listed_link_is_refused() {
+    // Given
+    let worktree = a_worktree_linking_its_skills_from_an_unlisted_tree();
+    worktree.with_gitignored_file(
+        "tools/agent-skills/.cache/token.json",
+        b"{\"token\":\"t\"}\n",
+    );
+
+    // When
+    let refusal = read_context_file_bytes(
+        worktree.path(),
+        "tools/agent-skills/.cache/token.json",
+        CLAUDE_GLOBS,
+        A_GENEROUS_CAP,
+    );
+
+    // Then
+    assert_eq!(
+        refusal
+            .expect_err("a gitignored file must not be served through a link")
+            .code(),
+        tddy_rpc::Code::PermissionDenied
+    );
+}
