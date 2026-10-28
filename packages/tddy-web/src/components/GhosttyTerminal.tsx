@@ -8,6 +8,7 @@ import React, {
 } from "react";
 import { Terminal, FitAddon } from "ghostty-web";
 import { newGhosttyInstance } from "../lib/ghosttyInstance";
+import { watchDevicePixelRatio } from "../lib/terminalDprWatch";
 import {
   canPitchIn,
   canPitchOut,
@@ -365,6 +366,29 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
         disposablesRef.current = disposables;
 
         term.open(containerRef.current);
+
+        // ghostty-web 0.4.0 reads devicePixelRatio once, at renderer
+        // construction, and never again — a terminal mounted on one display
+        // keeps that display's scale factor forever, so dragging the window
+        // onto a screen with a different one leaves the canvas rendering at
+        // the old scale, upscaled soft by the compositor. Sync the renderer
+        // to the live value and watch for changes: render() detects the
+        // backing-store mismatch a DPR change leaves and fully repaints at
+        // the new scale. (devicePixelRatio is private in ghostty-web's types,
+        // so the field is reached through a cast, as the library gives no API.)
+        const syncRendererDpr = () => {
+          const renderer = term.renderer;
+          if (!renderer || !term.wasmTerm) return;
+          const dpr = window.devicePixelRatio;
+          const mutable = renderer as unknown as { devicePixelRatio: number };
+          if (mutable.devicePixelRatio === dpr) return;
+          mutable.devicePixelRatio = dpr;
+          renderer.render(term.wasmTerm, true, term.viewportY, term);
+        };
+        syncRendererDpr();
+        disposables.push({
+          dispose: watchDevicePixelRatio(window, syncRendererDpr),
+        });
 
         const fitAddon = new FitAddon();
         term.loadAddon(fitAddon);
@@ -1378,9 +1402,16 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
         style={{
           width: "100%",
           height: "100%",
-          minWidth: fixedViewportGrid ? 0 : undefined,
+          // The canvas has a fixed pixel width. Without these, the container's
+          // min-content width is the canvas' fitted width — a flex-hosted pane
+          // (a `flex: 1` ancestor without min-width: 0) then refuses to shrink
+          // below it when the window collapses, the FitAddon's ResizeObserver
+          // sees no change, and the grid goes stale, clipping text at the old
+          // edge. Clipping overflow here is the desired behavior: the pane
+          // shrinks, the observer fires, and the grid re-fits to the parent.
+          minWidth: 0,
+          overflow: "hidden",
           minHeight: containerMinHeightPx !== undefined ? containerMinHeightPx : 200,
-          overflow: fixedViewportGrid ? "hidden" : undefined,
           ...(sessionActive
             ? {}
             : { opacity: 0.55, pointerEvents: "none" as const }),

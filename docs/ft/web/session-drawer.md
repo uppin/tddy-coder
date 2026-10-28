@@ -1315,27 +1315,34 @@ session its host serves directly has no room to measure and reads `—`.
 
 ## Terminal Control — "Claim terminal" CTA
 
-> **Updated: 2026-06-26** — Adds a single-screen control mutex to `SessionsDrawerScreen`.
+> **Updated: 2026-10-27** — The blocking overlay becomes a toast over a greyed-out terminal: the
+> panes stay visible and fitted, and the claim action floats over them.
 
 When a session has an active terminal controller (another browser tab or device), the
-`SessionMainPane` shows a **"Claim terminal"** overlay over the terminal container. The overlay
-names the holding screen and provides a button to steal control.
+`SessionMainPane` shows a **"Claim terminal"** toast at the top of the terminal area. The toast
+names the holding screen and provides a button to steal control; the terminal itself stays visible,
+greyed out.
 
-### Overlay
+### Toast
 
 - Rendered inside `SessionMainPane` when `terminalControl.isController === false`.
-- Full-cover absolute scrim over the terminal container (`data-testid="terminal-control-overlay"`),
-  matching the `terminal-coder-unavailable` overlay style in `GhosttyTerminalSession`.
+- A small floating pill anchored to the top of the terminal area
+  (`data-testid="terminal-control-overlay"`), **not** a full-cover scrim: the terminal behind it
+  stays mounted, center-fitted and readable.
+- The grey-out is applied to the terminal panes themselves (the runtime's `paneClass` adds
+  `opacity-60 grayscale` while this screen is not the controller) — the toast carries the
+  explanation, the grey-out the state.
 - Contains:
   - A brief message: "Controlled by another screen".
   - The holder screen identifier (`data-testid="terminal-control-holder"`).
   - A primary `<Button>` labelled **"Claim terminal"** (`data-testid="terminal-claim-btn"`).
 - Clicking the button calls `onClaim()` → `ClaimTerminalControl({steal: true})`.
-- When this screen holds control (`isController === true`), no overlay is rendered.
-- **Disconnected sessions never show it.** The overlay is hosted by the *focused* `SessionRuntime`,
+- When this screen holds control (`isController === true`), no toast is rendered and the panes are
+  not greyed out.
+- **Disconnected sessions never show it.** The toast is hosted by the *focused* `SessionRuntime`,
   and `SessionMainPane` suppresses the focused runtime while the inspector is docked
   (`focused={!docked && …}`). So a session shown as `disconnected` renders no
-  `sessions-detail-terminal-container` and no control overlay, even if its runtime is still in the
+  `sessions-detail-terminal-container` and no control toast, even if its runtime is still in the
   registry — the runtime layer stays mounted behind the docked inspector (background sessions keep
   streaming).
 
