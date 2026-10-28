@@ -28,6 +28,9 @@ State A below is distilled from that file. Do not duplicate grep traces or file 
 - [ ] [`tddy-tool-engine`](../../../packages/tddy-tool-engine/README.md): `WaitProjectNotifications`, `ReadProjectNotifications`
 - [ ] [`tddy-daemon-rpc`](../../../packages/tddy-daemon-rpc/README.md): the port over the log
 - [ ] [`tddy-session-tool-client`](../../../packages/tddy-session-tool-client/README.md): `remote_block_arg_keys` clamps `timeout_ms`
+- [ ] [`tddy-session-lifecycle`](../../../packages/tddy-session-lifecycle/README.md): `DaemonSessionHost::with_project_notification_log` / `project_notification_log()`, so the exec-tool handler reaches the log (pass 2 addition, D4)
+
+`tddy-session-activity` gains a dependency on `tddy-tool-engine` (for `FollowPage`). The edge is acyclic: `tddy-tool-engine`'s normal tree contains no `tddy-session-activity` (D2).
 
 ## Responsibility
 
@@ -62,8 +65,29 @@ State A below is distilled from that file. Do not duplicate grep traces or file 
 
 ## Draft PR contract
 
-The first push publishes the log's types and method signatures, the two tools, the clamp entry
-(bodies `// TODO(home-wait): implement`), and the failing tests.
+Published as commit 2 (pass 2). Bodies are `// TODO(home-wait): implement` and return refusals, an unchanged value, or `Ok(())`; none panics.
+
+**`tddy-session-activity`: `project_notification_log.rs`**
+- `PROJECT_NOTIFICATION_CAPACITY = 1000`, `MAX_NOTIFICATION_WAIT = 20 s`, `clamp_wait(Duration) -> Duration`, `type SessionsBaseFor`.
+- `ProjectNotificationRecord { seq, session_id, label, kind, source, text, agent: Option<AgentNotification>, question: Option<QuestionNotice>, at_unix_ms }`.
+- `ProjectNotificationScope { project_id, os_user, exclude_session_id }`.
+- `NotificationRead { page: FollowPage<Record>, lost: u64 }`, `NotificationWait { page, timed_out: bool }`.
+- `ProjectNotificationLog::{open(data_dir, sessions_base_for), read(scope, cursor, limit), async wait(scope, cursor, timeout)}`.
+- `impl SessionNotificationSubscriber for ProjectNotificationLog`: `wants` is real (`AttentionRequired` only); `deliver` is a TODO.
+
+**`tddy-tool-engine`: `project_home_inbox_tools.rs`**
+- `WAIT_PROJECT_NOTIFICATIONS`, `READ_PROJECT_NOTIFICATIONS`, `MAX_WAIT_MS = 20_000`, `is_project_home_inbox_tool`, `project_home_inbox_tool_defs()` (real schemas: `timeout_ms` max 20000, `limit` max 200, `cursor`, `daemon_instance_id`, nothing required).
+- `NotificationsPage { page: FollowPage<Value>, lost, timed_out }` (the port speaks JSON, D2).
+- `trait ProjectHomeInboxPort: ProjectHomePort { read_notifications(home, cursor, limit), wait_notifications(home, cursor, timeout_ms) }`, both with refusing defaults.
+- `execute_project_home_inbox_tool` (TODO).
+
+**`tddy-daemon-rpc`**
+- `exec_tool/project_home_inbox.rs`: `impl ProjectHomeInboxPort for DaemonProjectHome` (refusing stubs).
+- `ProjectHomeHost.notification_log` and `DaemonProjectHome.notification_log`, from `host.project_notification_log()`.
+
+**`tddy-session-lifecycle`**: `with_project_notification_log`, `project_notification_log()`.
+
+**`tddy-session-tool-client`**: a `TODO(home-wait)` comment in `remote_block_arg_keys`; the `WaitProjectNotifications` arm is deliberately absent so its test fails.
 
 ## Green wave
 
@@ -98,19 +122,32 @@ eviction reported.
 ### Acceptance tests
 
 **`tddy-session-activity`**: `packages/tddy-session-activity/tests/project_notification_log_acceptance.rs`
-- [ ] `a_notification_published_after_the_wait_began_returns_the_wait_with_it_and_a_new_cursor`
-- [ ] `a_wait_with_nothing_new_times_out_and_a_timeout_above_20000_ms_is_capped`
-- [ ] `waiting_from_a_returned_cursor_never_repeats_or_skips_across_a_restart`
-- [ ] `another_projects_another_os_users_and_the_callers_own_records_never_appear`
-- [ ] `reading_from_an_evicted_cursor_reports_how_many_records_were_lost`
-- [ ] `an_question_record_carries_its_id_and_content`
+- [x] `a_notification_published_after_the_wait_began_returns_the_wait_with_it_and_a_new_cursor`
+- [x] `a_wait_with_nothing_new_times_out_and_a_timeout_above_20000_ms_is_capped`
+- [x] `waiting_from_a_returned_cursor_never_repeats_or_skips_across_a_restart`
+- [x] `another_projects_another_os_users_and_the_callers_own_records_never_appear`
+- [x] `reading_from_an_evicted_cursor_reports_how_many_records_were_lost`
+- [x] `an_question_record_carries_its_id_and_content`
 
 **`tddy-daemon-rpc`**: `packages/tddy-daemon-rpc/tests/project_home_wait_acceptance.rs`
-- [ ] `a_project_home_agent_waits_and_receives_a_childs_agent_notification`
-- [ ] `a_non_project_home_caller_is_refused_as_permission_denied`
+- [x] `a_project_home_agent_waits_and_receives_a_childs_agent_notification`
+- [x] `a_non_project_home_caller_is_refused_as_permission_denied`
 
 **`tddy-session-tool-client`**: unit
-- [ ] `wait_project_notifications_timeout_is_clamped_on_livekit`
+- [x] `wait_project_notifications_timeout_is_clamped_on_livekit`
+
+### Red-phase results (pass 2)
+
+All nine acceptance tests are written, compile, and fail because this node's bodies are missing; none is blocked on a parent's unimplemented body (they use only n1's and n3's published types and publish straight onto the bus).
+
+| Test | Fails with |
+|---|---|
+| session-activity: all six | `ProjectNotificationLog::read: not implemented` / `…::wait: not implemented` |
+| daemon-rpc `a_project_home_agent_waits…` | `PermissionDenied: tool WaitProjectNotifications is refused: a project-home session is read-only` (tool not registered, D6) |
+| daemon-rpc `a_non_project_home_caller_is_refused…` | `unknown tool: WaitProjectNotifications` returned as a response, not `PermissionDenied` (D6) |
+| tool-client clamp | left `Some(60000)`, right `Some(20000)` |
+
+Unit tests (`tddy-session-activity/tests/project_notification_log_unit.rs`, 21 cases; `tddy-tool-engine/tests/project_home_inbox_tools.rs`, 13): 17 and 7 fail on the TODO bodies. The rest pass already and pin what is real: the `wants` filter, `clamp_wait` for values at or below the cap, the tool definitions' schema bounds (`timeout_ms` ≤ 20000, `limit` ≤ 200, `daemon_instance_id` present), name recognition, and the two refusals that the stub already gives.
 
 ### Test level decisions
 | Aspect | Level | Rationale |
@@ -119,6 +156,23 @@ eviction reported.
 | Tool | Integration over the exec-tool handler | Role gate + scoping |
 
 ## Decisions & Trade-offs
+
+### Pass 2 deviations (accepted by the orchestrator, developer AFK)
+
+- **D1 — scope struct.** `read`/`wait` take a `ProjectNotificationScope { project_id, os_user, exclude_session_id }` instead of `(project_id, os_user, …)`, because excluding the caller's own session after paging would break page sizes.
+- **D2 — JSON port.** `tddy-tool-engine` cannot depend on `tddy-session-activity` (cycle through `tddy-daemon-sandbox`), so the port returns `NotificationsPage` over `FollowPage<serde_json::Value>`; the daemon serialises records into it. The record type stays in session-activity. New acyclic edge session-activity → tool-engine.
+- **D3 — empty-page cursor.** The `next_cursor` of an empty page (including a timed-out wait from `""`) is the log's newest `seq` (`"0"` for a log that never held a record), a **deliberate divergence from #755's "cursor unchanged"**: with an unchanged empty cursor a wait from `""` skips whatever is published between two polls. `seq` starts at 1; `lost` counts records after the cursor evicted before reading. A wait that names no `timeout_ms` holds for the 20 s cap.
+- **D4 — host plumbing.** `tddy-session-lifecycle` gets the builder and accessor (precedent: 5/8's `terminal_control()`); it is added to Affected Packages.
+- **D9 — shared test support.** `tddy-daemon-rpc/tests/support/mod.rs` gains `a_host_logging_notifications` plus `daemon_over_customised`/`host_built_with`; `daemon_over` and `host_built_by` delegate unchanged.
+- **D10 — test location.** The tool-client clamp test is an integration file in `tests/`.
+
+### Left to green, explicitly
+
+- **D5 — daemon wiring.** In `tddy-daemon/src/runtime/mount_host.rs`: construct the log, register it on the bus, call `DaemonSessionHost::with_project_notification_log`. The block already carries `TODO(desktop-notify)`.
+- **D6 — registration.** The catalog entries; `is_project_home_target_tool` (the `daemon_instance_id` forward); `is_project_home_tool` and `is_project_home_allowed_tool` (`read_only.rs`); the daemon dispatch in `run_locally`; the `read_only.rs` pin, `project_home_session_tools_acceptance.rs`, `exec_tool_admission.rs`, `project_home_prompt.md` and its test; and `remote_block_arg_keys`' `WaitProjectNotifications => &["timeout_ms"]` arm.
+- **D7 — #755's helpers.** Green makes `page_size` and `parse_cursor` in `tddy-tool-engine/src/session_follow.rs` `pub` and uses them in the log, rather than re-implementing them (the changeset's `pub(crate)` is not enough across crates).
+- **D8 — `serde`.** Green adds `serde` (derive, the workspace dependency) to `tddy-session-activity` for the JSONL record DTOs; the public record carries no serde derives.
+- The port impl in daemon-rpc needs `os_user` widened to `pub(super)` on `DaemonProjectHome`.
 
 - Cursor = sequence number, not time (dev-3.0's lesson: never guess a position from a window).
 - 20 s cap keeps one call under every transport's deadline; the agent re-waits with the cursor.
@@ -129,10 +183,10 @@ eviction reported.
 - [x] Cross-check `packages/*/docs/code-issues/` and `docs/dev/todo/` for items this change touches (Step 2b)
 - [x] Create/update PRD documentation
 - [x] Create changeset (this document)
-- [ ] Create failing acceptance tests
-- [ ] Run acceptance tests (verify they fail)
-- [ ] USER REVIEW — acceptance tests
-- [ ] TDD Red — write failing unit/integration tests
+- [x] Create failing acceptance tests
+- [x] Run acceptance tests (verify they fail)
+- [x] USER REVIEW — acceptance tests (approved by the orchestrator while the developer was AFK, 2026-10-28)
+- [x] TDD Red — write failing unit/integration tests
 - [ ] TDD Green — implement with quality code
 - [ ] Update documentation with progress
 - [ ] Repeat Red→Green→Update cycle until feature complete

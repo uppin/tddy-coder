@@ -4,6 +4,7 @@ pub mod home_terminal_leases;
 mod path_guard;
 mod ports;
 mod project_home;
+mod project_home_inbox;
 mod project_home_remote;
 mod project_home_session_follow;
 mod project_home_start_options;
@@ -20,6 +21,7 @@ use tddy_credentials::SessionVaults;
 use tddy_daemon_kernel::config::DaemonConfig;
 use tddy_daemon_kernel::SessionUserResolver;
 use tddy_host_service::{GithubCli, HostServiceImpl};
+use tddy_session_activity::project_notification_log::ProjectNotificationLog;
 use tddy_session_lifecycle::connection_service::launch_ports::LaunchSessions;
 use tddy_session_lifecycle::connection_service::{DaemonSessionHost, LocalExecTools};
 use tddy_session_lifecycle::peer_routing::PeerRouting;
@@ -81,6 +83,10 @@ pub(crate) struct ProjectHomeHost {
     /// The permission prompts this host's claude-cli hooks hold open, the registry
     /// `AnswerSessionPermission` delivers into (`#home-inbox` 6/8).
     pub(crate) pending_answers: Arc<tddy_session_activity::pending_answers::PendingAnswers>,
+    /// The project notification log the daemon registered on its bus, which
+    /// `WaitProjectNotifications` and `ReadProjectNotifications` read (`#home-inbox` 7/8). `None`
+    /// on a host with none installed.
+    pub(crate) notification_log: Option<Arc<ProjectNotificationLog>>,
 }
 
 impl ExecToolRpcHandler {
@@ -116,6 +122,7 @@ impl ExecToolRpcHandler {
                 terminal_control: host.terminal_control(),
                 leases: Arc::new(home_terminal_leases::HomeTerminalLeases::default()),
                 pending_answers: host.pending_answers(),
+                notification_log: host.project_notification_log(),
             },
         }
     }

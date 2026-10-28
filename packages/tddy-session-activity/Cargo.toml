@@ -49,6 +49,10 @@ tddy-projects = { path = "../tddy-projects" }
 # permission prompt (`#home-inbox` 6/8). Already in this crate's tree through tddy-daemon-sandbox.
 tddy-discovery = { path = "../tddy-discovery" }
 tddy-session-files = { path = "../tddy-session-files" }
+# `FollowPage`, the paging every follow tool answers in (`#start-parity` 6/9), which the project
+# notification log pages its records with (`#home-inbox` 7/8). Already in this crate's tree through
+# tddy-daemon-sandbox; tool-engine depends on nothing that depends on this crate.
+tddy-tool-engine = { path = "../tddy-tool-engine" }
 tddy-daemon-sandbox = { path = "../tddy-daemon-sandbox" }
 # `SessionRooms`: the port deleting a session closes its room through.
 tddy-daemon-extensions = { path = "../tddy-daemon-extensions" }

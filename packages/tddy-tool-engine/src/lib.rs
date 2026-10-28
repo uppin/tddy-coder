@@ -13,6 +13,7 @@ pub mod project_home_answer_tools;
 pub(crate) mod project_home_diff;
 pub mod project_home_disk_refresh;
 pub mod project_home_git_tools;
+pub mod project_home_inbox_tools;
 pub mod project_home_terminal_tools;
 pub mod project_home_terminate;
 pub mod project_home_tools;

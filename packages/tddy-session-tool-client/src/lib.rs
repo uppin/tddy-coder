@@ -156,6 +156,9 @@ fn remote_block_arg_keys(tool_name: &str) -> &'static [&'static str] {
     match tool_name {
         "Await" => &["timeout_ms", "block_until_ms"],
         "Shell" => &["block_until_ms"],
+        // TODO(home-wait): implement — `"WaitProjectNotifications" => &["timeout_ms"]`. The tool
+        // holds a call for up to its `timeout_ms` (#home-inbox 7/8), so it needs the same ceiling
+        // as `Await`; until then a LiveKit call to it is not clamped.
         _ => &[],
     }
 }

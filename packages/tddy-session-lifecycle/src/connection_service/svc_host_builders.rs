@@ -113,6 +113,7 @@ impl DaemonSessionHost {
             // No bus until one is installed with `with_session_notification_bus`: the subscribers
             // are the daemon's to choose, and this service names none of them.
             session_notification_bus: None,
+            project_notification_log: None,
             sandbox_rpc_bridge: Arc::new(std::sync::OnceLock::new()),
             // Installed by the composition root once the handlers above this crate are built
             // from this host (`with_rpc_families`).
@@ -400,6 +401,26 @@ impl DaemonSessionHost {
     ) -> Self {
         self.session_notification_bus = Some(bus);
         self
+    }
+
+    /// Install the project notification log the project-home notification tools read (builder
+    /// pattern). The caller also registers it as a subscriber on the bus it installs with
+    /// [`Self::with_session_notification_bus`]: this only lets the exec-tool handler reach it
+    /// (`#home-inbox` 7/8).
+    pub fn with_project_notification_log(
+        mut self,
+        log: Arc<tddy_session_activity::project_notification_log::ProjectNotificationLog>,
+    ) -> Self {
+        self.project_notification_log = Some(log);
+        self
+    }
+
+    /// The project notification log installed with [`Self::with_project_notification_log`], or
+    /// `None` on a host with none.
+    pub fn project_notification_log(
+        &self,
+    ) -> Option<Arc<tddy_session_activity::project_notification_log::ProjectNotificationLog>> {
+        self.project_notification_log.clone()
     }
 
     /// Attach an idle-timeout tracker to this service (builder pattern).

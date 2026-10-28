@@ -13816,6 +13816,7 @@ dependencies = [
  "tddy-rpc",
  "tddy-service",
  "tddy-session-files",
+ "tddy-tool-engine",
  "tddy-workflow",
  "tddy-worktree-service",
  "tempfile",

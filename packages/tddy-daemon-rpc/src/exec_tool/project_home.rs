@@ -38,6 +38,7 @@ use tddy_service::proto::exec_tools::{ExecuteToolRequest, ExecuteToolResponse};
 use tddy_service::proto::session::{ListSessionsRequest, Signal};
 use tddy_session_activity::answers::{answer_permission, AnswerContext, AnsweringCaller};
 use tddy_session_activity::pending_answers::PendingAnswers;
+use tddy_session_activity::project_notification_log::ProjectNotificationLog;
 use tddy_session_activity::session_reader::{list_sessions_in_dir, SessionEntry};
 use tddy_session_lifecycle::connection_service::launch_ports::LaunchSessions;
 use tddy_session_lifecycle::connection_service::session_acting_identity::SessionAccountAccess;
@@ -158,6 +159,7 @@ impl ExecToolRpcHandler {
             terminal_control: Arc::clone(&self.project_home_host.terminal_control),
             leases: Arc::clone(&self.project_home_host.leases),
             pending_answers: Arc::clone(&self.project_home_host.pending_answers),
+            notification_log: self.project_home_host.notification_log.clone(),
         })
     }
 
@@ -319,6 +321,9 @@ pub(super) struct DaemonProjectHome {
     leases: Arc<HomeTerminalLeases>,
     /// The permission prompts this host's hooks hold open, which `AnswerSessionPermission` answers.
     pending_answers: Arc<PendingAnswers>,
+    /// This host's project notification log, which the two inbox tools read (`#home-inbox` 7/8);
+    /// `None` on a host with none installed.
+    pub(super) notification_log: Option<Arc<ProjectNotificationLog>>,
 }
 
 /// One session as the target resolver reads it: its `.session.yaml`, its changeset's branch, and the

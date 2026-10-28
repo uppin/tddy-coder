@@ -27,6 +27,8 @@ use tddy_service::proto::session::{
     ListSessionsRequest, SessionService as SessionServiceTrait, StartSessionRequest,
 };
 use tddy_service::proto::tasks::{CancelTaskRequest, CancelTaskResponse};
+use tddy_session_activity::project_notification_log::ProjectNotificationLog;
+use tddy_session_activity::session_notifications::SessionNotificationBus;
 use tddy_session_lifecycle::connection_service::DaemonSessionHost;
 use tddy_session_lifecycle::peer_routing::PeerRouting;
 use tddy_session_lifecycle::test_util::{test_config, TEST_TOKEN, TEST_USER};
@@ -240,11 +242,31 @@ fn config_mapping_test_user_to(os_user: &str) -> tddy_daemon_kernel::config::Dae
 }
 
 fn daemon_over(
+    config: tddy_daemon_kernel::config::DaemonConfig,
+    instance_id: &str,
+    sessions_base: &Path,
+    peers: Arc<InProcessPeers>,
+    terminals: Arc<CliSessionManager>,
+) -> TestDaemon {
+    daemon_over_customised(
+        config,
+        instance_id,
+        sessions_base,
+        peers,
+        terminals,
+        |host| host,
+    )
+}
+
+/// [`daemon_over`], with `customise` given the host before its handlers are installed on it: the
+/// `with_*` a suite wants on it, which cannot be added afterwards.
+fn daemon_over_customised(
     mut config: tddy_daemon_kernel::config::DaemonConfig,
     instance_id: &str,
     sessions_base: &Path,
     peers: Arc<InProcessPeers>,
     terminals: Arc<CliSessionManager>,
+    customise: impl FnOnce(DaemonSessionHost) -> DaemonSessionHost,
 ) -> TestDaemon {
     config.daemon_instance_id = Some(instance_id.to_string());
     let base = sessions_base.to_path_buf();
@@ -264,7 +286,7 @@ fn daemon_over(
         Arc::new(tddy_daemon_kernel::operator_channel::NoOperatorChannel),
         terminals,
     );
-    let daemon = TestDaemon::from_host(host);
+    let daemon = TestDaemon::from_host(customise(host));
     daemon.as_arc().install_sandbox_rpc_bridge();
     daemon
 }
@@ -435,6 +457,43 @@ fn host_built_by(
     peers: &Arc<InProcessPeers>,
     config: tddy_daemon_kernel::config::DaemonConfig,
 ) -> Host {
+    host_built_with(instance_id, peers, config, |host, _sessions| host)
+}
+
+/// [`a_host`], whose daemon keeps a project notification log on its notification bus
+/// (`#home-inbox` 7/8): publish onto the returned bus to record a notification, as the daemon's
+/// publish sites do. The log persists under the host's sessions directory.
+pub fn a_host_logging_notifications(
+    instance_id: &str,
+    peers: &Arc<InProcessPeers>,
+) -> (Host, Arc<SessionNotificationBus>) {
+    let bus = Arc::new(std::sync::Mutex::new(None));
+    let published_on = Arc::clone(&bus);
+    let host = host_built_with(instance_id, peers, test_config(), move |host, sessions| {
+        let base = sessions.to_path_buf();
+        let log = Arc::new(
+            ProjectNotificationLog::open(
+                &sessions.join("notification-log"),
+                Arc::new(move |_os_user: &str| Some(base.clone())),
+            )
+            .expect("the notification log opens"),
+        );
+        let notifications =
+            Arc::new(SessionNotificationBus::new().with_subscriber(Arc::clone(&log)));
+        *published_on.lock().unwrap() = Some(Arc::clone(&notifications));
+        host.with_session_notification_bus(notifications)
+            .with_project_notification_log(log)
+    });
+    let bus = bus.lock().unwrap().take().expect("the bus was installed");
+    (host, bus)
+}
+
+fn host_built_with(
+    instance_id: &str,
+    peers: &Arc<InProcessPeers>,
+    config: tddy_daemon_kernel::config::DaemonConfig,
+    customise: impl FnOnce(DaemonSessionHost, &Path) -> DaemonSessionHost,
+) -> Host {
     let sessions = tempfile::tempdir().unwrap();
     let this_repo = a_repo_with_origin();
     let other_repo = a_repo_with_origin();
@@ -447,12 +506,14 @@ fn host_built_by(
     )
     .unwrap();
     let terminals = Arc::new(CliSessionManager::new());
-    let daemon = Arc::new(daemon_over(
+    let sessions_path = sessions.path().to_path_buf();
+    let daemon = Arc::new(daemon_over_customised(
         config,
         instance_id,
         sessions.path(),
         Arc::clone(peers),
         Arc::clone(&terminals),
+        |host| customise(host, &sessions_path),
     ));
     peers.register(instance_id, Arc::clone(&daemon));
     Host {
