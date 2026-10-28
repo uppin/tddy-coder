@@ -127,14 +127,18 @@ describe("GhosttyTerminal shrink — the real pane chain", () => {
         cy.get("[data-testid='shrink-host']").click();
 
         // Then — the grid re-fits to the shrunken pane (the FitAddon's resize observer is
-        // debounced at 100ms, hence the retry window)
+        // debounced at 100ms, hence the retry window). The message names the container's own
+        // width: a canvas stuck wide while the container shrank means the re-fit path froze
+        // (timer throttling); a container stuck wide means the flex chain did.
         byTestId(TEST_IDS.ghosttyTerminal)
           .find("canvas")
           .should(($c) => {
             const width = parseFloat($c[0].style.width);
+            const container = $c.closest(`[data-testid='${TEST_IDS.ghosttyTerminal}']`)[0];
+            const containerWidth = container ? container.clientWidth : -1;
             expect(
               width,
-              `canvas should re-fit under the 300px pane (was ${fittedWidth}px, now ${width}px)`,
+              `canvas should re-fit under the 300px pane (was ${fittedWidth}px, now ${width}px; container clientWidth ${containerWidth}px, dpr ${window.devicePixelRatio})`,
             ).to.be.lessThan(300);
           });
       });

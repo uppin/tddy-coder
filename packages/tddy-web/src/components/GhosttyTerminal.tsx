@@ -244,6 +244,7 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
       text: string;
     } | null>(null);
     const fitAddonRef = useRef<FitAddon | null>(null);
+    const resizeObserverRef = useRef<ResizeObserver | null>(null);
     const [ready, setReady] = useState(false);
     const [displayFontSize, setDisplayFontSize] = useState(fontSize);
 
@@ -398,6 +399,17 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
         } else {
           fitAddon.fit();
           fitAddon.observeResize();
+          // Belt-and-braces re-fit, watched on the container we render. The addon's own observer
+          // debounces its fit through `setTimeout` (100 ms), and a throttled or occluded page
+          // postpones that timer indefinitely — headless CI runs the AUT in an Electron window
+          // the runner treats as hidden, so the pane shrank, the observer entry fired, and the
+          // grid stayed stale at its fitted width (the GhosttyTerminalShrink CI failure, where
+          // the canvas froze at 1179px). ResizeObserver callbacks run in the rendering steps,
+          // not on timers, so re-fitting from our own observer keeps the re-fit working where
+          // the addon's timer-based one does not. `fit()` no-ops when the computed dimensions
+          // are unchanged, so the addon's observer firing too is harmless.
+          resizeObserverRef.current = new ResizeObserver(() => fitAddon.fit());
+          resizeObserverRef.current.observe(containerRef.current);
         }
 
         // Proactively report the size on mount so the PTY is resized to match the screen
@@ -428,6 +440,8 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
 
       return () => {
         isMounted = false;
+        resizeObserverRef.current?.disconnect();
+        resizeObserverRef.current = null;
         fitAddonRef.current?.dispose();
         fitAddonRef.current = null;
         disposablesRef.current.forEach((d) => d.dispose());
