@@ -245,6 +245,10 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
     } | null>(null);
     const fitAddonRef = useRef<FitAddon | null>(null);
     const resizeObserverRef = useRef<ResizeObserver | null>(null);
+    // Frame handle of the re-fit retry loop — at component scope because the effect's cleanup
+    // must be able to cancel a loop armed inside `setup()` (which runs asynchronously, so the
+    // cleanup can fire before setup's own locals exist).
+    const refitRafRef = useRef(0);
     const [ready, setReady] = useState(false);
     const [displayFontSize, setDisplayFontSize] = useState(fontSize);
 
@@ -394,9 +398,6 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
         const fitAddon = new FitAddon();
         term.loadAddon(fitAddon);
         fitAddonRef.current = fitAddon;
-        // Frame handle of the re-fit retry loop (declared here so the effect's cleanup can
-        // cancel it; only armed on the observed path below).
-        let refitRaf = 0;
         if (fixedViewportGrid) {
           term.resize(fixedViewportGrid.cols, fixedViewportGrid.rows);
         } else {
@@ -431,10 +432,10 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
           const refitWithRetry = () => {
             if (refit() || refitFrames >= 30) return;
             refitFrames++;
-            refitRaf = requestAnimationFrame(refitWithRetry);
+            refitRafRef.current = requestAnimationFrame(refitWithRetry);
           };
           resizeObserverRef.current = new ResizeObserver(() => {
-            cancelAnimationFrame(refitRaf);
+            cancelAnimationFrame(refitRafRef.current);
             refitFrames = 0;
             refitWithRetry();
           });
@@ -469,9 +470,9 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
 
       return () => {
         isMounted = false;
+        cancelAnimationFrame(refitRafRef.current);
         resizeObserverRef.current?.disconnect();
         resizeObserverRef.current = null;
-        cancelAnimationFrame(refitRaf);
         fitAddonRef.current?.dispose();
         fitAddonRef.current = null;
         disposablesRef.current.forEach((d) => d.dispose());
