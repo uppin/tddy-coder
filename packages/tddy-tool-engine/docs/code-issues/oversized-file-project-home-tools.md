@@ -3,7 +3,7 @@
 **Location:** `packages/tddy-tool-engine/src/project_home_tools.rs`
 **Category:** oversized-file
 **Detected:** 2026-10-25 — `/pr-wrap` step 3.5 file-length gate on #750 (`#start-parity` 1/9), production lines counted to the first `#[cfg(test)]`
-**Metrics:** **699 production lines** (2026-10-26) · budget 500 · 1.4× over
+**Metrics:** **709 production lines** (2026-10-28) · budget 500 · 1.4× over
 **Thresholds breached:** length 699 > 500
 **Restructure:** not designed
 **Status:** Open — split deferred: the file is stack-shared (later `#start-parity` nodes add tools to it), and a split mid-stack would conflict in every one; the follow-up is after the stack lands — **unclaimed**
@@ -21,6 +21,7 @@
 | 2026-10-25 | 643 | **regressed.** `#start-parity` 7/9 (#756): 632 → 643 (+11) — `TerminateSession` in the module table, `is_project_home_tool` and `is_project_home_target_tool`, `ProjectHomePort::terminate_session`, the catalogue entry and the dispatch arm; the tool itself is the new `project_home_terminate.rs` (62). **Split deferred by developer instruction** (stack-shared) |
 | 2026-10-26 | 660 | **regressed.** `#start-parity` 8/9 (#757): 643 → 660 (+17) — `RefreshWorktreeDiskUsage` in the module table, `is_project_home_tool` and `is_project_home_target_tool`, `ProjectHomePort::refresh_worktree_disk_usage`, the catalogue entry and the dispatch arm; the tool itself is the new `project_home_disk_refresh.rs` (80). **Split deferred by developer instruction** (stack-shared) |
 | 2026-10-26 | 699 | **regressed.** `#start-parity` 9/9 (#758): 660 at its base (`#start-parity` 8/9 tip) → 699 (+39) — `SessionToolRole`, `is_conversation_spawner_tool` and `session_offered_catalog_for` (a conversation spawner's catalogue: the daemon-wide one plus the four start tools). **Split deferred by developer instruction** (stack-shared) |
+| 2026-10-28 | 709 | **regressed.** `#home-inbox` 2/8 (#767): 699 → 709 (+10) — `ReadSessionTerminal` in the module table, `is_project_home_tool`, `is_project_home_target_tool`, the catalogue entry and a dispatch arm that names the wiring mistake; the tool itself is the new `project_home_terminal_tools.rs` (114). **Split deferred** (stack-shared: `#home-inbox` 5/8 and 6/8 touch the file) |
 
 ## What would close it — candidate seams (not proven)
 
