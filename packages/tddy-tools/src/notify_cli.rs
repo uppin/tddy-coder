@@ -64,27 +64,8 @@ pub struct NotifyArgs {
 /// `Ok` only once the daemon accepted it; every other outcome is an `Err` naming why, which the
 /// binary prints and exits non-zero on.
 pub async fn run_notify(args: NotifyArgs) -> anyhow::Result<()> {
-    let session_id = required_env(notify_env::SESSION_ID)?;
-    let os_user = required_env(notify_env::OS_USER)?;
-    let hook_token = required_env(notify_env::HOOK_TOKEN)?;
-    let transport = Transport::from_env()?;
-
-    let body_markdown = match args.body.as_deref() {
-        Some("-") => read_stdin().await?,
-        Some(body) => body.to_string(),
-        None => String::new(),
-    };
-    let request = ReportOperatorNotificationRequest {
-        session_id,
-        hook_token,
-        os_user,
-        title: args.title,
-        body_markdown,
-        level: NotificationLevel::from(args.level) as i32,
-        sound: args.sound,
-    };
-
-    transport.send(request.encode_to_vec()).await?;
+    let session = NotifySession::from_lookup(|name| std::env::var(name).ok())?;
+    session.send(&args).await?;
     println!("Notification sent");
     Ok(())
 }
@@ -100,13 +81,65 @@ impl From<NotifyLevel> for NotificationLevel {
     }
 }
 
-/// The value of a session environment variable, or an error naming it.
-fn required_env(name: &str) -> anyhow::Result<String> {
-    match std::env::var(name) {
-        Ok(value) if !value.is_empty() => Ok(value),
-        _ => anyhow::bail!(
-            "{name} is not set: `tddy-tools notify` runs inside a session the daemon launched"
-        ),
+/// The session a notification is sent for and how its daemon is reached, as the environment of a
+/// daemon-launched agent names them.
+#[derive(Debug, PartialEq, Eq)]
+pub struct NotifySession {
+    pub session_id: String,
+    pub os_user: String,
+    pub hook_token: String,
+    pub transport: Transport,
+}
+
+impl NotifySession {
+    /// Read the session from `lookup` (the process environment in production). An unset or empty
+    /// variable is an error naming it.
+    pub fn from_lookup(lookup: impl Fn(&str) -> Option<String>) -> anyhow::Result<Self> {
+        let required = |name: &str| {
+            lookup(name).filter(|value| !value.is_empty()).ok_or_else(|| {
+                anyhow::anyhow!(
+                    "{name} is not set: `tddy-tools notify` runs inside a session the daemon launched"
+                )
+            })
+        };
+        Ok(Self {
+            session_id: required(notify_env::SESSION_ID)?,
+            os_user: required(notify_env::OS_USER)?,
+            hook_token: required(notify_env::HOOK_TOKEN)?,
+            transport: Transport::from_lookup(&lookup)?,
+        })
+    }
+
+    /// Read the body `args` names, then send the notification to this session's daemon.
+    async fn send(&self, args: &NotifyArgs) -> anyhow::Result<()> {
+        let request = self.request(args, body_markdown(args.body.as_deref()).await?);
+        self.transport.send(request.encode_to_vec()).await
+    }
+
+    /// The request `args` (with its body already read) becomes for this session.
+    #[must_use]
+    pub fn request(
+        &self,
+        args: &NotifyArgs,
+        body_markdown: String,
+    ) -> ReportOperatorNotificationRequest {
+        ReportOperatorNotificationRequest {
+            session_id: self.session_id.clone(),
+            hook_token: self.hook_token.clone(),
+            os_user: self.os_user.clone(),
+            title: args.title.clone(),
+            body_markdown,
+            level: NotificationLevel::from(args.level) as i32,
+            sound: args.sound,
+        }
+    }
+}
+
+/// The markdown body `--body` names: read from stdin for `-`, empty when it is absent.
+async fn body_markdown(body: Option<&str>) -> anyhow::Result<String> {
+    match body {
+        Some("-") => read_stdin().await,
+        other => Ok(other.unwrap_or_default().to_string()),
     }
 }
 
@@ -124,26 +157,25 @@ async fn read_stdin() -> anyhow::Result<String> {
 
 /// How the daemon is reached: its agent-tool socket when the session was given one, which an
 /// embedded daemon serves instead of HTTP, its URL otherwise.
-enum Transport {
+#[derive(Debug, PartialEq, Eq)]
+pub enum Transport {
     Socket(PathBuf),
     Http(String),
 }
 
 impl Transport {
-    fn from_env() -> anyhow::Result<Self> {
-        if let Ok(socket) = std::env::var(notify_env::DAEMON_SOCKET) {
-            if !socket.is_empty() {
-                return Ok(Self::Socket(PathBuf::from(socket)));
-            }
+    fn from_lookup(lookup: &impl Fn(&str) -> Option<String>) -> anyhow::Result<Self> {
+        let set = |name: &str| lookup(name).filter(|value| !value.is_empty());
+        if let Some(socket) = set(notify_env::DAEMON_SOCKET) {
+            return Ok(Self::Socket(PathBuf::from(socket)));
         }
-        match std::env::var(notify_env::DAEMON_URL) {
-            Ok(url) if !url.is_empty() => Ok(Self::Http(url)),
-            _ => anyhow::bail!(
+        set(notify_env::DAEMON_URL).map(Self::Http).ok_or_else(|| {
+            anyhow::anyhow!(
                 "neither {} nor {} is set: the daemon cannot be reached",
                 notify_env::DAEMON_SOCKET,
                 notify_env::DAEMON_URL
-            ),
-        }
+            )
+        })
     }
 
     async fn send(&self, body: Vec<u8>) -> anyhow::Result<()> {
@@ -196,3 +228,7 @@ async fn post_proto(daemon: &str, body: Vec<u8>) -> anyhow::Result<()> {
     }
     Ok(())
 }
+
+#[cfg(test)]
+#[path = "notify_cli_unit_tests.rs"]
+mod notify_cli_unit_tests;

@@ -47,6 +47,8 @@ production lines, re-exported there) into `notify_env.rs`; `to_telegram_html` sp
 the start and resume replies extracted, so every function this node grew ends at or under its
 base length — `spawn_claude_cli_session_inner` 310 → 309, `spawn_cursor_cli_session_reporting`
 208 → 202, `resume_claude_cli_session` 142 → 141, `resume_session_at_session_coordinate` 202 → 189
-(the cursor-cli branch is `LaunchSessions::resume_cursor_cli`). Added tests: a cursor-cli
+(the cursor-cli branch is `LaunchSessions::resume_cursor_cli`). `notify_cli` reads its session through `NotifySession::from_lookup` and builds its request with
+`NotifySession::request`, unit-tested in-crate (`notify_cli_unit_tests.rs`): `run_notify` CRAP 72 → 12
+(`tddy-tools analyze`; it runs only as a subprocess in `tddy-tools-cli`'s suite). Added tests: a cursor-cli
 notification is accepted, a session with no recorded token refuses an empty one, an unreachable
 socket and `--body -` from the CLI.
