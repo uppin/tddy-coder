@@ -82,8 +82,28 @@ impl PendingQuestion {
     /// path), or the first question's text. Empty when the record says neither.
     #[must_use]
     pub fn summary(&self) -> String {
-        // TODO(elicit-content): implement
-        String::new()
+        if let Some(first) = self.questions.first() {
+            return first.question.clone();
+        }
+        if self.tool_name.is_empty() {
+            return String::new();
+        }
+        let input = serde_json::from_str::<serde_json::Value>(&self.tool_input_json).ok();
+        // The field that names what a tool acts on. Any other tool, or input without that field, is
+        // summarised by its whole input.
+        let named_field = match self.tool_name.as_str() {
+            "Bash" => Some("command"),
+            "Edit" | "Write" | "Read" => Some("file_path"),
+            _ => None,
+        };
+        let summary = match named_field.and_then(|field| input.as_ref()?.get(field)?.as_str()) {
+            Some(text) => text.to_string(),
+            None => match &input {
+                Some(value) => value.to_string(),
+                None => self.tool_input_json.clone(),
+            },
+        };
+        summary.replace(['\r', '\n'], " ").trim().to_string()
     }
 }
 

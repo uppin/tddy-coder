@@ -38,8 +38,8 @@ pub use changeset::{
 };
 pub use elapsed_format::format_elapsed_compact;
 pub use session_activity::{
-    activity_status_from_hook, activity_status_from_hook_with_tool, parse_hook_event, HookEvent,
-    SessionActivityStatus,
+    activity_status_from_hook, activity_status_from_hook_with_tool, hook_event_asks_a_question,
+    parse_hook_event, HookEvent, SessionActivityStatus, ASK_USER_QUESTION_TOOL,
 };
 pub use session_agent::{
     AgentId, AgentIdError, AgentKindRecord, AgentPlacementRecord, SessionAgentRecord,
@@ -55,8 +55,9 @@ pub use session_lifecycle::{
 };
 pub use session_metadata::{
     paired_agent, read_session_metadata, reads_host_paths, repo_root_for_session,
-    update_activity_status, write_initial_tool_session_metadata, write_session_metadata,
-    InitialToolSessionMetadataOpts, SessionMetadata, SESSION_METADATA_FILENAME,
+    set_pending_elicitation, update_activity_status, write_initial_tool_session_metadata,
+    write_session_metadata, InitialToolSessionMetadataOpts, SessionMetadata,
+    SESSION_METADATA_FILENAME,
 };
 pub use session_provider_account::{
     read_session_provider_account, write_session_provider_account, SessionProviderAccount,

@@ -65,21 +65,24 @@ pub(crate) fn daemon_socket_arg(p: &HookCommandParams<'_>) -> String {
 /// { "matcher": "", "hooks": [{ "type": "command", "command": "<cmd>" }] }
 /// ```
 /// `matcher = ""` matches all tool names (for `PostToolUse`/`Notification`) and all other
-/// variants.
+/// variants. `PreToolUse` is matched to `AskUserQuestion` alone: a hook on every tool would run a
+/// process before each call of the agent's loop, and only that one tool's input is a question
+/// (`#home-inbox` 3/8).
 pub fn build_claude_hooks_settings(p: &HookCommandParams<'_>) -> serde_json::Value {
-    // TODO(elicit-content): implement — add `PermissionRequest`, and `PreToolUse` with the matcher
-    // `AskUserQuestion`, to the six events below (eight in all).
-    let events = [
-        "SessionStart",
-        "UserPromptSubmit",
-        "PostToolUse",
-        "Notification",
-        "Stop",
-        "SessionEnd",
+    // (event, matcher)
+    let events: [(&str, &str); 8] = [
+        ("SessionStart", ""),
+        ("UserPromptSubmit", ""),
+        ("PostToolUse", ""),
+        ("Notification", ""),
+        ("PermissionRequest", ""),
+        ("PreToolUse", "AskUserQuestion"),
+        ("Stop", ""),
+        ("SessionEnd", ""),
     ];
 
     let mut hooks_obj = serde_json::Map::new();
-    for event in &events {
+    for (event, matcher) in &events {
         let cmd = format!(
             "{} session-hook --session {} --daemon {}{} --os-user {} --hook-token {} --event {}",
             shell_quote(p.tddy_tools_path),
@@ -91,7 +94,7 @@ pub fn build_claude_hooks_settings(p: &HookCommandParams<'_>) -> serde_json::Val
             event,
         );
         let hook_entry = serde_json::json!([{
-            "matcher": "",
+            "matcher": matcher,
             "hooks": [{"type": "command", "command": cmd}]
         }]);
         hooks_obj.insert(event.to_string(), hook_entry);

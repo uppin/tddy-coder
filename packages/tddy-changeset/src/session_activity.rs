@@ -81,6 +81,19 @@ pub fn activity_status_from_hook(
     activity_status_from_hook_with_tool(hook_event_name, notification_type, None)
 }
 
+/// The tool whose input is a set of questions for the operator, rather than an action.
+pub const ASK_USER_QUESTION_TOOL: &str = "AskUserQuestion";
+
+/// Whether a hook event asks the operator something: a `PermissionRequest`, or a `PreToolUse` of
+/// [`ASK_USER_QUESTION_TOOL`] (`#home-inbox` 3/8). Both are hooks Claude waits on.
+pub fn hook_event_asks_a_question(hook_event_name: &str, tool_name: Option<&str>) -> bool {
+    match hook_event_name {
+        "PermissionRequest" => true,
+        "PreToolUse" => tool_name == Some(ASK_USER_QUESTION_TOOL),
+        _ => false,
+    }
+}
+
 /// [`activity_status_from_hook`] for an event that may name a tool: `PermissionRequest`, and
 /// `PreToolUse` of `AskUserQuestion`, map to `WaitingForInput` (`#home-inbox` 3/8). Every other
 /// `PreToolUse` maps to `None`, as it always has.
@@ -91,9 +104,9 @@ pub fn activity_status_from_hook_with_tool(
     notification_type: Option<&str>,
     tool_name: Option<&str>,
 ) -> Option<SessionActivityStatus> {
-    // TODO(elicit-content): implement — `PermissionRequest`, and `PreToolUse` with
-    // `tool_name == "AskUserQuestion"`, map to `WaitingForInput`.
-    let _ = tool_name;
+    if hook_event_asks_a_question(hook_event_name, tool_name) {
+        return Some(SessionActivityStatus::WaitingForInput);
+    }
     match hook_event_name {
         // Claude Code CLI (PascalCase)
         "SessionStart" | "sessionStart" => Some(SessionActivityStatus::Started),
