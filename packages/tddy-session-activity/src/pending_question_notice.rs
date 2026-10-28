@@ -6,13 +6,34 @@
 //! conversion is a function: a `From` impl between two foreign types is refused by the orphan rule.
 
 use tddy_core::pending_question::PendingQuestion;
-use tddy_daemon_kernel::session_notification::QuestionNotice;
+use tddy_daemon_kernel::session_notification::{
+    QuestionNotice, QuestionNoticeItem, QuestionNoticeOption,
+};
 
 /// The notice that carries `pending` on a notification.
 #[must_use]
 pub fn question_notice_for(pending: &PendingQuestion) -> QuestionNotice {
-    // TODO(elicit-content): implement — request_id, kind, tool_name, `pending.summary()` and every
-    // question with its options.
-    let _ = pending;
-    QuestionNotice::default()
+    QuestionNotice {
+        request_id: pending.request_id.clone(),
+        kind: pending.kind.clone(),
+        tool_name: pending.tool_name.clone(),
+        summary: pending.summary(),
+        questions: pending
+            .questions
+            .iter()
+            .map(|item| QuestionNoticeItem {
+                header: item.header.clone(),
+                question: item.question.clone(),
+                options: item
+                    .options
+                    .iter()
+                    .map(|option| QuestionNoticeOption {
+                        label: option.label.clone(),
+                        description: option.description.clone(),
+                    })
+                    .collect(),
+                multi_select: item.multi_select,
+            })
+            .collect(),
+    }
 }

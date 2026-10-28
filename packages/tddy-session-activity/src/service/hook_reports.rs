@@ -6,16 +6,92 @@
 //! `docs/dev/todo/2026-10-19-restructure-extract-method-refused-under-async-trait.md`. Bodies are
 //! byte-identical apart from taking the already-unwrapped request.
 
+use crate::pending_question_notice::question_notice_for;
+use crate::pending_question_record::pending_question_for_hook;
 use crate::service::ActivityServiceImpl;
 use crate::session_notifications::{
     notification_for_activity_status, notification_for_agent_tool_call,
+    notification_for_pending_question, SessionNotification,
 };
-use std::path::PathBuf;
+use std::fmt::Display;
+use std::path::{Path, PathBuf};
+use tddy_core::pending_question::{
+    clear_pending_question, read_pending_question, write_pending_question, PendingQuestion,
+};
 use tddy_rpc::{Response, Status};
 use tddy_service::proto::activity::{
     ReportAgentActivityRequest, ReportAgentActivityResponse, ReportSessionStatusRequest,
     ReportSessionStatusResponse,
 };
+
+/// What a status report did to the question its session waits on, and so what it publishes.
+enum PendingChange {
+    /// A permission or a question was recorded under a new id: one notification carries it.
+    Recorded(PendingQuestion),
+    /// The question already pending is kept for the `Notification` that follows its prompt. The
+    /// status notification for that prompt carries it, so the operator is told once.
+    Kept(PendingQuestion),
+    /// No structured question is involved: the status notification goes out as it always has.
+    Plain,
+}
+
+/// Record, keep or clear the question a status report's session waits on, and mirror whether it
+/// waits in `.session.yaml`.
+///
+/// - `asked` is the question a permission or `AskUserQuestion` report recorded: it replaces any
+///   question before it.
+/// - A `WaitingForInput` with no tool — the `Notification` that follows a prompt — keeps the
+///   structured question still pending, and fills its text from the message only if it had none.
+///   With no such question pending it records the message alone, as `#start-parity` 6/9 did.
+/// - Any other status clears the question. A wait the hook gave no message for leaves nothing
+///   pending.
+fn record_pending_question(
+    session_dir: &Path,
+    req: &ReportSessionStatusRequest,
+    asked: Option<PendingQuestion>,
+) -> Result<PendingChange, Status> {
+    if let Some(question) = asked {
+        write_pending_question(session_dir, &question).map_err(pending_question_failure)?;
+        set_pending_elicitation(session_dir, true)?;
+        return Ok(PendingChange::Recorded(question));
+    }
+
+    let waiting = req.status == tddy_core::SessionActivityStatus::WaitingForInput.as_wire();
+    if waiting {
+        let pending = read_pending_question(session_dir).map_err(pending_question_failure)?;
+        if let Some(mut kept) = pending.filter(|question| !question.request_id.is_empty()) {
+            if kept.question.is_empty() && !req.message.is_empty() {
+                kept.question = req.message.clone();
+                write_pending_question(session_dir, &kept).map_err(pending_question_failure)?;
+            }
+            set_pending_elicitation(session_dir, true)?;
+            return Ok(PendingChange::Kept(kept));
+        }
+        if !req.message.is_empty() {
+            let message_only = PendingQuestion {
+                kind: "permission".to_string(),
+                question: req.message.clone(),
+                ..Default::default()
+            };
+            write_pending_question(session_dir, &message_only).map_err(pending_question_failure)?;
+            set_pending_elicitation(session_dir, true)?;
+            return Ok(PendingChange::Plain);
+        }
+    }
+
+    clear_pending_question(session_dir).map_err(pending_question_failure)?;
+    set_pending_elicitation(session_dir, false)?;
+    Ok(PendingChange::Plain)
+}
+
+fn pending_question_failure(e: impl Display) -> Status {
+    Status::internal(format!("failed to record the pending question: {e}"))
+}
+
+fn set_pending_elicitation(session_dir: &Path, pending: bool) -> Result<(), Status> {
+    tddy_core::set_pending_elicitation(session_dir, pending)
+        .map_err(|e| Status::internal(format!("failed to record pending_elicitation: {e}")))
+}
 
 impl ActivityServiceImpl {
     /// The per-worktree `claude` / `cursor` hook reporting what its session is doing.
@@ -51,27 +127,27 @@ impl ActivityServiceImpl {
             return Err(Status::permission_denied("invalid hook_token"));
         }
 
+        // A question is built, and so refused if it is malformed, before anything is written.
+        let now = tddy_daemon_kernel::now_unix_ms();
+        let asked = if req.status == tddy_core::SessionActivityStatus::WaitingForInput.as_wire()
+            && !req.tool_name.is_empty()
+        {
+            Some(pending_question_for_hook(
+                &req.tool_name,
+                &req.tool_input_json,
+                uuid::Uuid::new_v4().to_string(),
+                now,
+            )?)
+        } else {
+            None
+        };
+
         tddy_core::update_activity_status(&session_dir, &req.status)
             .map_err(|e| Status::internal(format!("failed to update activity status: {}", e)))?;
 
         // What the session waits on is kept next to the status that says it waits: a reader that is
         // not watching live (an orchestrator's `ReadSessionActivity`) sees the agent's question.
-        // Any other status — or a wait the hook gave no message for — leaves nothing pending.
-        if req.status == tddy_core::SessionActivityStatus::WaitingForInput.as_wire()
-            && !req.message.is_empty()
-        {
-            tddy_core::pending_question::write_pending_question(
-                &session_dir,
-                &tddy_core::pending_question::PendingQuestion {
-                    kind: "permission".to_string(),
-                    question: req.message.clone(),
-                    ..Default::default()
-                },
-            )
-        } else {
-            tddy_core::pending_question::clear_pending_question(&session_dir)
-        }
-        .map_err(|e| Status::internal(format!("failed to record the pending question: {}", e)))?;
+        let change = record_pending_question(&session_dir, &req, asked)?;
 
         log::debug!(
             target: "tddy_daemon::connection_service",
@@ -86,22 +162,44 @@ impl ActivityServiceImpl {
         //
         // The notification names `req.os_user` as its owner — the same user whose sessions
         // directory the hook token was just checked against — so the stream can hand it to that
-        // operator's clients and to no one else's.
-        self.publish_for_session(&sessions_base, &req.session_id, |label| {
-            notification_for_activity_status(
+        // operator's clients and to no one else's. A recorded question is one notification of its
+        // own; the status it came with is not published a second time.
+        self.publish_for_session(&sessions_base, &req.session_id, |label| match &change {
+            PendingChange::Recorded(question) => Some(notification_for_pending_question(
+                &req.session_id,
+                &req.os_user,
+                label,
+                question,
+                now,
+            )),
+            PendingChange::Kept(question) => notification_for_activity_status(
                 &req.session_id,
                 &req.os_user,
                 label,
                 &req.status,
-                tddy_daemon_kernel::now_unix_ms(),
+                now,
             )
+            .map(|notification| SessionNotification {
+                question: Some(question_notice_for(question)),
+                ..notification
+            }),
+            PendingChange::Plain => notification_for_activity_status(
+                &req.session_id,
+                &req.os_user,
+                label,
+                &req.status,
+                now,
+            ),
         })
         .await;
 
+        let request_id = match change {
+            PendingChange::Recorded(question) => question.request_id,
+            PendingChange::Kept(_) | PendingChange::Plain => String::new(),
+        };
         Ok(Response::new(ReportSessionStatusResponse {
             ok: true,
-            // TODO(elicit-content): implement — the id of the question this report recorded.
-            request_id: String::new(),
+            request_id,
         }))
     }
 

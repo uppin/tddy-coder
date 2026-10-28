@@ -279,6 +279,38 @@ pub fn notification_for_activity_status(
     })
 }
 
+/// The notification a claude-cli session's pending question raises: one per question, attention
+/// required, and carrying what is asked (`#home-inbox` 3/8). The text is the sentence a drawer
+/// tooltip shows; a chat is sent [`QuestionAlert`](tddy_telegram_control) instead.
+pub fn notification_for_pending_question(
+    session_id: &str,
+    os_user: &str,
+    label: &str,
+    pending: &tddy_core::pending_question::PendingQuestion,
+    at_unix_ms: u64,
+) -> SessionNotification {
+    let text = match pending.tool_name.as_str() {
+        tool if tool == tddy_core::ASK_USER_QUESTION_TOOL => {
+            format!("🔔 Session {label} asks: {}", pending.summary())
+        }
+        tool => format!(
+            "🔔 Session {label} wants to run {tool}: {}",
+            pending.summary()
+        ),
+    };
+    SessionNotification {
+        session_id: session_id.to_string(),
+        os_user: os_user.to_string(),
+        label: label.to_string(),
+        kind: SessionNotificationKind::AttentionRequired,
+        source: SessionNotificationSource::PendingQuestion,
+        text,
+        agent: None,
+        at_unix_ms,
+        question: Some(crate::pending_question_notice::question_notice_for(pending)),
+    }
+}
+
 /// The notification the agent's own tool call raises. Always activity: a tool call is the agent
 /// working, and no chat is disturbed by one.
 pub fn notification_for_agent_tool_call(
