@@ -112,6 +112,7 @@ fn build_harness(
             daemon_url: None,
             claude_home_dir: None,
             fullscreen: true,
+            answer_wait_secs: 120,
         }),
         ..Default::default()
     };

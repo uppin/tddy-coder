@@ -87,6 +87,7 @@ impl DaemonSessionHost {
             agent_conversation_frames: Arc::new(
                 tddy_daemon_kernel::conversation_frames::ConversationFrames::default(),
             ),
+            pending_answers: Arc::new(tddy_session_activity::pending_answers::PendingAnswers::new()),
             worktree_size_calculator,
             session_agent_inference: Arc::new(
                 crate::session_agent_inference::SessionAgentInferenceStore::new(),
@@ -375,6 +376,12 @@ impl DaemonSessionHost {
         &self,
     ) -> Arc<tddy_daemon_kernel::conversation_frames::ConversationFrames> {
         Arc::clone(&self.agent_conversation_frames)
+    }
+
+    /// The permission prompts this daemon's claude-cli hooks hold open, shared by
+    /// `AwaitQuestionAnswer` and the project-home `AnswerSessionPermission` tool (`#home-inbox` 6/8).
+    pub fn pending_answers(&self) -> Arc<tddy_session_activity::pending_answers::PendingAnswers> {
+        Arc::clone(&self.pending_answers)
     }
 
     /// Return the shared `TaskRegistry` so `main.rs` can pass it to other services.

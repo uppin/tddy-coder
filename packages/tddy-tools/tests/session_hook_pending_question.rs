@@ -11,6 +11,8 @@ fn the_hook() -> SessionHookArgs {
         os_user: "dev".to_string(),
         hook_token: "token-1".to_string(),
         event: String::new(),
+        await_answer: false,
+        await_timeout_secs: tddy_tools::session_hook::DEFAULT_AWAIT_TIMEOUT_SECS,
     }
 }
 

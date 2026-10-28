@@ -32,7 +32,7 @@ async-trait = "0.1"
 anyhow = "1"
 # The broadcast channel the notification stream fans out on, one per daemon, and the `rt` handle the
 # three relay tasks are spawned onto.
-tokio = { version = "1", features = ["rt", "sync"] }
+tokio = { version = "1", features = ["rt", "sync", "time"] }
 # A swallowed subscriber failure is only visible in the log, so the log line is the report.
 log = "0.4"
 # An ACP replay frame carries its `AcpAgentMessage` as encoded bytes — `Message::encode_to_vec`.
@@ -44,6 +44,10 @@ serde_json = "1"
 uuid = { version = "1", features = ["v4", "v7"] }
 chrono = { version = "0.4", default-features = false, features = ["clock"] }
 tddy-projects = { path = "../tddy-projects" }
+# `#coagents`' answering vocabulary — `PermissionRequestView`, `PermissionAnswer`,
+# `PermissionAnswering`, `AnsweredBy` — which `PendingAnswers` implements for a claude-cli child's
+# permission prompt (`#home-inbox` 6/8). Already in this crate's tree through tddy-daemon-sandbox.
+tddy-discovery = { path = "../tddy-discovery" }
 tddy-session-files = { path = "../tddy-session-files" }
 tddy-daemon-sandbox = { path = "../tddy-daemon-sandbox" }
 # `SessionRooms`: the port deleting a session closes its room through.

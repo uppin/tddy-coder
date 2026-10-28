@@ -65,6 +65,44 @@ pub struct SessionHookArgs {
     /// rely on stdin `hook_event_name` only.
     #[arg(long, default_value = "")]
     pub event: String,
+
+    /// On a `PermissionRequest`, wait for the session's orchestrator to answer after reporting
+    /// (`AwaitQuestionAnswer`), and print Claude's decision JSON when it does. The daemon decides
+    /// whether there is anyone to wait for; with nobody, or no answer in time, nothing is printed
+    /// and Claude shows its own prompt (`#home-inbox` 6/8).
+    #[arg(long)]
+    pub await_answer: bool,
+
+    /// How long the hook itself waits on `AwaitQuestionAnswer`, in seconds: past the daemon's own
+    /// deadline (`claude_cli.answer_wait_secs`) and inside Claude's `timeout` for the hook, so the
+    /// daemon answers `TIMED_OUT` first and Claude never kills a hook that is still waiting.
+    #[arg(long, default_value_t = DEFAULT_AWAIT_TIMEOUT_SECS)]
+    pub await_timeout_secs: u64,
+}
+
+/// [`SessionHookArgs::await_timeout_secs`] when the hook command names none: the default
+/// `answer_wait_secs` (120) plus five.
+pub const DEFAULT_AWAIT_TIMEOUT_SECS: u64 = 125;
+
+/// How an orchestrator's answer reached the hook: the `AwaitQuestionAnswer` response, and Claude's
+/// `permission_suggestions` from the hook's stdin, which an `allow_always` answer applies.
+///
+/// The decision is Claude Code's `PermissionRequest` hook output
+/// (<https://code.claude.com/docs/en/hooks> § PermissionRequest decision control):
+///
+/// - `allow_once` → `{"hookSpecificOutput":{"hookEventName":"PermissionRequest","decision":{"behavior":"allow"}}}`;
+/// - `allow_always` → the same, with `"updatedPermissions"` set to Claude's `permission_suggestions`;
+/// - a `reject_*` option → `"behavior":"deny"` with `"message"`;
+/// - `cancelled`, `TIMED_OUT`, `NO_ORCHESTRATOR` → `None`: nothing is printed, and Claude's own
+///   prompt follows.
+#[must_use]
+pub fn permission_decision_json(
+    answer: &tddy_service::proto::activity::AwaitQuestionAnswerResponse,
+    permission_suggestions: Option<&serde_json::Value>,
+) -> Option<String> {
+    // TODO(permission-answer): implement — the mapping above.
+    let _ = (answer, permission_suggestions);
+    None
 }
 
 /// The `ReportSessionStatus` request the hook event in `stdin_json` becomes, or `None` for an
@@ -162,6 +200,9 @@ async fn try_run_session_hook(args: SessionHookArgs) -> anyhow::Result<()> {
     }
 
     report_session_status(&args, &stdin_buf).await
+    // TODO(permission-answer): implement — with `--await-answer` on a `PermissionRequest`, decode
+    // the report's `request_id`, call `AwaitQuestionAnswer` within `--await-timeout-secs`, and print
+    // `permission_decision_json` (the only stdout this hook ever writes).
 }
 
 /// Send a `ReportSessionStatus` RPC for the status the hook event in `stdin_json` maps to.

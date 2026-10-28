@@ -21,6 +21,9 @@ tokio = { version = "1", features = ["rt", "macros", "fs", "sync", "time", "proc
 tddy-core = { path = "../tddy-core" }
 base64 = "0.22"
 tddy-task = { path = "../tddy-task" }
+# `PermissionAnswer`, the answer `AnswerSessionPermission` delivers (`#home-inbox` 6/8). Already in
+# this crate's tree.
+tddy-discovery = { path = "../tddy-discovery" }
 tddy-service = { path = "../tddy-service" }
 tddy-worktree-service = { path = "../tddy-worktree-service" }
 futures-util = "0.3"

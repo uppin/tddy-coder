@@ -4,7 +4,7 @@
 **Status:** 🚧 In Progress
 **Type:** Feature
 **Complexity**: 5 — six packages, the daemon's first hold-until-answered RPC, a hook mode that prints a decision (Claude's contract), authorization across two sessions, bounded timeouts on three layers
-**Stack:** `#home-inbox 6/8` — branch `feature/home-inbox/permission-answer`, base `feature/home-inbox/terminal-keys`
+**Stack:** `#home-inbox 6/8` (PR #771) — branch `feature/home-inbox/permission-answer`, base `feature/home-inbox/terminal-keys`
 **PRD:** [PRD-2026-10-25-permission-answer.md](../../ft/daemon/1-WIP/PRD-2026-10-25-permission-answer.md)
 
 ## Initial Discovery
@@ -92,15 +92,88 @@ State A below is distilled from that file. Do not duplicate grep traces or file 
 | `#start-parity 2/9` start-tool (#751) + `9/9` spawn-conversation (#758) | `orchestrator_session_id` and `orchestrator_daemon_instance_id` on every start; spawn-capable sessions as orchestrators | authorises by `orchestrator_session_id`; reads `orchestrator_daemon_instance_id` for presence | change how starts record the orchestrator |
 | `#start-parity 1/9` remote-targets (#750, merged) | the generic forward | `AnswerSessionPermission` is a target tool | change the forward |
 
+**Tests blocked on a parent (6e/6f, 2026-10-28).** The two `tddy-tools-cli` hook tests keep the
+real report, because the report's `request_id` is what the hook waits on: they go green only once
+`3/8` maps `PermissionRequest` to `WaitingForInput` and fills the tool fields. Every other test of
+this node writes `3/8`'s record directly and depends on this node alone.
+
 **Sequencing fact (replan 2026-10-26).** The `#start-parity` line predates `#coagents` on `master`,
 so this base lacks `tddy-discovery/src/subagent/permission.rs`. This node's pass 2 needs that line
 rebased onto `master` first. That rebase is `#start-parity`'s work, not this node's.
 
 ## Draft PR contract
 
-The first push publishes the proto RPC (regenerated), `PendingAnswers`, `OrchestratorPresence`,
-`answer_permission`, the hook flag, the config field, the tool (bodies `// TODO(permission-answer): implement`),
-and the failing tests.
+The first push publishes the surface below with bodies `// TODO(permission-answer): implement`, and
+the failing tests. Every stub refuses or answers `Unimplemented`; none panics.
+
+- **Proto** (`activity.proto`, TS regenerated):
+  - `rpc AwaitQuestionAnswer(AwaitQuestionAnswerRequest) returns (AwaitQuestionAnswerResponse)`.
+  - `AwaitQuestionAnswerRequest { session_id = 1, hook_token = 2, os_user = 3, request_id = 4, permission_suggestions_json = 5 }`.
+  - `enum AwaitQuestionOutcome { UNSPECIFIED = 0, ANSWERED = 1, NO_ORCHESTRATOR = 2, TIMED_OUT = 3 }`.
+  - `AwaitQuestionAnswerResponse { outcome = 1, option_id = 2, cancelled = 3, message = 4, answered_by = 5 }`.
+- **`tddy-discovery`**: `AnsweredBy::Orchestrator(String)` (the answering session id), with its
+  `name()` and `Display` (`orchestrator session <id>`) arms.
+- **`tddy-session-activity`**:
+  - `pending_answers::PendingAnswers`: `open(session_id, PermissionRequestView)`,
+    `open_request(id) -> Option<OpenRequest>`, `wait(id, Duration) -> WaitOutcome`,
+    `answer_with_message(&PermissionAnswer, AnsweredBy, Option<String>)`, and `impl PermissionAnswering`.
+    `WaitOutcome::{Answered(DeliveredAnswer { answer, by, message }), TimedOut}`.
+  - `orchestrator_presence::{OrchestratorPresence { async fn is_active(&str) -> bool }, NoOrchestratorIsActive}`.
+  - `answers`: `ALLOW_ONCE`, `ALLOW_ALWAYS`, `REJECT_ONCE`, `ANSWER_SESSION_QUESTION`;
+    `AnsweringCaller { session_id, daemon_instance_id }`;
+    `AnswerContext { sessions_base, this_daemon_instance_id, pending }`; `AnsweredPermission`;
+    `AnswerRefusal::{NotTheOrchestrator, AlreadyAnswered, UnknownRequest, NotAPermission, UnknownOption, Io}`
+    with its `Display`; `permission_request_view(&PendingQuestion, has_suggestions)`;
+    `answer_permission(ctx, caller, target, PermissionAnswer, Option<String>) -> Result<AnsweredPermission, AnswerRefusal>`.
+  - `AnswerWaitPorts { pending, presence, wait: Duration }` and `ActivityServiceImpl::with_question_answers`.
+- **`tddy-session-lifecycle`** (wiring): `PeerRoutedActivity::await_question_answer` (not routed);
+  `DaemonSessionHost::pending_answers()`; `ServedTerminalPresence` (stub); `activity_service()`
+  applies `with_question_answers`.
+- **`tddy-daemon-kernel`**: `ClaudeCliConfig.answer_wait_secs` (serde default 120),
+  `DEFAULT_ANSWER_WAIT_SECS`, `DaemonConfig::claude_cli_answer_wait_secs()`.
+- **`tddy-tools`**: `session-hook --await-answer` and `--await-timeout-secs` (default
+  `DEFAULT_AWAIT_TIMEOUT_SECS` = 125); `permission_decision_json(&AwaitQuestionAnswerResponse, Option<&Value>) -> Option<String>`.
+- **`tddy-tool-engine`**: `project_home_answer_tools`: `ANSWER_SESSION_PERMISSION`,
+  `is_project_home_answer_tool`, `project_home_answer_tool_defs`, `AnswerPermissionArgs`,
+  `ProjectHomeAnswerPort::answer_permission` (default refuses), `execute_project_home_answer_tool`.
+
+### Deviations from the plan (found at 6d, approved 2026-10-28)
+
+1. `PermissionAnswering::answer_as` carries no message, so `PendingAnswers::answer_with_message` is
+   the real entry and `answer_as` delegates with `None`. `deferred_to_user` is always `false`;
+   `pending_request()` is the earliest-opened open request across the daemon. An `answered` map
+   outlives the waiter, so a second answer names the first answerer.
+2. The registry and presence reach `ActivityServiceImpl` through the builder `with_question_answers`,
+   not `ActivityPorts`, so existing `ActivityPorts` literals are unchanged.
+3. `DaemonConfig.claude_cli` is `tddy-daemon-kernel/src/config/agent_cli.rs`'s `ClaudeCliConfig`; two
+   `tddy-telegram-control` test literals gained `answer_wait_secs: 120`.
+4. **Green's work:** the hook settings — `--await-answer` on the `PermissionRequest` entry and
+   `timeout = answer_wait_secs + 10` — need `answer_wait_secs` on `HookCommandParams`, whose literals
+   live in `tddy-agent-launch`, `tddy-session-split` and the cursor hooks. The entry itself is
+   `3/8`'s and still a stub.
+5. Extra hook flag `--await-timeout-secs`: the hook's own client bound, between the daemon's deadline
+   and Claude's `timeout`, so the daemon answers `TIMED_OUT` before Claude kills the hook.
+6. Extra request field `permission_suggestions_json = 5`: `3/8`'s record does not carry Claude's
+   suggestions and is not this node's to change. They offer `allow_always`, and the hook echoes them
+   back as `updatedPermissions`.
+7. `AnswerRefusal::UnknownRequest` also covers "no hook is waiting any more" (a timed-out wait).
+8. The hook's process test lives in `tddy-tools-cli` (it builds the binary), as `3/8`'s does.
+9. **Green's work:** registering the tool — `is_project_home_tool`, `is_project_home_target_tool`,
+   the `read_only.rs` pin, the catalog, `exec_tool_admission.rs`, `project_home_prompt.md` — and the
+   daemon-rpc `ProjectHomeAnswerPort` impl, as `5/8` left its own.
+10. Mechanical: `tddy-tools/tests/session_hook_pending_question.rs` gained the two new
+    `SessionHookArgs` fields; `connection_service.rs` grew by 3 lines (the `pending_answers` field).
+
+### Claude Code's `PermissionRequest` contract (https://code.claude.com/docs/en/hooks)
+
+- Input: `tool_name`, `tool_input`, optional `permission_suggestions` (permission-update entries such
+  as `{type: "addRules", rules: [{toolName, ruleContent}], behavior, destination}`).
+- Output: `{"hookSpecificOutput":{"hookEventName":"PermissionRequest","decision":{"behavior":"allow"|"deny", ...}}}`;
+  `updatedInput` and `updatedPermissions` for allow only, `message` and `interrupt` for deny only.
+- Exit 0 with no output is no decision, and the normal prompt follows; exit 2 is not honoured.
+  Default command-hook timeout is 600 s.
+- Mapping: `allow_once` → `allow`; `allow_always` → `allow` with `updatedPermissions` = the
+  suggestions; `reject_*` → `deny` with `message`; cancelled, `TIMED_OUT`, `NO_ORCHESTRATOR` → nothing.
 
 ## Green wave
 
@@ -136,23 +209,41 @@ home wakes it with allow/deny; Claude proceeds. No orchestrator, a dead orchestr
 
 ### Acceptance tests
 
-**`tddy-session-activity`**: `packages/tddy-session-activity/tests/permission_answer_acceptance.rs`
-- [ ] `an_orchestrated_childs_await_returns_allow_when_its_home_answers_allow`
-- [ ] `deny_with_a_message_returns_deny_with_that_message`
-- [ ] `with_no_answer_before_the_deadline_the_await_times_out`
-- [ ] `a_child_without_an_active_orchestrator_returns_no_orchestrator_at_once`
-- [ ] `another_home_an_unknown_id_and_an_already_answered_question_are_refused_and_the_waiter_keeps_waiting`
+Written and failing (6e, approved by the orchestrator 2026-10-28; the developer AFK).
 
-**`tddy-tools`**: `packages/tddy-tools/tests/session_hook_await_answer_acceptance.rs`
-- [ ] `an_answered_permission_prints_claudes_allow_decision_json_and_exits_zero`
-- [ ] `a_timeout_or_daemon_error_prints_nothing_and_exits_zero`
+**`tddy-session-activity`**: `packages/tddy-session-activity/tests/permission_answer_acceptance.rs` — the
+real handler, a fake presence port, an injected wait; the pending question is written directly.
+- [x] `an_orchestrated_childs_await_returns_allow_when_its_home_answers_allow` — fails: the hook never opens its wait
+- [x] `deny_with_a_message_returns_deny_with_that_message` — fails: the hook never opens its wait
+- [x] `with_no_answer_before_the_deadline_the_await_times_out` — fails: `AwaitQuestionAnswer` is `Unimplemented`
+- [x] `a_child_without_an_active_orchestrator_returns_no_orchestrator_at_once` (home not running / none / another host) — fails: `Unimplemented`
+- [x] `another_home_an_unknown_id_and_an_already_answered_question_are_refused_and_the_waiter_keeps_waiting` — fails: the hook never opens its wait
 
-**`tddy-daemon-rpc`**: `packages/tddy-daemon-rpc/tests/project_home_answer_permission_acceptance.rs`
-- [ ] `answer_session_permission_from_the_childs_home_wakes_the_waiting_hook`
-- [ ] `a_caller_that_is_not_the_childs_orchestrator_is_refused_as_permission_denied`
-- [ ] `a_spawn_capable_orchestrator_answers_its_own_child`
-- [ ] `a_second_answer_is_refused_naming_who_answered_first`
-- [ ] `a_question_question_is_refused_naming_answer_session_question`
+**`tddy-tools-cli`**: `packages/tddy-tools-cli/tests/session_hook_await_answer_acceptance.rs` (moved from
+`tddy-tools`, which builds no binary) — process level against a fake `/rpc` router.
+**Blocked on `3/8`**: its `activity_status_from_hook_with_tool` stub maps `PermissionRequest` to no
+status, so the hook sends no report and has no `request_id` to wait on.
+- [x] `an_answered_permission_prints_claudes_allow_decision_json_and_exits_zero` — fails: stdout is empty
+- [x] `a_timeout_or_daemon_error_prints_nothing_and_exits_zero` (timed out / no orchestrator / daemon error) — fails: `AwaitQuestionAnswer` never asked
+
+**`tddy-daemon-rpc`**: `packages/tddy-daemon-rpc/tests/project_home_answer_permission_acceptance.rs` — the
+real `activity_service()` and `ExecuteTool`; orchestrators run a stand-in terminal; the orchestrator
+and pending question are written directly.
+- [x] `answer_session_permission_from_the_childs_home_wakes_the_waiting_hook` — fails: the hook never opens its wait
+- [x] `a_caller_that_is_not_the_childs_orchestrator_is_refused_as_permission_denied` — same
+- [x] `a_spawn_capable_orchestrator_answers_its_own_child` — same
+- [x] `a_second_answer_is_refused_naming_who_answered_first` — same
+- [x] `a_question_question_is_refused_naming_answer_session_question` — fails: the tool is unregistered, so the read-only guard refuses it
+
+### Unit tests (6f)
+
+| Surface | File | Pins | Now |
+|---|---|---|---|
+| `permission_decision_json` | `packages/tddy-tools/tests/permission_decision_json.rs` | `allow_once` → plain allow; `allow_always` → allow + `updatedPermissions`; `reject_once` → deny + message; one line; timed out / no orchestrator / cancelled / unspecified → `None` | 4 fail, 4 pass (the `None` guards) |
+| `permission_request_view` | `packages/tddy-session-activity/tests/permission_request_view.rs` | title, ACP kind (`execute`/`edit`/`read`/`other`), parsed input or its text, options in order with `allow_always` only with suggestions | 7 fail |
+| `AnswerRefusal` `Display` | `packages/tddy-session-activity/tests/answer_refusal_messages.rs` | every refusal's exact text | 6 pass (implemented with the surface) |
+| `PendingAnswers` | `packages/tddy-session-activity/tests/pending_answers_unit.rs` | open, answer wakes the wait, answer before the wait, second answer refused naming the first, unknown request refused, deadline closes the request | 6 fail, 1 pass (`deferred_to_user` is false) |
+| `answer_wait_secs` | `packages/tddy-daemon-kernel/tests/answer_wait_secs_config.rs` | serde default 120; absent section → 120; configured value read | 1 fails, 2 pass (defaults) |
 
 ### Test level decisions
 | Aspect | Level | Rationale |
@@ -171,6 +262,12 @@ home wakes it with allow/deny; Claude proceeds. No orchestrator, a dead orchestr
   and an ACP subagent's request in one shape, and both refuse a second answer the same way.
   `ParkedPermissions` itself is not reused: it parks an ACP turn in process, and this node holds
   a hook process across an RPC.
+- **`ActivityServiceImpl::new` holds no hook** (accepted 2026-10-28): it defaults to
+  `AnswerWaitPorts::default()`, whose `NoOrchestratorIsActive` answers `NO_ORCHESTRATOR` — the
+  designed outcome when no orchestrator is present, reported explicitly rather than masking
+  anything. The daemon wires `ServedTerminalPresence` through `with_question_answers`, and the
+  daemon-rpc acceptance tests go through the real `activity_service()`, so they pin that wiring.
+  Not a fallback; green does not revisit it.
 - **Same host only, for now.** The await waits only while the orchestrator runs on the child's
   host. An orchestrator on another host (`orchestrator_daemon_instance_id` set, `#start-parity 2/9`)
   gets `NO_ORCHESTRATOR`, so Claude's own prompt appears. Asking a peer daemon whether its session is
@@ -182,10 +279,10 @@ home wakes it with allow/deny; Claude proceeds. No orchestrator, a dead orchestr
 - [x] Cross-check `packages/*/docs/code-issues/` and `docs/dev/todo/` for items this change touches (Step 2b)
 - [x] Create/update PRD documentation
 - [x] Create changeset (this document)
-- [ ] Create failing acceptance tests
-- [ ] Run acceptance tests (verify they fail)
-- [ ] USER REVIEW — acceptance tests
-- [ ] TDD Red — write failing unit/integration tests
+- [x] Create failing acceptance tests
+- [x] Run acceptance tests (verify they fail)
+- [x] USER REVIEW — acceptance tests (reviewed by the orchestrator, developer AFK, 2026-10-28)
+- [x] TDD Red — write failing unit/integration tests
 - [ ] TDD Green — implement with quality code
 - [ ] Update documentation with progress
 - [ ] Repeat Red→Green→Update cycle until feature complete
