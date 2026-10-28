@@ -44,6 +44,20 @@ impl DaemonSessionHost {
         )
     }
 
+    /// The single-screen control lease of every terminal this daemon serves — the one
+    /// `terminal_session.TerminalSessionService` claims and verifies against, so a holder named
+    /// here is the holder a browser sees.
+    ///
+    /// Public so a daemon-side writer that is not a terminal RPC — the project-home agent's
+    /// `ClaimSessionTerminal` and `SendSessionKeys` — takes and checks the same lease the browsers
+    /// fight over, rather than keeping a lookalike (`#home-inbox` 5/8).
+    #[must_use]
+    pub fn terminal_control(&self) -> Arc<dyn TerminalControl> {
+        Arc::new(CliManagerTerminalControl::new(Arc::clone(
+            &self.claude_cli_manager,
+        )))
+    }
+
     /// The jailed sessions this daemon runs, as the terminal surface resolves them.
     ///
     /// Public for the same reason [`Self::terminal_session_service`] is: a jail's PTY is reached
@@ -85,9 +99,7 @@ impl DaemonSessionHost {
             github_users: self.user_resolver.clone(),
             os_users: Arc::new(move |github_user: &str| config.os_user_for_github(github_user)),
             terminals: Arc::new(self.terminal_sessions()),
-            control: Arc::new(CliManagerTerminalControl::new(Arc::clone(
-                &self.claude_cli_manager,
-            ))),
+            control: self.terminal_control(),
             roster: Arc::new(CliManagerTerminalRoster::new(
                 Arc::clone(&self.claude_cli_manager),
                 self.config.clone(),

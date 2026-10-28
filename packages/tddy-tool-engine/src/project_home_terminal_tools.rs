@@ -10,6 +10,11 @@
 //! to name the host its session runs on, and the daemon forwards such a call to that host whole
 //! (`#start-parity` 1/9), so the port below is only ever asked about this host's terminals.
 //!
+//! `ClaimSessionTerminal` and `SendSessionKeys` are the other two tools of this module
+//! (`#home-inbox` 5/8): the agent claims the target's terminal control lease, then types into it for as
+//! long as it holds that lease. Both are target tools too, and both run on the host that owns the
+//! terminal, which is where the lease lives.
+//!
 //! Feature doc: docs/ft/daemon/project-concept.md § Project-home tools.
 
 use async_trait::async_trait;
@@ -25,15 +30,29 @@ use crate::project_home_tools::{
 use crate::ToolOutcome;
 
 pub const READ_SESSION_TERMINAL: &str = "ReadSessionTerminal";
+pub const CLAIM_SESSION_TERMINAL: &str = "ClaimSessionTerminal";
+pub const SEND_SESSION_KEYS: &str = "SendSessionKeys";
 
-/// Whether `name` is [`READ_SESSION_TERMINAL`].
-pub fn is_project_home_terminal_tool(name: &str) -> bool {
-    name == READ_SESSION_TERMINAL
+/// The screen id a project-home session holds a terminal's control lease under.
+///
+/// Distinct per home session, so a browser's "who has control" names the agent that took it and two
+/// homes never share a lease.
+fn project_home_screen_id(home: &HomeCaller) -> String {
+    format!("project-home:{}", home.session_id)
 }
 
-/// The tool's definition.
+/// Whether `name` is one of the terminal tools: [`READ_SESSION_TERMINAL`],
+/// [`CLAIM_SESSION_TERMINAL`] or [`SEND_SESSION_KEYS`].
+pub fn is_project_home_terminal_tool(name: &str) -> bool {
+    matches!(
+        name,
+        READ_SESSION_TERMINAL | CLAIM_SESSION_TERMINAL | SEND_SESSION_KEYS
+    )
+}
+
+/// The tools' definitions.
 pub fn project_home_terminal_tool_defs() -> Vec<ToolDef> {
-    vec![tool_def(
+    let mut defs = vec![tool_def(
         READ_SESSION_TERMINAL,
         "Read what a session of this project shows on its main terminal right now: the visible rows of the screen it is on (the alternate screen while a full-screen TUI runs), each with trailing whitespace trimmed, and the cursor's row, column and visibility, zero-based. Answers lines, cursor {row, col, visible}, cols, rows and offset (the position in the terminal's output stream the text corresponds to). Text only: no scrollback, colours or attributes. Reading sends no input and disturbs no attached screen. A session with no live terminal, or whose terminal has not reported its size, is refused with the reason.",
         json!({
@@ -47,7 +66,53 @@ pub fn project_home_terminal_tool_defs() -> Vec<ToolDef> {
             },
             "required": ["session_id"]
         }),
-    )]
+    )];
+    defs.extend(terminal_keys_tool_defs());
+    defs
+}
+
+fn terminal_keys_tool_defs() -> Vec<ToolDef> {
+    vec![
+        tool_def(
+            CLAIM_SESSION_TERMINAL,
+            "Take control of a session's main terminal so SendSessionKeys can type into it. Taking control takes it from whoever holds it: a person watching the session in the browser drops to watch-only and sees that you took control, and they take it back by claiming it themselves. Claim only when you mean to act, and never to fight a person for control. Control stays yours until a person takes it; there is no release. Answers holder, the screen id you now hold it under.",
+            json!({
+                "type": "object",
+                "properties": {
+                    "session_id": {
+                        "type": "string",
+                        "description": "The session of this project whose terminal to take control of, as ListProjectSessions reports it."
+                    },
+                    TARGET_DAEMON_INSTANCE_ID: target_host_property()
+                },
+                "required": ["session_id"]
+            }),
+        ),
+        tool_def(
+            SEND_SESSION_KEYS,
+            "Type into a session's main terminal while you hold its control (ClaimSessionTerminal). Refused, naming who holds control, when you do not, and nothing is sent: claim it again. `text` is typed first, as a bracketed paste when the terminal has enabled that; `keys` follow in order. Key names: Enter, Escape, Tab, BTab, Backspace, Delete, Up, Down, Left, Right, Home, End, PageUp, PageDown, Space, C-a to C-z (control keys, C-c interrupts), F1 to F12. An unknown key name is refused before anything is sent. Read the result with ReadSessionTerminal.",
+            json!({
+                "type": "object",
+                "properties": {
+                    "session_id": {
+                        "type": "string",
+                        "description": "The session of this project to type into, as ListProjectSessions reports it."
+                    },
+                    "text": {
+                        "type": "string",
+                        "description": "Text to type first. Does not press Enter: name Enter in keys."
+                    },
+                    "keys": {
+                        "type": "array",
+                        "items": { "type": "string" },
+                        "description": "Named keys to press, in order, after the text."
+                    },
+                    TARGET_DAEMON_INSTANCE_ID: target_host_property()
+                },
+                "required": ["session_id"]
+            }),
+        ),
+    ]
 }
 
 /// What the tool needs from the daemon beyond the target resolver: the screen of a session's main
@@ -57,6 +122,37 @@ pub trait ProjectHomeTerminalPort: ProjectHomePort {
     /// The visible text of `target`'s main terminal. An error names why there is none: the session
     /// has no live terminal, or the terminal's size is not yet known.
     async fn read_terminal(&self, target: &SessionTarget) -> anyhow::Result<TextGrid>;
+
+    /// Take the control lease of `target`'s terminals for `screen_id`, stealing it from whoever
+    /// holds it, and keep the issued token on this host on behalf of the calling home session. The
+    /// token is never returned. An error names why it could not be taken.
+    ///
+    /// `#home-inbox` 5/8. The default refuses, so a port that does not serve terminal input (and
+    /// the fakes `#home-inbox` 2/8's tests build) need not name it.
+    async fn claim_terminal(&self, target: &SessionTarget, screen_id: &str) -> Result<(), String> {
+        // TODO(terminal-keys): implement — `TerminalControl::claim(target, screen_id, steal = true)`
+        // and remember the token under the confirmed caller and the target.
+        let _ = (target, screen_id);
+        Err("claim_terminal: not implemented".to_string())
+    }
+
+    /// Write `bytes` to `target`'s main terminal, provided `screen_id`'s token is the session's
+    /// current lease. The lease is verified explicitly, also for a jailed terminal whose own input
+    /// path does not check it. An error names why nothing was written, and the current holder when
+    /// that is why.
+    ///
+    /// `#home-inbox` 5/8; the default refuses, as for [`Self::claim_terminal`].
+    async fn send_keys(
+        &self,
+        target: &SessionTarget,
+        screen_id: &str,
+        bytes: Vec<u8>,
+    ) -> Result<(), String> {
+        // TODO(terminal-keys): implement — verify the remembered token against the lease, then
+        // `TerminalSession::send_input` on `main`.
+        let _ = (target, screen_id, bytes);
+        Err("send_keys: not implemented".to_string())
+    }
 }
 
 #[derive(Deserialize)]
@@ -81,6 +177,9 @@ pub async fn execute_project_home_terminal_tool(
         Ok(v) => v,
         Err(e) => return ToolOutcome::err(format!("invalid args_json: {e}")),
     };
+    if tool_name != READ_SESSION_TERMINAL {
+        return execute_terminal_keys_tool(port, home, tool_name, args).await;
+    }
     let args: ReadTerminalArgs = match serde_json::from_value(args) {
         Ok(a) => a,
         Err(e) => {
@@ -111,4 +210,19 @@ fn grid_answer(grid: &TextGrid) -> Value {
         "rows": grid.rows,
         "offset": grid.offset,
     })
+}
+
+/// Run [`CLAIM_SESSION_TERMINAL`] or [`SEND_SESSION_KEYS`] for `home`: resolve the target, then take
+/// or use the lease under [`project_home_screen_id`]. `args` is the call's parsed argument object.
+async fn execute_terminal_keys_tool(
+    port: &dyn ProjectHomeTerminalPort,
+    home: &HomeCaller,
+    tool_name: &str,
+    args: Value,
+) -> ToolOutcome {
+    // TODO(terminal-keys): implement — `ClaimSessionTerminal` answers `{holder}`; `SendSessionKeys`
+    // reads the grid's `bracketed_paste` only when `text` is given, `encode_keys`, then
+    // `port.send_keys`.
+    let _ = (port, home, args, project_home_screen_id);
+    ToolOutcome::err(format!("{tool_name}: not implemented"))
 }

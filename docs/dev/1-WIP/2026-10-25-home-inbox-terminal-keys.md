@@ -52,13 +52,34 @@ State A below is distilled from that file. Do not duplicate grep traces or file 
 | Parent node | What it delivers | How this PR consumes it | This PR does NOT |
 |---|---|---|---|
 | `#home-inbox 2/8` terminal-read | `project_home_terminal_tools` module + `ProjectHomeTerminalPort`, the store accessor, `TextGrid.bracketed_paste`, `ReadSessionTerminal` | adds two tools to that module and two methods to the port; reads `bracketed_paste` before encoding; acceptance tests verify through `ReadSessionTerminal` | change `ReadSessionTerminal`, `TextGrid`, `text_grid`, or the store accessor |
+| `#home-inbox 2/8` terminal-read — **green, not only its contract** | `DaemonProjectHome: ProjectHomeTerminalPort`, `ExecToolRpcHandler::from_host` taking `terminal_sessions()`, the registration points `2/8` lists, `TerminalCapture::text_grid` (real), and the `tddy-terminal-rpc` normal dependency of `tddy-daemon-rpc` | green here cannot start before `2/8`'s green. `SendSessionKeys` reads `bracketed_paste` through `read_terminal` when `text` is given; acceptance test 1's last step reads the screen through `ReadSessionTerminal` | add the `tddy-terminal-rpc` dependency or the terminal store to the handler itself |
 | `#term-snapshot 1/4` (#760, merged) | the screen model and sniffer | indirectly, through `2/8` | — |
 | `#start-parity 1/9` remote-targets (#750, merged) | the generic forward and the caller confirmed at the owning daemon | declares both tools target tools; keys leases by the confirmed caller | change the forward |
 
 ## Draft PR contract
 
-The first push publishes `encode_keys`, the two tool constants/defs, the port methods, the lease
-store type, `terminal_control()` (bodies `// TODO(terminal-keys): implement`), pins, and the failing tests.
+The first push publishes `encode_keys`, the two tool constants/defs, the two port methods (with
+refusing default bodies), the lease store type and `terminal_control()` (bodies
+`// TODO(terminal-keys): implement`, except `terminal_control()`, which is real), and the failing tests.
+
+It deliberately does **not** register the tools and carries **no pins**, as `2/8` does not. The
+pin lists also contain `ReadSessionTerminal`, which `2/8` has not registered, and registration needs
+`DaemonProjectHome: ProjectHomeTerminalPort`, which is `2/8`'s green. Left to green:
+
+- the tools in `project_home_tool_defs_with` (so the offered catalog), `is_project_home_tool`,
+  `is_project_home_target_tool` and `is_project_home_allowed_tool`;
+- the `run_locally` and caller-held-elsewhere predicates in `tddy-daemon-rpc`;
+- `DaemonProjectHome`'s `claim_terminal` and `send_keys`, and `HomeTerminalLeases` as a field of
+  `ExecToolRpcHandler` (built in `from_host` beside the terminal control);
+- the pins: `read_only.rs`, `exec_tool_admission.rs`, `project_home_session_tools_acceptance.rs`,
+  `project_home_target_host.rs` and `project_home_prompt.md`.
+
+No existing pin test is red on this branch.
+
+**Green must carry the caller's daemon instance through.** `home_caller_confirmed_at_owner`
+(`exec_tool/project_home_remote.rs`) returns a `HomeCaller` without the daemon that owns the calling
+session, and `HomeTerminalClaimKey` needs it. A caller held here is keyed by this host's own instance.
+`DaemonProjectHome` carries it from the two places that build it.
 
 ## Green wave
 
@@ -102,10 +123,21 @@ writes them; a browser steal makes the next send fail naming the holder.
 - [ ] `an_unknown_key_name_is_refused_and_writes_nothing`
 - [ ] `the_claim_broadcasts_a_control_change_naming_the_project_home_screen`
 - [ ] `a_jailed_childs_terminal_follows_the_same_rules`
+- [ ] `a_session_on_another_host_is_claimed_and_typed_into_on_that_host` (added in pass 2: the replan's cross-host rule, which the six above never reach)
+- [ ] `another_home_that_never_claimed_cannot_type_with_the_first_homes_claim` (added in pass 2: the lease is keyed by caller)
+
+**Failing now** because `ClaimSessionTerminal` and `SendSessionKeys` are not registered: the daemon
+answers `PermissionDenied: … a project-home session is read-only`. Test 1's last step reads the child's
+screen through `ReadSessionTerminal`, which is blocked on `2/8`'s green (see `## Dependencies`); the
+other seven do not read it. The stand-in TUI is a raw-mode shell script that records every byte it is
+typed into a file; the jailed child is a registered jail whose stdin channel the test reads.
 
 ### Unit tests
 
-- [ ] `terminal_keys`: every named key's bytes; `C-c` = `0x03`; text with newlines as bracketed paste vs raw; empty input; unknown name.
+All written and failing (pass 2, 6f); they go green with the implementation.
+
+- [ ] `tddy-tool-engine`, `packages/tddy-tool-engine/tests/terminal_keys.rs` (16): every named key's bytes (editing keys, navigation keys, `C-a`…`C-z`, `F1`…`F12`); keys in the order named; text raw and as a bracketed paste; a newline in raw text is `\r`, in a paste verbatim; text before keys; an unknown or near-miss name is refused naming it; one unknown name among known ones refuses the whole request; a request with nothing to type is refused. Fail with "encode_keys: not implemented".
+- [ ] `tddy-daemon-rpc`, `packages/tddy-daemon-rpc/tests/home_terminal_leases.rs` (6): a remembered token is given back; none for a claim never made; a new claim replaces the old token; no sharing across caller session, caller daemon instance or target.
 
 ### Test level decisions
 | Aspect | Level | Rationale |
@@ -114,6 +146,19 @@ writes them; a browser steal makes the next send fail naming the holder.
 | Lease + write | Integration over the exec-tool handler with a real PTY and the real lease | The rule is the behaviour |
 
 ## Decisions & Trade-offs
+
+Pass 2 (2026-10-28) deviations from the plan, each from reading the code the plan builds on:
+
+1. `claim_terminal` and `send_keys` are on `ProjectHomeTerminalPort` with **refusing default bodies**. Required methods would break `2/8`'s own fake port in `tests/project_home_terminal_tools.rs` and its `DaemonProjectHome` impl. Green removes the defaults.
+2. **No registration and no pins** in the first push (see `## Draft PR contract`).
+3. `HomeTerminalLeases` is **not yet a field of `ExecToolRpcHandler`**: it would be dead code now and would conflict with `2/8`'s green edits to `from_host`. Wired at green. It is `pub` in `pub mod exec_tool::home_terminal_leases`, with `HomeTerminalClaimKey { caller_daemon_instance_id, caller_session_id, target_session_id }`.
+4. The key carries the **caller's daemon instance**, which `home_caller_confirmed_at_owner` does not yet return (see `## Dependencies`).
+5. Lease semantics the tests rely on. `TerminalControl::verify` accepts any token while a session has no lease, so a send must check the remembered token first, then verify it, and also that the holder is the home's screen (a deleted session clears its lease). The **first** claim on a session with no holder broadcasts no `ControlChange` (`control_lease.rs`: only a steal does), so the broadcast test starts with a browser holding control.
+6. `DaemonSessionHost::terminal_control()` is real code, not a stub: the acceptance tests need it, and `terminal_session_ports` now uses it.
+
+**Refusal wording the acceptance tests pin.** No claim and no holder: contains `ClaimSessionTerminal`. Held by another screen (including a home that never claimed): contains that screen id and `claim` (for example "control is held by `<screen>`; claim it again"). Unknown key: contains the key name.
+
+**Encoding decisions the unit tests pin** (the PRD lists names, not bytes). Normal cursor mode: `Enter` `\r`, `Escape` `0x1b`, `Tab` `\t`, `BTab` `ESC[Z`, `Backspace` `0x7f`, `Delete` `ESC[3~`, arrows `ESC[A..D`, `Home` `ESC[H`, `End` `ESC[F`, `PageUp/Down` `ESC[5~`/`ESC[6~`, `F1`–`F4` `ESC O P..S`, `F5`–`F12` `ESC[15~ 17~ 18~ 19~ 20~ 21~ 23~ 24~`. Key names are case-sensitive. Raw text turns each line break into `\r`; a paste carries the text verbatim. A request with no text and no keys is refused ("nothing to send").
 
 - Claim-then-send with the lease (developer, 2026-10-25): the agent claims; a person reclaims by the
   existing steal; no release tool.
@@ -125,10 +170,10 @@ writes them; a browser steal makes the next send fail naming the holder.
 - [x] Cross-check `packages/*/docs/code-issues/` and `docs/dev/todo/` for items this change touches (Step 2b)
 - [x] Create/update PRD documentation
 - [x] Create changeset (this document)
-- [ ] Create failing acceptance tests
-- [ ] Run acceptance tests (verify they fail)
-- [ ] USER REVIEW — acceptance tests
-- [ ] TDD Red — write failing unit/integration tests
+- [x] Create failing acceptance tests
+- [x] Run acceptance tests (verify they fail)
+- [x] USER REVIEW — acceptance tests — reviewed by the orchestrator, developer AFK, 2026-10-28
+- [x] TDD Red — write failing unit/integration tests
 - [ ] TDD Green — implement with quality code
 - [ ] Update documentation with progress
 - [ ] Repeat Red→Green→Update cycle until feature complete
