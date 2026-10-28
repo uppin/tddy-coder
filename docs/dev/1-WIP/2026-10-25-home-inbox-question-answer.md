@@ -1,9 +1,9 @@
 # Changeset: Project-home agent answers a session's question
 
 **Created:** 2026-10-25
-**Status:** 🚧 In Progress
+**Status:** 🚧 In Progress — pass 2 contract published; red phase done
 **Type:** Feature
-**Complexity**: 3 — four packages, reuses `6/8`'s wait machinery; the risk is the Claude-version-dependent decision format, settled in pass 2
+**Complexity**: 3 — six packages (four own surface), reuses `6/8`'s wait machinery; the risk is the Claude-version-dependent decision format, settled in pass 2
 **Stack:** `#home-inbox 8/8` — branch `feature/home-inbox/question-answer`, base `feature/home-inbox/home-wait`
 **PRD:** [PRD-2026-10-25-question-answer.md](../../ft/daemon/1-WIP/PRD-2026-10-25-question-answer.md)
 
@@ -29,11 +29,20 @@ State A below is distilled from that file. Do not duplicate grep traces or file 
 
 ## Responsibility
 
-- `tddy_session_activity::answers::{answer_question(caller_home, target, request_id, answers: Vec<QuestionAnswer { question_index, selected: Vec<String>, other: Option<String> }>), validate_question_answers(&PendingQuestion, &[QuestionAnswer]) -> Result<(), String>}`.
-- Proto: `AwaitQuestionAnswerResponse.answers = 4` (`repeated QuestionAnswer`).
-- `tddy_tools::session_hook::question_decision::{encode_question_decision(&PendingQuestion, &[QuestionAnswer]) -> String}` — the mechanism chosen in pass 2 (`updatedInput` vs deny-with-answers) after verifying the installed Claude Code; the build is recorded in Decisions.
-- Hook: `PreToolUse(AskUserQuestion)` runs `--await-answer` with `timeout = answer_wait_secs + 10`.
-- Tool `AnswerSessionQuestion(session_id, daemon_instance_id?, request_id, answers)` in `project_home_answer_tools.rs`; port `ProjectHomeAnswerPort::answer_question`.
+The surface as published in pass 2 (bodies `// TODO(question-answer): implement`):
+
+- `tddy_session_activity::answers` (`src/answers/question.rs`, re-exported):
+  `answer_question(&AnswerContext, &AnsweringCaller, target, request_id, Vec<QuestionAnswer>) -> Result<AnsweredQuestion, AnswerRefusal>`,
+  `validate_question_answers(&PendingQuestion, &[QuestionAnswer]) -> Result<(), String>`,
+  `question_tool_call_id(request_id) -> String` (`question:<id>`),
+  `answered_question_output(answered_by, &[QuestionAnswer]) -> Value`,
+  `AnsweredQuestion`, `ANSWER_SESSION_PERMISSION`, and `QuestionAnswer` (the proto message, re-exported).
+  `AnswerRefusal` gains `NotAQuestion`, `InvalidAnswers { request_id, reason }`, `NoRequestId { session_id }`.
+- `tddy_session_activity::pending_answers` (`src/pending_answers/question.rs`): `PendingAnswers::{open_question, open_question_request, wait_for_question, answer_question_with, question_answered_by}`, `OpenQuestion`, `QuestionWaitOutcome`, `DeliveredQuestionAnswers`; the waiters live in a private `QuestionSlots` beside `6/8`'s permission waiters.
+- Proto (`activity.proto`): `message QuestionAnswer { uint32 question_index = 1; repeated string selected = 2; optional string other = 3; }` and `AwaitQuestionAnswerResponse.answers = 6` (4 and 5 are `message` and `answered_by`).
+- `tddy_tools::session_hook::question_decision::encode_question_decision(&serde_json::Value /* the hook's tool_input */, &[QuestionAnswer]) -> Option<String>` — the `updatedInput` mechanism, verified on Claude Code 2.1.312 (Decisions). `None` prints nothing.
+- Tool `AnswerSessionQuestion(session_id, daemon_instance_id?, request_id, answers)` in `project_home_answer_tools.rs`: `ANSWER_SESSION_QUESTION`, its def (returned by `project_home_answer_tool_defs()`, accepted by `is_project_home_answer_tool`), `AnswerQuestionArgs`, `QuestionAnswerArg`, and port method `ProjectHomeAnswerPort::answer_question` (default refuses).
+- **Green work, no surface in the contract:** `PreToolUse(AskUserQuestion)` runs `--await-answer` with `timeout = answer_wait_secs + 10` (`claude_hooks.rs`); the question branch of the hook's await mode and of `await_question_answer_impl`; wiring `AnswerSessionQuestion` into dispatch, the catalog pins and `project_home_prompt.md`.
 
 ## Boundaries
 
@@ -51,10 +60,23 @@ State A below is distilled from that file. Do not duplicate grep traces or file 
 | `#start-parity 6/9` session-follow (#755) | `PendingQuestion` and `ReadSessionActivity` | the home agent reads the question it answers there; answers are validated against the record | change either |
 | `#home-inbox 3/8` elicit-content | question `PendingQuestion` (questions, options, `multi_select`) and its hook entry | validates answers against it; extends the entry's command | change capture |
 
+**Sequencing (recorded in pass 2).** `6/8`'s green owns wiring `AnswerSessionPermission` into the
+daemon's dispatch and the catalog; this node's green wires only `AnswerSessionQuestion`, and runs
+**after** `6/8`'s green and `3/8`'s. Until then these acceptance tests are blocked: the await
+handler's body (`6/8`), the hook's await mode (`6/8`), the `PreToolUse(AskUserQuestion)` status
+mapping that makes the hook report at all (`3/8`).
+
+**Additive edits to parent files (accepted):** `pending_answers.rs` (a `mod` and one private field),
+`answers.rs` (a `mod`, a `pub use`, three `AnswerRefusal` variants), `project_home_answer_tools.rs`
+(a second def, the name in `is_project_home_answer_tool`, a port method), and `..Default::default()`
+in the five `AwaitQuestionAnswerResponse` literals of `6/8`'s tests the new proto field broke.
+
 ## Draft PR contract
 
-The first push publishes `answer_question`/`validate_question_answers`, the proto field, the
-encoder signature, the tool (bodies `// TODO(question-answer): implement`), and the failing tests.
+The first push publishes the surface listed under Responsibility (bodies
+`// TODO(question-answer): implement`, never a panic) and the failing tests below. A stub that must
+not fail open does not: `validate_question_answers` returns `Err`, `answer_question` a refusal,
+`encode_question_decision` `None`, the registry methods refuse or time out.
 
 ## Green wave
 
@@ -88,17 +110,26 @@ those answers.
 
 ### Acceptance tests
 
-**`tddy-session-activity`**: `packages/tddy-session-activity/tests/question_answer_acceptance.rs`
-- [ ] `an_orchestrated_childs_question_await_returns_the_home_agents_answers`
-- [ ] `an_unknown_question_index_an_unoffered_label_or_two_selections_on_a_single_choice_question_are_refused_and_the_waiter_keeps_waiting`
-- [ ] `answer_session_question_on_a_permission_question_is_refused_naming_answer_session_permission`
+Approved by the orchestrator (developer AFK). Each fails now; "blocked" = fails before reaching this node's own code.
 
-**`tddy-tools`**: `packages/tddy-tools/tests/session_hook_question_answer_acceptance.rs`
-- [ ] `an_answered_question_prints_the_decision_that_hands_claude_those_answers` (pins the chosen format)
-- [ ] `with_no_answer_before_the_deadline_the_question_hook_prints_nothing`
+**`tddy-session-activity`**: `packages/tddy-session-activity/tests/question_answer_acceptance.rs`
+- [x] `an_orchestrated_childs_question_await_returns_the_home_agents_answers` — also pins the child's `question:<id>` record. Fails: `the hook never opened its wait for req-which-language`. **Blocked on `6/8`** (`await_question_answer_impl`).
+- [x] `an_unknown_question_index_an_unoffered_label_or_two_selections_on_a_single_choice_question_are_refused_and_the_waiter_keeps_waiting` — same failure, **blocked on `6/8`**.
+- [x] `answer_session_question_on_a_permission_question_is_refused_naming_answer_session_permission` — fails: `expected a NotAQuestion refusal, got Err(UnknownRequest { … not implemented })`. Not blocked.
+
+**`tddy-tools-cli`** (not `tddy-tools`, as `6/8`'s): `packages/tddy-tools-cli/tests/session_hook_question_answer_acceptance.rs`
+- [x] `an_answered_question_prints_the_decision_that_hands_claude_those_answers` (pins the chosen format)
+- [x] `with_no_answer_before_the_deadline_the_question_hook_prints_nothing`
+  - Both fail: `the hook never asked AwaitQuestionAnswer; it called ["ReportAgentActivity"]`. **Blocked on `3/8`** (status mapping) **and `6/8`** (hook await mode).
 
 **`tddy-daemon-rpc`**: `packages/tddy-daemon-rpc/tests/project_home_answer_question_acceptance.rs`
-- [ ] `answer_session_question_from_the_childs_home_wakes_the_waiting_hook`
+- [x] `answer_session_question_from_the_childs_home_wakes_the_waiting_hook` — fails: `the hook of <child> never opened its wait`. **Blocked on `6/8`** (await body, dispatch and port wiring).
+
+### Unit / integration tests (6f)
+
+- `packages/tddy-session-activity/tests/question_answer_unit.rs` — 26 cases. Red (22): every `validate_question_answers` case (6 accepted, 8 refused with their reason), the registry cycle (open/answer/wake, answer before wait, first wins, timeout removes the waiter, question vs permission waiters) and the `question:<id>` record (id, output shape). Green already (4): the three `AnswerRefusal` Displays and a wait on an unopened request.
+- `packages/tddy-tools/tests/question_decision.rs` — 9 cases. Red (6): single, multi, free text alone, labels + free text, an unanswered question left out of the map, the call's other input kept. Green already (3, the stub's `None`): no answers, an unknown index, an input without `questions`.
+- `packages/tddy-tool-engine/tests/project_home_answer_question_tool.rs` — 4 cases: the name, the two defs in order, the question def's schema, the args parsing. All green: this surface is real. Dispatch through a port is covered by the acceptance tests; a `ProjectHomePort` fake is too wide for a unit test.
 
 ### Test level decisions
 | Aspect | Level | Rationale |
@@ -110,8 +141,33 @@ those answers.
 
 - A separate tool (`AnswerSessionQuestion`) rather than widening `6/8`'s, so no node changes a
   symbol another owns (2026-10-25, stated to the developer).
-- Mechanism (`updatedInput` vs deny-with-answers): **open until pass 2**, verified against the
-  installed Claude Code and recorded here with its version.
+- **Mechanism: `updatedInput` (a), decided in pass 2 (2026-10-28).** Verified interactively against
+  Claude Code **2.1.312**: a `PreToolUse(AskUserQuestion)` hook printing
+  `{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"allow","updatedInput":{"questions":[…unchanged…],"answers":{"<question text>":"<answer>"}}}}`
+  makes Claude skip its dialog, run the tool as answered (`User answered Claude's questions: · … → Blue`)
+  and continue; no denied call appears in the transcript. `claude -p` does not offer `AskUserQuestion`,
+  so headless runs cannot check it. An answer string is the labels joined with `", "` (the build's own
+  schema: "multi-select answers are comma-separated"), then `other`; `other` alone is the text.
+  (b) deny-with-answers was not needed. The format is pinned in `question_decision.rs` and by
+  `an_answered_question_prints_the_decision_that_hands_claude_those_answers`.
+- **Pass-2 deviations from the Responsibility section** (each also stated in the contract commit):
+  `AwaitQuestionAnswerResponse.answers = 6` (4 and 5 are `message` and `answered_by`); the
+  `QuestionAnswer` type is the proto message, re-exported where the changeset named a Rust struct;
+  `encode_question_decision(&Value, &[QuestionAnswer]) -> Option<String>` takes the hook's own
+  `tool_input` (the hook has stdin, not a `PendingQuestion`) and prints nothing on `None`; the
+  process-level test lives in `tddy-tools-cli` (as `6/8`'s does).
+
+- **Answer validation (pass 2).** Refused, naming why: an index the call has no question at; a question
+  answered twice; a label not offered, exactly spelled; more than one answer to a single-choice question
+  (a label and `other` count one each); an answer that selects nothing. `other` is free text, always
+  accepted. A question the answers leave out is not refused.
+- **Recording (decided with the orchestrator, 2026-10-28; mirrors `6/8`).** The child's activity gets
+  `question:<request_id>` = `{"answeredBy", "answers": [{"questionIndex", "selected", "other"?}]}`, beside
+  `permission:<id>` = `{"answeredBy","optionId"}`. The home's side is the `AnswerSessionQuestion` tool call its
+  log already records; nothing extra is written there. Pinned by the first acceptance test and the unit tests.
+- **Registry (pass 2).** The question waiters are separate methods and state of `PendingAnswers`: `PermissionAnswer`
+  and `DeliveredAnswer` have no room for per-question answers, and a new field on `DeliveredAnswer` would break
+  `6/8`'s constructors when it greens.
 
 ## TODO
 
@@ -119,10 +175,10 @@ those answers.
 - [x] Cross-check `packages/*/docs/code-issues/` and `docs/dev/todo/` for items this change touches (Step 2b)
 - [x] Create/update PRD documentation
 - [x] Create changeset (this document)
-- [ ] Create failing acceptance tests
-- [ ] Run acceptance tests (verify they fail)
-- [ ] USER REVIEW — acceptance tests
-- [ ] TDD Red — write failing unit/integration tests
+- [x] Create failing acceptance tests
+- [x] Run acceptance tests (verify they fail)
+- [x] USER REVIEW — acceptance tests (approved by the orchestrator, developer AFK)
+- [x] TDD Red — write failing unit/integration tests
 - [ ] TDD Green — implement with quality code
 - [ ] Update documentation with progress
 - [ ] Repeat Red→Green→Update cycle until feature complete

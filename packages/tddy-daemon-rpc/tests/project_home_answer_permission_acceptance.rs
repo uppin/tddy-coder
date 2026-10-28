@@ -212,6 +212,7 @@ fn answered(option_id: &str, by: &str, message: &str) -> AwaitQuestionAnswerResp
         cancelled: false,
         message: message.to_string(),
         answered_by: by.to_string(),
+        ..Default::default()
     }
 }
 

@@ -35,6 +35,15 @@ use tddy_discovery::subagent::{
 
 use crate::pending_answers::PendingAnswers;
 
+mod question;
+
+// `#home-inbox` 8/8: answering a question (`AskUserQuestion`) is `question`'s, beside the permission
+// answer above; one path, `answers::answer_question`.
+pub use question::{
+    answer_question, answered_question_output, question_tool_call_id, validate_question_answers,
+    AnsweredQuestion, QuestionAnswer, ANSWER_SESSION_PERMISSION,
+};
+
 /// Allow this one call: Claude's `allow`.
 pub const ALLOW_ONCE: &str = "allow_once";
 /// Allow, and apply Claude's permission suggestions so it does not ask again: Claude's `allow`
@@ -99,6 +108,14 @@ pub enum AnswerRefusal {
         request_id: String,
         option_id: String,
     },
+    /// The pending question is a permission, not a question (`#home-inbox` 8/8).
+    NotAQuestion { request_id: String, kind: String },
+    /// The answers do not fit the question: an index it does not have, a label it does not offer, or
+    /// several selections on a single-choice question (`#home-inbox` 8/8). `reason` says which.
+    InvalidAnswers { request_id: String, reason: String },
+    /// The child's pending question carries no `request_id` — a `tool` session's clarification,
+    /// which is answered through its presenter, not here (`#home-inbox` 8/8).
+    NoRequestId { session_id: String },
     /// The child's records could not be read, so nothing was delivered.
     Io(String),
 }
@@ -137,6 +154,19 @@ impl std::fmt::Display for AnswerRefusal {
             } => write!(
                 f,
                 "permission request '{request_id}' offers no option '{option_id}'"
+            ),
+            Self::NotAQuestion { request_id, kind } => write!(
+                f,
+                "pending question '{request_id}' is a {kind} request, not a question: \
+                 answer it with {ANSWER_SESSION_PERMISSION}"
+            ),
+            Self::InvalidAnswers { request_id, reason } => {
+                write!(f, "answers to question '{request_id}' refused: {reason}")
+            }
+            Self::NoRequestId { session_id } => write!(
+                f,
+                "session {session_id}'s pending question carries no request_id: it is answered \
+                 through the session's own presenter, not with {ANSWER_SESSION_QUESTION}"
             ),
             Self::Io(reason) => write!(f, "{reason}"),
         }

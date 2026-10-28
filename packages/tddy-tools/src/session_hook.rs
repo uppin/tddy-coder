@@ -29,6 +29,12 @@ use tddy_service::proto::activity::{
     ReportAgentActivityRequest, ReportSessionStatusRequest, ReportSessionStatusResponse,
 };
 
+pub mod question_decision;
+
+/// An orchestrator's answer to one question of an `AskUserQuestion` call, as the daemon hands it to
+/// the awaiting hook (`#home-inbox` 8/8).
+pub use tddy_service::proto::activity::QuestionAnswer;
+
 /// The coordinate both reports are served at, read from `tddy-service` so this hook and the daemon
 /// serving it cannot disagree about the name.
 ///

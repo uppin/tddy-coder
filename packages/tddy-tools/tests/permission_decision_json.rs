@@ -19,6 +19,7 @@ fn answered(option_id: &str, message: &str) -> AwaitQuestionAnswerResponse {
         cancelled: false,
         message: message.to_string(),
         answered_by: "home-session-1".to_string(),
+        ..Default::default()
     }
 }
 

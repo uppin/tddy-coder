@@ -338,6 +338,21 @@ message AwaitQuestionAnswerResponse {
   string message = 4;
   // ANSWERED: who answered — the orchestrator's session id.
   string answered_by = 5;
+  // ANSWERED, for an AskUserQuestion (not a permission): the orchestrator's answer to each question
+  // it answered (`#home-inbox` 8/8). `option_id` is empty then; the hook hands these to Claude.
+  // 4 and 5 are taken by `message` and `answered_by`, so this is 6.
+  repeated QuestionAnswer answers = 6;
+}
+
+// The answer to one question of an AskUserQuestion call (`#home-inbox` 8/8).
+message QuestionAnswer {
+  // Position in the call's `questions` array, from 0.
+  uint32 question_index = 1;
+  // The labels chosen, as the question offers them: exactly one for a single-choice question, any
+  // number (possibly none, beside `other`) for a multi-select one.
+  repeated string selected = 2;
+  // Free text beside, or instead of, the options (Claude's "Other").
+  optional string other = 3;
 }
 
 // One thing that happened in one session.

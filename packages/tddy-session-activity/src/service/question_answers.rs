@@ -154,6 +154,8 @@ fn answered_response(delivered: DeliveredAnswer) -> AwaitQuestionAnswerResponse 
         cancelled,
         message: delivered.message.unwrap_or_default(),
         answered_by: delivered.by.name(),
+        // A permission answer carries no per-question answers (`#home-inbox` 8/8 fills them).
+        answers: Vec::new(),
     }
 }
 
