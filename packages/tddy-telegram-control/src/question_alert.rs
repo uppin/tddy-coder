@@ -3,20 +3,23 @@
 //!
 //! A permission names the tool and its input summary; a question gives its text and lists its
 //! options. The message is HTML in Telegram's tag subset, so every piece of the session's own
-//! words is escaped.
+//! words is escaped, and a long question set is split with the same well-formed-HTML splitter an
+//! agent notification uses, so no message passes Telegram's 4,096-byte limit.
 //!
 //! A module of its own rather than more of `telegram_notifier.rs` or
 //! `telegram_session_subscriber.rs`: both are over budget, and rendering is a pure function of the
 //! notification.
 
+use crate::agent_notification_telegram::{split_html, TELEGRAM_HTML_MESSAGE_MAX_BYTES};
 use tddy_daemon_kernel::session_notification::{
     QuestionNotice, QuestionNoticeItem, SessionNotification,
 };
 
-/// The HTML message one pending question is sent as.
+/// The HTML one pending question is sent as, whole and as the messages that carry it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct QuestionAlert {
     html: String,
+    messages: Vec<String>,
 }
 
 impl QuestionAlert {
@@ -30,13 +33,21 @@ impl QuestionAlert {
         } else {
             question_html(&label, question)
         };
-        Some(Self { html })
+        let messages = split_html(&html, TELEGRAM_HTML_MESSAGE_MAX_BYTES);
+        Some(Self { html, messages })
     }
 
-    /// The message, in Telegram's HTML parse mode.
+    /// The whole alert, in Telegram's HTML parse mode, before it is split.
     #[must_use]
     pub fn html(&self) -> &str {
         &self.html
+    }
+
+    /// The messages the alert is sent as, in order: each at most 4,096 bytes and well-formed on
+    /// its own.
+    #[must_use]
+    pub fn messages(&self) -> &[String] {
+        &self.messages
     }
 }
 

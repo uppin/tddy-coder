@@ -1,6 +1,7 @@
 //! What a claude-cli session is asking, as Telegram tells the operator: a permission names the tool
 //! and its input, a question lists its options, each is sent once per request, and the generic
-//! "needs your input" alert does not follow for the same prompt (`#home-inbox` 3/8).
+//! "needs your input" alert does not follow for the same prompt; a question set too long for one
+//! message is split (`#home-inbox` 3/8).
 //!
 //! PRD `docs/ft/daemon/1-WIP/PRD-2026-10-25-elicitation-content.md`. The path under test is the real
 //! one from the bus onwards: notifications are published onto a `SessionNotificationBus` that has
@@ -267,5 +268,69 @@ async fn no_needs_your_input_alert_follows_while_the_same_prompt_is_pending() {
             "<i>Session {LABEL} wants to run</i> <code>Bash</code>: <code>cargo publish</code>"
         ))]
     );
+    assert_eq!(daemon.plain_text_sent(), Vec::<(i64, String)>::new());
+}
+
+/// A question set of 20 questions, each with ten options described at length: well over the 4,096
+/// bytes one Telegram message may carry.
+fn a_question_set_over_the_telegram_limit() -> QuestionNotificationBuilder {
+    let questions = (1..=20)
+        .map(|n| QuestionNoticeItem {
+            header: format!("Choice {n}"),
+            question: format!("Which option should step {n} take?"),
+            options: (1..=10)
+                .map(|o| an_option(&format!("Option {o}"), &"a long description ".repeat(3)))
+                .collect(),
+            multi_select: false,
+        })
+        .collect();
+    a_permission_request().with_question(QuestionNotice {
+        request_id: "request-4".to_string(),
+        kind: "select".to_string(),
+        tool_name: "AskUserQuestion".to_string(),
+        summary: "Which option should step 1 take?".to_string(),
+        questions,
+    })
+}
+
+#[tokio::test]
+async fn a_question_set_over_the_telegram_limit_is_sent_as_several_well_formed_messages() {
+    // Given a daemon with Telegram on its bus
+    let daemon = ADaemonWithTelegram::broadcasting_to_one_chat();
+
+    // When a session asks a question set too long for one Telegram message
+    daemon
+        .publish(a_question_set_over_the_telegram_limit().build())
+        .await;
+
+    // Then the chat receives it as several messages, none over the limit, each loud
+    let sent = daemon.html_sent();
+    assert!(
+        sent.len() > 1,
+        "expected a split alert, got {} message(s)",
+        sent.len()
+    );
+    for message in &sent {
+        assert_eq!(message.chat_id, BROADCAST_CHAT);
+        assert!(!message.silent);
+        assert!(
+            message.html.len() <= 4096,
+            "a message of {} bytes passes Telegram's limit",
+            message.html.len()
+        );
+        // And each closes every bold tag it opens, as the Bot API requires
+        assert_eq!(
+            message.html.matches("<b>").count(),
+            message.html.matches("</b>").count(),
+            "unbalanced <b> in {:?}",
+            message.html
+        );
+    }
+    // And together they carry the whole question set, first question to last
+    assert!(sent[0]
+        .html
+        .starts_with(&format!("<i>Session {LABEL} asks</i>")));
+    let last = &sent[sent.len() - 1].html;
+    assert!(last.contains("Which option should step 20 take?"), "{last}");
     assert_eq!(daemon.plain_text_sent(), Vec::<(i64, String)>::new());
 }

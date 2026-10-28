@@ -35,6 +35,63 @@ enum PendingChange {
     Plain,
 }
 
+impl PendingChange {
+    /// What the report publishes: a recorded question is one notification of its own, a kept one
+    /// rides on the status notification for its prompt, and anything else is the plain status.
+    fn notification(
+        &self,
+        req: &ReportSessionStatusRequest,
+        label: &str,
+        now: u64,
+    ) -> Option<SessionNotification> {
+        let status = || {
+            notification_for_activity_status(&req.session_id, &req.os_user, label, &req.status, now)
+        };
+        match self {
+            Self::Recorded(question) => Some(notification_for_pending_question(
+                &req.session_id,
+                &req.os_user,
+                label,
+                question,
+                now,
+            )),
+            Self::Kept(question) => status().map(|notification| SessionNotification {
+                question: Some(question_notice_for(question)),
+                ..notification
+            }),
+            Self::Plain => status(),
+        }
+    }
+
+    /// The id the hook is answered with: a newly recorded question's, else empty.
+    fn recorded_request_id(self) -> String {
+        match self {
+            Self::Recorded(question) => question.request_id,
+            Self::Kept(_) | Self::Plain => String::new(),
+        }
+    }
+}
+
+/// The question a permission or `AskUserQuestion` report asks, under a new id — `None` for any
+/// other report, and refused when its input is malformed.
+fn question_asked_by(
+    req: &ReportSessionStatusRequest,
+    now: u64,
+) -> Result<Option<PendingQuestion>, Status> {
+    if req.status != tddy_core::SessionActivityStatus::WaitingForInput.as_wire()
+        || req.tool_name.is_empty()
+    {
+        return Ok(None);
+    }
+    pending_question_for_hook(
+        &req.tool_name,
+        &req.tool_input_json,
+        uuid::Uuid::new_v4().to_string(),
+        now,
+    )
+    .map(Some)
+}
+
 /// Record, keep or clear the question a status report's session waits on, and mirror whether it
 /// waits in `.session.yaml`.
 ///
@@ -129,18 +186,7 @@ impl ActivityServiceImpl {
 
         // A question is built, and so refused if it is malformed, before anything is written.
         let now = tddy_daemon_kernel::now_unix_ms();
-        let asked = if req.status == tddy_core::SessionActivityStatus::WaitingForInput.as_wire()
-            && !req.tool_name.is_empty()
-        {
-            Some(pending_question_for_hook(
-                &req.tool_name,
-                &req.tool_input_json,
-                uuid::Uuid::new_v4().to_string(),
-                now,
-            )?)
-        } else {
-            None
-        };
+        let asked = question_asked_by(&req, now)?;
 
         tddy_core::update_activity_status(&session_dir, &req.status)
             .map_err(|e| Status::internal(format!("failed to update activity status: {}", e)))?;
@@ -164,42 +210,14 @@ impl ActivityServiceImpl {
         // directory the hook token was just checked against — so the stream can hand it to that
         // operator's clients and to no one else's. A recorded question is one notification of its
         // own; the status it came with is not published a second time.
-        self.publish_for_session(&sessions_base, &req.session_id, |label| match &change {
-            PendingChange::Recorded(question) => Some(notification_for_pending_question(
-                &req.session_id,
-                &req.os_user,
-                label,
-                question,
-                now,
-            )),
-            PendingChange::Kept(question) => notification_for_activity_status(
-                &req.session_id,
-                &req.os_user,
-                label,
-                &req.status,
-                now,
-            )
-            .map(|notification| SessionNotification {
-                question: Some(question_notice_for(question)),
-                ..notification
-            }),
-            PendingChange::Plain => notification_for_activity_status(
-                &req.session_id,
-                &req.os_user,
-                label,
-                &req.status,
-                now,
-            ),
+        self.publish_for_session(&sessions_base, &req.session_id, |label| {
+            change.notification(&req, label, now)
         })
         .await;
 
-        let request_id = match change {
-            PendingChange::Recorded(question) => question.request_id,
-            PendingChange::Kept(_) | PendingChange::Plain => String::new(),
-        };
         Ok(Response::new(ReportSessionStatusResponse {
             ok: true,
-            request_id,
+            request_id: change.recorded_request_id(),
         }))
     }
 

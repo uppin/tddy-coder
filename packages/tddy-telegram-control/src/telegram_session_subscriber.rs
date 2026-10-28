@@ -139,23 +139,27 @@ impl TelegramDaemonHooks {
         Ok(())
     }
 
-    /// Send `html` to each of `chat_ids` in Telegram's HTML mode, loudly, failing with how many it
-    /// missed.
+    /// Send `messages` to each of `chat_ids`, in order, in Telegram's HTML mode, loudly, failing
+    /// with how many chats it missed. A chat that refuses one message is sent none of the rest: the
+    /// tail of a split question set without its head is worse than none.
     async fn send_html_to_every_chat(
         &self,
         chat_ids: Vec<i64>,
         session_id: &str,
-        html: &str,
+        messages: &[String],
     ) -> anyhow::Result<()> {
         let total = chat_ids.len();
         let mut failed = 0_usize;
         for chat_id in chat_ids {
-            if let Err(e) = self.sender.send_html_message(chat_id, html, false).await {
-                failed += 1;
-                log::warn!(
-                    target: "tddy_daemon::telegram",
-                    "send_html_message failed chat_id={chat_id} session_id={session_id}: {e:#}"
-                );
+            for html in messages {
+                if let Err(e) = self.sender.send_html_message(chat_id, html, false).await {
+                    failed += 1;
+                    log::warn!(
+                        target: "tddy_daemon::telegram",
+                        "send_html_message failed chat_id={chat_id} session_id={session_id}: {e:#}"
+                    );
+                    break;
+                }
             }
         }
         if failed > 0 {
@@ -193,7 +197,7 @@ impl TelegramDaemonHooks {
         let Some(chat_ids) = self.recipients_of(&notification.session_id).await else {
             return Ok(());
         };
-        self.send_html_to_every_chat(chat_ids, &notification.session_id, alert.html())
+        self.send_html_to_every_chat(chat_ids, &notification.session_id, alert.messages())
             .await
     }
 }

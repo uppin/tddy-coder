@@ -296,12 +296,12 @@ fn agent_activity_request(
     // A malformed payload degrades to empty fields rather than failing the hook.
     let payload: HookToolPayload = serde_json::from_str(stdin_json).unwrap_or_default();
 
-    // An `AskUserQuestion` is a question, not a tool call. Its `PreToolUse` leaves no call for a
-    // `PostToolUse` to complete if the operator declines it, so it is not reported as one: the
-    // question goes to the daemon by `ReportSessionStatus` instead (`#home-inbox` 3/8).
-    if hook_event_name == "PreToolUse"
-        && payload.tool_name.as_deref() == Some(ASK_USER_QUESTION_TOOL)
-    {
+    // An `AskUserQuestion` is a question, not a tool call, so neither of its hooks is reported as
+    // one: the question goes to the daemon by `ReportSessionStatus` instead (`#home-inbox` 3/8).
+    // Its `PreToolUse` would leave a pending call that a declined question never completes, and so
+    // its `PostToolUse` would have nothing to pair with and write an unpaired `completed` row under
+    // a fresh id. Nothing reads such a row.
+    if payload.tool_name.as_deref() == Some(ASK_USER_QUESTION_TOOL) {
         return None;
     }
 
@@ -450,17 +450,20 @@ mod tests {
         );
     }
 
-    /// The decision is for `PreToolUse` only: the `PostToolUse` of the same tool still reports, as
-    /// it always has.
+    /// Nor is its `PostToolUse`: with no pending call to pair with, it would append an unpaired
+    /// `completed` row under a fresh id, which nothing reads (`#home-inbox` 3/8).
     #[test]
-    fn a_post_tool_use_of_ask_user_question_is_still_reported() {
+    fn a_post_tool_use_of_ask_user_question_is_not_reported_as_a_tool_call() {
         // Given
         let stdin_json = r#"{"hook_event_name":"PostToolUse","tool_name":"AskUserQuestion","tool_input":{"questions":[]},"tool_response":{"answers":[]}}"#;
 
         // When
-        let req = map("PostToolUse", stdin_json).expect("PostToolUse must produce a request");
+        let req = map("PostToolUse", stdin_json);
 
         // Then
-        assert_eq!(req.tool_name, "AskUserQuestion");
+        assert_eq!(
+            req, None,
+            "a question must not leave an unpaired completed row in the activity log"
+        );
     }
 }
