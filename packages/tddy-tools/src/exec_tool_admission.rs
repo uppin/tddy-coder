@@ -140,6 +140,8 @@ mod tests {
                 "ReadSessionActivity",
                 "ReadSessionTranscript",
                 "ReadSessionTerminal",
+                "ClaimSessionTerminal",
+                "SendSessionKeys",
                 "TerminateSession",
                 "CommitSessionWorktree",
                 "PushSessionBranch",

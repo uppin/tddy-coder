@@ -27,6 +27,7 @@ use crate::catalog::ToolDef;
 use crate::project_home_tools::{
     resolve_target, target_host_property, tool_def, ProjectHomePort, TARGET_DAEMON_INSTANCE_ID,
 };
+use crate::terminal_keys::encode_keys;
 use crate::ToolOutcome;
 
 pub const READ_SESSION_TERMINAL: &str = "ReadSessionTerminal";
@@ -127,37 +128,37 @@ pub trait ProjectHomeTerminalPort: ProjectHomePort {
     /// holds it, and keep the issued token on this host on behalf of the calling home session. The
     /// token is never returned. An error names why it could not be taken.
     ///
-    /// `#home-inbox` 5/8. The default refuses, so a port that does not serve terminal input (and
-    /// the fakes `#home-inbox` 2/8's tests build) need not name it.
-    async fn claim_terminal(&self, target: &SessionTarget, screen_id: &str) -> Result<(), String> {
-        // TODO(terminal-keys): implement — `TerminalControl::claim(target, screen_id, steal = true)`
-        // and remember the token under the confirmed caller and the target.
-        let _ = (target, screen_id);
-        Err("claim_terminal: not implemented".to_string())
-    }
+    /// `#home-inbox` 5/8.
+    async fn claim_terminal(&self, target: &SessionTarget, screen_id: &str) -> Result<(), String>;
 
     /// Write `bytes` to `target`'s main terminal, provided `screen_id`'s token is the session's
     /// current lease. The lease is verified explicitly, also for a jailed terminal whose own input
     /// path does not check it. An error names why nothing was written, and the current holder when
     /// that is why.
     ///
-    /// `#home-inbox` 5/8; the default refuses, as for [`Self::claim_terminal`].
+    /// `#home-inbox` 5/8.
     async fn send_keys(
         &self,
         target: &SessionTarget,
         screen_id: &str,
         bytes: Vec<u8>,
-    ) -> Result<(), String> {
-        // TODO(terminal-keys): implement — verify the remembered token against the lease, then
-        // `TerminalSession::send_input` on `main`.
-        let _ = (target, screen_id, bytes);
-        Err("send_keys: not implemented".to_string())
-    }
+    ) -> Result<(), String>;
 }
 
 #[derive(Deserialize)]
-struct ReadTerminalArgs {
+struct SessionArgs {
     session_id: String,
+}
+
+/// The arguments of `SendSessionKeys`: the text typed first, then the named keys. Either may be
+/// absent, not both.
+#[derive(Deserialize)]
+struct SendKeysArgs {
+    session_id: String,
+    #[serde(default)]
+    text: Option<String>,
+    #[serde(default)]
+    keys: Vec<String>,
 }
 
 /// Run [`READ_SESSION_TERMINAL`] for `home`.
@@ -180,7 +181,7 @@ pub async fn execute_project_home_terminal_tool(
     if tool_name != READ_SESSION_TERMINAL {
         return execute_terminal_keys_tool(port, home, tool_name, args).await;
     }
-    let args: ReadTerminalArgs = match serde_json::from_value(args) {
+    let args: SessionArgs = match serde_json::from_value(args) {
         Ok(a) => a,
         Err(e) => {
             return ToolOutcome::err(format!("{READ_SESSION_TERMINAL}: invalid arguments: {e}"))
@@ -220,9 +221,76 @@ async fn execute_terminal_keys_tool(
     tool_name: &str,
     args: Value,
 ) -> ToolOutcome {
-    // TODO(terminal-keys): implement — `ClaimSessionTerminal` answers `{holder}`; `SendSessionKeys`
-    // reads the grid's `bracketed_paste` only when `text` is given, `encode_keys`, then
-    // `port.send_keys`.
-    let _ = (port, home, args, project_home_screen_id);
-    ToolOutcome::err(format!("{tool_name}: not implemented"))
+    if tool_name == CLAIM_SESSION_TERMINAL {
+        return claim_session_terminal(port, home, args).await;
+    }
+    send_session_keys(port, home, args).await
+}
+
+/// `ClaimSessionTerminal`: take the target's control lease for this home session. Answers
+/// `{holder}`, the screen id the lease is now held under. The token stays on the host.
+async fn claim_session_terminal(
+    port: &dyn ProjectHomeTerminalPort,
+    home: &HomeCaller,
+    args: Value,
+) -> ToolOutcome {
+    let args: SessionArgs = match serde_json::from_value(args) {
+        Ok(a) => a,
+        Err(e) => {
+            return ToolOutcome::err(format!("{CLAIM_SESSION_TERMINAL}: invalid arguments: {e}"))
+        }
+    };
+    let target = match resolve_target(port, home, &args.session_id).await {
+        Ok(t) => t,
+        Err(outcome) => return outcome,
+    };
+    let screen_id = project_home_screen_id(home);
+    match port.claim_terminal(&target, &screen_id).await {
+        Ok(()) => ToolOutcome::ok(json!({ "holder": screen_id }).to_string()),
+        Err(e) => ToolOutcome::err(format!("{CLAIM_SESSION_TERMINAL}: {e}")),
+    }
+}
+
+/// `SendSessionKeys`: encode the text and keys, then write them under this home session's lease.
+/// The text is encoded as a paste only when the target's terminal has enabled bracketed paste, so
+/// that is read first, and only when there is text to type. Every refusal leaves nothing typed.
+/// Answers `{sent_bytes}`, the number of bytes written.
+async fn send_session_keys(
+    port: &dyn ProjectHomeTerminalPort,
+    home: &HomeCaller,
+    args: Value,
+) -> ToolOutcome {
+    let args: SendKeysArgs = match serde_json::from_value(args) {
+        Ok(a) => a,
+        Err(e) => return ToolOutcome::err(format!("{SEND_SESSION_KEYS}: invalid arguments: {e}")),
+    };
+    let target = match resolve_target(port, home, &args.session_id).await {
+        Ok(t) => t,
+        Err(outcome) => return outcome,
+    };
+    let typing_text = args.text.as_deref().filter(|text| !text.is_empty());
+    let bracketed_paste = match typing_text {
+        None => false,
+        Some(_) => match port.read_terminal(&target).await {
+            Ok(grid) => grid.bracketed_paste,
+            Err(e) => {
+                return ToolOutcome::err(format!(
+                    "{SEND_SESSION_KEYS}: cannot tell whether the terminal takes a paste, so \
+                     nothing was sent: {e:#}"
+                ))
+            }
+        },
+    };
+    let bytes = match encode_keys(typing_text, &args.keys, bracketed_paste) {
+        Ok(bytes) => bytes,
+        Err(e) => return ToolOutcome::err(format!("{SEND_SESSION_KEYS}: {e}; nothing was sent")),
+    };
+    let sent_bytes = bytes.len();
+    match port
+        .send_keys(&target, &project_home_screen_id(home), bytes)
+        .await
+    {
+        Ok(()) => ToolOutcome::ok(json!({ "sent_bytes": sent_bytes }).to_string()),
+        Err(e) => ToolOutcome::err(format!("{SEND_SESSION_KEYS}: {e}; nothing was sent")),
+    }
 }

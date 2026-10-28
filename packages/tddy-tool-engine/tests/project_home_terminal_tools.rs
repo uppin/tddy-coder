@@ -81,6 +81,14 @@ impl ProjectHomeTerminalPort for FakeTerminals {
             None => anyhow::bail!("no terminal of session {}", target.session_id),
         }
     }
+
+    async fn claim_terminal(&self, _: &SessionTarget, _: &str) -> Result<(), String> {
+        Err("not used by ReadSessionTerminal".to_string())
+    }
+
+    async fn send_keys(&self, _: &SessionTarget, _: &str, _: Vec<u8>) -> Result<(), String> {
+        Err("not used by ReadSessionTerminal".to_string())
+    }
 }
 
 #[async_trait]

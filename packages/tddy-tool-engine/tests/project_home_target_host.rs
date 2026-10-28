@@ -6,7 +6,9 @@
 use serde_json::Value;
 use tddy_tool_engine::project_home_disk_refresh::REFRESH_WORKTREE_DISK_USAGE;
 use tddy_tool_engine::project_home_git_tools::project_home_git_tool_defs;
-use tddy_tool_engine::project_home_terminal_tools::READ_SESSION_TERMINAL;
+use tddy_tool_engine::project_home_terminal_tools::{
+    CLAIM_SESSION_TERMINAL, READ_SESSION_TERMINAL, SEND_SESSION_KEYS,
+};
 use tddy_tool_engine::project_home_terminate::TERMINATE_SESSION;
 use tddy_tool_engine::project_home_tools::{
     project_home_tool_defs, target_daemon_instance_id, DIFF_SESSION_WORKTREE,
@@ -17,8 +19,8 @@ use tddy_tool_engine::session_follow::{READ_SESSION_ACTIVITY, READ_SESSION_TRANS
 use tddy_tool_engine::start_options::DESCRIBE_SESSION_START_OPTIONS;
 
 /// The tools that act on a target session: read, diff, the two worktree tools, the two follow
-/// tools, the terminal read, terminate, the seven git tools, and the start-options describe, which
-/// names the host it describes.
+/// tools, the three terminal tools, terminate, the seven git tools, and the start-options describe,
+/// which names the host it describes.
 fn target_tool_schemas() -> Vec<(String, Value)> {
     project_home_tool_defs()
         .into_iter()
@@ -32,6 +34,8 @@ fn target_tool_schemas() -> Vec<(String, Value)> {
                 READ_SESSION_ACTIVITY,
                 READ_SESSION_TRANSCRIPT,
                 READ_SESSION_TERMINAL,
+                CLAIM_SESSION_TERMINAL,
+                SEND_SESSION_KEYS,
                 TERMINATE_SESSION,
                 REFRESH_WORKTREE_DISK_USAGE,
             ]
@@ -51,8 +55,8 @@ fn every_target_tool_offers_the_targets_host_as_an_optional_described_string() {
     let schemas = target_tool_schemas();
     assert_eq!(
         schemas.len(),
-        17,
-        "read, diff, the two worktree tools, the two follow tools, the terminal read, terminate, refresh, the seven git tools and the start-options describe"
+        19,
+        "read, diff, the two worktree tools, the two follow tools, the three terminal tools, terminate, refresh, the seven git tools and the start-options describe"
     );
 
     for (name, schema) in schemas {
