@@ -1,7 +1,7 @@
 # 2026-10-28 — Context sync's git gate ignores a linked worktree's private exclude file
 
 **Category:** Deferred from `context-sync-symlinks` (#784)
-**Source:** `docs/dev/1-WIP/2026-10-28-context-sync-symlinks.md` § Decisions (gitignore gate)
+**Source:** PR [#784](https://github.com/uppin/tddy-coder/pull/784) review (Decisions (gitignore gate)); history: [2026-10-28-context-sync-symlinks.md](../changesets/2026-10-28-context-sync-symlinks.md)
 
 A file pulled into an agent's context only because an allow-listed symlink reaches it travels only
 if git does not ignore it. The walk asks `git check-ignore --stdin -z`

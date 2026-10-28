@@ -1,7 +1,7 @@
 # 2026-10-28 — A tree pulled in through a context-sync link has no aggregate bound
 
 **Category:** Deferred from `context-sync-symlinks` (#784)
-**Source:** `docs/dev/1-WIP/2026-10-28-context-sync-symlinks.md` § Open decisions
+**Source:** PR [#784](https://github.com/uppin/tddy-coder/pull/784) review (Open decisions); history: [2026-10-28-context-sync-symlinks.md](../changesets/2026-10-28-context-sync-symlinks.md)
 
 An allow-listed symlink pulls its target into the agent's context even when no glob names that
 target (`walk_context_files`, `packages/tddy-sandbox/src/context_manifest.rs`). A directory target is

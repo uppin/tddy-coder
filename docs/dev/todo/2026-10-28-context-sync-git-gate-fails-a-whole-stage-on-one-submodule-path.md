@@ -1,7 +1,7 @@
 # 2026-10-28 — One submodule path makes context sync's git gate drop every link pull-in in that stage
 
 **Category:** Deferred from `context-sync-symlinks` (#784)
-**Source:** `docs/dev/1-WIP/2026-10-28-context-sync-symlinks.md` § Validation Results (final pass)
+**Source:** PR [#784](https://github.com/uppin/tddy-coder/pull/784) review (Validation Results (final pass)); history: [2026-10-28-context-sync-symlinks.md](../changesets/2026-10-28-context-sync-symlinks.md)
 
 The walk asks `git check-ignore` once per stage for every path a link would pull in
 (`packages/tddy-sandbox/src/context_manifest/{walk,git_ignore}.rs`). A path inside a git submodule

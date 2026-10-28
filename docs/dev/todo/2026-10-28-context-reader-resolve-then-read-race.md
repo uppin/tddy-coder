@@ -1,7 +1,7 @@
 # 2026-10-28 — Context reads and writes check a path, then use it by name: a symlink swapped in between is followed
 
 **Category:** Future enhancement (pre-existing; surfaced by `context-sync-symlinks` #784 review)
-**Source:** `docs/dev/1-WIP/2026-10-28-context-sync-symlinks.md` § Validation Results
+**Source:** PR [#784](https://github.com/uppin/tddy-coder/pull/784) review (Validation Results); history: [2026-10-28-context-sync-symlinks.md](../changesets/2026-10-28-context-sync-symlinks.md)
 
 Both the manifest walk (`packages/tddy-sandbox/src/context_manifest.rs`) and the reader
 (`packages/tddy-session-files/src/context_files.rs`) `canonicalize` a path, check it against the
