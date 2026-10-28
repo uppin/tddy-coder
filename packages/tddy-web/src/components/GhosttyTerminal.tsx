@@ -394,21 +394,50 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
         const fitAddon = new FitAddon();
         term.loadAddon(fitAddon);
         fitAddonRef.current = fitAddon;
+        // Frame handle of the re-fit retry loop (declared here so the effect's cleanup can
+        // cancel it; only armed on the observed path below).
+        let refitRaf = 0;
         if (fixedViewportGrid) {
           term.resize(fixedViewportGrid.cols, fixedViewportGrid.rows);
         } else {
           fitAddon.fit();
           fitAddon.observeResize();
-          // Belt-and-braces re-fit, watched on the container we render. The addon's own observer
-          // debounces its fit through `setTimeout` (100 ms), and a throttled or occluded page
-          // postpones that timer indefinitely — headless CI runs the AUT in an Electron window
-          // the runner treats as hidden, so the pane shrank, the observer entry fired, and the
-          // grid stayed stale at its fitted width (the GhosttyTerminalShrink CI failure, where
-          // the canvas froze at 1179px). ResizeObserver callbacks run in the rendering steps,
-          // not on timers, so re-fitting from our own observer keeps the re-fit working where
-          // the addon's timer-based one does not. `fit()` no-ops when the computed dimensions
-          // are unchanged, so the addon's observer firing too is harmless.
-          resizeObserverRef.current = new ResizeObserver(() => fitAddon.fit());
+          // Belt-and-braces re-fit, watched on the container we render — and deliberately NOT
+          // going through `fit()`: the addon's own observer debounces its fit through
+          // `setTimeout`, and `fit()` itself clears its private `_isResizing` latch through
+          // another one. A page the window manager treats as hidden (headless CI runs the AUT
+          // in an occluded Electron window) throttles those timers indefinitely, so the latch
+          // set by the mount-time fit never clears and every later fit() returns immediately —
+          // the GhosttyTerminalShrink CI failure: container shrank to 300px, canvas frozen at
+          // its fitted width, every fit() a no-op. Proposing the dimensions and resizing
+          // through the public API sidesteps the latch; both self-guard on unchanged dims.
+          // ResizeObserver callbacks run in the rendering steps, not on timers, so this fires
+          // where the addon's timer-based path does not.
+          const refit = (): boolean => {
+            const addon = fitAddonRef.current;
+            const term = termRef.current;
+            if (!addon || !term) return true;
+            const proposed = addon.proposeDimensions();
+            // `getMetrics()` can transiently return nothing (it measures the live canvas) —
+            // report false so the frame retry picks it up; the RO only fires while the size
+            // actually changes, so a skipped proposal would otherwise be dropped for good.
+            if (!proposed) return false;
+            if (proposed.cols !== term.cols || proposed.rows !== term.rows) {
+              term.resize(proposed.cols, proposed.rows);
+            }
+            return true;
+          };
+          let refitFrames = 0;
+          const refitWithRetry = () => {
+            if (refit() || refitFrames >= 30) return;
+            refitFrames++;
+            refitRaf = requestAnimationFrame(refitWithRetry);
+          };
+          resizeObserverRef.current = new ResizeObserver(() => {
+            cancelAnimationFrame(refitRaf);
+            refitFrames = 0;
+            refitWithRetry();
+          });
           resizeObserverRef.current.observe(containerRef.current);
         }
 
@@ -442,6 +471,7 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
         isMounted = false;
         resizeObserverRef.current?.disconnect();
         resizeObserverRef.current = null;
+        cancelAnimationFrame(refitRaf);
         fitAddonRef.current?.dispose();
         fitAddonRef.current = null;
         disposablesRef.current.forEach((d) => d.dispose());
