@@ -8,9 +8,9 @@
 mod support;
 
 use support::{
-    a_desktop, a_pending_question_notification, a_status_report, a_status_report_for,
-    an_agent_notification, route_to, this_desktops_context, ShownNotices, ANOTHER_SESSION,
-    THE_LABEL, THE_SESSION, THIS_DESKTOP,
+    a_desktop, a_pending_question_notification, a_pending_question_worded, a_status_report,
+    a_status_report_for, an_agent_notification, route_to, this_desktops_context, ShownNotices,
+    ANOTHER_SESSION, THE_LABEL, THE_SESSION, THIS_DESKTOP,
 };
 use tauri::Url;
 use tddy_desktop::native_notifications::{
@@ -275,6 +275,43 @@ async fn the_previous_notice_is_remembered_per_session() {
     desktop
         .shown()
         .assert_sessions(&[THE_SESSION, ANOTHER_SESSION]);
+}
+
+#[tokio::test]
+async fn a_question_already_shown_is_not_shown_again_when_its_wording_changes() {
+    // Given a session asking one question, reported twice in different words
+    let desktop = a_desktop().start();
+
+    // When both reports are published
+    desktop
+        .publish(a_pending_question_worded("q-1", "asks — Run `cargo test`?"))
+        .await;
+    desktop
+        .publish(a_pending_question_worded(
+            "q-1",
+            "still asks — Run `cargo test`?",
+        ))
+        .await;
+
+    // Then the operator is told about the question once
+    desktop.shown().assert_sessions(&[THE_SESSION]);
+}
+
+#[tokio::test]
+async fn a_new_question_from_the_same_session_is_shown() {
+    // Given a session that asks one question and then another
+    let desktop = a_desktop().start();
+
+    // When both are published
+    desktop
+        .publish(a_pending_question_worded("q-1", "asks — A?"))
+        .await;
+    desktop
+        .publish(a_pending_question_worded("q-2", "asks — B?"))
+        .await;
+
+    // Then each question is shown
+    desktop.shown().assert_sessions(&[THE_SESSION, THE_SESSION]);
 }
 
 #[tokio::test]

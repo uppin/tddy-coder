@@ -2,7 +2,7 @@
 //! `tauri-plugin-notification`, and the dashboard window through the application handle.
 //!
 //! Neither is exercised by a test — both need a running Tauri application. What they carry is
-//! verified by hand (the changeset's manual verification); what decides *whether* and *what* to
+//! verified by hand (PR #769's manual verification); what decides *whether* and *what* to
 //! show is tested against the ports' fakes in `tests/native_notifications_acceptance.rs`.
 
 use tauri::{AppHandle, Manager, Url, WebviewWindow};

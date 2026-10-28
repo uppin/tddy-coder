@@ -117,6 +117,12 @@ backlog would raise indicators for turns that finished while the tab was closed.
 several operators the stream is scoped to the caller's OS user; a token that maps to no OS user is
 refused, and a notification whose owner cannot be established is delivered to nobody.
 
+**An embedding host adds its own subscriber.** A process that hosts the daemon in code registers
+one with `RuntimeOptions::with_notification_subscriber`; it is offered every notification after the
+two built-in subscribers, in registration order. Tddy Desktop uses this for
+[native notifications](../desktop/tddy-desktop-tauri.md#native-notifications). The `tddy-daemon`
+binary registers none.
+
 ## Guarantees
 
 - A notification that cannot be delivered is logged, never propagated: reporting a hook still

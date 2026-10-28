@@ -8,7 +8,7 @@
 //! something a CI runner can observe; the real one is verified by hand (the changeset's manual
 //! verification).
 //!
-//! PRD: `docs/ft/desktop/1-WIP/PRD-2026-10-25-desktop-notifications.md`.
+//! Product: `docs/ft/desktop/tddy-desktop-tauri.md` § Native notifications.
 
 mod support;
 

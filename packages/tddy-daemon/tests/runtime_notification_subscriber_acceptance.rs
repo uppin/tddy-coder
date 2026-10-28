@@ -4,7 +4,7 @@
 //! it, so an embedding host (Tddy Desktop) cannot subscribe after the fact. It registers a
 //! subscriber on the options instead, and `build` appends it after the two built-in subscribers.
 //!
-//! PRD: `docs/ft/desktop/1-WIP/PRD-2026-10-25-desktop-notifications.md`.
+//! Product: `docs/ft/desktop/tddy-desktop-tauri.md` § Native notifications.
 
 use std::path::Path;
 use std::sync::Arc;

@@ -127,6 +127,19 @@ pub fn a_pending_question_notification() -> SessionNotification {
     }
 }
 
+/// [`a_pending_question_notification`] about the question `request_id`, worded as `text` — a later
+/// status report about a question still pending carries different text for the same id.
+pub fn a_pending_question_worded(request_id: &str, text: &str) -> SessionNotification {
+    SessionNotification {
+        text: text.to_string(),
+        question: Some(QuestionNotice {
+            request_id: request_id.to_string(),
+            ..QuestionNotice::default()
+        }),
+        ..a_pending_question_notification()
+    }
+}
+
 /// What a desktop knows about itself, as the subscriber is built with it.
 pub fn this_desktops_context() -> DesktopContext {
     DesktopContext {

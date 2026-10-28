@@ -15,7 +15,8 @@
 //! [`desktop_notice_for`] decides what a notification becomes; the subscriber adds what only a
 //! running desktop knows — which session the focused window shows, and what it said last.
 //!
-//! PRD: `docs/ft/desktop/1-WIP/PRD-2026-10-25-desktop-notifications.md`.
+//! Product: `docs/ft/desktop/tddy-desktop-tauri.md` § Native notifications; implementation:
+//! `packages/tddy-desktop/docs/native-notifications.md`.
 //!
 //! # Clicks
 //!
@@ -208,13 +209,32 @@ pub fn open_session_route(
     window.navigate(target)
 }
 
+/// What the subscriber last showed for one session.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct LastShown {
+    notice: DesktopNotice,
+    /// The `request_id` of the question it was about, when it was about one.
+    question_request_id: Option<String>,
+}
+
+impl LastShown {
+    /// Whether showing `notice` — about the question `question_request_id`, if any — would repeat
+    /// this one: the same notice, or the same pending question however the report that raised it is
+    /// worded. A later status report about a question still pending carries different text, and
+    /// the operator has already been told about that question.
+    fn is_repeated_by(&self, notice: &DesktopNotice, question_request_id: Option<&str>) -> bool {
+        self.notice == *notice
+            || question_request_id.is_some_and(|id| self.question_request_id.as_deref() == Some(id))
+    }
+}
+
 /// Shows the daemon's attention notifications for the desktop operator's sessions natively.
 pub struct DesktopNotificationSubscriber {
     context: DesktopContext,
     notifier: Arc<dyn NativeNotifier>,
     window: Arc<dyn DashboardWindow>,
-    /// The notice last shown per session, so an identical one is not shown twice in a row.
-    last_shown: Mutex<HashMap<String, DesktopNotice>>,
+    /// What was last shown per session, so the same thing is not shown twice in a row.
+    last_shown: Mutex<HashMap<String, LastShown>>,
 }
 
 impl DesktopNotificationSubscriber {
@@ -255,11 +275,24 @@ impl SessionNotificationSubscriber for DesktopNotificationSubscriber {
             .last_shown
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
-        if last_shown.get(&notice.route.session_id) == Some(&notice) {
+        let question_request_id = notification
+            .question
+            .as_ref()
+            .map(|question| question.request_id.clone());
+        if last_shown
+            .get(&notice.route.session_id)
+            .is_some_and(|last| last.is_repeated_by(&notice, question_request_id.as_deref()))
+        {
             return Ok(());
         }
         self.notifier.show(&notice)?;
-        last_shown.insert(notice.route.session_id.clone(), notice);
+        last_shown.insert(
+            notice.route.session_id.clone(),
+            LastShown {
+                notice,
+                question_request_id,
+            },
+        );
         Ok(())
     }
 }
