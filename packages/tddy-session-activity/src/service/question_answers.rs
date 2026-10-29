@@ -1,14 +1,16 @@
-//! `AwaitQuestionAnswer`: an orchestrated claude-cli session's `PermissionRequest` hook, held until
-//! its orchestrator answers or the deadline passes (`#home-inbox` 6/8).
+//! `AwaitQuestionAnswer`: an orchestrated claude-cli session's `PermissionRequest` or
+//! `PreToolUse(AskUserQuestion)` hook, held until its orchestrator answers or the deadline passes
+//! (`#home-inbox` 6/8, 8/8).
 //!
 //! Authenticated as `ReportSessionStatus` is: the session must be claude-cli and the `hook_token`
 //! its own. Then, in order:
 //!
 //! 1. no `orchestrator_session_id` in the session's changeset, an orchestrator on another host, or
 //!    one whose terminal this daemon does not serve → `NO_ORCHESTRATOR`, at once;
-//! 2. the pending question must be the `request_id` asked for, and a permission;
+//! 2. the pending question must be the `request_id` asked for. A permission is held as a permission
+//!    prompt; any other kind is a question, held with its answers (`8/8`);
 //! 3. a waiter is opened in [`PendingAnswers`] and held for at most [`AnswerWaitPorts::wait`] →
-//!    `ANSWERED`, or `TIMED_OUT`.
+//!    `ANSWERED` (with the option, or the per-question answers), or `TIMED_OUT`.
 
 use std::sync::Arc;
 use std::time::Duration;
@@ -24,7 +26,9 @@ use tddy_service::proto::activity::{
 };
 
 use crate::answers::permission_request_view;
-use crate::pending_answers::{DeliveredAnswer, WaitOutcome};
+use crate::pending_answers::{
+    DeliveredAnswer, DeliveredQuestionAnswers, QuestionWaitOutcome, WaitOutcome,
+};
 
 use crate::orchestrator_presence::{NoOrchestratorIsActive, OrchestratorPresence};
 use crate::pending_answers::PendingAnswers;
@@ -76,7 +80,7 @@ impl ActivityServiceImpl {
             )));
         }
 
-        // 2. The question is the one asked for, and a permission.
+        // 2. The question is the one asked for.
         let question = read_pending_question(&session_dir)
             .map_err(|e| Status::internal(format!("cannot read the pending question: {e}")))?
             .filter(|question| !req.request_id.is_empty() && question.request_id == req.request_id)
@@ -86,23 +90,28 @@ impl ActivityServiceImpl {
                     req.request_id, req.session_id
                 ))
             })?;
-        if question.kind != "permission" {
-            return Err(Status::failed_precondition(format!(
-                "pending question '{}' is a {} question, not a permission",
-                req.request_id, question.kind
-            )));
-        }
 
         // 3. Hold the hook until it is answered or the deadline passes.
-        let has_suggestions = has_permission_suggestions(&req.permission_suggestions_json);
         let pending = &self.answers.pending;
-        pending.open(
-            &req.session_id,
-            permission_request_view(&question, has_suggestions),
-        );
-        let response = match pending.wait(&req.request_id, self.answers.wait).await {
-            WaitOutcome::Answered(delivered) => answered_response(delivered),
-            WaitOutcome::TimedOut => outcome_only(AwaitQuestionOutcome::TimedOut),
+        let response = if question.kind == "permission" {
+            let has_suggestions = has_permission_suggestions(&req.permission_suggestions_json);
+            pending.open(
+                &req.session_id,
+                permission_request_view(&question, has_suggestions),
+            );
+            match pending.wait(&req.request_id, self.answers.wait).await {
+                WaitOutcome::Answered(delivered) => answered_response(delivered),
+                WaitOutcome::TimedOut => outcome_only(AwaitQuestionOutcome::TimedOut),
+            }
+        } else {
+            pending.open_question(&req.session_id, question);
+            match pending
+                .wait_for_question(&req.request_id, self.answers.wait)
+                .await
+            {
+                QuestionWaitOutcome::Answered(delivered) => answered_question_response(delivered),
+                QuestionWaitOutcome::TimedOut => outcome_only(AwaitQuestionOutcome::TimedOut),
+            }
         };
         Ok(Response::new(response))
     }
@@ -154,8 +163,18 @@ fn answered_response(delivered: DeliveredAnswer) -> AwaitQuestionAnswerResponse 
         cancelled,
         message: delivered.message.unwrap_or_default(),
         answered_by: delivered.by.name(),
-        // A permission answer carries no per-question answers (`#home-inbox` 8/8 fills them).
+        // A permission answer carries no per-question answers.
         answers: Vec::new(),
+    }
+}
+
+/// A response that carries the per-question answers of an `AskUserQuestion`.
+fn answered_question_response(delivered: DeliveredQuestionAnswers) -> AwaitQuestionAnswerResponse {
+    AwaitQuestionAnswerResponse {
+        outcome: AwaitQuestionOutcome::Answered as i32,
+        answered_by: delivered.by.name(),
+        answers: delivered.answers,
+        ..Default::default()
     }
 }
 

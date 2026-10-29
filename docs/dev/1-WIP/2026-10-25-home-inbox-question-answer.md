@@ -169,6 +169,57 @@ Approved by the orchestrator (developer AFK). Each fails now; "blocked" = fails 
   and `DeliveredAnswer` have no room for per-question answers, and a new field on `DeliveredAnswer` would break
   `6/8`'s constructors when it greens.
 
+## Green decisions (2026-10-29)
+
+Taken by the green agent with the developer AFK; each is pinned by a test or by the code's doc.
+
+- **Await branch by kind.** `await_question_answer_impl` holds a `permission` as before; any other kind
+  is a question, opened with `open_question` and answered with `answered_question_response` (the
+  per-question `answers`, `answered_by`). `NO_ORCHESTRATOR` and the request-id check come first, as in `6/8`.
+- **Hook await for `PreToolUse` only when the tool is `AskUserQuestion`.** The hook's `--await-answer`
+  branch matches on `(event, tool_name)`, so a `PreToolUse` of any other tool never waits. The hook entry
+  is installed with matcher `AskUserQuestion` alone (`3/8`).
+- **Hook timing mirrors `6/8`.** The `PreToolUse(AskUserQuestion)` entry gets
+  `--await-timeout-secs answer_wait_secs + 5` and Claude's `timeout = answer_wait_secs + 10`; the
+  `PermissionRequest` entry is unchanged.
+- **Decision emitted from the hook's stdin.** `question_decision_json` takes the `tool_input` of the
+  hook's own stdin and prints nothing unless the wait was `ANSWERED` and `encode_question_decision`
+  accepts the answers (no `questions`, an index past them, or no answers → nothing printed).
+- **Refusal order in `answer_question`.** Orchestrator (`require_orchestrator`), already answered, then a
+  pending question that carries a `request_id` (else `NoRequestId`), is not the asked id (else
+  `UnknownRequest`), is not a `permission` (else `NotAQuestion`), then a hook waiting under the id, then
+  `validate_question_answers` against the question the waiter recorded, then delivery.
+- **Validation rules as the pass-2 contract states them.** The reason names the index for an unknown
+  question; `answered twice`; `does not offer "<label>"`; `give one answer` for a single choice with more
+  than one pick (a selection and `other` count one each); `selects nothing` for an empty answer. An empty
+  `other` string counts as no free text.
+- **Answered-question memory is bounded** by the permission registry's `ANSWERED_REQUESTS_KEPT`, so a second
+  answer is still refused naming the first answerer for the last 1024 answers. Answer-before-wait is
+  kept in `delivered` until the wait takes it.
+- **Activity record.** `question:<request_id>`, `input` is the question's `tool_input_json` parsed (`null`
+  when unparseable), `result` is `answered_question_output`.
+- **Catalog and pins.** `AnswerSessionQuestion` joins `is_project_home_tool`, `is_project_home_target_tool`
+  and `is_conversation_spawner_tool` (so a grill-me spawner is offered it, as `AnswerSessionPermission` is).
+  The dispatch arm in `execute_project_home_tool` names the wiring mistake, as the permission arm does.
+  Pins updated: `read_only.rs` (`the_project_home_allowed_tools_…`), `exec_tool_admission.rs`, and
+  `tddy-daemon-rpc/tests/project_home_session_tools_acceptance.rs` (one line; the test pins the offered list).
+- **Daemon port.** `DaemonProjectHome::answer_question` answers from this host's `PendingAnswers` via
+  `tddy_session_activity::answers::answer_question`; the result is `{session_id, request_id, answered_by,
+  answers: [{question_index, selected, other}], at_unix_ms}`.
+- **`project_home_prompt.md`** gains an `AnswerSessionQuestion` bullet.
+- **Not implemented here:** `TODO(terminal-styles)`, out of this node's scope by instruction.
+
+Scoped gates (2026-10-29, `CARGO_INCREMENTAL=0 CARGO_PROFILE_DEV_DEBUG=0 ./dev cargo …`):
+- `tddy-session-activity`: all test targets pass (56 lib, `question_answer_unit` 26/26,
+  `question_answer_acceptance` 3/3, `permission_answer_acceptance` 7/7).
+- `tddy-tools`: 340 passed, 0 failed (includes `question_decision` and `permission_decision_json`).
+- `tddy-tools-cli`: `session_hook_question_answer_acceptance` 2/2, `session_hook_await_answer_acceptance` 4/4,
+  `session_hook_cli` 13/13.
+- `tddy-agent-backend` + `tddy-tool-engine`: 377 passed, 0 failed.
+- `tddy-daemon-rpc`: `project_home_answer_question_acceptance` 1/1, `project_home_answer_permission_acceptance`
+  5/5, `project_home_session_tools_acceptance` 10/10.
+- `cargo clippy -p … -- -D warnings`: clean for all five packages.
+
 ## TODO
 
 - [x] Record initial discovery (`2026-10-25-home-inbox-question-answer-initial-discovery.md`)
@@ -179,7 +230,7 @@ Approved by the orchestrator (developer AFK). Each fails now; "blocked" = fails 
 - [x] Run acceptance tests (verify they fail)
 - [x] USER REVIEW — acceptance tests (approved by the orchestrator, developer AFK)
 - [x] TDD Red — write failing unit/integration tests
-- [ ] TDD Green — implement with quality code
+- [x] TDD Green — implement with quality code (`/green`, 2026-10-29; scoped gates below)
 - [ ] Update documentation with progress
 - [ ] Repeat Red→Green→Update cycle until feature complete
 - [ ] Run the touched packages' tests (`./test -p {package}` per package) — verify 100% pass

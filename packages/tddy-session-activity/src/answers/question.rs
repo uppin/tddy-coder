@@ -17,9 +17,16 @@
 //!
 //! Feature doc: docs/ft/daemon/project-concept.md § Project-home tools.
 
-use tddy_core::pending_question::PendingQuestion;
+use std::collections::HashSet;
+use std::path::Path;
 
-use super::{AnswerContext, AnswerRefusal, AnsweringCaller};
+use serde_json::{json, Value};
+use tddy_core::agent_activity::{append_agent_activity, AgentActivityRecord, STATUS_COMPLETED};
+use tddy_core::pending_question::{clear_pending_question, read_pending_question, PendingQuestion};
+use tddy_core::session_lifecycle::unified_session_dir_path;
+use tddy_discovery::subagent::AnsweredBy;
+
+use super::{require_orchestrator, AnswerContext, AnswerRefusal, AnsweringCaller};
 
 /// One answer to one question of an `AskUserQuestion` call: `question_index` (from 0),
 /// `selected` labels, and `other` free text. The wire type, so the hook, the registry and the tool
@@ -33,22 +40,28 @@ pub const ANSWER_SESSION_PERMISSION: &str = "AnswerSessionPermission";
 /// `question:<request_id>`, beside `6/8`'s `permission:<request_id>`.
 #[must_use]
 pub fn question_tool_call_id(request_id: &str) -> String {
-    // TODO(question-answer): implement
-    let _ = request_id;
-    String::new()
+    format!("question:{request_id}")
 }
 
 /// What the child's activity records as the output of that call: `{"answeredBy": <session id>,
 /// "answers": [{"questionIndex", "selected", "other"?}]}` — `other` left out when absent, as `6/8`'s
 /// `{"answeredBy", "optionId"}` is for a permission.
 #[must_use]
-pub fn answered_question_output(
-    answered_by: &str,
-    answers: &[QuestionAnswer],
-) -> serde_json::Value {
-    // TODO(question-answer): implement
-    let _ = (answered_by, answers);
-    serde_json::Value::Null
+pub fn answered_question_output(answered_by: &str, answers: &[QuestionAnswer]) -> Value {
+    let answers: Vec<Value> = answers
+        .iter()
+        .map(|answer| {
+            let mut entry = json!({
+                "questionIndex": answer.question_index,
+                "selected": answer.selected,
+            });
+            if let Some(other) = &answer.other {
+                entry["other"] = json!(other);
+            }
+            entry
+        })
+        .collect();
+    json!({ "answeredBy": answered_by, "answers": answers })
 }
 
 /// An answer that was delivered.
@@ -81,13 +94,47 @@ pub fn validate_question_answers(
     question: &PendingQuestion,
     answers: &[QuestionAnswer],
 ) -> Result<(), String> {
-    // TODO(question-answer): implement — the refusals above, against `question.questions`.
-    let _ = (question, answers);
-    Err("validate_question_answers: not implemented".to_string())
+    let asked = question.questions.len();
+    let mut answered = HashSet::new();
+    for answer in answers {
+        let index = answer.question_index as usize;
+        let Some(item) = question.questions.get(index) else {
+            return Err(format!(
+                "question {index} does not exist: the call asks {asked}"
+            ));
+        };
+        if !answered.insert(index) {
+            return Err(format!("question {index} is answered twice"));
+        }
+        if let Some(label) = answer
+            .selected
+            .iter()
+            .find(|label| !item.options.iter().any(|option| &option.label == *label))
+        {
+            return Err(format!("question {index} does not offer {label:?}"));
+        }
+        let free_text = answer.other.as_deref().is_some_and(|text| !text.is_empty());
+        let picks = answer.selected.len() + usize::from(free_text);
+        if !item.multi_select && picks > 1 {
+            return Err(format!(
+                "question {index} is a single choice: give one answer, not {picks}"
+            ));
+        }
+        if picks == 0 {
+            return Err(format!(
+                "question {index} selects nothing: give a label or other"
+            ));
+        }
+    }
+    Ok(())
 }
 
 /// Deliver `caller`'s `answers` to the question `target`'s hook waits on under `request_id`. See the
 /// module doc for the checks, in order.
+///
+/// # Errors
+///
+/// The [`AnswerRefusal`] of the first check that fails; the waiting hook keeps waiting.
 pub fn answer_question(
     context: &AnswerContext<'_>,
     caller: &AnsweringCaller,
@@ -95,12 +142,123 @@ pub fn answer_question(
     request_id: &str,
     answers: Vec<QuestionAnswer>,
 ) -> Result<AnsweredQuestion, AnswerRefusal> {
-    // TODO(question-answer): implement — the five checks, then `PendingAnswers::answer_question_with`,
-    // the activity record of who answered what, and `clear_pending_question`.
-    let _ = (context, caller, answers);
-    Err(AnswerRefusal::UnknownRequest {
-        request_id: format!(
-            "{request_id} (on session {target}; answering a question is not implemented)"
-        ),
+    let session_dir = unified_session_dir_path(context.sessions_base, target);
+
+    // 1. The caller is the child's orchestrator, on the host the changeset records.
+    require_orchestrator(context, caller, target, &session_dir)?;
+
+    // 2. Nobody answered it first.
+    if let Some(first) = context.pending.question_answered_by(request_id) {
+        return Err(AnswerRefusal::AlreadyAnswered {
+            request_id: request_id.to_string(),
+            by: first.name(),
+        });
+    }
+
+    // 3 and 4. The child waits on exactly this question, which carries a request id, and it is a
+    // question.
+    let question = read_pending_question(&session_dir)
+        .map_err(|e| AnswerRefusal::Io(format!("cannot read the pending question: {e}")))?
+        .ok_or_else(|| AnswerRefusal::UnknownRequest {
+            request_id: request_id.to_string(),
+        })?;
+    if question.request_id.is_empty() {
+        return Err(AnswerRefusal::NoRequestId {
+            session_id: target.to_string(),
+        });
+    }
+    if question.request_id != request_id {
+        return Err(AnswerRefusal::UnknownRequest {
+            request_id: request_id.to_string(),
+        });
+    }
+    if question.kind == "permission" {
+        return Err(AnswerRefusal::NotAQuestion {
+            request_id: request_id.to_string(),
+            kind: question.kind,
+        });
+    }
+
+    // 5. A hook is waiting on it, and the answers fit the questions it asked.
+    let open = context
+        .pending
+        .open_question_request(request_id)
+        .filter(|open| open.session_id == target)
+        .ok_or_else(|| AnswerRefusal::UnknownRequest {
+            request_id: request_id.to_string(),
+        })?;
+    validate_question_answers(&open.question, &answers).map_err(|reason| {
+        AnswerRefusal::InvalidAnswers {
+            request_id: request_id.to_string(),
+            reason,
+        }
+    })?;
+
+    let by = AnsweredBy::Orchestrator(caller.session_id.clone());
+    // The registry decides the race check 5 cannot: another answer, or the wait's deadline, landing
+    // since.
+    if context
+        .pending
+        .answer_question_with(request_id, answers.clone(), by.clone())
+        .is_err()
+    {
+        return Err(match context.pending.question_answered_by(request_id) {
+            Some(first) => AnswerRefusal::AlreadyAnswered {
+                request_id: request_id.to_string(),
+                by: first.name(),
+            },
+            None => AnswerRefusal::UnknownRequest {
+                request_id: request_id.to_string(),
+            },
+        });
+    }
+
+    let at_unix_ms = tddy_daemon_kernel::now_unix_ms();
+    record_answer(&session_dir, &question, &answers, &by, at_unix_ms);
+    if let Err(e) = clear_pending_question(&session_dir) {
+        log::warn!(
+            target: "tddy_session_activity::answers",
+            "answered question {request_id}, but could not clear its pending question: {e}"
+        );
+    }
+
+    Ok(AnsweredQuestion {
+        session_id: target.to_string(),
+        request_id: request_id.to_string(),
+        answered_by: caller.session_id.clone(),
+        answers,
+        at_unix_ms,
     })
+}
+
+/// Record in the child's activity who answered what. The answer is already delivered, so a failed
+/// write is logged and not turned into a refusal.
+fn record_answer(
+    session_dir: &Path,
+    question: &PendingQuestion,
+    answers: &[QuestionAnswer],
+    by: &AnsweredBy,
+    at_unix_ms: u64,
+) {
+    let record = AgentActivityRecord {
+        call_id: question_tool_call_id(&question.request_id),
+        tool_name: question.tool_name.clone(),
+        input: serde_json::from_str(&question.tool_input_json).unwrap_or(Value::Null),
+        status: STATUS_COMPLETED.to_string(),
+        result: answered_question_output(&by.name(), answers),
+        error_message: String::new(),
+        started_unix_ms: question.at_unix_ms,
+        completed_unix_ms: at_unix_ms,
+        source: "claude-cli".to_string(),
+        head_commit: String::new(),
+        activity_seq: 0,
+        changed_paths: Vec::new(),
+    };
+    if let Err(e) = append_agent_activity(session_dir, &record) {
+        log::warn!(
+            target: "tddy_session_activity::answers",
+            "could not record the answer to question {}: {e}",
+            question.request_id
+        );
+    }
 }

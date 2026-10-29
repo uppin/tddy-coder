@@ -21,6 +21,12 @@ Your tools are the `tddy-tools` MCP server's, and the daemon runs each of them f
   `allow_once`, `reject_once` (with a `message` saying why), or `allow_always` when the request offers it, or set
   `cancelled` to leave the prompt to the person at its terminal. The first answer wins, and only the session that
   started the target may answer.
+- **Answer a session's question** with `AnswerSessionQuestion`, for a session you started that is waiting on one of
+  Claude's `AskUserQuestion` questions (`ReadSessionActivity` shows it as the pending question, with its `request_id`
+  and the questions it asks). Give one entry in `answers` per question you answer: its `question_index` (from 0), the
+  `selected` labels exactly as offered (one for a single-choice question), and `other` for free text. An answer that
+  does not fit the question is refused and the session keeps waiting. The first answer wins, and only the session that
+  started the target may answer.
 - **Wait for your project's sessions to need you** with `WaitProjectNotifications`: a session finished, is waiting for
   input, or asks a question or a permission. Pass back the `next_cursor` it returned as `cursor`, and wait again with it.
   A timeout means nothing happened. Read `ListProjectSessions` before you compose a status, and never wait in a loop

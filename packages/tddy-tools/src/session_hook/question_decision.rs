@@ -20,7 +20,7 @@
 //!   are comma-separated), then `other` when given. An `other` alone is the text itself.
 //! - A question the answers leave out is absent from `answers`; Claude then asks it.
 
-use serde_json::Value;
+use serde_json::{json, Value};
 
 use crate::session_hook::QuestionAnswer;
 
@@ -29,7 +29,33 @@ use crate::session_hook::QuestionAnswer;
 /// an answer names a question index it does not have. `None` prints nothing, and Claude shows its own dialog.
 #[must_use]
 pub fn encode_question_decision(tool_input: &Value, answers: &[QuestionAnswer]) -> Option<String> {
-    // TODO(question-answer): implement — the shape in the module doc.
-    let _ = (tool_input, answers);
-    None
+    if answers.is_empty() {
+        return None;
+    }
+    let questions = tool_input.get("questions")?.as_array()?;
+    let mut by_question = serde_json::Map::new();
+    for answer in answers {
+        let question = questions.get(answer.question_index as usize)?;
+        let text = question.get("question")?.as_str()?;
+        let free_text = answer.other.as_deref().filter(|text| !text.is_empty());
+        let parts: Vec<&str> = answer
+            .selected
+            .iter()
+            .map(String::as_str)
+            .chain(free_text)
+            .collect();
+        by_question.insert(text.to_string(), Value::String(parts.join(", ")));
+    }
+    let mut updated_input = tool_input.as_object()?.clone();
+    updated_input.insert("answers".to_string(), Value::Object(by_question));
+    Some(
+        json!({
+            "hookSpecificOutput": {
+                "hookEventName": "PreToolUse",
+                "permissionDecision": "allow",
+                "updatedInput": updated_input,
+            }
+        })
+        .to_string(),
+    )
 }

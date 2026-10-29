@@ -36,7 +36,9 @@ use tddy_host_service::HostServiceImpl;
 use tddy_rpc::{Request, Status};
 use tddy_service::proto::exec_tools::{ExecuteToolRequest, ExecuteToolResponse};
 use tddy_service::proto::session::{ListSessionsRequest, Signal};
-use tddy_session_activity::answers::{answer_permission, AnswerContext, AnsweringCaller};
+use tddy_session_activity::answers::{
+    answer_permission, answer_question, AnswerContext, AnsweringCaller, QuestionAnswer,
+};
 use tddy_session_activity::pending_answers::PendingAnswers;
 use tddy_session_activity::project_notification_log::ProjectNotificationLog;
 use tddy_session_activity::session_reader::{list_sessions_in_dir, SessionEntry};
@@ -836,6 +838,51 @@ impl ProjectHomeAnswerPort for DaemonProjectHome {
             "answered_by": answered.answered_by,
             "option_id": answered.option_id,
             "cancelled": answered.cancelled,
+            "at_unix_ms": answered.at_unix_ms,
+        }))
+    }
+
+    /// Deliver the calling home session's `answers` to the `AskUserQuestion` `target`'s hook waits
+    /// on under `request_id`, from this host's registry (`#home-inbox` 8/8). Who may answer and what
+    /// fits the question are checked there.
+    async fn answer_question(
+        &self,
+        home: &HomeCaller,
+        target: &SessionTarget,
+        request_id: &str,
+        answers: Vec<QuestionAnswer>,
+    ) -> Result<serde_json::Value, String> {
+        let answered = answer_question(
+            &AnswerContext {
+                sessions_base: &self.sessions_base,
+                this_daemon_instance_id: &self.daemon_instance_id,
+                pending: &self.pending_answers,
+            },
+            &AnsweringCaller {
+                session_id: home.session_id.clone(),
+                daemon_instance_id: self.caller_daemon_instance_id.clone(),
+            },
+            &target.session_id,
+            request_id,
+            answers,
+        )
+        .map_err(|refusal| refusal.to_string())?;
+        let answers: Vec<serde_json::Value> = answered
+            .answers
+            .iter()
+            .map(|answer| {
+                serde_json::json!({
+                    "question_index": answer.question_index,
+                    "selected": answer.selected,
+                    "other": answer.other,
+                })
+            })
+            .collect();
+        Ok(serde_json::json!({
+            "session_id": answered.session_id,
+            "request_id": answered.request_id,
+            "answered_by": answered.answered_by,
+            "answers": answers,
             "at_unix_ms": answered.at_unix_ms,
         }))
     }

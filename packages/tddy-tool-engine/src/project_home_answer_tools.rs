@@ -164,10 +164,9 @@ pub trait ProjectHomeAnswerPort: ProjectHomePort {
         request_id: &str,
         answers: Vec<QuestionAnswer>,
     ) -> Result<Value, String> {
-        // TODO(question-answer): implement — `tddy_session_activity::answers::answer_question` over
-        // this host's `PendingAnswers`, answering the recorded `AnsweredQuestion`.
+        // The daemon, which owns this host's `PendingAnswers`, implements this.
         let _ = (home, target, request_id, answers);
-        Err("answer_question: not implemented".to_string())
+        Err("this host serves no question answers".to_string())
     }
 }
 
@@ -213,6 +212,32 @@ impl From<QuestionAnswerArg> for QuestionAnswer {
     }
 }
 
+/// [`ANSWER_SESSION_QUESTION`]: resolve the target, then deliver the answers through the port.
+async fn execute_answer_session_question(
+    port: &dyn ProjectHomeAnswerPort,
+    home: &HomeCaller,
+    args_json: &str,
+) -> ToolOutcome {
+    let args: AnswerQuestionArgs = match serde_json::from_str(args_json) {
+        Ok(args) => args,
+        Err(e) => {
+            return ToolOutcome::err(format!("{ANSWER_SESSION_QUESTION}: invalid arguments: {e}"))
+        }
+    };
+    let target = match resolve_target(port, home, &args.session_id).await {
+        Ok(target) => target,
+        Err(outcome) => return outcome,
+    };
+    let answers = args.answers.into_iter().map(QuestionAnswer::from).collect();
+    match port
+        .answer_question(home, &target, &args.request_id, answers)
+        .await
+    {
+        Ok(answered) => ToolOutcome::ok(answered.to_string()),
+        Err(e) => ToolOutcome::err(format!("{ANSWER_SESSION_QUESTION}: {e}")),
+    }
+}
+
 /// Run [`ANSWER_SESSION_PERMISSION`] or [`ANSWER_SESSION_QUESTION`] for `home`.
 ///
 /// Bad arguments, a target refusal and the port's refusal come back as an `is_error` outcome naming
@@ -227,9 +252,7 @@ pub async fn execute_project_home_answer_tool(
         return ToolOutcome::err(format!("unknown project-home answer tool: {tool_name}"));
     }
     if tool_name == ANSWER_SESSION_QUESTION {
-        // TODO(question-answer): implement — parse `AnswerQuestionArgs`, `resolve_target`, then
-        // `port.answer_question`.
-        return ToolOutcome::err(format!("{tool_name}: not implemented"));
+        return execute_answer_session_question(port, home, args_json).await;
     }
     let args: AnswerPermissionArgs = match serde_json::from_str(args_json) {
         Ok(args) => args,
