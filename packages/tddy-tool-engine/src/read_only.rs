@@ -32,7 +32,7 @@ const MCP_TOOL_PREFIX: &str = "mcp__tddy-tools__";
 /// What a project-home session's `claude` is pre-approved to call, in the names `--allowedTools` takes:
 /// every tool [`is_project_home_allowed_tool`] lets it run (the read-only tools, the project-home
 /// session tools and the project-home git tools), as the `mcp__tddy-tools__*` tools they are reached through. Derived from
-/// [`project_home_offered_catalog`](crate::project_home_catalogue::project_home_offered_catalog), so the
+/// [`project_home_offered_catalog`](crate::project_home_tools::project_home_offered_catalog), so the
 /// set the spawn names, the set the daemon advertises and the set it executes are one set.
 pub fn project_home_allowed_tools() -> Vec<String> {
     crate::project_home_tools::project_home_offered_catalog()

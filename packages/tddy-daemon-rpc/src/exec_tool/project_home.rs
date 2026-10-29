@@ -94,8 +94,8 @@ impl ExecToolRpcHandler {
                 .run_exec_tool_locally(req, sessions_base, worktree_root)
                 .await);
         }
-        let home = project_home_caller(sessions_base, &req.session_id, &req.tool_name)?;
-        refuse_a_spawner_outside_its_own_sessions(sessions_base, &home, req)?;
+        let (home, role) = project_home_caller(sessions_base, &req.session_id, &req.tool_name)?;
+        refuse_a_spawner_outside_its_own_sessions(sessions_base, &home, role, req)?;
         let response = match self.served_on_target_host(req).await? {
             Some(answered) => answered,
             None => {

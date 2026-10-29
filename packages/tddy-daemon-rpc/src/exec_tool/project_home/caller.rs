@@ -10,20 +10,23 @@ use tddy_worktree_service::session_target::HomeCaller;
 
 /// Refuse `tool_name` unless `session_id` is a project-home session — or a session that spawns
 /// conversations calling one of its five tools ([`is_conversation_spawner_tool`]) — and name that
-/// session's project. The role is
-/// the session's own record, not anything the request claims.
+/// session's project, with the role that admitted it. The role is the session's own record, not
+/// anything the request claims, and it is read once: the scope check that follows
+/// ([`refuse_a_spawner_outside_its_own_sessions`]) is handed this role rather than re-reading it, so
+/// a record that changes or becomes unreadable between the two cannot widen the call.
 pub(super) fn project_home_caller(
     sessions_base: &Path,
     session_id: &str,
     tool_name: &str,
-) -> Result<HomeCaller, Status> {
+) -> Result<(HomeCaller, SessionToolRole), Status> {
     let session_dir = unified_session_dir_path(sessions_base, session_id);
     let metadata = tddy_core::read_session_metadata(&session_dir).map_err(|e| {
         Status::permission_denied(format!(
             "tool {tool_name} is refused: cannot read session {session_id}'s role ({e})"
         ))
     })?;
-    match session_tool_role(&metadata) {
+    let role = session_tool_role(&metadata);
+    match role {
         SessionToolRole::ProjectHome => {}
         // A session that spawns conversations is served the start tools and the permission answer,
         // for its own project.
@@ -37,30 +40,30 @@ pub(super) fn project_home_caller(
             )));
         }
     }
-    Ok(HomeCaller {
-        session_id: session_id.to_string(),
-        project_id: metadata.project_id,
-    })
+    Ok((
+        HomeCaller {
+            session_id: session_id.to_string(),
+            project_id: metadata.project_id,
+        },
+        role,
+    ))
 }
 
 /// Refuse a conversation spawner's [`is_conversation_spawner_scoped_tool`] call unless its target —
 /// the `session_id` the call names — is a session the spawner started: one whose changeset names
 /// `home` as its `orchestrator_session_id` (`#home-inbox` 11/11). Refused as permission denied,
-/// naming the caller and the target. Any other caller, or any other tool, passes: their scope is the
-/// project's, checked by the target resolver.
+/// naming the caller and the target; a target with no readable changeset is refused too. Any other
+/// caller — `role` is the one [`project_home_caller`] admitted it with — or any other tool, passes:
+/// their scope is the project's, checked by the target resolver.
 pub(super) fn refuse_a_spawner_outside_its_own_sessions(
     sessions_base: &Path,
     home: &HomeCaller,
+    role: SessionToolRole,
     req: &ExecuteToolRequest,
 ) -> Result<(), Status> {
-    if !is_conversation_spawner_scoped_tool(&req.tool_name) {
-        return Ok(());
-    }
-    let session_dir = unified_session_dir_path(sessions_base, &home.session_id);
-    let is_spawner = tddy_core::read_session_metadata(&session_dir)
-        .map(|metadata| session_tool_role(&metadata) == SessionToolRole::ConversationSpawner)
-        .unwrap_or(false);
-    if !is_spawner {
+    if role != SessionToolRole::ConversationSpawner
+        || !is_conversation_spawner_scoped_tool(&req.tool_name)
+    {
         return Ok(());
     }
     let refused = |why: &str| {

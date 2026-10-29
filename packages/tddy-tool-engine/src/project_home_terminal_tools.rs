@@ -6,7 +6,7 @@
 //! grid size and the stream offset — the same screen a reconnecting browser is repainted with.
 //! Reading writes nothing and takes no control lease.
 //!
-//! A target tool: it takes [`TARGET_DAEMON_INSTANCE_ID`](crate::project_home_target_host::TARGET_DAEMON_INSTANCE_ID)
+//! A target tool: it takes [`TARGET_DAEMON_INSTANCE_ID`](crate::project_home_tools::TARGET_DAEMON_INSTANCE_ID)
 //! to name the host its session runs on, and the daemon forwards such a call to that host whole
 //! (`#start-parity` 1/9), so the port below is only ever asked about this host's terminals.
 //!

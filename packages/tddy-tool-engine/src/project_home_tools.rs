@@ -23,6 +23,7 @@
 //! | `AnswerSessionQuestion` | answers the `AskUserQuestion` a session this one started is waiting on, validated against its options; its orchestrator only ([`crate::project_home_answer_tools`]) |
 //! | `WaitProjectNotifications` | holds until this project's sessions need it, or a timeout passes, and answers what they raised ([`crate::project_home_inbox_tools`]) |
 //! | `ReadProjectNotifications` | reads what this project's sessions raised, without waiting ([`crate::project_home_inbox_tools`]) |
+//! | `NotifyOperator` | notifies the operator in the agent's own words, as `tddy-tools notify` does, for a session with no shell ([`crate::project_home_notify_tools`]) |
 //!
 //! Targets resolve through `tddy_worktree_service::session_target`. Listing and starting need the
 //! daemon's session store and start path, which reach this crate through [`ProjectHomePort`].

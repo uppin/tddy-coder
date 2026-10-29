@@ -358,3 +358,28 @@ async fn a_grill_me_spawner_reading_a_session_it_did_not_start_is_refused_as_per
         .await
         .assert_answered();
 }
+
+#[tokio::test]
+async fn a_grill_me_spawner_reading_a_child_whose_changeset_is_unreadable_is_refused() {
+    // Given a child the grill-me session started, whose changeset can no longer be parsed
+    let world = a_world().await;
+    std::fs::write(
+        world
+            .a
+            .session_dir(&world.child_of_spawner)
+            .join("changeset.yaml"),
+        "orchestrator_session_id: [not, a, string\n",
+    )
+    .unwrap();
+
+    // When the grill-me session reads that child's activity
+    let refused = world
+        .reads_the_activity_of(&world.spawner, &world.child_of_spawner)
+        .await;
+
+    // Then it is refused, as it cannot be shown to have started it: the scope fails closed
+    refused
+        .assert_refused_saying("PermissionDenied")
+        .assert_refused_saying(&world.spawner)
+        .assert_refused_saying("started");
+}
