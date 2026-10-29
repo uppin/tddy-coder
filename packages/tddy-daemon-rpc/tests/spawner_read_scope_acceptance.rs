@@ -9,7 +9,7 @@
 //! calls the grill-me agent makes.
 //!
 //! Feature doc: docs/ft/daemon/project-concept.md § Project-home tools.
-//! Changeset: docs/dev/1-WIP/2026-10-29-home-inbox-sweep.md
+//! Changeset: docs/dev/changesets/2026-10-29-home-inbox-sweep.md
 
 mod support;
 

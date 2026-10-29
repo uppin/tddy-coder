@@ -8,7 +8,7 @@
 //! notification in the agent's words.
 //!
 //! Feature doc: docs/ft/daemon/session-notifications.md § Agent-written notifications.
-//! Changeset: docs/dev/1-WIP/2026-10-29-home-inbox-sweep.md
+//! Changeset: docs/dev/changesets/2026-10-29-home-inbox-sweep.md
 
 mod support;
 

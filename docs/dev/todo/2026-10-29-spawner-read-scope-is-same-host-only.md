@@ -2,7 +2,7 @@
 
 **Category:** Gap (low). Deferred from `#home-inbox` 11/11 (sweep, #788), and accepted by the
 orchestrator at that node's 6e review.
-**Source:** `packages/tddy-daemon-rpc/src/exec_tool/project_home.rs`
+**Source:** `packages/tddy-daemon-rpc/src/exec_tool/project_home/caller.rs`
 (`refuse_a_spawner_outside_its_own_sessions`).
 
 `#home-inbox` 11/11 offers a conversation spawner, such as a `grill-me` session,
