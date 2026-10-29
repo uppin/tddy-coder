@@ -2,80 +2,25 @@
 //! window, sequence numbers continue across a restart after compaction, and a damaged line is
 //! skipped rather than ending the log (`#home-inbox` 7/8).
 //!
-//! Changeset: docs/dev/1-WIP/2026-10-25-home-inbox-home-wait.md
+//! Changeset: docs/dev/changesets/2026-10-29-home-inbox-home-wait.md
 
-use std::path::{Path, PathBuf};
-use std::sync::Arc;
+mod project_notification_log_support;
+
+use std::path::Path;
 
 use pretty_assertions::assert_eq;
-use tddy_core::session_metadata::{write_session_metadata, SessionMetadata};
+use project_notification_log_support::{a_log_over, write_session};
 use tddy_session_activity::project_notification_log::{
-    ProjectNotificationLog, ProjectNotificationScope, PROJECT_NOTIFICATION_CAPACITY,
+    ProjectNotificationScope, PROJECT_NOTIFICATION_CAPACITY,
 };
 use tddy_session_activity::session_notifications::{
-    SessionNotification, SessionNotificationBus, SessionNotificationKind, SessionNotificationSource,
+    SessionNotification, SessionNotificationKind, SessionNotificationSource,
 };
 
 const PROJECT: &str = "project-a";
 const ADA: &str = "ada";
 const CHILD: &str = "01900000-0000-7000-8000-AABB00000500";
 const HOME: &str = "01900000-0000-7000-8000-AABB00000501";
-
-fn sessions_of(data_dir: &Path) -> PathBuf {
-    data_dir.join("users").join(ADA)
-}
-
-fn write_child_session(data_dir: &Path) {
-    let dir = sessions_of(data_dir).join("sessions").join(CHILD);
-    std::fs::create_dir_all(&dir).expect("the session dir");
-    let meta = SessionMetadata {
-        session_id: CHILD.to_string(),
-        project_id: PROJECT.to_string(),
-        created_at: "2026-10-25T10:00:00Z".to_string(),
-        updated_at: "2026-10-25T10:00:00Z".to_string(),
-        status: "active".to_string(),
-        repo_path: Some(format!("/home/{ADA}/{PROJECT}")),
-        pid: Some(4242),
-        tool: None,
-        livekit_room: None,
-        pending_elicitation: false,
-        previous_session_id: None,
-        session_type: Some("claude-cli".to_string()),
-        model: None,
-        cursor_chat_id: None,
-        harness_resume_token: None,
-        activity_status: Some("Running".to_string()),
-        hook_token: None,
-        sandbox: None,
-        agent: None,
-        recipe: None,
-        agents: Vec::new(),
-        agents_rev: 0,
-        legacy_specialized_agents: Vec::new(),
-        codebase_daemon_instance_id: None,
-        codebase_session_id: None,
-        agent_daemon_instance_id: None,
-        agent_session_id: None,
-        ssh_config_host: None,
-        managed_codebase: false,
-        session_role: None,
-    };
-    write_session_metadata(&dir, &meta).expect("the session's .session.yaml");
-}
-
-/// The log over `data_dir`, as a daemon starting over it opens it.
-fn a_log_over(data_dir: &Path) -> (Arc<ProjectNotificationLog>, SessionNotificationBus) {
-    let root = data_dir.to_path_buf();
-    let log = Arc::new(
-        ProjectNotificationLog::open(
-            data_dir,
-            Arc::new(move |os_user: &str| Some(root.join("users").join(os_user))),
-        )
-        .expect("the log opens over the data directory"),
-    );
-    let bus = SessionNotificationBus::new().with_subscriber(Arc::clone(&log));
-    (log, bus)
-}
 
 fn an_attention_notification(text: &str) -> SessionNotification {
     SessionNotification {
@@ -115,7 +60,7 @@ async fn a_log_that_outgrows_its_window_on_disk_keeps_its_sequence_across_a_rest
     // Given a daemon whose child publishes twice the window's worth of notifications, so its file
     // is rewritten to the window once it has grown past twice the window
     let data_dir = tempfile::tempdir().expect("a temporary data dir");
-    write_child_session(data_dir.path());
+    write_session(data_dir.path(), ADA, CHILD, PROJECT);
     let (_log, bus) = a_log_over(data_dir.path());
     let published = 2 * PROJECT_NOTIFICATION_CAPACITY + 1;
     for n in 1..=published {
@@ -165,7 +110,7 @@ async fn a_log_that_outgrows_its_window_on_disk_keeps_its_sequence_across_a_rest
 async fn a_damaged_line_is_skipped_and_the_records_around_it_are_kept() {
     // Given one record, then a line the file's writer never wrote
     let data_dir = tempfile::tempdir().expect("a temporary data dir");
-    write_child_session(data_dir.path());
+    write_session(data_dir.path(), ADA, CHILD, PROJECT);
     let (_log, bus) = a_log_over(data_dir.path());
     bus.publish(an_attention_notification("before the damage"))
         .await;
@@ -199,4 +144,48 @@ async fn a_damaged_line_is_skipped_and_the_records_around_it_are_kept() {
             "2".to_string()
         )
     );
+}
+
+#[tokio::test]
+async fn a_line_torn_by_a_crash_does_not_swallow_the_next_record() {
+    // Given one record, then the start of a second that a crash cut off before its line break
+    let data_dir = tempfile::tempdir().expect("a temporary data dir");
+    write_session(data_dir.path(), ADA, CHILD, PROJECT);
+    let (_log, bus) = a_log_over(data_dir.path());
+    bus.publish(an_attention_notification("before the crash"))
+        .await;
+    let file = data_dir
+        .path()
+        .join("projects")
+        .join(PROJECT)
+        .join("notifications.jsonl");
+    let mut torn = std::fs::read_to_string(&file).expect("the file");
+    torn.push_str("{\"os_user\":\"ada\",\"seq\":2,\"sess");
+    std::fs::write(&file, torn).expect("the torn line");
+
+    // When the daemon restarts and a record is published
+    let (restarted, restarted_bus) = a_log_over(data_dir.path());
+    restarted_bus
+        .publish(an_attention_notification("after the crash"))
+        .await;
+
+    // Then the new record survives another restart: it did not run on into the torn line
+    let (reopened, _) = a_log_over(data_dir.path());
+    for log in [&restarted, &reopened] {
+        let texts: Vec<String> = log
+            .read(&the_home_agents_scope(), "", None)
+            .expect("the log is read")
+            .page
+            .items
+            .iter()
+            .map(|r| r.text.clone())
+            .collect();
+        assert_eq!(
+            texts,
+            vec![
+                "before the crash".to_string(),
+                "after the crash".to_string()
+            ]
+        );
+    }
 }

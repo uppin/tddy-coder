@@ -149,7 +149,7 @@ pub trait ProjectHomeInboxPort: ProjectHomePort {
 }
 
 /// The refusal of a port that keeps no notification log.
-const NO_NOTIFICATION_LOG: &str = "this host keeps no project notification log";
+pub const NO_NOTIFICATION_LOG: &str = "this host keeps no project notification log";
 
 /// Run [`WAIT_PROJECT_NOTIFICATIONS`] or [`READ_PROJECT_NOTIFICATIONS`] for `home`.
 ///

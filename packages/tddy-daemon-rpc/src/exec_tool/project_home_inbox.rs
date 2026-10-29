@@ -12,20 +12,20 @@ use async_trait::async_trait;
 use tddy_session_activity::project_notification_log::{
     record_json, ProjectNotificationLog, ProjectNotificationRecord, ProjectNotificationScope,
 };
-use tddy_tool_engine::project_home_inbox_tools::{NotificationsPage, ProjectHomeInboxPort};
+use tddy_tool_engine::project_home_inbox_tools::{
+    NotificationsPage, ProjectHomeInboxPort, NO_NOTIFICATION_LOG,
+};
 use tddy_tool_engine::session_follow::FollowPage;
 use tddy_worktree_service::session_target::HomeCaller;
 
 use super::project_home::DaemonProjectHome;
-
-const NO_LOG: &str = "this host keeps no project notification log";
 
 impl DaemonProjectHome {
     /// The log this host keeps, or a refusal when none is installed.
     fn log(&self) -> Result<&ProjectNotificationLog, String> {
         self.notification_log
             .as_deref()
-            .ok_or_else(|| NO_LOG.to_string())
+            .ok_or_else(|| NO_NOTIFICATION_LOG.to_string())
     }
 
     /// The records the caller may see: its own project, its own OS user, not its own session.

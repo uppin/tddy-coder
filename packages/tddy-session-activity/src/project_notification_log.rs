@@ -8,8 +8,8 @@
 //!
 //! - **Records.** Each carries a monotonic `seq`, starting at 1 and never reused, and the
 //!   notification's own fields (the agent's words, the question's id and content). The project is
-//!   resolved from the session's metadata; a notification whose session or owner cannot be resolved
-//!   belongs to no project and is not recorded.
+//!   resolved from the session's metadata. A session of no project is skipped quietly; one whose
+//!   owner or record cannot be resolved is a delivery error the bus logs.
 //! - **Window.** The newest [`PROJECT_NOTIFICATION_CAPACITY`] records are kept per project. A cursor
 //!   older than the window is reported as `lost`, never silently trimmed.
 //! - **Persistence.** Appended as JSON lines to
@@ -41,6 +41,7 @@ use tddy_core::session_lifecycle::{unified_session_dir_path, validate_session_id
 use tddy_daemon_kernel::session_notification::{
     AgentNotification, QuestionNotice, SessionNotificationKind, SessionNotificationSource,
 };
+use tddy_tool_engine::project_home_inbox_tools::MAX_WAIT_MS;
 use tddy_tool_engine::session_follow::{page_size, parse_cursor, FollowPage};
 
 use crate::session_notifications::{SessionNotification, SessionNotificationSubscriber};
@@ -50,9 +51,9 @@ pub use storage::record_json;
 /// How many records a project's log keeps; older ones are evicted and counted.
 pub const PROJECT_NOTIFICATION_CAPACITY: usize = 1_000;
 
-/// The longest [`ProjectNotificationLog::wait`] is held, whatever it is asked for: the
-/// remote-call clamp, which keeps one call under every transport's deadline.
-pub const MAX_NOTIFICATION_WAIT: Duration = Duration::from_millis(20_000);
+/// The longest [`ProjectNotificationLog::wait`] is held, whatever it is asked for: the tools' cap
+/// ([`MAX_WAIT_MS`]), the remote-call clamp that keeps one call under every transport's deadline.
+pub const MAX_NOTIFICATION_WAIT: Duration = Duration::from_millis(MAX_WAIT_MS);
 
 /// `wait`'s timeout as the log honours it: `requested`, capped at [`MAX_NOTIFICATION_WAIT`].
 #[must_use]
@@ -247,8 +248,12 @@ impl ProjectNotificationLog {
         let size = page_size(None);
         let deadline = Instant::now() + clamp_wait(timeout);
         loop {
-            // Subscribed before the log is read, so a record appended in between wakes this wait.
+            // Registered before the log is read, so a record appended in between wakes this wait.
+            // `notify_waiters` already reaches a `Notified` from its creation; `enable` makes the
+            // registration explicit rather than leaning on that guarantee.
             let arrived = project.arrived.notified();
+            tokio::pin!(arrived);
+            arrived.as_mut().enable();
             let answer = {
                 let state = project.lock();
                 let (page, lost) = page_of(&state, scope, Start::After(after), size);
@@ -273,8 +278,9 @@ impl ProjectNotificationLog {
         Arc::clone(projects.entry(project_id.to_string()).or_default())
     }
 
-    /// The project a notification's session belongs to, from its own record.
-    fn project_of(&self, notification: &SessionNotification) -> anyhow::Result<String> {
+    /// The project a notification's session belongs to, from its own record; `None` for a session
+    /// of no project. A session whose OS user or record cannot be resolved is an error.
+    fn project_of(&self, notification: &SessionNotification) -> anyhow::Result<Option<String>> {
         validate_session_id_segment(&notification.session_id)
             .map_err(|e| anyhow::anyhow!("{}", e.message()))?;
         let sessions_base = (self.sessions_base_for)(&notification.os_user).ok_or_else(|| {
@@ -287,12 +293,7 @@ impl ProjectNotificationLog {
                 notification.session_id
             )
         })?;
-        anyhow::ensure!(
-            !metadata.project_id.is_empty(),
-            "session {} belongs to no project",
-            notification.session_id
-        );
-        Ok(metadata.project_id)
+        Ok((!metadata.project_id.is_empty()).then_some(metadata.project_id))
     }
 }
 
@@ -364,7 +365,16 @@ impl SessionNotificationSubscriber for ProjectNotificationLog {
     }
 
     async fn deliver(&self, notification: &SessionNotification) -> anyhow::Result<()> {
-        let project_id = self.project_of(notification)?;
+        let Some(project_id) = self.project_of(notification)? else {
+            // A session started without a project is a normal session, not a fault: nothing to
+            // record, and nothing for the bus to warn about.
+            log::debug!(
+                target: "tddy_session_activity::project_notification_log",
+                "session {} belongs to no project; its notification is not recorded",
+                notification.session_id
+            );
+            return Ok(());
+        };
         let path = storage::project_file(&self.data_dir, &project_id)?;
         let project = self.project(&project_id);
         {

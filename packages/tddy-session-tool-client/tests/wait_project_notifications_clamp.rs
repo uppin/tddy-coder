@@ -2,7 +2,7 @@
 //! remote daemon over LiveKit has that timeout capped at the remote block ceiling like `Await`'s
 //! (`#home-inbox` 7/8). Without it, a minute-long wait sits past every transport's deadline.
 //!
-//! Changeset: docs/dev/1-WIP/2026-10-25-home-inbox-home-wait.md
+//! Changeset: docs/dev/changesets/2026-10-29-home-inbox-home-wait.md
 
 use pretty_assertions::assert_eq;
 use tddy_session_tool_client::{clamp_remote_blocking_args, MAX_REMOTE_BLOCK_MS};

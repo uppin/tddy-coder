@@ -89,6 +89,7 @@ pub(super) fn replay_all(data_dir: &Path) -> anyhow::Result<Vec<Replayed>> {
 }
 
 fn replay_file(path: &Path) -> anyhow::Result<(Vec<Held>, usize)> {
+    end_on_a_line_break(path)?;
     let file =
         std::fs::File::open(path).map_err(|e| anyhow::anyhow!("open {}: {e}", path.display()))?;
     let mut records = Vec::new();
@@ -110,6 +111,35 @@ fn replay_file(path: &Path) -> anyhow::Result<(Vec<Held>, usize)> {
         }
     }
     Ok((records, lines))
+}
+
+/// A crash part-way through an append leaves a line with no line break; the next append would
+/// then run on into it and be lost with it. Ending the file on a line break first keeps the torn
+/// line alone, where the replay skips it.
+fn end_on_a_line_break(path: &Path) -> anyhow::Result<()> {
+    use std::io::{Read, Seek, SeekFrom};
+    let mut file = OpenOptions::new()
+        .read(true)
+        .append(true)
+        .open(path)
+        .map_err(|e| anyhow::anyhow!("open {}: {e}", path.display()))?;
+    let length = file
+        .metadata()
+        .map_err(|e| anyhow::anyhow!("stat {}: {e}", path.display()))?
+        .len();
+    if length == 0 {
+        return Ok(());
+    }
+    let mut last = [0u8; 1];
+    file.seek(SeekFrom::Start(length - 1))
+        .and_then(|_| file.read_exact(&mut last))
+        .map_err(|e| anyhow::anyhow!("read {}: {e}", path.display()))?;
+    if last[0] != b'\n' {
+        log::warn!(target: LOG_TARGET, "{} ends in a torn line; ending it", path.display());
+        file.write_all(b"\n")
+            .map_err(|e| anyhow::anyhow!("write {}: {e}", path.display()))?;
+    }
+    Ok(())
 }
 
 /// Append `held` to the file at `path`, creating its directory and file as needed.
@@ -144,10 +174,22 @@ pub(super) fn rewrite<'a>(
         body.push('\n');
     }
     let temporary = path.with_extension("jsonl.tmp");
-    std::fs::write(&temporary, body)
+    let mut file = std::fs::File::create(&temporary)
+        .map_err(|e| anyhow::anyhow!("create {}: {e}", temporary.display()))?;
+    // Flushed to disk before the rename, so a crash after it never leaves an empty or short file
+    // where the previous one stood.
+    file.write_all(body.as_bytes())
+        .and_then(|()| file.sync_all())
         .map_err(|e| anyhow::anyhow!("write {}: {e}", temporary.display()))?;
     std::fs::rename(&temporary, path)
-        .map_err(|e| anyhow::anyhow!("replace {}: {e}", path.display()))
+        .map_err(|e| anyhow::anyhow!("replace {}: {e}", path.display()))?;
+    // The rename itself is durable once the directory holding it is.
+    if let Some(parent) = path.parent() {
+        std::fs::File::open(parent)
+            .and_then(|dir| dir.sync_all())
+            .map_err(|e| anyhow::anyhow!("sync {}: {e}", parent.display()))?;
+    }
+    Ok(())
 }
 
 // ── the JSON form ────────────────────────────────────────────────────────────────────────────────

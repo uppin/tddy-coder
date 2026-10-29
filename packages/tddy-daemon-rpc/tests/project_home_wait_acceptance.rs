@@ -8,7 +8,7 @@
 //!
 //! Feature doc: docs/ft/daemon/project-concept.md § Project-home tools,
 //! docs/ft/daemon/session-notifications.md.
-//! Changeset: docs/dev/1-WIP/2026-10-25-home-inbox-home-wait.md
+//! Changeset: docs/dev/changesets/2026-10-29-home-inbox-home-wait.md
 
 mod support;
 

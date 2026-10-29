@@ -4,7 +4,7 @@
 //! The log is the daemon's: here the port is a fake that records what it was asked and answers a
 //! page it was given, so only the tools' rules are read.
 //!
-//! Changeset: docs/dev/1-WIP/2026-10-25-home-inbox-home-wait.md
+//! Changeset: docs/dev/changesets/2026-10-29-home-inbox-home-wait.md
 
 use std::sync::Mutex;
 

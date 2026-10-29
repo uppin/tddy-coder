@@ -7,16 +7,17 @@
 //! first one's directory. Every wait here is bounded: a wait that never returns fails its test
 //! instead of hanging it.
 //!
-//! PRD `docs/ft/daemon/1-WIP/PRD-2026-10-25-home-wait-notifications.md`.
-//! Changeset: docs/dev/1-WIP/2026-10-25-home-inbox-home-wait.md
+//! Feature doc: docs/ft/daemon/project-concept.md § Waiting for notifications.
+//! Changeset: docs/dev/changesets/2026-10-29-home-inbox-home-wait.md
+
+mod project_notification_log_support;
 
 use std::future::Future;
-use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
 
 use pretty_assertions::assert_eq;
-use tddy_core::session_metadata::{write_session_metadata, SessionMetadata};
+use project_notification_log_support::{a_log_over, write_session};
 use tddy_daemon_kernel::session_notification::QuestionNotice;
 use tddy_session_activity::project_notification_log::{
     clamp_wait, NotificationRead, NotificationWait, ProjectNotificationLog,
@@ -57,24 +58,6 @@ struct ADaemon {
     bus: SessionNotificationBus,
 }
 
-/// Where `os_user`'s sessions live under `data_dir`.
-fn sessions_of(data_dir: &Path, os_user: &str) -> PathBuf {
-    data_dir.join("users").join(os_user)
-}
-
-fn a_log_over(data_dir: &Path) -> (Arc<ProjectNotificationLog>, SessionNotificationBus) {
-    let root = data_dir.to_path_buf();
-    let log = Arc::new(
-        ProjectNotificationLog::open(
-            data_dir,
-            Arc::new(move |os_user: &str| Some(sessions_of(&root, os_user))),
-        )
-        .expect("the log opens over the data directory"),
-    );
-    let bus = SessionNotificationBus::new().with_subscriber(Arc::clone(&log));
-    (log, bus)
-}
-
 impl ADaemon {
     /// A daemon holding the home session of project A, a child of it, a session of project B and a
     /// session of another OS user in project A.
@@ -99,46 +82,6 @@ impl ADaemon {
         self.log = log;
         self.bus = bus;
     }
-}
-
-fn write_session(data_dir: &Path, os_user: &str, session_id: &str, project_id: &str) {
-    let session_dir = sessions_of(data_dir, os_user)
-        .join("sessions")
-        .join(session_id);
-    std::fs::create_dir_all(&session_dir).expect("the session dir");
-    let meta = SessionMetadata {
-        session_id: session_id.to_string(),
-        project_id: project_id.to_string(),
-        created_at: "2026-10-25T10:00:00Z".to_string(),
-        updated_at: "2026-10-25T10:00:00Z".to_string(),
-        status: "active".to_string(),
-        repo_path: Some(format!("/home/{os_user}/{project_id}")),
-        pid: Some(4242),
-        tool: None,
-        livekit_room: None,
-        pending_elicitation: false,
-        previous_session_id: None,
-        session_type: Some("claude-cli".to_string()),
-        model: None,
-        cursor_chat_id: None,
-        harness_resume_token: None,
-        activity_status: Some("Running".to_string()),
-        hook_token: None,
-        sandbox: None,
-        agent: None,
-        recipe: None,
-        agents: Vec::new(),
-        agents_rev: 0,
-        legacy_specialized_agents: Vec::new(),
-        codebase_daemon_instance_id: None,
-        codebase_session_id: None,
-        agent_daemon_instance_id: None,
-        agent_session_id: None,
-        ssh_config_host: None,
-        managed_codebase: false,
-        session_role: None,
-    };
-    write_session_metadata(&session_dir, &meta).expect("the session's .session.yaml");
 }
 
 // ── builders ─────────────────────────────────────────────────────────────────────────────────

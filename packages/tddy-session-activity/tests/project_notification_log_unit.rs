@@ -2,15 +2,16 @@
 //! wants, cursor parsing, the cursor of an empty page, paging and the `lost` count
 //! (`#home-inbox` 7/8). The end-to-end behaviour is `project_notification_log_acceptance.rs`'s.
 //!
-//! Changeset: docs/dev/1-WIP/2026-10-25-home-inbox-home-wait.md
+//! Changeset: docs/dev/changesets/2026-10-29-home-inbox-home-wait.md
 
-use std::path::Path;
+mod project_notification_log_support;
+
 use std::sync::Arc;
 use std::time::Duration;
 
 use pretty_assertions::assert_eq;
+use project_notification_log_support::{a_log_over, write_session};
 use rstest::rstest;
-use tddy_core::session_metadata::{write_session_metadata, SessionMetadata};
 use tddy_session_activity::project_notification_log::{
     clamp_wait, ProjectNotificationLog, ProjectNotificationScope, MAX_NOTIFICATION_WAIT,
     PROJECT_NOTIFICATION_CAPACITY,
@@ -39,64 +40,14 @@ struct ALog {
 fn a_log_holding_two_users_children() -> ALog {
     let data_dir = tempfile::tempdir().expect("a temporary data dir");
     for (user, session) in [(ADA, HOME), (ADA, CHILD), (GRACE, GRACES_CHILD)] {
-        write_session(data_dir.path(), user, session);
+        write_session(data_dir.path(), user, session, PROJECT);
     }
-    let root = data_dir.path().to_path_buf();
-    let log = Arc::new(
-        ProjectNotificationLog::open(
-            data_dir.path(),
-            Arc::new(move |user: &str| Some(root.join("users").join(user))),
-        )
-        .expect("the log opens"),
-    );
-    let bus = SessionNotificationBus::new().with_subscriber(Arc::clone(&log));
+    let (log, bus) = a_log_over(data_dir.path());
     ALog {
         _data_dir: data_dir,
         log,
         bus,
     }
-}
-
-fn write_session(data_dir: &Path, os_user: &str, session_id: &str) {
-    let dir = data_dir
-        .join("users")
-        .join(os_user)
-        .join("sessions")
-        .join(session_id);
-    std::fs::create_dir_all(&dir).expect("the session dir");
-    let meta = SessionMetadata {
-        session_id: session_id.to_string(),
-        project_id: PROJECT.to_string(),
-        created_at: "2026-10-25T10:00:00Z".to_string(),
-        updated_at: "2026-10-25T10:00:00Z".to_string(),
-        status: "active".to_string(),
-        repo_path: Some(format!("/home/{os_user}/{PROJECT}")),
-        pid: Some(4242),
-        tool: None,
-        livekit_room: None,
-        pending_elicitation: false,
-        previous_session_id: None,
-        session_type: Some("claude-cli".to_string()),
-        model: None,
-        cursor_chat_id: None,
-        harness_resume_token: None,
-        activity_status: Some("Running".to_string()),
-        hook_token: None,
-        sandbox: None,
-        agent: None,
-        recipe: None,
-        agents: Vec::new(),
-        agents_rev: 0,
-        legacy_specialized_agents: Vec::new(),
-        codebase_daemon_instance_id: None,
-        codebase_session_id: None,
-        agent_daemon_instance_id: None,
-        agent_session_id: None,
-        ssh_config_host: None,
-        managed_codebase: false,
-        session_role: None,
-    };
-    write_session_metadata(&dir, &meta).expect("the session's .session.yaml");
 }
 
 fn a_notification(
@@ -395,4 +346,52 @@ async fn a_wait_returns_at_once_when_records_newer_than_its_cursor_exist() {
         ),
         (vec![2], false)
     );
+}
+
+// ── what the log cannot record ───────────────────────────────────────────────────────────────
+
+#[tokio::test]
+async fn a_session_of_no_project_is_skipped_without_an_error() {
+    // Given a session started without a project
+    let world = a_log_holding_two_users_children();
+    const LONE: &str = "01900000-0000-7000-8000-AABB00000403";
+    write_session(world._data_dir.path(), ADA, LONE, "");
+
+    // When it asks for attention
+    let delivered = world
+        .log
+        .deliver(&a_notification(
+            SessionNotificationKind::AttentionRequired,
+            ADA,
+            LONE,
+            "needs you",
+        ))
+        .await;
+
+    // Then the delivery succeeds and nothing is recorded
+    assert!(delivered.is_ok(), "{delivered:?}");
+    let read = world.log.read(&ada_home_scope(), "", None).expect("read");
+    assert_eq!(read.page.next_cursor, "0");
+}
+
+#[tokio::test]
+async fn a_session_with_no_record_is_a_delivery_error_naming_it() {
+    let world = a_log_holding_two_users_children();
+    const UNKNOWN: &str = "01900000-0000-7000-8000-AABB000004FF";
+
+    let delivered = world
+        .log
+        .deliver(&a_notification(
+            SessionNotificationKind::AttentionRequired,
+            ADA,
+            UNKNOWN,
+            "needs you",
+        ))
+        .await;
+
+    let error = format!(
+        "{:#}",
+        delivered.expect_err("an unknown session is not recorded")
+    );
+    assert!(error.contains(UNKNOWN), "{error}");
 }
