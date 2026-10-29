@@ -28,7 +28,7 @@ Decisions:
 - **The hook always runs `--await-answer`**; the daemon decides whether anyone is there, because a
   child is tagged with its orchestrator only after its hooks are written.
 - **Presence is a served terminal on this host**, not a pid. An orchestrator on another host gets
-  no wait (backlog: `2026-10-29-permission-wait-needs-a-same-host-orchestrator`).
+  no wait (backlog: `2026-10-29-permission-wait-needs-a-same-host-orchestrator`, resolved by `#home-inbox` 10/11, #787).
 - **Check order**: orchestrator, already answered, pending question, kind, waiter and option —
   "already answered" before the pending question because an answer clears it. A race lost at
   delivery is reported as `AlreadyAnswered` when another answer won it.

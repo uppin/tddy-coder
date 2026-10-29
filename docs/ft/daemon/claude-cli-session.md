@@ -368,8 +368,16 @@ alone) run `session-hook --await-answer --await-timeout-secs <wait + 5>`, with C
 same authentication as `ReportSessionStatus`:
 
 - answers `NO_ORCHESTRATOR` at once when the session's changeset names no `orchestrator_session_id`,
-  names one on another host, or names one whose main terminal this daemon does not serve (a served
-  terminal, not a live pid, so a dead orchestrator whose pid was reused never makes a child wait);
+  or names one whose main terminal **the daemon it runs on** does not serve (a served terminal, not
+  a live pid, so a dead orchestrator whose pid was reused never makes a child wait). An orchestrator
+  on this host is judged from this daemon's own terminals. One on another host — the changeset's
+  `orchestrator_daemon_instance_id` names a peer — is asked of that peer once, before the wait, with
+  the peer-only `ActivityService.IsSessionTerminalServed`, bounded by 3 s (`PEER_PRESENCE_TIMEOUT`).
+  A peer off the roster, unreachable, erroring or silent past the bound counts as absent and is
+  logged at warn, so asking never delays Claude's prompt by more than the bound. The wait itself
+  stays on the child's host; the orchestrator's `AnswerSessionPermission` / `AnswerSessionQuestion`
+  is forwarded there. A peer that answers "served" and then goes away is not re-asked: the hook
+  waits out `<wait>` and ends `TIMED_OUT`;
 - refuses a `request_id` that is not the session's pending question;
 - otherwise holds the call until the orchestrator answers → `ANSWERED`, or until `<wait>` passes →
   `TIMED_OUT`. A pending question of kind `permission` is answered with `AnswerSessionPermission`

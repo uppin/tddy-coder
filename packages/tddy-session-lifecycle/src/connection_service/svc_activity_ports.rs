@@ -175,7 +175,7 @@ impl DaemonSessionHost {
             }) => match self.ask_peer_whether_it_serves(&peer, session_id).await {
                 Ok(served) => served,
                 Err(status) => {
-                    log::debug!(
+                    log::warn!(
                         "{PRESENCE_RPC}: {session_id} counted as absent: daemon_instance_id={peer} \
                          did not answer: {:?} {}",
                         status.code(),
@@ -192,7 +192,7 @@ impl DaemonSessionHost {
                 .await
                 .is_some(),
             Err(status) => {
-                log::debug!(
+                log::warn!(
                     "{PRESENCE_RPC}: {session_id} counted as absent: daemon_instance_id={peer_instance_id} \
                      is not routable: {}",
                     status.message()
