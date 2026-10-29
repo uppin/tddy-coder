@@ -15,6 +15,7 @@
 use async_trait::async_trait;
 use serde::Deserialize;
 use serde_json::json;
+use tddy_daemon_kernel::agent_notification_limits::validate_agent_notification;
 use tddy_service::proto::activity::NotificationLevel;
 use tddy_worktree_service::session_target::HomeCaller;
 
@@ -84,11 +85,25 @@ impl NotifyOperatorArgs {
     /// other than `info`, `success`, `warning` or `error`. An omitted level is `info`, an omitted
     /// sound silent.
     pub fn into_notice(self) -> Result<OperatorNotice, String> {
-        // TODO(sweep): implement — `validate_agent_notification`, then the level by name.
-        Err(format!(
-            "{NOTIFY_OPERATOR}: argument validation is not implemented yet ({:?})",
-            self.title
-        ))
+        validate_agent_notification(&self.title, &self.body_markdown)
+            .map_err(|reason| format!("{NOTIFY_OPERATOR}: {reason}"))?;
+        let level = match self.level.as_deref().map(str::trim) {
+            None | Some("") | Some("info") => NotificationLevel::Info,
+            Some("success") => NotificationLevel::Success,
+            Some("warning") => NotificationLevel::Warning,
+            Some("error") => NotificationLevel::Error,
+            Some(other) => {
+                return Err(format!(
+                    "{NOTIFY_OPERATOR}: unknown level {other:?}; use info, success, warning or error"
+                ))
+            }
+        };
+        Ok(OperatorNotice {
+            title: self.title,
+            body_markdown: self.body_markdown,
+            level,
+            sound: self.sound.unwrap_or(false),
+        })
     }
 }
 
@@ -129,8 +144,16 @@ pub async fn execute_project_home_notify_tool(
     tool_name: &str,
     args_json: &str,
 ) -> ToolOutcome {
-    // TODO(sweep): implement — parse NotifyOperatorArgs, map the level, call the port and answer
-    // what was published.
-    let _ = (port, home, args_json);
-    ToolOutcome::err(format!("{tool_name}: not implemented yet"))
+    let args: NotifyOperatorArgs = match serde_json::from_str(args_json) {
+        Ok(args) => args,
+        Err(e) => return ToolOutcome::err(format!("{tool_name}: invalid arguments: {e}")),
+    };
+    let notice = match args.into_notice() {
+        Ok(notice) => notice,
+        Err(refusal) => return ToolOutcome::err(refusal),
+    };
+    match port.notify_operator(home, notice).await {
+        Ok(()) => ToolOutcome::ok(json!({ "published": true }).to_string()),
+        Err(reason) => ToolOutcome::err(format!("{tool_name}: {reason}")),
+    }
 }

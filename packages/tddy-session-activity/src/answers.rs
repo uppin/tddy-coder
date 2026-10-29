@@ -304,12 +304,7 @@ pub fn answer_permission(
         &by,
         at_unix_ms,
     );
-    if let Err(e) = clear_pending_question(&session_dir) {
-        log::warn!(
-            target: "tddy_session_activity::answers",
-            "answered permission request {request_id}, but could not clear its pending question: {e}"
-        );
-    }
+    clear_answered_pending_question(&session_dir, &request_id);
 
     Ok(AnsweredPermission {
         session_id: target.to_string(),
@@ -328,9 +323,13 @@ pub fn answer_permission(
 ///
 /// A failure to read or clear is logged, never returned: the answer is already delivered.
 pub fn clear_answered_pending_question(session_dir: &Path, request_id: &str) {
-    // TODO(sweep): implement — clear only when the recorded question's `request_id` is
-    // `request_id`, and call this from `answer_permission` and `answer_question`. Until then it clears
-    // unconditionally, as `answer_permission` does today.
+    let still_pending = matches!(
+        read_pending_question(session_dir),
+        Ok(Some(current)) if current.request_id == request_id
+    );
+    if !still_pending {
+        return;
+    }
     if let Err(e) = clear_pending_question(session_dir) {
         log::warn!(
             target: "tddy_session_activity::answers",

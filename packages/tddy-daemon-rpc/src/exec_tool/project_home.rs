@@ -34,6 +34,7 @@ use tddy_daemon_kernel::user_paths::projects_path_for_user;
 use tddy_discovery::subagent::PermissionAnswer;
 use tddy_host_service::HostServiceImpl;
 use tddy_rpc::{Request, Status};
+use tddy_service::proto::activity::{ActivityService as _, ReportOperatorNotificationRequest};
 use tddy_service::proto::exec_tools::{ExecuteToolRequest, ExecuteToolResponse};
 use tddy_service::proto::session::{ListSessionsRequest, Signal};
 use tddy_session_activity::answers::{
@@ -43,6 +44,7 @@ use tddy_session_activity::pending_answers::PendingAnswers;
 use tddy_session_activity::project_notification_log::ProjectNotificationLog;
 use tddy_session_activity::session_reader::{list_sessions_in_dir, SessionEntry};
 use tddy_session_lifecycle::connection_service::launch_ports::LaunchSessions;
+use tddy_session_lifecycle::connection_service::PeerRoutedActivity;
 use tddy_session_lifecycle::connection_service::session_acting_identity::SessionAccountAccess;
 use tddy_session_lifecycle::connection_service::start_choices;
 use tddy_session_lifecycle::terminal_session_adapter::DaemonTerminalSessionStore;
@@ -170,6 +172,7 @@ impl ExecToolRpcHandler {
             leases: Arc::clone(&self.project_home_host.leases),
             pending_answers: Arc::clone(&self.project_home_host.pending_answers),
             notification_log: self.project_home_host.notification_log.clone(),
+            activity: Arc::clone(&self.project_home_host.activity),
         })
     }
 
@@ -282,14 +285,36 @@ fn refuse_a_spawner_outside_its_own_sessions(
     if !is_conversation_spawner_scoped_tool(&req.tool_name) {
         return Ok(());
     }
-    // TODO(sweep): implement — pass a project-home caller; for a conversation spawner, read the
-    // target's changeset under `sessions_base` and pass only when its `orchestrator_session_id` is
-    // `home.session_id` (on this host).
-    let _ = sessions_base;
-    Err(Status::permission_denied(format!(
-        "tool {} is refused: session {} may read only the sessions it started",
-        req.tool_name, home.session_id
-    )))
+    let session_dir = unified_session_dir_path(sessions_base, &home.session_id);
+    let is_spawner = tddy_core::read_session_metadata(&session_dir)
+        .map(|metadata| session_tool_role(&metadata) == SessionToolRole::ConversationSpawner)
+        .unwrap_or(false);
+    if !is_spawner {
+        return Ok(());
+    }
+    let refused = |why: &str| {
+        Status::permission_denied(format!(
+            "tool {} is refused: session {} may read only the sessions it started ({why})",
+            req.tool_name, home.session_id
+        ))
+    };
+    let target = serde_json::from_str::<serde_json::Value>(&req.args_json)
+        .ok()
+        .and_then(|args| args.get("session_id")?.as_str().map(str::to_string))
+        .unwrap_or_default();
+    if validate_session_id_segment(&target).is_err() {
+        return Err(refused("the call names no valid session_id"));
+    }
+    // Same host only: a child recorded on another host has no changeset here (see
+    // docs/dev/todo/2026-10-29-spawner-read-scope-is-same-host-only.md).
+    let started_by = tddy_core::read_changeset(&unified_session_dir_path(sessions_base, &target))
+        .ok()
+        .and_then(|changeset| changeset.orchestrator_session_id);
+    if started_by.as_deref() == Some(home.session_id.as_str()) {
+        Ok(())
+    } else {
+        Err(refused(&format!("it did not start {target}")))
+    }
 }
 
 /// Append the call to the session's tool-call log, as the local runner does for every other tool.
@@ -362,6 +387,8 @@ pub(super) struct DaemonProjectHome {
     /// This host's project notification log, which the two inbox tools read (`#home-inbox` 7/8);
     /// `None` on a host with none installed.
     pub(super) notification_log: Option<Arc<ProjectNotificationLog>>,
+    /// This host's activity surface, which `NotifyOperator` reports through (`#home-inbox` 11/11).
+    activity: Arc<PeerRoutedActivity>,
 }
 
 /// One session as the target resolver reads it: its `.session.yaml`, its changeset's branch, and the
@@ -850,10 +877,34 @@ impl ProjectHomeNotifyPort for DaemonProjectHome {
         home: &HomeCaller,
         notice: OperatorNotice,
     ) -> Result<(), String> {
-        // TODO(sweep): implement — read `home`'s hook token from its record and call this host's
-        // `ReportOperatorNotification` in-process with it.
-        let _ = (home, notice);
-        Err("NotifyOperator is not implemented yet".to_string())
+        let session_dir = unified_session_dir_path(&self.sessions_base, &home.session_id);
+        let metadata = tddy_core::read_session_metadata(&session_dir)
+            .map_err(|e| format!("cannot read session {}'s record ({e})", home.session_id))?;
+        let can_notify = matches!(
+            metadata.session_type.as_deref(),
+            Some("claude-cli" | "cursor-cli")
+        );
+        let hook_token = metadata
+            .hook_token
+            .filter(|token| !token.is_empty())
+            .filter(|_| can_notify)
+            .ok_or_else(|| {
+                "this session has no hook token (only claude-cli and cursor-cli sessions can notify)"
+                    .to_string()
+            })?;
+        self.activity
+            .report_operator_notification(Request::direct(ReportOperatorNotificationRequest {
+                session_id: home.session_id.clone(),
+                hook_token,
+                os_user: self.os_user.clone(),
+                title: notice.title,
+                body_markdown: notice.body_markdown,
+                level: notice.level as i32,
+                sound: notice.sound,
+            }))
+            .await
+            .map(|_| ())
+            .map_err(|status| status.message().to_string())
     }
 }
 

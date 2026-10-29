@@ -73,6 +73,7 @@ use crate::project_home_worktree_tools::{
     run_get_worktree, run_list_worktrees, worktree_tool_defs, WorktreeEntry, GET_WORKTREE,
     LIST_WORKTREES,
 };
+use crate::project_home_notify_tools::{notify_operator_tool_def, NOTIFY_OPERATOR};
 use crate::read_only::is_project_home_allowed_tool;
 use crate::session_follow::{
     run_session_follow_tool, session_follow_tool_defs, SessionActivity, ToolCallBodies,
@@ -118,6 +119,7 @@ pub fn is_project_home_tool(name: &str) -> bool {
             | ANSWER_SESSION_QUESTION
             | WAIT_PROJECT_NOTIFICATIONS
             | READ_PROJECT_NOTIFICATIONS
+            | NOTIFY_OPERATOR
     )
 }
 
@@ -182,10 +184,7 @@ pub fn is_conversation_spawner_tool(name: &str) -> bool {
 /// need (`#home-inbox` 11/11). The daemon serves such a call only when the target's changeset names
 /// the caller as its `orchestrator_session_id`, and refuses any other as permission denied.
 pub fn is_conversation_spawner_scoped_tool(name: &str) -> bool {
-    // TODO(sweep): implement — `READ_SESSION_ACTIVITY`, and join it to
-    // `is_conversation_spawner_tool` once the daemon's scope check is in place.
-    let _ = name;
-    false
+    name == READ_SESSION_ACTIVITY
 }
 
 /// [`session_offered_catalog`] by [`SessionToolRole`]: a conversation spawner is offered the
@@ -200,7 +199,10 @@ pub fn session_offered_catalog_for(role: SessionToolRole, choices: &StartChoices
             .chain(
                 project_home_tool_defs_with(start_session_schema(choices))
                     .into_iter()
-                    .filter(|tool| is_conversation_spawner_tool(&tool.name)),
+                    .filter(|tool| {
+                        is_conversation_spawner_tool(&tool.name)
+                            || is_conversation_spawner_scoped_tool(&tool.name)
+                    }),
             )
             .collect(),
     }
@@ -460,6 +462,7 @@ fn project_home_tool_defs_with(start_schema: Value) -> Vec<ToolDef> {
     defs.extend(project_home_inbox_tool_defs());
     defs.extend(terminate_session_tool_def());
     defs.extend(refresh_worktree_disk_usage_tool_def());
+    defs.push(notify_operator_tool_def());
     defs
 }
 
