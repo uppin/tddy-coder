@@ -153,7 +153,7 @@ pub enum SessionToolRole {
     /// The project-home session: every project-home tool, and nothing else that writes.
     ProjectHome,
     /// A session that can spawn conversations (grill-me): the daemon-wide catalog, the four start
-    /// tools (`#start-parity` 9/9) and the two answer tools (`#home-inbox` 6/8, 8/8), for its own
+    /// tools (`#start-parity` 9/9) and the two answer tools (`#home-inbox` 6/8, 8/9), for its own
     /// project alone.
     ConversationSpawner,
     /// Any other session: the daemon-wide catalog.
@@ -164,7 +164,7 @@ pub enum SessionToolRole {
 /// served: the four start tools — `StartSession`, `GetSessionStart`, `CancelSessionStart` and
 /// `DescribeSessionStartOptions` — and the two answer tools, `AnswerSessionPermission` and
 /// `AnswerSessionQuestion`, the answers to a prompt or a question of a session it started
-/// (`#home-inbox` 6/8, 8/8).
+/// (`#home-inbox` 6/8, 8/9).
 pub fn is_conversation_spawner_tool(name: &str) -> bool {
     matches!(
         name,

@@ -1,4 +1,4 @@
-//! An orchestrator answering its child's `AskUserQuestion` (`#home-inbox` 8/8).
+//! An orchestrator answering its child's `AskUserQuestion` (`#home-inbox` 8/9).
 //!
 //! [`answer_question`] is what `AnswerSessionQuestion` runs on the child's host. It refuses unless
 //! every one of these holds, in this order — the first three are [`super::answer_permission`]'s:
@@ -215,11 +215,19 @@ pub fn answer_question(
 
     let at_unix_ms = tddy_daemon_kernel::now_unix_ms();
     record_answer(&session_dir, &question, &answers, &by, at_unix_ms);
-    if let Err(e) = clear_pending_question(&session_dir) {
-        log::warn!(
-            target: "tddy_session_activity::answers",
-            "answered question {request_id}, but could not clear its pending question: {e}"
-        );
+    // Clear only the question that was answered: the hook has returned, so Claude may already have
+    // recorded its next one, and that one is not this answer's to clear.
+    let still_pending = matches!(
+        read_pending_question(&session_dir),
+        Ok(Some(current)) if current.request_id == request_id
+    );
+    if still_pending {
+        if let Err(e) = clear_pending_question(&session_dir) {
+            log::warn!(
+                target: "tddy_session_activity::answers",
+                "answered question {request_id}, but could not clear its pending question: {e}"
+            );
+        }
     }
 
     Ok(AnsweredQuestion {

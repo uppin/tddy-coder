@@ -1,6 +1,6 @@
 //! What `session-hook --await-answer` prints for an orchestrator's answers to an `AskUserQuestion`:
 //! Claude Code's `PreToolUse` decision, `permissionDecision: allow` with the call's own input
-//! plus an `answers` map (`#home-inbox` 8/8). The mechanism was verified against Claude Code
+//! plus an `answers` map (`#home-inbox` 8/9). The mechanism was verified against Claude Code
 //! 2.1.312; see `question_decision.rs`.
 
 use pretty_assertions::assert_eq;

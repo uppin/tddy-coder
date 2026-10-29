@@ -765,7 +765,7 @@ export type AwaitQuestionAnswerResponse = Message<"activity.AwaitQuestionAnswerR
 
   /**
    * ANSWERED, for an AskUserQuestion (not a permission): the orchestrator's answer to each question
-   * it answered (`#home-inbox` 8/8). `option_id` is empty then; the hook hands these to Claude.
+   * it answered (`#home-inbox` 8/9). `option_id` is empty then; the hook hands these to Claude.
    * 4 and 5 are taken by `message` and `answered_by`, so this is 6.
    *
    * @generated from field: repeated activity.QuestionAnswer answers = 6;
@@ -781,7 +781,7 @@ export const AwaitQuestionAnswerResponseSchema: GenMessage<AwaitQuestionAnswerRe
   messageDesc(file_activity, 15);
 
 /**
- * The answer to one question of an AskUserQuestion call (`#home-inbox` 8/8).
+ * The answer to one question of an AskUserQuestion call (`#home-inbox` 8/9).
  *
  * @generated from message activity.QuestionAnswer
  */

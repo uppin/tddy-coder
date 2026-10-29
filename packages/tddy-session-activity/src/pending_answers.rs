@@ -25,7 +25,7 @@ use tddy_discovery::subagent::{
 
 mod question;
 
-// `#home-inbox` 8/8: the waiters of `AskUserQuestion` calls, `PendingAnswers`' question methods.
+// `#home-inbox` 8/9: the waiters of `AskUserQuestion` calls, `PendingAnswers`' question methods.
 pub use question::{DeliveredQuestionAnswers, OpenQuestion, QuestionWaitOutcome};
 
 /// An answer as it reached a waiting hook: the answer, who gave it, and the message a `reject_*`
@@ -109,7 +109,7 @@ impl Slots {
 #[derive(Default)]
 pub struct PendingAnswers {
     slots: Mutex<Slots>,
-    /// The `AskUserQuestion` waiters (`#home-inbox` 8/8); see [`question`].
+    /// The `AskUserQuestion` waiters (`#home-inbox` 8/9); see [`question`].
     questions: Mutex<question::QuestionSlots>,
 }
 

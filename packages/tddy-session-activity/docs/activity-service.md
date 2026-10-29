@@ -98,6 +98,21 @@ whose `NoOrchestratorIsActive` presence answers every hook `NO_ORCHESTRATOR`. Th
   the waiter and its offered option, then delivery, an activity row and clearing the question.
   `permission_request_view` turns `#home-inbox` 3/8's `PendingQuestion` into the
   `PermissionRequestView` an orchestrator reads; `AnswerRefusal` carries every refusal's text.
+- **`pending_answers::question`** — the waiters of `AskUserQuestion` calls, `PendingAnswers`' question
+  methods (`open_question`, `wait_for_question`, `answer_question_with`, `question_answered_by`) over a
+  `QuestionSlots` behind their own lock, beside the permission waiters: a permission is answered with
+  one option id, a question with an answer per question, and `PermissionAnswer` has no room for that.
+  Same rules otherwise (one waiter per `request_id`, first answer wins, the same
+  `ANSWERED_REQUESTS_KEPT` memory). The waiter holds the question **as recorded when the hook opened
+  it**.
+- **`answers::answer_question`** — what `AnswerSessionQuestion` runs: `answer_permission`'s first
+  three checks (orchestrator, already answered, a pending question open under the `request_id` — and
+  one that carries a `request_id`, else `NoRequestId`), then the kind (`NotAQuestion` for a
+  permission), the waiter, and `validate_question_answers` against the **waiter's** question, not the
+  file's, so the answers are checked against what the hook is really holding. Delivery, the
+  `question:<request_id>` activity row, and clearing the pending question — only if it is still that
+  question — follow. `AwaitQuestionAnswer` branches on the pending question's kind: `permission` as
+  before, anything else is a question and `ANSWERED` carries `answers`.
 - **`orchestrator_presence::OrchestratorPresence`** — the port: whether this daemon serves a
   session's main terminal.
 

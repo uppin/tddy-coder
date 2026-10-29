@@ -1,5 +1,5 @@
 //! An orchestrated claude-cli child's `AskUserQuestion` hook waits, for a bounded time, for its
-//! orchestrator's answers (`#home-inbox` 8/8).
+//! orchestrator's answers (`#home-inbox` 8/9).
 //!
 //! PRD `docs/ft/daemon/1-WIP/PRD-2026-10-25-question-answer.md`. The path under test is the real
 //! `AwaitQuestionAnswer` handler over a real session directory, answered through the real
@@ -10,9 +10,8 @@
 //! The pending question is written straight into the child's session directory, as `#home-inbox`
 //! 3/8's capture records it.
 //!
-//! **Blocked on `permission-answer` (`6/8`):** the two tests that hold a hook open go through
-//! `await_question_answer_impl`, whose body is `6/8`'s. Until it is green they fail at "the hook
-//! never opened its wait" — before reaching anything this node owns. The third test needs no hook.
+//! Depends on `permission-answer` (`6/8`): the two tests that hold a hook open go through its
+//! `await_question_answer_impl`. The third test needs no hook.
 
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};

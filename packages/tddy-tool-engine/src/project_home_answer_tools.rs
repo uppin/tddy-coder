@@ -5,7 +5,7 @@
 //! this tool wakes it with an option of the request — `allow_once`, `reject_once`, or `allow_always`
 //! when Claude suggested a rule — or cancels it, and Claude proceeds as if a person had answered.
 //!
-//! `AnswerSessionQuestion` (`#home-inbox` 8/8) does the same for an `AskUserQuestion`: `session_id`,
+//! `AnswerSessionQuestion` (`#home-inbox` 8/9) does the same for an `AskUserQuestion`: `session_id`,
 //! `daemon_instance_id`, `request_id` and `answers`, one per question it answers — `question_index`,
 //! the `selected` labels, and `other` free text — validated against the options the child recorded.
 //! A permission is refused there, and a question here, each naming the other tool.
@@ -151,7 +151,7 @@ pub trait ProjectHomeAnswerPort: ProjectHomePort {
     }
 
     /// Deliver `home`'s `answers` to the question `target`'s hook waits on under `request_id`
-    /// (`#home-inbox` 8/8). An error names why it was refused: the caller is not the target's
+    /// (`#home-inbox` 8/9). An error names why it was refused: the caller is not the target's
     /// orchestrator, the request was already answered (by whom), no such request is pending, it is
     /// a permission rather than a question, it carries no `request_id`, or the answers do not fit
     /// the question (which index, which label).

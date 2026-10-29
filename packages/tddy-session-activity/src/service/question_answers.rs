@@ -1,6 +1,6 @@
 //! `AwaitQuestionAnswer`: an orchestrated claude-cli session's `PermissionRequest` or
 //! `PreToolUse(AskUserQuestion)` hook, held until its orchestrator answers or the deadline passes
-//! (`#home-inbox` 6/8, 8/8).
+//! (`#home-inbox` 6/8, 8/9).
 //!
 //! Authenticated as `ReportSessionStatus` is: the session must be claude-cli and the `hook_token`
 //! its own. Then, in order:
@@ -8,7 +8,7 @@
 //! 1. no `orchestrator_session_id` in the session's changeset, an orchestrator on another host, or
 //!    one whose terminal this daemon does not serve → `NO_ORCHESTRATOR`, at once;
 //! 2. the pending question must be the `request_id` asked for. A permission is held as a permission
-//!    prompt; any other kind is a question, held with its answers (`8/8`);
+//!    prompt; any other kind is a question, held with its answers (`8/9`);
 //! 3. a waiter is opened in [`PendingAnswers`] and held for at most [`AnswerWaitPorts::wait`] →
 //!    `ANSWERED` (with the option, or the per-question answers), or `TIMED_OUT`.
 

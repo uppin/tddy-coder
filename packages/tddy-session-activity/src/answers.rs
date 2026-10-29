@@ -7,7 +7,7 @@
 //!    spawn-capable one, on the host the changeset records (`#start-parity` 2/9, 9/9);
 //! 2. the request was not answered already (a second answer is refused naming the first answerer);
 //! 3. the child's pending question (`#home-inbox` 3/8's record) is open under that `request_id`;
-//! 4. its kind is `permission` — a question is refused naming `AnswerSessionQuestion` (`8/8`);
+//! 4. its kind is `permission` — a question is refused naming `AnswerSessionQuestion` (`8/9`);
 //! 5. the chosen option is one the request offers, and a hook is waiting on it.
 //!
 //! It then wakes the hook, records who answered, when and what in the child's activity log, and
@@ -37,7 +37,7 @@ use crate::pending_answers::PendingAnswers;
 
 mod question;
 
-// `#home-inbox` 8/8: answering a question (`AskUserQuestion`) is `question`'s, beside the permission
+// `#home-inbox` 8/9: answering a question (`AskUserQuestion`) is `question`'s, beside the permission
 // answer above; one path, `answers::answer_question`.
 pub use question::{
     answer_question, answered_question_output, question_tool_call_id, validate_question_answers,
@@ -108,13 +108,13 @@ pub enum AnswerRefusal {
         request_id: String,
         option_id: String,
     },
-    /// The pending question is a permission, not a question (`#home-inbox` 8/8).
+    /// The pending question is a permission, not a question (`#home-inbox` 8/9).
     NotAQuestion { request_id: String, kind: String },
     /// The answers do not fit the question: an index it does not have, a label it does not offer, or
-    /// several selections on a single-choice question (`#home-inbox` 8/8). `reason` says which.
+    /// several selections on a single-choice question (`#home-inbox` 8/9). `reason` says which.
     InvalidAnswers { request_id: String, reason: String },
     /// The child's pending question carries no `request_id` — a `tool` session's clarification,
-    /// which is answered through its presenter, not here (`#home-inbox` 8/8).
+    /// which is answered through its presenter, not here (`#home-inbox` 8/9).
     NoRequestId { session_id: String },
     /// The child's records could not be read, so nothing was delivered.
     Io(String),

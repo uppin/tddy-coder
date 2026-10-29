@@ -1,4 +1,4 @@
-//! `AnswerSessionQuestion`'s definition and arguments (`#home-inbox` 8/8). Its dispatch runs
+//! `AnswerSessionQuestion`'s definition and arguments (`#home-inbox` 8/9). Its dispatch runs
 //! through `ProjectHomeAnswerPort::answer_question`, which `question_answer_acceptance.rs` and
 //! `project_home_answer_question_acceptance.rs` exercise end to end.
 

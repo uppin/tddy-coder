@@ -1,4 +1,4 @@
-//! The pieces of answering an `AskUserQuestion` (`#home-inbox` 8/8), one at a time: validating
+//! The pieces of answering an `AskUserQuestion` (`#home-inbox` 8/9), one at a time: validating
 //! answers against the recorded questions, the refusals' wording, the question waiters of
 //! `PendingAnswers`, and the record the child's activity keeps of an answer.
 //!

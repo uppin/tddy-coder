@@ -1,6 +1,6 @@
 //! `tddy-tools session-hook --await-answer` on an `AskUserQuestion`: an orchestrated claude-cli
 //! session's `PreToolUse` hook reports the question, waits for the orchestrator's answers, and
-//! prints the decision that hands them to Claude (`#home-inbox` 8/8).
+//! prints the decision that hands them to Claude (`#home-inbox` 8/9).
 //!
 //! Process level, because the hook's stdout and exit code are Claude Code's contract. The decision
 //! format is pinned whole: it is the mechanism verified against Claude Code 2.1.312 on 2026-10-28 —
@@ -12,10 +12,8 @@
 //! `activity.ActivityService` mounted at its own name, as `session_hook_await_answer_acceptance.rs`
 //! (`6/8`) does.
 //!
-//! **Blocked on `permission-answer` (`6/8`) and `elicit-content` (`3/8`):** the hook's await mode
-//! (`6/8`) and the `PreToolUse(AskUserQuestion)` status mapping that makes the hook report at all
-//! (`3/8`) are their bodies. Until they are green both tests fail at "the hook never asked
-//! AwaitQuestionAnswer" — before reaching the decision this node owns.
+//! Depends on `permission-answer` (`6/8`) for the hook's await mode and on `elicit-content` (`3/8`)
+//! for the `PreToolUse(AskUserQuestion)` status mapping that makes the hook report at all.
 //!
 //! Lives in `tddy-tools-cli`, not `tddy-tools` as the changeset says: that package builds the
 //! `tddy-tools` binary (`6/8` made the same move).

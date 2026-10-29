@@ -1,5 +1,5 @@
 //! The `AskUserQuestion` calls claude-cli hooks are holding open on this daemon, waiting for an
-//! orchestrator's answers (`#home-inbox` 8/8).
+//! orchestrator's answers (`#home-inbox` 8/9).
 //!
 //! Beside the permission waiters of [`PendingAnswers`] (`6/8`), not in them: a permission is answered
 //! with one option id, a question with an answer per question, and `#coagents`' `PermissionAnswer`

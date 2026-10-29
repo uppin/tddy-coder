@@ -359,20 +359,26 @@ so the activity log carries no row for it at all.
 
 ### Waiting for an orchestrator's answer
 
-The `PermissionRequest` hook runs `session-hook --await-answer --await-timeout-secs <wait + 5>`, with
-Claude's hook `timeout` set to `<wait + 10>`, where `<wait>` is `claude_cli.answer_wait_secs`
+The `PermissionRequest` hook and the `PreToolUse` hook of `AskUserQuestion` (matched to that tool
+alone) run `session-hook --await-answer --await-timeout-secs <wait + 5>`, with Claude's hook
+`timeout` set to `<wait + 10>`, where `<wait>` is `claude_cli.answer_wait_secs`
 (default 120). After its report it calls `ActivityService.AwaitQuestionAnswer` with the report's
-`request_id` and Claude's `permission_suggestions` (as JSON; empty when none). The daemon, with the
+`request_id` and, for a permission, Claude's `permission_suggestions` (as JSON; empty when none). A
+`PreToolUse` of any other tool never waits. The daemon, with the
 same authentication as `ReportSessionStatus`:
 
 - answers `NO_ORCHESTRATOR` at once when the session's changeset names no `orchestrator_session_id`,
   names one on another host, or names one whose main terminal this daemon does not serve (a served
   terminal, not a live pid, so a dead orchestrator whose pid was reused never makes a child wait);
-- refuses a `request_id` that is not the session's pending question, or one that is not a permission;
-- otherwise holds the call until the orchestrator answers with `AnswerSessionPermission`
-  ([Project concept § Answering a permission prompt](project-concept.md#answering-a-permission-prompt))
-  → `ANSWERED` with `option_id` or `cancelled`, `message` and `answered_by`; or until `<wait>` passes
-  → `TIMED_OUT`.
+- refuses a `request_id` that is not the session's pending question;
+- otherwise holds the call until the orchestrator answers → `ANSWERED`, or until `<wait>` passes →
+  `TIMED_OUT`. A pending question of kind `permission` is answered with `AnswerSessionPermission`
+  ([Project concept § Answering a permission prompt](project-concept.md#answering-a-permission-prompt)),
+  and `ANSWERED` carries `option_id` or `cancelled`, `message` and `answered_by`. Any other kind is
+  a question, answered with `AnswerSessionQuestion`
+  ([Project concept § Answering a question](project-concept.md#answering-a-question)), and
+  `ANSWERED` carries `answers` (one `{question_index, selected, other?}` per question answered) and
+  `answered_by`.
 
 The hook prints Claude's decision on `ANSWERED`, and nothing in every other case, so Claude's own
 prompt follows:
@@ -383,6 +389,21 @@ prompt follows:
 | `allow_always` | the same, with `"updatedPermissions"`: Claude's `permission_suggestions` |
 | `reject_*` | `"decision":{"behavior":"deny","message":"<message>"}` |
 | `cancelled`, `TIMED_OUT`, `NO_ORCHESTRATOR`, a daemon error, the hook's own deadline | nothing |
+
+For an `AskUserQuestion` the hook prints a `PreToolUse` decision only on `ANSWERED`, and only when
+the answers fit the call's own `tool_input` (it has `questions`, and every answer's index is one of
+them); otherwise nothing, and Claude shows its own dialog. The decision allows the call with
+`updatedInput`: the call's input unchanged, plus an `answers` map from each question's text to its
+answer — the chosen labels joined with `", "`, then the free `other` text, or `other` alone. Claude
+then skips the dialog and runs the tool as if the person had answered (`User answered Claude's
+questions: …`), with no denied call in the transcript. A question the answers leave out stays absent
+from the map and Claude asks it. Verified interactively on Claude Code 2.1.312; `claude -p` does not offer
+`AskUserQuestion` at all, so headless runs cannot check it.
+
+```json
+{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"allow",
+  "updatedInput":{"questions":[…as asked…],"answers":{"Which language?":"Rust"}}}}
+```
 
 The bounds nest: the daemon answers `TIMED_OUT` before the hook's own deadline, and the hook ends
 before Claude kills it. Waiters are held in memory, one per `request_id`: a daemon restart drops

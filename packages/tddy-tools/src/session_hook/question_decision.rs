@@ -1,5 +1,5 @@
 //! What `session-hook --await-answer` prints when an orchestrator answered the `AskUserQuestion` a
-//! `PreToolUse` hook is holding (`#home-inbox` 8/8).
+//! `PreToolUse` hook is holding (`#home-inbox` 8/9).
 //!
 //! # The mechanism, verified against Claude Code 2.1.312 (2026-10-28)
 //!

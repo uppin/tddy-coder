@@ -235,7 +235,7 @@ an ordinary, still read-only session, and main is set up once more.
 The exec tools below give the read-only main its reach over **its own project's** sessions. Only a
 session whose record carries the `project-home` role may run them; any other caller is refused with
 `PERMISSION_DENIED` naming the role — except that a session that can spawn conversations is offered
-and served the four start tools and `AnswerSessionPermission`, for its own project (see
+and served the four start tools and the two answer tools, for its own project (see
 [Conversation spawners](#conversation-spawners)).
 
 | Tool | Arguments | Answers |
@@ -255,6 +255,7 @@ and served the four start tools and `AnswerSessionPermission`, for its own proje
 | `ClaimSessionTerminal` | `session_id`, `daemon_instance_id?` | `{holder}`: takes the session's terminal control lease for the screen `project-home:<home session id>`, stealing it from whoever holds it, as a browser's claim with `steal` does — the change is broadcast, so an attached browser drops to watch-only and names the new holder. The control token stays on the host that owns the terminal and is never returned. There is no release: a person takes control back by claiming it in the browser. See [Typing into a terminal](#typing-into-a-terminal) |
 | `SendSessionKeys` | `session_id`, `daemon_instance_id?`, `text?`, `keys?` | `{sent_bytes}`: types `text`, then each named key in order, into the session's **main** terminal while this home session holds its lease. Refused, naming the holder, when it does not, and nothing is sent. See [Typing into a terminal](#typing-into-a-terminal) |
 | `AnswerSessionPermission` | `session_id`, `request_id`, `option_id` or `cancelled`, `message?`, `daemon_instance_id?` | `{session_id, request_id, answered_by, option_id, cancelled, at_unix_ms}`: answers the Claude permission prompt a session this caller started is waiting on, as `ReadSessionActivity`'s `pending_question` shows it. `option_id` is `allow_once`, `reject_once` (with `message` saying why), or `allow_always` when Claude suggested a rule; `cancelled` leaves the prompt to the person at its terminal. Only the target's orchestrator may answer, and the first answer wins. See [Answering a permission prompt](#answering-a-permission-prompt) |
+| `AnswerSessionQuestion` | `session_id`, `request_id`, `answers: [{question_index, selected, other?}]`, `daemon_instance_id?` | `{session_id, request_id, answered_by, answers, at_unix_ms}`: answers the `AskUserQuestion` a session this caller started is waiting on, as `ReadSessionActivity`'s `pending_question` shows it. Each answer names a question by index, the option labels chosen and, optionally, free text. Only the target's orchestrator may answer, the answers are checked against the question as asked, and the first answer wins. See [Answering a question](#answering-a-question) |
 | `WaitProjectNotifications` | `cursor?`, `timeout_ms?` (at most 20000, the default), `daemon_instance_id?` | `{items, next_cursor, has_more, timed_out, lost?}`: returns at once when the project's notification log holds records after `cursor`, otherwise holds until one arrives or `timeout_ms` passes. Without a cursor it waits for the next new record. See [Waiting for notifications](#waiting-for-notifications) |
 | `ReadProjectNotifications` | `cursor?`, `limit?` (50 by default, at most 200), `daemon_instance_id?` | `{items, next_cursor, has_more, clamped_to?, lost?}`: up to `limit` records after `cursor`, oldest first, without waiting; without a cursor, the newest page. See [Waiting for notifications](#waiting-for-notifications) |
 
@@ -346,8 +347,8 @@ owns, an invalid option) is the tool's `is_error` result naming why, not a handl
 A session whose recipe gives it the conversation-spawn capability (today `grill-me`) is an
 orchestrator too, limited to starting sessions:
 
-- **Offered the four start tools and the permission answer.** `StartSession`, `GetSessionStart`,
-  `CancelSessionStart`, `DescribeSessionStartOptions` and `AnswerSessionPermission` are added to its `ListExecTools` set (`SessionToolRole::ConversationSpawner`)
+- **Offered the four start tools and the two answers.** `StartSession`, `GetSessionStart`,
+  `CancelSessionStart`, `DescribeSessionStartOptions`, `AnswerSessionPermission` and `AnswerSessionQuestion` are added to its `ListExecTools` set (`SessionToolRole::ConversationSpawner`)
   and served to it, with `project_id` fixed to its own project and itself as the orchestrator. The
   other project-home tools are still refused to it; an ordinary session is offered none of them.
 - **`spawn_conversation` is the same start.** The agent's `spawn_conversation` tool (MCP and
@@ -480,6 +481,29 @@ its `PermissionRequest` hook open for that orchestrator's decision, for at most
 - **Known gap.** A conversation spawner may answer but is not served `ReadSessionActivity`, so it
   cannot read the `request_id`; its claude-cli children wait out the deadline
   ([TODO](../../dev/todo/2026-10-29-conversation-spawner-cannot-read-its-childs-permission-request.md)).
+
+### Answering a question
+
+An orchestrated claude-cli session's `AskUserQuestion` waits the same bounded way a permission does
+(`PreToolUse` hook, [Claude Code CLI session § Waiting for an orchestrator's answer](claude-cli-session.md#waiting-for-an-orchestrators-answer)),
+and `AnswerSessionQuestion` gives the answers. With no orchestrator on the host, or no answer in
+time, the child shows its own dialog.
+
+- **Checks, in order**, each refused as an `is_error` result naming why, and each leaving the hook
+  waiting: the caller is the target's orchestrator; nobody answered it already; the target's pending
+  question carries a `request_id` (a `tool` session's clarification does not: it is answered through
+  that session's own presenter) and is the one asked for; it is a question, not a permission (`…
+  answer it with AnswerSessionPermission`); a hook is still waiting on it; and the answers fit the
+  question the waiter recorded.
+- **What fits.** `other` is free text and always accepted. Refused, naming the question: an index
+  the call has no question at; a question answered twice; a label the question does not offer, as
+  spelled; more than one answer to a single-choice question (a label and `other` count one each);
+  an answer that selects nothing. A question the answers leave out is not refused: Claude shows it.
+- **Then** the hook is woken with the answers, a `completed` row under `question:<request_id>` is
+  appended to the target's activity (`{"answeredBy", "answers": [{"questionIndex", "selected",
+  "other"?}]}`), and the target's pending question is cleared if it is still that question. As for a
+  permission, once the hook is woken the answer stands: a failed write is logged, not refused.
+- **Same host only, and the spawner gap**, as for a permission.
 
 ### Waiting for notifications
 

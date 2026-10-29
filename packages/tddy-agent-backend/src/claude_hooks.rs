@@ -47,7 +47,7 @@ pub struct HookCommandParams<'a> {
     /// How long an orchestrated session's `PermissionRequest` and `AskUserQuestion` hooks wait for
     /// their orchestrator's answer, in seconds (`claude_cli.answer_wait_secs`). The hook's own bound
     /// is this plus [`AWAIT_CLIENT_MARGIN_SECS`], and Claude's `timeout` for it this plus
-    /// [`CLAUDE_HOOK_TIMEOUT_MARGIN_SECS`] (`#home-inbox` 6/8, 8/8).
+    /// [`CLAUDE_HOOK_TIMEOUT_MARGIN_SECS`] (`#home-inbox` 6/8, 8/9).
     pub answer_wait_secs: u64,
 }
 

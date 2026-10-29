@@ -843,7 +843,7 @@ impl ProjectHomeAnswerPort for DaemonProjectHome {
     }
 
     /// Deliver the calling home session's `answers` to the `AskUserQuestion` `target`'s hook waits
-    /// on under `request_id`, from this host's registry (`#home-inbox` 8/8). Who may answer and what
+    /// on under `request_id`, from this host's registry (`#home-inbox` 8/9). Who may answer and what
     /// fits the question are checked there.
     async fn answer_question(
         &self,

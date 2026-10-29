@@ -3,7 +3,7 @@
 **Location:** `packages/tddy-daemon-rpc/src/exec_tool/project_home.rs`
 **Category:** oversized-file
 **Detected:** 2026-10-25 — `/pr-wrap` step 3.5 file-length gate on #753 (`#start-parity` 4/9), production lines counted to the first `#[cfg(test)]`
-**Metrics:** **842 production lines** (2026-10-29) · budget 500 · 1.7× over
+**Metrics:** **889 production lines** (2026-10-29) · budget 500 · 1.7× over
 **Thresholds breached:** length 641 > 500
 **Restructure:** not designed
 **Status:** Open — partially fixed (641 > 500: seams B and C remain); split deferred: the file is stack-shared, the follow-up is after the stack lands — **unclaimed**
@@ -23,6 +23,7 @@
 | 2026-10-28 | 779 | **regressed.** `#home-inbox` 5/8 (#770): 686 → 779 (+93) — `DaemonProjectHome`'s caller identity, terminal control and lease store fields, `claim_key`, the `claim_terminal` and `send_keys` port impls and `control_refusal`. **Split deferred** (stack-shared: `#home-inbox` 6/8–8/8 touch the file); the terminal port impl (read, claim, send) is the first candidate for `exec_tool/project_home_terminal.rs` |
 | 2026-10-29 | 830 | **regressed.** `#home-inbox` 6/8 (#771): 779 → 830 (+51) — the `pending_answers` field on `DaemonProjectHome`, the `AnswerSessionPermission` dispatch arm and the `ProjectHomeAnswerPort::answer_permission` impl (delegating to `tddy_session_activity::answers::answer_permission`). **Split deferred** (stack-shared: `#home-inbox` 7/8 and 8/8 touch the file); the answer port impl moves with the terminal ports to a sibling module |
 | 2026-10-29 | 842 | **regressed.** `#home-inbox` 7/9 (#772): 830 → 842 (+12) — the `notification_log` field on `DaemonProjectHome`, `os_user` widened to `pub(super)`, and the inbox dispatch arm; the `ProjectHomeInboxPort` impl itself is the new sibling `exec_tool/project_home_inbox.rs` (95). **Split deferred** (stack-shared: `#home-inbox` 8/9 and 9/9 touch the file) |
+| 2026-10-29 | 889 | **regressed.** `#home-inbox` 8/9 (#773): 842 → 889 (+47) — the `AnswerSessionQuestion` dispatch arm and `answer_session_question`, which resolves the caller's host and runs the registry delivery of `tddy_session_activity::answers::answer_question`. Stack-shared (`#home-inbox` 9/9 edits it), so no split here; the seams above stay the way out |
 
 ## What would close it — candidate seams (not proven)
 

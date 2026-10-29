@@ -1,6 +1,6 @@
 //! Acceptance: the session that started a claude-cli child answers the child's `AskUserQuestion`
 //! with `AnswerSessionQuestion`, and the child's waiting hook wakes with those answers
-//! (`#home-inbox` 8/8).
+//! (`#home-inbox` 8/9).
 //!
 //! The child's hook is the real `AwaitQuestionAnswer` of the daemon's own activity surface, held
 //! open in a task; the answer is the real exec-tool call a home agent makes. An orchestrator is
@@ -10,10 +10,8 @@
 //! The child's orchestrator and its pending question are written into its session directory as
 //! `#start-parity` 2/9's start and `#home-inbox` 3/8's capture record them.
 //!
-//! **Blocked on `permission-answer` (`6/8`):** the tool is not yet wired into the daemon's exec-tool
-//! dispatch, the port that runs it is not implemented, and `await_question_answer_impl` is `6/8`'s
-//! body. Until `6/8` is green this fails at "the hook of <child> never opened its wait" — before
-//! reaching anything this node owns.
+//! Depends on `permission-answer` (`6/8`): the exec-tool dispatch, the port and the await handler
+//! the question branch extends are its.
 //!
 //! Feature doc: docs/ft/daemon/project-concept.md § Project-home tools,
 //! docs/ft/daemon/claude-cli-session.md.
