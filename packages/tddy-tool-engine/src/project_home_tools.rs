@@ -20,6 +20,7 @@
 //! | `ClaimSessionTerminal` | takes a target session's terminal control lease for this home session ([`crate::project_home_terminal_tools`]) |
 //! | `SendSessionKeys` | types text and named keys into a target session's terminal while this home session holds the lease ([`crate::terminal_keys`]) |
 //! | `AnswerSessionPermission` | answers the permission prompt a session this one started is waiting on; its orchestrator only ([`crate::project_home_answer_tools`]) |
+//! | `AnswerSessionQuestion` | answers the `AskUserQuestion` a session this one started is waiting on, validated against its options; its orchestrator only ([`crate::project_home_answer_tools`]) |
 //! | `WaitProjectNotifications` | holds until this project's sessions need it, or a timeout passes, and answers what they raised ([`crate::project_home_inbox_tools`]) |
 //! | `ReadProjectNotifications` | reads what this project's sessions raised, without waiting ([`crate::project_home_inbox_tools`]) |
 //!
@@ -48,7 +49,9 @@ use tddy_worktree_service::worktree_files::{
 };
 
 use crate::catalog::{tool_catalog, ToolDef};
-use crate::project_home_answer_tools::{project_home_answer_tool_defs, ANSWER_SESSION_PERMISSION};
+use crate::project_home_answer_tools::{
+    project_home_answer_tool_defs, ANSWER_SESSION_PERMISSION, ANSWER_SESSION_QUESTION,
+};
 use crate::project_home_diff::worktree_diff;
 use crate::project_home_disk_refresh::{
     refresh_worktree_disk_usage, refresh_worktree_disk_usage_tool_def, REFRESH_WORKTREE_DISK_USAGE,
@@ -112,6 +115,7 @@ pub fn is_project_home_tool(name: &str) -> bool {
             | CLAIM_SESSION_TERMINAL
             | SEND_SESSION_KEYS
             | ANSWER_SESSION_PERMISSION
+            | ANSWER_SESSION_QUESTION
             | WAIT_PROJECT_NOTIFICATIONS
             | READ_PROJECT_NOTIFICATIONS
     )
@@ -149,17 +153,18 @@ pub enum SessionToolRole {
     /// The project-home session: every project-home tool, and nothing else that writes.
     ProjectHome,
     /// A session that can spawn conversations (grill-me): the daemon-wide catalog, the four start
-    /// tools (`#start-parity` 9/9) and `AnswerSessionPermission` (`#home-inbox` 6/8), for its own
+    /// tools (`#start-parity` 9/9) and the two answer tools (`#home-inbox` 6/8, 8/9), for its own
     /// project alone.
     ConversationSpawner,
     /// Any other session: the daemon-wide catalog.
     Ordinary,
 }
 
-/// Whether `name` is one of the five tools a [`SessionToolRole::ConversationSpawner`] is offered and
+/// Whether `name` is one of the six tools a [`SessionToolRole::ConversationSpawner`] is offered and
 /// served: the four start tools — `StartSession`, `GetSessionStart`, `CancelSessionStart` and
-/// `DescribeSessionStartOptions` — and `AnswerSessionPermission`, the answer to a permission prompt
-/// of a session it started (`#home-inbox` 6/8).
+/// `DescribeSessionStartOptions` — and the two answer tools, `AnswerSessionPermission` and
+/// `AnswerSessionQuestion`, the answers to a prompt or a question of a session it started
+/// (`#home-inbox` 6/8, 8/9).
 pub fn is_conversation_spawner_tool(name: &str) -> bool {
     matches!(
         name,
@@ -168,11 +173,12 @@ pub fn is_conversation_spawner_tool(name: &str) -> bool {
             | CANCEL_SESSION_START
             | DESCRIBE_SESSION_START_OPTIONS
             | ANSWER_SESSION_PERMISSION
+            | ANSWER_SESSION_QUESTION
     )
 }
 
 /// [`session_offered_catalog`] by [`SessionToolRole`]: a conversation spawner is offered the
-/// daemon-wide catalog and [`is_conversation_spawner_tool`]'s five, `StartSession` offering
+/// daemon-wide catalog and [`is_conversation_spawner_tool`]'s six, `StartSession` offering
 /// `choices`.
 pub fn session_offered_catalog_for(role: SessionToolRole, choices: &StartChoices) -> Vec<ToolDef> {
     match role {
@@ -262,6 +268,7 @@ pub fn is_project_home_target_tool(name: &str) -> bool {
             | CLAIM_SESSION_TERMINAL
             | SEND_SESSION_KEYS
             | ANSWER_SESSION_PERMISSION
+            | ANSWER_SESSION_QUESTION
             | WAIT_PROJECT_NOTIFICATIONS
             | READ_PROJECT_NOTIFICATIONS
     ) || is_project_home_git_tool(name)
@@ -491,7 +498,7 @@ pub async fn execute_project_home_tool(
         READ_SESSION_TERMINAL | CLAIM_SESSION_TERMINAL | SEND_SESSION_KEYS => ToolOutcome::err(
             format!("{tool_name} is answered by execute_project_home_terminal_tool, not by execute_project_home_tool"),
         ),
-        ANSWER_SESSION_PERMISSION => ToolOutcome::err(
+        ANSWER_SESSION_PERMISSION | ANSWER_SESSION_QUESTION => ToolOutcome::err(
             format!("{tool_name} is answered by execute_project_home_answer_tool, not by execute_project_home_tool"),
         ),
         // Read the daemon's notification log, so the daemon answers them through

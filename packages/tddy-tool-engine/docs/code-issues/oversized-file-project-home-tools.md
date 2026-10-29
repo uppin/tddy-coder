@@ -3,7 +3,7 @@
 **Location:** `packages/tddy-tool-engine/src/project_home_tools.rs`
 **Category:** oversized-file
 **Detected:** 2026-10-25 — `/pr-wrap` step 3.5 file-length gate on #750 (`#start-parity` 1/9), production lines counted to the first `#[cfg(test)]`
-**Metrics:** **750 production lines** (2026-10-29) · budget 500 · 1.5× over
+**Metrics:** **757 production lines** (2026-10-29) · budget 500 · 1.5× over
 **Thresholds breached:** length 699 > 500
 **Restructure:** not designed
 **Status:** Open — split deferred: the file is stack-shared (later `#start-parity` nodes add tools to it), and a split mid-stack would conflict in every one; the follow-up is after the stack lands — **unclaimed**
@@ -25,6 +25,7 @@
 | 2026-10-28 | 719 | **regressed.** `#home-inbox` 5/8 (#770): 709 → 719 (+10) — `ClaimSessionTerminal` / `SendSessionKeys` in the module table, `is_project_home_tool`, `is_project_home_target_tool` and the wiring-mistake dispatch arm; the tools themselves are in `project_home_terminal_tools.rs` (296) and `terminal_keys.rs` (124). **Split deferred** (stack-shared) |
 | 2026-10-29 | 734 | **regressed.** `#home-inbox` 6/8 (#771): 719 → 734 (+15) — `AnswerSessionPermission` in the module table, `is_project_home_tool`, `is_project_home_target_tool`, `is_conversation_spawner_tool`, the catalogue and the wiring-mistake dispatch arm; the tool itself is the new `project_home_answer_tools.rs` (153). **Split deferred** (stack-shared: parents `#home-inbox` 2/8 and 5/8 edit it) |
 | 2026-10-29 | 750 | **regressed.** `#home-inbox` 7/9 (#772): 734 → 750 (+16) — `WaitProjectNotifications` / `ReadProjectNotifications` in the module table, `is_project_home_tool`, `is_project_home_target_tool` and the catalogue; the tools themselves are the new `project_home_inbox_tools.rs` (233). **Split deferred** (stack-shared: `#home-inbox` 8/9 and 9/9 edit it) |
+| 2026-10-29 | 757 | **regressed.** `#home-inbox` 8/9 (#773): 750 → 757 (+7) — `AnswerSessionQuestion` in the module table, `is_project_home_tool` and the answer tools' schema entry. Stack-shared (`#home-inbox` 9/9 edits it), so no split here; the seams above stay the way out |
 
 ## What would close it — candidate seams (not proven)
 

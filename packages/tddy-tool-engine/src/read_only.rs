@@ -113,6 +113,7 @@ mod tests {
                 "mcp__tddy-tools__ClaimSessionTerminal",
                 "mcp__tddy-tools__SendSessionKeys",
                 "mcp__tddy-tools__AnswerSessionPermission",
+                "mcp__tddy-tools__AnswerSessionQuestion",
                 "mcp__tddy-tools__WaitProjectNotifications",
                 "mcp__tddy-tools__ReadProjectNotifications",
                 "mcp__tddy-tools__TerminateSession",

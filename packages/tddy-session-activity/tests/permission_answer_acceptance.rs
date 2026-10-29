@@ -364,6 +364,7 @@ impl AwaitOutcomeAssertions for AwaitQuestionAnswerResponse {
                 cancelled: false,
                 message: message.to_string(),
                 answered_by: by.to_string(),
+                ..Default::default()
             },
             "how the hook's wait ended"
         );

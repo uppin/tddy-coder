@@ -25,9 +25,19 @@ use tddy_core::{
     SessionActivityStatus, ASK_USER_QUESTION_TOOL,
 };
 use tddy_service::proto::activity::{
-    AwaitQuestionAnswerRequest, AwaitQuestionAnswerResponse, AwaitQuestionOutcome,
-    ReportAgentActivityRequest, ReportSessionStatusRequest, ReportSessionStatusResponse,
+    AwaitQuestionOutcome, ReportAgentActivityRequest, ReportSessionStatusRequest,
+    ReportSessionStatusResponse,
 };
+
+mod await_answer;
+pub mod question_decision;
+
+pub use await_answer::question_decision_json;
+use await_answer::{await_answer, await_question_decision};
+
+/// An orchestrator's answer to one question of an `AskUserQuestion` call, as the daemon hands it to
+/// the awaiting hook (`#home-inbox` 8/9).
+pub use tddy_service::proto::activity::QuestionAnswer;
 
 /// The coordinate both reports are served at, read from `tddy-service` so this hook and the daemon
 /// serving it cannot disagree about the name.
@@ -69,10 +79,10 @@ pub struct SessionHookArgs {
     #[arg(long, default_value = "")]
     pub event: String,
 
-    /// On a `PermissionRequest`, wait for the session's orchestrator to answer after reporting
-    /// (`AwaitQuestionAnswer`), and print Claude's decision JSON when it does. The daemon decides
-    /// whether there is anyone to wait for; with nobody, or no answer in time, nothing is printed
-    /// and Claude shows its own prompt (`#home-inbox` 6/8).
+    /// On a `PermissionRequest`, or a `PreToolUse` of `AskUserQuestion`, wait for the session's
+    /// orchestrator to answer after reporting (`AwaitQuestionAnswer`), and print Claude's decision
+    /// JSON when it does. The daemon decides whether there is anyone to wait for; with nobody, or no
+    /// answer in time, nothing is printed and Claude shows its own prompt (`#home-inbox` 6/8, 8/9).
     #[arg(long)]
     pub await_answer: bool,
 
@@ -227,12 +237,20 @@ async fn try_run_session_hook(args: SessionHookArgs) -> anyhow::Result<()> {
     }
 
     let reported = report_session_status(&args, &stdin_buf).await?;
-    if args.await_answer && hook_event_name == "PermissionRequest" {
+    if args.await_answer {
         let request_id = reported
             .map(|response| response.request_id)
             .unwrap_or_default();
+        let tool_name = parsed.as_ref().and_then(|ev| ev.tool_name.as_deref());
         if !request_id.is_empty() {
-            if let Some(decision) = await_decision(&args, &stdin_buf, request_id).await? {
+            let decision = match (hook_event_name, tool_name) {
+                ("PermissionRequest", _) => await_decision(&args, &stdin_buf, request_id).await?,
+                ("PreToolUse", Some(ASK_USER_QUESTION_TOOL)) => {
+                    await_question_decision(&args, &stdin_buf, request_id).await?
+                }
+                _ => None,
+            };
+            if let Some(decision) = decision {
                 // The decision is the only stdout this hook ever writes: Claude reads it.
                 println!("{decision}");
             }
@@ -241,7 +259,7 @@ async fn try_run_session_hook(args: SessionHookArgs) -> anyhow::Result<()> {
     Ok(())
 }
 
-/// Ask the daemon for the orchestrator's answer to `request_id`, waiting at most
+/// Ask the daemon for the orchestrator's answer to the permission `request_id`, waiting at most
 /// `--await-timeout-secs`, and map it to Claude's decision JSON.
 async fn await_decision(
     args: &SessionHookArgs,
@@ -251,25 +269,15 @@ async fn await_decision(
     let suggestions = serde_json::from_str::<serde_json::Value>(stdin_json)
         .ok()
         .and_then(|event| event.get("permission_suggestions").cloned());
-    let req = AwaitQuestionAnswerRequest {
-        session_id: args.session.clone(),
-        hook_token: args.hook_token.clone(),
-        os_user: args.os_user.clone(),
+    let answer = await_answer(
+        args,
         request_id,
-        permission_suggestions_json: suggestions
+        suggestions
             .as_ref()
             .map(serde_json::Value::to_string)
             .unwrap_or_default(),
-    };
-    let bytes = exchange(
-        args,
-        "AwaitQuestionAnswer",
-        req.encode_to_vec(),
-        std::time::Duration::from_secs(args.await_timeout_secs),
     )
     .await?;
-    let answer = AwaitQuestionAnswerResponse::decode(&bytes[..])
-        .map_err(|e| anyhow::anyhow!("decode AwaitQuestionAnswerResponse: {e}"))?;
     Ok(permission_decision_json(&answer, suggestions.as_ref()))
 }
 

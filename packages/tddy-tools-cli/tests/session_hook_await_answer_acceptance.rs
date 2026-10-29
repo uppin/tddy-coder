@@ -148,6 +148,7 @@ fn answered(option_id: &str) -> TheDaemonAnswers {
         cancelled: false,
         message: String::new(),
         answered_by: "home-session-1".to_string(),
+        ..Default::default()
     })
 }
 

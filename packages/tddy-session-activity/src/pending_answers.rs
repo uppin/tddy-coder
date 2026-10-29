@@ -23,6 +23,11 @@ use tddy_discovery::subagent::{
     AnsweredBy, PermissionAnswer, PermissionAnswering, PermissionRequestView,
 };
 
+mod question;
+
+// `#home-inbox` 8/9: the waiters of `AskUserQuestion` calls, `PendingAnswers`' question methods.
+pub use question::{DeliveredQuestionAnswers, OpenQuestion, QuestionWaitOutcome};
+
 /// An answer as it reached a waiting hook: the answer, who gave it, and the message a `reject_*`
 /// option carries for Claude.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -104,6 +109,8 @@ impl Slots {
 #[derive(Default)]
 pub struct PendingAnswers {
     slots: Mutex<Slots>,
+    /// The `AskUserQuestion` waiters (`#home-inbox` 8/9); see [`question`].
+    questions: Mutex<question::QuestionSlots>,
 }
 
 impl PendingAnswers {
