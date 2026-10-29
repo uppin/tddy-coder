@@ -177,6 +177,17 @@ pub fn is_conversation_spawner_tool(name: &str) -> bool {
     )
 }
 
+/// Whether `name` is a tool a [`SessionToolRole::ConversationSpawner`] is offered for the sessions
+/// it started alone — `ReadSessionActivity`, so it can read the `request_id` its two answer tools
+/// need (`#home-inbox` 11/11). The daemon serves such a call only when the target's changeset names
+/// the caller as its `orchestrator_session_id`, and refuses any other as permission denied.
+pub fn is_conversation_spawner_scoped_tool(name: &str) -> bool {
+    // TODO(sweep): implement — `READ_SESSION_ACTIVITY`, and join it to
+    // `is_conversation_spawner_tool` once the daemon's scope check is in place.
+    let _ = name;
+    false
+}
+
 /// [`session_offered_catalog`] by [`SessionToolRole`]: a conversation spawner is offered the
 /// daemon-wide catalog and [`is_conversation_spawner_tool`]'s six, `StartSession` offering
 /// `choices`.

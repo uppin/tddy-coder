@@ -59,13 +59,17 @@ use tddy_tool_engine::project_home_git_tools::is_project_home_git_tool;
 use tddy_tool_engine::project_home_inbox_tools::{
     execute_project_home_inbox_tool, is_project_home_inbox_tool,
 };
+use tddy_tool_engine::project_home_notify_tools::{
+    execute_project_home_notify_tool, is_project_home_notify_tool, OperatorNotice,
+    ProjectHomeNotifyPort,
+};
 use tddy_tool_engine::project_home_terminal_tools::{
     execute_project_home_terminal_tool, is_project_home_terminal_tool, ProjectHomeTerminalPort,
 };
 use tddy_tool_engine::project_home_tools::{
-    execute_project_home_tool, is_conversation_spawner_tool, is_project_home_tool,
-    session_offered_catalog_for, ListProjectSessionsResult, ListedSession, ProjectHomePort,
-    SessionToolRole,
+    execute_project_home_tool, is_conversation_spawner_scoped_tool, is_conversation_spawner_tool,
+    is_project_home_tool, session_offered_catalog_for, ListProjectSessionsResult, ListedSession,
+    ProjectHomePort, SessionToolRole,
 };
 use tddy_tool_engine::project_home_worktree_tools::WorktreeEntry;
 use tddy_tool_engine::session_follow::{SessionActivity, ToolCallBodies, TranscriptItem};
@@ -104,6 +108,7 @@ impl ExecToolRpcHandler {
                 .await);
         }
         let home = project_home_caller(sessions_base, &req.session_id, &req.tool_name)?;
+        refuse_a_spawner_outside_its_own_sessions(sessions_base, &home, req)?;
         let response = match self.served_on_target_host(req).await? {
             Some(answered) => answered,
             None => {
@@ -249,6 +254,9 @@ fn project_home_caller(
         // A session that spawns conversations is served the start tools and the permission answer,
         // for its own project.
         SessionToolRole::ConversationSpawner if is_conversation_spawner_tool(tool_name) => {}
+        // A read of a session it started: whose, is checked once the target is known
+        // ([`refuse_a_spawner_outside_its_own_sessions`]).
+        SessionToolRole::ConversationSpawner if is_conversation_spawner_scoped_tool(tool_name) => {}
         _ => {
             return Err(Status::permission_denied(format!(
                 "tool {tool_name} is served only to a project-home session"
@@ -259,6 +267,29 @@ fn project_home_caller(
         session_id: session_id.to_string(),
         project_id: metadata.project_id,
     })
+}
+
+/// Refuse a conversation spawner's [`is_conversation_spawner_scoped_tool`] call unless its target —
+/// the `session_id` the call names — is a session the spawner started: one whose changeset names
+/// `home` as its `orchestrator_session_id` (`#home-inbox` 11/11). Refused as permission denied,
+/// naming the caller and the target. Any other caller, or any other tool, passes: their scope is the
+/// project's, checked by the target resolver.
+fn refuse_a_spawner_outside_its_own_sessions(
+    sessions_base: &Path,
+    home: &HomeCaller,
+    req: &ExecuteToolRequest,
+) -> Result<(), Status> {
+    if !is_conversation_spawner_scoped_tool(&req.tool_name) {
+        return Ok(());
+    }
+    // TODO(sweep): implement — pass a project-home caller; for a conversation spawner, read the
+    // target's changeset under `sessions_base` and pass only when its `orchestrator_session_id` is
+    // `home.session_id` (on this host).
+    let _ = sessions_base;
+    Err(Status::permission_denied(format!(
+        "tool {} is refused: session {} may read only the sessions it started",
+        req.tool_name, home.session_id
+    )))
 }
 
 /// Append the call to the session's tool-call log, as the local runner does for every other tool.
@@ -348,7 +379,9 @@ impl DaemonProjectHome {
         home: &HomeCaller,
         req: &ExecuteToolRequest,
     ) -> ExecuteToolResponse {
-        let outcome = if is_project_home_answer_tool(&req.tool_name) {
+        let outcome = if is_project_home_notify_tool(&req.tool_name) {
+            execute_project_home_notify_tool(self, home, &req.tool_name, &req.args_json).await
+        } else if is_project_home_answer_tool(&req.tool_name) {
             execute_project_home_answer_tool(self, home, &req.tool_name, &req.args_json).await
         } else if is_project_home_inbox_tool(&req.tool_name) {
             execute_project_home_inbox_tool(self, home, &req.tool_name, &req.args_json).await
@@ -803,6 +836,25 @@ fn registered_project(
     tddy_projects::project_storage::find_project(&projects_dir, project_id)
         .map_err(|e| e.to_string())?
         .ok_or_else(|| "project not found".to_string())
+}
+
+#[async_trait]
+impl ProjectHomeNotifyPort for DaemonProjectHome {
+    /// Publish `notice` for the calling home session through this host's
+    /// `ActivityService.ReportOperatorNotification`, presenting the hook token the session's own
+    /// `.session.yaml` records — the credential `tddy-tools notify` presents from its environment
+    /// (`#home-inbox` 11/11). The caller was authenticated by its session token, and its role read from
+    /// that record, before this is reached.
+    async fn notify_operator(
+        &self,
+        home: &HomeCaller,
+        notice: OperatorNotice,
+    ) -> Result<(), String> {
+        // TODO(sweep): implement — read `home`'s hook token from its record and call this host's
+        // `ReportOperatorNotification` in-process with it.
+        let _ = (home, notice);
+        Err("NotifyOperator is not implemented yet".to_string())
+    }
 }
 
 #[async_trait]

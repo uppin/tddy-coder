@@ -43,8 +43,13 @@ use tddy_session_lifecycle::session_notifications::{
     SessionNotificationSubscriber,
 };
 
+mod tap;
 mod tauri_host;
 
+pub use tap::{
+    on_notification_tap, session_route_from_tap, TappedNotification, EXTRA_HOST, EXTRA_SESSION_ID,
+    TAP_ACTION_ID,
+};
 pub use tauri_host::{TauriDashboardWindow, TauriNotifier};
 
 /// How many characters of an agent's body a native notification carries. Operating-system centres

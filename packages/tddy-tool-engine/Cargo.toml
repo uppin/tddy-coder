@@ -26,6 +26,9 @@ tddy-task = { path = "../tddy-task" }
 tddy-discovery = { path = "../tddy-discovery" }
 tddy-service = { path = "../tddy-service" }
 tddy-worktree-service = { path = "../tddy-worktree-service" }
+# `agent_notification_limits`: `NotifyOperator` refuses what `tddy-tools notify` refuses
+# (`#home-inbox` 11/11). Already in this crate's tree (through `tddy-task`), so no crate is added.
+tddy-daemon-kernel = { path = "../tddy-daemon-kernel" }
 futures-util = "0.3"
 
 # Signalling a timed-out shell's whole *process group* — `kill(-pid, …)`, which neither `std` nor

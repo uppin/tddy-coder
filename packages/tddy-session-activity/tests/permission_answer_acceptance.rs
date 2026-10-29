@@ -27,8 +27,8 @@ use tddy_service::proto::activity::{
     AwaitQuestionOutcome,
 };
 use tddy_session_activity::answers::{
-    answer_permission, AnswerContext, AnswerRefusal, AnsweredPermission, AnsweringCaller,
-    ALLOW_ONCE, REJECT_ONCE,
+    answer_permission, clear_answered_pending_question, AnswerContext, AnswerRefusal,
+    AnsweredPermission, AnsweringCaller, ALLOW_ONCE, REJECT_ONCE,
 };
 use tddy_session_activity::orchestrator_presence::OrchestratorPresence;
 use tddy_session_activity::pending_answers::PendingAnswers;
@@ -541,4 +541,37 @@ async fn another_home_an_unknown_id_and_an_already_answered_question_are_refused
     hook.outcome_within(AT_ONCE)
         .await
         .assert_answered(ALLOW_ONCE, HOME, "");
+}
+
+// ---------------------------------------------------------------------------
+// The clear after an answer (`#home-inbox` 11/11)
+// ---------------------------------------------------------------------------
+
+/// What `#home-inbox` 3/8 records for Claude's next prompt, asked once the hook of the first returned.
+fn a_newer_permission_question() -> PendingQuestion {
+    PendingQuestion {
+        request_id: "req-git-push".to_string(),
+        question: "Run Bash: git push".to_string(),
+        tool_input_json: r#"{"command":"git push"}"#.to_string(),
+        ..the_permission_question()
+    }
+}
+
+#[tokio::test]
+async fn a_newer_pending_question_survives_the_clear_after_an_answer_to_the_older_one() {
+    // Given a child whose home answered its prompt, and whose agent — its hook returned — has
+    // already recorded the next prompt before the answer's clear ran
+    let host = a_host().build();
+    write_pending_question(&host.child_dir(), &a_newer_permission_question())
+        .expect("the child's newer pending question");
+
+    // When the answer to the older prompt clears what it answered
+    clear_answered_pending_question(&host.child_dir(), REQUEST_ID);
+
+    // Then the newer prompt is still pending: it is not that answer's to clear
+    assert_eq!(
+        host.pending_question(),
+        Some(a_newer_permission_question()),
+        "the child's pending question"
+    );
 }
