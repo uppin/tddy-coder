@@ -307,8 +307,28 @@ fn row_styles_answer(row: &RowStyles) -> Value {
 /// One run as `{from, to}` plus only the attributes that are set: `fg` and `bg` as the colour's
 /// name, each flag as `true`.
 fn run_answer(run: &StyleRun) -> Value {
-    // TODO(terminal-styles): implement. Fails closed: names the columns and no attribute.
-    json!({ "from": run.from, "to": run.to })
+    let mut answer = json!({ "from": run.from, "to": run.to });
+    if let Some(fg) = run.fg {
+        answer["fg"] = json!(fg.to_string());
+    }
+    if let Some(bg) = run.bg {
+        answer["bg"] = json!(bg.to_string());
+    }
+    let flags = [
+        ("bold", run.bold),
+        ("dim", run.dim),
+        ("italic", run.italic),
+        ("underline", run.underline),
+        ("inverse", run.inverse),
+        ("strikethrough", run.strikethrough),
+        ("blink", run.blink),
+    ];
+    for (name, set) in flags {
+        if set {
+            answer[name] = json!(true);
+        }
+    }
+    answer
 }
 
 /// Run [`CLAIM_SESSION_TERMINAL`] or [`SEND_SESSION_KEYS`] for `home`: resolve the target, then take

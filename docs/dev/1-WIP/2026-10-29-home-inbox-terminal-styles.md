@@ -1,7 +1,7 @@
 # Changeset: ReadSessionTerminal answers the screen's styles on request
 
 **Created:** 2026-10-29
-**Status:** 🚧 Pass 2: contract and failing tests (no behaviour yet)
+**Status:** 🟢 TDD Green: behaviour in, scoped gates green. `/validate-changes` and `/pr-wrap` next
 **Type:** Feature
 **Complexity**: 3. It spans three packages, two of them owning new surface. It adds no proto, wiring or registration, because the tool and its port exist (`2/8`). The risk is the highlighted-row rule.
 **Stack:** `#home-inbox 9/9`, branch `feature/home-inbox/terminal-styles`, base `feature/home-inbox/question-answer`
@@ -165,13 +165,62 @@ In `packages/tddy-daemon-rpc/tests/project_home_terminal_styles_acceptance.rs`. 
   new dependency, so `StyleRun` is a plain struct and `run_answer` builds the JSON.
 - **A follow-up node, not a `2/8` amendment.** `2/8` is wrapped and green, and amending it would
   rebase six PRs.
+- **Green decisions (2026-10-29, taken without the developer, who was away):**
+  - **Wide tails by `Cell::width()`.** `avt`'s `Occupancy` is crate-private, but `Cell::width()` is
+    public and returns 0 for a wide tail. `walk_cells` skips width-0 cells, which is the same
+    selection `Line::chars()` makes, so the positions match `text_grid().lines`. No new dependency:
+    the colour is read through `avt::Color` and `Pen`'s public accessors.
+  - **One walk, two outputs.** `walk_cells` builds `styles` and `widths` in the same pass over
+    `Line::cells()`, so a run's columns and a character's cell span cannot disagree.
+  - **Runs group by `Pen` equality.** A default pen (`Pen::is_default`) makes no run, and two
+    adjacent characters with equal pens make one. Different pens that touch stay separate runs.
+  - **Blank means `char::is_whitespace`.** The highlight rule's "non-blank" uses that, and a row
+    whose text is all whitespace is never highlighted.
+  - **Highlight rule as pinned, checked in one pass.** Runs are ascending, so the covering runs are
+    found by walking from the span's first character: each run must start at or before the next
+    uncovered position, and the walk stops once the span's last character is covered. All covering
+    runs inverse, or all with the same `Some` background, makes the row a bar. Output is ascending.
+  - **Crop pads each row to the screen width.** A row's text is a prefix of its width list, so the
+    characters past the trimmed text are blanks at width 1 (or their listed width), and the row is
+    extended to `cols` cells. A run painting a bar past the text then always has cells to fall on,
+    even when `widths` is empty.
+  - **Crop cut rule.** A character is kept whole when its cells lie inside the box. A wide character
+    whose cells straddle an edge becomes one space, and keeps its run because the run is in
+    character positions. Runs are clipped to the kept characters and re-based by the first kept
+    index.
+  - **Cursor relative to the clipped box.** `inside` is tested against the box actually read, which
+    is the requested box clipped to the screen. On a screen cursor the two agree.
+  - **Refusal wording.** A zero-size or wholly off-screen box is refused as `the box at row R,
+    column C, H rows by W columns, is empty or lies off the screen; the screen is <cols> columns by
+    <rows> rows`. The tool prefixes `ReadSessionTerminal: `.
+  - **Span JSON key order.** `run_answer` builds one object; `serde_json` keeps its keys sorted, so
+    the JSON is `from`, `to`, then the set attributes alphabetically. The acceptance tests compare
+    values, not text.
+  - **Pre-existing red, not fixed.** `read_only::tests::the_project_home_allowed_tools_are_the_read_only_and_project_home_tools_as_mcp_names`
+    in `tddy-tool-engine` is red on this base. It expects no `mcp__tddy-tools__AnswerSessionQuestion`,
+    which `#home-inbox 8/8`'s contract commit (`8944fa60a`) added to the catalog. That node's green
+    owns the expectation, and it is outside this PR's surface, so it is left as found.
 
 ## TODO
 
 - [x] Pass 2: the surface and the failing acceptance and unit tests (contract commit)
-- [ ] TDD Green
+- [x] TDD Green: `walk_cells`, `TerminalColour` `Display`, `highlighted_rows`, `crop`, `run_answer`
 - [ ] `/validate-changes`, `/pr-wrap`
 
 ## Validation Results
 
-Not yet run. Scoped gates at the contract commit: `cargo clippy --all-targets -D warnings` and `cargo fmt` clean on `tddy-task`, `tddy-tool-engine` and `tddy-daemon-rpc`; the tests above fail as listed.
+Scoped gates on the green commit (`CARGO_INCREMENTAL=0 CARGO_PROFILE_DEV_DEBUG=0 ./dev cargo …`,
+`-p tddy-task -p tddy-tool-engine -p tddy-daemon-rpc` only; no workspace-wide run):
+
+- `tddy-task`, full package: 24 unit, plus every integration suite, all green. The three target
+  suites are `terminal_styles` (25/25), `terminal_crop` (18/18) and `terminal_capture_text_grid`
+  (14/14, n2, still green).
+- `tddy-tool-engine`, full package: every integration suite green, including
+  `project_home_terminal_tools` (2/2, the n2 guard). The one red is the pre-existing
+  `read_only` unit test above, owned by `#home-inbox 8/8`.
+- `tddy-daemon-rpc`: `project_home_terminal_styles_acceptance` 9/9 and
+  `project_home_terminal_read_acceptance` (n2) 7/7. The rest of the package was not run here.
+- `cargo clippy -p tddy-task -p tddy-tool-engine -p tddy-daemon-rpc -- -D warnings`: clean.
+- `cargo fmt --check` on the three packages: clean.
+- Not run locally: the whole workspace, and the n7 flakes and the macOS sandbox suites this PR
+  does not touch. CI is the authority for those.
