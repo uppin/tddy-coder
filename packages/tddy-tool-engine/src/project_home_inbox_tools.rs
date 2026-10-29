@@ -104,11 +104,11 @@ pub struct NotificationsPage {
     /// The log's records, as JSON, oldest first.
     #[serde(flatten)]
     pub page: FollowPage<Value>,
-    /// A read's count of records evicted between its cursor and the oldest kept; `None` when the
-    /// cursor is within the window (and always for a wait).
+    /// How many records the cursor lost to eviction, for a read or a wait; `None` when it lost none.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub lost: Option<u64>,
-    /// A wait's flag: it returned because `timeout_ms` passed, not because a record arrived.
+    /// A wait's flag: it returned because `timeout_ms` passed, not because a record arrived. `None`
+    /// for a read.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub timed_out: Option<bool>,
 }
@@ -123,17 +123,15 @@ pub trait ProjectHomeInboxPort: ProjectHomePort {
     /// read, among them a `cursor` that no page ever returned.
     ///
     /// The default refuses, so a port that keeps no log (and the fakes of the other home-inbox
-    /// nodes' tests) need not name it.
+    /// nodes' tests) need not name it. The daemon's port reads its log.
     async fn read_notifications(
         &self,
         home: &HomeCaller,
         cursor: &str,
         limit: Option<usize>,
     ) -> Result<NotificationsPage, String> {
-        // TODO(home-wait): implement — `ProjectNotificationLog::read` for `home.project_id`, the
-        // caller's OS user and `home.session_id` as the excluded session, records as JSON.
         let _ = (home, cursor, limit);
-        Err("read_notifications: not implemented".to_string())
+        Err(NO_NOTIFICATION_LOG.to_string())
     }
 
     /// As [`Self::read_notifications`], but holding the call until a record newer than `cursor`
@@ -145,11 +143,13 @@ pub trait ProjectHomeInboxPort: ProjectHomePort {
         cursor: &str,
         timeout_ms: u64,
     ) -> Result<NotificationsPage, String> {
-        // TODO(home-wait): implement — `ProjectNotificationLog::wait`, as above.
         let _ = (home, cursor, timeout_ms);
-        Err("wait_notifications: not implemented".to_string())
+        Err(NO_NOTIFICATION_LOG.to_string())
     }
 }
+
+/// The refusal of a port that keeps no notification log.
+const NO_NOTIFICATION_LOG: &str = "this host keeps no project notification log";
 
 /// Run [`WAIT_PROJECT_NOTIFICATIONS`] or [`READ_PROJECT_NOTIFICATIONS`] for `home`.
 ///
@@ -161,8 +161,73 @@ pub async fn execute_project_home_inbox_tool(
     tool_name: &str,
     args_json: &str,
 ) -> ToolOutcome {
-    // TODO(home-wait): implement — parse `cursor`, `timeout_ms` (capped at `MAX_WAIT_MS`) or
-    // `limit`, call the port, and answer the page as JSON.
-    let _ = (port, home, args_json);
-    ToolOutcome::err(format!("{tool_name}: not implemented"))
+    match answer(port, home, tool_name, args_json).await {
+        Ok(page) => match serde_json::to_string(&page) {
+            Ok(json) => ToolOutcome::ok(json),
+            Err(e) => ToolOutcome::err(format!("{tool_name}: {e}")),
+        },
+        Err(message) => ToolOutcome::err(format!("{tool_name}: {message}")),
+    }
+}
+
+/// The page `tool_name` answers for `args_json`, read from the port.
+async fn answer(
+    port: &dyn ProjectHomeInboxPort,
+    home: &HomeCaller,
+    tool_name: &str,
+    args_json: &str,
+) -> Result<NotificationsPage, String> {
+    if !is_project_home_inbox_tool(tool_name) {
+        return Err(format!("unknown inbox tool: {tool_name}"));
+    }
+    let args: Value =
+        serde_json::from_str(args_json).map_err(|e| format!("invalid args_json: {e}"))?;
+    let cursor = cursor_argument(&args)?;
+    match tool_name {
+        WAIT_PROJECT_NOTIFICATIONS => {
+            port.wait_notifications(home, &cursor, timeout_argument(&args)?)
+                .await
+        }
+        _ => {
+            port.read_notifications(home, &cursor, limit_argument(&args)?)
+                .await
+        }
+    }
+}
+
+/// `cursor`: the `next_cursor` a page returned, as a string or a bare integer; empty from the start.
+fn cursor_argument(args: &Value) -> Result<String, String> {
+    match args.get("cursor") {
+        None | Some(Value::Null) => Ok(String::new()),
+        Some(Value::String(cursor)) => Ok(cursor.clone()),
+        Some(cursor @ Value::Number(number)) if number.is_u64() => Ok(cursor.to_string()),
+        Some(other) => Err(format!(
+            "cursor must be the next_cursor a page returned, not {other}"
+        )),
+    }
+}
+
+/// `timeout_ms`, capped at [`MAX_WAIT_MS`]; absent, a wait holds for the cap.
+fn timeout_argument(args: &Value) -> Result<u64, String> {
+    match args.get("timeout_ms") {
+        None | Some(Value::Null) => Ok(MAX_WAIT_MS),
+        Some(timeout) => timeout
+            .as_u64()
+            .map(|ms| ms.min(MAX_WAIT_MS))
+            .ok_or_else(|| {
+                format!("timeout_ms must be a whole number of milliseconds, not {timeout}")
+            }),
+    }
+}
+
+/// `limit`, as the follow tools take it; absent, the default page.
+fn limit_argument(args: &Value) -> Result<Option<usize>, String> {
+    match args.get("limit") {
+        None | Some(Value::Null) => Ok(None),
+        Some(limit) => limit
+            .as_u64()
+            .and_then(|n| usize::try_from(n).ok())
+            .map(Some)
+            .ok_or_else(|| format!("limit must be a whole number of records, not {limit}")),
+    }
 }

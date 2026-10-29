@@ -14,7 +14,8 @@
 //!   older than the window is reported as `lost`, never silently trimmed.
 //! - **Persistence.** Appended as JSON lines to
 //!   `<data dir>/projects/<project_id>/notifications.jsonl` and replayed on [`ProjectNotificationLog::open`],
-//!   so a cursor survives a daemon restart and `seq` continues where it stopped.
+//!   so a cursor survives a daemon restart and `seq` continues where it stopped. The file is rewritten
+//!   to the window once it holds twice the window's lines, so it stays bounded.
 //! - **Cursor.** The decimal `seq` of the last record a page returned. An empty cursor means "from
 //!   now" for a wait and "the newest page" for a read. Paging is `#start-parity` 6/9's
 //!   ([`FollowPage`]), with one addition the wait needs: **the `next_cursor` of an empty page is
@@ -25,17 +26,26 @@
 //!
 //! Feature doc: docs/ft/daemon/session-notifications.md, docs/ft/daemon/project-concept.md.
 
+mod storage;
+
+use std::collections::{HashMap, VecDeque};
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::time::Duration;
 
 use async_trait::async_trait;
+use tokio::sync::Notify;
+use tokio::time::Instant;
+
+use tddy_core::session_lifecycle::{unified_session_dir_path, validate_session_id_segment};
 use tddy_daemon_kernel::session_notification::{
     AgentNotification, QuestionNotice, SessionNotificationKind, SessionNotificationSource,
 };
-use tddy_tool_engine::session_follow::FollowPage;
+use tddy_tool_engine::session_follow::{page_size, parse_cursor, FollowPage};
 
 use crate::session_notifications::{SessionNotification, SessionNotificationSubscriber};
+
+pub use storage::record_json;
 
 /// How many records a project's log keeps; older ones are evicted and counted.
 pub const PROJECT_NOTIFICATION_CAPACITY: usize = 1_000;
@@ -47,8 +57,7 @@ pub const MAX_NOTIFICATION_WAIT: Duration = Duration::from_millis(20_000);
 /// `wait`'s timeout as the log honours it: `requested`, capped at [`MAX_NOTIFICATION_WAIT`].
 #[must_use]
 pub fn clamp_wait(requested: Duration) -> Duration {
-    // TODO(home-wait): implement — `requested.min(MAX_NOTIFICATION_WAIT)`.
-    requested
+    requested.min(MAX_NOTIFICATION_WAIT)
 }
 
 /// Resolves an OS user to the sessions directory its sessions live in, to read a notifying
@@ -88,15 +97,19 @@ pub struct ProjectNotificationScope {
 #[derive(Debug, Clone, PartialEq)]
 pub struct NotificationRead {
     pub page: FollowPage<ProjectNotificationRecord>,
-    /// Records after the cursor that were evicted before they were read; `0` when the cursor is
-    /// within the window.
+    /// Records of the project after the cursor that were evicted before they were read; `0` when
+    /// the cursor is within the window. Counted over the project, whoever's records they were.
     pub lost: u64,
 }
 
-/// A wait's answer: a page, and whether it ended by timing out.
+/// A wait's answer: a page, how many records the cursor lost to eviction, and whether the wait
+/// ended by timing out.
 #[derive(Debug, Clone, PartialEq)]
 pub struct NotificationWait {
     pub page: FollowPage<ProjectNotificationRecord>,
+    /// As [`NotificationRead::lost`]: a cursor evicted while the caller was not reading is reported,
+    /// not silently trimmed.
+    pub lost: u64,
     /// The wait returned because its timeout passed with nothing new; the page is then empty and
     /// its `next_cursor` is the cursor to wait from again.
     pub timed_out: bool,
@@ -106,18 +119,92 @@ pub struct NotificationWait {
 pub struct ProjectNotificationLog {
     data_dir: PathBuf,
     sessions_base_for: SessionsBaseFor,
+    projects: Mutex<HashMap<String, Arc<Project>>>,
+}
+
+/// A record as the log holds it: the record, and the OS user whose session made it.
+#[derive(Debug, Clone)]
+struct Held {
+    os_user: String,
+    record: ProjectNotificationRecord,
+}
+
+impl Held {
+    fn visible_to(&self, scope: &ProjectNotificationScope) -> bool {
+        self.os_user == scope.os_user && self.record.session_id != scope.exclude_session_id
+    }
+}
+
+/// One project's records, and the wake-up its waiters sleep on.
+#[derive(Default)]
+struct Project {
+    state: Mutex<ProjectState>,
+    /// Woken whenever a record is appended to the project.
+    arrived: Notify,
+}
+
+#[derive(Default)]
+struct ProjectState {
+    /// The newest [`PROJECT_NOTIFICATION_CAPACITY`] records, oldest first.
+    window: VecDeque<Held>,
+    /// The `seq` of the newest record ever appended; `0` for a log that never held one.
+    newest_seq: u64,
+    /// The lines the project's file holds, which is rewritten once it has grown past twice the
+    /// window.
+    lines_on_disk: usize,
+}
+
+impl Project {
+    fn restored(records: Vec<Held>, lines_on_disk: usize) -> Self {
+        let newest_seq = records
+            .iter()
+            .map(|held| held.record.seq)
+            .max()
+            .unwrap_or(0);
+        let skip = records.len().saturating_sub(PROJECT_NOTIFICATION_CAPACITY);
+        let window = records.into_iter().skip(skip).collect();
+        Self {
+            state: Mutex::new(ProjectState {
+                window,
+                newest_seq,
+                lines_on_disk,
+            }),
+            arrived: Notify::new(),
+        }
+    }
+
+    fn lock(&self) -> MutexGuard<'_, ProjectState> {
+        self.state.lock().unwrap_or_else(PoisonError::into_inner)
+    }
+}
+
+/// Where a read or a wait starts: from the newest page, or after a `seq`.
+#[derive(Clone, Copy)]
+enum Start {
+    Newest,
+    After(u64),
 }
 
 impl ProjectNotificationLog {
     /// A log persisted under `data_dir` (`<data_dir>/projects/<project_id>/notifications.jsonl`),
     /// holding what a previous run of the daemon recorded there. `sessions_base_for` resolves a
     /// notifying session's project.
+    ///
+    /// An unreadable file is an error: a log is not started over records it could not read.
     pub fn open(data_dir: &Path, sessions_base_for: SessionsBaseFor) -> anyhow::Result<Self> {
-        // TODO(home-wait): implement — replay each project's JSON lines into its ring, keeping the
-        // newest `PROJECT_NOTIFICATION_CAPACITY`, so `seq` continues across a restart.
+        let projects = storage::replay_all(data_dir)?
+            .into_iter()
+            .map(|replayed| {
+                (
+                    replayed.project_id,
+                    Arc::new(Project::restored(replayed.records, replayed.lines)),
+                )
+            })
+            .collect();
         Ok(Self {
             data_dir: data_dir.to_path_buf(),
             sessions_base_for,
+            projects: Mutex::new(projects),
         })
     }
 
@@ -132,9 +219,14 @@ impl ProjectNotificationLog {
         cursor: &str,
         limit: Option<usize>,
     ) -> Result<NotificationRead, String> {
-        // TODO(home-wait): implement — page the project's ring after `cursor`, filtered by `scope`.
-        let _ = (&self.data_dir, scope, cursor, limit);
-        Err("ProjectNotificationLog::read: not implemented".to_string())
+        let start = match parse_cursor(cursor)? {
+            Some(seq) => Start::After(seq),
+            None => Start::Newest,
+        };
+        let project = self.project(&scope.project_id);
+        let state = project.lock();
+        let (page, lost) = page_of(&state, scope, start, page_size(limit));
+        Ok(NotificationRead { page, lost })
     }
 
     /// The records of `scope` after `cursor`, holding the call until one arrives or `timeout`
@@ -145,11 +237,117 @@ impl ProjectNotificationLog {
         cursor: &str,
         timeout: Duration,
     ) -> Result<NotificationWait, String> {
-        // TODO(home-wait): implement — return at once when records after `cursor` exist, else park
-        // on the project's `tokio::sync::Notify` until one is recorded or `clamp_wait(timeout)`.
-        let _ = (scope, cursor, timeout);
-        Err("ProjectNotificationLog::wait: not implemented".to_string())
+        let cursor = parse_cursor(cursor)?;
+        let project = self.project(&scope.project_id);
+        let after = match cursor {
+            Some(seq) => seq,
+            // "From now": what is recorded after this call is what the wait is for.
+            None => project.lock().newest_seq,
+        };
+        let size = page_size(None);
+        let deadline = Instant::now() + clamp_wait(timeout);
+        loop {
+            // Subscribed before the log is read, so a record appended in between wakes this wait.
+            let arrived = project.arrived.notified();
+            let answer = {
+                let state = project.lock();
+                let (page, lost) = page_of(&state, scope, Start::After(after), size);
+                (!page.items.is_empty() || Instant::now() >= deadline).then_some((page, lost))
+            };
+            if let Some((page, lost)) = answer {
+                let timed_out = page.items.is_empty();
+                return Ok(NotificationWait {
+                    page,
+                    lost,
+                    timed_out,
+                });
+            }
+            // Returns when a record arrives or the deadline passes; the loop then looks again.
+            let _ = tokio::time::timeout_at(deadline, arrived).await;
+        }
     }
+
+    /// The project's log, created empty the first time it is named.
+    fn project(&self, project_id: &str) -> Arc<Project> {
+        let mut projects = self.projects.lock().unwrap_or_else(PoisonError::into_inner);
+        Arc::clone(projects.entry(project_id.to_string()).or_default())
+    }
+
+    /// The project a notification's session belongs to, from its own record.
+    fn project_of(&self, notification: &SessionNotification) -> anyhow::Result<String> {
+        validate_session_id_segment(&notification.session_id)
+            .map_err(|e| anyhow::anyhow!("{}", e.message()))?;
+        let sessions_base = (self.sessions_base_for)(&notification.os_user).ok_or_else(|| {
+            anyhow::anyhow!("no sessions directory for OS user {}", notification.os_user)
+        })?;
+        let session_dir = unified_session_dir_path(&sessions_base, &notification.session_id);
+        let metadata = tddy_core::read_session_metadata(&session_dir).map_err(|e| {
+            anyhow::anyhow!(
+                "session {} has no readable record: {e}",
+                notification.session_id
+            )
+        })?;
+        anyhow::ensure!(
+            !metadata.project_id.is_empty(),
+            "session {} belongs to no project",
+            notification.session_id
+        );
+        Ok(metadata.project_id)
+    }
+}
+
+/// What `state` holds for `scope` from `start`: a page of at most `size` records, and the number
+/// of records the start lost to eviction.
+///
+/// The page's `next_cursor` is its last record's `seq`, or, for an empty page, the log's newest
+/// `seq`. `has_more` says whether a record of `scope` follows the page's end.
+fn page_of(
+    state: &ProjectState,
+    scope: &ProjectNotificationScope,
+    start: Start,
+    (size, clamped_to): (usize, Option<usize>),
+) -> (FollowPage<ProjectNotificationRecord>, u64) {
+    let visible = state.window.iter().filter(|held| held.visible_to(scope));
+    let (held, has_more, lost) = match start {
+        Start::Newest => {
+            let all: Vec<&Held> = visible.collect();
+            let first = all.len().saturating_sub(size);
+            (all[first..].to_vec(), false, 0)
+        }
+        Start::After(seq) => {
+            let after: Vec<&Held> = visible.filter(|held| held.record.seq > seq).collect();
+            let has_more = after.len() > size;
+            (
+                after.into_iter().take(size).collect(),
+                has_more,
+                lost_after(state, seq),
+            )
+        }
+    };
+    let next_cursor = held
+        .last()
+        .map_or(state.newest_seq, |held| held.record.seq)
+        .to_string();
+    let items = held.into_iter().map(|held| held.record.clone()).collect();
+    (
+        FollowPage {
+            items,
+            next_cursor,
+            has_more,
+            clamped_to,
+        },
+        lost,
+    )
+}
+
+/// How many records between `seq` and the window's oldest were evicted before they were read.
+fn lost_after(state: &ProjectState, seq: u64) -> u64 {
+    let Some(oldest) = state.window.front() else {
+        return 0;
+    };
+    // The records numbered after `seq` and before the oldest kept one are the evicted ones.
+    let last_evicted = oldest.record.seq.saturating_sub(1);
+    last_evicted.saturating_sub(seq)
 }
 
 #[async_trait]
@@ -166,10 +364,47 @@ impl SessionNotificationSubscriber for ProjectNotificationLog {
     }
 
     async fn deliver(&self, notification: &SessionNotification) -> anyhow::Result<()> {
-        // TODO(home-wait): implement — resolve the project from the session's metadata through
-        // `sessions_base_for(os_user)`, append the record to the ring and the JSONL file, and wake
-        // the project's waiters.
-        let _ = (&self.sessions_base_for, notification);
+        let project_id = self.project_of(notification)?;
+        let path = storage::project_file(&self.data_dir, &project_id)?;
+        let project = self.project(&project_id);
+        {
+            // Held across the append, so the file's lines are in `seq` order and a record is
+            // either recorded whole or not at all.
+            let mut state = project.lock();
+            let held = Held {
+                os_user: notification.os_user.clone(),
+                record: ProjectNotificationRecord {
+                    seq: state.newest_seq + 1,
+                    session_id: notification.session_id.clone(),
+                    label: notification.label.clone(),
+                    kind: notification.kind,
+                    source: notification.source,
+                    text: notification.text.clone(),
+                    agent: notification.agent.clone(),
+                    question: notification.question.clone(),
+                    at_unix_ms: notification.at_unix_ms,
+                },
+            };
+            storage::append(&path, &held)?;
+            state.newest_seq = held.record.seq;
+            state.lines_on_disk += 1;
+            state.window.push_back(held);
+            if state.window.len() > PROJECT_NOTIFICATION_CAPACITY {
+                state.window.pop_front();
+            }
+            if state.lines_on_disk > 2 * PROJECT_NOTIFICATION_CAPACITY {
+                match storage::rewrite(&path, state.window.iter()) {
+                    Ok(()) => state.lines_on_disk = state.window.len(),
+                    // The record is recorded; the file keeps growing until a rewrite succeeds.
+                    Err(e) => log::warn!(
+                        target: "tddy_session_activity::project_notification_log",
+                        "could not compact {}: {e:#}",
+                        path.display()
+                    ),
+                }
+            }
+        }
+        project.arrived.notify_waiters();
         Ok(())
     }
 }

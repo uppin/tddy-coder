@@ -40,6 +40,9 @@ prost = "0.13"
 # A tool call's `input` and `result` are the JSON the hook reported, carried through unparsed on a
 # `running` row (`Value::Null` — the wire's "unset") and parsed on the terminal one.
 serde_json = "1"
+# The project notification log's JSON-lines records (`#home-inbox` 7/8): the file form and the answer
+# form of a record are one serde DTO, kept private to `project_notification_log`.
+serde = { version = "1", features = ["derive"] }
 # `ReportAgentActivity` mints the `call_id` a PreToolUse row is paired to its PostToolUse row by.
 uuid = { version = "1", features = ["v4", "v7"] }
 chrono = { version = "0.4", default-features = false, features = ["clock"] }

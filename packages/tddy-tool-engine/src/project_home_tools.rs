@@ -20,6 +20,8 @@
 //! | `ClaimSessionTerminal` | takes a target session's terminal control lease for this home session ([`crate::project_home_terminal_tools`]) |
 //! | `SendSessionKeys` | types text and named keys into a target session's terminal while this home session holds the lease ([`crate::terminal_keys`]) |
 //! | `AnswerSessionPermission` | answers the permission prompt a session this one started is waiting on; its orchestrator only ([`crate::project_home_answer_tools`]) |
+//! | `WaitProjectNotifications` | holds until this project's sessions need it, or a timeout passes, and answers what they raised ([`crate::project_home_inbox_tools`]) |
+//! | `ReadProjectNotifications` | reads what this project's sessions raised, without waiting ([`crate::project_home_inbox_tools`]) |
 //!
 //! Targets resolve through `tddy_worktree_service::session_target`. Listing and starting need the
 //! daemon's session store and start path, which reach this crate through [`ProjectHomePort`].
@@ -53,6 +55,9 @@ use crate::project_home_disk_refresh::{
 };
 use crate::project_home_git_tools::{
     execute_project_home_git_tool, is_project_home_git_tool, project_home_git_tool_defs,
+};
+use crate::project_home_inbox_tools::{
+    project_home_inbox_tool_defs, READ_PROJECT_NOTIFICATIONS, WAIT_PROJECT_NOTIFICATIONS,
 };
 use crate::project_home_terminal_tools::{
     project_home_terminal_tool_defs, CLAIM_SESSION_TERMINAL, READ_SESSION_TERMINAL,
@@ -107,6 +112,8 @@ pub fn is_project_home_tool(name: &str) -> bool {
             | CLAIM_SESSION_TERMINAL
             | SEND_SESSION_KEYS
             | ANSWER_SESSION_PERMISSION
+            | WAIT_PROJECT_NOTIFICATIONS
+            | READ_PROJECT_NOTIFICATIONS
     )
 }
 
@@ -236,8 +243,9 @@ pub fn target_daemon_instance_id(args_json: &str) -> Option<String> {
 
 /// Whether `name` is a project-home tool that acts on a host, and so takes
 /// [`TARGET_DAEMON_INSTANCE_ID`]: read, diff, the two worktree tools, the seven git tools, the
-/// terminal tools (`#home-inbox` 2/8, 5/8), and `DescribeSessionStartOptions`, which describes the
-/// host it names (`#start-parity` 5/9).
+/// terminal tools (`#home-inbox` 2/8, 5/8), `DescribeSessionStartOptions`, which describes the host
+/// it names (`#start-parity` 5/9), and the two notification tools, which read the host they name
+/// (`#home-inbox` 7/8).
 pub fn is_project_home_target_tool(name: &str) -> bool {
     matches!(
         name,
@@ -254,6 +262,8 @@ pub fn is_project_home_target_tool(name: &str) -> bool {
             | CLAIM_SESSION_TERMINAL
             | SEND_SESSION_KEYS
             | ANSWER_SESSION_PERMISSION
+            | WAIT_PROJECT_NOTIFICATIONS
+            | READ_PROJECT_NOTIFICATIONS
     ) || is_project_home_git_tool(name)
 }
 
@@ -429,6 +439,7 @@ fn project_home_tool_defs_with(start_schema: Value) -> Vec<ToolDef> {
     defs.extend(session_follow_tool_defs());
     defs.extend(project_home_terminal_tool_defs());
     defs.extend(project_home_answer_tool_defs());
+    defs.extend(project_home_inbox_tool_defs());
     defs.extend(terminate_session_tool_def());
     defs.extend(refresh_worktree_disk_usage_tool_def());
     defs
@@ -483,6 +494,11 @@ pub async fn execute_project_home_tool(
         ANSWER_SESSION_PERMISSION => ToolOutcome::err(
             format!("{tool_name} is answered by execute_project_home_answer_tool, not by execute_project_home_tool"),
         ),
+        // Read the daemon's notification log, so the daemon answers them through
+        // `execute_project_home_inbox_tool`.
+        WAIT_PROJECT_NOTIFICATIONS | READ_PROJECT_NOTIFICATIONS => ToolOutcome::err(format!(
+            "{tool_name} is answered by execute_project_home_inbox_tool, not by execute_project_home_tool"
+        )),
         other => ToolOutcome::err(format!("unknown project-home tool: {other}")),
     }
 }

@@ -174,6 +174,25 @@ Unit tests (`tddy-session-activity/tests/project_notification_log_unit.rs`, 21 c
 - **D8 — `serde`.** Green adds `serde` (derive, the workspace dependency) to `tddy-session-activity` for the JSONL record DTOs; the public record carries no serde derives.
 - The port impl in daemon-rpc needs `os_user` widened to `pub(super)` on `DaemonProjectHome`.
 
+### Green decisions (taken by `/green`, developer AFK)
+
+- **D11 — a wait reports `lost`.** `NotificationWait` gains `lost: u64`, and the wait's answer carries `lost` when it is non-zero, as a read's does. The Responsibility's "plus `lost: N` when the cursor is older than the window" and the log's "never silently trimmed" both cover a wait that starts from an evicted cursor; the contract's struct had no field for it. Additive: the acceptance tests read only `page` and `timed_out`.
+- **D12 — `has_more` means "a record of the caller's scope follows `next_cursor`".** A newest-page read (empty cursor) therefore answers `has_more: false`: no older page is reachable with a forward cursor, so `true` would point the agent at nothing.
+- **D13 — `lost` counts the project's records.** Sequence numbers are project-wide, so the count is over the project, whoever's records they were. Only a count leaves the log, never another session's record.
+- **D14 — the file is bounded.** Lines are appended per record; once the file holds twice the window's lines it is rewritten to the window (temporary file, then rename). Sequence numbers survive compaction because they live in the lines.
+- **D15 — an unreadable file fails `open`.** The daemon's start fails naming the file rather than starting an empty log, which could reuse sequence numbers. A malformed line is skipped with a warning, and the lines around it are kept.
+- **D16 — a notification that names no readable session is an error.** `deliver` returns `Err` for a session whose sessions directory, record or project cannot be resolved. The bus logs it; the record is not written.
+- **D17 — the trait defaults keep refusing.** The contract's `TODO(home-wait)` bodies in `ProjectHomeInboxPort`'s defaults were the daemon's job, not the defaults'; the defaults keep refusing (a host with no log) and the daemon's impl overrides both.
+- **D18 — `tddy-daemon` names the log directly.** It gains a path dependency on `tddy-session-activity`, the one edge `mount_host` needs to construct `ProjectNotificationLog`. The log opens in `open_shared`, over the mount's sessions-base resolver and the data dir, before the bus is assembled, so the bus, the host and the RPC handler share one log.
+- **D19 — dispatch and catalog order.** `DaemonProjectHome::execute` routes the inbox tools after the answer tools and before the terminal tools. The catalog places them after `AnswerSessionPermission`, before `TerminateSession`, and the `read_only.rs` pin is in that order.
+- **D20 — no `TODO(desktop-notify)` in `mount_host`.** The changeset's D5 note names a block that carries one; grep finds none in `mount_host.rs` or elsewhere in `packages/`, so nothing was removed.
+- **Added test.** `packages/tddy-session-activity/tests/project_notification_log_storage.rs` (2 tests) covers what the contract does not reach: the file staying bounded past the window with sequence numbers and `lost` intact across a restart, and a damaged line being skipped.
+
+- **Pre-existing / flaky (not caused by this node).** Two `tddy-daemon-rpc` tests went red in a full-package run and were classified as flakes, re-run alone and left unfixed:
+  - `coding_subagent_acceptance::cancelling_a_turn_paused_on_a_permission_request_answers_it_cancelled_and_keeps_the_conversation`: a read race. The test parses `record.jsonl` while it is being appended. It passes 3/3 alone.
+  - `rpc_handlers_acceptance::a_catalog_handler_records_rpc_activity_on_the_hosts_own_idle_tracker`: the fixture's `IdleTimeoutTracker` has a 1 ms timeout, so a scheduler delay over 1 ms between the bump and the check flips it. It fails about 1 run in 3 alone. The path it exercises is `CatalogRpcHandler::list_tools`, which this node does not touch.
+- The daemon-rpc full package needed `tddy-acp-stub` and four other helper bins built with `-p` first. Without them, 51 tests fail with "tddy-acp-stub not built".
+
 - Cursor = sequence number, not time (dev-3.0's lesson: never guess a position from a window).
 - 20 s cap keeps one call under every transport's deadline; the agent re-waits with the cursor.
 
@@ -187,7 +206,7 @@ Unit tests (`tddy-session-activity/tests/project_notification_log_unit.rs`, 21 c
 - [x] Run acceptance tests (verify they fail)
 - [x] USER REVIEW — acceptance tests (approved by the orchestrator while the developer was AFK, 2026-10-28)
 - [x] TDD Red — write failing unit/integration tests
-- [ ] TDD Green — implement with quality code
+- [x] TDD Green — implement with quality code (`/green`, 2026-10-29; decisions D11–D20 above)
 - [ ] Update documentation with progress
 - [ ] Repeat Red→Green→Update cycle until feature complete
 - [ ] Run the touched packages' tests (`./test -p {package}` per package) — verify 100% pass

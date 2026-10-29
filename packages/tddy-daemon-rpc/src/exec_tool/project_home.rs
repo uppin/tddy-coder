@@ -54,6 +54,9 @@ use tddy_tool_engine::project_home_answer_tools::{
     execute_project_home_answer_tool, is_project_home_answer_tool, ProjectHomeAnswerPort,
 };
 use tddy_tool_engine::project_home_git_tools::is_project_home_git_tool;
+use tddy_tool_engine::project_home_inbox_tools::{
+    execute_project_home_inbox_tool, is_project_home_inbox_tool,
+};
 use tddy_tool_engine::project_home_terminal_tools::{
     execute_project_home_terminal_tool, is_project_home_terminal_tool, ProjectHomeTerminalPort,
 };
@@ -287,7 +290,9 @@ fn record_call(sessions_base: &Path, req: &ExecuteToolRequest, response: &Execut
 pub(super) struct DaemonProjectHome {
     launch: LaunchSessions,
     session_token: String,
-    os_user: String,
+    /// The OS user the caller's sessions belong to; the notification log is read for it
+    /// (`#home-inbox` 7/8).
+    pub(super) os_user: String,
     sessions_base: PathBuf,
     tddy_data_dir: PathBuf,
     /// Reads the signed-in person's vault for a target's GitHub identity, as a session start does.
@@ -343,6 +348,8 @@ impl DaemonProjectHome {
     ) -> ExecuteToolResponse {
         let outcome = if is_project_home_answer_tool(&req.tool_name) {
             execute_project_home_answer_tool(self, home, &req.tool_name, &req.args_json).await
+        } else if is_project_home_inbox_tool(&req.tool_name) {
+            execute_project_home_inbox_tool(self, home, &req.tool_name, &req.args_json).await
         } else if is_project_home_terminal_tool(&req.tool_name) {
             execute_project_home_terminal_tool(self, home, &req.tool_name, &req.args_json).await
         } else {

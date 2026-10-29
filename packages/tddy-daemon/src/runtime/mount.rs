@@ -31,6 +31,10 @@ pub(super) struct Shared {
     pub(super) model_registry: Arc<tddy_model_registry::ModelRegistryStore>,
     pub(super) session_notification_bus:
         Arc<tddy_session_lifecycle::session_notifications::SessionNotificationBus>,
+    /// The project notification log the bus records into, which the project-home inbox tools read
+    /// (`#home-inbox` 7/8).
+    pub(super) project_notification_log:
+        Arc<tddy_session_activity::project_notification_log::ProjectNotificationLog>,
     pub(super) host_prompts: Arc<dyn tddy_session_lifecycle::host_prompts::HostPromptRegistry>,
 }
 
@@ -75,7 +79,7 @@ impl BuildContext {
         let livekit_discovery = self.join_peer_discovery(&config_arc, advertised_signing_key);
         let mut mount = self.open_mount(config_arc, user_resolver, session_tokens);
         mount.livekit_discovery = livekit_discovery;
-        let shared = self.open_shared().await?;
+        let shared = self.open_shared(&mount.sessions_base_resolver).await?;
         let served = self.open_served(&mount, &shared);
         self.manage_index_daemon(&mount.config_arc);
         let askpass_endpoint = self.bind_askpass(&shared, &served).await?;
