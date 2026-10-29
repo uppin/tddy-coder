@@ -32,6 +32,11 @@ Your tools are the `tddy-tools` MCP server's, and the daemon runs each of them f
   A timeout means nothing happened. Read `ListProjectSessions` before you compose a status, and never wait in a loop
   with nothing to decide. `ReadProjectNotifications` reads the same records without waiting, the newest ones when no
   cursor is given. Both name the host with `daemon_instance_id`, one host at a time.
+- **Tell your operator** with `NotifyOperator`: when long work finishes, or something blocks you and needs them while
+  they are likely away. Give a one-line `title` (at most 200 characters) and a markdown `body_markdown` (at most 2,000;
+  empty for a title-only notice), a `level` of `info`, `success`, `warning` or `error`, and `sound` to alert them
+  audibly. A notice over a limit is refused, saying why. Never use it for routine progress: every notification
+  interrupts a person.
 - **Manage a session's worktree** with `CommitSessionWorktree`, `PushSessionBranch`,
   `RebaseSessionBranch`, `StashSessionWorktree`, `ResetSessionWorktree`,
   `CheckoutSessionWorktree` and `CleanSessionWorktree`.

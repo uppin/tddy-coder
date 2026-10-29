@@ -304,12 +304,7 @@ pub fn answer_permission(
         &by,
         at_unix_ms,
     );
-    if let Err(e) = clear_pending_question(&session_dir) {
-        log::warn!(
-            target: "tddy_session_activity::answers",
-            "answered permission request {request_id}, but could not clear its pending question: {e}"
-        );
-    }
+    clear_answered_pending_question(&session_dir, &request_id);
 
     Ok(AnsweredPermission {
         session_id: target.to_string(),
@@ -319,6 +314,28 @@ pub fn answer_permission(
         cancelled: matches!(answer, PermissionAnswer::Cancelled { .. }),
         at_unix_ms,
     })
+}
+
+/// Clear the pending question in `session_dir` once `request_id` has been answered — only when it is
+/// still the question recorded there. The hook has already returned, so Claude may have recorded its
+/// next question, and that one is not this answer's to clear (`#home-inbox` 11/11; `8/9` fixed the
+/// same race in [`answer_question`]).
+///
+/// A failure to read or clear is logged, never returned: the answer is already delivered.
+pub fn clear_answered_pending_question(session_dir: &Path, request_id: &str) {
+    let still_pending = matches!(
+        read_pending_question(session_dir),
+        Ok(Some(current)) if current.request_id == request_id
+    );
+    if !still_pending {
+        return;
+    }
+    if let Err(e) = clear_pending_question(session_dir) {
+        log::warn!(
+            target: "tddy_session_activity::answers",
+            "answered request {request_id}, but could not clear its pending question: {e}"
+        );
+    }
 }
 
 /// Refuse unless `caller` is `target`'s orchestrator: the session its changeset's

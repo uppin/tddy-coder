@@ -488,9 +488,9 @@ A resume rebuilds both from the `hook_token` recorded in `.session.yaml`; a sess
 none is given nothing. Not wired:
 
 - **A session with a standing role** (`session_role`, e.g. the project-home main). It has no shell to
-  run the command, so neither the environment nor the guidance is given. An MCP tool for those
-  sessions is a follow-up
-  ([`docs/dev/todo/2026-10-26-shell-less-sessions-cannot-notify-their-operator.md`](../../dev/todo/2026-10-26-shell-less-sessions-cannot-notify-their-operator.md)).
+  run the command, so neither the environment nor the guidance is given. It notifies with the
+  `NotifyOperator` exec tool instead, and its role prompt names that tool
+  ([Session notifications § A session with no shell](session-notifications.md#a-session-with-no-shell-notifyoperator)).
 - **A sandboxed session.** It has no hooks and no hook token.
 
 A cursor-cli session is given the same environment at start and resume (its socket and URL are its

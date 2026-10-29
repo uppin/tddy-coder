@@ -20,11 +20,12 @@
 //!
 //! # Clicks
 //!
-//! **Not delivered.** `tauri-plugin-notification` 2.4 — the last line that builds against the Tauri
-//! this application is locked to (2.11) — shows a desktop notification fire-and-forget and reports
-//! no click. Plugin 2.5 and later do (`Notification::on_action`, action `tap`) but need Tauri 2.12
-//! and Rust 1.90. [`open_session_route`] is the whole click handler and is tested here; *what calls
-//! it* is `docs/dev/todo/2026-10-26-desktop-notification-click-needs-tauri-2-12.md`.
+//! A click on a notification is delivered by `tauri-plugin-notification` 2.5 and later
+//! (`Notification::on_action`, action `tap`). Each notice is shown with its route as the `extra`
+//! payload ([`SessionRoute::tap_extra`]); `tauri_host::register_tap_handler` maps a click back
+//! ([`session_route_from_tap`]) and runs [`on_notification_tap`] → [`open_session_route`]. The
+//! mapping and the handler are tested here against the fake window; the registration needs a running
+//! application and stays a manual macOS check.
 //!
 //! # Subtitle and permission
 //!
@@ -43,9 +44,14 @@ use tddy_session_lifecycle::session_notifications::{
     SessionNotificationSubscriber,
 };
 
+mod tap;
 mod tauri_host;
 
-pub use tauri_host::{TauriDashboardWindow, TauriNotifier};
+pub use tap::{
+    on_notification_tap, session_route_from_tap, TappedNotification, EXTRA_HOST, EXTRA_SESSION_ID,
+    TAP_ACTION_ID,
+};
+pub use tauri_host::{register_tap_handler, TauriDashboardWindow, TauriNotifier};
 
 /// How many characters of an agent's body a native notification carries. Operating-system centres
 /// truncate further on their own, so more is only wasted.

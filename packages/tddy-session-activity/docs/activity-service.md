@@ -111,7 +111,9 @@ it learns is one boolean about a session id it already knows.
   re-open of the same id never closes the new waiter.
 - **`answers::answer_permission`** — what `AnswerSessionPermission` runs on the child's host: the
   orchestrator check (`require_orchestrator`), already answered, the pending question and its kind,
-  the waiter and its offered option, then delivery, an activity row and clearing the question.
+  the waiter and its offered option, then delivery, an activity row and clearing the question —
+  through `clear_answered_pending_question`, only if it is still the answered `request_id` (the hook
+  has returned, so Claude may have recorded its next one; `#home-inbox` 11/11).
   `permission_request_view` turns `#home-inbox` 3/8's `PendingQuestion` into the
   `PermissionRequestView` an orchestrator reads; `AnswerRefusal` carries every refusal's text.
 - **`pending_answers::question`** — the waiters of `AskUserQuestion` calls, `PendingAnswers`' question
@@ -127,7 +129,7 @@ it learns is one boolean about a session id it already knows.
   permission), the waiter, and `validate_question_answers` against the **waiter's** question, not the
   file's, so the answers are checked against what the hook is really holding. Delivery, the
   `question:<request_id>` activity row, and clearing the pending question — only if it is still that
-  question — follow. `AwaitQuestionAnswer` branches on the pending question's kind: `permission` as
+  question, the same `clear_answered_pending_question` — follow. `AwaitQuestionAnswer` branches on the pending question's kind: `permission` as
   before, anything else is a question and `ANSWERED` carries `answers`.
 - **`orchestrator_presence::OrchestratorPresence`** — the port: whether this daemon serves a
   session's main terminal.
@@ -177,7 +179,7 @@ written twice. See
 | `service/ports.rs` | 146 | the ports the daemon injects: `ActivityPorts`, `SessionLabels`, `SessionDeltaStores` and `NoSessionDeltaStores`, `DeltaLookup`, `DeltaScope`, `MeasuredDelta` — re-exported from `service` |
 | `service/rpc.rs` | 323 | the `activity.ActivityService` trait impl: the four streams, the two ACP replay reads, and the two hook reports as one-line delegations |
 | `service/question_answers.rs` | 167 | `AnswerWaitPorts` and `await_question_answer_impl`, the long-held hook call |
-| `answers.rs` | 387 | `answer_permission`, its refusals and `permission_request_view` |
+| `answers.rs` | 434 | `answer_permission`, `clear_answered_pending_question`, its refusals and `permission_request_view` |
 | `pending_answers.rs` | 249 | `PendingAnswers`, the in-memory waiters |
 | `orchestrator_presence.rs` | 32 | the `OrchestratorPresence` port and `NoOrchestratorIsActive` |
 | `service/hook_reports.rs` | 215 | the two hook reports' bodies, `report_session_status_impl` and `report_agent_activity_impl`, as inherent methods: a trait impl cannot be split across files and `restructure`'s `extract_method` is refused inside an `#[async_trait]` impl, so the trait methods delegate here |

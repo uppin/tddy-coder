@@ -235,8 +235,8 @@ an ordinary, still read-only session, and main is set up once more.
 The exec tools below give the read-only main its reach over **its own project's** sessions. Only a
 session whose record carries the `project-home` role may run them; any other caller is refused with
 `PERMISSION_DENIED` naming the role — except that a session that can spawn conversations is offered
-and served the four start tools and the two answer tools, for its own project (see
-[Conversation spawners](#conversation-spawners)).
+and served the four start tools and the two answer tools, for its own project, and
+`ReadSessionActivity` for the sessions it started (see [Conversation spawners](#conversation-spawners)).
 
 | Tool | Arguments | Answers |
 |---|---|---|
@@ -258,6 +258,7 @@ and served the four start tools and the two answer tools, for its own project (s
 | `AnswerSessionQuestion` | `session_id`, `request_id`, `answers: [{question_index, selected, other?}]`, `daemon_instance_id?` | `{session_id, request_id, answered_by, answers, at_unix_ms}`: answers the `AskUserQuestion` a session this caller started is waiting on, as `ReadSessionActivity`'s `pending_question` shows it. Each answer names a question by index, the option labels chosen and, optionally, free text. Only the target's orchestrator may answer, the answers are checked against the question as asked, and the first answer wins. See [Answering a question](#answering-a-question) |
 | `WaitProjectNotifications` | `cursor?`, `timeout_ms?` (at most 20000, the default), `daemon_instance_id?` | `{items, next_cursor, has_more, timed_out, lost?}`: returns at once when the project's notification log holds records after `cursor`, otherwise holds until one arrives or `timeout_ms` passes. Without a cursor it waits for the next new record. See [Waiting for notifications](#waiting-for-notifications) |
 | `ReadProjectNotifications` | `cursor?`, `limit?` (50 by default, at most 200), `daemon_instance_id?` | `{items, next_cursor, has_more, clamped_to?, lost?}`: up to `limit` records after `cursor`, oldest first, without waiting; without a cursor, the newest page. See [Waiting for notifications](#waiting-for-notifications) |
+| `NotifyOperator` | `title`, `body_markdown`, `level?` (`info` (default), `success`, `warning`, `error`), `sound?` | `{published: true}`: notifies the operator in the agent's own words, as `tddy-tools notify` does for a session with a shell — one `AGENT` attention notification on every surface (Telegram, the desktop). The title is 1 to 200 characters after trimming and the body at most 2,000; either over its limit, or an unknown `level`, is refused saying why, never truncated. No session argument: the daemon publishes for the calling session alone, with the `hook_token` its `.session.yaml` records, through `ActivityService.ReportOperatorNotification` in process; the token never appears in the answer. A main that is not `claude-cli` / `cursor-cli`, or records no hook token, is refused naming the tool and why. See [Session notifications § A session with no shell](session-notifications.md#a-session-with-no-shell-notifyoperator) |
 
 - **Targets.** A target is a session id in the caller's project, with a worktree, on the host the
   optional `daemon_instance_id` argument names (as `ListProjectSessions` reports it; empty or absent
@@ -351,6 +352,15 @@ orchestrator too, limited to starting sessions:
   `CancelSessionStart`, `DescribeSessionStartOptions`, `AnswerSessionPermission` and `AnswerSessionQuestion` are added to its `ListExecTools` set (`SessionToolRole::ConversationSpawner`)
   and served to it, with `project_id` fixed to its own project and itself as the orchestrator. The
   other project-home tools are still refused to it; an ordinary session is offered none of them.
+- **Reads the sessions it started.** `ReadSessionActivity` is offered too, so the spawner can read
+  the `request_id` its answer tools need. It is served only for a target whose changeset names the
+  spawner as `orchestrator_session_id`; any other target — one it did not start, one with no
+  readable changeset, or a call naming no valid `session_id` — is refused as `PERMISSION_DENIED`,
+  naming the spawner and that it may read only the sessions it started. The caller's role is read
+  once, from its own record, and the same read decides the scope. **This host only**: a child on
+  another host has no changeset here and a forwarded call is refused by the peer, which confirms
+  only project-home callers
+  ([TODO](../../dev/todo/2026-10-29-spawner-read-scope-is-same-host-only.md)).
 - **`spawn_conversation` is the same start.** The agent's `spawn_conversation` tool (MCP and
   `tddy-tools spawn-conversation`) takes `StartSession`'s arguments and runs the very start
   `StartSession` runs: it begins on the streamed start path (forwarded to the host the arguments
@@ -507,9 +517,10 @@ its `PermissionRequest` hook open for that orchestrator's decision, for at most
   a peer that says no or cannot answer in time gets no wait, and Claude's own prompt appears. The
   wait stays on the child's host and the answer is forwarded there
   ([claude-cli session § Waiting for an orchestrator's answer](claude-cli-session.md#waiting-for-an-orchestrators-answer)).
-- **Known gap.** A conversation spawner may answer but is not served `ReadSessionActivity`, so it
-  cannot read the `request_id`; its claude-cli children wait out the deadline
-  ([TODO](../../dev/todo/2026-10-29-conversation-spawner-cannot-read-its-childs-permission-request.md)).
+- **A conversation spawner** reads its child's `request_id` with `ReadSessionActivity`, scoped to the
+  sessions it started (see [Conversation spawners](#conversation-spawners)).
+- **The pending question is cleared only if it is still the answered one**, for a permission as for
+  a question: the hook has returned, so Claude may already have recorded its next.
 
 ### Answering a question
 
@@ -532,7 +543,7 @@ time, the child shows its own dialog.
   appended to the target's activity (`{"answeredBy", "answers": [{"questionIndex", "selected",
   "other"?}]}`), and the target's pending question is cleared if it is still that question. As for a
   permission, once the hook is woken the answer stands: a failed write is logged, not refused.
-- **Same host only, and the spawner gap**, as for a permission.
+- **Same host only**, and a spawner reads and answers its children, as for a permission.
 
 ### Waiting for notifications
 

@@ -155,6 +155,7 @@ mod tests {
                 "CheckoutSessionWorktree",
                 "CleanSessionWorktree",
                 "RefreshWorktreeDiskUsage",
+                "NotifyOperator",
             ])
         );
     }

@@ -4,7 +4,7 @@
 **Category:** oversized-file
 **Detected:** 2026-09-26 by `structural audit` — hand-measured during `/plan-red` Step 2b for the
 subagent turn-control changeset
-**Metrics:** **888 production lines** (2026-10-29) · budget 500 · **1.6× over**
+**Metrics:** **889 production lines** (2026-10-29) · budget 500 · **1.6× over**
 **Thresholds breached:** length 884 > 500
 **Restructure:** required — `extract_module --to_file`, `/code-restructuring` territory
 **Status:** Open — unclaimed (882 production lines, 2026-10-25)
@@ -115,3 +115,4 @@ budget to time out on) and green after. Re-grepped the crate for `process::Comma
 | 2026-10-28 | 886 | +1 in `#home-inbox` 5/8 (#770): `pub mod terminal_keys;` (885 at its base). Stack-shared, so no split here |
 | 2026-10-29 | 887 | +1 in `#home-inbox` 6/8 (#771): `pub mod project_home_answer_tools;`. Stack-shared (`#home-inbox` 7/8 and 8/8 edit this module list), so no split here |
 | 2026-10-29 | 888 | +1 in `#home-inbox` 7/9 (#772): `pub mod project_home_inbox_tools;`. Stack-shared (`#home-inbox` 8/9 and 9/9 edit this module list), so no split here |
+| 2026-10-29 | 889 | +1 in `#home-inbox` 11/11 (#788): `pub mod project_home_notify_tools;` (the three private `mod project_home_catalogue/listing/target_host;` lines that split `project_home_tools.rs` sit past the first `#[cfg(test)]`). Not split here: the growth is one declaration for a module that holds the tool (159 lines), and the shell-surface extraction `## What would close it` names is a separate restructure, left to a follow-up |

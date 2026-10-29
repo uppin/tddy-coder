@@ -22,11 +22,14 @@ use std::path::Path;
 
 use serde_json::{json, Value};
 use tddy_core::agent_activity::{append_agent_activity, AgentActivityRecord, STATUS_COMPLETED};
-use tddy_core::pending_question::{clear_pending_question, read_pending_question, PendingQuestion};
+use tddy_core::pending_question::{read_pending_question, PendingQuestion};
 use tddy_core::session_lifecycle::unified_session_dir_path;
 use tddy_discovery::subagent::AnsweredBy;
 
-use super::{require_orchestrator, AnswerContext, AnswerRefusal, AnsweringCaller};
+use super::{
+    clear_answered_pending_question, require_orchestrator, AnswerContext, AnswerRefusal,
+    AnsweringCaller,
+};
 
 /// One answer to one question of an `AskUserQuestion` call: `question_index` (from 0),
 /// `selected` labels, and `other` free text. The wire type, so the hook, the registry and the tool
@@ -215,20 +218,7 @@ pub fn answer_question(
 
     let at_unix_ms = tddy_daemon_kernel::now_unix_ms();
     record_answer(&session_dir, &question, &answers, &by, at_unix_ms);
-    // Clear only the question that was answered: the hook has returned, so Claude may already have
-    // recorded its next one, and that one is not this answer's to clear.
-    let still_pending = matches!(
-        read_pending_question(&session_dir),
-        Ok(Some(current)) if current.request_id == request_id
-    );
-    if still_pending {
-        if let Err(e) = clear_pending_question(&session_dir) {
-            log::warn!(
-                target: "tddy_session_activity::answers",
-                "answered question {request_id}, but could not clear its pending question: {e}"
-            );
-        }
-    }
+    clear_answered_pending_question(&session_dir, request_id);
 
     Ok(AnsweredQuestion {
         session_id: target.to_string(),

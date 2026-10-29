@@ -17,7 +17,10 @@ use support::{
     a_status_report_for, an_agent_notification, route_to, NotificationOwnedBy, ShownNotices,
     WindowEvent, ANOTHER_SESSION, THE_LABEL, THE_SESSION, THIS_DESKTOP,
 };
-use tddy_desktop::native_notifications::{open_session_route, DesktopNotice};
+use tddy_desktop::native_notifications::{
+    on_notification_tap, open_session_route, session_route_from_tap, DesktopNotice,
+    TappedNotification, TAP_ACTION_ID,
+};
 
 // ---------------------------------------------------------------------------
 // AC1 — an agent-written notification
@@ -129,6 +132,68 @@ fn a_click_navigates_the_main_window_to_the_sessions_route() {
     // Then the window is brought to the front and opens that session on this desktop's host,
     // in that order — navigating a window that is still hidden would leave the operator looking
     // at whatever it showed before
+    window.assert_events(vec![
+        WindowEvent::BroughtToFront,
+        WindowEvent::Navigated(format!(
+            "tauri://localhost/#/sessions/{THE_SESSION}?host={THIS_DESKTOP}"
+        )),
+    ]);
+}
+
+// ---------------------------------------------------------------------------
+// AC5 — a tap reported by the plugin opens the session it is about (`#home-inbox` 11/11)
+// ---------------------------------------------------------------------------
+
+/// What the plugin reports for `action_id` on a notice shown for `session_id`: the action, and the
+/// payload the notice was shown with.
+fn an_action_on_the_notice_for(session_id: &str, action_id: &str) -> TappedNotification {
+    TappedNotification {
+        action_id: action_id.to_string(),
+        extra: route_to(session_id).tap_extra(),
+    }
+}
+
+#[test]
+fn a_tap_on_a_notice_maps_back_to_the_route_it_was_shown_for() {
+    // Given a notice the desktop showed for a session, tapped by the operator
+    let tapped = an_action_on_the_notice_for(THE_SESSION, TAP_ACTION_ID);
+
+    // When the tap's payload is read
+    let route = session_route_from_tap(&tapped);
+
+    // Then it names that session on this desktop's host
+    assert_eq!(route, Some(route_to(THE_SESSION)), "the route a tap opens");
+}
+
+#[test]
+fn an_action_that_is_not_a_tap_and_a_payload_naming_no_session_open_nothing() {
+    // Given an action other than a click on the notice, and a tap on a notice with no session
+    let not_a_tap = an_action_on_the_notice_for(THE_SESSION, "dismiss");
+    let no_session = TappedNotification {
+        action_id: TAP_ACTION_ID.to_string(),
+        extra: Default::default(),
+    };
+
+    // When each is read
+    // Then neither names a route
+    assert_eq!(session_route_from_tap(&not_a_tap), None, "a dismissal");
+    assert_eq!(
+        session_route_from_tap(&no_session),
+        None,
+        "a tap naming no session"
+    );
+}
+
+#[test]
+fn the_tap_handler_brings_the_window_forward_on_the_tapped_session() {
+    // Given the dashboard window on the app's own page, and a tap on a session's notice
+    let window = a_dashboard_window_at("tauri://localhost/");
+    let tapped = an_action_on_the_notice_for(THE_SESSION, TAP_ACTION_ID);
+
+    // When the plugin reports the tap
+    on_notification_tap(&window, &tapped).expect("the tap was not handled");
+
+    // Then the window is brought to the front and opens that session, as a click does
     window.assert_events(vec![
         WindowEvent::BroughtToFront,
         WindowEvent::Navigated(format!(

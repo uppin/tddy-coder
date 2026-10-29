@@ -602,6 +602,23 @@ async fn an_ensured_main_is_told_it_is_the_projects_main() {
 }
 
 #[tokio::test]
+async fn an_ensured_main_is_told_to_notify_its_operator_with_the_tool_not_the_cli() {
+    // Given a main the ensure has started, which has no shell to run `tddy-tools notify` in
+    let world = a_daemon_with_a_project();
+    let main = world.a_running_main().await;
+
+    // When the prompt it is launched with is read
+    let launch = world.launch_of(&main.session_id).await;
+    let prompt = std::fs::read_to_string(launch.value_of("--append-system-prompt-file"))
+        .expect("the role prompt file exists");
+
+    // Then it names `NotifyOperator` as how it tells an absent operator, and never the CLI
+    // (`#home-inbox` 11/11)
+    assert!(prompt.contains("NotifyOperator"), "prompt: {prompt}");
+    assert!(!prompt.contains("tddy-tools notify"), "prompt: {prompt}");
+}
+
+#[tokio::test]
 async fn a_resumed_main_is_wired_to_its_tools_again_under_a_credential_of_its_own() {
     // Given a main that ran and was stopped
     let world = a_daemon_with_a_project();

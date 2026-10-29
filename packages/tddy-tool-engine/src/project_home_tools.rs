@@ -23,6 +23,7 @@
 //! | `AnswerSessionQuestion` | answers the `AskUserQuestion` a session this one started is waiting on, validated against its options; its orchestrator only ([`crate::project_home_answer_tools`]) |
 //! | `WaitProjectNotifications` | holds until this project's sessions need it, or a timeout passes, and answers what they raised ([`crate::project_home_inbox_tools`]) |
 //! | `ReadProjectNotifications` | reads what this project's sessions raised, without waiting ([`crate::project_home_inbox_tools`]) |
+//! | `NotifyOperator` | notifies the operator in the agent's own words, as `tddy-tools notify` does, for a session with no shell ([`crate::project_home_notify_tools`]) |
 //!
 //! Targets resolve through `tddy_worktree_service::session_target`. Listing and starting need the
 //! daemon's session store and start path, which reach this crate through [`ProjectHomePort`].
@@ -48,239 +49,45 @@ use tddy_worktree_service::worktree_files::{
     list_worktree_directory_entries, read_worktree_file_utf8,
 };
 
-use crate::catalog::{tool_catalog, ToolDef};
-use crate::project_home_answer_tools::{
-    project_home_answer_tool_defs, ANSWER_SESSION_PERMISSION, ANSWER_SESSION_QUESTION,
-};
+use crate::project_home_answer_tools::{ANSWER_SESSION_PERMISSION, ANSWER_SESSION_QUESTION};
 use crate::project_home_diff::worktree_diff;
-use crate::project_home_disk_refresh::{
-    refresh_worktree_disk_usage, refresh_worktree_disk_usage_tool_def, REFRESH_WORKTREE_DISK_USAGE,
-};
-use crate::project_home_git_tools::{
-    execute_project_home_git_tool, is_project_home_git_tool, project_home_git_tool_defs,
-};
-use crate::project_home_inbox_tools::{
-    project_home_inbox_tool_defs, READ_PROJECT_NOTIFICATIONS, WAIT_PROJECT_NOTIFICATIONS,
-};
+use crate::project_home_disk_refresh::{refresh_worktree_disk_usage, REFRESH_WORKTREE_DISK_USAGE};
+use crate::project_home_git_tools::{execute_project_home_git_tool, is_project_home_git_tool};
+use crate::project_home_inbox_tools::{READ_PROJECT_NOTIFICATIONS, WAIT_PROJECT_NOTIFICATIONS};
 use crate::project_home_terminal_tools::{
-    project_home_terminal_tool_defs, CLAIM_SESSION_TERMINAL, READ_SESSION_TERMINAL,
-    SEND_SESSION_KEYS,
+    CLAIM_SESSION_TERMINAL, READ_SESSION_TERMINAL, SEND_SESSION_KEYS,
 };
-use crate::project_home_terminate::{
-    terminate_session, terminate_session_tool_def, TERMINATE_SESSION,
-};
+use crate::project_home_terminate::{terminate_session, TERMINATE_SESSION};
 use crate::project_home_worktree_tools::{
-    run_get_worktree, run_list_worktrees, worktree_tool_defs, WorktreeEntry, GET_WORKTREE,
-    LIST_WORKTREES,
+    run_get_worktree, run_list_worktrees, WorktreeEntry, GET_WORKTREE, LIST_WORKTREES,
 };
-use crate::read_only::is_project_home_allowed_tool;
 use crate::session_follow::{
-    run_session_follow_tool, session_follow_tool_defs, SessionActivity, ToolCallBodies,
-    TranscriptItem, READ_SESSION_ACTIVITY, READ_SESSION_TRANSCRIPT,
+    run_session_follow_tool, SessionActivity, ToolCallBodies, TranscriptItem,
+    READ_SESSION_ACTIVITY, READ_SESSION_TRANSCRIPT,
 };
 use crate::start_ledger::{
     StartHandle, StartLedgerRecord, CANCEL_SESSION_START, GET_SESSION_START,
 };
-use crate::start_options::{
-    start_options_tool_def, StartOptions, StartOptionsQuery, DESCRIBE_SESSION_START_OPTIONS,
-};
-use crate::start_session_args::{
-    start_session_schema, start_session_schema_without_choices, StartChoices, StartSessionArgs,
-    START_SESSION,
-};
+use crate::start_options::{StartOptions, StartOptionsQuery, DESCRIBE_SESSION_START_OPTIONS};
+use crate::start_session_args::{StartSessionArgs, START_SESSION};
 use crate::ToolOutcome;
 
 pub const LIST_PROJECT_SESSIONS: &str = "ListProjectSessions";
 pub const READ_SESSION_WORKTREE: &str = "ReadSessionWorktree";
 pub const DIFF_SESSION_WORKTREE: &str = "DiffSessionWorktree";
 
-/// Whether `name` is one of the project-home tools.
-pub fn is_project_home_tool(name: &str) -> bool {
-    matches!(
-        name,
-        LIST_PROJECT_SESSIONS
-            | START_SESSION
-            | GET_SESSION_START
-            | CANCEL_SESSION_START
-            | DESCRIBE_SESSION_START_OPTIONS
-            | READ_SESSION_WORKTREE
-            | DIFF_SESSION_WORKTREE
-            | LIST_WORKTREES
-            | GET_WORKTREE
-            | READ_SESSION_ACTIVITY
-            | READ_SESSION_TRANSCRIPT
-            | TERMINATE_SESSION
-            | REFRESH_WORKTREE_DISK_USAGE
-            | READ_SESSION_TERMINAL
-            | CLAIM_SESSION_TERMINAL
-            | SEND_SESSION_KEYS
-            | ANSWER_SESSION_PERMISSION
-            | ANSWER_SESSION_QUESTION
-            | WAIT_PROJECT_NOTIFICATIONS
-            | READ_PROJECT_NOTIFICATIONS
-    )
-}
+pub use crate::project_home_catalogue::{
+    is_conversation_spawner_scoped_tool, is_conversation_spawner_tool, is_project_home_tool,
+    project_home_offered_catalog, session_offered_catalog, session_offered_catalog_for,
+    SessionToolRole,
+};
 
-/// The exec tools a project-home session's agent is offered: exactly the tools
-/// [`is_project_home_allowed_tool`] lets it run, in catalog order, then the four project-home tools,
-/// then the seven project-home git tools (`#project-home` 7/7).
-/// The same predicate the daemon's role guard applies at call time, so what is advertised and what
-/// is executed cannot disagree.
-///
-/// `StartSession`'s schema here names no host or recipe choices
-/// ([`start_session_schema_without_choices`]); [`session_offered_catalog`] is the daemon's answer,
-/// with them.
-pub fn project_home_offered_catalog() -> Vec<ToolDef> {
-    project_home_catalog_with(start_session_schema_without_choices())
-}
+pub use crate::project_home_listing::{ListProjectSessionsResult, ListedSession, UnreachableHost};
 
-/// The exec tools a session's agent is offered, by whether it is a project-home session: the
-/// project-home catalog for one, with `StartSession`'s schema offering `choices` — the daemon's
-/// eligible hosts and supported recipes — and the daemon-wide catalog for any other. The one place
-/// that answer is decided, for every host that answers `ListExecTools` (the token route and the
-/// jail's bridge).
-pub fn session_offered_catalog(is_project_home: bool, choices: &StartChoices) -> Vec<ToolDef> {
-    if is_project_home {
-        project_home_catalog_with(start_session_schema(choices))
-    } else {
-        tool_catalog()
-    }
-}
-
-/// What a session's role entitles its agent to among the project-home tools.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum SessionToolRole {
-    /// The project-home session: every project-home tool, and nothing else that writes.
-    ProjectHome,
-    /// A session that can spawn conversations (grill-me): the daemon-wide catalog, the four start
-    /// tools (`#start-parity` 9/9) and the two answer tools (`#home-inbox` 6/8, 8/9), for its own
-    /// project alone.
-    ConversationSpawner,
-    /// Any other session: the daemon-wide catalog.
-    Ordinary,
-}
-
-/// Whether `name` is one of the six tools a [`SessionToolRole::ConversationSpawner`] is offered and
-/// served: the four start tools — `StartSession`, `GetSessionStart`, `CancelSessionStart` and
-/// `DescribeSessionStartOptions` — and the two answer tools, `AnswerSessionPermission` and
-/// `AnswerSessionQuestion`, the answers to a prompt or a question of a session it started
-/// (`#home-inbox` 6/8, 8/9).
-pub fn is_conversation_spawner_tool(name: &str) -> bool {
-    matches!(
-        name,
-        START_SESSION
-            | GET_SESSION_START
-            | CANCEL_SESSION_START
-            | DESCRIBE_SESSION_START_OPTIONS
-            | ANSWER_SESSION_PERMISSION
-            | ANSWER_SESSION_QUESTION
-    )
-}
-
-/// [`session_offered_catalog`] by [`SessionToolRole`]: a conversation spawner is offered the
-/// daemon-wide catalog and [`is_conversation_spawner_tool`]'s six, `StartSession` offering
-/// `choices`.
-pub fn session_offered_catalog_for(role: SessionToolRole, choices: &StartChoices) -> Vec<ToolDef> {
-    match role {
-        SessionToolRole::ProjectHome => session_offered_catalog(true, choices),
-        SessionToolRole::Ordinary => session_offered_catalog(false, choices),
-        SessionToolRole::ConversationSpawner => tool_catalog()
-            .into_iter()
-            .chain(
-                project_home_tool_defs_with(start_session_schema(choices))
-                    .into_iter()
-                    .filter(|tool| is_conversation_spawner_tool(&tool.name)),
-            )
-            .collect(),
-    }
-}
-
-fn project_home_catalog_with(start_schema: Value) -> Vec<ToolDef> {
-    tool_catalog()
-        .into_iter()
-        .filter(|tool| is_project_home_allowed_tool(&tool.name))
-        .chain(project_home_tool_defs_with(start_schema))
-        .chain(project_home_git_tool_defs())
-        .collect()
-}
-
-/// One session as `ListProjectSessions` reports it.
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-pub struct ListedSession {
-    pub session_id: String,
-    pub branch: String,
-    pub worktree: String,
-    pub is_active: bool,
-    /// The agent status name (`idle`, `running`, `waiting_for_input`, …).
-    pub agent_status: String,
-    pub pending_elicitation: bool,
-    /// The daemon the session runs on, as the eligible-daemon roster names it. A target tool given
-    /// this id reaches the session on that host (`#start-parity` 1/9).
-    #[serde(default)]
-    pub daemon_instance_id: String,
-}
-
-/// What `ListProjectSessions` answers: the project's sessions on every eligible host, and the hosts
-/// that did not answer — named rather than silently left out of the list.
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-pub struct ListProjectSessionsResult {
-    pub sessions: Vec<ListedSession>,
-    pub unreachable_hosts: Vec<UnreachableHost>,
-}
-
-/// An eligible host that did not answer `ListProjectSessions`'s fan-out, and why.
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-pub struct UnreachableHost {
-    pub daemon_instance_id: String,
-    pub reason: String,
-}
-
-/// The argument every project-home target tool takes to name the host its target runs on. Empty or
-/// absent is this host.
-pub const TARGET_DAEMON_INSTANCE_ID: &str = "daemon_instance_id";
-
-/// The host `args_json` names in [`TARGET_DAEMON_INSTANCE_ID`], or `None` for this host (the
-/// argument absent or empty, or `args_json` not an object).
-pub fn target_daemon_instance_id(args_json: &str) -> Option<String> {
-    let args: Value = serde_json::from_str(args_json).ok()?;
-    let host = args.get(TARGET_DAEMON_INSTANCE_ID)?.as_str()?.trim();
-    (!host.is_empty()).then(|| host.to_string())
-}
-
-/// Whether `name` is a project-home tool that acts on a host, and so takes
-/// [`TARGET_DAEMON_INSTANCE_ID`]: read, diff, the two worktree tools, the seven git tools, the
-/// terminal tools (`#home-inbox` 2/8, 5/8), `DescribeSessionStartOptions`, which describes the host
-/// it names (`#start-parity` 5/9), and the two notification tools, which read the host they name
-/// (`#home-inbox` 7/8).
-pub fn is_project_home_target_tool(name: &str) -> bool {
-    matches!(
-        name,
-        READ_SESSION_WORKTREE
-            | DIFF_SESSION_WORKTREE
-            | LIST_WORKTREES
-            | GET_WORKTREE
-            | DESCRIBE_SESSION_START_OPTIONS
-            | READ_SESSION_ACTIVITY
-            | READ_SESSION_TRANSCRIPT
-            | TERMINATE_SESSION
-            | REFRESH_WORKTREE_DISK_USAGE
-            | READ_SESSION_TERMINAL
-            | CLAIM_SESSION_TERMINAL
-            | SEND_SESSION_KEYS
-            | ANSWER_SESSION_PERMISSION
-            | ANSWER_SESSION_QUESTION
-            | WAIT_PROJECT_NOTIFICATIONS
-            | READ_PROJECT_NOTIFICATIONS
-    ) || is_project_home_git_tool(name)
-}
-
-/// The [`TARGET_DAEMON_INSTANCE_ID`] property every target tool's schema carries.
-pub(crate) fn target_host_property() -> Value {
-    json!({
-        "type": "string",
-        "description": "The host the session runs on, as ListProjectSessions reports it in its daemon_instance_id; empty for this host."
-    })
-}
+pub(crate) use crate::project_home_target_host::target_host_property;
+pub use crate::project_home_target_host::{
+    is_project_home_target_tool, target_daemon_instance_id, TARGET_DAEMON_INSTANCE_ID,
+};
 
 /// What the tools need from the daemon.
 ///
@@ -378,87 +185,8 @@ pub trait ProjectHomePort: Send + Sync {
     ) -> anyhow::Result<crate::project_home_disk_refresh::RefreshQueued>;
 }
 
-/// The project-home tools' definitions, as a client registers them before the daemon is asked:
-/// `StartSession`'s schema names no host or recipe choices
-/// ([`start_session_schema_without_choices`]).
-pub fn project_home_tool_defs() -> Vec<ToolDef> {
-    project_home_tool_defs_with(start_session_schema_without_choices())
-}
-
-fn project_home_tool_defs_with(start_schema: Value) -> Vec<ToolDef> {
-    let mut defs = vec![
-        tool_def(
-            LIST_PROJECT_SESSIONS,
-            "List the other sessions of this project on every host, with their host, worktree, activity and status. A host that does not answer is named in unreachable_hosts.",
-            json!({ "type": "object", "properties": {}, "additionalProperties": false }),
-        ),
-        tool_def(
-            START_SESSION,
-            "Start a session in this project, with any option the New-session form offers, on this host or another eligible one. It is recorded as started by this project-home session on the host that holds it. It returns at once with start_id, task_id and daemon_instance_id: poll the start with GetSessionStart, stop it with CancelSessionStart. A start the form would refuse outright (a CLI session without a model, a branch another session owns) is refused now, naming why. A start whose session type emits no progress (tool, sandboxed and stack-child starts) reads running until its outcome.",
-            start_schema,
-        ),
-        tool_def(
-            GET_SESSION_START,
-            "Read a start by start_id: its state (running, succeeded, failed or cancelled), the step it is in and that step's status, the clone's progress, and once it succeeded its session_id, branch and worktree, or once it failed or was cancelled, why.",
-            json!({
-                "type": "object",
-                "properties": { "start_id": { "type": "string" } },
-                "required": ["start_id"]
-            }),
-        ),
-        tool_def(
-            CANCEL_SESSION_START,
-            "Cancel a start by start_id while it is running, on whichever host runs it. It returns at once; the start reads cancelled once it has stopped, and a session it had already created is removed.",
-            json!({
-                "type": "object",
-                "properties": { "start_id": { "type": "string" } },
-                "required": ["start_id"]
-            }),
-        ),
-        tool_def(
-            READ_SESSION_WORKTREE,
-            "Read a file, or list a directory, in another session's worktree of this project.",
-            json!({
-                "type": "object",
-                "properties": {
-                    "session_id": { "type": "string" },
-                    "path": { "type": "string", "description": "Relative to the worktree root; empty for the root." },
-                    TARGET_DAEMON_INSTANCE_ID: target_host_property()
-                },
-                "required": ["session_id"]
-            }),
-        ),
-        tool_def(
-            DIFF_SESSION_WORKTREE,
-            "Diff another session's worktree of this project against its base, including uncommitted and untracked files.",
-            json!({
-                "type": "object",
-                "properties": {
-                    "session_id": { "type": "string" },
-                    TARGET_DAEMON_INSTANCE_ID: target_host_property()
-                },
-                "required": ["session_id"]
-            }),
-        ),
-    ];
-    defs.push(start_options_tool_def());
-    defs.extend(worktree_tool_defs());
-    defs.extend(session_follow_tool_defs());
-    defs.extend(project_home_terminal_tool_defs());
-    defs.extend(project_home_answer_tool_defs());
-    defs.extend(project_home_inbox_tool_defs());
-    defs.extend(terminate_session_tool_def());
-    defs.extend(refresh_worktree_disk_usage_tool_def());
-    defs
-}
-
-pub(crate) fn tool_def(name: &str, description: &str, schema: Value) -> ToolDef {
-    ToolDef {
-        name: name.to_string(),
-        description: description.to_string(),
-        input_schema_json: schema.to_string(),
-    }
-}
+pub use crate::project_home_catalogue::project_home_tool_defs;
+pub(crate) use crate::project_home_catalogue::tool_def;
 
 /// Run one of the project-home tools for `home`: the four here, or the seven git tools.
 ///

@@ -87,6 +87,9 @@ pub(crate) struct ProjectHomeHost {
     /// `WaitProjectNotifications` and `ReadProjectNotifications` read (`#home-inbox` 7/8). `None`
     /// on a host with none installed.
     pub(crate) notification_log: Option<Arc<ProjectNotificationLog>>,
+    /// This host's activity surface, which `NotifyOperator` publishes through in process
+    /// (`#home-inbox` 11/11).
+    pub(crate) activity: Arc<tddy_session_lifecycle::connection_service::PeerRoutedActivity>,
 }
 
 impl ExecToolRpcHandler {
@@ -123,6 +126,7 @@ impl ExecToolRpcHandler {
                 leases: Arc::new(home_terminal_leases::HomeTerminalLeases::default()),
                 pending_answers: host.pending_answers(),
                 notification_log: host.project_notification_log(),
+                activity: Arc::new(host.activity_service()),
             },
         }
     }

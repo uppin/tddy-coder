@@ -29,7 +29,9 @@ use tddy_service::proto::session::{
 };
 use tddy_service::proto::tasks::{CancelTaskRequest, CancelTaskResponse};
 use tddy_session_activity::project_notification_log::ProjectNotificationLog;
-use tddy_session_activity::session_notifications::SessionNotificationBus;
+use tddy_session_activity::session_notifications::{
+    RecordingSessionNotificationSubscriber, SessionNotificationBus,
+};
 use tddy_session_lifecycle::connection_service::DaemonSessionHost;
 use tddy_session_lifecycle::peer_routing::PeerRouting;
 use tddy_session_lifecycle::test_util::{test_config, TEST_TOKEN, TEST_USER};
@@ -528,6 +530,22 @@ pub fn a_host_logging_notifications(
     });
     let bus = bus.lock().unwrap().take().expect("the bus was installed");
     (host, bus)
+}
+
+/// [`a_host`], whose daemon's notification bus records everything published on it
+/// (`#home-inbox` 11/11): what an agent's `NotifyOperator` reached.
+pub fn a_host_recording_notifications(
+    instance_id: &str,
+    peers: &Arc<InProcessPeers>,
+) -> (Host, Arc<RecordingSessionNotificationSubscriber>) {
+    let recorded = Arc::new(RecordingSessionNotificationSubscriber::new());
+    let subscriber = Arc::clone(&recorded);
+    let host = host_built_with(instance_id, peers, test_config(), move |host, _sessions| {
+        host.with_session_notification_bus(Arc::new(
+            SessionNotificationBus::new().with_subscriber(subscriber),
+        ))
+    });
+    (host, recorded)
 }
 
 fn host_built_with(

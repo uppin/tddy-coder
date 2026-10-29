@@ -34,7 +34,7 @@ list, chain-parent buttons — still use the short-id label. Unifying those is a
 | `ATTENTION_REQUIRED` | `WaitingForInput`, `Done` | ✓ (unchanged copy) | yellow |
 | `ATTENTION_REQUIRED` | a claude-cli permission prompt or `AskUserQuestion` (source `PENDING_QUESTION`, carrying `question`) | ✓ *(names the tool, or lists the options)* | yellow |
 | `ATTENTION_REQUIRED` | a presenter elicitation | ✓ *(via its own keyboard surface)* | yellow |
-| `ATTENTION_REQUIRED` | the agent itself, with `tddy-tools notify` (source `AGENT`) | ✓ *(rendered markdown, see below)* | yellow |
+| `ATTENTION_REQUIRED` | the agent itself, with `tddy-tools notify` or the `NotifyOperator` exec tool (source `AGENT`) | ✓ *(rendered markdown, see below)* | yellow |
 | `ACTIVITY` | `Started` / `Running` / `ExecutingTool`, an agent tool call, a workflow state change | — | blinking green |
 
 **One notification per question.** A report that records a question publishes one
@@ -78,8 +78,27 @@ tddy-tools notify "Parallel run finished" --body "4 done, **1 blocked**" --level
   route `#/sessions/<id>?host=<daemon instance>`.
 - **Never de-duplicated.** Two identical agent notifications are two events, and both are delivered.
 
-Who cannot notify: a session with a standing role (the project-home main has no shell, so it is not
-given the environment) and a sandboxed claude-cli session (it has no hooks and no hook token).
+### A session with no shell: `NotifyOperator`
+
+A session with a standing role — the project-home main — has no shell to run the CLI in, and its
+launch exports no notify environment. It is offered the `NotifyOperator` exec tool instead
+(`title`, `body_markdown`, `level?`, `sound?`, with the CLI's limits and levels), and its role prompt
+names the tool rather than the command:
+
+- **The same notification.** The daemon publishes it through
+  `ActivityService.ReportOperatorNotification`, in process, so it is the same `AGENT` notification
+  the CLI raises, authenticated the same way.
+- **The credential stays in the daemon.** The exec-tool path has already authenticated the caller by
+  its session token and read its role from its own record; the daemon then presents the `hook_token`
+  that session's `.session.yaml` records. The tool takes no session argument, so a session notifies
+  as itself only, and the token is never in the tool's answer or a log.
+- **Refused, naming why.** A main that is not claude-cli or cursor-cli, or records no hook token, is
+  refused with `NotifyOperator: this session has no hook token (only claude-cli and cursor-cli
+  sessions can notify)`; nothing is published. A session without the role is not offered the tool.
+- See [Project concept § Project-home tools](project-concept.md#project-home-tools).
+
+Who cannot notify: a sandboxed claude-cli session (it has no hooks and no hook token), and a
+standing-role main that is not claude-cli or cursor-cli.
 
 ## The drawer indicator
 

@@ -118,6 +118,7 @@ mod tests {
                 "mcp__tddy-tools__ReadProjectNotifications",
                 "mcp__tddy-tools__TerminateSession",
                 "mcp__tddy-tools__RefreshWorktreeDiskUsage",
+                "mcp__tddy-tools__NotifyOperator",
                 "mcp__tddy-tools__CommitSessionWorktree",
                 "mcp__tddy-tools__PushSessionBranch",
                 "mcp__tddy-tools__RebaseSessionBranch",

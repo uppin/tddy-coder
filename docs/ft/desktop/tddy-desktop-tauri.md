@@ -376,13 +376,16 @@ application runs as.
 - it is about a pending question (`request_id`) whose notice was the last one shown for that
   session, however the later report is worded.
 
+**A click opens the session.** Clicking a notification brings the dashboard window to the front
+and opens that session, `#/sessions/<id>?host=<instance>`. Each notification carries its session id
+and host as its payload; a click on anything else — an action that is not a click on the
+notification itself, or a notification whose payload names no session — opens nothing. The page
+opened is always on the dashboard's own origin. This needs Tauri 2.12 (2.12.5) and
+`tauri-plugin-notification` 2.5 or later (2.8.0 is locked), the first line that reports desktop
+clicks.
+
 **Known limits.**
 
-- **Clicks are not delivered.** The click handler, which brings the window to the front and opens
-  `#/sessions/<id>?host=<instance>`, exists but nothing calls it.
-  `tauri-plugin-notification` 2.4, the last line that builds against Tauri 2.11, reports no
-  desktop clicks. See
-  [the TODO](../../dev/todo/2026-10-26-desktop-notification-click-needs-tauri-2-12.md).
 - **Permission is invisible.** The plugin always answers "granted" on desktop. macOS asks on the
   first notification and silently drops notifications the operator refused.
 - Windows, notification actions (reply, approve) and notifications from peer daemons are out of

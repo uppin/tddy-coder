@@ -14,7 +14,8 @@ use support::{
 };
 use tauri::Url;
 use tddy_desktop::native_notifications::{
-    desktop_notice_for, DesktopNotice, SessionRoute, BODY_LIMIT,
+    desktop_notice_for, session_route_from_tap, DesktopNotice, SessionRoute, TappedNotification,
+    BODY_LIMIT, EXTRA_HOST, EXTRA_SESSION_ID, TAP_ACTION_ID,
 };
 
 // ---------------------------------------------------------------------------
@@ -340,4 +341,109 @@ async fn a_focused_window_that_shows_another_session_does_not_suppress_this_one(
 
     // Then the operator is told about it
     desktop.shown().assert_sessions(&[THE_SESSION]);
+}
+
+// ---------------------------------------------------------------------------
+// The tap payload — SessionRoute::tap_extra and session_route_from_tap (`#home-inbox` 11/11)
+// ---------------------------------------------------------------------------
+
+/// A session on another host, whose ids carry characters a query string encodes.
+fn a_route_with_awkward_ids() -> SessionRoute {
+    SessionRoute {
+        session_id: THE_SESSION.to_string(),
+        host: "studio mac & co".to_string(),
+    }
+}
+
+fn a_tap_carrying(extra: &[(&str, &str)]) -> TappedNotification {
+    TappedNotification {
+        action_id: TAP_ACTION_ID.to_string(),
+        extra: extra
+            .iter()
+            .map(|(key, value)| (key.to_string(), value.to_string()))
+            .collect(),
+    }
+}
+
+#[test]
+fn a_notices_tap_payload_names_its_session_and_host_under_the_desktops_keys() {
+    // Given the route a notice is shown for
+    let route = route_to(THE_SESSION);
+
+    // When its tap payload is built
+    let extra = route.tap_extra();
+
+    // Then it carries exactly the session id and the host, under the desktop's own keys
+    assert_eq!(
+        extra,
+        [
+            (EXTRA_SESSION_ID.to_string(), THE_SESSION.to_string()),
+            (EXTRA_HOST.to_string(), THIS_DESKTOP.to_string()),
+        ]
+        .into_iter()
+        .collect(),
+        "the tap payload"
+    );
+}
+
+#[test]
+fn a_route_survives_the_round_trip_through_its_tap_payload_unencoded() {
+    // Given a route whose host has a space and an ampersand
+    let route = a_route_with_awkward_ids();
+
+    // When a tap carries back the payload it was shown with
+    let tapped = TappedNotification {
+        action_id: TAP_ACTION_ID.to_string(),
+        extra: route.tap_extra(),
+    };
+
+    // Then the same route comes back, the ids as they were — encoding is the route fragment's job
+    assert_eq!(session_route_from_tap(&tapped), Some(route));
+}
+
+#[test]
+fn a_tap_on_a_notice_missing_either_key_or_with_an_empty_one_opens_nothing() {
+    // Given taps whose payload lacks the host, lacks the session, or names an empty session
+    let no_host = a_tap_carrying(&[(EXTRA_SESSION_ID, THE_SESSION)]);
+    let no_session = a_tap_carrying(&[(EXTRA_HOST, THIS_DESKTOP)]);
+    let empty_session = a_tap_carrying(&[(EXTRA_SESSION_ID, ""), (EXTRA_HOST, THIS_DESKTOP)]);
+
+    // When each is read
+    // Then none names a route
+    assert_eq!(session_route_from_tap(&no_host), None, "no host");
+    assert_eq!(session_route_from_tap(&no_session), None, "no session");
+    assert_eq!(
+        session_route_from_tap(&empty_session),
+        None,
+        "an empty session"
+    );
+}
+
+#[test]
+fn an_action_other_than_a_tap_opens_nothing_even_on_a_desktop_notice() {
+    // Given an action button pressed on a notice the desktop showed
+    let pressed = TappedNotification {
+        action_id: "snooze".to_string(),
+        extra: route_to(THE_SESSION).tap_extra(),
+    };
+
+    // When it is read
+    // Then it names no route: only a click on the notice itself opens its session
+    assert_eq!(session_route_from_tap(&pressed), None);
+}
+
+#[test]
+fn a_tap_payload_with_keys_of_its_own_still_maps_to_its_route() {
+    // Given a tap whose payload carries a key the desktop did not write, beside its own
+    let mut tapped = TappedNotification {
+        action_id: TAP_ACTION_ID.to_string(),
+        extra: route_to(THE_SESSION).tap_extra(),
+    };
+    tapped
+        .extra
+        .insert("platform_key".to_string(), "x".to_string());
+
+    // When it is read
+    // Then the extra key is ignored
+    assert_eq!(session_route_from_tap(&tapped), Some(route_to(THE_SESSION)));
 }
