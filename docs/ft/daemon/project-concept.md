@@ -255,6 +255,8 @@ and served the four start tools and `AnswerSessionPermission`, for its own proje
 | `ClaimSessionTerminal` | `session_id`, `daemon_instance_id?` | `{holder}`: takes the session's terminal control lease for the screen `project-home:<home session id>`, stealing it from whoever holds it, as a browser's claim with `steal` does — the change is broadcast, so an attached browser drops to watch-only and names the new holder. The control token stays on the host that owns the terminal and is never returned. There is no release: a person takes control back by claiming it in the browser. See [Typing into a terminal](#typing-into-a-terminal) |
 | `SendSessionKeys` | `session_id`, `daemon_instance_id?`, `text?`, `keys?` | `{sent_bytes}`: types `text`, then each named key in order, into the session's **main** terminal while this home session holds its lease. Refused, naming the holder, when it does not, and nothing is sent. See [Typing into a terminal](#typing-into-a-terminal) |
 | `AnswerSessionPermission` | `session_id`, `request_id`, `option_id` or `cancelled`, `message?`, `daemon_instance_id?` | `{session_id, request_id, answered_by, option_id, cancelled, at_unix_ms}`: answers the Claude permission prompt a session this caller started is waiting on, as `ReadSessionActivity`'s `pending_question` shows it. `option_id` is `allow_once`, `reject_once` (with `message` saying why), or `allow_always` when Claude suggested a rule; `cancelled` leaves the prompt to the person at its terminal. Only the target's orchestrator may answer, and the first answer wins. See [Answering a permission prompt](#answering-a-permission-prompt) |
+| `WaitProjectNotifications` | `cursor?`, `timeout_ms?` (at most 20000, the default), `daemon_instance_id?` | `{items, next_cursor, has_more, timed_out, lost?}`: returns at once when the project's notification log holds records after `cursor`, otherwise holds until one arrives or `timeout_ms` passes. Without a cursor it waits for the next new record. See [Waiting for notifications](#waiting-for-notifications) |
+| `ReadProjectNotifications` | `cursor?`, `limit?` (50 by default, at most 200), `daemon_instance_id?` | `{items, next_cursor, has_more, clamped_to?, lost?}`: up to `limit` records after `cursor`, oldest first, without waiting; without a cursor, the newest page. See [Waiting for notifications](#waiting-for-notifications) |
 
 - **Targets.** A target is a session id in the caller's project, with a worktree, on the host the
   optional `daemon_instance_id` argument names (as `ListProjectSessions` reports it; empty or absent
@@ -271,7 +273,7 @@ and served the four start tools and `AnswerSessionPermission`, for its own proje
   limitation:** the name tie-break mirrors the browser's `localeCompare` for ASCII names (case-insensitive,
   lowercase first on a case-only difference, punctuation before digits before letters); for non-ASCII
   names it is an approximation and may order equal-sized worktrees differently from the screen.
-- **Across hosts.** A target tool call (read, diff, the two worktree tools, `DescribeSessionStartOptions`, the two follow tools, `TerminateSession`, `RefreshWorktreeDiskUsage`, `ReadSessionTerminal`, `ClaimSessionTerminal`, `SendSessionKeys`, `AnswerSessionPermission`, every git tool) naming another host is
+- **Across hosts.** A target tool call (read, diff, the two worktree tools, `DescribeSessionStartOptions`, the two follow tools, `TerminateSession`, `RefreshWorktreeDiskUsage`, `ReadSessionTerminal`, `ClaimSessionTerminal`, `SendSessionKeys`, `AnswerSessionPermission`, the two notification tools, every git tool) naming another host is
   forwarded whole to that host over the peer forward and runs there unchanged: that host's path
   containment, activity gate and push identity apply. The host receiving it does not hold the calling
   session, so it confirms the caller **at the daemon that owns it**: it asks every other eligible
@@ -478,6 +480,33 @@ its `PermissionRequest` hook open for that orchestrator's decision, for at most
 - **Known gap.** A conversation spawner may answer but is not served `ReadSessionActivity`, so it
   cannot read the `request_id`; its claude-cli children wait out the deadline
   ([TODO](../../dev/todo/2026-10-29-conversation-spawner-cannot-read-its-childs-permission-request.md)).
+
+### Waiting for notifications
+
+`WaitProjectNotifications` and `ReadProjectNotifications` tell the project-home agent what happened in
+its project without polling: a session finished, waits for input, asks a question or a permission, or
+an agent wrote it a notification.
+
+- **The log.** Every `ATTENTION_REQUIRED` notification of a project's sessions
+  ([Session notifications](session-notifications.md#the-project-notification-log)) is appended to
+  that project's log on the daemon that published it. A record carries `seq`, `session_id`, `label`,
+  `kind`, `source`, `text`, the agent's own notification (`agent`) and the question with its
+  `request_id` (`question`), so `AnswerSessionPermission` can act on it, and `at_unix_ms`.
+- **The cursor** is the decimal `seq` of the last record returned. Passing `next_cursor` back returns
+  only what came after it, and it survives a daemon restart. The `next_cursor` of an empty page is
+  the log's newest `seq` (`"0"` for a log that never held one), so polling from it neither repeats
+  nor skips a record. A cursor that is not a decimal `seq` is refused naming it.
+- **The window** is the newest 1000 records per project. A cursor older than it answers
+  `lost: N`, the records evicted before they were read; it is never silently trimmed.
+- **A wait** is capped at 20 s, the remote-call clamp, also on a call relayed to another host. A
+  timeout answers `timed_out: true` and the cursor to wait from again. A home agent waiting in the
+  tool is inside a tool call, so it reports `Running` and [auto-stop](project-home-auto-stop.md)
+  does not stop it mid-wait.
+- **Scope.** Records are those of the caller's operating-system user, never the home session's own.
+  One host per call: `daemon_instance_id` forwards it to that host's log, and there is no merged view
+  across hosts.
+- **Tool guidance.** The descriptions tell the agent to wait with the last cursor, that a timeout means
+  nothing happened, and never to wait in a loop with nothing to decide.
 
 ### Following a session
 

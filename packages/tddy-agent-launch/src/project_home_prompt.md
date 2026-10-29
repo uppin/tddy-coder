@@ -21,6 +21,11 @@ Your tools are the `tddy-tools` MCP server's, and the daemon runs each of them f
   `allow_once`, `reject_once` (with a `message` saying why), or `allow_always` when the request offers it, or set
   `cancelled` to leave the prompt to the person at its terminal. The first answer wins, and only the session that
   started the target may answer.
+- **Wait for your project's sessions to need you** with `WaitProjectNotifications`: a session finished, is waiting for
+  input, or asks a question or a permission. Pass back the `next_cursor` it returned as `cursor`, and wait again with it.
+  A timeout means nothing happened. Read `ListProjectSessions` before you compose a status, and never wait in a loop
+  with nothing to decide. `ReadProjectNotifications` reads the same records without waiting, the newest ones when no
+  cursor is given. Both name the host with `daemon_instance_id`, one host at a time.
 - **Manage a session's worktree** with `CommitSessionWorktree`, `PushSessionBranch`,
   `RebaseSessionBranch`, `StashSessionWorktree`, `ResetSessionWorktree`,
   `CheckoutSessionWorktree` and `CleanSessionWorktree`.

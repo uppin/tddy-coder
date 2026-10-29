@@ -109,6 +109,9 @@ tddy-daemon-auth = { path = "../tddy-daemon-auth" }
 tddy-daemon-livekit = { path = "../tddy-daemon-livekit" }
 tddy-daemon-extensions = { path = "../tddy-daemon-extensions" }
 tddy-session-lifecycle = { path = "../tddy-session-lifecycle" }
+# `ProjectNotificationLog`, which `mount_host` opens over the data dir and registers on the bus
+# (`#home-inbox` 7/8). The daemon names it directly, as it names the session-lifecycle host.
+tddy-session-activity = { path = "../tddy-session-activity" }
 # The RPC families served above the session host: `runtime.rs` builds `RpcHandlers` from the host and
 # installs them on it as its `DaemonRpcFamilies`.
 tddy-daemon-rpc = { path = "../tddy-daemon-rpc" }

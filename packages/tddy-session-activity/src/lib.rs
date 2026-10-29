@@ -26,6 +26,7 @@ mod pending_question_record;
 pub mod presenter_intent_client;
 pub mod presenter_observer_spawn;
 pub mod presenter_observer_task;
+pub mod project_notification_log;
 pub mod remote_git_pack_execution;
 pub mod service;
 pub mod session_deletion;

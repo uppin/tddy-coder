@@ -40,6 +40,9 @@ prost = "0.13"
 # A tool call's `input` and `result` are the JSON the hook reported, carried through unparsed on a
 # `running` row (`Value::Null` — the wire's "unset") and parsed on the terminal one.
 serde_json = "1"
+# The project notification log's JSON-lines records (`#home-inbox` 7/8): the file form and the answer
+# form of a record are one serde DTO, kept private to `project_notification_log`.
+serde = { version = "1", features = ["derive"] }
 # `ReportAgentActivity` mints the `call_id` a PreToolUse row is paired to its PostToolUse row by.
 uuid = { version = "1", features = ["v4", "v7"] }
 chrono = { version = "0.4", default-features = false, features = ["clock"] }
@@ -49,6 +52,10 @@ tddy-projects = { path = "../tddy-projects" }
 # permission prompt (`#home-inbox` 6/8). Already in this crate's tree through tddy-daemon-sandbox.
 tddy-discovery = { path = "../tddy-discovery" }
 tddy-session-files = { path = "../tddy-session-files" }
+# `FollowPage`, the paging every follow tool answers in (`#start-parity` 6/9), which the project
+# notification log pages its records with (`#home-inbox` 7/8). Already in this crate's tree through
+# tddy-daemon-sandbox; tool-engine depends on nothing that depends on this crate.
+tddy-tool-engine = { path = "../tddy-tool-engine" }
 tddy-daemon-sandbox = { path = "../tddy-daemon-sandbox" }
 # `SessionRooms`: the port deleting a session closes its room through.
 tddy-daemon-extensions = { path = "../tddy-daemon-extensions" }

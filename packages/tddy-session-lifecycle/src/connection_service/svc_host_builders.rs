@@ -113,6 +113,7 @@ impl DaemonSessionHost {
             // No bus until one is installed with `with_session_notification_bus`: the subscribers
             // are the daemon's to choose, and this service names none of them.
             session_notification_bus: None,
+            project_notification_log: None,
             sandbox_rpc_bridge: Arc::new(std::sync::OnceLock::new()),
             // Installed by the composition root once the handlers above this crate are built
             // from this host (`with_rpc_families`).

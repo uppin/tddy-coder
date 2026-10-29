@@ -48,7 +48,10 @@ impl BuildContext {
         }
     }
 
-    pub(super) async fn open_shared(&self) -> anyhow::Result<Shared> {
+    pub(super) async fn open_shared(
+        &self,
+        sessions_base_resolver: &tddy_daemon_kernel::SessionsBaseResolver,
+    ) -> anyhow::Result<Shared> {
         let config = &self.config;
         let tddy_data_dir = &self.identity.keys.tddy_data_dir;
         // This daemon's model registry: the providers it talks to, their models, and the
@@ -65,6 +68,15 @@ impl BuildContext {
             .await?
             .reserving_agent_ids(config.allowed_agents().iter().map(|a| a.id.clone())),
         );
+        // The project notification log the project-home inbox tools read: every attention
+        // notification of a project's sessions, kept across restarts. Opened before the bus, which
+        // it is registered on, so nothing published after the bus is assembled goes unrecorded.
+        let project_notification_log = Arc::new(
+            tddy_session_activity::project_notification_log::ProjectNotificationLog::open(
+                tddy_data_dir,
+                Arc::clone(sessions_base_resolver),
+            )?,
+        );
         // The daemon's session-notification bus: the operator channel (Telegram's, on a daemon
         // that has one) takes the attention-worthy events from the activity-status path, and
         // `StreamSessionNotifications` relays every event to the browsers driving the drawer's
@@ -80,6 +92,7 @@ impl BuildContext {
             let bus = bus.with_subscriber(Arc::new(
                 tddy_session_lifecycle::session_notification_subscribers::SessionNotificationStreamSubscriber::new(),
             ));
+            let bus = bus.with_subscriber(Arc::clone(&project_notification_log));
             // The subscribers an embedding host registered, after both built-ins in registration order.
             let bus = self
                 .options
@@ -99,6 +112,7 @@ impl BuildContext {
         Ok(Shared {
             model_registry,
             session_notification_bus,
+            project_notification_log,
             host_prompts,
         })
     }
@@ -275,6 +289,7 @@ impl BuildContext {
             .with_approval_routes(Arc::clone(&approval_routes)),
         ))
         .with_session_notification_bus(session_notification_bus)
+        .with_project_notification_log(Arc::clone(&shared.project_notification_log))
         .with_session_tokens(session_tokens.clone())
         .with_askpass_endpoint(askpass_endpoint)
         .with_approval_routes(approval_routes)

@@ -38,6 +38,7 @@ use tddy_service::proto::exec_tools::{ExecuteToolRequest, ExecuteToolResponse};
 use tddy_service::proto::session::{ListSessionsRequest, Signal};
 use tddy_session_activity::answers::{answer_permission, AnswerContext, AnsweringCaller};
 use tddy_session_activity::pending_answers::PendingAnswers;
+use tddy_session_activity::project_notification_log::ProjectNotificationLog;
 use tddy_session_activity::session_reader::{list_sessions_in_dir, SessionEntry};
 use tddy_session_lifecycle::connection_service::launch_ports::LaunchSessions;
 use tddy_session_lifecycle::connection_service::session_acting_identity::SessionAccountAccess;
@@ -53,6 +54,9 @@ use tddy_tool_engine::project_home_answer_tools::{
     execute_project_home_answer_tool, is_project_home_answer_tool, ProjectHomeAnswerPort,
 };
 use tddy_tool_engine::project_home_git_tools::is_project_home_git_tool;
+use tddy_tool_engine::project_home_inbox_tools::{
+    execute_project_home_inbox_tool, is_project_home_inbox_tool,
+};
 use tddy_tool_engine::project_home_terminal_tools::{
     execute_project_home_terminal_tool, is_project_home_terminal_tool, ProjectHomeTerminalPort,
 };
@@ -158,6 +162,7 @@ impl ExecToolRpcHandler {
             terminal_control: Arc::clone(&self.project_home_host.terminal_control),
             leases: Arc::clone(&self.project_home_host.leases),
             pending_answers: Arc::clone(&self.project_home_host.pending_answers),
+            notification_log: self.project_home_host.notification_log.clone(),
         })
     }
 
@@ -285,7 +290,9 @@ fn record_call(sessions_base: &Path, req: &ExecuteToolRequest, response: &Execut
 pub(super) struct DaemonProjectHome {
     launch: LaunchSessions,
     session_token: String,
-    os_user: String,
+    /// The OS user the caller's sessions belong to; the notification log is read for it
+    /// (`#home-inbox` 7/8).
+    pub(super) os_user: String,
     sessions_base: PathBuf,
     tddy_data_dir: PathBuf,
     /// Reads the signed-in person's vault for a target's GitHub identity, as a session start does.
@@ -319,6 +326,9 @@ pub(super) struct DaemonProjectHome {
     leases: Arc<HomeTerminalLeases>,
     /// The permission prompts this host's hooks hold open, which `AnswerSessionPermission` answers.
     pending_answers: Arc<PendingAnswers>,
+    /// This host's project notification log, which the two inbox tools read (`#home-inbox` 7/8);
+    /// `None` on a host with none installed.
+    pub(super) notification_log: Option<Arc<ProjectNotificationLog>>,
 }
 
 /// One session as the target resolver reads it: its `.session.yaml`, its changeset's branch, and the
@@ -338,6 +348,8 @@ impl DaemonProjectHome {
     ) -> ExecuteToolResponse {
         let outcome = if is_project_home_answer_tool(&req.tool_name) {
             execute_project_home_answer_tool(self, home, &req.tool_name, &req.args_json).await
+        } else if is_project_home_inbox_tool(&req.tool_name) {
+            execute_project_home_inbox_tool(self, home, &req.tool_name, &req.args_json).await
         } else if is_project_home_terminal_tool(&req.tool_name) {
             execute_project_home_terminal_tool(self, home, &req.tool_name, &req.args_json).await
         } else {

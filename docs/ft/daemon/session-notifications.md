@@ -123,6 +123,21 @@ two built-in subscribers, in registration order. Tddy Desktop uses this for
 [native notifications](../desktop/tddy-desktop-tauri.md#native-notifications). The `tddy-daemon`
 binary registers none.
 
+## The project notification log
+
+The stream is live-only; the **project notification log** is what a project-home agent reads instead
+([Project concept § Waiting for notifications](project-concept.md#waiting-for-notifications)).
+
+- A bus subscriber on every daemon appends each `ATTENTION_REQUIRED` notification to the log of the
+  project its session belongs to, read from the session's record. A session of no project is skipped;
+  one whose owner or record cannot be resolved is a delivery failure the bus logs.
+- Records are numbered per project from 1 and never reused. The newest 1000 are kept per project.
+- The log is persisted as JSON lines at `<data dir>/projects/<project_id>/notifications.jsonl` and
+  replayed when the daemon starts, so numbering continues across a restart. Once the file holds twice
+  the window it is rewritten to the window: written to a temporary file, flushed, and renamed over it.
+  A damaged line is skipped with a warning; a file that cannot be read stops the daemon's start, since
+  starting over it could reuse numbers.
+
 ## Guarantees
 
 - A notification that cannot be delivered is logged, never propagated: reporting a hook still

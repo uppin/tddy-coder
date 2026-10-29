@@ -219,6 +219,11 @@ pub struct DaemonSessionHost {
     /// nothing is listening: publishing is skipped, and `StreamSessionNotifications` has no feed to
     /// hand a client.
     session_notification_bus: Option<Arc<crate::session_notifications::SessionNotificationBus>>,
+    /// The project notification log the daemon registered on that bus, which the project-home
+    /// `WaitProjectNotifications` and `ReadProjectNotifications` tools read (`#home-inbox` 7/8).
+    /// `None` on a host with none installed, whose tools then refuse.
+    project_notification_log:
+        Option<Arc<tddy_session_activity::project_notification_log::ProjectNotificationLog>>,
     /// This host's own handle, installed once the top-level `Arc` exists (`runtime::build`), from
     /// which each jail's sandbox-IPC bridge is built. Weak: it is a field of the host itself.
     sandbox_rpc_bridge: Arc<std::sync::OnceLock<std::sync::Weak<DaemonSessionHost>>>,
@@ -540,6 +545,7 @@ mod svc_conversation_worktree_wiring;
 mod svc_host_builders;
 mod svc_list_exec_tools_wiring;
 pub use svc_list_exec_tools_wiring::start_choices;
+mod svc_project_notification_log_wiring;
 mod svc_reachable_sessions;
 mod svc_session_identity_wiring;
 mod svc_worktree_observer_wiring;

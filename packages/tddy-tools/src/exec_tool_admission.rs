@@ -143,6 +143,8 @@ mod tests {
                 "ClaimSessionTerminal",
                 "SendSessionKeys",
                 "AnswerSessionPermission",
+                "WaitProjectNotifications",
+                "ReadProjectNotifications",
                 "TerminateSession",
                 "CommitSessionWorktree",
                 "PushSessionBranch",

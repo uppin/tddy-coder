@@ -108,6 +108,29 @@ all it sends **nothing** rather than broadcasting.
 that `StreamSessionNotifications` subscribes to. Live-only: a replayed backlog would raise
 indicators for turns that finished while the tab was closed.
 
+**`ProjectNotificationLog`** (`project_notification_log`, `#home-inbox` 7/8) wants
+`AttentionRequired` and appends it to the log of the session's project, which
+`WaitProjectNotifications` and `ReadProjectNotifications` read. `tddy-daemon`'s `mount_host::open_shared`
+opens it over the data dir before the bus is assembled and installs the same `Arc` on the session host
+(`DaemonSessionHost::with_project_notification_log`).
+
+- **Concurrency.** One `Mutex<ProjectState>` per project is held across the append (and a compaction),
+  so the file's lines are in `seq` order and a record is in the window only once it is on disk. A
+  per-project `tokio::sync::Notify` is woken with `notify_waiters` after the lock is released; a wait
+  creates and `enable`s its `Notified` before it reads the window, so a record appended in between
+  always wakes it.
+- **Cursor of an empty page** is the newest `seq`, a deliberate divergence from the follow tools'
+  "cursor unchanged": an unchanged empty cursor would let a wait "from now" skip what was published
+  between two polls.
+- **Storage** (`project_notification_log/storage.rs`): one serde DTO is both the file line and the
+  tool's answer object. Compaction at twice the window writes a sibling `.jsonl.tmp`, `sync_all`s it,
+  renames it over the file and syncs the directory. A torn last line (a crash mid-append) is ended
+  with a line break on replay, so the next append does not run on into it.
+- **Errors.** A session of no project is skipped with `Ok`; an unresolvable OS user or an unreadable
+  record is an `Err` the bus logs. A failed compaction is logged and retried on the next append.
+- **Dependencies.** The paging (`FollowPage`, `page_size`, `parse_cursor`) and `MAX_WAIT_MS` are
+  `tddy-tool-engine`'s; the edge is acyclic, since tool-engine's tree holds no session-activity.
+
 ## Publish sites
 
 | Site | Source |
@@ -155,6 +178,10 @@ Telegram surface is unaffected, and web-started and resumed sessions publish nor
 | `telegram_notification_subscriber_unit` | `tddy-telegram-control` | the Telegram channel's interest filter, tracked-first routing, dedupe |
 | `telegram_operator_channel_acceptance` | `tddy-telegram-control` | the Telegram channel's port contract: its id, what it wants and declines, delivery to the tracked chat, one send per unchanged alert |
 | `session_notifications_acceptance` | `tddy-telegram-control` | the real `ReportSessionStatus` RPC reaching Telegram, including that neither the hook token nor the bot token reaches a notification |
+| `project_notification_log_acceptance` | `tddy-session-activity` | a wait returned by a record published after it began; timeouts and the 20 s cap; cursors across a restart; scoping by project, OS user and own session; `lost`; a question's id and content |
+| `project_notification_log_unit` | `tddy-session-activity` | `wants`, cursor parsing, the empty-page cursor, paging and clamping, `lost`, skipping a session of no project, an unknown session's delivery error |
+| `project_notification_log_storage` | `tddy-session-activity` | compaction past twice the window keeping `seq` and `lost` across a restart; a damaged line skipped; a torn last line not swallowing the next record |
+| `project_home_wait_acceptance` | `tddy-daemon-rpc` | the tool through the exec-tool handler: a home agent receiving a child's notification, a non-home caller refused |
 
 ⚠ The bus's classification, fan-out and stream are asserted from `tddy-session-lifecycle` and
 `tddy-telegram-control`, not from this crate. Recorded in

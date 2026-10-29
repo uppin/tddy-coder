@@ -89,7 +89,7 @@ pub struct ToolCallBodies {
 }
 
 /// The page size `limit` asks for, and the maximum it was clamped to when it asked for more.
-fn page_size(limit: Option<usize>) -> (usize, Option<usize>) {
+pub fn page_size(limit: Option<usize>) -> (usize, Option<usize>) {
     match limit {
         None | Some(0) => (FOLLOW_PAGE_DEFAULT, None),
         Some(n) if n > FOLLOW_PAGE_MAX => (FOLLOW_PAGE_MAX, Some(FOLLOW_PAGE_MAX)),
@@ -99,7 +99,7 @@ fn page_size(limit: Option<usize>) -> (usize, Option<usize>) {
 
 /// `cursor` as a position, or `None` for the start (empty). A cursor that is not a decimal position
 /// is refused: it is not something a page ever returned.
-fn parse_cursor(cursor: &str) -> Result<Option<u64>, String> {
+pub fn parse_cursor(cursor: &str) -> Result<Option<u64>, String> {
     let cursor = cursor.trim();
     if cursor.is_empty() {
         return Ok(None);
