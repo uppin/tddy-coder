@@ -20,14 +20,17 @@ use async_trait::async_trait;
 use tddy_rpc::{Request, Response, Status};
 use tddy_service::proto::activity::{
     AcpReplayFrame, ActivityService, AgentActivityDeltaChunk, AgentActivityDeltaRequest,
-    AgentActivityRecord, GetAcpReplayPageRequest, GetAcpReplayPageResponse,
-    GetAcpToolCallDetailRequest, GetAcpToolCallDetailResponse, ReportAgentActivityRequest,
-    ReportAgentActivityResponse, ReportOperatorNotificationRequest,
-    ReportOperatorNotificationResponse, ReportSessionStatusRequest, ReportSessionStatusResponse,
-    SessionNotificationEvent, StreamAcpReplayRequest, StreamSessionActivityRequest,
-    StreamSessionNotificationsRequest,
+    AgentActivityRecord, AwaitQuestionAnswerRequest, AwaitQuestionAnswerResponse,
+    GetAcpReplayPageRequest, GetAcpReplayPageResponse, GetAcpToolCallDetailRequest,
+    GetAcpToolCallDetailResponse, ReportAgentActivityRequest, ReportAgentActivityResponse,
+    ReportOperatorNotificationRequest, ReportOperatorNotificationResponse,
+    ReportSessionStatusRequest, ReportSessionStatusResponse, SessionNotificationEvent,
+    StreamAcpReplayRequest, StreamSessionActivityRequest, StreamSessionNotificationsRequest,
 };
-use tddy_session_activity::{ActivityPorts, ActivityServiceImpl, SessionLabels};
+use tddy_session_activity::orchestrator_presence::OrchestratorPresence;
+use tddy_session_activity::{ActivityPorts, ActivityServiceImpl, AnswerWaitPorts, SessionLabels};
+use tddy_terminal_rpc::bridge::MAIN_TERMINAL_ID;
+use tddy_terminal_rpc::session::TerminalSessionStore as _;
 use tddy_worktree_service::stream::MpscResultStream;
 
 use super::DaemonSessionHost;
@@ -73,7 +76,20 @@ impl DaemonSessionHost {
     pub fn activity_service(&self) -> PeerRoutedActivity {
         PeerRoutedActivity {
             connection: self.clone(),
-            local: ActivityServiceImpl::new(self.activity_ports()),
+            local: ActivityServiceImpl::new(self.activity_ports())
+                .with_question_answers(self.answer_wait_ports()),
+        }
+    }
+
+    /// What `AwaitQuestionAnswer` holds a hook with: this daemon's registry, its served terminals
+    /// as the orchestrator's presence, and `claude_cli.answer_wait_secs` (`#home-inbox` 6/8).
+    fn answer_wait_ports(&self) -> AnswerWaitPorts {
+        AnswerWaitPorts {
+            pending: self.pending_answers(),
+            presence: Arc::new(ServedTerminalPresence {
+                terminals: self.terminal_sessions(),
+            }),
+            wait: std::time::Duration::from_secs(self.config.claude_cli_answer_wait_secs()),
         }
     }
 
@@ -101,6 +117,22 @@ impl DaemonSessionHost {
                 &self.config,
             ),
         }
+    }
+}
+
+/// An orchestrator is present when this daemon serves its main terminal — the served terminal, not
+/// a pid, so a dead home whose pid was reused never makes a child wait.
+struct ServedTerminalPresence {
+    terminals: crate::terminal_session_adapter::DaemonTerminalSessionStore,
+}
+
+#[async_trait]
+impl OrchestratorPresence for ServedTerminalPresence {
+    async fn is_active(&self, orchestrator_session_id: &str) -> bool {
+        self.terminals
+            .get_terminal(orchestrator_session_id, MAIN_TERMINAL_ID)
+            .await
+            .is_some()
     }
 }
 
@@ -224,6 +256,15 @@ impl ActivityService for PeerRoutedActivity {
         request: Request<ReportAgentActivityRequest>,
     ) -> Result<Response<ReportAgentActivityResponse>, Status> {
         self.local.report_agent_activity(request).await
+    }
+
+    /// Not routed, for the reason `report_session_status` is not: the hook waits on the host that
+    /// holds its session.
+    async fn await_question_answer(
+        &self,
+        request: Request<AwaitQuestionAnswerRequest>,
+    ) -> Result<Response<AwaitQuestionAnswerResponse>, Status> {
+        self.local.await_question_answer(request).await
     }
 
     /// Not routed, for the reason `report_session_status` is not: `tddy-tools notify` runs inside

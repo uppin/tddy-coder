@@ -44,7 +44,20 @@ pub struct HookCommandParams<'a> {
     /// returns, and every report POSTed to it is answered with a 404 the hook swallows. When set,
     /// the hook reports over this socket instead of `daemon_url`.
     pub daemon_socket: Option<&'a str>,
+    /// How long an orchestrated session's `PermissionRequest` hook waits for its orchestrator's
+    /// answer, in seconds (`claude_cli.answer_wait_secs`). The hook's own bound is this plus
+    /// [`AWAIT_CLIENT_MARGIN_SECS`], and Claude's `timeout` for it this plus
+    /// [`CLAUDE_HOOK_TIMEOUT_MARGIN_SECS`] (`#home-inbox` 6/8).
+    pub answer_wait_secs: u64,
 }
+
+/// How far the hook's own client bound sits past the daemon's deadline: the daemon answers
+/// `TIMED_OUT` first.
+pub const AWAIT_CLIENT_MARGIN_SECS: u64 = 5;
+
+/// How far Claude's `timeout` for the `PermissionRequest` hook sits past the daemon's deadline: a
+/// hook still waiting is never killed by Claude before the daemon has answered.
+pub const CLAUDE_HOOK_TIMEOUT_MARGIN_SECS: u64 = 10;
 
 /// The `--daemon-socket` argument of a hook command, with its leading space — or nothing when the
 /// daemon is reached over HTTP. Quoted like the tools path: the command is a shell string.
@@ -93,9 +106,22 @@ pub fn build_claude_hooks_settings(p: &HookCommandParams<'_>) -> serde_json::Val
             p.hook_token,
             event,
         );
+        let hook = if *event == "PermissionRequest" {
+            // Wait for the orchestrator's answer; the daemon decides whether anyone is there.
+            serde_json::json!({
+                "type": "command",
+                "command": format!(
+                    "{cmd} --await-answer --await-timeout-secs {}",
+                    p.answer_wait_secs + AWAIT_CLIENT_MARGIN_SECS
+                ),
+                "timeout": p.answer_wait_secs + CLAUDE_HOOK_TIMEOUT_MARGIN_SECS,
+            })
+        } else {
+            serde_json::json!({"type": "command", "command": cmd})
+        };
         let hook_entry = serde_json::json!([{
             "matcher": matcher,
-            "hooks": [{"type": "command", "command": cmd}]
+            "hooks": [hook]
         }]);
         hooks_obj.insert(event.to_string(), hook_entry);
     }
@@ -119,6 +145,7 @@ mod tests {
             os_user: "alice",
             hook_token: "tok-xyz",
             daemon_socket: None,
+            answer_wait_secs: 120,
         }
     }
 

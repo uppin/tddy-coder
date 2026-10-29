@@ -178,6 +178,7 @@ pub(super) fn install_claude_cli_hooks(
             os_user,
             hook_token: &hook_token,
             daemon_socket: daemon_socket.as_deref(),
+            answer_wait_secs: config.claude_cli_answer_wait_secs(),
         },
     );
     (tddy_tools_path, hook_token)

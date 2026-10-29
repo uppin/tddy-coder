@@ -12,12 +12,12 @@ use async_trait::async_trait;
 use tddy_rpc::{Request, Response, Status};
 use tddy_service::proto::activity::{
     AcpReplayFrame, AgentActivityDeltaChunk, AgentActivityDeltaRequest,
-    AgentActivityRecord as ProtoAgentActivityRecord, DeltaScope as ProtoDeltaScope,
-    GetAcpReplayPageRequest, GetAcpReplayPageResponse, GetAcpToolCallDetailRequest,
-    GetAcpToolCallDetailResponse, ReportAgentActivityRequest, ReportAgentActivityResponse,
-    ReportOperatorNotificationRequest, ReportOperatorNotificationResponse,
-    ReportSessionStatusRequest, ReportSessionStatusResponse, SessionNotificationEvent,
-    StreamAcpReplayRequest, StreamMode, StreamSessionActivityRequest,
+    AgentActivityRecord as ProtoAgentActivityRecord, AwaitQuestionAnswerRequest,
+    AwaitQuestionAnswerResponse, DeltaScope as ProtoDeltaScope, GetAcpReplayPageRequest,
+    GetAcpReplayPageResponse, GetAcpToolCallDetailRequest, GetAcpToolCallDetailResponse,
+    ReportAgentActivityRequest, ReportAgentActivityResponse, ReportOperatorNotificationRequest,
+    ReportOperatorNotificationResponse, ReportSessionStatusRequest, ReportSessionStatusResponse,
+    SessionNotificationEvent, StreamAcpReplayRequest, StreamMode, StreamSessionActivityRequest,
     StreamSessionNotificationsRequest,
 };
 use tddy_worktree_service::stream::MpscResultStream;
@@ -50,6 +50,15 @@ impl tddy_service::proto::activity::ActivityService for ActivityServiceImpl {
     ) -> Result<Response<ReportOperatorNotificationResponse>, Status> {
         self.report_operator_notification_impl(request.into_inner())
             .await
+    }
+
+    /// An orchestrated session's `PermissionRequest` hook waiting for its orchestrator's answer —
+    /// see `question_answers`.
+    async fn await_question_answer(
+        &self,
+        request: Request<AwaitQuestionAnswerRequest>,
+    ) -> Result<Response<AwaitQuestionAnswerResponse>, Status> {
+        self.await_question_answer_impl(request.into_inner()).await
     }
 
     type StreamSessionActivityStream = MpscResultStream<ProtoAgentActivityRecord>;

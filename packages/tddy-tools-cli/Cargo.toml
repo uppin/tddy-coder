@@ -59,3 +59,5 @@ wiremock = "0.6"
 # dependency, so no new crate enters the tree.
 tddy-connectrpc = { path = "../tddy-connectrpc" }
 axum = "0.8"
+# session_hook_await_answer_acceptance.rs: one case per way a wait ends without an answer.
+rstest = { workspace = true }

@@ -17,6 +17,9 @@
 //! [`tddy_service::session_activity::next_tick`] for why — and is re-exported here because this is
 //! the crate that stamps the ticks.
 
+pub mod answers;
+pub mod orchestrator_presence;
+pub mod pending_answers;
 pub mod pending_elicitation;
 pub mod pending_question_notice;
 mod pending_question_record;
@@ -42,7 +45,7 @@ pub use crate::service::ports::NoSessionDeltaStores;
 pub use crate::service::ports::OsUserResolver;
 pub use crate::service::ports::SessionDeltaStores;
 pub use crate::service::ports::SessionLabels;
-pub use service::ActivityServiceImpl;
+pub use service::{ActivityServiceImpl, AnswerWaitPorts};
 
 /// How a session's activity deltas are numbered: the wire's absent value, the first real tick, and
 /// the rule that produces the next one.

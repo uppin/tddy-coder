@@ -313,6 +313,7 @@ pub use agent_cli::{
     resolve_cursor_binary_path, resolve_cursor_cli_daemon_url, resolve_cursor_cli_tddy_tools_path,
     resolve_cursor_home_dir, resolve_harness_binary_name, ClaudeCliConfig, CursorCliConfig,
     CLAUDE_BINARY_ENV, CLAUDE_FULLSCREEN_ENV, CLAUDE_HOME_ENV, CURSOR_BINARY_ENV, CURSOR_HOME_ENV,
+    DEFAULT_ANSWER_WAIT_SECS,
 };
 
 use crate::config::access::AllowedTool;

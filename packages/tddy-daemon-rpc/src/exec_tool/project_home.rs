@@ -31,10 +31,13 @@ use tddy_agent_launch::svc_signal_delete_session::signal_session_dir;
 use tddy_core::session_lifecycle::{unified_session_dir_path, validate_session_id_segment};
 use tddy_daemon_kernel::daemon_identity::local_instance_id_for_config;
 use tddy_daemon_kernel::user_paths::projects_path_for_user;
+use tddy_discovery::subagent::PermissionAnswer;
 use tddy_host_service::HostServiceImpl;
 use tddy_rpc::{Request, Status};
 use tddy_service::proto::exec_tools::{ExecuteToolRequest, ExecuteToolResponse};
 use tddy_service::proto::session::{ListSessionsRequest, Signal};
+use tddy_session_activity::answers::{answer_permission, AnswerContext, AnsweringCaller};
+use tddy_session_activity::pending_answers::PendingAnswers;
 use tddy_session_activity::session_reader::{list_sessions_in_dir, SessionEntry};
 use tddy_session_lifecycle::connection_service::launch_ports::LaunchSessions;
 use tddy_session_lifecycle::connection_service::session_acting_identity::SessionAccountAccess;
@@ -46,6 +49,9 @@ use tddy_terminal_rpc::bridge::MAIN_TERMINAL_ID;
 use tddy_terminal_rpc::session::TerminalSessionStore;
 use tddy_terminal_rpc::{ControlClaim, TerminalControl};
 use tddy_tool_engine::catalog::ToolDef;
+use tddy_tool_engine::project_home_answer_tools::{
+    execute_project_home_answer_tool, is_project_home_answer_tool, ProjectHomeAnswerPort,
+};
 use tddy_tool_engine::project_home_git_tools::is_project_home_git_tool;
 use tddy_tool_engine::project_home_terminal_tools::{
     execute_project_home_terminal_tool, is_project_home_terminal_tool, ProjectHomeTerminalPort,
@@ -151,6 +157,7 @@ impl ExecToolRpcHandler {
             caller_daemon_instance_id,
             terminal_control: Arc::clone(&self.project_home_host.terminal_control),
             leases: Arc::clone(&self.project_home_host.leases),
+            pending_answers: Arc::clone(&self.project_home_host.pending_answers),
         })
     }
 
@@ -216,7 +223,8 @@ impl ExecToolRpcHandler {
 }
 
 /// Refuse `tool_name` unless `session_id` is a project-home session — or a session that spawns
-/// conversations calling one of the four start tools — and name that session's project. The role is
+/// conversations calling one of its five tools ([`is_conversation_spawner_tool`]) — and name that
+/// session's project. The role is
 /// the session's own record, not anything the request claims.
 fn project_home_caller(
     sessions_base: &Path,
@@ -231,7 +239,8 @@ fn project_home_caller(
     })?;
     match session_tool_role(&metadata) {
         SessionToolRole::ProjectHome => {}
-        // A session that spawns conversations is served the start tools, for its own project.
+        // A session that spawns conversations is served the start tools and the permission answer,
+        // for its own project.
         SessionToolRole::ConversationSpawner if is_conversation_spawner_tool(tool_name) => {}
         _ => {
             return Err(Status::permission_denied(format!(
@@ -308,6 +317,8 @@ pub(super) struct DaemonProjectHome {
     terminal_control: Arc<dyn TerminalControl>,
     /// The control tokens this host's project-home sessions hold on its terminals.
     leases: Arc<HomeTerminalLeases>,
+    /// The permission prompts this host's hooks hold open, which `AnswerSessionPermission` answers.
+    pending_answers: Arc<PendingAnswers>,
 }
 
 /// One session as the target resolver reads it: its `.session.yaml`, its changeset's branch, and the
@@ -325,7 +336,9 @@ impl DaemonProjectHome {
         home: &HomeCaller,
         req: &ExecuteToolRequest,
     ) -> ExecuteToolResponse {
-        let outcome = if is_project_home_terminal_tool(&req.tool_name) {
+        let outcome = if is_project_home_answer_tool(&req.tool_name) {
+            execute_project_home_answer_tool(self, home, &req.tool_name, &req.args_json).await
+        } else if is_project_home_terminal_tool(&req.tool_name) {
             execute_project_home_terminal_tool(self, home, &req.tool_name, &req.args_json).await
         } else {
             execute_project_home_tool(self, home, &req.tool_name, &req.args_json).await
@@ -776,4 +789,42 @@ fn registered_project(
     tddy_projects::project_storage::find_project(&projects_dir, project_id)
         .map_err(|e| e.to_string())?
         .ok_or_else(|| "project not found".to_string())
+}
+
+#[async_trait]
+impl ProjectHomeAnswerPort for DaemonProjectHome {
+    /// Deliver the calling home session's `answer` to the hook `target` holds open on this host.
+    /// Who may answer is the target's changeset `orchestrator_session_id`, on the host it records:
+    /// the caller's own host id is the one that confirmed it (`#home-inbox` 6/8).
+    async fn answer_permission(
+        &self,
+        home: &HomeCaller,
+        target: &SessionTarget,
+        answer: PermissionAnswer,
+        message: Option<String>,
+    ) -> Result<serde_json::Value, String> {
+        let answered = answer_permission(
+            &AnswerContext {
+                sessions_base: &self.sessions_base,
+                this_daemon_instance_id: &self.daemon_instance_id,
+                pending: &self.pending_answers,
+            },
+            &AnsweringCaller {
+                session_id: home.session_id.clone(),
+                daemon_instance_id: self.caller_daemon_instance_id.clone(),
+            },
+            &target.session_id,
+            answer,
+            message,
+        )
+        .map_err(|refusal| refusal.to_string())?;
+        Ok(serde_json::json!({
+            "session_id": answered.session_id,
+            "request_id": answered.request_id,
+            "answered_by": answered.answered_by,
+            "option_id": answered.option_id,
+            "cancelled": answered.cancelled,
+            "at_unix_ms": answered.at_unix_ms,
+        }))
+    }
 }

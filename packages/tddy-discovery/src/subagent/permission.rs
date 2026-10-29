@@ -125,6 +125,9 @@ pub enum AnsweredBy {
     MainAgent,
     /// A user, by login, through `AnswerAgentPermission`.
     User(String),
+    /// An orchestrating session, by session id, answering a claude-cli child's permission prompt
+    /// through `AnswerSessionPermission` (`#home-inbox` 6/8).
+    Orchestrator(String),
 }
 
 impl AnsweredBy {
@@ -133,6 +136,7 @@ impl AnsweredBy {
         match self {
             Self::MainAgent => MAIN_AGENT_NAME.to_string(),
             Self::User(login) => login.clone(),
+            Self::Orchestrator(session_id) => session_id.clone(),
         }
     }
 }
@@ -142,6 +146,7 @@ impl std::fmt::Display for AnsweredBy {
         match self {
             Self::MainAgent => write!(f, "the main agent"),
             Self::User(login) => write!(f, "{login}"),
+            Self::Orchestrator(session_id) => write!(f, "orchestrator session {session_id}"),
         }
     }
 }

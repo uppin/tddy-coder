@@ -12,7 +12,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file activity.proto.
  */
 export const file_activity: GenFile = /*@__PURE__*/
-  fileDesc("Cg5hY3Rpdml0eS5wcm90bxIIYWN0aXZpdHkiUAoOQWNwUmVwbGF5RnJhbWUSGQoRYWNwX2FnZW50X21lc3NhZ2UYASABKAwSFgoOYWN0aXZpdHlfY291bnQYAiABKAQSCwoDc2VxGAMgASgEIpEBChdBZ2VudEFjdGl2aXR5RGVsdGFDaHVuaxINCgVwYXRjaBgBIAEoDBILCgNzZXEYAiABKAQSEAoIcHJldl9zZXEYAyABKAQSEwoLYmFzZV9jb21taXQYBCABKAkSFwoPdG90YWxfYnl0ZV9zaXplGAYgASgEEhQKDHNjb3BlZF9wYXRocxgHIAMoCUoECAUQBiKYAQoZQWdlbnRBY3Rpdml0eURlbHRhUmVxdWVzdBIVCg1zZXNzaW9uX3Rva2VuGAEgASgJEhIKCnNlc3Npb25faWQYAiABKAkSGgoSZGFlbW9uX2luc3RhbmNlX2lkGAMgASgJEg8KB2NhbGxfaWQYBCABKAkSIwoFc2NvcGUYBSABKA4yFC5hY3Rpdml0eS5EZWx0YVNjb3BlIrUCChNBZ2VudEFjdGl2aXR5UmVjb3JkEg8KB2NhbGxfaWQYASABKAkSEQoJdG9vbF9uYW1lGAIgASgJEiUKBWlucHV0GAMgASgLMhYuZ29vZ2xlLnByb3RvYnVmLlZhbHVlEg4KBnN0YXR1cxgEIAEoCRImCgZyZXN1bHQYBSABKAsyFi5nb29nbGUucHJvdG9idWYuVmFsdWUSFQoNZXJyb3JfbWVzc2FnZRgGIAEoCRIXCg9zdGFydGVkX3VuaXhfbXMYByABKAQSGQoRY29tcGxldGVkX3VuaXhfbXMYCCABKAQSDgoGc291cmNlGAkgASgJEhMKC2hlYWRfY29tbWl0GAogASgJEhQKDGFjdGl2aXR5X3NlcRgLIAEoBBIVCg1jaGFuZ2VkX3BhdGhzGAwgAygJIqABChdHZXRBY3BSZXBsYXlQYWdlUmVxdWVzdBIVCg1zZXNzaW9uX3Rva2VuGAEgASgJEhIKCnNlc3Npb25faWQYAiABKAkSGgoSZGFlbW9uX2luc3RhbmNlX2lkGAMgASgJEhIKCmJlZm9yZV9zZXEYBCABKAQSEQoJcGFnZV9zaXplGAUgASgNEhcKD2NvbnZlcnNhdGlvbl9pZBgGIAEoCSJQChhHZXRBY3BSZXBsYXlQYWdlUmVzcG9uc2USDgoGZnJhbWVzGAEgAygMEhEKCWZpcnN0X3NlcRgCIAEoBBIRCglhdF9vbGRlc3QYAyABKAgikwEKG0dldEFjcFRvb2xDYWxsRGV0YWlsUmVxdWVzdBIVCg1zZXNzaW9uX3Rva2VuGAEgASgJEhIKCnNlc3Npb25faWQYAiABKAkSGgoSZGFlbW9uX2luc3RhbmNlX2lkGAMgASgJEhQKDHRvb2xfY2FsbF9pZBgEIAEoCRIXCg9jb252ZXJzYXRpb25faWQYBSABKAkibAocR2V0QWNwVG9vbENhbGxEZXRhaWxSZXNwb25zZRIWCglyYXdfaW5wdXQYASABKAlIAIgBARIXCgpyYXdfb3V0cHV0GAIgASgJSAGIAQFCDAoKX3Jhd19pbnB1dEINCgtfcmF3X291dHB1dCLJAQoaUmVwb3J0QWdlbnRBY3Rpdml0eVJlcXVlc3QSEgoKc2Vzc2lvbl9pZBgBIAEoCRISCgpob29rX3Rva2VuGAIgASgJEg8KB29zX3VzZXIYAyABKAkSDQoFZXZlbnQYBCABKAkSEQoJdG9vbF9uYW1lGAUgASgJEhIKCmlucHV0X2pzb24YBiABKAkSEwoLcmVzdWx0X2pzb24YByABKAkSEAoIaXNfZXJyb3IYCCABKAgSFQoNZXJyb3JfbWVzc2FnZRgJIAEoCSIpChtSZXBvcnRBZ2VudEFjdGl2aXR5UmVzcG9uc2USCgoCb2sYASABKAgiuwEKGlJlcG9ydFNlc3Npb25TdGF0dXNSZXF1ZXN0EhIKCnNlc3Npb25faWQYASABKAkSEgoKaG9va190b2tlbhgCIAEoCRIPCgdvc191c2VyGAMgASgJEg4KBnN0YXR1cxgEIAEoCRIPCgdtZXNzYWdlGAUgASgJEhcKD2hvb2tfZXZlbnRfbmFtZRgGIAEoCRIRCgl0b29sX25hbWUYByABKAkSFwoPdG9vbF9pbnB1dF9qc29uGAggASgJIj0KG1JlcG9ydFNlc3Npb25TdGF0dXNSZXNwb25zZRIKCgJvaxgBIAEoCBISCgpyZXF1ZXN0X2lkGAIgASgJIr0BCiFSZXBvcnRPcGVyYXRvck5vdGlmaWNhdGlvblJlcXVlc3QSEgoKc2Vzc2lvbl9pZBgBIAEoCRISCgpob29rX3Rva2VuGAIgASgJEg8KB29zX3VzZXIYAyABKAkSDQoFdGl0bGUYBCABKAkSFQoNYm9keV9tYXJrZG93bhgFIAEoCRIqCgVsZXZlbBgGIAEoDjIbLmFjdGl2aXR5Lk5vdGlmaWNhdGlvbkxldmVsEg0KBXNvdW5kGAcgASgIIjAKIlJlcG9ydE9wZXJhdG9yTm90aWZpY2F0aW9uUmVzcG9uc2USCgoCb2sYASABKAgi4AIKGFNlc3Npb25Ob3RpZmljYXRpb25FdmVudBISCgpzZXNzaW9uX2lkGAEgASgJEg0KBWxhYmVsGAIgASgJEi8KBGtpbmQYAyABKA4yIS5hY3Rpdml0eS5TZXNzaW9uTm90aWZpY2F0aW9uS2luZBIzCgZzb3VyY2UYBCABKA4yIy5hY3Rpdml0eS5TZXNzaW9uTm90aWZpY2F0aW9uU291cmNlEgwKBHRleHQYBSABKAkSEgoKYXRfdW5peF9tcxgGIAEoBBINCgV0aXRsZRgHIAEoCRIVCg1ib2R5X21hcmtkb3duGAggASgJEioKBWxldmVsGAkgASgOMhsuYWN0aXZpdHkuTm90aWZpY2F0aW9uTGV2ZWwSDQoFc291bmQYCiABKAgSDAoEbGluaxgLIAEoCRIqCghxdWVzdGlvbhgMIAEoCzIYLmFjdGl2aXR5LlF1ZXN0aW9uTm90aWNlIocBCg5RdWVzdGlvbk5vdGljZRISCgpyZXF1ZXN0X2lkGAEgASgJEgwKBGtpbmQYAiABKAkSEQoJdG9vbF9uYW1lGAMgASgJEg8KB3N1bW1hcnkYBCABKAkSLwoJcXVlc3Rpb25zGAUgAygLMhwuYWN0aXZpdHkuUXVlc3Rpb25Ob3RpY2VJdGVtIn0KElF1ZXN0aW9uTm90aWNlSXRlbRIOCgZoZWFkZXIYASABKAkSEAoIcXVlc3Rpb24YAiABKAkSLwoHb3B0aW9ucxgDIAMoCzIeLmFjdGl2aXR5LlF1ZXN0aW9uTm90aWNlT3B0aW9uEhQKDG11bHRpX3NlbGVjdBgEIAEoCCI6ChRRdWVzdGlvbk5vdGljZU9wdGlvbhINCgVsYWJlbBgBIAEoCRITCgtkZXNjcmlwdGlvbhgCIAEoCSKvAQoWU3RyZWFtQWNwUmVwbGF5UmVxdWVzdBIVCg1zZXNzaW9uX3Rva2VuGAEgASgJEhIKCnNlc3Npb25faWQYAiABKAkSGgoSZGFlbW9uX2luc3RhbmNlX2lkGAMgASgJEiIKBG1vZGUYBCABKA4yFC5hY3Rpdml0eS5TdHJlYW1Nb2RlEhEKCXBhZ2Vfc2l6ZRgFIAEoDRIXCg9jb252ZXJzYXRpb25faWQYBiABKAkiiQEKHFN0cmVhbVNlc3Npb25BY3Rpdml0eVJlcXVlc3QSFQoNc2Vzc2lvbl90b2tlbhgBIAEoCRISCgpzZXNzaW9uX2lkGAIgASgJEhoKEmRhZW1vbl9pbnN0YW5jZV9pZBgDIAEoCRIiCgRtb2RlGAQgASgOMhQuYWN0aXZpdHkuU3RyZWFtTW9kZSI6CiFTdHJlYW1TZXNzaW9uTm90aWZpY2F0aW9uc1JlcXVlc3QSFQoNc2Vzc2lvbl90b2tlbhgBIAEoCSpSCgpEZWx0YVNjb3BlEhQKEERFTFRBX1NDT1BFX0NBTEwQABIYChRERUxUQV9TQ09QRV9SRVNJRFVBTBABEhQKEERFTFRBX1NDT1BFX1RJQ0sQAiqeAQoXU2Vzc2lvbk5vdGlmaWNhdGlvbktpbmQSKQolU0VTU0lPTl9OT1RJRklDQVRJT05fS0lORF9VTlNQRUNJRklFRBAAEiYKIlNFU1NJT05fTk9USUZJQ0FUSU9OX0tJTkRfQUNUSVZJVFkQARIwCixTRVNTSU9OX05PVElGSUNBVElPTl9LSU5EX0FUVEVOVElPTl9SRVFVSVJFRBACKq4CChlTZXNzaW9uTm90aWZpY2F0aW9uU291cmNlEisKJ1NFU1NJT05fTk9USUZJQ0FUSU9OX1NPVVJDRV9VTlNQRUNJRklFRBAAEi8KK1NFU1NJT05fTk9USUZJQ0FUSU9OX1NPVVJDRV9BQ1RJVklUWV9TVEFUVVMQARIvCitTRVNTSU9OX05PVElGSUNBVElPTl9TT1VSQ0VfQUdFTlRfVE9PTF9DQUxMEAISKQolU0VTU0lPTl9OT1RJRklDQVRJT05fU09VUkNFX1BSRVNFTlRFUhADEiUKIVNFU1NJT05fTk9USUZJQ0FUSU9OX1NPVVJDRV9BR0VOVBAEEjAKLFNFU1NJT05fTk9USUZJQ0FUSU9OX1NPVVJDRV9QRU5ESU5HX1FVRVNUSU9OEAUqsgEKEU5vdGlmaWNhdGlvbkxldmVsEiIKHk5PVElGSUNBVElPTl9MRVZFTF9VTlNQRUNJRklFRBAAEhsKF05PVElGSUNBVElPTl9MRVZFTF9JTkZPEAESHgoaTk9USUZJQ0FUSU9OX0xFVkVMX1NVQ0NFU1MQAhIeChpOT1RJRklDQVRJT05fTEVWRUxfV0FSTklORxADEhwKGE5PVElGSUNBVElPTl9MRVZFTF9FUlJPUhAEKlwKClN0cmVhbU1vZGUSFgoSU05BUFNIT1RfVEhFTl9MSVZFEAASDQoJTElWRV9PTkxZEAESEwoPQ09VTlRfVEhFTl9MSVZFEAISEgoOVEFJTF9USEVOX0xJVkUQAzKeBwoPQWN0aXZpdHlTZXJ2aWNlEmIKE1JlcG9ydFNlc3Npb25TdGF0dXMSJC5hY3Rpdml0eS5SZXBvcnRTZXNzaW9uU3RhdHVzUmVxdWVzdBolLmFjdGl2aXR5LlJlcG9ydFNlc3Npb25TdGF0dXNSZXNwb25zZRJgChVTdHJlYW1TZXNzaW9uQWN0aXZpdHkSJi5hY3Rpdml0eS5TdHJlYW1TZXNzaW9uQWN0aXZpdHlSZXF1ZXN0Gh0uYWN0aXZpdHkuQWdlbnRBY3Rpdml0eVJlY29yZDABEmIKE1JlcG9ydEFnZW50QWN0aXZpdHkSJC5hY3Rpdml0eS5SZXBvcnRBZ2VudEFjdGl2aXR5UmVxdWVzdBolLmFjdGl2aXR5LlJlcG9ydEFnZW50QWN0aXZpdHlSZXNwb25zZRJvChpTdHJlYW1TZXNzaW9uTm90aWZpY2F0aW9ucxIrLmFjdGl2aXR5LlN0cmVhbVNlc3Npb25Ob3RpZmljYXRpb25zUmVxdWVzdBoiLmFjdGl2aXR5LlNlc3Npb25Ob3RpZmljYXRpb25FdmVudDABEmQKGFN0cmVhbUFnZW50QWN0aXZpdHlEZWx0YRIjLmFjdGl2aXR5LkFnZW50QWN0aXZpdHlEZWx0YVJlcXVlc3QaIS5hY3Rpdml0eS5BZ2VudEFjdGl2aXR5RGVsdGFDaHVuazABEk8KD1N0cmVhbUFjcFJlcGxheRIgLmFjdGl2aXR5LlN0cmVhbUFjcFJlcGxheVJlcXVlc3QaGC5hY3Rpdml0eS5BY3BSZXBsYXlGcmFtZTABEmUKFEdldEFjcFRvb2xDYWxsRGV0YWlsEiUuYWN0aXZpdHkuR2V0QWNwVG9vbENhbGxEZXRhaWxSZXF1ZXN0GiYuYWN0aXZpdHkuR2V0QWNwVG9vbENhbGxEZXRhaWxSZXNwb25zZRJZChBHZXRBY3BSZXBsYXlQYWdlEiEuYWN0aXZpdHkuR2V0QWNwUmVwbGF5UGFnZVJlcXVlc3QaIi5hY3Rpdml0eS5HZXRBY3BSZXBsYXlQYWdlUmVzcG9uc2USdwoaUmVwb3J0T3BlcmF0b3JOb3RpZmljYXRpb24SKy5hY3Rpdml0eS5SZXBvcnRPcGVyYXRvck5vdGlmaWNhdGlvblJlcXVlc3QaLC5hY3Rpdml0eS5SZXBvcnRPcGVyYXRvck5vdGlmaWNhdGlvblJlc3BvbnNlYgZwcm90bzM", [file_google_protobuf_struct]);
+  fileDesc("Cg5hY3Rpdml0eS5wcm90bxIIYWN0aXZpdHkiUAoOQWNwUmVwbGF5RnJhbWUSGQoRYWNwX2FnZW50X21lc3NhZ2UYASABKAwSFgoOYWN0aXZpdHlfY291bnQYAiABKAQSCwoDc2VxGAMgASgEIpEBChdBZ2VudEFjdGl2aXR5RGVsdGFDaHVuaxINCgVwYXRjaBgBIAEoDBILCgNzZXEYAiABKAQSEAoIcHJldl9zZXEYAyABKAQSEwoLYmFzZV9jb21taXQYBCABKAkSFwoPdG90YWxfYnl0ZV9zaXplGAYgASgEEhQKDHNjb3BlZF9wYXRocxgHIAMoCUoECAUQBiKYAQoZQWdlbnRBY3Rpdml0eURlbHRhUmVxdWVzdBIVCg1zZXNzaW9uX3Rva2VuGAEgASgJEhIKCnNlc3Npb25faWQYAiABKAkSGgoSZGFlbW9uX2luc3RhbmNlX2lkGAMgASgJEg8KB2NhbGxfaWQYBCABKAkSIwoFc2NvcGUYBSABKA4yFC5hY3Rpdml0eS5EZWx0YVNjb3BlIrUCChNBZ2VudEFjdGl2aXR5UmVjb3JkEg8KB2NhbGxfaWQYASABKAkSEQoJdG9vbF9uYW1lGAIgASgJEiUKBWlucHV0GAMgASgLMhYuZ29vZ2xlLnByb3RvYnVmLlZhbHVlEg4KBnN0YXR1cxgEIAEoCRImCgZyZXN1bHQYBSABKAsyFi5nb29nbGUucHJvdG9idWYuVmFsdWUSFQoNZXJyb3JfbWVzc2FnZRgGIAEoCRIXCg9zdGFydGVkX3VuaXhfbXMYByABKAQSGQoRY29tcGxldGVkX3VuaXhfbXMYCCABKAQSDgoGc291cmNlGAkgASgJEhMKC2hlYWRfY29tbWl0GAogASgJEhQKDGFjdGl2aXR5X3NlcRgLIAEoBBIVCg1jaGFuZ2VkX3BhdGhzGAwgAygJIqABChdHZXRBY3BSZXBsYXlQYWdlUmVxdWVzdBIVCg1zZXNzaW9uX3Rva2VuGAEgASgJEhIKCnNlc3Npb25faWQYAiABKAkSGgoSZGFlbW9uX2luc3RhbmNlX2lkGAMgASgJEhIKCmJlZm9yZV9zZXEYBCABKAQSEQoJcGFnZV9zaXplGAUgASgNEhcKD2NvbnZlcnNhdGlvbl9pZBgGIAEoCSJQChhHZXRBY3BSZXBsYXlQYWdlUmVzcG9uc2USDgoGZnJhbWVzGAEgAygMEhEKCWZpcnN0X3NlcRgCIAEoBBIRCglhdF9vbGRlc3QYAyABKAgikwEKG0dldEFjcFRvb2xDYWxsRGV0YWlsUmVxdWVzdBIVCg1zZXNzaW9uX3Rva2VuGAEgASgJEhIKCnNlc3Npb25faWQYAiABKAkSGgoSZGFlbW9uX2luc3RhbmNlX2lkGAMgASgJEhQKDHRvb2xfY2FsbF9pZBgEIAEoCRIXCg9jb252ZXJzYXRpb25faWQYBSABKAkibAocR2V0QWNwVG9vbENhbGxEZXRhaWxSZXNwb25zZRIWCglyYXdfaW5wdXQYASABKAlIAIgBARIXCgpyYXdfb3V0cHV0GAIgASgJSAGIAQFCDAoKX3Jhd19pbnB1dEINCgtfcmF3X291dHB1dCLJAQoaUmVwb3J0QWdlbnRBY3Rpdml0eVJlcXVlc3QSEgoKc2Vzc2lvbl9pZBgBIAEoCRISCgpob29rX3Rva2VuGAIgASgJEg8KB29zX3VzZXIYAyABKAkSDQoFZXZlbnQYBCABKAkSEQoJdG9vbF9uYW1lGAUgASgJEhIKCmlucHV0X2pzb24YBiABKAkSEwoLcmVzdWx0X2pzb24YByABKAkSEAoIaXNfZXJyb3IYCCABKAgSFQoNZXJyb3JfbWVzc2FnZRgJIAEoCSIpChtSZXBvcnRBZ2VudEFjdGl2aXR5UmVzcG9uc2USCgoCb2sYASABKAgiuwEKGlJlcG9ydFNlc3Npb25TdGF0dXNSZXF1ZXN0EhIKCnNlc3Npb25faWQYASABKAkSEgoKaG9va190b2tlbhgCIAEoCRIPCgdvc191c2VyGAMgASgJEg4KBnN0YXR1cxgEIAEoCRIPCgdtZXNzYWdlGAUgASgJEhcKD2hvb2tfZXZlbnRfbmFtZRgGIAEoCRIRCgl0b29sX25hbWUYByABKAkSFwoPdG9vbF9pbnB1dF9qc29uGAggASgJIj0KG1JlcG9ydFNlc3Npb25TdGF0dXNSZXNwb25zZRIKCgJvaxgBIAEoCBISCgpyZXF1ZXN0X2lkGAIgASgJIr0BCiFSZXBvcnRPcGVyYXRvck5vdGlmaWNhdGlvblJlcXVlc3QSEgoKc2Vzc2lvbl9pZBgBIAEoCRISCgpob29rX3Rva2VuGAIgASgJEg8KB29zX3VzZXIYAyABKAkSDQoFdGl0bGUYBCABKAkSFQoNYm9keV9tYXJrZG93bhgFIAEoCRIqCgVsZXZlbBgGIAEoDjIbLmFjdGl2aXR5Lk5vdGlmaWNhdGlvbkxldmVsEg0KBXNvdW5kGAcgASgIIjAKIlJlcG9ydE9wZXJhdG9yTm90aWZpY2F0aW9uUmVzcG9uc2USCgoCb2sYASABKAgijgEKGkF3YWl0UXVlc3Rpb25BbnN3ZXJSZXF1ZXN0EhIKCnNlc3Npb25faWQYASABKAkSEgoKaG9va190b2tlbhgCIAEoCRIPCgdvc191c2VyGAMgASgJEhIKCnJlcXVlc3RfaWQYBCABKAkSIwobcGVybWlzc2lvbl9zdWdnZXN0aW9uc19qc29uGAUgASgJIpoBChtBd2FpdFF1ZXN0aW9uQW5zd2VyUmVzcG9uc2USLwoHb3V0Y29tZRgBIAEoDjIeLmFjdGl2aXR5LkF3YWl0UXVlc3Rpb25PdXRjb21lEhEKCW9wdGlvbl9pZBgCIAEoCRIRCgljYW5jZWxsZWQYAyABKAgSDwoHbWVzc2FnZRgEIAEoCRITCgthbnN3ZXJlZF9ieRgFIAEoCSLgAgoYU2Vzc2lvbk5vdGlmaWNhdGlvbkV2ZW50EhIKCnNlc3Npb25faWQYASABKAkSDQoFbGFiZWwYAiABKAkSLwoEa2luZBgDIAEoDjIhLmFjdGl2aXR5LlNlc3Npb25Ob3RpZmljYXRpb25LaW5kEjMKBnNvdXJjZRgEIAEoDjIjLmFjdGl2aXR5LlNlc3Npb25Ob3RpZmljYXRpb25Tb3VyY2USDAoEdGV4dBgFIAEoCRISCgphdF91bml4X21zGAYgASgEEg0KBXRpdGxlGAcgASgJEhUKDWJvZHlfbWFya2Rvd24YCCABKAkSKgoFbGV2ZWwYCSABKA4yGy5hY3Rpdml0eS5Ob3RpZmljYXRpb25MZXZlbBINCgVzb3VuZBgKIAEoCBIMCgRsaW5rGAsgASgJEioKCHF1ZXN0aW9uGAwgASgLMhguYWN0aXZpdHkuUXVlc3Rpb25Ob3RpY2UihwEKDlF1ZXN0aW9uTm90aWNlEhIKCnJlcXVlc3RfaWQYASABKAkSDAoEa2luZBgCIAEoCRIRCgl0b29sX25hbWUYAyABKAkSDwoHc3VtbWFyeRgEIAEoCRIvCglxdWVzdGlvbnMYBSADKAsyHC5hY3Rpdml0eS5RdWVzdGlvbk5vdGljZUl0ZW0ifQoSUXVlc3Rpb25Ob3RpY2VJdGVtEg4KBmhlYWRlchgBIAEoCRIQCghxdWVzdGlvbhgCIAEoCRIvCgdvcHRpb25zGAMgAygLMh4uYWN0aXZpdHkuUXVlc3Rpb25Ob3RpY2VPcHRpb24SFAoMbXVsdGlfc2VsZWN0GAQgASgIIjoKFFF1ZXN0aW9uTm90aWNlT3B0aW9uEg0KBWxhYmVsGAEgASgJEhMKC2Rlc2NyaXB0aW9uGAIgASgJIq8BChZTdHJlYW1BY3BSZXBsYXlSZXF1ZXN0EhUKDXNlc3Npb25fdG9rZW4YASABKAkSEgoKc2Vzc2lvbl9pZBgCIAEoCRIaChJkYWVtb25faW5zdGFuY2VfaWQYAyABKAkSIgoEbW9kZRgEIAEoDjIULmFjdGl2aXR5LlN0cmVhbU1vZGUSEQoJcGFnZV9zaXplGAUgASgNEhcKD2NvbnZlcnNhdGlvbl9pZBgGIAEoCSKJAQocU3RyZWFtU2Vzc2lvbkFjdGl2aXR5UmVxdWVzdBIVCg1zZXNzaW9uX3Rva2VuGAEgASgJEhIKCnNlc3Npb25faWQYAiABKAkSGgoSZGFlbW9uX2luc3RhbmNlX2lkGAMgASgJEiIKBG1vZGUYBCABKA4yFC5hY3Rpdml0eS5TdHJlYW1Nb2RlIjoKIVN0cmVhbVNlc3Npb25Ob3RpZmljYXRpb25zUmVxdWVzdBIVCg1zZXNzaW9uX3Rva2VuGAEgASgJKlIKCkRlbHRhU2NvcGUSFAoQREVMVEFfU0NPUEVfQ0FMTBAAEhgKFERFTFRBX1NDT1BFX1JFU0lEVUFMEAESFAoQREVMVEFfU0NPUEVfVElDSxACKrUBChRBd2FpdFF1ZXN0aW9uT3V0Y29tZRImCiJBV0FJVF9RVUVTVElPTl9PVVRDT01FX1VOU1BFQ0lGSUVEEAASIwofQVdBSVRfUVVFU1RJT05fT1VUQ09NRV9BTlNXRVJFRBABEioKJkFXQUlUX1FVRVNUSU9OX09VVENPTUVfTk9fT1JDSEVTVFJBVE9SEAISJAogQVdBSVRfUVVFU1RJT05fT1VUQ09NRV9USU1FRF9PVVQQAyqeAQoXU2Vzc2lvbk5vdGlmaWNhdGlvbktpbmQSKQolU0VTU0lPTl9OT1RJRklDQVRJT05fS0lORF9VTlNQRUNJRklFRBAAEiYKIlNFU1NJT05fTk9USUZJQ0FUSU9OX0tJTkRfQUNUSVZJVFkQARIwCixTRVNTSU9OX05PVElGSUNBVElPTl9LSU5EX0FUVEVOVElPTl9SRVFVSVJFRBACKq4CChlTZXNzaW9uTm90aWZpY2F0aW9uU291cmNlEisKJ1NFU1NJT05fTk9USUZJQ0FUSU9OX1NPVVJDRV9VTlNQRUNJRklFRBAAEi8KK1NFU1NJT05fTk9USUZJQ0FUSU9OX1NPVVJDRV9BQ1RJVklUWV9TVEFUVVMQARIvCitTRVNTSU9OX05PVElGSUNBVElPTl9TT1VSQ0VfQUdFTlRfVE9PTF9DQUxMEAISKQolU0VTU0lPTl9OT1RJRklDQVRJT05fU09VUkNFX1BSRVNFTlRFUhADEiUKIVNFU1NJT05fTk9USUZJQ0FUSU9OX1NPVVJDRV9BR0VOVBAEEjAKLFNFU1NJT05fTk9USUZJQ0FUSU9OX1NPVVJDRV9QRU5ESU5HX1FVRVNUSU9OEAUqsgEKEU5vdGlmaWNhdGlvbkxldmVsEiIKHk5PVElGSUNBVElPTl9MRVZFTF9VTlNQRUNJRklFRBAAEhsKF05PVElGSUNBVElPTl9MRVZFTF9JTkZPEAESHgoaTk9USUZJQ0FUSU9OX0xFVkVMX1NVQ0NFU1MQAhIeChpOT1RJRklDQVRJT05fTEVWRUxfV0FSTklORxADEhwKGE5PVElGSUNBVElPTl9MRVZFTF9FUlJPUhAEKlwKClN0cmVhbU1vZGUSFgoSU05BUFNIT1RfVEhFTl9MSVZFEAASDQoJTElWRV9PTkxZEAESEwoPQ09VTlRfVEhFTl9MSVZFEAISEgoOVEFJTF9USEVOX0xJVkUQAzKCCAoPQWN0aXZpdHlTZXJ2aWNlEmIKE1JlcG9ydFNlc3Npb25TdGF0dXMSJC5hY3Rpdml0eS5SZXBvcnRTZXNzaW9uU3RhdHVzUmVxdWVzdBolLmFjdGl2aXR5LlJlcG9ydFNlc3Npb25TdGF0dXNSZXNwb25zZRJgChVTdHJlYW1TZXNzaW9uQWN0aXZpdHkSJi5hY3Rpdml0eS5TdHJlYW1TZXNzaW9uQWN0aXZpdHlSZXF1ZXN0Gh0uYWN0aXZpdHkuQWdlbnRBY3Rpdml0eVJlY29yZDABEmIKE1JlcG9ydEFnZW50QWN0aXZpdHkSJC5hY3Rpdml0eS5SZXBvcnRBZ2VudEFjdGl2aXR5UmVxdWVzdBolLmFjdGl2aXR5LlJlcG9ydEFnZW50QWN0aXZpdHlSZXNwb25zZRJvChpTdHJlYW1TZXNzaW9uTm90aWZpY2F0aW9ucxIrLmFjdGl2aXR5LlN0cmVhbVNlc3Npb25Ob3RpZmljYXRpb25zUmVxdWVzdBoiLmFjdGl2aXR5LlNlc3Npb25Ob3RpZmljYXRpb25FdmVudDABEmQKGFN0cmVhbUFnZW50QWN0aXZpdHlEZWx0YRIjLmFjdGl2aXR5LkFnZW50QWN0aXZpdHlEZWx0YVJlcXVlc3QaIS5hY3Rpdml0eS5BZ2VudEFjdGl2aXR5RGVsdGFDaHVuazABEk8KD1N0cmVhbUFjcFJlcGxheRIgLmFjdGl2aXR5LlN0cmVhbUFjcFJlcGxheVJlcXVlc3QaGC5hY3Rpdml0eS5BY3BSZXBsYXlGcmFtZTABEmUKFEdldEFjcFRvb2xDYWxsRGV0YWlsEiUuYWN0aXZpdHkuR2V0QWNwVG9vbENhbGxEZXRhaWxSZXF1ZXN0GiYuYWN0aXZpdHkuR2V0QWNwVG9vbENhbGxEZXRhaWxSZXNwb25zZRJZChBHZXRBY3BSZXBsYXlQYWdlEiEuYWN0aXZpdHkuR2V0QWNwUmVwbGF5UGFnZVJlcXVlc3QaIi5hY3Rpdml0eS5HZXRBY3BSZXBsYXlQYWdlUmVzcG9uc2USdwoaUmVwb3J0T3BlcmF0b3JOb3RpZmljYXRpb24SKy5hY3Rpdml0eS5SZXBvcnRPcGVyYXRvck5vdGlmaWNhdGlvblJlcXVlc3QaLC5hY3Rpdml0eS5SZXBvcnRPcGVyYXRvck5vdGlmaWNhdGlvblJlc3BvbnNlEmIKE0F3YWl0UXVlc3Rpb25BbnN3ZXISJC5hY3Rpdml0eS5Bd2FpdFF1ZXN0aW9uQW5zd2VyUmVxdWVzdBolLmFjdGl2aXR5LkF3YWl0UXVlc3Rpb25BbnN3ZXJSZXNwb25zZWIGcHJvdG8z", [file_google_protobuf_struct]);
 
 /**
  * One replay frame: a service-local wrapper carrying an ACP `tddy.acp.v1.AcpAgentMessage`
@@ -684,6 +684,94 @@ export const ReportOperatorNotificationResponseSchema: GenMessage<ReportOperator
   messageDesc(file_activity, 13);
 
 /**
+ * @generated from message activity.AwaitQuestionAnswerRequest
+ */
+export type AwaitQuestionAnswerRequest = Message<"activity.AwaitQuestionAnswerRequest"> & {
+  /**
+   * @generated from field: string session_id = 1;
+   */
+  sessionId: string;
+
+  /**
+   * @generated from field: string hook_token = 2;
+   */
+  hookToken: string;
+
+  /**
+   * @generated from field: string os_user = 3;
+   */
+  osUser: string;
+
+  /**
+   * The pending question to wait on: `ReportSessionStatusResponse.request_id` of the report that
+   * recorded it.
+   *
+   * @generated from field: string request_id = 4;
+   */
+  requestId: string;
+
+  /**
+   * Claude's `permission_suggestions` for the request, as the hook received them (a JSON array);
+   * empty when Claude sent none. A non-empty value offers the orchestrator `allow_always`.
+   *
+   * @generated from field: string permission_suggestions_json = 5;
+   */
+  permissionSuggestionsJson: string;
+};
+
+/**
+ * Describes the message activity.AwaitQuestionAnswerRequest.
+ * Use `create(AwaitQuestionAnswerRequestSchema)` to create a new message.
+ */
+export const AwaitQuestionAnswerRequestSchema: GenMessage<AwaitQuestionAnswerRequest> = /*@__PURE__*/
+  messageDesc(file_activity, 14);
+
+/**
+ * @generated from message activity.AwaitQuestionAnswerResponse
+ */
+export type AwaitQuestionAnswerResponse = Message<"activity.AwaitQuestionAnswerResponse"> & {
+  /**
+   * @generated from field: activity.AwaitQuestionOutcome outcome = 1;
+   */
+  outcome: AwaitQuestionOutcome;
+
+  /**
+   * ANSWERED: the chosen option (`allow_once`, `allow_always`, `reject_once`); empty when cancelled.
+   *
+   * @generated from field: string option_id = 2;
+   */
+  optionId: string;
+
+  /**
+   * ANSWERED: the request was answered as cancelled, so the hook prints no decision.
+   *
+   * @generated from field: bool cancelled = 3;
+   */
+  cancelled: boolean;
+
+  /**
+   * ANSWERED with a `reject_*` option: why, for Claude.
+   *
+   * @generated from field: string message = 4;
+   */
+  message: string;
+
+  /**
+   * ANSWERED: who answered — the orchestrator's session id.
+   *
+   * @generated from field: string answered_by = 5;
+   */
+  answeredBy: string;
+};
+
+/**
+ * Describes the message activity.AwaitQuestionAnswerResponse.
+ * Use `create(AwaitQuestionAnswerResponseSchema)` to create a new message.
+ */
+export const AwaitQuestionAnswerResponseSchema: GenMessage<AwaitQuestionAnswerResponse> = /*@__PURE__*/
+  messageDesc(file_activity, 15);
+
+/**
  * One thing that happened in one session.
  *
  * @generated from message activity.SessionNotificationEvent
@@ -771,7 +859,7 @@ export type SessionNotificationEvent = Message<"activity.SessionNotificationEven
  * Use `create(SessionNotificationEventSchema)` to create a new message.
  */
 export const SessionNotificationEventSchema: GenMessage<SessionNotificationEvent> = /*@__PURE__*/
-  messageDesc(file_activity, 14);
+  messageDesc(file_activity, 16);
 
 /**
  * What a session is asking: a permission for a tool, or the questions of an AskUserQuestion call.
@@ -816,7 +904,7 @@ export type QuestionNotice = Message<"activity.QuestionNotice"> & {
  * Use `create(QuestionNoticeSchema)` to create a new message.
  */
 export const QuestionNoticeSchema: GenMessage<QuestionNotice> = /*@__PURE__*/
-  messageDesc(file_activity, 15);
+  messageDesc(file_activity, 17);
 
 /**
  * @generated from message activity.QuestionNoticeItem
@@ -848,7 +936,7 @@ export type QuestionNoticeItem = Message<"activity.QuestionNoticeItem"> & {
  * Use `create(QuestionNoticeItemSchema)` to create a new message.
  */
 export const QuestionNoticeItemSchema: GenMessage<QuestionNoticeItem> = /*@__PURE__*/
-  messageDesc(file_activity, 16);
+  messageDesc(file_activity, 18);
 
 /**
  * @generated from message activity.QuestionNoticeOption
@@ -870,7 +958,7 @@ export type QuestionNoticeOption = Message<"activity.QuestionNoticeOption"> & {
  * Use `create(QuestionNoticeOptionSchema)` to create a new message.
  */
 export const QuestionNoticeOptionSchema: GenMessage<QuestionNoticeOption> = /*@__PURE__*/
-  messageDesc(file_activity, 17);
+  messageDesc(file_activity, 19);
 
 /**
  * Request for the read-only ACP transcript replay. Mirrors StreamSessionActivityRequest — same
@@ -923,7 +1011,7 @@ export type StreamAcpReplayRequest = Message<"activity.StreamAcpReplayRequest"> 
  * Use `create(StreamAcpReplayRequestSchema)` to create a new message.
  */
 export const StreamAcpReplayRequestSchema: GenMessage<StreamAcpReplayRequest> = /*@__PURE__*/
-  messageDesc(file_activity, 18);
+  messageDesc(file_activity, 20);
 
 /**
  * @generated from message activity.StreamSessionActivityRequest
@@ -957,7 +1045,7 @@ export type StreamSessionActivityRequest = Message<"activity.StreamSessionActivi
  * Use `create(StreamSessionActivityRequestSchema)` to create a new message.
  */
 export const StreamSessionActivityRequestSchema: GenMessage<StreamSessionActivityRequest> = /*@__PURE__*/
-  messageDesc(file_activity, 19);
+  messageDesc(file_activity, 21);
 
 /**
  * @generated from message activity.StreamSessionNotificationsRequest
@@ -976,7 +1064,7 @@ export type StreamSessionNotificationsRequest = Message<"activity.StreamSessionN
  * Use `create(StreamSessionNotificationsRequestSchema)` to create a new message.
  */
 export const StreamSessionNotificationsRequestSchema: GenMessage<StreamSessionNotificationsRequest> = /*@__PURE__*/
-  messageDesc(file_activity, 20);
+  messageDesc(file_activity, 22);
 
 /**
  * Which slice of a tick's diff to serve.
@@ -1017,6 +1105,45 @@ export const DeltaScopeSchema: GenEnum<DeltaScope> = /*@__PURE__*/
   enumDesc(file_activity, 0);
 
 /**
+ * How a wait for an answer ended.
+ *
+ * @generated from enum activity.AwaitQuestionOutcome
+ */
+export enum AwaitQuestionOutcome {
+  /**
+   * @generated from enum value: AWAIT_QUESTION_OUTCOME_UNSPECIFIED = 0;
+   */
+  UNSPECIFIED = 0,
+
+  /**
+   * The orchestrator answered: `option_id` or `cancelled` says how.
+   *
+   * @generated from enum value: AWAIT_QUESTION_OUTCOME_ANSWERED = 1;
+   */
+  ANSWERED = 1,
+
+  /**
+   * The session has no orchestrator active on this host, so nobody will answer: no wait at all.
+   *
+   * @generated from enum value: AWAIT_QUESTION_OUTCOME_NO_ORCHESTRATOR = 2;
+   */
+  NO_ORCHESTRATOR = 2,
+
+  /**
+   * Nobody answered before the deadline.
+   *
+   * @generated from enum value: AWAIT_QUESTION_OUTCOME_TIMED_OUT = 3;
+   */
+  TIMED_OUT = 3,
+}
+
+/**
+ * Describes the enum activity.AwaitQuestionOutcome.
+ */
+export const AwaitQuestionOutcomeSchema: GenEnum<AwaitQuestionOutcome> = /*@__PURE__*/
+  enumDesc(file_activity, 1);
+
+/**
  * Whether a notification asks the operator for something, or merely reports progress.
  *
  * @generated from enum activity.SessionNotificationKind
@@ -1049,7 +1176,7 @@ export enum SessionNotificationKind {
  * Describes the enum activity.SessionNotificationKind.
  */
 export const SessionNotificationKindSchema: GenEnum<SessionNotificationKind> = /*@__PURE__*/
-  enumDesc(file_activity, 1);
+  enumDesc(file_activity, 2);
 
 /**
  * Which of the daemon's inbound paths raised a notification.
@@ -1103,7 +1230,7 @@ export enum SessionNotificationSource {
  * Describes the enum activity.SessionNotificationSource.
  */
 export const SessionNotificationSourceSchema: GenEnum<SessionNotificationSource> = /*@__PURE__*/
-  enumDesc(file_activity, 2);
+  enumDesc(file_activity, 3);
 
 /**
  * How an agent grades what it is telling its operator.
@@ -1141,7 +1268,7 @@ export enum NotificationLevel {
  * Describes the enum activity.NotificationLevel.
  */
 export const NotificationLevelSchema: GenEnum<NotificationLevel> = /*@__PURE__*/
-  enumDesc(file_activity, 3);
+  enumDesc(file_activity, 4);
 
 /**
  * Whether the stream replays the persisted history before tailing live records.
@@ -1186,7 +1313,7 @@ export enum StreamMode {
  * Describes the enum activity.StreamMode.
  */
 export const StreamModeSchema: GenEnum<StreamMode> = /*@__PURE__*/
-  enumDesc(file_activity, 4);
+  enumDesc(file_activity, 5);
 
 /**
  * @generated from service activity.ActivityService
@@ -1314,6 +1441,20 @@ export const ActivityService: GenService<{
     methodKind: "unary";
     input: typeof ReportOperatorNotificationRequestSchema;
     output: typeof ReportOperatorNotificationResponseSchema;
+  },
+  /**
+   * The `PermissionRequest` hook of an orchestrated claude-cli session, holding until the session's
+   * orchestrator answers the pending question `request_id` names, or the daemon's deadline
+   * (`claude_cli.answer_wait_secs`) passes (`#home-inbox` 6/8). Authenticated exactly like
+   * ReportSessionStatus. Answers at once with NO_ORCHESTRATOR when the session has no orchestrator
+   * active on this host: the hook then prints nothing and Claude shows its own prompt.
+   *
+   * @generated from rpc activity.ActivityService.AwaitQuestionAnswer
+   */
+  awaitQuestionAnswer: {
+    methodKind: "unary";
+    input: typeof AwaitQuestionAnswerRequestSchema;
+    output: typeof AwaitQuestionAnswerResponseSchema;
   },
 }> = /*@__PURE__*/
   serviceDesc(file_activity, 0);

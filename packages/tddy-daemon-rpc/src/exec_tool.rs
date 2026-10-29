@@ -78,6 +78,9 @@ pub(crate) struct ProjectHomeHost {
     /// The control tokens this host's project-home sessions hold on its terminals, kept here so the
     /// agent never sees one (`#home-inbox` 5/8).
     pub(crate) leases: Arc<home_terminal_leases::HomeTerminalLeases>,
+    /// The permission prompts this host's claude-cli hooks hold open, the registry
+    /// `AnswerSessionPermission` delivers into (`#home-inbox` 6/8).
+    pub(crate) pending_answers: Arc<tddy_session_activity::pending_answers::PendingAnswers>,
 }
 
 impl ExecToolRpcHandler {
@@ -112,6 +115,7 @@ impl ExecToolRpcHandler {
                 terminals: host.terminal_sessions(),
                 terminal_control: host.terminal_control(),
                 leases: Arc::new(home_terminal_leases::HomeTerminalLeases::default()),
+                pending_answers: host.pending_answers(),
             },
         }
     }

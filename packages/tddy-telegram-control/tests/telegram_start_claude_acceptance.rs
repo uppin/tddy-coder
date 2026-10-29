@@ -93,6 +93,7 @@ fn daemon_config_with_stub_binary(stub_binary: &str) -> DaemonConfig {
             daemon_url: None,
             claude_home_dir: None,
             fullscreen: true,
+            answer_wait_secs: 120,
         }),
         ..Default::default()
     }

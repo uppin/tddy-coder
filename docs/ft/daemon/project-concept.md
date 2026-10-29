@@ -235,7 +235,7 @@ an ordinary, still read-only session, and main is set up once more.
 The exec tools below give the read-only main its reach over **its own project's** sessions. Only a
 session whose record carries the `project-home` role may run them; any other caller is refused with
 `PERMISSION_DENIED` naming the role — except that a session that can spawn conversations is offered
-and served the four start tools, for its own project (see
+and served the four start tools and `AnswerSessionPermission`, for its own project (see
 [Conversation spawners](#conversation-spawners)).
 
 | Tool | Arguments | Answers |
@@ -254,6 +254,7 @@ and served the four start tools, for its own project (see
 | `ReadSessionTerminal` | `session_id`, `daemon_instance_id?` | `{lines, cursor: {row, col, visible}, cols, rows, offset}`: what the session's **main** terminal shows right now, as text — the visible rows of the screen it is on (the alternate screen while a full-screen TUI runs), each with trailing whitespace trimmed, and the cursor, zero-based. `offset` is the position in the terminal's output stream the text corresponds to: the same sequence point a reconnecting browser's snapshot carries. Text only: no scrollback, colours or attributes. Reading sends no input, takes no control lease and disturbs no attached screen. A session with no live terminal, or whose terminal has not reported its size, is refused naming why. See [Reading a terminal](#reading-a-terminal) |
 | `ClaimSessionTerminal` | `session_id`, `daemon_instance_id?` | `{holder}`: takes the session's terminal control lease for the screen `project-home:<home session id>`, stealing it from whoever holds it, as a browser's claim with `steal` does — the change is broadcast, so an attached browser drops to watch-only and names the new holder. The control token stays on the host that owns the terminal and is never returned. There is no release: a person takes control back by claiming it in the browser. See [Typing into a terminal](#typing-into-a-terminal) |
 | `SendSessionKeys` | `session_id`, `daemon_instance_id?`, `text?`, `keys?` | `{sent_bytes}`: types `text`, then each named key in order, into the session's **main** terminal while this home session holds its lease. Refused, naming the holder, when it does not, and nothing is sent. See [Typing into a terminal](#typing-into-a-terminal) |
+| `AnswerSessionPermission` | `session_id`, `request_id`, `option_id` or `cancelled`, `message?`, `daemon_instance_id?` | `{session_id, request_id, answered_by, option_id, cancelled, at_unix_ms}`: answers the Claude permission prompt a session this caller started is waiting on, as `ReadSessionActivity`'s `pending_question` shows it. `option_id` is `allow_once`, `reject_once` (with `message` saying why), or `allow_always` when Claude suggested a rule; `cancelled` leaves the prompt to the person at its terminal. Only the target's orchestrator may answer, and the first answer wins. See [Answering a permission prompt](#answering-a-permission-prompt) |
 
 - **Targets.** A target is a session id in the caller's project, with a worktree, on the host the
   optional `daemon_instance_id` argument names (as `ListProjectSessions` reports it; empty or absent
@@ -270,7 +271,7 @@ and served the four start tools, for its own project (see
   limitation:** the name tie-break mirrors the browser's `localeCompare` for ASCII names (case-insensitive,
   lowercase first on a case-only difference, punctuation before digits before letters); for non-ASCII
   names it is an approximation and may order equal-sized worktrees differently from the screen.
-- **Across hosts.** A target tool call (read, diff, the two worktree tools, `DescribeSessionStartOptions`, the two follow tools, `TerminateSession`, `RefreshWorktreeDiskUsage`, `ReadSessionTerminal`, `ClaimSessionTerminal`, `SendSessionKeys`, every git tool) naming another host is
+- **Across hosts.** A target tool call (read, diff, the two worktree tools, `DescribeSessionStartOptions`, the two follow tools, `TerminateSession`, `RefreshWorktreeDiskUsage`, `ReadSessionTerminal`, `ClaimSessionTerminal`, `SendSessionKeys`, `AnswerSessionPermission`, every git tool) naming another host is
   forwarded whole to that host over the peer forward and runs there unchanged: that host's path
   containment, activity gate and push identity apply. The host receiving it does not hold the calling
   session, so it confirms the caller **at the daemon that owns it**: it asks every other eligible
@@ -343,8 +344,8 @@ owns, an invalid option) is the tool's `is_error` result naming why, not a handl
 A session whose recipe gives it the conversation-spawn capability (today `grill-me`) is an
 orchestrator too, limited to starting sessions:
 
-- **Offered the four start tools.** `StartSession`, `GetSessionStart`, `CancelSessionStart` and
-  `DescribeSessionStartOptions` are added to its `ListExecTools` set (`SessionToolRole::ConversationSpawner`)
+- **Offered the four start tools and the permission answer.** `StartSession`, `GetSessionStart`,
+  `CancelSessionStart`, `DescribeSessionStartOptions` and `AnswerSessionPermission` are added to its `ListExecTools` set (`SessionToolRole::ConversationSpawner`)
   and served to it, with `project_id` fixed to its own project and itself as the orchestrator. The
   other project-home tools are still refused to it; an ordinary session is offered none of them.
 - **`spawn_conversation` is the same start.** The agent's `spawn_conversation` tool (MCP and
@@ -442,6 +443,41 @@ The rule is "type only while you hold it", since leases are never released.
 - **Input offset.** Input is written with offset 0, which the terminal treats as unset and does not
   acknowledge, so a browser's un-acknowledged-input overlay is untouched.
 - Not offered: a release tool, mouse input, resizing, or typing into the home session itself.
+
+### Answering a permission prompt
+
+A claude-cli session started by an orchestrator (its changeset's `orchestrator_session_id`) holds
+its `PermissionRequest` hook open for that orchestrator's decision, for at most
+`claude_cli.answer_wait_secs` ([Claude Code CLI session § Waiting for an orchestrator's answer](claude-cli-session.md#waiting-for-an-orchestrators-answer)).
+`AnswerSessionPermission` gives that decision.
+
+- **The request** is offered in the same shape as an ACP subagent's (`PermissionRequestView`): the
+  tool as `title`, its ACP `kind` (`execute` for `Bash`; `edit` for `Edit`, `MultiEdit`, `Write`,
+  `NotebookEdit`; `read` for `Read`, `Glob`, `Grep`; `other` otherwise), its parsed input, and the
+  options `allow_once` ("Allow once"), `allow_always` ("Allow always", only when Claude sent
+  permission suggestions) and `reject_once` ("Reject").
+- **Checks, in order**, each refused as an `is_error` result naming why, and each leaving the hook
+  waiting:
+  1. the caller is the target's orchestrator — the session `orchestrator_session_id` names, on the
+     host `orchestrator_daemon_instance_id` names (the target's own host when absent): `permission
+     denied: session <caller> is not the orchestrator of session <target> (its orchestrator is …)`;
+  2. nobody answered it already: `permission request '<id>' was already answered by orchestrator
+     session <id>` (the daemon remembers its last 1024 answers);
+  3. the target's pending question is open under that `request_id`, and a hook is still waiting on
+     it: `no permission request '<id>' is pending on that session` — also after the wait timed out;
+  4. it is a permission, not a question: `… is a <kind> question, not a permission: answer it with
+     AnswerSessionQuestion`;
+  5. the option is one the request offers: `permission request '<id>' offers no option '<option>'`.
+- **Then** the hook is woken with the answer, a `completed` row under `permission:<request_id>` is
+  appended to the target's activity (the request, and who answered what), and its pending question
+  is cleared. Once the hook is woken the answer stands: failing to write the row or clear the
+  question is logged, and the child's next status report clears the question.
+- **Same host only.** The hook waits only for an orchestrator whose main terminal its own daemon
+  serves. An orchestrator on another host gets no wait, and Claude's own prompt appears
+  ([TODO](../../dev/todo/2026-10-29-permission-wait-needs-a-same-host-orchestrator.md)).
+- **Known gap.** A conversation spawner may answer but is not served `ReadSessionActivity`, so it
+  cannot read the `request_id`; its claude-cli children wait out the deadline
+  ([TODO](../../dev/todo/2026-10-29-conversation-spawner-cannot-read-its-childs-permission-request.md)).
 
 ### Following a session
 

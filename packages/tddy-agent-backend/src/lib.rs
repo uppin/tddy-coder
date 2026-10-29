@@ -42,6 +42,9 @@ pub use backend::{
     SessionMode, SharedBackend, StubBackend, ToolExecutor, CODEX_OAUTH_AUTHORIZE_URL_FILENAME,
     CODEX_THREAD_ID_FILENAME,
 };
-pub use claude_hooks::{build_claude_hooks_settings, HookCommandParams};
+pub use claude_hooks::{
+    build_claude_hooks_settings, HookCommandParams, AWAIT_CLIENT_MARGIN_SECS,
+    CLAUDE_HOOK_TIMEOUT_MARGIN_SECS,
+};
 pub use cursor_hooks::build_cursor_hooks_settings;
 pub use stream::ProgressEvent;

@@ -75,6 +75,12 @@ service ActivityService {
   // hooks this refuses loudly: a title or body over its limit is INVALID_ARGUMENT, never truncated
   // (`#home-inbox` 1/8).
   rpc ReportOperatorNotification(ReportOperatorNotificationRequest) returns (ReportOperatorNotificationResponse);
+  // The `PermissionRequest` hook of an orchestrated claude-cli session, holding until the session's
+  // orchestrator answers the pending question `request_id` names, or the daemon's deadline
+  // (`claude_cli.answer_wait_secs`) passes (`#home-inbox` 6/8). Authenticated exactly like
+  // ReportSessionStatus. Answers at once with NO_ORCHESTRATOR when the session has no orchestrator
+  // active on this host: the hook then prints nothing and Claude shows its own prompt.
+  rpc AwaitQuestionAnswer(AwaitQuestionAnswerRequest) returns (AwaitQuestionAnswerResponse);
 }
 
 // One replay frame: a service-local wrapper carrying an ACP `tddy.acp.v1.AcpAgentMessage`
@@ -297,6 +303,41 @@ message ReportOperatorNotificationRequest {
 
 message ReportOperatorNotificationResponse {
   bool ok = 1;
+}
+
+message AwaitQuestionAnswerRequest {
+  string session_id = 1;
+  string hook_token = 2;
+  string os_user    = 3;
+  // The pending question to wait on: `ReportSessionStatusResponse.request_id` of the report that
+  // recorded it.
+  string request_id = 4;
+  // Claude's `permission_suggestions` for the request, as the hook received them (a JSON array);
+  // empty when Claude sent none. A non-empty value offers the orchestrator `allow_always`.
+  string permission_suggestions_json = 5;
+}
+
+// How a wait for an answer ended.
+enum AwaitQuestionOutcome {
+  AWAIT_QUESTION_OUTCOME_UNSPECIFIED = 0;
+  // The orchestrator answered: `option_id` or `cancelled` says how.
+  AWAIT_QUESTION_OUTCOME_ANSWERED = 1;
+  // The session has no orchestrator active on this host, so nobody will answer: no wait at all.
+  AWAIT_QUESTION_OUTCOME_NO_ORCHESTRATOR = 2;
+  // Nobody answered before the deadline.
+  AWAIT_QUESTION_OUTCOME_TIMED_OUT = 3;
+}
+
+message AwaitQuestionAnswerResponse {
+  AwaitQuestionOutcome outcome = 1;
+  // ANSWERED: the chosen option (`allow_once`, `allow_always`, `reject_once`); empty when cancelled.
+  string option_id = 2;
+  // ANSWERED: the request was answered as cancelled, so the hook prints no decision.
+  bool cancelled = 3;
+  // ANSWERED with a `reject_*` option: why, for Claude.
+  string message = 4;
+  // ANSWERED: who answered — the orchestrator's session id.
+  string answered_by = 5;
 }
 
 // One thing that happened in one session.

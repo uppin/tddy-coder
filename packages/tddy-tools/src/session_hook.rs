@@ -24,7 +24,10 @@ use tddy_core::{
     activity_status_from_hook_with_tool, hook_event_asks_a_question, parse_hook_event,
     SessionActivityStatus, ASK_USER_QUESTION_TOOL,
 };
-use tddy_service::proto::activity::{ReportAgentActivityRequest, ReportSessionStatusRequest};
+use tddy_service::proto::activity::{
+    AwaitQuestionAnswerRequest, AwaitQuestionAnswerResponse, AwaitQuestionOutcome,
+    ReportAgentActivityRequest, ReportSessionStatusRequest, ReportSessionStatusResponse,
+};
 
 /// The coordinate both reports are served at, read from `tddy-service` so this hook and the daemon
 /// serving it cannot disagree about the name.
@@ -65,6 +68,68 @@ pub struct SessionHookArgs {
     /// rely on stdin `hook_event_name` only.
     #[arg(long, default_value = "")]
     pub event: String,
+
+    /// On a `PermissionRequest`, wait for the session's orchestrator to answer after reporting
+    /// (`AwaitQuestionAnswer`), and print Claude's decision JSON when it does. The daemon decides
+    /// whether there is anyone to wait for; with nobody, or no answer in time, nothing is printed
+    /// and Claude shows its own prompt (`#home-inbox` 6/8).
+    #[arg(long)]
+    pub await_answer: bool,
+
+    /// How long the hook itself waits on `AwaitQuestionAnswer`, in seconds: past the daemon's own
+    /// deadline (`claude_cli.answer_wait_secs`) and inside Claude's `timeout` for the hook, so the
+    /// daemon answers `TIMED_OUT` first and Claude never kills a hook that is still waiting.
+    #[arg(long, default_value_t = DEFAULT_AWAIT_TIMEOUT_SECS)]
+    pub await_timeout_secs: u64,
+}
+
+/// [`SessionHookArgs::await_timeout_secs`] when the hook command names none: the default
+/// `answer_wait_secs` (120) plus five.
+pub const DEFAULT_AWAIT_TIMEOUT_SECS: u64 = 125;
+
+/// How an orchestrator's answer reached the hook: the `AwaitQuestionAnswer` response, and Claude's
+/// `permission_suggestions` from the hook's stdin, which an `allow_always` answer applies.
+///
+/// The decision is Claude Code's `PermissionRequest` hook output
+/// (<https://code.claude.com/docs/en/hooks> § PermissionRequest decision control):
+///
+/// - `allow_once` → `{"hookSpecificOutput":{"hookEventName":"PermissionRequest","decision":{"behavior":"allow"}}}`;
+/// - `allow_always` → the same, with `"updatedPermissions"` set to Claude's `permission_suggestions`;
+/// - a `reject_*` option → `"behavior":"deny"` with `"message"`;
+/// - `cancelled`, `TIMED_OUT`, `NO_ORCHESTRATOR` → `None`: nothing is printed, and Claude's own
+///   prompt follows.
+#[must_use]
+pub fn permission_decision_json(
+    answer: &tddy_service::proto::activity::AwaitQuestionAnswerResponse,
+    permission_suggestions: Option<&serde_json::Value>,
+) -> Option<String> {
+    if AwaitQuestionOutcome::try_from(answer.outcome) != Ok(AwaitQuestionOutcome::Answered)
+        || answer.cancelled
+    {
+        return None;
+    }
+    let decision = match answer.option_id.as_str() {
+        "allow_once" => serde_json::json!({ "behavior": "allow" }),
+        "allow_always" => match permission_suggestions {
+            Some(suggestions) => {
+                serde_json::json!({ "behavior": "allow", "updatedPermissions": suggestions })
+            }
+            None => serde_json::json!({ "behavior": "allow" }),
+        },
+        option if option.starts_with("reject_") => {
+            serde_json::json!({ "behavior": "deny", "message": answer.message })
+        }
+        _ => return None,
+    };
+    Some(
+        serde_json::json!({
+            "hookSpecificOutput": {
+                "hookEventName": "PermissionRequest",
+                "decision": decision,
+            }
+        })
+        .to_string(),
+    )
 }
 
 /// The `ReportSessionStatus` request the hook event in `stdin_json` becomes, or `None` for an
@@ -161,18 +226,75 @@ async fn try_run_session_hook(args: SessionHookArgs) -> anyhow::Result<()> {
         eprintln!("[session-hook] agent-activity report failed (ignored, fail-quiet): {e}");
     }
 
-    report_session_status(&args, &stdin_buf).await
+    let reported = report_session_status(&args, &stdin_buf).await?;
+    if args.await_answer && hook_event_name == "PermissionRequest" {
+        let request_id = reported
+            .map(|response| response.request_id)
+            .unwrap_or_default();
+        if !request_id.is_empty() {
+            if let Some(decision) = await_decision(&args, &stdin_buf, request_id).await? {
+                // The decision is the only stdout this hook ever writes: Claude reads it.
+                println!("{decision}");
+            }
+        }
+    }
+    Ok(())
+}
+
+/// Ask the daemon for the orchestrator's answer to `request_id`, waiting at most
+/// `--await-timeout-secs`, and map it to Claude's decision JSON.
+async fn await_decision(
+    args: &SessionHookArgs,
+    stdin_json: &str,
+    request_id: String,
+) -> anyhow::Result<Option<String>> {
+    let suggestions = serde_json::from_str::<serde_json::Value>(stdin_json)
+        .ok()
+        .and_then(|event| event.get("permission_suggestions").cloned());
+    let req = AwaitQuestionAnswerRequest {
+        session_id: args.session.clone(),
+        hook_token: args.hook_token.clone(),
+        os_user: args.os_user.clone(),
+        request_id,
+        permission_suggestions_json: suggestions
+            .as_ref()
+            .map(serde_json::Value::to_string)
+            .unwrap_or_default(),
+    };
+    let bytes = exchange(
+        args,
+        "AwaitQuestionAnswer",
+        req.encode_to_vec(),
+        std::time::Duration::from_secs(args.await_timeout_secs),
+    )
+    .await?;
+    let answer = AwaitQuestionAnswerResponse::decode(&bytes[..])
+        .map_err(|e| anyhow::anyhow!("decode AwaitQuestionAnswerResponse: {e}"))?;
+    Ok(permission_decision_json(&answer, suggestions.as_ref()))
 }
 
 /// Send a `ReportSessionStatus` RPC for the status the hook event in `stdin_json` maps to.
 ///
-/// Returns `Ok(())` without contacting the daemon when the event maps to no status (no-op event).
-async fn report_session_status(args: &SessionHookArgs, stdin_json: &str) -> anyhow::Result<()> {
+/// Returns `Ok(None)` without contacting the daemon when the event maps to no status (no-op event),
+/// and the daemon's response otherwise: its `request_id` names the question the report recorded.
+async fn report_session_status(
+    args: &SessionHookArgs,
+    stdin_json: &str,
+) -> anyhow::Result<Option<ReportSessionStatusResponse>> {
     let Some(req) = session_status_request(args, stdin_json) else {
-        return Ok(());
+        return Ok(None);
     };
 
-    deliver(args, "ReportSessionStatus", req.encode_to_vec()).await
+    let bytes = exchange(
+        args,
+        "ReportSessionStatus",
+        req.encode_to_vec(),
+        REPORT_TIMEOUT,
+    )
+    .await?;
+    let response = ReportSessionStatusResponse::decode(&bytes[..])
+        .map_err(|e| anyhow::anyhow!("decode ReportSessionStatusResponse: {e}"))?;
+    Ok(Some(response))
 }
 
 /// Send a `ReportAgentActivity` RPC carrying the tool payload of a tool-use hook.
@@ -202,9 +324,19 @@ const REPORT_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(2);
 /// Send an encoded protobuf request to a daemon [`ACTIVITY_SERVICE`] method — over the daemon's
 /// agent-facing socket when the hook was given one, over HTTP otherwise.
 async fn deliver(args: &SessionHookArgs, method: &str, body: Vec<u8>) -> anyhow::Result<()> {
+    exchange(args, method, body, REPORT_TIMEOUT).await.map(drop)
+}
+
+/// [`deliver`], returning the response body and bounding the call by `timeout`.
+async fn exchange(
+    args: &SessionHookArgs,
+    method: &str,
+    body: Vec<u8>,
+    timeout: std::time::Duration,
+) -> anyhow::Result<Vec<u8>> {
     match &args.daemon_socket {
-        Some(socket) => call_over_socket(socket, method, body).await,
-        None => post_proto(&args.daemon, method, body).await,
+        Some(socket) => call_over_socket(socket, method, body, timeout).await,
+        None => post_proto(&args.daemon, method, body, timeout).await,
     }
 }
 
@@ -216,7 +348,8 @@ async fn call_over_socket(
     socket: &std::path::Path,
     method: &str,
     body: Vec<u8>,
-) -> anyhow::Result<()> {
+    timeout: std::time::Duration,
+) -> anyhow::Result<Vec<u8>> {
     let context = format!("{ACTIVITY_SERVICE}/{method} over {}", socket.display());
     let call = async {
         let client = tddy_session_tool_client::connect_sandbox_ipc(socket)
@@ -227,21 +360,25 @@ async fn call_over_socket(
             .await
             .map_err(|e| anyhow::anyhow!("{context}: {e}"))
     };
-    tokio::time::timeout(REPORT_TIMEOUT, call)
+    tokio::time::timeout(timeout, call)
         .await
-        .map_err(|_| anyhow::anyhow!("{context}: timed out"))??;
-    Ok(())
+        .map_err(|_| anyhow::anyhow!("{context}: timed out"))?
 }
 
 /// POST an encoded protobuf request to a daemon [`ACTIVITY_SERVICE`] method via the Connect
 /// protocol (async reqwest with a 2-second timeout).
-async fn post_proto(daemon: &str, method: &str, body: Vec<u8>) -> anyhow::Result<()> {
+async fn post_proto(
+    daemon: &str,
+    method: &str,
+    body: Vec<u8>,
+    timeout: std::time::Duration,
+) -> anyhow::Result<Vec<u8>> {
     let url = format!(
         "{}/rpc/{ACTIVITY_SERVICE}/{method}",
         daemon.trim_end_matches('/')
     );
     let client = reqwest::Client::builder()
-        .timeout(REPORT_TIMEOUT)
+        .timeout(timeout)
         .build()
         .map_err(|e| anyhow::anyhow!("build http client: {e}"))?;
 
@@ -257,7 +394,11 @@ async fn post_proto(daemon: &str, method: &str, body: Vec<u8>) -> anyhow::Result
         anyhow::bail!("POST {url} → HTTP {}", resp.status());
     }
 
-    Ok(())
+    let bytes = resp
+        .bytes()
+        .await
+        .map_err(|e| anyhow::anyhow!("POST {url}: read response: {e}"))?;
+    Ok(bytes.to_vec())
 }
 
 /// Tool-payload subset of the Claude Code hook stdin JSON.

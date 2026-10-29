@@ -26,7 +26,10 @@ mod conversation_replay;
 mod hook_reports;
 mod operator_notifications;
 pub(crate) mod ports;
+mod question_answers;
 mod rpc;
+
+pub use question_answers::AnswerWaitPorts;
 
 use std::path::PathBuf;
 
@@ -44,12 +47,26 @@ pub use crate::service::ports::{
 /// The `activity.ActivityService` implementation.
 pub struct ActivityServiceImpl {
     ports: ActivityPorts,
+    /// What `AwaitQuestionAnswer` holds a hook with (`#home-inbox` 6/8).
+    answers: AnswerWaitPorts,
 }
 
 impl ActivityServiceImpl {
+    /// The service over `ports`, holding no hook for an answer ([`AnswerWaitPorts::default`]) until
+    /// [`Self::with_question_answers`].
     #[must_use]
     pub fn new(ports: ActivityPorts) -> Self {
-        Self { ports }
+        Self {
+            ports,
+            answers: AnswerWaitPorts::default(),
+        }
+    }
+
+    /// Hold `AwaitQuestionAnswer` callers with `answers` (builder).
+    #[must_use]
+    pub fn with_question_answers(mut self, answers: AnswerWaitPorts) -> Self {
+        self.answers = answers;
+        self
     }
 
     /// The base directory a token's owner keeps its sessions under.

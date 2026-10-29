@@ -10,6 +10,15 @@ fn default_claude_cli_fullscreen() -> bool {
     true
 }
 
+/// How long an orchestrated claude-cli session's `PermissionRequest` hook waits for its
+/// orchestrator's answer, in seconds, when `claude_cli.answer_wait_secs` is not set
+/// (`#home-inbox` 6/8).
+pub const DEFAULT_ANSWER_WAIT_SECS: u64 = 120;
+
+fn default_claude_cli_answer_wait_secs() -> u64 {
+    DEFAULT_ANSWER_WAIT_SECS
+}
+
 fn default_cursor_cli_binary_path() -> String {
     "agent".to_string()
 }
@@ -161,6 +170,12 @@ pub struct ClaudeCliConfig {
     /// [`DaemonConfig::claude_cli_renderer_env`]. `false` leaves the renderer to Claude.
     #[serde(default = "default_claude_cli_fullscreen")]
     pub fullscreen: bool,
+    /// How long an orchestrated session's `PermissionRequest` hook waits for its orchestrator's
+    /// answer before Claude shows its own prompt, in seconds (default
+    /// [`DEFAULT_ANSWER_WAIT_SECS`]). Claude's own timeout for that hook is this plus ten
+    /// (`#home-inbox` 6/8).
+    #[serde(default = "default_claude_cli_answer_wait_secs")]
+    pub answer_wait_secs: u64,
 }
 
 /// One further CLI harness's configuration, under `cli_harnesses.<session type>:`.
@@ -173,6 +188,15 @@ pub struct CliHarnessConfig {
 }
 
 impl DaemonConfig {
+    /// `claude_cli.answer_wait_secs`, or [`DEFAULT_ANSWER_WAIT_SECS`] when the `claude_cli:` section
+    /// is absent (`#home-inbox` 6/8).
+    #[must_use]
+    pub fn claude_cli_answer_wait_secs(&self) -> u64 {
+        self.claude_cli
+            .as_ref()
+            .map_or(DEFAULT_ANSWER_WAIT_SECS, |c| c.answer_wait_secs)
+    }
+
     /// The environment every claude-cli launch adds so Claude runs the renderer `claude_cli.fullscreen`
     /// asks for: [`CLAUDE_FULLSCREEN_ENV`] when on — also when the `claude_cli:` section is absent —
     /// and nothing when off. Forcing it also overrides Claude's own fall back to the classic renderer
