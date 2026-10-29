@@ -21,76 +21,61 @@
 //!
 //! Feature doc: docs/ft/daemon/project-concept.md § Project-home tools.
 
-use std::collections::HashMap;
+mod answer;
+mod caller;
+mod listing;
+mod notify;
+mod port;
+mod terminal;
+
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use async_trait::async_trait;
 use tddy_agent_launch::conversation_spawn::session_tool_role;
-use tddy_agent_launch::svc_signal_delete_session::signal_session_dir;
 use tddy_core::session_lifecycle::{unified_session_dir_path, validate_session_id_segment};
 use tddy_daemon_kernel::daemon_identity::local_instance_id_for_config;
 use tddy_daemon_kernel::user_paths::projects_path_for_user;
-use tddy_discovery::subagent::PermissionAnswer;
 use tddy_host_service::HostServiceImpl;
-use tddy_rpc::{Request, Status};
-use tddy_service::proto::activity::{ActivityService as _, ReportOperatorNotificationRequest};
+use tddy_rpc::Status;
 use tddy_service::proto::exec_tools::{ExecuteToolRequest, ExecuteToolResponse};
-use tddy_service::proto::session::{ListSessionsRequest, Signal};
-use tddy_session_activity::answers::{
-    answer_permission, answer_question, AnswerContext, AnsweringCaller, QuestionAnswer,
-};
 use tddy_session_activity::pending_answers::PendingAnswers;
 use tddy_session_activity::project_notification_log::ProjectNotificationLog;
-use tddy_session_activity::session_reader::{list_sessions_in_dir, SessionEntry};
 use tddy_session_lifecycle::connection_service::launch_ports::LaunchSessions;
 use tddy_session_lifecycle::connection_service::session_acting_identity::SessionAccountAccess;
 use tddy_session_lifecycle::connection_service::start_choices;
 use tddy_session_lifecycle::connection_service::PeerRoutedActivity;
 use tddy_session_lifecycle::terminal_session_adapter::DaemonTerminalSessionStore;
 use tddy_session_lifecycle::user_sessions_path::sessions_base_for_user;
-use tddy_task::TextGrid;
-use tddy_terminal_rpc::bridge::MAIN_TERMINAL_ID;
-use tddy_terminal_rpc::session::TerminalSessionStore;
-use tddy_terminal_rpc::{ControlClaim, TerminalControl};
+use tddy_terminal_rpc::TerminalControl;
 use tddy_tool_engine::catalog::ToolDef;
 use tddy_tool_engine::project_home_answer_tools::{
-    execute_project_home_answer_tool, is_project_home_answer_tool, ProjectHomeAnswerPort,
+    execute_project_home_answer_tool, is_project_home_answer_tool,
 };
 use tddy_tool_engine::project_home_git_tools::is_project_home_git_tool;
 use tddy_tool_engine::project_home_inbox_tools::{
     execute_project_home_inbox_tool, is_project_home_inbox_tool,
 };
 use tddy_tool_engine::project_home_notify_tools::{
-    execute_project_home_notify_tool, is_project_home_notify_tool, OperatorNotice,
-    ProjectHomeNotifyPort,
+    execute_project_home_notify_tool, is_project_home_notify_tool,
 };
 use tddy_tool_engine::project_home_terminal_tools::{
-    execute_project_home_terminal_tool, is_project_home_terminal_tool, ProjectHomeTerminalPort,
+    execute_project_home_terminal_tool, is_project_home_terminal_tool,
 };
 use tddy_tool_engine::project_home_tools::{
-    execute_project_home_tool, is_conversation_spawner_scoped_tool, is_conversation_spawner_tool,
-    is_project_home_tool, session_offered_catalog_for, ListProjectSessionsResult, ListedSession,
-    ProjectHomePort, SessionToolRole,
+    execute_project_home_tool, is_project_home_tool, session_offered_catalog_for,
 };
-use tddy_tool_engine::project_home_worktree_tools::WorktreeEntry;
-use tddy_tool_engine::session_follow::{SessionActivity, ToolCallBodies, TranscriptItem};
-use tddy_tool_engine::start_ledger::{StartHandle, StartLedger, StartLedgerRecord};
-use tddy_tool_engine::start_options::{StartOptions, StartOptionsQuery};
-use tddy_tool_engine::start_session_args::{StartContext, StartSessionArgs};
-use tddy_worktree_service::service::project_main_repo_on_host;
-use tddy_worktree_service::session_git_ops::PushIdentity;
-use tddy_worktree_service::session_target::{HomeCaller, SessionTarget, TargetRecord};
-use tddy_worktree_service::worktrees::{
-    list_worktree_diff_rows, project_worktree_snapshot, worktree_path_is_listed,
-    WorktreeSizeCalculator,
-};
+use tddy_tool_engine::start_ledger::StartLedger;
+use tddy_worktree_service::session_target::HomeCaller;
+use tddy_worktree_service::worktrees::WorktreeSizeCalculator;
 
 use super::home_terminal_leases::{HomeTerminalClaimKey, HomeTerminalLeases};
 use super::project_home_remote::PeerSessionLists;
-use super::project_home_session_follow;
-use super::project_home_start_options::{describe_start_options, StartOptionsSources};
 use super::ExecToolRpcHandler;
+use crate::exec_tool::project_home::caller::project_home_caller;
+use crate::exec_tool::project_home::caller::record_call;
+use crate::exec_tool::project_home::caller::refuse_a_spawner_outside_its_own_sessions;
+use crate::exec_tool::project_home::listing::session_rows;
+use crate::exec_tool::project_home::listing::SessionRow;
 use crate::families::ProviderAccountsPort;
 use crate::{CatalogRpcHandler, ProjectRpcHandler};
 
@@ -237,112 +222,6 @@ impl ExecToolRpcHandler {
     }
 }
 
-/// Refuse `tool_name` unless `session_id` is a project-home session — or a session that spawns
-/// conversations calling one of its five tools ([`is_conversation_spawner_tool`]) — and name that
-/// session's project. The role is
-/// the session's own record, not anything the request claims.
-fn project_home_caller(
-    sessions_base: &Path,
-    session_id: &str,
-    tool_name: &str,
-) -> Result<HomeCaller, Status> {
-    let session_dir = unified_session_dir_path(sessions_base, session_id);
-    let metadata = tddy_core::read_session_metadata(&session_dir).map_err(|e| {
-        Status::permission_denied(format!(
-            "tool {tool_name} is refused: cannot read session {session_id}'s role ({e})"
-        ))
-    })?;
-    match session_tool_role(&metadata) {
-        SessionToolRole::ProjectHome => {}
-        // A session that spawns conversations is served the start tools and the permission answer,
-        // for its own project.
-        SessionToolRole::ConversationSpawner if is_conversation_spawner_tool(tool_name) => {}
-        // A read of a session it started: whose, is checked once the target is known
-        // ([`refuse_a_spawner_outside_its_own_sessions`]).
-        SessionToolRole::ConversationSpawner if is_conversation_spawner_scoped_tool(tool_name) => {}
-        _ => {
-            return Err(Status::permission_denied(format!(
-                "tool {tool_name} is served only to a project-home session"
-            )));
-        }
-    }
-    Ok(HomeCaller {
-        session_id: session_id.to_string(),
-        project_id: metadata.project_id,
-    })
-}
-
-/// Refuse a conversation spawner's [`is_conversation_spawner_scoped_tool`] call unless its target —
-/// the `session_id` the call names — is a session the spawner started: one whose changeset names
-/// `home` as its `orchestrator_session_id` (`#home-inbox` 11/11). Refused as permission denied,
-/// naming the caller and the target. Any other caller, or any other tool, passes: their scope is the
-/// project's, checked by the target resolver.
-fn refuse_a_spawner_outside_its_own_sessions(
-    sessions_base: &Path,
-    home: &HomeCaller,
-    req: &ExecuteToolRequest,
-) -> Result<(), Status> {
-    if !is_conversation_spawner_scoped_tool(&req.tool_name) {
-        return Ok(());
-    }
-    let session_dir = unified_session_dir_path(sessions_base, &home.session_id);
-    let is_spawner = tddy_core::read_session_metadata(&session_dir)
-        .map(|metadata| session_tool_role(&metadata) == SessionToolRole::ConversationSpawner)
-        .unwrap_or(false);
-    if !is_spawner {
-        return Ok(());
-    }
-    let refused = |why: &str| {
-        Status::permission_denied(format!(
-            "tool {} is refused: session {} may read only the sessions it started ({why})",
-            req.tool_name, home.session_id
-        ))
-    };
-    let target = serde_json::from_str::<serde_json::Value>(&req.args_json)
-        .ok()
-        .and_then(|args| args.get("session_id")?.as_str().map(str::to_string))
-        .unwrap_or_default();
-    if validate_session_id_segment(&target).is_err() {
-        return Err(refused("the call names no valid session_id"));
-    }
-    // Same host only: a child recorded on another host has no changeset here (see
-    // docs/dev/todo/2026-10-29-spawner-read-scope-is-same-host-only.md).
-    let started_by = tddy_core::read_changeset(&unified_session_dir_path(sessions_base, &target))
-        .ok()
-        .and_then(|changeset| changeset.orchestrator_session_id);
-    if started_by.as_deref() == Some(home.session_id.as_str()) {
-        Ok(())
-    } else {
-        Err(refused(&format!("it did not start {target}")))
-    }
-}
-
-/// Append the call to the session's tool-call log, as the local runner does for every other tool.
-/// A failed write is logged and does not fail the call.
-fn record_call(sessions_base: &Path, req: &ExecuteToolRequest, response: &ExecuteToolResponse) {
-    let session_dir = unified_session_dir_path(sessions_base, &req.session_id);
-    let record = tddy_tool_engine::tool_call_log::ToolCallRecord {
-        task_id: response.job_id.clone(),
-        tool_name: req.tool_name.clone(),
-        args_json: req.args_json.clone(),
-        result_json: response.result_json.clone(),
-        is_error: response.is_error,
-        error_message: response.error_message.clone(),
-        job_running: response.job_running,
-        created_unix_ms: std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_millis() as u64,
-    };
-    if let Err(e) = tddy_tool_engine::tool_call_log::append_tool_call(&session_dir, &record) {
-        log::warn!(
-            "tool_call_log: failed to persist project-home tool call for session {}: {}",
-            req.session_id,
-            e
-        );
-    }
-}
-
 /// [`ProjectHomePort`] over this host, for one caller: the host's session list and start run as the
 /// caller's token, and the session store is read for the worktrees the resolver needs.
 pub(super) struct DaemonProjectHome {
@@ -389,14 +268,6 @@ pub(super) struct DaemonProjectHome {
     pub(super) notification_log: Option<Arc<ProjectNotificationLog>>,
     /// This host's activity surface, which `NotifyOperator` reports through (`#home-inbox` 11/11).
     activity: Arc<PeerRoutedActivity>,
-}
-
-/// One session as the target resolver reads it: its `.session.yaml`, its changeset's branch, and the
-/// ref its worktree is diffed against.
-struct SessionRow {
-    entry: SessionEntry,
-    branch: String,
-    base_ref: String,
 }
 
 impl DaemonProjectHome {
@@ -458,396 +329,6 @@ impl DaemonProjectHome {
     }
 }
 
-fn session_rows(
-    sessions_base: &Path,
-    tddy_data_dir: &Path,
-    os_user: &str,
-) -> anyhow::Result<Vec<SessionRow>> {
-    let projects_dir = projects_path_for_user(os_user, Some(tddy_data_dir));
-    // A project's main branch is the diff base of every session in it, so each is read once.
-    let mut main_branch_refs: HashMap<String, Option<String>> = HashMap::new();
-    let mut rows = Vec::new();
-    for entry in list_sessions_in_dir(sessions_base)? {
-        let session_dir = unified_session_dir_path(sessions_base, &entry.session_id);
-        let changeset = tddy_core::read_changeset(&session_dir).ok();
-        let branch = changeset
-            .as_ref()
-            .and_then(|c| c.branch.clone())
-            .unwrap_or_default();
-        let recorded_base = changeset
-            .and_then(|c| c.effective_worktree_integration_base_ref)
-            .filter(|r| !r.trim().is_empty());
-        let base_ref = match recorded_base {
-            Some(base) => base,
-            None => main_branch_refs
-                .entry(entry.project_id.clone())
-                .or_insert_with(|| {
-                    let dir = projects_dir.as_ref()?;
-                    tddy_projects::project_storage::find_project(dir, &entry.project_id)
-                        .ok()
-                        .flatten()
-                        .and_then(|p| p.main_branch_ref)
-                })
-                .clone()
-                .unwrap_or_default(),
-        };
-        rows.push(SessionRow {
-            entry,
-            branch,
-            base_ref,
-        });
-    }
-    Ok(rows)
-}
-
-#[async_trait]
-impl ProjectHomePort for DaemonProjectHome {
-    /// The host's choices for a start, answered from this host's own RPCs and sessions. A remote
-    /// host's answer is the one it gives for itself: the tool forwards a call that names it.
-    async fn start_options(
-        &self,
-        project_id: &str,
-        query: StartOptionsQuery,
-    ) -> anyhow::Result<StartOptions> {
-        describe_start_options(
-            StartOptionsSources {
-                session_token: &self.session_token,
-                daemon_instance_id: &self.daemon_instance_id,
-                launch: &self.launch,
-                catalog: &self.catalog,
-                projects: &self.projects,
-                host_service: &self.host_service,
-                provider_accounts: self.provider_accounts.as_deref(),
-            },
-            project_id,
-            query,
-        )
-        .await
-    }
-
-    async fn list_sessions(
-        &self,
-        project_id: &str,
-        home_session_id: &str,
-    ) -> anyhow::Result<Vec<ListedSession>> {
-        let listed = self
-            .launch
-            .list_sessions_at_session_coordinate(Request::direct(ListSessionsRequest {
-                session_token: self.session_token.clone(),
-            }))
-            .await
-            .map_err(|status| anyhow::anyhow!(status.message().to_string()))?
-            .into_inner();
-        Ok(listed
-            .sessions
-            .into_iter()
-            .filter(|s| s.project_id == project_id && s.session_id != home_session_id)
-            .map(|s| ListedSession {
-                agent_status: if s.activity_status.is_empty() {
-                    s.status
-                } else {
-                    s.activity_status
-                },
-                session_id: s.session_id,
-                branch: s.branch,
-                worktree: s.repo_path,
-                is_active: s.is_active,
-                pending_elicitation: s.pending_elicitation,
-                daemon_instance_id: self.daemon_instance_id.clone(),
-            })
-            .collect())
-    }
-
-    async fn list_peer_sessions(
-        &self,
-        _project_id: &str,
-        _home_session_id: &str,
-    ) -> ListProjectSessionsResult {
-        match &self.peers {
-            Some(peers) => peers.list().await,
-            None => ListProjectSessionsResult {
-                sessions: Vec::new(),
-                unreachable_hosts: Vec::new(),
-            },
-        }
-    }
-
-    /// The start is begun on this daemon's streamed start path, which forwards it to the host the
-    /// arguments name, and recorded in the start ledger of `home_session_id`, the orchestrator the
-    /// session is linked to. Answers with the handle once the start has named its task.
-    async fn start_session(
-        &self,
-        project_id: &str,
-        home_session_id: &str,
-        args: StartSessionArgs,
-    ) -> anyhow::Result<StartHandle> {
-        let request = args.into_request(StartContext {
-            session_token: self.session_token.clone(),
-            project_id: project_id.to_string(),
-            orchestrator_session_id: home_session_id.to_string(),
-            orchestrator_daemon_instance_id: self.daemon_instance_id.clone(),
-        });
-        let ledger = self.start_ledger_of(home_session_id)?;
-        self.launch
-            .begin_recorded_start(request, &self.os_user, ledger)
-            .await
-    }
-
-    async fn get_session_start(
-        &self,
-        home_session_id: &str,
-        start_id: &str,
-    ) -> anyhow::Result<StartLedgerRecord> {
-        self.start_ledger_of(home_session_id)?.read(start_id)
-    }
-
-    /// Stop the start on the host its task runs on: this host's task registry, or the peer's
-    /// `CancelTask`. The record reads cancelled once the start's stream has ended.
-    async fn cancel_session_start(
-        &self,
-        home_session_id: &str,
-        start_id: &str,
-    ) -> anyhow::Result<()> {
-        let ledger = self.start_ledger_of(home_session_id)?;
-        self.launch
-            .cancel_recorded_start(&ledger, start_id, &self.session_token)
-            .await
-    }
-
-    async fn push_identity(&self, target: &SessionTarget) -> anyhow::Result<PushIdentity> {
-        let identity = self.identity.clone();
-        let os_user = self.os_user.clone();
-        let sessions_base = self.sessions_base.clone();
-        let tddy_data_dir = self.tddy_data_dir.clone();
-        let session_id = target.session_id.clone();
-        let project_id = target.project_id.clone();
-        let env = tokio::task::spawn_blocking(move || {
-            let project = match registered_project(&tddy_data_dir, &os_user, &project_id) {
-                Ok(project) => Some(project),
-                Err(reason) => {
-                    log::warn!(
-                        "project-home git: target session {session_id} has no git identity: its project could not be read: {reason}"
-                    );
-                    None
-                }
-            };
-            let session_dir = unified_session_dir_path(&sessions_base, &session_id);
-            identity
-                .session_identity_in(&session_id, &os_user, &session_dir, project.as_ref())
-                .git_environment
-        })
-        .await
-        .map_err(|e| anyhow::anyhow!("reading the target's git identity failed: {e}"))?;
-        Ok(PushIdentity { env })
-    }
-
-    /// The worktrees of `project_id` on this host, from the snapshot the Worktrees screen's stream
-    /// opens with, so the tool and the screen cannot disagree (`#start-parity` 3/9).
-    async fn list_worktrees(&self, project_id: &str) -> anyhow::Result<Vec<WorktreeEntry>> {
-        let main_repo = project_main_repo_on_host(
-            &self.tddy_data_dir,
-            &self.os_user,
-            &self.daemon_instance_id,
-            project_id,
-        )
-        .map_err(|status| anyhow::anyhow!(status.message().to_string()))?;
-        let calculator = Arc::clone(&self.worktree_sizes);
-        let project_id = project_id.to_string();
-        let rows = tokio::task::spawn_blocking(move || {
-            project_worktree_snapshot(&main_repo, &calculator, &project_id)
-        })
-        .await
-        .map_err(|e| anyhow::anyhow!("reading the worktrees failed: {e}"))?;
-        Ok(rows.into_iter().map(WorktreeEntry::from).collect())
-    }
-
-    async fn session_activity(&self, target: &SessionTarget) -> anyhow::Result<SessionActivity> {
-        project_home_session_follow::session_activity(&self.sessions_base, target).await
-    }
-
-    async fn session_transcript(
-        &self,
-        target: &SessionTarget,
-    ) -> anyhow::Result<Vec<TranscriptItem>> {
-        project_home_session_follow::session_transcript(&self.sessions_base, target).await
-    }
-
-    async fn session_tool_call(
-        &self,
-        target: &SessionTarget,
-        tool_call_id: &str,
-    ) -> anyhow::Result<Option<ToolCallBodies>> {
-        project_home_session_follow::session_tool_call(&self.sessions_base, target, tool_call_id)
-            .await
-    }
-
-    /// SIGTERM to `target`'s process, delivered as `SignalSession` delivers it, on the sessions
-    /// directory this port reads the target from (`#start-parity` 7/9). The record, worktree and
-    /// branch are left as they are.
-    async fn terminate_session(&self, target: &SessionTarget) -> anyhow::Result<()> {
-        let session_dir = unified_session_dir_path(&self.sessions_base, &target.session_id);
-        let session_id = target.session_id.clone();
-        tokio::task::spawn_blocking(move || {
-            signal_session_dir(&session_dir, &session_id, Signal::Sigterm as i32)
-        })
-        .await
-        .map_err(|e| anyhow::anyhow!("terminating the session failed: {e}"))?
-        .map_err(status_error)?;
-        Ok(())
-    }
-
-    /// Enqueue the Worktrees screen's size walk: one worktree (membership-checked on git's own
-    /// worktree list, as `CalculateWorktreeSize` checks it), or every worktree of the project
-    /// (`#start-parity` 8/9). Answers once the walks are queued; the calculator reports the rest.
-    async fn refresh_worktree_disk_usage(
-        &self,
-        project_id: &str,
-        path: Option<&str>,
-    ) -> anyhow::Result<tddy_tool_engine::project_home_disk_refresh::RefreshQueued> {
-        let main_repo = project_main_repo_on_host(
-            &self.tddy_data_dir,
-            &self.os_user,
-            &self.daemon_instance_id,
-            project_id,
-        )
-        .map_err(|status| anyhow::anyhow!(status.message().to_string()))?;
-        let wanted = path.map(PathBuf::from);
-        let targets = tokio::task::spawn_blocking(move || -> anyhow::Result<Vec<PathBuf>> {
-            match wanted {
-                None => Ok(list_worktree_diff_rows(&main_repo)
-                    .into_iter()
-                    .map(|row| row.path)
-                    .collect()),
-                Some(path) if worktree_path_is_listed(&main_repo, &path) => Ok(vec![path]),
-                Some(path) => anyhow::bail!(
-                    "worktree path {} is not in git worktree list",
-                    path.display()
-                ),
-            }
-        })
-        .await
-        .map_err(|e| anyhow::anyhow!("reading the worktrees failed: {e}"))??;
-        for target in &targets {
-            self.worktree_sizes.enqueue(project_id, target).await;
-        }
-        Ok(tddy_tool_engine::project_home_disk_refresh::RefreshQueued {
-            queued: targets.len(),
-        })
-    }
-
-    async fn target_records(&self) -> anyhow::Result<Vec<TargetRecord>> {
-        Ok(self
-            .rows()
-            .await?
-            .into_iter()
-            .map(|row| TargetRecord {
-                worktree: Some(row.entry.repo_path)
-                    .filter(|p| !p.is_empty())
-                    .map(PathBuf::from),
-                session_id: row.entry.session_id,
-                project_id: row.entry.project_id,
-                branch: row.branch,
-                base_ref: row.base_ref,
-                is_active: row.entry.is_active,
-            })
-            .collect())
-    }
-}
-
-#[async_trait]
-impl ProjectHomeTerminalPort for DaemonProjectHome {
-    /// The screen of `target`'s main terminal, read under its capture's lock: the active buffer's
-    /// rows and the cursor at one moment. The store is the one the terminal RPCs resolve through,
-    /// sandbox first. A session with no live terminal, or whose terminal has not reported its size,
-    /// is refused with the reason (`#home-inbox` 2/8).
-    async fn read_terminal(&self, target: &SessionTarget) -> anyhow::Result<TextGrid> {
-        let session = self
-            .terminals
-            .get_terminal(&target.session_id, MAIN_TERMINAL_ID)
-            .await
-            .ok_or_else(|| anyhow::anyhow!("session {} has no live terminal", target.session_id))?;
-        let capture = session.capture();
-        let grid = capture
-            .lock()
-            .map_err(|_| {
-                anyhow::anyhow!(
-                    "session {}'s terminal capture is poisoned",
-                    target.session_id
-                )
-            })?
-            .text_grid();
-        grid.ok_or_else(|| {
-            anyhow::anyhow!(
-                "session {}'s terminal size is not known yet",
-                target.session_id
-            )
-        })
-    }
-
-    /// Take `target`'s control lease for `screen_id` the way a browser's claim does, stealing it, and
-    /// remember the issued token under this caller and the target. The token is kept here and never
-    /// returned (`#home-inbox` 5/8).
-    async fn claim_terminal(&self, target: &SessionTarget, screen_id: &str) -> Result<(), String> {
-        match self
-            .terminal_control
-            .claim(&target.session_id, screen_id, true)
-            .await
-        {
-            ControlClaim::Granted { control_token } => {
-                self.leases
-                    .remember(self.claim_key(&target.session_id), control_token);
-                Ok(())
-            }
-            ControlClaim::Denied { holder_screen_id } => Err(format!(
-                "control of session {} is held by `{holder_screen_id}`, and was not taken",
-                target.session_id
-            )),
-        }
-    }
-
-    /// Write `bytes` to `target`'s main terminal, provided this caller's remembered token is still the
-    /// session's lease and `screen_id` holds it. The lease is verified here explicitly: a jailed
-    /// terminal does not check it on input, so this is the only check it gets. Input is written with
-    /// no input offset, which the terminal reads as unset and does not acknowledge (`#home-inbox` 5/8).
-    async fn send_keys(
-        &self,
-        target: &SessionTarget,
-        screen_id: &str,
-        bytes: Vec<u8>,
-    ) -> Result<(), String> {
-        let session_id = target.session_id.as_str();
-        let holder = self.terminal_control.holder_screen_id(session_id).await;
-        let token = match self.leases.token_of(&self.claim_key(session_id)) {
-            Some(token) if holder.as_deref() == Some(screen_id) => token,
-            _ => return Err(control_refusal(session_id, holder.as_deref())),
-        };
-        if !self.terminal_control.verify(session_id, &token).await {
-            let holder = self.terminal_control.holder_screen_id(session_id).await;
-            return Err(control_refusal(session_id, holder.as_deref()));
-        }
-        let terminal = self
-            .terminals
-            .get_terminal(session_id, MAIN_TERMINAL_ID)
-            .await
-            .ok_or_else(|| format!("session {session_id} has no live terminal"))?;
-        terminal.send_input(bytes.into(), 0);
-        Ok(())
-    }
-}
-
-/// Why a send to `session_id` is refused for want of control: another screen holds it, naming that
-/// screen, or nothing does. Either way the agent claims it again, which is the one way back.
-fn control_refusal(session_id: &str, holder: Option<&str>) -> String {
-    match holder {
-        Some(holder) => format!(
-            "control of session {session_id} is held by `{holder}`; claim it again with ClaimSessionTerminal, then send"
-        ),
-        None => format!(
-            "control of session {session_id} is not held; claim it with ClaimSessionTerminal first"
-        ),
-    }
-}
-
 pub(super) fn status_error(status: Status) -> anyhow::Error {
     anyhow::anyhow!(status.message().to_string())
 }
@@ -863,130 +344,4 @@ fn registered_project(
     tddy_projects::project_storage::find_project(&projects_dir, project_id)
         .map_err(|e| e.to_string())?
         .ok_or_else(|| "project not found".to_string())
-}
-
-#[async_trait]
-impl ProjectHomeNotifyPort for DaemonProjectHome {
-    /// Publish `notice` for the calling home session through this host's
-    /// `ActivityService.ReportOperatorNotification`, presenting the hook token the session's own
-    /// `.session.yaml` records — the credential `tddy-tools notify` presents from its environment
-    /// (`#home-inbox` 11/11). The caller was authenticated by its session token, and its role read from
-    /// that record, before this is reached.
-    async fn notify_operator(
-        &self,
-        home: &HomeCaller,
-        notice: OperatorNotice,
-    ) -> Result<(), String> {
-        let session_dir = unified_session_dir_path(&self.sessions_base, &home.session_id);
-        let metadata = tddy_core::read_session_metadata(&session_dir)
-            .map_err(|e| format!("cannot read session {}'s record ({e})", home.session_id))?;
-        let can_notify = matches!(
-            metadata.session_type.as_deref(),
-            Some("claude-cli" | "cursor-cli")
-        );
-        let hook_token = metadata
-            .hook_token
-            .filter(|token| !token.is_empty())
-            .filter(|_| can_notify)
-            .ok_or_else(|| {
-                "this session has no hook token (only claude-cli and cursor-cli sessions can notify)"
-                    .to_string()
-            })?;
-        self.activity
-            .report_operator_notification(Request::direct(ReportOperatorNotificationRequest {
-                session_id: home.session_id.clone(),
-                hook_token,
-                os_user: self.os_user.clone(),
-                title: notice.title,
-                body_markdown: notice.body_markdown,
-                level: notice.level as i32,
-                sound: notice.sound,
-            }))
-            .await
-            .map(|_| ())
-            .map_err(|status| status.message().to_string())
-    }
-}
-
-#[async_trait]
-impl ProjectHomeAnswerPort for DaemonProjectHome {
-    /// Deliver the calling home session's `answer` to the hook `target` holds open on this host.
-    /// Who may answer is the target's changeset `orchestrator_session_id`, on the host it records:
-    /// the caller's own host id is the one that confirmed it (`#home-inbox` 6/8).
-    async fn answer_permission(
-        &self,
-        home: &HomeCaller,
-        target: &SessionTarget,
-        answer: PermissionAnswer,
-        message: Option<String>,
-    ) -> Result<serde_json::Value, String> {
-        let answered = answer_permission(
-            &AnswerContext {
-                sessions_base: &self.sessions_base,
-                this_daemon_instance_id: &self.daemon_instance_id,
-                pending: &self.pending_answers,
-            },
-            &AnsweringCaller {
-                session_id: home.session_id.clone(),
-                daemon_instance_id: self.caller_daemon_instance_id.clone(),
-            },
-            &target.session_id,
-            answer,
-            message,
-        )
-        .map_err(|refusal| refusal.to_string())?;
-        Ok(serde_json::json!({
-            "session_id": answered.session_id,
-            "request_id": answered.request_id,
-            "answered_by": answered.answered_by,
-            "option_id": answered.option_id,
-            "cancelled": answered.cancelled,
-            "at_unix_ms": answered.at_unix_ms,
-        }))
-    }
-
-    /// Deliver the calling home session's `answers` to the `AskUserQuestion` `target`'s hook waits
-    /// on under `request_id`, from this host's registry (`#home-inbox` 8/9). Who may answer and what
-    /// fits the question are checked there.
-    async fn answer_question(
-        &self,
-        home: &HomeCaller,
-        target: &SessionTarget,
-        request_id: &str,
-        answers: Vec<QuestionAnswer>,
-    ) -> Result<serde_json::Value, String> {
-        let answered = answer_question(
-            &AnswerContext {
-                sessions_base: &self.sessions_base,
-                this_daemon_instance_id: &self.daemon_instance_id,
-                pending: &self.pending_answers,
-            },
-            &AnsweringCaller {
-                session_id: home.session_id.clone(),
-                daemon_instance_id: self.caller_daemon_instance_id.clone(),
-            },
-            &target.session_id,
-            request_id,
-            answers,
-        )
-        .map_err(|refusal| refusal.to_string())?;
-        let answers: Vec<serde_json::Value> = answered
-            .answers
-            .iter()
-            .map(|answer| {
-                serde_json::json!({
-                    "question_index": answer.question_index,
-                    "selected": answer.selected,
-                    "other": answer.other,
-                })
-            })
-            .collect();
-        Ok(serde_json::json!({
-            "session_id": answered.session_id,
-            "request_id": answered.request_id,
-            "answered_by": answered.answered_by,
-            "answers": answers,
-            "at_unix_ms": answered.at_unix_ms,
-        }))
-    }
 }
