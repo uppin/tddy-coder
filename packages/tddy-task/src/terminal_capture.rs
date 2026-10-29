@@ -14,6 +14,12 @@ use std::collections::BTreeSet;
 
 use crate::screen_dump::portable_dump;
 
+mod crop;
+mod styles;
+
+pub use crop::{crop, CroppedCursor, CroppedGrid, GridRegion};
+pub use styles::{highlighted_rows, RowStyles, StyleRun, TerminalColour};
+
 /// Private modes that control mouse reporting: normal tracking (1000), button-event tracking
 /// (1002), any-event tracking (1003), and the UTF-8 / SGR / urxvt / SGR-pixel encodings (1005,
 /// 1006, 1015, 1016). These are replayed in front of the raw ring ([`TerminalCapture::replay`]).
@@ -146,8 +152,11 @@ impl TerminalCapture {
             .view()
             .map(|line| line.text().trim_end().to_owned())
             .collect();
+        let styles::ScreenCells { styles, widths } = styles::walk_cells(self.screen.view());
         Some(TextGrid {
             lines,
+            styles,
+            widths,
             cursor: GridCursor {
                 row: cursor.row as u16,
                 col: cursor.col as u16,
@@ -435,12 +444,19 @@ pub struct ScreenSnapshot {
 /// The visible text of a terminal's active screen buffer at a sequence point
 /// ([`TerminalCapture::text_grid`]).
 ///
-/// Text only: no scrollback, colours or attributes. `lines` holds one entry per row of the grid
-/// (`rows` of them), each trimmed at the end.
+/// No scrollback. `lines` holds one entry per row of the grid (`rows` of them), each trimmed at the
+/// end; `styles` holds the colours and attributes of the rows that have any.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TextGrid {
     /// The visible rows, top first.
     pub lines: Vec<String>,
+    /// The non-default style runs of the rows that have any, in row order. Columns are character
+    /// positions in the row's `lines` entry (see [`StyleRun`]).
+    pub styles: Vec<RowStyles>,
+    /// The cell span of each character of each row of `lines` and beyond it, to the grid's width:
+    /// 1, or 2 for a wide character. One entry per row; a grid without entries is read as all
+    /// narrow. [`crop`] cuts on cell boundaries with it.
+    pub widths: Vec<Vec<u8>>,
     pub cursor: GridCursor,
     pub cols: u16,
     pub rows: u16,

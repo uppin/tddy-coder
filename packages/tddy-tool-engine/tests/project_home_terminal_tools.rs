@@ -53,6 +53,8 @@ fn a_record(session_id: &str) -> TargetRecord {
 fn a_grid() -> TextGrid {
     TextGrid {
         lines: vec!["Proceed? (y/n)".to_string(), String::new()],
+        styles: Vec::new(),
+        widths: Vec::new(),
         cursor: GridCursor {
             row: 0,
             col: 15,
