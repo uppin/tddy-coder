@@ -26,6 +26,7 @@ use tddy_service::gen::ServerMessage;
 use tddy_session_activity::session_notifications::LastDeliveredPerSession;
 
 use crate::agent_notification_telegram::AgentNotificationTelegram;
+use crate::question_alert::QuestionAlert;
 use crate::telegram_notifier::{TelegramSender, TelegramSessionWatcher};
 use tddy_session_lifecycle::config::DaemonConfig;
 
@@ -137,6 +138,68 @@ impl TelegramDaemonHooks {
         }
         Ok(())
     }
+
+    /// Send `messages` to each of `chat_ids`, in order, in Telegram's HTML mode, loudly, failing
+    /// with how many chats it missed. A chat that refuses one message is sent none of the rest: the
+    /// tail of a split question set without its head is worse than none.
+    async fn send_html_to_every_chat(
+        &self,
+        chat_ids: Vec<i64>,
+        session_id: &str,
+        messages: &[String],
+    ) -> anyhow::Result<()> {
+        let total = chat_ids.len();
+        let mut failed = 0_usize;
+        for chat_id in chat_ids {
+            for html in messages {
+                if let Err(e) = self.sender.send_html_message(chat_id, html, false).await {
+                    failed += 1;
+                    log::warn!(
+                        target: "tddy_daemon::telegram",
+                        "send_html_message failed chat_id={chat_id} session_id={session_id}: {e:#}"
+                    );
+                    break;
+                }
+            }
+        }
+        if failed > 0 {
+            anyhow::bail!("telegram send failed for {failed} of {total} chat(s)");
+        }
+        Ok(())
+    }
+
+    /// Tell the chats what a session is asking: one message per request.
+    ///
+    /// The bus publishes an unchanged question again, as it does a status, so the request is
+    /// recorded before anything is sent and a repeat is no alert. The record is keyed by the request,
+    /// apart from the texts of status notifications, which share the same per-session memory.
+    async fn alert_pending_question(
+        &self,
+        notification: &SessionNotification,
+    ) -> anyhow::Result<()> {
+        let Some(question) = notification.question.as_ref() else {
+            return Ok(());
+        };
+        let Some(alert) = QuestionAlert::render(notification) else {
+            return Ok(());
+        };
+        if !self.last_alerted.record_and_is_new(
+            &notification.session_id,
+            &format!("question:{}", question.request_id),
+        ) {
+            log::debug!(
+                target: "tddy_daemon::telegram",
+                "pending question already alerted — no alert session_id={}",
+                notification.session_id
+            );
+            return Ok(());
+        }
+        let Some(chat_ids) = self.recipients_of(&notification.session_id).await else {
+            return Ok(());
+        };
+        self.send_html_to_every_chat(chat_ids, &notification.session_id, alert.messages())
+            .await
+    }
 }
 
 #[async_trait]
@@ -158,24 +221,35 @@ impl OperatorChannel for TelegramDaemonHooks {
 
     /// Telegram's interest in the notification bus.
     ///
-    /// It takes attention-worthy events from the activity-status path and nothing else. Two
-    /// exclusions carry the design (PRD FR7):
+    /// It takes attention-worthy events from the activity-status path, the agent's own words and
+    /// a claude-cli session's pending question, and nothing else. Two exclusions carry the design
+    /// (PRD FR7):
     ///
     /// - **`Activity` is declined.** The indicator feed is why that kind exists; sending it to a
     ///   chat would turn every tool call into a message.
     /// - **`Presenter` is declined.** A workflow session's elicitations already reach Telegram
     ///   through [`Self::on_presenter_event`], with their inline keyboards, per-chat FIFO and
     ///   tracked-session gate. Taking them here as well would send each one twice.
+    ///
+    /// The status notification that follows a pending question is declined too: the question
+    /// already told the operator, so the generic "needs your input" would say it twice.
     fn wants_notification(&self, notification: &SessionNotification) -> bool {
         self.enabled()
             && notification.kind == SessionNotificationKind::AttentionRequired
-            && matches!(
-                notification.source,
-                SessionNotificationSource::ActivityStatus | SessionNotificationSource::Agent
-            )
+            && match notification.source {
+                SessionNotificationSource::PendingQuestion => true,
+                SessionNotificationSource::ActivityStatus => notification.question.is_none(),
+                SessionNotificationSource::Agent => true,
+                SessionNotificationSource::AgentToolCall | SessionNotificationSource::Presenter => {
+                    false
+                }
+            }
     }
 
     async fn on_notification(&self, notification: &SessionNotification) -> anyhow::Result<()> {
+        if notification.source == SessionNotificationSource::PendingQuestion {
+            return self.alert_pending_question(notification).await;
+        }
         // An agent's notification is an event of its own, so two identical ones are both delivered;
         // only a re-published status is de-duplicated.
         let from_agent = AgentNotificationTelegram::render(notification);

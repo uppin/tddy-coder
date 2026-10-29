@@ -263,10 +263,21 @@ message ReportSessionStatusRequest {
   // WaitingForInput and recorded as the session's pending question. Empty for every other status
   // (`#start-parity` 6/9).
   string message = 5;
+  // The hook event that raised this report (`PermissionRequest`, `PreToolUse`, ...), so the daemon
+  // can tell a permission prompt from an `AskUserQuestion` call. Set with `tool_name` for the two
+  // events that carry a question; empty otherwise (`#home-inbox` 3/8).
+  string hook_event_name = 6;
+  // The tool the agent asks to use: `Bash` for a permission, `AskUserQuestion` for a question.
+  string tool_name = 7;
+  // That tool's input exactly as the hook received it, as a JSON string.
+  string tool_input_json = 8;
 }
 
 message ReportSessionStatusResponse {
   bool ok = 1;
+  // The id of the pending question this report recorded; empty for a report that recorded none.
+  // Field 2, not 1: `ok` already holds 1 on the wire (`#home-inbox` 3/8).
+  string request_id = 2;
 }
 
 /// Sent by `tddy-tools notify`; bearer is the per-session hook_token, read from the agent's
@@ -310,6 +321,32 @@ message SessionNotificationEvent {
   bool                      sound         = 10;
   // The session's web route, `#/sessions/<id>?host=<daemon instance>`.
   string                    link          = 11;
+  // Set only for source PENDING_QUESTION: what a claude-cli session is asking (`#home-inbox` 3/8).
+  QuestionNotice            question      = 12;
+}
+
+// What a session is asking: a permission for a tool, or the questions of an AskUserQuestion call.
+message QuestionNotice {
+  // The id the question is answered by; one notification is published per id.
+  string                    request_id = 1;
+  // `permission`, `select` or `multi_select`.
+  string                    kind       = 2;
+  string                    tool_name  = 3;
+  // One line: a permission's input summary, or the first question's text.
+  string                    summary    = 4;
+  repeated QuestionNoticeItem questions = 5;
+}
+
+message QuestionNoticeItem {
+  string                      header       = 1;
+  string                      question     = 2;
+  repeated QuestionNoticeOption options    = 3;
+  bool                        multi_select = 4;
+}
+
+message QuestionNoticeOption {
+  string label       = 1;
+  string description = 2;
 }
 
 // Whether a notification asks the operator for something, or merely reports progress.
@@ -334,6 +371,9 @@ enum SessionNotificationSource {
   SESSION_NOTIFICATION_SOURCE_PRESENTER = 3;
   // ReportOperatorNotification — the agent's own words (`tddy-tools notify`).
   SESSION_NOTIFICATION_SOURCE_AGENT = 4;
+  // ReportSessionStatus with a structured question — a claude-cli permission prompt or
+  // AskUserQuestion call (`#home-inbox` 3/8).
+  SESSION_NOTIFICATION_SOURCE_PENDING_QUESTION = 5;
 }
 
 // How an agent grades what it is telling its operator.

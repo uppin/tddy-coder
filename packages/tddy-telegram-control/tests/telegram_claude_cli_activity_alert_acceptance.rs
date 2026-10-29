@@ -178,6 +178,7 @@ async fn waiting_for_input_transition_alerts_tracked_chat() {
             os_user: OS_USER.to_string(),
             status: "WaitingForInput".to_string(),
             message: String::new(),
+            ..Default::default()
         }))
         .await
         .expect("report_session_status must succeed for valid claude-cli session");
@@ -228,6 +229,7 @@ async fn done_transition_alerts_tracked_chat() {
             os_user: OS_USER.to_string(),
             status: "Done".to_string(),
             message: String::new(),
+            ..Default::default()
         }))
         .await
         .expect("report_session_status must succeed");
@@ -272,6 +274,7 @@ async fn repeated_same_status_does_not_realert() {
                 os_user: OS_USER.to_string(),
                 status: "WaitingForInput".to_string(),
                 message: String::new(),
+                ..Default::default()
             }))
             .await
             .expect("report_session_status must succeed");
@@ -317,6 +320,7 @@ async fn untracked_session_falls_back_to_configured_chat_ids() {
             os_user: OS_USER.to_string(),
             status: "WaitingForInput".to_string(),
             message: String::new(),
+            ..Default::default()
         }))
         .await
         .expect("report_session_status must succeed even when session is untracked");
@@ -361,6 +365,7 @@ async fn running_status_does_not_alert() {
             os_user: OS_USER.to_string(),
             status: "Running".to_string(),
             message: String::new(),
+            ..Default::default()
         }))
         .await
         .expect("report_session_status must succeed");

@@ -32,9 +32,16 @@ list, chain-parent buttons — still use the short-id label. Unifying those is a
 | Kind | Raised by | Telegram | Drawer dot |
 |---|---|---|---|
 | `ATTENTION_REQUIRED` | `WaitingForInput`, `Done` | ✓ (unchanged copy) | yellow |
+| `ATTENTION_REQUIRED` | a claude-cli permission prompt or `AskUserQuestion` (source `PENDING_QUESTION`, carrying `question`) | ✓ *(names the tool, or lists the options)* | yellow |
 | `ATTENTION_REQUIRED` | a presenter elicitation | ✓ *(via its own keyboard surface)* | yellow |
 | `ATTENTION_REQUIRED` | the agent itself, with `tddy-tools notify` (source `AGENT`) | ✓ *(rendered markdown, see below)* | yellow |
 | `ACTIVITY` | `Started` / `Running` / `ExecutingTool`, an agent tool call, a workflow state change | — | blinking green |
+
+**One notification per question.** A report that records a question publishes one
+`PENDING_QUESTION` notification and no separate status one; its drawer text is
+`🔔 Session {label} wants to run {tool}: {summary}` or `🔔 Session {label} asks: {first question}`.
+The `WaitingForInput` status that follows the same prompt carries the same `question`, and Telegram
+declines it, so the operator is told once.
 
 **Telegram traffic did not grow.** `ACTIVITY` exists for indicators; sending it to a chat would turn
 every tool call into a message.

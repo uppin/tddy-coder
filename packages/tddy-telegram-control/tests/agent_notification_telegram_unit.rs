@@ -25,6 +25,7 @@ fn an_agent_notification(title: &str, body: &str, sound: bool, label: &str) -> S
             link: LINK.to_string(),
         }),
         at_unix_ms: 1,
+        question: None,
     }
 }
 

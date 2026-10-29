@@ -15,7 +15,9 @@ use tddy_core::agent_activity::AgentActivityRecord;
 use tddy_service::proto::acp::AcpAgentMessage;
 use tddy_service::proto::activity::{
     AcpReplayFrame, AgentActivityRecord as ProtoAgentActivityRecord,
-    NotificationLevel as ProtoNotificationLevel, SessionNotificationEvent,
+    NotificationLevel as ProtoNotificationLevel, QuestionNotice as ProtoQuestionNotice,
+    QuestionNoticeItem as ProtoQuestionNoticeItem,
+    QuestionNoticeOption as ProtoQuestionNoticeOption, SessionNotificationEvent,
     SessionNotificationKind as ProtoSessionNotificationKind,
     SessionNotificationSource as ProtoSessionNotificationSource,
 };
@@ -23,7 +25,7 @@ use tokio::sync::broadcast::error::RecvError;
 use tokio::sync::broadcast::Receiver;
 use tokio::sync::mpsc::UnboundedSender;
 
-use tddy_daemon_kernel::session_notification::NotificationLevel;
+use tddy_daemon_kernel::session_notification::{NotificationLevel, QuestionNotice};
 
 use crate::session_notifications::{
     SessionNotification, SessionNotificationKind, SessionNotificationSource,
@@ -38,6 +40,7 @@ use crate::session_notifications::{
 #[must_use]
 pub fn session_notification_event(notification: SessionNotification) -> SessionNotificationEvent {
     let agent = notification.agent.as_ref();
+    let question = notification.question.as_ref().map(proto_question_notice);
     SessionNotificationEvent {
         session_id: notification.session_id,
         label: notification.label,
@@ -56,6 +59,9 @@ pub fn session_notification_event(notification: SessionNotification) -> SessionN
             }
             SessionNotificationSource::Presenter => ProtoSessionNotificationSource::Presenter,
             SessionNotificationSource::Agent => ProtoSessionNotificationSource::Agent,
+            SessionNotificationSource::PendingQuestion => {
+                ProtoSessionNotificationSource::PendingQuestion
+            }
         } as i32,
         text: notification.text,
         at_unix_ms: notification.at_unix_ms,
@@ -66,6 +72,34 @@ pub fn session_notification_event(notification: SessionNotification) -> SessionN
         }) as i32,
         sound: agent.is_some_and(|a| a.sound),
         link: agent.map(|a| a.link.clone()).unwrap_or_default(),
+        question,
+    }
+}
+
+/// What a session is asking, on the wire: a field-for-field copy of the kernel's notice.
+fn proto_question_notice(question: &QuestionNotice) -> ProtoQuestionNotice {
+    ProtoQuestionNotice {
+        request_id: question.request_id.clone(),
+        kind: question.kind.clone(),
+        tool_name: question.tool_name.clone(),
+        summary: question.summary.clone(),
+        questions: question
+            .questions
+            .iter()
+            .map(|item| ProtoQuestionNoticeItem {
+                header: item.header.clone(),
+                question: item.question.clone(),
+                options: item
+                    .options
+                    .iter()
+                    .map(|option| ProtoQuestionNoticeOption {
+                        label: option.label.clone(),
+                        description: option.description.clone(),
+                    })
+                    .collect(),
+                multi_select: item.multi_select,
+            })
+            .collect(),
     }
 }
 

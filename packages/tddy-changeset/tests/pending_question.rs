@@ -14,6 +14,7 @@ fn a_question() -> PendingQuestion {
         question: "Which packages does this touch?".to_string(),
         options: vec!["core".to_string(), "web".to_string()],
         allow_other: true,
+        ..Default::default()
     }
 }
 

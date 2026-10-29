@@ -169,6 +169,7 @@ async fn report_status(service: &DaemonSessionHost, status: &str) {
             os_user: OS_USER.to_string(),
             status: status.to_string(),
             message: String::new(),
+            ..Default::default()
         }))
         .await
         .expect("report_session_status must succeed for a valid claude-cli session");

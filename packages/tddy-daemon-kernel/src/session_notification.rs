@@ -29,6 +29,9 @@ pub enum SessionNotificationSource {
     /// `ReportOperatorNotification` — the agent's own words, sent with `tddy-tools notify`. Carries
     /// an [`AgentNotification`] (`#home-inbox` 1/8).
     Agent,
+    /// `ReportSessionStatus` carrying a structured question — a claude-cli permission prompt or
+    /// `AskUserQuestion` call. Carries a [`QuestionNotice`] (`#home-inbox` 3/8).
+    PendingQuestion,
 }
 
 /// How an agent grades what it is telling its operator. Chosen by the agent (`tddy-tools notify
@@ -67,6 +70,41 @@ pub struct AgentNotification {
     pub link: String,
 }
 
+/// What a claude-cli session is asking: the structured content of a
+/// [`SessionNotificationSource::PendingQuestion`] notification.
+///
+/// A mirror of `tddy_changeset::pending_question::PendingQuestion` rather than a re-export,
+/// because this crate does not depend on `tddy-changeset`; `tddy-session-activity` builds it from
+/// the record (`question_notice_for`).
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct QuestionNotice {
+    /// The id the question is answered by. One notification is published per id.
+    pub request_id: String,
+    /// `permission`, `select` or `multi_select`.
+    pub kind: String,
+    pub tool_name: String,
+    /// One line: a permission's input summary, or the first question's text.
+    pub summary: String,
+    /// Every question an `AskUserQuestion` asked; empty for a permission.
+    pub questions: Vec<QuestionNoticeItem>,
+}
+
+/// One question of an `AskUserQuestion` call.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct QuestionNoticeItem {
+    pub header: String,
+    pub question: String,
+    pub options: Vec<QuestionNoticeOption>,
+    pub multi_select: bool,
+}
+
+/// One choice offered by a [`QuestionNoticeItem`].
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct QuestionNoticeOption {
+    pub label: String,
+    pub description: String,
+}
+
 /// One thing that happened in one session.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SessionNotification {
@@ -91,6 +129,10 @@ pub struct SessionNotification {
     /// What the agent wrote, for a [`SessionNotificationSource::Agent`] notification; `None` for
     /// every other source, whose `text` is the whole of what they say.
     pub agent: Option<AgentNotification>,
+    /// What the session is asking, for a [`SessionNotificationSource::PendingQuestion`]
+    /// notification — and for the `ActivityStatus` one that follows the same prompt, so a surface
+    /// that already told the operator can tell it is the same prompt. `None` otherwise.
+    pub question: Option<QuestionNotice>,
     /// Epoch milliseconds. The web ages activity out of its blink window against this, so it is
     /// the moment the event happened, never the moment a client read it.
     pub at_unix_ms: u64,

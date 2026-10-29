@@ -308,6 +308,25 @@ pub fn update_activity_status(
     write_session_metadata(session_dir, &metadata)
 }
 
+/// Set `pending_elicitation` in an existing `.session.yaml`, and say whether the session waits on a
+/// question.
+///
+/// Writes only when the flag changes: a status report that leaves it alone — nearly all of them —
+/// does not rewrite the file. Used by the `ReportSessionStatus` handler alongside the pending
+/// question it records or clears (`#home-inbox` 3/8).
+pub fn set_pending_elicitation(
+    session_dir: &Path,
+    pending: bool,
+) -> Result<(), crate::WorkflowError> {
+    let mut metadata = read_session_metadata(session_dir)?;
+    if metadata.pending_elicitation == pending {
+        return Ok(());
+    }
+    metadata.pending_elicitation = pending;
+    metadata.updated_at = chrono::Utc::now().to_rfc3339();
+    write_session_metadata(session_dir, &metadata)
+}
+
 /// Read session metadata from the session directory.
 pub fn read_session_metadata(session_dir: &Path) -> Result<SessionMetadata, crate::WorkflowError> {
     let path = session_dir.join(SESSION_METADATA_FILENAME);

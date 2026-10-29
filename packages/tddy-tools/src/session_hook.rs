@@ -3,7 +3,8 @@
 //! Claude Code invokes this binary as a hook (stdin = hook event JSON). The subcommand issues up
 //! to two independent, fail-quiet daemon reports:
 //! 1. **`ReportSessionStatus`** — maps the event to a [`SessionActivityStatus`] via
-//!    [`activity_status_from_hook`]; skipped when the mapping is `None` (no-op event).
+//!    [`activity_status_from_hook_with_tool`]; skipped when the mapping is `None` (no-op event).
+//!    A permission or a question also carries its tool and that tool's input (`#home-inbox` 3/8).
 //! 2. **`ReportAgentActivity`** — for `PreToolUse` / `PostToolUse` events, carries the tool
 //!    payload (name, input, response) so claude-cli sessions populate `agent-activity.jsonl`;
 //!    skipped for every other event.
@@ -19,7 +20,10 @@ use clap::Args;
 use prost::Message as _;
 use serde::Deserialize;
 use std::io::Read;
-use tddy_core::{activity_status_from_hook, parse_hook_event, SessionActivityStatus};
+use tddy_core::{
+    activity_status_from_hook_with_tool, hook_event_asks_a_question, parse_hook_event,
+    SessionActivityStatus, ASK_USER_QUESTION_TOOL,
+};
 use tddy_service::proto::activity::{ReportAgentActivityRequest, ReportSessionStatusRequest};
 
 /// The coordinate both reports are served at, read from `tddy-service` so this hook and the daemon
@@ -73,12 +77,39 @@ pub fn session_status_request(
 ) -> Option<ReportSessionStatusRequest> {
     let parsed = parse_hook_event(stdin_json).ok();
     let notification_type = parsed.as_ref().and_then(|ev| ev.notification_type.clone());
+    let tool_name = parsed.as_ref().and_then(|ev| ev.tool_name.clone());
     let hook_event_name = parsed
         .as_ref()
         .map(|ev| ev.hook_event_name.as_str())
         .filter(|s| !s.is_empty())
         .unwrap_or(args.event.as_str());
-    let status = activity_status_from_hook(hook_event_name, notification_type.as_deref())?;
+    let status = activity_status_from_hook_with_tool(
+        hook_event_name,
+        notification_type.as_deref(),
+        tool_name.as_deref(),
+    )?;
+
+    // A permission or a question carries what is asked — the event, the tool and that tool's input —
+    // and none of the agent's own words: the `Notification` hook that follows the same prompt says
+    // those (`#home-inbox` 3/8).
+    if hook_event_asks_a_question(hook_event_name, tool_name.as_deref()) {
+        let tool_input_json = parsed
+            .as_ref()
+            .and_then(|ev| ev.tool_input.as_ref())
+            .map(serde_json::Value::to_string)
+            .unwrap_or_default();
+        return Some(ReportSessionStatusRequest {
+            session_id: args.session.clone(),
+            hook_token: args.hook_token.clone(),
+            os_user: args.os_user.clone(),
+            status: status.as_wire().to_string(),
+            message: String::new(),
+            hook_event_name: hook_event_name.to_string(),
+            tool_name: tool_name.unwrap_or_default(),
+            tool_input_json,
+        });
+    }
+
     let message = match status {
         SessionActivityStatus::WaitingForInput => parsed.as_ref().and_then(|ev| ev.message.clone()),
         _ => None,
@@ -90,6 +121,9 @@ pub fn session_status_request(
         os_user: args.os_user.clone(),
         status: status.as_wire().to_string(),
         message,
+        hook_event_name: String::new(),
+        tool_name: String::new(),
+        tool_input_json: String::new(),
     })
 }
 
@@ -262,6 +296,15 @@ fn agent_activity_request(
     // A malformed payload degrades to empty fields rather than failing the hook.
     let payload: HookToolPayload = serde_json::from_str(stdin_json).unwrap_or_default();
 
+    // An `AskUserQuestion` is a question, not a tool call, so neither of its hooks is reported as
+    // one: the question goes to the daemon by `ReportSessionStatus` instead (`#home-inbox` 3/8).
+    // Its `PreToolUse` would leave a pending call that a declined question never completes, and so
+    // its `PostToolUse` would have nothing to pair with and write an unpaired `completed` row under
+    // a fresh id. Nothing reads such a row.
+    if payload.tool_name.as_deref() == Some(ASK_USER_QUESTION_TOOL) {
+        return None;
+    }
+
     let (is_error, error_message) = tool_response_error(payload.tool_response.as_ref());
     let input_json = payload
         .tool_input
@@ -386,6 +429,41 @@ mod tests {
         assert_eq!(
             req, None,
             "Stop is not a tool event and must not be reported"
+        );
+    }
+
+    /// `AskUserQuestion` is a question, not a tool call: its `PreToolUse` leaves no call for a
+    /// `PostToolUse` to complete when the operator declines it, so it is not reported as one
+    /// (`#home-inbox` 3/8).
+    #[test]
+    fn a_pre_tool_use_of_ask_user_question_is_not_reported_as_a_tool_call() {
+        // Given
+        let stdin_json = r#"{"hook_event_name":"PreToolUse","tool_name":"AskUserQuestion","tool_input":{"questions":[]}}"#;
+
+        // When
+        let req = map("PreToolUse", stdin_json);
+
+        // Then
+        assert_eq!(
+            req, None,
+            "a question must not leave a running row or a pending call"
+        );
+    }
+
+    /// Nor is its `PostToolUse`: with no pending call to pair with, it would append an unpaired
+    /// `completed` row under a fresh id, which nothing reads (`#home-inbox` 3/8).
+    #[test]
+    fn a_post_tool_use_of_ask_user_question_is_not_reported_as_a_tool_call() {
+        // Given
+        let stdin_json = r#"{"hook_event_name":"PostToolUse","tool_name":"AskUserQuestion","tool_input":{"questions":[]},"tool_response":{"answers":[]}}"#;
+
+        // When
+        let req = map("PostToolUse", stdin_json);
+
+        // Then
+        assert_eq!(
+            req, None,
+            "a question must not leave an unpaired completed row in the activity log"
         );
     }
 }

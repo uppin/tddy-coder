@@ -58,6 +58,7 @@ fn an_attention_notification() -> SessionNotification {
         text: "🔔 Session my-feature-branch: Claude Code needs your input.".to_string(),
         agent: None,
         at_unix_ms: 1_756_000_000_000,
+        question: None,
     }
 }
 

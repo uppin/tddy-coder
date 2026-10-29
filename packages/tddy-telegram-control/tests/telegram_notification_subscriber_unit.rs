@@ -54,6 +54,7 @@ fn an_attention_notification() -> SessionNotification {
         text: format!("🔔 Session {LABEL}: Claude Code needs your input."),
         agent: None,
         at_unix_ms: AT,
+        question: None,
     }
 }
 

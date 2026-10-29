@@ -93,6 +93,23 @@ change in between) does **not** send a second message. Only a genuine transition
 
 `<label>` is the session's **drawer label** — the basename of its `repo_path`, else its `workflow_goal`, else the first eight characters of its id (`tddy_core::session_label::session_display_label`). A session working in `/home/dev/my-feature-branch` reads as `Session my-feature-branch`.
 
+### What the session is asking
+
+A claude-cli permission prompt or `AskUserQuestion` is alerted with its content instead of the
+generic `WaitingForInput` line ([claude-cli-session.md § What a session is asking](claude-cli-session.md#what-a-session-is-asking)).
+Sent loud, in Telegram's HTML mode, once per `request_id`; the session's own words have `&`, `<` and
+`>` escaped:
+
+- **Permission:** `<i>Session {label} wants to run</i> <code>{tool}</code>: <code>{summary}</code>`
+  (no `: …` when the summary is empty).
+- **Question:** `<i>Session {label} asks</i>`, then for each question its header in bold (when it has
+  one), its text (with ` (choose several)` when multi-select) and one `• label: description` line per
+  option (`• label` with no description), blocks separated by a blank line.
+
+A question set longer than Telegram's 4,096-byte limit is split into several messages, each
+well-formed HTML on its own, with the splitter agent-written notifications use. A chat that refuses
+one is sent none of the rest. No "needs your input" line follows for the same prompt.
+
 ### Routing
 
 Routing prefers the **tracked session** binding — the same `SharedTelegramTrackedSessionCoordinator`

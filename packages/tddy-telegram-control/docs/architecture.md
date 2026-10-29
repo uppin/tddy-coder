@@ -87,8 +87,8 @@ notification text sent (`LastDeliveredPerSession`). Its `id()` is `telegram`
 | Port method | What Telegram does |
 |---|---|
 | `on_presenter_event` | locks the watcher and calls `on_server_message`. An error ends that session's presenter observer. The watcher opens and closes its per-chat elicitation queue on the core's `awaits_operator` rule, so it agrees with the drawer indicator on every mode |
-| `wants_notification` | `AttentionRequired` from the `ActivityStatus` path or from an agent (`Agent`), while the `telegram:` block is enabled. `Activity` is declined (every tool call would become a message) and so is `Presenter` (those elicitations already arrive through `on_presenter_event`, with their keyboards — taking them twice would double-send) |
-| `on_notification` | an agent-written notification is rendered by `agent_notification_telegram::AgentNotificationTelegram` and sent as HTML (never de-duplicated); otherwise drops a text identical to the last one sent for that session, resolves the recipients tracked-first (the chats that entered the session, else the configured broadcast list; an unreadable tracking map sends nothing), and sends the notification's text to each, failing with "N of M chat(s)" when some sends fail |
+| `wants_notification` | `AttentionRequired` from the `ActivityStatus` path (unless it carries a `question` — the pending question already alerted), from an agent (`Agent`) or a claude-cli pending question (`PendingQuestion`), while the `telegram:` block is enabled. `Activity` is declined (every tool call would become a message) and so is `Presenter` (those elicitations already arrive through `on_presenter_event`, with their keyboards — taking them twice would double-send) |
+| `on_notification` | a `PendingQuestion` is rendered by `question_alert::QuestionAlert` and sent loud as HTML once per `request_id` (the dedupe key `question:<request_id>`, apart from status texts); an agent-written notification is rendered by `agent_notification_telegram::AgentNotificationTelegram` and sent as HTML (never de-duplicated); otherwise drops a text identical to the last one sent for that session, resolves the recipients tracked-first (the chats that entered the session, else the configured broadcast list; an unreadable tracking map sends nothing), and sends the notification's text to each, failing with "N of M chat(s)" when some sends fail |
 
 `agent_notification_telegram.rs` is a module of its own because rendering is a pure function of the
 notification: `AgentNotificationTelegram::render` lays out `<b>title</b>`, `<i>label</i>`, the body
@@ -97,6 +97,13 @@ into messages of at most `TELEGRAM_HTML_MESSAGE_MAX_BYTES` (4,096) — at whites
 tag, entity or character, closing the tags open at a break and reopening them in the next message.
 `send_to` sends every message to each chat through `TelegramSender::send_html_message` with
 `silent = !sound`, and stops a chat at its first refused message.
+
+`question_alert.rs` is the same kind of pure renderer for a claude-cli pending question: a permission
+as `<i>Session {label} wants to run</i> <code>{tool}</code>: <code>{summary}</code>`, a question set as
+each question's bold header, text and `• label: description` options. It escapes only `&`, `<` and `>`
+(the kernel's `escape_html` also escapes `"`, which the layout does not want) and splits through
+`agent_notification_telegram::split_html` (`pub(crate)`), so a long question set is several
+well-formed messages; `QuestionAlert::html()` is the whole alert and `messages()` what is sent.
 
 `tddy-daemon`'s `runtime/mount_host.rs` installs the hooks twice from one value: on
 `DaemonSessionHost::new` as its `SharedOperatorChannel`, and on the daemon's notification bus through

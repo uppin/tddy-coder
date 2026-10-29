@@ -1,6 +1,7 @@
 //! The Telegram control plane: everything that turns a chat into a session front-end on top of the
 //! daemon's session lifecycle.
 //!
+//! - [`question_alert`] — the message that tells the operator what a session is asking.
 //! - [`telegram_bot`] — the long-polling dispatcher, routing inbound messages and callbacks.
 //! - [`telegram_session_control`] — the harness those updates drive: pickers, session start,
 //!   elicitation answers, chaining, the session list.
@@ -18,6 +19,7 @@
 //! [`TelegramDaemonHooks`]: telegram_session_subscriber::TelegramDaemonHooks
 
 pub mod agent_notification_telegram;
+pub mod question_alert;
 pub mod telegram_bot;
 pub mod telegram_multi_select_shortcuts;
 pub mod telegram_notifier;

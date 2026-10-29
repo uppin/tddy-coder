@@ -105,6 +105,7 @@ async fn report_session_status_writes_activity_status_to_session_yaml() {
         os_user: TEST_OS_USER.to_string(),
         status: "Running".to_string(),
         message: String::new(),
+        ..Default::default()
     });
     let response = service
         .activity_service()
@@ -132,6 +133,7 @@ async fn report_session_status_rejects_unknown_session() {
         os_user: TEST_OS_USER.to_string(),
         status: "Running".to_string(),
         message: String::new(),
+        ..Default::default()
     });
     let err = service
         .activity_service()
@@ -158,6 +160,7 @@ async fn report_session_status_rejects_bad_hook_token() {
         os_user: TEST_OS_USER.to_string(),
         status: "Running".to_string(),
         message: String::new(),
+        ..Default::default()
     });
     let err = service
         .activity_service()
@@ -218,6 +221,7 @@ async fn report_session_status_rejects_non_claude_cli_session() {
         os_user: TEST_OS_USER.to_string(),
         status: "Running".to_string(),
         message: String::new(),
+        ..Default::default()
     });
     let err = service
         .activity_service()
@@ -244,6 +248,7 @@ async fn report_session_status_rejects_unknown_status_string() {
         os_user: TEST_OS_USER.to_string(),
         status: "UnknownBadStatus".to_string(),
         message: String::new(),
+        ..Default::default()
     });
     let err = service
         .activity_service()
@@ -264,6 +269,7 @@ async fn report_session_status_rejects_session_id_path_traversal() {
         os_user: TEST_OS_USER.to_string(),
         status: "Running".to_string(),
         message: String::new(),
+        ..Default::default()
     });
     let err = service
         .activity_service()
@@ -280,6 +286,7 @@ fn reporting(session_id: &str, status: &str, message: &str) -> Request<ReportSes
         os_user: TEST_OS_USER.to_string(),
         status: status.to_string(),
         message: message.to_string(),
+        ..Default::default()
     })
 }
 

@@ -1,7 +1,7 @@
 //! Pure builder for the per-worktree `.claude/settings.local.json` hooks configuration.
 //!
 //! The daemon calls [`build_claude_hooks_settings`] during `start_claude_cli_session` to produce
-//! the JSON that Claude Code will read from the worktree. Each of the six relevant hook events is
+//! the JSON that Claude Code will read from the worktree. Each of the relevant hook events is
 //! wired to `tddy-tools session-hook` with the session id, daemon URL, os_user, and hook_token
 //! baked in so the hook can authenticate and report status without additional config.
 //!
@@ -65,19 +65,24 @@ pub(crate) fn daemon_socket_arg(p: &HookCommandParams<'_>) -> String {
 /// { "matcher": "", "hooks": [{ "type": "command", "command": "<cmd>" }] }
 /// ```
 /// `matcher = ""` matches all tool names (for `PostToolUse`/`Notification`) and all other
-/// variants.
+/// variants. `PreToolUse` is matched to `AskUserQuestion` alone: a hook on every tool would run a
+/// process before each call of the agent's loop, and only that one tool's input is a question
+/// (`#home-inbox` 3/8).
 pub fn build_claude_hooks_settings(p: &HookCommandParams<'_>) -> serde_json::Value {
-    let events = [
-        "SessionStart",
-        "UserPromptSubmit",
-        "PostToolUse",
-        "Notification",
-        "Stop",
-        "SessionEnd",
+    // (event, matcher)
+    let events: [(&str, &str); 8] = [
+        ("SessionStart", ""),
+        ("UserPromptSubmit", ""),
+        ("PostToolUse", ""),
+        ("Notification", ""),
+        ("PermissionRequest", ""),
+        ("PreToolUse", "AskUserQuestion"),
+        ("Stop", ""),
+        ("SessionEnd", ""),
     ];
 
     let mut hooks_obj = serde_json::Map::new();
-    for event in &events {
+    for (event, matcher) in &events {
         let cmd = format!(
             "{} session-hook --session {} --daemon {}{} --os-user {} --hook-token {} --event {}",
             shell_quote(p.tddy_tools_path),
@@ -89,7 +94,7 @@ pub fn build_claude_hooks_settings(p: &HookCommandParams<'_>) -> serde_json::Val
             event,
         );
         let hook_entry = serde_json::json!([{
-            "matcher": "",
+            "matcher": matcher,
             "hooks": [{"type": "command", "command": cmd}]
         }]);
         hooks_obj.insert(event.to_string(), hook_entry);
@@ -117,9 +122,9 @@ mod tests {
         }
     }
 
-    /// The generated settings must contain all six hook event keys.
+    /// The generated settings must contain all eight hook event keys.
     #[test]
-    fn build_claude_hooks_settings_emits_all_six_events() {
+    fn build_claude_hooks_settings_emits_all_eight_events() {
         // When
         let value = build_claude_hooks_settings(&test_params());
         let hooks = value
@@ -128,20 +133,55 @@ mod tests {
             .as_object()
             .expect("hooks must be an object");
 
-        for event in &[
-            "SessionStart",
-            "UserPromptSubmit",
-            "PostToolUse",
-            "Notification",
-            "Stop",
-            "SessionEnd",
-        ] {
-            assert!(
-                hooks.contains_key(*event),
-                "hooks must contain event '{event}'"
-            );
-        }
-        assert_eq!(hooks.len(), 6, "hooks must contain exactly 6 events");
+        // Then
+        let mut events: Vec<&str> = hooks.keys().map(String::as_str).collect();
+        events.sort_unstable();
+        assert_eq!(
+            events,
+            vec![
+                "Notification",
+                "PermissionRequest",
+                "PostToolUse",
+                "PreToolUse",
+                "SessionEnd",
+                "SessionStart",
+                "Stop",
+                "UserPromptSubmit",
+            ]
+        );
+    }
+
+    /// `PreToolUse` is installed for the one tool whose input is a question; a hook on every tool
+    /// would run a process before each call of the agent's loop. Every other event matches all.
+    #[test]
+    fn the_pre_tool_use_hook_matches_ask_user_question_only() {
+        // When
+        let value = build_claude_hooks_settings(&test_params());
+
+        // Then
+        let hooks = value["hooks"].as_object().expect("hooks must be an object");
+        let matchers: std::collections::BTreeMap<&str, &str> = hooks
+            .iter()
+            .map(|(event, entries)| {
+                (
+                    event.as_str(),
+                    entries[0]["matcher"].as_str().expect("a string matcher"),
+                )
+            })
+            .collect();
+        assert_eq!(
+            matchers,
+            std::collections::BTreeMap::from([
+                ("Notification", ""),
+                ("PermissionRequest", ""),
+                ("PostToolUse", ""),
+                ("PreToolUse", "AskUserQuestion"),
+                ("SessionEnd", ""),
+                ("SessionStart", ""),
+                ("Stop", ""),
+                ("UserPromptSubmit", ""),
+            ])
+        );
     }
 
     /// Each hook entry must be an array with one matcher group containing one command hook.
@@ -164,10 +204,11 @@ mod tests {
             );
 
             let group = &arr[0];
-            assert_eq!(
-                group.get("matcher").and_then(|v| v.as_str()),
-                Some(""),
-                "{event_name}: matcher must be empty string"
+            // The matchers — `PreToolUse` alone carries one — are pinned whole by
+            // `the_pre_tool_use_hook_matches_ask_user_question_only`.
+            assert!(
+                group.get("matcher").and_then(|v| v.as_str()).is_some(),
+                "{event_name}: a matcher group must carry a string matcher"
             );
 
             let inner = group["hooks"]

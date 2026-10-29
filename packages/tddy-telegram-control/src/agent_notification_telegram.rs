@@ -156,7 +156,7 @@ type LastBreak<'a> = (usize, Vec<(&'a str, &'a str)>, usize);
 /// `html` as messages of at most `limit` bytes, each well-formed on its own: a message that ends
 /// inside an open tag closes it, and the next reopens it. Breaks fall at whitespace when the
 /// message has any, and never inside a tag, an entity or a character.
-fn split_html(html: &str, limit: usize) -> Vec<String> {
+pub(crate) fn split_html(html: &str, limit: usize) -> Vec<String> {
     let atoms = atoms_of(html);
     let mut messages = Vec::new();
     let mut reopen: Vec<(&str, &str)> = Vec::new();

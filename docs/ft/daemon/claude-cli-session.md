@@ -312,7 +312,7 @@ fullscreen crashes needs `fullscreen: false`.
 ## Session activity status via per-worktree hooks
 
 When the daemon starts a claude-cli session it writes `.claude/settings.local.json` into the git
-worktree configuring six Claude Code lifecycle hooks. Each hook invokes
+worktree configuring eight Claude Code hooks. Each hook invokes
 `tddy-tools session-hook` which maps the event to a granular `SessionActivityStatus` and calls
 `ReportSessionStatus` on `activity.ActivityService`. The daemon validates the per-session
 `hook_token`, writes `activity_status` to `.session.yaml`, and surfaces it via
@@ -326,9 +326,34 @@ worktree configuring six Claude Code lifecycle hooks. Each hook invokes
 | `UserPromptSubmit` | — | `Running` |
 | `PostToolUse` | — | `ExecutingTool` |
 | `Notification` | `permission_prompt` / `elicitation_dialog` / `idle_prompt` | `WaitingForInput` |
+| `PermissionRequest` | — | `WaitingForInput`, with the tool and its input |
+| `PreToolUse` (matcher `AskUserQuestion` only) | — | `WaitingForInput`, with every question and option |
 | `Stop` | — | `Done` |
 | `SessionEnd` | — | `Ended` |
 | anything else | — | no-op (hook exits 0, no RPC) |
+
+### What a session is asking
+
+`PermissionRequest` and `PreToolUse(AskUserQuestion)` report the tool name and its input
+(`ReportSessionStatusRequest.{hook_event_name, tool_name, tool_input_json}`), return at once with
+empty stdout, and decide nothing: Claude's own prompt still appears. The daemon records the question
+in the session's `pending-question.json` under a new `request_id` (returned in
+`ReportSessionStatusResponse.request_id`) and sets `.session.yaml` `pending_elicitation`:
+
+- **permission:** `kind: permission`, `tool_name`, `tool_input_json`, and `question` reading
+  `Run <tool>: <summary>` — `Bash` is summarised by its `command`, `Edit`/`Write`/`Read` by their
+  `file_path`, any other tool by its input as compact JSON;
+- **question:** `kind: select` or `multi_select` (from the first question), `allow_other`, and
+  `questions: [{header, question, options: [{label, description}], multi_select}]`, the flat fields
+  mirroring the first.
+
+A malformed `AskUserQuestion` input is refused as `InvalidArgument` before anything is written.
+The `Notification` hook that follows the same prompt **keeps** the record (filling only an empty
+`question` from its message). The next `PostToolUse`, `UserPromptSubmit`, `Stop` or `SessionEnd`
+clears it and resets `pending_elicitation`. An orchestrator sees the record through
+`ReadSessionActivity`. Neither hook of an `AskUserQuestion` is reported as a tool call
+(`ReportAgentActivity`): it is a question, and a declined one has no `PostToolUse` to complete it,
+so the activity log carries no row for it at all.
 
 ### Hook wiring
 
