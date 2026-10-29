@@ -49,6 +49,8 @@ const SYNC_STATE_BASENAME: &str = ".tddy-context-sync.json";
 /// a test can assert that nothing was transferred.
 struct ACodebaseHost {
     files: Mutex<BTreeMap<String, Vec<u8>>>,
+    /// Symlinks the repository holds: the link's path, and the root-relative path it points at.
+    links: Mutex<BTreeMap<String, String>>,
     manifest_calls: AtomicUsize,
     read_calls: AtomicUsize,
     failing: Mutex<Option<String>>,
@@ -57,6 +59,7 @@ struct ACodebaseHost {
 fn a_codebase_host() -> ACodebaseHost {
     ACodebaseHost {
         files: Mutex::new(BTreeMap::new()),
+        links: Mutex::new(BTreeMap::new()),
         manifest_calls: AtomicUsize::new(0),
         read_calls: AtomicUsize::new(0),
         failing: Mutex::new(None),
@@ -79,6 +82,23 @@ impl ACodebaseHost {
             .expect("lock")
             .insert(rel_path.to_string(), contents.to_vec());
         self
+    }
+
+    /// A symlink at `rel_path` pointing at `target`, both root-relative, as the manifest carries it.
+    fn linking(self, rel_path: &str, target: &str) -> Self {
+        self.relink(rel_path, target);
+        self
+    }
+
+    fn relink(&self, rel_path: &str, target: &str) {
+        self.links
+            .lock()
+            .expect("lock")
+            .insert(rel_path.to_string(), target.to_string());
+    }
+
+    fn unlink(&self, rel_path: &str) {
+        self.links.lock().expect("lock").remove(rel_path);
     }
 
     fn edit(&self, rel_path: &str, contents: &str) {
@@ -122,15 +142,22 @@ impl ContextSource for ACodebaseHost {
         self.manifest_calls.fetch_add(1, Ordering::SeqCst);
         self.refuse_if_unreachable()?;
         let files = self.files.lock().expect("lock");
+        let links = self.links.lock().expect("lock");
+        let file_entries = files.iter().map(|(rel_path, bytes)| ContextEntry {
+            rel_path: rel_path.clone(),
+            sha256: tddy_sandbox::sha256_hex(bytes),
+            size_bytes: bytes.len() as u64,
+            symlink_target: None,
+        });
+        // A link carries no bytes; its identity is where it points, so retargeting it moves its hash.
+        let link_entries = links.iter().map(|(rel_path, target)| ContextEntry {
+            rel_path: rel_path.clone(),
+            sha256: tddy_sandbox::sha256_hex(target.as_bytes()),
+            size_bytes: 0,
+            symlink_target: Some(target.clone()),
+        });
         Ok(ContextManifest::from_entries(
-            files
-                .iter()
-                .map(|(rel_path, bytes)| ContextEntry {
-                    rel_path: rel_path.clone(),
-                    sha256: tddy_sandbox::sha256_hex(bytes),
-                    size_bytes: bytes.len() as u64,
-                })
-                .collect(),
+            file_entries.chain(link_entries).collect(),
         ))
     }
 
@@ -148,6 +175,12 @@ impl ContextSource for ACodebaseHost {
 
 fn a_session_dir() -> tempfile::TempDir {
     tempfile::tempdir().expect("tempdir")
+}
+
+/// Where the symlink at `rel_path` in the context dir points, exactly as it was written.
+fn link_at(context_dir: &Path, rel_path: &str) -> std::path::PathBuf {
+    std::fs::read_link(context_dir.join(rel_path))
+        .unwrap_or_else(|e| panic!("{rel_path} must be a symlink in the context dir: {e}"))
 }
 
 fn read(context_dir: &Path, rel_path: &str) -> String {
@@ -704,4 +737,342 @@ fn a_path_served_with_backslash_separators_lands_in_the_directory_the_agent_read
 
     // Then
     assert_eq!(read(&context_dir, ".claude/settings.json"), "{}\n");
+}
+
+// ---------------------------------------------------------------------------
+// Symlinks are recreated, not flattened
+// ---------------------------------------------------------------------------
+
+/// The repository's `.claude/skills -> ../.agents/skills` reaches the agent's directory as a
+/// symlink. Claude Code reads skills, commands and agents only under `.claude/`, so a context dir
+/// holding `.agents/**` alone gives the agent the project's rules and none of its skills.
+#[cfg(unix)]
+#[test]
+fn a_link_the_codebase_host_serves_is_recreated_as_a_symlink() {
+    // Given
+    let session_dir = a_session_dir();
+    let host = a_codebase_host()
+        .holding(".agents/skills/tdd/SKILL.md", "# TDD skill\n")
+        .linking(".claude/skills", ".agents/skills");
+
+    // When
+    let context_dir = build_split_context_dir(session_dir.path(), &[], CLAUDE_GLOBS, &host)
+        .expect("build must succeed");
+
+    // Then
+    assert_eq!(
+        link_at(&context_dir, ".claude/skills"),
+        Path::new("../.agents/skills"),
+        "the link is written relative to where it sits, so it resolves inside the context dir"
+    );
+}
+
+/// And the agent reads the skill through it, as it would in the repository.
+#[cfg(unix)]
+#[test]
+fn a_skill_reached_through_a_recreated_link_reads_back_its_bytes() {
+    // Given
+    let session_dir = a_session_dir();
+    let host = a_codebase_host()
+        .holding(".agents/skills/tdd/SKILL.md", "# TDD skill\n")
+        .linking(".claude/skills", ".agents/skills");
+
+    // When
+    let context_dir = build_split_context_dir(session_dir.path(), &[], CLAUDE_GLOBS, &host)
+        .expect("build must succeed");
+
+    // Then
+    assert_eq!(
+        read(&context_dir, ".claude/skills/tdd/SKILL.md"),
+        "# TDD skill\n"
+    );
+}
+
+/// A served link pulls its target in even when no glob names the target: the codebase host lists
+/// that target *because* an allow-listed link reaches it, so refusing it here would leave the agent
+/// a dangling link.
+#[cfg(unix)]
+#[test]
+fn a_link_to_a_target_no_glob_names_is_synced_together_with_its_target() {
+    // Given
+    let session_dir = a_session_dir();
+    let host = a_codebase_host()
+        .holding("tools/agent-skills/tdd/SKILL.md", "# TDD skill\n")
+        .linking(".claude/skills", "tools/agent-skills");
+
+    // When
+    let context_dir = build_split_context_dir(session_dir.path(), &[], CLAUDE_GLOBS, &host)
+        .expect("a link's own target must be accepted alongside it");
+
+    // Then
+    assert_eq!(
+        read(&context_dir, ".claude/skills/tdd/SKILL.md"),
+        "# TDD skill\n"
+    );
+}
+
+/// Only a link's target is let in that way. A served path no glob names and no served link reaches
+/// is still a peer offering something outside the session's allow-list.
+#[test]
+fn a_served_path_no_glob_names_and_no_link_reaches_is_still_refused() {
+    // Given
+    let session_dir = a_session_dir();
+    let host = a_codebase_host()
+        .holding("CLAUDE.md", "# rules\n")
+        .holding("src/main.rs", "fn main() {}\n");
+
+    // When
+    let refusal = build_split_context_dir(session_dir.path(), &[], CLAUDE_GLOBS, &host);
+
+    // Then
+    assert_eq!(
+        refusal
+            .expect_err("an unlisted, unlinked path must fail the build")
+            .code(),
+        tddy_rpc::Code::PermissionDenied
+    );
+}
+
+/// The manifest comes from another host, so a link target is a path that host chose. One that
+/// climbs out of the context dir is refused, not written: recreated, it would hand the agent a
+/// window onto this host's filesystem.
+#[cfg(unix)]
+#[test]
+fn a_served_link_pointing_out_of_the_context_dir_is_refused() {
+    // Given
+    let session_dir = a_session_dir();
+    let host = a_codebase_host()
+        .holding("CLAUDE.md", "# rules\n")
+        .linking(".claude/skills", "../../.ssh");
+
+    // When
+    let refusal = build_split_context_dir(session_dir.path(), &[], CLAUDE_GLOBS, &host);
+
+    // Then
+    assert_eq!(
+        refusal
+            .expect_err("a link escaping the context dir must fail the build")
+            .code(),
+        tddy_rpc::Code::PermissionDenied
+    );
+}
+
+/// Pulling a link's target in does not reopen the secrets: a peer serving `.claude/creds -> .env`
+/// together with `.env` is refused on this side too, whatever the codebase host decided.
+#[cfg(unix)]
+#[test]
+fn a_served_link_to_a_secret_shaped_target_is_refused() {
+    // Given
+    let session_dir = a_session_dir();
+    let host = a_codebase_host()
+        .holding(".env", "AWS_SECRET_ACCESS_KEY=hunter2\n")
+        .linking(".claude/creds", ".env");
+
+    // When
+    let refusal = build_split_context_dir(session_dir.path(), &[], CLAUDE_GLOBS, &host);
+
+    // Then
+    assert_eq!(
+        refusal
+            .expect_err("a link to a secret-shaped file must fail the build")
+            .code(),
+        tddy_rpc::Code::PermissionDenied
+    );
+}
+
+/// A link the project points somewhere else is re-pointed in the agent's directory on the next
+/// tick.
+#[cfg(unix)]
+#[test]
+fn a_tick_after_a_link_is_retargeted_repoints_the_symlink() {
+    // Given
+    let session_dir = a_session_dir();
+    let host = a_codebase_host()
+        .holding(".agents/skills/tdd/SKILL.md", "# TDD skill\n")
+        .holding(".agents/skills-next/tdd/SKILL.md", "# TDD skill, revised\n")
+        .linking(".claude/skills", ".agents/skills");
+    let context_dir = build_split_context_dir(session_dir.path(), &[], CLAUDE_GLOBS, &host)
+        .expect("build must succeed");
+    let syncer = ContextSyncer::new(context_dir.clone(), CLAUDE_GLOBS);
+
+    // When
+    host.relink(".claude/skills", ".agents/skills-next");
+    syncer.tick(&host).expect("tick must succeed");
+
+    // Then
+    assert_eq!(
+        read(&context_dir, ".claude/skills/tdd/SKILL.md"),
+        "# TDD skill, revised\n"
+    );
+}
+
+/// A link the project removes is removed — the link, not what it pointed at. Deleting through a
+/// directory link would empty the target tree the repository still ships.
+#[cfg(unix)]
+#[test]
+fn a_tick_that_drops_a_link_removes_the_symlink_and_keeps_its_target() {
+    // Given
+    let session_dir = a_session_dir();
+    let host = a_codebase_host()
+        .holding(".agents/skills/tdd/SKILL.md", "# TDD skill\n")
+        .linking(".claude/skills", ".agents/skills");
+    let context_dir = build_split_context_dir(session_dir.path(), &[], CLAUDE_GLOBS, &host)
+        .expect("build must succeed");
+    let syncer = ContextSyncer::new(context_dir.clone(), CLAUDE_GLOBS);
+
+    // When
+    host.unlink(".claude/skills");
+    syncer.tick(&host).expect("tick must succeed");
+
+    // Then
+    assert!(
+        std::fs::symlink_metadata(context_dir.join(".claude/skills")).is_err(),
+        "the retracted link must be gone"
+    );
+    assert_eq!(
+        read(&context_dir, ".agents/skills/tdd/SKILL.md"),
+        "# TDD skill\n",
+        "the target the repository still ships must survive"
+    );
+}
+
+/// A link that replaces a whole allow-listed directory (`.claude -> shared/claude`) is recreated
+/// too, and the agent reads its settings through it.
+#[cfg(unix)]
+#[test]
+fn a_directory_root_link_is_recreated_so_its_files_read_through_it() {
+    // Given
+    let session_dir = a_session_dir();
+    let host = a_codebase_host()
+        .holding("shared/claude/settings.json", "{\"model\":\"opus\"}\n")
+        .linking(".claude", "shared/claude");
+
+    // When
+    let context_dir = build_split_context_dir(session_dir.path(), &[], CLAUDE_GLOBS, &host)
+        .expect("a directory-root link must be accepted");
+
+    // Then
+    assert_eq!(
+        read(&context_dir, ".claude/settings.json"),
+        "{\"model\":\"opus\"}\n"
+    );
+}
+
+/// The codebase host lists a preamble file as an ordinary file, never a link, so a peer serving
+/// `CLAUDE.md` as a link is a defect — and recreating it would put the managed-codebase preamble
+/// somewhere the agent does not read it, or nowhere. Refused rather than written.
+#[cfg(unix)]
+#[test]
+fn a_served_link_at_a_preamble_path_is_refused() {
+    // Given
+    let session_dir = a_session_dir();
+    let host = a_codebase_host()
+        .holding(".agents/rules.md", "# Project rules\n")
+        .linking("CLAUDE.md", ".agents/rules.md");
+
+    // When
+    let refusal = build_split_context_dir(session_dir.path(), &[], CLAUDE_GLOBS, &host);
+
+    // Then
+    assert_eq!(
+        refusal
+            .expect_err("a preamble file served as a link must fail the build")
+            .code(),
+        tddy_rpc::Code::PermissionDenied
+    );
+}
+
+/// The codebase host lists the files behind a link under the target's path, never beneath the
+/// link's own name. A served file beneath a served link is therefore a defect — and written, it
+/// would land wherever the recreated link points.
+#[cfg(unix)]
+#[test]
+fn a_served_file_beneath_a_served_link_is_refused() {
+    // Given
+    let session_dir = a_session_dir();
+    let host = a_codebase_host()
+        .holding(".agents/skills/tdd/SKILL.md", "# TDD skill\n")
+        .holding(".claude/skills/planted.md", "# planted\n")
+        .linking(".claude/skills", ".agents/skills");
+
+    // When
+    let refusal = build_split_context_dir(session_dir.path(), &[], CLAUDE_GLOBS, &host);
+
+    // Then
+    assert_eq!(
+        refusal
+            .expect_err("an entry beneath a served link must fail the build")
+            .code(),
+        tddy_rpc::Code::PermissionDenied
+    );
+}
+
+/// The escape that makes this matter: a link back up to `.claude`, a second link beneath it whose
+/// `..` steps are counted from where it is *named* but resolved from where it physically lands, and
+/// a file beneath that. Each passes a string check; together they write outside the context dir.
+#[cfg(unix)]
+#[test]
+fn nested_served_links_cannot_write_outside_the_context_dir() {
+    // Given
+    let session_dir = a_session_dir();
+    let host = a_codebase_host()
+        .linking(".claude/a/b", ".claude")
+        .linking(".claude/a/b/a/b/a/b/q", "t")
+        .holding(".claude/a/b/a/b/a/b/q/escaped.md", "# escaped\n");
+
+    // When
+    let refusal = build_split_context_dir(session_dir.path(), &[], CLAUDE_GLOBS, &host);
+
+    // Then
+    assert_eq!(
+        refusal
+            .expect_err("nested links that escape the context dir must fail the build")
+            .code(),
+        tddy_rpc::Code::PermissionDenied
+    );
+}
+
+/// The co-located source answers a tick's reads from the walk its manifest was taken from, not from
+/// a fresh walk per file. Besides the cost — one walk per tick rather than one per file read — it is
+/// the consistent answer: a link committed between the manifest and the reads cannot widen what
+/// that tick serves.
+#[cfg(unix)]
+#[test]
+fn a_co_located_read_answers_from_the_manifest_it_serves() {
+    // Given
+    let worktree = tempfile::tempdir().expect("tempdir");
+    let init = std::process::Command::new("git")
+        .args(["init", "--quiet"])
+        .current_dir(worktree.path())
+        .output()
+        .expect("git must run");
+    assert!(init.status.success(), "git init failed");
+    std::fs::create_dir_all(worktree.path().join("tools/agent-skills/tdd")).expect("mkdir");
+    std::fs::write(
+        worktree.path().join("tools/agent-skills/tdd/SKILL.md"),
+        "# TDD skill\n",
+    )
+    .expect("write");
+    std::fs::create_dir_all(worktree.path().join(".claude")).expect("mkdir");
+    let source = tddy_session_files::context_sync::LocalWorktreeSource::new(
+        worktree.path().to_path_buf(),
+        CLAUDE_GLOBS,
+        A_GENEROUS_CAP,
+    );
+    ContextSource::manifest(&source).expect("manifest");
+    std::os::unix::fs::symlink(
+        "../tools/agent-skills",
+        worktree.path().join(".claude/skills"),
+    )
+    .expect("symlink");
+
+    // When
+    let read = ContextSource::read(&source, "tools/agent-skills/tdd/SKILL.md");
+
+    // Then
+    assert_eq!(
+        read.expect_err("the manifest this tick serves reached no such file")
+            .code(),
+        tddy_rpc::Code::PermissionDenied
+    );
 }

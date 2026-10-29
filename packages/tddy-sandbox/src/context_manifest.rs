@@ -9,8 +9,12 @@
 //!
 //! PRD: docs/ft/daemon/agent-context-sync.md § Design.
 
-use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
-use std::path::{Path, PathBuf};
+mod git_ignore;
+pub(crate) mod links;
+pub(crate) mod walk;
+
+use std::collections::{BTreeMap, BTreeSet, HashMap};
+use std::path::Path;
 use std::sync::{LazyLock, PoisonError, RwLock};
 
 use glob::{MatchOptions, Pattern};
@@ -102,13 +106,19 @@ pub fn matches_context_globs(rel_path: &str, globs: &[&str]) -> bool {
 
 /// Whether an already-normalized path is one [`CONTEXT_EXCLUDE_GLOBS`] withholds.
 fn is_excluded(path: &str) -> bool {
-    CONTEXT_EXCLUDE_GLOBS.iter().any(|glob| {
+    matches_any_exclusion(path, CONTEXT_EXCLUDE_GLOBS)
+}
+
+fn matches_any_exclusion(path: &str, exclusions: &[&str]) -> bool {
+    exclusions.iter().any(|glob| {
         with_compiled_pattern(glob, |pattern| {
             pattern.matches_with(path, EXCLUDE_MATCH_OPTIONS)
         })
         .unwrap_or(false)
     })
 }
+
+use crate::context_manifest::walk::walk_context_files;
 
 /// Every glob this process has been asked about, compiled once.
 ///
@@ -123,8 +133,9 @@ fn is_excluded(path: &str) -> bool {
 ///   the failure is reported once, when the pattern is first constructed, which is where it
 ///   belongs.
 ///
-/// Growth is bounded by construction: the keys are the compiled-in tables' rows and the individual
-/// path segments of those rows, never anything a caller or a peer names.
+/// Growth is bounded by construction: the keys are the compiled-in tables' rows, the individual
+/// path segments of those rows and the directory a `dir/**` row roots ([`names_a_link`]), never
+/// anything a caller or a peer names.
 static COMPILED_PATTERNS: LazyLock<RwLock<HashMap<String, Option<Pattern>>>> =
     LazyLock::new(|| RwLock::new(HashMap::new()));
 
@@ -237,149 +248,6 @@ fn pattern_reaches_below(glob: &str, dir_rel: &str) -> bool {
     pattern_segments.next().is_some()
 }
 
-/// One allow-listed file in a worktree, paired with the path its bytes actually live at — which is
-/// the link target when the entry was a symlink, and the allow-list has been asked about *both*
-/// spellings (see [`walk_context_files`]).
-pub(crate) struct ContextFile {
-    /// Worktree-root-relative and `/`-separated, the spelling both the manifest and the copier use.
-    pub rel_path: String,
-    pub source: PathBuf,
-}
-
-/// Every allow-listed file under `root`, sorted by path.
-///
-/// A symlink is followed only when **both ends** are allow-listed: the name it is reached by *and*
-/// the place its target sits in the tree. Checking only the name is not enough and checking only
-/// containment in the root is actively wrong — `.claude/creds -> ../.env` resolves inside the root
-/// and would otherwise be published under a name every glob happily matches, handing the whole
-/// point of the allow-list away. On the split path those bytes then cross to another host and land
-/// in the agent's readable working directory.
-///
-/// So a link out of the root (`.claude/x -> /etc/passwd`) is skipped because its target is not
-/// under `root`, and a link to a sibling inside it (`.claude/creds -> ../.env`,
-/// `.claude/x -> node_modules/…`) is skipped because its target's own root-relative path is named
-/// by no glob. Only a link between two allow-listed places — `.claude/tdd.md -> .agents/skills/tdd/SKILL.md`
-/// — survives, which is the one case an agent-config tree actually has a use for. (A link to a
-/// *directory* already inside the walk is additionally deduplicated by `visited`, so an aliased
-/// tree is listed once, under whichever spelling the walk reached first.)
-pub(crate) fn walk_context_files(root: &Path, globs: &[&str]) -> anyhow::Result<Vec<ContextFile>> {
-    let root = std::fs::canonicalize(root)?;
-    let mut found = Vec::new();
-    let mut visited = HashSet::new();
-    collect_context_files(&root, "", &root, globs, &mut visited, &mut found)?;
-    found.sort_by(|left, right| left.rel_path.cmp(&right.rel_path));
-    Ok(found)
-}
-
-fn collect_context_files(
-    dir: &Path,
-    dir_rel: &str,
-    root: &Path,
-    globs: &[&str],
-    visited: &mut HashSet<PathBuf>,
-    found: &mut Vec<ContextFile>,
-) -> anyhow::Result<()> {
-    for entry in std::fs::read_dir(dir)? {
-        let entry = entry?;
-        // A name no glob could ever spell cannot be allow-listed.
-        let Some(name) = entry.file_name().to_str().map(str::to_string) else {
-            continue;
-        };
-        let rel_path = if dir_rel.is_empty() {
-            name
-        } else {
-            format!("{dir_rel}/{name}")
-        };
-        let Some(source) = resolve_within_root(&entry.path(), root)? else {
-            continue;
-        };
-        // Where the bytes actually sit, spelled the way the allow-list is written. For a plain
-        // entry this is `rel_path` itself; for a symlink it is the *target*'s place in the tree,
-        // and that is the half a containment-only guard never asked about.
-        let Some(source_rel) = root_relative(&source, root) else {
-            log::warn!(
-                "context_manifest: {source:?} resolved outside {root:?} after the containment \
-                 check; skipping it"
-            );
-            continue;
-        };
-        let metadata = std::fs::symlink_metadata(&source)?;
-        if metadata.is_dir() {
-            // Both ends again: the name must be able to lead somewhere allow-listed, and so must
-            // the directory the link lands in — otherwise `.claude/x -> node_modules` would be
-            // descended into under a name that matches `.claude/**`.
-            if !could_contain_matches(&rel_path, globs)
-                || !could_contain_matches(&source_rel, globs)
-                || !visited.insert(source.clone())
-            {
-                continue;
-            }
-            collect_context_files(&source, &rel_path, root, globs, visited, found)?;
-        } else if metadata.is_file()
-            && matches_context_globs(&rel_path, globs)
-            && matches_context_globs(&source_rel, globs)
-        {
-            found.push(ContextFile { rel_path, source });
-        }
-    }
-    Ok(())
-}
-
-/// `path`'s place under `root`, `/`-separated, or `None` when it is not under `root` at all.
-///
-/// Both must be canonical by the time this is asked — here `root` comes from
-/// [`walk_context_files`] and `path` from [`resolve_within_root`] — so a plain prefix strip is the
-/// whole of it.
-///
-/// Exported because the **reader** needs the identical answer. The both-ends symlink rule
-/// ([`walk_context_files`]) is only half enforced if the walk applies it and the reader does not:
-/// the reader is handed a caller-supplied name, and asking the allow-list about that name alone
-/// serves `.claude/creds -> ../.env` under a spelling every glob matches. It has to ask about the
-/// resolved target's own root-relative path too, which is this — and it has to be *this* function
-/// rather than a second prefix strip beside it, because the drift between the two halves of that
-/// rule is what made the reader serve the file the walk had already refused.
-pub fn root_relative(path: &Path, root: &Path) -> Option<String> {
-    let rel = path.strip_prefix(root).ok()?;
-    let joined = rel
-        .components()
-        .map(|component| component.as_os_str().to_string_lossy())
-        .collect::<Vec<_>>()
-        .join("/");
-    (!joined.is_empty()).then_some(joined)
-}
-
-/// The path to read `entry` through, or `None` when it must not be read at all.
-///
-/// Containment in `root` is only half the guard; the caller asks the allow-list about the resolved
-/// path as well (see [`walk_context_files`]). A missing target is the one error swallowed here: a
-/// link pointing at a file the project deleted has no bytes to sync and never had. Every other
-/// error — `EACCES`, `ELOOP`, `EIO` — is propagated, because treating it as "skip" would quietly
-/// drop a file the project still ships, and a dropped manifest entry is a *delete* in the agent's
-/// context directory: a transient error would withdraw guidance with nothing anywhere saying so.
-fn resolve_within_root(entry: &Path, root: &Path) -> anyhow::Result<Option<PathBuf>> {
-    if !std::fs::symlink_metadata(entry)?.file_type().is_symlink() {
-        return Ok(Some(entry.to_path_buf()));
-    }
-    let target = match std::fs::canonicalize(entry) {
-        Ok(target) => target,
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
-            log::debug!("context_manifest: {entry:?} is a dangling symlink; skipping it");
-            return Ok(None);
-        }
-        Err(e) => {
-            log::error!("context_manifest: resolving the symlink {entry:?} failed: {e}");
-            return Err(
-                anyhow::Error::new(e).context(format!("failed to resolve the symlink {entry:?}"))
-            );
-        }
-    };
-    if !target.starts_with(root) {
-        log::debug!("context_manifest: {entry:?} resolves outside {root:?}; skipping it");
-        return Ok(None);
-    }
-    Ok(Some(target))
-}
-
 /// Lowercase hex SHA-256, the identity a manifest entry is compared on.
 pub fn sha256_hex(bytes: &[u8]) -> String {
     let digest = Sha256::digest(bytes);
@@ -422,6 +290,14 @@ pub struct ContextEntry {
     pub rel_path: String,
     pub sha256: String,
     pub size_bytes: u64,
+    /// `Some` when `rel_path` travels as a symlink: the worktree-root-relative path it resolves
+    /// to, `/`-separated. A link carries no bytes of its own — the consumer recreates it, and its
+    /// target is listed as entries of its own. Its `size_bytes` is `0` and its `sha256` is
+    /// [`sha256_hex`] of the target's spelling, so a retargeted link is a changed entry.
+    ///
+    /// Never `Some` at a [`PREAMBLE_FILES`](crate::context_dir::PREAMBLE_FILES) path: a symlink there is followed, and listed as an
+    /// ordinary file whose hash and size are its target's ([`followed_preamble_target`](links::followed_preamble_target)).
+    pub symlink_target: Option<String>,
 }
 
 /// Everything the allow-list names, in a stable order.
@@ -457,6 +333,17 @@ impl ContextManifest {
     pub fn of_worktree(root: &Path, globs: &[&str], max_bytes: u64) -> anyhow::Result<Self> {
         let mut entries = Vec::new();
         for file in walk_context_files(root, globs)? {
+            if let Some(target) = file.symlink_target {
+                // A link carries no bytes; its identity is where it points, so retargeting it
+                // changes its hash and the diff fetches it although no file's bytes moved.
+                entries.push(ContextEntry {
+                    rel_path: file.rel_path,
+                    sha256: sha256_hex(target.as_bytes()),
+                    size_bytes: 0,
+                    symlink_target: Some(target),
+                });
+                continue;
+            }
             let declared_size = std::fs::metadata(&file.source)?.len();
             if declared_size > max_bytes {
                 log::warn!(
@@ -481,6 +368,7 @@ impl ContextManifest {
                 rel_path: file.rel_path,
                 sha256,
                 size_bytes,
+                symlink_target: None,
             });
         }
         Ok(Self::from_entries(entries))

@@ -339,10 +339,11 @@ fn a_worktree_whose_symlinks_alias_files_the_allow_list_withholds() -> AWorktree
     worktree
 }
 
-/// AC19, at the **reader**. A symlink is followed only when both ends are allow-listed: the name it
-/// is reached by *and* the place its target sits in the tree. Checking the requested name alone and
-/// then only containment lets an attacker publish any file in the checkout under a name every glob
-/// happily matches — `.claude/creds` hands back `.env`, and `.claude/alias.json` hands back the
+/// AC19, at the **reader**. A symlink is followed only when the place its target sits in the tree
+/// may travel — a glob names it, or an allow-listed link pulls it in and it is neither secret-shaped
+/// (`CONTEXT_SECRET_GLOBS`) nor excluded (`CONTEXT_EXCLUDE_GLOBS`). Checking the requested name
+/// alone and then only containment lets an attacker publish any file in the checkout under a name
+/// every glob happily matches — `.claude/creds` hands back `.env`, and `.claude/alias.json` hands back the
 /// `settings.local.json` the daemon owns, defeating the exclusion list outright. On the split path
 /// those bytes then cross to another host into the agent's readable working directory.
 ///
@@ -424,6 +425,91 @@ fn the_manifest_omits_the_symlinks_whose_targets_the_allow_list_does_not_name() 
         !paths.contains(&".claude/creds".to_string())
             && !paths.contains(&".claude/alias.json".to_string()),
         "an aliased path must not be advertised; got {paths:?}"
+    );
+}
+
+/// A checkout that keeps its skills outside every glob and reaches them from `.claude/` through a
+/// committed link — the layout whose target the allow-list does not name but the link does.
+#[cfg(unix)]
+fn a_worktree_linking_its_skills_from_an_unlisted_tree() -> AWorktree {
+    let worktree = a_worktree();
+    worktree
+        .with_file("tools/agent-skills/tdd/SKILL.md", b"# TDD skill\n")
+        .with_file("tools/build.sh", b"#!/bin/sh\n");
+    std::fs::create_dir_all(worktree.path().join(".claude")).expect("mkdir");
+    std::os::unix::fs::symlink(
+        "../tools/agent-skills",
+        worktree.path().join(".claude/skills"),
+    )
+    .expect("symlink");
+    worktree.committed();
+    worktree
+}
+
+/// The manifest carries the link as a link, naming its target, so the far side can recreate it.
+#[cfg(unix)]
+#[test]
+fn the_manifest_marks_an_allow_listed_link_with_its_target() {
+    // Given
+    let worktree = a_worktree_linking_its_skills_from_an_unlisted_tree();
+
+    // When
+    let manifest = context_manifest(worktree.path(), CLAUDE_GLOBS, A_GENEROUS_CAP)
+        .expect("manifest must build");
+
+    // Then
+    let link = manifest
+        .iter()
+        .find(|e| e.rel_path == ".claude/skills")
+        .expect(".claude/skills must be listed");
+    assert_eq!(link.symlink_target, "tools/agent-skills");
+}
+
+/// The reader and the manifest agree: the file the manifest lists because an allow-listed link
+/// reaches it is a file the reader serves, though no glob names its path.
+#[cfg(unix)]
+#[test]
+fn a_file_reached_only_through_an_allow_listed_link_is_served() {
+    // Given
+    let worktree = a_worktree_linking_its_skills_from_an_unlisted_tree();
+
+    // When
+    let served = read_context_file_bytes(
+        worktree.path(),
+        "tools/agent-skills/tdd/SKILL.md",
+        CLAUDE_GLOBS,
+        A_GENEROUS_CAP,
+    );
+
+    // Then
+    assert_eq!(
+        served.expect("a link's target must be readable"),
+        b"# TDD skill\n".to_vec()
+    );
+}
+
+/// A sibling of the linked tree is not reached by the link, so it stays exactly as unreadable as
+/// it was.
+#[cfg(unix)]
+#[test]
+fn a_file_beside_a_linked_tree_stays_refused() {
+    // Given
+    let worktree = a_worktree_linking_its_skills_from_an_unlisted_tree();
+
+    // When
+    let refusal = read_context_file_bytes(
+        worktree.path(),
+        "tools/build.sh",
+        CLAUDE_GLOBS,
+        A_GENEROUS_CAP,
+    );
+
+    // Then
+    assert_eq!(
+        refusal
+            .expect_err("no glob and no link reaches tools/build.sh")
+            .code(),
+        tddy_rpc::Code::PermissionDenied
     );
 }
 
@@ -724,5 +810,34 @@ fn a_batch_naming_the_same_path_twice_is_refused() {
             .expect_err("a batch repeating a path must be refused")
             .code(),
         tddy_rpc::Code::InvalidArgument
+    );
+}
+
+/// A link pulls in only what git does not ignore, and the reader agrees: an ignored file reached
+/// through an allow-listed link is refused like any unlisted path.
+#[cfg(unix)]
+#[test]
+fn a_gitignored_file_reached_through_an_allow_listed_link_is_refused() {
+    // Given
+    let worktree = a_worktree_linking_its_skills_from_an_unlisted_tree();
+    worktree.with_gitignored_file(
+        "tools/agent-skills/.cache/token.json",
+        b"{\"token\":\"t\"}\n",
+    );
+
+    // When
+    let refusal = read_context_file_bytes(
+        worktree.path(),
+        "tools/agent-skills/.cache/token.json",
+        CLAUDE_GLOBS,
+        A_GENEROUS_CAP,
+    );
+
+    // Then
+    assert_eq!(
+        refusal
+            .expect_err("a gitignored file must not be served through a link")
+            .code(),
+        tddy_rpc::Code::PermissionDenied
     );
 }

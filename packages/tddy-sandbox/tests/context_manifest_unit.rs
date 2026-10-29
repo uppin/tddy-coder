@@ -22,6 +22,7 @@ fn an_entry(rel_path: &str, sha256: &str) -> ContextEntry {
         rel_path: rel_path.to_string(),
         sha256: sha256.to_string(),
         size_bytes: 1,
+        symlink_target: None,
     }
 }
 
@@ -265,11 +266,13 @@ fn a_matching_hash_is_not_re_fetched_even_when_the_recorded_size_differs() {
         rel_path: "CLAUDE.md".to_string(),
         sha256: "aaa".to_string(),
         size_bytes: 10,
+        symlink_target: None,
     }]);
     let served = ContextManifest::from_entries(vec![ContextEntry {
         rel_path: "CLAUDE.md".to_string(),
         sha256: "aaa".to_string(),
         size_bytes: 999,
+        symlink_target: None,
     }]);
 
     // When

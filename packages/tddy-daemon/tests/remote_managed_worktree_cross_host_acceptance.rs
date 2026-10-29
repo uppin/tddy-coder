@@ -210,8 +210,9 @@ fn register_project(projects_dir: &Path, repo_path: &Path) {
 }
 
 /// A repo whose `origin` points at itself, so worktree setup's `git fetch origin` succeeds with no
-/// server.
-fn create_test_repo_with_origin(dir: &Path) {
+/// server. Whatever `seed` writes into it is committed on top of the initial commit and pushed, so
+/// the worktree the codebase host checks out holds it.
+fn create_test_repo_with_origin_committing(dir: &Path, seed: impl FnOnce(&Path)) {
     let run = |args: &[&str]| {
         std::process::Command::new("git")
             .args(args)
@@ -227,6 +228,9 @@ fn create_test_repo_with_origin(dir: &Path) {
     run(&["config", "user.email", "t@t.com"]);
     run(&["config", "user.name", "Test"]);
     run(&["commit", "--allow-empty", "-m", "init"]);
+    seed(dir);
+    run(&["add", "-A"]);
+    run(&["commit", "--allow-empty", "-m", "seed"]);
     run(&["remote", "add", "origin", dir.to_str().unwrap()]);
     run(&["push", "-u", "origin", "main"]);
 }
@@ -387,6 +391,11 @@ async fn split_hosts_with_agent_claude_binary(agent_claude_binary: Option<&str>)
     split_hosts_with_codebase_provisioner_and_agent_binary(None, agent_claude_binary).await
 }
 
+/// Both hosts with working stubs, over a repository that commits whatever `seed` writes.
+async fn split_hosts_over_a_repo_seeded_with(seed: impl FnOnce(&Path)) -> SplitHosts {
+    split_hosts_seeded(None, None, seed).await
+}
+
 /// A split pair whose codebase daemon B builds its workspace jail through `provisioner` rather
 /// than the real kernel sandbox, so a test can assert which calls reached the jail and that the
 /// host worktree was never touched — the same double `workspace_tool_sandbox_acceptance.rs` uses
@@ -395,6 +404,14 @@ async fn split_hosts_with_codebase_provisioner_and_agent_binary(
     provisioner: Option<Arc<dyn WorkspaceSandboxProvisioner>>,
     agent_claude_binary: Option<&str>,
 ) -> SplitHosts {
+    split_hosts_seeded(provisioner, agent_claude_binary, |_| {}).await
+}
+
+async fn split_hosts_seeded(
+    provisioner: Option<Arc<dyn WorkspaceSandboxProvisioner>>,
+    agent_claude_binary: Option<&str>,
+    seed: impl FnOnce(&Path),
+) -> SplitHosts {
     let livekit = LiveKitTestkit::start()
         .await
         .expect("LiveKit testkit (Docker or LIVEKIT_TESTKIT_WS_URL)");
@@ -402,7 +419,7 @@ async fn split_hosts_with_codebase_provisioner_and_agent_binary(
     let os_user = std::env::var("USER").expect("USER required");
 
     let repo_dir = tempfile::tempdir().unwrap();
-    create_test_repo_with_origin(repo_dir.path());
+    create_test_repo_with_origin_committing(repo_dir.path(), seed);
 
     let stub_dir = tempfile::tempdir().unwrap();
     let claude_stub = a_claude_stub(stub_dir.path());
@@ -488,6 +505,26 @@ fn a_sandboxed_split_session_request() -> StartSessionRequest {
         sandbox: true,
         ..a_split_session_request()
     }
+}
+
+/// The directory the agent on host A runs in: its copy of the codebase's agent configuration.
+fn the_agent_context_dir_of(hosts: &SplitHosts, session_id: &str) -> PathBuf {
+    tddy_session_lifecycle::split_session::split_context_dir(&unified_session_dir_path(
+        &hosts.agent_sessions_base,
+        session_id,
+    ))
+}
+
+/// The layout this repository ships: skills kept once under `.agents/`, reached from `.claude/`
+/// through a committed symlink, and `CLAUDE.md -> AGENTS.md`.
+#[cfg(unix)]
+fn a_repo_linking_claude_skills_to_agents_skills(dir: &Path) {
+    std::fs::create_dir_all(dir.join(".agents/skills/tdd")).expect("mkdir");
+    std::fs::write(dir.join(".agents/skills/tdd/SKILL.md"), "# TDD skill\n").expect("write");
+    std::fs::create_dir_all(dir.join(".claude")).expect("mkdir");
+    std::os::unix::fs::symlink("../.agents/skills", dir.join(".claude/skills")).expect("symlink");
+    std::fs::write(dir.join("AGENTS.md"), "# Project rules\n").expect("write");
+    std::os::unix::fs::symlink("AGENTS.md", dir.join("CLAUDE.md")).expect("symlink");
 }
 
 fn session_metadata_on(sessions_base: &Path, session_id: &str) -> tddy_core::SessionMetadata {
@@ -1091,5 +1128,74 @@ async fn a_tool_call_on_a_sandboxed_split_session_runs_in_the_jail_on_the_codeba
     assert!(
         !codebase_worktree.join("from-the-jail.txt").exists(),
         "the host tool engine on B must not have run: the jail owns this write"
+    );
+}
+
+/// The repository's `.claude/skills -> ../.agents/skills` reaches the agent's host as a symlink.
+/// Claude Code finds skills only under `.claude/`, so a split agent whose context dir holds
+/// `.agents/**` alone starts with the project's rules and none of its skills, commands or agents.
+#[cfg(unix)]
+#[tokio::test]
+#[serial]
+async fn a_split_sessions_context_dir_recreates_the_repos_claude_skills_link() {
+    // Given two daemons, and a codebase whose `.claude/skills` links to `.agents/skills`
+    let hosts =
+        split_hosts_over_a_repo_seeded_with(a_repo_linking_claude_skills_to_agents_skills).await;
+
+    // When the agent host starts a session whose codebase is on the other host
+    let started = hosts
+        .agent
+        .start_session(Request::direct(a_split_session_request()))
+        .await
+        .expect("a split session must start")
+        .into_inner();
+
+    // Then the agent's context dir holds the link, and the skill reads back through it
+    let context_dir = the_agent_context_dir_of(&hosts, &started.session_id);
+    assert_eq!(
+        std::fs::read_link(context_dir.join(".claude/skills"))
+            .expect(".claude/skills must be a symlink in the agent's context dir"),
+        Path::new("../.agents/skills")
+    );
+    assert_eq!(
+        std::fs::read_to_string(context_dir.join(".claude/skills/tdd/SKILL.md"))
+            .expect("the skill must be readable through the link"),
+        "# TDD skill\n"
+    );
+}
+
+/// This repository's `CLAUDE.md -> AGENTS.md` still reaches the agent as a file that opens with the
+/// managed-codebase preamble — the one rule telling it the codebase is elsewhere — followed by the
+/// project's own text.
+#[cfg(unix)]
+#[tokio::test]
+#[serial]
+async fn a_split_sessions_linked_claude_md_still_leads_with_the_managed_codebase_preamble() {
+    // Given two daemons, and a codebase whose `CLAUDE.md` links to `AGENTS.md`
+    let hosts =
+        split_hosts_over_a_repo_seeded_with(a_repo_linking_claude_skills_to_agents_skills).await;
+
+    // When the agent host starts a session whose codebase is on the other host
+    let started = hosts
+        .agent
+        .start_session(Request::direct(a_split_session_request()))
+        .await
+        .expect("a split session must start")
+        .into_inner();
+
+    // Then CLAUDE.md is a file, led by the preamble, carrying the project's rules
+    let claude_md = the_agent_context_dir_of(&hosts, &started.session_id).join("CLAUDE.md");
+    assert!(
+        !std::fs::symlink_metadata(&claude_md)
+            .expect("CLAUDE.md must exist")
+            .file_type()
+            .is_symlink(),
+        "CLAUDE.md must be written as a file, not recreated as a link"
+    );
+    let text = std::fs::read_to_string(&claude_md).expect("CLAUDE.md must be readable");
+    assert!(
+        text.starts_with(tddy_sandbox::managed_codebase_preamble(&[]).trim_start())
+            && text.contains("# Project rules"),
+        "CLAUDE.md must lead with the preamble and carry AGENTS.md's text: {text}"
     );
 }
