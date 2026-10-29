@@ -502,9 +502,11 @@ its `PermissionRequest` hook open for that orchestrator's decision, for at most
   appended to the target's activity (the request, and who answered what), and its pending question
   is cleared. Once the hook is woken the answer stands: failing to write the row or clear the
   question is logged, and the child's next status report clears the question.
-- **Same host only.** The hook waits only for an orchestrator whose main terminal its own daemon
-  serves. An orchestrator on another host gets no wait, and Claude's own prompt appears
-  ([TODO](../../dev/todo/2026-10-29-permission-wait-needs-a-same-host-orchestrator.md)).
+- **Across hosts.** The hook waits for an orchestrator whose main terminal the daemon it runs on
+  serves. For an orchestrator on another host, the child's host asks that peer once, within 3 s;
+  a peer that says no or cannot answer in time gets no wait, and Claude's own prompt appears. The
+  wait stays on the child's host and the answer is forwarded there
+  ([claude-cli session § Waiting for an orchestrator's answer](claude-cli-session.md#waiting-for-an-orchestrators-answer)).
 - **Known gap.** A conversation spawner may answer but is not served `ReadSessionActivity`, so it
   cannot read the `request_id`; its claude-cli children wait out the deadline
   ([TODO](../../dev/todo/2026-10-29-conversation-spawner-cannot-read-its-childs-permission-request.md)).

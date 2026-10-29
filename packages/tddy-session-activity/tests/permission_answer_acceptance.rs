@@ -68,19 +68,31 @@ impl SessionLabels for EverySessionIsLabelled {
     }
 }
 
-/// The orchestrators this daemon serves a terminal for: the fake presence port.
+/// The orchestrators each host serves a terminal for: the fake presence port answers per host.
+///
+/// This host (`None`) serves [`OrchestratorsServedPerHost::here`]. Another host serves none of these
+/// orchestrators, so an orchestrator the changeset names there is absent even when this host serves
+/// its session under the same id.
 #[derive(Default)]
-struct OrchestratorsServedHere {
-    active: Mutex<HashSet<String>>,
+struct OrchestratorsServedPerHost {
+    here: Mutex<HashSet<String>>,
 }
 
 #[async_trait::async_trait]
-impl OrchestratorPresence for OrchestratorsServedHere {
-    async fn is_active(&self, orchestrator_session_id: &str) -> bool {
-        self.active
-            .lock()
-            .expect("the active set")
-            .contains(orchestrator_session_id)
+impl OrchestratorPresence for OrchestratorsServedPerHost {
+    async fn is_active(
+        &self,
+        orchestrator_session_id: &str,
+        orchestrator_daemon_instance_id: Option<&str>,
+    ) -> bool {
+        match orchestrator_daemon_instance_id {
+            None => self
+                .here
+                .lock()
+                .expect("the active set")
+                .contains(orchestrator_session_id),
+            Some(_) => false,
+        }
     }
 }
 
@@ -135,9 +147,9 @@ impl HostBuilder {
         write_orchestrator(&child_dir, &self.orchestrator);
         write_pending_question(&child_dir, &the_permission_question())
             .expect("the child's pending question");
-        let presence = OrchestratorsServedHere::default();
+        let presence = OrchestratorsServedPerHost::default();
         presence
-            .active
+            .here
             .lock()
             .expect("the active set")
             .extend(self.active.iter().map(|id| id.to_string()));

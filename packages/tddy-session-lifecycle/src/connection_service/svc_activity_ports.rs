@@ -17,17 +17,19 @@
 use std::sync::Arc;
 
 use async_trait::async_trait;
+use prost::Message as _;
 use tddy_rpc::{Request, Response, Status};
 use tddy_service::proto::activity::{
     AcpReplayFrame, ActivityService, AgentActivityDeltaChunk, AgentActivityDeltaRequest,
     AgentActivityRecord, AwaitQuestionAnswerRequest, AwaitQuestionAnswerResponse,
     GetAcpReplayPageRequest, GetAcpReplayPageResponse, GetAcpToolCallDetailRequest,
-    GetAcpToolCallDetailResponse, ReportAgentActivityRequest, ReportAgentActivityResponse,
-    ReportOperatorNotificationRequest, ReportOperatorNotificationResponse,
-    ReportSessionStatusRequest, ReportSessionStatusResponse, SessionNotificationEvent,
-    StreamAcpReplayRequest, StreamSessionActivityRequest, StreamSessionNotificationsRequest,
+    GetAcpToolCallDetailResponse, IsSessionTerminalServedRequest, IsSessionTerminalServedResponse,
+    ReportAgentActivityRequest, ReportAgentActivityResponse, ReportOperatorNotificationRequest,
+    ReportOperatorNotificationResponse, ReportSessionStatusRequest, ReportSessionStatusResponse,
+    SessionNotificationEvent, StreamAcpReplayRequest, StreamSessionActivityRequest,
+    StreamSessionNotificationsRequest,
 };
-use tddy_session_activity::orchestrator_presence::OrchestratorPresence;
+use tddy_session_activity::orchestrator_presence::{OrchestratorPresence, PEER_PRESENCE_TIMEOUT};
 use tddy_session_activity::{ActivityPorts, ActivityServiceImpl, AnswerWaitPorts, SessionLabels};
 use tddy_terminal_rpc::bridge::MAIN_TERMINAL_ID;
 use tddy_terminal_rpc::session::TerminalSessionStore as _;
@@ -42,6 +44,10 @@ use tddy_daemon_kernel::peer_forwarding::PeerRoute;
 /// Read from `tddy-service` so the entry this daemon mounts, the peer it forwards to and every
 /// out-of-process subscriber are named from one place.
 const ACTIVITY_SERVICE: &str = tddy_service::session_activity::ACTIVITY_SERVICE;
+
+/// The peer query whether a daemon serves an orchestrator's main terminal
+/// (`ActivityService.IsSessionTerminalServed`), as the peer's routing names it.
+const PRESENCE_RPC: &str = "IsSessionTerminalServed";
 
 impl DaemonSessionHost {
     /// The `activity.ActivityService` entry this daemon registers.
@@ -88,6 +94,7 @@ impl DaemonSessionHost {
             pending: self.pending_answers(),
             presence: Arc::new(ServedTerminalPresence {
                 terminals: self.terminal_sessions(),
+                connection: self.clone(),
             }),
             wait: std::time::Duration::from_secs(self.config.claude_cli_answer_wait_secs()),
         }
@@ -120,19 +127,104 @@ impl DaemonSessionHost {
     }
 }
 
-/// An orchestrator is present when this daemon serves its main terminal — the served terminal, not
-/// a pid, so a dead home whose pid was reused never makes a child wait.
+/// An orchestrator is present when the daemon it runs on serves its main terminal — the served
+/// terminal, not a pid, so a dead home whose pid was reused never makes a child wait. This daemon
+/// answers for itself; for an orchestrator on another host it asks that host
+/// ([`DaemonSessionHost::peer_serves_main_terminal`]), `#home-inbox` 10/11.
 struct ServedTerminalPresence {
     terminals: crate::terminal_session_adapter::DaemonTerminalSessionStore,
+    /// This daemon's roster and common room, which a peer is asked through.
+    connection: DaemonSessionHost,
 }
 
 #[async_trait]
 impl OrchestratorPresence for ServedTerminalPresence {
-    async fn is_active(&self, orchestrator_session_id: &str) -> bool {
-        self.terminals
-            .get_terminal(orchestrator_session_id, MAIN_TERMINAL_ID)
-            .await
-            .is_some()
+    async fn is_active(
+        &self,
+        orchestrator_session_id: &str,
+        orchestrator_daemon_instance_id: Option<&str>,
+    ) -> bool {
+        match orchestrator_daemon_instance_id {
+            None => self
+                .terminals
+                .get_terminal(orchestrator_session_id, MAIN_TERMINAL_ID)
+                .await
+                .is_some(),
+            Some(host) => {
+                self.connection
+                    .peer_serves_main_terminal(host, orchestrator_session_id)
+                    .await
+            }
+        }
+    }
+}
+
+impl DaemonSessionHost {
+    /// Whether the daemon `peer_instance_id` names serves `session_id`'s main terminal. A daemon
+    /// other than this one is asked with `ActivityService.IsSessionTerminalServed`, over the roster
+    /// and unary forward [`PeerRoutedActivity`] uses, within [`PEER_PRESENCE_TIMEOUT`]. This daemon
+    /// is answered from its own terminals.
+    ///
+    /// **Absent on any doubt**: an id that is not on the roster, no common room, a peer that errors,
+    /// or one that does not answer in time all answer `false`, so a dead peer costs the child's
+    /// Claude prompt at most the bound and never a wait.
+    async fn peer_serves_main_terminal(&self, peer_instance_id: &str, session_id: &str) -> bool {
+        match self.classify_addressed_daemon_route(PRESENCE_RPC, peer_instance_id) {
+            Ok(PeerRoute::Forward {
+                peer_instance_id: peer,
+            }) => match self.ask_peer_whether_it_serves(&peer, session_id).await {
+                Ok(served) => served,
+                Err(status) => {
+                    log::warn!(
+                        "{PRESENCE_RPC}: {session_id} counted as absent: daemon_instance_id={peer} \
+                         did not answer: {:?} {}",
+                        status.code(),
+                        status.message()
+                    );
+                    false
+                }
+            },
+            // The host named is this one, which the gate folds into `None`; answered from this
+            // daemon's own terminals all the same.
+            Ok(PeerRoute::Local) => self
+                .terminal_sessions()
+                .get_terminal(session_id, MAIN_TERMINAL_ID)
+                .await
+                .is_some(),
+            Err(status) => {
+                log::warn!(
+                    "{PRESENCE_RPC}: {session_id} counted as absent: daemon_instance_id={peer_instance_id} \
+                     is not routable: {}",
+                    status.message()
+                );
+                false
+            }
+        }
+    }
+
+    /// Ask `peer` whether it serves `session_id`'s main terminal, bounded by
+    /// [`PEER_PRESENCE_TIMEOUT`]. Any failure is returned for the caller to count as absent.
+    async fn ask_peer_whether_it_serves(
+        &self,
+        peer: &str,
+        session_id: &str,
+    ) -> Result<bool, Status> {
+        let request = IsSessionTerminalServedRequest {
+            session_id: session_id.to_string(),
+        };
+        let answered = self
+            .common_room_slot(PRESENCE_RPC)?
+            .forward_to_peer_within(
+                peer,
+                ACTIVITY_SERVICE,
+                PRESENCE_RPC,
+                request.encode_to_vec(),
+                PEER_PRESENCE_TIMEOUT,
+            )
+            .await?;
+        IsSessionTerminalServedResponse::decode(answered.as_slice())
+            .map(|answer| answer.served)
+            .map_err(|e| Status::internal(format!("decode {PRESENCE_RPC} answer from peer: {e}")))
     }
 }
 
@@ -265,6 +357,15 @@ impl ActivityService for PeerRoutedActivity {
         request: Request<AwaitQuestionAnswerRequest>,
     ) -> Result<Response<AwaitQuestionAnswerResponse>, Status> {
         self.local.await_question_answer(request).await
+    }
+
+    /// Not routed: the question is *to* the daemon it arrived on — does it serve this terminal —
+    /// and carries no `daemon_instance_id`, so a peer's answer is never forwarded again.
+    async fn is_session_terminal_served(
+        &self,
+        request: Request<IsSessionTerminalServedRequest>,
+    ) -> Result<Response<IsSessionTerminalServedResponse>, Status> {
+        self.local.is_session_terminal_served(request).await
     }
 
     /// Not routed, for the reason `report_session_status` is not: `tddy-tools notify` runs inside

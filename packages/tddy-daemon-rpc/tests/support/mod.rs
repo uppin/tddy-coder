@@ -9,9 +9,9 @@
 
 #![allow(dead_code)] // each suite uses the part of the world it needs
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, RwLock};
+use std::sync::{Arc, Mutex, RwLock};
 use std::time::Duration;
 
 use futures_util::StreamExt;
@@ -22,6 +22,7 @@ use tddy_daemon_rpc::test_util::TestDaemon;
 use tddy_host_service::multi_host::{DaemonInstanceId, EligibleDaemonInfo, EligibleDaemonSource};
 use tddy_projects::project_storage::{write_projects, ProjectData};
 use tddy_rpc::{Request, RequestMetadata, RequestTransport, Status};
+use tddy_service::proto::activity::{ActivityService as _, IsSessionTerminalServedRequest};
 use tddy_service::proto::exec_tools::{ExecToolService, ExecuteToolRequest};
 use tddy_service::proto::session::{
     ListSessionsRequest, SessionService as SessionServiceTrait, StartSessionRequest,
@@ -44,6 +45,7 @@ pub const HOST_B: &str = "host-b";
 pub const SILENT_HOST: &str = "host-c";
 pub const SESSION_SERVICE: &str = "session.SessionService";
 pub const TASKS_SERVICE: &str = "tasks.TaskService";
+pub const ACTIVITY_SERVICE: &str = tddy_service::session_activity::ACTIVITY_SERVICE;
 
 // ── the hosts ────────────────────────────────────────────────────────────────────────────────
 
@@ -70,9 +72,31 @@ impl EligibleDaemonSource for TheCommonRoom {
 #[derive(Default)]
 pub struct InProcessPeers {
     daemons: RwLock<HashMap<String, Arc<TestDaemon>>>,
+    /// Hosts that take every call and never answer: a peer whose link has gone quiet.
+    never_answering: RwLock<HashSet<String>>,
+    /// Every unary call made, as `(peer, service, method)`, in the order it was made — answered or not.
+    unary_calls: Mutex<Vec<(String, String, String)>>,
 }
 
 impl InProcessPeers {
+    /// `instance_id` takes every call from now on and never answers it.
+    pub fn never_answers(&self, instance_id: &str) {
+        self.never_answering
+            .write()
+            .unwrap()
+            .insert(instance_id.to_string());
+    }
+
+    /// How many times `method` of `service` was asked of `peer`.
+    pub fn times_asked(&self, peer: &str, service: &str, method: &str) -> usize {
+        self.unary_calls
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|(p, s, m)| p == peer && s == service && m == method)
+            .count()
+    }
+
     pub fn register(&self, instance_id: &str, daemon: Arc<TestDaemon>) {
         self.daemons
             .write()
@@ -107,8 +131,26 @@ impl PeerForwarder for InProcessPeers {
         method: &str,
         body: Vec<u8>,
     ) -> Result<Vec<u8>, Status> {
+        self.unary_calls.lock().unwrap().push((
+            peer_id.to_string(),
+            service.to_string(),
+            method.to_string(),
+        ));
+        if self.never_answering.read().unwrap().contains(peer_id) {
+            std::future::pending::<()>().await;
+        }
         let daemon = self.daemon(peer_id)?;
         match (service, method) {
+            // A peer asked whether it serves a session's main terminal (`#home-inbox` 10/11).
+            (ACTIVITY_SERVICE, "IsSessionTerminalServed") => {
+                let req = IsSessionTerminalServedRequest::decode(body.as_slice()).unwrap();
+                daemon
+                    .connection()
+                    .activity_service()
+                    .is_session_terminal_served(arriving_from_a_peer(req))
+                    .await
+                    .map(|r| r.into_inner().encode_to_vec())
+            }
             (EXEC_TOOL_SERVICE, "ExecuteTool") => {
                 let req = ExecuteToolRequest::decode(body.as_slice()).unwrap();
                 daemon

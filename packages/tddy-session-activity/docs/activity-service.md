@@ -11,7 +11,8 @@ along with the notification bus.
 |---|---|---|
 | `ReportSessionStatus` | unary | a hook's per-session `hook_token`, not a session token; a `WaitingForInput` report carrying `tool_name` (a `PermissionRequest` or `PreToolUse(AskUserQuestion)`) records the structured question in `pending-question.json` under a new `request_id`, sets `pending_elicitation`, answers with the id and publishes one `PendingQuestion` notification; a `WaitingForInput` with no tool keeps a structured question still pending (the follow-up `Notification`, whose status notification carries the question) or else records its `message` (`kind: permission`); any other report — or a wait with no message and nothing pending — clears both. A malformed question is refused before anything is written (`pending_question_record`, `pending_question_notice`) |
 | `ReportOperatorNotification` | unary | the same hook token, after the same session-type check (claude-cli or cursor-cli); a session that recorded no token is refused. Validates the title (1–200 characters after trimming) and body (≤ 2,000) first — `INVALID_ARGUMENT`, never truncation — then publishes one `AttentionRequired` / `Agent` notification carrying an `AgentNotification` (`service/operator_notifications.rs`). Not routed to a peer: `tddy-tools notify` runs on the host that holds its session |
-| `AwaitQuestionAnswer` | unary, long-held | the same hook token, claude-cli only. `NO_ORCHESTRATOR` at once unless the session's changeset names an `orchestrator_session_id` on this host whose main terminal `AnswerWaitPorts::presence` reports active; refuses a `request_id` that is not the pending question, or not a permission; otherwise opens a waiter in `PendingAnswers` and holds the call for at most `AnswerWaitPorts::wait` → `ANSWERED` or `TIMED_OUT` (`service/question_answers.rs`). Not routed to a peer: the hook waits on the host that holds its session |
+| `AwaitQuestionAnswer` | unary, long-held | the same hook token, claude-cli only. `NO_ORCHESTRATOR` at once unless the session's changeset names an `orchestrator_session_id` whose main terminal `AnswerWaitPorts::presence` reports active on the daemon it runs on — the gate passes `None` when the changeset names no host, an empty one or this one, and `Some(orchestrator_daemon_instance_id)` otherwise; refuses a `request_id` that is not the pending question, or not a permission; otherwise opens a waiter in `PendingAnswers` and holds the call for at most `AnswerWaitPorts::wait` → `ANSWERED` or `TIMED_OUT` (`service/question_answers.rs`). Not routed to a peer: the hook waits on the host that holds its session |
+| `IsSessionTerminalServed` | unary, peer-only | no token: refused `PERMISSION_DENIED` unless it arrived over `RequestTransport::LiveKit` (stamped by the listener's `ServerEngine`, never by the caller). Answers `served` from this daemon's own terminals (`presence.is_active(session_id, None)`), so it is never forwarded again; `PeerRoutedActivity` delegates it locally (`service/question_answers.rs`) |
 | `ReportAgentActivity` | unary | the same hook token; mints the `call_id` pairing a PreToolUse row to its PostToolUse row |
 | `StreamSessionActivity` | server-stream | the persisted activity log, then the live hub |
 | `StreamSessionNotifications` | server-stream | this host's notification bus, scoped to the caller's OS user |
@@ -82,8 +83,23 @@ client retries.
 `ActivityServiceImpl` through the builder `with_question_answers(AnswerWaitPorts { pending, presence,
 wait })`, not `ActivityPorts`; `ActivityServiceImpl::new` alone wires `AnswerWaitPorts::default()`,
 whose `NoOrchestratorIsActive` presence answers every hook `NO_ORCHESTRATOR`. The daemon
-(`tddy-session-lifecycle`, `DaemonSessionHost::activity_service`) wires its one `PendingAnswers`, a
-`ServedTerminalPresence` over its terminal store and `claude_cli.answer_wait_secs`.
+(`tddy-session-lifecycle`, `DaemonSessionHost::activity_service`) wires its one `PendingAnswers`, `ServedTerminalPresence` over its terminal store and `claude_cli.answer_wait_secs`.
+
+**Presence across hosts.** `OrchestratorPresence::is_active(session_id, orchestrator_daemon_instance_id:
+Option<&str>)`: `None` is this daemon. For `Some(peer)`, `ServedTerminalPresence` calls
+`DaemonSessionHost::peer_serves_main_terminal`, which classifies the id against the eligible-daemon
+roster (`classify_addressed_daemon_route`) and asks the peer `IsSessionTerminalServed` through
+`common_room_slot(..).forward_to_peer_within(.., PEER_PRESENCE_TIMEOUT)` — 3 s, shorter than the
+general forward deadline. Absent on any doubt: off-roster, no common room, a forward error, the
+deadline or an undecodable answer all mean `false`, logged at `warn` (the operator's answer to "why did
+this child not wait?"). The peer is asked once per hook, before the waiter opens; a peer that dies
+after answering "served" costs the hook `AnswerWaitPorts::wait`, never more.
+
+**The transport gate.** `IsSessionTerminalServed` carries no token, so `RequestTransport::LiveKit` is
+its only gate. The transport is set by the listener (`tddy-livekit` builds its `ServerEngine` with
+`RequestTransport::LiveKit`), not read from the request, so a Unix-socket, pipe, HTTP or in-process
+caller cannot claim it. Any participant a LiveKit room admits can ask, not only peer daemons; what
+it learns is one boolean about a session id it already knows.
 
 - **`pending_answers::PendingAnswers`** — the waiters, one per `request_id`, in memory. It implements
   `#coagents`' `PermissionAnswering` (`answer_as` delegates to `answer_with_message` with no

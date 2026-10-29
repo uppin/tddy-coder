@@ -5,8 +5,9 @@
 //! Authenticated as `ReportSessionStatus` is: the session must be claude-cli and the `hook_token`
 //! its own. Then, in order:
 //!
-//! 1. no `orchestrator_session_id` in the session's changeset, an orchestrator on another host, or
-//!    one whose terminal this daemon does not serve → `NO_ORCHESTRATOR`, at once;
+//! 1. no `orchestrator_session_id` in the session's changeset, or an orchestrator whose terminal the
+//!    daemon it runs on does not serve → `NO_ORCHESTRATOR`, at once. (An orchestrator on another
+//!    host is asked of that host over the peer query, `#home-inbox` 10/11.)
 //! 2. the pending question must be the `request_id` asked for. A permission is held as a permission
 //!    prompt; any other kind is a question, held with its answers (`8/9`);
 //! 3. a waiter is opened in [`PendingAnswers`] and held for at most [`AnswerWaitPorts::wait`] →
@@ -20,9 +21,10 @@ use std::path::Path;
 use tddy_core::pending_question::read_pending_question;
 use tddy_core::read_changeset;
 use tddy_discovery::subagent::PermissionAnswer;
-use tddy_rpc::{Response, Status};
+use tddy_rpc::{Request, RequestTransport, Response, Status};
 use tddy_service::proto::activity::{
     AwaitQuestionAnswerRequest, AwaitQuestionAnswerResponse, AwaitQuestionOutcome,
+    IsSessionTerminalServedRequest, IsSessionTerminalServedResponse,
 };
 
 use crate::answers::permission_request_view;
@@ -116,7 +118,8 @@ impl ActivityServiceImpl {
         Ok(Response::new(response))
     }
 
-    /// Whether the session's orchestrator is on this host and served here.
+    /// Whether the session's orchestrator is served by the daemon it runs on: this one, asked from
+    /// its own terminals, or another host, asked over the peer query (`#home-inbox` 10/11).
     async fn orchestrator_is_present(&self, session_dir: &Path) -> bool {
         let changeset = match read_changeset(session_dir) {
             Ok(changeset) => changeset,
@@ -136,11 +139,36 @@ impl ActivityServiceImpl {
         else {
             return false;
         };
-        let on_another_host = changeset
+        // `None` when the changeset names this host (or none): the port answers from this daemon's
+        // own terminals. Otherwise the port asks the host the changeset names.
+        let orchestrator_host = changeset
             .orchestrator_daemon_instance_id
             .as_deref()
-            .is_some_and(|host| !host.is_empty() && host != self.ports.daemon_instance_id);
-        !on_another_host && self.answers.presence.is_active(orchestrator).await
+            .filter(|host| !host.is_empty() && *host != self.ports.daemon_instance_id);
+        self.answers
+            .presence
+            .is_active(orchestrator, orchestrator_host)
+            .await
+    }
+
+    /// `IsSessionTerminalServed`: whether this daemon serves `session_id`'s main terminal, asked by
+    /// the host of a child whose orchestrator runs here (`#home-inbox` 10/11).
+    ///
+    /// Peer-only. The question carries no token, so the transport it arrived on is the only gate: a
+    /// call over any transport but the common room is refused.
+    pub(super) async fn is_session_terminal_served_impl(
+        &self,
+        request: Request<IsSessionTerminalServedRequest>,
+    ) -> Result<Response<IsSessionTerminalServedResponse>, Status> {
+        if request.metadata().transport() != RequestTransport::LiveKit {
+            return Err(Status::permission_denied(
+                "IsSessionTerminalServed is peer-only: it is answered to another daemon over the common room",
+            ));
+        }
+        let req = request.into_inner();
+        // This daemon's own terminals only: the daemon asking must not be asked again.
+        let served = self.answers.presence.is_active(&req.session_id, None).await;
+        Ok(Response::new(IsSessionTerminalServedResponse { served }))
     }
 }
 
