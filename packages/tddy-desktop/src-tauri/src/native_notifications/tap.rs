@@ -35,9 +35,10 @@ pub struct TappedNotification {
 impl SessionRoute {
     /// The `extra` payload a notice for this route is shown with, so a tap on it can name it again.
     pub fn tap_extra(&self) -> HashMap<String, String> {
-        // TODO(sweep): implement — the session id under EXTRA_SESSION_ID and the host under
-        // EXTRA_HOST.
-        HashMap::new()
+        HashMap::from([
+            (EXTRA_SESSION_ID.to_string(), self.session_id.clone()),
+            (EXTRA_HOST.to_string(), self.host.clone()),
+        ])
     }
 }
 
@@ -46,9 +47,14 @@ impl SessionRoute {
 /// [`EXTRA_SESSION_ID`] and [`EXTRA_HOST`]. Any other action, or a payload that names no session,
 /// opens nothing.
 pub fn session_route_from_tap(tap: &TappedNotification) -> Option<SessionRoute> {
-    // TODO(sweep): implement.
-    let _ = tap;
-    None
+    if tap.action_id != TAP_ACTION_ID {
+        return None;
+    }
+    let named = |key: &str| tap.extra.get(key).filter(|value| !value.is_empty());
+    Some(SessionRoute {
+        session_id: named(EXTRA_SESSION_ID)?.clone(),
+        host: named(EXTRA_HOST)?.clone(),
+    })
 }
 
 /// The tap handler: open the session `tap` names in `window` ([`super::open_session_route`]); a tap
@@ -57,7 +63,8 @@ pub fn on_notification_tap(
     window: &dyn DashboardWindow,
     tap: &TappedNotification,
 ) -> anyhow::Result<()> {
-    // TODO(sweep): implement — map with `session_route_from_tap`, then `open_session_route`.
-    let _ = (window, tap);
-    Ok(())
+    match session_route_from_tap(tap) {
+        Some(route) => super::open_session_route(window, &route),
+        None => Ok(()),
+    }
 }

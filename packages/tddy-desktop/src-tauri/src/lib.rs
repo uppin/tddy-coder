@@ -289,6 +289,7 @@ fn start_daemon(
     // The operator's native notifications: this process's own sessions, addressed on this daemon. Read
     // before `config` moves into the runtime, and an unresolvable user is a startup error rather than
     // notifications for everyone or for no one.
+    native_notifications::register_tap_handler(&handle)?;
     let notifications = DesktopNotificationSubscriber::new(
         DesktopContext {
             os_user: this_process_os_user()?,

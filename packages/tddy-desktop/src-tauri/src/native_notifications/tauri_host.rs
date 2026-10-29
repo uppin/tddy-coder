@@ -8,7 +8,9 @@
 use tauri::{AppHandle, Manager, Url, WebviewWindow};
 use tauri_plugin_notification::NotificationExt;
 
-use super::{DashboardWindow, DesktopNotice, NativeNotifier};
+use super::{
+    on_notification_tap, DashboardWindow, DesktopNotice, NativeNotifier, TappedNotification,
+};
 use crate::MAIN_WINDOW_LABEL;
 
 /// Shows a [`DesktopNotice`] through `tauri-plugin-notification`, with the label folded into the body
@@ -36,6 +38,10 @@ impl NativeNotifier for TauriNotifier {
             .builder()
             .title(&notice.title)
             .body(notice.body_with_label());
+        // The route rides along as the payload, so a tap on the notice can name its session again.
+        for (key, value) in notice.route.tap_extra() {
+            builder = builder.extra(key, value);
+        }
         if notice.sound {
             // The operating system's own default alert, the one an agent asks for by name.
             builder = builder.sound("default");
@@ -43,6 +49,33 @@ impl NativeNotifier for TauriNotifier {
         builder.show()?;
         Ok(())
     }
+}
+
+/// Open the session a click on a notification this desktop showed is about: register the plugin's
+/// action handler, which maps the click back to its route and opens it in the dashboard window
+/// (`#home-inbox` 11/11). The plugin runs the handler on a background thread; a failure to open the
+/// session is logged, as there is no caller to return it to.
+pub fn register_tap_handler(app: &AppHandle) -> anyhow::Result<()> {
+    let window = TauriDashboardWindow::new(app.clone());
+    app.notification().on_action(move |performed| {
+        let tap = TappedNotification {
+            action_id: performed.action_id().to_string(),
+            extra: performed
+                .notification()
+                .map(|notification| {
+                    notification
+                        .extra()
+                        .iter()
+                        .filter_map(|(key, value)| Some((key.clone(), value.as_str()?.to_string())))
+                        .collect()
+                })
+                .unwrap_or_default(),
+        };
+        if let Err(e) = on_notification_tap(&window, &tap) {
+            log::warn!("[tddy-desktop] a notification click could not open its session: {e:#}");
+        }
+    })?;
+    Ok(())
 }
 
 /// The dashboard window, looked up by label on every call: it is created after the daemon — and so

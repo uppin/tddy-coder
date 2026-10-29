@@ -26,7 +26,10 @@ use tddy_core::pending_question::{read_pending_question, PendingQuestion};
 use tddy_core::session_lifecycle::unified_session_dir_path;
 use tddy_discovery::subagent::AnsweredBy;
 
-use super::{clear_answered_pending_question, require_orchestrator, AnswerContext, AnswerRefusal, AnsweringCaller};
+use super::{
+    clear_answered_pending_question, require_orchestrator, AnswerContext, AnswerRefusal,
+    AnsweringCaller,
+};
 
 /// One answer to one question of an `AskUserQuestion` call: `question_index` (from 0),
 /// `selected` labels, and `other` free text. The wire type, so the hook, the registry and the tool

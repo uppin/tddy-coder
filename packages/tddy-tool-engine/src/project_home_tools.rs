@@ -62,6 +62,7 @@ use crate::project_home_git_tools::{
 use crate::project_home_inbox_tools::{
     project_home_inbox_tool_defs, READ_PROJECT_NOTIFICATIONS, WAIT_PROJECT_NOTIFICATIONS,
 };
+use crate::project_home_notify_tools::{notify_operator_tool_def, NOTIFY_OPERATOR};
 use crate::project_home_terminal_tools::{
     project_home_terminal_tool_defs, CLAIM_SESSION_TERMINAL, READ_SESSION_TERMINAL,
     SEND_SESSION_KEYS,
@@ -73,7 +74,6 @@ use crate::project_home_worktree_tools::{
     run_get_worktree, run_list_worktrees, worktree_tool_defs, WorktreeEntry, GET_WORKTREE,
     LIST_WORKTREES,
 };
-use crate::project_home_notify_tools::{notify_operator_tool_def, NOTIFY_OPERATOR};
 use crate::read_only::is_project_home_allowed_tool;
 use crate::session_follow::{
     run_session_follow_tool, session_follow_tool_defs, SessionActivity, ToolCallBodies,
