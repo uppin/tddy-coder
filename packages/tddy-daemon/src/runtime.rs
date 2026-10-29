@@ -82,6 +82,12 @@ pub struct RuntimeOptions {
     /// an accepted update back to. `None` — a host that configured the daemon in code — makes every
     /// update a refusal, because there is nowhere to persist one.
     pub config_path: Option<PathBuf>,
+    /// Subscribers an embedding host registers on the daemon's session-notification bus, in
+    /// registration order. [`build`] appends them after the bus's two built-in subscribers
+    /// (the operator channel and the notification stream), so a host's delivery never precedes
+    /// either. Empty for a host that listens to nothing — the `tddy-daemon` binary among them.
+    pub notification_subscribers:
+        Vec<Arc<dyn tddy_session_lifecycle::session_notifications::SessionNotificationSubscriber>>,
 }
 
 impl std::fmt::Debug for RuntimeOptions {
@@ -95,6 +101,14 @@ impl std::fmt::Debug for RuntimeOptions {
             )
             .field("spawn_backend", &self.spawn_backend)
             .field("config_path", &self.config_path)
+            .field(
+                "notification_subscribers",
+                &self
+                    .notification_subscribers
+                    .iter()
+                    .map(|subscriber| subscriber.name())
+                    .collect::<Vec<_>>(),
+            )
             .finish()
     }
 }
@@ -109,6 +123,7 @@ impl RuntimeOptions {
             spawn_client: None,
             spawn_backend,
             config_path: None,
+            notification_subscribers: Vec::new(),
         }
     }
 
@@ -121,6 +136,7 @@ impl RuntimeOptions {
             spawn_client: None,
             spawn_backend,
             config_path: None,
+            notification_subscribers: Vec::new(),
         }
     }
 
@@ -144,6 +160,21 @@ impl RuntimeOptions {
     /// written back to it.
     pub fn with_config_path(mut self, config_path: Option<PathBuf>) -> Self {
         self.config_path = config_path;
+        self
+    }
+
+    /// Register `subscriber` on the session-notification bus this runtime assembles.
+    ///
+    /// The runtime hands out no handle on its bus, so this is how an embedding host listens to the
+    /// notifications its daemon raises. May be called more than once; subscribers are offered each
+    /// notification in the order they were registered, after the built-in ones.
+    pub fn with_notification_subscriber(
+        mut self,
+        subscriber: Arc<
+            dyn tddy_session_lifecycle::session_notifications::SessionNotificationSubscriber,
+        >,
+    ) -> Self {
+        self.notification_subscribers.push(subscriber);
         self
     }
 

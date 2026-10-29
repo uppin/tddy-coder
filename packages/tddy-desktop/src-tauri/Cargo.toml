@@ -19,6 +19,18 @@ tauri-build = { version = "2", features = [] }
 tauri = { version = "2", features = [] }
 # Opens external http(s) links in the operator's browser instead of inside the webview.
 tauri-plugin-opener = "2"
+# Native operating-system notifications for the sessions this daemon hosts (`#home-inbox` 4/8;
+# approved by the developer 2026-10-25). `~2.4` is the last line that builds against the Tauri this
+# application is locked to (2.11): 2.5 and later require Tauri 2.12 and Rust 1.90. The older line has
+# no click reporting on desktop — see `src/native_notifications.rs`.
+tauri-plugin-notification = "~2.4"
+# `async_trait` on `SessionNotificationSubscriber`, which `DesktopNotificationSubscriber` implements.
+# Already in this crate's tree through every daemon crate — declaring it adds no crate.
+async-trait = "0.1"
+# `AgentNotification` (the agent's own title and markdown body) and `notification_markdown`, which
+# flattens that body to the plain text a native notification shows. A workspace crate already in this
+# crate's tree through `tddy-daemon`.
+tddy-daemon-kernel = { path = "../../tddy-daemon-kernel" }
 # The daemon this application is a host for: one process, one service roster.
 tddy-daemon = { path = "../../tddy-daemon" }
 # `CliSessionManager` is defined here, and was reached as `tddy_daemon::cli_session_manager`

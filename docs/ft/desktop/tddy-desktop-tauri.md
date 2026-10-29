@@ -355,12 +355,50 @@ than as a fault of the directory.
   [config-resolution-and-install.md § Content Security Policy](../../../packages/tddy-desktop/docs/config-resolution-and-install.md#content-security-policy).
 - The Codex OAuth loopback tunnel is unchanged and still lives in `tddy-daemon`.
 
+## Native notifications
+
+When one of its own sessions needs the operator, Tddy Desktop shows an operating-system
+notification. It listens on the daemon's [notification bus](../daemon/session-notifications.md),
+takes only **attention-required** notifications, and shows only sessions owned by the OS user the
+application runs as.
+
+| Field | What it shows |
+|---|---|
+| Title | The agent's own title, or "`<label>` needs you" for a daemon-worded notification |
+| First body line | The session label (the notification plugin has no subtitle on desktop) |
+| Body | An agent's markdown body as plain text cut to 300 characters, or the daemon's fixed text |
+| Sound | Only when the agent asked for one, or when the session is asking a question |
+
+**It stays quiet** when:
+
+- the dashboard window has focus and is on that session's route;
+- the notice is identical to the last one shown for that session;
+- it is about a pending question (`request_id`) whose notice was the last one shown for that
+  session, however the later report is worded.
+
+**Known limits.**
+
+- **Clicks are not delivered.** The click handler, which brings the window to the front and opens
+  `#/sessions/<id>?host=<instance>`, exists but nothing calls it.
+  `tauri-plugin-notification` 2.4, the last line that builds against Tauri 2.11, reports no
+  desktop clicks. See
+  [the TODO](../../dev/todo/2026-10-26-desktop-notification-click-needs-tauri-2-12.md).
+- **Permission is invisible.** The plugin always answers "granted" on desktop. macOS asks on the
+  first notification and silently drops notifications the operator refused.
+- Windows, notification actions (reply, approve) and notifications from peer daemons are out of
+  scope.
+
+Implementation: [native-notifications.md](../../../packages/tddy-desktop/docs/native-notifications.md).
+
 ## Platforms
 
 macOS and Linux. The macOS `.app` bundle is verified; the `.dmg` step needs Automation permission
 for Finder. Linux bundles are unverified — the nix dev shell carries the WebKitGTK inputs for them.
 
 ## Related docs
+
+- [Native notifications](../../../packages/tddy-desktop/docs/native-notifications.md) — the
+  subscriber, its two ports and the suppression rules
 
 - [Addressed webview IPC connections](../../../packages/tddy-desktop/docs/webview-ipc-connections.md)
   — the implementation of the bridge described above

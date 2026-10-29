@@ -1,10 +1,40 @@
 //! Mounting the session host: the services it is built from, the host itself, and the
 //! code-intelligence executors registered against its task registry.
 
+use async_trait::async_trait;
+use tokio::sync::broadcast;
+
 use super::build_context::BuildContext;
 use super::mount::{Hosted, Mount, Served, Shared};
 use super::*;
 use tddy_session_lifecycle::connection_service::DaemonSessionHost;
+use tddy_session_lifecycle::session_notifications::{
+    SessionNotification, SessionNotificationSubscriber,
+};
+
+/// Offers the bus a subscriber a host registered on [`RuntimeOptions`]. The bus takes its
+/// subscribers by value and sized, while a host holds its own as `Arc<dyn …>`, so the bus gets this
+/// forwarder over that `Arc`, and every method is passed through unchanged.
+struct RegisteredSubscriber(Arc<dyn SessionNotificationSubscriber>);
+
+#[async_trait]
+impl SessionNotificationSubscriber for RegisteredSubscriber {
+    fn name(&self) -> &'static str {
+        self.0.name()
+    }
+
+    fn wants(&self, notification: &SessionNotification) -> bool {
+        self.0.wants(notification)
+    }
+
+    async fn deliver(&self, notification: &SessionNotification) -> anyhow::Result<()> {
+        self.0.deliver(notification).await
+    }
+
+    fn client_relay(&self) -> Option<broadcast::Receiver<SessionNotification>> {
+        self.0.client_relay()
+    }
+}
 
 impl BuildContext {
     /// The daemon's operator channel: Telegram's hooks when a bot is configured, the port's null
@@ -47,9 +77,18 @@ impl BuildContext {
                         self.operator_channel(),
                     ),
                 ));
-            Arc::new(bus.with_subscriber(Arc::new(
-            tddy_session_lifecycle::session_notification_subscribers::SessionNotificationStreamSubscriber::new(),
-        )))
+            let bus = bus.with_subscriber(Arc::new(
+                tddy_session_lifecycle::session_notification_subscribers::SessionNotificationStreamSubscriber::new(),
+            ));
+            // The subscribers an embedding host registered, after both built-ins in registration order.
+            let bus = self
+                .options
+                .notification_subscribers
+                .iter()
+                .fold(bus, |bus, registered| {
+                    bus.with_subscriber(Arc::new(RegisteredSubscriber(Arc::clone(registered))))
+                });
+            Arc::new(bus)
         };
         // One registry for the whole daemon. `ConnectionService` streams and answers prompts;
         // `ScreenSharingService` raises them for a desktop password. A prompt raised on one
