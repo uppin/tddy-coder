@@ -335,8 +335,10 @@ worktree configuring eight Claude Code hooks. Each hook invokes
 ### What a session is asking
 
 `PermissionRequest` and `PreToolUse(AskUserQuestion)` report the tool name and its input
-(`ReportSessionStatusRequest.{hook_event_name, tool_name, tool_input_json}`), return at once with
-empty stdout, and decide nothing: Claude's own prompt still appears. The daemon records the question
+(`ReportSessionStatusRequest.{hook_event_name, tool_name, tool_input_json}`). `PreToolUse` returns at
+once with empty stdout and decides nothing; `PermissionRequest` then waits for an orchestrator's
+answer when the session has one (below), and otherwise decides nothing either, so Claude's own
+prompt appears. The daemon records the question
 in the session's `pending-question.json` under a new `request_id` (returned in
 `ReportSessionStatusResponse.request_id`) and sets `.session.yaml` `pending_elicitation`:
 
@@ -355,14 +357,46 @@ clears it and resets `pending_elicitation`. An orchestrator sees the record thro
 (`ReportAgentActivity`): it is a question, and a declined one has no `PostToolUse` to complete it,
 so the activity log carries no row for it at all.
 
+### Waiting for an orchestrator's answer
+
+The `PermissionRequest` hook runs `session-hook --await-answer --await-timeout-secs <wait + 5>`, with
+Claude's hook `timeout` set to `<wait + 10>`, where `<wait>` is `claude_cli.answer_wait_secs`
+(default 120). After its report it calls `ActivityService.AwaitQuestionAnswer` with the report's
+`request_id` and Claude's `permission_suggestions` (as JSON; empty when none). The daemon, with the
+same authentication as `ReportSessionStatus`:
+
+- answers `NO_ORCHESTRATOR` at once when the session's changeset names no `orchestrator_session_id`,
+  names one on another host, or names one whose main terminal this daemon does not serve (a served
+  terminal, not a live pid, so a dead orchestrator whose pid was reused never makes a child wait);
+- refuses a `request_id` that is not the session's pending question, or one that is not a permission;
+- otherwise holds the call until the orchestrator answers with `AnswerSessionPermission`
+  ([Project concept § Answering a permission prompt](project-concept.md#answering-a-permission-prompt))
+  → `ANSWERED` with `option_id` or `cancelled`, `message` and `answered_by`; or until `<wait>` passes
+  → `TIMED_OUT`.
+
+The hook prints Claude's decision on `ANSWERED`, and nothing in every other case, so Claude's own
+prompt follows:
+
+| Answer | stdout |
+|---|---|
+| `allow_once` | `{"hookSpecificOutput":{"hookEventName":"PermissionRequest","decision":{"behavior":"allow"}}}` |
+| `allow_always` | the same, with `"updatedPermissions"`: Claude's `permission_suggestions` |
+| `reject_*` | `"decision":{"behavior":"deny","message":"<message>"}` |
+| `cancelled`, `TIMED_OUT`, `NO_ORCHESTRATOR`, a daemon error, the hook's own deadline | nothing |
+
+The bounds nest: the daemon answers `TIMED_OUT` before the hook's own deadline, and the hook ends
+before Claude kills it. Waiters are held in memory, one per `request_id`: a daemon restart drops
+them and each hook falls back to Claude's prompt. A person can still answer in Claude's terminal once
+the wait ends.
+
 ### Hook wiring
 
 `start_claude_cli_session` generates a per-session UUID `hook_token` and calls
-`tddy_core::build_claude_hooks_settings(&HookCommandParams { tddy_tools_path, daemon_url, daemon_socket, session_id, os_user, hook_token })`.
+`tddy_core::build_claude_hooks_settings(&HookCommandParams { tddy_tools_path, daemon_url, daemon_socket, session_id, os_user, hook_token, answer_wait_secs })`.
 The resulting JSON is written to `<worktree>/.claude/settings.local.json`. The `hook_token` is also
 stored in `.session.yaml` for validation on inbound `ReportSessionStatus` calls.
 
-Config (`claude_cli:` block) may override `tddy_tools_path` (default: `current_exe` sibling → `"tddy-tools"`) and `daemon_url` (default: `http://127.0.0.1:{web_port}`).
+Config (`claude_cli:` block) may override `tddy_tools_path` (default: `current_exe` sibling → `"tddy-tools"`), `daemon_url` (default: `http://127.0.0.1:{web_port}`) and `answer_wait_secs` (default 120).
 
 ### Which transport a hook reports over
 
@@ -385,7 +419,7 @@ Split agents' hooks are written the same way. Cursor-cli hooks still report over
 
 ### Fail-quiet contract
 
-`tddy-tools session-hook` always exits 0. A 2-second ceiling on each report — over HTTP or the agent-tool socket — prevents a dead daemon from blocking Claude; a socket nobody listens on is refused at once. On no-op events (unrecognized event names, unrecognized `notification_type`) the tool exits immediately without making any network call.
+`tddy-tools session-hook` always exits 0. A 2-second ceiling on each report (the permission wait has its own, `--await-timeout-secs`) — over HTTP or the agent-tool socket — prevents a dead daemon from blocking Claude; a socket nobody listens on is refused at once. On no-op events (unrecognized event names, unrecognized `notification_type`) the tool exits immediately without making any network call.
 
 ### Auth model
 
@@ -456,6 +490,30 @@ the agent-tool socket on Tddy Desktop):
 
 ```proto
 rpc ReportSessionStatus(ReportSessionStatusRequest) returns (ReportSessionStatusResponse);
+rpc AwaitQuestionAnswer(AwaitQuestionAnswerRequest) returns (AwaitQuestionAnswerResponse);
+
+message AwaitQuestionAnswerRequest {
+  string session_id = 1;
+  string hook_token = 2;
+  string os_user = 3;
+  string request_id = 4;                  // ReportSessionStatusResponse.request_id
+  string permission_suggestions_json = 5; // Claude's permission_suggestions; empty when none
+}
+
+enum AwaitQuestionOutcome {
+  AWAIT_QUESTION_OUTCOME_UNSPECIFIED = 0;
+  AWAIT_QUESTION_OUTCOME_ANSWERED = 1;
+  AWAIT_QUESTION_OUTCOME_NO_ORCHESTRATOR = 2;
+  AWAIT_QUESTION_OUTCOME_TIMED_OUT = 3;
+}
+
+message AwaitQuestionAnswerResponse {
+  AwaitQuestionOutcome outcome = 1;
+  string option_id = 2;   // allow_once, allow_always, reject_once; empty when cancelled
+  bool cancelled = 3;
+  string message = 4;     // with a reject_* option
+  string answered_by = 5; // the orchestrator's session id
+}
 
 message ReportSessionStatusRequest {
   string session_id  = 1;

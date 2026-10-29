@@ -9,7 +9,7 @@ use tddy_discovery::subagent::{
     AnsweredBy, PermissionAnswer, PermissionAnswering, PermissionRequestView, PermissionToolCall,
 };
 use tddy_session_activity::pending_answers::{
-    DeliveredAnswer, OpenRequest, PendingAnswers, WaitOutcome,
+    DeliveredAnswer, OpenRequest, PendingAnswers, WaitOutcome, ANSWERED_REQUESTS_KEPT,
 };
 
 const CHILD: &str = "child-1";
@@ -194,4 +194,64 @@ async fn a_wait_past_its_deadline_times_out_and_closes_the_request() {
 #[test]
 fn no_request_is_ever_deferred_to_the_web_user() {
     assert!(!with_a_waiter().deferred_to_user(REQUEST_ID));
+}
+
+#[tokio::test]
+async fn a_wait_replaced_by_a_reopen_leaves_the_new_waiter_open() {
+    // Given a hook waiting on the request
+    let pending = with_a_waiter();
+    let replaced = {
+        let pending = Arc::clone(&pending);
+        tokio::spawn(async move { pending.wait(REQUEST_ID, A_LONG_WAIT).await })
+    };
+    // On this current-thread runtime, yielding runs the spawned wait up to its first await.
+    tokio::task::yield_now().await;
+
+    // When the same request is opened again, and the replaced wait ends
+    pending.open(CHILD, a_request());
+    let outcome = tokio::time::timeout(AT_ONCE, replaced)
+        .await
+        .expect("the replaced wait ended")
+        .expect("the wait ran");
+
+    // Then the replaced wait timed out, and the new waiter is still open to an answer
+    assert_eq!(outcome, WaitOutcome::TimedOut);
+    assert!(
+        pending.open_request(REQUEST_ID).is_some(),
+        "the re-opened request must stay open"
+    );
+    pending
+        .answer_as(&allow_once(), the_home())
+        .expect("the re-opened request takes an answer");
+}
+
+#[test]
+fn only_the_most_recent_answers_are_remembered() {
+    // Given one more answered request than the registry remembers
+    let pending = PendingAnswers::new();
+    for n in 0..=ANSWERED_REQUESTS_KEPT {
+        let request_id = format!("req-{n}");
+        pending.open(
+            CHILD,
+            PermissionRequestView {
+                request_id: request_id.clone(),
+                ..a_request()
+            },
+        );
+        pending
+            .answer_as(
+                &PermissionAnswer::Cancelled {
+                    request_id: request_id.clone(),
+                },
+                the_home(),
+            )
+            .expect("each request is answered once");
+    }
+
+    // Then the oldest answer is forgotten, and the newest still names who answered
+    assert_eq!(pending.answered_by("req-0"), None);
+    assert_eq!(
+        pending.answered_by(&format!("req-{ANSWERED_REQUESTS_KEPT}")),
+        Some(the_home())
+    );
 }

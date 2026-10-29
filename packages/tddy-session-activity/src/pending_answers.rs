@@ -13,7 +13,7 @@
 //!
 //! Feature doc: docs/ft/daemon/claude-cli-session.md.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::sync::{Mutex, MutexGuard, PoisonError};
 use std::time::Duration;
 
@@ -64,10 +64,39 @@ struct Slots {
     /// Answers delivered before their hook began waiting; the wait takes its own.
     delivered: HashMap<String, DeliveredAnswer>,
     /// Requests already answered, by `request_id`, with who answered first. Kept after the waiter
-    /// is gone, so a second answer is refused naming the first answerer.
+    /// is gone, so a second answer is refused naming the first answerer — for the last
+    /// [`ANSWERED_REQUESTS_KEPT`] answers, oldest forgotten first (`answered_order`).
     answered: HashMap<String, AnsweredBy>,
+    /// The keys of `answered`, oldest first.
+    answered_order: VecDeque<String>,
     /// The next [`Opened::seq`].
     next_seq: u64,
+}
+
+/// How many answered requests [`PendingAnswers`] remembers, so a second answer is refused naming
+/// the first answerer. The registry lives as long as the daemon, so the memory is bounded: an answer
+/// to a request forgotten this way is refused as one no hook is waiting on.
+pub const ANSWERED_REQUESTS_KEPT: usize = 1024;
+
+impl Slots {
+    /// Remember that `by` answered `request_id`, forgetting the oldest answer past
+    /// [`ANSWERED_REQUESTS_KEPT`].
+    fn remember_answer(&mut self, request_id: &str, by: AnsweredBy) {
+        self.answered.insert(request_id.to_string(), by);
+        self.answered_order.push_back(request_id.to_string());
+        while self.answered_order.len() > ANSWERED_REQUESTS_KEPT {
+            if let Some(oldest) = self.answered_order.pop_front() {
+                self.answered.remove(&oldest);
+            }
+        }
+    }
+
+    /// Whether the open request under `request_id` is still the one opened as `seq`.
+    fn is_open_as(&self, request_id: &str, seq: u64) -> bool {
+        self.open
+            .get(request_id)
+            .is_some_and(|opened| opened.seq == seq)
+    }
 }
 
 /// Every permission prompt a hook holds open on this daemon. Shared by `AwaitQuestionAnswer` and
@@ -122,17 +151,17 @@ impl PendingAnswers {
     /// Wait until the waiter `request_id` names is answered, or `deadline` passes. A request no
     /// waiter is open for times out at once.
     pub async fn wait(&self, request_id: &str, deadline: Duration) -> WaitOutcome {
-        let mut woken = {
+        let (seq, mut woken) = {
             let mut slots = self.slots();
             if let Some(delivered) = slots.delivered.remove(request_id) {
                 return WaitOutcome::Answered(delivered);
             }
-            if !slots.open.contains_key(request_id) {
+            let Some(seq) = slots.open.get(request_id).map(|opened| opened.seq) else {
                 return WaitOutcome::TimedOut;
-            }
+            };
             let (wake, woken) = oneshot::channel();
             slots.waiters.insert(request_id.to_string(), wake);
-            woken
+            (seq, woken)
         };
         if let Ok(Ok(delivered)) = tokio::time::timeout(deadline, &mut woken).await {
             return WaitOutcome::Answered(delivered);
@@ -143,8 +172,12 @@ impl PendingAnswers {
         if let Ok(delivered) = woken.try_recv() {
             return WaitOutcome::Answered(delivered);
         }
-        slots.waiters.remove(request_id);
-        slots.open.remove(request_id);
+        // Close the request only if it is still the one this wait opened on: a re-open replaced it
+        // (and dropped this wait's wake-up), and the new waiter is not this wait's to close.
+        if slots.is_open_as(request_id, seq) {
+            slots.waiters.remove(request_id);
+            slots.open.remove(request_id);
+        }
         WaitOutcome::TimedOut
     }
 
@@ -176,7 +209,7 @@ impl PendingAnswers {
             by: by.clone(),
             message,
         };
-        slots.answered.insert(request_id.to_string(), by);
+        slots.remember_answer(request_id, by);
         match slots.waiters.remove(request_id) {
             Some(wake) => {
                 // A dropped receiver is a wait that ended; the answer is recorded all the same.

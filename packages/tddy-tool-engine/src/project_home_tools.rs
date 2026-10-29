@@ -141,8 +141,9 @@ pub fn session_offered_catalog(is_project_home: bool, choices: &StartChoices) ->
 pub enum SessionToolRole {
     /// The project-home session: every project-home tool, and nothing else that writes.
     ProjectHome,
-    /// A session that can spawn conversations (grill-me): the daemon-wide catalog and the four
-    /// start tools, for its own project alone (`#start-parity` 9/9).
+    /// A session that can spawn conversations (grill-me): the daemon-wide catalog, the four start
+    /// tools (`#start-parity` 9/9) and `AnswerSessionPermission` (`#home-inbox` 6/8), for its own
+    /// project alone.
     ConversationSpawner,
     /// Any other session: the daemon-wide catalog.
     Ordinary,
@@ -164,7 +165,8 @@ pub fn is_conversation_spawner_tool(name: &str) -> bool {
 }
 
 /// [`session_offered_catalog`] by [`SessionToolRole`]: a conversation spawner is offered the
-/// daemon-wide catalog and the four start tools, `StartSession` offering `choices`.
+/// daemon-wide catalog and [`is_conversation_spawner_tool`]'s five, `StartSession` offering
+/// `choices`.
 pub fn session_offered_catalog_for(role: SessionToolRole, choices: &StartChoices) -> Vec<ToolDef> {
     match role {
         SessionToolRole::ProjectHome => session_offered_catalog(true, choices),

@@ -223,7 +223,8 @@ impl ExecToolRpcHandler {
 }
 
 /// Refuse `tool_name` unless `session_id` is a project-home session — or a session that spawns
-/// conversations calling one of the four start tools — and name that session's project. The role is
+/// conversations calling one of its five tools ([`is_conversation_spawner_tool`]) — and name that
+/// session's project. The role is
 /// the session's own record, not anything the request claims.
 fn project_home_caller(
     sessions_base: &Path,
@@ -238,7 +239,8 @@ fn project_home_caller(
     })?;
     match session_tool_role(&metadata) {
         SessionToolRole::ProjectHome => {}
-        // A session that spawns conversations is served the start tools, for its own project.
+        // A session that spawns conversations is served the start tools and the permission answer,
+        // for its own project.
         SessionToolRole::ConversationSpawner if is_conversation_spawner_tool(tool_name) => {}
         _ => {
             return Err(Status::permission_denied(format!(

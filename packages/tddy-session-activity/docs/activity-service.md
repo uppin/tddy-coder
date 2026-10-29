@@ -1,8 +1,8 @@
-# `activity.ActivityService` — the nine methods and their ports
+# `activity.ActivityService` — the ten methods and their ports
 
 ## Role
 
-`tddy-session-activity` serves the nine RPCs of families M and N: what an agent is doing, what a
+`tddy-session-activity` serves the ten RPCs of families M and N: what an agent is doing, what a
 session's status is, and the transcript of both. The coordinate and the crate both arrived with
 `#unbundle` node 7, which moved the families off `connection.ConnectionService` (50 methods → 33)
 along with the notification bus.
@@ -11,6 +11,7 @@ along with the notification bus.
 |---|---|---|
 | `ReportSessionStatus` | unary | a hook's per-session `hook_token`, not a session token; a `WaitingForInput` report carrying `tool_name` (a `PermissionRequest` or `PreToolUse(AskUserQuestion)`) records the structured question in `pending-question.json` under a new `request_id`, sets `pending_elicitation`, answers with the id and publishes one `PendingQuestion` notification; a `WaitingForInput` with no tool keeps a structured question still pending (the follow-up `Notification`, whose status notification carries the question) or else records its `message` (`kind: permission`); any other report — or a wait with no message and nothing pending — clears both. A malformed question is refused before anything is written (`pending_question_record`, `pending_question_notice`) |
 | `ReportOperatorNotification` | unary | the same hook token, after the same session-type check (claude-cli or cursor-cli); a session that recorded no token is refused. Validates the title (1–200 characters after trimming) and body (≤ 2,000) first — `INVALID_ARGUMENT`, never truncation — then publishes one `AttentionRequired` / `Agent` notification carrying an `AgentNotification` (`service/operator_notifications.rs`). Not routed to a peer: `tddy-tools notify` runs on the host that holds its session |
+| `AwaitQuestionAnswer` | unary, long-held | the same hook token, claude-cli only. `NO_ORCHESTRATOR` at once unless the session's changeset names an `orchestrator_session_id` on this host whose main terminal `AnswerWaitPorts::presence` reports active; refuses a `request_id` that is not the pending question, or not a permission; otherwise opens a waiter in `PendingAnswers` and holds the call for at most `AnswerWaitPorts::wait` → `ANSWERED` or `TIMED_OUT` (`service/question_answers.rs`). Not routed to a peer: the hook waits on the host that holds its session |
 | `ReportAgentActivity` | unary | the same hook token; mints the `call_id` pairing a PreToolUse row to its PostToolUse row |
 | `StreamSessionActivity` | server-stream | the persisted activity log, then the live hub |
 | `StreamSessionNotifications` | server-stream | this host's notification bus, scoped to the caller's OS user |
@@ -75,6 +76,31 @@ point.
 on — and its `Err` is not a fifth absence, but "this host could not answer the question", which a
 client retries.
 
+## Holding a hook for an orchestrator's answer
+
+`AwaitQuestionAnswer` is the one call this service holds open. What it needs reaches
+`ActivityServiceImpl` through the builder `with_question_answers(AnswerWaitPorts { pending, presence,
+wait })`, not `ActivityPorts`; `ActivityServiceImpl::new` alone wires `AnswerWaitPorts::default()`,
+whose `NoOrchestratorIsActive` presence answers every hook `NO_ORCHESTRATOR`. The daemon
+(`tddy-session-lifecycle`, `DaemonSessionHost::activity_service`) wires its one `PendingAnswers`, a
+`ServedTerminalPresence` over its terminal store and `claude_cli.answer_wait_secs`.
+
+- **`pending_answers::PendingAnswers`** — the waiters, one per `request_id`, in memory. It implements
+  `#coagents`' `PermissionAnswering` (`answer_as` delegates to `answer_with_message` with no
+  message; `deferred_to_user` is always false; `pending_request` is the earliest-opened open
+  request). The first answer wins; answered ids are remembered for the last
+  `ANSWERED_REQUESTS_KEPT` (1024) answers so a second is refused naming the first answerer. An answer
+  given before its hook waits is that wait's outcome; a wait that times out closes its request, and
+  an answer that lands between the deadline and the lock is returned, not lost. A wait replaced by a
+  re-open of the same id never closes the new waiter.
+- **`answers::answer_permission`** — what `AnswerSessionPermission` runs on the child's host: the
+  orchestrator check (`require_orchestrator`), already answered, the pending question and its kind,
+  the waiter and its offered option, then delivery, an activity row and clearing the question.
+  `permission_request_view` turns `#home-inbox` 3/8's `PendingQuestion` into the
+  `PermissionRequestView` an orchestrator reads; `AnswerRefusal` carries every refusal's text.
+- **`orchestrator_presence::OrchestratorPresence`** — the port: whether this daemon serves a
+  session's main terminal.
+
 ## What is deliberately not here
 
 `daemon_instance_id` routing, for the reason node 6's `tddy-session-files` gives: forwarding a call
@@ -119,6 +145,10 @@ written twice. See
 | `service.rs` | 202 | `ActivityServiceImpl`, the session-directory and hook-session resolution every method shares, `publish_for_session`, `activity_delta_frames` and the two stream adapters (`streamed`, `relayed`) |
 | `service/ports.rs` | 146 | the ports the daemon injects: `ActivityPorts`, `SessionLabels`, `SessionDeltaStores` and `NoSessionDeltaStores`, `DeltaLookup`, `DeltaScope`, `MeasuredDelta` — re-exported from `service` |
 | `service/rpc.rs` | 323 | the `activity.ActivityService` trait impl: the four streams, the two ACP replay reads, and the two hook reports as one-line delegations |
+| `service/question_answers.rs` | 167 | `AnswerWaitPorts` and `await_question_answer_impl`, the long-held hook call |
+| `answers.rs` | 387 | `answer_permission`, its refusals and `permission_request_view` |
+| `pending_answers.rs` | 249 | `PendingAnswers`, the in-memory waiters |
+| `orchestrator_presence.rs` | 32 | the `OrchestratorPresence` port and `NoOrchestratorIsActive` |
 | `service/hook_reports.rs` | 215 | the two hook reports' bodies, `report_session_status_impl` and `report_agent_activity_impl`, as inherent methods: a trait impl cannot be split across files and `restructure`'s `extract_method` is refused inside an `#[async_trait]` impl, so the trait methods delegate here |
 
 Production lines are counted to the first `#[cfg(test)]`; the budget is 500.

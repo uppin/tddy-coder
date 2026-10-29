@@ -11,7 +11,10 @@
 //! 5. the chosen option is one the request offers, and a hook is waiting on it.
 //!
 //! It then wakes the hook, records who answered, when and what in the child's activity log, and
-//! clears the pending question.
+//! clears the pending question. Once the hook is woken the answer is delivered: a failure to record
+//! it or to clear the question is logged, never returned as a refusal — every refusal leaves the
+//! hook waiting, and a refused answer the hook already acted on would mislead the orchestrator. The
+//! child's next status report clears a question left behind (`#home-inbox` 3/8's clear rule).
 //!
 //! The request is offered in `#coagents`' shape, a [`PermissionRequestView`], with the options
 //! [`ALLOW_ONCE`] and [`REJECT_ONCE`], plus [`ALLOW_ALWAYS`] when Claude sent permission
@@ -96,7 +99,7 @@ pub enum AnswerRefusal {
         request_id: String,
         option_id: String,
     },
-    /// The child's records could not be read or written.
+    /// The child's records could not be read, so nothing was delivered.
     Io(String),
 }
 
@@ -211,28 +214,7 @@ pub fn answer_permission(
     let session_dir = unified_session_dir_path(context.sessions_base, target);
 
     // 1. The caller is the child's orchestrator, on the host the changeset records.
-    let changeset = match read_changeset(&session_dir) {
-        Ok(changeset) => Some(changeset),
-        Err(WorkflowError::ChangesetMissing(_)) => None,
-        Err(e) => return Err(AnswerRefusal::Io(format!("cannot read the changeset: {e}"))),
-    };
-    let orchestrator = changeset
-        .as_ref()
-        .and_then(|changeset| changeset.orchestrator_session_id.clone());
-    let orchestrator_host = changeset
-        .as_ref()
-        .and_then(|changeset| changeset.orchestrator_daemon_instance_id.as_deref())
-        .filter(|host| !host.is_empty())
-        .unwrap_or(context.this_daemon_instance_id);
-    let is_orchestrator = orchestrator.as_deref() == Some(caller.session_id.as_str())
-        && orchestrator_host == caller.daemon_instance_id;
-    if !is_orchestrator {
-        return Err(AnswerRefusal::NotTheOrchestrator {
-            caller: caller.session_id.clone(),
-            target: target.to_string(),
-            orchestrator,
-        });
-    }
+    require_orchestrator(context, caller, target, &session_dir)?;
 
     // 2. Nobody answered it first.
     if let Some(first) = context.pending.answered_by(&request_id) {
@@ -264,31 +246,24 @@ pub fn answer_permission(
         .ok_or_else(|| AnswerRefusal::UnknownRequest {
             request_id: request_id.clone(),
         })?;
-    let option_id = match &answer {
-        PermissionAnswer::Selected { option_id, .. } => {
-            if !open
-                .request
-                .options
-                .iter()
-                .any(|offered| &offered.option_id == option_id)
-            {
-                return Err(AnswerRefusal::UnknownOption {
-                    request_id,
-                    option_id: option_id.clone(),
-                });
-            }
-            option_id.clone()
-        }
-        PermissionAnswer::Cancelled { .. } => String::new(),
-    };
+    let option_id = offered_option(&open.request, &answer)?;
 
     let by = AnsweredBy::Orchestrator(caller.session_id.clone());
-    context
+    // The registry decides the race checks 2 and 5 cannot: another answer, or the wait's deadline,
+    // landing since.
+    if context
         .pending
         .answer_with_message(&answer, by.clone(), message)
-        .map_err(|_| AnswerRefusal::UnknownRequest {
-            request_id: request_id.clone(),
-        })?;
+        .is_err()
+    {
+        return Err(match context.pending.answered_by(&request_id) {
+            Some(first) => AnswerRefusal::AlreadyAnswered {
+                request_id,
+                by: first.name(),
+            },
+            None => AnswerRefusal::UnknownRequest { request_id },
+        });
+    }
 
     let at_unix_ms = tddy_daemon_kernel::now_unix_ms();
     record_answer(
@@ -299,8 +274,12 @@ pub fn answer_permission(
         &by,
         at_unix_ms,
     );
-    clear_pending_question(&session_dir)
-        .map_err(|e| AnswerRefusal::Io(format!("cannot clear the pending question: {e}")))?;
+    if let Err(e) = clear_pending_question(&session_dir) {
+        log::warn!(
+            target: "tddy_session_activity::answers",
+            "answered permission request {request_id}, but could not clear its pending question: {e}"
+        );
+    }
 
     Ok(AnsweredPermission {
         session_id: target.to_string(),
@@ -310,6 +289,68 @@ pub fn answer_permission(
         cancelled: matches!(answer, PermissionAnswer::Cancelled { .. }),
         at_unix_ms,
     })
+}
+
+/// Refuse unless `caller` is `target`'s orchestrator: the session its changeset's
+/// `orchestrator_session_id` names, on the host its `orchestrator_daemon_instance_id` names (this host
+/// when absent).
+pub(crate) fn require_orchestrator(
+    context: &AnswerContext<'_>,
+    caller: &AnsweringCaller,
+    target: &str,
+    session_dir: &Path,
+) -> Result<(), AnswerRefusal> {
+    let changeset = match read_changeset(session_dir) {
+        Ok(changeset) => Some(changeset),
+        Err(WorkflowError::ChangesetMissing(_)) => None,
+        Err(e) => return Err(AnswerRefusal::Io(format!("cannot read the changeset: {e}"))),
+    };
+    let orchestrator = changeset
+        .as_ref()
+        .and_then(|changeset| changeset.orchestrator_session_id.clone());
+    let orchestrator_host = changeset
+        .as_ref()
+        .and_then(|changeset| changeset.orchestrator_daemon_instance_id.as_deref())
+        .filter(|host| !host.is_empty())
+        .unwrap_or(context.this_daemon_instance_id);
+    let is_orchestrator = orchestrator.as_deref() == Some(caller.session_id.as_str())
+        && orchestrator_host == caller.daemon_instance_id;
+    if is_orchestrator {
+        Ok(())
+    } else {
+        Err(AnswerRefusal::NotTheOrchestrator {
+            caller: caller.session_id.clone(),
+            target: target.to_string(),
+            orchestrator,
+        })
+    }
+}
+
+/// The option `answer` chose, when `request` offers it; empty for a cancellation.
+fn offered_option(
+    request: &PermissionRequestView,
+    answer: &PermissionAnswer,
+) -> Result<String, AnswerRefusal> {
+    match answer {
+        PermissionAnswer::Selected {
+            request_id,
+            option_id,
+        } => {
+            if request
+                .options
+                .iter()
+                .any(|offered| &offered.option_id == option_id)
+            {
+                Ok(option_id.clone())
+            } else {
+                Err(AnswerRefusal::UnknownOption {
+                    request_id: request_id.clone(),
+                    option_id: option_id.clone(),
+                })
+            }
+        }
+        PermissionAnswer::Cancelled { .. } => Ok(String::new()),
+    }
 }
 
 /// Record in the child's activity who answered what. The answer is already delivered, so a failed

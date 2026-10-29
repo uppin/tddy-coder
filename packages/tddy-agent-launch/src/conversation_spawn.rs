@@ -17,7 +17,7 @@ pub(crate) fn recipe_enables_conversation_spawn(recipe_name: &str) -> bool {
 }
 
 /// What `metadata`'s role entitles its agent to among the project-home tools: the project-home
-/// session's own, a conversation spawner's four start tools, or none.
+/// session's own, a conversation spawner's start tools and permission answer, or none.
 pub fn session_tool_role(
     metadata: &tddy_core::SessionMetadata,
 ) -> tddy_tool_engine::project_home_tools::SessionToolRole {
