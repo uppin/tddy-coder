@@ -23,6 +23,7 @@ use tddy_session_lifecycle::connection_service::launch_ports::LaunchSessions;
 use tddy_session_lifecycle::connection_service::{DaemonSessionHost, LocalExecTools};
 use tddy_session_lifecycle::peer_routing::PeerRouting;
 use tddy_session_lifecycle::relay_idle::RpcActivity;
+use tddy_session_lifecycle::terminal_session_adapter::DaemonTerminalSessionStore;
 use tddy_worktree_service::worktrees::WorktreeSizeCalculator;
 
 use crate::families::ProviderAccountsPort;
@@ -66,6 +67,9 @@ pub(crate) struct ProjectHomeHost {
     /// The provider accounts this host's vaults hold, late-bound by
     /// [`RpcHandlers::attach_provider_accounts`](crate::RpcHandlers::attach_provider_accounts).
     pub(crate) provider_accounts: Arc<OnceLock<Arc<dyn ProviderAccountsPort>>>,
+    /// The terminals `ReadSessionTerminal` reads a session's main terminal through: the store the
+    /// terminal RPCs resolve through, sandbox first (`#home-inbox` 2/8).
+    pub(crate) terminals: DaemonTerminalSessionStore,
 }
 
 impl ExecToolRpcHandler {
@@ -97,6 +101,7 @@ impl ExecToolRpcHandler {
                     host.user_resolver(),
                 )),
                 provider_accounts: Arc::new(OnceLock::new()),
+                terminals: host.terminal_sessions(),
             },
         }
     }

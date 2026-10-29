@@ -191,7 +191,13 @@ pub fn a_daemon_named(
     sessions_base: &Path,
     peers: Arc<InProcessPeers>,
 ) -> TestDaemon {
-    daemon_over(test_config(), instance_id, sessions_base, peers)
+    daemon_over(
+        test_config(),
+        instance_id,
+        sessions_base,
+        peers,
+        Arc::new(CliSessionManager::new()),
+    )
 }
 
 /// [`a_daemon_named`], except that the test user maps to the OS user this process runs as. A probe
@@ -207,6 +213,7 @@ pub fn a_daemon_as_current_user(
         instance_id,
         sessions_base,
         peers,
+        Arc::new(CliSessionManager::new()),
     )
 }
 
@@ -237,6 +244,7 @@ fn daemon_over(
     instance_id: &str,
     sessions_base: &Path,
     peers: Arc<InProcessPeers>,
+    terminals: Arc<CliSessionManager>,
 ) -> TestDaemon {
     config.daemon_instance_id = Some(instance_id.to_string());
     let base = sessions_base.to_path_buf();
@@ -254,7 +262,7 @@ fn daemon_over(
         tddy_spawn::supervisor_client::SpawnBackendChoice::ForkedWorker,
         routing,
         Arc::new(tddy_daemon_kernel::operator_channel::NoOperatorChannel),
-        Arc::new(CliSessionManager::new()),
+        terminals,
     );
     let daemon = TestDaemon::from_host(host);
     daemon.as_arc().install_sandbox_rpc_bridge();
@@ -378,6 +386,8 @@ pub async fn a_workspace_in(daemon: &TestDaemon, project_id: &str) -> String {
 /// One daemon's half of the world: its sessions directory and the repos its projects point at.
 pub struct Host {
     pub daemon: Arc<TestDaemon>,
+    /// The manager the daemon's terminals live in: a test starts a session's child here.
+    pub terminals: Arc<CliSessionManager>,
     pub sessions: tempfile::TempDir,
     _repos: (tempfile::TempDir, tempfile::TempDir),
 }
@@ -408,18 +418,22 @@ impl Host {
 }
 
 pub fn a_host(instance_id: &str, peers: &Arc<InProcessPeers>) -> Host {
-    host_built_by(instance_id, peers, a_daemon_named)
+    host_built_by(instance_id, peers, test_config())
 }
 
 /// [`a_host`], whose daemon maps the test user to the OS user this process runs as.
 pub fn a_host_as_current_user(instance_id: &str, peers: &Arc<InProcessPeers>) -> Host {
-    host_built_by(instance_id, peers, a_daemon_as_current_user)
+    host_built_by(
+        instance_id,
+        peers,
+        config_mapping_test_user_to(&current_os_user()),
+    )
 }
 
 fn host_built_by(
     instance_id: &str,
     peers: &Arc<InProcessPeers>,
-    daemon_on: fn(&str, &Path, Arc<InProcessPeers>) -> TestDaemon,
+    config: tddy_daemon_kernel::config::DaemonConfig,
 ) -> Host {
     let sessions = tempfile::tempdir().unwrap();
     let this_repo = a_repo_with_origin();
@@ -432,10 +446,18 @@ fn host_built_by(
         ],
     )
     .unwrap();
-    let daemon = Arc::new(daemon_on(instance_id, sessions.path(), Arc::clone(peers)));
+    let terminals = Arc::new(CliSessionManager::new());
+    let daemon = Arc::new(daemon_over(
+        config,
+        instance_id,
+        sessions.path(),
+        Arc::clone(peers),
+        Arc::clone(&terminals),
+    ));
     peers.register(instance_id, Arc::clone(&daemon));
     Host {
         daemon,
+        terminals,
         sessions,
         _repos: (this_repo, other_repo),
     }

@@ -139,6 +139,7 @@ mod tests {
                 "GetWorktree",
                 "ReadSessionActivity",
                 "ReadSessionTranscript",
+                "ReadSessionTerminal",
                 "TerminateSession",
                 "CommitSessionWorktree",
                 "PushSessionBranch",

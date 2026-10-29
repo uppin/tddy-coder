@@ -67,6 +67,17 @@ the ring already holds the raw history.
 would render wrong, so the caller refuses instead (see the sequence point below). Every PTY spawner
 calls `resize(rows, cols)` at spawn, before the child can write.
 
+### Text grid
+
+`text_grid() -> Option<TextGrid>` is the same model read as text rather than as a repaint:
+`lines` (the visible rows of the **active** buffer — `Vt::view()`, the alternate screen while an
+application is full-screen — each `trim_end`ed), `cursor { row, col, visible }`, `cols`, `rows`,
+`offset` (`end_offset()`) and `bracketed_paste` (private mode 2004 as the sniffer last saw it). All of
+it is read in one borrow, so it describes one moment. Text only, no colours or attributes. It is `None`
+until `resize` has sized the model, for the reason `snapshot()` is. The project-home agent's
+`ReadSessionTerminal` serves `lines`, `cursor`, `cols`, `rows` and `offset`; `bracketed_paste` is
+carried for input.
+
 `append` feeds the model with **incremental UTF-8 decoding**: a code point split across two chunks is
 held (at most three bytes) until the next chunk completes it, and bytes that are not UTF-8 render as
 U+FFFD, as a terminal would. `avt` parses escape sequences across chunk boundaries itself.

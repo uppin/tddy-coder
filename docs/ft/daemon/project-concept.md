@@ -251,6 +251,7 @@ and served the four start tools, for its own project (see
 | `ReadSessionTranscript` | `session_id`, `daemon_instance_id?`, `cursor?`, `limit?`, `direction?` (`newest_first` (default) or `from_cursor`), `tool_call_id?` | `{items: [{seq, kind, text, tool_call_id, truncated}], next_cursor, has_more, clamped_to?}`: the frames the web's Activities view pages (`GetAcpReplayPage`), each text cut at 4096 bytes and marked `truncated`; with `tool_call_id`, `{tool_call_id, raw_input, raw_output}` whole instead (`GetAcpToolCallDetail`). See [Following a session](#following-a-session) |
 | `TerminateSession` | `session_id`, `daemon_instance_id?` | `{session_id, signal: "SIGTERM"}`: what the web UI's **Terminate** does — `SignalSession` with SIGTERM to the session's process on its host. The session's record, worktree and branch are kept, so it can be resumed; deleting them is the UI's separate Delete, which is not offered. A session whose process has already ended (or that records none) is refused as an `is_error` result saying so. See [Terminating a session](#terminating-a-session) |
 | `RefreshWorktreeDiskUsage` | `path?` (as `ListWorktrees` lists it; every worktree when empty), `daemon_instance_id?` | `{queued}`: what the Worktrees screen's **Refresh** does — queues the background size walk (`WorktreeSizeCalculator`, two walks at a time) for one worktree or all of the project's, and answers at once. Progress is read with `ListWorktrees` (`sizing {done, total}`, the screen's "{done} of {total}") or `GetWorktree` (`size_status`: `calculating` until cached). A path not in git's worktree list is refused naming it. No ledger of its own: the calculator's persisted per-path state is the record |
+| `ReadSessionTerminal` | `session_id`, `daemon_instance_id?` | `{lines, cursor: {row, col, visible}, cols, rows, offset}`: what the session's **main** terminal shows right now, as text — the visible rows of the screen it is on (the alternate screen while a full-screen TUI runs), each with trailing whitespace trimmed, and the cursor, zero-based. `offset` is the position in the terminal's output stream the text corresponds to: the same sequence point a reconnecting browser's snapshot carries. Text only: no scrollback, colours or attributes. Reading sends no input, takes no control lease and disturbs no attached screen. A session with no live terminal, or whose terminal has not reported its size, is refused naming why. See [Reading a terminal](#reading-a-terminal) |
 
 - **Targets.** A target is a session id in the caller's project, with a worktree, on the host the
   optional `daemon_instance_id` argument names (as `ListProjectSessions` reports it; empty or absent
@@ -267,7 +268,7 @@ and served the four start tools, for its own project (see
   limitation:** the name tie-break mirrors the browser's `localeCompare` for ASCII names (case-insensitive,
   lowercase first on a case-only difference, punctuation before digits before letters); for non-ASCII
   names it is an approximation and may order equal-sized worktrees differently from the screen.
-- **Across hosts.** A target tool call (read, diff, the two worktree tools, `DescribeSessionStartOptions`, the two follow tools, `TerminateSession`, `RefreshWorktreeDiskUsage`, every git tool) naming another host is
+- **Across hosts.** A target tool call (read, diff, the two worktree tools, `DescribeSessionStartOptions`, the two follow tools, `TerminateSession`, `RefreshWorktreeDiskUsage`, `ReadSessionTerminal`, every git tool) naming another host is
   forwarded whole to that host over the peer forward and runs there unchanged: that host's path
   containment, activity gate and push identity apply. The host receiving it does not hold the calling
   session, so it confirms the caller **at the daemon that owns it**: it asks every other eligible
@@ -397,6 +398,21 @@ answers them on demand, each from the RPC the form calls, on the host `daemon_in
   (`packages/tddy-tool-engine/src/start_options.rs`) and run, with the form's own TypeScript
   functions, over one shared fixture
   (`packages/tddy-web/cypress/support/fixtures/stack-parent-candidates.json`).
+
+### Reading a terminal
+
+`ReadSessionTerminal` answers from the daemon's screen model of the target's `main` terminal
+(`tddy_task::TerminalCapture::text_grid`), the model a reconnecting browser is repainted from, so the
+agent and the screen cannot disagree.
+
+- **Which screen.** The buffer in use: the alternate screen while an application is full-screen, the
+  primary screen otherwise. Scrollback is not kept by the model.
+- **Which terminal.** The one the terminal RPCs resolve for `main` — the sandbox's first, then the
+  host's. A jailed terminal is readable once the jail has reported its size.
+- **One moment.** Rows, cursor, size and `offset` are read under the capture's lock. Rows are trimmed
+  at the end, so a blank row is an empty string.
+- **Refusals** are `is_error` results: `no live terminal` (with the session id) and `terminal size is
+  not known yet`, besides the target refusals every target tool shares.
 
 ### Following a session
 

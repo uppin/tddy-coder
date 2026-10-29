@@ -3,7 +3,7 @@
 **Location:** `packages/tddy-task/src/terminal_capture.rs`
 **Category:** oversized-file
 **Detected:** 2026-10-25 — `/pr-wrap` step 3.5 on PR #760 (`#term-snapshot` 1/4)
-**Metrics:** **668 production lines** (no `#[cfg(test)]` block; the file's tests live in `tests/`) · budget 500 · **1.3× over**
+**Metrics:** **728 production lines** (2026-10-28; no `#[cfg(test)]` block; the file's tests live in `tests/`) · budget 500 · **1.3× over**
 **Thresholds breached:** length 668 > 500
 **Restructure:** `extract_module --to_file` — `/code-restructuring` territory
 **Status:** Open — **unclaimed**
@@ -14,6 +14,7 @@
 | Run | Production lines | Note |
 |---|---|---|
 | 2026-10-25 | 668 | first detection; 482 → 668 in PR #760: the screen model (`avt::Vt`, incremental UTF-8 feed), `ScreenSnapshot`, `InputModes` (the widened sniffer state) and the DECKPAM/DECSCUSR parser events. Decomposition deferred with the developer's consent: the file is stack-shared — `#term-snapshot` 2/4–4/4 (#761, #762, #763) modify it too, and a split here would conflict in each |
+| 2026-10-28 | 728 | **regressed.** `#home-inbox` 2/8 (#767): 668 → 728 (+60) — `TerminalCapture::text_grid` (the active buffer's rows, cursor, size, offset and the bracketed-paste state) with `TextGrid` / `GridCursor`. The accessor reads the screen model and belongs with `snapshot` in the screen-model seam above. **Split deferred** (stack-shared: `#home-inbox` 5/8 and 6/8 touch the file) |
 
 ## What the tool found
 

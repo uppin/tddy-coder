@@ -16,6 +16,7 @@
 //! | `ReadSessionTranscript` | a target session's transcript, paged; one tool call whole by id |
 //! | `TerminateSession` | sends a target session's process SIGTERM, as the UI's Terminate does; the record, worktree and branch stay ([`crate::project_home_terminate`]) |
 //! | `RefreshWorktreeDiskUsage` | queues the Worktrees screen's size walk for one worktree or every one, and answers at once; the progress is read with `ListWorktrees` ([`crate::project_home_disk_refresh`]) |
+//! | `ReadSessionTerminal` | what a target session's main terminal shows right now, as text, with its cursor ([`crate::project_home_terminal_tools`]) |
 //!
 //! Targets resolve through `tddy_worktree_service::session_target`. Listing and starting need the
 //! daemon's session store and start path, which reach this crate through [`ProjectHomePort`].
@@ -49,6 +50,7 @@ use crate::project_home_disk_refresh::{
 use crate::project_home_git_tools::{
     execute_project_home_git_tool, is_project_home_git_tool, project_home_git_tool_defs,
 };
+use crate::project_home_terminal_tools::{project_home_terminal_tool_defs, READ_SESSION_TERMINAL};
 use crate::project_home_terminate::{
     terminate_session, terminate_session_tool_def, TERMINATE_SESSION,
 };
@@ -94,6 +96,7 @@ pub fn is_project_home_tool(name: &str) -> bool {
             | READ_SESSION_TRANSCRIPT
             | TERMINATE_SESSION
             | REFRESH_WORKTREE_DISK_USAGE
+            | READ_SESSION_TERMINAL
     )
 }
 
@@ -229,6 +232,7 @@ pub fn is_project_home_target_tool(name: &str) -> bool {
             | READ_SESSION_TRANSCRIPT
             | TERMINATE_SESSION
             | REFRESH_WORKTREE_DISK_USAGE
+            | READ_SESSION_TERMINAL
     ) || is_project_home_git_tool(name)
 }
 
@@ -402,6 +406,7 @@ fn project_home_tool_defs_with(start_schema: Value) -> Vec<ToolDef> {
     defs.push(start_options_tool_def());
     defs.extend(worktree_tool_defs());
     defs.extend(session_follow_tool_defs());
+    defs.extend(project_home_terminal_tool_defs());
     defs.extend(terminate_session_tool_def());
     defs.extend(refresh_worktree_disk_usage_tool_def());
     defs
@@ -448,6 +453,11 @@ pub async fn execute_project_home_tool(
         }
         TERMINATE_SESSION => terminate_session(port, home, args).await,
         REFRESH_WORKTREE_DISK_USAGE => refresh_worktree_disk_usage(port, home, args).await,
+        // Needs the terminal port as well, so the daemon answers it through
+        // `execute_project_home_terminal_tool`; reaching here is a wiring mistake, named as one.
+        READ_SESSION_TERMINAL => ToolOutcome::err(format!(
+            "{READ_SESSION_TERMINAL} is answered by execute_project_home_terminal_tool, not by execute_project_home_tool"
+        )),
         other => ToolOutcome::err(format!("unknown project-home tool: {other}")),
     }
 }

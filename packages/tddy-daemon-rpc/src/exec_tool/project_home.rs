@@ -39,9 +39,16 @@ use tddy_session_activity::session_reader::{list_sessions_in_dir, SessionEntry};
 use tddy_session_lifecycle::connection_service::launch_ports::LaunchSessions;
 use tddy_session_lifecycle::connection_service::session_acting_identity::SessionAccountAccess;
 use tddy_session_lifecycle::connection_service::start_choices;
+use tddy_session_lifecycle::terminal_session_adapter::DaemonTerminalSessionStore;
 use tddy_session_lifecycle::user_sessions_path::sessions_base_for_user;
+use tddy_task::TextGrid;
+use tddy_terminal_rpc::bridge::MAIN_TERMINAL_ID;
+use tddy_terminal_rpc::session::TerminalSessionStore;
 use tddy_tool_engine::catalog::ToolDef;
 use tddy_tool_engine::project_home_git_tools::is_project_home_git_tool;
+use tddy_tool_engine::project_home_terminal_tools::{
+    execute_project_home_terminal_tool, is_project_home_terminal_tool, ProjectHomeTerminalPort,
+};
 use tddy_tool_engine::project_home_tools::{
     execute_project_home_tool, is_conversation_spawner_tool, is_project_home_tool,
     session_offered_catalog_for, ListProjectSessionsResult, ListedSession, ProjectHomePort,
@@ -133,6 +140,7 @@ impl ExecToolRpcHandler {
                 .provider_accounts
                 .get()
                 .map(Arc::clone),
+            terminals: self.project_home_host.terminals.clone(),
         })
     }
 
@@ -277,6 +285,8 @@ pub(super) struct DaemonProjectHome {
     host_service: Arc<HostServiceImpl>,
     /// The provider accounts this host's vaults hold; `None` on a host with no credential vaults.
     provider_accounts: Option<Arc<dyn ProviderAccountsPort>>,
+    /// The terminals `ReadSessionTerminal` reads a session's main terminal through.
+    terminals: DaemonTerminalSessionStore,
 }
 
 /// One session as the target resolver reads it: its `.session.yaml`, its changeset's branch, and the
@@ -294,7 +304,11 @@ impl DaemonProjectHome {
         home: &HomeCaller,
         req: &ExecuteToolRequest,
     ) -> ExecuteToolResponse {
-        let outcome = execute_project_home_tool(self, home, &req.tool_name, &req.args_json).await;
+        let outcome = if is_project_home_terminal_tool(&req.tool_name) {
+            execute_project_home_terminal_tool(self, home, &req.tool_name, &req.args_json).await
+        } else {
+            execute_project_home_tool(self, home, &req.tool_name, &req.args_json).await
+        };
         ExecuteToolResponse {
             result_json: outcome.result_json,
             is_error: outcome.is_error,
@@ -620,6 +634,37 @@ impl ProjectHomePort for DaemonProjectHome {
                 is_active: row.entry.is_active,
             })
             .collect())
+    }
+}
+
+#[async_trait]
+impl ProjectHomeTerminalPort for DaemonProjectHome {
+    /// The screen of `target`'s main terminal, read under its capture's lock: the active buffer's
+    /// rows and the cursor at one moment. The store is the one the terminal RPCs resolve through,
+    /// sandbox first. A session with no live terminal, or whose terminal has not reported its size,
+    /// is refused with the reason (`#home-inbox` 2/8).
+    async fn read_terminal(&self, target: &SessionTarget) -> anyhow::Result<TextGrid> {
+        let session = self
+            .terminals
+            .get_terminal(&target.session_id, MAIN_TERMINAL_ID)
+            .await
+            .ok_or_else(|| anyhow::anyhow!("session {} has no live terminal", target.session_id))?;
+        let capture = session.capture();
+        let grid = capture
+            .lock()
+            .map_err(|_| {
+                anyhow::anyhow!(
+                    "session {}'s terminal capture is poisoned",
+                    target.session_id
+                )
+            })?
+            .text_grid();
+        grid.ok_or_else(|| {
+            anyhow::anyhow!(
+                "session {}'s terminal size is not known yet",
+                target.session_id
+            )
+        })
     }
 }
 

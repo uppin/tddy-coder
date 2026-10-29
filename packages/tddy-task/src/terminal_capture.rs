@@ -19,9 +19,12 @@ use crate::screen_dump::portable_dump;
 /// 1006, 1015, 1016). These are replayed in front of the raw ring ([`TerminalCapture::replay`]).
 const MOUSE_TRACKING_MODES: [u16; 7] = [1000, 1002, 1003, 1005, 1006, 1015, 1016];
 
+/// Bracketed paste (2004), read by [`TerminalCapture::text_grid`].
+const BRACKETED_PASTE_MODE: u16 = 2004;
+
 /// Focus reporting (1004) and bracketed paste (2004): input modes a client needs to drive the
 /// screen, carried by a snapshot but not by the legacy raw replay.
-const OTHER_INPUT_MODES: [u16; 2] = [1004, 2004];
+const OTHER_INPUT_MODES: [u16; 2] = [1004, BRACKETED_PASTE_MODE];
 
 /// Private modes that switch to the alternate screen buffer (`47`, `1047`, `1049`).
 const ALTERNATE_SCREEN_MODES: [u16; 3] = [47, 1047, 1049];
@@ -124,6 +127,36 @@ impl TerminalCapture {
             offset: self.end_offset,
             rows: rows as u16,
             cols: cols as u16,
+        })
+    }
+
+    /// The active screen buffer's visible rows as text, with the cursor, the grid size, the stream
+    /// offset the text corresponds to and whether the application switched bracketed paste on — all
+    /// read under one borrow, so they describe one moment. Each row has its trailing whitespace
+    /// trimmed. `None` until [`Self::resize`] has told the model the PTY's size: a grid read at a
+    /// guessed size would be wrong, and the caller refuses instead.
+    ///
+    /// The model is read through `Vt::view()`, which is the buffer in use: the alternate screen
+    /// while an application is full-screen, not the primary buffer `Vt::text()` returns.
+    pub fn text_grid(&self) -> Option<TextGrid> {
+        let (rows, cols) = self.grid()?;
+        let cursor = self.screen.cursor();
+        let lines = self
+            .screen
+            .view()
+            .map(|line| line.text().trim_end().to_owned())
+            .collect();
+        Some(TextGrid {
+            lines,
+            cursor: GridCursor {
+                row: cursor.row as u16,
+                col: cursor.col as u16,
+                visible: cursor.visible,
+            },
+            cols,
+            rows,
+            offset: self.end_offset,
+            bracketed_paste: self.modes.enabled.contains(&BRACKETED_PASTE_MODE),
         })
     }
 
@@ -397,6 +430,33 @@ pub struct ScreenSnapshot {
     /// The grid `data` was serialized at.
     pub rows: u16,
     pub cols: u16,
+}
+
+/// The visible text of a terminal's active screen buffer at a sequence point
+/// ([`TerminalCapture::text_grid`]).
+///
+/// Text only: no scrollback, colours or attributes. `lines` holds one entry per row of the grid
+/// (`rows` of them), each trimmed at the end.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TextGrid {
+    /// The visible rows, top first.
+    pub lines: Vec<String>,
+    pub cursor: GridCursor,
+    pub cols: u16,
+    pub rows: u16,
+    /// The sequence point: every output byte below this absolute offset is reflected in `lines`,
+    /// none at or above it is. The same offset a [`ScreenSnapshot`] taken at that moment carries.
+    pub offset: u64,
+    /// Whether the application has bracketed paste (private mode 2004) switched on.
+    pub bracketed_paste: bool,
+}
+
+/// Where the cursor is on the grid, zero-based from the top-left cell.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct GridCursor {
+    pub row: u16,
+    pub col: u16,
+    pub visible: bool,
 }
 
 /// A contiguous slice of the capture ring returned by [`TerminalCapture::replay_last`],
