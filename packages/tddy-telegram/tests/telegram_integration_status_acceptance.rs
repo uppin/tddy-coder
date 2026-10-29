@@ -72,6 +72,15 @@ impl TelegramSender for AnUnreachableApi {
     ) -> anyhow::Result<()> {
         Err(a_network_error())
     }
+
+    async fn send_html_message(
+        &self,
+        _chat_id: i64,
+        _html: &str,
+        _silent: bool,
+    ) -> anyhow::Result<()> {
+        Err(a_network_error())
+    }
 }
 
 /// A bot whose `getMe` answers.

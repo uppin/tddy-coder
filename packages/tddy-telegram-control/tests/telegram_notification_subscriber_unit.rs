@@ -52,6 +52,7 @@ fn an_attention_notification() -> SessionNotification {
         kind: SessionNotificationKind::AttentionRequired,
         source: SessionNotificationSource::ActivityStatus,
         text: format!("🔔 Session {LABEL}: Claude Code needs your input."),
+        agent: None,
         at_unix_ms: AT,
     }
 }
@@ -148,6 +149,15 @@ impl TelegramSender for AnUnreachableApi {
         _chat_id: i64,
         _text: &str,
         _inline_keyboard: InlineKeyboardRows,
+    ) -> anyhow::Result<()> {
+        anyhow::bail!("connection refused")
+    }
+
+    async fn send_html_message(
+        &self,
+        _chat_id: i64,
+        _html: &str,
+        _silent: bool,
     ) -> anyhow::Result<()> {
         anyhow::bail!("connection refused")
     }

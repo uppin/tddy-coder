@@ -60,6 +60,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 // reference and read disjointly, so the symbol *is* the file. See the changeset's
 // `## Decisions & Trade-offs`.
 pub mod agent_list_mapping;
+pub mod agent_notification_limits;
 pub mod agent_tool_socket;
 pub mod config;
 pub mod conversation_frames;
@@ -67,6 +68,7 @@ pub mod daemon_hook_urls;
 pub mod daemon_identity;
 pub mod first_login_enrolment;
 pub mod live_users;
+pub mod notification_markdown;
 pub mod open_vault_idle_ttl;
 pub mod operator_channel;
 pub mod os_user_resolution;

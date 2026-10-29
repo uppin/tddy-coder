@@ -69,22 +69,9 @@ impl LaunchSessions {
 
         // --- cursor-cli branch: resume without LiveKit ---
         if metadata.session_type.as_deref() == Some("cursor-cli") {
-            let identity = self.host.session_identity(
-                os_user,
-                &req.session_id,
-                &metadata.project_id,
-                &req.session_token,
-            );
             return bridge_conn_resume_response(
-                crate::cursor_cli_spawn::resume_cursor_cli_session(
-                    &self.claude_cli_manager,
-                    &self.config,
-                    &req.session_id,
-                    &session_dir,
-                    metadata,
-                    identity.git_environment,
-                )
-                .await,
+                self.resume_cursor_cli(os_user, &req, &session_dir, metadata)
+                    .await,
             );
         }
 
@@ -231,5 +218,41 @@ impl LaunchSessions {
             livekit_url: result.livekit_url,
             livekit_server_identity: result.livekit_server_identity,
         }))
+    }
+}
+
+impl LaunchSessions {
+    /// Resume a cursor-cli session on this host's PTY: its process is given the project's account
+    /// identity pairs again and its notify environment, rebuilt from the hook token its record
+    /// holds.
+    async fn resume_cursor_cli(
+        &self,
+        os_user: &str,
+        req: &ResumeSessionRequest,
+        session_dir: &std::path::Path,
+        metadata: tddy_core::SessionMetadata,
+    ) -> Result<Response<ResumeSessionResponse>, Status> {
+        let identity = self.host.session_identity(
+            os_user,
+            &req.session_id,
+            &metadata.project_id,
+            &req.session_token,
+        );
+        let mut agent_env = identity.git_environment;
+        agent_env.extend(crate::cursor_cli_spawn::resumed_cursor_notify_env(
+            &self.config,
+            &self.tddy_data_dir,
+            os_user,
+            &metadata,
+        ));
+        crate::cursor_cli_spawn::resume_cursor_cli_session(
+            &self.claude_cli_manager,
+            &self.config,
+            &req.session_id,
+            session_dir,
+            metadata,
+            agent_env,
+        )
+        .await
     }
 }

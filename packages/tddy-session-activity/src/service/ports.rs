@@ -146,4 +146,7 @@ pub struct ActivityPorts {
     /// Where a call's delta is served from. The session room's, because only the host that
     /// measured the checkout has one — see [`SessionDeltaStores`].
     pub deltas: Arc<dyn SessionDeltaStores>,
+    /// What this host is called in the common room. An agent notification links to its session
+    /// as `#/sessions/<id>?host=<this>`, the route the web opens a session on another host by.
+    pub daemon_instance_id: String,
 }

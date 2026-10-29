@@ -15,6 +15,7 @@ use tddy_service::proto::activity::{
     AgentActivityRecord as ProtoAgentActivityRecord, DeltaScope as ProtoDeltaScope,
     GetAcpReplayPageRequest, GetAcpReplayPageResponse, GetAcpToolCallDetailRequest,
     GetAcpToolCallDetailResponse, ReportAgentActivityRequest, ReportAgentActivityResponse,
+    ReportOperatorNotificationRequest, ReportOperatorNotificationResponse,
     ReportSessionStatusRequest, ReportSessionStatusResponse, SessionNotificationEvent,
     StreamAcpReplayRequest, StreamMode, StreamSessionActivityRequest,
     StreamSessionNotificationsRequest,
@@ -39,6 +40,16 @@ impl tddy_service::proto::activity::ActivityService for ActivityServiceImpl {
         request: Request<ReportAgentActivityRequest>,
     ) -> Result<Response<ReportAgentActivityResponse>, Status> {
         self.report_agent_activity_impl(request.into_inner()).await
+    }
+
+    /// An agent notifying its operator in its own words (`tddy-tools notify`) — see
+    /// `operator_notifications`.
+    async fn report_operator_notification(
+        &self,
+        request: Request<ReportOperatorNotificationRequest>,
+    ) -> Result<Response<ReportOperatorNotificationResponse>, Status> {
+        self.report_operator_notification_impl(request.into_inner())
+            .await
     }
 
     type StreamSessionActivityStream = MpscResultStream<ProtoAgentActivityRecord>;

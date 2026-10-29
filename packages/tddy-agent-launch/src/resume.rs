@@ -27,8 +27,8 @@ pub async fn resume_cursor_cli_session(
     session_id: &str,
     session_dir: &Path,
     meta: SessionMetadata,
-    // The project's account identity pairs the resumed agent's commits carry (empty keeps the
-    // checkout's own).
+    // What the resumed agent's environment is given: the project's account identity pairs its
+    // commits carry (none keeps the checkout's own) and its notify environment.
     git_environment: Vec<(String, String)>,
 ) -> Result<Response<ResumeSessionResponse>, Status> {
     let model = meta.model.clone().unwrap_or_default();

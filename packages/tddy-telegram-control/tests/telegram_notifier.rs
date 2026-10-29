@@ -43,6 +43,16 @@ impl TelegramSender for MockTelegramSender {
         self.calls.lock().unwrap().push((chat_id, text.to_string()));
         Ok(())
     }
+
+    async fn send_html_message(
+        &self,
+        chat_id: i64,
+        html: &str,
+        _silent: bool,
+    ) -> anyhow::Result<()> {
+        self.calls.lock().unwrap().push((chat_id, html.to_string()));
+        Ok(())
+    }
 }
 
 fn write_config(yaml: &str) -> DaemonConfig {

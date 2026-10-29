@@ -110,9 +110,10 @@ the Telegram channel reports on stays in extensions.
 
 ### `session_notification` — the types the port names
 
-`SessionNotification`, `SessionNotificationKind` (`Activity`, `AttentionRequired`) and
-`SessionNotificationSource` (`ActivityStatus`, `AgentToolCall`, `Presenter`) are defined here so the
-port can name them. The bus, its subscriber trait and its subscribers live in `tddy-session-activity`,
+`SessionNotification`, `SessionNotificationKind` (`Activity`, `AttentionRequired`),
+`SessionNotificationSource` (`ActivityStatus`, `AgentToolCall`, `Presenter`, `Agent`) and an agent
+notification's content (`AgentNotification`, `NotificationLevel`) are defined here so the port can
+name them. The bus, its subscriber trait and its subscribers live in `tddy-session-activity`,
 whose `session_notifications` module re-exports these three under its own path —
 [session-notifications.md](../../tddy-session-activity/docs/session-notifications.md).
 
@@ -336,6 +337,21 @@ system package and never shipped beside tddy, so an unset path is `x11vnc` on `P
 `x11_socket_dir` means `/tmp/.X11-unix`, which `tddy-host-service`'s `x11_displays` applies. None of
 these resolvers checks that the file exists; the tooling probe does that
 (`binary_is_present`). `tests/x11vnc_binary_resolution.rs` holds the x11vnc resolver.
+
+## `notification_markdown` and `agent_notification_limits` — an agent notification's body
+
+Kernel-owned because more than one surface renders the same agent-written body:
+
+- `notification_markdown::to_telegram_html(md)` — `pulldown-cmark` events to Telegram's HTML subset:
+  `b`, `i`, `code`, `pre`, `a` (headings bold, list items as `•` lines); every other construct,
+  raw HTML included, is escaped text. `to_plain_text(md, max_chars)` flattens the markup and cuts at
+  a character boundary with `…`; `escape_html(text)` escapes `& < > "` for the words that are not
+  markdown (a title, a label).
+- `agent_notification_limits::validate_agent_notification(title, body)` — title 1–`MAX_TITLE_CHARS`
+  (200) characters after trimming, body at most `MAX_BODY_CHARS` (2,000); the `Err` names the part
+  that is too long, worded for the agent that sent it.
+
+Tests: `tests/notification_markdown_unit.rs`, `tests/agent_notification_limits_unit.rs`.
 
 ## `agent_list_mapping` and `daemon_hook_urls` — two daemon-wide helpers with no session state
 

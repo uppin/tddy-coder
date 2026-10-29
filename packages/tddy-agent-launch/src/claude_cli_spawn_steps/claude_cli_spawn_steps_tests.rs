@@ -434,3 +434,182 @@ fn an_ordinary_session_writes_nothing_before_the_spawn() {
     // Then no record exists yet: the spawn writes the first one, as it always did
     assert!(tddy_core::read_session_metadata(dir.path()).is_err());
 }
+
+// ---------------------------------------------------------------------------
+// `tddy-tools notify`: the environment and the guidance a claude-cli agent is launched with
+// (`#home-inbox` 1/8)
+// ---------------------------------------------------------------------------
+
+use std::collections::BTreeMap;
+use tddy_service::session_activity::notify_env;
+
+const A_NOTIFYING_SESSION: &str = "01a19c2e-55d0-7a41-9b3e-4f1d2c3b4a59";
+const ITS_OS_USER: &str = "ada";
+const ITS_HOOK_TOKEN: &str = "the-token-its-hooks-present";
+
+/// The notify wiring a launch produced, read the way the agent's process reads it.
+struct TheNotifyWiring(AgentNotifyWiring);
+
+impl TheNotifyWiring {
+    /// The environment as a map: what the agent can look up, in no particular order.
+    fn environment(&self) -> BTreeMap<&str, &str> {
+        self.0
+            .env
+            .iter()
+            .map(|(k, v)| (k.as_str(), v.as_str()))
+            .collect()
+    }
+
+    /// The text of the file `claude` appends to its system prompt.
+    fn appended_system_prompt(&self) -> String {
+        let file = self
+            .0
+            .append_system_prompt_file
+            .as_ref()
+            .expect("the launch appends a system-prompt file");
+        std::fs::read_to_string(file).expect("the system-prompt file exists")
+    }
+}
+
+/// The notify environment a session on a host that serves HTTP RPC at `daemon_url` is given.
+fn the_environment_reaching_the_url(daemon_url: &str) -> BTreeMap<&'static str, String> {
+    BTreeMap::from([
+        (notify_env::SESSION_ID, A_NOTIFYING_SESSION.to_string()),
+        (notify_env::OS_USER, ITS_OS_USER.to_string()),
+        (notify_env::HOOK_TOKEN, ITS_HOOK_TOKEN.to_string()),
+        (notify_env::DAEMON_URL, daemon_url.to_string()),
+    ])
+}
+
+fn as_borrowed<'a>(expected: &'a BTreeMap<&'static str, String>) -> BTreeMap<&'a str, &'a str> {
+    expected.iter().map(|(k, v)| (*k, v.as_str())).collect()
+}
+
+/// A plain claude-cli start's notify wiring on `config` / `data_dir`, with no managed recipe.
+fn a_started_sessions_notify_wiring(
+    config: &DaemonConfig,
+    data_dir: &Path,
+    session_dir: &Path,
+) -> TheNotifyWiring {
+    TheNotifyWiring(
+        agent_notify_launch(AgentNotifyLaunch {
+            config,
+            tddy_data_dir: data_dir,
+            os_user: ITS_OS_USER,
+            session_id: A_NOTIFYING_SESSION,
+            hook_token: ITS_HOOK_TOKEN,
+            session_dir,
+            managed_prompt_file: None,
+        })
+        .expect("a start's notify wiring is built"),
+    )
+}
+
+#[test]
+fn a_claude_cli_session_is_launched_with_the_notify_environment_and_the_guidance_fragment() {
+    // Given a binary daemon, which serves HTTP RPC
+    let host = ARegularHost::without_an_agent_tool_socket();
+    let session_dir = tempfile::tempdir().expect("a temporary session dir");
+
+    // When a claude-cli session is started there
+    let wiring =
+        a_started_sessions_notify_wiring(&host.config, host.data_dir(), session_dir.path());
+
+    // Then its agent's environment names its session, its owner, its hook token and the daemon's
+    // URL — exactly what `tddy-tools notify` reads
+    let expected =
+        the_environment_reaching_the_url(&daemon_hook_urls::claude_hook_daemon_url(&host.config));
+    assert_eq!(wiring.environment(), as_borrowed(&expected));
+    // And its system prompt is appended the paragraph telling it when to notify
+    assert!(
+        wiring
+            .appended_system_prompt()
+            .contains(crate::notify_env::AGENT_NOTIFY_GUIDANCE.trim()),
+        "the appended system prompt carries the notify guidance: {:?}",
+        wiring.appended_system_prompt()
+    );
+}
+
+#[test]
+fn a_resumed_claude_cli_session_carries_the_notify_environment_again() {
+    // Given a binary daemon, and a stopped claude-cli session whose record holds its hook token
+    let host = ARegularHost::without_an_agent_tool_socket();
+    let session_dir = tempfile::tempdir().expect("a temporary session dir");
+    let recorded = tddy_core::SessionMetadata {
+        hook_token: Some(ITS_HOOK_TOKEN.to_string()),
+        ..service_util::starting_session_metadata(A_NOTIFYING_SESSION, "p-1", "claude-cli")
+    };
+
+    // When it is resumed
+    let wiring = TheNotifyWiring(
+        resumed_agent_notify_launch(
+            &host.config,
+            host.data_dir(),
+            ITS_OS_USER,
+            session_dir.path(),
+            &recorded,
+            None,
+        )
+        .expect("a resume's notify wiring is built"),
+    );
+
+    // Then its new process is given the same notify environment its first one was
+    let expected =
+        the_environment_reaching_the_url(&daemon_hook_urls::claude_hook_daemon_url(&host.config));
+    assert_eq!(wiring.environment(), as_borrowed(&expected));
+}
+
+#[test]
+fn an_embedded_host_exports_the_daemon_socket_not_the_url() {
+    // Given a desktop daemon, which serves no HTTP RPC and has its agent-tool socket bound
+    let host = AnEmbeddedHost::with_its_agent_tool_socket_bound();
+    let session_dir = tempfile::tempdir().expect("a temporary session dir");
+
+    // When a claude-cli session is started there
+    let wiring =
+        a_started_sessions_notify_wiring(&host.config, host.data_dir(), session_dir.path());
+
+    // Then its agent reaches the daemon over that socket, and is told of no URL that answers nothing
+    let socket = host.agent_tool_socket();
+    assert_eq!(
+        wiring.environment(),
+        BTreeMap::from([
+            (notify_env::SESSION_ID, A_NOTIFYING_SESSION),
+            (notify_env::OS_USER, ITS_OS_USER),
+            (notify_env::HOOK_TOKEN, ITS_HOOK_TOKEN),
+            (notify_env::DAEMON_SOCKET, socket.as_str()),
+        ])
+    );
+}
+
+#[test]
+fn a_managed_sessions_recipe_prompt_follows_the_notify_guidance_in_the_one_appended_file() {
+    // Given a binary daemon, and a managed recipe whose orchestration prompt is already written
+    let host = ARegularHost::without_an_agent_tool_socket();
+    let session_dir = tempfile::tempdir().expect("a temporary session dir");
+    let recipe_prompt = session_dir.path().join("recipe-prompt.md");
+    std::fs::write(&recipe_prompt, "You are driving the tdd recipe.").expect("the recipe prompt");
+
+    // When the session is started — `claude` takes a single `--append-system-prompt-file`
+    let wiring = TheNotifyWiring(
+        agent_notify_launch(AgentNotifyLaunch {
+            config: &host.config,
+            tddy_data_dir: host.data_dir(),
+            os_user: ITS_OS_USER,
+            session_id: A_NOTIFYING_SESSION,
+            hook_token: ITS_HOOK_TOKEN,
+            session_dir: session_dir.path(),
+            managed_prompt_file: Some(&recipe_prompt),
+        })
+        .expect("a start's notify wiring is built"),
+    );
+
+    // Then the one file it appends carries the guidance, then the recipe's prompt, both whole
+    assert_eq!(
+        wiring.appended_system_prompt(),
+        format!(
+            "{}\n\nYou are driving the tdd recipe.",
+            crate::notify_env::AGENT_NOTIFY_GUIDANCE.trim_end()
+        )
+    );
+}

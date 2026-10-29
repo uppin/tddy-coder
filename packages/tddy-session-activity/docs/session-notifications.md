@@ -28,12 +28,20 @@ pub struct SessionNotification {
     pub session_id: String,
     pub label: String,       // the drawer label; see "Naming" below
     pub kind: SessionNotificationKind,     // Activity | AttentionRequired
-    pub source: SessionNotificationSource, // ActivityStatus | AgentToolCall | Presenter
+    pub source: SessionNotificationSource, // ActivityStatus | AgentToolCall | Presenter | Agent
     pub text: String,        // operator-facing line, rendered once at publish
+    pub agent: Option<AgentNotification>, // what the agent wrote; Some only for source Agent
     pub at_unix_ms: u64,
     pub os_user: String,     // owner; server-side only, never on the wire
 }
 ```
+
+`agent` carries an agent-written notification's structure — `title`, `body_markdown`, `level`
+(`NotificationLevel`: `Info` | `Success` | `Warning` | `Error`), `sound` and the session's web
+`link` (`#/sessions/<id>?host=<ActivityPorts::daemon_instance_id>`) — beside a `text` that is the title
+alone, because each surface renders the body differently and none can recover structure from a
+flattened line. `streams::session_notification_event` maps it onto `SessionNotificationEvent`'s
+`title`, `body_markdown`, `level`, `sound` and `link` (empty for every other source).
 
 `text` is rendered at publish rather than by each subscriber, so a chat message and the drawer's
 tooltip read the same sentence. `os_user` is what scopes the stream — see **Authorization**.
@@ -107,8 +115,9 @@ indicators for turns that finished while the tab was closed.
 | `tddy_session_activity::service::ActivityServiceImpl::report_session_status` | `ActivityStatus` |
 | `tddy_session_activity::service::ActivityServiceImpl::report_agent_activity` | `AgentToolCall` |
 | `tddy_session_activity::presenter_observer_task` (`deliver_presenter_event`) | `Presenter` |
+| `tddy_session_activity::service::ActivityServiceImpl::report_operator_notification` | `Agent` |
 
-The first two are `activity.ActivityService` methods. Before `#unbundle` node 7 they were
+The first two and the last are `activity.ActivityService` methods. Before `#unbundle` node 7 they were
 `connection.ConnectionService`'s, and the hook clients that call them were re-pointed in the same
 PR.
 

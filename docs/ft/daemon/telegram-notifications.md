@@ -123,9 +123,10 @@ nothing else changes for it: the drawer indicator still lights on every daemon, 
 "this presenter mode waits on a human" is the core's, not Telegram's.
 
 From the bus, the channel takes only `AttentionRequired` notifications from the activity-status path
-(declining `Activity`, so no new Telegram traffic, and declining presenter-sourced events, which reach
-the channel directly with their keyboard-bearing surface below — so nothing is sent twice). It holds a
-per-session record of the last line delivered so an unchanged status reaches a chat once, and
+and from agents (declining `Activity`, so no new Telegram traffic, and declining presenter-sourced
+events, which reach the channel directly with their keyboard-bearing surface below — so nothing is
+sent twice). It holds a per-session record of the last status line delivered so an unchanged status
+reaches a chat once — an agent-written notification is never de-duplicated — and
 resolves recipients tracked-first: `chats_tracking_session(session_id)` on the
 shared tracked coordinator when it reports chats, otherwise the enabled `telegram.chat_ids`
 broadcast list. When that lookup cannot be read at all it sends **nothing** rather than falling back
@@ -134,6 +135,35 @@ to the broadcast, so an unreadable tracking map cannot turn a targeted alert int
 The bus and its other subscriber — the `StreamSessionNotifications` feed that drives the web's
 per-session indicators — are described in
 **[session-notifications-as-indicators](session-notifications.md)**.
+
+## Agent-written notifications
+
+An agent that runs `tddy-tools notify` (see
+[session-notifications § Agent-written notifications](session-notifications.md#agent-written-notifications))
+reaches the same recipients as an activity alert — tracked chats first, else `telegram.chat_ids` —
+in **HTML parse mode**, laid out as:
+
+```
+<b>title</b>
+<i>session label</i>
+
+body, rendered from markdown
+
+#/sessions/<id>?host=<daemon instance>
+```
+
+- **Markdown rendering.** Bold, italic, inline code, code blocks and links render (`b`, `i`, `code`,
+  `pre`, `a`); headings render bold; lists flatten to `•` lines; every other construct — raw HTML in
+  the body included — is escaped text, because the Bot API rejects a whole message over one unknown
+  tag or one unescaped `<`. The title and the label are escaped as text. An empty body leaves no
+  empty section.
+- **Chunking.** A message over Telegram's 4,096-byte limit is split into several, breaking at
+  whitespace and never inside a tag, an entity or a character. Each message is well-formed on its
+  own: one that ends inside a tag closes it, and the next reopens it.
+- **Sound.** Without `--sound` every message is sent with `disable_notification`, silently.
+- **Delivery.** Each chat gets every message in order; a chat that refuses one is sent none of the
+  rest of that notification (the tail of a body without its head is worse than none) while the other
+  chats still get theirs. Two identical agent notifications are both delivered.
 
 ## Presenter stream: elicitation (`ModeChanged`)
 

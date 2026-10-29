@@ -29,6 +29,7 @@ pub mod jail_session_files;
 pub mod jail_worktree;
 pub mod launch_ports;
 pub mod managed_launch;
+pub mod notify_env;
 mod opencode_cli_spawn;
 pub mod placement;
 pub mod project_home_idle;
@@ -87,6 +88,8 @@ mod harness_profile_request_tests;
 mod harness_profile_start_tests;
 #[cfg(test)]
 mod host_session_socket_tests;
+#[cfg(test)]
+mod notify_env_unit_tests;
 #[cfg(test)]
 mod provider_account_lookup_tests;
 #[cfg(test)]

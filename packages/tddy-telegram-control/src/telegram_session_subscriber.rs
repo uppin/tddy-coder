@@ -25,6 +25,7 @@ use tddy_daemon_kernel::session_notification::{
 use tddy_service::gen::ServerMessage;
 use tddy_session_activity::session_notifications::LastDeliveredPerSession;
 
+use crate::agent_notification_telegram::AgentNotificationTelegram;
 use crate::telegram_notifier::{TelegramSender, TelegramSessionWatcher};
 use tddy_session_lifecycle::config::DaemonConfig;
 
@@ -168,13 +169,20 @@ impl OperatorChannel for TelegramDaemonHooks {
     fn wants_notification(&self, notification: &SessionNotification) -> bool {
         self.enabled()
             && notification.kind == SessionNotificationKind::AttentionRequired
-            && notification.source == SessionNotificationSource::ActivityStatus
+            && matches!(
+                notification.source,
+                SessionNotificationSource::ActivityStatus | SessionNotificationSource::Agent
+            )
     }
 
     async fn on_notification(&self, notification: &SessionNotification) -> anyhow::Result<()> {
-        if !self
-            .last_alerted
-            .record_and_is_new(&notification.session_id, &notification.text)
+        // An agent's notification is an event of its own, so two identical ones are both delivered;
+        // only a re-published status is de-duplicated.
+        let from_agent = AgentNotificationTelegram::render(notification);
+        if from_agent.is_none()
+            && !self
+                .last_alerted
+                .record_and_is_new(&notification.session_id, &notification.text)
         {
             log::debug!(
                 target: "tddy_daemon::telegram",
@@ -186,6 +194,9 @@ impl OperatorChannel for TelegramDaemonHooks {
         let Some(chat_ids) = self.recipients_of(&notification.session_id).await else {
             return Ok(());
         };
-        self.send_to_every_chat(chat_ids, notification).await
+        match from_agent {
+            Some(telegram) => telegram.send_to(self.sender.as_ref(), &chat_ids).await,
+            None => self.send_to_every_chat(chat_ids, notification).await,
+        }
     }
 }

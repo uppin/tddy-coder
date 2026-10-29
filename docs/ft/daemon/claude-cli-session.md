@@ -370,6 +370,44 @@ The hook has no web session token. A per-session random `hook_token` (UUID) is g
 
 Web-side rendering of `activity_status` (badge in the session list) is a follow-up; this changeset surfaces the field in the `ListSessions` response but does not yet display it in the UI.
 
+## Notifying the operator
+
+A daemon-launched claude-cli agent can notify its operator in its own words with
+`tddy-tools notify` (see
+[Session notifications § Agent-written notifications](session-notifications.md#agent-written-notifications)).
+The launch gives it two things, at start and again at resume:
+
+- **The environment** the command reads (`tddy_agent_launch::notify_env::notify_env_pairs`; the names
+  live in `tddy_service::session_activity::notify_env`):
+
+  | Variable | Value |
+  |---|---|
+  | `TDDY_SESSION_ID` | the session id |
+  | `TDDY_OS_USER` | the OS user that owns the session |
+  | `TDDY_HOOK_TOKEN` | the session's `hook_token` — the same credential its hooks present |
+  | `TDDY_DAEMON_SOCKET` | the embedded daemon's agent-tool socket, when one is listening (the same rule as the hooks' `--daemon-socket`) |
+  | `TDDY_DAEMON_URL` | otherwise, the hooks' daemon URL |
+
+  Exactly one of the last two is exported: an embedded daemon serves no HTTP RPC, so a URL there would
+  reach nothing.
+- **One guidance paragraph** in its system prompt (`agent_notify_guidance.md`): the command exists,
+  use it when long work finishes or something blocks while the operator is likely away, never for
+  routine progress. `claude` takes a single `--append-system-prompt-file`, so the daemon writes
+  `<session dir>/agent-system-prompt.md` holding the guidance followed by a managed recipe's
+  orchestration prompt, when the session has one.
+
+A resume rebuilds both from the `hook_token` recorded in `.session.yaml`; a session that recorded
+none is given nothing. Not wired:
+
+- **A session with a standing role** (`session_role`, e.g. the project-home main). It has no shell to
+  run the command, so neither the environment nor the guidance is given. An MCP tool for those
+  sessions is a follow-up
+  ([`docs/dev/todo/2026-10-26-shell-less-sessions-cannot-notify-their-operator.md`](../../dev/todo/2026-10-26-shell-less-sessions-cannot-notify-their-operator.md)).
+- **A sandboxed session.** It has no hooks and no hook token.
+
+A cursor-cli session is given the same environment at start and resume (its socket and URL are its
+hooks'), but no guidance paragraph: its CLI has no system-prompt flag this relies on.
+
 ## Proto delta
 
 `connection.proto`:

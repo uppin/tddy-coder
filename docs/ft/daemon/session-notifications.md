@@ -1,7 +1,7 @@
 # Session notifications — one bus, several surfaces
 
 **Status:** Shipped
-**Updated:** 2026-10-22
+**Updated:** 2026-10-26
 
 ## Overview
 
@@ -33,10 +33,46 @@ list, chain-parent buttons — still use the short-id label. Unifying those is a
 |---|---|---|---|
 | `ATTENTION_REQUIRED` | `WaitingForInput`, `Done` | ✓ (unchanged copy) | yellow |
 | `ATTENTION_REQUIRED` | a presenter elicitation | ✓ *(via its own keyboard surface)* | yellow |
+| `ATTENTION_REQUIRED` | the agent itself, with `tddy-tools notify` (source `AGENT`) | ✓ *(rendered markdown, see below)* | yellow |
 | `ACTIVITY` | `Started` / `Running` / `ExecutingTool`, an agent tool call, a workflow state change | — | blinking green |
 
 **Telegram traffic did not grow.** `ACTIVITY` exists for indicators; sending it to a chat would turn
 every tool call into a message.
+
+## Agent-written notifications
+
+Every other notification is a fixed sentence the daemon writes. An agent in a daemon-launched
+claude-cli or cursor-cli session can instead tell its operator, in its own words, what finished or
+what is blocked:
+
+```bash
+tddy-tools notify "Parallel run finished" --body "4 done, **1 blocked**" --level success --sound
+```
+
+- **Arguments.** A one-line title; an optional markdown `--body` (`--body -` reads it from stdin); a
+  `--level` of `info` (default), `success`, `warning` or `error`; `--sound` to alert audibly.
+- **Limits are refusals, never truncation.** The title must be 1–200 characters after trimming and
+  the body at most 2,000. A message over a limit is refused with a reason naming the part that was
+  too long, so the agent learns it and can say it again, shorter.
+- **Not fail-quiet.** Unlike the hooks, the command prints `Notification sent` on success and exits
+  non-zero with the reason when the environment is missing, the daemon cannot be reached, or the
+  daemon refuses.
+- **Credentials come from the agent's environment.** The launch exports `TDDY_SESSION_ID`,
+  `TDDY_OS_USER`, `TDDY_HOOK_TOKEN` and exactly one of `TDDY_DAEMON_SOCKET` (an embedded daemon's
+  agent-tool socket) or `TDDY_DAEMON_URL`, at start and again at resume. These are the credentials the
+  session's hooks already hold, so exporting them grants nothing new — see
+  [Claude Code CLI session § Notifying the operator](claude-cli-session.md#notifying-the-operator).
+- **Authenticated like a hook.** `ActivityService.ReportOperatorNotification` refuses a session that
+  is not claude-cli or cursor-cli (`FAILED_PRECONDITION`), then a session that recorded no hook token
+  or a token that does not match it (`PERMISSION_DENIED`).
+- **What is published.** One `ATTENTION_REQUIRED` notification with source `AGENT`. Its `text` is the
+  title, so a surface that knows nothing of agent notifications still shows one line; beside it the
+  notification carries the title, the markdown body, the level, the sound flag and the session's web
+  route `#/sessions/<id>?host=<daemon instance>`.
+- **Never de-duplicated.** Two identical agent notifications are two events, and both are delivered.
+
+Who cannot notify: a session with a standing role (the project-home main has no shell, so it is not
+given the environment) and a sandboxed claude-cli session (it has no hooks and no hook token).
 
 ## The drawer indicator
 
@@ -78,8 +114,9 @@ refused, and a notification whose owner cannot be established is delivered to no
 
 - A notification that cannot be delivered is logged, never propagated: reporting a hook still
   succeeds when a subscriber errors, and one subscriber's failure does not starve the others.
-- Bot tokens and session tokens never appear in a notification's text or in a log line.
-- A status re-reported without changing sends no second Telegram message, and a presenter
+- Bot tokens, session tokens and hook tokens never appear in a notification's text or in a log line.
+- A status re-reported without changing sends no second Telegram message (an agent-written
+  notification is always sent), and a presenter
   elicitation reaches Telegram once — through its keyboard surface, never also as a bus alert.
 - The drawer indicator does not depend on Telegram: which presenter modes wait on the operator is
   the daemon's own rule, so a daemon with no `telegram:` block lights a workflow session's dot for

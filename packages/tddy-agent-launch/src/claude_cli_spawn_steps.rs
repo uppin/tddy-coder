@@ -183,6 +183,11 @@ pub(super) fn install_claude_cli_hooks(
     (tddy_tools_path, hook_token)
 }
 
+/// The notify wiring a claude-cli start and resume apply — see [`crate::notify_env`].
+pub use crate::notify_env::{
+    agent_notify_launch, resumed_agent_notify_launch, AgentNotifyLaunch, AgentNotifyWiring,
+};
+
 /// What wiring a claude-cli session's managed workflow and semantic index reads.
 pub(super) struct ManagedClaudeCliLaunch<'a> {
     pub(super) tddy_data_dir: &'a Path,
