@@ -936,6 +936,9 @@ pub mod dynamic_proxy {
 /// without being any.
 pub mod exec_tool_entry;
 pub mod exec_tool_service;
+mod project_home_catalogue;
+mod project_home_listing;
+mod project_home_target_host;
 pub mod tool_call_log;
 pub use exec_tool_entry::{build_exec_tool_entry, EXEC_TOOL_SERVICE, IN_JAIL_RELAYABLE_EXEC_TOOLS};
 pub use exec_tool_service::{ExecToolHandler, ExecToolServiceImpl};

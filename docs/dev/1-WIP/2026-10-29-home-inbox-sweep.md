@@ -1,7 +1,7 @@
 # Changeset: #home-inbox sweep
 
 **Created:** 2026-10-29
-**Status:** 🚧 Contract and failing tests (pass 2)
+**Status:** 🚧 Green: features, race fix and both splits done; validate and wrap pending
 **Type:** Sweep (feature + refactor + fix)
 **Complexity**: 5. It covers three independent features, two file splits, and a dependency upgrade (Tauri 2.12 plus the notification plugin) across about eight packages.
 **Stack:** `#home-inbox 11/11` (sweep), branch `feature/home-inbox/sweep`, base `feature/home-inbox/cross-host-wait`
@@ -97,6 +97,46 @@ nothing panics. The splits and the wiring land in green.
   `agent_notification_limits`. The crate was already in tool-engine's normal tree through
   `tddy-task`, so the declaration adds no crate.
 
+## Green decisions (AFK, 2026-10-29)
+
+- **Spawner scope check** (`exec_tool/project_home/caller.rs`) re-reads the caller's role from its
+  record; only a `ConversationSpawner` is checked. The target is the call's `session_id`; its
+  changeset (same host only) must name the caller as `orchestrator_session_id`. A missing, invalid or
+  remote target is refused as permission denied, naming the spawner and "started".
+- **`NotifyOperator` credential.** `DaemonProjectHome` holds the host's `PeerRoutedActivity`
+  (`ProjectHomeHost.activity`, from `DaemonSessionHost::activity_service()`) and calls
+  `ReportOperatorNotification` in process with the session's `.session.yaml` `hook_token`. The
+  session type (`claude-cli` / `cursor-cli`) and a non-empty token are checked first, so the
+  activity service's raw `session_type` error is never surfaced.
+- **Level parsing** is case-sensitive over the four names; an omitted or empty level is `info`.
+- **Desktop tap.** `register_tap_handler` (in `tauri_host`) is called from `start_daemon` before the
+  subscriber is built; the plugin's `extra` map is read as strings, and a tap whose notification the
+  platform did not report opens nothing. A failed open is logged, not returned.
+- **Race fix** is `clear_answered_pending_question`; `answer_permission` and `answer_question` both
+  call it and n8's inline copy is gone.
+
+### Splits (pure moves)
+
+| File | Production lines before | After |
+|---|---|---|
+| `tddy-daemon-rpc/src/exec_tool/project_home.rs` | 992 | 347 (+ `caller` 119, `listing` 54, `port` 280, `terminal` 102, `notify` 50, `answer` 91) |
+| `tddy-tool-engine/src/project_home_tools.rs` | 771 | 484 (+ `project_home_catalogue` 239, `project_home_listing` 30, `project_home_target_host` 61) |
+
+- **All moves were done by the restructure engine** (`move_item`, `restructure verify --against HEAD`
+  reports every statement accounted for); **no hand move of code**. Two hand edits after the engine:
+  an unused `TerminalControl` import in `terminal.rs`, and `cargo fix`'s removal of 37 unused imports
+  in `port.rs` (the engine's tidy did not run on it, because a three-operation plan stopped at its
+  third operation with "anchor invalidated: position … fell inside text removed by an earlier
+  operation"; that operation, `session_rows`, was re-run as its own plan).
+- `exec_tool/project_home.rs` went further than the record's seams: the whole
+  `impl ProjectHomePort for DaemonProjectHome` moved to `port.rs` (a trait impl cannot be split), as
+  the file stayed at 664 lines without it. Seam B's `rows` (an inherent-impl member) stays in
+  `project_home.rs`; `SessionRow` and `session_rows` moved to `listing.rs`.
+- `project_home_tools.rs`: seam B (catalogue) also took the offered-catalogue and role functions
+  (`is_project_home_tool`, `SessionToolRole`, …), and every moved public item is re-exported by
+  name, so no public path changed.
+- Both code-issue records are deleted: every file is under 500 production lines.
+
 ## Testing Strategy
 
 - **Acceptance:**
@@ -139,7 +179,7 @@ nothing panics. The splits and the wiring land in green.
 - [x] Run the acceptance tests and check that they fail
 - [x] USER REVIEW of the acceptance tests (orchestrator, 2026-10-29)
 - [x] TDD Red: write the failing unit and integration tests
-- [ ] TDD Green, including the splits, the race fix and `tddy-desktop`'s full suite
+- [x] TDD Green, including the splits, the race fix and `tddy-desktop`'s full suite
 - [ ] `/validate-changes`, `/pr-wrap`
 - [ ] Manual: macOS notification click
 

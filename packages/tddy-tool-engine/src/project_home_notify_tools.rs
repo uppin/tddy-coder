@@ -92,9 +92,11 @@ impl NotifyOperatorArgs {
             Some("success") => NotificationLevel::Success,
             Some("warning") => NotificationLevel::Warning,
             Some("error") => NotificationLevel::Error,
-            Some(other) => return Err(format!(
+            Some(other) => {
+                return Err(format!(
                 "{NOTIFY_OPERATOR}: unknown level {other:?}; use info, success, warning or error"
-            )),
+            ))
+            }
         };
         Ok(OperatorNotice {
             title: self.title,
