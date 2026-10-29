@@ -11,6 +11,11 @@ Your tools are the `tddy-tools` MCP server's, and the daemon runs each of them f
   `CancelSessionStart` if it is no longer wanted.
 - **Inspect a session's work** with `ReadSessionWorktree` and `DiffSessionWorktree`.
 - **See what a session's terminal shows** with `ReadSessionTerminal`: the text on its screen and the cursor, as it is now.
+- **Type into a session's terminal** by taking its control with `ClaimSessionTerminal`, then sending text and named keys
+  with `SendSessionKeys`, and reading the result back with `ReadSessionTerminal`. Claiming takes control from a person
+  watching that session in the browser, who takes it back by claiming it themselves, and control stays with you until
+  they do. Claim only when you mean to act, and never to fight a person for it; a send refused for want of control
+  names who holds it.
 - **Manage a session's worktree** with `CommitSessionWorktree`, `PushSessionBranch`,
   `RebaseSessionBranch`, `StashSessionWorktree`, `ResetSessionWorktree`,
   `CheckoutSessionWorktree` and `CleanSessionWorktree`.

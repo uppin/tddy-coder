@@ -17,6 +17,8 @@
 //! | `TerminateSession` | sends a target session's process SIGTERM, as the UI's Terminate does; the record, worktree and branch stay ([`crate::project_home_terminate`]) |
 //! | `RefreshWorktreeDiskUsage` | queues the Worktrees screen's size walk for one worktree or every one, and answers at once; the progress is read with `ListWorktrees` ([`crate::project_home_disk_refresh`]) |
 //! | `ReadSessionTerminal` | what a target session's main terminal shows right now, as text, with its cursor ([`crate::project_home_terminal_tools`]) |
+//! | `ClaimSessionTerminal` | takes a target session's terminal control lease for this home session ([`crate::project_home_terminal_tools`]) |
+//! | `SendSessionKeys` | types text and named keys into a target session's terminal while this home session holds the lease ([`crate::terminal_keys`]) |
 //!
 //! Targets resolve through `tddy_worktree_service::session_target`. Listing and starting need the
 //! daemon's session store and start path, which reach this crate through [`ProjectHomePort`].
@@ -50,7 +52,10 @@ use crate::project_home_disk_refresh::{
 use crate::project_home_git_tools::{
     execute_project_home_git_tool, is_project_home_git_tool, project_home_git_tool_defs,
 };
-use crate::project_home_terminal_tools::{project_home_terminal_tool_defs, READ_SESSION_TERMINAL};
+use crate::project_home_terminal_tools::{
+    project_home_terminal_tool_defs, CLAIM_SESSION_TERMINAL, READ_SESSION_TERMINAL,
+    SEND_SESSION_KEYS,
+};
 use crate::project_home_terminate::{
     terminate_session, terminate_session_tool_def, TERMINATE_SESSION,
 };
@@ -97,6 +102,8 @@ pub fn is_project_home_tool(name: &str) -> bool {
             | TERMINATE_SESSION
             | REFRESH_WORKTREE_DISK_USAGE
             | READ_SESSION_TERMINAL
+            | CLAIM_SESSION_TERMINAL
+            | SEND_SESSION_KEYS
     )
 }
 
@@ -218,8 +225,9 @@ pub fn target_daemon_instance_id(args_json: &str) -> Option<String> {
 }
 
 /// Whether `name` is a project-home tool that acts on a host, and so takes
-/// [`TARGET_DAEMON_INSTANCE_ID`]: read, diff, the two worktree tools, the seven git tools, and
-/// `DescribeSessionStartOptions`, which describes the host it names (`#start-parity` 5/9).
+/// [`TARGET_DAEMON_INSTANCE_ID`]: read, diff, the two worktree tools, the seven git tools, the
+/// terminal tools (`#home-inbox` 2/8, 5/8), and `DescribeSessionStartOptions`, which describes the
+/// host it names (`#start-parity` 5/9).
 pub fn is_project_home_target_tool(name: &str) -> bool {
     matches!(
         name,
@@ -233,6 +241,8 @@ pub fn is_project_home_target_tool(name: &str) -> bool {
             | TERMINATE_SESSION
             | REFRESH_WORKTREE_DISK_USAGE
             | READ_SESSION_TERMINAL
+            | CLAIM_SESSION_TERMINAL
+            | SEND_SESSION_KEYS
     ) || is_project_home_git_tool(name)
 }
 
@@ -453,11 +463,11 @@ pub async fn execute_project_home_tool(
         }
         TERMINATE_SESSION => terminate_session(port, home, args).await,
         REFRESH_WORKTREE_DISK_USAGE => refresh_worktree_disk_usage(port, home, args).await,
-        // Needs the terminal port as well, so the daemon answers it through
+        // Need the terminal port as well, so the daemon answers them through
         // `execute_project_home_terminal_tool`; reaching here is a wiring mistake, named as one.
-        READ_SESSION_TERMINAL => ToolOutcome::err(format!(
-            "{READ_SESSION_TERMINAL} is answered by execute_project_home_terminal_tool, not by execute_project_home_tool"
-        )),
+        READ_SESSION_TERMINAL | CLAIM_SESSION_TERMINAL | SEND_SESSION_KEYS => ToolOutcome::err(
+            format!("{tool_name} is answered by execute_project_home_terminal_tool, not by execute_project_home_tool"),
+        ),
         other => ToolOutcome::err(format!("unknown project-home tool: {other}")),
     }
 }

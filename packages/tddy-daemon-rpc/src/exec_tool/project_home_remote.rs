@@ -40,6 +40,9 @@ use super::ExecToolRpcHandler;
 
 const SESSION_SERVICE: &str = "session.SessionService";
 
+/// One peer's answer to `ListSessions`: the peer asked, and what it said.
+type PeerSessionsAnswer = (String, Result<Option<ListSessionsResponse>, Status>);
+
 impl ExecToolRpcHandler {
     /// Serve a project-home tool call whose calling session this daemon does not hold, once the
     /// daemon that owns it confirms it is a project-home session. `Ok(None)` when the call is not
@@ -62,7 +65,7 @@ impl ExecToolRpcHandler {
         if unified_session_dir_path(&sessions_base, &req.session_id).is_dir() {
             return Ok(None);
         }
-        let home = self.home_caller_confirmed_at_owner(req).await?;
+        let (home, owner) = self.home_caller_confirmed_at_owner(req).await?;
         if let Some(host) = target_daemon_instance_id(&req.args_json)
             .filter(|host| *host != local_instance_id_for_config(&self.config))
         {
@@ -72,22 +75,21 @@ impl ExecToolRpcHandler {
                 req.tool_name, req.session_id
             )));
         }
-        let port = self.project_home_port(req, os_user, &sessions_base, None)?;
+        let port = self.project_home_port(req, os_user, &sessions_base, None, owner)?;
         Ok(Some(port.execute(&home, req).await))
     }
 
-    /// The calling session as the daemon that owns it reports it, when that is a project-home
-    /// session; PERMISSION_DENIED otherwise. Every other eligible daemon is asked, and only a row
-    /// the owner reports for itself is believed.
-    async fn home_caller_confirmed_at_owner(
+    /// Ask every other eligible daemon, at once, for the sessions `req`'s caller may see: one task
+    /// per peer, each answering with the peer it asked.
+    fn ask_every_peer_for_sessions(
         &self,
         req: &ExecuteToolRequest,
-    ) -> Result<HomeCaller, Status> {
+    ) -> Vec<tokio::task::JoinHandle<PeerSessionsAnswer>> {
         let local_id = local_instance_id_for_config(&self.config);
         let ask = ListSessionsRequest {
             session_token: req.session_token.clone(),
         };
-        let asking: Vec<_> = other_hosts(&self.peer_routing, &local_id)
+        other_hosts(&self.peer_routing, &local_id)
             .map(|peer| {
                 let routing = self.peer_routing.clone();
                 let ask = ask.clone();
@@ -103,8 +105,17 @@ impl ExecToolRpcHandler {
                     (peer, answer)
                 })
             })
-            .collect();
-        for asked in asking {
+            .collect()
+    }
+
+    /// The calling session as the daemon that owns it reports it, when that is a project-home
+    /// session, with that daemon's instance id; PERMISSION_DENIED otherwise. Every other eligible
+    /// daemon is asked, and only a row the owner reports for itself is believed.
+    async fn home_caller_confirmed_at_owner(
+        &self,
+        req: &ExecuteToolRequest,
+    ) -> Result<(HomeCaller, String), Status> {
+        for asked in self.ask_every_peer_for_sessions(req) {
             let (peer, answer) = asked.await.map_err(|e| {
                 Status::internal(format!("asking a daemon for its sessions failed: {e}"))
             })?;
@@ -138,10 +149,11 @@ impl ExecToolRpcHandler {
                     req.tool_name, req.session_id
                 )));
             }
-            return Ok(HomeCaller {
+            let home = HomeCaller {
                 session_id: owned.session_id,
                 project_id: owned.project_id,
-            });
+            };
+            return Ok((home, peer));
         }
         Err(Status::permission_denied(format!(
             "tool {} is refused: no daemon confirms session {} as a project-home session",

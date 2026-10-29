@@ -1,5 +1,6 @@
 //! Family L — `exec_tools.ExecToolService`.
 
+pub mod home_terminal_leases;
 mod path_guard;
 mod ports;
 mod project_home;
@@ -24,6 +25,7 @@ use tddy_session_lifecycle::connection_service::{DaemonSessionHost, LocalExecToo
 use tddy_session_lifecycle::peer_routing::PeerRouting;
 use tddy_session_lifecycle::relay_idle::RpcActivity;
 use tddy_session_lifecycle::terminal_session_adapter::DaemonTerminalSessionStore;
+use tddy_terminal_rpc::TerminalControl;
 use tddy_worktree_service::worktrees::WorktreeSizeCalculator;
 
 use crate::families::ProviderAccountsPort;
@@ -70,6 +72,12 @@ pub(crate) struct ProjectHomeHost {
     /// The terminals `ReadSessionTerminal` reads a session's main terminal through: the store the
     /// terminal RPCs resolve through, sandbox first (`#home-inbox` 2/8).
     pub(crate) terminals: DaemonTerminalSessionStore,
+    /// The control lease of every terminal this host serves, the one `ClaimSessionTerminal` takes and
+    /// `SendSessionKeys` verifies (`#home-inbox` 5/8).
+    pub(crate) terminal_control: Arc<dyn TerminalControl>,
+    /// The control tokens this host's project-home sessions hold on its terminals, kept here so the
+    /// agent never sees one (`#home-inbox` 5/8).
+    pub(crate) leases: Arc<home_terminal_leases::HomeTerminalLeases>,
 }
 
 impl ExecToolRpcHandler {
@@ -102,6 +110,8 @@ impl ExecToolRpcHandler {
                 )),
                 provider_accounts: Arc::new(OnceLock::new()),
                 terminals: host.terminal_sessions(),
+                terminal_control: host.terminal_control(),
+                leases: Arc::new(home_terminal_leases::HomeTerminalLeases::default()),
             },
         }
     }
