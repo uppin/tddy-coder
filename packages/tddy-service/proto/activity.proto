@@ -81,6 +81,12 @@ service ActivityService {
   // ReportSessionStatus. Answers at once with NO_ORCHESTRATOR when the session has no orchestrator
   // active on this host: the hook then prints nothing and Claude shows its own prompt.
   rpc AwaitQuestionAnswer(AwaitQuestionAnswerRequest) returns (AwaitQuestionAnswerResponse);
+  // The peer presence query (`#home-inbox` 10/11): does THIS daemon serve `session_id`'s main
+  // terminal? Asked by the host of a waiting child, over the existing unary peer forward, to decide
+  // whether an orchestrator running here is present to answer. Answers only about this daemon's own
+  // terminals, so it is never forwarded again. Carries no session token: a boolean about one session
+  // id, asked daemon to daemon.
+  rpc IsSessionTerminalServed(IsSessionTerminalServedRequest) returns (IsSessionTerminalServedResponse);
 }
 
 // One replay frame: a service-local wrapper carrying an ACP `tddy.acp.v1.AcpAgentMessage`
@@ -317,12 +323,24 @@ message AwaitQuestionAnswerRequest {
   string permission_suggestions_json = 5;
 }
 
+message IsSessionTerminalServedRequest {
+  // The session whose main terminal is asked about: a child's orchestrator.
+  string session_id = 1;
+}
+
+message IsSessionTerminalServedResponse {
+  // True when this daemon serves `session_id`'s main terminal right now: the served terminal, not a
+  // recorded pid, so a dead session whose pid was reused is not served.
+  bool served = 1;
+}
+
 // How a wait for an answer ended.
 enum AwaitQuestionOutcome {
   AWAIT_QUESTION_OUTCOME_UNSPECIFIED = 0;
   // The orchestrator answered: `option_id` or `cancelled` says how.
   AWAIT_QUESTION_OUTCOME_ANSWERED = 1;
-  // The session has no orchestrator active on this host, so nobody will answer: no wait at all.
+  // The session has no orchestrator active — on this host, or on the peer its changeset names
+  // (`#home-inbox` 10/11) — so nobody will answer: no wait at all.
   AWAIT_QUESTION_OUTCOME_NO_ORCHESTRATOR = 2;
   // Nobody answered before the deadline.
   AWAIT_QUESTION_OUTCOME_TIMED_OUT = 3;

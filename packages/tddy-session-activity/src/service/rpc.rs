@@ -15,7 +15,8 @@ use tddy_service::proto::activity::{
     AgentActivityRecord as ProtoAgentActivityRecord, AwaitQuestionAnswerRequest,
     AwaitQuestionAnswerResponse, DeltaScope as ProtoDeltaScope, GetAcpReplayPageRequest,
     GetAcpReplayPageResponse, GetAcpToolCallDetailRequest, GetAcpToolCallDetailResponse,
-    ReportAgentActivityRequest, ReportAgentActivityResponse, ReportOperatorNotificationRequest,
+    IsSessionTerminalServedRequest, IsSessionTerminalServedResponse, ReportAgentActivityRequest,
+    ReportAgentActivityResponse, ReportOperatorNotificationRequest,
     ReportOperatorNotificationResponse, ReportSessionStatusRequest, ReportSessionStatusResponse,
     SessionNotificationEvent, StreamAcpReplayRequest, StreamMode, StreamSessionActivityRequest,
     StreamSessionNotificationsRequest,
@@ -59,6 +60,16 @@ impl tddy_service::proto::activity::ActivityService for ActivityServiceImpl {
         request: Request<AwaitQuestionAnswerRequest>,
     ) -> Result<Response<AwaitQuestionAnswerResponse>, Status> {
         self.await_question_answer_impl(request.into_inner()).await
+    }
+
+    /// A peer asking whether this daemon serves an orchestrator's terminal — see
+    /// `question_answers`.
+    async fn is_session_terminal_served(
+        &self,
+        request: Request<IsSessionTerminalServedRequest>,
+    ) -> Result<Response<IsSessionTerminalServedResponse>, Status> {
+        self.is_session_terminal_served_impl(request.into_inner())
+            .await
     }
 
     type StreamSessionActivityStream = MpscResultStream<ProtoAgentActivityRecord>;

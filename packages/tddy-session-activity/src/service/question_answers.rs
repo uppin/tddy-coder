@@ -5,8 +5,9 @@
 //! Authenticated as `ReportSessionStatus` is: the session must be claude-cli and the `hook_token`
 //! its own. Then, in order:
 //!
-//! 1. no `orchestrator_session_id` in the session's changeset, an orchestrator on another host, or
-//!    one whose terminal this daemon does not serve → `NO_ORCHESTRATOR`, at once;
+//! 1. no `orchestrator_session_id` in the session's changeset, or an orchestrator whose terminal its
+//!    own daemon does not serve → `NO_ORCHESTRATOR`, at once. (An orchestrator on another host is
+//!    asked of that host, `#home-inbox` 10/11; until then it counts as absent.)
 //! 2. the pending question must be the `request_id` asked for. A permission is held as a permission
 //!    prompt; any other kind is a question, held with its answers (`8/9`);
 //! 3. a waiter is opened in [`PendingAnswers`] and held for at most [`AnswerWaitPorts::wait`] →
@@ -23,6 +24,7 @@ use tddy_discovery::subagent::PermissionAnswer;
 use tddy_rpc::{Response, Status};
 use tddy_service::proto::activity::{
     AwaitQuestionAnswerRequest, AwaitQuestionAnswerResponse, AwaitQuestionOutcome,
+    IsSessionTerminalServedRequest, IsSessionTerminalServedResponse,
 };
 
 use crate::answers::permission_request_view;
@@ -136,11 +138,31 @@ impl ActivityServiceImpl {
         else {
             return false;
         };
-        let on_another_host = changeset
+        let orchestrator_host = changeset
             .orchestrator_daemon_instance_id
             .as_deref()
-            .is_some_and(|host| !host.is_empty() && host != self.ports.daemon_instance_id);
-        !on_another_host && self.answers.presence.is_active(orchestrator).await
+            .filter(|host| !host.is_empty() && *host != self.ports.daemon_instance_id);
+        if orchestrator_host.is_some() {
+            // TODO(cross-host-wait): implement — ask the port about the orchestrator's host
+            // (`is_active(orchestrator, orchestrator_host)`) instead of refusing it. Until then an
+            // orchestrator on another host counts as absent, exactly as before `#home-inbox` 10/11.
+            return false;
+        }
+        self.answers.presence.is_active(orchestrator, None).await
+    }
+
+    /// `IsSessionTerminalServed`: whether this daemon serves `session_id`'s main terminal, asked by
+    /// the host of a child whose orchestrator runs here (`#home-inbox` 10/11).
+    pub(super) async fn is_session_terminal_served_impl(
+        &self,
+        req: IsSessionTerminalServedRequest,
+    ) -> Result<Response<IsSessionTerminalServedResponse>, Status> {
+        // TODO(cross-host-wait): implement — answer `self.answers.presence.is_active(&req.session_id,
+        // None)`, this daemon's own terminals only.
+        let _ = req;
+        Ok(Response::new(IsSessionTerminalServedResponse {
+            served: false,
+        }))
     }
 }
 

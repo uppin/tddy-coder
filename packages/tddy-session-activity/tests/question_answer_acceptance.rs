@@ -74,7 +74,11 @@ struct OrchestratorsServedHere {
 
 #[async_trait::async_trait]
 impl OrchestratorPresence for OrchestratorsServedHere {
-    async fn is_active(&self, orchestrator_session_id: &str) -> bool {
+    async fn is_active(
+        &self,
+        orchestrator_session_id: &str,
+        _orchestrator_daemon_instance_id: Option<&str>,
+    ) -> bool {
         self.active
             .lock()
             .expect("the active set")

@@ -22,10 +22,11 @@ use tddy_service::proto::activity::{
     AcpReplayFrame, ActivityService, AgentActivityDeltaChunk, AgentActivityDeltaRequest,
     AgentActivityRecord, AwaitQuestionAnswerRequest, AwaitQuestionAnswerResponse,
     GetAcpReplayPageRequest, GetAcpReplayPageResponse, GetAcpToolCallDetailRequest,
-    GetAcpToolCallDetailResponse, ReportAgentActivityRequest, ReportAgentActivityResponse,
-    ReportOperatorNotificationRequest, ReportOperatorNotificationResponse,
-    ReportSessionStatusRequest, ReportSessionStatusResponse, SessionNotificationEvent,
-    StreamAcpReplayRequest, StreamSessionActivityRequest, StreamSessionNotificationsRequest,
+    GetAcpToolCallDetailResponse, IsSessionTerminalServedRequest, IsSessionTerminalServedResponse,
+    ReportAgentActivityRequest, ReportAgentActivityResponse, ReportOperatorNotificationRequest,
+    ReportOperatorNotificationResponse, ReportSessionStatusRequest, ReportSessionStatusResponse,
+    SessionNotificationEvent, StreamAcpReplayRequest, StreamSessionActivityRequest,
+    StreamSessionNotificationsRequest,
 };
 use tddy_session_activity::orchestrator_presence::OrchestratorPresence;
 use tddy_session_activity::{ActivityPorts, ActivityServiceImpl, AnswerWaitPorts, SessionLabels};
@@ -88,6 +89,7 @@ impl DaemonSessionHost {
             pending: self.pending_answers(),
             presence: Arc::new(ServedTerminalPresence {
                 terminals: self.terminal_sessions(),
+                connection: self.clone(),
             }),
             wait: std::time::Duration::from_secs(self.config.claude_cli_answer_wait_secs()),
         }
@@ -120,19 +122,56 @@ impl DaemonSessionHost {
     }
 }
 
-/// An orchestrator is present when this daemon serves its main terminal — the served terminal, not
-/// a pid, so a dead home whose pid was reused never makes a child wait.
+/// An orchestrator is present when the daemon it runs on serves its main terminal — the served
+/// terminal, not a pid, so a dead home whose pid was reused never makes a child wait. This daemon
+/// answers for itself; for an orchestrator on another host it asks that host
+/// ([`DaemonSessionHost::peer_serves_main_terminal`]), `#home-inbox` 10/11.
 struct ServedTerminalPresence {
     terminals: crate::terminal_session_adapter::DaemonTerminalSessionStore,
+    /// This daemon's roster and common room, which a peer is asked through.
+    connection: DaemonSessionHost,
 }
 
 #[async_trait]
 impl OrchestratorPresence for ServedTerminalPresence {
-    async fn is_active(&self, orchestrator_session_id: &str) -> bool {
-        self.terminals
-            .get_terminal(orchestrator_session_id, MAIN_TERMINAL_ID)
-            .await
-            .is_some()
+    async fn is_active(
+        &self,
+        orchestrator_session_id: &str,
+        orchestrator_daemon_instance_id: Option<&str>,
+    ) -> bool {
+        match orchestrator_daemon_instance_id {
+            None => self
+                .terminals
+                .get_terminal(orchestrator_session_id, MAIN_TERMINAL_ID)
+                .await
+                .is_some(),
+            Some(host) => {
+                self.connection
+                    .peer_serves_main_terminal(host, orchestrator_session_id)
+                    .await
+            }
+        }
+    }
+}
+
+impl DaemonSessionHost {
+    /// Whether the peer `peer_instance_id` serves `session_id`'s main terminal: asked of it with
+    /// `ActivityService.IsSessionTerminalServed`, over the roster and unary forward
+    /// [`PeerRoutedActivity`] uses, within
+    /// [`PEER_PRESENCE_TIMEOUT`](tddy_session_activity::orchestrator_presence::PEER_PRESENCE_TIMEOUT).
+    ///
+    /// **Absent on any doubt**: an id that is not on the roster, no common room, a peer that errors,
+    /// or one that does not answer in time all answer `false`, so a dead peer costs the child's
+    /// Claude prompt at most the bound and never a wait.
+    async fn peer_serves_main_terminal(&self, peer_instance_id: &str, session_id: &str) -> bool {
+        // TODO(cross-host-wait): implement — classify `peer_instance_id` with
+        // `classify_addressed_daemon_route("IsSessionTerminalServed", ..)`, then
+        // `common_room_slot(..)?.forward_to_peer_within(peer, ACTIVITY_SERVICE,
+        // "IsSessionTerminalServed", IsSessionTerminalServedRequest { session_id }.encode_to_vec(),
+        // PEER_PRESENCE_TIMEOUT)`, decode `served`, and log (not propagate) every failure. Until
+        // then another host counts as absent.
+        let _ = (peer_instance_id, session_id);
+        false
     }
 }
 
@@ -265,6 +304,15 @@ impl ActivityService for PeerRoutedActivity {
         request: Request<AwaitQuestionAnswerRequest>,
     ) -> Result<Response<AwaitQuestionAnswerResponse>, Status> {
         self.local.await_question_answer(request).await
+    }
+
+    /// Not routed: the question is *to* the daemon it arrived on — does it serve this terminal —
+    /// and carries no `daemon_instance_id`, so a peer's answer is never forwarded again.
+    async fn is_session_terminal_served(
+        &self,
+        request: Request<IsSessionTerminalServedRequest>,
+    ) -> Result<Response<IsSessionTerminalServedResponse>, Status> {
+        self.local.is_session_terminal_served(request).await
     }
 
     /// Not routed, for the reason `report_session_status` is not: `tddy-tools notify` runs inside
