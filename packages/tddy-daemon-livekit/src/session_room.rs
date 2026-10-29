@@ -1462,6 +1462,9 @@ impl SessionRoomRegistry {
             // Loud, because from here on the room has no RPC server: every `ExecuteTool` an agent
             // in it makes will wait for a participant that is no longer there, and nothing else in
             // the system notices.
+            // TODO: rejoin instead, the way the common room's RPC participant does
+            // (`common_room_supervisor::serve_rpc_participant_until_shutdown`) — keeping the
+            // broadcast publishers above pointed at the new connection.
             if !serve_stopped.swap(true, Ordering::Relaxed) {
                 log::error!(
                     "session_room: {serve_room} lost its host; file access and activity in that room have stopped until the session is restarted"

@@ -224,6 +224,25 @@ impl LiveKitTestkit {
             .map_err(|e| anyhow::anyhow!("remove participant {identity} from {room}: {e}"))
     }
 
+    /// The identities the server holds as `ACTIVE` in `room` right now: joined *and* with ICE
+    /// connectivity established, so able to exchange data with everyone else in it.
+    ///
+    /// A participant whose signalling joined but whose peer connection is still being negotiated
+    /// is listed too, as `JOINING`/`JOINED` — and the SDK's own connect retries rejoin under the
+    /// same identity — so "listed" does not mean "in the room and serving". This does.
+    pub async fn active_participant_identities(&self, room: &str) -> Result<Vec<String>> {
+        let http_url = format!("http://{}", self.ws_url.trim_start_matches("ws://"));
+        let participants = RoomClient::with_api_key(&http_url, DEV_API_KEY, DEV_API_SECRET)
+            .list_participants(room)
+            .await
+            .map_err(|e| anyhow::anyhow!("list participants of {room}: {e}"))?;
+        Ok(participants
+            .into_iter()
+            .filter(|p| p.state().as_str_name() == "ACTIVE")
+            .map(|p| p.identity)
+            .collect())
+    }
+
     /// Generate an access token for a participant to join a room.
     pub fn generate_token(&self, room: &str, identity: &str) -> Result<String> {
         let token = AccessToken::with_api_key(DEV_API_KEY, DEV_API_SECRET)

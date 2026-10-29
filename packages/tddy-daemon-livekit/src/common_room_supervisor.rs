@@ -333,24 +333,14 @@ impl CommonRoomConnector for DaemonCommonRoomConnector {
             identity,
             Duration::from_secs(tddy_livekit::DEFAULT_LIVEKIT_JWT_TTL_SECS),
         );
-        let roster = tddy_rpc::MultiRpcService::new(cloned_entries(&self.entries));
         let shutdown = Arc::new(AtomicBool::new(false));
-        let url = target.url().to_string();
-        let participant = tokio::spawn({
-            let shutdown = shutdown.clone();
-            async move {
-                tddy_livekit::LiveKitParticipant::run_with_reconnect(
-                    &url,
-                    &token_generator,
-                    roster,
-                    Default::default(),
-                    shutdown,
-                    None,
-                    None,
-                )
-                .await;
-            }
-        });
+        let participant = tokio::spawn(serve_rpc_participant_until_shutdown(
+            target.url().to_string(),
+            target.room().to_string(),
+            token_generator,
+            cloned_entries(&self.entries),
+            shutdown.clone(),
+        ));
 
         Box::new(RunningCommonRoom {
             participant,
@@ -358,6 +348,137 @@ impl CommonRoomConnector for DaemonCommonRoomConnector {
             discovery,
             peer_discovery: self.peer_discovery.clone(),
         })
+    }
+}
+
+/// The first wait before rejoining a common room the RPC participant lost, and the wait after a
+/// connection that did join and then ended: one second is long enough not to hammer a server that
+/// just dropped this daemon, and short next to how long a remote client tolerates a silent host.
+const REJOIN_BACKOFF_INITIAL: Duration = Duration::from_secs(1);
+
+/// The longest wait between two attempts to rejoin. Join failures double the wait up to this, so a
+/// server that is down for hours costs one attempt every half minute rather than a tight loop, and
+/// a server that comes back is rejoined within half a minute.
+const REJOIN_BACKOFF_MAX: Duration = Duration::from_secs(30);
+
+/// How often a backoff wait looks at the shutdown flag — the same cadence the serve loop checks it
+/// at, so a departing participant leaves well inside [`PARTICIPANT_LEAVE_GRACE`] whichever of the
+/// two it is in.
+const SHUTDOWN_POLL_INTERVAL: Duration = Duration::from_millis(100);
+
+/// The wait before the next attempt to rejoin, growing while joins keep failing.
+#[derive(Debug)]
+struct RejoinBackoff {
+    next: Duration,
+}
+
+impl RejoinBackoff {
+    fn new() -> Self {
+        Self {
+            next: REJOIN_BACKOFF_INITIAL,
+        }
+    }
+
+    /// The wait after a failed join: the current one, doubling the next up to
+    /// [`REJOIN_BACKOFF_MAX`].
+    fn after_a_failed_join(&mut self) -> Duration {
+        let wait = self.next;
+        self.next = (self.next * 2).min(REJOIN_BACKOFF_MAX);
+        wait
+    }
+
+    /// The wait after a connection that joined and then ended: the server was reachable, so the
+    /// growth a run of failed joins built up no longer describes it.
+    fn after_a_lost_connection(&mut self) -> Duration {
+        self.next = REJOIN_BACKOFF_INITIAL;
+        self.after_a_failed_join()
+    }
+}
+
+/// Sleep for `wait`, or less if `shutdown` is set first. Returns whether shutdown was requested.
+async fn wait_unless_shutdown(wait: Duration, shutdown: &AtomicBool) -> bool {
+    let deadline = tokio::time::Instant::now() + wait;
+    loop {
+        if shutdown.load(Ordering::Relaxed) {
+            return true;
+        }
+        let now = tokio::time::Instant::now();
+        if now >= deadline {
+            return false;
+        }
+        tokio::time::sleep((deadline - now).min(SHUTDOWN_POLL_INTERVAL)).await;
+    }
+}
+
+/// Serve the RPC roster in `room` as this daemon's RPC participant until `shutdown` is set,
+/// rejoining whenever the connection ends or a join fails.
+///
+/// A LiveKit connection ends on its own more often than the daemon asks it to: the SDK gives up
+/// reconnecting after a long enough network outage, and the server removes participants. Nothing
+/// below this rejoins — [`tddy_livekit::JoinedParticipant::serve`] returns when its connection ends
+/// and leaves saying so to its caller — while the discovery loop *does* reconnect for ever, so
+/// without this loop the daemon would stay advertised in the room with nobody there to answer the
+/// RPCs its advertisement invites.
+///
+/// The loop lives here rather than in `tddy-livekit` so the supervisor's down-then-up rule holds
+/// unchanged: this task is the one participant claiming `daemon-{instance}`, it runs one connection
+/// at a time, and [`RunningCommonRoom::disconnect`] stopping it stops every rejoin with it. The
+/// identity is fixed by `token_generator`, which mints a fresh token for every attempt.
+async fn serve_rpc_participant_until_shutdown(
+    url: String,
+    room: String,
+    token_generator: tddy_livekit::TokenGenerator,
+    entries: Vec<tddy_rpc::ServiceEntry>,
+    shutdown: Arc<AtomicBool>,
+) {
+    let mut backoff = RejoinBackoff::new();
+    loop {
+        // A roster per connection: joining consumes the service it serves, and every one is a list
+        // of the same `Arc`ed implementations.
+        let roster = tddy_rpc::MultiRpcService::new(cloned_entries(&entries));
+        let joined = tddy_livekit::LiveKitParticipant::join(
+            &url,
+            &token_generator,
+            roster,
+            Default::default(),
+            None,
+            None,
+            None,
+        )
+        .await;
+        let wait = match joined {
+            Ok(joined) => {
+                joined.serve(shutdown.clone()).await;
+                if shutdown.load(Ordering::Relaxed) {
+                    return;
+                }
+                let wait = backoff.after_a_lost_connection();
+                log::warn!(
+                    target: "tddy_daemon::common_room",
+                    "the RPC participant lost common room {room} at {url} — rejoining in {wait:?}"
+                );
+                wait
+            }
+            Err(e) => {
+                if shutdown.load(Ordering::Relaxed) {
+                    return;
+                }
+                let wait = backoff.after_a_failed_join();
+                log::warn!(
+                    target: "tddy_daemon::common_room",
+                    "the RPC participant could not join common room {room} at {url}: {e:#} — \
+                     retrying in {wait:?}"
+                );
+                wait
+            }
+        };
+        if wait_unless_shutdown(wait, &shutdown).await {
+            return;
+        }
+        log::info!(
+            target: "tddy_daemon::common_room",
+            "the RPC participant is rejoining common room {room} at {url}"
+        );
     }
 }
 
@@ -885,5 +1006,54 @@ mod tests {
             daemon.next_room_lifecycle().await,
             RoomLifecycle::Joined(the_room(LOBBY_A, THE_LOBBY))
         );
+    }
+
+    #[tokio::test]
+    async fn a_shutdown_ends_a_rejoin_backoff_well_inside_the_leave_grace() {
+        // Given an RPC participant waiting out the longest backoff before it rejoins
+        let shutdown = Arc::new(AtomicBool::new(false));
+        let waiting = tokio::spawn({
+            let shutdown = shutdown.clone();
+            async move { wait_unless_shutdown(REJOIN_BACKOFF_MAX, &shutdown).await }
+        });
+
+        // When the daemon asks it to leave
+        shutdown.store(true, Ordering::Relaxed);
+
+        // Then it stops waiting at once, reporting that it was asked to, instead of rejoining
+        let asked_to_leave = timeout(PARTICIPANT_LEAVE_GRACE / 2, waiting)
+            .await
+            .expect("the backoff ignored the shutdown flag")
+            .expect("the backoff wait panicked");
+        assert!(asked_to_leave);
+    }
+
+    #[tokio::test]
+    async fn a_backoff_nobody_interrupts_runs_its_course() {
+        // Given no shutdown
+        let shutdown = AtomicBool::new(false);
+
+        // When a short backoff is waited out
+        // Then it reports that the participant should rejoin
+        assert!(!wait_unless_shutdown(Duration::from_millis(10), &shutdown).await);
+    }
+
+    #[test]
+    fn failed_joins_back_off_up_to_the_cap_and_a_lost_connection_starts_again() {
+        // Given a participant whose joins keep failing
+        let mut backoff = RejoinBackoff::new();
+        let waits: Vec<Duration> = (0..8).map(|_| backoff.after_a_failed_join()).collect();
+
+        // Then each wait doubles the last, never past the cap
+        assert_eq!(
+            waits,
+            [1, 2, 4, 8, 16, 30, 30, 30]
+                .map(Duration::from_secs)
+                .to_vec()
+        );
+
+        // And once a join succeeds and that connection is lost, the wait starts from the beginning
+        assert_eq!(backoff.after_a_lost_connection(), REJOIN_BACKOFF_INITIAL);
+        assert_eq!(backoff.after_a_failed_join(), REJOIN_BACKOFF_INITIAL * 2);
     }
 }
