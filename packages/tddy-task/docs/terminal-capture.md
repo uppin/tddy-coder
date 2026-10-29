@@ -73,10 +73,45 @@ calls `resize(rows, cols)` at spawn, before the child can write.
 `lines` (the visible rows of the **active** buffer — `Vt::view()`, the alternate screen while an
 application is full-screen — each `trim_end`ed), `cursor { row, col, visible }`, `cols`, `rows`,
 `offset` (`end_offset()`) and `bracketed_paste` (private mode 2004 as the sniffer last saw it). All of
-it is read in one borrow, so it describes one moment. Text only, no colours or attributes. It is `None`
+it is read in one borrow, so it describes one moment. No scrollback. It also carries `styles` and `widths` (below). It is `None`
 until `resize` has sized the model, for the reason `snapshot()` is. The project-home agent's
 `ReadSessionTerminal` serves `lines`, `cursor`, `cols`, `rows` and `offset`; `bracketed_paste` is
 carried for input.
+
+`TextGrid` and `GridCursor` live in `terminal_capture/grid.rs`, re-exported from the module.
+
+#### Styles (`terminal_capture/styles.rs`)
+
+`text_grid()` makes one walk over the screen model's cells (`walk_cells`, over `Line::cells()`) that
+yields both extra fields, so a run's columns and a character's cell span cannot disagree:
+
+- `styles: Vec<RowStyles>`: per row with any, `RowStyles { row, runs: Vec<StyleRun> }`, in row order.
+  `StyleRun { from, to, fg, bg, bold, dim, italic, underline, inverse, strikethrough, blink }`,
+  `from` inclusive, `to` exclusive, **character positions in that row's `lines` entry**. Cells whose
+  `Pen` is default make no run; adjacent characters with equal pens make one; different pens that
+  touch stay separate. A bar's run reaches past the trimmed text, to the cells it paints. Wide tails
+  are skipped by `Cell::width() == 0`, the selection `Line::chars()` makes, so positions match
+  `lines`. Colours are `TerminalColour { Indexed(u8), Rgb(u8, u8, u8) }`, whose `Display` names the
+  16 standard indices (`black … white`, `bright-black … bright-white`), `idx:N` and `#rrggbb`.
+- `widths: Vec<Vec<u8>>`: per row, the cell span (1, or 2 for a wide character) of each character
+  and of the blank cells beyond the text, to the grid's width. An empty list is read as all narrow.
+- `highlighted_rows(&[RowStyles], &[String]) -> Vec<u16>`: a row with a non-blank character
+  (`char::is_whitespace`) whose covering runs, from its first to its last non-blank character, leave
+  no gap and are all `inverse` or all share one `Some` background. Ascending; one pass.
+
+`tddy-task` has no `serde`: `StyleRun` is a plain struct, and the tool engine builds the JSON.
+
+#### Crop (`terminal_capture/crop.rs`)
+
+`crop(&TextGrid, GridRegion { row, col, rows, cols }) -> Result<CroppedGrid, String>` is pure. A
+row's text is characters and the box is in screen cells, so it works on entries (character, first
+cell, width) built from `lines` and `widths` and padded with blanks to `cols`. A character is kept
+whole when its cells lie inside the box; a wide one straddling an edge becomes one space and keeps
+its run. Each row is trimmed at the end after the cut, so padding never reaches `lines`. Runs are
+clipped to the kept characters and re-based by the first kept index; `highlighted_rows` is recomputed
+on the cropped rows. `CroppedGrid { lines, styles, highlighted_rows, cursor: CroppedCursor { row,
+col (signed), visible, inside }, region }`, where `region` is the box clipped to the screen. A box
+with no size or wholly off the screen is `Err` naming `<cols> columns by <rows> rows`.
 
 `append` feeds the model with **incremental UTF-8 decoding**: a code point split across two chunks is
 held (at most three bytes) until the next chunk completes it, and bytes that are not UTF-8 render as
@@ -208,6 +243,8 @@ terminal is refused with `FAILED_PRECONDITION`.
 | `tests/terminal_capture_snapshot.rs` | snapshot fidelity against an independent reference emulator (`vt100`, dev-dependency): an alternate-screen TUI with scroll region, saved cursor, truecolor and input modes past 64 KiB of diffs; scroll region and saved cursor survive further bytes; a chunk boundary at every byte of a CSI and a 4-byte code point; a resize re-serializes at the new grid; an unsized capture has no snapshot |
 | `tests/terminal_capture_sequence_point.rs` | `snapshot_and_subscribe` neither loses nor duplicates a byte under a concurrent producer |
 | `tests/terminal_capture_replay.rs` | the mode prologue, eviction and the `replay_capture` / `replay` split |
+| `tests/terminal_styles.rs` | colour naming, each attribute as its own flag, run merging and splitting, a bar's run past the text, wide characters keeping columns aligned, the highlight rule and its negative cases |
+| `tests/terminal_crop.rs` | cell-boundary cuts and trimmed lines, wide characters at and inside the box, runs clipped and re-based, cursor inside and outside (signed), clipping versus refusal |
 
 ## See also
 

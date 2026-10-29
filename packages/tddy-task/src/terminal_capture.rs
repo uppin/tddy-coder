@@ -15,9 +15,11 @@ use std::collections::BTreeSet;
 use crate::screen_dump::portable_dump;
 
 mod crop;
+mod grid;
 mod styles;
 
 pub use crop::{crop, CroppedCursor, CroppedGrid, GridRegion};
+pub use grid::{GridCursor, TextGrid};
 pub use styles::{highlighted_rows, RowStyles, StyleRun, TerminalColour};
 
 /// Private modes that control mouse reporting: normal tracking (1000), button-event tracking
@@ -439,40 +441,6 @@ pub struct ScreenSnapshot {
     /// The grid `data` was serialized at.
     pub rows: u16,
     pub cols: u16,
-}
-
-/// The visible text of a terminal's active screen buffer at a sequence point
-/// ([`TerminalCapture::text_grid`]).
-///
-/// No scrollback. `lines` holds one entry per row of the grid (`rows` of them), each trimmed at the
-/// end; `styles` holds the colours and attributes of the rows that have any.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct TextGrid {
-    /// The visible rows, top first.
-    pub lines: Vec<String>,
-    /// The non-default style runs of the rows that have any, in row order. Columns are character
-    /// positions in the row's `lines` entry (see [`StyleRun`]).
-    pub styles: Vec<RowStyles>,
-    /// The cell span of each character of each row of `lines` and beyond it, to the grid's width:
-    /// 1, or 2 for a wide character. One entry per row; a grid without entries is read as all
-    /// narrow. [`crop`] cuts on cell boundaries with it.
-    pub widths: Vec<Vec<u8>>,
-    pub cursor: GridCursor,
-    pub cols: u16,
-    pub rows: u16,
-    /// The sequence point: every output byte below this absolute offset is reflected in `lines`,
-    /// none at or above it is. The same offset a [`ScreenSnapshot`] taken at that moment carries.
-    pub offset: u64,
-    /// Whether the application has bracketed paste (private mode 2004) switched on.
-    pub bracketed_paste: bool,
-}
-
-/// Where the cursor is on the grid, zero-based from the top-left cell.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct GridCursor {
-    pub row: u16,
-    pub col: u16,
-    pub visible: bool,
 }
 
 /// A contiguous slice of the capture ring returned by [`TerminalCapture::replay_last`],
