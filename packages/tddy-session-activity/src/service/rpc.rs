@@ -68,8 +68,7 @@ impl tddy_service::proto::activity::ActivityService for ActivityServiceImpl {
         &self,
         request: Request<IsSessionTerminalServedRequest>,
     ) -> Result<Response<IsSessionTerminalServedResponse>, Status> {
-        self.is_session_terminal_served_impl(request.into_inner())
-            .await
+        self.is_session_terminal_served_impl(request).await
     }
 
     type StreamSessionActivityStream = MpscResultStream<ProtoAgentActivityRecord>;

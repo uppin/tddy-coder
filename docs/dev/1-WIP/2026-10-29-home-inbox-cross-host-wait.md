@@ -1,7 +1,7 @@
 # Changeset: A child waits for an orchestrator on another host
 
 **Created:** 2026-10-29
-**Status:** 🚧 Contract published (pass 2): surface stubbed, tests failing; green pending
+**Status:** 🟢 Green: the wait asks the peer and the peer answers; every `TODO(cross-host-wait)` is gone. Validation and wrap pending
 **Type:** Feature
 **Complexity**: 4. It needs a new peer presence query over the existing unary peer forwarding, and two hosts in every acceptance test.
 **Stack:** `#home-inbox 10/11` (PR #787), branch `feature/home-inbox/cross-host-wait`, base `feature/home-inbox/terminal-styles`
@@ -45,10 +45,10 @@
 
 ## Draft PR contract
 
-Published in pass 2. Every body is `// TODO(cross-host-wait): implement`, and the stub keeps today's
-behaviour: another host counts as absent. The branch builds and lints clean on it.
+Published in pass 2. Every body was `// TODO(cross-host-wait): implement`, and the stub kept today's
+behaviour: another host counts as absent. Green replaced every body; the column is what pass 2 stubbed.
 
-| Surface | Where | Stub |
+| Surface | Where | Stub (pass 2) |
 |---|---|---|
 | `OrchestratorPresence::is_active(session_id, orchestrator_daemon_instance_id: Option<&str>)`. `None` is this daemon; the gate folds "empty or this host" into `None`. | `packages/tddy-session-activity/src/orchestrator_presence.rs` | `NoOrchestratorIsActive` ignores the host |
 | `PEER_PRESENCE_TIMEOUT` (3 s) | same file | a constant |
@@ -85,6 +85,35 @@ checked for inclusion only by `unbundle_service_split`, so nothing is registered
    `question_answer_acceptance.rs` take the new parameter and ignore it; nothing else changed.
 6. **Test support.** `support/mod.rs` gained `never_answers`, `times_asked`, call recording and an
    `IsSessionTerminalServed` arm; all additive.
+
+### Green decisions
+
+Taken during green without a human in the loop; each one is reviewable here.
+
+7. **Rebase skipped by instruction; the dependency gate run by hand.** The branch was not rebased
+   (the run said so). The parents' surfaces were checked present on the branch before any code:
+   `OrchestratorPresence` and `ServedTerminalPresence` (`6/11`), `orchestrator_is_present` and the
+   await handler (`8/11`), `classify_addressed_daemon_route`, `common_room_slot` and
+   `forward_to_peer_within` (`#start-parity`). Nothing from `## Dependencies` was implemented here.
+8. **A local route is answered locally.** `peer_serves_main_terminal` classifies the named host
+   first. The gate folds this host into `None`, so an `Some(this host)` reaches it only from a direct
+   `is_active` call; answering from this daemon's terminal store keeps the port correct for any
+   caller, rather than reporting this daemon's own orchestrator as absent.
+9. **Every failure is absent, logged at debug.** An id off the roster, no common room, a forward
+   error, the `PEER_PRESENCE_TIMEOUT` deadline and an undecodable answer all count as `false` with a
+   `log::debug!` line, never stdout. The roster check's own rejection is logged at info by the
+   shared routing helper, as every routed RPC logs it; the debug line is the second record.
+10. **The peer handler takes the whole `Request`.** The transport is the gate, so the handler reads
+    `request.metadata().transport()`. Anything but `RequestTransport::LiveKit` (`Direct` and `Pipe`
+    included) is `PERMISSION_DENIED`, saying the RPC is peer-only. The trait surface is unchanged.
+11. **The parent's fake answers per host.** `permission_answer_acceptance.rs` now uses
+    `OrchestratorsServedPerHost`: this host (`None`) answers from its own set, and any named host
+    answers `false`, since in that case the other host serves none of these orchestrators. Its
+    `its_orchestrator_runs_on_another_host` case still expects `NO_ORCHESTRATOR` at once, now reached
+    through the port rather than the deleted refusal. A case where the other host serves the home is
+    not added here: the two-host acceptance tests (criteria 1 and 2) cover that wait.
+12. **`question_answer_acceptance.rs` is unchanged.** Its fake already takes and ignores the host and
+    has no other-host case, so nothing in it depends on the gate's new behaviour.
 
 ### Left for wrap
 
@@ -124,9 +153,19 @@ green, then reverted).
 ## TODO
 
 - [x] Pass 2: contract and failing tests (acceptance and unit; user review approved by the orchestrator)
-- [ ] TDD Green
+- [x] TDD Green (the gate, the peer query and its handler, and the parent case made host-aware)
 - [ ] `/validate-changes`, `/pr-wrap`
 
 ## Validation Results
 
-Not yet run.
+Scoped to the two touched packages, plus the two-host suite that exercises them. Not a whole-workspace run; CI is the authority for that.
+
+| Gate | Scope | Result |
+|---|---|---|
+| Tests | `tddy-session-activity`, `--no-fail-fast`, all binaries | all pass: 56 lib, plus every integration suite; `cross_host_presence_unit` 8/8, `permission_answer_acceptance` 7/7 |
+| Tests | `tddy-daemon-rpc --test cross_host_answer_wait_acceptance` | 7/7 pass (AC1 to AC5, the peer-only refusal, the same-host guard) |
+| Clippy | `tddy-session-activity --all-targets -- -D warnings` | clean |
+| Clippy | `tddy-session-lifecycle --all-targets -- -D warnings` | clean |
+| Format | `rustfmt --check` on the four edited Rust files | clean |
+
+Reds: none in these scopes. The known local reds in the stack notes were not exercised by these suites.
