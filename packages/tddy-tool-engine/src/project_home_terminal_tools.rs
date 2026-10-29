@@ -20,7 +20,7 @@
 use async_trait::async_trait;
 use serde::Deserialize;
 use serde_json::{json, Value};
-use tddy_task::TextGrid;
+use tddy_task::{crop, highlighted_rows, GridRegion, RowStyles, StyleRun, TextGrid};
 use tddy_worktree_service::session_target::{HomeCaller, SessionTarget};
 
 use crate::catalog::ToolDef;
@@ -55,13 +55,28 @@ pub fn is_project_home_terminal_tool(name: &str) -> bool {
 pub fn project_home_terminal_tool_defs() -> Vec<ToolDef> {
     let mut defs = vec![tool_def(
         READ_SESSION_TERMINAL,
-        "Read what a session of this project shows on its main terminal right now: the visible rows of the screen it is on (the alternate screen while a full-screen TUI runs), each with trailing whitespace trimmed, and the cursor's row, column and visibility, zero-based. Answers lines, cursor {row, col, visible}, cols, rows and offset (the position in the terminal's output stream the text corresponds to). Text only: no scrollback, colours or attributes. Reading sends no input and disturbs no attached screen. A session with no live terminal, or whose terminal has not reported its size, is refused with the reason.",
+        "Read what a session of this project shows on its main terminal right now: the visible rows of the screen it is on (the alternate screen while a full-screen TUI runs), each with trailing whitespace trimmed, and the cursor's row, column and visibility, zero-based. Answers lines, cursor {row, col, visible}, cols, rows and offset (the position in the terminal's output stream the text corresponds to). Text only, with no scrollback, unless you pass styles: true, which adds colours and attributes: `styles`, per row that has any, the runs {from, to, fg, bg, bold, dim, italic, underline, inverse, strikethrough, blink} whose style differs from the terminal default (only the set attributes are present; from is inclusive and to exclusive, as character positions in that row's line, and a run may reach past the trimmed text into a bar's blank cells), and `highlighted_rows`, the rows painted as a bar, where the runs covering all the row's text are contiguous and all inverse or all one background colour. Pass styles: true when you must know what is selected before you type: many TUIs mark the current item only by inverse video or a background colour. Highlighted rows are usually the selection but may be a status bar, so check the text. Pass region {row, col, rows, cols} (the top-left cell, zero-based, and a size, in screen cells) to read only one pane, menu or dialog: lines, styles and the cursor then describe that box, the cursor relative to it with inside telling whether it is in the box, and the answer echoes the region read, clipped to the screen (a box with no size, or off the screen, is refused); cols and rows stay the full screen's size. Reading sends no input and disturbs no attached screen. A session with no live terminal, or whose terminal has not reported its size, is refused with the reason.",
         json!({
             "type": "object",
             "properties": {
                 "session_id": {
                     "type": "string",
                     "description": "The session of this project to read, as ListProjectSessions reports it."
+                },
+                "region": {
+                    "type": "object",
+                    "description": "Read only this box of the screen, in screen cells (the units of cursor, cols and rows).",
+                    "properties": {
+                        "row": { "type": "integer", "minimum": 0, "description": "Top row of the box, zero-based." },
+                        "col": { "type": "integer", "minimum": 0, "description": "Left column of the box, zero-based." },
+                        "rows": { "type": "integer", "minimum": 1, "description": "Height of the box." },
+                        "cols": { "type": "integer", "minimum": 1, "description": "Width of the box." }
+                    },
+                    "required": ["row", "col", "rows", "cols"]
+                },
+                "styles": {
+                    "type": "boolean",
+                    "description": "Also answer the screen's colours and attributes as `styles` and `highlighted_rows`. Default false: text only."
                 },
                 TARGET_DAEMON_INSTANCE_ID: target_host_property()
             },
@@ -150,6 +165,25 @@ struct SessionArgs {
     session_id: String,
 }
 
+/// The arguments of `ReadSessionTerminal`: the session, and whether to answer its styles too.
+#[derive(Deserialize)]
+struct ReadArgs {
+    session_id: String,
+    #[serde(default)]
+    styles: bool,
+    #[serde(default)]
+    region: Option<RegionArg>,
+}
+
+/// The `region` argument: a box of screen cells.
+#[derive(Deserialize)]
+struct RegionArg {
+    row: u16,
+    col: u16,
+    rows: u16,
+    cols: u16,
+}
+
 /// The arguments of `SendSessionKeys`: the text typed first, then the named keys. Either may be
 /// absent, not both.
 #[derive(Deserialize)]
@@ -181,7 +215,7 @@ pub async fn execute_project_home_terminal_tool(
     if tool_name != READ_SESSION_TERMINAL {
         return execute_terminal_keys_tool(port, home, tool_name, args).await;
     }
-    let args: SessionArgs = match serde_json::from_value(args) {
+    let args: ReadArgs = match serde_json::from_value(args) {
         Ok(a) => a,
         Err(e) => {
             return ToolOutcome::err(format!("{READ_SESSION_TERMINAL}: invalid arguments: {e}"))
@@ -192,25 +226,109 @@ pub async fn execute_project_home_terminal_tool(
         Err(outcome) => return outcome,
     };
     match port.read_terminal(&target).await {
-        Ok(grid) => ToolOutcome::ok(grid_answer(&grid).to_string()),
+        Ok(grid) => match grid_answer(&grid, args.styles, args.region.as_ref()) {
+            Ok(answer) => ToolOutcome::ok(answer.to_string()),
+            Err(refusal) => ToolOutcome::err(format!("{READ_SESSION_TERMINAL}: {refusal}")),
+        },
         Err(e) => ToolOutcome::err(format!("{READ_SESSION_TERMINAL}: {e:#}")),
     }
 }
 
 /// The answer [`READ_SESSION_TERMINAL`] gives for `grid`. `bracketed_paste` is left out: it is the
 /// input-mode state the keys tool reads, not part of what the screen shows.
-fn grid_answer(grid: &TextGrid) -> Value {
-    json!({
-        "lines": grid.lines,
+///
+/// `styles` and `highlighted_rows` are added only when `with_styles` is set, so an answer without
+/// the argument is exactly the text-only answer of `#home-inbox` 2/8. With a `region`, `lines`,
+/// `cursor` and the style fields are those of the cropped box, and the answer echoes the region
+/// read; `cols`, `rows` and `offset` stay the whole screen's. A box the screen cannot give is the
+/// `Err`, naming why.
+fn grid_answer(
+    grid: &TextGrid,
+    with_styles: bool,
+    region: Option<&RegionArg>,
+) -> Result<Value, String> {
+    let Some(region) = region else {
+        let mut answer = json!({
+            "lines": grid.lines,
+            "cursor": {
+                "row": grid.cursor.row,
+                "col": grid.cursor.col,
+                "visible": grid.cursor.visible,
+            },
+            "cols": grid.cols,
+            "rows": grid.rows,
+            "offset": grid.offset,
+        });
+        if with_styles {
+            answer["styles"] = grid.styles.iter().map(row_styles_answer).collect();
+            answer["highlighted_rows"] = json!(highlighted_rows(&grid.styles, &grid.lines));
+        }
+        return Ok(answer);
+    };
+    let cropped = crop(
+        grid,
+        GridRegion {
+            row: region.row,
+            col: region.col,
+            rows: region.rows,
+            cols: region.cols,
+        },
+    )?;
+    let mut answer = json!({
+        "lines": cropped.lines,
         "cursor": {
-            "row": grid.cursor.row,
-            "col": grid.cursor.col,
-            "visible": grid.cursor.visible,
+            "row": cropped.cursor.row,
+            "col": cropped.cursor.col,
+            "visible": cropped.cursor.visible,
+            "inside": cropped.cursor.inside,
         },
         "cols": grid.cols,
         "rows": grid.rows,
         "offset": grid.offset,
-    })
+        "region": {
+            "row": cropped.region.row,
+            "col": cropped.region.col,
+            "rows": cropped.region.rows,
+            "cols": cropped.region.cols,
+        },
+    });
+    if with_styles {
+        answer["styles"] = cropped.styles.iter().map(row_styles_answer).collect();
+        answer["highlighted_rows"] = json!(cropped.highlighted_rows);
+    }
+    Ok(answer)
+}
+
+/// One row's runs as the agent reads them: `{row, runs: [...]}`.
+fn row_styles_answer(row: &RowStyles) -> Value {
+    json!({ "row": row.row, "runs": row.runs.iter().map(run_answer).collect::<Vec<_>>() })
+}
+
+/// One run as `{from, to}` plus only the attributes that are set: `fg` and `bg` as the colour's
+/// name, each flag as `true`.
+fn run_answer(run: &StyleRun) -> Value {
+    let mut answer = json!({ "from": run.from, "to": run.to });
+    if let Some(fg) = run.fg {
+        answer["fg"] = json!(fg.to_string());
+    }
+    if let Some(bg) = run.bg {
+        answer["bg"] = json!(bg.to_string());
+    }
+    let flags = [
+        ("bold", run.bold),
+        ("dim", run.dim),
+        ("italic", run.italic),
+        ("underline", run.underline),
+        ("inverse", run.inverse),
+        ("strikethrough", run.strikethrough),
+        ("blink", run.blink),
+    ];
+    for (name, set) in flags {
+        if set {
+            answer[name] = json!(true);
+        }
+    }
+    answer
 }
 
 /// Run [`CLAIM_SESSION_TERMINAL`] or [`SEND_SESSION_KEYS`] for `home`: resolve the target, then take

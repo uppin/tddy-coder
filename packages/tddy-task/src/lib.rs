@@ -17,6 +17,9 @@ pub use registry::{TaskRegistry, TaskRegistryEvent};
 pub use task::{
     AppliedOffset, ChannelKind, TaskBody, TaskChannel, TaskContext, TaskHandle, TaskId, TaskStatus,
 };
-pub use terminal_capture::{CaptureChunk, GridCursor, ScreenSnapshot, TerminalCapture, TextGrid};
+pub use terminal_capture::{
+    crop, highlighted_rows, CaptureChunk, CroppedCursor, CroppedGrid, GridCursor, GridRegion,
+    RowStyles, ScreenSnapshot, StyleRun, TerminalCapture, TerminalColour, TextGrid,
+};
 /// The signal a cancellable task body (or a start that runs as one) observes.
 pub use tokio_util::sync::CancellationToken;

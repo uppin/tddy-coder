@@ -251,7 +251,7 @@ and served the four start tools and the two answer tools, for its own project (s
 | `ReadSessionTranscript` | `session_id`, `daemon_instance_id?`, `cursor?`, `limit?`, `direction?` (`newest_first` (default) or `from_cursor`), `tool_call_id?` | `{items: [{seq, kind, text, tool_call_id, truncated}], next_cursor, has_more, clamped_to?}`: the frames the web's Activities view pages (`GetAcpReplayPage`), each text cut at 4096 bytes and marked `truncated`; with `tool_call_id`, `{tool_call_id, raw_input, raw_output}` whole instead (`GetAcpToolCallDetail`). See [Following a session](#following-a-session) |
 | `TerminateSession` | `session_id`, `daemon_instance_id?` | `{session_id, signal: "SIGTERM"}`: what the web UI's **Terminate** does — `SignalSession` with SIGTERM to the session's process on its host. The session's record, worktree and branch are kept, so it can be resumed; deleting them is the UI's separate Delete, which is not offered. A session whose process has already ended (or that records none) is refused as an `is_error` result saying so. See [Terminating a session](#terminating-a-session) |
 | `RefreshWorktreeDiskUsage` | `path?` (as `ListWorktrees` lists it; every worktree when empty), `daemon_instance_id?` | `{queued}`: what the Worktrees screen's **Refresh** does — queues the background size walk (`WorktreeSizeCalculator`, two walks at a time) for one worktree or all of the project's, and answers at once. Progress is read with `ListWorktrees` (`sizing {done, total}`, the screen's "{done} of {total}") or `GetWorktree` (`size_status`: `calculating` until cached). A path not in git's worktree list is refused naming it. No ledger of its own: the calculator's persisted per-path state is the record |
-| `ReadSessionTerminal` | `session_id`, `daemon_instance_id?` | `{lines, cursor: {row, col, visible}, cols, rows, offset}`: what the session's **main** terminal shows right now, as text — the visible rows of the screen it is on (the alternate screen while a full-screen TUI runs), each with trailing whitespace trimmed, and the cursor, zero-based. `offset` is the position in the terminal's output stream the text corresponds to: the same sequence point a reconnecting browser's snapshot carries. Text only: no scrollback, colours or attributes. Reading sends no input, takes no control lease and disturbs no attached screen. A session with no live terminal, or whose terminal has not reported its size, is refused naming why. See [Reading a terminal](#reading-a-terminal) |
+| `ReadSessionTerminal` | `session_id`, `styles?`, `region? {row, col, rows, cols}`, `daemon_instance_id?` | `{lines, cursor: {row, col, visible}, cols, rows, offset}`: what the session's **main** terminal shows right now, as text — the visible rows of the screen it is on (the alternate screen while a full-screen TUI runs), each with trailing whitespace trimmed, and the cursor, zero-based. `offset` is the position in the terminal's output stream the text corresponds to: the same sequence point a reconnecting browser's snapshot carries. Text only, no scrollback, unless `styles: true` adds `styles` and `highlighted_rows`; `region` reads one box. Reading sends no input, takes no control lease and disturbs no attached screen. A session with no live terminal, or whose terminal has not reported its size, is refused naming why. See [Reading a terminal](#reading-a-terminal) |
 | `ClaimSessionTerminal` | `session_id`, `daemon_instance_id?` | `{holder}`: takes the session's terminal control lease for the screen `project-home:<home session id>`, stealing it from whoever holds it, as a browser's claim with `steal` does — the change is broadcast, so an attached browser drops to watch-only and names the new holder. The control token stays on the host that owns the terminal and is never returned. There is no release: a person takes control back by claiming it in the browser. See [Typing into a terminal](#typing-into-a-terminal) |
 | `SendSessionKeys` | `session_id`, `daemon_instance_id?`, `text?`, `keys?` | `{sent_bytes}`: types `text`, then each named key in order, into the session's **main** terminal while this home session holds its lease. Refused, naming the holder, when it does not, and nothing is sent. See [Typing into a terminal](#typing-into-a-terminal) |
 | `AnswerSessionPermission` | `session_id`, `request_id`, `option_id` or `cancelled`, `message?`, `daemon_instance_id?` | `{session_id, request_id, answered_by, option_id, cancelled, at_unix_ms}`: answers the Claude permission prompt a session this caller started is waiting on, as `ReadSessionActivity`'s `pending_question` shows it. `option_id` is `allow_once`, `reject_once` (with `message` saying why), or `allow_always` when Claude suggested a rule; `cancelled` leaves the prompt to the person at its terminal. Only the target's orchestrator may answer, and the first answer wins. See [Answering a permission prompt](#answering-a-permission-prompt) |
@@ -419,6 +419,33 @@ agent and the screen cannot disagree.
   at the end, so a blank row is an empty string.
 - **Refusals** are `is_error` results: `no live terminal` (with the session id) and `terminal size is
   not known yet`, besides the target refusals every target tool shares.
+- **Styles (`styles: true`).** Opt-in, since a styled answer is several times larger; without it, or
+  with `styles: false`, the answer is exactly the text-only one. It adds two fields:
+  - `styles`: per row that has any, `{row, runs: [{from, to, fg?, bg?, bold?, dim?, italic?,
+    underline?, inverse?, strikethrough?, blink?}]}`, the runs whose pen differs from the terminal
+    default. Only set attributes appear. `from` is inclusive and `to` exclusive, as character
+    positions in that row's `lines` entry, so a run slices the string directly; a run may reach past
+    the trimmed text into the blank cells a bar paints. Two adjacent characters with the same pen
+    are one run; different pens that touch stay separate. Colours are `black … white` and
+    `bright-black … bright-white` for the 16 standard indices, `idx:N` for the rest of the 256-colour
+    palette and `#rrggbb` for true colour. A wide character counts as one position, so runs after it
+    stay aligned.
+  - `highlighted_rows`, ascending: the rows painted as a bar. A row qualifies when it has a
+    non-blank character and the runs covering the span from its first to its last non-blank
+    character leave no default-styled gap, and either all are `inverse` or all share one identical
+    `bg`. A coloured word inside an inverse bar still counts. Many TUIs mark the current item only
+    this way, so the agent asks before it types. It is usually the selection but may be a status
+    bar, which the tool description says; the name says what is measured, not what it means.
+- **Crop box (`region`).** `{row, col, rows, cols}`: the top-left cell, zero-based, and a size, in
+  screen cells (the units of `cursor`, `cols` and `rows`), to read one pane, menu or dialog.
+  `lines`, `styles` and `cursor` then describe the box: rows cut to the box's columns and trimmed at
+  the end, runs clipped and re-based so row 0 and column 0 are the box's top-left, `highlighted_rows`
+  recomputed on the cropped rows (a menu bar inside a pane counts though the whole row holds other
+  text), and `cursor` relative to the box, signed (negative above or left of it) with `inside`. The
+  answer echoes the `region` read, clipped to the screen; `cols`, `rows` and `offset` stay the whole
+  screen's. A wide character cut by an edge becomes a space. A box with no rows or columns, or
+  wholly off the screen, is refused naming `<cols> columns by <rows> rows`. The crop runs after the
+  read, on the host that owns the terminal, so a cross-host read crops there.
 
 ### Typing into a terminal
 

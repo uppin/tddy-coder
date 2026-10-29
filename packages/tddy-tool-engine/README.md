@@ -53,7 +53,7 @@ project-home session, its `StartSession` schema offering the daemon's eligible h
 tables of fields the caller's context fills or the tool withholds. `project_home_diff` takes the worktree's diff
 against its base over a temporary `GIT_INDEX_FILE` (`read-tree HEAD`, `add -A`, `diff --cached`), so
 untracked files appear and the worktree's own index is never written; an option-shaped base ref is
-refused. `ListExecTools` is in `IN_JAIL_RELAYABLE_EXEC_TOOLS`. See
+refused. `ListExecTools` is in `IN_JAIL_RELAYABLE_EXEC_TOOLS`. `project_home_terminal_tools` runs `ReadSessionTerminal`: with `styles: true` its answer adds `styles` (each `StyleRun` as `{from, to}` plus only its set attributes, colours by name) and `highlighted_rows`; with `region` it answers `tddy_task::crop`'s box and echoes the region read. Without either, the answer is exactly the text-only one. JSON is built here, since `tddy-task` has no `serde`. See
 [project-home tools](../../docs/ft/daemon/project-concept.md#project-home-tools).
 
 ## Project-home git tools

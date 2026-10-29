@@ -14,6 +14,14 @@ use std::collections::BTreeSet;
 
 use crate::screen_dump::portable_dump;
 
+mod crop;
+mod grid;
+mod styles;
+
+pub use crop::{crop, CroppedCursor, CroppedGrid, GridRegion};
+pub use grid::{GridCursor, TextGrid};
+pub use styles::{highlighted_rows, RowStyles, StyleRun, TerminalColour};
+
 /// Private modes that control mouse reporting: normal tracking (1000), button-event tracking
 /// (1002), any-event tracking (1003), and the UTF-8 / SGR / urxvt / SGR-pixel encodings (1005,
 /// 1006, 1015, 1016). These are replayed in front of the raw ring ([`TerminalCapture::replay`]).
@@ -146,8 +154,11 @@ impl TerminalCapture {
             .view()
             .map(|line| line.text().trim_end().to_owned())
             .collect();
+        let styles::ScreenCells { styles, widths } = styles::walk_cells(self.screen.view());
         Some(TextGrid {
             lines,
+            styles,
+            widths,
             cursor: GridCursor {
                 row: cursor.row as u16,
                 col: cursor.col as u16,
@@ -430,33 +441,6 @@ pub struct ScreenSnapshot {
     /// The grid `data` was serialized at.
     pub rows: u16,
     pub cols: u16,
-}
-
-/// The visible text of a terminal's active screen buffer at a sequence point
-/// ([`TerminalCapture::text_grid`]).
-///
-/// Text only: no scrollback, colours or attributes. `lines` holds one entry per row of the grid
-/// (`rows` of them), each trimmed at the end.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct TextGrid {
-    /// The visible rows, top first.
-    pub lines: Vec<String>,
-    pub cursor: GridCursor,
-    pub cols: u16,
-    pub rows: u16,
-    /// The sequence point: every output byte below this absolute offset is reflected in `lines`,
-    /// none at or above it is. The same offset a [`ScreenSnapshot`] taken at that moment carries.
-    pub offset: u64,
-    /// Whether the application has bracketed paste (private mode 2004) switched on.
-    pub bracketed_paste: bool,
-}
-
-/// Where the cursor is on the grid, zero-based from the top-left cell.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct GridCursor {
-    pub row: u16,
-    pub col: u16,
-    pub visible: bool,
 }
 
 /// A contiguous slice of the capture ring returned by [`TerminalCapture::replay_last`],
