@@ -189,7 +189,8 @@ async fn a_project_home_mains_notify_operator_publishes_one_agent_attention_noti
             }),
         )
         .await
-        .assert_answered();
+        .assert_answered()
+        .assert_not_saying(HOOK_TOKEN);
 
     // Then the bus carries one attention notification in the agent's words, linking to the main
     let published = world.agent_notifications();
@@ -292,4 +293,32 @@ async fn a_main_with_no_hook_token_is_refused_naming_the_tool_and_why_and_publis
         Vec::new(),
         "agent notifications on the bus"
     );
+}
+
+#[tokio::test]
+async fn a_main_naming_another_session_still_notifies_as_itself() {
+    // Given the project's main and another claude-cli session of the project
+    let world = a_world().await;
+
+    // When the main's agent names the other session in its call
+    world
+        .notifies(
+            &world.home,
+            serde_json::json!({
+                "title": "Stack green",
+                "body_markdown": "",
+                "session_id": world.ordinary,
+            }),
+        )
+        .await
+        .assert_answered()
+        .assert_not_saying(HOOK_TOKEN);
+
+    // Then the one notification published is the main's: the tool publishes for its caller alone
+    let published: Vec<String> = world
+        .agent_notifications()
+        .into_iter()
+        .map(|notification| notification.session_id)
+        .collect();
+    assert_eq!(published, vec![world.home.clone()], "whose notifications");
 }
