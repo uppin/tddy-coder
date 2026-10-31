@@ -2,6 +2,7 @@
 
 use super::routed::{route_child_env, splice_route_args};
 use super::{InvokeRequest, InvokeResponse};
+use crate::adapters::HeadlessRenderer;
 use crate::error::BackendError;
 use crate::provider_route::HarnessRoute;
 use crate::stream;
@@ -221,6 +222,12 @@ pub struct ClaudeCodeBackend {
     progress_callback: ProgressCallback,
     /// The provider route the child runs on (`with_provider_route`); `None` for the vendor.
     pub(super) provider_route: Option<HarnessRoute>,
+    /// The agent's declaration its invocation is rendered from (`with_headless_renderer`); `None`
+    /// builds the argv by hand ([`build_claude_args`]).
+    ///
+    /// TODO(claude-headless): green makes the spec the only path — `create_backend("claude")`
+    /// passes one — and deletes `build_claude_args` and `create_mcp_config_temp_file`.
+    headless: Option<Arc<dyn HeadlessRenderer>>,
 }
 
 impl std::fmt::Debug for ClaudeCodeBackend {
@@ -236,6 +243,7 @@ impl std::fmt::Debug for ClaudeCodeBackend {
                 },
             )
             .field("provider_route", &self.provider_route)
+            .field("headless", &self.headless)
             .finish()
     }
 }
@@ -246,6 +254,7 @@ impl Clone for ClaudeCodeBackend {
             binary_path: self.binary_path.clone(),
             progress_callback: self.progress_callback.clone(),
             provider_route: self.provider_route.clone(),
+            headless: self.headless.clone(),
         }
     }
 }
@@ -263,6 +272,7 @@ impl ClaudeCodeBackend {
             binary_path: PathBuf::from("claude"),
             progress_callback: None,
             provider_route: None,
+            headless: None,
         }
     }
 
@@ -273,6 +283,7 @@ impl ClaudeCodeBackend {
             binary_path: path,
             progress_callback: None,
             provider_route: None,
+            headless: None,
         }
     }
 
@@ -284,6 +295,33 @@ impl ClaudeCodeBackend {
     {
         self.progress_callback = Some(Arc::new(Mutex::new(Box::new(f))));
         self
+    }
+
+    /// Render every invocation from `renderer` — the agent's `coding_agent.headless` declaration —
+    /// and read its output through the adapter the declaration names (builder). The rendered
+    /// program replaces [`Self::with_path`]'s binary.
+    #[must_use]
+    pub fn with_headless_renderer(mut self, renderer: Arc<dyn HeadlessRenderer>) -> Self {
+        self.headless = Some(renderer);
+        self
+    }
+
+    /// One invocation rendered from `renderer`: goal hints mapped onto the template's
+    /// `permission_mode` (plan, acceptEdits), the session onto `session_id`/`resume`, the system
+    /// prompt onto the append-system-prompt slot, the hints' allowed tools and the approval tool onto
+    /// the tool slots, and [`HeadlessRenderer::tool_server`] onto the MCP slot; the rendered files
+    /// written, the program spawned with today's environment, and its stdout read through
+    /// [`crate::adapters::HeadlessInvocation::adapter`], whose `exit_ok` replaces
+    /// `GoalHints::claude_nonzero_exit_ok_if_structured_response`.
+    fn invoke_from_spec(
+        &self,
+        request: InvokeRequest,
+        renderer: &Arc<dyn HeadlessRenderer>,
+    ) -> Result<InvokeResponse, BackendError> {
+        // TODO(claude-headless): implement — build a `HeadlessTurn` from `request`, `render` it,
+        // then spawn and read as `invoke_sync` does, through `HeadlessInvocation::adapter`.
+        let _ = (request, renderer);
+        todo!("claude-headless: ClaudeCodeBackend::invoke_from_spec")
     }
 }
 
@@ -303,6 +341,9 @@ impl super::CodingBackend for ClaudeCodeBackend {
 
 impl ClaudeCodeBackend {
     fn invoke_sync(&self, request: InvokeRequest) -> Result<InvokeResponse, BackendError> {
+        if let Some(renderer) = &self.headless {
+            return self.invoke_from_spec(request, renderer);
+        }
         let (system_prompt_path, cleanup_temp) = if let Some(ref path) = request.system_prompt_path
         {
             (Some(path.clone()), false)

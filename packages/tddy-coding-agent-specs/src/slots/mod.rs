@@ -137,6 +137,7 @@ mod tests {
                     curated: vec!["opus".to_string()],
                 },
                 context_globs: vec!["CLAUDE.md".to_string()],
+                headless: None,
             },
         }
     }

@@ -1,9 +1,10 @@
 //! The `coding_agent` extension: its schema, its owner, and the validated view of one agent.
 
+use std::collections::BTreeMap;
 use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
-use tddy_actions::tool::{ExtensionOwner, RunSection, ToolDef};
+use tddy_actions::tool::{ArgvItem, ExtensionOwner, RunSection, ToolDef, Transport};
 use thiserror::Error;
 
 /// The `extensions:` key this crate owns.
@@ -22,6 +23,8 @@ impl ExtensionOwner for CodingAgentExtension {
 
     fn validate(&self, tool_id: &str, section: &serde_yaml::Value) -> Result<(), String> {
         // TODO(claude-host): implement — deserialize a `CodingAgentSection`, resolve the hooks adapter.
+        // TODO(claude-headless): and refuse a `headless` section whose adapter is unregistered —
+        // `crate::headless::validate_headless(section, &AdapterRegistry::builtin())`.
         let _ = (tool_id, section);
         todo!("claude-host: CodingAgentExtension::validate")
     }
@@ -75,6 +78,50 @@ pub struct CodingAgentSection {
     /// What context sync copies from a codebase into the agent's working directory.
     #[serde(default)]
     pub context_globs: Vec<String>,
+    /// How the agent runs headless — one invocation per turn, its output read by a named adapter
+    /// (`#agent-tools 6/12`). `None` for an agent with no headless mode.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub headless: Option<HeadlessSection>,
+}
+
+impl CodingAgentSpec {
+    /// The agent's headless declaration, if it has one.
+    pub fn headless(&self) -> Option<&HeadlessSection> {
+        self.agent.headless.as_ref()
+    }
+}
+
+/// `coding_agent.headless`: one headless turn's argv template, its static env, the adapter its
+/// output is read through, and whether a non-zero exit with a structured result is a success.
+///
+/// The argv is rendered with `tddy_actions::tool::render_argv` over [`Self::run_section`], the
+/// slots spliced in as `slots` — the same grammar and slots as the PTY `run:` section.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct HeadlessSection {
+    pub argv: Vec<ArgvItem>,
+    /// Set on the process on top of what the launcher passes. Values are literal.
+    #[serde(default)]
+    pub env: BTreeMap<String, String>,
+    /// The stream adapter (`tddy_agent_backend::adapters::AdapterRegistry`) that reads the
+    /// agent's stdout: `claude-stream-json`. A name the registry does not hold is refused at load.
+    pub adapter: String,
+    /// A non-zero exit whose result carries a structured response counts as success. A property of
+    /// the agent, not of the goal: it replaces
+    /// `GoalHints::claude_nonzero_exit_ok_if_structured_response`.
+    #[serde(default)]
+    pub exit_ok_if_structured: bool,
+}
+
+impl HeadlessSection {
+    /// This section as a `stdio` run section, for `render_argv`.
+    pub fn run_section(&self) -> RunSection {
+        RunSection {
+            transport: Transport::Stdio,
+            argv: self.argv.clone(),
+            env: self.env.clone(),
+        }
+    }
 }
 
 /// Where an agent takes its MCP server registration.

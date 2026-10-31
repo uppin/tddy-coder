@@ -8,6 +8,7 @@
 //! launcher renders the template with `tddy_actions::tool::render_argv` and the slots with
 //! [`slots::render`]; nothing in that path hard-codes an agent.
 
+pub mod headless;
 pub mod slots;
 mod spec;
 
@@ -16,9 +17,9 @@ use std::path::Path;
 use tddy_actions::tool::{ToolError, ToolRegistry};
 
 pub use spec::{
-    CodingAgentExtension, CodingAgentSection, CodingAgentSpec, FlagSlot, HooksSlot,
-    InstructionsSlot, McpFormat, McpSlot, ModelsSection, SpecError, ToolSlot, Unsupported,
-    CODING_AGENT_EXTENSION,
+    CodingAgentExtension, CodingAgentSection, CodingAgentSpec, FlagSlot, HeadlessSection,
+    HooksSlot, InstructionsSlot, McpFormat, McpSlot, ModelsSection, SpecError, ToolSlot,
+    Unsupported, CODING_AGENT_EXTENSION,
 };
 
 /// The embedded agent specs: `(source path, YAML)`.
