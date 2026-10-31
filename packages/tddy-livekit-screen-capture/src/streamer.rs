@@ -54,9 +54,13 @@ impl ScreenShareStreamer {
             anyhow::bail!("streamer already started");
         }
 
-        let (room, mut room_events) = Room::connect(url, token, RoomOptions::default())
-            .await
-            .context("failed to connect to LiveKit")?;
+        let (room, mut room_events) = Room::connect(
+            url,
+            token,
+            tddy_livekit::tddy_room_options(tddy_livekit::ContinualGatheringPolicy::GatherOnce),
+        )
+        .await
+        .context("failed to connect to LiveKit")?;
 
         let room_arc = Arc::new(room);
         tokio::spawn(async move { while room_events.recv().await.is_some() {} });

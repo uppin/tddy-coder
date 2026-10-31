@@ -11,6 +11,7 @@ use tddy_daemon::daemon_config_service::{CommonRoomSupervisor, DaemonConfigServi
 use tddy_daemon::server::serving_sandboxed_codebase_support;
 use tddy_daemon_extensions::{IntegrationState, IntegrationStatusBoard};
 use tddy_rpc::{Code, Request};
+use tddy_service::proto::daemon_config::IceGathering as WireIceGathering;
 use tddy_service::proto::daemon_config::{
     ClientAllowedAgent, DaemonConfigService as DaemonConfigServiceTrait, DaemonSettings,
     GetClientConfigRequest, GetClientConfigResponse, GetConfigRequest, GetIntegrationStatusRequest,
@@ -177,6 +178,9 @@ impl SettingsBuilder {
                 common_room: Some(self.common_room),
                 api_secret_set: false,
                 enabled: self.livekit_enabled,
+                // Unspecified, as a form predating the ICE gathering control sends — the daemon
+                // reads it as `gather_once`, the configuration default.
+                ice_gathering: WireIceGathering::Unspecified as i32,
             }),
             listen: Some(ListenSettings {
                 web_port: Some(self.web_port),

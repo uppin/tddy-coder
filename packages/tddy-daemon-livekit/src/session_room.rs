@@ -1741,7 +1741,7 @@ async fn join_room<S: RpcService>(
         &credentials.url,
         &token_generator,
         service,
-        tddy_livekit::RoomOptions::default(),
+        tddy_livekit::tddy_room_options(crate::ice_gathering_policy(credentials.ice_gathering)),
         None,
         None,
         None,
@@ -1766,6 +1766,7 @@ struct LiveKitCredentials {
     url: String,
     api_key: String,
     api_secret: String,
+    ice_gathering: tddy_daemon_kernel::config::IceGathering,
 }
 
 impl LiveKitCredentials {
@@ -1785,6 +1786,7 @@ impl LiveKitCredentials {
             url: configured(&livekit.url)?,
             api_key: configured(&livekit.api_key)?,
             api_secret: configured(&livekit.api_secret)?,
+            ice_gathering: livekit.ice_gathering,
         })
     }
 }
