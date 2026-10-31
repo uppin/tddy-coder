@@ -13,6 +13,7 @@ use livekit::prelude::*;
 
 use crate::client::RpcClient;
 use crate::client_factory::LiveKitRpcClientFactory;
+use crate::ContinualGatheringPolicy;
 
 /// Why a client could not be pointed at a serving participant.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -53,9 +54,13 @@ pub async fn connect_client(
     target_identity: &str,
     wait_for_participant: Duration,
 ) -> Result<ConnectedClient, ConnectError> {
-    let (room, mut events) = Room::connect(url, token, RoomOptions::default())
-        .await
-        .map_err(|e| ConnectError::Room(e.to_string()))?;
+    let (room, mut events) = Room::connect(
+        url,
+        token,
+        crate::tddy_room_options(ContinualGatheringPolicy::GatherOnce),
+    )
+    .await
+    .map_err(|e| ConnectError::Room(e.to_string()))?;
     let room = Arc::new(room);
 
     let target: ParticipantIdentity = target_identity.to_string().into();

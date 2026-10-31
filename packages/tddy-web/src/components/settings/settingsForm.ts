@@ -11,9 +11,13 @@
 import { create } from "@bufbuild/protobuf";
 import {
   DaemonSettingsSchema,
+  IceGathering,
   type DaemonSettings,
   type GetConfigResponse,
 } from "../../gen/daemon_config_pb";
+
+/** The ICE gathering policy as the select control holds it. */
+export type LivekitIceGathering = "gather_once" | "gather_continually";
 
 export interface DaemonSettingsFormState {
   livekitUrl: string;
@@ -29,6 +33,12 @@ export interface DaemonSettingsFormState {
    * field, so turning LiveKit back on is one toggle rather than four credentials retyped.
    */
   livekitEnabled: boolean;
+  /**
+   * How the daemon's ICE agent gathers host candidates. `gather_once` is the default — the
+   * SDK's continual re-gathering leaks the superseded ICE sockets on every network change
+   * (livekit/rust-sdks#1512).
+   */
+  livekitIceGathering: LivekitIceGathering;
   webPort: string;
   webHost: string;
 }
@@ -50,6 +60,12 @@ export function toFormState(response: GetConfigResponse): DaemonSettingsFormStat
     // A daemon with no `livekit:` block joins no common room, so the toggle reads off rather than
     // defaulting to on for a room that does not exist.
     livekitEnabled: livekit?.enabled ?? false,
+    // Unspecified — a configuration that predates the key — reads as the default the daemon
+    // applies, so the control never shows a value the daemon is not running.
+    livekitIceGathering:
+      livekit?.iceGathering === IceGathering.GATHER_CONTINUALLY
+        ? "gather_continually"
+        : "gather_once",
     webPort: listen?.webPort === undefined ? "" : String(listen.webPort),
     webHost: listen?.webHost ?? "",
   };
@@ -69,6 +85,12 @@ export function toUpdateSettings(form: DaemonSettingsFormState): DaemonSettings 
       // The operator's switch, always sent: the daemon assigns what the update carries, so a flag
       // left out of the message would read as "switch it off" rather than "leave it alone".
       enabled: form.livekitEnabled,
+      // The policy, always sent explicitly: unspecified would read as the daemon's default, and
+      // only the explicit value proves the operator's choice reached the wire.
+      iceGathering:
+        form.livekitIceGathering === "gather_continually"
+          ? IceGathering.GATHER_CONTINUALLY
+          : IceGathering.GATHER_ONCE,
       // `api_secret_set` is read-only: the daemon ignores it on update.
     },
     listen: {

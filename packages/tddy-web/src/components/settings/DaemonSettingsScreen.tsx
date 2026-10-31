@@ -11,7 +11,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { Code, ConnectError, type Client } from "@connectrpc/connect";
 import type { DaemonConfigService } from "../../gen/daemon_config_pb";
 import { integrationStatusText } from "./integrationStatusText";
-import { toFormState, toUpdateSettings, type DaemonSettingsFormState } from "./settingsForm";
+import { toFormState, toUpdateSettings, type DaemonSettingsFormState, type LivekitIceGathering } from "./settingsForm";
 
 export interface DaemonSettingsScreenProps {
   client: Client<typeof DaemonConfigService>;
@@ -200,6 +200,25 @@ export function DaemonSettingsScreen({ client, sessionToken }: DaemonSettingsScr
                 value={form.livekitCommonRoom}
                 onChange={(e) => edit("livekitCommonRoom", e.target.value)}
               />
+            </label>
+            <label>
+              <span className={labelClass}>ICE gathering</span>
+              <select
+                data-testid="daemon-settings-livekit-ice-gathering"
+                className={inputClass}
+                value={form.livekitIceGathering}
+                onChange={(e) =>
+                  edit("livekitIceGathering", e.target.value as LivekitIceGathering)
+                }
+              >
+                <option value="gather_once">Gather once (recommended)</option>
+                <option value="gather_continually">Gather continually</option>
+              </select>
+              <span className="text-xs text-muted-foreground">
+                Gathering continually keeps a session alive across a network switch without a
+                reconnect, but leaks file descriptors on hosts whose networks change; the daemon
+                runs out of file descriptors after a couple of days.
+              </span>
             </label>
           </div>
 

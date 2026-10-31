@@ -27,6 +27,7 @@ pub struct LiveKitTerminalExposure {
     url: String,
     api_key: String,
     api_secret: String,
+    ice_gathering: tddy_daemon_kernel::config::IceGathering,
 }
 
 impl LiveKitTerminalExposure {
@@ -41,6 +42,7 @@ impl LiveKitTerminalExposure {
             url: livekit.public_url.as_ref().unwrap_or(url).clone(),
             api_key: livekit.api_key.as_ref()?.clone(),
             api_secret: livekit.api_secret.as_ref()?.clone(),
+            ice_gathering: livekit.ice_gathering,
         }))
     }
 }
@@ -72,7 +74,7 @@ impl TerminalExposure for LiveKitTerminalExposure {
             &self.url,
             &token,
             terminal,
-            Default::default(),
+            tddy_livekit::tddy_room_options(crate::ice_gathering_policy(self.ice_gathering)),
             None,
             None,
         )

@@ -7,7 +7,7 @@
 //! file: the service authenticates, calls in here, persists, and applies.
 
 use tddy_rpc::Status;
-use tddy_service::proto::daemon_config::{DaemonSettings, ListenSettings, LiveKitSettings};
+use tddy_service::proto::daemon_config::{self, DaemonSettings, ListenSettings, LiveKitSettings};
 
 use crate::config::{DaemonConfig, LiveKitConfig};
 
@@ -36,6 +36,7 @@ pub fn redacted_settings(config: &DaemonConfig) -> DaemonSettings {
             common_room: livekit.common_room.clone(),
             api_secret_set: livekit.api_secret.is_some(),
             enabled: livekit.enabled,
+            ice_gathering: proto_ice_gathering(livekit.ice_gathering),
         }),
         listen: Some(ListenSettings {
             web_port: config.listen.web_port.map(u32::from),
@@ -91,7 +92,30 @@ fn merged_livekit(
     if settings.api_secret.is_some() {
         livekit.api_secret = settings.api_secret.clone();
     }
+    livekit.ice_gathering = kernel_ice_gathering(settings.ice_gathering);
     Ok(livekit)
+}
+
+/// The operator's configured policy, as the proto enum's value.
+fn proto_ice_gathering(ice_gathering: crate::config::IceGathering) -> i32 {
+    match ice_gathering {
+        crate::config::IceGathering::GatherOnce => daemon_config::IceGathering::GatherOnce as i32,
+        crate::config::IceGathering::GatherContinually => {
+            daemon_config::IceGathering::GatherContinually as i32
+        }
+    }
+}
+
+/// The value an update carries, as the operator's policy. Unspecified — a client that predates
+/// the control, or a YAML without the key — reads as the default, [`IceGathering::GatherOnce`],
+/// the same value an absent key serialises to.
+fn kernel_ice_gathering(value: i32) -> crate::config::IceGathering {
+    match daemon_config::IceGathering::try_from(value) {
+        Ok(daemon_config::IceGathering::GatherContinually) => {
+            crate::config::IceGathering::GatherContinually
+        }
+        _ => crate::config::IceGathering::GatherOnce,
+    }
 }
 
 /// A LiveKit URL a client can actually connect with. Anything else is refused rather than stored:
@@ -125,9 +149,14 @@ fn web_port(port: u32) -> Result<u16, Status> {
 /// toggle off would leave the daemon in the room it was just told to leave.
 fn common_room_changed(before: &Option<LiveKitConfig>, after: &Option<LiveKitConfig>) -> bool {
     let identity = |livekit: &Option<LiveKitConfig>| {
-        livekit
-            .as_ref()
-            .map(|lk| (lk.enabled, lk.url.clone(), lk.common_room.clone()))
+        livekit.as_ref().map(|lk| {
+            (
+                lk.enabled,
+                lk.url.clone(),
+                lk.common_room.clone(),
+                lk.ice_gathering,
+            )
+        })
     };
     identity(before) != identity(after)
 }
@@ -193,6 +222,7 @@ listen:
             public_url: None,
             api_secret: None,
             common_room: "tddy-lobby".to_string(),
+            ice_gathering: None,
             web_port: 8899,
             web_host: "127.0.0.1".to_string(),
         }
@@ -205,6 +235,9 @@ listen:
         public_url: Option<String>,
         api_secret: Option<String>,
         common_room: String,
+        /// The ICE gathering control as the form sends it — unspecified when the form predates
+        /// the control.
+        ice_gathering: Option<i32>,
         web_port: u32,
         web_host: String,
     }
@@ -237,6 +270,12 @@ listen:
             self
         }
 
+        /// The ICE gathering control as the form sends it, as the generated enum's value.
+        fn with_ice_gathering(mut self, ice_gathering: daemon_config::IceGathering) -> Self {
+            self.ice_gathering = Some(ice_gathering as i32);
+            self
+        }
+
         fn with_web_port(mut self, web_port: u32) -> Self {
             self.web_port = web_port;
             self
@@ -257,6 +296,7 @@ listen:
                     common_room: Some(self.common_room),
                     api_secret_set: false,
                     enabled: self.livekit_enabled,
+                    ice_gathering: self.ice_gathering.unwrap_or(0),
                 }),
                 listen: Some(ListenSettings {
                     web_port: Some(self.web_port),
@@ -684,6 +724,87 @@ livekit:
         assert!(
             !update.reconnect_common_room,
             "an unrelated edit dropped the common-room connection"
+        );
+    }
+
+    // -----------------------------------------------------------------------
+    // The ICE gathering policy: what the UI is shown, what an update adopts, and whether saving it
+    // rebuilds the live connection.
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn reports_the_configured_ice_gathering_policy() {
+        // Given a daemon configured to gather continually
+        let config: DaemonConfig =
+            serde_yaml::from_str("livekit:\n  ice_gathering: gather_continually\n")
+                .expect("the daemon fixture did not parse");
+
+        // When its settings are projected for the UI
+        let settings = redacted_settings(&config);
+
+        // Then the control shows what is configured rather than a default
+        assert_eq!(
+            settings.livekit.expect("no livekit block").ice_gathering,
+            daemon_config::IceGathering::GatherContinually as i32
+        );
+    }
+
+    #[test]
+    fn adopts_gather_continually_from_an_update() {
+        // Given the operator choosing continual gathering
+        let settings = the_current_settings()
+            .with_ice_gathering(daemon_config::IceGathering::GatherContinually)
+            .build();
+
+        // When it is applied
+        let update = accepted(apply_update(&a_configured_daemon(), &settings));
+
+        // Then the daemon's own configuration says so
+        assert_eq!(
+            update
+                .config
+                .livekit
+                .expect("no livekit block")
+                .ice_gathering,
+            tddy_daemon_kernel::config::IceGathering::GatherContinually
+        );
+    }
+
+    #[test]
+    fn reads_an_unspecified_ice_gathering_as_gather_once() {
+        // Given an update from a client that predates the ICE gathering control
+        let settings = the_current_settings().build();
+
+        // When it is applied
+        let update = accepted(apply_update(&a_configured_daemon(), &settings));
+
+        // Then the unspecified value reads as the default, which is also what an operator
+        // deleting the YAML key gets
+        assert_eq!(
+            update
+                .config
+                .livekit
+                .expect("no livekit block")
+                .ice_gathering,
+            tddy_daemon_kernel::config::IceGathering::GatherOnce
+        );
+    }
+
+    #[test]
+    fn reconnects_the_common_room_when_the_ice_gathering_policy_changes() {
+        // Given an update choosing the policy the daemon is not connected with
+        let settings = the_current_settings()
+            .with_ice_gathering(daemon_config::IceGathering::GatherContinually)
+            .build();
+
+        // When it is applied
+        let update = accepted(apply_update(&a_configured_daemon(), &settings));
+
+        // Then the live connection is rebuilt — a room joined under one policy does not acquire
+        // the other's behaviour by itself
+        assert!(
+            update.reconnect_common_room,
+            "a changed ICE gathering policy left the live connection untouched"
         );
     }
 }

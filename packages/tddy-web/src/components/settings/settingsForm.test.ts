@@ -8,7 +8,7 @@
 
 import { describe, it, expect } from "bun:test";
 import { create } from "@bufbuild/protobuf";
-import { GetConfigResponseSchema } from "../../gen/daemon_config_pb";
+import { GetConfigResponseSchema, IceGathering } from "../../gen/daemon_config_pb";
 import {
   toFormState,
   toUpdateSettings,
@@ -205,5 +205,52 @@ describe("daemon settings form", () => {
 
     // Then the port crosses the wire as a number
     expect(settings.listen?.webPort).toEqual(9911);
+  });
+
+  it("shows the configured ICE gathering policy in the form", () => {
+    // Given a daemon configured to gather continually
+    const response = aConfiguredDaemonResponse();
+    response.settings!.livekit!.iceGathering = IceGathering.GATHER_CONTINUALLY;
+
+    // When the form is loaded from it
+    const form = toFormState(response);
+
+    // Then the control shows what is configured rather than a default
+    expect(form.livekitIceGathering).toEqual("gather_continually");
+  });
+
+  it("reads an unspecified ICE gathering as gather once", () => {
+    // Given a daemon whose stored configuration predates the control
+    const response = aConfiguredDaemonResponse();
+
+    // When the form is loaded from it
+    const form = toFormState(response);
+
+    // Then the control shows the default, which is what the daemon applies for unspecified
+    expect(form.livekitIceGathering).toEqual("gather_once");
+  });
+
+  it("carries a chosen gather continually in the update", () => {
+    // Given a form where the operator chose continual gathering
+    const form = theLoadedForm({ livekitIceGathering: "gather_continually" });
+
+    // When the update is built
+    const settings = toUpdateSettings(form);
+
+    // Then it crosses the wire as the enum value, not as unspecified
+    expect(settings.livekit?.iceGathering).toEqual(IceGathering.GATHER_CONTINUALLY);
+  });
+
+  it("carries a chosen gather once in the update", () => {
+    // Given a form where the operator chose gather-once explicitly. This is the direction that
+    // discriminates: an unspecified proto3 enum already reads zero, so only the explicit
+    // `GATHER_ONCE` value proves the form's choice reached the wire.
+    const form = theLoadedForm({ livekitIceGathering: "gather_once" });
+
+    // When the update is built
+    const settings = toUpdateSettings(form);
+
+    // Then the daemon is told gather-once, not unspecified
+    expect(settings.livekit?.iceGathering).toEqual(IceGathering.GATHER_ONCE);
   });
 });
