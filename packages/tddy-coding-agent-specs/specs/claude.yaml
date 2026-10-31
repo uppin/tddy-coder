@@ -41,6 +41,30 @@ extensions:
       default: opus
       curated: [opus, sonnet, haiku, claude-opus-5, claude-sonnet-5, claude-haiku-4-5-20251001]
     context_globs: [AGENTS.md, ".agents/**", CLAUDE.md, ".claude/**", .mcp.json]
+    # --- Headless (`#agent-tools 6/12`): one `claude -p` per turn, for the workflow backend
+    # (`tddy-coder --agent claude`) and a headless coding subagent. It renders byte-for-byte what
+    # `build_claude_args` and `headless_driver/argv.rs::claude()` built by hand:
+    #   claude -p PROMPT --output-format stream-json --verbose [--permission-mode P] [--model M]
+    #          [(--resume|--session-id) ID] <slot flags>
+    # The output is read by the `claude-stream-json` adapter (`tddy_agent_backend::adapters`).
+    headless:
+      argv:
+        - "{binary}"
+        - -p
+        - "{prompt}"
+        - --output-format
+        - stream-json
+        - --verbose
+        - { if: permission_mode, then: ["--permission-mode", "{permission_mode}"] }
+        - { if: model, then: ["--model", "{model}"] }
+        - if: session_id
+          then:
+            - { if: resume, then: ["--resume", "{session_id}"], else: ["--session-id", "{session_id}"] }
+        - { splice: slots }
+      env: {}
+      adapter: claude-stream-json
+      # `claude -p` can exit 1 after an ExitPlanMode despite a complete structured result.
+      exit_ok_if_structured: true
 # --- Jail sections (`#agent-tools 5/12`): what a sandboxed launch lowers into the jail. ----------
 # A persistent home at <tddyhome>/homes/claude, mounted rw: refreshed OAuth tokens, history and
 # settings survive the session. Replaces <tddyhome>/sandbox-claude-home, migrated once in place.
