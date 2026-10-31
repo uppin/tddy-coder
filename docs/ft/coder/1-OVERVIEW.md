@@ -80,6 +80,7 @@ its changeset wraps.
 | PRD | Affects |
 |-----|---------|
 | [Restructure refusal truth and authoring gates](1-WIP/PRD-2026-09-17-restructure-refusal-truth-and-authoring-gates.md) | [Rust code restructuring](rust-code-restructuring.md) — refusal classes, import restoration, a leftover-reference preflight, `restructure snapshot`, and the authoring gates |
+| [Headless Cursor, Codex and Oz run from their tool definitions](1-WIP/PRD-2026-10-31-headless-cursor-codex-oz-from-specs.md) | `#agent-tools 9/12` |
 
 ## Integration Points
 
