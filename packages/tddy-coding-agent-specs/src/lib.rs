@@ -17,7 +17,7 @@ use std::path::Path;
 use tddy_actions::tool::{ToolError, ToolRegistry};
 
 pub use spec::{
-    AgentVariant, CodingAgentExtension, CodingAgentSection, CodingAgentSpec, FlagSlot,
+    AcpSection, AgentVariant, CodingAgentExtension, CodingAgentSection, CodingAgentSpec, FlagSlot,
     HeadlessSection, HooksSlot, InstructionsSlot, McpFormat, McpSlot, ModelsSection, Placement,
     PlacementError, ResumeSlot, RouteSlot, SpecError, ToolSlot, Unsupported, VariantError,
     CODING_AGENT_EXTENSION, HOST_AGENT_VARIANT,
@@ -40,6 +40,12 @@ pub const CODEX_SPEC_YAML: &str = include_str!("../specs/codex.yaml");
 
 /// `specs/oz.yaml` (`#agent-tools 9/12`), embedded.
 pub const OZ_SPEC_YAML: &str = include_str!("../specs/oz.yaml");
+
+/// `specs/claude-acp.yaml` (`#agent-tools 11/12`), embedded.
+pub const CLAUDE_ACP_SPEC_YAML: &str = include_str!("../specs/claude-acp.yaml");
+
+/// `specs/codex-acp.yaml` (`#agent-tools 11/12`), embedded.
+pub const CODEX_ACP_SPEC_YAML: &str = include_str!("../specs/codex-acp.yaml");
 
 /// The embedded agent specs: `(source path, YAML)`.
 pub fn builtin_specs() -> Vec<(&'static str, &'static str)> {
@@ -71,6 +77,14 @@ pub fn builtin_specs() -> Vec<(&'static str, &'static str)> {
         (
             "packages/tddy-coding-agent-specs/specs/oz.yaml",
             OZ_SPEC_YAML,
+        ),
+        (
+            "packages/tddy-coding-agent-specs/specs/claude-acp.yaml",
+            CLAUDE_ACP_SPEC_YAML,
+        ),
+        (
+            "packages/tddy-coding-agent-specs/specs/codex-acp.yaml",
+            CODEX_ACP_SPEC_YAML,
         ),
     ]
 }

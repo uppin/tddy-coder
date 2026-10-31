@@ -61,6 +61,20 @@ extensions:
       files_dir: provider-route
       key_env: TDDY_OPENCODE_PROVIDER_KEY
     placements: [host, jail]
+    # --- ACP (`#agent-tools 11/12`): `opencode acp`, behind an `opencode` coding subagent and the
+    # `opencode` workflow backend (`tddy-coder --agent opencode`). It renders what the launcher and
+    # `OpenCodeAcpBackend` build by hand. The tool server reaches it as `session/new`
+    # `mcp_servers`; a managed launch switches its built-in tools off through inline config in
+    # `OPENCODE_CONFIG_CONTENT`, merged over the route's. The route's configuration file is written
+    # owner-only and named in `OPENCODE_CONFIG` by the `opencode-route-file` hooks adapter, which
+    # holds it for the agent's lifetime; the route's `--model` is not passed.
+    acp:
+      command: ["{binary}", acp]
+      env: {}
+      hooks_adapter: opencode-route-file
+      mcp: { kind: acp-session }
+      tool_deny: { config_env: OPENCODE_CONFIG_CONTENT }
+      withdraw_native: [bash, read, write, edit, patch, glob, grep, list]
 # --- Jail sections: what a sandboxed launch lowers into the jail. ---------------------------------
 # A per-session home: the jail holds no credentials of its own, its provider route brings them.
 home: { kind: session }

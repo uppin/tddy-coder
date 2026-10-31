@@ -9,7 +9,7 @@ use std::path::PathBuf;
 
 use pretty_assertions::assert_eq;
 use support::{a_host, a_tool_yaml, a_tools_dir};
-use tddy_actions::tool::{ResolvedTool, ToolError, ToolRegistry};
+use tddy_actions::tool::{resolve_sibling, ResolvedTool, ToolBinary, ToolError, ToolRegistry};
 
 fn a_registry_with(tools: &support::AToolsDir) -> ToolRegistry {
     ToolRegistry::load(ToolRegistry::builtin().unwrap(), tools.path()).expect("the tools load")
@@ -151,4 +151,69 @@ fn resolving_an_unknown_id_is_refused() {
 
     // Then
     assert_eq!(refused, ToolError::UnknownTool("jq".into()));
+}
+
+/// `codex-acp`'s binary as `codex-acp.yaml` declares it: beside its `codex` dep.
+fn a_binary_beside_codex() -> ToolBinary {
+    ToolBinary {
+        command: "codex-acp".into(),
+        env: Some("TDDY_CODEX_ACP_CLI".into()),
+        target: None,
+        sibling_of: Some("codex".into()),
+    }
+}
+
+/// `codex`, resolved to `binary`.
+fn codex_resolved_at(binary: &str) -> ResolvedTool {
+    ResolvedTool {
+        id: "codex".into(),
+        command: "codex".into(),
+        binary: PathBuf::from(binary),
+        reads: vec![],
+        network: Default::default(),
+    }
+}
+
+#[test]
+fn a_sibling_binary_resolves_in_the_directory_of_its_deps_resolved_binary() {
+    // Given — `codex` resolved into a Homebrew Cellar, `codex-acp` installed beside it
+    let codex = codex_resolved_at("/opt/homebrew/Cellar/codex/0.9/bin/codex");
+    let host = a_host()
+        .with_path(&["/usr/bin"])
+        .with_executable("/usr/bin/codex-acp")
+        .with_executable("/opt/homebrew/Cellar/codex/0.9/bin/codex")
+        .with_executable("/opt/homebrew/Cellar/codex/0.9/bin/codex-acp");
+
+    // When
+    let resolved = resolve_sibling("codex-acp", &a_binary_beside_codex(), &codex, &host);
+
+    // Then — beside the dep, not the `PATH` hit
+    assert_eq!(
+        resolved,
+        Ok(PathBuf::from(
+            "/opt/homebrew/Cellar/codex/0.9/bin/codex-acp"
+        ))
+    );
+}
+
+#[test]
+fn a_sibling_binary_absent_beside_its_dep_is_unresolvable_naming_both() {
+    // Given — `codex-acp` is on the `PATH`, but not beside the resolved `codex`
+    let codex = codex_resolved_at("/opt/codex/bin/codex");
+    let host = a_host()
+        .with_path(&["/usr/bin"])
+        .with_executable("/usr/bin/codex-acp")
+        .with_executable("/opt/codex/bin/codex");
+
+    // When
+    let refused = resolve_sibling("codex-acp", &a_binary_beside_codex(), &codex, &host);
+
+    // Then — no fall back to the `PATH`
+    assert_eq!(
+        refused,
+        Err(ToolError::Unresolvable {
+            tool: "codex-acp".into(),
+            searched: "/opt/codex/bin/codex-acp (beside codex at /opt/codex/bin/codex)".into(),
+        })
+    );
 }

@@ -94,6 +94,9 @@ impl ToolRegistry {
         // TODO(build-tools): a `binary.target` resolves through `host.target_output` before `env`
         // and the `PATH` search; a host answering `None` makes the tool `Unresolvable`, naming the
         // target and path it searched.
+        // TODO(acp-agents): a `binary.sibling_of` resolves, after `env`, through `resolve_sibling`
+        // beside that dep's resolved binary — deps resolve first, so it is already in the closure.
+        // Load refuses a `sibling_of` that is not one of the tool's `deps`.
         let _ = (ids, host);
         todo!("tool-defs: ToolRegistry::resolve_closure")
     }

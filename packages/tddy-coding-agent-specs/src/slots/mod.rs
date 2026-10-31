@@ -4,6 +4,7 @@
 //! Every renderer is pure except [`instructions`], which reads the files it prepends to. Nothing is
 //! written here: the launcher writes [`RenderedSlots::files`] before it spawns the agent.
 
+pub mod acp;
 pub mod cursor;
 pub mod headless_mcp;
 pub mod hooks;
@@ -183,6 +184,7 @@ mod tests {
                 resume: None,
                 placements: crate::Placement::anywhere(),
                 variants: BTreeMap::new(),
+                acp: None,
             },
         }
     }

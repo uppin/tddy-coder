@@ -16,17 +16,24 @@
 //! listing and `warp-resume-token` scrapes a resume token off an exited session's terminal. Their
 //! shapes are not a stream's, so they have their own traits and registry ([`LaunchAdapters`]).
 //!
+//! [`acp_hooks`] holds the ACP side (`#agent-tools 11/12`): `codex-acp-login` and
+//! `opencode-route-file`, named by a spec's `coding_agent.acp.hooks_adapter` and held in their own
+//! registry ([`AcpHooksAdapters`]).
+//!
 //! [`headless`] is the other half of the seam: the port a spec-driven renderer implements, so the
 //! consumers in this crate (`ClaudeCodeBackend`, `HeadlessDriver`) can launch from a spec without
 //! naming the specs crate.
 
+pub mod acp_hooks;
 mod claude_stream_json;
+mod codex_acp_login;
 mod codex_jsonl;
 mod cursor_models;
 mod cursor_stream;
 pub mod headless;
 pub mod launch;
 mod opencode_models;
+mod opencode_route_file;
 mod oz_ndjson;
 mod warp_resume_token;
 
@@ -42,6 +49,12 @@ use crate::stream::{ProgressEvent, StreamResult};
 /// The error a [`HeadlessRenderer`] and a [`StreamAdapter`] report, named here for implementors
 /// outside this crate.
 pub use crate::error::BackendError as AdapterError;
+// `#agent-tools 11/12`: what an ACP agent's driver runs with around a session — the Codex login
+// retry, the OpenCode route file. Neither a stream nor a PTY reader, so a registry of their own.
+pub use acp_hooks::{
+    AcpHooksAdapter, AcpHooksAdapters, AcpHooksLaunch, AcpOpenScope, CodexAcpLogin,
+    OpenCodeRouteFile, PreparedAcpHooks, CODEX_ACP_LOGIN, OPENCODE_ROUTE_FILE,
+};
 pub use claude_stream_json::ClaudeStreamJson;
 // `#agent-tools 9/12`: the stream adapters of Cursor's, Codex's and Oz's headless runs, and Cursor's
 // model listing.

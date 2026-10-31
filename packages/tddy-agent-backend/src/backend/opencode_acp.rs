@@ -34,6 +34,9 @@ const OWNER_ONLY_FILE: u32 = 0o600;
 
 /// The directory a route's files are written into. It is created owner-only, held by the driver
 /// that runs the agent, and removed when that driver ends.
+// TODO(acp-agents): green moves this into `adapters::OpenCodeRouteFile` (`opencode-route-file`),
+// and the backend is built from `opencode.yaml`'s `coding_agent.acp`
+// (`tddy_coder::acp_from_spec::opencode_acp_backend_from_spec`).
 struct RouteFiles {
     dir: PathBuf,
     /// The file `OPENCODE_CONFIG` names: the route's first file.

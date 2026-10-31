@@ -28,6 +28,9 @@ impl ExtensionOwner for CodingAgentExtension {
         // TODO(harness-clis): and refuse a `models.adapter` / `resume.adapter` that
         // `tddy_agent_backend::adapters::LaunchAdapters::builtin()` does not hold, a `models` with
         // one of `list_command`/`adapter` but not the other, and an empty `placements`.
+        // TODO(acp-agents): and refuse an `acp.hooks_adapter` that
+        // `tddy_agent_backend::adapters::AcpHooksAdapters::builtin()` does not hold, and a spec whose
+        // `run.transport` is `acp` but which declares no `acp` section.
         let _ = (tool_id, section);
         todo!("claude-host: CodingAgentExtension::validate")
     }
@@ -104,6 +107,77 @@ pub struct CodingAgentSection {
     /// codebase that lives elsewhere. Empty for an agent with none.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub variants: BTreeMap<String, AgentVariant>,
+    /// How the agent runs over the Agent Client Protocol (`#agent-tools 11/12`): its launch
+    /// command, the hooks adapter its driver runs with, and how a managed launch withdraws its
+    /// native tools. `None` for an agent with no ACP mode.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub acp: Option<AcpSection>,
+}
+
+/// `coding_agent.acp`: one ACP launch of the agent (`#agent-tools 11/12`).
+///
+/// The command is rendered with `tddy_actions::tool::render_argv` over [`Self::run_section`] —
+/// `{binary}` bound to the resolved binary, `route_args` to the provider route's arguments. The
+/// tool server reaches the agent through the MCP slot (`acp-session`: `session/new`
+/// `mcp_servers`), and a managed launch withdraws [`Self::withdraw_native`] through the deny slot.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct AcpSection {
+    /// The argv template of the ACP agent process.
+    pub command: Vec<ArgvItem>,
+    /// Set on the process on top of what the launcher passes. Values are literal.
+    #[serde(default)]
+    pub env: BTreeMap<String, String>,
+    /// The hooks adapter (`tddy_agent_backend::adapters::AcpHooksAdapters`) the driver runs with —
+    /// `codex-acp-login`, `opencode-route-file`; `None` runs it with no hooks. A name the registry
+    /// does not hold is refused at load.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub hooks_adapter: Option<String>,
+    /// Where an ACP launch registers its MCP server, when that differs from `coding_agent.mcp`
+    /// (OpenCode: none on its PTY launch, `session/new` here). `None` uses `coding_agent.mcp`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mcp: Option<McpSlot>,
+    /// How an ACP launch withdraws native tools, when that differs from `coding_agent.tool_deny`
+    /// (OpenCode: `config_env` here, `unsupported` on its PTY launch). `None` uses
+    /// `coding_agent.tool_deny`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tool_deny: Option<ToolSlot>,
+    /// The agent's own file-system and shell tools, by the names its deny slot takes — what a
+    /// managed launch withdraws. Empty for an agent that cannot withdraw any.
+    #[serde(default)]
+    pub withdraw_native: Vec<String>,
+}
+
+impl AcpSection {
+    /// This section's command as an `acp` run section, for `render_argv`.
+    pub fn run_section(&self) -> RunSection {
+        RunSection {
+            transport: Transport::Acp,
+            argv: self.command.clone(),
+            env: self.env.clone(),
+        }
+    }
+}
+
+impl CodingAgentSpec {
+    /// The agent's ACP declaration, if it has one.
+    pub fn acp(&self) -> Option<&AcpSection> {
+        self.agent.acp.as_ref()
+    }
+
+    /// The MCP slot an ACP launch registers its tool server through: `acp.mcp`, else
+    /// `coding_agent.mcp`. `None` for an agent with no ACP mode.
+    pub fn acp_mcp(&self) -> Option<&McpSlot> {
+        let acp = self.acp()?;
+        Some(acp.mcp.as_ref().unwrap_or(&self.agent.mcp))
+    }
+
+    /// The deny slot an ACP launch withdraws native tools through: `acp.tool_deny`, else
+    /// `coding_agent.tool_deny`. `None` for an agent with no ACP mode.
+    pub fn acp_tool_deny(&self) -> Option<&ToolSlot> {
+        let acp = self.acp()?;
+        Some(acp.tool_deny.as_ref().unwrap_or(&self.agent.tool_deny))
+    }
 }
 
 /// The variant a split session's agent runs as: on this host, against a codebase on another daemon
@@ -311,6 +385,10 @@ pub enum McpSlot {
     /// is the conversation's, so it is listed in `RenderedSlots::written` and removed when the
     /// conversation closes or the start-up sweep finds it.
     Workdir { path: PathBuf, format: McpFormat },
+    /// The registration as ACP `session/new` (and `session/load`) `mcp_servers`, with no file and
+    /// no flag (`#agent-tools 11/12`: every ACP agent). Rendered by
+    /// [`crate::slots::acp::acp_mcp_servers`].
+    AcpSession,
 }
 
 /// The shape of an MCP registration file.
@@ -329,11 +407,26 @@ pub enum McpFormat {
 /// `tool_deny: unsupported` is how a spec says "this agent cannot withdraw its native tools" (Cursor,
 /// Codex, Oz). It is spec data rather than an absent field, so the gap is reviewable in the YAML and
 /// a caller that needs the slot is refused by name instead of silently getting nothing.
+///
+/// An ACP agent takes its withdrawn tools another way (`#agent-tools 11/12`), each written as a map
+/// keyed by its kind: `{ acp_meta: <dotted path> }` — a list at that path of `session/new` `_meta`
+/// (Claude's `claudeCode.options.disallowedTools`) — and `{ config_env: <VAR> }` — inline JSON
+/// config `{"tools": {<tool>: false}}` in that variable (OpenCode's `OPENCODE_CONFIG_CONTENT`).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(untagged)]
 pub enum ToolSlot {
     Flag(FlagSlot),
     Unsupported(Unsupported),
+    /// The tools as a list at `path` (dotted) in the ACP `session/new` `_meta`.
+    AcpMeta {
+        #[serde(rename = "acp_meta")]
+        path: String,
+    },
+    /// The tools switched off in inline JSON config handed in variable `env`.
+    ConfigEnv {
+        #[serde(rename = "config_env")]
+        env: String,
+    },
 }
 
 /// The YAML word `unsupported`.
@@ -348,7 +441,9 @@ impl ToolSlot {
     pub fn flag(&self) -> Option<&FlagSlot> {
         match self {
             ToolSlot::Flag(flag) => Some(flag),
-            ToolSlot::Unsupported(_) => None,
+            ToolSlot::Unsupported(_) | ToolSlot::AcpMeta { .. } | ToolSlot::ConfigEnv { .. } => {
+                None
+            }
         }
     }
 }

@@ -17,10 +17,15 @@ log = "0.4"
 serde_json = "1"
 tokio = { version = "1", features = ["macros", "rt", "sync", "time"] }
 tddy-agent-backend = { path = "../tddy-agent-backend" }
+# `#agent-tools 11/12`: an ACP agent's confinement is read from its spec's deny slot.
+tddy-coding-agent-specs = { path = "../tddy-coding-agent-specs" }
 tddy-discovery = { path = "../tddy-discovery" }
 
 [dev-dependencies]
 pretty_assertions = { workspace = true }
+# `spec_confinement_unit.rs` reads the built-in ACP specs straight from their embedded YAML.
+serde_yaml = "0.9"
+tddy-actions = { path = "../tddy-actions" }
 serial_test = "3"
 tempfile = "3"
 tokio = { version = "1", features = ["rt", "rt-multi-thread", "macros", "sync", "time"] }
