@@ -12897,6 +12897,7 @@ dependencies = [
  "prost 0.13.5",
  "serde_json",
  "tddy-actions",
+ "tddy-build",
  "tddy-core",
  "tddy-daemon-extensions",
  "tddy-daemon-kernel",

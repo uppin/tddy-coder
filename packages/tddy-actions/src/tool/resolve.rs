@@ -2,7 +2,7 @@
 
 use std::path::{Path, PathBuf};
 
-use super::NetworkSection;
+use super::{NetworkSection, TargetBinary};
 
 /// The environment a tool resolves against. Production uses the daemon's own process
 /// ([`ProcessToolHost`]); tests inject a fixture so resolution is host-independent.
@@ -15,6 +15,13 @@ pub trait ToolHost: Send + Sync {
     fn is_executable_file(&self, path: &Path) -> bool;
     /// `path` with every symlink resolved.
     fn canonicalize(&self, path: &Path) -> std::io::Result<PathBuf>;
+    /// Where `binary`'s producing target put its output on this host, once that target has built
+    /// (`#agent-tools 4/12`). Only a host that knows a build graph — `tddy-build`'s executor —
+    /// answers; every other host has no targets, and a tool naming one is unresolvable there.
+    fn target_output(&self, binary: &TargetBinary) -> Option<PathBuf> {
+        let _ = binary;
+        None
+    }
 }
 
 /// The daemon process as a [`ToolHost`]: its environment, its `PATH`, its filesystem.
