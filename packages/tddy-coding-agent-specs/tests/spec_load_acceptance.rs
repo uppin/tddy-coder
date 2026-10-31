@@ -158,3 +158,83 @@ fn the_same_override_without_the_unowned_key_loads() {
         Some(tools.file("claude.yaml").as_path())
     );
 }
+
+/// A `coding_agent.headless` section (YAML lines inside `coding_agent`) whose output is read by
+/// `adapter` (`#agent-tools 6/12`).
+fn a_headless_section(adapter: &str) -> String {
+    format!(
+        "    headless:\n      argv: [\"{{binary}}\", -p, \"{{prompt}}\"]\n      adapter: {adapter}\n"
+    )
+}
+
+#[test]
+fn a_spec_naming_an_unregistered_adapter_is_refused_naming_it() {
+    // Given — a headless section read by an adapter this build does not register
+    let tools = a_tools_dir().with_file(
+        "claude.yaml",
+        &a_claude_override(A_FILE_MCP_SLOT, &a_headless_section("claude-ndjson-v2")),
+    );
+
+    // When
+    let refused = load_agent_registry(tools.path()).unwrap_err();
+
+    // Then
+    let ToolError::ExtensionRejected {
+        file,
+        owner,
+        message,
+    } = refused
+    else {
+        panic!("expected an extension refusal, got {refused:?}");
+    };
+    assert_eq!(
+        (file, owner),
+        (
+            tools.file("claude.yaml"),
+            CODING_AGENT_EXTENSION.to_string()
+        )
+    );
+    assert!(
+        message.contains("claude-ndjson-v2"),
+        "the refusal must name the adapter: {message}"
+    );
+}
+
+#[test]
+fn the_same_headless_section_naming_claude_stream_json_loads() {
+    // Given — the positive control for the refusal above
+    let tools = a_tools_dir().with_file(
+        "claude.yaml",
+        &a_claude_override(A_FILE_MCP_SLOT, &a_headless_section("claude-stream-json")),
+    );
+
+    // When
+    let registry = load_agent_registry(tools.path()).expect("the override loads");
+
+    // Then
+    let spec = CodingAgentSpec::of(registry.get("claude").expect("claude"))
+        .expect("claude is a coding agent");
+    assert_eq!(
+        spec.headless().map(|headless| headless.adapter.as_str()),
+        Some("claude-stream-json")
+    );
+}
+
+#[test]
+fn the_builtin_claude_spec_runs_headless_through_claude_stream_json_and_tolerates_a_structured_exit(
+) {
+    // Given — a fresh `<tddyhome>` with no overrides
+    let home = tempfile::tempdir().unwrap();
+
+    // When
+    let registry = load_agent_registry(&home.path().join("tools")).expect("the built-ins load");
+
+    // Then
+    let spec = CodingAgentSpec::of(registry.get("claude").expect("claude is built in"))
+        .expect("claude is a coding agent");
+    assert_eq!(
+        spec.headless()
+            .map(|headless| (headless.adapter.as_str(), headless.exit_ok_if_structured)),
+        Some(("claude-stream-json", true))
+    );
+}

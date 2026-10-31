@@ -44,6 +44,10 @@ tddy-task = { path = "../tddy-task" }
 tddy-pty = { path = "../tddy-pty" }
 tddy-terminal-rpc = { path = "../tddy-terminal-rpc" }
 tddy-tool-engine = { path = "../tddy-tool-engine" }
+# `claude` as a declared tool: its `coding_agent.headless` section renders the workflow backend's
+# invocation (`#agent-tools 6/12`).
+tddy-actions = { path = "../tddy-actions" }
+tddy-coding-agent-specs = { path = "../tddy-coding-agent-specs" }
 tonic = "0.12"
 tokio-stream = "0.1"
 prost = "0.13"
