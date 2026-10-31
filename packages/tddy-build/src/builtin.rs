@@ -190,6 +190,7 @@ mod tests {
                         target: "tools:stamp-build".into(),
                         path: "tools/out/stamp".into(),
                     }),
+                    sibling_of: None,
                 },
                 deps: vec![],
                 reads: vec![],

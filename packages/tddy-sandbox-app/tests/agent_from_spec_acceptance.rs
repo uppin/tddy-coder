@@ -223,9 +223,20 @@ fn an_unknown_agent_id_is_refused_naming_the_registry_ids() {
         refused,
         Err(AgentChoiceError::Unknown {
             id: "gemini".to_string(),
-            known: ["claude", "codex", "cursor", "muse", "opencode", "oz", "warp"]
-                .map(str::to_string)
-                .to_vec(),
+            // `#agent-tools 11/12` adds `claude-acp` and `codex-acp` to the registry.
+            known: [
+                "claude",
+                "claude-acp",
+                "codex",
+                "codex-acp",
+                "cursor",
+                "muse",
+                "opencode",
+                "oz",
+                "warp",
+            ]
+            .map(str::to_string)
+            .to_vec(),
         })
     );
 }

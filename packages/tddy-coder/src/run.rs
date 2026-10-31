@@ -2561,6 +2561,8 @@ fn create_backend(
             // `crate::headless_from_spec::cursor_backend_from_spec`, so the spec is the only path.
             AnyBackend::Cursor(CursorBackend::with_path(path).with_progress(on_progress))
         }
+        // TODO(acp-agents): build it with `crate::acp_from_spec::claude_acp_backend_from_spec`,
+        // so the spec is the only path.
         "claude-acp" => AnyBackend::ClaudeAcp(ClaudeAcpBackend::new()),
         "codex" => {
             let path = resolve_codex_binary(codex_cli_path);
@@ -2572,6 +2574,8 @@ fn create_backend(
             // `crate::headless_from_spec::codex_backend_from_spec`, so the spec is the only path.
             AnyBackend::Codex(CodexBackend::with_path(path))
         }
+        // TODO(acp-agents): build it with `crate::acp_from_spec::codex_acp_backend_from_spec`, so
+        // the spec is the only path.
         "codex-acp" => {
             let acp_bin = resolve_codex_acp_binary(codex_acp_cli_path, codex_cli_path);
             let codex_bin = resolve_codex_binary(codex_cli_path);
@@ -2584,6 +2588,8 @@ fn create_backend(
                 acp_bin, codex_bin,
             ))
         }
+        // TODO(acp-agents): build it with `crate::acp_from_spec::opencode_acp_backend_from_spec`,
+        // so the spec is the only path.
         "opencode" => {
             let path = opencode_cli_path
                 .map(Path::to_path_buf)

@@ -196,6 +196,23 @@ pub trait CodingAgentLauncher: Send + Sync {
         launch: &CodingAgentLaunch,
     ) -> Result<Vec<McpServerSpec>, SubagentError>;
 
+    /// The `_meta` the ACP session is opened with (`#agent-tools 11/12`): in a managed session, the
+    /// native-tool withdrawal of an agent whose spec declares `tool_deny: { acp_meta: … }`. By
+    /// default today's per-harness answer, [`crate::withdrawal_session_meta`]; a launcher holding
+    /// the agent specs answers from them.
+    ///
+    /// TODO(acp-agents): `tddy-session-agents`' `start_acp_session` asks this instead of calling
+    /// `withdrawal_session_meta` itself, and green drops the default once every launcher has specs.
+    async fn session_meta_for(
+        &self,
+        launch: &CodingAgentLaunch,
+    ) -> Result<Option<serde_json::Map<String, serde_json::Value>>, SubagentError> {
+        Ok(launch
+            .managed
+            .then(|| crate::withdrawal_session_meta(&launch.def.harness))
+            .flatten())
+    }
+
     /// The command a headless coding agent's CLI runs for every turn of `launch`'s conversation: the
     /// program, the environment it adds, its working directory and any MCP config it reads. Asked
     /// only for a headless harness ([`crate::transports::transport_of`]). The session sets the

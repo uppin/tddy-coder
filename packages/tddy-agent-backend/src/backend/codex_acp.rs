@@ -31,6 +31,8 @@ pub const DEFAULT_CODEX_ACP_BINARY: &str = "codex-acp";
 /// The backend sets the session directory of the request it is opening, under its open lock, and
 /// reads back a login that failed: that failure is what the caller is told, since the session error
 /// it followed says only that the agent was not signed in.
+// TODO(acp-agents): green moves this into `adapters::CodexAcpLogin` (`codex-acp-login`), and the
+// backend is built from `codex-acp.yaml` (`tddy_coder::acp_from_spec::codex_acp_backend_from_spec`).
 struct CodexLoginHooks {
     codex_cli_path: PathBuf,
     session_dir: tokio::sync::Mutex<Option<PathBuf>>,

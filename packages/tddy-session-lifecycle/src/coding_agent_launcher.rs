@@ -171,6 +171,8 @@ pub struct DaemonCodingAgentLauncher {
     ///
     /// TODO(claude-headless): green installs them in `for_daemon` and makes the spec the Claude
     /// arm's only path — deleting the hand-built `mcp_servers_wrapped` registration for it.
+    /// `#agent-tools 11/12`: with them, the ACP harnesses are planned from their specs too
+    /// (`acp_plan_from_spec`).
     coding_agents: Option<Arc<HostCodingAgents>>,
 }
 
@@ -314,6 +316,68 @@ impl DaemonCodingAgentLauncher {
         todo!("claude-headless: DaemonCodingAgentLauncher::headless_plan_from_spec")
     }
 
+    /// The ACP command of `launch` from its declaration (`#agent-tools 11/12`), before the user
+    /// switch: the agent spec named by the harness (`claude-acp`, `codex-acp`, `opencode`) resolved
+    /// by `agents` — `codex-acp` beside its `codex` dep — refused in a managed session when its
+    /// spec cannot withdraw native tools (`tddy_coding_subagent::refuse_unless_spec_confinable`,
+    /// naming the registry's confinable ACP agents), `coding_agent.acp.command` rendered with
+    /// `{binary}`, `package_runner` (set when the binary came from `binary.command`, not
+    /// `binary.env`) and `route_args` (the route's, as `codex_acp_route_args` maps them for
+    /// `codex-acp` until `#agent-tools 12/12`), the route's env and secret env, the spec's hooks
+    /// adapter applied (`opencode-route-file` writes the route's file), and on a managed launch a
+    /// `config_env` withdrawal (`tddy_coding_agent_specs::slots::acp::acp_withdrawal`) merged into
+    /// that variable's inline config.
+    fn acp_plan_from_spec(
+        &self,
+        launch: &CodingAgentLaunch,
+        agents: &HostCodingAgents,
+    ) -> Result<AcpAgentCommand, SubagentError> {
+        // TODO(acp-agents): implement. Green then deletes `harness_command`, `apply_route`,
+        // `opencode_route_config`, `claude_agent_acp_command`, `CODEX_ACP_CLI_ENV`,
+        // `CODEX_ACP_BINARY`, `CLAUDE_AGENT_ACP_CLI_ENV`, `BUNX`, `CLAUDE_AGENT_ACP`,
+        // `OPENCODE_BINARY`, `OPENCODE_ACP_SUBCOMMAND`, and `tddy_coding_subagent::ACP_HARNESSES`
+        // (its transports read the registry's `run.transport: acp` specs instead).
+        let _ = (launch, agents);
+        todo!("acp-agents: DaemonCodingAgentLauncher::acp_plan_from_spec")
+    }
+
+    /// The `session/new` `mcp_servers` of `launch` from its declaration: on a managed launch, the
+    /// tool server through the spec's ACP MCP slot
+    /// (`tddy_coding_agent_specs::slots::acp::acp_mcp_servers`); nothing otherwise.
+    fn acp_mcp_servers_from_spec(
+        &self,
+        launch: &CodingAgentLaunch,
+        agents: &HostCodingAgents,
+    ) -> Result<Vec<McpServerSpec>, SubagentError> {
+        // TODO(acp-agents): implement.
+        let _ = (launch, agents);
+        todo!("acp-agents: DaemonCodingAgentLauncher::acp_mcp_servers_from_spec")
+    }
+
+    /// The `session/new` `_meta` of `launch` from its declaration: on a managed launch, an
+    /// `acp_meta` withdrawal of the spec's `acp.withdraw_native`
+    /// (`tddy_coding_agent_specs::slots::acp::acp_withdrawal`); `None` otherwise.
+    fn acp_session_meta_from_spec(
+        &self,
+        launch: &CodingAgentLaunch,
+        agents: &HostCodingAgents,
+    ) -> Result<Option<serde_json::Map<String, serde_json::Value>>, SubagentError> {
+        // TODO(acp-agents): implement.
+        let _ = (launch, agents);
+        todo!("acp-agents: DaemonCodingAgentLauncher::acp_session_meta_from_spec")
+    }
+
+    /// The agents a launch of `launch`'s harness over ACP is planned from: the installed coding
+    /// agents, for an ACP harness; `None` plans it by hand.
+    fn acp_agents_for(&self, launch: &CodingAgentLaunch) -> Option<&HostCodingAgents> {
+        // `#agent-tools 11/12`: ACP harnesses are planned from `claude-acp.yaml`, `codex-acp.yaml`
+        // and `opencode.yaml`'s `coding_agent.acp` once the coding agents are installed.
+        let agents = self.coding_agents.as_deref()?;
+        (tddy_coding_subagent::transport_of(&launch.def.harness)
+            == Some(tddy_coding_subagent::Transport::Acp))
+        .then_some(agents)
+    }
+
     fn refuse(launch: &CodingAgentLaunch, reason: &str) -> SubagentError {
         SubagentError::from(format!(
             "coding agent '{}' ({}) cannot be launched: {reason}",
@@ -393,6 +457,9 @@ impl DaemonCodingAgentLauncher {
         &self,
         launch: &CodingAgentLaunch,
     ) -> Result<AcpAgentCommand, SubagentError> {
+        if let Some(agents) = self.acp_agents_for(launch) {
+            return self.acp_plan_from_spec(launch, agents);
+        }
         refuse_unless_confinable(&launch.def.harness, launch.managed)
             .map_err(|reason| Self::refuse(launch, &reason))?;
         let (program, args) = Self::harness_command(launch)?;
@@ -874,10 +941,26 @@ impl CodingAgentLauncher for DaemonCodingAgentLauncher {
         &self,
         launch: &CodingAgentLaunch,
     ) -> Result<Vec<McpServerSpec>, SubagentError> {
+        if let Some(agents) = self.acp_agents_for(launch) {
+            return self.acp_mcp_servers_from_spec(launch, agents);
+        }
         if !launch.managed {
             return Ok(Vec::new());
         }
         Ok(vec![self.tool_server_spec(launch)?])
+    }
+
+    async fn session_meta_for(
+        &self,
+        launch: &CodingAgentLaunch,
+    ) -> Result<Option<serde_json::Map<String, serde_json::Value>>, SubagentError> {
+        if let Some(agents) = self.acp_agents_for(launch) {
+            return self.acp_session_meta_from_spec(launch, agents);
+        }
+        Ok(launch
+            .managed
+            .then(|| tddy_coding_subagent::withdrawal_session_meta(&launch.def.harness))
+            .flatten())
     }
 
     /// The headless command [`Self::headless_plan`] settles: refused unless the daemon can run the

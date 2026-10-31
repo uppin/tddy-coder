@@ -1,0 +1,59 @@
+# Claude Code over the Agent Client Protocol — Zed's `claude-agent-acp` adapter, behind a `claude-acp`
+# coding subagent and the `claude-acp` workflow backend (`tddy-coder --agent claude-acp`)
+# (`#agent-tools 11/12`).
+#
+# The command renders what `claude_agent_acp_command` and `ClaudeAcpBackend` build by hand:
+#   bunx claude-agent-acp           by default: the npm package, through Bun's package runner
+#   <TDDY_CLAUDE_AGENT_ACP_CLI>     when that variable names a `claude-agent-acp` binary — what a
+#                                   supervised host allowlists instead of `bunx`, whose arguments
+#                                   the allowlist cannot pin
+# `package_runner` is the param a launcher sets when `{binary}` resolved through `binary.command`
+# (`bunx`) rather than `binary.env`.
+#
+# A provider route reaches the agent as its environment only; its arguments are not passed.
+#
+# The tool server reaches the agent as `session/new` `mcp_servers`. A managed launch withdraws
+# Claude's own file-system and shell tools through `session/new` `_meta`
+# (`claudeCode.options.disallowedTools`), which `claude-agent-acp` merges into the Claude Code SDK
+# options — documented, verified against `tddy-acp-stub` only.
+#
+# Override whole with `<tddyhome>/tools/claude-acp.yaml`.
+#
+# No `network:` section: ACP agents are not jailed, and `Egress` does not deserialize yet
+# (`#agent-tools 3/12`).
+schema_version: 1
+id: claude-acp
+summary: Claude Code over ACP (claude-agent-acp) — a coding subagent and workflow backend
+binary:
+  command: bunx
+  env: TDDY_CLAUDE_AGENT_ACP_CLI
+deps: [tddy-tools]
+reads: []
+# ACP agents launch from `coding_agent.acp.command`; `run:` names the transport.
+run:
+  transport: acp
+  argv:
+    - "{binary}"
+  env: {}
+extensions:
+  coding_agent:
+    mcp: { kind: acp-session }
+    tool_allow: unsupported
+    tool_deny: { acp_meta: claudeCode.options.disallowedTools }
+    permission_prompt: unsupported
+    instructions:
+      files: []
+    hooks: { adapter: unsupported }
+    models:
+      default: opus
+      curated: [opus, sonnet, haiku]
+    context_globs: [AGENTS.md, ".agents/**", CLAUDE.md, ".claude/**", .mcp.json]
+    placements: [host]
+    acp:
+      command:
+        - "{binary}"
+        - { if: package_runner, then: [claude-agent-acp] }
+      env: {}
+      # The same set a split session's main agent has withdrawn (`CLAUDE_NATIVE_TOOLS` today).
+      withdraw_native:
+        [Read, Write, Edit, MultiEdit, NotebookEdit, Bash, BashOutput, KillShell, Glob, Grep, LS]

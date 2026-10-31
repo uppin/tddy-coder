@@ -2,7 +2,7 @@
 
 use std::path::{Path, PathBuf};
 
-use super::{NetworkSection, TargetBinary};
+use super::{NetworkSection, TargetBinary, ToolBinary, ToolError};
 
 /// The environment a tool resolves against. Production uses the daemon's own process
 /// ([`ProcessToolHost`]); tests inject a fixture so resolution is host-independent.
@@ -66,4 +66,22 @@ pub struct ResolvedTool {
     /// The definition's `network:` section, carried so a tool set's egress can be lowered from its
     /// resolution alone (`#agent-tools 3/12`).
     pub network: NetworkSection,
+}
+
+/// Where `tool`'s binary is when it declares `sibling_of` (`#agent-tools 11/12`): `binary.command`
+/// in the directory of `dep`'s resolved binary, canonical. Refused as
+/// [`ToolError::Unresolvable`] when no executable file is there, naming both the path searched and
+/// the dep binary it was searched beside — never a fall back to the `PATH`.
+///
+/// [`super::ToolRegistry::resolve_closure`] calls it once `dep` is resolved; `binary.env` is tried
+/// before it.
+pub fn resolve_sibling(
+    tool: &str,
+    binary: &ToolBinary,
+    dep: &ResolvedTool,
+    host: &dyn ToolHost,
+) -> Result<PathBuf, ToolError> {
+    // TODO(acp-agents): implement.
+    let _ = (tool, binary, dep, host);
+    todo!("acp-agents: resolve_sibling")
 }
