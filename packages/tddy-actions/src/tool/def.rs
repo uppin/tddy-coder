@@ -1,10 +1,11 @@
 //! The `ToolDef` YAML schema.
 
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
-use super::ToolError;
+use super::{RunSection, ToolError};
 
 /// The only schema version this build reads. A file naming another is refused at load.
 pub const TOOL_SCHEMA_VERSION: u32 = 1;
@@ -28,6 +29,16 @@ pub struct ToolDef {
     /// Extra host paths the tool needs readable, beyond its binary and the binary's libraries.
     #[serde(default)]
     pub reads: Vec<PathBuf>,
+    /// How tddy launches the tool itself: an argv template, static env and a transport
+    /// (`#agent-tools 2/12`). `None` for a tool that is only made reachable (a jail's `rg`) and never
+    /// spawned by tddy.
+    #[serde(default)]
+    pub run: Option<RunSection>,
+    /// Owner-validated sections, keyed by owner name (`coding_agent`). `tddy-actions` never reads
+    /// one: [`super::ToolRegistry::load_with_owners`] hands each section to the
+    /// [`super::ExtensionOwner`] of that name, and refuses a section no owner claims.
+    #[serde(default)]
+    pub extensions: BTreeMap<String, serde_yaml::Value>,
 }
 
 /// How a tool's binary is found on the host.

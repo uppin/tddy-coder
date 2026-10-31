@@ -261,6 +261,10 @@ pub(crate) async fn spawn_claude_cli_session_inner(
         managed_codebase,
     )?;
     progress.begin_phase(StartStep::Agent);
+    // TODO(claude-host): when the host has coding agents installed (`LaunchSessions::coding_agents`),
+    // resolve the `claude` spec, render its argv and slots (hooks, append-system-prompt, role
+    // allow-list) and spawn through `spec_launch::launch_host_pty` instead of the hand-built argv
+    // below; `install_claude_cli_hooks` then stops writing `.claude/settings.local.json` itself.
     let handle = claude_cli_spawn_steps::spawn_claude_cli_process(
         claude_cli_spawn_steps::ClaudeCliProcess {
             os_user,

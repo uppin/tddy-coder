@@ -215,6 +215,7 @@ impl DaemonSessionHost {
             hosted_agent_clones: Arc::clone(&self.hosted_agent_clones),
             session_admissions: Arc::clone(&self.session_admissions),
             worktree_observer: self.worktree_observer.clone(),
+            coding_agents: self.coding_agents.clone(),
             host: Arc::new(self.clone()),
             session_reach: Arc::clone(&self.session_reach),
             reachable_sessions: Arc::new(self.clone()),

@@ -1,0 +1,94 @@
+{
+  "hooks": {
+    "Notification": [
+      {
+        "hooks": [
+          {
+            "command": "'<STUBS>/tddy-tools' session-hook --session <SESSION_ID> --daemon http://127.0.0.1:8899 --os-user <OS_USER> --hook-token <HOOK_TOKEN> --event Notification",
+            "type": "command"
+          }
+        ],
+        "matcher": ""
+      }
+    ],
+    "PermissionRequest": [
+      {
+        "hooks": [
+          {
+            "command": "'<STUBS>/tddy-tools' session-hook --session <SESSION_ID> --daemon http://127.0.0.1:8899 --os-user <OS_USER> --hook-token <HOOK_TOKEN> --event PermissionRequest --await-answer --await-timeout-secs 125",
+            "timeout": 130,
+            "type": "command"
+          }
+        ],
+        "matcher": ""
+      }
+    ],
+    "PostToolUse": [
+      {
+        "hooks": [
+          {
+            "command": "'<STUBS>/tddy-tools' session-hook --session <SESSION_ID> --daemon http://127.0.0.1:8899 --os-user <OS_USER> --hook-token <HOOK_TOKEN> --event PostToolUse",
+            "type": "command"
+          }
+        ],
+        "matcher": ""
+      }
+    ],
+    "PreToolUse": [
+      {
+        "hooks": [
+          {
+            "command": "'<STUBS>/tddy-tools' session-hook --session <SESSION_ID> --daemon http://127.0.0.1:8899 --os-user <OS_USER> --hook-token <HOOK_TOKEN> --event PreToolUse --await-answer --await-timeout-secs 125",
+            "timeout": 130,
+            "type": "command"
+          }
+        ],
+        "matcher": "AskUserQuestion"
+      }
+    ],
+    "SessionEnd": [
+      {
+        "hooks": [
+          {
+            "command": "'<STUBS>/tddy-tools' session-hook --session <SESSION_ID> --daemon http://127.0.0.1:8899 --os-user <OS_USER> --hook-token <HOOK_TOKEN> --event SessionEnd",
+            "type": "command"
+          }
+        ],
+        "matcher": ""
+      }
+    ],
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "command": "'<STUBS>/tddy-tools' session-hook --session <SESSION_ID> --daemon http://127.0.0.1:8899 --os-user <OS_USER> --hook-token <HOOK_TOKEN> --event SessionStart",
+            "type": "command"
+          }
+        ],
+        "matcher": ""
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "command": "'<STUBS>/tddy-tools' session-hook --session <SESSION_ID> --daemon http://127.0.0.1:8899 --os-user <OS_USER> --hook-token <HOOK_TOKEN> --event Stop",
+            "type": "command"
+          }
+        ],
+        "matcher": ""
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "command": "'<STUBS>/tddy-tools' session-hook --session <SESSION_ID> --daemon http://127.0.0.1:8899 --os-user <OS_USER> --hook-token <HOOK_TOKEN> --event UserPromptSubmit",
+            "type": "command"
+          }
+        ],
+        "matcher": ""
+      }
+    ]
+  }
+}
