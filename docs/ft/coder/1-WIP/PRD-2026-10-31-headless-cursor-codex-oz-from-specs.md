@@ -14,17 +14,17 @@
 This node extends the `6/12` headless model to the remaining headless agents:
 
 - **Cursor**: `cursor.yaml` gains a `headless:` section, using the `cursor-stream` adapter and `--list-models` parsing through `cursor-models`.
-- **Codex**: `codex.yaml` is new. It runs `codex exec … --json` with the `codex-jsonl` adapter, declares MCP as an `inline` slot (`-c mcp_servers.<n>.*`), and gets OAuth login through a named `codex-oauth` adapter.
-- **Oz**: `warp.yaml` gains a headless `oz agent run` variant, with the `oz-ndjson` adapter and an `argv` MCP slot (`--mcp <path>`).
+- **Codex**: `codex.yaml` is new. It runs `codex exec … --json` with the `codex-jsonl` adapter, declares MCP as an `inline` slot (`-c mcp_servers.<n>.*`). A sign-in failure keeps today's remediation hint; there is no login adapter, because this path has no login retry to move.
+- **Oz**: a new `oz.yaml` (its own binary, `oz`) declares the headless `oz agent run`, with the `oz-ndjson` adapter and an `argv` MCP slot (`--mcp <path>`). `warp.yaml`, the interactive `warp` TUI, is unchanged.
 
-`HeadlessHarness` and the per-agent `headless_driver/argv.rs` builders are removed. The MCP file that a Cursor conversation writes is recorded with the conversation, so its close and the start-up sweep remove it ([2026-10-25-cursor-project-mcp-config-outlives-its-conversation.md](../../../dev/todo/2026-10-25-cursor-project-mcp-config-outlives-its-conversation.md)).
+The per-agent `headless_driver/argv.rs` builders are removed. `HeadlessHarness` stays, because the adapters' `turn_format` names it; `12/12` collapses it. The MCP file that a Cursor conversation writes is recorded with the conversation, so its close and the start-up sweep remove it ([2026-10-25-cursor-project-mcp-config-outlives-its-conversation.md](../../../dev/todo/2026-10-25-cursor-project-mcp-config-outlives-its-conversation.md)).
 
 ## Acceptance Criteria
 
 - [ ] `tddy-coder --agent cursor` and `--agent codex` drive stubs whose argv equals today's, including resume and the thread id.
-- [ ] The headless Cursor, Codex and Oz subagents launch with MCP rendered from each spec's slot kind: `file`, `inline` and `argv`.
+- [ ] The headless Cursor, Codex and Oz subagents launch with MCP rendered from each spec's slot kind: a worktree file (`workdir`), `inline` and `argv`.
 - [ ] A closed Cursor conversation leaves no `.cursor/mcp.json`. A retry under the same conversation id is admitted.
-- [ ] Codex's login retry still runs through `codex-oauth` when the stub reports an auth error.
+- [ ] On a Codex auth error, today's `codex_openai_auth_remediation` hint is still appended. This is a preserved-behaviour pin.
 
 ## Out of Scope
 

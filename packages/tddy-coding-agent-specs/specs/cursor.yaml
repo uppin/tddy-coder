@@ -50,6 +50,40 @@ extensions:
       default: composer-2.5
       curated: [composer-2.5, gpt-5.3-codex, claude-4.6-sonnet-medium-thinking]
     context_globs: [AGENTS.md, ".agents/**", ".cursor/**"]
+    # --- Headless (`#agent-tools 9/12`): one `agent -p` per turn, for the workflow backend
+    # (`tddy-coder --agent cursor`) and a headless coding subagent. It renders byte-for-byte what
+    # `build_cursor_cli_args` and `headless_driver/argv.rs::cursor()` built by hand:
+    #   agent [--plan] [--resume ID] -p PROMPT [--model M] --output-format stream-json
+    #         --stream-partial-output [--force] --trust --approve-mcps
+    # `plan` and `force` are the turn's params: the workflow backend binds `force` (and `plan` for a
+    # planning goal); a headless conversation binds neither, so it runs read-only unless an operator
+    # opts in. `--resume` takes an optional argument, so it is rendered only with an id.
+    #
+    # Headless, Cursor reads the worktree's `.cursor/mcp.json` rather than `{home}`'s: the file is
+    # the conversation's, recorded in `headless/<conversation>/written-files` and removed on close.
+    # The output is read by the `cursor-stream` adapter (`tddy_agent_backend::adapters`).
+    #
+    # TODO(headless-others): `models` gains `list_command: ["{binary}", --list-models]` and
+    # `adapter: cursor-models` — an edit of the `models` section `#agent-tools 7/12` owns, so it
+    # waits for the developer's consent (see the changeset).
+    headless:
+      argv:
+        - "{binary}"
+        - { if: plan, then: [--plan] }
+        - { if: resume, then: [--resume, "{session_id}"] }
+        - -p
+        - "{prompt}"
+        - { if: model, then: [--model, "{model}"] }
+        - --output-format
+        - stream-json
+        - --stream-partial-output
+        - { if: force, then: [--force] }
+        - --trust
+        - --approve-mcps
+        - { splice: slots }
+      env: {}
+      adapter: cursor-stream
+      mcp: { kind: workdir, path: .cursor/mcp.json, format: cursor-mcp-json }
 # --- Jail sections: what a sandboxed launch lowers into the jail. ---------------------------------
 # A persistent home at <tddyhome>/homes/cursor, mounted rw: Cursor's refreshed login and its config
 # survive the session.

@@ -313,6 +313,15 @@ impl DaemonCodingAgentLauncher {
         conversation: &str,
         agents: &HostCodingAgents,
     ) -> Result<HeadlessCommand, SubagentError> {
+        // TODO(headless-others): and for Cursor, Codex and Oz: the spec's MCP slot
+        // (`headless.mcp`, else `coding_agent.mcp`) names what the turns will write —
+        // `tddy_coding_agent_specs::slots::headless_mcp::mcp_written_paths` — and those paths are
+        // recorded with `tddy_coding_subagent::launcher::record_written_files` in the claimed
+        // directory before anything is written; a worktree file that already exists
+        // (`.cursor/mcp.json`) is refused and kept out of git as `write_cursor_project_mcp_config`
+        // does; Codex's server environment goes into the command's `env`; Oz's profile is not
+        // set. Green then deletes `headless_program`, `mcp_servers_by_name`,
+        // `write_cursor_project_mcp_config` and `OZ_BINARY`.
         let agent = agents
             .resolve("claude", None)
             .map_err(|reason| Self::refuse(launch, &reason.to_string()))?;
@@ -520,10 +529,15 @@ impl DaemonCodingAgentLauncher {
                 &format!("its conversation id {unsafe_id} is not a plain name"),
             )
         })?;
+        // `#agent-tools 9/12`: every headless harness — Cursor, Codex and Oz as well as Claude — is
+        // planned from its spec once the coding agents are installed (`cursor.yaml`, `codex.yaml`,
+        // `oz.yaml`).
+        if let Some(agents) = &self.coding_agents {
+            return self.headless_plan_from_spec(launch, wiring, conversation.as_str(), agents);
+        }
+        // TODO(headless-others): decide at green whether a failed coding-agent install refuses
+        // Cursor, Codex and Oz too; until then it refuses Claude only, as before.
         if harness == HeadlessHarness::Claude {
-            if let Some(agents) = &self.coding_agents {
-                return self.headless_plan_from_spec(launch, wiring, conversation.as_str(), agents);
-            }
             if let Some(reason) = &self.coding_agents_error {
                 return Err(Self::refuse(launch, reason));
             }

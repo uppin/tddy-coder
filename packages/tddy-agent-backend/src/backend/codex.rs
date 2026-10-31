@@ -11,6 +11,7 @@
 
 use super::routed::route_child_env;
 use super::{InvokeRequest, InvokeResponse};
+use crate::adapters::HeadlessRenderer;
 use crate::error::BackendError;
 use crate::provider_route::HarnessRoute;
 use crate::stream::codex::{
@@ -19,6 +20,7 @@ use crate::stream::codex::{
 use std::io::{BufRead, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
+use std::sync::Arc;
 use tddy_workflow::PermissionHint;
 
 mod login_text;
@@ -37,6 +39,12 @@ pub struct CodexBackend {
     binary_path: PathBuf,
     /// The provider route the child runs on (`with_provider_route`); `None` for the vendor.
     pub(super) provider_route: Option<HarnessRoute>,
+    /// The agent's declaration its invocation is rendered from (`with_headless_renderer`,
+    /// `#agent-tools 9/12`); `None` builds the argv by hand ([`build_codex_exec_argv`]).
+    ///
+    /// TODO(headless-others): green makes the spec the only path — `create_backend("codex")`
+    /// passes one — and deletes `build_codex_exec_argv`.
+    headless: Option<Arc<dyn HeadlessRenderer>>,
 }
 
 impl Default for CodexBackend {
@@ -53,6 +61,7 @@ impl CodexBackend {
         Self {
             binary_path: PathBuf::from(Self::DEFAULT_CLI_BINARY),
             provider_route: None,
+            headless: None,
         }
     }
 
@@ -61,7 +70,36 @@ impl CodexBackend {
         Self {
             binary_path: path,
             provider_route: None,
+            headless: None,
         }
+    }
+
+    /// Render every invocation from `renderer` — `codex.yaml`'s `coding_agent.headless` — instead
+    /// of building the argv by hand (`#agent-tools 9/12`).
+    #[must_use]
+    pub fn with_headless_renderer(mut self, renderer: Arc<dyn HeadlessRenderer>) -> Self {
+        self.headless = Some(renderer);
+        self
+    }
+
+    /// One invocation rendered from `renderer`: the merged prompt ([`merge_codex_prompt`]), the
+    /// param `sandbox_mode` bound to `read-only` for a read-only planning goal and to
+    /// `workspace-write` otherwise, the session onto `session_id`/`resume`, the working directory
+    /// as `workdir`, and the provider route's argv as `route_args` **in place of** the model (the
+    /// turn's `model` is `None` on a route). No tool server is registered, as today. The program is
+    /// spawned with today's environment (the route's, `BROWSER`/`TDDY_CODEX_OAUTH_OUT`, the
+    /// `TDDY_*` variables), its stdout read through the adapter it names (`codex-jsonl`), and a
+    /// failed exit's detail gets `login_text::codex_openai_auth_remediation`'s hint appended,
+    /// as `invoke_sync` appends it.
+    fn invoke_from_spec(
+        &self,
+        request: InvokeRequest,
+        renderer: &Arc<dyn HeadlessRenderer>,
+    ) -> Result<InvokeResponse, BackendError> {
+        // TODO(headless-others): implement — build a `HeadlessTurn` from `request`, `render` it,
+        // then spawn and read as `invoke_sync` does, through `HeadlessInvocation::adapter`.
+        let _ = (request, renderer);
+        todo!("headless-others: CodexBackend::invoke_from_spec")
     }
 
     /// Run `codex login` with **browser OAuth** (the default `codex login` flow, **not** `--device-auth`).
@@ -150,6 +188,9 @@ impl CodexBackend {
     }
 
     fn invoke_sync(&self, request: InvokeRequest) -> Result<InvokeResponse, BackendError> {
+        if let Some(renderer) = &self.headless {
+            return self.invoke_from_spec(request, renderer);
+        }
         let merged_prompt = merge_codex_prompt(&request)?;
         let args = build_codex_exec_argv(&request, &merged_prompt, self.provider_route.as_ref());
 

@@ -34,6 +34,12 @@ pub const MUSE_SPEC_YAML: &str = include_str!("../specs/muse.yaml");
 /// `specs/warp.yaml` (`#agent-tools 8/12`), embedded.
 pub const WARP_SPEC_YAML: &str = include_str!("../specs/warp.yaml");
 
+/// `specs/codex.yaml` (`#agent-tools 9/12`), embedded.
+pub const CODEX_SPEC_YAML: &str = include_str!("../specs/codex.yaml");
+
+/// `specs/oz.yaml` (`#agent-tools 9/12`), embedded.
+pub const OZ_SPEC_YAML: &str = include_str!("../specs/oz.yaml");
+
 /// The embedded agent specs: `(source path, YAML)`.
 pub fn builtin_specs() -> Vec<(&'static str, &'static str)> {
     vec![
@@ -56,6 +62,14 @@ pub fn builtin_specs() -> Vec<(&'static str, &'static str)> {
         (
             "packages/tddy-coding-agent-specs/specs/warp.yaml",
             WARP_SPEC_YAML,
+        ),
+        (
+            "packages/tddy-coding-agent-specs/specs/codex.yaml",
+            CODEX_SPEC_YAML,
+        ),
+        (
+            "packages/tddy-coding-agent-specs/specs/oz.yaml",
+            OZ_SPEC_YAML,
         ),
     ]
 }

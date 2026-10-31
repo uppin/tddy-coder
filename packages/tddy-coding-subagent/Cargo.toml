@@ -20,6 +20,7 @@ tddy-agent-backend = { path = "../tddy-agent-backend" }
 tddy-discovery = { path = "../tddy-discovery" }
 
 [dev-dependencies]
+pretty_assertions = { workspace = true }
 serial_test = "3"
 tempfile = "3"
 tokio = { version = "1", features = ["rt", "rt-multi-thread", "macros", "sync", "time"] }

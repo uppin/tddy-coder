@@ -222,6 +222,8 @@ impl AgentRoster {
         if ConversationId::parse(conversation_id).is_err() {
             return;
         }
+        // TODO(headless-others): `tddy_coding_subagent::launcher::close_headless_conversation`, so
+        // the files its plan recorded outside the directory (`.cursor/mcp.json`) go too.
         let dir = tddy_coding_subagent::launcher::headless_conversation_dir(
             &self.tddy_data_dir,
             conversation_id,

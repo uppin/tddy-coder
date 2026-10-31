@@ -61,6 +61,8 @@ impl LaunchAdapters {
     /// Every launch adapter this build registers: [`super::OPENCODE_MODELS`]
     /// ([`super::OpenCodeModels`]) and [`super::WARP_RESUME_TOKEN`] ([`super::WarpResumeToken`]).
     pub fn builtin() -> Self {
+        // TODO(headless-others): and `CursorModels` (`cursor-models`) — which widens
+        // `the_builtin_launch_adapters_are_opencode_models_and_warp_resume_token` at #798's green.
         let models: Arc<dyn ModelsAdapter> = Arc::new(OpenCodeModels);
         let resume_token: Arc<dyn ResumeTokenAdapter> = Arc::new(WarpResumeToken);
         Self {

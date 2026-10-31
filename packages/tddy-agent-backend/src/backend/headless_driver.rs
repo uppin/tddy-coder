@@ -106,6 +106,13 @@ pub struct HeadlessCommand {
     /// but `argv::claude()` stays: `HeadlessDriver::new(Claude, command)` without a renderer is still
     /// driven by `tests/headless_driver_acceptance.rs` and by the argv unit tests. Deleting it needs
     /// those moved to a renderer first. Cursor, Codex and Oz follow in `#agent-tools 9/12`.
+    ///
+    /// TODO(headless-others): green makes it every arm's only path — `cursor.yaml`, `codex.yaml`
+    /// and `oz.yaml` — and deletes `argv.rs` (`cursor()`, `codex()`, `oz()`,
+    /// `codex_mcp_server_overrides`). A rendered turn binds [`Self::profile`] as the param
+    /// `profile` (Oz's `--profile`) and nothing as `force`, `plan` or `sandbox_mode`, so Cursor runs
+    /// read-only and Codex `workspace-write`, as by hand. `HeadlessHarness` stays: the adapters'
+    /// `turn_format` returns it, and `#agent-tools 12/12` collapses it.
     pub renderer: Option<Arc<dyn HeadlessRenderer>>,
     /// With a [`Self::renderer`]: where each turn's rendered registration files (the MCP config)
     /// are written — the conversation's own directory, never the worktree, since the registration
