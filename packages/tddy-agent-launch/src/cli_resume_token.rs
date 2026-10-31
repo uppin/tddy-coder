@@ -35,6 +35,8 @@ impl ResumeTokenArm {
     }
 }
 
+// TODO(harness-clis): read the token through the spec's `coding_agent.resume.adapter`
+// (`tddy_agent_backend::adapters::LaunchAdapters::resume_token`) instead of naming Warp's scraper.
 /// The hook recording the resume token `session_dir`'s terminal prints as it exits, and the arm that
 /// releases it. A run that prints no token leaves the recorded one as it is.
 pub(crate) fn resume_token_recorder(session_dir: PathBuf) -> (ExitHook, ResumeTokenArm) {

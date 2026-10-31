@@ -86,6 +86,10 @@ pub enum SlotError {
         "hooks adapter {adapter} needs the daemon's agent-tool socket and the launch gave none"
     )]
     NoDaemonSocket { adapter: String },
+    /// The launch passed hook params to an agent whose spec declares no hooks
+    /// (`hooks: { adapter: unsupported }`, `#agent-tools 8/12`).
+    #[error("the agent's spec declares no lifecycle hooks, and the launch passed hook params")]
+    HooksUnsupported,
     /// A placed registration path names `{home}` and the launch bound no home.
     #[error("{path} names {{home}} and the launch bound no home")]
     UnboundHome { path: String },
@@ -100,6 +104,8 @@ pub fn render(spec: &CodingAgentSpec, inputs: &SlotInputs<'_>) -> Result<Rendere
     // (`cursor::render_cursor_mcp_json` at `cursor::placed_path`), `instructions.rules_file`
     // (`cursor::render_rules_file` with the preamble), and hooks through
     // `HooksAdapter::try_render`, so `cursor-hooks-json`'s refusal without a socket surfaces here.
+    // TODO(harness-clis): and refuse an `McpSlot::Unsupported` given a tool server
+    // (`SlotError::SlotUnsupported { slot: "mcp" }`).
     let _ = (spec, inputs);
     todo!("claude-host: slots::render")
 }
@@ -155,9 +161,14 @@ mod tests {
                 models: ModelsSection {
                     default: "opus".to_string(),
                     curated: vec!["opus".to_string()],
+                    list_command: None,
+                    adapter: None,
                 },
                 context_globs: vec!["CLAUDE.md".to_string()],
                 headless: None,
+                route: None,
+                resume: None,
+                placements: crate::Placement::anywhere(),
             },
         }
     }

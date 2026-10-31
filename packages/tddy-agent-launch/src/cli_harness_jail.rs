@@ -12,6 +12,10 @@ use tddy_core::provider_route::HarnessRoute;
 use tddy_daemon_kernel::config::DaemonConfig;
 use tddy_rpc::Status;
 
+// TODO(harness-clis): spec-driven — a sandboxed start whose spec's `placements` exclude `jail` is
+// refused by `crate::harness_from_spec::require_spec_placement` (warp.yaml: `[host]`), and the
+// route requirement reads `coding_agent.route.required_in_jail`; this match and
+// `require_provider_route`'s session-type gate go.
 /// The runner's `--agent-kind` for a CLI harness session type the runner hosts in its PTY; `None`
 /// for any other session type.
 pub(crate) fn sandboxed_agent_kind(session_type: &str) -> Option<&'static str> {

@@ -12,12 +12,19 @@
 //! depends on this one, so it validates names against [`AdapterRegistry::builtin`] directly and no
 //! dependency points back.
 //!
+//! [`launch`] holds the PTY-side adapters (`#agent-tools 8/12`): `opencode-models` reads a model
+//! listing and `warp-resume-token` scrapes a resume token off an exited session's terminal. Their
+//! shapes are not a stream's, so they have their own traits and registry ([`LaunchAdapters`]).
+//!
 //! [`headless`] is the other half of the seam: the port a spec-driven renderer implements, so the
 //! consumers in this crate (`ClaudeCodeBackend`, `HeadlessDriver`) can launch from a spec without
 //! naming the specs crate.
 
 mod claude_stream_json;
 pub mod headless;
+pub mod launch;
+mod opencode_models;
+mod warp_resume_token;
 
 use std::collections::BTreeMap;
 use std::fmt;
@@ -33,6 +40,11 @@ use crate::stream::{ProgressEvent, StreamResult};
 pub use crate::error::BackendError as AdapterError;
 pub use claude_stream_json::ClaudeStreamJson;
 pub use headless::{HeadlessInvocation, HeadlessMcpServer, HeadlessRenderer, HeadlessTurn};
+// `#agent-tools 8/12`: what a PTY launch reads its agent's own output through — a model listing,
+// a resume token. Not stream adapters, so a registry of their own ([`launch::LaunchAdapters`]).
+pub use launch::{LaunchAdapters, ModelsAdapter, ResumeTokenAdapter};
+pub use opencode_models::{OpenCodeModels, OPENCODE_MODELS};
+pub use warp_resume_token::{WarpResumeToken, WARP_RESUME_TOKEN};
 
 /// The adapter that reads Claude Code's `--output-format stream-json --verbose`.
 pub const CLAUDE_STREAM_JSON: &str = "claude-stream-json";
