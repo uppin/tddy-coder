@@ -11,11 +11,15 @@ path = "src/lib.rs"
 [dependencies]
 anyhow = "1"
 serde_json = "1"
+# The declared-tool vocabulary `tool_grants` lowers (`#agent-tools 1/12`). The generic
+# `tddy-sandbox` never depends on it; only this recipes layer does.
+tddy-actions = { path = "../tddy-actions" }
 tddy-core = { path = "../tddy-core" }
 tddy-sandbox = { path = "../tddy-sandbox" }
 tddy-workflow-recipes = { path = "../tddy-workflow-recipes" }
 
 [dev-dependencies]
+pretty_assertions = { workspace = true }
 # `route_secrets` holds the process environment while it sets CLAUDE_CODE_OAUTH_TOKEN. Workspace-internal.
 tddy-testing-commons = { path = "../tddy-testing-commons" }
 tempfile = "3"

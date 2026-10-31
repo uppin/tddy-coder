@@ -12115,6 +12115,7 @@ dependencies = [
  "pretty_assertions",
  "serde",
  "serde_json",
+ "serde_yaml",
  "serial_test",
  "tddy-task",
  "tempfile",
@@ -12875,6 +12876,7 @@ dependencies = [
  "futures-util",
  "libc",
  "log",
+ "pretty_assertions",
  "prost 0.13.5",
  "serde_json",
  "tddy-actions",
@@ -13622,7 +13624,9 @@ name = "tddy-sandbox-recipes"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "pretty_assertions",
  "serde_json",
+ "tddy-actions",
  "tddy-core",
  "tddy-sandbox",
  "tddy-testing-commons",

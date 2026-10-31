@@ -1,0 +1,14 @@
+# The ripgrep binary behind the `Grep` exec tool (`tddy-tool-engine`'s `tool_grep` shells out to it).
+#
+# A workspace jail's PATH holds only the system directories, and Homebrew installs `rg` under
+# `/opt/homebrew/bin` or `/usr/local/bin`. Declaring it here is what makes it reachable inside the
+# jail — as this one binary, not its whole directory. Override with `<tddyhome>/tools/rg.yaml`, or
+# point `TDDY_RG_BINARY` at an absolute path.
+schema_version: 1
+id: rg
+summary: ripgrep — content search behind the Grep exec tool
+binary:
+  command: rg
+  env: TDDY_RG_BINARY
+deps: []
+reads: []
