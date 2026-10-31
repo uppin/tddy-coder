@@ -664,6 +664,49 @@ warn_unless_file_declares() {
   echo "install:   handover disagree. ${remedy}" >&2
 }
 
+# read_daemon_service_key FILE KEY
+#
+# Prints the value of KEY (`user` or `group`) declared by the `tddy-daemon` service entry in a
+# supervisor config, or prints nothing when the service block or the key is absent — the caller
+# treats empty as a hard error, never as a reason to fall back to a default.
+#
+# The service entry is the `- name: tddy-daemon` list item under `services:`. A service's own keys
+# sit exactly one indentation step (two spaces, as every rendered template and the supervisor's own
+# examples use) deeper than the `- name:` marker; anything deeper belongs to a nested block such as
+# `socket:` or `host_sockets:`, which carry their own `group:`/`user:` keys that must NOT be read as
+# the service's identity. A config indented differently fails the extraction loudly rather than
+# matching the wrong line — a wrong identity here is a daemon crash-looping on its own log files.
+read_daemon_service_key() {
+  local file="$1" key="$2"
+  awk -v key="$key" '
+    /^[[:space:]]*$/ { next }
+    {
+      line_indent = match($0, /[^[:space:]]/) - 1
+    }
+    /^[[:space:]]*-[[:space:]]*name:/ {
+      if (inblock && line_indent <= block_indent) {
+        inblock = 0
+      }
+      if (!inblock && $0 ~ /^[[:space:]]*-[[:space:]]*name:[[:space:]]*tddy-daemon([[:space:]]|#|$)/) {
+        inblock = 1
+        block_indent = line_indent
+        next
+      }
+    }
+    inblock && line_indent == block_indent + 2 && $0 ~ "^[[:space:]]*" key ":" {
+      sub("^[[:space:]]*" key ":[[:space:]]*", "")
+      sub(/[[:space:]]+#.*$/, "")
+      sub(/^["'\'']*/, "")
+      sub(/["'\'']*[[:space:]]*$/, "")
+      print
+      exit
+    }
+    inblock && line_indent <= block_indent {
+      inblock = 0
+    }
+  ' "$file"
+}
+
 # --- desktop install ------------------------------------------------------------------------------
 #
 # Self-contained: it shares this script's helpers (atomically_write, render_template,
@@ -917,9 +960,61 @@ if "$want_desktop"; then
   exit 0
 fi
 
+# The daemon's OS identity is the supervisor config's to declare, not the installer's to keep
+# choosing. supervisor.yaml is preserved verbatim on an upgrade, so the account install creates,
+# adds to the socket group and chowns the log + auth directories to MUST be the one that config
+# spawns the daemon as — anything else is a daemon crash-looping on its own log files and signing
+# key with a bare Permission denied. The env vars therefore only SEED a fresh install's rendered
+# config; once the config exists it is read back and obeyed, and an env var that disagrees with it
+# is an error rather than a silent winner. Nothing in the runtime ever re-chowns these directories,
+# so this read-back at install time is the only thing that keeps the two sides in step.
+DAEMON_IDENTITY_FROM_CONFIG=false
+if "$want_supervisor" && [[ -f "$SUPERVISOR_CONFIG_FILE" ]]; then
+  config_daemon_user="$(read_daemon_service_key "$SUPERVISOR_CONFIG_FILE" user)"
+  config_daemon_group="$(read_daemon_service_key "$SUPERVISOR_CONFIG_FILE" group)"
+  if [[ -z "$config_daemon_user" ]]; then
+    echo "install: ${SUPERVISOR_CONFIG_FILE} declares no user for the tddy-daemon service, and the" >&2
+    echo "install: daemon runs as the account that service names — there is no default to fall back" >&2
+    echo "install: to. Add \`user: <account>\` to the service block (the installed template shows the" >&2
+    echo "install: shape), or delete the file and re-run install to regenerate it." >&2
+    exit 1
+  fi
+  if [[ -z "$config_daemon_group" ]]; then
+    echo "install: ${SUPERVISOR_CONFIG_FILE} declares no group for the tddy-daemon service, and the" >&2
+    echo "install: daemon's directories are chowned to the account that service names — there is no" >&2
+    echo "install: default to fall back to. Add \`group: <group>\` to the service block, or delete" >&2
+    echo "install: the file and re-run install to regenerate it." >&2
+    exit 1
+  fi
+  if [[ -n "${INSTALL_DAEMON_USER:-}" && "$INSTALL_DAEMON_USER" != "$config_daemon_user" ]]; then
+    echo "install: INSTALL_DAEMON_USER=${INSTALL_DAEMON_USER} disagrees with the daemon service user" >&2
+    echo "install: \`${config_daemon_user}\` declared in ${SUPERVISOR_CONFIG_FILE}. The config is the" >&2
+    echo "install: authority once it exists: drop the variable, or edit the service's \`user:\` and" >&2
+    echo "install: re-run install." >&2
+    exit 1
+  fi
+  if [[ -n "${INSTALL_DAEMON_GROUP:-}" && "$INSTALL_DAEMON_GROUP" != "$config_daemon_group" ]]; then
+    echo "install: INSTALL_DAEMON_GROUP=${INSTALL_DAEMON_GROUP} disagrees with the daemon service group" >&2
+    echo "install: \`${config_daemon_group}\` declared in ${SUPERVISOR_CONFIG_FILE}. The config is the" >&2
+    echo "install: authority once it exists: drop the variable, or edit the service's \`group:\` and" >&2
+    echo "install: re-run install." >&2
+    exit 1
+  fi
+  DAEMON_USER="$config_daemon_user"
+  DAEMON_GROUP="$config_daemon_group"
+  DAEMON_IDENTITY_FROM_CONFIG=true
+  echo "install: daemon service user read from ${SUPERVISOR_CONFIG_FILE}: ${DAEMON_USER}"
+fi
+
 if "$want_supervisor" && [[ "$DAEMON_USER" == "root" ]]; then
-  echo "install: INSTALL_DAEMON_USER=root is not supported: tddy-supervisor rejects a root-run managed" >&2
-  echo "install: service at config load. Multi-user session spawning is the supervisor's job now — list" >&2
+  if "$DAEMON_IDENTITY_FROM_CONFIG"; then
+    echo "install: ${SUPERVISOR_CONFIG_FILE} declares the tddy-daemon service as user root, which is" >&2
+    echo "install: not supported: tddy-supervisor rejects a root-run managed service at config load." >&2
+  else
+    echo "install: INSTALL_DAEMON_USER=root is not supported: tddy-supervisor rejects a root-run managed" >&2
+    echo "install: service at config load." >&2
+  fi
+  echo "install: Multi-user session spawning is the supervisor's job now — list" >&2
   echo "install: the target accounts under spawn_policy.allowed_session_users in ${SUPERVISOR_CONFIG_FILE}." >&2
   exit 1
 fi

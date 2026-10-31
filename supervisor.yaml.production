@@ -14,6 +14,13 @@
 #   __DAEMON_USER__              — unprivileged service user (INSTALL_DAEMON_USER)
 #   __DAEMON_GROUP__             — service group (INSTALL_DAEMON_GROUP)
 #
+# THIS FILE OWNS THE DAEMON'S OS IDENTITY. The `user:`/`group:` of the tddy-daemon service below are
+# not hints: on every install after the first, ./install reads them back and creates the account,
+# adds it to the socket-access group and chowns the daemon's log and auth directories to THEM — the
+# env vars only seed a freshly rendered copy of this file, and one that disagrees with an existing
+# file is an error, never a silent winner. Editing `user:` here and re-running install moves the
+# daemon's directories to the new account.
+#
 # Unknown keys are a startup failure, not a silently ignored setting: a typo'd security setting must
 # fail loudly. Every path here must be absolute.
 

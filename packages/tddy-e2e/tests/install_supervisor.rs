@@ -504,11 +504,15 @@ fn refuses_a_multi_line_socket_path_and_writes_no_config_at_all() {
 
 #[test]
 fn keeps_an_existing_supervisor_config_rather_than_overwriting_the_policy_in_it() {
-    // Given a host whose operator has declared a spawn policy
+    // Given a host whose operator has declared a spawn policy — the config still declares the
+    // daemon service identity install must obey
     let tree = an_install_tree();
     tree.install();
-    let operator_policy = "spawn_policy:\n  allowed_session_users: [alice]\n";
-    tree.overwrite_installed_config("supervisor.yaml", operator_policy);
+    let operator_policy = format!(
+        "{}spawn_policy:\n  allowed_session_users: [alice]\n",
+        a_supervisor_config_declaring_the_daemon_as("tddy", Some("tddy"))
+    );
+    tree.overwrite_installed_config("supervisor.yaml", &operator_policy);
 
     // When
     tree.install();
@@ -701,4 +705,209 @@ fn upgrading_removes_the_supervisor_block_from_an_existing_daemon_yaml_and_says_
         narration.contains("removed the obsolete `supervisor:` block"),
         "the install reports the removal:\n{narration}"
     );
+}
+
+// ---------------------------------------------------------------------------------------------
+// The daemon's OS identity comes from supervisor.yaml, not from the install environment
+// (docs/ft/daemon/systemd-install.md)
+// ---------------------------------------------------------------------------------------------
+
+/// A supervisor config whose `tddy-daemon` service declares the given `user:`/`group:`, with the
+/// surrounding keys the real template carries so the file reads like an operator-edited install.
+fn a_supervisor_config_declaring_the_daemon_as(user: &str, group: Option<&str>) -> String {
+    let mut lines: Vec<String> = vec![
+        "socket:".into(),
+        "  path: /run/tddy-supervisor.sock".into(),
+        "  group: tddy-clients".into(),
+        "  mode: \"0660\"".into(),
+        "services:".into(),
+        "  - name: tddy-daemon".into(),
+        "    exec_start: /usr/local/bin/tddy-daemon".into(),
+        "    args: [\"-c\", \"/etc/tddy/daemon.yaml\"]".into(),
+    ];
+    lines.push(format!("    user: {user}"));
+    if let Some(group) = group {
+        lines.push(format!("    group: {group}"));
+    }
+    lines.push("    restart:".into());
+    lines.push("      max_retries: 5".into());
+    lines.join("\n") + "\n"
+}
+
+#[test]
+fn an_upgrade_derives_the_daemon_identity_from_the_existing_supervisor_config() {
+    // Given a host whose operator changed the daemon service's account in supervisor.yaml
+    let tree = an_install_tree();
+    tree.install();
+    tree.overwrite_installed_config(
+        "supervisor.yaml",
+        &a_supervisor_config_declaring_the_daemon_as("mantas", Some("mantas")),
+    );
+
+    // When
+    let output = tree.attempt_install_with(&[]);
+
+    // Then install obeys the config it preserved rather than its own env defaults
+    assert!(
+        output.status.success(),
+        "install failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let narration = format!(
+        "{}{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(
+        narration.contains("daemon service user read from") && narration.contains("mantas"),
+        "the install says the identity came from the config:\n{narration}"
+    );
+}
+
+#[test]
+fn an_install_daemon_user_disagreeing_with_the_existing_config_is_refused() {
+    // Given a host whose supervisor config declares one user while the caller passes another
+    let tree = an_install_tree();
+    tree.install();
+    tree.overwrite_installed_config(
+        "supervisor.yaml",
+        &a_supervisor_config_declaring_the_daemon_as("tddy", Some("tddy")),
+    );
+
+    // When
+    let outcome = tree.attempt_install_with(&[("INSTALL_DAEMON_USER", "someone-else")]);
+
+    // Then the env var must not silently win or silently lose — the run stops and names both
+    assert!(
+        !outcome.status.success(),
+        "install should refuse a disagreeing INSTALL_DAEMON_USER"
+    );
+    let stderr = String::from_utf8_lossy(&outcome.stderr);
+    assert!(
+        stderr.contains("someone-else") && stderr.contains("tddy"),
+        "the refusal names both the env value and the config value:\n{stderr}"
+    );
+}
+
+#[test]
+fn an_install_daemon_group_disagreeing_with_the_existing_config_is_refused() {
+    // Given a host whose supervisor config declares one group while the caller passes another
+    let tree = an_install_tree();
+    tree.install();
+    tree.overwrite_installed_config(
+        "supervisor.yaml",
+        &a_supervisor_config_declaring_the_daemon_as("tddy", Some("tddy")),
+    );
+
+    // When
+    let outcome = tree.attempt_install_with(&[("INSTALL_DAEMON_GROUP", "some-other-group")]);
+
+    // Then the group env var has no more authority than the user one once the config exists
+    assert!(
+        !outcome.status.success(),
+        "install should refuse a disagreeing INSTALL_DAEMON_GROUP"
+    );
+    let stderr = String::from_utf8_lossy(&outcome.stderr);
+    assert!(
+        stderr.contains("some-other-group") && stderr.contains("tddy"),
+        "the refusal names both the env value and the config value:\n{stderr}"
+    );
+}
+
+#[test]
+fn an_existing_config_whose_daemon_service_declares_no_user_is_refused() {
+    // Given a supervisor config whose tddy-daemon service lost its user key
+    let tree = an_install_tree();
+    tree.install();
+    let config_without_user = a_supervisor_config_declaring_the_daemon_as("tddy", Some("tddy"))
+        .lines()
+        .filter(|line| !line.contains("user:"))
+        .collect::<Vec<_>>()
+        .join("\n");
+    tree.overwrite_installed_config(
+        "supervisor.yaml",
+        &format!("{config_without_user}\n"),
+    );
+
+    // When
+    let outcome = tree.attempt_install_with(&[]);
+
+    // Then install fails rather than falling back to a default the operator never declared
+    assert!(
+        !outcome.status.success(),
+        "install should refuse a config without a daemon user"
+    );
+    let stderr = String::from_utf8_lossy(&outcome.stderr);
+    assert!(
+        stderr.contains("declares no user") || stderr.contains("no `user:`"),
+        "the refusal says the user key is missing and names the remedy:\n{stderr}"
+    );
+}
+
+#[test]
+fn an_existing_config_whose_daemon_service_declares_no_group_is_refused() {
+    // Given a supervisor config whose tddy-daemon service lost its group key
+    let tree = an_install_tree();
+    tree.install();
+    tree.overwrite_installed_config(
+        "supervisor.yaml",
+        &a_supervisor_config_declaring_the_daemon_as("tddy", None),
+    );
+
+    // When
+    let outcome = tree.attempt_install_with(&[]);
+
+    // Then install fails rather than guessing a group the config never named
+    assert!(
+        !outcome.status.success(),
+        "install should refuse a config without a daemon group"
+    );
+    let stderr = String::from_utf8_lossy(&outcome.stderr);
+    assert!(
+        stderr.contains("declares no group") || stderr.contains("no `group:`"),
+        "the refusal says the group key is missing and names the remedy:\n{stderr}"
+    );
+}
+
+#[test]
+fn an_existing_config_declaring_root_as_the_daemon_user_is_refused() {
+    // Given a supervisor config whose daemon service names root — a child the supervisor itself
+    // would refuse at config load
+    let tree = an_install_tree();
+    tree.install();
+    tree.overwrite_installed_config(
+        "supervisor.yaml",
+        &a_supervisor_config_declaring_the_daemon_as("root", Some("root")),
+    );
+
+    // When
+    let outcome = tree.attempt_install_with(&[]);
+
+    // Then install refuses with the same message it uses for a root INSTALL_DAEMON_USER
+    assert!(
+        !outcome.status.success(),
+        "install should refuse a root daemon user"
+    );
+    let stderr = String::from_utf8_lossy(&outcome.stderr);
+    assert!(
+        stderr.contains("declares the tddy-daemon service as user root"),
+        "the refusal names the config as the source of the root user:\n{stderr}"
+    );
+}
+
+#[test]
+fn a_fresh_install_renders_the_requested_daemon_identity_into_the_supervisor_config() {
+    // Given a host with no supervisor config yet and an operator choosing the service account
+    let tree = an_install_tree();
+
+    // When
+    tree.install_with(&[
+        ("INSTALL_DAEMON_USER", "svc-tddy"),
+        ("INSTALL_DAEMON_GROUP", "svc-tddy"),
+    ]);
+
+    // Then the rendered config carries the requested identity — the seed the config then owns
+    let config = tree.installed_config("supervisor.yaml");
+    assert_contains(&config, "user: svc-tddy", "the supervisor config");
+    assert_contains(&config, "group: svc-tddy", "the supervisor config");
 }
