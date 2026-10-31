@@ -9,7 +9,10 @@
 //! [`slots::render`]; nothing in that path hard-codes an agent.
 
 pub mod claude_tools;
+mod capability;
 pub mod headless;
+mod registry;
+mod route;
 pub mod slots;
 mod spec;
 
@@ -17,6 +20,9 @@ use std::path::Path;
 
 use tddy_actions::tool::{ToolError, ToolRegistry, BUILTIN_SUPPORT_TOOLS, BUILTIN_TOOLS};
 
+pub use capability::Capability;
+pub use registry::{CodingAgentRegistry, RegistryError, CLI_SESSION_TYPE_SUFFIX};
+pub use route::{ProviderKind, RouteShape, RouteSupport};
 pub use spec::{
     package_runner, AcpCommandError, AcpSection, AgentVariant, CodingAgentExtension,
     CodingAgentSection, CodingAgentSpec, FlagSlot, HeadlessSection, HooksSlot, InstructionsSlot,

@@ -44,6 +44,9 @@ extensions:
     # (a `#agent-tools 2/12` type change); until then the `unsupported` adapter refuses a launch
     # that passes hook params.
     hooks: { adapter: unsupported }
+    # What a session of this agent offers (`#agent-tools 12/12`): the gates read these, never the
+    # agent's name. Unknown words are refused at load.
+    capabilities: []
     models:
       # OpenCode lists its own `provider/model` ids, one per line; the first is the default.
       default: ""

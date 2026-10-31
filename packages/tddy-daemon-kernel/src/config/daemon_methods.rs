@@ -41,6 +41,12 @@ impl DaemonConfig {
         let contents = std::fs::read_to_string(path)
             .map_err(|e| anyhow::anyhow!("failed to read config {}: {}", path.display(), e))?;
         refuse_obsolete_supervisor_block(&contents, path)?;
+        // TODO(agent-registry): refuse the removed agent sections here, before typed
+        // deserialization — `crate::config::refuse_removed_agent_keys(&document)` over the parsed
+        // document, its error prefixed with `path` as the `supervisor:` refusal is — then delete
+        // `claude_cli`, `cursor_cli` and `cli_harnesses` from `DaemonConfig` (and `agent_cli.rs`'s
+        // section types) along with every reader of them. Not wired at contract stage: start-up
+        // still accepts the sections, so the config tests that parse them stay green until then.
         let config: Self = serde_yaml::from_str(&contents)
             .map_err(|e| anyhow::anyhow!("failed to parse config {}: {}", path.display(), e))?;
         config

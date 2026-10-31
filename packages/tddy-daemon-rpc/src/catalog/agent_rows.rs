@@ -28,6 +28,13 @@ pub(super) async fn listed_agents(
         .into_iter()
         .map(|row| (row.id, row.display_label))
         .chain(harness_profile_rows(&profiles))
-        .map(|(id, label)| CatalogAgentInfo { id, label })
+        // TODO(agent-registry): fill `kind`, `harness` and `route_providers` from the host's
+        // `CodingAgentRegistry` (`<tddyhome>/tools`): CODING_AGENT with the spec id and its
+        // `route_support().providers` for a registry agent, MODEL with neither for a definition.
+        .map(|(id, label)| CatalogAgentInfo {
+            id,
+            label,
+            ..Default::default()
+        })
         .collect())
 }

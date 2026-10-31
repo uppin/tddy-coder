@@ -47,6 +47,9 @@ extensions:
     instructions:
       files: []
     hooks: { adapter: unsupported }
+    # What a session of this agent offers (`#agent-tools 12/12`): the gates read these, never the
+    # agent's name. Unknown words are refused at load.
+    capabilities: []
     models:
       default: gpt-5
       curated: [gpt-5]
