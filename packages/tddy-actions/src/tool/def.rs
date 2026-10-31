@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
-use super::{RunSection, ToolError};
+use super::{NetworkSection, RunSection, ToolError};
 
 /// The only schema version this build reads. A file naming another is refused at load.
 pub const TOOL_SCHEMA_VERSION: u32 = 1;
@@ -39,6 +39,10 @@ pub struct ToolDef {
     /// [`super::ExtensionOwner`] of that name, and refuses a section no owner claims.
     #[serde(default)]
     pub extensions: BTreeMap<String, serde_yaml::Value>,
+    /// Which hosts the tool may reach and whether it takes an OAuth callback (`#agent-tools 3/12`).
+    /// Absent means `egress: none` — a declared default, not a fallback.
+    #[serde(default)]
+    pub network: NetworkSection,
 }
 
 /// How a tool's binary is found on the host.
