@@ -206,6 +206,8 @@ fn the_expected_turn(
         mcp_server: Some(the_tool_server()),
         workdir: agent.path().to_path_buf(),
         scratch_dir: agent.path().join("session"),
+        params: BTreeMap::new(),
+        route_args: Vec::new(),
     }
 }
 
@@ -440,6 +442,8 @@ fn the_expected_driver_turn(
         }),
         workdir: agent.path().to_path_buf(),
         scratch_dir: agent.path().join("conv-1"),
+        params: BTreeMap::new(),
+        route_args: Vec::new(),
     }
 }
 

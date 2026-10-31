@@ -111,6 +111,11 @@ pub struct HeadlessSection {
     /// `GoalHints::claude_nonzero_exit_ok_if_structured_response`.
     #[serde(default)]
     pub exit_ok_if_structured: bool,
+    /// Where a headless run registers its MCP server, when that differs from the agent's
+    /// `coding_agent.mcp` (Cursor: a project file in the worktree headless, `{home}` for its PTY
+    /// session). `None` uses `coding_agent.mcp`. Added by the 2026-10-31 amendment.
+    #[serde(default)]
+    pub mcp: Option<McpSlot>,
 }
 
 impl HeadlessSection {
