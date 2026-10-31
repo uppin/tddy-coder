@@ -924,13 +924,19 @@ async fn connect_common_room_publish_metadata(
     token: &str,
     advertisement: &DaemonAdvertisement,
     host_id: &str,
+    ice_gathering: tddy_daemon_kernel::config::IceGathering,
 ) -> anyhow::Result<(
     Arc<Room>,
     tokio::sync::mpsc::UnboundedReceiver<RoomEvent>,
     VecDeque<RoomEvent>,
     String,
 )> {
-    let (room, mut events) = Room::connect(url, token, tddy_livekit::tddy_room_options()).await?;
+    let (room, mut events) = Room::connect(
+        url,
+        token,
+        tddy_livekit::tddy_room_options(crate::ice_gathering_policy(ice_gathering)),
+    )
+    .await?;
     let room = Arc::new(room);
     let lp = room.local_participant();
     log::info!(
@@ -1340,9 +1346,19 @@ async fn common_room_discovery_cycle(
         signing_key_id: signing_key.key_id,
         signing_public_key: signing_key.public_key,
     };
-    let (room, events, event_buffer, daemon_adv_metadata) =
-        connect_common_room_publish_metadata(&room_name, &url, &token, &advertisement, &host_id)
-            .await?;
+    let (room, events, event_buffer, daemon_adv_metadata) = connect_common_room_publish_metadata(
+        &room_name,
+        &url,
+        &token,
+        &advertisement,
+        &host_id,
+        config
+            .livekit
+            .as_ref()
+            .map(|lk| lk.ice_gathering)
+            .unwrap_or_default(),
+    )
+    .await?;
     {
         let mut g = room_slot.write().await;
         *g = Some(room.clone());

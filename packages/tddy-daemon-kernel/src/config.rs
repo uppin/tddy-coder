@@ -351,6 +351,23 @@ pub struct ListenConfig {
     pub advertise_url: Option<String>,
 }
 
+/// How the ICE agent gathers host candidates on tddy's LiveKit connections.
+///
+/// The default is [`IceGathering::GatherOnce`] because the SDK's `GatherContinually`
+/// re-gathers on every network change and leaks the superseded host-candidate sockets
+/// (livekit/rust-sdks#1512), which exhausted a multi-homed daemon's file descriptor limit.
+/// An operator who needs established sessions to survive a network switch without a
+/// reconnect cycle opts into [`IceGathering::GatherContinually`] knowingly.
+#[derive(
+    Debug, Copy, Clone, PartialEq, Eq, Default, serde::Deserialize, serde::Serialize,
+)]
+#[serde(rename_all = "snake_case")]
+pub enum IceGathering {
+    #[default]
+    GatherOnce,
+    GatherContinually,
+}
+
 #[derive(Debug, Clone, serde::Deserialize, serde::Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct LiveKitConfig {
@@ -391,6 +408,10 @@ pub struct LiveKitConfig {
     /// caps how long we keep trying before treating the round as failed (minimum effective **1** second).
     #[serde(default = "default_common_room_set_metadata_timeout_secs")]
     pub common_room_set_metadata_timeout_secs: u64,
+    /// How the ICE agent gathers host candidates on this daemon's LiveKit connections.
+    /// See [`IceGathering`] for why the default is what it is.
+    #[serde(default)]
+    pub ice_gathering: IceGathering,
 }
 
 impl Default for LiveKitConfig {
@@ -403,6 +424,7 @@ impl Default for LiveKitConfig {
             public_url: None,
             common_room: None,
             common_room_set_metadata_timeout_secs: default_common_room_set_metadata_timeout_secs(),
+            ice_gathering: IceGathering::default(),
         }
     }
 }
@@ -573,6 +595,38 @@ mod spawn_timeout_tests {
             ..Default::default()
         };
         assert_eq!(c.common_room_set_metadata_attempt_budget().as_secs(), 1);
+    }
+
+    #[test]
+    fn ice_gathering_defaults_to_gather_once() {
+        let c = DaemonConfig::default();
+        let livekit = c.livekit.unwrap_or_default();
+        assert_eq!(
+            livekit.ice_gathering,
+            IceGathering::GatherOnce,
+            "continual gathering leaks the superseded ICE sockets on every network change \
+             (livekit/rust-sdks#1512), so the safe value must be the default"
+        );
+    }
+
+    #[test]
+    fn ice_gathering_parses_both_values_from_yaml() {
+        // Given
+        let once: DaemonConfig = serde_yaml::from_str("livekit:\n  ice_gathering: gather_once\n")
+            .expect("gather_once parses");
+        let continually: DaemonConfig =
+            serde_yaml::from_str("livekit:\n  ice_gathering: gather_continually\n")
+                .expect("gather_continually parses");
+
+        // Then
+        assert_eq!(
+            once.livekit.as_ref().unwrap().ice_gathering,
+            IceGathering::GatherOnce
+        );
+        assert_eq!(
+            continually.livekit.as_ref().unwrap().ice_gathering,
+            IceGathering::GatherContinually
+        );
     }
 
     #[test]

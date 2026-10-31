@@ -118,6 +118,18 @@ message LiveKitSettings {
   // Whether this daemon joins its common room. Everything else in the block is preserved when it
   // is false, so turning LiveKit back on is one toggle rather than re-entering four fields.
   bool enabled = 7;
+  // How the ICE agent gathers host candidates on this daemon's LiveKit connections. The default
+  // (also for `ICE_GATHERING_UNSPECIFIED`) is `GATHER_ONCE`: the SDK's continual re-gathering
+  // leaks the superseded host-candidate sockets on every network change
+  // (livekit/rust-sdks#1512), which exhausted a multi-homed daemon's file descriptors.
+  IceGathering ice_gathering = 8;
+}
+
+// How the ICE agent gathers host candidates. Mirrors `tddy_daemon_kernel::config::IceGathering`.
+enum IceGathering {
+  ICE_GATHERING_UNSPECIFIED = 0;
+  GATHER_ONCE = 1;
+  GATHER_CONTINUALLY = 2;
 }
 
 message ListenSettings {

@@ -38,6 +38,7 @@ pub use client_connect::{connect_client, ConnectError, ConnectedClient};
 pub use client_factory::LiveKitRpcClientFactory;
 pub use envelope::{decode_request, encode_request, encode_response, response_from_result};
 pub use livekit::prelude::RoomOptions;
+pub use livekit::webrtc::prelude::ContinualGatheringPolicy;
 pub use participant::{
     merge_participant_metadata_json, owned_project_count_for_projects_dir,
     spawn_local_participant_metadata_watcher, JoinedParticipant, LiveKitParticipant,

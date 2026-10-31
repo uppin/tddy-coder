@@ -291,7 +291,7 @@ async fn publish_to_livekit(
         &config.livekit_url,
         &config.livekit_token,
         input_svc,
-        tddy_room_options(),
+        tddy_room_options(tddy_livekit::ContinualGatheringPolicy::GatherOnce),
         None,
         None,
     )

@@ -64,7 +64,7 @@ impl SessionParticipantHost for LiveKitParticipantHost {
                         &url,
                         &generator,
                         surface,
-                        tddy_room_options(),
+                        tddy_room_options(tddy_livekit::ContinualGatheringPolicy::GatherOnce),
                         options.shutdown,
                         options.metadata,
                         options.codex_oauth_watch,
@@ -133,7 +133,7 @@ async fn serve_once(
         url,
         token,
         surface,
-        tddy_room_options(),
+        tddy_room_options(tddy_livekit::ContinualGatheringPolicy::GatherOnce),
         codex_oauth_watch,
         projects_registry_dir,
     )

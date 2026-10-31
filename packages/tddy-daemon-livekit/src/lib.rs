@@ -72,6 +72,23 @@ pub use split_rooms::LiveKitSplitRooms;
 /// agent roster is wired with.
 pub use tddy_livekit::room_connector::LiveKitRoomConnector;
 
+/// The ICE gathering policy the operator's `livekit.ice_gathering` selects.
+///
+/// The config side stays in [`tddy_daemon_kernel::config::IceGathering`] (the kernel does not
+/// depend on the livekit crate), so this is the one place the operator's value becomes the SDK's.
+pub fn ice_gathering_policy(
+    ice_gathering: tddy_daemon_kernel::config::IceGathering,
+) -> tddy_livekit::ContinualGatheringPolicy {
+    match ice_gathering {
+        tddy_daemon_kernel::config::IceGathering::GatherOnce => {
+            tddy_livekit::ContinualGatheringPolicy::GatherOnce
+        }
+        tddy_daemon_kernel::config::IceGathering::GatherContinually => {
+            tddy_livekit::ContinualGatheringPolicy::GatherContinually
+        }
+    }
+}
+
 /// Bytes to leave free in a LiveKit data packet for everything in a frame that is not payload: the
 /// RPC envelope (request id, service/method metadata, sender identity) plus the frame's own fields —
 /// `total_byte_size` for a document chunk, `error_message` / `job_id` / the flags for a tool-result
@@ -184,5 +201,19 @@ mod tests {
         // Then it reports none rather than guessing — a daemon that has not joined knows nothing
         // about who else is there, which is different from knowing nobody is
         assert!(peers.is_empty());
+    }
+
+    #[test]
+    fn maps_the_operator_s_ice_gathering_onto_the_sdk_policy() {
+        // Given / When / Then — the config side lives in the kernel, which does not depend on the
+        // livekit crate, so this mapping is the bridge between the two vocabularies.
+        assert_eq!(
+            ice_gathering_policy(tddy_daemon_kernel::config::IceGathering::GatherOnce),
+            tddy_livekit::ContinualGatheringPolicy::GatherOnce
+        );
+        assert_eq!(
+            ice_gathering_policy(tddy_daemon_kernel::config::IceGathering::GatherContinually),
+            tddy_livekit::ContinualGatheringPolicy::GatherContinually
+        );
     }
 }

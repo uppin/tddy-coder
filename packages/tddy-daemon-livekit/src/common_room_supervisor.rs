@@ -340,6 +340,7 @@ impl CommonRoomConnector for DaemonCommonRoomConnector {
             token_generator,
             cloned_entries(&self.entries),
             shutdown.clone(),
+            target.livekit().ice_gathering,
         ));
 
         Box::new(RunningCommonRoom {
@@ -430,6 +431,7 @@ async fn serve_rpc_participant_until_shutdown(
     token_generator: tddy_livekit::TokenGenerator,
     entries: Vec<tddy_rpc::ServiceEntry>,
     shutdown: Arc<AtomicBool>,
+    ice_gathering: tddy_daemon_kernel::config::IceGathering,
 ) {
     let mut backoff = RejoinBackoff::new();
     loop {
@@ -440,7 +442,7 @@ async fn serve_rpc_participant_until_shutdown(
             &url,
             &token_generator,
             roster,
-            tddy_livekit::tddy_room_options(),
+            tddy_livekit::tddy_room_options(crate::ice_gathering_policy(ice_gathering)),
             None,
             None,
             None,
