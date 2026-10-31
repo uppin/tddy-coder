@@ -284,6 +284,12 @@ impl LaunchSessions {
             .map_err(Status::internal)?;
         let loopback_allow_ports = vec![egress_shim_port];
 
+        // TODO(cursor-cli): resolve `cursor_from_spec::CURSOR_AGENT_ID` with `HostCodingAgents`,
+        // render its slots for jail paths (`home` = `<tddyhome>/homes/cursor`) and call
+        // `launch_jailed` instead of building the runner's `--agent-kind cursor` argv below — no
+        // Cursor flag reaches the runner, and the Claude overlay is no longer applied. Green
+        // deletes this file (code issue `crap-svc-start-sandboxed-cursor-cli-session`); the
+        // deletion needs the developer's approval (CLAUDE.md § ASK).
         let mut runner_argv = vec![
             sandbox_runner_path,
             "--session-id".into(),

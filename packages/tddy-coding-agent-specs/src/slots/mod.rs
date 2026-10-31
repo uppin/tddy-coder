@@ -4,6 +4,7 @@
 //! Every renderer is pure except [`instructions`], which reads the files it prepends to. Nothing is
 //! written here: the launcher writes [`RenderedSlots::files`] before it spawns the agent.
 
+pub mod cursor;
 pub mod hooks;
 pub mod instructions;
 pub mod mcp;
@@ -51,6 +52,10 @@ pub struct SlotInputs<'a> {
     /// session, so a per-tab activity identity is a later parameter rather than a second writer
     /// (`docs/dev/todo/2026-10-24-claude-agent-tab-shares-session-hooks.md`).
     pub hooks: Option<HookCommandParams<'a>>,
+    /// The agent's home on this launch — what `{home}` in a [`crate::McpSlot::Placed`] path
+    /// resolves to: the jail's persistent home, or the host's `$HOME` (`#agent-tools 7/12`). `None`
+    /// refuses a placed path that names `{home}` ([`SlotError::UnboundHome`]).
+    pub home: Option<PathBuf>,
 }
 
 /// What a launch adds: argv entries (spliced before the prompt) and files to write, each with its
@@ -74,6 +79,16 @@ pub enum SlotError {
     /// list of tools to withdraw from an agent that cannot withdraw any. Refused, never dropped.
     #[error("{agent} cannot take {slot}: its spec declares it unsupported")]
     SlotUnsupported { agent: String, slot: String },
+    /// The hooks adapter reports over the daemon's agent-tool socket and the launch gave it none.
+    /// Refused rather than falling back to `daemon_url`, which on an embedded daemon answers every
+    /// report with a 404 the hook swallows (`#agent-tools 7/12`).
+    #[error(
+        "hooks adapter {adapter} needs the daemon's agent-tool socket and the launch gave none"
+    )]
+    NoDaemonSocket { adapter: String },
+    /// A placed registration path names `{home}` and the launch bound no home.
+    #[error("{path} names {{home}} and the launch bound no home")]
+    UnboundHome { path: String },
 }
 
 /// Every slot of `spec` filled from `inputs`. `argv_extra` is ordered: the append-system-prompt
@@ -81,6 +96,10 @@ pub enum SlotError {
 /// hand-built launch used.
 pub fn render(spec: &CodingAgentSpec, inputs: &SlotInputs<'_>) -> Result<RenderedSlots, SlotError> {
     // TODO(claude-host): implement — compose `instructions`, `tools`, `mcp` and `hooks`.
+    // TODO(cursor-cli): and the Cursor slots — an `McpSlot::Placed` registration
+    // (`cursor::render_cursor_mcp_json` at `cursor::placed_path`), `instructions.rules_file`
+    // (`cursor::render_rules_file` with the preamble), and hooks through
+    // `HooksAdapter::try_render`, so `cursor-hooks-json`'s refusal without a socket surfaces here.
     let _ = (spec, inputs);
     todo!("claude-host: slots::render")
 }
@@ -128,6 +147,7 @@ mod tests {
                 instructions: InstructionsSlot {
                     files: vec![PathBuf::from("CLAUDE.md"), PathBuf::from("AGENTS.md")],
                     append_system_prompt: Some(flag("--append-system-prompt-file")),
+                    rules_file: None,
                 },
                 hooks: HooksSlot {
                     adapter: "claude-settings-local".to_string(),
@@ -154,6 +174,7 @@ mod tests {
             preamble: None,
             append_system_prompt_file: None,
             hooks: None,
+            home: None,
         }
     }
 

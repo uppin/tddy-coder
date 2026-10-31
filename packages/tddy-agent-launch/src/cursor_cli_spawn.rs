@@ -265,6 +265,14 @@ pub(crate) async fn spawn_cursor_cli_session_reporting(
     // `.session.yaml` below, and passed as `--resume <id>` on every later spawn so a resume
     // continues this chat instead of opening a new one.
     progress.begin_phase(StartStep::Agent);
+    // TODO(cursor-cli): when the host has coding agents installed (`LaunchSessions::coding_agents`),
+    // resolve `cursor_from_spec::CURSOR_AGENT_ID`, render its slots (the `{home}/.cursor/mcp.json`
+    // registration with `home` = the host's `$HOME`, the rules file, `cursor-hooks-json` with the
+    // daemon's agent-tool socket) and spawn through `spec_launch::launch_host_pty` with
+    // `cursor_from_spec::cursor_template_params(chat_id, …)` instead of `start_cursor` below; then
+    // `prepare_cursor_cli_launch` and `install_cursor_hooks_in_worktree` stop writing files, and
+    // the per-agent body of this function is deleted (code issue
+    // `complexity-cursor-cli-spawn-spawn-cursor-cli-session-inner`).
     let (cursor_chat_id, handle) = spawn_cursor_cli_process(
         cli_manager,
         session_id,
