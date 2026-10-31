@@ -65,6 +65,17 @@ extensions:
       adapter: claude-stream-json
       # `claude -p` can exit 1 after an ExitPlanMode despite a complete structured result.
       exit_ok_if_structured: true
+    # --- Variants (`#agent-tools 10/12`): the same agent, launched differently. ------------------
+    # `host_agent` is the agent a split session runs on this host against a codebase that lives on
+    # another daemon or in a jail. `--strict-mcp-config` loads only the `--mcp-config` the launch
+    # names, so a checkout's `.mcp.json` cannot register a server that runs unconfined here;
+    # `--setting-sources user` drops the checkout's `.claude/settings.json`, whose hooks would run
+    # here too. Its native filesystem and shell tools are withdrawn through `tool_deny`: on this host
+    # they would reach this host's disk, not the codebase's.
+    variants:
+      host_agent:
+        args: [--strict-mcp-config, --setting-sources, user]
+        withdraw_native: [Read, Write, Edit, MultiEdit, NotebookEdit, Bash, BashOutput, KillShell, Glob, Grep, LS]
 # --- Jail sections (`#agent-tools 5/12`): what a sandboxed launch lowers into the jail. ----------
 # A persistent home at <tddyhome>/homes/claude, mounted rw: refreshed OAuth tokens, history and
 # settings survive the session. Replaces <tddyhome>/sandbox-claude-home, migrated once in place.

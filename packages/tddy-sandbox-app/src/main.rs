@@ -65,6 +65,14 @@ struct Args {
     #[arg(long, default_value = "claude")]
     agent_kind: String,
 
+    /// The coding agent to jail, by its spec id in the tool registry (`claude`, `cursor`, …) —
+    /// `<session-base>/tools/<id>.yaml` overrides the embedded spec. An id the registry does not hold
+    /// is refused, naming the ones it does (`#agent-tools 10/12`).
+    // TODO(jail-agnostic): replaces `--agent-kind`, `--claude-binary` and `--cursor-binary`, which
+    // green deletes once this flag launches through the spec.
+    #[arg(long, conflicts_with = "agent_kind")]
+    agent: Option<String>,
+
     /// Claude model passed to the in-jail `claude` binary (default: the versionless `opus` alias).
     #[arg(long)]
     model: Option<String>,
@@ -379,6 +387,11 @@ async fn main() -> Result<()> {
 /// daemon-hosted sandboxed session (see `daemon_client`). The in-process Seatbelt path is macOS-only.
 #[cfg(target_os = "linux")]
 async fn run_linux(args: Args, cfg: config::SandboxAppConfig) -> Result<()> {
+    if let Some(id) = args.agent.as_deref() {
+        // TODO(jail-agnostic): implement — hand the daemon the spec id instead of a Claude launch.
+        let _ = id;
+        todo!("jail-agnostic: --agent on the Linux daemon path");
+    }
     // `--codebase-mode`/`--remote-codebase` on the CLI win; otherwise fall back to config.
     let codebase_mode = args.codebase_mode.or(cfg.codebase_mode);
     let mode = resolve_codebase_mode(codebase_mode.as_deref(), args.remote_codebase)
@@ -458,6 +471,14 @@ async fn run_macos(args: Args, cfg: config::SandboxAppConfig) -> Result<()> {
         eprintln!("verbose logging enabled (RUST_LOG)");
     }
 
+    if let Some(id) = args.agent.as_deref() {
+        let chosen = tddy_sandbox_app::agent_spec::choose_agent(id, &session_base)
+            .map_err(|e| anyhow::anyhow!(e))?;
+        // TODO(jail-agnostic): implement — launch `chosen` through `agent_spec::agent_exec_plan`
+        // and `tddy-sandbox-runner --exec-plan`, then delete `AgentKind` and the hand-seeded homes.
+        let _ = chosen;
+        todo!("jail-agnostic: launch --agent");
+    }
     let agent_kind = AgentKind::parse(&args.agent_kind).map_err(|e| anyhow::anyhow!(e))?;
 
     let claude_home_dir = args

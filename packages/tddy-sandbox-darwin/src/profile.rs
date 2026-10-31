@@ -65,7 +65,7 @@ pub fn render_plan(plan: &SandboxPlan) -> Result<String, SandboxError> {
     );
 
     // The jail's agent-context dir is carved back out of the writable tree it lives in.
-    if let Some(context_dir) = context_dir_from_runner_argv(&spec.command) {
+    if let Some(context_dir) = context_dir_of(plan) {
         out.push_str(
             ";; The agent's context dir is read-only *inside* the jail: it holds the guidance\n\
              ;; files (CLAUDE.md / AGENTS.md and their managed-codebase preamble) that tell the\n\
@@ -172,6 +172,18 @@ pub fn render_plan(plan: &SandboxPlan) -> Result<String, SandboxError> {
     out.push_str(&render_network(&plan.network, spec.ipc_socket.as_deref()));
 
     Ok(out)
+}
+
+/// The directory the jail keeps read-only to the confined process: [`SandboxPlan::context_dir`]
+/// (`#agent-tools 10/12`).
+///
+/// Any jail may carry one, not only a `tddy-sandbox-runner` argv, and what the confined command
+/// line says no longer matters.
+// TODO(jail-agnostic): implement — return `plan.context_dir`, then delete
+// `context_dir_from_runner_argv` once every launcher sets the field. Today's argv sniffing stays
+// until then, so no current jail loses its carve-out.
+fn context_dir_of(plan: &SandboxPlan) -> Option<PathBuf> {
+    context_dir_from_runner_argv(&plan.spec.command)
 }
 
 /// The agent-context directory the confined process will use, read off the command line the plan
@@ -405,6 +417,8 @@ mod tests {
             limits: ResourceLimits::default(),
             stdin: None,
             cgroup: Default::default(),
+            context_dir: None,
+            stdio: false,
         }
     }
 
@@ -619,6 +633,55 @@ mod tests {
         assert!(
             !profile.contains("(deny file-write* (subpath"),
             "a plan with no --context-dir must render no context-dir carve-out:\n{profile}"
+        );
+    }
+
+    /// A jail that is not a `tddy-sandbox-runner` argv: the carve-out is declared on the plan.
+    fn a_plan_declaring_its_context_dir_running(command: Vec<String>) -> SandboxPlan {
+        let mut plan = a_runner_plan_told_its_context_dir();
+        plan.spec.command = command;
+        plan.context_dir = Some(PathBuf::from(ITS_CONTEXT_DIR));
+        plan
+    }
+
+    #[test]
+    fn rendered_profile_denies_writes_under_the_plans_context_dir_whose_argv_names_none() {
+        // Given — the plan declares the context dir; the command never spells `--context-dir`
+        let plan = a_plan_declaring_its_context_dir_running(vec![
+            "/opt/agents/bin/claude".into(),
+            "--model".into(),
+            "opus".into(),
+        ]);
+
+        // When
+        let profile = render_plan(&plan).expect("render must succeed");
+
+        // Then
+        assert!(
+            profile.contains(&format!(
+                "(deny file-write* (subpath \"{ITS_CONTEXT_DIR}\"))"
+            )),
+            "the plan's context dir must be carved out whatever the argv says:\n{profile}"
+        );
+    }
+
+    #[test]
+    fn rendered_profile_ignores_a_context_dir_flag_the_plan_does_not_declare() {
+        // Given — `--context-dir` in the argv, but no context dir on the plan
+        let mut plan = a_runner_plan_told_its_context_dir();
+        plan.context_dir = None;
+
+        // When
+        let profile = render_plan(&plan).expect("render must succeed");
+
+        // Then — the project root is still written (positive control), and no carve-out is
+        assert!(
+            profile.contains(&format!("(subpath \"{A_PROJECT_ROOT_NOT_ON_DISK}\")")),
+            "the project root must still be granted:\n{profile}"
+        );
+        assert!(
+            !profile.contains("(deny file-write* (subpath"),
+            "an argv flag must no longer declare a carve-out:\n{profile}"
         );
     }
 

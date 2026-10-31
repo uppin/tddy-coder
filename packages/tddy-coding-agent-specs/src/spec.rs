@@ -99,6 +99,54 @@ pub struct CodingAgentSection {
     /// sandboxed start up front, naming the placements ([`CodingAgentSpec::require_placement`]).
     #[serde(default = "Placement::anywhere")]
     pub placements: Vec<Placement>,
+    /// Named ways of running this same agent with fixed extra flags and native tools withdrawn
+    /// (`#agent-tools 10/12`) — `host_agent`, the agent a split session runs on this host against a
+    /// codebase that lives elsewhere. Empty for an agent with none.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub variants: BTreeMap<String, AgentVariant>,
+}
+
+/// The variant a split session's agent runs as: on this host, against a codebase on another daemon
+/// or in a jail, so nothing from the checkout may configure it and none of its native filesystem or
+/// shell tools may run (`#agent-tools 10/12`).
+pub const HOST_AGENT_VARIANT: &str = "host_agent";
+
+/// `coding_agent.variants.<name>`: what a variant adds to the agent's ordinary launch.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct AgentVariant {
+    /// Fixed flags, appended after the run template's own and before the slot flags.
+    #[serde(default)]
+    pub args: Vec<String>,
+    /// The agent's own tools the variant withdraws, each passed through the `tool_deny` slot.
+    #[serde(default)]
+    pub withdraw_native: Vec<String>,
+}
+
+/// Why a variant cannot be rendered.
+#[derive(Debug, Clone, PartialEq, Eq, Error)]
+pub enum VariantError {
+    #[error("agent {agent} declares no variant {variant:?}; it declares {declared:?}")]
+    Unknown {
+        agent: String,
+        variant: String,
+        declared: Vec<String>,
+    },
+    #[error(
+        "agent {agent}: variant {variant:?} withdraws native tools, but its tool_deny slot is unsupported"
+    )]
+    DenyUnsupported { agent: String, variant: String },
+}
+
+impl CodingAgentSpec {
+    /// The flags variant `name` adds to a launch: its `args`, then `tool_deny`'s flag once per
+    /// `withdraw_native` tool. Refused for a variant the agent does not declare, naming the ones it
+    /// does, and for one that withdraws tools through an `unsupported` deny slot.
+    pub fn variant_args(&self, name: &str) -> Result<Vec<String>, VariantError> {
+        // TODO(jail-agnostic): implement.
+        let _ = name;
+        todo!("jail-agnostic: CodingAgentSpec::variant_args")
+    }
 }
 
 impl CodingAgentSpec {

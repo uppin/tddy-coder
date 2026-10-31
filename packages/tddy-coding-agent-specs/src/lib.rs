@@ -17,9 +17,10 @@ use std::path::Path;
 use tddy_actions::tool::{ToolError, ToolRegistry};
 
 pub use spec::{
-    CodingAgentExtension, CodingAgentSection, CodingAgentSpec, FlagSlot, HeadlessSection,
-    HooksSlot, InstructionsSlot, McpFormat, McpSlot, ModelsSection, Placement, PlacementError,
-    ResumeSlot, RouteSlot, SpecError, ToolSlot, Unsupported, CODING_AGENT_EXTENSION,
+    AgentVariant, CodingAgentExtension, CodingAgentSection, CodingAgentSpec, FlagSlot,
+    HeadlessSection, HooksSlot, InstructionsSlot, McpFormat, McpSlot, ModelsSection, Placement,
+    PlacementError, ResumeSlot, RouteSlot, SpecError, ToolSlot, Unsupported, VariantError,
+    CODING_AGENT_EXTENSION, HOST_AGENT_VARIANT,
 };
 
 /// `specs/cursor.yaml` (`#agent-tools 7/12`), embedded.

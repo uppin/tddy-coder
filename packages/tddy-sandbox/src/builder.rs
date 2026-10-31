@@ -292,6 +292,20 @@ pub struct SandboxPlan {
     pub stdin: Option<Vec<u8>>,
     /// cgroup v2 delegation parameters (Linux backend only; ignored elsewhere).
     pub cgroup: CgroupConfig,
+    /// The directory inside the writable tree that holds the confined process's guidance files, and
+    /// that the jail must keep read-only to it (`#agent-tools 10/12`). `None` for a plan with nothing
+    /// to protect.
+    ///
+    /// The backends read the carve-out from here instead of sniffing `--context-dir` out of
+    /// [`SandboxSpec::command`], so a jail no longer has to run `tddy-sandbox-runner` to get one.
+    // TODO(jail-agnostic): the darwin and cgroups backends still read `--context-dir` off the argv;
+    // green switches them to this field and every launcher sets it.
+    pub context_dir: Option<PathBuf>,
+    /// The confined process speaks RPC over its stdin/stdout, so both are piped back to the caller
+    /// instead of stdout going to the egress log (`#agent-tools 10/12`).
+    // TODO(jail-agnostic): the backends still detect `--stdio` in the argv; green switches them to
+    // this field and every launcher sets it.
+    pub stdio: bool,
 }
 
 /// Assembles a [`SandboxPlan`] from explicit, caller-supplied grants.
@@ -314,6 +328,8 @@ pub struct SandboxBuilder {
     limits: ResourceLimits,
     cwd: Option<PathBuf>,
     stdin: Option<Vec<u8>>,
+    context_dir: Option<PathBuf>,
+    stdio: bool,
 }
 
 impl SandboxBuilder {
@@ -342,7 +358,21 @@ impl SandboxBuilder {
             limits: ResourceLimits::default(),
             cwd: None,
             stdin: None,
+            context_dir: None,
+            stdio: false,
         }
+    }
+
+    /// The directory the jail keeps read-only to the confined process — [`SandboxPlan::context_dir`].
+    pub fn context_dir(mut self, context_dir: Option<PathBuf>) -> Self {
+        self.context_dir = context_dir;
+        self
+    }
+
+    /// Pipe the confined process's stdin/stdout back to the caller — [`SandboxPlan::stdio`].
+    pub fn stdio(mut self, stdio: bool) -> Self {
+        self.stdio = stdio;
+        self
     }
 
     pub fn stdin(mut self, stdin: Option<Vec<u8>>) -> Self {
@@ -451,6 +481,8 @@ impl SandboxBuilder {
             limits,
             cwd,
             stdin,
+            context_dir,
+            stdio,
         } = self;
 
         // Dedup reads by (host, kind), preserving first-seen order.
@@ -561,6 +593,8 @@ impl SandboxBuilder {
             limits,
             stdin,
             cgroup: CgroupConfig::default(),
+            context_dir,
+            stdio,
         })
     }
 }
