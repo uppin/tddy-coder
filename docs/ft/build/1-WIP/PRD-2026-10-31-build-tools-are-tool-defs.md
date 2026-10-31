@@ -13,7 +13,7 @@
 
 Three changes:
 
-1. **A BUILD.yaml `type: tool` target is a `ToolDef`.** Its config is either an inline definition or `ref: <tool id>`, which names a registry tool. Its binary can also be another target's output (`binary: { target: "//tools:stamp", path: bin/stamp }`), so a tool can be **built and then used**.
+1. **A BUILD.yaml `type: tool` target is a `ToolDef`.** Its config is either an inline definition or `ref: <tool id>`, which names a registry tool. Its binary can also be another target's output (`binary: { command: stamp, target: { target: "stamp:bin", path: bin/stamp } }`), so a tool can be **built and then used**.
 2. **`tool_dep_ids` on an action resolve through the tool registry.** The action gets the tool closure's binaries on PATH, exactly as a jail would, and the directory-only `bin_dir` is gone.
 3. **An action can run hermetically.** `sandbox: true` on an action, or `tddy build --hermetic` for all of them, lowers the action through the same tool runtime:
    - the action's `inputs` are read-only mounts;
@@ -26,7 +26,12 @@ Three changes:
 ```yaml
 targets:
   - id: "tools:stamp"
-    config: { type: tool, binary: { target: "stamp:bin", path: target/debug/stamp }, reads: [] }
+    config:
+      type: tool
+      schema_version: 1
+      id: stamp
+      summary: stamps its input
+      binary: { command: stamp, target: { target: "stamp:bin", path: target/debug/stamp } }
   - id: "app:build"
     actions:
       - id: package

@@ -226,6 +226,8 @@ fn group_membership_drives_build_order_without_plugins() {
     );
 }
 
+// TODO(build-tools): rewrite or delete with the legacy `{bin_dir, commands}` shape — green refuses
+// it (`build_tools_acceptance::the_legacy_bin_dir_tool_shape_is_refused_with_a_migration_message`).
 #[tokio::test]
 async fn tool_bin_dir_is_prepended_to_action_path() {
     // Given
@@ -338,6 +340,7 @@ fn cache_key_is_deterministic() {
         outputs: vec![],
         tool_dep_ids: vec![],
         working_dir: String::new(),
+        sandbox: false,
     };
     let fingerprints = vec![FileFingerprint {
         path: "src/a.txt".to_string(),

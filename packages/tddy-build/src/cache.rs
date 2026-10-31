@@ -96,6 +96,20 @@ pub fn compute_cache_key(action: &BuildAction, input_fingerprints: &[FileFingerp
     key
 }
 
+/// [`compute_cache_key`] with the resolved tool binaries' fingerprints folded in
+/// (`#agent-tools 4/12`): changing a tool's binary invalidates every action using it. Independent
+/// of `tool_fingerprints`' order, as the input fingerprints are.
+pub fn compute_cache_key_with_tools(
+    action: &BuildAction,
+    input_fingerprints: &[FileFingerprint],
+    tool_fingerprints: &[FileFingerprint],
+) -> String {
+    // TODO(build-tools): implement — the same hash with a `|tools|` section, sorted by path; fold
+    // `compute_cache_key` into it once the executor always passes tools.
+    let _ = (action, input_fingerprints, tool_fingerprints);
+    todo!("build-tools: compute_cache_key_with_tools")
+}
+
 /// Load the cache entry for `{target_id}/{action_id}`, returning it only when its
 /// recorded key matches `expected_key` and every output path still exists.
 pub fn lookup_cache(
@@ -275,6 +289,62 @@ mod tests {
 
         // When / Then
         assert_ne!(base, compute_cache_key(&other, &fps()));
+    }
+
+    fn a_tool_binary(size: u64, mtime_ms: u64) -> FileFingerprint {
+        FileFingerprint {
+            path: "/opt/tools/bin/stamp".to_string(),
+            size,
+            mtime_ms,
+        }
+    }
+
+    fn another_tool_binary() -> FileFingerprint {
+        FileFingerprint {
+            path: "/opt/tools/bin/zip".to_string(),
+            size: 7,
+            mtime_ms: 7,
+        }
+    }
+
+    #[test]
+    fn key_changes_when_a_tool_binary_fingerprint_changes() {
+        // Given
+        let action = sample_action();
+        let before = compute_cache_key_with_tools(&action, &fps(), &[a_tool_binary(100, 1)]);
+
+        // When — the tool is rebuilt: same path, new size and mtime
+        let after = compute_cache_key_with_tools(&action, &fps(), &[a_tool_binary(140, 2)]);
+
+        // Then
+        assert_ne!(before, after);
+    }
+
+    #[test]
+    fn key_with_tools_differs_from_the_key_without_them() {
+        // Given
+        let action = sample_action();
+
+        // When
+        let with_tools = compute_cache_key_with_tools(&action, &fps(), &[a_tool_binary(100, 1)]);
+
+        // Then
+        assert_ne!(with_tools, compute_cache_key(&action, &fps()));
+    }
+
+    #[test]
+    fn key_is_independent_of_tool_fingerprint_order() {
+        // Given
+        let action = sample_action();
+        let forward = [a_tool_binary(100, 1), another_tool_binary()];
+        let reversed = [another_tool_binary(), a_tool_binary(100, 1)];
+
+        // When
+        let key_forward = compute_cache_key_with_tools(&action, &fps(), &forward);
+        let key_reversed = compute_cache_key_with_tools(&action, &fps(), &reversed);
+
+        // Then
+        assert_eq!(key_forward, key_reversed);
     }
 
     #[test]

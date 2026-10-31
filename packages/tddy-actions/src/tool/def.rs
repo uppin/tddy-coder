@@ -55,6 +55,21 @@ pub struct ToolBinary {
     /// An environment variable whose value — an absolute path — wins over the `PATH` search.
     #[serde(default)]
     pub env: Option<String>,
+    /// A `tddy-build` target's declared output that **is** the binary (`#agent-tools 4/12`): the
+    /// tool is built, then used. Resolved through [`super::ToolHost::target_output`] — only a host
+    /// that knows a build graph answers it — and it wins over `env` and the `PATH` search.
+    #[serde(default)]
+    pub target: Option<TargetBinary>,
+}
+
+/// A binary that another build target produces: `target`'s declared output at `path`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct TargetBinary {
+    /// The producing build target's id (`tools:stamp-build`).
+    pub target: String,
+    /// The output path, relative to the repository root, as that target declares it.
+    pub path: String,
 }
 
 impl ToolDef {

@@ -5,6 +5,7 @@
 **Type:** Feature
 **Complexity**: 4 — `tddy-build`, `tddy-actions`, `tddy-daemon-sandbox`, `tddy-bsp`/`tddy-tools`; a manifest format change (breaking for `type: tool`); cache-key change; live jail tests
 **Stack:** `#agent-tools 4/12` — branch `feature/agent-tools/build-tools`, base `feature/agent-tools/egress-allowlist`
+**PR:** [#793](https://github.com/uppin/tddy-coder/pull/793)
 **PRD:** [PRD-2026-10-31-build-tools-are-tool-defs.md](../../ft/build/1-WIP/PRD-2026-10-31-build-tools-are-tool-defs.md)
 
 ## Initial Discovery
@@ -56,9 +57,9 @@ implementing one here collides with the PR that owns it.
 |---|---|---|---|
 | `n1` tool-defs (#790) | `ToolDef`, `ToolRegistry`, `ToolHost`, `resolve_closure`, `lower_tools` | BUILD tool targets are `ToolDef`s, and hermetic actions lower their tool closure | change the override rule or `lower_tools` |
 | `n3` egress-allowlist | `NetworkSection`, `EgressPolicy`, `lower_network` | a hermetic action's network is `lower_network` of its tool closure | change `admits` or the union rule |
-| `n2` claude-host | nothing consumed | sits above #2 only because of the line | touch `run` or `extensions` |
+| `n2` claude-host | nothing consumed | sits above #791 only because of the line | touch `run` or `extensions` |
 
-`ToolBinary.target` is a new field on #1's `ToolBinary`. It is additive, and resolution of the existing `command`/`env` sources is unchanged.
+`ToolBinary.target` is a new field on #790's `ToolBinary`. It is additive, and resolution of the existing `command`/`env` sources is unchanged.
 
 ## Draft PR contract
 
@@ -76,8 +77,8 @@ Unimplemented bodies are `// TODO(build-tools): implement`.
 ## Green wave
 
 **Wave:** 2 of 7
-**Greenable independently:** yes, once #1 is green, and #3 for the hermetic network test. Tests drive the executor with a real jail
-**Concurrent with:** #2 claude-host and #3 egress-allowlist
+**Greenable independently:** yes, once #790 is green, and #792 for the hermetic network test. Tests drive the executor with a real jail. Confirmed by the red phase: `BuildTools::load` needs #790's `ToolRegistry::{builtin, load}`, every acceptance test needs #790's `resolve_closure`, the hermetic tests need #790's `lower_tools`/`HostBinaryLibraries`, and only `a_hermetic_action_with_no_network_declaring_tool_has_no_network` needs #792's `lower_network`. No new edge
+**Concurrent with:** #791 claude-host and #792 egress-allowlist
 **Blocks:** nothing (no later node consumes the build integration)
 
 Real dependency edges, as opposed to the branch line:
@@ -116,23 +117,23 @@ Real dependency edges, as opposed to the branch line:
 
 **`tddy-build`: `packages/tddy-build/tests/build_tools_acceptance.rs`**
 
-- [ ] `an_action_using_a_tool_built_by_another_target_builds_that_target_first_and_finds_the_tool_on_path`
-- [ ] `a_ref_tool_target_resolves_from_the_registry_including_a_tddyhome_override`
-- [ ] `changing_a_tools_binary_invalidates_the_cache_of_every_action_using_it`
-- [ ] `the_legacy_bin_dir_tool_shape_is_refused_with_a_migration_message`
+- [x] `an_action_using_a_tool_built_by_another_target_builds_that_target_first_and_finds_the_tool_on_path`
+- [x] `a_ref_tool_target_resolves_from_the_registry_including_a_tddyhome_override`
+- [x] `changing_a_tools_binary_invalidates_the_cache_of_every_action_using_it`
+- [x] `the_legacy_bin_dir_tool_shape_is_refused_with_a_migration_message`
 
 **`tddy-daemon-sandbox`: `packages/tddy-daemon-sandbox/tests/hermetic_build_action_acceptance.rs`**
 
-- [ ] `a_hermetic_action_writing_only_its_declared_output_succeeds`
-- [ ] `a_hermetic_action_writing_outside_its_outputs_fails_naming_the_path` (macOS Seatbelt here; Linux cgroups runs on CI)
-- [ ] `a_hermetic_action_execing_a_binary_outside_its_tool_closure_fails_naming_it`
-- [ ] `a_hermetic_action_with_no_network_declaring_tool_has_no_network`
+- [x] `a_hermetic_action_writing_only_its_declared_output_succeeds`
+- [x] `a_hermetic_action_writing_outside_its_outputs_fails_naming_the_path` (macOS Seatbelt here; Linux cgroups runs on CI)
+- [x] `a_hermetic_action_execing_a_binary_outside_its_tool_closure_fails_naming_it`
+- [x] `a_hermetic_action_with_no_network_declaring_tool_has_no_network`
 
 ### Unit / integration tests
 
-- [ ] `tddy-build` `builtin`: `ToolTarget` parsing of inline, ref and the legacy shape.
-- [ ] `tddy-build` `graph`: a target-output binary adds an ordering edge, and a cycle through a tool target is reported.
-- [ ] `tddy-build` `cache`: the key changes when a tool fingerprint changes and stays order-independent.
+- [x] `tddy-build` `builtin`: `ToolTarget` parsing of inline, ref and the legacy shape.
+- [x] `tddy-build` `graph`: a target-output binary adds an ordering edge, and a cycle through a tool target is reported.
+- [x] `tddy-build` `cache`: the key changes when a tool fingerprint changes and stays order-independent.
 
 ### Test level decisions
 
@@ -153,10 +154,10 @@ Real dependency edges, as opposed to the branch line:
 - [x] Cross-check `packages/*/docs/code-issues/` and `docs/dev/todo/` for items this change touches (Step 2b)
 - [x] Create/update PRD documentation
 - [x] Create changeset (this document)
-- [ ] Create failing acceptance tests
-- [ ] Run acceptance tests (verify they fail)
-- [ ] USER REVIEW — acceptance tests
-- [ ] TDD Red — write failing unit/integration tests
+- [x] Create failing acceptance tests
+- [x] Run acceptance tests (verify they fail)
+- [x] USER REVIEW — acceptance tests — waived by the developer 2026-10-31: pass 2 runs without per-node review
+- [x] TDD Red — write failing unit/integration tests
 - [ ] TDD Green — implement with quality code
 - [ ] Update documentation with progress
 - [ ] Repeat Red→Green→Update cycle until feature complete
@@ -176,6 +177,48 @@ Real dependency edges, as opposed to the branch line:
 
 ## Refactoring Needed
 ### From /red (TDD red phase)
+
+**Published surface** (commit 2 of #793):
+
+- `tddy_actions::tool::ToolBinary.target: Option<TargetBinary>` and `TargetBinary { target, path }` (`tool/def.rs`), additive with `#[serde(default)]`.
+- `ToolHost::target_output(&TargetBinary) -> Option<PathBuf>` (`tool/resolve.rs`) is a **default method answering `None`**, so no existing `ToolHost` impl changed (the fixtures in `tddy-actions`, `tddy-daemon-sandbox` and `tddy-session-lifecycle` compile untouched). `resolve_closure` carries a `TODO(build-tools)` for the target branch beside #790's `TODO(tool-defs)`.
+- `tddy_build::builtin::{ToolTarget::{Inline(Box<ToolDef>), Ref { ref_ }}, tool_target(target_id, fields)}`.
+- `BuildAction.sandbox` — `bool sandbox = 10` in `actions.proto`, regenerated through the existing `build.rs`.
+- `tddy_build::ActionSandbox` (`action_sandbox.rs`): `run(&ActionSpec, &[ResolvedTool]) -> BoxFuture<Result<ActionOutcome, BuildError>>`.
+- `tddy_build::executor::{BuildTools { registry, host, sandbox }, BuildTools::load(tools_dir, host), BuildTools::with_sandbox, execute_target_with_tools, ExecuteOptions.hermetic}`.
+- `tddy_build::cache::compute_cache_key_with_tools(action, inputs, tool_fingerprints)`.
+- `tddy_daemon_sandbox::build_action_sandbox::DaemonActionSandbox::new(work_dir)` implementing `ActionSandbox`. `tddy-daemon-sandbox` gains a path dependency on `tddy-build` (no cycle: `tddy-build` depends only on `tddy-actions` and `tddy-task`).
+- `examples/pipeline/app/BUILD.yaml` migrated: a new `tools:stamp-build` target installs `tools/bin/stamp` to `tools/out/stamp`, and `tools:bin` is an inline `ToolDef` whose binary is that output — the "built, then used" shape. No file was deleted.
+
+**Red baseline** (`./dev cargo test -p tddy-build --no-fail-fast`, `-p tddy-daemon-sandbox --lib --test hermetic_build_action_acceptance`):
+
+| Test | Fails because |
+|---|---|
+| `build_tools_acceptance::*` (4) | `todo!("build-tools: BuildTools::load")` |
+| `hermetic_build_action_acceptance::*` (4) | `todo!("build-tools: BuildTools::load")`, then `DaemonActionSandbox::run` |
+| `builtin::tests::{an_inline_tool_config_is_a_whole_tool_definition, a_ref_tool_config_names_a_registry_tool, the_legacy_tool_shape_is_refused_naming_the_target_and_the_migration, a_ref_with_inline_definition_fields_is_refused_naming_the_target}` | `todo!("build-tools: tool_target")` |
+| `cache::tests::{key_changes_when_a_tool_binary_fingerprint_changes, key_with_tools_differs_from_the_key_without_them, key_is_independent_of_tool_fingerprint_order}` | `todo!("build-tools: compute_cache_key_with_tools")` |
+| `graph::tests::a_tool_built_by_another_target_orders_that_target_before_every_user_of_the_tool` | assertion: `build_order("app")` is `["app"]`, expected `["stamp:bin", "tools:stamp", "app"]` (`target_edges` has the `TODO(build-tools)`) |
+| `graph::tests::a_cycle_through_a_tool_target_is_reported_naming_it` | assertion: `from_manifests` accepts the cycle |
+| `example_pipeline::pipeline_builds_successfully_through_a_tool_target` | **was green; intentionally red.** The migrated manifest reaches the legacy `tool_path`, which refuses it (`invalid tool config: unknown field schema_version`). Green's executor resolution makes it pass |
+
+Every other test in `tddy-build` (34 lib + 14 + 4 + 1 + 4 + 5) and the `tddy-daemon-sandbox` lib (7) passes.
+
+**Pre-existing failures** (not this node's): 33 `tddy-actions` tests panic on parent TODOs — `tool-defs: ToolRegistry::builtin` (17), `claude-host: render_argv` (9), `egress-allowlist: HostPattern::parse` (6), `egress-allowlist: Egress::deserialize` (1). `tddy-daemon-sandbox/tests/sandbox_stdio_seatbelt_acceptance.rs` does not compile on macOS (`SandboxHandle` not in scope) and was excluded from every scoped command.
+
+**Deviations from the planned surface:**
+
+- `ToolTarget::Inline` boxes its `ToolDef` (`clippy::large_enum_variant`: 312 bytes against a `String`).
+- `ActionSandbox::run` takes no separate `outputs`: the writable paths are `ActionSpec::outputs`, already absolute. It returns a `BoxFuture` (`futures`, already a dependency) so `tddy-build` gains no `async-trait`.
+- "`BuildOptions.hermetic`" is `ExecuteOptions.hermetic` — `BuildOptions` is `tddy-toolcall`'s relay wire type, which this node does not touch.
+- The contract adds `BuildTools`, `execute_target_with_tools` and `compute_cache_key_with_tools` instead of changing `execute_target`'s and `compute_cache_key`'s signatures, which ~60 call sites in seven crates use. Green makes `execute_target` delegate and folds the two cache functions together.
+- No serde helper for `sandbox`: a proto `bool` deserializes through the message-level `#[serde(default)]`.
+- The PRD's example wrote `binary: { target, path }`; `ToolBinary.command` is #790's required field, so the shape is `binary: { command, target: { target, path } }`. The PRD example is corrected.
+- An inline tool's `id` is its tool id; `tool_dep_ids` name *targets*, mapped to the inline `id` or to `ref`. An inline id the registry already holds is refused as a duplicate (documented on `ToolTarget`).
+- `tddy-bsp` / `tddy-tools` `--hermetic` wiring is not in the draft contract: no test drives it. Green adds the flag and builds `BuildTools` from `<tddyhome>/tools` with `DaemonActionSandbox`.
+- #790's `tool_registry_acceptance.rs` gained `target: None` in its two `ToolBinary` literals — the only edit outside this node's files, forced by the additive field.
+
+**`TODO(build-tools)` deletions needing developer approval at green:** `builtin::{LegacyToolTarget, tool_bin_dir}`, `executor::tool_path`, and the two tests that pin the legacy shape — `builtin::tests::tool_extracts_bin_dir` and `build_acceptance::tool_bin_dir_is_prepended_to_action_path` (the latter rewritten or deleted in favour of `the_legacy_bin_dir_tool_shape_is_refused_with_a_migration_message`). `build_acceptance::MIXED_YAML` still lists a legacy tool target; `build-list` never parses it, so it stays valid until green decides.
 ### From /validate-changes
 ### From /validate-tests
 ### From /validate-prod-ready

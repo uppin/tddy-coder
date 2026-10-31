@@ -103,6 +103,9 @@ impl ToolRegistry {
         ids: &[&str],
         host: &dyn ToolHost,
     ) -> Result<Vec<ResolvedTool>, ToolError> {
+        // TODO(build-tools): a `binary.target` resolves through `host.target_output` before `env`
+        // and the `PATH` search; a host answering `None` makes the tool `Unresolvable`, naming the
+        // target and path it searched.
         let mut visited = BTreeSet::new();
         let mut closure = Vec::new();
         for id in ids {

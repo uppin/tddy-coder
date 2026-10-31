@@ -3,10 +3,14 @@
 use std::path::Path;
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use std::sync::Arc;
+
+use tddy_actions::tool::{ToolHost, ToolRegistry};
 use tddy_actions::ProcessRuntime;
 use tddy_task::{TaskHandle, TaskRegistry, TaskStatus};
 
 use crate::action_convert::build_action_to_spec;
+use crate::action_sandbox::ActionSandbox;
 use crate::builtin::{self, TOOL};
 use crate::cache::{compute_cache_key, lookup_cache, persist_cache, CacheMode};
 use crate::capabilities::BuildMode;
@@ -24,6 +28,10 @@ pub struct ExecuteOptions {
     pub dry_run: bool,
     /// Cache read/write policy (ignored when `no_cache`).
     pub cache_mode: CacheMode,
+    /// Run every action hermetically, as if each declared `sandbox: true` (`tddy build
+    /// --hermetic`). Needs a [`BuildTools`] with an [`ActionSandbox`]; without one the run is
+    /// refused, never silently unconfined.
+    pub hermetic: bool,
 }
 
 impl Default for ExecuteOptions {
@@ -32,6 +40,40 @@ impl Default for ExecuteOptions {
             no_cache: false,
             dry_run: false,
             cache_mode: CacheMode::ReadWrite,
+            hermetic: false,
+        }
+    }
+}
+
+/// What a build resolves `tool_dep_ids` against, and how it runs hermetic actions
+/// (`#agent-tools 4/12`).
+pub struct BuildTools {
+    /// The built-ins plus `<tddyhome>/tools` overrides; a run adds its inline tool targets.
+    pub registry: ToolRegistry,
+    /// The host tools resolve against. The executor wraps it so a [`TargetBinary`] answers with
+    /// the producing target's output under the repository root.
+    ///
+    /// [`TargetBinary`]: tddy_actions::tool::TargetBinary
+    pub host: Arc<dyn ToolHost>,
+    /// Runs `sandbox: true` actions; `None` refuses them.
+    pub sandbox: Option<Arc<dyn ActionSandbox>>,
+}
+
+impl BuildTools {
+    /// The built-in tools with `tools_dir` (`<tddyhome>/tools`) applied as overrides, resolving
+    /// against `host`, with no sandbox.
+    pub fn load(tools_dir: &Path, host: Arc<dyn ToolHost>) -> Result<Self, BuildError> {
+        // TODO(build-tools): implement — `ToolRegistry::load(ToolRegistry::builtin()?, tools_dir)`,
+        // a `ToolError` becoming a `BuildError` that keeps its message.
+        let _ = (tools_dir, host);
+        todo!("build-tools: BuildTools::load")
+    }
+
+    /// The same tools, running hermetic actions through `sandbox`.
+    pub fn with_sandbox(self, sandbox: Arc<dyn ActionSandbox>) -> Self {
+        Self {
+            sandbox: Some(sandbox),
+            ..self
         }
     }
 }
@@ -92,6 +134,30 @@ pub async fn execute_target(
     }
 
     Ok(record)
+}
+
+/// [`execute_target`] with `tool_dep_ids` resolved through `tools` (`#agent-tools 4/12`).
+///
+/// - A tool target's binary that is another target's output makes that target build first
+///   ([`BuildGraph::build_order`]).
+/// - An action's `PATH` gets each resolved tool's link directory, ahead of the inherited `PATH`.
+/// - An action with `sandbox: true`, or every action when `opts.hermetic`, runs through
+///   `tools.sandbox`.
+/// - The cache key covers the resolved tool binaries
+///   ([`crate::cache::compute_cache_key_with_tools`]).
+pub async fn execute_target_with_tools(
+    repo_root: &Path,
+    graph: &BuildGraph,
+    target_id: &str,
+    opts: &ExecuteOptions,
+    mode: BuildMode,
+    registry: &PluginRegistry,
+    tools: &BuildTools,
+) -> Result<BuildRecord, BuildError> {
+    // TODO(build-tools): implement, then make `execute_target` this with the process host and
+    // `<tddyhome>/tools`, delete `tool_path` and the legacy `tool_bin_dir`.
+    let _ = (repo_root, graph, target_id, opts, mode, registry, tools);
+    todo!("build-tools: execute_target_with_tools")
 }
 
 async fn run_target_actions(
@@ -254,6 +320,7 @@ async fn wait_task_terminal(handle: &TaskHandle) {
 
 /// Build a `PATH` value with each tool dep's `bin_dir` prepended, or `None` when
 /// the action has no tool deps.
+// TODO(build-tools): delete — `execute_target_with_tools` puts the resolved tool closure on PATH.
 fn tool_path(
     repo_root: &Path,
     graph: &BuildGraph,
