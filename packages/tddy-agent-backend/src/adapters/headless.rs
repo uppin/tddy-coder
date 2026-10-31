@@ -50,6 +50,13 @@ pub struct HeadlessTurn {
     pub workdir: PathBuf,
     /// Where the turn's registration files (the MCP config) are written.
     pub scratch_dir: PathBuf,
+    /// Agent-specific template parameters, bound as `{name}` (and testable by `When`): what one
+    /// agent's argv needs and the generic fields above do not name — Cursor's `force`, Codex's
+    /// `sandbox_mode`. Added by the 2026-10-31 amendment (#798's red phase).
+    pub params: BTreeMap<String, String>,
+    /// A provider route's argv (`-c model_provider=…`, `-m …`), bound as the list `route_args` for
+    /// a `{ splice: route_args }` item. Empty when the turn runs on no route.
+    pub route_args: Vec<String>,
 }
 
 /// One rendered headless turn: what to spawn, what to write first, and how to read it.
@@ -96,5 +103,9 @@ pub trait HeadlessRenderer: Send + Sync + fmt::Debug {
 
     /// `turn` rendered: the agent's `coding_agent.headless.argv` with `turn`'s parameters and its
     /// slots, the files those slots write, and the adapter its output is read through.
+    ///
+    /// Binds `prompt`, `model`, `session_id`, `resume`, `permission_mode`, `workdir`, every entry of
+    /// `params`, and the lists `slots` and `route_args`. The MCP slot is `headless.mcp` when the
+    /// spec sets one, else the agent's `coding_agent.mcp`.
     fn render(&self, turn: &HeadlessTurn) -> Result<HeadlessInvocation, BackendError>;
 }

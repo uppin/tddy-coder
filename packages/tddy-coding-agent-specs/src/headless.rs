@@ -84,10 +84,12 @@ impl HeadlessRenderer for SpecHeadlessRenderer {
         todo!("claude-headless: SpecHeadlessRenderer::tool_server")
     }
 
-    /// `slots::render` over the turn's slot inputs (no preamble, no hooks), then
+    /// `slots::render` over the turn's slot inputs (no preamble, no hooks; the MCP slot is
+    /// `headless.mcp` when set, else `coding_agent.mcp`), then
     /// `render_argv(headless.run_section(), tool, params)` with `prompt`, `model`, `session_id`,
-    /// `resume`, `permission_mode` and the rendered slot flags as `slots`; `{binary}` (the first
-    /// rendered entry) becomes the program.
+    /// `resume`, `permission_mode`, `workdir`, each of `turn.params`, the rendered slot flags as the
+    /// list `slots` and `turn.route_args` as the list `route_args`; `{binary}` (the first rendered
+    /// entry) becomes the program.
     fn render(&self, turn: &HeadlessTurn) -> Result<HeadlessInvocation, AdapterError> {
         // TODO(claude-headless): implement.
         let _ = (turn, &self.tool, &self.adapters);
@@ -110,6 +112,7 @@ mod tests {
             env: BTreeMap::new(),
             adapter: adapter.to_string(),
             exit_ok_if_structured: false,
+            mcp: None,
         }
     }
 

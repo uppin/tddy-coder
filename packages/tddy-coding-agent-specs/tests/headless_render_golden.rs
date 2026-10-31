@@ -85,6 +85,8 @@ fn a_backend_turn(permission_mode: Option<&str>, session: SessionMode) -> Headle
         mcp_server: Some(the_tool_server()),
         workdir: PathBuf::from("/home/dev/repo"),
         scratch_dir: PathBuf::from(SCRATCH),
+        params: BTreeMap::new(),
+        route_args: Vec::new(),
     }
 }
 
@@ -197,6 +199,8 @@ fn a_conversations_resumed_turn_renders_the_argv_the_headless_driver_builds_toda
         mcp_server: Some(the_tool_server()),
         workdir: PathBuf::from("/home/dev/worktrees/parser-fix"),
         scratch_dir: PathBuf::from(SCRATCH),
+        params: BTreeMap::new(),
+        route_args: Vec::new(),
     };
 
     // When

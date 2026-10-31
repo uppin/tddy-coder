@@ -161,6 +161,13 @@ Real dependency edges, as opposed to the branch line:
 ## Refactoring Needed
 ### From /red (TDD red phase)
 
+- **Contract amendment (commit 3, 2026-10-31), forced by #798 headless-others' red phase.** Every addition is additive.
+  - `HeadlessTurn.params: BTreeMap<String, String>` holds agent template parameters, bound as `{name}`: Cursor's `force`, Codex's `sandbox_mode`.
+  - `HeadlessTurn.route_args: Vec<String>` holds a provider route's argv, bound as the list `route_args` for `{ splice: route_args }`.
+  - `HeadlessSection.mcp: Option<McpSlot>` is a headless MCP slot that overrides `coding_agent.mcp`. Cursor needs it, because headless Cursor registers a project file in the worktree while its PTY session uses `{home}`.
+  - `render` is documented to bind `{workdir}` too, since Codex and Oz pass `-C`. Its body is still this node's `todo!`.
+  - Test literals in this node's own suites were updated. #798's tests exercise the new bindings; this node's own tests (Claude) leave them empty.
+
 **Published surface (commit 2).**
 
 - `tddy-agent-backend` `src/adapters/mod.rs`: `CLAUDE_STREAM_JSON`, `StreamSinks`, trait `StreamAdapter { name, read_stream, exit_ok, turn_format }`, `AdapterRegistry { builtin (todo), get, contains, names }`, `AdapterError` (re-export of `BackendError` for implementors outside the crate). `src/adapters/claude_stream_json.rs`: `ClaudeStreamJson` (bodies todo; `read_stream` wraps `stream::process_ndjson_stream` unchanged). `src/adapters/headless.rs` (**new, not in the plan**): the port `HeadlessRenderer { agent_id, tool_server, render }`, `HeadlessTurn`, `HeadlessInvocation`, `HeadlessMcpServer`.
