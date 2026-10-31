@@ -116,6 +116,9 @@ pub fn split_mcp_log_path(session_dir: &Path) -> PathBuf {
 /// is `tddy-tools`, which stops advertising a withdrawn tool and refuses a call to one. Both are
 /// needed. Without this layer the withdrawn tool stays *pre-approved*, so the main agent is invited
 /// to reach for it and meets the second layer's refusal mid-turn, every turn.
+// TODO(jail-agnostic): render from `claude.yaml`'s `coding_agent.variants.host_agent`
+// (`CodingAgentSpec::variant_args(HOST_AGENT_VARIANT)`) plus the slots, instead of these hand-built
+// flags and `tddy_sandbox_recipes`' Claude allow/deny writers — the split suite must pass unchanged.
 pub fn split_claude_extra_args(
     session_dir: &Path,
     tddy_tools_path: &str,

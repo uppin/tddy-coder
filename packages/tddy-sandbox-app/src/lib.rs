@@ -11,6 +11,7 @@
 //! in-process, Linux drives a running `tddy-daemon` over gRPC, and neither module is compiled on
 //! the other host.
 
+pub mod agent_spec;
 pub mod bridge;
 pub mod codebase_mode;
 pub mod config;

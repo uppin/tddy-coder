@@ -58,7 +58,7 @@ pub fn spawn_plan(plan: SandboxPlan) -> Result<SandboxHandle, SandboxError> {
     // `--stdio` dedicates the sandboxed process's stdin/stdout to RPC framing (see
     // `tddy_core::stdio_safety`, `tddy-stdio`) instead of the --grpc-uds/--grpc-listen-port
     // transport — pipe both back to the caller instead of routing stdout to an egress log.
-    let stdio_mode = plan.spec.command.iter().any(|arg| arg == "--stdio");
+    let stdio_mode = stdio_mode_of(&plan);
 
     let argv = sandbox_exec_argv(&plan);
     let mut cmd = Command::new(&argv[0]);
@@ -123,6 +123,14 @@ pub fn spawn_plan(plan: SandboxPlan) -> Result<SandboxHandle, SandboxError> {
         grpc_socket_path,
         ready_marker_path,
     ))
+}
+
+/// Whether the confined process speaks RPC over its stdio: [`SandboxPlan::stdio`]
+/// (`#agent-tools 10/12`), whatever its argv says.
+// TODO(jail-agnostic): implement — return `plan.stdio` once every launcher sets it. Today's `--stdio`
+// argv sniffing stays until then.
+pub(crate) fn stdio_mode_of(plan: &SandboxPlan) -> bool {
+    plan.spec.command.iter().any(|arg| arg == "--stdio")
 }
 
 fn open_egress_log(egress_dir: &std::path::Path, name: &str) -> Result<File, SandboxError> {
@@ -212,4 +220,71 @@ fn push_allow_path(paths: &mut Vec<std::path::PathBuf>, raw: String) {
         return;
     }
     paths.push(std::path::PathBuf::from(trimmed));
+}
+
+#[cfg(test)]
+mod tests {
+    use std::path::PathBuf;
+
+    use tddy_sandbox::{
+        EnvSpec, NetworkSpec, PolicySpec, ResourceLimits, SandboxPlan, SandboxSpec,
+    };
+
+    use super::stdio_mode_of;
+
+    fn a_plan_running(command: Vec<String>, stdio: bool) -> SandboxPlan {
+        SandboxPlan {
+            spec: SandboxSpec {
+                project_root: PathBuf::from("/tmp/tddy-stdio-mode-test"),
+                scratch_dir: PathBuf::from("/tmp/tddy-stdio-mode-test/.work"),
+                egress_dir: PathBuf::from("/tmp/tddy-stdio-mode-test/out"),
+                allow_read_paths: vec![],
+                command,
+                env: Default::default(),
+                profile_path: PathBuf::from("/tmp/tddy-stdio-mode-test/profile.sb"),
+                loopback_allow_ports: vec![],
+                ipc_socket: None,
+                cwd: None,
+            },
+            reads: vec![],
+            mounts: vec![],
+            copies: vec![],
+            symlinks: vec![],
+            env: EnvSpec::default(),
+            policy: PolicySpec::default(),
+            network: NetworkSpec::default(),
+            limits: ResourceLimits::default(),
+            stdin: None,
+            cgroup: Default::default(),
+            context_dir: None,
+            stdio,
+        }
+    }
+
+    #[test]
+    fn a_plan_marked_stdio_is_spawned_in_stdio_mode_without_the_flag_in_its_argv() {
+        // Given — a plan that says stdio, running a command that never spells `--stdio`
+        let plan = a_plan_running(vec!["/bin/cat".into()], true);
+
+        // When
+        let stdio_mode = stdio_mode_of(&plan);
+
+        // Then
+        assert!(stdio_mode, "the plan's `stdio` decides, not the argv");
+    }
+
+    #[test]
+    fn a_plan_not_marked_stdio_is_not_spawned_in_stdio_mode_whatever_its_argv_says() {
+        // Given — `--stdio` in the argv, but the plan does not ask for it
+        let plan = a_plan_running(vec!["/bin/cat".into(), "--stdio".into()], false);
+
+        // When
+        let stdio_mode = stdio_mode_of(&plan);
+
+        // Then
+        assert!(
+            !stdio_mode,
+            "an argv token must no longer switch the transport"
+        );
+    }
 }

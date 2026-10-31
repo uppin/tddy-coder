@@ -30,6 +30,9 @@ futures-util = "0.3"
 bytes = "1"
 uuid = { version = "1", features = ["v7"] }
 tddy-core = { path = "../tddy-core" }
+# `--agent <spec id>` (`#agent-tools 10/12`): the registry and the spec renderers the daemon uses.
+tddy-actions = { path = "../tddy-actions" }
+tddy-coding-agent-specs = { path = "../tddy-coding-agent-specs" }
 # The sandbox subsystem only. `tddy-daemon` itself left this manifest with `#unbundle`
 # node 3: the Linux path talks to a running daemon over gRPC and never linked it, and the
 # macOS path needed `sandbox_session`, which is now its own crate.
@@ -63,6 +66,7 @@ prost = "0.13"
 libc = "0.2"
 
 [dev-dependencies]
+pretty_assertions = { workspace = true }
 tempfile = "3"
 serial_test = "3"
 # The acceptance suite watches a real jail come up and go away; `wait::eventually` is the
