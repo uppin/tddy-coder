@@ -22,12 +22,21 @@ pub use spec::{
     Unsupported, CODING_AGENT_EXTENSION,
 };
 
+/// `specs/cursor.yaml` (`#agent-tools 7/12`), embedded.
+pub const CURSOR_SPEC_YAML: &str = include_str!("../specs/cursor.yaml");
+
 /// The embedded agent specs: `(source path, YAML)`.
 pub fn builtin_specs() -> Vec<(&'static str, &'static str)> {
-    vec![(
-        "packages/tddy-coding-agent-specs/specs/claude.yaml",
-        include_str!("../specs/claude.yaml"),
-    )]
+    vec![
+        (
+            "packages/tddy-coding-agent-specs/specs/claude.yaml",
+            include_str!("../specs/claude.yaml"),
+        ),
+        (
+            "packages/tddy-coding-agent-specs/specs/cursor.yaml",
+            CURSOR_SPEC_YAML,
+        ),
+    ]
 }
 
 /// The registry a host that launches coding agents uses: `tddy-actions`' built-in and support

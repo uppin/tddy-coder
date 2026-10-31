@@ -36,6 +36,10 @@ pub fn install_cursor_hooks_in_worktree(
         // for sandboxed cursor sessions (whose jail may not reach a $TMPDIR socket) and from
         // tddy-telegram-control, and neither caller hands it the daemon's resolved data dir.
         // Tracked in `docs/dev/todo/2026-10-17-desktop-cursor-hooks-reach-daemon.md`.
+        // TODO(cursor-cli): the spec path renders these through the `cursor-hooks-json` adapter
+        // (`tddy_coding_agent_specs::slots::cursor`), which takes the daemon's agent-tool socket on
+        // the host and is refused without one; in a jail the in-jail `tddy-tools session-hook`
+        // reports over `TDDY_SANDBOX_TOOL_IPC` instead. This installer goes with the hand-built path.
         daemon_socket: None,
         // Cursor hooks never wait for an answer; the value is unread.
         answer_wait_secs: config.claude_cli_answer_wait_secs(),

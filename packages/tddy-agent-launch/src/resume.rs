@@ -49,6 +49,9 @@ pub async fn resume_cursor_cli_session(
     let binary_path = resolve_cursor_binary_path(config);
     let chat_id = chat_to_resume(&meta, session_id, &binary_path, &worktree_path).await?;
 
+    // TODO(cursor-cli): with coding agents installed, render the `cursor` spec with the same
+    // `cursor_from_spec::cursor_template_params(chat_id, …)` and spawn through
+    // `spec_launch::launch_host_pty` instead of `resume_cursor`.
     let launched = relaunch_cursor(
         cli_manager,
         CursorRelaunch {

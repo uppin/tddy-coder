@@ -7,6 +7,8 @@
 **Restructure:** **no** — tests first. Same rule as `packages/tddy-telegram-control/docs/code-issues/crap-telegram-bot-handlers.md`
 **Status:** Open — converted 2026-10-07 by #534 without tests, against this record's rule (developer decision D10 (a)); the `TODO(crap-svc-start-sandboxed-cursor-cli-session)` marker in the source points here; still never executed — **unclaimed**
 **Deferred:** by the developer 2026-11-03 (#session-tabs sweep: code issues deferred, logic issues solved)
+**Claimed by:** #796 — `#agent-tools 7/12`
+**Lands after:** #795
 **Moved:** 2026-10-09 by `#carve` 21/21 (#536), engine move into `tddy-agent-launch`, from `packages/tddy-session-lifecycle/src/connection_service/svc_start_sandboxed_cursor_cli_session.rs:32`
 
 ## Measurement history

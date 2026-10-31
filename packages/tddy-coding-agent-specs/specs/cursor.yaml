@@ -1,0 +1,82 @@
+# Cursor Agent CLI — the interactive coding agent behind `cursor-cli` sessions (`#agent-tools 7/12`).
+#
+# The argv renders byte-for-byte what `build_cursor_argv` built by hand:
+#   agent [--resume CHAT_ID] [--model M] [PROMPT]
+# CHAT_ID is the chat the session owns for its whole lifetime (`agent create-chat`, minted at start
+# and persisted in `.session.yaml`); `--resume` takes an *optional* argument, so it is rendered only
+# with an id — a bare flag drops the CLI into an interactive chat picker.
+#
+# In a jail the published `agent` wrapper cannot resolve its own install dir (it `realpath`s `$0`),
+# so a launch whose resolved binary is that launcher script binds `node_launcher` to the bundled
+# `node` beside it and `node_entry` to its `index.js`, and runs those instead.
+#
+# Override whole with `<tddyhome>/tools/cursor.yaml`. `TDDY_CURSOR_AGENT` (and, until
+# `#agent-tools 12/12`, daemon.yaml `cursor_cli.binary_path`) still names the binary.
+#
+# Cursor has no allow-list, deny-list or permission-prompt flag: those slots are `unsupported`
+# (`ToolSlot::Unsupported`), and a launch that fills one is refused rather than dropped.
+schema_version: 1
+id: cursor
+summary: Cursor Agent CLI — the interactive coding agent behind cursor-cli sessions
+binary:
+  command: agent
+  env: TDDY_CURSOR_AGENT
+deps: [tddy-tools]
+reads: []
+run:
+  transport: pty
+  argv:
+    - if: node_launcher
+      then: ["{node_launcher}", "{node_entry}"]
+      else: ["{binary}"]
+    - { if: chat_id, then: ["--resume", "{chat_id}"] }
+    - { if: model, then: ["--model", "{model}"] }
+    - { splice: slots }
+    - { if: prompt, then: ["{prompt}"] }
+  env: {}
+extensions:
+  coding_agent:
+    # Cursor reads its MCP servers from `$HOME/.cursor/mcp.json`; no flag names the file.
+    mcp: { kind: placed, path: "{home}/.cursor/mcp.json", format: cursor-mcp-json }
+    tool_allow: unsupported
+    # Managed-codebase enforcement refuses a withdrawal Cursor cannot carry: the refusal reads this.
+    tool_deny: unsupported
+    permission_prompt: unsupported
+    instructions:
+      files: []
+      rules_file: .cursor/rules/tddy-managed-workflow.mdc
+    hooks: { adapter: cursor-hooks-json }
+    models:
+      default: composer-2.5
+      curated: [composer-2.5, gpt-5.3-codex, claude-4.6-sonnet-medium-thinking]
+    context_globs: [AGENTS.md, ".agents/**", ".cursor/**"]
+# --- Jail sections: what a sandboxed launch lowers into the jail. ---------------------------------
+# A persistent home at <tddyhome>/homes/cursor, mounted rw: Cursor's refreshed login and its config
+# survive the session.
+home: { kind: persistent, key: cursor }
+files:
+  # Seeded once: the jail may since have refreshed its own login, which the host's must not clobber.
+  - { kind: seed-once, from_host: .cursor/auth.json, to: .cursor/auth.json }
+  - { kind: seed-once, from_host: .cursor/cli-config.json, to: .cursor/cli-config.json }
+  # The wrapper's self-check looks for its own install under $HOME.
+  - { kind: mirror, from_host: .local/bin/agent, to: .local/bin/agent }
+  - { kind: mirror, from_host: .local/share/cursor-agent/versions, to: .local/share/cursor-agent/versions }
+  - { kind: overlay, env: CURSOR_TMPDIR, value: "{tmp}" }
+  # The jail has no Keychain entitlement: a probe of securityd hangs ~30s and fails, and `CI=true`
+  # keeps a parent shell from re-enabling the interactive login.
+  - { kind: overlay, env: CURSOR_SKIP_KEYCHAIN, value: "1" }
+  - { kind: overlay, env: CI, value: "true" }
+# An interactive Node/V8 CLI: the same allows as Claude Code.
+policy:
+  jit: true
+  fork: true
+  sysctl_read: true
+  exec_paths: [/usr/bin, /usr/libexec, /bin, /sbin, /System, /Library, /Applications, /opt/homebrew, /opt/local]
+# Cursor's API, its auth and its update channel.
+#
+# TODO(cursor-cli): uncomment when the jail launcher lands. Until `Egress` deserializes
+# (`#agent-tools 3/12`), a `network:` section here would make every load of this file panic. The
+# host list is unverified — confirm it against a live jailed session at green.
+# network:
+#   egress:
+#     hosts: [api2.cursor.sh, api3.cursor.sh, api.cursor.com, cursor.com, www.cursor.com, repo42.cursor.sh]

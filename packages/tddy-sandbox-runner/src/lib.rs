@@ -23,9 +23,9 @@ pub use host_relay::{
     StdioSandboxClient, IN_JAIL_TOOL_TIMEOUT,
 };
 pub use runner::{
-    connect_sandbox_client, connect_sandbox_client_uds, connect_uds_channel, resolve_secret_envs,
-    resolve_workspace_tools_transport, run_sandbox_runner, run_workspace_tool_runner,
-    SandboxRunnerArgs, WorkspaceToolsTransport,
+    connect_sandbox_client, connect_sandbox_client_uds, connect_uds_channel, relays_to_the_host,
+    resolve_secret_envs, resolve_workspace_tools_transport, run_sandbox_runner,
+    run_workspace_tool_runner, SandboxRunnerArgs, WorkspaceToolsTransport,
 };
 
 /// Re-exported so host-relay callers can implement [`HostToolHandler`] without depending on
