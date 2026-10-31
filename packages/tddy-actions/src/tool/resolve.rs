@@ -2,6 +2,8 @@
 
 use std::path::{Path, PathBuf};
 
+use super::NetworkSection;
+
 /// The environment a tool resolves against. Production uses the daemon's own process
 /// ([`ProcessToolHost`]); tests inject a fixture so resolution is host-independent.
 pub trait ToolHost: Send + Sync {
@@ -54,4 +56,7 @@ pub struct ResolvedTool {
     pub binary: PathBuf,
     /// The definition's extra `reads`.
     pub reads: Vec<PathBuf>,
+    /// The definition's `network:` section, carried so a tool set's egress can be lowered from its
+    /// resolution alone (`#agent-tools 3/12`).
+    pub network: NetworkSection,
 }

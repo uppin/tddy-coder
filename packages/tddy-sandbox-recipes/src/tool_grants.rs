@@ -13,11 +13,14 @@
 //!   away);
 //! - **a name on `PATH`** — a jail-local `bin/` directory of links, one per tool, placed first on
 //!   the jail's `PATH`.
+//!
+//! [`lower_network`] lowers the same tool set's `network:` sections into the jail's egress policy
+//! (`#agent-tools 3/12`).
 
 use std::path::{Path, PathBuf};
 
 use tddy_actions::tool::ResolvedTool;
-use tddy_sandbox::{ReadSpec, SymlinkSpec};
+use tddy_sandbox::{EgressPolicy, ReadSpec, SymlinkSpec};
 
 /// What a resolved tool set adds to a jail's plan.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -62,4 +65,18 @@ pub fn lower_tools(
     // TODO(tool-defs): implement.
     let _ = (tools, jail_bin_dir, libraries);
     todo!("tool-defs: lower_tools")
+}
+
+/// Lower `tools`' `network:` sections into one jail's egress policy and whether it takes an OAuth
+/// callback (`#agent-tools 3/12`).
+///
+/// The union rule: one tool declaring `any` makes the whole jail [`EgressPolicy::Any`] — the honest
+/// reading of a jail that hosts one unrestricted tool; `hosts` lists concatenate, in tool order and
+/// without repeats; `none` contributes nothing, so a set of only `none` tools is
+/// [`EgressPolicy::None`] and its jail starts no shim. `oauth_inbound` is true when any tool
+/// declares it.
+pub fn lower_network(tools: &[ResolvedTool]) -> (EgressPolicy, bool) {
+    // TODO(egress-allowlist): implement
+    let _ = tools;
+    todo!("egress-allowlist: lower_network")
 }

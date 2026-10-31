@@ -38,6 +38,7 @@ fn loopback_network_profile_is_accepted_by_sandbox_exec() {
     .network(NetworkSpec {
         loopback_allow_ports: vec![55900, 55901],
         allow_oauth_inbound: false,
+        egress: Default::default(),
     })
     .env_map(env)
     .build()

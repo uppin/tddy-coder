@@ -44,6 +44,7 @@ fn resolved(id: &str) -> ResolvedTool {
         command: id.to_string(),
         binary: PathBuf::from(format!("/usr/local/bin/{id}")),
         reads: Vec::new(),
+        network: Default::default(),
     }
 }
 

@@ -329,6 +329,7 @@ fn qemu_sandbox_argv_forwards_the_control_port_and_loopback_ports() {
     .network(NetworkSpec {
         loopback_allow_ports: vec![9000],
         allow_oauth_inbound: false,
+        egress: Default::default(),
     })
     .build()
     .expect("plan must build");
