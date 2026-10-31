@@ -43,6 +43,7 @@ fn a_workspace_tool_plan(session: &SessionOnDisk) -> SandboxPlan {
         runner_path: "/opt/tddy/bin/tddy-sandbox-runner".to_string(),
         tddy_tools_path: "/opt/tddy/bin/tddy-tools".to_string(),
         cgroup: Default::default(),
+        tools: Vec::new(),
     })
     .expect("a workspace tool plan must build")
 }
@@ -293,4 +294,91 @@ fn a_host_with_no_sandbox_backend_refuses_a_workspace_jail_rather_than_running_o
         support,
         Err(tddy_sandbox::SandboxError::Unsupported { .. })
     ));
+}
+
+// ---------------------------------------------------------------------------
+// Declared tools (`#agent-tools 1/12`)
+// ---------------------------------------------------------------------------
+
+const DECLARED_RG: &str = "/opt/homebrew/Cellar/ripgrep/14.1.1/bin/rg";
+
+fn a_plan_running_the_declared_rg(session: &SessionOnDisk) -> SandboxPlan {
+    build_workspace_tool_plan(WorkspaceToolPlanRequest {
+        layout: WorkspaceSandboxLayout::under_session_dir(&session.session_dir),
+        worktree_path: session.worktree.clone(),
+        session_id: SESSION_ID.to_string(),
+        runner_path: "/opt/tddy/bin/tddy-sandbox-runner".to_string(),
+        tddy_tools_path: "/opt/tddy/bin/tddy-tools".to_string(),
+        cgroup: Default::default(),
+        tools: vec![tddy_actions::tool::ResolvedTool {
+            id: "rg".into(),
+            command: "rg".into(),
+            binary: PathBuf::from(DECLARED_RG),
+            reads: vec![],
+        }],
+    })
+    .expect("a workspace tool plan must build")
+}
+
+/// `Grep` runs `rg` by name, so the jail's own `bin/` — where the declared tool's link lives — is
+/// the first `PATH` entry.
+#[test]
+fn a_plan_with_a_declared_tool_puts_the_jail_bin_dir_first_on_path_and_links_the_tool_there() {
+    // Given
+    let session = a_session_on_disk();
+    let jail_bin = WorkspaceSandboxLayout::under_session_dir(&session.session_dir)
+        .scratch_dir
+        .join("bin");
+
+    // When
+    let plan = a_plan_running_the_declared_rg(&session);
+
+    // Then
+    let path = plan.env.vars.get("PATH").expect("a jail PATH");
+    assert_eq!(
+        path.split(':').next(),
+        Some(jail_bin.to_str().unwrap()),
+        "PATH: {path}"
+    );
+    assert_eq!(
+        plan.symlinks,
+        vec![tddy_sandbox::SymlinkSpec {
+            link: jail_bin.join("rg"),
+            target: PathBuf::from(DECLARED_RG),
+        }]
+    );
+}
+
+/// The grant is the binary, not its directory: no read makes a directory holding a declared tool
+/// executable, so nothing else in `/opt/homebrew/bin`-like directories runs in the jail.
+#[test]
+fn a_plan_with_a_declared_tool_never_makes_a_directory_executable_for_it() {
+    // Given
+    let session = a_session_on_disk();
+
+    // When
+    let plan = a_plan_running_the_declared_rg(&session);
+
+    // Then — the binary itself is granted (the positive control: without it this test would pass
+    // on a plan that ignores declared tools altogether) …
+    assert_eq!(
+        plan.reads
+            .iter()
+            .filter(|r| r.host == Path::new(DECLARED_RG))
+            .cloned()
+            .collect::<Vec<_>>(),
+        vec![
+            tddy_sandbox::ReadSpec::literal(DECLARED_RG, tddy_sandbox::ReadReason::BinaryDeps)
+                .executable()
+        ]
+    );
+    // … and no directory above it is executable
+    let executable_dirs: Vec<_> = plan
+        .reads
+        .iter()
+        .filter(|r| r.exec && r.kind == tddy_sandbox::ReadKind::Subpath)
+        .map(|r| r.host.clone())
+        .filter(|host| Path::new(DECLARED_RG).starts_with(host))
+        .collect();
+    assert_eq!(executable_dirs, Vec::<PathBuf>::new());
 }
