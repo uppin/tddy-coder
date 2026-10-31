@@ -11,6 +11,7 @@ pub mod muse_cli;
 pub mod opencode_cli;
 pub mod plan;
 mod route_files;
+pub mod tool_grants;
 
 #[cfg(unix)]
 pub use claude_cli::seed_claude_local_install;
@@ -35,3 +36,4 @@ pub use plan::{
     build_process_plan, build_runner_plan, detect_recipe_from_argv, recipe_from_name,
     route_secrets, shell_interactive_policy, ProcessPlanRequest, RunnerPlanRequest, SandboxRecipe,
 };
+pub use tool_grants::{lower_tools, BinaryLibraries, HostBinaryLibraries, ToolGrants};
