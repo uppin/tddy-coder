@@ -17,6 +17,7 @@ tddy-actions = { path = "../tddy-actions" }
 tddy-core = { path = "../tddy-core" }
 tddy-sandbox = { path = "../tddy-sandbox" }
 tddy-workflow-recipes = { path = "../tddy-workflow-recipes" }
+thiserror = "1"
 
 [dev-dependencies]
 pretty_assertions = { workspace = true }

@@ -8,12 +8,14 @@
 
 mod conversation_root;
 pub mod egress_policy;
+pub mod exec_plan;
 pub mod harness_pty;
 pub mod host_relay;
 pub mod runner;
 
 pub use conversation_root::CONVERSATION_WORKTREES_DIR;
 pub use egress_policy::{EgressGuard, EgressRefusal};
+pub use exec_plan::{run_exec_plan, ExecPlan, ExecPlanFile};
 pub use host_relay::{
     relay_egress_request, run_host_relay, run_host_relay_with_in_jail_tools,
     run_host_relay_with_rpc, HostRelayConfig, HostRpcHandler, HostTerminalEvent, HostToolHandler,

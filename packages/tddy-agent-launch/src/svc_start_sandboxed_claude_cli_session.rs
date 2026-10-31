@@ -405,6 +405,9 @@ impl LaunchSessions {
             })
             .await?;
 
+        // TODO(claude-jail): resolve `claude` with `HostCodingAgents`, render its slots for jail
+        // paths and call `launch_jailed` with the session's role instead of building the runner's
+        // Claude argv above — this function stays as its thin caller.
         let pid = self
             .launch_jail(
                 &jail,
