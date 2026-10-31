@@ -38,6 +38,11 @@ impl DaemonSessionHost {
         claude_cli_manager: Arc<CliSessionManager>,
     ) -> Self {
         let spawn_client = spawn_client.map(|(c, _pid)| Arc::new(c));
+        // Declared tools resolve from `<tddyhome>/tools` at each jail start (`#agent-tools 1/12`).
+        let workspace_sandbox_provisioner =
+            tddy_daemon_sandbox::workspace_tool_sandbox::JailedWorkspaceSandboxProvisioner::for_tddy_home(
+                &tddy_data_dir,
+            );
         let task_registry = claude_cli_manager.task_registry();
         let demo_vm_state = Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::new()));
         let host_session_sockets =
@@ -69,9 +74,7 @@ impl DaemonSessionHost {
             workspace_sandboxes: Arc::new(
                 tddy_daemon_sandbox::workspace_tool_sandbox::WorkspaceSandboxRegistry::new(),
             ),
-            workspace_sandbox_provisioner: Arc::new(
-                tddy_daemon_sandbox::workspace_tool_sandbox::JailedWorkspaceSandboxProvisioner,
-            ),
+            workspace_sandbox_provisioner: Arc::new(workspace_sandbox_provisioner),
             jail_relaunch: Arc::new(super::jail_relaunch::JailRelaunch::default()),
             task_registry,
             rpc_activity: crate::relay_idle::RpcActivity::default(),

@@ -5,6 +5,7 @@
 **Type:** Feature
 **Complexity**: 4 — three crates (`tddy-actions`, `tddy-sandbox-recipes`, `tddy-daemon-sandbox`) plus daemon wiring; a new YAML contract that eleven later nodes build on; a live Seatbelt seam
 **Stack:** `#agent-tools 1/12` — branch `feature/agent-tools/tool-defs`, base `master`
+**PR:** [#790](https://github.com/uppin/tddy-coder/pull/790)
 **PRD:** [PRD-2026-10-31-declared-tools.md](../../ft/coder/1-WIP/PRD-2026-10-31-declared-tools.md)
 
 ## Initial Discovery
@@ -26,7 +27,8 @@ State A below is distilled from that file. Grep traces and file dumps are not re
 - [ ] [`tddy-actions`](../../../packages/tddy-actions/README.md): `tool` module — the `ToolDef` schema, the `ToolRegistry` (embedded built-ins plus `<tddyhome>/tools` overrides) and host resolution of the dep closure; built-in `tools/rg.yaml`
 - [ ] [`tddy-sandbox-recipes`](../../../packages/tddy-sandbox-recipes/README.md): `tool_grants` — lowers a resolved tool set to `ReadSpec`, `SymlinkSpec` and PATH; depends on `tddy-actions`
 - [ ] [`tddy-daemon-sandbox`](../../../packages/tddy-daemon-sandbox/README.md): the workspace jail plan takes the registry's `rg`; `host_ripgrep_grants` is deleted
-- [ ] [`tddy-daemon`](../../../packages/tddy-daemon/README.md): builds the `ToolRegistry` once at start-up and hands it to the workspace-jail provisioner
+- [ ] [`tddy-session-lifecycle`](../../../packages/tddy-session-lifecycle/README.md): builds the provisioner with `for_tddy_home`
+- [ ] [`tddy-session-split`](../../../packages/tddy-session-split/README.md): test construction only
 
 ## Responsibility
 
@@ -43,7 +45,9 @@ State A below is distilled from that file. Grep traces and file dumps are not re
   - Each `otool -L` dependency is readable, and so is the nearest non-symlinked ancestor of each.
   - `jail_bin_dir/<command>` links to the resolved binary.
 - `tddy_daemon_sandbox::workspace_tool_sandbox::WorkspaceToolPlanRequest.tools: Vec<ResolvedTool>`.
-  - `JailedWorkspaceSandboxProvisioner` resolves `["rg"]` from the registry at jail start, and refuses the start on `ToolError`.
+- `JailedWorkspaceSandboxProvisioner::{new(tools_dir, Arc<dyn ToolHost>), for_tddy_home(&Path), resolve_jail_tools()}` and `WORKSPACE_JAIL_TOOLS = ["rg"]`.
+  - At each jail start, **before** the jail tree is created, it loads `ToolRegistry::load(builtin()?, <tddyhome>/tools)` and resolves the closure.
+  - A `ToolError` refuses the start as `SandboxError::InvalidSpec(<the ToolError's message>)`.
 - `packages/tddy-actions/tools/rg.yaml`, the first built-in tool.
 
 ## Boundaries
@@ -76,9 +80,9 @@ The first push publishes:
 **Concurrent with:** none (wave 1 has one node)
 **Blocks:** every other node:
 
-- #2 claude-host's specs load through this registry;
-- #3 egress-allowlist adds a schema section to `ToolDef`;
-- #4 build-tools resolves `tool` targets through it;
+- #791 claude-host's specs load through this registry;
+- #792 egress-allowlist adds a schema section to `ToolDef`;
+- #793 build-tools resolves `tool` targets through it;
 - the rest are blocked transitively.
 
 Real dependency edges, as opposed to the branch line:
@@ -99,8 +103,7 @@ Real dependency edges, as opposed to the branch line:
 
 ## State B
 
-- **At start-up**, the daemon loads `ToolRegistry::load(builtin(), <tddyhome>/tools)`. A bad tool file fails the daemon's start, naming the file.
-- **At jail start**, the workspace provisioner resolves `["rg"]` and its closure against the daemon's process host.
+- **At jail start**, the workspace provisioner loads `ToolRegistry::load(builtin(), <tddyhome>/tools)`. A bad tool file refuses that jail and names the file. It then resolves `["rg"]` and its closure against the daemon's process host.
   - On error, the jail start fails with `tool rg is unavailable: searched TDDY_RG_BINARY (unset), PATH (/usr/bin:…)`.
 - **The plan builder** calls `lower_tools`:
   - `<scratch>/bin/rg` links to the canonical `rg`;
@@ -117,8 +120,9 @@ Real dependency edges, as opposed to the branch line:
 ### Modified
 - `tddy-sandbox-recipes/Cargo.toml` gains `tddy-actions`.
 - `workspace_tool_sandbox.rs`: the request field and the provisioner's resolution. `host_ripgrep_grants`, `RipgrepGrants` and `binary_dependency_traversal_dirs` move into `tool_grants` in generic form.
-- `tddy-daemon` runtime: builds the registry and hands it to `JailedWorkspaceSandboxProvisioner`.
-- `tests/ripgrep_in_jail_seatbelt.rs` resolves `rg` through the registry.
+- `tddy-session-lifecycle` `svc_host_builders.rs` builds `JailedWorkspaceSandboxProvisioner::for_tddy_home(tddy_data_dir)`. No daemon-wide registry: `#agent-tools 12/12` (#801) owns one.
+- `tddy-session-split` `tests/split_room_hosting_port.rs` constructs the provisioner the same way.
+- `tests/ripgrep_in_jail_seatbelt.rs` proves the `host_ripgrep_grants` patch and is superseded by `declared_tools_workspace_jail_acceptance.rs`. It is **deleted with the patch at green, once the developer approves** (CLAUDE.md: ask before deleting files).
 - Docs, at wrap: `docs/ft/coder/sandbox-builder.md` § Declared tools; `docs/ft/daemon/remote-codebase-mode.md` § Workspace tool sandbox; `packages/tddy-actions/docs/`.
 
 ## Testing Strategy
@@ -169,7 +173,7 @@ Real dependency edges, as opposed to the branch line:
 - **A tool is an executable plus what it needs, and an action is one invocation of a tool** — Bazel's split. `ActionSpec` is untouched here. Later nodes let an invocation name a tool.
 - **Override is replace-whole by id, never a field merge.** A partial merge would make the effective definition invisible in any one file.
 - **The binary, not its directory.** A jail-local link directory on PATH, plus a literal exec grant, keeps the explicit-allow-list claim. That is what the todo asked for.
-- **Resolution is at jail start, not daemon start.** An `rg` installed after the daemon starts is picked up, and a missing one refuses only the jails that need it.
+- **Loading and resolution are both at jail start, not daemon start** (changed from the plan in pass 2). An `rg` installed, or a `<tddyhome>/tools` edit made, after the daemon started is picked up. A missing tool refuses only the jails that need it. No registry is threaded through the daemon's builders.
 - **Lowering lives in `tddy-sandbox-recipes`**, because the generic `tddy-sandbox` must not learn the tool vocabulary.
 
 ## TODO
@@ -178,10 +182,10 @@ Real dependency edges, as opposed to the branch line:
 - [x] Cross-check `packages/*/docs/code-issues/` and `docs/dev/todo/` for items this change touches (Step 2b)
 - [x] Create/update PRD documentation
 - [x] Create changeset (this document)
-- [ ] Create failing acceptance tests
-- [ ] Run acceptance tests (verify they fail)
-- [ ] USER REVIEW — acceptance tests
-- [ ] TDD Red — write failing unit/integration tests
+- [x] Create failing acceptance tests
+- [x] Run acceptance tests (verify they fail)
+- [x] USER REVIEW — acceptance tests
+- [x] TDD Red — write failing unit/integration tests
 - [ ] TDD Green — implement with quality code
 - [ ] Update documentation with progress
 - [ ] Repeat Red→Green→Update cycle until feature complete
@@ -201,6 +205,9 @@ Real dependency edges, as opposed to the branch line:
 
 ## Refactoring Needed
 ### From /red (TDD red phase)
+
+- **Pre-existing, not this node:** `packages/tddy-daemon-sandbox/tests/sandbox_stdio_seatbelt_acceptance.rs` does not compile on macOS (`SandboxHandle` not in scope). The file is identical to `master`, so exclude that target when gating this node (`cargo clippy -p tddy-daemon-sandbox --lib --test …`).
+- **Red baseline (2026-10-31):** every new test fails at a `TODO(tool-defs)` body. The exception is `a_host_that_cannot_resolve_rg_…`, which fails because today's `provision` spawns a jail (it dies with exit 127) instead of refusing before the tree exists. `ripgrep_in_jail_seatbelt` still passes, on the old patch. Existing `tddy-actions`/`tddy-sandbox-recipes`/`workspace_tool_sandbox_plan_unit` tests stay green.
 ### From /validate-changes
 ### From /validate-tests
 ### From /validate-prod-ready
