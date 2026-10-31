@@ -28,6 +28,19 @@ pub enum ToolError {
     /// The host cannot satisfy the tool's binary. `searched` says where it looked.
     #[error("tool {tool} is unavailable: searched {searched}")]
     Unresolvable { tool: String, searched: String },
+    /// An `extensions:` key no registered [`super::ExtensionOwner`] claims.
+    #[error("tool file {}: unknown extension owner {owner}", file.display())]
+    UnknownExtension { file: PathBuf, owner: String },
+    /// The owner of an `extensions:` section refused it.
+    #[error("tool file {}: extension {owner}: {message}", file.display())]
+    ExtensionRejected {
+        file: PathBuf,
+        owner: String,
+        message: String,
+    },
+    /// A `run.argv` placeholder (`{name}`) no template parameter binds. Never rendered as empty.
+    #[error("tool {tool}: argv placeholder {{{name}}} is unbound")]
+    UnboundPlaceholder { tool: String, name: String },
     /// The overrides directory exists but could not be read.
     #[error("tool directory {}: {message}", dir.display())]
     Io { dir: PathBuf, message: String },
