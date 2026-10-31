@@ -173,6 +173,9 @@ pub fn build_workspace_tool_plan(
     } = request;
     // TODO(tool-defs): lower `tools` with `tddy_sandbox_recipes::lower_tools` into the plan's reads,
     // its `<scratch>/bin` links and the front of its PATH, and delete `host_ripgrep_grants`.
+    // TODO(egress-allowlist): lower `tools` with `tddy_sandbox_recipes::lower_network` into
+    // `plan.network.egress` and `allow_oauth_inbound`, and — unless the policy is `None` — pass the
+    // runner `--egress-shim-port`, `--egress-policy` and one `--egress-tool` per tool id.
     let _declared_tools = tools;
 
     let scratch_home = layout.scratch_dir.join("home");

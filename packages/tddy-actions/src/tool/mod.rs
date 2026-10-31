@@ -13,10 +13,14 @@
 //! [`render_argv`], static env, a transport) and open, owner-validated **extensions**
 //! ([`ExtensionOwner`]) — `tddy-coding-agent-specs` owns `coding_agent`, so this crate stays
 //! agent-agnostic.
+//!
+//! `#agent-tools 3/12` adds which hosts a tool may reach ([`NetworkSection`]); the jail's shim and
+//! host relay enforce the union of a tool set's declarations.
 
 mod def;
 mod error;
 mod extensions;
+mod network;
 mod registry;
 mod resolve;
 mod run;
@@ -25,6 +29,7 @@ mod template;
 pub use def::{ToolBinary, ToolDef, TOOL_SCHEMA_VERSION};
 pub use error::ToolError;
 pub use extensions::ExtensionOwner;
+pub use network::{Egress, HostPattern, HostPatternError, NetworkSection, DEFAULT_EGRESS_PORT};
 pub use registry::{ToolRegistry, BUILTIN_SUPPORT_TOOLS, BUILTIN_TOOLS};
 pub use resolve::{ProcessToolHost, ResolvedTool, ToolHost};
 pub use run::{ArgvItem, RunSection, Transport};

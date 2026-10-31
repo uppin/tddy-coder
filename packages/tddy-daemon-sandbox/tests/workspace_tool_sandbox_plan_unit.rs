@@ -315,6 +315,7 @@ fn a_plan_running_the_declared_rg(session: &SessionOnDisk) -> SandboxPlan {
             command: "rg".into(),
             binary: PathBuf::from(DECLARED_RG),
             reads: vec![],
+            network: Default::default(),
         }],
     })
     .expect("a workspace tool plan must build")
