@@ -2557,6 +2557,8 @@ fn create_backend(
                 "[tddy-coder] Cursor backend: CLI binary `{}` (full argv logged when a goal invokes the backend)",
                 path.display()
             );
+            // TODO(headless-others): build it with
+            // `crate::headless_from_spec::cursor_backend_from_spec`, so the spec is the only path.
             AnyBackend::Cursor(CursorBackend::with_path(path).with_progress(on_progress))
         }
         "claude-acp" => AnyBackend::ClaudeAcp(ClaudeAcpBackend::new()),
@@ -2566,6 +2568,8 @@ fn create_backend(
                 "[tddy-coder] Codex backend: CLI binary `{}`",
                 path.display()
             );
+            // TODO(headless-others): build it with
+            // `crate::headless_from_spec::codex_backend_from_spec`, so the spec is the only path.
             AnyBackend::Codex(CodexBackend::with_path(path))
         }
         "codex-acp" => {

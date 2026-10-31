@@ -301,6 +301,15 @@ impl DaemonCodingAgentLauncher {
         agents: &HostCodingAgents,
     ) -> Result<HeadlessCommand, SubagentError> {
         // TODO(claude-headless): implement.
+        // TODO(headless-others): and for Cursor, Codex and Oz: the spec's MCP slot
+        // (`headless.mcp`, else `coding_agent.mcp`) names what the turns will write —
+        // `tddy_coding_agent_specs::slots::headless_mcp::mcp_written_paths` — and those paths are
+        // recorded with `tddy_coding_subagent::launcher::record_written_files` in the claimed
+        // directory before anything is written; a worktree file that already exists
+        // (`.cursor/mcp.json`) is refused and kept out of git as `write_cursor_project_mcp_config`
+        // does; Codex's server environment goes into the command's `env`; Oz's profile is not
+        // set. Green then deletes `headless_program`, `mcp_servers_by_name`,
+        // `write_cursor_project_mcp_config` and `OZ_BINARY`.
         let _ = (launch, wiring, conversation, agents);
         todo!("claude-headless: DaemonCodingAgentLauncher::headless_plan_from_spec")
     }
@@ -460,10 +469,11 @@ impl DaemonCodingAgentLauncher {
                 &format!("its conversation id {unsafe_id} is not a plain name"),
             )
         })?;
-        if harness == HeadlessHarness::Claude {
-            if let Some(agents) = &self.coding_agents {
-                return self.headless_plan_from_spec(launch, wiring, conversation.as_str(), agents);
-            }
+        // `#agent-tools 9/12`: every headless harness — Cursor, Codex and Oz as well as Claude — is
+        // planned from its spec once the coding agents are installed (`cursor.yaml`, `codex.yaml`,
+        // `oz.yaml`).
+        if let Some(agents) = &self.coding_agents {
+            return self.headless_plan_from_spec(launch, wiring, conversation.as_str(), agents);
         }
         let program = headless_program(&wiring.config, harness);
         self.refuse_unless_daemon_user(launch, &program)?;

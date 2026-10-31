@@ -1,0 +1,72 @@
+# OpenAI Codex CLI — the headless coding agent behind the `codex` workflow backend
+# (`tddy-coder --agent codex`) and a headless `codex` coding subagent (`#agent-tools 9/12`).
+#
+# The headless argv renders byte-for-byte what `build_codex_exec_argv` built by hand:
+#   codex exec [<mcp -c overrides>] -C DIR -s SANDBOX --json [resume] [ROUTE ARGS | -m M] [THREAD] PROMPT
+# `exec`-level options (`-C`, `-s`, `--json`) must come before `resume`, which takes only its own
+# (`-m`). `sandbox_mode` is the turn's param — `read-only` for a read-only planning goal; a turn
+# that binds none runs `workspace-write`. On a provider account the route's argv (`-c
+# model_provider…`, `-m …`) takes the model's place; its key travels in the environment.
+#
+# A headless conversation's argv (`headless_driver/argv.rs::codex()`) put `-m` before `--json`; the
+# template puts it after, as the backend does — same meaning, one order.
+#
+# Codex reads no MCP config file: the tool server is handed inline as `-c mcp_servers.<name>.*`,
+# its environment named (`env_vars`), never valued, so the credential stays off the argv.
+#
+# Codex cannot withdraw its native tools: the tool slots are `unsupported`, and a managed launch
+# that asks it to is refused by name (docs/dev/todo/2026-10-25-headless-cursor-codex-oz-cannot-withdraw-native-tools.md).
+#
+# Codex runs only headless here: `run:` is the bare CLI, which no session type launches.
+#
+# Override whole with `<tddyhome>/tools/codex.yaml`. `TDDY_CODEX_CLI` (and `--codex-cli-path`)
+# still names the binary.
+#
+# TODO(headless-others): a `network:` section (api.openai.com, auth.openai.com) once `Egress`
+# deserializes (`#agent-tools 3/12`) and Codex is jailed (`#agent-tools 10/12`).
+schema_version: 1
+id: codex
+summary: OpenAI Codex CLI — the headless coding agent behind the codex workflow backend
+binary:
+  command: codex
+  env: TDDY_CODEX_CLI
+deps: [tddy-tools]
+reads: []
+run:
+  transport: pty
+  argv:
+    - "{binary}"
+  env: {}
+extensions:
+  coding_agent:
+    mcp: { kind: inline, flag: -c, key_prefix: mcp_servers }
+    tool_allow: unsupported
+    tool_deny: unsupported
+    permission_prompt: unsupported
+    instructions:
+      files: [AGENTS.md]
+    hooks: { adapter: unsupported }
+    models:
+      default: gpt-5.3-codex
+      curated: [gpt-5.3-codex]
+    context_globs: [AGENTS.md, ".agents/**", ".codex/**"]
+    headless:
+      argv:
+        - "{binary}"
+        - exec
+        - { splice: slots }
+        - -C
+        - "{workdir}"
+        - { if: sandbox_mode, then: [-s, "{sandbox_mode}"], else: [-s, workspace-write] }
+        - --json
+        - { if: resume, then: [resume] }
+        - { splice: route_args }
+        - { if: model, then: [-m, "{model}"] }
+        - { if: resume, then: ["{session_id}"] }
+        - "{prompt}"
+      env: {}
+      adapter: codex-jsonl
+      # A non-zero exit with a non-empty parsed result counts as success, as the backend tolerates
+      # it for a planning goal today.
+      exit_ok_if_structured: true
+    placements: [host]
