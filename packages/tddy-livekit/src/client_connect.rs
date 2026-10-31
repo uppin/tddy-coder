@@ -53,7 +53,7 @@ pub async fn connect_client(
     target_identity: &str,
     wait_for_participant: Duration,
 ) -> Result<ConnectedClient, ConnectError> {
-    let (room, mut events) = Room::connect(url, token, RoomOptions::default())
+    let (room, mut events) = Room::connect(url, token, crate::tddy_room_options())
         .await
         .map_err(|e| ConnectError::Room(e.to_string()))?;
     let room = Arc::new(room);

@@ -72,9 +72,7 @@ use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use livekit::prelude::{
-    ConnectionState, RemoteParticipant, Room, RoomError, RoomEvent, RoomOptions,
-};
+use livekit::prelude::{ConnectionState, RemoteParticipant, Room, RoomError, RoomEvent};
 use livekit::DisconnectReason;
 use prost::Message;
 use serde::Deserialize;
@@ -932,7 +930,7 @@ async fn connect_common_room_publish_metadata(
     VecDeque<RoomEvent>,
     String,
 )> {
-    let (room, mut events) = Room::connect(url, token, RoomOptions::default()).await?;
+    let (room, mut events) = Room::connect(url, token, tddy_livekit::tddy_room_options()).await?;
     let room = Arc::new(room);
     let lp = room.local_participant();
     log::info!(

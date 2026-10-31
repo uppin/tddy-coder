@@ -12,7 +12,7 @@ use std::time::Duration;
 use tddy_coder::participant_host::{
     ParticipantAuth, ParticipantJoin, ParticipantOptions, ServedParticipant, SessionParticipantHost,
 };
-use tddy_livekit::{LiveKitParticipant, RoomOptions, TokenGenerator};
+use tddy_livekit::{tddy_room_options, LiveKitParticipant, TokenGenerator};
 
 /// How often a fixed-token participant looks at the shutdown flag.
 const SHUTDOWN_POLL: Duration = Duration::from_millis(100);
@@ -64,7 +64,7 @@ impl SessionParticipantHost for LiveKitParticipantHost {
                         &url,
                         &generator,
                         surface,
-                        RoomOptions::default(),
+                        tddy_room_options(),
                         options.shutdown,
                         options.metadata,
                         options.codex_oauth_watch,
@@ -133,7 +133,7 @@ async fn serve_once(
         url,
         token,
         surface,
-        RoomOptions::default(),
+        tddy_room_options(),
         codex_oauth_watch,
         projects_registry_dir,
     )

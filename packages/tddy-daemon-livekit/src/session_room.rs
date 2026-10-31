@@ -1741,7 +1741,7 @@ async fn join_room<S: RpcService>(
         &credentials.url,
         &token_generator,
         service,
-        tddy_livekit::RoomOptions::default(),
+        tddy_livekit::tddy_room_options(),
         None,
         None,
         None,

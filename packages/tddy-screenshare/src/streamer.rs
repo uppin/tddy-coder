@@ -45,7 +45,7 @@ impl ScreenSharingStreamer {
         width: u32,
         height: u32,
     ) -> Result<Self> {
-        let (room, mut room_events) = Room::connect(url, token, RoomOptions::default())
+        let (room, mut room_events) = Room::connect(url, token, tddy_livekit::tddy_room_options())
             .await
             .context("failed to connect to LiveKit room")?;
 

@@ -72,7 +72,7 @@ impl TerminalExposure for LiveKitTerminalExposure {
             &self.url,
             &token,
             terminal,
-            Default::default(),
+            tddy_livekit::tddy_room_options(),
             None,
             None,
         )

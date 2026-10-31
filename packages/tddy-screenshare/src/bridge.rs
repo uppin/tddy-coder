@@ -16,7 +16,7 @@ use tokio::signal::unix::{signal, SignalKind};
 use tokio::sync::mpsc;
 use tokio_stream::wrappers::ReceiverStream;
 
-use tddy_livekit::{LiveKitParticipant, RoomOptions};
+use tddy_livekit::{tddy_room_options, LiveKitParticipant};
 use tddy_rpc::{Request, Response, Status, Streaming};
 use tddy_service::proto::screen_sharing_input::{
     screen_sharing_input_event::Event, ScreenSharingInputAck, ScreenSharingInputEvent,
@@ -291,7 +291,7 @@ async fn publish_to_livekit(
         &config.livekit_url,
         &config.livekit_token,
         input_svc,
-        RoomOptions::default(),
+        tddy_room_options(),
         None,
         None,
     )

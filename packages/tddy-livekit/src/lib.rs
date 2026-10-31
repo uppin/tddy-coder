@@ -14,6 +14,7 @@ pub mod participant;
 mod projects_registry;
 pub mod room_connector;
 pub mod room_metadata;
+pub mod room_options;
 pub mod room_roster;
 pub mod rpc_log;
 pub mod server_api_url;
@@ -43,5 +44,6 @@ pub use participant::{
     OWNED_PROJECT_COUNT_METADATA_KEY,
 };
 pub use room_metadata::{livekit_http_url, RoomMetadataClient};
+pub use room_options::tddy_room_options;
 pub use tddy_rpc::Status;
 pub use token::{TokenGenerator, DEFAULT_LIVEKIT_JWT_TTL_SECS};

@@ -440,7 +440,7 @@ async fn serve_rpc_participant_until_shutdown(
             &url,
             &token_generator,
             roster,
-            Default::default(),
+            tddy_livekit::tddy_room_options(),
             None,
             None,
             None,
