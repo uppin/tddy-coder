@@ -84,6 +84,7 @@ its changeset wraps.
 | [A tool declares the hosts it may reach, and the jail enforces it](1-WIP/PRD-2026-10-31-tool-egress-allowlist.md) | `#agent-tools 3/12` |
 | [Headless Claude runs from its tool definition through a named stream adapter](1-WIP/PRD-2026-10-31-headless-agents-from-specs.md) | `#agent-tools 6/12` |
 | [Headless Cursor, Codex and Oz run from their tool definitions](1-WIP/PRD-2026-10-31-headless-cursor-codex-oz-from-specs.md) | `#agent-tools 9/12` |
+| [Every jail runs a tool plan: the sandbox runner and recipes forget coding agents](1-WIP/PRD-2026-10-31-tool-agnostic-jail.md) | `#agent-tools 10/12` |
 
 ## Integration Points
 
