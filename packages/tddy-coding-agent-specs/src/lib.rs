@@ -17,7 +17,8 @@ use tddy_actions::tool::{ToolError, ToolRegistry};
 
 pub use spec::{
     CodingAgentExtension, CodingAgentSection, CodingAgentSpec, FlagSlot, HooksSlot,
-    InstructionsSlot, McpFormat, McpSlot, ModelsSection, SpecError, CODING_AGENT_EXTENSION,
+    InstructionsSlot, McpFormat, McpSlot, ModelsSection, SpecError, ToolSlot, Unsupported,
+    CODING_AGENT_EXTENSION,
 };
 
 /// The embedded agent specs: `(source path, YAML)`.

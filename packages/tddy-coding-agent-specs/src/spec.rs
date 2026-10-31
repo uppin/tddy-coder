@@ -62,12 +62,13 @@ pub enum SpecError {
 pub struct CodingAgentSection {
     /// Where the tool server registration goes, and in what shape.
     pub mcp: McpSlot,
-    /// The flag each pre-approved tool is passed with.
-    pub tool_allow: FlagSlot,
-    /// The flag each withdrawn tool is passed with.
-    pub tool_deny: FlagSlot,
-    /// The flag naming the MCP tool the agent asks before running anything not pre-approved.
-    pub permission_prompt: FlagSlot,
+    /// The flag each pre-approved tool is passed with — or `unsupported`.
+    pub tool_allow: ToolSlot,
+    /// The flag each withdrawn tool is passed with — or `unsupported`.
+    pub tool_deny: ToolSlot,
+    /// The flag naming the MCP tool the agent asks before running anything not pre-approved — or
+    /// `unsupported`.
+    pub permission_prompt: ToolSlot,
     pub instructions: InstructionsSlot,
     pub hooks: HooksSlot,
     pub models: ModelsSection,
@@ -90,6 +91,35 @@ pub enum McpSlot {
 pub enum McpFormat {
     /// `{"mcpServers": {"<name>": {"command", "args", "env"?}}}`.
     ClaudeMcpJson,
+}
+
+/// A tool slot: the flag an agent takes it by, or the declaration that it has none.
+///
+/// `tool_deny: unsupported` is how a spec says "this agent cannot withdraw its native tools" (Cursor,
+/// Codex, Oz). It is spec data rather than an absent field, so the gap is reviewable in the YAML and
+/// a caller that needs the slot is refused by name instead of silently getting nothing.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum ToolSlot {
+    Flag(FlagSlot),
+    Unsupported(Unsupported),
+}
+
+/// The YAML word `unsupported`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum Unsupported {
+    #[serde(rename = "unsupported")]
+    Unsupported,
+}
+
+impl ToolSlot {
+    /// The flag, when the agent has one.
+    pub fn flag(&self) -> Option<&FlagSlot> {
+        match self {
+            ToolSlot::Flag(flag) => Some(flag),
+            ToolSlot::Unsupported(_) => None,
+        }
+    }
 }
 
 /// A slot rendered as `flag <value>` argv pairs.
@@ -125,4 +155,44 @@ pub struct HooksSlot {
 pub struct ModelsSection {
     pub default: String,
     pub curated: Vec<String>,
+}
+
+#[cfg(test)]
+mod tool_slot_tests {
+    use pretty_assertions::assert_eq;
+
+    use super::{FlagSlot, ToolSlot, Unsupported};
+
+    #[test]
+    fn a_tool_slot_reads_a_flag_map() {
+        // When
+        let slot: ToolSlot = serde_yaml::from_str("{ flag: --disallowedTools }").unwrap();
+
+        // Then
+        assert_eq!(
+            slot,
+            ToolSlot::Flag(FlagSlot {
+                flag: "--disallowedTools".to_string(),
+            })
+        );
+    }
+
+    #[test]
+    fn a_tool_slot_reads_the_word_unsupported() {
+        // When
+        let slot: ToolSlot = serde_yaml::from_str("unsupported").unwrap();
+
+        // Then
+        assert_eq!(slot, ToolSlot::Unsupported(Unsupported::Unsupported));
+        assert_eq!(slot.flag(), None);
+    }
+
+    #[test]
+    fn any_other_word_is_refused() {
+        // When
+        let refused = serde_yaml::from_str::<ToolSlot>("none");
+
+        // Then
+        assert!(refused.is_err(), "`none` must not read as a tool slot");
+    }
 }
