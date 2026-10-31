@@ -182,6 +182,7 @@ mod tests {
                 route: None,
                 resume: None,
                 placements: crate::Placement::anywhere(),
+                variants: BTreeMap::new(),
             },
         }
     }
