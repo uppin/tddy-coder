@@ -14,6 +14,18 @@ pub trait HooksAdapter: Send + Sync {
 
     /// The hooks file for `params`, under the agent's working directory `workdir`, with its bytes.
     fn render(&self, workdir: &Path, params: &HookCommandParams<'_>) -> (PathBuf, Vec<u8>);
+
+    /// [`Self::render`], or why `params` cannot be rendered by this adapter. What a launcher calls
+    /// (`#agent-tools 7/12`): an adapter that reports over the daemon's agent-tool socket refuses
+    /// params without one ([`SlotError::NoDaemonSocket`]) instead of falling back to `daemon_url`.
+    /// Every adapter that renders any params needs no override.
+    fn try_render(
+        &self,
+        workdir: &Path,
+        params: &HookCommandParams<'_>,
+    ) -> Result<(PathBuf, Vec<u8>), SlotError> {
+        Ok(self.render(workdir, params))
+    }
 }
 
 /// Claude Code's `<workdir>/.claude/settings.local.json`, built by
@@ -39,6 +51,7 @@ impl HooksAdapter for ClaudeSettingsLocal {
 /// The adapter named `name`; an unknown name is [`SlotError::UnknownHooksAdapter`].
 pub fn adapter(name: &str) -> Result<&'static dyn HooksAdapter, SlotError> {
     // TODO(claude-host): implement.
+    // TODO(cursor-cli): and resolve `cursor-hooks-json` to `super::cursor::CursorHooksJson`.
     let _ = name;
     todo!("claude-host: hooks::adapter")
 }
@@ -61,13 +74,14 @@ mod tests {
     #[test]
     fn an_unknown_hooks_adapter_is_refused_naming_it() {
         // When
-        let refused = adapter("cursor-hooks-json").map(|a| a.name());
+        // (`cursor-hooks-json` was the example until `#agent-tools 7/12` registered it.)
+        let refused = adapter("an-unregistered-hooks-json").map(|a| a.name());
 
         // Then
         assert_eq!(
             refused,
             Err(SlotError::UnknownHooksAdapter {
-                name: "cursor-hooks-json".to_string(),
+                name: "an-unregistered-hooks-json".to_string(),
             })
         );
     }

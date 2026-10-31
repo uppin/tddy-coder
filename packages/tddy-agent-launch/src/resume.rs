@@ -71,6 +71,9 @@ pub async fn resume_cursor_cli_session(
         }
     };
 
+    // TODO(cursor-cli): with coding agents installed, render the `cursor` spec with the same
+    // `cursor_from_spec::cursor_template_params(chat_id, …)` and spawn through
+    // `spec_launch::launch_host_pty` instead of `resume_cursor`.
     let handle = cli_manager
         .resume_cursor(
             session_id,

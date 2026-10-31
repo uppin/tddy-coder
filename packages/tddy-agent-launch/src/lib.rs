@@ -16,6 +16,7 @@ pub mod conversation_spawn_handler;
 pub mod conversation_start;
 pub mod conversation_worktree_op;
 pub mod cursor_cli_spawn;
+pub mod cursor_from_spec;
 pub mod family_proto_bridge;
 pub mod harness_profile_request;
 pub mod harness_profile_start;

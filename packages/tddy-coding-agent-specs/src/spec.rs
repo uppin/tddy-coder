@@ -135,6 +135,11 @@ impl HeadlessSection {
 pub enum McpSlot {
     /// A file in `format`, passed by `flag <path>`.
     File { flag: String, format: McpFormat },
+    /// A file in `format` written where the agent looks for it, passed by no flag
+    /// (`#agent-tools 7/12`: Cursor reads `$HOME/.cursor/mcp.json`). `path` may name `{home}` — the
+    /// agent's home on this launch ([`crate::slots::SlotInputs::home`]); every other character is
+    /// literal.
+    Placed { path: String, format: McpFormat },
 }
 
 /// The shape of an MCP registration file.
@@ -143,6 +148,9 @@ pub enum McpSlot {
 pub enum McpFormat {
     /// `{"mcpServers": {"<name>": {"command", "args", "env"?}}}`.
     ClaudeMcpJson,
+    /// Cursor's `.cursor/mcp.json`: the same `mcpServers` object, at the placed path
+    /// (`#agent-tools 7/12`).
+    CursorMcpJson,
 }
 
 /// A tool slot: the flag an agent takes it by, or the declaration that it has none.
@@ -191,10 +199,15 @@ pub struct InstructionsSlot {
     /// The flag a system-prompt file is appended with; `None` for an agent without one.
     #[serde(default)]
     pub append_system_prompt: Option<FlagSlot>,
+    /// A rules file, relative to the agent's working directory, that a launch's preamble is
+    /// written to **whole** (`#agent-tools 7/12`: Cursor's `.cursor/rules/<name>.mdc`); `None` for
+    /// an agent without one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rules_file: Option<PathBuf>,
 }
 
 /// Which Rust hooks adapter writes the agent's lifecycle-hooks configuration. The hook protocol is
-/// not declarable; a file can only name an adapter (`claude-settings-local`).
+/// not declarable; a file can only name an adapter (`claude-settings-local`, `cursor-hooks-json`).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct HooksSlot {

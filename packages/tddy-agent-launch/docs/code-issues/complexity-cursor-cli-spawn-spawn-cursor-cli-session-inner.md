@@ -8,6 +8,8 @@
 **Thresholds breached:** length 337 > 60; parameters 9 > 5 (`/analyze-clean-code`)
 **Restructure:** `extract_method` — `/code-restructuring` territory
 **Status:** Open — regressed 2026-10-04 (file crossed the 500-production-line budget in #571: 445 → 532). Narrowed 2026-09-24 by #524 (337 → 244 lines); the remaining seams are refused by the engine (T: `SpawnStackParent<'_>`; E4: early returns) — **unclaimed**
+**Claimed by:** #796 — `#agent-tools 7/12`
+**Lands after:** #795
 **Verified:** ⚠ **not hand-verified** — metrics are machine-measured and re-derivable; the finding itself has not been read by a person
 **Moved:** 2026-10-09 by `#carve` 21/21 (#536), engine move into `tddy-agent-launch`, from `packages/tddy-session-lifecycle/src/cursor_cli_spawn.rs:27`
 

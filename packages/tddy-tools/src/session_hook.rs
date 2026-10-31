@@ -335,7 +335,34 @@ async fn deliver(args: &SessionHookArgs, method: &str, body: Vec<u8>) -> anyhow:
     exchange(args, method, body, REPORT_TIMEOUT).await.map(drop)
 }
 
+/// Where a hook's reports go (`#agent-tools 7/12`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum HookTransport {
+    /// The in-jail tool-IPC socket (`TDDY_SANDBOX_TOOL_IPC`); the runner relays each report to the
+    /// facilitating daemon (`tddy_service::session_activity::IN_JAIL_RELAYABLE_HOOK_REPORTS`).
+    SandboxIpc(std::path::PathBuf),
+    /// An embedded daemon's agent-tool socket (`--daemon-socket`).
+    DaemonSocket(std::path::PathBuf),
+    /// The daemon's HTTP RPC (`--daemon`).
+    Http(String),
+}
+
+/// The transport for `args`: the sandbox tool-IPC socket when the hook runs in a jail
+/// (`sandbox_tool_ipc`, read from `TDDY_SANDBOX_TOOL_IPC` by the caller) — whatever the baked-in
+/// command names, since a jail reaches neither a host socket path nor the daemon's port — then
+/// `--daemon-socket`, then `--daemon`.
+pub fn hook_transport(
+    args: &SessionHookArgs,
+    sandbox_tool_ipc: Option<&std::path::Path>,
+) -> HookTransport {
+    // TODO(cursor-cli): implement.
+    let _ = (args, sandbox_tool_ipc);
+    todo!("cursor-cli: hook_transport")
+}
+
 /// [`deliver`], returning the response body and bounding the call by `timeout`.
+// TODO(cursor-cli): dispatch on `hook_transport(args, TDDY_SANDBOX_TOOL_IPC)` —
+// `HookTransport::SandboxIpc` calls `call_over_socket` on the tool-IPC socket.
 async fn exchange(
     args: &SessionHookArgs,
     method: &str,
@@ -501,6 +528,64 @@ mod tests {
     use super::*;
 
     const SESSION_ID: &str = "sess-1";
+
+    /// A Cursor hook command's arguments, as `cursor-hooks-json` bakes them on the host.
+    fn hook_args(daemon_socket: Option<&str>) -> SessionHookArgs {
+        SessionHookArgs {
+            session: SESSION_ID.to_string(),
+            daemon: "http://127.0.0.1:8899".to_string(),
+            daemon_socket: daemon_socket.map(std::path::PathBuf::from),
+            os_user: OS_USER.to_string(),
+            hook_token: HOOK_TOKEN.to_string(),
+            event: String::new(),
+            await_answer: false,
+            await_timeout_secs: DEFAULT_AWAIT_TIMEOUT_SECS,
+        }
+    }
+
+    #[test]
+    fn a_hook_in_a_jail_reports_over_the_sandbox_tool_ipc_socket_whatever_its_command_names() {
+        // When
+        let transport = hook_transport(
+            &hook_args(Some("/var/folders/T/tddy-agent-tools.sock")),
+            Some(std::path::Path::new("/jail/tmp/tool-ipc.sock")),
+        );
+
+        // Then
+        assert_eq!(
+            transport,
+            HookTransport::SandboxIpc(std::path::PathBuf::from("/jail/tmp/tool-ipc.sock"))
+        );
+    }
+
+    #[test]
+    fn a_hook_on_the_host_reports_over_the_daemon_socket_it_was_given() {
+        // When
+        let transport = hook_transport(
+            &hook_args(Some("/var/folders/T/tddy-agent-tools.sock")),
+            None,
+        );
+
+        // Then
+        assert_eq!(
+            transport,
+            HookTransport::DaemonSocket(std::path::PathBuf::from(
+                "/var/folders/T/tddy-agent-tools.sock"
+            ))
+        );
+    }
+
+    #[test]
+    fn a_hook_given_no_socket_outside_a_jail_reports_over_http() {
+        // When
+        let transport = hook_transport(&hook_args(None), None);
+
+        // Then
+        assert_eq!(
+            transport,
+            HookTransport::Http("http://127.0.0.1:8899".to_string())
+        );
+    }
     const HOOK_TOKEN: &str = "tok-1";
     const OS_USER: &str = "alice";
 

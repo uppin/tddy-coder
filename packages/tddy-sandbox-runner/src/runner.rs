@@ -57,6 +57,17 @@ const MAIN_TERMINAL_ID: &str = "main";
 /// poll-gated `ToolRequest`/`ToolResponse` pair (one at a time, as it was built for); the new
 /// RPCs ride `RpcRequest`/`RpcStreamFrame` on the outbound stream directly, the way tunnel
 /// frames do, so they never block a tool call.
+/// Whether the in-jail tool-IPC socket relays `service`/`method` to the facilitating daemon: the
+/// roster and conversation RPCs (`tddy_service::session_agents::IN_JAIL_RELAYABLE`), the
+/// conversation-worktree exec tools (`tddy_tool_engine::IN_JAIL_RELAYABLE_EXEC_TOOLS`), and the
+/// hook reports (`tddy_service::session_activity::IN_JAIL_RELAYABLE_HOOK_REPORTS`,
+/// `#agent-tools 7/12`). Anything else is answered `not_found` in the jail.
+pub fn relays_to_the_host(service: &str, method: &str) -> bool {
+    // TODO(cursor-cli): implement.
+    let _ = (service, method);
+    todo!("cursor-cli: relays_to_the_host")
+}
+
 struct ToolExecService {
     relay: Arc<SandboxSessionRelay>,
 }
@@ -102,6 +113,9 @@ impl tddy_rpc::RpcService for ToolExecService {
         const FORWARDED_RPCS: &[(&str, &str)] = &tddy_service::session_agents::IN_JAIL_RELAYABLE;
         // Conversation-worktree operations are exec-tool RPCs with a typed request; they ride the
         // same channel, to the same daemon.
+        // TODO(cursor-cli): replace this allowlist with `relays_to_the_host`, which adds the hook
+        // reports (`tddy_service::session_activity::IN_JAIL_RELAYABLE_HOOK_REPORTS`) — generic:
+        // any jailed `tddy-tools session-hook`, not only Cursor's.
         if !FORWARDED_RPCS
             .iter()
             .chain(tddy_tool_engine::IN_JAIL_RELAYABLE_EXEC_TOOLS.iter())
