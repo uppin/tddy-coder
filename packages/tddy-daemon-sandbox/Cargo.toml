@@ -48,6 +48,7 @@ tddy-sandbox-cgroups = { path = "../tddy-sandbox-cgroups" }
 libc = "0.2"
 
 [dev-dependencies]
+pretty_assertions = { workspace = true }
 # The reference emulator a jailed terminal's snapshot is rendered in.
 vt100 = "0.15"
 prost = "0.13"

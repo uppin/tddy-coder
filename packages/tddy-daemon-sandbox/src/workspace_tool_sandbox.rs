@@ -22,6 +22,7 @@ use std::time::Duration;
 
 use async_trait::async_trait;
 use futures_util::{Stream, StreamExt};
+use tddy_actions::tool::{ProcessToolHost, ResolvedTool, ToolHost};
 use tddy_sandbox::{CgroupConfig, MountSpec, SandboxError, SandboxPlan};
 // The budget both hosts of this exchange keep. Imported rather than restated: the daemon and the
 // standalone app speak the same one-call-at-a-time protocol into the same jail, so a call still
@@ -146,6 +147,9 @@ pub struct WorkspaceToolPlanRequest {
     pub runner_path: String,
     pub tddy_tools_path: String,
     pub cgroup: CgroupConfig,
+    /// The declared tools this jail runs, resolved against the host (`#agent-tools 1/12`): each is
+    /// exec-granted as its binary file and reachable by name through the jail's own `bin/`.
+    pub tools: Vec<ResolvedTool>,
 }
 
 /// Assemble the [`SandboxPlan`] for a workspace jail: `tddy-sandbox-runner --stdio` over the
@@ -165,7 +169,11 @@ pub fn build_workspace_tool_plan(
         runner_path,
         tddy_tools_path,
         cgroup,
+        tools,
     } = request;
+    // TODO(tool-defs): lower `tools` with `tddy_sandbox_recipes::lower_tools` into the plan's reads,
+    // its `<scratch>/bin` links and the front of its PATH, and delete `host_ripgrep_grants`.
+    let _declared_tools = tools;
 
     let scratch_home = layout.scratch_dir.join("home");
     let scratch_tmp = layout.scratch_dir.join("tmp");
@@ -397,9 +405,46 @@ pub fn workspace_sandbox_platform_support() -> Result<(), SandboxError> {
 /// How long the jail is given to write its ready marker before the start is failed.
 const JAIL_READY_TIMEOUT: Duration = Duration::from_secs(120);
 
+/// The declared tools every workspace jail runs: `Grep` shells out to `rg`.
+pub const WORKSPACE_JAIL_TOOLS: &[&str] = &["rg"];
+
 /// The production provisioner: a real jail on this host's backend.
-#[derive(Debug, Default)]
-pub struct JailedWorkspaceSandboxProvisioner;
+///
+/// It resolves [`WORKSPACE_JAIL_TOOLS`] from the built-in tools plus `<tddyhome>/tools` **at jail
+/// start**, so an `rg` installed after the daemon started is picked up and a missing one refuses
+/// only the jails that need it, naming the tool.
+pub struct JailedWorkspaceSandboxProvisioner {
+    tools_dir: PathBuf,
+    host: Arc<dyn ToolHost>,
+}
+
+impl std::fmt::Debug for JailedWorkspaceSandboxProvisioner {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("JailedWorkspaceSandboxProvisioner")
+            .field("tools_dir", &self.tools_dir)
+            .finish_non_exhaustive()
+    }
+}
+
+impl JailedWorkspaceSandboxProvisioner {
+    /// Resolve tools from `tools_dir` overrides against `host`.
+    pub fn new(tools_dir: PathBuf, host: Arc<dyn ToolHost>) -> Self {
+        Self { tools_dir, host }
+    }
+
+    /// The daemon's provisioner: overrides from `<tddy_home>/tools`, resolved against this process.
+    pub fn for_tddy_home(tddy_home: &Path) -> Self {
+        Self::new(tddy_home.join("tools"), Arc::new(ProcessToolHost))
+    }
+
+    /// The jail's declared tools, resolved — or the refusal naming the tool the host lacks.
+    pub fn resolve_jail_tools(&self) -> Result<Vec<ResolvedTool>, SandboxError> {
+        // TODO(tool-defs): implement — `ToolRegistry::load(builtin()?, &self.tools_dir)?
+        // .resolve_closure(WORKSPACE_JAIL_TOOLS, &*self.host)`, mapping `ToolError` to a refusal.
+        let _ = (&self.tools_dir, &self.host);
+        todo!("tool-defs: resolve_jail_tools")
+    }
+}
 
 #[async_trait]
 impl WorkspaceSandboxProvisioner for JailedWorkspaceSandboxProvisioner {
@@ -421,6 +466,8 @@ impl WorkspaceSandboxProvisioner for JailedWorkspaceSandboxProvisioner {
             runner_path: canonical_exec(&crate::sandbox_session::resolve_sandbox_runner_path()),
             tddy_tools_path: canonical_exec(&crate::sandbox_session::resolve_tddy_tools_path(None)),
             cgroup: CgroupConfig::default(),
+            // TODO(tool-defs): `self.resolve_jail_tools()?`, before the jail tree is created.
+            tools: Vec::new(),
         })?;
 
         let mut handle = crate::sandbox_session::spawn_sandbox_plan(plan)?;

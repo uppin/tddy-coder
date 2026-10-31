@@ -67,6 +67,10 @@ fn a_rendered_profile_for(session_dir: &Path, worktree: &Path) -> PathBuf {
         runner_path: "/usr/bin/true".to_string(),
         tddy_tools_path: "/usr/bin/true".to_string(),
         cgroup: Default::default(),
+        // TODO(tool-defs): superseded by `declared_tools_workspace_jail_acceptance.rs`. This proves
+        // the `host_ripgrep_grants` patch, which green deletes; remove this file with it (deleting
+        // a file needs the developer's go-ahead).
+        tools: Vec::new(),
     })
     .expect("the plan must build");
 
