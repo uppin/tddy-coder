@@ -8,7 +8,10 @@
 //! launcher renders the template with `tddy_actions::tool::render_argv` and the slots with
 //! [`slots::render`]; nothing in that path hard-codes an agent.
 
+mod capability;
 pub mod headless;
+mod registry;
+mod route;
 pub mod slots;
 mod spec;
 
@@ -16,6 +19,9 @@ use std::path::Path;
 
 use tddy_actions::tool::{ToolError, ToolRegistry};
 
+pub use capability::Capability;
+pub use registry::{CodingAgentRegistry, RegistryError, CLI_SESSION_TYPE_SUFFIX};
+pub use route::{ProviderKind, RouteShape, RouteSupport};
 pub use spec::{
     AcpSection, AgentVariant, CodingAgentExtension, CodingAgentSection, CodingAgentSpec, FlagSlot,
     HeadlessSection, HooksSlot, InstructionsSlot, McpFormat, McpSlot, ModelsSection, Placement,

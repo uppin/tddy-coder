@@ -12,7 +12,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file catalog.proto.
  */
 export const file_catalog: GenFile = /*@__PURE__*/
-  fileDesc("Cg1jYXRhbG9nLnByb3RvEgdjYXRhbG9nIiYKCUFnZW50SW5mbxIKCgJpZBgBIAEoCRINCgVsYWJlbBgCIAEoCSJaChZMaXN0QWdlbnRNb2RlbHNSZXF1ZXN0EhUKDXNlc3Npb25fdG9rZW4YASABKAkSDQoFYWdlbnQYAiABKAkSGgoSZGFlbW9uX2luc3RhbmNlX2lkGAMgASgJIlQKF0xpc3RBZ2VudE1vZGVsc1Jlc3BvbnNlEiIKBm1vZGVscxgBIAMoCzISLmNhdGFsb2cuTW9kZWxJbmZvEhUKDWRlZmF1bHRfbW9kZWwYAiABKAkiEwoRTGlzdEFnZW50c1JlcXVlc3QiOAoSTGlzdEFnZW50c1Jlc3BvbnNlEiIKBmFnZW50cxgBIAMoCzISLmNhdGFsb2cuQWdlbnRJbmZvIhYKFExpc3RTdWJhZ2VudHNSZXF1ZXN0IkEKFUxpc3RTdWJhZ2VudHNSZXNwb25zZRIoCglzdWJhZ2VudHMYASADKAsyFS5jYXRhbG9nLlN1YmFnZW50SW5mbyISChBMaXN0VG9vbHNSZXF1ZXN0IjUKEUxpc3RUb29sc1Jlc3BvbnNlEiAKBXRvb2xzGAEgAygLMhEuY2F0YWxvZy5Ub29sSW5mbyImCglNb2RlbEluZm8SCgoCaWQYASABKAkSDQoFbGFiZWwYAiABKAki6AEKDFN1YmFnZW50SW5mbxIMCgRuYW1lGAEgASgJEg0KBWxhYmVsGAIgASgJEg0KBW1vZGVsGAMgASgJEhoKEmRhZW1vbl9pbnN0YW5jZV9pZBgEIAEoCRIQCghhZ2VudF9pZBgFIAEoCRIQCghyZXBsYWNlcxgGIAMoCRINCgV0b29scxgHIAMoCRIeCgRraW5kGAggASgOMhAudHlwZXMuQWdlbnRLaW5kEg8KB2hhcm5lc3MYCSABKAkSEQoJdHJhbnNwb3J0GAogASgJEhkKEXBlcm1pc3Npb25fcG9saWN5GAsgASgJIicKCFRvb2xJbmZvEgwKBHBhdGgYASABKAkSDQoFbGFiZWwYAiABKAkywQIKDkNhdGFsb2dTZXJ2aWNlEkIKCUxpc3RUb29scxIZLmNhdGFsb2cuTGlzdFRvb2xzUmVxdWVzdBoaLmNhdGFsb2cuTGlzdFRvb2xzUmVzcG9uc2USRQoKTGlzdEFnZW50cxIaLmNhdGFsb2cuTGlzdEFnZW50c1JlcXVlc3QaGy5jYXRhbG9nLkxpc3RBZ2VudHNSZXNwb25zZRJUCg9MaXN0QWdlbnRNb2RlbHMSHy5jYXRhbG9nLkxpc3RBZ2VudE1vZGVsc1JlcXVlc3QaIC5jYXRhbG9nLkxpc3RBZ2VudE1vZGVsc1Jlc3BvbnNlEk4KDUxpc3RTdWJhZ2VudHMSHS5jYXRhbG9nLkxpc3RTdWJhZ2VudHNSZXF1ZXN0Gh4uY2F0YWxvZy5MaXN0U3ViYWdlbnRzUmVzcG9uc2ViBnByb3RvMw", [file_types]);
+  fileDesc("Cg1jYXRhbG9nLnByb3RvEgdjYXRhbG9nInAKCUFnZW50SW5mbxIKCgJpZBgBIAEoCRINCgVsYWJlbBgCIAEoCRIeCgRraW5kGAMgASgOMhAudHlwZXMuQWdlbnRLaW5kEg8KB2hhcm5lc3MYBCABKAkSFwoPcm91dGVfcHJvdmlkZXJzGAUgAygJIloKFkxpc3RBZ2VudE1vZGVsc1JlcXVlc3QSFQoNc2Vzc2lvbl90b2tlbhgBIAEoCRINCgVhZ2VudBgCIAEoCRIaChJkYWVtb25faW5zdGFuY2VfaWQYAyABKAkiVAoXTGlzdEFnZW50TW9kZWxzUmVzcG9uc2USIgoGbW9kZWxzGAEgAygLMhIuY2F0YWxvZy5Nb2RlbEluZm8SFQoNZGVmYXVsdF9tb2RlbBgCIAEoCSITChFMaXN0QWdlbnRzUmVxdWVzdCI4ChJMaXN0QWdlbnRzUmVzcG9uc2USIgoGYWdlbnRzGAEgAygLMhIuY2F0YWxvZy5BZ2VudEluZm8iFgoUTGlzdFN1YmFnZW50c1JlcXVlc3QiQQoVTGlzdFN1YmFnZW50c1Jlc3BvbnNlEigKCXN1YmFnZW50cxgBIAMoCzIVLmNhdGFsb2cuU3ViYWdlbnRJbmZvIhIKEExpc3RUb29sc1JlcXVlc3QiNQoRTGlzdFRvb2xzUmVzcG9uc2USIAoFdG9vbHMYASADKAsyES5jYXRhbG9nLlRvb2xJbmZvIiYKCU1vZGVsSW5mbxIKCgJpZBgBIAEoCRINCgVsYWJlbBgCIAEoCSLoAQoMU3ViYWdlbnRJbmZvEgwKBG5hbWUYASABKAkSDQoFbGFiZWwYAiABKAkSDQoFbW9kZWwYAyABKAkSGgoSZGFlbW9uX2luc3RhbmNlX2lkGAQgASgJEhAKCGFnZW50X2lkGAUgASgJEhAKCHJlcGxhY2VzGAYgAygJEg0KBXRvb2xzGAcgAygJEh4KBGtpbmQYCCABKA4yEC50eXBlcy5BZ2VudEtpbmQSDwoHaGFybmVzcxgJIAEoCRIRCgl0cmFuc3BvcnQYCiABKAkSGQoRcGVybWlzc2lvbl9wb2xpY3kYCyABKAkiJwoIVG9vbEluZm8SDAoEcGF0aBgBIAEoCRINCgVsYWJlbBgCIAEoCTLBAgoOQ2F0YWxvZ1NlcnZpY2USQgoJTGlzdFRvb2xzEhkuY2F0YWxvZy5MaXN0VG9vbHNSZXF1ZXN0GhouY2F0YWxvZy5MaXN0VG9vbHNSZXNwb25zZRJFCgpMaXN0QWdlbnRzEhouY2F0YWxvZy5MaXN0QWdlbnRzUmVxdWVzdBobLmNhdGFsb2cuTGlzdEFnZW50c1Jlc3BvbnNlElQKD0xpc3RBZ2VudE1vZGVscxIfLmNhdGFsb2cuTGlzdEFnZW50TW9kZWxzUmVxdWVzdBogLmNhdGFsb2cuTGlzdEFnZW50TW9kZWxzUmVzcG9uc2USTgoNTGlzdFN1YmFnZW50cxIdLmNhdGFsb2cuTGlzdFN1YmFnZW50c1JlcXVlc3QaHi5jYXRhbG9nLkxpc3RTdWJhZ2VudHNSZXNwb25zZWIGcHJvdG8z", [file_types]);
 
 /**
  * @generated from message catalog.AgentInfo
@@ -27,6 +27,33 @@ export type AgentInfo = Message<"catalog.AgentInfo"> & {
    * @generated from field: string label = 2;
    */
   label: string;
+
+  /**
+   * CODING_AGENT for an agent the daemon's coding-agent registry holds (a spec, built in or a
+   * `<tddyhome>/tools/<id>.yaml`); MODEL for a specialized agent definition or registry assistant
+   * (`#agent-tools 12/12`).
+   *
+   * @generated from field: types.AgentKind kind = 3;
+   */
+  kind: AgentKind;
+
+  /**
+   * For a CODING_AGENT row, the id of the spec it runs (`claude`, `codex-acp`, `opencode`). Empty
+   * for MODEL rows.
+   *
+   * @generated from field: string harness = 4;
+   */
+  harness: string;
+
+  /**
+   * The provider kinds a route can point this agent at, as its spec's `route.providers` spells
+   * them (`anthropic`, `openai_responses`, `openai_chat`, `meta`). Empty for an agent that always
+   * runs on its own vendor and for every MODEL row: a picker asks `ListProviderRoutes` only when
+   * this is non-empty.
+   *
+   * @generated from field: repeated string route_providers = 5;
+   */
+  routeProviders: string[];
 };
 
 /**

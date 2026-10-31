@@ -37,6 +37,9 @@ extensions:
       files: [CLAUDE.md, AGENTS.md]
       append_system_prompt: { flag: --append-system-prompt-file }
     hooks: { adapter: claude-settings-local }
+    # What a session of this agent offers (`#agent-tools 12/12`): the gates read these, never the
+    # agent's name. Unknown words are refused at load.
+    capabilities: [hooks, ask_user_question, split_host, project_home_main, requires_model, branch_name_required, operator_notify]
     models:
       default: opus
       curated: [opus, sonnet, haiku, claude-opus-5, claude-sonnet-5, claude-haiku-4-5-20251001]

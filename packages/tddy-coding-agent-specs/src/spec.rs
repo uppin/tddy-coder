@@ -1,11 +1,14 @@
 //! The `coding_agent` extension: its schema, its owner, and the validated view of one agent.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
 use tddy_actions::tool::{ArgvItem, ExtensionOwner, RunSection, ToolDef, Transport};
 use thiserror::Error;
+
+use crate::capability::Capability;
+use crate::route::{ProviderKind, RouteShape, RouteSupport};
 
 /// The `extensions:` key this crate owns.
 pub const CODING_AGENT_EXTENSION: &str = "coding_agent";
@@ -112,6 +115,32 @@ pub struct CodingAgentSection {
     /// native tools. `None` for an agent with no ACP mode.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub acp: Option<AcpSection>,
+    /// What a session of the agent offers (`#agent-tools 12/12`): every gate that used to compare
+    /// a session type with `"claude-cli"` reads this instead ([`CodingAgentSpec::has`]). A word that
+    /// is not a [`Capability`] is refused at load. Empty for an agent that offers none.
+    #[serde(default, skip_serializing_if = "BTreeSet::is_empty")]
+    pub capabilities: BTreeSet<Capability>,
+}
+
+impl CodingAgentSpec {
+    /// The capabilities the agent declares.
+    pub fn capabilities(&self) -> &BTreeSet<Capability> {
+        &self.agent.capabilities
+    }
+
+    /// Whether the agent declares `capability` — the question every agent gate asks.
+    pub fn has(&self, capability: Capability) -> bool {
+        // TODO(agent-registry): implement.
+        let _ = capability;
+        todo!("agent-registry: CodingAgentSpec::has")
+    }
+
+    /// What a provider route can do with the agent: `coding_agent.route.providers` and `.shape`, or
+    /// no providers when the spec has no `route` section — an agent that cannot be routed.
+    pub fn route_support(&self) -> RouteSupport {
+        // TODO(agent-registry): implement.
+        todo!("agent-registry: CodingAgentSpec::route_support")
+    }
 }
 
 /// `coding_agent.acp`: one ACP launch of the agent (`#agent-tools 11/12`).
@@ -260,6 +289,14 @@ pub struct RouteSlot {
     /// The variable the route's key is handed in (`TDDY_OPENCODE_PROVIDER_KEY`, `META_API_KEY`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub key_env: Option<String>,
+    /// The providers a route can point the agent at (`#agent-tools 12/12`); empty for an agent that
+    /// always runs on its own vendor. Read through [`CodingAgentSpec::route_support`].
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub providers: Vec<ProviderKind>,
+    /// How the route reaches the agent (`#agent-tools 12/12`): environment (the default),
+    /// arguments, or a configuration file.
+    #[serde(default)]
+    pub shape: RouteShape,
 }
 
 /// `coding_agent.resume`: the launch adapter (`tddy_agent_backend::adapters::LaunchAdapters`) that
