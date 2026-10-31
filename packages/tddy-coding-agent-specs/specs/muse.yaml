@@ -42,6 +42,9 @@ extensions:
       files: []
     # TODO(harness-clis): `hooks: unsupported` once `HooksSlot` takes the word (see opencode.yaml).
     hooks: { adapter: unsupported }
+    # What a session of this agent offers (`#agent-tools 12/12`): the gates read these, never the
+    # agent's name. Unknown words are refused at load.
+    capabilities: []
     models:
       default: muse-spark-1.3
       curated: [muse-spark-1.3, muse-wonder-1.0]
