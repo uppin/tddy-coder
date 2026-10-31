@@ -358,9 +358,7 @@ pub struct ListenConfig {
 /// (livekit/rust-sdks#1512), which exhausted a multi-homed daemon's file descriptor limit.
 /// An operator who needs established sessions to survive a network switch without a
 /// reconnect cycle opts into [`IceGathering::GatherContinually`] knowingly.
-#[derive(
-    Debug, Copy, Clone, PartialEq, Eq, Default, serde::Deserialize, serde::Serialize,
-)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq, Default, serde::Deserialize, serde::Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum IceGathering {
     #[default]
