@@ -55,7 +55,9 @@ pub fn a_caller_token() -> &'static str {
 
 /// A daemon serving one project: what a suite's `World` holds, beside the project's repo.
 pub struct HomeDaemon {
-    pub service: DaemonSessionHost,
+    /// Shared, with its sandbox RPC bridge installed as the daemon runtime installs it, so a
+    /// sandboxed main's jail can reach it (`#agent-tools 5/12`).
+    pub service: Arc<DaemonSessionHost>,
     pub manager: Arc<ClaudeCliSessionManager>,
     pub data: tempfile::TempDir,
     _stub: tempfile::TempDir,
@@ -72,8 +74,12 @@ pub fn a_home_daemon(repo: &Path, extra_row_yaml: &str, extra_config_yaml: &str)
     let claude = write_argv_and_env_script(stub.path());
     let (cfg, config) = write_daemon_config(claude.to_str().unwrap(), extra_config_yaml);
     let manager = Arc::new(ClaudeCliSessionManager::new());
-    let service =
-        minimal_service_with_manager(config, data.path().to_path_buf(), Arc::clone(&manager));
+    let service = Arc::new(minimal_service_with_manager(
+        config,
+        data.path().to_path_buf(),
+        Arc::clone(&manager),
+    ));
+    service.install_sandbox_rpc_bridge();
     HomeDaemon {
         service,
         manager,

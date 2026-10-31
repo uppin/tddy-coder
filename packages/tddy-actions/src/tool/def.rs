@@ -5,7 +5,9 @@ use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
-use super::{NetworkSection, RunSection, ToolError};
+use super::{
+    FileItem, HomeSection, NetworkSection, PolicySection, RunSection, SecretItem, ToolError,
+};
 
 /// The only schema version this build reads. A file naming another is refused at load.
 pub const TOOL_SCHEMA_VERSION: u32 = 1;
@@ -43,6 +45,19 @@ pub struct ToolDef {
     /// Absent means `egress: none` — a declared default, not a fallback.
     #[serde(default)]
     pub network: NetworkSection,
+    /// The `$HOME` the tool runs with in a jail (`#agent-tools 5/12`). Absent is a session home.
+    #[serde(default)]
+    pub home: HomeSection,
+    /// What is placed in the tool's home before it starts, and env overlays naming jail paths
+    /// (`#agent-tools 5/12`).
+    #[serde(default)]
+    pub files: Vec<FileItem>,
+    /// Values delivered to the tool's process out of band (`#agent-tools 5/12`).
+    #[serde(default)]
+    pub secrets: Vec<SecretItem>,
+    /// Non-file allows the tool's process needs in a jail (`#agent-tools 5/12`). Absent allows none.
+    #[serde(default)]
+    pub policy: PolicySection,
 }
 
 /// How a tool's binary is found on the host.

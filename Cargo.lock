@@ -13654,6 +13654,7 @@ dependencies = [
  "tddy-testing-commons",
  "tddy-workflow-recipes",
  "tempfile",
+ "thiserror 1.0.69",
 ]
 
 [[package]]
@@ -13672,6 +13673,7 @@ dependencies = [
  "portable-pty 0.9.0",
  "prost 0.13.5",
  "reqwest 0.12.28",
+ "serde",
  "serde_json",
  "tddy-agent-backend",
  "tddy-core",

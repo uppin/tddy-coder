@@ -41,3 +41,36 @@ extensions:
       default: opus
       curated: [opus, sonnet, haiku, claude-opus-5, claude-sonnet-5, claude-haiku-4-5-20251001]
     context_globs: [AGENTS.md, ".agents/**", CLAUDE.md, ".claude/**", .mcp.json]
+# --- Jail sections (`#agent-tools 5/12`): what a sandboxed launch lowers into the jail. ----------
+# A persistent home at <tddyhome>/homes/claude, mounted rw: refreshed OAuth tokens, history and
+# settings survive the session. Replaces <tddyhome>/sandbox-claude-home, migrated once in place.
+home: { kind: persistent, key: claude }
+files:
+  # Seeded once: the jail may since have refreshed its own token, which the host's must not clobber.
+  - { kind: seed-once, from_host: .claude/.credentials.json, to: .claude/.credentials.json }
+  # Claude's startup self-check looks for its own install under $HOME.
+  - { kind: mirror, from_host: .local/bin/claude, to: .local/bin/claude }
+  - { kind: mirror, from_host: .local/share/claude/versions, to: .local/share/claude/versions }
+  - { kind: overlay, env: CLAUDE_CODE_TMPDIR, value: "{tmp}" }
+  - { kind: overlay, env: CLAUDE_TMPDIR, value: "{tmp}" }
+secrets:
+  # Claude's own vendor login; a provider route brings its own credentials instead.
+  - env: CLAUDE_CODE_OAUTH_TOKEN
+    source: { kind: host-env, var: CLAUDE_CODE_OAUTH_TOKEN }
+    when: unrouted
+# An interactive Node/V8 CLI: JIT, fork, sysctl reads, and the system directories it shells into.
+policy:
+  jit: true
+  fork: true
+  sysctl_read: true
+  exec_paths: [/usr/bin, /usr/libexec, /bin, /sbin, /System, /Library, /Applications, /opt/homebrew, /opt/local]
+# The Anthropic API, telemetry and the OAuth login. A provider route's base-URL host is added by the
+# launcher; `oauth_inbound` admits the login's loopback callback (unrouted sessions only).
+#
+# TODO(claude-jail): uncomment when the jail launcher lands. Until `Egress` deserializes
+# (`#agent-tools 3/12`), a `network:` section here would make every load of this file — the
+# unsandboxed launch's included — panic, so it stays a comment at contract stage.
+# network:
+#   egress:
+#     hosts: [api.anthropic.com, statsig.anthropic.com, sentry.io, console.anthropic.com, claude.ai]
+#   oauth_inbound: true

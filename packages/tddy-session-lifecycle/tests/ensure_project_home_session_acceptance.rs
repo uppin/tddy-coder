@@ -356,6 +356,8 @@ async fn setting_up_main_as_a_tool_session_is_refused_and_starts_nothing() {
     assert_eq!(world.session_dirs(), 0);
 }
 
+// TODO(claude-jail): green removes this test — `a_project_home_main_set_up_in_a_sandbox_is_listed_with_session_role_project_home`
+// supersedes it once the sandboxed start carries `session_role`.
 #[tokio::test]
 async fn setting_up_main_in_a_sandbox_is_refused_and_starts_nothing() {
     // Given
@@ -374,6 +376,58 @@ async fn setting_up_main_in_a_sandbox_is_refused_and_starts_nothing() {
     // Then
     assert_eq!(refusal.code(), Code::InvalidArgument);
     assert_eq!(world.session_dirs(), 0);
+}
+
+/// A main set up in a sandbox runs in a Seatbelt jail, so this test is macOS-only; CI (ubuntu)
+/// never runs it. Its jail is terminated when the test ends, pass or fail.
+///
+/// Supersedes `setting_up_main_in_a_sandbox_is_refused_and_starts_nothing`: the jail launcher
+/// carries `session_role` (`#agent-tools 5/12`), so the refusal goes.
+#[cfg(target_os = "macos")]
+#[tokio::test]
+async fn a_project_home_main_set_up_in_a_sandbox_is_listed_with_session_role_project_home() {
+    // Given
+    let world = a_daemon_with_a_project();
+    let spec = StartSessionRequest {
+        sandbox: true,
+        ..a_claude_cli_spec()
+    };
+
+    // When
+    let set_up = world
+        .set_up_main(spec)
+        .await
+        .expect("setting main up in a sandbox succeeds");
+
+    // Then
+    let session = set_up.session.expect("main is returned");
+    let _jail = AJailGuard(world.metadata_of(&session.session_id).pid);
+    let listed = world.listed(&session.session_id).await;
+    assert_eq!(
+        (
+            set_up.outcome.as_str(),
+            listed.session_role.as_str(),
+            world
+                .metadata_of(&session.session_id)
+                .sandbox
+                .unwrap_or(false),
+        ),
+        ("started", PROJECT_HOME_ROLE, true)
+    );
+}
+
+/// Terminates a sandboxed session's jail when dropped, so a failing assertion leaves no runner
+/// behind.
+#[cfg(target_os = "macos")]
+struct AJailGuard(Option<u32>);
+
+#[cfg(target_os = "macos")]
+impl Drop for AJailGuard {
+    fn drop(&mut self) {
+        if let Some(pid) = self.0 {
+            tddy_daemon_sandbox::sandbox_session::terminate_sandbox_process(pid);
+        }
+    }
 }
 
 #[tokio::test]

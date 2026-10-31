@@ -32,8 +32,9 @@ pub(crate) fn refuse_what_main_cannot_honour(spec: &StartSessionRequest) -> Resu
             spec.session_role
         )));
     }
-    // TODO: the sandboxed claude-cli path drops `session_role`; carry it there, then allow a
-    // sandboxed main (docs/dev/todo/2026-10-24-sandboxed-main-needs-session-role.md).
+    // TODO(claude-jail): `launch_jailed` carries `session_role`; drop `sandbox` from the refused
+    // placements once the sandboxed claude-cli start calls it
+    // (docs/dev/todo/2026-10-24-sandboxed-main-needs-session-role.md).
     let placement = [
         (spec.sandbox, "sandbox"),
         (spec.sandboxed_codebase, "sandboxed_codebase"),

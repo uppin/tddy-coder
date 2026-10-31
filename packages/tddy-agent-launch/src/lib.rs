@@ -26,6 +26,7 @@ pub mod host_coding_agents;
 pub mod host_session_socket;
 pub mod inherited_host_sockets;
 pub mod jail_env_builders;
+pub mod jail_launch;
 pub mod jail_launch_steps;
 pub mod jail_relaunch;
 pub mod jail_session_files;
