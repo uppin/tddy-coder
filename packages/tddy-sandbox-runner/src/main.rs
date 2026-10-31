@@ -4,7 +4,9 @@ use std::path::PathBuf;
 use anyhow::Result;
 use clap::Parser;
 
-use tddy_sandbox_runner::{run_sandbox_runner, run_workspace_tool_runner, SandboxRunnerArgs};
+use tddy_sandbox_runner::{
+    run_exec_plan, run_sandbox_runner, run_workspace_tool_runner, SandboxRunnerArgs,
+};
 
 /// The runner's CLI: the arguments every mode shares, plus the one flag that selects the mode
 /// which hosts no agent.
@@ -23,6 +25,11 @@ struct Cli {
     /// that also runs the build reaches it through the host's CONNECT relay.
     #[arg(long)]
     workspace_tools: Option<PathBuf>,
+    /// Exec the tool plan in this JSON file (`tddy_sandbox_runner::ExecPlan`): a rendered argv, its
+    /// env and the files it reads, written by the daemon's jail launcher. The runner learns nothing
+    /// about which tool it is; no agent flag (`--claude-binary`, `--claude-arg`, …) is read.
+    #[arg(long, conflicts_with = "workspace_tools")]
+    exec_plan: Option<PathBuf>,
 }
 
 #[tokio::main]
@@ -30,9 +37,10 @@ async fn main() -> Result<()> {
     let _ = env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("warn"))
         .try_init();
     let cli = Cli::parse();
-    let result = match cli.workspace_tools {
-        Some(worktree) => run_workspace_tool_runner(cli.runner, worktree).await,
-        None => run_sandbox_runner(cli.runner).await,
+    let result = match (cli.workspace_tools, cli.exec_plan) {
+        (Some(worktree), _) => run_workspace_tool_runner(cli.runner, worktree).await,
+        (None, Some(plan)) => run_exec_plan(cli.runner, plan).await,
+        (None, None) => run_sandbox_runner(cli.runner).await,
     };
     if let Err(err) = result {
         eprintln!("Error: {err:#}");
