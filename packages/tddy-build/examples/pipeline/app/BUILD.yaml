@@ -1,11 +1,29 @@
 schema_version: 1
 targets:
+  # The stamp tool is built, then used: this target installs it, and `tools:bin` names its output
+  # as the tool's binary, so every action listing `tools:bin` builds this target first.
+  - id: "tools:stamp-build"
+    name: "Build the stamp tool"
+    actions:
+      - id: "install"
+        type: command
+        command: ["sh", "-c", "mkdir -p tools/out && cp tools/bin/stamp tools/out/stamp && chmod +x tools/out/stamp"]
+        inputs:
+          - include: ["tools/bin/stamp"]
+            root: "."
+        outputs:
+          - path: "tools/out/stamp"
+            kind: file
   - id: "tools:bin"
     name: "Tools"
     config:
       type: tool
-      bin_dir: tools/bin
-      commands: { stamp: stamp }
+      schema_version: 1
+      id: stamp
+      summary: stamps its stdin
+      binary:
+        command: stamp
+        target: { target: "tools:stamp-build", path: tools/out/stamp }
   - id: "app:build"
     name: "Build app"
     deps: ["lib:build"]

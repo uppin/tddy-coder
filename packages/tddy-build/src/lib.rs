@@ -8,8 +8,10 @@
 //! ([`executor`]) with a content-addressed action cache ([`cache`]). `BuildAction`
 //! and the cache types remain proto — the stable engine↔plugin contract.
 //!
-//! The crate is standalone — it has no `tddy-*` dependencies and no knowledge of any
-//! specific ecosystem target type (those live in plugin crates).
+//! The crate has no knowledge of any specific ecosystem target type (those live in plugin
+//! crates) and no sandbox dependency: hermetic actions run through the [`ActionSandbox`] port.
+// TODO(build-tools): the Cargo description and `docs/architecture.md` still say "no tddy-* deps";
+// corrected at wrap.
 
 pub mod proto {
     #![allow(clippy::all)]
@@ -17,6 +19,7 @@ pub mod proto {
 }
 
 pub mod action_convert;
+pub mod action_sandbox;
 pub mod builtin;
 pub mod cache;
 pub mod capabilities;
@@ -31,6 +34,7 @@ pub mod plugin;
 pub mod serde_helpers;
 pub mod service;
 
+pub use action_sandbox::ActionSandbox;
 pub use capabilities::{resolve_target_metadata, BuildMode, ResolvedMeta};
 pub use error::BuildError;
 pub use io::{outputs_to_decls, srcs_to_inputs, OutputSpec};

@@ -20,6 +20,8 @@ tokio-util = "0.7"
 tonic = { version = "0.12", default-features = false, features = ["transport"] }
 uuid = { version = "1", features = ["v4", "v7"] }
 tddy-actions = { path = "../tddy-actions" }
+# `build_action_sandbox` implements `tddy-build`'s `ActionSandbox` port (`#agent-tools 4/12`).
+tddy-build = { path = "../tddy-build" }
 tddy-core = { path = "../tddy-core" }
 # `AgentActivityHub` and `now_unix_ms` — the only two symbols this subsystem ever reached
 # `connection_service` for, and the whole reason it can live outside `tddy-daemon`.
