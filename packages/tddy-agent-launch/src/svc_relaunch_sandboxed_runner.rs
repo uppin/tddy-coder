@@ -200,6 +200,9 @@ impl LaunchSessions {
         // Claude-only: `relaunch_jail_env` is shared with the other harnesses' sandboxed resume.
         env.extend(self.config.claude_cli_renderer_env());
 
+        // TODO(claude-jail): render the same `claude` spec (with `resume` bound) and call
+        // `launch_jailed` instead of the runner's Claude flags above — this function stays as its
+        // thin caller.
         let handle = self
             .spawn_relaunched_runner(RelaunchedRunnerSpawn {
                 sandbox_root,

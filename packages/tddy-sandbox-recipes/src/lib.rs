@@ -7,6 +7,7 @@
 
 pub mod claude_cli;
 pub mod cursor_cli;
+pub mod homes;
 pub mod muse_cli;
 pub mod opencode_cli;
 pub mod plan;
@@ -37,5 +38,6 @@ pub use plan::{
     route_secrets, shell_interactive_policy, ProcessPlanRequest, RunnerPlanRequest, SandboxRecipe,
 };
 pub use tool_grants::{
-    lower_network, lower_tools, BinaryLibraries, HostBinaryLibraries, ToolGrants,
+    lower_files, lower_home, lower_network, lower_policy, lower_secrets, lower_tools,
+    BinaryLibraries, FileGrants, HomeGrant, HostBinaryLibraries, JailPaths, ToolGrants,
 };
