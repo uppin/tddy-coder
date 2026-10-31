@@ -33,6 +33,9 @@ impl std::fmt::Debug for ClaudeAcpBackend {
     }
 }
 
+// TODO(acp-agents): green builds the backend from `claude-acp.yaml`
+// (`tddy_coder::acp_from_spec::claude_acp_backend_from_spec`), so `bunx claude-agent-acp` stops
+// being hard-coded here.
 impl Default for ClaudeAcpBackend {
     fn default() -> Self {
         Self::unstarted(PathBuf::from("bunx"), vec!["claude-agent-acp".to_string()])

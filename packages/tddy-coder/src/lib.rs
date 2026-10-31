@@ -1,6 +1,7 @@
 //! tddy-coder library — shared by the tddy-coder (package `tddy-coder-cli`) and tddy-demo binaries.
 
 pub mod acp_agent;
+pub mod acp_from_spec;
 pub mod acp_host;
 pub mod build_executor;
 pub mod claude_from_spec;

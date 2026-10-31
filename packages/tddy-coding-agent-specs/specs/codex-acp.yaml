@@ -1,0 +1,60 @@
+# OpenAI Codex over the Agent Client Protocol — Zed's `codex-acp`, behind a `codex-acp` coding
+# subagent and the `codex-acp` workflow backend (`tddy-coder --agent codex-acp`)
+# (`#agent-tools 11/12`).
+#
+# `codex-acp` ships beside `codex`: its binary is `codex-acp` in the directory of the resolved
+# `codex` dep (`binary.sibling_of`), so a `<tddyhome>/tools/codex.yaml` override that moves `codex`
+# moves `codex-acp` with it. `TDDY_CODEX_ACP_CLI` still names it outright. A `codex-acp` absent
+# beside `codex` is refused, naming both — the `PATH` is not searched.
+#
+# The command renders what the launcher and `CodexAcpBackend` build by hand:
+#   codex-acp [ROUTE ARGS]
+# The route's arguments take `-c key=value` overrides; its `-m <model>` reaches `codex-acp` as
+# `-c model="<model>"` (`codex_acp_route_args`) until route compatibility becomes spec data
+# (`#agent-tools 12/12`). Its key travels in the environment.
+#
+# An auth-like `session/new` error runs `codex login` (the `codex` dep's binary) and retries once:
+# the `codex-acp-login` hooks adapter.
+#
+# Codex offers sandbox modes only, no tool withdrawal: `tool_deny` is `unsupported`, so a managed
+# session refuses `codex-acp` by name.
+#
+# Override whole with `<tddyhome>/tools/codex-acp.yaml`.
+#
+# No `network:` section: ACP agents are not jailed, and `Egress` does not deserialize yet
+# (`#agent-tools 3/12`).
+schema_version: 1
+id: codex-acp
+summary: OpenAI Codex over ACP (codex-acp) — a coding subagent and workflow backend
+binary:
+  command: codex-acp
+  env: TDDY_CODEX_ACP_CLI
+  sibling_of: codex
+deps: [codex, tddy-tools]
+reads: []
+# ACP agents launch from `coding_agent.acp.command`; `run:` names the transport.
+run:
+  transport: acp
+  argv:
+    - "{binary}"
+  env: {}
+extensions:
+  coding_agent:
+    mcp: { kind: acp-session }
+    tool_allow: unsupported
+    tool_deny: unsupported
+    permission_prompt: unsupported
+    instructions:
+      files: []
+    hooks: { adapter: unsupported }
+    models:
+      default: gpt-5
+      curated: [gpt-5]
+    context_globs: [AGENTS.md, ".agents/**", ".codex/**"]
+    placements: [host]
+    acp:
+      command:
+        - "{binary}"
+        - { splice: route_args }
+      env: {}
+      hooks_adapter: codex-acp-login

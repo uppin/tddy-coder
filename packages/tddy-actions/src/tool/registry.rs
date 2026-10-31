@@ -111,6 +111,9 @@ impl ToolRegistry {
         ids: &[&str],
         host: &dyn ToolHost,
     ) -> Result<Vec<ResolvedTool>, ToolError> {
+        // TODO(acp-agents): a `binary.sibling_of` resolves, after `env`, through `resolve_sibling`
+        // beside that dep's resolved binary — deps resolve first, so it is already in the closure.
+        // Load refuses a `sibling_of` that is not one of the tool's `deps`.
         let mut visited = BTreeSet::new();
         let mut closure = Vec::new();
         for id in ids {
