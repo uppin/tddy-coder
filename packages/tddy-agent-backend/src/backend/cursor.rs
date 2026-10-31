@@ -5,6 +5,7 @@
 //! Based on Baker CLI's executeWithCursor.
 
 use super::{InvokeRequest, InvokeResponse};
+use crate::adapters::HeadlessRenderer;
 use crate::error::BackendError;
 use crate::stream::cursor;
 use std::io::Write;
@@ -19,6 +20,12 @@ type ProgressCallback = Option<Arc<Mutex<Box<dyn FnMut(&crate::stream::ProgressE
 pub struct CursorBackend {
     binary_path: PathBuf,
     progress_callback: ProgressCallback,
+    /// The agent's declaration its invocation is rendered from (`with_headless_renderer`,
+    /// `#agent-tools 9/12`); `None` builds the argv by hand ([`build_cursor_cli_args`]).
+    ///
+    /// TODO(headless-others): green makes the spec the only path — `create_backend("cursor")`
+    /// passes one — and deletes `build_cursor_cli_args` and `register_cursor_mcp_config`.
+    headless: Option<Arc<dyn HeadlessRenderer>>,
 }
 
 impl std::fmt::Debug for CursorBackend {
@@ -33,6 +40,7 @@ impl std::fmt::Debug for CursorBackend {
                     "None"
                 },
             )
+            .field("headless", &self.headless)
             .finish()
     }
 }
@@ -42,6 +50,7 @@ impl Clone for CursorBackend {
         Self {
             binary_path: self.binary_path.clone(),
             progress_callback: self.progress_callback.clone(),
+            headless: self.headless.clone(),
         }
     }
 }
@@ -61,6 +70,7 @@ impl CursorBackend {
         Self {
             binary_path: PathBuf::from(Self::DEFAULT_CLI_BINARY),
             progress_callback: None,
+            headless: None,
         }
     }
 
@@ -70,6 +80,7 @@ impl CursorBackend {
         Self {
             binary_path: path,
             progress_callback: None,
+            headless: None,
         }
     }
 
@@ -81,6 +92,32 @@ impl CursorBackend {
     {
         self.progress_callback = Some(Arc::new(Mutex::new(Box::new(f))));
         self
+    }
+
+    /// Render every invocation from `renderer` — `cursor.yaml`'s `coding_agent.headless` — instead
+    /// of building the argv by hand (`#agent-tools 9/12`).
+    #[must_use]
+    pub fn with_headless_renderer(mut self, renderer: Arc<dyn HeadlessRenderer>) -> Self {
+        self.headless = Some(renderer);
+        self
+    }
+
+    /// One invocation rendered from `renderer`: the system prompt merged into the prompt as today,
+    /// the goal's plan intent bound as the param `plan` and `force` always bound (the workflow
+    /// backend writes), the session onto `session_id`/`resume`, the working directory as `workdir`,
+    /// and [`HeadlessRenderer::tool_server`] onto the MCP slot — the headless `workdir` slot that
+    /// writes `<working_dir>/.cursor/mcp.json`; the rendered files written, the program spawned
+    /// with today's environment, and its stdout read through the adapter it names
+    /// (`cursor-stream`).
+    fn invoke_from_spec(
+        &self,
+        request: InvokeRequest,
+        renderer: &Arc<dyn HeadlessRenderer>,
+    ) -> Result<InvokeResponse, BackendError> {
+        // TODO(headless-others): implement — build a `HeadlessTurn` from `request`, `render` it,
+        // then spawn and read as `invoke_sync` does, through `HeadlessInvocation::adapter`.
+        let _ = (request, renderer);
+        todo!("headless-others: CursorBackend::invoke_from_spec")
     }
 }
 
@@ -228,6 +265,9 @@ fn register_cursor_mcp_config(base_dir: &std::path::Path) -> Result<(), BackendE
 
 impl CursorBackend {
     fn invoke_sync(&self, request: InvokeRequest) -> Result<InvokeResponse, BackendError> {
+        if let Some(renderer) = &self.headless {
+            return self.invoke_from_spec(request, renderer);
+        }
         // Cursor CLI has no --system-prompt; prepend system content to user prompt.
         let system_content: Option<String> = if let Some(ref path) = request.system_prompt_path {
             Some(std::fs::read_to_string(path).map_err(|e| {

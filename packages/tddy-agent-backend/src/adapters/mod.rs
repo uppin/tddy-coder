@@ -21,9 +21,13 @@
 //! naming the specs crate.
 
 mod claude_stream_json;
+mod codex_jsonl;
+mod cursor_models;
+mod cursor_stream;
 pub mod headless;
 pub mod launch;
 mod opencode_models;
+mod oz_ndjson;
 mod warp_resume_token;
 
 use std::collections::BTreeMap;
@@ -39,7 +43,13 @@ use crate::stream::{ProgressEvent, StreamResult};
 /// outside this crate.
 pub use crate::error::BackendError as AdapterError;
 pub use claude_stream_json::ClaudeStreamJson;
+// `#agent-tools 9/12`: the stream adapters of Cursor's, Codex's and Oz's headless runs, and Cursor's
+// model listing.
+pub use codex_jsonl::{CodexJsonl, CODEX_JSONL};
+pub use cursor_models::{CursorModels, CURSOR_MODELS};
+pub use cursor_stream::{CursorStream, CURSOR_STREAM};
 pub use headless::{HeadlessInvocation, HeadlessMcpServer, HeadlessRenderer, HeadlessTurn};
+pub use oz_ndjson::{OzNdjson, OZ_NDJSON};
 // `#agent-tools 8/12`: what a PTY launch reads its agent's own output through — a model listing,
 // a resume token. Not stream adapters, so a registry of their own ([`launch::LaunchAdapters`]).
 pub use launch::{LaunchAdapters, ModelsAdapter, ResumeTokenAdapter};
@@ -103,6 +113,8 @@ impl AdapterRegistry {
     /// `#agent-tools 9/12` adds Cursor's, Codex's and Oz's.
     pub fn builtin() -> Self {
         // TODO(claude-headless): implement — register `ClaudeStreamJson` under its `name()`.
+        // TODO(headless-others): and `CursorStream`, `CodexJsonl` and `OzNdjson` — which widens
+        // `the_builtin_registry_lists_claude_stream_json` below at #798's green.
         todo!("claude-headless: AdapterRegistry::builtin")
     }
 

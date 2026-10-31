@@ -62,6 +62,8 @@ impl LaunchAdapters {
     pub fn builtin() -> Self {
         // TODO(harness-clis): implement — register `OpenCodeModels` and `WarpResumeToken` under
         // their `name()`.
+        // TODO(headless-others): and `CursorModels` (`cursor-models`) — which widens
+        // `the_builtin_launch_adapters_are_opencode_models_and_warp_resume_token` at #798's green.
         todo!("harness-clis: LaunchAdapters::builtin")
     }
 

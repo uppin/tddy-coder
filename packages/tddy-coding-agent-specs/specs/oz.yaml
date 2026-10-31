@@ -1,0 +1,63 @@
+# Warp's headless runner (`oz`) — the headless `oz` coding subagent (`#agent-tools 9/12`). Distinct
+# from `warp.yaml`, the interactive `warp` TUI behind `warp-cli` sessions: another binary, and an
+# MCP registration that the TUI does not take.
+#
+# The headless argv renders byte-for-byte what `headless_driver/argv.rs::oz()` built by hand:
+#   oz agent run -p PROMPT --output-format ndjson -C DIR [--conversation ID] [--model M]
+#      [--mcp PATH] [--profile P]
+# A later turn's `--conversation` is the id the run's `conversation_started` event named. `profile`
+# is the turn's param: the agent profile the run executes under, which decides its permissions,
+# since a headless `oz` run never asks.
+#
+# The tool server is registered through `--mcp <path>`, a servers-by-name file written owner-only
+# under the conversation's directory. The output is read by the `oz-ndjson` adapter.
+#
+# Oz cannot withdraw its native tools: the tool slots are `unsupported`.
+#
+# Override whole with `<tddyhome>/tools/oz.yaml`. `TDDY_OZ_CLI` names the binary; without it, `oz`
+# runs from `PATH`, as it does today.
+schema_version: 1
+id: oz
+summary: Warp's headless runner (oz) — the headless oz coding subagent
+binary:
+  command: oz
+  env: TDDY_OZ_CLI
+deps: [tddy-tools]
+reads: []
+run:
+  transport: pty
+  argv:
+    - "{binary}"
+  env: {}
+extensions:
+  coding_agent:
+    mcp: { kind: argv, flag: --mcp }
+    tool_allow: unsupported
+    tool_deny: unsupported
+    permission_prompt: unsupported
+    instructions:
+      files: []
+    hooks: { adapter: unsupported }
+    models:
+      default: ""
+      curated: []
+    context_globs: [AGENTS.md, ".agents/**", WARP.md]
+    headless:
+      argv:
+        - "{binary}"
+        - agent
+        - run
+        - -p
+        - "{prompt}"
+        - --output-format
+        - ndjson
+        - -C
+        - "{workdir}"
+        - { if: resume, then: [--conversation, "{session_id}"] }
+        - { if: model, then: [--model, "{model}"] }
+        - { splice: slots }
+        - { if: profile, then: [--profile, "{profile}"] }
+      env: {}
+      adapter: oz-ndjson
+    # A headless CLI runs only as the daemon's own user, on its host.
+    placements: [host]

@@ -248,6 +248,21 @@ pub enum McpSlot {
     /// today's launch). A launch that passes a tool server is refused rather than dropped, as an
     /// `unsupported` tool slot is.
     Unsupported,
+    /// The registration as argv config overrides, with no file (`#agent-tools 9/12`: Codex's
+    /// `-c mcp_servers.<name>.command=…`). Each field is `flag <key_prefix>.<name>.<field>=<toml>`
+    /// for `command`, `args` and `env_vars`. The server's environment is **named** (`env_vars`),
+    /// never valued: the agent forwards those variables from its own environment, so the
+    /// credential stays off the argv another user's `ps` reads.
+    Inline { flag: String, key_prefix: String },
+    /// A file passed by `flag <path>` in the servers-by-name shape `{"<name>": {command, args,
+    /// env}}` (`#agent-tools 9/12`: Oz's `--mcp <path>`), written owner-only under the launch's
+    /// scratch directory as [`crate::slots::headless_mcp::ARGV_MCP_FILE`].
+    Argv { flag: String },
+    /// A file in `format` written at `path` under the agent's working directory, passed by no flag
+    /// (`#agent-tools 9/12`: a headless Cursor reads its worktree's `.cursor/mcp.json`). The file
+    /// is the conversation's, so it is listed in `RenderedSlots::written` and removed when the
+    /// conversation closes or the start-up sweep finds it.
+    Workdir { path: PathBuf, format: McpFormat },
 }
 
 /// The shape of an MCP registration file.

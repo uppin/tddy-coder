@@ -5,6 +5,7 @@
 //! written here: the launcher writes [`RenderedSlots::files`] before it spawns the agent.
 
 pub mod cursor;
+pub mod headless_mcp;
 pub mod hooks;
 pub mod instructions;
 pub mod mcp;
@@ -64,6 +65,14 @@ pub struct SlotInputs<'a> {
 pub struct RenderedSlots {
     pub argv_extra: Vec<String>,
     pub files: Vec<(PathBuf, Vec<u8>)>,
+    /// Every file the MCP slot writes for this launch, in [`Self::files`]' order
+    /// (`#agent-tools 9/12`): the registrations that belong to the launch's conversation and must
+    /// go with it. A launcher records them in `headless/<conversation>/written-files`
+    /// (`tddy_coding_subagent::launcher::record_written_files`) at plan time, so the close and the
+    /// start-up sweep remove what is recorded — a worktree's `.cursor/mcp.json` included. Edits to
+    /// existing files (an instruction file's preamble) are not listed: they are not the
+    /// conversation's to remove.
+    pub written: Vec<PathBuf>,
 }
 
 /// Why a slot could not be rendered.
@@ -106,6 +115,10 @@ pub fn render(spec: &CodingAgentSpec, inputs: &SlotInputs<'_>) -> Result<Rendere
     // `HooksAdapter::try_render`, so `cursor-hooks-json`'s refusal without a socket surfaces here.
     // TODO(harness-clis): and refuse an `McpSlot::Unsupported` given a tool server
     // (`SlotError::SlotUnsupported { slot: "mcp" }`).
+    // TODO(headless-others): and the headless MCP kinds — `McpSlot::Inline`
+    // (`headless_mcp::render_inline_mcp`), `McpSlot::Argv` (`headless_mcp::render_argv_mcp`) and
+    // `McpSlot::Workdir` (`headless_mcp::render_workdir_mcp`) — and fill `RenderedSlots::written`
+    // with every file the MCP slot writes (`headless_mcp::mcp_written_paths`).
     let _ = (spec, inputs);
     todo!("claude-host: slots::render")
 }
@@ -229,7 +242,11 @@ mod tests {
                     "--mcp-config".to_string(),
                     config_path.to_string_lossy().into_owned(),
                 ],
-                files: vec![(config_path, expected_config.to_string().into_bytes())],
+                files: vec![(
+                    config_path.clone(),
+                    expected_config.to_string().into_bytes()
+                )],
+                written: vec![config_path],
             })
         );
     }
@@ -266,6 +283,7 @@ mod tests {
                     "mcp__tddy-tools__approval_prompt",
                 ]),
                 files: Vec::new(),
+                written: Vec::new(),
             })
         );
     }
@@ -321,6 +339,7 @@ mod tests {
                     workdir.path().join("CLAUDE.md"),
                     format!("{PREAMBLE}\n\nOriginal instructions.\n").into_bytes(),
                 )],
+                written: Vec::new(),
             })
         );
     }

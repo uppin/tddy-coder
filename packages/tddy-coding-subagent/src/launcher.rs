@@ -45,6 +45,43 @@ pub fn claim_headless_conversation_dir(
     std::fs::write(dir.join(HEADLESS_OWNER_FILE), daemon_instance_id)
 }
 
+/// The file in a headless conversation's directory listing, one absolute path per line, every file
+/// its plan wrote **outside** that directory — a worktree's `.cursor/mcp.json` — so the close and
+/// the start-up sweep remove those too (`#agent-tools 9/12`;
+/// `docs/dev/todo/2026-10-25-cursor-project-mcp-config-outlives-its-conversation.md`).
+pub const HEADLESS_WRITTEN_FILES: &str = "written-files";
+
+/// Record `files` — a plan's `RenderedSlots::written` — in `dir`'s [`HEADLESS_WRITTEN_FILES`],
+/// after what an earlier plan of the conversation recorded. Written before the files themselves,
+/// so a plan that fails part-way leaves nothing the record does not name.
+pub fn record_written_files(dir: &Path, files: &[PathBuf]) -> std::io::Result<()> {
+    // TODO(headless-others): implement.
+    let _ = (dir, files);
+    todo!("headless-others: record_written_files")
+}
+
+/// Remove every file `dir`'s [`HEADLESS_WRITTEN_FILES`] records. A recorded file already gone is
+/// not an error; a missing record removes nothing. Returns the files removed, in recorded order.
+pub fn remove_recorded_files(dir: &Path) -> std::io::Result<Vec<PathBuf>> {
+    // TODO(headless-others): implement.
+    let _ = dir;
+    todo!("headless-others: remove_recorded_files")
+}
+
+/// Close headless conversation `conversation_id` under `tddy_data_dir`: the files its record names
+/// ([`remove_recorded_files`]), then its directory. What `AgentRoster::conversation_closed` does
+/// for a closed conversation. A conversation with no directory is not an error. Returns the
+/// recorded files removed.
+pub fn close_headless_conversation(
+    tddy_data_dir: &Path,
+    conversation_id: &str,
+) -> std::io::Result<Vec<PathBuf>> {
+    // TODO(headless-others): implement — and `AgentRoster::conversation_closed`
+    // (`tddy-session-agents` `coding_agent.rs`) calls it in place of its bare `remove_dir_all`.
+    let _ = (tddy_data_dir, conversation_id);
+    todo!("headless-others: close_headless_conversation")
+}
+
 /// Remove the files every headless conversation of the daemon `daemon_instance_id` left under
 /// `<tddy_data_dir>/headless/` — what that daemon left behind when it stopped without closing them.
 /// Called once at start-up, when the daemon holds no conversation (its conversation table is in
@@ -71,6 +108,8 @@ pub fn sweep_headless_dirs(
         if owner.trim() != daemon_instance_id {
             continue;
         }
+        // TODO(headless-others): `remove_recorded_files(&dir)?` first, so a worktree file the
+        // conversation's plan wrote (`.cursor/mcp.json`) goes with it.
         std::fs::remove_dir_all(&dir)?;
         if let Some(conversation) = dir.file_name().and_then(|name| name.to_str()) {
             swept.push(conversation.to_string());

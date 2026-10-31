@@ -100,6 +100,13 @@ pub struct HeadlessCommand {
     ///
     /// TODO(claude-headless): green makes this the Claude arm's only path and deletes
     /// `argv::claude()`; Cursor, Codex and Oz follow in `#agent-tools 9/12`.
+    ///
+    /// TODO(headless-others): green makes it every arm's only path — `cursor.yaml`, `codex.yaml`
+    /// and `oz.yaml` — and deletes `argv.rs` (`cursor()`, `codex()`, `oz()`,
+    /// `codex_mcp_server_overrides`). A rendered turn binds [`Self::profile`] as the param
+    /// `profile` (Oz's `--profile`) and nothing as `force`, `plan` or `sandbox_mode`, so Cursor runs
+    /// read-only and Codex `workspace-write`, as by hand. `HeadlessHarness` stays: the adapters'
+    /// `turn_format` returns it, and `#agent-tools 12/12` collapses it.
     pub renderer: Option<Arc<dyn HeadlessRenderer>>,
     /// With a [`Self::renderer`]: where each turn's rendered registration files (the MCP config)
     /// are written — the conversation's own directory, never the worktree, since the registration
