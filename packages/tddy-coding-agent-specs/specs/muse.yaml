@@ -1,0 +1,68 @@
+# Muse Code (Meta's `muse` CLI) — the interactive coding agent behind `muse-cli` sessions
+# (`#agent-tools 8/12`).
+#
+# The argv renders byte-for-byte what `muse_argv` (the `CliHarness` descriptor) built by hand:
+#   muse [--model M] [PROMPT]     a start
+#   muse --continue               a resume: the worktree's session, which is this one
+#
+# TODO(muse-cli-facts): unconfirmed against a real `muse`, as are `--model`, `--continue`,
+# `META_API_KEY` and the `.muse/` tree — see docs/dev/todo/2026-10-22-muse-code-cli-facts-unconfirmed.md.
+#
+# Override whole with `<tddyhome>/tools/muse.yaml`. `TDDY_MUSE_CLI` (and, until `#agent-tools 12/12`,
+# daemon.yaml `cli_harnesses.muse-cli.binary_path`) still names the binary.
+#
+# Muse takes no allow-list, deny-list or permission-prompt flag, no MCP registration and no lifecycle
+# hooks on today's launch: those slots are `unsupported`.
+schema_version: 1
+id: muse
+summary: Muse Code CLI — the interactive coding agent behind muse-cli sessions
+binary:
+  command: muse
+  env: TDDY_MUSE_CLI
+deps: [tddy-tools]
+reads: []
+run:
+  transport: pty
+  argv:
+    - "{binary}"
+    - if: resume
+      then: ["--continue"]
+      else:
+        - { if: model, then: ["--model", "{model}"] }
+        - { if: prompt, then: ["{prompt}"] }
+    - { splice: slots }
+  env: {}
+extensions:
+  coding_agent:
+    mcp: { kind: unsupported }
+    tool_allow: unsupported
+    tool_deny: unsupported
+    permission_prompt: unsupported
+    instructions:
+      files: []
+    # TODO(harness-clis): `hooks: unsupported` once `HooksSlot` takes the word (see opencode.yaml).
+    hooks: { adapter: unsupported }
+    models:
+      default: muse-spark-1.3
+      curated: [muse-spark-1.3, muse-wonder-1.0]
+    context_globs: [AGENTS.md, ".agents/**", ".muse/**"]
+    # A jailed start without a provider route is refused: the jail holds no Meta login. The route
+    # is environment only — no configuration file — and hands its key in `META_API_KEY`.
+    route:
+      required_in_jail: true
+      key_env: META_API_KEY
+    placements: [host, jail]
+# --- Jail sections: what a sandboxed launch lowers into the jail. ---------------------------------
+home: { kind: session }
+# A native binary: Claude Code's allows without JIT (`muse_interactive_policy`).
+policy:
+  jit: false
+  fork: true
+  sysctl_read: true
+  exec_paths: [/usr/bin, /usr/libexec, /bin, /sbin, /System, /Library, /Applications, /opt/homebrew, /opt/local]
+# Muse reaches only its route's base URL, which the launcher adds.
+#
+# TODO(harness-clis): uncomment when the jail launcher lands (see opencode.yaml).
+# network:
+#   egress:
+#     hosts: []

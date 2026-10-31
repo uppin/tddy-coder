@@ -30,6 +30,7 @@ pub struct CliRouteLaunch {
     pub args: Vec<String>,
 }
 
+// TODO(harness-clis): `route_config_env` is the spec's `coding_agent.route.config_env`.
 /// The model a launch of `harness` names on its own command line. A config-file route (OpenCode's)
 /// names the model itself, on the provider it generates, so a `routed` launch leaves it blank; an
 /// environment-only route (Muse Code's) hands over the key and nothing else, so the session keeps

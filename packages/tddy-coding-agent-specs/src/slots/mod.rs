@@ -86,6 +86,10 @@ pub enum SlotError {
         "hooks adapter {adapter} needs the daemon's agent-tool socket and the launch gave none"
     )]
     NoDaemonSocket { adapter: String },
+    /// The launch passed hook params to an agent whose spec declares no hooks
+    /// (`hooks: { adapter: unsupported }`, `#agent-tools 8/12`).
+    #[error("the agent's spec declares no lifecycle hooks, and the launch passed hook params")]
+    HooksUnsupported,
     /// A placed registration path names `{home}` and the launch bound no home.
     #[error("{path} names {{home}} and the launch bound no home")]
     UnboundHome { path: String },
@@ -95,6 +99,8 @@ pub enum SlotError {
 /// flag, the allow flags, the deny flags, the permission-prompt flag, the MCP flag — the order the
 /// hand-built launch used.
 pub fn render(spec: &CodingAgentSpec, inputs: &SlotInputs<'_>) -> Result<RenderedSlots, SlotError> {
+    // TODO(harness-clis): and refuse an `McpSlot::Unsupported` given a tool server
+    // (`SlotError::SlotUnsupported { slot: "mcp" }`).
     let agent = &spec.agent;
     let mut rendered = RenderedSlots::default();
 
@@ -223,9 +229,14 @@ mod tests {
                 models: ModelsSection {
                     default: "opus".to_string(),
                     curated: vec!["opus".to_string()],
+                    list_command: None,
+                    adapter: None,
                 },
                 context_globs: vec!["CLAUDE.md".to_string()],
                 headless: None,
+                route: None,
+                resume: None,
+                placements: crate::Placement::anywhere(),
             },
         }
     }

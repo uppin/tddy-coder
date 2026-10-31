@@ -1,0 +1,79 @@
+# OpenCode's TUI — the interactive coding agent behind `opencode-cli` sessions (`#agent-tools 8/12`).
+#
+# The argv renders byte-for-byte what `opencode_cli_argv` (the `CliHarness` descriptor) built by hand:
+#   opencode [--model M] [--prompt PROMPT]     a start
+#   opencode --continue                        a resume: the worktree's last session, which is this
+#                                              one (one session per worktree)
+# A routed launch appends its route's own arguments (`--model tddy-route/<model>`) and points
+# `OPENCODE_CONFIG` at the route's generated configuration file.
+#
+# Override whole with `<tddyhome>/tools/opencode.yaml`. `TDDY_OPENCODE_CLI` (and, until
+# `#agent-tools 12/12`, daemon.yaml `cli_harnesses.opencode-cli.binary_path`) still names the binary.
+#
+# OpenCode takes no allow-list, deny-list or permission-prompt flag, no MCP registration and no
+# lifecycle hooks on today's launch: those slots are `unsupported`, and a launch that fills one is
+# refused rather than dropped.
+schema_version: 1
+id: opencode
+summary: OpenCode TUI — the interactive coding agent behind opencode-cli sessions
+binary:
+  command: opencode
+  env: TDDY_OPENCODE_CLI
+deps: [tddy-tools]
+reads: []
+run:
+  transport: pty
+  argv:
+    - "{binary}"
+    - if: resume
+      then: ["--continue"]
+      else:
+        - { if: model, then: ["--model", "{model}"] }
+        - { if: prompt, then: ["--prompt", "{prompt}"] }
+    - { splice: slots }
+  env: {}
+extensions:
+  coding_agent:
+    mcp: { kind: unsupported }
+    tool_allow: unsupported
+    tool_deny: unsupported
+    permission_prompt: unsupported
+    instructions:
+      files: []
+    # TODO(harness-clis): `hooks: unsupported` once `HooksSlot` takes the word as `ToolSlot` does
+    # (a `#agent-tools 2/12` type change); until then the `unsupported` adapter refuses a launch
+    # that passes hook params.
+    hooks: { adapter: unsupported }
+    models:
+      # OpenCode lists its own `provider/model` ids, one per line; the first is the default.
+      default: ""
+      curated: []
+      list_command: ["{binary}", models]
+      adapter: opencode-models
+    context_globs: [AGENTS.md, ".agents/**", opencode.json, ".opencode/**"]
+    # A jail's `$HOME` is the session's own scratch, so the person's own OpenCode setup is not in
+    # it: a jailed start without a provider route is refused. The route's configuration file is
+    # written owner-only under `<scratch>/provider-route`, `OPENCODE_CONFIG` names it, and the key
+    # it reads is handed in `TDDY_OPENCODE_PROVIDER_KEY`.
+    route:
+      required_in_jail: true
+      config_env: OPENCODE_CONFIG
+      files_dir: provider-route
+      key_env: TDDY_OPENCODE_PROVIDER_KEY
+    placements: [host, jail]
+# --- Jail sections: what a sandboxed launch lowers into the jail. ---------------------------------
+# A per-session home: the jail holds no credentials of its own, its provider route brings them.
+home: { kind: session }
+# A Node/Bun TUI: the same allows as Claude Code (`opencode_interactive_policy`).
+policy:
+  jit: true
+  fork: true
+  sysctl_read: true
+  exec_paths: [/usr/bin, /usr/libexec, /bin, /sbin, /System, /Library, /Applications, /opt/homebrew, /opt/local]
+# OpenCode reaches only its route's base URL, which the launcher adds; it declares no host of its own.
+#
+# TODO(harness-clis): uncomment when the jail launcher lands. Until `Egress` deserializes
+# (`#agent-tools 3/12`), a `network:` section here would make every load of this file panic.
+# network:
+#   egress:
+#     hosts: []

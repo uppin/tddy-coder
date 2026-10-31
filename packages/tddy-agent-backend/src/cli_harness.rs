@@ -10,6 +10,12 @@
 //! match. A descriptor may live in a module of its own ([`crate::cli_harness_muse`],
 //! [`crate::cli_harness_warp`]).
 
+// TODO(harness-clis): delete this module — every descriptor field has a home in a
+// `tddy-coding-agent-specs/specs/*.yaml` (`#agent-tools 8/12`): the argv is `run.argv`, the binary
+// `binary`, `route_config_env` `coding_agent.route.config_env`, `models` `coding_agent.models`
+// (`opencode-models` for the listed kind), the session type `spec_for_session_type`. Deleting a
+// file needs the developer's approval (CLAUDE.md § ASK).
+
 use crate::backend::{claude_cli_models, cursor_cli_models, BackendModel, BackendModels};
 use crate::cli_harness_muse::MUSE_CLI;
 use crate::cli_harness_warp::WARP_CLI;
