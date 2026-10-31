@@ -11,6 +11,10 @@
 //! v0.2026.10.21); the exit banner's exact wording is still unobserved
 //! (docs/dev/todo/2026-10-24-warp-cli-facts-unconfirmed.md).
 
+// TODO(harness-clis): delete this module — the descriptor is `specs/warp.yaml`, and
+// `resume_token_from_output` is the `warp-resume-token` adapter
+// (`crate::adapters::WarpResumeToken`).
+
 use crate::backend::BackendModels;
 use crate::cli_harness::{CliHarness, CliLaunch, CliModelSource};
 use crate::provider_route::Harness;

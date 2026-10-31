@@ -25,6 +25,9 @@ impl ExtensionOwner for CodingAgentExtension {
         // TODO(claude-host): implement — deserialize a `CodingAgentSection`, resolve the hooks adapter.
         // TODO(claude-headless): and refuse a `headless` section whose adapter is unregistered —
         // `crate::headless::validate_headless(section, &AdapterRegistry::builtin())`.
+        // TODO(harness-clis): and refuse a `models.adapter` / `resume.adapter` that
+        // `tddy_agent_backend::adapters::LaunchAdapters::builtin()` does not hold, a `models` with
+        // one of `list_command`/`adapter` but not the other, and an empty `placements`.
         let _ = (tool_id, section);
         todo!("claude-host: CodingAgentExtension::validate")
     }
@@ -82,6 +85,20 @@ pub struct CodingAgentSection {
     /// (`#agent-tools 6/12`). `None` for an agent with no headless mode.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub headless: Option<HeadlessSection>,
+    /// What a provider route needs of this agent (`#agent-tools 8/12`): whether a jailed launch
+    /// requires one, and how the route's file and key reach the agent. `None` for an agent whose
+    /// route is environment only and optional in a jail.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub route: Option<RouteSlot>,
+    /// How a resume finds the agent's own conversation (`#agent-tools 8/12`): the adapter that reads
+    /// the token off the exited session's terminal. `None` for an agent resumed by an id the
+    /// daemon owns (Claude's session id, Cursor's chat id) or by its worktree (`--continue`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub resume: Option<ResumeSlot>,
+    /// Where the agent may run (`#agent-tools 8/12`). Absent means both; `[host]` refuses a
+    /// sandboxed start up front, naming the placements ([`CodingAgentSpec::require_placement`]).
+    #[serde(default = "Placement::anywhere")]
+    pub placements: Vec<Placement>,
 }
 
 impl CodingAgentSpec {
@@ -89,6 +106,93 @@ impl CodingAgentSpec {
     pub fn headless(&self) -> Option<&HeadlessSection> {
         self.agent.headless.as_ref()
     }
+}
+
+impl CodingAgentSpec {
+    /// `Ok` when the agent's `placements` include `placement`; otherwise the refusal, naming the
+    /// agent and every placement it declares — a sandboxed `warp-cli` start is refused with it
+    /// (`#agent-tools 8/12`).
+    pub fn require_placement(&self, placement: Placement) -> Result<(), PlacementError> {
+        // TODO(harness-clis): implement.
+        let _ = placement;
+        todo!("harness-clis: CodingAgentSpec::require_placement")
+    }
+}
+
+/// `coding_agent.route`: what a provider route needs of the agent.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RouteSlot {
+    /// A jailed launch without a provider route is refused: the jail holds no credentials of the
+    /// agent's own (OpenCode, Muse).
+    #[serde(default)]
+    pub required_in_jail: bool,
+    /// The variable the route's first file is named in (`OPENCODE_CONFIG`); `None` for a route that
+    /// is environment only.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub config_env: Option<String>,
+    /// The directory under the jail's scratch the route's files are written to owner-only
+    /// (`provider-route`); `None` for a route with no files.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub files_dir: Option<String>,
+    /// The variable the route's key is handed in (`TDDY_OPENCODE_PROVIDER_KEY`, `META_API_KEY`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub key_env: Option<String>,
+}
+
+/// `coding_agent.resume`: the launch adapter (`tddy_agent_backend::adapters::LaunchAdapters`) that
+/// reads a resume token off an exited session's terminal — `warp-resume-token`. A name the registry
+/// does not hold is refused at load.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ResumeSlot {
+    pub adapter: String,
+}
+
+/// Where an agent may run.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Placement {
+    /// A PTY on the daemon's host, as the session's OS user.
+    Host,
+    /// Inside a session jail, through `tddy-sandbox-runner`.
+    Jail,
+}
+
+impl Placement {
+    /// The placements of a spec that declares none: both.
+    pub fn anywhere() -> Vec<Placement> {
+        vec![Placement::Host, Placement::Jail]
+    }
+
+    /// The word a spec writes it as.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Placement::Host => "host",
+            Placement::Jail => "jail",
+        }
+    }
+}
+
+impl std::fmt::Display for Placement {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
+/// Why an agent cannot run where a launch asked.
+#[derive(Debug, Clone, PartialEq, Eq, Error)]
+pub enum PlacementError {
+    /// The spec's `placements` exclude the asked one.
+    #[error(
+        "{tool} cannot run in the {placement}: its spec's placements are [{}]",
+        placements.iter().map(|p| p.as_str()).collect::<Vec<_>>().join(", ")
+    )]
+    NotPlaced {
+        tool: String,
+        placement: Placement,
+        placements: Vec<Placement>,
+    },
 }
 
 /// `coding_agent.headless`: one headless turn's argv template, its static env, the adapter its
@@ -140,6 +244,10 @@ pub enum McpSlot {
     /// agent's home on this launch ([`crate::slots::SlotInputs::home`]); every other character is
     /// literal.
     Placed { path: String, format: McpFormat },
+    /// The agent takes no MCP registration (`#agent-tools 8/12`: OpenCode, Muse and Warp on
+    /// today's launch). A launch that passes a tool server is refused rather than dropped, as an
+    /// `unsupported` tool slot is.
+    Unsupported,
 }
 
 /// The shape of an MCP registration file.
@@ -220,6 +328,14 @@ pub struct HooksSlot {
 pub struct ModelsSection {
     pub default: String,
     pub curated: Vec<String>,
+    /// The command that lists the agent's models (`["{binary}", "models"]`), rendered with the run
+    /// grammar; `None` for an agent whose catalogue is `curated` (`#agent-tools 8/12`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub list_command: Option<Vec<ArgvItem>>,
+    /// The launch adapter (`tddy_agent_backend::adapters::LaunchAdapters`) that reads
+    /// `list_command`'s stdout — `opencode-models`. Set exactly when `list_command` is.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub adapter: Option<String>,
 }
 
 #[cfg(test)]
@@ -259,5 +375,81 @@ mod tool_slot_tests {
 
         // Then
         assert!(refused.is_err(), "`none` must not read as a tool slot");
+    }
+}
+
+#[cfg(test)]
+mod placement_tests {
+    use pretty_assertions::assert_eq;
+    use tddy_actions::tool::RunSection;
+
+    use super::{CodingAgentSection, CodingAgentSpec, Placement, PlacementError};
+
+    /// The coding-agent view of a built-in spec file, read straight from its YAML: its `run` and
+    /// `extensions.coding_agent` sections deserialized as they are declared.
+    fn the_builtin_spec(id: &str, yaml: &str) -> CodingAgentSpec {
+        let document: serde_yaml::Value = serde_yaml::from_str(yaml).unwrap();
+        let run: RunSection = serde_yaml::from_value(document["run"].clone()).unwrap();
+        let agent: CodingAgentSection =
+            serde_yaml::from_value(document["extensions"]["coding_agent"].clone()).unwrap();
+        CodingAgentSpec {
+            id: id.to_string(),
+            run,
+            agent,
+        }
+    }
+
+    fn warp() -> CodingAgentSpec {
+        the_builtin_spec("warp", crate::WARP_SPEC_YAML)
+    }
+
+    #[test]
+    fn a_host_only_spec_refuses_the_jail_naming_its_placements() {
+        // When
+        let refused = warp().require_placement(Placement::Jail);
+
+        // Then
+        assert_eq!(
+            (
+                refused.clone(),
+                refused.map_err(|error| error.to_string()).unwrap_err()
+            ),
+            (
+                Err(PlacementError::NotPlaced {
+                    tool: "warp".to_string(),
+                    placement: Placement::Jail,
+                    placements: vec![Placement::Host],
+                }),
+                "warp cannot run in the jail: its spec's placements are [host]".to_string(),
+            )
+        );
+    }
+
+    #[test]
+    fn a_host_only_spec_admits_the_host() {
+        // When
+        let admitted = warp().require_placement(Placement::Host);
+
+        // Then
+        assert_eq!(admitted, Ok(()));
+    }
+
+    #[test]
+    fn a_spec_that_declares_no_placements_runs_on_the_host_and_in_a_jail() {
+        // Given — claude.yaml declares no `placements`
+        let claude = the_builtin_spec("claude", include_str!("../specs/claude.yaml"));
+
+        // When
+        let admitted = (
+            claude.agent.placements.clone(),
+            claude.require_placement(Placement::Host),
+            claude.require_placement(Placement::Jail),
+        );
+
+        // Then
+        assert_eq!(
+            admitted,
+            (vec![Placement::Host, Placement::Jail], Ok(()), Ok(()))
+        );
     }
 }

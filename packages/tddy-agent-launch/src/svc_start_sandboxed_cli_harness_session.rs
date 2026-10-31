@@ -50,6 +50,9 @@ pub(crate) struct SandboxedCliHarnessStart<'a> {
 }
 
 impl LaunchSessions {
+    // TODO(harness-clis): become a `launch_jailed` caller over the session type's spec
+    // (`spec_for_session_type`), its route files and config env from `coding_agent.route`; or be
+    // deleted (needs the developer's approval, CLAUDE.md § ASK).
     /// The sandboxed start of a CLI harness: its provider route resolved before anything is created,
     /// then the start in its jail.
     pub(crate) async fn start_sandboxed_cli_harness_from_request(

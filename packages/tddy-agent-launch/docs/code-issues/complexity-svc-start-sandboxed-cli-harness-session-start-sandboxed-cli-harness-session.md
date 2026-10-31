@@ -7,6 +7,8 @@
 **Thresholds breached:** length 250 > 60 (`/analyze-clean-code`)
 **Restructure:** required — `extract_method` × 4, `/code-restructuring` territory, blocked as below
 **Status:** Open — **unclaimed**. Added by #670 and not closed in it: a `/green-yolo` stop condition, left for the developer
+**Claimed by:** #797 — `#agent-tools 8/12`
+**Lands after:** #796
 
 ## Measurement history
 

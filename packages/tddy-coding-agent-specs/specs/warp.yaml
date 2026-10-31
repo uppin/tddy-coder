@@ -1,0 +1,52 @@
+# Warp's Agent CLI (the `warp` binary) — the interactive coding agent behind `warp-cli` sessions
+# (`#agent-tools 8/12`).
+#
+# The argv renders byte-for-byte what `warp_argv` (the `CliHarness` descriptor) built by hand:
+#   warp                        a start
+#   warp [--resume TOKEN]       a resume, with the token the last run printed as it exited; a resume
+#                               with no recorded token starts fresh — never a bare `--resume`
+# Warp takes no model and no first prompt on its command line: both are chosen inside the TUI
+# (`/model`, `/agent <prompt>`). The resume token is read back off the terminal by the
+# `warp-resume-token` adapter (`tddy_agent_backend::adapters`).
+#
+# TODO(warp-cli-facts): the exit banner's exact wording is still unobserved
+# (docs/dev/todo/2026-10-24-warp-cli-facts-unconfirmed.md).
+#
+# Override whole with `<tddyhome>/tools/warp.yaml`. `TDDY_WARP_CLI` (and, until `#agent-tools 12/12`,
+# daemon.yaml `cli_harnesses.warp-cli.binary_path`) still names the binary.
+schema_version: 1
+id: warp
+summary: Warp Agent CLI — the interactive coding agent behind warp-cli sessions
+binary:
+  command: warp
+  env: TDDY_WARP_CLI
+deps: [tddy-tools]
+reads: []
+run:
+  transport: pty
+  argv:
+    - "{binary}"
+    - { if: resume_token, then: ["--resume", "{resume_token}"] }
+    - { splice: slots }
+  env: {}
+extensions:
+  coding_agent:
+    mcp: { kind: unsupported }
+    tool_allow: unsupported
+    tool_deny: unsupported
+    permission_prompt: unsupported
+    instructions:
+      files: []
+    # TODO(harness-clis): `hooks: unsupported` once `HooksSlot` takes the word (see opencode.yaml).
+    hooks: { adapter: unsupported }
+    # No model to choose from outside the TUI.
+    models:
+      default: ""
+      curated: []
+    context_globs: [AGENTS.md, ".agents/**", WARP.md]
+    resume: { adapter: warp-resume-token }
+    # Warp is not jailed (decided 2026-10-31, docs/dev/todo/2026-10-24-warp-cli-sandbox.md): a
+    # sandboxed start is refused FAILED_PRECONDITION naming these placements. What would admit
+    # `jail`: a `files`/`reads` entry for Warp's config dir and the `warp-resume-token` adapter on
+    # the jailed launch.
+    placements: [host]

@@ -91,6 +91,8 @@ pub(crate) fn harness_binary(config: &DaemonConfig, harness: &CliHarness) -> Str
     )
 }
 
+// TODO(harness-clis): launch from the session type's spec through `launch_host_pty`, rendered
+// with `crate::harness_from_spec::harness_template_params`, instead of `CliHarness::argv`.
 /// Start a CLI harness session: cut its worktree, apply its provider route, spawn the harness in
 /// a PTY and record `.session.yaml`.
 pub(crate) async fn start_cli_harness_session(
