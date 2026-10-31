@@ -7,7 +7,9 @@
 **CRAP:** **CRAP 2862** · complexity 53 · rank 2/50 in this crate · **never executed by any test**
 **Thresholds breached:** length 615 > 60; nesting 5 > 4 (`/analyze-clean-code`)
 **Restructure:** `extract_method` — `/code-restructuring` territory
-**Status:** Open — narrowed 2026-09-24 by #524 (615 → 342) — **unclaimed**
+**Status:** Open — narrowed 2026-09-24 by #524 (615 → 342) — claimed
+**Claimed by:** #794 — `#agent-tools 5/12`
+**Lands after:** #793
 **Verified:** ⚠ **not hand-verified** — metrics are machine-measured and re-derivable; the finding itself has not been read by a person
 **Moved:** 2026-10-09 by `#carve` 21/21 (#536), engine move into `tddy-agent-launch`, from `packages/tddy-session-lifecycle/src/connection_service/svc_start_sandboxed_claude_cli_session.rs:96`
 
