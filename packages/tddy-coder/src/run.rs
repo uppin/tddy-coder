@@ -2591,6 +2591,8 @@ fn create_backend(
             AnyBackend::OpenCode(OpenCodeAcpBackend::with_agent_path(path))
         }
         "stub" => AnyBackend::Stub(StubBackend::new()),
+        // TODO(claude-headless): build it with `crate::claude_from_spec::claude_backend_from_spec`
+        // over `<tddyhome>/tools` and `ProcessToolHost`, so the spec is the only path.
         "claude" => AnyBackend::Claude(ClaudeCodeBackend::new().with_progress(on_progress)),
         unknown => {
             let known = specialized_agent_defs

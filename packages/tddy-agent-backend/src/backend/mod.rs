@@ -343,7 +343,7 @@ impl AgentOutputSink {
 }
 
 /// Session mode for backend invocation: fresh session or resume existing.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SessionMode {
     /// Start a new session with this ID.
     Fresh(String),
