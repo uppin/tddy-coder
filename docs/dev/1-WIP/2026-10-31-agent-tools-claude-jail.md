@@ -192,6 +192,8 @@ Real dependency edges, as opposed to the branch line:
 ## Refactoring Needed
 ### From /red (TDD red phase)
 
+- **Fix-up (commit 3, 2026-10-31), found by #800's red phase.** Adding `ToolDef.{home, files, secrets, policy}` broke compilation of #793's `ToolDef` literal in `packages/tddy-build/src/builtin.rs` (lib tests). The scoped checks for this node had not covered `tddy-build`. The literal now sets the four fields to their defaults.
+
 **Published surface (commit 2).**
 
 - `tddy_actions::tool::{HomeSection, FileItem, SecretItem, SecretItemSource, RouteGuard, PolicySection}` (`src/tool/{home,files,secrets,policy}.rs`), and `ToolDef.{home, files, secrets, policy}` — all `#[serde(default)]`, additive. These are plain serde types with no bodies to implement.
