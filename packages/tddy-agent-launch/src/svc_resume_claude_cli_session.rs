@@ -126,6 +126,9 @@ impl LaunchSessions {
             &mut env_extra,
         )?;
 
+        // TODO(claude-host): with `self.coding_agents` installed, render the `claude` spec with
+        // `resume` set and spawn through `spec_launch::launch_host_pty`; this function must shrink,
+        // not grow (code issue `complexity-svc-resume-claude-cli-session-…`).
         let handle = manager
             .resume_with_options(
                 &session_id_owned,

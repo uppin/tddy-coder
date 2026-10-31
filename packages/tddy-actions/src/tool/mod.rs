@@ -8,13 +8,24 @@
 //! it loads definitions ([`ToolRegistry`]) and resolves them against a host ([`ToolHost`]) into
 //! [`ResolvedTool`]s. Lowering a resolution into jail grants is `tddy-sandbox-recipes`'
 //! `tool_grants`, so the generic sandbox crate never learns this vocabulary.
+//!
+//! `#agent-tools 2/12` adds how a tool is **run** ([`RunSection`]: an argv template rendered by
+//! [`render_argv`], static env, a transport) and open, owner-validated **extensions**
+//! ([`ExtensionOwner`]) — `tddy-coding-agent-specs` owns `coding_agent`, so this crate stays
+//! agent-agnostic.
 
 mod def;
 mod error;
+mod extensions;
 mod registry;
 mod resolve;
+mod run;
+mod template;
 
 pub use def::{ToolBinary, ToolDef, TOOL_SCHEMA_VERSION};
 pub use error::ToolError;
-pub use registry::{ToolRegistry, BUILTIN_TOOLS};
+pub use extensions::ExtensionOwner;
+pub use registry::{ToolRegistry, BUILTIN_SUPPORT_TOOLS, BUILTIN_TOOLS};
 pub use resolve::{ProcessToolHost, ResolvedTool, ToolHost};
+pub use run::{ArgvItem, RunSection, Transport};
+pub use template::{render_argv, TemplateParams};

@@ -235,6 +235,9 @@ pub struct DaemonSessionHost {
     /// Told of each started session's worktree — see [`SessionWorktreeObserver`]. `None` on a host
     /// whose embedder acts on nothing of the kind.
     worktree_observer: Option<Arc<dyn SessionWorktreeObserver>>,
+    /// The coding agents declared as tools, installed with [`Self::with_coding_agents`]. `None`
+    /// keeps the hand-built `claude-cli` launch (`#agent-tools 2/12`).
+    coding_agents: Option<Arc<tddy_agent_launch::spec_launch::HostCodingAgents>>,
     /// What extends a session's reach beyond this host when it is connected to — see
     /// [`tddy_daemon_extensions::SessionReach`]. [`tddy_daemon_extensions::NoSessionReach`] until
     /// the composition root installs an integration with [`Self::with_session_reach`].
@@ -545,6 +548,7 @@ mod svc_conversation_worktree_wiring;
 mod svc_host_builders;
 mod svc_list_exec_tools_wiring;
 pub use svc_list_exec_tools_wiring::start_choices;
+mod svc_coding_agents_wiring;
 mod svc_project_notification_log_wiring;
 mod svc_reachable_sessions;
 mod svc_session_identity_wiring;

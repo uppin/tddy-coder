@@ -1,0 +1,14 @@
+# tddy's own agent-side binary: the MCP relay a coding agent registers as its tool server
+# (`tddy-tools --mcp`), and the `session-hook` command its lifecycle hooks run.
+#
+# Coding agents list it in `deps`, which is how the relay binary is found — the same way as every
+# other binary (`#agent-tools 2/12`). Override with `<tddyhome>/tools/tddy-tools.yaml`, or point
+# `TDDY_TOOLS_BINARY` at an absolute path.
+schema_version: 1
+id: tddy-tools
+summary: tddy-tools — the MCP relay and hook command coding agents call back into tddy through
+binary:
+  command: tddy-tools
+  env: TDDY_TOOLS_BINARY
+deps: []
+reads: []
