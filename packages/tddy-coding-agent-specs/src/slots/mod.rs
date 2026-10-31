@@ -70,6 +70,10 @@ pub enum SlotError {
     /// An instruction file exists but could not be read.
     #[error("instruction file {}: {message}", path.display())]
     Io { path: PathBuf, message: String },
+    /// The launch has values for a slot the agent's spec declares `unsupported` — for example a
+    /// list of tools to withdraw from an agent that cannot withdraw any. Refused, never dropped.
+    #[error("{agent} cannot take {slot}: its spec declares it unsupported")]
+    SlotUnsupported { agent: String, slot: String },
 }
 
 /// Every slot of `spec` filled from `inputs`. `argv_extra` is ordered: the append-system-prompt
@@ -93,7 +97,7 @@ mod tests {
     use super::*;
     use crate::{
         CodingAgentSection, FlagSlot, HooksSlot, InstructionsSlot, McpFormat, McpSlot,
-        ModelsSection,
+        ModelsSection, ToolSlot, Unsupported,
     };
 
     const PREAMBLE: &str = "## Managed Codebase\n\nThe real codebase is managed.";
@@ -118,9 +122,9 @@ mod tests {
                     flag: "--mcp-config".to_string(),
                     format: McpFormat::ClaudeMcpJson,
                 },
-                tool_allow: flag("--allowedTools"),
-                tool_deny: flag("--disallowedTools"),
-                permission_prompt: flag("--permission-prompt-tool"),
+                tool_allow: ToolSlot::Flag(flag("--allowedTools")),
+                tool_deny: ToolSlot::Flag(flag("--disallowedTools")),
+                permission_prompt: ToolSlot::Flag(flag("--permission-prompt-tool")),
                 instructions: InstructionsSlot {
                     files: vec![PathBuf::from("CLAUDE.md"), PathBuf::from("AGENTS.md")],
                     append_system_prompt: Some(flag("--append-system-prompt-file")),
@@ -344,5 +348,44 @@ mod tests {
                 expected.into_bytes(),
             )])
         );
+    }
+
+    /// An agent that cannot withdraw its native tools declares `tool_deny: unsupported`; a launch
+    /// that asks it to withdraw some anyway is refused by name, never rendered without them.
+    #[test]
+    fn denied_tools_for_an_agent_whose_tool_deny_is_unsupported_are_refused() {
+        // Given
+        let dir = tempfile::tempdir().unwrap();
+        let mut spec = a_claude_spec();
+        spec.agent.tool_deny = ToolSlot::Unsupported(Unsupported::Unsupported);
+        let mut inputs = no_inputs(dir.path(), dir.path());
+        inputs.denied_tools = strings(&["Bash"]);
+
+        // When
+        let refused = render(&spec, &inputs).unwrap_err();
+
+        // Then
+        assert_eq!(
+            refused,
+            SlotError::SlotUnsupported {
+                agent: "claude".to_string(),
+                slot: "tool_deny".to_string(),
+            }
+        );
+    }
+
+    /// The positive control: with nothing to withdraw, an `unsupported` deny slot renders no flag.
+    #[test]
+    fn an_unsupported_tool_deny_with_nothing_to_withdraw_renders_no_deny_flag() {
+        // Given
+        let dir = tempfile::tempdir().unwrap();
+        let mut spec = a_claude_spec();
+        spec.agent.tool_deny = ToolSlot::Unsupported(Unsupported::Unsupported);
+
+        // When
+        let rendered = render(&spec, &no_inputs(dir.path(), dir.path())).unwrap();
+
+        // Then
+        assert_eq!(rendered.argv_extra, Vec::<String>::new());
     }
 }

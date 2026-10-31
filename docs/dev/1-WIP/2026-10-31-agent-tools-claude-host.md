@@ -184,6 +184,13 @@ Real dependency edges, as opposed to the branch line:
 ## Refactoring Needed
 ### From /red (TDD red phase)
 
+- **Contract amendment (commit 3, 2026-10-31), forced by #796 cursor-cli's red phase.** `tool_allow`, `tool_deny` and `permission_prompt` were each a required `FlagSlot`. That left no way to declare an agent that has no such flag (Cursor, and later Codex, Oz and codex-acp), so `cursor.yaml` could not load.
+  - The fields are now `ToolSlot = Flag(FlagSlot) | unsupported`. In YAML the second form is the word `unsupported`.
+  - `FlagSlot` is unchanged. `claude.yaml` is unchanged; it still reads `{ flag: … }`.
+  - `slots::render` refuses a non-empty list for an `unsupported` slot with `SlotError::SlotUnsupported { agent, slot }` and never drops it.
+  - #800 acp-agents extends `ToolSlot` additively, with its `acp_meta` / `config_env` kinds.
+  - New tests: `spec::tool_slot_tests` (3 shape pins, which pass — serde does the work), plus `slots::tests::denied_tools_for_an_agent_whose_tool_deny_is_unsupported_are_refused` and its positive control `an_unsupported_tool_deny_with_nothing_to_withdraw_renders_no_deny_flag` (both fail on `render`'s TODO).
+
 **Red baseline (2026-10-31, contract commit).** Every new test compiles and fails on a `todo!` of
 `claude-host`; none fails on a parent's TODO first.
 
