@@ -40,6 +40,7 @@ use std::io;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
+use tddy_agent_launch::spec_launch::HostCodingAgents;
 use tddy_coding_subagent::launcher::{HEADLESS_DIR, SESSION_TOKEN_ENV};
 use tddy_coding_subagent::{
     opencode_withdrawal_config, refuse_unless_confinable, AgentTransport, ApprovalRoutes,
@@ -164,6 +165,13 @@ pub struct DaemonCodingAgentLauncher {
     /// Where a headless conversation's permission approvals are bound at launch. `None` leaves them
     /// unbound, so every approval for such a conversation is refused.
     approval_routes: Option<Arc<ApprovalRoutes>>,
+    /// The coding agents declared as tools (`#agent-tools 6/12`): with them, a headless `claude`
+    /// conversation is rendered from `claude.yaml`'s `coding_agent.headless` section. `None` plans it
+    /// by hand.
+    ///
+    /// TODO(claude-headless): green installs them in `for_daemon` and makes the spec the Claude
+    /// arm's only path — deleting the hand-built `mcp_servers_wrapped` registration for it.
+    coding_agents: Option<Arc<HostCodingAgents>>,
 }
 
 impl DaemonCodingAgentLauncher {
@@ -266,7 +274,35 @@ impl DaemonCodingAgentLauncher {
             relay: None,
             headless: None,
             approval_routes: None,
+            coding_agents: None,
         }
+    }
+
+    /// Plan headless `claude` conversations from `agents`' declaration of it (builder): its binary
+    /// resolved by the agent registry's host, each turn's argv rendered from
+    /// `coding_agent.headless`, and its MCP registration and approval tool from its slots.
+    #[must_use]
+    pub fn with_coding_agents(mut self, agents: Arc<HostCodingAgents>) -> Self {
+        self.coding_agents = Some(agents);
+        self
+    }
+
+    /// The headless command of a `claude` conversation, from its declaration: `agents.resolve`
+    /// names the binary (refused when the session runs as another OS user, as by hand), the
+    /// conversation directory is claimed as by hand and becomes the command's `scratch_dir`, the
+    /// tool server and the approval tool become its `mcp_server` and `permission_prompt_tool`, the
+    /// route's env its `env`, and a `SpecHeadlessRenderer` its `renderer`. Approvals are bound once
+    /// the plan has written everything, as by hand.
+    fn headless_plan_from_spec(
+        &self,
+        launch: &CodingAgentLaunch,
+        wiring: &HeadlessWiring,
+        conversation: &str,
+        agents: &HostCodingAgents,
+    ) -> Result<HeadlessCommand, SubagentError> {
+        // TODO(claude-headless): implement.
+        let _ = (launch, wiring, conversation, agents);
+        todo!("claude-headless: DaemonCodingAgentLauncher::headless_plan_from_spec")
     }
 
     fn refuse(launch: &CodingAgentLaunch, reason: &str) -> SubagentError {
@@ -424,6 +460,11 @@ impl DaemonCodingAgentLauncher {
                 &format!("its conversation id {unsafe_id} is not a plain name"),
             )
         })?;
+        if harness == HeadlessHarness::Claude {
+            if let Some(agents) = &self.coding_agents {
+                return self.headless_plan_from_spec(launch, wiring, conversation.as_str(), agents);
+            }
+        }
         let program = headless_program(&wiring.config, harness);
         self.refuse_unless_daemon_user(launch, &program)?;
         let env = match launch.def.provider_account.as_deref() {
@@ -449,6 +490,8 @@ impl DaemonCodingAgentLauncher {
             disallowed_tools: Vec::new(),
             profile: None,
             mcp_server: None,
+            renderer: None,
+            scratch_dir: None,
         };
         let refused_config = |e: io::Error| {
             Self::refuse(launch, &format!("its MCP config could not be written: {e}"))

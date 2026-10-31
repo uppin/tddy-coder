@@ -26,6 +26,7 @@ use tokio::process::{Child, ChildStderr, Command};
 use tokio::sync::Notify;
 use tokio::task::JoinHandle;
 
+use crate::adapters::HeadlessRenderer;
 use crate::error::BackendError;
 
 use super::acp_driver::{AcpDriver, AcpTurnEnd, AcpUpdateSink};
@@ -94,6 +95,16 @@ pub struct HeadlessCommand {
     /// reads no MCP config file. Its environment is the launcher's to put in [`Self::env`]: the argv
     /// names its variables, never their values.
     pub mcp_server: Option<super::acp_driver::McpServerSpec>,
+    /// The agent's declaration each turn's argv is rendered from (`coding_agent.headless`), and the
+    /// adapter its stream is read through. `None` builds the argv by hand (`argv::turn_argv`).
+    ///
+    /// TODO(claude-headless): green makes this the Claude arm's only path and deletes
+    /// `argv::claude()`; Cursor, Codex and Oz follow in `#agent-tools 9/12`.
+    pub renderer: Option<Arc<dyn HeadlessRenderer>>,
+    /// With a [`Self::renderer`]: where each turn's rendered registration files (the MCP config)
+    /// are written — the conversation's own directory, never the worktree, since the registration
+    /// carries the agent's credential. A rendered turn without one is refused.
+    pub scratch_dir: Option<PathBuf>,
 }
 
 /// One headless conversation: its CLI, and the CLI's own session id once the first turn named it.
@@ -200,6 +211,11 @@ impl HeadlessDriver {
         cancel: Arc<Notify>,
     ) -> Result<AcpTurnEnd, BackendError> {
         let resume = self.session_id();
+        if let Some(renderer) = &self.command.renderer {
+            return self
+                .run_rendered_turn(renderer, resume.as_deref(), prompt, updates, cancel)
+                .await;
+        }
         let argv = argv::turn_argv(self.harness, &self.command, resume.as_deref(), prompt);
         let mut child = self.spawn(&argv)?;
         let pgid = child.id();
@@ -272,6 +288,27 @@ impl HeadlessDriver {
             self.store_session(id);
         }
         result
+    }
+}
+
+impl HeadlessDriver {
+    /// One turn rendered from `renderer`: the prompt, the command's model, `resume` as a `Resume`
+    /// session, the command's permission-prompt tool, withdrawn tools and MCP server as the slots'
+    /// inputs, its `cwd` as the workdir and its `scratch_dir` as the scratch directory; the rendered
+    /// files written, the program spawned as [`Self::spawn`] spawns, and its
+    /// stdout decoded by the transcript the adapter's `turn_format` names.
+    async fn run_rendered_turn(
+        &self,
+        renderer: &Arc<dyn HeadlessRenderer>,
+        resume: Option<&str>,
+        prompt: &str,
+        updates: Option<AcpUpdateSink>,
+        cancel: Arc<Notify>,
+    ) -> Result<AcpTurnEnd, BackendError> {
+        // TODO(claude-headless): implement — `renderer.render(&HeadlessTurn { … })`, then the loop
+        // `run_turn` runs over `Transcript::new(adapter.turn_format(), updates)`.
+        let _ = (renderer, resume, prompt, updates, cancel);
+        todo!("claude-headless: HeadlessDriver::run_rendered_turn")
     }
 }
 
