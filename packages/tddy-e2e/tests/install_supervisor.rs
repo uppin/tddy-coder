@@ -824,10 +824,7 @@ fn an_existing_config_whose_daemon_service_declares_no_user_is_refused() {
         .filter(|line| !line.contains("user:"))
         .collect::<Vec<_>>()
         .join("\n");
-    tree.overwrite_installed_config(
-        "supervisor.yaml",
-        &format!("{config_without_user}\n"),
-    );
+    tree.overwrite_installed_config("supervisor.yaml", &format!("{config_without_user}\n"));
 
     // When
     let outcome = tree.attempt_install_with(&[]);
