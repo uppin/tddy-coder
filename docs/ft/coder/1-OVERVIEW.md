@@ -80,6 +80,7 @@ its changeset wraps.
 | PRD | Affects |
 |-----|---------|
 | [Restructure refusal truth and authoring gates](1-WIP/PRD-2026-09-17-restructure-refusal-truth-and-authoring-gates.md) | [Rust code restructuring](rust-code-restructuring.md) — refusal classes, import restoration, a leftover-reference preflight, `restructure snapshot`, and the authoring gates |
+| [Declared tools](1-WIP/PRD-2026-10-31-declared-tools.md) | [Sandbox builder](sandbox-builder.md) — a jail's executable surface comes from YAML tool definitions with deps (`#agent-tools 1/12`) |
 
 ## Integration Points
 
