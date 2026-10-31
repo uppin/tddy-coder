@@ -1,0 +1,43 @@
+# Claude Code CLI — the interactive coding agent behind `claude-cli` sessions (`#agent-tools 2/12`).
+#
+# The argv renders byte-for-byte what the launch built by hand before:
+#   claude [--model M] (--resume|--session-id) ID (--dangerously-skip-permissions|--permission-mode P)
+#          <slot flags> [PROMPT]
+# Slot flags go before the prompt: `--mcp-config` is variadic and would swallow a bare positional.
+#
+# Override whole with `<tddyhome>/tools/claude.yaml`. `TDDY_CLAUDE_BINARY` (and, until
+# `#agent-tools 12/12`, daemon.yaml `claude_cli.binary_path`) still names the binary.
+schema_version: 1
+id: claude
+summary: Claude Code CLI — the interactive coding agent behind claude-cli sessions
+binary:
+  command: claude
+  env: TDDY_CLAUDE_BINARY
+deps: [tddy-tools]
+reads: []
+run:
+  transport: pty
+  argv:
+    - "{binary}"
+    - { if: model, then: ["--model", "{model}"] }
+    - { if: resume, then: ["--resume", "{session_id}"], else: ["--session-id", "{session_id}"] }
+    - if: dangerously_skip_permissions
+      then: ["--dangerously-skip-permissions"]
+      else: ["--permission-mode", "{permission_mode}"]
+    - { splice: slots }
+    - { if: prompt, then: ["{prompt}"] }
+  env: {}
+extensions:
+  coding_agent:
+    mcp: { kind: file, flag: --mcp-config, format: claude-mcp-json }
+    tool_allow: { flag: --allowedTools }
+    tool_deny: { flag: --disallowedTools }
+    permission_prompt: { flag: --permission-prompt-tool }
+    instructions:
+      files: [CLAUDE.md, AGENTS.md]
+      append_system_prompt: { flag: --append-system-prompt-file }
+    hooks: { adapter: claude-settings-local }
+    models:
+      default: opus
+      curated: [opus, sonnet, haiku, claude-opus-5, claude-sonnet-5, claude-haiku-4-5-20251001]
+    context_globs: [AGENTS.md, ".agents/**", CLAUDE.md, ".claude/**", .mcp.json]

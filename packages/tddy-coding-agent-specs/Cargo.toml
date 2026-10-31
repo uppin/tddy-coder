@@ -1,0 +1,23 @@
+[package]
+name = "tddy-coding-agent-specs"
+version = "0.1.0"
+edition = "2021"
+description = "Coding agents as declared tools: the embedded agent specs, the coding_agent extension and its slot renderers"
+
+[lib]
+name = "tddy_coding_agent_specs"
+path = "src/lib.rs"
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+serde_yaml = "0.9"
+thiserror = "1"
+tddy-actions = { path = "../tddy-actions" }
+# `HookCommandParams` and `build_claude_hooks_settings`: the hook protocol stays in Rust, and the
+# `claude-settings-local` adapter names it.
+tddy-agent-backend = { path = "../tddy-agent-backend" }
+
+[dev-dependencies]
+pretty_assertions = { workspace = true }
+tempfile = "3"

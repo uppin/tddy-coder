@@ -5,6 +5,7 @@
 **Type:** Feature
 **Complexity**: 5 — four crates (`tddy-actions`, new `tddy-coding-agent-specs`, `tddy-agent-launch`, `tddy-session-lifecycle`); a new contract (argv template + extensions + mapping slots) every agent node builds on; byte-identical output pinned against today's launch; the template grammar is new design
 **Stack:** `#agent-tools 2/12` — branch `feature/agent-tools/claude-host`, base `feature/agent-tools/tool-defs`
+**PR:** [#791](https://github.com/uppin/tddy-coder/pull/791)
 **PRD:** [PRD-2026-10-31-claude-cli-from-spec.md](../../ft/daemon/1-WIP/PRD-2026-10-31-claude-cli-from-spec.md)
 
 ## Initial Discovery
@@ -28,7 +29,7 @@ State A below is distilled from that file. Grep traces and file dumps are not re
 - [ ] [`tddy-coding-agent-specs`](../../../packages/tddy-coding-agent-specs/README.md): **new crate**. Embedded `specs/claude.yaml`; `CodingAgentSpec` (validates the `coding_agent` extension); slot renderers for MCP file, allow/deny argv, permission prompt, instruction files and hooks adapter name
 - [ ] [`tddy-agent-launch`](../../../packages/tddy-agent-launch/README.md): spec-driven host PTY launcher; the unsandboxed claude-cli start and resume use it
 - [ ] [`tddy-session-lifecycle`](../../../packages/tddy-session-lifecycle/README.md): claude-cli spawn wiring passes the spec registry through
-- [ ] [`tddy-daemon`](../../../packages/tddy-daemon/README.md): registers the `coding_agent` extension owner on the registry, and passes daemon.yaml `claude_cli.binary_path` as the binary override until #12
+- [ ] [`tddy-daemon`](../../../packages/tddy-daemon/README.md): registers the `coding_agent` extension owner on the registry, and passes daemon.yaml `claude_cli.binary_path` as the binary override until #801
 
 ## Responsibility
 
@@ -43,10 +44,10 @@ State A below is distilled from that file. Grep traces and file dumps are not re
 
 ## Boundaries
 
-- No jail (#5). The sandboxed claude-cli path still uses today's code.
-- No `network:` section (#3, used by #5). No `home`, `files`, `secrets` or `policy` (#5).
-- No headless (#6), split sessions or `tddy-sandbox-app` (#10).
-- The `claude-cli` session-type string gates are untouched (#12).
+- No jail (#794). The sandboxed claude-cli path still uses today's code.
+- No `network:` section (#792, used by #794). No `home`, `files`, `secrets` or `policy` (#794).
+- No headless (#795), split sessions or `tddy-sandbox-app` (#799).
+- The `claude-cli` session-type string gates are untouched (#801).
 - The hook **protocol** (`tddy-tools session-hook`, the PermissionRequest decision JSON) is not changed. Only who writes `.claude/settings.local.json` moves, into the slot renderer.
 
 ## Dependencies
@@ -74,9 +75,9 @@ Unimplemented bodies are `// TODO(claude-host): implement`. The claude-cli start
 ## Green wave
 
 **Wave:** 2 of 7
-**Greenable independently:** yes, once #1 is green. Every test uses #1's registry and resolution (behaviour) and a stub `claude` binary on a fixture PATH
-**Concurrent with:** #3 egress-allowlist and #4 build-tools
-**Blocks:** #5 claude-jail (reuses the launcher's rendering and slots), #6 claude-headless (the `coding_agent` extension and `claude.yaml`), and transitively #7–#12
+**Greenable independently:** yes, once #790 is green. Every test uses #790's registry and resolution (behaviour) and a stub `claude` binary on a fixture PATH
+**Concurrent with:** #792 egress-allowlist and #793 build-tools
+**Blocks:** #794 claude-jail (reuses the launcher's rendering and slots), #795 claude-headless (the `coding_agent` extension and `claude.yaml`), and transitively #796–#801
 
 Real dependency edges, as opposed to the branch line:
 
@@ -88,7 +89,7 @@ Real dependency edges, as opposed to the branch line:
 - Unsandboxed claude-cli argv is built in `tddy-agent-backend/src/claude_argv.rs` and `tddy-cli-sessions` `argv.rs`. The binary is resolved by `tddy-daemon-kernel` `config/agent_cli.rs` (`claude_cli.binary_path`, `TDDY_CLAUDE_BINARY`, `~/.local/bin`, skipping `.superset/bin`, canonicalized).
 - Hooks are written by `claude_hooks.rs` and `agent-launch` `claude_cli_spawn_steps.rs:168`. The MCP config and allow/deny lists come from recipes and from `build_claude_allowlist`. The preamble is `tddy_sandbox::MANAGED_CODEBASE_PREAMBLE`.
 - Models and the default `opus` are in `tddy-agent-backend/src/backend/mod.rs:637-741`. Context globs are in `context_globs.rs:37`.
-- `ToolDef` (#1) has no `run`, and no extension mechanism.
+- `ToolDef` (#790) has no `run`, and no extension mechanism.
 
 ## State B
 
@@ -101,7 +102,9 @@ Real dependency edges, as opposed to the branch line:
 ### New
 - `packages/tddy-coding-agent-specs/{Cargo.toml, README.md, src/{lib.rs, spec.rs, slots/{mod.rs, mcp.rs, tools.rs, instructions.rs, hooks.rs}}, specs/claude.yaml}`
 - `packages/tddy-actions/src/tool/{run.rs, template.rs, extensions.rs}` and `packages/tddy-actions/tools/tddy-tools.yaml`
-- `packages/tddy-agent-launch/src/spec_launch.rs`
+- `packages/tddy-agent-launch/src/spec_launch.rs` (`HostCodingAgents`, `HostAgent`, `HostPtySession`, `SpecLaunchError`, `launch_host_pty`)
+- `packages/tddy-session-lifecycle/src/connection_service/svc_coding_agents_wiring.rs` (`DaemonSessionHost::with_coding_agents`)
+- Tests: `packages/tddy-coding-agent-specs/tests/spec_load_acceptance.rs`, `packages/tddy-agent-launch/tests/spec_launch_acceptance.rs`, `packages/tddy-session-lifecycle/tests/claude_cli_from_spec_acceptance.rs` + `tests/fixtures/claude_cli_from_spec/`
 ### Modified
 - The root `Cargo.toml` workspace members gain the new crate.
 - `claude_cli_spawn*` and `svc_resume_claude_cli_session.rs` call `launch_host_pty`.
@@ -125,6 +128,10 @@ Real dependency edges, as opposed to the branch line:
 - [ ] `the_builtin_claude_spec_loads_and_depends_on_tddy_tools`
 - [ ] `an_unknown_slot_kind_is_refused_naming_the_file`
 - [ ] `an_unknown_extension_owner_is_refused_naming_the_owner`
+- [ ] `the_same_override_without_the_unowned_key_loads` (positive control for the owner refusal)
+
+**`tddy-agent-launch`: `packages/tddy-agent-launch/tests/spec_launch_acceptance.rs`** (moved here from `spec_load_acceptance.rs`: the launcher lives in `tddy-agent-launch`, which `tddy-coding-agent-specs` must not depend on)
+
 - [ ] `a_spec_whose_transport_is_not_pty_is_refused_by_the_host_pty_launcher`
 
 ### Unit / integration tests
@@ -143,7 +150,7 @@ Real dependency edges, as opposed to the branch line:
 
 - **Open extensions, owner-validated**, the same model as BUILD.yaml's open `config`. `tddy-actions` stays agent-agnostic, and `tddy-coding-agent-specs` owns the `coding_agent` vocabulary.
 - **A structured template (`When` nodes), not a string mini-language.** It is reviewable and serde-checked, and it cannot inject shell.
-- **daemon.yaml `claude_cli.binary_path` stays as an override until #12**, so this node changes no configuration.
+- **daemon.yaml `claude_cli.binary_path` stays as an override until #801**, so this node changes no configuration.
 - **`tddy-tools` is a tool, and agents depend on it.** The relay binary is found the same way as every other binary.
 - Complexity 5 because the template and slot grammar is new design that eleven nodes inherit. That is the reason the node owns only Claude on the host.
 
@@ -153,10 +160,10 @@ Real dependency edges, as opposed to the branch line:
 - [x] Cross-check `packages/*/docs/code-issues/` and `docs/dev/todo/` for items this change touches (Step 2b)
 - [x] Create/update PRD documentation
 - [x] Create changeset (this document)
-- [ ] Create failing acceptance tests
-- [ ] Run acceptance tests (verify they fail)
-- [ ] USER REVIEW — acceptance tests
-- [ ] TDD Red — write failing unit/integration tests
+- [x] Create failing acceptance tests
+- [x] Run acceptance tests (verify they fail)
+- [x] USER REVIEW — acceptance tests — waived by the developer 2026-10-31: pass 2 runs without per-node review
+- [x] TDD Red — write failing unit/integration tests
 - [ ] TDD Green — implement with quality code
 - [ ] Update documentation with progress
 - [ ] Repeat Red→Green→Update cycle until feature complete
@@ -176,6 +183,101 @@ Real dependency edges, as opposed to the branch line:
 
 ## Refactoring Needed
 ### From /red (TDD red phase)
+
+**Red baseline (2026-10-31, contract commit).** Every new test compiles and fails on a `todo!` of
+`claude-host`; none fails on a parent's TODO first.
+
+| Suite | Tests | Fails at |
+|---|---|---|
+| `tddy-actions` `tool::template::tests` (lib) | 9 | `render_argv` (`todo!("claude-host: render_argv")`) |
+| `tddy-coding-agent-specs` `slots::tests` (lib) | 6 | `slots::render` |
+| `tddy-coding-agent-specs` `slots::hooks::tests` (lib) | 2 | `hooks::adapter` |
+| `tddy-coding-agent-specs` `tests/spec_load_acceptance.rs` | 4 | `load_agent_registry` |
+| `tddy-agent-launch` `tests/spec_launch_acceptance.rs` | 1 | `CodingAgentSpec::of` |
+| `tddy-session-lifecycle` `tests/claude_cli_from_spec_acceptance.rs` | 5 | `load_agent_registry` |
+
+Green needs #790 green as well: `load_agent_registry` is built on `ToolDef::parse`, `ToolRegistry::load`
+and `resolve_closure`, which are `TODO(tool-defs)` today. That is the planned sequencing (wave 2), not
+a new edge.
+
+**Pre-existing failures in touched packages.** The `tddy-actions` suites `tool_registry_acceptance`
+(9) and `tool_resolve_unit` (7) fail on #790's own `TODO(tool-defs)` bodies — the parent's red, not
+this node's. Environmental failures seen locally, unrelated to this node (the hand-built
+path is untouched): `tddy-agent-launch` `clone_askpass_acceptance` (9 — `target/debug/tddy-askpass`
+not built by a bare `cargo test`); `tddy-session-lifecycle` `claude_cli_fullscreen_renderer` — 2 host
+`fullscreen: false` cases (the runner, itself a Claude Code session, exports
+`CLAUDE_CODE_NO_FLICKER=1`, which the suite's doc says it assumes absent) and 3 macOS sandbox cases
+(`tddy-sandbox-runner` not built). Baseline note: the step-2 `cargo check` baseline was taken after
+this node's first edits had started, so it is not a clean "before"; the existing suites were run on
+the final tree instead.
+
+**Goldens.** `packages/tddy-session-lifecycle/tests/fixtures/claude_cli_from_spec/{host_start_argv.txt,
+host_start_env.txt, host_start_settings_local.json}` were captured from today's hand-built launch (the
+`claude_cli.binary_path` route, no coding agents installed) with a throwaway test that was removed
+before the commit. Per-run values are `<SESSION_ID>`, `<WORKTREE>`, `<SESSIONS>`, `<STUBS>`,
+`<HOOK_TOKEN>`, `<OS_USER>`. The env golden pins only what the launch sets (`CLAUDE_CODE_NO_FLICKER`,
+`TDDY_DAEMON_URL`, `TDDY_HOOK_TOKEN`, `TDDY_OS_USER`, `TDDY_SESSION_ID`) — a host agent inherits
+the daemon's environment, so anything else is the test runner's. On the host today the MCP, allow,
+deny, permission-prompt and preamble slots are all empty for an ordinary session; the golden pins
+that, plus the hooks file and the append-system-prompt flag.
+
+**Deviations from the planned surface (all within this node's own design):**
+
+- **`ArgvItem::Splice { splice }`** — a third template item that expands a list parameter in place.
+  The slot flags must sit *between* the permission flags and the positional prompt (`--mcp-config`
+  is variadic and swallows a bare positional), and a single-entry literal cannot carry a list.
+  `claude.yaml` has `{ splice: slots }` before `{ if: prompt, … }`; `TemplateParams::with_list`
+  binds it. An unbound list is `ToolError::UnboundPlaceholder` like an unbound placeholder.
+- **`claude.yaml` permission arm** — `{ if: dangerously_skip_permissions, then:
+  [--dangerously-skip-permissions], else: [--permission-mode, "{permission_mode}"] }` instead of the
+  PRD sketch's optional `--permission-mode`: today's argv always carries one of the two (mode
+  defaulted to `auto`), and byte-identity is the contract. Likewise `--model` is under
+  `{ if: model }` because today omits it when empty.
+- **`claude.yaml` has `env: {}`, not `CLAUDE_CODE_NO_FLICKER: "1"`.** daemon.yaml
+  `claude_cli.fullscreen: false` turns that variable off today (`claude_cli_renderer_env`); a static
+  spec env would make it unconditional and break `claude_cli_fullscreen_renderer.rs`. It stays in
+  the launcher's env until the fullscreen switch is a template parameter or moves (decide at green).
+- **`BUILTIN_SUPPORT_TOOLS`** (new const in `tddy-actions`) holds `tddy-tools.yaml`, instead of adding
+  it to #790's `BUILTIN_TOOLS`: #790's `an_override_with_a_new_id_adds_a_tool` pins the built-in id
+  set to `["jq", "rg"]`, so growing that list would break the parent's test. A host that launches
+  agents builds its registry with the new **`ToolRegistry::from_embedded(&[…])`** from
+  `BUILTIN_TOOLS ++ BUILTIN_SUPPORT_TOOLS ++ builtin_specs()`, then `load_with_owners`.
+  `tddy_coding_agent_specs::load_agent_registry(overrides_dir)` is that composition, and what the
+  daemon will call.
+- **New `ToolError` variants** `UnknownExtension { file, owner }`, `ExtensionRejected { file, owner,
+  message }`, `UnboundPlaceholder { tool, name }` — additive, as the Responsibility's refusals need.
+- **New `ToolDef` fields** `run: Option<RunSection>` and `extensions: BTreeMap<String, Value>`, both
+  `#[serde(default)]`, so #790's files (`rg.yaml`) and fixtures still parse.
+- **`HostCodingAgents`** (`spec_launch`) — the registry plus the `ToolHost` it resolves against,
+  installed with **`DaemonSessionHost::with_coding_agents`** and carried as
+  **`LaunchSessions::coding_agents`**. This is how "claude-cli spawn wiring passes the spec registry
+  through" lands; the acceptance suite injects a fixture `ToolHost` through it.
+  `HostCodingAgents::resolve(id, binary_override)` takes daemon.yaml `claude_cli.binary_path` as the
+  override until #801.
+- **Slot input/outputs**: `SlotInputs { workdir, scratch_dir, mcp_server, allowed_tools,
+  denied_tools, permission_prompt_tool, preamble, append_system_prompt_file, hooks }` and
+  `RenderedSlots { argv_extra, files }`. `argv_extra` order is append-system-prompt, allow, deny,
+  permission prompt, MCP — the hand-built order. Allow/deny render **one flag per entry**
+  (`--allowedTools a --allowedTools b`), which is what today passes; "one flag per list joined" in
+  the plan was read as that.
+- **Hooks adapter** is a trait (`slots::hooks::HooksAdapter`) with one adapter,
+  `ClaudeSettingsLocal` (`claude-settings-local`), resolved by `hooks::adapter(name)`. The crate
+  depends on `tddy-agent-backend` (workspace) for `HookCommandParams` and
+  `build_claude_hooks_settings`; no third-party crate was added.
+
+**For green (not decided here):**
+
+- `launch_host_pty` needs a public `CliSessionManager` entry that spawns a rendered argv
+  (`spawn_tool` is `pub(crate)` in `tddy-cli-sessions`) — a small additive change there.
+- The `tddy-tools` the hooks and MCP slot name: today `resolve_tddy_tools_path` prefers daemon.yaml
+  `claude_cli.tddy_tools_path`, then `CARGO_BIN_EXE_tddy-tools`, then the daemon's sibling; the
+  registry resolves `TDDY_TOOLS_BINARY`, then `PATH`. The acceptance suite sets both to one stub, so
+  either rule passes it; green must pick one without breaking the sibling lookup `./install` relies
+  on.
+- The start/resume routing is not wired: `TODO(claude-host)` at the spawn in `claude_cli_spawn.rs`
+  and at `resume_with_options` in `svc_resume_claude_cli_session.rs`. Nothing installs coding agents
+  in production yet (the daemon registration is green's `tddy-daemon` change), so every existing
+  path is unchanged.
 ### From /validate-changes
 ### From /validate-tests
 ### From /validate-prod-ready

@@ -13,7 +13,9 @@ log = "0.4"
 prost = "0.13"
 serde_json = "1"
 tddy-accounts = { path = "../tddy-accounts" }
+tddy-actions = { path = "../tddy-actions" }
 tddy-cli-sessions = { path = "../tddy-cli-sessions" }
+tddy-coding-agent-specs = { path = "../tddy-coding-agent-specs" }
 tddy-core = { path = "../tddy-core" }
 tddy-credentials = { path = "../tddy-credentials" }
 tddy-daemon-extensions = { path = "../tddy-daemon-extensions" }
@@ -45,6 +47,9 @@ tonic = { version = "0.12", default-features = false, features = ["transport"] }
 uuid = { version = "1", features = ["v4", "v7"] }
 
 [dev-dependencies]
+# `spec_launch_acceptance.rs` deserializes an agent's tool file directly (`#agent-tools 2/12`).
+serde_yaml = "0.9"
+pretty_assertions = { workspace = true }
 # `start_keepalive`'s tests pause the clock to cross the keep-alive interval instantly.
 tokio = { version = "1", features = ["test-util"] }
 tempfile = "3"
