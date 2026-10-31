@@ -245,6 +245,10 @@ pub struct NetworkSpec {
     pub loopback_allow_ports: Vec<u16>,
     /// Allow inbound on ephemeral loopback ports (Claude OAuth callback server).
     pub allow_oauth_inbound: bool,
+    /// Which hosts the jail may reach through its egress shim and host relay (`#agent-tools 3/12`).
+    /// A plan lowered from tools carries the union of their declarations; a recipe-built agent jail
+    /// carries [`crate::EgressPolicy::Any`], today's behaviour, until its own node declares hosts.
+    pub egress: crate::EgressPolicy,
 }
 
 /// cgroup v2 / resource limits (Linux).

@@ -54,6 +54,7 @@ fn a_path_hit_through_a_symlink_resolves_to_the_real_file() {
             command: "rg".into(),
             binary: PathBuf::from("/opt/homebrew/Cellar/ripgrep/14.1.1/bin/rg"),
             reads: vec![],
+            network: Default::default(),
         }]
     );
 }

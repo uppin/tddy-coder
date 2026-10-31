@@ -112,6 +112,7 @@ mod tests {
             command: "claude".to_string(),
             binary: PathBuf::from(binary),
             reads: Vec::new(),
+            network: Default::default(),
         }
     }
 

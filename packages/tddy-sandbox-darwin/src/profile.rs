@@ -630,6 +630,7 @@ mod tests {
             NetworkSpec {
                 loopback_allow_ports: vec![],
                 allow_oauth_inbound: true,
+                egress: Default::default(),
             },
         );
 
