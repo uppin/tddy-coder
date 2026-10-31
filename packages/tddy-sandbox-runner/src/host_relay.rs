@@ -12,6 +12,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 
+use crate::egress_policy::EgressGuard;
 use async_trait::async_trait;
 use bytes::Bytes;
 use futures_util::Stream;
@@ -257,6 +258,9 @@ pub struct HostRelayConfig {
     /// Initial terminal dimensions sent with `SubscribeTerminal`.
     pub initial_cols: u32,
     pub initial_rows: u32,
+    /// The jail's egress policy, checked on every `TunnelOpen` independently of the in-jail shim —
+    /// a jailed process that speaks the relay protocol directly is refused here (`#agent-tools 3/12`).
+    pub egress: EgressGuard,
 }
 
 /// What the jail's terminal reported, in the order it reported it.
@@ -306,13 +310,21 @@ impl JailTerminalRoute {
 impl HostRelayConfig {
     /// Config with the default 80x24 terminal size (suitable for headless callers and tests).
     pub fn new(session_id: impl Into<String>, terminal_sink: mpsc::UnboundedSender<Bytes>) -> Self {
+        let session_id = session_id.into();
         Self {
-            session_id: session_id.into(),
+            session_id: session_id.clone(),
             terminal_sink,
             terminal_events: None,
             initial_cols: 80,
             initial_rows: 24,
+            egress: EgressGuard::unrestricted(session_id),
         }
+    }
+
+    /// Enforce `egress` on the jail's `TunnelOpen`s rather than admitting every host.
+    pub fn with_egress(mut self, egress: EgressGuard) -> Self {
+        self.egress = egress;
+        self
     }
 
     /// Report the jail's terminal output and size changes, in order, on `events` rather than its
@@ -605,6 +617,7 @@ async fn run_host_relay_inner<H: HostToolHandler, C: SessionChannelClient>(
         .map_err(|_| "session channel closed before subscribe".to_string())?;
 
     let session_id = config.session_id.clone();
+    let egress = config.egress;
     let terminal = JailTerminalRoute {
         sink: config.terminal_sink,
         events: config.terminal_events,
@@ -775,6 +788,24 @@ async fn run_host_relay_inner<H: HostToolHandler, C: SessionChannelClient>(
                         let Some(tx) = host_tx_reader.upgrade() else {
                             continue;
                         };
+                        // Checked here as well as at the shim: the shim is the jail's own process
+                        // and cannot be what keeps the jail inside its declarations.
+                        // TODO(egress-allowlist): refuse a `TunnelOpen` whose port is not a u16
+                        // outright; port 0 is admitted by no host list, only by `any`.
+                        let port = u16::try_from(open.port).unwrap_or(0);
+                        if let Err(refusal) = egress.check(&open.host, port) {
+                            log::warn!(target: "tddy_sandbox_runner::egress", "{refusal}");
+                            let _ = tx
+                                .send(SessionFrame {
+                                    payload: Some(SessionPayload::TunnelOpenAck(TunnelOpenAck {
+                                        tunnel_id: open.tunnel_id,
+                                        ok: false,
+                                        error: refusal.to_string(),
+                                    })),
+                                })
+                                .await;
+                            continue;
+                        }
                         let (tcp_in_tx, tcp_in_rx) = mpsc::unbounded_channel::<Bytes>();
                         tunnels.insert(open.tunnel_id.clone(), tcp_in_tx);
                         spawn_tunnel(open, tcp_in_rx, tx);

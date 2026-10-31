@@ -36,4 +36,6 @@ pub use plan::{
     build_process_plan, build_runner_plan, detect_recipe_from_argv, recipe_from_name,
     route_secrets, shell_interactive_policy, ProcessPlanRequest, RunnerPlanRequest, SandboxRecipe,
 };
-pub use tool_grants::{lower_tools, BinaryLibraries, HostBinaryLibraries, ToolGrants};
+pub use tool_grants::{
+    lower_network, lower_tools, BinaryLibraries, HostBinaryLibraries, ToolGrants,
+};

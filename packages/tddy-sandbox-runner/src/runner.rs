@@ -27,12 +27,14 @@ use tddy_service::tonic_sandbox::sandbox_service_server::{
 };
 
 use tddy_sandbox::{
-    append_line, egress_log_path, session_id_from_env, SANDBOX_RUNNER_FAILURE, SANDBOX_RUNNER_LOG,
+    append_line, egress_log_path, session_id_from_env, EgressPolicy, SANDBOX_RUNNER_FAILURE,
+    SANDBOX_RUNNER_LOG,
 };
 use tddy_sandbox_recipes::{append_claude_mcp_args, claude_scratch_mcp_dir};
 // The in-jail PTY decodes the resize escape the same way every other PTY host does.
 use tddy_pty::strip_resize as strip_resize_escape;
 
+use crate::egress_policy::EgressGuard;
 use crate::harness_pty::{spawn_harness_pty, SpawnHarnessPtyParams};
 
 /// The terminal id a sandbox session's single PTY is exposed under: the reserved main terminal (the
@@ -323,6 +325,15 @@ pub struct SandboxRunnerArgs {
     /// When set, bind the in-jail egress HTTP shim on this loopback port.
     #[arg(long)]
     pub egress_shim_port: Option<u16>,
+    /// Which hosts the shim admits, as `tddy_sandbox::EgressPolicy::to_runner_arg` spells it:
+    /// `none`, `any` or `hosts:<host:port>,…` (`#agent-tools 3/12`). `any` is what every jail had
+    /// before policies existed; a plan lowered from tools always passes its own.
+    #[arg(long, default_value = "any")]
+    pub egress_policy: String,
+    /// The ids of the tools the egress policy was lowered from, named in every refusal. Repeat once
+    /// per tool.
+    #[arg(long = "egress-tool")]
+    pub egress_tool: Vec<String>,
     /// AF_UNIX socket path for the gRPC `SessionChannel` (Linux cgroups path). A UDS bound on a
     /// bind-mounted path crosses the jail's network namespace, where loopback TCP cannot. When set,
     /// it takes precedence over [`grpc_listen_port`](Self::grpc_listen_port).
@@ -1806,7 +1817,21 @@ fn egress_proxy_env(shim_port: Option<u16>) -> Vec<(String, String)> {
         .collect()
 }
 
-async fn start_egress_shim(relay: Arc<SandboxSessionRelay>, port: Option<u16>) -> Result<u16> {
+/// The guard the shim enforces, read from the runner's `--egress-policy` / `--egress-tool`.
+fn runner_egress_guard(args: &SandboxRunnerArgs) -> Result<EgressGuard> {
+    let policy = EgressPolicy::from_runner_arg(&args.egress_policy)?;
+    Ok(EgressGuard::new(
+        policy,
+        args.session_id.clone(),
+        args.egress_tool.clone(),
+    ))
+}
+
+async fn start_egress_shim(
+    relay: Arc<SandboxSessionRelay>,
+    egress: Arc<EgressGuard>,
+    port: Option<u16>,
+) -> Result<u16> {
     // Bind to the literal loopback IP, never "localhost": inside the Seatbelt jail the
     // process runs under a clean `env -i` with no resolver, so getaddrinfo("localhost")
     // fails with "nodename nor servname provided". 127.0.0.1 needs no name resolution.
@@ -1828,8 +1853,9 @@ async fn start_egress_shim(relay: Arc<SandboxSessionRelay>, port: Option<u16>) -
                 continue;
             };
             let relay = Arc::clone(&relay);
+            let egress = Arc::clone(&egress);
             tokio::spawn(async move {
-                handle_egress_shim_connection(stream, &relay).await;
+                handle_egress_shim_connection(stream, &relay, &egress).await;
             });
         }
     });
@@ -1839,6 +1865,7 @@ async fn start_egress_shim(relay: Arc<SandboxSessionRelay>, port: Option<u16>) -
 async fn handle_egress_shim_connection(
     mut stream: tokio::net::TcpStream,
     relay: &SandboxSessionRelay,
+    egress: &EgressGuard,
 ) {
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
@@ -1858,7 +1885,7 @@ async fn handle_egress_shim_connection(
     // request — no tunnel payload is buffered here and lost before the pump in handle_connect_tunnel.
     if first.starts_with("CONNECT ") {
         if let Some((host, port)) = parse_connect_target(&first) {
-            handle_connect_tunnel(stream, relay, host, port).await;
+            handle_connect_tunnel(stream, relay, egress, host, port).await;
         } else {
             let _ = stream
                 .write_all(
@@ -1874,7 +1901,7 @@ async fn handle_egress_shim_connection(
     // http:// (only https:// uses CONNECT). This is how the specialized subagent's HTTP client
     // reaches a local model server such as Ollama. Rewrite to origin form and relay to host:port.
     if let Some((head, host, port)) = rewrite_http_proxy_request(&buf[..n]) {
-        handle_http_forward(stream, relay, host, port, head).await;
+        handle_http_forward(stream, relay, egress, host, port, head).await;
         return;
     }
 
@@ -1917,13 +1944,15 @@ fn parse_connect_target(request_line: &str) -> Option<(String, u16)> {
 async fn handle_connect_tunnel(
     mut stream: tokio::net::TcpStream,
     relay: &SandboxSessionRelay,
+    egress: &EgressGuard,
     host: String,
     port: u16,
 ) {
     use tokio::io::AsyncWriteExt;
 
-    let Some((tunnel_id, in_rx)) = open_relay_tunnel(&mut stream, relay, host, port).await else {
-        return; // open_relay_tunnel already wrote a 502 to the client.
+    let Some((tunnel_id, in_rx)) = open_relay_tunnel(&mut stream, relay, egress, host, port).await
+    else {
+        return; // open_relay_tunnel already answered the client (403 or 502).
     };
 
     // CONNECT contract: acknowledge the tunnel, then TLS stays end-to-end (no initial payload).
@@ -1952,28 +1981,39 @@ async fn handle_connect_tunnel(
 async fn handle_http_forward(
     mut stream: tokio::net::TcpStream,
     relay: &SandboxSessionRelay,
+    egress: &EgressGuard,
     host: String,
     port: u16,
     head: Vec<u8>,
 ) {
-    let Some((tunnel_id, in_rx)) = open_relay_tunnel(&mut stream, relay, host, port).await else {
+    let Some((tunnel_id, in_rx)) = open_relay_tunnel(&mut stream, relay, egress, host, port).await
+    else {
         return;
     };
     pump_tunnel(stream, relay, tunnel_id, in_rx, Some(head)).await;
 }
 
-/// Open a relayed outbound tunnel to `host:port`: wait for the host to attach, register the tunnel,
-/// push `TunnelOpen`, and await the ack. On any failure a `502 Bad Gateway` is written to `stream`
-/// and `None` is returned (the runner never dials out itself — the host owns the outbound socket).
+/// Open a relayed outbound tunnel to `host:port`: check the jail's egress policy, wait for the host
+/// to attach, register the tunnel, push `TunnelOpen`, and await the ack. A host the policy does not
+/// admit is answered `403 Forbidden` naming it, and no `TunnelOpen` is sent; on any other failure a
+/// `502 Bad Gateway` is written to `stream`. Either way `None` is returned (the runner never dials
+/// out itself — the host owns the outbound socket).
 async fn open_relay_tunnel(
     stream: &mut tokio::net::TcpStream,
     relay: &SandboxSessionRelay,
+    egress: &EgressGuard,
     host: String,
     port: u16,
 ) -> Option<(String, tokio::sync::mpsc::UnboundedReceiver<Bytes>)> {
     use tokio::io::AsyncWriteExt;
     const BAD_GATEWAY: &[u8] =
         b"HTTP/1.1 502 Bad Gateway\r\nContent-Length: 0\r\nConnection: close\r\n\r\n";
+
+    if let Err(refusal) = egress.check(&host, port) {
+        boot_log("WARN", &refusal.to_string());
+        let _ = stream.write_all(&refusal.forbidden_response()).await;
+        return None;
+    }
 
     // The agent's PTY starts before the host dials in; wait for the SessionChannel to attach so an
     // early request is relayed rather than hard-failed with 502.
@@ -2201,7 +2241,8 @@ async fn run_workspace_tool_runner_inner(
     // workspace jail asks for none and stays networkless.
     let shim_port = match args.egress_shim_port {
         Some(requested) => {
-            let bound = start_egress_shim(Arc::clone(&relay), Some(requested))
+            let egress = Arc::new(runner_egress_guard(args)?);
+            let bound = start_egress_shim(Arc::clone(&relay), egress, Some(requested))
                 .await
                 .inspect_err(|e| boot_log_error("start_egress_shim", format!("{e:#}")))?;
             boot_log(
@@ -2414,7 +2455,10 @@ async fn run_sandbox_runner_inner(args: SandboxRunnerArgs) -> Result<()> {
         ),
     );
     let relay = Arc::new(SandboxSessionRelay::default());
-    let shim_port = start_egress_shim(Arc::clone(&relay), args.egress_shim_port)
+    // TODO(egress-allowlist): start no shim — and set no proxy env on the PTY — when the policy is
+    // `EgressPolicy::None`. Today every agent jail is `any`, so the shim always starts.
+    let egress = Arc::new(runner_egress_guard(&args)?);
+    let shim_port = start_egress_shim(Arc::clone(&relay), egress, args.egress_shim_port)
         .await
         .inspect_err(|e| boot_log_error("start_egress_shim", format!("{e:#}")))?;
     let egress_shim = format!("http://127.0.0.1:{shim_port}");
@@ -3500,9 +3544,13 @@ mod tests {
         let relay = Arc::new(SandboxSessionRelay::default());
         let canned = b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nok".to_vec();
         let host = FakeHost::attach(Arc::clone(&relay), canned.clone());
-        let port = start_egress_shim(Arc::clone(&relay), None)
-            .await
-            .expect("shim binds");
+        let port = start_egress_shim(
+            Arc::clone(&relay),
+            Arc::new(EgressGuard::unrestricted("shim-test")),
+            None,
+        )
+        .await
+        .expect("shim binds");
 
         // When
         let response = send_to_shim(
@@ -3539,9 +3587,13 @@ mod tests {
         // Given
         let relay = Arc::new(SandboxSessionRelay::default());
         let _host = FakeHost::attach(Arc::clone(&relay), Vec::new());
-        let port = start_egress_shim(Arc::clone(&relay), None)
-            .await
-            .expect("shim binds");
+        let port = start_egress_shim(
+            Arc::clone(&relay),
+            Arc::new(EgressGuard::unrestricted("shim-test")),
+            None,
+        )
+        .await
+        .expect("shim binds");
 
         // When
         let response = send_to_shim(port, b"GET /nonsense HTTP/1.1\r\n\r\n").await;
@@ -3551,6 +3603,129 @@ mod tests {
             String::from_utf8_lossy(&response).starts_with("HTTP/1.1 404 Not Found"),
             "an unrecognized request must 404; got: {:?}",
             String::from_utf8_lossy(&response)
+        );
+    }
+
+    // ─── egress shim: the jail's declared hosts (`#agent-tools 3/12`) ───────────
+
+    fn a_guard_admitting(host: &str, port: u16) -> Arc<EgressGuard> {
+        Arc::new(EgressGuard::new(
+            EgressPolicy::Hosts(vec![tddy_sandbox::HostPattern::new(host, port)]),
+            "shim-test",
+            vec!["curl".to_string()],
+        ))
+    }
+
+    /// A `CONNECT` to a host the jail's tools never declared is answered `403` naming it, and the
+    /// host is never asked to dial it.
+    #[tokio::test]
+    async fn egress_shim_answers_an_undeclared_connect_403_naming_the_host_and_opens_no_tunnel() {
+        // Given
+        let relay = Arc::new(SandboxSessionRelay::default());
+        let host = FakeHost::attach(Arc::clone(&relay), Vec::new());
+        let port = start_egress_shim(
+            Arc::clone(&relay),
+            a_guard_admitting("api.anthropic.com", 443),
+            None,
+        )
+        .await
+        .expect("shim binds");
+
+        // When
+        let response = send_to_shim(port, b"CONNECT api.openai.com:443 HTTP/1.1\r\n\r\n").await;
+
+        // Then
+        let body = "egress to api.openai.com:443 refused for session shim-test: not declared by tool set [curl]";
+        assert_eq!(
+            String::from_utf8_lossy(&response),
+            format!(
+                "HTTP/1.1 403 Forbidden\r\nContent-Type: text/plain\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                body.len()
+            )
+        );
+        assert_eq!(host.tunnel_target(), None);
+    }
+
+    /// The positive control: a declared host is tunnelled as before.
+    #[tokio::test]
+    async fn egress_shim_tunnels_a_connect_to_a_declared_host() {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+        // Given
+        let relay = Arc::new(SandboxSessionRelay::default());
+        let host = FakeHost::attach(Arc::clone(&relay), b"pong".to_vec());
+        let port = start_egress_shim(
+            Arc::clone(&relay),
+            a_guard_admitting("api.anthropic.com", 443),
+            None,
+        )
+        .await
+        .expect("shim binds");
+
+        // When
+        let mut client = tokio::net::TcpStream::connect(("127.0.0.1", port))
+            .await
+            .expect("connect to shim");
+        client
+            .write_all(b"CONNECT API.Anthropic.com:443 HTTP/1.1\r\n\r\n")
+            .await
+            .unwrap();
+        let mut established = [0u8; 39];
+        client.read_exact(&mut established).await.unwrap();
+        client.write_all(b"ping").await.unwrap();
+        let mut reply = Vec::new();
+        client.read_to_end(&mut reply).await.unwrap();
+
+        // Then
+        assert_eq!(
+            String::from_utf8_lossy(&established),
+            "HTTP/1.1 200 Connection Established\r\n\r\n"
+        );
+        assert_eq!(
+            host.tunnel_target(),
+            Some(("API.Anthropic.com".to_string(), 443))
+        );
+        assert_eq!(reply, b"pong");
+    }
+
+    /// The shim reads the policy the daemon lowered, and the tool set a refusal names, from its
+    /// command line.
+    #[test]
+    fn the_runner_reads_its_egress_policy_and_tool_set_from_its_args() {
+        // Given
+        let args = SandboxRunnerArgs::try_parse_from([
+            "tddy-sandbox-runner",
+            "--session-id",
+            "sess-1",
+            "--context-dir",
+            "/tmp/ctx",
+            "--tool-ipc-socket",
+            "/tmp/ipc.sock",
+            "--ready-marker",
+            "/tmp/ready",
+            "--egress-policy",
+            "hosts:127.0.0.1:8080,*.statsig.com:443",
+            "--egress-tool",
+            "curl",
+            "--egress-tool",
+            "jq",
+        ])
+        .expect("argv must parse");
+
+        // When
+        let guard = runner_egress_guard(&args).expect("the policy reads");
+
+        // Then
+        assert_eq!(
+            guard,
+            EgressGuard::new(
+                EgressPolicy::Hosts(vec![
+                    tddy_sandbox::HostPattern::new("127.0.0.1", 8080),
+                    tddy_sandbox::HostPattern::new("*.statsig.com", 443),
+                ]),
+                "sess-1",
+                vec!["curl".to_string(), "jq".to_string()],
+            )
         );
     }
 

@@ -178,6 +178,9 @@ pub fn build_workspace_tool_plan(
         &layout.scratch_dir.join("bin"),
         &tddy_sandbox_recipes::HostBinaryLibraries,
     );
+    // TODO(egress-allowlist): lower `tools` with `tddy_sandbox_recipes::lower_network` into
+    // `plan.network.egress` and `allow_oauth_inbound`, and — unless the policy is `None` — pass the
+    // runner `--egress-shim-port`, `--egress-policy` and one `--egress-tool` per tool id.
 
     let scratch_home = layout.scratch_dir.join("home");
     let scratch_tmp = layout.scratch_dir.join("tmp");

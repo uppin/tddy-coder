@@ -200,6 +200,8 @@ async fn routes_https_egress_from_jail_through_the_host_relay_to_a_tls_server() 
             append_system_prompt_file: None,
             grpc_listen_port: None,
             egress_shim_port: None,
+            egress_policy: "any".to_string(),
+            egress_tool: vec![],
             grpc_uds: Some(uds_path.clone()),
             pty_command: vec![],
             claude_arg: vec![],

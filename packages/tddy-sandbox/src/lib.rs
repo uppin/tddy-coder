@@ -10,6 +10,7 @@ mod error;
 pub mod exec_reads;
 mod log;
 pub mod materialize;
+pub mod network;
 pub mod runner_env;
 mod spec;
 pub mod tool_ipc;
@@ -50,6 +51,7 @@ pub use log::{
     SANDBOX_SPAWN_MANIFEST,
 };
 pub use materialize::{materialize_copies, materialize_secrets, materialize_symlinks};
+pub use network::{EgressPolicy, EgressPolicyArgError, HostPattern};
 pub use runner_env::{process_jail_env, scratch_runner_env};
 pub use spec::{SandboxHandle, SandboxSpec};
 pub use tool_ipc::session_id_from_env;
