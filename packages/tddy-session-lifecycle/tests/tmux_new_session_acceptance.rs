@@ -2,7 +2,7 @@
 //! tmux session in the session's worktree (or attaches when it exists) and stopping the tab detaches
 //! it while the tmux session keeps running.
 //!
-//! PRD: docs/ft/web/1-WIP/PRD-2026-11-02-tmux-new-session-tab.md (`#session-tabs 7/7`)
+//! PRD: docs/ft/web/session-terminal-tabs.md (`#session-tabs 7/7`)
 //!
 //! Each test runs a real tmux server of its own: `TMUX_TMPDIR` points tmux's socket directory at a
 //! temp dir, so the daemon's tmux and the test's tmux are one private server, and no developer's

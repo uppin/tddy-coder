@@ -28,7 +28,9 @@ can have, because nothing in the crate shows it.
   installs `test_util::RpcFamiliesNotUnderTest` with `with_rpc_families`. A suite that asserts one
   of those families — through a room or a stack link — belongs in `tddy-daemon-rpc`, whose
   `test_util::TestDaemon` installs the real `RpcHandlers`.
-- There is no `tests/common/` module. The PTY wait the CLI suites share is
+- There is no `tests/common/` module. The two tmux tab suites (`tmux_tabs_acceptance`,
+  `tmux_new_session_acceptance`) share a private tmux server and a one-session daemon through
+  `tests/support/mod.rs`. The PTY wait the CLI suites share is
   `tddy_testing_commons::wait::a_capture_showing`, with its `PTY_STUB_OUTPUT` ceiling, so the
   Telegram start suites in `tddy-telegram-control` use the same one.
 - Crates a suite needs go in `[dev-dependencies]`, never `[dependencies]` — a crate only a test

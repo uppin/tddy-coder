@@ -148,6 +148,12 @@ tmux server of the **session's OS user** — the sessions that user started in t
   match the name exactly; `-T clipboard` is a per-client feature telling tmux this client accepts
   OSC 52, so tmux copy-mode copies are forwarded to the browser. **No tmux option on the user's
   server is changed.**
+- **`StartTerminalSession`** with `kind = "tmux-new"` and `tmux_session = <name>` starts a tmux
+  client on a **new** session: `tmux -T clipboard new-session -A -s <name> -c <worktree>`, spawned
+  exactly as the attach tab is. The name is trimmed first; `-A` attaches instead of failing when a
+  session of that name appeared meanwhile. The worktree is resolved as for any started tab. The tab is
+  then a tmux tab like an attached one — listed with kind `"tmux-new"` and its `tmux_session`, and
+  stopping it detaches, so the new session outlives the tab.
 - **`ListTerminalSessions`** lists the tab with kind `"tmux"` and `TerminalSessionInfo.tmux_session`
   (field 4) naming the tmux session, so every viewer labels it the same.
 - **`StopTerminalSession`** ends the tab's tmux client only, which **detaches** it: the tmux session
@@ -163,9 +169,10 @@ Refusals, all before anything spawns:
 |---|---|
 | `kind = "tmux"` with an empty `tmux_session` | `INVALID_ARGUMENT` |
 | a daemon that cannot become the session's OS user (not root, another user) | `FAILED_PRECONDITION` with the kernel's `CannotBecomeUser` message naming both accounts — the tab is **never** started as the daemon user |
-| a name tmux does not list for that user | `NOT_FOUND` |
+| `kind = "tmux-new"` with an empty `tmux_session`, a whitespace-only one, or one containing `:` or `.` (tmux's target separators) | `INVALID_ARGUMENT` |
+| a name tmux does not list for that user (`kind = "tmux"`) | `NOT_FOUND` |
 | tmux not installed | `FAILED_PRECONDITION` naming tmux |
-| a **room-backed** (tddy-coder) session — `ListTmuxSessions` or a `tmux` kind | `FAILED_PRECONDITION` "this session's terminals run bash only; tmux is not offered here" |
+| a **room-backed** (tddy-coder) session — `ListTmuxSessions`, a `tmux` or a `tmux-new` kind | `FAILED_PRECONDITION` "this session's terminals run bash only; tmux is not offered here" |
 
 A tmux tab on a stopped session starts in the worktree the session's record names, as every other
 tab does. Like the other tabs it is not persisted across a daemon restart — but the tmux session it

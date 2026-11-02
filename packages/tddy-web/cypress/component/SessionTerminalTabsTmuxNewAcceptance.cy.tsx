@@ -4,7 +4,7 @@
  * "+" → "New tmux session…" opens a name field prefilled with a name no listed tmux session has;
  * Enter starts a `tmux-new` terminal and focuses its `tmux: <name>` tab, Escape cancels.
  *
- * PRD: docs/ft/web/1-WIP/PRD-2026-11-02-tmux-new-session-tab.md (`#session-tabs 7/7`)
+ * PRD: docs/ft/web/session-terminal-tabs.md (`#session-tabs 7/7`)
  */
 
 import React from "react";

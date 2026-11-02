@@ -1,6 +1,6 @@
 //! `TerminalKind::from_request` for a tmux terminal on a new tmux session.
 //!
-//! PRD: docs/ft/web/1-WIP/PRD-2026-11-02-tmux-new-session-tab.md (`#session-tabs 7/7`)
+//! PRD: docs/ft/web/session-terminal-tabs.md (`#session-tabs 7/7`)
 
 use tddy_rpc::Code;
 use tddy_terminal_rpc::TerminalKind;

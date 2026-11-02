@@ -9,7 +9,7 @@ menu opens additional terminals, each a closable tab. An extra terminal runs the
 (**Bash**), a registered CLI harness (Claude CLI, Cursor CLI, OpenCode, Muse Code, Warp) — an
 **agent tab**: a second, interactive agent in the same worktree as the session's main agent — or a
 **tmux tab**: a client attached to a tmux session already running on the session's host for the
-session's OS user. The agents share the checkout and do not talk to each other; the operator
+session's OS user, or a client on a tmux session started in the session's worktree. The agents share the checkout and do not talk to each other; the operator
 coordinates them. Switching
 tabs never tears a terminal down — every terminal of the focused session stays mounted and keeps
 streaming in the background (the same keep-alive model the per-session `SessionRuntimeRegistry`
@@ -80,6 +80,11 @@ styled like the inspector tab strip (`InspectorTabs`).
     installed) shows its reason inline (`sessions-terminal-tab-new-tmux-error`). The bash and harness
     items are unaffected by whatever state the tmux listing is in. A tool session's menu has no tmux
     section.
+  - **New tmux session…** heads the tmux section (`sessions-terminal-tab-new-tmux-new`). Choosing it
+    shows an inline name field (`sessions-terminal-tab-new-tmux-name`) prefilled with the session's
+    short id, or `<short-id>-2`, `-3`, … when a listed tmux session has the name. Enter calls
+    `StartTerminalSession` with kind `tmux-new` and the typed name and opens a **tmux: <name>** tab;
+    Escape cancels and keeps the menu open; closing the menu drops an unsent name.
   - **Closing a tmux tab detaches** its client: the tmux session keeps running and can be attached
     again from the menu or from any real terminal. tmux runs on the alternate screen, which a
     reattaching browser's snapshot open carries, so the tmux screen renders correctly on reload.
@@ -189,6 +194,9 @@ without resuming the agent first.
     opens a **tmux: <name>** tab attached to it, which every viewer lists under the same label.
     Closing it detaches, leaving the tmux session running. The section shows **No tmux sessions**
     for an empty listing and the refusal's reason when tmux is unavailable.
+12. **New tmux session…** asks for a name (prefilled with one no listed tmux session has) and opens a
+    **tmux: <name>** tab on a new tmux session in the session's worktree; closing it detaches,
+    leaving the session running.
 
 ## Non-goals
 
@@ -201,7 +209,7 @@ without resuming the agent first.
 - A model, first prompt or provider account for an agent tab; agent tabs inside a sandboxed
   session's jail; agent-to-agent messaging.
 - Per-terminal control leases (the mutex stays per-session).
-- Creating or killing a tmux session from tddy; tmux inside a sandboxed session's jail; tmux on a host
+- Killing a tmux session from tddy; tmux layouts or windows; tmux inside a sandboxed session's jail; tmux on a host
   other than the session's.
 
 ## Related
