@@ -169,6 +169,7 @@ impl CliSessionManager {
         let exit_settlements = Arc::clone(&self.exit_settlements);
         let managed_workflows = Arc::clone(&self.managed_workflows);
         let exposed_terminals = Arc::clone(&self.exposed_terminals);
+        let main_recordings = Arc::clone(&self.main_recordings);
         let task_registry = self.task_registry.clone();
         tokio::spawn(async move {
             let task = match task_registry.get(&task_id).await {
@@ -183,6 +184,16 @@ impl CliSessionManager {
                 if status_rx.changed().await.is_err() {
                     break;
                 }
+            }
+            // The recording's last snapshot is the terminal's last output, and it is written before
+            // the terminal leaves the index.
+            if terminal_id == MAIN_TERMINAL_ID {
+                super::capture_recorder::finish_main_recording(
+                    &main_recordings,
+                    &session_id,
+                    &task_id,
+                )
+                .await;
             }
             // The process has exited and its output is complete. The hook finishes before the
             // terminal leaves the index, and before a waiting resume goes on.

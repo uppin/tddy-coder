@@ -9,6 +9,7 @@
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
+use std::time::Duration;
 
 use tddy_task::{TaskId, TaskRegistry};
 use tokio::sync::{broadcast, RwLock};
@@ -111,6 +112,10 @@ pub struct CliSessionManager {
     /// The exit hooks of terminals spawned with one, until each has finished — what
     /// [`Self::exit_hook_settled`] waits on.
     exit_settlements: ExitSettlements,
+    /// The sessions whose `main` terminal is recorded to disk, and where.
+    main_recordings: capture_recorder::MainRecordings,
+    /// How often a running `main` terminal is rewritten to its recording.
+    recording_interval: Duration,
 }
 
 /// Backward-compatible alias for [`CliSessionManager`].
@@ -140,6 +145,8 @@ impl CliSessionManager {
             managed_workflows: Arc::new(RwLock::new(HashMap::new())),
             exposed_terminals: Arc::new(RwLock::new(HashMap::new())),
             exit_settlements: Arc::new(RwLock::new(HashMap::new())),
+            main_recordings: Arc::new(RwLock::new(HashMap::new())),
+            recording_interval: RECORDING_INTERVAL,
         }
     }
 
