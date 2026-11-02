@@ -159,10 +159,10 @@ Recorded at the contract commit (2026-11-02), scoped to `tddy-terminal-rpc`, `td
 - [x] Run acceptance tests (verify they fail)
 - [x] USER REVIEW — acceptance tests — waived by the developer 2026-11-02 (reviewed with the stack at the end of pass 2)
 - [x] TDD Red — write failing unit/integration tests
-- [ ] TDD Green — implement with quality code
+- [x] TDD Green — implement with quality code
 - [ ] Update documentation with progress
 - [ ] Repeat Red→Green→Update cycle until feature complete
-- [ ] Run the touched packages' tests (`./test -p {package}` per package) — verify 100% pass
+- [x] Run the touched packages' tests (`./test -p {package}` per package) — verify 100% pass
 - [ ] Validate changes (/validate-changes)
 - [ ] Refactor issues from change validation
 - [ ] USER REVIEW — development complete
@@ -173,7 +173,7 @@ Recorded at the contract commit (2026-11-02), scoped to `tddy-terminal-rpc`, `td
 - [ ] Analyze code quality (/analyze-clean-code)
 - [ ] Refactor code quality issues
 - [ ] Final validation (/validate-changes)
-- [ ] Linting and formatting (`cargo clippy -p {package} -- -D warnings`, `cargo fmt`)
+- [x] Linting and formatting (`cargo clippy -p {package} -- -D warnings`, `cargo fmt`)
 - [ ] USER REVIEW — scope developed, every gap approved: ready to wrap
 
 ## Refactoring Needed

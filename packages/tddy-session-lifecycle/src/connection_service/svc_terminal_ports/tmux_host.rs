@@ -48,8 +48,16 @@ pub(super) fn tmux_attach_argv(binary: &str, name: &str) -> Vec<String> {
 /// A tmux session name a "tmux-new" tab may create: trimmed, non-empty, and free of the `:` and `.`
 /// tmux reads as target separators. Anything else is `INVALID_ARGUMENT`.
 pub(super) fn tmux_session_name(raw: &str) -> Result<String, Status> {
-    // TODO(tmux-new): implement
-    Ok(raw.to_string())
+    let name = raw.trim();
+    if name.is_empty() {
+        return Err(Status::invalid_argument("a new tmux session needs a name"));
+    }
+    if name.contains([':', '.']) {
+        return Err(Status::invalid_argument(format!(
+            "a tmux session name may not contain ':' or '.': {name:?}"
+        )));
+    }
+    Ok(name.to_string())
 }
 
 /// The argv of a tab's client on a new tmux session `name` in `worktree`; `-A` attaches instead
@@ -59,9 +67,17 @@ pub(super) fn tmux_new_session_argv(
     name: &str,
     worktree: &std::path::Path,
 ) -> Vec<String> {
-    // TODO(tmux-new): implement
-    let _ = (binary, name, worktree, tmux_session_name(name));
-    Vec::new()
+    vec![
+        binary.to_string(),
+        "-T".to_string(),
+        "clipboard".to_string(),
+        "new-session".to_string(),
+        "-A".to_string(),
+        "-s".to_string(),
+        name.to_string(),
+        "-c".to_string(),
+        worktree.to_string_lossy().into_owned(),
+    ]
 }
 
 /// The sessions `tmux list-sessions -F LIST_SESSIONS_FORMAT` printed.

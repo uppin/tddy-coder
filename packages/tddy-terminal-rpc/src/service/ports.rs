@@ -96,18 +96,27 @@ impl TerminalKind {
     /// surrounding whitespace is ignored. A tmux kind without a session is `INVALID_ARGUMENT`.
     pub fn from_request(kind: &str, tmux_session: &str) -> Result<TerminalKind, Status> {
         let kind = kind.trim();
-        if kind == TMUX_KIND || kind == TMUX_NEW_KIND {
+        if kind == TMUX_KIND {
             let session = tmux_session.trim();
             if session.is_empty() {
                 return Err(Status::invalid_argument(
                     "a tmux terminal names the tmux session it attaches to",
                 ));
             }
-            let session = session.to_string();
-            return Ok(if kind == TMUX_KIND {
-                TerminalKind::Tmux { session }
-            } else {
-                TerminalKind::TmuxNew { session }
+            return Ok(TerminalKind::Tmux {
+                session: session.to_string(),
+            });
+        }
+        if kind == TMUX_NEW_KIND {
+            // Only the empty name is refused here. The name is trimmed and validated by the host's
+            // `tmux_session_name`, so a whitespace-only name is refused with that message.
+            if tmux_session.is_empty() {
+                return Err(Status::invalid_argument(
+                    "a tmux terminal on a new session names the session it creates",
+                ));
+            }
+            return Ok(TerminalKind::TmuxNew {
+                session: tmux_session.to_string(),
             });
         }
         Ok(match kind {

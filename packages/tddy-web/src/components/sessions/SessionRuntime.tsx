@@ -264,6 +264,7 @@ export function SessionRuntime({
         onSelect={selectTerminal}
         onOpen={open}
         tmux={tmux}
+        sessionId={runtime.sessionId}
         onClose={close}
         sessionType={sessionType}
         childSessions={childSessions}
