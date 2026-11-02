@@ -3,11 +3,14 @@ import React, {
   useCallback,
   useEffect,
   useImperativeHandle,
+  useMemo,
   useRef,
   useState,
 } from "react";
 import { Terminal, FitAddon } from "ghostty-web";
 import { newGhosttyInstance } from "../lib/ghosttyInstance";
+import { copyToClipboard } from "../lib/clipboard";
+import { createOsc52Recognizer } from "../lib/osc52";
 import { watchDevicePixelRatio } from "../lib/terminalDprWatch";
 import {
   canPitchIn,
@@ -252,6 +255,12 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
     const [ready, setReady] = useState(false);
     const [displayFontSize, setDisplayFontSize] = useState(fontSize);
 
+    // One OSC 52 recognizer per terminal instance: it sees every byte written, and copies clipboard writes.
+    const osc52Tap = useMemo(
+      () => createOsc52Recognizer((text) => void copyToClipboard(text)),
+      [],
+    );
+
     const disposablesRef = useRef<{ dispose: () => void }[]>([]);
     /** Accumulates `deltaY` for trackpad pinch (Ctrl+wheel); touch pinch uses separate logic. */
     const wheelPinchAccumRef = useRef(0);
@@ -463,6 +472,7 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
         if (initialContent) {
           contentRevisionRef.current++;
           term.write(initialContent);
+          osc52Tap(initialContent);
         }
       }
 
@@ -488,6 +498,7 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
       if (ready && initialContent && termRef.current) {
         contentRevisionRef.current++;
         termRef.current.write(initialContent);
+        osc52Tap(initialContent);
       }
     }, [initialContent, ready]);
 
@@ -1357,6 +1368,7 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
         }
         contentRevisionRef.current++;
         termRef.current?.write(data);
+        osc52Tap(data);
       },
       clear() {
         contentRevisionRef.current++;
