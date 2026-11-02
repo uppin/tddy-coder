@@ -15,6 +15,7 @@ use std::collections::BTreeMap;
 use std::fmt;
 use std::sync::Arc;
 
+use super::{OpenCodeModels, WarpResumeToken};
 use crate::backend::BackendModels;
 
 /// How an agent's model-listing command's stdout becomes its model catalogue.
@@ -60,9 +61,12 @@ impl LaunchAdapters {
     /// Every launch adapter this build registers: [`super::OPENCODE_MODELS`]
     /// ([`super::OpenCodeModels`]) and [`super::WARP_RESUME_TOKEN`] ([`super::WarpResumeToken`]).
     pub fn builtin() -> Self {
-        // TODO(harness-clis): implement — register `OpenCodeModels` and `WarpResumeToken` under
-        // their `name()`.
-        todo!("harness-clis: LaunchAdapters::builtin")
+        let models: Arc<dyn ModelsAdapter> = Arc::new(OpenCodeModels);
+        let resume_token: Arc<dyn ResumeTokenAdapter> = Arc::new(WarpResumeToken);
+        Self {
+            models: BTreeMap::from([(models.name().to_string(), models)]),
+            resume_tokens: BTreeMap::from([(resume_token.name().to_string(), resume_token)]),
+        }
     }
 
     /// The models adapter registered as `name`.

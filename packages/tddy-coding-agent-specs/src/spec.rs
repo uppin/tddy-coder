@@ -5,7 +5,7 @@ use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
 use tddy_actions::tool::{ArgvItem, ExtensionOwner, RunSection, ToolDef, Transport};
-use tddy_agent_backend::adapters::AdapterRegistry;
+use tddy_agent_backend::adapters::{AdapterRegistry, LaunchAdapters};
 use thiserror::Error;
 
 use crate::headless::validate_headless;
@@ -26,13 +26,37 @@ impl ExtensionOwner for CodingAgentExtension {
     }
 
     fn validate(&self, tool_id: &str, section: &serde_yaml::Value) -> Result<(), String> {
-        // TODO(harness-clis): and refuse a `models.adapter` / `resume.adapter` that
-        // `tddy_agent_backend::adapters::LaunchAdapters::builtin()` does not hold, a `models` with
-        // one of `list_command`/`adapter` but not the other, and an empty `placements`.
         let agent = parse_section(tool_id, section).map_err(|error| match error {
             SpecError::Invalid { message, .. } => message,
             other => other.to_string(),
         })?;
+        let launch_adapters = LaunchAdapters::builtin();
+        if let Some(name) = &agent.models.adapter {
+            if launch_adapters.models(name).is_none() {
+                return Err(format!(
+                    "models.adapter {name} is not a launch adapter this build has"
+                ));
+            }
+        }
+        if agent.models.list_command.is_some() != agent.models.adapter.is_some() {
+            return Err(
+                "models.list_command and models.adapter are declared together or not at all"
+                    .to_string(),
+            );
+        }
+        if let Some(resume) = &agent.resume {
+            if launch_adapters.resume_token(&resume.adapter).is_none() {
+                return Err(format!(
+                    "resume.adapter {} is not a launch adapter this build has",
+                    resume.adapter
+                ));
+            }
+        }
+        if agent.placements.is_empty() {
+            return Err(
+                "placements is empty: an agent runs on at least one of host, jail".to_string(),
+            );
+        }
         if let Some(headless) = &agent.headless {
             validate_headless(tool_id, headless, &AdapterRegistry::builtin())
                 .map_err(|error| error.to_string())?;
@@ -146,9 +170,14 @@ impl CodingAgentSpec {
     /// agent and every placement it declares — a sandboxed `warp-cli` start is refused with it
     /// (`#agent-tools 8/12`).
     pub fn require_placement(&self, placement: Placement) -> Result<(), PlacementError> {
-        // TODO(harness-clis): implement.
-        let _ = placement;
-        todo!("harness-clis: CodingAgentSpec::require_placement")
+        if self.agent.placements.contains(&placement) {
+            return Ok(());
+        }
+        Err(PlacementError::NotPlaced {
+            tool: self.id.clone(),
+            placement,
+            placements: self.agent.placements.clone(),
+        })
     }
 }
 
@@ -490,6 +519,107 @@ mod placement_tests {
         assert_eq!(
             admitted,
             (vec![Placement::Host, Placement::Jail], Ok(()), Ok(()))
+        );
+    }
+}
+
+#[cfg(test)]
+mod extension_validation_tests {
+    use pretty_assertions::assert_eq;
+    use tddy_actions::tool::ExtensionOwner;
+
+    use super::CodingAgentExtension;
+
+    /// The `coding_agent` section of the built-in OpenCode spec, as YAML.
+    fn the_opencode_section() -> serde_yaml::Value {
+        let document: serde_yaml::Value = serde_yaml::from_str(crate::OPENCODE_SPEC_YAML).unwrap();
+        document["extensions"]["coding_agent"].clone()
+    }
+
+    fn validate(section: &serde_yaml::Value) -> Result<(), String> {
+        CodingAgentExtension.validate("opencode", section)
+    }
+
+    #[test]
+    fn the_builtin_opencode_section_validates() {
+        // When
+        let outcome = validate(&the_opencode_section());
+
+        // Then
+        assert_eq!(outcome, Ok(()));
+    }
+
+    #[test]
+    fn a_models_adapter_the_build_does_not_hold_is_refused_naming_it() {
+        // Given
+        let mut section = the_opencode_section();
+        section["models"]["adapter"] = serde_yaml::Value::String("no-such-adapter".to_string());
+
+        // When
+        let refused = validate(&section);
+
+        // Then
+        assert_eq!(
+            refused,
+            Err(
+                "models.adapter no-such-adapter is not a launch adapter this build has".to_string()
+            )
+        );
+    }
+
+    #[test]
+    fn a_models_list_command_without_its_adapter_is_refused() {
+        // Given
+        let mut section = the_opencode_section();
+        section["models"]
+            .as_mapping_mut()
+            .unwrap()
+            .remove("adapter");
+
+        // When
+        let refused = validate(&section);
+
+        // Then
+        assert_eq!(
+            refused,
+            Err(
+                "models.list_command and models.adapter are declared together or not at all"
+                    .to_string()
+            )
+        );
+    }
+
+    #[test]
+    fn a_resume_adapter_the_build_does_not_hold_is_refused_naming_it() {
+        // Given
+        let mut section = the_opencode_section();
+        section["resume"] = serde_yaml::from_str("adapter: no-such-adapter").unwrap();
+
+        // When
+        let refused = validate(&section);
+
+        // Then
+        assert_eq!(
+            refused,
+            Err(
+                "resume.adapter no-such-adapter is not a launch adapter this build has".to_string()
+            )
+        );
+    }
+
+    #[test]
+    fn an_empty_placements_list_is_refused() {
+        // Given
+        let mut section = the_opencode_section();
+        section["placements"] = serde_yaml::Value::Sequence(Vec::new());
+
+        // When
+        let refused = validate(&section);
+
+        // Then
+        assert_eq!(
+            refused,
+            Err("placements is empty: an agent runs on at least one of host, jail".to_string())
         );
     }
 }

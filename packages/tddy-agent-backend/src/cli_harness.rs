@@ -16,7 +16,8 @@
 // (`opencode-models` for the listed kind), the session type `spec_for_session_type`. Deleting a
 // file needs the developer's approval (CLAUDE.md § ASK).
 
-use crate::backend::{claude_cli_models, cursor_cli_models, BackendModel, BackendModels};
+use crate::adapters::{ModelsAdapter, OpenCodeModels};
+use crate::backend::{claude_cli_models, cursor_cli_models, BackendModels};
 use crate::cli_harness_muse::MUSE_CLI;
 use crate::cli_harness_warp::WARP_CLI;
 use crate::provider_route::Harness;
@@ -138,20 +139,7 @@ pub fn cli_harness_requires_model(session_type: &str) -> bool {
 /// `opencode models` does. Blank lines are skipped; the first model is the default.
 #[must_use]
 pub fn models_from_listing(stdout: &str) -> BackendModels {
-    let models: Vec<BackendModel> = stdout
-        .lines()
-        .map(str::trim)
-        .filter(|id| !id.is_empty())
-        .map(|id| BackendModel::new(id, id))
-        .collect();
-    let default_model = models
-        .first()
-        .map(|model| model.id.clone())
-        .unwrap_or_default();
-    BackendModels {
-        models,
-        default_model,
-    }
+    OpenCodeModels.parse_models(stdout)
 }
 
 /// A value with its surrounding whitespace removed, or `None` when nothing but whitespace is left.

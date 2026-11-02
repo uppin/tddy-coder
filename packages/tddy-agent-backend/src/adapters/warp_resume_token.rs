@@ -6,8 +6,8 @@ use super::launch::ResumeTokenAdapter;
 /// [`WarpResumeToken`]'s name.
 pub const WARP_RESUME_TOKEN: &str = "warp-resume-token";
 
-/// Scrapes a Warp session's terminal output, escape sequences and CR line ends included — what
-/// `cli_harness_warp::resume_token_from_output` reads today.
+/// Scrapes a Warp session's terminal output, escape sequences and CR line ends included: the token
+/// of the last `warp --resume <TOKEN>` line the output holds, `None` when it holds none.
 #[derive(Debug, Clone, Copy, Default)]
 pub struct WarpResumeToken;
 
@@ -17,10 +17,56 @@ impl ResumeTokenAdapter for WarpResumeToken {
     }
 
     fn resume_token(&self, output: &[u8]) -> Option<String> {
-        // TODO(harness-clis): implement — `cli_harness_warp::resume_token_from_output` and its
-        // escape-sequence stripping move here when `cli_harness_warp.rs` is deleted.
-        let _ = output;
-        todo!("harness-clis: WarpResumeToken::resume_token")
+        let plain = String::from_utf8_lossy(&without_escape_sequences(output)).replace('\r', "\n");
+        let mut token = None;
+        for line in plain.lines() {
+            let words: Vec<&str> = line.split_whitespace().collect();
+            for window in words.windows(3) {
+                if let ["warp", "--resume", found] = window {
+                    token = Some(found.to_string());
+                }
+            }
+        }
+        token
+    }
+}
+
+const ESC: u8 = 0x1b;
+const BEL: u8 = 0x07;
+
+/// `output` without its escape sequences: CSI (`ESC [` … a final byte), the string sequences OSC,
+/// DCS, SOS, PM and APC (closed by BEL or `ESC \`), and any other escape (its intermediate bytes,
+/// then one final byte).
+fn without_escape_sequences(output: &[u8]) -> Vec<u8> {
+    let mut plain = Vec::with_capacity(output.len());
+    let mut bytes = output.iter().copied();
+    while let Some(byte) = bytes.next() {
+        if byte != ESC {
+            plain.push(byte);
+            continue;
+        }
+        match bytes.next() {
+            Some(b'[') => {
+                bytes.find(|b| (0x40..=0x7e).contains(b));
+            }
+            Some(b']' | b'P' | b'X' | b'^' | b'_') => skip_string(&mut bytes),
+            Some(0x20..=0x2f) => {
+                bytes.find(|b| (0x30..=0x7e).contains(b));
+            }
+            Some(_) | None => {}
+        }
+    }
+    plain
+}
+
+/// Consumes a string sequence up to and including its terminator: BEL, or `ESC \`.
+fn skip_string(bytes: &mut impl Iterator<Item = u8>) {
+    let mut after_esc = false;
+    for byte in bytes {
+        if byte == BEL || (after_esc && byte == b'\\') {
+            return;
+        }
+        after_esc = byte == ESC;
     }
 }
 

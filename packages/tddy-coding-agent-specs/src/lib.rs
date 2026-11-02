@@ -67,9 +67,14 @@ pub fn builtin_specs() -> Vec<(&'static str, &'static str)> {
 /// The one place a session type meets a spec id: the launchers and harness profiles resolve
 /// through it instead of the `CliHarness` table.
 pub fn spec_for_session_type(session_type: &str) -> Option<&'static str> {
-    // TODO(harness-clis): implement.
-    let _ = session_type;
-    todo!("harness-clis: spec_for_session_type")
+    match session_type {
+        "claude-cli" => Some("claude"),
+        "cursor-cli" => Some("cursor"),
+        "opencode-cli" => Some("opencode"),
+        "muse-cli" => Some("muse"),
+        "warp-cli" => Some("warp"),
+        _ => None,
+    }
 }
 
 /// The registry a host that launches coding agents uses: `tddy-actions`' built-in and support

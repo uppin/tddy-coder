@@ -39,9 +39,19 @@ pub struct HarnessLaunch<'a> {
 /// with `resume_token` bound when a non-blank one was recorded. A resume binds neither model nor
 /// prompt — the agent continues the session it had.
 pub fn harness_template_params(launch: &HarnessLaunch<'_>) -> TemplateParams {
-    // TODO(harness-clis): implement.
-    let _ = launch;
-    todo!("harness-clis: harness_template_params")
+    if launch.resume {
+        return TemplateParams::new()
+            .with_flag("resume", true)
+            .with_opt("resume_token", non_blank(launch.resume_token));
+    }
+    TemplateParams::new()
+        .with_opt("model", non_blank(Some(launch.model)))
+        .with_opt("prompt", non_blank(launch.prompt))
+}
+
+/// `value` trimmed, or `None` when nothing but whitespace is left.
+fn non_blank(value: Option<&str>) -> Option<&str> {
+    value.map(str::trim).filter(|value| !value.is_empty())
 }
 
 /// `Ok` when `spec`'s placements include `placement`; otherwise `FAILED_PRECONDITION` naming the
@@ -52,10 +62,11 @@ pub fn require_spec_placement(
     session_type: &str,
     placement: Placement,
 ) -> Result<(), Status> {
-    // TODO(harness-clis): implement — `spec.require_placement(placement)`, its error as the
-    // message after "the sandbox runner does not host {session_type}: ".
-    let _ = (spec, session_type, placement);
-    todo!("harness-clis: require_spec_placement")
+    spec.require_placement(placement).map_err(|error| {
+        Status::failed_precondition(format!(
+            "the sandbox runner does not host {session_type}: {error}"
+        ))
+    })
 }
 
 #[cfg(test)]

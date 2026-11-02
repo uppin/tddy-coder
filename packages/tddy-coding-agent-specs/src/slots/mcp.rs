@@ -38,8 +38,10 @@ pub fn render_mcp(
             let path = placed_path(path, home)?;
             Ok((registration(format, server, path), Vec::new()))
         }
-        // TODO(harness-clis): an `unsupported` slot given a tool server is refused in `slots::render`.
-        McpSlot::Unsupported => todo!("harness-clis: McpSlot::Unsupported in render_mcp"),
+        // `slots::render` refuses an unsupported slot given a tool server before it gets here.
+        McpSlot::Unsupported => {
+            unreachable!("an unsupported mcp slot registers no server: slots::render refuses it")
+        }
     }
 }
 

@@ -15,6 +15,7 @@
 // `resume_token_from_output` is the `warp-resume-token` adapter
 // (`crate::adapters::WarpResumeToken`).
 
+use crate::adapters::{ResumeTokenAdapter, WarpResumeToken};
 use crate::backend::BackendModels;
 use crate::cli_harness::{CliHarness, CliLaunch, CliModelSource};
 use crate::provider_route::Harness;
@@ -50,56 +51,7 @@ fn warp_argv(launch: &CliLaunch<'_>) -> Vec<String> {
 /// their escape sequences; `None` when the run printed none.
 #[must_use]
 pub fn resume_token_from_output(output: &[u8]) -> Option<String> {
-    let plain = String::from_utf8_lossy(&without_escape_sequences(output)).replace('\r', "\n");
-    let mut token = None;
-    for line in plain.lines() {
-        let words: Vec<&str> = line.split_whitespace().collect();
-        for window in words.windows(3) {
-            if let ["warp", "--resume", found] = window {
-                token = Some(found.to_string());
-            }
-        }
-    }
-    token
-}
-
-const ESC: u8 = 0x1b;
-const BEL: u8 = 0x07;
-
-/// `output` without its escape sequences: CSI (`ESC [` … a final byte), the string sequences OSC,
-/// DCS, SOS, PM and APC (closed by BEL or `ESC \`), and any other escape (its intermediate bytes,
-/// then one final byte).
-fn without_escape_sequences(output: &[u8]) -> Vec<u8> {
-    let mut plain = Vec::with_capacity(output.len());
-    let mut bytes = output.iter().copied();
-    while let Some(byte) = bytes.next() {
-        if byte != ESC {
-            plain.push(byte);
-            continue;
-        }
-        match bytes.next() {
-            Some(b'[') => {
-                bytes.find(|b| (0x40..=0x7e).contains(b));
-            }
-            Some(b']' | b'P' | b'X' | b'^' | b'_') => skip_string(&mut bytes),
-            Some(0x20..=0x2f) => {
-                bytes.find(|b| (0x30..=0x7e).contains(b));
-            }
-            Some(_) | None => {}
-        }
-    }
-    plain
-}
-
-/// Consumes a string sequence up to and including its terminator: BEL, or `ESC \`.
-fn skip_string(bytes: &mut impl Iterator<Item = u8>) {
-    let mut after_esc = false;
-    for byte in bytes {
-        if byte == BEL || (after_esc && byte == b'\\') {
-            return;
-        }
-        after_esc = byte == ESC;
-    }
+    WarpResumeToken.resume_token(output)
 }
 
 /// The Warp descriptor, registered in [`crate::cli_harness::cli_harnesses`].

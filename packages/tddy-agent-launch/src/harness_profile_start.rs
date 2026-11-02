@@ -50,8 +50,6 @@ pub fn profile_start(profile: &HarnessProfile) -> Result<ProfileStart, String> {
 /// session type through `tddy_coding_agent_specs::spec_for_session_type` (`opencode-cli` →
 /// `opencode`); `None` for a profile that starts a tool session, or names no harness.
 pub fn profile_spec_id(profile: &HarnessProfile) -> Option<&'static str> {
-    // TODO(harness-clis): implement — `profile_start(profile)`'s `session_type`, resolved through
-    // `spec_for_session_type`; the CLI start then launches from that spec.
-    let _ = profile;
-    todo!("harness-clis: profile_spec_id")
+    let start = profile_start(profile).ok()?;
+    tddy_coding_agent_specs::spec_for_session_type(start.session_type.as_deref()?)
 }

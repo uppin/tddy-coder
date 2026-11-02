@@ -71,9 +71,6 @@ policy:
   sysctl_read: true
   exec_paths: [/usr/bin, /usr/libexec, /bin, /sbin, /System, /Library, /Applications, /opt/homebrew, /opt/local]
 # OpenCode reaches only its route's base URL, which the launcher adds; it declares no host of its own.
-#
-# TODO(harness-clis): uncomment when the jail launcher lands. Until `Egress` deserializes
-# (`#agent-tools 3/12`), a `network:` section here would make every load of this file panic.
-# network:
-#   egress:
-#     hosts: []
+network:
+  egress:
+    hosts: []

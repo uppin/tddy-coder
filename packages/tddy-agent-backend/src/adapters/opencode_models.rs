@@ -2,7 +2,7 @@
 //! first the default (`#agent-tools 8/12`). Named by `opencode.yaml`'s `coding_agent.models`.
 
 use super::launch::ModelsAdapter;
-use crate::backend::BackendModels;
+use crate::backend::{BackendModel, BackendModels};
 
 /// [`OpenCodeModels`]'s name.
 pub const OPENCODE_MODELS: &str = "opencode-models";
@@ -18,10 +18,20 @@ impl ModelsAdapter for OpenCodeModels {
     }
 
     fn parse_models(&self, stdout: &str) -> BackendModels {
-        // TODO(harness-clis): implement — `cli_harness::models_from_listing` moves here when the
-        // `CliHarness` table is deleted.
-        let _ = stdout;
-        todo!("harness-clis: OpenCodeModels::parse_models")
+        let models: Vec<BackendModel> = stdout
+            .lines()
+            .map(str::trim)
+            .filter(|id| !id.is_empty())
+            .map(|id| BackendModel::new(id, id))
+            .collect();
+        let default_model = models
+            .first()
+            .map(|model| model.id.clone())
+            .unwrap_or_default();
+        BackendModels {
+            models,
+            default_model,
+        }
     }
 }
 

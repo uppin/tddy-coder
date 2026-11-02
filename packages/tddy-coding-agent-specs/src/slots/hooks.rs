@@ -70,29 +70,29 @@ impl HooksAdapter for UnsupportedHooks {
         UNSUPPORTED_HOOKS
     }
 
-    fn render(&self, workdir: &Path, params: &HookCommandParams<'_>) -> (PathBuf, Vec<u8>) {
-        // TODO(harness-clis): implement — never reached through `try_render`, which refuses.
-        let _ = (workdir, params);
-        todo!("harness-clis: UnsupportedHooks::render")
+    fn render(&self, _workdir: &Path, _params: &HookCommandParams<'_>) -> (PathBuf, Vec<u8>) {
+        // This adapter has no hooks file to write, and `render` has no refusal to return: every
+        // launch goes through `try_render`, which refuses the params.
+        unreachable!(
+            "the unsupported hooks adapter writes no file: its try_render refuses the params"
+        )
     }
 
     fn try_render(
         &self,
-        workdir: &Path,
-        params: &HookCommandParams<'_>,
+        _workdir: &Path,
+        _params: &HookCommandParams<'_>,
     ) -> Result<(PathBuf, Vec<u8>), SlotError> {
-        // TODO(harness-clis): implement — `Err(SlotError::HooksUnsupported)`.
-        let _ = (workdir, params);
-        todo!("harness-clis: UnsupportedHooks::try_render")
+        Err(SlotError::HooksUnsupported)
     }
 }
 
 /// The adapter named `name`; an unknown name is [`SlotError::UnknownHooksAdapter`].
 pub fn adapter(name: &str) -> Result<&'static dyn HooksAdapter, SlotError> {
-    // TODO(harness-clis): and `unsupported` to `UnsupportedHooks`.
     match name {
         CLAUDE_SETTINGS_LOCAL => Ok(&ClaudeSettingsLocal),
         CURSOR_HOOKS_JSON => Ok(&CursorHooksJson),
+        UNSUPPORTED_HOOKS => Ok(&UnsupportedHooks),
         _ => Err(SlotError::UnknownHooksAdapter {
             name: name.to_string(),
         }),
