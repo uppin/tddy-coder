@@ -22,6 +22,7 @@
 - **Operator-visible failures (RPC errors shown where they happen)**: [operator-visible-failures.md](operator-visible-failures.md)
 - **LiveKit presence — owned project count**: [livekit-participant-owned-projects.md](../../../docs/ft/web/livekit-participant-owned-projects.md)
 - **Product (Web area)**: `docs/ft/web/` (e.g. [web-terminal.md](../../../docs/ft/web/web-terminal.md))
+- **Terminal OSC 52 clipboard writes (a program's copy reaches the viewer)**: [terminal-osc52-clipboard.md](terminal-osc52-clipboard.md)
 - **Terminal connection chrome (status bar, layouts)**: [terminal-connection-chrome.md](terminal-connection-chrome.md)
 - **Terminal file upload (drop / mobile Attach)**: [terminal-file-upload.md](terminal-file-upload.md)
 - **Terminal presentation (reconnect overlay)**: [terminal-presentation.md](terminal-presentation.md)

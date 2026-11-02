@@ -183,6 +183,12 @@ The shell includes:
 
 Implementation reference: [terminal-connection-chrome.md](../../../packages/tddy-web/docs/terminal-connection-chrome.md).
 
+### Clipboard writes from the terminal (OSC 52)
+
+A program in any session terminal (agent, bash, harness or tmux tab) can put text on the viewer's clipboard by printing an OSC 52 write, `ESC ] 52 ; <selection> ; <base64> BEL` (or `ESC \` as the terminator). tmux copy-mode, Neovim over OSC 52 and the Claude CLI's copy all use it. The terminal decodes the payload and writes the text to the clipboard of the machine the viewer is on, so it can be pasted outside the session. The bytes still reach the emulator unchanged, so the output around a sequence renders as before, and a sequence split across output chunks is recognized once.
+
+Only writes are honoured. A read (`?` payload) is ignored and never answered, so a program cannot read the viewer's clipboard. A selection other than the default or `c`, an empty payload, invalid base64, bytes that are not UTF-8, and a payload that decodes to more than 1 MiB are dropped without touching the clipboard. Implementation reference: [terminal-osc52-clipboard.md](../../../packages/tddy-web/docs/terminal-osc52-clipboard.md).
+
 ### Mobile UX
 
 On touch-capable devices or narrow viewports (width &lt; 768px):
