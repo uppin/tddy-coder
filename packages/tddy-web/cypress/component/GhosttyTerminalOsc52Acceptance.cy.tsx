@@ -6,7 +6,7 @@
  * and never answered. Both feed paths are covered: the agent terminal (`GhosttyTerminalSession` on
  * a feed) and a bash tab (`GrpcSessionTerminal` over the terminal RPC stream).
  *
- * PRD: docs/ft/web/1-WIP/PRD-2026-11-02-terminal-osc52-clipboard.md (`#session-tabs 4/7`)
+ * Reference: packages/tddy-web/docs/terminal-osc52-clipboard.md (`#session-tabs 4/7`)
  *
  * `navigator.clipboard.writeText` is stubbed: the stub is the viewer's clipboard.
  */
