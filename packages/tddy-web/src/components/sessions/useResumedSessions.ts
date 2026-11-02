@@ -15,9 +15,8 @@ export type ResumedSessions = ReadonlySet<string>;
 
 /** `resumed` with `sessionId` marked live after a successful resume. */
 export function markResumed(resumed: ResumedSessions, sessionId: string): ResumedSessions {
-  // TODO(dormant-agent-tab): implement
-  void sessionId;
-  return resumed;
+  if (resumed.has(sessionId)) return resumed;
+  return new Set([...resumed, sessionId]);
 }
 
 /** `resumed` after a listing: a session the listing reports live needs no mark any more. */
@@ -25,9 +24,9 @@ export function afterListing(
   resumed: ResumedSessions,
   listed: readonly Pick<SessionEntry, "sessionId" | "isActive">[],
 ): ResumedSessions {
-  // TODO(dormant-agent-tab): implement
-  void listed;
-  return resumed;
+  const reportedLive = new Set(listed.filter((s) => s.isActive).map((s) => s.sessionId));
+  if (![...resumed].some((sessionId) => reportedLive.has(sessionId))) return resumed;
+  return new Set([...resumed].filter((sessionId) => !reportedLive.has(sessionId)));
 }
 
 /** Whether `session` is live — by the listing, or by a resume the listing has not caught up with. */
@@ -35,7 +34,15 @@ export function isLive(
   resumed: ResumedSessions,
   session: Pick<SessionEntry, "sessionId" | "isActive">,
 ): boolean {
-  // TODO(dormant-agent-tab): implement
-  void resumed;
-  return session.isActive;
+  return session.isActive || resumed.has(session.sessionId);
+}
+
+/**
+ * `session` as the pane should read it: a session that is live by a resume the listing has not
+ * caught up with reads as active. Every other session is returned as it came, so the reference is
+ * unchanged when there is nothing to correct.
+ */
+export function withResumedLiveness(resumed: ResumedSessions, session: SessionEntry): SessionEntry {
+  if (session.isActive || !resumed.has(session.sessionId)) return session;
+  return { ...session, isActive: true };
 }
