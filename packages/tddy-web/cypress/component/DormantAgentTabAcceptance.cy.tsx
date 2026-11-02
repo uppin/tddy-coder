@@ -20,6 +20,9 @@ import {
 } from "../support/rpc/daemonSessionHostBackend";
 import { sessionsDrawerPage } from "../support/pages/sessionsDrawerPage";
 import { sessionTerminalTabsPage as tabs } from "../support/pages/sessionTerminalTabsPage";
+import { sessionActivitiesPage } from "../support/pages/sessionActivitiesPage";
+import { agentChatPage } from "../support/pages/agentChatPage";
+import { replayAgentText } from "../support/rpc/acpReplay";
 import { byTestId, TEST_IDS } from "../support/testIds";
 
 const STOPPED = {
@@ -185,5 +188,28 @@ describe("A stopped session's Agent tab", () => {
     // Then
     byTestId("dormant-agent-terminal-empty", { timeout: 10000 }).should("contain.text", "No recorded output");
     toast().should("be.visible");
+  });
+
+  it("a stopped session's recorded transcript is in the inspector's Activity tab", () => {
+    // Given a stopped session whose agent recorded a transcript, and whose Agent tab shows its output
+    const backend = aSessionServiceBackend({
+      sessions: [STOPPED],
+      connectSession: () => ({ livekitRoom: "", livekitUrl: "", livekitServerIdentity: "" }),
+      terminalHistory: [
+        { data: RECORDED_OUTPUT, startOffset: 0n, endOffset: BigInt(RECORDED_OUTPUT.length), atOldest: true, atEnd: true },
+      ],
+      acpReplay: { counts: [1], snapshot: [replayAgentText("Rewrote the tokenizer.", 1_000)] },
+    });
+    selectTheStoppedSession(backend);
+    dormantTerminal().should("exist");
+
+    // When the operator opens the inspector's Activity tab
+    sessionsDrawerPage.inspectorToggle().click();
+    sessionsDrawerPage.inspectorActivityTab().click();
+
+    // Then the transcript is there, and the Agent tab still shows the greyed recorded output
+    sessionActivitiesPage.pane().should("exist");
+    agentChatPage.chatMessage(0).should("have.text", "Rewrote the tokenizer.");
+    dormantTerminal().should("have.attr", "data-color-scheme", "history");
   });
 });

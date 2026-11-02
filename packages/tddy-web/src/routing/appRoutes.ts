@@ -239,6 +239,7 @@ export function parseSessionsDrawerSessionId(pathname: string): string | null {
  */
 export const INSPECTOR_TAB_NAMES = [
   "details",
+  "activity",
   "tools",
   "agents",
   "usage",
@@ -253,6 +254,19 @@ export type InspectorTabName = (typeof INSPECTOR_TAB_NAMES)[number];
 /** Whether an `inspector=` param value names a real tab. An unknown value degrades to the default. */
 export function isInspectorTabName(value: string): value is InspectorTabName {
   return (INSPECTOR_TAB_NAMES as readonly string[]).includes(value);
+}
+
+/**
+ * The inspector tabs that exist only for a stopped session: its recorded transcript (`activity`),
+ * which has no other route once the Agent tab shows the greyed terminal output.
+ */
+export const DORMANT_INSPECTOR_TAB_NAMES = ["activity"] as const;
+
+export type DormantInspectorTabName = (typeof DORMANT_INSPECTOR_TAB_NAMES)[number];
+
+/** Whether `value` names one of the tabs that exists only for a stopped session. */
+export function isDormantInspectorTabName(value: string): value is DormantInspectorTabName {
+  return (DORMANT_INSPECTOR_TAB_NAMES as readonly string[]).includes(value);
 }
 
 /**

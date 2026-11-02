@@ -258,6 +258,7 @@ export const TEST_IDS = {
 
   // Session inspector — tabs
   sessionsInspectorTabDetails: "sessions-inspector-tab-details",
+  sessionsInspectorTabActivity: "sessions-inspector-tab-activity",
   sessionsInspectorTabTools: "sessions-inspector-tab-tools",
   /** Opens the session's agent roster (`agentRosterPane`). */
   sessionsInspectorTabAgents: "sessions-inspector-tab-agents",

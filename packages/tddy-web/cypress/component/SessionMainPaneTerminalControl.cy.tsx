@@ -43,6 +43,7 @@ const noopHandlers = {
   onInspectorExpand: () => undefined,
   onInspectorRestore: () => undefined,
   onResume: () => undefined,
+  onResumeSession: () => Promise.resolve(),
   onDelete: () => undefined,
   onTerminate: () => undefined,
 };

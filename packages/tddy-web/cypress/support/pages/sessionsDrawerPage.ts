@@ -271,6 +271,10 @@ export const sessionsDrawerPage = {
   inspectorDetailsTab: (options?: Parameters<typeof cy.get>[1]) =>
     byTestId(TEST_IDS.sessionsInspectorTabDetails, { timeout: 5000, ...options }),
 
+  /** The Activity tab button — only a stopped session's inspector has it. Its recorded transcript. */
+  inspectorActivityTab: (options?: Parameters<typeof cy.get>[1]) =>
+    byTestId(TEST_IDS.sessionsInspectorTabActivity, { timeout: 5000, ...options }),
+
   /** The Tools tab button in the inspector tab strip. */
   inspectorToolsTab: (options?: Parameters<typeof cy.get>[1]) =>
     byTestId(TEST_IDS.sessionsInspectorTabTools, { timeout: 5000, ...options }),

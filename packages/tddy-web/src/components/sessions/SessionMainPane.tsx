@@ -487,6 +487,7 @@ export function SessionMainPane({
                   buildSessionExecToolClient={buildSessionExecToolClient}
                   onInsertPathIntoTerminal={insertPathIntoTerminal}
                   onSwitchPeer={onSwitchPeer}
+                  activityClient={buildSessionActivityClient?.() ?? activityClient}
                 />
               </div>
             </SessionWithActivitySidebar>

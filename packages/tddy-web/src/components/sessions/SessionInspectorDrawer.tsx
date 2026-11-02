@@ -2,6 +2,7 @@ import React, { useCallback, useState } from "react";
 import type { Client } from "@connectrpc/connect";
 import type { Room } from "livekit-client";
 import type { SessionService, SessionEntry } from "../../gen/session_pb";
+import type { ActivityService } from "../../gen/activity_pb";
 import type { ExecToolService } from "../../gen/exec_tools_pb";
 import type { SessionFilesService } from "../../gen/session_files_pb";
 import type { WorktreeService } from "../../gen/worktree_pb";
@@ -12,7 +13,11 @@ import { ScrollArea } from "../ui/scroll-area";
 import { cn } from "../../lib/utils";
 import { InspectorTabs, type InspectorTab } from "./InspectorTabs";
 import { PARAM_INSPECTOR } from "../../routing/appLocation";
-import { isInspectorTabName, isMediaInspectorTabName } from "../../routing/appRoutes";
+import {
+  isDormantInspectorTabName,
+  isInspectorTabName,
+  isMediaInspectorTabName,
+} from "../../routing/appRoutes";
 import { useCapabilityAvailability } from "../../hooks/useCapabilityAvailability";
 import type { HostConnection } from "../../rpc/connections/types";
 import { useAppLocation } from "../../routing/useAppLocation";
@@ -21,6 +26,8 @@ import { SessionToolsTab } from "./SessionToolsTab";
 import { SessionUsageTab } from "./SessionUsageTab";
 import { SessionWorktreeTab } from "./SessionWorktreeTab";
 import { SessionFilesTab } from "./SessionFilesTab";
+import { SessionInspectorActivityTab } from "./SessionInspectorActivityTab";
+import { canResumeSession } from "./sessionBaseView";
 // (usage stream is owned by SessionUsageTab so it opens only while that tab is mounted)
 import { SessionVncTab } from "./SessionVncTab";
 import { SessionScreenSharingTab } from "./SessionScreenSharingTab";
@@ -46,6 +53,8 @@ interface SessionInspectorDrawerProps {
   onDelete: (sessionId: string) => void;
   onTerminate: (sessionId: string) => void;
   client?: Client<typeof SessionService>;
+  /** `activity.ActivityService` on the same host as `client` — the Activity tab of a stopped session. */
+  activityClient?: Client<typeof ActivityService>;
   /** `exec_tools.ExecToolService` on the same host as `client` — the Tools tab. */
   execToolClient?: Client<typeof ExecToolService>;
   /**
@@ -127,6 +136,7 @@ export function SessionInspectorDrawer({
   onDelete,
   onTerminate,
   client,
+  activityClient,
   execToolClient,
   worktreeClient,
   sessionFilesClient,
@@ -166,8 +176,15 @@ export function SessionInspectorDrawer({
   // Unlike an unknown tab name, this one is *not* normalised out of the URL by the screen: media
   // availability is a property of a live connection and can appear later, so the request is kept
   // and honoured the moment the host's wire can serve it.
+  // The Activity tab is the recorded transcript of a stopped session, so it exists only while the
+  // session is stopped. A live session's transcript is the Agent Activity sidebar's. A request for it
+  // on a live session degrades to Details, and is honoured again if the session stops.
+  const activityAvailable = canResumeSession(session);
   const tab: InspectorTab =
-    !mediaAvailable && isMediaInspectorTabName(requestedTab) ? "details" : requestedTab;
+    (!mediaAvailable && isMediaInspectorTabName(requestedTab)) ||
+    (!activityAvailable && isDormantInspectorTabName(requestedTab))
+      ? "details"
+      : requestedTab;
   const setTab = useCallback(
     (next: InspectorTab) => setParams({ [PARAM_INSPECTOR]: next }),
     [setParams],
@@ -278,7 +295,12 @@ export function SessionInspectorDrawer({
 
       {/* Tab strip — only when a session is selected */}
       {session && (
-        <InspectorTabs value={tab} onChange={setTab} mediaAvailable={mediaAvailable} />
+        <InspectorTabs
+          value={tab}
+          onChange={setTab}
+          mediaAvailable={mediaAvailable}
+          activityAvailable={activityAvailable}
+        />
       )}
 
       {/* Content */}
@@ -384,6 +406,14 @@ export function SessionInspectorDrawer({
               </div>
             </div>
           </ScrollArea>
+        ) : tab === "activity" ? (
+          // The recorded transcript of a stopped session, scrolled by its own transcript view, so it
+          // takes the panel without the ScrollArea the other tabs use.
+          <SessionInspectorActivityTab
+            session={session}
+            sessionToken={sessionToken ?? ""}
+            client={activityClient}
+          />
         ) : tab === "tools" ? (
           <ScrollArea className="flex-1 min-h-0">
             <SessionToolsTab

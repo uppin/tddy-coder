@@ -2,10 +2,10 @@
  * Acceptance: an **inactive session shows its recorded activities**, not the inspector.
  *
  * Selecting a dormant session used to open the Inspector over an empty pane whose only content was
- * "Select Resume to reconnect". It now shows the session's recorded ACP transcript as the main-pane
- * view, keeps the Inspector closed, and offers Resume from the pane's top bar — in the same position
- * for every inactive session, including the ones whose base view (PR-Stack, workflow chat) is
- * deliberately left alone.
+ * "Select Resume to reconnect". It now shows the session's Agent tab (the greyed recorded output),
+ * keeps the Inspector closed, and offers Resume from the pane's top bar — in the same position for
+ * every inactive session, including the ones whose base view (PR-Stack, workflow chat) is
+ * deliberately left alone. The recorded ACP transcript is the inspector's Activity tab.
  *
  * PRD: docs/ft/web/inactive-session-activities.md
  *
@@ -52,6 +52,7 @@ import { agentChatPage } from "../support/pages/agentChatPage";
 import { appLocationPage } from "../support/pages/appLocationPage";
 import { prStackScreenPage } from "../support/pages/prStackScreenPage";
 import { workflowChatScreenPage } from "../support/pages/workflowChatScreenPage";
+import { byTestId } from "../support/testIds";
 
 // ---------------------------------------------------------------------------
 // Session fixtures
@@ -124,12 +125,24 @@ function mountScreen(backend: ReturnType<typeof aSessionServiceBackend>) {
   mountWithRecordingLiveKitRpc(withSelectedDaemon(<SessionsDrawerScreen />), backend);
 }
 
+/** The Agent tab of a stopped session: the greyed recorded output, which replaces the transcript as
+ *  the main view. The transcript itself is in the inspector's Activity tab. */
+const dormantAgentTerminal = (options?: Parameters<typeof cy.get>[1]) =>
+  byTestId("dormant-agent-terminal", { timeout: 5000, ...options });
+
+/** Open the inspector on its Activity tab, where a stopped session's recorded transcript lives. */
+function openActivityTab() {
+  page.inspectorToggle().click();
+  page.inspectorActivityTab().click();
+}
+
 const noopHandlers = {
   onToggleInspector: () => undefined,
   onInspectorClose: () => undefined,
   onInspectorExpand: () => undefined,
   onInspectorRestore: () => undefined,
   onResume: () => undefined,
+  onResumeSession: () => Promise.resolve(),
   onDelete: () => undefined,
   onTerminate: () => undefined,
 };
@@ -198,7 +211,7 @@ describe("InactiveSessionActivities — the default view for a dormant session",
     window.localStorage.setItem("tddy_session_token", "fake-token");
   });
 
-  it("shows the recorded activity transcript as the main view when an inactive session is selected", () => {
+  it("shows the recorded output as the main view when an inactive session is selected", () => {
     // Given — a dormant session whose transcript the daemon can still replay
     const backend = aSessionServiceBackend({
       sessions: [DORMANT],
@@ -209,7 +222,12 @@ describe("InactiveSessionActivities — the default view for a dormant session",
     mountScreen(backend);
     page.drawerItem(DORMANT.sessionId).click();
 
-    // Then — the transcript is the pane, carrying the recorded entries in order
+    // Then — the main view is the greyed Agent tab; the transcript is not the pane
+    dormantAgentTerminal().should("exist");
+    sessionActivitiesPage.pane().should("not.exist");
+
+    // Then — the transcript carries the recorded entries in order, in the inspector's Activity tab
+    openActivityTab();
     sessionActivitiesPage.pane().should("exist");
     agentChatPage.chatMessage(0).should("have.text", "Rewrote the tokenizer.");
     agentChatPage.chatMessageKind(1).should("equal", "tool");
@@ -277,7 +295,8 @@ describe("InactiveSessionActivities — the default view for a dormant session",
     mountScreen(backend);
     page.drawerItem(DORMANT.sessionId).click();
 
-    // Then — the view still owns the pane, says so, and still offers Resume
+    // Then — the Activity tab owns the transcript's place, says so, and the top bar still offers Resume
+    openActivityTab();
     sessionActivitiesPage.empty().should("be.visible");
     agentChatPage.chatMessage(0, { timeout: 1000 }).should("not.exist");
     sessionActivitiesPage.resumeBtn(DORMANT.sessionId).should("be.visible");
@@ -293,6 +312,7 @@ describe("InactiveSessionActivities — the default view for a dormant session",
     // When
     mountScreen(backend);
     page.drawerItem(DORMANT.sessionId).click();
+    openActivityTab();
 
     // Then — the pane is there, but says nothing it cannot support
     sessionActivitiesPage.pane().should("exist");
@@ -361,14 +381,14 @@ describe("InactiveSessionActivities — the default view for a dormant session",
     // When — select it while dormant, then let the daemon report it alive
     mountScreen(backend);
     page.drawerItem(DORMANT.sessionId).click();
-    sessionActivitiesPage.pane().should("exist");
+    dormantAgentTerminal().should("exist");
     cy.then(() => {
       sessionIsLive = true;
     });
 
-    // Then — the pane swaps back to the terminal, Resume goes away, and exactly one attach was taken
+    // Then — the Agent tab swaps back to the terminal, Resume goes away, and exactly one attach was taken
     page.detailTerminalContainer().should("exist");
-    sessionActivitiesPage.pane({ timeout: 1000 }).should("not.exist");
+    dormantAgentTerminal({ timeout: 1000 }).should("not.exist");
     sessionActivitiesPage.resumeBtn(DORMANT.sessionId, { timeout: 1000 }).should("not.exist");
     cy.wrap(null).should(() => {
       const attached = backend
@@ -398,7 +418,7 @@ describe("InactiveSessionActivities — the default view for a dormant session",
     // When — live, dead, live again
     mountScreen(backend);
     page.drawerItem(DORMANT.sessionId).click();
-    sessionActivitiesPage.pane().should("exist");
+    dormantAgentTerminal().should("exist");
     cy.then(() => {
       sessionIsLive = true;
     });
@@ -406,7 +426,7 @@ describe("InactiveSessionActivities — the default view for a dormant session",
     cy.then(() => {
       sessionIsLive = false;
     });
-    sessionActivitiesPage.pane().should("exist");
+    dormantAgentTerminal().should("exist");
     cy.then(() => {
       sessionIsLive = true;
     });
@@ -556,11 +576,13 @@ describe("InactiveSessionActivities — workflow views keep precedence", () => {
 describe("InactiveSessionActivities — one transcript per pane", () => {
   beforeEach(() => {
     cy.viewport(1280, 800);
+    appLocationPage.reset();
   });
 
-  it("hides the agent activity overlay icon while the activities view is showing", () => {
-    // Given — a dormant terminal session with a recorded transcript
+  it("hides the agent activity overlay icon while a stopped session's Activity tab is showing", () => {
+    // Given — a dormant terminal session with a recorded transcript, its inspector on the Activity tab
     const client = aReplayClient();
+    appLocationPage.startAt(`/sessions/${DORMANT.sessionId}?inspector=activity`);
 
     // When
     mountWithRpc(
@@ -569,15 +591,15 @@ describe("InactiveSessionActivities — one transcript per pane", () => {
         {...noopHandlers}
         selectedSession={DORMANT as unknown as SessionEntry}
         attachment={{ status: "idle" } satisfies SessionAttachmentState}
-        inspectorState="closed"
+        inspectorState="open"
         activityClient={client}
       />,
       anInMemoryRpcBackend(),
     );
 
-    // Then — the transcript is the pane, so the popover that shows the same thing is suppressed.
-    // Waiting for a rendered entry first is what makes this meaningful: the overlay icon only
-    // appears once the count feed has delivered, so asserting its absence before then would pass
+    // Then — the transcript is in the Activity tab, so the popover that shows the same thing is
+    // suppressed. Waiting for a rendered entry first is what makes this meaningful: the overlay icon
+    // only appears once the count feed has delivered, so asserting its absence before then would pass
     // against a suppression that does not exist.
     agentChatPage.chatMessage(1).should("exist");
     agentActivityPage.button({ timeout: 1000 }).should("not.exist");
@@ -604,9 +626,10 @@ describe("InactiveSessionActivities — one transcript per pane", () => {
     agentActivityPage.button().should("exist");
   });
 
-  it("opens the tool call detail dialog from an entry in the activities view", () => {
-    // Given — a transcript whose tool call has recorded bodies
+  it("opens the tool call detail dialog from an entry in a stopped session's Activity tab", () => {
+    // Given — a transcript whose tool call has recorded bodies, shown on the Activity tab
     const client = aReplayClient();
+    appLocationPage.startAt(`/sessions/${DORMANT.sessionId}?inspector=activity`);
 
     // When
     mountWithRpc(
@@ -615,7 +638,7 @@ describe("InactiveSessionActivities — one transcript per pane", () => {
         {...noopHandlers}
         selectedSession={DORMANT as unknown as SessionEntry}
         attachment={{ status: "idle" } satisfies SessionAttachmentState}
-        inspectorState="closed"
+        inspectorState="open"
         activityClient={client}
       />,
       anInMemoryRpcBackend(),
@@ -627,7 +650,7 @@ describe("InactiveSessionActivities — one transcript per pane", () => {
     agentActivityPage.detailInput().should("contain.text", "tokenizer.rs");
   });
 
-  it("keeps a mounted runtime unfocused behind the activities view", () => {
+  it("keeps a mounted runtime unfocused behind a stopped session's Agent tab", () => {
     // Given — a dormant session that still has a runtime mounted from an earlier attach
     const transport = aReplayTransportWithHeldTerminal();
 
@@ -649,8 +672,8 @@ describe("InactiveSessionActivities — one transcript per pane", () => {
     );
 
     // Then — the runtime layer stays mounted (background streaming preserved) but nothing is
-    // foregrounded over the transcript, so no claim-terminal CTA appears
-    sessionActivitiesPage.pane().should("exist");
+    // foregrounded over the greyed Agent tab, so no claim-terminal CTA appears
+    dormantAgentTerminal().should("exist");
     page.runtimeLayer().should("exist");
     page.detailTerminalContainer({ timeout: 1000 }).should("not.exist");
     page.terminalControlOverlay({ timeout: 1000 }).should("not.exist");

@@ -27,6 +27,7 @@ import { sessionFilesTabPage as files } from "../support/pages/sessionFilesTabPa
 import { sessionActivitiesPage } from "../support/pages/sessionActivitiesPage";
 import { sessionTerminalTabsPage as tabs } from "../support/pages/sessionTerminalTabsPage";
 import { sessionAgentConversationPage as conversations } from "../support/pages/sessionAgentConversationPage";
+import { byTestId } from "../support/testIds";
 
 // ---------------------------------------------------------------------------
 // Fixtures
@@ -165,19 +166,19 @@ describe("A stopped session keeps its tab strip", () => {
     window.localStorage.setItem("tddy_session_token", "fake-token");
   });
 
-  it("a stopped session shows its tab strip with the recorded transcript in the Agent tab", () => {
+  it("a stopped session shows its tab strip with the greyed recorded output in the Agent tab", () => {
     // Given a stopped session with a recorded transcript
     const backend = aStoppedSessionBackend();
 
     // When it is selected
     selectStoppedSession(backend);
 
-    // Then its strip is shown, the Agent tab is selected, and its pane holds the transcript
+    // Then its strip is shown, the Agent tab is selected, and its pane is the greyed recorded output
     tabs.tabs().should("be.visible");
     tabs.agentTab().should("have.attr", "aria-selected", "true");
     tabs.newTab().should("be.visible");
     tabs.pane("main").within(() => {
-      sessionActivitiesPage.pane().should("contain.text", "Rewrote the tokenizer.");
+      byTestId("dormant-agent-terminal").should("have.attr", "data-color-scheme", "history");
     });
   });
 

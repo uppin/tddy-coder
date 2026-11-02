@@ -16,7 +16,7 @@ import { aSessionsDrawerBackend } from "../support/rpc/vncBackend";
 import { sessionsDrawerPage } from "../support/pages/sessionsDrawerPage";
 import { prStackScreenPage } from "../support/pages/prStackScreenPage";
 import { workflowChatScreenPage } from "../support/pages/workflowChatScreenPage";
-import { sessionActivitiesPage } from "../support/pages/sessionActivitiesPage";
+import { byTestId } from "../support/testIds";
 
 // ---------------------------------------------------------------------------
 // Fixtures
@@ -90,9 +90,9 @@ it("keeps the ordinary base view for a claude-cli session even when it carries a
   sessionsDrawerPage.drawerItem(CLAUDE_CLI_SESSION.sessionId).click();
 
   // Then — neither custom view renders for a claude-cli PTY session (it has no Presenter); the
-  // session falls through to its liveness-derived base view, which for this dormant one is its
-  // recorded activities. The view registry does not touch that path.
+  // session falls through to its liveness-derived base view, which for this dormant one is its Agent
+  // tab (the greyed recorded output). The view registry does not touch that path.
   prStackScreenPage.screen().should("not.exist");
   workflowChatScreenPage.screen().should("not.exist");
-  sessionActivitiesPage.pane().should("exist");
+  byTestId("dormant-agent-terminal").should("exist");
 });

@@ -13,7 +13,7 @@ import { anAttachedAgent } from "../support/rpc/sessionAgentRosterBackend";
 import { mountWithRecordingLiveKitRpc } from "../support/rpc/recordingLiveKitRpc";
 import { sessionsDrawerPage } from "../support/pages/sessionsDrawerPage";
 import { sessionAgentRosterPage } from "../support/pages/sessionAgentRosterPage";
-import { sessionActivitiesPage } from "../support/pages/sessionActivitiesPage";
+import { byTestId } from "../support/testIds";
 
 // ---------------------------------------------------------------------------
 // Session constants used across specs
@@ -420,9 +420,9 @@ describe("SessionInspectorAcceptance — the attachment does not drive the inspe
     sessionsDrawerPage.expandRemaining();
     sessionsDrawerPage.drawerItem(DISCONNECTED_SESSION.sessionId).click();
 
-    // Then — the new selection really did take (its activities view is the observable proof), and
-    // the drawer was not opened for it
-    sessionActivitiesPage.pane().should("exist");
+    // Then — the new selection really did take (its Agent tab is the observable proof), and the
+    // drawer was not opened for it
+    byTestId("dormant-agent-terminal").should("exist");
     sessionsDrawerPage.inspectorDrawer().should("have.attr", "data-state", "closed");
   });
 });

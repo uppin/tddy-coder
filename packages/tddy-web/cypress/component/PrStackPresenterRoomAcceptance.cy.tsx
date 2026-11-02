@@ -77,6 +77,7 @@ function PrStackMainPaneHarness() {
       onInspectorExpand={cy.stub()}
       onInspectorRestore={cy.stub()}
       onResume={cy.stub()}
+      onResumeSession={cy.stub()}
       onDelete={cy.stub()}
       onTerminate={cy.stub()}
     />
