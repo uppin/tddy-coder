@@ -50,7 +50,6 @@ export function SessionRuntime({
   runtime,
   focused,
   sessionToken,
-  callerLogin = null,
   client,
   terminalClient,
   host = null,

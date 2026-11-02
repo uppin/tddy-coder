@@ -107,6 +107,31 @@ Known limitation: <kbd>Esc</kbd> exits full screen before the terminal sees it, 
 (`navigator.keyboard.lock(["Escape"])`), which changes the exit gesture to press-and-hold; not done
 here.
 
+### Stopped sessions
+
+A session whose agent is not running (`is_active == false`) keeps its tab strip. Its worktree is
+still on disk, so the operator can run the tests, read git state or ask another agent about it
+without resuming the agent first.
+
+- **Agent tab**: the session's recorded transcript, read-only — the
+  [Activities view](inactive-session-activities.md). It takes no input, so it shows no "Claim
+  terminal" toast and takes no Files-tab insert.
+- **Terminal tabs**: the terminals the daemon already runs for the session (`ListTerminalSessions`),
+  and **`+`** opens Bash or any CLI harness. They stream through the owning daemon's
+  `TerminalSessionService` exactly as a live session's tabs do, and start in the worktree the
+  session's record names (see [Terminal Sessions](../daemon/terminal-sessions.md#start--stop)). A
+  session with no worktree on this host — a split session's agent half, or an unknown id — is
+  refused, and the refusal shows in `sessions-terminal-error`.
+- **Agent-conversation tabs**: **Add agent** opens a conversation tab in the strip, as on a live
+  session.
+- **The terminal tabs carry the live strip's features**: full screen, the mobile shortcut drawer on
+  the focused tab, the Files tab's **Insert** into the focused bash tab, and "Claim terminal" with
+  the grey-out while another screen holds the session's control lease.
+- **Resume** swaps the stopped strip for the live one. Tabs opened while the session was stopped
+  are daemon terminals, so the live strip lists them; open conversations are not cancelled. Leaving
+  the session and coming back does not cancel them either: only closing a tab ends a conversation.
+- A workflow session (PR-Stack, workflow chat) keeps its own view and has no strip.
+
 ## Requirements
 
 1. A connected session shows a terminal tab bar with an **Agent** tab that has no close control.
@@ -127,6 +152,9 @@ here.
 8. A tool session's menu offers **Bash** only; a session whose type is not yet known offers every
    harness.
 9. A refused start shows its reason in `sessions-terminal-error` and opens no tab.
+10. A stopped (non-workflow) session shows the strip too: an **Agent** tab holding its recorded
+    transcript, the terminals the daemon lists for it, its agent conversations, and `+`. Its terminals
+    start in the session's recorded worktree and are still in the strip after Resume.
 
 ## Non-goals
 
@@ -134,8 +162,8 @@ here.
 - Reordering / drag-and-drop of tabs.
 - Tiling two terminals side by side — the panes are a tabbed deck, not a split.
 - Restoring full screen from a URL, or a keyboard shortcut for it.
-- Persisting or resuming open terminals (bash or agent) across daemon (or coder) restart or session
-  resume — terminals are in-memory.
+- Persisting open terminals (bash or agent) across a daemon (or coder) restart — terminals are
+  in-memory. They do survive the session itself stopping and resuming, since the daemon holds them.
 - A model, first prompt or provider account for an agent tab; agent tabs inside a sandboxed
   session's jail; agent-to-agent messaging.
 - Per-terminal control leases (the mutex stays per-session).

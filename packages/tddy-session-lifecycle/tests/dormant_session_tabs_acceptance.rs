@@ -2,7 +2,7 @@
 //! running main terminal starts the tab in the worktree the session's record names.
 //!
 //! Feature: docs/ft/web/session-terminal-tabs.md
-//! PRD: docs/ft/web/1-WIP/PRD-2026-11-02-dormant-session-tabs.md (`#session-tabs 1/7`)
+//! Feature: docs/ft/daemon/terminal-sessions.md § Start / Stop
 //!
 //! A stopped session is a session directory under the daemon's data dir whose `.session.yaml`
 //! names a worktree, and no `main` terminal in the manager. Harnesses are stub scripts that record

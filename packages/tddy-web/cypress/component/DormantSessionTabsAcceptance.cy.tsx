@@ -6,7 +6,7 @@
  * strip: the Agent tab holds the transcript, "+" opens terminals through the owning daemon, the
  * daemon's existing tabs are listed, and an added agent's conversation gets its tab.
  *
- * PRD: docs/ft/web/1-WIP/PRD-2026-11-02-dormant-session-tabs.md (`#session-tabs 1/7`)
+ * Feature: docs/ft/web/session-terminal-tabs.md § Stopped sessions
  *
  * Driven over the in-memory daemon: terminal RPCs, the recorded transcript and the agent roster are
  * all served by `aSessionServiceBackend`.

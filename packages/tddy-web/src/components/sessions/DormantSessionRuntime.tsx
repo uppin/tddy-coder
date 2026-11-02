@@ -32,7 +32,7 @@ import { useTerminalControl, type Session } from "./useTerminalControl";
  * conversations' bodies: those outlive any strip (see `SessionAgentConversationLayer`), and this
  * strip only lists their tabs and adopts the element they live in.
  *
- * PRD: docs/ft/web/1-WIP/PRD-2026-11-02-dormant-session-tabs.md (`#session-tabs 1/7`)
+ * Feature: docs/ft/web/session-terminal-tabs.md § Stopped sessions
  */
 export interface DormantSessionRuntimeProps {
   /** The stopped session. */

@@ -205,7 +205,6 @@ export function SessionMainPane({
           hostsConversations={!(dormantStripShown && r.sessionId === selectedSession?.sessionId)}
           focused={!dormant && r.sessionId === focusedRuntimeId}
           sessionToken={sessionToken}
-          callerLogin={callerLogin}
           client={sessionAgentClient}
           terminalClient={terminalClient}
           mobileShortcuts={mobileShortcuts}

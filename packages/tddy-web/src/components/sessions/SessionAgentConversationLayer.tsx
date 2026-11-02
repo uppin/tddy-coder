@@ -17,7 +17,7 @@ import type { SessionAgentClient } from "./sessionRuntimeProps";
  * ({@link useConversationHostAttachment}); a strip that goes away leaves the host, and the bodies
  * in it, untouched.
  *
- * PRD: docs/ft/web/1-WIP/PRD-2026-11-02-dormant-session-tabs.md (`#session-tabs 1/7`)
+ * Dev doc: packages/tddy-web/docs/session-agent-conversation.md § 1
  */
 
 /** The per-session host elements, created on first ask and kept for the life of the layer's owner. */
