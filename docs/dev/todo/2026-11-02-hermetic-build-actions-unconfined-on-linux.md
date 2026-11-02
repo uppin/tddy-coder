@@ -28,3 +28,6 @@ The gap is the cgroups backend's, not the build integration's: #793 only lowers 
 
 The cgroups jail pivots into a minimal root built from the plan's reads and mounts. Then drop the two
 `cfg` gates and the `allow(dead_code)` on `ARepo::with_script`.
+
+On CI the remaining Linux-run hermetic tests also self-skip, because the runners forbid unprivileged
+user namespaces: see [2026-11-02-ci-runs-no-linux-jail.md](2026-11-02-ci-runs-no-linux-jail.md).

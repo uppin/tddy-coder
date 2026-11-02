@@ -26,6 +26,20 @@ use tddy_build::plugin::PluginRegistry;
 use tddy_build::{load_build_manifest, BuildMode};
 use tddy_daemon_sandbox::build_action_sandbox::DaemonActionSandbox;
 
+/// Linux cgroups sandbox requires unprivileged user namespaces; macOS sandboxing does not.
+/// Mirrors the self-skip contract in `action_sandbox_acceptance.rs` and
+/// `tddy-sandbox-cgroups/tests/jail_smoke.rs`. CI's ubuntu runners forbid them, so there these tests
+/// skip: see `docs/dev/todo/2026-11-02-ci-runs-no-linux-jail.md`.
+#[cfg(target_os = "linux")]
+fn sandbox_userns_available() -> bool {
+    tddy_sandbox_cgroups::unprivileged_userns_available()
+}
+
+#[cfg(not(target_os = "linux"))]
+fn sandbox_userns_available() -> bool {
+    true
+}
+
 /// A host whose environment the test declares, with only the system directories on `PATH`, over
 /// the real filesystem.
 #[derive(Default)]
@@ -172,6 +186,12 @@ const IN_AND_OUT: &str = r#"        inputs: [{ include: ["in.txt"], root: "." }]
 
 #[tokio::test]
 async fn a_hermetic_action_writing_only_its_declared_output_succeeds() {
+    if !sandbox_userns_available() {
+        eprintln!(
+            "SKIP: host forbids unprivileged user namespaces (cannot create the sandbox here): a_hermetic_action_writing_only_its_declared_output_succeeds"
+        );
+        return;
+    }
     // Given
     let repo = a_repo_with_manifest(&a_manifest(&[a_target(
         "copy:jailed",
@@ -261,6 +281,12 @@ async fn a_hermetic_action_execing_a_binary_outside_its_tool_closure_fails_namin
 
 #[tokio::test]
 async fn a_hermetic_action_with_no_network_declaring_tool_has_no_network() {
+    if !sandbox_userns_available() {
+        eprintln!(
+            "SKIP: host forbids unprivileged user namespaces (cannot create the sandbox here): a_hermetic_action_with_no_network_declaring_tool_has_no_network"
+        );
+        return;
+    }
     // Given — a loopback listener, and `nc` declared as a tool with no `network:` section
     // (`egress: none`); the same probe, unconfined and hermetic
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0")

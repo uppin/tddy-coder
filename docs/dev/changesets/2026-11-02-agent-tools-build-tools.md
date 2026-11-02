@@ -33,3 +33,9 @@ Deferred: [Linux write/exec confinement](../todo/2026-11-02-hermetic-build-actio
 Docs: [tddy-build](../../ft/build/tddy-build.md), [tddy-build architecture](../../../packages/tddy-build/docs/architecture.md),
 [declared tools](../../../packages/tddy-actions/docs/declared-tools.md),
 [tddy-daemon-sandbox services](../../../packages/tddy-daemon-sandbox/docs/task-and-action-services.md).
+
+## CI coverage decision
+
+The Linux-run hermetic tests self-skip on hosts without unprivileged user namespaces, which includes
+CI's ubuntu runners — the developer's choice on 2026-11-02, deferred as
+[2026-11-02-ci-runs-no-linux-jail.md](../todo/2026-11-02-ci-runs-no-linux-jail.md).
