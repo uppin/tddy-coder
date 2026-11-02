@@ -109,13 +109,12 @@ impl Drop for SandboxSessionState {
 #[derive(Default)]
 pub struct SandboxSessionManager {
     inner: Mutex<HashMap<String, Arc<SandboxSessionState>>>,
+    pub(crate) recorder: crate::main_recording::JailRecorder,
 }
 
 impl SandboxSessionManager {
     pub fn new() -> Self {
-        Self {
-            inner: Mutex::new(HashMap::new()),
-        }
+        Self::default()
     }
 
     pub async fn insert(&self, session_id: String, state: Arc<SandboxSessionState>) {
@@ -127,7 +126,9 @@ impl SandboxSessionManager {
     }
 
     pub async fn remove(&self, session_id: &str) -> Option<Arc<SandboxSessionState>> {
-        self.inner.lock().await.remove(session_id)
+        let removed = self.inner.lock().await.remove(session_id);
+        self.recorder.finish(session_id).await;
+        removed
     }
 }
 

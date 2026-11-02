@@ -71,6 +71,8 @@ pub fn coder_terminal_session_entry(svc: Arc<SessionConnectionService>) -> Servi
         ))),
         control: Arc::new(CoderTerminalControl::new(Arc::clone(&svc))),
         roster: Arc::new(CoderTerminalRoster::new(Arc::clone(&svc))),
+        // A tool session's terminals are not recorded: its history ends with its process.
+        recorded_history: Arc::new(tddy_terminal_rpc::NoRecordedHistory),
         initial_frame_bytes: tddy_terminal_rpc::bridge::DEFAULT_INITIAL_FRAME_BYTES,
     });
     ServiceEntry {

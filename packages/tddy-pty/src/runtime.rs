@@ -5,7 +5,9 @@
 //! caller's responsibility: this runtime receives the final `argv`/`env` via [`PtySpawnSpec`] and
 //! spawns them verbatim.
 
+use std::future::Future;
 use std::path::PathBuf;
+use std::pin::Pin;
 use std::sync::mpsc::RecvTimeoutError;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -13,7 +15,7 @@ use std::time::Duration;
 use async_trait::async_trait;
 use bytes::Bytes;
 use portable_pty::{native_pty_system, CommandBuilder, MasterPty, PtySize};
-use tddy_task::{TaskBody, TaskChannel, TaskContext, TaskHandle, TaskRegistry, TaskStatus};
+use tddy_task::{TaskBody, TaskChannel, TaskContext, TaskHandle, TaskId, TaskRegistry, TaskStatus};
 use tokio::sync::{mpsc, oneshot};
 
 use crate::registry::{PtyControl, PtyRegistry};
@@ -53,6 +55,12 @@ pub struct PtySpawnSpec {
     pub env: Vec<(String, String)>,
 }
 
+/// Work to finish when a process has exited and its output is complete, run with the task's id
+/// **before** the terminal's control leaves the [`PtyRegistry`] — so whoever finds the terminal
+/// absent from the registry can rely on the work being done. The runtime knows nothing of what the
+/// work is.
+pub type PtyExitHook = Box<dyn FnOnce(TaskId) -> Pin<Box<dyn Future<Output = ()> + Send>> + Send>;
+
 /// Ready signal emitted once the PTY is open and the child has been spawned.
 pub struct PtyReady {
     pub pid: u32,
@@ -70,12 +78,25 @@ impl PtyRuntime {
         spec: PtySpawnSpec,
         ready_tx: oneshot::Sender<Result<PtyReady, String>>,
     ) -> Arc<TaskHandle> {
+        Self::spawn_with_exit_hook(registry, pty_registry, spec, ready_tx, None).await
+    }
+
+    /// [`spawn`](Self::spawn), running `exit_hook` once the process has exited (or been cancelled)
+    /// and before the terminal is removed from `pty_registry`.
+    pub async fn spawn_with_exit_hook(
+        registry: &TaskRegistry,
+        pty_registry: &PtyRegistry,
+        spec: PtySpawnSpec,
+        ready_tx: oneshot::Sender<Result<PtyReady, String>>,
+        exit_hook: Option<PtyExitHook>,
+    ) -> Arc<TaskHandle> {
         let (channel, stdin_rx) = TaskChannel::pty("0", "pty");
         let body = PtyTaskBody {
             spec: spec.clone(),
             pty_registry: pty_registry.clone(),
             stdin_rx: stdin_rx.expect("pty channel must have stdin"),
             ready_tx: Some(ready_tx),
+            exit_hook,
         };
         registry
             .spawn(body, spec.kind, spec.session_id, vec![channel])
@@ -88,6 +109,7 @@ struct PtyTaskBody {
     pty_registry: PtyRegistry,
     stdin_rx: mpsc::UnboundedReceiver<Bytes>,
     ready_tx: Option<oneshot::Sender<Result<PtyReady, String>>>,
+    exit_hook: Option<PtyExitHook>,
 }
 
 struct SetupResult {
@@ -116,6 +138,7 @@ impl TaskBody for PtyTaskBody {
         let spec = self.spec.clone();
         let stdin_rx = self.stdin_rx;
         let ready_tx = self.ready_tx;
+        let exit_hook = self.exit_hook;
         let output_ch_thread = Arc::clone(&output_ch);
         // Captured from the async context so the blocking writer thread — which has no ambient
         // runtime of its own — can drive the async stdin receiver and the child-exit signal.
@@ -181,6 +204,9 @@ impl TaskBody for PtyTaskBody {
                     let _ = signal_pid(setup.pid as i32, libc::SIGKILL);
                 }
                 ctx.deregister_child_pid(setup.pid);
+                if let Some(hook) = exit_hook {
+                    hook(task_id.clone()).await;
+                }
                 self.pty_registry.remove(&task_id).await;
                 return TaskStatus::Cancelled;
             }
@@ -190,6 +216,9 @@ impl TaskBody for PtyTaskBody {
         };
 
         ctx.deregister_child_pid(setup.pid);
+        if let Some(hook) = exit_hook {
+            hook(task_id.clone()).await;
+        }
         self.pty_registry.remove(&task_id).await;
         exit_status
     }

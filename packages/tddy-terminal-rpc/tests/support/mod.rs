@@ -409,6 +409,30 @@ impl tddy_terminal_rpc::TerminalRoster for InMemoryRoster {
     }
 }
 
+/// A host's recording of its session's `main` terminal, as [`OS_USER`] reads it.
+pub struct RecordedMain {
+    recording: tddy_task::CaptureRecording,
+}
+
+impl RecordedMain {
+    pub fn holding(recording: tddy_task::CaptureRecording) -> Self {
+        RecordedMain { recording }
+    }
+}
+
+#[async_trait::async_trait]
+impl tddy_terminal_rpc::RecordedTerminalHistory for RecordedMain {
+    async fn recorded(
+        &self,
+        os_user: &str,
+        session_id: &str,
+        terminal_id: &str,
+    ) -> Option<tddy_task::CaptureRecording> {
+        (os_user == OS_USER && session_id == SESSION_ID && terminal_id == "main")
+            .then(|| self.recording.clone())
+    }
+}
+
 /// A host serving `terminal_session.TerminalSessionService`, driven the way a transport drives it:
 /// requests go in as encoded bytes at the registered service name and answers come back off the
 /// wire, so a test proves the *registration* rather than the handler behind it.
@@ -473,6 +497,48 @@ impl TerminalServiceHost {
         terminal: Option<std::sync::Arc<StubTerminal>>,
         mapping: UserMapping,
     ) -> Self {
+        Self::over_recording(
+            store,
+            terminal,
+            mapping,
+            std::sync::Arc::new(tddy_terminal_rpc::NoRecordedHistory),
+        )
+    }
+
+    /// A host whose session's `main` terminal is not running and whose recording of it holds
+    /// `recording` — a stopped session's agent terminal.
+    pub fn serving_a_recorded_main_terminal(recording: tddy_task::CaptureRecording) -> Self {
+        Self::over_recording(
+            StubStore::empty(),
+            None,
+            UserMapping::Mapped,
+            std::sync::Arc::new(RecordedMain::holding(recording)),
+        )
+    }
+
+    /// A host whose `main` terminal is running with `output` in its ring **and** which also holds
+    /// an older `recording` of it — the recording must never be read while the terminal runs.
+    pub fn serving_main_terminal_with_a_stale_recording(
+        output: &[u8],
+        recording: tddy_task::CaptureRecording,
+    ) -> Self {
+        let terminal = StubTerminal::new();
+        terminal.write(output);
+        let (store, handle) = StubStore::with(terminal);
+        Self::over_recording(
+            store,
+            Some(handle),
+            UserMapping::Mapped,
+            std::sync::Arc::new(RecordedMain::holding(recording)),
+        )
+    }
+
+    fn over_recording(
+        store: StubStore,
+        terminal: Option<std::sync::Arc<StubTerminal>>,
+        mapping: UserMapping,
+        recorded_history: std::sync::Arc<dyn tddy_terminal_rpc::RecordedTerminalHistory>,
+    ) -> Self {
         let control = std::sync::Arc::new(InMemoryControl::unheld());
         let roster = std::sync::Arc::new(InMemoryRoster::with_main_terminal());
         let entry = tddy_terminal_rpc::build_terminal_session_entry(
@@ -489,6 +555,7 @@ impl TerminalServiceHost {
                 terminals: std::sync::Arc::new(store),
                 control: control.clone(),
                 roster: roster.clone(),
+                recorded_history,
                 // Small enough that a handful of bytes exercises the chunking a real ring only
                 // reaches after kilobytes of output.
                 initial_frame_bytes: 4,

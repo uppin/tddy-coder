@@ -35,6 +35,20 @@ use tddy_core::provider_route::{Harness, RouteSources};
 
 use tddy_service::proto::session::start_phase::Step as StartStep;
 
+/// Record `session_id`'s running `main` terminal in its session directory under `tddy_data_dir`, so
+/// its history outlives the process: rewritten while it runs, and once more at its exit.
+pub(crate) async fn record_main_terminal(
+    manager: &CliSessionManager,
+    tddy_data_dir: &Path,
+    session_id: &str,
+) {
+    let path = tddy_cli_sessions::cli_session_manager::main_capture_recording_path(
+        tddy_data_dir,
+        session_id,
+    );
+    manager.record_main_capture(session_id, path).await;
+}
+
 #[allow(clippy::too_many_arguments)]
 pub(crate) async fn spawn_claude_cli_session_inner(
     config: &DaemonConfig,
@@ -281,6 +295,7 @@ pub(crate) async fn spawn_claude_cli_session_inner(
     )
     .await?;
     progress.end_phase(StartStep::Agent);
+    record_main_terminal(claude_cli_manager, tddy_data_dir, session_id).await;
 
     let pid = handle.pid;
 

@@ -176,6 +176,20 @@ against an unknown state would fight the application's own; `terminal_capture_re
 `FROM_OFFSET` attach is not told the program is on the alternate screen (backlog:
 `2026-10-24-reattach-does-not-replay-the-alternate-screen`); a snapshot is.
 
+## Recording (`src/capture_recording.rs`)
+
+`CaptureRecording { start_offset, end_offset, data }` is a capture's retained window on disk, so a
+terminal's history outlives its PTY. `CaptureRecording::of(&capture)` takes the window;
+`replay_from(from, until, max_bytes)` pages it with the **same** function the live capture uses
+(`terminal_capture/paging.rs`, `forward_chunk`), so a recording answers byte-for-byte the chunks its
+capture answered. The file is a header — magic `TDDYCAP\0`, a `u32` version (1), the two offsets,
+little-endian — followed by the bytes; `read` refuses a wrong magic, another version or offsets that do
+not match the data as `InvalidData`. `write_atomically` writes a temporary file beside the target
+(process id and a counter in its name), syncs it and renames it into place; a failed write removes the
+temporary. `CaptureRecording::record(&Mutex<TerminalCapture>, &Path)` is what a recorder calls: snapshot
+(a poisoned lock is still read — bytes and offsets are updated together), create the directory, write
+on a blocking thread. `RECORDING_INTERVAL` (30 s) is the rewrite period every recorder shares.
+
 ## Escape-aware trimming
 
 `EscapeParser` is a small VT state machine (Ground / Escape / EscapeIntermediate / CSI /
@@ -244,6 +258,7 @@ terminal is refused with `FAILED_PRECONDITION`.
 | `tests/terminal_capture_sequence_point.rs` | `snapshot_and_subscribe` neither loses nor duplicates a byte under a concurrent producer |
 | `tests/terminal_capture_replay.rs` | the mode prologue, eviction and the `replay_capture` / `replay` split |
 | `tests/terminal_styles.rs` | colour naming, each attribute as its own flag, run merging and splitting, a bar's run past the text, wide characters keeping columns aligned, the highlight rule and its negative cases |
+| `tests/capture_recording_unit.rs` | a recording holds its capture's window and offsets; a round trip through the file; paging equal to the live capture's; a non-recording refused as `InvalidData`; a failed write (missing directory, or a rename over a non-empty directory) leaves no file or temporary behind; `record` creates the directory |
 | `tests/terminal_crop.rs` | cell-boundary cuts and trimmed lines, wide characters at and inside the box, runs clipped and re-based, cursor inside and outside (signed), clipping versus refusal |
 
 ## See also

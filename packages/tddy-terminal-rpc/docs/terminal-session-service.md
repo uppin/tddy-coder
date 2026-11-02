@@ -56,6 +56,15 @@ a handler has no per-host branch in it.
 | `TerminalRoster` | Starting (from a `TerminalLaunch`), stopping and listing the tools a session runs. |
 | `TerminalControl` | The single-screen control lease — claim, steal, and the change broadcast. |
 
+`TerminalSessionPorts` also carries **`recorded_history: Arc<dyn RecordedTerminalHistory>`** — the
+history of a terminal that is no longer running (`src/service/recorded_history.rs`).
+`GetTerminalHistory` reads it **only** when `TerminalSessionStore` has no running terminal by that id,
+and pages the returned `CaptureRecording` exactly as the live path pages a capture (the same
+`max_bytes` default, one chunk, then the stream closes); `None` is `NOT_FOUND`. A running terminal never
+reads it. `NoRecordedHistory` is the host that records nothing — the coder participant; the daemon
+passes `tddy-session-lifecycle`'s `SessionDirRecordedHistory`. Tests:
+`tests/recorded_history_acceptance.rs`.
+
 The port types — `TerminalSessionPorts`, `TerminalRoster`, `TerminalControl`, `TerminalDescriptor`,
 `ControlClaim`, `ControlChange`, `TerminalLaunch` and `TerminalKind` — live in the module
 `tddy_terminal_rpc::service::ports` (`src/service/ports.rs`). `service` re-exports them, and the crate

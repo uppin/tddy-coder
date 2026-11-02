@@ -427,6 +427,7 @@ impl LaunchSessions {
         self.sandbox_manager
             .insert(session_id.to_string(), state)
             .await;
+        self.record_jailed_main(session_id).await;
 
         let meta = tddy_core::SessionMetadata {
             repo_path: Some(worktree_path.to_string_lossy().to_string()),

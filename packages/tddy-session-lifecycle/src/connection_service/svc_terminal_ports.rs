@@ -108,6 +108,11 @@ impl DaemonSessionHost {
                 self.config.clone(),
                 self.tddy_data_dir.clone(),
             )),
+            recorded_history: Arc::new(
+                crate::session_dir_recorded_history::SessionDirRecordedHistory::new(
+                    self.tddy_data_dir.clone(),
+                ),
+            ),
             initial_frame_bytes: tddy_terminal_rpc::bridge::DEFAULT_INITIAL_FRAME_BYTES,
         }
     }

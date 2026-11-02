@@ -227,6 +227,7 @@ impl LaunchSessions {
         self.sandbox_manager
             .insert(session_id.to_string(), state)
             .await;
+        self.record_jailed_main(session_id).await;
         Ok(pid)
     }
 }

@@ -10,6 +10,7 @@ use tddy_rpc::Response;
 
 use std::path::PathBuf;
 
+use crate::claude_cli_spawn::record_main_terminal;
 use crate::hooks_and_urls;
 
 use crate::launch_ports::LaunchSessions;
@@ -142,6 +143,7 @@ impl LaunchSessions {
         if let Some(mw) = managed {
             manager.attach_managed_workflow(&session_id_owned, mw).await;
         }
+        record_main_terminal(&manager, &self.tddy_data_dir, &session_id_owned).await;
 
         let pid = handle.pid;
 
