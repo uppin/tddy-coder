@@ -1,6 +1,6 @@
-# complexity: invoke_sync
+# complexity: run_child (was invoke_sync)
 
-**Location:** `packages/tddy-agent-backend/src/backend/claude.rs:436` — `invoke_sync`
+**Location:** `packages/tddy-agent-backend/src/backend/claude.rs` — `ClaudeCodeBackend::run_child` (was `invoke_sync`)
 **Moved:** 2026-09-23 — from `packages/tddy-core/src/backend/claude.rs:435` by `#carve` 12/12 (PR #522), which carved `tddy-core` into a wiring point; the body moved unchanged, so the metrics below still hold
 **Category:** complexity
 **Detected:** 2026-09-18 — targeted by `/jev-restructuring` sweep, measured by structural scan
@@ -47,3 +47,9 @@ finding is a lead, not an issue.
 ## Measurement update 2026-10-22 — #provider-route 4/9 (#665)
 
 **Touched, slightly worse:** two route branches (`splice_route_args` on the argv, the route env on the child), +6 lines, nesting unchanged. Not re-measured with the scan.
+
+## Measurement update 2026-11-02 — #agent-tools 6/12 (#795)
+
+**Moved:** 2026-11-02 — the spawn-and-read body of `invoke_sync` became `ClaudeCodeBackend::run_child` (shared by the hand-built path and `invoke_from_spec`); `invoke_sync` is now 41 lines. Record renamed from `complexity-claude-invoke-sync.md`.
+
+**Status:** Open — deferred to the #agent-tools sweep node (developer, 2026-11-02). `run_child`: **290 lines** (fn line to closing brace), budget 60. Slightly smaller than the 336 it was carved from, not under budget.

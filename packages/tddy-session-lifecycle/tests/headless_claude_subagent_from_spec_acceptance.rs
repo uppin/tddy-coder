@@ -2,7 +2,7 @@
 //! `coding_agent.headless` section — its binary resolved by the agent registry, its argv rendered
 //! from the template, and its MCP config and approval tool from the declared slots.
 //!
-//! PRD: `docs/ft/coder/1-WIP/PRD-2026-10-31-headless-agents-from-specs.md` (`#agent-tools 6/12`).
+//! Changeset: `docs/dev/changesets/2026-11-02-agent-tools-claude-headless.md` (`#agent-tools 6/12`).
 //!
 //! The daemon config names a `claude` that does not exist, so only the binary the spec resolves —
 //! a stub on a fixture `ToolHost` — can run. The stub records its argv and the MCP config it was

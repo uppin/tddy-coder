@@ -1,6 +1,6 @@
 //! Stream adapters: the Rust code a declared coding agent's output is read through, by name.
 //!
-//! PRD: `docs/ft/coder/1-WIP/PRD-2026-10-31-headless-agents-from-specs.md` (`#agent-tools 6/12`).
+//! Changeset: `docs/dev/changesets/2026-11-02-agent-tools-claude-headless.md` (`#agent-tools 6/12`).
 //!
 //! A coding agent's tool file (`tddy-coding-agent-specs`) declares *how it is launched*; how its
 //! output is *read* is a runtime protocol that cannot be YAML. So a spec's `coding_agent.headless`

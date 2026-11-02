@@ -33,3 +33,7 @@
 | D | request and sink types: `AgentOutputSink`, `ProgressSink`, `SessionMode`, `RemoteToolEnv`, `InvokeRequest` (L283–493) | ~210 |
 
 `context_globs_for_agent` is out (`backend/context_globs.rs`); seams A–C leave about 470 lines, under budget, and D takes it further. Line numbers above predate that move. `pub use` at the module root keeps every path. Prove the seams with `restructure check --deep` before applying them.
+
+## Measurement update 2026-11-02 — #agent-tools 6/12 (#795)
+
+**Unchanged:** 851 production lines. #795 touched one line (`SessionMode` derives `PartialEq, Eq`).

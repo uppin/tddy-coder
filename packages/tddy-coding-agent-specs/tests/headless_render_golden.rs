@@ -5,7 +5,7 @@
 //! The spec is read straight from the embedded file (no registry, no host resolution), so this
 //! pins the declaration and the renderer alone.
 //!
-//! PRD: `docs/ft/coder/1-WIP/PRD-2026-10-31-headless-agents-from-specs.md` (`#agent-tools 6/12`).
+//! Changeset: `docs/dev/changesets/2026-11-02-agent-tools-claude-headless.md` (`#agent-tools 6/12`).
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};

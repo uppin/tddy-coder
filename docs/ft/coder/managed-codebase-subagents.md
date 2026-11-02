@@ -341,7 +341,12 @@ subagent is paused, not finished — its ACP prompt stays in flight, waiting on 
 - **Headless `claude -p` asks the same way.** Its `--permission-prompt-tool` is tddy-tools'
   `approval_prompt`, which asks the daemon (`ExecToolService.RequestApproval`); the daemon parks the
   request on the conversation, and the caller sees the same `permission_requested` turn and answers
-  it with `subagent_resume`. A timeout (60 s), a cancel or a refused route is a denial. Headless
+  it with `subagent_resume`. A timeout (60 s), a cancel or a refused route is a denial. A daemon
+  renders each headless `claude` turn from `claude.yaml`'s `coding_agent.headless` section: the
+  binary the agent registry resolves, `--model`, `--resume`, the approval tool and the MCP
+  registration (`<tddyhome>/headless/<conversation>/claude-mcp-config.json`, mode 0600) from its
+  slots. When the daemon's coding agents do not load, a headless `claude` launch is refused with the
+  load error — never planned by hand. Headless
   `cursor`, `codex` and `oz` cannot ask mid-turn and run under the fixed policy their row names
   ([Session agent roster § Coding agents](../daemon/session-agent-roster.md#coding-agents)).
 - **`toolCall.kind` is the agent's ACP tool kind** by its wire name (`edit`, `execute`, `read`, …),

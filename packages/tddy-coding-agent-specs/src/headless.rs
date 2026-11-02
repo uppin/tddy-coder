@@ -1,7 +1,7 @@
 //! Headless coding agents from their declaration: `coding_agent.headless` rendered into the
 //! [`HeadlessInvocation`] `tddy-agent-backend`'s consumers spawn (`#agent-tools 6/12`).
 //!
-//! PRD: `docs/ft/coder/1-WIP/PRD-2026-10-31-headless-agents-from-specs.md`.
+//! Changeset: `docs/dev/changesets/2026-11-02-agent-tools-claude-headless.md`.
 //!
 //! The backend owns the port ([`HeadlessRenderer`]) and the adapter registry; this crate depends on
 //! the backend, so it implements the port here and validates adapter names against

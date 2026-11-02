@@ -62,3 +62,5 @@ This file has **three** `#[cfg(test)]` modules (L2683, L2880, L4359). Seam A in 
 `session_participant::pending_question::spawn_pending_question_recorder` beside the ACP transcript
 writer (the recorder itself is the new `session_participant/pending_question.rs`, 76). Already over
 budget before this PR, which did not push it past; recorded, not split, by developer instruction.
+
+**Regressed, split deferred (2026-11-02, #795, #agent-tools 6/12):** 2,626 → 2,638 production lines. `create_backend` takes `tools_dir` and `claude` is built by `claude_from_spec::claude_backend_from_spec` (a new 41-line module, not in `run.rs`). deferred to the #agent-tools sweep node (developer, 2026-11-02).

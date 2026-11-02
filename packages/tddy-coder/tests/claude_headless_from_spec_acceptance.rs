@@ -3,7 +3,7 @@
 //! the hand-built `build_claude_args` passes today — for the plan goal, for accept-edits, and for a
 //! resume — while a `<tddyhome>/tools/claude.yaml` override changes it.
 //!
-//! PRD: `docs/ft/coder/1-WIP/PRD-2026-10-31-headless-agents-from-specs.md` (`#agent-tools 6/12`).
+//! Changeset: `docs/dev/changesets/2026-11-02-agent-tools-claude-headless.md` (`#agent-tools 6/12`).
 //!
 //! The goldens below are `build_claude_args`' output for the same requests, with the MCP config at
 //! its new home: `<session_dir>/claude-mcp-config.json`, written by the MCP slot, rather than a
