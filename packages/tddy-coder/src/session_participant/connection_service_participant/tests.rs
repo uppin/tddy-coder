@@ -326,6 +326,53 @@ async fn start_terminal_session_refuses_an_agent_kind() {
     );
 }
 
+/// A tool session has no tmux server of its own to attach to, so a `tmux` terminal is refused
+/// before anything spawns — never answered with a shell.
+#[tokio::test]
+async fn start_terminal_session_refuses_a_tmux_kind() {
+    // Given a session participant
+    let dir = tempfile::tempdir().unwrap();
+    let entry = a_terminal_entry(dir.path());
+
+    // When the web asks it for a tab attached to a tmux session
+    let req = pb::StartTerminalSessionRequest {
+        session_token: TERM_TOKEN.to_string(),
+        session_id: TERM_SID.to_string(),
+        control_token: String::new(),
+        kind: "tmux".to_string(),
+        tmux_session: "alpha".to_string(),
+    };
+    let result = call(&entry, "StartTerminalSession", req.encode_to_vec()).await;
+
+    // Then it is refused as a precondition this host does not meet
+    let RpcResult::Unary(Err(status)) = result else {
+        panic!("a tmux terminal must be refused by a session participant");
+    };
+    assert_eq!(status.code(), Code::FailedPrecondition);
+    assert!(status.message().contains("tmux"), "{}", status.message());
+}
+
+#[tokio::test]
+async fn list_tmux_sessions_is_refused_by_a_tool_session() {
+    // Given a session participant
+    let dir = tempfile::tempdir().unwrap();
+    let entry = a_terminal_entry(dir.path());
+
+    // When the "+" menu asks it for the host's tmux sessions
+    let req = pb::ListTmuxSessionsRequest {
+        session_token: TERM_TOKEN.to_string(),
+        session_id: TERM_SID.to_string(),
+    };
+    let result = call(&entry, "ListTmuxSessions", req.encode_to_vec()).await;
+
+    // Then it is refused, saying tmux is not offered here
+    let RpcResult::Unary(Err(status)) = result else {
+        panic!("a tool session must refuse ListTmuxSessions");
+    };
+    assert_eq!(status.code(), Code::FailedPrecondition);
+    assert!(status.message().contains("tmux"), "{}", status.message());
+}
+
 #[tokio::test]
 async fn list_terminal_sessions_includes_a_started_bash_terminal() {
     // Given a session participant with one started terminal

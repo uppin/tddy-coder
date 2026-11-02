@@ -50,6 +50,12 @@ impl PrivateTmux {
         PrivateTmux { socket_dir }
     }
 
+    /// Tell the daemon to run `binary` as tmux — cleared again when this server is dropped.
+    fn with_tmux_binary(self, binary: &str) -> Self {
+        std::env::set_var("TDDY_TMUX_BINARY", binary);
+        self
+    }
+
     fn tmux(&self, args: &[&str]) -> std::process::Output {
         Command::new("tmux")
             .env("TMUX_TMPDIR", self.socket_dir.path())
@@ -89,6 +95,7 @@ impl Drop for PrivateTmux {
     fn drop(&mut self) {
         let _ = self.tmux(&["kill-server"]);
         std::env::remove_var("TMUX_TMPDIR");
+        std::env::remove_var("TDDY_TMUX_BINARY");
     }
 }
 
@@ -160,7 +167,8 @@ impl TmuxTabDaemon {
     }
 }
 
-fn names(sessions: &[TmuxSessionInfo]) -> Vec<(&str, u32, u32)> {
+/// Each listed session as `(name, windows, attached)`.
+fn name_windows_attached(sessions: &[TmuxSessionInfo]) -> Vec<(&str, u32, u32)> {
     sessions
         .iter()
         .map(|s| (s.name.as_str(), s.windows, s.attached))
@@ -187,7 +195,10 @@ async fn list_tmux_sessions_returns_the_users_sessions_with_window_and_attached_
         .expect("tmux sessions listed");
 
     // Then
-    assert_eq!(names(&sessions), vec![("alpha", 2, 0), ("beta", 1, 0)]);
+    assert_eq!(
+        name_windows_attached(&sessions),
+        vec![("alpha", 2, 0), ("beta", 1, 0)]
+    );
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -211,13 +222,11 @@ async fn list_tmux_sessions_without_a_tmux_server_is_empty() {
 #[serial_test::serial]
 async fn list_tmux_sessions_without_tmux_installed_is_refused_naming_tmux() {
     // Given a tmux binary that does not exist
-    let _tmux = PrivateTmux::started();
-    std::env::set_var("TDDY_TMUX_BINARY", "/nonexistent/tmux");
+    let _tmux = PrivateTmux::started().with_tmux_binary("/nonexistent/tmux");
     let daemon = a_daemon_with_a_running_session().await;
 
     // When
     let refusal = daemon.list_tmux_sessions().await.unwrap_err();
-    std::env::remove_var("TDDY_TMUX_BINARY");
 
     // Then
     assert_eq!(refusal.code(), Code::FailedPrecondition);

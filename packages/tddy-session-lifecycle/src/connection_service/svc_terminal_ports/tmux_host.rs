@@ -244,13 +244,23 @@ mod tests {
     }
 
     #[test]
-    fn a_missing_server_lists_nothing_and_any_other_failure_is_an_error() {
-        assert!(listing_failure("no server running on /tmp/tmux-1/default")
-            .unwrap()
-            .is_empty());
-        assert!(listing_failure("error connecting to /tmp/x (No such file)")
-            .unwrap()
-            .is_empty());
-        assert!(listing_failure("boom").is_err());
+    fn a_missing_server_lists_nothing() {
+        // tmux says one of these, depending on whether the socket file exists
+        for stderr in [
+            "no server running on /tmp/tmux-1/default",
+            "error connecting to /tmp/x (No such file)",
+        ] {
+            assert_eq!(listing_failure(stderr).unwrap(), Vec::<TmuxSession>::new());
+        }
+    }
+
+    #[test]
+    fn any_other_listing_failure_is_an_internal_error_carrying_what_tmux_said() {
+        // When
+        let refusal = listing_failure("  boom \n").unwrap_err();
+
+        // Then
+        assert_eq!(refusal.code(), tddy_rpc::Code::Internal);
+        assert_eq!(refusal.message(), "tmux list-sessions failed: boom");
     }
 }
