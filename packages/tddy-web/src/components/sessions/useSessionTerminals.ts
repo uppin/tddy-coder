@@ -51,8 +51,9 @@ export interface UseSessionTerminalsParams {
 /**
  * Owns the set of terminals for a single session plus the active-tab selection.
  *
- * On attach it lists the session's already-open terminals, each with the kind it runs. `open` and
- * `close` drive the daemon `StartTerminalSession`/`StopTerminalSession` RPCs and keep the local tab
+ * On attach it lists the session's already-open terminals, each with the kind it runs and, for a tmux
+ * tab, the tmux session it is attached to. `open` and `close` drive the daemon
+ * `StartTerminalSession`/`StopTerminalSession` RPCs and keep the local tab
  * set consistent with an optimistic remove (the tab disappears immediately, the Stop RPC fires in
  * the background). The reserved `main` terminal (the Agent tab) is implicit and is never part of
  * `terminals`.
@@ -80,9 +81,14 @@ export function useSessionTerminals({
       try {
         const res = await client.listTerminalSessions({ sessionToken, sessionId });
         if (cancelled) return;
-        const listed = res.terminals
+        const listed: SessionTerminal[] = res.terminals
           .filter((t) => t.terminalId && t.terminalId !== AGENT_TERMINAL_ID)
-          .map((t) => ({ terminalId: t.terminalId, kind: t.kind }));
+          .map((t) => ({
+            terminalId: t.terminalId,
+            kind: t.kind,
+            // Empty on the wire for every kind but tmux; absent here, as on `SessionTerminal`.
+            tmuxSession: t.tmuxSession || undefined,
+          }));
         setTerminals((prev) => {
           // Merge: keep any locally-opened tab not yet reflected by the daemon list.
           const merged = [...listed];
@@ -111,7 +117,7 @@ export function useSessionTerminals({
   }, []);
 
   const open = useCallback(
-    (kind: string) => {
+    (kind: string, tmuxSession?: string) => {
       if (!client) {
         setError(hostNotConnectedText(null));
         return;
@@ -125,13 +131,16 @@ export function useSessionTerminals({
             sessionId,
             controlToken,
             kind: requestedKind,
+            tmuxSession: tmuxSession ?? "",
           });
           const id = res.terminalId;
           if (!id) {
             throw new Error("The host started no terminal — it answered without a terminal id.");
           }
           setTerminals((prev) =>
-            prev.some((t) => t.terminalId === id) ? prev : [...prev, { terminalId: id, kind }],
+            prev.some((t) => t.terminalId === id)
+              ? prev
+              : [...prev, { terminalId: id, kind, tmuxSession }],
           );
           setActiveTerminalId(id);
           setError(null);

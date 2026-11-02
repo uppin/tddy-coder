@@ -8,6 +8,7 @@ import { useConversationHostAttachment } from "./SessionAgentConversationLayer";
 import { PaneFullscreenExit, TerminalControlLayer } from "./SessionPaneChrome";
 import { SessionChildRuntime } from "./SessionChildRuntime";
 import { AGENT_TERMINAL_ID, useSessionTerminals } from "./useSessionTerminals";
+import { useTmuxSessions } from "./useTmuxSessions";
 import { useChildSessions } from "./useChildSessions";
 import { SessionConnectionOverlay } from "./SessionConnectionOverlay";
 import { useTerminalControl, type Session } from "./useTerminalControl";
@@ -127,6 +128,13 @@ export function SessionRuntime({
     sessionToken,
     client: sessionTerminalClient,
     controlToken: connected?.controlToken,
+  });
+
+  // The host's tmux sessions, listed when the "+" menu opens.
+  const tmux = useTmuxSessions({
+    sessionId: runtime.sessionId,
+    sessionToken,
+    client: sessionTerminalClient,
   });
 
   // Spawned child conversations of this session (tagged with `orchestratorSessionId = this session`).
@@ -255,6 +263,7 @@ export function SessionRuntime({
         activeTerminalId={activeTerminalId}
         onSelect={selectTerminal}
         onOpen={open}
+        tmux={tmux}
         onClose={close}
         sessionType={sessionType}
         childSessions={childSessions}

@@ -13,6 +13,7 @@ import { PaneFullscreenExit, TerminalControlLayer } from "./SessionPaneChrome";
 import { SessionTerminalTabs } from "./SessionTerminalTabs";
 import type { TerminalClient } from "./sessionRuntimeProps";
 import { AGENT_TERMINAL_ID, useSessionTerminals } from "./useSessionTerminals";
+import { useTmuxSessions } from "./useTmuxSessions";
 import { useSessionPaneFullscreen } from "./useSessionPaneFullscreen";
 import { useTerminalControl, type Session } from "./useTerminalControl";
 
@@ -20,10 +21,10 @@ import { useTerminalControl, type Session } from "./useTerminalControl";
  * The tab strip of a session whose agent is not running.
  *
  * A live session's strip lives in `SessionRuntime`, which needs a connection to its agent. A stopped
- * session has none, yet its worktree is still there: "+" opens bash and harness terminals through the
- * owning daemon's `TerminalSessionService` (which starts them in the worktree the session's record
- * names), the terminals the daemon already runs for it are listed, and added agents' conversations
- * get their tabs. What the Agent tab shows is the caller's — `agentTab` — so the stopped Agent tab's
+ * session has none, yet its worktree is still there: "+" opens bash, harness and tmux terminals
+ * through the owning daemon's `TerminalSessionService` (which starts them in the worktree the
+ * session's record names), the terminals the daemon already runs for it are listed, and added agents'
+ * conversations get their tabs. What the Agent tab shows is the caller's — `agentTab` — so the stopped Agent tab's
  * body can change without touching the strip.
  *
  * It carries the live strip's features for the terminals it hosts: full screen, the mobile shortcut
@@ -92,6 +93,13 @@ export function DormantSessionRuntime({
       controlToken: connected?.controlToken,
     });
 
+  // The host's tmux sessions, listed when the "+" menu opens.
+  const tmux = useTmuxSessions({
+    sessionId: session.sessionId,
+    sessionToken,
+    client: terminalClient,
+  });
+
   // Whether a file dropped onto the terminals is handed over by its real path or uploaded, decided
   // the same way the live runtime decides it.
   const { servingInstanceId } = useSelectedDaemon();
@@ -148,11 +156,12 @@ export function DormantSessionRuntime({
           onSelectAgentConversation?.(null);
           setActive(terminalId);
         }}
-        onOpen={(kind) => {
+        onOpen={(kind, tmuxSession) => {
           // A new terminal is shown at once, so it takes the pane from a focused conversation.
           onSelectAgentConversation?.(null);
-          open(kind);
+          open(kind, tmuxSession);
         }}
+        tmux={tmux}
         onClose={close}
         sessionType={session.sessionType}
         agentConversations={agentConversations}

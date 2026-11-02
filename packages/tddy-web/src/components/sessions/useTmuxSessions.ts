@@ -1,5 +1,10 @@
-import type { TerminalClient } from "./sessionRuntimeProps";
+import { useCallback, useEffect, useState } from "react";
 import type { TmuxSessionInfo } from "../../gen/terminal_session_pb";
+import { tddyDebug } from "../../lib/debugMask";
+import { rpcFailureText } from "../../rpc/rpcFailure";
+import type { TerminalClient } from "./sessionRuntimeProps";
+
+const dTmux = tddyDebug("tddy:term:tmux");
 
 /**
  * The tmux sessions on a session's host that a "tmux" tab can attach to, fetched through the
@@ -14,6 +19,9 @@ export interface TmuxMenuState {
   readonly sessions: readonly TmuxSessionInfo[];
   /** Why the last listing failed (e.g. tmux is not installed), ready to render; `null` otherwise. */
   readonly error: string | null;
+  /** True from a `refresh` until its listing answers. It stays true while the client is still
+   *  connecting, because the listing waits for it rather than reporting an empty host. */
+  readonly loading: boolean;
   /** List again — called when the "+" menu opens. */
   readonly refresh: () => void;
 }
@@ -25,7 +33,50 @@ export interface UseTmuxSessionsParams {
   client?: TerminalClient | null;
 }
 
-export function useTmuxSessions(_params: UseTmuxSessionsParams): TmuxMenuState {
-  // TODO(tmux-attach): implement
-  return { sessions: [], error: null, refresh: () => undefined };
+/**
+ * Lists the tmux sessions when asked. `refresh` records a request; the listing runs for the newest
+ * request once a client is present, so a menu opened while the session is still connecting lists as
+ * soon as the client arrives, the same way the terminal list waits for its client. A listing that
+ * a newer request has overtaken, or that outlives the component, is not written back.
+ */
+export function useTmuxSessions({
+  sessionId,
+  sessionToken,
+  client = null,
+}: UseTmuxSessionsParams): TmuxMenuState {
+  const [sessions, setSessions] = useState<readonly TmuxSessionInfo[]>([]);
+  const [error, setError] = useState<string | null>(null);
+  // `requests` counts the refreshes asked for; `answered` is the last one whose listing came back.
+  const [requests, setRequests] = useState(0);
+  const [answered, setAnswered] = useState(0);
+
+  useEffect(() => {
+    // Nothing is listed until the menu asks for it, and nothing without a client to ask through.
+    if (requests === 0 || client === null) return;
+    let current = true;
+    void (async () => {
+      try {
+        const res = await client.listTmuxSessions({ sessionToken, sessionId });
+        if (!current) return;
+        setSessions(res.sessions);
+        setError(null);
+      } catch (err) {
+        dTmux(
+          "listTmuxSessions failed sessionId=%s error=%o",
+          sessionId,
+          err instanceof Error ? err.message : err,
+        );
+        if (!current) return;
+        setError(rpcFailureText(err));
+      }
+      if (current) setAnswered(requests);
+    })();
+    return () => {
+      current = false;
+    };
+  }, [requests, client, sessionId, sessionToken]);
+
+  const refresh = useCallback(() => setRequests((count) => count + 1), []);
+
+  return { sessions, error, loading: requests !== answered, refresh };
 }
