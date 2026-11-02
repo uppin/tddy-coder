@@ -4,7 +4,7 @@
 **Status:** 🚧 In Progress
 **Type:** Feature
 **Complexity**: 3 — web only; a new `Toast` component, a read-only history terminal and an optimistic liveness hint threaded through the resume path
-**Stack:** `#session-tabs 6/7` — branch `feature/session-tabs/dormant-agent-tab`, base `feature/session-tabs/tab-plus`
+**Stack:** `#session-tabs 6/7` — branch `feature/session-tabs/dormant-agent-tab`, base `feature/session-tabs/tab-plus` · **PR:** [#809](https://github.com/uppin/tddy-coder/pull/809)
 **PRD:** [PRD-2026-11-02-dormant-agent-tab.md](../../ft/web/1-WIP/PRD-2026-11-02-dormant-agent-tab.md)
 
 ## Initial Discovery
@@ -33,7 +33,9 @@
   - It shows the `Toast` "This session is not running", with Resume.
 - `SessionMainPane` fills n1's `DormantSessionRuntime` `agentTab` slot with `DormantAgentTerminal`
   instead of `SessionActivitiesPane`.
-- The optimistic liveness hint (`useResumedSessions` in `src/components/sessions/useResumedSessions.ts`):
+- The optimistic liveness hint (`src/components/sessions/useResumedSessions.ts`). It is pure state —
+  `markResumed(resumed, id)`, `afterListing(resumed, listed)`, `isLive(resumed, session)` over a
+  `ReadonlySet<string>` — which the pane holds and threads through:
   - a successful `resumeSession` marks the session live until the next listing reports it;
   - `canResumeSession` / `connectionStatusForSession` callers in the pane read it.
   - The top-bar Resume and the toast share one resume action.
@@ -119,9 +121,12 @@ Real dependency edges, as opposed to the branch line:
   - busy disables it;
   - an error renders with `role="alert"`.
 - [ ] `packages/tddy-web/src/components/sessions/useResumedSessions.test.ts` (bun):
-  - marked live after a resume;
-  - cleared when a listing reports the session live;
-  - cleared when a listing reports it dormant again after the resume.
+  - `a stopped session is live as soon as it is resumed`;
+  - `a resumed session stays live while the listing still reports it stopped`;
+  - `once the listing reports it live, the listing alone decides again` (a guard);
+  - `a session nobody resumed is as live as the listing says` (a guard).
+- The in-memory terminal fake gains `terminalHistoryNotFound` (a `NOT_FOUND` history) and `atEnd`
+  on scripted chunks.
 
 ### Test level decisions
 
@@ -136,16 +141,26 @@ Real dependency edges, as opposed to the branch line:
   design), and the hint is just a fresher liveness fact.
 - **Terminal output over the transcript** in the Agent tab, as chosen in the interview.
 
+## Baseline before green
+
+Recorded at the contract commit (2026-11-02), scoped to `tddy-web`:
+
+- **This node's red tests:**
+  - `DormantAgentTabAcceptance.cy.tsx`: 7 failing. Six fail on the missing `dormant-agent-*` elements. `a bash tab opened before Resume…` fails earlier, on n1's missing stopped-session "+", which is the recorded n1 → n6 dependency.
+  - `Toast.cy.tsx`: 4 failing.
+  - `useResumedSessions.test.ts`: 2 failing (+ 2 guards passing on the identity stub).
+- `HISTORY_THEME` / `HISTORY_FILTER` are now exported from `GhosttyTerminalSession.tsx`; no logic changed there.
+
 ## TODO
 
 - [x] Record initial discovery (`2026-11-02-session-tabs-dormant-agent-tab-initial-discovery.md`)
 - [x] Cross-check `packages/*/docs/code-issues/` and `docs/dev/todo/` for items this change touches (Step 2b)
 - [x] Create/update PRD documentation
 - [x] Create changeset (this document)
-- [ ] Create failing acceptance tests
-- [ ] Run acceptance tests (verify they fail)
-- [ ] USER REVIEW — acceptance tests
-- [ ] TDD Red — write failing unit/integration tests
+- [x] Create failing acceptance tests
+- [x] Run acceptance tests (verify they fail)
+- [x] USER REVIEW — acceptance tests — waived by the developer 2026-11-02 (reviewed with the stack at the end of pass 2)
+- [x] TDD Red — write failing unit/integration tests
 - [ ] TDD Green — implement with quality code
 - [ ] Update documentation with progress
 - [ ] Repeat Red→Green→Update cycle until feature complete
