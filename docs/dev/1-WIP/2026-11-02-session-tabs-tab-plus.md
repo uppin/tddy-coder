@@ -80,7 +80,6 @@ Real dependency edges, as opposed to the branch line:
 
 ### Modified
 - `packages/tddy-web/src/components/sessions/SessionTerminalTabs.tsx`, `NewTerminalMenu.tsx`.
-- `packages/tddy-web/cypress/support/pages/sessionTerminalTabsPage.ts` (helpers).
 - Docs, at wrap: `docs/ft/web/session-terminal-tabs.md`.
 
 ## Testing Strategy
@@ -95,6 +94,10 @@ Real dependency edges, as opposed to the branch line:
 - [ ] `"+" stays visible at the scroller's edge when the tabs overflow` (imports `src/index.css`)
 - [ ] `the "+" menu is fully visible while the tabs overflow`
 - [ ] `Escape and an outside click still close the menu`
+
+The spec imports `src/index.css` once, for all six cases. The last three pass on today's layout,
+where "+" is outside the scroller. They are the guarantees the move must keep, and stay green through
+it.
 
 ### Unit / integration tests
 
