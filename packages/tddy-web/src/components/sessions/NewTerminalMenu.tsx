@@ -7,11 +7,19 @@ import {
   terminalKindLabel,
 } from "./cliHarnessOptions";
 
+import type { TmuxMenuState } from "./useTmuxSessions";
+
 interface NewTerminalMenuProps {
   /** The session's type: a tool session offers bash only. Unset offers every harness. */
   sessionType?: string;
-  /** Open a terminal of the chosen kind: `bash`, or a CLI harness's session type. */
-  onOpen: (kind: string) => void;
+  /** Open a terminal of the chosen kind: `bash`, a CLI harness's session type, or `tmux` attached
+   *  to `tmuxSession`. */
+  onOpen: (kind: string, tmuxSession?: string) => void;
+  /** The host's tmux sessions, offered as a section of the menu; absent offers no tmux section.
+   *  TODO(tmux-attach): render the section (`sessions-terminal-tab-new-tmux-<name>`, the empty
+   *  state `sessions-terminal-tab-new-tmux-empty`, the error `sessions-terminal-tab-new-tmux-error`)
+   *  and call `tmux.refresh` when the menu opens. */
+  tmux?: TmuxMenuState;
 }
 
 /**

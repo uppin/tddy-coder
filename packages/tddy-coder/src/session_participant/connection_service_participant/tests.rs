@@ -217,6 +217,7 @@ async fn start_terminal_session_returns_a_fresh_non_main_terminal_id() {
         session_id: TERM_SID.to_string(),
         control_token: String::new(),
         kind: String::new(),
+        tmux_session: String::new(),
     };
     let resp = pb::StartTerminalSessionResponse::decode(
         &unary_ok(call(&entry, "StartTerminalSession", req.encode_to_vec()).await)[..],
@@ -251,6 +252,7 @@ async fn start_terminal_session_refuses_a_request_naming_another_session() {
         session_id: ANOTHER_SID.to_string(),
         control_token: String::new(),
         kind: String::new(),
+        tmux_session: String::new(),
     };
     let result = call(&entry, "StartTerminalSession", req.encode_to_vec()).await;
 
@@ -308,6 +310,7 @@ async fn start_terminal_session_refuses_an_agent_kind() {
         session_id: TERM_SID.to_string(),
         control_token: String::new(),
         kind: "warp-cli".to_string(),
+        tmux_session: String::new(),
     };
     let result = call(&entry, "StartTerminalSession", req.encode_to_vec()).await;
 
@@ -333,6 +336,7 @@ async fn list_terminal_sessions_includes_a_started_bash_terminal() {
         session_id: TERM_SID.to_string(),
         control_token: String::new(),
         kind: String::new(),
+        tmux_session: String::new(),
     };
     let started = pb::StartTerminalSessionResponse::decode(
         &unary_ok(call(&entry, "StartTerminalSession", start.encode_to_vec()).await)[..],
@@ -399,6 +403,7 @@ async fn send_terminal_input_is_accepted_for_a_started_terminal() {
         session_id: TERM_SID.to_string(),
         control_token: String::new(),
         kind: String::new(),
+        tmux_session: String::new(),
     };
     let started = pb::StartTerminalSessionResponse::decode(
         &unary_ok(call(&entry, "StartTerminalSession", start.encode_to_vec()).await)[..],
@@ -462,6 +467,7 @@ async fn stream_terminal_output_streams_a_started_shell_output() {
         session_id: TERM_SID.to_string(),
         control_token: String::new(),
         kind: String::new(),
+        tmux_session: String::new(),
     };
     let started = pb::StartTerminalSessionResponse::decode(
         &unary_ok(call(&entry, "StartTerminalSession", start.encode_to_vec()).await)[..],

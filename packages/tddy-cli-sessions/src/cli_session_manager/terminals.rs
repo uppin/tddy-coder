@@ -69,6 +69,24 @@ impl CliSessionManager {
         .await
     }
 
+    /// Start a **tmux terminal** attached to `session_id`: `argv` (a tmux client attaching to, or
+    /// creating, `tmux_session`) in `worktree_path`, run **as `os_user`** so it reaches that user's
+    /// own tmux server. Returns the new handle with a fresh `terminal_id`, kind `"tmux"`, and
+    /// `tmux_session` recorded so a listing can name it. Stopping it ends the client only, which
+    /// detaches it.
+    pub async fn start_tmux_terminal(
+        &self,
+        session_id: &str,
+        worktree_path: PathBuf,
+        os_user: &str,
+        argv: Vec<String>,
+        tmux_session: &str,
+    ) -> anyhow::Result<Arc<pty_handle::PtyHandle>> {
+        // TODO(tmux-attach): implement
+        let _ = (session_id, worktree_path, os_user, argv, tmux_session);
+        anyhow::bail!("tmux terminals are not implemented")
+    }
+
     /// Look up a specific tool of a session by `terminal_id` (use `MAIN_TERMINAL_ID` for the
     /// `claude` terminal).
     pub async fn get_terminal(

@@ -104,6 +104,10 @@
             # Grep failed with `spawn failed: No such file or directory` anywhere built from this
             # flake alone — including CI, where nothing had exercised the tool to notice.
             pkgs.ripgrep
+            # The tmux session tabs (`#session-tabs` 3/7, 7/7) attach to and start tmux sessions,
+            # and their daemon acceptance tests drive a real tmux on a private socket — declared so
+            # CI has it rather than relying on one that happens to be on a developer's PATH.
+            pkgs.tmux
             pkgs.bun
             pkgs.nodejs_20
             pkgs.util-linux

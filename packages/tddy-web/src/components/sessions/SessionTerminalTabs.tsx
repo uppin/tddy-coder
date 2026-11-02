@@ -3,6 +3,7 @@ import { Maximize2, Minimize2, X } from "lucide-react";
 import { AGENT_TERMINAL_ID, type SessionTerminal } from "./useSessionTerminals";
 import { terminalKindLabel } from "./cliHarnessOptions";
 import { NewTerminalMenu } from "./NewTerminalMenu";
+import type { TmuxMenuState } from "./useTmuxSessions";
 import type { ChildSession } from "./useChildSessions";
 import { agentConversationLabel, type AgentConversation } from "./agentConversationTabs";
 import { safeTestIdPart } from "../../lib/testId";
@@ -16,7 +17,9 @@ interface SessionTerminalTabsProps {
   /** Focus a tab. */
   onSelect: (terminalId: string) => void;
   /** Open a terminal of the given kind: `bash`, or a CLI harness's session type. */
-  onOpen: (kind: string) => void;
+  onOpen: (kind: string, tmuxSession?: string) => void;
+  /** The host's tmux sessions for the "+" menu's tmux section; absent offers none. */
+  tmux?: TmuxMenuState;
   /** Close a terminal (the ✕ control on its tab). */
   onClose: (terminalId: string) => void;
   /**

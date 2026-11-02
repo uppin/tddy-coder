@@ -4,7 +4,7 @@
 **Status:** 🚧 In Progress
 **Type:** Feature
 **Complexity**: 4 — proto + `tddy-terminal-rpc` + `tddy-cli-sessions` + daemon + coder participant + web; a first run-as-the-session-user tab; tests need a real tmux
-**Stack:** `#session-tabs 3/7` — branch `feature/session-tabs/tmux-attach`, base `feature/session-tabs/agent-history`
+**Stack:** `#session-tabs 3/7` — branch `feature/session-tabs/tmux-attach`, base `feature/session-tabs/agent-history` · **PR:** [#806](https://github.com/uppin/tddy-coder/pull/806)
 **PRD:** [PRD-2026-11-02-tmux-attach-tab.md](../../ft/web/1-WIP/PRD-2026-11-02-tmux-attach-tab.md)
 
 ## Initial Discovery
@@ -34,31 +34,43 @@
   - `TmuxSessionInfo{name, windows: uint32, attached: uint32}`;
   - `StartTerminalSessionRequest.tmux_session: string`;
   - `TerminalSessionInfo.tmux_session: string`.
-- `TerminalKind::Tmux { session: String }`, from kind `"tmux"` with a non-empty `tmux_session`. A
-  `tmux` kind without a name → `invalid_argument`.
+- `TerminalKind::Tmux { session: String }`, and `TerminalKind::from_request(kind, tmux_session) ->
+  Result<TerminalKind, Status>`: kind `"tmux"` (`TMUX_KIND`) with a non-empty `tmux_session` → `Tmux`;
+  a `tmux` kind without a name → `invalid_argument`.
+- `TerminalLaunch.os_user: String` — the OS user the request's token maps to, filled by
+  `start_terminal_session` (planned in n1, moved here in pass 2 as its only consumer).
 - `TerminalDescriptor.tmux_session: Option<String>`.
-- `tddy_terminal_rpc::service::TmuxHost` trait:
-  `async fn list(&self, os_user: &str) -> Result<Vec<TmuxSession>, Status>`.
+- `tddy_terminal_rpc::service::{TmuxHost, TmuxSession, NoTmux}` — the trait
+  `async fn list(&self, os_user: &str) -> Result<Vec<TmuxSession>, Status>`, and `NoTmux`, a host
+  that refuses every listing with `failed_precondition`.
   - Added to `TerminalSessionPorts` as `tmux`.
-  - The service answers `ListTmuxSessions` through it.
+  - The service answers `ListTmuxSessions` through it (`list_tmux_sessions`, already wired in the
+    contract: it is a pass-through).
 - `CliSessionManager::start_tmux_terminal(session_id, worktree, os_user, argv, tmux_session)`, which goes
   through `spawn_tool` with `os_user: Some(_)`.
-- Daemon `HostTmux` (`tddy-session-lifecycle/src/connection_service/svc_tmux_host.rs`):
-  - lists by running `tmux list-sessions -F '#{session_name}\t#{session_windows}\t#{session_attached}'`
-    as the user;
+- Daemon `HostTmux` (`connection_service/svc_terminal_ports/tmux_host.rs`, a submodule so
+  `connection_service.rs` gains no `mod` line):
+  - lists by running `tmux list-sessions -F LIST_SESSIONS_FORMAT` (name, windows, attached; parsed
+    by `parse_list_sessions`) as the user;
   - "no server running" → `[]`, tmux missing → `failed_precondition`;
   - `tmux_attach_argv(binary, name) = [binary, "-T", "clipboard", "attach-session", "-t", "=<name>"]`
     (`=` forces an exact match);
   - an unknown name is checked against `list` first → `not_found`;
-  - the tmux binary comes from config (`tmux_binary`, default `tmux` on PATH).
+  - the binary is `TDDY_TMUX_BINARY` when set and non-empty, else `tmux` on PATH (`tmux_binary()`),
+    the same pattern as `TDDY_CLAUDE_BINARY`. A `DaemonConfig` field was rejected: the struct has
+    ~150 construction sites.
 - `CliManagerTerminalRoster::start` `Tmux` arm. The worktree comes from the live `main`, or from n1's
   resolution when stopped.
-- The coder participant: `ListTmuxSessions` and kind `tmux` → `failed_precondition`.
+- The coder participant: `ListTmuxSessions` (`NoTmux`) and kind `tmux` → `failed_precondition`. Both
+  refusals land in the contract commit, so a tool session can never start a shell for a `tmux` kind.
 - **Web:**
-  - `useTmuxSessions` (`src/components/sessions/useTmuxSessions.ts`) fetches on menu open;
+  - `useTmuxSessions({sessionId, sessionToken, client}) -> TmuxMenuState {sessions, error, refresh}`
+    (`src/components/sessions/useTmuxSessions.ts`) lists on menu open;
+  - `NewTerminalMenu` / `SessionTerminalTabs` take `tmux?: TmuxMenuState` and
+    `onOpen(kind, tmuxSession?)`;
   - the `NewTerminalMenu` tmux section (`sessions-terminal-tab-new-tmux-<name>`, the empty state
     `sessions-terminal-tab-new-tmux-empty`, an inline error);
-  - `useSessionTerminals.open` accepts `{kind: "tmux", tmuxSession}`;
+  - `useSessionTerminals.open(kind, tmuxSession?)`; `SessionTerminal.tmuxSession`;
   - the tab label is `tmux: <name>`.
 
 ## Boundaries
@@ -76,8 +88,8 @@ implementing one here collides with the PR that owns it.
 
 | Parent node | What it delivers | How this PR consumes it | This PR does NOT |
 |---|---|---|---|
-| `n1` dormant-tabs | `TerminalLaunch.os_user`; roster start on a stopped session (`recorded_worktree`) | the tmux arm spawns as `launch.os_user`; a tmux tab on a stopped session gets its worktree the same way | add or change `TerminalLaunch.os_user`, or the stopped-session lookup |
-| `n2` agent-history | `recorded_history` port on `TerminalSessionPorts` | constructs `TerminalSessionPorts` with it in place | touch recording or `RecordedTerminalHistory` |
+| `n1` dormant-tabs | roster start on a stopped session (`recorded_worktree`) | a tmux tab on a stopped session gets its worktree the same way | change the stopped-session lookup |
+| `n2` agent-history | `recorded_history` port on `TerminalSessionPorts`, `NoRecordedHistory` | constructs `TerminalSessionPorts` with it in place (and adds `tmux` beside it) | touch recording or `RecordedTerminalHistory` |
 
 ## Draft PR contract
 
@@ -116,9 +128,10 @@ Real dependency edges, as opposed to the branch line:
 ## Delta
 
 ### New
-- `packages/tddy-session-lifecycle/src/connection_service/svc_tmux_host.rs`
-- `packages/tddy-terminal-rpc/src/service/tmux.rs` (the port and the `ListTmuxSessions` handler)
+- `packages/tddy-session-lifecycle/src/connection_service/svc_terminal_ports/tmux_host.rs`
 - `packages/tddy-web/src/components/sessions/useTmuxSessions.ts`
+- The port lives in `tddy-terminal-rpc/src/service/ports.rs` beside the others; the handler in
+  `service.rs`.
 
 ### Modified
 - `terminal_session.proto` (+ generated TS in `tddy-web` / `tddy-rpc-web` as the repo's codegen does).
@@ -126,7 +139,9 @@ Real dependency edges, as opposed to the branch line:
 - `tddy-cli-sessions` `terminals.rs`.
 - `svc_terminal_ports.rs`.
 - the `tddy-coder` participant.
-- `tddy-daemon` config (`tmux_binary`).
+- `flake.nix`: `pkgs.tmux` in the dev shell (approved by the developer 2026-11-02), so the tests and
+  CI have a real tmux.
+- Every `StartTerminalSessionRequest { … }` and `TerminalDescriptor { … }` literal gains the new field.
 - `tddy-web` `NewTerminalMenu.tsx`, `useSessionTerminals.ts`, `SessionTerminalTabs.tsx` (label), `cypress/support/rpc/terminalSessionServiceBackend.ts`.
 - Docs, at wrap: `docs/ft/web/session-terminal-tabs.md`, `docs/ft/web/web-terminal.md`.
 
@@ -134,7 +149,10 @@ Real dependency edges, as opposed to the branch line:
 
 ### Acceptance tests
 
-**`tddy-session-lifecycle`**: `packages/tddy-session-lifecycle/tests/tmux_tabs_acceptance.rs` (each test runs a private tmux server on its own `-L` socket via the configured binary)
+**`tddy-session-lifecycle`**: `packages/tddy-session-lifecycle/tests/tmux_tabs_acceptance.rs`. Each test
+runs a private tmux server: `TMUX_TMPDIR` points tmux's socket directory at a temp dir, for the daemon
+and the test alike. The identity maps to the OS user running the test, so no privilege change happens.
+Serial, because the tests set process env.
 
 - [ ] `list_tmux_sessions_returns_the_users_sessions_with_window_and_attached_counts`
 - [ ] `list_tmux_sessions_without_a_tmux_server_is_empty`
@@ -153,11 +171,15 @@ Real dependency edges, as opposed to the branch line:
 
 ### Unit / integration tests
 
-- [ ] `tddy-terminal-rpc` `TerminalKind::from_request`: `tmux` + name → `Tmux`; `tmux` without a name → refused; other kinds are unchanged.
-- [ ] `svc_tmux_host.rs`:
-  - the list-format parser (tabs, empty output, the "no server running" stderr);
-  - `tmux_attach_argv` uses `-T clipboard` and an exact `=name` target.
-- [ ] `packages/tddy-coder/tests/` (extended parity or a new case): the coder refuses `ListTmuxSessions` with `failed_precondition`.
+- [ ] `packages/tddy-terminal-rpc/tests/terminal_kind_unit.rs`:
+  - `a_tmux_kind_with_a_session_is_a_tmux_terminal_attached_to_it`;
+  - `a_tmux_kind_without_a_session_is_refused_as_invalid_argument`;
+  - `bash_and_harness_kinds_are_read_as_before` (a guard).
+- [ ] `tmux_host.rs` unit tests: `the_listing_reads_name_windows_and_attached_clients_per_line`,
+  `a_session_name_with_spaces_is_kept_whole`, `an_empty_listing_has_no_sessions`,
+  `a_tab_attaches_with_the_clipboard_feature_to_exactly_the_named_session`.
+- The coder's refusals are already in place (contract), and `two_server_parity_acceptance` stays green
+  with `NoTmux` on both servers.
 
 ### Test level decisions
 
@@ -171,8 +193,22 @@ Real dependency edges, as opposed to the branch line:
 - **Run as the session's OS user**, the user's own tmux server, as chosen in the interview.
 - **Per-client `-T clipboard`** rather than setting `set-clipboard` or `terminal-features` on the user's
   server, so tddy never edits the user's tmux.
-- **⚠ Dependency question for pass 2:** the daemon tests need `tmux` in the dev shell
-  (`flake.nix`). That is a new toolchain dependency — ask before adding it.
+- **`pkgs.tmux` in the dev shell** — asked and approved 2026-11-02, rather than a fake tmux script that
+  could not prove detach-on-close or `-T clipboard`.
+
+## Baseline before green
+
+Recorded at the contract commit (2026-11-02), scoped to `tddy-terminal-rpc`, `tddy-cli-sessions`, `tddy-session-lifecycle`, `tddy-coder` (+ `tddy-web` specs):
+
+- `cargo fmt --check` and `cargo clippy --all-targets -- -D warnings` are clean.
+- **This node's red tests:**
+  - `terminal_kind_unit.rs`: 2 failing (+ the bash/harness guard passing);
+  - the four `tmux_host` unit tests failing (`an_empty_listing_has_no_sessions` passes on the empty stub);
+  - `tmux_tabs_acceptance.rs`: 7 failing;
+  - `SessionTerminalTabsTmuxAcceptance.cy.tsx`: 4 failing ("no `sessions-terminal-tab-new-tmux-*`").
+- **Unchanged and green:** `terminal_session_acceptance` (12), `agent_terminal_tabs_acceptance` (7), `tddy-coder` `two_server_parity_acceptance` and the `connection_service_participant` lib tests, `SessionTerminalTabsAgentKindsAcceptance.cy.tsx` (7).
+- **Inherited reds** (n1/n2's, expected on this branch): `recorded_worktree` units, `capture_recorder`, `recorded_history_acceptance`.
+- **Not this node:** `tddy-terminal-rpc` `local_pty_relay::runs_a_fast_exiting_command_to_completion` hung for minutes in one package-wide run while another worktree loaded the machine. It passed alone in 0.01 s.
 
 ## TODO
 
@@ -180,10 +216,10 @@ Real dependency edges, as opposed to the branch line:
 - [x] Cross-check `packages/*/docs/code-issues/` and `docs/dev/todo/` for items this change touches (Step 2b)
 - [x] Create/update PRD documentation
 - [x] Create changeset (this document)
-- [ ] Create failing acceptance tests
-- [ ] Run acceptance tests (verify they fail)
-- [ ] USER REVIEW — acceptance tests
-- [ ] TDD Red — write failing unit/integration tests
+- [x] Create failing acceptance tests
+- [x] Run acceptance tests (verify they fail)
+- [x] USER REVIEW — acceptance tests — waived by the developer 2026-11-02 (reviewed with the stack at the end of pass 2)
+- [x] TDD Red — write failing unit/integration tests
 - [ ] TDD Green — implement with quality code
 - [ ] Update documentation with progress
 - [ ] Repeat Red→Green→Update cycle until feature complete

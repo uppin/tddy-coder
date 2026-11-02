@@ -364,6 +364,7 @@ impl InMemoryRoster {
                 terminal_id: tddy_terminal_rpc::bridge::MAIN_TERMINAL_ID.to_string(),
                 kind: "claude-cli".to_string(),
                 pid: 4242,
+                tmux_session: None,
             }]),
             started_launches: Mutex::new(Vec::new()),
             started: AtomicUsize::new(0),
@@ -393,6 +394,7 @@ impl tddy_terminal_rpc::TerminalRoster for InMemoryRoster {
                 terminal_id: terminal_id.clone(),
                 kind: "bash".to_string(),
                 pid: 5000 + nth as u32,
+                tmux_session: None,
             });
         Ok(terminal_id)
     }
@@ -556,6 +558,7 @@ impl TerminalServiceHost {
                 control: control.clone(),
                 roster: roster.clone(),
                 recorded_history,
+                tmux: std::sync::Arc::new(tddy_terminal_rpc::NoTmux),
                 // Small enough that a handful of bytes exercises the chunking a real ring only
                 // reaches after kilobytes of output.
                 initial_frame_bytes: 4,
@@ -864,6 +867,7 @@ pub fn a_start_request() -> tddy_terminal_rpc::proto::terminal_session::StartTer
         session_id: SESSION_ID.to_string(),
         control_token: String::new(),
         kind: String::new(),
+        tmux_session: String::new(),
     }
 }
 

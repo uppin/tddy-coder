@@ -16,6 +16,8 @@ export const AGENT_TERMINAL_ID = "main";
 export interface SessionTerminal {
   readonly terminalId: string;
   readonly kind: string;
+  /** The tmux session a `tmux` terminal is attached to; absent for every other kind. */
+  readonly tmuxSession?: string;
 }
 
 export interface SessionTerminalsController {
@@ -25,8 +27,9 @@ export interface SessionTerminalsController {
   readonly activeTerminalId: string;
   /** Focus an existing terminal tab. */
   setActive: (terminalId: string) => void;
-  /** Start a terminal of `kind` (`bash`, or a harness's session type), append its tab, focus it. */
-  open: (kind: string) => void;
+  /** Start a terminal of `kind` (`bash`, a harness's session type, or `tmux` attached to
+   *  `tmuxSession`), append its tab, focus it. */
+  open: (kind: string, tmuxSession?: string) => void;
   /** Stop a terminal, remove its tab, and fall back to the Agent tab if it was focused. */
   close: (terminalId: string) => void;
   /** Drop a tab whose terminal has already ended (its output stream closed) — no Stop RPC. */

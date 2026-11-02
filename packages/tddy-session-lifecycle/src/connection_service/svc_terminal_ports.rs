@@ -25,6 +25,7 @@ use crate::config::DaemonConfig;
 use crate::terminal_session_adapter::DaemonTerminalSessionStore;
 
 mod recorded_worktree;
+mod tmux_host;
 
 impl DaemonSessionHost {
     /// Every terminal this daemon serves, behind one
@@ -113,6 +114,7 @@ impl DaemonSessionHost {
                     self.tddy_data_dir.clone(),
                 ),
             ),
+            tmux: Arc::new(tmux_host::HostTmux),
             initial_frame_bytes: tddy_terminal_rpc::bridge::DEFAULT_INITIAL_FRAME_BYTES,
         }
     }
@@ -211,6 +213,20 @@ impl TerminalRoster for CliManagerTerminalRoster {
                     .await
                     .map_err(|e| Status::internal(format!("failed to start terminal: {e}")))?
             }
+            TerminalKind::Tmux { session } => {
+                // TODO(tmux-attach): refuse a session `HostTmux::list` does not name (NOT_FOUND).
+                let binary = tmux_host::tmux_binary();
+                self.manager
+                    .start_tmux_terminal(
+                        session_id,
+                        worktree,
+                        &launch.os_user,
+                        tmux_host::tmux_attach_argv(&binary, session),
+                        session,
+                    )
+                    .await
+                    .map_err(|e| Status::internal(format!("failed to start terminal: {e}")))?
+            }
         };
         Ok(handle.terminal_id.clone())
     }
@@ -228,6 +244,8 @@ impl TerminalRoster for CliManagerTerminalRoster {
                 terminal_id: handle.terminal_id.clone(),
                 kind: handle.kind.clone(),
                 pid: handle.pid,
+                // TODO(tmux-attach): the tmux session a tmux terminal is attached to.
+                tmux_session: None,
             })
             .collect()
     }
