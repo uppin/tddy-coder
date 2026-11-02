@@ -120,6 +120,70 @@ fn minimal_service(config: DaemonConfig, sessions_base: PathBuf) -> DaemonSessio
     )
 }
 
+/// `<sessions_base>/stub-bin` holding a stub `claude` and a link to the built `tddy-tools`: what
+/// the `claude` tool definition resolves against on a host whose coding agents are installed.
+#[cfg(not(target_os = "macos"))]
+fn a_stub_bin_with_claude_and_tddy_tools(sessions_base: &std::path::Path) -> PathBuf {
+    use std::os::unix::fs::PermissionsExt;
+    let stub_bin = sessions_base.join("stub-bin");
+    std::fs::create_dir_all(&stub_bin).unwrap();
+    let stub_bin = std::fs::canonicalize(stub_bin).unwrap();
+    let claude = stub_bin.join("claude");
+    std::fs::write(&claude, "#!/bin/sh\nexit 0\n").unwrap();
+    std::fs::set_permissions(&claude, std::fs::Permissions::from_mode(0o755)).unwrap();
+    let tddy_tools = std::env::var_os("CARGO_BIN_EXE_tddy-tools")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| {
+            PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../target/debug/tddy-tools")
+        });
+    std::os::unix::fs::symlink(tddy_tools, stub_bin.join("tddy-tools")).unwrap();
+    stub_bin
+}
+
+/// [`minimal_service`] with the daemon's coding agents installed, as the runtime installs them: a
+/// sandboxed `claude-cli` session is launched from the `claude` tool definition, resolved on a
+/// `PATH` of `stub_bin` alone.
+#[cfg(not(target_os = "macos"))]
+fn a_service_with_coding_agents(
+    config: DaemonConfig,
+    sessions_base: PathBuf,
+    stub_bin: PathBuf,
+) -> DaemonSessionHost {
+    let registry = tddy_coding_agent_specs::load_agent_registry(&sessions_base.join("tools"))
+        .expect("the agent registry loads");
+    minimal_service(config, sessions_base).with_coding_agents(Arc::new(
+        tddy_agent_launch::spec_launch::HostCodingAgents::new(
+            registry,
+            Arc::new(APathHost(vec![stub_bin])),
+        ),
+    ))
+}
+
+/// A tool host with a declared `PATH` over the real filesystem: nothing of the real machine's
+/// `PATH` or `TDDY_*_BINARY` variables reaches resolution.
+#[cfg(not(target_os = "macos"))]
+struct APathHost(Vec<PathBuf>);
+
+#[cfg(not(target_os = "macos"))]
+impl tddy_actions::tool::ToolHost for APathHost {
+    fn env_var(&self, _name: &str) -> Option<String> {
+        None
+    }
+
+    fn path_dirs(&self) -> Vec<PathBuf> {
+        self.0.clone()
+    }
+
+    fn is_executable_file(&self, path: &std::path::Path) -> bool {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::metadata(path).is_ok_and(|m| m.is_file() && m.permissions().mode() & 0o111 != 0)
+    }
+
+    fn canonicalize(&self, path: &std::path::Path) -> std::io::Result<PathBuf> {
+        std::fs::canonicalize(path)
+    }
+}
+
 fn create_test_repo_with_origin(dir: &std::path::Path) {
     let run = |args: &[&str], envs: &[(&str, &str)]| {
         let mut cmd = std::process::Command::new("git");
@@ -215,8 +279,10 @@ async fn start_session_sandbox_unsupported_on_non_darwin() {
     create_test_repo_with_origin(repo_dir.path());
     let sessions_tmp = tempfile::tempdir().unwrap();
     register_project(&sessions_tmp.path().join("projects"), repo_dir.path());
-    let (_cfg_dir, config) = write_config_with_claude_cli_binary("claude");
-    let service = minimal_service(config, sessions_tmp.path().to_path_buf());
+    let stub_bin = a_stub_bin_with_claude_and_tddy_tools(sessions_tmp.path());
+    let (_cfg_dir, config) =
+        write_config_with_claude_cli_binary(stub_bin.join("claude").to_str().unwrap());
+    let service = a_service_with_coding_agents(config, sessions_tmp.path().to_path_buf(), stub_bin);
 
     // When
     let err = service
