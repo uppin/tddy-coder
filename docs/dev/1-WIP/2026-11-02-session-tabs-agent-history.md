@@ -21,11 +21,13 @@
 
 ## Affected Packages
 
-- [ ] [`tddy-task`](../../../packages/tddy-task/README.md): `CaptureRecording` — a serializable snapshot of a capture's retained window with its offsets, and paging over it
-- [ ] [`tddy-cli-sessions`](../../../packages/tddy-cli-sessions/README.md): record a session's `main` capture on exit and periodically
-- [ ] [`tddy-daemon-sandbox`](../../../packages/tddy-daemon-sandbox/README.md): the same for a jailed `main`
-- [ ] [`tddy-terminal-rpc`](../../../packages/tddy-terminal-rpc/README.md): a `RecordedTerminalHistory` port that `GetTerminalHistory` reads when no terminal is running
-- [ ] [`tddy-session-lifecycle`](../../../packages/tddy-session-lifecycle/README.md): the daemon's implementation reading `<session_dir>/terminals/main.capture`
+- [x] [`tddy-task`](../../../packages/tddy-task/README.md): `CaptureRecording` — a serializable snapshot of a capture's retained window with its offsets, and paging over it
+- [x] [`tddy-cli-sessions`](../../../packages/tddy-cli-sessions/README.md): record a session's `main` capture on exit and periodically
+- [x] [`tddy-daemon-sandbox`](../../../packages/tddy-daemon-sandbox/README.md): the same for a jailed `main`
+- [x] [`tddy-terminal-rpc`](../../../packages/tddy-terminal-rpc/README.md): a `RecordedTerminalHistory` port that `GetTerminalHistory` reads when no terminal is running
+- [x] [`tddy-session-lifecycle`](../../../packages/tddy-session-lifecycle/README.md): the daemon's implementation reading `<session_dir>/terminals/main.capture`
+- [x] [`tddy-pty`](../../../packages/tddy-pty/README.md): `PtyExitHook` — work run when the process has exited, before the terminal leaves the PTY registry
+- [x] [`tddy-agent-launch`](../../../packages/tddy-agent-launch/README.md): the claude-cli start and resume paths, and the four jailed start/resume paths, register the main recording
 
 ## Responsibility
 
@@ -42,7 +44,17 @@
 - The launch and resume paths (`tddy-agent-launch`) call it with
   `tddy_session_lifecycle::session_dir_recorded_history::main_capture_recording_path(tddy_data_dir, id)`
   (`<tddy_data_dir>/sessions/<id>/terminals/main.capture`).
-- The jailed equivalent, `SandboxSessionManager::record_main_capture(session_id, path)`.
+- `tddy_pty::PtyRuntime::spawn_with_exit_hook(.., Option<PtyExitHook>)` (`PtyExitHook = FnOnce(TaskId) -> Future`):
+  run once the process has exited or been cancelled, **before** the terminal is removed from the
+  `PtyRegistry`. `tddy-pty` stays unaware of files. `CliSessionManager::spawn_tool` installs the main
+  terminal's recording finish as that hook, so the final write precedes the terminal's disappearance.
+- `main_capture_recording_path` / `MAIN_CAPTURE_RECORDING` live in `tddy-cli-sessions` (beside the
+  recorder) and are re-exported from `tddy_session_lifecycle::session_dir_recorded_history`;
+  `RECORDING_INTERVAL` lives in `tddy_task::capture_recording` and is shared by both recorders.
+  Both recorders create the recording's `terminals/` directory before writing (`write_atomically` itself does not).
+- The jailed equivalent, `SandboxSessionManager::record_main_capture(session_id, path)`: rewritten
+  every `RECORDING_INTERVAL` (`with_recording_interval` overrides) while the state is registered, and
+  once more inside `SandboxSessionManager::remove` (delete, or a resume replacing the state).
 - `tddy_terminal_rpc::service::RecordedTerminalHistory` trait:
   `async fn recorded(&self, os_user: &str, session_id: &str, terminal_id: &str) -> Option<CaptureRecording>`.
   - Added to `TerminalSessionPorts` as `recorded_history`; `NoRecordedHistory` is the host that records
@@ -173,6 +185,15 @@ adds that test where the launch and resume paths are exercised with a stub agent
   per session and paging semantics are identical.
 - **Periodic plus at-exit writes.** At-exit alone loses everything on a daemon crash; continuous
   append would need a new log format.
+- **Exit race: the final write is in the PTY exit path.** Writing at task-terminal status raced the
+  PTY runtime dropping the terminal from `pty_registry` (`GetTerminalHistory` answered NotFound for a
+  moment after exit; `capture_recorder` failed 3/8). The exit hook closes the window at its source;
+  `capture_recorder` passes 10/10 consecutive runs.
+- **Registration at launch and resume, by the launcher.** The path helper moved down to
+  `tddy-cli-sessions` so `tddy-agent-launch` can compute it without depending on session-lifecycle.
+- **Jailed main: periodic plus on state removal.** The jail has no exit callback the daemon owns; the
+  state's removal (delete/resume) is the teardown point. A jail that dies on its own is covered by the
+  periodic write.
 - **A port consulted only when nothing runs** is the designed source for a stopped terminal, not a
   fallback over a live one. A running `main` never reads the file.
 
@@ -199,7 +220,7 @@ Recorded at the contract commit (2026-11-02), scoped to `tddy-task`, `tddy-cli-s
 - [x] Run acceptance tests (verify they fail)
 - [x] USER REVIEW — acceptance tests — waived by the developer 2026-11-02 (reviewed with the stack at the end of pass 2)
 - [x] TDD Red — write failing unit/integration tests
-- [ ] TDD Green — implement with quality code
+- [x] TDD Green — implement with quality code
 - [ ] Update documentation with progress
 - [ ] Repeat Red→Green→Update cycle until feature complete
 - [ ] Run the touched packages' tests (`./test -p {package}` per package) — verify 100% pass

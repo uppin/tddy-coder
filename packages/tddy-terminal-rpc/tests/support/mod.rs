@@ -409,9 +409,6 @@ impl tddy_terminal_rpc::TerminalRoster for InMemoryRoster {
     }
 }
 
-/// A host serving `terminal_session.TerminalSessionService`, driven the way a transport drives it:
-/// requests go in as encoded bytes at the registered service name and answers come back off the
-/// wire, so a test proves the *registration* rather than the handler behind it.
 /// A host's recording of its session's `main` terminal, as [`OS_USER`] reads it.
 pub struct RecordedMain {
     recording: tddy_task::CaptureRecording,
@@ -436,6 +433,9 @@ impl tddy_terminal_rpc::RecordedTerminalHistory for RecordedMain {
     }
 }
 
+/// A host serving `terminal_session.TerminalSessionService`, driven the way a transport drives it:
+/// requests go in as encoded bytes at the registered service name and answers come back off the
+/// wire, so a test proves the *registration* rather than the handler behind it.
 pub struct TerminalServiceHost {
     entry: tddy_rpc::ServiceEntry,
     /// The live terminal the streaming methods attach to, when this host has one.

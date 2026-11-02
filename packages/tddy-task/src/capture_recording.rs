@@ -71,10 +71,6 @@ impl CaptureRecording {
     /// The temporary file sits beside `path`, so the rename never crosses a filesystem. A write that
     /// fails leaves `path` as it was and no temporary file behind.
     pub fn write_atomically(&self, path: &Path) -> io::Result<()> {
-        // A session's `terminals/` directory exists only once something is recorded into it.
-        if let Some(parent) = path.parent() {
-            fs::create_dir_all(parent)?;
-        }
         let temporary = temporary_beside(path);
         let mut file = OpenOptions::new()
             .write(true)

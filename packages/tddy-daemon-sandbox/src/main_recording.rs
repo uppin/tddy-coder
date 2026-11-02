@@ -64,7 +64,14 @@ impl JailRecording {
     async fn write_snapshot(&self) {
         let snapshot = CaptureRecording::of(&self.capture.lock().unwrap());
         let path = self.path.clone();
-        let outcome = tokio::task::spawn_blocking(move || snapshot.write_atomically(&path)).await;
+        let outcome = tokio::task::spawn_blocking(move || {
+            // A session's `terminals/` directory exists only once something is recorded into it.
+            if let Some(parent) = path.parent() {
+                std::fs::create_dir_all(parent)?;
+            }
+            snapshot.write_atomically(&path)
+        })
+        .await;
         let error = match outcome {
             Ok(Ok(())) => return,
             Ok(Err(error)) => error.to_string(),
