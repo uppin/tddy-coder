@@ -1,6 +1,6 @@
 //! The jail of a tool run from its definition (`#agent-tools 5/12`).
 //!
-//! PRD: `docs/ft/daemon/1-WIP/PRD-2026-10-31-claude-cli-jail-from-spec.md`.
+//! Feature: `docs/ft/daemon/claude-cli-session.md` § The jail from the `claude` tool definition.
 //!
 //! [`lower_tool_jail`] turns a resolved tool closure and the definitions it came from into the
 //! grants one jail needs: the persistent or session `HOME` and its files, the secrets the process

@@ -1,6 +1,6 @@
 //! Unit: a `mirror` item lowered into a home an older launch already seeded.
 //!
-//! PRD: `docs/ft/daemon/1-WIP/PRD-2026-10-31-claude-cli-jail-from-spec.md` (`#agent-tools 5/12`).
+//! Feature: `docs/ft/daemon/claude-cli-session.md` § The jail from the `claude` tool definition (`#agent-tools 5/12`).
 //!
 //! The recipes this replaces seeded `.local/share/claude/versions/<version>` as a real directory of
 //! links, and the persistent home that holds it is migrated, not recreated. The mirror of that

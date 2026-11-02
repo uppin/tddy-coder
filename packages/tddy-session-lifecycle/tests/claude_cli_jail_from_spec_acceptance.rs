@@ -2,7 +2,7 @@
 //! (`tddy-coding-agent-specs/specs/claude.yaml`) by the shared jail launcher — the runner is told
 //! what to exec, never that the process is Claude, and Claude sees an ordinary environment.
 //!
-//! PRD: `docs/ft/daemon/1-WIP/PRD-2026-10-31-claude-cli-jail-from-spec.md` (`#agent-tools 5/12`).
+//! Feature: `docs/ft/daemon/claude-cli-session.md` § The jail from the `claude` tool definition (`#agent-tools 5/12`).
 //!
 //! The daemon is the real `DaemonSessionHost` with its sandbox RPC bridge installed and its coding
 //! agents given as the daemon runtime gives them — the agent registry from `<tddyhome>/tools`,

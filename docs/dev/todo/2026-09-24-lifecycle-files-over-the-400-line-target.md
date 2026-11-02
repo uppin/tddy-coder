@@ -55,7 +55,8 @@ session_coordinate_handlers.rs      414
 
 - **Rows 1, 4, 5, 7, 12** close when their functions do: the
   [functions TODO](./2026-09-24-lifecycle-functions-still-over-150-lines.md), the
-  [jail-launch TODO](./2026-09-24-lifecycle-shared-sandboxed-jail-launch-needs-coverage-first.md), and, for row 12,
+  shared jail launcher (`LaunchSessions::launch_jailed`, #794; the Cursor start moves onto it in
+  [#796](https://github.com/uppin/tddy-coder/pull/796)), and, for row 12,
   an `extract_module` of the lifted `session_entry_from_listing` into `session_list_entries.rs`.
   Row 9 shrinks with the [folding](./2026-09-24-lifecycle-topic-files-to-fold-into-existing-siblings.md)
   and [re-parenting](./2026-09-24-lifecycle-modules-to-re-parent-by-hand.md) moves.

@@ -68,8 +68,10 @@ needs" set lives in one reviewable recipe; and a non-leaking secret channel deli
 7. **Explicit symlinks.** Symlinks created inside the jail are declared as `SymlinkSpec` and
    materialized by each backend.
 8. **Single Claude recipe.** `claude_required_reads()`, `claude_required_copies(host_home)`, and
-   `claude_policy()` in `tddy-sandbox-recipes` are the one reviewable source of what a Claude jail
-   needs; both the app and daemon call them via `tddy-sandbox-recipes::claude_cli`.
+   `claude_policy()` in `tddy-sandbox-recipes` are the one reviewable source of what a recipe-built
+   Claude jail needs; `tddy-sandbox-app` and split sessions call them via
+   `tddy-sandbox-recipes::claude_cli`. The daemon's sandboxed `claude-cli` session is built from the
+   `claude` tool definition instead ([§ Jail sections](#jail-sections)).
 9. **Action sandbox plans.** `tddy-daemon` `sandbox_plan_builder` maps `ActionSpec` + `SandboxRequest`
    to process or runner-PTY plans: `SandboxRecipe::RunnerPty` for in-jail PTY (`--pty-command` on
    `tddy-sandbox-runner`); `generic_exec_policy` for confined Rust binaries; `cwd` and
@@ -215,7 +217,11 @@ naming the tool. `hosts: []` is a policy that admits nothing — the shim starts
 jail `any`; host lists concatenate in tool order without repeats; `none` contributes nothing, so a set
 of only `none` tools is `EgressPolicy::None`. `oauth_inbound` is true when any tool declares it. A
 plan built from tools sets `NetworkSpec.egress` and `allow_oauth_inbound` from this; recipe-built
-agent jails keep `EgressPolicy::Any` (the `NetworkSpec` default) until their own nodes declare hosts.
+agent jails keep `EgressPolicy::Any` (the `NetworkSpec` default). The sandboxed `claude-cli` jail is
+built from its tool definition ([§ Jail sections](#jail-sections)): its declared hosts, plus the host
+of each `http(s)` URL in the session's provider route, which the launcher admits at plan time (a
+`none` jail with a route reaches that host alone; `any` already does). `oauth_inbound` is honoured
+only on an unrouted session.
 
 **Enforcement, at two points, independently:**
 
@@ -238,3 +244,57 @@ does not yet serve tunnels, so a declared host is refused nothing but also reach
 [`docs/dev/todo/2026-11-02-workspace-jail-serves-no-egress-tunnels.md`](../../dev/todo/2026-11-02-workspace-jail-serves-no-egress-tunnels.md).
 
 Out of scope: path or method filtering, DNS pinning, TLS inspection (the tunnel stays end-to-end TLS).
+
+## Jail sections
+
+Since `#agent-tools 5/12` ([#794](https://github.com/uppin/tddy-coder/pull/794)), a tool definition
+also declares what it needs from a jail beyond its binary and network. The sections are generic — any
+tool may carry them, and none names an agent:
+
+```yaml
+home: { kind: persistent, key: claude }   # or { kind: session } — the default
+files:
+  - { kind: seed-once, from_host: .claude/.credentials.json, to: .claude/.credentials.json }
+  - { kind: mirror, from_host: .local/bin/claude, to: .local/bin/claude }
+  - { kind: overlay, env: CLAUDE_CODE_TMPDIR, value: "{tmp}" }
+secrets:
+  - env: CLAUDE_CODE_OAUTH_TOKEN
+    source: { kind: host-env, var: CLAUDE_CODE_OAUTH_TOKEN }   # or { kind: host-file, path: … }
+    when: unrouted                                              # or routed; absent is always
+policy: { jit: true, fork: true, sysctl_read: true, exec_paths: [/usr/bin, /bin] }
+```
+
+`from_host` is relative to the host user's home and `to` to the tool's home: a definition never names
+an absolute path on either side. Every section is optional; an unknown field is refused at load.
+
+**Lowering** (`tddy-sandbox-recipes::tool_grants`), over the tool and its dep closure:
+
+| Section | Lowered by | Into the jail |
+|---|---|---|
+| `home` | `lower_home` | `persistent` → `HOME=<tddyhome>/homes/<key>` (`homes::persistent_home`), mounted read-write and shared by every session naming the key; `session` → a fresh home in the jail's scratch |
+| `files` | `lower_files` | `seed-once` copies the host file into the home (mode `0600`) **only when the home lacks it**, before the jail exists — a home that refreshed its own token keeps it; `mirror` is a symlink at `to` to the canonical host path, plus the read (executable for a file) that makes it followable; `overlay` sets an env var, with `{home}` and `{tmp}` replaced. A host path that does not exist seeds or mirrors nothing. A directory at a mirror's `to` that holds only links (an older mirror) is replaced; any other directory is the tool's own and is left alone |
+| `secrets` | `lower_secrets` | a `SecretSpec` per item the route guard admits — `when: unrouted` is dropped on a provider-routed launch, `when: routed` on an unrouted one. A `host-env` source unset or blank delivers nothing. Each is delivered as a `TDDY_SECRET_<NAME>` file the runner resolves on the child alone |
+| `policy` | `lower_policy` | one `PolicySpec` for the set: an allow is granted when any tool asks for it, `exec_paths` concatenate without repeats. Mach lookup and the pseudo-terminal are the launcher's |
+
+**Persistent homes** live under `<tddyhome>/homes/`. The first resolution of a key whose legacy,
+tool-named home `<tddyhome>/sandbox-<key>-home` exists renames it into place once, keeping its
+contents; when both exist the resolution is refused naming both, and neither is touched.
+
+**The jail of a tool** (`tddy-daemon-sandbox::tool_jail`): `lower_tool_jail` combines the sections
+above with `lower_tools` (the closure's `bin/` links and exec reads, plus the binary's own process
+reads) and `lower_network` with the route's hosts; `build_tool_jail_plan` puts those grants on the
+runner's plan, replacing the reads, policy and egress the runner's argv would imply, and adds each
+secret with `SandboxPlan::add_secret`.
+
+**The runner execs a plan** (`tddy-sandbox-runner --exec-plan <file>`). The file is an `ExecPlan`:
+the rendered `argv`, the `env`, the `files` to write at their jail paths, and whether to point the
+process at the egress shim. The runner writes the files and spawns the argv in its PTY with an
+environment of its own minus every `TDDY_SANDBOX_*` control variable, plus the plan's env with each
+`TDDY_SECRET_<NAME>` resolved to `<NAME>` (its file unlinked), plus `HTTPS_PROXY` / `HTTP_PROXY` in
+both casings (`NO_PROXY` bypassing loopback) when the plan asks for the shim and the jail's policy started one. The
+runner learns nothing about which tool it is running; the jail ends when that one process exits.
+`--exec-plan` and `--workspace-tools` are exclusive.
+
+**First client:** the sandboxed `claude-cli` session —
+[Claude CLI session § The jail](../daemon/claude-cli-session.md#the-jail-from-the-claude-tool-definition).
+The other jailed CLIs still run from their recipes.

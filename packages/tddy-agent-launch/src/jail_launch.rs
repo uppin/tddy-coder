@@ -1,7 +1,7 @@
 //! The shared jail launcher: a coding agent declared as a tool is run in a sandbox from its
 //! definition alone.
 //!
-//! PRD: `docs/ft/daemon/1-WIP/PRD-2026-10-31-claude-cli-jail-from-spec.md` (`#agent-tools 5/12`).
+//! Feature: `docs/ft/daemon/claude-cli-session.md` § The jail from the `claude` tool definition (`#agent-tools 5/12`).
 //!
 //! [`LaunchSessions::launch_jailed`] takes the agent's resolved closure ([`JailSpec`]), renders its
 //! argv and slots for jail paths, lowers the closure's `home`, `files`, `secrets`, `policy`,

@@ -2,8 +2,8 @@
 //! `claude` **today** — its argv, the environment it relies on, the read-write mount of its home and
 //! the files it reads.
 //!
-//! PRD: `docs/ft/daemon/1-WIP/PRD-2026-10-31-claude-cli-jail-from-spec.md` (`#agent-tools 5/12`).
-//! Todo: `docs/dev/todo/2026-09-24-lifecycle-shared-sandboxed-jail-launch-needs-coverage-first.md`.
+//! Feature: `docs/ft/daemon/claude-cli-session.md` § The jail from the `claude` tool definition (`#agent-tools 5/12`).
+//! History: `docs/dev/changesets/2026-11-02-agent-tools-claude-jail.md`.
 //!
 //! These tests passed on the hand-built launch and stay green on the shared jail launcher
 //! (`tddy_agent_launch::jail_launch`) that replaced it, which launches `claude` from its tool

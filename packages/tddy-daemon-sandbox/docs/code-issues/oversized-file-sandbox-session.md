@@ -3,7 +3,7 @@
 **Location:** `packages/tddy-daemon-sandbox/src/sandbox_session.rs`
 **Category:** oversized-file
 **Detected:** 2026-09-19 — `/analyze-clean-code` on PR #518
-**Metrics:** **947 production lines** (2026-11-02, after #805; 911 at detection, of 1,147 total then) · budget 500 · **1.8× over**
+**Metrics:** **985 production lines** (2026-11-02, after #794 — measured before the cascade onto #805's +1; 947 after #805; 946 after #762; 911 at detection, of 1,147 total then) · budget 500 · **1.8× over**
 **Thresholds breached:** length 946 > 500; `dial_and_bridge` **12 parameters** > 5
 **Restructure:** `extract_module --to_file` — seam not yet designed
 **Status:** Open — regressed 2026-11-02 (946 → 947 in #805) and 2026-09-24 (911 → 916 in #509, `#keyring` 2/9, transport stamping; deferred with consent) — **unclaimed**
@@ -21,6 +21,7 @@
 | 2026-10-25 | 946 | **worse** by 22 in PR #762 (`#term-snapshot` 3/4): `forward_jail_terminal_events`, which replaces the inline byte forwarder in `dial_and_bridge` and also resizes the capture when the jail reports a size. Deferred with the developer's consent: the file is stack-shared within `#term-snapshot` |
 | 2026-11-02 | 947 | **worse** by 1 in #805 (`#session-tabs` 2/7): `SandboxSessionManager` gains its `recorder` field and `remove` writes the jailed main terminal's final recording (`self.recorder.finish(..)`); `new()` became `Self::default()` (−2). Everything else of the recording — `JailRecorder`, `with_recording_interval`, `record_main_capture` — lives in `main_recording.rs` (the green phase had grown this file to 1,003). Measured against `origin/feature/session-tabs/dormant-tabs` (a35ebd026). Not decomposed: no engine run fit the disk on this host, and the seam is still undesigned |
 | 2026-11-03 | 947 | **unchanged** since #805 (`#session-tabs` 2/7): 946 at the merge-base `e9d036e0c`, 947 at master `162a66978` (first `#[cfg(all(test, unix))]` gate). No later stack node touched the file. `analyze coverage` did **not run** for this crate: its macOS `sandbox_stdio_seatbelt_acceptance` test target does not compile (3 errors), so complexity/CRAP were not re-derived. Still open, unclaimed |
+| 2026-11-02 | 985 | **worse** by 39 in PR #794 (`#agent-tools` 5/12): `dial_and_bridge_with_egress`, which holds the host relay's `TunnelOpen`s to the jail's egress policy, with `dial_and_bridge` now a wrapper passing an unrestricted guard. The jail plan of a tool definition lives in the new `tool_jail.rs`. Not split: deferred to the #agent-tools sweep node (developer, 2026-11-02) |
 
 ## What the tool found
 

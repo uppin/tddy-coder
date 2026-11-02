@@ -1,6 +1,6 @@
 //! A tool's `home:` section — the `$HOME` it runs with inside a jail.
 //!
-//! PRD: `docs/ft/daemon/1-WIP/PRD-2026-10-31-claude-cli-jail-from-spec.md` (`#agent-tools 5/12`).
+//! Feature: `docs/ft/daemon/claude-cli-session.md` § The jail from the `claude` tool definition (`#agent-tools 5/12`).
 //!
 //! ```yaml
 //! home: { kind: persistent, key: claude }   # <tddyhome>/homes/claude, mounted rw, kept across sessions

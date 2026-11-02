@@ -1,7 +1,7 @@
 //! A tool's `secrets:` section — values delivered to its process out of band, never in the jail's
 //! env list or argv.
 //!
-//! PRD: `docs/ft/daemon/1-WIP/PRD-2026-10-31-claude-cli-jail-from-spec.md` (`#agent-tools 5/12`).
+//! Feature: `docs/ft/daemon/claude-cli-session.md` § The jail from the `claude` tool definition (`#agent-tools 5/12`).
 //!
 //! ```yaml
 //! secrets:

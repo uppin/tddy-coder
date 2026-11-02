@@ -1,7 +1,7 @@
 //! `--exec-plan <file>`: the runner's generic tool mode — exec a rendered argv with a declared env
 //! and files, knowing nothing of which tool it is.
 //!
-//! PRD: `docs/ft/daemon/1-WIP/PRD-2026-10-31-claude-cli-jail-from-spec.md` (`#agent-tools 5/12`).
+//! Feature: `docs/ft/daemon/claude-cli-session.md` § The jail from the `claude` tool definition (`#agent-tools 5/12`).
 //!
 //! The daemon's jail launcher (`tddy_agent_launch::jail_launch`) renders a tool's argv, env and
 //! slot files from its definition and writes them here as JSON; the runner writes the files, sets

@@ -1,7 +1,7 @@
 //! Unit: lowering a tool's generic jail sections — `home`, `files`, `secrets`, `policy` — into the
 //! grants a jail's plan carries.
 //!
-//! PRD: `docs/ft/daemon/1-WIP/PRD-2026-10-31-claude-cli-jail-from-spec.md` (`#agent-tools 5/12`).
+//! Feature: `docs/ft/daemon/claude-cli-session.md` § The jail from the `claude` tool definition (`#agent-tools 5/12`).
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};

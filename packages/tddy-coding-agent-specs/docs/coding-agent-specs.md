@@ -20,12 +20,14 @@ This crate owns that section's vocabulary. `tddy-actions` stays agent-agnostic.
 | `slots/tools.rs` | one flag per value (`--allowedTools a --allowedTools b`) |
 | `slots/instructions.rs` | the preamble prepended once to each declared instruction file that exists. A file already led by it is unchanged |
 | `slots/hooks.rs` | `HooksAdapter`, and `ClaudeSettingsLocal` (`claude-settings-local`), which renders `<workdir>/.claude/settings.local.json` with `tddy_agent_backend::build_claude_hooks_settings`. `adapter(name)` returns the adapter, and refuses an unknown name |
-| `specs/claude.yaml` | Claude Code CLI |
+| `specs/claude.yaml` | Claude Code CLI. Beside `run:` and `extensions.coding_agent`, it carries the generic jail sections a sandboxed launch lowers: `home: { kind: persistent, key: claude }`, `files:` (credentials seed-once, install mirrors, `CLAUDE_CODE_TMPDIR` / `CLAUDE_TMPDIR` overlays), `secrets:` (`CLAUDE_CODE_OAUTH_TOKEN` from the host env, `when: unrouted`), `policy:` and `network:` (Anthropic API, telemetry and login hosts, `oauth_inbound: true`) — see [Claude CLI session § The jail](../../../docs/ft/daemon/claude-cli-session.md#the-jail-from-the-claude-tool-definition) |
 
 ## Rules
 
-- **Nothing is written here.** The renderers return bytes and argv, and the launcher
-  (`tddy_agent_launch::spec_launch::launch_host_pty`) writes `RenderedSlots::files` before it spawns.
+- **Nothing is written here.** The renderers return bytes and argv. The host launcher
+  (`tddy_agent_launch::spec_launch::launch_host_pty`) writes `RenderedSlots::files` before it spawns;
+  the jail launcher (`tddy_agent_launch::jail_launch`) renders the slots for jail paths and hands the
+  files to the runner in its exec plan, which writes them inside the jail.
   Only `instructions` reads the disk.
 - **`argv_extra` is ordered** as the append-system-prompt flag, the allow flags, the deny flags,
   the permission-prompt flag, then the MCP flags. The template splices it before the positional

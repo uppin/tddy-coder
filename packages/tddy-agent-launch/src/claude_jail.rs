@@ -142,7 +142,8 @@ impl LaunchSessions {
 /// project's own `.mcp.json`, which the agent has always loaded beside `tddy-tools`, so the slot's
 /// strict flag — which would drop it — is not passed.
 // TODO(claude-jail): decide whether a jailed agent should load only `tddy-tools`, as an
-// unsandboxed main does; today's jail did not restrict it.
+// unsandboxed main does; today's jail did not restrict it
+// (docs/dev/todo/2026-11-02-jailed-claude-loads-project-mcp-json.md).
 fn jailed(spec: &CodingAgentSpec) -> CodingAgentSpec {
     let mut spec = spec.clone();
     let McpSlot::File { strict_flag, .. } = &mut spec.agent.mcp;
