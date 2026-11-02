@@ -13,7 +13,7 @@ mod spec;
 
 use std::path::Path;
 
-use tddy_actions::tool::{ToolError, ToolRegistry};
+use tddy_actions::tool::{ToolError, ToolRegistry, BUILTIN_SUPPORT_TOOLS, BUILTIN_TOOLS};
 
 pub use spec::{
     CodingAgentExtension, CodingAgentSection, CodingAgentSpec, FlagSlot, HooksSlot,
@@ -33,8 +33,13 @@ pub fn builtin_specs() -> Vec<(&'static str, &'static str)> {
 /// tools plus [`builtin_specs`], with `<tddyhome>/tools` (`overrides_dir`) applied and every
 /// `extensions:` section validated by [`CodingAgentExtension`].
 pub fn load_agent_registry(overrides_dir: &Path) -> Result<ToolRegistry, ToolError> {
-    // TODO(claude-host): implement — `ToolRegistry::from_embedded(BUILTIN_TOOLS ++
-    // BUILTIN_SUPPORT_TOOLS ++ builtin_specs())`, then `load_with_owners(…, &[&CodingAgentExtension])`.
-    let _ = overrides_dir;
-    todo!("claude-host: load_agent_registry")
+    let specs = builtin_specs();
+    let sources: Vec<(&str, &str)> = BUILTIN_TOOLS
+        .iter()
+        .chain(BUILTIN_SUPPORT_TOOLS)
+        .chain(&specs)
+        .copied()
+        .collect();
+    let builtin = ToolRegistry::from_embedded(&sources)?;
+    ToolRegistry::load_with_owners(builtin, overrides_dir, &[&CodingAgentExtension])
 }

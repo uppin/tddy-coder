@@ -11,18 +11,21 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use tddy_actions::tool::{
-    ResolvedTool, TemplateParams, ToolError, ToolHost, ToolRegistry, Transport,
+    render_argv, ResolvedTool, TemplateParams, ToolDef, ToolError, ToolHost, ToolRegistry,
+    Transport,
 };
 use tddy_cli_sessions::cli_session_manager::pty_handle::PtyHandle;
 use tddy_cli_sessions::cli_session_manager::CliSessionManager;
-use tddy_coding_agent_specs::slots::RenderedSlots;
+use tddy_coding_agent_specs::slots::{self, RenderedSlots, SlotError, SlotInputs};
 use tddy_coding_agent_specs::{CodingAgentSpec, SpecError};
+use tddy_daemon_kernel::config::DaemonConfig;
 
 /// The coding agents this host can launch: the agent registry
 /// (`tddy_coding_agent_specs::load_agent_registry`) and the host its tools resolve against.
 ///
 /// Installed on the session host by the daemon runtime; a host without it launches `claude-cli`
-/// the hand-built way (`TODO(claude-host)`: green makes this the only path).
+/// the hand-built way. `TODO(agent-tools 12/12)`: the hand-built way goes once the session-type
+/// gates move onto specs.
 pub struct HostCodingAgents {
     registry: ToolRegistry,
     host: Arc<dyn ToolHost>,
@@ -45,10 +48,60 @@ impl HostCodingAgents {
         id: &str,
         binary_override: Option<&Path>,
     ) -> Result<HostAgent, SpecLaunchError> {
-        // TODO(claude-host): implement — `CodingAgentSpec::of(registry.get(id))`, then
-        // `registry.resolve_closure(&[id], host)`, the override replacing the agent's own binary.
-        let _ = (id, binary_override, &self.host);
-        todo!("claude-host: HostCodingAgents::resolve")
+        let def = self
+            .registry
+            .get(id)
+            .ok_or_else(|| SpecLaunchError::UnknownAgent(id.to_string()))?;
+        let spec = CodingAgentSpec::of(def).map_err(SpecLaunchError::Spec)?;
+        let (tool, deps) = match binary_override {
+            None => {
+                let mut closure = self
+                    .registry
+                    .resolve_closure(&[id], self.host.as_ref())
+                    .map_err(SpecLaunchError::Tool)?;
+                // The closure lists deps first, so the agent's own tool is last.
+                let tool = closure
+                    .pop()
+                    .ok_or_else(|| SpecLaunchError::UnknownAgent(id.to_string()))?;
+                (tool, closure)
+            }
+            Some(binary) => {
+                let dep_ids: Vec<&str> = def.deps.iter().map(String::as_str).collect();
+                let deps = self
+                    .registry
+                    .resolve_closure(&dep_ids, self.host.as_ref())
+                    .map_err(SpecLaunchError::Tool)?;
+                (self.overridden_tool(def, binary)?, deps)
+            }
+        };
+        Ok(HostAgent { spec, tool, deps })
+    }
+
+    /// `def` as the tool at `binary`, which must be an executable file on this host.
+    fn overridden_tool(
+        &self,
+        def: &ToolDef,
+        binary: &Path,
+    ) -> Result<ResolvedTool, SpecLaunchError> {
+        let unresolvable = |reason: String| {
+            SpecLaunchError::Tool(ToolError::Unresolvable {
+                tool: def.id.clone(),
+                searched: format!("{} ({reason})", binary.display()),
+            })
+        };
+        if !self.host.is_executable_file(binary) {
+            return Err(unresolvable("not an executable file".to_string()));
+        }
+        let canonical = self
+            .host
+            .canonicalize(binary)
+            .map_err(|e| unresolvable(format!("cannot be resolved: {e}")))?;
+        Ok(ResolvedTool {
+            id: def.id.clone(),
+            command: def.binary.command.clone(),
+            binary: canonical,
+            reads: def.reads.clone(),
+        })
     }
 }
 
@@ -94,6 +147,8 @@ pub enum SpecLaunchError {
         spec: String,
         transport: Transport,
     },
+    /// A slot could not be rendered.
+    Slots(SlotError),
     /// A slot file could not be written.
     SlotFile {
         path: PathBuf,
@@ -109,6 +164,7 @@ impl fmt::Display for SpecLaunchError {
             Self::UnknownAgent(id) => write!(f, "unknown coding agent {id}"),
             Self::Tool(e) => write!(f, "{e}"),
             Self::Spec(e) => write!(f, "{e}"),
+            Self::Slots(e) => write!(f, "{e}"),
             Self::TransportNotPty { spec, transport } => write!(
                 f,
                 "coding agent {spec} declares transport {transport:?}; the host PTY launcher runs pty agents only"
@@ -133,8 +189,146 @@ pub async fn launch_host_pty(
     worktree: &Path,
     session: HostPtySession<'_>,
 ) -> Result<Arc<PtyHandle>, SpecLaunchError> {
-    // TODO(claude-host): implement — needs a `CliSessionManager` entry that spawns a rendered argv
-    // (`spawn_tool` is crate-private to `tddy-cli-sessions` today).
-    let _ = (agent, params, slots, worktree, session);
-    todo!("claude-host: launch_host_pty")
+    if agent.spec.run.transport != Transport::Pty {
+        return Err(SpecLaunchError::TransportNotPty {
+            spec: agent.spec.id.clone(),
+            transport: agent.spec.run.transport,
+        });
+    }
+    for (path, bytes) in &slots.files {
+        write_slot_file(path, bytes)?;
+    }
+    let params = params.clone().with_list("slots", slots.argv_extra.clone());
+    let argv = render_argv(&agent.spec.run, &agent.tool, &params).map_err(SpecLaunchError::Tool)?;
+    let env = agent
+        .spec
+        .run
+        .env
+        .iter()
+        .map(|(name, value)| (name.clone(), value.clone()))
+        .chain(session.env)
+        .collect();
+    session
+        .manager
+        .spawn_rendered_main(
+            session.session_id,
+            session.session_type,
+            worktree.to_path_buf(),
+            session.model,
+            argv,
+            env,
+            session.os_user,
+        )
+        .await
+        .map_err(|e| SpecLaunchError::Spawn(e.to_string()))
+}
+
+fn write_slot_file(path: &Path, bytes: &[u8]) -> Result<(), SpecLaunchError> {
+    let slot_file = |message: String| SpecLaunchError::SlotFile {
+        path: path.to_path_buf(),
+        message,
+    };
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent).map_err(|e| slot_file(e.to_string()))?;
+    }
+    tddy_core::atomic_file::write_atomic(path, bytes).map_err(|e| slot_file(e.to_string()))
+}
+
+/// A `claude-cli` start or resume, as the launch steps before the spawn have settled it.
+pub struct ClaudeCliLaunch<'a> {
+    pub agents: &'a HostCodingAgents,
+    /// Where daemon.yaml `claude_cli.binary_path` is read from.
+    pub config: &'a DaemonConfig,
+    pub manager: &'a Arc<CliSessionManager>,
+    pub session_id: &'a str,
+    pub worktree: &'a Path,
+    pub model: &'a str,
+    /// Continue the existing transcript (`--resume`) rather than assign the id (`--session-id`).
+    pub resume: bool,
+    pub initial_prompt: Option<&'a str>,
+    pub permission_mode: Option<&'a str>,
+    pub dangerously_skip_permissions: bool,
+    pub append_system_prompt_file: Option<&'a Path>,
+    /// Flags already rendered by the caller (a role's allow-list, a split session's MCP config),
+    /// placed after the slot flags and before the prompt.
+    pub extra_args: Vec<String>,
+    pub env: Vec<(String, String)>,
+    pub os_user: Option<&'a str>,
+}
+
+/// The agent every `claude-cli` session runs.
+const CLAUDE_AGENT_ID: &str = "claude";
+
+/// Launch a `claude-cli` session from the `claude` spec: resolve it, render its slots and its argv,
+/// and spawn it with [`launch_host_pty`].
+pub async fn launch_claude_cli(
+    launch: ClaudeCliLaunch<'_>,
+) -> Result<Arc<PtyHandle>, SpecLaunchError> {
+    let agent = launch
+        .agents
+        .resolve(CLAUDE_AGENT_ID, configured_binary(launch.config).as_deref())?;
+    // MCP and hooks are not slot inputs yet: the MCP flags arrive in `extra_args`, and the hooks
+    // file is still written by `install_claude_cli_hooks`.
+    // TODO(agent-tools 2/12): move the hooks file behind the `hooks` slot.
+    let mut slots = slots::render(
+        &agent.spec,
+        &SlotInputs {
+            workdir: launch.worktree.to_path_buf(),
+            scratch_dir: launch.worktree.to_path_buf(),
+            mcp_server: None,
+            allowed_tools: Vec::new(),
+            denied_tools: Vec::new(),
+            permission_prompt_tool: None,
+            preamble: None,
+            append_system_prompt_file: launch.append_system_prompt_file.map(Path::to_path_buf),
+            hooks: None,
+        },
+    )
+    .map_err(SpecLaunchError::Slots)?;
+    slots.argv_extra.extend(launch.extra_args);
+
+    let params = TemplateParams::new()
+        .with("model", launch.model)
+        .with("session_id", launch.session_id)
+        .with_flag("resume", launch.resume)
+        .with_flag(
+            "dangerously_skip_permissions",
+            launch.dangerously_skip_permissions,
+        )
+        .with(
+            "permission_mode",
+            non_blank(launch.permission_mode).unwrap_or("auto"),
+        )
+        .with_opt("prompt", non_blank(launch.initial_prompt));
+    launch_host_pty(
+        &agent,
+        &params,
+        &slots,
+        launch.worktree,
+        HostPtySession {
+            manager: launch.manager,
+            session_id: launch.session_id,
+            session_type: "claude-cli",
+            model: launch.model,
+            env: launch.env,
+            os_user: launch.os_user,
+        },
+    )
+    .await
+}
+
+/// `value` trimmed, or `None` when nothing but whitespace is left.
+fn non_blank(value: Option<&str>) -> Option<&str> {
+    value.map(str::trim).filter(|v| !v.is_empty())
+}
+
+/// daemon.yaml `claude_cli.binary_path` when it names a path; a bare name leaves the binary to the
+/// spec's own resolution.
+fn configured_binary(config: &DaemonConfig) -> Option<PathBuf> {
+    config
+        .claude_cli
+        .as_ref()
+        .map(|claude_cli| claude_cli.binary_path.as_str())
+        .filter(|path| path.contains('/'))
+        .map(PathBuf::from)
 }

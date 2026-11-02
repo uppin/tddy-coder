@@ -3,7 +3,7 @@
 
 use std::path::{Path, PathBuf};
 
-use tddy_agent_backend::claude_hooks::HookCommandParams;
+use tddy_agent_backend::claude_hooks::{build_claude_hooks_settings, HookCommandParams};
 
 use super::SlotError;
 
@@ -30,17 +30,23 @@ impl HooksAdapter for ClaudeSettingsLocal {
     }
 
     fn render(&self, workdir: &Path, params: &HookCommandParams<'_>) -> (PathBuf, Vec<u8>) {
-        // TODO(claude-host): implement — the bytes `write_claude_hooks_settings` writes today.
-        let _ = (workdir, params);
-        todo!("claude-host: ClaudeSettingsLocal::render")
+        let settings = build_claude_hooks_settings(params);
+        // `{:#}` is `serde_json`'s pretty form, and unlike `to_string_pretty` cannot fail.
+        (
+            workdir.join(".claude").join("settings.local.json"),
+            format!("{settings:#}").into_bytes(),
+        )
     }
 }
 
 /// The adapter named `name`; an unknown name is [`SlotError::UnknownHooksAdapter`].
 pub fn adapter(name: &str) -> Result<&'static dyn HooksAdapter, SlotError> {
-    // TODO(claude-host): implement.
-    let _ = name;
-    todo!("claude-host: hooks::adapter")
+    match name {
+        CLAUDE_SETTINGS_LOCAL => Ok(&ClaudeSettingsLocal),
+        _ => Err(SlotError::UnknownHooksAdapter {
+            name: name.to_string(),
+        }),
+    }
 }
 
 #[cfg(test)]

@@ -6,6 +6,8 @@ use serde::{Deserialize, Serialize};
 use tddy_actions::tool::{ExtensionOwner, RunSection, ToolDef};
 use thiserror::Error;
 
+use crate::slots::hooks;
+
 /// The `extensions:` key this crate owns.
 pub const CODING_AGENT_EXTENSION: &str = "coding_agent";
 
@@ -21,9 +23,12 @@ impl ExtensionOwner for CodingAgentExtension {
     }
 
     fn validate(&self, tool_id: &str, section: &serde_yaml::Value) -> Result<(), String> {
-        // TODO(claude-host): implement — deserialize a `CodingAgentSection`, resolve the hooks adapter.
-        let _ = (tool_id, section);
-        todo!("claude-host: CodingAgentExtension::validate")
+        parse_section(tool_id, section)
+            .map(|_| ())
+            .map_err(|error| match error {
+                SpecError::Invalid { message, .. } => message,
+                other => other.to_string(),
+            })
     }
 }
 
@@ -39,10 +44,35 @@ impl CodingAgentSpec {
     /// The coding-agent view of `def`: refused when it has no `run:` section or no
     /// `coding_agent` extension, or when that extension does not validate.
     pub fn of(def: &ToolDef) -> Result<Self, SpecError> {
-        // TODO(claude-host): implement.
-        let _ = def;
-        todo!("claude-host: CodingAgentSpec::of")
+        let run = def.run.clone().ok_or_else(|| SpecError::NoRunSection {
+            tool: def.id.clone(),
+        })?;
+        let section = def.extensions.get(CODING_AGENT_EXTENSION).ok_or_else(|| {
+            SpecError::NotACodingAgent {
+                tool: def.id.clone(),
+            }
+        })?;
+        Ok(Self {
+            id: def.id.clone(),
+            run,
+            agent: parse_section(&def.id, section)?,
+        })
     }
+}
+
+/// `section` as a [`CodingAgentSection`] whose hooks adapter this build has.
+fn parse_section(
+    tool_id: &str,
+    section: &serde_yaml::Value,
+) -> Result<CodingAgentSection, SpecError> {
+    let invalid = |message: String| SpecError::Invalid {
+        tool: tool_id.to_string(),
+        message,
+    };
+    let agent: CodingAgentSection =
+        serde_yaml::from_value(section.clone()).map_err(|e| invalid(e.to_string()))?;
+    hooks::adapter(&agent.hooks.adapter).map_err(|e| invalid(e.to_string()))?;
+    Ok(agent)
 }
 
 /// Why a tool is not a usable coding agent.

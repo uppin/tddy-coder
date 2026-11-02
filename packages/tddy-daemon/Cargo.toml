@@ -124,6 +124,8 @@ tddy-telegram-control = { path = "../tddy-telegram-control" }
 tddy-telegram = { path = "../tddy-telegram" }
 # Reached from `src/index_daemon/registry.rs`, not from a top-level source file.
 tddy-daemon-sandbox = { path = "../tddy-daemon-sandbox" }
+tddy-agent-launch = { path = "../tddy-agent-launch" }
+tddy-coding-agent-specs = { path = "../tddy-coding-agent-specs" }
 tddy-sandbox-runner = { path = "../tddy-sandbox-runner" }
 tddy-projects = { path = "../tddy-projects" }
 

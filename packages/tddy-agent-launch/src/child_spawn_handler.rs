@@ -137,6 +137,7 @@ impl tddy_core::toolcall::ChildSpawnHandler for StackChildSpawnHandler {
             &self.claude_cli_manager.task_registry(),
             // Nobody watches a spawned child's start: the orchestrator is told its id, not its steps.
             &tddy_session_files::attachment_progress::AttachmentProgressSink::discarding(),
+            self.service.coding_agents.as_deref(),
         )
         .await
         .map_err(|status| status.message().to_string())?;

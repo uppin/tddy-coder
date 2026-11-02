@@ -2,7 +2,7 @@
 
 use std::collections::BTreeMap;
 
-use super::{ResolvedTool, RunSection, ToolError};
+use super::{ArgvItem, ResolvedTool, RunSection, ToolError};
 
 /// The named values an argv template is rendered with (`model`, `session_id`, `resume`, …).
 ///
@@ -71,9 +71,73 @@ pub fn render_argv(
     tool: &ResolvedTool,
     params: &TemplateParams,
 ) -> Result<Vec<String>, ToolError> {
-    // TODO(claude-host): implement — walk `run.argv`, substitute `{name}` in each literal.
-    let _ = (run, tool, params);
-    todo!("claude-host: render_argv")
+    let mut argv = Vec::new();
+    render_items(&run.argv, tool, params, &mut argv)?;
+    Ok(argv)
+}
+
+fn render_items(
+    items: &[ArgvItem],
+    tool: &ResolvedTool,
+    params: &TemplateParams,
+    argv: &mut Vec<String>,
+) -> Result<(), ToolError> {
+    for item in items {
+        match item {
+            ArgvItem::Lit(literal) => argv.push(substitute(literal, tool, params)?),
+            ArgvItem::When { if_, then, else_ } => {
+                let set = params.get(if_).is_some_and(|value| !value.is_empty());
+                render_items(if set { then } else { else_ }, tool, params, argv)?;
+            }
+            ArgvItem::Splice { splice } => {
+                let items = params.list(splice).ok_or_else(|| unbound(tool, splice))?;
+                argv.extend(items.iter().cloned());
+            }
+        }
+    }
+    Ok(())
+}
+
+/// `literal` with each `{name}` replaced. Braces that do not enclose an identifier stay literal.
+fn substitute(
+    literal: &str,
+    tool: &ResolvedTool,
+    params: &TemplateParams,
+) -> Result<String, ToolError> {
+    let mut out = String::with_capacity(literal.len());
+    let mut rest = literal;
+    while let Some(open) = rest.find('{') {
+        out.push_str(&rest[..open]);
+        let after = &rest[open + 1..];
+        match after.find('}').filter(|end| is_identifier(&after[..*end])) {
+            Some(end) => {
+                let name = &after[..end];
+                if name == "binary" {
+                    out.push_str(&tool.binary.to_string_lossy());
+                } else {
+                    out.push_str(params.get(name).ok_or_else(|| unbound(tool, name))?);
+                }
+                rest = &after[end + 1..];
+            }
+            None => {
+                out.push('{');
+                rest = after;
+            }
+        }
+    }
+    out.push_str(rest);
+    Ok(out)
+}
+
+fn is_identifier(name: &str) -> bool {
+    !name.is_empty() && name.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
+}
+
+fn unbound(tool: &ResolvedTool, name: &str) -> ToolError {
+    ToolError::UnboundPlaceholder {
+        tool: tool.id.clone(),
+        name: name.to_string(),
+    }
 }
 
 #[cfg(test)]

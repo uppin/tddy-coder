@@ -15,7 +15,7 @@ use std::path::PathBuf;
 use tddy_agent_backend::claude_hooks::HookCommandParams;
 use thiserror::Error;
 
-use crate::CodingAgentSpec;
+use crate::{CodingAgentSpec, ToolSlot};
 
 /// The MCP server a launch registers with its agent (`tddy-tools --mcp`).
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -80,9 +80,66 @@ pub enum SlotError {
 /// flag, the allow flags, the deny flags, the permission-prompt flag, the MCP flag — the order the
 /// hand-built launch used.
 pub fn render(spec: &CodingAgentSpec, inputs: &SlotInputs<'_>) -> Result<RenderedSlots, SlotError> {
-    // TODO(claude-host): implement — compose `instructions`, `tools`, `mcp` and `hooks`.
-    let _ = (spec, inputs);
-    todo!("claude-host: slots::render")
+    let agent = &spec.agent;
+    let mut rendered = RenderedSlots::default();
+
+    if let (Some(slot), Some(file)) = (
+        &agent.instructions.append_system_prompt,
+        &inputs.append_system_prompt_file,
+    ) {
+        rendered.argv_extra.push(slot.flag.clone());
+        rendered
+            .argv_extra
+            .push(file.to_string_lossy().into_owned());
+    }
+    if let Some(preamble) = &inputs.preamble {
+        rendered
+            .files
+            .extend(instructions::render_instruction_files(
+                &agent.instructions,
+                &inputs.workdir,
+                preamble,
+            )?);
+    }
+
+    let prompt_tool: Vec<String> = inputs.permission_prompt_tool.iter().cloned().collect();
+    for (slot_name, slot, values) in [
+        ("tool_allow", &agent.tool_allow, &inputs.allowed_tools),
+        ("tool_deny", &agent.tool_deny, &inputs.denied_tools),
+        ("permission_prompt", &agent.permission_prompt, &prompt_tool),
+    ] {
+        rendered
+            .argv_extra
+            .extend(render_tool_slot(spec, slot_name, slot, values)?);
+    }
+
+    if let Some(server) = &inputs.mcp_server {
+        let (file, argv) = mcp::render_mcp(&agent.mcp, server, &inputs.scratch_dir);
+        rendered.files.push(file);
+        rendered.argv_extra.extend(argv);
+    }
+    if let Some(params) = &inputs.hooks {
+        let adapter = hooks::adapter(&agent.hooks.adapter)?;
+        rendered.files.push(adapter.render(&inputs.workdir, params));
+    }
+    Ok(rendered)
+}
+
+/// `values` as `slot`'s flags; values for an `unsupported` slot are refused, never dropped.
+fn render_tool_slot(
+    spec: &CodingAgentSpec,
+    slot_name: &str,
+    slot: &ToolSlot,
+    values: &[String],
+) -> Result<Vec<String>, SlotError> {
+    match slot {
+        ToolSlot::Flag(flag) => Ok(tools::render_flag_per_value(flag, values)),
+        ToolSlot::Unsupported(_) if values.is_empty() => Ok(Vec::new()),
+        ToolSlot::Unsupported(_) => Err(SlotError::SlotUnsupported {
+            agent: spec.id.clone(),
+            slot: slot_name.to_string(),
+        }),
+    }
 }
 
 #[cfg(test)]

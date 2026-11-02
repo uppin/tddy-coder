@@ -1,6 +1,7 @@
 use crate::claude_cli_tmux::ClaudeCliTmuxLaunch;
 use crate::hooks_and_urls;
 use crate::managed_launch;
+use crate::spec_launch::{launch_claude_cli, ClaudeCliLaunch, HostCodingAgents};
 use tddy_cli_sessions::cli_session_manager::CliSessionManager;
 use tddy_session_split::service_util;
 
@@ -332,6 +333,10 @@ pub(super) struct ClaudeCliProcess<'a> {
     pub(super) managed: Option<tddy_cli_sessions::session_toolcall::ManagedWorkflow>,
     pub(super) append_system_prompt_file: Option<PathBuf>,
     pub(super) env_extra: Vec<(String, String)>,
+    /// The coding agents declared as tools, when the host has them: the process is then launched
+    /// from the `claude` spec instead of the hand-built argv. `config` names daemon.yaml's
+    /// `claude_cli.binary_path`.
+    pub(super) coding_agents: Option<(&'a HostCodingAgents, &'a DaemonConfig)>,
     /// A main's launch, carried out only now that nothing before the spawn can refuse the start.
     pub(super) main: Option<crate::project_home_launch::MainLaunchPlan<'a>>,
     /// Run `claude` inside a tmux session instead of as the PTY child ([`crate::claude_cli_tmux`]).
@@ -365,36 +370,70 @@ pub(super) async fn spawn_claude_cli_process(
         managed,
         append_system_prompt_file,
         env_extra,
+        coding_agents,
         main,
         run_in_tmux,
         session_dir,
     } = launch;
     let role_launch = crate::project_home_launch::RoleLaunch::of(main)?;
-    let launch = ClaudeCliTmuxLaunch {
-        os_user,
-        session_id: &session_id_owned,
-        worktree_path: worktree_clone,
-        model: &model_owned,
-        binary: &binary_owned,
-        initial_prompt: initial_prompt_opt.as_deref(),
-        permission_mode: permission_mode_opt.as_deref(),
-        dangerously_skip_permissions,
-        resume: false,
-        append_system_prompt_file: append_system_prompt_file.as_deref(),
-        extra_args: role_launch.extra_args,
-        env: env_extra.into_iter().chain(role_launch.env).collect(),
-        session_dir,
-    };
-    let spawned = if run_in_tmux {
-        let launched = crate::claude_cli_tmux::start_claude_in_tmux(&manager, launch).await?;
-        SpawnedClaudeCli {
-            pid: launched.pane_pid,
-            tmux_session: Some(launched.tmux_session),
+    let env: Vec<(String, String)> = env_extra.into_iter().chain(role_launch.env).collect();
+    let spawned = match coding_agents {
+        // TODO(agent-tools-cascade): a tmux-run start (`run_in_tmux`, #tmux-agent) still builds the
+        // hand-built argv in `claude_cli_tmux::start_claude_in_tmux`; confirm the spec-rendered argv
+        // (`spec_launch::launch_claude_cli`) should be the one started in the agent's tmux pane.
+        Some((agents, config)) if !run_in_tmux => {
+            let handle = launch_claude_cli(ClaudeCliLaunch {
+                agents,
+                config,
+                manager: &manager,
+                session_id: &session_id_owned,
+                worktree: &worktree_clone,
+                model: &model_owned,
+                resume: false,
+                initial_prompt: initial_prompt_opt.as_deref(),
+                permission_mode: permission_mode_opt.as_deref(),
+                dangerously_skip_permissions,
+                append_system_prompt_file: append_system_prompt_file.as_deref(),
+                extra_args: role_launch.extra_args,
+                env,
+                os_user: Some(os_user),
+            })
+            .await
+            .map_err(|e| Status::internal(format!("failed to spawn claude-cli: {}", e)))?;
+            SpawnedClaudeCli {
+                pid: handle.pid,
+                tmux_session: None,
+            }
         }
-    } else {
-        SpawnedClaudeCli {
-            pid: start_claude_in_pty(&manager, launch).await?,
-            tmux_session: None,
+        _ => {
+            let launch = ClaudeCliTmuxLaunch {
+                os_user,
+                session_id: &session_id_owned,
+                worktree_path: worktree_clone,
+                model: &model_owned,
+                binary: &binary_owned,
+                initial_prompt: initial_prompt_opt.as_deref(),
+                permission_mode: permission_mode_opt.as_deref(),
+                dangerously_skip_permissions,
+                resume: false,
+                append_system_prompt_file: append_system_prompt_file.as_deref(),
+                extra_args: role_launch.extra_args,
+                env,
+                session_dir,
+            };
+            if run_in_tmux {
+                let launched =
+                    crate::claude_cli_tmux::start_claude_in_tmux(&manager, launch).await?;
+                SpawnedClaudeCli {
+                    pid: launched.pane_pid,
+                    tmux_session: Some(launched.tmux_session),
+                }
+            } else {
+                SpawnedClaudeCli {
+                    pid: start_claude_in_pty(&manager, launch).await?,
+                    tmux_session: None,
+                }
+            }
         }
     };
     if let Some(mw) = managed {

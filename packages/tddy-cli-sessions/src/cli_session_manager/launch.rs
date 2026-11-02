@@ -60,6 +60,35 @@ impl CliSessionManager {
         .await
     }
 
+    /// Spawn `argv` — already rendered, by a launcher that owns the agent's argument template — as
+    /// `session_id`'s main terminal, registered under `session_type`. `env` is applied on top of the
+    /// daemon's; `os_user` is the session owner, or `None` to run as the daemon.
+    #[allow(clippy::too_many_arguments)]
+    pub async fn spawn_rendered_main(
+        &self,
+        session_id: &str,
+        session_type: &str,
+        worktree_path: PathBuf,
+        model: &str,
+        argv: Vec<String>,
+        env: Vec<(String, String)>,
+        os_user: Option<&str>,
+    ) -> anyhow::Result<Arc<pty_handle::PtyHandle>> {
+        self.spawn_tool(
+            session_id,
+            MAIN_TERMINAL_ID,
+            session_type,
+            worktree_path,
+            model,
+            argv,
+            env,
+            os_user,
+            None,
+            None,
+        )
+        .await
+    }
+
     /// Spawn a new Cursor Agent CLI process for `session_id` in `worktree_path`.
     ///
     /// `chat_id` — the Cursor chat the session owns, launched into via `--resume <chat_id>`.

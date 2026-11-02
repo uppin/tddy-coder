@@ -225,7 +225,7 @@ impl BuildContext {
         shared: &Shared,
         served: &Served,
         askpass_endpoint: Arc<tddy_host_service::askpass::AskpassEndpoint>,
-    ) -> DaemonSessionHost {
+    ) -> anyhow::Result<DaemonSessionHost> {
         let config = &self.config;
         let options = &self.options;
         let tddy_data_dir = &self.identity.keys.tddy_data_dir;
@@ -260,7 +260,9 @@ impl BuildContext {
             Arc::clone(shared_claude_cli_manager),
         );
 
-        crate::livekit_host_ports::with_livekit_room_ports(
+        let coding_agents = crate::coding_agents::host_coding_agents(config, tddy_data_dir)?;
+
+        Ok(crate::livekit_host_ports::with_livekit_room_ports(
         connection_impl,
         Arc::clone(shared_session_rooms),
         Arc::clone(shared_session_admissions),
@@ -298,6 +300,7 @@ impl BuildContext {
         .with_inherited_host_session_sockets(
             tddy_session_lifecycle::connection_service::inherited_host_sockets::adopt_from_environment(),
         )
+        .with_coding_agents(coding_agents))
     }
 
     pub(super) fn install_session_host(

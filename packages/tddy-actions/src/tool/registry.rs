@@ -60,9 +60,13 @@ impl ToolRegistry {
     /// [`Self::builtin`] validates its own: a duplicate id, an unknown dep and a dep cycle are
     /// refused. Extensions are not checked here; [`Self::load_with_owners`] checks them.
     pub fn from_embedded(sources: &[(&str, &str)]) -> Result<Self, ToolError> {
-        // TODO(claude-host): implement — parse each source, refuse duplicates, validate deps.
-        let _ = sources;
-        todo!("claude-host: ToolRegistry::from_embedded")
+        let mut tools = BTreeMap::new();
+        for &(source, yaml) in sources {
+            let file = PathBuf::from(source);
+            let def = ToolDef::parse(&file, yaml)?;
+            insert_unique(&mut tools, def, file)?;
+        }
+        Self { tools }.validated()
     }
 
     /// [`Self::load`], then every tool's `extensions:` checked against `owners`: a key no owner
@@ -74,9 +78,9 @@ impl ToolRegistry {
         overrides_dir: &Path,
         owners: &[&dyn ExtensionOwner],
     ) -> Result<Self, ToolError> {
-        // TODO(claude-host): implement — `load`, then validate each tool's extensions.
-        let _ = (builtin, overrides_dir, owners);
-        todo!("claude-host: ToolRegistry::load_with_owners")
+        let registry = Self::load(builtin, overrides_dir)?;
+        registry.validate_extensions(owners)?;
+        Ok(registry)
     }
 
     pub fn get(&self, id: &str) -> Option<&ToolDef> {
@@ -132,6 +136,28 @@ impl ToolRegistry {
             });
         }
         closure.push(resolved);
+        Ok(())
+    }
+
+    fn validate_extensions(&self, owners: &[&dyn ExtensionOwner]) -> Result<(), ToolError> {
+        for (id, (def, file)) in &self.tools {
+            for (key, section) in &def.extensions {
+                let owner = owners
+                    .iter()
+                    .find(|owner| owner.name() == key)
+                    .ok_or_else(|| ToolError::UnknownExtension {
+                        file: file.clone(),
+                        owner: key.clone(),
+                    })?;
+                owner
+                    .validate(id, section)
+                    .map_err(|message| ToolError::ExtensionRejected {
+                        file: file.clone(),
+                        owner: key.clone(),
+                        message,
+                    })?;
+            }
+        }
         Ok(())
     }
 

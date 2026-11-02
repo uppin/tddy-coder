@@ -1,5 +1,6 @@
 use crate::hooks_and_urls;
 use crate::project_home_launch::StartRole;
+use crate::spec_launch::HostCodingAgents;
 use crate::stack_parent;
 use tddy_session_split::service_util;
 use tddy_worktree_service::branch_intent::BranchIntentPolicy;
@@ -97,6 +98,8 @@ pub(crate) async fn spawn_claude_cli_session_inner(
     // Where the start's phases (worktree, semantic index, agent) are announced; discarding for a
     // caller with nobody watching.
     progress: &AttachmentProgressSink,
+    // The coding agents declared as tools; the process is launched from the `claude` spec when set.
+    coding_agents: Option<&HostCodingAgents>,
 ) -> Result<Response<StartSessionResponse>, Status> {
     if model.trim().is_empty() {
         return Err(Status::invalid_argument(
@@ -278,10 +281,6 @@ pub(crate) async fn spawn_claude_cli_session_inner(
         managed_codebase,
     )?;
     progress.begin_phase(StartStep::Agent);
-    // TODO(claude-host): when the host has coding agents installed (`LaunchSessions::coding_agents`),
-    // resolve the `claude` spec, render its argv and slots (hooks, append-system-prompt, role
-    // allow-list) and spawn through `spec_launch::launch_host_pty` instead of the hand-built argv
-    // below; `install_claude_cli_hooks` then stops writing `.claude/settings.local.json` itself.
     let spawned = claude_cli_spawn_steps::spawn_claude_cli_process(
         claude_cli_spawn_steps::ClaudeCliProcess {
             os_user,
@@ -297,6 +296,7 @@ pub(crate) async fn spawn_claude_cli_session_inner(
             managed,
             append_system_prompt_file,
             env_extra,
+            coding_agents: coding_agents.map(|agents| (agents, config)),
             main: role.main,
             run_in_tmux,
             session_dir: session_dir.clone(),
