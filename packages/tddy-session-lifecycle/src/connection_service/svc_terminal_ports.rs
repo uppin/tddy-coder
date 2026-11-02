@@ -12,6 +12,7 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use tddy_core::cli_harness::{cli_harness, CliLaunch};
+use tddy_daemon_kernel::privilege_drop::EffectiveIdentity;
 use tddy_rpc::Status;
 use tddy_terminal_rpc::service::{
     ControlChange, ControlClaim, TerminalControl, TerminalDescriptor, TerminalKind, TerminalLaunch,
@@ -224,6 +225,9 @@ impl TerminalRoster for CliManagerTerminalRoster {
                     .map_err(|e| Status::internal(format!("failed to start terminal: {e}")))?
             }
             TerminalKind::Tmux { session } => {
+                // Reachability first: a daemon that cannot become the session's user refuses with
+                // the named error, and never starts the tab as the daemon user.
+                tmux_host::ensure_reachable(&launch.os_user, &EffectiveIdentity::current())?;
                 // Checked before anything spawns: a client for a name tmux does not hold would
                 // attach to nothing and exit, leaving a dead tab behind.
                 let sessions = self.tmux.list(&launch.os_user).await?;

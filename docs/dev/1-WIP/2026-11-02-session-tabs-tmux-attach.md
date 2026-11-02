@@ -21,11 +21,11 @@
 
 ## Affected Packages
 
-- [ ] [`tddy-terminal-rpc`](../../../packages/tddy-terminal-rpc/README.md): proto (`ListTmuxSessions`, `StartTerminalSessionRequest.tmux_session`, `TerminalSessionInfo.tmux_session`), `TerminalKind::Tmux`, the `TmuxHost` port
-- [ ] [`tddy-cli-sessions`](../../../packages/tddy-cli-sessions/README.md): `start_tmux_terminal` spawns as a given OS user and records the tmux session name
-- [ ] [`tddy-session-lifecycle`](../../../packages/tddy-session-lifecycle/README.md): the daemon's `HostTmux` (list as user, attach argv) and the roster arm
-- [ ] [`tddy-coder`](../../../packages/tddy-coder/README.md): refuses kind `tmux` and `ListTmuxSessions`
-- [ ] [`tddy-web`](../../../packages/tddy-web/README.md): the tmux section of `NewTerminalMenu`, `tmux: <name>` labels
+- [x] [`tddy-terminal-rpc`](../../../packages/tddy-terminal-rpc/README.md): proto (`ListTmuxSessions`, `StartTerminalSessionRequest.tmux_session`, `TerminalSessionInfo.tmux_session`), `TerminalKind::Tmux`, the `TmuxHost` port
+- [x] [`tddy-cli-sessions`](../../../packages/tddy-cli-sessions/README.md): `start_tmux_terminal` spawns as a given OS user and records the tmux session name
+- [x] [`tddy-session-lifecycle`](../../../packages/tddy-session-lifecycle/README.md): the daemon's `HostTmux` (list as user, attach argv) and the roster arm
+- [x] [`tddy-coder`](../../../packages/tddy-coder/README.md): refuses kind `tmux` and `ListTmuxSessions`
+- [x] [`tddy-web`](../../../packages/tddy-web/README.md): the tmux section of `NewTerminalMenu`, `tmux: <name>` labels
 
 ## Responsibility
 
@@ -154,28 +154,28 @@ runs a private tmux server: `TMUX_TMPDIR` points tmux's socket directory at a te
 and the test alike. The identity maps to the OS user running the test, so no privilege change happens.
 Serial, because the tests set process env.
 
-- [ ] `list_tmux_sessions_returns_the_users_sessions_with_window_and_attached_counts`
-- [ ] `list_tmux_sessions_without_a_tmux_server_is_empty`
-- [ ] `list_tmux_sessions_without_tmux_installed_is_refused_naming_tmux`
-- [ ] `a_tmux_tab_attaches_to_the_named_session_and_carries_input_and_output`
-- [ ] `stopping_a_tmux_tab_detaches_and_leaves_the_tmux_session_running`
-- [ ] `a_tmux_tab_for_an_unknown_session_is_not_found`
-- [ ] `list_terminal_sessions_reports_a_tmux_tab_with_its_tmux_session_name`
+- [x] `list_tmux_sessions_returns_the_users_sessions_with_window_and_attached_counts`
+- [x] `list_tmux_sessions_without_a_tmux_server_is_empty`
+- [x] `list_tmux_sessions_without_tmux_installed_is_refused_naming_tmux`
+- [x] `a_tmux_tab_attaches_to_the_named_session_and_carries_input_and_output`
+- [x] `stopping_a_tmux_tab_detaches_and_leaves_the_tmux_session_running`
+- [x] `a_tmux_tab_for_an_unknown_session_is_not_found`
+- [x] `list_terminal_sessions_reports_a_tmux_tab_with_its_tmux_session_name`
 
 **`tddy-web`**: `packages/tddy-web/cypress/component/SessionTerminalTabsTmuxAcceptance.cy.tsx`
 
-- [ ] `"+" lists the host's tmux sessions`
-- [ ] `choosing a tmux session opens a tab labelled "tmux: <name>"`
-- [ ] `"+" shows "No tmux sessions" when there are none`
-- [ ] `"+" shows the error when tmux is unavailable`
+- [x] `"+" lists the host's tmux sessions`
+- [x] `choosing a tmux session opens a tab labelled "tmux: <name>"`
+- [x] `"+" shows "No tmux sessions" when there are none`
+- [x] `"+" shows the error when tmux is unavailable`
 
 ### Unit / integration tests
 
-- [ ] `packages/tddy-terminal-rpc/tests/terminal_kind_unit.rs`:
+- [x] `packages/tddy-terminal-rpc/tests/terminal_kind_unit.rs`:
   - `a_tmux_kind_with_a_session_is_a_tmux_terminal_attached_to_it`;
   - `a_tmux_kind_without_a_session_is_refused_as_invalid_argument`;
   - `bash_and_harness_kinds_are_read_as_before` (a guard).
-- [ ] `tmux_host.rs` unit tests: `the_listing_reads_name_windows_and_attached_clients_per_line`,
+- [x] `tmux_host.rs` unit tests: `the_listing_reads_name_windows_and_attached_clients_per_line`,
   `a_session_name_with_spaces_is_kept_whole`, `an_empty_listing_has_no_sessions`,
   `a_tab_attaches_with_the_clipboard_feature_to_exactly_the_named_session`.
 - The coder's refusals are already in place (contract), and `two_server_parity_acceptance` stays green
@@ -193,6 +193,9 @@ Serial, because the tests set process env.
 - **Run as the session's OS user**, the user's own tmux server, as chosen in the interview.
 - **Per-client `-T clipboard`** rather than setting `set-clipboard` or `terminal-features` on the user's
   server, so tddy never edits the user's tmux.
+- **Listing goes through the kernel's `run_output_as_user`** (absolute tmux path from `tmux_binary()`; a bare name is looked up on the daemon's `PATH`, because the kernel anchors relative programs to the daemon's cwd). Exit 0 parses; "no server running" / "error connecting" is `[]`; a missing binary is `failed_precondition` naming tmux; a `CannotBecomeUser` is refused with that error. The child inherits the daemon's environment, so the daemon's own `TMUX_TMPDIR` decides which socket directory tmux reads. The roster's `Tmux` arm uses this list for its `not_found` check. Follow-up: `docs/dev/todo/2026-11-02-tmux-listing-and-tab-use-two-privilege-drops.md` (the listing's `pre_exec` drop and the tab's `PtyRuntime`/`setpriv` drop can disagree).
+- **Tab refusal before spawn:** the roster arm calls `ensure_reachable` (kernel `resolve_target_account` + `plan_privilege_change_from`) and refuses with the named `CannotBecomeUser` message (`failed_precondition`); a tmux tab is never spawned as the daemon user. Unit-tested with an injected unprivileged identity, so no root is needed.
+- **Accepted deviation:** `TmuxMenuState.loading` stays in the web hook, so the menu never flashes a false "No tmux sessions" while the listing is in flight.
 - **`pkgs.tmux` in the dev shell** — asked and approved 2026-11-02, rather than a fake tmux script that
   could not prove detach-on-close or `-T clipboard`.
 
@@ -220,10 +223,10 @@ Recorded at the contract commit (2026-11-02), scoped to `tddy-terminal-rpc`, `td
 - [x] Run acceptance tests (verify they fail)
 - [x] USER REVIEW — acceptance tests — waived by the developer 2026-11-02 (reviewed with the stack at the end of pass 2)
 - [x] TDD Red — write failing unit/integration tests
-- [ ] TDD Green — implement with quality code
+- [x] TDD Green — implement with quality code
 - [ ] Update documentation with progress
 - [ ] Repeat Red→Green→Update cycle until feature complete
-- [ ] Run the touched packages' tests (`./test -p {package}` per package) — verify 100% pass
+- [x] Run the touched packages' tests (`./test -p {package}` per package) — verify 100% pass
 - [ ] Validate changes (/validate-changes)
 - [ ] Refactor issues from change validation
 - [ ] USER REVIEW — development complete
@@ -234,7 +237,7 @@ Recorded at the contract commit (2026-11-02), scoped to `tddy-terminal-rpc`, `td
 - [ ] Analyze code quality (/analyze-clean-code)
 - [ ] Refactor code quality issues
 - [ ] Final validation (/validate-changes)
-- [ ] Linting and formatting (`cargo clippy -p {package} -- -D warnings`, `cargo fmt`)
+- [x] Linting and formatting (`cargo clippy -p {package} -- -D warnings`, `cargo fmt`)
 - [ ] USER REVIEW — scope developed, every gap approved: ready to wrap
 
 ## Refactoring Needed

@@ -7,7 +7,13 @@
 //!
 //! The binary is `TDDY_TMUX_BINARY` when set and non-empty, else `tmux` on the daemon's `PATH`.
 
+use std::path::{Path, PathBuf};
+
 use async_trait::async_trait;
+use tddy_daemon_kernel::privilege_drop::{
+    plan_privilege_change_from, resolve_target_account, CannotBecomeUser, EffectiveIdentity,
+};
+use tddy_daemon_kernel::spawn_as_user::run_output_as_user;
 use tddy_rpc::Status;
 use tddy_terminal_rpc::{TmuxHost, TmuxSession};
 
@@ -64,16 +70,84 @@ pub(super) fn parse_list_sessions(stdout: &str) -> Vec<TmuxSession> {
 /// [`TmuxHost`] over the daemon host's tmux, run as the asking OS user.
 pub(super) struct HostTmux;
 
+/// The absolute path of `binary`: itself when absolute, else the first `PATH` entry holding an
+/// executable of that name. The kernel's as-user spawn anchors a relative program to the daemon's
+/// working directory, so a bare `tmux` has to be found here, on the daemon's `PATH`.
+fn absolute_tmux(binary: &str) -> Result<PathBuf, Status> {
+    let path = Path::new(binary);
+    if path.is_absolute() {
+        return Ok(path.to_path_buf());
+    }
+    let search = std::env::var_os("PATH").unwrap_or_default();
+    std::env::split_paths(&search)
+        .map(|dir| dir.join(binary))
+        .find(|candidate| candidate.is_file())
+        .ok_or_else(|| Status::failed_precondition(format!("tmux ({binary}) is not installed")))
+}
+
+/// Whether this daemon can run a child as `os_user`, decided before anything spawns. A daemon that
+/// is not root cannot become another user, and a tab must then be refused with the kernel's named
+/// [`CannotBecomeUser`] error — never started as the daemon user.
+pub(super) fn ensure_reachable(os_user: &str, current: &EffectiveIdentity) -> Result<(), Status> {
+    let target = resolve_target_account(os_user).map_err(Status::failed_precondition)?;
+    plan_privilege_change_from(target, current)
+        .map(|_| ())
+        .map_err(|refusal| Status::failed_precondition(refusal.to_string()))
+}
+
+/// What `tmux list-sessions` said when it ran and exited non-zero: a missing server is an empty
+/// listing, anything else is an error.
+fn listing_failure(stderr: &str) -> Result<Vec<TmuxSession>, Status> {
+    let lowered = stderr.to_lowercase();
+    if lowered.contains("no server running") || lowered.contains("error connecting") {
+        Ok(Vec::new())
+    } else {
+        Err(Status::internal(format!(
+            "tmux list-sessions failed: {}",
+            stderr.trim()
+        )))
+    }
+}
+
+/// Run `tmux list-sessions` as `os_user`. Blocking.
+///
+/// The child inherits the daemon's environment, `TMUX_TMPDIR` included, so the daemon's own
+/// setting decides where tmux looks for the user's socket.
+fn list_blocking(os_user: &str) -> Result<Vec<TmuxSession>, Status> {
+    let binary = absolute_tmux(&tmux_binary())?;
+    let args = vec![
+        "list-sessions".to_string(),
+        "-F".to_string(),
+        LIST_SESSIONS_FORMAT.to_string(),
+    ];
+    let run = run_output_as_user(os_user, &binary, &args).map_err(|e| {
+        match e.downcast_ref::<CannotBecomeUser>() {
+            Some(refusal) => Status::failed_precondition(refusal.to_string()),
+            None => Status::failed_precondition(format!("cannot run tmux as {os_user}: {e}")),
+        }
+    })?;
+    let output = run.result.map_err(|e| {
+        Status::failed_precondition(format!(
+            "tmux ({}) could not be run: {e}",
+            run.resolved_program.display()
+        ))
+    })?;
+    if output.status.success() {
+        Ok(parse_list_sessions(&String::from_utf8_lossy(
+            &output.stdout,
+        )))
+    } else {
+        listing_failure(&String::from_utf8_lossy(&output.stderr))
+    }
+}
+
 #[async_trait]
 impl TmuxHost for HostTmux {
     async fn list(&self, os_user: &str) -> Result<Vec<TmuxSession>, Status> {
-        // TODO(tmux-attach): implement. BLOCKED on a design decision: the main agent PTY's as-user
-        // path (`PtyRuntime`, which wraps argv in `setpriv`) is a terminal, so a one-shot listing
-        // gets stdout and stderr as one stream and no separate stdout. See the node report.
-        let _ = (os_user, LIST_SESSIONS_FORMAT, parse_list_sessions("").len());
-        Err(Status::unimplemented(
-            "listing tmux sessions is not implemented",
-        ))
+        let os_user = os_user.to_string();
+        tokio::task::spawn_blocking(move || list_blocking(&os_user))
+            .await
+            .map_err(|e| Status::internal(format!("tmux listing task failed: {e}")))?
     }
 }
 
@@ -141,5 +215,42 @@ mod tests {
                 "=alpha"
             ]
         );
+    }
+
+    #[test]
+    fn a_user_this_daemon_cannot_become_is_refused_naming_both_accounts() {
+        // Given a daemon that runs as an unprivileged user other than root
+        let daemon = EffectiveIdentity {
+            uid: 4242,
+            gid: 4242,
+            name: "unprivileged".to_string(),
+        };
+
+        // When a tab is asked for as root
+        let refusal = ensure_reachable("root", &daemon).unwrap_err();
+
+        // Then it is refused, naming who runs and who was asked for
+        assert_eq!(refusal.code(), tddy_rpc::Code::FailedPrecondition);
+        assert!(
+            refusal.message().contains("'unprivileged'"),
+            "{}",
+            refusal.message()
+        );
+        assert!(
+            refusal.message().contains("'root'"),
+            "{}",
+            refusal.message()
+        );
+    }
+
+    #[test]
+    fn a_missing_server_lists_nothing_and_any_other_failure_is_an_error() {
+        assert!(listing_failure("no server running on /tmp/tmux-1/default")
+            .unwrap()
+            .is_empty());
+        assert!(listing_failure("error connecting to /tmp/x (No such file)")
+            .unwrap()
+            .is_empty());
+        assert!(listing_failure("boom").is_err());
     }
 }
