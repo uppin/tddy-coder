@@ -73,6 +73,8 @@ pub fn coder_terminal_session_entry(svc: Arc<SessionConnectionService>) -> Servi
         roster: Arc::new(CoderTerminalRoster::new(Arc::clone(&svc))),
         // A tool session's terminals are not recorded: its history ends with its process.
         recorded_history: Arc::new(tddy_terminal_rpc::NoRecordedHistory),
+        // A tool session offers no tmux: its terminals run bash only.
+        tmux: Arc::new(tddy_terminal_rpc::NoTmux),
         initial_frame_bytes: tddy_terminal_rpc::bridge::DEFAULT_INITIAL_FRAME_BYTES,
     });
     ServiceEntry {
@@ -263,10 +265,18 @@ impl TerminalRoster for CoderTerminalRoster {
                 "this session participant runs session {served}, not {session_id}"
             )));
         }
-        if let TerminalKind::Agent(kind) = &launch.kind {
-            return Err(Status::invalid_argument(format!(
-                "this session's terminals run bash only, not {kind:?}"
-            )));
+        match &launch.kind {
+            TerminalKind::Bash => {}
+            TerminalKind::Agent(kind) => {
+                return Err(Status::invalid_argument(format!(
+                    "this session's terminals run bash only, not {kind:?}"
+                )));
+            }
+            TerminalKind::Tmux { .. } => {
+                return Err(Status::failed_precondition(
+                    "this session's terminals run bash only; tmux is not offered here",
+                ));
+            }
         }
         self.svc
             .terminal_manager
@@ -292,6 +302,7 @@ impl TerminalRoster for CoderTerminalRoster {
                 terminal_id: handle.terminal_id.clone(),
                 kind: handle.kind.clone(),
                 pid: handle.pid,
+                tmux_session: None,
             })
             .collect()
     }

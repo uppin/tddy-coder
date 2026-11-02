@@ -1,8 +1,9 @@
 import React from "react";
 import { Maximize2, Minimize2, X } from "lucide-react";
 import { AGENT_TERMINAL_ID, type SessionTerminal } from "./useSessionTerminals";
-import { terminalKindLabel } from "./cliHarnessOptions";
+import { TMUX_KIND, terminalKindLabel } from "./cliHarnessOptions";
 import { NewTerminalMenu } from "./NewTerminalMenu";
+import type { TmuxMenuState } from "./useTmuxSessions";
 import type { ChildSession } from "./useChildSessions";
 import { agentConversationLabel, type AgentConversation } from "./agentConversationTabs";
 import { safeTestIdPart } from "../../lib/testId";
@@ -15,8 +16,11 @@ interface SessionTerminalTabsProps {
   activeTerminalId: string;
   /** Focus a tab. */
   onSelect: (terminalId: string) => void;
-  /** Open a terminal of the given kind: `bash`, or a CLI harness's session type. */
-  onOpen: (kind: string) => void;
+  /** Open a terminal of the given kind: `bash`, a CLI harness's session type, or `tmux` attached to
+   *  `tmuxSession`. */
+  onOpen: (kind: string, tmuxSession?: string) => void;
+  /** The host's tmux sessions for the "+" menu's tmux section; absent offers none. */
+  tmux?: TmuxMenuState;
   /** Close a terminal (the ✕ control on its tab). */
   onClose: (terminalId: string) => void;
   /**
@@ -56,7 +60,8 @@ function tabColorClasses(selected: boolean): string {
 
 /**
  * Each terminal with the label its tab shows: its kind's name and its ordinal among the tabs of that
- * kind, counted in tab order — "Bash 1", "Warp 1", "Bash 2".
+ * kind, counted in tab order — "Bash 1", "Warp 1", "Bash 2" — or, for a tmux tab, the tmux session it
+ * is attached to — "tmux: alpha".
  */
 function labelledTerminals(
   terminals: readonly SessionTerminal[],
@@ -65,8 +70,13 @@ function labelledTerminals(
   return terminals.map((terminal) => {
     const ordinal = (ordinals.get(terminal.kind) ?? 0) + 1;
     ordinals.set(terminal.kind, ordinal);
-    return { terminal, label: `${terminalKindLabel(terminal.kind)} ${ordinal}` };
+    return { terminal, label: terminalTabLabel(terminal, ordinal) };
   });
+}
+
+function terminalTabLabel(terminal: SessionTerminal, ordinal: number): string {
+  if (terminal.kind === TMUX_KIND) return `tmux: ${terminal.tmuxSession ?? ""}`;
+  return `${terminalKindLabel(terminal.kind)} ${ordinal}`;
 }
 
 /** Display label for a spawned child-conversation tab (its recipe, e.g. "grill me"). */
@@ -79,7 +89,8 @@ function childLabel(child: ChildSession): string {
  * (the reserved `main` terminal), one tab per open terminal, one per spawned child conversation, one
  * per open conversation with an attached agent, and — pinned to the right edge — the full-screen
  * toggle for whichever pane is currently active. A "+" control sits beside the tabs and opens a menu
- * of bash and every CLI harness the session can run. Styled after `InspectorTabs`.
+ * of bash, every CLI harness the session can run, and the host's tmux sessions. Styled after
+ * `InspectorTabs`.
  *
  * The tabs scroll horizontally when they overflow; the "+" and the full-screen control sit *outside*
  * that scroller, so a session with a dozen terminals and conversations cannot push them out of reach,
@@ -90,6 +101,7 @@ export function SessionTerminalTabs({
   activeTerminalId,
   onSelect,
   onOpen,
+  tmux,
   onClose,
   sessionType,
   childSessions = [],
@@ -204,7 +216,7 @@ export function SessionTerminalTabs({
         })}
       </div>
 
-      <NewTerminalMenu sessionType={sessionType} onOpen={onOpen} />
+      <NewTerminalMenu sessionType={sessionType} onOpen={onOpen} tmux={tmux} />
 
       {/* Full screen — acts on whichever pane is active, since only one is ever visible. */}
       {onToggleFullscreen && (

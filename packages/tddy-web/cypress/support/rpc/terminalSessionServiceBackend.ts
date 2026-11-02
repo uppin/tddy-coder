@@ -11,11 +11,12 @@
  */
 
 import { create } from "@bufbuild/protobuf";
-import type { ServiceImpl } from "@connectrpc/connect";
+import { Code, ConnectError, type ServiceImpl } from "@connectrpc/connect";
 import { anInMemoryRpcBackend, type InMemoryRpcBackend } from "tddy-connectrpc-testkit";
 import {
   ClaimTerminalControlResponseSchema,
   ListTerminalSessionsResponseSchema,
+  ListTmuxSessionsResponseSchema,
   SessionTerminalOutputSchema,
   StartTerminalSessionResponseSchema,
   StopTerminalSessionResponseSchema,
@@ -23,6 +24,7 @@ import {
   TerminalHistoryChunkSchema,
   TerminalSessionInfoSchema,
   TerminalSessionService,
+  TmuxSessionInfoSchema,
   type SessionTerminalInput,
   type SessionTerminalOutput,
 } from "../../../src/gen/terminal_session_pb";
@@ -54,6 +56,11 @@ export interface TerminalSessionServiceScenario {
    *  across successive calls (one chunk per call). Each chunk's `startOffset`/`endOffset`/`atOldest`
    *  is used verbatim. The backend pops one chunk per `getTerminalHistory` call. */
   terminalHistory?: Array<{ data: Uint8Array; startOffset: bigint; endOffset: bigint; atOldest: boolean }>;
+  /** `ListTmuxSessions` result — the tmux sessions on the session's host. Default: none. */
+  tmuxSessions?: Array<{ name: string; windows?: number; attached?: number }>;
+  /** When set, `ListTmuxSessions` fails `FAILED_PRECONDITION` with this message — a host without
+   *  tmux. */
+  tmuxUnavailable?: string;
 }
 
 export interface TerminalSessionServiceControls {
@@ -65,6 +72,8 @@ export interface TerminalSessionServiceControls {
   readonly startedTerminalIds: string[];
   /** The `kind` each `StartTerminalSession` asked for (`""` for the login shell), in call order. */
   readonly startedTerminalKinds: string[];
+  /** The `tmux_session` each `StartTerminalSession` named (`""` for a non-tmux kind), in call order. */
+  readonly startedTmuxSessions: string[];
   /** Every `{ sessionId, terminalId }` passed to `StopTerminalSession`, in call order. */
   readonly stoppedTerminals: { sessionId: string; terminalId: string }[];
   /** Every `{ sessionId, terminalId, data }` passed to `SendTerminalInput`, in call order. */
@@ -97,6 +106,7 @@ export function aTerminalSessionServiceFake(
   const startTerminalSessionIds: string[] = [];
   const startedTerminalIds: string[] = [];
   const startedTerminalKinds: string[] = [];
+  const startedTmuxSessions: string[] = [];
   const stoppedTerminals: { sessionId: string; terminalId: string }[] = [];
   const sentTerminalInput: { sessionId: string; terminalId: string; data: Uint8Array }[] = [];
   const streamedTerminals: { sessionId: string; terminalId: string }[] = [];
@@ -108,9 +118,14 @@ export function aTerminalSessionServiceFake(
   }[] = [];
 
   // Live bash-terminal list — mutated by Start/Stop so ListTerminalSessions stays consistent.
-  const liveTerminals: { terminalId: string; kind: string; pid: number }[] = (
+  const liveTerminals: { terminalId: string; kind: string; pid: number; tmuxSession: string }[] = (
     scenario.terminals ?? []
-  ).map((t, i) => ({ terminalId: t.terminalId, kind: t.kind ?? "bash", pid: t.pid ?? 8000 + i }));
+  ).map((t, i) => ({
+    terminalId: t.terminalId,
+    kind: t.kind ?? "bash",
+    pid: t.pid ?? 8000 + i,
+    tmuxSession: "",
+  }));
   const nextTerminalId = scenario.newTerminalId ?? ((index: number) => `bash-${index + 1}`);
 
   // The lease each session's terminals are held under, once claimed. As on the daemon, a session
@@ -164,12 +179,24 @@ export function aTerminalSessionServiceFake(
       startTerminalSessionIds.push(req.sessionId);
       startedTerminalIds.push(terminalId);
       startedTerminalKinds.push(req.kind);
+      startedTmuxSessions.push(req.tmuxSession);
       liveTerminals.push({
         terminalId,
         kind: req.kind === "" ? "bash" : req.kind,
         pid: 8000 + liveTerminals.length,
+        tmuxSession: req.tmuxSession,
       });
       return create(StartTerminalSessionResponseSchema, { terminalId });
+    },
+    listTmuxSessions: async () => {
+      if (scenario.tmuxUnavailable !== undefined) {
+        throw new ConnectError(scenario.tmuxUnavailable, Code.FailedPrecondition);
+      }
+      return create(ListTmuxSessionsResponseSchema, {
+        sessions: (scenario.tmuxSessions ?? []).map((t) =>
+          create(TmuxSessionInfoSchema, { name: t.name, windows: t.windows ?? 1, attached: t.attached ?? 0 }),
+        ),
+      });
     },
     stopTerminalSession: async (req) => {
       stoppedTerminals.push({ sessionId: req.sessionId, terminalId: req.terminalId });
@@ -291,6 +318,7 @@ export function aTerminalSessionServiceFake(
     startTerminalSessionIds,
     startedTerminalIds,
     startedTerminalKinds,
+    startedTmuxSessions,
     stoppedTerminals,
     sentTerminalInput,
     streamedTerminals,

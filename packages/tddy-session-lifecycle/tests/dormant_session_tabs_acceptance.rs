@@ -130,6 +130,7 @@ impl DormantTabDaemon {
                 session_id: session_id.to_string(),
                 control_token: String::new(),
                 kind: kind.to_string(),
+                tmux_session: String::new(),
             }))
             .await
             .map(|resp| resp.into_inner().terminal_id)

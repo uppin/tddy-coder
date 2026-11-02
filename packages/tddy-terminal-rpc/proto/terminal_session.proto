@@ -26,6 +26,10 @@ service TerminalSessionService {
   rpc StartTerminalSession(StartTerminalSessionRequest) returns (StartTerminalSessionResponse);
   rpc StopTerminalSession(StopTerminalSessionRequest) returns (StopTerminalSessionResponse);
   rpc ListTerminalSessions(ListTerminalSessionsRequest) returns (ListTerminalSessionsResponse);
+  // The tmux sessions running on the session's host for the session's OS user — what a "tmux" tab
+  // can attach to. No tmux server running answers an empty list; tmux not installed is
+  // FAILED_PRECONDITION.
+  rpc ListTmuxSessions(ListTmuxSessionsRequest) returns (ListTmuxSessionsResponse);
   // Single-screen terminal control mutex — at most one screen controls a session's terminals at a
   // time. ClaimTerminalControl issues or steals the exclusive control token; WatchTerminalControl
   // streams ownership changes so a displaced screen can render the "Claim terminal" CTA.
@@ -199,9 +203,12 @@ message StartTerminalSessionRequest {
   string control_token = 3;
   // What the terminal runs. Empty or "bash": the session user's login shell. Otherwise the session
   // type of a registered CLI harness ("claude-cli", "cursor-cli", "opencode-cli", "muse-cli",
-  // "warp-cli"), started fresh and interactive in the session's worktree. A kind the host does not
-  // run is refused INVALID_ARGUMENT.
+  // "warp-cli"), started fresh and interactive in the session's worktree. "tmux": a tmux client
+  // attached to `tmux_session` on the session's host, as the session's OS user; stopping the tab
+  // detaches it. A kind the host does not run is refused INVALID_ARGUMENT.
   string kind          = 4;
+  // The tmux session a "tmux" terminal attaches to. Empty for every other kind.
+  string tmux_session  = 5;
 }
 
 message StartTerminalSessionResponse {
@@ -230,13 +237,32 @@ message ListTerminalSessionsRequest {
 message TerminalSessionInfo {
   string terminal_id = 1;
   // The reserved main tool's session type ("claude-cli", …), "bash" for a started shell, or the
-  // CLI harness session type a started agent terminal runs.
+  // CLI harness session type a started agent terminal runs, or "tmux".
   string kind        = 2;
   uint32 pid         = 3;
+  // The tmux session a "tmux" terminal is attached to; empty for every other kind.
+  string tmux_session = 4;
 }
 
 message ListTerminalSessionsResponse {
   repeated TerminalSessionInfo terminals = 1;
+}
+
+message ListTmuxSessionsRequest {
+  string session_token = 1;
+  string session_id    = 2;
+}
+
+message TmuxSessionInfo {
+  string name     = 1;
+  // Windows in the tmux session.
+  uint32 windows  = 2;
+  // Clients currently attached to it.
+  uint32 attached = 3;
+}
+
+message ListTmuxSessionsResponse {
+  repeated TmuxSessionInfo sessions = 1;
 }
 
 // --- Single-screen terminal control mutex ---

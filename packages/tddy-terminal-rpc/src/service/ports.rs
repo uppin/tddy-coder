@@ -64,6 +64,9 @@ pub struct TerminalDescriptor {
     /// the CLI harness a started agent terminal runs.
     pub kind: String,
     pub pid: u32,
+    /// The tmux session a [`TerminalKind::Tmux`] terminal is attached to; `None` for every other
+    /// kind.
+    pub tmux_session: Option<String>,
 }
 
 /// What a started terminal runs, as `StartTerminalSessionRequest.kind` names it.
@@ -74,16 +77,34 @@ pub enum TerminalKind {
     /// A CLI harness, by its session type (`"warp-cli"`, …). Whether the host runs it is the
     /// roster's to decide: only the host knows its harness registry.
     Agent(String),
+    /// A tmux client attached to `session` on the host's tmux server for the session's OS user —
+    /// kind `"tmux"` with a non-empty `tmux_session`. Stopping the terminal detaches it.
+    Tmux { session: String },
 }
 
+/// The kind `StartTerminalSessionRequest.kind` names for a tmux terminal.
+pub const TMUX_KIND: &str = "tmux";
+
 impl TerminalKind {
-    /// The kind a request names; surrounding whitespace is ignored.
-    #[must_use]
-    pub fn from_request(kind: &str) -> TerminalKind {
-        match kind.trim() {
+    /// The kind a request names, with the tmux session it names for a [`TMUX_KIND`] terminal;
+    /// surrounding whitespace is ignored. A tmux kind without a session is `INVALID_ARGUMENT`.
+    pub fn from_request(kind: &str, tmux_session: &str) -> Result<TerminalKind, Status> {
+        let kind = kind.trim();
+        if kind == TMUX_KIND {
+            let session = tmux_session.trim();
+            if session.is_empty() {
+                return Err(Status::invalid_argument(
+                    "a tmux terminal names the tmux session it attaches to",
+                ));
+            }
+            return Ok(TerminalKind::Tmux {
+                session: session.to_string(),
+            });
+        }
+        Ok(match kind {
             "" | "bash" => TerminalKind::Bash,
             agent => TerminalKind::Agent(agent.to_string()),
-        }
+        })
     }
 }
 
@@ -94,6 +115,39 @@ pub struct TerminalLaunch {
     /// The session user's login shell, resolved by [`crate::login_shell::login_shell_for`]; what a
     /// [`TerminalKind::Bash`] terminal runs.
     pub login_shell: String,
+    /// The OS user the request's token maps to — who a [`TerminalKind::Tmux`] terminal runs as, so
+    /// it reaches that user's own tmux server.
+    pub os_user: String,
+}
+
+/// One tmux session on a host's tmux server.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TmuxSession {
+    pub name: String,
+    /// Windows in the session.
+    pub windows: u32,
+    /// Clients attached to it.
+    pub attached: u32,
+}
+
+/// The tmux sessions a host can attach a terminal to.
+#[async_trait]
+pub trait TmuxHost: Send + Sync {
+    /// The sessions on `os_user`'s tmux server: empty when no server runs, `FAILED_PRECONDITION`
+    /// when the host has no tmux.
+    async fn list(&self, os_user: &str) -> Result<Vec<TmuxSession>, Status>;
+}
+
+/// A host that offers no tmux: every listing is refused.
+pub struct NoTmux;
+
+#[async_trait]
+impl TmuxHost for NoTmux {
+    async fn list(&self, _os_user: &str) -> Result<Vec<TmuxSession>, Status> {
+        Err(Status::failed_precondition(
+            "this session's terminals run bash only; tmux is not offered here",
+        ))
+    }
 }
 
 /// The terminals a host runs for a session: start one, stop one, list them.
@@ -135,6 +189,8 @@ pub struct TerminalSessionPorts {
     /// The history of a terminal that is no longer running — `GetTerminalHistory` reads it only when
     /// [`Self::terminals`] has no running terminal by that id.
     pub recorded_history: Arc<dyn super::RecordedTerminalHistory>,
+    /// The tmux sessions `ListTmuxSessions` answers with.
+    pub tmux: Arc<dyn TmuxHost>,
     /// The per-frame replay budget: how many bytes of retained output one open frame may carry.
     ///
     /// Injected because it is a *transport* limit — the largest message the host's gRPC / LiveKit

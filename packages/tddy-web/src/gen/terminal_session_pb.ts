@@ -10,7 +10,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file terminal_session.proto.
  */
 export const file_terminal_session: GenFile = /*@__PURE__*/
-  fileDesc("ChZ0ZXJtaW5hbF9zZXNzaW9uLnByb3RvEhB0ZXJtaW5hbF9zZXNzaW9uIp4CChRTZXNzaW9uVGVybWluYWxJbnB1dBIVCg1zZXNzaW9uX3Rva2VuGAEgASgJEhIKCnNlc3Npb25faWQYAiABKAkSDAoEZGF0YRgDIAEoDBITCgt0ZXJtaW5hbF9pZBgEIAEoCRIVCg1jb250cm9sX3Rva2VuGAUgASgJEhQKDGlucHV0X29mZnNldBgGIAEoBBIwCgRtb2RlGAcgASgOMiIudGVybWluYWxfc2Vzc2lvbi5TdHJlYW1SZXBsYXlNb2RlEhMKC2Zyb21fb2Zmc2V0GAggASgEEhQKDGluaXRpYWxfY29scxgJIAEoDRIUCgxpbml0aWFsX3Jvd3MYCiABKA0SGAoQcmVxdWVzdF9zbmFwc2hvdBgLIAEoCCKcAgoVU2Vzc2lvblRlcm1pbmFsT3V0cHV0EgwKBGRhdGEYASABKAwSGgoSYWNrZWRfaW5wdXRfb2Zmc2V0GAIgASgEEhQKDHN0YXJ0X29mZnNldBgDIAEoBBISCgplbmRfb2Zmc2V0GAQgASgEEhEKCWF0X29sZGVzdBgFIAEoCBISCgpzZXNzaW9uX2lkGAYgASgJEhMKC3Rlcm1pbmFsX2lkGAcgASgJEhAKCHNuYXBzaG90GAggASgIEhUKDXNuYXBzaG90X3Jvd3MYCSABKA0SFQoNc25hcHNob3RfY29scxgKIAEoDRIcChRyZWZ1c2VkX2lucHV0X29mZnNldBgLIAEoBBIVCg1pbnB1dF9yZWZ1c2FsGAwgASgJIucBChtTdHJlYW1UZXJtaW5hbE91dHB1dFJlcXVlc3QSFQoNc2Vzc2lvbl90b2tlbhgBIAEoCRISCgpzZXNzaW9uX2lkGAIgASgJEhMKC3Rlcm1pbmFsX2lkGAMgASgJEhQKDGluaXRpYWxfY29scxgEIAEoDRIUCgxpbml0aWFsX3Jvd3MYBSABKA0SMAoEbW9kZRgGIAEoDjIiLnRlcm1pbmFsX3Nlc3Npb24uU3RyZWFtUmVwbGF5TW9kZRITCgtmcm9tX29mZnNldBgHIAEoBBIVCg1jb250cm9sX3Rva2VuGAggASgJIhsKGVNlbmRUZXJtaW5hbElucHV0UmVzcG9uc2UimQEKGUdldFRlcm1pbmFsSGlzdG9yeVJlcXVlc3QSFQoNc2Vzc2lvbl90b2tlbhgBIAEoCRISCgpzZXNzaW9uX2lkGAIgASgJEhMKC3Rlcm1pbmFsX2lkGAMgASgJEhMKC2Zyb21fb2Zmc2V0GAQgASgEEhQKDHVudGlsX29mZnNldBgFIAEoBBIRCgltYXhfYnl0ZXMYBiABKA0icQoUVGVybWluYWxIaXN0b3J5Q2h1bmsSDAoEZGF0YRgBIAEoDBIUCgxzdGFydF9vZmZzZXQYAiABKAQSEgoKZW5kX29mZnNldBgDIAEoBBIRCglhdF9vbGRlc3QYBCABKAgSDgoGYXRfZW5kGAUgASgIIm0KG1N0YXJ0VGVybWluYWxTZXNzaW9uUmVxdWVzdBIVCg1zZXNzaW9uX3Rva2VuGAEgASgJEhIKCnNlc3Npb25faWQYAiABKAkSFQoNY29udHJvbF90b2tlbhgDIAEoCRIMCgRraW5kGAQgASgJIjMKHFN0YXJ0VGVybWluYWxTZXNzaW9uUmVzcG9uc2USEwoLdGVybWluYWxfaWQYASABKAkicwoaU3RvcFRlcm1pbmFsU2Vzc2lvblJlcXVlc3QSFQoNc2Vzc2lvbl90b2tlbhgBIAEoCRISCgpzZXNzaW9uX2lkGAIgASgJEhMKC3Rlcm1pbmFsX2lkGAMgASgJEhUKDWNvbnRyb2xfdG9rZW4YBCABKAkiOgobU3RvcFRlcm1pbmFsU2Vzc2lvblJlc3BvbnNlEgoKAm9rGAEgASgIEg8KB21lc3NhZ2UYAiABKAkiSAobTGlzdFRlcm1pbmFsU2Vzc2lvbnNSZXF1ZXN0EhUKDXNlc3Npb25fdG9rZW4YASABKAkSEgoKc2Vzc2lvbl9pZBgCIAEoCSJFChNUZXJtaW5hbFNlc3Npb25JbmZvEhMKC3Rlcm1pbmFsX2lkGAEgASgJEgwKBGtpbmQYAiABKAkSCwoDcGlkGAMgASgNIlgKHExpc3RUZXJtaW5hbFNlc3Npb25zUmVzcG9uc2USOAoJdGVybWluYWxzGAEgAygLMiUudGVybWluYWxfc2Vzc2lvbi5UZXJtaW5hbFNlc3Npb25JbmZvImoKG0NsYWltVGVybWluYWxDb250cm9sUmVxdWVzdBIVCg1zZXNzaW9uX3Rva2VuGAEgASgJEhIKCnNlc3Npb25faWQYAiABKAkSEQoJc2NyZWVuX2lkGAMgASgJEg0KBXN0ZWFsGAQgASgIImgKHENsYWltVGVybWluYWxDb250cm9sUmVzcG9uc2USDwoHZ3JhbnRlZBgBIAEoCBIVCg1jb250cm9sX3Rva2VuGAIgASgJEiAKGGN1cnJlbnRfaG9sZGVyX3NjcmVlbl9pZBgDIAEoCSJfChtXYXRjaFRlcm1pbmFsQ29udHJvbFJlcXVlc3QSFQoNc2Vzc2lvbl90b2tlbhgBIAEoCRISCgpzZXNzaW9uX2lkGAIgASgJEhUKDWNvbnRyb2xfdG9rZW4YAyABKAkiTAoUVGVybWluYWxDb250cm9sRXZlbnQSGAoQaG9sZGVyX3NjcmVlbl9pZBgBIAEoCRIaChJ5b3VfYXJlX2NvbnRyb2xsZXIYAiABKAgqdAoQU3RyZWFtUmVwbGF5TW9kZRIbChdTVFJFQU1fUkVQTEFZX01PREVfVEFJTBAAEiIKHlNUUkVBTV9SRVBMQVlfTU9ERV9GUk9NX09GRlNFVBABEh8KG1NUUkVBTV9SRVBMQVlfTU9ERV9TTkFQU0hPVBACMpsIChZUZXJtaW5hbFNlc3Npb25TZXJ2aWNlEm4KF1N0cmVhbVNlc3Npb25UZXJtaW5hbElPEiYudGVybWluYWxfc2Vzc2lvbi5TZXNzaW9uVGVybWluYWxJbnB1dBonLnRlcm1pbmFsX3Nlc3Npb24uU2Vzc2lvblRlcm1pbmFsT3V0cHV0KAEwARJwChRTdHJlYW1UZXJtaW5hbE91dHB1dBItLnRlcm1pbmFsX3Nlc3Npb24uU3RyZWFtVGVybWluYWxPdXRwdXRSZXF1ZXN0GicudGVybWluYWxfc2Vzc2lvbi5TZXNzaW9uVGVybWluYWxPdXRwdXQwARJoChFTZW5kVGVybWluYWxJbnB1dBImLnRlcm1pbmFsX3Nlc3Npb24uU2Vzc2lvblRlcm1pbmFsSW5wdXQaKy50ZXJtaW5hbF9zZXNzaW9uLlNlbmRUZXJtaW5hbElucHV0UmVzcG9uc2USawoSR2V0VGVybWluYWxIaXN0b3J5EisudGVybWluYWxfc2Vzc2lvbi5HZXRUZXJtaW5hbEhpc3RvcnlSZXF1ZXN0GiYudGVybWluYWxfc2Vzc2lvbi5UZXJtaW5hbEhpc3RvcnlDaHVuazABEnUKFFN0YXJ0VGVybWluYWxTZXNzaW9uEi0udGVybWluYWxfc2Vzc2lvbi5TdGFydFRlcm1pbmFsU2Vzc2lvblJlcXVlc3QaLi50ZXJtaW5hbF9zZXNzaW9uLlN0YXJ0VGVybWluYWxTZXNzaW9uUmVzcG9uc2UScgoTU3RvcFRlcm1pbmFsU2Vzc2lvbhIsLnRlcm1pbmFsX3Nlc3Npb24uU3RvcFRlcm1pbmFsU2Vzc2lvblJlcXVlc3QaLS50ZXJtaW5hbF9zZXNzaW9uLlN0b3BUZXJtaW5hbFNlc3Npb25SZXNwb25zZRJ1ChRMaXN0VGVybWluYWxTZXNzaW9ucxItLnRlcm1pbmFsX3Nlc3Npb24uTGlzdFRlcm1pbmFsU2Vzc2lvbnNSZXF1ZXN0Gi4udGVybWluYWxfc2Vzc2lvbi5MaXN0VGVybWluYWxTZXNzaW9uc1Jlc3BvbnNlEnUKFENsYWltVGVybWluYWxDb250cm9sEi0udGVybWluYWxfc2Vzc2lvbi5DbGFpbVRlcm1pbmFsQ29udHJvbFJlcXVlc3QaLi50ZXJtaW5hbF9zZXNzaW9uLkNsYWltVGVybWluYWxDb250cm9sUmVzcG9uc2USbwoUV2F0Y2hUZXJtaW5hbENvbnRyb2wSLS50ZXJtaW5hbF9zZXNzaW9uLldhdGNoVGVybWluYWxDb250cm9sUmVxdWVzdBomLnRlcm1pbmFsX3Nlc3Npb24uVGVybWluYWxDb250cm9sRXZlbnQwAWIGcHJvdG8z");
+  fileDesc("ChZ0ZXJtaW5hbF9zZXNzaW9uLnByb3RvEhB0ZXJtaW5hbF9zZXNzaW9uIp4CChRTZXNzaW9uVGVybWluYWxJbnB1dBIVCg1zZXNzaW9uX3Rva2VuGAEgASgJEhIKCnNlc3Npb25faWQYAiABKAkSDAoEZGF0YRgDIAEoDBITCgt0ZXJtaW5hbF9pZBgEIAEoCRIVCg1jb250cm9sX3Rva2VuGAUgASgJEhQKDGlucHV0X29mZnNldBgGIAEoBBIwCgRtb2RlGAcgASgOMiIudGVybWluYWxfc2Vzc2lvbi5TdHJlYW1SZXBsYXlNb2RlEhMKC2Zyb21fb2Zmc2V0GAggASgEEhQKDGluaXRpYWxfY29scxgJIAEoDRIUCgxpbml0aWFsX3Jvd3MYCiABKA0SGAoQcmVxdWVzdF9zbmFwc2hvdBgLIAEoCCKcAgoVU2Vzc2lvblRlcm1pbmFsT3V0cHV0EgwKBGRhdGEYASABKAwSGgoSYWNrZWRfaW5wdXRfb2Zmc2V0GAIgASgEEhQKDHN0YXJ0X29mZnNldBgDIAEoBBISCgplbmRfb2Zmc2V0GAQgASgEEhEKCWF0X29sZGVzdBgFIAEoCBISCgpzZXNzaW9uX2lkGAYgASgJEhMKC3Rlcm1pbmFsX2lkGAcgASgJEhAKCHNuYXBzaG90GAggASgIEhUKDXNuYXBzaG90X3Jvd3MYCSABKA0SFQoNc25hcHNob3RfY29scxgKIAEoDRIcChRyZWZ1c2VkX2lucHV0X29mZnNldBgLIAEoBBIVCg1pbnB1dF9yZWZ1c2FsGAwgASgJIucBChtTdHJlYW1UZXJtaW5hbE91dHB1dFJlcXVlc3QSFQoNc2Vzc2lvbl90b2tlbhgBIAEoCRISCgpzZXNzaW9uX2lkGAIgASgJEhMKC3Rlcm1pbmFsX2lkGAMgASgJEhQKDGluaXRpYWxfY29scxgEIAEoDRIUCgxpbml0aWFsX3Jvd3MYBSABKA0SMAoEbW9kZRgGIAEoDjIiLnRlcm1pbmFsX3Nlc3Npb24uU3RyZWFtUmVwbGF5TW9kZRITCgtmcm9tX29mZnNldBgHIAEoBBIVCg1jb250cm9sX3Rva2VuGAggASgJIhsKGVNlbmRUZXJtaW5hbElucHV0UmVzcG9uc2UimQEKGUdldFRlcm1pbmFsSGlzdG9yeVJlcXVlc3QSFQoNc2Vzc2lvbl90b2tlbhgBIAEoCRISCgpzZXNzaW9uX2lkGAIgASgJEhMKC3Rlcm1pbmFsX2lkGAMgASgJEhMKC2Zyb21fb2Zmc2V0GAQgASgEEhQKDHVudGlsX29mZnNldBgFIAEoBBIRCgltYXhfYnl0ZXMYBiABKA0icQoUVGVybWluYWxIaXN0b3J5Q2h1bmsSDAoEZGF0YRgBIAEoDBIUCgxzdGFydF9vZmZzZXQYAiABKAQSEgoKZW5kX29mZnNldBgDIAEoBBIRCglhdF9vbGRlc3QYBCABKAgSDgoGYXRfZW5kGAUgASgIIoMBChtTdGFydFRlcm1pbmFsU2Vzc2lvblJlcXVlc3QSFQoNc2Vzc2lvbl90b2tlbhgBIAEoCRISCgpzZXNzaW9uX2lkGAIgASgJEhUKDWNvbnRyb2xfdG9rZW4YAyABKAkSDAoEa2luZBgEIAEoCRIUCgx0bXV4X3Nlc3Npb24YBSABKAkiMwocU3RhcnRUZXJtaW5hbFNlc3Npb25SZXNwb25zZRITCgt0ZXJtaW5hbF9pZBgBIAEoCSJzChpTdG9wVGVybWluYWxTZXNzaW9uUmVxdWVzdBIVCg1zZXNzaW9uX3Rva2VuGAEgASgJEhIKCnNlc3Npb25faWQYAiABKAkSEwoLdGVybWluYWxfaWQYAyABKAkSFQoNY29udHJvbF90b2tlbhgEIAEoCSI6ChtTdG9wVGVybWluYWxTZXNzaW9uUmVzcG9uc2USCgoCb2sYASABKAgSDwoHbWVzc2FnZRgCIAEoCSJIChtMaXN0VGVybWluYWxTZXNzaW9uc1JlcXVlc3QSFQoNc2Vzc2lvbl90b2tlbhgBIAEoCRISCgpzZXNzaW9uX2lkGAIgASgJIlsKE1Rlcm1pbmFsU2Vzc2lvbkluZm8SEwoLdGVybWluYWxfaWQYASABKAkSDAoEa2luZBgCIAEoCRILCgNwaWQYAyABKA0SFAoMdG11eF9zZXNzaW9uGAQgASgJIlgKHExpc3RUZXJtaW5hbFNlc3Npb25zUmVzcG9uc2USOAoJdGVybWluYWxzGAEgAygLMiUudGVybWluYWxfc2Vzc2lvbi5UZXJtaW5hbFNlc3Npb25JbmZvIkQKF0xpc3RUbXV4U2Vzc2lvbnNSZXF1ZXN0EhUKDXNlc3Npb25fdG9rZW4YASABKAkSEgoKc2Vzc2lvbl9pZBgCIAEoCSJCCg9UbXV4U2Vzc2lvbkluZm8SDAoEbmFtZRgBIAEoCRIPCgd3aW5kb3dzGAIgASgNEhAKCGF0dGFjaGVkGAMgASgNIk8KGExpc3RUbXV4U2Vzc2lvbnNSZXNwb25zZRIzCghzZXNzaW9ucxgBIAMoCzIhLnRlcm1pbmFsX3Nlc3Npb24uVG11eFNlc3Npb25JbmZvImoKG0NsYWltVGVybWluYWxDb250cm9sUmVxdWVzdBIVCg1zZXNzaW9uX3Rva2VuGAEgASgJEhIKCnNlc3Npb25faWQYAiABKAkSEQoJc2NyZWVuX2lkGAMgASgJEg0KBXN0ZWFsGAQgASgIImgKHENsYWltVGVybWluYWxDb250cm9sUmVzcG9uc2USDwoHZ3JhbnRlZBgBIAEoCBIVCg1jb250cm9sX3Rva2VuGAIgASgJEiAKGGN1cnJlbnRfaG9sZGVyX3NjcmVlbl9pZBgDIAEoCSJfChtXYXRjaFRlcm1pbmFsQ29udHJvbFJlcXVlc3QSFQoNc2Vzc2lvbl90b2tlbhgBIAEoCRISCgpzZXNzaW9uX2lkGAIgASgJEhUKDWNvbnRyb2xfdG9rZW4YAyABKAkiTAoUVGVybWluYWxDb250cm9sRXZlbnQSGAoQaG9sZGVyX3NjcmVlbl9pZBgBIAEoCRIaChJ5b3VfYXJlX2NvbnRyb2xsZXIYAiABKAgqdAoQU3RyZWFtUmVwbGF5TW9kZRIbChdTVFJFQU1fUkVQTEFZX01PREVfVEFJTBAAEiIKHlNUUkVBTV9SRVBMQVlfTU9ERV9GUk9NX09GRlNFVBABEh8KG1NUUkVBTV9SRVBMQVlfTU9ERV9TTkFQU0hPVBACMoYJChZUZXJtaW5hbFNlc3Npb25TZXJ2aWNlEm4KF1N0cmVhbVNlc3Npb25UZXJtaW5hbElPEiYudGVybWluYWxfc2Vzc2lvbi5TZXNzaW9uVGVybWluYWxJbnB1dBonLnRlcm1pbmFsX3Nlc3Npb24uU2Vzc2lvblRlcm1pbmFsT3V0cHV0KAEwARJwChRTdHJlYW1UZXJtaW5hbE91dHB1dBItLnRlcm1pbmFsX3Nlc3Npb24uU3RyZWFtVGVybWluYWxPdXRwdXRSZXF1ZXN0GicudGVybWluYWxfc2Vzc2lvbi5TZXNzaW9uVGVybWluYWxPdXRwdXQwARJoChFTZW5kVGVybWluYWxJbnB1dBImLnRlcm1pbmFsX3Nlc3Npb24uU2Vzc2lvblRlcm1pbmFsSW5wdXQaKy50ZXJtaW5hbF9zZXNzaW9uLlNlbmRUZXJtaW5hbElucHV0UmVzcG9uc2USawoSR2V0VGVybWluYWxIaXN0b3J5EisudGVybWluYWxfc2Vzc2lvbi5HZXRUZXJtaW5hbEhpc3RvcnlSZXF1ZXN0GiYudGVybWluYWxfc2Vzc2lvbi5UZXJtaW5hbEhpc3RvcnlDaHVuazABEnUKFFN0YXJ0VGVybWluYWxTZXNzaW9uEi0udGVybWluYWxfc2Vzc2lvbi5TdGFydFRlcm1pbmFsU2Vzc2lvblJlcXVlc3QaLi50ZXJtaW5hbF9zZXNzaW9uLlN0YXJ0VGVybWluYWxTZXNzaW9uUmVzcG9uc2UScgoTU3RvcFRlcm1pbmFsU2Vzc2lvbhIsLnRlcm1pbmFsX3Nlc3Npb24uU3RvcFRlcm1pbmFsU2Vzc2lvblJlcXVlc3QaLS50ZXJtaW5hbF9zZXNzaW9uLlN0b3BUZXJtaW5hbFNlc3Npb25SZXNwb25zZRJ1ChRMaXN0VGVybWluYWxTZXNzaW9ucxItLnRlcm1pbmFsX3Nlc3Npb24uTGlzdFRlcm1pbmFsU2Vzc2lvbnNSZXF1ZXN0Gi4udGVybWluYWxfc2Vzc2lvbi5MaXN0VGVybWluYWxTZXNzaW9uc1Jlc3BvbnNlEmkKEExpc3RUbXV4U2Vzc2lvbnMSKS50ZXJtaW5hbF9zZXNzaW9uLkxpc3RUbXV4U2Vzc2lvbnNSZXF1ZXN0GioudGVybWluYWxfc2Vzc2lvbi5MaXN0VG11eFNlc3Npb25zUmVzcG9uc2USdQoUQ2xhaW1UZXJtaW5hbENvbnRyb2wSLS50ZXJtaW5hbF9zZXNzaW9uLkNsYWltVGVybWluYWxDb250cm9sUmVxdWVzdBouLnRlcm1pbmFsX3Nlc3Npb24uQ2xhaW1UZXJtaW5hbENvbnRyb2xSZXNwb25zZRJvChRXYXRjaFRlcm1pbmFsQ29udHJvbBItLnRlcm1pbmFsX3Nlc3Npb24uV2F0Y2hUZXJtaW5hbENvbnRyb2xSZXF1ZXN0GiYudGVybWluYWxfc2Vzc2lvbi5UZXJtaW5hbENvbnRyb2xFdmVudDABYgZwcm90bzM");
 
 /**
  * @generated from message terminal_session.SessionTerminalInput
@@ -427,12 +427,20 @@ export type StartTerminalSessionRequest = Message<"terminal_session.StartTermina
   /**
    * What the terminal runs. Empty or "bash": the session user's login shell. Otherwise the session
    * type of a registered CLI harness ("claude-cli", "cursor-cli", "opencode-cli", "muse-cli",
-   * "warp-cli"), started fresh and interactive in the session's worktree. A kind the host does not
-   * run is refused INVALID_ARGUMENT.
+   * "warp-cli"), started fresh and interactive in the session's worktree. "tmux": a tmux client
+   * attached to `tmux_session` on the session's host, as the session's OS user; stopping the tab
+   * detaches it. A kind the host does not run is refused INVALID_ARGUMENT.
    *
    * @generated from field: string kind = 4;
    */
   kind: string;
+
+  /**
+   * The tmux session a "tmux" terminal attaches to. Empty for every other kind.
+   *
+   * @generated from field: string tmux_session = 5;
+   */
+  tmuxSession: string;
 };
 
 /**
@@ -550,7 +558,7 @@ export type TerminalSessionInfo = Message<"terminal_session.TerminalSessionInfo"
 
   /**
    * The reserved main tool's session type ("claude-cli", …), "bash" for a started shell, or the
-   * CLI harness session type a started agent terminal runs.
+   * CLI harness session type a started agent terminal runs, or "tmux".
    *
    * @generated from field: string kind = 2;
    */
@@ -560,6 +568,13 @@ export type TerminalSessionInfo = Message<"terminal_session.TerminalSessionInfo"
    * @generated from field: uint32 pid = 3;
    */
   pid: number;
+
+  /**
+   * The tmux session a "tmux" terminal is attached to; empty for every other kind.
+   *
+   * @generated from field: string tmux_session = 4;
+   */
+  tmuxSession: string;
 };
 
 /**
@@ -585,6 +600,76 @@ export type ListTerminalSessionsResponse = Message<"terminal_session.ListTermina
  */
 export const ListTerminalSessionsResponseSchema: GenMessage<ListTerminalSessionsResponse> = /*@__PURE__*/
   messageDesc(file_terminal_session, 12);
+
+/**
+ * @generated from message terminal_session.ListTmuxSessionsRequest
+ */
+export type ListTmuxSessionsRequest = Message<"terminal_session.ListTmuxSessionsRequest"> & {
+  /**
+   * @generated from field: string session_token = 1;
+   */
+  sessionToken: string;
+
+  /**
+   * @generated from field: string session_id = 2;
+   */
+  sessionId: string;
+};
+
+/**
+ * Describes the message terminal_session.ListTmuxSessionsRequest.
+ * Use `create(ListTmuxSessionsRequestSchema)` to create a new message.
+ */
+export const ListTmuxSessionsRequestSchema: GenMessage<ListTmuxSessionsRequest> = /*@__PURE__*/
+  messageDesc(file_terminal_session, 13);
+
+/**
+ * @generated from message terminal_session.TmuxSessionInfo
+ */
+export type TmuxSessionInfo = Message<"terminal_session.TmuxSessionInfo"> & {
+  /**
+   * @generated from field: string name = 1;
+   */
+  name: string;
+
+  /**
+   * Windows in the tmux session.
+   *
+   * @generated from field: uint32 windows = 2;
+   */
+  windows: number;
+
+  /**
+   * Clients currently attached to it.
+   *
+   * @generated from field: uint32 attached = 3;
+   */
+  attached: number;
+};
+
+/**
+ * Describes the message terminal_session.TmuxSessionInfo.
+ * Use `create(TmuxSessionInfoSchema)` to create a new message.
+ */
+export const TmuxSessionInfoSchema: GenMessage<TmuxSessionInfo> = /*@__PURE__*/
+  messageDesc(file_terminal_session, 14);
+
+/**
+ * @generated from message terminal_session.ListTmuxSessionsResponse
+ */
+export type ListTmuxSessionsResponse = Message<"terminal_session.ListTmuxSessionsResponse"> & {
+  /**
+   * @generated from field: repeated terminal_session.TmuxSessionInfo sessions = 1;
+   */
+  sessions: TmuxSessionInfo[];
+};
+
+/**
+ * Describes the message terminal_session.ListTmuxSessionsResponse.
+ * Use `create(ListTmuxSessionsResponseSchema)` to create a new message.
+ */
+export const ListTmuxSessionsResponseSchema: GenMessage<ListTmuxSessionsResponse> = /*@__PURE__*/
+  messageDesc(file_terminal_session, 15);
 
 /**
  * @generated from message terminal_session.ClaimTerminalControlRequest
@@ -621,7 +706,7 @@ export type ClaimTerminalControlRequest = Message<"terminal_session.ClaimTermina
  * Use `create(ClaimTerminalControlRequestSchema)` to create a new message.
  */
 export const ClaimTerminalControlRequestSchema: GenMessage<ClaimTerminalControlRequest> = /*@__PURE__*/
-  messageDesc(file_terminal_session, 13);
+  messageDesc(file_terminal_session, 16);
 
 /**
  * @generated from message terminal_session.ClaimTerminalControlResponse
@@ -652,7 +737,7 @@ export type ClaimTerminalControlResponse = Message<"terminal_session.ClaimTermin
  * Use `create(ClaimTerminalControlResponseSchema)` to create a new message.
  */
 export const ClaimTerminalControlResponseSchema: GenMessage<ClaimTerminalControlResponse> = /*@__PURE__*/
-  messageDesc(file_terminal_session, 14);
+  messageDesc(file_terminal_session, 17);
 
 /**
  * @generated from message terminal_session.WatchTerminalControlRequest
@@ -682,7 +767,7 @@ export type WatchTerminalControlRequest = Message<"terminal_session.WatchTermina
  * Use `create(WatchTerminalControlRequestSchema)` to create a new message.
  */
 export const WatchTerminalControlRequestSchema: GenMessage<WatchTerminalControlRequest> = /*@__PURE__*/
-  messageDesc(file_terminal_session, 15);
+  messageDesc(file_terminal_session, 18);
 
 /**
  * Emitted once on subscribe (snapshot) and again whenever the lease changes.
@@ -710,7 +795,7 @@ export type TerminalControlEvent = Message<"terminal_session.TerminalControlEven
  * Use `create(TerminalControlEventSchema)` to create a new message.
  */
 export const TerminalControlEventSchema: GenMessage<TerminalControlEvent> = /*@__PURE__*/
-  messageDesc(file_terminal_session, 16);
+  messageDesc(file_terminal_session, 19);
 
 /**
  * Selects the replay behavior of StreamTerminalOutput (and the bidi open frame).
@@ -833,6 +918,18 @@ export const TerminalSessionService: GenService<{
     methodKind: "unary";
     input: typeof ListTerminalSessionsRequestSchema;
     output: typeof ListTerminalSessionsResponseSchema;
+  },
+  /**
+   * The tmux sessions running on the session's host for the session's OS user — what a "tmux" tab
+   * can attach to. No tmux server running answers an empty list; tmux not installed is
+   * FAILED_PRECONDITION.
+   *
+   * @generated from rpc terminal_session.TerminalSessionService.ListTmuxSessions
+   */
+  listTmuxSessions: {
+    methodKind: "unary";
+    input: typeof ListTmuxSessionsRequestSchema;
+    output: typeof ListTmuxSessionsResponseSchema;
   },
   /**
    * Single-screen terminal control mutex — at most one screen controls a session's terminals at a

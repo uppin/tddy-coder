@@ -5,6 +5,10 @@
 > `TAIL` / `FROM_OFFSET` replays (non-web clients, `StreamTerminalOutput`) still do not: their
 > `mode_prologue` is pinned to the mouse modes by `terminal_capture_replay`'s
 > `ignores_private_modes_outside_the_mouse_tracking_family`. What remains is below, narrowed to them.
+>
+> **Answered for tmux tabs (#806, `#session-tabs 3/7`):** tmux runs on the alternate screen, and a
+> tmux tab is a web tab opened with `SNAPSHOT`, so a reattaching browser renders the tmux screen
+> correctly. Nothing about the legacy replays changed.
 
 **Category:** Deferred from "No terminal history offer while a full-screen TUI owns navigation" (#714)
 **Source:** `packages/tddy-task/src/terminal_capture.rs` (`mode_prologue`, `MOUSE_TRACKING_MODES`)

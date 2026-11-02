@@ -133,6 +133,7 @@ impl AgentTabDaemon {
                 session_id: SESSION_ID.to_string(),
                 control_token: String::new(),
                 kind: kind.to_string(),
+                tmux_session: String::new(),
             }))
             .await
             .map(|resp| resp.into_inner().terminal_id)

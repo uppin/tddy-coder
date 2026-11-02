@@ -34,10 +34,11 @@ use crate::bridge::{
 };
 use crate::proto::terminal_session::{
     ClaimTerminalControlRequest, ClaimTerminalControlResponse, GetTerminalHistoryRequest,
-    ListTerminalSessionsRequest, ListTerminalSessionsResponse, SendTerminalInputResponse,
-    SessionTerminalInput, SessionTerminalOutput, StartTerminalSessionRequest,
-    StartTerminalSessionResponse, StopTerminalSessionRequest, StopTerminalSessionResponse,
-    StreamTerminalOutputRequest, TerminalControlEvent, TerminalHistoryChunk, TerminalSessionInfo,
+    ListTerminalSessionsRequest, ListTerminalSessionsResponse, ListTmuxSessionsRequest,
+    ListTmuxSessionsResponse, SendTerminalInputResponse, SessionTerminalInput,
+    SessionTerminalOutput, StartTerminalSessionRequest, StartTerminalSessionResponse,
+    StopTerminalSessionRequest, StopTerminalSessionResponse, StreamTerminalOutputRequest,
+    TerminalControlEvent, TerminalHistoryChunk, TerminalSessionInfo, TmuxSessionInfo,
     WatchTerminalControlRequest,
 };
 use crate::proto::terminal_session::{TerminalSessionService, TerminalSessionServiceServer};
@@ -323,8 +324,9 @@ impl TerminalSessionService for TerminalSessionServiceImpl {
         let session_id = keyed_session_id(&req.session_id);
 
         let launch = TerminalLaunch {
-            kind: TerminalKind::from_request(&req.kind),
+            kind: TerminalKind::from_request(&req.kind, &req.tmux_session)?,
             login_shell: crate::login_shell::login_shell_for(&os_user),
+            os_user,
         };
         let terminal_id = self.ports.roster.start(&session_id, &launch).await?;
         Ok(Response::new(StartTerminalSessionResponse { terminal_id }))
@@ -376,9 +378,31 @@ impl TerminalSessionService for TerminalSessionServiceImpl {
                 terminal_id: terminal.terminal_id,
                 kind: terminal.kind,
                 pid: terminal.pid,
+                tmux_session: terminal.tmux_session.unwrap_or_default(),
             })
             .collect();
         Ok(Response::new(ListTerminalSessionsResponse { terminals }))
+    }
+
+    async fn list_tmux_sessions(
+        &self,
+        request: Request<ListTmuxSessionsRequest>,
+    ) -> Result<Response<ListTmuxSessionsResponse>, Status> {
+        let req = request.into_inner();
+        let os_user = self.os_user(&req.session_token)?;
+        let sessions = self
+            .ports
+            .tmux
+            .list(&os_user)
+            .await?
+            .into_iter()
+            .map(|session| TmuxSessionInfo {
+                name: session.name,
+                windows: session.windows,
+                attached: session.attached,
+            })
+            .collect();
+        Ok(Response::new(ListTmuxSessionsResponse { sessions }))
     }
 
     async fn claim_terminal_control(

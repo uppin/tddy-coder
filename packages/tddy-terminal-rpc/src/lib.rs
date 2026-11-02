@@ -58,9 +58,10 @@ pub use bridge::{
 pub use login_shell::login_shell_for;
 pub use proto::terminal_session::{GetTerminalHistoryRequest, TerminalHistoryChunk};
 pub use service::{
-    build_terminal_session_entry, ControlChange, ControlClaim, NoRecordedHistory,
+    build_terminal_session_entry, ControlChange, ControlClaim, NoRecordedHistory, NoTmux,
     RecordedTerminalHistory, TerminalControl, TerminalDescriptor, TerminalKind, TerminalLaunch,
-    TerminalRoster, TerminalSessionPorts, TerminalSessionServiceImpl, TERMINAL_SESSION_SERVICE,
+    TerminalRoster, TerminalSessionPorts, TerminalSessionServiceImpl, TmuxHost, TmuxSession,
+    TERMINAL_SESSION_SERVICE, TMUX_KIND,
 };
 
 /// Serialized `FileDescriptorSet` for gRPC reflection (merged at the daemon host with

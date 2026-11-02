@@ -133,6 +133,49 @@ inside a `claude-cli` session shares the worktree's `.claude/settings.local.json
 activity may be reported against the main session — see
 [`docs/dev/todo/2026-10-24-claude-agent-tab-shares-session-hooks.md`](../../dev/todo/2026-10-24-claude-agent-tab-shares-session-hooks.md).
 
+## tmux terminals
+
+A started terminal can attach to a **tmux session already running on the session's host**, on the
+tmux server of the **session's OS user** — the sessions that user started in their own terminals.
+
+- **`ListTmuxSessions(session_token, session_id)`** lists them: name, window count, attached-client
+  count. The daemon runs `tmux list-sessions -F '#{session_name}\t#{session_windows}\t#{session_attached}'`
+  as the OS user the token maps to. No tmux server running answers an **empty list**; a tmux that
+  cannot be found or run answers `FAILED_PRECONDITION` naming tmux.
+- **`StartTerminalSession`** with `kind = "tmux"` and `tmux_session = <name>` (field 5) starts
+  `tmux -T clipboard attach-session -t =<name>` in the session's worktree, **as the session's OS
+  user** — the same spawn path, and the same privilege drop, the main agent PTY uses. `=` makes tmux
+  match the name exactly; `-T clipboard` is a per-client feature telling tmux this client accepts
+  OSC 52, so tmux copy-mode copies are forwarded to the browser. **No tmux option on the user's
+  server is changed.**
+- **`ListTerminalSessions`** lists the tab with kind `"tmux"` and `TerminalSessionInfo.tmux_session`
+  (field 4) naming the tmux session, so every viewer labels it the same.
+- **`StopTerminalSession`** ends the tab's tmux client only, which **detaches** it: the tmux session
+  keeps running, with one attached client fewer, and can be attached again from tddy or any terminal.
+
+The tmux binary is `TDDY_TMUX_BINARY` when set and non-empty, else `tmux` on the daemon's `PATH`. The
+listing inherits the daemon's environment, so the daemon's own `TMUX_TMPDIR` decides which socket
+directory tmux reads.
+
+Refusals, all before anything spawns:
+
+| Request | Status |
+|---|---|
+| `kind = "tmux"` with an empty `tmux_session` | `INVALID_ARGUMENT` |
+| a daemon that cannot become the session's OS user (not root, another user) | `FAILED_PRECONDITION` with the kernel's `CannotBecomeUser` message naming both accounts — the tab is **never** started as the daemon user |
+| a name tmux does not list for that user | `NOT_FOUND` |
+| tmux not installed | `FAILED_PRECONDITION` naming tmux |
+| a **room-backed** (tddy-coder) session — `ListTmuxSessions` or a `tmux` kind | `FAILED_PRECONDITION` "this session's terminals run bash only; tmux is not offered here" |
+
+A tmux tab on a stopped session starts in the worktree the session's record names, as every other
+tab does. Like the other tabs it is not persisted across a daemon restart — but the tmux session it
+attached to is the user's and survives, so it can simply be attached again.
+
+Known limitation: the listing drops privilege through the kernel's `run_output_as_user`, the tab
+through the PTY runtime's `setpriv` wrapper; on a host where only one of them works, the menu can list
+sessions the tab cannot attach to — see
+[`docs/dev/todo/2026-11-02-tmux-listing-and-tab-use-two-privilege-drops.md`](../../dev/todo/2026-11-02-tmux-listing-and-tab-use-two-privilege-drops.md).
+
 ## Terminal Control Ownership (Single-Screen Mutex)
 
 > **Updated: 2026-06-26** — Extends the multi-tool RPC surface with a per-session control mutex
@@ -514,8 +557,8 @@ relay exits with it rather than waiting for a participant nobody put there. See
 
 ### Registry & identity
 `ClaudeCliSessionManager`'s registry becomes two-level: `session_id → (terminal_id → PtyHandle)`.
-`PtyHandle` carries `terminal_id` and `kind` (the main tool's session type, `"bash"`, or an agent
-terminal's harness session type). The main `claude`
+`PtyHandle` carries `terminal_id` and `kind` (the main tool's session type, `"bash"`, an agent
+terminal's harness session type, or `"tmux"`), and `tmux_session` for a tmux terminal. The main `claude`
 tool is inserted under the reserved id `MAIN_TERMINAL_ID = "main"`; `get(session_id)` remains a
 convenience that returns the `"main"` tool so existing call sites are unchanged. The PTY
 exit-monitor removes the tool by `(session_id, terminal_id)`.
@@ -528,16 +571,19 @@ threading, capture, and cleanup. The Bash tool's shell is resolved by
 `shell_path` argument (no test-only branches) and labels the instance kind `"bash"`. An agent
 terminal's argv is built by the daemon's terminal roster from the harness descriptor and spawned by
 `CliSessionManager::start_agent_terminal` under the harness's session type as its kind. Neither takes
-per-start inputs.
+per-start inputs. A tmux terminal's attach argv is built by the roster too (`tmux_host`) and spawned by
+`CliSessionManager::start_tmux_terminal` with `os_user: Some(_)` — the only started tab that runs as
+the session's OS user rather than the daemon user.
 
 ### Lifecycle
 `StopTerminalSession` signals the tool's pid (reusing the SIGTERM/SIGKILL helper used by session
 deletion) and removes the registry entry; this is idempotent with the exit-monitor's own removal.
 
 ### RPC surface (`terminal_session.TerminalSessionService`)
-All nine terminal methods answer at this coordinate: the three lifecycle methods
+All ten terminal methods answer at this coordinate: the three lifecycle methods
 `StartTerminalSession` / `StopTerminalSession` / `ListTerminalSessions` (terminal-named for
-continuity; each operates on a tool instance), the four I/O methods, and the two control methods.
+continuity; each operates on a tool instance), `ListTmuxSessions`, the four I/O methods, and the two
+control methods.
 Every I/O message carries an optional `terminal_id`, empty resolving to `"main"`.
 
 A client reaches it at the same endpoints as every other service the daemon registers — `/rpc` over

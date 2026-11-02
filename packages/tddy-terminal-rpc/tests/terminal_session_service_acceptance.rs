@@ -230,6 +230,7 @@ async fn start_terminal_session_hands_the_roster_the_requested_agent_kind() {
         vec![TerminalLaunch {
             kind: TerminalKind::Agent("warp-cli".to_string()),
             login_shell: login_shell_for(OS_USER),
+            os_user: OS_USER.to_string(),
         }]
     );
 }
@@ -249,6 +250,7 @@ async fn a_start_without_a_kind_hands_the_roster_the_login_shell() {
         vec![TerminalLaunch {
             kind: TerminalKind::Bash,
             login_shell: login_shell_for(OS_USER),
+            os_user: OS_USER.to_string(),
         }]
     );
 }
@@ -269,6 +271,7 @@ async fn a_start_naming_bash_hands_the_roster_the_login_shell() {
         vec![TerminalLaunch {
             kind: TerminalKind::Bash,
             login_shell: login_shell_for(OS_USER),
+            os_user: OS_USER.to_string(),
         }]
     );
 }

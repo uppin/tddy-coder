@@ -19,6 +19,16 @@ The argv of every spawn comes from the [CLI harness registry](../../tddy-agent-b
 spawns any registered harness, its route's arguments (`args`) after the descriptor's argv and its route's
 environment (`env`) on the child.
 
+## tmux terminals
+
+`start_tmux_terminal(session_id, worktree, os_user, argv, tmux_session)` (`terminals.rs`) spawns a
+tmux client — the argv the daemon's roster built — through `spawn_tool` with `os_user: Some(_)`, so it
+runs as the session's OS user and reaches that user's own tmux server. It is the only started terminal
+that is not the daemon user. Its kind is `"tmux"` (`tddy_terminal_rpc::service::TMUX_KIND`), and the
+tmux session name is recorded on `PtyHandle::tmux_session` and on the terminal's index entry, so a
+listing — or a handle rebuilt from the index — still names it. Stopping it ends the client, which
+detaches it.
+
 ## Exit hooks
 
 `on_exit: Option<ExitHook>` is work to finish once the process has exited. `ExitHook`

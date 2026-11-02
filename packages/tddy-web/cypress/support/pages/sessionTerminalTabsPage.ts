@@ -52,6 +52,18 @@ export const sessionTerminalTabsPage = {
   paneStack: (sessionId: string, options?: Parameters<typeof cy.get>[1]) =>
     byTestId(sessionsTerminalPaneStack(sessionId), { timeout: 10000, ...options }),
 
+  /** The "+" menu's item attaching a tab to the host's tmux session `name`. */
+  tmuxOption: (name: string, options?: Parameters<typeof cy.get>[1]) =>
+    byTestId(`sessions-terminal-tab-new-tmux-${name}`, { timeout: 10000, ...options }),
+
+  /** The "+" menu's tmux section when the host runs no tmux sessions. */
+  tmuxEmpty: (options?: Parameters<typeof cy.get>[1]) =>
+    byTestId("sessions-terminal-tab-new-tmux-empty", { timeout: 10000, ...options }),
+
+  /** The "+" menu's tmux section when the host cannot list tmux sessions. */
+  tmuxError: (options?: Parameters<typeof cy.get>[1]) =>
+    byTestId("sessions-terminal-tab-new-tmux-error", { timeout: 10000, ...options }),
+
   /** A single bash terminal tab, keyed by terminal id. */
   tab: (terminalId: string, options?: Parameters<typeof cy.get>[1]) =>
     byTestId(sessionsTerminalTab(terminalId), { timeout: 10000, ...options }),

@@ -8,6 +8,8 @@ use super::MAIN_TERMINAL_ID;
 
 use super::pty_handle;
 
+use tddy_terminal_rpc::service::TMUX_KIND;
+
 use std::sync::Arc;
 
 impl CliSessionManager {
@@ -39,6 +41,7 @@ impl CliSessionManager {
             Vec::new(),
             None,
             None,
+            None,
         )
         .await
     }
@@ -65,6 +68,36 @@ impl CliSessionManager {
             None,
             // A tab's exit is never recorded: it carries no resume token of its own.
             None,
+            None,
+        )
+        .await
+    }
+
+    /// Start a **tmux terminal** attached to `session_id`: `argv` (a tmux client attaching to, or
+    /// creating, `tmux_session`) in `worktree_path`, run **as `os_user`** so it reaches that user's
+    /// own tmux server. Returns the new handle with a fresh `terminal_id`, kind `"tmux"`, and
+    /// `tmux_session` recorded so a listing can name it. Stopping it ends the client only, which
+    /// detaches it.
+    pub async fn start_tmux_terminal(
+        &self,
+        session_id: &str,
+        worktree_path: PathBuf,
+        os_user: &str,
+        argv: Vec<String>,
+        tmux_session: &str,
+    ) -> anyhow::Result<Arc<pty_handle::PtyHandle>> {
+        let terminal_id = uuid::Uuid::now_v7().to_string();
+        self.spawn_tool(
+            session_id,
+            &terminal_id,
+            TMUX_KIND,
+            worktree_path,
+            "",
+            argv,
+            Vec::new(),
+            Some(os_user),
+            None,
+            Some(tmux_session),
         )
         .await
     }
