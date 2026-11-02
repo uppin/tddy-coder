@@ -13,4 +13,6 @@ pub mod runtime;
 pub use bytes::{self, Bytes};
 pub use registry::{PtyControl, PtyRegistry};
 pub use resize::strip_resize;
-pub use runtime::{PtyReady, PtyRuntime, PtySpawnSpec, DEFAULT_TERM_COLS, DEFAULT_TERM_ROWS};
+pub use runtime::{
+    PtyExitHook, PtyReady, PtyRuntime, PtySpawnSpec, DEFAULT_TERM_COLS, DEFAULT_TERM_ROWS,
+};

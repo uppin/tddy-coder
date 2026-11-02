@@ -281,6 +281,16 @@ pub(crate) async fn spawn_claude_cli_session_inner(
     )
     .await?;
     progress.end_phase(StartStep::Agent);
+    // The main terminal's history outlives its process: recorded while it runs, and at its exit.
+    claude_cli_manager
+        .record_main_capture(
+            session_id,
+            tddy_cli_sessions::cli_session_manager::main_capture_recording_path(
+                tddy_data_dir,
+                session_id,
+            ),
+        )
+        .await;
 
     let pid = handle.pid;
 

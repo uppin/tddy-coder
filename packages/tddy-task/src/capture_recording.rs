@@ -11,6 +11,7 @@ use std::fs::{self, OpenOptions};
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::time::Duration;
 
 use crate::terminal_capture::{forward_chunk, CaptureChunk, TerminalCapture};
 
@@ -19,6 +20,10 @@ const MAGIC: [u8; 8] = *b"TDDYCAP\0";
 
 /// The layout this build writes and reads. A file written at another version is refused.
 const VERSION: u32 = 1;
+
+/// How often a running terminal's capture is rewritten to its recording — what a daemon crash can
+/// lose at most. One value for every recorder, jailed or not.
+pub const RECORDING_INTERVAL: Duration = Duration::from_secs(30);
 
 /// The retained window of a terminal's output, with its absolute offsets in the cumulative stream.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -66,6 +71,10 @@ impl CaptureRecording {
     /// The temporary file sits beside `path`, so the rename never crosses a filesystem. A write that
     /// fails leaves `path` as it was and no temporary file behind.
     pub fn write_atomically(&self, path: &Path) -> io::Result<()> {
+        // A session's `terminals/` directory exists only once something is recorded into it.
+        if let Some(parent) = path.parent() {
+            fs::create_dir_all(parent)?;
+        }
         let temporary = temporary_beside(path);
         let mut file = OpenOptions::new()
             .write(true)

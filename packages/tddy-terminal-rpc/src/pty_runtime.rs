@@ -67,6 +67,18 @@ impl PtyRuntime {
         spec: PtySpawnSpec,
         ready_tx: oneshot::Sender<Result<PtyReady, String>>,
     ) -> Arc<TaskHandle> {
+        Self::spawn_with_exit_hook(registry, pty_registry, spec, ready_tx, None).await
+    }
+
+    /// [`spawn`](Self::spawn), running `exit_hook` when the process has exited, before the terminal
+    /// leaves the PTY registry (see [`tddy_pty::PtyExitHook`]).
+    pub async fn spawn_with_exit_hook(
+        registry: &TaskRegistry,
+        pty_registry: &PtyRegistry,
+        spec: PtySpawnSpec,
+        ready_tx: oneshot::Sender<Result<PtyReady, String>>,
+        exit_hook: Option<tddy_pty::PtyExitHook>,
+    ) -> Arc<TaskHandle> {
         match resolve_final_argv_env(&spec) {
             Ok((argv, env)) => {
                 let core = tddy_pty::PtySpawnSpec {
@@ -77,7 +89,14 @@ impl PtyRuntime {
                     kind: spec.kind,
                     env,
                 };
-                tddy_pty::PtyRuntime::spawn(registry, pty_registry, core, ready_tx).await
+                tddy_pty::PtyRuntime::spawn_with_exit_hook(
+                    registry,
+                    pty_registry,
+                    core,
+                    ready_tx,
+                    exit_hook,
+                )
+                .await
             }
             Err(msg) => {
                 let _ = ready_tx.send(Err(msg.clone()));

@@ -175,7 +175,9 @@ mod pty_spawn;
 pub use pty_spawn::ExitHook;
 
 mod capture_recorder;
-pub use capture_recorder::RECORDING_INTERVAL;
+pub use capture_recorder::{
+    main_capture_recording_path, MAIN_CAPTURE_RECORDING, RECORDING_INTERVAL,
+};
 
 // ---------------------------------------------------------------------------
 // Resize escape parsing

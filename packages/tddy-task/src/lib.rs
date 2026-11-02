@@ -14,7 +14,7 @@ mod screen_dump;
 pub mod task;
 pub mod terminal_capture;
 
-pub use capture_recording::CaptureRecording;
+pub use capture_recording::{CaptureRecording, RECORDING_INTERVAL};
 pub use idle::IdleTimeoutTracker;
 pub use registry::{TaskRegistry, TaskRegistryEvent};
 pub use task::{

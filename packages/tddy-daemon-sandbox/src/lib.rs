@@ -37,6 +37,7 @@
 
 pub mod action_service;
 mod conversation_tool;
+mod main_recording;
 pub mod sandbox_action;
 pub mod sandbox_plan_builder;
 pub mod sandbox_runtime;

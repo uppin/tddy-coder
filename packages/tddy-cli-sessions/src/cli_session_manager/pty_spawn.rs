@@ -61,7 +61,32 @@ impl CliSessionManager {
             os_user: os_user.map(str::to_string),
         };
 
-        let task = PtyRuntime::spawn(&self.task_registry, &self.pty_registry, spec, ready_tx).await;
+        // The main terminal's recording is finished by the PTY runtime itself, before the terminal
+        // leaves the PTY registry: a stopped main must answer history from its recording the moment
+        // it can no longer be found running.
+        let recording_hook = (terminal_id == MAIN_TERMINAL_ID).then(|| {
+            let main_recordings = Arc::clone(&self.main_recordings);
+            let session_id = session_id.to_string();
+            let hook: tddy_pty::PtyExitHook = Box::new(move |task_id| {
+                Box::pin(async move {
+                    super::capture_recorder::finish_main_recording(
+                        &main_recordings,
+                        &session_id,
+                        &task_id,
+                    )
+                    .await;
+                })
+            });
+            hook
+        });
+        let task = PtyRuntime::spawn_with_exit_hook(
+            &self.task_registry,
+            &self.pty_registry,
+            spec,
+            ready_tx,
+            recording_hook,
+        )
+        .await;
 
         let ready = ready_rx
             .await
@@ -169,7 +194,6 @@ impl CliSessionManager {
         let exit_settlements = Arc::clone(&self.exit_settlements);
         let managed_workflows = Arc::clone(&self.managed_workflows);
         let exposed_terminals = Arc::clone(&self.exposed_terminals);
-        let main_recordings = Arc::clone(&self.main_recordings);
         let task_registry = self.task_registry.clone();
         tokio::spawn(async move {
             let task = match task_registry.get(&task_id).await {
@@ -184,16 +208,6 @@ impl CliSessionManager {
                 if status_rx.changed().await.is_err() {
                     break;
                 }
-            }
-            // The recording's last snapshot is the terminal's last output, and it is written before
-            // the terminal leaves the index.
-            if terminal_id == MAIN_TERMINAL_ID {
-                super::capture_recorder::finish_main_recording(
-                    &main_recordings,
-                    &session_id,
-                    &task_id,
-                )
-                .await;
             }
             // The process has exited and its output is complete. The hook finishes before the
             // terminal leaves the index, and before a waiting resume goes on.

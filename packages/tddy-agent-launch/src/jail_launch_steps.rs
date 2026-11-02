@@ -27,6 +27,20 @@ use crate::session_acting_identity::{RelayUser, SessionIdentity, SharedGithubCre
 pub(crate) type JailRelayIdentity = (Vec<(String, String)>, Option<SharedGithubCredential>);
 
 impl LaunchSessions {
+    /// Records the jailed `main` terminal of `session_id`, whose sandbox state was just registered:
+    /// its history outlives the jail (see `SandboxSessionManager::record_main_capture`).
+    pub(crate) async fn record_jailed_main(&self, session_id: &str) {
+        self.sandbox_manager
+            .record_main_capture(
+                session_id,
+                tddy_cli_sessions::cli_session_manager::main_capture_recording_path(
+                    &self.tddy_data_dir,
+                    session_id,
+                ),
+            )
+            .await;
+    }
+
     /// What a jail's host-side relay runs its commands under, and the handler its tools' token
     /// requests are answered by, for a session of `os_user`.
     ///
@@ -278,6 +292,7 @@ impl LaunchSessions {
         self.sandbox_manager
             .insert(session_id.to_string(), state)
             .await;
+        self.record_jailed_main(session_id).await;
         Ok(pid)
     }
 }

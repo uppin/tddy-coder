@@ -142,6 +142,15 @@ impl LaunchSessions {
         if let Some(mw) = managed {
             manager.attach_managed_workflow(&session_id_owned, mw).await;
         }
+        manager
+            .record_main_capture(
+                &session_id_owned,
+                tddy_cli_sessions::cli_session_manager::main_capture_recording_path(
+                    &self.tddy_data_dir,
+                    &session_id_owned,
+                ),
+            )
+            .await;
 
         let pid = handle.pid;
 

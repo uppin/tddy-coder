@@ -6,7 +6,7 @@
 //! the recording always ends with the last thing the agent printed.
 
 use std::collections::HashMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -15,8 +15,18 @@ use tokio::sync::{Mutex, RwLock};
 
 use super::{CliSessionManager, TerminalIndex, MAIN_TERMINAL_ID};
 
-/// How often a running `main` terminal's capture is rewritten to its recording.
-pub const RECORDING_INTERVAL: Duration = Duration::from_secs(30);
+pub use tddy_task::RECORDING_INTERVAL;
+
+/// Where, relative to a session directory, its `main` terminal is recorded.
+pub const MAIN_CAPTURE_RECORDING: &str = "terminals/main.capture";
+
+/// The recording of `session_id`'s `main` terminal under `tddy_data_dir`:
+/// `<tddy_data_dir>/sessions/<id>/terminals/main.capture`.
+#[must_use]
+pub fn main_capture_recording_path(tddy_data_dir: &Path, session_id: &str) -> PathBuf {
+    tddy_core::session_lifecycle::unified_session_dir_path(tddy_data_dir, session_id)
+        .join(MAIN_CAPTURE_RECORDING)
+}
 
 /// The sessions whose `main` terminal is recorded: `session_id → recording`.
 pub(crate) type MainRecordings = Arc<RwLock<HashMap<String, Arc<MainRecording>>>>;
