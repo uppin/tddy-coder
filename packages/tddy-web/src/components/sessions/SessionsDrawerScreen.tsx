@@ -37,6 +37,8 @@ import { useSessionsDrawerActivation } from "./useSessionsDrawerActivation";
 import { useSessionsDrawerDeleteSelection } from "./useSessionsDrawerDeleteSelection";
 import { SessionsDrawerOpenListButton, SessionsDrawerUnknownSession } from "./SessionsDrawerScreenParts";
 import { useSessionsDrawerPaneActions } from "./useSessionsDrawerPaneActions";
+import { useResumedSessionLiveness } from "./useResumedSessionLiveness";
+import { withResumedLiveness } from "./useResumedSessions";
 import {
   SessionsDrawerLoadNotices,
   SessionsDrawerPaneError,
@@ -193,7 +195,16 @@ export function SessionsDrawerScreen({
   // cross-host rows, and every "not connected" this screen says.
   const hostLabelForInstance = useHostLabel();
 
-  const { paneError, reportAttachFailure, handleResume, handleDelete, handleTerminate } =
+  // A successful resume reads the session as live until the listing says so — the Agent tab goes live
+  // at once rather than at the next poll. Only the pane reads the hint; the activation and liveness
+  // effects above keep working from the listing.
+  const { resumed, markSessionResumed } = useResumedSessionLiveness(sortedSessions);
+  const liveSelectedSession = useMemo(
+    () => (selectedSession ? withResumedLiveness(resumed, selectedSession) : null),
+    [resumed, selectedSession],
+  );
+
+  const { paneError, reportAttachFailure, handleResume, resume, handleDelete, handleTerminate } =
     useSessionsDrawerPaneActions({
       selectedSession,
       selectedSessionId,
@@ -204,6 +215,7 @@ export function SessionsDrawerScreen({
       sessionToken,
       attachClaimRef,
       listGeneration,
+      onResumed: markSessionResumed,
     });
 
   // Key-press shortcuts for the connected session's tool (shown as the mobile overlay).
@@ -411,7 +423,7 @@ export function SessionsDrawerScreen({
             <SessionsDrawerUnknownSession onHome={handleUnknownHome} />
           ) : (
             <SessionMainPane
-              selectedSession={selectedSession}
+              selectedSession={liveSelectedSession}
               attachment={attachment}
               attachmentHint={attachmentHint}
               inspectorState={inspectorState}
@@ -420,6 +432,7 @@ export function SessionsDrawerScreen({
               onInspectorExpand={handleInspectorExpand}
               onInspectorRestore={handleInspectorRestore}
               onResume={handleResume}
+              onResumeSession={resume}
               onDelete={handleDelete}
               onTerminate={handleTerminate}
               isCreating={mode === "creating"}

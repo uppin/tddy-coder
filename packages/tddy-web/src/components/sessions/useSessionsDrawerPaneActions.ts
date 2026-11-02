@@ -27,6 +27,8 @@ export interface SessionsDrawerPaneActionsOptions {
   attachClaimRef: MutableRefObject<AttachClaim | null>;
   /** The list snapshot the operator is acting on — stamped on the claim a resume takes. */
   listGeneration: number;
+  /** Called once a resume has landed, so the session reads as live before the next listing. */
+  onResumed: (sessionId: string) => void;
 }
 
 export interface SessionsDrawerPaneActions {
@@ -34,7 +36,10 @@ export interface SessionsDrawerPaneActions {
   readonly paneError: string | null;
   /** Record an attach that failed — or could not be attempted — as the pane's failure. */
   readonly reportAttachFailure: (error: unknown) => void;
+  /** Resume `sessionId` and say nothing of a failure: the pane's error shows it. */
   readonly handleResume: (sessionId: string) => void;
+  /** Resume `sessionId`. Resolves once it is attached; rejects with why it did not land. */
+  readonly resume: (sessionId: string) => Promise<void>;
   readonly handleDelete: (sessionId: string) => void;
   readonly handleTerminate: (sessionId: string) => void;
 }
@@ -57,6 +62,7 @@ export function useSessionsDrawerPaneActions({
   sessionToken,
   attachClaimRef,
   listGeneration,
+  onResumed,
 }: SessionsDrawerPaneActionsOptions): SessionsDrawerPaneActions {
   const { state, resumeSession, deleteSession, signalSession } = attachment;
   const hostLabel = useHostLabel();
@@ -80,11 +86,14 @@ export function useSessionsDrawerPaneActions({
     if (state.status === "connected") clearPaneFailure();
   }, [state.status, clearPaneFailure]);
 
-  const handleResume = (sessionId: string) => {
+  // The one Resume action: the top bar's and the Agent tab's toast both call it. Resolves once the
+  // session is attached; rejects with why the resume did not land, which the toast shows.
+  const resume = async (sessionId: string): Promise<void> => {
     clearPaneFailure();
     if (!activeHost) {
-      reportPaneFailure(actionFailed("Resume", hostNotConnected(owningHostLabel())));
-      return;
+      const failure = actionFailed("Resume", hostNotConnected(owningHostLabel()));
+      reportPaneFailure(failure);
+      throw failure;
     }
     // `ResumeSession` returns the session's routing and `useSessionAttachment` puts the screen
     // straight into `connected` — the attach for this live epoch is already done.
@@ -93,12 +102,21 @@ export function useSessionsDrawerPaneActions({
     // terminal through a reconnect and another `ClaimTerminalControl`. The claim is stamped with the
     // snapshot the operator acted on, so the dormant readings still in flight cannot revoke it.
     attachClaimRef.current = { sessionId, listGeneration };
-    // `resumeSession` never rejects: a refused resume is the attachment's `error` state, shown below.
-    void resumeSession(sessionId, sessionToken, activeHost).then((attached) => {
+    const failure = await resumeSession(sessionId, sessionToken, activeHost);
+    if (failure !== null) {
       // The resume never landed, so no attach was taken after all — release the claim so the
       // liveness effect can still attach if the session turns out to be alive.
-      if (!attached) attachClaimRef.current = null;
-    });
+      attachClaimRef.current = null;
+      throw new Error(`Resume failed: ${failure}`);
+    }
+    onResumed(sessionId);
+  };
+
+  // The top bar's and the inspector's Resume. Its failure is already the pane's error (`paneError`:
+  // the attachment's `error` state, or the host-not-connected report `resume` makes), so the
+  // rejection has nothing further to say.
+  const handleResume = (sessionId: string) => {
+    void resume(sessionId).catch(() => undefined);
   };
 
   const handleDelete = (sessionId: string) => {
@@ -130,5 +148,5 @@ export function useSessionsDrawerPaneActions({
 
   const paneError = paneFailure.error ?? (state.status === "error" ? state.error : null);
 
-  return { paneError, reportAttachFailure, handleResume, handleDelete, handleTerminate };
+  return { paneError, reportAttachFailure, handleResume, resume, handleDelete, handleTerminate };
 }

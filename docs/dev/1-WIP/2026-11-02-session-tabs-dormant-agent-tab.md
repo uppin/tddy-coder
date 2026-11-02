@@ -180,6 +180,9 @@ Recorded at the contract commit (2026-11-02), scoped to `tddy-web`:
 
 ## Refactoring Needed
 ### From /red (TDD red phase)
+### From /green (TDD green phase)
+- **Open decision: the stopped session's Agent tab no longer hosts the transcript.** The Agent-tab slot now holds `DormantAgentTerminal` (this changeset's Delta). Two n1 acceptance specs still pin the transcript there, and they pass at the contract commit and fail with this change: `DormantSessionTabsAcceptance` ("a stopped session shows its tab strip with the recorded transcript in the Agent tab") and eight `InactiveSessionActivitiesAcceptance` cases (default view, empty state, pending count, return to terminal, re-attach, one transcript per pane). They encode State A. The developer must decide whether to rewrite them to State B and where the recorded transcript stays reachable: nothing mounts `SessionActivitiesPane` now, and the activity sidebar stays suppressed for an activities-mode session.
+- `SessionMainPane` takes a new required prop, `onResumeSession`. Fifteen Cypress component mount sites that spread an untyped handler set no longer type-check (they run unchanged); add the prop when those specs are reconciled.
 ### From /validate-changes
 ### From /validate-tests
 ### From /validate-prod-ready
