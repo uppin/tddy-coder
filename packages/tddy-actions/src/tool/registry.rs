@@ -87,7 +87,15 @@ impl ToolRegistry {
         for dep in &def.deps {
             self.visit(dep, host, visited, closure)?;
         }
-        closure.push(resolve_tool(def, host)?);
+        let resolved = resolve_tool(def, host)?;
+        if let Some(first) = closure.iter().find(|t| t.command == resolved.command) {
+            return Err(ToolError::DuplicateCommand {
+                command: resolved.command,
+                first: first.id.clone(),
+                second: resolved.id,
+            });
+        }
+        closure.push(resolved);
         Ok(())
     }
 

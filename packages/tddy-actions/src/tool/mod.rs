@@ -1,6 +1,6 @@
 //! Declared tools — a tool is a YAML definition of an executable and what it needs.
 //!
-//! PRD: `docs/ft/coder/1-WIP/PRD-2026-10-31-declared-tools.md` (`#agent-tools 1/12`).
+//! PRD: `docs/ft/coder/sandbox-builder.md` § Declared tools (`#agent-tools 1/12`).
 //!
 //! The Bazel split: a **tool** ([`ToolDef`]) is *what an executable is* — how its binary is found
 //! on the host, which other tools it depends on, and which host paths it needs readable. An

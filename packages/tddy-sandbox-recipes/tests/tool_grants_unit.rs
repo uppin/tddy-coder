@@ -1,7 +1,7 @@
 //! Unit: lowering resolved tools into jail grants — the binary as a file, the loader's reads, and
 //! a jail-local `bin/` on `PATH`.
 //!
-//! PRD: `docs/ft/coder/1-WIP/PRD-2026-10-31-declared-tools.md` (`#agent-tools 1/12`).
+//! PRD: `docs/ft/coder/sandbox-builder.md` § Declared tools (`#agent-tools 1/12`).
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};

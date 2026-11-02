@@ -1,8 +1,8 @@
 //! Acceptance: a workspace jail runs its declared tools — `rg` today — as the binary file the
 //! registry resolves, reachable by name, and refuses to start when the host cannot satisfy one.
 //!
-//! PRD: `docs/ft/coder/1-WIP/PRD-2026-10-31-declared-tools.md` (`#agent-tools 1/12`); replaces the
-//! `host_ripgrep_grants` patch (`docs/dev/todo/2026-09-26-grep-is-unreachable-inside-every-jail.md`).
+//! PRD: `docs/ft/coder/sandbox-builder.md` § Declared tools (`#agent-tools 1/12`); replaces the
+//! `host_ripgrep_grants` patch.
 //!
 //! The two Seatbelt tests run on a developer's Mac only: every CI job is `ubuntu-*`, the same gap
 //! `docs/dev/todo/2026-09-12-the-in-jail-conversation-suite-runs-nowhere.md` records. They are the
@@ -265,15 +265,28 @@ mod under_seatbelt {
         );
         let plan = a_plan_for(&session, provisioner.resolve_jail_tools().unwrap());
 
-        // When
+        // When — the granted `rg` by name, and its sibling by path, in the same jail
+        let rg = run_in_jail(&plan, &session.session_dir, &["rg", "--version"]);
         let sibling = run_in_jail(
             &plan,
             &session.session_dir,
             &[bin_dir.join("sibling").to_str().unwrap(), "escaped"],
         );
 
-        // Then — the jail never runs it
+        // Then — the jail and the directory work for `rg`
+        assert!(
+            rg.status.success() && String::from_utf8_lossy(&rg.stdout).starts_with("ripgrep "),
+            "rg --version in the jail: stdout {:?}, stderr {:?}",
+            String::from_utf8_lossy(&rg.stdout),
+            String::from_utf8_lossy(&rg.stderr)
+        );
+        // Then — the sibling is refused by Seatbelt, not missing or failing some other way
         assert_eq!(String::from_utf8_lossy(&sibling.stdout), "");
         assert!(!sibling.status.success());
+        let stderr = String::from_utf8_lossy(&sibling.stderr);
+        assert!(
+            stderr.contains("Operation not permitted"),
+            "expected a Seatbelt denial for the sibling, got stderr {stderr:?}"
+        );
     }
 }

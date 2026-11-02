@@ -1,6 +1,6 @@
 //! Lowering resolved tools into jail grants.
 //!
-//! PRD: `docs/ft/coder/1-WIP/PRD-2026-10-31-declared-tools.md` (`#agent-tools 1/12`).
+//! PRD: `docs/ft/coder/sandbox-builder.md` § Declared tools (`#agent-tools 1/12`).
 //!
 //! A [`ResolvedTool`] says which file a tool's binary is. A jail needs three things to run it, and
 //! this module produces all three for a whole tool set:

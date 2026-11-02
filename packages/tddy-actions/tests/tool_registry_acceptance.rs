@@ -1,7 +1,7 @@
 //! Acceptance: the declared-tool registry — built-ins, `<tddyhome>/tools` overrides, and the
 //! refusals that keep a bad tool file from ever reaching a jail.
 //!
-//! PRD: `docs/ft/coder/1-WIP/PRD-2026-10-31-declared-tools.md` (`#agent-tools 1/12`).
+//! PRD: `docs/ft/coder/sandbox-builder.md` § Declared tools (`#agent-tools 1/12`).
 
 mod support;
 

@@ -233,6 +233,13 @@ tools directly on the host worktree.
    between the two outcomes exists for exactly one decision — whether to rebuild — and for no
    other.
 
+9. **`Grep` runs a declared tool.** At each jail start, before the jail tree is created, the
+   provisioner loads the built-in tools plus `<tddyhome>/tools` and resolves `rg` against the
+   daemon's process. A bad tool file, or a host that cannot resolve `rg`, refuses the jail as an
+   invalid spec naming the tool and what was searched — `Grep` never fails per call with
+   `spawn failed`. The jail gets `rg` as one executable file on a jail-local `PATH` entry, not its
+   directory. See [Sandbox builder § Declared tools](../coder/sandbox-builder.md#declared-tools).
+
 **What the retry can cost, stated plainly.** A transport failure says the *answer* did not come
 back; it does not say the tool did not run. A mutating call retried in a rebuilt jail can therefore
 execute twice. That is an accepted risk rather than an oversight, recorded in

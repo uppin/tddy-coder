@@ -28,6 +28,7 @@ impl ToolHost for ProcessToolHost {
 
     /// Relative and empty `PATH` entries are dropped. They name the daemon's working directory, and
     /// no jail should be granted a binary from wherever the daemon happened to start.
+    /// An unset `PATH` is an empty search, which refuses the tool — it never falls back to a grant.
     fn path_dirs(&self) -> Vec<PathBuf> {
         std::env::var_os("PATH")
             .map(|path| {
@@ -98,7 +99,11 @@ fn locate_binary(def: &ToolDef, host: &dyn ToolHost) -> Result<PathBuf, ToolErro
             return canonical(def, &candidate, host);
         }
     }
-    searched.push(format!("PATH ({})", join_dirs(&dirs)));
+    if dirs.is_empty() {
+        searched.push("PATH (empty)".to_string());
+    } else {
+        searched.push(format!("PATH ({})", join_dirs(&dirs)));
+    }
     Err(unresolvable(def, searched.join(", ")))
 }
 

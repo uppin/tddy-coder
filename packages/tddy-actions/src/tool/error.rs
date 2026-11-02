@@ -28,6 +28,13 @@ pub enum ToolError {
     /// The host cannot satisfy the tool's binary. `searched` says where it looked.
     #[error("tool {tool} is unavailable: searched {searched}")]
     Unresolvable { tool: String, searched: String },
+    /// Two tools of one closure put the same command on the jail's `PATH`; one would shadow the other.
+    #[error("tools {first} and {second} both provide the command {command}")]
+    DuplicateCommand {
+        command: String,
+        first: String,
+        second: String,
+    },
     /// The overrides directory exists but could not be read.
     #[error("tool directory {}: {message}", dir.display())]
     Io { dir: PathBuf, message: String },

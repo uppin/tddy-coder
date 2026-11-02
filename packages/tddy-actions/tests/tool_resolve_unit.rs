@@ -1,7 +1,7 @@
 //! Resolving declared tools against a host: the `env` override, the `PATH` search, symlink
 //! canonicalization, and the dep closure — on a fixture host, so nothing depends on this machine.
 //!
-//! PRD: `docs/ft/coder/1-WIP/PRD-2026-10-31-declared-tools.md` (`#agent-tools 1/12`).
+//! PRD: `docs/ft/coder/sandbox-builder.md` § Declared tools (`#agent-tools 1/12`).
 
 mod support;
 
@@ -150,4 +150,50 @@ fn resolving_an_unknown_id_is_refused() {
 
     // Then
     assert_eq!(refused, ToolError::UnknownTool("jq".into()));
+}
+
+#[test]
+fn two_tools_in_one_closure_with_one_command_are_refused_naming_both_ids() {
+    // Given — `wrapper` deps on `grep-a`, and both put `grep` on the jail's PATH
+    let tools = a_tools_dir()
+        .with_file("grep-a.yaml", &a_tool_yaml("grep-a", "grep", &[]))
+        .with_file("wrapper.yaml", &a_tool_yaml("wrapper", "grep", &["grep-a"]));
+    let registry = a_registry_with(&tools);
+    let host = a_host()
+        .with_path(&["/usr/bin"])
+        .with_executable("/usr/bin/grep");
+
+    // When
+    let err = registry.resolve_closure(&["wrapper"], &host).unwrap_err();
+
+    // Then
+    assert_eq!(
+        err,
+        ToolError::DuplicateCommand {
+            command: "grep".into(),
+            first: "grep-a".into(),
+            second: "wrapper".into(),
+        }
+    );
+    assert_eq!(
+        err.to_string(),
+        "tools grep-a and wrapper both provide the command grep"
+    );
+}
+
+#[test]
+fn an_empty_path_search_says_path_is_empty() {
+    // Given — no PATH directories at all
+    let registry = ToolRegistry::builtin().unwrap();
+    let host = a_host();
+
+    // When
+    let err = registry.resolve_closure(&["rg"], &host).unwrap_err();
+
+    // Then — still refused; the search names an empty PATH, not `PATH ()`
+    let ToolError::Unresolvable { tool, searched } = err else {
+        panic!("expected Unresolvable, got {err:?}");
+    };
+    assert_eq!(tool, "rg");
+    assert!(searched.ends_with("PATH (empty)"), "searched: {searched}");
 }
