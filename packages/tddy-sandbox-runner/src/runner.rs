@@ -1255,7 +1255,7 @@ fn spawn_generic_pty(
 pub(crate) fn run_claude_pty_thread(
     argv: Vec<String>,
     cwd: PathBuf,
-    egress_shim: String,
+    egress_shim: Option<String>,
     relay: Arc<SandboxSessionRelay>,
     stdin_rx: std::sync::mpsc::Receiver<Bytes>,
     initial_cols: u16,
@@ -1289,14 +1289,17 @@ pub(crate) fn run_claude_pty_thread(
     }
     cmd.cwd(&cwd);
     cmd.env("TERM", "xterm-256color");
-    cmd.env("TDDY_EGRESS_SHIM", &egress_shim);
     // Route the agent's outbound HTTPS through the in-jail CONNECT proxy (the egress shim).
     // claude honors HTTPS_PROXY and issues `CONNECT api.anthropic.com:443`, which the shim
     // tunnels to the host over the SessionChannel. The jail itself still has (deny network*).
-    cmd.env("HTTPS_PROXY", &egress_shim);
-    cmd.env("HTTP_PROXY", &egress_shim);
-    cmd.env("https_proxy", &egress_shim);
-    cmd.env("http_proxy", &egress_shim);
+    // A jail whose policy is `none` has no shim, so its PTY is given no proxy at all.
+    if let Some(egress_shim) = &egress_shim {
+        cmd.env("TDDY_EGRESS_SHIM", egress_shim);
+        cmd.env("HTTPS_PROXY", egress_shim);
+        cmd.env("HTTP_PROXY", egress_shim);
+        cmd.env("https_proxy", egress_shim);
+        cmd.env("http_proxy", egress_shim);
+    }
     for key in [
         "TDDY_EGRESS_PROBE_HOST",
         "TDDY_EGRESS_PROBE_PORT",
@@ -1505,7 +1508,7 @@ struct SpawnClaudePtyParams<'a> {
     append_system_prompt_file: Option<&'a Path>,
     session_id: &'a str,
     tddy_tools_path: &'a Path,
-    egress_shim: &'a str,
+    egress_shim: Option<&'a str>,
     relay: Arc<SandboxSessionRelay>,
     initial_cols: u16,
     initial_rows: u16,
@@ -1635,7 +1638,7 @@ fn spawn_claude_pty(params: SpawnClaudePtyParams<'_>) -> Result<PtyState> {
 
     let cwd = cwd.to_path_buf();
     let relay_thread = Arc::clone(&relay);
-    let egress_shim = egress_shim.to_string();
+    let egress_shim = egress_shim.map(str::to_string);
 
     std::thread::spawn(move || {
         if let Err(e) = run_claude_pty_thread(
@@ -1660,7 +1663,7 @@ struct SpawnCursorPtyParams<'a> {
     cursor_binary: &'a str,
     model: &'a str,
     tddy_tools_path: &'a Path,
-    egress_shim: &'a str,
+    egress_shim: Option<&'a str>,
     relay: Arc<SandboxSessionRelay>,
     initial_cols: u16,
     initial_rows: u16,
@@ -1719,7 +1722,7 @@ fn spawn_cursor_pty(params: SpawnCursorPtyParams<'_>) -> Result<PtyState> {
 
     let cwd = cwd.to_path_buf();
     let relay_thread = Arc::clone(&relay);
-    let egress_shim = egress_shim.to_string();
+    let egress_shim = egress_shim.map(str::to_string);
 
     std::thread::spawn(move || {
         if let Err(e) = run_claude_pty_thread(
@@ -1860,6 +1863,28 @@ async fn start_egress_shim(
         }
     });
     Ok(port)
+}
+
+/// [`start_egress_shim`] for the policy the jail was started with. A `none` policy starts no shim:
+/// a jail that may reach no host has no port for its PTY or its tool subprocesses to be pointed at,
+/// and nothing listening that a jailed process could dial.
+async fn start_egress_shim_for_policy(
+    relay: Arc<SandboxSessionRelay>,
+    egress: Arc<EgressGuard>,
+    port: Option<u16>,
+) -> Result<Option<u16>> {
+    if matches!(egress.policy(), EgressPolicy::None) {
+        boot_log("INFO", "boot: egress policy is none, no egress shim");
+        return Ok(None);
+    }
+    let bound = start_egress_shim(relay, egress, port)
+        .await
+        .inspect_err(|e| boot_log_error("start_egress_shim", format!("{e:#}")))?;
+    boot_log(
+        "INFO",
+        &format!("boot: egress shim listening on {}", egress_shim_url(bound)),
+    );
+    Ok(Some(bound))
 }
 
 async fn handle_egress_shim_connection(
@@ -2242,14 +2267,7 @@ async fn run_workspace_tool_runner_inner(
     let shim_port = match args.egress_shim_port {
         Some(requested) => {
             let egress = Arc::new(runner_egress_guard(args)?);
-            let bound = start_egress_shim(Arc::clone(&relay), egress, Some(requested))
-                .await
-                .inspect_err(|e| boot_log_error("start_egress_shim", format!("{e:#}")))?;
-            boot_log(
-                "INFO",
-                &format!("boot: egress shim listening on {}", egress_shim_url(bound)),
-            );
-            Some(bound)
+            start_egress_shim_for_policy(Arc::clone(&relay), egress, Some(requested)).await?
         }
         None => None,
     };
@@ -2455,17 +2473,12 @@ async fn run_sandbox_runner_inner(args: SandboxRunnerArgs) -> Result<()> {
         ),
     );
     let relay = Arc::new(SandboxSessionRelay::default());
-    // TODO(egress-allowlist): start no shim — and set no proxy env on the PTY — when the policy is
-    // `EgressPolicy::None`. Today every agent jail is `any`, so the shim always starts.
     let egress = Arc::new(runner_egress_guard(&args)?);
-    let shim_port = start_egress_shim(Arc::clone(&relay), egress, args.egress_shim_port)
-        .await
-        .inspect_err(|e| boot_log_error("start_egress_shim", format!("{e:#}")))?;
-    let egress_shim = format!("http://127.0.0.1:{shim_port}");
-    boot_log(
-        "INFO",
-        &format!("boot: egress shim listening on {egress_shim}"),
-    );
+    // A `none` policy starts no shim, and the PTY below is then given no proxy environment.
+    let egress_shim =
+        start_egress_shim_for_policy(Arc::clone(&relay), egress, args.egress_shim_port)
+            .await?
+            .map(egress_shim_url);
 
     boot_log(
         "INFO",
@@ -2520,7 +2533,7 @@ async fn run_sandbox_runner_inner(args: SandboxRunnerArgs) -> Result<()> {
                 model: &args.model,
                 resume: args.resume,
                 cwd: &cwd,
-                egress_shim: &egress_shim,
+                egress_shim: egress_shim.as_deref(),
                 relay: Arc::clone(&relay),
                 initial_cols: args.initial_cols,
                 initial_rows: args.initial_rows,
@@ -2551,7 +2564,7 @@ async fn run_sandbox_runner_inner(args: SandboxRunnerArgs) -> Result<()> {
                 cursor_binary,
                 model: &args.model,
                 tddy_tools_path,
-                egress_shim: &egress_shim,
+                egress_shim: egress_shim.as_deref(),
                 relay: Arc::clone(&relay),
                 initial_cols: args.initial_cols,
                 initial_rows: args.initial_rows,
@@ -2581,7 +2594,7 @@ async fn run_sandbox_runner_inner(args: SandboxRunnerArgs) -> Result<()> {
                 append_system_prompt_file: args.append_system_prompt_file.as_deref(),
                 session_id: &args.session_id,
                 tddy_tools_path,
-                egress_shim: &egress_shim,
+                egress_shim: egress_shim.as_deref(),
                 relay: Arc::clone(&relay),
                 initial_cols: args.initial_cols,
                 initial_rows: args.initial_rows,

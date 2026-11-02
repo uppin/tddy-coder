@@ -26,7 +26,8 @@ pub struct EgressGuard {
 pub struct EgressRefusal {
     pub session_id: String,
     pub host: String,
-    pub port: u16,
+    /// The port as it was asked for. A relayed `TunnelOpen` can ask for one no `u16` holds.
+    pub port: u32,
     pub tool_set: Vec<String>,
 }
 
@@ -56,28 +57,51 @@ impl EgressGuard {
         if self.policy.admits(host, port) {
             return Ok(());
         }
-        Err(EgressRefusal {
+        Err(self.refusal(host, u32::from(port)))
+    }
+
+    /// [`Self::check`] for a port as a `TunnelOpen` carries it, a `u32`. A value no `u16` holds is
+    /// no port at all, so no policy admits it, `any` included, and it is refused outright with the
+    /// same refusal an undeclared port gets.
+    pub fn check_wire_port(&self, host: &str, port: u32) -> Result<(), EgressRefusal> {
+        match u16::try_from(port) {
+            Ok(port) => self.check(host, port),
+            Err(_) => Err(self.refusal(host, port)),
+        }
+    }
+
+    fn refusal(&self, host: &str, port: u32) -> EgressRefusal {
+        EgressRefusal {
             session_id: self.session_id.clone(),
             host: host.to_string(),
             port,
             tool_set: self.tool_set.clone(),
-        })
+        }
     }
 }
 
 impl EgressRefusal {
     /// The shim's answer to a refused `CONNECT`: `403 Forbidden`, the refusal as its body.
     pub fn forbidden_response(&self) -> Vec<u8> {
-        // TODO(egress-allowlist): implement
-        todo!("egress-allowlist: EgressRefusal::forbidden_response")
+        let body = self.to_string();
+        format!(
+            "HTTP/1.1 403 Forbidden\r\nContent-Type: text/plain\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+            body.len()
+        )
+        .into_bytes()
     }
 }
 
 impl fmt::Display for EgressRefusal {
     /// `egress to <host>:<port> refused for session <id>: not declared by tool set [<a>, <b>]`
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        // TODO(egress-allowlist): implement
-        let _ = f;
-        todo!("egress-allowlist: EgressRefusal::fmt")
+        write!(
+            f,
+            "egress to {}:{} refused for session {}: not declared by tool set [{}]",
+            self.host,
+            self.port,
+            self.session_id,
+            self.tool_set.join(", ")
+        )
     }
 }

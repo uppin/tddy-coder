@@ -789,11 +789,9 @@ async fn run_host_relay_inner<H: HostToolHandler, C: SessionChannelClient>(
                             continue;
                         };
                         // Checked here as well as at the shim: the shim is the jail's own process
-                        // and cannot be what keeps the jail inside its declarations.
-                        // TODO(egress-allowlist): refuse a `TunnelOpen` whose port is not a u16
-                        // outright; port 0 is admitted by no host list, only by `any`.
-                        let port = u16::try_from(open.port).unwrap_or(0);
-                        if let Err(refusal) = egress.check(&open.host, port) {
+                        // and cannot be what keeps the jail inside its declarations. A port no u16
+                        // holds is refused outright, whatever the policy.
+                        if let Err(refusal) = egress.check_wire_port(&open.host, open.port) {
                             log::warn!(target: "tddy_sandbox_runner::egress", "{refusal}");
                             let _ = tx
                                 .send(SessionFrame {

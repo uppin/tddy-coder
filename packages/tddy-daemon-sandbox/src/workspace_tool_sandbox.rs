@@ -23,7 +23,7 @@ use std::time::Duration;
 use async_trait::async_trait;
 use futures_util::{Stream, StreamExt};
 use tddy_actions::tool::{ProcessToolHost, ResolvedTool, ToolError, ToolHost, ToolRegistry};
-use tddy_sandbox::{CgroupConfig, MountSpec, SandboxError, SandboxPlan};
+use tddy_sandbox::{CgroupConfig, EgressPolicy, MountSpec, SandboxError, SandboxPlan};
 // The budget both hosts of this exchange keep. Imported rather than restated: the daemon and the
 // standalone app speak the same one-call-at-a-time protocol into the same jail, so a call still
 // legitimate on one of them must not already have been abandoned on the other.
@@ -33,6 +33,8 @@ use tddy_service::proto::sandbox::session_frame::Payload as SessionPayload;
 use tddy_service::proto::sandbox::SessionFrame;
 use tokio::sync::{mpsc, Mutex};
 use tokio_stream::wrappers::ReceiverStream;
+
+use crate::sandbox_session::pick_free_loopback_port;
 
 /// Where the jail runner records its pid so a later daemon can tear down an orphaned process.
 pub const RUNNER_PID_FILE: &str = "runner.pid";
@@ -178,17 +180,24 @@ pub fn build_workspace_tool_plan(
         &layout.scratch_dir.join("bin"),
         &tddy_sandbox_recipes::HostBinaryLibraries,
     );
-    // TODO(egress-allowlist): lower `tools` with `tddy_sandbox_recipes::lower_network` into
-    // `plan.network.egress` and `allow_oauth_inbound`, and — unless the policy is `None` — pass the
-    // runner `--egress-shim-port`, `--egress-policy` and one `--egress-tool` per tool id.
+    // The declared tools' network (`#agent-tools 3/12`): one policy for the whole jail, the union of
+    // their `network:` sections. A `none` jail starts no shim, so it picks no port for one.
+    let (egress, oauth_inbound) = tddy_sandbox_recipes::lower_network(&tools);
+    let shim_port = match egress {
+        EgressPolicy::None => None,
+        EgressPolicy::Any | EgressPolicy::Hosts(_) => {
+            Some(pick_free_loopback_port().map_err(SandboxError::InvalidSpec)?)
+        }
+    };
 
     let scratch_home = layout.scratch_dir.join("home");
     let scratch_tmp = layout.scratch_dir.join("tmp");
 
     // `--workspace-tools` is what makes this a jail with no agent in it: the runner serves the
-    // host's `in_jail_tool_request`s against the worktree as mounted here, and spawns no PTY, no
-    // in-jail `tddy-tools --mcp` server and no egress shim for one to reach the network through.
-    let runner_argv = vec![
+    // host's `in_jail_tool_request`s against the worktree as mounted here, and spawns no PTY and no
+    // in-jail `tddy-tools --mcp` server. It starts an egress shim only when a tool it serves declares
+    // hosts.
+    let mut runner_argv = vec![
         runner_path,
         "--session-id".to_string(),
         session_id.clone(),
@@ -204,6 +213,17 @@ pub fn build_workspace_tool_plan(
         worktree_path.to_string_lossy().to_string(),
         "--stdio".to_string(),
     ];
+    if let Some(port) = shim_port {
+        runner_argv.extend([
+            "--egress-shim-port".to_string(),
+            port.to_string(),
+            "--egress-policy".to_string(),
+            egress.to_runner_arg(),
+        ]);
+        for tool in &tools {
+            runner_argv.extend(["--egress-tool".to_string(), tool.id.clone()]);
+        }
+    }
 
     let mut env = tddy_sandbox::scratch_runner_env(
         &scratch_home,
@@ -225,7 +245,9 @@ pub fn build_workspace_tool_plan(
             profile_path: layout.profile_path.clone(),
             runner_argv,
             env,
-            loopback_allow_ports: vec![],
+            // The runner binds its egress shim inside the jail, so the jail is allowed that one
+            // loopback port, and no other.
+            loopback_allow_ports: shim_port.into_iter().collect(),
             // No host-bound tool IPC: that socket exists for an in-jail `tddy-tools --mcp` calling
             // *out* to the host, which a jail with no agent in it never does. Declaring one would
             // also have to fit macOS's 104-byte `SUN_LEN` cap, which a path this deep under the
@@ -240,6 +262,10 @@ pub fn build_workspace_tool_plan(
             // The jail hosts the session's tools and no agent, so it takes no provider route.
             route: None,
         })?;
+    // The policy and the OAuth callback come from the tools, not the recipe: a plan built from
+    // tools declares its own network.
+    plan.network.egress = egress;
+    plan.network.allow_oauth_inbound = oauth_inbound;
     // Path lookup for the worktree itself. Resolving `/a/b/worktree` walks `/a`, then `/a/b`, and
     // a jail that cannot stat those cannot canonicalize its own checkout — which is the first
     // thing every path-containing tool does. That lookup is all each ancestor is granted: a

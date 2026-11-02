@@ -145,7 +145,7 @@ Real dependency edges, as opposed to the branch line:
 - [x] Run acceptance tests (verify they fail)
 - [x] USER REVIEW — acceptance tests — waived by the developer 2026-10-31: pass 2 runs without per-node review
 - [x] TDD Red — write failing unit/integration tests
-- [ ] TDD Green — implement with quality code
+- [x] TDD Green — implement with quality code (scoped gates green except the inherited `tool::template` reds, see § From /green)
 - [ ] Update documentation with progress
 - [ ] Repeat Red→Green→Update cycle until feature complete
 - [ ] Run the touched packages' tests (`./test -p {package}` per package) — verify 100% pass
@@ -194,6 +194,25 @@ Real dependency edges, as opposed to the branch line:
 - **`lower_network` de-duplicates hosts** (case-insensitively, after the 443 default) — a decision the plan left open.
 
 **Left for green (`TODO(egress-allowlist)` in code):** start no shim and set no proxy env when the policy is `None` (`run_sandbox_runner`); refuse a `TunnelOpen` whose port is not a `u16` outright (`host_relay`); wire `build_workspace_tool_plan` to `lower_network` (shim port, `--egress-policy`, `--egress-tool`, `NetworkSpec.egress`, `allow_oauth_inbound`).
+### From /green
+
+Every `todo!("egress-allowlist: …")` and every `TODO(egress-allowlist)` in production code is replaced. Scoped gates (2026-11-02, `CARGO_INCREMENTAL=0 CARGO_PROFILE_DEV_DEBUG=0`):
+
+- `tddy-sandbox` 144/144, `tddy-sandbox-recipes` 77/77, `tddy-sandbox-runner` 72/72, `tddy-daemon-sandbox` 50 passed / 0 failed / 1 ignored (`--lib` plus every test target except `sandbox_stdio_seatbelt_acceptance`).
+- `tddy-actions` 30 passed / 9 failed. The nine are `tool::template::tests`, which panic on `todo!("claude-host: render_argv")` at `packages/tddy-actions/src/tool/template.rs:76`. That stub is on the base `2ae725caf` and belongs to #791 (n2). It is not a dependency of this node, so it is not implemented here.
+- clippy `-D warnings` and `cargo fmt --check` are clean for all five packages.
+
+Decisions taken in green, beyond the Deviations above:
+
+1. `EgressRefusal.port` is `u32`, and `EgressGuard::check_wire_port` refuses a `TunnelOpen` port no `u16` holds under every policy, `any` included. `check` keeps the `u16` shim path.
+2. The workspace-tools runner honours `none` through the shared `start_egress_shim_for_policy`, so a `none` jail starts no shim there either.
+3. The workspace plan sets `loopback_allow_ports = [shim_port]`, as `sandbox_plan_builder` does, so the jail can reach its own shim. No other loopback port is allowed.
+4. `TDDY_EGRESS_SHIM` and the proxy variables are omitted under `none`.
+5. `from_runner_arg("hosts:")` returns `Hosts([])`, so the form round-trips. A tool with `hosts: []` yields a shim that refuses everything, not `None`.
+6. `HostPattern::parse` also refuses a path and labels outside `[A-Za-z0-9-]`. The `parse` doc already promised the path refusal.
+7. The shim port is picked with `pick_free_loopback_port()`, the same bind-then-release pattern as `sandbox_plan_builder.rs`, and it carries the same small race.
+8. `harness_pty.rs` takes `egress_shim: Option<&str>`. It was not in the Modified list but follows from the runner change.
+
 ### From /validate-changes
 ### From /validate-tests
 ### From /validate-prod-ready

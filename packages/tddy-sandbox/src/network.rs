@@ -31,10 +31,38 @@ impl HostPattern {
     /// `*.example.com` matches `api.example.com` and `a.b.example.com`, never `example.com`; an
     /// IPv4 literal matches only itself.
     pub fn matches(&self, host: &str, port: u16) -> bool {
-        // TODO(egress-allowlist): implement
-        let _ = (host, port);
-        todo!("egress-allowlist: HostPattern::matches")
+        if port != self.port {
+            return false;
+        }
+        match self.host.strip_prefix("*.") {
+            Some(domain) => is_subdomain_of(host, domain),
+            None => host.eq_ignore_ascii_case(&self.host),
+        }
     }
+}
+
+/// Whether `host` is a subdomain of `domain` at any depth: it ends in `.domain` with at least one
+/// label before that dot. The apex is not its own subdomain, and an empty domain has no subdomains.
+fn is_subdomain_of(host: &str, domain: &str) -> bool {
+    let Some(dot) = host.len().checked_sub(domain.len() + 1) else {
+        return false;
+    };
+    !domain.is_empty()
+        && dot > 0
+        && host.get(dot..).is_some_and(|suffix| {
+            suffix
+                .strip_prefix('.')
+                .is_some_and(|rest| rest.eq_ignore_ascii_case(domain))
+        })
+}
+
+/// One `host:port` of a `--egress-policy` value: the host is everything before the last colon.
+fn host_port_from_runner_arg(pattern: &str) -> Option<HostPattern> {
+    let (host, port) = pattern.rsplit_once(':')?;
+    if host.is_empty() {
+        return None;
+    }
+    Some(HostPattern::new(host, port.parse().ok()?))
 }
 
 impl fmt::Display for HostPattern {
@@ -77,11 +105,7 @@ impl EgressPolicy {
         match self {
             EgressPolicy::None => false,
             EgressPolicy::Any => true,
-            EgressPolicy::Hosts(patterns) => {
-                // TODO(egress-allowlist): implement
-                let _ = (patterns, host, port);
-                todo!("egress-allowlist: EgressPolicy::admits")
-            }
+            EgressPolicy::Hosts(patterns) => patterns.iter().any(|p| p.matches(host, port)),
         }
     }
 
@@ -92,22 +116,37 @@ impl EgressPolicy {
             EgressPolicy::None => "none".to_string(),
             EgressPolicy::Any => "any".to_string(),
             EgressPolicy::Hosts(patterns) => {
-                // TODO(egress-allowlist): implement
-                let _ = patterns;
-                todo!("egress-allowlist: EgressPolicy::to_runner_arg")
+                let hosts: Vec<String> = patterns.iter().map(ToString::to_string).collect();
+                format!("hosts:{}", hosts.join(","))
             }
         }
     }
 
     /// Read back what [`Self::to_runner_arg`] wrote. Anything else is refused, never read as `any`.
     pub fn from_runner_arg(arg: &str) -> Result<Self, EgressPolicyArgError> {
+        let refuse = |reason: String| EgressPolicyArgError {
+            arg: arg.to_string(),
+            reason,
+        };
         match arg {
             "none" => Ok(EgressPolicy::None),
             "any" => Ok(EgressPolicy::Any),
             other => {
-                // TODO(egress-allowlist): implement
-                let _ = other;
-                todo!("egress-allowlist: EgressPolicy::from_runner_arg")
+                let Some(list) = other.strip_prefix("hosts:") else {
+                    return Err(refuse(
+                        "expected `none`, `any` or `hosts:<host:port>,…`".to_string(),
+                    ));
+                };
+                if list.is_empty() {
+                    return Ok(EgressPolicy::Hosts(Vec::new()));
+                }
+                list.split(',')
+                    .map(|pattern| {
+                        host_port_from_runner_arg(pattern)
+                            .ok_or_else(|| refuse(format!("`{pattern}` is not `host:port`")))
+                    })
+                    .collect::<Result<Vec<_>, _>>()
+                    .map(EgressPolicy::Hosts)
             }
         }
     }

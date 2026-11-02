@@ -66,9 +66,51 @@ impl<'de> Deserialize<'de> for Egress {
     /// `none` / `any` as a string, `{ hosts: [...] }` as a one-key map. Anything else is refused
     /// naming what was expected; a malformed pattern is refused with its [`HostPatternError`].
     fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        // TODO(egress-allowlist): implement — a visitor taking `visit_str` and `visit_map`.
-        let _ = deserializer;
-        todo!("egress-allowlist: Egress::deserialize")
+        struct EgressVisitor;
+
+        impl<'de> serde::de::Visitor<'de> for EgressVisitor {
+            type Value = Egress;
+
+            fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+                formatter.write_str("`none`, `any` or `{ hosts: [pattern, …] }`")
+            }
+
+            fn visit_str<E: serde::de::Error>(self, value: &str) -> Result<Egress, E> {
+                match value {
+                    "none" => Ok(Egress::None),
+                    "any" => Ok(Egress::Any),
+                    other => Err(E::invalid_value(serde::de::Unexpected::Str(other), &self)),
+                }
+            }
+
+            fn visit_map<A: serde::de::MapAccess<'de>>(
+                self,
+                mut map: A,
+            ) -> Result<Egress, A::Error> {
+                let mut hosts: Option<Vec<HostPattern>> = None;
+                while let Some(key) = map.next_key::<String>()? {
+                    match key.as_str() {
+                        "hosts" if hosts.is_none() => {
+                            hosts = Some(map.next_value::<Vec<HostPattern>>()?);
+                        }
+                        "hosts" => {
+                            return Err(<A::Error as serde::de::Error>::duplicate_field("hosts"));
+                        }
+                        other => {
+                            return Err(<A::Error as serde::de::Error>::unknown_field(
+                                other,
+                                &["hosts"],
+                            ));
+                        }
+                    }
+                }
+                hosts
+                    .map(Egress::Hosts)
+                    .ok_or_else(|| <A::Error as serde::de::Error>::missing_field("hosts"))
+            }
+        }
+
+        deserializer.deserialize_any(EgressVisitor)
     }
 }
 
@@ -95,9 +137,46 @@ impl HostPattern {
     /// scheme, a path, an empty label, a `*` anywhere but a leading `*.`, and a port that is not
     /// `1..=65535` are refused.
     pub fn parse(pattern: &str) -> Result<Self, HostPatternError> {
-        // TODO(egress-allowlist): implement
-        let _ = pattern;
-        todo!("egress-allowlist: HostPattern::parse")
+        let refuse = |reason: &str| HostPatternError {
+            pattern: pattern.to_string(),
+            reason: reason.to_string(),
+        };
+        if pattern.contains("://") {
+            return Err(refuse("a scheme is not a host"));
+        }
+        let (name, port) = match pattern.rsplit_once(':') {
+            Some((name, port)) => {
+                let port = port
+                    .parse::<u16>()
+                    .ok()
+                    .filter(|port| *port != 0)
+                    .ok_or_else(|| refuse("port must be 1..=65535"))?;
+                (name, port)
+            }
+            None => (pattern, DEFAULT_EGRESS_PORT),
+        };
+        if name.contains('/') {
+            return Err(refuse("a path is not part of a host"));
+        }
+        let domain = name.strip_prefix("*.").unwrap_or(name);
+        if domain.contains('*') {
+            return Err(refuse("`*` is only allowed as a leading `*.`"));
+        }
+        for label in domain.split('.') {
+            if label.is_empty() {
+                return Err(refuse("empty label"));
+            }
+            if !label
+                .bytes()
+                .all(|b| b.is_ascii_alphanumeric() || b == b'-')
+            {
+                return Err(refuse("not a valid host name"));
+            }
+        }
+        Ok(Self {
+            host: name.to_ascii_lowercase(),
+            port,
+        })
     }
 
     pub fn host(&self) -> &str {
