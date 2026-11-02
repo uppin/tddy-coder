@@ -79,6 +79,12 @@
   The baseline, the sandboxed-main test and three sandboxed `claude_cli_fullscreen_renderer` tests
   gained a Given with coding agents installed; no assertion changed.
   `setting_up_main_in_a_sandbox_is_refused_and_starts_nothing` is removed, superseded.
+- **Linux-only Given, found by CI (`/fix-pr`, 2026-11-02).**
+  `sandboxed_claude_cli_acceptance::start_session_sandbox_unsupported_on_non_darwin` (non-macOS
+  only, so no local run reached it) was refused with `this host has no coding agents installed`
+  before the jail spawn could report `sandbox unsupported`. Its Given now installs coding agents
+  over a stub `PATH` (a stub `claude` and the built `tddy-tools`), the same Given edit the developer
+  approved above. Its assertion is unchanged, and no production refusal was reordered.
 
 ## Tests
 
