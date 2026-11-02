@@ -44,9 +44,34 @@ pub struct ToolBinary {
 
 impl ToolDef {
     /// Parse one tool file. `file` names the source in every error.
+    ///
+    /// The schema version is read before the rest of the file, so a file from a later schema is
+    /// refused for its version rather than for whichever field that version added first.
     pub fn parse(file: &Path, yaml: &str) -> Result<Self, ToolError> {
-        // TODO(tool-defs): implement — serde_yaml, then the schema-version check.
-        let _ = (file, yaml);
-        todo!("tool-defs: ToolDef::parse")
+        let probe: SchemaProbe = serde_yaml::from_str(yaml).map_err(|e| parse_error(file, &e))?;
+        if probe.schema_version != TOOL_SCHEMA_VERSION {
+            return Err(ToolError::Parse {
+                file: file.to_path_buf(),
+                message: format!(
+                    "schema_version {} is not supported (this build reads {TOOL_SCHEMA_VERSION})",
+                    probe.schema_version
+                ),
+            });
+        }
+        serde_yaml::from_str(yaml).map_err(|e| parse_error(file, &e))
+    }
+}
+
+/// The schema version alone. Not `deny_unknown_fields`, so every other field is left to the full
+/// parse to judge.
+#[derive(Deserialize)]
+struct SchemaProbe {
+    schema_version: u32,
+}
+
+fn parse_error(file: &Path, error: &serde_yaml::Error) -> ToolError {
+    ToolError::Parse {
+        file: file.to_path_buf(),
+        message: error.to_string(),
     }
 }

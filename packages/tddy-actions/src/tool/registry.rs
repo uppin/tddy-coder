@@ -1,8 +1,9 @@
 //! The set of tools a host knows: built-ins plus `<tddyhome>/tools/*.yaml` overrides.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
+use super::resolve::resolve_tool;
 use super::{ResolvedTool, ToolDef, ToolError, ToolHost};
 
 /// The built-in tool files, embedded at build time: `(source path, YAML)`.
@@ -11,17 +12,25 @@ pub const BUILTIN_TOOLS: &[(&str, &str)] = &[(
     include_str!("../../tools/rg.yaml"),
 )];
 
+/// A tool definition and the file it was loaded from.
+type Entry = (ToolDef, PathBuf);
+
 /// Every tool this host knows, by id, with the file each came from.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct ToolRegistry {
-    tools: BTreeMap<String, (ToolDef, PathBuf)>,
+    tools: BTreeMap<String, Entry>,
 }
 
 impl ToolRegistry {
     /// The embedded built-ins ([`BUILTIN_TOOLS`]), validated.
     pub fn builtin() -> Result<Self, ToolError> {
-        // TODO(tool-defs): implement — parse each embedded file, refuse duplicates, validate deps.
-        todo!("tool-defs: ToolRegistry::builtin")
+        let mut tools = BTreeMap::new();
+        for &(source, yaml) in BUILTIN_TOOLS {
+            let file = PathBuf::from(source);
+            let def = ToolDef::parse(&file, yaml)?;
+            insert_unique(&mut tools, def, file)?;
+        }
+        Self { tools }.validated()
     }
 
     /// `builtin` with every `*.yaml` / `*.yml` in `overrides_dir` applied: a file whose id matches a
@@ -29,9 +38,9 @@ impl ToolRegistry {
     /// fresh `<tddyhome>` has none). Refuses an unknown field, a duplicate id among the overrides,
     /// an unknown dep and a dep cycle — across the merged set.
     pub fn load(builtin: Self, overrides_dir: &Path) -> Result<Self, ToolError> {
-        // TODO(tool-defs): implement.
-        let _ = (builtin, overrides_dir);
-        todo!("tool-defs: ToolRegistry::load")
+        let mut tools = builtin.tools;
+        tools.extend(read_overrides(overrides_dir)?);
+        Self { tools }.validated()
     }
 
     pub fn get(&self, id: &str) -> Option<&ToolDef> {
@@ -54,8 +63,169 @@ impl ToolRegistry {
         ids: &[&str],
         host: &dyn ToolHost,
     ) -> Result<Vec<ResolvedTool>, ToolError> {
-        // TODO(tool-defs): implement.
-        let _ = (ids, host);
-        todo!("tool-defs: ToolRegistry::resolve_closure")
+        let mut visited = BTreeSet::new();
+        let mut closure = Vec::new();
+        for id in ids {
+            self.visit(id, host, &mut visited, &mut closure)?;
+        }
+        Ok(closure)
     }
+
+    fn visit(
+        &self,
+        id: &str,
+        host: &dyn ToolHost,
+        visited: &mut BTreeSet<String>,
+        closure: &mut Vec<ResolvedTool>,
+    ) -> Result<(), ToolError> {
+        if !visited.insert(id.to_string()) {
+            return Ok(());
+        }
+        let def = self
+            .get(id)
+            .ok_or_else(|| ToolError::UnknownTool(id.to_string()))?;
+        for dep in &def.deps {
+            self.visit(dep, host, visited, closure)?;
+        }
+        closure.push(resolve_tool(def, host)?);
+        Ok(())
+    }
+
+    fn validated(self) -> Result<Self, ToolError> {
+        self.refuse_unknown_deps()?;
+        self.refuse_dep_cycles()?;
+        Ok(self)
+    }
+
+    fn refuse_unknown_deps(&self) -> Result<(), ToolError> {
+        for (id, (def, _)) in &self.tools {
+            if let Some(dep) = def
+                .deps
+                .iter()
+                .find(|dep| !self.tools.contains_key(dep.as_str()))
+            {
+                return Err(ToolError::UnknownDep {
+                    tool: id.clone(),
+                    dep: dep.clone(),
+                });
+            }
+        }
+        Ok(())
+    }
+
+    fn refuse_dep_cycles(&self) -> Result<(), ToolError> {
+        let mut finished = BTreeSet::new();
+        for id in self.tools.keys() {
+            if let Some(cycle) = self.cycle_from(id, &mut Vec::new(), &mut finished) {
+                return Err(ToolError::DepCycle { cycle });
+            }
+        }
+        Ok(())
+    }
+
+    /// Depth-first search from `id`, returning the cycle it closes if it closes one. `path` is the
+    /// chain being visited; `finished` holds the ids whose deps were all searched without a cycle.
+    fn cycle_from<'a>(
+        &'a self,
+        id: &'a str,
+        path: &mut Vec<&'a str>,
+        finished: &mut BTreeSet<&'a str>,
+    ) -> Option<Vec<String>> {
+        if let Some(start) = path.iter().position(|on_path| *on_path == id) {
+            return Some(closed_cycle(&path[start..]));
+        }
+        if finished.contains(id) {
+            return None;
+        }
+        let (def, _) = self.tools.get(id)?;
+        path.push(id);
+        for dep in &def.deps {
+            if let Some(cycle) = self.cycle_from(dep, path, finished) {
+                return Some(cycle);
+            }
+        }
+        path.pop();
+        finished.insert(id);
+        None
+    }
+}
+
+/// Insert `def` unless its id is already taken in this source, which is refused naming both files.
+fn insert_unique(
+    tools: &mut BTreeMap<String, Entry>,
+    def: ToolDef,
+    file: PathBuf,
+) -> Result<(), ToolError> {
+    if let Some((_, first)) = tools.get(&def.id) {
+        return Err(ToolError::DuplicateId {
+            id: def.id,
+            first: first.clone(),
+            second: file,
+        });
+    }
+    tools.insert(def.id.clone(), (def, file));
+    Ok(())
+}
+
+/// The override files in `dir`, keyed by id. A missing directory has none.
+fn read_overrides(dir: &Path) -> Result<BTreeMap<String, Entry>, ToolError> {
+    let mut overrides = BTreeMap::new();
+    for file in yaml_files_in(dir)? {
+        let yaml = std::fs::read_to_string(&file).map_err(|e| ToolError::Parse {
+            file: file.clone(),
+            message: format!("cannot be read: {e}"),
+        })?;
+        let def = ToolDef::parse(&file, &yaml)?;
+        insert_unique(&mut overrides, def, file)?;
+    }
+    Ok(overrides)
+}
+
+/// The `*.yaml` and `*.yml` files directly in `dir`, sorted by name so that a duplicate id is always
+/// reported against the same pair of files.
+fn yaml_files_in(dir: &Path) -> Result<Vec<PathBuf>, ToolError> {
+    let entries = match std::fs::read_dir(dir) {
+        Ok(entries) => entries,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
+        Err(e) => return Err(dir_error(dir, &e)),
+    };
+    let mut files = Vec::new();
+    for entry in entries {
+        let path = entry.map_err(|e| dir_error(dir, &e))?.path();
+        if is_yaml(&path) && path.is_file() {
+            files.push(path);
+        }
+    }
+    files.sort();
+    Ok(files)
+}
+
+fn is_yaml(path: &Path) -> bool {
+    matches!(
+        path.extension().and_then(|ext| ext.to_str()),
+        Some("yaml" | "yml")
+    )
+}
+
+fn dir_error(dir: &Path, error: &std::io::Error) -> ToolError {
+    ToolError::Io {
+        dir: dir.to_path_buf(),
+        message: error.to_string(),
+    }
+}
+
+/// A cycle as `[id, …, id]`, listed from its smallest id so the same cycle always reads the same way.
+fn closed_cycle(members: &[&str]) -> Vec<String> {
+    let start = members
+        .iter()
+        .enumerate()
+        .min_by(|(_, a), (_, b)| a.cmp(b))
+        .map_or(0, |(index, _)| index);
+    let mut cycle: Vec<String> = members[start..]
+        .iter()
+        .chain(&members[..start])
+        .map(|id| id.to_string())
+        .collect();
+    cycle.push(cycle[0].clone());
+    cycle
 }

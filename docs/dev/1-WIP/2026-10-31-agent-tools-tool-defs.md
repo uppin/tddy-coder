@@ -186,7 +186,7 @@ Real dependency edges, as opposed to the branch line:
 - [x] Run acceptance tests (verify they fail)
 - [x] USER REVIEW — acceptance tests
 - [x] TDD Red — write failing unit/integration tests
-- [ ] TDD Green — implement with quality code
+- [x] TDD Green — implement with quality code (2 tests still red, see From /green)
 - [ ] Update documentation with progress
 - [ ] Repeat Red→Green→Update cycle until feature complete
 - [ ] Run the touched packages' tests (`./test -p {package}` per package) — verify 100% pass
@@ -208,6 +208,16 @@ Real dependency edges, as opposed to the branch line:
 
 - **Pre-existing, not this node:** `packages/tddy-daemon-sandbox/tests/sandbox_stdio_seatbelt_acceptance.rs` does not compile on macOS (`SandboxHandle` not in scope). The file is identical to `master`, so exclude that target when gating this node (`cargo clippy -p tddy-daemon-sandbox --lib --test …`).
 - **Red baseline (2026-10-31):** every new test fails at a `TODO(tool-defs)` body. The exception is `a_host_that_cannot_resolve_rg_…`, which fails because today's `provision` spawns a jail (it dies with exit 127) instead of refusing before the tree exists. `ripgrep_in_jail_seatbelt` still passes, on the old patch. Existing `tddy-actions`/`tddy-sandbox-recipes`/`workspace_tool_sandbox_plan_unit` tests stay green.
+### From /green
+- **RED, test defect (needs a decision):** `declared_tools_workspace_jail_acceptance::under_seatbelt::a_workspace_jail_built_from_the_declared_rg_tool_runs_rg_over_its_worktree_under_seatbelt` expects `hay.rs:1:const NEEDLE: u32 = 1;`, but its argv is `rg --no-config NEEDLE <dir>` with no `-n`. Piped `rg` omits line numbers (checked: `rg NEEDLE hay.rs | cat` prints `const NEEDLE: u32 = 1;`). The jail runs rg correctly. Left unedited: it is an approved acceptance test. Fix is either `-n` in the argv (keeps the `:1:` check) or dropping `:1:` from the expectation.
+- **RED, expected (needs approval):** `tests/ripgrep_in_jail_seatbelt.rs` is superseded. It passes `tools: Vec::new()`, so it goes red once `host_ripgrep_grants` is removed (`execvp() … Operation not permitted`). Not deleted: deletion needs the developer's go-ahead.
+- **Package outside the Delta:** `packages/tddy-sandbox-darwin/src/profile.rs` now emits `process-exec*` for literal exec reads, not only exec subpaths. Needed: with it reverted, the live rg case fails with `env: rg: Operation not permitted`. The only literal+exec grant in the tree is `tool_grants.rs` lowering, so agent jails are unaffected. Add `tddy-sandbox-darwin` to Affected Packages and the Delta, or split it out.
+- **Contract vs this changeset (sync at validate-changes):** `ToolRegistry::builtin()` returns `Result`; `ToolHost` is `path_dirs` + `is_executable_file` (not `path_search`); `ResolvedTool` carries `command`; an unreadable override file is `ToolError::Parse`. The tests and their fixture hosts are the authority.
+- **Budget:** `workspace_tool_sandbox.rs` is 684 production lines (741 on master), still over 500. Its code-issue record `packages/tddy-daemon-sandbox/docs/code-issues/oversized-file-workspace-tool-sandbox.md` still describes the removed ripgrep patch.
+- **Behaviour gap:** two tools with the same `binary.command` in one closure overwrite each other's `bin/` link silently. The contract has no refusal for this.
+- **Weak assertion:** the live `…no_sibling_binary_in_its_directory_is_executable` case passes on any failure to run the sibling. Check at validate-tests.
+- **Minor:** `ProcessToolHost::path_dirs` returns an empty list when `PATH` is unset (`unwrap_or_default`), so the Unresolvable error names an empty search.
+- **Not exercised:** Linux (this run is macOS). Pre-existing and excluded: `tests/sandbox_stdio_seatbelt_acceptance.rs` does not compile on macOS on master.
 ### From /validate-changes
 ### From /validate-tests
 ### From /validate-prod-ready

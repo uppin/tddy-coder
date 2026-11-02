@@ -146,19 +146,21 @@ pub fn render_plan(plan: &SandboxPlan) -> Result<String, SandboxError> {
         "(allow file-ioctl\n  (literal \"/dev/ptmx\")\n  (regex #\"^/dev/ttys[0-9]+$\"))\n",
     );
 
-    // process-exec*: the project tree, the declared exec paths, and exec-marked subpath reads.
+    // process-exec*: the project tree, the declared exec paths, and exec-marked reads. An exec subpath
+    // grants its tree; an exec literal grants that one file, so a declared tool's binary runs without
+    // its directory being executable. Linux already reads the flag this way (no MS_NOEXEC on a
+    // literal bind mount).
     out.push_str("(allow process-exec*\n");
     out.push_str(&format!("  (subpath \"{project_root}\")\n"));
     for p in &plan.policy.exec_paths {
         out.push_str(&format!("  (subpath \"{}\")\n", canonical_rule_path(p)));
     }
-    for r in &plan.reads {
-        if r.exec && r.kind == ReadKind::Subpath {
-            out.push_str(&format!(
-                "  (subpath \"{}\")\n",
-                canonical_rule_path(&r.host)
-            ));
-        }
+    for r in plan
+        .reads
+        .iter()
+        .filter(|r| r.exec && matches!(r.kind, ReadKind::Subpath | ReadKind::Literal))
+    {
+        out.push_str(&render_read_rule(r));
     }
     // Mounted working dirs may hold scripts/binaries the agent runs.
     for m in &plan.mounts {
