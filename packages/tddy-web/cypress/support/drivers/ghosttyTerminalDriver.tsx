@@ -438,6 +438,32 @@ export function aGhosttyTerminal(options: GhosttyTerminalDriverOptions = {}) {
     },
 
     /**
+     * Assert the live buffer (viewport + scrollback) holds `text` exactly `times` times, once the
+     * terminal has settled. The buffer must first show it at all; then two animation frames let a
+     * late second write land before the count is taken, so a duplicated write cannot pass by being
+     * read between its two halves. Requires `withHandleCapture: true`.
+     */
+    expectBufferHoldsTimes(text: string, times: number) {
+      const occurrences = () => {
+        const handle = handleRef.current;
+        return (handle?.getBufferText?.() ?? "").split(text).length - 1;
+      };
+      cy.wrap(handleRef).should(() => {
+        expect(occurrences(), `the buffer should show ${JSON.stringify(text)}`).to.be.greaterThan(0);
+      });
+      cy.window().then(
+        (win) =>
+          new Promise<void>((resolve) =>
+            win.requestAnimationFrame(() => win.requestAnimationFrame(() => resolve())),
+          ),
+      );
+      cy.wrap(handleRef).should(() => {
+        expect(occurrences(), `times ${JSON.stringify(text)} is in the buffer`).to.equal(times);
+      });
+      return this;
+    },
+
+    /**
      * Wait until the terminal is wired to report mouse gestures to the TUI: the DECSET
      * mouse-tracking sequences have been processed, *and* the effect that attaches the
      * mouse/touch listeners has committed. The terminal enables tracking while still inside its

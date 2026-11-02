@@ -17,6 +17,7 @@
 | 2026-10-28 | 728 | **regressed.** `#home-inbox` 2/8 (#767): 668 → 728 (+60) — `TerminalCapture::text_grid` (the active buffer's rows, cursor, size, offset and the bracketed-paste state) with `TextGrid` / `GridCursor`. The accessor reads the screen model and belongs with `snapshot` in the screen-model seam above. **Split deferred** (stack-shared: `#home-inbox` 5/8 and 6/8 touch the file) |
 | 2026-10-29 | 712 | `#home-inbox` 9/9 (#785): the styles walk and crop went into `terminal_capture/styles.rs` and `crop.rs`, and `TextGrid` / `GridCursor` moved to `grid.rs`; net −16 against 728 despite the module wiring and two `TextGrid` fields. The remaining split (sniffer and mode state) is unchanged |
 | 2026-11-02 | 697 | **better** by 15 in #805 (`#session-tabs` 2/7): `replay_from`'s forward-chunk arithmetic moved to `terminal_capture/paging.rs` (`forward_chunk`), shared with the on-disk `CaptureRecording`, which is a new module (`capture_recording.rs`) rather than lines here. The sniffer and mode-state split is unchanged |
+| 2026-11-03 | 697 | **unchanged** since #805 at master `162a66978` (712 at the merge-base `e9d036e0c`; no `#[cfg(test)]` block, total lines). `tddy-tools analyze` (130 tests, join 88.7%): `feed` complexity 9; the stack-added `capture_recording::decode` complexity 9, `write_atomically` 4. Sniffer and mode-state split still open, unclaimed |
 
 ## What the tool found
 

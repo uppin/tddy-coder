@@ -18,6 +18,20 @@ describe("GhosttyTerminal", () => {
     aGhosttyTerminal({ initialContent: ansiContent }).mount().expectExists().expectCanvasExists();
   });
 
+  it("renders its initial content once, not once per effect that writes it", () => {
+    // Given initial content carrying a marker line
+    const driver = aGhosttyTerminal({
+      initialContent: "initial-content-marker\r\n",
+      withHandleCapture: true,
+    });
+
+    // When the terminal is mounted
+    driver.mount().expectExists();
+
+    // Then the emulator received it once
+    driver.expectBufferHoldsTimes("initial-content-marker", 1);
+  });
+
   it("reveals earlier output when the user drags one finger down to scroll back", () => {
     // Bug: the terminal wires two-finger pinch-to-zoom and SGR tap forwarding for
     // touch, but has no single-finger drag-to-scroll handler. On mobile there is
