@@ -93,3 +93,6 @@ local.bun.lock
 /coverage/
 .codegraph
 
+
+# tddy-build action cache and tool link dirs
+.tddy-build/

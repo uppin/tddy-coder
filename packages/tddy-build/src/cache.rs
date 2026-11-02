@@ -123,6 +123,29 @@ pub fn compute_cache_key_with_tools(
     format!("sha256:{}", hex::encode(hasher.finalize()))
 }
 
+/// The key a build run records for `action`: [`compute_cache_key_with_tools`] plus whether the
+/// action runs `hermetic` (the effective mode — `sandbox: true` or a `--hermetic` run). An entry an
+/// unconfined run wrote therefore never serves a hermetic run, nor the reverse.
+///
+/// An unconfined run keeps [`compute_cache_key_with_tools`]'s own key, so entries written before
+/// the mode was recorded stay valid for unconfined runs.
+pub fn compute_run_cache_key(
+    action: &BuildAction,
+    input_fingerprints: &[FileFingerprint],
+    tool_fingerprints: &[FileFingerprint],
+    hermetic: bool,
+) -> String {
+    let key = compute_cache_key_with_tools(action, input_fingerprints, tool_fingerprints);
+    if !hermetic {
+        return key;
+    }
+
+    let mut hasher = Sha256::new();
+    hasher.update(key.as_bytes());
+    hasher.update(b"|hermetic|");
+    format!("sha256:{}", hex::encode(hasher.finalize()))
+}
+
 /// Load the cache entry for `{target_id}/{action_id}`, returning it only when its
 /// recorded key matches `expected_key` and every output path still exists.
 pub fn lookup_cache(
@@ -358,6 +381,24 @@ mod tests {
 
         // Then
         assert_eq!(key_forward, key_reversed);
+    }
+
+    #[test]
+    fn run_key_differs_between_a_hermetic_and_an_unconfined_run() {
+        // Given
+        let action = sample_action();
+        let tools = [a_tool_binary(100, 1)];
+
+        // When
+        let unconfined = compute_run_cache_key(&action, &fps(), &tools, false);
+        let hermetic = compute_run_cache_key(&action, &fps(), &tools, true);
+
+        // Then
+        assert_ne!(hermetic, unconfined);
+        assert_eq!(
+            unconfined,
+            compute_cache_key_with_tools(&action, &fps(), &tools)
+        );
     }
 
     #[test]

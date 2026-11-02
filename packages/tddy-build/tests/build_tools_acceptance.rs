@@ -10,14 +10,19 @@
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
+
+use futures::future::BoxFuture;
 
 use pretty_assertions::assert_eq;
-use tddy_actions::tool::ToolHost;
-use tddy_build::executor::{execute_target_with_tools, BuildRecord, BuildTools, ExecuteOptions};
+use tddy_actions::tool::{ResolvedTool, ToolHost};
+use tddy_actions::ActionSpec;
+use tddy_build::executor::{
+    execute_target_with_tools, ActionOutcome, BuildRecord, BuildTools, ExecuteOptions,
+};
 use tddy_build::graph::BuildGraph;
 use tddy_build::plugin::PluginRegistry;
-use tddy_build::{load_build_manifest, BuildError, BuildMode};
+use tddy_build::{load_build_manifest, ActionSandbox, BuildError, BuildMode};
 
 /// A host whose environment and `PATH` the test declares, over the real filesystem.
 #[derive(Default)]
@@ -98,18 +103,29 @@ impl ARepo {
 
     /// Load the manifest and build `target` with the repository's tools resolving against `host`.
     async fn build(&self, target: &str, host: AHost) -> Result<BuildRecord, BuildError> {
+        let tools = BuildTools::load(&self.tools_dir, Arc::new(host))?;
+        self.build_with(target, &tools, &ExecuteOptions::default())
+            .await
+    }
+
+    /// Build `target` with the given `tools` and `opts`.
+    async fn build_with(
+        &self,
+        target: &str,
+        tools: &BuildTools,
+        opts: &ExecuteOptions,
+    ) -> Result<BuildRecord, BuildError> {
         let yaml = std::fs::read_to_string(self.path("BUILD.yaml")).expect("BUILD.yaml");
         let manifest = load_build_manifest(&yaml)?;
         let graph = BuildGraph::from_manifests(vec![manifest])?;
-        let tools = BuildTools::load(&self.tools_dir, Arc::new(host))?;
         execute_target_with_tools(
             &self.root,
             &graph,
             target,
-            &ExecuteOptions::default(),
+            opts,
             BuildMode::Compile,
             &PluginRegistry::new(),
-            &tools,
+            tools,
         )
         .await
     }
@@ -120,6 +136,48 @@ fn write_script(path: &Path, body: &str) {
     std::fs::create_dir_all(path.parent().expect("a parent")).expect("script dir");
     std::fs::write(path, format!("#!/bin/sh\n{body}\n")).expect("script");
     std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o755)).expect("chmod");
+}
+
+/// A sandbox that records the actions it was handed and writes `stamp` to each declared output.
+struct ARecordingSandbox {
+    ran: Mutex<Vec<String>>,
+    stamp: &'static str,
+}
+
+fn a_recording_sandbox(stamp: &'static str) -> Arc<ARecordingSandbox> {
+    Arc::new(ARecordingSandbox {
+        ran: Mutex::new(Vec::new()),
+        stamp,
+    })
+}
+
+impl ARecordingSandbox {
+    fn ran(&self) -> Vec<String> {
+        self.ran.lock().expect("ran").clone()
+    }
+}
+
+impl ActionSandbox for ARecordingSandbox {
+    fn run<'a>(
+        &'a self,
+        spec: &'a ActionSpec,
+        _tools: &'a [ResolvedTool],
+    ) -> BoxFuture<'a, Result<ActionOutcome, BuildError>> {
+        Box::pin(async move {
+            self.ran.lock().expect("ran").push(spec.id.clone());
+            for output in &spec.outputs {
+                std::fs::write(&output.host_path, self.stamp).expect("sandbox output");
+            }
+            Ok(ActionOutcome {
+                action_id: spec.id.clone(),
+                cached: false,
+                exit_code: 0,
+                argv: spec.command.clone(),
+                stdout: String::new(),
+                stderr: String::new(),
+            })
+        })
+    }
 }
 
 /// What each action in `record` reports as `cached`, in order.
@@ -307,4 +365,55 @@ targets:
          supported — declare a tool definition (schema_version, id, summary, binary) or \
          ref: <tool id> instead"
     );
+}
+
+#[tokio::test]
+async fn an_entry_an_unconfined_run_wrote_never_serves_a_hermetic_run_of_the_same_action() {
+    // Given — an action built unconfined, so its cache entry exists
+    let repo = a_repo_with_manifest(
+        r#"
+schema_version: 1
+targets:
+  - id: "a:out"
+    actions:
+      - id: write
+        type: command
+        command: ["sh", "-c", "echo unconfined > out.txt"]
+        outputs: [{ path: "out.txt", kind: file }]
+"#,
+    );
+    let unconfined = repo
+        .build("a:out", a_host())
+        .await
+        .expect("builds unconfined");
+    let sandbox = a_recording_sandbox("hermetic\n");
+    let tools = BuildTools::load(&repo.tools_dir, Arc::new(a_host()))
+        .expect("tools")
+        .with_sandbox(sandbox.clone());
+    let hermetic = ExecuteOptions {
+        hermetic: true,
+        ..ExecuteOptions::default()
+    };
+
+    // When — the same target builds hermetically, twice
+    let first = repo
+        .build_with("a:out", &tools, &hermetic)
+        .await
+        .expect("builds hermetically");
+    let second = repo
+        .build_with("a:out", &tools, &hermetic)
+        .await
+        .expect("rebuilds hermetically");
+
+    // Then — the unconfined entry was a miss; the hermetic run's own entry is a hit
+    assert_eq!(
+        (
+            cached_flags(&unconfined),
+            cached_flags(&first),
+            cached_flags(&second)
+        ),
+        (vec![false], vec![false], vec![true])
+    );
+    assert_eq!(sandbox.ran(), vec!["write".to_string()]);
+    assert_eq!(repo.read("out.txt"), "hermetic\n");
 }

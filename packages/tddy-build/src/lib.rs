@@ -10,8 +10,6 @@
 //!
 //! The crate has no knowledge of any specific ecosystem target type (those live in plugin
 //! crates) and no sandbox dependency: hermetic actions run through the [`ActionSandbox`] port.
-// TODO(build-tools): the Cargo description and `docs/architecture.md` still say "no tddy-* deps";
-// corrected at wrap.
 
 pub mod proto {
     #![allow(clippy::all)]

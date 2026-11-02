@@ -1,6 +1,6 @@
 # tddy-build architecture
 
-Standalone, Bazel-inspired, content-addressed build **engine** plus a wiring point for build plugins. No `tddy-*` dependencies and **no knowledge of any specific ecosystem target type** — `tddy-tools` and `tddy-coder` depend on it; `tddy-core` only exposes an extension point. The recipe crates (`tddy-build-rust`, `tddy-build-typescript`, `tddy-build-docker`, `tddy-build-buildroot`, `tddy-build-qemu`) depend on it and implement its plugin trait.
+Standalone, Bazel-inspired, content-addressed build **engine** plus a wiring point for build plugins. Its only `tddy-*` dependencies are `tddy-actions` (tool definitions, `ActionSpec`) and `tddy-task` (the process runtime); it has **no sandbox dependency** — hermetic actions run through the `ActionSandbox` port, implemented in `tddy-daemon-sandbox` — and **no knowledge of any specific ecosystem target type** — `tddy-tools` and `tddy-coder` depend on it; `tddy-core` only exposes an extension point. The recipe crates (`tddy-build-rust`, `tddy-build-typescript`, `tddy-build-docker`, `tddy-build-buildroot`, `tddy-build-qemu`) depend on it and implement its plugin trait.
 
 ## Manifests → open serde schema
 

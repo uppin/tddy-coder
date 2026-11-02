@@ -14,9 +14,7 @@ use tddy_task::{TaskHandle, TaskRegistry, TaskStatus};
 use crate::action_convert::build_action_to_spec;
 use crate::action_sandbox::ActionSandbox;
 use crate::builtin::{self, ToolTarget, TOOL};
-use crate::cache::{
-    compute_cache_key_with_tools, lookup_cache, persist_cache, sanitize, CacheMode,
-};
+use crate::cache::{compute_run_cache_key, lookup_cache, persist_cache, sanitize, CacheMode};
 use crate::capabilities::BuildMode;
 use crate::error::BuildError;
 use crate::graph::{action_waves, BuildGraph};
@@ -138,8 +136,8 @@ pub async fn execute_target(
 /// - An action's `PATH` gets each resolved tool's link directory, ahead of the inherited `PATH`.
 /// - An action with `sandbox: true`, or every action when `opts.hermetic`, runs through
 ///   `tools.sandbox`.
-/// - The cache key covers the resolved tool binaries
-///   ([`crate::cache::compute_cache_key_with_tools`]).
+/// - The cache key covers the resolved tool binaries and whether the action runs hermetically
+///   ([`crate::cache::compute_run_cache_key`]).
 pub async fn execute_target_with_tools(
     repo_root: &Path,
     graph: &BuildGraph,
@@ -469,9 +467,8 @@ async fn run_one(
         .iter()
         .map(|tool| file_fingerprint(&tool.binary))
         .collect::<Result<Vec<_>, _>>()?;
-    // TODO(build-tools): the key does not record whether the action ran hermetically, so an entry an
-    // unconfined run wrote can serve a `sandbox: true` action. Decide whether the key should carry it.
-    let cache_key = compute_cache_key_with_tools(action, &fingerprints, &tool_fingerprints);
+    let hermetic = opts.hermetic || action.sandbox;
+    let cache_key = compute_run_cache_key(action, &fingerprints, &tool_fingerprints, hermetic);
 
     if use_cache && lookup_cache(run.repo_root, target_id, &action.id, &cache_key).is_some() {
         log::debug!("cache hit for action {} (target {})", action.id, target_id);
@@ -488,7 +485,7 @@ async fn run_one(
     log::debug!("running action {}: {:?}", action.id, action.command);
 
     prepare_outputs(run.repo_root, action);
-    let outcome = if opts.hermetic || action.sandbox {
+    let outcome = if hermetic {
         run_hermetic(run, action, &closure).await?
     } else {
         run_action(run.repo_root, target_id, action, &closure).await?

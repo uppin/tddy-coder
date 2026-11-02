@@ -1,13 +1,15 @@
 schema_version: 1
 targets:
   # The stamp tool is built, then used: this target installs it, and `tools:bin` names its output
-  # as the tool's binary, so every action listing `tools:bin` builds this target first.
+  # as the tool's binary, so every action listing `tools:bin` builds this target first. The
+  # executor creates each declared output's parent, so the command does not: a hermetic jail
+  # grants writes on the output only, and `mkdir` of its parent is refused there.
   - id: "tools:stamp-build"
     name: "Build the stamp tool"
     actions:
       - id: "install"
         type: command
-        command: ["sh", "-c", "mkdir -p tools/out && cp tools/bin/stamp tools/out/stamp && chmod +x tools/out/stamp"]
+        command: ["sh", "-c", "cp tools/bin/stamp tools/out/stamp && chmod +x tools/out/stamp"]
         inputs:
           - include: ["tools/bin/stamp"]
             root: "."
