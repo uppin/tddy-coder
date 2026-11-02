@@ -18,7 +18,10 @@ interface NewTerminalMenuProps {
    *  to `tmuxSession`. */
   onOpen: (kind: string, tmuxSession?: string) => void;
   /** The host's tmux sessions, offered as a section of the menu; absent offers no tmux section. The
-   *  section lists again each time the menu opens. */
+   *  section lists again each time the menu opens.
+   *  TODO(tmux-new): "New tmux session…" (`sessions-terminal-tab-new-tmux-new`) opening a name field
+   *  (`sessions-terminal-tab-new-tmux-name`) prefilled by `nextTmuxSessionName`; Enter calls
+   *  `onOpen("tmux-new", name)`, Escape cancels. */
   tmux?: TmuxMenuState;
 }
 

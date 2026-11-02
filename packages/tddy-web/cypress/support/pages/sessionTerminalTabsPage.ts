@@ -56,6 +56,14 @@ export const sessionTerminalTabsPage = {
   tmuxOption: (name: string, options?: Parameters<typeof cy.get>[1]) =>
     byTestId(`sessions-terminal-tab-new-tmux-${name}`, { timeout: 10000, ...options }),
 
+  /** The "+" menu's "New tmux session…" item. */
+  tmuxNewOption: (options?: Parameters<typeof cy.get>[1]) =>
+    byTestId("sessions-terminal-tab-new-tmux-new", { timeout: 10000, ...options }),
+
+  /** The name field "New tmux session…" opens. */
+  tmuxNameInput: (options?: Parameters<typeof cy.get>[1]) =>
+    byTestId("sessions-terminal-tab-new-tmux-name", { timeout: 10000, ...options }),
+
   /** The "+" menu's tmux section when the host runs no tmux sessions. */
   tmuxEmpty: (options?: Parameters<typeof cy.get>[1]) =>
     byTestId("sessions-terminal-tab-new-tmux-empty", { timeout: 10000, ...options }),

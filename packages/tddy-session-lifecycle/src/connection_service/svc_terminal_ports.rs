@@ -248,6 +248,15 @@ impl TerminalRoster for CliManagerTerminalRoster {
                     .await
                     .map_err(|e| Status::internal(format!("failed to start terminal: {e}")))?
             }
+            TerminalKind::TmuxNew { session } => {
+                // TODO(tmux-new): validate the name with `tmux_session_name` (INVALID_ARGUMENT).
+                let binary = tmux_host::tmux_binary();
+                let argv = tmux_host::tmux_new_session_argv(&binary, session, &worktree);
+                self.manager
+                    .start_tmux_terminal(session_id, worktree, &launch.os_user, argv, session)
+                    .await
+                    .map_err(|e| Status::internal(format!("failed to start terminal: {e}")))?
+            }
         };
         Ok(handle.terminal_id.clone())
     }

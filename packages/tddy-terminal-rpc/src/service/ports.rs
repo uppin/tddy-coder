@@ -80,25 +80,34 @@ pub enum TerminalKind {
     /// A tmux client attached to `session` on the host's tmux server for the session's OS user —
     /// kind `"tmux"` with a non-empty `tmux_session`. Stopping the terminal detaches it.
     Tmux { session: String },
+    /// A tmux client on a **new** tmux session `session` started in the session's worktree (or
+    /// attached, if one of that name appeared meanwhile) — kind `"tmux-new"`.
+    TmuxNew { session: String },
 }
 
 /// The kind `StartTerminalSessionRequest.kind` names for a tmux terminal.
 pub const TMUX_KIND: &str = "tmux";
+
+/// The kind `StartTerminalSessionRequest.kind` names for a tmux terminal on a new tmux session.
+pub const TMUX_NEW_KIND: &str = "tmux-new";
 
 impl TerminalKind {
     /// The kind a request names, with the tmux session it names for a [`TMUX_KIND`] terminal;
     /// surrounding whitespace is ignored. A tmux kind without a session is `INVALID_ARGUMENT`.
     pub fn from_request(kind: &str, tmux_session: &str) -> Result<TerminalKind, Status> {
         let kind = kind.trim();
-        if kind == TMUX_KIND {
+        if kind == TMUX_KIND || kind == TMUX_NEW_KIND {
             let session = tmux_session.trim();
             if session.is_empty() {
                 return Err(Status::invalid_argument(
                     "a tmux terminal names the tmux session it attaches to",
                 ));
             }
-            return Ok(TerminalKind::Tmux {
-                session: session.to_string(),
+            let session = session.to_string();
+            return Ok(if kind == TMUX_KIND {
+                TerminalKind::Tmux { session }
+            } else {
+                TerminalKind::TmuxNew { session }
             });
         }
         Ok(match kind {

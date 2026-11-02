@@ -61,7 +61,7 @@ pub use service::{
     build_terminal_session_entry, ControlChange, ControlClaim, NoRecordedHistory, NoTmux,
     RecordedTerminalHistory, TerminalControl, TerminalDescriptor, TerminalKind, TerminalLaunch,
     TerminalRoster, TerminalSessionPorts, TerminalSessionServiceImpl, TmuxHost, TmuxSession,
-    TERMINAL_SESSION_SERVICE, TMUX_KIND,
+    TERMINAL_SESSION_SERVICE, TMUX_KIND, TMUX_NEW_KIND,
 };
 
 /// Serialized `FileDescriptorSet` for gRPC reflection (merged at the daemon host with
