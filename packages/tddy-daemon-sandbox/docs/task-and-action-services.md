@@ -39,6 +39,25 @@ re-exports this crate (`pub use tddy_daemon_sandbox::*;`), so those paths resolv
 Neither module needed a dependency the crate did not already have: `tddy-task` and `tddy-actions`
 could not host them without a cycle, and `tddy-daemon-rpc` sits above lifecycle.
 
+## `build_action_sandbox`
+
+`DaemonActionSandbox::new(work_dir)` implements `tddy_build::ActionSandbox` for `sandbox: true` /
+`--hermetic` build actions ([tddy-build § Hermetic actions](../../../docs/ft/build/tddy-build.md#hermetic-actions)).
+It lowers one action into a process-mode jail plan, one directory per action id under `work_dir`:
+inputs are read-only grants, declared outputs the only writable paths, the tool closure is lowered
+by `tddy_sandbox_recipes::lower_tools` (literal executable reads, linked from a jail-local `bin/`
+first on `PATH`), and network is `lower_network` of the closure. A closure that declares egress hosts
+is refused — there is no egress shim for build actions. It spawns through `spawn_sandbox_plan` (Seatbelt
+on macOS, cgroups on Linux); the action's stdout/stderr are captured by a launcher shell into files in
+its jail directory, because the backends' own logs are not the command's output.
+
+Limits: on Linux writes and execs are not confined
+([todo](../../../docs/dev/todo/2026-11-02-hermetic-build-actions-unconfined-on-linux.md)), so the two
+confinement tests in `tests/hermetic_build_action_acceptance.rs` are macOS-only
+(`FIXME(fs-confinement)`); outputs are executable
+([todo](../../../docs/dev/todo/2026-11-02-hermetic-build-action-outputs-are-executable.md)); no egress
+shim ([todo](../../../docs/dev/todo/2026-11-02-hermetic-build-actions-have-no-egress-shim.md)).
+
 ## Tests
 
 | Suite | What it pins |

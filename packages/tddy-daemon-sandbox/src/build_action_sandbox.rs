@@ -1,6 +1,6 @@
 //! `tddy-build`'s hermetic-action port, over the action sandbox runtime (`#agent-tools 4/12`).
 //!
-//! PRD: `docs/ft/build/1-WIP/PRD-2026-10-31-build-tools-are-tool-defs.md`.
+//! Product doc: `docs/ft/build/tddy-build.md` § Hermetic actions.
 //!
 //! [`DaemonActionSandbox`] lowers one build action into a process-mode jail plan:
 //!

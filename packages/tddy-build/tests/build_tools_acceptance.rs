@@ -1,7 +1,7 @@
 //! Acceptance: a BUILD.yaml `type: tool` target is a tool definition — inline, or a `ref` into the
 //! tool registry — and an action's `tool_dep_ids` resolve through that registry.
 //!
-//! PRD: `docs/ft/build/1-WIP/PRD-2026-10-31-build-tools-are-tool-defs.md` (`#agent-tools 4/12`).
+//! Product doc: `docs/ft/build/tddy-build.md` (`#agent-tools 4/12`).
 //!
 //! Every test builds a real repository in a tempdir and runs real actions through
 //! [`execute_target_with_tools`]. The host is a fixture over the real filesystem whose `PATH` holds

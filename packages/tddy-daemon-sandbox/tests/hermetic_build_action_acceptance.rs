@@ -2,7 +2,7 @@
 //! read-only, its declared outputs are the only writable paths, its tool closure is the only set of
 //! executables beyond the jail's baseline, and its network is what that closure declares.
 //!
-//! PRD: `docs/ft/build/1-WIP/PRD-2026-10-31-build-tools-are-tool-defs.md` (`#agent-tools 4/12`).
+//! Product doc: `docs/ft/build/tddy-build.md` (`#agent-tools 4/12`).
 //!
 //! Every test drives `tddy-build`'s executor with [`DaemonActionSandbox`] as its `ActionSandbox`,
 //! against a real repository in a tempdir. The claim is confinement, which only the real backend

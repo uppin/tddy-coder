@@ -1,6 +1,6 @@
 //! The hermetic-action port (`#agent-tools 4/12`).
 //!
-//! PRD: `docs/ft/build/1-WIP/PRD-2026-10-31-build-tools-are-tool-defs.md`.
+//! Product doc: `docs/ft/build/tddy-build.md` § Hermetic actions.
 //!
 //! An action with `sandbox: true` — or every action of a `--hermetic` run — is not spawned by the
 //! executor itself. It is handed to an [`ActionSandbox`], which runs it in a jail where:
