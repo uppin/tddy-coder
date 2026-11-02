@@ -52,6 +52,7 @@ use crate::session::TerminalSession;
 const CONTROL_EVENT_CHANNEL_CAPACITY: usize = 16;
 
 pub use ports::*;
+use recorded_history::serve_recorded_history;
 pub use recorded_history::{NoRecordedHistory, RecordedTerminalHistory};
 
 /// The `terminal_session.TerminalSessionService` implementation.
@@ -278,16 +279,34 @@ impl TerminalSessionService for TerminalSessionServiceImpl {
         request: Request<GetTerminalHistoryRequest>,
     ) -> Result<Response<Self::GetTerminalHistoryStream>, Status> {
         let mut req = request.into_inner();
-        self.os_user(&req.session_token)?;
+        let os_user = self.os_user(&req.session_token)?;
         req.session_id = keyed_session_id(&req.session_id);
 
-        // TODO(agent-history): answer a terminal that is not running from `ports.recorded_history`.
-        let rx = serve_get_terminal_history_with(
-            &*self.ports.terminals,
-            req,
-            self.ports.initial_frame_bytes,
-        )
-        .await?;
+        // A running terminal is answered from its live capture and never reads its recording. Only a
+        // terminal that is not running is answered from what its host recorded of it.
+        let terminal_id = resolved_terminal_id(&req.terminal_id);
+        let running = self
+            .ports
+            .terminals
+            .get_terminal(&req.session_id, terminal_id)
+            .await
+            .is_some();
+        let rx = if running {
+            serve_get_terminal_history_with(
+                &*self.ports.terminals,
+                req,
+                self.ports.initial_frame_bytes,
+            )
+            .await?
+        } else {
+            serve_recorded_history(
+                &*self.ports.recorded_history,
+                &os_user,
+                &req,
+                self.ports.initial_frame_bytes,
+            )
+            .await?
+        };
         Ok(Response::new(ReceiverStream::new(rx)))
     }
 
