@@ -89,9 +89,18 @@
   `sandboxed_claude_cli_acceptance` (5), `sandbox_behavior_acceptance` (5) and
   `sandboxed_session_lifecycle_acceptance` (2) were refused with `this host has no coding agents
   installed`. Their Givens now install coding agents, with the built `tddy-tools` on a stub `PATH`.
-  Linux CI does not run them. They now stop at the pre-existing `sandbox RPC bridge not installed`
-  harness gap (from #670). Three of them also conflict with "no `TDDY_*` variable on the agent"
-  (`TDDY_EGRESS_SHIM`/`TDDY_EGRESS_PROBE_*`, `TDDY_SUBAGENT`), which is left for the developer.
+  Linux CI does not run them. They also install the sandbox RPC bridge, as the runtime does at
+  mount. Their `minimal_service` never had it, a harness gap since #670.
+- **Three tests moved to the no-`TDDY_*`-on-the-agent contract (developer decision, 2026-11-02).**
+  Production is unchanged. `tddy_testing_commons::write_egress_probe_claude_script(dir, host, port)`
+  bakes the direct-socket target into the script instead of reading `TDDY_EGRESS_PROBE_HOST/PORT`.
+  It reaches the shim through `HTTPS_PROXY` (with `--noproxy '*'`), not `TDDY_EGRESS_SHIM`. That
+  keeps `sandboxed_session_relays_claude_llm_egress_via_session_channel` and
+  `sandboxed_session_denies_direct_outbound_network_from_jail` proving the same behaviour. Its
+  other caller, `tddy-sandbox-darwin`'s `sandbox_runner_behavior_acceptance`, passes the target too.
+  `sandboxed_claude_cli_start_wires_specialized_agents_env_and_metadata` now asserts
+  `TDDY_SUBAGENT=fastcontext` in the `tddy-tools` server's `env` of the `--mcp-config` the agent
+  was given, where `tddy-tools` reads it, instead of in the jailed process env.
 
 ## Tests
 

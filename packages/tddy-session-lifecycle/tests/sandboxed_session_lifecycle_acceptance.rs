@@ -84,20 +84,28 @@ fn minimal_service(config: DaemonConfig, sessions_base: PathBuf) -> DaemonSessio
 /// [`minimal_service`] with the daemon's coding agents installed, as the runtime installs them: a
 /// sandboxed `claude-cli` session is launched from the `claude` tool definition, which resolves the
 /// jail's `tddy-tools` on a `PATH` of `<sessions_base>/stub-bin` alone. `claude` itself stays the
-/// configured `claude_cli.binary_path`.
-fn a_service_with_coding_agents(config: DaemonConfig, sessions_base: PathBuf) -> DaemonSessionHost {
+/// configured `claude_cli.binary_path`. A sandboxed launch reaches the jail over the sandbox RPC
+/// bridge, which the daemon runtime installs at mount.
+fn a_service_with_coding_agents(
+    config: DaemonConfig,
+    sessions_base: PathBuf,
+) -> Arc<DaemonSessionHost> {
     let stub_bin = sessions_base.join("stub-bin");
     std::fs::create_dir_all(&stub_bin).unwrap();
     let stub_bin = std::fs::canonicalize(stub_bin).unwrap();
     std::os::unix::fs::symlink(tddy_tools_binary(), stub_bin.join("tddy-tools")).unwrap();
     let registry = tddy_coding_agent_specs::load_agent_registry(&sessions_base.join("tools"))
         .expect("the agent registry loads");
-    minimal_service(config, sessions_base).with_coding_agents(Arc::new(
-        tddy_agent_launch::spec_launch::HostCodingAgents::new(
-            registry,
-            Arc::new(APathHost(vec![stub_bin])),
-        ),
-    ))
+    let host = Arc::new(
+        minimal_service(config, sessions_base).with_coding_agents(Arc::new(
+            tddy_agent_launch::spec_launch::HostCodingAgents::new(
+                registry,
+                Arc::new(APathHost(vec![stub_bin])),
+            ),
+        )),
+    );
+    host.install_sandbox_rpc_bridge();
+    host
 }
 
 /// A tool host with a declared `PATH` over the real filesystem: nothing of the real machine's

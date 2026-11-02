@@ -150,20 +150,25 @@ fn a_stub_bin_with_tddy_tools(sessions_base: &std::path::Path) -> PathBuf {
 
 /// [`minimal_service`] with the daemon's coding agents installed, as the runtime installs them: a
 /// sandboxed `claude-cli` session is launched from the `claude` tool definition, resolved on a
-/// `PATH` of `stub_bin` alone.
+/// `PATH` of `stub_bin` alone. A sandboxed launch reaches the jail over the sandbox RPC bridge,
+/// which the daemon runtime installs at mount.
 fn a_service_with_coding_agents(
     config: DaemonConfig,
     sessions_base: PathBuf,
     stub_bin: PathBuf,
-) -> DaemonSessionHost {
+) -> Arc<DaemonSessionHost> {
     let registry = tddy_coding_agent_specs::load_agent_registry(&sessions_base.join("tools"))
         .expect("the agent registry loads");
-    minimal_service(config, sessions_base).with_coding_agents(Arc::new(
-        tddy_agent_launch::spec_launch::HostCodingAgents::new(
-            registry,
-            Arc::new(APathHost(vec![stub_bin])),
-        ),
-    ))
+    let host = Arc::new(
+        minimal_service(config, sessions_base).with_coding_agents(Arc::new(
+            tddy_agent_launch::spec_launch::HostCodingAgents::new(
+                registry,
+                Arc::new(APathHost(vec![stub_bin])),
+            ),
+        )),
+    );
+    host.install_sandbox_rpc_bridge();
+    host
 }
 
 /// A tool host with a declared `PATH` over the real filesystem: nothing of the real machine's
@@ -609,7 +614,8 @@ async fn sandboxed_claude_cli_start_wires_specialized_agents_env_and_metadata() 
     let persisted_roster: Vec<&str> = meta.agents.iter().map(|a| a.name.as_str()).collect();
     assert_eq!(persisted_roster, vec!["fastcontext"]);
 
-    // Then — the jailed process actually received TDDY_SUBAGENT in its env
+    // Then — the jail's `tddy-tools` MCP server, which reads the roster, is given TDDY_SUBAGENT in
+    // its env block (the agent process itself is given no `TDDY_*` variable)
     let stream_resp = service
         .terminal_session_service()
         .stream_terminal_output(Request::direct(StreamTerminalOutputRequest {
@@ -626,20 +632,35 @@ async fn sandboxed_claude_cli_start_wires_specialized_agents_env_and_metadata() 
         .expect("stream_terminal_output must succeed for sandbox session");
     let mut stream = stream_resp.into_inner();
 
-    let saw_subagent_env = tokio::time::timeout(Duration::from_secs(30), async {
+    let launched_argv = tokio::time::timeout(Duration::from_secs(30), async {
+        let mut text = String::new();
         while let Some(Ok(msg)) = stream.next().await {
-            let text = String::from_utf8_lossy(&msg.data);
-            if text.contains("TDDY_SUBAGENT=fastcontext") {
-                return true;
+            text.push_str(&String::from_utf8_lossy(&msg.data));
+            if let Some(line) = text
+                .lines()
+                .find(|line| line.starts_with("ARGV: ") && line.contains("claude-mcp-config.json"))
+            {
+                return Some(line.to_string());
             }
         }
-        false
+        None
     })
     .await
-    .unwrap_or(false);
-
-    assert!(
-        saw_subagent_env,
-        "jailed process env must include TDDY_SUBAGENT=fastcontext"
+    .ok()
+    .flatten()
+    .expect("the jailed agent must report the argv it was launched with");
+    let mcp_config_path = launched_argv
+        .split_whitespace()
+        .skip_while(|arg| *arg != "--mcp-config")
+        .nth(1)
+        .expect("the jailed agent must be given --mcp-config");
+    let mcp_config: serde_json::Value = serde_json::from_str(
+        &std::fs::read_to_string(mcp_config_path).expect("the MCP config the agent was given"),
+    )
+    .expect("the MCP config is JSON");
+    assert_eq!(
+        mcp_config["mcpServers"]["tddy-tools"]["env"]["TDDY_SUBAGENT"],
+        serde_json::json!("fastcontext"),
+        "the tddy-tools MCP server env must include TDDY_SUBAGENT=fastcontext: {mcp_config}"
     );
 }
