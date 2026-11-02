@@ -58,4 +58,10 @@ export interface SessionRuntimeProps {
   onSelectAgentConversation?: (conversationId: string | null) => void;
   /** Close a conversation's tab — the owner drops it, which cancels it. */
   onCloseAgentConversation?: (conversationId: string) => void;
+  /** The element this session's conversation bodies live in (see `SessionAgentConversationLayer`).
+   *  The runtime adopts it into its pane stack; it does not render the bodies itself. */
+  conversationHost?: HTMLElement;
+  /** Whether this runtime is the strip currently showing the session's conversations. `false` while
+   *  a stopped session's own strip is covering this one. Default `true`. */
+  hostsConversations?: boolean;
 }

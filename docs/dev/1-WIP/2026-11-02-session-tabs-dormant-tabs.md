@@ -45,6 +45,19 @@
     with `SessionActivitiesPane`. n6 fills the same slot with the greyed terminal.
 - `SessionMainPane`: a dormant selected session renders `DormantSessionRuntime` instead of the
   full-pane activities overlay. A workflow session's custom view is unchanged.
+- **Conversation bodies are owned by neither strip.** `SessionAgentConversationLayer`
+  (`SessionAgentConversationLayer.tsx`) is rendered once by `SessionMainPane` and portals each
+  conversation body into a per-session host element (`useConversationHosts`); the strip showing a
+  session adopts that host into its pane stack (`useConversationHostAttachment`). `SessionRuntime`
+  no longer renders the bodies (it gains `conversationHost` / `hostsConversations`). Only closing a
+  tab ends a conversation.
+- **The stopped strip carries the live strip's features for its bash tabs:** full screen
+  (`useSessionPaneFullscreen`), the mobile shortcut drawer (`mobileShortcuts`), the Files-tab Insert
+  (the strip registers an insert for its focused bash tab; `SessionMainPane` routes the inspector's
+  `onInsertPathIntoTerminal` to it while the stopped strip shows) and the Claim-terminal toast with the
+  grey-out (`useTerminalControl`). The shared chrome — `PaneFullscreenExit`, `TerminalControlLayer` —
+  lives in `SessionPaneChrome.tsx` and is used by both strips. The Agent tab of a stopped session is a
+  transcript: it takes no input, shows no claim toast and takes no inserts.
 
 ## Boundaries
 
@@ -104,7 +117,12 @@ Real dependency edges, as opposed to the branch line:
 - `packages/tddy-session-lifecycle/src/connection_service/svc_terminal_ports/recorded_worktree.rs`
 - `packages/tddy-web/src/components/sessions/DormantSessionRuntime.tsx`
 
+- `packages/tddy-web/src/components/sessions/SessionAgentConversationLayer.tsx` (conversation bodies + host elements)
+- `packages/tddy-web/src/components/sessions/SessionPaneChrome.tsx` (fullscreen exit, control layer — shared by both strips)
+
 ### Modified
+- `packages/tddy-web/src/components/sessions/SessionRuntime.tsx` (bodies moved out; adopts the host; shared chrome) and `sessionRuntimeProps.ts`.
+- `packages/tddy-web/cypress/support/rpc/terminalSessionServiceBackend.ts` (`leaseHeldBy`), `cypress/support/pages/sessionTerminalTabsPage.ts` (`paneShortcutDrawer`).
 - `packages/tddy-session-lifecycle/src/connection_service/svc_terminal_ports.rs` (`start` resolves via `recorded_worktree` when `main` is absent; the roster gains the config it needs).
 - `packages/tddy-web/src/components/sessions/SessionMainPane.tsx` (render `DormantSessionRuntime` for a dormant session).
 - Docs, at wrap: `docs/ft/web/session-terminal-tabs.md`, `docs/ft/web/inactive-session-activities.md`, `packages/tddy-session-lifecycle/docs/`.
@@ -115,23 +133,36 @@ Real dependency edges, as opposed to the branch line:
 
 **`tddy-session-lifecycle`**: `packages/tddy-session-lifecycle/tests/dormant_session_tabs_acceptance.rs`
 
-- [ ] `a_bash_tab_on_a_stopped_session_starts_in_its_recorded_worktree`
-- [ ] `a_harness_tab_on_a_stopped_session_starts_in_its_recorded_worktree`
-- [ ] `a_stopped_session_without_a_recorded_worktree_is_refused_naming_it`
-- [ ] `an_unknown_session_is_refused_naming_it`
-- [ ] `a_live_session_still_starts_tabs_in_its_main_terminals_worktree`
+- [x] `a_bash_tab_on_a_stopped_session_starts_in_its_recorded_worktree`
+- [x] `a_harness_tab_on_a_stopped_session_starts_in_its_recorded_worktree`
+- [x] `a_stopped_session_without_a_recorded_worktree_is_refused_naming_it`
+- [x] `an_unknown_session_is_refused_naming_it`
+- [x] `a_live_session_still_starts_tabs_in_its_main_terminals_worktree`
 
 **`tddy-web`**: `packages/tddy-web/cypress/component/DormantSessionTabsAcceptance.cy.tsx`
 
-- [ ] `a stopped session shows its tab strip with the recorded transcript in the Agent tab`
-- [ ] `"+" → Bash on a stopped session opens a working terminal tab`
-- [ ] `a stopped session lists the terminals the daemon already runs for it`
-- [ ] `Add agent on a stopped session opens a conversation tab in its strip`
-- [ ] `a tab opened while the session was stopped is still in the strip after Resume`
+- [x] `a stopped session shows its tab strip with the recorded transcript in the Agent tab`
+- [x] `"+" → Bash on a stopped session opens a working terminal tab`
+- [x] `a stopped session lists the terminals the daemon already runs for it`
+- [x] `Add agent on a stopped session opens a conversation tab in its strip`
+- [x] `a tab opened while the session was stopped is still in the strip after Resume`
+
+Added in green (developer decisions 2026-11-02), same spec:
+
+- [x] `a conversation opened on a stopped session is not cancelled by leaving it and coming back`
+- [x] `a conversation opened on a stopped session is not cancelled by Resume`
+- [x] `a stopped session's terminal can be taken to full screen`
+- [x] `a stopped session's bash tab carries the tool's shortcut drawer`
+- [x] `the Files tab inserts an uploaded path into a stopped session's focused bash tab`
+- [x] `a stopped session's bash tab offers Claim terminal while another screen holds its lease`
+
+The fifth red test selected `sessions-detail-resume-<id>`, which only the unused `SessionDetailPane`
+renders; it now clicks the real dormant Resume, `sessions-main-resume-<id>`, through
+`sessionActivitiesPage.resume`. Its intent is unchanged.
 
 ### Unit / integration tests
 
-- [ ] `recorded_worktree.rs` unit tests (`#[cfg(test)]`):
+- [x] `recorded_worktree.rs` unit tests (`#[cfg(test)]`):
   - `a_stopped_session_resolves_to_the_worktree_its_metadata_records`;
   - `a_session_whose_metadata_records_no_worktree_is_refused_naming_it`;
   - `a_session_with_no_directory_on_this_host_is_refused_naming_it`;
@@ -154,6 +185,22 @@ Real dependency edges, as opposed to the branch line:
   roster resolves it), so the roster needs no OS user. `TerminalLaunch.os_user` was planned here and
   moved to n3 `tmux-attach`, its only consumer (refined in pass 2).
 - **A render slot for the Agent tab**, so n6 replaces its body without touching the strip host.
+- **Conversation bodies live above both strips (option B), via portals into stable per-session host
+  elements.** A body cancels its conversation on unmount, and Resume swaps the stopped strip for the
+  live one, as selecting another session swaps strips — a body owned by either would end the
+  conversation. A portal whose container changes remounts its children, so the portal target is a
+  host element the layer owns and the strips *move*, not a container that changes. Considered and
+  rejected: keeping bodies in the strip and re-opening on remount (loses the transcript the daemon
+  holds nothing for).
+- **Test 5's locator was wrong, not the behaviour:** the planner chose the Resume button of the
+  unused `SessionDetailPane`. `SessionDetailPane.tsx` is left in place (out of scope).
+- **`leaseHeldBy` added to the in-memory terminal fake** (`terminalSessionServiceBackend.ts`) so a
+  spec can say another screen holds the lease; the scenario could not express it before.
+
+## Files left for a human
+
+- `packages/tddy-web/src/components/sessions/SessionDetailPane.tsx` is rendered by nothing; it was the
+  source of test 5's wrong locator. Not deleted (out of scope; deleting needs consent).
 
 ## Baseline before green
 
@@ -173,7 +220,7 @@ Recorded at the contract commit (2026-11-02), scoped to `tddy-session-lifecycle`
 - [x] Run acceptance tests (verify they fail)
 - [x] USER REVIEW — acceptance tests — approved by the developer 2026-11-02 (later nodes' reviews waived)
 - [x] TDD Red — write failing unit/integration tests
-- [ ] TDD Green — implement with quality code
+- [x] TDD Green — implement with quality code
 - [ ] Update documentation with progress
 - [ ] Repeat Red→Green→Update cycle until feature complete
 - [ ] Run the touched packages' tests (`./test -p {package}` per package) — verify 100% pass

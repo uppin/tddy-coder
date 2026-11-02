@@ -23,6 +23,7 @@ import {
 import { anAvailableAgent } from "../support/rpc/sessionAgentRosterBackend";
 import { replayAgentText } from "../support/rpc/acpReplay";
 import { sessionsDrawerPage } from "../support/pages/sessionsDrawerPage";
+import { sessionFilesTabPage as files } from "../support/pages/sessionFilesTabPage";
 import { sessionActivitiesPage } from "../support/pages/sessionActivitiesPage";
 import { sessionTerminalTabsPage as tabs } from "../support/pages/sessionTerminalTabsPage";
 import { sessionAgentConversationPage as conversations } from "../support/pages/sessionAgentConversationPage";
@@ -45,7 +46,25 @@ const STOPPED = {
   projectId: "proj-stopped-tabs-1",
   daemonInstanceId: HOST,
   sessionType: "claude-cli",
+  agent: "claude-cli",
   pendingElicitation: false,
+};
+
+/** Another stopped session, to move the selection to and come back from. */
+const ANOTHER = {
+  ...STOPPED,
+  sessionId: "stopped-tabs-bbbbbbbb-0000-0000-0000-000000000002",
+  repoPath: "/home/dev/other-work",
+  projectId: "proj-stopped-tabs-2",
+};
+
+/** A file already uploaded to the stopped session. */
+const UPLOAD = {
+  uploadId: "up-1",
+  fileName: "report.pdf",
+  hostPath: "/home/dev/finished-work/uploads/report.pdf",
+  sizeBytes: 1024n,
+  uploadedAtMs: 1_700_000_000_000n,
 };
 
 /** The transcript the daemon replays for the stopped session. */
@@ -58,10 +77,13 @@ const RECORDED_TRANSCRIPT = {
 /** A daemon serving the stopped session, its transcript, an agent to add, and `terminals`. */
 function aStoppedSessionBackend(
   terminals: Array<{ terminalId: string }> = [],
+  extra: { leaseHeldBy?: string } = {},
 ): SessionServiceBackend {
   return aSessionServiceBackend({
-    sessions: [STOPPED],
+    sessions: [STOPPED, ANOTHER],
     terminals,
+    uploads: [UPLOAD],
+    ...extra,
     acpReplay: RECORDED_TRANSCRIPT,
     sessionAgents: {
       sessionId: STOPPED.sessionId,
@@ -83,6 +105,13 @@ function aStoppedSessionThatResumes(): SessionServiceBackend {
     listSessionsFactory: () =>
       resumed ? [{ ...STOPPED, status: "active", pid: 4242, isActive: true }] : [STOPPED],
     acpReplay: RECORDED_TRANSCRIPT,
+    sessionAgents: {
+      sessionId: STOPPED.sessionId,
+      initial: [],
+      rev: 0,
+      offers: [anAvailableAgent("explorer", HOST)],
+    },
+    agentConversations: { answerChunks: ["ready"], stopReason: "EndTurn" },
     connectSession: () => ({ livekitRoom: "", livekitUrl: "", livekitServerIdentity: "" }),
     resumeSession: (sessionId) => {
       resumed = true;
@@ -94,6 +123,36 @@ function aStoppedSessionThatResumes(): SessionServiceBackend {
 function selectStoppedSession(backend: SessionServiceBackend) {
   mountWithRpc(withSelectedDaemon(<SessionsDrawerScreen />), backend);
   sessionsDrawerPage.drawerItem(STOPPED.sessionId).click();
+}
+
+/**
+ * Stub the Fullscreen API on the AUT window and drive `document.fullscreenElement` from the stub, so
+ * the component's `fullscreenchange` listener sees the state the browser would have produced (as
+ * `SessionTerminalFullscreenAcceptance` does). Must run AFTER mount.
+ */
+function stubFullscreenApi() {
+  cy.window().then((win) => {
+    const setActive = (el: Element | null) => {
+      Object.defineProperty(win.document, "fullscreenElement", {
+        configurable: true,
+        get: () => el,
+      });
+      win.document.dispatchEvent(new win.Event("fullscreenchange"));
+    };
+    cy.stub(win.Element.prototype, "requestFullscreen")
+      .as("requestFullscreen")
+      .callsFake(function (this: Element) {
+        setActive(this);
+        return Promise.resolve();
+      });
+    cy.stub(win.document, "exitFullscreen")
+      .as("exitFullscreen")
+      .callsFake(() => {
+        setActive(null);
+        return Promise.resolve();
+      });
+    setActive(null);
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -178,10 +237,126 @@ describe("A stopped session keeps its tab strip", () => {
     tabs.tab("bash-1").should("exist");
 
     // When the operator resumes the session
-    sessionsDrawerPage.detailResumeBtn(STOPPED.sessionId).click();
+    sessionActivitiesPage.resume(STOPPED.sessionId);
 
     // Then the live session's strip still carries that tab
-    sessionsDrawerPage.detailResumeBtn(STOPPED.sessionId).should("not.exist");
+    sessionActivitiesPage.resumeBtn(STOPPED.sessionId).should("not.exist");
     tabs.tab("bash-1").should("exist");
+  });
+
+  it("a conversation opened on a stopped session is not cancelled by leaving it and coming back", () => {
+    // Given a conversation opened on a stopped session
+    const backend = aStoppedSessionBackend();
+    selectStoppedSession(backend);
+    conversations.attachAgent(EXPLORER);
+    conversations.tabs().should("have.length", 1).and("have.attr", "aria-selected", "true");
+
+    // When another session is selected and this one is selected again
+    sessionsDrawerPage.drawerItem(ANOTHER.sessionId).click();
+    sessionsDrawerPage.drawerItem(STOPPED.sessionId).click();
+
+    // Then the conversation was never cancelled, and it is still the tab holding the pane
+    cy.wrap(null).should(() => {
+      expect(backend.cancelledConversationIds()).to.deep.equal([]);
+    });
+    conversations.tabs().should("have.length", 1).and("have.attr", "aria-selected", "true");
+    conversations.panes().should("have.length", 1).and("be.visible");
+  });
+
+  it("a conversation opened on a stopped session is not cancelled by Resume", () => {
+    // Given a conversation opened on a stopped session
+    const backend = aStoppedSessionThatResumes();
+    selectStoppedSession(backend);
+    conversations.attachAgent(EXPLORER);
+    conversations.tabs().should("have.length", 1).and("have.attr", "aria-selected", "true");
+
+    // When the operator resumes the session
+    sessionActivitiesPage.resume(STOPPED.sessionId);
+    sessionActivitiesPage.resumeBtn(STOPPED.sessionId).should("not.exist");
+
+    // Then the conversation was never cancelled, and it is still the open tab
+    cy.wrap(null).should(() => {
+      expect(backend.cancelledConversationIds()).to.deep.equal([]);
+    });
+    conversations.tabs().should("have.length", 1).and("have.attr", "aria-selected", "true");
+    conversations.panes().should("have.length", 1).and("be.visible");
+  });
+
+  it("a stopped session's terminal can be taken to full screen", () => {
+    // Given a stopped session with its strip showing
+    const backend = aStoppedSessionBackend();
+    selectStoppedSession(backend);
+    tabs.tabs().should("be.visible");
+    stubFullscreenApi();
+
+    // When the operator asks for full screen
+    tabs.fullscreenToggle().click();
+
+    // Then this session's pane stack — not its tab strip — is handed to the Fullscreen API, and the
+    // pane draws its own way back
+    tabs.paneStack(STOPPED.sessionId).then(($stack) => {
+      cy.get("@requestFullscreen").should((subject) => {
+        const stub = subject as unknown as sinon.SinonStub;
+        expect(stub.firstCall.thisValue).to.equal($stack[0]);
+      });
+    });
+    tabs.fullscreenExit().should("exist").click({ force: true });
+    cy.get("@exitFullscreen").should("have.been.calledOnce");
+  });
+
+  it("a stopped session's bash tab carries the tool's shortcut drawer", () => {
+    // Given a stopped claude-cli session with a bash tab
+    const backend = aStoppedSessionBackend([{ terminalId: "bash-1" }]);
+    selectStoppedSession(backend);
+
+    // When the bash tab is the one showing
+    tabs.tab("bash-1").click();
+
+    // Then its pane carries the shortcut drawer for the session's tool
+    tabs.paneShortcutDrawer("bash-1").should("exist");
+  });
+
+  it("the Files tab inserts an uploaded path into a stopped session's focused bash tab", () => {
+    // Given a stopped session with a bash tab showing, and an uploaded file
+    const backend = aStoppedSessionBackend([{ terminalId: "bash-1" }]);
+    selectStoppedSession(backend);
+    tabs.tab("bash-1").click();
+    cy.wrap(backend).should((b: SessionServiceBackend) => {
+      expect(b.streamedTerminals.map((s) => s.terminalId)).to.include("bash-1");
+    });
+
+    // When the file's Insert is pressed in the inspector's Files tab
+    sessionsDrawerPage.inspectorToggle().click();
+    files.tabButton().click();
+    files.insert(UPLOAD.fileName).click();
+
+    // Then the shell-quoted path was typed into that bash terminal
+    cy.wrap(backend).should((b: SessionServiceBackend) => {
+      const typed = b.sentTerminalInput
+        .filter((i) => i.terminalId === "bash-1")
+        .map((i) => new TextDecoder().decode(i.data))
+        .join("");
+      expect(typed).to.contain(UPLOAD.hostPath);
+    });
+  });
+
+  it("a stopped session's bash tab offers Claim terminal while another screen holds its lease", () => {
+    // Given a stopped session whose terminals' lease another screen holds, with a bash tab
+    const backend = aStoppedSessionBackend([{ terminalId: "bash-1" }], {
+      leaseHeldBy: "screen-held-by-another-9999",
+    });
+    selectStoppedSession(backend);
+
+    // Then the Agent tab (a transcript, which takes no input) offers no claim
+    tabs.agentTab().should("have.attr", "aria-selected", "true");
+    sessionsDrawerPage.terminalControlOverlay({ timeout: 1000 }).should("not.exist");
+
+    // When the bash tab is shown, the toast names the holder and offers the claim
+    tabs.tab("bash-1").click();
+    sessionsDrawerPage.terminalControlHolder().should("contain.text", "screen-held-by-another-9999");
+
+    // And claiming takes the lease, which removes the toast
+    sessionsDrawerPage.terminalClaimBtn().click();
+    sessionsDrawerPage.terminalControlOverlay({ timeout: 1000 }).should("not.exist");
   });
 });

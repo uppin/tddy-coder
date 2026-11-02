@@ -70,6 +70,12 @@ export const sessionTerminalTabsPage = {
       `[data-testid='${TEST_IDS.ghosttyTerminal}']`,
     ),
 
+  /** The mobile shortcut drawer inside one terminal's pane. */
+  paneShortcutDrawer: (terminalId: string, options?: Parameters<typeof cy.get>[1]) =>
+    byTestId(sessionsTerminalPane(terminalId), { timeout: 10000, ...options }).find(
+      `[data-testid='${TEST_IDS.shortcutDrawer}']`,
+    ),
+
   /** A tab for a spawned child conversation, keyed by the child's session id. */
   childTab: (sessionId: string, options?: Parameters<typeof cy.get>[1]) =>
     byTestId(sessionsChildTab(sessionId), { timeout: 10000, ...options }),
