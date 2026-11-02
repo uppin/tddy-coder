@@ -297,6 +297,7 @@ fn create_backend_for_args(args: &Args, agent: &str) -> anyhow::Result<SharedBac
         None,
         None,
         &tools_dir,
+        Arc::new(tddy_actions::tool::ProcessToolHost),
         &resolve_specialized_agent_defs(args)?,
         load_provider_route(args.provider_route_path.as_deref())?,
     )
@@ -2531,6 +2532,8 @@ fn create_backend(
     _working_dir: Option<&Path>,
     // `<tddyhome>/tools`: the coding agent declarations `claude` is rendered from.
     tools_dir: &Path,
+    // Where `claude` and its deps (`tddy-tools`) are resolved: this process's env and `PATH`.
+    tool_host: Arc<dyn tddy_actions::tool::ToolHost>,
     // Resolved specialized-agent defs (<tddyhome>/agents/*.yaml, `--agent-def-path` — see
     // docs/ft/coder/specialized-subagents.md).
     specialized_agent_defs: &[tddy_discovery::agent_def::SpecializedAgentDef],
@@ -2598,10 +2601,7 @@ fn create_backend(
         // Rendered from `claude.yaml`'s headless section on this host's tools, so the spec is the
         // only path a `claude` workflow takes.
         "claude" => {
-            let claude = crate::claude_from_spec::claude_backend_from_spec(
-                tools_dir,
-                Arc::new(tddy_actions::tool::ProcessToolHost),
-            )?;
+            let claude = crate::claude_from_spec::claude_backend_from_spec(tools_dir, tool_host)?;
             AnyBackend::Claude(claude.with_progress(on_progress))
         }
         unknown => {
@@ -2728,6 +2728,7 @@ mod create_backend_specialized_agent_tests {
             None,
             None,
             std::path::Path::new("/nonexistent/tools"),
+            std::sync::Arc::new(tddy_actions::tool::ProcessToolHost),
             std::slice::from_ref(&def),
             None,
         )
@@ -2780,6 +2781,7 @@ mod create_backend_specialized_agent_tests {
             None,
             None,
             std::path::Path::new("/nonexistent/tools"),
+            std::sync::Arc::new(tddy_actions::tool::ProcessToolHost),
             std::slice::from_ref(&def),
             None,
         )
@@ -2831,6 +2833,7 @@ mod create_backend_specialized_agent_tests {
             None,
             None,
             std::path::Path::new("/nonexistent/tools"),
+            std::sync::Arc::new(tddy_actions::tool::ProcessToolHost),
             std::slice::from_ref(&def),
             None,
         )
@@ -2854,6 +2857,7 @@ mod agent_def_handover_tests {
     //! PRD: docs/ft/web/1-WIP/PRD-2026-08-16-models-and-assistants.md (AC9).
 
     use super::{create_backend, resolve_specialized_agent_defs, Args};
+    use std::path::{Path, PathBuf};
     use tddy_core::backend::CodingBackend;
     use tddy_discovery::agent_def::{SpecializedAgentDef, SubagentTool};
 
@@ -3017,6 +3021,7 @@ mod agent_def_handover_tests {
             None,
             None,
             std::path::Path::new("/nonexistent/tools"),
+            std::sync::Arc::new(tddy_actions::tool::ProcessToolHost),
             &defs,
             None,
         )
@@ -3031,10 +3036,52 @@ mod agent_def_handover_tests {
         );
     }
 
+    /// A host that knows nothing of the real machine: its `PATH` is one directory holding an
+    /// executable stub `claude` and `tddy-tools`, and it has no environment.
+    struct AHostWithStubAgentTools {
+        bin: tempfile::TempDir,
+    }
+
+    impl AHostWithStubAgentTools {
+        fn new() -> Self {
+            use std::os::unix::fs::PermissionsExt;
+            let bin = tempfile::tempdir().expect("stub bin dir");
+            for name in ["claude", "tddy-tools"] {
+                let path = bin.path().join(name);
+                std::fs::write(&path, "#!/bin/sh\nexit 0\n").expect("stub binary");
+                std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755))
+                    .expect("stub binary mode");
+            }
+            Self { bin }
+        }
+    }
+
+    impl tddy_actions::tool::ToolHost for AHostWithStubAgentTools {
+        fn env_var(&self, _name: &str) -> Option<String> {
+            None
+        }
+
+        fn path_dirs(&self) -> Vec<PathBuf> {
+            vec![self.bin.path().to_path_buf()]
+        }
+
+        fn is_executable_file(&self, path: &Path) -> bool {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::metadata(path)
+                .is_ok_and(|m| m.is_file() && m.permissions().mode() & 0o111 != 0)
+        }
+
+        fn canonicalize(&self, path: &Path) -> std::io::Result<PathBuf> {
+            std::fs::canonicalize(path)
+        }
+    }
+
     #[test]
     fn the_default_claude_backend_is_still_selectable_by_name() {
-        // Given
+        // Given — a host whose `claude` and `tddy-tools` are stubs, so nothing of this machine's
+        // installed tools is consulted
         let defs: Vec<SpecializedAgentDef> = Vec::new();
+        let host = std::sync::Arc::new(AHostWithStubAgentTools::new());
 
         // When
         let backend = create_backend(
@@ -3046,6 +3093,7 @@ mod agent_def_handover_tests {
             None,
             None,
             std::path::Path::new("/nonexistent/tools"),
+            host,
             &defs,
             None,
         )
@@ -3397,6 +3445,7 @@ fn run_full_workflow_tui(
                     socket_path_for_factory.as_deref(),
                     None,
                     &tools_dir_for_factory,
+                    Arc::new(tddy_actions::tool::ProcessToolHost),
                     &specialized_agent_defs_for_factory,
                     provider_route_for_factory.clone(),
                 )

@@ -22,3 +22,7 @@
 
 - The hand-built paths stay while callers remain: `build_claude_args` (`tddy-integration-tests/tests/backend_args.rs`), `create_mcp_config_temp_file` (renderer-less `ClaudeCodeBackend`), `argv.rs::claude()` (`tests/headless_driver_acceptance.rs`), the launcher's hand-built Claude MCP registration (launchers without coding agents). See `docs/dev/todo/2026-11-02-claude-hand-built-headless-paths.md`.
 - File-size and complexity growth in `claude.rs`, `headless_driver.rs`, `coding_agent_launcher.rs` and `run.rs` is recorded in the packages' `docs/code-issues/`, deferred to the `#agent-tools` sweep node.
+
+## Fix (2026-11-03, /fix-pr)
+
+CI on Linux failed `run::agent_def_handover_tests::the_default_claude_backend_is_still_selectable_by_name`: `create_backend("claude")` resolves `claude` and its `tddy-tools` dep at creation, and the runner had no `tddy-tools`. It passed only on hosts where one is installed. `create_backend` now takes the `ToolHost` it resolves against (production passes `ProcessToolHost`), and the test passes a host whose `PATH` holds stub `claude`/`tddy-tools` only. The assertion is unchanged. Eager resolution is kept: with no `tddy-tools`, a `claude` backend is refused rather than run without its MCP server.
