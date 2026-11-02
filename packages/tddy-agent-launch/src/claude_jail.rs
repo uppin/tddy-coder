@@ -98,6 +98,8 @@ impl LaunchSessions {
                 preamble: None,
                 append_system_prompt_file: launch.append_system_prompt_file.map(Path::to_path_buf),
                 hooks: None,
+                // TODO(cursor-cli): the jail's persistent home, for a placed slot naming `{home}`.
+                home: None,
             },
         )
         .map_err(|e| Status::internal(e.to_string()))?;
@@ -146,8 +148,9 @@ impl LaunchSessions {
 // (docs/dev/todo/2026-11-02-jailed-claude-loads-project-mcp-json.md).
 fn jailed(spec: &CodingAgentSpec) -> CodingAgentSpec {
     let mut spec = spec.clone();
-    let McpSlot::File { strict_flag, .. } = &mut spec.agent.mcp;
-    *strict_flag = None;
+    if let McpSlot::File { strict_flag, .. } = &mut spec.agent.mcp {
+        *strict_flag = None;
+    }
     spec
 }
 

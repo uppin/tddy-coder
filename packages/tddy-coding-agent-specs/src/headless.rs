@@ -172,6 +172,7 @@ impl HeadlessRenderer for SpecHeadlessRenderer {
                 preamble: None,
                 append_system_prompt_file: turn.append_system_prompt_file.clone(),
                 hooks: None,
+                home: None,
             },
         )
         .map_err(|e| AdapterError::InvocationFailed(e.to_string()))?;

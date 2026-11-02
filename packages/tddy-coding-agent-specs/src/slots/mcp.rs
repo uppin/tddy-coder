@@ -15,12 +15,21 @@ pub fn render_mcp(
     server: &McpServerCommand,
     scratch_dir: &Path,
 ) -> ((PathBuf, Vec<u8>), Vec<String>) {
-    let McpSlot::File {
-        flag,
-        format,
-        strict_flag,
-    } = slot;
-    let McpFormat::ClaudeMcpJson = format;
+    let (flag, format, strict_flag) = match slot {
+        McpSlot::File {
+            flag,
+            format,
+            strict_flag,
+        } => (flag, format, strict_flag),
+        // TODO(cursor-cli): a placed registration is rendered by `cursor::render_cursor_mcp_json`.
+        McpSlot::Placed { .. } => todo!("cursor-cli: McpSlot::Placed in render_mcp"),
+    };
+    #[allow(unreachable_patterns)]
+    match format {
+        McpFormat::ClaudeMcpJson => {}
+        // TODO(cursor-cli): a file slot in another format.
+        _ => todo!("cursor-cli: McpFormat other than ClaudeMcpJson in render_mcp"),
+    }
     let mut entry = serde_json::json!({
         "command": server.command.to_string_lossy(),
         "args": server.args,

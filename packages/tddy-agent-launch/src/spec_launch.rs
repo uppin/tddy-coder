@@ -320,6 +320,8 @@ pub async fn launch_claude_cli(
             preamble: None,
             append_system_prompt_file: launch.append_system_prompt_file.map(Path::to_path_buf),
             hooks: launch.hooks,
+            // TODO(cursor-cli): the host's `$HOME`, for a placed slot naming `{home}`.
+            home: None,
         },
     )
     .map_err(SpecLaunchError::Slots)?;
