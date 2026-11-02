@@ -52,7 +52,7 @@ import { agentChatPage } from "../support/pages/agentChatPage";
 import { appLocationPage } from "../support/pages/appLocationPage";
 import { prStackScreenPage } from "../support/pages/prStackScreenPage";
 import { workflowChatScreenPage } from "../support/pages/workflowChatScreenPage";
-import { byTestId } from "../support/testIds";
+import { dormantAgentTabPage } from "../support/pages/dormantAgentTabPage";
 
 // ---------------------------------------------------------------------------
 // Session fixtures
@@ -124,11 +124,6 @@ const NO_TRANSCRIPT = { counts: [0], snapshot: [] };
 function mountScreen(backend: ReturnType<typeof aSessionServiceBackend>) {
   mountWithRecordingLiveKitRpc(withSelectedDaemon(<SessionsDrawerScreen />), backend);
 }
-
-/** The Agent tab of a stopped session: the greyed recorded output, which replaces the transcript as
- *  the main view. The transcript itself is in the inspector's Activity tab. */
-const dormantAgentTerminal = (options?: Parameters<typeof cy.get>[1]) =>
-  byTestId("dormant-agent-terminal", { timeout: 5000, ...options });
 
 /** Open the inspector on its Activity tab, where a stopped session's recorded transcript lives. */
 function openActivityTab() {
@@ -223,7 +218,7 @@ describe("InactiveSessionActivities — the default view for a dormant session",
     page.drawerItem(DORMANT.sessionId).click();
 
     // Then — the main view is the greyed Agent tab; the transcript is not the pane
-    dormantAgentTerminal().should("exist");
+    dormantAgentTabPage.terminal().should("exist");
     sessionActivitiesPage.pane().should("not.exist");
 
     // Then — the transcript carries the recorded entries in order, in the inspector's Activity tab
@@ -381,14 +376,14 @@ describe("InactiveSessionActivities — the default view for a dormant session",
     // When — select it while dormant, then let the daemon report it alive
     mountScreen(backend);
     page.drawerItem(DORMANT.sessionId).click();
-    dormantAgentTerminal().should("exist");
+    dormantAgentTabPage.terminal().should("exist");
     cy.then(() => {
       sessionIsLive = true;
     });
 
     // Then — the Agent tab swaps back to the terminal, Resume goes away, and exactly one attach was taken
     page.detailTerminalContainer().should("exist");
-    dormantAgentTerminal({ timeout: 1000 }).should("not.exist");
+    dormantAgentTabPage.terminal({ timeout: 1000 }).should("not.exist");
     sessionActivitiesPage.resumeBtn(DORMANT.sessionId, { timeout: 1000 }).should("not.exist");
     cy.wrap(null).should(() => {
       const attached = backend
@@ -418,7 +413,7 @@ describe("InactiveSessionActivities — the default view for a dormant session",
     // When — live, dead, live again
     mountScreen(backend);
     page.drawerItem(DORMANT.sessionId).click();
-    dormantAgentTerminal().should("exist");
+    dormantAgentTabPage.terminal().should("exist");
     cy.then(() => {
       sessionIsLive = true;
     });
@@ -426,7 +421,7 @@ describe("InactiveSessionActivities — the default view for a dormant session",
     cy.then(() => {
       sessionIsLive = false;
     });
-    dormantAgentTerminal().should("exist");
+    dormantAgentTabPage.terminal().should("exist");
     cy.then(() => {
       sessionIsLive = true;
     });
@@ -673,7 +668,7 @@ describe("InactiveSessionActivities — one transcript per pane", () => {
 
     // Then — the runtime layer stays mounted (background streaming preserved) but nothing is
     // foregrounded over the greyed Agent tab, so no claim-terminal CTA appears
-    dormantAgentTerminal().should("exist");
+    dormantAgentTabPage.terminal().should("exist");
     page.runtimeLayer().should("exist");
     page.detailTerminalContainer({ timeout: 1000 }).should("not.exist");
     page.terminalControlOverlay({ timeout: 1000 }).should("not.exist");

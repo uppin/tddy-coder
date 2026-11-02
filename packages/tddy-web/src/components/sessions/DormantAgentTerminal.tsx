@@ -22,7 +22,7 @@ import { AGENT_TERMINAL_ID } from "./useSessionTerminals";
  * the session's recording once the process has exited. Keystrokes go nowhere. A session with no
  * recording says "No recorded output".
  *
- * PRD: docs/ft/web/1-WIP/PRD-2026-11-02-dormant-agent-tab.md (`#session-tabs 6/7`)
+ * PRD: docs/ft/web/session-terminal-tabs.md (`#session-tabs 6/7`)
  */
 export interface DormantAgentTerminalProps {
   sessionId: string;
@@ -39,23 +39,31 @@ const RECORDING_SCROLLBACK = 50000;
 const NO_TERMINAL_CLIENT =
   "This session's terminal service is not connected, so its recorded output cannot be read.";
 
-export function DormantAgentTerminal({
-  sessionId,
-  sessionToken,
-  terminalClient = null,
-  onResume,
-}: DormantAgentTerminalProps): React.ReactElement {
-  const terminalRef = useRef<GhosttyTerminalHandle>(null);
-  // A touch device keeps the keyboard down over a view that takes no input, as the live terminal
-  // does while its keyboard is closed. A pointer device may focus it, so a click lands in it.
-  const isMobile = useIsMobile();
-  // The emulator takes writes only once it has opened, so the recording is read from then on.
-  const [opened, setOpened] = useState(false);
+/** What reading the recording has found so far. */
+interface RecordedOutput {
+  /** The text the terminal holds, mirrored for the terminal specs. */
+  bufferText: string;
+  /** The daemon has no recording for this terminal, or the recording is empty. */
+  noRecording: boolean;
+  /** Why the recording could not be read, other than there being none. */
+  historyError: string | null;
+}
+
+/**
+ * Write the agent terminal's whole recording into `terminalRef` once the emulator has `opened`, chunk
+ * by chunk up to the end the daemon reports with `atEnd`. A stopped session has no live stream to
+ * anchor on, so the fill runs to the recording's end.
+ */
+function useRecordedOutput(
+  terminalRef: React.RefObject<GhosttyTerminalHandle | null>,
+  opened: boolean,
+  terminalClient: TerminalClient | null,
+  sessionId: string,
+  sessionToken: string,
+): RecordedOutput {
   const [bufferText, setBufferText] = useState("");
   const [noRecording, setNoRecording] = useState(false);
   const [historyError, setHistoryError] = useState<string | null>(null);
-  const [resuming, setResuming] = useState(false);
-  const [resumeError, setResumeError] = useState<string | null>(null);
 
   useEffect(() => {
     if (!opened || terminalClient === null) return;
@@ -65,8 +73,6 @@ export function DormantAgentTerminal({
       sessionId,
       terminalId: AGENT_TERMINAL_ID,
     });
-    // A stopped session has no live stream to anchor on, so the fill runs to the recording's end,
-    // which the daemon reports with `atEnd`.
     const loader = new TerminalHistoryForwardLoader(null);
     void (async () => {
       let wrote = false;
@@ -93,7 +99,15 @@ export function DormantAgentTerminal({
     return () => {
       stale = true;
     };
-  }, [opened, terminalClient, sessionId, sessionToken]);
+  }, [terminalRef, opened, terminalClient, sessionId, sessionToken]);
+
+  return { bufferText, noRecording, historyError };
+}
+
+/** The toast's Resume: busy while it runs, and the rejection's text once it fails. */
+function useResumeAction(onResume: () => Promise<void>) {
+  const [resuming, setResuming] = useState(false);
+  const [resumeError, setResumeError] = useState<string | null>(null);
 
   const resume = async () => {
     setResuming(true);
@@ -106,6 +120,30 @@ export function DormantAgentTerminal({
       setResuming(false);
     }
   };
+
+  return { resume, resuming, resumeError };
+}
+
+export function DormantAgentTerminal({
+  sessionId,
+  sessionToken,
+  terminalClient = null,
+  onResume,
+}: DormantAgentTerminalProps): React.ReactElement {
+  const terminalRef = useRef<GhosttyTerminalHandle>(null);
+  // A touch device keeps the keyboard down over a view that takes no input, as the live terminal
+  // does while its keyboard is closed. A pointer device may focus it, so a click lands in it.
+  const isMobile = useIsMobile();
+  // The emulator takes writes only once it has opened, so the recording is read from then on.
+  const [opened, setOpened] = useState(false);
+  const { bufferText, noRecording, historyError } = useRecordedOutput(
+    terminalRef,
+    opened,
+    terminalClient,
+    sessionId,
+    sessionToken,
+  );
+  const { resume, resuming, resumeError } = useResumeAction(onResume);
 
   return (
     <div

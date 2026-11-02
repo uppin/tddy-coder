@@ -1,6 +1,6 @@
 # Inactive session activities (main-pane base view)
 
-Technical reference for the base-view rule in **`packages/tddy-web/src/components/sessions/sessionBaseView.ts`**, the pane in **`SessionActivitiesPane.tsx`**, and the attach bookkeeping in **`SessionsDrawerScreen.tsx`** that lets a resumed session return to its terminal.
+Technical reference for the base-view rule in **`packages/tddy-web/src/components/sessions/sessionBaseView.ts`**, the stopped Agent tab in **`DormantAgentTerminal.tsx`**, the transcript pane in **`SessionActivitiesPane.tsx`** (the inspector's Activity tab), and the attach bookkeeping and resume hint in **`SessionsDrawerScreen.tsx`** that let a resumed session return to its terminal.
 
 Product reference: [docs/ft/web/inactive-session-activities.md](../../../docs/ft/web/inactive-session-activities.md).
 
@@ -20,11 +20,30 @@ Product reference: [docs/ft/web/inactive-session-activities.md](../../../docs/ft
 
 `DormantSessionRuntime.tsx` is the tab strip of a session with no live connection. It reuses `SessionTerminalTabs`, `useSessionTerminals` and `GrpcSessionTerminal` against the owning daemon's `TerminalSessionService` client — none of which needs the agent's connection — and claims the session's control lease on attach (`useTerminalControl`) as a live strip does. `SessionMainPane` keys it by session id, so one session's terminal list and lease never carry into another's.
 
-- **The Agent tab is a render slot** (`agentTab: React.ReactNode`); `SessionMainPane` fills it with `SessionActivitiesPane`. The strip never decides what a stopped Agent tab shows.
-- **What a keystroke would reach** (`focusedTerminalId`) is a bash or harness tab with no conversation over it — never the Agent tab, which is a transcript. Only that tab gets the mobile shortcut drawer, the claim toast and grey-out (`TerminalControlLayer`, rendered only while another screen holds the lease), and the Files-tab Insert.
+- **The Agent tab is a render slot** (`agentTab: React.ReactNode`); `SessionMainPane` fills it with `DormantAgentTerminal`. The strip never decides what a stopped Agent tab shows.
+- **What a keystroke would reach** (`focusedTerminalId`) is a bash or harness tab with no conversation over it — never the Agent tab, which is read-only. Only that tab gets the mobile shortcut drawer, the claim toast and grey-out (`TerminalControlLayer`, rendered only while another screen holds the lease), and the Files-tab Insert.
 - **Insert** reaches a live runtime through the session runtime registry. A stopped session has none, so the strip hands `SessionMainPane` a function (`onRegisterInsert`) that types into its focused bash tab, and `SessionMainPane` routes the inspector's `onInsertPathIntoTerminal` to it while the stopped strip shows.
 - **Full screen** uses the same `useSessionPaneFullscreen` and `PaneFullscreenExit` as the live strip. The shared pane chrome — `PaneFullscreenExit`, `TerminalControlLayer` — lives in `SessionPaneChrome.tsx`, so the two strips cannot drift.
 - **Agent-conversation bodies are not rendered by the strip** — see [session-agent-conversation.md](session-agent-conversation.md#1-conversation-bodies-are-owned-by-neither-strip).
+
+### The stopped Agent tab
+
+`DormantAgentTerminal({ sessionId, sessionToken, terminalClient, onResume })` is a `GhosttyTerminal` with no `onData` sink, so a keystroke reaches nothing. It uses `HISTORY_THEME` and `HISTORY_FILTER`, exported from `GhosttyTerminalSession.tsx` rather than copied, so the stopped tab and "View history" cannot drift apart.
+
+- **`useRecordedOutput`** waits for the emulator's `onReady` (writes before open are lost), then drives a `TerminalHistoryForwardLoader(null)` over `createForwardHistoryFetcher` for `AGENT_TERMINAL_ID` until `done`. With no live stream to anchor on, the fill runs to the daemon's `atEnd`. `NOT_FOUND`, or a recording that wrote nothing, sets *no recording* ("No recorded output"); any other failure is shown through `rpcFailureText`. A missing terminal client is its own message, not an empty recording.
+- **`terminal-buffer-text`** mirrors the buffer the way `GhosttyTerminalSession` does, so the terminal specs read it the same way.
+- **`preventFocusOnTap={isMobile}`**: on a touch device a tap does not focus the read-only terminal, so the keyboard stays down; a pointer device keeps the default focus.
+- **The toast** is `Toast` (`src/components/ui/toast.tsx`): `{ message, action?: { label, onClick, busy? }, error?, testId }`, `role="status"`, its error `role="alert"` through `InlineError`, absolutely positioned like `TerminalControlOverlay`. There is no toast queue; the caller owns placement. `useResumeAction` keeps the action busy while `onResume` runs and shows its rejection's text.
+
+## Resume
+
+`useSessionsDrawerPaneActions` owns one resume action, **`resume(sessionId): Promise<void>`**, which resolves once the session is attached and rejects with why it did not land (host not connected, or `ResumeSession`'s failure). `SessionMainPane` takes it as `onResumeSession` and hands it to the stopped Agent tab's toast, which shows the rejection. `handleResume` — the top bar and the inspector's Details tab — is `resume` with the rejection dropped, because that failure is already the pane's error (`paneError`). For that, `useSessionAttachment.resumeSession` resolves the failure's text (or `null`) instead of a boolean; `connectSession` keeps its boolean.
+
+### The resumed-session hint
+
+Liveness only refreshes on the drawer's 2s `ListSessions` poll, so after a successful resume the stopped strip would linger until the next poll. **`resumedSessions.ts`** is pure state over a `ReadonlySet<string>` of session ids: `markResumed` after a resume lands, `afterListing` drops every id a listing reports live, `isLive` is `isActive || marked`, and `withResumedLiveness(resumed, session)` returns the session with `isActive: true` while it is marked (the same reference otherwise). **`useResumedSessionLiveness(sortedSessions, selectedSession)`** holds the set, settles it on every list snapshot and returns `liveSelectedSession` plus `markSessionResumed`, which `resume` calls on success.
+
+Only `SessionMainPane` reads `liveSelectedSession`. The activation and liveness effects keep reading the listing, so the attach bookkeeping below is unchanged: `ResumeSession` itself drives the attachment to `connected`, and the claim stops the liveness effect from attaching a second time.
 
 ## Liveness semantics
 
@@ -34,21 +53,22 @@ Product reference: [docs/ft/web/inactive-session-activities.md](../../../docs/ft
 
 `SessionActivitiesPane` renders the same recorded ACP transcript as `AgentActivityOverlay` — `useAcpReplay` → `AgentChatView room={null} readOnly` → `AgentActivityDetailDialog` — with two differences:
 
-- The snapshot loads **eagerly** on mount. The overlay defers because it is a popover the operator may never open; this *is* the view, so deferring would only add a blank frame. Both share the `agentActivityRegistry` cache, so a transcript read in one costs nothing in the other.
-- The overlay's icon is suppressed while this pane renders (`baseViewMode !== "activities"` in `SessionMainPane`), so a pane never carries two copies of the same transcript. The overlay remains the only route to the transcript for an active session and for a dormant session showing a workflow view.
+- It is mounted by **`SessionInspectorActivityTab`**, the inspector's Activity tab, with the drawer's `activityClient` (`buildSessionActivityClient?.() ?? activityClient`, from `SessionMainPane`). `activity` is in `INSPECTOR_TAB_NAMES`; `DORMANT_INSPECTOR_TAB_NAMES` names it as the stopped-only tab, and `SessionInspectorDrawer` offers it (`InspectorTabs` `activityAvailable`) only while `canResumeSession(session)`. A request for it on a live session degrades to Details without being normalised out of the URL, exactly as a media tab does on a host without tracks.
+- The snapshot loads **eagerly** on mount. The overlay defers because it is a popover the operator may never open; here the operator opened the tab for it. Both share the `agentActivityRegistry` cache, so a transcript read in one costs nothing in the other.
+- The overlay's icon is suppressed while the stopped strip shows (`baseViewMode !== "activities"` in `SessionMainPane`), so a pane never carries two copies of the same transcript; the Activity tab is that session's transcript route. The overlay remains the only route to the transcript for an active session and for a dormant session showing a workflow view.
 
 **`countLoaded`** (on `agentActivityRegistry`, exposed through `useAcpReplay`) is set on the first `COUNT_THEN_LIVE` frame **whatever value it carries**. `hasActivity` is `count > 0` starting from 0, so without this flag the pane asserts *"This session recorded no activity"* during the window before the count feed answers — and identically when the feed **fails**, since `useAcpReplay` swallows a stream error. The pane renders nothing until the count is known, so a pending or failed read never becomes a false claim.
 
 ## Attach bookkeeping
 
-Two effects can issue `ConnectSession` for a selected session: the activation effect (runs once per selection) and a liveness effect (attaches a selected session that comes alive — from the top-bar Resume, or resumed elsewhere and seen on the next list poll). Without the second, the pane would keep showing the transcript until the session was re-selected.
+Two effects can issue `ConnectSession` for a selected session: the activation effect (runs once per selection) and a liveness effect (attaches a selected session that comes alive — resumed elsewhere and seen on the next list poll). Without the second, the pane would keep showing the stopped strip until the session was re-selected.
 
 They share **`attachClaimRef: { sessionId, listGeneration }`**. The claim means *an attach has been taken for the current live epoch*, and is released once a **later** list snapshot reports the session dormant:
 
 - Guarding release on "do we still hold an attachment for this session" **deadlocks** — nothing resets a stale connected attachment when a session dies, so the claim is never released and a second Resume within one selection silently does nothing.
 - The generation counter is incremented **during render**, not in an effect, so a claim taken from a click handler records the snapshot the operator was actually looking at. The snapshot a resume was made under still reports dormant (hold); a later one reporting dormant is real evidence of death (release).
 
-`handleResume` claims the attach on success and releases it if the resume rejects — otherwise `resumeSession` (which already drives the attachment to `connected`) and the liveness effect both fire, minting a fresh browser identity and forcing a terminal reconnect plus a second `ClaimTerminalControl`.
+`resume` claims the attach before `ResumeSession` and releases it if the resume fails — otherwise `resumeSession` (which already drives the attachment to `connected`) and the liveness effect both fire, minting a fresh browser identity and forcing a terminal reconnect plus a second `ClaimTerminalControl`.
 
 ## Inspector
 

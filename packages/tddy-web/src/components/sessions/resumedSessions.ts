@@ -9,7 +9,7 @@ import type { SessionEntry } from "../../gen/session_pb";
  * dropped as soon as a listing reports the session live itself, after which the listing alone
  * decides again. The view stays derived — this is a fresher liveness fact, not navigation.
  *
- * PRD: docs/ft/web/1-WIP/PRD-2026-11-02-dormant-agent-tab.md (`#session-tabs 6/7`)
+ * PRD: docs/ft/web/inactive-session-activities.md (`#session-tabs 6/7`)
  */
 export type ResumedSessions = ReadonlySet<string>;
 
@@ -43,6 +43,6 @@ export function isLive(
  * unchanged when there is nothing to correct.
  */
 export function withResumedLiveness(resumed: ResumedSessions, session: SessionEntry): SessionEntry {
-  if (session.isActive || !resumed.has(session.sessionId)) return session;
+  if (isLive(resumed, session) === session.isActive) return session;
   return { ...session, isActive: true };
 }

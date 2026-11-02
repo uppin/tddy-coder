@@ -13,7 +13,7 @@ import { anAttachedAgent } from "../support/rpc/sessionAgentRosterBackend";
 import { mountWithRecordingLiveKitRpc } from "../support/rpc/recordingLiveKitRpc";
 import { sessionsDrawerPage } from "../support/pages/sessionsDrawerPage";
 import { sessionAgentRosterPage } from "../support/pages/sessionAgentRosterPage";
-import { byTestId } from "../support/testIds";
+import { dormantAgentTabPage } from "../support/pages/dormantAgentTabPage";
 
 // ---------------------------------------------------------------------------
 // Session constants used across specs
@@ -422,7 +422,7 @@ describe("SessionInspectorAcceptance — the attachment does not drive the inspe
 
     // Then — the new selection really did take (its Agent tab is the observable proof), and the
     // drawer was not opened for it
-    byTestId("dormant-agent-terminal").should("exist");
+    dormantAgentTabPage.terminal().should("exist");
     sessionsDrawerPage.inspectorDrawer().should("have.attr", "data-state", "closed");
   });
 });

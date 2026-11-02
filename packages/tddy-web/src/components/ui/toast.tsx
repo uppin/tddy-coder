@@ -8,7 +8,7 @@ import { InlineError } from "./inline-error"
  * error renders inside it with `role="alert"`. Positioned absolutely: the caller's container is the
  * containing block, as for `TerminalControlOverlay`.
  *
- * PRD: docs/ft/web/1-WIP/PRD-2026-11-02-dormant-agent-tab.md (`#session-tabs 6/7`)
+ * PRD: docs/ft/web/session-terminal-tabs.md (`#session-tabs 6/7`)
  */
 
 interface ToastAction {

@@ -2,7 +2,7 @@
  * Cypress component acceptance: a stopped session's Agent tab shows what the agent last printed,
  * greyed and read-only, under a toast that offers Resume — and Resume turns it live in place.
  *
- * PRD: docs/ft/web/1-WIP/PRD-2026-11-02-dormant-agent-tab.md (`#session-tabs 6/7`)
+ * PRD: docs/ft/web/session-terminal-tabs.md (`#session-tabs 6/7`)
  *
  * The daemon is in memory: `GetTerminalHistory` serves the recorded output, `ResumeSession` succeeds
  * or fails per test, and `ListSessions` keeps reporting the session stopped — so a view that goes
@@ -21,6 +21,7 @@ import {
 import { sessionsDrawerPage } from "../support/pages/sessionsDrawerPage";
 import { sessionTerminalTabsPage as tabs } from "../support/pages/sessionTerminalTabsPage";
 import { sessionActivitiesPage } from "../support/pages/sessionActivitiesPage";
+import { dormantAgentTabPage } from "../support/pages/dormantAgentTabPage";
 import { agentChatPage } from "../support/pages/agentChatPage";
 import { replayAgentText } from "../support/rpc/acpReplay";
 import { byTestId, TEST_IDS } from "../support/testIds";
@@ -40,21 +41,23 @@ const STOPPED = {
 
 const RECORDED_OUTPUT = new TextEncoder().encode("Rewrote the tokenizer.\r\n$ ");
 
-const dormantTerminal = (options?: Parameters<typeof cy.get>[1]) =>
-  byTestId("dormant-agent-terminal", { timeout: 10000, ...options });
-const toast = (options?: Parameters<typeof cy.get>[1]) =>
-  byTestId("dormant-agent-toast", { timeout: 10000, ...options });
-const toastResume = () => byTestId("dormant-agent-toast-action", { timeout: 10000 });
-const toastError = () => byTestId("dormant-agent-toast-error", { timeout: 10000 });
+const { terminal: dormantTerminal, toast, toastResume, toastError } = dormantAgentTabPage;
 
-/** A daemon serving the stopped session; `resume` decides what `ResumeSession` does. */
+/**
+ * A daemon serving the stopped session: `history` decides whether its agent terminal was recorded,
+ * `resume` what `ResumeSession` does, and `transcript` whether it has a replayable ACP transcript.
+ */
 function aStoppedSessionBackend({
   history = "recorded",
   resume = "succeeds",
-}: { history?: "recorded" | "none"; resume?: "succeeds" | "fails" } = {}) {
+  transcript = false,
+}: { history?: "recorded" | "none"; resume?: "succeeds" | "fails"; transcript?: boolean } = {}) {
   const resumes: string[] = [];
   const backend = aSessionServiceBackend({
     sessions: [STOPPED],
+    acpReplay: transcript
+      ? { counts: [1], snapshot: [replayAgentText("Rewrote the tokenizer.", 1_000)] }
+      : undefined,
     connectSession: () => ({ livekitRoom: "", livekitUrl: "", livekitServerIdentity: "" }),
     terminalHistory:
       history === "recorded"
@@ -186,20 +189,13 @@ describe("A stopped session's Agent tab", () => {
     selectTheStoppedSession(backend);
 
     // Then
-    byTestId("dormant-agent-terminal-empty", { timeout: 10000 }).should("contain.text", "No recorded output");
+    dormantAgentTabPage.empty().should("contain.text", "No recorded output");
     toast().should("be.visible");
   });
 
   it("a stopped session's recorded transcript is in the inspector's Activity tab", () => {
     // Given a stopped session whose agent recorded a transcript, and whose Agent tab shows its output
-    const backend = aSessionServiceBackend({
-      sessions: [STOPPED],
-      connectSession: () => ({ livekitRoom: "", livekitUrl: "", livekitServerIdentity: "" }),
-      terminalHistory: [
-        { data: RECORDED_OUTPUT, startOffset: 0n, endOffset: BigInt(RECORDED_OUTPUT.length), atOldest: true, atEnd: true },
-      ],
-      acpReplay: { counts: [1], snapshot: [replayAgentText("Rewrote the tokenizer.", 1_000)] },
-    });
+    const { backend } = aStoppedSessionBackend({ transcript: true });
     selectTheStoppedSession(backend);
     dormantTerminal().should("exist");
 

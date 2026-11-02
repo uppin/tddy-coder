@@ -1,5 +1,5 @@
 import { describe, expect, it } from "bun:test";
-import { afterListing, isLive, markResumed, type ResumedSessions } from "./useResumedSessions";
+import { afterListing, isLive, markResumed, type ResumedSessions } from "./resumedSessions";
 
 const NONE: ResumedSessions = new Set();
 const STOPPED = { sessionId: "s1", isActive: false };

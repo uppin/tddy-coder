@@ -256,6 +256,14 @@ export const TEST_IDS = {
   sessionsInspectorRestore: "sessions-inspector-restore",
   sessionsInspectorMetadata: "sessions-inspector-metadata",
 
+  // A stopped session's Agent tab — the greyed recorded output and its Resume toast
+  dormantAgentTerminal: "dormant-agent-terminal",
+  dormantAgentTerminalEmpty: "dormant-agent-terminal-empty",
+  dormantAgentTerminalError: "dormant-agent-terminal-error",
+  dormantAgentToast: "dormant-agent-toast",
+  dormantAgentToastAction: "dormant-agent-toast-action",
+  dormantAgentToastError: "dormant-agent-toast-error",
+
   // Session inspector — tabs
   sessionsInspectorTabDetails: "sessions-inspector-tab-details",
   sessionsInspectorTabActivity: "sessions-inspector-tab-activity",

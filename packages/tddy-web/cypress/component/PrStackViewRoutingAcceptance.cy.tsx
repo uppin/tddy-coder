@@ -16,7 +16,7 @@ import { aSessionsDrawerBackend } from "../support/rpc/vncBackend";
 import { sessionsDrawerPage } from "../support/pages/sessionsDrawerPage";
 import { prStackScreenPage } from "../support/pages/prStackScreenPage";
 import { workflowChatScreenPage } from "../support/pages/workflowChatScreenPage";
-import { byTestId } from "../support/testIds";
+import { dormantAgentTabPage } from "../support/pages/dormantAgentTabPage";
 
 // ---------------------------------------------------------------------------
 // Fixtures
@@ -94,5 +94,5 @@ it("keeps the ordinary base view for a claude-cli session even when it carries a
   // tab (the greyed recorded output). The view registry does not touch that path.
   prStackScreenPage.screen().should("not.exist");
   workflowChatScreenPage.screen().should("not.exist");
-  byTestId("dormant-agent-terminal").should("exist");
+  dormantAgentTabPage.terminal().should("exist");
 });

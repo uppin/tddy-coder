@@ -1,0 +1,3 @@
+# 2026-11-02 — A stopped session's Agent tab shows its greyed output and offers Resume
+
+A stopped session's **Agent** tab now shows what the agent terminal last printed, read-only and greyed in the terminal's history colour scheme, under a toast "This session is not running" with **Resume**. Resume — from the toast or the top bar — turns the Agent tab live as soon as the daemon accepts it, without waiting for the next session-list refresh, and every other tab stays open. The recorded transcript moved to a new **Activity** tab in the Inspector, offered only while the session is stopped. See [Session terminal tabs](../session-terminal-tabs.md#stopped-sessions) and [Inactive session activities](../inactive-session-activities.md).

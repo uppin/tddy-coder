@@ -10,7 +10,7 @@ import { rosterHalfOf } from "./sessionRosterHalf";
  * Only offered for a stopped session (`DORMANT_INSPECTOR_TAB_NAMES`); a live session's transcript is
  * the Agent Activity sidebar's.
  *
- * PRD: docs/ft/web/1-WIP/PRD-2026-11-02-dormant-agent-tab.md (`#session-tabs 6/7`)
+ * PRD: docs/ft/web/inactive-session-activities.md (`#session-tabs 6/7`)
  */
 export interface SessionInspectorActivityTabProps {
   session: SessionEntry;

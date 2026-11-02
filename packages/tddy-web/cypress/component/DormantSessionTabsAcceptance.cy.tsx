@@ -27,7 +27,7 @@ import { sessionFilesTabPage as files } from "../support/pages/sessionFilesTabPa
 import { sessionActivitiesPage } from "../support/pages/sessionActivitiesPage";
 import { sessionTerminalTabsPage as tabs } from "../support/pages/sessionTerminalTabsPage";
 import { sessionAgentConversationPage as conversations } from "../support/pages/sessionAgentConversationPage";
-import { byTestId } from "../support/testIds";
+import { dormantAgentTabPage } from "../support/pages/dormantAgentTabPage";
 
 // ---------------------------------------------------------------------------
 // Fixtures
@@ -178,7 +178,7 @@ describe("A stopped session keeps its tab strip", () => {
     tabs.agentTab().should("have.attr", "aria-selected", "true");
     tabs.newTab().should("be.visible");
     tabs.pane("main").within(() => {
-      byTestId("dormant-agent-terminal").should("have.attr", "data-color-scheme", "history");
+      dormantAgentTabPage.terminal().should("have.attr", "data-color-scheme", "history");
     });
   });
 

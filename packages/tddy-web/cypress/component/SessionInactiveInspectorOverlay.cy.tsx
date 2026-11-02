@@ -44,6 +44,7 @@ import { aSessionServiceBackend } from "../support/rpc/daemonSessionHostBackend"
 import { mountWithRecordingLiveKitRpc } from "../support/rpc/recordingLiveKitRpc";
 import { sessionsDrawerPage as page } from "../support/pages/sessionsDrawerPage";
 import { byTestId, TEST_IDS } from "../support/testIds";
+import { dormantAgentTabPage } from "../support/pages/dormantAgentTabPage";
 
 // ---------------------------------------------------------------------------
 // Session fixtures
@@ -169,7 +170,7 @@ describe("SessionInactiveInspectorOverlay — overlay-drawer layout", () => {
     // tab. The docked layout used to *replace* that pane, so its survival is what the removal of
     // docking buys.
     page.inspectorDrawer().should("have.attr", "data-state", "open");
-    byTestId("dormant-agent-terminal").should("exist");
+    dormantAgentTabPage.terminal().should("exist");
   });
 
   it("keeps a connected session's terminal mounted behind the open inspector", () => {
