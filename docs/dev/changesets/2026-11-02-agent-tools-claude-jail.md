@@ -85,6 +85,13 @@
   before the jail spawn could report `sandbox unsupported`. Its Given now installs coding agents
   over a stub `PATH` (a stub `claude` and the built `tddy-tools`), the same Given edit the developer
   approved above. Its assertion is unchanged, and no production refusal was reordered.
+- **Darwin-only Givens (`/fix-pr`, 2026-11-02).** The 12 macOS sandboxed Claude tests in
+  `sandboxed_claude_cli_acceptance` (5), `sandbox_behavior_acceptance` (5) and
+  `sandboxed_session_lifecycle_acceptance` (2) were refused with `this host has no coding agents
+  installed`. Their Givens now install coding agents, with the built `tddy-tools` on a stub `PATH`.
+  Linux CI does not run them. They now stop at the pre-existing `sandbox RPC bridge not installed`
+  harness gap (from #670). Three of them also conflict with "no `TDDY_*` variable on the agent"
+  (`TDDY_EGRESS_SHIM`/`TDDY_EGRESS_PROBE_*`, `TDDY_SUBAGENT`), which is left for the developer.
 
 ## Tests
 
