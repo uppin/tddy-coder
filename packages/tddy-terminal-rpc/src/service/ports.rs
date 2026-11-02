@@ -132,6 +132,9 @@ pub struct TerminalSessionPorts {
     pub control: Arc<dyn TerminalControl>,
     /// The session's running terminals.
     pub roster: Arc<dyn TerminalRoster>,
+    /// The history of a terminal that is no longer running — `GetTerminalHistory` reads it only when
+    /// [`Self::terminals`] has no running terminal by that id.
+    pub recorded_history: Arc<dyn super::RecordedTerminalHistory>,
     /// The per-frame replay budget: how many bytes of retained output one open frame may carry.
     ///
     /// Injected because it is a *transport* limit — the largest message the host's gRPC / LiveKit

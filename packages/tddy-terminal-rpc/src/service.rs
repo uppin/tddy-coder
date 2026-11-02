@@ -18,6 +18,7 @@
 //! not.
 
 mod ports;
+mod recorded_history;
 
 use std::sync::Arc;
 
@@ -51,6 +52,7 @@ use crate::session::TerminalSession;
 const CONTROL_EVENT_CHANNEL_CAPACITY: usize = 16;
 
 pub use ports::*;
+pub use recorded_history::{NoRecordedHistory, RecordedTerminalHistory};
 
 /// The `terminal_session.TerminalSessionService` implementation.
 pub struct TerminalSessionServiceImpl {
@@ -279,6 +281,7 @@ impl TerminalSessionService for TerminalSessionServiceImpl {
         self.os_user(&req.session_token)?;
         req.session_id = keyed_session_id(&req.session_id);
 
+        // TODO(agent-history): answer a terminal that is not running from `ports.recorded_history`.
         let rx = serve_get_terminal_history_with(
             &*self.ports.terminals,
             req,

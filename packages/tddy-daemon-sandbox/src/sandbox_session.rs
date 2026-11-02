@@ -112,6 +112,13 @@ pub struct SandboxSessionManager {
 }
 
 impl SandboxSessionManager {
+    /// Record `session_id`'s jailed `main` terminal at `path`: periodically while it runs, and when
+    /// it exits — the jailed counterpart of `CliSessionManager::record_main_capture`.
+    pub async fn record_main_capture(&self, session_id: &str, path: PathBuf) {
+        // TODO(agent-history): implement
+        let _ = (session_id, path);
+    }
+
     pub fn new() -> Self {
         Self {
             inner: Mutex::new(HashMap::new()),

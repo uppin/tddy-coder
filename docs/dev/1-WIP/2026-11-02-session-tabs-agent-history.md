@@ -4,7 +4,7 @@
 **Status:** 🚧 In Progress
 **Type:** Feature
 **Complexity**: 4 — four crates (`tddy-task`, `tddy-cli-sessions`, `tddy-terminal-rpc`, `tddy-session-lifecycle`, plus the sandbox registry's exit path); an on-disk format; a crash-safety interval; offsets must page exactly like the live capture
-**Stack:** `#session-tabs 2/7` — branch `feature/session-tabs/agent-history`, base `feature/session-tabs/dormant-tabs`
+**Stack:** `#session-tabs 2/7` — branch `feature/session-tabs/agent-history`, base `feature/session-tabs/dormant-tabs` · **PR:** [#805](https://github.com/uppin/tddy-coder/pull/805)
 **PRD:** [PRD-2026-11-02-agent-terminal-history-persists.md](../../ft/daemon/1-WIP/PRD-2026-11-02-agent-terminal-history-persists.md)
 
 ## Initial Discovery
@@ -37,17 +37,21 @@
   - a versioned header that refuses a wrong magic or version.
 - `CliSessionManager::record_main_capture(session_id, path: PathBuf)` — registers where a session's `main`
   capture is recorded. It is written every `RECORDING_INTERVAL` (30 s) while `main` runs and once more on
-  its exit, before deregistration. The launch and resume paths call it with
-  `<session_dir>/terminals/main.capture`.
-- The jailed equivalent on `SandboxSessionManager`.
+  its exit, before deregistration. `CliSessionManager::with_recording_interval(Duration)` overrides the
+  interval (`capture_recorder.rs`).
+- The launch and resume paths (`tddy-agent-launch`) call it with
+  `tddy_session_lifecycle::session_dir_recorded_history::main_capture_recording_path(tddy_data_dir, id)`
+  (`<tddy_data_dir>/sessions/<id>/terminals/main.capture`).
+- The jailed equivalent, `SandboxSessionManager::record_main_capture(session_id, path)`.
 - `tddy_terminal_rpc::service::RecordedTerminalHistory` trait:
   `async fn recorded(&self, os_user: &str, session_id: &str, terminal_id: &str) -> Option<CaptureRecording>`.
-  - Added to `TerminalSessionPorts` as `recorded_history`.
+  - Added to `TerminalSessionPorts` as `recorded_history`; `NoRecordedHistory` is the host that records
+    nothing.
   - `get_terminal_history` consults it only when the store has no running terminal. It is served from
     a new module, `service/recorded_history.rs`.
 - The daemon's `SessionDirRecordedHistory` (`tddy-session-lifecycle`), which answers `main` from the
   file and `None` for any other terminal id.
-- The coder participant passes a port that always answers `None`.
+- The coder participant (and its parity suite) passes `NoRecordedHistory`.
 
 ## Boundaries
 
@@ -65,7 +69,7 @@ implementing one here collides with the PR that owns it.
 
 | Parent node | What it delivers | How this PR consumes it | This PR does NOT |
 |---|---|---|---|
-| `n1` dormant-tabs | `TerminalLaunch.os_user`; the `svc_recorded_worktree.rs` metadata lookup | nothing at the code level — n1 sits below only because the line is flattened; this node resolves the session dir itself from the history request's token | change `TerminalLaunch`, the roster, or `recorded_worktree` |
+| `n1` dormant-tabs | `recorded_worktree` and the roster's `tddy_data_dir` field in `svc_terminal_ports.rs` | nothing at the code level — n1 sits below only because the line is flattened. This node adds a sibling field (`recorded_history`) to the same `TerminalSessionPorts` literal, which is a textual neighbour, not a dependency | change the roster, `recorded_worktree`, or the stopped-session start path |
 
 ## Draft PR contract
 
@@ -73,8 +77,10 @@ The first push publishes:
 
 - `CaptureRecording` with its methods as `// TODO(agent-history): implement`;
 - `CliSessionManager::record_main_capture`, a no-op body;
-- the `RecordedTerminalHistory` trait and the `recorded_history` port field, with the daemon and coder
-  implementations answering `None`;
+- the `RecordedTerminalHistory` trait, `NoRecordedHistory` and the `recorded_history` port field
+  (`get_terminal_history` does not consult it yet), with the daemon's `SessionDirRecordedHistory`
+  answering `None`;
+- `SandboxSessionManager::record_main_capture`, a no-op body;
 - the failing tests below.
 
 ## Green wave
@@ -130,27 +136,35 @@ Real dependency edges, as opposed to the branch line:
 - [ ] `streaming_a_stopped_main_is_still_not_found`
 - [ ] `a_session_that_never_recorded_answers_not_found`
 
+These register the recording the way the launcher does (`record_main_capture` at
+`main_capture_recording_path`). **That the launcher itself registers it is not pinned here.** `/green`
+adds that test where the launch and resume paths are exercised with a stub agent (an
+`svc_resume_claude_cli_session` / start-session case asserting the file appears).
+
 ### Unit / integration tests
 
 - [ ] `packages/tddy-task/tests/capture_recording_unit.rs`:
-  - a round trip keeps the offsets and bytes;
-  - `replay_from` agrees with `TerminalCapture::replay_from` for the same window;
-  - a wrong magic or version is refused;
-  - the write is atomic (no partial file after a failed write).
-- [ ] `packages/tddy-cli-sessions/tests/capture_recorder.rs`:
-  - a registered `main` is written on exit before deregistration;
-  - it is rewritten after the interval (with a paused tokio clock);
-  - an unregistered session writes nothing.
-- [ ] `packages/tddy-terminal-rpc/tests/recorded_history_acceptance.rs`:
-  - with a fake port, a stopped terminal's history comes from the port;
-  - a running terminal never consults it.
+  - `a_recording_holds_the_window_and_offsets_its_capture_retains`;
+  - `a_recording_written_and_read_back_is_the_same_recording`;
+  - `paging_a_recording_answers_the_chunks_its_live_capture_answers`;
+  - `a_file_that_is_not_a_recording_is_refused_as_invalid_data`;
+  - `a_failed_write_leaves_no_file_behind`.
+  - `tempfile` becomes a dev-dependency of `tddy-task` (already in the workspace lock).
+- [ ] `packages/tddy-cli-sessions/tests/capture_recorder.rs` (a real PTY, a 50 ms interval):
+  - `a_registered_main_is_recorded_with_its_last_output_before_it_leaves_the_index`;
+  - `a_running_main_is_recorded_on_the_interval`;
+  - `an_unregistered_session_is_never_recorded` (a regression guard: it passes on the contract).
+- [ ] `packages/tddy-terminal-rpc/tests/recorded_history_acceptance.rs` (the shared `support` host gains
+  `serving_a_recorded_main_terminal` and `serving_main_terminal_with_a_stale_recording`):
+  - `a_stopped_main_terminal_answers_history_from_its_recording`;
+  - `a_running_main_terminal_never_reads_its_recording` (a regression guard).
 
 ### Test level decisions
 
 | Aspect | Level | Rationale |
 |---|---|---|
 | Format and paging | Unit over `CaptureRecording` | Pure data |
-| Recorder timing | Integration with a paused tokio clock | Deterministic intervals |
+| Recorder timing | Integration over a real PTY with a short configured interval | A paused tokio clock does not pause a child process |
 | Served behaviour | Daemon acceptance through `terminal_session_service()` | The coordinate the web calls |
 
 ## Decisions & Trade-offs
@@ -162,16 +176,29 @@ Real dependency edges, as opposed to the branch line:
 - **A port consulted only when nothing runs** is the designed source for a stopped terminal, not a
   fallback over a live one. A running `main` never reads the file.
 
+## Baseline before green
+
+Recorded at the contract commit (2026-11-02), scoped to `tddy-task`, `tddy-cli-sessions`, `tddy-terminal-rpc`, `tddy-session-lifecycle`, `tddy-daemon-sandbox`, `tddy-coder`:
+
+- `cargo fmt --check` and `cargo clippy --all-targets -- -D warnings` clean (`tddy-daemon-sandbox` at `--lib`: see below).
+- **This node's red tests:**
+  - `capture_recording_unit.rs`: 5 failing;
+  - `capture_recorder.rs`: 2 failing (+ `an_unregistered_session_is_never_recorded` passing as a guard);
+  - `recorded_history_acceptance.rs`: 1 failing (+ the running-terminal guard passing);
+  - `agent_terminal_history_recording_acceptance.rs`: 4 failing (+ the stopped-stream and never-recorded refusals passing as guards).
+- Unchanged and green: `terminal_session_acceptance`, `agent_terminal_tabs_acceptance`, `tddy-coder` `two_server_parity_acceptance`, every other `tddy-task` / `tddy-cli-sessions` / `tddy-terminal-rpc` suite.
+- **Not this node:** `tddy-daemon-sandbox` `tests/sandbox_stdio_seatbelt_acceptance.rs` (macOS-gated) does not compile on master (`cannot find type SandboxHandle`), so that crate's clippy runs at `--lib`. The `tddy-session-lifecycle` environmental failures recorded in #804's baseline (sibling binaries not built under a bare `cargo test -p`) apply here too.
+
 ## TODO
 
 - [x] Record initial discovery (`2026-11-02-session-tabs-agent-history-initial-discovery.md`)
 - [x] Cross-check `packages/*/docs/code-issues/` and `docs/dev/todo/` for items this change touches (Step 2b)
 - [x] Create/update PRD documentation
 - [x] Create changeset (this document)
-- [ ] Create failing acceptance tests
-- [ ] Run acceptance tests (verify they fail)
-- [ ] USER REVIEW — acceptance tests
-- [ ] TDD Red — write failing unit/integration tests
+- [x] Create failing acceptance tests
+- [x] Run acceptance tests (verify they fail)
+- [x] USER REVIEW — acceptance tests — waived by the developer 2026-11-02 (reviewed with the stack at the end of pass 2)
+- [x] TDD Red — write failing unit/integration tests
 - [ ] TDD Green — implement with quality code
 - [ ] Update documentation with progress
 - [ ] Repeat Red→Green→Update cycle until feature complete

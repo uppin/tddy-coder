@@ -167,6 +167,9 @@ mod argv;
 mod pty_spawn;
 pub use pty_spawn::ExitHook;
 
+mod capture_recorder;
+pub use capture_recorder::RECORDING_INTERVAL;
+
 // ---------------------------------------------------------------------------
 // Resize escape parsing
 // ---------------------------------------------------------------------------

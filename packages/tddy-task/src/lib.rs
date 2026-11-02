@@ -5,13 +5,16 @@
 //! - [`TaskBody`] / [`TaskContext`] for implementing cancellable task bodies
 //! - [`TaskRegistry`] — register, list, spawn, and cancel tasks
 //! - [`TerminalCapture`] — bounded replay ring that survives eviction of sticky terminal modes
+//! - [`CaptureRecording`] — a capture's retained window on disk, for history after the process
 
+pub mod capture_recording;
 pub mod idle;
 pub mod registry;
 mod screen_dump;
 pub mod task;
 pub mod terminal_capture;
 
+pub use capture_recording::CaptureRecording;
 pub use idle::IdleTimeoutTracker;
 pub use registry::{TaskRegistry, TaskRegistryEvent};
 pub use task::{

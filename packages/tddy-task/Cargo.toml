@@ -25,6 +25,7 @@ libc = "0.2"
 
 [dev-dependencies]
 serial_test = "3"
+tempfile = "3"
 # An independent reference emulator: a snapshot is checked by rendering it in a VT that is not the
 # one that produced it.
 vt100 = "0.15"

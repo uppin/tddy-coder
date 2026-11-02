@@ -114,6 +114,8 @@ pub use tddy_session_agents::{
 /// with `#unbundle` node 7. All are reached as `crate::session_notifications::X`, as before.
 pub mod session_notifications;
 pub use tddy_session_split::{split_session, workspace_session};
+pub mod session_dir_recorded_history;
+
 pub mod terminal_session_adapter;
 pub use tddy_tool_engine::tool_call_log;
 pub mod pr_stack_rpc;

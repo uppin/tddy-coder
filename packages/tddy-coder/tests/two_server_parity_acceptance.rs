@@ -527,6 +527,7 @@ fn daemon_constructor_terminal_entry(
         terminals: Arc::new(CoderTerminalSessionStore::new(Arc::clone(manager))),
         control: Arc::new(ArbitratedControl::unheld()),
         roster: Arc::new(CoderTerminalRoster::new(svc)),
+        recorded_history: Arc::new(tddy_terminal_rpc::NoRecordedHistory),
         initial_frame_bytes: tddy_terminal_rpc::bridge::DEFAULT_INITIAL_FRAME_BYTES,
     })
 }
