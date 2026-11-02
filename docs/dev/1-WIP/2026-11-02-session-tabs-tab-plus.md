@@ -4,7 +4,7 @@
 **Status:** 🚧 In Progress
 **Type:** Feature
 **Complexity**: 2 — one component's layout plus moving a menu into a portal; layout is hard to assert in the CSS-less component harness
-**Stack:** `#session-tabs 5/7` — branch `feature/session-tabs/tab-plus`, base `feature/session-tabs/osc52-clipboard`
+**Stack:** `#session-tabs 5/7` — branch `feature/session-tabs/tab-plus`, base `feature/session-tabs/osc52-clipboard` · **PR:** [#808](https://github.com/uppin/tddy-coder/pull/808)
 **PRD:** [PRD-2026-11-02-tab-plus-follows-last-tab.md](../../ft/web/1-WIP/PRD-2026-11-02-tab-plus-follows-last-tab.md)
 
 ## Initial Discovery
@@ -113,16 +113,24 @@ Real dependency edges, as opposed to the branch line:
 - **The portal** is the only way to stop `overflow-x: auto` from clipping the menu (CSS clips
   absolutely-positioned descendants of a scroll container).
 
+## Baseline before green
+
+Recorded at the contract commit (2026-11-02), scoped to `tddy-web`:
+
+- **This node's red tests:** `SessionTerminalTabsPlusPlacement.cy.tsx`: the three placement cases fail ("+" is not inside the tab scroller).
+- **Guards passing on today's layout, which the move must keep green:** overflow visibility, the unclipped menu, Escape and an outside click.
+- No new public surface: commit 2 is the tests alone.
+
 ## TODO
 
 - [x] Record initial discovery (`2026-11-02-session-tabs-tab-plus-initial-discovery.md`)
 - [x] Cross-check `packages/*/docs/code-issues/` and `docs/dev/todo/` for items this change touches (Step 2b)
 - [x] Create/update PRD documentation
 - [x] Create changeset (this document)
-- [ ] Create failing acceptance tests
-- [ ] Run acceptance tests (verify they fail)
-- [ ] USER REVIEW — acceptance tests
-- [ ] TDD Red — write failing unit/integration tests
+- [x] Create failing acceptance tests
+- [x] Run acceptance tests (verify they fail)
+- [x] USER REVIEW — acceptance tests — waived by the developer 2026-11-02 (reviewed with the stack at the end of pass 2)
+- [x] TDD Red — write failing unit/integration tests
 - [ ] TDD Green — implement with quality code
 - [ ] Update documentation with progress
 - [ ] Repeat Red→Green→Update cycle until feature complete
