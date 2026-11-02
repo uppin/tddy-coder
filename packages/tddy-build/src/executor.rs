@@ -582,37 +582,6 @@ async fn wait_task_terminal(handle: &TaskHandle) {
     }
 }
 
-/// Build a `PATH` value with each tool dep's `bin_dir` prepended, or `None` when
-/// the action has no tool deps.
-// TODO(build-tools): delete — `execute_target_with_tools` puts the resolved tool closure on PATH.
-fn tool_path(
-    repo_root: &Path,
-    graph: &BuildGraph,
-    action: &BuildAction,
-) -> Result<Option<String>, BuildError> {
-    if action.tool_dep_ids.is_empty() {
-        return Ok(None);
-    }
-    let mut dirs: Vec<String> = Vec::new();
-    for tool_id in &action.tool_dep_ids {
-        if let Some(target) = graph.target(tool_id) {
-            if let Some(config) = &target.config {
-                if config.r#type == TOOL {
-                    let bin_dir = builtin::tool_bin_dir(&config.fields)?;
-                    dirs.push(repo_root.join(&bin_dir).to_string_lossy().into_owned());
-                }
-            }
-        }
-    }
-    if dirs.is_empty() {
-        return Ok(None);
-    }
-    if let Ok(existing) = std::env::var("PATH") {
-        dirs.push(existing);
-    }
-    Ok(Some(dirs.join(":")))
-}
-
 fn fingerprint_inputs(repo_root: &Path, action: &BuildAction) -> Vec<FileFingerprint> {
     let mut fingerprints: Vec<FileFingerprint> = Vec::new();
     for file_set in &action.inputs {

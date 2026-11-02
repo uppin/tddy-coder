@@ -34,17 +34,6 @@ struct ScriptTarget {
     working_dir_rel: Vec<String>,
 }
 
-// TODO(build-tools): delete this legacy shape once the executor resolves tools through
-// `tool_target`; until then `tool_bin_dir` keeps today's PATH behaviour for any manifest still
-// using it.
-#[derive(Debug, Default, Deserialize)]
-#[serde(default, deny_unknown_fields)]
-struct LegacyToolTarget {
-    bin_dir: String,
-    #[allow(dead_code)]
-    commands: HashMap<String, String>,
-}
-
 /// A `type: tool` target's config (`#agent-tools 4/12`): a tool definition written inline, or a
 /// reference to one the tool registry already holds.
 ///
@@ -152,13 +141,6 @@ pub fn script_action(fields: &serde_yaml::Value) -> Result<BuildAction, BuildErr
     })
 }
 
-/// The `bin_dir` a legacy `tool` target prepends onto dependents' `PATH`.
-// TODO(build-tools): delete with `LegacyToolTarget` once the executor resolves tool closures.
-pub fn tool_bin_dir(fields: &serde_yaml::Value) -> Result<String, BuildError> {
-    let tool: LegacyToolTarget = parse(fields, TOOL)?;
-    Ok(tool.bin_dir)
-}
-
 /// The member target ids a `group` aggregates (build-order predecessors).
 pub fn group_member_ids(fields: &serde_yaml::Value) -> Result<Vec<String>, BuildError> {
     let group: GroupTarget = parse(fields, GROUP)?;
@@ -191,20 +173,6 @@ mod tests {
         assert_eq!(action.working_dir, "sub/dir");
         assert_eq!(action.env.get("K").map(String::as_str), Some("V"));
         assert_eq!(action.r#type, ActionType::Command as i32);
-    }
-
-    // TODO(build-tools): delete with `tool_bin_dir` — the legacy shape is refused, see
-    // `the_legacy_tool_shape_is_refused_naming_the_target_and_the_migration`.
-    #[test]
-    fn tool_extracts_bin_dir() {
-        // Given
-        let config = yaml("bin_dir: tools/bin\ncommands: { greet: greet }\n");
-
-        // When
-        let bin_dir = tool_bin_dir(&config).expect("tool parses");
-
-        // Then
-        assert_eq!(bin_dir, "tools/bin");
     }
 
     #[test]

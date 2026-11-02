@@ -72,8 +72,11 @@ targets:
     name: "Tools"
     config:
       type: tool
-      bin_dir: tools/bin
-      commands: { greet: greet }
+      schema_version: 1
+      id: greet
+      summary: greets
+      binary:
+        command: greet
   - id: "all:group"
     name: "Group"
     config:
@@ -226,23 +229,38 @@ fn group_membership_drives_build_order_without_plugins() {
     );
 }
 
-// TODO(build-tools): rewrite or delete with the legacy `{bin_dir, commands}` shape — green refuses
-// it (`build_tools_acceptance::the_legacy_bin_dir_tool_shape_is_refused_with_a_migration_message`).
 #[tokio::test]
-async fn tool_bin_dir_is_prepended_to_action_path() {
-    // Given
+async fn a_declared_tool_is_on_the_action_path() {
+    // Given — the greet script is copied to its own output, and the inline tool names that output
+    // as its binary, so the tool's target builds first and its command is on the action's PATH
     let yaml = r#"
 schema_version: 1
 targets:
+  - id: "mytool:build"
+    name: "Build the greet tool"
+    actions:
+      - id: "install"
+        description: "copy the greet script to its output"
+        type: command
+        command: ["sh", "-c", "mkdir -p out && cp toolbin/greet out/greet && chmod +x out/greet"]
+        inputs:
+          - include: ["toolbin/greet"]
+            root: "."
+        outputs:
+          - path: "out/greet"
+            kind: file
   - id: "mytool:tool"
     name: "My Tool"
     config:
       type: tool
-      bin_dir: toolbin
-      commands: { greet: greet }
+      schema_version: 1
+      id: mytool
+      summary: runs the greet script
+      binary:
+        command: greet
+        target: { target: "mytool:build", path: out/greet }
   - id: "uses:tool"
     name: "Uses Tool"
-    deps: ["mytool:tool"]
     actions:
       - id: "run-greet"
         description: "invoke the tool-provided binary"
@@ -252,9 +270,9 @@ targets:
 "#;
     let repo = tempfile::tempdir().expect("tempdir");
     let root = repo.path();
-    let bin_dir = root.join("toolbin");
-    std::fs::create_dir_all(&bin_dir).expect("mkdir toolbin");
-    let greet = bin_dir.join("greet");
+    let toolbin = root.join("toolbin");
+    std::fs::create_dir_all(&toolbin).expect("mkdir toolbin");
+    let greet = toolbin.join("greet");
     std::fs::write(&greet, "#!/bin/sh\necho GREETED-BY-TOOL\n").expect("write greet");
     #[cfg(unix)]
     {
@@ -280,7 +298,7 @@ targets:
     // Then
     assert!(
         record.actions[0].stdout.contains("GREETED-BY-TOOL"),
-        "built-in tool bin_dir must be on PATH, got: {:?}",
+        "the declared tool's binary must be on the action PATH, got: {:?}",
         record.actions[0].stdout
     );
 }

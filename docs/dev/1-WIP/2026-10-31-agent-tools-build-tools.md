@@ -219,6 +219,16 @@ Every other test in `tddy-build` (34 lib + 14 + 4 + 1 + 4 + 5) and the `tddy-dae
 - #790's `tool_registry_acceptance.rs` gained `target: None` in its two `ToolBinary` literals — the only edit outside this node's files, forced by the additive field.
 
 **`TODO(build-tools)` deletions needing developer approval at green:** `builtin::{LegacyToolTarget, tool_bin_dir}`, `executor::tool_path`, and the two tests that pin the legacy shape — `builtin::tests::tool_extracts_bin_dir` and `build_acceptance::tool_bin_dir_is_prepended_to_action_path` (the latter rewritten or deleted in favour of `the_legacy_bin_dir_tool_shape_is_refused_with_a_migration_message`). `build_acceptance::MIXED_YAML` still lists a legacy tool target; `build-list` never parses it, so it stays valid until green decides.
+
+### From /green (TDD green phase)
+
+Developer decisions, applied at green:
+
+- **Deleted:** `builtin::{LegacyToolTarget, tool_bin_dir}`, `executor::tool_path` (it was dead once the executor resolved tools through the registry, and `clippy -D warnings` flagged it), and the unit test `builtin::tests::tool_extracts_bin_dir`. The legacy shape is still refused by `builtin::tool_target`, which checks the raw `bin_dir` / `commands` keys.
+- **Rewritten, not deleted:** `build_acceptance::tool_bin_dir_is_prepended_to_action_path` is now `a_declared_tool_is_on_the_action_path`. It declares `mytool` in the new shape: an inline tool whose `binary` is `greet`, built into `out/greet` by `mytool:build` and named as that target's output. The `uses:tool` action still finds and runs `greet` on its `PATH`. The `TODO(build-tools)` comment above it is gone.
+- **`build_acceptance::MIXED_YAML`:** its `tools:bin` target moved to the inline shape (`schema_version`, `id`, `summary`, `binary: { command: greet }`). It keeps its id and its `tool` type.
+- **Kept, with their markers, for wrap or a human:** the executor's cache-key hermeticity TODO (`executor.rs`), the sandbox exec-on-writable-mounts FIXME and the egress-shim TODO (`build_action_sandbox.rs`), and `lib.rs`'s doc TODO.
+
 ### From /validate-changes
 ### From /validate-tests
 ### From /validate-prod-ready
