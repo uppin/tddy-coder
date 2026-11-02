@@ -2,12 +2,11 @@ import React from "react";
 import { projectForUnscopedSession } from "../../utils/sessionProjectTable";
 import { SessionInspectorDrawer } from "./SessionInspectorDrawer";
 import { canResumeSession, sessionBaseViewMode } from "./sessionBaseView";
-import { SessionActivitiesPane } from "./SessionActivitiesPane";
 import { DormantSessionRuntime } from "./DormantSessionRuntime";
+import { DormantAgentTerminal } from "./DormantAgentTerminal";
 import { PARAM_CODE } from "../../routing/appLocation";
 import { useAppLocation } from "../../routing/useAppLocation";
 import { SessionWithActivitySidebar } from "./SessionWithActivitySidebar";
-import { rosterHalfOf } from "./sessionRosterHalf";
 import { Button } from "../ui/button";
 import { CreateSessionPane } from "./CreateSessionPane";
 import { AgentPicker } from "./AgentPicker";
@@ -34,6 +33,7 @@ export function SessionMainPane({
   onInspectorExpand,
   onInspectorRestore,
   onResume,
+  onResumeSession,
   onDelete,
   onTerminate,
   isCreating = false,
@@ -239,11 +239,11 @@ export function SessionMainPane({
         onRegisterInsert={registerDormantInsert}
         conversationHost={conversationHostFor(selectedSession.sessionId)}
         agentTab={
-          <SessionActivitiesPane
+          <DormantAgentTerminal
             sessionId={selectedSession.sessionId}
             sessionToken={sessionToken}
-            rosterHalf={rosterHalfOf(selectedSession)}
-            client={buildSessionActivityClient?.() ?? activityClient}
+            terminalClient={terminalClient}
+            onResume={() => onResumeSession(selectedSession.sessionId)}
           />
         }
         agentConversations={agentConversations[selectedSession.sessionId] ?? []}
@@ -487,6 +487,7 @@ export function SessionMainPane({
                   buildSessionExecToolClient={buildSessionExecToolClient}
                   onInsertPathIntoTerminal={insertPathIntoTerminal}
                   onSwitchPeer={onSwitchPeer}
+                  activityClient={buildSessionActivityClient?.() ?? activityClient}
                 />
               </div>
             </SessionWithActivitySidebar>

@@ -43,8 +43,8 @@ import { withSelectedDaemon } from "../support/rpc/withSelectedDaemon";
 import { aSessionServiceBackend } from "../support/rpc/daemonSessionHostBackend";
 import { mountWithRecordingLiveKitRpc } from "../support/rpc/recordingLiveKitRpc";
 import { sessionsDrawerPage as page } from "../support/pages/sessionsDrawerPage";
-import { sessionActivitiesPage } from "../support/pages/sessionActivitiesPage";
 import { byTestId, TEST_IDS } from "../support/testIds";
+import { dormantAgentTabPage } from "../support/pages/dormantAgentTabPage";
 
 // ---------------------------------------------------------------------------
 // Session fixtures
@@ -137,6 +137,7 @@ const noopInspectorHandlers = {
   onInspectorExpand: () => undefined,
   onInspectorRestore: () => undefined,
   onResume: () => undefined,
+  onResumeSession: () => Promise.resolve(),
   onDelete: () => undefined,
   onTerminate: () => undefined,
 };
@@ -153,7 +154,7 @@ describe("SessionInactiveInspectorOverlay — overlay-drawer layout", () => {
     window.localStorage.setItem("tddy_session_token", "fake-token");
   });
 
-  it("keeps a disconnected session's activities mounted behind the open inspector", () => {
+  it("keeps a disconnected session's Agent tab mounted behind the open inspector", () => {
     // Given
     const backend = aSessionServiceBackend({
       sessions: [DISCONNECTED_SESSION],
@@ -165,10 +166,11 @@ describe("SessionInactiveInspectorOverlay — overlay-drawer layout", () => {
     page.drawerItem(DISCONNECTED_SESSION.sessionId).click();
     page.inspectorToggle().click();
 
-    // Then — the drawer opens over a pane that still owns its base view. The docked layout used to
-    // *replace* that pane, so its survival is what the removal of docking buys.
+    // Then — the drawer opens over a pane that still owns its base view: the stopped session's Agent
+    // tab. The docked layout used to *replace* that pane, so its survival is what the removal of
+    // docking buys.
     page.inspectorDrawer().should("have.attr", "data-state", "open");
-    sessionActivitiesPage.pane().should("exist");
+    dormantAgentTabPage.terminal().should("exist");
   });
 
   it("keeps a connected session's terminal mounted behind the open inspector", () => {

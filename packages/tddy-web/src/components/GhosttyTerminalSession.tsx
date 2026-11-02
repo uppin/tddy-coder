@@ -84,12 +84,12 @@ function traceModes(term: GhosttyTerminalHandle, modes: string[]): void {
 }
 
 /**
- * The history view's greyish color scheme, so it never reads as the live terminal. The theme greys
- * the page terminal's default background and foreground; the filter desaturates whatever colors
- * the replayed output itself carries (SGR palette and truecolor alike), which a theme can't reach.
+ * The history view's greyish color scheme (also a stopped session's Agent tab), so it never reads as
+ * the live terminal. The theme greys the page terminal's default background and foreground; the filter
+ * desaturates the replayed output's own colors (SGR palette and truecolor alike), which a theme can't.
  */
-const HISTORY_THEME = { background: "#232326", foreground: "#9a9aa0" };
-const HISTORY_FILTER = "grayscale(1) brightness(0.9)";
+export const HISTORY_THEME = { background: "#232326", foreground: "#9a9aa0" };
+export const HISTORY_FILTER = "grayscale(1) brightness(0.9)";
 
 /** Scrollback lines retained by the older-history page terminal (large enough to hold a full session). */
 const PAGE_SCROLLBACK = 50000;

@@ -13,10 +13,3 @@
   specs prove the adjacent fact that the base view stays mounted behind an open drawer). Importing
   the stylesheet would make layout testable but risks perturbing the ~163 existing specs, so it is
   its own changeset.
-- **Resume has up to a ~2s dead time before the view changes.** The base view is derived from
-  session liveness, and liveness for the selected session only refreshes on the drawer's 2s
-  `ListSessions` poll (`sessionManager.ts` `REFRESH_INTERVAL_MS`), so after clicking Resume the pane
-  keeps showing the recorded transcript until the next poll reports the session live. Not a
-  regression — it falls straight out of "the view is derived, not navigated" — but it is a visible
-  lag on this feature's primary action. An optimistic local liveness hint on a successful
-  `ResumeSession` would close it without reintroducing view state.

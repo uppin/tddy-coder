@@ -37,6 +37,8 @@ import { useSessionsDrawerActivation } from "./useSessionsDrawerActivation";
 import { useSessionsDrawerDeleteSelection } from "./useSessionsDrawerDeleteSelection";
 import { SessionsDrawerOpenListButton, SessionsDrawerUnknownSession } from "./SessionsDrawerScreenParts";
 import { useSessionsDrawerPaneActions } from "./useSessionsDrawerPaneActions";
+import { useResumedSessionLiveness } from "./useResumedSessionLiveness";
+import { sessionPaneClients } from "./sessionPaneClients";
 import {
   SessionsDrawerLoadNotices,
   SessionsDrawerPaneError,
@@ -60,20 +62,8 @@ export function SessionsDrawerScreen({
   // daemon attributes the cancel itself. `null` when no one is signed in: the cancel is refused.
   const callerLogin = user?.login ? user.login : null;
 
-  const {
-    client,
-    projectClient,
-    worktreeClient,
-    terminalClient,
-    sessionFilesClient,
-    sessionAgentClient,
-    activityClient,
-    catalogClient,
-    accountsClient,
-    execToolClient,
-    prStackClient,
-    taskClient,
-  } = useSessionsDrawerClients();
+  const drawerClients = useSessionsDrawerClients();
+  const { client, projectClient } = drawerClients;
 
   // One daemon-level notification feed for the whole drawer, however many rows it has (NFR1). The
   // dots are written into `sessionNotificationRegistry`, which each row reads for itself; what comes
@@ -174,26 +164,17 @@ export function SessionsDrawerScreen({
     attachClaimRef,
   });
 
-  const {
-    activeClient,
-    activeWorktreeClient,
-    activeCodeNavigationClient,
-    activeTerminalClient,
-    activeSessionFilesClient,
-    activeSessionAgentClient,
-    activeActivityClient,
-    activeCatalogClient,
-    activeExecToolClient,
-    activePrStackClient,
-    activeTaskClient,
-    activeHost,
-  } = useSessionsDrawerOwningHost(selectedSession, selectedInstanceId);
+  const owningHost = useSessionsDrawerOwningHost(selectedSession, selectedInstanceId);
+  const { activeClient, activeHost } = owningHost;
 
   // A daemon instance id as a host is named in text (see `rpc/hostLabel`) — the owning-host badge on
   // cross-host rows, and every "not connected" this screen says.
   const hostLabelForInstance = useHostLabel();
 
-  const { paneError, reportAttachFailure, handleResume, handleDelete, handleTerminate } =
+  // A successful resume reads the session as live until the listing says so (the pane only).
+  const { liveSelectedSession, markSessionResumed } = useResumedSessionLiveness(sortedSessions, selectedSession);
+
+  const { paneError, reportAttachFailure, handleResume, resume, handleDelete, handleTerminate } =
     useSessionsDrawerPaneActions({
       selectedSession,
       selectedSessionId,
@@ -204,6 +185,7 @@ export function SessionsDrawerScreen({
       sessionToken,
       attachClaimRef,
       listGeneration,
+      onResumed: markSessionResumed,
     });
 
   // Key-press shortcuts for the connected session's tool (shown as the mobile overlay).
@@ -411,7 +393,7 @@ export function SessionsDrawerScreen({
             <SessionsDrawerUnknownSession onHome={handleUnknownHome} />
           ) : (
             <SessionMainPane
-              selectedSession={selectedSession}
+              selectedSession={liveSelectedSession}
               attachment={attachment}
               attachmentHint={attachmentHint}
               inspectorState={inspectorState}
@@ -420,58 +402,11 @@ export function SessionsDrawerScreen({
               onInspectorExpand={handleInspectorExpand}
               onInspectorRestore={handleInspectorRestore}
               onResume={handleResume}
+              onResumeSession={resume}
               onDelete={handleDelete}
               onTerminate={handleTerminate}
               isCreating={mode === "creating"}
-              client={mode === "creating" ? (client ?? undefined) : (activeClient ?? client ?? undefined)}
-              projectClient={projectClient ?? undefined}
-              taskClient={
-                mode === "creating"
-                  ? (taskClient ?? undefined)
-                  : (activeTaskClient ?? taskClient ?? undefined)
-              }
-              worktreeClient={
-                mode === "creating"
-                  ? (worktreeClient ?? undefined)
-                  : (activeWorktreeClient ?? worktreeClient ?? undefined)
-              }
-              codeNavigationClient={activeCodeNavigationClient ?? undefined}
-              terminalClient={
-                mode === "creating"
-                  ? (terminalClient ?? undefined)
-                  : (activeTerminalClient ?? terminalClient ?? undefined)
-              }
-              sessionFilesClient={
-                mode === "creating"
-                  ? (sessionFilesClient ?? undefined)
-                  : (activeSessionFilesClient ?? sessionFilesClient ?? undefined)
-              }
-              sessionAgentClient={
-                mode === "creating"
-                  ? (sessionAgentClient ?? undefined)
-                  : (activeSessionAgentClient ?? sessionAgentClient ?? undefined)
-              }
-              activityClient={
-                mode === "creating"
-                  ? (activityClient ?? undefined)
-                  : (activeActivityClient ?? activityClient ?? undefined)
-              }
-              accountsClient={accountsClient ?? undefined}
-              catalogClient={
-                mode === "creating"
-                  ? (catalogClient ?? undefined)
-                  : (activeCatalogClient ?? catalogClient ?? undefined)
-              }
-              execToolClient={
-                mode === "creating"
-                  ? (execToolClient ?? undefined)
-                  : (activeExecToolClient ?? execToolClient ?? undefined)
-              }
-              prStackClient={
-                mode === "creating"
-                  ? (prStackClient ?? undefined)
-                  : (activePrStackClient ?? prStackClient ?? undefined)
-              }
+              {...sessionPaneClients(mode === "creating", drawerClients, owningHost)}
               host={activeHost}
               sessionToken={sessionToken}
               callerLogin={callerLogin}

@@ -53,6 +53,9 @@ export interface SessionMainPaneProps {
   onInspectorExpand: () => void;
   onInspectorRestore: () => void;
   onResume: (sessionId: string) => void;
+  /** The same Resume as `onResume`, but it rejects with why the session did not come back — the
+   *  stopped Agent tab's toast shows that reason. */
+  onResumeSession: (sessionId: string) => Promise<void>;
   onDelete: (sessionId: string) => void;
   onTerminate: (sessionId: string) => void;
   // Create session mode

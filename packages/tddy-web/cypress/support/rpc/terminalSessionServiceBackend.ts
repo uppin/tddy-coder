@@ -55,7 +55,16 @@ export interface TerminalSessionServiceScenario {
   /** Older history chunks returned by `GetTerminalHistory`, in the order they should be yielded
    *  across successive calls (one chunk per call). Each chunk's `startOffset`/`endOffset`/`atOldest`
    *  is used verbatim. The backend pops one chunk per `getTerminalHistory` call. */
-  terminalHistory?: Array<{ data: Uint8Array; startOffset: bigint; endOffset: bigint; atOldest: boolean }>;
+  terminalHistory?: Array<{
+    data: Uint8Array;
+    startOffset: bigint;
+    endOffset: bigint;
+    atOldest: boolean;
+    atEnd?: boolean;
+  }>;
+  /** When set, `GetTerminalHistory` fails `NOT_FOUND` — a terminal that is neither running nor
+   *  recorded. */
+  terminalHistoryNotFound?: boolean;
   /** `ListTmuxSessions` result — the tmux sessions on the session's host. Default: none. */
   tmuxSessions?: Array<{ name: string; windows?: number; attached?: number }>;
   /** When set, `ListTmuxSessions` fails `FAILED_PRECONDITION` with this message — a host without
@@ -305,6 +314,9 @@ export function aTerminalSessionServiceFake(
         fromOffset: req.fromOffset,
         untilOffset: req.untilOffset,
       });
+      if (scenario.terminalHistoryNotFound) {
+        throw new ConnectError("terminal not found or not running", Code.NotFound);
+      }
       const chunk = (scenario.terminalHistory ?? []).shift();
       if (chunk) {
         yield create(TerminalHistoryChunkSchema, chunk);

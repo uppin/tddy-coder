@@ -19,9 +19,19 @@ interface InspectorTabsProps {
    * one matches what is actually true of the wire.
    */
   mediaAvailable: boolean;
+  /**
+   * Whether the session is stopped, so the recorded transcript (the Activity tab) is offered. A live
+   * session's transcript is the Agent Activity sidebar's, so its strip has no Activity tab.
+   */
+  activityAvailable: boolean;
 }
 
-export function InspectorTabs({ value, onChange, mediaAvailable }: InspectorTabsProps) {
+export function InspectorTabs({
+  value,
+  onChange,
+  mediaAvailable,
+  activityAvailable,
+}: InspectorTabsProps) {
   return (
     <div className="flex border-b border-border flex-shrink-0">
       <button
@@ -36,6 +46,20 @@ export function InspectorTabs({ value, onChange, mediaAvailable }: InspectorTabs
       >
         Details
       </button>
+      {activityAvailable && (
+        <button
+          data-testid="sessions-inspector-tab-activity"
+          aria-selected={value === "activity"}
+          onClick={() => onChange("activity")}
+          className={`px-3 py-1.5 text-xs font-medium border-b-2 transition-colors ${
+            value === "activity"
+              ? "border-foreground text-foreground"
+              : "border-transparent text-muted-foreground hover:text-foreground"
+          }`}
+        >
+          Activity
+        </button>
+      )}
       <button
         data-testid="sessions-inspector-tab-tools"
         aria-selected={value === "tools"}

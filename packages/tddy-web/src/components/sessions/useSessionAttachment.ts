@@ -48,8 +48,8 @@ export interface UseSessionAttachmentResult {
   hint: SessionAttachmentHint | null;
   /** Resolves `true` once the attach is settled, `false` when it failed (the state is then `error`). */
   connectSession(sessionId: string, sessionToken: string, host: HostConnection): Promise<boolean>;
-  /** As {@link connectSession}. */
-  resumeSession(sessionId: string, sessionToken: string, host: HostConnection): Promise<boolean>;
+  /** Resolves `null` once the resume is settled; otherwise the failure's text (the state is then `error`). */
+  resumeSession(sessionId: string, sessionToken: string, host: HostConnection): Promise<string | null>;
   deleteSession(
     sessionId: string,
     sessionToken: string,
@@ -89,7 +89,7 @@ export function useSessionAttachment(): UseSessionAttachmentResult {
    * LiveKit fields of the reply are read, and the branch (`resp.livekitRoom !== ""`) that used to
    * decide which of two statuses every consumer would then have to handle.
    *
-   * The failure is shown as the `error` state *and* reported to the caller as `false`: the caller
+   * The failure is shown as the `error` state *and* reported to the caller as its text: the caller
    * holds an attach claim for this session, and only it can give the claim back.
    */
   const attach = useCallback(
@@ -101,7 +101,7 @@ export function useSessionAttachment(): UseSessionAttachmentResult {
         livekitUrl: string;
         livekitServerIdentity: string;
       }>,
-    ): Promise<boolean> => {
+    ): Promise<string | null> => {
       setAttachment({ state: { status: "connecting", sessionId }, hint: null });
       try {
         const reply = await call(host.clientFor(SessionService));
@@ -112,22 +112,27 @@ export function useSessionAttachment(): UseSessionAttachmentResult {
           // started joining a room — and the registry that would otherwise own it will never be
           // told about this one.
           connection.close();
-          return true;
+          return null;
         }
         setAttachment({ state: { status: "connected", connection }, hint });
-        return true;
+        return null;
       } catch (err) {
         // The daemon's own words, without the transport's `[code]` (see `rpcFailureText`).
-        setAttachment({ state: { status: "error", error: rpcFailureText(err) }, hint: null });
-        return false;
+        const failure = rpcFailureText(err);
+        setAttachment({ state: { status: "error", error: failure }, hint: null });
+        return failure;
       }
     },
     [],
   );
 
   const connectSession = useCallback(
-    (sessionId: string, sessionToken: string, host: HostConnection) =>
-      attach(sessionId, host, (client) => client.connectSession({ sessionToken, sessionId })),
+    async (sessionId: string, sessionToken: string, host: HostConnection): Promise<boolean> => {
+      const failure = await attach(sessionId, host, (client) =>
+        client.connectSession({ sessionToken, sessionId }),
+      );
+      return failure === null;
+    },
     [attach],
   );
 

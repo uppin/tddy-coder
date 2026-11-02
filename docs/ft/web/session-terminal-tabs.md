@@ -133,9 +133,15 @@ A session whose agent is not running (`is_active == false`) keeps its tab strip.
 still on disk, so the operator can run the tests, read git state or ask another agent about it
 without resuming the agent first.
 
-- **Agent tab**: the session's recorded transcript, read-only — the
-  [Activities view](inactive-session-activities.md). It takes no input, so it shows no "Claim
-  terminal" toast and takes no Files-tab insert.
+- **Agent tab**: what the agent terminal last printed, from `GetTerminalHistory` for `main`, in a
+  read-only terminal drawn in the **history colour scheme** (the greyed scheme of "View history"). It
+  scrolls through the whole recording, takes no input, shows no "Claim terminal" toast and takes no
+  Files-tab insert. A session with no recording says **No recorded output**.
+  - A **toast** over it reads "This session is not running" with a **Resume** action. While the
+    resume runs the action shows a spinner and cannot be pressed again; a refused resume shows its
+    reason in the toast, and the greyed view stays.
+  - The recorded ACP transcript is the inspector's **Activity** tab — see
+    [Inactive session activities](inactive-session-activities.md#inspector-activity-tab).
 - **Terminal tabs**: the terminals the daemon already runs for the session (`ListTerminalSessions`),
   and **`+`** opens Bash or any CLI harness. They stream through the owning daemon's
   `TerminalSessionService` exactly as a live session's tabs do, and start in the worktree the
@@ -147,8 +153,10 @@ without resuming the agent first.
 - **The terminal tabs carry the live strip's features**: full screen, the mobile shortcut drawer on
   the focused tab, the Files tab's **Insert** into the focused bash tab, and "Claim terminal" with
   the grey-out while another screen holds the session's control lease.
-- **Resume** swaps the stopped strip for the live one. Tabs opened while the session was stopped
-  are daemon terminals, so the live strip lists them; open conversations are not cancelled. Leaving
+- **Resume** (the toast's or the top bar's — one action) swaps the stopped strip for the live one
+  as soon as `ResumeSession` succeeds, without waiting for the next session-list poll. Tabs opened
+  while the session was stopped are daemon terminals, so the live strip lists them; open
+  conversations are not cancelled. Leaving
   the session and coming back does not cancel them either: only closing a tab ends a conversation.
 - A workflow session (PR-Stack, workflow chat) keeps its own view and has no strip.
 
@@ -172,9 +180,11 @@ without resuming the agent first.
 8. A tool session's menu offers **Bash** only; a session whose type is not yet known offers every
    harness.
 9. A refused start shows its reason in `sessions-terminal-error` and opens no tab.
-10. A stopped (non-workflow) session shows the strip too: an **Agent** tab holding its recorded
-    transcript, the terminals the daemon lists for it, its agent conversations, and `+`. Its terminals
-    start in the session's recorded worktree and are still in the strip after Resume.
+10. A stopped (non-workflow) session shows the strip too: an **Agent** tab holding the agent
+    terminal's last recorded output, greyed and read-only, under a "This session is not running"
+    toast with **Resume**; the terminals the daemon lists for it; its agent conversations; and `+`.
+    Its terminals start in the session's recorded worktree and are still in the strip, the same
+    terminals, after Resume. Resume goes live at once, not at the next session-list poll.
 11. The menu lists the host's tmux sessions for the session's OS user when it opens; choosing one
     opens a **tmux: <name>** tab attached to it, which every viewer lists under the same label.
     Closing it detaches, leaving the tmux session running. The section shows **No tmux sessions**
