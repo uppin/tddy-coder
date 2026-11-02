@@ -81,6 +81,48 @@ fn minimal_service(config: DaemonConfig, sessions_base: PathBuf) -> DaemonSessio
     )
 }
 
+/// [`minimal_service`] with the daemon's coding agents installed, as the runtime installs them: a
+/// sandboxed `claude-cli` session is launched from the `claude` tool definition, which resolves the
+/// jail's `tddy-tools` on a `PATH` of `<sessions_base>/stub-bin` alone. `claude` itself stays the
+/// configured `claude_cli.binary_path`.
+fn a_service_with_coding_agents(config: DaemonConfig, sessions_base: PathBuf) -> DaemonSessionHost {
+    let stub_bin = sessions_base.join("stub-bin");
+    std::fs::create_dir_all(&stub_bin).unwrap();
+    let stub_bin = std::fs::canonicalize(stub_bin).unwrap();
+    std::os::unix::fs::symlink(tddy_tools_binary(), stub_bin.join("tddy-tools")).unwrap();
+    let registry = tddy_coding_agent_specs::load_agent_registry(&sessions_base.join("tools"))
+        .expect("the agent registry loads");
+    minimal_service(config, sessions_base).with_coding_agents(Arc::new(
+        tddy_agent_launch::spec_launch::HostCodingAgents::new(
+            registry,
+            Arc::new(APathHost(vec![stub_bin])),
+        ),
+    ))
+}
+
+/// A tool host with a declared `PATH` over the real filesystem: nothing of the real machine's
+/// `PATH` or `TDDY_*_BINARY` variables reaches resolution.
+struct APathHost(Vec<PathBuf>);
+
+impl tddy_actions::tool::ToolHost for APathHost {
+    fn env_var(&self, _name: &str) -> Option<String> {
+        None
+    }
+
+    fn path_dirs(&self) -> Vec<PathBuf> {
+        self.0.clone()
+    }
+
+    fn is_executable_file(&self, path: &std::path::Path) -> bool {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::metadata(path).is_ok_and(|m| m.is_file() && m.permissions().mode() & 0o111 != 0)
+    }
+
+    fn canonicalize(&self, path: &std::path::Path) -> std::io::Result<PathBuf> {
+        std::fs::canonicalize(path)
+    }
+}
+
 fn create_test_repo_with_origin(dir: &std::path::Path) {
     let run = |args: &[&str], envs: &[(&str, &str)]| {
         let mut cmd = std::process::Command::new("git");
@@ -160,7 +202,7 @@ async fn delete_sandbox_session_stops_child_and_removes_directory() {
     register_project(&sessions_tmp.path().join("projects"), repo_dir.path());
     let stub = write_stub_claude(repo_dir.path());
     let (_cfg_dir, config) = write_config_with_claude_cli_binary(stub.to_str().unwrap());
-    let service = minimal_service(config, sessions_tmp.path().to_path_buf());
+    let service = a_service_with_coding_agents(config, sessions_tmp.path().to_path_buf());
 
     let resp = service
         .start_session(Request::direct(sandbox_start_request()))
@@ -200,7 +242,7 @@ async fn resume_sandbox_session_respawns_and_updates_pid() {
     register_project(&sessions_tmp.path().join("projects"), repo_dir.path());
     let stub = write_stub_claude(repo_dir.path());
     let (_cfg_dir, config) = write_config_with_claude_cli_binary(stub.to_str().unwrap());
-    let service = minimal_service(config, sessions_tmp.path().to_path_buf());
+    let service = a_service_with_coding_agents(config, sessions_tmp.path().to_path_buf());
 
     let session_id = service
         .start_session(Request::direct(sandbox_start_request()))

@@ -100,6 +100,48 @@ fn minimal_service(config: DaemonConfig, sessions_base: PathBuf) -> DaemonSessio
     )
 }
 
+/// [`minimal_service`] with the daemon's coding agents installed, as the runtime installs them: a
+/// sandboxed `claude-cli` session is launched from the `claude` tool definition, which resolves the
+/// jail's `tddy-tools` on a `PATH` of `<sessions_base>/stub-bin` alone. `claude` itself stays the
+/// configured `claude_cli.binary_path`.
+fn a_service_with_coding_agents(config: DaemonConfig, sessions_base: PathBuf) -> DaemonSessionHost {
+    let stub_bin = sessions_base.join("stub-bin");
+    std::fs::create_dir_all(&stub_bin).unwrap();
+    let stub_bin = std::fs::canonicalize(stub_bin).unwrap();
+    std::os::unix::fs::symlink(tddy_tools_binary(), stub_bin.join("tddy-tools")).unwrap();
+    let registry = tddy_coding_agent_specs::load_agent_registry(&sessions_base.join("tools"))
+        .expect("the agent registry loads");
+    minimal_service(config, sessions_base).with_coding_agents(Arc::new(
+        tddy_agent_launch::spec_launch::HostCodingAgents::new(
+            registry,
+            Arc::new(APathHost(vec![stub_bin])),
+        ),
+    ))
+}
+
+/// A tool host with a declared `PATH` over the real filesystem: nothing of the real machine's
+/// `PATH` or `TDDY_*_BINARY` variables reaches resolution.
+struct APathHost(Vec<PathBuf>);
+
+impl tddy_actions::tool::ToolHost for APathHost {
+    fn env_var(&self, _name: &str) -> Option<String> {
+        None
+    }
+
+    fn path_dirs(&self) -> Vec<PathBuf> {
+        self.0.clone()
+    }
+
+    fn is_executable_file(&self, path: &std::path::Path) -> bool {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::metadata(path).is_ok_and(|m| m.is_file() && m.permissions().mode() & 0o111 != 0)
+    }
+
+    fn canonicalize(&self, path: &std::path::Path) -> std::io::Result<PathBuf> {
+        std::fs::canonicalize(path)
+    }
+}
+
 fn create_test_repo_with_origin(dir: &Path) {
     let run = |args: &[&str], envs: &[(&str, &str)]| {
         let mut cmd = std::process::Command::new("git");
@@ -243,7 +285,7 @@ async fn sandboxed_session_streams_demo_tui_dimensions_in_terminal() {
         "build tddy-demo-tui before running this test"
     );
     let (_cfg_dir, config) = write_config_with_claude_cli_binary(demo_tui.to_str().unwrap());
-    let service = minimal_service(config, sessions_tmp.path().to_path_buf());
+    let service = a_service_with_coding_agents(config, sessions_tmp.path().to_path_buf());
 
     // When
     let session_id = service
@@ -275,7 +317,7 @@ async fn sandboxed_session_spawn_manifest_records_session_channel_egress() {
     register_project(&sessions_tmp.path().join("projects"), repo_dir.path());
     let demo_tui = demo_tui_binary();
     let (_cfg_dir, config) = write_config_with_claude_cli_binary(demo_tui.to_str().unwrap());
-    let service = minimal_service(config, sessions_tmp.path().to_path_buf());
+    let service = a_service_with_coding_agents(config, sessions_tmp.path().to_path_buf());
 
     // When
     let session_id = service
@@ -315,7 +357,7 @@ async fn sandboxed_session_relays_claude_llm_egress_via_session_channel() {
     register_project(&sessions_tmp.path().join("projects"), repo_dir.path());
     let probe_claude = write_egress_probe_claude_script(repo_dir.path());
     let (_cfg_dir, config) = write_config_with_claude_cli_binary(probe_claude.to_str().unwrap());
-    let service = minimal_service(config, sessions_tmp.path().to_path_buf());
+    let service = a_service_with_coding_agents(config, sessions_tmp.path().to_path_buf());
 
     // When
     let session_id = service
@@ -355,7 +397,7 @@ async fn sandboxed_session_denies_direct_outbound_network_from_jail() {
     register_project(&sessions_tmp.path().join("projects"), repo_dir.path());
     let probe_claude = write_egress_probe_claude_script(repo_dir.path());
     let (_cfg_dir, config) = write_config_with_claude_cli_binary(probe_claude.to_str().unwrap());
-    let service = minimal_service(config, sessions_tmp.path().to_path_buf());
+    let service = a_service_with_coding_agents(config, sessions_tmp.path().to_path_buf());
 
     // When
     let session_id = service
@@ -399,7 +441,7 @@ async fn sandboxed_session_child_is_alive_after_demo_tui_start() {
     register_project(&sessions_tmp.path().join("projects"), repo_dir.path());
     let demo_tui = demo_tui_binary();
     let (_cfg_dir, config) = write_config_with_claude_cli_binary(demo_tui.to_str().unwrap());
-    let service = minimal_service(config, sessions_tmp.path().to_path_buf());
+    let service = a_service_with_coding_agents(config, sessions_tmp.path().to_path_buf());
 
     // When
     let session_id = service
