@@ -7,6 +7,7 @@
 
 use std::path::{Path, PathBuf};
 
+use tddy_core::session_lifecycle::{unified_session_dir_path, validate_session_id_segment};
 use tddy_rpc::Status;
 
 /// The worktree `session_id`'s directory under `tddy_data_dir` records, as
@@ -16,11 +17,13 @@ use tddy_rpc::Status;
 /// `failed_precondition` naming the session when nothing on this host records its worktree — an
 /// unknown session, or a split session's agent half whose checkout lives on another daemon.
 pub(super) fn recorded_worktree(tddy_data_dir: &Path, session_id: &str) -> Result<PathBuf, Status> {
-    // TODO(dormant-tabs): implement
-    let _ = tddy_data_dir;
-    Err(Status::unimplemented(format!(
-        "starting a tab on stopped session {session_id} is not implemented"
-    )))
+    validate_session_id_segment(session_id).map_err(|e| Status::invalid_argument(e.message()))?;
+    let session_dir = unified_session_dir_path(tddy_data_dir, session_id);
+    tddy_core::repo_root_for_session(&session_dir).ok_or_else(|| {
+        Status::failed_precondition(format!(
+            "session {session_id} records no worktree on this host, so its tabs cannot start"
+        ))
+    })
 }
 
 #[cfg(test)]
