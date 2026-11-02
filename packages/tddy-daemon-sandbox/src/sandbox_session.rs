@@ -15,8 +15,6 @@ use tddy_service::proto::exec_tools::ExecuteToolResponse;
 use tddy_service::tonic_sandbox::sandbox_service_client::SandboxServiceClient;
 use tddy_task::TerminalCapture;
 
-use crate::main_recording::{JailRecording, JailRecordings};
-
 /// A resource whose lifetime is tied to a sandbox session and whose cleanup happens on `Drop`.
 ///
 /// The daemon's managed-workflow wiring is the only implementor: a per-session toolcall listener
@@ -108,62 +106,15 @@ impl Drop for SandboxSessionState {
 }
 
 /// Registry of sandbox sessions keyed by session_id.
+#[derive(Default)]
 pub struct SandboxSessionManager {
     inner: Mutex<HashMap<String, Arc<SandboxSessionState>>>,
-    /// The sessions whose jailed `main` terminal is recorded to disk, and where.
-    recordings: JailRecordings,
-    /// How often a running jailed `main` is rewritten to its recording.
-    recording_interval: Duration,
-}
-
-impl Default for SandboxSessionManager {
-    fn default() -> Self {
-        Self::new()
-    }
+    pub(crate) recorder: crate::main_recording::JailRecorder,
 }
 
 impl SandboxSessionManager {
     pub fn new() -> Self {
-        Self {
-            inner: Mutex::new(HashMap::new()),
-            recordings: Mutex::new(HashMap::new()),
-            recording_interval: tddy_task::RECORDING_INTERVAL,
-        }
-    }
-
-    /// The same manager, rewriting running recordings every `interval` instead of
-    /// [`tddy_task::RECORDING_INTERVAL`].
-    #[must_use]
-    pub fn with_recording_interval(mut self, interval: Duration) -> Self {
-        self.recording_interval = interval;
-        self
-    }
-
-    /// Record `session_id`'s jailed `main` terminal at `path`: periodically while it runs, and once
-    /// more when its sandbox state is removed — the jailed counterpart of
-    /// `CliSessionManager::record_main_capture`.
-    ///
-    /// Registering again replaces the earlier registration, which stops writing. A session with no
-    /// sandbox state has nothing to record, so nothing is registered and that is logged.
-    pub async fn record_main_capture(&self, session_id: &str, path: PathBuf) {
-        let Some(state) = self.get(session_id).await else {
-            log::warn!(
-                target: "tddy_daemon_sandbox::main_recording",
-                "record_main_capture: session={session_id} has no sandbox state; {} is not registered",
-                path.display()
-            );
-            return;
-        };
-        let recording = JailRecording::new(path, Arc::clone(&state.capture));
-        let replaced = self
-            .recordings
-            .lock()
-            .await
-            .insert(session_id.to_string(), Arc::clone(&recording));
-        if let Some(replaced) = replaced {
-            replaced.replace().await;
-        }
-        tokio::spawn(recording.record_periodically(self.recording_interval));
+        Self::default()
     }
 
     pub async fn insert(&self, session_id: String, state: Arc<SandboxSessionState>) {
@@ -174,16 +125,9 @@ impl SandboxSessionManager {
         self.inner.lock().await.get(session_id).cloned()
     }
 
-    /// Removes `session_id`'s state, after writing the final snapshot of its recording when its
-    /// `main` is recorded.
     pub async fn remove(&self, session_id: &str) -> Option<Arc<SandboxSessionState>> {
         let removed = self.inner.lock().await.remove(session_id);
-        if removed.is_some() {
-            let recording = self.recordings.lock().await.remove(session_id);
-            if let Some(recording) = recording {
-                recording.finish().await;
-            }
-        }
+        self.recorder.finish(session_id).await;
         removed
     }
 }

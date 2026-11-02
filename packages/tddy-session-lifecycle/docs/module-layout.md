@@ -74,6 +74,7 @@ and those crates deliberately do not grow a transport.
 | `handler.rs`, `service.rs` | `SessionHandler`, `SessionStartEventStream`, `SessionServiceImpl`, `build_session_entry` |
 | `rpc_families.rs` | the `DaemonRpcFamilies` port ([session-service.md](session-service.md)) |
 | `terminal_session_adapter.rs` | the terminal RPC adapter over `CliSessionManager` |
+| `session_dir_recorded_history.rs` | `SessionDirRecordedHistory`, the daemon's `RecordedTerminalHistory`: a stopped session's `main` answered from `<data dir>/sessions/<id>/terminals/main.capture` (any other terminal id, a missing file and an unreadable one — logged — are `None`); re-exports `main_capture_recording_path` / `MAIN_CAPTURE_RECORDING` from `tddy-cli-sessions` |
 | `session_agent_clone.rs` | `clone_worktree_path`, plus a re-export of `tddy_session_agents::session_agent_clone`; the function is unreferenced |
 | `session_notifications.rs` | a facade over `tddy_session_activity::session_notifications` and `session_notification_publishing` |
 | `claude_cli_session.rs`, `pr_stack_rpc.rs` | historical-path re-exports of `cli_session_manager` and `tddy_pr_stack::rpc` |

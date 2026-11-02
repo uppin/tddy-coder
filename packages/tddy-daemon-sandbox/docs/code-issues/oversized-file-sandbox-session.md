@@ -3,10 +3,10 @@
 **Location:** `packages/tddy-daemon-sandbox/src/sandbox_session.rs`
 **Category:** oversized-file
 **Detected:** 2026-09-19 — `/analyze-clean-code` on PR #518
-**Metrics:** **946 production lines** (2026-10-25, after #762; 911 at detection, of 1,147 total then) · budget 500 · **1.8× over**
+**Metrics:** **947 production lines** (2026-11-02, after #805; 911 at detection, of 1,147 total then) · budget 500 · **1.8× over**
 **Thresholds breached:** length 946 > 500; `dial_and_bridge` **12 parameters** > 5
 **Restructure:** `extract_module --to_file` — seam not yet designed
-**Status:** Open — regressed 2026-09-24 (911 → 916 in #509, `#keyring` 2/9, transport stamping; deferred with consent) — **unclaimed**
+**Status:** Open — regressed 2026-11-02 (946 → 947 in #805) and 2026-09-24 (911 → 916 in #509, `#keyring` 2/9, transport stamping; deferred with consent) — **unclaimed**
 
 ## Measurement history
 
@@ -18,6 +18,7 @@
 | 2026-10-22 | 922 | **worse** by 5 in PR #670 (`#provider-route` 9/9): `SandboxRunnerSpawn.route` and its doc, passed into the recipe plan. No logic added here; the route's handling is in `tddy-sandbox-recipes` (`plan.rs`, `route_files.rs`). Decomposition still deferred |
 | 2026-10-25 | 924 | **worse** by 2 in PR #760 (`#term-snapshot` 1/4): the jail's stdio loop broadcasts under the capture lock (the snapshot sequence point) — one line moved inside the lock plus its comment. Decomposition deferred with the developer's consent: the file is stack-shared with #762 and #763 |
 | 2026-10-25 | 946 | **worse** by 22 in PR #762 (`#term-snapshot` 3/4): `forward_jail_terminal_events`, which replaces the inline byte forwarder in `dial_and_bridge` and also resizes the capture when the jail reports a size. Deferred with the developer's consent: the file is stack-shared within `#term-snapshot` |
+| 2026-11-02 | 947 | **worse** by 1 in #805 (`#session-tabs` 2/7): `SandboxSessionManager` gains its `recorder` field and `remove` writes the jailed main terminal's final recording (`self.recorder.finish(..)`); `new()` became `Self::default()` (−2). Everything else of the recording — `JailRecorder`, `with_recording_interval`, `record_main_capture` — lives in `main_recording.rs` (the green phase had grown this file to 1,003). Measured against `origin/feature/session-tabs/dormant-tabs` (a35ebd026). Not decomposed: no engine run fit the disk on this host, and the seam is still undesigned |
 
 ## What the tool found
 

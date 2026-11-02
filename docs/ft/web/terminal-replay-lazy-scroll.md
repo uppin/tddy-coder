@@ -264,6 +264,9 @@ Consumed from the unification changeset (forward-chunk shape):
   `from_offset`, then closes. The client appends it to the older terminal, advances
   `from_offset` to the chunk's `end_offset`, and calls again until `at_end = true` (reached
   `until_offset` / the capture tip).
+- For a session's `main` terminal whose process has exited, the daemon answers the same call from the
+  session's recording of it, with the offsets the live terminal had
+  ([terminal sessions § History of a stopped agent terminal](../daemon/terminal-sessions.md#history-of-a-stopped-agent-terminal)).
 
 ## Component contract
 

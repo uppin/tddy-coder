@@ -11,6 +11,7 @@ use std::fs::{self, OpenOptions};
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Mutex, PoisonError};
 use std::time::Duration;
 
 use crate::terminal_capture::{forward_chunk, CaptureChunk, TerminalCapture};
@@ -86,6 +87,25 @@ impl CaptureRecording {
             return Err(error);
         }
         Ok(())
+    }
+
+    /// Snapshot `capture` and replace the recording at `path` with it, on a blocking thread,
+    /// creating the recording's directory first — what a recorder does on every write.
+    ///
+    /// A poisoned capture is still recorded: its bytes and offsets stay consistent, because every
+    /// append updates them together.
+    pub async fn record(capture: &Mutex<TerminalCapture>, path: &Path) -> io::Result<()> {
+        let snapshot = Self::of(&capture.lock().unwrap_or_else(PoisonError::into_inner));
+        let path = path.to_path_buf();
+        tokio::task::spawn_blocking(move || {
+            // A session's `terminals/` directory exists only once something is recorded into it.
+            if let Some(parent) = path.parent() {
+                fs::create_dir_all(parent)?;
+            }
+            snapshot.write_atomically(&path)
+        })
+        .await
+        .map_err(io::Error::other)?
     }
 
     /// The recording at `path`. A wrong magic, an unknown version or offsets that do not match the

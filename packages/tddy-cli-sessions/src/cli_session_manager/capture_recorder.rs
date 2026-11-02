@@ -46,30 +46,16 @@ pub(crate) struct MainRecording {
 }
 
 impl MainRecording {
-    /// Snapshot the capture and write it to the recording's path, on a blocking thread. A failed
-    /// write is logged and the terminal carries on: the recording is a copy, and the live terminal
-    /// does not depend on it.
+    /// Snapshot the capture and write it to the recording's path. A failed write is logged and the
+    /// terminal carries on: the recording is a copy, and the live terminal does not depend on it.
     async fn write_snapshot(&self) {
-        let snapshot = CaptureRecording::of(&self.capture.lock().unwrap());
-        let path = self.path.clone();
-        let outcome = tokio::task::spawn_blocking(move || {
-            // A session's `terminals/` directory exists only once something is recorded into it.
-            if let Some(parent) = path.parent() {
-                std::fs::create_dir_all(parent)?;
-            }
-            snapshot.write_atomically(&path)
-        })
-        .await;
-        let error = match outcome {
-            Ok(Ok(())) => return,
-            Ok(Err(error)) => error.to_string(),
-            Err(join_error) => join_error.to_string(),
-        };
-        log::warn!(
-            target: "tddy_daemon::claude_cli_session",
-            "could not write the main terminal's recording to {}: {error}",
-            self.path.display()
-        );
+        if let Err(error) = CaptureRecording::record(&self.capture, &self.path).await {
+            log::warn!(
+                target: "tddy_daemon::claude_cli_session",
+                "could not write the main terminal's recording to {}: {error}",
+                self.path.display()
+            );
+        }
     }
 }
 

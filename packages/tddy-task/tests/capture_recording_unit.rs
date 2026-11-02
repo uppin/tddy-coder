@@ -1,7 +1,7 @@
 //! `CaptureRecording`: a terminal capture's retained window on disk, paging exactly like the live
 //! capture it was taken from.
 //!
-//! PRD: docs/ft/daemon/1-WIP/PRD-2026-11-02-agent-terminal-history-persists.md (`#session-tabs 2/7`)
+//! Feature: docs/ft/daemon/terminal-sessions.md § History of a stopped agent terminal
 
 use std::io::ErrorKind;
 
@@ -105,7 +105,48 @@ fn a_failed_write_leaves_no_file_behind() {
     // When
     let result = recording.write_atomically(&path);
 
-    // Then the write fails and nothing named like the target is left anywhere under the dir
+    // Then the write fails and the target does not exist
     assert_eq!(result.unwrap_err().kind(), ErrorKind::NotFound);
     assert!(!path.exists());
+}
+
+#[test]
+fn a_write_that_fails_at_the_rename_leaves_no_temporary_file_behind() {
+    // Given a target path already taken by a non-empty directory, so only the rename can fail
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("main.capture");
+    std::fs::create_dir(&path).unwrap();
+    std::fs::write(path.join("occupant"), b"x").unwrap();
+    let recording = CaptureRecording::of(&a_capture_that_evicted_its_oldest_output());
+
+    // When
+    let result = recording.write_atomically(&path);
+
+    // Then the write fails and the directory holds only the target, no temporary beside it
+    assert!(
+        result.is_err(),
+        "renaming over a non-empty directory must fail"
+    );
+    let left: Vec<_> = std::fs::read_dir(dir.path())
+        .unwrap()
+        .map(|entry| entry.unwrap().file_name())
+        .collect();
+    assert_eq!(left, vec![std::ffi::OsString::from("main.capture")]);
+}
+
+#[tokio::test]
+async fn recording_a_capture_creates_its_directory_and_writes_its_window() {
+    // Given a capture and a recording path whose directory does not exist yet
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("terminals").join("main.capture");
+    let capture = std::sync::Mutex::new(a_capture_that_evicted_its_oldest_output());
+
+    // When it is recorded
+    CaptureRecording::record(&capture, &path)
+        .await
+        .expect("the capture is recorded");
+
+    // Then the file holds the window the capture retains
+    let expected = CaptureRecording::of(&capture.lock().unwrap());
+    assert_eq!(CaptureRecording::read(&path).unwrap(), expected);
 }

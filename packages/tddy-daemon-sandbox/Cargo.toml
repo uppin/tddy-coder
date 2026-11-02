@@ -54,6 +54,8 @@ prost = "0.13"
 # `task_service_peer_cancel.rs` scripts the peer daemon behind a `CommonRoom`.
 tddy-daemon-extensions = { path = "../tddy-daemon-extensions" }
 tempfile = "3"
+# `eventually` — the recording tests wait on a file the periodic recorder writes.
+tddy-testing-commons = { path = "../tddy-testing-commons" }
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "time", "process", "io-util"] }
 # The exec-tool server the jailed runner relays to, mounted directly by
 # `sandbox_stdio_seatbelt_acceptance.rs`.

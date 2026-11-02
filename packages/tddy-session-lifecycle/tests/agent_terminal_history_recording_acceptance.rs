@@ -2,7 +2,7 @@
 //! for `main` of a stopped session answers from the recording in the session directory, also for a
 //! fresh daemon over the same data dir, while a running `main` always answers from its live ring.
 //!
-//! PRD: docs/ft/daemon/1-WIP/PRD-2026-11-02-agent-terminal-history-persists.md (`#session-tabs 2/7`)
+//! Feature: docs/ft/daemon/terminal-sessions.md § History of a stopped agent terminal
 //!
 //! The agent is a stub that prints a line, waits for a newline on stdin and exits. Its terminal is
 //! registered for recording at the session directory's path the way the launcher registers it.
@@ -84,8 +84,8 @@ impl RecordingDaemon {
         )
         .unwrap();
         std::fs::set_permissions(&agent, std::fs::Permissions::from_mode(0o755)).unwrap();
+        // The recorder creates the session's `terminals/` directory itself.
         let recording = main_capture_recording_path(&self.data_dir, SESSION_ID);
-        std::fs::create_dir_all(recording.parent().unwrap()).unwrap();
         let main = self
             .manager
             .start(

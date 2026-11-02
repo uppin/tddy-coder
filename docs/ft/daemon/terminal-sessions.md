@@ -293,6 +293,26 @@ chunk at a time, until the capture ring's anchor is reached.
   the chunk, advances `from_offset` to the chunk's `end_offset`, and calls again until `at_end = true`
   (reached `until_offset` / the capture tip).
 
+### History of a stopped agent terminal
+
+A session's agent terminal (`main`) keeps its history after its process exits, and after the daemon
+restarts:
+
+- The daemon **records** `main`'s retained capture — the same bounded window the live terminal keeps,
+  with its absolute offsets — to `<data dir>/sessions/<id>/terminals/main.capture`. It is rewritten
+  every 30 s while `main` runs, so a daemon crash loses at most that much, and once more when the
+  process exits, **before** the terminal leaves the registry: whoever finds `main` gone finds the
+  recording complete. A jailed `main` is recorded the same way; its final write happens when the
+  session's sandbox state is removed (delete, or a resume replacing it).
+- `GetTerminalHistory` for `main` of a session with **no running `main`** answers from that file, with
+  the same chunks, offsets and `at_oldest` / `at_end` flags the live terminal answered.
+- A **running** `main` always answers from its live capture; its recording is never read.
+- History is read-only: `StreamTerminalOutput`, `StreamTerminalIO`, `SendTerminalInput` and resize on
+  a stopped `main` stay `NOT_FOUND`. A session with neither a running `main` nor a recording answers
+  `NOT_FOUND`, as does any other stopped terminal id — started tabs (bash, harness tabs) are not
+  recorded.
+- Disk use is at most one capture window (64 KiB) per session.
+
 ### Snapshot on (re)connect
 
 A terminal that connects or reconnects is shown **the current screen**, rendered correctly and at

@@ -1,6 +1,6 @@
 //! Acceptance: a launched or resumed claude-cli session's main terminal is recorded to its session
 //! directory (`terminals/main.capture`), so its history outlives the process
-//! (PRD: docs/ft/daemon/1-WIP/PRD-2026-11-02-agent-terminal-history-persists.md).
+//! (feature: docs/ft/daemon/terminal-sessions.md § History of a stopped agent terminal).
 //!
 //! The agent is a stub that prints and then stays alive, so the periodic write (50 ms here) is what
 //! the tests observe: registration happens at launch and at resume, not by hand.
@@ -19,6 +19,7 @@ use tddy_session_lifecycle::claude_cli_session::ClaudeCliSessionManager;
 use tddy_session_lifecycle::connection_service::DaemonSessionHost;
 use tddy_session_lifecycle::session_dir_recorded_history::main_capture_recording_path;
 use tddy_task::CaptureRecording;
+use tddy_testing_commons::wait::eventually;
 
 type SessionsBaseResolver = Arc<dyn Fn(&str) -> Option<PathBuf> + Send + Sync>;
 type UserResolver = Arc<dyn Fn(&str) -> Option<String> + Send + Sync>;
@@ -137,25 +138,30 @@ fn a_manager_recording_every_50_ms() -> Arc<ClaudeCliSessionManager> {
     Arc::new(ClaudeCliSessionManager::new().with_recording_interval(Duration::from_millis(50)))
 }
 
+/// A safety net for the stub to print and the periodic write to land, not a prediction.
+const OBSERVE: Duration = Duration::from_secs(10);
+
 /// The recording at `path` once it holds the stub's output.
 async fn recording_of_the_stub(path: &std::path::Path) -> CaptureRecording {
-    for _ in 0..400 {
-        if let Ok(recording) = CaptureRecording::read(path) {
-            if String::from_utf8_lossy(&recording.data).contains("STUB-AGENT-OUTPUT") {
-                return recording;
-            }
+    eventually("a recording of the stub agent's output", OBSERVE, || {
+        let recording = CaptureRecording::read(path)
+            .map_err(|e| format!("{} is not a readable recording yet: {e}", path.display()))?;
+        if String::from_utf8_lossy(&recording.data).contains("STUB-AGENT-OUTPUT") {
+            Ok(recording)
+        } else {
+            Err(format!(
+                "the recording holds {:?}, not yet the stub's output",
+                String::from_utf8_lossy(&recording.data)
+            ))
         }
-        tokio::time::sleep(Duration::from_millis(25)).await;
-    }
-    panic!(
-        "no recording of the stub agent appeared at {}",
-        path.display()
-    );
+    })
+    .await
 }
 
 #[tokio::test]
 #[serial_test::serial]
 async fn a_started_session_records_its_main_terminal() {
+    // Given a project and a stub agent that prints and stays alive
     let repo_dir = tempfile::tempdir().unwrap();
     create_test_repo_with_origin(repo_dir.path());
     let sessions_tmp = tempfile::tempdir().unwrap();
@@ -169,6 +175,7 @@ async fn a_started_session_records_its_main_terminal() {
         a_manager_recording_every_50_ms(),
     );
 
+    // When a claude-cli session is started
     let started = service
         .start_session(Request::direct(StartSessionRequest {
             session_token: VALID_TOKEN.to_string(),
@@ -181,6 +188,7 @@ async fn a_started_session_records_its_main_terminal() {
         .expect("StartSession must succeed")
         .into_inner();
 
+    // Then its main terminal is recorded in its session directory without anyone registering it
     let path = main_capture_recording_path(sessions_tmp.path(), &started.session_id);
     recording_of_the_stub(&path).await;
 }
@@ -188,6 +196,7 @@ async fn a_started_session_records_its_main_terminal() {
 #[tokio::test]
 #[serial_test::serial]
 async fn a_resumed_session_records_its_main_terminal() {
+    // Given an inactive claude-cli session on disk and a stub agent that prints and stays alive
     let worktree_dir = tempfile::tempdir().unwrap();
     let sessions_tmp = tempfile::tempdir().unwrap();
     let session_id = "01900000-0000-7000-8000-000000000005";
@@ -236,6 +245,7 @@ async fn a_resumed_session_records_its_main_terminal() {
         a_manager_recording_every_50_ms(),
     );
 
+    // When it is resumed
     service
         .resume_session(Request::direct(ResumeSessionRequest {
             session_token: VALID_TOKEN.to_string(),
@@ -244,6 +254,7 @@ async fn a_resumed_session_records_its_main_terminal() {
         .await
         .expect("ResumeSession must succeed");
 
+    // Then its main terminal is recorded in its session directory
     let path = main_capture_recording_path(&sessions_base, session_id);
     recording_of_the_stub(&path).await;
 }

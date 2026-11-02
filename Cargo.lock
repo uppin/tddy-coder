@@ -12892,6 +12892,7 @@ dependencies = [
  "tddy-stdio",
  "tddy-subagent-worktree",
  "tddy-task",
+ "tddy-testing-commons",
  "tddy-tool-engine",
  "tddy-tools",
  "tempfile",

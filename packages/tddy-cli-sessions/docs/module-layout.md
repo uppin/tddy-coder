@@ -38,5 +38,26 @@ recorder).
 Tests: `tests/exit_hook.rs` — `a_resume_waits_for_the_exit_hook_of_the_run_before`,
 `a_resume_does_not_wait_for_a_run_that_is_still_going`.
 
+## Recording the main terminal
+
+`cli_session_manager/capture_recorder.rs` records a session's `main` terminal to disk so its history
+outlives the process. `record_main_capture(session_id, path)` registers the running `main` (a session
+with none is logged and not registered; registering again replaces, and closes, the earlier
+registration). While `main` runs its capture is rewritten to `path` every `RECORDING_INTERVAL` (30 s,
+`tddy_task`; `with_recording_interval` overrides it), through `CaptureRecording::record`. The final
+write is the PTY runtime's **exit hook** (`tddy_pty::PtyExitHook`, installed by `spawn_tool` for the
+`main` terminal only), which runs before the terminal leaves the PTY registry — so a stopped `main`
+that can no longer be found running already has a complete recording. A `closed` flag under one async
+mutex keeps a periodic write from landing after the exit write.
+
+`main_capture_recording_path(tddy_data_dir, session_id)` (`<data dir>/sessions/<id>/terminals/main.capture`,
+`MAIN_CAPTURE_RECORDING`) lives here, beside the writer, so `tddy-agent-launch` can compute it without
+depending on `tddy-session-lifecycle`; the readers re-export it. `tddy-agent-launch` registers the
+recording on start and on resume.
+
+Tests: `tests/capture_recorder.rs` (a real PTY, a 50 ms interval) —
+`a_registered_main_is_recorded_with_its_last_output_before_it_leaves_the_index`,
+`a_running_main_is_recorded_on_the_interval`, `an_unregistered_session_is_never_recorded`.
+
 `tddy_session_lifecycle` re-exports both modules (`cli_session_manager`, `session_toolcall`) and keeps
 `claude_cli_session` as a historical alias of `cli_session_manager`.

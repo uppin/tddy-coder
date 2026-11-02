@@ -56,6 +56,10 @@ As a developer, I want to start a raw Claude Code CLI session from the tddy web 
     - Spawns a new `claude --model <model>` PTY inside the existing worktree.
     - Updates `.session.yaml` with the new PID and `status: active`.
 15. Terminal access resumes immediately via the same `StreamSessionTerminalIO` stream pattern.
+16. What the agent printed outlives the process: the session's `main` terminal is recorded to
+    `~/.tddy/sessions/<session-id>/terminals/main.capture` while it runs (every 30 s) and at exit, on
+    start and on resume, and a stopped session's `GetTerminalHistory(main)` is served from it — see
+    [Terminal sessions § History of a stopped agent terminal](terminal-sessions.md#history-of-a-stopped-agent-terminal).
 
 ### Connect (reattach)
 16. When the `claude` process is still running and the web client disconnects/reconnects, `ConnectSession` finds the existing PTY and reopens the stream — no new process is spawned.

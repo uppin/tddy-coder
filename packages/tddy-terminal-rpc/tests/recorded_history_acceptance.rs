@@ -1,7 +1,7 @@
 //! `GetTerminalHistory` for a terminal that is no longer running answers from the host's recording
 //! of it — and a running terminal never reads that recording.
 //!
-//! PRD: docs/ft/daemon/1-WIP/PRD-2026-11-02-agent-terminal-history-persists.md (`#session-tabs 2/7`)
+//! Feature: docs/ft/daemon/terminal-sessions.md § History of a stopped agent terminal
 
 mod support;
 

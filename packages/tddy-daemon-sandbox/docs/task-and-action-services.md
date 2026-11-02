@@ -6,6 +6,15 @@ plans and runtime behind both (`sandbox_plan_builder`, `sandbox_runtime`, `sandb
 crate's own rustdoc (`src/lib.rs`) records why it is a crate apart from `tddy-spawn`. This page covers
 the two RPC services it also serves, because they run tasks through that runtime.
 
+## Recording a jailed `main`
+
+`main_recording.rs` is the jailed counterpart of `tddy-cli-sessions`' recorder.
+`SandboxSessionManager::record_main_capture(session_id, path)` registers the session's sandbox state's
+capture (no state: logged, nothing registered); a `JailRecorder` rewrites it every
+`tddy_task::RECORDING_INTERVAL` (`with_recording_interval` overrides) and writes it once more inside
+`SandboxSessionManager::remove` — delete, or a resume replacing the state — before `remove` returns. A
+jail that dies on its own is covered by the periodic write. Tests: `tests/jail_main_recording.rs`.
+
 ## `task_service` and `action_service`
 
 | Module | Serves | Over |

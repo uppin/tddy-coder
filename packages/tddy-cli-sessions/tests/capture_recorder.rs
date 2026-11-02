@@ -3,7 +3,7 @@
 //!
 //! The PTY is real: a stub agent prints what it is told to and exits on a newline from stdin.
 //!
-//! PRD: docs/ft/daemon/1-WIP/PRD-2026-11-02-agent-terminal-history-persists.md (`#session-tabs 2/7`)
+//! Feature: docs/ft/daemon/terminal-sessions.md § History of a stopped agent terminal
 
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
@@ -71,8 +71,8 @@ async fn recording_containing(path: &Path, expected: &str) -> String {
 async fn a_registered_main_is_recorded_with_its_last_output_before_it_leaves_the_index() {
     // Given a running agent whose terminal is recorded
     let dir = tempfile::tempdir().unwrap();
+    // (the recorder creates the recording's `terminals/` directory itself)
     let recording = dir.path().join("terminals").join("main.capture");
-    std::fs::create_dir_all(recording.parent().unwrap()).unwrap();
     let manager = CliSessionManager::new();
     let main = start_main(
         &manager,
