@@ -26,10 +26,12 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use tddy_actions::tool::{
-    Egress, FileItem, HomeSection, PolicySection, ResolvedTool, SecretItem, ToolHost,
+    Egress, FileItem, HomeSection, PolicySection, ResolvedTool, RouteGuard, SecretItem,
+    SecretItemSource, ToolHost,
 };
 use tddy_sandbox::{
-    EgressPolicy, HostPattern, MountSpec, PolicySpec, ReadReason, ReadSpec, SecretSpec, SymlinkSpec,
+    EgressPolicy, HostPattern, MountSpec, PolicySpec, ReadReason, ReadSpec, SecretSource,
+    SecretSpec, SymlinkSpec,
 };
 
 use crate::homes::HomeError;
@@ -225,9 +227,19 @@ pub struct HomeGrant {
 /// Lower a tool's `home:` section: a persistent home is resolved (and migrated once) under
 /// `paths.tddy_home` and mounted read-write; a session home is `paths.session_home`.
 pub fn lower_home(home: &HomeSection, paths: &JailPaths<'_>) -> Result<HomeGrant, HomeError> {
-    // TODO(claude-jail): implement.
-    let _ = (home, paths);
-    todo!("claude-jail: lower_home")
+    match home {
+        HomeSection::Persistent { key } => {
+            let home = crate::homes::persistent_home(paths.tddy_home, key)?;
+            Ok(HomeGrant {
+                mount: Some(MountSpec::read_write(home.clone())),
+                home,
+            })
+        }
+        HomeSection::Session => Ok(HomeGrant {
+            home: paths.session_home.to_path_buf(),
+            mount: None,
+        }),
+    }
 }
 
 /// What a tool set's `files:` sections add to a jail.
@@ -251,9 +263,28 @@ pub fn lower_files(
     home: &Path,
     paths: &JailPaths<'_>,
 ) -> std::io::Result<FileGrants> {
-    // TODO(claude-jail): implement.
-    let _ = (items, home, paths);
-    todo!("claude-jail: lower_files")
+    let mut grants = FileGrants::default();
+    for item in items {
+        match item {
+            FileItem::SeedOnce { from_host, to } => {
+                seed_once(&paths.host_home.join(from_host), &home.join(to))?
+            }
+            FileItem::Mirror { from_host, to } => {
+                mirror(
+                    &paths.host_home.join(from_host),
+                    &home.join(to),
+                    &mut grants,
+                )?;
+            }
+            FileItem::Overlay { env, value } => {
+                let value = value
+                    .replace("{home}", &home.to_string_lossy())
+                    .replace("{tmp}", &paths.tmp.to_string_lossy());
+                grants.env.insert(env.clone(), value);
+            }
+        }
+    }
+    Ok(grants)
 }
 
 /// Lower `items` into the jail's out-of-band secrets. `routed` is whether the session runs on a
@@ -261,16 +292,101 @@ pub fn lower_files(
 /// routed` on an unrouted one. A `host-env` source reads `host`; an unset variable delivers
 /// nothing.
 pub fn lower_secrets(items: &[SecretItem], routed: bool, host: &dyn ToolHost) -> Vec<SecretSpec> {
-    // TODO(claude-jail): implement.
-    let _ = (items, routed, host);
-    todo!("claude-jail: lower_secrets")
+    items
+        .iter()
+        .filter(|item| match item.when {
+            Some(RouteGuard::Unrouted) => !routed,
+            Some(RouteGuard::Routed) => routed,
+            None => true,
+        })
+        .filter_map(|item| {
+            let source = match &item.source {
+                SecretItemSource::HostEnv { var } => {
+                    SecretSource::Value(host.env_var(var).filter(|value| !value.trim().is_empty())?)
+                }
+                SecretItemSource::HostFile { path } => SecretSource::HostFile(path.clone()),
+            };
+            Some(SecretSpec {
+                env_name: item.env.clone(),
+                source,
+            })
+        })
+        .collect()
 }
 
 /// Lower a tool set's `policy:` sections into one jail policy: each allow is granted when any tool
 /// asks for it, and `exec_paths` concatenate in tool order without repeats. The knobs a section
 /// cannot name (`mach_lookup`, `pseudo_tty`) stay at [`PolicySpec::default`] for the launcher to set.
 pub fn lower_policy(sections: &[PolicySection]) -> PolicySpec {
-    // TODO(claude-jail): implement.
-    let _ = sections;
-    todo!("claude-jail: lower_policy")
+    let mut policy = PolicySpec::default();
+    for section in sections {
+        policy.allow_dynamic_code_generation |= section.jit;
+        policy.allow_process_fork |= section.fork;
+        policy.sysctl_read |= section.sysctl_read;
+        for path in &section.exec_paths {
+            push_unique(&mut policy.exec_paths, path.clone());
+        }
+    }
+    policy
+}
+
+/// Copy `host_file` to `dest` (mode `0600`) unless `dest` exists. A missing host file seeds nothing.
+fn seed_once(host_file: &Path, dest: &Path) -> std::io::Result<()> {
+    if dest.exists() || !host_file.is_file() {
+        return Ok(());
+    }
+    if let Some(parent) = dest.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    std::fs::copy(host_file, dest)?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(dest, std::fs::Permissions::from_mode(0o600))?;
+    }
+    Ok(())
+}
+
+/// Record a symlink at `link` to the canonical form of `host_path`, and the reads that make the
+/// link followable. A host path that does not exist mirrors nothing.
+///
+/// A home an older launch seeded holds a real directory of links where a mirror of a directory goes
+/// (`.local/share/claude/versions`). One that holds nothing but links is that older mirror, and is
+/// replaced; any other directory is the tool's own, is left alone and is not mirrored over.
+fn mirror(host_path: &Path, link: &Path, grants: &mut FileGrants) -> std::io::Result<()> {
+    let Ok(target) = std::fs::canonicalize(host_path) else {
+        return Ok(());
+    };
+    if is_a_real_directory(link) {
+        if !holds_only_links(link)? {
+            return Ok(());
+        }
+        std::fs::remove_dir_all(link)?;
+    }
+    let read = if target.is_dir() {
+        ReadSpec::subpath(target.clone(), ReadReason::Custom)
+    } else {
+        ReadSpec::literal(target.clone(), ReadReason::Custom).executable()
+    };
+    push_unique(&mut grants.reads, read);
+    grants.symlinks.push(SymlinkSpec {
+        link: link.to_path_buf(),
+        target,
+    });
+    Ok(())
+}
+
+/// Whether `path` is a directory itself, not a link to one.
+fn is_a_real_directory(path: &Path) -> bool {
+    std::fs::symlink_metadata(path).is_ok_and(|meta| meta.is_dir())
+}
+
+/// Whether every entry of the directory `dir` is a symbolic link.
+fn holds_only_links(dir: &Path) -> std::io::Result<bool> {
+    for entry in std::fs::read_dir(dir)? {
+        if !entry?.file_type()?.is_symlink() {
+            return Ok(false);
+        }
+    }
+    Ok(true)
 }

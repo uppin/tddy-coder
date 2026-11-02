@@ -10,12 +10,23 @@
 //! ordinary environment and no `--claude-*` flag ever reaches the runner.
 
 use std::collections::BTreeMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 
-use crate::runner::SandboxRunnerArgs;
+use crate::runner::{
+    egress_proxy_env, finish_runner_run, prepare_runner_boot, resolve_secret_envs,
+    run_sandbox_runner_inner, spawn_generic_pty, PtyState, SandboxRunnerArgs, SandboxSessionRelay,
+};
+
+/// The prefix of the runner's own control variables (`TDDY_SANDBOX_SESSION_ID`, the tool-IPC socket,
+/// the egress directory). The process the plan runs is not told it is sandboxed, so none reaches it.
+const RUNNER_CONTROL_PREFIX: &str = "TDDY_SANDBOX_";
+
+/// The prefix of an out-of-band secret reference, resolved by [`resolve_secret_envs`].
+const SECRET_PREFIX: &str = "TDDY_SECRET_";
 
 /// One process the runner execs, fully rendered by the host.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -51,20 +62,90 @@ impl ExecPlan {
         jail_env: &BTreeMap<String, String>,
         shim_port: u16,
     ) -> BTreeMap<String, String> {
-        // TODO(claude-jail): implement — reuse `resolve_secret_envs` and `egress_proxy_env`.
-        let _ = (jail_env, shim_port);
-        todo!("claude-jail: ExecPlan::child_env")
+        let mut env = jail_env.clone();
+        env.extend(self.env.clone());
+        let secrets = resolve_secret_envs(&env);
+        env.retain(|name, _| !name.starts_with(SECRET_PREFIX));
+        env.extend(secrets);
+        if self.egress_shim {
+            env.extend(egress_proxy_env(Some(shim_port)));
+        }
+        env
+    }
+
+    /// Write [`Self::files`], creating the directories above each.
+    fn write_files(&self) -> Result<()> {
+        for file in &self.files {
+            if let Some(parent) = file.path.parent() {
+                std::fs::create_dir_all(parent)
+                    .with_context(|| format!("create {}", parent.display()))?;
+            }
+            std::fs::write(&file.path, &file.contents)
+                .with_context(|| format!("write plan file {}", file.path.display()))?;
+        }
+        Ok(())
+    }
+
+    fn read(path: &Path) -> Result<Self> {
+        let json = std::fs::read_to_string(path)
+            .with_context(|| format!("read exec plan {}", path.display()))?;
+        let plan: Self = serde_json::from_str(&json)
+            .with_context(|| format!("parse exec plan {}", path.display()))?;
+        anyhow::ensure!(
+            !plan.argv.is_empty(),
+            "exec plan {} has an empty argv",
+            path.display()
+        );
+        Ok(plan)
     }
 }
 
 /// Run the plan at `plan` under `args`: the same boot, `SessionChannel` server and egress shim as
 /// [`crate::run_sandbox_runner`], then write [`ExecPlan::files`] and spawn [`ExecPlan::argv`] in the
-/// PTY with [`ExecPlan::child_env`]. No in-jail `tddy-tools --mcp` is started and no agent argv is
-/// built: the plan's argv already registers whatever server its tool declares.
+/// PTY with [`ExecPlan::child_env`]. The in-jail tool-IPC server is served as in the agent modes,
+/// because the plan's argv registers a `tddy-tools --mcp` server that dials it; no agent argv is
+/// built here: the plan's argv already registers whatever server its tool declares.
 pub async fn run_exec_plan(args: SandboxRunnerArgs, plan: PathBuf) -> Result<()> {
-    // TODO(claude-jail): implement.
-    let _ = (args, plan);
-    todo!("claude-jail: run_exec_plan")
+    prepare_runner_boot("run_exec_plan", &args);
+    let result = match ExecPlan::read(&plan) {
+        Ok(plan) => run_sandbox_runner_inner(args, Some(plan)).await,
+        Err(e) => Err(e),
+    };
+    finish_runner_run("run_exec_plan", result)
+}
+
+/// Write `plan`'s files and spawn its argv in a PTY at `cwd`. The child's environment is the
+/// runner's own without its control variables ([`RUNNER_CONTROL_PREFIX`]), plus the plan's, plus the
+/// proxy env when the plan asks for the shim and the jail started one.
+pub(crate) fn spawn_exec_plan_pty(
+    plan: &ExecPlan,
+    cwd: PathBuf,
+    shim_port: Option<u16>,
+    relay: Arc<SandboxSessionRelay>,
+    initial_cols: u16,
+    initial_rows: u16,
+) -> Result<(PtyState, std::sync::mpsc::Receiver<i32>)> {
+    plan.write_files()?;
+    let jail_env: BTreeMap<String, String> = std::env::vars()
+        .filter(|(name, _)| !name.starts_with(RUNNER_CONTROL_PREFIX))
+        .collect();
+    // A `none` egress policy starts no shim, so a plan asking for one gets no proxy at all.
+    let child_env = match shim_port {
+        Some(port) => plan.child_env(&jail_env, port),
+        None => ExecPlan {
+            egress_shim: false,
+            ..plan.clone()
+        }
+        .child_env(&jail_env, 0),
+    };
+    spawn_generic_pty(
+        plan.argv.clone(),
+        cwd,
+        Some(child_env),
+        relay,
+        initial_cols,
+        initial_rows,
+    )
 }
 
 #[cfg(test)]

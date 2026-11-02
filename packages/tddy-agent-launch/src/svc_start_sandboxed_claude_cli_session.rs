@@ -22,7 +22,7 @@ use std::sync::Arc;
 
 use std::path::{Path, PathBuf};
 
-use crate::cli_harness_jail::canonical_exec_path;
+use crate::claude_jail::ClaudeJail;
 use crate::launch_ports::LaunchSessions;
 
 use tddy_core::provider_route::HarnessRoute;
@@ -62,21 +62,6 @@ pub struct JailDirs {
     pub context_dir: PathBuf,
 }
 
-/// Everything the sandbox runner is spawned with, beyond the session and its directories.
-pub struct JailLaunch {
-    pub managed: Option<tddy_cli_sessions::session_toolcall::ManagedWorkflow>,
-    pub session_env: Vec<(String, String)>,
-    pub scratch_home: PathBuf,
-    pub tool_ipc_socket: PathBuf,
-    pub ready_marker: PathBuf,
-    pub profile_path: PathBuf,
-    pub loopback_allow_ports: Vec<u16>,
-    pub runner_argv: Vec<String>,
-    pub env: std::collections::BTreeMap<String, String>,
-    /// The provider route the agent runs on; `None` for the harness's own vendor.
-    pub route: Option<HarnessRoute>,
-}
-
 /// A managed-workflow session's controller, its orchestration prompt file and its host-side env.
 pub type ManagedJailEnv = (
     Option<tddy_cli_sessions::session_toolcall::ManagedWorkflow>,
@@ -84,16 +69,14 @@ pub type ManagedJailEnv = (
     Vec<(String, String)>,
 );
 
-/// What the sandbox runner's env is built from: the jail's paths, its subagents, and the semantic index.
-struct JailRunnerEnv<'a> {
+/// What the env the daemon adds to a jailed session is built from: its subagents and the semantic
+/// index.
+struct JailSessionEnv<'a> {
     session_id: &'a str,
     semantic_index: bool,
     specialized_defs: Vec<tddy_discovery::agent_def::SpecializedAgentDef>,
     session_dir: &'a Path,
     worktree_path: &'a Path,
-    jail_dirs: &'a JailDirs,
-    scratch_home: &'a Path,
-    tool_ipc_socket: &'a Path,
 }
 
 impl LaunchSessions {
@@ -150,6 +133,9 @@ impl LaunchSessions {
         // The provider route the agent runs on, resolved by the caller before the session's
         // directory was created. `None` runs the harness on its own vendor.
         route: Option<HarnessRoute>,
+        // The session's standing role (`project-home` for a project's main; empty for none),
+        // recorded in its metadata before the jail is launched.
+        session_role: &str,
     ) -> Result<Response<StartSessionResponse>, Status> {
         if model.trim().is_empty() {
             return Err(Status::invalid_argument(
@@ -312,119 +298,42 @@ impl LaunchSessions {
             &tddy_tools_path,
         )?;
 
-        // Canonicalize the binary paths the runner will exec: the SBPL allow-list is built
-        // from the canonical (symlink-resolved) parent dirs, so a symlinked spelling (e.g. a
-        // binary under /tmp -> /private/tmp) would be denied at exec time ("doesn't exist /
-        // Operation not permitted"). A relative/PATH-resolved name (no '/') is left as-is.
-        let (tddy_tools_path, sandbox_runner_path) = canonical_jail_exec_paths(tddy_tools_path);
-        // Resolve the real `claude` to an absolute path (skipping wrapper shims). Overridable via
-        // TDDY_CLAUDE_BINARY or `claude_cli.binary_path`. A bare name would give binary_exec_reads
-        // an empty parent → `(subpath "")` → macOS sandbox-exec rejects the profile.
-        let claude_binary = tddy_daemon_kernel::config::resolve_claude_binary_path(&self.config);
-        let claude_binary = claude_binary.as_str();
-
-        // Persistent daemon-wide jail $HOME: reused across sessions and mounted read-write below, so
-        // refreshed OAuth tokens, session history, and settings survive. Seeded non-clobbering.
-        let claude_home_dir = tddy_daemon_kernel::config::resolve_claude_home_dir(&self.config);
-        let scratch_home = tddy_daemon_sandbox::sandbox_session::prepare_persistent_claude_home(
-            &claude_home_dir,
-            claude_binary,
-        );
-
-        // The tool-IPC AF_UNIX socket must fit within SUN_LEN (104 bytes on macOS); the
-        // canonical session dir is far too deep, so use a short out-of-tree path that the
-        // SBPL profile grants an explicit literal allow (see SandboxSpec::ipc_socket).
-        let tool_ipc_socket = tddy_sandbox::SandboxSpec::short_ipc_socket_path(session_id);
-        let ready_marker = jail_dirs.sandbox_root.join("sandbox.ready");
-        let profile_path = jail_dirs.sandbox_root.join("sandbox.sb");
-
-        let perm = if permission_mode.trim().is_empty() {
-            "auto"
-        } else {
-            permission_mode.trim()
-        };
-
-        let egress_shim_port = tddy_daemon_sandbox::sandbox_session::pick_free_loopback_port()
-            .map_err(Status::internal)?;
-        let loopback_allow_ports = vec![egress_shim_port];
-
-        let mut runner_argv = vec![
-            sandbox_runner_path,
-            "--session-id".into(),
-            session_id.to_string(),
-            "--context-dir".into(),
-            jail_dirs.context_dir.to_string_lossy().to_string(),
-            "--tool-ipc-socket".into(),
-            tool_ipc_socket.to_string_lossy().to_string(),
-            "--tddy-tools-path".into(),
-            tddy_tools_path.clone(),
-            "--ready-marker".into(),
-            ready_marker.to_string_lossy().to_string(),
-            "--claude-binary".into(),
-            claude_binary.to_string(),
-            "--model".into(),
-            model.to_string(),
-            "--permission-mode".into(),
-            perm.to_string(),
-            "--egress-shim-port".into(),
-            egress_shim_port.to_string(),
-            "--stdio".into(),
-        ];
-        // The runner reconciles this with --permission-mode (they are mutually exclusive; when set,
-        // the in-jail claude argv drops --permission-mode). See build_claude_base_argv.
-        if dangerously_skip_permissions {
-            runner_argv.push("--dangerously-skip-permissions".into());
-        }
-        if let Some(prompt_path) = &append_system_prompt_file {
-            runner_argv.push("--append-system-prompt-file".into());
-            runner_argv.push(prompt_path.to_string_lossy().to_string());
-        }
-        // Forward client-supplied pass-through args (+ a trailing positional prompt) to the in-jail
-        // `claude`. Each token becomes a `--claude-arg` occurrence the runner replays verbatim after
-        // claude's fixed flags and before the MCP allowlist args.
-        for token in sandbox_claude_passthrough_args(claude_args, initial_prompt) {
-            runner_argv.push("--claude-arg".into());
-            runner_argv.push(token);
-        }
-
-        // Semantic index: index the worktree into the session dir before spawning the jail
-        // (blocking; a missing embedder or a failed index aborts the start — no unindexed
-        // fallback), and inject `TDDY_SEMANTIC_INDEX_DB` into the jail env. Its presence both points
-        // the in-jail `SemanticSearch` tool at the per-session index and signals the runner to keep
-        // `SemanticSearch` in the tool set (it is otherwise folded into the replaced set).
+        // The daemon's additions to the jail's environment. Semantic index: index the worktree into
+        // the session dir before spawning the jail (blocking; a missing embedder or a failed index
+        // aborts the start — no unindexed fallback), and inject `TDDY_SEMANTIC_INDEX_DB`. Its
+        // presence both points the in-jail `SemanticSearch` tool at the per-session index and keeps
+        // `SemanticSearch` in the agent's tool set (it is otherwise folded into the replaced set).
         let env = self
-            .jail_runner_env(JailRunnerEnv {
+            .jail_session_env(JailSessionEnv {
                 session_id,
                 semantic_index,
                 specialized_defs,
                 session_dir: &session_dir,
                 worktree_path: &worktree_path,
-                jail_dirs: &jail_dirs,
-                scratch_home: &scratch_home,
-                tool_ipc_socket: &tool_ipc_socket,
             })
             .await?;
 
-        // TODO(claude-jail): resolve `claude` with `HostCodingAgents`, render its slots for jail
-        // paths and call `launch_jailed` with the session's role instead of building the runner's
-        // Claude argv above — this function stays as its thin caller.
+        // The `claude` tool definition decides the jail: its home, files, secrets, policy and
+        // network. Client-supplied pass-through args and the first prompt go ahead of the slot
+        // flags, where the variadic MCP flag cannot swallow them.
         let pid = self
-            .launch_jail(
-                &jail,
-                &jail_dirs,
-                JailLaunch {
-                    managed,
-                    session_env,
-                    scratch_home,
-                    tool_ipc_socket,
-                    ready_marker,
-                    profile_path,
-                    loopback_allow_ports,
-                    runner_argv,
-                    env,
-                    route,
-                },
-            )
+            .launch_jailed_claude(ClaudeJail {
+                jail: &jail,
+                dirs: &jail_dirs,
+                model,
+                resume: false,
+                permission_mode,
+                dangerously_skip_permissions,
+                passthrough_args: sandbox_claude_passthrough_args(claude_args, initial_prompt),
+                append_system_prompt_file: append_system_prompt_file.as_deref(),
+                agents: &started_agents,
+                env,
+                session_env,
+                managed,
+                managed_codebase,
+                route,
+                role: session_role,
+            })
             .await?;
 
         jail_session_files::write_jail_session_metadata(
@@ -434,6 +343,7 @@ impl LaunchSessions {
             started_agents,
             pid,
             managed_codebase,
+            session_role,
         )?;
         // The roster naming them is on disk now, so the clones belong to the session rather than to
         // the start that claimed them.
@@ -454,30 +364,25 @@ impl LaunchSessions {
         }))
     }
 
-    async fn jail_runner_env(
+    /// What the daemon adds to the jail's environment for a session: its subagents, who the daemon
+    /// is, the LSP and restructure tools, the semantic index and the renderer choice. What the
+    /// jail's own environment holds (its `HOME`, `TMPDIR`, the runner's control variables) is the
+    /// launcher's and the tool definition's.
+    async fn jail_session_env(
         &self,
-        launch: JailRunnerEnv<'_>,
+        launch: JailSessionEnv<'_>,
     ) -> Result<std::collections::BTreeMap<String, String>, Status> {
-        let JailRunnerEnv {
+        let JailSessionEnv {
             session_id,
             semantic_index,
             specialized_defs,
             session_dir,
             worktree_path,
-            jail_dirs,
-            scratch_home,
-            tool_ipc_socket,
         } = launch;
         let semantic_index_env_pair = self
             .jail_semantic_index_env(session_id, semantic_index, session_dir, worktree_path)
             .await?;
-        let mut env = tddy_daemon_sandbox::sandbox_session::build_sandbox_runner_env(
-            scratch_home,
-            &jail_dirs.scratch_tmp,
-            session_id,
-            tool_ipc_socket,
-            &jail_dirs.egress_dir,
-        );
+        let mut env = std::collections::BTreeMap::new();
         if !specialized_defs.is_empty() {
             env.extend(self.specialized_subagent_env(&specialized_defs)?);
         }
@@ -489,13 +394,6 @@ impl LaunchSessions {
         env.extend(self.config.claude_cli_renderer_env());
         Ok(env)
     }
-}
-
-fn canonical_jail_exec_paths(tddy_tools_path: String) -> (String, String) {
-    (
-        canonical_exec_path(&tddy_tools_path),
-        canonical_exec_path(&tddy_daemon_sandbox::sandbox_session::resolve_sandbox_runner_path()),
-    )
 }
 
 pub use crate::{jail_env_builders, jail_launch_steps, jail_session_files, jail_worktree};

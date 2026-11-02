@@ -520,11 +520,8 @@ impl SandboxBuilder {
         // value itself never enters the env var map (only the file path does).
         let mut vars = env;
         for sec in &secrets {
-            let path = scratch_dir.join(".secrets").join(&sec.env_name);
-            vars.insert(
-                format!("TDDY_SECRET_{}", sec.env_name),
-                path.to_string_lossy().into_owned(),
-            );
+            let (name, path) = secret_file_var(&scratch_dir, &sec.env_name);
+            vars.insert(name, path);
         }
 
         let allow_read_paths: Vec<PathBuf> = reads
@@ -562,6 +559,28 @@ impl SandboxBuilder {
             stdin,
             cgroup: CgroupConfig::default(),
         })
+    }
+}
+
+/// The env var that names `env_name`'s scratch secret file, and that file's path.
+fn secret_file_var(scratch_dir: &std::path::Path, env_name: &str) -> (String, String) {
+    let path = scratch_dir.join(".secrets").join(env_name);
+    (
+        format!("TDDY_SECRET_{env_name}"),
+        path.to_string_lossy().into_owned(),
+    )
+}
+
+impl SandboxPlan {
+    /// Deliver `secret` out of band, as [`SandboxBuilder::secret`] does: a `0600` scratch file the
+    /// runner resolves into `secret.env_name` on the confined child alone, referenced by
+    /// `TDDY_SECRET_<NAME>`. For a plan that was assembled before its secrets were known (one whose
+    /// secrets come from a tool's own definition).
+    pub fn add_secret(&mut self, secret: SecretSpec) {
+        let (name, path) = secret_file_var(&self.spec.scratch_dir, &secret.env_name);
+        self.env.vars.insert(name.clone(), path.clone());
+        self.spec.env.insert(name, path);
+        self.env.secrets.push(secret);
     }
 }
 

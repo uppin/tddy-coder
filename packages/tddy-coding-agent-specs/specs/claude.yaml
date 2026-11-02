@@ -66,11 +66,7 @@ policy:
   exec_paths: [/usr/bin, /usr/libexec, /bin, /sbin, /System, /Library, /Applications, /opt/homebrew, /opt/local]
 # The Anthropic API, telemetry and the OAuth login. A provider route's base-URL host is added by the
 # launcher; `oauth_inbound` admits the login's loopback callback (unrouted sessions only).
-#
-# TODO(claude-jail): uncomment when the jail launcher lands. Until `Egress` deserializes
-# (`#agent-tools 3/12`), a `network:` section here would make every load of this file — the
-# unsandboxed launch's included — panic, so it stays a comment at contract stage.
-# network:
-#   egress:
-#     hosts: [api.anthropic.com, statsig.anthropic.com, sentry.io, console.anthropic.com, claude.ai]
-#   oauth_inbound: true
+network:
+  egress:
+    hosts: [api.anthropic.com, statsig.anthropic.com, sentry.io, console.anthropic.com, claude.ai]
+  oauth_inbound: true

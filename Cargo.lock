@@ -12175,6 +12175,7 @@ dependencies = [
  "tddy-projects",
  "tddy-rpc",
  "tddy-sandbox",
+ "tddy-sandbox-recipes",
  "tddy-sandbox-runner",
  "tddy-semantic-index",
  "tddy-service",

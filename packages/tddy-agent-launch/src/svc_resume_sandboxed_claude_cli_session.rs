@@ -55,6 +55,8 @@ impl LaunchSessions {
             .relaunch_sandboxed_runner(
                 os_user,
                 session_id,
+                &meta.project_id,
+                session_token,
                 &session_dir,
                 &worktree_path,
                 &model,

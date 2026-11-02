@@ -5,8 +5,9 @@
 //! PRD: `docs/ft/daemon/1-WIP/PRD-2026-10-31-claude-cli-jail-from-spec.md` (`#agent-tools 5/12`).
 //! Todo: `docs/dev/todo/2026-09-24-lifecycle-shared-sandboxed-jail-launch-needs-coverage-first.md`.
 //!
-//! These tests pass on the hand-built launch and must stay green when the shared jail launcher
-//! (`tddy_agent_launch::jail_launch`) replaces it. The jail home is configured at
+//! These tests passed on the hand-built launch and stay green on the shared jail launcher
+//! (`tddy_agent_launch::jail_launch`) that replaced it, which launches `claude` from its tool
+//! definition and so needs the daemon's coding agents installed. The jail home is configured at
 //! `<tddyhome>/homes/claude` — where the launcher puts Claude's persistent home — so the same
 //! assertions hold on both sides of the replacement.
 //!
@@ -25,7 +26,6 @@ const CREDENTIALS: &str = r#"{"claudeAiOauth":{"accessToken":"baseline"}}"#;
 fn a_daemon_with_a_home_holding_credentials() -> claude_jail_support::AJailedClaudeDaemon {
     let daemon = a_jailed_claude_daemon(ADaemonSpec {
         configured_claude_home: "homes/claude",
-        coding_agents: false,
         ..ADaemonSpec::default()
     });
     let credentials = daemon

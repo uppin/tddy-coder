@@ -1,4 +1,3 @@
-use crate::cli_harness_jail::canonical_exec_path;
 use crate::launch_ports::LaunchSessions;
 use crate::session_acting_identity::SessionIdentity;
 use std::sync::Mutex as StdMutex;
@@ -57,33 +56,6 @@ impl LaunchSessions {
             managed = Some(launch.workflow);
         }
         Ok((managed, append_system_prompt_file, session_env))
-    }
-
-    pub(super) fn resolve_relaunch_binaries(
-        &self,
-        tddy_tools_path: String,
-    ) -> (String, String, String, PathBuf) {
-        let tddy_tools_path = canonical_exec_path(&tddy_tools_path);
-        let sandbox_runner_path = canonical_exec_path(
-            &tddy_daemon_sandbox::sandbox_session::resolve_sandbox_runner_path(),
-        );
-        // See the sibling call site above: resolve the real `claude` (overridable via
-        // TDDY_CLAUDE_BINARY / `claude_cli.binary_path`); a bare name breaks the sandbox profile.
-        let claude_binary = tddy_daemon_kernel::config::resolve_claude_binary_path(&self.config);
-
-        // Persistent daemon-wide jail $HOME (see sibling site above): mounted read-write, seeded
-        // non-clobbering, so auth/history persist across sessions.
-        let claude_home_dir = tddy_daemon_kernel::config::resolve_claude_home_dir(&self.config);
-        let scratch_home = tddy_daemon_sandbox::sandbox_session::prepare_persistent_claude_home(
-            &claude_home_dir,
-            &claude_binary,
-        );
-        (
-            tddy_tools_path,
-            sandbox_runner_path,
-            claude_binary,
-            scratch_home,
-        )
     }
 
     pub(super) fn relaunch_jail_env(

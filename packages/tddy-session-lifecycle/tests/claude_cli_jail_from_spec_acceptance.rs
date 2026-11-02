@@ -203,7 +203,7 @@ async fn a_sandboxed_claude_cli_start_runs_a_stub_claude_whose_argv_home_path_pr
 }
 
 #[tokio::test]
-async fn the_agent_process_needs_no_tddy_sandbox_variable_and_sees_only_the_tddy_vars_its_declared_tddy_tools_server_needs(
+async fn the_agent_process_sees_no_tddy_variable_and_its_tddy_tools_server_carries_the_ones_it_needs(
 ) {
     // Given
     let daemon = a_daemon_with_a_claude_home(ADaemonSpec::default());
@@ -225,16 +225,24 @@ async fn the_agent_process_needs_no_tddy_sandbox_variable_and_sees_only_the_tddy
         .cloned()
         .collect();
     let tddy_tools = std::fs::canonicalize(claude_jail_support::tddy_tools_binary()).unwrap();
+    let needed_by_tddy_tools: BTreeSet<String> =
+        ["TDDY_SANDBOX_TOOL_IPC", "TDDY_SANDBOX_SESSION_ID"]
+            .into_iter()
+            .map(str::to_string)
+            .collect();
+    let server_names = tddy_names(&server_env);
     assert_eq!(
         (
             server["command"].as_str().map(str::to_string),
             sandbox_names,
             tddy_names(&agent_names),
+            needed_by_tddy_tools.is_subset(&server_names),
         ),
         (
             Some(tddy_tools.to_string_lossy().into_owned()),
             BTreeSet::new(),
-            tddy_names(&server_env),
+            BTreeSet::new(),
+            true,
         )
     );
 }

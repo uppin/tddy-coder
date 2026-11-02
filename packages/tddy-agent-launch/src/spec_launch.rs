@@ -42,6 +42,12 @@ impl HostCodingAgents {
         &self.registry
     }
 
+    /// The host the agents' tools resolve against, and whose environment a jailed tool's
+    /// `host-env` secrets are read from.
+    pub fn host(&self) -> &dyn ToolHost {
+        self.host.as_ref()
+    }
+
     /// Agent `id` resolved on this host: its spec, its own tool and the closure of its deps.
     /// `binary_override` — daemon.yaml `claude_cli.binary_path` until `#agent-tools 12/12` — wins
     /// over the spec's binary resolution when set.
@@ -282,7 +288,7 @@ pub struct McpRegistration {
 }
 
 /// The agent every `claude-cli` session runs.
-const CLAUDE_AGENT_ID: &str = "claude";
+pub(crate) const CLAUDE_AGENT_ID: &str = "claude";
 
 /// Launch a `claude-cli` session from the `claude` spec: resolve it, render its slots and its argv,
 /// and spawn it with [`launch_host_pty`].
@@ -361,7 +367,7 @@ fn non_blank(value: Option<&str>) -> Option<&str> {
 
 /// daemon.yaml `claude_cli.binary_path` when it names a path; a bare name leaves the binary to the
 /// spec's own resolution.
-fn configured_binary(config: &DaemonConfig) -> Option<PathBuf> {
+pub(crate) fn configured_binary(config: &DaemonConfig) -> Option<PathBuf> {
     config
         .claude_cli
         .as_ref()

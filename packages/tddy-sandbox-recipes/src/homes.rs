@@ -42,8 +42,21 @@ pub fn legacy_home(tddy_home: &Path, key: &str) -> PathBuf {
 /// When only [`legacy_home`] exists it is renamed into place first, once; when both exist the
 /// resolution is refused ([`HomeError::BothExist`]) naming both.
 pub fn persistent_home(tddy_home: &Path, key: &str) -> Result<PathBuf, HomeError> {
-    // TODO(claude-jail): implement — rename the legacy home when only it exists, refuse when both
-    // do, create `homes/<key>` otherwise, then canonicalize.
-    let _ = (tddy_home, key);
-    todo!("claude-jail: persistent_home")
+    let home = tddy_home.join(HOMES_DIR).join(key);
+    let legacy = legacy_home(tddy_home, key);
+    let io_error = |path: &Path, e: std::io::Error| HomeError::Io {
+        path: path.to_path_buf(),
+        message: e.to_string(),
+    };
+    if legacy.exists() {
+        if home.exists() {
+            return Err(HomeError::BothExist { legacy, home });
+        }
+        let homes_dir = tddy_home.join(HOMES_DIR);
+        std::fs::create_dir_all(&homes_dir).map_err(|e| io_error(&homes_dir, e))?;
+        std::fs::rename(&legacy, &home).map_err(|e| io_error(&legacy, e))?;
+    } else {
+        std::fs::create_dir_all(&home).map_err(|e| io_error(&home, e))?;
+    }
+    std::fs::canonicalize(&home).map_err(|e| io_error(&home, e))
 }

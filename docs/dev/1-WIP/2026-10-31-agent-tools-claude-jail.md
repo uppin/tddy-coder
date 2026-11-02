@@ -124,7 +124,7 @@ Real dependency edges, as opposed to the branch line:
 **`tddy-session-lifecycle`: `packages/tddy-session-lifecycle/tests/claude_cli_jail_from_spec_acceptance.rs`** (whole file macOS-only: every test runs a real Seatbelt jail; fixture in `tests/claude_jail_support/mod.rs`)
 
 - [x] `a_sandboxed_claude_cli_start_runs_a_stub_claude_whose_argv_home_path_proxy_env_mcp_config_and_credentials_match_the_spec` (macOS, real Seatbelt)
-- [x] `the_agent_process_needs_no_tddy_sandbox_variable_and_sees_only_the_tddy_vars_its_declared_tddy_tools_server_needs`
+- [x] `the_agent_process_sees_no_tddy_variable_and_its_tddy_tools_server_carries_the_ones_it_needs` (renamed at green, see `### From /green`)
 - [x] `a_relaunch_uses_the_same_launcher_and_renders_the_same_spec`
 - [x] `claude_in_a_jail_reaches_a_declared_host_through_the_shim_and_is_refused_an_undeclared_one` (local stand-in hosts mapped through the pattern list)
 - [x] `a_routed_session_reaches_its_base_url_host_and_carries_no_oauth_token_secret`
@@ -226,6 +226,12 @@ Real dependency edges, as opposed to the branch line:
 - Green **removes** `ensure_project_home_session_acceptance::setting_up_main_in_a_sandbox_is_refused_and_starts_nothing` (marked `TODO(claude-jail)`): the new sandboxed-main test supersedes it. It is a test removal, not a file deletion.
 - The baseline builds its daemon **without** coding agents (installing them panics on n2's todo today). If the launcher requires them, green adds them to the baseline's Given — no assertion changes.
 - `claude_cli.claude_home_dir` and `TDDY_SANDBOX_CLAUDE_HOME` stop deciding where the jailed Claude's home is (`persistent_home` does). Green should say what happens to them; the migration test configures `claude_home_dir` at the legacy path so today and tomorrow are both observable.
+### From /green
+
+- **Test edit, approved by the developer (2026-11-02).** The red-phase test asserted both "no `TDDY_SANDBOX_*` in the agent env" and "agent `TDDY_*` names == the `tddy-tools --mcp` server's env names". In-jail `tddy-tools` finds its socket only through `TDDY_SANDBOX_TOOL_IPC` (and `TDDY_SANDBOX_SESSION_ID`), so the server block must carry them and the two cannot hold together (`tddy-session-tool-client/src/lib.rs:248`, `tddy-tools/src/server.rs:1748`). Chosen: the agent sees no `TDDY_*`. The test is renamed `the_agent_process_sees_no_tddy_variable_and_its_tddy_tools_server_carries_the_ones_it_needs`; the third assertion is now "agent `TDDY_*` names are empty", with a positive check that the server block carries `TDDY_SANDBOX_TOOL_IPC` and `TDDY_SANDBOX_SESSION_ID`. The `command` and no-`TDDY_SANDBOX_*` checks are kept.
+- **Given edits, approved by the developer.** Launching a sandboxed Claude from its tool definition needs the daemon's coding agents, as the runtime installs them (no production fallback). Added to: `sandboxed_claude_launch_baseline` (dropped `coding_agents: false`), `ensure_project_home_session_acceptance` (sandboxed-main test uses a world with coding agents), and the three sandboxed `claude_cli_fullscreen_renderer` tests (`a_session_host_with_coding_agents`). No assertion changed. Also removed `setting_up_main_in_a_sandbox_is_refused_and_starts_nothing`, as planned.
+- Open: `TODO(claude-jail)` at `claude_jail.rs:144` (jail renders the MCP slot without `--strict-mcp-config`); the project-home allowed-tools/prompt wiring of the sandboxed-main todo is not applied in the jail.
+
 ### From /validate-changes
 ### From /validate-tests
 ### From /validate-prod-ready

@@ -8,7 +8,8 @@
 use std::path::PathBuf;
 
 use crate::project_home_support::{
-    a_home_daemon, a_repo_with_origin_main, ensure_main, git, HomeDaemon, PROJECT_ID,
+    a_home_daemon, a_home_daemon_with_coding_agents, a_repo_with_origin_main, ensure_main, git,
+    HomeDaemon, PROJECT_ID,
 };
 use tddy_core::session_metadata::{read_session_metadata, write_session_metadata, SessionMetadata};
 use tddy_projects::project_storage;
@@ -123,6 +124,17 @@ pub fn a_claude_cli_spec() -> StartSessionRequest {
 
 pub fn a_daemon_with_a_project() -> World {
     a_daemon_with_a_project_recording(None)
+}
+
+/// [`a_daemon_with_a_project`] with the daemon's coding agents installed, which a main set up in a
+/// sandbox is launched from.
+#[allow(dead_code)]
+pub fn a_daemon_with_a_project_and_coding_agents() -> World {
+    let repo = a_repo_with_origin_main();
+    World {
+        home: a_home_daemon_with_coding_agents(repo.path(), "", ""),
+        repo,
+    }
 }
 
 pub fn a_daemon_with_a_project_recording(home_session_id: Option<&str>) -> World {
