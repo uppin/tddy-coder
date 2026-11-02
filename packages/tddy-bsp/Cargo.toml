@@ -11,7 +11,10 @@ path = "src/lib.rs"
 [dependencies]
 tddy-core = { path = "../tddy-core" }
 tddy-session-catalog = { path = "../tddy-session-catalog" }
+tddy-actions = { path = "../tddy-actions" }
 tddy-build = { path = "../tddy-build" }
+# The `build` command's hermetic actions run in the daemon's sandbox (`#agent-tools 4/12`).
+tddy-daemon-sandbox = { path = "../tddy-daemon-sandbox" }
 tddy-build-rust = { path = "../tddy-build-rust" }
 tddy-build-typescript = { path = "../tddy-build-typescript" }
 tddy-build-docker = { path = "../tddy-build-docker" }

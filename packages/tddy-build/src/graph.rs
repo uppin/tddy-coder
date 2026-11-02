@@ -2,7 +2,7 @@
 
 use std::collections::HashMap;
 
-use crate::builtin::{self, GROUP};
+use crate::builtin::{self, ToolTarget, GROUP, TOOL};
 use crate::capabilities::BuildMode;
 use crate::error::BuildError;
 use crate::lower::lower_target;
@@ -97,9 +97,17 @@ impl BuildGraph {
         if visited.iter().any(|v| v == id) {
             return Ok(());
         }
-        if on_stack.iter().any(|v| v == id) {
+        if let Some(start) = on_stack.iter().position(|v| v == id) {
+            let cycle: Vec<&str> = on_stack[start..]
+                .iter()
+                .map(String::as_str)
+                .chain(std::iter::once(id))
+                .collect();
             log::warn!("build graph cycle detected through target {id}");
-            return Err(BuildError::Cycle(format!("cycle through target {id}")));
+            return Err(BuildError::Cycle(format!(
+                "cycle through target {}",
+                cycle.join(" → ")
+            )));
         }
         on_stack.push(id.to_string());
         if let Some(target) = self.targets.get(id) {
@@ -166,9 +174,8 @@ impl BuildGraph {
         Ok(())
     }
 
-    /// Target-level predecessors: declared deps plus group members.
-    // TODO(build-tools): plus, for every action's `tool_dep_ids`, the tool target itself and —
-    // when its inline binary is a `TargetBinary` — the producing target (`builtin::tool_target`).
+    /// Target-level predecessors: declared deps, group members, the tool targets this target's
+    /// actions name, and the target a tool target's binary is built by.
     fn target_edges(&self, target: &BuildTarget) -> Result<Vec<String>, BuildError> {
         let mut edges = target.deps.clone();
         if let Some(config) = &target.config {
@@ -176,7 +183,23 @@ impl BuildGraph {
                 edges.extend(builtin::group_member_ids(&config.fields)?);
             }
         }
+        for action in &target.actions {
+            edges.extend(action.tool_dep_ids.iter().cloned());
+        }
+        edges.extend(tool_producer(target));
         Ok(edges)
+    }
+}
+
+/// The target whose output a tool target's binary is, when its inline definition names one.
+///
+/// A config that is not a readable tool definition names none. The graph does not refuse a manifest
+/// for declaring one: the executor refuses it when a build uses it, before any action runs.
+fn tool_producer(target: &BuildTarget) -> Option<String> {
+    let config = target.config.as_ref().filter(|c| c.r#type == TOOL)?;
+    match builtin::tool_target(&target.id, &config.fields) {
+        Ok(ToolTarget::Inline(def)) => def.binary.target.map(|binary| binary.target),
+        Ok(ToolTarget::Ref { .. }) | Err(_) => None,
     }
 }
 

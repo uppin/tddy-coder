@@ -99,15 +99,28 @@ pub fn compute_cache_key(action: &BuildAction, input_fingerprints: &[FileFingerp
 /// [`compute_cache_key`] with the resolved tool binaries' fingerprints folded in
 /// (`#agent-tools 4/12`): changing a tool's binary invalidates every action using it. Independent
 /// of `tool_fingerprints`' order, as the input fingerprints are.
+///
+/// An action with no tools keeps [`compute_cache_key`]'s own key, so entries written before tools
+/// were fingerprinted stay valid.
 pub fn compute_cache_key_with_tools(
     action: &BuildAction,
     input_fingerprints: &[FileFingerprint],
     tool_fingerprints: &[FileFingerprint],
 ) -> String {
-    // TODO(build-tools): implement — the same hash with a `|tools|` section, sorted by path; fold
-    // `compute_cache_key` into it once the executor always passes tools.
-    let _ = (action, input_fingerprints, tool_fingerprints);
-    todo!("build-tools: compute_cache_key_with_tools")
+    let key = compute_cache_key(action, input_fingerprints);
+    if tool_fingerprints.is_empty() {
+        return key;
+    }
+
+    let mut hasher = Sha256::new();
+    hasher.update(key.as_bytes());
+    hasher.update(b"|tools|");
+    let mut tools: Vec<&FileFingerprint> = tool_fingerprints.iter().collect();
+    tools.sort_by(|a, b| (&a.path, a.size, a.mtime_ms).cmp(&(&b.path, b.size, b.mtime_ms)));
+    for fp in tools {
+        hasher.update(format!("{}:{}:{};", fp.path, fp.size, fp.mtime_ms).as_bytes());
+    }
+    format!("sha256:{}", hex::encode(hasher.finalize()))
 }
 
 /// Load the cache entry for `{target_id}/{action_id}`, returning it only when its
@@ -170,7 +183,7 @@ fn cache_entry_path(repo_root: &Path, target_id: &str, action_id: &str) -> PathB
 }
 
 /// Make an id filesystem-safe (target ids contain `/` and `:`).
-fn sanitize(id: &str) -> String {
+pub(crate) fn sanitize(id: &str) -> String {
     id.chars()
         .map(|c| match c {
             '/' | ':' | '\\' | ' ' => '_',

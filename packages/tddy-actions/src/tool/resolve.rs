@@ -93,9 +93,19 @@ pub(super) fn resolve_tool(def: &ToolDef, host: &dyn ToolHost) -> Result<Resolve
     })
 }
 
-/// The `env` override first, then the first `PATH` directory holding the command. An override that
-/// does not name an executable refuses the tool: it never falls back to the search.
+/// The producing target's output when the binary is one, then the `env` override, then the first
+/// `PATH` directory holding the command. A target output that is not an executable, or an override
+/// that does not name one, refuses the tool: neither ever falls back to the search.
 fn locate_binary(def: &ToolDef, host: &dyn ToolHost) -> Result<PathBuf, ToolError> {
+    if let Some(target) = &def.binary.target {
+        return match host.target_output(target) {
+            Some(output) => target_output_binary(def, target, &output, host),
+            None => Err(unresolvable(
+                def,
+                format!("{} output {}", target.target, target.path),
+            )),
+        };
+    }
     let mut searched = Vec::new();
     if let Some(var) = &def.binary.env {
         match host.env_var(var) {
@@ -116,6 +126,25 @@ fn locate_binary(def: &ToolDef, host: &dyn ToolHost) -> Result<PathBuf, ToolErro
         searched.push(format!("PATH ({})", join_dirs(&dirs)));
     }
     Err(unresolvable(def, searched.join(", ")))
+}
+
+fn target_output_binary(
+    def: &ToolDef,
+    target: &TargetBinary,
+    output: &Path,
+    host: &dyn ToolHost,
+) -> Result<PathBuf, ToolError> {
+    if host.is_executable_file(output) {
+        return canonical(def, output, host);
+    }
+    Err(unresolvable(
+        def,
+        format!(
+            "{} output {} (not an executable file)",
+            target.target,
+            output.display()
+        ),
+    ))
 }
 
 fn override_binary(

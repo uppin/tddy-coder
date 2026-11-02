@@ -6,9 +6,10 @@
 //! from the target's open [`crate::manifest::TargetConfig`] fields.
 
 use std::collections::HashMap;
+use std::path::Path;
 
 use serde::Deserialize;
-use tddy_actions::tool::ToolDef;
+use tddy_actions::tool::{ToolDef, ToolError};
 
 use crate::error::BuildError;
 use crate::proto::{ActionType, BuildAction};
@@ -70,10 +71,55 @@ pub enum ToolTarget {
 /// `tool target <id>: the {bin_dir, commands} tool shape is no longer supported — declare a tool
 /// definition (schema_version, id, summary, binary) or ref: <tool id> instead`.
 pub fn tool_target(target_id: &str, fields: &serde_yaml::Value) -> Result<ToolTarget, BuildError> {
-    // TODO(build-tools): implement — `ref` alone is a `Ref`; `bin_dir` or `commands` present is
-    // the legacy refusal; anything else is `ToolDef` YAML (errors name `target_id`).
-    let _ = (target_id, fields);
-    todo!("build-tools: tool_target")
+    const LEGACY_SHAPE: &str = "the {bin_dir, commands} tool shape is no longer supported — \
+        declare a tool definition (schema_version, id, summary, binary) or ref: <tool id> instead";
+    let refuse =
+        |reason: String| BuildError::Manifest(format!("tool target {target_id}: {reason}"));
+    let keys: Vec<&str> = fields
+        .as_mapping()
+        .ok_or_else(|| refuse("its config is not a mapping".to_string()))?
+        .keys()
+        .filter_map(serde_yaml::Value::as_str)
+        .collect();
+
+    if keys
+        .iter()
+        .any(|key| matches!(*key, "bin_dir" | "commands"))
+    {
+        return Err(refuse(LEGACY_SHAPE.to_string()));
+    }
+    if keys.contains(&"ref") {
+        let others: Vec<&str> = keys.iter().copied().filter(|key| *key != "ref").collect();
+        if !others.is_empty() {
+            return Err(refuse(format!(
+                "`ref` names a registry tool and takes no other fields, but this config also has {}",
+                others.join(", ")
+            )));
+        }
+        let ref_ = fields
+            .get("ref")
+            .and_then(serde_yaml::Value::as_str)
+            .ok_or_else(|| refuse("`ref` must name a tool id".to_string()))?;
+        return Ok(ToolTarget::Ref {
+            ref_: ref_.to_string(),
+        });
+    }
+    Ok(ToolTarget::Inline(Box::new(tool_definition(
+        target_id, fields,
+    )?)))
+}
+
+/// The config's fields parsed as one whole [`ToolDef`], by the same rule a registry file follows.
+fn tool_definition(target_id: &str, fields: &serde_yaml::Value) -> Result<ToolDef, BuildError> {
+    let yaml = serde_yaml::to_string(fields)
+        .map_err(|e| BuildError::Manifest(format!("tool target {target_id}: {e}")))?;
+    ToolDef::parse(Path::new(target_id), &yaml).map_err(|error| {
+        let reason = match error {
+            ToolError::Parse { message, .. } => message,
+            other => other.to_string(),
+        };
+        BuildError::Manifest(format!("tool target {target_id}: {reason}"))
+    })
 }
 
 #[derive(Debug, Default, Deserialize)]

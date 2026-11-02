@@ -1,23 +1,30 @@
 //! Execute a build target: lower → cache check → wave-based parallel run.
 
-use std::path::Path;
+use std::collections::{BTreeMap, BTreeSet};
+use std::path::{Path, PathBuf};
+use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use std::sync::Arc;
-
-use tddy_actions::tool::{ToolHost, ToolRegistry};
-use tddy_actions::ProcessRuntime;
+use tddy_actions::tool::{
+    ProcessToolHost, ResolvedTool, TargetBinary, ToolError, ToolHost, ToolRegistry,
+};
+use tddy_actions::{ActionInput, ProcessRuntime};
 use tddy_task::{TaskHandle, TaskRegistry, TaskStatus};
 
 use crate::action_convert::build_action_to_spec;
 use crate::action_sandbox::ActionSandbox;
-use crate::builtin::{self, TOOL};
-use crate::cache::{compute_cache_key, lookup_cache, persist_cache, CacheMode};
+use crate::builtin::{self, ToolTarget, TOOL};
+use crate::cache::{
+    compute_cache_key_with_tools, lookup_cache, persist_cache, sanitize, CacheMode,
+};
 use crate::capabilities::BuildMode;
 use crate::error::BuildError;
 use crate::graph::{action_waves, BuildGraph};
 use crate::plugin::PluginRegistry;
 use crate::proto::{ActionCacheEntry, BuildAction, FileFingerprint};
+
+/// Where an action's tool links live: one directory per action, under the repository's build state.
+const TOOL_LINK_ROOT: &str = ".tddy-build/tools";
 
 /// Options controlling a build run.
 #[derive(Debug, Clone)]
@@ -63,10 +70,13 @@ impl BuildTools {
     /// The built-in tools with `tools_dir` (`<tddyhome>/tools`) applied as overrides, resolving
     /// against `host`, with no sandbox.
     pub fn load(tools_dir: &Path, host: Arc<dyn ToolHost>) -> Result<Self, BuildError> {
-        // TODO(build-tools): implement — `ToolRegistry::load(ToolRegistry::builtin()?, tools_dir)`,
-        // a `ToolError` becoming a `BuildError` that keeps its message.
-        let _ = (tools_dir, host);
-        todo!("build-tools: BuildTools::load")
+        let builtin = ToolRegistry::builtin().map_err(tool_error)?;
+        let registry = ToolRegistry::load(builtin, tools_dir).map_err(tool_error)?;
+        Ok(Self {
+            registry,
+            host,
+            sandbox: None,
+        })
     }
 
     /// The same tools, running hermetic actions through `sandbox`.
@@ -102,6 +112,9 @@ pub struct BuildRecord {
 /// topological wave in parallel. Honors caching and `dry_run` per `opts`.
 ///
 /// `mode` applies to `target_id` itself; its dependencies are always compiled.
+///
+/// Tool dependencies resolve against the built-in tools on this process, and no action runs in a
+/// sandbox: [`execute_target_with_tools`] takes the `<tddyhome>/tools` overrides and a sandbox.
 pub async fn execute_target(
     repo_root: &Path,
     graph: &BuildGraph,
@@ -110,30 +123,12 @@ pub async fn execute_target(
     mode: BuildMode,
     registry: &PluginRegistry,
 ) -> Result<BuildRecord, BuildError> {
-    let order = graph.build_order(target_id)?;
-    let mut record = BuildRecord {
-        target: target_id.to_string(),
-        actions: Vec::new(),
+    let tools = BuildTools {
+        registry: ToolRegistry::builtin().map_err(tool_error)?,
+        host: Arc::new(ProcessToolHost),
+        sandbox: None,
     };
-
-    for current_target in &order {
-        let current_mode = if current_target == target_id {
-            mode
-        } else {
-            BuildMode::Compile
-        };
-        let actions = graph.actions_for_mode(current_target, current_mode, registry)?;
-        if actions.is_empty() {
-            continue;
-        }
-        log::info!("building target {}", current_target);
-        let outcomes = run_target_actions(repo_root, graph, current_target, &actions, opts).await?;
-        if current_target == target_id {
-            record.actions = outcomes;
-        }
-    }
-
-    Ok(record)
+    execute_target_with_tools(repo_root, graph, target_id, opts, mode, registry, &tools).await
 }
 
 /// [`execute_target`] with `tool_dep_ids` resolved through `tools` (`#agent-tools 4/12`).
@@ -154,15 +149,278 @@ pub async fn execute_target_with_tools(
     registry: &PluginRegistry,
     tools: &BuildTools,
 ) -> Result<BuildRecord, BuildError> {
-    // TODO(build-tools): implement, then make `execute_target` this with the process host and
-    // `<tddyhome>/tools`, delete `tool_path` and the legacy `tool_bin_dir`.
-    let _ = (repo_root, graph, target_id, opts, mode, registry, tools);
-    todo!("build-tools: execute_target_with_tools")
+    let order = graph.build_order(target_id)?;
+    let mut plans: Vec<(String, Vec<BuildAction>)> = Vec::new();
+    for current_target in order {
+        let current_mode = if current_target == target_id {
+            mode
+        } else {
+            BuildMode::Compile
+        };
+        let actions = graph.actions_for_mode(&current_target, current_mode, registry)?;
+        if !actions.is_empty() {
+            plans.push((current_target, actions));
+        }
+    }
+
+    // Every tool the build names is read before the first action runs: a tool that does not parse
+    // stops the build here, not partway through it.
+    let run = ToolRun::new(
+        repo_root,
+        graph,
+        tools,
+        plans.iter().flat_map(|(_, actions)| actions),
+    )?;
+    let mut record = BuildRecord {
+        target: target_id.to_string(),
+        actions: Vec::new(),
+    };
+    for (current_target, actions) in &plans {
+        log::info!("building target {}", current_target);
+        let outcomes = run_target_actions(&run, current_target, actions, opts).await?;
+        if current_target == target_id {
+            record.actions = outcomes;
+        }
+    }
+
+    Ok(record)
+}
+
+/// The tools one build run resolves against: the tools' registry with the run's inline tool targets
+/// added, the tool id each named tool target stands for, and the host the binaries resolve on.
+struct ToolRun<'a> {
+    repo_root: &'a Path,
+    registry: ToolRegistry,
+    /// Tool target id → the tool id a [`ToolRegistry::resolve_closure`] takes.
+    tool_ids: BTreeMap<String, String>,
+    host: TargetHost<'a>,
+    sandbox: Option<&'a dyn ActionSandbox>,
+}
+
+impl<'a> ToolRun<'a> {
+    /// Read the tool targets `actions` name. An inline definition joins the registry; a `ref` must name
+    /// a tool it holds. A name that is not a tool target, or a definition that does not parse, refuses
+    /// the build.
+    fn new<'b>(
+        repo_root: &'a Path,
+        graph: &BuildGraph,
+        tools: &'a BuildTools,
+        actions: impl Iterator<Item = &'b BuildAction>,
+    ) -> Result<Self, BuildError> {
+        let names: BTreeSet<&str> = actions
+            .flat_map(|action| action.tool_dep_ids.iter().map(String::as_str))
+            .collect();
+        let mut registry = tools.registry.clone();
+        let mut tool_ids = BTreeMap::new();
+        for name in names {
+            let tool_id = match tool_config(graph, name)? {
+                ToolTarget::Inline(def) => {
+                    let id = def.id.clone();
+                    registry = registry
+                        .with_tool(*def, PathBuf::from(name))
+                        .map_err(tool_error)?;
+                    id
+                }
+                ToolTarget::Ref { ref_ } => {
+                    if registry.get(&ref_).is_none() {
+                        return Err(tool_error(ToolError::UnknownTool(ref_)));
+                    }
+                    ref_
+                }
+            };
+            tool_ids.insert(name.to_string(), tool_id);
+        }
+        Ok(Self {
+            repo_root,
+            registry,
+            tool_ids,
+            host: TargetHost {
+                inner: tools.host.as_ref(),
+                repo_root,
+            },
+            sandbox: tools.sandbox.as_deref(),
+        })
+    }
+
+    /// The closure of `action`'s tool dependencies, deps before dependents; empty when it names none.
+    fn closure(&self, action: &BuildAction) -> Result<Vec<ResolvedTool>, BuildError> {
+        if action.tool_dep_ids.is_empty() {
+            return Ok(Vec::new());
+        }
+        let ids = action
+            .tool_dep_ids
+            .iter()
+            .map(|name| {
+                self.tool_ids
+                    .get(name)
+                    .map(String::as_str)
+                    .ok_or_else(|| BuildError::UnknownTarget(name.clone()))
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        self.registry
+            .resolve_closure(&ids, &self.host)
+            .map_err(|e| BuildError::Exec(e.to_string()))
+    }
+}
+
+/// The parsed config of the tool target `name`, which must be a tool target.
+fn tool_config(graph: &BuildGraph, name: &str) -> Result<ToolTarget, BuildError> {
+    let target = graph
+        .target(name)
+        .ok_or_else(|| BuildError::UnknownTarget(name.to_string()))?;
+    match &target.config {
+        Some(config) if config.r#type == TOOL => builtin::tool_target(name, &config.fields),
+        _ => Err(BuildError::Manifest(format!(
+            "tool_dep_ids names {name}, which is not a tool target"
+        ))),
+    }
+}
+
+/// The host a build resolves tools on: the tools' host, except that a [`TargetBinary`] answers with
+/// the producing target's output under the repository root. The build order has already built that
+/// producer before any action that resolves it.
+struct TargetHost<'a> {
+    inner: &'a dyn ToolHost,
+    repo_root: &'a Path,
+}
+
+impl ToolHost for TargetHost<'_> {
+    fn env_var(&self, name: &str) -> Option<String> {
+        self.inner.env_var(name)
+    }
+    fn path_dirs(&self) -> Vec<PathBuf> {
+        self.inner.path_dirs()
+    }
+    fn is_executable_file(&self, path: &Path) -> bool {
+        self.inner.is_executable_file(path)
+    }
+    fn canonicalize(&self, path: &Path) -> std::io::Result<PathBuf> {
+        self.inner.canonicalize(path)
+    }
+    fn target_output(&self, binary: &TargetBinary) -> Option<PathBuf> {
+        Some(self.repo_root.join(&binary.path))
+    }
+}
+
+fn tool_error(error: ToolError) -> BuildError {
+    BuildError::Manifest(error.to_string())
+}
+
+/// Run `action` through the build's sandbox. Without one the action is refused, never run unconfined.
+async fn run_hermetic(
+    run: &ToolRun<'_>,
+    action: &BuildAction,
+    closure: &[ResolvedTool],
+) -> Result<ActionOutcome, BuildError> {
+    let sandbox = run.sandbox.ok_or_else(|| {
+        BuildError::Exec(format!(
+            "action {} runs hermetically, but this build has no sandbox",
+            action.id
+        ))
+    })?;
+    let mut spec = build_action_to_spec(run.repo_root, action);
+    if spec.working_dir.is_none() {
+        spec.working_dir = Some(run.repo_root.to_path_buf());
+    }
+    spec.inputs = matched_inputs(&spec.inputs)?;
+    sandbox.run(&spec, closure).await
+}
+
+/// The concrete paths each declared input pattern matches, as read-only inputs: a sandbox mounts
+/// paths, not globs.
+fn matched_inputs(inputs: &[ActionInput]) -> Result<Vec<ActionInput>, BuildError> {
+    let mut matched = Vec::new();
+    for input in inputs {
+        let pattern = input.host_path.to_string_lossy();
+        let paths = glob::glob(&pattern)
+            .map_err(|e| BuildError::Manifest(format!("input {pattern}: {e}")))?;
+        for path in paths {
+            let host_path = path.map_err(|e| BuildError::Io(e.to_string()))?;
+            matched.push(ActionInput {
+                host_path,
+                jail_path: None,
+                writable: false,
+            });
+        }
+    }
+    Ok(matched)
+}
+
+/// Expose each tool of `closure` by its command in `links`: one symlink per command, to its binary.
+/// A link an earlier run left is replaced, so a re-resolved binary is never reached by a stale name.
+fn link_tools(links: &Path, closure: &[ResolvedTool]) -> Result<(), BuildError> {
+    std::fs::create_dir_all(links).map_err(|e| io_error(links, e))?;
+    for tool in closure {
+        let link = links.join(&tool.command);
+        // A link that is absent is the normal case; anything else is reported by `symlink_file`.
+        let _ = std::fs::remove_file(&link);
+        symlink_file(&tool.binary, &link).map_err(|e| io_error(&link, e))?;
+    }
+    Ok(())
+}
+
+#[cfg(unix)]
+fn symlink_file(target: &Path, link: &Path) -> std::io::Result<()> {
+    std::os::unix::fs::symlink(target, link)
+}
+
+#[cfg(not(unix))]
+fn symlink_file(_target: &Path, _link: &Path) -> std::io::Result<()> {
+    Err(std::io::Error::new(
+        std::io::ErrorKind::Unsupported,
+        "tool links need a unix host",
+    ))
+}
+
+/// Where `action`'s tool links live: one directory per action, under the repository's build state.
+fn tool_link_dir(repo_root: &Path, target_id: &str, action_id: &str) -> PathBuf {
+    repo_root
+        .join(TOOL_LINK_ROOT)
+        .join(sanitize(target_id))
+        .join(sanitize(action_id))
+        .join("bin")
+}
+
+/// `PATH` with `links` first, ahead of the inherited `PATH`.
+fn path_with(links: &Path) -> String {
+    match std::env::var("PATH") {
+        Ok(existing) => format!("{}:{existing}", links.display()),
+        Err(_) => links.display().to_string(),
+    }
+}
+
+/// The fingerprint of one tool binary, as an input's is: its path, size and mtime.
+fn file_fingerprint(path: &Path) -> Result<FileFingerprint, BuildError> {
+    let metadata = std::fs::metadata(path).map_err(|e| io_error(path, e))?;
+    let mtime_ms = metadata
+        .modified()
+        .ok()
+        .and_then(|t| t.duration_since(UNIX_EPOCH).ok())
+        .map(|d| d.as_millis() as u64)
+        .unwrap_or(0);
+    Ok(FileFingerprint {
+        path: path.to_string_lossy().into_owned(),
+        size: metadata.len(),
+        mtime_ms,
+    })
+}
+
+fn io_error(path: &Path, error: std::io::Error) -> BuildError {
+    BuildError::Io(format!("{}: {error}", path.display()))
+}
+
+/// Create the parent directory of each declared output. Many tools (e.g. compilers, `docker build
+/// --iidfile`) do not create the directory for a declared output.
+fn prepare_outputs(repo_root: &Path, action: &BuildAction) {
+    for output in &action.outputs {
+        if let Some(parent) = repo_root.join(&output.path).parent() {
+            let _ = std::fs::create_dir_all(parent);
+        }
+    }
 }
 
 async fn run_target_actions(
-    repo_root: &Path,
-    graph: &BuildGraph,
+    run: &ToolRun<'_>,
     target_id: &str,
     actions: &[BuildAction],
     opts: &ExecuteOptions,
@@ -173,7 +431,7 @@ async fn run_target_actions(
     for wave in waves {
         let futures = wave.iter().map(|&idx| {
             let action = &actions[idx];
-            run_one(repo_root, graph, target_id, action, opts)
+            run_one(run, target_id, action, opts)
         });
         let results = futures::future::join_all(futures).await;
         for (&idx, result) in wave.iter().zip(results.into_iter()) {
@@ -188,8 +446,7 @@ async fn run_target_actions(
 }
 
 async fn run_one(
-    repo_root: &Path,
-    graph: &BuildGraph,
+    run: &ToolRun<'_>,
     target_id: &str,
     action: &BuildAction,
     opts: &ExecuteOptions,
@@ -206,10 +463,17 @@ async fn run_one(
     }
 
     let use_cache = !opts.no_cache;
-    let fingerprints = fingerprint_inputs(repo_root, action);
-    let cache_key = compute_cache_key(action, &fingerprints);
+    let fingerprints = fingerprint_inputs(run.repo_root, action);
+    let closure = run.closure(action)?;
+    let tool_fingerprints = closure
+        .iter()
+        .map(|tool| file_fingerprint(&tool.binary))
+        .collect::<Result<Vec<_>, _>>()?;
+    // TODO(build-tools): the key does not record whether the action ran hermetically, so an entry an
+    // unconfined run wrote can serve a `sandbox: true` action. Decide whether the key should carry it.
+    let cache_key = compute_cache_key_with_tools(action, &fingerprints, &tool_fingerprints);
 
-    if use_cache && lookup_cache(repo_root, target_id, &action.id, &cache_key).is_some() {
+    if use_cache && lookup_cache(run.repo_root, target_id, &action.id, &cache_key).is_some() {
         log::debug!("cache hit for action {} (target {})", action.id, target_id);
         return Ok(ActionOutcome {
             action_id: action.id.clone(),
@@ -223,7 +487,12 @@ async fn run_one(
     log::debug!("cache miss for action {} (target {})", action.id, target_id);
     log::debug!("running action {}: {:?}", action.id, action.command);
 
-    let outcome = run_action(repo_root, graph, action).await?;
+    prepare_outputs(run.repo_root, action);
+    let outcome = if opts.hermetic || action.sandbox {
+        run_hermetic(run, action, &closure).await?
+    } else {
+        run_action(run.repo_root, target_id, action, &closure).await?
+    };
 
     if outcome.exit_code == 0 && use_cache && opts.cache_mode.writes() {
         let entry = ActionCacheEntry {
@@ -235,7 +504,7 @@ async fn run_one(
             action_id: action.id.clone(),
             target_id: target_id.to_string(),
         };
-        persist_cache(repo_root, target_id, &entry)?;
+        persist_cache(run.repo_root, target_id, &entry)?;
         log::debug!(
             "persisted cache entry for action {} (target {})",
             action.id,
@@ -248,8 +517,9 @@ async fn run_one(
 
 async fn run_action(
     repo_root: &Path,
-    graph: &BuildGraph,
+    target_id: &str,
     action: &BuildAction,
+    closure: &[ResolvedTool],
 ) -> Result<ActionOutcome, BuildError> {
     let argv = action.command.clone();
     if argv.is_empty() {
@@ -259,20 +529,14 @@ async fn run_action(
         )));
     }
 
-    // Ensure declared output parent directories exist. Many tools (e.g. compilers,
-    // `docker build --iidfile`) do not create the directory for a declared output.
-    for output in &action.outputs {
-        if let Some(parent) = repo_root.join(&output.path).parent() {
-            let _ = std::fs::create_dir_all(parent);
-        }
-    }
-
     let mut spec = build_action_to_spec(repo_root, action);
     if spec.working_dir.is_none() {
         spec.working_dir = Some(repo_root.to_path_buf());
     }
-    if let Some(path) = tool_path(repo_root, graph, action)? {
-        spec.env.insert("PATH".to_string(), path);
+    if !closure.is_empty() {
+        let links = tool_link_dir(repo_root, target_id, &action.id);
+        link_tools(&links, closure)?;
+        spec.env.insert("PATH".to_string(), path_with(&links));
     }
 
     let registry = TaskRegistry::new();
