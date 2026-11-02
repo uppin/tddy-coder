@@ -15,7 +15,7 @@ use tddy_core::cli_harness::{cli_harness, CliLaunch};
 use tddy_rpc::Status;
 use tddy_terminal_rpc::service::{
     ControlChange, ControlClaim, TerminalControl, TerminalDescriptor, TerminalKind, TerminalLaunch,
-    TerminalRoster, TerminalSessionPorts,
+    TerminalRoster, TerminalSessionPorts, TmuxHost,
 };
 use tokio::sync::broadcast;
 
@@ -99,6 +99,7 @@ impl DaemonSessionHost {
     /// maps to, where the terminals and the control lease live, and what this host frames at.
     fn terminal_session_ports(&self) -> TerminalSessionPorts {
         let config = self.config.clone();
+        let tmux: Arc<dyn TmuxHost> = Arc::new(tmux_host::HostTmux);
         TerminalSessionPorts {
             github_users: self.user_resolver.clone(),
             os_users: Arc::new(move |github_user: &str| config.os_user_for_github(github_user)),
@@ -108,13 +109,14 @@ impl DaemonSessionHost {
                 Arc::clone(&self.claude_cli_manager),
                 self.config.clone(),
                 self.tddy_data_dir.clone(),
+                Arc::clone(&tmux),
             )),
             recorded_history: Arc::new(
                 crate::session_dir_recorded_history::SessionDirRecordedHistory::new(
                     self.tddy_data_dir.clone(),
                 ),
             ),
-            tmux: Arc::new(tmux_host::HostTmux),
+            tmux,
             initial_frame_bytes: tddy_terminal_rpc::bridge::DEFAULT_INITIAL_FRAME_BYTES,
         }
     }
@@ -164,14 +166,22 @@ struct CliManagerTerminalRoster {
     config: DaemonConfig,
     /// Where session directories live — a stopped session's worktree is read from its record.
     tddy_data_dir: PathBuf,
+    /// The host's tmux, which a tmux tab's session name is checked against before anything spawns.
+    tmux: Arc<dyn TmuxHost>,
 }
 
 impl CliManagerTerminalRoster {
-    fn new(manager: Arc<CliSessionManager>, config: DaemonConfig, tddy_data_dir: PathBuf) -> Self {
+    fn new(
+        manager: Arc<CliSessionManager>,
+        config: DaemonConfig,
+        tddy_data_dir: PathBuf,
+        tmux: Arc<dyn TmuxHost>,
+    ) -> Self {
         CliManagerTerminalRoster {
             manager,
             config,
             tddy_data_dir,
+            tmux,
         }
     }
 }
@@ -214,7 +224,14 @@ impl TerminalRoster for CliManagerTerminalRoster {
                     .map_err(|e| Status::internal(format!("failed to start terminal: {e}")))?
             }
             TerminalKind::Tmux { session } => {
-                // TODO(tmux-attach): refuse a session `HostTmux::list` does not name (NOT_FOUND).
+                // Checked before anything spawns: a client for a name tmux does not hold would
+                // attach to nothing and exit, leaving a dead tab behind.
+                let sessions = self.tmux.list(&launch.os_user).await?;
+                if !sessions.iter().any(|listed| listed.name == *session) {
+                    return Err(Status::not_found(format!(
+                        "no tmux session named {session:?} on this host for this user"
+                    )));
+                }
                 let binary = tmux_host::tmux_binary();
                 self.manager
                     .start_tmux_terminal(
@@ -244,8 +261,7 @@ impl TerminalRoster for CliManagerTerminalRoster {
                 terminal_id: handle.terminal_id.clone(),
                 kind: handle.kind.clone(),
                 pid: handle.pid,
-                // TODO(tmux-attach): the tmux session a tmux terminal is attached to.
-                tmux_session: None,
+                tmux_session: handle.tmux_session.clone(),
             })
             .collect()
     }

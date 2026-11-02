@@ -18,25 +18,47 @@ pub(super) const TMUX_BINARY_ENV: &str = "TDDY_TMUX_BINARY";
 pub(super) const LIST_SESSIONS_FORMAT: &str =
     "#{session_name}\t#{session_windows}\t#{session_attached}";
 
-/// The tmux binary this daemon runs.
+/// The tmux binary this daemon runs: `TDDY_TMUX_BINARY` when set and non-empty, else `tmux` on
+/// the daemon's `PATH`.
 pub(super) fn tmux_binary() -> String {
-    // TODO(tmux-attach): implement
-    let _ = TMUX_BINARY_ENV;
-    String::new()
+    match std::env::var(TMUX_BINARY_ENV) {
+        Ok(binary) if !binary.is_empty() => binary,
+        _ => "tmux".to_string(),
+    }
 }
 
 /// The argv of a tab's client attached to exactly `name` (`=` stops tmux matching a prefix).
 pub(super) fn tmux_attach_argv(binary: &str, name: &str) -> Vec<String> {
-    // TODO(tmux-attach): implement
-    let _ = (binary, name);
-    Vec::new()
+    vec![
+        binary.to_string(),
+        "-T".to_string(),
+        "clipboard".to_string(),
+        "attach-session".to_string(),
+        "-t".to_string(),
+        format!("={name}"),
+    ]
 }
 
 /// The sessions `tmux list-sessions -F LIST_SESSIONS_FORMAT` printed.
+///
+/// tmux prints exactly the format, one session per line, so a line without its three fields is not
+/// a session and is skipped. The name comes first and may itself hold tabs, so the two counts are
+/// read from the end of the line.
 pub(super) fn parse_list_sessions(stdout: &str) -> Vec<TmuxSession> {
-    // TODO(tmux-attach): implement
-    let _ = stdout;
-    Vec::new()
+    stdout
+        .lines()
+        .filter_map(|line| {
+            let mut fields = line.rsplitn(3, '\t');
+            let attached = fields.next()?.parse().ok()?;
+            let windows = fields.next()?.parse().ok()?;
+            let name = fields.next()?;
+            Some(TmuxSession {
+                name: name.to_string(),
+                windows,
+                attached,
+            })
+        })
+        .collect()
 }
 
 /// [`TmuxHost`] over the daemon host's tmux, run as the asking OS user.
@@ -45,7 +67,9 @@ pub(super) struct HostTmux;
 #[async_trait]
 impl TmuxHost for HostTmux {
     async fn list(&self, os_user: &str) -> Result<Vec<TmuxSession>, Status> {
-        // TODO(tmux-attach): implement
+        // TODO(tmux-attach): implement. BLOCKED on a design decision: the main agent PTY's as-user
+        // path (`PtyRuntime`, which wraps argv in `setpriv`) is a terminal, so a one-shot listing
+        // gets stdout and stderr as one stream and no separate stdout. See the node report.
         let _ = (os_user, LIST_SESSIONS_FORMAT, parse_list_sessions("").len());
         Err(Status::unimplemented(
             "listing tmux sessions is not implemented",
