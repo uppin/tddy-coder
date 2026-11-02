@@ -16,7 +16,10 @@ use crate::screen_dump::portable_dump;
 
 mod crop;
 mod grid;
+mod paging;
 mod styles;
+
+pub(crate) use paging::forward_chunk;
 
 pub use crop::{crop, CroppedCursor, CroppedGrid, GridRegion};
 pub use grid::{GridCursor, TextGrid};
@@ -325,32 +328,14 @@ impl TerminalCapture {
         until_offset: u64,
         max_bytes: usize,
     ) -> CaptureChunk {
-        let chunk_start = from_offset.max(self.start_offset);
-        let cap = if until_offset == 0 {
-            self.end_offset
-        } else {
-            until_offset.min(self.end_offset)
-        };
-        // Nothing to return once the fill has reached the upper bound.
-        if chunk_start >= cap {
-            return CaptureChunk {
-                data: Vec::new(),
-                start_offset: chunk_start,
-                end_offset: chunk_start,
-                at_oldest: chunk_start == self.start_offset,
-                at_end: true,
-            };
-        }
-        let chunk_end = (chunk_start.saturating_add(max_bytes as u64)).min(cap);
-        let buffer_start = (chunk_start - self.start_offset) as usize;
-        let buffer_end = (chunk_end - self.start_offset) as usize;
-        CaptureChunk {
-            data: self.buffer[buffer_start..buffer_end].to_vec(),
-            start_offset: chunk_start,
-            end_offset: chunk_end,
-            at_oldest: chunk_start == self.start_offset,
-            at_end: chunk_end >= cap,
-        }
+        forward_chunk(
+            &self.buffer,
+            self.start_offset,
+            self.end_offset,
+            from_offset,
+            until_offset,
+            max_bytes,
+        )
     }
 }
 
