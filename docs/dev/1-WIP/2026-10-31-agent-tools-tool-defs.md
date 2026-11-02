@@ -28,16 +28,18 @@ State A below is distilled from that file. Grep traces and file dumps are not re
 - [ ] [`tddy-sandbox-recipes`](../../../packages/tddy-sandbox-recipes/README.md): `tool_grants` — lowers a resolved tool set to `ReadSpec`, `SymlinkSpec` and PATH; depends on `tddy-actions`
 - [ ] [`tddy-daemon-sandbox`](../../../packages/tddy-daemon-sandbox/README.md): the workspace jail plan takes the registry's `rg`; `host_ripgrep_grants` is deleted
 - [ ] [`tddy-session-lifecycle`](../../../packages/tddy-session-lifecycle/README.md): builds the provisioner with `for_tddy_home`
+- [ ] `tddy-sandbox-darwin` (no README): `src/profile.rs` emits `process-exec*` for a literal exec read as well as an exec subpath, so the lowered tool binary can run under Seatbelt. Added during green, as a fix the developer approved. Agent jails emit only exec subpaths, so their profiles are unchanged
 - [ ] [`tddy-session-split`](../../../packages/tddy-session-split/README.md): test construction only
 
 ## Responsibility
 
 - `tddy_actions::tool::ToolDef` — `{ schema_version: u32, id: String, summary: String, binary: ToolBinary { command: String, env: Option<String> }, deps: Vec<String>, reads: Vec<PathBuf> }`, with serde and `deny_unknown_fields`.
-- `tddy_actions::tool::ToolRegistry::{builtin() -> Self, load(builtin, overrides_dir: &Path) -> Result<Self, ToolError>, get(&str) -> Option<&ToolDef>, ids()}`.
+- `tddy_actions::tool::ToolRegistry::{builtin() -> Result<Self, ToolError>, load(builtin, overrides_dir: &Path) -> Result<Self, ToolError>, get(&str) -> Option<&ToolDef>, ids()}`.
   - An override replaces a built-in whole, by `id`.
   - Load refuses an unknown field, a duplicate id within one source, an unknown dep and a dep cycle, each naming the ids and files involved.
-- `tddy_actions::tool::ToolHost` — a trait for the environment a tool resolves against (`env_var`, `path_search`, `canonicalize`). Production uses the daemon's process; tests inject a fixture host.
-- `tddy_actions::tool::ResolvedTool { id, binary: PathBuf, reads: Vec<PathBuf> }` and `ToolRegistry::resolve_closure(&[&str], &dyn ToolHost) -> Result<Vec<ResolvedTool>, ToolError>`.
+  - An override file that cannot be read is `ToolError::Parse`.
+- `tddy_actions::tool::ToolHost` — a trait for the environment a tool resolves against (`env_var`, `path_dirs`, `is_executable_file`, `canonicalize`). Production uses the daemon's process; tests inject a fixture host.
+- `tddy_actions::tool::ResolvedTool { id, command: String, binary: PathBuf, reads: Vec<PathBuf> }` and `ToolRegistry::resolve_closure(&[&str], &dyn ToolHost) -> Result<Vec<ResolvedTool>, ToolError>`.
   - Resolution order is `env` override, then `command` on PATH, then canonicalize.
   - `ToolError::Unresolvable { tool, searched }` names the tool and what was searched.
 - `tddy_sandbox_recipes::tool_grants::{ToolGrants { reads: Vec<ReadSpec>, symlinks: Vec<SymlinkSpec>, path_prefix: PathBuf }, lower_tools(&[ResolvedTool], jail_bin_dir: &Path) -> ToolGrants}`.
@@ -122,7 +124,8 @@ Real dependency edges, as opposed to the branch line:
 - `workspace_tool_sandbox.rs`: the request field and the provisioner's resolution. `host_ripgrep_grants`, `RipgrepGrants` and `binary_dependency_traversal_dirs` move into `tool_grants` in generic form.
 - `tddy-session-lifecycle` `svc_host_builders.rs` builds `JailedWorkspaceSandboxProvisioner::for_tddy_home(tddy_data_dir)`. No daemon-wide registry: `#agent-tools 12/12` (#801) owns one.
 - `tddy-session-split` `tests/split_room_hosting_port.rs` constructs the provisioner the same way.
-- `tests/ripgrep_in_jail_seatbelt.rs` proves the `host_ripgrep_grants` patch and is superseded by `declared_tools_workspace_jail_acceptance.rs`. It is **deleted with the patch at green, once the developer approves** (CLAUDE.md: ask before deleting files).
+- `packages/tddy-sandbox-darwin/src/profile.rs`: the `process-exec*` rule also emits a literal exec read, which is the lowered tool binary. With it reverted, the live rg case fails with `env: rg: Operation not permitted`. Agent jails emit only exec subpaths, so their profiles are unchanged.
+- `tests/ripgrep_in_jail_seatbelt.rs` proved the `host_ripgrep_grants` patch. **Deleted at green with the developer's approval (2026-11-02).** `declared_tools_workspace_jail_acceptance.rs` supersedes it.
 - Docs, at wrap: `docs/ft/coder/sandbox-builder.md` § Declared tools; `docs/ft/daemon/remote-codebase-mode.md` § Workspace tool sandbox; `packages/tddy-actions/docs/`.
 
 ## Testing Strategy
@@ -186,7 +189,7 @@ Real dependency edges, as opposed to the branch line:
 - [x] Run acceptance tests (verify they fail)
 - [x] USER REVIEW — acceptance tests
 - [x] TDD Red — write failing unit/integration tests
-- [x] TDD Green — implement with quality code (2 tests still red, see From /green)
+- [x] TDD Green — implement with quality code (green on 2026-11-02 after the two developer decisions, see From /green)
 - [ ] Update documentation with progress
 - [ ] Repeat Red→Green→Update cycle until feature complete
 - [ ] Run the touched packages' tests (`./test -p {package}` per package) — verify 100% pass
@@ -209,10 +212,11 @@ Real dependency edges, as opposed to the branch line:
 - **Pre-existing, not this node:** `packages/tddy-daemon-sandbox/tests/sandbox_stdio_seatbelt_acceptance.rs` does not compile on macOS (`SandboxHandle` not in scope). The file is identical to `master`, so exclude that target when gating this node (`cargo clippy -p tddy-daemon-sandbox --lib --test …`).
 - **Red baseline (2026-10-31):** every new test fails at a `TODO(tool-defs)` body. The exception is `a_host_that_cannot_resolve_rg_…`, which fails because today's `provision` spawns a jail (it dies with exit 127) instead of refusing before the tree exists. `ripgrep_in_jail_seatbelt` still passes, on the old patch. Existing `tddy-actions`/`tddy-sandbox-recipes`/`workspace_tool_sandbox_plan_unit` tests stay green.
 ### From /green
-- **RED, test defect (needs a decision):** `declared_tools_workspace_jail_acceptance::under_seatbelt::a_workspace_jail_built_from_the_declared_rg_tool_runs_rg_over_its_worktree_under_seatbelt` expects `hay.rs:1:const NEEDLE: u32 = 1;`, but its argv is `rg --no-config NEEDLE <dir>` with no `-n`. Piped `rg` omits line numbers (checked: `rg NEEDLE hay.rs | cat` prints `const NEEDLE: u32 = 1;`). The jail runs rg correctly. Left unedited: it is an approved acceptance test. Fix is either `-n` in the argv (keeps the `:1:` check) or dropping `:1:` from the expectation.
-- **RED, expected (needs approval):** `tests/ripgrep_in_jail_seatbelt.rs` is superseded. It passes `tools: Vec::new()`, so it goes red once `host_ripgrep_grants` is removed (`execvp() … Operation not permitted`). Not deleted: deletion needs the developer's go-ahead.
-- **Package outside the Delta:** `packages/tddy-sandbox-darwin/src/profile.rs` now emits `process-exec*` for literal exec reads, not only exec subpaths. Needed: with it reverted, the live rg case fails with `env: rg: Operation not permitted`. The only literal+exec grant in the tree is `tool_grants.rs` lowering, so agent jails are unaffected. Add `tddy-sandbox-darwin` to Affected Packages and the Delta, or split it out.
-- **Contract vs this changeset (sync at validate-changes):** `ToolRegistry::builtin()` returns `Result`; `ToolHost` is `path_dirs` + `is_executable_file` (not `path_search`); `ResolvedTool` carries `command`; an unreadable override file is `ToolError::Parse`. The tests and their fixture hosts are the authority.
+- **RESOLVED, test defect (developer decision, 2026-11-02):** `-n` was added to the rg argv. The `:1:` assertion is unchanged.
+- **Earlier finding, kept for the record:** `declared_tools_workspace_jail_acceptance::under_seatbelt::a_workspace_jail_built_from_the_declared_rg_tool_runs_rg_over_its_worktree_under_seatbelt` expects `hay.rs:1:const NEEDLE: u32 = 1;`, but its argv is `rg --no-config NEEDLE <dir>` with no `-n`. Piped `rg` omits line numbers (checked: `rg NEEDLE hay.rs | cat` prints `const NEEDLE: u32 = 1;`). The jail runs rg correctly. Left unedited: it is an approved acceptance test. The fix was `-n` in the argv, which keeps the `:1:` check.
+- **RESOLVED, expected red (developer approved the deletion, 2026-11-02):** `tests/ripgrep_in_jail_seatbelt.rs` is superseded. It passes `tools: Vec::new()`, so it goes red once `host_ripgrep_grants` is removed (`execvp() … Operation not permitted`). Deleted, and its TODO(tool-defs) went with it.
+- **Package outside the Delta:** `packages/tddy-sandbox-darwin/src/profile.rs` now emits `process-exec*` for literal exec reads, not only exec subpaths. Needed: with it reverted, the live rg case fails with `env: rg: Operation not permitted`. The only literal+exec grant in the tree is `tool_grants.rs` lowering, so agent jails are unaffected. Recorded in Affected Packages and the Delta. Kept, not split: the fix is needed for the lowered binary to run.
+- **Contract vs this changeset (synced in Responsibility):** `ToolRegistry::builtin()` returns `Result`; `ToolHost` is `path_dirs` + `is_executable_file` (not `path_search`); `ResolvedTool` carries `command`; an unreadable override file is `ToolError::Parse`. The tests and their fixture hosts are the authority.
 - **Budget:** `workspace_tool_sandbox.rs` is 684 production lines (741 on master), still over 500. Its code-issue record `packages/tddy-daemon-sandbox/docs/code-issues/oversized-file-workspace-tool-sandbox.md` still describes the removed ripgrep patch.
 - **Behaviour gap:** two tools with the same `binary.command` in one closure overwrite each other's `bin/` link silently. The contract has no refusal for this.
 - **Weak assertion:** the live `…no_sibling_binary_in_its_directory_is_executable` case passes on any failure to run the sibling. Check at validate-tests.

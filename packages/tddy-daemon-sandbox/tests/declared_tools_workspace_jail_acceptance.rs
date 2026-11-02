@@ -231,6 +231,7 @@ mod under_seatbelt {
             &[
                 "rg",
                 "--no-config",
+                "-n",
                 "NEEDLE",
                 session.worktree.to_str().unwrap(),
             ],
