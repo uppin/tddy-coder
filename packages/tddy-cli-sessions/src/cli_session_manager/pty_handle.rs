@@ -28,6 +28,8 @@ pub struct PtyHandle {
     pub kind: String,
     pub worktree_path: PathBuf,
     pub model: String,
+    /// The tmux session a `"tmux"` terminal is attached to; `None` for every other kind.
+    pub tmux_session: Option<String>,
     /// Send bytes to the child process via PTY master (stdin).
     pub stdin_tx: mpsc::UnboundedSender<Bytes>,
     /// Subscribe to bytes from the child process via PTY master (stdout+stderr combined).

@@ -55,6 +55,7 @@ impl CliSessionManager {
             extras.env,
             os_user,
             extras.on_exit,
+            None,
         )
         .await
     }
@@ -83,6 +84,7 @@ impl CliSessionManager {
             model,
             argv,
             env,
+            None,
             None,
             None,
         )
@@ -224,6 +226,7 @@ impl CliSessionManager {
             argv,
             env,
             os_user,
+            None,
             None,
         )
         .await

@@ -52,6 +52,7 @@ struct TerminalEntry {
     task_id: TaskId,
     worktree_path: PathBuf,
     model: String,
+    tmux_session: Option<String>,
 }
 
 /// `session_id → (terminal_id → TerminalEntry)`.

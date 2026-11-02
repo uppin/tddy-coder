@@ -49,6 +49,7 @@ impl CliSessionManager {
         env: Vec<(String, String)>,
         os_user: Option<&str>,
         on_exit: Option<ExitHook>,
+        tmux_session: Option<&str>,
     ) -> anyhow::Result<Arc<pty_handle::PtyHandle>> {
         let (ready_tx, ready_rx) = oneshot::channel();
         let spec = PtySpawnSpec {
@@ -93,7 +94,9 @@ impl CliSessionManager {
             .map_err(|_| anyhow::anyhow!("PTY runtime did not signal ready"))?
             .map_err(|e| anyhow::anyhow!("PTY spawn failed: {e}"))?;
 
-        let handle = self.build_pty_handle(task, terminal_id, kind, worktree_path, model, ready)?;
+        let mut handle =
+            self.build_pty_handle(task, terminal_id, kind, worktree_path, model, ready)?;
+        handle.tmux_session = tmux_session.map(str::to_string);
 
         self.terminals
             .write()
@@ -106,6 +109,7 @@ impl CliSessionManager {
                     task_id: handle.task_id.clone(),
                     worktree_path: handle.worktree_path.clone(),
                     model: handle.model.clone(),
+                    tmux_session: handle.tmux_session.clone(),
                 },
             );
 
@@ -171,6 +175,8 @@ impl CliSessionManager {
             kind: kind.to_string(),
             worktree_path,
             model: model.to_string(),
+            // Set by the caller that knows the terminal is a tmux one; see `spawn_tool`.
+            tmux_session: None,
             stdin_tx,
             stdout_tx: channel.output_broadcast(),
             capture: channel.capture_arc(),
@@ -290,16 +296,18 @@ impl CliSessionManager {
             master: control.master,
             current_size: control.current_size,
         };
-        self.build_pty_handle(
-            task,
-            terminal_id,
-            &control.kind,
-            entry.worktree_path,
-            &entry.model,
-            ready,
-        )
-        .ok()
-        .map(Arc::new)
+        let mut handle = self
+            .build_pty_handle(
+                task,
+                terminal_id,
+                &control.kind,
+                entry.worktree_path,
+                &entry.model,
+                ready,
+            )
+            .ok()?;
+        handle.tmux_session = entry.tmux_session;
+        Some(Arc::new(handle))
     }
 }
 

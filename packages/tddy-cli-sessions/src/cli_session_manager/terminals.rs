@@ -8,6 +8,8 @@ use super::MAIN_TERMINAL_ID;
 
 use super::pty_handle;
 
+use tddy_terminal_rpc::service::TMUX_KIND;
+
 use std::sync::Arc;
 
 impl CliSessionManager {
@@ -39,6 +41,7 @@ impl CliSessionManager {
             Vec::new(),
             None,
             None,
+            None,
         )
         .await
     }
@@ -65,6 +68,7 @@ impl CliSessionManager {
             None,
             // A tab's exit is never recorded: it carries no resume token of its own.
             None,
+            None,
         )
         .await
     }
@@ -82,9 +86,20 @@ impl CliSessionManager {
         argv: Vec<String>,
         tmux_session: &str,
     ) -> anyhow::Result<Arc<pty_handle::PtyHandle>> {
-        // TODO(tmux-attach): implement
-        let _ = (session_id, worktree_path, os_user, argv, tmux_session);
-        anyhow::bail!("tmux terminals are not implemented")
+        let terminal_id = uuid::Uuid::now_v7().to_string();
+        self.spawn_tool(
+            session_id,
+            &terminal_id,
+            TMUX_KIND,
+            worktree_path,
+            "",
+            argv,
+            Vec::new(),
+            Some(os_user),
+            None,
+            Some(tmux_session),
+        )
+        .await
     }
 
     /// Look up a specific tool of a session by `terminal_id` (use `MAIN_TERMINAL_ID` for the

@@ -89,9 +89,19 @@ impl TerminalKind {
     /// The kind a request names, with the tmux session it names for a [`TMUX_KIND`] terminal;
     /// surrounding whitespace is ignored. A tmux kind without a session is `INVALID_ARGUMENT`.
     pub fn from_request(kind: &str, tmux_session: &str) -> Result<TerminalKind, Status> {
-        // TODO(tmux-attach): map TMUX_KIND + `tmux_session` to `Tmux`, refusing an empty session.
-        let _ = tmux_session;
-        Ok(match kind.trim() {
+        let kind = kind.trim();
+        if kind == TMUX_KIND {
+            let session = tmux_session.trim();
+            if session.is_empty() {
+                return Err(Status::invalid_argument(
+                    "a tmux terminal names the tmux session it attaches to",
+                ));
+            }
+            return Ok(TerminalKind::Tmux {
+                session: session.to_string(),
+            });
+        }
+        Ok(match kind {
             "" | "bash" => TerminalKind::Bash,
             agent => TerminalKind::Agent(agent.to_string()),
         })
