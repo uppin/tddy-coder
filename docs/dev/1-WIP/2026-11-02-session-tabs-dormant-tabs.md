@@ -3,8 +3,8 @@
 **Created:** 2026-11-02
 **Status:** 🚧 In Progress
 **Type:** Feature
-**Complexity**: 4 — three packages (`tddy-terminal-rpc`, `tddy-session-lifecycle`, `tddy-web`); a new runtime-less tab host in the web; the launch port gains the OS user that n3 also builds on
-**Stack:** `#session-tabs 1/7` — branch `feature/session-tabs/dormant-tabs`, base `master`
+**Complexity**: 4 — two packages (`tddy-session-lifecycle`, `tddy-web`); a new runtime-less tab host in the web, and the dormant base view changes for every stopped PTY session
+**Stack:** `#session-tabs 1/7` — branch `feature/session-tabs/dormant-tabs`, base `master` · **PR:** [#804](https://github.com/uppin/tddy-coder/pull/804)
 **PRD:** [PRD-2026-11-02-dormant-session-tabs.md](../../ft/web/1-WIP/PRD-2026-11-02-dormant-session-tabs.md)
 
 ## Initial Discovery
@@ -22,20 +22,21 @@
 
 ## Affected Packages
 
-- [ ] [`tddy-terminal-rpc`](../../../packages/tddy-terminal-rpc/README.md): `TerminalLaunch` carries the requesting OS user
 - [ ] [`tddy-session-lifecycle`](../../../packages/tddy-session-lifecycle/README.md): `CliManagerTerminalRoster::start` resolves a stopped session's worktree from its metadata
 - [ ] [`tddy-web`](../../../packages/tddy-web/README.md): a dormant session renders a tab strip; the transcript moves into its Agent tab
 
 ## Responsibility
 
-- `tddy_terminal_rpc::service::TerminalLaunch.os_user: String` — the OS user the request's token maps to,
-  filled by `start_terminal_session`.
 - `CliManagerTerminalRoster::start` (`svc_terminal_ports.rs`): when `manager.get(session_id)` is `None`,
-  read `<sessions_base_for_user(launch.os_user)>/<session_id>/.session.yaml` and start the tab in its
-  `repo_path`. A missing session dir, metadata or `repo_path` →
-  `failed_precondition("session <id> has no worktree on this host")`.
-- A private helper `recorded_worktree(os_user, session_id) -> Result<PathBuf, Status>` in a new file
-  `connection_service/svc_recorded_worktree.rs`.
+  start the tab in the worktree `recorded_worktree` resolves. The roster gains the daemon's
+  `tddy_data_dir`.
+- `recorded_worktree(tddy_data_dir, session_id) -> Result<PathBuf, Status>`, a submodule of
+  `svc_terminal_ports` (`connection_service/svc_terminal_ports/recorded_worktree.rs`, so
+  `connection_service.rs` gains no `mod` line):
+  - validates the id as one path segment (`invalid_argument`);
+  - reads `tddy_core::repo_root_for_session(<tddy_data_dir>/sessions/<id>)`, i.e. the changeset's
+    worktree, then `.session.yaml` `repo_path`;
+  - `None` → `failed_precondition` naming the session. There is no substitute directory.
 - `tddy-web` `DormantSessionRuntime` (`src/components/sessions/DormantSessionRuntime.tsx`): the tab strip
   for a session with no live connection.
   - It reuses `SessionTerminalTabs`, `useSessionTerminals` and `GrpcSessionTerminal` against the
@@ -62,9 +63,8 @@ None — this is the root node. It depends on `master` only.
 
 The first push publishes:
 
-- `TerminalLaunch.os_user`, filled by `start_terminal_session`;
-- `svc_recorded_worktree.rs` with `recorded_worktree` as `// TODO(dormant-tabs): implement` (the roster
-  still refuses without `main`);
+- `recorded_worktree` as `// TODO(dormant-tabs): implement`, answering `unimplemented`, and already
+  called by the roster when `main` is absent (so a stopped session is still refused until green);
 - `DormantSessionRuntime` with its props (including the `agentTab` slot), rendering nothing yet
   (`// TODO(dormant-tabs): implement`);
 - the failing tests below.
@@ -85,7 +85,6 @@ Real dependency edges, as opposed to the branch line:
 - `CliManagerTerminalRoster::start` refuses every start without a live `main`
   (`failed_precondition("session has no running terminal")`); it needs `main` only for its
   `worktree_path`.
-- `start_terminal_session` resolves `os_user` but hands the roster only `{ kind, login_shell }`.
 - Web: `SessionMainPane` covers the runtime layer with `SessionActivitiesPane` for a dormant session,
   and passes `focused={!dormant && …}`, which hides `SessionRuntime` entirely. A dormant session with no
   runtime has no tab strip, no "+" and nowhere for an added agent's conversation tab to appear.
@@ -102,14 +101,13 @@ Real dependency edges, as opposed to the branch line:
 ## Delta
 
 ### New
-- `packages/tddy-session-lifecycle/src/connection_service/svc_recorded_worktree.rs`
+- `packages/tddy-session-lifecycle/src/connection_service/svc_terminal_ports/recorded_worktree.rs`
 - `packages/tddy-web/src/components/sessions/DormantSessionRuntime.tsx`
 
 ### Modified
-- `packages/tddy-terminal-rpc/src/service/ports.rs` (`TerminalLaunch.os_user`) and `src/service.rs` (fill it).
 - `packages/tddy-session-lifecycle/src/connection_service/svc_terminal_ports.rs` (`start` resolves via `recorded_worktree` when `main` is absent; the roster gains the config it needs).
 - `packages/tddy-web/src/components/sessions/SessionMainPane.tsx` (render `DormantSessionRuntime` for a dormant session).
-- Docs, at wrap: `docs/ft/web/session-terminal-tabs.md`, `docs/ft/web/inactive-session-activities.md`, `packages/tddy-terminal-rpc/docs/`.
+- Docs, at wrap: `docs/ft/web/session-terminal-tabs.md`, `docs/ft/web/inactive-session-activities.md`, `packages/tddy-session-lifecycle/docs/`.
 
 ## Testing Strategy
 
@@ -133,8 +131,11 @@ Real dependency edges, as opposed to the branch line:
 
 ### Unit / integration tests
 
-- [ ] `packages/tddy-terminal-rpc/tests/terminal_session_service_acceptance.rs` (extended): `start_terminal_session_hands_the_roster_the_requesting_os_user`.
-- [ ] `svc_recorded_worktree.rs` unit tests: `repo_path` is returned; missing dir, missing metadata and missing `repo_path` each refuse naming the session.
+- [ ] `recorded_worktree.rs` unit tests (`#[cfg(test)]`):
+  - `a_stopped_session_resolves_to_the_worktree_its_metadata_records`;
+  - `a_session_whose_metadata_records_no_worktree_is_refused_naming_it`;
+  - `a_session_with_no_directory_on_this_host_is_refused_naming_it`;
+  - `a_session_id_that_is_not_one_path_segment_is_refused`.
 
 ### Test level decisions
 
@@ -149,7 +150,18 @@ Real dependency edges, as opposed to the branch line:
   everything on daemon restart, the metadata does not.
 - **No substitute directory.** Resume falls back to the session dir; tabs do not, because a shell in the
   wrong directory is worse than a clear refusal (CLAUDE.md: no fallbacks without consent).
+- **The session dir is the daemon's, not the user's** (`<tddy_data_dir>/sessions/<id>`, as the agent
+  roster resolves it), so the roster needs no OS user. `TerminalLaunch.os_user` was planned here and
+  moved to n3 `tmux-attach`, its only consumer (refined in pass 2).
 - **A render slot for the Agent tab**, so n6 replaces its body without touching the strip host.
+
+## Baseline before green
+
+Recorded at the contract commit (2026-11-02), scoped to `tddy-session-lifecycle` + `tddy-terminal-rpc`:
+
+- `cargo build -p … --all-targets`, `cargo fmt --check`, `cargo clippy -p … --all-targets -- -D warnings`: clean.
+- **This node's red tests:** `dormant_session_tabs_acceptance.rs` 4 failing (+ the live-session regression guard passing); the four `recorded_worktree` unit tests failing; `DormantSessionTabsAcceptance.cy.tsx` 5 failing ("no `sessions-terminal-tabs`").
+- **Not this node — environmental under a bare `cargo test -p`** (sibling binaries not built; `./test` builds `tddy-tools`): `ensure_project_home_session_acceptance`, `ensure_project_home_session_replace_edges`, `project_home_idle_stop_acceptance` (`tddy-tools not found in target/debug`); every `sandboxed_*` suite, `sandbox_behavior_acceptance`, `claude_cli_fullscreen_renderer` (3), `cursor_cli_session_acceptance` (1) (`env: tddy-sandbox-runner: No such file`); `session_sync_livekit_acceptance` (`tddy-remote-git-repo is not built`); `tool_session_host_socket` (7); lib `stack_child_spawn_tests::a_child_started_from_the_dialog_is_told_to_read_its_changeset`.
 
 ## TODO
 
@@ -157,10 +169,10 @@ Real dependency edges, as opposed to the branch line:
 - [x] Cross-check `packages/*/docs/code-issues/` and `docs/dev/todo/` for items this change touches (Step 2b)
 - [x] Create/update PRD documentation
 - [x] Create changeset (this document)
-- [ ] Create failing acceptance tests
-- [ ] Run acceptance tests (verify they fail)
-- [ ] USER REVIEW — acceptance tests
-- [ ] TDD Red — write failing unit/integration tests
+- [x] Create failing acceptance tests
+- [x] Run acceptance tests (verify they fail)
+- [x] USER REVIEW — acceptance tests — approved by the developer 2026-11-02 (later nodes' reviews waived)
+- [x] TDD Red — write failing unit/integration tests
 - [ ] TDD Green — implement with quality code
 - [ ] Update documentation with progress
 - [ ] Repeat Red→Green→Update cycle until feature complete
