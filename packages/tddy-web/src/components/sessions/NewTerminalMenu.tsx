@@ -1,4 +1,5 @@
-import React, { useEffect, useRef, useState } from "react";
+import React, { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { Plus } from "lucide-react";
 import type { TmuxSessionInfo } from "../../gen/terminal_session_pb";
 import {
@@ -21,24 +22,59 @@ interface NewTerminalMenuProps {
   tmux?: TmuxMenuState;
 }
 
+/** Gap between the "+" button and the top of its menu, in pixels. */
+const MENU_GAP_PX = 4;
+
+/** Stacking of the portaled menu above the page: it lives in `document.body`, beside the app's panes. */
+const MENU_Z_INDEX = 20;
+
+/** Viewport coordinates of the menu's top-left corner. */
+interface MenuPosition {
+  top: number;
+  left: number;
+}
+
 /**
  * The tab strip's "+" control: a menu of bash and every CLI harness this session can run — the same
- * list the Create pane offers — and, below them, the host's tmux sessions. Rendered outside the tab
- * scroller so the menu is not clipped by it.
+ * list the Create pane offers — and, below them, the host's tmux sessions. The control is the last
+ * tab of the tab scroller, sticky at its right edge; the menu is portaled to `document.body` so the
+ * scroller does not clip it, and is placed under the button.
  *
  * The tmux section is a group of its own, so the bash and harness list stays exactly the terminals
  * it offers, whatever state the tmux listing is in.
  */
 export function NewTerminalMenu({ sessionType, onOpen, tmux: tmuxState }: NewTerminalMenuProps) {
   const [menuOpen, setMenuOpen] = useState(false);
+  const [menuPosition, setMenuPosition] = useState<MenuPosition | null>(null);
   const newTabRef = useRef<HTMLDivElement>(null);
   const newTabButtonRef = useRef<HTMLButtonElement>(null);
+  const menuPanelRef = useRef<HTMLDivElement>(null);
 
   // A tool session's participant runs bash only, so there is no tmux server on its side to list.
   const tmux = sessionType === TOOL_SESSION_TYPE ? undefined : tmuxState;
 
+  // While the menu is open, it is placed under the button: now, and again whenever the viewport or
+  // any scroll container moves the button. Listened for only while open, like the dismiss listeners.
+  // A layout effect, so the menu is placed before the browser paints it.
+  useLayoutEffect(() => {
+    if (!menuOpen) return;
+    const placeMenu = () => {
+      const rect = newTabButtonRef.current?.getBoundingClientRect();
+      if (!rect) return;
+      setMenuPosition({ top: rect.bottom + MENU_GAP_PX, left: rect.left });
+    };
+    placeMenu();
+    window.addEventListener("resize", placeMenu);
+    window.addEventListener("scroll", placeMenu, true);
+    return () => {
+      window.removeEventListener("resize", placeMenu);
+      window.removeEventListener("scroll", placeMenu, true);
+    };
+  }, [menuOpen]);
+
   // The "+" menu closes on Escape and on a press outside it. Both are listened for only while it is
-  // open, so an idle tab strip holds no document listeners.
+  // open, so an idle tab strip holds no document listeners. The menu is portaled, so a press inside
+  // it is checked against its own panel as well as against the control.
   useEffect(() => {
     if (!menuOpen) return;
     const onKeyDown = (event: KeyboardEvent) => {
@@ -48,7 +84,10 @@ export function NewTerminalMenu({ sessionType, onOpen, tmux: tmuxState }: NewTer
     };
     const onPointerDown = (event: PointerEvent) => {
       const target = event.target;
-      if (target instanceof Node && newTabRef.current?.contains(target)) return;
+      if (target instanceof Node) {
+        if (newTabRef.current?.contains(target)) return;
+        if (menuPanelRef.current?.contains(target)) return;
+      }
       setMenuOpen(false);
     };
     document.addEventListener("keydown", onKeyDown);
@@ -66,7 +105,7 @@ export function NewTerminalMenu({ sessionType, onOpen, tmux: tmuxState }: NewTer
   ];
 
   return (
-    <div ref={newTabRef} className="relative flex-shrink-0">
+    <div ref={newTabRef} className="flex-shrink-0">
       <button
         ref={newTabButtonRef}
         type="button"
@@ -83,41 +122,51 @@ export function NewTerminalMenu({ sessionType, onOpen, tmux: tmuxState }: NewTer
       >
         <Plus className="h-3.5 w-3.5" />
       </button>
-      {menuOpen ? (
-        <div
-          role="menu"
-          aria-label="New terminal"
-          className="absolute left-0 z-20 mt-1 min-w-[10rem] rounded-md border border-border bg-popover py-1 text-popover-foreground shadow-md"
-        >
-          <ul role="group" data-testid="sessions-terminal-tab-new-menu">
-            {menuKinds.map((kind) => (
-              <li key={kind} role="none">
-                <button
-                  type="button"
-                  role="menuitem"
-                  data-testid={`sessions-terminal-tab-new-${kind}`}
-                  onClick={() => {
-                    setMenuOpen(false);
-                    onOpen(kind);
-                  }}
-                  className="block w-full px-3 py-2 text-left text-sm hover:bg-muted"
-                >
-                  {terminalKindLabel(kind)}
-                </button>
-              </li>
-            ))}
-          </ul>
-          {tmux ? (
-            <TmuxMenuSection
-              tmux={tmux}
-              onChoose={(name) => {
-                setMenuOpen(false);
-                onOpen(TMUX_KIND, name);
+      {menuOpen && menuPosition
+        ? createPortal(
+            <div
+              ref={menuPanelRef}
+              role="menu"
+              aria-label="New terminal"
+              style={{
+                position: "fixed",
+                zIndex: MENU_Z_INDEX,
+                top: menuPosition.top,
+                left: menuPosition.left,
               }}
-            />
-          ) : null}
-        </div>
-      ) : null}
+              className="min-w-[10rem] rounded-md border border-border bg-popover py-1 text-popover-foreground shadow-md"
+            >
+              <ul role="group" data-testid="sessions-terminal-tab-new-menu">
+                {menuKinds.map((kind) => (
+                  <li key={kind} role="none">
+                    <button
+                      type="button"
+                      role="menuitem"
+                      data-testid={`sessions-terminal-tab-new-${kind}`}
+                      onClick={() => {
+                        setMenuOpen(false);
+                        onOpen(kind);
+                      }}
+                      className="block w-full px-3 py-2 text-left text-sm hover:bg-muted"
+                    >
+                      {terminalKindLabel(kind)}
+                    </button>
+                  </li>
+                ))}
+              </ul>
+              {tmux ? (
+                <TmuxMenuSection
+                  tmux={tmux}
+                  onChoose={(name) => {
+                    setMenuOpen(false);
+                    onOpen(TMUX_KIND, name);
+                  }}
+                />
+              ) : null}
+            </div>,
+            document.body,
+          )
+        : null}
     </div>
   );
 }

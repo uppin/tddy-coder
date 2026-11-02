@@ -92,9 +92,10 @@ function childLabel(child: ChildSession): string {
  * of bash, every CLI harness the session can run, and the host's tmux sessions. Styled after
  * `InspectorTabs`.
  *
- * The tabs scroll horizontally when they overflow; the "+" and the full-screen control sit *outside*
- * that scroller, so a session with a dozen terminals and conversations cannot push them out of reach,
- * and the menu is not clipped by it.
+ * The "+" is the last item of the tab scroller, right after the last tab, so it always follows the
+ * tabs. It is sticky at the scroller's right edge with an opaque background, so it stays reachable
+ * when the tabs overflow. Its menu is portaled to the document body, so the scroller does not clip
+ * it. The full-screen control sits outside the scroller, pinned at the right edge.
  */
 export function SessionTerminalTabs({
   terminals,
@@ -214,9 +215,11 @@ export function SessionTerminalTabs({
             </div>
           );
         })}
-      </div>
 
-      <NewTerminalMenu sessionType={sessionType} onOpen={onOpen} tmux={tmux} />
+        <div className="sticky right-0 flex-shrink-0 bg-background">
+          <NewTerminalMenu sessionType={sessionType} onOpen={onOpen} tmux={tmux} />
+        </div>
+      </div>
 
       {/* Full screen — acts on whichever pane is active, since only one is ever visible. */}
       {onToggleFullscreen && (
