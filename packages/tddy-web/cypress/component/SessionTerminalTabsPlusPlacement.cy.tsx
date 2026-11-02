@@ -2,7 +2,7 @@
  * Acceptance: the tab strip's "+" sits right after the last tab, and stays reachable when the tabs
  * overflow — sticky at the scroller's right edge — with its menu never clipped by the scroller.
  *
- * PRD: docs/ft/web/1-WIP/PRD-2026-11-02-tab-plus-follows-last-tab.md (`#session-tabs 5/7`)
+ * PRD: docs/ft/web/session-terminal-tabs.md (`#session-tabs 5/7`)
  *
  * The strip is mounted on its own, without RPC: placement is a rendering question. The app
  * stylesheet is imported here, in this spec only, because the overflow and sticky cases need real
@@ -136,6 +136,22 @@ describe('The tab strip\'s "+" follows the last tab', () => {
     tabs.newTabOption("bash").should("be.visible");
     tabs.newTabMenu().then(($menu) => {
       expect($menu[0].closest(".overflow-x-auto"), "the menu's clipping ancestor").to.equal(null);
+    });
+  });
+
+  it("the menu stays inside the viewport when \"+\" sits at its right edge", () => {
+    // Given a strip as wide as the viewport, so "+" is within a few pixels of the right edge
+    mountTheStrip({ terminals: bashTerminals(30) }, 1280);
+
+    // When the menu is opened
+    tabs.newTab().click();
+
+    // Then the whole menu is on screen
+    tabs.newTabMenu().should("be.visible");
+    tabs.newTabMenu().then(($menu) => {
+      expect($menu[0].getBoundingClientRect().right, "menu right edge").to.be.at.most(
+        $menu[0].ownerDocument.defaultView!.innerWidth,
+      );
     });
   });
 

@@ -64,8 +64,11 @@ styled like the inspector tab strip (`InspectorTabs`).
   - **Before the session's type is known** (the session is not yet listed in the drawer) the menu
     offers every harness. The host refuses a kind it does not run, and the refusal is shown in
     `sessions-terminal-error` with no tab opened — the same surface as any refused start.
-  - The `+` sits in its own wrapper **outside** the tabs' horizontal scroller, beside it, so a long
-    strip cannot push it out of reach and the menu is not clipped by the scroller.
+  - The `+` is the **last item of the tab list**, right after the last tab of any kind (terminal,
+    child session, agent conversation). When the tabs overflow and scroll it is `sticky` at the
+    scroller's right edge with an opaque background, so it stays reachable. Its menu opens under the
+    button, outside the scroller, so the scroller does not clip it, and stays inside the viewport
+    even when `+` sits at the viewport's right edge.
   - **tmux section**: below the bash and harness group, a group of its own listing the host's tmux
     sessions (`ListTmuxSessions`, fetched afresh **each time the menu opens** — tmux sessions come and
     go outside tddy). Each item (`sessions-terminal-tab-new-tmux-<name>`) shows the session's name,

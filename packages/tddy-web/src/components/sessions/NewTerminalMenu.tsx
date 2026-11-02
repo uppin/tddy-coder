@@ -25,6 +25,12 @@ interface NewTerminalMenuProps {
 /** Gap between the "+" button and the top of its menu, in pixels. */
 const MENU_GAP_PX = 4;
 
+/** The menu's `min-w-[10rem]` in pixels: its width before it is measured. */
+const MENU_MIN_WIDTH_PX = 160;
+
+/** Smallest distance the menu keeps from the viewport's left and right edges, in pixels. */
+const MENU_VIEWPORT_MARGIN_PX = 8;
+
 /** Stacking of the portaled menu above the page: it lives in `document.body`, beside the app's panes. */
 const MENU_Z_INDEX = 20;
 
@@ -55,13 +61,19 @@ export function NewTerminalMenu({ sessionType, onOpen, tmux: tmuxState }: NewTer
 
   // While the menu is open, it is placed under the button: now, and again whenever the viewport or
   // any scroll container moves the button. Listened for only while open, like the dismiss listeners.
-  // A layout effect, so the menu is placed before the browser paints it.
+  // A layout effect, so the menu is placed before the browser paints it. The button sits at the
+  // strip's right edge, so the menu is kept inside the viewport instead of hanging off it.
+  const menuMounted = menuPosition !== null;
   useLayoutEffect(() => {
     if (!menuOpen) return;
     const placeMenu = () => {
       const rect = newTabButtonRef.current?.getBoundingClientRect();
       if (!rect) return;
-      setMenuPosition({ top: rect.bottom + MENU_GAP_PX, left: rect.left });
+      const width = menuPanelRef.current?.offsetWidth ?? MENU_MIN_WIDTH_PX;
+      const rightmost = window.innerWidth - width - MENU_VIEWPORT_MARGIN_PX;
+      const top = rect.bottom + MENU_GAP_PX;
+      const left = Math.max(MENU_VIEWPORT_MARGIN_PX, Math.min(rect.left, rightmost));
+      setMenuPosition((was) => (was?.top === top && was.left === left ? was : { top, left }));
     };
     placeMenu();
     window.addEventListener("resize", placeMenu);
@@ -70,7 +82,7 @@ export function NewTerminalMenu({ sessionType, onOpen, tmux: tmuxState }: NewTer
       window.removeEventListener("resize", placeMenu);
       window.removeEventListener("scroll", placeMenu, true);
     };
-  }, [menuOpen]);
+  }, [menuOpen, menuMounted]);
 
   // The "+" menu closes on Escape and on a press outside it. Both are listened for only while it is
   // open, so an idle tab strip holds no document listeners. The menu is portaled, so a press inside
