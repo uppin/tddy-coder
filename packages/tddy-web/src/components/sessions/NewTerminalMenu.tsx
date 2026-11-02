@@ -6,9 +6,11 @@ import {
   BASH_KIND,
   CLI_HARNESS_OPTIONS,
   TMUX_KIND,
+  TMUX_NEW_KIND,
   TOOL_SESSION_TYPE,
   terminalKindLabel,
 } from "./cliHarnessOptions";
+import { nextTmuxSessionName } from "./tmuxSessionName";
 import type { TmuxMenuState } from "./useTmuxSessions";
 
 interface NewTerminalMenuProps {
@@ -17,6 +19,9 @@ interface NewTerminalMenuProps {
   /** Open a terminal of the chosen kind: `bash`, a CLI harness's session type, or `tmux` attached
    *  to `tmuxSession`. */
   onOpen: (kind: string, tmuxSession?: string) => void;
+  /** The session this menu opens terminals for: its short id (the first segment of the id) names a
+   *  new tmux session. */
+  sessionId: string;
   /** The host's tmux sessions, offered as a section of the menu; absent offers no tmux section. The
    *  section lists again each time the menu opens. */
   tmux?: TmuxMenuState;
@@ -49,8 +54,15 @@ interface MenuPosition {
  * The tmux section is a group of its own, so the bash and harness list stays exactly the terminals
  * it offers, whatever state the tmux listing is in.
  */
-export function NewTerminalMenu({ sessionType, onOpen, tmux: tmuxState }: NewTerminalMenuProps) {
+export function NewTerminalMenu({
+  sessionType,
+  onOpen,
+  sessionId,
+  tmux: tmuxState,
+}: NewTerminalMenuProps) {
   const [menuOpen, setMenuOpen] = useState(false);
+  // The name typed for "New tmux session…", or null while that item is not open.
+  const [tmuxNaming, setTmuxNaming] = useState<string | null>(null);
   const [menuPosition, setMenuPosition] = useState<MenuPosition | null>(null);
   const newTabRef = useRef<HTMLDivElement>(null);
   const newTabButtonRef = useRef<HTMLButtonElement>(null);
@@ -58,6 +70,11 @@ export function NewTerminalMenu({ sessionType, onOpen, tmux: tmuxState }: NewTer
 
   // A tool session's participant runs bash only, so there is no tmux server on its side to list.
   const tmux = sessionType === TOOL_SESSION_TYPE ? undefined : tmuxState;
+
+  // Closing the menu drops an unsent name.
+  useEffect(() => {
+    if (!menuOpen) setTmuxNaming(null);
+  }, [menuOpen]);
 
   // While the menu is open, it is placed under the button: now, and again whenever the viewport or
   // any scroll container moves the button. Listened for only while open, like the dismiss listeners.
@@ -173,6 +190,21 @@ export function NewTerminalMenu({ sessionType, onOpen, tmux: tmuxState }: NewTer
                     setMenuOpen(false);
                     onOpen(TMUX_KIND, name);
                   }}
+                  naming={tmuxNaming}
+                  onStartNaming={() =>
+                    setTmuxNaming(
+                      nextTmuxSessionName(
+                        sessionId.split("-")[0],
+                        tmux.sessions.map((session) => session.name),
+                      ),
+                    )
+                  }
+                  onNameChange={setTmuxNaming}
+                  onSubmitName={(name) => {
+                    setMenuOpen(false);
+                    onOpen(TMUX_NEW_KIND, name);
+                  }}
+                  onCancelName={() => setTmuxNaming(null)}
                 />
               ) : null}
             </div>,
@@ -183,16 +215,64 @@ export function NewTerminalMenu({ sessionType, onOpen, tmux: tmuxState }: NewTer
   );
 }
 
-/** The tmux section of the "+" menu: one item per session the host listed, or what stands in for them. */
+/**
+ * The tmux section of the "+" menu: "New tmux session…" first, then one item per session the host
+ * listed, or what stands in for them. While `naming` is set, "New tmux session…" shows its name field:
+ * Enter starts the session with the typed name, Escape cancels it and keeps the menu open.
+ */
 function TmuxMenuSection({
   tmux,
   onChoose,
+  naming,
+  onStartNaming,
+  onNameChange,
+  onSubmitName,
+  onCancelName,
 }: {
   tmux: TmuxMenuState;
   onChoose: (name: string) => void;
+  naming: string | null;
+  onStartNaming: () => void;
+  onNameChange: (name: string) => void;
+  onSubmitName: (name: string) => void;
+  onCancelName: () => void;
 }) {
   return (
     <ul role="group" aria-label="tmux sessions" className="mt-1 border-t border-border pt-1">
+      <li role="none">
+        {naming === null ? (
+          <button
+            type="button"
+            role="menuitem"
+            data-testid="sessions-terminal-tab-new-tmux-new"
+            onClick={onStartNaming}
+            className="block w-full px-3 py-2 text-left text-sm hover:bg-muted"
+          >
+            New tmux session…
+          </button>
+        ) : (
+          <input
+            type="text"
+            autoFocus
+            aria-label="New tmux session name"
+            data-testid="sessions-terminal-tab-new-tmux-name"
+            value={naming}
+            onChange={(event) => onNameChange(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === "Enter") {
+                event.preventDefault();
+                const name = naming.trim();
+                if (name !== "") onSubmitName(name);
+              } else if (event.key === "Escape") {
+                // Handled here so the menu's own Escape listener keeps the menu open.
+                event.stopPropagation();
+                onCancelName();
+              }
+            }}
+            className="w-full px-3 py-2 text-sm bg-background"
+          />
+        )}
+      </li>
       {tmuxRows(tmux, onChoose)}
     </ul>
   );

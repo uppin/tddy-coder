@@ -25,6 +25,9 @@ export const BASH_KIND = "bash";
 /** The kind of a terminal attached to a tmux session on the host, named by its tmux session. */
 export const TMUX_KIND = "tmux";
 
+/** The kind of a terminal attached to a tmux session the tab creates in the session's worktree. */
+export const TMUX_NEW_KIND = "tmux-new";
+
 /** The name a terminal of `kind` is shown by: a harness's toggle label, or "Bash". */
 export function terminalKindLabel(kind: string): string {
   if (kind === BASH_KIND) return "Bash";

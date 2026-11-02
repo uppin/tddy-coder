@@ -272,7 +272,7 @@ impl TerminalRoster for CoderTerminalRoster {
                     "this session's terminals run bash only, not {kind:?}"
                 )));
             }
-            TerminalKind::Tmux { .. } => {
+            TerminalKind::Tmux { .. } | TerminalKind::TmuxNew { .. } => {
                 return Err(Status::failed_precondition(
                     "this session's terminals run bash only; tmux is not offered here",
                 ));

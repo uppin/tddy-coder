@@ -45,6 +45,41 @@ pub(super) fn tmux_attach_argv(binary: &str, name: &str) -> Vec<String> {
     ]
 }
 
+/// A tmux session name a "tmux-new" tab may create: trimmed, non-empty, and free of the `:` and `.`
+/// tmux reads as target separators. Anything else is `INVALID_ARGUMENT`.
+pub(super) fn tmux_session_name(raw: &str) -> Result<String, Status> {
+    let name = raw.trim();
+    if name.is_empty() {
+        return Err(Status::invalid_argument("a new tmux session needs a name"));
+    }
+    if name.contains([':', '.']) {
+        return Err(Status::invalid_argument(format!(
+            "a tmux session name may not contain ':' or '.': {name:?}"
+        )));
+    }
+    Ok(name.to_string())
+}
+
+/// The argv of a tab's client on a new tmux session `name` in `worktree`; `-A` attaches instead
+/// when a session of that name already exists.
+pub(super) fn tmux_new_session_argv(
+    binary: &str,
+    name: &str,
+    worktree: &std::path::Path,
+) -> Vec<String> {
+    vec![
+        binary.to_string(),
+        "-T".to_string(),
+        "clipboard".to_string(),
+        "new-session".to_string(),
+        "-A".to_string(),
+        "-s".to_string(),
+        name.to_string(),
+        "-c".to_string(),
+        worktree.to_string_lossy().into_owned(),
+    ]
+}
+
 /// The sessions `tmux list-sessions -F LIST_SESSIONS_FORMAT` printed.
 ///
 /// tmux prints exactly the format, one session per line, so a line without its three fields is not
@@ -196,6 +231,56 @@ mod tests {
     #[test]
     fn an_empty_listing_has_no_sessions() {
         assert_eq!(parse_list_sessions(""), Vec::<TmuxSession>::new());
+    }
+
+    #[test]
+    fn a_new_session_tab_creates_or_attaches_the_named_session_in_the_worktree() {
+        // When
+        let argv = tmux_new_session_argv(
+            "/usr/bin/tmux",
+            "work",
+            std::path::Path::new("/home/dev/feature"),
+        );
+
+        // Then
+        assert_eq!(
+            argv,
+            vec![
+                "/usr/bin/tmux",
+                "-T",
+                "clipboard",
+                "new-session",
+                "-A",
+                "-s",
+                "work",
+                "-c",
+                "/home/dev/feature"
+            ]
+        );
+    }
+
+    #[test]
+    fn a_new_session_name_is_trimmed() {
+        assert_eq!(tmux_session_name("  work ").unwrap(), "work");
+    }
+
+    #[test]
+    fn an_empty_new_session_name_is_refused() {
+        assert_eq!(
+            tmux_session_name("   ").unwrap_err().code(),
+            tddy_rpc::Code::InvalidArgument
+        );
+    }
+
+    #[test]
+    fn a_new_session_name_with_a_target_separator_is_refused() {
+        for name in ["a:b", "a.b"] {
+            assert_eq!(
+                tmux_session_name(name).unwrap_err().code(),
+                tddy_rpc::Code::InvalidArgument,
+                "{name}"
+            );
+        }
     }
 
     #[test]

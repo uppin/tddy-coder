@@ -315,7 +315,8 @@ opens through `RoomSession::open_duplex("terminal.TerminalService", "StreamTermi
 `StartTerminalSessionRequest.kind` says what a started terminal runs. The handler parses it with
 `TerminalKind::from_request(kind, tmux_session)` — `""` or `"bash"` (surrounding whitespace ignored) is
 `TerminalKind::Bash`; `"tmux"` (`TMUX_KIND`) with a non-empty `tmux_session` is
-`TerminalKind::Tmux { session }`, and without one `INVALID_ARGUMENT`; anything else is
+`TerminalKind::Tmux { session }`, and without one `INVALID_ARGUMENT`; `"tmux-new"` (`TMUX_NEW_KIND`) with a non-empty `tmux_session`
+is `TerminalKind::TmuxNew { session }` (empty: `INVALID_ARGUMENT`); anything else is
 `TerminalKind::Agent(kind)` — resolves the login shell, and hands the roster
 `start(session_id, &TerminalLaunch { kind, login_shell, os_user })`, `os_user` being the OS user the
 token maps to (who a tmux terminal runs as). A started terminal's `TerminalDescriptor` carries
@@ -331,12 +332,13 @@ is one the host runs is the roster's decision, because only the host knows its h
   the daemon cannot become `launch.os_user` (the kernel's `CannotBecomeUser`, `FAILED_PRECONDITION`)
   or when `TmuxHost::list` does not hold that name (`NOT_FOUND`); otherwise
   `CliSessionManager::start_tmux_terminal` spawns `tmux -T clipboard attach-session -t =<session>` as
-  that user.
+  that user. `TmuxNew { session }` validates the name first (`tmux_session_name`), then spawns
+  `tmux -T clipboard new-session -A -s <name> -c <worktree>` the same way.
   Either kind starts in the session's worktree: the live main terminal's, or — for a stopped
   session — the one its session directory records (`recorded_worktree`, `FAILED_PRECONDITION`
   naming the session when there is none).
 - **`tddy-coder`** (`CoderTerminalRoster`) runs `Bash` only and refuses `Agent(_)` with
-  `INVALID_ARGUMENT` "this session's terminals run bash only", and `Tmux { .. }` with
+  `INVALID_ARGUMENT` "this session's terminals run bash only", and `Tmux { .. }` / `TmuxNew { .. }` with
   `FAILED_PRECONDITION` "tmux is not offered here".
 
 A kind is a registered harness name, never an argv, so a client cannot choose the binary.

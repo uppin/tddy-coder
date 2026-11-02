@@ -47,6 +47,7 @@ function mountTheStrip(
         activeTerminalId={AGENT_TERMINAL_ID}
         onSelect={cy.stub()}
         onOpen={cy.stub().as("onOpen")}
+        sessionId="c0ffee12-0000-0000-0000-000000000001"
         onClose={cy.stub()}
         agentConversations={conversations}
         activeAgentConversationId={null}

@@ -52,6 +52,7 @@ function aTabStrip(conversations: AgentConversation[], options: StripOptions = {
           activeTerminalId={AGENT_TERMINAL_ID}
           onSelect={cy.stub().as("onSelect")}
           onOpen={cy.stub().as("onOpen")}
+          sessionId="c0ffee12-0000-0000-0000-000000000001"
           onClose={cy.stub().as("onClose")}
           agentConversations={conversations}
           activeAgentConversationId={options.activeAgentConversationId ?? null}

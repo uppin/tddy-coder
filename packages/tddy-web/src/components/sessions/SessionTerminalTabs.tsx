@@ -1,7 +1,7 @@
 import React from "react";
 import { Maximize2, Minimize2, X } from "lucide-react";
 import { AGENT_TERMINAL_ID, type SessionTerminal } from "./useSessionTerminals";
-import { TMUX_KIND, terminalKindLabel } from "./cliHarnessOptions";
+import { TMUX_KIND, TMUX_NEW_KIND, terminalKindLabel } from "./cliHarnessOptions";
 import { NewTerminalMenu } from "./NewTerminalMenu";
 import type { TmuxMenuState } from "./useTmuxSessions";
 import type { ChildSession } from "./useChildSessions";
@@ -21,6 +21,8 @@ interface SessionTerminalTabsProps {
   onOpen: (kind: string, tmuxSession?: string) => void;
   /** The host's tmux sessions for the "+" menu's tmux section; absent offers none. */
   tmux?: TmuxMenuState;
+  /** The session the tabs belong to; its short id names a new tmux session. */
+  sessionId: string;
   /** Close a terminal (the ✕ control on its tab). */
   onClose: (terminalId: string) => void;
   /**
@@ -75,7 +77,9 @@ function labelledTerminals(
 }
 
 function terminalTabLabel(terminal: SessionTerminal, ordinal: number): string {
-  if (terminal.kind === TMUX_KIND) return `tmux: ${terminal.tmuxSession ?? ""}`;
+  if (terminal.kind === TMUX_KIND || terminal.kind === TMUX_NEW_KIND) {
+    return `tmux: ${terminal.tmuxSession ?? ""}`;
+  }
   return `${terminalKindLabel(terminal.kind)} ${ordinal}`;
 }
 
@@ -103,6 +107,7 @@ export function SessionTerminalTabs({
   onSelect,
   onOpen,
   tmux,
+  sessionId,
   onClose,
   sessionType,
   childSessions = [],
@@ -217,7 +222,12 @@ export function SessionTerminalTabs({
         })}
 
         <div className="sticky right-0 flex-shrink-0 bg-background">
-          <NewTerminalMenu sessionType={sessionType} onOpen={onOpen} tmux={tmux} />
+          <NewTerminalMenu
+            sessionType={sessionType}
+            onOpen={onOpen}
+            sessionId={sessionId}
+            tmux={tmux}
+          />
         </div>
       </div>
 

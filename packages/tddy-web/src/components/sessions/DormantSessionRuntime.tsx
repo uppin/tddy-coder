@@ -162,6 +162,7 @@ export function DormantSessionRuntime({
           open(kind, tmuxSession);
         }}
         tmux={tmux}
+        sessionId={session.sessionId}
         onClose={close}
         sessionType={session.sessionType}
         agentConversations={agentConversations}
