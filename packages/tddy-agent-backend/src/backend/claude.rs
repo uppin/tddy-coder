@@ -2,15 +2,22 @@
 
 use super::routed::{route_child_env, splice_route_args};
 use super::{InvokeRequest, InvokeResponse};
-use crate::adapters::HeadlessRenderer;
+use crate::adapters::headless::{turn_workdir, write_rendered_files};
+use crate::adapters::{
+    ClaudeStreamJson, HeadlessRenderer, HeadlessTurn, StreamAdapter, StreamSinks,
+};
 use crate::error::BackendError;
 use crate::provider_route::HarnessRoute;
 use crate::stream;
+use std::collections::BTreeMap;
 use std::io::{BufReader, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::sync::{Arc, Mutex};
 use tddy_workflow::PermissionHint;
+
+/// The tool a Claude turn's permission prompts are routed to: `approval_prompt` on `tddy-tools`.
+const APPROVAL_PROMPT_TOOL: &str = "mcp__tddy-tools__approval_prompt";
 
 mod transcript_usage;
 pub use transcript_usage::{read_claude_subagent_usages, read_claude_transcript_usage};
@@ -213,6 +220,61 @@ fn goal_to_claude_config(request: &InvokeRequest) -> ClaudeInvokeConfig {
     }
 }
 
+/// Removes a temporary file when dropped.
+struct CleanupGuard(PathBuf);
+
+impl Drop for CleanupGuard {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_file(&self.0);
+    }
+}
+
+/// The system prompt as the file the agent is passed: the request's own path, or its inline prompt
+/// written to a temporary file that the returned guard removes once the turn ends.
+fn system_prompt_file(
+    request: &InvokeRequest,
+) -> Result<(Option<PathBuf>, Option<CleanupGuard>), BackendError> {
+    if let Some(ref path) = request.system_prompt_path {
+        return Ok((Some(path.clone()), None));
+    }
+    let Some(ref sys_prompt) = request.system_prompt else {
+        return Ok((None, None));
+    };
+    let tmp = std::env::temp_dir().join(format!(
+        "tddy-sys-{}-{}.txt",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    std::fs::write(&tmp, sys_prompt).map_err(|e| {
+        BackendError::InvocationFailed(format!("failed to write system prompt file: {}", e))
+    })?;
+    Ok((Some(tmp.clone()), Some(CleanupGuard(tmp))))
+}
+
+/// The `--permission-mode` a turn runs under; `None` leaves the agent's default.
+fn permission_mode_name(mode: PermissionMode) -> Option<String> {
+    match mode {
+        PermissionMode::Plan => Some("plan".to_string()),
+        PermissionMode::AcceptEdits => Some("acceptEdits".to_string()),
+        PermissionMode::Default => None,
+    }
+}
+
+/// One Claude child: what it is spawned with, and how its stdout is read.
+struct ChildLaunch<'a> {
+    program: &'a Path,
+    argv: &'a [String],
+    /// Set on the child on top of what the backend passes it.
+    env: &'a [(String, String)],
+    adapter: &'a dyn StreamAdapter,
+    exit_ok_if_structured: bool,
+    /// The system prompt file, whose text the conversation log records.
+    system_prompt_path: Option<&'a Path>,
+}
+
 /// Backend that invokes the Claude Code CLI binary.
 ///
 /// Uses `--output-format stream-json` for NDJSON stream processing.
@@ -225,8 +287,10 @@ pub struct ClaudeCodeBackend {
     /// The agent's declaration its invocation is rendered from (`with_headless_renderer`); `None`
     /// builds the argv by hand ([`build_claude_args`]).
     ///
-    /// TODO(claude-headless): green makes the spec the only path — `create_backend("claude")`
-    /// passes one — and deletes `build_claude_args` and `create_mcp_config_temp_file`.
+    /// TODO(claude-headless): `create_backend("claude")` now passes one, so the spec is the workflow's
+    /// path. `build_claude_args` and `create_mcp_config_temp_file` stay for backends built without a
+    /// renderer (`with_path` in `tddy-integration-tests`, which `build_claude_args` is public for);
+    /// deleting them needs those callers moved to a renderer first.
     headless: Option<Arc<dyn HeadlessRenderer>>,
 }
 
@@ -318,10 +382,57 @@ impl ClaudeCodeBackend {
         request: InvokeRequest,
         renderer: &Arc<dyn HeadlessRenderer>,
     ) -> Result<InvokeResponse, BackendError> {
-        // TODO(claude-headless): implement — build a `HeadlessTurn` from `request`, `render` it,
-        // then spawn and read as `invoke_sync` does, through `HeadlessInvocation::adapter`.
-        let _ = (request, renderer);
-        todo!("claude-headless: ClaudeCodeBackend::invoke_from_spec")
+        let scratch_dir = request.session_dir.clone().ok_or_else(|| {
+            BackendError::InvocationFailed(
+                "a headless claude turn writes its MCP registration to the session directory, and the request names none"
+                    .to_string(),
+            )
+        })?;
+        let (system_prompt_path, _system_prompt_file) = system_prompt_file(&request)?;
+        let config = goal_to_claude_config(&request);
+        let tool_server = renderer.tool_server();
+        // A provider route's arguments ride after the rendered argv, and a route that names its model
+        // replaces the request's, as `splice_route_args` does for the hand-built argv.
+        let route_args = self
+            .provider_route
+            .as_ref()
+            .map(|route| route.args.clone())
+            .unwrap_or_default();
+        let model = if route_args.iter().any(|arg| arg == "--model") {
+            None
+        } else {
+            request.model.clone()
+        };
+        let turn = HeadlessTurn {
+            prompt: request.prompt.clone(),
+            model,
+            session: request.session.clone(),
+            permission_mode: permission_mode_name(config.permission_mode),
+            append_system_prompt_file: system_prompt_path.clone(),
+            allowed_tools: config.allowed_tools,
+            denied_tools: Vec::new(),
+            permission_prompt_tool: tool_server
+                .as_ref()
+                .map(|_| APPROVAL_PROMPT_TOOL.to_string()),
+            mcp_server: tool_server,
+            workdir: turn_workdir(request.working_dir.as_deref())?,
+            scratch_dir,
+            params: BTreeMap::new(),
+            route_args,
+        };
+        let invocation = renderer.render(&turn)?;
+        write_rendered_files(&invocation.files)?;
+        self.run_child(
+            &request,
+            ChildLaunch {
+                program: &invocation.program,
+                argv: &invocation.argv,
+                env: &invocation.env,
+                adapter: invocation.adapter.as_ref(),
+                exit_ok_if_structured: invocation.exit_ok_if_structured,
+                system_prompt_path: system_prompt_path.as_deref(),
+            },
+        )
     }
 }
 
@@ -344,66 +455,55 @@ impl ClaudeCodeBackend {
         if let Some(renderer) = &self.headless {
             return self.invoke_from_spec(request, renderer);
         }
-        let (system_prompt_path, cleanup_temp) = if let Some(ref path) = request.system_prompt_path
-        {
-            (Some(path.clone()), false)
-        } else if let Some(ref sys_prompt) = request.system_prompt {
-            let tmp = std::env::temp_dir().join(format!(
-                "tddy-sys-{}-{}.txt",
-                std::process::id(),
-                std::time::SystemTime::now()
-                    .duration_since(std::time::UNIX_EPOCH)
-                    .unwrap()
-                    .as_nanos()
-            ));
-            std::fs::write(&tmp, sys_prompt).map_err(|e| {
-                BackendError::InvocationFailed(format!("failed to write system prompt file: {}", e))
-            })?;
-            (Some(tmp), true)
-        } else {
-            (None, false)
-        };
-
-        struct CleanupGuard(PathBuf);
-        impl Drop for CleanupGuard {
-            fn drop(&mut self) {
-                let _ = std::fs::remove_file(&self.0);
-            }
-        }
-        let _cleanup = if cleanup_temp {
-            system_prompt_path.as_ref().map(|p| CleanupGuard(p.clone()))
-        } else {
-            None
-        };
+        let (system_prompt_path, _system_prompt_file) = system_prompt_file(&request)?;
 
         let mut config = goal_to_claude_config(&request);
 
         // MCP + permission-prompt-tool for every goal: tool approvals must route through
         // tddy-tools (same as Plan) whether or not `TDDY_SOCKET` is set — without MCP, non-plan
         // goals fall back to Claude Code UI-only prompts and break headless workflows.
-        let _mcp_cleanup: Option<CleanupGuard> = if let Some(mcp_path) =
-            create_mcp_config_temp_file()
-        {
-            config.permission_prompt_tool = Some("mcp__tddy-tools__approval_prompt".to_string());
-            config.mcp_config_path = Some(mcp_path.clone());
-            Some(CleanupGuard(mcp_path))
-        } else {
-            None
-        };
+        let _mcp_cleanup: Option<CleanupGuard> =
+            if let Some(mcp_path) = create_mcp_config_temp_file() {
+                config.permission_prompt_tool = Some(APPROVAL_PROMPT_TOOL.to_string());
+                config.mcp_config_path = Some(mcp_path.clone());
+                Some(CleanupGuard(mcp_path))
+            } else {
+                None
+            };
 
         let mut args = build_claude_args(&request, &config, system_prompt_path.as_deref());
         if let Some(ref route) = self.provider_route {
             splice_route_args(&mut args, route, "--model");
         }
-        let mut cmd = Command::new(&self.binary_path);
+        let adapter = ClaudeStreamJson;
+        self.run_child(
+            &request,
+            ChildLaunch {
+                program: &self.binary_path,
+                argv: &args,
+                env: &[],
+                adapter: &adapter,
+                exit_ok_if_structured: request.hints.claude_nonzero_exit_ok_if_structured_response,
+                system_prompt_path: system_prompt_path.as_deref(),
+            },
+        )
+    }
+
+    /// The spawn and read every Claude invocation shares: `launch`'s program with its argv and
+    /// environment on top of the backend's own, its stdout read through `launch.adapter` into the
+    /// response, and its exit judged by that adapter.
+    fn run_child(
+        &self,
+        request: &InvokeRequest,
+        launch: ChildLaunch<'_>,
+    ) -> Result<InvokeResponse, BackendError> {
+        let mut cmd = Command::new(launch.program);
         if let Some(ref wd) = request.working_dir {
             cmd.current_dir(wd);
         }
-        for arg in &args {
-            cmd.arg(arg);
-        }
+        cmd.args(launch.argv);
 
-        let resolved = which_binary(&self.binary_path);
+        let resolved = which_binary(launch.program);
         let cwd_str = request
             .working_dir
             .as_ref()
@@ -413,11 +513,11 @@ impl ClaudeCodeBackend {
                     .map(|p| p.display().to_string())
                     .unwrap_or_else(|_| "(unknown)".into())
             });
-        let cmd_str = super::format_command_for_log(&self.binary_path, &args, 200);
+        let cmd_str = super::format_command_for_log(launch.program, launch.argv, 200);
         log::debug!("[tddy-coder] Claude backend command: {}", cmd_str);
         log::debug!(
             "[tddy-coder] Claude backend spawning: {} (resolved: {})",
-            self.binary_path.display(),
+            launch.program.display(),
             resolved
         );
         log::debug!("[tddy-coder] cwd: {}", cwd_str);
@@ -463,6 +563,7 @@ impl ClaudeCodeBackend {
                 cmd.env(key, value);
             }
         }
+        cmd.envs(launch.env.iter().map(|(key, value)| (key, value)));
         cmd.stdout(Stdio::piped());
         cmd.stderr(Stdio::piped());
         cmd.stdin(if request.inherit_stdin {
@@ -473,7 +574,7 @@ impl ClaudeCodeBackend {
 
         let mut child = cmd.spawn().map_err(|e| {
             if e.kind() == std::io::ErrorKind::NotFound {
-                BackendError::BinaryNotFound(self.binary_path.to_string_lossy().to_string())
+                BackendError::BinaryNotFound(launch.program.to_string_lossy().to_string())
             } else {
                 BackendError::InvocationFailed(e.to_string())
             }
@@ -505,10 +606,6 @@ impl ClaudeCodeBackend {
                 }
             }
         };
-
-        // A resumed `claude` invocation only emits its own new turn's stdout, not a replay of
-        // prior conversation history, so there is nothing to skip when echoing live output.
-        let skip_until_line = 0;
 
         let agent_output = request.agent_output;
         let agent_output_sink = request.agent_output_sink.clone();
@@ -547,8 +644,8 @@ impl ClaudeCodeBackend {
         };
 
         if let Some(ref mut f) = conv_file {
-            let sys_prompt_content = system_prompt_path
-                .as_ref()
+            let sys_prompt_content = launch
+                .system_prompt_path
                 .and_then(|p| std::fs::read_to_string(p).ok())
                 .or_else(|| request.system_prompt.clone());
             let (session_id, is_resume) = request
@@ -586,24 +683,26 @@ impl ClaudeCodeBackend {
             }
         };
 
-        let reader = BufReader::new(stdout_handle);
-        let stream_result = stream::process_ndjson_stream(
-            reader,
-            &mut on_progress,
-            &mut on_raw_output,
-            if request.debug {
-                Some(&mut on_debug_line)
-            } else {
-                None
+        // A resumed `claude` invocation only emits its own new turn's stdout, not a replay of prior
+        // conversation history, so the adapter reads the whole stream: there is nothing to skip.
+        let mut reader = BufReader::new(stdout_handle);
+        let stream_result = launch.adapter.read_stream(
+            &mut reader,
+            StreamSinks {
+                on_progress: &mut on_progress,
+                on_raw_output: &mut on_raw_output,
+                on_debug_line: if request.debug {
+                    Some(&mut on_debug_line)
+                } else {
+                    None
+                },
+                on_conversation_line: if request.conversation_output_path.is_some() {
+                    Some(&mut on_conversation_line)
+                } else {
+                    None
+                },
             },
-            if request.conversation_output_path.is_some() {
-                Some(&mut on_conversation_line)
-            } else {
-                None
-            },
-            skip_until_line,
-        )
-        .map_err(|e| BackendError::InvocationFailed(format!("stream parse error: {}", e)))?;
+        )?;
 
         let stderr_buf = stderr_thread
             .and_then(|j| j.join().ok())
@@ -622,12 +721,12 @@ impl ClaudeCodeBackend {
         );
 
         if exit_code != 0 {
-            // When plan goal produced valid structured output, treat exit 1 as non-fatal.
-            // CLI may exit 1 after session/ExitPlanMode issues despite successful output.
-            let has_structured_despite_nonzero =
-                request.hints.claude_nonzero_exit_ok_if_structured_response
-                    && stream_result.result_text.contains("<structured-response");
-            if has_structured_despite_nonzero {
+            // A structured result makes a non-zero exit a success where the agent allows it: the CLI may
+            // exit 1 after session/ExitPlanMode issues despite successful output.
+            if launch
+                .adapter
+                .exit_ok(exit_code, &stream_result, launch.exit_ok_if_structured)
+            {
                 log::debug!(
                     "[tddy-coder] CLI exited with code {} but plan output present; treating as success",
                     exit_code

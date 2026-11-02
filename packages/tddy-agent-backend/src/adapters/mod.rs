@@ -90,8 +90,9 @@ impl AdapterRegistry {
     /// Every adapter this build registers: [`CLAUDE_STREAM_JSON`] ([`ClaudeStreamJson`]).
     /// `#agent-tools 9/12` adds Cursor's, Codex's and Oz's.
     pub fn builtin() -> Self {
-        // TODO(claude-headless): implement — register `ClaudeStreamJson` under its `name()`.
-        todo!("claude-headless: AdapterRegistry::builtin")
+        let claude: Arc<dyn StreamAdapter> = Arc::new(ClaudeStreamJson);
+        let adapters = BTreeMap::from([(claude.name().to_string(), claude)]);
+        Self { adapters }
     }
 
     /// The adapter registered as `name`.

@@ -5,7 +5,7 @@ use std::io::BufRead;
 
 use crate::backend::headless_driver::HeadlessHarness;
 use crate::error::BackendError;
-use crate::stream::StreamResult;
+use crate::stream::{self, StreamResult};
 
 use super::{StreamAdapter, StreamSinks, CLAUDE_STREAM_JSON};
 
@@ -27,28 +27,24 @@ impl StreamAdapter for ClaudeStreamJson {
         stdout: &mut dyn BufRead,
         sinks: StreamSinks<'_>,
     ) -> Result<StreamResult, BackendError> {
-        // TODO(claude-headless): implement — `stream::process_ndjson_stream(stdout, sinks.on_progress,
-        // sinks.on_raw_output, sinks.on_debug_line, sinks.on_conversation_line, 0)`, its error as
-        // `BackendError::InvocationFailed("stream parse error: …")` as `invoke_sync` maps it today.
-        let _ = (stdout, sinks);
-        todo!("claude-headless: ClaudeStreamJson::read_stream")
+        stream::process_ndjson_stream(
+            stdout,
+            sinks.on_progress,
+            sinks.on_raw_output,
+            sinks.on_debug_line,
+            sinks.on_conversation_line,
+            0,
+        )
+        .map_err(|e| BackendError::InvocationFailed(format!("stream parse error: {e}")))
     }
 
     fn exit_ok(&self, exit_code: i32, stream: &StreamResult, exit_ok_if_structured: bool) -> bool {
-        // TODO(claude-headless): implement — zero, or `exit_ok_if_structured` and the result text
-        // carries `STRUCTURED_RESPONSE_MARKER`.
-        let _ = (
-            exit_code,
-            stream,
-            exit_ok_if_structured,
-            STRUCTURED_RESPONSE_MARKER,
-        );
-        todo!("claude-headless: ClaudeStreamJson::exit_ok")
+        exit_code == 0
+            || (exit_ok_if_structured && stream.result_text.contains(STRUCTURED_RESPONSE_MARKER))
     }
 
     fn turn_format(&self) -> Option<HeadlessHarness> {
-        // TODO(claude-headless): implement — the driver's stream-json transcript for Claude.
-        todo!("claude-headless: ClaudeStreamJson::turn_format")
+        Some(HeadlessHarness::Claude)
     }
 }
 

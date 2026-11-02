@@ -19,9 +19,9 @@ use tddy_core::workflow::graph::ExecutionStatus;
 use tddy_core::{
     backend_from_label, backend_selection_question, default_model_for_agent, get_session_for_tag,
     output::SESSIONS_SUBDIR, preselected_index_for_agent, read_changeset, read_session_metadata,
-    AnyBackend, ClaudeAcpBackend, ClaudeCodeBackend, CodexAcpBackend, CodexBackend, CodingBackend,
-    CursorBackend, GoalId, OpenCodeAcpBackend, PendingWorkflowStart, ProgressEvent, SharedBackend,
-    StubBackend, WorkflowEngine, WorkflowRecipe,
+    AnyBackend, ClaudeAcpBackend, CodexAcpBackend, CodexBackend, CodingBackend, CursorBackend,
+    GoalId, OpenCodeAcpBackend, PendingWorkflowStart, ProgressEvent, SharedBackend, StubBackend,
+    WorkflowEngine, WorkflowRecipe,
 };
 use tddy_discovery;
 use tddy_workflow_recipes::{parse_evaluate_response, parse_refactor_response};
@@ -287,6 +287,7 @@ fn resolve_specialized_agent_defs(
 /// The backend `args` runs for `agent`, with the specialized defs and the provider route `args`
 /// names applied by [`create_backend`].
 fn create_backend_for_args(args: &Args, agent: &str) -> anyhow::Result<SharedBackend> {
+    let tools_dir = resolve_tddy_data_dir(args).join("tools");
     create_backend(
         agent,
         args.cursor_agent_path.as_deref(),
@@ -295,6 +296,7 @@ fn create_backend_for_args(args: &Args, agent: &str) -> anyhow::Result<SharedBac
         args.opencode_cli_path.as_deref(),
         None,
         None,
+        &tools_dir,
         &resolve_specialized_agent_defs(args)?,
         load_provider_route(args.provider_route_path.as_deref())?,
     )
@@ -2527,6 +2529,8 @@ fn create_backend(
     opencode_cli_path: Option<&Path>,
     _socket_path: Option<&Path>,
     _working_dir: Option<&Path>,
+    // `<tddyhome>/tools`: the coding agent declarations `claude` is rendered from.
+    tools_dir: &Path,
     // Resolved specialized-agent defs (<tddyhome>/agents/*.yaml, `--agent-def-path` — see
     // docs/ft/coder/specialized-subagents.md).
     specialized_agent_defs: &[tddy_discovery::agent_def::SpecializedAgentDef],
@@ -2591,9 +2595,15 @@ fn create_backend(
             AnyBackend::OpenCode(OpenCodeAcpBackend::with_agent_path(path))
         }
         "stub" => AnyBackend::Stub(StubBackend::new()),
-        // TODO(claude-headless): build it with `crate::claude_from_spec::claude_backend_from_spec`
-        // over `<tddyhome>/tools` and `ProcessToolHost`, so the spec is the only path.
-        "claude" => AnyBackend::Claude(ClaudeCodeBackend::new().with_progress(on_progress)),
+        // Rendered from `claude.yaml`'s headless section on this host's tools, so the spec is the
+        // only path a `claude` workflow takes.
+        "claude" => {
+            let claude = crate::claude_from_spec::claude_backend_from_spec(
+                tools_dir,
+                Arc::new(tddy_actions::tool::ProcessToolHost),
+            )?;
+            AnyBackend::Claude(claude.with_progress(on_progress))
+        }
         unknown => {
             let known = specialized_agent_defs
                 .iter()
@@ -2717,6 +2727,7 @@ mod create_backend_specialized_agent_tests {
             None,
             None,
             None,
+            std::path::Path::new("/nonexistent/tools"),
             std::slice::from_ref(&def),
             None,
         )
@@ -2768,6 +2779,7 @@ mod create_backend_specialized_agent_tests {
             None,
             None,
             None,
+            std::path::Path::new("/nonexistent/tools"),
             std::slice::from_ref(&def),
             None,
         )
@@ -2818,6 +2830,7 @@ mod create_backend_specialized_agent_tests {
             None,
             None,
             None,
+            std::path::Path::new("/nonexistent/tools"),
             std::slice::from_ref(&def),
             None,
         )
@@ -3003,6 +3016,7 @@ mod agent_def_handover_tests {
             None,
             None,
             None,
+            std::path::Path::new("/nonexistent/tools"),
             &defs,
             None,
         )
@@ -3023,8 +3037,19 @@ mod agent_def_handover_tests {
         let defs: Vec<SpecializedAgentDef> = Vec::new();
 
         // When
-        let backend = create_backend("claude", None, None, None, None, None, None, &defs, None)
-            .expect("'claude' names a coding backend");
+        let backend = create_backend(
+            "claude",
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            std::path::Path::new("/nonexistent/tools"),
+            &defs,
+            None,
+        )
+        .expect("'claude' names a coding backend");
 
         // Then
         assert_eq!(backend.name(), "claude");
@@ -3356,6 +3381,7 @@ fn run_full_workflow_tui(
         let codex_path_for_factory = args.codex_cli_path.clone();
         let codex_acp_path_for_factory = args.codex_acp_cli_path.clone();
         let opencode_path_for_factory = args.opencode_cli_path.clone();
+        let tools_dir_for_factory = resolve_tddy_data_dir(args).join("tools");
         let specialized_agent_defs_for_factory = resolve_specialized_agent_defs(args)?;
         let provider_route_for_factory = load_provider_route(args.provider_route_path.as_deref())?;
         let mut p = presenter.lock().unwrap();
@@ -3370,6 +3396,7 @@ fn run_full_workflow_tui(
                     opencode_path_for_factory.as_deref(),
                     socket_path_for_factory.as_deref(),
                     None,
+                    &tools_dir_for_factory,
                     &specialized_agent_defs_for_factory,
                     provider_route_for_factory.clone(),
                 )

@@ -83,7 +83,6 @@ impl AFakeAgent {
 fn a_claude_stream(session: &str, result: &str) -> Vec<serde_json::Value> {
     vec![
         serde_json::json!({ "type": "system", "subtype": "init", "session_id": session }),
-        serde_json::json!({ "type": "assistant", "message": { "content": [{ "type": "text", "text": result }] }, "session_id": session }),
         serde_json::json!({ "type": "result", "subtype": "success", "result": result, "session_id": session }),
     ]
 }

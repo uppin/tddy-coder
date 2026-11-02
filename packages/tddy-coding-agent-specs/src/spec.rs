@@ -5,8 +5,10 @@ use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
 use tddy_actions::tool::{ArgvItem, ExtensionOwner, RunSection, ToolDef, Transport};
+use tddy_agent_backend::adapters::AdapterRegistry;
 use thiserror::Error;
 
+use crate::headless::validate_headless;
 use crate::slots::hooks;
 
 /// The `extensions:` key this crate owns.
@@ -24,14 +26,15 @@ impl ExtensionOwner for CodingAgentExtension {
     }
 
     fn validate(&self, tool_id: &str, section: &serde_yaml::Value) -> Result<(), String> {
-        // TODO(claude-headless): refuse a `headless` section whose adapter is unregistered —
-        // `crate::headless::validate_headless(section, &AdapterRegistry::builtin())`.
-        parse_section(tool_id, section)
-            .map(|_| ())
-            .map_err(|error| match error {
-                SpecError::Invalid { message, .. } => message,
-                other => other.to_string(),
-            })
+        let agent = parse_section(tool_id, section).map_err(|error| match error {
+            SpecError::Invalid { message, .. } => message,
+            other => other.to_string(),
+        })?;
+        if let Some(headless) = &agent.headless {
+            validate_headless(tool_id, headless, &AdapterRegistry::builtin())
+                .map_err(|error| error.to_string())?;
+        }
+        Ok(())
     }
 }
 

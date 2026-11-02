@@ -7,7 +7,7 @@
 
 use std::collections::BTreeMap;
 use std::fmt;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use crate::backend::SessionMode;
@@ -108,4 +108,30 @@ pub trait HeadlessRenderer: Send + Sync + fmt::Debug {
     /// `params`, and the lists `slots` and `route_args`. The MCP slot is `headless.mcp` when the
     /// spec sets one, else the agent's `coding_agent.mcp`.
     fn render(&self, turn: &HeadlessTurn) -> Result<HeadlessInvocation, BackendError>;
+}
+
+/// The mode a rendered file is written with: an MCP registration can carry the agent's tool
+/// credential, so only its owner may read it.
+const OWNER_ONLY_FILE: u32 = 0o600;
+
+/// Writes a turn's rendered `files` owner-only, creating their directories, before the agent that
+/// reads them is spawned.
+pub(crate) fn write_rendered_files(files: &[(PathBuf, Vec<u8>)]) -> Result<(), BackendError> {
+    for (path, contents) in files {
+        crate::atomic_file::write_atomic_with_mode(path, contents, OWNER_ONLY_FILE).map_err(
+            |e| BackendError::InvocationFailed(format!("could not write {}: {e}", path.display())),
+        )?;
+    }
+    Ok(())
+}
+
+/// A turn's working directory: `cwd` when the request names one, else the directory this process
+/// runs in, which the agent inherits.
+pub(crate) fn turn_workdir(cwd: Option<&Path>) -> Result<PathBuf, BackendError> {
+    match cwd {
+        Some(cwd) => Ok(cwd.to_path_buf()),
+        None => std::env::current_dir().map_err(|e| {
+            BackendError::InvocationFailed(format!("the working directory cannot be read: {e}"))
+        }),
+    }
 }

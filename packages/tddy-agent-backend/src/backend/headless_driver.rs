@@ -14,9 +14,9 @@ mod oz_ndjson;
 mod stream_json;
 mod transcript;
 
-use std::collections::VecDeque;
+use std::collections::{BTreeMap, VecDeque};
 use std::io;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::time::Duration;
@@ -26,10 +26,14 @@ use tokio::process::{Child, ChildStderr, Command};
 use tokio::sync::Notify;
 use tokio::task::JoinHandle;
 
+use crate::adapters::headless::{
+    turn_workdir, write_rendered_files, HeadlessMcpServer, HeadlessTurn,
+};
 use crate::adapters::HeadlessRenderer;
 use crate::error::BackendError;
 
-use super::acp_driver::{AcpDriver, AcpTurnEnd, AcpUpdateSink};
+use super::acp_driver::{AcpDriver, AcpTurnEnd, AcpUpdateSink, McpServerSpec};
+use super::SessionMode;
 use transcript::{Ending, Finished, Transcript};
 
 /// How long a failed turn waits for its stderr to close before it reads the tail it kept.
@@ -98,8 +102,10 @@ pub struct HeadlessCommand {
     /// The agent's declaration each turn's argv is rendered from (`coding_agent.headless`), and the
     /// adapter its stream is read through. `None` builds the argv by hand (`argv::turn_argv`).
     ///
-    /// TODO(claude-headless): green makes this the Claude arm's only path and deletes
-    /// `argv::claude()`; Cursor, Codex and Oz follow in `#agent-tools 9/12`.
+    /// TODO(claude-headless): a Claude conversation launched with coding agents installed passes one,
+    /// but `argv::claude()` stays: `HeadlessDriver::new(Claude, command)` without a renderer is still
+    /// driven by `tests/headless_driver_acceptance.rs` and by the argv unit tests. Deleting it needs
+    /// those moved to a renderer first. Cursor, Codex and Oz follow in `#agent-tools 9/12`.
     pub renderer: Option<Arc<dyn HeadlessRenderer>>,
     /// With a [`Self::renderer`]: where each turn's rendered registration files (the MCP config)
     /// are written — the conversation's own directory, never the worktree, since the registration
@@ -178,11 +184,24 @@ impl HeadlessDriver {
             .unwrap_or_else(PoisonError::into_inner) = Some(id);
     }
 
-    fn spawn(&self, argv: &[String]) -> Result<Child, BackendError> {
-        let mut command = Command::new(&self.command.program);
+    /// Spawns `program` with `argv`, in the command's directory, with its environment and then `env`
+    /// on top of it.
+    fn spawn(
+        &self,
+        program: &Path,
+        argv: &[String],
+        env: &[(String, String)],
+    ) -> Result<Child, BackendError> {
+        let mut command = Command::new(program);
         command
             .args(argv)
-            .envs(self.command.env.iter().map(|(key, value)| (key, value)))
+            .envs(
+                self.command
+                    .env
+                    .iter()
+                    .chain(env)
+                    .map(|(key, value)| (key, value)),
+            )
             .stdin(Stdio::null())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
@@ -194,7 +213,7 @@ impl HeadlessDriver {
             command.current_dir(cwd);
         }
         command.spawn().map_err(|e| {
-            let program = self.command.program.display();
+            let program = program.display();
             if e.kind() == io::ErrorKind::NotFound {
                 BackendError::BinaryNotFound(format!("{program}: {e}"))
             } else {
@@ -217,24 +236,36 @@ impl HeadlessDriver {
                 .await;
         }
         let argv = argv::turn_argv(self.harness, &self.command, resume.as_deref(), prompt);
-        let mut child = self.spawn(&argv)?;
-        let pgid = child.id();
-        self.set_pgid(pgid);
+        let child = self.spawn(&self.command.program, &argv, &[])?;
         log::debug!(
             "[headless] {} turn started, resuming: {}",
             self.harness.id(),
             resume.is_some()
         );
+        self.read_turn(self.harness, child, updates, cancel).await
+    }
+
+    /// Maps a spawned turn's stdout as it arrives, through the transcript `format` names, and ends the
+    /// turn on exit or cancel.
+    async fn read_turn(
+        &self,
+        format: HeadlessHarness,
+        mut child: Child,
+        updates: Option<AcpUpdateSink>,
+        cancel: Arc<Notify>,
+    ) -> Result<AcpTurnEnd, BackendError> {
+        let pgid = child.id();
+        self.set_pgid(pgid);
 
         let stdout = child.stdout.take().ok_or_else(|| {
-            BackendError::InvocationFailed(format!("{} turn has no stdout", self.harness.id()))
+            BackendError::InvocationFailed(format!("{} turn has no stdout", format.id()))
         })?;
         let stderr_reader = child
             .stderr
             .take()
             .map(|stderr| tokio::spawn(drain_stderr(stderr)));
         let mut lines = BufReader::new(stdout).lines();
-        let mut transcript = Transcript::new(self.harness, updates);
+        let mut transcript = Transcript::new(format, updates);
 
         let mut cancelled = loop {
             tokio::select! {
@@ -246,7 +277,7 @@ impl HeadlessDriver {
                     Err(e) => {
                         return Err(BackendError::InvocationFailed(format!(
                             "reading {} output: {e}",
-                            self.harness.id()
+                            format.id()
                         )));
                     }
                 },
@@ -266,7 +297,7 @@ impl HeadlessDriver {
         }
         // Reaps the child (or returns its cached status when it has already exited).
         let status = child.wait().await.map_err(|e| {
-            BackendError::InvocationFailed(format!("waiting for {} turn: {e}", self.harness.id()))
+            BackendError::InvocationFailed(format!("waiting for {} turn: {e}", format.id()))
         })?;
         self.set_pgid(None);
 
@@ -305,10 +336,57 @@ impl HeadlessDriver {
         updates: Option<AcpUpdateSink>,
         cancel: Arc<Notify>,
     ) -> Result<AcpTurnEnd, BackendError> {
-        // TODO(claude-headless): implement — `renderer.render(&HeadlessTurn { … })`, then the loop
-        // `run_turn` runs over `Transcript::new(adapter.turn_format(), updates)`.
-        let _ = (renderer, resume, prompt, updates, cancel);
-        todo!("claude-headless: HeadlessDriver::run_rendered_turn")
+        let scratch_dir = self.command.scratch_dir.clone().ok_or_else(|| {
+            BackendError::InvocationFailed(format!(
+                "a rendered {} turn writes its registration files to a scratch directory, and the conversation names none",
+                self.harness.id()
+            ))
+        })?;
+        let turn = HeadlessTurn {
+            prompt: prompt.to_string(),
+            model: self.command.model.clone(),
+            session: resume.map(|id| SessionMode::Resume(id.to_string())),
+            permission_mode: None,
+            append_system_prompt_file: None,
+            allowed_tools: Vec::new(),
+            denied_tools: self.command.disallowed_tools.clone(),
+            permission_prompt_tool: self.command.permission_prompt_tool.clone(),
+            mcp_server: self
+                .command
+                .mcp_server
+                .as_ref()
+                .map(headless_server)
+                .or_else(|| renderer.tool_server()),
+            workdir: turn_workdir(self.command.cwd.as_deref())?,
+            scratch_dir,
+            params: BTreeMap::new(),
+            route_args: Vec::new(),
+        };
+        let invocation = renderer.render(&turn)?;
+        let format = invocation.adapter.turn_format().ok_or_else(|| {
+            BackendError::InvocationFailed(format!(
+                "the {} adapter reads no conversation transcript",
+                invocation.adapter.name()
+            ))
+        })?;
+        write_rendered_files(&invocation.files)?;
+        log::debug!(
+            "[headless] {} turn started, resuming: {}",
+            format.id(),
+            resume.is_some()
+        );
+        let child = self.spawn(&invocation.program, &invocation.argv, &invocation.env)?;
+        self.read_turn(format, child, updates, cancel).await
+    }
+}
+
+/// `server` as the port's MCP server: its name, program, arguments and environment.
+fn headless_server(server: &McpServerSpec) -> HeadlessMcpServer {
+    HeadlessMcpServer {
+        name: server.name.clone(),
+        command: server.command.clone(),
+        args: server.args.clone(),
+        env: server.env.iter().cloned().collect(),
     }
 }
 

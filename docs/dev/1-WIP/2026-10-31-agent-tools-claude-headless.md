@@ -197,6 +197,13 @@ Real dependency edges, as opposed to the branch line:
 - The slot renderer orders deny flags before `--permission-prompt-tool`/`--mcp-config`; `argv.rs::claude()` puts `--disallowedTools` last. Byte-identity holds only because a headless Claude conversation is never managed (no deny flags today). If that changes, the driver's order changes with it.
 - Owner-only (0600) mode for the driver's MCP file is now the consumer's job when it writes `HeadlessInvocation::files`; the acceptance test pins it.
 - Deletions green makes (TODO-marked, need approval as deletions of code, not files): `build_claude_args`, `create_mcp_config_temp_file`, `headless_driver/argv.rs::claude()`, the launcher's hand-built Claude `mcp_servers_wrapped` registration.
+
+### From /green (TDD green phase)
+
+- **Approved fixture edit (developer decision, 2026-11-02).** `packages/tddy-agent-backend/tests/headless_renderer_port.rs` `a_claude_stream` no longer emits an assistant text block duplicating the `result` event. The fixture emits `system/init` and `result` only. The parser is unchanged: it still appends assistant text and result text, pinned by `claude_stream_json` unit tests and the positive control. The two assertions (`:243`, `:373`) are unchanged. `headless_renderer_port` is 8/8.
+- **Deferred deletions, not made by green.** `build_claude_args` (`pub`, called by `packages/tddy-integration-tests/tests/backend_args.rs`), `create_mcp_config_temp_file` (renderer-less `invoke_sync` via `ClaudeCodeBackend::with_path`), `headless_driver/argv.rs::claude()` (renderer-less driver and its tests), and the launcher's hand-built Claude `mcp_servers_wrapped` registration (kept for launchers without coding agents). Each needs its callers or tests moved first.
+- **Implementer decisions to confirm.** (1) `claude.yaml` headless gains an `mcp` file slot without `strict_flag`, and a trailing `splice: route_args`. (2) `create_backend` gains `tools_dir`; five test call sites in `run.rs` `mod tests` pass it. (3) The spec path refuses a turn with no `session_dir` or `scratch_dir`. (4) `for_daemon`'s coding-agents load failure refuses headless claude launches through `coding_agents_error`; there is no fallback. (5) `tddy-coding-agent-specs` moves from dev-dependencies to dependencies in `tddy-session-lifecycle`. (6) Rendered files are written 0600.
+
 ### From /validate-changes
 ### From /validate-tests
 ### From /validate-prod-ready
