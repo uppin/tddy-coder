@@ -1,8 +1,8 @@
 # Inactive Session Activities — what a dormant session shows before it is resumed
 
-**Component:** `SessionMainPane`, `SessionActivitiesPane`, `SessionInspectorDrawer`
+**Component:** `SessionMainPane`, `DormantSessionRuntime`, `SessionActivitiesPane`, `SessionInspectorDrawer`
 **Route:** `#/sessions/:sessionId`
-**Updated:** 2026-08-02
+**Updated:** 2026-11-02
 **Status:** Shipped
 
 ## Overview
@@ -11,7 +11,7 @@ A session the operator selects may have no live agent behind it — the process 
 restarted, or the work simply finished. Such a session is **inactive**: `SessionEntry.is_active` is
 false and no `daemon-<instanceId>-<sessionId>` participant is present in the common room.
 
-An inactive session has no terminal to show, but it does have a **recorded history**: the daemon
+An inactive session has no agent terminal to show, but it does have a **recorded history**: the daemon
 persists every ACP transcript frame and tool call to disk (`acp-transcript.jsonl`,
 `agent-activity.jsonl`) and replays them over `activity.ActivityService.StreamAcpReplay` without
 needing LiveKit or a live process. That recording — not an empty pane, and not the Inspector — is
@@ -20,7 +20,9 @@ bring it back.
 
 An inactive session therefore presents:
 
-- **Activities as the default main-pane view** — the read-only ACP transcript, full pane.
+- **Activities as the Agent tab** — the read-only ACP transcript, in the **Agent** tab of the
+  session's tab strip. The strip's other tabs — shells, CLI harnesses, agent conversations — work on
+  a stopped session too; see [Session terminal tabs § Stopped sessions](session-terminal-tabs.md#stopped-sessions).
 - **A `Resume` button in the pane's top bar** — always in the same place, for every inactive session.
 - **The Inspector closed** — reachable on demand via the existing `Inspector` toggle, never opened
   for the operator.
@@ -35,14 +37,14 @@ The main pane's base view is chosen by session liveness, on top of the existing 
 |---|---|
 | `recipe == "pr-stack"` | `PrStackScreen` (planned PRs) — regardless of liveness |
 | tool session, `recipe != ""` | `WorkflowChatScreen` — regardless of liveness |
-| any other session, **inactive** | **Activities view** |
+| any other session, **inactive** | **Tab strip** with the Activities view in its Agent tab |
 | any other session, active | Terminal (mounted runtimes) |
 
 Workflow views own their own chrome and their own content, and both remain meaningful when the
 session is dormant — `PrStackScreen` renders the planned-PR stack from persisted state, and
 `WorkflowChatScreen` is already a transcript. Neither is replaced. The Activities view takes over
-exactly one surface: the terminal base view, which for an inactive session was the placeholder text
-*"Select Resume to reconnect"*.
+exactly one surface: the terminal base view's Agent tab, where an active session shows its agent's
+terminal.
 
 ### Activities view
 
@@ -69,8 +71,10 @@ exactly one surface: the terminal base view, which for an inactive session was t
   routed to the session's owning daemon.
 - The Inspector's own Resume button is unchanged and stays where it is — two entry points, one
   handler.
-- Once the resumed session becomes active, the pane returns to the terminal on its own: the base
-  view is derived from liveness, so no view state has to be reset.
+- Once the resumed session becomes active, the pane returns to the live terminal strip on its own:
+  the base view is derived from liveness, so no view state has to be reset. Terminal tabs opened
+  while the session was stopped are listed by the live strip, and open agent conversations carry
+  over uncancelled.
 
 ### Inspector
 
@@ -107,7 +111,7 @@ where it remains the only way to read the transcript.
 - **Session becomes active while being read** (someone resumes it elsewhere) — liveness flips from
   the common-room participants, the base view swaps to the terminal, and `Resume` disappears.
 - **Runtimes stay mounted** — a previously attached runtime for the inactive session remains
-  mounted and unfocused behind the Activities view, so background sessions keep streaming and a
+  mounted and unfocused behind the stopped session's strip, so background sessions keep streaming and a
   later resume is instant. No claim-terminal overlay renders for it.
 - **Agent died mid-elicitation** — a session carrying a stale `pending_elicitation` with
   `is_active = false` counts as **inactive**: it gets the Activities view and the Resume button like

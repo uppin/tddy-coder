@@ -7,6 +7,7 @@
 //! implemented once here rather than a branch repeated per handler, which is what the four terminal
 //! RPCs in [`super::rpc_service`] used to carry.
 
+use std::path::PathBuf;
 use std::sync::Arc;
 
 use async_trait::async_trait;
@@ -22,6 +23,8 @@ use super::DaemonSessionHost;
 use crate::cli_session_manager::CliSessionManager;
 use crate::config::DaemonConfig;
 use crate::terminal_session_adapter::DaemonTerminalSessionStore;
+
+mod recorded_worktree;
 
 impl DaemonSessionHost {
     /// Every terminal this daemon serves, behind one
@@ -103,6 +106,7 @@ impl DaemonSessionHost {
             roster: Arc::new(CliManagerTerminalRoster::new(
                 Arc::clone(&self.claude_cli_manager),
                 self.config.clone(),
+                self.tddy_data_dir.clone(),
             )),
             initial_frame_bytes: tddy_terminal_rpc::bridge::DEFAULT_INITIAL_FRAME_BYTES,
         }
@@ -151,25 +155,29 @@ impl TerminalControl for CliManagerTerminalControl {
 struct CliManagerTerminalRoster {
     manager: Arc<CliSessionManager>,
     config: DaemonConfig,
+    /// Where session directories live — a stopped session's worktree is read from its record.
+    tddy_data_dir: PathBuf,
 }
 
 impl CliManagerTerminalRoster {
-    fn new(manager: Arc<CliSessionManager>, config: DaemonConfig) -> Self {
-        CliManagerTerminalRoster { manager, config }
+    fn new(manager: Arc<CliSessionManager>, config: DaemonConfig, tddy_data_dir: PathBuf) -> Self {
+        CliManagerTerminalRoster {
+            manager,
+            config,
+            tddy_data_dir,
+        }
     }
 }
 
 #[async_trait]
 impl TerminalRoster for CliManagerTerminalRoster {
-    /// A started terminal runs in the same worktree the session's agent does, which is why the
-    /// main terminal has to exist first: it is where that path is recorded.
+    /// A started terminal runs in the same worktree the session's agent does: the live main
+    /// terminal's when the agent runs, and the one the session's record names when it is stopped.
     async fn start(&self, session_id: &str, launch: &TerminalLaunch) -> Result<String, Status> {
-        let main = self
-            .manager
-            .get(session_id)
-            .await
-            .ok_or_else(|| Status::failed_precondition("session has no running terminal"))?;
-        let worktree = main.worktree_path.clone();
+        let worktree = match self.manager.get(session_id).await {
+            Some(main) => main.worktree_path.clone(),
+            None => recorded_worktree::recorded_worktree(&self.tddy_data_dir, session_id)?,
+        };
         let handle = match &launch.kind {
             TerminalKind::Bash => self
                 .manager

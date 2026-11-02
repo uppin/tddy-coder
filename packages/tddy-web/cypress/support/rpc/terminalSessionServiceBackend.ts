@@ -46,6 +46,10 @@ export interface TerminalSessionServiceScenario {
    *  The first `n` opened streams drop; every later one stays open, so a test can drop a feed once
    *  and still observe what the screen does to recover. Default 0 (no stream ever ends). */
   droppedTerminalStreams?: number;
+  /** The screen id of another screen that already holds every session's control lease: an
+   *  unstolen `ClaimTerminalControl` is refused naming it, and the lease feed reports it as the
+   *  holder. A steal (`steal: true`) is granted. Default: nobody holds it, so the first claim wins. */
+  leaseHeldBy?: string;
   /** Older history chunks returned by `GetTerminalHistory`, in the order they should be yielded
    *  across successive calls (one chunk per call). Each chunk's `startOffset`/`endOffset`/`atOldest`
    *  is used verbatim. The backend pops one chunk per `getTerminalHistory` call. */
@@ -113,6 +117,8 @@ export function aTerminalSessionServiceFake(
   // nobody has claimed accepts input under any token (an empty one included), and a claimed one
   // accepts it only under the holder's token.
   const leaseHolders = new Map<string, string>();
+  // Sessions whose lease was stolen from `scenario.leaseHeldBy`, and by which screen.
+  const stolenBy = new Map<string, string>();
   const mayWrite = (sessionId: string, controlToken: string): boolean => {
     const holder = leaseHolders.get(sessionId);
     return holder === undefined || holder === controlToken;
@@ -121,7 +127,14 @@ export function aTerminalSessionServiceFake(
   const handlers: Partial<ServiceImpl<typeof TerminalSessionService>> = {
     claimTerminalControl: async (req) => {
       claimedControlSessionIds.push(req.sessionId);
+      if (scenario.leaseHeldBy !== undefined && !req.steal) {
+        return create(ClaimTerminalControlResponseSchema, {
+          granted: false,
+          currentHolderScreenId: scenario.leaseHeldBy,
+        });
+      }
       leaseHolders.set(req.sessionId, GRANTED_CONTROL_TOKEN);
+      if (req.steal) stolenBy.set(req.sessionId, req.screenId);
       return create(ClaimTerminalControlResponseSchema, {
         granted: true,
         controlToken: GRANTED_CONTROL_TOKEN,
@@ -130,8 +143,16 @@ export function aTerminalSessionServiceFake(
     // The daemon's on-subscribe snapshot of the lease, then the stream completes. Its zero values
     // say "no screen is named as the holder" — the claim above is what grants control; this feed
     // only reports what the daemon holds.
-    watchTerminalControl: async function* () {
-      yield create(TerminalControlEventSchema, {});
+    watchTerminalControl: async function* (req) {
+      const thief = stolenBy.get(req.sessionId);
+      yield create(
+        TerminalControlEventSchema,
+        thief !== undefined
+          ? { holderScreenId: thief, youAreController: true }
+          : scenario.leaseHeldBy !== undefined
+            ? { holderScreenId: scenario.leaseHeldBy, youAreController: false }
+            : {},
+      );
     },
     // --- Multiple terminals per session ---
     listTerminalSessions: async () =>

@@ -14,7 +14,17 @@ Product reference: [docs/ft/web/inactive-session-activities.md](../../../docs/ft
 
 **`canResumeSession(session)`** is the same dormancy predicate, used alone for the top-bar Resume. Keying Resume on liveness rather than on the base view is what gives a dormant `pr-stack` orchestrator the button in the same position as a dormant terminal session.
 
-`SessionMainPane` composes these into a four-arm base view: `customView` → activities-over-runtime-layer → runtime layer → connected placeholder → disconnected placeholder. The runtime layer is extracted into one variable because a dormant session renders the Activities view **over** it, not instead of it — the runtimes stay mounted (background streaming preserved, a later resume is instant) with `focused={!dormant && …}`, so nothing foregrounds a stale terminal or its claim-terminal CTA.
+`SessionMainPane` composes these into a four-arm base view: `customView` → stopped-strip-over-runtime-layer → runtime layer → connected placeholder → disconnected placeholder. The runtime layer is extracted into one variable because a dormant session renders its own tab strip **over** it, not instead of it — the runtimes stay mounted (background streaming preserved, a later resume is instant) with `focused={!dormant && …}`, so nothing foregrounds a stale terminal or its claim-terminal CTA.
+
+### The stopped session's strip
+
+`DormantSessionRuntime.tsx` is the tab strip of a session with no live connection. It reuses `SessionTerminalTabs`, `useSessionTerminals` and `GrpcSessionTerminal` against the owning daemon's `TerminalSessionService` client — none of which needs the agent's connection — and claims the session's control lease on attach (`useTerminalControl`) as a live strip does. `SessionMainPane` keys it by session id, so one session's terminal list and lease never carry into another's.
+
+- **The Agent tab is a render slot** (`agentTab: React.ReactNode`); `SessionMainPane` fills it with `SessionActivitiesPane`. The strip never decides what a stopped Agent tab shows.
+- **What a keystroke would reach** (`focusedTerminalId`) is a bash or harness tab with no conversation over it — never the Agent tab, which is a transcript. Only that tab gets the mobile shortcut drawer, the claim toast and grey-out (`TerminalControlLayer`, rendered only while another screen holds the lease), and the Files-tab Insert.
+- **Insert** reaches a live runtime through the session runtime registry. A stopped session has none, so the strip hands `SessionMainPane` a function (`onRegisterInsert`) that types into its focused bash tab, and `SessionMainPane` routes the inspector's `onInsertPathIntoTerminal` to it while the stopped strip shows.
+- **Full screen** uses the same `useSessionPaneFullscreen` and `PaneFullscreenExit` as the live strip. The shared pane chrome — `PaneFullscreenExit`, `TerminalControlLayer` — lives in `SessionPaneChrome.tsx`, so the two strips cannot drift.
+- **Agent-conversation bodies are not rendered by the strip** — see [session-agent-conversation.md](session-agent-conversation.md#1-conversation-bodies-are-owned-by-neither-strip).
 
 ## Liveness semantics
 

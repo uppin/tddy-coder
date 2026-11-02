@@ -60,6 +60,7 @@ module, so it reads the host's private fields directly and needs `pub(super)` at
 | `svc_session_files_ports.rs` | the host's session-files impl |
 | `svc_session_files_ports/svc_peer_routed_session_files.rs` | `PeerRoutedSessionFiles` |
 | `svc_activity_ports.rs`, `svc_terminal_ports.rs` | the activity and terminal families' ports |
+| `svc_terminal_ports/recorded_worktree.rs` | `recorded_worktree`: where a stopped session's tabs start — the worktree its session directory records under the daemon's data dir, or `FAILED_PRECONDITION` naming the session. A submodule, so `connection_service.rs` declares nothing for it |
 
 The `PeerRouted*` wrappers stay in this crate rather than in `tddy-session-agents` and `tddy-session-files`:
 the routing needs the eligible-daemon roster and the common room slot (`PeerRouting`, from `tddy-host-service`),

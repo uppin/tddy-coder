@@ -24,7 +24,8 @@ to read.
 | Piece | File | Owns |
 |---|---|---|
 | Tab list + attach | `src/components/sessions/SessionMainPane.tsx` | which conversations exist, per session, and which is focused |
-| Tab strip + pane stack | `src/components/sessions/SessionRuntime.tsx`, `SessionTerminalTabs.tsx` | rendering a tab and a body per conversation |
+| Tab strip + pane stack | `src/components/sessions/SessionRuntime.tsx` (live), `DormantSessionRuntime.tsx` (stopped), `SessionTerminalTabs.tsx` | rendering a tab per conversation, and adopting the session's conversation host |
+| Bodies | `src/components/sessions/SessionAgentConversationLayer.tsx` | rendering a body per conversation, portalled into its session's host element |
 | The conversation | `src/components/sessions/useAgentConversation.ts`, `SessionAgentConversationPane.tsx` | `Open` / `Prompt` / `Cancel` on `session_agents.SessionAgentService`, for exactly one conversation |
 
 Two pure modules carry the logic worth testing without a DOM:
@@ -32,26 +33,39 @@ Two pure modules carry the logic worth testing without a DOM:
 
 ## Invariants
 
-### 1. The runtime layer must keep one slot in the element tree
+### 1. Conversation bodies are owned by neither strip
 
-`SessionMainPane` renders `runtimeLayer` in the **same position** whether it is shown, hidden behind
-an overlay (a workflow view, a dormant session's transcript), or absent because nothing is attached.
+**A body cancels its conversation as it unmounts**, and only closing a tab may end a conversation.
+Selecting another session is not closing a tab, and neither is Resume — which swaps a stopped
+session's strip (`DormantSessionRuntime`) for the live one (`SessionRuntime`). A body that lived in a
+strip's pane stack would end with the strip.
 
-This is load-bearing. React unmounts a subtree that changes position, unmounting a runtime unmounts
-the bodies of its open conversations, and **a body cancels its conversation as it unmounts**. Before
-this was fixed, selecting a workflow session swapped the layer out for the workflow's own view, so an
-operator who glanced at a PR-Stack session came back to tabs whose conversations the daemon had
-already dropped — and the tabs, held in the screen's state, looked fine.
+So `SessionMainPane` renders every session's bodies once, in `SessionAgentConversationLayer`, which
+sits in the base view and outlives every strip. Each body is **portalled into a host element** the
+screen keeps per session (`useConversationHosts`), and the strip currently showing that session
+**adopts the host** into its pane stack (`useConversationHostAttachment`). The host is a stable
+element that *moves*; a portal whose container changes remounts its children, which would cancel
+the conversation all the same.
 
-Selecting another session is not closing a tab. **Only closing a tab may end a conversation.**
+- Exactly one strip adopts a session's host at a time. A live runtime covered by its own session's
+  stopped strip passes `hostsConversations={false}`.
+- A strip that unmounts removes the host only while it is still the parent, so a successor that
+  already adopted it is not undone.
+- The host is `position: absolute; inset: 0; z-index: 4; pointer-events: none` — above the
+  terminal-control toast (3) and the terminals (2), and transparent to clicks while no body shows.
+  The focused body re-enables pointer events.
 
-A refactor that reintroduces a branch like `customView ? customView : runtimeLayer` reintroduces the
-bug. `SessionAgentAttachTabAcceptance.cy.tsx` pins it with "keeps a conversation open when a workflow
-session is selected instead".
+`SessionMainPane` also renders `runtimeLayer` in the **same position** whether it is shown, hidden
+behind an overlay (a workflow view, a stopped session's strip), or absent because nothing is
+attached, so selecting a workflow session never remounts the runtimes.
 
-**Known gap:** this holds for switching sessions, not for opening the create-session pane, which
-skips the whole session-detail block. Surviving that too means hoisting the runtime layer above the
-`PanelGroup`, which breaks the Code-pane split.
+`SessionAgentAttachTabAcceptance.cy.tsx` pins the session-switch case ("keeps a conversation open
+when a workflow session is selected instead"); `DormantSessionTabsAcceptance.cy.tsx` pins leaving a
+stopped session and coming back, and Resume.
+
+**Known gap:** this holds for switching sessions and Resume, not for opening the create-session pane,
+which skips the whole session-detail block — the layer with it. Surviving that too means hoisting the
+layer above the `PanelGroup`, which breaks the Code-pane split.
 
 ### 2. One owner for a conversation's whole life
 
@@ -68,7 +82,7 @@ has not created) and the open land after — leaving a conversation, and the age
 
 The cancel names no actor: the daemon records a permission request the cancel ends as answered by
 the authenticated caller. The tab still needs someone signed in (`callerLogin`, read from the auth
-context by `SessionsDrawerScreen` and passed down through `SessionRuntime` and `SessionMainPane`):
+context by `SessionsDrawerScreen` and passed through `SessionMainPane` to `SessionAgentConversationLayer`):
 with no signed-in user the cancel is refused locally, sends nothing, and is traced with
 `console.debug`. The login is read when the tab closes, not when the open settles.
 

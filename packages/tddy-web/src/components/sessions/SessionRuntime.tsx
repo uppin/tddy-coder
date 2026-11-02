@@ -1,15 +1,14 @@
 import React, { useCallback, useMemo, useRef, useState } from "react";
-import { Minimize2 } from "lucide-react";
 import { TerminalSessionService } from "../../gen/terminal_session_pb";
 import { GhosttyTerminalSession } from "../GhosttyTerminalSession";
 import { GrpcSessionTerminal } from "./GrpcSessionTerminal";
 import { useSessionTerminalFeed } from "./useSessionTerminalFeed";
 import { SessionTerminalTabs } from "./SessionTerminalTabs";
-import { SessionAgentConversationPane } from "./SessionAgentConversationPane";
+import { useConversationHostAttachment } from "./SessionAgentConversationLayer";
+import { PaneFullscreenExit, TerminalControlLayer } from "./SessionPaneChrome";
 import { SessionChildRuntime } from "./SessionChildRuntime";
 import { AGENT_TERMINAL_ID, useSessionTerminals } from "./useSessionTerminals";
 import { useChildSessions } from "./useChildSessions";
-import { TerminalControlOverlay } from "./TerminalControlOverlay";
 import { SessionConnectionOverlay } from "./SessionConnectionOverlay";
 import { useTerminalControl, type Session } from "./useTerminalControl";
 import { useSessionPaneFullscreen } from "./useSessionPaneFullscreen";
@@ -18,7 +17,6 @@ import type { ByteDelta } from "./sessionRuntimeRegistry";
 import type { SessionRuntimeProps, TerminalClient } from "./sessionRuntimeProps";
 import { useConnectionStatus } from "../../rpc/connections/useConnectionStatus";
 import { useHasCapability } from "../../rpc/connections/useHasCapability";
-import { safeTestIdPart } from "../../lib/testId";
 import { sessionReadsLocalPaths } from "../../lib/sessionReadsLocalPaths";
 import type { TauriHostWindow } from "../../rpc/daemonTransportFlavour";
 import { useSelectedDaemon } from "../../rpc/selectedDaemon";
@@ -52,7 +50,6 @@ export function SessionRuntime({
   runtime,
   focused,
   sessionToken,
-  callerLogin = null,
   client,
   terminalClient,
   host = null,
@@ -65,6 +62,8 @@ export function SessionRuntime({
   activeAgentConversationId = null,
   onSelectAgentConversation,
   onCloseAgentConversation,
+  conversationHost,
+  hostsConversations = true,
 }: SessionRuntimeProps) {
   // This session's own connection, and what it can carry. One terminal component renders either
   // way; what the capabilities decide is where its bytes come from — a session whose wire carries
@@ -222,6 +221,7 @@ export function SessionRuntime({
   // focus, which a fullscreen transition can drop.
   const { paneStackRef, fullscreenActive, fullscreenOwned, toggleFullscreen } =
     useSessionPaneFullscreen(focused);
+  useConversationHostAttachment(paneStackRef, conversationHost, hostsConversations);
   const { containerRef, registerAgentFocus } = useAgentTerminalFocus({
     focused,
     agentPaneActive,
@@ -379,70 +379,24 @@ export function SessionRuntime({
           </div>
         ))}
 
-        {/* One mounted body per open conversation with an attached agent. Kept mounted while
-            another tab is up, so switching tabs never re-opens a conversation; only closing the tab
-            ends one. */}
-        {agentConversations.map((conversation) => (
-          <div
-            key={conversation.conversationId}
-            data-testid={`sessions-agent-pane-${safeTestIdPart(conversation.conversationId)}`}
-            className="bg-background"
-            // Stated inline, not as utility classes, because the terminal this overlays states its
-            // own stacking inline too (`terminal-live-pane` takes z-index 2 and paints over anything
-            // that only claims document order), and a conversation that ends up under a terminal
-            // still painting is one the operator cannot type into. Above the terminal-control
-            // overlay (3) as well: that overlay is about typing into the *terminal*, and a
-            // conversation is not it.
-            style={{
-              position: "absolute",
-              inset: 0,
-              zIndex: 4,
-              display:
-                activeAgentConversationId === conversation.conversationId ? "block" : "none",
-            }}
-          >
-            <SessionAgentConversationPane
-              sessionId={runtime.sessionId}
-              sessionToken={sessionToken}
-              daemonInstanceId={conversation.daemonInstanceId}
-              agentId={conversation.agentId}
-              conversationId={conversation.conversationId}
-              callerLogin={callerLogin}
-              client={client ?? undefined}
-            />
-          </div>
-        ))}
-
         {focused && (
           // The focused runtime carries the `sessions-detail-terminal-container` marker (existing
           // acceptance contract) and the terminal-control toast. The toast is only rendered when a
           // terminal-control client is available — without one the lease is not being managed, so
           // the terminal stays plain (no spurious "Claim terminal" CTA, no grey-out).
-          // `pointer-events-none` on this container lets clicks reach the terminal below; only the
-          // toast itself re-enables pointer events.
-          //
-          // Its position and stacking are stated inline for the same reason the conversation panes
-          // state theirs: `terminal-live-pane` claims `position: absolute; z-index: 2` inline, so a
-          // toast that only claimed them through utility classes would be painted over by the very
-          // terminal canvas it floats over.
-          //
-          // The ladder in this stack, bottom up: terminal panes (2, greyed out while controlled
-          // elsewhere), this toast (3), an open agent conversation (4). Each covers what it is
-          // about and nothing else — the toast no longer blocks the terminal, it explains it.
-          <div
-            data-testid="sessions-detail-terminal-container"
-            className="absolute inset-0 pointer-events-none"
-            style={{ position: "absolute", inset: 0, zIndex: 3 }}
-          >
-            {terminalClient && (
-              <TerminalControlOverlay
-                isController={controlState.isController}
-                holderScreenId={controlState.holderScreenId}
-                onClaim={claimControl}
-                claimError={claimError}
-              />
-            )}
-          </div>
+          <TerminalControlLayer
+            testId="sessions-detail-terminal-container"
+            overlay={
+              terminalClient
+                ? {
+                    isController: controlState.isController,
+                    holderScreenId: controlState.holderScreenId,
+                    onClaim: claimControl,
+                    claimError,
+                  }
+                : null
+            }
+          />
         )}
 
         {/* Connection overlay — covers the panes while the session's connection is still coming up,
@@ -452,21 +406,7 @@ export function SessionRuntime({
             configuration — with no connection state shown at all. */}
         {connection && <SessionConnectionOverlay status={connectionStatus.status} />}
 
-        {/* The tab strip — and with it the strip's own toggle — is outside the fullscreen element,
-            so full screen needs its own way back. Rendered only by the stack that actually holds
-            fullscreen, and only while it does. Esc still works; this is the in-app equivalent. */}
-        {fullscreenOwned && (
-          <button
-            type="button"
-            data-testid="sessions-terminal-fullscreen-exit"
-            aria-label="Exit full screen"
-            title="Exit full screen"
-            onClick={toggleFullscreen}
-            className="absolute right-2 top-2 z-20 rounded border border-border bg-background/80 p-1.5 text-muted-foreground opacity-60 transition-opacity hover:opacity-100 hover:text-foreground"
-          >
-            <Minimize2 className="h-3.5 w-3.5" />
-          </button>
-        )}
+        {fullscreenOwned && <PaneFullscreenExit onExit={toggleFullscreen} />}
       </div>
     </div>
   );

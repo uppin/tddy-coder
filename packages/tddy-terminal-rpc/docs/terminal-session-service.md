@@ -306,6 +306,9 @@ is one the host runs is the roster's decision, because only the host knows its h
   "unknown terminal kind" when unregistered — then `DaemonConfig::cli_harness_binary` and the
   descriptor's argv for a default `CliLaunch` with a fresh conversation id, spawned by
   `CliSessionManager::start_agent_terminal`.
+  Either kind starts in the session's worktree: the live main terminal's, or — for a stopped
+  session — the one its session directory records (`recorded_worktree`, `FAILED_PRECONDITION`
+  naming the session when there is none).
 - **`tddy-coder`** (`CoderTerminalRoster`) runs `Bash` only and refuses `Agent(_)` with
   `INVALID_ARGUMENT` "this session's terminals run bash only".
 

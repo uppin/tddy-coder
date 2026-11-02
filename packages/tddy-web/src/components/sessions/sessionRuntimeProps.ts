@@ -22,12 +22,9 @@ export interface SessionRuntimeProps {
    *  shortcut overlay; backgrounded runtimes stay mounted but `display:none`. */
   focused: boolean;
   sessionToken: string;
-  /** The signed-in user's login, which an agent-conversation tab needs in order to cancel when it
-   *  is closed. `null` (the default) when none is signed in, and the closing cancel is refused. */
-  callerLogin?: string | null;
-  /** Owning daemon `session_agents.SessionAgentService` client — the agent-conversation panes hold
-   *  their conversation over it, and a spawned child runtime inherits it. Pass `null`/`undefined`
-   *  until the daemon is reachable. */
+  /** Owning daemon `session_agents.SessionAgentService` client, which a spawned child runtime
+   *  inherits. (The agent-conversation bodies hold their conversations over the screen's client, in
+   *  `SessionAgentConversationLayer`.) Pass `null`/`undefined` until the daemon is reachable. */
   client?: SessionAgentClient | null;
   /** Owning daemon `TerminalSessionService` client — the auto-claim-on-attach target, and the
    *  fallback wire for host-served terminal I/O. Pass `null`/`undefined` until the daemon is
@@ -58,4 +55,10 @@ export interface SessionRuntimeProps {
   onSelectAgentConversation?: (conversationId: string | null) => void;
   /** Close a conversation's tab — the owner drops it, which cancels it. */
   onCloseAgentConversation?: (conversationId: string) => void;
+  /** The element this session's conversation bodies live in (see `SessionAgentConversationLayer`).
+   *  The runtime adopts it into its pane stack; it does not render the bodies itself. */
+  conversationHost?: HTMLElement;
+  /** Whether this runtime is the strip currently showing the session's conversations. `false` while
+   *  a stopped session's own strip is covering this one. Default `true`. */
+  hostsConversations?: boolean;
 }

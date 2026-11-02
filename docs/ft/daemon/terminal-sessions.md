@@ -65,6 +65,16 @@ session and manage them over RPC, so I can run a shell in the session's worktree
    user's interactive shell, and a terminal opened with it comes up in the wrong shell with none of
    the user's rc files. A `pw_shell` that refuses logins (`/usr/sbin/nologin`, `/bin/false`) is
    skipped.
+   - **The session's worktree** is the live main terminal's while the session's agent runs. A
+     **stopped** session has no main terminal, so the worktree is the one its session directory
+     records (`<data dir>/sessions/<id>`: the changeset's worktree, else `.session.yaml`
+     `repo_path`) — the same record a resume reads. Tabs started there run as any tab does: on the
+     host, as the daemon user, never inside the session's jail.
+   - A stopped session whose directory records **no worktree on this host** — an unknown id, or a
+     split session's agent half, whose checkout lives on another daemon — is refused with
+     `FAILED_PRECONDITION` naming the session. There is no substitute directory: a shell opened
+     anywhere else would look like the session and act on something else. A `session_id` that is
+     not one path segment is `INVALID_ARGUMENT`.
 4. The Bash tool uses the same PTY mechanic as the main tool: stdin is writable, output is
    broadcast and captured for replay.
 5. `StopTerminalSession(session_id, terminal_id)` terminates the tool's process and removes it from

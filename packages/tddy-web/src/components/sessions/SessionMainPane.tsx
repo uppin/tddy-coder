@@ -3,6 +3,7 @@ import { projectForUnscopedSession } from "../../utils/sessionProjectTable";
 import { SessionInspectorDrawer } from "./SessionInspectorDrawer";
 import { canResumeSession, sessionBaseViewMode } from "./sessionBaseView";
 import { SessionActivitiesPane } from "./SessionActivitiesPane";
+import { DormantSessionRuntime } from "./DormantSessionRuntime";
 import { PARAM_CODE } from "../../routing/appLocation";
 import { useAppLocation } from "../../routing/useAppLocation";
 import { SessionWithActivitySidebar } from "./SessionWithActivitySidebar";
@@ -17,6 +18,11 @@ import { WorktreeCodePane } from "../session/WorktreeCodePane";
 import { Panel, PanelGroup, PanelResizeHandle } from "react-resizable-panels";
 import type { SessionMainPaneProps } from "./sessionMainPaneProps";
 import { useSessionAgentConversations } from "./useSessionAgentConversations";
+import {
+  SessionAgentConversationLayer,
+  useConversationHosts,
+} from "./SessionAgentConversationLayer";
+import { joinQuotedPaths } from "../../lib/shellQuote";
 
 export function SessionMainPane({
   selectedSession,
@@ -98,6 +104,11 @@ export function SessionMainPane({
     closeConversation,
   } = useSessionAgentConversations({ sessionAgentClient, selectedSession, sessionToken });
 
+  // Where each session's conversation bodies live. They are rendered once, by the layer in the base
+  // view below, and adopted into whichever tab strip shows their session — so neither the live
+  // strip nor a stopped session's can end a conversation by going away. Only closing a tab does.
+  const conversationHostFor = useConversationHosts();
+
   // The selected session's project default branch, read from the registry the drawer already loaded
   // rather than an RPC or a git probe (D20). Empty when the project is not in the list or stores no
   // `main_branch_ref` (a legacy project): the PR-Stack view then labels the base "default branch" and
@@ -148,14 +159,29 @@ export function SessionMainPane({
   // resumed elsewhere corrects its own view on the next list poll — there is no view state to reset.
   const baseViewMode = sessionBaseViewMode(selectedSession, customView !== null);
   const dormant = canResumeSession(selectedSession);
+  // Whether the stopped session's own tab strip is what shows (it covers that session's live strip).
+  const dormantStripShown = baseViewMode === "activities" && selectedSession !== null;
+
+  // The Files tab's Insert reaches the live runtime through the registry; a stopped session has no
+  // runtime there, so its strip hands over the function that types into its focused bash tab.
+  const dormantInsertRef = React.useRef<((text: string) => void) | null>(null);
+  const registerDormantInsert = React.useCallback(
+    (insert: ((text: string) => void) | null) => {
+      dormantInsertRef.current = insert;
+    },
+    [],
+  );
+  const insertPathIntoTerminal = dormantStripShown
+    ? (hostPath: string) => dormantInsertRef.current?.(joinQuotedPaths([hostPath]))
+    : onInsertPathIntoTerminal;
 
   // One mounted terminal per attached session: the focused runtime's terminal is CSS-visible while
   // backgrounded ones are `display:none` but stay mounted (and subscribed to their LiveKit room), so
   // switching focus back is instant and background sessions keep streaming. Each runtime owns its
   // own terminal-control lease (see `SessionRuntime`), so the focused one carries the
   // `sessions-detail-terminal-container` marker (existing acceptance contract) and the
-  // terminal-control claim toast. Extracted into a variable because a dormant session renders the
-  // Activities view *over* this layer rather than instead of it.
+  // terminal-control claim toast. Extracted into a variable because a dormant session renders its tab
+  // strip *over* this layer rather than instead of it.
   //
   // A dormant session never foregrounds a terminal: there is no live process behind it, so
   // foregrounding one would only put a stale screen (and its claim-terminal CTA) over the view the
@@ -175,9 +201,10 @@ export function SessionMainPane({
           onCloseAgentConversation={(conversationId) =>
             closeConversation(r.sessionId, conversationId)
           }
+          conversationHost={conversationHostFor(r.sessionId)}
+          hostsConversations={!(dormantStripShown && r.sessionId === selectedSession?.sessionId)}
           focused={!dormant && r.sessionId === focusedRuntimeId}
           sessionToken={sessionToken}
-          callerLogin={callerLogin}
           client={sessionAgentClient}
           terminalClient={terminalClient}
           mobileShortcuts={mobileShortcuts}
@@ -191,19 +218,42 @@ export function SessionMainPane({
     </div>
   );
 
-  // The base view (custom workflow view / recorded activities / mounted terminals / placeholder).
-  // Rendered on its own when the Code pane is closed, or as the left panel of the split when it is
-  // open — never unmounted between the two so terminals stay attached.
+  // The base view (custom workflow view / a dormant session's tab strip / mounted terminals /
+  // placeholder). Rendered on its own when the Code pane is closed, or as the left panel of the split
+  // when it is open — never unmounted between the two so terminals stay attached.
   // What covers the runtimes, when anything does: a custom per-workflow view, or a dormant session's
-  // recorded transcript. Null means the runtimes themselves are the pane.
+  // own tab strip, whose Agent tab holds the recorded transcript. Null means the runtimes themselves
+  // are the pane.
+  //
+  // The strip is keyed by session because its terminal list and lease belong to one stopped session:
+  // a selection change must not carry one session's tabs into another's.
   const overlay: React.ReactNode =
     customView ??
-    (baseViewMode === "activities" && selectedSession ? (
-      <SessionActivitiesPane
-        sessionId={selectedSession.sessionId}
+    (dormantStripShown && selectedSession ? (
+      <DormantSessionRuntime
+        key={selectedSession.sessionId}
+        session={selectedSession}
         sessionToken={sessionToken}
-        rosterHalf={rosterHalfOf(selectedSession)}
-        client={buildSessionActivityClient?.() ?? activityClient}
+        terminalClient={terminalClient}
+        mobileShortcuts={mobileShortcuts}
+        onRegisterInsert={registerDormantInsert}
+        conversationHost={conversationHostFor(selectedSession.sessionId)}
+        agentTab={
+          <SessionActivitiesPane
+            sessionId={selectedSession.sessionId}
+            sessionToken={sessionToken}
+            rosterHalf={rosterHalfOf(selectedSession)}
+            client={buildSessionActivityClient?.() ?? activityClient}
+          />
+        }
+        agentConversations={agentConversations[selectedSession.sessionId] ?? []}
+        activeAgentConversationId={activeConversations[selectedSession.sessionId] ?? null}
+        onSelectAgentConversation={(conversationId) =>
+          focusConversation(selectedSession.sessionId, conversationId)
+        }
+        onCloseAgentConversation={(conversationId) =>
+          closeConversation(selectedSession.sessionId, conversationId)
+        }
       />
     ) : null);
 
@@ -221,6 +271,14 @@ export function SessionMainPane({
   // open — never unmounted between the two, so terminals stay attached.
   const baseView = (
     <div className="flex-1 min-h-0 relative overflow-hidden">
+      <SessionAgentConversationLayer
+        agentConversations={agentConversations}
+        activeConversations={activeConversations}
+        hostFor={conversationHostFor}
+        sessionToken={sessionToken}
+        callerLogin={callerLogin}
+        client={sessionAgentClient}
+      />
       {hasRuntimes && (
         <div className={overlay !== null ? "hidden" : "absolute inset-0 flex flex-col"}>
           {runtimeLayer}
@@ -427,7 +485,7 @@ export function SessionMainPane({
                   serverIdentity={attachmentHint?.serverIdentity}
                   traffic={traffic}
                   buildSessionExecToolClient={buildSessionExecToolClient}
-                  onInsertPathIntoTerminal={onInsertPathIntoTerminal}
+                  onInsertPathIntoTerminal={insertPathIntoTerminal}
                   onSwitchPeer={onSwitchPeer}
                 />
               </div>
