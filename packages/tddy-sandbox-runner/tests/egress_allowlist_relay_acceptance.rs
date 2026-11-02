@@ -2,7 +2,7 @@
 //! a jailed process that skips the in-jail shim and speaks the relay protocol directly is still
 //! refused, and the refusal names the session, the host and the tool set that lacked it.
 //!
-//! PRD: `docs/ft/coder/1-WIP/PRD-2026-10-31-tool-egress-allowlist.md` (`#agent-tools 3/12`).
+//! PRD: `docs/ft/coder/sandbox-builder.md` § Tool egress (`#agent-tools 3/12`).
 //!
 //! The jail side is the fake `SandboxService` in `common`, which pushes a raw `TunnelOpen` exactly
 //! as a process bypassing the shim would. The relay under test is the real one.

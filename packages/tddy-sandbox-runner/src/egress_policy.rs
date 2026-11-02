@@ -1,7 +1,7 @@
 //! The jail's egress policy at its two enforcement points: the in-jail CONNECT shim and the host
 //! relay's `TunnelOpen`.
 //!
-//! PRD: `docs/ft/coder/1-WIP/PRD-2026-10-31-tool-egress-allowlist.md` (`#agent-tools 3/12`).
+//! PRD: `docs/ft/coder/sandbox-builder.md` § Tool egress (`#agent-tools 3/12`).
 //!
 //! Both points hold an [`EgressGuard`] and ask it independently, so a jailed process that bypasses
 //! the shim by speaking the relay protocol directly is still refused. A refusal names the session,

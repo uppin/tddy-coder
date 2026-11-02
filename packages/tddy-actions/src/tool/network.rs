@@ -1,6 +1,6 @@
 //! A tool's `network:` section — which hosts it may reach, and whether it takes an OAuth callback.
 //!
-//! PRD: `docs/ft/coder/1-WIP/PRD-2026-10-31-tool-egress-allowlist.md` (`#agent-tools 3/12`).
+//! PRD: `docs/ft/coder/sandbox-builder.md` § Tool egress (`#agent-tools 3/12`).
 //!
 //! ```yaml
 //! network:

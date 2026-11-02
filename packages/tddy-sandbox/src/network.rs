@@ -1,6 +1,6 @@
 //! Which hosts a jail may reach — the egress policy its shim and its host relay both enforce.
 //!
-//! PRD: `docs/ft/coder/1-WIP/PRD-2026-10-31-tool-egress-allowlist.md` (`#agent-tools 3/12`).
+//! PRD: `docs/ft/coder/sandbox-builder.md` § Tool egress (`#agent-tools 3/12`).
 //!
 //! This crate knows nothing of tools: a policy arrives already lowered (`tddy-sandbox-recipes`'
 //! `lower_network` takes the union of a tool set's declarations). What lives here is the policy's

@@ -19,6 +19,7 @@
 | 2026-10-01 | 739 | **worse** by 2 in PR #560 (`#agent-worktree` 1/4): the `conversation_id` parameter and its doc on the jail route's `execute_tool` request. Inside the standing deferral (PR #548 deletes the ripgrep block this file is over budget for) |
 | 2026-10-22 | 741 | **worse** by 2 in PR #670 (`#provider-route` 9/9): `route: None` and its comment on the workspace tool jail's plan — the jail hosts no agent, so it takes no route. Inside the standing deferral |
 | 2026-11-02 | 684 | **better** by 57 in PR #790 (`#agent-tools` 1/12): `host_ripgrep_grants`, `RipgrepGrants`, `binary_dependency_traversal_dirs` and their three `FIXME(grep-in-jail)` sites are deleted; the jail now lowers declared tools through `tddy_sandbox_recipes::tool_grants`. The provisioner gained tool resolution at jail start (`new`, `for_tddy_home`, `resolve_jail_tools`, `WORKSPACE_JAIL_TOOLS`). The standing deferral's premise (PR #548 deletes the ripgrep block) is void: the block is gone and the file is still over budget, so the seam below is what closes it |
+| 2026-11-02 | 713 | **worse** by 29 in PR #792 (`#agent-tools` 3/12): `build_workspace_tool_plan` lowers its tools' network (`lower_network`, the shim port, `--egress-*` runner args, `loopback_allow_ports`, `NetworkSpec.egress` / `allow_oauth_inbound`). Not split: stack-shared with every `#agent-tools` node, deferred to after the stack lands |
 
 ## What would close it — designed seam
 

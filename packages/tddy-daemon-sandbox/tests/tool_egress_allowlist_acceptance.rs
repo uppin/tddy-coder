@@ -1,6 +1,6 @@
 //! Acceptance: a jail reaches exactly the hosts its tools declare.
 //!
-//! PRD: `docs/ft/coder/1-WIP/PRD-2026-10-31-tool-egress-allowlist.md` (`#agent-tools 3/12`).
+//! PRD: `docs/ft/coder/sandbox-builder.md` § Tool egress (`#agent-tools 3/12`).
 //!
 //! Two levels. The plan tests pin what a workspace jail built from declared tools asks its runner
 //! for — the lowered policy, a shim only when something may leave, and the tool set a refusal

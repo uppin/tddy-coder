@@ -39,6 +39,9 @@ pumps bytes both ways. TLS stays end-to-end — the host never sees plaintext or
 - **Read confinement is enforced via an explicit allow-list** (the `SandboxBuilder` plan; no
   `(allow file-read*)` wildcard). The Claude read recipe lives in `tddy-sandbox/src/claude_spawn.rs`
   (`claude_required_reads`); add the minimal enclosing dir there when a new read is needed.
+- **`CONNECT=403` / `egress to <host>:<port> refused …`**: the jail's egress policy does not admit
+  that host (`#agent-tools 3/12`). The tool set named in the line lacks it in its `network:` section —
+  declare the host there; see [sandbox-builder.md § Tool egress](../../../docs/ft/coder/sandbox-builder.md#tool-egress).
 - Acceptance: `sandbox_runner_tunnels_https_proxy_connect_via_session_channel`. The daemon
   `StartSession` egress path reuses the same helpers but lacks a daemon-specific acceptance test yet.
 
