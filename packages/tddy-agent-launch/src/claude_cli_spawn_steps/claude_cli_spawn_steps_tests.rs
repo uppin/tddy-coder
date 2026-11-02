@@ -1,7 +1,7 @@
 //! Unit tests: what a claude-cli start launches its agent with, beyond the managed workflow's own.
 
 use super::*;
-use crate::project_home_launch::{project_home_launch, ProjectHomeLaunch, RoleLaunch};
+use crate::project_home_launch::{project_home_wiring, ProjectHomeLaunch, RoleLaunch};
 
 fn the_accounts_git_pairs() -> Vec<(String, String)> {
     vec![
@@ -242,7 +242,8 @@ struct AMainLaunch {
 impl AMainLaunch {
     fn on(config: &DaemonConfig, data_dir: &Path) -> Self {
         let session_dir = tempfile::tempdir().expect("a temporary session dir");
-        let launch = project_home_launch(ProjectHomeLaunch {
+        // The hand-built rendering: flags as argv, the MCP config written into the session dir.
+        let launch = project_home_wiring(ProjectHomeLaunch {
             config,
             tddy_data_dir: data_dir,
             session_dir: session_dir.path(),
@@ -250,6 +251,7 @@ impl AMainLaunch {
             agent_session_token: A_MINTED_TOKEN,
             tddy_tools_path: Path::new("/opt/tddy/bin/tddy-tools"),
         })
+        .and_then(|wiring| wiring.hand_built())
         .expect("a main's launch is built");
         Self {
             session_dir,

@@ -16,7 +16,7 @@ use crate::claude_cli_spawn_steps::role_allowed_tools_args;
 use crate::launch_ports::LaunchSessions;
 use crate::spec_launch::{AgentToolset, McpRegistration};
 
-/// What a project-home (main) agent's launch is built from. See [`project_home_launch`].
+/// What a project-home (main) agent's launch is built from. See [`project_home_wiring`].
 pub(crate) struct ProjectHomeLaunch<'a> {
     pub(crate) config: &'a DaemonConfig,
     /// The data dir the daemon *resolved*: an embedded host's agent-tool socket path digests it.
@@ -230,14 +230,6 @@ impl MainLaunchPlan<'_> {
     }
 }
 
-/// A main's launch as the hand-built path passes it: [`project_home_wiring`], its flags rendered to
-/// argv and its MCP config written into its session dir. The start and resume paths render
-/// [`RoleWiring`] themselves, at the spawn.
-#[cfg(test)]
-pub(crate) fn project_home_launch(launch: ProjectHomeLaunch<'_>) -> Result<RoleLaunch, Status> {
-    project_home_wiring(launch)?.hand_built()
-}
-
 /// A main's wiring: `tddy-tools --mcp` as its only MCP server, reaching this daemon as the main
 /// (agent-tool socket on an embedded host, HTTP otherwise), every native filesystem and shell tool
 /// withdrawn, its tool set pre-approved, and the role prompt appended ([`MainAgentFlags`]). The
@@ -321,7 +313,7 @@ impl LaunchSessions {
         )?)
     }
 
-    /// For a main, the plan of its launch ([`project_home_launch`]) under a credential of its own,
+    /// For a main, the plan of its launch ([`project_home_wiring`]) under a credential of its own,
     /// minted now from the caller's `session_token` — the caller's lives minutes, the agent hours. A
     /// refusal fails the launch. Every other role has no plan and mints nothing.
     fn main_plan<'a>(

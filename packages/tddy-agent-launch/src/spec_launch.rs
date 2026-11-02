@@ -27,7 +27,7 @@ use tddy_daemon_kernel::config::DaemonConfig;
 ///
 /// Installed on the session host by the daemon runtime; a host without it launches `claude-cli`
 /// the hand-built way. `TODO(agent-tools 12/12)`: the hand-built way goes once the session-type
-/// gates move onto specs.
+/// gates move onto specs (`docs/dev/todo/2026-11-02-claude-cli-hand-built-launch-removal.md`).
 pub struct HostCodingAgents {
     registry: ToolRegistry,
     host: Arc<dyn ToolHost>,
@@ -291,6 +291,7 @@ pub async fn launch_claude_cli(
     let agent = launch
         .agents
         .resolve(CLAUDE_AGENT_ID, configured_binary(launch.config).as_deref())?;
+    let params = claude_template_params(&launch);
     let AgentToolset {
         mcp,
         allowed_tools,
@@ -317,19 +318,6 @@ pub async fn launch_claude_cli(
     .map_err(SpecLaunchError::Slots)?;
     slots.argv_extra.extend(launch.extra_args);
 
-    let params = TemplateParams::new()
-        .with("model", launch.model)
-        .with("session_id", launch.session_id)
-        .with_flag("resume", launch.resume)
-        .with_flag(
-            "dangerously_skip_permissions",
-            launch.dangerously_skip_permissions,
-        )
-        .with(
-            "permission_mode",
-            non_blank(launch.permission_mode).unwrap_or("auto"),
-        )
-        .with_opt("prompt", non_blank(launch.initial_prompt));
     launch_host_pty(
         &agent,
         &params,
@@ -345,6 +333,24 @@ pub async fn launch_claude_cli(
         },
     )
     .await
+}
+
+/// The `claude` template's parameters for `launch`. The permission mode defaults to `auto`, and a
+/// blank prompt is no prompt — both as the hand-built argv had them.
+fn claude_template_params(launch: &ClaudeCliLaunch<'_>) -> TemplateParams {
+    TemplateParams::new()
+        .with("model", launch.model)
+        .with("session_id", launch.session_id)
+        .with_flag("resume", launch.resume)
+        .with_flag(
+            "dangerously_skip_permissions",
+            launch.dangerously_skip_permissions,
+        )
+        .with(
+            "permission_mode",
+            non_blank(launch.permission_mode).unwrap_or("auto"),
+        )
+        .with_opt("prompt", non_blank(launch.initial_prompt))
 }
 
 /// `value` trimmed, or `None` when nothing but whitespace is left.
