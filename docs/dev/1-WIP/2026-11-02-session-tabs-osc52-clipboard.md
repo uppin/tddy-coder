@@ -4,7 +4,7 @@
 **Status:** 🚧 In Progress
 **Type:** Feature
 **Complexity**: 2 — one web module plus a tap in the terminal's write path; a streaming parser with chunk-split handling; possible desktop capability check
-**Stack:** `#session-tabs 4/7` — branch `feature/session-tabs/osc52-clipboard`, base `feature/session-tabs/tmux-attach`
+**Stack:** `#session-tabs 4/7` — branch `feature/session-tabs/osc52-clipboard`, base `feature/session-tabs/tmux-attach` · **PR:** [#807](https://github.com/uppin/tddy-coder/pull/807)
 **PRD:** [PRD-2026-11-02-terminal-osc52-clipboard.md](../../ft/web/1-WIP/PRD-2026-11-02-terminal-osc52-clipboard.md)
 
 ## Initial Discovery
@@ -128,16 +128,26 @@ Real dependency edges, as opposed to the branch line:
 - **Write-only**, the safe subset of OSC 52, as chosen in the interview.
 - **1 MiB cap**, which bounds memory for a hostile or buggy stream.
 
+## Baseline before green
+
+Recorded at the contract commit (2026-11-02), scoped to `tddy-web`:
+
+- **This node's red tests:**
+  - `src/lib/osc52.test.ts` (bun): 6 failing, the copy cases. 5 pass on the empty stub and must stay green: the ignore-cases (read, invalid base64, over-cap, other OSC) and the 1 MiB default.
+  - `GhosttyTerminalOsc52Acceptance.cy.tsx`: 3 failing ("clipboardWrite … never called"). `an OSC 52 read writes nothing and sends no input` passes as a guard.
+- **Found while writing them:** ghostty-web 0.4 has a private `copyToClipboard` for its own mouse selection and no OSC 52 hook (`dist/index.d.ts`). So the tap in `GhosttyTerminal`'s write path is the only place an OSC 52 copy can happen, and it does not double up with the emulator.
+- Desktop (Tauri webview) clipboard behaviour is unverified until green. A Tauri clipboard plugin, if needed, is a dependency question for the developer.
+
 ## TODO
 
 - [x] Record initial discovery (`2026-11-02-session-tabs-osc52-clipboard-initial-discovery.md`)
 - [x] Cross-check `packages/*/docs/code-issues/` and `docs/dev/todo/` for items this change touches (Step 2b)
 - [x] Create/update PRD documentation
 - [x] Create changeset (this document)
-- [ ] Create failing acceptance tests
-- [ ] Run acceptance tests (verify they fail)
-- [ ] USER REVIEW — acceptance tests
-- [ ] TDD Red — write failing unit/integration tests
+- [x] Create failing acceptance tests
+- [x] Run acceptance tests (verify they fail)
+- [x] USER REVIEW — acceptance tests — waived by the developer 2026-11-02 (reviewed with the stack at the end of pass 2)
+- [x] TDD Red — write failing unit/integration tests
 - [ ] TDD Green — implement with quality code
 - [ ] Update documentation with progress
 - [ ] Repeat Red→Green→Update cycle until feature complete
