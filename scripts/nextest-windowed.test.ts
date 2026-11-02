@@ -1,5 +1,12 @@
 import { describe, expect, test } from "bun:test";
-import { type WindowPackage, balancedBatches, testBinaryPaths, windowBatches } from "./nextest-windowed";
+import {
+  type WindowPackage,
+  balancedBatches,
+  parseShard,
+  shardPackages,
+  testBinaryPaths,
+  windowBatches,
+} from "./nextest-windowed";
 
 function aPackage(name: string, binaries: number): WindowPackage {
   return { name, binaries };
@@ -122,5 +129,76 @@ describe("the test binaries a batch built", () => {
 
   test("a_listing_without_json_is_an_error_not_an_empty_list", () => {
     expect(() => testBinaryPaths("tddy-coder dev shell: …\nerror: could not compile")).toThrow(/listing/);
+  });
+});
+
+describe("a shard of the workspace", () => {
+  const workspace = Array.from({ length: 109 }, (_, i) => aPackage(`p${i}`, ((i * 13) % 31) + 1));
+  const names = (pkgs: WindowPackage[]) => pkgs.map((p) => p.name);
+
+  test("the_shards_together_hold_every_package_with_tests_and_never_overlap", () => {
+    // When
+    const shards = [1, 2, 3].map((i) => shardPackages(workspace, { index: i, total: 3 }));
+
+    // Then
+    const all = shards.flatMap(names);
+    expect(all.slice().sort()).toEqual(names(workspace).sort());
+    expect(new Set(all).size).toBe(all.length);
+  });
+
+  test("a_package_with_no_test_binaries_is_in_no_shard", () => {
+    // Given
+    const packages = [aPackage("a", 3), aPackage("none", 0), aPackage("b", 3)];
+
+    // When
+    const all = [1, 2].flatMap((i) => names(shardPackages(packages, { index: i, total: 2 })));
+
+    // Then
+    expect(all).toEqual(["a", "b"]);
+  });
+
+  test("the_shards_are_balanced_by_test_binaries_to_within_the_largest_package", () => {
+    // When
+    const totals = [1, 2, 3, 4].map((i) =>
+      shardPackages(workspace, { index: i, total: 4 }).reduce((sum, p) => sum + p.binaries, 0),
+    );
+
+    // Then
+    const largest = Math.max(...workspace.map((p) => p.binaries));
+    expect(Math.max(...totals) - Math.min(...totals)).toBeLessThanOrEqual(largest);
+  });
+
+  test("the_split_is_deterministic_and_keeps_workspace_order", () => {
+    // When
+    const first = shardPackages(workspace, { index: 2, total: 3 });
+    const again = shardPackages(workspace.slice(), { index: 2, total: 3 });
+
+    // Then
+    expect(again).toEqual(first);
+    const positions = names(first).map((n) => names(workspace).indexOf(n));
+    expect(positions).toEqual(positions.slice().sort((a, b) => a - b));
+  });
+
+  test("a_shard_left_empty_is_an_error_not_a_silent_pass", () => {
+    // Given two packages cannot fill three shards
+    const packages = [aPackage("a", 3), aPackage("b", 4)];
+
+    // Then
+    expect(() => shardPackages(packages, { index: 3, total: 3 })).toThrow(/empty|fewer/);
+  });
+
+  test("a_shard_out_of_range_is_refused", () => {
+    expect(() => shardPackages(workspace, { index: 0, total: 3 })).toThrow(/shard/);
+    expect(() => shardPackages(workspace, { index: 4, total: 3 })).toThrow(/shard/);
+  });
+
+  test("parses_i_over_n", () => {
+    expect(parseShard("2/3")).toEqual({ index: 2, total: 3 });
+  });
+
+  test("a_malformed_shard_is_refused", () => {
+    for (const bad of ["", "3", "1/", "/3", "a/b", "1/2/3", "1.5/3", "-1/3", "0/3", "4/3", "1/0"]) {
+      expect(() => parseShard(bad)).toThrow(/shard/);
+    }
   });
 });

@@ -15,11 +15,16 @@
  * nextest's non-test binaries and are never deleted. Within a batch cargo and nextest stay as
  * parallel as ever: the window bounds disk, not concurrency.
  *
- * Usage: `bun scripts/nextest-windowed.ts (--batches <n> | --max-binaries <n>) [--packages a,b]
- * [-- <nextest run args>...]`, from the repo root inside the dev shell. `--batches` splits the
+ * One runner may still be too small for even half the workspace, so `--shard <i>/<n>` first splits
+ * the packages into `n` contiguous groups balanced by test binaries — each CI job runs one group,
+ * windowed as above. nextest's own `--partition` cannot do this: it partitions after building.
+ *
+ * Usage: `bun scripts/nextest-windowed.ts (--batches <n> | --max-binaries <n>) [--shard <i>/<n>]
+ * [--packages a,b] [--plan] [-- <nextest run args>...]`, from the repo root inside the dev shell. `--batches` splits the
  * workspace into that many batches balanced by test binaries; `--max-binaries` caps each batch
- * instead. `--packages` limits the run to the named packages (one
- * batch's worth, to reproduce it locally). Each batch's JUnit report is kept as
+ * instead. `--packages` limits the run to the named packages (one batch's worth, to reproduce it
+ * locally); with `--shard` it narrows the workspace *before* the shards are cut, so shard numbers
+ * then refer to that narrowed set. `--plan` prints the batches and runs nothing. Each batch's JUnit report is kept as
  * `target/nextest/<profile>/junit-<batch>.xml`. Exits non-zero if any batch did.
  */
 
@@ -84,6 +89,44 @@ export function balancedBatches(packages: WindowPackage[], count: number): strin
   return batches;
 }
 
+export interface Shard {
+  /** 1-based. */
+  index: number;
+  total: number;
+}
+
+/** Parse `<i>/<n>`; anything else, or an `i` outside 1..n, is an error. */
+export function parseShard(text: string): Shard {
+  const match = /^([0-9]+)\/([0-9]+)$/.exec(text);
+  if (!match) throw new Error(`malformed shard "${text}": expected <i>/<n>, e.g. 1/3`);
+  const index = Number(match[1]);
+  const total = Number(match[2]);
+  if (total < 1 || index < 1 || index > total) {
+    throw new Error(`shard ${text} is out of range: need 1 <= i <= n`);
+  }
+  return { index, total };
+}
+
+/**
+ * The packages of one shard: the packages with test binaries cut into `total` contiguous groups
+ * balanced by binaries (workspace order kept), then group `index`. Every package lands in exactly
+ * one shard. A workspace too small to fill every shard is an error — an empty shard would pass
+ * without running anything.
+ */
+export function shardPackages(packages: WindowPackage[], shard: Shard): WindowPackage[] {
+  if (!Number.isInteger(shard.total) || !Number.isInteger(shard.index) || shard.total < 1 || shard.index < 1 || shard.index > shard.total) {
+    throw new Error(`shard ${shard.index}/${shard.total} is out of range: need 1 <= i <= n`);
+  }
+  const groups = balancedBatches(packages, shard.total);
+  if (groups.length < shard.total) {
+    throw new Error(
+      `shard ${shard.index}/${shard.total} would be empty: only ${groups.length} groups from ${packages.filter((p) => p.binaries > 0).length} packages with tests (fewer packages than shards)`,
+    );
+  }
+  const names = new Set(groups[shard.index - 1]);
+  return packages.filter((pkg) => names.has(pkg.name));
+}
+
 /**
  * The test binaries in a `cargo nextest list --list-type binaries-only --message-format json`
  * listing. The dev shell prints a banner line on stdout first, so the JSON starts at the first `{`.
@@ -113,6 +156,8 @@ function group<T>(title: string, body: () => T): T {
 
 function parseArgs(argv: string[]): {
   split: { batches: number } | { cap: number };
+  shard: Shard | null;
+  plan: boolean;
   only: string[] | null;
   profile: string;
   nextestArgs: string[];
@@ -122,37 +167,48 @@ function parseArgs(argv: string[]): {
   const nextestArgs = separator < 0 ? [] : argv.slice(separator + 1);
   const capAt = own.indexOf("--max-binaries");
   const batchesAt = own.indexOf("--batches");
-  const usage = "usage: nextest-windowed.ts (--batches <n> | --max-binaries <n>) [--packages a,b] [-- <nextest run args>...]";
+  const usage = "usage: nextest-windowed.ts (--batches <n> | --max-binaries <n>) [--shard <i>/<n>] [--packages a,b] [--plan] [-- <nextest run args>...]";
   if ((capAt < 0) === (batchesAt < 0)) throw new Error(usage);
   const value = own[(capAt >= 0 ? capAt : batchesAt) + 1];
   if (value === undefined) throw new Error(usage);
   const split = capAt >= 0 ? { cap: Number(value) } : { batches: Number(value) };
   const onlyAt = own.indexOf("--packages");
   const only = onlyAt >= 0 ? (own[onlyAt + 1] ?? "").split(",").filter(Boolean) : null;
+  const shardAt = own.indexOf("--shard");
+  const shardText = shardAt >= 0 ? own[shardAt + 1] : undefined;
+  if (shardAt >= 0 && shardText === undefined) throw new Error(usage);
+  const shard = shardText === undefined ? null : parseShard(shardText);
+  const plan = own.includes("--plan");
   const profileAt = nextestArgs.indexOf("--profile");
   const profile = profileAt >= 0 ? nextestArgs[profileAt + 1] : "default";
-  return { split, only, profile, nextestArgs };
+  return { split, shard, plan, only, profile, nextestArgs };
 }
 
 function main(): number {
-  const { split, only, profile, nextestArgs } = parseArgs(process.argv.slice(2));
+  const { split, shard, plan, only, profile, nextestArgs } = parseArgs(process.argv.slice(2));
   const repoRoot = process.cwd();
   const targets = testBinaries(repoRoot);
   // One binary per integration-test target, plus the package's own unit-test binary.
   const members = workspacePackages(repoRoot);
   const unknown = (only ?? []).filter((name) => !members.some((pkg) => pkg.name === name));
   if (unknown.length > 0) throw new Error(`not workspace packages: ${unknown.join(", ")}`);
-  const packages = members.filter((pkg) => only === null || only.includes(pkg.name)).map((pkg) => ({
+  const narrowed = members.filter((pkg) => only === null || only.includes(pkg.name)).map((pkg) => ({
     name: pkg.name,
     binaries: targets.filter((target) => target.package === pkg.name).length + 1,
   }));
+  const packages = shard === null ? narrowed : shardPackages(narrowed, shard);
   const batches = "cap" in split ? windowBatches(packages, split.cap) : balancedBatches(packages, split.batches);
   const reportDir = join(repoRoot, "target", "nextest", profile);
   console.log(
-    `${packages.length} packages in ${batches.length} batches: ${batches
+    `${shard === null ? "" : `shard ${shard.index}/${shard.total}: `}${packages.length} packages in ${batches.length} batches: ${batches
       .map((batch) => batch.reduce((sum, name) => sum + (packages.find((pkg) => pkg.name === name)?.binaries ?? 0), 0))
       .join(" + ")} test binaries`,
   );
+
+  if (plan) {
+    batches.forEach((batch, i) => console.log(`batch ${i + 1}: ${batch.join(", ")}`));
+    return 0;
+  }
 
   const failed: number[] = [];
   batches.forEach((batch, index) => {
