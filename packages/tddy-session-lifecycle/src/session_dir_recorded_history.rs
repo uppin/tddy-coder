@@ -8,6 +8,7 @@ use std::path::{Path, PathBuf};
 
 use async_trait::async_trait;
 use tddy_task::CaptureRecording;
+use tddy_terminal_rpc::bridge::MAIN_TERMINAL_ID;
 use tddy_terminal_rpc::RecordedTerminalHistory;
 
 /// Where, relative to a session directory, its `main` terminal is recorded.
@@ -34,14 +35,31 @@ impl SessionDirRecordedHistory {
 
 #[async_trait]
 impl RecordedTerminalHistory for SessionDirRecordedHistory {
+    /// The recording of the session's `main` terminal. No other terminal is recorded, and a `main`
+    /// with no recording yet has none.
+    ///
+    /// A recording that is present but cannot be read answers `None` too, because the port cannot
+    /// carry the reason; the log is where that reason is kept.
     async fn recorded(
         &self,
-        os_user: &str,
+        _os_user: &str,
         session_id: &str,
         terminal_id: &str,
     ) -> Option<CaptureRecording> {
-        // TODO(agent-history): implement
-        let _ = (&self.tddy_data_dir, os_user, session_id, terminal_id);
-        None
+        if terminal_id != MAIN_TERMINAL_ID {
+            return None;
+        }
+        let path = main_capture_recording_path(&self.tddy_data_dir, session_id);
+        match CaptureRecording::read(&path) {
+            Ok(recording) => Some(recording),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
+            Err(error) => {
+                log::warn!(
+                    "the main terminal's recording at {} cannot be read, so its history is not served: {error}",
+                    path.display()
+                );
+                None
+            }
+        }
     }
 }
