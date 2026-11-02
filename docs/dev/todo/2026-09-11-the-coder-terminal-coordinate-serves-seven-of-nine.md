@@ -5,13 +5,14 @@
 `terminal_session.TerminalSessionService` (changeset
 [`2026-09-11-unbundle-session-io-services`](../changesets/2026-09-11-unbundle-session-io-services.md))
 
-`tddy-terminal-rpc` serves nine methods. `tddy-coder`'s session participant registers the coordinate
-but answers **eight** of them; `packages/tddy-coder/src/session_participant/terminal_session_service.rs`
-refuses the ninth with `Unimplemented`:
+`tddy-terminal-rpc` serves ten methods (nine until #806 added `ListTmuxSessions`). `tddy-coder`'s
+session participant registers the coordinate but answers **eight** of them;
+`packages/tddy-coder/src/session_participant/terminal_session_service.rs` refuses the other two:
 
 | Method | Why it is refused here |
 |---|---|
 | `WatchTerminalControl` | The coder's control lease is a permanent grant — it owns its own terminal and arbitrates nothing. Answering would tell **every** watching screen `you_are_controller = true`, including one the daemon's real lease has just displaced. That screen is exactly the one the event exists to correct, so a wrong answer is worse than none. |
+| `ListTmuxSessions` (#806, `#session-tabs` 3/7) | Refused `FAILED_PRECONDITION` ("this session's terminals run bash only; tmux is not offered here") through the `NoTmux` port, and a `StartTerminalSession` of kind `tmux` is refused the same way. A tool session's terminals are bash shells the participant spawns; it has no tmux host of its own to offer. Unlike `WatchTerminalControl` this is a **deliberate, stated** refusal rather than `Unimplemented`, and `tddy-web` hides the tmux section on a tool session, so no client asks. Closing it would mean the coder offering its host's tmux — a product decision, not a gap |
 
 ## Why it matters
 

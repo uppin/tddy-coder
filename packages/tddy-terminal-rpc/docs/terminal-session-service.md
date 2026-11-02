@@ -14,9 +14,10 @@ Product contract: [terminal-sessions.md](../../../docs/ft/daemon/terminal-sessio
 | `StreamTerminalOutput` | server stream | Attach to a terminal's output: a snapshot, or a mode prologue and anchored replay, then the live tail. |
 | `SendTerminalInput` | unary | One write to a terminal's stdin, carrying a cumulative `input_offset`. |
 | `GetTerminalHistory` | server stream | Bytes older than what a stream replayed, addressed by absolute offsets. |
-| `StartTerminalSession` | unary | Spawn the tool `kind` names — the login shell, or a CLI harness — in the session's checkout and return its `terminal_id`. |
+| `StartTerminalSession` | unary | Spawn the tool `kind` names — the login shell, a CLI harness, or a tmux client attached to `tmux_session` — in the session's checkout and return its `terminal_id`. |
 | `StopTerminalSession` | unary | Terminate one tool and deregister it. |
-| `ListTerminalSessions` | unary | The tools running in a session. |
+| `ListTerminalSessions` | unary | The tools running in a session, each with its `kind` and, for a tmux terminal, its `tmux_session`. |
+| `ListTmuxSessions` | unary | The tmux sessions on the session's host for the caller's OS user (name, windows, attached clients) — what a `tmux` terminal can attach to. |
 | `ClaimTerminalControl` | unary | Take the session's single-screen control lease, optionally by stealing it. |
 | `WatchTerminalControl` | server stream | Lease changes, starting with an immediate snapshot. |
 
@@ -65,8 +66,15 @@ reads it. `NoRecordedHistory` is the host that records nothing — the coder par
 passes `tddy-session-lifecycle`'s `SessionDirRecordedHistory`. Tests:
 `tests/recorded_history_acceptance.rs`.
 
+It carries **`tmux: Arc<dyn TmuxHost>`** too — `async fn list(&self, os_user) -> Result<Vec<TmuxSession>,
+Status>`, the sessions on that user's tmux server: empty when no server runs, `FAILED_PRECONDITION` when
+the host has no tmux. `ListTmuxSessions` is a pass-through to it for the OS user the token maps to.
+`NoTmux` refuses every listing with `FAILED_PRECONDITION` — the coder participant; the daemon passes
+`tddy-session-lifecycle`'s `HostTmux`.
+
 The port types — `TerminalSessionPorts`, `TerminalRoster`, `TerminalControl`, `TerminalDescriptor`,
-`ControlClaim`, `ControlChange`, `TerminalLaunch` and `TerminalKind` — live in the module
+`ControlClaim`, `ControlChange`, `TerminalLaunch`, `TerminalKind`, `TMUX_KIND`, `TmuxHost`,
+`TmuxSession` and `NoTmux` — live in the module
 `tddy_terminal_rpc::service::ports` (`src/service/ports.rs`). `service` re-exports them, and the crate
 root re-exports them from there, so `tddy_terminal_rpc::service::TerminalRoster` and
 `tddy_terminal_rpc::TerminalRoster` both name them; `src/service.rs` keeps the handlers and
@@ -305,21 +313,31 @@ opens through `RoomSession::open_duplex("terminal.TerminalService", "StreamTermi
 ## Starting a terminal: `TerminalLaunch`
 
 `StartTerminalSessionRequest.kind` says what a started terminal runs. The handler parses it with
-`TerminalKind::from_request` — `""` or `"bash"` (surrounding whitespace ignored) is
-`TerminalKind::Bash`; anything else is `TerminalKind::Agent(kind)` — resolves the login shell, and
-hands the roster `start(session_id, &TerminalLaunch { kind, login_shell })`. Whether an agent kind
+`TerminalKind::from_request(kind, tmux_session)` — `""` or `"bash"` (surrounding whitespace ignored) is
+`TerminalKind::Bash`; `"tmux"` (`TMUX_KIND`) with a non-empty `tmux_session` is
+`TerminalKind::Tmux { session }`, and without one `INVALID_ARGUMENT`; anything else is
+`TerminalKind::Agent(kind)` — resolves the login shell, and hands the roster
+`start(session_id, &TerminalLaunch { kind, login_shell, os_user })`, `os_user` being the OS user the
+token maps to (who a tmux terminal runs as). A started terminal's `TerminalDescriptor` carries
+`tmux_session: Option<String>`, which `ListTerminalSessions` sends as `TerminalSessionInfo.tmux_session`
+(empty for every other kind). Whether an agent kind
 is one the host runs is the roster's decision, because only the host knows its harness registry:
 
 - **`tddy-daemon`** (`CliManagerTerminalRoster`, in `tddy-session-lifecycle`) runs `Bash` with
   `launch.login_shell`, and resolves `Agent(kind)` through `cli_harness(kind)` — `INVALID_ARGUMENT`
   "unknown terminal kind" when unregistered — then `DaemonConfig::cli_harness_binary` and the
   descriptor's argv for a default `CliLaunch` with a fresh conversation id, spawned by
-  `CliSessionManager::start_agent_terminal`.
+  `CliSessionManager::start_agent_terminal`. `Tmux { session }` is refused before anything spawns when
+  the daemon cannot become `launch.os_user` (the kernel's `CannotBecomeUser`, `FAILED_PRECONDITION`)
+  or when `TmuxHost::list` does not hold that name (`NOT_FOUND`); otherwise
+  `CliSessionManager::start_tmux_terminal` spawns `tmux -T clipboard attach-session -t =<session>` as
+  that user.
   Either kind starts in the session's worktree: the live main terminal's, or — for a stopped
   session — the one its session directory records (`recorded_worktree`, `FAILED_PRECONDITION`
   naming the session when there is none).
 - **`tddy-coder`** (`CoderTerminalRoster`) runs `Bash` only and refuses `Agent(_)` with
-  `INVALID_ARGUMENT` "this session's terminals run bash only".
+  `INVALID_ARGUMENT` "this session's terminals run bash only", and `Tmux { .. }` with
+  `FAILED_PRECONDITION` "tmux is not offered here".
 
 A kind is a registered harness name, never an argv, so a client cannot choose the binary.
 
@@ -335,7 +353,8 @@ named.
 
 | Suite | What it pins |
 |---|---|
-| `terminal_session_service_acceptance.rs` | all nine methods answer at the registered coordinate; the request's `kind` reaches the roster, and an empty or `"bash"` kind arrives as `Bash` with the login shell |
+| `terminal_kind_unit.rs` | `TerminalKind::from_request`: a tmux kind with a session, a tmux kind without one refused `INVALID_ARGUMENT`, bash and harness kinds unchanged |
+| `terminal_session_service_acceptance.rs` | all ten methods answer at the registered coordinate; the request's `kind` reaches the roster, and an empty or `"bash"` kind arrives as `Bash` with the login shell |
 | `terminal_session_bidi_acceptance.rs` | `StreamSessionTerminalIO` carries a session end to end; a screen without the lease (or whose lease was taken, re-opening after a blip) watches the terminal while its keystrokes are refused; a keystroke under a stale token is answered with a refusal frame and typing resumes on the same stream once control is reclaimed |
 | `stream_snapshot_acceptance.rs` | a `SNAPSHOT` open renders the server's screen in a reference emulator (`vt100`, dev-dependency) then only contiguous deltas equal to `replay_from(snapshot.end_offset)`; no redraw signal and no prologue frame; a new grid resizes first and snapshots at it; `StreamTerminalOutput` honours `SNAPSHOT`; an unsized terminal is refused |
 | `stream_resync_acceptance.rs` | a mid-stream `request_snapshot` on a message that also types applies the keystroke, then yields a snapshot that renders the server's screen, followed only by deltas contiguous from it; a subscriber that lags a capacity-1 broadcast is resynced with a snapshot, not a hole; a `TAIL` stream that lags is never sent a snapshot frame |

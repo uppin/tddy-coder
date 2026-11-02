@@ -2,7 +2,7 @@
 //! session user's tmux sessions, a `tmux` terminal attaches a client to one, and stopping the tab
 //! detaches it while the tmux session keeps running.
 //!
-//! PRD: docs/ft/web/1-WIP/PRD-2026-11-02-tmux-attach-tab.md (`#session-tabs 3/7`)
+//! Feature: docs/ft/daemon/terminal-sessions.md § tmux terminals (`#session-tabs 3/7`)
 //!
 //! Each test runs a real tmux server of its own: `TMUX_TMPDIR` points tmux's socket directory at a
 //! temp dir, so the daemon's tmux and the test's tmux are one private server, and no developer's

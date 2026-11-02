@@ -60,6 +60,7 @@ module, so it reads the host's private fields directly and needs `pub(super)` at
 | `svc_session_files_ports.rs` | the host's session-files impl |
 | `svc_session_files_ports/svc_peer_routed_session_files.rs` | `PeerRoutedSessionFiles` |
 | `svc_activity_ports.rs`, `svc_terminal_ports.rs` | the activity and terminal families' ports |
+| `svc_terminal_ports/tmux_host.rs` | `HostTmux`, the daemon's `TmuxHost`: `tmux list-sessions` run as the asking OS user through the kernel's `run_output_as_user` (a bare binary resolved on the daemon's `PATH`; "no server running" is `[]`, a missing tmux `FAILED_PRECONDITION`), `parse_list_sessions`, `tmux_attach_argv` (`-T clipboard attach-session -t =<name>`), `tmux_binary` (`TDDY_TMUX_BINARY`, else `tmux`) and `ensure_reachable` — the roster's refusal, before a tmux tab spawns, of a user this daemon cannot become. A submodule, so `connection_service.rs` declares nothing for it |
 | `svc_terminal_ports/recorded_worktree.rs` | `recorded_worktree`: where a stopped session's tabs start — the worktree its session directory records under the daemon's data dir, or `FAILED_PRECONDITION` naming the session. A submodule, so `connection_service.rs` declares nothing for it |
 
 The `PeerRouted*` wrappers stay in this crate rather than in `tddy-session-agents` and `tddy-session-files`:

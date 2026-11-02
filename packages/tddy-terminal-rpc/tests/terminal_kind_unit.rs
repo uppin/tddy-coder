@@ -1,7 +1,7 @@
 //! `TerminalKind::from_request`: which terminal a `StartTerminalSession` names, including a tmux
 //! terminal and the tmux session it attaches to.
 //!
-//! PRD: docs/ft/web/1-WIP/PRD-2026-11-02-tmux-attach-tab.md (`#session-tabs 3/7`)
+//! Feature: docs/ft/daemon/terminal-sessions.md § tmux terminals (`#session-tabs 3/7`)
 
 use tddy_rpc::Code;
 use tddy_terminal_rpc::TerminalKind;

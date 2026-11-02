@@ -12,7 +12,7 @@ const dTmux = tddyDebug("tddy:term:tmux");
  * sessions come and go outside tddy, so a list cached from an earlier opening would offer stale
  * ones.
  *
- * PRD: docs/ft/web/1-WIP/PRD-2026-11-02-tmux-attach-tab.md (`#session-tabs 3/7`)
+ * Feature: docs/ft/web/session-terminal-tabs.md (`#session-tabs 3/7`)
  */
 export interface TmuxMenuState {
   /** The sessions from the last listing, in the host's order. */

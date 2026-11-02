@@ -5,10 +5,12 @@
 A session's detail pane has a **tab bar at the top** that lets the user switch between the coding
 agent and one or more extra terminals. Multiple terminals per session are supported. The first tab is
 the **Agent** (the coding-agent terminal, reserved id `"main"`) and is **not closable**; a **`+`**
-menu opens additional terminals, each a closable tab. An extra terminal runs either the login shell
-(**Bash**) or a registered CLI harness (Claude CLI, Cursor CLI, OpenCode, Muse Code, Warp) — an
-**agent tab**: a second, interactive agent in the same worktree as the session's main agent. The
-agents share the checkout and do not talk to each other; the operator coordinates them. Switching
+menu opens additional terminals, each a closable tab. An extra terminal runs the login shell
+(**Bash**), a registered CLI harness (Claude CLI, Cursor CLI, OpenCode, Muse Code, Warp) — an
+**agent tab**: a second, interactive agent in the same worktree as the session's main agent — or a
+**tmux tab**: a client attached to a tmux session already running on the session's host for the
+session's OS user. The agents share the checkout and do not talk to each other; the operator
+coordinates them. Switching
 tabs never tears a terminal down — every terminal of the focused session stays mounted and keeps
 streaming in the background (the same keep-alive model the per-session `SessionRuntimeRegistry`
 already uses across sessions).
@@ -44,9 +46,10 @@ styled like the inspector tab strip (`InspectorTabs`).
   Agent tab.
 - **Tab labels** are the terminal's kind with a per-kind ordinal, counted in tab order: **Bash 1**,
   **Bash 2**, **Warp 1**, **Claude CLI 1**. The kind name is the harness's label from the Create
-  pane's session-type toggle, or **Bash** for the login shell. On reattach the labels are rebuilt
-  from the `kind` each terminal carries in `ListTerminalSessions`, so a reloaded page shows the same
-  names.
+  pane's session-type toggle, or **Bash** for the login shell. A tmux tab is labelled by the tmux
+  session it is attached to instead — **tmux: alpha**. On reattach the labels are rebuilt from the
+  `kind` (and, for tmux, the `tmux_session`) each terminal carries in `ListTerminalSessions`, so a
+  reloaded page — and every other viewer — shows the same names.
 - **New-terminal menu** (`+`, `data-testid="sessions-terminal-tab-new"`): toggles a menu
   (`data-testid="sessions-terminal-tab-new-menu"`) whose items are **Bash**
   (`sessions-terminal-tab-new-bash`), then one per CLI harness
@@ -63,6 +66,20 @@ styled like the inspector tab strip (`InspectorTabs`).
     `sessions-terminal-error` with no tab opened — the same surface as any refused start.
   - The `+` sits in its own wrapper **outside** the tabs' horizontal scroller, beside it, so a long
     strip cannot push it out of reach and the menu is not clipped by the scroller.
+  - **tmux section**: below the bash and harness group, a group of its own listing the host's tmux
+    sessions (`ListTmuxSessions`, fetched afresh **each time the menu opens** — tmux sessions come and
+    go outside tddy). Each item (`sessions-terminal-tab-new-tmux-<name>`) shows the session's name,
+    its window count and, when any, its attached clients. Choosing one calls `StartTerminalSession`
+    with kind `tmux` and that `tmux_session`, and opens a **tmux: <name>** tab attached to it. While
+    the listing is in flight the section says "Loading tmux sessions…"
+    (`sessions-terminal-tab-new-tmux-loading`) rather than flashing an empty host; an empty listing
+    shows **No tmux sessions** (`sessions-terminal-tab-new-tmux-empty`); a refused listing (tmux not
+    installed) shows its reason inline (`sessions-terminal-tab-new-tmux-error`). The bash and harness
+    items are unaffected by whatever state the tmux listing is in. A tool session's menu has no tmux
+    section.
+  - **Closing a tmux tab detaches** its client: the tmux session keeps running and can be attached
+    again from the menu or from any real terminal. tmux runs on the alternate screen, which a
+    reattaching browser's snapshot open carries, so the tmux screen renders correctly on reload.
 - **Keep-alive**: the active tab's terminal is visible; the others are `display:none` but stay
   mounted and subscribed to their output stream, so switching back is instant and background
   terminals keep receiving bytes.
@@ -155,6 +172,10 @@ without resuming the agent first.
 10. A stopped (non-workflow) session shows the strip too: an **Agent** tab holding its recorded
     transcript, the terminals the daemon lists for it, its agent conversations, and `+`. Its terminals
     start in the session's recorded worktree and are still in the strip after Resume.
+11. The menu lists the host's tmux sessions for the session's OS user when it opens; choosing one
+    opens a **tmux: <name>** tab attached to it, which every viewer lists under the same label.
+    Closing it detaches, leaving the tmux session running. The section shows **No tmux sessions**
+    for an empty listing and the refusal's reason when tmux is unavailable.
 
 ## Non-goals
 
@@ -167,6 +188,8 @@ without resuming the agent first.
 - A model, first prompt or provider account for an agent tab; agent tabs inside a sandboxed
   session's jail; agent-to-agent messaging.
 - Per-terminal control leases (the mutex stays per-session).
+- Creating or killing a tmux session from tddy; tmux inside a sandboxed session's jail; tmux on a host
+  other than the session's.
 
 ## Related
 

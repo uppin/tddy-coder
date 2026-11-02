@@ -4,7 +4,7 @@
  * The "+" menu lists the tmux sessions on the session's host (`ListTmuxSessions`); choosing one
  * starts a `tmux` terminal attached to it, labelled `tmux: <name>`.
  *
- * PRD: docs/ft/web/1-WIP/PRD-2026-11-02-tmux-attach-tab.md (`#session-tabs 3/7`)
+ * Feature: docs/ft/web/session-terminal-tabs.md (`#session-tabs 3/7`)
  *
  * Driven over the deterministic gRPC path (empty `livekitRoom`), so every terminal RPC flows over
  * the daemon client into the in-memory backend.
