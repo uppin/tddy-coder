@@ -2,7 +2,7 @@
 //! (`tddy-coding-agent-specs`) is resolved on the host, its argv rendered from its `run:` template,
 //! its slots written, and it is spawned in a PTY — with nothing agent-specific in this path.
 //!
-//! PRD: `docs/ft/daemon/1-WIP/PRD-2026-10-31-claude-cli-from-spec.md` (`#agent-tools 2/12`). The
+//! Spec: `docs/ft/daemon/claude-cli-session.md` § Launch (`#agent-tools 2/12`). The
 //! unsandboxed `claude-cli` start and resume are its first callers; the jail (`#agent-tools 5/12`)
 //! reuses the rendering, not this launcher.
 

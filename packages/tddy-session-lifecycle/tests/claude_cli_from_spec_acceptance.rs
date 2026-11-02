@@ -2,7 +2,7 @@
 //! `claude` tool definition (`tddy-coding-agent-specs/specs/claude.yaml`) through the spec-driven
 //! host PTY launcher, and what reaches the process is what the hand-built launch produced.
 //!
-//! PRD: `docs/ft/daemon/1-WIP/PRD-2026-10-31-claude-cli-from-spec.md` (`#agent-tools 2/12`).
+//! Spec: `docs/ft/daemon/claude-cli-session.md` § Launch (`#agent-tools 2/12`).
 //!
 //! The host is given its coding agents as the daemon runtime gives them: the agent registry loaded
 //! from a `<tddyhome>/tools` directory, resolved against a fixture `ToolHost` whose `PATH` holds a

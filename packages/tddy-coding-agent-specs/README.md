@@ -11,4 +11,5 @@ context globs.
 - `CodingAgentSpec::of(&ToolDef)` — the validated view of one agent.
 - `slots::render` — the MCP file, flag argv, instruction files and hooks file for one launch.
 
-PRD: `docs/ft/daemon/1-WIP/PRD-2026-10-31-claude-cli-from-spec.md`.
+Details: [docs/coding-agent-specs.md](docs/coding-agent-specs.md). Product contract:
+[Claude CLI session § Launch](../../docs/ft/daemon/claude-cli-session.md#launch-from-the-claude-tool-definition).

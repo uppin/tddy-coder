@@ -1,6 +1,6 @@
 //! Coding agents as declared tools (`#agent-tools`).
 //!
-//! PRD: `docs/ft/daemon/1-WIP/PRD-2026-10-31-claude-cli-from-spec.md` (`#agent-tools 2/12`).
+//! Spec: `docs/ft/daemon/claude-cli-session.md` § Launch (`#agent-tools 2/12`).
 //!
 //! An agent is a `tddy_actions::tool::ToolDef`: its `run:` section is the argv template, its
 //! `deps` name the tools it calls back through (`tddy-tools`), and its `extensions.coding_agent`

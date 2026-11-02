@@ -1,6 +1,6 @@
 //! Acceptance: the spec-driven host PTY launcher runs PTY agents only.
 //!
-//! PRD: `docs/ft/daemon/1-WIP/PRD-2026-10-31-claude-cli-from-spec.md` (`#agent-tools 2/12`).
+//! Spec: `docs/ft/daemon/claude-cli-session.md` § Launch (`#agent-tools 2/12`).
 
 use std::path::PathBuf;
 use std::sync::Arc;

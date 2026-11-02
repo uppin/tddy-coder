@@ -1,7 +1,7 @@
 //! Acceptance: coding-agent specs load through the declared-tool registry, and a bad agent file
 //! is refused at load, naming what is wrong.
 //!
-//! PRD: `docs/ft/daemon/1-WIP/PRD-2026-10-31-claude-cli-from-spec.md` (`#agent-tools 2/12`).
+//! Spec: `docs/ft/daemon/claude-cli-session.md` § Launch (`#agent-tools 2/12`).
 
 use std::path::{Path, PathBuf};
 

@@ -168,3 +168,27 @@ On macOS the Seatbelt renderer emits `process-exec*` for an exec literal as well
 agent jails declare only exec subpaths, so their profiles are unchanged.
 
 **First client:** the workspace tool jail (below) runs `Grep` through the declared `rg`.
+
+**Running a tool.** A tool tddy spawns itself also declares `run:`. It holds an argv template, static
+`env` and a `transport` (`pty` or `stdio`). The template is structured, not a string language:
+
+- a literal is one argv entry, with `{name}` placeholders, and `{binary}` is always the resolved
+  binary;
+- `{ if: name, then: […], else: […] }` renders a segment when the parameter is bound to a non-empty
+  value;
+- `{ splice: name }` expands a list parameter in place.
+
+An unbound placeholder or list is an error naming it, never an empty entry. Nothing is passed through
+a shell.
+
+**Extensions.** `extensions:` is an open map from an owner name to a section that owner validates. It
+follows the same model as `BUILD.yaml`'s open `config`. `tddy-actions` never reads a section. A key
+no registered owner claims, or a section its owner refuses, fails the load naming the file.
+`tddy-coding-agent-specs` owns `coding_agent`: a coding agent is a tool whose `coding_agent` section
+declares its mapping slots. See
+[Claude CLI session § Launch](../daemon/claude-cli-session.md#launch-from-the-claude-tool-definition).
+
+**Built-in support tools.** `tddy-tools.yaml` (the MCP relay and hook binary every coding agent lists
+in `deps`) is a built-in. It sits apart from the jail tool set, so `ToolRegistry::builtin()` keeps
+offering exactly the jail tools. A host that launches coding agents builds its registry from both
+sets and the agent specs.
