@@ -196,10 +196,17 @@ result; a refusal lands in `sessions-terminal-error` and opens no tab. Tab label
 order as the kind's name plus a per-kind ordinal ("Bash 1", "Warp 1"), by `terminalKindLabel`.
 
 The `+` is `NewTerminalMenu.tsx`: a button and a `role="menu"` list of bash followed by
-`CLI_HARNESS_OPTIONS`, rendered in its own wrapper outside the tab scroller so the scroller cannot
-clip the menu. Its Escape and outside-press listeners are attached only while the menu is open. A
-`sessionType` of `"tool"` (passed from `SessionRuntime`) limits it to bash; an unset one offers every
-harness. `cliHarnessOptions.ts` is the one list both the menu and the Create pane's
+`CLI_HARNESS_OPTIONS`. `SessionTerminalTabs` renders it as the last child of the `overflow-x-auto`
+tab list, in a `sticky right-0 bg-background` wrapper, so it follows the last tab and stays at the
+scroller's edge when the tabs overflow; the full-screen control stays outside the scroller. The menu
+is portaled into `document.body` (a scroll container clips absolutely-positioned descendants) and
+placed under the button from its bounding rect, re-placed on resize and on any scroll while open, and
+clamped to the viewport with an 8px margin. Its `position`, `top`, `left` and `z-index` are inline
+styles: the coordinates are computed at run time, and the component harness loads no CSS, so classes
+alone painted the portaled menu under the page. The outside-press listener counts a press inside the
+portaled panel as inside. Its Escape and outside-press listeners are attached only while the menu is
+open. A `sessionType` of `"tool"` (passed from `SessionRuntime`) limits it to bash; an unset one offers
+every harness. `cliHarnessOptions.ts` is the one list both the menu and the Create pane's
 `CreateSessionTypeToggle` read (`SESSION_TYPE_OPTIONS`, `CLI_HARNESS_OPTIONS`, `BASH_KIND`,
 `TOOL_SESSION_TYPE`, `terminalKindLabel`).
 
