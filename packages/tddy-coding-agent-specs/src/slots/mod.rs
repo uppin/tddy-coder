@@ -178,6 +178,7 @@ mod tests {
                 mcp: McpSlot::File {
                     flag: "--mcp-config".to_string(),
                     format: McpFormat::ClaudeMcpJson,
+                    strict_flag: None,
                 },
                 tool_allow: ToolSlot::Flag(flag("--allowedTools")),
                 tool_deny: ToolSlot::Flag(flag("--disallowedTools")),

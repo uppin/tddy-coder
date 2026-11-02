@@ -18,6 +18,7 @@ use crate::hooks_and_urls;
 use tddy_cli_sessions::cli_session_manager::CliSessionManager;
 
 use crate::launch_ports::LaunchSessions;
+use crate::project_home_launch::ResumedFlags;
 use crate::session_provider_route::resume_route_env;
 use crate::spec_launch::{launch_claude_cli, ClaudeCliLaunch};
 use tddy_core::provider_route::Harness;
@@ -69,7 +70,7 @@ impl LaunchSessions {
             .unwrap_or_else(|| session_dir.clone());
         let is_split = split.is_some();
         // A role's wiring is not in a persisted argv, so a resumed agent is given it again.
-        let (split_args, split_env) = self
+        let (flags, split_env) = self
             .resumed_role(&meta, session_id, &session_dir, session_token)?
             .after_split(split);
 
@@ -144,7 +145,7 @@ impl LaunchSessions {
                 model: &model,
                 binary: &binary_owned,
                 append_system_prompt_file: append_system_prompt_file.as_deref(),
-                extra_args: split_args,
+                extra_args: flags.hand_built_args()?,
                 env: env_extra,
                 session_dir: session_dir.clone(),
                 ..Default::default()
@@ -156,11 +157,10 @@ impl LaunchSessions {
                 &worktree_path,
                 &model,
                 append_system_prompt_file.as_deref(),
-                split_args,
+                flags,
                 env_extra,
             )
-            .await
-            .map_err(|e| Status::internal(format!("failed to relaunch claude-cli: {}", e)))?
+            .await?
             .pid
         };
 
@@ -187,36 +187,44 @@ impl LaunchSessions {
 
 impl LaunchSessions {
     /// Spawn the process of a resumed claude-cli session — from the `claude` spec when the host has
-    /// coding agents, the hand-built argv otherwise. A resume never replays the prompt or carries a
-    /// permission mode over, and runs as the daemon.
+    /// coding agents, the hand-built argv otherwise. A resume never replays the
+    /// prompt or carries a permission mode over, never rewrites the hooks file its start wrote, and
+    /// runs as the daemon.
     async fn relaunch_claude_cli(
         &self,
         session_id: &str,
         worktree_path: &Path,
         model: &str,
         append_system_prompt_file: Option<&Path>,
-        extra_args: Vec<String>,
+        flags: ResumedFlags,
         env: Vec<(String, String)>,
-    ) -> anyhow::Result<Arc<tddy_cli_sessions::cli_session_manager::pty_handle::PtyHandle>> {
-        match self.coding_agents.as_deref() {
-            Some(agents) => Ok(launch_claude_cli(ClaudeCliLaunch {
-                agents,
-                config: &self.config,
-                manager: &self.claude_cli_manager,
-                session_id,
-                worktree: worktree_path,
-                model,
-                resume: true,
-                initial_prompt: None,
-                permission_mode: None,
-                dangerously_skip_permissions: false,
-                append_system_prompt_file,
-                extra_args,
-                env,
-                os_user: None,
-            })
-            .await?),
+    ) -> Result<Arc<tddy_cli_sessions::cli_session_manager::pty_handle::PtyHandle>, Status> {
+        let relaunched = match self.coding_agents.as_deref() {
+            Some(agents) => {
+                let (extra_args, toolset) = flags.spec_launch();
+                launch_claude_cli(ClaudeCliLaunch {
+                    agents,
+                    config: &self.config,
+                    manager: &self.claude_cli_manager,
+                    session_id,
+                    worktree: worktree_path,
+                    model,
+                    resume: true,
+                    initial_prompt: None,
+                    permission_mode: None,
+                    dangerously_skip_permissions: false,
+                    append_system_prompt_file,
+                    toolset,
+                    hooks: None,
+                    extra_args,
+                    env,
+                    os_user: None,
+                })
+                .await
+                .map_err(anyhow::Error::from)
+            }
             None => {
+                let extra_args = flags.hand_built_args()?;
                 self.claude_cli_manager
                     .resume_with_options(
                         session_id,
@@ -229,7 +237,8 @@ impl LaunchSessions {
                     )
                     .await
             }
-        }
+        };
+        relaunched.map_err(|e| Status::internal(format!("failed to relaunch claude-cli: {}", e)))
     }
 }
 

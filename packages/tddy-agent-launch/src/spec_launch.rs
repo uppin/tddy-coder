@@ -16,7 +16,9 @@ use tddy_actions::tool::{
 };
 use tddy_cli_sessions::cli_session_manager::pty_handle::PtyHandle;
 use tddy_cli_sessions::cli_session_manager::CliSessionManager;
-use tddy_coding_agent_specs::slots::{self, RenderedSlots, SlotError, SlotInputs};
+use tddy_coding_agent_specs::slots::{
+    self, McpServerCommand, RenderedSlots, SlotError, SlotInputs,
+};
 use tddy_coding_agent_specs::{CodingAgentSpec, SpecError};
 use tddy_daemon_kernel::config::DaemonConfig;
 
@@ -249,11 +251,33 @@ pub struct ClaudeCliLaunch<'a> {
     pub permission_mode: Option<&'a str>,
     pub dangerously_skip_permissions: bool,
     pub append_system_prompt_file: Option<&'a Path>,
-    /// Flags already rendered by the caller (a role's allow-list, a split session's MCP config),
-    /// placed after the slot flags and before the prompt.
+    /// The tool server registered and the tools pre-approved and withdrawn, through the slots.
+    pub toolset: AgentToolset,
+    /// The session the `hooks` slot writes its settings for; `None` leaves the hooks file alone (a
+    /// resume, which keeps the file its start wrote).
+    pub hooks: Option<tddy_core::HookCommandParams<'a>>,
+    /// Flags already rendered by the caller (a split session's wiring), placed after the slot flags
+    /// and before the prompt.
     pub extra_args: Vec<String>,
     pub env: Vec<(String, String)>,
     pub os_user: Option<&'a str>,
+}
+
+/// What a launch hands its agent to call: the tool server it registers, the tools it pre-approves
+/// and the tools it withdraws. Rendered by the agent's `mcp`, `tool_allow` and `tool_deny` slots.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct AgentToolset {
+    /// `None` registers nothing and adds no flag.
+    pub mcp: Option<McpRegistration>,
+    pub allowed_tools: Vec<String>,
+    pub denied_tools: Vec<String>,
+}
+
+/// An MCP server and the directory its registration file is written to.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct McpRegistration {
+    pub server: McpServerCommand,
+    pub dir: PathBuf,
 }
 
 /// The agent every `claude-cli` session runs.
@@ -267,21 +291,27 @@ pub async fn launch_claude_cli(
     let agent = launch
         .agents
         .resolve(CLAUDE_AGENT_ID, configured_binary(launch.config).as_deref())?;
-    // MCP and hooks are not slot inputs yet: the MCP flags arrive in `extra_args`, and the hooks
-    // file is still written by `install_claude_cli_hooks`.
-    // TODO(agent-tools 2/12): move the hooks file behind the `hooks` slot.
+    let AgentToolset {
+        mcp,
+        allowed_tools,
+        denied_tools,
+    } = launch.toolset;
+    let (mcp_server, scratch_dir) = match mcp {
+        Some(McpRegistration { server, dir }) => (Some(server), dir),
+        None => (None, launch.worktree.to_path_buf()),
+    };
     let mut slots = slots::render(
         &agent.spec,
         &SlotInputs {
             workdir: launch.worktree.to_path_buf(),
-            scratch_dir: launch.worktree.to_path_buf(),
-            mcp_server: None,
-            allowed_tools: Vec::new(),
-            denied_tools: Vec::new(),
+            scratch_dir,
+            mcp_server,
+            allowed_tools,
+            denied_tools,
             permission_prompt_tool: None,
             preamble: None,
             append_system_prompt_file: launch.append_system_prompt_file.map(Path::to_path_buf),
-            hooks: None,
+            hooks: launch.hooks,
         },
     )
     .map_err(SpecLaunchError::Slots)?;

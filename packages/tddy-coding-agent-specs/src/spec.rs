@@ -111,8 +111,15 @@ pub struct CodingAgentSection {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "kebab-case", deny_unknown_fields)]
 pub enum McpSlot {
-    /// A file in `format`, passed by `flag <path>`.
-    File { flag: String, format: McpFormat },
+    /// A file in `format`, passed by `flag <path>`, then `strict_flag` when the spec declares one.
+    File {
+        flag: String,
+        format: McpFormat,
+        /// Loads the registered servers and no other MCP configuration (`--strict-mcp-config`),
+        /// passed after the path. Optional: an agent without such a flag omits it.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        strict_flag: Option<String>,
+    },
 }
 
 /// The shape of an MCP registration file.

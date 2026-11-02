@@ -22,6 +22,7 @@ pub mod family_proto_bridge;
 pub mod harness_profile_request;
 pub mod harness_profile_start;
 pub mod hooks_and_urls;
+pub mod host_coding_agents;
 pub mod host_session_socket;
 pub mod inherited_host_sockets;
 pub mod jail_env_builders;

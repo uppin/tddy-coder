@@ -1,6 +1,7 @@
 use crate::claude_cli_tmux::ClaudeCliTmuxLaunch;
 use crate::hooks_and_urls;
 use crate::managed_launch;
+use crate::project_home_launch::{spec_role_launch, RoleWiring};
 use crate::spec_launch::{launch_claude_cli, ClaudeCliLaunch, HostCodingAgents};
 use tddy_cli_sessions::cli_session_manager::CliSessionManager;
 use tddy_session_split::service_util;
@@ -146,44 +147,75 @@ pub(super) fn spawned_claude_cli_branch(
     Ok(spawned_branch)
 }
 
+/// The lifecycle hooks a claude-cli start wires its agent to: the relay that reports them, where it
+/// reports, and the per-session token the daemon checks.
+pub(super) struct ClaudeCliHooks {
+    pub(super) tddy_tools_path: String,
+    daemon_url: String,
+    daemon_socket: Option<String>,
+    pub(super) hook_token: String,
+    answer_wait_secs: u64,
+}
+
+impl ClaudeCliHooks {
+    /// The hooks' command parameters for `session_id`, run by `os_user`.
+    pub(super) fn params<'a>(
+        &'a self,
+        session_id: &'a str,
+        os_user: &'a str,
+    ) -> tddy_core::HookCommandParams<'a> {
+        tddy_core::HookCommandParams {
+            tddy_tools_path: &self.tddy_tools_path,
+            daemon_url: &self.daemon_url,
+            session_id,
+            os_user,
+            hook_token: &self.hook_token,
+            daemon_socket: self.daemon_socket.as_deref(),
+            answer_wait_secs: self.answer_wait_secs,
+        }
+    }
+}
+
+/// A claude-cli start's hooks, with a fresh per-session token.
+///
 /// `tddy_data_dir` is the data dir the daemon *resolved* — `TDDY_DATA_DIR` included, which a
 /// configuration file need not agree with (`./desktop-dev` sets it absolute beside a relative
 /// `tmp/.tddy`) — because an embedded daemon's agent-tool socket path is digested from it.
-pub(super) fn install_claude_cli_hooks(
-    config: &DaemonConfig,
-    tddy_data_dir: &Path,
-    os_user: &str,
-    session_id: &str,
-    worktree_path: &Path,
-) -> (String, String) {
+pub(super) fn claude_cli_hooks(config: &DaemonConfig, tddy_data_dir: &Path) -> ClaudeCliHooks {
     let tddy_tools_path = tddy_daemon_sandbox::sandbox_session::resolve_tddy_tools_path(
         config
             .claude_cli
             .as_ref()
             .and_then(|c| c.tddy_tools_path.as_deref()),
     );
+    ClaudeCliHooks {
+        tddy_tools_path,
+        daemon_url: daemon_hook_urls::claude_hook_daemon_url(config),
+        // An embedded daemon serves no HTTP RPC; its hooks report over this socket.
+        daemon_socket: tddy_daemon_kernel::embedded_host_agent_tool_socket(tddy_data_dir),
+        hook_token: Uuid::new_v4().to_string(),
+        answer_wait_secs: config.claude_cli_answer_wait_secs(),
+    }
+}
 
-    let daemon_url = daemon_hook_urls::claude_hook_daemon_url(config);
-    // An embedded daemon serves no HTTP RPC; its hooks report over this socket.
-    let daemon_socket = tddy_daemon_kernel::embedded_host_agent_tool_socket(tddy_data_dir);
-
-    // Generate a per-session hook token and write .claude/settings.local.json into the
-    // worktree. Claude Code reads this file on startup and wires the six lifecycle hooks.
-    // Write failure is warn-and-continue so it never blocks the session from starting.
-    let hook_token = Uuid::new_v4().to_string();
+/// A claude-cli start's hooks ([`claude_cli_hooks`]), their `.claude/settings.local.json` written
+/// into the worktree — the hand-built launch's writer; a spec-driven launch renders the file through
+/// the `claude` spec's `hooks` slot instead. Claude Code reads this file on startup and wires the
+/// six lifecycle hooks. Write failure is warn-and-continue so it never blocks the session from
+/// starting.
+pub(super) fn install_claude_cli_hooks(
+    config: &DaemonConfig,
+    tddy_data_dir: &Path,
+    os_user: &str,
+    session_id: &str,
+    worktree_path: &Path,
+) -> ClaudeCliHooks {
+    let hooks = claude_cli_hooks(config, tddy_data_dir);
     tddy_session_split::service_util::write_claude_hooks_settings(
         worktree_path,
-        &tddy_core::HookCommandParams {
-            tddy_tools_path: &tddy_tools_path,
-            daemon_url: &daemon_url,
-            session_id,
-            os_user,
-            hook_token: &hook_token,
-            daemon_socket: daemon_socket.as_deref(),
-            answer_wait_secs: config.claude_cli_answer_wait_secs(),
-        },
+        &hooks.params(session_id, os_user),
     );
-    (tddy_tools_path, hook_token)
+    hooks
 }
 
 /// The notify wiring a claude-cli start and resume apply — see [`crate::notify_env`].
@@ -337,6 +369,8 @@ pub(super) struct ClaudeCliProcess<'a> {
     /// from the `claude` spec instead of the hand-built argv. `config` names daemon.yaml's
     /// `claude_cli.binary_path`.
     pub(super) coding_agents: Option<(&'a HostCodingAgents, &'a DaemonConfig)>,
+    /// The session's hooks: a spec-driven launch writes their settings through the `hooks` slot.
+    pub(super) hooks: &'a ClaudeCliHooks,
     /// A main's launch, carried out only now that nothing before the spawn can refuse the start.
     pub(super) main: Option<crate::project_home_launch::MainLaunchPlan<'a>>,
     /// Run `claude` inside a tmux session instead of as the PTY child ([`crate::claude_cli_tmux`]).
@@ -371,17 +405,19 @@ pub(super) async fn spawn_claude_cli_process(
         append_system_prompt_file,
         env_extra,
         coding_agents,
+        hooks,
         main,
         run_in_tmux,
         session_dir,
     } = launch;
-    let role_launch = crate::project_home_launch::RoleLaunch::of(main)?;
-    let env: Vec<(String, String)> = env_extra.into_iter().chain(role_launch.env).collect();
+    let role = RoleWiring::of(main)?;
     let spawned = match coding_agents {
         // TODO(agent-tools-cascade): a tmux-run start (`run_in_tmux`, #tmux-agent) still builds the
-        // hand-built argv in `claude_cli_tmux::start_claude_in_tmux`; confirm the spec-rendered argv
-        // (`spec_launch::launch_claude_cli`) should be the one started in the agent's tmux pane.
+        // hand-built argv in `claude_cli_tmux::start_claude_in_tmux` (and installs its hooks by
+        // hand); confirm the spec-rendered argv (`spec_launch::launch_claude_cli`) should be the one
+        // started in the agent's tmux pane.
         Some((agents, config)) if !run_in_tmux => {
+            let (extra_args, toolset) = spec_role_launch(role.main.as_ref());
             let handle = launch_claude_cli(ClaudeCliLaunch {
                 agents,
                 config,
@@ -394,8 +430,10 @@ pub(super) async fn spawn_claude_cli_process(
                 permission_mode: permission_mode_opt.as_deref(),
                 dangerously_skip_permissions,
                 append_system_prompt_file: append_system_prompt_file.as_deref(),
-                extra_args: role_launch.extra_args,
-                env,
+                toolset,
+                hooks: Some(hooks.params(session_id, os_user)),
+                extra_args,
+                env: env_extra.into_iter().chain(role.env).collect(),
                 os_user: Some(os_user),
             })
             .await
@@ -406,6 +444,8 @@ pub(super) async fn spawn_claude_cli_process(
             }
         }
         _ => {
+            let role_launch = role.hand_built()?;
+            let env = env_extra.into_iter().chain(role_launch.env).collect();
             let launch = ClaudeCliTmuxLaunch {
                 os_user,
                 session_id: &session_id_owned,

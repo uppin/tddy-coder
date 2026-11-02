@@ -207,13 +207,20 @@ pub(crate) async fn spawn_claude_cli_session_inner(
         .link_spawned_branch_without_failing_the_spawn(&sessions_base, &spawned_branch, session_id)
         .await;
 
-    let (tddy_tools_path, hook_token) = claude_cli_spawn_steps::install_claude_cli_hooks(
-        config,
-        tddy_data_dir,
-        os_user,
-        session_id,
-        &worktree_path,
-    );
+    // The hooks settings are written here on the hand-built launch, and by the `claude` spec's
+    // `hooks` slot at the spawn when the host has coding agents.
+    // A tmux-run start still launches the hand-built argv (see `spawn_claude_cli_process`), so it
+    // installs the hooks settings itself.
+    let hooks = match coding_agents {
+        Some(_) if !run_in_tmux => claude_cli_spawn_steps::claude_cli_hooks(config, tddy_data_dir),
+        _ => claude_cli_spawn_steps::install_claude_cli_hooks(
+            config,
+            tddy_data_dir,
+            os_user,
+            session_id,
+            &worktree_path,
+        ),
+    };
 
     // Spawn the claude CLI process in a PTY inside the real worktree. Resolve `claude` through the
     // shared host resolver — the same one the sandboxed path uses — so an explicit config path is
@@ -246,7 +253,7 @@ pub(crate) async fn spawn_claude_cli_session_inner(
                 task_registry,
                 session_dir: &session_dir,
                 worktree_path: &worktree_path,
-                tddy_tools_path,
+                tddy_tools_path: hooks.tddy_tools_path.clone(),
                 git_environment,
                 github_credential_handler,
             },
@@ -261,7 +268,7 @@ pub(crate) async fn spawn_claude_cli_session_inner(
             tddy_data_dir,
             os_user,
             session_id,
-            hook_token: &hook_token,
+            hook_token: &hooks.hook_token,
             session_dir: &session_dir,
             managed_prompt_file: append_system_prompt_file.as_deref(),
         },
@@ -297,6 +304,7 @@ pub(crate) async fn spawn_claude_cli_session_inner(
             append_system_prompt_file,
             env_extra,
             coding_agents: coding_agents.map(|agents| (agents, config)),
+            hooks: &hooks,
             main: role.main,
             run_in_tmux,
             session_dir: session_dir.clone(),
@@ -313,7 +321,7 @@ pub(crate) async fn spawn_claude_cli_session_inner(
         repo_path: Some(worktree_path.to_string_lossy().to_string()),
         pid: Some(pid),
         model: Some(model.to_string()),
-        hook_token: Some(hook_token),
+        hook_token: Some(hooks.hook_token),
         recipe: managed_recipe.as_ref().map(|r| r.name().to_string()),
         ssh_config_host: if ssh_alias.is_empty() {
             None

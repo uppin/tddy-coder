@@ -260,7 +260,8 @@ impl BuildContext {
             Arc::clone(shared_claude_cli_manager),
         );
 
-        let coding_agents = crate::coding_agents::host_coding_agents(config, tddy_data_dir)?;
+        let coding_agents =
+            tddy_agent_launch::host_coding_agents::host_coding_agents(config, tddy_data_dir)?;
 
         Ok(crate::livekit_host_ports::with_livekit_room_ports(
         connection_impl,

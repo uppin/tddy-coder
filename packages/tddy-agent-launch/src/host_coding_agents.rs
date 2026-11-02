@@ -5,11 +5,10 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use tddy_actions::tool::{ProcessToolHost, ToolHost};
-use tddy_agent_launch::spec_launch::HostCodingAgents;
 use tddy_coding_agent_specs::load_agent_registry;
-use tddy_daemon_kernel::config::{resolve_claude_binary_path, CLAUDE_BINARY_ENV};
+use tddy_daemon_kernel::config::{resolve_claude_binary_path, DaemonConfig, CLAUDE_BINARY_ENV};
 
-use crate::config::DaemonConfig;
+use crate::spec_launch::HostCodingAgents;
 
 /// The variable `tddy-tools.yaml` names for its binary override.
 const TDDY_TOOLS_BINARY_ENV: &str = "TDDY_TOOLS_BINARY";
