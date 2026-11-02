@@ -104,6 +104,7 @@ fn a_plan_for(session: &ASession, tools: Vec<ResolvedTool>) -> SandboxPlan {
 }
 
 /// The jail's `PATH`, as the plan declares it.
+#[cfg(target_os = "macos")]
 fn the_jail_path(plan: &SandboxPlan) -> String {
     plan.env.vars.get("PATH").cloned().expect("a jail PATH")
 }
