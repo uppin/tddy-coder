@@ -158,7 +158,7 @@ scripts/ci-status.sh <N> --watch      # block until the run finishes, then repor
 
 **Diagnosing a failed check.** The counts and failing test names come from check runs published by
 `mikepenz/action-junit-report`, so they are available over the API with no artifact download; the
-underlying `gh` calls, and the raw `junit-rust` / `junit-web` artifacts, are listed in
+underlying `gh` calls, and the raw `junit-rust-shard-i` / `junit-web` artifacts, are listed in
 `docs/dev/guides/ci.md` § Reading results. Classify each failure:
 
 | Class | Action |

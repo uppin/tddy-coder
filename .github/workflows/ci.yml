@@ -141,12 +141,12 @@ jobs:
           restore-prefixes-first-match: nix-${{ runner.os }}-
           save: false # rust-build is the sole writer; see the comment there
 
-      # Reads the cache `Rust tests` writes: it restores the dependency graph the unit leg built on
-      # master. It never saves — `Rust tests` builds the full set of test targets, so it is the one
-      # writer, and two writers on one key would race.
+      # Reads the cache `Rust tests shard 1` writes (`test-shard-1`): the third-party dependency
+      # graph, common to every shard. It never saves — each shard is the one writer of its own key,
+      # and two writers on one key would race.
       - uses: Swatinem/rust-cache@v2
         with:
-          shared-key: test
+          shared-key: test-shard-1
           save-if: false
 
       # `-p`/`--test` arguments derived from .config/rust-e2e.filterset. The script fails — and so does
@@ -191,10 +191,30 @@ jobs:
           if-no-files-found: error
           retention-days: 1
 
-  rust-test:
-    name: Rust tests
+  # One shard of the unit leg. The workspace's packages are cut into N contiguous groups balanced by
+  # test binaries (`nextest-windowed.ts --shard i/N`), and each shard windows its own group in two
+  # batches. Sharding is by package, never by nextest `--partition`: that partitions after every
+  # binary is built, and building is what fills a runner's disk. Even half the ~1,250 test binaries
+  # no longer fit one runner (run 41440040890: the runner itself died, out of disk), so the peak is
+  # now ~1/(3*2) of the set per batch. N is the length of `matrix.shard`; it is passed on from
+  # `strategy.job-total`. Raise it when a shard's `Disk after the tests` step runs low.
+  #
+  # rust-cache: each shard compiles a different slice, so each has its own key, `test-shard-<i>`,
+  # saved by that shard alone on master — one writer per key, so no two jobs race to reserve one
+  # (the loser would fail to save). `Rust e2e test archive` restores `test-shard-1` read-only: the
+  # third-party dependency graph, which is what the cache holds, is common to every shard, and its
+  # own e2e targets are rebuilt from source either way.
+  #
+  # The check this job publishes (`Rust tests shard i/N`) is not the one branch protection reads:
+  # that is `rust-test` below.
+  rust-test-shard:
+    name: Rust tests shard ${{ matrix.shard }}/${{ strategy.job-total }}
     runs-on: ubuntu-latest
     needs: rust-build
+    strategy:
+      fail-fast: false # a red shard must not hide the others' results
+      matrix:
+        shard: [1, 2, 3]
     # The first run on a cold cache builds 57 crates including libwebrtc. Later
     # runs restore master's cache and finish in a fraction of this.
     timeout-minutes: 150
@@ -220,10 +240,9 @@ jobs:
 
       - uses: Swatinem/rust-cache@v2
         with:
-          # The writer of the `test` cache: it builds every `--workspace` test target, so what it
-          # saves is what the e2e archive job restores (read-only). Only this job saves it — two
-          # writers on one key would race, and the second would fail to reserve it.
-          shared-key: test
+          # The only writer of this shard's key. `test-shard-1` is also what the e2e archive job
+          # restores (read-only); see the comment on the job.
+          shared-key: test-shard-${{ matrix.shard }}
           save-if: ${{ github.ref == 'refs/heads/master' }}
 
       # nextest builds the test targets itself. What it cannot produce is a
@@ -260,7 +279,8 @@ jobs:
         # .config/nextest.toml apply to every leg.
         run: |
           e2e="$(cat .config/rust-e2e.filterset)"
-          ./dev bun scripts/nextest-windowed.ts --batches 2 -- --profile ci --locked -E "not ($e2e)"
+          ./dev bun scripts/nextest-windowed.ts --batches 2 \
+            --shard "${{ matrix.shard }}/${{ strategy.job-total }}" -- --profile ci --locked -E "not ($e2e)"
 
       - name: Disk after the tests
         if: always()
@@ -268,23 +288,60 @@ jobs:
           df -h /
           du -sh target 2>/dev/null || true
 
+      - name: Upload JUnit XML
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: junit-rust-shard-${{ matrix.shard }}
+          path: target/nextest/ci/junit-*.xml
+          if-no-files-found: warn
+          retention-days: 14
+
+      - name: Fail the shard if nextest failed
+        if: ${{ steps.nextest.outcome == 'failure' }}
+        run: exit 1
+
+  # The check named `Rust tests`: the name branch protection requires, which the shards must not
+  # take. It publishes the one JUnit report for every shard (so scripts/ci-status.sh finds the
+  # failing tests and the count under that name) and fails unless every job it depends on
+  # succeeded. `!cancelled()` and the explicit gate matter: without them a failed shard would leave
+  # this check skipped, and a skipped check does not block a merge.
+  rust-test:
+    name: Rust tests
+    runs-on: ubuntu-latest
+    needs: [gate, rust-build, rust-test-shard]
+    if: ${{ !cancelled() && needs.gate.outputs.build == 'true' }}
+    timeout-minutes: 30
+    steps:
+      - name: Fetch every shard's JUnit XML
+        if: ${{ needs.rust-test-shard.result != 'skipped' }}
+        uses: actions/download-artifact@v7
+        with:
+          pattern: junit-rust-shard-*
+          path: shards
+
       - name: Publish test report
+        if: ${{ needs.rust-test-shard.result != 'skipped' }}
         uses: mikepenz/action-junit-report@v6
         with:
-          report_paths: target/nextest/ci/junit-*.xml
+          report_paths: shards/*/junit-*.xml
           check_name: Rust tests
           detailed_summary: true
           fail_on_failure: true
           require_tests: true
 
-      - name: Upload JUnit XML
-        if: always()
-        uses: actions/upload-artifact@v7
-        with:
-          name: junit-rust
-          path: target/nextest/ci/junit-*.xml
-          if-no-files-found: warn
-          retention-days: 14
+      - name: Fail unless every job this check stands for succeeded
+        if: ${{ always() }}
+        env:
+          RESULTS: ${{ join(needs.*.result, ' ') }}
+        run: |
+          echo "needed jobs: $RESULTS"
+          for result in $RESULTS; do
+            if [ "$result" != "success" ]; then
+              echo "::error::a job behind Rust tests ended '$result', not 'success'"
+              exit 1
+            fi
+          done
 
   # One shard of the e2e set. nextest `--partition hash:i/N` assigns each *test* (not each binary) to
   # a shard by a stable hash of its binary id and name, so the serial `rust-analyzer` group — 52
