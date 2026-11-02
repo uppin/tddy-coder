@@ -103,6 +103,7 @@ impl HostCodingAgents {
             command: def.binary.command.clone(),
             binary: canonical,
             reads: def.reads.clone(),
+            network: def.network.clone(),
         })
     }
 }
