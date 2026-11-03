@@ -1,7 +1,7 @@
 # Changeset: a terminal reports ready only once its initial content is written
 
 **Date**: 2026-11-03
-**Status**: 📋 Planned
+**Status**: 🟢 Green
 **Type**: Bug fix
 **Complexity**: 2/5 — one component, one package (`tddy-web`), no API change
 **Stack**: `#tmux-agent` 4/4 (sweep) — base `feature/tmux-agent/harnesses-in-tmux` (#816)

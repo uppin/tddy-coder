@@ -239,6 +239,12 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
     // times a second, and serializing a 50 000-line scrollback cell by cell on every poll pinned
     // the WebView at a full core even with no output arriving.
     const contentRevisionRef = useRef(0);
+    // The latest `initialContent`, read by the open path (the setup effect has `[]` deps).
+    const initialContentRef = useRef(initialContent);
+    initialContentRef.current = initialContent;
+    // The `initialContent` last written into the emulator, so the open path and the effect never
+    // write the same value twice.
+    const writtenInitialContentRef = useRef<string | undefined>(undefined);
     const bufferTextCacheRef = useRef<{
       term: Terminal;
       revision: number;
@@ -466,8 +472,16 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
         onResize?.({ cols: term.cols, rows: term.rows });
 
         logLife("term opened cols=%d rows=%d, calling onReady", term.cols, term.rows);
-        // `initialContent` is not written here: the `[initialContent, ready]` effect writes it once
-        // `ready` flips, and a second write would render it twice and copy its OSC 52 twice.
+        // Content present at open is written before ready is signalled, so ready means "showing
+        // what it was given". The `[initialContent, ready]` effect skips a value already written
+        // here, so it renders once and its OSC 52 is copied once.
+        const openContent = initialContentRef.current;
+        if (openContent) {
+          contentRevisionRef.current++;
+          term.write(openContent);
+          osc52Tap(openContent);
+          writtenInitialContentRef.current = openContent;
+        }
         setReady(true);
         onReady?.();
       }
@@ -491,11 +505,13 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
     }, []);
 
     useEffect(() => {
-      if (ready && initialContent && termRef.current) {
-        contentRevisionRef.current++;
-        termRef.current.write(initialContent);
-        osc52Tap(initialContent);
-      }
+      if (!ready || !termRef.current) return;
+      if (initialContent === writtenInitialContentRef.current) return;
+      writtenInitialContentRef.current = initialContent;
+      if (!initialContent) return;
+      contentRevisionRef.current++;
+      termRef.current.write(initialContent);
+      osc52Tap(initialContent);
     }, [initialContent, ready]);
 
     useEffect(() => {
