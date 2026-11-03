@@ -5,9 +5,11 @@
 //! its final screen survives for the hook to read. Nothing else tells the agent's end from a
 //! client's, so a watcher polls the pane until it has exited; then the hook runs, and the tmux
 //! session is ended. The watcher ends when the session is gone without an exited pane (killed by
-//! someone else), and runs nothing then.
+//! someone else), and runs nothing then. A daemon shutdown ([`CliSessionManager::kill_all`]) stops
+//! the watchers still polling — the agent outlives the daemon, and the next daemon's re-attach
+//! watches it again — but never a hook already running.
 
-use std::collections::HashSet;
+use std::collections::HashMap;
 use std::sync::{Arc, Mutex, PoisonError};
 use std::time::Duration;
 
@@ -23,7 +25,30 @@ pub(crate) const EXIT_HOOK_POLL_INTERVAL: Duration = Duration::from_secs(1);
 
 /// The sessions whose agent already has a watcher: a second registration for one of them is
 /// dropped, because the watcher holds the hook of the run that is still going.
-pub(super) type ExitHookWatched = Arc<Mutex<HashSet<String>>>;
+pub(super) type ExitHookWatched = Arc<Mutex<ExitHookWatchers>>;
+
+/// The running exit-hook watchers, and whether new ones may start: a manager that has shut down
+/// starts none.
+#[derive(Default)]
+pub(crate) struct ExitHookWatchers {
+    closed: bool,
+    /// `session_id → watcher`; `None` once its hook runs, which a shutdown does not interrupt.
+    by_session: HashMap<String, Option<tokio::task::AbortHandle>>,
+}
+
+impl ExitHookWatchers {
+    /// Stop every watcher still waiting for its agent to exit, and refuse new ones.
+    pub(crate) fn close(&mut self) {
+        self.closed = true;
+        self.by_session.retain(|_, watcher| match watcher {
+            Some(waiting) => {
+                waiting.abort();
+                false
+            }
+            None => true,
+        });
+    }
+}
 
 /// The output an exit hook is handed for a tmux-run main that ended as `exit`: the final screen
 /// as a capture when the agent ended, `None` — and `final_screen` never called — when only the
@@ -66,6 +91,7 @@ impl CliSessionManager {
     ///
     /// Called again for a session whose agent is already watched (a second resume of a live
     /// session), the new hook is dropped: the watcher holds the hook of the run that is going.
+    /// Nothing starts once the manager has shut down.
     pub fn run_exit_hook_on_agent_exit(
         &self,
         session_id: &str,
@@ -73,12 +99,12 @@ impl CliSessionManager {
         name: &str,
         on_exit: ExitHook,
     ) {
-        let newly_watched = self
+        // Held across the spawn, so a concurrent `close` either sees this watcher or stops it first.
+        let mut watchers = self
             .exit_hook_watched
             .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .insert(session_id.to_string());
-        if !newly_watched {
+            .unwrap_or_else(PoisonError::into_inner);
+        if watchers.closed || watchers.by_session.contains_key(session_id) {
             return;
         }
         let watch = ExitHookWatch {
@@ -90,20 +116,35 @@ impl CliSessionManager {
             os_user.to_string(),
             name.to_string(),
         );
-        tokio::spawn(async move {
+        let key = session_id.clone();
+        let watcher = tokio::spawn(async move {
             watch.run(session_id, os_user, name, on_exit).await;
         });
+        watchers
+            .by_session
+            .insert(key, Some(watcher.abort_handle()));
     }
 }
 
 impl ExitHookWatch {
     async fn run(self, session_id: String, os_user: String, name: String, on_exit: ExitHook) {
         if wait_for_agent_exit(&os_user, &name).await {
+            // From here on a shutdown no longer stops the watcher: the hook runs to its end.
+            if let Some(watcher) = self
+                .watched
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .by_session
+                .get_mut(&session_id)
+            {
+                *watcher = None;
+            }
             self.run_hook(&session_id, &os_user, &name, on_exit).await;
         }
         self.watched
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
+            .by_session
             .remove(&session_id);
     }
 

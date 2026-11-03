@@ -202,6 +202,12 @@ impl CliSessionManager {
         // Closed before the clients are cancelled: each cancelled tmux-run main exits as a client
         // only, and a watcher started for it now would outlive the shutdown.
         self.detached_watchers.write().await.close();
+        // The same for the exit-hook watchers: the agent outlives the daemon, and the next
+        // daemon's re-attach watches it again.
+        self.exit_hook_watched
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .close();
         let task_ids = self.drain_terminals().await;
         if task_ids.is_empty() {
             log::debug!(

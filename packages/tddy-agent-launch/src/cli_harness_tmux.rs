@@ -6,8 +6,11 @@
 //! pane's — for a harness whose argv the caller has already built (the registry's, plus a route's
 //! arguments; cursor's chat-id argv). A harness with an exit hook runs it on the *agent's* exit
 //! with the pane's final screen (`remain-on-exit`), never on a client's.
+//!
+//! After a daemon restart the main terminal is re-attached lazily, on the first stream
+//! ([`reattach_recorded_harness`]), and the exit hook is watched again from then on.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use tddy_cli_sessions::cli_session_manager::{CliSessionManager, ExitHook};
 use tddy_cli_sessions::tmux::{
@@ -18,6 +21,7 @@ use tddy_rpc::Status;
 
 pub use crate::claude_cli_tmux::TmuxLaunched;
 use crate::claude_cli_tmux::{in_tmux_blocking, stop_tmux_session_of_failed_start};
+use crate::cli_resume_token::resume_token_recorder;
 
 /// What a tmux-run harness is launched with.
 pub struct HarnessTmuxLaunch<'a> {
@@ -118,7 +122,15 @@ pub async fn resume_harness_in_tmux(
             })?
     };
     match state {
-        PaneState::Running => reattach_running_harness(manager, launch, name).await,
+        PaneState::Running => {
+            let running = RunningHarness {
+                os_user: launch.os_user,
+                session_id: launch.session_id,
+                worktree_path: launch.worktree_path,
+                kind: launch.kind,
+            };
+            reattach_running_harness(manager, running, launch.on_exit, name).await
+        }
         PaneState::Exited | PaneState::SessionGone => {
             if state == PaneState::Exited {
                 log::warn!(
@@ -140,21 +152,29 @@ pub async fn resume_harness_in_tmux(
     }
 }
 
+/// A tmux-run harness session whose agent is running, for a re-attach.
+struct RunningHarness<'a> {
+    os_user: &'a str,
+    session_id: &'a str,
+    worktree_path: PathBuf,
+    /// The main terminal's kind: the session type.
+    kind: &'a str,
+}
+
 /// Re-attach the main terminal to the running agent of tmux session `name`, re-record its pane's
 /// pid, and register the exit hook again: a daemon restart lost the watcher that held it.
 async fn reattach_running_harness(
     manager: &CliSessionManager,
-    launch: HarnessTmuxLaunch<'_>,
+    running: RunningHarness<'_>,
+    on_exit: Option<ExitHook>,
     name: String,
 ) -> Result<TmuxLaunched, Status> {
-    let HarnessTmuxLaunch {
+    let RunningHarness {
         os_user,
         session_id,
         worktree_path,
         kind,
-        on_exit,
-        ..
-    } = launch;
+    } = running;
     // The pane's pid is read before a client is attached, so a failure to read it leaves nothing
     // attached behind.
     let pid = {
@@ -183,4 +203,92 @@ async fn reattach_running_harness(
         pane_pid: pid,
         tmux_session: name,
     })
+}
+
+/// A tmux-run harness session (cursor-cli, opencode-cli, muse-cli, warp-cli) as its
+/// `.session.yaml` records it, for the lazy re-attach of its main terminal.
+pub struct RecordedHarness<'a> {
+    pub os_user: &'a str,
+    pub session_id: &'a str,
+    /// The session type the session recorded, which is the main terminal's kind.
+    pub session_type: &'a str,
+    pub worktree_path: PathBuf,
+    pub session_dir: &'a Path,
+}
+
+/// Re-attach the main terminal of a recorded tmux-run harness session whose daemon or client went
+/// away — the agent is not relaunched — and watch its agent's exit again, so its exit hook (Warp's
+/// resume token) runs even when the agent exits with no client attached. `true` when a main is
+/// attached; `false` when there is none to attach: the tmux session is gone, or its agent exited
+/// while no daemon watched it, in which case the exit hook runs now on the pane's final screen and
+/// ends the tmux session.
+pub async fn reattach_recorded_harness(
+    manager: &CliSessionManager,
+    recorded: RecordedHarness<'_>,
+) -> Result<bool, Status> {
+    let RecordedHarness {
+        os_user,
+        session_id,
+        session_type,
+        worktree_path,
+        session_dir,
+    } = recorded;
+    let name = agent_tmux_session_name(session_id);
+    let state = {
+        let (probe_user, probe_name) = (os_user.to_string(), name.clone());
+        in_tmux_blocking(move || pane_state(&probe_user, &probe_name))
+            .await?
+            .map_err(|e| {
+                Status::internal(format!(
+                    "could not read the pane of tmux session {name:?}: {e}"
+                ))
+            })?
+    };
+    let on_exit = recorded_exit_hook(session_type, session_dir);
+    match (state, on_exit) {
+        (PaneState::Running, on_exit) => {
+            let running = RunningHarness {
+                os_user,
+                session_id,
+                worktree_path,
+                kind: session_type,
+            };
+            reattach_running_harness(manager, running, on_exit, name).await?;
+            Ok(true)
+        }
+        (PaneState::Exited, Some(on_exit)) => {
+            log::info!(
+                target: "tddy_daemon::claude_cli_session",
+                "the agent of {session_id} exited while no daemon watched tmux session {name:?}: running its exit hook on the final screen"
+            );
+            manager.run_exit_hook_on_agent_exit(session_id, os_user, &name, on_exit);
+            Ok(false)
+        }
+        // A pane kept without a hook to read it holds nothing anyone needs.
+        (PaneState::Exited, None) => {
+            let (end_user, end_name) = (os_user.to_string(), name.clone());
+            in_tmux_blocking(move || kill_tmux_session(&end_user, &end_name))
+                .await?
+                .map_err(|e| {
+                    Status::internal(format!("could not end tmux session {name:?}: {e}"))
+                })?;
+            Ok(false)
+        }
+        (PaneState::SessionGone, _) => Ok(false),
+    }
+}
+
+/// The exit hook a re-attached harness is watched with — the one its launch registered. Every
+/// harness the generic launcher runs (opencode, muse, warp) records the resume token its run
+/// prints as it exits; claude-cli and cursor-cli register none. The session's metadata is already
+/// on disk, so the recorder is armed at once.
+fn recorded_exit_hook(session_type: &str, session_dir: &Path) -> Option<ExitHook> {
+    let generic = tddy_core::cli_harness::cli_harness(session_type).is_some()
+        && !matches!(session_type, "claude-cli" | "cursor-cli");
+    if !generic {
+        return None;
+    }
+    let (hook, arm) = resume_token_recorder(session_dir.to_path_buf());
+    arm.arm();
+    Some(hook)
 }

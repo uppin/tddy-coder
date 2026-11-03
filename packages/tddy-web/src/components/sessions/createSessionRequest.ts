@@ -244,8 +244,9 @@ export function buildStartSessionRequest(
  * Whether the request carries `run_in_tmux`: the operator's choice, for every CLI harness type, and
  * never with the sandbox, the jailed codebase or a split placement, each of which the daemon
  * refuses together with it. Read off the form rather than off the request: the opencode, muse and
- * warp returns send `sandbox: false`, but a sandbox left on from another session type still
- * withholds it.
+ * warp returns send `sandbox: false` whatever the form holds. (The pane clears a sandbox or jailed
+ * codebase left on from another session type when it switches to one without the control —
+ * `useCreateSessionPlacement` — so the form does not hold one there.)
  */
 function runInTmuxChoice(form: CreateSessionFormValues): boolean {
   return (

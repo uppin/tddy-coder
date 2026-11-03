@@ -81,10 +81,13 @@ Real dependency edges: `n1 → n2 → n3`, `n1 → n3`
 - [x] `a_live_tmux_run_harness_session_is_reattached_on_resume`
 - [x] `a_warp_session_in_tmux_records_its_resume_token_from_the_final_screen`
 - [x] `a_client_exit_does_not_run_a_harness_exit_hook`
+- [x] 🆕 `a_fresh_daemon_reattaches_a_live_harness_session_on_first_stream_without_restarting_it` (opencode, warp — same pane pid, the main keeps its kind)
+- [x] 🆕 `a_warp_agent_that_exits_while_detached_after_a_restart_records_its_resume_token`
 
 **`tddy-web`**: `packages/tddy-web/cypress/component/CreateSessionRunInTmuxAcceptance.cy.tsx` (extended)
 - [x] `the Create pane offers "Run the agent in tmux" for every CLI harness type`
 - [x] `opencode, muse and warp send run_in_tmux when checked` (one case per type: `opencode-cli|muse-cli|warp-cli sends run_in_tmux when checked`)
+- [x] 🆕 `a sandbox left on from claude-cli does not disable the option for opencode-cli`
 
 ### Unit / integration tests
 - [x] `tddy-cli-sessions`: `remain_on_exit_args` / `capture_pane_args` arg shape (unit, `tmux.rs`); `exit_hook_capture` reads the pane on agent exit only (`tests/tmux_exit_hook.rs`) — red on stubs.
@@ -93,6 +96,9 @@ Real dependency edges: `n1 → n2 → n3`, `n1 → n3`
 
 - **`remain-on-exit` + `capture-pane`** for the exit hook — the pane's final screen is the only place Warp's banner survives once the pane's process exits.
 - **cursor as the session's OS user in tmux mode only** (developer, 2026-11-03).
+- **Harness re-attach and exit-watch parity** (developer, 2026-11-03, sent back to /green from /validate-changes): the lazy re-attach after a daemon restart (n2's `MainReattach` port → `claude_cli_tmux::reattach_recorded_main`) dispatches by the recorded `session_type` — claude-cli as before, every other CLI harness through `cli_harness_tmux::reattach_recorded_harness` with the session's own terminal kind — and a re-attached opencode/muse/warp agent is watched for its exit again (its resume-token recorder, armed at once), so Warp's token is recorded even when the agent exits with no client attached. A pane found already dead runs the hook on its final screen and attaches nothing. A daemon shutdown (`kill_all`) now stops the exit-hook watchers still polling — never a hook already running — like n2's detach watchers, so the next daemon's watcher is the one that runs it.
+- **Create pane: placement reset on a type switch** (developer, 2026-11-03): switching to a session type without the control clears the sandbox (types other than claude-cli and cursor-cli) and the jailed codebase (types other than claude-cli), so a placement left on from claude or cursor no longer disables the tmux toggle for opencode, muse or warp (`useCreateSessionPlacement`).
+- **Contract deviations kept from /green** (for review): the toggle takes `unavailable` instead of `sandbox` (one rule for claude and the harnesses); pane commands target `=<name>:` because a bare session target fails on tmux 3.6a; `pane_state` reads empty output as the session being gone (tmux 3.6a answers an absent session with success and no output).
 
 ## TODO
 
@@ -144,9 +150,7 @@ Deviations from the contract, for review:
 - The exit-hook watcher polls the pane once a second. The exit settlement is registered only when the agent's exit is seen.
 - `CreateSessionRunInTmuxToggle` takes `unavailable` where the contract named `sandbox`, so the claude and harness rules are one rule.
 
-Needs a human decision:
-
-- Placement state is shared across session types. A sandbox or sandboxed codebase left on from claude or cursor disables the tmux checkbox for opencode, muse and warp, which have no sandbox control, with no visible reason.
+Decided by the developer and implemented at /validate-changes (see Decisions): placement reset on a type switch, and harness re-attach / exit-watch parity after a restart. The earlier deviation "a resumed session whose agent exited while no daemon watched it is ended and started afresh, its exit hook not run" still holds for **ResumeSession** — the lazy re-attach (first stream) now runs the hook on such a pane instead.
 
 Environment, not this change:
 

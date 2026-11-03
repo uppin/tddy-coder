@@ -140,4 +140,27 @@ describe("CreateSession run-in-tmux option", () => {
         });
       });
     });
+
+  it("a sandbox left on from claude-cli does not disable the option for opencode-cli", () => {
+    // Given a claude-cli form with the sandbox on
+    const backend = aCreateSessionBackend();
+    mountCreatePane(backend);
+    byTestId(TEST_IDS.createSessionTypeClaudeCliBtn).click();
+    byTestId(TEST_IDS.createSessionSandboxToggle).check();
+    byTestId(TEST_IDS.createSessionTmuxToggle).should("be.disabled");
+
+    // When the operator switches to opencode-cli, which has no sandbox control, and asks for tmux
+    byTestId(TEST_IDS.createSessionTypeOpenCodeCliBtn).click();
+    byTestId(TEST_IDS.createSessionProjectSelect).select("proj-1");
+    byTestId(TEST_IDS.createSessionTmuxToggle).should("not.be.disabled").check();
+    byTestId(TEST_IDS.createSessionSubmitBtn).should("not.be.disabled").click();
+
+    // Then the request carries run_in_tmux
+    cy.wrap(null).should(() => {
+      const calls = backend.callsTo(SessionService.method.startSession);
+      expect(calls).to.have.length(1);
+      expect(calls[0].sessionType).to.eq("opencode-cli");
+      expect(calls[0].runInTmux).to.eq(true);
+    });
+  });
 });

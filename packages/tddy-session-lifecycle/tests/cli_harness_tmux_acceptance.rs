@@ -23,6 +23,12 @@ use tddy_service::proto::session::{
 };
 use tddy_session_lifecycle::claude_cli_session::ClaudeCliSessionManager;
 use tddy_session_lifecycle::connection_service::DaemonSessionHost;
+use tddy_terminal_rpc::bridge::MAIN_TERMINAL_ID;
+use tddy_terminal_rpc::proto::terminal_session::{
+    StreamReplayMode, StreamTerminalOutputRequest,
+    TerminalSessionService as TerminalSessionServiceTrait,
+};
+use tddy_terminal_rpc::session::TerminalSessionStore;
 use tddy_testing_commons::stub_scripts::{a_stub_agent_script, read_last_appended_argv};
 use tddy_testing_commons::wait::{eventually, eventually_awaiting};
 
@@ -208,6 +214,26 @@ fn a_registered_project(sessions_base: &Path) -> tempfile::TempDir {
     repo_dir
 }
 
+/// The first stream of `session_id`'s main terminal from `host` — what re-attaches it lazily.
+async fn first_stream_of_the_main_terminal(
+    host: &DaemonSessionHost,
+    session_id: &str,
+) -> Result<(), tddy_rpc::Status> {
+    host.terminal_session_service()
+        .stream_terminal_output(Request::direct(StreamTerminalOutputRequest {
+            session_token: VALID_TOKEN.to_string(),
+            session_id: session_id.to_string(),
+            terminal_id: MAIN_TERMINAL_ID.to_string(),
+            initial_cols: 0,
+            initial_rows: 0,
+            mode: StreamReplayMode::Tail as i32,
+            from_offset: 0,
+            control_token: String::new(),
+        }))
+        .await
+        .map(|_| ())
+}
+
 fn a_start_request(session_type: &str) -> StartSessionRequest {
     StartSessionRequest {
         session_token: VALID_TOKEN.to_string(),
@@ -248,11 +274,20 @@ impl HarnessTmuxDaemon {
 
     /// A daemon restarted over the same sessions directory: no terminals registered, same tmux.
     fn restarted(&self) -> Arc<DaemonSessionHost> {
-        a_session_host(
+        self.restarted_with_its_manager().0
+    }
+
+    /// [`Self::restarted`], with the restarted daemon's terminal manager.
+    fn restarted_with_its_manager(
+        &self,
+    ) -> (Arc<DaemonSessionHost>, Arc<ClaudeCliSessionManager>) {
+        let manager = Arc::new(ClaudeCliSessionManager::new());
+        let host = a_session_host(
             self.config.clone(),
             self.sessions_base.clone(),
-            Arc::new(ClaudeCliSessionManager::new()),
-        )
+            Arc::clone(&manager),
+        );
+        (host, manager)
     }
 
     async fn until_launched_in(&self, name: &str) {
@@ -267,16 +302,30 @@ impl HarnessTmuxDaemon {
     }
 
     async fn until_the_main_left_the_registry(&self, session_id: &str) {
+        Self::until_the_main_left(&self.manager, session_id).await;
+    }
+
+    async fn until_the_main_left(manager: &ClaudeCliSessionManager, session_id: &str) {
         eventually_awaiting(
             "the main terminal to leave the registry",
             OBSERVE,
             || async {
-                match self.manager.get(session_id).await {
+                match manager.get(session_id).await {
                     None => Ok(()),
                     Some(_) => Err("the main terminal is still registered".to_string()),
                 }
             },
         )
+        .await;
+    }
+
+    async fn until_the_resume_token_is(&self, session_id: &str, token: &str) {
+        eventually("the resume token to be recorded", OBSERVE, || {
+            match self.metadata_of(session_id).harness_resume_token {
+                Some(recorded) if recorded == token => Ok(()),
+                other => Err(format!("recorded token: {other:?}")),
+            }
+        })
         .await;
     }
 
@@ -467,4 +516,88 @@ async fn a_client_exit_does_not_run_a_harness_exit_hook() {
     // Then no token was recorded from the banner, and the agent's tmux session is alive
     assert_eq!(daemon.metadata_of(&session_id).harness_resume_token, None);
     assert!(daemon.tmux.has_session(&name));
+}
+
+#[tokio::test]
+#[serial_test::serial]
+async fn a_fresh_daemon_reattaches_a_live_harness_session_on_first_stream_without_restarting_it() {
+    for session_type in ["opencode-cli", "warp-cli"] {
+        // Given a tmux-run harness session that outlived its daemon
+        let daemon = a_daemon_with_a_private_tmux(false).await;
+        let session_id = daemon.starts_in_tmux(session_type).await;
+        let name = daemon.tmux_session_of(&session_id);
+        daemon.until_launched_in(&name).await;
+        let agent_pid = daemon.metadata_of(&session_id).pid;
+        daemon.host.shut_down_children().await;
+        until_attached(&daemon.tmux, &name, 0).await;
+        let (fresh, fresh_manager) = daemon.restarted_with_its_manager();
+
+        // When a client first streams the session's main terminal from the fresh daemon
+        let streamed = first_stream_of_the_main_terminal(&fresh, &session_id).await;
+
+        // Then a client is attached to the same tmux session and the harness was not relaunched
+        assert!(
+            streamed.is_ok(),
+            "{session_type}: the first stream re-attaches the main terminal: {streamed:?}"
+        );
+        assert!(
+            fresh
+                .terminal_sessions()
+                .get_terminal(&session_id, MAIN_TERMINAL_ID)
+                .await
+                .is_some(),
+            "{session_type}: the main terminal is registered"
+        );
+        let main = fresh_manager
+            .get(&session_id)
+            .await
+            .expect("the re-attached main is in the registry");
+        assert_eq!(main.kind, session_type, "the main keeps its session's kind");
+        until_attached(&daemon.tmux, &name, 1).await;
+        assert_eq!(daemon.launch_count(), 1, "{session_type} was not relaunched");
+        assert_eq!(daemon.metadata_of(&session_id).pid, agent_pid, "{session_type}");
+    }
+}
+
+#[tokio::test]
+#[serial_test::serial]
+async fn a_warp_agent_that_exits_while_detached_after_a_restart_records_its_resume_token() {
+    // Given a warp session in tmux that outlived its daemon, re-attached by a fresh daemon whose
+    // client then detached — no client is attached while the agent runs
+    let daemon = a_daemon_with_a_private_tmux(false).await;
+    let session_id = daemon.starts_in_tmux("warp-cli").await;
+    let name = daemon.tmux_session_of(&session_id);
+    daemon.until_launched_in(&name).await;
+    daemon.host.shut_down_children().await;
+    until_attached(&daemon.tmux, &name, 0).await;
+    let (fresh, fresh_manager) = daemon.restarted_with_its_manager();
+    first_stream_of_the_main_terminal(&fresh, &session_id)
+        .await
+        .expect("the first stream re-attaches the main terminal");
+    until_attached(&daemon.tmux, &name, 1).await;
+    assert!(daemon
+        .tmux
+        .tmux(&["detach-client", "-s", &name])
+        .status
+        .success());
+    HarnessTmuxDaemon::until_the_main_left(&fresh_manager, &session_id).await;
+    assert_eq!(daemon.metadata_of(&session_id).harness_resume_token, None);
+
+    // When warp exits (end of input), its banner on the final screen
+    let pane = format!("={name}:");
+    assert!(daemon
+        .tmux
+        .tmux(&["send-keys", "-t", &pane, "C-d"])
+        .status
+        .success());
+
+    // Then the fresh daemon read the token from the final screen and recorded it
+    daemon.until_the_resume_token_is(&session_id, "tok-123").await;
+    // And ended the tmux session with the hook
+    eventually("the tmux session to be killed", OBSERVE, || {
+        (!daemon.tmux.has_session(&name))
+            .then_some(())
+            .ok_or_else(|| format!("tmux still has {name:?}"))
+    })
+    .await;
 }
