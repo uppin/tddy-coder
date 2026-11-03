@@ -1,3 +1,5 @@
+use std::path::Path;
+
 use tddy_core::cli_harness::{cli_harness, CliLaunch};
 
 use super::CliSessionManager;
@@ -51,6 +53,59 @@ impl CliSessionManager {
                 ..CliLaunch::default()
             },
         )
+    }
+
+    /// The argv of a claude process as [`Self::start_with_options`] launches it: [`Self::build_claude_argv`],
+    /// with `--append-system-prompt-file` and `extra_args` inserted before any positional prompt, so
+    /// every flag precedes the prompt.
+    ///
+    /// Shared by the PTY launch and the tmux launch (`tddy_agent_launch::claude_cli_tmux`), so the
+    /// two cannot build different argument lists for the same session.
+    #[allow(clippy::too_many_arguments)]
+    pub fn build_claude_cli_argv(
+        binary_path: &str,
+        model: &str,
+        session_id: &str,
+        initial_prompt: Option<&str>,
+        permission_mode: Option<&str>,
+        dangerously_skip_permissions: bool,
+        resume: bool,
+        append_system_prompt_file: Option<&Path>,
+        extra_args: Vec<String>,
+    ) -> Vec<String> {
+        let mut argv = Self::build_claude_argv(
+            binary_path,
+            model,
+            session_id,
+            initial_prompt,
+            permission_mode,
+            dangerously_skip_permissions,
+            resume,
+        );
+        // Insert before a trailing positional prompt (if any) so every flag precedes the prompt.
+        let has_positional_prompt = initial_prompt.is_some_and(|p| !p.trim().is_empty());
+        let insert_at = |argv: &Vec<String>| {
+            if has_positional_prompt {
+                argv.len() - 1
+            } else {
+                argv.len()
+            }
+        };
+        if let Some(path) = append_system_prompt_file {
+            let at = insert_at(&argv);
+            argv.splice(
+                at..at,
+                [
+                    "--append-system-prompt-file".to_string(),
+                    path.to_string_lossy().into_owned(),
+                ],
+            );
+        }
+        if !extra_args.is_empty() {
+            let at = insert_at(&argv);
+            argv.splice(at..at, extra_args);
+        }
+        argv
     }
 
     /// Build the argv for the Cursor Agent CLI process.

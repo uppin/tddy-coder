@@ -10,7 +10,40 @@ use super::pty_handle;
 
 use tddy_terminal_rpc::service::TMUX_KIND;
 
+use crate::tmux::kill_tmux_session;
+
 use std::sync::Arc;
+
+/// Kill the tmux session `name` of a terminal registered as `os_user`, in the blocking pool. A
+/// failure is logged and not returned: shutdown must still stop every other child.
+async fn kill_tmux_session_at_shutdown(name: String, os_user: Option<String>) {
+    let Some(os_user) = os_user else {
+        log::warn!(
+            target: "tddy_daemon::claude_cli_session",
+            "kill_all: tmux session {name:?} has no OS user recorded, so it is not killed"
+        );
+        return;
+    };
+    let killed = tokio::task::spawn_blocking({
+        let name = name.clone();
+        move || kill_tmux_session(&os_user, &name)
+    })
+    .await;
+    match killed {
+        Ok(Ok(())) => log::info!(
+            target: "tddy_daemon::claude_cli_session",
+            "kill_all: killed tmux session {name:?}"
+        ),
+        Ok(Err(error)) => log::warn!(
+            target: "tddy_daemon::claude_cli_session",
+            "kill_all: could not kill tmux session {name:?}, continuing shutdown: {error}"
+        ),
+        Err(error) => log::warn!(
+            target: "tddy_daemon::claude_cli_session",
+            "kill_all: the kill of tmux session {name:?} did not finish, continuing shutdown: {error}"
+        ),
+    }
+}
 
 impl CliSessionManager {
     /// Look up the **main** (`claude`) terminal of a session by id.
@@ -177,21 +210,33 @@ impl CliSessionManager {
         }
     }
 
-    /// Kill all tracked PTY processes across every session: cancel each task, wait up to 5 s,
-    /// then SIGKILL any child PIDs that remain. Clears the terminal index on completion.
+    /// Kill all tracked PTY processes across every session: kill the tmux session of each tmux-run
+    /// agent, cancel each task, wait up to 5 s, then SIGKILL any child PIDs that remain. Clears the
+    /// terminal index on completion.
     ///
     /// Called during daemon shutdown so that spawned `claude` / shell processes do not
     /// outlive the daemon as orphans.
     pub async fn kill_all(&self) {
-        let task_ids: Vec<TaskId> = {
+        let (task_ids, tmux_sessions): (Vec<TaskId>, Vec<(String, Option<String>)>) = {
             let mut reg = self.terminals.write().await;
-            let ids = reg
-                .values()
-                .flat_map(|tools| tools.values().map(|e| e.task_id.clone()))
-                .collect();
+            let mut ids = Vec::new();
+            let mut tmux = Vec::new();
+            for entry in reg.values().flat_map(|tools| tools.values()) {
+                ids.push(entry.task_id.clone());
+                if let Some(name) = &entry.tmux_session {
+                    tmux.push((name.clone(), entry.os_user.clone()));
+                }
+            }
             reg.clear();
-            ids
+            (ids, tmux)
         };
+
+        // A tmux-run agent lives in its tmux session, not in the terminal's PTY: that session is
+        // killed first, as the user it was started as. Each kill is logged on its own, so one that
+        // fails does not stop the rest.
+        for (name, os_user) in tmux_sessions {
+            kill_tmux_session_at_shutdown(name, os_user).await;
+        }
 
         if task_ids.is_empty() {
             log::debug!(

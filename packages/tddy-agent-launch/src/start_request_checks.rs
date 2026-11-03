@@ -78,6 +78,19 @@ pub(crate) fn refuse_an_unsupported_cli_harness_start(
     Ok(())
 }
 
+/// A claude-cli start that asks for both a tmux-run agent and a sandbox is refused before anything is
+/// created: the sandbox confines the agent in its own jail, which a tmux session on the host is not.
+/// Other session types ignore `run_in_tmux` until they honour it.
+pub(crate) fn refuse_a_tmux_run_sandboxed_start(req: &StartSessionRequest) -> Result<(), Status> {
+    if req.session_type.trim() == "claude-cli" && req.run_in_tmux && req.sandbox {
+        return Err(Status::invalid_argument(
+            "run_in_tmux cannot be combined with sandbox: a sandboxed agent runs in its own jail, \
+             not in a tmux session on the host",
+        ));
+    }
+    Ok(())
+}
+
 /// claude-cli and cursor-cli always need a model: a start naming either type without one is
 /// refused before anything is created.
 pub(crate) fn refuse_a_cli_start_without_a_model(req: &StartSessionRequest) -> Result<(), Status> {

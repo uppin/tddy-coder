@@ -19,7 +19,8 @@ use tddy_session_split::split_start::resolve_split_agent_placement;
 use tddy_session_split::split_start::resolve_caller_chosen_session_id;
 
 use crate::start_request_checks::{
-    refuse_a_cli_start_without_a_model, refuse_an_orchestrated_tool_start,
+    refuse_a_cli_start_without_a_model, refuse_a_tmux_run_sandboxed_start,
+    refuse_an_orchestrated_tool_start,
 };
 
 use tddy_rpc::Response;
@@ -73,6 +74,10 @@ impl LaunchSessions {
             .config
             .os_user_for_github(&github_user)
             .ok_or_else(|| Status::permission_denied("user not mapped to OS user"))?;
+
+        // Refused here, before routing: a start this daemon would refuse is not forwarded to a peer
+        // to be refused there, and nothing is created for it.
+        refuse_a_tmux_run_sandboxed_start(&req)?;
 
         // An agent id names either a coding backend from the config allowlist or an assistant in
         // this daemon's registry — the registry is a def source on equal footing with the YAML

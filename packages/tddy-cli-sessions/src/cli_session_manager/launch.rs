@@ -185,7 +185,7 @@ impl CliSessionManager {
         env: Vec<(String, String)>,
         os_user: Option<&str>,
     ) -> anyhow::Result<Arc<pty_handle::PtyHandle>> {
-        let mut argv = Self::build_claude_argv(
+        let argv = Self::build_claude_cli_argv(
             binary_path,
             model,
             session_id,
@@ -193,30 +193,9 @@ impl CliSessionManager {
             permission_mode,
             dangerously_skip_permissions,
             resume,
+            append_system_prompt_file,
+            extra_args,
         );
-        // Insert before a trailing positional prompt (if any) so every flag precedes the prompt.
-        let has_positional_prompt = initial_prompt.is_some_and(|p| !p.trim().is_empty());
-        let insert_at = |argv: &Vec<String>| {
-            if has_positional_prompt {
-                argv.len() - 1
-            } else {
-                argv.len()
-            }
-        };
-        if let Some(path) = append_system_prompt_file {
-            let at = insert_at(&argv);
-            argv.splice(
-                at..at,
-                [
-                    "--append-system-prompt-file".to_string(),
-                    path.to_string_lossy().into_owned(),
-                ],
-            );
-        }
-        if !extra_args.is_empty() {
-            let at = insert_at(&argv);
-            argv.splice(at..at, extra_args);
-        }
         self.spawn_tool(
             session_id,
             MAIN_TERMINAL_ID,

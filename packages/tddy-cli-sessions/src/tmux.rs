@@ -14,9 +14,11 @@
 use std::path::{Path, PathBuf};
 
 use tddy_daemon_kernel::privilege_drop::{
-    plan_privilege_change_from, resolve_target_account, CannotBecomeUser, EffectiveIdentity,
+    plan_privilege_change_from, pty_user_env_overrides, resolve_pty_os_user,
+    resolve_target_account, CannotBecomeUser, EffectiveIdentity,
 };
 use tddy_daemon_kernel::spawn_as_user::run_output_as_user;
+use tddy_daemon_kernel::user_paths::spawn_path_extra_for_home;
 use tddy_rpc::Status;
 use tddy_terminal_rpc::TmuxSession;
 
@@ -193,13 +195,29 @@ impl std::fmt::Display for TmuxError {
 
 impl std::error::Error for TmuxError {}
 
+/// The prefix of an agent's tmux session name, before the session id's characters.
+const AGENT_SESSION_NAME_PREFIX: &str = "tddy-";
+
+/// How many leading characters of the session id an agent's tmux session name carries.
+const AGENT_SESSION_ID_CHARS: usize = 8;
+
 /// The tmux session an agent session runs in: `tddy-` and the first eight characters of its id.
 ///
-/// A valid tmux session name (no `:` or `.`), stable for a session id.
+/// tmux reads `:` and `.` as target separators, so each is replaced by `_` — the character tmux
+/// itself substitutes when it names a session. Stable for a session id.
+///
+/// FIXME(claude-in-tmux): the first eight hex characters of a UUIDv7 are the high bits of its
+/// millisecond timestamp, so they repeat every ~65 s. Two agent sessions of one OS user started in
+/// the same window get the same name: the second start is refused by tmux, and a kill by name
+/// (Delete, Resume, shutdown) reaches the other session's agent. The name is pinned by
+/// `an_agent_tmux_session_is_named_after_the_short_session_id`; the naming needs a decision.
 pub fn agent_tmux_session_name(session_id: &str) -> String {
-    // TODO(claude-in-tmux): implement
-    let _ = session_id;
-    unimplemented!("TODO(claude-in-tmux): agent_tmux_session_name")
+    let short: String = session_id
+        .chars()
+        .take(AGENT_SESSION_ID_CHARS)
+        .map(|c| if matches!(c, ':' | '.') { '_' } else { c })
+        .collect();
+    format!("{AGENT_SESSION_NAME_PREFIX}{short}")
 }
 
 /// The arguments of `tmux new-session` that start `argv` detached in a session `name`, in
@@ -210,14 +228,29 @@ pub fn agent_new_session_args(
     env: &[(String, String)],
     argv: &[String],
 ) -> Vec<String> {
-    // TODO(claude-in-tmux): implement
-    let _ = (name, worktree, env, argv);
-    unimplemented!("TODO(claude-in-tmux): agent_new_session_args")
+    let mut args = vec![
+        "new-session".to_string(),
+        "-d".to_string(),
+        "-s".to_string(),
+        name.to_string(),
+        "-c".to_string(),
+        worktree.to_string_lossy().into_owned(),
+    ];
+    for (key, value) in env {
+        args.push("-e".to_string());
+        args.push(format!("{key}={value}"));
+    }
+    args.push("--".to_string());
+    args.extend(argv.iter().cloned());
+    args
 }
 
 /// Start `argv` in a new detached tmux session `name` in `worktree`, as `os_user`, with `env` set
 /// on the pane (a tmux pane inherits the *server's* environment, not a client's). Returns the pane
 /// process's pid.
+///
+/// The pane also gets the target user's `HOME` and configured `PATH`, as a PTY child run as that
+/// user does; `env` is applied on top of them.
 pub fn start_agent_tmux_session(
     os_user: &str,
     name: &str,
@@ -225,31 +258,138 @@ pub fn start_agent_tmux_session(
     env: &[(String, String)],
     argv: &[String],
 ) -> Result<u32, TmuxError> {
-    // TODO(claude-in-tmux): implement
-    let _ = (os_user, name, worktree, env, argv);
-    unimplemented!("TODO(claude-in-tmux): start_agent_tmux_session")
+    let pane_env = pane_environment(os_user, env)?;
+    let args = agent_new_session_args(name, worktree, &pane_env, argv);
+    let output = run_tmux_as_user(os_user, &args)?;
+    if !output.status.success() {
+        return Err(TmuxError::new(format!(
+            "tmux could not start session {name:?}: {}",
+            stderr_of(&output)
+        )));
+    }
+    pane_pid(os_user, name)
 }
 
 /// Kill the tmux session `name` of `os_user`, and with it the agent running in it. Killing a
 /// session that is not there is not an error.
 pub fn kill_tmux_session(os_user: &str, name: &str) -> Result<(), TmuxError> {
-    // TODO(claude-in-tmux): implement
-    let _ = (os_user, name);
-    unimplemented!("TODO(claude-in-tmux): kill_tmux_session")
+    let args = vec![
+        "kill-session".to_string(),
+        "-t".to_string(),
+        exact_target(name),
+    ];
+    let output = run_tmux_as_user(os_user, &args)?;
+    if output.status.success() || reports_no_session(&stderr_of(&output)) {
+        return Ok(());
+    }
+    Err(TmuxError::new(format!(
+        "tmux could not kill session {name:?}: {}",
+        stderr_of(&output)
+    )))
 }
 
-/// Whether `os_user`'s tmux has a session `name`.
+/// Whether `os_user`'s tmux has a session `name`. A run that is refused (not as that user, or
+/// tmux not installed) answers `false`, and the reason is logged rather than dropped.
 pub fn tmux_session_alive(os_user: &str, name: &str) -> bool {
-    // TODO(claude-in-tmux): implement
-    let _ = (os_user, name);
-    unimplemented!("TODO(claude-in-tmux): tmux_session_alive")
+    let args = vec![
+        "has-session".to_string(),
+        "-t".to_string(),
+        exact_target(name),
+    ];
+    match run_tmux_as_user(os_user, &args) {
+        Ok(output) => output.status.success(),
+        Err(refusal) => {
+            log::warn!(
+                target: "tddy_daemon::tmux",
+                "tmux session {name:?} of {os_user} is reported as not alive: {refusal}"
+            );
+            false
+        }
+    }
 }
 
 /// The pid of the process in the first pane of `os_user`'s tmux session `name`.
 pub fn pane_pid(os_user: &str, name: &str) -> Result<u32, TmuxError> {
-    // TODO(claude-in-tmux): implement
-    let _ = (os_user, name);
-    unimplemented!("TODO(claude-in-tmux): pane_pid")
+    // `=<name>:` names the session's current window. A bare `=<name>` prints nothing for a pane
+    // format on tmux 3.6, so the window is named explicitly.
+    let args = vec![
+        "display-message".to_string(),
+        "-p".to_string(),
+        "-t".to_string(),
+        format!("{}:", exact_target(name)),
+        "#{pane_pid}".to_string(),
+    ];
+    let output = run_tmux_as_user(os_user, &args)?;
+    if !output.status.success() {
+        return Err(TmuxError::new(format!(
+            "tmux could not read the pane of session {name:?}: {}",
+            stderr_of(&output)
+        )));
+    }
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    stdout.trim().parse::<u32>().map_err(|_| {
+        TmuxError::new(format!(
+            "tmux reported no pane pid for session {name:?}: {:?}",
+            stdout.trim()
+        ))
+    })
+}
+
+/// The `=`-prefixed target that names exactly `name`, not a session whose name it starts with.
+fn exact_target(name: &str) -> String {
+    format!("={name}")
+}
+
+/// Whether tmux's error says there is no session to kill. The session is absent, or the server that
+/// would hold it is gone: a server exits with its last session, and the socket it leaves behind is
+/// then reported as "no server running", or is missing altogether.
+fn reports_no_session(stderr: &str) -> bool {
+    let lowered = stderr.to_lowercase();
+    lowered.contains("no server running")
+        || lowered.contains("can't find session")
+        || lowered.contains("session not found")
+        || (lowered.contains("error connecting") && lowered.contains("no such file"))
+}
+
+/// What a tmux run wrote to stderr, trimmed.
+fn stderr_of(output: &std::process::Output) -> String {
+    String::from_utf8_lossy(&output.stderr).trim().to_string()
+}
+
+/// Run tmux as `os_user` with `args`, and hand back its output. A run that cannot happen — as that
+/// user, or at all — is a [`TmuxError`] naming why; nothing runs as this daemon's own user instead.
+fn run_tmux_as_user(os_user: &str, args: &[String]) -> Result<std::process::Output, TmuxError> {
+    let binary =
+        absolute_tmux(&tmux_binary()).map_err(|refusal| TmuxError::new(refusal.message()))?;
+    let run = run_output_as_user(os_user, &binary, args).map_err(|e| {
+        match e.downcast_ref::<CannotBecomeUser>() {
+            Some(refusal) => TmuxError::new(refusal.to_string()),
+            None => TmuxError::new(format!("cannot run tmux as {os_user}: {e}")),
+        }
+    })?;
+    run.result.map_err(|e| {
+        TmuxError::new(format!(
+            "tmux ({}) could not be run: {e}",
+            run.resolved_program.display()
+        ))
+    })
+}
+
+/// The environment of a pane run as `os_user`: the target user's `HOME` and configured `PATH`, as
+/// the PTY runtime gives a child it runs as that user, with `env` on top. A pane inherits the tmux
+/// server's environment, and that was taken from whichever client started the server, so the
+/// user's own `HOME` and `PATH` are set on the pane explicitly.
+fn pane_environment(
+    os_user: &str,
+    env: &[(String, String)],
+) -> Result<Vec<(String, String)>, TmuxError> {
+    let account = resolve_pty_os_user(os_user).map_err(TmuxError::new)?;
+    let home = PathBuf::from(&account.home_dir);
+    let path_extra = spawn_path_extra_for_home(&home);
+    let mut pane = pty_user_env_overrides(&home, path_extra.as_deref());
+    pane.retain(|(key, _)| !env.iter().any(|(set, _)| set == key));
+    pane.extend(env.iter().cloned());
+    Ok(pane)
 }
 
 #[cfg(test)]
