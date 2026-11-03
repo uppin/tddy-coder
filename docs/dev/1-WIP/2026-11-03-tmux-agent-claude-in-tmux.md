@@ -113,6 +113,17 @@ Real dependency edges: `n1 → n2 → n3`, `n1 → n3`
 - **n1 keeps "terminate kills tmux" on shutdown** so it is correct merged alone; n2 flips it to detach.
 - **Helper move folded into this node** (developer, 2026-11-03) instead of a restructure-engine Refactor node.
 - **`deny_unknown_fields` compatibility**: older daemons cannot read a tmux-run record — documented, accepted.
+- **Name**: `tddy-` + first 8 characters of the session id; `:` and `.` become `_` (tmux's own substitution). Collision is open, see Green status 2.
+- **Pane environment**: the pane gets the target user's `HOME` and configured `PATH` as the PTY runtime gives them, with `run_in_tmux`'s env on top, via `new-session -e`.
+- **`pane_pid` target**: `=<name>:`, since a bare `=<name>` prints nothing on tmux 3.6.
+- **Absent session**: a kill treats "no server running", "can't find session", "session not found" and "error connecting … no such file" as already gone. An attach failure kills the new tmux session it started.
+- **Shutdown**: `kill_all` kills tmux sessions first, as the `os_user` recorded on `TerminalEntry`, and logs and continues on failure.
+- **Delete**: handler side, in `tddy-agent-launch`, before teardown, because `tddy-session-activity` cannot depend on `tddy-cli-sessions`. A refused kill refuses the delete with the session intact.
+- **Refusal**: `run_in_tmux` with `sandbox` on claude-cli is refused in `start_request_checks`, before routing. Other session types ignore the flag until 3/3.
+- **Argv**: `CliSessionManager::build_claude_cli_argv` is shared by the PTY and tmux launches.
+- **Resume**: `resume_claude_in_tmux` always passes `--resume`, whatever the caller set.
+- **Main terminal model**: `""`, because the contract has no model parameter for the tmux client.
+- **Web**: the checkbox is hidden on the project-home (`placementFixed`) variant, whose start spec does not carry it. Switching the sandbox on clears `runInTmux`, and the request never carries both.
 
 ## TODO
 
@@ -159,6 +170,31 @@ Scoped to the touched packages (`tddy-changeset`, `tddy-cli-sessions`, `tddy-age
 **Green (guards):** the 10 moved `tmux` helper tests in `tddy-cli-sessions`; `tmux_tabs_acceptance` (7) and `tmux_new_session_acceptance` (5) in `tddy-session-lifecycle`; the two new `tddy-changeset` `tmux_session` tests (the field is data, so they pass on the surface alone; 30 of 30 `session_metadata` tests pass).
 
 **Pre-existing failures:** none seen in the targeted suites. Not run locally: the rest of the packages' suites.
+
+## Green status
+
+Green was run on the branch rebased onto `origin/master` (`2e4af52ac`, with #813 merged). Scoped to the touched packages; whole-workspace health is CI's.
+
+| Gate | Result |
+|---|---|
+| `./dev cargo test -p tddy-cli-sessions -p tddy-changeset` | 243 passed, 0 failed (includes the 3 `tmux::tests`) |
+| `./dev cargo test -p tddy-agent-launch --lib` | 171 passed, 0 failed |
+| `./dev cargo test -p tddy-session-lifecycle --test claude_cli_tmux_session_acceptance --test tmux_tabs_acceptance --test tmux_new_session_acceptance --test terminal_session_acceptance` | 31 passed, 0 failed (`claude_cli_tmux` 7/7, `tmux_tabs` 7/7, `tmux_new_session` 5/5, `terminal_session` 12/12) |
+| `./dev cargo test -p tddy-session-lifecycle --lib connection_service::svc_terminal_ports` | 4 passed, 0 failed |
+| `./dev cargo clippy -p tddy-cli-sessions -p tddy-agent-launch -p tddy-session-lifecycle --all-targets -- -D warnings` | clean |
+| `./dev cargo fmt -p … -- --check` (the same three packages) | clean |
+| `bun test src/components/sessions` (tddy-web) | 440 passed, 0 failed |
+| Cypress `CreateSessionRunInTmuxAcceptance.cy.tsx` | 3/3 passing |
+| Cypress `createSessionRequestParity.cy.ts` | **1 of 2 failing** (see the first open decision below) |
+| `./dev cargo test -p tddy-tool-engine --test start_session_args_parity` | **1 of 4 failing** (`every_start_session_request_field_is_offered_context_filled_or_withheld`, the same field) |
+
+**Open decisions (🔴, not resolved in green):**
+
+1. **`run_in_tmux` is not offered to the StartSession tool.** The New-session form sends it, and the tool neither offers it nor withholds it with a reason. Both parity tests pin that: `start_session_args_parity.rs` (`INTERNAL_START_FIELDS` / `offered_start_fields`) and `createSessionRequestParity.cy.ts` against `cypress/support/fixtures/start-session-tool-fields.json`. The choice is to offer it, or to withhold it with a reason. The fixture and the test are not edited to pass.
+2. **Name collision.** `tddy-` plus the first eight characters of a UUIDv7 repeats about every 65 s. Two agent sessions of one OS user started in the same window get one name. The second start is refused, and a kill by name (Delete, Resume, shutdown) reaches the other session's agent. The name is pinned by `an_agent_tmux_session_is_named_after_the_short_session_id`, so the fix needs a decision. The FIXME is at `tmux.rs` (`agent_tmux_session_name`).
+3. **Silent ignore for other placements.** `run_in_tmux` with `sandboxed_codebase` or a split codebase is ignored, because those branches run before the claude path. Only `sandbox` is refused, so the option is dropped without a word.
+4. **Delete with an unreadable `.session.yaml`.** The tmux kill is skipped with a `log::warn!`, and the directory is still removed. That is a fallback-shaped path, and it needs a refuse-or-proceed decision.
+5. **Unverified.** Whether `kill-session` (SIGHUP to the pane) ends a claude that ignores SIGHUP, so it survives shutdown or delete. This needs a check on a real claude.
 
 ## Refactoring Needed
 ### From /red (TDD red phase)
