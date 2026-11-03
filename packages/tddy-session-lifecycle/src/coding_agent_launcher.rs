@@ -430,11 +430,7 @@ impl DaemonCodingAgentLauncher {
             .ok_or_else(|| Self::refuse(launch, "no tool of that id is declared"))?;
         let mut command = agent
             .spec
-            .acp_command(
-                &agent.tool,
-                package_runner(def, agents.host()),
-                route_args,
-            )
+            .acp_command(&agent.tool, package_runner(def, agents.host()), route_args)
             .map_err(|e| Self::refuse(launch, &e.to_string()))?;
         command.cwd = Some(launch.worktree.clone());
         if let Some(route) = &route {
@@ -529,7 +525,8 @@ impl DaemonCodingAgentLauncher {
             .ids()
             .filter_map(|id| {
                 let spec = CodingAgentSpec::of(agents.registry().get(id)?).ok()?;
-                (spec.acp().is_some() && confinement_of_spec(&spec) == Confinement::WithdrawsNativeTools)
+                (spec.acp().is_some()
+                    && confinement_of_spec(&spec) == Confinement::WithdrawsNativeTools)
                     .then(|| id.to_string())
             })
             .collect()
@@ -587,7 +584,10 @@ impl DaemonCodingAgentLauncher {
     /// Refuses an ACP harness when this daemon's coding agents did not load: a tool file that does
     /// not load must not start the agent some other way (the rule `headless_plan` keeps for the
     /// headless harnesses). Every other launch passes.
-    fn refuse_acp_when_agents_failed(&self, launch: &CodingAgentLaunch) -> Result<(), SubagentError> {
+    fn refuse_acp_when_agents_failed(
+        &self,
+        launch: &CodingAgentLaunch,
+    ) -> Result<(), SubagentError> {
         match &self.coding_agents_error {
             Some(reason) if transport_of(&launch.def.harness) == Some(Transport::Acp) => {
                 Err(Self::refuse(launch, reason))

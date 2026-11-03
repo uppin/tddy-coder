@@ -11,8 +11,7 @@ use std::path::{Path, PathBuf};
 use tddy_agent_backend::HeadlessHarness;
 use tddy_coding_subagent::{
     coding_agent_defs_in, refuse_unless_confinable, transport_of, AgentTransport, CodingAgentDef,
-    CodingAgentLaunch, CodingAgentLauncher, CodingAgentSession,
-    Transport,
+    CodingAgentLaunch, CodingAgentLauncher, CodingAgentSession, Transport,
 };
 use tddy_core::OpenSession;
 use tddy_core::{AgentKindRecord, SessionAgentRecord};
