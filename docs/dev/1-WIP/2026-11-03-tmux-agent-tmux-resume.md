@@ -4,7 +4,7 @@
 **Status:** 🚧 In Progress
 **Type:** Feature
 **Complexity**: 4 — client-vs-agent exit classification in the PTY cleanup path, detach-on-shutdown, resume branch, lazy re-attach in the main-terminal lookup; restart-surviving acceptance tests
-**Stack:** `#tmux-agent 2/3` — branch `feature/tmux-agent/tmux-resume`, base `feature/tmux-agent/claude-in-tmux`
+**Stack:** `#tmux-agent 2/3` — **PR:** [#815](https://github.com/uppin/tddy-coder/pull/815) — branch `feature/tmux-agent/tmux-resume`, base `feature/tmux-agent/claude-in-tmux`
 **PRD:** [PRD-2026-11-03-tmux-agent-resume.md](../../ft/daemon/1-WIP/PRD-2026-11-03-tmux-agent-resume.md)
 
 ## Initial Discovery
@@ -46,7 +46,14 @@ What each parent PR delivers that this PR consumes. These surfaces are **theirs 
 
 ## Draft PR contract
 
-The first push publishes `reattach_main` and the classification helper as `// TODO(tmux-resume): implement`, plus the failing tests below.
+The first push publishes, as `// TODO(tmux-resume): implement` stubs, plus the failing tests below:
+
+- `tddy_cli_sessions::cli_session_manager::{MainExit, classify_main_exit}` — client-vs-agent exit classification with an injected liveness probe (`tmux_reattach.rs`).
+- `CliSessionManager::reattach_main` (`tmux_reattach.rs`).
+- `tddy_agent_launch::claude_cli_tmux::reattach_claude_in_tmux` — the resume branch for a live tmux session; `relaunch_claude_cli` calls it instead of n1's `resume_claude_in_tmux` when `tmux_session_alive` (n1's symbols are untouched).
+- `DaemonTerminalSessionStore::reattach_main_once` + `TmuxRunMain` — the single-flight re-attach entry in the main-terminal lookup.
+
+Green wires the stubs into `spawn_terminal_cleanup`, `kill_all`, `relaunch_claude_cli` and `get_terminal`; nothing is wired in the contract so n1's behaviour is unchanged.
 
 ## Green wave
 
@@ -56,6 +63,8 @@ The first push publishes `reattach_main` and the classification helper as `// TO
 **Blocks:** n3 `harnesses-in-tmux` (its harness resume uses the re-attach-or-fresh branch)
 
 Real dependency edges: `n1 → n2 → n3`, `n1 → n3`
+
+**Sequencing of the red tests:** every acceptance test in `claude_cli_tmux_reattach_acceptance.rs` starts a tmux-run session through n1's launcher, so each is red until n1's green lands (n1's start path is stubs at this commit) and only then red or green for n2's own behaviour. After n1 is green, the shutdown test and the fresh-start-after-gone test are expected to pass already (a guard on n1: `kill_all` ends the client only; the fresh path is n1's) — the tests that stay red for n2 are the re-attach, resume-live, client-exit-keeps-socket and agent-exit-cleanup ones.
 
 ## State A (after n1)
 
@@ -78,15 +87,15 @@ Real dependency edges: `n1 → n2 → n3`, `n1 → n3`
 ### Acceptance tests
 
 **`tddy-session-lifecycle`**: `packages/tddy-session-lifecycle/tests/claude_cli_tmux_reattach_acceptance.rs` (private tmux, stub claude, serial)
-- [ ] `a_daemon_shutdown_leaves_a_tmux_run_agent_running`
-- [ ] `a_fresh_daemon_reattaches_the_main_terminal_on_first_stream_without_restarting_the_agent`
-- [ ] `resume_of_a_live_tmux_run_session_reattaches_instead_of_relaunching`
-- [ ] `resume_of_a_tmux_run_session_whose_tmux_session_is_gone_starts_fresh`
-- [ ] `a_client_exit_while_tmux_lives_keeps_the_sessions_toolcall_socket`
-- [ ] `an_agent_exit_runs_the_main_exit_cleanup_and_records_history`
+- [x] `a_daemon_shutdown_leaves_a_tmux_run_agent_running`
+- [x] `a_fresh_daemon_reattaches_the_main_terminal_on_first_stream_without_restarting_the_agent`
+- [x] `resume_of_a_live_tmux_run_session_reattaches_instead_of_relaunching`
+- [x] `resume_of_a_tmux_run_session_whose_tmux_session_is_gone_starts_fresh`
+- [x] `a_client_exit_while_tmux_lives_keeps_the_sessions_toolcall_socket`
+- [x] `an_agent_exit_runs_the_main_exit_cleanup_and_records_history`
 
 ### Unit / integration tests
-- [ ] `tddy-cli-sessions`: cleanup classification (alive → keep, gone → clean) with an injected liveness probe; `kill_all` does not kill a tmux-run main's tmux session.
+- [x] `tddy-cli-sessions` (`tests/tmux_reattach.rs`): cleanup classification (alive → client only, gone → agent ended, PTY-run → no probe) with an injected liveness probe — red; `kill_all` ends a tmux-run main's client but not its tmux session — a **guard, green today** (the claim is about behaviour n2 must preserve when it wires detach-on-shutdown).
 
 ## Decisions & Trade-offs
 
@@ -99,10 +108,10 @@ Real dependency edges: `n1 → n2 → n3`, `n1 → n3`
 - [x] Cross-check `packages/*/docs/code-issues/` and `docs/dev/todo/` for items this change touches (Step 2b)
 - [x] Create/update PRD documentation
 - [x] Create changeset (this document)
-- [ ] Create failing acceptance tests
-- [ ] Run acceptance tests (verify they fail)
-- [ ] USER REVIEW — acceptance tests
-- [ ] TDD Red — write failing unit/integration tests
+- [x] Create failing acceptance tests
+- [x] Run acceptance tests (verify they fail) — red for n1's stubs now; see Green wave
+- [x] USER REVIEW — acceptance tests — waived by the developer 2026-11-03 (reviewed with the stack at the end)
+- [x] TDD Red — write failing unit/integration tests
 - [ ] TDD Green — implement with quality code
 - [ ] Update documentation with progress
 - [ ] Repeat Red→Green→Update cycle until feature complete
@@ -119,6 +128,12 @@ Real dependency edges: `n1 → n2 → n3`, `n1 → n3`
 - [ ] Final validation (/validate-changes)
 - [ ] Linting and formatting (`cargo clippy -p {package} -- -D warnings`, `cargo fmt`)
 - [ ] USER REVIEW — scope developed, every gap approved: ready to wrap
+
+## Baseline before green
+
+Scoped to `tddy-cli-sessions`, `tddy-agent-launch`, `tddy-session-lifecycle` (`cargo check --all-targets` and `cargo clippy --all-targets -- -D warnings` clean on the rebased tree). Red: `tmux_reattach` 3 of 4 (the classification tests; `kill_all` is a guard); the six lifecycle acceptance tests are red on n1's stubs (not run here — the test binary link is heavy; compile-checked). Not run: the rest of the workspace (CI's).
+
+Note: the lifecycle fixtures are copied from n1's `claude_cli_tmux_session_acceptance.rs` (read-only here); the green phase may move them into `tests/support/` once n1 has landed.
 
 ## Refactoring Needed
 ### From /red (TDD red phase)

@@ -199,6 +199,19 @@ async fn stop_tmux_session_of_failed_start(os_user: &str, name: &str) {
     }
 }
 
+/// Resume a tmux-run session whose tmux session is still alive: re-attach the main terminal to it
+/// (`CliSessionManager::reattach_main`) and re-record the pane's pid — the agent is not
+/// relaunched. `launch.resume` is true.
+pub async fn reattach_claude_in_tmux(
+    manager: &CliSessionManager,
+    launch: ClaudeCliTmuxLaunch<'_>,
+) -> Result<TmuxLaunched, Status> {
+    // TODO(tmux-resume): implement — `reattach_main`, then `pane_pid`; `relaunch_claude_cli`
+    // calls this instead of `resume_claude_in_tmux` when `tmux_session_alive`.
+    let _ = (manager, launch);
+    unimplemented!("TODO(tmux-resume): reattach_claude_in_tmux")
+}
+
 /// Relaunch a resumed claude-cli agent and return the pid to record: in a fresh tmux session when
 /// the session ran in tmux (`in_tmux`), else as the PTY child, exactly as before.
 pub async fn relaunch_claude_cli(

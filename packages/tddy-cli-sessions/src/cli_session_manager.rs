@@ -170,6 +170,9 @@ mod terminals;
 
 mod tmux_main;
 
+mod tmux_reattach;
+pub use tmux_reattach::{classify_main_exit, MainExit};
+
 mod relaunch;
 
 mod launch;

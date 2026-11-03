@@ -180,6 +180,30 @@ impl DaemonTerminalSessionStore {
     pub fn new(manager: Arc<CliSessionManager>, sandboxes: Arc<SandboxSessionManager>) -> Self {
         DaemonTerminalSessionStore { manager, sandboxes }
     }
+
+    /// Re-attach `session_id`'s main terminal to the tmux session its agent still runs in, when
+    /// the daemon has no main registered for it (a restart, or a client that exited): single-flight
+    /// per session, so two first accesses attach one client. Returns the main terminal, or `None`
+    /// when `run` names a tmux session that is gone. `get_terminal` calls this for a tmux-run
+    /// session's main.
+    pub async fn reattach_main_once(
+        &self,
+        session_id: &str,
+        run: TmuxRunMain,
+    ) -> Option<Arc<PtyHandle>> {
+        // TODO(tmux-resume): implement
+        let _ = (self, session_id, run);
+        unimplemented!("TODO(tmux-resume): reattach_main_once")
+    }
+}
+
+/// What the lookup needs to re-attach a tmux-run session's main: read from its metadata.
+#[derive(Debug, Clone)]
+pub struct TmuxRunMain {
+    pub os_user: String,
+    pub tmux_session: String,
+    pub worktree: std::path::PathBuf,
+    pub kind: String,
 }
 
 #[async_trait]
