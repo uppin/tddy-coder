@@ -362,6 +362,7 @@ impl ACursorDaemon {
             session_type: Some("cursor-cli".to_string()),
             model: Some(TEST_MODEL.to_string()),
             cursor_chat_id: Some(RECORDED_CHAT_ID.to_string()),
+            tmux_session: None,
             harness_resume_token: None,
             activity_status: None,
             hook_token: Some("a-recorded-hook-token".to_string()),
