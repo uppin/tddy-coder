@@ -1,5 +1,5 @@
 //! Running cursor-cli and the registered CLI harnesses (opencode, muse, warp) inside tmux
-//! (`#tmux-agent` 3/3, docs/ft/daemon/1-WIP/PRD-2026-11-03-harnesses-in-tmux.md).
+//! (`#tmux-agent` 3/3, docs/ft/daemon/cursor-cli-session.md § tmux mode and its siblings).
 //!
 //! The same shape as [`crate::claude_cli_tmux`] — the agent runs in a tmux session of its own as
 //! the session's OS user, the main terminal is a client attached to it, the pid recorded is the

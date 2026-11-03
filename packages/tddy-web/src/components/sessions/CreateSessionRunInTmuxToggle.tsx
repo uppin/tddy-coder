@@ -12,8 +12,8 @@ export interface CreateSessionRunInTmuxToggleProps {
 
 /**
  * "Run the agent in tmux", offered for claude-cli and every CLI harness type (`#tmux-agent` 3/3,
- * docs/ft/daemon/1-WIP/PRD-2026-11-03-harnesses-in-tmux.md). One control for all of them, so the
- * label, the enable rule and the test id cannot drift between session types.
+ * docs/ft/daemon/cursor-cli-session.md § tmux mode and its siblings). One control for all of them,
+ * so the label, the enable rule and the test id cannot drift between session types.
  */
 export function CreateSessionRunInTmuxToggle({
   runInTmux,
