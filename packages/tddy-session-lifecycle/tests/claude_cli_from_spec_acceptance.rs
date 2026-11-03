@@ -348,6 +348,7 @@ fn an_exited_host_session(sessions_base: &Path, worktree: &Path) {
         session_type: Some("claude-cli".to_string()),
         model: Some(TEST_MODEL.to_string()),
         cursor_chat_id: None,
+        tmux_session: None,
         harness_resume_token: None,
         activity_status: None,
         hook_token: None,
