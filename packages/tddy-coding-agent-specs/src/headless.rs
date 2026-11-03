@@ -160,7 +160,10 @@ impl HeadlessRenderer for SpecHeadlessRenderer {
         if let Some(mcp) = &headless.mcp {
             spec.agent.mcp = mcp.clone();
         }
-        let RenderedSlots { argv_extra, files } = slots::render(
+        // TODO(headless-others): the turn records `written` before anything is written.
+        let RenderedSlots {
+            argv_extra, files, ..
+        } = slots::render(
             &spec,
             &SlotInputs {
                 workdir: turn.workdir.clone(),

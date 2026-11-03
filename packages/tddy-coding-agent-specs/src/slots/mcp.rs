@@ -42,6 +42,10 @@ pub fn render_mcp(
         McpSlot::Unsupported => {
             unreachable!("an unsupported mcp slot registers no server: slots::render refuses it")
         }
+        // TODO(headless-others): the headless kinds render through `headless_mcp`.
+        McpSlot::Inline { .. } | McpSlot::Argv { .. } | McpSlot::Workdir { .. } => {
+            todo!("headless-others: render_mcp for the headless MCP kinds")
+        }
     }
 }
 
