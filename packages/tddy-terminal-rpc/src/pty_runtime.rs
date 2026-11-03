@@ -25,6 +25,11 @@ pub use tddy_daemon_kernel::privilege_drop::{
     wrap_argv_for_privilege_drop, ResolvedPtyUser,
 };
 
+#[cfg(unix)]
+use tddy_daemon_kernel::privilege_drop::{
+    plan_privilege_change_from, resolve_target_account, EffectiveIdentity, PrivilegeChange,
+};
+
 use std::path::PathBuf;
 use std::sync::Arc;
 
@@ -135,10 +140,11 @@ type ResolvedArgvEnv = (Vec<String>, Vec<(String, String)>);
 /// Resolve the daemon's [`PtySpawnSpec`] into the final `(argv, env)` the shared PTY runtime
 /// spawns verbatim. With no `os_user`, argv/env pass through unchanged. With one, the target user's
 /// `HOME`/`PATH` are prepended and — when the target differs from the daemon's own identity — the
-/// argv is front-loaded with a `setpriv` privilege drop.
+/// argv is front-loaded with a `setpriv` privilege drop — or the spawn is refused with the kernel's
+/// `CannotBecomeUser` when this daemon is not root, the same refusal the tmux listing makes.
 #[cfg(unix)]
 fn resolve_final_argv_env(spec: &PtySpawnSpec) -> Result<ResolvedArgvEnv, String> {
-    resolve_final_argv_env_as(spec, &tddy_daemon_kernel::privilege_drop::EffectiveIdentity::current())
+    resolve_final_argv_env_as(spec, &EffectiveIdentity::current())
 }
 
 /// [`resolve_final_argv_env`] with the daemon's identity passed in, so the refusal is testable on
@@ -146,7 +152,7 @@ fn resolve_final_argv_env(spec: &PtySpawnSpec) -> Result<ResolvedArgvEnv, String
 #[cfg(unix)]
 fn resolve_final_argv_env_as(
     spec: &PtySpawnSpec,
-    current: &tddy_daemon_kernel::privilege_drop::EffectiveIdentity,
+    current: &EffectiveIdentity,
 ) -> Result<ResolvedArgvEnv, String> {
     if spec.argv.is_empty() {
         return Err("empty argv".into());
@@ -154,28 +160,28 @@ fn resolve_final_argv_env_as(
     match spec.os_user.as_deref() {
         None => Ok((spec.argv.clone(), spec.env.clone())),
         Some(user) => {
-            let resolved = resolve_pty_os_user(user)
+            let target = resolve_target_account(user)
                 .map_err(|e| format!("cannot resolve os_user '{user}': {e}"))?;
-            let home = std::path::PathBuf::from(&resolved.home_dir);
+            let home = std::path::PathBuf::from(&target.home);
             let path_extra = crate::tddy_user_config::spawn_path_extra_for_home(&home);
             let mut env = pty_user_env_overrides(&home, path_extra.as_deref());
             // The managed session's explicit overrides win over the impersonation defaults.
             env.extend(spec.env.iter().cloned());
-            let argv = if pty_requires_privilege_drop(
-                resolved.uid,
-                resolved.gid,
-                current.uid,
-                current.gid,
-            ) {
-                log::info!(
-                    target: "tddy_daemon::pty_runtime",
-                    "PTY child for os_user '{user}': dropping to uid={} gid={} via setpriv",
-                    resolved.uid,
-                    resolved.gid
-                );
-                wrap_argv_for_privilege_drop(&spec.argv, resolved.uid, resolved.gid)
-            } else {
-                spec.argv.clone()
+            // The kernel decides, as it does for the tmux listing: refuse before any PTY opens when
+            // this daemon cannot become the user, instead of launching a `setpriv` that fails inside.
+            let argv = match plan_privilege_change_from(target, current)
+                .map_err(|refusal| refusal.to_string())?
+            {
+                PrivilegeChange::None => spec.argv.clone(),
+                PrivilegeChange::Drop(target) => {
+                    log::info!(
+                        target: "tddy_daemon::pty_runtime",
+                        "PTY child for os_user '{user}': dropping to uid={} gid={} via setpriv",
+                        target.uid,
+                        target.gid
+                    );
+                    wrap_argv_for_privilege_drop(&spec.argv, target.uid, target.gid)
+                }
             };
             Ok((argv, env))
         }
