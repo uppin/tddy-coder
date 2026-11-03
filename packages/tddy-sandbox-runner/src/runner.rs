@@ -63,9 +63,11 @@ const MAIN_TERMINAL_ID: &str = "main";
 /// hook reports (`tddy_service::session_activity::IN_JAIL_RELAYABLE_HOOK_REPORTS`,
 /// `#agent-tools 7/12`). Anything else is answered `not_found` in the jail.
 pub fn relays_to_the_host(service: &str, method: &str) -> bool {
-    // TODO(cursor-cli): implement.
-    let _ = (service, method);
-    todo!("cursor-cli: relays_to_the_host")
+    tddy_service::session_agents::IN_JAIL_RELAYABLE
+        .iter()
+        .chain(tddy_tool_engine::IN_JAIL_RELAYABLE_EXEC_TOOLS.iter())
+        .chain(tddy_service::session_activity::IN_JAIL_RELAYABLE_HOOK_REPORTS.iter())
+        .any(|(s, m)| *s == service && *m == method)
 }
 
 struct ToolExecService {
@@ -109,18 +111,9 @@ impl tddy_rpc::RpcService for ToolExecService {
         //
         // Read from `tddy-service` rather than spelled out here, so this allowlist and the
         // coordinate the daemon actually serves cannot drift: a tuple naming a service nobody
-        // answers fails *closed*, silently, at runtime.
-        const FORWARDED_RPCS: &[(&str, &str)] = &tddy_service::session_agents::IN_JAIL_RELAYABLE;
-        // Conversation-worktree operations are exec-tool RPCs with a typed request; they ride the
-        // same channel, to the same daemon.
-        // TODO(cursor-cli): replace this allowlist with `relays_to_the_host`, which adds the hook
-        // reports (`tddy_service::session_activity::IN_JAIL_RELAYABLE_HOOK_REPORTS`) — generic:
-        // any jailed `tddy-tools session-hook`, not only Cursor's.
-        if !FORWARDED_RPCS
-            .iter()
-            .chain(tddy_tool_engine::IN_JAIL_RELAYABLE_EXEC_TOOLS.iter())
-            .any(|(s, m)| (*s == service) && (*m == method))
-        {
+        // answers fails *closed*, silently, at runtime. Conversation-worktree operations are
+        // exec-tool RPCs with a typed request; they ride the same channel, to the same daemon.
+        if !relays_to_the_host(service, method) {
             return tddy_rpc::RpcResult::Unary(Err(tddy_rpc::Status::not_found(format!(
                 "unknown {service}/{method}"
             ))));

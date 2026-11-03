@@ -5,6 +5,7 @@ use std::path::{Path, PathBuf};
 
 use tddy_agent_backend::claude_hooks::{build_claude_hooks_settings, HookCommandParams};
 
+use super::cursor::{CursorHooksJson, CURSOR_HOOKS_JSON};
 use super::SlotError;
 
 /// One way of wiring an agent's lifecycle hooks to `tddy-tools session-hook`.
@@ -53,9 +54,9 @@ impl HooksAdapter for ClaudeSettingsLocal {
 
 /// The adapter named `name`; an unknown name is [`SlotError::UnknownHooksAdapter`].
 pub fn adapter(name: &str) -> Result<&'static dyn HooksAdapter, SlotError> {
-    // TODO(cursor-cli): and resolve `cursor-hooks-json` to `super::cursor::CursorHooksJson`.
     match name {
         CLAUDE_SETTINGS_LOCAL => Ok(&ClaudeSettingsLocal),
+        CURSOR_HOOKS_JSON => Ok(&CursorHooksJson),
         _ => Err(SlotError::UnknownHooksAdapter {
             name: name.to_string(),
         }),

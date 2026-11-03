@@ -1,7 +1,12 @@
 use tddy_core::write_session_metadata;
 
-use crate::cursor_cli_spawn::{chat, LaunchedCursor};
-use tddy_daemon_kernel::config::resolve_cursor_binary_path;
+use crate::cursor_cli_spawn::{chat, no_coding_agents, resolve_cursor_agent, LaunchedCursor};
+use crate::cursor_from_spec::{cursor_template_params, node_launcher_of};
+use crate::spec_launch::{
+    launch_host_pty, plan_host_pty, HostAgent, HostCodingAgents, HostPtySession,
+};
+use tddy_actions::tool::TemplateParams;
+use tddy_coding_agent_specs::slots::RenderedSlots;
 
 use std::path::PathBuf;
 
@@ -32,7 +37,11 @@ pub async fn resume_cursor_cli_session(
     // What the resumed agent's environment is given: the project's account identity pairs its
     // commits carry (none keeps the checkout's own) and its notify environment.
     git_environment: Vec<(String, String)>,
+    // The coding agents this host launches from: the resume relaunches the `cursor` spec into the
+    // recorded chat. A host without them refuses.
+    coding_agents: Option<&HostCodingAgents>,
 ) -> Result<Response<ResumeSessionResponse>, Status> {
+    let agents = coding_agents.ok_or_else(no_coding_agents)?;
     let model = meta.model.clone().unwrap_or_default();
     let worktree_path = meta
         .repo_path
@@ -46,20 +55,26 @@ pub async fn resume_cursor_cli_session(
         ));
     }
 
-    let binary_path = resolve_cursor_binary_path(config);
+    let agent = resolve_cursor_agent(agents, config)?;
+    let binary_path = agent.tool.binary.to_string_lossy().into_owned();
     let chat_id = chat_to_resume(&meta, session_id, &binary_path, &worktree_path).await?;
 
-    // TODO(cursor-cli): with coding agents installed, render the `cursor` spec with the same
-    // `cursor_from_spec::cursor_template_params(chat_id, …)` and spawn through
-    // `spec_launch::launch_host_pty` instead of `resume_cursor`.
+    let params = cursor_template_params(
+        &chat_id,
+        &model,
+        None,
+        node_launcher_of(&agent.tool.binary).as_ref(),
+    );
     let launched = relaunch_cursor(
         cli_manager,
+        &agent,
+        &params,
         CursorRelaunch {
             os_user,
             session_id,
             session_dir,
             worktree_path: &worktree_path,
-            argv: (&binary_path, &model, &chat_id),
+            model: &model,
             env: git_environment,
             in_tmux: meta.tmux_session.is_some(),
         },
@@ -88,45 +103,54 @@ struct CursorRelaunch<'a> {
     session_id: &'a str,
     session_dir: &'a Path,
     worktree_path: &'a Path,
-    /// The binary, the model and the chat id its argv resumes.
-    argv: (&'a str, &'a str, &'a str),
+    model: &'a str,
     env: Vec<(String, String)>,
     /// The session ran its agent in tmux.
     in_tmux: bool,
 }
 
-/// Relaunch a resumed cursor-cli agent: a tmux-run one is re-attached while its tmux session is
-/// alive, else started fresh, as the session's OS user (`#tmux-agent` 3/3); any other is the PTY
-/// child again.
+/// Relaunch a resumed cursor-cli agent from the `cursor` spec (`params` resume the recorded chat):
+/// a tmux-run one is re-attached while its tmux session is alive, else started fresh, as the
+/// session's OS user (`#tmux-agent` 3/3); any other is the PTY child again. A resume keeps the
+/// hooks file its start wrote, and registers no MCP server on the host.
 async fn relaunch_cursor(
-    cli_manager: &CliSessionManager,
+    cli_manager: &Arc<CliSessionManager>,
+    agent: &HostAgent,
+    params: &TemplateParams,
     relaunch: CursorRelaunch<'_>,
 ) -> Result<LaunchedCursor, Status> {
-    let (binary_path, model, chat_id) = relaunch.argv;
+    let failed = |e: crate::spec_launch::SpecLaunchError| {
+        Status::internal(format!("failed to resume cursor-cli: {e}"))
+    };
     if relaunch.in_tmux {
-        let argv = CliSessionManager::build_cursor_argv(binary_path, model, Some(chat_id), None);
+        let plan = plan_host_pty(agent, params, &RenderedSlots::default()).map_err(failed)?;
         let launch = crate::cli_harness_tmux::HarnessTmuxLaunch::cursor(
             relaunch.os_user,
             relaunch.session_id,
             relaunch.worktree_path,
             relaunch.session_dir,
-            argv,
-            relaunch.env,
+            plan.argv,
+            plan.env.into_iter().chain(relaunch.env).collect(),
         );
         let launched = crate::cli_harness_tmux::resume_harness_in_tmux(cli_manager, launch).await?;
         return Ok(LaunchedCursor::in_tmux(launched));
     }
-    let handle = cli_manager
-        .resume_cursor(
-            relaunch.session_id,
-            relaunch.worktree_path.to_path_buf(),
-            model,
-            binary_path,
-            Some(chat_id),
-            relaunch.env,
-        )
-        .await
-        .map_err(|e| Status::internal(format!("failed to resume cursor-cli: {}", e)))?;
+    let handle = launch_host_pty(
+        agent,
+        params,
+        &RenderedSlots::default(),
+        relaunch.worktree_path,
+        HostPtySession {
+            manager: cli_manager,
+            session_id: relaunch.session_id,
+            session_type: "cursor-cli",
+            model: relaunch.model,
+            env: relaunch.env,
+            os_user: None,
+        },
+    )
+    .await
+    .map_err(failed)?;
     Ok(LaunchedCursor {
         pid: handle.pid,
         tmux_session: None,

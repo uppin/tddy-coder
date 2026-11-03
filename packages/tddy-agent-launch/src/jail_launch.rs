@@ -17,7 +17,9 @@ use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex as StdMutex};
 
-use tddy_actions::tool::{render_argv, ResolvedTool, TemplateParams, ToolDef, ToolHost};
+use tddy_actions::tool::{
+    render_argv, HomeSection, ResolvedTool, TemplateParams, ToolDef, ToolHost,
+};
 use tddy_coding_agent_specs::slots::RenderedSlots;
 use tddy_core::provider_route::HarnessRoute;
 use tddy_daemon_sandbox::sandbox_session::{
@@ -30,6 +32,7 @@ use tddy_daemon_sandbox::tool_jail::{
 };
 use tddy_rpc::Status;
 use tddy_sandbox::EgressPolicy;
+use tddy_sandbox_recipes::homes::{persistent_home, HomeError};
 use tddy_sandbox_runner::{EgressGuard, ExecPlan, ExecPlanFile};
 use tddy_task::TerminalCapture;
 
@@ -273,6 +276,25 @@ impl LaunchSessions {
             .await;
         self.record_jailed_main(session_id).await;
         Ok(pid)
+    }
+}
+
+/// The `HOME` a jail of `def` runs with, resolved as [`LaunchSessions::launch_jailed`] resolves it,
+/// so a placed slot naming `{home}` can be rendered before the jail is lowered: the persistent
+/// `<tddyhome>/homes/<key>`, or `session_home` for a home that lives and dies with the session.
+pub(crate) fn jail_home(
+    def: &ToolDef,
+    tddy_home: &Path,
+    session_home: &Path,
+) -> Result<PathBuf, Status> {
+    match &def.home {
+        HomeSection::Persistent { key } => {
+            persistent_home(tddy_home, key).map_err(|error| match error {
+                HomeError::BothExist { .. } => Status::failed_precondition(error.to_string()),
+                HomeError::Io { .. } => Status::internal(error.to_string()),
+            })
+        }
+        HomeSection::Session => Ok(session_home.to_path_buf()),
     }
 }
 

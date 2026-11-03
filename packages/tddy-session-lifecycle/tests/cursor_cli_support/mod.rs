@@ -211,6 +211,29 @@ impl ToolHost for AFixtureHost {
     }
 }
 
+/// The coding agents a daemon keeping its state in `tddy_home` launches from, as the daemon runtime
+/// binds them: the agent registry loaded from `<tddyhome>/tools`, resolved against a host whose
+/// `PATH` holds the real `tddy-tools` and whose `$HOME` is a directory of the test's. The `agent`
+/// itself is the daemon config's `cursor_cli.binary_path`. For a suite whose Given is a host with
+/// coding agents but whose stub `agent` is its own.
+pub fn coding_agents_over(tddy_home: &Path) -> Arc<HostCodingAgents> {
+    let tools_dir = tddy_home.join("tools");
+    std::fs::create_dir_all(&tools_dir).unwrap();
+    let registry = load_agent_registry(&tools_dir).expect("the agent registry loads");
+    let tool_bin = tddy_home.join("tool-bin");
+    std::fs::create_dir_all(&tool_bin).unwrap();
+    let _ = std::os::unix::fs::symlink(tddy_tools_binary(), tool_bin.join("tddy-tools"));
+    let home = tddy_home.join("host-home");
+    std::fs::create_dir_all(&home).unwrap();
+    Arc::new(HostCodingAgents::new(
+        registry,
+        Arc::new(AFixtureHost {
+            path: vec![tool_bin],
+            home,
+        }),
+    ))
+}
+
 /// How an [`ACursorDaemon`] is built.
 #[derive(Default)]
 pub struct ADaemonSpec {

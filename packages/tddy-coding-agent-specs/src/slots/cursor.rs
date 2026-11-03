@@ -15,6 +15,7 @@ use std::path::{Path, PathBuf};
 use tddy_agent_backend::claude_hooks::HookCommandParams;
 
 use super::hooks::HooksAdapter;
+use super::mcp::mcp_servers_json;
 use super::{McpServerCommand, SlotError};
 
 /// [`CursorHooksJson`]'s name.
@@ -36,9 +37,8 @@ impl HooksAdapter for CursorHooksJson {
     /// Reached only through [`HooksAdapter::try_render`]: params without a daemon socket have no
     /// rendering, and a direct call with them panics naming the refusal.
     fn render(&self, workdir: &Path, params: &HookCommandParams<'_>) -> (PathBuf, Vec<u8>) {
-        // TODO(cursor-cli): implement — `self.try_render(..)`, panicking with its refusal.
-        let _ = (workdir, params);
-        todo!("cursor-cli: CursorHooksJson::render")
+        self.try_render(workdir, params)
+            .unwrap_or_else(|refusal| panic!("{refusal}"))
     }
 
     fn try_render(
@@ -46,9 +46,7 @@ impl HooksAdapter for CursorHooksJson {
         workdir: &Path,
         params: &HookCommandParams<'_>,
     ) -> Result<(PathBuf, Vec<u8>), SlotError> {
-        // TODO(cursor-cli): implement — `render_cursor_hooks_json`.
-        let _ = (workdir, params);
-        todo!("cursor-cli: CursorHooksJson::try_render")
+        render_cursor_hooks_json(workdir, params)
     }
 }
 
@@ -60,35 +58,50 @@ pub fn render_cursor_hooks_json(
     workdir: &Path,
     params: &HookCommandParams<'_>,
 ) -> Result<(PathBuf, Vec<u8>), SlotError> {
-    // TODO(cursor-cli): implement — `tddy_agent_backend::build_cursor_hooks_settings`, which then
-    // takes the socket it bakes in as a required argument.
-    let _ = (workdir, params);
-    todo!("cursor-cli: render_cursor_hooks_json")
+    if params.daemon_socket.is_none() {
+        return Err(SlotError::NoDaemonSocket {
+            adapter: CURSOR_HOOKS_JSON.to_string(),
+        });
+    }
+    let settings = tddy_agent_backend::build_cursor_hooks_settings(params);
+    // `{:#}` is `serde_json`'s pretty form, and unlike `to_string_pretty` cannot fail.
+    Ok((
+        workdir.join(CURSOR_HOOKS_FILE),
+        format!("{settings:#}").into_bytes(),
+    ))
 }
 
 /// The `cursor-mcp-json` registration of `server` at `path`: `{"mcpServers": {name: {command,
 /// args, env?}}}`, compact, `env` omitted when empty — the bytes the runner's
 /// `write_cursor_mcp_config` writes today.
 pub fn render_cursor_mcp_json(server: &McpServerCommand, path: &Path) -> (PathBuf, Vec<u8>) {
-    // TODO(cursor-cli): implement.
-    let _ = (server, path);
-    todo!("cursor-cli: render_cursor_mcp_json")
+    (
+        path.to_path_buf(),
+        mcp_servers_json(server).to_string().into_bytes(),
+    )
 }
 
 /// A placed registration `path` with `{home}` replaced by `home`; a path naming `{home}` with no
 /// home bound is [`SlotError::UnboundHome`].
 pub fn placed_path(path: &str, home: Option<&Path>) -> Result<PathBuf, SlotError> {
-    // TODO(cursor-cli): implement.
-    let _ = (path, home);
-    todo!("cursor-cli: placed_path")
+    if !path.contains("{home}") {
+        return Ok(PathBuf::from(path));
+    }
+    let home = home.ok_or_else(|| SlotError::UnboundHome {
+        path: path.to_string(),
+    })?;
+    Ok(PathBuf::from(
+        path.replace("{home}", &home.to_string_lossy()),
+    ))
 }
 
 /// `<workdir>/<rules_file>` holding `preamble` and a final newline — written whole on every launch,
 /// so a re-run replaces it rather than growing it.
 pub fn render_rules_file(workdir: &Path, rules_file: &Path, preamble: &str) -> (PathBuf, Vec<u8>) {
-    // TODO(cursor-cli): implement.
-    let _ = (workdir, rules_file, preamble);
-    todo!("cursor-cli: render_rules_file")
+    (
+        workdir.join(rules_file),
+        format!("{}\n", preamble.trim_end()).into_bytes(),
+    )
 }
 
 #[cfg(test)]

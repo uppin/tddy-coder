@@ -12,9 +12,18 @@
 use std::path::{Path, PathBuf};
 
 use tddy_actions::tool::TemplateParams;
+use tddy_daemon_kernel::config::{resolve_cursor_binary_path, DaemonConfig};
 
 /// The `cursor` tool's id in the agent registry.
 pub const CURSOR_AGENT_ID: &str = "cursor";
+
+/// `cursor_cli.binary_path` (or `TDDY_CURSOR_AGENT`) when it names a path; a bare name leaves the
+/// binary to the spec's own resolution.
+pub(crate) fn configured_cursor_binary(config: &DaemonConfig) -> Option<PathBuf> {
+    Some(resolve_cursor_binary_path(config))
+        .filter(|path| path.contains('/'))
+        .map(PathBuf::from)
+}
 
 /// The bundled runtime a Cursor launcher script execs: `<install>/node` against
 /// `<install>/index.js`. Run directly in a jail, where the script cannot resolve its own install
@@ -29,9 +38,17 @@ pub struct NodeLauncher {
 /// canonical directory holds an executable `node` and an `index.js` — and `None` for any other
 /// binary, which then runs as itself.
 pub fn node_launcher_of(resolved_binary: &Path) -> Option<NodeLauncher> {
-    // TODO(cursor-cli): implement — the layout `build_cursor_sandbox_argv` probes today.
-    let _ = resolved_binary;
-    todo!("cursor-cli: node_launcher_of")
+    let binary = std::fs::canonicalize(resolved_binary).ok()?;
+    let install_dir = binary.parent()?;
+    let node = install_dir.join("node");
+    let entry = install_dir.join("index.js");
+    (is_executable_file(&node) && entry.is_file()).then_some(NodeLauncher { node, entry })
+}
+
+/// Whether `path` is a regular file with an execute bit set.
+fn is_executable_file(path: &Path) -> bool {
+    use std::os::unix::fs::PermissionsExt;
+    std::fs::metadata(path).is_ok_and(|m| m.is_file() && m.permissions().mode() & 0o111 != 0)
 }
 
 /// The parameters `cursor.yaml`'s `run.argv` is rendered with: `chat_id`, `model` and `prompt`
@@ -42,9 +59,22 @@ pub fn cursor_template_params(
     prompt: Option<&str>,
     launcher: Option<&NodeLauncher>,
 ) -> TemplateParams {
-    // TODO(cursor-cli): implement.
-    let _ = (chat_id, model, prompt, launcher);
-    todo!("cursor-cli: cursor_template_params")
+    let mut params = TemplateParams::new()
+        .with_opt("chat_id", non_blank(chat_id))
+        .with_opt("model", non_blank(model))
+        .with_opt("prompt", prompt.and_then(non_blank));
+    if let Some(launcher) = launcher {
+        params = params
+            .with("node_launcher", &launcher.node.to_string_lossy())
+            .with("node_entry", &launcher.entry.to_string_lossy());
+    }
+    params
+}
+
+/// `value` trimmed, or `None` when nothing but whitespace is left.
+fn non_blank(value: &str) -> Option<&str> {
+    let value = value.trim();
+    (!value.is_empty()).then_some(value)
 }
 
 #[cfg(test)]

@@ -18,6 +18,9 @@
 //! CLI open an interactive chat picker that would wedge the PTY. The argv assertions therefore
 //! check the flag and its id as an adjacent pair, never just that `--resume` is present.
 
+#[allow(dead_code)]
+mod cursor_cli_support;
+
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
@@ -347,6 +350,7 @@ fn connection_service(
     manager: Arc<CliSessionManager>,
 ) -> DaemonSessionHost {
     let tddy_data_dir = sessions_base.clone();
+    let agents = cursor_cli_support::coding_agents_over(&sessions_base);
     let sessions_base_resolver: SessionsBaseResolver =
         Arc::new(move |_| Some(sessions_base.clone()));
     let user_resolver: UserResolver =
@@ -362,6 +366,7 @@ fn connection_service(
         Arc::new(tddy_daemon_kernel::operator_channel::NoOperatorChannel),
         manager,
     )
+    .with_coding_agents(agents)
 }
 
 fn create_test_repo_with_origin(dir: &Path) {

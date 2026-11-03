@@ -1,6 +1,5 @@
-use std::sync::Mutex as StdMutex;
-
-use tddy_task::TerminalCapture;
+use std::collections::BTreeMap;
+use std::path::Path;
 
 use tddy_session_agents::roster_replacement::roster_replacement_pairs;
 
@@ -24,13 +23,45 @@ use std::sync::Arc;
 
 use std::path::PathBuf;
 
+use crate::claude_jail::{closure_defs, TDDY_TOOLS_ID};
+use crate::cursor_cli_spawn::resolve_cursor_agent;
+use crate::cursor_from_spec::{cursor_template_params, node_launcher_of};
+use crate::jail_launch::{jail_home, mcp_server_env, tool_ipc_socket, JailSpec, JailedSession};
 use crate::launch_ports::LaunchSessions;
+use crate::spec_launch::{HostAgent, HostCodingAgents};
+use crate::svc_start_sandboxed_claude_cli_session::{JailDirs, JailSession};
+use tddy_coding_agent_specs::slots::{
+    self, cursor::render_cursor_hooks_json, McpServerCommand, SlotInputs,
+};
+use tddy_core::HookCommandParams;
+use tddy_daemon_kernel::config::DaemonConfig;
+use uuid::Uuid;
+
+/// A sandboxed `cursor-cli` launch from the `cursor` spec, as its start has settled it.
+struct CursorJail<'a> {
+    jail: &'a JailSession<'a>,
+    dirs: &'a JailDirs,
+    model: &'a str,
+    /// The chat the session owns, which `--resume` names.
+    chat_id: &'a str,
+    initial_prompt: &'a str,
+    /// The managed workflow's prompt, written whole as the agent's rules file.
+    rules: Option<String>,
+    /// What the daemon adds for the session: see [`JailedSession::env`].
+    env: BTreeMap<String, String>,
+    session_env: Vec<(String, String)>,
+    managed: Option<tddy_cli_sessions::session_toolcall::ManagedWorkflow>,
+    managed_codebase: bool,
+}
 
 // TODO(crap-svc-start-sandboxed-cursor-cli-session): converted onto `LaunchSessions` by a header-only
 // edit (no logic touched), which that code-issue record's "tests first" rule forbids; the
 // characterisation tests it asks for are deferred. Linux CI's sandboxed suites are the evidence.
 impl LaunchSessions {
     /// Handle `StartSession` for sandboxed `cursor-cli` sessions (darwin Seatbelt / Linux cgroups).
+    ///
+    /// The agent is launched from the `cursor` spec through `launch_jailed` (`#agent-tools 7/12`). A
+    /// host without coding agents refuses with `FailedPrecondition`, as the Claude path does.
     #[allow(clippy::too_many_arguments)]
     pub(crate) async fn start_sandboxed_cursor_cli_session(
         &self,
@@ -153,12 +184,24 @@ impl LaunchSessions {
         )
         .await?;
 
-        let hook_token = crate::cursor_cli_spawn::install_cursor_hooks_in_worktree(
+        // With coding agents, the jailed agent is the `cursor` spec's: its hooks file is written
+        // into the worktree now, before the jail's context is copied from it.
+        let agents = self.coding_agents.clone().ok_or_else(|| {
+            Status::failed_precondition(
+                "this host has no coding agents installed: a sandboxed cursor-cli session is \
+                 launched from the `cursor` tool definition",
+            )
+        })?;
+        let agent = resolve_cursor_agent(&agents, &self.config)?;
+        let hook_token = Uuid::new_v4().to_string();
+        write_jail_hooks(
+            &agent,
             &self.config,
             &worktree_path,
             session_id,
             os_user,
-        );
+            &hook_token,
+        )?;
 
         // The clones this session's seeded agents read, claimed now: the worktree they mirror
         // exists, and the peers that build them must be at work before the agent that prompts them
@@ -234,6 +277,8 @@ impl LaunchSessions {
             .host
             .session_identity(os_user, session_id, project_id, session_token);
         let (mut session_env, github_credential) = self.jail_relay_identity(identity, os_user)?;
+        // The managed workflow's prompt, as the agent's rules file.
+        let mut managed_rules: Option<String> = None;
         if let Some(recipe) = managed_recipe.clone() {
             let launch = self.prepare_managed_workflow(
                 session_id,
@@ -246,85 +291,10 @@ impl LaunchSessions {
                 None,
                 github_credential,
             )?;
-            if let Ok(prompt) = std::fs::read_to_string(&launch.prompt_file) {
-                let rules_dir = worktree_path.join(".cursor").join("rules");
-                let _ = std::fs::create_dir_all(&rules_dir);
-                let _ = std::fs::write(rules_dir.join("tddy-managed-workflow.mdc"), prompt);
-            }
+            managed_rules = std::fs::read_to_string(&launch.prompt_file).ok();
             session_env.extend(launch.env);
             managed = Some(launch.workflow);
         }
-
-        let canonicalize_exec = |p: &str| -> String {
-            if p.contains('/') {
-                std::fs::canonicalize(p)
-                    .map(|c| c.to_string_lossy().into_owned())
-                    .unwrap_or_else(|_| p.to_string())
-            } else {
-                p.to_string()
-            }
-        };
-        let tddy_tools_path = canonicalize_exec(&tddy_tools_path);
-        let sandbox_runner_path =
-            canonicalize_exec(&tddy_daemon_sandbox::sandbox_session::resolve_sandbox_runner_path());
-        let cursor_binary = canonicalize_exec(
-            &tddy_daemon_kernel::config::resolve_cursor_binary_path(&self.config),
-        );
-        let cursor_home_dir = tddy_daemon_kernel::config::resolve_cursor_home_dir(&self.config);
-        let scratch_home = tddy_daemon_sandbox::sandbox_session::prepare_persistent_cursor_home(
-            &cursor_home_dir,
-            &cursor_binary,
-        );
-
-        let tool_ipc_socket = tddy_sandbox::SandboxSpec::short_ipc_socket_path(session_id);
-        let ready_marker = sandbox_root.join("sandbox.ready");
-        let profile_path = sandbox_root.join("sandbox.sb");
-
-        let egress_shim_port = tddy_daemon_sandbox::sandbox_session::pick_free_loopback_port()
-            .map_err(Status::internal)?;
-        let loopback_allow_ports = vec![egress_shim_port];
-
-        // TODO(cursor-cli): resolve `cursor_from_spec::CURSOR_AGENT_ID` with `HostCodingAgents`,
-        // render its slots for jail paths (`home` = `<tddyhome>/homes/cursor`) and call
-        // `launch_jailed` instead of building the runner's `--agent-kind cursor` argv below — no
-        // Cursor flag reaches the runner, and the Claude overlay is no longer applied. Green
-        // deletes this file (code issue `crap-svc-start-sandboxed-cursor-cli-session`); the
-        // deletion needs the developer's approval (CLAUDE.md § ASK).
-        let mut runner_argv = vec![
-            sandbox_runner_path,
-            "--session-id".into(),
-            session_id.to_string(),
-            "--context-dir".into(),
-            context_dir.to_string_lossy().to_string(),
-            "--tool-ipc-socket".into(),
-            tool_ipc_socket.to_string_lossy().to_string(),
-            "--tddy-tools-path".into(),
-            tddy_tools_path.clone(),
-            "--ready-marker".into(),
-            ready_marker.to_string_lossy().to_string(),
-            "--agent-kind".into(),
-            "cursor".into(),
-            "--agent-binary".into(),
-            cursor_binary.clone(),
-            "--model".into(),
-            model.to_string(),
-            "--egress-shim-port".into(),
-            egress_shim_port.to_string(),
-            "--stdio".into(),
-        ];
-        let prompt = initial_prompt.trim();
-        if !prompt.is_empty() {
-            runner_argv.push("--agent-arg".into());
-            runner_argv.push(prompt.to_string());
-        }
-
-        // TODO: pin a Cursor chat for sandboxed cursor sessions too (`--agent-arg --resume
-        // --agent-arg <id>`), the way the unsandboxed path does in `spawn_cursor_cli_session_inner`.
-        // Not done here because the jail runs against its own persistent cursor home
-        // (`prepare_persistent_cursor_home`), so a chat minted by the host `cursor-agent
-        // create-chat` is not necessarily resolvable inside the jail — that needs verifying before
-        // an id is pinned. Until then a sandboxed session records no `cursor_chat_id`, and its
-        // first resume adopts a fresh chat (see `resume_cursor_cli_session`).
 
         // Semantic index: index the worktree into the session dir before spawning the jail
         // (blocking; a missing embedder or a failed index aborts the start — no unindexed
@@ -345,100 +315,82 @@ impl LaunchSessions {
             );
         }
 
-        let mut env = tddy_daemon_sandbox::sandbox_session::build_sandboxed_cursor_runner_env(
-            &scratch_home,
-            &scratch_tmp,
-            session_id,
-            &tool_ipc_socket,
-            &egress_dir,
-        );
-        if !specialized_defs.is_empty() {
-            env.extend(self.specialized_subagent_env(&specialized_defs)?);
-        }
-        env.extend(self.jail_daemon_identity_env());
-        env.extend(self.lsp_tools_env(&worktree_path));
-        env.extend(self.restructure_tools_env());
-        env.extend(semantic_index_env_pair);
-
-        let mut handle = tddy_daemon_sandbox::sandbox_session::spawn_sandbox_runner(
-            tddy_daemon_sandbox::sandbox_session::SandboxRunnerSpawn {
-                project_root: sandbox_root.clone(),
-                scratch_dir: scratch_dir.clone(),
-                egress_dir: egress_dir.clone(),
-                profile_path,
-                runner_argv,
-                env,
-                loopback_allow_ports,
-                ipc_socket: Some(tool_ipc_socket.clone()),
-                mounts: vec![tddy_sandbox::MountSpec::read_write(scratch_home.clone())],
-                host_home: None,
-                cgroup: self.config.sandbox_cgroup_config(),
-                route: None,
-            },
-        )
-        .map_err(|e| {
-            let logs = tddy_sandbox::format_egress_logs(&egress_dir);
-            let mut status = tddy_daemon_sandbox::sandbox_session::sandbox_error_to_status(e);
-            status.message = format!("{}\n{logs}", status.message);
-            status
-        })?;
-
-        tddy_daemon_sandbox::sandbox_session::wait_for_sandbox_ready(
-            &mut handle,
-            &ready_marker,
-            std::time::Duration::from_secs(120),
-            &egress_dir,
-        )
-        .await
-        .map_err(Status::deadline_exceeded)?;
-
-        let (stdout_tx, _) = tokio::sync::broadcast::channel(256);
-        let capture = Arc::new(StdMutex::new(TerminalCapture::new()));
-        let (stdin_tx, stdin_rx) = tokio::sync::mpsc::unbounded_channel();
-
-        tddy_daemon_sandbox::sandbox_session::dial_and_bridge(
-            session_id,
-            worktree_path.clone(),
-            &mut handle,
-            self.task_registry.clone(),
-            stdout_tx.clone(),
-            Arc::clone(&capture),
-            stdin_rx,
-            Arc::new(session_env),
-            session_dir.clone(),
-            Arc::clone(&self.agent_activity_hub),
-            self.host.sandbox_rpc_handler(session_id, &session_dir),
-        )
-        .await
-        .map_err(Status::internal)?;
-
-        let pid = handle.pid();
-        let state = Arc::new(
-            tddy_daemon_sandbox::sandbox_session::SandboxSessionState::new(
-                tddy_daemon_sandbox::sandbox_session::SandboxSessionStateInit {
-                    pid,
-                    worktree_path: worktree_path.clone(),
-                    stdout_tx,
-                    capture,
-                    stdin_tx,
-                    ready_marker: ready_marker.clone(),
-                    handle,
-                    managed_workflow: managed.map(|w| {
-                        Box::new(w)
-                            as Box<dyn tddy_daemon_sandbox::sandbox_session::SessionScopedResource>
-                    }),
+        let (pid, cursor_chat_id) = {
+            // The chat this session owns for its whole lifetime: minted here, persisted in the
+            // session's metadata, and named by `--resume` on every later launch.
+            let chat_id = crate::chat::mint_cursor_chat_id(
+                &agent.tool.binary.to_string_lossy(),
+                &worktree_path,
+            )
+            .await
+            .map_err(|e| {
+                Status::internal(format!(
+                    "failed to create the Cursor chat for session {session_id}: {e}"
+                ))
+            })?;
+            // The hook token is on record before the agent starts: its first hook fires during
+            // the launch, and a report is refused until the session names the token.
+            tddy_core::write_session_metadata(
+                &session_dir,
+                &tddy_core::SessionMetadata {
+                    hook_token: Some(hook_token.clone()),
+                    managed_codebase,
+                    ..tddy_session_split::service_util::starting_session_metadata(
+                        session_id,
+                        project_id,
+                        "cursor-cli",
+                    )
                 },
-            ),
-        );
-        self.sandbox_manager
-            .insert(session_id.to_string(), state)
-            .await;
-        self.record_jailed_main(session_id).await;
+            )
+            .map_err(|e| Status::internal(format!("failed to write session metadata: {e}")))?;
+            let mut env = BTreeMap::new();
+            if !specialized_defs.is_empty() {
+                env.extend(self.specialized_subagent_env(&specialized_defs)?);
+            }
+            env.extend(self.jail_daemon_identity_env());
+            env.extend(self.lsp_tools_env(&worktree_path));
+            env.extend(self.restructure_tools_env());
+            env.extend(semantic_index_env_pair);
+            let jail = JailSession {
+                session_id,
+                project_id,
+                session_token,
+                session_dir: &session_dir,
+                worktree_path: &worktree_path,
+            };
+            let dirs = JailDirs {
+                sandbox_root: sandbox_root.clone(),
+                egress_dir: egress_dir.clone(),
+                scratch_dir: scratch_dir.clone(),
+                scratch_tmp: scratch_tmp.clone(),
+                context_dir: context_dir.clone(),
+            };
+            let pid = self
+                .launch_jailed_cursor(
+                    &agents,
+                    &agent,
+                    CursorJail {
+                        jail: &jail,
+                        dirs: &dirs,
+                        model,
+                        chat_id: &chat_id,
+                        initial_prompt,
+                        rules: managed_rules,
+                        env,
+                        session_env,
+                        managed,
+                        managed_codebase,
+                    },
+                )
+                .await?;
+            (pid, Some(chat_id))
+        };
 
         let meta = tddy_core::SessionMetadata {
             repo_path: Some(worktree_path.to_string_lossy().to_string()),
             pid: Some(pid),
             model: Some(model.to_string()),
+            cursor_chat_id,
             hook_token: Some(hook_token),
             sandbox: Some(true),
             managed_codebase,
@@ -471,4 +423,127 @@ impl LaunchSessions {
             branch_conflict: None,
         }))
     }
+
+    /// Launch the `cursor` spec's agent in a jail for `launch` and return the runner's pid: its argv
+    /// from `cursor.yaml`, its `{home}/.cursor/mcp.json` registration of `tddy-tools` in the
+    /// persistent cursor home, and its rules file in the context directory.
+    async fn launch_jailed_cursor(
+        &self,
+        agents: &HostCodingAgents,
+        agent: &HostAgent,
+        launch: CursorJail<'_>,
+    ) -> Result<u32, Status> {
+        let defs = closure_defs(agents.registry(), agent)?;
+        let tddy_tools = agent
+            .dep(TDDY_TOOLS_ID)
+            .ok_or_else(|| {
+                Status::failed_precondition(format!(
+                    "the cursor tool does not depend on {TDDY_TOOLS_ID}, which a jailed agent \
+                     reaches its tools through"
+                ))
+            })?
+            .binary
+            .clone();
+        let tool_def = defs
+            .iter()
+            .find(|def| def.id == agent.tool.id)
+            .ok_or_else(|| {
+                Status::internal(format!(
+                    "the registry holds no definition of {}",
+                    agent.tool.id
+                ))
+            })?;
+        let home = jail_home(
+            tool_def,
+            &self.tddy_data_dir,
+            &launch.dirs.scratch_dir.join("home"),
+        )?;
+        let server = McpServerCommand {
+            name: TDDY_TOOLS_ID.to_string(),
+            command: tddy_tools,
+            args: vec!["--mcp".to_string()],
+            env: mcp_server_env(launch.jail.session_id, launch.dirs, &launch.env),
+        };
+        let slots = slots::render(
+            &agent.spec,
+            &SlotInputs {
+                workdir: launch.dirs.context_dir.clone(),
+                scratch_dir: launch.dirs.scratch_tmp.clone(),
+                mcp_server: Some(server),
+                allowed_tools: Vec::new(),
+                denied_tools: Vec::new(),
+                permission_prompt_tool: None,
+                preamble: launch.rules,
+                append_system_prompt_file: None,
+                // Written into the worktree before the context was copied (`write_jail_hooks`).
+                hooks: None,
+                home: Some(home),
+            },
+        )
+        .map_err(|e| Status::internal(e.to_string()))?;
+        let params = cursor_template_params(
+            launch.chat_id,
+            launch.model,
+            Some(launch.initial_prompt),
+            node_launcher_of(&agent.tool.binary).as_ref(),
+        );
+        self.launch_jailed(
+            JailSpec {
+                agent,
+                defs: &defs,
+                host: agents.host(),
+            },
+            &params,
+            &slots,
+            JailedSession {
+                jail: launch.jail,
+                dirs: launch.dirs,
+                session_env: launch.session_env,
+                env: launch.env,
+                managed: launch.managed,
+                managed_codebase: launch.managed_codebase,
+                route: None,
+            },
+            "",
+        )
+        .await
+    }
+}
+
+/// Write the jailed agent's `.cursor/hooks.json` into `worktree_path`, each event reporting over the
+/// session's tool-IPC socket: the one socket a jail can reach. It is written on the host because the
+/// jail reads a copy of the worktree taken after this.
+fn write_jail_hooks(
+    agent: &HostAgent,
+    config: &DaemonConfig,
+    worktree_path: &Path,
+    session_id: &str,
+    os_user: &str,
+    hook_token: &str,
+) -> Result<(), Status> {
+    let tddy_tools = agent.dep(TDDY_TOOLS_ID).ok_or_else(|| {
+        Status::failed_precondition(format!(
+            "the cursor tool does not depend on {TDDY_TOOLS_ID}"
+        ))
+    })?;
+    let tddy_tools_path = tddy_tools.binary.to_string_lossy().into_owned();
+    let daemon_socket = tool_ipc_socket(session_id).to_string_lossy().into_owned();
+    let daemon_url = crate::chat::cursor_hook_daemon_url(config);
+    let params = HookCommandParams {
+        tddy_tools_path: &tddy_tools_path,
+        daemon_url: &daemon_url,
+        session_id,
+        os_user,
+        hook_token,
+        daemon_socket: Some(&daemon_socket),
+        answer_wait_secs: config.claude_cli_answer_wait_secs(),
+    };
+    let (path, bytes) = render_cursor_hooks_json(worktree_path, &params)
+        .map_err(|e| Status::internal(e.to_string()))?;
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)
+            .map_err(|e| Status::internal(format!("create {}: {e}", parent.display())))?;
+    }
+    tddy_core::atomic_file::write_atomic(&path, bytes)
+        .map_err(|e| Status::internal(format!("write {}: {e}", path.display())))
 }

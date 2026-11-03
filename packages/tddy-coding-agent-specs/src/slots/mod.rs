@@ -95,10 +95,6 @@ pub enum SlotError {
 /// flag, the allow flags, the deny flags, the permission-prompt flag, the MCP flag — the order the
 /// hand-built launch used.
 pub fn render(spec: &CodingAgentSpec, inputs: &SlotInputs<'_>) -> Result<RenderedSlots, SlotError> {
-    // TODO(cursor-cli): and the Cursor slots — an `McpSlot::Placed` registration
-    // (`cursor::render_cursor_mcp_json` at `cursor::placed_path`), `instructions.rules_file`
-    // (`cursor::render_rules_file` with the preamble), and hooks through
-    // `HooksAdapter::try_render`, so `cursor-hooks-json`'s refusal without a socket surfaces here.
     let agent = &spec.agent;
     let mut rendered = RenderedSlots::default();
 
@@ -119,6 +115,13 @@ pub fn render(spec: &CodingAgentSpec, inputs: &SlotInputs<'_>) -> Result<Rendere
                 &inputs.workdir,
                 preamble,
             )?);
+        if let Some(rules_file) = &agent.instructions.rules_file {
+            rendered.files.push(cursor::render_rules_file(
+                &inputs.workdir,
+                rules_file,
+                preamble,
+            ));
+        }
     }
 
     let prompt_tool: Vec<String> = inputs.permission_prompt_tool.iter().cloned().collect();
@@ -133,13 +136,20 @@ pub fn render(spec: &CodingAgentSpec, inputs: &SlotInputs<'_>) -> Result<Rendere
     }
 
     if let Some(server) = &inputs.mcp_server {
-        let (file, argv) = mcp::render_mcp(&agent.mcp, server, &inputs.scratch_dir);
+        let (file, argv) = mcp::render_mcp(
+            &agent.mcp,
+            server,
+            &inputs.scratch_dir,
+            inputs.home.as_deref(),
+        )?;
         rendered.files.push(file);
         rendered.argv_extra.extend(argv);
     }
     if let Some(params) = &inputs.hooks {
         let adapter = hooks::adapter(&agent.hooks.adapter)?;
-        rendered.files.push(adapter.render(&inputs.workdir, params));
+        rendered
+            .files
+            .push(adapter.try_render(&inputs.workdir, params)?);
     }
     Ok(rendered)
 }

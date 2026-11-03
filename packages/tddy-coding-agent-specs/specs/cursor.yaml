@@ -74,9 +74,9 @@ policy:
   exec_paths: [/usr/bin, /usr/libexec, /bin, /sbin, /System, /Library, /Applications, /opt/homebrew, /opt/local]
 # Cursor's API, its auth and its update channel.
 #
-# TODO(cursor-cli): uncomment when the jail launcher lands. Until `Egress` deserializes
-# (`#agent-tools 3/12`), a `network:` section here would make every load of this file panic. The
-# host list is unverified — confirm it against a live jailed session at green.
-# network:
-#   egress:
-#     hosts: [api2.cursor.sh, api3.cursor.sh, api.cursor.com, cursor.com, www.cursor.com, repo42.cursor.sh]
+# TODO(cursor-cli): this host list is unverified against a live Cursor session. It must stay
+# declared: a definition with no `network:` section cannot start a jail
+# (docs/dev/todo/2026-11-03-jail-with-no-network-section-cannot-bind-its-shim.md).
+network:
+  egress:
+    hosts: [api2.cursor.sh, api3.cursor.sh, api.cursor.com, cursor.com, www.cursor.com, repo42.cursor.sh]

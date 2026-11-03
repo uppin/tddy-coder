@@ -253,6 +253,7 @@ impl LaunchSessions {
             session_dir,
             metadata,
             agent_env,
+            self.coding_agents.as_deref(),
         )
         .await
     }

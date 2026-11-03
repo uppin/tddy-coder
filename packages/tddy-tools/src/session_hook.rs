@@ -355,23 +355,33 @@ pub fn hook_transport(
     args: &SessionHookArgs,
     sandbox_tool_ipc: Option<&std::path::Path>,
 ) -> HookTransport {
-    // TODO(cursor-cli): implement.
-    let _ = (args, sandbox_tool_ipc);
-    todo!("cursor-cli: hook_transport")
+    if let Some(socket) = sandbox_tool_ipc {
+        return HookTransport::SandboxIpc(socket.to_path_buf());
+    }
+    match &args.daemon_socket {
+        Some(socket) => HookTransport::DaemonSocket(socket.clone()),
+        None => HookTransport::Http(args.daemon.clone()),
+    }
 }
 
 /// [`deliver`], returning the response body and bounding the call by `timeout`.
-// TODO(cursor-cli): dispatch on `hook_transport(args, TDDY_SANDBOX_TOOL_IPC)` —
-// `HookTransport::SandboxIpc` calls `call_over_socket` on the tool-IPC socket.
+///
+/// The transport is [`hook_transport`]'s: the tool-IPC socket when the hook process was given
+/// `TDDY_SANDBOX_TOOL_IPC`, the socket it was given, or the daemon's HTTP RPC.
 async fn exchange(
     args: &SessionHookArgs,
     method: &str,
     body: Vec<u8>,
     timeout: std::time::Duration,
 ) -> anyhow::Result<Vec<u8>> {
-    match &args.daemon_socket {
-        Some(socket) => call_over_socket(socket, method, body, timeout).await,
-        None => post_proto(&args.daemon, method, body, timeout).await,
+    let sandbox_tool_ipc = std::env::var_os("TDDY_SANDBOX_TOOL_IPC")
+        .filter(|socket| !socket.is_empty())
+        .map(std::path::PathBuf::from);
+    match hook_transport(args, sandbox_tool_ipc.as_deref()) {
+        HookTransport::SandboxIpc(socket) | HookTransport::DaemonSocket(socket) => {
+            call_over_socket(&socket, method, body, timeout).await
+        }
+        HookTransport::Http(daemon) => post_proto(&daemon, method, body, timeout).await,
     }
 }
 

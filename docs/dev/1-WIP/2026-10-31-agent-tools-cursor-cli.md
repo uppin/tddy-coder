@@ -109,6 +109,9 @@ Real dependency edges, as opposed to the branch line:
 ### Modified
 - `tddy-agent-launch` `cursor_cli_spawn.rs` and `chat.rs` (hooks).
 - `tddy-tools` `session_hook.rs`; `tddy-sandbox-runner` (generic hook relay).
+- `tddy-agent-launch` `cli_branch_starts.rs`, `svc_resume_session.rs`: pass `LaunchSessions::coding_agents` to the host start and resume.
+- `tddy-agent-launch` `jail_launch.rs` (`jail_home`: the persistent home resolved before the jail is lowered, so a placed `{home}` slot renders), `claude_jail.rs`, `spec_launch.rs` (`SlotInputs.home`).
+- `tddy-session-lifecycle` `daemon_rpc_handler.rs`: the bridge serves `ReportSessionStatus` and `ReportAgentActivity` for the jail's own session only (test 6).
 - Docs at wrap: `docs/ft/daemon/cursor-cli-session.md`.
 ### Removed
 - `packages/tddy-agent-launch/src/svc_start_sandboxed_cursor_cli_session.rs`, and the per-agent body of `spawn_cursor_cli_session_inner`
@@ -221,6 +224,17 @@ Real dependency edges, as opposed to the branch line:
 **Open question for green:** a non-embedded (server) daemon serves no agent-tool socket. Under "no socket is an error", a host Cursor session there gets no hooks file. Decide whether a server daemon serves the socket too, or whether that case is refused at start.
 
 **`TODO(...)` deletions needing approval (CLAUDE.md § ASK):** green deletes `svc_start_sandboxed_cursor_cli_session.rs` and the per-agent body of `spawn_cursor_cli_session_inner`. Both are marked in the source.
+### From /green
+
+- **Open question (server daemon and the agent-tool socket): decided from the code.** Only an embedded daemon binds the socket (`RuntimeHost::Embedded` in `runtime/build_context.rs`; `embedded_host_agent_tool_socket` probes it). Test 1 of `cursor_cli_from_spec_acceptance` starts and resumes a host session with nothing listening and requires the hooks file to be written, so the start cannot refuse. A host start therefore renders `agent_tool_socket_path(data_dir)` unconditionally. **Consequence, a regression against master that needs a developer decision:** before this node a server daemon's host Cursor hooks reported over HTTP (`install_cursor_hooks_in_worktree`, `daemon_socket: None`) and worked; on a server (non-embedded) daemon those hook reports go to an unserved socket and are dropped fail-quiet. Fix options: bind the socket on a server daemon too (a one-line change in `runtime/build_context.rs`, but it also flips `embedded_host_agent_tool_socket` to `Some` on server daemons and so changes Claude's hook and tool transport; not verified here), or fall back to HTTP (forbidden as a fallback). Not done here.
+- **No fallback without coding agents.** A host without coding agents refuses every Cursor launch with `FailedPrecondition: this host has no coding agents installed`, as the Claude path does: the jailed start, the host start (`spawn_cursor_cli_session_reporting`; `spawn_cursor_cli_session_inner` gained a `coding_agents` parameter) and the host resume. The runner's hand-built `spawn_runner_cursor` is removed. Tests get coding agents in their Given: `sandboxed_cursor_cli_acceptance::minimal_service` (also installs the sandbox RPC bridge), `cursor_cli_session_acceptance` and `cursor_cli_resume_chat_acceptance` through `cursor_cli_support::coding_agents_over`; the `spawn_cursor_cli_session_inner` call gained the argument. Dead since: `prepare_cursor_cli_launch` and `spawn_cursor_cli_process` (`#[allow(dead_code)]` + `TODO(cursor-cli)`), `install_cursor_hooks_in_worktree` (public) and the manager's `resume_cursor`/`start_cursor`.
+- **Approved test edited per the stack's ruling.** `sandboxed_cursor_cli_start_wires_specialized_agents_env_and_metadata` asserted `TDDY_SUBAGENT` in the jailed agent's own env. The agent process sees no `TDDY_*` (developer's 2026-11-02 decision for the stack, as ruled on #794: tests follow the contract), so the stub now prints the `.cursor/mcp.json` registration and the test asserts `TDDY_SUBAGENT=fastcontext` in the tddy-tools server's env block. Every other assertion is unchanged.
+- **Jailed hooks deviate from the changeset text.** The runner strips `TDDY_SANDBOX_*` from the agent's env, so `hooks.json` passes the in-jail tool-IPC socket as `--daemon-socket` rather than `session-hook` reading `TDDY_SANDBOX_TOOL_IPC` itself. Consistent with the no-`TDDY_*` contract.
+- **`cursor.yaml` `network.egress.hosts` is declared**, because a jail with no `network:` cannot start: `docs/dev/todo/2026-11-03-jail-with-no-network-section-cannot-bind-its-shim.md` (#794's launcher, not fixed here). The host list itself is unverified against a live Cursor session.
+- **Jailed resume is out of scope.** `resume_cursor_cli` (host PTY) serves every cursor-cli resume, as before; the Responsibility lists no jailed resume.
+- **Hooks transport.** `chat::cursor_hook_daemon_url` (now `pub(crate)`) feeds only `--daemon`, which `session-hook` ignores when `--daemon-socket` is given; the host spec path sets the agent-tool socket, the jail path the tool-IPC socket.
+- **Deletions awaiting approval:** `svc_start_sandboxed_cursor_cli_session.rs` (its jailed start is now `launch_jailed_cursor`; the file still holds it) and the per-agent body of `spawn_cursor_cli_session_inner`/`resume_cursor_cli_session` (the `None` arms).
+
 ### From /validate-changes
 ### From /validate-tests
 ### From /validate-prod-ready

@@ -87,7 +87,61 @@ fn an_agent_def_pointing_fastcontext_at(tddy_data_dir: &std::path::Path, base_ur
     .unwrap();
 }
 
-fn minimal_service(config: DaemonConfig, sessions_base: PathBuf) -> DaemonSessionHost {
+/// The `ToolHost` a daemon's coding agents resolve against in these tests: a `PATH` holding the real
+/// `tddy-tools`, and a `$HOME` of the test's, nothing of the machine's own.
+struct ACursorToolHost {
+    path: Vec<PathBuf>,
+    home: PathBuf,
+}
+
+impl tddy_actions::tool::ToolHost for ACursorToolHost {
+    fn env_var(&self, name: &str) -> Option<String> {
+        (name == "HOME").then(|| self.home.to_string_lossy().into_owned())
+    }
+
+    fn path_dirs(&self) -> Vec<PathBuf> {
+        self.path.clone()
+    }
+
+    fn is_executable_file(&self, path: &std::path::Path) -> bool {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::metadata(path).is_ok_and(|m| m.is_file() && m.permissions().mode() & 0o111 != 0)
+    }
+
+    fn canonicalize(&self, path: &std::path::Path) -> std::io::Result<PathBuf> {
+        std::fs::canonicalize(path)
+    }
+}
+
+/// The real `tddy-tools`, built beside the test binaries.
+fn tddy_tools_binary() -> PathBuf {
+    std::env::var_os("CARGO_BIN_EXE_tddy-tools")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| {
+            PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../target/debug/tddy-tools")
+        })
+}
+
+/// A daemon whose coding agents are bound the way the daemon runtime binds them: the agent registry
+/// loaded from `<tddyhome>/tools`, resolved against a host whose `PATH` holds `tddy-tools`. Its
+/// sandbox RPC bridge is installed, as the daemon installs it.
+fn minimal_service(config: DaemonConfig, sessions_base: PathBuf) -> Arc<DaemonSessionHost> {
+    let tools_dir = sessions_base.join("tools");
+    std::fs::create_dir_all(&tools_dir).unwrap();
+    let registry =
+        tddy_coding_agent_specs::load_agent_registry(&tools_dir).expect("the agent registry loads");
+    let tool_bin = sessions_base.join("tool-bin");
+    std::fs::create_dir_all(&tool_bin).unwrap();
+    std::os::unix::fs::symlink(tddy_tools_binary(), tool_bin.join("tddy-tools")).unwrap();
+    let host = ACursorToolHost {
+        path: vec![tool_bin],
+        home: sessions_base.join("home"),
+    };
+    let agents = Arc::new(tddy_agent_launch::spec_launch::HostCodingAgents::new(
+        registry,
+        Arc::new(host),
+    ));
+
     let tddy_data_dir = sessions_base.clone();
     let sessions_base_resolver: SessionsBaseResolver =
         Arc::new(move |_| Some(sessions_base.clone()));
@@ -98,7 +152,7 @@ fn minimal_service(config: DaemonConfig, sessions_base: PathBuf) -> DaemonSessio
             None
         }
     });
-    DaemonSessionHost::new(
+    let service = DaemonSessionHost::new(
         config.clone(),
         sessions_base_resolver,
         tddy_data_dir,
@@ -109,6 +163,10 @@ fn minimal_service(config: DaemonConfig, sessions_base: PathBuf) -> DaemonSessio
         Arc::new(tddy_daemon_kernel::operator_channel::NoOperatorChannel),
         Arc::new(ClaudeCliSessionManager::new()),
     )
+    .with_coding_agents(agents);
+    let service = Arc::new(service);
+    service.install_sandbox_rpc_bridge();
+    service
 }
 
 fn create_test_repo_with_origin(dir: &std::path::Path) {
@@ -170,7 +228,7 @@ fn write_echo_argv_and_subagent_env_script(dir: &std::path::Path) -> std::path::
     std::fs::write(
         &script_path,
         format!(
-            "#!/bin/sh\nif [ \"$1\" = \"create-chat\" ]; then echo \"{STUB_CHAT_ID}\"; exit 0; fi\necho \"ARGV: $@\"\necho \"TDDY_SUBAGENT=$TDDY_SUBAGENT\"\ncat\n"
+            "#!/bin/sh\nif [ \"$1\" = \"create-chat\" ]; then echo \"{STUB_CHAT_ID}\"; exit 0; fi\necho \"ARGV: $@\"\ntr , \"\\n\" < \"$HOME/.cursor/mcp.json\" | sed \"s/^/MCP: /\"\ncat\n"
         ),
     )
     .unwrap();
@@ -419,7 +477,7 @@ async fn sandboxed_cursor_cli_start_wires_specialized_agents_env_and_metadata() 
     let saw_subagent_env = tokio::time::timeout(Duration::from_secs(30), async {
         while let Some(Ok(msg)) = stream.next().await {
             let text = String::from_utf8_lossy(&msg.data);
-            if text.contains("TDDY_SUBAGENT=fastcontext") {
+            if text.contains("MCP: \"TDDY_SUBAGENT\":\"fastcontext\"") {
                 return true;
             }
         }
@@ -430,6 +488,6 @@ async fn sandboxed_cursor_cli_start_wires_specialized_agents_env_and_metadata() 
 
     assert!(
         saw_subagent_env,
-        "jailed cursor agent env must include TDDY_SUBAGENT=fastcontext"
+        "the tddy-tools server the jailed cursor agent is registered with must carry TDDY_SUBAGENT=fastcontext in its env block"
     );
 }
