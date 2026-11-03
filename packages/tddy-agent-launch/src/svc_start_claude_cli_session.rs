@@ -67,6 +67,8 @@ impl LaunchSessions {
         session_role: &str,
         // A checkout to run in directly instead of cutting a session worktree; empty cuts one.
         repo_path: &str,
+        // Run the agent inside a tmux session as the session's OS user (`StartSessionRequest.run_in_tmux`).
+        run_in_tmux: bool,
         // Where the session's provider account is chosen; see `session_route_sources`.
         route_sources: &RouteSources,
         progress: &AttachmentProgressSink,
@@ -143,6 +145,7 @@ impl LaunchSessions {
             managed_codebase,
             self.start_role(session_role, session_id, &sessions_base, session_token)?,
             repo_path,
+            run_in_tmux,
             &self.host.session_account_access(session_token),
             route_sources,
             &self.task_registry,

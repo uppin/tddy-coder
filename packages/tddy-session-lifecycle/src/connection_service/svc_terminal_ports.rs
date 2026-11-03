@@ -11,6 +11,9 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use async_trait::async_trait;
+use tddy_cli_sessions::tmux::{
+    ensure_reachable, tmux_attach_argv, tmux_binary, tmux_new_session_argv, tmux_session_name,
+};
 use tddy_core::cli_harness::{cli_harness, CliLaunch};
 use tddy_daemon_kernel::privilege_drop::EffectiveIdentity;
 use tddy_rpc::Status;
@@ -227,7 +230,7 @@ impl TerminalRoster for CliManagerTerminalRoster {
             TerminalKind::Tmux { session } => {
                 // Reachability first: a daemon that cannot become the session's user refuses with
                 // the named error, and never starts the tab as the daemon user.
-                tmux_host::ensure_reachable(&launch.os_user, &EffectiveIdentity::current())?;
+                ensure_reachable(&launch.os_user, &EffectiveIdentity::current())?;
                 // Checked before anything spawns: a client for a name tmux does not hold would
                 // attach to nothing and exit, leaving a dead tab behind.
                 let sessions = self.tmux.list(&launch.os_user).await?;
@@ -236,13 +239,13 @@ impl TerminalRoster for CliManagerTerminalRoster {
                         "no tmux session named {session:?} on this host for this user"
                     )));
                 }
-                let binary = tmux_host::tmux_binary();
+                let binary = tmux_binary();
                 self.manager
                     .start_tmux_terminal(
                         session_id,
                         worktree,
                         &launch.os_user,
-                        tmux_host::tmux_attach_argv(&binary, session),
+                        tmux_attach_argv(&binary, session),
                         session,
                     )
                     .await
@@ -250,10 +253,10 @@ impl TerminalRoster for CliManagerTerminalRoster {
             }
             TerminalKind::TmuxNew { session } => {
                 // The name is validated before anything else, so a refused name never reaches tmux.
-                let name = tmux_host::tmux_session_name(session)?;
-                tmux_host::ensure_reachable(&launch.os_user, &EffectiveIdentity::current())?;
-                let binary = tmux_host::tmux_binary();
-                let argv = tmux_host::tmux_new_session_argv(&binary, &name, &worktree);
+                let name = tmux_session_name(session)?;
+                ensure_reachable(&launch.os_user, &EffectiveIdentity::current())?;
+                let binary = tmux_binary();
+                let argv = tmux_new_session_argv(&binary, &name, &worktree);
                 self.manager
                     .start_tmux_terminal(session_id, worktree, &launch.os_user, argv, &name)
                     .await

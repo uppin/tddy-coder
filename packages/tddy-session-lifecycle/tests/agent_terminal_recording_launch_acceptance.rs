@@ -234,6 +234,7 @@ async fn a_resumed_session_records_its_main_terminal() {
         ssh_config_host: None,
         managed_codebase: false,
         session_role: None,
+        tmux_session: None,
     };
     write_session_metadata(&session_dir, &meta).unwrap();
     let stub_dir = tempfile::tempdir().unwrap();

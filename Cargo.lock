@@ -12367,6 +12367,7 @@ dependencies = [
  "prost 0.13.5",
  "tddy-core",
  "tddy-daemon-extensions",
+ "tddy-daemon-kernel",
  "tddy-daemon-sandbox",
  "tddy-pty",
  "tddy-rpc",

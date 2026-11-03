@@ -176,6 +176,7 @@ impl<S: TelegramSender + Send + Sync> TelegramSessionControlHarness<S> {
             ssh_config_host: None,
             managed_codebase: false,
             session_role: None,
+            tmux_session: None,
         };
         tddy_core::write_session_metadata(&session_dir, &meta)
             .map_err(|e| anyhow::anyhow!("write session metadata: {e}"))?;
@@ -412,6 +413,7 @@ impl<S: TelegramSender + Send + Sync> TelegramSessionControlHarness<S> {
             ssh_config_host: None,
             managed_codebase: false,
             session_role: None,
+            tmux_session: None,
         };
         tddy_core::write_session_metadata(&session_dir, &meta)
             .map_err(|e| anyhow::anyhow!("write session metadata: {e}"))?;

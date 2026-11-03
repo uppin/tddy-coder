@@ -165,6 +165,8 @@ mod control_lease;
 
 mod terminals;
 
+mod tmux_main;
+
 mod relaunch;
 
 mod launch;

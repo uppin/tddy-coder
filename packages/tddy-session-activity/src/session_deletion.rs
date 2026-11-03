@@ -500,6 +500,7 @@ mod tests {
             ssh_config_host: None,
             managed_codebase: false,
             session_role: None,
+            tmux_session: None,
         };
         tddy_core::write_session_metadata(dir, &metadata).unwrap();
     }
@@ -663,6 +664,7 @@ mod tests {
             ssh_config_host: None,
             managed_codebase: false,
             session_role: None,
+            tmux_session: None,
         };
         tddy_core::write_session_metadata(&dir, &metadata).unwrap();
 
@@ -723,6 +725,7 @@ mod tests {
             ssh_config_host: None,
             managed_codebase: false,
             session_role: None,
+            tmux_session: None,
         };
         tddy_core::write_session_metadata(&dir, &metadata).unwrap();
 

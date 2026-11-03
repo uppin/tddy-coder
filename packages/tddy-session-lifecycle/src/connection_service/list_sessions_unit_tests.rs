@@ -75,6 +75,7 @@ async fn list_sessions_unit_returns_new_metadata_fields() {
         ssh_config_host: None,
         managed_codebase: false,
         session_role: None,
+        tmux_session: None,
     };
     write_session_metadata(&session_dir, &metadata).unwrap();
 

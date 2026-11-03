@@ -17,6 +17,9 @@ export interface CreateSessionClaudeCliFieldsProps {
   placementWithdrawsPermissionBypass: boolean;
   sandbox: boolean;
   setSandbox: (sandbox: boolean) => void;
+  /** Run the agent inside tmux on the host. */
+  runInTmux: boolean;
+  setRunInTmux: (runInTmux: boolean) => void;
   applyPlacement: (toggled: CodebasePlacementChoice, on: boolean) => void;
   sandboxedCodebase: boolean;
   sandboxedCodebaseUnavailableReason: string | null;

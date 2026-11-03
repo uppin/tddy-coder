@@ -129,6 +129,7 @@ fn write_minimal_running_session(sessions_base: &std::path::Path, session_id: &s
         ssh_config_host: None,
         managed_codebase: false,
         session_role: None,
+        tmux_session: None,
     };
     tddy_core::write_session_metadata(&session_dir, &metadata).unwrap();
 }

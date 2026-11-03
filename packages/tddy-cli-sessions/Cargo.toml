@@ -14,6 +14,8 @@ portable-pty = "0.9"
 prost = "0.13"
 uuid = { version = "1", features = ["v4", "v7"] }
 tddy-core = { path = "../tddy-core" }
+# The as-user spawn and the privilege plan the tmux helpers run under.
+tddy-daemon-kernel = { path = "../tddy-daemon-kernel" }
 tddy-daemon-sandbox = { path = "../tddy-daemon-sandbox" }
 # `TerminalExposure`: the port a PTY is served to remote participants through.
 tddy-daemon-extensions = { path = "../tddy-daemon-extensions" }

@@ -52,6 +52,8 @@ export interface CreateSessionFormValues {
   placementWithdrawsPermissionBypass: boolean;
   initialPrompt: string;
   sandbox: boolean;
+  /** Run the claude agent inside tmux on the host. Sent as `run_in_tmux` for claude-cli only. */
+  runInTmux?: boolean;
   managedCodebase: boolean;
   sandboxedCodebase: boolean;
   isSplitCodebase: boolean;
@@ -222,6 +224,8 @@ export function buildStartSessionRequest(
     stackNodeId,
     ...claudeCliAgentChoices(form),
     sandbox,
+    // claude-cli only: the other session types never run in tmux yet, so they send the default.
+    runInTmux: form.runInTmux ?? false,
     managedCodebase,
     // The third placement. Choosing it cleared the two above and the codebase host in the form,
     // so they go out cleared here without being restated — the request says what the screen says.

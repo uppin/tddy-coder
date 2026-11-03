@@ -139,6 +139,7 @@ mod tests {
                 ssh_config_host: Some(ssh_host.to_string()),
                 managed_codebase: false,
                 session_role: None,
+                tmux_session: None,
             },
         )
         .expect("write session metadata");

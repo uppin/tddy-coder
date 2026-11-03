@@ -4,7 +4,7 @@
 **Status:** 🚧 In Progress
 **Type:** Feature
 **Complexity**: 4 — proto + `tddy-changeset` + `tddy-cli-sessions` (new tmux module, moved helpers, main-in-tmux start) + `tddy-agent-launch` (claude start/resume/delete) + `tddy-session-lifecycle` (import move, shutdown) + web; real-tmux acceptance tests; pid semantics change for tmux-run sessions
-**Stack:** `#tmux-agent 1/3` — branch `feature/tmux-agent/claude-in-tmux`, base `master`
+**Stack:** `#tmux-agent 1/3` — branch `feature/tmux-agent/claude-in-tmux`, base `master` — **PR:** [#814](https://github.com/uppin/tddy-coder/pull/814)
 **PRD:** [PRD-2026-11-03-claude-cli-in-tmux.md](../../ft/daemon/1-WIP/PRD-2026-11-03-claude-cli-in-tmux.md)
 
 ## Initial Discovery
@@ -88,23 +88,23 @@ Real dependency edges: `n1 → n2 → n3`, `n1 → n3`
 ### Acceptance tests
 
 **`tddy-session-lifecycle`**: `packages/tddy-session-lifecycle/tests/claude_cli_tmux_session_acceptance.rs` (private tmux via `TMUX_TMPDIR`, identity → current OS user, stub claude recording argv/env/cwd, serial)
-- [ ] `a_claude_session_started_in_tmux_runs_claude_in_a_named_tmux_session_in_the_worktree`
-- [ ] `the_main_terminal_of_a_tmux_run_session_is_attached_to_its_tmux_session`
-- [ ] `a_tmux_run_session_records_the_pane_pid_and_reads_active`
-- [ ] `claude_in_tmux_sees_the_session_environment`
-- [ ] `deleting_a_tmux_run_session_kills_the_agent_and_the_tmux_session`
-- [ ] `resuming_a_terminated_tmux_run_session_starts_a_fresh_tmux_session_with_the_resume_argv`
-- [ ] `run_in_tmux_with_sandbox_is_refused`
+- [x] `a_claude_session_started_in_tmux_runs_claude_in_a_named_tmux_session_in_the_worktree`
+- [x] `the_main_terminal_of_a_tmux_run_session_is_attached_to_its_tmux_session`
+- [x] `a_tmux_run_session_records_the_pane_pid_and_reads_active`
+- [x] `claude_in_tmux_sees_the_session_environment`
+- [x] `deleting_a_tmux_run_session_kills_the_agent_and_the_tmux_session`
+- [x] `resuming_a_terminated_tmux_run_session_starts_a_fresh_tmux_session_with_the_resume_argv`
+- [x] `run_in_tmux_with_sandbox_is_refused`
 
 **`tddy-web`**: `packages/tddy-web/cypress/component/CreateSessionRunInTmuxAcceptance.cy.tsx`
-- [ ] `the Create pane offers "Run the agent in tmux" for a Claude CLI session`
-- [ ] `checking it sends run_in_tmux on StartSession`
-- [ ] `the option is disabled while the session is sandboxed`
+- [x] `the Create pane offers "Run the agent in tmux" for a Claude CLI session`
+- [x] `checking it sends run_in_tmux on StartSession`
+- [x] `the option is disabled while the session is sandboxed`
 
 ### Unit / integration tests
-- [ ] `tddy-cli-sessions` `tmux` unit tests: `agent_tmux_session_name` (short id, valid name), `start_agent_tmux_session` argv shape (`new-session -d -s -c -e K=V -- argv`), moved helper tests move with the code.
-- [ ] `tddy-changeset`: a `.session.yaml` with `tmux_session` round-trips; one without it reads `None`.
-- [ ] Existing `tmux_tabs_acceptance` / `tmux_new_session_acceptance` stay green after the move (regression guard).
+- [x] `tddy-cli-sessions` `tmux` unit tests: `agent_tmux_session_name` (short id, valid name), `start_agent_tmux_session` argv shape (`new-session -d -s -c -e K=V -- argv`), moved helper tests move with the code.
+- [x] `tddy-changeset`: a `.session.yaml` with `tmux_session` round-trips; one without it reads `None`.
+- [x] Existing `tmux_tabs_acceptance` / `tmux_new_session_acceptance` stay green after the move (regression guard).
 
 ## Decisions & Trade-offs
 
@@ -120,10 +120,10 @@ Real dependency edges: `n1 → n2 → n3`, `n1 → n3`
 - [x] Cross-check `packages/*/docs/code-issues/` and `docs/dev/todo/` for items this change touches (Step 2b)
 - [x] Create/update PRD documentation
 - [x] Create changeset (this document)
-- [ ] Create failing acceptance tests
-- [ ] Run acceptance tests (verify they fail)
-- [ ] USER REVIEW — acceptance tests
-- [ ] TDD Red — write failing unit/integration tests
+- [x] Create failing acceptance tests
+- [x] Run acceptance tests (verify they fail)
+- [x] USER REVIEW — acceptance tests — waived by the developer 2026-11-03 (reviewed with the stack at the end)
+- [x] TDD Red — write failing unit/integration tests
 - [ ] TDD Green — implement with quality code
 - [ ] Update documentation with progress
 - [ ] Repeat Red→Green→Update cycle until feature complete
@@ -140,6 +140,25 @@ Real dependency edges: `n1 → n2 → n3`, `n1 → n3`
 - [ ] Final validation (/validate-changes)
 - [ ] Linting and formatting (`cargo clippy -p {package} -- -D warnings`, `cargo fmt`)
 - [ ] USER REVIEW — scope developed, every gap approved: ready to wrap
+
+## Baseline before green
+
+Scoped to the touched packages (`tddy-changeset`, `tddy-cli-sessions`, `tddy-agent-launch`, `tddy-session-lifecycle`, `tddy-web`); whole-workspace health is CI's.
+
+**Surface published (builds, `cargo clippy -p <pkg> --all-targets -- -D warnings` clean):** proto `run_in_tmux = 47` + regenerated TS (all four gen dirs `check` clean); `SessionMetadata.tmux_session`; `tddy_cli_sessions::tmux` (helpers moved for real from `tmux_host.rs`, which keeps only `HostTmux`; new `agent_tmux_session_name`, `agent_new_session_args`, `start_agent_tmux_session`, `kill_tmux_session`, `tmux_session_alive`, `pane_pid` as `TODO(claude-in-tmux)` stubs); `CliSessionManager::attach_main_to_tmux` stub; `tddy_agent_launch::claude_cli_tmux` (`start_claude_in_tmux`, `resume_claude_in_tmux`, `relaunch_claude_cli`) wired into the claude start and resume paths; web `runInTmux` state/prop/request plumbing (no checkbox yet).
+
+**Red (fail because the implementation is missing):**
+
+| Test | Failure |
+|---|---|
+| `tddy-session-lifecycle/tests/claude_cli_tmux_session_acceptance.rs` — 6 of 7 (`a_claude_session_started_in_tmux…`, `the_main_terminal…`, `a_tmux_run_session_records…`, `claude_in_tmux_sees…`, `deleting_a_tmux_run_session…`, `resuming_a_terminated…`) | panic in the `start_claude_in_tmux` stub |
+| `…::run_in_tmux_with_sandbox_is_refused` | no `invalid_argument` refusal: the start proceeds into the sandbox path (which here dies on a missing `tddy-sandbox-runner`, a harness gap, not the cause) |
+| `tddy-cli-sessions` `tmux::tests` — 3 (`an_agent_tmux_session_is_named_after_the_short_session_id`, `an_agent_tmux_session_name_is_a_valid_new_session_name`, `an_agent_session_starts_detached_in_the_worktree_with_its_environment_and_argv`) | `unimplemented!` stubs |
+| `tddy-web/cypress/component/CreateSessionRunInTmuxAcceptance.cy.tsx` — 3 of 3 | `create-session-tmux-toggle` not rendered yet |
+
+**Green (guards):** the 10 moved `tmux` helper tests in `tddy-cli-sessions`; `tmux_tabs_acceptance` (7) and `tmux_new_session_acceptance` (5) in `tddy-session-lifecycle`; the two new `tddy-changeset` `tmux_session` tests (the field is data, so they pass on the surface alone; 30 of 30 `session_metadata` tests pass).
+
+**Pre-existing failures:** none seen in the targeted suites. Not run locally: the rest of the packages' suites.
 
 ## Refactoring Needed
 ### From /red (TDD red phase)

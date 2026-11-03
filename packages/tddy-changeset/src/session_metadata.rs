@@ -125,6 +125,12 @@ pub struct SessionMetadata {
     /// the project's read-only home session. See `#project-home` 4/7.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub session_role: Option<String>,
+    /// The tmux session the agent runs in, when the session was started with `run_in_tmux`
+    /// (docs/ft/daemon/1-WIP/PRD-2026-11-03-claude-cli-in-tmux.md). Absent for every session whose
+    /// agent is the PTY child itself, and for legacy files. For a tmux-run session `pid` is the
+    /// pane's process, not the tmux client's.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tmux_session: Option<String>,
 }
 
 /// [`SessionMetadata::session_role`] of a project's project-home session.
@@ -272,6 +278,7 @@ pub fn write_initial_tool_session_metadata(
         ssh_config_host: None,
         managed_codebase: false,
         session_role: None,
+        tmux_session: None,
     };
     write_session_metadata(session_dir, &metadata)
 }
@@ -766,6 +773,38 @@ session_type: workspace
             session_role: None,
             ..a_workspace_session()
         }
+    }
+
+    #[test]
+    fn a_recorded_tmux_session_round_trips_through_session_yaml() {
+        // Given
+        let session = SessionMetadata {
+            tmux_session: Some("tddy-018f1234".to_string()),
+            ..a_workspace_session()
+        };
+
+        // When
+        let yaml = serde_yaml::to_string(&session).unwrap();
+        let read: SessionMetadata = serde_yaml::from_str(&yaml).unwrap();
+
+        // Then
+        assert_eq!(read.tmux_session.as_deref(), Some("tddy-018f1234"));
+    }
+
+    #[test]
+    fn a_session_yaml_without_a_tmux_session_reads_none_and_writes_none() {
+        // Given a file written before `tmux_session` was recorded
+        let session = a_workspace_session();
+
+        // When
+        let yaml = serde_yaml::to_string(&session).unwrap();
+
+        // Then
+        assert_eq!(session.tmux_session, None);
+        assert!(
+            !yaml.contains("tmux_session"),
+            "an absent tmux session must not be written; got:\n{yaml}"
+        );
     }
 
     #[test]
