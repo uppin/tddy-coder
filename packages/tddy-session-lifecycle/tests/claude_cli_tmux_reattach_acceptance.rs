@@ -151,6 +151,8 @@ fn a_registered_project(sessions_base: &Path) -> tempfile::TempDir {
     repo_dir
 }
 
+/// A managed claude-cli start (managed codebase with a recipe): the session gets its toolcall
+/// listener, the socket the client-exit and agent-exit tests follow.
 fn a_claude_cli_start_request(run_in_tmux: bool, sandbox: bool) -> StartSessionRequest {
     StartSessionRequest {
         session_token: VALID_TOKEN.to_string(),
@@ -159,6 +161,8 @@ fn a_claude_cli_start_request(run_in_tmux: bool, sandbox: bool) -> StartSessionR
         model: TEST_MODEL.to_string(),
         run_in_tmux,
         sandbox,
+        managed_codebase: true,
+        recipe: "tdd".to_string(),
         ..Default::default()
     }
 }

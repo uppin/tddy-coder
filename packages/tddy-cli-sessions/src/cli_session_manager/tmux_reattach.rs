@@ -24,16 +24,23 @@ pub fn classify_main_exit(
     tmux_session: Option<&str>,
     tmux_session_alive: impl FnOnce(&str) -> bool,
 ) -> MainExit {
-    // TODO(tmux-resume): implement
-    let _ = (tmux_session, tmux_session_alive);
-    unimplemented!("TODO(tmux-resume): classify_main_exit")
+    match tmux_session {
+        Some(name) if tmux_session_alive(name) => MainExit::ClientOnly,
+        _ => MainExit::AgentEnded,
+    }
 }
 
 impl CliSessionManager {
     /// Re-attach `session_id`'s main terminal to the live tmux session `name`: what
-    /// [`attach_main_to_tmux`](Self::attach_main_to_tmux) does, plus re-registering the main
-    /// recording and the terminal exposure the previous client's exit left behind. Returns the
-    /// new main handle. The agent is not touched.
+    /// [`attach_main_to_tmux`](Self::attach_main_to_tmux) does. Returns the main handle.
+    ///
+    /// A main already attached to `name` is returned as it is, so a second resume of a live session
+    /// does not add a second client. The agent is not touched.
+    ///
+    /// The caller registers the main recording, as it does after a start (the recording path is the
+    /// caller's to name, not this manager's). The exposure record is not re-registered here: a
+    /// client's exit in this daemon keeps it (see [`classify_main_exit`]), and a restarted daemon has
+    /// no record to re-register from.
     pub async fn reattach_main(
         &self,
         session_id: &str,
@@ -42,8 +49,14 @@ impl CliSessionManager {
         worktree: PathBuf,
         kind: &str,
     ) -> anyhow::Result<Arc<pty_handle::PtyHandle>> {
-        // TODO(tmux-resume): implement
-        let _ = (self, session_id, os_user, name, worktree, kind);
-        unimplemented!("TODO(tmux-resume): reattach_main")
+        if let Some(attached) = self
+            .get(session_id)
+            .await
+            .filter(|main| main.tmux_session.as_deref() == Some(name))
+        {
+            return Ok(attached);
+        }
+        self.attach_main_to_tmux(session_id, worktree, os_user, kind, name)
+            .await
     }
 }

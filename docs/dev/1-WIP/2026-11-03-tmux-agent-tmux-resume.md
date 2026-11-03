@@ -113,7 +113,7 @@ Real dependency edges: `n1 → n2 → n3`, `n1 → n3`
 - [x] USER REVIEW — acceptance tests — waived by the developer 2026-11-03 (reviewed with the stack at the end)
 - [x] TDD Red — write failing unit/integration tests
 - [ ] TDD Green — implement with quality code
-- [ ] Update documentation with progress
+- [x] Update documentation with progress
 - [ ] Repeat Red→Green→Update cycle until feature complete
 - [ ] Run the touched packages' tests (`./test -p {package}` per package) — verify 100% pass
 - [ ] Validate changes (/validate-changes)
@@ -126,7 +126,7 @@ Real dependency edges: `n1 → n2 → n3`, `n1 → n3`
 - [ ] Analyze code quality (/analyze-clean-code)
 - [ ] Refactor code quality issues
 - [ ] Final validation (/validate-changes)
-- [ ] Linting and formatting (`cargo clippy -p {package} -- -D warnings`, `cargo fmt`)
+- [x] Linting and formatting (`cargo clippy -p {package} -- -D warnings`, `cargo fmt`) — scoped; see Green status
 - [ ] USER REVIEW — scope developed, every gap approved: ready to wrap
 
 ## Baseline before green
@@ -134,6 +134,32 @@ Real dependency edges: `n1 → n2 → n3`, `n1 → n3`
 Scoped to `tddy-cli-sessions`, `tddy-agent-launch`, `tddy-session-lifecycle` (`cargo check --all-targets` and `cargo clippy --all-targets -- -D warnings` clean on the rebased tree). Red: `tmux_reattach` 3 of 4 (the classification tests; `kill_all` is a guard); the six lifecycle acceptance tests are red on n1's stubs (not run here — the test binary link is heavy; compile-checked). Not run: the rest of the workspace (CI's).
 
 Note: the lifecycle fixtures are copied from n1's `claude_cli_tmux_session_acceptance.rs` (read-only here); the green phase may move them into `tests/support/` once n1 has landed.
+
+## Green status (2026-11-03)
+
+Rebased onto `feature/tmux-agent/claude-in-tmux` (e64891547); this PR is the two commits above it (docs, contract). Scoped runs only; the rest of the workspace is CI's.
+
+| Gate | Result |
+|---|---|
+| `./dev cargo test -p tddy-cli-sessions --no-fail-fast` | all pass, incl. `tmux_reattach` 4 of 4 |
+| `./dev cargo test -p tddy-agent-launch --lib` | 175 pass |
+| `claude_cli_tmux_reattach_acceptance` | 5 of 6 pass; **red:** `a_fresh_daemon_reattaches_the_main_terminal_on_first_stream_without_restarting_the_agent` (lazy lookup; `reattach_main_once` is still a stub) |
+| n1 guards: `claude_cli_tmux_session_acceptance`, `terminal_session_acceptance`, `tmux_tabs_acceptance` | 9/9, 12/12, 7/7 |
+| `cargo clippy --all-targets -- -D warnings` | `tddy-cli-sessions`, `tddy-agent-launch` clean; `tddy-session-lifecycle` for the reattach test target only |
+
+Implemented: `kill_all` cancels a tmux-run main's client and leaves its tmux session; `classify_main_exit` is wired into `spawn_terminal_cleanup` (the probe runs on the blocking pool; the tmux identity is captured at spawn, so a main ended by shutdown is still a client-only exit); `reattach_main` attaches the client, and returns the main already attached to that session rather than adding a second; `reattach_claude_in_tmux` reads the pane pid before attaching; `relaunch_claude_cli` re-attaches when `tmux_session_alive`, else starts fresh as before.
+
+Checked: `ResumeSession` does not refuse a claude-cli session whose pid reads active (`resume_claude_cli_session` has no pid check), so the live-tmux case goes to re-attach.
+
+Deviations from the Responsibility section:
+- `reattach_main` does not register the main recording or the exposure. The recording path needs the daemon's data dir, which the manager does not hold, so callers register it as after a start (`record_main_terminal`). A client's exit keeps the exposure record rather than re-registering it: a restarted daemon has no metadata to rebuild it from, because `stack_parent` is not persisted.
+- `TerminalEntry.os_user` is removed; its only reader was `kill_all`'s tmux kill.
+- Fixture: `a_claude_cli_start_request` now sets `managed_codebase: true` and `recipe: "tdd"`. Without them the session is unmanaged, has no toolcall listener, and `a_client_exit_while_tmux_lives_keeps_the_sessions_toolcall_socket` asserted on a socket that never existed, while `an_agent_exit_...` could only pass vacuously. Assertions are unchanged.
+
+Open decisions (not implemented; this node stops here):
+1. **Lazy re-attach (`reattach_main_once`).** The Responsibility section says the lookup reads the tmux run's details "from its metadata", but `SessionMetadata` holds neither the run's OS user nor the daemon data dir, and `DaemonTerminalSessionStore` holds only the CLI and sandbox managers. `get_terminal` gets no token, so nothing else supplies the OS user. Needed: where the OS user comes from (persist it at start, or a host-side resolver), and the data dir for the recording path and the metadata read.
+2. **A live same-daemon resume deletes the agent's toolcall socket.** Verified with a temporary test: detach, then `ResumeSession` on the same daemon. The client exit keeps the managed workflow (`ClientOnly`); the resume's `prepare_managed_workflow` binds a new `tddy-wf-<id>.sock`; `attach_managed_workflow` then drops the old listener, whose `Drop` unlinks that path. The socket is gone after the resume. Options: release the old workflow before the new listener binds (a window with no socket for the live agent), or skip creating a new workflow when the tmux session is alive (needs a probe before `prepare_managed_workflow`). The restart test does not catch it, since its manager is empty.
+3. **No observer for a detached agent that ends.** After a `ClientOnly` exit with no client attached, nothing sees the tmux session end, so the `AgentEnded` cleanup (socket, exposure) waits for the next attach. The PRD says the cleanup runs "when the agent's tmux session has ended". Needs a watcher: owner and poll interval.
 
 ## Refactoring Needed
 ### From /red (TDD red phase)

@@ -53,9 +53,6 @@ struct TerminalEntry {
     worktree_path: PathBuf,
     model: String,
     tmux_session: Option<String>,
-    /// The OS user the terminal was started as, when it was started as one. A tmux session is
-    /// killed as this user, so shutdown reaches the same tmux server the session was started on.
-    os_user: Option<String>,
 }
 
 /// `session_id → (terminal_id → TerminalEntry)`.

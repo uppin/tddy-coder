@@ -11,7 +11,8 @@ use std::sync::Arc;
 use tddy_cli_sessions::cli_session_manager::pty_handle::PtyHandle;
 use tddy_cli_sessions::cli_session_manager::CliSessionManager;
 use tddy_cli_sessions::tmux::{
-    agent_tmux_session_name, kill_tmux_session, start_agent_tmux_session,
+    agent_tmux_session_name, kill_tmux_session, pane_pid, start_agent_tmux_session,
+    tmux_session_alive,
 };
 use tddy_rpc::Status;
 
@@ -206,23 +207,65 @@ pub async fn reattach_claude_in_tmux(
     manager: &CliSessionManager,
     launch: ClaudeCliTmuxLaunch<'_>,
 ) -> Result<TmuxLaunched, Status> {
-    // TODO(tmux-resume): implement — `reattach_main`, then `pane_pid`; `relaunch_claude_cli`
-    // calls this instead of `resume_claude_in_tmux` when `tmux_session_alive`.
-    let _ = (manager, launch);
-    unimplemented!("TODO(tmux-resume): reattach_claude_in_tmux")
+    let name = agent_tmux_session_name(launch.session_id);
+    let os_user = launch.os_user.to_string();
+    // The pane's pid is read before a client is attached, so a failure to read it leaves nothing
+    // attached behind.
+    let pid = {
+        let (probe_user, probe_name) = (os_user.clone(), name.clone());
+        in_tmux_blocking(move || pane_pid(&probe_user, &probe_name))
+            .await?
+            .map_err(|e| {
+                Status::internal(format!(
+                    "could not read the pane of tmux session {name:?}: {e}"
+                ))
+            })?
+    };
+    let handle = manager
+        .reattach_main(
+            launch.session_id,
+            &os_user,
+            &name,
+            launch.worktree_path,
+            "claude-cli",
+        )
+        .await
+        .map_err(|e| {
+            Status::internal(format!(
+                "failed to re-attach the main terminal to tmux session {name:?}: {e}"
+            ))
+        })?;
+    Ok(TmuxLaunched {
+        handle,
+        pane_pid: pid,
+        tmux_session: name,
+    })
 }
 
-/// Relaunch a resumed claude-cli agent and return the pid to record: in a fresh tmux session when
-/// the session ran in tmux (`in_tmux`), else as the PTY child, exactly as before.
+/// Relaunch a resumed claude-cli agent and return the pid to record. A session that ran in tmux
+/// (`in_tmux`) re-attaches to its tmux session when that still lives, and otherwise starts a fresh
+/// one; a session that did not run in tmux is relaunched as the PTY child, exactly as before.
 pub async fn relaunch_claude_cli(
     manager: &CliSessionManager,
     in_tmux: bool,
     launch: ClaudeCliTmuxLaunch<'_>,
 ) -> Result<u32, Status> {
     if in_tmux {
-        return resume_claude_in_tmux(manager, launch)
-            .await
-            .map(|l| l.pane_pid);
+        // A tmux session still alive holds the agent the session recorded: the client re-attaches to
+        // it. Only a gone one is started again.
+        let alive = {
+            let (os_user, name) = (
+                launch.os_user.to_string(),
+                agent_tmux_session_name(launch.session_id),
+            );
+            in_tmux_blocking(move || tmux_session_alive(&os_user, &name)).await?
+        };
+        let launched = if alive {
+            reattach_claude_in_tmux(manager, launch).await
+        } else {
+            resume_claude_in_tmux(manager, launch).await
+        };
+        return launched.map(|l| l.pane_pid);
     }
     manager
         .resume_with_options(

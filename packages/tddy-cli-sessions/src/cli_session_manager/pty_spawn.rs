@@ -12,6 +12,10 @@ use tddy_task::TaskHandle;
 
 use super::{ExitSettlements, TerminalEntry};
 
+use super::tmux_reattach::{classify_main_exit, MainExit};
+
+use crate::tmux::tmux_session_alive;
+
 use tddy_terminal_rpc::pty_runtime::PtyRuntime;
 
 use tddy_terminal_rpc::pty_runtime::PtySpawnSpec;
@@ -110,7 +114,6 @@ impl CliSessionManager {
                     worktree_path: handle.worktree_path.clone(),
                     model: handle.model.clone(),
                     tmux_session: handle.tmux_session.clone(),
-                    os_user: os_user.map(str::to_string),
                 },
             );
 
@@ -126,6 +129,10 @@ impl CliSessionManager {
             terminal_id.to_string(),
             handle.task_id.clone(),
             on_exit,
+            TmuxRun {
+                session: tmux_session.map(str::to_string),
+                os_user: os_user.map(str::to_string),
+            },
         );
 
         log::info!(
@@ -196,6 +203,7 @@ impl CliSessionManager {
         terminal_id: String,
         task_id: TaskId,
         on_exit: Option<PendingExit>,
+        tmux_run: TmuxRun,
     ) {
         let terminals = Arc::clone(&self.terminals);
         let exit_settlements = Arc::clone(&self.exit_settlements);
@@ -222,6 +230,12 @@ impl CliSessionManager {
                 let key = (session_id.clone(), terminal_id.clone());
                 pending.finish(&task, key, &exit_settlements).await;
             }
+            // Only a main's exit can end the agent: a tab is a client of nothing the session keeps.
+            let main_exit = if terminal_id == MAIN_TERMINAL_ID {
+                Some(classify_ended_main(tmux_run).await)
+            } else {
+                None
+            };
             let mut reg = terminals.write().await;
             if let Some(tools) = reg.get_mut(&session_id) {
                 if tools
@@ -234,11 +248,12 @@ impl CliSessionManager {
                     reg.remove(&session_id);
                 }
             }
-            // The main claude terminal exiting ends the session — drop its managed workflow so the
-            // per-session toolcall listener socket is cleaned up, and forget how it was exposed to
+            // The main claude terminal's agent ending ends the session — drop its managed workflow so
+            // the per-session toolcall listener socket is cleaned up, and forget how it was exposed to
             // LiveKit: there is no terminal left to bridge, and an entry nobody removes would keep
-            // a dead session's block waiting for a consumer that could only find an empty PTY.
-            if terminal_id == MAIN_TERMINAL_ID {
+            // a dead session's block waiting for a consumer that could only find an empty PTY. A
+            // tmux client that ended while its agent lives keeps both: its agent still serves them.
+            if main_exit == Some(MainExit::AgentEnded) {
                 managed_workflows.write().await.remove(&session_id);
                 exposed_terminals.write().await.remove(&session_id);
             }
@@ -309,6 +324,38 @@ impl CliSessionManager {
             .ok()?;
         handle.tmux_session = entry.tmux_session;
         Some(Arc::new(handle))
+    }
+}
+
+/// The tmux session a terminal is a client of, and the OS user it runs as — both `None` for a
+/// terminal that is not a tmux client.
+pub(crate) struct TmuxRun {
+    session: Option<String>,
+    os_user: Option<String>,
+}
+
+/// How a main terminal's process ended. The liveness probe runs a process, so it runs on the
+/// blocking pool. A probe that did not finish keeps the session's state: nothing is torn down on a
+/// guess.
+async fn classify_ended_main(tmux_run: TmuxRun) -> MainExit {
+    let TmuxRun { session, os_user } = tmux_run;
+    let classified = tokio::task::spawn_blocking(move || {
+        classify_main_exit(session.as_deref(), |name| {
+            os_user
+                .as_deref()
+                .is_some_and(|user| tmux_session_alive(user, name))
+        })
+    })
+    .await;
+    match classified {
+        Ok(exit) => exit,
+        Err(error) => {
+            log::warn!(
+                target: "tddy_daemon::claude_cli_session",
+                "could not tell whether a main terminal's agent is still running, so its session is kept: {error}"
+            );
+            MainExit::ClientOnly
+        }
     }
 }
 
