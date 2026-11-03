@@ -192,6 +192,10 @@ fn render_tool_slot(
             agent: spec.id.clone(),
             slot: slot_name.to_string(),
         }),
+        // TODO(acp-agents): glue — `slots::acp::acp_withdrawal` reads these, not flags.
+        ToolSlot::AcpMeta { .. } | ToolSlot::ConfigEnv { .. } => {
+            todo!("acp-agents: render_tool_slot for the acp withdrawal slots")
+        }
     }
 }
 

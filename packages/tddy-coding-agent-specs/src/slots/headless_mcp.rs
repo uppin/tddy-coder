@@ -102,6 +102,8 @@ pub fn mcp_written_paths(
         McpSlot::Argv { .. } => vec![scratch_dir.join(ARGV_MCP_FILE)],
         McpSlot::Workdir { path, .. } => vec![workdir.join(path)],
         McpSlot::Inline { .. } | McpSlot::Unsupported => Vec::new(),
+        // TODO(acp-agents): glue — the acp-session servers travel in `session/new`, not a file.
+        McpSlot::AcpSession => todo!("acp-agents: mcp_written_paths for the acp-session slot"),
     })
 }
 
