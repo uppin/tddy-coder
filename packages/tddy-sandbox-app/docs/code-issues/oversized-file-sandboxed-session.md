@@ -3,16 +3,17 @@
 **Location:** `packages/tddy-sandbox-app/src/sandboxed_session.rs`
 **Category:** oversized-file
 **Detected:** 2026-10-22 by `/pr-wrap` step 3.5 file-length gate on PR #670 (`#provider-route` 9/9)
-**Metrics:** **737 production lines** (counted to the first `#[cfg(test)]`) · budget 500
+**Metrics:** **740 production lines** (2026-11-03, after #799) (counted to the first `#[cfg(test)]`) · budget 500
 **Thresholds breached:** length 737 > 500
 **Restructure:** required — not designed, `/code-restructuring` territory
-**Status:** Open — **unclaimed**
+**Status:** Open — regressed 2026-11-03 (+3 in #799); deferred to the #agent-tools sweep node — **unclaimed**
 
 ## Measurement history
 
 | Run | Production lines | Note |
 |---|---|---|
 | 2026-10-22 | 737 | first record; 736 at PR #670's merge-base (`655970c72`), already over budget. +1 in #670: `route: None` on the standalone app's runner spawn. |
+| 2026-11-03 | 740 | **worse** by 3 in PR #799 (`#agent-tools` 10/12): the workspace jail's plan sets `context_dir` and `stdio: true`. Not split: deferred to the #agent-tools sweep node (developer) |
 
 ## What the tool found
 

@@ -1,7 +1,7 @@
 //! Acceptance: `tddy-sandbox-app --agent <spec id>` jails the agent its spec declares
 //! (`#agent-tools 10/12`).
 //!
-//! PRD: `docs/ft/coder/1-WIP/PRD-2026-10-31-tool-agnostic-jail.md`. The app chooses the agent from
+//! Docs: `docs/ft/coder/sandbox-builder.md`. The app chooses the agent from
 //! the coding-agent registry and hands the runner a rendered [`ExecPlan`] instead of agent flags.
 //! These tests pin that plan — the boundary between the app and the jail — against what
 //! `--agent-kind claude|cursor` launched before: the same binary, model, session and permission

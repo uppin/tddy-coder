@@ -3,7 +3,7 @@
 **Location:** `packages/tddy-sandbox-app/src/main.rs`
 **Category:** oversized-file
 **Detected:** 2026-10-22 by `/pr-wrap` step 3.5 file-length gate on PR #670 (`#provider-route` 9/9)
-**Metrics:** **976 production lines** (counted to the first `#[cfg(test)]`) · budget 500
+**Metrics:** **957 production lines** (2026-11-03, after #799) (counted to the first `#[cfg(test)]`) · budget 500
 **Thresholds breached:** length 976 > 500
 **Restructure:** required — not designed, `/code-restructuring` territory
 **Status:** Open — **unclaimed**
@@ -13,6 +13,7 @@
 | Run | Production lines | Note |
 |---|---|---|
 | 2026-10-22 | 976 | first record; 973 at PR #670's merge-base (`655970c72`), already over budget. +3 in #670: the `--agent-kind` doc and the `agent_home_banner` arm for the two kinds the app does not start. |
+| 2026-11-03 | 957 | **better** by 19 in PR #799 (`#agent-tools` 10/12): `--agent <spec id>` replaces `--agent-kind`, `--claude-binary`, `--cursor-binary`, `--claude-home-dir` and `--cursor-home-dir`. The Linux path refuses an agent other than claude (+9) |
 
 ## What the tool found
 

@@ -1,6 +1,6 @@
 //! The runner's command line knows no coding agent (`#agent-tools 10/12`).
 //!
-//! PRD: `docs/ft/coder/1-WIP/PRD-2026-10-31-tool-agnostic-jail.md`. Every jail is a tool plan: the
+//! Docs: `docs/ft/coder/sandbox-builder.md`. Every jail is a tool plan: the
 //! runner execs an `--exec-plan` written by the launcher, or serves `--workspace-tools`, and the
 //! per-agent flags it used to build an agent's argv from are gone. Both tests drive the real binary,
 //! and neither starts a jail: `--help` exits before any mode runs, and a refused flag is a parse

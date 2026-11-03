@@ -1,7 +1,7 @@
 //! Acceptance: the agent a split session runs on this host is a declared variant of `claude.yaml`
 //! (`#agent-tools 10/12`), not a hand-built argv.
 //!
-//! PRD: `docs/ft/coder/1-WIP/PRD-2026-10-31-tool-agnostic-jail.md`. The spec is read with serde
+//! Docs: `docs/ft/coder/sandbox-builder.md`. The spec is read with serde
 //! straight from the embedded file, so these tests exercise the variant's own surface and nothing
 //! the registry still has to deliver.
 

@@ -1,7 +1,7 @@
 //! `--agent <spec id>`: the agent this app jails, chosen from the coding-agent registry
 //! (`#agent-tools 10/12`).
 //!
-//! PRD: `docs/ft/coder/1-WIP/PRD-2026-10-31-tool-agnostic-jail.md`. The app used to know four agents
+//! Docs: `docs/ft/coder/sandbox-builder.md`. The app used to know four agents
 //! by name (`--agent-kind`, `spawn::AgentKind`) and seed each one's home by hand. Here it knows
 //! none: [`choose_agent`] loads the same registry the daemon does — the embedded specs with
 //! `<tddyhome>/tools` overrides applied — and [`agent_exec_plan`] renders the chosen spec's argv and

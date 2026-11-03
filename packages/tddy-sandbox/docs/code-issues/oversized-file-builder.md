@@ -3,10 +3,10 @@
 **Location:** `packages/tddy-sandbox/src/builder.rs`
 **Category:** oversized-file
 **Detected:** 2026-10-22 by `/pr-wrap` step 3.5 file-length gate on PR #670 (`#provider-route` 9/9)
-**Metrics:** **596 production lines** (2026-11-02, after #794) (counted to the first `#[cfg(test)]`) · budget 500
+**Metrics:** **628 production lines** (2026-11-03, after #799) (counted to the first `#[cfg(test)]`) · budget 500
 **Thresholds breached:** length 573 > 500
 **Restructure:** required — not designed, `/code-restructuring` territory
-**Status:** Open — **unclaimed**
+**Status:** Open — regressed 2026-11-03 (+32 in #799); deferred to the #agent-tools sweep node — **unclaimed**
 
 ## Measurement history
 
@@ -15,6 +15,7 @@
 | 2026-10-22 | 573 | first record; 562 at PR #670's merge-base (`655970c72`), already over budget. +11 in #670: a hand-written `Debug` for `SecretSource`, so a literal secret in a plan never reaches a log line. |
 | 2026-11-02 | 577 | **worse** by 4 in PR #792 (`#agent-tools` 3/12): `NetworkSpec.egress` and its doc. `EgressPolicy` itself is in the new `network.rs`. Not split: stack-shared |
 | 2026-11-02 | 596 | **worse** by 19 in PR #794 (`#agent-tools` 5/12): `SandboxPlan::add_secret` (a plan assembled before its secrets were known) and the `secret_file_var` helper it shares with `SandboxBuilder::build`. Not split: stack-shared, and deferred to the #agent-tools sweep node (developer, 2026-11-02) |
+| 2026-11-03 | 628 | **worse** by 32 in PR #799 (`#agent-tools` 10/12): `SandboxPlan.{context_dir, stdio}` and the matching `SandboxBuilder` setters, which the backends now read instead of sniffing the runner's argv. Not split: deferred to the #agent-tools sweep node (developer) |
 
 ## What the tool found
 

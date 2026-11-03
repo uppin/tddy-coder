@@ -87,8 +87,10 @@ the host relay (`HostRelayConfig::with_egress`), so a `TunnelOpen` to an undecla
 the host as well as at the in-jail shim. `dial_and_bridge` is it with an unrestricted guard, for the
 recipe-built jails.
 
-`sandbox_session::prepare_persistent_claude_home` (the recipe-era seed of a configured Claude home)
-has no caller in the daemon.
+A jailed agent's persistent home is its tool definition's `home:` section, resolved by
+`tool_jail::lower_tool_jail`. `sandbox_session` seeds no agent home, and `build_allow_read_paths`
+grants the toolchain paths plus the runner binary's own directory. What the process the runner execs
+reads comes from its tool definition, never from the runner's argv.
 
 ## Tests
 

@@ -1,6 +1,6 @@
 //! Source scan: the jail crates name no coding agent (`#agent-tools 10/12`).
 //!
-//! PRD: `docs/ft/coder/1-WIP/PRD-2026-10-31-tool-agnostic-jail.md`. Every jail is a tool plan: what
+//! Docs: `docs/ft/coder/sandbox-builder.md`. Every jail is a tool plan: what
 //! an agent needs of one is declared in its tool file (`tddy-coding-agent-specs/specs/*.yaml`) and
 //! lowered by `tddy_sandbox_recipes::tool_grants`, so neither `tddy-sandbox` nor
 //! `tddy-sandbox-recipes` has any reason to spell an agent's name. A deletion claim is only durable
