@@ -20,7 +20,7 @@ use crate::backend::acp_driver::{AcpAgentCommand, AcpAgentHooks};
 use crate::error::BackendError;
 use crate::provider_route::HarnessRoute;
 
-pub use super::codex_acp_login::{CodexAcpLogin, CODEX_ACP_LOGIN};
+pub use super::codex_acp_login::{CodexAcpLogin, CODEX_ACP_LOGIN, CODEX_DEP};
 pub use super::opencode_route_file::{OpenCodeRouteFile, OPENCODE_ROUTE_FILE};
 
 /// What one ACP launch hands its hooks adapter, before the agent is spawned.
@@ -79,9 +79,14 @@ impl AcpHooksAdapters {
     /// Every ACP hooks adapter this build registers: [`CODEX_ACP_LOGIN`] ([`CodexAcpLogin`]) and
     /// [`OPENCODE_ROUTE_FILE`] ([`OpenCodeRouteFile`]).
     pub fn builtin() -> Self {
-        // TODO(acp-agents): implement — register `CodexAcpLogin` and `OpenCodeRouteFile` under
-        // their `name()`.
-        todo!("acp-agents: AcpHooksAdapters::builtin")
+        let builtin: [Arc<dyn AcpHooksAdapter>; 2] =
+            [Arc::new(CodexAcpLogin), Arc::new(OpenCodeRouteFile)];
+        Self {
+            adapters: builtin
+                .into_iter()
+                .map(|adapter| (adapter.name().to_string(), adapter))
+                .collect(),
+        }
     }
 
     /// The adapter registered as `name`.

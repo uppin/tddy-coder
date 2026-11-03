@@ -53,7 +53,7 @@ pub use crate::error::BackendError as AdapterError;
 // retry, the OpenCode route file. Neither a stream nor a PTY reader, so a registry of their own.
 pub use acp_hooks::{
     AcpHooksAdapter, AcpHooksAdapters, AcpHooksLaunch, AcpOpenScope, CodexAcpLogin,
-    OpenCodeRouteFile, PreparedAcpHooks, CODEX_ACP_LOGIN, OPENCODE_ROUTE_FILE,
+    OpenCodeRouteFile, PreparedAcpHooks, CODEX_ACP_LOGIN, CODEX_DEP, OPENCODE_ROUTE_FILE,
 };
 pub use claude_stream_json::ClaudeStreamJson;
 // `#agent-tools 9/12`: the stream adapters of Cursor's, Codex's and Oz's headless runs, and Cursor's
