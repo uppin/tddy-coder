@@ -7,6 +7,7 @@
 **Thresholds breached:** length 119 > 60; parameters 9 > 5
 **Restructure:** an options struct for the parameters; `extract_method --variant module` for the length
 **Status:** Open — partially fixed 2026-10-24 (144 → 142 lines; still over the 60-line and 5-parameter budgets)
+**Deferred:** by the developer 2026-11-03 (#session-tabs sweep: code issues deferred, logic issues solved)
 **Moved:** 2026-10-09 by `#carve` 21/21 (#536), engine move into `tddy-agent-launch`, from `packages/tddy-session-lifecycle/src/connection_service/svc_resume_claude_cli_session.rs:21`
 
 ## Measurement history

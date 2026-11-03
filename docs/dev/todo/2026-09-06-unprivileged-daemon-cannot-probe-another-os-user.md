@@ -23,3 +23,10 @@ Still open. The privilege drop now lives in `tddy_daemon_kernel::pre_exec_stages
 refuses **before forking** with `CannotBecomeUser`, naming both users and the supervisor. The probe
 still fails on the supervised deployment shape; the deployment answer is `#start-progress` 3/8's
 supervisor handoff.
+
+## Update 2026-11-03 — `#session-tabs` sweep
+
+Verdict: **still open, unaffected.** The PTY spawn now refuses with `CannotBecomeUser` before opening
+a PTY (as the listing does), which makes the failure honest and early on the supervised shape, but the
+deployment decision (supervisor brokers the spawn, or a capability, or documented single-user) is
+unchanged.

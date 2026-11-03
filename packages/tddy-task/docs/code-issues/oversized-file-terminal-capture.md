@@ -7,6 +7,7 @@
 **Thresholds breached:** length 668 > 500
 **Restructure:** `extract_module --to_file` — `/code-restructuring` territory
 **Status:** Open — partially fixed 2026-11-02 (712 → 697; the sniffer and mode-state split remains) — **unclaimed**
+**Deferred:** by the developer 2026-11-03 (#session-tabs sweep: code issues deferred, logic issues solved)
 **Related:** `complexity-terminal-capture-feed.md` (`EscapeParser::feed`, in the same file)
 
 ## Measurement history

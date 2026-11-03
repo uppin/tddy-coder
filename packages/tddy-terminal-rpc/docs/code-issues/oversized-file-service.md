@@ -7,6 +7,7 @@
 **Thresholds breached:** length 546 > 500
 **Restructure:** `extract_module --to_file` — `/code-restructuring` territory
 **Status:** Open — regressed 2026-11-02 (522 → 546 in #806) — **unclaimed**. Not split in #805 or #806: the file is stack-shared — `#session-tabs` 3/7 (#806), 5/7 (#808) and 7/7 (#810) modify it, and a split in any one node would conflict in each of the others
+**Deferred:** by the developer 2026-11-03 (#session-tabs sweep: code issues deferred, logic issues solved)
 
 ## Measurement history
 

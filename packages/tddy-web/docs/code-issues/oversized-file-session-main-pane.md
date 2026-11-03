@@ -6,6 +6,7 @@
 **Metrics:** **504 lines** (non-test source, whole file) · budget 500 · **1.008× over**
 **Thresholds breached:** length 504 > 500
 **Status:** Open — unclaimed
+**Deferred:** by the developer 2026-11-03 (#session-tabs sweep: code issues deferred, logic issues solved)
 
 ## Measurement history
 

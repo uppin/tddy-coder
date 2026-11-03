@@ -7,6 +7,7 @@
 **Thresholds breached:** length 946 > 500; `dial_and_bridge` **12 parameters** > 5
 **Restructure:** `extract_module --to_file` — seam not yet designed
 **Status:** Open — regressed 2026-11-02 (946 → 947 in #805) and 2026-09-24 (911 → 916 in #509, `#keyring` 2/9, transport stamping; deferred with consent) — **unclaimed**
+**Deferred:** by the developer 2026-11-03 (#session-tabs sweep: code issues deferred, logic issues solved)
 
 ## Measurement history
 

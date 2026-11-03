@@ -62,5 +62,5 @@ Discovery: [2026-11-03-session-tabs-sweep-initial-discovery.md](./2026-11-03-ses
 ## TODO
 
 - [x] Red: failing tests
-- [ ] Green: the three fixes
-- [ ] Backlog records: deferral lines, new plus-menu TODO
+- [x] Green: the three fixes (item 3 narrowed: shared decision + refusal; mechanism left open)
+- [x] Backlog records: deferral lines, new plus-menu TODO

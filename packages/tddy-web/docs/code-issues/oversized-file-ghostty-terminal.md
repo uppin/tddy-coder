@@ -6,6 +6,7 @@
 **Metrics:** **1479 lines** (whole file, TS) · budget 500 — `wc -l packages/tddy-web/src/components/GhosttyTerminal.tsx`
 **Thresholds breached:** length 1479 > 500
 **Status:** Open — unclaimed
+**Deferred:** by the developer 2026-11-03 (#session-tabs sweep: code issues deferred, logic issues solved)
 
 ## Measurement history
 
