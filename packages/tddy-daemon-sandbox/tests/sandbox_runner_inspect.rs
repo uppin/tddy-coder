@@ -5,6 +5,7 @@
 use std::path::PathBuf;
 use std::process::{Command, Stdio};
 use std::time::Duration;
+use tddy_testing_commons::sandbox_fixtures::write_exec_plan;
 
 use tddy_daemon_sandbox::sandbox_session::{
     build_sandbox_plan, build_sandbox_runner_env, pick_free_loopback_port, spawn_sandbox_runner,
@@ -71,12 +72,10 @@ fn sandbox_runner_inspect_seatbelt_spawn() {
         tools.to_string_lossy().to_string(),
         "--ready-marker".into(),
         ready_marker.to_string_lossy().to_string(),
-        "--claude-binary".into(),
-        "/bin/sleep".into(),
-        "--model".into(),
-        "x".into(),
-        "--permission-mode".into(),
-        "auto".into(),
+        "--exec-plan".into(),
+        write_exec_plan(&project, &["/bin/sleep", "--model", "x"])
+            .to_string_lossy()
+            .to_string(),
         "--grpc-listen-port".into(),
         grpc_port.to_string(),
         "--egress-shim-port".into(),
@@ -104,6 +103,8 @@ fn sandbox_runner_inspect_seatbelt_spawn() {
         host_home: None,
         cgroup: Default::default(),
         route: None,
+        context_dir: Some(context.clone()),
+        stdio: false,
     };
 
     let plan = build_sandbox_plan(make_params()).expect("build plan");
@@ -152,7 +153,7 @@ fn sandbox_runner_inspect_seatbelt_spawn() {
     )
     .profile_path(project.join("minimal.sb"))
     .reads(tddy_sandbox::system_baseline_reads())
-    .policy(tddy_sandbox_recipes::claude_interactive_policy())
+    .policy(tddy_sandbox_recipes::runner_pty_policy())
     .network(NetworkSpec::default())
     .build()
     .expect("minimal plan");

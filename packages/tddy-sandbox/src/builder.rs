@@ -298,13 +298,11 @@ pub struct SandboxPlan {
     ///
     /// The backends read the carve-out from here instead of sniffing `--context-dir` out of
     /// [`SandboxSpec::command`], so a jail no longer has to run `tddy-sandbox-runner` to get one.
-    // TODO(jail-agnostic): the darwin and cgroups backends still read `--context-dir` off the argv;
-    // green switches them to this field and every launcher sets it.
+    // TODO(jail-agnostic): the cgroups backend carries the field but adds no read-only bind for it
+    // (docs/dev/todo/2026-11-03-cgroups-has-no-context-dir-carve-out.md).
     pub context_dir: Option<PathBuf>,
     /// The confined process speaks RPC over its stdin/stdout, so both are piped back to the caller
     /// instead of stdout going to the egress log (`#agent-tools 10/12`).
-    // TODO(jail-agnostic): the backends still detect `--stdio` in the argv; green switches them to
-    // this field and every launcher sets it.
     pub stdio: bool,
 }
 

@@ -1,10 +1,10 @@
 //! Persistent tool homes: `<tddyhome>/homes/<key>`.
 //!
-//! Feature: `docs/ft/daemon/claude-cli-session.md` § The jail from the `claude` tool definition (`#agent-tools 5/12`).
+//! Feature: the daemon docs under `docs/ft/daemon/`, § The jail from its tool definition (`#agent-tools 5/12`).
 //!
 //! A tool declaring `home: { kind: persistent, key: K }` runs with `HOME=<tddyhome>/homes/K`,
 //! mounted read-write and shared by every session naming `K`. The directory replaces the
-//! tool-named `<tddyhome>/sandbox-K-home` homes the recipes created (`sandbox-claude-home`); the
+//! tool-named `<tddyhome>/sandbox-K-home` homes the recipes created; the
 //! first resolution after the upgrade moves one in place with a `rename`, so its credentials and
 //! history are kept and nothing is copied.
 

@@ -1,168 +1,42 @@
-//! Claude CLI sandbox recipe — reads, copies, policy, MCP argv, env overlays.
+//! The tool lists a Claude launch is given: what its `tool_allow` and `tool_deny` slots take.
+//!
+//! The slots (`crate::slots`) say *where* a list goes on the command line; these say *what* is in
+//! it — Claude Code's own tool names, `mcp__tddy-tools__<tool>` for each exec tool `tddy-tools`
+//! serves, and the native tools a session withdraws. They are Claude's vocabulary, so they live
+//! with Claude's spec rather than in the jail crates, which name no agent (`#agent-tools 10/12`).
 
-use std::collections::BTreeMap;
-use std::path::{Path, PathBuf};
-
-use anyhow::{Context, Result};
-use tddy_sandbox::builder::{CopySpec, MachPolicy, PolicySpec};
-use tddy_sandbox::{process_exec_reads, workspace_exec_tool_names};
-
-/// Read grants for a sandboxed Claude binary (baseline + toolchain + binary deps).
-pub fn process_claude_exec_reads(claude_binary: &Path) -> Vec<tddy_sandbox::ReadSpec> {
-    process_exec_reads(claude_binary)
+/// Exec tool names served by the daemon `ExecuteTool` RPC for workspace/sandbox sessions.
+///
+/// Must stay in sync with `tddy_tool_engine::tool_catalog`.
+pub fn workspace_exec_tool_names() -> &'static [&'static str] {
+    &[
+        "Read",
+        "Write",
+        "StrReplace",
+        "Delete",
+        "Grep",
+        "Glob",
+        "Shell",
+        "Await",
+        "ReadLints",
+        "SemanticSearch",
+    ]
 }
 
-/// Seed `claude_home_dir/.claude/.credentials.json` from the real host `~/.claude` once, so a
-/// **persistent** jail home can authenticate on its first run. Never overwrites an existing file —
-/// the jail may have since refreshed its own token, and the host copy must not clobber it on later
-/// restarts. This is the persistent-home counterpart to [`claude_credentials_copies`] (which
-/// re-copies every session and is only correct for an ephemeral per-session home).
-pub fn seed_claude_credentials(claude_home_dir: &Path) -> Result<()> {
-    let dest_dir = claude_home_dir.join(".claude");
-    std::fs::create_dir_all(&dest_dir)
-        .with_context(|| format!("create persistent claude home {}", dest_dir.display()))?;
-    let dest = dest_dir.join(".credentials.json");
-    if dest.exists() {
-        return Ok(());
-    }
-    let Some(host_home) = std::env::var_os("HOME").map(PathBuf::from) else {
-        return Ok(());
-    };
-    let src = host_home.join(".claude").join(".credentials.json");
-    if !src.is_file() {
-        return Ok(());
-    }
-    std::fs::copy(&src, &dest)
-        .with_context(|| format!("seed credentials {} -> {}", src.display(), dest.display()))?;
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        let _ = std::fs::set_permissions(&dest, std::fs::Permissions::from_mode(0o600));
-    }
-    Ok(())
-}
-
-/// Mirror the host's self-managed install layout
-/// (`$HOME/.local/bin/claude` -> `$HOME/.local/share/claude/versions/<version>` -> real binary)
-/// inside the persistent jail home, so Claude's own startup self-check — which looks for itself
-/// at `$HOME/.local/bin/claude` — finds a consistent install instead of warning "missing or
-/// broken — run claude install to repair". The actually-exec'd binary stays the resolved
-/// `claude_binary` path passed to the runner; these are just symlinks pointing at the same file.
-#[cfg(unix)]
-pub fn seed_claude_local_install(claude_home_dir: &Path, claude_binary: &str) -> Result<()> {
-    use std::os::unix::fs::symlink;
-
-    let real_bin = Path::new(claude_binary);
-    let local_bin_dir = claude_home_dir.join(".local").join("bin");
-    std::fs::create_dir_all(&local_bin_dir)
-        .with_context(|| format!("create {}", local_bin_dir.display()))?;
-    let local_bin_claude = local_bin_dir.join("claude");
-
-    // Detect the installer's `.../versions/<version>/<real binary>` shape and mirror it so a
-    // version-manifest check (if any) also finds a matching entry; otherwise fall back to a flat
-    // symlink straight at the resolved binary.
-    let link_target = if is_versioned_install_layout(real_bin) {
-        mirror_versioned_symlink(claude_home_dir, real_bin)?
-    } else {
-        real_bin.to_path_buf()
-    };
-
-    let _ = std::fs::remove_file(&local_bin_claude);
-    symlink(&link_target, &local_bin_claude).with_context(|| {
-        format!(
-            "symlink {} -> {}",
-            local_bin_claude.display(),
-            link_target.display()
-        )
-    })?;
-    Ok(())
-}
-
-#[cfg(unix)]
-fn is_versioned_install_layout(real_bin: &Path) -> bool {
-    real_bin
-        .parent()
-        .and_then(|p| p.file_name())
-        .is_some_and(|n| n == "versions")
-}
-
-/// Mirror `real_bin` (`.../versions/<version>/<binary>`) under
-/// `claude_home_dir/.local/share/claude/versions/<version>`, returning the mirrored symlink path.
-#[cfg(unix)]
-fn mirror_versioned_symlink(claude_home_dir: &Path, real_bin: &Path) -> Result<PathBuf> {
-    use std::os::unix::fs::symlink;
-
-    let version = real_bin
-        .file_name()
-        .map(|n| n.to_owned())
-        .context("versioned claude binary has no file name")?;
-    let versions_dir = claude_home_dir
-        .join(".local")
-        .join("share")
-        .join("claude")
-        .join("versions");
-    std::fs::create_dir_all(&versions_dir)
-        .with_context(|| format!("create {}", versions_dir.display()))?;
-    let versioned_link = versions_dir.join(&version);
-    let _ = std::fs::remove_file(&versioned_link);
-    symlink(real_bin, &versioned_link).with_context(|| {
-        format!(
-            "symlink {} -> {}",
-            versioned_link.display(),
-            real_bin.display()
-        )
-    })?;
-    Ok(versioned_link)
-}
-
-/// Credentials copied into the jail HOME for Claude — `.credentials.json` only.
-pub fn claude_credentials_copies(host_home: &Path, scratch_home: &Path) -> Vec<CopySpec> {
-    vec![CopySpec {
-        src: host_home.join(".claude").join(".credentials.json"),
-        dest: scratch_home.join(".claude").join(".credentials.json"),
-        optional: true,
-        mode: Some(0o600),
-    }]
-}
-
-/// Policy for an interactive Node/V8 CLI with PTY (Claude Code).
-pub fn claude_interactive_policy() -> PolicySpec {
-    PolicySpec {
-        allow_dynamic_code_generation: true,
-        allow_process_fork: true,
-        mach_lookup: MachPolicy::All,
-        sysctl_read: true,
-        pseudo_tty: true,
-        exec_paths: [
-            "/usr/bin",
-            "/usr/libexec",
-            "/bin",
-            "/sbin",
-            "/System",
-            "/Library",
-            "/Applications",
-            "/opt/homebrew",
-            "/opt/local",
-        ]
-        .into_iter()
-        .map(PathBuf::from)
-        .collect(),
-    }
-}
-
-/// Claude-specific env vars layered on [`tddy_sandbox::scratch_runner_env`].
-pub fn claude_runner_env_overlay(scratch_tmp: &Path) -> BTreeMap<String, String> {
-    let mut env = BTreeMap::new();
-    let tmp = scratch_tmp.to_string_lossy().to_string();
-    env.insert("CLAUDE_CODE_TMPDIR".into(), tmp.clone());
-    env.insert("CLAUDE_TMPDIR".into(), tmp);
-    env
+/// `mcp__tddy-tools__<tool>` for each of `discovered_tools`, then `AskUserQuestion`: the allow-list
+/// of an agent whose exec tools are served by `tddy-tools`.
+fn remote_allowlist(discovered_tools: &[&str]) -> Vec<String> {
+    let mut allowlist: Vec<String> = discovered_tools
+        .iter()
+        .map(|name| format!("mcp__tddy-tools__{name}"))
+        .collect();
+    allowlist.push("AskUserQuestion".to_string());
+    allowlist
 }
 
 /// The MCP tool Claude asks before running anything not pre-approved (`--permission-prompt-tool`),
 /// served by the agent's own `tddy-tools --mcp` child.
 pub const PERMISSION_PROMPT_TOOL: &str = "mcp__tddy-tools__approval_prompt";
-const MCP_CONFIG_FILENAME: &str = "claude-mcp-config.json";
 
 /// ACP-shaped subagent tools (see docs/ft/coder/managed-codebase-subagents.md) that a sandboxed
 /// Claude must be allowed to call when a discovery subagent is wired into the session.
@@ -242,8 +116,7 @@ pub fn build_claude_allowlist(subagent_enabled: bool, replaced: &[&str]) -> Vec<
         .filter(|name| !replaced.contains(name))
         .copied()
         .collect();
-    let mut allowlist =
-        tddy_workflow_recipes::permissions::build_remote_allowlist(&remaining_tools);
+    let mut allowlist = remote_allowlist(&remaining_tools);
     if subagent_enabled {
         allowlist.extend(SUBAGENT_TOOLS.iter().map(|s| s.to_string()));
     }
@@ -274,35 +147,6 @@ pub fn build_claude_disallowlist(replaced: &[&str]) -> Vec<String> {
         }
     }
     disallowed
-}
-
-/// Write MCP config registering `tddy-tools --mcp` under a writable scratch directory. `mcp_env`,
-/// when non-empty, becomes the server's `env` block — the sandbox runner uses it to set
-/// `TDDY_TOOLS_LOG_FILE` (persist the in-jail MCP server's logs) and `RUST_LOG` so the process
-/// Claude spawns is observable.
-pub fn write_claude_mcp_config(
-    scratch_dir: &Path,
-    tddy_tools_path: &Path,
-    mcp_env: &BTreeMap<String, String>,
-) -> Result<PathBuf> {
-    std::fs::create_dir_all(scratch_dir).with_context(|| {
-        format!(
-            "create scratch dir for MCP config: {}",
-            scratch_dir.display()
-        )
-    })?;
-    let path = scratch_dir.join(MCP_CONFIG_FILENAME);
-    let mut server = serde_json::json!({
-        "command": tddy_tools_path.to_string_lossy(),
-        "args": ["--mcp"]
-    });
-    if !mcp_env.is_empty() {
-        server["env"] = serde_json::json!(mcp_env);
-    }
-    let config = serde_json::json!({ "mcpServers": { "tddy-tools": server } });
-    tddy_core::atomic_file::write_atomic(&path, config.to_string())
-        .with_context(|| format!("write MCP config: {}", path.display()))?;
-    Ok(path)
 }
 
 /// The exec tools whose names `tddy` and Claude Code happen to share.
@@ -343,90 +187,64 @@ pub fn build_host_agent_disallowlist() -> Vec<String> {
     disallowed
 }
 
-/// [`append_claude_mcp_args`] for an agent spawned on the host against a jailed codebase: the same
-/// `mcp__tddy-tools__*` allow-list and MCP config, plus [`build_host_agent_disallowlist`] on top of
-/// whatever the session's subagents already replaced.
-pub fn append_host_agent_mcp_args(
-    argv: &mut Vec<String>,
-    scratch_dir: &Path,
-    tddy_tools_path: &Path,
-    subagent_enabled: bool,
-    replaced: &[&str],
-    mcp_env: &BTreeMap<String, String>,
-) -> Result<()> {
-    // Withdrawn first, because [`append_claude_mcp_args`] must have the last word: it ends with the
-    // variadic `--mcp-config`, which would swallow anything appended after it. The replacements it
-    // will withdraw itself are skipped here, so a tool a subagent replaced is not named twice.
-    let replacements = build_claude_disallowlist(replaced);
-    for tool in build_host_agent_disallowlist() {
-        if replacements.contains(&tool) {
-            continue;
-        }
-        argv.push("--disallowedTools".into());
-        argv.push(tool);
-    }
-    append_claude_mcp_args(
-        argv,
-        scratch_dir,
-        tddy_tools_path,
-        subagent_enabled,
-        replaced,
-        mcp_env,
-    )
-}
-
-/// Append `--allowedTools`, `--permission-prompt-tool`, and `--mcp-config` for sandbox spawn.
-/// `subagent_enabled` mirrors `tddy_tools::server::subagent_enabled()`'s `TDDY_SUBAGENT` check —
-/// the caller decides, so this crate stays free of an env-reading dependency of its own. `replaced`
-/// is the set of exec tools the wired-in subagents declare they replace (see
-/// [`build_claude_allowlist`]).
-pub fn append_claude_mcp_args(
-    argv: &mut Vec<String>,
-    scratch_dir: &Path,
-    tddy_tools_path: &Path,
-    subagent_enabled: bool,
-    replaced: &[&str],
-    mcp_env: &BTreeMap<String, String>,
-) -> Result<()> {
-    let mcp_path = write_claude_mcp_config(scratch_dir, tddy_tools_path, mcp_env)?;
-    for tool in build_claude_allowlist(subagent_enabled, replaced) {
-        argv.push("--allowedTools".into());
-        argv.push(tool);
-    }
-    for tool in build_claude_disallowlist(replaced) {
-        argv.push("--disallowedTools".into());
-        argv.push(tool);
-    }
-    argv.push("--permission-prompt-tool".into());
-    argv.push(PERMISSION_PROMPT_TOOL.into());
-    argv.push("--mcp-config".into());
-    argv.push(mcp_path.to_string_lossy().into_owned());
-    Ok(())
-}
-
-/// Writable directory for the sandbox MCP config.
-///
-/// It must not be the agent's context dir: the sandbox profile carves that directory back out of
-/// the jail's writable tree with an explicit deny (see `tddy_sandbox_darwin::render_plan`), so the
-/// guidance files the host syncs in cannot be rewritten from inside. `TMPDIR` is set for every
-/// jailed process (`tddy_sandbox::runner_env`) and points into the session scratch tree, which is
-/// writable — that is the directory this returns in practice.
-pub fn claude_scratch_mcp_dir(fallback: &Path) -> PathBuf {
-    std::env::var("TMPDIR")
-        .ok()
-        .filter(|v| !v.trim().is_empty())
-        .map(PathBuf::from)
-        .unwrap_or_else(|| fallback.to_path_buf())
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::collections::BTreeMap;
+    use std::path::Path;
+
+    /// `--allowedTools`, `--disallowedTools` and `--permission-prompt-tool` as a launch passes them,
+    /// with an `--mcp-config` marker standing for the registration the slots write.
+    fn append_claude_mcp_args(
+        argv: &mut Vec<String>,
+        _scratch_dir: &Path,
+        _tddy_tools_path: &Path,
+        subagent_enabled: bool,
+        replaced: &[&str],
+        _mcp_env: &BTreeMap<String, String>,
+    ) -> Result<(), String> {
+        for tool in build_claude_allowlist(subagent_enabled, replaced) {
+            argv.push("--allowedTools".into());
+            argv.push(tool);
+        }
+        for tool in build_claude_disallowlist(replaced) {
+            argv.push("--disallowedTools".into());
+            argv.push(tool);
+        }
+        argv.push("--permission-prompt-tool".into());
+        argv.push(PERMISSION_PROMPT_TOOL.into());
+        argv.push("--mcp-config".into());
+        argv.push("registration.json".into());
+        Ok(())
+    }
+
+    /// [`append_claude_mcp_args`] with the host agent's natives withdrawn first.
+    fn append_host_agent_mcp_args(
+        argv: &mut Vec<String>,
+        scratch_dir: &Path,
+        tddy_tools_path: &Path,
+        subagent_enabled: bool,
+        replaced: &[&str],
+        mcp_env: &BTreeMap<String, String>,
+    ) -> Result<(), String> {
+        let replacements = build_claude_disallowlist(replaced);
+        for tool in build_host_agent_disallowlist() {
+            if replacements.contains(&tool) {
+                continue;
+            }
+            argv.push("--disallowedTools".into());
+            argv.push(tool);
+        }
+        append_claude_mcp_args(
+            argv,
+            scratch_dir,
+            tddy_tools_path,
+            subagent_enabled,
+            replaced,
+            mcp_env,
+        )
+    }
     use std::collections::HashSet;
-    // Only the macOS-gated dyld-root test below consumes these; gate the import to match so it is
-    // not flagged unused on Linux.
-    #[cfg(target_os = "macos")]
-    use tddy_sandbox::builder::{ReadKind, ReadReason};
 
     const NATIVE_TOOLS_EXCLUDED: &[&str] = &[
         "Read",
@@ -668,101 +486,6 @@ mod tests {
                 "{tool} must still be present alongside a replaced-tool filter: {allowlist:?}"
             );
         }
-    }
-
-    #[test]
-    #[cfg(target_os = "macos")]
-    fn claude_exec_reads_include_the_dyld_root_literal() {
-        let reads = process_claude_exec_reads(Path::new("/usr/bin/true"));
-        assert!(
-            reads.iter().any(|r| {
-                r.kind == ReadKind::Literal
-                    && r.host == Path::new("/")
-                    && r.reason == ReadReason::DyldRoot
-            }),
-            "claude reads must include the dyld root literal: {reads:?}"
-        );
-    }
-
-    /// `seed_claude_credentials` never overwrites an existing dest — a persistent jail that has
-    /// refreshed its own OAuth token must not be clobbered by the (possibly stale) host copy on a
-    /// later restart. This no-clobber guarantee is what makes auth *persist* across sessions.
-    #[test]
-    fn seed_claude_credentials_does_not_overwrite_an_existing_token() {
-        let home = tempfile::tempdir().unwrap();
-        let dest = home.path().join(".claude").join(".credentials.json");
-        std::fs::create_dir_all(dest.parent().unwrap()).unwrap();
-        std::fs::write(&dest, "JAIL-REFRESHED-TOKEN").unwrap();
-
-        seed_claude_credentials(home.path()).expect("seed must succeed");
-
-        assert_eq!(
-            std::fs::read_to_string(&dest).unwrap(),
-            "JAIL-REFRESHED-TOKEN",
-            "an existing jail token must survive seeding"
-        );
-    }
-
-    #[test]
-    fn claude_credentials_copies_seed_only_the_credentials_file() {
-        let copies = claude_credentials_copies(Path::new("/home/user"), Path::new("/jail/home"));
-        assert_eq!(
-            copies.len(),
-            1,
-            "expected only the credentials copy: {copies:?}"
-        );
-        assert!(
-            copies[0].src.ends_with(".claude/.credentials.json"),
-            "copy src must be the credentials file: {:?}",
-            copies[0].src
-        );
-        assert!(
-            copies
-                .iter()
-                .all(|c| !c.src.to_string_lossy().contains("settings")),
-            "settings.json must not be seeded into the jail: {copies:?}"
-        );
-    }
-
-    #[test]
-    fn write_claude_mcp_config_registers_tddy_tools_mcp_server() {
-        let dir = tempfile::tempdir().unwrap();
-        let tools = dir.path().join("tddy-tools");
-        let path = write_claude_mcp_config(dir.path(), &tools, &BTreeMap::new())
-            .expect("write MCP config must succeed");
-        let json: serde_json::Value =
-            serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
-        let server = &json["mcpServers"]["tddy-tools"];
-        assert_eq!(server["command"].as_str().unwrap(), tools.to_string_lossy());
-        assert_eq!(server["args"], serde_json::json!(["--mcp"]));
-        assert!(
-            server.get("env").is_none(),
-            "no env block when mcp_env is empty"
-        );
-    }
-
-    /// A non-empty `mcp_env` is written as the server's `env` block so the in-jail `--mcp` process
-    /// (e.g. its log file + RUST_LOG) is configured by the runner.
-    #[test]
-    fn write_claude_mcp_config_includes_env_block_when_given() {
-        let dir = tempfile::tempdir().unwrap();
-        let tools = dir.path().join("tddy-tools");
-        let mut env = BTreeMap::new();
-        env.insert(
-            "TDDY_TOOLS_LOG_FILE".to_string(),
-            "/egress/tddy-tools.mcp.log".to_string(),
-        );
-        env.insert("RUST_LOG".to_string(), "info".to_string());
-        let path = write_claude_mcp_config(dir.path(), &tools, &env)
-            .expect("write MCP config must succeed");
-        let json: serde_json::Value =
-            serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
-        let server = &json["mcpServers"]["tddy-tools"];
-        assert_eq!(
-            server["env"]["TDDY_TOOLS_LOG_FILE"].as_str().unwrap(),
-            "/egress/tddy-tools.mcp.log"
-        );
-        assert_eq!(server["env"]["RUST_LOG"].as_str().unwrap(), "info");
     }
 
     // ─── replaced tools must be hard-disabled, not merely un-allowlisted ─────────────

@@ -17,12 +17,12 @@
 use std::path::{Path, PathBuf};
 
 use pretty_assertions::assert_eq;
+use tddy_coding_agent_specs::claude_tools::{build_claude_allowlist, build_claude_disallowlist};
 use tddy_core::session_lifecycle::unified_session_dir_path;
 use tddy_core::SessionMetadata;
 use tddy_daemon_rpc::test_util::{test_service, TestDaemon};
 use tddy_discovery::subagent::normalize_replaced_tools;
 use tddy_rpc::{Code, Request};
-use tddy_sandbox_recipes::{build_claude_allowlist, build_claude_disallowlist};
 use tddy_service::proto::catalog::{CatalogService, ListSubagentsRequest};
 use tddy_service::proto::session_agents_svc::{
     AttachSessionAgentRequest, DetachSessionAgentRequest, SessionAgentRoster,

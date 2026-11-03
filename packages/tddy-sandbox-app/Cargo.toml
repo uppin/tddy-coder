@@ -41,7 +41,6 @@ tddy-discovery = { path = "../tddy-discovery" }
 tddy-lsp = { path = "../tddy-lsp" }
 tddy-lsp-executor = { path = "../tddy-lsp-executor" }
 tddy-sandbox = { path = "../tddy-sandbox" }
-tddy-sandbox-recipes = { path = "../tddy-sandbox-recipes" }
 tddy-sandbox-runner = { path = "../tddy-sandbox-runner" }
 tddy-service = { path = "../tddy-service" }
 tddy-task = { path = "../tddy-task" }

@@ -127,10 +127,8 @@ pub fn spawn_plan(plan: SandboxPlan) -> Result<SandboxHandle, SandboxError> {
 
 /// Whether the confined process speaks RPC over its stdio: [`SandboxPlan::stdio`]
 /// (`#agent-tools 10/12`), whatever its argv says.
-// TODO(jail-agnostic): implement — return `plan.stdio` once every launcher sets it. Today's `--stdio`
-// argv sniffing stays until then.
 pub(crate) fn stdio_mode_of(plan: &SandboxPlan) -> bool {
-    plan.spec.command.iter().any(|arg| arg == "--stdio")
+    plan.stdio
 }
 
 fn open_egress_log(egress_dir: &std::path::Path, name: &str) -> Result<File, SandboxError> {

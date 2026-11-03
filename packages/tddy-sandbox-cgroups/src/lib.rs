@@ -73,11 +73,13 @@ pub fn cgroup_limits_from(limits: &tddy_sandbox::ResourceLimits) -> CgroupLimits
 
 /// Whether the confined process speaks RPC over its stdio: [`SandboxPlan::stdio`]
 /// (`#agent-tools 10/12`), whatever its argv says — mirroring `tddy-sandbox-darwin`.
-// TODO(jail-agnostic): implement — return `plan.stdio` once every launcher sets it. Today's `--stdio`
-// argv sniffing stays until then.
 pub(crate) fn stdio_mode_of(plan: &SandboxPlan) -> bool {
-    plan.spec.command.iter().any(|arg| arg == "--stdio")
+    plan.stdio
 }
+
+// TODO(jail-agnostic): `plan.context_dir` is carried but adds no read-only bind here, unlike the
+// Seatbelt backend's carve-out — a new capability, not added in #799
+// (docs/dev/todo/2026-11-03-cgroups-has-no-context-dir-carve-out.md).
 
 /// Spawn a sandboxed process from an explicit [`SandboxPlan`]: RO bind-mount the declared reads,
 /// materialize copies/symlinks/secrets, apply env + cgroup limits from the plan.

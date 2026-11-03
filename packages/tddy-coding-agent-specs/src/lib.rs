@@ -8,6 +8,7 @@
 //! launcher renders the template with `tddy_actions::tool::render_argv` and the slots with
 //! [`slots::render`]; nothing in that path hard-codes an agent.
 
+pub mod claude_tools;
 pub mod headless;
 pub mod slots;
 mod spec;
@@ -73,6 +74,29 @@ pub fn builtin_specs() -> Vec<(&'static str, &'static str)> {
             OZ_SPEC_YAML,
         ),
     ]
+}
+
+/// The built-in spec of agent `id`, as embedded — without the `<tddyhome>/tools` overrides
+/// [`load_agent_registry`] applies, and without resolving its binary.
+///
+/// For a caller that renders one agent's slots and has no tool registry to hand
+/// (`tddy-session-split`). A caller that launches the agent loads the registry instead.
+// TODO(jail-agnostic): hand split sessions the daemon's registry so an operator's override of the
+// agent's spec reaches them (docs/dev/todo/2026-11-03-split-sessions-render-the-embedded-agent-spec.md).
+pub fn embedded_spec(id: &str) -> Result<CodingAgentSpec, SpecError> {
+    let (path, yaml) = builtin_specs()
+        .into_iter()
+        .find(|(path, _)| path.ends_with(&format!("/{id}.yaml")))
+        .ok_or_else(|| SpecError::NotACodingAgent {
+            tool: id.to_string(),
+        })?;
+    let def = tddy_actions::tool::ToolDef::parse(Path::new(path), yaml).map_err(|e| {
+        SpecError::Invalid {
+            tool: id.to_string(),
+            message: e.to_string(),
+        }
+    })?;
+    CodingAgentSpec::of(&def)
 }
 
 /// The id of the agent spec a CLI session type runs (`claude-cli` → `claude`, `cursor-cli` →

@@ -3,12 +3,17 @@
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
+use tddy_actions::tool::ProcessToolHost;
+use tddy_coding_agent_specs::claude_tools::effective_replaced_tools;
 use tddy_daemon_sandbox::sandbox_session::{
-    build_sandbox_runner_env, copy_dir_all, pick_free_loopback_port, resolve_sandbox_runner_path,
-    resolve_tddy_tools_path, spawn_sandbox_runner, wait_for_sandbox_ready, SandboxRunnerSpawn,
+    copy_dir_all, pick_free_loopback_port, resolve_sandbox_runner_path, resolve_tddy_tools_path,
+    spawn_sandbox_plan, wait_for_sandbox_ready, SandboxRunnerSpawn,
 };
+use tddy_daemon_sandbox::tool_jail::{build_tool_jail_plan, lower_tool_jail, ToolJailInputs};
 use tddy_sandbox::{append_line, SandboxContextDir, SandboxHandle, SubagentReplacement};
+use tddy_sandbox_runner::ExecPlan;
 
+use crate::agent_spec::{agent_exec_plan_with, AgentJail, AgentSession, ChosenAgent};
 use crate::codebase_mode::CodebaseMode;
 
 pub(crate) fn spawn_trace(session_dir: &Path, message: &str) {
@@ -31,79 +36,30 @@ pub(crate) fn spawn_trace_quietly(session_dir: &Path, message: &str) {
     let _ = append_line(&trace, message);
 }
 
-/// Agent kind for the in-jail CLI: `claude` (default), `cursor`, `opencode` or `muse`.
-///
-/// The runner hosts `opencode` and `muse`, but this app does not start them yet — see
-/// [`unstarted_agent_kind`].
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum AgentKind {
-    Claude,
-    Cursor,
-    OpenCode,
-    Muse,
-}
-
-impl AgentKind {
-    pub fn parse(s: &str) -> Result<Self, String> {
-        match s.trim() {
-            "claude" => Ok(Self::Claude),
-            "cursor" => Ok(Self::Cursor),
-            "opencode" => Ok(Self::OpenCode),
-            "muse" => Ok(Self::Muse),
-            other => Err(format!(
-                "unrecognized --agent-kind {other:?}; expected \"claude\", \"cursor\", \"opencode\" or \"muse\""
-            )),
-        }
-    }
-}
-
-/// Refusal for an agent kind this app does not start yet. A jailed OpenCode or Muse session runs on
-/// a provider account, and this app passes none: the route is the daemon's to supply. This app also
-/// has no persistent home or binary flag for either kind, so there is nothing honest to start with.
-// TODO(sandboxed-routes): start OpenCode and Muse here once this app carries a provider route —
-// docs/dev/todo/2026-10-22-sandbox-app-cannot-start-opencode-or-muse.md.
-fn unstarted_agent_kind(kind: AgentKind) -> anyhow::Error {
-    anyhow::anyhow!(
-        "--agent-kind {kind:?} is not started by tddy-sandbox-app yet: a jailed {kind:?} session \
-         runs on a provider account, and this app passes none"
-    )
-}
-
-/// Parameters for a local sandboxed Claude or Cursor session.
+/// Parameters for a local sandboxed agent session: the agent `--agent` chose, and the jail laid out
+/// around it.
 pub struct SpawnParams {
-    pub agent_kind: AgentKind,
+    /// The agent the jail runs, resolved from the registry ([`crate::agent_spec::choose_agent`]).
+    pub agent: ChosenAgent,
+    /// `<tddyhome>`: where the agent's persistent home lives (`<tddyhome>/homes/<key>`).
+    pub tddy_home: PathBuf,
     pub repo: PathBuf,
     pub session_id: String,
     pub model: String,
     pub permission_mode: String,
-    pub claude_binary: Option<String>,
-    /// Path to the `agent` binary when `agent_kind` is Cursor (default: `agent` on PATH).
-    pub cursor_binary: Option<String>,
     pub tddy_tools_path: Option<String>,
     pub sandbox_runner_path: Option<String>,
     pub session_dir: PathBuf,
-    /// Working directory for Claude inside the jail. Defaults to the mounted repo root.
+    /// Working directory for the agent inside the jail. Defaults to the mounted repo root.
     pub cwd: Option<PathBuf>,
-    /// Persistent jail `$HOME`, mounted read-write and reused across restarts. Separate from the
-    /// real host `~/.claude`.
-    ///
-    /// Deliberately shared across all `tddy-sandbox-app` invocations on a host, not per-session —
-    /// that's the point (settings/session-history/credentials persist across restarts). Concurrent
-    /// runs sharing this dir is analogous to a user running multiple concurrent `claude` CLI
-    /// sessions against their real `~/.claude` today; this is not an oversight.
-    pub claude_home_dir: PathBuf,
-    /// Persistent jail `$HOME` for Cursor (`agent`) when `agent_kind` is Cursor.
-    pub cursor_home_dir: PathBuf,
     /// Where the checkout lives relative to the jail, and which side of it the agent is on.
     pub codebase_mode: CodebaseMode,
     /// Already-resolved specialized-agent defs to wire into the in-jail `tddy-tools --mcp` process
     /// (see `crate::config::resolve_session_agents`). Empty means no subagent is wired.
     pub specialized_defs: Vec<tddy_discovery::agent_def::SpecializedAgentDef>,
-    /// Extra args forwarded verbatim to the in-jail `claude` invocation (relayed to
-    /// `tddy-sandbox-runner` as repeated `--claude-arg` tokens).
-    pub claude_args: Vec<String>,
-    /// `RUST_LOG` for the in-jail `tddy-tools --mcp` server (relayed as `--mcp-log-level`); `None`
-    /// lets the runner pick its default.
+    /// Extra args forwarded verbatim to the in-jail agent, ahead of its slot flags.
+    pub agent_args: Vec<String>,
+    /// `RUST_LOG` for the in-jail `tddy-tools --mcp` server; `None` lets the app pick its default.
     pub mcp_log_level: Option<String>,
 }
 
@@ -165,104 +121,6 @@ pub(crate) fn subagent_env_overlay(
         }
     }
     env
-}
-
-/// Seed `claude_home_dir/.claude/.credentials.json` from the real host `~/.claude` once, so the
-/// jail can authenticate on its first run. Never overwrites an existing file — the jail may have
-/// since refreshed its own token, and the host copy must not clobber it on later restarts.
-pub(crate) fn seed_claude_credentials(claude_home_dir: &Path) -> Result<()> {
-    let dest_dir = claude_home_dir.join(".claude");
-    std::fs::create_dir_all(&dest_dir)
-        .with_context(|| format!("create persistent claude home {}", dest_dir.display()))?;
-    let dest = dest_dir.join(".credentials.json");
-    if dest.exists() {
-        return Ok(());
-    }
-    let Some(host_home) = std::env::var_os("HOME").map(PathBuf::from) else {
-        return Ok(());
-    };
-    let src = host_home.join(".claude").join(".credentials.json");
-    if !src.is_file() {
-        return Ok(());
-    }
-    std::fs::copy(&src, &dest)
-        .with_context(|| format!("seed credentials {} -> {}", src.display(), dest.display()))?;
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        let _ = std::fs::set_permissions(&dest, std::fs::Permissions::from_mode(0o600));
-    }
-    Ok(())
-}
-
-/// Mirror the host's self-managed install layout
-/// (`$HOME/.local/bin/claude` -> `$HOME/.local/share/claude/versions/<version>` -> real binary)
-/// inside the persistent jail home, so Claude's own startup self-check — which looks for itself
-/// at `$HOME/.local/bin/claude` — finds a consistent install instead of warning "missing or
-/// broken — run claude install to repair". The actually-exec'd binary stays the resolved
-/// `claude_binary` path passed to the runner; these are just symlinks pointing at the same file.
-pub(crate) fn seed_claude_local_install(claude_home_dir: &Path, claude_binary: &str) -> Result<()> {
-    use std::os::unix::fs::symlink;
-
-    let real_bin = Path::new(claude_binary);
-    let local_bin_dir = claude_home_dir.join(".local").join("bin");
-    std::fs::create_dir_all(&local_bin_dir)
-        .with_context(|| format!("create {}", local_bin_dir.display()))?;
-    let local_bin_claude = local_bin_dir.join("claude");
-
-    // Detect the installer's `.../versions/<version>/<real binary>` shape and mirror it so a
-    // version-manifest check (if any) also finds a matching entry; otherwise fall back to a flat
-    // symlink straight at the resolved binary.
-    let link_target = if is_versioned_install_layout(real_bin) {
-        mirror_versioned_symlink(claude_home_dir, real_bin)?
-    } else {
-        real_bin.to_path_buf()
-    };
-
-    let _ = std::fs::remove_file(&local_bin_claude);
-    symlink(&link_target, &local_bin_claude).with_context(|| {
-        format!(
-            "symlink {} -> {}",
-            local_bin_claude.display(),
-            link_target.display()
-        )
-    })?;
-    Ok(())
-}
-
-fn is_versioned_install_layout(real_bin: &Path) -> bool {
-    real_bin
-        .parent()
-        .and_then(|p| p.file_name())
-        .is_some_and(|n| n == "versions")
-}
-
-/// Mirror `real_bin` (`.../versions/<version>/<binary>`) under
-/// `claude_home_dir/.local/share/claude/versions/<version>`, returning the mirrored symlink path.
-fn mirror_versioned_symlink(claude_home_dir: &Path, real_bin: &Path) -> Result<PathBuf> {
-    use std::os::unix::fs::symlink;
-
-    let version = real_bin
-        .file_name()
-        .map(|n| n.to_owned())
-        .context("versioned claude binary has no file name")?;
-    let versions_dir = claude_home_dir
-        .join(".local")
-        .join("share")
-        .join("claude")
-        .join("versions");
-    std::fs::create_dir_all(&versions_dir)
-        .with_context(|| format!("create {}", versions_dir.display()))?;
-    let versioned_link = versions_dir.join(&version);
-    let _ = std::fs::remove_file(&versioned_link);
-    symlink(real_bin, &versioned_link).with_context(|| {
-        format!(
-            "symlink {} -> {}",
-            versioned_link.display(),
-            real_bin.display()
-        )
-    })?;
-    Ok(versioned_link)
 }
 
 /// Resolve Claude's working directory inside the jail: the explicit `cwd` override if given,
@@ -372,36 +230,6 @@ pub(crate) fn build_workspace_tools_runner_argv(args: WorkspaceToolsRunnerArgs) 
     ]
 }
 
-pub(crate) fn seed_cursor_credentials(cursor_home_dir: &Path) -> Result<()> {
-    let dest_dir = cursor_home_dir.join(".cursor");
-    std::fs::create_dir_all(&dest_dir)
-        .with_context(|| format!("create persistent cursor home {}", dest_dir.display()))?;
-    let Some(host_home) = std::env::var_os("HOME").map(PathBuf::from) else {
-        return Ok(());
-    };
-    let host_cursor = host_home.join(".cursor");
-    for name in ["auth.json", "cli-config.json"] {
-        let src = host_cursor.join(name);
-        let dest = dest_dir.join(name);
-        if dest.exists() || !src.is_file() {
-            continue;
-        }
-        std::fs::copy(&src, &dest).with_context(|| {
-            format!(
-                "seed cursor credentials {} -> {}",
-                src.display(),
-                dest.display()
-            )
-        })?;
-        #[cfg(unix)]
-        if name == "auth.json" {
-            use std::os::unix::fs::PermissionsExt;
-            let _ = std::fs::set_permissions(&dest, std::fs::Permissions::from_mode(0o600));
-        }
-    }
-    Ok(())
-}
-
 /// A sandboxed Claude or Cursor session ready for host `SessionChannel` attach.
 pub struct SpawnedSandbox {
     pub handle: SandboxHandle,
@@ -410,6 +238,8 @@ pub struct SpawnedSandbox {
     pub ready_marker: PathBuf,
     pub egress_dir: PathBuf,
     pub session_dir: PathBuf,
+    /// The agent's `$HOME` in the jail: where its own history and credentials live.
+    pub home: PathBuf,
 }
 
 pub(crate) fn canonicalize_exec_path(path: &str) -> String {
@@ -420,78 +250,6 @@ pub(crate) fn canonicalize_exec_path(path: &str) -> String {
     } else {
         path.to_string()
     }
-}
-
-fn resolve_cursor_binary(configured: Option<&str>) -> Result<String> {
-    let name = configured
-        .filter(|s| !s.trim().is_empty())
-        .unwrap_or("agent");
-    if name.contains('/') {
-        let path = Path::new(name);
-        anyhow::ensure!(
-            path.is_file() || path.is_symlink(),
-            "cursor agent binary not found at {}",
-            path.display()
-        );
-        return Ok(canonicalize_exec_path(name));
-    }
-    let which_out = std::process::Command::new("which")
-        .arg(name)
-        .output()
-        .context("run which to locate agent")?;
-    if which_out.status.success() {
-        let path = String::from_utf8_lossy(&which_out.stdout)
-            .lines()
-            .next()
-            .unwrap_or("")
-            .trim()
-            .to_string();
-        if !path.is_empty() {
-            return Ok(canonicalize_exec_path(&path));
-        }
-    }
-    anyhow::bail!(
-        "cursor agent binary {name:?} not found on host PATH.\n\
-         Pass an absolute path, e.g.: --cursor-binary $(which agent)"
-    );
-}
-
-/// Resolve the `claude` binary to exec: an explicit path as given, or the first `claude` on the
-/// host PATH. Never a bare name — the jail's PATH is not this host's, and a session that cannot
-/// name its agent binary should fail here rather than inside the jail.
-pub fn resolve_claude_binary(configured: Option<&str>) -> Result<String> {
-    let name = configured
-        .filter(|s| !s.trim().is_empty())
-        .unwrap_or("claude");
-    if name.contains('/') {
-        let path = Path::new(name);
-        anyhow::ensure!(
-            path.is_file() || path.is_symlink(),
-            "claude binary not found at {}",
-            path.display()
-        );
-        return Ok(canonicalize_exec_path(name));
-    }
-    let which_out = std::process::Command::new("which")
-        .arg(name)
-        .output()
-        .context("run which to locate claude")?;
-    if which_out.status.success() {
-        let path = String::from_utf8_lossy(&which_out.stdout)
-            .lines()
-            .next()
-            .unwrap_or("")
-            .trim()
-            .to_string();
-        if !path.is_empty() {
-            return Ok(canonicalize_exec_path(&path));
-        }
-    }
-    anyhow::bail!(
-        "claude binary {name:?} not found on host PATH.\n\
-         The sandbox jail only includes /usr/bin:/bin — pass an absolute path, e.g.:\n\
-         --claude-binary $(which claude)"
-    );
 }
 
 async fn wait_for_runner_failure_or_settle(egress_dir: &Path) -> Result<()> {
@@ -512,13 +270,21 @@ async fn wait_for_runner_failure_or_settle(egress_dir: &Path) -> Result<()> {
     Ok(())
 }
 
-/// Prepare sandbox dirs, context, and spawn `sandbox-exec` → `tddy-sandbox-runner`.
+/// The file the runner reads its [`ExecPlan`] from, under the jail's root.
+const EXEC_PLAN_FILE: &str = "exec-plan.json";
+
+/// Default `RUST_LOG` for the in-jail `tddy-tools --mcp` server when none is named: captures
+/// specialized-subagent turns and HTTP activity so failures land in the persisted log.
+const DEFAULT_MCP_RUST_LOG: &str = "info,tddy_tools=debug,tddy_discovery=debug";
+
+/// Prepare sandbox dirs, context, and spawn `sandbox-exec` → `tddy-sandbox-runner --exec-plan`.
+///
+/// The agent is launched the way the daemon launches one: its argv and slots rendered from its
+/// spec ([`agent_exec_plan_with_env`]), its home, files, secrets, policy and egress lowered from
+/// its tool definition ([`lower_tool_jail`]), and the runner told to exec the plan. Nothing here
+/// names an agent.
 #[cfg(target_os = "macos")]
 pub async fn spawn_claude_sandbox(params: SpawnParams) -> Result<SpawnedSandbox> {
-    // Refused before anything is created, so a refused kind leaves no session directory behind.
-    if matches!(params.agent_kind, AgentKind::OpenCode | AgentKind::Muse) {
-        return Err(unstarted_agent_kind(params.agent_kind));
-    }
     let repo = params
         .repo
         .canonicalize()
@@ -536,26 +302,10 @@ pub async fn spawn_claude_sandbox(params: SpawnParams) -> Result<SpawnedSandbox>
         .context("mkdir sandbox scratch tmp")?;
     std::fs::create_dir_all(sandbox_root.join("context")).context("mkdir sandbox context")?;
     std::fs::create_dir_all(&egress_dir).context("mkdir sandbox egress")?;
-    let scratch_home_dir = match params.agent_kind {
-        AgentKind::Claude => &params.claude_home_dir,
-        AgentKind::Cursor => &params.cursor_home_dir,
-        AgentKind::OpenCode | AgentKind::Muse => {
-            return Err(unstarted_agent_kind(params.agent_kind))
-        }
-    };
-    match params.agent_kind {
-        AgentKind::Claude => seed_claude_credentials(scratch_home_dir)?,
-        AgentKind::Cursor => seed_cursor_credentials(scratch_home_dir)?,
-        AgentKind::OpenCode | AgentKind::Muse => {
-            return Err(unstarted_agent_kind(params.agent_kind))
-        }
-    }
 
     let sandbox_root = std::fs::canonicalize(&sandbox_root).unwrap_or(sandbox_root);
     let egress_dir = std::fs::canonicalize(&egress_dir).unwrap_or(egress_dir);
     let scratch_dir = sandbox_root.join(".work");
-    let scratch_home =
-        std::fs::canonicalize(scratch_home_dir).unwrap_or_else(|_| scratch_home_dir.clone());
     let scratch_tmp = scratch_dir.join("tmp");
     let context_dir = sandbox_root.join("context");
 
@@ -564,15 +314,9 @@ pub async fn spawn_claude_sandbox(params: SpawnParams) -> Result<SpawnedSandbox>
         &format!("preparing context from {} …", repo.display()),
     );
     let repo_for_context = repo.clone();
-    // The jail's cwd carries what *this* agent reads for guidance and nothing else: `--agent-kind`
-    // is already spelled the way tddy-core's per-backend table is keyed, so no mapping is needed
-    // here (unlike the daemon, which dispatches on session types).
-    let context_globs = tddy_core::backend::context_globs_for_agent(match params.agent_kind {
-        AgentKind::Claude => "claude",
-        AgentKind::Cursor => "cursor",
-        AgentKind::OpenCode => "opencode",
-        AgentKind::Muse => "muse",
-    });
+    // The jail's cwd carries what *this* agent reads for guidance and nothing else: the globs are
+    // the agent's own spec's.
+    let context_globs: Vec<String> = params.agent.spec.agent.context_globs.clone();
     let specialized_defs = params.specialized_defs;
     let replacement_pairs = specialized_agent_replacement_pairs(&specialized_defs);
     let ctx: SandboxContextDir = tokio::task::spawn_blocking(move || {
@@ -588,7 +332,8 @@ pub async fn spawn_claude_sandbox(params: SpawnParams) -> Result<SpawnedSandbox>
                 replaced: refs,
             })
             .collect();
-        SandboxContextDir::create_with_subagent(&repo_for_context, &replacements, context_globs)
+        let globs: Vec<&str> = context_globs.iter().map(String::as_str).collect();
+        SandboxContextDir::create_with_subagent(&repo_for_context, &replacements, &globs)
     })
     .await
     .context("context prep task join")??;
@@ -598,7 +343,7 @@ pub async fn spawn_claude_sandbox(params: SpawnParams) -> Result<SpawnedSandbox>
 
     spawn_trace(
         &session_dir,
-        "resolving claude / tddy-tools / sandbox-runner paths …",
+        "resolving agent / tddy-tools / sandbox-runner paths …",
     );
     let tddy_tools_path =
         canonicalize_exec_path(&resolve_tddy_tools_path(params.tddy_tools_path.as_deref()));
@@ -607,14 +352,30 @@ pub async fn spawn_claude_sandbox(params: SpawnParams) -> Result<SpawnedSandbox>
         .clone()
         .map(|p| canonicalize_exec_path(&p))
         .unwrap_or_else(|| canonicalize_exec_path(&resolve_sandbox_runner_path()));
-    let claude_binary = resolve_claude_binary(params.claude_binary.as_deref())?;
-    let cursor_binary = resolve_cursor_binary(params.cursor_binary.as_deref())?;
-    if params.agent_kind == AgentKind::Claude {
-        seed_claude_local_install(scratch_home_dir, &claude_binary)?;
-    } else {
-        #[cfg(unix)]
-        tddy_sandbox_recipes::seed_cursor_local_install(scratch_home_dir, &cursor_binary)?;
+
+    // The one `tddy-tools` the jail holds is the one the agent's MCP registration runs.
+    let mut agent: ChosenAgent = params.agent;
+    for dep in agent.deps.iter_mut().filter(|dep| dep.id == "tddy-tools") {
+        dep.binary = PathBuf::from(&tddy_tools_path);
     }
+    let closure: Vec<_> = agent.deps.iter().chain([&agent.tool]).cloned().collect();
+    let host_home = std::env::var_os("HOME")
+        .map(PathBuf::from)
+        .filter(|home| home.is_absolute())
+        .context("HOME is not set to an absolute path: a jailed tool's files are seeded from it")?;
+    // The persistent home, its seeded and mirrored files, the secrets, the policy and the egress
+    // the agent's definition declares.
+    let grants = lower_tool_jail(&ToolJailInputs {
+        tool: &agent.tool,
+        closure: &closure,
+        defs: &agent.defs,
+        tddy_home: &params.tddy_home,
+        host_home: &host_home,
+        scratch_dir: &scratch_dir,
+        host: &ProcessToolHost,
+        route: None,
+    })
+    .map_err(|status| anyhow::anyhow!("lower the jail of {}: {}", agent.id, status.message))?;
 
     let grpc_socket = sandbox_root.join("sandbox.grpc.sock");
     let tool_ipc_socket = tddy_sandbox::SandboxSpec::short_ipc_socket_path(&params.session_id);
@@ -627,15 +388,9 @@ pub async fn spawn_claude_sandbox(params: SpawnParams) -> Result<SpawnedSandbox>
         pick_free_loopback_port().map_err(|e| anyhow::anyhow!("pick egress shim port: {e}"))?;
     let loopback_allow_ports = vec![grpc_listen_port, egress_shim_port];
 
-    let perm = if params.permission_mode.trim().is_empty() {
-        "auto"
-    } else {
-        params.permission_mode.trim()
-    };
-
-    // Mount the repo into the jail (read-write) and start Claude there, so the agent works on the
-    // real project tree instead of the (guidance-only) context dir — unless `remote_codebase` is
-    // set, in which case the repo is never mounted and Claude starts in the read-only context dir,
+    // Mount the repo into the jail (read-write) and start the agent there, so it works on the real
+    // project tree instead of the (guidance-only) context dir — unless the codebase is managed, in
+    // which case the repo is never mounted and the agent starts in the read-only context dir,
     // reaching the real repo only via `mcp__tddy-tools__*` calls relayed by the host.
     let jail_cwd = resolve_jail_cwd(
         params.cwd.as_deref(),
@@ -650,7 +405,31 @@ pub async fn spawn_claude_sandbox(params: SpawnParams) -> Result<SpawnedSandbox>
     // never fires if the user's terminal never actually changes size after attach) to correct it.
     let (initial_rows, initial_cols) = crate::bridge::terminal_size_or_default();
 
-    let mut runner_argv = vec![
+    let exec_plan = agent_exec_plan_for_jail(
+        &agent,
+        &AgentJail {
+            session_id: params.session_id.clone(),
+            model: Some(params.model.clone()),
+            permission_mode: params.permission_mode.clone(),
+            agent_args: params.agent_args.clone(),
+            home: grants.home.clone(),
+            tmp: scratch_tmp.clone(),
+            context_dir: context_dir.clone(),
+            cwd: jail_cwd.clone(),
+            tddy_tools_path: PathBuf::from(&tddy_tools_path),
+            tool_ipc_socket: tool_ipc_socket.clone(),
+        },
+        &egress_dir,
+        params.mcp_log_level.as_deref(),
+        &specialized_defs,
+        &grants,
+    )?;
+    let exec_plan_path = sandbox_root.join(EXEC_PLAN_FILE);
+    let plan_json = serde_json::to_vec_pretty(&exec_plan).context("serialize the exec plan")?;
+    tddy_core::atomic_file::write_atomic(&exec_plan_path, plan_json)
+        .with_context(|| format!("write the exec plan {}", exec_plan_path.display()))?;
+
+    let runner_argv = vec![
         sandbox_runner_path,
         "--session-id".into(),
         params.session_id.clone(),
@@ -676,39 +455,12 @@ pub async fn spawn_claude_sandbox(params: SpawnParams) -> Result<SpawnedSandbox>
         initial_cols.to_string(),
         "--initial-rows".into(),
         initial_rows.to_string(),
+        "--exec-plan".into(),
+        exec_plan_path.to_string_lossy().to_string(),
     ];
-    match params.agent_kind {
-        AgentKind::Claude => {
-            runner_argv.push("--claude-binary".into());
-            runner_argv.push(claude_binary.clone());
-            runner_argv.push("--permission-mode".into());
-            runner_argv.push(perm.to_string());
-            for claude_arg in &params.claude_args {
-                runner_argv.push("--claude-arg".into());
-                runner_argv.push(claude_arg.clone());
-            }
-        }
-        AgentKind::Cursor => {
-            runner_argv.push("--agent-kind".into());
-            runner_argv.push("cursor".into());
-            runner_argv.push("--agent-binary".into());
-            runner_argv.push(cursor_binary.clone());
-            for agent_arg in &params.claude_args {
-                runner_argv.push("--agent-arg".into());
-                runner_argv.push(agent_arg.clone());
-            }
-        }
-        AgentKind::OpenCode | AgentKind::Muse => {
-            return Err(unstarted_agent_kind(params.agent_kind))
-        }
-    }
-    if let Some(level) = &params.mcp_log_level {
-        runner_argv.push("--mcp-log-level".into());
-        runner_argv.push(level.clone());
-    }
 
-    let mut env = build_sandbox_runner_env(
-        &scratch_home,
+    let mut env = tddy_sandbox::scratch_runner_env(
+        &grants.home,
         &scratch_tmp,
         &params.session_id,
         &tool_ipc_socket,
@@ -740,25 +492,31 @@ pub async fn spawn_claude_sandbox(params: SpawnParams) -> Result<SpawnedSandbox>
         "spawning sandbox-exec → tddy-sandbox-runner …",
     );
 
-    let mut handle = spawn_sandbox_runner(SandboxRunnerSpawn {
+    let mut mounts = build_sandbox_mounts_for(params.codebase_mode, &repo);
+    mounts.extend(grants.mounts.clone());
+    let spawn = SandboxRunnerSpawn {
         project_root: sandbox_root.clone(),
         scratch_dir: scratch_dir.clone(),
         egress_dir: egress_dir.clone(),
         profile_path,
-        runner_argv: runner_argv.clone(),
+        runner_argv,
         env,
         loopback_allow_ports,
         ipc_socket: Some(tool_ipc_socket),
-        mounts: build_sandbox_mounts(params.codebase_mode, &repo, &scratch_home),
-        // Preserve prior behavior (build_sandbox_plan used to hardcode $HOME): the recipe's
-        // per-session credential copy stays enabled for the app path.
-        host_home: std::env::var_os("HOME").map(PathBuf::from),
+        mounts,
+        // The home is seeded by the agent's definition, not copied per session.
+        host_home: None,
         // Standalone app path has no daemon config; empty config lets the cgroups backend derive
         // the delegated base at runtime (ignored by the macOS/QEMU backends).
         cgroup: tddy_sandbox::CgroupConfig::default(),
         route: None,
-    })
-    .map_err(|e| {
+        context_dir: Some(context_dir.clone()),
+        stdio: false,
+    };
+    let home = grants.home.clone();
+    let plan = build_tool_jail_plan(spawn, grants)
+        .map_err(|e| anyhow::anyhow!("build the jail's sandbox plan: {e}"))?;
+    let mut handle = spawn_sandbox_plan(plan).map_err(|e| {
         let logs = tddy_sandbox::format_egress_logs(&egress_dir);
         anyhow::anyhow!("spawn sandbox-runner: {e}\n{logs}")
     })?;
@@ -801,7 +559,7 @@ pub async fn spawn_claude_sandbox(params: SpawnParams) -> Result<SpawnedSandbox>
     );
     spawn_trace(
         &session_dir,
-        "sandbox ready — attaching terminal (blank screen until Claude starts is normal)",
+        "sandbox ready — attaching terminal (blank screen until the agent starts is normal)",
     );
 
     Ok(SpawnedSandbox {
@@ -811,7 +569,85 @@ pub async fn spawn_claude_sandbox(params: SpawnParams) -> Result<SpawnedSandbox>
         ready_marker,
         egress_dir,
         session_dir,
+        home,
     })
+}
+
+/// The read-write mounts of a jail beyond its home: the repo, unless the codebase is managed.
+///
+/// `Managed` is the one mode that leaves the checkout outside: the agent reaches it only via
+/// `mcp__tddy-tools__*` calls the host relays, so mounting it would hand back the direct route the
+/// mode exists to remove.
+fn build_sandbox_mounts_for(mode: CodebaseMode, repo: &Path) -> Vec<tddy_sandbox::MountSpec> {
+    match mode {
+        CodebaseMode::Managed => Vec::new(),
+        CodebaseMode::Mounted | CodebaseMode::Sandboxed => {
+            vec![tddy_sandbox::MountSpec::read_write(repo)]
+        }
+    }
+}
+
+/// The [`ExecPlan`] the runner execs for `agent` in `jail`, with the env the agent's definition and
+/// the session add on top of its spec's: the plan's own env, the home's overlay, the jail's `PATH`
+/// and the log settings of the agent's `tddy-tools --mcp` server.
+fn agent_exec_plan_for_jail(
+    agent: &ChosenAgent,
+    jail: &AgentJail,
+    egress_dir: &Path,
+    mcp_log_level: Option<&str>,
+    specialized_defs: &[tddy_discovery::agent_def::SpecializedAgentDef],
+    grants: &tddy_daemon_sandbox::tool_jail::ToolJailGrants,
+) -> Result<ExecPlan> {
+    // What the in-jail `tddy-tools --mcp` server needs beyond the socket: where it logs, how
+    // chatty it is, and the roster and tool seeds the session carries. Persisting its logs
+    // (incl. specialized-subagent HTTP activity) lands failures on disk instead of in the agent's
+    // captured MCP stderr.
+    let mut mcp_env = subagent_env_overlay(specialized_defs);
+    mcp_env.insert(
+        "TDDY_TOOLS_LOG_FILE".to_string(),
+        egress_dir
+            .join("tddy-tools.mcp.log")
+            .to_string_lossy()
+            .into_owned(),
+    );
+    mcp_env.insert(
+        "TDDY_TOOLS_ACCOUNTING_FILE".to_string(),
+        egress_dir
+            .join("accounting.json")
+            .to_string_lossy()
+            .into_owned(),
+    );
+    mcp_env.insert(
+        "RUST_LOG".to_string(),
+        mcp_log_level.unwrap_or(DEFAULT_MCP_RUST_LOG).to_string(),
+    );
+    // `SemanticSearch` is available only when the session carries a semantic index, which this app
+    // never builds: it joins the withdrawn tools, as it does for every jail without one.
+    let subagent_replaced =
+        tddy_discovery::subagent::resolve_replaced_tools_for_defs(specialized_defs);
+    let subagent_replaced_refs: Vec<&str> = subagent_replaced.iter().map(String::as_str).collect();
+    let replaced_tools = effective_replaced_tools(&subagent_replaced_refs, false)
+        .into_iter()
+        .map(str::to_string)
+        .collect();
+    let mut plan = agent_exec_plan_with(
+        agent,
+        jail,
+        &AgentSession {
+            mcp_env,
+            subagent_enabled: !specialized_defs.is_empty(),
+            replaced_tools,
+        },
+    )?;
+    plan.env.extend(grants.env.clone());
+    let baseline_path = tddy_sandbox::process_jail_env(Path::new(""), Path::new(""))
+        .remove("PATH")
+        .unwrap_or_default();
+    plan.env.insert(
+        "PATH".to_string(),
+        format!("{}:{baseline_path}", grants.bin_dir.display()),
+    );
+    Ok(plan)
 }
 
 /// Log paths useful when the sandbox child fails before attach.
@@ -824,34 +660,6 @@ pub fn log_spawn_diagnostics(egress_dir: &Path, session_dir: &Path) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use serial_test::serial;
-
-    #[test]
-    fn the_agent_kind_flag_parses_opencode() {
-        // When / Then
-        assert_eq!(AgentKind::parse("opencode"), Ok(AgentKind::OpenCode));
-    }
-
-    #[test]
-    fn the_agent_kind_flag_parses_muse() {
-        // When / Then
-        assert_eq!(AgentKind::parse("muse"), Ok(AgentKind::Muse));
-    }
-
-    #[test]
-    fn an_unknown_agent_kind_names_every_kind_the_flag_accepts() {
-        // When
-        let err = AgentKind::parse("vim");
-
-        // Then
-        assert_eq!(
-            err,
-            Err(
-                "unrecognized --agent-kind \"vim\"; expected \"claude\", \"cursor\", \"opencode\" or \"muse\""
-                    .to_string()
-            )
-        );
-    }
 
     // ─── The session's own record, once the terminal is somebody else's ─────────
 
@@ -875,192 +683,6 @@ mod tests {
         assert!(
             trace.contains("the host tool IPC socket could not accept"),
             "the trace log must hold what was not printed; it held: {trace}"
-        );
-    }
-
-    /// `seed_claude_credentials` copies the real host `~/.claude/.credentials.json` into the jail
-    /// home the first time it's called, so the jail can authenticate on its first run.
-    #[test]
-    #[serial]
-    fn seed_claude_credentials_copies_source_file_when_dest_does_not_exist() {
-        // Given
-        let host_home = tempfile::tempdir().expect("temp host home");
-        let claude_dir = host_home.path().join(".claude");
-        std::fs::create_dir_all(&claude_dir).expect("mkdir host .claude");
-        std::fs::write(claude_dir.join(".credentials.json"), "{\"token\":\"abc\"}")
-            .expect("write host credentials");
-
-        let claude_home_dir = tempfile::tempdir().expect("temp jail home");
-
-        let prev_home = std::env::var_os("HOME");
-        std::env::set_var("HOME", host_home.path());
-
-        // When
-        let result = seed_claude_credentials(claude_home_dir.path());
-
-        match prev_home {
-            Some(v) => std::env::set_var("HOME", v),
-            None => std::env::remove_var("HOME"),
-        }
-
-        // Then
-        assert!(result.is_ok(), "expected Ok(()), got: {result:?}");
-        let dest = claude_home_dir
-            .path()
-            .join(".claude")
-            .join(".credentials.json");
-        let contents = std::fs::read_to_string(&dest).expect("dest credentials file must exist");
-        assert_eq!(contents, "{\"token\":\"abc\"}");
-    }
-
-    /// `seed_claude_credentials` never overwrites an existing dest file — the jail may have since
-    /// refreshed its own token, and the host copy must not clobber it on later restarts.
-    #[test]
-    #[serial]
-    fn seed_claude_credentials_does_not_overwrite_existing_dest_file() {
-        // Given
-        let host_home = tempfile::tempdir().expect("temp host home");
-        let claude_dir = host_home.path().join(".claude");
-        std::fs::create_dir_all(&claude_dir).expect("mkdir host .claude");
-        std::fs::write(
-            claude_dir.join(".credentials.json"),
-            "{\"token\":\"from-host\"}",
-        )
-        .expect("write host credentials");
-
-        let claude_home_dir = tempfile::tempdir().expect("temp jail home");
-        let dest_dir = claude_home_dir.path().join(".claude");
-        std::fs::create_dir_all(&dest_dir).expect("mkdir jail .claude");
-        std::fs::write(
-            dest_dir.join(".credentials.json"),
-            "{\"token\":\"refreshed-by-jail\"}",
-        )
-        .expect("write existing jail credentials marker");
-
-        let prev_home = std::env::var_os("HOME");
-        std::env::set_var("HOME", host_home.path());
-
-        // When
-        let result = seed_claude_credentials(claude_home_dir.path());
-
-        match prev_home {
-            Some(v) => std::env::set_var("HOME", v),
-            None => std::env::remove_var("HOME"),
-        }
-
-        // Then
-        assert!(result.is_ok(), "expected Ok(()), got: {result:?}");
-        let contents = std::fs::read_to_string(dest_dir.join(".credentials.json"))
-            .expect("dest credentials file must still exist");
-        assert_eq!(
-            contents, "{\"token\":\"refreshed-by-jail\"}",
-            "existing dest file must survive untouched, got: {contents}"
-        );
-    }
-
-    /// `seed_claude_credentials` is a graceful no-op when the host has no `~/.claude/.credentials.json`
-    /// to seed from (e.g. a fresh host, or a host that never authenticated).
-    #[test]
-    #[serial]
-    fn seed_claude_credentials_no_ops_when_source_file_is_missing() {
-        // Given
-        let host_home = tempfile::tempdir().expect("temp host home");
-        let claude_home_dir = tempfile::tempdir().expect("temp jail home");
-
-        let prev_home = std::env::var_os("HOME");
-        std::env::set_var("HOME", host_home.path());
-
-        // When
-        let result = seed_claude_credentials(claude_home_dir.path());
-
-        match prev_home {
-            Some(v) => std::env::set_var("HOME", v),
-            None => std::env::remove_var("HOME"),
-        }
-
-        // Then
-        assert!(
-            result.is_ok(),
-            "must no-op gracefully when source file is missing, got: {result:?}"
-        );
-        let dest = claude_home_dir
-            .path()
-            .join(".claude")
-            .join(".credentials.json");
-        assert!(
-            !dest.exists(),
-            "dest file must not be created when there's nothing to seed"
-        );
-    }
-
-    /// `seed_claude_local_install` symlinks `claude_home_dir/.local/bin/claude` at the resolved
-    /// binary path, so Claude's own startup self-check finds a consistent install.
-    #[test]
-    fn seed_claude_local_install_creates_symlink_at_local_bin_claude() {
-        // Given
-        let claude_home_dir = tempfile::tempdir().expect("temp jail home");
-        let real_bin_dir = tempfile::tempdir().expect("temp bin dir");
-        let real_bin = real_bin_dir.path().join("claude");
-        std::fs::write(&real_bin, "#!/bin/sh\necho fake claude\n").expect("write fake binary");
-
-        // When
-        let result = seed_claude_local_install(claude_home_dir.path(), real_bin.to_str().unwrap());
-
-        // Then
-        assert!(result.is_ok(), "expected Ok(()), got: {result:?}");
-        let local_bin_claude = claude_home_dir
-            .path()
-            .join(".local")
-            .join("bin")
-            .join("claude");
-        assert!(
-            local_bin_claude.is_symlink(),
-            "expected a symlink at {}",
-            local_bin_claude.display()
-        );
-        let resolved = std::fs::canonicalize(&local_bin_claude).expect("resolve symlink target");
-        let expected = std::fs::canonicalize(&real_bin).expect("resolve real bin");
-        assert_eq!(
-            resolved, expected,
-            "symlink must point at the given binary path"
-        );
-    }
-
-    /// When the binary's parent directory is literally named `versions` (the self-managed
-    /// install layout), `seed_claude_local_install` also mirrors a versioned symlink under
-    /// `.local/share/claude/versions/<version>` so a version-manifest check finds a match too.
-    #[test]
-    fn seed_claude_local_install_mirrors_versioned_symlink_when_parent_dir_is_versions() {
-        // Given
-        let claude_home_dir = tempfile::tempdir().expect("temp jail home");
-        let install_root = tempfile::tempdir().expect("temp install root");
-        let versions_dir = install_root.path().join("versions");
-        std::fs::create_dir_all(&versions_dir).expect("mkdir versions dir");
-        let real_bin = versions_dir.join("1.2.3");
-        std::fs::write(&real_bin, "#!/bin/sh\necho fake claude\n").expect("write fake binary");
-
-        // When
-        let result = seed_claude_local_install(claude_home_dir.path(), real_bin.to_str().unwrap());
-
-        // Then
-        assert!(result.is_ok(), "expected Ok(()), got: {result:?}");
-        let versioned_link = claude_home_dir
-            .path()
-            .join(".local")
-            .join("share")
-            .join("claude")
-            .join("versions")
-            .join("1.2.3");
-        assert!(
-            versioned_link.is_symlink(),
-            "expected a versioned mirror symlink at {}",
-            versioned_link.display()
-        );
-        let resolved = std::fs::canonicalize(&versioned_link).expect("resolve versioned symlink");
-        let expected = std::fs::canonicalize(&real_bin).expect("resolve real bin");
-        assert_eq!(
-            resolved, expected,
-            "versioned symlink must point at the real binary"
         );
     }
 

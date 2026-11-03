@@ -180,43 +180,12 @@ pub fn render_plan(plan: &SandboxPlan) -> Result<String, SandboxError> {
 /// (`#agent-tools 10/12`).
 ///
 /// Any jail may carry one, not only a `tddy-sandbox-runner` argv, and what the confined command
-/// line says no longer matters.
-// TODO(jail-agnostic): implement — return `plan.context_dir`, then delete
-// `context_dir_from_runner_argv` once every launcher sets the field. Today's argv sniffing stays
-// until then, so no current jail loses its carve-out.
+/// line says does not matter. An empty path is treated as absent rather than rendered as
+/// `(subpath "")`, which would be a rule matching nothing useful in a profile that must stay strict.
 fn context_dir_of(plan: &SandboxPlan) -> Option<PathBuf> {
-    context_dir_from_runner_argv(&plan.spec.command)
-}
-
-/// The agent-context directory the confined process will use, read off the command line the plan
-/// launches (`plan.spec.command`).
-///
-/// Why derive it from argv instead of carrying it as its own plan field: `--context-dir <path>` is
-/// how the path reaches the sandboxed process in the first place — every launcher (the daemon's
-/// Claude/Cursor/split session paths, its plan builder, and `tddy-sandbox-app`) spells it exactly
-/// that way, and `tddy-sandbox-runner` learns the directory from nowhere else. Reading the same
-/// argv the child is executed with makes it impossible for the profile's carve-out to name a
-/// different directory than the one the agent actually reads its guidance from; a parallel field
-/// could silently drift. [`crate::spawn::spawn_plan`] already inspects this argv the same way to
-/// detect `--stdio`.
-///
-/// Plans that run something other than the runner (action orchestration, plain shells) carry no
-/// such flag and therefore get no carve-out — they have no context dir to protect. An empty value
-/// is treated as absent rather than rendered as `(subpath "")`, which would be a rule matching
-/// nothing useful in a profile that must stay strict.
-fn context_dir_from_runner_argv(argv: &[String]) -> Option<PathBuf> {
-    for (index, arg) in argv.iter().enumerate() {
-        if let Some(inline) = arg.strip_prefix("--context-dir=") {
-            return (!inline.is_empty()).then(|| PathBuf::from(inline));
-        }
-        if arg == "--context-dir" {
-            return argv
-                .get(index + 1)
-                .filter(|value| !value.is_empty())
-                .map(PathBuf::from);
-        }
-    }
-    None
+    plan.context_dir
+        .clone()
+        .filter(|dir| !dir.as_os_str().is_empty())
 }
 
 /// Render a single read grant as its SBPL path filter.
@@ -551,6 +520,7 @@ mod tests {
             "--context-dir".into(),
             ITS_CONTEXT_DIR.into(),
         ];
+        plan.context_dir = Some(PathBuf::from(ITS_CONTEXT_DIR));
         plan
     }
 

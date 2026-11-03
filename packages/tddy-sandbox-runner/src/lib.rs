@@ -1,6 +1,6 @@
 //! Shared sandbox runner + host-side `SessionChannel` relay.
 //!
-//! The in-jail runner (gRPC `SessionChannel` server, claude PTY bridge, `HTTPS_PROXY` CONNECT
+//! The in-jail runner (gRPC `SessionChannel` server, PTY bridge, `HTTPS_PROXY` CONNECT
 //! egress shim) and the host-side relay that turns CONNECT tunnels into real outbound sockets are
 //! platform-agnostic. They live here so the Darwin Seatbelt backend, the Linux cgroups backend,
 //! the daemon, the standalone app, and tests all reuse one implementation instead of duplicating
@@ -9,7 +9,6 @@
 mod conversation_root;
 pub mod egress_policy;
 pub mod exec_plan;
-pub mod harness_pty;
 pub mod host_relay;
 pub mod runner;
 

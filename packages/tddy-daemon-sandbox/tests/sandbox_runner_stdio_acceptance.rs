@@ -66,10 +66,13 @@ fn sandbox_runner_stdio_command(work_dir: &std::path::Path) -> Command {
 
     // `--grpc-socket` is a required flag on `SandboxRunnerArgs` but unused by any code path
     // (vestigial, superseded by `--grpc-uds`/`--grpc-listen-port`) — a placeholder path satisfies
-    // clap without affecting behavior. `--tddy-tools-path` is required by `spawn_claude_pty` to
-    // build the claude CLI's `--mcp-config`; `/bin/sleep` stands in for both `--claude-binary`
-    // and this path since neither is actually invoked as claude here.
+    // clap without affecting behavior. `--tddy-tools-path` names the tool server; `/bin/sleep` stands in
+    // for it and, via the exec plan, for the process in the PTY, since neither is invoked for real.
     let grpc_socket = work_dir.join("unused.grpc.sock");
+    let exec_plan = tddy_testing_commons::sandbox_fixtures::write_exec_plan(
+        work_dir,
+        &["/bin/sleep", "--model", "claude-opus-4-8"],
+    );
     let mut command = Command::new(sandbox_runner_exe_path());
     command.env_clear().args([
         "--session-id".as_ref(),
@@ -82,12 +85,10 @@ fn sandbox_runner_stdio_command(work_dir: &std::path::Path) -> Command {
         tool_ipc_socket.as_os_str(),
         "--ready-marker".as_ref(),
         ready_marker.as_os_str(),
-        "--claude-binary".as_ref(),
-        "/bin/sleep".as_ref(),
+        "--exec-plan".as_ref(),
+        exec_plan.as_os_str(),
         "--tddy-tools-path".as_ref(),
         "/bin/sleep".as_ref(),
-        "--model".as_ref(),
-        "claude-opus-4-8".as_ref(),
         "--stdio".as_ref(),
     ]);
     command

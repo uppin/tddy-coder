@@ -26,7 +26,8 @@ pub fn process_is_alive(_pid: u32) -> bool {
 ///
 /// The direct socket probe dials `host:port`, written into the script itself: the jailed agent is
 /// given no `TDDY_*` variable, so the target cannot reach it through the environment. The shim
-/// probe uses `HTTPS_PROXY`, the proxy the jail gives the agent (the runner's egress shim, which
+/// probe uses `HTTPS_PROXY`, the proxy the jail gives the agent — or, for a runner that execs an
+/// `--exec-plan` with `egress_shim`, the `HTTP_PROXY` it sets (the runner's egress shim, which
 /// answers `GET /probe` by forwarding an `EgressRequest` to the host).
 /// Emits structured `EGRESS_PROBE:` markers on stdout (PTY-visible).
 pub fn write_egress_probe_claude_script(dir: &Path, host: &str, port: u16) -> PathBuf {
@@ -43,7 +44,7 @@ else
   echo "EGRESS_PROBE: direct=denied"
 fi
 
-SHIM="${{HTTPS_PROXY:-}}"
+SHIM="${{HTTPS_PROXY:-${{HTTP_PROXY:-}}}}"
 if [ -z "$SHIM" ]; then
   echo "EGRESS_PROBE: session_channel=unset"
 elif curl -s -o /dev/null --noproxy '*' --connect-timeout 2 "${{SHIM}}/probe" 2>/dev/null; then
@@ -94,4 +95,27 @@ exec cat
         std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
     }
     script
+}
+
+/// Write the runner's `--exec-plan` file for a process that runs `argv`, with no env, no files and
+/// no egress shim, as `<dir>/exec-plan.json`, and return its path.
+///
+/// The plan is the JSON `tddy_sandbox_runner::ExecPlan` reads; a runner test names the process it
+/// wants in the PTY this way, instead of an agent flag.
+pub fn write_exec_plan(dir: &Path, argv: &[&str]) -> PathBuf {
+    write_exec_plan_with_shim(dir, argv, false)
+}
+
+/// [`write_exec_plan`] with the process pointed at the runner's egress shim when `egress_shim`
+/// (`HTTPS_PROXY` and friends), as a launcher does for a jail that reaches the network.
+pub fn write_exec_plan_with_shim(dir: &Path, argv: &[&str], egress_shim: bool) -> PathBuf {
+    let path = dir.join("exec-plan.json");
+    let plan = serde_json::json!({
+        "argv": argv,
+        "env": {},
+        "files": [],
+        "egress_shim": egress_shim,
+    });
+    std::fs::write(&path, plan.to_string()).expect("write the exec plan");
+    path
 }

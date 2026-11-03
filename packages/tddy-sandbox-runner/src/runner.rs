@@ -1,4 +1,4 @@
-//! Sandbox runner — in-jail gRPC server + claude PTY + MCP tool-exec bridge.
+//! Sandbox runner — in-jail gRPC server + PTY for the process a tool plan names + MCP tool-exec bridge.
 
 use std::collections::{HashMap, VecDeque};
 use std::path::{Path, PathBuf};
@@ -30,12 +30,10 @@ use tddy_sandbox::{
     append_line, egress_log_path, session_id_from_env, EgressPolicy, SANDBOX_RUNNER_FAILURE,
     SANDBOX_RUNNER_LOG,
 };
-use tddy_sandbox_recipes::{append_claude_mcp_args, claude_scratch_mcp_dir};
 // The in-jail PTY decodes the resize escape the same way every other PTY host does.
 use tddy_pty::strip_resize as strip_resize_escape;
 
 use crate::egress_policy::EgressGuard;
-use crate::harness_pty::{spawn_harness_pty, SpawnHarnessPtyParams};
 
 /// The terminal id a sandbox session's single PTY is exposed under: the reserved main terminal (the
 /// daemon serves no other `terminal_id` for a sandbox session). Duplicated from
@@ -217,10 +215,9 @@ fn log_startup_environment(args: &SandboxRunnerArgs) {
     boot_log(
         "INFO",
         &format!(
-            "boot env: session_id={} context_dir={} claude_binary={} grpc_listen_port={:?} egress_shim_port={:?} ready_marker={}",
+            "boot env: session_id={} context_dir={} grpc_listen_port={:?} egress_shim_port={:?} ready_marker={}",
             args.session_id,
             args.context_dir.display(),
-            args.claude_binary,
             args.grpc_listen_port,
             args.egress_shim_port,
             args.ready_marker.display(),
@@ -279,8 +276,8 @@ pub struct SandboxRunnerArgs {
     pub session_id: String,
     #[arg(long)]
     pub context_dir: PathBuf,
-    /// Working directory for the Claude process. Defaults to `context_dir`; set to a mounted
-    /// project dir so the agent starts inside the repo.
+    /// Working directory for the confined process. Defaults to `context_dir`; set to a mounted
+    /// project dir so it starts inside the repo.
     #[arg(long)]
     pub cwd: Option<PathBuf>,
     /// Vestigial: unused once `--stdio` is passed. Kept optional for callers that still pass it
@@ -289,43 +286,16 @@ pub struct SandboxRunnerArgs {
     pub grpc_socket: Option<PathBuf>,
     #[arg(long)]
     pub tool_ipc_socket: PathBuf,
-    /// Path to `tddy-tools` for in-jail MCP config (`--mcp` server). Required for Claude mode.
+    /// Path to `tddy-tools` as the jail reaches it.
     #[arg(long)]
     pub tddy_tools_path: Option<PathBuf>,
-    #[arg(long, default_value = "claude")]
-    pub claude_binary: String,
-    /// Agent kind for in-jail PTY: `claude` (default), `cursor`, `opencode` or `muse`.
-    #[arg(long, default_value = "claude")]
-    pub agent_kind: String,
-    /// Binary path for the in-jail agent when `agent_kind` is `cursor`, `opencode` or `muse`
-    /// (default: `agent`, `opencode` and `muse` respectively).
-    #[arg(long)]
-    pub agent_binary: Option<String>,
-    /// Model for the in-jail agent. Empty only in a mode that hosts no agent
-    /// ([`run_workspace_tool_runner`]); the claude and cursor paths refuse an empty one rather
-    /// than launching the CLI with a meaningless `--model`.
+    /// Vestigial: no mode reads it. Kept so launchers that still pass it keep parsing.
+    // TODO(jail-agnostic): drop `--model` once the launchers stop passing it
+    // (docs/dev/todo/2026-11-03-runner-model-flag-is-vestigial.md).
     #[arg(long, default_value = "")]
     pub model: String,
     #[arg(long)]
     pub ready_marker: PathBuf,
-    #[arg(long, default_value = "auto")]
-    pub permission_mode: String,
-    /// When set, pass `--dangerously-skip-permissions` to the in-jail `claude`, bypassing all
-    /// permission prompts. Mutually exclusive with `--permission-mode`: when set, the in-jail claude
-    /// argv drops `--permission-mode` (the claude CLI rejects both together). Claude-mode only.
-    #[arg(long)]
-    pub dangerously_skip_permissions: bool,
-    /// When set, resume an existing on-disk claude session transcript via `--resume <id>` instead
-    /// of assigning the id to a fresh session via `--session-id <id>`. The daemon sets this on the
-    /// resume path (the transcript already exists under the persistent sandbox claude HOME, so
-    /// `--session-id` would abort with "Session ID already in use"). Claude-mode only.
-    #[arg(long)]
-    pub resume: bool,
-    /// When set, pass `--append-system-prompt-file <path>` to the jailed `claude` (a managed
-    /// workflow's orchestration prompt). The path must be readable inside the jail (e.g. under the
-    /// context dir).
-    #[arg(long)]
-    pub append_system_prompt_file: Option<PathBuf>,
     /// When set, bind sandbox gRPC on this loopback port (required inside Seatbelt).
     #[arg(long)]
     pub grpc_listen_port: Option<u16>,
@@ -346,24 +316,10 @@ pub struct SandboxRunnerArgs {
     /// it takes precedence over [`grpc_listen_port`](Self::grpc_listen_port).
     #[arg(long)]
     pub grpc_uds: Option<PathBuf>,
-    /// When set, spawn this command in a PTY instead of Claude (generic confined action mode).
+    /// When set, spawn this command in a PTY (generic confined action mode).
     /// Repeat the flag once per argv token (`--pty-command=/bin/sh --pty-command=-c …`).
     #[arg(long = "pty-command", allow_hyphen_values = true)]
     pub pty_command: Vec<String>,
-    /// Extra args passed verbatim to the in-jail `claude` invocation, inserted after the fixed
-    /// `--model`/`--session-id`/`--permission-mode` flags and BEFORE the MCP allowlist args (whose
-    /// trailing variadic `--mcp-config` would otherwise swallow a bare positional prompt). Repeat
-    /// once per token (`--claude-arg=--add-dir --claude-arg=/foo`). Ignored in `--pty-command` mode.
-    #[arg(long = "claude-arg", allow_hyphen_values = true)]
-    pub claude_arg: Vec<String>,
-    /// Extra args for the in-jail `agent` when `agent_kind=cursor`. Falls back to `claude_arg`.
-    #[arg(long = "agent-arg", allow_hyphen_values = true)]
-    pub agent_arg: Vec<String>,
-    /// `RUST_LOG` for the in-jail `tddy-tools --mcp` server (whose logs — including specialized
-    /// subagent HTTP activity — are persisted to `<egress-dir>/tddy-tools.mcp.log`). Defaults to a
-    /// level that captures subagent turns. Claude-mode only.
-    #[arg(long)]
-    pub mcp_log_level: Option<String>,
     /// Serve `SandboxService` over stdin/stdout (RPC over stdio, see `tddy-stdio`) instead of
     /// `--grpc-uds`/`--grpc-listen-port`/`--grpc-socket`'s UDS/TCP transport.
     #[arg(long)]
@@ -1275,496 +1231,6 @@ pub(crate) fn spawn_generic_pty(
     Ok((PtyState { stdin_tx }, done_rx))
 }
 
-pub(crate) fn run_claude_pty_thread(
-    argv: Vec<String>,
-    cwd: PathBuf,
-    egress_shim: Option<String>,
-    relay: Arc<SandboxSessionRelay>,
-    stdin_rx: std::sync::mpsc::Receiver<Bytes>,
-    initial_cols: u16,
-    initial_rows: u16,
-) -> Result<()> {
-    boot_log(
-        "INFO",
-        &format!(
-            "pty: openpty claude={} cwd={} argv={argv:?} size={initial_cols}x{initial_rows}",
-            argv.first().map(String::as_str).unwrap_or("<missing>"),
-            cwd.display(),
-        ),
-    );
-    let binary = std::fs::canonicalize(&argv[0])
-        .map(|p| p.to_string_lossy().into_owned())
-        .unwrap_or_else(|_| argv[0].clone());
-    let pty_system = native_pty_system();
-    let pair = pty_system
-        .openpty(PtySize {
-            rows: initial_rows,
-            cols: initial_cols,
-            pixel_width: 0,
-            pixel_height: 0,
-        })
-        .context("openpty")?;
-    // Before the child can write: the host's screen model starts at the grid its output is drawn for.
-    relay.push_terminal_size(initial_cols, initial_rows);
-    let mut cmd = CommandBuilder::new(&binary);
-    for arg in &argv[1..] {
-        cmd.arg(arg);
-    }
-    cmd.cwd(&cwd);
-    cmd.env("TERM", "xterm-256color");
-    // Route the agent's outbound HTTPS through the in-jail CONNECT proxy (the egress shim).
-    // claude honors HTTPS_PROXY and issues `CONNECT api.anthropic.com:443`, which the shim
-    // tunnels to the host over the SessionChannel. The jail itself still has (deny network*).
-    // A jail whose policy is `none` has no shim, so its PTY is given no proxy at all.
-    if let Some(egress_shim) = &egress_shim {
-        cmd.env("TDDY_EGRESS_SHIM", egress_shim);
-        cmd.env("HTTPS_PROXY", egress_shim);
-        cmd.env("HTTP_PROXY", egress_shim);
-        cmd.env("https_proxy", egress_shim);
-        cmd.env("http_proxy", egress_shim);
-    }
-    for key in [
-        "TDDY_EGRESS_PROBE_HOST",
-        "TDDY_EGRESS_PROBE_PORT",
-        "TDDY_EGRESS_PROBE_URL",
-    ] {
-        if let Ok(value) = std::env::var(key) {
-            if !value.trim().is_empty() {
-                cmd.env(key, value);
-            }
-        }
-    }
-    // Out-of-band secrets (e.g. CLAUDE_CODE_OAUTH_TOKEN): read from their `0600` scratch files and
-    // set on the inner claude child only, so the value never appears in the sandbox-exec argv.
-    let process_env: std::collections::BTreeMap<String, String> = std::env::vars().collect();
-    for (name, value) in resolve_secret_envs(&process_env) {
-        boot_log(
-            "INFO",
-            &format!("pty: injecting secret env {name} into claude child"),
-        );
-        cmd.env(name, value);
-    }
-    let mut child = pair
-        .slave
-        .spawn_command(cmd)
-        .context("spawn claude in pty")?;
-    boot_log("INFO", "pty: claude spawned");
-    drop(pair.slave);
-    let master = Arc::new(Mutex::new(pair.master));
-
-    let master_reader = Arc::clone(&master);
-    let relay_reader = Arc::clone(&relay);
-    let reader_thread = std::thread::spawn(move || {
-        // Clone the reader under the lock, then release it: holding the `master` guard across the
-        // read loop would deadlock the stdin writer thread below (edition 2021 keeps a temporary
-        // guard in an `if let` scrutinee alive for the whole block).
-        let reader = master_reader.lock().unwrap().try_clone_reader();
-        let mut r = match reader {
-            Ok(r) => r,
-            Err(_) => {
-                boot_log("ERROR", "pty: try_clone_reader failed");
-                return;
-            }
-        };
-        let mut buf = [0u8; 4096];
-        loop {
-            match std::io::Read::read(&mut r, &mut buf) {
-                Ok(0) => break,
-                Ok(n) => {
-                    relay_reader.push_terminal(Bytes::copy_from_slice(&buf[..n]));
-                }
-                Err(e) => {
-                    boot_log("ERROR", &format!("pty: stdout read failed: {e}"));
-                    break;
-                }
-            }
-        }
-    });
-
-    let master_writer = Arc::clone(&master);
-    let relay_resize = Arc::clone(&relay);
-    std::thread::spawn(move || {
-        // Take the writer once under the lock, then release it; the write loop must not hold
-        // `master` (the reader clone above needs it, and blocking writes would stall output).
-        let writer = master_writer.lock().unwrap().take_writer();
-        let mut w = match writer {
-            Ok(w) => w,
-            Err(_) => {
-                boot_log("ERROR", "pty: take_writer failed");
-                return;
-            }
-        };
-        while let Ok(chunk) = stdin_rx.recv() {
-            let (resize, remaining) = strip_resize_escape(&chunk);
-            if let Some((cols, rows)) = resize {
-                let applied = master_writer.lock().unwrap().resize(PtySize {
-                    rows,
-                    cols,
-                    pixel_width: 0,
-                    pixel_height: 0,
-                });
-                // The applied size only: a resize the PTY refused must not move the host's model.
-                if applied.is_ok() {
-                    relay_resize.push_terminal_size(cols, rows);
-                }
-            }
-            if remaining.is_empty() {
-                continue;
-            }
-            if let Err(e) = std::io::Write::write_all(&mut w, &remaining) {
-                boot_log("ERROR", &format!("pty: stdin write failed: {e}"));
-                break;
-            }
-            if let Err(e) = std::io::Write::flush(&mut w) {
-                boot_log("ERROR", &format!("pty: stdin flush failed: {e}"));
-                break;
-            }
-        }
-    });
-
-    let exit_code = match child.wait() {
-        Ok(status) => {
-            boot_log("INFO", &format!("pty: claude exited {status}"));
-            status.exit_code() as i32
-        }
-        Err(e) => {
-            boot_log("ERROR", &format!("pty: wait failed: {e}"));
-            1
-        }
-    };
-    // Join the reader thread first so every byte claude wrote is flushed to the relay before we
-    // announce the session end (mirrors `spawn_generic_pty`). Then signal `SessionEnded` so the
-    // host relay stops `HostPoll`-ing, both stream ends drop, the in-jail gRPC server shuts down,
-    // and the host app's terminal bridge exits — the sandbox must not outlive claude.
-    let _ = reader_thread.join();
-    relay.signal_session_ended(exit_code);
-    Ok(())
-}
-
-/// Pure resolution of the effective replaced-tool set from the legacy single-agent env pair: no
-/// subagent name (absent or blank) means nothing is replaced whatever the CSV says — there is no
-/// agent behind it to serve the withdrawn tool. The CSV is the agent's own declared `replaces`
-/// list, normalized against the canonical exec-tool names ([`tddy_discovery::subagent::
-/// normalize_replaced_tools`]); a name carries no replaced set of its own.
-fn resolve_subagent_replaced_tools(
-    subagent_name: Option<&str>,
-    replaces_csv: Option<&str>,
-) -> Vec<String> {
-    if subagent_name
-        .map(str::trim)
-        .filter(|name| !name.is_empty())
-        .is_none()
-    {
-        return Vec::new();
-    }
-    let Some(csv) = replaces_csv.map(str::trim).filter(|csv| !csv.is_empty()) else {
-        return Vec::new();
-    };
-    let tokens: Vec<String> = csv.split(',').map(str::trim).map(str::to_string).collect();
-    tddy_discovery::subagent::normalize_replaced_tools(&tokens)
-}
-
-/// Pure resolution of the effective replaced-tool set from a raw `TDDY_SUBAGENTS_JSON` payload
-/// (a serialized `Vec<SpecializedAgentDef>`): parses the JSON and unions every def's own
-/// `replaces` list via [`tddy_discovery::subagent::resolve_replaced_tools_for_defs`]. Absent or
-/// blank JSON resolves to an empty set — with no def there is no agent, and nothing to withdraw.
-///
-/// A payload that is *present* and does not parse is an **error**, never an empty set.
-/// `SpecializedAgentDef` is `deny_unknown_fields`, so a jail whose runner predates a field the
-/// spawning daemon writes lands exactly here — and reading it as "nothing is replaced" would leave
-/// the main agent holding every tool the operator withdrew, with no line anywhere saying so.
-fn subagents_json_replaced_tools(raw_json: Option<&str>) -> Result<Vec<String>> {
-    let raw_json = match raw_json.map(str::trim).filter(|s| !s.is_empty()) {
-        Some(raw_json) => raw_json,
-        None => return Ok(Vec::new()),
-    };
-    // The message carries serde's position, never the payload: a def holds a provider credential.
-    let defs: Vec<tddy_discovery::agent_def::SpecializedAgentDef> = serde_json::from_str(raw_json)
-        .map_err(|e| {
-            anyhow::anyhow!(
-                "TDDY_SUBAGENTS_JSON is set but does not parse as an array of agent defs: {e}. \
-                 This is what a sandbox-runner older than the daemon that spawned it sees, and \
-                 starting the agent anyway would hand back every tool the session's agents took \
-                 over"
-            )
-        })?;
-    Ok(tddy_discovery::subagent::resolve_replaced_tools_for_defs(
-        &defs,
-    ))
-}
-
-/// Thin env-reading wrapper around [`resolve_subagent_replaced_tools`] and
-/// [`subagents_json_replaced_tools`]: prefers the array model (`TDDY_SUBAGENTS_JSON`) when it
-/// parses to a non-empty replaced-tool set, otherwise falls back to the legacy single-subagent
-/// pair (`TDDY_SUBAGENT`/`TDDY_SUBAGENT_REPLACES`).
-///
-/// An unparseable `TDDY_SUBAGENTS_JSON` propagates, failing the spawn — it is not the same thing as
-/// "the array model is not in use", and the legacy pair must not stand in for a value that was set.
-fn subagent_replaced_tools_from_env() -> Result<Vec<String>> {
-    let from_json =
-        subagents_json_replaced_tools(std::env::var("TDDY_SUBAGENTS_JSON").ok().as_deref())?;
-    if !from_json.is_empty() {
-        return Ok(from_json);
-    }
-    Ok(resolve_subagent_replaced_tools(
-        std::env::var("TDDY_SUBAGENT").ok().as_deref(),
-        std::env::var("TDDY_SUBAGENT_REPLACES").ok().as_deref(),
-    ))
-}
-
-struct SpawnClaudePtyParams<'a> {
-    context_dir: &'a Path,
-    /// Working directory for the Claude process (defaults to `context_dir` when no project dir is
-    /// mounted into the jail).
-    cwd: &'a Path,
-    claude_binary: &'a str,
-    model: &'a str,
-    permission_mode: &'a str,
-    /// When true, pass `--dangerously-skip-permissions` to `claude`, bypassing all permission
-    /// prompts. Mutually exclusive with `permission_mode` (dropped when this is set).
-    dangerously_skip_permissions: bool,
-    /// When true, resume the existing on-disk transcript via `--resume <id>` instead of assigning
-    /// the id to a fresh session via `--session-id <id>` (see `SandboxRunnerArgs::resume`).
-    resume: bool,
-    /// When set, passed to `claude` as `--append-system-prompt-file <path>` (must be readable in
-    /// the jail).
-    append_system_prompt_file: Option<&'a Path>,
-    session_id: &'a str,
-    tddy_tools_path: &'a Path,
-    egress_shim: Option<&'a str>,
-    relay: Arc<SandboxSessionRelay>,
-    initial_cols: u16,
-    initial_rows: u16,
-    /// Extra args appended verbatim after the fixed flags and MCP allowlist args (see
-    /// `SandboxRunnerArgs::claude_arg`).
-    claude_args: &'a [String],
-    /// `RUST_LOG` for the in-jail `tddy-tools --mcp` server (see `SandboxRunnerArgs::mcp_log_level`).
-    mcp_log_level: Option<&'a str>,
-}
-
-/// Default `RUST_LOG` for the in-jail `tddy-tools --mcp` server when `--mcp-log-level` is unset:
-/// captures specialized-subagent turns and HTTP activity so failures land in the persisted log.
-const DEFAULT_MCP_RUST_LOG: &str = "info,tddy_tools=debug,tddy_discovery=debug";
-
-fn spawn_claude_pty(params: SpawnClaudePtyParams<'_>) -> Result<PtyState> {
-    let SpawnClaudePtyParams {
-        context_dir,
-        cwd,
-        claude_binary,
-        model,
-        permission_mode,
-        dangerously_skip_permissions,
-        resume,
-        append_system_prompt_file,
-        session_id,
-        tddy_tools_path,
-        egress_shim,
-        relay,
-        initial_cols,
-        initial_rows,
-        claude_args,
-        mcp_log_level,
-    } = params;
-    let (stdin_tx, stdin_rx) = std::sync::mpsc::channel::<Bytes>();
-
-    let mut argv = tddy_core::claude_argv::build_claude_base_argv(
-        claude_binary,
-        model,
-        session_id,
-        permission_mode,
-        dangerously_skip_permissions,
-        resume,
-    );
-    if let Some(path) = append_system_prompt_file {
-        argv.push("--append-system-prompt-file".into());
-        argv.push(path.to_string_lossy().into_owned());
-    }
-
-    // Caller-supplied pass-through args go here — after our fixed flags but BEFORE the MCP args.
-    // The MCP block ends in `--mcp-config <path>`, and Claude's `--mcp-config` is variadic: a bare
-    // positional (e.g. a trailing prompt) placed after it would be greedily swallowed as another
-    // config path. Bounded by `--permission-mode <mode>` before and `--allowedTools` after, a
-    // positional prompt here stays a positional and extra flags keep their order.
-    if !claude_args.is_empty() {
-        argv.extend(claude_args.iter().cloned());
-        boot_log(
-            "INFO",
-            &format!(
-                "pty: inserted {} pass-through claude arg(s) before MCP args",
-                claude_args.len()
-            ),
-        );
-    }
-
-    let scratch_dir = claude_scratch_mcp_dir(context_dir);
-    let subagent_enabled = std::env::var("TDDY_SUBAGENT")
-        .map(|v| !v.trim().is_empty())
-        .unwrap_or(false);
-    // No fallback: an unreadable seed fails the spawn rather than starting an agent whose tool
-    // withdrawals silently turned themselves off.
-    let replaced_tools = subagent_replaced_tools_from_env().inspect_err(|e| {
-        boot_log_error("spawn_claude_pty", format!("{e:#}"));
-    })?;
-    let subagent_replaced_refs: Vec<&str> = replaced_tools.iter().map(String::as_str).collect();
-    // `SemanticSearch` is available only when the session was started with a semantic index —
-    // signalled by the daemon injecting `TDDY_SEMANTIC_INDEX_DB` (the per-session index DB the tool
-    // reads). Without it, fold `SemanticSearch` into the replaced set so `append_claude_mcp_args`
-    // drops it from `--allowedTools` and hard-disables it via `--disallowedTools`.
-    let semantic_index_enabled = std::env::var("TDDY_SEMANTIC_INDEX_DB")
-        .map(|v| !v.trim().is_empty())
-        .unwrap_or(false);
-    let replaced_refs = tddy_sandbox_recipes::effective_replaced_tools(
-        &subagent_replaced_refs,
-        semantic_index_enabled,
-    );
-
-    // Persist the in-jail MCP server's logs (incl. specialized-subagent HTTP activity) to the
-    // session egress dir, and set its RUST_LOG — so failures like a subagent's model-server error
-    // land on disk instead of vanishing into Claude's captured MCP stderr.
-    let mut mcp_env = std::collections::BTreeMap::new();
-    if let Some(egress_dir) = std::env::var_os("TDDY_SANDBOX_EGRESS_DIR") {
-        if !egress_dir.is_empty() {
-            let log_path = Path::new(&egress_dir).join("tddy-tools.mcp.log");
-            mcp_env.insert(
-                "TDDY_TOOLS_LOG_FILE".to_string(),
-                log_path.to_string_lossy().into_owned(),
-            );
-            let accounting_path = Path::new(&egress_dir).join("accounting.json");
-            mcp_env.insert(
-                "TDDY_TOOLS_ACCOUNTING_FILE".to_string(),
-                accounting_path.to_string_lossy().into_owned(),
-            );
-        }
-    }
-    mcp_env.insert(
-        "RUST_LOG".to_string(),
-        mcp_log_level.unwrap_or(DEFAULT_MCP_RUST_LOG).to_string(),
-    );
-
-    append_claude_mcp_args(
-        &mut argv,
-        &scratch_dir,
-        tddy_tools_path,
-        subagent_enabled,
-        &replaced_refs,
-        &mcp_env,
-    )
-    .context("append sandbox claude MCP allowlist args")?;
-    boot_log(
-        "INFO",
-        &format!(
-            "pty: sandbox claude allowlist wired ({} tools, mcp_config scratch={})",
-            tddy_sandbox::workspace_exec_tool_names().len(),
-            scratch_dir.display()
-        ),
-    );
-
-    let cwd = cwd.to_path_buf();
-    let relay_thread = Arc::clone(&relay);
-    let egress_shim = egress_shim.map(str::to_string);
-
-    std::thread::spawn(move || {
-        if let Err(e) = run_claude_pty_thread(
-            argv,
-            cwd,
-            egress_shim,
-            relay_thread,
-            stdin_rx,
-            initial_cols,
-            initial_rows,
-        ) {
-            boot_log_error("spawn_claude_pty", format!("{e:#}"));
-            write_failure_marker(&format!("spawn_claude_pty failed: {e:#}"));
-        }
-    });
-
-    Ok(PtyState { stdin_tx })
-}
-
-struct SpawnCursorPtyParams<'a> {
-    cwd: &'a Path,
-    cursor_binary: &'a str,
-    model: &'a str,
-    tddy_tools_path: &'a Path,
-    egress_shim: Option<&'a str>,
-    relay: Arc<SandboxSessionRelay>,
-    initial_cols: u16,
-    initial_rows: u16,
-    agent_args: &'a [String],
-    mcp_log_level: Option<&'a str>,
-}
-
-fn spawn_cursor_pty(params: SpawnCursorPtyParams<'_>) -> Result<PtyState> {
-    let SpawnCursorPtyParams {
-        cwd,
-        cursor_binary,
-        model,
-        tddy_tools_path,
-        egress_shim,
-        relay,
-        initial_cols,
-        initial_rows,
-        agent_args,
-        mcp_log_level,
-    } = params;
-    let (stdin_tx, stdin_rx) = std::sync::mpsc::channel::<Bytes>();
-
-    let mut mcp_env = std::collections::BTreeMap::new();
-    if let Some(egress_dir) = std::env::var_os("TDDY_SANDBOX_EGRESS_DIR") {
-        if !egress_dir.is_empty() {
-            let log_path = Path::new(&egress_dir).join("tddy-tools.mcp.log");
-            mcp_env.insert(
-                "TDDY_TOOLS_LOG_FILE".to_string(),
-                log_path.to_string_lossy().into_owned(),
-            );
-            let accounting_path = Path::new(&egress_dir).join("accounting.json");
-            mcp_env.insert(
-                "TDDY_TOOLS_ACCOUNTING_FILE".to_string(),
-                accounting_path.to_string_lossy().into_owned(),
-            );
-        }
-    }
-    mcp_env.insert(
-        "RUST_LOG".to_string(),
-        mcp_log_level.unwrap_or(DEFAULT_MCP_RUST_LOG).to_string(),
-    );
-
-    let mcp_base = std::env::var_os("HOME")
-        .filter(|v| !v.is_empty())
-        .map(PathBuf::from)
-        .unwrap_or_else(|| cwd.to_path_buf());
-    let argv = tddy_sandbox_recipes::build_cursor_sandbox_argv(
-        Path::new(cursor_binary),
-        model,
-        agent_args,
-        &mcp_base,
-        tddy_tools_path,
-        &mcp_env,
-    )
-    .context("build sandbox cursor argv")?;
-
-    let cwd = cwd.to_path_buf();
-    let relay_thread = Arc::clone(&relay);
-    let egress_shim = egress_shim.map(str::to_string);
-
-    std::thread::spawn(move || {
-        if let Err(e) = run_claude_pty_thread(
-            argv,
-            cwd,
-            egress_shim,
-            relay_thread,
-            stdin_rx,
-            initial_cols,
-            initial_rows,
-        ) {
-            boot_log_error("spawn_cursor_pty", format!("{e:#}"));
-            write_failure_marker(&format!("spawn_cursor_pty failed: {e:#}"));
-        }
-    });
-
-    Ok(PtyState { stdin_tx })
-}
-
 async fn start_tool_ipc_server(path: PathBuf, relay: Arc<SandboxSessionRelay>) -> Result<()> {
     let _ = std::fs::remove_file(&path);
     let (ready_tx, ready_rx) = oneshot::channel();
@@ -2408,16 +1874,6 @@ fn dispatch_in_jail_tool_request(
     });
 }
 
-/// An agent CLI is launched with the model it was asked for, or not at all: `--model` is optional
-/// only because the mode that hosts no agent has no use for one, so the agent paths say so here
-/// rather than exec'ing `claude --model ""`.
-fn require_model(model: &str, agent_kind: &str) -> Result<()> {
-    if model.trim().is_empty() {
-        anyhow::bail!("--model is required for {agent_kind} pty mode");
-    }
-    Ok(())
-}
-
 /// Boot-log wiring shared by every entry point: a fallback log directory beside the ready marker,
 /// the panic hook that turns an in-jail abort into a readable failure marker, and the startup
 /// environment dump.
@@ -2521,7 +1977,6 @@ pub(crate) async fn run_sandbox_runner_inner(
     // A `none` policy starts no shim, and the PTY below is then given no proxy environment.
     let egress_shim_port =
         start_egress_shim_for_policy(Arc::clone(&relay), egress, args.egress_shim_port).await?;
-    let egress_shim = egress_shim_port.map(egress_shim_url);
 
     boot_log(
         "INFO",
@@ -2542,124 +1997,45 @@ pub(crate) async fn run_sandbox_runner_inner(
     let cwd = args.cwd.clone().unwrap_or_else(|| args.context_dir.clone());
     let shutdown_notify = Arc::new(tokio::sync::Notify::new());
 
-    let pty =
-        if let Some(plan) = exec_plan {
-            boot_log(
-                "INFO",
-                &format!("boot: spawn exec plan argv={:?}", plan.argv),
-            );
-            let (pty_state, done_rx) = crate::exec_plan::spawn_exec_plan_pty(
-                &plan,
-                cwd,
-                egress_shim_port,
-                Arc::clone(&relay),
-                args.initial_cols,
-                args.initial_rows,
-            )
-            .inspect_err(|e| boot_log_error("spawn_exec_plan_pty", format!("{e:#}")))?;
-            notify_when_the_process_exits(done_rx, Arc::clone(&shutdown_notify));
-            pty_state
-        } else if generic_pty {
-            boot_log(
-                "INFO",
-                &format!("boot: spawn_generic_pty argv={:?}", args.pty_command),
-            );
-            let (pty_state, done_rx) = spawn_generic_pty(
-                args.pty_command.clone(),
-                cwd,
-                None,
-                Arc::clone(&relay),
-                args.initial_cols,
-                args.initial_rows,
-            )
-            .inspect_err(|e| boot_log_error("spawn_generic_pty", format!("{e:#}")))?;
-            notify_when_the_process_exits(done_rx, Arc::clone(&shutdown_notify));
-            boot_log("INFO", "boot: generic pty thread spawned");
-            pty_state
-        } else if matches!(args.agent_kind.as_str(), "opencode" | "muse") {
-            boot_log(
-                "INFO",
-                &format!("boot: spawn_harness_pty agent_kind={}", args.agent_kind),
-            );
-            require_model(&args.model, &args.agent_kind)?;
-            let pty_state = spawn_harness_pty(SpawnHarnessPtyParams {
-                agent_kind: &args.agent_kind,
-                agent_binary: args.agent_binary.as_deref(),
-                model: &args.model,
-                resume: args.resume,
-                cwd: &cwd,
-                egress_shim: egress_shim.as_deref(),
-                relay: Arc::clone(&relay),
-                initial_cols: args.initial_cols,
-                initial_rows: args.initial_rows,
-            })
-            .inspect_err(|e| boot_log_error("spawn_harness_pty", format!("{e:#}")))?;
-            boot_log("INFO", "boot: harness pty thread spawned");
-            pty_state
-        } else if args.agent_kind == "cursor" {
-            boot_log(
-                "INFO",
-                &format!(
-                    "boot: spawn_cursor_pty binary={}",
-                    args.agent_binary.as_deref().unwrap_or("agent")
-                ),
-            );
-            let tddy_tools_path = args.tddy_tools_path.as_ref().ok_or_else(|| {
-                anyhow::anyhow!("tddy_tools_path is required for cursor pty mode")
-            })?;
-            require_model(&args.model, "cursor")?;
-            let cursor_binary = args.agent_binary.as_deref().unwrap_or("agent");
-            let agent_args = if args.agent_arg.is_empty() {
-                &args.claude_arg
-            } else {
-                &args.agent_arg
-            };
-            let pty_state = spawn_cursor_pty(SpawnCursorPtyParams {
-                cwd: &cwd,
-                cursor_binary,
-                model: &args.model,
-                tddy_tools_path,
-                egress_shim: egress_shim.as_deref(),
-                relay: Arc::clone(&relay),
-                initial_cols: args.initial_cols,
-                initial_rows: args.initial_rows,
-                agent_args,
-                mcp_log_level: args.mcp_log_level.as_deref(),
-            })
-            .inspect_err(|e| boot_log_error("spawn_cursor_pty", format!("{e:#}")))?;
-            boot_log("INFO", "boot: cursor pty thread spawned");
-            pty_state
-        } else {
-            boot_log(
-                "INFO",
-                &format!("boot: spawn_claude_pty binary={}", args.claude_binary),
-            );
-            let tddy_tools_path = args.tddy_tools_path.as_ref().ok_or_else(|| {
-                anyhow::anyhow!("tddy_tools_path is required for claude pty mode")
-            })?;
-            require_model(&args.model, "claude")?;
-            let pty_state = spawn_claude_pty(SpawnClaudePtyParams {
-                context_dir: &args.context_dir,
-                cwd: &cwd,
-                claude_binary: &args.claude_binary,
-                model: &args.model,
-                permission_mode: &args.permission_mode,
-                dangerously_skip_permissions: args.dangerously_skip_permissions,
-                resume: args.resume,
-                append_system_prompt_file: args.append_system_prompt_file.as_deref(),
-                session_id: &args.session_id,
-                tddy_tools_path,
-                egress_shim: egress_shim.as_deref(),
-                relay: Arc::clone(&relay),
-                initial_cols: args.initial_cols,
-                initial_rows: args.initial_rows,
-                claude_args: &args.claude_arg,
-                mcp_log_level: args.mcp_log_level.as_deref(),
-            })
-            .inspect_err(|e| boot_log_error("spawn_claude_pty", format!("{e:#}")))?;
-            boot_log("INFO", "boot: claude pty thread spawned");
-            pty_state
-        };
+    let pty = if let Some(plan) = exec_plan {
+        boot_log(
+            "INFO",
+            &format!("boot: spawn exec plan argv={:?}", plan.argv),
+        );
+        let (pty_state, done_rx) = crate::exec_plan::spawn_exec_plan_pty(
+            &plan,
+            cwd,
+            egress_shim_port,
+            Arc::clone(&relay),
+            args.initial_cols,
+            args.initial_rows,
+        )
+        .inspect_err(|e| boot_log_error("spawn_exec_plan_pty", format!("{e:#}")))?;
+        notify_when_the_process_exits(done_rx, Arc::clone(&shutdown_notify));
+        pty_state
+    } else if generic_pty {
+        boot_log(
+            "INFO",
+            &format!("boot: spawn_generic_pty argv={:?}", args.pty_command),
+        );
+        let (pty_state, done_rx) = spawn_generic_pty(
+            args.pty_command.clone(),
+            cwd,
+            None,
+            Arc::clone(&relay),
+            args.initial_cols,
+            args.initial_rows,
+        )
+        .inspect_err(|e| boot_log_error("spawn_generic_pty", format!("{e:#}")))?;
+        notify_when_the_process_exits(done_rx, Arc::clone(&shutdown_notify));
+        boot_log("INFO", "boot: generic pty thread spawned");
+        pty_state
+    } else {
+        // No `--exec-plan` and no `--pty-command`: nothing to run, and no agent to fall back to.
+        anyhow::bail!(
+            "nothing to run: pass --exec-plan <file>, --pty-command, or --workspace-tools <dir>"
+        );
+    };
 
     let service = SandboxRunnerService {
         session_id: args.session_id.clone(),
@@ -3106,214 +2482,6 @@ mod tests {
         ])
         .expect("argv must parse");
         assert_eq!(args.pty_command, vec!["/bin/sh", "-c", "printf", "pty_ok"]);
-    }
-
-    // ─── resolve_subagent_replaced_tools ────────────────────────────────────────
-    //
-    // Feature: docs/ft/coder/managed-codebase-subagents.md § Tool replacement (criteria 15, 17)
-    // Changeset: docs/dev/1-WIP/2026-07-02-changeset-subagent-tool-replacement.md
-    //
-    // Pure resolution (no env access) so these tests never touch process-global state — the thin
-    // `subagent_replaced_tools_from_env` wrapper reads `TDDY_SUBAGENT`/`TDDY_SUBAGENT_REPLACES`
-    // and delegates here.
-
-    /// No subagent name means nothing is replaced, whatever the CSV says — there is no agent
-    /// behind it to serve the withdrawn tool.
-    #[test]
-    fn resolve_subagent_replaced_tools_is_empty_when_no_subagent_name_is_given() {
-        // When
-        let replaced = resolve_subagent_replaced_tools(None, Some("grep"));
-
-        // Then
-        assert_eq!(replaced, Vec::<String>::new());
-    }
-
-    /// A blank subagent name (unset env var reads as `Some("")` in some shells) is treated the
-    /// same as no subagent at all.
-    #[test]
-    fn resolve_subagent_replaced_tools_is_empty_when_subagent_name_is_blank() {
-        // When
-        let replaced = resolve_subagent_replaced_tools(Some("  "), None);
-
-        // Then
-        assert_eq!(replaced, Vec::<String>::new());
-    }
-
-    /// A named agent with no declared `replaces` CSV withdraws nothing: a name has no replaced
-    /// set of its own to fall back on.
-    #[test]
-    fn resolve_subagent_replaced_tools_is_empty_when_the_agent_declares_no_replaces() {
-        // When
-        let replaced = resolve_subagent_replaced_tools(Some("explorer"), None);
-
-        // Then
-        assert_eq!(replaced, Vec::<String>::new());
-    }
-
-    /// The `TDDY_SUBAGENT_REPLACES` CSV (comma-separated, arbitrary whitespace) is the agent's
-    /// declared set, normalized to canonical casing.
-    #[test]
-    fn resolve_subagent_replaced_tools_honors_a_csv_with_whitespace() {
-        // When
-        let replaced = resolve_subagent_replaced_tools(Some("explorer"), Some(" read , grep "));
-
-        // Then
-        assert_eq!(replaced, vec!["Read".to_string(), "Grep".to_string()]);
-    }
-
-    /// A CSV that is present but empty withdraws nothing.
-    #[test]
-    fn resolve_subagent_replaced_tools_treats_an_empty_csv_as_replacing_nothing() {
-        // When
-        let replaced = resolve_subagent_replaced_tools(Some("explorer"), Some(""));
-
-        // Then
-        assert_eq!(replaced, Vec::<String>::new());
-    }
-
-    /// An unknown token in the CSV is dropped, not passed through — a typo must not silently
-    /// produce a nonsense allowlist entry.
-    #[test]
-    fn resolve_subagent_replaced_tools_drops_unrecognized_csv_tokens() {
-        // When
-        let replaced =
-            resolve_subagent_replaced_tools(Some("explorer"), Some("grep,not-a-real-tool"));
-
-        // Then
-        assert_eq!(replaced, vec!["Grep".to_string()]);
-    }
-
-    /// Drift guard (mirrors `tddy-daemon`'s `workspace_exec_tool_names_match_tool_catalog`):
-    /// `tddy_discovery::subagent`'s canonical exec-tool name table is intentionally kept local to
-    /// avoid a `tddy-discovery -> tddy-sandbox` dependency, so nothing enforces that it stays in
-    /// sync with `tddy_sandbox::workspace_exec_tool_names()` at the type level. Round-trip every
-    /// real exec tool name through the CSV to catch the list silently falling behind: a tool
-    /// missing from the canonical table would be dropped here instead of resolving to itself.
-    #[test]
-    fn every_workspace_exec_tool_name_round_trips_through_the_replaces_csv() {
-        // Given — the canonical exec-tool names this runner's allowlist is built from
-        // When — each one is passed as a single-tool CSV
-        // Then — it must resolve back to itself; a dropped name means the tables diverged
-        for name in tddy_sandbox::workspace_exec_tool_names() {
-            let replaced = resolve_subagent_replaced_tools(Some("explorer"), Some(name));
-            assert_eq!(
-                replaced,
-                vec![name.to_string()],
-                "tddy-discovery's canonical exec-tool table is missing {name} — \
-                 update CANONICAL_EXEC_TOOL_NAMES in packages/tddy-discovery/src/subagent.rs"
-            );
-        }
-    }
-
-    // ─── subagents_json_replaced_tools ───────────────────────────────────────────
-    //
-    // Feature: docs/ft/coder/managed-codebase-subagents.md § Tool replacement (array model)
-    //
-    // Pure resolution (no env access) of the `TDDY_SUBAGENTS_JSON` payload — the array-of-agents
-    // counterpart to `resolve_subagent_replaced_tools`'s single-name path above.
-
-    /// A JSON array of specialized-agent defs unions every def's own `replaces` list.
-    #[test]
-    fn subagents_json_replaced_tools_unions_from_json() {
-        // Given — two defs, one replacing Grep+Glob, the other replacing ReadLints
-        let raw_json = serde_json::json!([
-            {
-                "name": "explorer",
-                "model": "some-model",
-                "base_url": "http://localhost:11434",
-                "tools": ["READ"],
-                "max_turns": 6,
-                "replaces": ["Grep", "Glob"]
-            },
-            {
-                "name": "my-linter",
-                "model": "some-model",
-                "base_url": "http://localhost:30001",
-                "tools": ["READ"],
-                "max_turns": 6,
-                "replaces": ["ReadLints"]
-            }
-        ])
-        .to_string();
-
-        // When
-        let replaced = subagents_json_replaced_tools(Some(&raw_json)).expect("the defs must parse");
-
-        // Then
-        assert_eq!(
-            replaced,
-            vec![
-                "Grep".to_string(),
-                "Glob".to_string(),
-                "ReadLints".to_string()
-            ]
-        );
-    }
-
-    /// Absent JSON resolves to an empty set: with no def there is no agent, and nothing to
-    /// withdraw.
-    #[test]
-    fn subagents_json_replaced_tools_returns_empty_when_no_json_is_set() {
-        // Given / When
-        let replaced = subagents_json_replaced_tools(None).expect("an absent seed is not an error");
-
-        // Then
-        assert_eq!(replaced, Vec::<String>::new());
-    }
-
-    /// A blank value is the same as an absent one — the daemon writes no defs that way.
-    #[test]
-    fn subagents_json_replaced_tools_returns_empty_for_blank_json() {
-        // Given / When
-        let replaced =
-            subagents_json_replaced_tools(Some("   ")).expect("a blank seed is not an error");
-
-        // Then
-        assert_eq!(replaced, Vec::<String>::new());
-    }
-
-    /// A def field this runner predates makes the whole payload unparseable — `SpecializedAgentDef`
-    /// is `deny_unknown_fields` — and that is exactly the version skew that must not be read as
-    /// "nothing is replaced". Resolving it to an empty set would hand the main agent back every
-    /// tool the operator withdrew, silently.
-    #[test]
-    fn subagents_json_replaced_tools_refuses_a_def_carrying_an_unknown_field() {
-        // Given — the def a newer daemon serialized
-        let raw_json = serde_json::json!([{
-            "name": "explorer",
-            "model": "some-model",
-            "base_url": "http://localhost:11434",
-            "tools": ["READ"],
-            "max_turns": 6,
-            "replaces": ["Grep"],
-            "a_field_this_runner_predates": "value"
-        }])
-        .to_string();
-
-        // When
-        let result = subagents_json_replaced_tools(Some(&raw_json));
-
-        // Then
-        let error = result.expect_err("an unreadable seed must fail the spawn");
-        assert!(
-            error.to_string().contains("TDDY_SUBAGENTS_JSON"),
-            "the failure must name the variable it could not read, was: {error}"
-        );
-    }
-
-    /// Malformed JSON is refused for the same reason: the spawn fails rather than starting an agent
-    /// whose tool withdrawals turned themselves off.
-    #[test]
-    fn subagents_json_replaced_tools_refuses_unparseable_json() {
-        // Given / When
-        let result = subagents_json_replaced_tools(Some("not valid json"));
-
-        // Then
-        let error = result.expect_err("an unreadable seed must fail the spawn");
-        assert!(
-            error.to_string().contains("TDDY_SUBAGENTS_JSON"),
-            "the failure must name the variable it could not read, was: {error}"
-        );
     }
 
     /// **sandbox_runner_args_parse_with_stdio_flag_and_no_grpc_socket**: once the daemon's real
@@ -3981,47 +3149,5 @@ mod tests {
             (request.service.as_str(), request.method.as_str()),
             ("exec_tools.ExecToolService", "ConversationWorktree")
         );
-    }
-}
-
-#[cfg(test)]
-mod claude_session_argv_tests {
-    use super::SandboxRunnerArgs;
-    use clap::Parser;
-
-    fn parse_runner_args(extra: &[&str]) -> SandboxRunnerArgs {
-        let mut argv = vec![
-            "tddy-sandbox-runner",
-            "--session-id",
-            "sess-1",
-            "--context-dir",
-            "/tmp/ctx",
-            "--tool-ipc-socket",
-            "/tmp/ipc.sock",
-            "--model",
-            "claude-opus-4-8",
-            "--ready-marker",
-            "/tmp/ready",
-        ];
-        argv.extend_from_slice(extra);
-        SandboxRunnerArgs::try_parse_from(argv).expect("argv must parse")
-    }
-
-    #[test]
-    fn the_runner_accepts_a_resume_flag_so_the_daemon_can_request_resume() {
-        // Given / When — the daemon relaunches the runner with --resume
-        let args = parse_runner_args(&["--resume"]);
-
-        // Then
-        assert!(args.resume);
-    }
-
-    #[test]
-    fn the_runner_defaults_to_a_fresh_start_without_the_resume_flag() {
-        // Given / When — no --resume flag
-        let args = parse_runner_args(&[]);
-
-        // Then — a normal spawn is a fresh session, not a resume
-        assert!(!args.resume);
     }
 }

@@ -24,19 +24,11 @@ pub struct SandboxAppConfig {
     #[serde(default)]
     pub codebase_mode: Option<String>,
     #[serde(default)]
-    pub claude_binary: Option<String>,
-    #[serde(default)]
-    pub cursor_binary: Option<String>,
-    #[serde(default)]
     pub tddy_tools_path: Option<String>,
     #[serde(default)]
     pub sandbox_runner_path: Option<String>,
     #[serde(default)]
     pub session_base: Option<PathBuf>,
-    #[serde(default)]
-    pub claude_home_dir: Option<PathBuf>,
-    #[serde(default)]
-    pub cursor_home_dir: Option<PathBuf>,
     /// `--codebase-mode sandboxed` only: the **base** holding this host's build homes — one
     /// directory per repository, each the jail's `$HOME` for that checkout's build and its
     /// dependency caches. Not itself any jail's `$HOME`: one home shared by every repository would

@@ -29,6 +29,10 @@ pub const SPLIT_AGENT_TOKEN_TTL: Duration = Duration::from_secs(86_400);
 /// which is not the codebase — so every one of them is named in `--disallowedTools`, which takes
 /// precedence and removes them outright. This is the enforcement the PRD's "claude-cli only"
 /// restriction rests on (§ Why claude-cli only).
+///
+/// The launch itself reads the list off `claude.yaml`'s `host_agent` variant
+/// (`CodingAgentSpec::variant_args`); this constant is what the other consumers read, and a test
+/// pins the two to each other.
 pub const NATIVE_FILESYSTEM_TOOLS: &[&str] = &[
     "Read",
     "Write",
@@ -796,13 +800,31 @@ mod tests {
         "SemanticSearch",
     ];
 
+    /// The native tools `claude.yaml`'s `host_agent` variant withdraws: what a split session
+    /// hard-disables.
+    fn native_filesystem_tools() -> Vec<String> {
+        tddy_coding_agent_specs::embedded_spec("claude")
+            .expect("claude's embedded spec")
+            .agent
+            .variants
+            .remove(tddy_coding_agent_specs::HOST_AGENT_VARIANT)
+            .expect("claude declares a host_agent variant")
+            .withdraw_native
+    }
+
+    #[test]
+    fn the_native_filesystem_tools_are_exactly_what_the_host_agent_variant_withdraws() {
+        // Then — the launch renders the variant, the other consumers read the constant: one list
+        assert_eq!(NATIVE_FILESYSTEM_TOOLS.to_vec(), native_filesystem_tools());
+    }
+
     /// The native Claude built-ins `tddy-sandbox-recipes` knows an exec tool by, other than the
     /// exec tool's own name: `Bash`/`BashOutput`/`KillShell` for `Shell`, `Edit`/`MultiEdit`/
     /// `NotebookEdit` for `Write`. Read out of the public disallowlist builder, which is where that
     /// knowledge lives, so this test tracks it rather than restating it.
     fn native_aliases_the_sandbox_recipes_know() -> Vec<String> {
-        let exec_tools = tddy_sandbox::workspace_exec_tool_names();
-        tddy_sandbox_recipes::build_claude_disallowlist(exec_tools)
+        let exec_tools = tddy_coding_agent_specs::claude_tools::workspace_exec_tool_names();
+        tddy_coding_agent_specs::claude_tools::build_claude_disallowlist(exec_tools)
             .into_iter()
             // The `mcp__tddy-tools__` forms are the proxied tools themselves — the split session's
             // only route to the codebase, and the one thing it must *not* disallow.
@@ -827,14 +849,14 @@ mod tests {
         for alias in &aliases {
             assert!(
                 NATIVE_FILESYSTEM_TOOLS.contains(&alias.as_str()),
-                "native {alias} is hard-disabled by the sandbox recipes but not by a split session; add it to NATIVE_FILESYSTEM_TOOLS"
+                "native {alias} is hard-disabled by the sandbox recipes but not by a split session; add it to NATIVE_FILESYSTEM_TOOLS and claude.yaml's host_agent variant"
             );
         }
     }
 
     #[test]
     fn every_exec_tool_sharing_its_name_with_a_claude_built_in_is_hard_disabled() {
-        for tool in tddy_sandbox::workspace_exec_tool_names() {
+        for tool in tddy_coding_agent_specs::claude_tools::workspace_exec_tool_names() {
             if EXEC_TOOLS_WITH_NO_CLAUDE_BUILT_IN.contains(tool) {
                 continue;
             }
@@ -843,7 +865,7 @@ mod tests {
             assert!(
                 NATIVE_FILESYSTEM_TOOLS.contains(tool),
                 "exec tool {tool} names a Claude built-in that a split session leaves reachable; \
-                 add it to NATIVE_FILESYSTEM_TOOLS, or to EXEC_TOOLS_WITH_NO_CLAUDE_BUILT_IN if \
+                 add it to NATIVE_FILESYSTEM_TOOLS and claude.yaml's host_agent variant, or to EXEC_TOOLS_WITH_NO_CLAUDE_BUILT_IN if \
                  Claude has no tool by that name"
             );
         }

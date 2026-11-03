@@ -10,6 +10,7 @@ use thiserror::Error;
 
 use crate::headless::validate_headless;
 use crate::slots::hooks;
+use crate::slots::tools::render_flag_per_value;
 
 /// The `extensions:` key this crate owns.
 pub const CODING_AGENT_EXTENSION: &str = "coding_agent";
@@ -200,9 +201,28 @@ impl CodingAgentSpec {
     /// `withdraw_native` tool. Refused for a variant the agent does not declare, naming the ones it
     /// does, and for one that withdraws tools through an `unsupported` deny slot.
     pub fn variant_args(&self, name: &str) -> Result<Vec<String>, VariantError> {
-        // TODO(jail-agnostic): implement.
-        let _ = name;
-        todo!("jail-agnostic: CodingAgentSpec::variant_args")
+        let variant = self
+            .agent
+            .variants
+            .get(name)
+            .ok_or_else(|| VariantError::Unknown {
+                agent: self.id.clone(),
+                variant: name.to_string(),
+                declared: self.agent.variants.keys().cloned().collect(),
+            })?;
+        let mut args = variant.args.clone();
+        if !variant.withdraw_native.is_empty() {
+            let deny =
+                self.agent
+                    .tool_deny
+                    .flag()
+                    .ok_or_else(|| VariantError::DenyUnsupported {
+                        agent: self.id.clone(),
+                        variant: name.to_string(),
+                    })?;
+            args.extend(render_flag_per_value(deny, &variant.withdraw_native));
+        }
+        Ok(args)
     }
 }
 
