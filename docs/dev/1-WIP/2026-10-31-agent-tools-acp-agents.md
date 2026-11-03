@@ -128,6 +128,11 @@ Real dependency edges, as opposed to the branch line:
 ## Decisions & Trade-offs
 
 - **`sibling_of` is a declared tool dep.** It is how "`codex-acp` is beside `codex`" stops being hard-coded, which is the purpose of the user's tool-deps requirement.
+- **Behaviour change: ACP launches run from their specs in the daemon as soon as #800 lands.** The premise in § Delta and § Draft PR contract was stale: `for_daemon` already installs coding agents through `host_coding_agents`, and the embedded specs always load, so no production path was waiting for a gate. The developer accepted the cutover on 2026-11-04, with no config gate. [W] carries it into the docs.
+- **The hand-built ACP path stays** for launchers built without coding agents (`new`, `with_identity`, test-only). Kept with `TODO(acp-agents)`. Recorded in `docs/dev/todo/2026-11-04-acp-hand-built-launch-path-for-agentless-launchers.md`.
+- **The OpenCode ACP route config stays inline** (`OPENCODE_CONFIG_CONTENT`) in the daemon launcher, because `CodingAgentSession::start` has no session-scoped owner for the route file. Recorded in `docs/dev/todo/2026-11-04-opencode-acp-route-file-has-no-session-owner.md`.
+- **`codex_acp_beside_resolved_codex` and `resolve_executable_on_path` are deleted** with `resolve_codex_acp_binary`. They had no callers outside that function. The developer approved the deletion on 2026-11-04.
+- **`choose_agent` keeps its current behaviour**, which offers the ACP agents to the PTY sandbox too. Recorded in `docs/dev/todo/2026-11-04-choose-agent-offers-acp-agents-to-pty-sandbox.md`.
 
 ## TODO
 
