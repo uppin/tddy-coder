@@ -10,8 +10,8 @@ use std::path::{Path, PathBuf};
 
 use tddy_agent_backend::HeadlessHarness;
 use tddy_coding_subagent::{
-    coding_agent_defs_in, refuse_unless_confinable, transport_of, withdrawal_session_meta,
-    AgentTransport, CodingAgentDef, CodingAgentLaunch, CodingAgentLauncher, CodingAgentSession,
+    coding_agent_defs_in, refuse_unless_confinable, transport_of, AgentTransport, CodingAgentDef,
+    CodingAgentLaunch, CodingAgentLauncher, CodingAgentSession,
     Transport,
 };
 use tddy_core::OpenSession;
@@ -190,18 +190,17 @@ async fn start_acp_session(
     let refused =
         |e: tddy_discovery::subagent::SubagentError| Status::failed_precondition(e.to_string());
     let mcp_servers = launcher.mcp_servers_for(launch).await.map_err(refused)?;
-    let transport = launcher.launch_transport(launch).await.map_err(refused)?;
     // A managed session's agent loses its native tools: through `_meta` for the harness that
-    // takes them there; the others get theirs through the launcher's environment.
+    // takes them there; the others get theirs through the launcher's environment. Asked before the
+    // transport, so a refusal here never leaves a process started.
+    let meta = launcher.session_meta_for(launch).await.map_err(refused)?;
+    let transport = launcher.launch_transport(launch).await.map_err(refused)?;
     let open = OpenSession {
         cwd: launch.worktree.clone(),
         resume: None,
         model: Some(launch.def.model.clone()),
         mcp_servers,
-        meta: launch
-            .managed
-            .then(|| withdrawal_session_meta(&launch.def.harness))
-            .flatten(),
+        meta,
     };
     let model = launch.def.model.clone();
     match transport {
