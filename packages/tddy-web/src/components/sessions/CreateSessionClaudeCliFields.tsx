@@ -20,6 +20,8 @@ export interface CreateSessionClaudeCliFieldsProps {
   /** Run the agent inside tmux on the host. */
   runInTmux: boolean;
   setRunInTmux: (runInTmux: boolean) => void;
+  /** The placement rules out a tmux-run agent (sandbox, jailed codebase or split placement). */
+  runInTmuxUnavailable: boolean;
   applyPlacement: (toggled: CodebasePlacementChoice, on: boolean) => void;
   sandboxedCodebase: boolean;
   sandboxedCodebaseUnavailableReason: string | null;
@@ -64,6 +66,7 @@ export function CreateSessionClaudeCliFields({
   setSandbox,
   runInTmux,
   setRunInTmux,
+  runInTmuxUnavailable,
   applyPlacement,
   sandboxedCodebase,
   sandboxedCodebaseUnavailableReason,
@@ -157,7 +160,8 @@ export function CreateSessionClaudeCliFields({
       )}
 
       {/* Run the agent inside tmux on the host, so its terminal can be attached to from anywhere.
-          The daemon refuses it with the sandbox, so it is disabled while the sandbox is on. Not
+          The daemon refuses it with the sandbox, the jailed codebase and a split placement, so it
+          is disabled while any of them is chosen. Not
           offered on the project's home session: that start spec does not carry the choice, so a
           checked box there would be dropped without a word. */}
       {!placementFixed && (
@@ -169,7 +173,7 @@ export function CreateSessionClaudeCliFields({
               className="h-4 w-4 rounded border-input"
               checked={runInTmux}
               onChange={(e) => setRunInTmux(e.target.checked)}
-              disabled={sandbox}
+              disabled={runInTmuxUnavailable}
             />
             Run the agent in tmux
           </label>

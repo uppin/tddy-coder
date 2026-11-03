@@ -22,13 +22,13 @@
 
 ## Affected Packages
 
-- [ ] [`tddy-service`](../../../packages/tddy-service/README.md): `StartSessionRequest.run_in_tmux = 47`
-- [ ] [`tddy-changeset`](../../../packages/tddy-changeset/README.md): `SessionMetadata.tmux_session`
-- [ ] [`tddy-cli-sessions`](../../../packages/tddy-cli-sessions/README.md): `tmux` module (moved helpers + agent-session ops), main terminal attached to a tmux session
-- [ ] [`tddy-agent-launch`](../../../packages/tddy-agent-launch/README.md): claude start/resume in tmux, delete kills the tmux session, request validation
-- [ ] [`tddy-session-lifecycle`](../../../packages/tddy-session-lifecycle/README.md): tmux tab code imports the moved helpers; shutdown kills tmux-run sessions' tmux sessions
-- [ ] [`tddy-session-activity`](../../../packages/tddy-session-activity/README.md): delete kills the recorded tmux session
-- [ ] [`tddy-web`](../../../packages/tddy-web/README.md): Create-pane checkbox and request field
+- [x] [`tddy-service`](../../../packages/tddy-service/README.md): `StartSessionRequest.run_in_tmux = 47`
+- [x] [`tddy-changeset`](../../../packages/tddy-changeset/README.md): `SessionMetadata.tmux_session`
+- [x] [`tddy-cli-sessions`](../../../packages/tddy-cli-sessions/README.md): `tmux` module (moved helpers + agent-session ops), main terminal attached to a tmux session
+- [x] [`tddy-agent-launch`](../../../packages/tddy-agent-launch/README.md): claude start/resume in tmux, delete kills the tmux session, request validation
+- [x] [`tddy-session-lifecycle`](../../../packages/tddy-session-lifecycle/README.md): tmux tab code imports the moved helpers; shutdown kills tmux-run sessions' tmux sessions
+- [x] [`tddy-session-activity`](../../../packages/tddy-session-activity/README.md): delete kills the recorded tmux session
+- [x] [`tddy-web`](../../../packages/tddy-web/README.md): Create-pane checkbox and request field
 
 ## Responsibility
 
@@ -116,15 +116,15 @@ Real dependency edges: `n1 → n2 → n3`, `n1 → n3`
 - **Name** (developer, 2026-11-03): `tddy-` + the full session id; `:` and `.` become `_` (tmux's own substitution). A prefix of a UUIDv7 repeats every ~65 s, so a prefix could collide; the full id cannot, and the name is derivable from the id alone.
 - **Delete with unreadable metadata** (developer, 2026-11-03): the name is authoritative, so Delete kills `tddy-<session id>` as the session's OS user and treats "no such session" as fine. A tmux that cannot be run at all is logged and does not block deleting the broken session (a recorded name that cannot be killed still refuses the delete). Not a fallback: the derived name is the name.
 - **`run_in_tmux` is offered to the agent-facing StartSession tool** (developer, 2026-11-03): a boolean beside `sandbox`, forwarded to `StartSessionRequest.run_in_tmux`; the web parity fixture lists it.
-- **Refusals** (developer, 2026-11-03): `run_in_tmux` on claude-cli with `sandbox`, `sandboxed_codebase` or a split placement (`codebase_daemon_instance_id`) is `invalid_argument` naming the conflict, in `refuse_a_conflicting_tmux_run_start`, before routing.
+- **Refusals** (developer, 2026-11-03): `run_in_tmux` on claude-cli with `sandbox`, `sandboxed_codebase` or a split placement (`codebase_daemon_instance_id`) is `invalid_argument` naming the conflict, in `refuse_a_conflicting_tmux_run_start`, called from `start_session_core_cancellable` after the harness profile, before routing.
 - **SIGHUP-ignoring agent**: Delete kills the tmux session, then `delete_session_directory` terminates the recorded pane pid (SIGTERM, then SIGKILL), so an agent that traps HUP is gone; pinned by an acceptance case.
 - **Pane environment**: the pane gets the target user's `HOME` and configured `PATH` as the PTY runtime gives them, with `run_in_tmux`'s env on top, via `new-session -e`.
 - **`pane_pid` target**: `=<name>:`, since a bare `=<name>` prints nothing on tmux 3.6.
 - **Absent session**: a kill treats "no server running", "can't find session", "session not found" and "error connecting … no such file" as already gone. An attach failure kills the new tmux session it started.
-- **Shutdown**: `kill_all` kills tmux sessions first, as the `os_user` recorded on `TerminalEntry`, and logs and continues on failure.
+- **Shutdown**: `kill_all` kills the tmux sessions of **main** terminals first (a tmux-run agent's; never a tab's, which is the user's), as the `os_user` recorded on `TerminalEntry`, and logs and continues on failure.
 - **Delete**: handler side, in `tddy-agent-launch`, before teardown, because `tddy-session-activity` cannot depend on `tddy-cli-sessions`. A refused kill refuses the delete with the session intact.
 - **Other session types** ignore `run_in_tmux` until 3/3.
-- **Argv**: `CliSessionManager::build_claude_cli_argv` is shared by the PTY and tmux launches.
+- **Argv**: `CliSessionManager::with_claude_launch_flags` (over `build_claude_argv`) is shared by the PTY and tmux launches.
 - **Resume**: `resume_claude_in_tmux` always passes `--resume`, whatever the caller set.
 - **Main terminal model**: `""`, because the contract has no model parameter for the tmux client.
 - **Web**: the checkbox is hidden on the project-home (`placementFixed`) variant, whose start spec does not carry it. Switching the sandbox on clears `runInTmux`, and the request never carries both.
@@ -140,21 +140,21 @@ Real dependency edges: `n1 → n2 → n3`, `n1 → n3`
 - [x] USER REVIEW — acceptance tests — waived by the developer 2026-11-03 (reviewed with the stack at the end)
 - [x] TDD Red — write failing unit/integration tests
 - [x] TDD Green — implement with quality code
-- [ ] Update documentation with progress
-- [ ] Repeat Red→Green→Update cycle until feature complete
-- [ ] Run the touched packages' tests (`./test -p {package}` per package) — verify 100% pass
-- [ ] Validate changes (/validate-changes)
-- [ ] Refactor issues from change validation
-- [ ] USER REVIEW — development complete
-- [ ] Validate tests (/validate-tests)
-- [ ] Refactor test issues
-- [ ] Validate production readiness (/validate-prod-ready)
-- [ ] Refactor production readiness issues
-- [ ] Analyze code quality (/analyze-clean-code)
-- [ ] Refactor code quality issues
-- [ ] Final validation (/validate-changes)
-- [ ] Linting and formatting (`cargo clippy -p {package} -- -D warnings`, `cargo fmt`)
-- [ ] USER REVIEW — scope developed, every gap approved: ready to wrap
+- [x] Update documentation with progress
+- [x] Repeat Red→Green→Update cycle until feature complete
+- [x] Run the touched packages' tests (`./test -p {package}` per package) — verify 100% pass
+- [x] Validate changes (/validate-changes)
+- [x] Refactor issues from change validation
+- [x] USER REVIEW — development complete
+- [x] Validate tests (/validate-tests)
+- [x] Refactor test issues
+- [x] Validate production readiness (/validate-prod-ready)
+- [x] Refactor production readiness issues
+- [x] Analyze code quality (/analyze-clean-code)
+- [x] Refactor code quality issues
+- [x] Final validation (/validate-changes)
+- [x] Linting and formatting (`cargo clippy -p {package} -- -D warnings`, `cargo fmt`)
+- [x] USER REVIEW — scope developed, every gap approved: ready to wrap
 
 ## Baseline before green
 
@@ -191,16 +191,28 @@ Green was run on the branch based on `origin/master` (`2e4af52ac`, with #813 mer
 Every decision that was open at the first green is resolved in Decisions & Trade-offs above (tool offers `run_in_tmux`; full-id name, FIXME removed; refusals for `sandboxed_codebase` and split placement; Delete with unreadable metadata; SIGHUP-ignoring agent verified by a stub that traps HUP).
 
 ## Refactoring Needed
-### From /red (TDD red phase)
 ### From /validate-changes
+- ✅ **CRITICAL fixed** — `kill_all` killed the tmux session of **every** terminal naming one, tmux tabs included: daemon shutdown destroyed the user's own tmux sessions a tab was attached to (Boundaries: "no change to tmux tabs' behaviour"). Now main terminals only (`drain_terminals`); pinned by `tmux_tabs_acceptance::daemon_shutdown_detaches_a_tmux_tab_and_leaves_its_tmux_session_running` (red first) and `claude_cli_tmux_session_acceptance::daemon_shutdown_kills_a_tmux_run_sessions_agent_and_tmux_session`.
+- ✅ **WARNING fixed** — the web disabled the tmux checkbox only for the sandbox; the daemon also refuses `sandboxed_codebase` and split. `runInTmuxUnavailable` (hook) disables and clears it for all three; the request never carries `run_in_tmux` with any of them (`CreateSessionRequestBuilder.cy.ts`, 2 cases).
+- ⚠️ **WARNING, not fixed (reverses a developer decision)** — the pane env (provider `ANTHROPIC_AUTH_TOKEN` included) is on `tmux new-session -e`'s argv, readable by local users while that client runs. Recorded: `docs/dev/todo/2026-11-03-tmux-agent-env-on-the-tmux-argv.md`.
+- ✅ `tmux_session_alive` had no test (n2 consumes it): `a_tmux_session_reads_alive_while_it_runs_and_not_alive_once_killed`.
 ### From /validate-tests
+- ✅ `a_session_yaml_without_a_tmux_session_reads_none_and_writes_none` never read anything back; now writes and reads.
 ### From /validate-prod-ready
+- ✅ `#[allow(clippy::too_many_arguments)]` added on the 9-argument `build_claude_cli_argv`: replaced by `with_claude_launch_flags(argv, initial_prompt, append_system_prompt_file, extra_args)`; no suppression added by this PR.
+- No `TODO`/`FIXME`/`unimplemented!` left in this PR's code; no debug output.
 ### From /analyze-clean-code
+- ✅ `spawn_claude_cli_process` 42 → 73 → **52** lines: one `ClaudeCliTmuxLaunch`, the PTY branch in `start_claude_in_pty`.
+- ✅ `kill_all` 84 (base) → 101 → **83**: the drain in `drain_terminals`.
+- ✅ `start_session_on_request` (code issue `complexity-svc-start-session-core`): the refusal moved to `start_session_core_cancellable`; `svc_start_session_core.rs` is unchanged from base (it had reached 500 production lines).
+- ✅ `resume_claude_cli_session` (deferred code issue): green grew it 142 → 147; now **141** (`..Default::default()` launch, one relaunch call). Record updated.
+- ⚠️ `CreateSessionPane.tsx` 502 → 509 production lines (already over 500): **not split** — stack-shared with #815/#816; record `oversized-file-create-session-pane` updated (regressed).
 
 ## Validation Results
 | Validation | Last Run | Status |
 |------------|----------|--------|
-| /validate-changes | Not yet run | Pending |
-| /validate-tests | Not yet run | Pending |
-| /validate-prod-ready | Not yet run | Pending |
-| /analyze-clean-code | Not yet run | Pending |
+| /validate-changes | 2026-11-03 | ✅ stack gate clean (base `master`, already current at `2e4af52ac`, 6 own commits); 1 critical + 2 warnings fixed, 1 warning recorded |
+| /validate-tests | 2026-11-03 | ✅ one description/body mismatch fixed; new tests Given/When/Then |
+| /validate-prod-ready | 2026-11-03 | ✅ suppression removed; no markers |
+| /analyze-clean-code | 2026-11-03 | ✅ two functions back under/at base; one stack-shared file recorded |
+| file-length gate | 2026-11-03 | ⚠️ `CreateSessionPane.tsx` 502 → 509 (stack-shared, recorded); `gen/session_pb.ts` and `agent_activity_unit_tests.rs` are generated / test code |

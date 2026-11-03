@@ -10,6 +10,8 @@ The daemon's CLI session PTY runtime: PTY-hosted `claude`, `cursor` and every ot
 | `cli_session_manager/pty_handle.rs` | `PtyHandle`, `send_input` |
 | `cli_session_manager/control_lease.rs`, `argv.rs`, `launch.rs`, `pty_spawn.rs`, `relaunch.rs`, `terminals.rs`, `exposed_terminals.rs` | `impl CliSessionManager` blocks: the control lease, the argv a spawn builds, launch, the PTY spawn, relaunch, the local terminals, and the exposure of a session's terminal through a `TerminalExposure` (`ensure_exposed_terminal`, single-flight per session: each recorded terminal carries its own gate, held across the join, while the registry's lock is taken only to read and to write the record, so a slow join to one session holds up neither another session's join nor any other registry access) |
 | `cli_session_manager/pty_terminal_service.rs` | `pty_terminal_service(handle)`: serves `terminal.TerminalService` against a PTY handle, built from `tddy-rpc` types only, so any transport can host it. Every open starts with a snapshot frame taken under the capture lock (`tddy_terminal_rpc::session::snapshot_and_subscribe`), then live frames stamped with contiguous offsets; a `request_snapshot` after the opening message, or a lagged receiver, re-takes the snapshot at a new sequence point. No raw replay and no `trigger_redraw` — `PtyHandle::trigger_redraw` remains for the host's legacy bridge |
+| `tmux.rs` | the host's tmux, everything **run as the session's OS user** through the kernel's `run_output_as_user`: `tmux_binary` (`TDDY_TMUX_BINARY`, else `tmux`), `tmux_attach_argv` (`-T clipboard attach-session -t =<name>`), `tmux_session_name` / `tmux_new_session_argv` (the `tmux-new` tab), `list_tmux_sessions` + `parse_list_sessions` ("no server running" is `[]`), `ensure_reachable` (refuses a user this daemon cannot become); and the agent's tmux session — `agent_tmux_session_name` (`tddy-<full session id>`, `:`/`.` → `_`), `agent_new_session_args` / `start_agent_tmux_session` (`new-session -d -s -c -e K=V -- argv`, the pane given the user's `HOME`/`PATH` under the session env; returns the pane pid), `kill_tmux_session` (an absent session or server is not an error), `tmux_session_alive`, `pane_pid` (`=<name>:`). Lives here, below `tddy-agent-launch` and `tddy-session-lifecycle`, so both use it |
+| `cli_session_manager/tmux_main.rs` | `attach_main_to_tmux(session_id, worktree, os_user, kind, name)`: the session's **main** terminal as a tmux client of the agent's tmux session, run as `os_user` and recorded with `tmux_session = Some(name)`; an ordinary main, exit hook included |
 | `session_toolcall.rs` | the per-session toolcall listener and the managed-workflow wiring for claude-cli sessions: a `WorkflowController` positioned at the recipe's start goal behind a per-session `transition` handler, and `ManagedWorkflow` |
 
 The argv of every spawn comes from the [CLI harness registry](../../tddy-agent-backend/docs/architecture.md#cli-harnesses-cli_harness):
@@ -28,6 +30,17 @@ that is not the daemon user. Its kind is `"tmux"` (`tddy_terminal_rpc::service::
 tmux session name is recorded on `PtyHandle::tmux_session` and on the terminal's index entry, so a
 listing — or a handle rebuilt from the index — still names it. Stopping it ends the client, which
 detaches it.
+
+Each index entry also records the OS user it was started as (`TerminalEntry::os_user`). `kill_all`
+(daemon shutdown) first empties the index (`drain_terminals`) and kills the tmux session of every
+**main** terminal that names one — a tmux-run agent's — as that user, logging and continuing on a
+failure; a tab's tmux session is the user's and is never killed, its client is only stopped. Then it
+cancels every task and SIGKILLs what outlives 5 s, as before.
+
+`with_claude_launch_flags(argv, initial_prompt, append_system_prompt_file, extra_args)` (`argv.rs`)
+inserts `--append-system-prompt-file` and the extra arguments before any positional prompt; the PTY
+launch (`start_with_options`) and the tmux launch (`tddy-agent-launch`'s `claude_cli_tmux`) both build
+`build_claude_argv` through it, so the two cannot diverge.
 
 ## Exit hooks
 

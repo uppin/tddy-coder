@@ -55,33 +55,18 @@ impl CliSessionManager {
         )
     }
 
-    /// The argv of a claude process as [`Self::start_with_options`] launches it: [`Self::build_claude_argv`],
-    /// with `--append-system-prompt-file` and `extra_args` inserted before any positional prompt, so
-    /// every flag precedes the prompt.
+    /// `argv` — a [`Self::build_claude_argv`] result for `initial_prompt` — with
+    /// `--append-system-prompt-file` and `extra_args` inserted before any positional prompt, so every
+    /// flag precedes the prompt. This is the argv [`Self::start_with_options`] launches.
     ///
     /// Shared by the PTY launch and the tmux launch (`tddy_agent_launch::claude_cli_tmux`), so the
     /// two cannot build different argument lists for the same session.
-    #[allow(clippy::too_many_arguments)]
-    pub fn build_claude_cli_argv(
-        binary_path: &str,
-        model: &str,
-        session_id: &str,
+    pub fn with_claude_launch_flags(
+        mut argv: Vec<String>,
         initial_prompt: Option<&str>,
-        permission_mode: Option<&str>,
-        dangerously_skip_permissions: bool,
-        resume: bool,
         append_system_prompt_file: Option<&Path>,
         extra_args: Vec<String>,
     ) -> Vec<String> {
-        let mut argv = Self::build_claude_argv(
-            binary_path,
-            model,
-            session_id,
-            initial_prompt,
-            permission_mode,
-            dangerously_skip_permissions,
-            resume,
-        );
         // Insert before a trailing positional prompt (if any) so every flag precedes the prompt.
         let has_positional_prompt = initial_prompt.is_some_and(|p| !p.trim().is_empty());
         let insert_at = |argv: &Vec<String>| {

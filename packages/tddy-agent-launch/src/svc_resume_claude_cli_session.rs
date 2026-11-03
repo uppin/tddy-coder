@@ -11,6 +11,7 @@ use tddy_rpc::Response;
 use std::path::PathBuf;
 
 use crate::claude_cli_spawn::record_main_terminal;
+use crate::claude_cli_tmux::{relaunch_claude_cli, ClaudeCliTmuxLaunch};
 use crate::hooks_and_urls;
 
 use crate::launch_ports::LaunchSessions;
@@ -127,25 +128,19 @@ impl LaunchSessions {
             &mut env_extra,
         )?;
 
-        let pid = crate::claude_cli_tmux::relaunch_claude_cli(
-            &manager,
-            meta.tmux_session.is_some(),
-            crate::claude_cli_tmux::ClaudeCliTmuxLaunch {
-                os_user,
-                session_id: &session_id_owned,
-                worktree_path,
-                model: &model,
-                binary: &binary_owned,
-                initial_prompt: None,
-                permission_mode: None,
-                dangerously_skip_permissions: false,
-                resume: true,
-                append_system_prompt_file: append_system_prompt_file.as_deref(),
-                extra_args: split_args,
-                env: env_extra,
-            },
-        )
-        .await?;
+        let in_tmux = meta.tmux_session.is_some();
+        let launch = ClaudeCliTmuxLaunch {
+            os_user,
+            session_id: &session_id_owned,
+            worktree_path,
+            model: &model,
+            binary: &binary_owned,
+            append_system_prompt_file: append_system_prompt_file.as_deref(),
+            extra_args: split_args,
+            env: env_extra,
+            ..Default::default()
+        };
+        let pid = relaunch_claude_cli(&manager, in_tmux, launch).await?;
 
         if let Some(mw) = managed {
             manager.attach_managed_workflow(&session_id_owned, mw).await;

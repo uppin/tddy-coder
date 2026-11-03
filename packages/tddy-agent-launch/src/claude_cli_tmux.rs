@@ -16,7 +16,9 @@ use tddy_cli_sessions::tmux::{
 use tddy_rpc::Status;
 
 /// What a tmux-run claude is launched with: the arguments [`CliSessionManager::start_with_options`]
-/// takes for a PTY-child launch, so the two launches build the same `claude` argv.
+/// takes for a PTY-child launch, so the two launches build the same `claude` argv. The default is
+/// no prompt, the default permission mode and a fresh (not resumed) session.
+#[derive(Default)]
 pub struct ClaudeCliTmuxLaunch<'a> {
     pub os_user: &'a str,
     pub session_id: &'a str,
@@ -47,7 +49,8 @@ pub struct TmuxLaunched {
 /// Start claude in a new tmux session for `launch.session_id`, then attach the session's main
 /// terminal to it.
 ///
-/// The argv is the one a PTY-hosted start builds ([`CliSessionManager::build_claude_cli_argv`]).
+/// The argv is the one a PTY-hosted start builds ([`CliSessionManager::build_claude_argv`] with
+/// [`CliSessionManager::with_claude_launch_flags`]).
 /// The pane is started with `launch.env` on it, and its pid is the agent's.
 pub async fn start_claude_in_tmux(
     manager: &CliSessionManager,
@@ -68,14 +71,17 @@ pub async fn start_claude_in_tmux(
         env,
     } = launch;
     let name = agent_tmux_session_name(session_id);
-    let argv = CliSessionManager::build_claude_cli_argv(
-        binary,
-        model,
-        session_id,
+    let argv = CliSessionManager::with_claude_launch_flags(
+        CliSessionManager::build_claude_argv(
+            binary,
+            model,
+            session_id,
+            initial_prompt,
+            permission_mode,
+            dangerously_skip_permissions,
+            resume,
+        ),
         initial_prompt,
-        permission_mode,
-        dangerously_skip_permissions,
-        resume,
         append_system_prompt_file,
         extra_args,
     );

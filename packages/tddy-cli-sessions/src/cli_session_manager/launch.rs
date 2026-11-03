@@ -185,14 +185,17 @@ impl CliSessionManager {
         env: Vec<(String, String)>,
         os_user: Option<&str>,
     ) -> anyhow::Result<Arc<pty_handle::PtyHandle>> {
-        let argv = Self::build_claude_cli_argv(
-            binary_path,
-            model,
-            session_id,
+        let argv = Self::with_claude_launch_flags(
+            Self::build_claude_argv(
+                binary_path,
+                model,
+                session_id,
+                initial_prompt,
+                permission_mode,
+                dangerously_skip_permissions,
+                resume,
+            ),
             initial_prompt,
-            permission_mode,
-            dangerously_skip_permissions,
-            resume,
             append_system_prompt_file,
             extra_args,
         );

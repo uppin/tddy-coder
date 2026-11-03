@@ -210,31 +210,37 @@ impl CliSessionManager {
         }
     }
 
+    /// Empty the terminal index, returning every terminal's task and the tmux session of each
+    /// tmux-run agent with the OS user it runs as. Only a main terminal's tmux session holds the
+    /// session's agent: a tmux tab's session is the user's own, so the tab's client is stopped with
+    /// the rest and its tmux session keeps running.
+    async fn drain_terminals(&self) -> (Vec<TaskId>, Vec<(String, Option<String>)>) {
+        let mut reg = self.terminals.write().await;
+        let mut task_ids = Vec::new();
+        let mut agent_tmux_sessions = Vec::new();
+        for (terminal_id, entry) in reg.values().flat_map(|tools| tools.iter()) {
+            task_ids.push(entry.task_id.clone());
+            if let (MAIN_TERMINAL_ID, Some(name)) = (terminal_id.as_str(), &entry.tmux_session) {
+                agent_tmux_sessions.push((name.clone(), entry.os_user.clone()));
+            }
+        }
+        reg.clear();
+        (task_ids, agent_tmux_sessions)
+    }
+
     /// Kill all tracked PTY processes across every session: kill the tmux session of each tmux-run
-    /// agent, cancel each task, wait up to 5 s, then SIGKILL any child PIDs that remain. Clears the
-    /// terminal index on completion.
+    /// agent (see [`Self::drain_terminals`]), cancel each task, wait up to 5 s, then SIGKILL any child
+    /// PIDs that remain. Clears the terminal index on completion.
     ///
     /// Called during daemon shutdown so that spawned `claude` / shell processes do not
     /// outlive the daemon as orphans.
     pub async fn kill_all(&self) {
-        let (task_ids, tmux_sessions): (Vec<TaskId>, Vec<(String, Option<String>)>) = {
-            let mut reg = self.terminals.write().await;
-            let mut ids = Vec::new();
-            let mut tmux = Vec::new();
-            for entry in reg.values().flat_map(|tools| tools.values()) {
-                ids.push(entry.task_id.clone());
-                if let Some(name) = &entry.tmux_session {
-                    tmux.push((name.clone(), entry.os_user.clone()));
-                }
-            }
-            reg.clear();
-            (ids, tmux)
-        };
+        let (task_ids, agent_tmux_sessions) = self.drain_terminals().await;
 
         // A tmux-run agent lives in its tmux session, not in the terminal's PTY: that session is
         // killed first, as the user it was started as. Each kill is logged on its own, so one that
         // fails does not stop the rest.
-        for (name, os_user) in tmux_sessions {
+        for (name, os_user) in agent_tmux_sessions {
             kill_tmux_session_at_shutdown(name, os_user).await;
         }
 

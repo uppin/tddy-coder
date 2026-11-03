@@ -149,6 +149,7 @@ export function CreateSessionPane({
     setSandbox,
     runInTmux,
     setRunInTmux,
+    runInTmuxUnavailable,
     managedCodebase,
     setManagedCodebase,
     sandboxedCodebase,
@@ -396,6 +397,7 @@ export function CreateSessionPane({
           setSandbox={setSandbox}
           runInTmux={runInTmux}
           setRunInTmux={setRunInTmux}
+          runInTmuxUnavailable={runInTmuxUnavailable}
           applyPlacement={applyPlacement}
           sandboxedCodebase={sandboxedCodebase}
           sandboxedCodebaseUnavailableReason={sandboxedCodebaseUnavailableReason}

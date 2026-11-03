@@ -543,3 +543,52 @@ async fn deleting_a_session_whose_metadata_is_unreadable_still_kills_its_tmux_se
     })
     .await;
 }
+
+#[tokio::test]
+#[serial_test::serial]
+async fn daemon_shutdown_kills_a_tmux_run_sessions_agent_and_tmux_session() {
+    // Given a running tmux-run session
+    let daemon = a_daemon_with_a_private_tmux().await;
+    let session_id = daemon.starts_a_session_in_tmux().await;
+    let name = daemon.tmux_session_of(&session_id);
+    daemon
+        .until_the_agent_ran_in_tmux_session(&daemon.tmux, &name)
+        .await;
+    let agent_pid = daemon.metadata_of(&session_id).pid.expect("a recorded pid");
+
+    // When the daemon shuts down
+    daemon.manager.kill_all().await;
+
+    // Then the agent and its tmux session are gone
+    eventually(
+        "the agent and its tmux session to be gone",
+        OBSERVE,
+        || match (
+            a_process_is_alive(agent_pid),
+            daemon.tmux.has_session(&name),
+        ) {
+            (false, false) => Ok(()),
+            (agent, tmux) => Err(format!("agent alive: {agent}, tmux session alive: {tmux}")),
+        },
+    )
+    .await;
+}
+
+#[test]
+#[serial_test::serial]
+fn a_tmux_session_reads_alive_while_it_runs_and_not_alive_once_killed() {
+    use tddy_cli_sessions::tmux::{kill_tmux_session, tmux_session_alive};
+
+    // Given a running tmux session of this user — the liveness probe a re-attach decides on
+    let tmux = PrivateTmux::started().with_session("alpha", 1);
+    let user = this_os_user();
+    assert!(tmux_session_alive(&user, "alpha"));
+
+    // When it is killed
+    kill_tmux_session(&user, "alpha").expect("kill-session");
+
+    // Then it no longer reads alive, and killing it again is not an error
+    assert!(!tmux.has_session("alpha"));
+    assert!(!tmux_session_alive(&user, "alpha"));
+    kill_tmux_session(&user, "alpha").expect("killing an absent session is not an error");
+}

@@ -793,18 +793,20 @@ session_type: workspace
 
     #[test]
     fn a_session_yaml_without_a_tmux_session_reads_none_and_writes_none() {
-        // Given a file written before `tmux_session` was recorded
+        // Given a session that records no tmux session
         let session = a_workspace_session();
 
-        // When
+        // When it is written and read back
         let yaml = serde_yaml::to_string(&session).unwrap();
+        let read: SessionMetadata = serde_yaml::from_str(&yaml).unwrap();
 
-        // Then
-        assert_eq!(session.tmux_session, None);
+        // Then the file carries no `tmux_session` key — the shape of a file written before the
+        // field existed — and reading it yields `None`
         assert!(
             !yaml.contains("tmux_session"),
             "an absent tmux session must not be written; got:\n{yaml}"
         );
+        assert_eq!(read.tmux_session, None);
     }
 
     #[test]
