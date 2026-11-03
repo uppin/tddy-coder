@@ -43,7 +43,9 @@ describe("GhosttyTerminal", () => {
       initialContent: numberedLines(200),
       withHandleCapture: true,
     }).mount();
-    driver.expectExists().expectCanvasExists();
+    // The content is written by an effect after the terminal reports ready: a drag dispatched before
+    // it lands finds no scrollback to move through, so wait for the last row first.
+    driver.expectExists().expectCanvasExists().expectBufferHoldsTimes("row-200", 1);
 
     // When — the user drags one finger down to pull earlier output back into view
     driver.dragDownOneFinger();
