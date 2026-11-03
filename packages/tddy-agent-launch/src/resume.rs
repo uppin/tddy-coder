@@ -82,6 +82,7 @@ pub async fn resume_cursor_cli_session(
                 os_user,
                 session_id,
                 worktree_path: worktree_path.clone(),
+                session_dir: session_dir.to_path_buf(),
                 kind: "cursor-cli",
                 argv: CliSessionManager::build_cursor_argv(
                     &binary_path,

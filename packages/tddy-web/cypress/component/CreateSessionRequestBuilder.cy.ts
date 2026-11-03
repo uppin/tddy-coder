@@ -264,6 +264,36 @@ describe("create session request builder", () => {
     }
   });
 
+  it("sends run_in_tmux for every CLI harness type, and never with a placement the daemon refuses it with", () => {
+    for (const sessionType of ["cursor-cli", "opencode-cli", "muse-cli", "warp-cli"] as const) {
+      // Given a tmux choice on a harness with nothing refusing it
+      const plain = aFormWith({ sessionType, runInTmux: true });
+
+      // When
+      const request = buildStartSessionRequest(plain, null, []);
+
+      // Then
+      expect(request.runInTmux, sessionType).to.equal(true);
+
+      for (const placement of [
+        { sandbox: true },
+        { sandboxedCodebase: true },
+        { isSplitCodebase: true, codebaseDaemonInstanceId: "build-box-2" },
+      ]) {
+        // Given a tmux choice left on beside that placement
+        const refused = aFormWith({ sessionType, runInTmux: true, ...placement });
+
+        // When
+        const refusedRequest = buildStartSessionRequest(refused, null, []);
+
+        // Then
+        expect(refusedRequest.runInTmux, `${sessionType} ${JSON.stringify(placement)}`).to.equal(
+          false,
+        );
+      }
+    }
+  });
+
   it("replaces the branch fields with a conflict resolution's own", () => {
     // Given a form holding the branch the daemon refused
     const form = aFormWith({ sessionType: "claude-cli", newBranchName: "feature/taken" });

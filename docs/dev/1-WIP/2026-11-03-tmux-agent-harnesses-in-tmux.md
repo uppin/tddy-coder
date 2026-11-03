@@ -104,7 +104,7 @@ Real dependency edges: `n1 → n2 → n3`, `n1 → n3`
 - [x] Run acceptance tests (verify they fail) — web and cli-sessions run red; lifecycle compile-checked only, red on n1/n2 stubs
 - [x] USER REVIEW — acceptance tests — waived by the developer 2026-11-03 (reviewed with the stack at the end)
 - [x] TDD Red — write failing unit/integration tests
-- [ ] TDD Green — implement with quality code
+- [x] TDD Green — implement with quality code
 - [ ] Update documentation with progress
 - [ ] Repeat Red→Green→Update cycle until feature complete
 - [ ] Run the touched packages' tests (`./test -p {package}` per package) — verify 100% pass
@@ -126,6 +126,31 @@ Real dependency edges: `n1 → n2 → n3`, `n1 → n3`
 Scoped to `tddy-cli-sessions`, `tddy-agent-launch`, `tddy-session-lifecycle` (`cargo check --all-targets` and `cargo clippy --all-targets -- -D warnings` clean on the rebased tree). Red, run: `tddy-cli-sessions` 2 unit tests (`tmux.rs`) + 2 in `tests/tmux_exit_hook.rs`, all failing on `unimplemented!`; `CreateSessionRunInTmuxAcceptance.cy.tsx` 7 of 7 failing — the toggle is not rendered (n1's 3 cases are red on n1's stub, the 4 new ones on this node's). Red, **not run** (heavy test link, shared disk): the five `cli_harness_tmux_acceptance` tests — compile-checked; every one starts through n1's launcher, and resumes through n2's re-attach, so they stay red until n1 and n2 are green (this node is wave 3). Not run: the rest of the workspace (CI's).
 
 Surface published: `remain_on_exit: bool` on `start_agent_tmux_session` (n1's function is still a stub, so it has no callers to update — n1's launcher passes `false`, this node's `cli_harness_tmux` passes `on_exit.is_some()`); `tddy-agent-launch::cli_harness_tmux` (`start_harness_in_tmux`, `resume_harness_in_tmux`) wired into the generic harness `launch` and cursor start/resume; `tddy-cli-sessions` `remain_on_exit_args`, `capture_pane_args`, `capture_final_screen`, `exit_hook_capture`, `CliSessionManager::run_exit_hook_on_agent_exit`; web `CreateSessionRunInTmuxToggle` (stub, rendered for cursor/opencode/muse/warp) and `createSessionRequest.ts` sending `runInTmux` for them. The claude-cli toggle is still n1's to render; the green phase should unify the two.
+
+## Green status
+
+Green on the tree rebased onto `feature/tmux-agent/tmux-resume` (9550dbe25). Scoped runs only:
+
+- `tddy-cli-sessions`: `--lib tmux` 20 of 20; the whole package passes, including `tests/tmux_exit_hook.rs` (2 of 2).
+- `tddy-session-lifecycle`: `cli_harness_tmux_acceptance` 5 of 5.
+- `tddy-agent-launch --lib`: 174 of 175. The failure is `session_acting_identity_tests::a_local_gh_project_yields_the_gh_logins_four_pairs_and_its_github_source`, on the project identity path this change does not touch. Not yet checked against the base.
+- `tddy-web`: `bun test src/components/sessions` 440 of 440; Cypress `CreateSessionRunInTmuxAcceptance` 7 of 7, `createSessionRequestParity` 2 of 2, `CreateSessionRequestBuilder` 17 of 17.
+
+Deviations from the contract, for review:
+
+- The tmux targets for `remain-on-exit` and `capture-pane` are `=<name>:`, not `=<name>`. On tmux 3.6a a bare session target fails with "no such window" and "can't find pane". The two pinned argv tests were corrected to match.
+- `pane_state` reads an absent session as success with empty output (observed on tmux 3.6a), so empty output means the session is gone.
+- A resumed session whose agent exited while no daemon watched it is ended and started afresh. Its exit hook does not run, and the resume logs a warning.
+- The exit-hook watcher polls the pane once a second. The exit settlement is registered only when the agent's exit is seen.
+- `CreateSessionRunInTmuxToggle` takes `unavailable` where the contract named `sandbox`, so the claude and harness rules are one rule.
+
+Needs a human decision:
+
+- Placement state is shared across session types. A sandbox or sandboxed codebase left on from claude or cursor disables the tmux checkbox for opencode, muse and warp, which have no sandbox control, with no visible reason.
+
+Environment, not this change:
+
+- `cursor_cli_sandbox_start_succeeds_when_sandbox_backend_available` needs `tddy-sandbox-runner` on `PATH`, which `./install` provides and this worktree does not build.
 
 ## Refactoring Needed
 ### From /red (TDD red phase)

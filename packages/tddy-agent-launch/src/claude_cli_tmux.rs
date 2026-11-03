@@ -129,7 +129,8 @@ async fn start_agent_pane(
         worktree.to_path_buf(),
     );
     in_tmux_blocking(move || {
-        start_agent_tmux_session(&os_user, &name, &worktree, &session_dir, &env, &argv)
+        // Claude has no exit hook, so its pane is not kept after the agent exits.
+        start_agent_tmux_session(&os_user, &name, &worktree, &session_dir, &env, &argv, false)
     })
     .await?
     .map_err(|e| Status::internal(format!("failed to spawn claude-cli: {e}")))
@@ -168,7 +169,7 @@ pub async fn resume_claude_in_tmux(
 
 /// Run a blocking tmux operation off the async executor. Every tmux call spawns a process and
 /// waits for it, so none of them may run on the executor's threads.
-async fn in_tmux_blocking<T, F>(operation: F) -> Result<T, Status>
+pub(crate) async fn in_tmux_blocking<T, F>(operation: F) -> Result<T, Status>
 where
     T: Send + 'static,
     F: FnOnce() -> T + Send + 'static,
@@ -180,7 +181,7 @@ where
 
 /// Kill the tmux session of a start that failed after it began. The start's own error is what the
 /// caller is told, so a kill that fails is logged rather than returned.
-async fn stop_tmux_session_of_failed_start(os_user: &str, name: &str) {
+pub(crate) async fn stop_tmux_session_of_failed_start(os_user: &str, name: &str) {
     let (os_user, name) = (os_user.to_string(), name.to_string());
     let outcome = tokio::task::spawn_blocking({
         let name = name.clone();

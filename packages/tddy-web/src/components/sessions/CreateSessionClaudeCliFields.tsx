@@ -17,11 +17,8 @@ export interface CreateSessionClaudeCliFieldsProps {
   placementWithdrawsPermissionBypass: boolean;
   sandbox: boolean;
   setSandbox: (sandbox: boolean) => void;
-  /** Run the agent inside tmux on the host. */
-  runInTmux: boolean;
-  setRunInTmux: (runInTmux: boolean) => void;
-  /** The placement rules out a tmux-run agent (sandbox, jailed codebase or split placement). */
-  runInTmuxUnavailable: boolean;
+  /** The "Run the agent in tmux" control, built by the pane (the one every CLI harness shows). */
+  runInTmuxToggle: ReactNode;
   applyPlacement: (toggled: CodebasePlacementChoice, on: boolean) => void;
   sandboxedCodebase: boolean;
   sandboxedCodebaseUnavailableReason: string | null;
@@ -64,9 +61,7 @@ export function CreateSessionClaudeCliFields({
   placementWithdrawsPermissionBypass,
   sandbox,
   setSandbox,
-  runInTmux,
-  setRunInTmux,
-  runInTmuxUnavailable,
+  runInTmuxToggle,
   applyPlacement,
   sandboxedCodebase,
   sandboxedCodebaseUnavailableReason,
@@ -160,25 +155,9 @@ export function CreateSessionClaudeCliFields({
       )}
 
       {/* Run the agent inside tmux on the host, so its terminal can be attached to from anywhere.
-          The daemon refuses it with the sandbox, the jailed codebase and a split placement, so it
-          is disabled while any of them is chosen. Not
-          offered on the project's home session: that start spec does not carry the choice, so a
-          checked box there would be dropped without a word. */}
-      {!placementFixed && (
-        <div>
-          <label className="flex items-center gap-2 text-sm text-muted-foreground">
-            <input
-              data-testid="create-session-tmux-toggle"
-              type="checkbox"
-              className="h-4 w-4 rounded border-input"
-              checked={runInTmux}
-              onChange={(e) => setRunInTmux(e.target.checked)}
-              disabled={runInTmuxUnavailable}
-            />
-            Run the agent in tmux
-          </label>
-        </div>
-      )}
+          Not offered on the project's home session: that start spec does not carry the choice, so
+          a checked box there would be dropped without a word. */}
+      {!placementFixed && runInTmuxToggle}
 
       <div>
         <label className={labelClass} htmlFor="create-session-initial-prompt">

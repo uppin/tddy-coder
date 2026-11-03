@@ -279,6 +279,7 @@ pub(crate) async fn spawn_cursor_cli_session_reporting(
         initial_prompt_opt,
         session_env,
         run_in_tmux.then_some(os_user),
+        &session_dir,
     )
     .await?;
     progress.end_phase(StartStep::Agent);
@@ -357,6 +358,8 @@ async fn spawn_cursor_cli_process(
     // The session's OS user when the agent runs in tmux (as that user); `None` runs it as the PTY
     // child, as the daemon.
     tmux_os_user: Option<&str>,
+    // The session's directory, which holds the pane's environment file.
+    session_dir: &Path,
 ) -> Result<(String, LaunchedCursor), Status> {
     let cursor_chat_id = chat::mint_cursor_chat_id(&binary_path, worktree_path)
         .await
@@ -372,6 +375,7 @@ async fn spawn_cursor_cli_process(
                 os_user,
                 session_id,
                 worktree_path: worktree_path.to_path_buf(),
+                session_dir: session_dir.to_path_buf(),
                 kind: "cursor-cli",
                 argv: CliSessionManager::build_cursor_argv(
                     &binary_path,

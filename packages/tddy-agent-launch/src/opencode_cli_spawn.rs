@@ -233,6 +233,7 @@ pub(crate) async fn start_cli_harness_session(
         launch_extras(route.unwrap_or_default(), env, token_recorder),
         Some(os_user),
         HarnessRun::start(run_in_tmux),
+        &session_dir,
     )
     .await?;
     progress.end_phase(StartStep::Agent);
@@ -370,6 +371,7 @@ async fn resume_cli_harness_session(
         launch_extras(route, git_environment, token_recorder),
         Some(os_user),
         HarnessRun::resume(meta.tmux_session.is_some()),
+        session_dir,
     )
     .await?;
 
@@ -450,6 +452,7 @@ async fn launch(
     extras: HarnessLaunchExtras,
     os_user: Option<&str>,
     run: HarnessRun,
+    session_dir: &Path,
 ) -> Result<LaunchedHarness, Status> {
     if run.in_tmux {
         let os_user = os_user.ok_or_else(|| {
@@ -461,6 +464,7 @@ async fn launch(
             os_user,
             session_id,
             worktree_path: worktree_path.to_path_buf(),
+            session_dir: session_dir.to_path_buf(),
             kind: harness.session_type,
             argv,
             env: extras.env,

@@ -1,15 +1,36 @@
 export interface CreateSessionRunInTmuxToggleProps {
   runInTmux: boolean;
   setRunInTmux: (runInTmux: boolean) => void;
-  /** Tmux and the sandbox are exclusive: the option is disabled while the session is sandboxed. */
-  sandbox: boolean;
+  /**
+   * The placement rules out a tmux-run agent (sandbox, jailed codebase or split placement), so the
+   * checkbox is disabled. `useCreateSessionPlacement` owns that rule and clears the choice with it.
+   */
+  unavailable: boolean;
 }
 
 /**
- * "Run the agent in tmux", offered for every CLI harness type (`#tmux-agent` 3/3,
- * docs/ft/daemon/1-WIP/PRD-2026-11-03-harnesses-in-tmux.md).
+ * "Run the agent in tmux", offered for claude-cli and every CLI harness type (`#tmux-agent` 3/3,
+ * docs/ft/daemon/1-WIP/PRD-2026-11-03-harnesses-in-tmux.md). One control for all of them, so the
+ * label, the enable rule and the test id cannot drift between session types.
  */
-export function CreateSessionRunInTmuxToggle(_props: CreateSessionRunInTmuxToggleProps) {
-  // TODO(harnesses-in-tmux): implement — a labelled checkbox, test id `create-session-tmux-toggle`.
-  return null;
+export function CreateSessionRunInTmuxToggle({
+  runInTmux,
+  setRunInTmux,
+  unavailable,
+}: CreateSessionRunInTmuxToggleProps) {
+  return (
+    <div>
+      <label className="flex items-center gap-2 text-sm text-muted-foreground">
+        <input
+          data-testid="create-session-tmux-toggle"
+          type="checkbox"
+          className="h-4 w-4 rounded border-input"
+          checked={runInTmux}
+          onChange={(e) => setRunInTmux(e.target.checked)}
+          disabled={unavailable}
+        />
+        Run the agent in tmux
+      </label>
+    </div>
+  );
 }
