@@ -220,9 +220,14 @@ impl Drop for TerminateJailOnDrop {
 
 /// **sandboxed_session_spawn_argv_carries_stdio_and_no_grpc_flags**: family-C spawn modules in
 /// `tddy-agent-launch` must request the stdio transport and must never build gRPC flags.
+/// `jail_launch.rs` builds the runner argv for every agent launched from its tool definition.
 #[test]
 fn sandboxed_session_spawn_argv_carries_stdio_and_no_grpc_flags() {
     let sources = [
+        include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../tddy-agent-launch/src/jail_launch.rs"
+        )),
         include_str!(concat!(
             env!("CARGO_MANIFEST_DIR"),
             "/../tddy-agent-launch/src/svc_start_sandboxed_claude_cli_session.rs"
