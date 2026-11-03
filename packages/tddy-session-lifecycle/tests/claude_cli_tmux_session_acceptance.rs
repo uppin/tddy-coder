@@ -1,6 +1,6 @@
 //! Acceptance tests: a Claude CLI session started with `run_in_tmux` runs its agent inside a tmux
 //! session on the host, as the session's OS user (`#tmux-agent` 1/3,
-//! docs/ft/daemon/1-WIP/PRD-2026-11-03-claude-cli-in-tmux.md).
+//! docs/ft/daemon/claude-cli-session.md § tmux mode).
 //!
 //! Real tmux, privately: `TMUX_TMPDIR` points at a fresh socket directory (see `support`), the
 //! identity maps to the OS user running the test, and the agent is a stub `claude` that records how

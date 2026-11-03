@@ -2,7 +2,7 @@
  * The Claude CLI new-session form offers "Run the agent in tmux": checked, the typed `StartSession`
  * request carries `run_in_tmux = true`. The option is exclusive with the sandbox, so it is disabled
  * while the sandbox is on.
- * (PRD: docs/ft/daemon/1-WIP/PRD-2026-11-03-claude-cli-in-tmux.md; changeset `#tmux-agent` 1/3)
+ * (Feature: docs/ft/daemon/claude-cli-session.md § tmux mode; `#tmux-agent` 1/3)
  *
  * Uses the in-memory ConnectRPC backend so the assertions read the request the component sent.
  */

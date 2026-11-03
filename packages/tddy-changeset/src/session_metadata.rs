@@ -126,7 +126,7 @@ pub struct SessionMetadata {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub session_role: Option<String>,
     /// The tmux session the agent runs in, when the session was started with `run_in_tmux`
-    /// (docs/ft/daemon/1-WIP/PRD-2026-11-03-claude-cli-in-tmux.md). Absent for every session whose
+    /// (docs/ft/daemon/claude-cli-session.md § tmux mode). Absent for every session whose
     /// agent is the PTY child itself, and for legacy files. For a tmux-run session `pid` is the
     /// pane's process, not the tmux client's.
     #[serde(default, skip_serializing_if = "Option::is_none")]

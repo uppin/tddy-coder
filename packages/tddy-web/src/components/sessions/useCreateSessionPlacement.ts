@@ -30,7 +30,7 @@ export function useCreateSessionPlacement({
   agentHostInstanceId,
 }: UseCreateSessionPlacementArgs) {
   const [sandbox, setSandbox] = useState(false);
-  // Run the claude agent inside a tmux session on the host (docs/ft/daemon/1-WIP/PRD-2026-11-03-claude-cli-in-tmux.md).
+  // Run the claude agent inside a tmux session on the host (docs/ft/daemon/claude-cli-session.md § tmux mode).
   // Exclusive with every placement that is not a plain agent on this host — see `runInTmuxUnavailable`.
   const [runInTmux, setRunInTmux] = useState(false);
   const [managedCodebase, setManagedCodebase] = useState(false);

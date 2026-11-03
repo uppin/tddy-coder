@@ -527,6 +527,7 @@ A toggle at the top of the form switches between:
 | Model | claude-cli | yes — dropdown of `CLAUDE_CLI_MODELS` |
 | Permission mode | claude-cli | no — auto/default/acceptEdits/plan/bypassPermissions |
 | Initial prompt | claude-cli | no — textarea |
+| Run the agent in tmux | claude-cli | no — checkbox (`create-session-tmux-toggle`), unchecked; sends `StartSessionRequest.run_in_tmux` (field 47) — see [Claude CLI session § tmux mode](../daemon/claude-cli-session.md#tmux-mode-startsessionrequestrun_in_tmux--true). Disabled while the sandbox, the sandboxed codebase or a split placement is chosen (the daemon refuses each with it), and choosing one of them clears it, so the request never carries the pair. Not shown on the [main variant](#main-variant) |
 | Branch mode | both | — New branch from base (optional name + base ref) or Work on existing branch (select from `ListProjectBranches`) |
 | Create Remote Branch | claude-cli / cursor-cli | no — toggle shown in new-branch mode, **unchecked** by default (pre-checked when starting a PR-stack node); pushes the new branch to `origin` at session start |
 

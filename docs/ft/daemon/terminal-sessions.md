@@ -176,7 +176,15 @@ Refusals, all before anything spawns:
 
 A tmux tab on a stopped session starts in the worktree the session's record names, as every other
 tab does. Like the other tabs it is not persisted across a daemon restart — but the tmux session it
-attached to is the user's and survives, so it can simply be attached again.
+attached to is the user's and survives, so it can simply be attached again. Daemon shutdown stops a
+tab's client (detaching it) and never kills the tab's tmux session.
+
+A **tmux-run agent** is the other tmux terminal: a claude-cli session started with `run_in_tmux` runs
+its agent in a tmux session named `tddy-<session id>`, and its **main** terminal (`MAIN_TERMINAL_ID`,
+kind `claude-cli`) is a client attached to it, recorded with that `tmux_session` — see
+[Claude CLI session § tmux mode](claude-cli-session.md#tmux-mode-startsessionrequestrun_in_tmux--true).
+That session is an ordinary tmux session of the user, so `ListTmuxSessions` lists it and a tab can
+attach to it. Unlike a tab's, it belongs to the agent: Delete and daemon shutdown kill it.
 
 The listing and every PTY spawn as the session's user (the main agent terminal and every tab) take
 the **same decision** from the kernel's privilege plan: a daemon that cannot become that user refuses
@@ -582,8 +590,8 @@ threading, capture, and cleanup. The Bash tool's shell is resolved by
 `shell_path` argument (no test-only branches) and labels the instance kind `"bash"`. An agent
 terminal's argv is built by the daemon's terminal roster from the harness descriptor and spawned by
 `CliSessionManager::start_agent_terminal` under the harness's session type as its kind. Neither takes
-per-start inputs. A tmux terminal's attach argv is built by the roster too (`tmux_host`) and spawned by
-`CliSessionManager::start_tmux_terminal` with `os_user: Some(_)` — the only started tab that runs as
+per-start inputs. A tmux terminal's attach argv is built by the roster too (with `tddy_cli_sessions::tmux`) and spawned
+by `CliSessionManager::start_tmux_terminal` with `os_user: Some(_)` — the only started tab that runs as
 the session's OS user rather than the daemon user.
 
 ### Lifecycle

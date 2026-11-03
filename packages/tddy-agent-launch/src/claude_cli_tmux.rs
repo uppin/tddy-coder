@@ -1,5 +1,5 @@
 //! Running a Claude CLI agent inside tmux (`#tmux-agent` 1/3,
-//! docs/ft/daemon/1-WIP/PRD-2026-11-03-claude-cli-in-tmux.md).
+//! docs/ft/daemon/claude-cli-session.md § tmux mode).
 //!
 //! The agent runs in a tmux session of its own, as the session's OS user; the session's main
 //! terminal is a tmux client attached to it, and the pid the session records is the pane's process —
