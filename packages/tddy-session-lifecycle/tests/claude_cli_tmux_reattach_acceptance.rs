@@ -18,6 +18,10 @@ use tddy_service::proto::session::{
 use tddy_session_lifecycle::claude_cli_session::ClaudeCliSessionManager;
 use tddy_session_lifecycle::connection_service::DaemonSessionHost;
 use tddy_terminal_rpc::bridge::MAIN_TERMINAL_ID;
+use tddy_terminal_rpc::proto::terminal_session::{
+    StreamReplayMode, StreamTerminalOutputRequest,
+    TerminalSessionService as TerminalSessionServiceTrait,
+};
 use tddy_testing_commons::stub_scripts::{
     a_stub_agent_script, read_last_appended_argv, read_recorded_env,
 };
@@ -50,6 +54,10 @@ struct TmuxAgentDaemon {
 }
 
 async fn a_daemon_with_a_private_tmux() -> TmuxAgentDaemon {
+    a_daemon_over(ClaudeCliSessionManager::new()).await
+}
+
+async fn a_daemon_over(manager: ClaudeCliSessionManager) -> TmuxAgentDaemon {
     let tmux = PrivateTmux::started();
     let sessions_dir = tempfile::tempdir().unwrap();
     let stub_dir = tempfile::tempdir().unwrap();
@@ -62,7 +70,7 @@ async fn a_daemon_with_a_private_tmux() -> TmuxAgentDaemon {
         .build();
     let repo = a_registered_project(sessions_dir.path());
     let (config_dir, config) = a_config_running(&stub);
-    let manager = Arc::new(ClaudeCliSessionManager::new());
+    let manager = Arc::new(manager);
     let host = a_session_host(
         config.clone(),
         sessions_dir.path().to_path_buf(),
@@ -294,14 +302,34 @@ async fn a_fresh_daemon_reattaches_the_main_terminal_on_first_stream_without_res
     daemon.host.shut_down_children().await;
     let fresh = daemon.restarted();
 
-    // When the fresh daemon first serves the session's main terminal
-    let main = fresh
-        .terminal_sessions()
-        .get_terminal(&session_id, MAIN_TERMINAL_ID)
+    // When a client first streams the session's main terminal from the fresh daemon
+    let streamed = fresh
+        .terminal_session_service()
+        .stream_terminal_output(Request::direct(StreamTerminalOutputRequest {
+            session_token: VALID_TOKEN.to_string(),
+            session_id: session_id.clone(),
+            terminal_id: MAIN_TERMINAL_ID.to_string(),
+            initial_cols: 0,
+            initial_rows: 0,
+            mode: StreamReplayMode::Tail as i32,
+            from_offset: 0,
+            control_token: String::new(),
+        }))
         .await;
 
     // Then a client is attached to the same tmux session and the agent was not relaunched
-    assert!(main.is_some(), "the lookup re-attaches the main terminal");
+    assert!(
+        streamed.is_ok(),
+        "the first stream re-attaches the main terminal"
+    );
+    assert!(
+        fresh
+            .terminal_sessions()
+            .get_terminal(&session_id, MAIN_TERMINAL_ID)
+            .await
+            .is_some(),
+        "the main terminal is registered"
+    );
     until_attached(&daemon.tmux, &name, 1).await;
     assert_eq!(daemon.launch_count(), 1, "claude was not relaunched");
     assert_eq!(daemon.metadata_of(&session_id).pid, Some(agent_pid));
@@ -397,6 +425,81 @@ async fn a_client_exit_while_tmux_lives_keeps_the_sessions_toolcall_socket() {
     // Then the agent's tmux session and the toolcall socket are still there
     assert!(daemon.tmux.has_session(&name));
     assert!(socket.exists(), "the toolcall socket outlives the client");
+}
+
+#[tokio::test]
+#[serial_test::serial]
+async fn resuming_a_live_session_on_the_same_daemon_keeps_its_toolcall_socket_answering() {
+    // Given a running tmux-run session whose client then exits (a detach)
+    let daemon = a_daemon_with_a_private_tmux().await;
+    let (session_id, _) = daemon.is_running_in_tmux().await;
+    let name = daemon.tmux_session_of(&session_id);
+    until_attached(&daemon.tmux, &name, 1).await;
+    let socket = daemon.toolcall_socket().await;
+    assert!(daemon
+        .tmux
+        .tmux(&["detach-client", "-s", &name])
+        .status
+        .success());
+    daemon.until_the_main_left_the_registry(&session_id).await;
+
+    // When the session is resumed on the same daemon
+    daemon
+        .host
+        .resume_session(Request::direct(ResumeSessionRequest {
+            session_token: VALID_TOKEN.to_string(),
+            session_id: session_id.clone(),
+        }))
+        .await
+        .expect("ResumeSession");
+
+    // Then the socket the agent was told to use still exists and answers
+    until_attached(&daemon.tmux, &name, 1).await;
+    assert!(
+        socket.exists(),
+        "the resume did not unlink the agent's socket"
+    );
+    assert!(
+        std::os::unix::net::UnixStream::connect(&socket).is_ok(),
+        "the agent's toolcall socket answers"
+    );
+}
+
+#[tokio::test]
+#[serial_test::serial]
+async fn a_detached_agents_end_runs_the_cleanup_when_its_watcher_notices() {
+    // Given a tmux-run session whose client has exited, watched every 50 ms
+    let daemon = a_daemon_over(
+        ClaudeCliSessionManager::new()
+            .with_detach_watch_interval(std::time::Duration::from_millis(50)),
+    )
+    .await;
+    let (session_id, _) = daemon.is_running_in_tmux().await;
+    let name = daemon.tmux_session_of(&session_id);
+    until_attached(&daemon.tmux, &name, 1).await;
+    let socket = daemon.toolcall_socket().await;
+    assert!(daemon
+        .tmux
+        .tmux(&["detach-client", "-s", &name])
+        .status
+        .success());
+    daemon.until_the_main_left_the_registry(&session_id).await;
+    assert!(socket.exists(), "a detached agent keeps its socket");
+
+    // When its tmux session is killed from outside
+    assert!(daemon
+        .tmux
+        .tmux(&["kill-session", "-t", &name])
+        .status
+        .success());
+
+    // Then the watcher runs the agent-ended cleanup
+    eventually("the toolcall socket to be removed", OBSERVE, || {
+        (!socket.exists())
+            .then_some(())
+            .ok_or_else(|| format!("{} still exists", socket.display()))
+    })
+    .await;
 }
 
 #[tokio::test]

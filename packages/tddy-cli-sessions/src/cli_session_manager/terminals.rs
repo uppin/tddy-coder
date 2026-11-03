@@ -199,6 +199,9 @@ impl CliSessionManager {
     /// Called during daemon shutdown so that spawned `claude` / shell processes do not
     /// outlive the daemon as orphans.
     pub async fn kill_all(&self) {
+        for (_, watcher) in self.detached_watchers.write().await.drain() {
+            watcher.abort();
+        }
         let task_ids = self.drain_terminals().await;
         if task_ids.is_empty() {
             log::debug!(

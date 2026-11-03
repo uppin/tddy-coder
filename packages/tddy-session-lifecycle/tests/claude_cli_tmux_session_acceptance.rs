@@ -589,7 +589,7 @@ async fn deleting_a_session_whose_metadata_is_unreadable_still_kills_its_tmux_se
 
 #[tokio::test]
 #[serial_test::serial]
-async fn daemon_shutdown_kills_a_tmux_run_sessions_agent_and_tmux_session() {
+async fn daemon_shutdown_detaches_a_tmux_run_sessions_main_and_leaves_its_agent_running() {
     // Given a running tmux-run session
     let daemon = a_daemon_with_a_private_tmux().await;
     let session_id = daemon.starts_a_session_in_tmux().await;
@@ -602,19 +602,15 @@ async fn daemon_shutdown_kills_a_tmux_run_sessions_agent_and_tmux_session() {
     // When the daemon shuts down
     daemon.manager.kill_all().await;
 
-    // Then the agent and its tmux session are gone
-    eventually(
-        "the agent and its tmux session to be gone",
-        OBSERVE,
-        || match (
-            a_process_is_alive(agent_pid),
-            daemon.tmux.has_session(&name),
-        ) {
-            (false, false) => Ok(()),
-            (agent, tmux) => Err(format!("agent alive: {agent}, tmux session alive: {tmux}")),
-        },
-    )
+    // Then the main's client is detached, and the agent and its tmux session keep running
+    eventually("the main's tmux client to detach", OBSERVE, || {
+        (daemon.tmux.attached_clients(&name) == 0)
+            .then_some(())
+            .ok_or_else(|| "a client is still attached".to_string())
+    })
     .await;
+    assert!(daemon.tmux.has_session(&name), "the tmux session survives");
+    assert!(a_process_is_alive(agent_pid), "the agent survives");
 }
 
 #[test]

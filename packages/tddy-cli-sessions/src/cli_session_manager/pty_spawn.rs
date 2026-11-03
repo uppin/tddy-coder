@@ -210,6 +210,7 @@ impl CliSessionManager {
         let managed_workflows = Arc::clone(&self.managed_workflows);
         let exposed_terminals = Arc::clone(&self.exposed_terminals);
         let task_registry = self.task_registry.clone();
+        let detach_watch = self.detach_watch();
         tokio::spawn(async move {
             let task = match task_registry.get(&task_id).await {
                 Some(t) => t,
@@ -232,7 +233,7 @@ impl CliSessionManager {
             }
             // Only a main's exit can end the agent: a tab is a client of nothing the session keeps.
             let main_exit = if terminal_id == MAIN_TERMINAL_ID {
-                Some(classify_ended_main(tmux_run).await)
+                Some(classify_ended_main(tmux_run.clone()).await)
             } else {
                 None
             };
@@ -256,6 +257,17 @@ impl CliSessionManager {
             if main_exit == Some(MainExit::AgentEnded) {
                 managed_workflows.write().await.remove(&session_id);
                 exposed_terminals.write().await.remove(&session_id);
+            }
+            // The agent outlives the client that just ended, and nothing else will notice when it
+            // ends: a watcher does, and runs the cleanup above then.
+            if main_exit == Some(MainExit::ClientOnly) {
+                if let TmuxRun {
+                    session: Some(session),
+                    os_user: Some(os_user),
+                } = tmux_run
+                {
+                    detach_watch.start(session_id, session, os_user).await;
+                }
             }
         });
     }
@@ -329,6 +341,7 @@ impl CliSessionManager {
 
 /// The tmux session a terminal is a client of, and the OS user it runs as — both `None` for a
 /// terminal that is not a tmux client.
+#[derive(Clone)]
 pub(crate) struct TmuxRun {
     session: Option<String>,
     os_user: Option<String>,

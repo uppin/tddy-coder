@@ -558,6 +558,7 @@ impl TerminalServiceHost {
                 control: control.clone(),
                 roster: roster.clone(),
                 recorded_history,
+                main_reattach: std::sync::Arc::new(tddy_terminal_rpc::NoMainReattach),
                 tmux: std::sync::Arc::new(tddy_terminal_rpc::NoTmux),
                 // Small enough that a handful of bytes exercises the chunking a real ring only
                 // reaches after kilobytes of output.

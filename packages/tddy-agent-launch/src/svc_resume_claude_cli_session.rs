@@ -11,7 +11,9 @@ use tddy_rpc::Response;
 use std::path::PathBuf;
 
 use crate::claude_cli_spawn::record_main_terminal;
-use crate::claude_cli_tmux::{relaunch_claude_cli, ClaudeCliTmuxLaunch};
+use crate::claude_cli_tmux::{
+    agent_tmux_session_is_alive, relaunch_claude_cli, ClaudeCliTmuxLaunch,
+};
 use crate::hooks_and_urls;
 
 use crate::launch_ports::LaunchSessions;
@@ -93,7 +95,21 @@ impl LaunchSessions {
             session_token,
             &session_dir,
         )?;
-        if let Some(recipe_name) = meta.recipe.as_deref().filter(|s| !s.trim().is_empty()) {
+        // A live tmux session holds the agent the session recorded, and its `TDDY_SOCKET` names the
+        // toolcall socket of the workflow this daemon already serves: that workflow is kept, never
+        // replaced — replacing it would drop the old listener, which unlinks the very socket the
+        // agent is using. Only a daemon with no such workflow (a restart) prepares one, and it
+        // binds the same path.
+        let in_tmux = meta.tmux_session.is_some();
+        let agent_is_live_in_tmux =
+            in_tmux && agent_tmux_session_is_alive(os_user, session_id).await?;
+        let keeps_workflow =
+            agent_is_live_in_tmux && manager.has_managed_workflow(&session_id_owned).await;
+        if let Some(recipe_name) = meta
+            .recipe
+            .as_deref()
+            .filter(|s| !s.trim().is_empty() && !keeps_workflow)
+        {
             let recipe = tddy_workflow_recipes::resolve_workflow_recipe_from_cli_name(recipe_name)
                 .map_err(Status::invalid_argument)?;
             let resume_goal = LaunchSessions::managed_resume_goal(&session_dir, &recipe);
@@ -128,7 +144,6 @@ impl LaunchSessions {
             &mut env_extra,
         )?;
 
-        let in_tmux = meta.tmux_session.is_some();
         let launch = ClaudeCliTmuxLaunch {
             os_user,
             session_id: &session_id_owned,

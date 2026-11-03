@@ -98,6 +98,26 @@ impl TerminalSessionServiceImpl {
         }
     }
 
+    /// Brings `session_id`'s main terminal back when it is the one addressed and the store has no
+    /// running one (see [`MainReattach`]); a no-op for every other terminal and for a running main.
+    async fn ensure_main(&self, os_user: &str, session_id: &str, terminal_id: &str) {
+        if resolved_terminal_id(terminal_id) != MAIN_TERMINAL_ID {
+            return;
+        }
+        if self
+            .ports
+            .terminals
+            .get_terminal(session_id, MAIN_TERMINAL_ID)
+            .await
+            .is_none()
+        {
+            self.ports
+                .main_reattach
+                .reattach_main(os_user, session_id)
+                .await;
+        }
+    }
+
     /// The live terminal a driving call addresses, once the caller is allowed to drive it.
     ///
     /// The terminal is resolved *before* the lease is checked because whether the lease applies is
@@ -194,9 +214,10 @@ impl TerminalSessionService for TerminalSessionServiceImpl {
             .await
             .ok_or_else(|| Status::invalid_argument("stream ended before first message"))??;
 
-        self.os_user(&first.session_token)?;
+        let os_user = self.os_user(&first.session_token)?;
         let session_id = keyed_session_id(&first.session_id);
         let terminal_id = resolved_terminal_id(&first.terminal_id).to_string();
+        self.ensure_main(&os_user, &session_id, &terminal_id).await;
         // Watching needs no lease: every screen is served the output. Only writing is gated —
         // the grid here, and each input chunk in the bridge.
         let session = self
@@ -235,8 +256,10 @@ impl TerminalSessionService for TerminalSessionServiceImpl {
         request: Request<StreamTerminalOutputRequest>,
     ) -> Result<Response<Self::StreamTerminalOutputStream>, Status> {
         let mut req = request.into_inner();
-        self.os_user(&req.session_token)?;
+        let os_user = self.os_user(&req.session_token)?;
         req.session_id = keyed_session_id(&req.session_id);
+        self.ensure_main(&os_user, &req.session_id, &req.terminal_id)
+            .await;
         if !self
             .may_resize_on_open(&req.session_id, &req.terminal_id, &req.control_token)
             .await
@@ -261,9 +284,11 @@ impl TerminalSessionService for TerminalSessionServiceImpl {
         request: Request<SessionTerminalInput>,
     ) -> Result<Response<SendTerminalInputResponse>, Status> {
         let mut req = request.into_inner();
-        self.os_user(&req.session_token)?;
+        let os_user = self.os_user(&req.session_token)?;
         req.session_id = keyed_session_id(&req.session_id);
         let terminal_id = resolved_terminal_id(&req.terminal_id).to_string();
+        self.ensure_main(&os_user, &req.session_id, &terminal_id)
+            .await;
         let session = self
             .controlled_terminal(&req.session_id, &terminal_id, &req.control_token)
             .await?;
@@ -286,6 +311,8 @@ impl TerminalSessionService for TerminalSessionServiceImpl {
         // A running terminal is answered from its live capture and never reads its recording. Only a
         // terminal that is not running is answered from what its host recorded of it.
         let terminal_id = resolved_terminal_id(&req.terminal_id);
+        self.ensure_main(&os_user, &req.session_id, terminal_id)
+            .await;
         let running = self
             .ports
             .terminals
