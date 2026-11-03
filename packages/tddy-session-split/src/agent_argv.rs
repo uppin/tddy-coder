@@ -250,9 +250,10 @@ pub fn tddy_tools_only_mcp_args(
         &spec.agent.mcp,
         &tddy_tools_server(session_dir, tddy_tools_path),
         session_dir,
+        session_dir,
         None,
     )
     .map_err(|e| Status::internal(e.to_string()))?;
-    write_registrations(&mut vec![file])?;
+    write_registrations(&mut file.into_iter().collect())?;
     Ok(argv)
 }

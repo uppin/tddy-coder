@@ -126,7 +126,11 @@ async fn sandbox_runner_streams_demo_tui_dimensions_on_session_channel() {
             "build tddy-demo-tui before running: cargo build -p tddy-demo-tui"
         );
         let tmp = tempfile::tempdir().unwrap();
-        let (args, egress, plan) = runner_args(tmp.path(), &demo_tui);
+        let (args, egress, _) = runner_args(tmp.path(), &demo_tui);
+        // `tddy-demo-tui` never exits on its own, and the runner waits for its process before the
+        // test's runtime can shut down: bound its life so the test ends once it has been read.
+        let bounded_demo = format!("'{}' & demo=$!; sleep 20; kill $demo", demo_tui.display());
+        let plan = write_exec_plan_with_shim(tmp.path(), &["/bin/sh", "-c", &bounded_demo], true);
         let ready_marker = args.ready_marker.clone();
 
         let runner_task = tokio::spawn(async move {
