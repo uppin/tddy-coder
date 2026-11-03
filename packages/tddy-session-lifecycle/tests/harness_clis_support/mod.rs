@@ -403,6 +403,7 @@ impl AHarnessDaemon {
             session_type: Some(self.harness.session_type().to_string()),
             model: Some(TEST_MODEL.to_string()),
             cursor_chat_id: None,
+            tmux_session: None,
             harness_resume_token: resume_token.map(str::to_string),
             activity_status: None,
             hook_token: None,
