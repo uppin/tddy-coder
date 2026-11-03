@@ -272,14 +272,16 @@ pub(crate) async fn spawn_cursor_cli_session_reporting(
     progress.begin_phase(StartStep::Agent);
     let (cursor_chat_id, launched) = spawn_cursor_cli_process(
         cli_manager,
-        session_id,
-        model,
-        &worktree_path,
-        binary_path,
-        initial_prompt_opt,
-        session_env,
-        run_in_tmux.then_some(os_user),
-        &session_dir,
+        CursorProcess {
+            session_id,
+            model,
+            worktree_path: &worktree_path,
+            binary_path,
+            initial_prompt: initial_prompt_opt,
+            env: session_env,
+            tmux_os_user: run_in_tmux.then_some(os_user),
+            session_dir: &session_dir,
+        },
     )
     .await?;
     progress.end_phase(StartStep::Agent);
@@ -346,21 +348,35 @@ fn prepare_cursor_cli_launch(
     (binary_path, initial_prompt_opt)
 }
 
-#[allow(clippy::too_many_arguments)]
+/// What one cursor-cli agent process is started with.
+struct CursorProcess<'a> {
+    session_id: &'a str,
+    model: &'a str,
+    worktree_path: &'a Path,
+    binary_path: String,
+    initial_prompt: Option<String>,
+    env: Vec<(String, String)>,
+    /// The session's OS user when the agent runs in tmux (as that user); `None` runs it as the PTY
+    /// child, as the daemon.
+    tmux_os_user: Option<&'a str>,
+    /// The session's directory, which holds the pane's environment file.
+    session_dir: &'a Path,
+}
+
 async fn spawn_cursor_cli_process(
     cli_manager: &Arc<CliSessionManager>,
-    session_id: &str,
-    model: &str,
-    worktree_path: &Path,
-    binary_path: String,
-    initial_prompt_opt: Option<String>,
-    session_env: Vec<(String, String)>,
-    // The session's OS user when the agent runs in tmux (as that user); `None` runs it as the PTY
-    // child, as the daemon.
-    tmux_os_user: Option<&str>,
-    // The session's directory, which holds the pane's environment file.
-    session_dir: &Path,
+    process: CursorProcess<'_>,
 ) -> Result<(String, LaunchedCursor), Status> {
+    let CursorProcess {
+        session_id,
+        model,
+        worktree_path,
+        binary_path,
+        initial_prompt: initial_prompt_opt,
+        env: session_env,
+        tmux_os_user,
+        session_dir,
+    } = process;
     let cursor_chat_id = chat::mint_cursor_chat_id(&binary_path, worktree_path)
         .await
         .map_err(|e| {

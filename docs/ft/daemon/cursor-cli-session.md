@@ -51,6 +51,27 @@ The session directory `~/.tddy/sessions/<session-id>/` contains `.session.yaml` 
 - **Signal** — `SignalSession` delivers to the agent PTY process.
 - **Delete** — SIGTERM, wait, remove session directory and worktree.
 
+## tmux mode
+
+A cursor-cli session started with **Run the agent in tmux** (`run_in_tmux = true`) runs the Cursor
+Agent CLI in a detached tmux session on the host, with everything
+[Claude CLI § tmux mode](claude-cli-session.md#tmux-mode-startsessionrequestrun_in_tmux--true) describes — the `tddy-<session id>` name
+recorded as `tmux_session`, the pane's environment file, the pane pid as `pid`, delete, the agent
+outliving its client and its daemon, client-vs-agent exit and the detach watcher — and the same
+refusals with `sandbox`, `sandboxed_codebase` and a split placement.
+
+- **Identity.** In tmux mode the agent runs as the **session's OS user**. Outside tmux it still runs as
+  the daemon user.
+- **Launch.** The argv is the PTY start's: `--model <model> --resume <chat id>` and the first prompt,
+  with the chat minted beforehand as for every start.
+- **Resume** re-attaches while the tmux session is alive (the agent is not relaunched); otherwise it
+  starts a fresh tmux session running `--resume <chat id>`.
+- **Re-attach after a restart.** The first stream, input or history read of the session's `main`
+  terminal on a daemon that has none re-attaches it, dispatched by the session type `.session.yaml`
+  records, so the main keeps its kind (`cursor-cli`). The agent is never relaunched and the recorded `pid`
+  is unchanged.
+- cursor-cli registers no exit hook, so its pane is not kept after the agent exits.
+
 ## Activity status hooks (`.cursor/hooks.json`)
 
 At session start the daemon writes `<worktree>/.cursor/hooks.json`. Each hook invokes `tddy-tools session-hook`, which reads Cursor's stdin JSON `hook_event_name`, maps to `SessionActivityStatus`, and calls `ReportSessionStatus` on `activity.ActivityService`. The daemon validates `hook_token`, writes `activity_status` to `.session.yaml`, and surfaces it via `ListSessions`.

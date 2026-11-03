@@ -125,6 +125,25 @@ Context files served to the session's agent: `AGENTS.md`, `.agents/**`, `opencod
 - **Delete** stops the process and removes the session directory and its daemon-managed worktree (a
   client-supplied checkout is kept).
 
+## tmux mode
+
+An OpenCode session started with **Run the agent in tmux** (`run_in_tmux = true`) runs `opencode` in a
+detached tmux session on the host, as the session's OS user, with everything
+[Claude CLI § tmux mode](claude-cli-session.md#tmux-mode-startsessionrequestrun_in_tmux--true) describes and the same refusals.
+The pane's environment carries the session's own (the provider route's key included) through the
+`0600` environment file, never an argv.
+
+- **Resume** re-attaches while the tmux session is alive; otherwise it starts a fresh tmux session
+  running `opencode --continue`.
+- **Re-attach after a restart.** The first stream, input or history read of the session's `main`
+  terminal on a daemon that has none re-attaches it, dispatched by the session type `.session.yaml`
+  records, so the main keeps its kind (`opencode-cli`). The agent is never relaunched and the recorded `pid`
+  is unchanged.
+- The shared harness path registers the resume-token reader as an exit hook (see
+  [Warp § tmux mode](warp-cli-session.md#tmux-mode)), so the pane is kept after `opencode` exits until
+  the hook has read it, then the tmux session is ended. OpenCode prints no token, so nothing is
+  recorded.
+
 ## Running on a provider account
 
 An opencode-cli session can run on any provider account whose endpoint serves OpenAI Responses or

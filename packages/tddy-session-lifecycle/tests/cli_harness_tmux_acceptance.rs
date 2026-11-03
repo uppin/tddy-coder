@@ -1,15 +1,14 @@
 //! Acceptance tests: every CLI harness session — cursor-cli, opencode-cli, muse-cli, warp-cli —
-//! can run its agent in tmux as the session's OS user (`#tmux-agent` 3/3,
-//! docs/ft/daemon/1-WIP/PRD-2026-11-03-harnesses-in-tmux.md).
+//! can run its agent in tmux as the session's OS user, survives its daemon and is re-attached, and
+//! a Warp agent's exit records its resume token from the final screen (`#tmux-agent` 3/3,
+//! docs/ft/daemon/cursor-cli-session.md § tmux mode and its siblings).
 //!
 //! The fixtures mirror `claude_cli_tmux_session_acceptance.rs` and
-//! `claude_cli_tmux_reattach_acceptance.rs` (n1's and n2's, read-only here); the harnesses are
-//! stub scripts named in `cli_harnesses.<type>.binary_path` (cursor: `cursor_cli.binary_path`),
-//! the pattern of `agent_terminal_tabs_acceptance.rs`. Serial — the tmux socket directory is
-//! process-wide environment.
-//!
-//! Every start goes through n1's launcher and every resume through n2's re-attach, so these stay
-//! red until n1 and n2 are green.
+//! `claude_cli_tmux_reattach_acceptance.rs` (TODO(tmux-agent): share them through `tests/support/`
+//! — the same follow-up those files name); the harnesses are stub scripts named in
+//! `cli_harnesses.<type>.binary_path` (cursor: `cursor_cli.binary_path`), the pattern of
+//! `agent_terminal_tabs_acceptance.rs`. Serial — the tmux socket directory is process-wide
+//! environment.
 
 mod support;
 
@@ -278,9 +277,7 @@ impl HarnessTmuxDaemon {
     }
 
     /// [`Self::restarted`], with the restarted daemon's terminal manager.
-    fn restarted_with_its_manager(
-        &self,
-    ) -> (Arc<DaemonSessionHost>, Arc<ClaudeCliSessionManager>) {
+    fn restarted_with_its_manager(&self) -> (Arc<DaemonSessionHost>, Arc<ClaudeCliSessionManager>) {
         let manager = Arc::new(ClaudeCliSessionManager::new());
         let host = a_session_host(
             self.config.clone(),
@@ -554,8 +551,16 @@ async fn a_fresh_daemon_reattaches_a_live_harness_session_on_first_stream_withou
             .expect("the re-attached main is in the registry");
         assert_eq!(main.kind, session_type, "the main keeps its session's kind");
         until_attached(&daemon.tmux, &name, 1).await;
-        assert_eq!(daemon.launch_count(), 1, "{session_type} was not relaunched");
-        assert_eq!(daemon.metadata_of(&session_id).pid, agent_pid, "{session_type}");
+        assert_eq!(
+            daemon.launch_count(),
+            1,
+            "{session_type} was not relaunched"
+        );
+        assert_eq!(
+            daemon.metadata_of(&session_id).pid,
+            agent_pid,
+            "{session_type}"
+        );
     }
 }
 
@@ -592,7 +597,9 @@ async fn a_warp_agent_that_exits_while_detached_after_a_restart_records_its_resu
         .success());
 
     // Then the fresh daemon read the token from the final screen and recorded it
-    daemon.until_the_resume_token_is(&session_id, "tok-123").await;
+    daemon
+        .until_the_resume_token_is(&session_id, "tok-123")
+        .await;
     // And ended the tmux session with the hook
     eventually("the tmux session to be killed", OBSERVE, || {
         (!daemon.tmux.has_session(&name))
@@ -600,4 +607,64 @@ async fn a_warp_agent_that_exits_while_detached_after_a_restart_records_its_resu
             .ok_or_else(|| format!("tmux still has {name:?}"))
     })
     .await;
+}
+
+#[tokio::test]
+#[serial_test::serial]
+async fn resuming_a_warp_session_whose_agent_exited_with_no_daemon_continues_the_printed_token() {
+    // Given a warp session in tmux whose daemon is gone, and whose agent then exited — its banner
+    // only on the kept pane
+    let daemon = a_daemon_with_a_private_tmux(false).await;
+    let session_id = daemon.starts_in_tmux("warp-cli").await;
+    let name = daemon.tmux_session_of(&session_id);
+    daemon.until_launched_in(&name).await;
+    daemon.host.shut_down_children().await;
+    until_attached(&daemon.tmux, &name, 0).await;
+    let pane = format!("={name}:");
+    assert!(daemon
+        .tmux
+        .tmux(&["send-keys", "-t", &pane, "C-d"])
+        .status
+        .success());
+    eventually("the agent's pane to be dead", OBSERVE, || {
+        let dead = daemon
+            .tmux
+            .tmux(&["display-message", "-p", "-t", &pane, "#{pane_dead}"]);
+        (String::from_utf8_lossy(&dead.stdout).trim() == "1")
+            .then_some(())
+            .ok_or_else(|| "the pane is not dead yet".to_string())
+    })
+    .await;
+    let fresh = daemon.restarted();
+
+    // When it is resumed from a fresh daemon
+    fresh
+        .resume_session(Request::direct(HarnessTmuxDaemon::resume_request(
+            &session_id,
+        )))
+        .await
+        .expect("ResumeSession");
+
+    // Then the token was read from the final screen, and warp resumes that conversation
+    assert_eq!(
+        daemon
+            .metadata_of(&session_id)
+            .harness_resume_token
+            .as_deref(),
+        Some("tok-123")
+    );
+    let argv = eventually("warp to be relaunched", OBSERVE, || {
+        let argv = read_last_appended_argv(&daemon.launches)?;
+        argv.contains(&"--resume".to_string())
+            .then_some(argv.clone())
+            .ok_or_else(|| format!("last launch: {argv:?}"))
+    })
+    .await;
+    let token = argv
+        .iter()
+        .position(|a| a == "--resume")
+        .and_then(|i| argv.get(i + 1))
+        .map(String::as_str);
+    assert_eq!(token, Some("tok-123"));
+    assert_eq!(daemon.launch_count(), 2);
 }

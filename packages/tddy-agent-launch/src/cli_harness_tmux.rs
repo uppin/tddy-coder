@@ -12,10 +12,12 @@
 
 use std::path::{Path, PathBuf};
 
-use tddy_cli_sessions::cli_session_manager::{CliSessionManager, ExitHook};
+use tddy_cli_sessions::cli_session_manager::{
+    exit_hook_capture, CliSessionManager, ExitHook, MainExit,
+};
 use tddy_cli_sessions::tmux::{
-    agent_tmux_session_name, kill_tmux_session, pane_pid, pane_state, start_agent_tmux_session,
-    PaneState,
+    agent_tmux_session_name, capture_final_screen, kill_tmux_session, pane_pid, pane_state,
+    start_agent_tmux_session, PaneState,
 };
 use tddy_rpc::Status;
 
@@ -111,16 +113,7 @@ pub async fn resume_harness_in_tmux(
     launch: HarnessTmuxLaunch<'_>,
 ) -> Result<TmuxLaunched, Status> {
     let name = agent_tmux_session_name(launch.session_id);
-    let state = {
-        let (probe_user, probe_name) = (launch.os_user.to_string(), name.clone());
-        in_tmux_blocking(move || pane_state(&probe_user, &probe_name))
-            .await?
-            .map_err(|e| {
-                Status::internal(format!(
-                    "could not read the pane of tmux session {name:?}: {e}"
-                ))
-            })?
-    };
+    let state = probe_pane_state(launch.os_user, &name).await?;
     match state {
         PaneState::Running => {
             let running = RunningHarness {
@@ -234,16 +227,7 @@ pub async fn reattach_recorded_harness(
         session_dir,
     } = recorded;
     let name = agent_tmux_session_name(session_id);
-    let state = {
-        let (probe_user, probe_name) = (os_user.to_string(), name.clone());
-        in_tmux_blocking(move || pane_state(&probe_user, &probe_name))
-            .await?
-            .map_err(|e| {
-                Status::internal(format!(
-                    "could not read the pane of tmux session {name:?}: {e}"
-                ))
-            })?
-    };
+    let state = probe_pane_state(os_user, &name).await?;
     let on_exit = recorded_exit_hook(session_type, session_dir);
     match (state, on_exit) {
         (PaneState::Running, on_exit) => {
@@ -291,4 +275,52 @@ fn recorded_exit_hook(session_type: &str, session_dir: &Path) -> Option<ExitHook
     let (hook, arm) = resume_token_recorder(session_dir.to_path_buf());
     arm.arm();
     Some(hook)
+}
+
+/// Run the exit hook of a tmux-run harness whose agent exited while no daemon watched it, on the
+/// final screen its kept pane holds, then end its tmux session — what a Resume does before it reads
+/// the recorded resume token, so it continues the conversation that run printed. Nothing for a
+/// running agent, a gone tmux session or a harness with no exit hook.
+pub(crate) async fn settle_unwatched_agent_exit(
+    manager: &CliSessionManager,
+    os_user: &str,
+    session_id: &str,
+    session_type: &str,
+    session_dir: &Path,
+) -> Result<(), Status> {
+    let Some(on_exit) = recorded_exit_hook(session_type, session_dir) else {
+        return Ok(());
+    };
+    let name = agent_tmux_session_name(session_id);
+    if probe_pane_state(os_user, &name).await? != PaneState::Exited {
+        return Ok(());
+    }
+    // A watcher of this daemon that saw the same exit has run, or is running, the same hook.
+    manager.exit_hook_settled(session_id).await;
+    let (read_user, read_name) = (os_user.to_string(), name.clone());
+    let capture = in_tmux_blocking(move || {
+        exit_hook_capture(MainExit::AgentEnded, || {
+            capture_final_screen(&read_user, &read_name)
+        })
+    })
+    .await?;
+    if let Some(capture) = capture {
+        on_exit(capture).await;
+    }
+    let (end_user, end_name) = (os_user.to_string(), name.clone());
+    in_tmux_blocking(move || kill_tmux_session(&end_user, &end_name))
+        .await?
+        .map_err(|e| Status::internal(format!("could not end tmux session {name:?}: {e}")))
+}
+
+/// The state of the agent pane of `os_user`'s tmux session `name`, probed on the blocking pool.
+async fn probe_pane_state(os_user: &str, name: &str) -> Result<PaneState, Status> {
+    let (probe_user, probe_name) = (os_user.to_string(), name.to_string());
+    in_tmux_blocking(move || pane_state(&probe_user, &probe_name))
+        .await?
+        .map_err(|e| {
+            Status::internal(format!(
+                "could not read the pane of tmux session {name:?}: {e}"
+            ))
+        })
 }

@@ -1,5 +1,8 @@
 import React, { useMemo, useState } from "react";
-import { CreateSessionRunInTmuxToggle } from "./CreateSessionRunInTmuxToggle";
+import {
+  CreateSessionRunInTmuxToggle,
+  showsTheSharedTmuxToggle,
+} from "./CreateSessionRunInTmuxToggle";
 import { projectSelectOptions } from "../../lib/projectSelectOptions";
 import type { BaseBranchOption } from "./prstack/baseBranchChoice";
 import type { BranchWorktreeIntent } from "../../lib/branchConflict";
@@ -391,13 +394,8 @@ export function CreateSessionPane({
         />
       )}
 
-      {/* "Run the agent in tmux" for every CLI harness type; claude-cli places it in its own
-          fields. */}
-      {(sessionType === "cursor-cli" ||
-        sessionType === "opencode-cli" ||
-        sessionType === "muse-cli" ||
-        sessionType === "warp-cli") &&
-        runInTmuxToggle}
+      {/* "Run the agent in tmux"; claude-cli places it in its own fields. */}
+      {showsTheSharedTmuxToggle(sessionType) && runInTmuxToggle}
 
       {/* OpenCode and Muse Code session fields: the model alone, from the daemon's list */}
       {(sessionType === "opencode-cli" || sessionType === "muse-cli") && modelField}
