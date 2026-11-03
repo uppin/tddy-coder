@@ -1,4 +1,6 @@
 import React, { useRef } from "react";
+import { mount } from "cypress/react";
+import { GhosttyTerminal, type GhosttyTerminalHandle } from "../../src/components/GhosttyTerminal";
 import { aGhosttyTerminal } from "../support/drivers/ghosttyTerminalDriver";
 
 /** Deterministic overflow content: row-001 .. row-<count>, each on its own line (CRLF). */
@@ -30,6 +32,30 @@ describe("GhosttyTerminal", () => {
 
     // Then the emulator received it once
     driver.expectBufferHoldsTimes("initial-content-marker", 1);
+  });
+
+  it("holds its initial content by the time it reports ready", () => {
+    // Given initial content carrying a marker line, and a ready callback that reads the buffer
+    const handleRef = React.createRef<GhosttyTerminalHandle>();
+    const atReady: { text: string | null } = { text: null };
+    const onReady = () => {
+      atReady.text = handleRef.current?.getBufferText?.() ?? "";
+    };
+
+    // When the terminal is mounted and reports ready
+    mount(
+      <GhosttyTerminal
+        ref={handleRef}
+        initialContent={"ready-content-marker\r\n"}
+        onReady={onReady}
+      />,
+    );
+
+    // Then the buffer already showed the content when ready fired
+    cy.wrap(atReady).should((seen) => {
+      expect(seen.text, "onReady should have fired").to.not.equal(null);
+      expect(seen.text, "the buffer at onReady").to.contain("ready-content-marker");
+    });
   });
 
   it("reveals earlier output when the user drags one finger down to scroll back", () => {
