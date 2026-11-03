@@ -22,6 +22,7 @@ import {
 } from "../../src/gen/terminal_session_pb";
 import { GrpcSessionTerminal } from "../../src/components/sessions/GrpcSessionTerminal";
 import { UploadProgressProvider } from "../../src/rpc/uploadProgress";
+import { aGhosttyTerminal } from "../support/drivers/ghosttyTerminalDriver";
 import { aGhosttyTerminalSession } from "../support/drivers/ghosttyTerminalSessionDriver";
 import { byTestId, TEST_IDS } from "../support/testIds";
 
@@ -151,5 +152,19 @@ describe("A terminal's OSC 52 copy reaches the viewer's clipboard", () => {
       .should("contain.text", "before-the-copy")
       .and("contain.text", "after-the-copy");
     cy.get("@clipboardWrite").should("have.been.calledOnceWith", "x");
+  });
+
+  it("an OSC 52 write inside the initial content copies exactly once", () => {
+    // Given initial content that carries a clipboard write
+    const terminal = aGhosttyTerminal({
+      initialContent: `before${osc52Write("from-initial-content")}after-initial-copy\r\n`,
+      withHandleCapture: true,
+    });
+
+    // When the terminal is mounted and has painted that content
+    terminal.mount().expectExists().expectBufferHoldsTimes("after-initial-copy", 1);
+
+    // Then the viewer's clipboard was written once
+    cy.get("@clipboardWrite").should("have.been.calledOnceWith", "from-initial-content");
   });
 });

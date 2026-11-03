@@ -8,3 +8,5 @@ The OSC 52 tap calls `copyToClipboard` (`navigator.clipboard.writeText`, with an
 **Why deferred:** if the Tauri webview refuses, the fix is a clipboard plugin in `tddy-desktop`, which is a new dependency and needs the developer's decision first.
 
 **Recommendation:** try tmux copy-mode in a tmux tab in the installed desktop app and in a browser over https. Only if it fails, add the Tauri clipboard plugin (a new dependency, so ask first).
+
+**Defer consent:** the developer, 2026-11-03 (`#session-tabs` sweep gate): deferred as recorded; verify tmux copy-mode in the installed desktop app and over https later, add the Tauri clipboard plugin only after asking.

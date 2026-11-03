@@ -25,6 +25,11 @@ pub use tddy_daemon_kernel::privilege_drop::{
     wrap_argv_for_privilege_drop, ResolvedPtyUser,
 };
 
+#[cfg(unix)]
+use tddy_daemon_kernel::privilege_drop::{
+    plan_privilege_change_from, resolve_target_account, EffectiveIdentity, PrivilegeChange,
+};
+
 use std::path::PathBuf;
 use std::sync::Arc;
 
@@ -135,39 +140,48 @@ type ResolvedArgvEnv = (Vec<String>, Vec<(String, String)>);
 /// Resolve the daemon's [`PtySpawnSpec`] into the final `(argv, env)` the shared PTY runtime
 /// spawns verbatim. With no `os_user`, argv/env pass through unchanged. With one, the target user's
 /// `HOME`/`PATH` are prepended and — when the target differs from the daemon's own identity — the
-/// argv is front-loaded with a `setpriv` privilege drop.
+/// argv is front-loaded with a `setpriv` privilege drop — or the spawn is refused with the kernel's
+/// `CannotBecomeUser` when this daemon is not root, the same refusal the tmux listing makes.
 #[cfg(unix)]
 fn resolve_final_argv_env(spec: &PtySpawnSpec) -> Result<ResolvedArgvEnv, String> {
+    resolve_final_argv_env_as(spec, &EffectiveIdentity::current())
+}
+
+/// [`resolve_final_argv_env`] with the daemon's identity passed in, so the refusal is testable on
+/// a host where the test is not root.
+#[cfg(unix)]
+fn resolve_final_argv_env_as(
+    spec: &PtySpawnSpec,
+    current: &EffectiveIdentity,
+) -> Result<ResolvedArgvEnv, String> {
     if spec.argv.is_empty() {
         return Err("empty argv".into());
     }
     match spec.os_user.as_deref() {
         None => Ok((spec.argv.clone(), spec.env.clone())),
         Some(user) => {
-            let resolved = resolve_pty_os_user(user)
+            let target = resolve_target_account(user)
                 .map_err(|e| format!("cannot resolve os_user '{user}': {e}"))?;
-            let home = std::path::PathBuf::from(&resolved.home_dir);
+            let home = std::path::PathBuf::from(&target.home);
             let path_extra = crate::tddy_user_config::spawn_path_extra_for_home(&home);
             let mut env = pty_user_env_overrides(&home, path_extra.as_deref());
             // The managed session's explicit overrides win over the impersonation defaults.
             env.extend(spec.env.iter().cloned());
-            let current_uid = unsafe { libc::getuid() };
-            let current_gid = unsafe { libc::getgid() };
-            let argv = if pty_requires_privilege_drop(
-                resolved.uid,
-                resolved.gid,
-                current_uid,
-                current_gid,
-            ) {
-                log::info!(
-                    target: "tddy_daemon::pty_runtime",
-                    "PTY child for os_user '{user}': dropping to uid={} gid={} via setpriv",
-                    resolved.uid,
-                    resolved.gid
-                );
-                wrap_argv_for_privilege_drop(&spec.argv, resolved.uid, resolved.gid)
-            } else {
-                spec.argv.clone()
+            // The kernel decides, as it does for the tmux listing: refuse before any PTY opens when
+            // this daemon cannot become the user, instead of launching a `setpriv` that fails inside.
+            let argv = match plan_privilege_change_from(target, current)
+                .map_err(|refusal| refusal.to_string())?
+            {
+                PrivilegeChange::None => spec.argv.clone(),
+                PrivilegeChange::Drop(target) => {
+                    log::info!(
+                        target: "tddy_daemon::pty_runtime",
+                        "PTY child for os_user '{user}': dropping to uid={} gid={} via setpriv",
+                        target.uid,
+                        target.gid
+                    );
+                    wrap_argv_for_privilege_drop(&spec.argv, target.uid, target.gid)
+                }
             };
             Ok((argv, env))
         }
@@ -299,5 +313,85 @@ mod tests {
         // When reading back the target user
         // Then it is preserved on the spec
         assert_eq!(spec.os_user.as_deref(), Some("tddy"));
+    }
+
+    /// A spec running `claude` as `os_user`.
+    #[cfg(unix)]
+    fn a_spec_running_as(os_user: &str) -> PtySpawnSpec {
+        PtySpawnSpec {
+            argv: vec!["claude".to_string()],
+            worktree_path: PathBuf::from("/tmp/worktree"),
+            session_id: "session-1".to_string(),
+            terminal_id: "main".to_string(),
+            kind: "claude-cli".to_string(),
+            env: Vec::new(),
+            os_user: Some(os_user.to_string()),
+        }
+    }
+
+    #[cfg(unix)]
+    fn a_daemon_running_as(
+        uid: u32,
+        gid: u32,
+        name: &str,
+    ) -> tddy_daemon_kernel::privilege_drop::EffectiveIdentity {
+        tddy_daemon_kernel::privilege_drop::EffectiveIdentity {
+            uid,
+            gid,
+            name: name.to_string(),
+        }
+    }
+
+    /// The tmux listing refuses a daemon that cannot become the session's user with the kernel's
+    /// `CannotBecomeUser`; the PTY spawn must refuse the same way, before it opens a PTY, so the
+    /// two cannot disagree about a host.
+    #[cfg(unix)]
+    #[test]
+    fn a_daemon_that_cannot_become_the_user_refuses_with_the_kernels_named_error() {
+        // Given a daemon that is not root, and a session run as another user (root exists everywhere)
+        let daemon = a_daemon_running_as(4242, 4242, "tddy");
+        let spec = a_spec_running_as("root");
+
+        // When the spawn is resolved
+        let refusal = resolve_final_argv_env_as(&spec, &daemon).unwrap_err();
+
+        // Then it is the kernel's refusal, naming both users
+        let expected = tddy_daemon_kernel::privilege_drop::CannotBecomeUser {
+            running_as: "tddy".to_string(),
+            requested: "root".to_string(),
+        }
+        .to_string();
+        assert_eq!(refusal, expected);
+    }
+
+    /// A root daemon spawning as another user keeps today's launch: behind `setpriv`.
+    #[cfg(unix)]
+    #[test]
+    fn a_root_daemon_drops_to_another_user_behind_setpriv() {
+        // Given a root daemon and a session run as `nobody`, whose ids are not root's
+        let daemon = a_daemon_running_as(0, 0, "root");
+        let spec = a_spec_running_as("nobody");
+
+        // When the spawn is resolved
+        let (argv, _env) = resolve_final_argv_env_as(&spec, &daemon).expect("root may drop");
+
+        // Then the command line is front-loaded with setpriv
+        assert_eq!(argv.first().map(String::as_str), Some("setpriv"));
+        assert_eq!(argv.last().map(String::as_str), Some("claude"));
+    }
+
+    /// The same-user case needs no drop and must not be refused or wrapped.
+    #[cfg(unix)]
+    #[test]
+    fn the_daemons_own_user_is_neither_refused_nor_wrapped() {
+        // Given a daemon running as root and a session run as root
+        let daemon = a_daemon_running_as(0, 0, "root");
+        let spec = a_spec_running_as("root");
+
+        // When the spawn is resolved
+        let (argv, _env) = resolve_final_argv_env_as(&spec, &daemon).expect("same user");
+
+        // Then the argv is untouched
+        assert_eq!(argv, vec!["claude".to_string()]);
     }
 }

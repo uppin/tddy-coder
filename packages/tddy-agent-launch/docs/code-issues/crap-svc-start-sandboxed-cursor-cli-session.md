@@ -6,6 +6,7 @@
 **Metrics:** **CRAP 1,722** · complexity **41** · **never executed by any test** · rank **5/50** in this crate · 465 lines · nesting depth 3
 **Restructure:** **no** — tests first. Same rule as `packages/tddy-telegram-control/docs/code-issues/crap-telegram-bot-handlers.md`
 **Status:** Open — converted 2026-10-07 by #534 without tests, against this record's rule (developer decision D10 (a)); the `TODO(crap-svc-start-sandboxed-cursor-cli-session)` marker in the source points here; still never executed — **unclaimed**
+**Deferred:** by the developer 2026-11-03 (#session-tabs sweep: code issues deferred, logic issues solved)
 **Moved:** 2026-10-09 by `#carve` 21/21 (#536), engine move into `tddy-agent-launch`, from `packages/tddy-session-lifecycle/src/connection_service/svc_start_sandboxed_cursor_cli_session.rs:32`
 
 ## Measurement history
@@ -22,6 +23,7 @@
 | 2026-10-23 | — | — | never executed | 431 | touched by #698 (`#project-home` 3/7) and **unchanged in shape**: the `_managed_codebase` parameter is now used, passed on into the session metadata write (+1 line, 430 → 431 by brace matching, against `f7e2c5455`). No branch added. CRAP and complexity not re-derived |
 | 2026-10-24 | **1,332** | 36 | never executed | 431 | **Not touched** by `fix-main-agent-harness-se-e79c8de0` (`c1df8e142..4348f160a`): length by brace matching is identical at both. `/analyze-code-issues` re-run on `tddy-agent-launch` (182 tests across 90 files, join 61.7%), then again adding the session-lifecycle `ensure_project_home_session_acceptance` + `project_home_idle_stop_acceptance` (27 tests), with every workspace crate instrumented: never entered in either. Complexity 41 → 36 against the 2026-09-18 figure; the analyzer measured it in its new crate, and I did not attribute the drop. Still rank 1 in the combined run |
 | 2026-11-02 | — | — | never executed | 433 | touched by #805 (`#session-tabs` 2/7) and **unchanged in shape**: +1 line (432 → 433 by brace matching against `a35ebd026`), `self.record_jailed_main(session_id)` after the sandbox state is inserted. No branch added. CRAP and complexity not re-derived |
+| 2026-11-03 | **1,332** | 36 | never executed | 433 | re-measured at master `162a66978` after the `#session-tabs` stack: length unchanged since #805 (433, fn line to closing brace). `tddy-tools analyze` on `tddy-agent-launch` (199 tests across 99 files, join 62.5%): rank 2 in the crate by CRAP (after `start_here` 1,640), complexity 36, never entered. Stack-touched siblings `start_sandboxed_cli_harness_session` (complexity 22, CRAP 506; +1 line, `record_jailed_main`) and `spawn_claude_cli_session_inner` (complexity 15, CRAP 240; +1 line, `record_main_terminal`) are likewise unexecuted but pre-existing and each grew by one call only. Still open, unclaimed |
 
 ## What the tool found
 

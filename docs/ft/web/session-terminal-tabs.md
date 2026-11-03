@@ -75,7 +75,10 @@ styled like the inspector tab strip (`InspectorTabs`).
     its window count and, when any, its attached clients. Choosing one calls `StartTerminalSession`
     with kind `tmux` and that `tmux_session`, and opens a **tmux: <name>** tab attached to it. While
     the listing is in flight the section says "Loading tmux sessions…"
-    (`sessions-terminal-tab-new-tmux-loading`) rather than flashing an empty host; an empty listing
+    (`sessions-terminal-tab-new-tmux-loading`) rather than flashing an empty host; while the session's
+    host is not connected (no terminal client yet) it shows the same "host not connected" text as the
+    terminal tabs, in the error slot, instead of loading for ever, and lists as soon as the host
+    connects; an empty listing
     shows **No tmux sessions** (`sessions-terminal-tab-new-tmux-empty`); a refused listing (tmux not
     installed) shows its reason inline (`sessions-terminal-tab-new-tmux-error`). The bash and harness
     items are unaffected by whatever state the tmux listing is in. A tool session's menu has no tmux
