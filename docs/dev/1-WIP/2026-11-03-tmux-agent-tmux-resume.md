@@ -180,7 +180,7 @@ Rebased onto the wrapped `feature/tmux-agent/claude-in-tmux` (621f85af7). Scoped
 | `cargo test -p tddy-cli-sessions -p tddy-terminal-rpc` | all pass |
 | `cargo test -p tddy-agent-launch --lib` | 175 pass |
 | `claude_cli_tmux_reattach_acceptance` | 8 of 8 (the six originals + same-daemon resume socket + detached watcher) |
-| `claude_cli_tmux_session_acceptance`, `tmux_tabs_acceptance`, `terminal_session_acceptance` | 11/11, 12/12, 8/8 |
+| `claude_cli_tmux_session_acceptance`, `tmux_tabs_acceptance`, `terminal_session_acceptance` | 12/12, 12/12, 8/8 (rebased onto n1 0e251e0a0) |
 | `tddy-coder --test two_server_parity_acceptance` | 12/12 |
 | `cargo clippy --all-targets -- -D warnings`, `cargo fmt` | `tddy-cli-sessions`, `tddy-terminal-rpc`, `tddy-agent-launch`, `tddy-session-lifecycle`, `tddy-coder` clean |
 
