@@ -18,7 +18,8 @@ use tokio::sync::watch;
 
 use super::tmux_reattach::MainExit;
 use super::{CliSessionManager, ExitHook, ExitSettlements, MAIN_TERMINAL_ID};
-use crate::tmux::{capture_final_screen, kill_tmux_session, pane_state, PaneState, TmuxError};
+use crate::tmux::pane::{capture_final_screen, pane_state, PaneState};
+use crate::tmux::{kill_tmux_session, TmuxError};
 
 /// How often a tmux-run agent's pane is checked for having exited.
 pub(crate) const EXIT_HOOK_POLL_INTERVAL: Duration = Duration::from_secs(1);
