@@ -56,6 +56,7 @@ Discovery: [2026-11-03-session-tabs-sweep-initial-discovery.md](./2026-11-03-ses
 ## Decisions & Trade-offs
 
 - **Full unification (a `pre_exec` kernel drop in the PTY child) is not done.** portable-pty 0.9 offers no hook (see discovery 1); bypassing it rewrites the shared spawn path, and the Linux root drop cannot be exercised locally. Options for the developer: (a) patch/vendor portable-pty with a `pre_exec` hook; (b) own `openpty` + `StagedCommand` in `tddy-pty`; (c) keep `setpriv` and the shared decision made here. This changeset ships (c) and leaves the TODO narrowed.
+- **Developer decision 2026-11-03 on item 3:** option (c) — ship the shared decision, keep `setpriv`. Defer consent for the mechanism half recorded in the TODO entry.
 - `ensure_reachable` stays: it refuses the RPC before a handle exists.
 - Menu error flickers while a client is genuinely still connecting; accepted — it matches `useSessionTerminals`.
 
@@ -64,3 +65,22 @@ Discovery: [2026-11-03-session-tabs-sweep-initial-discovery.md](./2026-11-03-ses
 - [x] Red: failing tests
 - [x] Green: the three fixes (item 3 narrowed: shared decision + refusal; mechanism left open)
 - [x] Backlog records: deferral lines, new plus-menu TODO
+
+## Validation Results (2026-11-03)
+
+Ordinary branch (base `master` 162a66978); `origin/master..HEAD` holds only this branch's 5 commits.
+Risk: 0 critical, 0 warning. Info: the menu's host-not-connected text shows briefly while a client is
+genuinely connecting (accepted, see Decisions).
+
+| Item | Status |
+|---|---|
+| State B 1 — initial content written once | ✅ Complete (`GhosttyTerminal.tsx`) |
+| State B 2 — host-not-connected in the tmux menu | ✅ Complete (`useTmuxSessions.ts`) |
+| State B 3 — PTY spawn shares the kernel plan + refusal | ✅ Complete, narrowed (`pty_runtime.rs`); mechanism deferred with consent |
+
+Scoped gates: `cargo test -p tddy-daemon-kernel -p tddy-terminal-rpc -p tddy-cli-sessions` ✅;
+`tddy-session-lifecycle` `--lib connection_service::svc_terminal_ports` (15) and the five tmux/terminal/tab
+acceptance suites (36) ✅; clippy `-p tddy-terminal-rpc --all-targets -D warnings` ✅; fmt ✅;
+`bun test src/components/sessions src/lib` 805/805 ✅; Cypress `GhosttyTerminalOsc52Acceptance` 5,
+`GhosttyTerminal` 12, `UseTmuxSessionsHostNotConnected` 2, `SessionTerminalTabsTmuxAcceptance` 4,
+`SessionTerminalTabsTmuxNewAcceptance` 3 — each run alone ✅.

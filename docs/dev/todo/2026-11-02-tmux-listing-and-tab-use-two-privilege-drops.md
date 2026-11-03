@@ -25,3 +25,7 @@ is not extensible), and the only behaviour it would change is the Linux root-dae
 not exercisable locally. Options: (a) vendor/patch portable-pty with a `pre_exec` hook; (b) own
 `openpty` + `StagedCommand` in `tddy-pty`; (c) keep `setpriv` (today). Needs the developer's choice and
 a Linux-as-root run.
+
+**Defer consent:** the developer, 2026-11-03 (`#session-tabs` sweep): "ship the shared decision, keep
+setpriv" — option (c). The record stays open, narrowed to the drop **mechanism**; options (a) and (b)
+above remain the candidates, and either needs a Linux-as-root run.
