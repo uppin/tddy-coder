@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import type { TmuxSessionInfo } from "../../gen/terminal_session_pb";
 import { tddyDebug } from "../../lib/debugMask";
-import { rpcFailureText } from "../../rpc/rpcFailure";
+import { hostNotConnectedText, rpcFailureText } from "../../rpc/rpcFailure";
 import type { TerminalClient } from "./sessionRuntimeProps";
 
 const dTmux = tddyDebug("tddy:term:tmux");
@@ -19,8 +19,8 @@ export interface TmuxMenuState {
   readonly sessions: readonly TmuxSessionInfo[];
   /** Why the last listing failed (e.g. tmux is not installed), ready to render; `null` otherwise. */
   readonly error: string | null;
-  /** True from a `refresh` until its listing answers. It stays true while the client is still
-   *  connecting, because the listing waits for it rather than reporting an empty host. */
+  /** True from a `refresh` until its listing answers. Never true without a client: that is the
+   *  host-not-connected `error` instead, and the listing still runs when the client arrives. */
   readonly loading: boolean;
   /** List again — called when the "+" menu opens. */
   readonly refresh: () => void;
@@ -78,5 +78,14 @@ export function useTmuxSessions({
 
   const refresh = useCallback(() => setRequests((count) => count + 1), []);
 
-  return { sessions, error, loading: requests !== answered, refresh };
+  // A listing asked for with no client has nothing to wait on but the host connecting: say so, as
+  // the terminal tabs do, rather than loading for ever. When the client arrives the listing runs
+  // and this gives way to its answer.
+  const waitingForHost = requests > 0 && client === null;
+  return {
+    sessions,
+    error: waitingForHost ? hostNotConnectedText(null) : error,
+    loading: !waitingForHost && requests !== answered,
+    refresh,
+  };
 }
