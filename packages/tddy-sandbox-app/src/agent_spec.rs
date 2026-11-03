@@ -13,7 +13,7 @@ use std::fmt;
 use std::path::{Path, PathBuf};
 
 use tddy_actions::tool::{
-    render_argv, ProcessToolHost, ResolvedTool, TemplateParams, ToolDef, ToolError,
+    render_argv, ProcessToolHost, ResolvedTool, TemplateParams, ToolDef, ToolError, ToolHost,
 };
 use tddy_coding_agent_specs::claude_tools::{
     build_claude_allowlist, build_claude_disallowlist, PERMISSION_PROMPT_TOOL,
@@ -111,6 +111,16 @@ impl std::error::Error for AgentChoiceError {}
 /// applied): refused for an id no coding agent has, naming every one the registry holds, for a
 /// spec that is not placed in a jail, and for one whose route is required in a jail.
 pub fn choose_agent(id: &str, tddy_home: &Path) -> Result<ChosenAgent, AgentChoiceError> {
+    choose_agent_on(id, tddy_home, &ProcessToolHost)
+}
+
+/// [`choose_agent`], with the agent and its deps resolved against `host` instead of this process's
+/// environment and `PATH`.
+pub fn choose_agent_on(
+    id: &str,
+    tddy_home: &Path,
+    host: &dyn ToolHost,
+) -> Result<ChosenAgent, AgentChoiceError> {
     let registry =
         load_agent_registry(&tddy_home.join(TOOLS_SUBDIR)).map_err(AgentChoiceError::Registry)?;
     let mut known: Vec<String> = registry
@@ -145,7 +155,7 @@ pub fn choose_agent(id: &str, tddy_home: &Path) -> Result<ChosenAgent, AgentChoi
     }
 
     let mut closure = registry
-        .resolve_closure(&[id], &ProcessToolHost)
+        .resolve_closure(&[id], host)
         .map_err(AgentChoiceError::Registry)?;
     // The closure lists deps first, so the agent's own tool is last.
     let tool = closure.pop().ok_or_else(|| AgentChoiceError::Unknown {

@@ -13564,7 +13564,6 @@ dependencies = [
  "serde",
  "serde_json",
  "serde_yaml",
- "serial_test",
  "tddy-actions",
  "tddy-coding-agent-specs",
  "tddy-core",

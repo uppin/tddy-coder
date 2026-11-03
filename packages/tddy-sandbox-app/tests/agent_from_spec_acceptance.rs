@@ -6,42 +6,74 @@
 //! These tests pin that plan — the boundary between the app and the jail — against what
 //! `--agent-kind claude|cursor` launched before: the same binary, model, session and permission
 //! flags, pass-through args ahead of the MCP flag, `tddy-tools` registered, and the egress shim on.
-//! The binaries are stub scripts, named through the env overrides their specs declare, so the tests
-//! touch no real agent install.
+//! The binaries are stub scripts, `tddy-tools` among them, named through the env overrides their
+//! specs declare. The overrides are held by the fixture's tool host, never set on this process, so
+//! the tests touch no real install and need not run serially.
 
+use std::collections::BTreeMap;
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 
 use pretty_assertions::assert_eq;
-use serial_test::serial;
+use tddy_actions::tool::{ProcessToolHost, ToolHost};
 use tddy_sandbox_app::agent_spec::{
-    agent_exec_plan, choose_agent, AgentChoiceError, AgentJail, ChosenAgent,
+    agent_exec_plan, choose_agent_on, AgentChoiceError, AgentJail, ChosenAgent,
 };
 use tddy_sandbox_runner::ExecPlan;
 
 const SESSION_ID: &str = "0199c0de-0000-7000-8000-000000000010";
 
-/// A `<tddyhome>` with no overrides, and a directory of stub agent binaries.
+/// A `<tddyhome>` with no overrides, a directory of stub agent binaries, and the binary overrides
+/// an operator would export, held here rather than in this process's environment.
 struct AHost {
     tddy_home: tempfile::TempDir,
     bin: tempfile::TempDir,
+    env: BTreeMap<String, String>,
 }
 
+/// This process as a tool host, except that the env overrides are the fixture's own.
+struct FixtureToolHost<'a> {
+    env: &'a BTreeMap<String, String>,
+}
+
+impl ToolHost for FixtureToolHost<'_> {
+    fn env_var(&self, name: &str) -> Option<String> {
+        self.env.get(name).cloned()
+    }
+
+    fn path_dirs(&self) -> Vec<PathBuf> {
+        ProcessToolHost.path_dirs()
+    }
+
+    fn is_executable_file(&self, path: &Path) -> bool {
+        ProcessToolHost.is_executable_file(path)
+    }
+
+    fn canonicalize(&self, path: &Path) -> std::io::Result<PathBuf> {
+        ProcessToolHost.canonicalize(path)
+    }
+}
+
+/// Every coding agent's closure includes `tddy-tools`, so the host gets a stub of it too, named
+/// through its own override. A test then never depends on one being installed on `PATH`.
 fn a_host() -> AHost {
     AHost {
         tddy_home: tempfile::tempdir().expect("a tddy home"),
         bin: tempfile::tempdir().expect("a bin dir"),
+        env: BTreeMap::new(),
     }
+    .with_stub_binary("tddy-tools", "TDDY_TOOLS_BINARY")
 }
 
 impl AHost {
     /// Write an executable stub `name` and point `env` at it, as an operator's override would.
-    fn with_stub_binary(self, name: &str, env: &str) -> Self {
+    fn with_stub_binary(mut self, name: &str, env: &str) -> Self {
         let path = self.bin.path().join(name);
         std::fs::write(&path, "#!/bin/sh\necho \"$0 $*\" >> \"$0.argv\"\n").expect("a stub");
         std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755))
             .expect("an executable stub");
-        std::env::set_var(env, &path);
+        self.env
+            .insert(env.to_string(), path.to_string_lossy().into_owned());
         self
     }
 
@@ -54,7 +86,11 @@ impl AHost {
     }
 
     fn choose(&self, id: &str) -> Result<ChosenAgent, AgentChoiceError> {
-        choose_agent(id, self.tddy_home.path())
+        choose_agent_on(
+            id,
+            self.tddy_home.path(),
+            &FixtureToolHost { env: &self.env },
+        )
     }
 }
 
@@ -126,7 +162,6 @@ fn observe(plan: &ExecPlan, jail: &AgentJail, mcp_flag: Option<&str>) -> Observe
 }
 
 #[test]
-#[serial]
 fn sandbox_app_agent_claude_starts_a_jail_from_the_spec_with_todays_behaviour() {
     // Given
     let host = a_host().with_stub_binary("claude", "TDDY_CLAUDE_BINARY");
@@ -156,7 +191,6 @@ fn sandbox_app_agent_claude_starts_a_jail_from_the_spec_with_todays_behaviour() 
 }
 
 #[test]
-#[serial]
 fn sandbox_app_agent_cursor_does_the_same() {
     // Given
     let host = a_host().with_stub_binary("agent", "TDDY_CURSOR_AGENT");

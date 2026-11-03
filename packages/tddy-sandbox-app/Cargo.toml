@@ -67,7 +67,6 @@ libc = "0.2"
 [dev-dependencies]
 pretty_assertions = { workspace = true }
 tempfile = "3"
-serial_test = "3"
 # The acceptance suite watches a real jail come up and go away; `wait::eventually` is the
 # workspace's one polling helper, and its failures name the last state observed.
 tddy-testing-commons = { path = "../tddy-testing-commons" }
