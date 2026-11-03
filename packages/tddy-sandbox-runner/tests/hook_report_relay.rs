@@ -1,5 +1,5 @@
 //! The in-jail tool-IPC socket relays a jailed agent's hook reports to the facilitating daemon
-//! (`#agent-tools 7/12`, PRD `docs/ft/daemon/1-WIP/PRD-2026-10-31-cursor-cli-from-spec.md`): a
+//! (`#agent-tools 7/12`, `docs/ft/daemon/cursor-cli-session.md`): a
 //! jail is handed no host socket path, so the bridge is how `tddy-tools session-hook` reaches the
 //! daemon from inside one.
 

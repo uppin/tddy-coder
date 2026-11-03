@@ -502,7 +502,7 @@ fn started_without_livekit(session_id: &str) -> Response<StartSessionResponse> {
 }
 
 // TODO(cursor-cli): dead since a host without coding agents refuses; deleted with the per-agent body
-// of this module once the developer approves the deletion (changeset `### From /green`).
+// of this module once approved: docs/dev/todo/2026-11-03-cursor-hand-built-launch-paths.md.
 #[allow(dead_code)]
 fn prepare_cursor_cli_launch(
     config: &DaemonConfig,
@@ -545,7 +545,7 @@ struct CursorProcess<'a> {
 }
 
 // TODO(cursor-cli): dead since a host without coding agents refuses; deleted with the per-agent body
-// of this module once the developer approves the deletion (changeset `### From /green`).
+// of this module once approved: docs/dev/todo/2026-11-03-cursor-hand-built-launch-paths.md.
 #[allow(dead_code)]
 async fn spawn_cursor_cli_process(
     cli_manager: &Arc<CliSessionManager>,

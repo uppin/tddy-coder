@@ -4,6 +4,8 @@
 **Source:** `/validate-changes` on `feature/agent-tools/cursor-cli`. The held implementation is on
 the local ref `wip/agent-tools-cursor-cli-server-socket` (`07128a63e`).
 
+**Starting point:** the local ref `wip/agent-tools-cursor-cli-server-socket` (`07128a63e`, on top of #796's `33c53ed34`): the server binding in `build_context.rs`, `packages/tddy-daemon/tests/server_agent_tool_socket_acceptance.rs` (3 tests, red → green) and the doc edits across 6 crates. #796 shipped without it (developer decision, 2026-11-03).
+
 ## What is there
 
 #796 renders a host Cursor session's `.cursor/hooks.json` with

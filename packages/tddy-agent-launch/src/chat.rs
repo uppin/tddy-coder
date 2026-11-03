@@ -30,14 +30,9 @@ pub fn install_cursor_hooks_in_worktree(
         session_id,
         os_user,
         hook_token: &hook_token,
-        // TODO: on an embedded daemon (Tddy Desktop) `daemon_url` is only the GitHub sign-in
-        // callback, so every cursor hook report is a swallowed 404 — the bug claude-cli hooks were
-        // fixed for by passing the agent-tool socket. Not done here: this installer is also called
-        // for sandboxed cursor sessions (whose jail may not reach a $TMPDIR socket) and from
-        // tddy-telegram-control, and neither caller hands it the daemon's resolved data dir.
-        // Tracked in `docs/dev/todo/2026-10-17-desktop-cursor-hooks-reach-daemon.md`.
-        // A host with coding agents renders its hooks through the `cursor-hooks-json` adapter
-        // instead, over the daemon's agent-tool socket; this installer serves the hand-built path.
+        // The hand-built path, reporting over HTTP. No daemon path calls it: every Cursor launch
+        // renders its hooks through the `cursor-hooks-json` adapter, over the daemon's agent-tool
+        // socket. Deleted once approved: docs/dev/todo/2026-11-03-cursor-hand-built-launch-paths.md.
         daemon_socket: None,
         // Cursor hooks never wait for an answer; the value is unread.
         answer_wait_secs: config.claude_cli_answer_wait_secs(),

@@ -3,7 +3,7 @@
 //! the `cursor-hooks-json` adapter, with no tool flags (`unsupported`). Its jail sections are exercised by the jailed launch
 //! (`tddy-session-lifecycle` `cursor_cli_from_spec_acceptance`).
 //!
-//! PRD: `docs/ft/daemon/1-WIP/PRD-2026-10-31-cursor-cli-from-spec.md` (`#agent-tools 7/12`).
+//! PRD: `docs/ft/daemon/cursor-cli-session.md` (`#agent-tools 7/12`).
 
 use std::path::PathBuf;
 

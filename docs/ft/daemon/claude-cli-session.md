@@ -683,8 +683,9 @@ one the daemon resolved (`TDDY_DATA_DIR` wins over `tddy_data_dir` in the config
 bound the socket under. When `--daemon-socket` is given, `session-hook` uses only the socket. Hooks
 are written at session start, so a session keeps the transport it started with until it restarts.
 
-Split agents' hooks are written the same way. Cursor-cli hooks still report over HTTP only — see
-[`docs/dev/todo/2026-10-17-desktop-cursor-hooks-reach-daemon.md`](../../dev/todo/2026-10-17-desktop-cursor-hooks-reach-daemon.md).
+Split agents' hooks are written the same way. Cursor-cli hooks report over the agent-tool socket on
+the host and over the tool-IPC bridge in a jail — see
+[Cursor CLI session § Activity status hooks](cursor-cli-session.md#activity-status-hooks-cursorhooksjson).
 
 ### Fail-quiet contract
 

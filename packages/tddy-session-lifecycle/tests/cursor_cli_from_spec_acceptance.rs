@@ -2,7 +2,7 @@
 //! the `cursor` tool definition (`tddy-coding-agent-specs/specs/cursor.yaml`) through the shared
 //! launchers, and Cursor's hooks reach the daemon on the host and from inside the jail.
 //!
-//! PRD: `docs/ft/daemon/1-WIP/PRD-2026-10-31-cursor-cli-from-spec.md` (`#agent-tools 7/12`).
+//! PRD: `docs/ft/daemon/cursor-cli-session.md` (`#agent-tools 7/12`).
 //!
 //! The daemon is the real `DaemonSessionHost` given its coding agents as the daemon runtime gives
 //! them (see `cursor_cli_support`); the stub `agent` reports on its terminal what it was started

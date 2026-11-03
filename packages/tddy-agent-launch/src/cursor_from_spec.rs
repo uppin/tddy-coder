@@ -3,7 +3,7 @@
 //! [`crate::spec_launch::launch_host_pty`], in a jail through
 //! [`crate::launch_ports::LaunchSessions::launch_jailed`].
 //!
-//! PRD: `docs/ft/daemon/1-WIP/PRD-2026-10-31-cursor-cli-from-spec.md` (`#agent-tools 7/12`).
+//! PRD: `docs/ft/daemon/cursor-cli-session.md` (`#agent-tools 7/12`).
 //!
 //! Nothing here builds an argv: these are the template parameters `cursor.yaml` names. The chat id
 //! is the one the session owns for its whole lifetime (`agent create-chat`, persisted as

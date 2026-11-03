@@ -1,14 +1,13 @@
 //! Cursor's slots (`#agent-tools 7/12`): the `cursor-mcp-json` registration placed in the agent's
 //! home, the managed-workflow rules file, and the `cursor-hooks-json` hooks adapter.
 //!
-//! PRD: `docs/ft/daemon/1-WIP/PRD-2026-10-31-cursor-cli-from-spec.md`.
+//! PRD: `docs/ft/daemon/cursor-cli-session.md`.
 //!
 //! The hooks adapter reports over the daemon's agent-tool socket and nothing else: on the host it
 //! is the socket the daemon serves co-located agents on, and in a jail the in-jail
 //! `tddy-tools session-hook` reaches the daemon over the tool-IPC bridge instead. Params without a
 //! socket are refused ([`SlotError::NoDaemonSocket`]) — the silent `daemon_url` fallback is what
-//! made every desktop Cursor hook a swallowed 404
-//! (`docs/dev/todo/2026-10-17-desktop-cursor-hooks-reach-daemon.md`).
+//! made every desktop Cursor hook a swallowed 404.
 
 use std::path::{Path, PathBuf};
 
