@@ -16,7 +16,7 @@
 //!
 //! `codex-acp` offers sandbox modes only, no tool withdrawal, so it is `CannotWithdraw`.
 
-use tddy_coding_agent_specs::CodingAgentSpec;
+use tddy_coding_agent_specs::{CodingAgentSpec, ToolSlot};
 
 use crate::catalog::{ACP_HARNESSES, CLAUDE_ACP, OPENCODE};
 
@@ -42,16 +42,19 @@ pub fn confinement_for(harness: &str) -> Confinement {
 
 /// The confinement an ACP launch of `spec` supports, from its ACP deny slot
 /// ([`CodingAgentSpec::acp_tool_deny`], `#agent-tools 11/12`): `acp_meta` and `config_env` withdraw
-/// the declared `acp.withdraw_native`; `unsupported` — and a flag, which an ACP agent cannot take,
-/// or a spec with no `acp` section — is [`Confinement::CannotWithdraw`].
-///
-/// TODO(acp-agents): green makes this the only answer — the launcher and `tddy-session-agents`
-/// read it instead of [`confinement_for`], and `CLAUDE_NATIVE_TOOLS`, `OPENCODE_NATIVE_TOOLS`,
-/// [`withdrawal_session_meta`] and [`opencode_withdrawal_config`] are deleted (items, not files).
+/// the declared `acp.withdraw_native` — and only when that list names something to withdraw.
+/// `unsupported` — and a flag, which an ACP agent cannot take, or a spec with no `acp` section — is
+/// [`Confinement::CannotWithdraw`].
 pub fn confinement_of_spec(spec: &CodingAgentSpec) -> Confinement {
-    // TODO(acp-agents): implement.
-    let _ = spec;
-    todo!("acp-agents: confinement_of_spec")
+    let withdraws = spec
+        .acp()
+        .is_some_and(|acp| !acp.withdraw_native.is_empty());
+    match spec.acp_tool_deny() {
+        Some(ToolSlot::AcpMeta { .. } | ToolSlot::ConfigEnv { .. }) if withdraws => {
+            Confinement::WithdrawsNativeTools
+        }
+        _ => Confinement::CannotWithdraw,
+    }
 }
 
 /// [`refuse_unless_confinable`] for an ACP agent declared as `spec`: refused for a managed session
@@ -67,9 +70,29 @@ pub fn refuse_unless_spec_confinable(
     managed: bool,
     confinable: &[&str],
 ) -> Result<(), String> {
-    // TODO(acp-agents): implement.
-    let _ = (spec, managed, confinable);
-    todo!("acp-agents: refuse_unless_spec_confinable")
+    if !managed || confinement_of_spec(spec) == Confinement::WithdrawsNativeTools {
+        return Ok(());
+    }
+    Err(format!(
+        "the '{}' agent cannot withdraw its native file-system and shell tools (its spec declares \
+         {}), and a managed session's main agent has none, so its subagent must not either: attach \
+         a coding agent that can be confined ({}) or a model agent",
+        spec.id,
+        declaration(spec),
+        confinable.join(", ")
+    ))
+}
+
+/// How `spec` declares its withdrawal, for the refusal to name: its deny slot, or the lack of one.
+fn declaration(spec: &CodingAgentSpec) -> String {
+    match spec.acp_tool_deny() {
+        None => "no acp section".to_string(),
+        Some(ToolSlot::Unsupported(_)) => "tool_deny: unsupported".to_string(),
+        Some(ToolSlot::Flag(flag)) => format!("tool_deny: the flag {}", flag.flag),
+        Some(ToolSlot::AcpMeta { .. } | ToolSlot::ConfigEnv { .. }) => {
+            "an empty acp.withdraw_native".to_string()
+        }
+    }
 }
 
 /// Refuse `harness` for a managed session when its native tools cannot be withdrawn: the session's
