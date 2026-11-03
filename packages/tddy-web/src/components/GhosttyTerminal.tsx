@@ -466,14 +466,10 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
         onResize?.({ cols: term.cols, rows: term.rows });
 
         logLife("term opened cols=%d rows=%d, calling onReady", term.cols, term.rows);
+        // `initialContent` is not written here: the `[initialContent, ready]` effect writes it once
+        // `ready` flips, and a second write would render it twice and copy its OSC 52 twice.
         setReady(true);
         onReady?.();
-
-        if (initialContent) {
-          contentRevisionRef.current++;
-          term.write(initialContent);
-          osc52Tap(initialContent);
-        }
       }
 
       setup();
