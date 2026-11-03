@@ -12,9 +12,7 @@ use tddy_task::TaskHandle;
 
 use super::{ExitSettlements, TerminalEntry};
 
-use super::tmux_reattach::{classify_main_exit, MainExit};
-
-use crate::tmux::tmux_session_alive;
+use super::tmux_reattach::{classify_ended_main, TmuxRun};
 
 use tddy_terminal_rpc::pty_runtime::PtyRuntime;
 
@@ -129,10 +127,7 @@ impl CliSessionManager {
             terminal_id.to_string(),
             handle.task_id.clone(),
             on_exit,
-            TmuxRun {
-                session: tmux_session.map(str::to_string),
-                os_user: os_user.map(str::to_string),
-            },
+            TmuxRun::new(tmux_session, os_user),
         );
 
         log::info!(
@@ -207,8 +202,6 @@ impl CliSessionManager {
     ) {
         let terminals = Arc::clone(&self.terminals);
         let exit_settlements = Arc::clone(&self.exit_settlements);
-        let managed_workflows = Arc::clone(&self.managed_workflows);
-        let exposed_terminals = Arc::clone(&self.exposed_terminals);
         let task_registry = self.task_registry.clone();
         let detach_watch = self.detach_watch();
         tokio::spawn(async move {
@@ -249,25 +242,8 @@ impl CliSessionManager {
                     reg.remove(&session_id);
                 }
             }
-            // The main claude terminal's agent ending ends the session — drop its managed workflow so
-            // the per-session toolcall listener socket is cleaned up, and forget how it was exposed to
-            // LiveKit: there is no terminal left to bridge, and an entry nobody removes would keep
-            // a dead session's block waiting for a consumer that could only find an empty PTY. A
-            // tmux client that ended while its agent lives keeps both: its agent still serves them.
-            if main_exit == Some(MainExit::AgentEnded) {
-                managed_workflows.write().await.remove(&session_id);
-                exposed_terminals.write().await.remove(&session_id);
-            }
-            // The agent outlives the client that just ended, and nothing else will notice when it
-            // ends: a watcher does, and runs the cleanup above then.
-            if main_exit == Some(MainExit::ClientOnly) {
-                if let TmuxRun {
-                    session: Some(session),
-                    os_user: Some(os_user),
-                } = tmux_run
-                {
-                    detach_watch.start(session_id, session, os_user).await;
-                }
+            if let Some(exit) = main_exit {
+                detach_watch.main_ended(session_id, exit, tmux_run).await;
             }
         });
     }
@@ -336,39 +312,6 @@ impl CliSessionManager {
             .ok()?;
         handle.tmux_session = entry.tmux_session;
         Some(Arc::new(handle))
-    }
-}
-
-/// The tmux session a terminal is a client of, and the OS user it runs as — both `None` for a
-/// terminal that is not a tmux client.
-#[derive(Clone)]
-pub(crate) struct TmuxRun {
-    session: Option<String>,
-    os_user: Option<String>,
-}
-
-/// How a main terminal's process ended. The liveness probe runs a process, so it runs on the
-/// blocking pool. A probe that did not finish keeps the session's state: nothing is torn down on a
-/// guess.
-async fn classify_ended_main(tmux_run: TmuxRun) -> MainExit {
-    let TmuxRun { session, os_user } = tmux_run;
-    let classified = tokio::task::spawn_blocking(move || {
-        classify_main_exit(session.as_deref(), |name| {
-            os_user
-                .as_deref()
-                .is_some_and(|user| tmux_session_alive(user, name))
-        })
-    })
-    .await;
-    match classified {
-        Ok(exit) => exit,
-        Err(error) => {
-            log::warn!(
-                target: "tddy_daemon::claude_cli_session",
-                "could not tell whether a main terminal's agent is still running, so its session is kept: {error}"
-            );
-            MainExit::ClientOnly
-        }
     }
 }
 

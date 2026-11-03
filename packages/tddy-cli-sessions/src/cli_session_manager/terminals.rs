@@ -199,9 +199,9 @@ impl CliSessionManager {
     /// Called during daemon shutdown so that spawned `claude` / shell processes do not
     /// outlive the daemon as orphans.
     pub async fn kill_all(&self) {
-        for (_, watcher) in self.detached_watchers.write().await.drain() {
-            watcher.abort();
-        }
+        // Closed before the clients are cancelled: each cancelled tmux-run main exits as a client
+        // only, and a watcher started for it now would outlive the shutdown.
+        self.detached_watchers.write().await.close();
         let task_ids = self.drain_terminals().await;
         if task_ids.is_empty() {
             log::debug!(

@@ -134,11 +134,31 @@ on the host: it shows in `tmux ls` and can be attached from any terminal over SS
   intact. When `.session.yaml` cannot be read, the delete kills `tddy-<session id>` anyway — the name
   is authoritative — treating "no such session" as fine, and a tmux that cannot be run at all is
   logged without blocking the delete of the broken session.
-- **Daemon shutdown** kills each tmux-run agent's tmux session, as the OS user it was started as, with
-  the other terminals; a failed kill is logged and shutdown continues. A **tmux tab**'s session is the
-  user's own and is never killed: its client is stopped, which detaches it.
-- **Resume** of a terminated tmux-run session kills any leftover tmux session of that name, then starts
-  a fresh one running Claude's resume argv (`--resume <id>`).
+- **The agent outlives its client and its daemon.** The main terminal is only a tmux *client*: daemon
+  shutdown stops it, which **detaches** it, and the agent and its tmux session keep running (a tab's
+  tmux session was never touched either).
+- **Client exit vs agent exit.** When the main terminal's client ends, the daemon asks tmux whether the
+  recorded tmux session still lives (`has-session`, as the session's OS user, off the executor).
+  - **Alive** — only the client ended: the terminal entry is dropped and its recording finished, but
+    the session's managed workflow (its toolcall socket) and its LiveKit exposure stay, since the agent
+    still uses them.
+  - **Gone** — the agent ended: the ordinary main-exit cleanup drops both.
+  - A probe that cannot finish tears nothing down.
+- **Detach watcher.** A detached agent is watched: every **10 s** the daemon checks whether its tmux
+  session still lives, and runs the agent-ended cleanup (toolcall socket, exposure) once it is gone. A
+  re-attach stops the watcher; daemon shutdown stops every watcher and starts none.
+- **Re-attach.** A session whose tmux session is alive and has no main terminal registered gets one
+  re-attached — the agent is **never relaunched**, and the recorded `pid` is re-read from the pane:
+  - on **Resume**. A daemon that still serves the session's managed workflow (a client that detached
+    from this daemon) keeps it, so the agent's `TDDY_SOCKET` stays bound; a restarted daemon, which has
+    none, prepares one bound to the same `tddy-wf-<id>.sock` path. A main already attached to that tmux
+    session is returned as it is, so a second Resume adds no second client;
+  - on the **first stream, input or history read** of its `main` terminal — the session reads active
+    (its pane pid lives), so the web never offers Resume. The re-attach reads `.session.yaml`, probes
+    tmux as the requester's OS user, attaches, and registers the main recording; it is single-flight per
+    session, so concurrent first accesses attach one client.
+- **Resume** of a tmux-run session whose tmux session is gone kills any leftover tmux session of that
+  name, then starts a fresh one running Claude's resume argv (`--resume <id>`).
 - **A failed attach** kills the tmux session that start created: nothing records it, so nothing could
   stop it later.
 
@@ -159,6 +179,11 @@ Known limitations:
 
 - `SessionMetadata` is `deny_unknown_fields`, so a daemon older than tmux mode cannot read a tmux-run
   session's record (downgrades are not supported).
+- Nothing records the agent's output while no client is attached: the main recording ends at the
+  client's exit, so an agent that ends while detached leaves the history as of that moment — see
+  [`docs/dev/todo/2026-11-03-detached-tmux-agent-output-is-not-recorded.md`](../../dev/todo/2026-11-03-detached-tmux-agent-output-is-not-recorded.md).
+- A re-attach does not re-register the LiveKit exposure: a client's exit on the same daemon keeps it,
+  and a restarted daemon has nothing to rebuild it from (`stack_parent` is not persisted).
 - The tmux control commands (`new-session`, `kill-session`, `display-message`) drop privilege through
   the kernel's `run_output_as_user`, the client through the PTY runtime — the same split as tmux tabs,
   see [`docs/dev/todo/2026-11-02-tmux-listing-and-tab-use-two-privilege-drops.md`](../../dev/todo/2026-11-02-tmux-listing-and-tab-use-two-privilege-drops.md).

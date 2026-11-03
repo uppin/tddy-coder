@@ -18,7 +18,32 @@ use crate::tmux::tmux_session_alive;
 pub const DETACH_WATCH_INTERVAL: Duration = Duration::from_secs(10);
 
 /// The watchers of detached tmux-run agents, by session.
-pub(crate) type DetachedWatchers = Arc<RwLock<HashMap<String, tokio::task::AbortHandle>>>;
+pub(crate) type DetachedWatchers = Arc<RwLock<Watchers>>;
+
+/// The running watchers, and whether new ones may start: a manager that has shut down
+/// ([`CliSessionManager::kill_all`]) starts none.
+#[derive(Default)]
+pub(crate) struct Watchers {
+    closed: bool,
+    by_session: HashMap<String, tokio::task::AbortHandle>,
+}
+
+impl Watchers {
+    /// Stop `session_id`'s watcher, if one runs.
+    fn stop(&mut self, session_id: &str) {
+        if let Some(watcher) = self.by_session.remove(session_id) {
+            watcher.abort();
+        }
+    }
+
+    /// Stop every watcher and refuse new ones.
+    pub(crate) fn close(&mut self) {
+        self.closed = true;
+        for (_, watcher) in self.by_session.drain() {
+            watcher.abort();
+        }
+    }
+}
 
 /// What a watcher of a detached agent reads and cleans up: the manager's shared state, cloned.
 pub(crate) struct DetachWatch {
@@ -33,10 +58,17 @@ impl DetachWatch {
     /// Watch the tmux session `session` of `os_user`, which holds `session_id`'s agent, until it is
     /// gone or a main terminal is registered for the session again. When it is gone the session's
     /// managed workflow (its toolcall socket) and exposure are dropped — the cleanup a main exiting
-    /// with its agent runs. A watcher already running for the session is replaced.
+    /// with its agent runs. A watcher already running for the session is replaced. Nothing starts
+    /// once the manager has shut down.
     pub(crate) async fn start(self, session_id: String, session: String, os_user: String) {
         let key = session_id.clone();
         let watchers = Arc::clone(&self.watchers);
+        // Held across the spawn, so a concurrent `close` either sees this watcher or stops it first.
+        let mut registry = watchers.write().await;
+        if registry.closed {
+            return;
+        }
+        registry.stop(&key);
         let watcher = tokio::spawn(async move {
             loop {
                 tokio::time::sleep(self.interval).await;
@@ -61,8 +93,7 @@ impl DetachWatch {
                             target: "tddy_daemon::claude_cli_session",
                             "the agent of detached session {session_id} ended (tmux session {session:?} is gone): cleaning up"
                         );
-                        self.managed_workflows.write().await.remove(&session_id);
-                        self.exposed_terminals.write().await.remove(&session_id);
+                        self.drop_agent_state(&session_id).await;
                         return;
                     }
                     // A probe that did not finish tears nothing down: it is tried again.
@@ -73,9 +104,72 @@ impl DetachWatch {
                 }
             }
         });
-        let replaced = watchers.write().await.insert(key, watcher.abort_handle());
-        if let Some(replaced) = replaced {
-            replaced.abort();
+        registry.by_session.insert(key, watcher.abort_handle());
+    }
+
+    /// What a main terminal's end leaves of its session, by how it ended.
+    ///
+    /// The agent ending ends the session: its managed workflow is dropped so the per-session
+    /// toolcall listener socket is cleaned up, and its exposure to LiveKit is forgotten — there is
+    /// no terminal left to bridge, and an entry nobody removes would keep a dead session's block
+    /// waiting for a consumer that could only find an empty PTY. A tmux client that ended while its
+    /// agent lives keeps both, since its agent still serves them; nothing else will notice when that
+    /// agent ends, so a watcher does, and runs the same cleanup then.
+    pub(crate) async fn main_ended(self, session_id: String, exit: MainExit, tmux_run: TmuxRun) {
+        match (exit, tmux_run.session, tmux_run.os_user) {
+            (MainExit::AgentEnded, ..) => self.drop_agent_state(&session_id).await,
+            (MainExit::ClientOnly, Some(session), Some(os_user)) => {
+                self.start(session_id, session, os_user).await;
+            }
+            (MainExit::ClientOnly, ..) => {}
+        }
+    }
+
+    /// The cleanup of a session whose agent ended: its managed workflow and its exposure.
+    async fn drop_agent_state(&self, session_id: &str) {
+        self.managed_workflows.write().await.remove(session_id);
+        self.exposed_terminals.write().await.remove(session_id);
+    }
+}
+
+/// The tmux session a terminal is a client of, and the OS user it runs as — both `None` for a
+/// terminal that is not a tmux client.
+#[derive(Clone)]
+pub(crate) struct TmuxRun {
+    session: Option<String>,
+    os_user: Option<String>,
+}
+
+impl TmuxRun {
+    pub(crate) fn new(session: Option<&str>, os_user: Option<&str>) -> Self {
+        TmuxRun {
+            session: session.map(str::to_string),
+            os_user: os_user.map(str::to_string),
+        }
+    }
+}
+
+/// How a main terminal's process ended. The liveness probe runs a process, so it runs on the
+/// blocking pool. A probe that did not finish keeps the session's state: nothing is torn down on a
+/// guess.
+pub(crate) async fn classify_ended_main(tmux_run: TmuxRun) -> MainExit {
+    let TmuxRun { session, os_user } = tmux_run;
+    let classified = tokio::task::spawn_blocking(move || {
+        classify_main_exit(session.as_deref(), |name| {
+            os_user
+                .as_deref()
+                .is_some_and(|user| tmux_session_alive(user, name))
+        })
+    })
+    .await;
+    match classified {
+        Ok(exit) => exit,
+        Err(error) => {
+            log::warn!(
+                target: "tddy_daemon::claude_cli_session",
+                "could not tell whether a main terminal's agent is still running, so its session is kept: {error}"
+            );
+            MainExit::ClientOnly
         }
     }
 }
@@ -154,10 +248,49 @@ impl CliSessionManager {
         {
             return Ok(attached);
         }
-        if let Some(watcher) = self.detached_watchers.write().await.remove(session_id) {
-            watcher.abort();
-        }
+        self.detached_watchers.write().await.stop(session_id);
         self.attach_main_to_tmux(session_id, worktree, os_user, kind, name)
             .await
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn a_manager_that_shut_down_starts_no_watcher_for_a_detached_agent() {
+        // Given a manager that has shut down
+        let manager = CliSessionManager::new();
+        manager.kill_all().await;
+
+        // When a main cancelled by that shutdown exits as a client only
+        manager
+            .detach_watch()
+            .start("session-1".into(), "tddy-session".into(), "user".into())
+            .await;
+
+        // Then no watcher outlives the shutdown
+        assert!(manager.detached_watchers.read().await.by_session.is_empty());
+    }
+
+    #[tokio::test]
+    async fn a_running_manager_registers_a_watcher_for_a_detached_agent() {
+        // Given a running manager
+        let manager = CliSessionManager::new();
+
+        // When a tmux-run main exits as a client only
+        manager
+            .detach_watch()
+            .start("session-1".into(), "tddy-session".into(), "user".into())
+            .await;
+
+        // Then a watcher is registered for its session
+        assert!(manager
+            .detached_watchers
+            .read()
+            .await
+            .by_session
+            .contains_key("session-1"));
     }
 }

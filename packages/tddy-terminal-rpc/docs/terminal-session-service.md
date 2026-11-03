@@ -66,6 +66,16 @@ reads it. `NoRecordedHistory` is the host that records nothing — the coder par
 passes `tddy-session-lifecycle`'s `SessionDirRecordedHistory`. Tests:
 `tests/recorded_history_acceptance.rs`.
 
+It carries **`main_reattach: Arc<dyn MainReattach>`** — `async fn reattach_main(&self, os_user,
+session_id) -> bool`, which brings a session's `main` terminal back when the host has none registered
+but its agent still runs (a tmux-run agent that outlived its client or its daemon, `#tmux-agent` 2/3).
+`StreamSessionTerminalIo`, `StreamTerminalOutput`, `SendTerminalInput` and `GetTerminalHistory` consult
+it through `ensure_main` **only** for terminal `main` and **only** when `TerminalSessionStore` has no
+running one, with the OS user the service resolved from the token, and then ask the store again — so a
+running main never reaches it and its answer is never trusted over the store's. `NoMainReattach` (the
+coder participant, the test support) attaches nothing; the daemon passes `tddy-session-lifecycle`'s
+`TmuxMainReattach`.
+
 It carries **`tmux: Arc<dyn TmuxHost>`** too — `async fn list(&self, os_user) -> Result<Vec<TmuxSession>,
 Status>`, the sessions on that user's tmux server: empty when no server runs, `FAILED_PRECONDITION` when
 the host has no tmux. `ListTmuxSessions` is a pass-through to it for the OS user the token maps to.

@@ -1,7 +1,8 @@
 //! Acceptance tests: a tmux-run Claude CLI agent survives the daemon and is re-attached, not
-//! relaunched (`#tmux-agent` 2/3, docs/ft/daemon/1-WIP/PRD-2026-11-03-tmux-agent-resume.md).
+//! relaunched (`#tmux-agent` 2/3, docs/ft/daemon/claude-cli-session.md § tmux mode).
 //!
-//! The fixtures mirror `claude_cli_tmux_session_acceptance.rs` (n1's, read-only here), plus a
+//! The fixtures mirror `claude_cli_tmux_session_acceptance.rs` (TODO(tmux-agent): share them through
+//! `tests/support/` once the `#tmux-agent` stack has landed — both files are stack-shared), plus a
 //! *restart*: a second daemon over the same sessions directory and the same private tmux server.
 //! Serial — the tmux socket directory is process-wide environment.
 

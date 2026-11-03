@@ -184,7 +184,18 @@ its agent in a tmux session named `tddy-<session id>`, and its **main** terminal
 kind `claude-cli`) is a client attached to it, recorded with that `tmux_session` — see
 [Claude CLI session § tmux mode](claude-cli-session.md#tmux-mode-startsessionrequestrun_in_tmux--true).
 That session is an ordinary tmux session of the user, so `ListTmuxSessions` lists it and a tab can
-attach to it. Unlike a tab's, it belongs to the agent: Delete and daemon shutdown kill it.
+attach to it. Unlike a tab's, it belongs to the agent: Delete kills it. Daemon shutdown only detaches
+the main terminal's client, so the agent outlives the daemon.
+
+When a tmux-run session has **no main terminal registered** but its tmux session is alive (its client
+exited, or the daemon restarted), the first `StreamSessionTerminalIo`, `StreamTerminalOutput`,
+`SendTerminalInput` or `GetTerminalHistory` addressing `main` **re-attaches** one before it is
+answered. The service consults its host's `MainReattach` port only then — for terminal `main`, when the
+store has no running one — passing the requester's OS user as it resolved it from the token, and asks
+the store again. The daemon's port reads the session's record, checks the tmux session, and attaches a
+client single-flight per session, without relaunching the agent; the coder participant's port
+(`NoMainReattach`) never attaches anything. A session whose agent is gone is answered as before (its
+recorded history).
 
 The listing and every PTY spawn as the session's user (the main agent terminal and every tab) take
 the **same decision** from the kernel's privilege plan: a daemon that cannot become that user refuses

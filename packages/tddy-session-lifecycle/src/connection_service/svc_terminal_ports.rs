@@ -161,17 +161,24 @@ impl MainReattach for TmuxMainReattach {
                 .entry(session_id.to_string())
                 .or_default(),
         );
-        let _one_at_a_time = gate.lock().await;
-        if self.manager.get(session_id).await.is_some() {
-            return true;
+        let attached = {
+            let _one_at_a_time = gate.lock().await;
+            self.manager.get(session_id).await.is_some()
+                || tddy_agent_launch::claude_cli_tmux::reattach_recorded_main(
+                    &self.manager,
+                    &self.tddy_data_dir,
+                    os_user,
+                    session_id,
+                )
+                .await
+        };
+        // The last access out forgets the session's gate (every clone is taken under this lock, so
+        // a count of two — the map's and this one — means nobody else holds or waits on it).
+        let mut in_flight = self.in_flight.lock().await;
+        if Arc::strong_count(&gate) == 2 {
+            in_flight.remove(session_id);
         }
-        tddy_agent_launch::claude_cli_tmux::reattach_recorded_main(
-            &self.manager,
-            &self.tddy_data_dir,
-            os_user,
-            session_id,
-        )
-        .await
+        attached
     }
 }
 

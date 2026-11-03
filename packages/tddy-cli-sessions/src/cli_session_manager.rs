@@ -154,7 +154,7 @@ impl CliSessionManager {
             main_recordings: Arc::new(RwLock::new(HashMap::new())),
             recording_interval: RECORDING_INTERVAL,
             detach_watch_interval: tmux_reattach::DETACH_WATCH_INTERVAL,
-            detached_watchers: Arc::new(RwLock::new(HashMap::new())),
+            detached_watchers: tmux_reattach::DetachedWatchers::default(),
         }
     }
 
