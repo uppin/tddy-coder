@@ -52,7 +52,7 @@ export interface CreateSessionFormValues {
   placementWithdrawsPermissionBypass: boolean;
   initialPrompt: string;
   sandbox: boolean;
-  /** Run the claude agent inside tmux on the host. Sent as `run_in_tmux` for claude-cli only. */
+  /** Run the agent inside tmux on the host. Sent as `run_in_tmux` for every CLI harness type. */
   runInTmux?: boolean;
   managedCodebase: boolean;
   sandboxedCodebase: boolean;
@@ -168,6 +168,7 @@ export function buildStartSessionRequest(
       permissionMode: "",
       initialPrompt,
       sandbox,
+      runInTmux: runInTmuxChoice(form),
       managedCodebase,
       specializedAgents: selectedAgentIds,
       clonePlacedAgents,
@@ -203,6 +204,8 @@ export function buildStartSessionRequest(
       // codebase, specialized agents or semantic index.
       initialPrompt: "",
       sandbox: false,
+      // The one choice these types keep from the form: the tmux run the operator asked for.
+      runInTmux: runInTmuxChoice(form),
       managedCodebase: false,
       specializedAgents: [],
       clonePlacedAgents: [],
@@ -224,10 +227,7 @@ export function buildStartSessionRequest(
     stackNodeId,
     ...claudeCliAgentChoices(form),
     sandbox,
-    // Only this claude-cli return carries the field: the other session types omit it, which the
-    // proto reads as the default. Never sent with the sandbox, the jailed codebase or a split
-    // placement, each of which the daemon refuses together with it.
-    runInTmux: (form.runInTmux ?? false) && !sandbox && !sandboxedCodebase && !isSplitCodebase,
+    runInTmux: runInTmuxChoice(form),
     managedCodebase,
     // The third placement. Choosing it cleared the two above and the codebase host in the form,
     // so they go out cleared here without being restated — the request says what the screen says.
@@ -238,6 +238,20 @@ export function buildStartSessionRequest(
     codebaseDaemonInstanceId: isSplitCodebase ? codebaseDaemonInstanceId : "",
     sshConfigHost,
   };
+}
+
+/**
+ * Whether the request carries `run_in_tmux`: the operator's choice, for every CLI harness type, and
+ * never with the sandbox, the jailed codebase or a split placement, each of which the daemon
+ * refuses together with it. Read off the form rather than off the request: the opencode, muse and
+ * warp returns send `sandbox: false` whatever the form holds. (The pane clears a sandbox or jailed
+ * codebase left on from another session type when it switches to one without the control —
+ * `useCreateSessionPlacement` — so the form does not hold one there.)
+ */
+function runInTmuxChoice(form: CreateSessionFormValues): boolean {
+  return (
+    (form.runInTmux ?? false) && !form.sandbox && !form.sandboxedCodebase && !form.isSplitCodebase
+  );
 }
 
 /**

@@ -89,7 +89,8 @@ Warp prints its resume handle only as it exits, so the token is an output of the
 - Nothing but `harness_resume_token` is written, and only when a token was found.
 
 The reader runs for every CLI harness started through the shared OpenCode / Muse Code / Warp path;
-only Warp prints the line, so the others never record a token.
+only Warp prints the line, so the others never record a token. A session run in tmux reads the same
+line from its pane's final screen instead — see [§ tmux mode](#tmux-mode).
 
 ## Resume
 
@@ -100,6 +101,37 @@ refused with `FAILED_PRECONDITION`.
 
 The conversation continues only if Warp was let exit normally (`/exit`, or Ctrl+C twice) at least
 once; a session whose `warp` was killed resumes into a fresh conversation in the same worktree.
+
+## tmux mode
+
+A Warp session started with **Run the agent in tmux** (`run_in_tmux = true`) runs `warp` in a detached
+tmux session on the host, as the session's OS user, with everything
+[Claude CLI § tmux mode](claude-cli-session.md#tmux-mode-startsessionrequestrun_in_tmux--true) describes and the same refusals.
+What differs is where the resume token is read from:
+
+- **The pane is kept.** The tmux session is created with `remain-on-exit` (`set-option -t =<name>:
+  remain-on-exit on`), so when `warp` exits its pane stays, dead, with its final screen.
+- **The agent's exit runs the reader, a client's never does.** A watcher polls the pane
+  (`display-message -p '#{pane_dead}'`, once a second). Once the agent has exited, the reader runs on
+  the pane's whole scrollback (`capture-pane -p -S -`) exactly as on a PTY run's output — the last
+  `warp --resume <TOKEN>` line is recorded as `harness_resume_token` — and then the tmux session is
+  killed, which ends the client. A client that exits (a detach) while `warp` runs reads nothing. A
+  resume right after the exit waits for the reader, as for a PTY run.
+- **After a daemon restart** the first stream of the session's `main` terminal re-attaches it (as a
+  `warp-cli` main, same `pid`, `warp` not relaunched) and watches the agent again, so a `warp` that
+  exits later — with no client attached — still records its token. A pane found already dead at that
+  point runs the reader on its final screen and attaches nothing. Daemon shutdown stops the watchers
+  still polling (never a reader already running); the next daemon's watcher runs it.
+- **Resume** re-attaches while the tmux session is alive and its agent runs; otherwise it starts a
+  fresh tmux session running `warp --resume <TOKEN>`. A Resume that finds the pane already dead —
+  `warp` exited while no daemon watched it — first runs the reader on that final screen and ends the
+  tmux session, so it continues the conversation that run printed.
+
+Known limitation:
+
+- `remain-on-exit` is set by a second tmux command right after `new-session`. A `warp` that exits
+  before it is set (within milliseconds of the start) loses its pane, and the start is reported as
+  failed.
 
 ## Terminal access, persistence and delete
 

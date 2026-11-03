@@ -380,7 +380,7 @@ export const TEST_IDS = {
   createSessionDangerouslySkipPermissionsToggle:
     "create-session-dangerously-skip-permissions-toggle",
   createSessionSandboxToggle: "create-session-sandbox-toggle",
-  /** "Run the agent in tmux" checkbox (claude-cli only): sets `StartSessionRequest.run_in_tmux`.
+  /** "Run the agent in tmux" checkbox (every CLI harness type): sets `StartSessionRequest.run_in_tmux`.
    * Disabled while the sandbox toggle is on — the two are refused together by the daemon. */
   createSessionTmuxToggle: "create-session-tmux-toggle",
   /** "Sandboxed codebase" checkbox — jails this session's own checkout and runs the agent beside

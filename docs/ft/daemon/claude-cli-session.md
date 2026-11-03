@@ -171,7 +171,12 @@ is created, together with:
 | `sandboxed_codebase` | that placement withdraws the agent's native tools and jails the code — there is no host agent to run in tmux |
 | `codebase_daemon_instance_id` (split placement) | the worktree is on another daemon, and the tmux session runs in a worktree on this host |
 
-Other session types ignore `run_in_tmux`. The agent-facing StartSession tool offers it as a boolean
+[Cursor CLI](cursor-cli-session.md#tmux-mode), [OpenCode](opencode-cli-session.md#tmux-mode),
+[Muse Code](muse-cli-session.md#tmux-mode) and [Warp](warp-cli-session.md#tmux-mode) sessions honour
+`run_in_tmux` with the same behaviour and the same refusals; tool and workspace sessions ignore it. A
+harness with an exit hook (Warp's resume token) keeps its pane after the agent exits and reads the
+hook's output from it — see [Warp § tmux mode](warp-cli-session.md#tmux-mode). The agent-facing
+StartSession tool offers it as a boolean
 beside `sandbox`. On a supervised install a tmux-run session for another OS user is refused with
 `CannotBecomeUser` rather than run as the daemon user.
 

@@ -269,6 +269,7 @@ impl LaunchSessions {
             &clones,
             &self.host.session_account_access(&req.session_token),
             progress,
+            req.run_in_tmux,
         )
         .await
     }
@@ -316,11 +317,9 @@ impl LaunchSessions {
         let clones = tddy_session_agents::agent_host_callbacks::DaemonSeedCloneClaimant {
             service: self.agent_roster.clone(),
         };
-        let route_sources = session_route_sources_with_default(
-            req,
-            harness.session_type,
-            &self.host.session_account_access(&req.session_token),
-        )?;
+        let account_access = self.host.session_account_access(&req.session_token);
+        let route_sources =
+            session_route_sources_with_default(req, harness.session_type, &account_access)?;
         crate::opencode_cli_spawn::start_cli_harness_session(
             crate::opencode_cli_spawn::CliHarnessStart {
                 harness,
@@ -354,9 +353,10 @@ impl LaunchSessions {
                 create_remote_branch: req.create_remote_branch,
                 task_registry: &self.task_registry,
                 agent_clones: &clones,
-                account_access: &self.host.session_account_access(&req.session_token),
+                account_access: &account_access,
                 route_sources: &route_sources,
                 progress,
+                run_in_tmux: req.run_in_tmux,
             },
         )
         .await

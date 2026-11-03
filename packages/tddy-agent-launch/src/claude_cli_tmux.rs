@@ -129,7 +129,8 @@ async fn start_agent_pane(
         worktree.to_path_buf(),
     );
     in_tmux_blocking(move || {
-        start_agent_tmux_session(&os_user, &name, &worktree, &session_dir, &env, &argv)
+        // Claude has no exit hook, so its pane is not kept after the agent exits.
+        start_agent_tmux_session(&os_user, &name, &worktree, &session_dir, &env, &argv, false)
     })
     .await?
     .map_err(|e| Status::internal(format!("failed to spawn claude-cli: {e}")))
@@ -168,7 +169,7 @@ pub async fn resume_claude_in_tmux(
 
 /// Run a blocking tmux operation off the async executor. Every tmux call spawns a process and
 /// waits for it, so none of them may run on the executor's threads.
-async fn in_tmux_blocking<T, F>(operation: F) -> Result<T, Status>
+pub(crate) async fn in_tmux_blocking<T, F>(operation: F) -> Result<T, Status>
 where
     T: Send + 'static,
     F: FnOnce() -> T + Send + 'static,
@@ -180,7 +181,7 @@ where
 
 /// Kill the tmux session of a start that failed after it began. The start's own error is what the
 /// caller is told, so a kill that fails is logged rather than returned.
-async fn stop_tmux_session_of_failed_start(os_user: &str, name: &str) {
+pub(crate) async fn stop_tmux_session_of_failed_start(os_user: &str, name: &str) {
     let (os_user, name) = (os_user.to_string(), name.to_string());
     let outcome = tokio::task::spawn_blocking({
         let name = name.clone();
@@ -251,9 +252,11 @@ pub async fn agent_tmux_session_is_alive(os_user: &str, session_id: &str) -> Res
 
 /// Re-attach `session_id`'s main terminal from what its session directory records, when the session
 /// ran in tmux and its tmux session is alive — the lazy re-attach a first stream triggers after a
-/// daemon restart or a client's exit. The main recording is registered as a start registers it.
-/// `false` when the record is unreadable, the session did not run in tmux, its tmux session is gone
-/// or the attach failed (logged); nothing is relaunched.
+/// daemon restart or a client's exit. Dispatched by the recorded session type: claude-cli here
+/// (its main recording registered as a start registers it), every other CLI harness through
+/// [`crate::cli_harness_tmux::reattach_recorded_harness`]. `false` when the record is unreadable,
+/// the session did not run in tmux, its tmux session is gone, its agent has exited or the attach
+/// failed (logged); nothing is relaunched.
 pub async fn reattach_recorded_main(
     manager: &CliSessionManager,
     tddy_data_dir: &Path,
@@ -285,18 +288,22 @@ pub async fn reattach_recorded_main(
     }
     let worktree_path =
         tddy_core::repo_root_for_session(&session_dir).unwrap_or_else(|| session_dir.clone());
-    let launch = ClaudeCliTmuxLaunch {
+    let recorded = crate::cli_harness_tmux::RecordedHarness {
         os_user,
         session_id,
+        session_type: meta.session_type.as_deref().unwrap_or("claude-cli"),
         worktree_path,
-        resume: true,
-        ..Default::default()
+        session_dir: &session_dir,
     };
-    match reattach_claude_in_tmux(manager, launch).await {
-        Ok(_) => {
-            crate::claude_cli_spawn::record_main_terminal(manager, tddy_data_dir, session_id).await;
-            true
-        }
+    let reattached = if recorded.session_type == "claude-cli" {
+        reattach_recorded_claude(manager, tddy_data_dir, recorded).await
+    } else {
+        // Every other CLI harness re-attaches through its own tmux path, which watches its
+        // agent's exit again (`#tmux-agent` 3/3).
+        crate::cli_harness_tmux::reattach_recorded_harness(manager, recorded).await
+    };
+    match reattached {
+        Ok(attached) => attached,
         Err(error) => {
             log::warn!(
                 target: "tddy_daemon::claude_cli_session",
@@ -306,6 +313,26 @@ pub async fn reattach_recorded_main(
             false
         }
     }
+}
+
+/// [`reattach_claude_in_tmux`] for a recorded claude-cli session, registering its main recording
+/// as a start registers it.
+async fn reattach_recorded_claude(
+    manager: &CliSessionManager,
+    tddy_data_dir: &Path,
+    recorded: crate::cli_harness_tmux::RecordedHarness<'_>,
+) -> Result<bool, Status> {
+    let launch = ClaudeCliTmuxLaunch {
+        os_user: recorded.os_user,
+        session_id: recorded.session_id,
+        worktree_path: recorded.worktree_path,
+        resume: true,
+        ..Default::default()
+    };
+    reattach_claude_in_tmux(manager, launch).await?;
+    crate::claude_cli_spawn::record_main_terminal(manager, tddy_data_dir, recorded.session_id)
+        .await;
+    Ok(true)
 }
 
 /// Relaunch a resumed claude-cli agent and return the pid to record. A session that ran in tmux

@@ -122,6 +122,9 @@ pub struct CliSessionManager {
     detach_watch_interval: Duration,
     /// The watchers of detached tmux-run agents: `session_id → watcher`, stopped by a re-attach.
     detached_watchers: tmux_reattach::DetachedWatchers,
+    /// The exit-hook watchers of tmux-run agents. Kept apart from `detached_watchers`, which a
+    /// re-attach aborts; a shutdown closes both.
+    exit_hook_watched: tmux_exit_hook::ExitHookWatched,
 }
 
 /// Backward-compatible alias for [`CliSessionManager`].
@@ -155,6 +158,7 @@ impl CliSessionManager {
             recording_interval: RECORDING_INTERVAL,
             detach_watch_interval: tmux_reattach::DETACH_WATCH_INTERVAL,
             detached_watchers: tmux_reattach::DetachedWatchers::default(),
+            exit_hook_watched: tmux_exit_hook::ExitHookWatched::default(),
         }
     }
 
@@ -176,6 +180,9 @@ mod tmux_main;
 
 mod tmux_reattach;
 pub use tmux_reattach::{classify_main_exit, MainExit};
+
+mod tmux_exit_hook;
+pub use tmux_exit_hook::exit_hook_capture;
 
 mod relaunch;
 

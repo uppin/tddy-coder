@@ -1,4 +1,8 @@
 import React, { useMemo, useState } from "react";
+import {
+  CreateSessionRunInTmuxToggle,
+  showsTheSharedTmuxToggle,
+} from "./CreateSessionRunInTmuxToggle";
 import { projectSelectOptions } from "../../lib/projectSelectOptions";
 import type { BaseBranchOption } from "./prstack/baseBranchChoice";
 import type { BranchWorktreeIntent } from "../../lib/branchConflict";
@@ -305,6 +309,16 @@ export function CreateSessionPane({
     />
   );
 
+  // One "Run the agent in tmux" control for every CLI harness type: claude-cli places it in its own
+  // fields, the other harnesses in the block below.
+  const runInTmuxToggle = (
+    <CreateSessionRunInTmuxToggle
+      runInTmux={runInTmux}
+      setRunInTmux={setRunInTmux}
+      unavailable={runInTmuxUnavailable}
+    />
+  );
+
   return (
     <div
       data-testid="create-session-pane"
@@ -380,6 +394,9 @@ export function CreateSessionPane({
         />
       )}
 
+      {/* "Run the agent in tmux"; claude-cli places it in its own fields. */}
+      {showsTheSharedTmuxToggle(sessionType) && runInTmuxToggle}
+
       {/* OpenCode and Muse Code session fields: the model alone, from the daemon's list */}
       {(sessionType === "opencode-cli" || sessionType === "muse-cli") && modelField}
 
@@ -395,9 +412,7 @@ export function CreateSessionPane({
           placementWithdrawsPermissionBypass={placementWithdrawsPermissionBypass}
           sandbox={sandbox}
           setSandbox={setSandbox}
-          runInTmux={runInTmux}
-          setRunInTmux={setRunInTmux}
-          runInTmuxUnavailable={runInTmuxUnavailable}
+          runInTmuxToggle={runInTmuxToggle}
           applyPlacement={applyPlacement}
           sandboxedCodebase={sandboxedCodebase}
           sandboxedCodebaseUnavailableReason={sandboxedCodebaseUnavailableReason}

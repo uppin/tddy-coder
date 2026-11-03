@@ -11,6 +11,8 @@
 //! (OpenCode's `opencode.json`) lives in the session directory, its key reaches the child's
 //! environment only.
 
+mod harness_launch;
+
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
@@ -29,15 +31,13 @@ use tddy_session_files::attachment_progress::AttachmentProgressSink;
 use tddy_worktree_service::branch_intent::{BranchIntentPolicy, BranchIntentRequest};
 
 use crate::cli_resume_token::{resume_token_recorder, settled_resume_token};
-use crate::cli_route_launch::{
-    launch_model_for, resume_cli_route, start_cli_route, CliRouteLaunch,
-};
+use crate::cli_route_launch::{launch_model_for, resume_cli_route, start_cli_route};
 use crate::cli_session_worktree::{
     provision_cli_worktree, semantic_index_env, CliWorktree, CliWorktreeStart,
 };
 use crate::session_acting_identity::SessionAccountAccess;
 use crate::stack_parent::SpawnStackParent;
-use tddy_cli_sessions::cli_session_manager::{ExitHook, HarnessLaunchExtras};
+use harness_launch::{launch, launch_extras, HarnessRun, HarnessSession};
 
 /// Everything one CLI harness start reads.
 pub(crate) struct CliHarnessStart<'a> {
@@ -71,6 +71,9 @@ pub(crate) struct CliHarnessStart<'a> {
     pub account_access: &'a SessionAccountAccess,
     pub route_sources: &'a RouteSources,
     pub progress: &'a AttachmentProgressSink,
+    /// Run the harness inside a tmux session as the session's OS user
+    /// (`StartSessionRequest.run_in_tmux`, `#tmux-agent` 3/3).
+    pub run_in_tmux: bool,
 }
 
 /// The binary `harness` is run as: its environment variable, then
@@ -122,6 +125,7 @@ pub(crate) async fn start_cli_harness_session(
         account_access,
         route_sources,
         progress,
+        run_in_tmux,
     } = start;
     let project_id = project_id.trim();
     let repo_path = repo_path.trim();
@@ -218,8 +222,7 @@ pub(crate) async fn start_cli_harness_session(
     let launched = launch(
         cli_manager,
         harness,
-        session_id,
-        &worktree_path,
+        HarnessSession::new(session_id, &worktree_path, &session_dir, os_user),
         &CliLaunch {
             binary: &binary,
             model: launch_model,
@@ -227,13 +230,14 @@ pub(crate) async fn start_cli_harness_session(
             ..CliLaunch::default()
         },
         launch_extras(route.unwrap_or_default(), env, token_recorder),
-        Some(os_user),
+        HarnessRun::start(run_in_tmux),
     )
     .await?;
     progress.end_phase(StartStep::Agent);
 
     let pid = launched.pid;
     let meta = SessionMetadata {
+        tmux_session: launched.tmux_session,
         repo_path: Some(worktree_path.to_string_lossy().to_string()),
         pid: Some(pid),
         model: Some(model.to_string()).filter(|model| !model.is_empty()),
@@ -280,6 +284,17 @@ impl crate::launch_ports::LaunchSessions {
         session_dir: &Path,
         mut metadata: SessionMetadata,
     ) -> Result<Response<ResumeSessionResponse>, Status> {
+        if metadata.tmux_session.is_some() {
+            // A tmux-run agent that exited unwatched left its token on its kept pane.
+            crate::cli_harness_tmux::settle_unwatched_agent_exit(
+                &self.claude_cli_manager,
+                os_user,
+                &req.session_id,
+                harness.session_type,
+                session_dir,
+            )
+            .await?;
+        }
         // The previous run's recorder may still be writing the token it printed as it exited.
         metadata.harness_resume_token =
             settled_resume_token(&self.claude_cli_manager, &req.session_id, session_dir).await?;
@@ -353,8 +368,7 @@ async fn resume_cli_harness_session(
     let launched = launch(
         cli_manager,
         harness,
-        session_id,
-        &worktree_path,
+        HarnessSession::new(session_id, &worktree_path, session_dir, os_user),
         &CliLaunch {
             binary: &binary,
             conversation_id: meta.harness_resume_token.as_deref(),
@@ -362,12 +376,13 @@ async fn resume_cli_harness_session(
             ..CliLaunch::default()
         },
         launch_extras(route, git_environment, token_recorder),
-        Some(os_user),
+        HarnessRun::resume(meta.tmux_session.is_some()),
     )
     .await?;
 
     let mut updated = meta;
     updated.pid = Some(launched.pid);
+    updated.tmux_session = launched.tmux_session;
     updated.status = "active".to_string();
     updated.updated_at = chrono::Utc::now().to_rfc3339();
     write_session_metadata(session_dir, &updated)
@@ -381,44 +396,4 @@ async fn resume_cli_harness_session(
         livekit_url: String::new(),
         livekit_server_identity: String::new(),
     }))
-}
-
-/// What a launch adds to the harness's argv: the route's arguments, `env` with the route's
-/// environment on top, and `on_exit` run once the process has exited.
-fn launch_extras(
-    route: CliRouteLaunch,
-    mut env: Vec<(String, String)>,
-    on_exit: ExitHook,
-) -> HarnessLaunchExtras {
-    env.extend(route.env);
-    HarnessLaunchExtras {
-        args: route.args,
-        env,
-        on_exit: Some(on_exit),
-    }
-}
-
-/// Spawn `harness` with `launch`, followed by `extras`, as `os_user` — the session owner, whose
-/// `HOME` and configured `PATH` extra the child must run under, or its user-local binary and
-/// credentials are never found (a systemd daemon's own `PATH` is minimal).
-async fn launch(
-    cli_manager: &Arc<CliSessionManager>,
-    harness: &CliHarness,
-    session_id: &str,
-    worktree_path: &Path,
-    launch: &CliLaunch<'_>,
-    extras: HarnessLaunchExtras,
-    os_user: Option<&str>,
-) -> Result<Arc<tddy_cli_sessions::cli_session_manager::pty_handle::PtyHandle>, Status> {
-    cli_manager
-        .launch_cli_harness(
-            harness,
-            session_id,
-            worktree_path.to_path_buf(),
-            launch,
-            extras,
-            os_user,
-        )
-        .await
-        .map_err(|e| Status::internal(format!("failed to spawn {}: {e}", harness.session_type)))
 }

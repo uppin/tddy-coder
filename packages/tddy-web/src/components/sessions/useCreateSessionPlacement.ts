@@ -30,7 +30,8 @@ export function useCreateSessionPlacement({
   agentHostInstanceId,
 }: UseCreateSessionPlacementArgs) {
   const [sandbox, setSandbox] = useState(false);
-  // Run the claude agent inside a tmux session on the host (docs/ft/daemon/claude-cli-session.md § tmux mode).
+  // Run the agent inside a tmux session on the host, for every CLI harness type
+  // (docs/ft/daemon/claude-cli-session.md § tmux mode).
   // Exclusive with every placement that is not a plain agent on this host — see `runInTmuxUnavailable`.
   const [runInTmux, setRunInTmux] = useState(false);
   const [managedCodebase, setManagedCodebase] = useState(false);
@@ -154,6 +155,15 @@ export function useCreateSessionPlacement({
     if (runInTmuxUnavailable) setRunInTmux(false);
   }, [runInTmuxUnavailable]);
 
+  // The placement state is shared across session types, but only claude-cli offers the jailed
+  // codebase, and only claude-cli and cursor-cli the sandbox. Switching to a type without the
+  // control clears what another type left on, or it would disable the tmux choice (and withhold it
+  // from the request) with nothing on screen to say why.
+  useEffect(() => {
+    if (!sessionTypeOffersSandbox(sessionType)) setSandbox(false);
+    if (sessionType !== "claude-cli") setSandboxedCodebase(false);
+  }, [sessionType]);
+
   const applyPlacement = (toggled: CodebasePlacementChoice, on: boolean) => {
     const next = placementAfterToggling(currentPlacement, toggled, on);
     setSandboxedCodebase(next === "sandboxedCodebase");
@@ -198,4 +208,9 @@ export function useCreateSessionPlacement({
     applyPlacement,
     sshListDaemonId,
   };
+}
+
+/** Whether the Create pane offers the Sandbox toggle for `sessionType`. */
+function sessionTypeOffersSandbox(sessionType: SessionType): boolean {
+  return sessionType === "claude-cli" || sessionType === "cursor-cli";
 }

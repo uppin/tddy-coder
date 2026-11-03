@@ -104,6 +104,15 @@ session owns its worktree, so the worktree's last Muse Code session is this one.
 re-resolved from the owner's vault as it stands now. A resume whose worktree is gone is refused with
 `FAILED_PRECONDITION`.
 
+## tmux mode
+
+As for [OpenCode § tmux mode](opencode-cli-session.md#tmux-mode): with `run_in_tmux = true`, `muse`
+runs in a detached tmux session on the host as the session's OS user, resumes with `muse --continue`
+in a fresh tmux session when its tmux session is gone, is re-attached (never relaunched) when it is
+alive — on Resume, and on the first stream after a daemon restart, as a `muse-cli` main — and keeps its
+pane after exit until the (empty) resume-token read. Same refusals as
+[Claude CLI § tmux mode](claude-cli-session.md#tmux-mode-startsessionrequestrun_in_tmux--true).
+
 ## Running on a Meta account
 
 Muse Code talks only to Meta, so it runs on a `meta` [provider account](provider-accounts.md) and no
