@@ -138,6 +138,7 @@ impl LaunchSessions {
             append_system_prompt_file: append_system_prompt_file.as_deref(),
             extra_args: split_args,
             env: env_extra,
+            session_dir: session_dir.clone(),
             ..Default::default()
         };
         let pid = relaunch_claude_cli(&manager, in_tmux, launch).await?;

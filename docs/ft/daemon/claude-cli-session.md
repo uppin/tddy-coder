@@ -116,12 +116,16 @@ on the host: it shows in `tmux ls` and can be attached from any terminal over SS
   id, never a prefix: the leading characters of a UUIDv7 are its millisecond timestamp, so a prefix
   repeats across sessions started close together. The name is recorded as `tmux_session` in
   `.session.yaml`, and it is derivable from the id alone.
-- **Launch.** `tmux new-session -d -s <name> -c <worktree> -e K=V … -- <claude argv>` runs as the
-  session's OS user — the argv is the one a PTY start builds. The pane gets the target user's `HOME`
-  and configured `PATH`, then the session's environment on top (toolcall socket, hooks, provider
-  route, renderer settings): a pane inherits the tmux *server's* environment, not a client's, so the
-  environment is set on the pane. Then the main terminal runs `tmux -T clipboard attach-session -t
-  =<name>` as that user.
+- **Launch.** `tmux new-session -d -s <name> -c <worktree> -- /bin/sh -c '. "$1"; rm -f -- "$1";
+  shift; exec "$@"' sh <env file> <claude argv>` runs as the session's OS user — the argv is the one a
+  PTY start builds. A pane inherits the tmux *server's* environment, not a client's, so the pane's
+  environment — the target user's `HOME` and configured `PATH`, then the session's on top (toolcall
+  socket, hooks, provider route, renderer settings) — is handed over in a **file**, never on an argv:
+  the daemon writes it as `export K='v'` lines (shell-quoted) to a fresh file under
+  `<session dir>/tmux-env/`, created with mode `0600` and owned by the session's OS user (the directory
+  is `0700`, the user's too), and the pane sources it, deletes it and `exec`s Claude. No value —
+  the provider token included — appears on any process's argv. A start that fails removes the file
+  itself. Then the main terminal runs `tmux -T clipboard attach-session -t =<name>` as that user.
 - **pid.** The recorded `pid` is tmux's `#{pane_pid}` — the Claude process — not the client's. Liveness,
   **SignalSession** and the delete's process teardown act on the agent.
 - **Delete** kills the tmux session (as the session's OS user) **before** anything else of the session
@@ -158,9 +162,6 @@ Known limitations:
 - The tmux control commands (`new-session`, `kill-session`, `display-message`) drop privilege through
   the kernel's `run_output_as_user`, the client through the PTY runtime — the same split as tmux tabs,
   see [`docs/dev/todo/2026-11-02-tmux-listing-and-tab-use-two-privilege-drops.md`](../../dev/todo/2026-11-02-tmux-listing-and-tab-use-two-privilege-drops.md).
-- The pane's environment travels on `tmux new-session`'s argv, provider token included, readable by
-  local users while that client runs — see
-  [`docs/dev/todo/2026-11-03-tmux-agent-env-on-the-tmux-argv.md`](../../dev/todo/2026-11-03-tmux-agent-env-on-the-tmux-argv.md).
 
 ## Running on a provider account
 

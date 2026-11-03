@@ -15,12 +15,16 @@ use std::path::{Path, PathBuf};
 
 use tddy_daemon_kernel::privilege_drop::{
     plan_privilege_change_from, pty_user_env_overrides, resolve_pty_os_user,
-    resolve_target_account, CannotBecomeUser, EffectiveIdentity,
+    resolve_target_account, CannotBecomeUser, EffectiveIdentity, ResolvedPtyUser,
 };
 use tddy_daemon_kernel::spawn_as_user::run_output_as_user;
 use tddy_daemon_kernel::user_paths::spawn_path_extra_for_home;
 use tddy_rpc::Status;
 use tddy_terminal_rpc::TmuxSession;
+
+pub mod pane_env;
+
+use pane_env::{pane_command, remove_pane_env_file, write_pane_env_file, PaneEnvOwner};
 
 /// The environment variable that names the tmux binary, as `TDDY_CLAUDE_BINARY` names Claude's.
 pub const TMUX_BINARY_ENV: &str = "TDDY_TMUX_BINARY";
@@ -213,14 +217,10 @@ pub fn agent_tmux_session_name(session_id: &str) -> String {
     format!("{AGENT_SESSION_NAME_PREFIX}{name}")
 }
 
-/// The arguments of `tmux new-session` that start `argv` detached in a session `name`, in
-/// `worktree`, with `env` set on the pane: `new-session -d -s <name> -c <worktree> -e K=V -- argv`.
-pub fn agent_new_session_args(
-    name: &str,
-    worktree: &Path,
-    env: &[(String, String)],
-    argv: &[String],
-) -> Vec<String> {
+/// The arguments of `tmux new-session` that start the pane command `command` detached in a session
+/// `name`, in `worktree`: `new-session -d -s <name> -c <worktree> -- command`. The environment is not
+/// among them — see [`pane_env`].
+pub fn agent_new_session_args(name: &str, worktree: &Path, command: &[String]) -> Vec<String> {
     let mut args = vec![
         "new-session".to_string(),
         "-d".to_string(),
@@ -228,37 +228,48 @@ pub fn agent_new_session_args(
         name.to_string(),
         "-c".to_string(),
         worktree.to_string_lossy().into_owned(),
+        "--".to_string(),
     ];
-    for (key, value) in env {
-        args.push("-e".to_string());
-        args.push(format!("{key}={value}"));
-    }
-    args.push("--".to_string());
-    args.extend(argv.iter().cloned());
+    args.extend(command.iter().cloned());
     args
 }
 
-/// Start `argv` in a new detached tmux session `name` in `worktree`, as `os_user`, with `env` set
-/// on the pane (a tmux pane inherits the *server's* environment, not a client's). Returns the pane
-/// process's pid.
+/// Start `argv` in a new detached tmux session `name` in `worktree`, as `os_user`, with `env` on the
+/// pane, and return the pane process's pid.
 ///
-/// The pane also gets the target user's `HOME` and configured `PATH`, as a PTY child run as that
-/// user does; `env` is applied on top of them.
+/// A tmux pane inherits the *server's* environment, not a client's, so the pane's environment —
+/// the target user's `HOME` and configured `PATH`, as a PTY child run as that user gets them, with
+/// `env` on top — is written to a `0600` file under `session_dir` that the pane sources, deletes and
+/// replaces with `argv` ([`pane_env`]). No value is on tmux's argv. A start that fails removes the
+/// file itself.
 pub fn start_agent_tmux_session(
     os_user: &str,
     name: &str,
     worktree: &Path,
+    session_dir: &Path,
     env: &[(String, String)],
     argv: &[String],
 ) -> Result<u32, TmuxError> {
-    let pane_env = pane_environment(os_user, env)?;
-    let args = agent_new_session_args(name, worktree, &pane_env, argv);
-    let output = run_tmux_as_user(os_user, &args)?;
-    if !output.status.success() {
-        return Err(TmuxError::new(format!(
-            "tmux could not start session {name:?}: {}",
-            stderr_of(&output)
-        )));
+    let account = resolve_pty_os_user(os_user).map_err(TmuxError::new)?;
+    let owner = (EffectiveIdentity::current().uid != account.uid).then_some(PaneEnvOwner {
+        uid: account.uid,
+        gid: account.gid,
+    });
+    let env_file = write_pane_env_file(session_dir, owner, &pane_environment(&account, env))?;
+    let args = agent_new_session_args(name, worktree, &pane_command(&env_file, argv));
+    let started = run_tmux_as_user(os_user, &args).and_then(|output| {
+        if output.status.success() {
+            Ok(())
+        } else {
+            Err(TmuxError::new(format!(
+                "tmux could not start session {name:?}: {}",
+                stderr_of(&output)
+            )))
+        }
+    });
+    if let Err(error) = started {
+        remove_pane_env_file(&env_file);
+        return Err(error);
     }
     pane_pid(os_user, name)
 }
@@ -368,21 +379,17 @@ fn run_tmux_as_user(os_user: &str, args: &[String]) -> Result<std::process::Outp
     })
 }
 
-/// The environment of a pane run as `os_user`: the target user's `HOME` and configured `PATH`, as
+/// The environment of a pane run as `account`: the target user's `HOME` and configured `PATH`, as
 /// the PTY runtime gives a child it runs as that user, with `env` on top. A pane inherits the tmux
 /// server's environment, and that was taken from whichever client started the server, so the
 /// user's own `HOME` and `PATH` are set on the pane explicitly.
-fn pane_environment(
-    os_user: &str,
-    env: &[(String, String)],
-) -> Result<Vec<(String, String)>, TmuxError> {
-    let account = resolve_pty_os_user(os_user).map_err(TmuxError::new)?;
+fn pane_environment(account: &ResolvedPtyUser, env: &[(String, String)]) -> Vec<(String, String)> {
     let home = PathBuf::from(&account.home_dir);
     let path_extra = spawn_path_extra_for_home(&home);
     let mut pane = pty_user_env_overrides(&home, path_extra.as_deref());
     pane.retain(|(key, _)| !env.iter().any(|(set, _)| set == key));
     pane.extend(env.iter().cloned());
-    Ok(pane)
+    pane
 }
 
 #[cfg(test)]
@@ -568,41 +575,45 @@ mod tests {
     }
 
     #[test]
-    fn an_agent_session_starts_detached_in_the_worktree_with_its_environment_and_argv() {
+    fn an_agent_session_starts_detached_in_the_worktree_with_its_pane_command_and_no_environment() {
+        // Given a pane environment holding a secret
+        let session_dir = tempfile::tempdir().unwrap();
+        let env_file = pane_env::write_pane_env_file(
+            session_dir.path(),
+            None,
+            &[(
+                "ANTHROPIC_AUTH_TOKEN".to_string(),
+                "sk-sentinel-secret".to_string(),
+            )],
+        )
+        .unwrap();
+        let argv = ["/usr/bin/claude".to_string(), "--session-id".to_string()];
+
         // When
         let args = agent_new_session_args(
             "tddy-01900000",
             std::path::Path::new("/home/dev/feature"),
-            &[
-                ("TDDY_SOCKET".to_string(), "/tmp/s.sock".to_string()),
-                ("CLAUDE_CODE_NO_FLICKER".to_string(), "1".to_string()),
-            ],
-            &[
-                "/usr/bin/claude".to_string(),
-                "--session-id".to_string(),
-                "abc".to_string(),
-            ],
+            &pane_env::pane_command(&env_file, &argv),
         );
 
         // Then
         assert_eq!(
-            args,
-            vec![
+            args[..7],
+            [
                 "new-session",
                 "-d",
                 "-s",
                 "tddy-01900000",
                 "-c",
                 "/home/dev/feature",
-                "-e",
-                "TDDY_SOCKET=/tmp/s.sock",
-                "-e",
-                "CLAUDE_CODE_NO_FLICKER=1",
-                "--",
-                "/usr/bin/claude",
-                "--session-id",
-                "abc"
+                "--"
             ]
+        );
+        assert_eq!(args[args.len() - 2..], argv);
+        assert!(!args.iter().any(|a| a == "-e"), "{args:?}");
+        assert!(
+            args.iter().all(|a| !a.contains("sk-sentinel-secret")),
+            "no environment value is on tmux's argv: {args:?}"
         );
     }
 }

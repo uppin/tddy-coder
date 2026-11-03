@@ -32,9 +32,13 @@ pub struct ClaudeCliTmuxLaunch<'a> {
     pub resume: bool,
     pub append_system_prompt_file: Option<&'a Path>,
     pub extra_args: Vec<String>,
-    /// Set on the tmux *pane* (`new-session -e`): a pane inherits the tmux server's environment,
-    /// not the client's.
+    /// Set on the tmux *pane*, through a `0600` file under `session_dir` the pane sources and
+    /// deletes (`tddy_cli_sessions::tmux::pane_env`): a pane inherits the tmux server's
+    /// environment, not the client's, and no value may go on an argv.
     pub env: Vec<(String, String)>,
+    /// The session's directory (absolute), which holds the pane environment file. Unused by a
+    /// PTY-child launch.
+    pub session_dir: PathBuf,
 }
 
 /// A claude agent running in tmux, and the main terminal attached to it.
@@ -51,7 +55,8 @@ pub struct TmuxLaunched {
 ///
 /// The argv is the one a PTY-hosted start builds ([`CliSessionManager::build_claude_argv`] with
 /// [`CliSessionManager::with_claude_launch_flags`]).
-/// The pane is started with `launch.env` on it, and its pid is the agent's.
+/// The pane is started with `launch.env` on it (from a file, never an argv), and its pid is the
+/// agent's.
 pub async fn start_claude_in_tmux(
     manager: &CliSessionManager,
     launch: ClaudeCliTmuxLaunch<'_>,
@@ -69,6 +74,7 @@ pub async fn start_claude_in_tmux(
         append_system_prompt_file,
         extra_args,
         env,
+        session_dir,
     } = launch;
     let name = agent_tmux_session_name(session_id);
     let argv = CliSessionManager::with_claude_launch_flags(
@@ -85,12 +91,7 @@ pub async fn start_claude_in_tmux(
         append_system_prompt_file,
         extra_args,
     );
-    let pane_pid = {
-        let (os_user, name, worktree) = (os_user.to_string(), name.clone(), worktree_path.clone());
-        in_tmux_blocking(move || start_agent_tmux_session(&os_user, &name, &worktree, &env, &argv))
-            .await?
-            .map_err(|e| Status::internal(format!("failed to spawn claude-cli: {e}")))?
-    };
+    let pane_pid = start_agent_pane(os_user, &name, &worktree_path, session_dir, env, argv).await?;
     let handle = match manager
         .attach_main_to_tmux(session_id, worktree_path, os_user, "claude-cli", &name)
         .await
@@ -110,6 +111,27 @@ pub async fn start_claude_in_tmux(
         pane_pid,
         tmux_session: name,
     })
+}
+
+/// Start `argv` in the agent's tmux session `name`, off the executor, and return the pane's pid.
+async fn start_agent_pane(
+    os_user: &str,
+    name: &str,
+    worktree: &Path,
+    session_dir: PathBuf,
+    env: Vec<(String, String)>,
+    argv: Vec<String>,
+) -> Result<u32, Status> {
+    let (os_user, name, worktree) = (
+        os_user.to_string(),
+        name.to_string(),
+        worktree.to_path_buf(),
+    );
+    in_tmux_blocking(move || {
+        start_agent_tmux_session(&os_user, &name, &worktree, &session_dir, &env, &argv)
+    })
+    .await?
+    .map_err(|e| Status::internal(format!("failed to spawn claude-cli: {e}")))
 }
 
 /// Resume a tmux-run session: kill the leftover tmux session of the terminated run, then start

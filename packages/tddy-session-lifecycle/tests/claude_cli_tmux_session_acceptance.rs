@@ -361,6 +361,49 @@ async fn claude_in_tmux_sees_the_session_environment() {
 
 #[tokio::test]
 #[serial_test::serial]
+async fn the_pane_environment_file_is_gone_once_the_agent_runs_and_no_value_was_on_tmuxs_argv() {
+    // Given
+    let daemon = a_daemon_with_a_private_tmux().await;
+
+    // When
+    let session_id = daemon.starts_a_session_in_tmux().await;
+    let name = daemon.tmux_session_of(&session_id);
+    daemon
+        .until_the_agent_ran_in_tmux_session(&daemon.tmux, &name)
+        .await;
+
+    // Then the pane sourced and deleted the file the environment was handed over in
+    let env_dir = daemon
+        .session_dir(&session_id)
+        .join(tddy_cli_sessions::tmux::pane_env::PANE_ENV_DIR);
+    eventually("the pane environment file to be deleted", OBSERVE, || {
+        let left: Vec<_> = std::fs::read_dir(&env_dir)
+            .map_err(|e| format!("{}: {e}", env_dir.display()))?
+            .filter_map(Result::ok)
+            .map(|entry| entry.path())
+            .collect();
+        left.is_empty()
+            .then_some(())
+            .ok_or_else(|| format!("still there: {left:?}"))
+    })
+    .await;
+    // and the pane's command names a file, never a value
+    let start_command = daemon.tmux.tmux(&[
+        "display-message",
+        "-p",
+        "-t",
+        &format!("={name}:"),
+        "#{pane_start_command}",
+    ]);
+    let start_command = String::from_utf8_lossy(&start_command.stdout);
+    assert!(
+        !start_command.contains("CLAUDE_CODE_NO_FLICKER"),
+        "{start_command}"
+    );
+}
+
+#[tokio::test]
+#[serial_test::serial]
 async fn deleting_a_tmux_run_session_kills_the_agent_and_the_tmux_session() {
     // Given a running tmux-run session
     let daemon = a_daemon_with_a_private_tmux().await;

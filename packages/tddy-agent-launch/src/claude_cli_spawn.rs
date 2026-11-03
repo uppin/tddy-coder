@@ -295,6 +295,7 @@ pub(crate) async fn spawn_claude_cli_session_inner(
             env_extra,
             main: role.main,
             run_in_tmux,
+            session_dir: session_dir.clone(),
         },
     )
     .await?;

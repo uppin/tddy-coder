@@ -336,6 +336,8 @@ pub(super) struct ClaudeCliProcess<'a> {
     pub(super) main: Option<crate::project_home_launch::MainLaunchPlan<'a>>,
     /// Run `claude` inside a tmux session instead of as the PTY child ([`crate::claude_cli_tmux`]).
     pub(super) run_in_tmux: bool,
+    /// The session's directory: a tmux-run agent's pane environment file is written under it.
+    pub(super) session_dir: PathBuf,
 }
 
 /// A started claude-cli agent: the pid the session records, and the tmux session it runs in when
@@ -365,6 +367,7 @@ pub(super) async fn spawn_claude_cli_process(
         env_extra,
         main,
         run_in_tmux,
+        session_dir,
     } = launch;
     let role_launch = crate::project_home_launch::RoleLaunch::of(main)?;
     let launch = ClaudeCliTmuxLaunch {
@@ -380,6 +383,7 @@ pub(super) async fn spawn_claude_cli_process(
         append_system_prompt_file: append_system_prompt_file.as_deref(),
         extra_args: role_launch.extra_args,
         env: env_extra.into_iter().chain(role_launch.env).collect(),
+        session_dir,
     };
     let spawned = if run_in_tmux {
         let launched = crate::claude_cli_tmux::start_claude_in_tmux(&manager, launch).await?;
