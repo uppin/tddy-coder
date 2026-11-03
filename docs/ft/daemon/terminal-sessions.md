@@ -178,9 +178,13 @@ A tmux tab on a stopped session starts in the worktree the session's record name
 tab does. Like the other tabs it is not persisted across a daemon restart — but the tmux session it
 attached to is the user's and survives, so it can simply be attached again.
 
-Known limitation: the listing drops privilege through the kernel's `run_output_as_user`, the tab
-through the PTY runtime's `setpriv` wrapper; on a host where only one of them works, the menu can list
-sessions the tab cannot attach to — see
+The listing and every PTY spawn as the session's user (the main agent terminal and every tab) take
+the **same decision** from the kernel's privilege plan: a daemon that cannot become that user refuses
+with the same `CannotBecomeUser` message before any process or PTY opens, so the menu never lists
+sessions on a host the tab would refuse.
+
+Known limitation: the **mechanism** still differs — the listing drops privilege through the kernel's
+`run_output_as_user` (`pre_exec`), a root daemon's tab through the PTY runtime's `setpriv` wrapper — see
 [`docs/dev/todo/2026-11-02-tmux-listing-and-tab-use-two-privilege-drops.md`](../../dev/todo/2026-11-02-tmux-listing-and-tab-use-two-privilege-drops.md).
 
 ## Terminal Control Ownership (Single-Screen Mutex)

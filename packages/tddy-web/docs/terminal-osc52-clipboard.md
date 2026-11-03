@@ -5,7 +5,7 @@ Product behaviour: [Web terminal](../../../docs/ft/web/web-terminal.md) § Clipb
 ## Shape
 
 - **`src/lib/osc52.ts`** — `createOsc52Recognizer(onCopy, { maxDecodedBytes? })` returns a function fed every chunk (`Uint8Array | string`) a terminal is written. It is a byte-wise state machine (ground, escape, osc, osc-escape) that survives chunk boundaries at any byte, ends an OSC at BEL or `ESC \`, aborts it on CAN, SUB or a stray ESC, and calls `onCopy(text)` for every accepted `52;<selection>;<base64>` body. `OSC52_MAX_DECODED_BYTES` (1 MiB) is the default cap.
-- **`src/components/GhosttyTerminal.tsx`** — one recognizer per terminal instance (`useMemo`), whose `onCopy` is `copyToClipboard` from `src/lib/clipboard.ts`. It is a **tap, not a filter**: `term.write` receives the same bytes as before, and the recognizer is fed the same bytes beside it, in the imperative `write`, and for `initialContent`. ghostty-web 0.4 has no OSC 52 hook of its own (its `copyToClipboard` serves mouse selection), so the copy happens only here.
+- **`src/components/GhosttyTerminal.tsx`** — one recognizer per terminal instance (`useMemo`), whose `onCopy` is `copyToClipboard` from `src/lib/clipboard.ts`. It is a **tap, not a filter**: `term.write` receives the same bytes as before, and the recognizer is fed the same bytes beside it, in the imperative `write`, and for `initialContent` — which is written (and tapped) **once**, by the effect that runs when the terminal becomes ready, so an OSC 52 inside it copies once. ghostty-web 0.4 has no OSC 52 hook of its own (its `copyToClipboard` serves mouse selection), so the copy happens only here.
 
 ## Rules
 
@@ -20,4 +20,3 @@ Product behaviour: [Web terminal](../../../docs/ft/web/web-terminal.md) § Clipb
 ## Known limits
 
 - The Tauri webview's and a plain-http origin's clipboard reachability is unverified: see `docs/dev/todo/2026-11-02-osc52-clipboard-reachability-unverified.md`.
-- Output given as `initialContent` is written, and so tapped, twice on mount: see `docs/dev/todo/2026-11-02-ghostty-terminal-initial-content-written-twice.md`.
