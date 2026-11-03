@@ -19,10 +19,12 @@ State A below is distilled from that file. Grep traces and file dumps are not re
 | Record | Verdict |
 |---|---|
 | [2026-10-17-desktop-cursor-hooks-reach-daemon.md](../todo/2026-10-17-desktop-cursor-hooks-reach-daemon.md) | ✅ **RESOLVED HERE** (decided 2026-10-31). The hooks slot renders the daemon's agent-tool socket on the host, and hook reports go over the tool-IPC bridge in a jail |
-| `packages/tddy-agent-launch/docs/code-issues/crap-svc-start-sandboxed-cursor-cli-session.md` | ✅ **RESOLVED HERE.** The function is deleted, and the jailed Cursor start is executed by the new acceptance tests. Claimed at commit 2 |
-| `packages/tddy-agent-launch/docs/code-issues/complexity-cursor-cli-spawn-spawn-cursor-cli-session-inner.md` | ✅ **RESOLVED HERE.** The per-agent body is replaced by `launch_host_pty`. Claimed at commit 2 |
+| `packages/tddy-agent-launch/docs/code-issues/crap-svc-start-sandboxed-cursor-cli-session.md` | ⚠ **Partially fixed, not resolved** (re-measured 2026-11-03). The function is not deleted (the file deletion awaits approval), but it is 431 → 363 lines and the macOS jailed tests in `cursor_cli_from_spec_acceptance` now enter it. CRAP not re-derived. The claim is released; the rest is deferred to the #agent-tools sweep node (developer, 2026-11-02) |
+| `packages/tddy-agent-launch/docs/code-issues/complexity-cursor-cli-spawn-spawn-cursor-cli-session-inner.md` | ⚠ **Not resolved, worse** (re-measured 2026-11-03). The launch is replaced by `launch_host_pty`, but `spawn_cursor_cli_session_inner` is 75 → 78 lines and `spawn_cursor_cli_session_reporting` 202 → 217, and the dead hand-built helpers stay until their deletion is approved. The claim is released; deferred to the #agent-tools sweep node (developer, 2026-11-02) |
 | [2026-09-24-lifecycle-shared-sandboxed-jail-launch-needs-coverage-first.md](../todo/2026-09-24-lifecycle-shared-sandboxed-jail-launch-needs-coverage-first.md) | ℹ Claimed by #794 claude-jail. This node moves the third caller (Cursor) onto `launch_jailed`, and #794's wrap records the closure |
 | [2026-08-13-cursor-cli-cannot-enforce-managed-codebase-mode.md](../todo/2026-08-13-cursor-cli-cannot-enforce-managed-codebase-mode.md) | ⚠ During. Unchanged: `cursor.yaml` declares `tool_deny: unsupported`, so the refusals stay spec-driven |
+| [2026-11-03-cursor-hand-built-launch-paths.md](../todo/2026-11-03-cursor-hand-built-launch-paths.md) | 🆕 Added here: the deletions awaiting approval (the hand-built Cursor paths) |
+| [2026-11-03-server-daemon-agent-tool-socket-per-os-user.md](../todo/2026-11-03-server-daemon-agent-tool-socket-per-os-user.md) | 🆕 Added here, ⛔ **blocked developer decision**. Server daemons binding the socket is held on the local ref `wip/agent-tools-cursor-cli-server-socket`, because the per-user socket needs a supervisor protocol change. Until then a server daemon's host Cursor hooks are dropped |
 | [2026-10-25-cursor-project-mcp-config-outlives-its-conversation.md](../todo/2026-10-25-cursor-project-mcp-config-outlives-its-conversation.md) | — Unrelated here (headless conversations). Claimed by #798 |
 
 ## Affected Packages
@@ -236,6 +238,24 @@ Real dependency edges, as opposed to the branch line:
 - **Deletions awaiting approval:** `svc_start_sandboxed_cursor_cli_session.rs` (its jailed start is now `launch_jailed_cursor`; the file still holds it) and the per-agent body of `spawn_cursor_cli_session_inner`/`resume_cursor_cli_session` (the `None` arms).
 
 ### From /validate-changes
+
+**Run 2026-11-03** on the rebased branch (base `origin/feature/agent-tools/claude-headless` at `f1a9949d2`).
+
+- **Stack gate:** single-mode rebase `--onto origin/feature/agent-tools/claude-headless 351bc147c`, with no conflicts. The leak check is clean: `origin/<base>..HEAD` holds this PR's 4 commits only.
+- **Stack boundary:** the Responsibility is delivered. No `## Dependencies` symbol is implemented here, and no parent-owned file is deleted. The two planned deletions are **not** made; they await approval (`docs/dev/todo/2026-11-03-cursor-hand-built-launch-paths.md`).
+- **Developer decision: server daemons bind the agent-tool socket too (2026-11-03).** This answers the `/green` open question. An implementation, test first, exists on the **local** ref `wip/agent-tools-cursor-cli-server-socket` (`07128a63e`):
+  - `build_context.rs` binds for both hosts;
+  - `packages/tddy-daemon/tests/server_agent_tool_socket_acceptance.rs` holds 3 tests, red then green;
+  - doc edits in 6 crates.
+
+  It is **held, not shipped**. It showed a multi-user hazard: the socket is bound under the daemon user's `$TMPDIR` with the default mode. Under `tddy-supervisor`, sessions run as other OS users and get EACCES, while the daemon's connect probe still answers `Some`. Claude's and Cursor's hooks and tools would then silently lose reports that work over HTTP today.
+- **Developer decision: one agent-tool socket per OS user (2026-11-03)**, following `host_session_socket.rs`. **Blocked: it needs a new supervisor protocol.** The supervisor hands over exactly one socket per user (`host-session.<user>`, whose directory "must be used by this socket alone"), so it cannot hand over a second, agent-tool socket. Until that is decided, a **server** daemon's host Cursor hooks report to a socket nothing serves, as after `/green`.
+- **Fixed here:**
+  - `session_agent_remote_acceptance::seeds_a_peers_agent_onto_a_session_whose_codebase_is_here`: daemon A gets its coding agents in the Given, bound as the runtime binds them (`host_coding_agents`). This is this node's regression from removing the fallback.
+  - The 4 jailed tests in `cursor_cli_from_spec_acceptance` get `#[serial_test::serial]`, as the crate's other suites use. No assertion changed.
+  - `relays_to_the_host` was inserted under `ToolExecService`'s doc comment, which then documented the function. It is moved above that comment.
+- **Not fixed (accepted):** the two hook-report arms in `daemon_rpc_handler.rs` repeat the decode → own-session check → call shape. They follow the file's existing arms.
+- **File-length gate:** `cursor_cli_spawn.rs` 429 → 586, `svc_start_sandboxed_cursor_cli_session.rs` 467 → 549, `tddy-tools/src/session_hook.rs` 498 → 535, `runner.rs` 2,847 → 2,854. Each is recorded in `packages/*/docs/code-issues/` and deferred to the #agent-tools sweep node (developer, 2026-11-02).
 ### From /validate-tests
 ### From /validate-prod-ready
 ### From /analyze-clean-code
@@ -243,7 +263,7 @@ Real dependency edges, as opposed to the branch line:
 ## Validation Results
 | Validation | Last Run | Status |
 |------------|----------|--------|
-| /validate-changes | Not yet run | Pending |
+| /validate-changes | 2026-11-03 | ⚠ Done. One developer decision is blocked (per-user socket); see `### From /validate-changes` |
 | /validate-tests | Not yet run | Pending |
 | /validate-prod-ready | Not yet run | Pending |
 | /analyze-clean-code | Not yet run | Pending |

@@ -6,7 +6,6 @@
 //! cursor-cli and claude-cli session types — the cursor-cli path was the
 //! regression (hardcoded `None` for the chain base).
 
-#[allow(dead_code)]
 mod cursor_cli_support;
 
 use std::path::PathBuf;

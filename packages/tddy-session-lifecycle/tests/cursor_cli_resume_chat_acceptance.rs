@@ -18,7 +18,6 @@
 //! CLI open an interactive chat picker that would wedge the PTY. The argv assertions therefore
 //! check the flag and its id as an adjacent pair, never just that `--resume` is present.
 
-#[allow(dead_code)]
 mod cursor_cli_support;
 
 use std::path::{Path, PathBuf};

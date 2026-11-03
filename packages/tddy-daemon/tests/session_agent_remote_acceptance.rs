@@ -406,6 +406,12 @@ async fn a_fleet_with_peers(peers: &[(&str, &[&str])], model_base_url: &str) -> 
         ),
         Arc::new(tddy_daemon_kernel::operator_channel::NoOperatorChannel),
         Arc::new(tddy_session_lifecycle::claude_cli_session::ClaudeCliSessionManager::new()),
+    )
+    // A's co-located cursor-cli start launches from the `cursor` tool definition, so A has its
+    // coding agents, bound the way the daemon runtime binds them (`#agent-tools 7/12`).
+    .with_coding_agents(
+        tddy_agent_launch::host_coding_agents::host_coding_agents(&config_a, sessions_a.path())
+            .expect("daemon A's coding agents load"),
     );
     let session_admissions =
         Arc::new(tddy_daemon_livekit::session_admission_service::SessionAdmissionRegistry::new());

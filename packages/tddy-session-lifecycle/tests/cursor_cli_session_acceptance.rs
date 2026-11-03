@@ -1,6 +1,5 @@
 //! Acceptance tests: Cursor Agent CLI session type (PRD: docs/ft/daemon/cursor-cli-session.md).
 
-#[allow(dead_code)]
 mod cursor_cli_support;
 
 use std::path::PathBuf;

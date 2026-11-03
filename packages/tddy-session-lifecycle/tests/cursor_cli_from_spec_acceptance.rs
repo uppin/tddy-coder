@@ -156,6 +156,7 @@ mod jailed {
     }
 
     #[tokio::test]
+    #[serial_test::serial]
     async fn a_jailed_cursor_cli_start_runs_the_stub_with_the_persistent_cursor_home_credentials_and_keychain_skip_env_and_no_claude_overlay(
     ) {
         // Given
@@ -214,6 +215,7 @@ mod jailed {
     }
 
     #[tokio::test]
+    #[serial_test::serial]
     async fn cursors_jail_reaches_its_declared_hosts_and_is_refused_an_undeclared_one() {
         // Given — cursor declares only the first of two local stand-in hosts
         let declared = a_stub_http_endpoint_answering_ok().await;
@@ -242,6 +244,7 @@ mod jailed {
     }
 
     #[tokio::test]
+    #[serial_test::serial]
     async fn the_runner_receives_no_cursor_specific_flag_on_the_daemon_path() {
         // Given
         let daemon = a_daemon_with_a_cursor_home(ADaemonSpec::default());
@@ -268,6 +271,7 @@ mod jailed {
     }
 
     #[tokio::test]
+    #[serial_test::serial]
     async fn a_jailed_cursor_sessions_hook_reaches_the_daemon_through_the_bridge() {
         // Given — no agent-tool socket: the jail can reach the daemon only over its tool-IPC bridge
         let daemon = a_daemon_with_a_cursor_home(ADaemonSpec::default());
