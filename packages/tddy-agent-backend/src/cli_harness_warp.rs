@@ -14,6 +14,7 @@
 // TODO(harness-clis): delete this module — the descriptor is `specs/warp.yaml`, and
 // `resume_token_from_output` is the `warp-resume-token` adapter
 // (`crate::adapters::WarpResumeToken`).
+// Removal is deferred: docs/dev/todo/2026-11-03-harness-clis-legacy-cli-harness-removal.md
 
 use crate::adapters::{ResumeTokenAdapter, WarpResumeToken};
 use crate::backend::BackendModels;

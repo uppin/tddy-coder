@@ -1,23 +1,151 @@
-//! What a sandboxed CLI harness's jail is started from, decided before the jail exists: the
-//! runner's agent kind and model, the provider route it requires, the refusal of a first prompt the
-//! runner cannot deliver, the executables resolved to absolute paths for the sandbox profile, and
-//! the runner's argv. Shared by the start (`svc_start_sandboxed_cli_harness_session`) and the resume
-//! (`svc_resume_sandboxed_cli_harness_session`); every function here is pure or reads only the
-//! filesystem.
+//! What a sandboxed CLI agent's jail is launched from, decided from its spec before the jail exists: the
+//! provider route it requires (its `route.required_in_jail`), the configuration variable its route's
+//! file is named in (`route.config_env`), and the agent launched through
+//! [`LaunchSessions::launch_jailed`] with its argv rendered from its `run:` template. Shared by the
+//! start (`svc_start_sandboxed_cli_harness_session`) and the resume
+//! (`svc_resume_sandboxed_cli_harness_session`).
+//!
+//! The placement a sandboxed start may run on is the spec's (`placements`), refused by
+//! [`crate::harness_from_spec::require_spec_placement`] before anything is created.
+//!
+//! The functions below the `--agent-kind` line are the legacy jail that hosted OpenCode and Muse in
+//! `tddy-sandbox-runner`'s PTY. The launch no longer calls them; they remain for the tests that pin
+//! them until their removal (docs/dev/todo/2026-11-03-harness-clis-legacy-cli-harness-removal.md).
 
-use crate::cli_route_launch::launch_model_for;
+use std::collections::BTreeMap;
 use std::path::Path;
+
+use tddy_actions::tool::TemplateParams;
+use tddy_coding_agent_specs::slots::{self, SlotInputs};
+use tddy_coding_agent_specs::CodingAgentSpec;
 use tddy_core::cli_harness::CliHarness;
 use tddy_core::provider_route::HarnessRoute;
 use tddy_daemon_kernel::config::DaemonConfig;
 use tddy_rpc::Status;
 
-// TODO(harness-clis): spec-driven — a sandboxed start whose spec's `placements` exclude `jail` is
-// refused by `crate::harness_from_spec::require_spec_placement` (warp.yaml: `[host]`), and the
-// route requirement reads `coding_agent.route.required_in_jail`; this match and
-// `require_provider_route`'s session-type gate go.
+use crate::claude_jail::closure_defs;
+use crate::harness_from_spec::CliSessionAgent;
+use crate::jail_launch::{JailSpec, JailedSession};
+use crate::launch_ports::LaunchSessions;
+use crate::svc_start_sandboxed_claude_cli_session::{JailDirs, JailSession};
+
+/// A sandboxed CLI agent's launch, as its start or resume has settled it.
+pub(crate) struct CliJail<'a> {
+    pub(crate) session_agent: &'a CliSessionAgent,
+    pub(crate) jail: &'a JailSession<'a>,
+    pub(crate) dirs: &'a JailDirs,
+    /// The spec's `run:` template, bound for the launch (`harness_template_params`).
+    pub(crate) params: TemplateParams,
+    /// Arguments the provider route adds to the agent's argv: a start's, not a resume's.
+    pub(crate) route_args: Vec<String>,
+    /// What the daemon adds for the session: the agent's environment, its route's configuration
+    /// variable among them (see [`jail_route_config_env`]).
+    pub(crate) env: BTreeMap<String, String>,
+    pub(crate) session_env: Vec<(String, String)>,
+    /// The provider route the agent runs on; `None` for its own setup.
+    pub(crate) route: Option<HarnessRoute>,
+}
+
+impl LaunchSessions {
+    /// Launch the CLI agent of `launch` in a jail and return the runner's pid. Its slots are the spec's
+    /// own (no MCP registration, no tool lists, no hooks, no instruction files), and a route's
+    /// arguments are the caller's to give or withhold.
+    pub(crate) async fn launch_jailed_cli_agent(&self, launch: CliJail<'_>) -> Result<u32, Status> {
+        let CliSessionAgent { agent, agents, .. } = launch.session_agent;
+        let defs = closure_defs(agents.registry(), agent)?;
+        let mut slots = slots::render(
+            &agent.spec,
+            &SlotInputs {
+                workdir: launch.dirs.context_dir.clone(),
+                scratch_dir: launch.dirs.scratch_tmp.clone(),
+                mcp_server: None,
+                allowed_tools: Vec::new(),
+                denied_tools: Vec::new(),
+                permission_prompt_tool: None,
+                preamble: None,
+                append_system_prompt_file: None,
+                hooks: None,
+                home: None,
+            },
+        )
+        .map_err(|e| Status::internal(e.to_string()))?;
+        slots.argv_extra.extend(launch.route_args);
+        self.launch_jailed(
+            JailSpec {
+                agent,
+                defs: &defs,
+                host: agents.host(),
+            },
+            &launch.params,
+            &slots,
+            JailedSession {
+                jail: launch.jail,
+                dirs: launch.dirs,
+                session_env: launch.session_env,
+                env: launch.env,
+                managed: None,
+                managed_codebase: false,
+                route: launch.route,
+            },
+            "",
+        )
+        .await
+    }
+}
+
+/// The provider route a sandboxed CLI agent runs on, required when its spec says its jail needs one.
+///
+/// A jail's `$HOME` is the session's own scratch, so the person's own OpenCode or Muse Code setup is
+/// not inside it: without a provider account the agent would start with no credentials and could not
+/// authenticate. Refused up front rather than started to fail. `None` for an agent whose jail needs no
+/// route, which then runs on its own setup.
+pub(crate) fn require_jail_route(
+    session_type: &str,
+    spec: &CodingAgentSpec,
+    route: Option<HarnessRoute>,
+) -> Result<Option<HarnessRoute>, Status> {
+    let required = spec
+        .agent
+        .route
+        .as_ref()
+        .is_some_and(|slot| slot.required_in_jail);
+    if required && route.is_none() {
+        return Err(Status::failed_precondition(format!(
+            "a sandboxed {session_type} session needs a provider account: its jail holds no \
+             credentials of its own"
+        )));
+    }
+    Ok(route)
+}
+
+/// The variable a routed jailed agent reads its configuration file from (`coding_agent.route.config_env`,
+/// `OPENCODE_CONFIG`), pointed at the file the jail writes for the route: the first of the route's
+/// files, under the scratch's `files_dir` (`provider-route`). Empty for an agent whose route is
+/// environment only, and for a session on its own setup.
+pub(crate) fn jail_route_config_env(
+    spec: &CodingAgentSpec,
+    route: Option<&HarnessRoute>,
+    scratch_dir: &Path,
+) -> Vec<(String, String)> {
+    let Some(slot) = spec.agent.route.as_ref() else {
+        return Vec::new();
+    };
+    let (Some(config_env), Some(files_dir), Some(config)) = (
+        slot.config_env.as_ref(),
+        slot.files_dir.as_ref(),
+        route.and_then(|route| route.files.first()),
+    ) else {
+        return Vec::new();
+    };
+    let path = scratch_dir.join(files_dir).join(&config.name);
+    vec![(config_env.clone(), path.to_string_lossy().into_owned())]
+}
+
+// TODO(harness-clis): orphaned from the launch, which names the agent's `--agent-kind` nowhere. Pinned
+// by `sandboxed_cli_harness_tests`; removal is deferred: docs/dev/todo/2026-11-03-harness-clis-legacy-cli-harness-removal.md
 /// The runner's `--agent-kind` for a CLI harness session type the runner hosts in its PTY; `None`
 /// for any other session type.
+#[allow(dead_code)]
 pub(crate) fn sandboxed_agent_kind(session_type: &str) -> Option<&'static str> {
     match session_type {
         "opencode-cli" => Some("opencode"),
@@ -29,6 +157,7 @@ pub(crate) fn sandboxed_agent_kind(session_type: &str) -> Option<&'static str> {
 /// The runner's `--agent-kind` for `harness`, or the refusal of a sandboxed start of a harness the
 /// runner does not host. Checked before a provider route is resolved, so the refusal names the
 /// runner rather than a provider account the harness could never use.
+#[allow(dead_code)]
 pub(crate) fn require_sandbox_hosts(harness: &CliHarness) -> Result<&'static str, Status> {
     sandboxed_agent_kind(harness.session_type).ok_or_else(|| {
         Status::failed_precondition(format!(
@@ -45,12 +174,19 @@ pub(crate) fn require_sandbox_hosts(harness: &CliHarness) -> Result<&'static str
 /// OpenCode launch leaves to its configuration file: it is the same argument the unsandboxed launch
 /// appends, so the jail runs the harness on the model the route names. Otherwise the session's model
 /// is kept, and a session with none is refused.
+#[allow(dead_code)]
 pub(crate) fn sandboxed_runner_model(
     harness: &CliHarness,
     route: &HarnessRoute,
     model: &str,
 ) -> Result<String, Status> {
-    let launched = launch_model_for(harness, true, model);
+    // A routed launch of a config-file harness names the model in its configuration file, so it leaves
+    // the command-line model blank (the rule `launch_model_for` applies to the spec's route).
+    let launched = if harness.route_config_env.is_some() {
+        ""
+    } else {
+        model
+    };
     if !launched.is_empty() {
         return Ok(launched.to_string());
     }
@@ -65,6 +201,7 @@ pub(crate) fn sandboxed_runner_model(
 }
 
 /// The value of the route's `--model` argument, when it names a non-blank one.
+#[allow(dead_code)]
 fn model_argument(args: &[String]) -> Option<&str> {
     args.windows(2)
         .find(|pair| pair[0] == "--model")
@@ -74,6 +211,7 @@ fn model_argument(args: &[String]) -> Option<&str> {
 
 /// Refuses a first prompt for a sandboxed CLI harness: the runner hosts no first prompt for OpenCode
 /// or Muse, so one would be dropped without a trace. A blank prompt is no prompt.
+#[allow(dead_code)]
 pub(crate) fn refuse_first_prompt(
     harness: &CliHarness,
     initial_prompt: &str,
@@ -88,10 +226,7 @@ pub(crate) fn refuse_first_prompt(
 }
 
 /// The provider route a sandboxed CLI harness runs on, or a refusal when there is none.
-///
-/// A jail's `$HOME` is the session's own scratch, so the person's own OpenCode or Muse Code setup is
-/// not inside it: without a provider account the harness would start with no credentials and could
-/// not authenticate. Refused up front rather than started to fail.
+#[allow(dead_code)]
 pub(crate) fn require_provider_route(
     harness: &CliHarness,
     route: Option<HarnessRoute>,
@@ -109,6 +244,7 @@ pub(crate) fn require_provider_route(
 /// executable by its path, so a bare name is searched for on `path_var`, the `PATH` the daemon runs
 /// under. A name that is not there is refused rather than handed to the jail unresolved. A name with
 /// a separator is a path already, and is taken as it is named.
+#[allow(dead_code)]
 pub(crate) fn resolve_jail_agent_binary(binary: &str, path_var: &str) -> Result<String, Status> {
     if binary.contains('/') {
         return Ok(canonical_exec_path(binary));
@@ -127,6 +263,7 @@ pub(crate) fn resolve_jail_agent_binary(binary: &str, path_var: &str) -> Result<
 
 /// The executables a sandboxed CLI harness's runner is started from, resolved as the sandbox profile
 /// needs them, and the runner's `--agent-kind` for the harness.
+#[allow(dead_code)]
 pub(crate) struct CliJailBinaries {
     pub tddy_tools_path: String,
     pub sandbox_runner_path: String,
@@ -135,6 +272,7 @@ pub(crate) struct CliJailBinaries {
 }
 
 /// Resolve the executables a sandboxed CLI harness's runner is started from.
+#[allow(dead_code)]
 pub(crate) fn resolve_cli_jail_binaries(
     config: &DaemonConfig,
     harness: &CliHarness,
@@ -158,6 +296,7 @@ pub(crate) fn resolve_cli_jail_binaries(
 }
 
 /// What `tddy-sandbox-runner` is started with for a CLI harness.
+#[allow(dead_code)]
 pub(crate) struct CliRunnerArgv<'a> {
     pub sandbox_runner_path: &'a str,
     pub session_id: &'a str,
@@ -174,6 +313,7 @@ pub(crate) struct CliRunnerArgv<'a> {
 }
 
 /// The argv `tddy-sandbox-runner` is started with to host a CLI harness in its PTY.
+#[allow(dead_code)]
 pub(crate) fn cli_harness_runner_argv(spec: &CliRunnerArgv<'_>) -> Vec<String> {
     let mut argv = vec![
         spec.sandbox_runner_path.to_string(),

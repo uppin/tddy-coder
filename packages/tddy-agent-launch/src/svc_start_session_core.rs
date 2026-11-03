@@ -9,9 +9,11 @@ use uuid::Uuid;
 
 use tddy_task::CancellationToken;
 
-use tddy_core::cli_harness::cli_harness;
 use tddy_core::session_lifecycle::unified_session_dir_path;
 
+use tddy_coding_agent_specs::spec_for_session_type;
+
+use crate::harness_from_spec::cli_session_type;
 use crate::placement::CodebasePlacement;
 
 use tddy_session_split::split_start::resolve_split_agent_placement;
@@ -455,11 +457,11 @@ impl LaunchSessions {
             return Ok(started);
         }
 
-        // --- any other registered CLI harness (opencode-cli, muse-cli): a PTY, no LiveKit ---
-        if let Some(harness) = cli_harness(req.session_type.trim()) {
-            return self
-                .start_cli_harness(harness, &req, progress, os_user)
-                .await;
+        // --- any other CLI coding agent its spec launches (opencode-cli, muse-cli, warp-cli): a PTY,
+        // no LiveKit ---
+        if spec_for_session_type(req.session_type.trim()).is_some() {
+            let kind = cli_session_type(req.session_type.trim())?;
+            return self.start_cli_harness(kind, &req, progress, os_user).await;
         }
 
         let livekit = spawner::livekit_creds_from_config(&self.config)

@@ -150,6 +150,7 @@ async fn relaunch_cursor(
             env: relaunch.env,
             os_user: None,
         },
+        None,
     )
     .await
     .map_err(failed)?;

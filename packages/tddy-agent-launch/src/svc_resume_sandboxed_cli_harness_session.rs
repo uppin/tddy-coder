@@ -1,53 +1,54 @@
-//! Resume of a sandboxed CLI harness session (`opencode-cli`, `muse-cli`): its jail is relaunched
-//! with the runner's resume (`--continue` for the harness), on the provider route its start recorded
-//! and re-resolved from the owner's vault as it stands now. A sandboxed session never resumes on the
-//! host's PTY.
+//! Resume of a sandboxed CLI coding agent session (`opencode-cli`, `muse-cli`): its jail is relaunched
+//! from its spec through [`LaunchSessions::launch_jailed`], rendered with `resume` (the agent continues
+//! its worktree's session with `--continue`), on the provider route its start recorded and re-resolved
+//! from the owner's vault as it stands now. A sandboxed session never resumes on the host's PTY.
 
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
-use tddy_core::cli_harness::CliHarness;
 use tddy_core::provider_route::HarnessRoute;
 use tddy_core::{write_session_metadata, SessionAgentRecord, SessionMetadata};
 use tddy_rpc::{Response, Status};
 use tddy_service::proto::session::{ResumeSessionRequest, ResumeSessionResponse};
 use tddy_session_agents::agent_roster;
 
-use crate::cli_harness_jail::{
-    cli_harness_runner_argv, require_provider_route, resolve_cli_jail_binaries,
-    sandboxed_runner_model, CliRunnerArgv,
+use crate::cli_harness_jail::{jail_route_config_env, require_jail_route, CliJail};
+use crate::harness_from_spec::{
+    harness_template_params, resolve_session_agent, CliSessionAgent, CliSessionType, HarnessLaunch,
 };
 use crate::launch_ports::LaunchSessions;
 use crate::relaunch_jail_dirs::{prepare_relaunch_dirs, refresh_relaunch_context_dir};
 use crate::session_provider_route::resume_route;
-use crate::svc_relaunch_sandboxed_runner::{
-    RelaunchJailEnv, RelaunchedJailBridge, RelaunchedRunnerSpawn,
-};
+use crate::svc_start_sandboxed_claude_cli_session::{JailDirs, JailSession};
 
-/// What relaunching a sandboxed CLI harness session's jail is built from: the session, and the
-/// route and identity its resume re-resolved.
+/// What relaunching a sandboxed CLI session's jail is built from: the session, and the route and
+/// identity its resume re-resolved.
 struct CliHarnessRelaunch<'a> {
-    harness: &'static CliHarness,
+    session_agent: &'a CliSessionAgent,
     session_id: &'a str,
+    project_id: &'a str,
+    session_token: &'a str,
     session_dir: &'a Path,
     worktree_path: &'a Path,
     agents: &'a [SessionAgentRecord],
-    /// The model the runner starts the harness on (see `sandboxed_runner_model`).
-    runner_model: &'a str,
-    route: HarnessRoute,
+    /// The provider route the resume re-resolved; `None` for the agent's own setup.
+    route: Option<HarnessRoute>,
     session_env: Vec<(String, String)>,
 }
 
 impl LaunchSessions {
-    /// Handle `ResumeSession` for a sandboxed CLI harness session.
+    /// Handle `ResumeSession` for a sandboxed CLI coding agent session.
     pub(crate) async fn resume_sandboxed_cli_harness(
         &self,
-        harness: &'static CliHarness,
+        kind: CliSessionType,
         os_user: &str,
         req: &ResumeSessionRequest,
         session_dir: &Path,
         metadata: SessionMetadata,
     ) -> Result<Response<ResumeSessionResponse>, Status> {
+        // Resolved before the running jail is stopped: a resume the host cannot launch leaves it running.
+        let session_agent = resolve_session_agent(self.coding_agents.as_ref(), &self.config, kind)?;
         if let Some(state) = self.sandbox_manager.remove(&req.session_id).await {
             state.stop();
         } else if let Some(pid) = metadata.pid {
@@ -62,18 +63,14 @@ impl LaunchSessions {
             .ok_or_else(|| Status::internal("sandbox session missing repo_path in metadata"))?;
         // The account the start recorded, re-resolved from the owner's vault as it stands now: a
         // removed account refuses the resume rather than running it on the vendor.
-        let route = require_provider_route(
-            harness,
+        let route = require_jail_route(
+            kind.name,
+            &session_agent.agent.spec,
             resume_route(
                 &self.host.session_account_access(&req.session_token),
-                harness.route_harness,
+                kind.route,
                 session_dir,
             )?,
-        )?;
-        let runner_model = sandboxed_runner_model(
-            harness,
-            &route,
-            metadata.model.as_deref().unwrap_or_default(),
         )?;
         let identity = self.host.session_identity(
             os_user,
@@ -81,17 +78,18 @@ impl LaunchSessions {
             &metadata.project_id,
             &req.session_token,
         );
-        // No managed workflow is re-wired: a CLI harness session has none to drive.
+        // No managed workflow is re-wired: a CLI session has none to drive.
         let (session_env, _github_credential) = self.jail_relay_identity(identity, os_user)?;
 
         let pid = self
             .relaunch_sandboxed_cli_harness(CliHarnessRelaunch {
-                harness,
+                session_agent: &session_agent,
                 session_id: &req.session_id,
+                project_id: &metadata.project_id,
+                session_token: &req.session_token,
                 session_dir,
                 worktree_path: &worktree_path,
                 agents: &metadata.agents,
-                runner_model: &runner_model,
                 route,
                 session_env,
             })
@@ -114,18 +112,19 @@ impl LaunchSessions {
         }))
     }
 
-    /// Spawn the runner in resume mode in the session's jail and bridge it into this daemon.
+    /// Launch the agent in resume mode in the session's jail and return the runner's pid.
     async fn relaunch_sandboxed_cli_harness(
         &self,
         relaunch: CliHarnessRelaunch<'_>,
     ) -> Result<u32, Status> {
         let CliHarnessRelaunch {
-            harness,
+            session_agent,
             session_id,
+            project_id,
+            session_token,
             session_dir,
             worktree_path,
             agents,
-            runner_model,
             route,
             session_env,
         } = relaunch;
@@ -146,68 +145,52 @@ impl LaunchSessions {
 
         let (sandbox_root, egress_dir, scratch_dir, scratch_tmp, context_dir) =
             prepare_relaunch_dirs(session_dir)?;
-        refresh_relaunch_context_dir(worktree_path, agents, &context_dir, harness.session_type)?;
-        // The jail's $HOME is the session's own scratch, as at the start: the harness finds its
-        // session store where it left it.
-        let scratch_home = scratch_dir.join("home");
-        let binaries = resolve_cli_jail_binaries(&self.config, harness)?;
+        refresh_relaunch_context_dir(worktree_path, agents, &context_dir, session_agent.kind.name)?;
 
-        let tool_ipc_socket = tddy_sandbox::SandboxSpec::short_ipc_socket_path(session_id);
-        let _ = std::fs::remove_file(&tool_ipc_socket);
-        let ready_marker = sandbox_root.join("sandbox.ready");
-        let _ = std::fs::remove_file(&ready_marker);
-        let profile_path = sandbox_root.join("sandbox.sb");
-        let egress_shim_port = tddy_daemon_sandbox::sandbox_session::pick_free_loopback_port()
-            .map_err(Status::internal)?;
-        let runner_argv = cli_harness_runner_argv(&CliRunnerArgv {
-            sandbox_runner_path: &binaries.sandbox_runner_path,
-            session_id,
-            context_dir: &context_dir,
-            tool_ipc_socket: &tool_ipc_socket,
-            tddy_tools_path: &binaries.tddy_tools_path,
-            ready_marker: &ready_marker,
-            agent_kind: binaries.agent_kind,
-            agent_binary: &binaries.agent_binary,
-            model: runner_model,
-            egress_shim_port,
+        // The daemon's environment for the session, as its start gave it — but for the semantic index,
+        // which a resume does not rebuild: `SemanticSearch` stays withdrawn.
+        let mut env: BTreeMap<String, String> = BTreeMap::new();
+        if !specialized_defs.is_empty() {
+            env.extend(self.specialized_subagent_env(&specialized_defs)?);
+        }
+        env.extend(self.jail_daemon_identity_env());
+        env.extend(self.lsp_tools_env(worktree_path));
+        env.extend(self.restructure_tools_env());
+        env.extend(jail_route_config_env(
+            &session_agent.agent.spec,
+            route.as_ref(),
+            &scratch_dir,
+        ));
+
+        // A resume continues the agent's own session: its argv is the spec's `resume` branch alone, the
+        // model and route arguments belong to the start.
+        let params = harness_template_params(&HarnessLaunch {
             resume: true,
+            ..HarnessLaunch::default()
         });
-
-        let env = self.relaunch_jail_env(RelaunchJailEnv {
+        let jail = JailSession {
             session_id,
-            worktree_path,
-            specialized_defs,
-            egress_dir: &egress_dir,
-            scratch_tmp,
-            scratch_home: &scratch_home,
-            tool_ipc_socket: &tool_ipc_socket,
-        })?;
-
-        let handle = self
-            .spawn_relaunched_runner(RelaunchedRunnerSpawn {
-                sandbox_root,
-                egress_dir: &egress_dir,
-                scratch_dir,
-                scratch_home: scratch_home.clone(),
-                tool_ipc_socket: tool_ipc_socket.clone(),
-                ready_marker: &ready_marker,
-                profile_path,
-                loopback_allow_ports: vec![egress_shim_port],
-                runner_argv,
-                env,
-                route: Some(route),
-            })
-            .await?;
-
-        self.bridge_relaunched_jail(RelaunchedJailBridge {
-            session_id,
+            project_id,
+            session_token,
             session_dir,
             worktree_path,
+        };
+        let dirs = JailDirs {
+            sandbox_root,
             egress_dir,
-            managed: None,
+            scratch_dir,
+            scratch_tmp,
+            context_dir,
+        };
+        self.launch_jailed_cli_agent(CliJail {
+            session_agent,
+            jail: &jail,
+            dirs: &dirs,
+            params,
+            route_args: Vec::new(),
+            env,
             session_env,
-            ready_marker,
-            handle,
+            route,
         })
         .await
     }

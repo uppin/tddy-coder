@@ -16,8 +16,8 @@ pub struct ProfileStart {
     pub model: String,
 }
 
-// TODO(harness-clis): a CLI profile's start launches from `profile_spec_id`'s spec.
-/// What `profile` starts; `Err` when its `harness` names no harness this daemon runs.
+/// What `profile` starts; `Err` when its `harness` names no harness this daemon runs. A CLI profile's
+/// start is then the session type's start, which launches from that type's spec.
 pub fn profile_start(profile: &HarnessProfile) -> Result<ProfileStart, String> {
     let harness = Harness::from_agent_or_session_type(&profile.harness).ok_or_else(|| {
         format!(

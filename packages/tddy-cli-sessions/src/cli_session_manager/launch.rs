@@ -34,6 +34,10 @@ impl CliSessionManager {
     ///
     /// `os_user` — the session owner, whose `HOME` and configured `PATH` extra the child must run
     /// under (the same overrides a claude-cli launch applies); `None` runs the child as the daemon.
+    //
+    // TODO(harness-clis): no daemon launch calls this any more — the OpenCode, Muse and Warp starts
+    // launch from their specs through `spec_launch::launch_host_pty`. Pinned by `tests/exit_hook.rs`;
+    // removal is deferred: docs/dev/todo/2026-11-03-harness-clis-legacy-cli-harness-removal.md
     pub async fn launch_cli_harness(
         &self,
         harness: &CliHarness,
@@ -62,7 +66,8 @@ impl CliSessionManager {
 
     /// Spawn `argv` — already rendered, by a launcher that owns the agent's argument template — as
     /// `session_id`'s main terminal, registered under `session_type`. `env` is applied on top of the
-    /// daemon's; `os_user` is the session owner, or `None` to run as the daemon.
+    /// daemon's; `os_user` is the session owner, or `None` to run as the daemon. `on_exit` runs once
+    /// the process has exited, before its terminal is deregistered (see [`HarnessLaunchExtras`]).
     #[allow(clippy::too_many_arguments)]
     pub async fn spawn_rendered_main(
         &self,
@@ -73,6 +78,7 @@ impl CliSessionManager {
         argv: Vec<String>,
         env: Vec<(String, String)>,
         os_user: Option<&str>,
+        on_exit: Option<ExitHook>,
     ) -> anyhow::Result<Arc<pty_handle::PtyHandle>> {
         self.spawn_tool(
             session_id,
@@ -83,7 +89,7 @@ impl CliSessionManager {
             argv,
             env,
             os_user,
-            None,
+            on_exit,
             None,
         )
         .await

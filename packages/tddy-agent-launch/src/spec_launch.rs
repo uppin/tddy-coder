@@ -15,7 +15,7 @@ use tddy_actions::tool::{
     Transport,
 };
 use tddy_cli_sessions::cli_session_manager::pty_handle::PtyHandle;
-use tddy_cli_sessions::cli_session_manager::CliSessionManager;
+use tddy_cli_sessions::cli_session_manager::{CliSessionManager, ExitHook};
 use tddy_coding_agent_specs::slots::{
     self, McpServerCommand, RenderedSlots, SlotError, SlotInputs,
 };
@@ -227,13 +227,15 @@ pub fn plan_host_pty(
 }
 
 /// Spawn `agent` in a PTY in `worktree` from its [`plan_host_pty`], and register the process under
-/// `session`.
+/// `session`. `on_exit` runs once the process has exited, with its terminal's output (a resume
+/// token recorder, `#agent-tools 8/12`); `None` runs nothing.
 pub async fn launch_host_pty(
     agent: &HostAgent,
     params: &TemplateParams,
     slots: &RenderedSlots,
     worktree: &Path,
     session: HostPtySession<'_>,
+    on_exit: Option<ExitHook>,
 ) -> Result<Arc<PtyHandle>, SpecLaunchError> {
     let HostPtyPlan { argv, env } = plan_host_pty(agent, params, slots)?;
     let env = env.into_iter().chain(session.env).collect();
@@ -247,6 +249,7 @@ pub async fn launch_host_pty(
             argv,
             env,
             session.os_user,
+            on_exit,
         )
         .await
         .map_err(|e| SpecLaunchError::Spawn(e.to_string()))
@@ -359,6 +362,7 @@ pub async fn launch_claude_cli(
             env: launch.env,
             os_user: launch.os_user,
         },
+        None,
     )
     .await
 }

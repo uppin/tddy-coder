@@ -300,7 +300,7 @@ pub async fn reattach_recorded_main(
     } else {
         // Every other CLI harness re-attaches through its own tmux path, which watches its
         // agent's exit again (`#tmux-agent` 3/3).
-        crate::cli_harness_tmux::reattach_recorded_harness(manager, recorded).await
+        crate::cli_harness_tmux::reattach_recorded_harness(manager, tddy_data_dir, recorded).await
     };
     match reattached {
         Ok(attached) => attached,

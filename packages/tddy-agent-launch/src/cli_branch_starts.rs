@@ -16,15 +16,15 @@ use std::sync::Arc;
 
 use crate::svc_start_session_core::CliStart;
 
+use crate::harness_from_spec::{resolve_session_agent, CliSessionAgent, CliSessionType};
 use crate::launch_ports::LaunchSessions;
 use crate::placement::managed_recipe_for;
 use crate::session_provider_route::{
     sandboxed_start_route, session_route_sources_with_default, start_route,
 };
 use crate::start_request_checks::{
-    refuse_a_cli_start_without_a_model, refuse_an_unsupported_cli_harness_start,
+    refuse_a_cli_start_without_a_model, refuse_an_unsupported_cli_session_start,
 };
-use tddy_core::cli_harness::CliHarness;
 use tddy_core::output::SESSIONS_SUBDIR;
 use tddy_core::provider_route::{Harness, HarnessRoute};
 use tddy_service::proto::session::StartSessionRequest;
@@ -278,35 +278,47 @@ impl LaunchSessions {
 }
 
 impl LaunchSessions {
-    /// The start of a registered CLI harness that is cut a worktree of its own (`opencode-cli`,
-    /// `muse-cli`): refused over a managed codebase, otherwise the shared CLI prelude, then the
-    /// harness in its jail when the session is sandboxed, or in a PTY when it is not.
+    /// The start of a CLI coding agent that is cut a worktree of its own (`opencode-cli`, `muse-cli`,
+    /// `warp-cli`), launched from its spec: refused over a managed codebase or, when sandboxed, on a
+    /// placement its spec excludes; its agent resolved on this host before anything is cut; then the
+    /// shared CLI prelude, and the agent in its jail when the session is sandboxed or in a PTY when it
+    /// is not.
     pub(super) async fn start_cli_harness(
         &self,
-        harness: &'static CliHarness,
+        kind: CliSessionType,
         req: &StartSessionRequest,
         progress: &AttachmentProgressSink,
         os_user: &str,
     ) -> Result<Response<StartSessionResponse>, Status> {
-        refuse_an_unsupported_cli_harness_start(harness, req)?;
+        refuse_an_unsupported_cli_session_start(kind.name, req)?;
+        if req.sandbox {
+            self.require_sandbox_placement(kind.name)?;
+        }
+        let session_agent = resolve_session_agent(self.coding_agents.as_ref(), &self.config, kind)?;
         let start = self.cli_start_prelude(req, progress, os_user).await?;
         let sessions_base = start.sessions_base.clone();
         let session_id = start.session_id.clone();
         let started = if req.sandbox {
-            self.start_sandboxed_cli_harness_from_request(harness, req, os_user, start, progress)
-                .await?
+            self.start_sandboxed_cli_harness_from_request(
+                &session_agent,
+                req,
+                os_user,
+                start,
+                progress,
+            )
+            .await?
         } else {
-            self.start_cli_harness_from_request(harness, req, os_user, start, progress)
+            self.start_cli_harness_from_request(&session_agent, req, os_user, start, progress)
                 .await?
         };
         self.announce_worktree_ready(&sessions_base, &session_id);
         Ok(started)
     }
 
-    /// The seeded roster, resolved before the spawn, then the harness's route and its start.
+    /// The seeded roster, resolved before the spawn, then the agent's route and its start.
     async fn start_cli_harness_from_request(
         &self,
-        harness: &'static CliHarness,
+        session_agent: &CliSessionAgent,
         req: &StartSessionRequest,
         os_user: &str,
         start: CliStart,
@@ -321,10 +333,11 @@ impl LaunchSessions {
         };
         let account_access = self.host.session_account_access(&req.session_token);
         let route_sources =
-            session_route_sources_with_default(req, harness.session_type, &account_access)?;
+            session_route_sources_with_default(req, session_agent.kind.name, &account_access)?;
         crate::opencode_cli_spawn::start_cli_harness_session(
             crate::opencode_cli_spawn::CliHarnessStart {
-                harness,
+                kind: session_agent.kind,
+                agent: &session_agent.agent,
                 config: &self.config,
                 tddy_data_dir: &self.tddy_data_dir,
                 cli_manager: &self.claude_cli_manager,

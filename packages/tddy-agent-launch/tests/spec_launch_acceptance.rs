@@ -75,6 +75,7 @@ async fn a_spec_whose_transport_is_not_pty_is_refused_by_the_host_pty_launcher()
             env: Vec::new(),
             os_user: None,
         },
+        None,
     )
     .await;
 

@@ -1,15 +1,19 @@
-//! Start and resume of a registered CLI harness that is cut a worktree of its own — OpenCode
-//! (`opencode-cli`) and Muse Code (`muse-cli`) — for the launch topic. The harness is the caller's
-//! registry entry ([`CliHarness`]); nothing here is particular to one of them.
+//! Start and resume of a CLI coding agent that is cut a worktree of its own — OpenCode
+//! (`opencode-cli`), Muse Code (`muse-cli`) and Warp (`warp-cli`) — for the launch topic. The agent is
+//! its spec (`tddy-coding-agent-specs`): its argv is the spec's `run:` template, rendered by
+//! [`launch_host_pty`] over [`harness_template_params`]; its route is the spec's `route` section; its
+//! resume token is read by the spec's `resume` adapter. Nothing here is particular to one of them.
 //!
 //! The same shape as a Cursor session — a daemon-cut worktree, a PTY relayed over the daemon's own
-//! connection — minus what these harnesses have no counterpart of: no hooks are installed, no chat
-//! id is minted (a resume is `--continue` in the worktree, and a session owns its worktree), and the
-//! session is never sandboxed.
+//! connection — minus what these agents have no counterpart of: no hooks are installed, no chat id is
+//! minted (a resume is `--continue` in the worktree, and a session owns its worktree), and the session
+//! is never sandboxed here (the jail is `svc_start_sandboxed_cli_harness_session`).
 //!
 //! A chosen provider account is applied as a route ([`start_cli_route`]): any file it generates
 //! (OpenCode's `opencode.json`) lives in the session directory, its key reaches the child's
 //! environment only.
+//!
+//! PRD: `docs/ft/daemon/1-WIP/PRD-2026-10-31-harness-clis-from-specs.md` (`#agent-tools 8/12`).
 
 mod harness_launch;
 
@@ -17,7 +21,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use tddy_cli_sessions::cli_session_manager::CliSessionManager;
-use tddy_core::cli_harness::{CliHarness, CliLaunch};
+use tddy_coding_agent_specs::slots::{self, RenderedSlots, SlotInputs};
 use tddy_core::output::SESSIONS_SUBDIR;
 use tddy_core::provider_route::RouteSources;
 use tddy_core::{write_session_metadata, SessionMetadata};
@@ -35,14 +39,21 @@ use crate::cli_route_launch::{launch_model_for, resume_cli_route, start_cli_rout
 use crate::cli_session_worktree::{
     provision_cli_worktree, semantic_index_env, CliWorktree, CliWorktreeStart,
 };
+use crate::harness_from_spec::{
+    harness_template_params, resolve_session_agent, resume_token_adapter, CliSessionAgent,
+    CliSessionType, HarnessLaunch,
+};
 use crate::session_acting_identity::SessionAccountAccess;
+use crate::spec_launch::HostAgent;
 use crate::stack_parent::SpawnStackParent;
-use harness_launch::{launch, launch_extras, HarnessRun, HarnessSession};
+use harness_launch::{launch, HarnessRun, HarnessSession, HarnessSpecLaunch};
 
 /// Everything one CLI harness start reads.
 pub(crate) struct CliHarnessStart<'a> {
-    /// The registered harness the session runs.
-    pub harness: &'static CliHarness,
+    /// The CLI session type the session runs, with the spec that launches it.
+    pub kind: CliSessionType,
+    /// The coding agent the session launches, resolved on this host before anything is cut.
+    pub agent: &'a HostAgent,
     pub config: &'a DaemonConfig,
     pub tddy_data_dir: &'a Path,
     pub cli_manager: &'a Arc<CliSessionManager>,
@@ -76,13 +87,16 @@ pub(crate) struct CliHarnessStart<'a> {
     pub run_in_tmux: bool,
 }
 
-/// The binary `harness` is run as: its environment variable, then
-/// `cli_harnesses.<session type>.binary_path` in the daemon config, then the registry's default.
-/// A bare default name is resolved on the host — `~/.local/bin/<name>`, then `$PATH` — because the
-/// daemon runs under systemd with a minimal `PATH` that never holds the user-local install dirs
-/// (and the impersonated child would otherwise fail the same way). A name that resolves nowhere is
-/// left bare, so the spawner's error is the familiar "not found on PATH".
-pub(crate) fn harness_binary(config: &DaemonConfig, harness: &CliHarness) -> String {
+// TODO(harness-clis): orphaned from the production launch; only the legacy jail's
+// `resolve_cli_jail_binaries` still names it. Removal is deferred: docs/dev/todo/2026-11-03-harness-clis-legacy-cli-harness-removal.md
+/// The binary a CLI harness is run as before its spec launched it: its environment variable, then
+/// `cli_harnesses.<session type>.binary_path` in the daemon config, then the registry's default. A
+/// bare default name is resolved on the host — `~/.local/bin/<name>`, then `$PATH`.
+#[allow(dead_code)]
+pub(crate) fn harness_binary(
+    config: &DaemonConfig,
+    harness: &tddy_core::cli_harness::CliHarness,
+) -> String {
     let binary = config.cli_harness_binary(
         harness.session_type,
         harness.default_binary,
@@ -94,15 +108,40 @@ pub(crate) fn harness_binary(config: &DaemonConfig, harness: &CliHarness) -> Str
     )
 }
 
-// TODO(harness-clis): launch from the session type's spec through `launch_host_pty`, rendered
-// with `crate::harness_from_spec::harness_template_params`, instead of `CliHarness::argv`.
-/// Start a CLI harness session: cut its worktree, apply its provider route, spawn the harness in
-/// a PTY and record `.session.yaml`.
+/// The slots a host launch of `agent` fills. The CLI agents declare none of them on a host launch
+/// (no MCP registration, no tool lists, no hooks, no instruction files), so this adds nothing a spec
+/// does not already name; a value a slot refuses is refused by `slots::render`, never dropped.
+fn render_host_slots(
+    agent: &HostAgent,
+    worktree: &Path,
+    session_dir: &Path,
+) -> Result<RenderedSlots, Status> {
+    slots::render(
+        &agent.spec,
+        &SlotInputs {
+            workdir: worktree.to_path_buf(),
+            scratch_dir: session_dir.to_path_buf(),
+            mcp_server: None,
+            allowed_tools: Vec::new(),
+            denied_tools: Vec::new(),
+            permission_prompt_tool: None,
+            preamble: None,
+            append_system_prompt_file: None,
+            hooks: None,
+            home: None,
+        },
+    )
+    .map_err(|e| Status::internal(e.to_string()))
+}
+
+/// Start a CLI harness session: cut its worktree, apply its provider route, spawn the agent from its
+/// spec in a PTY and record `.session.yaml`.
 pub(crate) async fn start_cli_harness_session(
     start: CliHarnessStart<'_>,
 ) -> Result<Response<StartSessionResponse>, Status> {
     let CliHarnessStart {
-        harness,
+        kind,
+        agent,
         config,
         tddy_data_dir,
         cli_manager,
@@ -137,9 +176,15 @@ pub(crate) async fn start_cli_harness_session(
         .map_err(|e| Status::internal(format!("failed to create session dir: {e}")))?;
 
     // Resolved before anything is cut or spawned: an account that is missing, locked or cannot
-    // serve the harness fails the start, and the harness never silently runs on its own setup
-    // instead.
-    let route = start_cli_route(account_access, harness, route_sources, model, &session_dir)?;
+    // serve the agent fails the start, and the agent never silently runs on its own setup instead.
+    let route = start_cli_route(
+        account_access,
+        kind.route,
+        &agent.spec,
+        route_sources,
+        model,
+        &session_dir,
+    )?;
 
     let intent = tddy_session_split::service_util::write_initial_changeset(
         session_id,
@@ -149,7 +194,7 @@ pub(crate) async fn start_cli_harness_session(
             selected_integration_base_ref,
             selected_branch_to_work_on,
         },
-        BranchIntentPolicy::cli_harness(harness.session_type),
+        BranchIntentPolicy::cli_harness(kind.name),
         None,
         &session_dir,
         stack_parent.session_id(),
@@ -161,7 +206,7 @@ pub(crate) async fn start_cli_harness_session(
         project,
     } = provision_cli_worktree(
         &CliWorktreeStart {
-            session_type: harness.session_type,
+            session_type: kind.name,
             cut_label: "start_cli_harness_session: create worktree",
             session_id,
             session_dir: &session_dir,
@@ -217,21 +262,32 @@ pub(crate) async fn start_cli_harness_session(
             .git_environment,
     );
 
+    let launch_model = launch_model_for(&agent.spec, route.is_some(), model);
+    let (on_exit, token_arm) =
+        resume_token_recorder(session_dir.clone(), resume_token_adapter(&agent.spec)?);
     progress.begin_phase(StartStep::Agent);
-    let binary = harness_binary(config, harness);
-    let launch_model = launch_model_for(harness, route.is_some(), model);
-    let (token_recorder, token_arm) = resume_token_recorder(session_dir.clone());
+    let route = route.unwrap_or_default();
+    let mut slots = render_host_slots(agent, &worktree_path, &session_dir)?;
+    // The route's arguments follow the spec's own argv, and its environment follows the session's.
+    slots.argv_extra.extend(route.args);
+    env.extend(route.env);
+    let params = harness_template_params(&HarnessLaunch {
+        model: launch_model,
+        prompt: Some(initial_prompt),
+        ..HarnessLaunch::default()
+    });
     let launched = launch(
         cli_manager,
-        harness,
         HarnessSession::new(session_id, &worktree_path, &session_dir, os_user),
-        &CliLaunch {
-            binary: &binary,
+        HarnessSpecLaunch {
+            agent,
+            params: &params,
+            slots: &slots,
+            kind: kind.name,
             model: launch_model,
-            initial_prompt: Some(initial_prompt),
-            ..CliLaunch::default()
+            env,
+            on_exit,
         },
-        launch_extras(route.unwrap_or_default(), env, token_recorder),
         HarnessRun::start(run_in_tmux),
     )
     .await?;
@@ -246,9 +302,7 @@ pub(crate) async fn start_cli_harness_session(
         agents_rev: tddy_session_agents::agent_roster::started_roster_rev(agents),
         agents: agents.to_vec(),
         ..tddy_session_split::service_util::starting_session_metadata(
-            session_id,
-            project_id,
-            harness.session_type,
+            session_id, project_id, kind.name,
         )
     };
     write_session_metadata(&session_dir, &meta)
@@ -262,7 +316,7 @@ pub(crate) async fn start_cli_harness_session(
     log::info!(
         target: "tddy_daemon::connection_service",
         "started {} session {session_id} pid={pid} worktree={} user={os_user}",
-        harness.session_type,
+        kind.name,
         worktree_path.display()
     );
 
@@ -280,7 +334,7 @@ impl crate::launch_ports::LaunchSessions {
     /// then [`resume_cli_harness_session`].
     pub(crate) async fn resume_cli_harness(
         &self,
-        harness: &'static CliHarness,
+        kind: CliSessionType,
         os_user: &str,
         req: &ResumeSessionRequest,
         session_dir: &Path,
@@ -290,9 +344,10 @@ impl crate::launch_ports::LaunchSessions {
             // A tmux-run agent that exited unwatched left its token on its kept pane.
             crate::cli_harness_tmux::settle_unwatched_agent_exit(
                 &self.claude_cli_manager,
+                &self.tddy_data_dir,
                 os_user,
                 &req.session_id,
-                harness.session_type,
+                kind.name,
                 session_dir,
             )
             .await?;
@@ -300,6 +355,7 @@ impl crate::launch_ports::LaunchSessions {
         // The previous run's recorder may still be writing the token it printed as it exited.
         metadata.harness_resume_token =
             settled_resume_token(&self.claude_cli_manager, &req.session_id, session_dir).await?;
+        let session_agent = resolve_session_agent(self.coding_agents.as_ref(), &self.config, kind)?;
         let identity = self.host.session_identity(
             os_user,
             &req.session_id,
@@ -307,9 +363,8 @@ impl crate::launch_ports::LaunchSessions {
             &req.session_token,
         );
         resume_cli_harness_session(
-            harness,
+            &session_agent,
             &self.claude_cli_manager,
-            &self.config,
             &self.host.session_account_access(&req.session_token),
             ResumedSession {
                 session_id: &req.session_id,
@@ -335,16 +390,17 @@ struct ResumedSession<'a> {
     os_user: &'a str,
 }
 
-/// Resume a CLI harness session: the harness's resume argv (`--continue`) in its worktree, with its
-/// provider route re-resolved from the vault as it stands now. Refused when the worktree is gone —
-/// there is nothing for `--continue` to continue.
+/// Resume a CLI harness session: the agent's spec rendered with `resume` (`--continue`, or its
+/// recorded resume token) in its worktree, with its provider route re-resolved from the vault as it
+/// stands now. Refused when the worktree is gone — there is nothing for `--continue` to continue.
 async fn resume_cli_harness_session(
-    harness: &CliHarness,
+    session_agent: &CliSessionAgent,
     cli_manager: &Arc<CliSessionManager>,
-    config: &DaemonConfig,
     account_access: &SessionAccountAccess,
     session: ResumedSession<'_>,
 ) -> Result<Response<ResumeSessionResponse>, Status> {
+    let CliSessionAgent { kind, agent, .. } = session_agent;
+    let kind = *kind;
     let ResumedSession {
         session_id,
         session_dir,
@@ -360,24 +416,36 @@ async fn resume_cli_harness_session(
     if !worktree_path.exists() {
         return Err(Status::failed_precondition(format!(
             "worktree no longer exists; cannot resume {} session",
-            harness.session_type
+            kind.name
         )));
     }
 
-    let route = resume_cli_route(account_access, harness, session_dir)?;
-    let binary = harness_binary(config, harness);
-    let (token_recorder, token_arm) = resume_token_recorder(session_dir.to_path_buf());
+    let route = resume_cli_route(account_access, kind.route, &agent.spec, session_dir)?;
+    let (on_exit, token_arm) = resume_token_recorder(
+        session_dir.to_path_buf(),
+        resume_token_adapter(&agent.spec)?,
+    );
+    let mut slots = render_host_slots(agent, &worktree_path, session_dir)?;
+    slots.argv_extra.extend(route.args);
+    let mut env = git_environment;
+    env.extend(route.env);
+    let params = harness_template_params(&HarnessLaunch {
+        resume: true,
+        resume_token: meta.harness_resume_token.as_deref(),
+        ..HarnessLaunch::default()
+    });
     let launched = launch(
         cli_manager,
-        harness,
         HarnessSession::new(session_id, &worktree_path, session_dir, os_user),
-        &CliLaunch {
-            binary: &binary,
-            conversation_id: meta.harness_resume_token.as_deref(),
-            resume: true,
-            ..CliLaunch::default()
+        HarnessSpecLaunch {
+            agent,
+            params: &params,
+            slots: &slots,
+            kind: kind.name,
+            model: "",
+            env,
+            on_exit,
         },
-        launch_extras(route, git_environment, token_recorder),
         HarnessRun::resume(meta.tmux_session.is_some()),
     )
     .await?;

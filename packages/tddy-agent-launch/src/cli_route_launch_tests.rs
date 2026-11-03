@@ -6,10 +6,17 @@
 
 use std::os::unix::fs::PermissionsExt;
 
-use tddy_core::cli_harness::cli_harness;
+use tddy_coding_agent_specs::{load_agent_registry, CodingAgentSpec};
 use tddy_core::provider_route::{HarnessRoute, RouteFile, RouteSecret};
 
 use crate::cli_route_launch::{cli_route_launch, launch_model_for, CliRouteLaunch};
+
+/// The built-in spec of the coding agent `id`, as a host loads it.
+fn the_spec(id: &str) -> CodingAgentSpec {
+    let tools = tempfile::tempdir().expect("a tools directory");
+    let registry = load_agent_registry(tools.path()).expect("the built-in agents load");
+    CodingAgentSpec::of(registry.get(id).expect("registered")).expect("a coding agent")
+}
 
 fn a_fireworks_opencode_route() -> HarnessRoute {
     HarnessRoute {
@@ -37,11 +44,11 @@ fn value_of<'a>(pairs: &'a [(String, String)], key: &str) -> Option<&'a str> {
 fn an_opencode_session_on_fireworks_gets_a_config_naming_that_endpoint() {
     // Given
     let session_dir = tempfile::tempdir().expect("a session directory");
-    let opencode = cli_harness("opencode-cli").expect("registered");
+    let opencode = the_spec("opencode");
 
     // When
     let launch = cli_route_launch(
-        opencode,
+        &opencode,
         Some(&a_fireworks_opencode_route()),
         session_dir.path(),
     )
@@ -74,10 +81,10 @@ fn an_opencode_session_on_fireworks_gets_a_config_naming_that_endpoint() {
 fn an_unrouted_launch_adds_nothing_and_writes_nothing() {
     // Given
     let session_dir = tempfile::tempdir().expect("a session directory");
-    let opencode = cli_harness("opencode-cli").expect("registered");
+    let opencode = the_spec("opencode");
 
     // When
-    let launch = cli_route_launch(opencode, None, session_dir.path()).expect("nothing to apply");
+    let launch = cli_route_launch(&opencode, None, session_dir.path()).expect("nothing to apply");
 
     // Then
     assert_eq!(launch, CliRouteLaunch::default());
@@ -90,10 +97,10 @@ fn an_unrouted_launch_adds_nothing_and_writes_nothing() {
 #[test]
 fn a_muse_launch_on_a_meta_route_keeps_the_sessions_model() {
     // Given — Muse Code's route is environment only: it hands over the key and names no model
-    let muse = cli_harness("muse-cli").expect("registered");
+    let muse = the_spec("muse");
 
     // When
-    let model = launch_model_for(muse, true, "muse-wonder-1.0");
+    let model = launch_model_for(&muse, true, "muse-wonder-1.0");
 
     // Then
     assert_eq!(model, "muse-wonder-1.0");
@@ -102,10 +109,10 @@ fn a_muse_launch_on_a_meta_route_keeps_the_sessions_model() {
 #[test]
 fn an_opencode_launch_on_a_route_leaves_the_model_to_the_route() {
     // Given — OpenCode's route writes a config and names the model in its own `--model`
-    let opencode = cli_harness("opencode-cli").expect("registered");
+    let opencode = the_spec("opencode");
 
     // When
-    let model = launch_model_for(opencode, true, "fireworks/kimi-k2");
+    let model = launch_model_for(&opencode, true, "fireworks/kimi-k2");
 
     // Then
     assert_eq!(model, "");
@@ -114,10 +121,10 @@ fn an_opencode_launch_on_a_route_leaves_the_model_to_the_route() {
 #[test]
 fn an_unrouted_muse_launch_keeps_the_sessions_model() {
     // Given
-    let muse = cli_harness("muse-cli").expect("registered");
+    let muse = the_spec("muse");
 
     // When
-    let model = launch_model_for(muse, false, "muse-wonder-1.0");
+    let model = launch_model_for(&muse, false, "muse-wonder-1.0");
 
     // Then
     assert_eq!(model, "muse-wonder-1.0");
@@ -126,10 +133,10 @@ fn an_unrouted_muse_launch_keeps_the_sessions_model() {
 #[test]
 fn an_unrouted_opencode_launch_keeps_the_sessions_model() {
     // Given
-    let opencode = cli_harness("opencode-cli").expect("registered");
+    let opencode = the_spec("opencode");
 
     // When
-    let model = launch_model_for(opencode, false, "fireworks/kimi-k2");
+    let model = launch_model_for(&opencode, false, "fireworks/kimi-k2");
 
     // Then
     assert_eq!(model, "fireworks/kimi-k2");

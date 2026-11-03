@@ -15,6 +15,7 @@
 // `binary`, `route_config_env` `coding_agent.route.config_env`, `models` `coding_agent.models`
 // (`opencode-models` for the listed kind), the session type `spec_for_session_type`. Deleting a
 // file needs the developer's approval (CLAUDE.md § ASK).
+// Removal is deferred: docs/dev/todo/2026-11-03-harness-clis-legacy-cli-harness-removal.md
 
 use crate::adapters::{ModelsAdapter, OpenCodeModels};
 use crate::backend::{claude_cli_models, cursor_cli_models, BackendModels};

@@ -2,11 +2,19 @@
 //! their daemon from: a real git repo with `origin/main`, a projects registry naming it, a daemon
 //! config pointing one CLI harness at a stub binary, and a `DaemonSessionHost` serving a test user.
 //!
+//! The daemon's coding agents are installed as the daemon runtime installs them (see
+//! [`coding_agents_over`]): a CLI harness session is launched from its agent's spec, so a session
+//! type the host has no agent for is refused.
+//!
 //! Every item here is used by both suites, so neither test binary carries dead code.
 
+use std::os::unix::fs::PermissionsExt as _;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
+use tddy_actions::tool::ToolHost;
+use tddy_agent_launch::spec_launch::HostCodingAgents;
+use tddy_coding_agent_specs::load_agent_registry;
 use tddy_daemon_kernel::config::DaemonConfig;
 use tddy_session_lifecycle::claude_cli_session::CliSessionManager;
 use tddy_session_lifecycle::connection_service::DaemonSessionHost;
@@ -52,12 +60,14 @@ cli_harnesses:
     DaemonConfig::load(&config_path).expect("config must parse")
 }
 
-/// A session host over `sessions_base` serving [`VALID_TOKEN`], with `manager` running its PTYs.
+/// A session host over `sessions_base` serving [`VALID_TOKEN`], with `manager` running its PTYs and
+/// the coding agents of [`coding_agents_over`] installed.
 pub fn session_host(
     config: DaemonConfig,
     sessions_base: PathBuf,
     manager: Arc<CliSessionManager>,
 ) -> DaemonSessionHost {
+    let agents = coding_agents_over(&sessions_base);
     let tddy_data_dir = sessions_base.clone();
     let sessions_base_resolver: SessionsBaseResolver =
         Arc::new(move |_| Some(sessions_base.clone()));
@@ -75,6 +85,67 @@ pub fn session_host(
         Arc::new(tddy_daemon_kernel::operator_channel::NoOperatorChannel),
         manager,
     )
+    .with_coding_agents(agents)
+}
+
+/// The coding agents a daemon keeping its state in `tddy_home` launches from, as the daemon runtime
+/// binds them: the agent registry loaded from `<tddyhome>/tools`, resolved against a host whose `PATH`
+/// holds the real `tddy-tools` and whose `$HOME` is a directory of the test's. The harness binary
+/// itself is the daemon config's `cli_harnesses.<session type>.binary_path`.
+pub fn coding_agents_over(tddy_home: &Path) -> Arc<HostCodingAgents> {
+    let tools_dir = tddy_home.join("tools");
+    std::fs::create_dir_all(&tools_dir).unwrap();
+    let registry = load_agent_registry(&tools_dir).expect("the agent registry loads");
+    let tool_bin = tddy_home.join("tool-bin");
+    std::fs::create_dir_all(&tool_bin).unwrap();
+    match std::os::unix::fs::symlink(tddy_tools_binary(), tool_bin.join("tddy-tools")) {
+        Ok(()) => {}
+        Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {}
+        Err(e) => panic!("tddy-tools is linked into the host's PATH: {e}"),
+    }
+    let home = tddy_home.join("host-home");
+    std::fs::create_dir_all(&home).unwrap();
+    Arc::new(HostCodingAgents::new(
+        registry,
+        Arc::new(AFixtureHost {
+            path: vec![tool_bin],
+            home,
+        }),
+    ))
+}
+
+/// The real `tddy-tools`, built beside this test binary.
+pub fn tddy_tools_binary() -> PathBuf {
+    std::env::var_os("CARGO_BIN_EXE_tddy-tools")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| {
+            PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../target/debug/tddy-tools")
+        })
+}
+
+/// A host with a declared `PATH` and `$HOME` over the real filesystem — nothing of the real machine's
+/// `PATH`, `$HOME` or `TDDY_*` variables reaches resolution.
+struct AFixtureHost {
+    path: Vec<PathBuf>,
+    home: PathBuf,
+}
+
+impl ToolHost for AFixtureHost {
+    fn env_var(&self, name: &str) -> Option<String> {
+        (name == "HOME").then(|| self.home.to_string_lossy().into_owned())
+    }
+
+    fn path_dirs(&self) -> Vec<PathBuf> {
+        self.path.clone()
+    }
+
+    fn is_executable_file(&self, path: &Path) -> bool {
+        std::fs::metadata(path).is_ok_and(|m| m.is_file() && m.permissions().mode() & 0o111 != 0)
+    }
+
+    fn canonicalize(&self, path: &Path) -> std::io::Result<PathBuf> {
+        std::fs::canonicalize(path)
+    }
 }
 
 /// A git repo in `dir` with one empty commit on `main`, pushed to an `origin` that is itself.
