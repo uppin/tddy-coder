@@ -3,7 +3,7 @@
 //! Args is the common runtime type. CoderArgs and DemoArgs are CLI parser types
 //! with different agent constraints; both convert to Args via From.
 
-use crate::codex_binaries::{resolve_codex_acp_binary, resolve_codex_binary};
+use crate::codex_binaries::resolve_codex_binary;
 use crate::provider_route_arg::{
     apply_provider_route, load_provider_route, refuse_route_for_definition,
 };
@@ -19,9 +19,8 @@ use tddy_core::workflow::graph::ExecutionStatus;
 use tddy_core::{
     backend_from_label, backend_selection_question, default_model_for_agent, get_session_for_tag,
     output::SESSIONS_SUBDIR, preselected_index_for_agent, read_changeset, read_session_metadata,
-    AnyBackend, ClaudeAcpBackend, CodexAcpBackend, CodexBackend, CodingBackend, GoalId,
-    OpenCodeAcpBackend, PendingWorkflowStart, ProgressEvent, SharedBackend, StubBackend,
-    WorkflowEngine, WorkflowRecipe,
+    AnyBackend, CodexBackend, CodingBackend, GoalId, PendingWorkflowStart, ProgressEvent,
+    SharedBackend, StubBackend, WorkflowEngine, WorkflowRecipe,
 };
 use tddy_discovery;
 use tddy_workflow_recipes::{parse_evaluate_response, parse_refactor_response};
@@ -2561,9 +2560,10 @@ fn create_backend(
             let cursor = crate::headless_from_spec::cursor_backend_from_spec(tools_dir, host)?;
             AnyBackend::Cursor(cursor.with_progress(on_progress))
         }
-        // TODO(acp-agents): build it with `crate::acp_from_spec::claude_acp_backend_from_spec`,
-        // so the spec is the only path.
-        "claude-acp" => AnyBackend::ClaudeAcp(ClaudeAcpBackend::new()),
+        // Rendered from `claude-acp.yaml`'s `coding_agent.acp` on this host's tools.
+        "claude-acp" => AnyBackend::ClaudeAcp(crate::acp_from_spec::claude_acp_backend_from_spec(
+            tools_dir, tool_host,
+        )?),
         // Rendered from `codex.yaml`'s headless section; an explicit `--codex-cli-path` names the
         // spec's binary.
         "codex" => {
@@ -2576,31 +2576,34 @@ fn create_backend(
                 tools_dir, host,
             )?)
         }
-        // TODO(acp-agents): build it with `crate::acp_from_spec::codex_acp_backend_from_spec`, so
-        // the spec is the only path.
+        // Rendered from `codex-acp.yaml`'s `coding_agent.acp`: an explicit `--codex-acp-cli-path`
+        // names its binary, and an explicit `--codex-cli-path` names the `codex` dep its login runs.
         "codex-acp" => {
-            let acp_bin = resolve_codex_acp_binary(codex_acp_cli_path, codex_cli_path);
-            let codex_bin = resolve_codex_binary(codex_cli_path);
-            log::info!(
-                "[tddy-coder] Codex ACP backend: agent `{}`, codex CLI for OAuth `{}`",
-                acp_bin.display(),
-                codex_bin.display()
+            let host = crate::headless_from_spec::host_naming_binary(
+                tool_host,
+                crate::acp_from_spec::CODEX_ACP_BINARY_ENV,
+                codex_acp_cli_path,
             );
-            AnyBackend::CodexAcp(CodexAcpBackend::with_agent_and_codex_paths(
-                acp_bin, codex_bin,
-            ))
+            let host = crate::headless_from_spec::host_naming_binary(
+                host,
+                crate::headless_from_spec::CODEX_BINARY_ENV,
+                codex_cli_path,
+            );
+            AnyBackend::CodexAcp(crate::acp_from_spec::codex_acp_backend_from_spec(
+                tools_dir, host,
+            )?)
         }
-        // TODO(acp-agents): build it with `crate::acp_from_spec::opencode_acp_backend_from_spec`,
-        // so the spec is the only path.
+        // Rendered from `opencode.yaml`'s `coding_agent.acp`; an explicit `--opencode-cli-path`
+        // names the spec's binary.
         "opencode" => {
-            let path = opencode_cli_path
-                .map(Path::to_path_buf)
-                .unwrap_or_else(|| PathBuf::from(OpenCodeAcpBackend::DEFAULT_CLI_BINARY));
-            log::info!(
-                "[tddy-coder] OpenCode ACP backend: agent `{}`",
-                path.display()
+            let host = crate::headless_from_spec::host_naming_binary(
+                tool_host,
+                crate::acp_from_spec::OPENCODE_BINARY_ENV,
+                opencode_cli_path,
             );
-            AnyBackend::OpenCode(OpenCodeAcpBackend::with_agent_path(path))
+            AnyBackend::OpenCode(crate::acp_from_spec::opencode_acp_backend_from_spec(
+                tools_dir, host,
+            )?)
         }
         "stub" => AnyBackend::Stub(StubBackend::new()),
         // Rendered from `claude.yaml`'s headless section on this host's tools, so the spec is the
