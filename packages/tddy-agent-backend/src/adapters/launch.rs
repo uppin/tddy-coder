@@ -1,7 +1,7 @@
 //! Launch adapters: the Rust code an interactive (PTY) coding agent's launch reads its *own*
 //! output through, by name (`#agent-tools 8/12`).
 //!
-//! PRD: `docs/ft/daemon/1-WIP/PRD-2026-10-31-harness-clis-from-specs.md`.
+//! Feature docs: `docs/ft/daemon/{opencode,muse,warp}-cli-session.md`.
 //!
 //! A [`super::StreamAdapter`] reads a headless turn's stdout as it streams. These read something
 //! else, after the fact: the stdout of a model-listing command (`opencode models`), and a PTY

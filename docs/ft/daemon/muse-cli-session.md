@@ -42,7 +42,6 @@ Refused starts:
 | Request | Status |
 |---|---|
 | `sandbox = true` with no Meta account (none chosen, no default, or **Built in**) | `FAILED_PRECONDITION` "a sandboxed muse-cli session needs a provider account" — see [Sandbox mode](#sandbox-mode) |
-| `sandbox = true` with a non-blank first prompt | `FAILED_PRECONDITION` — the jail hosts Muse Code without a first prompt |
 | `managed_codebase = true` | `INVALID_ARGUMENT` — Muse Code has no workflow of its own for a managed codebase to drive |
 
 ## Sandbox mode
@@ -50,8 +49,8 @@ Refused starts:
 The web **Create session** pane does not offer a sandbox toggle for Muse Code; the mode is reached through
 `StartSession` directly.
 
-`sandbox = true` runs Muse Code in a jail (macOS Seatbelt, Linux userns + cgroups). The jail hosts
-`tddy-sandbox-runner --agent-kind muse`, which runs `muse --model <model>` in its PTY and relays it
+`sandbox = true` runs Muse Code in a jail (macOS Seatbelt, Linux userns + cgroups). The jail's
+`tddy-sandbox-runner` runs the argv `muse.yaml`'s `run:` template renders in its PTY and relays it
 over the daemon's own connection. The worktree is the daemon's. The jail's `$HOME` is the session's
 own scratch directory. Muse Code is a native binary, so its jail policy is the interactive TUI policy
 **without** run-time code generation.
@@ -62,8 +61,10 @@ the jail. Without one the start is refused before anything is cut or spawned. On
 never the jail's environment map or argv. The binary is resolved to an absolute path on the daemon's
 `PATH` first, and a binary that is not there is refused.
 
-The jail's runner hosts **no first prompt**, so a sandboxed start with a non-blank `initial_prompt` is
-refused (`FAILED_PRECONDITION`). A resume relaunches the jail with `--resume` (`muse --continue`) on
+A non-blank first prompt is delivered through the spec's argv, and a blank model is not refused (the
+Meta account is required by `muse.yaml`'s `route.required_in_jail`). The agent process sees no
+`TDDY_*` variable; the daemon's additions go only to the `tddy-tools --mcp` server's environment. A
+resume relaunches the jail with `--resume` (`muse --continue`) on
 the account the start recorded, re-resolved from the owner's vault. It never resumes on the host's
 PTY.
 

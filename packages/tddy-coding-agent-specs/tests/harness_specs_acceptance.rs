@@ -3,7 +3,7 @@
 //! jail needs, the model listing and its adapter, the resume adapter and the placements. Their
 //! launches are exercised by `tddy-session-lifecycle` `harness_clis_from_spec_acceptance`.
 //!
-//! PRD: `docs/ft/daemon/1-WIP/PRD-2026-10-31-harness-clis-from-specs.md` (`#agent-tools 8/12`).
+//! Feature docs: `docs/ft/daemon/{opencode,muse,warp}-cli-session.md` (`#agent-tools 8/12`).
 
 use pretty_assertions::assert_eq;
 use tddy_actions::tool::{ArgvItem, ToolRegistry};

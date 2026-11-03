@@ -38,7 +38,6 @@ Refused starts:
 | Request | Status |
 |---|---|
 | `sandbox = true` with no provider account (none chosen, no default, or **Built in**) | `FAILED_PRECONDITION` "a sandboxed opencode-cli session needs a provider account" — see [Sandbox mode](#sandbox-mode) |
-| `sandbox = true` with a non-blank first prompt | `FAILED_PRECONDITION` — the jail hosts OpenCode without a first prompt |
 | `managed_codebase = true` | `INVALID_ARGUMENT` — OpenCode has no workflow of its own for a managed codebase to drive |
 
 ## Sandbox mode
@@ -46,9 +45,10 @@ Refused starts:
 The web **Create session** pane does not offer a sandbox toggle for OpenCode; the mode is reached through
 `StartSession` directly.
 
-`sandbox = true` runs OpenCode in a jail (macOS Seatbelt, Linux userns + cgroups). The jail hosts
-`tddy-sandbox-runner --agent-kind opencode`, which runs `opencode --model <model>` in its PTY and
-relays the PTY over the daemon's own connection, as a sandboxed Cursor session does. The worktree is
+`sandbox = true` runs OpenCode in a jail (macOS Seatbelt, Linux userns + cgroups). The jail's
+`tddy-sandbox-runner` runs the argv `opencode.yaml`'s `run:` template renders (`opencode --model
+<model> [--prompt <prompt>]`) in its PTY and relays the PTY over the daemon's own connection, as a
+sandboxed Cursor session does. The worktree is
 the daemon's, cut exactly as for an unsandboxed start. The jail's `$HOME` is the session's own
 scratch directory, so a resume finds OpenCode's session store where it left it.
 
@@ -62,14 +62,20 @@ On the account:
   scratch, and `OPENCODE_CONFIG` names it;
 - the key reaches the agent child through the jail's secret-file channel (`TDDY_SECRET_<NAME>`), never
   the jail's environment map or argv;
-- the runner's `--model` is the route's (`tddy-route/<model>`).
+- the agent's `--model` is the route's (`tddy-route/<model>`), so a blank requested model is not
+  refused;
+- the jail's egress admits the hosts `opencode.yaml` declares plus the base-URL host named in the
+  route's files (`opencode.json`), so a routed jail reaches its own provider.
+
+The agent process sees no `TDDY_*` variable: the daemon's `TDDY_*` additions go only to the
+`tddy-tools --mcp` server's environment.
 
 The binary is resolved to an absolute path on the daemon's `PATH` before the jail is built, because
 the sandbox profile grants reads to it by path. A binary that is not there is refused with
 `FAILED_PRECONDITION`.
 
-The jail's runner hosts **no first prompt**, so a sandboxed start with a non-blank `initial_prompt` is
-refused (`FAILED_PRECONDITION`) rather than dropping the prompt silently. A blank prompt is no prompt.
+A non-blank first prompt is delivered through the spec's argv (`--prompt`). A blank prompt is no
+prompt.
 
 A resume of a sandboxed session relaunches its jail with `--resume` (`opencode --continue`), on the
 account the start recorded and re-resolved from the owner's vault as it stands now. It never resumes

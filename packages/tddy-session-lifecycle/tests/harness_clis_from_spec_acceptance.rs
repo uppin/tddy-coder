@@ -4,7 +4,7 @@
 //! and config env from the spec's `route` section, Warp's resume token is read through the
 //! `warp-resume-token` adapter, and Warp's jail refusal is its spec's `placements: [host]`.
 //!
-//! PRD: `docs/ft/daemon/1-WIP/PRD-2026-10-31-harness-clis-from-specs.md` (`#agent-tools 8/12`).
+//! Feature docs: `docs/ft/daemon/{opencode,muse,warp}-cli-session.md` (`#agent-tools 8/12`).
 //!
 //! The daemon is the real `DaemonSessionHost` given its coding agents as the daemon runtime gives
 //! them (see `harness_clis_support`); the stub harness reports on its terminal what it was started

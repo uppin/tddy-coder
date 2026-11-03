@@ -13,7 +13,7 @@
 //! (OpenCode's `opencode.json`) lives in the session directory, its key reaches the child's
 //! environment only.
 //!
-//! PRD: `docs/ft/daemon/1-WIP/PRD-2026-10-31-harness-clis-from-specs.md` (`#agent-tools 8/12`).
+//! Feature docs: `docs/ft/daemon/{opencode,muse,warp}-cli-session.md` (`#agent-tools 8/12`).
 
 mod harness_launch;
 

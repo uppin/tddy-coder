@@ -4,7 +4,7 @@
 //! [`crate::launch_ports::LaunchSessions::launch_jailed`] — and the spec-driven refusal of a
 //! placement the spec excludes.
 //!
-//! PRD: `docs/ft/daemon/1-WIP/PRD-2026-10-31-harness-clis-from-specs.md` (`#agent-tools 8/12`).
+//! Feature docs: `docs/ft/daemon/{opencode,muse,warp}-cli-session.md` (`#agent-tools 8/12`).
 //!
 //! Nothing here builds an argv: these are the template parameters the three specs name. A resume
 //! is `resume` for the agents that continue their worktree's session (`--continue`), and

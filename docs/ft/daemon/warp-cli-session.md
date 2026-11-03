@@ -39,7 +39,7 @@ Refused starts, each before anything is cut or spawned:
 
 | Request | Status |
 |---|---|
-| `sandbox = true` | `FAILED_PRECONDITION` "the sandbox runner does not host warp-cli" — the sandbox runner hosts no Warp, and the refusal comes before any provider route is resolved |
+| `sandbox = true` | `FAILED_PRECONDITION` "the sandbox runner does not host warp-cli: warp cannot run in the jail: its spec's placements are [host]" — `warp.yaml` declares `placements: [host]`, and the refusal comes before any provider route is resolved |
 | `managed_codebase = true` | `INVALID_ARGUMENT` — Warp has no workflow of its own for a managed codebase to drive |
 | a provider account chosen (`provider_account_id`) | `INVALID_ARGUMENT` "Warp cannot be pointed at another provider; it always runs on its own vendor" — the refusal Cursor gets, checked before the empty-model refusal so it names Warp |
 
@@ -74,7 +74,9 @@ cli_harnesses:
 
 ## The resume token
 
-Warp prints its resume handle only as it exits, so the token is an output of the run:
+Warp prints its resume handle only as it exits, so the token is an output of the run. `warp.yaml`
+names the reader as `resume: { adapter: warp-resume-token }`, and the host launch runs it as the
+terminal's exit hook:
 
 - Every time the session's `warp` process exits, the daemon reads the tail of that terminal's output
   (the last 64 KiB), strips terminal escape sequences (CSI, OSC, DCS and the other string sequences,
@@ -88,9 +90,9 @@ Warp prints its resume handle only as it exits, so the token is an output of the
   leaves the recorded token unchanged. A session that has never exited cleanly has none.
 - Nothing but `harness_resume_token` is written, and only when a token was found.
 
-The reader runs for every CLI harness started through the shared OpenCode / Muse Code / Warp path;
-only Warp prints the line, so the others never record a token. A session run in tmux reads the same
-line from its pane's final screen instead — see [§ tmux mode](#tmux-mode).
+Only a spec with a `resume` adapter gets the hook; OpenCode and Muse Code declare none, so they never
+record a token. A session run in tmux reads the same line from its pane's final screen instead — see
+[§ tmux mode](#tmux-mode).
 
 ## Resume
 

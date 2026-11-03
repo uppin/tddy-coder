@@ -1,7 +1,7 @@
 # 2026-11-03 — The legacy `CliHarness` table and the jail's `--agent-kind` helpers outlive the harness-clis launch
 
 **Category:** Deferred from `#agent-tools 8/12` (harness-clis, PR #797)
-**Source:** the harness-clis changeset `docs/dev/1-WIP/2026-10-31-agent-tools-harness-clis.md`
+**Source:** the harness-clis changeset, wrapped as `docs/dev/changesets/2026-11-03-agent-tools-harness-clis.md`
 (`## Refactoring Needed` → `### From /red`, the `TODO(...)` deletions needing approval) and the green
 pass that moved the OpenCode, Muse Code and Warp launches onto their specs.
 
