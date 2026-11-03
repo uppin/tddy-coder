@@ -24,6 +24,7 @@
     "provider_account_id",
     "provider_built_in",
     "recipe",
+    "run_in_tmux",
     "sandbox",
     "sandboxed_codebase",
     "selected_branch_to_work_on",

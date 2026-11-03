@@ -52,6 +52,7 @@ pub struct StartSessionArgs {
     pub codebase_daemon_instance_id: String,
     pub ssh_config_host: String,
     pub semantic_index: bool,
+    pub run_in_tmux: bool,
     pub specialized_agents: Vec<String>,
     pub clone_placed_agents: Vec<String>,
     pub attachments: Vec<HostDocumentAttachment>,
@@ -231,6 +232,7 @@ impl StartSessionArgs {
             codebase_daemon_instance_id: self.codebase_daemon_instance_id,
             ssh_config_host: self.ssh_config_host,
             semantic_index: self.semantic_index,
+            run_in_tmux: self.run_in_tmux,
             specialized_agents: self.specialized_agents,
             clone_placed_agents: self.clone_placed_agents,
             attachments: self

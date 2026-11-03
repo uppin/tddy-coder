@@ -44,9 +44,9 @@ move down to `tddy-cli-sessions` here.
 ### What's Changing
 
 - **Create request:** `StartSessionRequest.run_in_tmux` (bool). It is honoured for host claude-cli
-  sessions. It is refused with `invalid_argument` together with `sandbox`, and ignored by other session
+  sessions. It is refused with `invalid_argument` together with `sandbox`, `sandboxed_codebase` or a split placement (`codebase_daemon_instance_id`), and ignored by other session
   types until `3/3`.
-- **Record:** `SessionMetadata.tmux_session: Option<String>`. The name is `tddy-<session short id>`.
+- **Record:** `SessionMetadata.tmux_session: Option<String>`. The name is `tddy-<full session id>`.
 - **Launch:**
   - `tmux new-session -d -s <name> -c <worktree> -e <K=V>… -- <claude argv>` runs as the session's OS user;
   - then the main terminal runs `tmux -T clipboard attach-session -t =<name>` as that user;

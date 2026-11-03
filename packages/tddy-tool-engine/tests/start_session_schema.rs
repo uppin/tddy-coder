@@ -178,6 +178,7 @@ fn every_argument_reaches_the_request_under_its_own_name() {
         "codebase_daemon_instance_id": "host-d",
         "ssh_config_host": "builder",
         "semantic_index": true,
+        "run_in_tmux": true,
         "specialized_agents": ["fastcontext"],
         "clone_placed_agents": ["fastcontext"],
         "attachments": [],
@@ -222,6 +223,7 @@ fn every_argument_reaches_the_request_under_its_own_name() {
             codebase_daemon_instance_id: "host-d".to_string(),
             ssh_config_host: "builder".to_string(),
             semantic_index: true,
+            run_in_tmux: true,
             specialized_agents: vec!["fastcontext".to_string()],
             clone_placed_agents: vec!["fastcontext".to_string()],
             ..Default::default()

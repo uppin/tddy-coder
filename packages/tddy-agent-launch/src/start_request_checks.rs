@@ -78,15 +78,39 @@ pub(crate) fn refuse_an_unsupported_cli_harness_start(
     Ok(())
 }
 
-/// A claude-cli start that asks for both a tmux-run agent and a sandbox is refused before anything is
-/// created: the sandbox confines the agent in its own jail, which a tmux session on the host is not.
+/// A claude-cli start that asks for a tmux-run agent together with a placement that is not a plain
+/// agent on this host is refused before anything is created, naming the conflict:
+///
+/// - `sandbox` confines the agent in its own jail, which a tmux session on the host is not;
+/// - `sandboxed_codebase` withdraws the agent's native tools and jails the code, so there is no host
+///   agent to run in tmux;
+/// - `codebase_daemon_instance_id` (split placement) puts the worktree on another daemon, while the
+///   tmux session is as this host's OS user in a local worktree.
+///
 /// Other session types ignore `run_in_tmux` until they honour it.
-pub(crate) fn refuse_a_tmux_run_sandboxed_start(req: &StartSessionRequest) -> Result<(), Status> {
-    if req.session_type.trim() == "claude-cli" && req.run_in_tmux && req.sandbox {
+pub(crate) fn refuse_a_conflicting_tmux_run_start(req: &StartSessionRequest) -> Result<(), Status> {
+    if req.session_type.trim() != "claude-cli" || !req.run_in_tmux {
+        return Ok(());
+    }
+    if req.sandbox {
         return Err(Status::invalid_argument(
             "run_in_tmux cannot be combined with sandbox: a sandboxed agent runs in its own jail, \
              not in a tmux session on the host",
         ));
+    }
+    if req.sandboxed_codebase {
+        return Err(Status::invalid_argument(
+            "run_in_tmux cannot be combined with sandboxed_codebase: that placement withdraws the \
+             agent's native tools and jails the code, so there is no agent on the host to run in tmux",
+        ));
+    }
+    let codebase_host = req.codebase_daemon_instance_id.trim();
+    if !codebase_host.is_empty() {
+        return Err(Status::invalid_argument(format!(
+            "run_in_tmux cannot be combined with codebase_daemon_instance_id {codebase_host:?}: a \
+             split session's worktree is on another daemon, and a tmux session runs in a worktree \
+             on this host"
+        )));
     }
     Ok(())
 }

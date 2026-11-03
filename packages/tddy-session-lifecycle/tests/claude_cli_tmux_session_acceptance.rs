@@ -50,13 +50,28 @@ struct TmuxAgentDaemon {
 }
 
 async fn a_daemon_with_a_private_tmux() -> TmuxAgentDaemon {
+    a_daemon_whose_agent(AgentTemperament::HoldsItsPane).await
+}
+
+/// How the stub `claude` behaves when its tmux session is killed (tmux sends SIGHUP to the pane).
+enum AgentTemperament {
+    HoldsItsPane,
+    IgnoresHangup,
+}
+
+async fn a_daemon_whose_agent(temperament: AgentTemperament) -> TmuxAgentDaemon {
     let tmux = PrivateTmux::started();
     let sessions_dir = tempfile::tempdir().unwrap();
     let stub_dir = tempfile::tempdir().unwrap();
     let launches = stub_dir.path().join("launches.log");
     let environment = stub_dir.path().join("environment.txt");
     let working_directory = stub_dir.path().join("cwd.txt");
-    let stub = a_stub_agent_script(stub_dir.path(), "stub_claude.sh")
+    let mut stub = a_stub_agent_script(stub_dir.path(), "stub_claude.sh");
+    if matches!(temperament, AgentTemperament::IgnoresHangup) {
+        // An ignored signal stays ignored across `exec`, so the `cat` the stub ends in ignores it too.
+        stub = stub.with_prelude("trap '' HUP");
+    }
+    let stub = stub
         .with_prelude(&format!("pwd -P > \"{}\"", working_directory.display()))
         .recording_env_to(&environment, &["CLAUDE_CODE_NO_FLICKER"])
         .appending_argv_to(&launches)
@@ -461,4 +476,70 @@ async fn run_in_tmux_with_sandbox_is_refused() {
         "the refusal names the option: {}",
         refusal.message()
     );
+}
+
+#[tokio::test]
+#[serial_test::serial]
+async fn deleting_a_tmux_run_session_ends_an_agent_that_ignores_hangup() {
+    // Given a running tmux-run session whose agent ignores SIGHUP, the signal kill-session sends
+    let daemon = a_daemon_whose_agent(AgentTemperament::IgnoresHangup).await;
+    let session_id = daemon.starts_a_session_in_tmux().await;
+    let name = daemon.tmux_session_of(&session_id);
+    daemon
+        .until_the_agent_ran_in_tmux_session(&daemon.tmux, &name)
+        .await;
+    let agent_pid = daemon.metadata_of(&session_id).pid.expect("a recorded pid");
+
+    // When it is deleted
+    daemon
+        .host
+        .delete_session(Request::direct(DeleteSessionRequest {
+            session_token: VALID_TOKEN.to_string(),
+            session_id: session_id.clone(),
+        }))
+        .await
+        .expect("DeleteSession");
+
+    // Then the agent is gone, not merely detached from a dead tmux session
+    eventually(
+        "the agent to be gone",
+        std::time::Duration::from_secs(20),
+        || match a_process_is_alive(agent_pid) {
+            false => Ok(()),
+            true => Err(format!("agent pid {agent_pid} is still alive")),
+        },
+    )
+    .await;
+}
+
+#[tokio::test]
+#[serial_test::serial]
+async fn deleting_a_session_whose_metadata_is_unreadable_still_kills_its_tmux_session() {
+    // Given a running tmux-run session whose .session.yaml is then lost
+    let daemon = a_daemon_with_a_private_tmux().await;
+    let session_id = daemon.starts_a_session_in_tmux().await;
+    let name = daemon.tmux_session_of(&session_id);
+    daemon
+        .until_the_agent_ran_in_tmux_session(&daemon.tmux, &name)
+        .await;
+    std::fs::remove_file(daemon.session_dir(&session_id).join(".session.yaml")).unwrap();
+
+    // When it is deleted
+    daemon
+        .host
+        .delete_session(Request::direct(DeleteSessionRequest {
+            session_token: VALID_TOKEN.to_string(),
+            session_id: session_id.clone(),
+        }))
+        .await
+        .expect("DeleteSession");
+
+    // Then the tmux session, named by the session id, is gone
+    eventually("the tmux session to be gone", OBSERVE, || {
+        match daemon.tmux.has_session(&name) {
+            false => Ok(()),
+            true => Err(format!("tmux session {name:?} is still alive")),
+        }
+    })
+    .await;
 }

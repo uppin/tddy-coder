@@ -198,26 +198,19 @@ impl std::error::Error for TmuxError {}
 /// The prefix of an agent's tmux session name, before the session id's characters.
 const AGENT_SESSION_NAME_PREFIX: &str = "tddy-";
 
-/// How many leading characters of the session id an agent's tmux session name carries.
-const AGENT_SESSION_ID_CHARS: usize = 8;
-
-/// The tmux session an agent session runs in: `tddy-` and the first eight characters of its id.
+/// The tmux session an agent session runs in: `tddy-` and the full session id.
 ///
-/// tmux reads `:` and `.` as target separators, so each is replaced by `_` — the character tmux
-/// itself substitutes when it names a session. Stable for a session id.
-///
-/// FIXME(claude-in-tmux): the first eight hex characters of a UUIDv7 are the high bits of its
-/// millisecond timestamp, so they repeat every ~65 s. Two agent sessions of one OS user started in
-/// the same window get the same name: the second start is refused by tmux, and a kill by name
-/// (Delete, Resume, shutdown) reaches the other session's agent. The name is pinned by
-/// `an_agent_tmux_session_is_named_after_the_short_session_id`; the naming needs a decision.
+/// The whole id, never a prefix: the leading characters of a UUIDv7 are the high bits of its
+/// millisecond timestamp, so a prefix repeats across sessions started close together. The name is
+/// derivable from the id alone, so it stays authoritative even when the session's metadata cannot
+/// be read. tmux reads `:` and `.` as target separators, so each is replaced by `_` — the character
+/// tmux itself substitutes when it names a session. Stable for a session id.
 pub fn agent_tmux_session_name(session_id: &str) -> String {
-    let short: String = session_id
+    let name: String = session_id
         .chars()
-        .take(AGENT_SESSION_ID_CHARS)
         .map(|c| if matches!(c, ':' | '.') { '_' } else { c })
         .collect();
-    format!("{AGENT_SESSION_NAME_PREFIX}{short}")
+    format!("{AGENT_SESSION_NAME_PREFIX}{name}")
 }
 
 /// The arguments of `tmux new-session` that start `argv` detached in a session `name`, in
@@ -556,12 +549,12 @@ mod tests {
     }
 
     #[test]
-    fn an_agent_tmux_session_is_named_after_the_short_session_id() {
+    fn an_agent_tmux_session_is_named_after_the_full_session_id() {
         // When
         let name = agent_tmux_session_name("01900000-0000-7000-8000-0000000f5c01");
 
         // Then
-        assert_eq!(name, "tddy-01900000");
+        assert_eq!(name, "tddy-01900000-0000-7000-8000-0000000f5c01");
     }
 
     #[test]
