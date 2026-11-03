@@ -53,8 +53,9 @@ pub fn render_mcp(
             let (file, argv) = headless_mcp::render_argv_mcp(flag, server, scratch_dir);
             Ok((Some(file), argv))
         }
-        // TODO(acp-agents): glue — `slots::acp::acp_mcp_servers` renders this slot, not a file.
-        McpSlot::AcpSession => todo!("acp-agents: render_mcp for the acp-session slot"),
+        // The server travels in `session/new` `mcp_servers`, which `slots::acp::acp_mcp_servers`
+        // renders: no file and no argv entry.
+        McpSlot::AcpSession => Ok((None, Vec::new())),
         McpSlot::Workdir { path, format } => Ok((
             Some(headless_mcp::render_workdir_mcp(
                 path, *format, server, workdir,

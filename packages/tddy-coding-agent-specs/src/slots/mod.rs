@@ -192,10 +192,15 @@ fn render_tool_slot(
             agent: spec.id.clone(),
             slot: slot_name.to_string(),
         }),
-        // TODO(acp-agents): glue — `slots::acp::acp_withdrawal` reads these, not flags.
-        ToolSlot::AcpMeta { .. } | ToolSlot::ConfigEnv { .. } => {
-            todo!("acp-agents: render_tool_slot for the acp withdrawal slots")
+        // An ACP deny slot takes no argv flag: its withdrawal is `acp::acp_withdrawal`'s. Values for
+        // it are refused here, never dropped.
+        ToolSlot::AcpMeta { .. } | ToolSlot::ConfigEnv { .. } if values.is_empty() => {
+            Ok(Vec::new())
         }
+        ToolSlot::AcpMeta { .. } | ToolSlot::ConfigEnv { .. } => Err(SlotError::SlotUnsupported {
+            agent: spec.id.clone(),
+            slot: slot_name.to_string(),
+        }),
     }
 }
 

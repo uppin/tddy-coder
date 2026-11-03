@@ -6,7 +6,7 @@
 use tddy_agent_backend::McpServerSpec;
 
 use super::{McpServerCommand, SlotError};
-use crate::{CodingAgentSpec, McpSlot};
+use crate::{CodingAgentSpec, McpSlot, ToolSlot};
 
 /// How an ACP launch withdraws an agent's native tools.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -30,9 +30,26 @@ pub fn acp_mcp_servers(
     spec: &CodingAgentSpec,
     server: Option<&McpServerCommand>,
 ) -> Result<Vec<McpServerSpec>, SlotError> {
-    // TODO(acp-agents): implement — `McpServerCommand` → `McpServerSpec`, its `env` in name order.
-    let _ = (spec, server, McpSlot::AcpSession);
-    todo!("acp-agents: acp_mcp_servers")
+    let Some(server) = server else {
+        return Ok(Vec::new());
+    };
+    match spec.acp_mcp() {
+        Some(McpSlot::AcpSession) => Ok(vec![McpServerSpec {
+            name: server.name.clone(),
+            command: server.command.clone(),
+            args: server.args.clone(),
+            // `BTreeMap` iterates in name order, which is the order the entries are sent in.
+            env: server
+                .env
+                .iter()
+                .map(|(name, value)| (name.clone(), value.clone()))
+                .collect(),
+        }]),
+        _ => Err(SlotError::SlotUnsupported {
+            agent: spec.id.clone(),
+            slot: "mcp".to_string(),
+        }),
+    }
 }
 
 /// How an ACP launch of `spec` withdraws `tools` — the declared `acp.withdraw_native` on a managed
@@ -45,7 +62,49 @@ pub fn acp_withdrawal(
     spec: &CodingAgentSpec,
     tools: &[String],
 ) -> Result<Option<AcpWithdrawal>, SlotError> {
-    // TODO(acp-agents): implement.
-    let _ = (spec, tools);
-    todo!("acp-agents: acp_withdrawal")
+    if tools.is_empty() {
+        return Ok(None);
+    }
+    let refused = || SlotError::SlotUnsupported {
+        agent: spec.id.clone(),
+        slot: "tool_deny".to_string(),
+    };
+    match spec.acp_tool_deny().ok_or_else(refused)? {
+        ToolSlot::AcpMeta { path } => Ok(Some(AcpWithdrawal::Meta(meta_at(path, tools)))),
+        ToolSlot::ConfigEnv { env } => Ok(Some(AcpWithdrawal::ConfigEnv {
+            env: env.clone(),
+            config: switched_off_config(tools),
+        })),
+        ToolSlot::Flag(_) | ToolSlot::Unsupported(_) => Err(refused()),
+    }
+}
+
+/// `tools` as a list at the dotted `path` of a JSON object, nested as the path is:
+/// `claudeCode.options.disallowedTools` → `{"claudeCode": {"options": {"disallowedTools": [...]}}}`.
+fn meta_at(path: &str, tools: &[String]) -> serde_json::Map<String, serde_json::Value> {
+    let list = serde_json::Value::Array(
+        tools
+            .iter()
+            .cloned()
+            .map(serde_json::Value::String)
+            .collect(),
+    );
+    let mut keys = path.split('.').rev();
+    // `split` yields the whole path at least once, so the leaf is always there.
+    let leaf = keys.next().unwrap_or(path);
+    keys.fold(
+        serde_json::Map::from_iter([(leaf.to_string(), list)]),
+        |inner, key| {
+            serde_json::Map::from_iter([(key.to_string(), serde_json::Value::Object(inner))])
+        },
+    )
+}
+
+/// `{"tools": {<tool>: false, ...}}`: each withdrawn tool switched off in OpenCode's inline config.
+fn switched_off_config(tools: &[String]) -> serde_json::Value {
+    let switched_off: serde_json::Map<String, serde_json::Value> = tools
+        .iter()
+        .map(|tool| (tool.clone(), serde_json::Value::Bool(false)))
+        .collect();
+    serde_json::json!({ "tools": switched_off })
 }

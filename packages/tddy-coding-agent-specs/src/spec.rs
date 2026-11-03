@@ -5,7 +5,7 @@ use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
 use tddy_actions::tool::{ArgvItem, ExtensionOwner, RunSection, ToolDef, Transport};
-use tddy_agent_backend::adapters::{AdapterRegistry, LaunchAdapters};
+use tddy_agent_backend::adapters::{AcpHooksAdapters, AdapterRegistry, LaunchAdapters};
 use thiserror::Error;
 
 use crate::headless::validate_headless;
@@ -27,13 +27,24 @@ impl ExtensionOwner for CodingAgentExtension {
     }
 
     fn validate(&self, tool_id: &str, section: &serde_yaml::Value) -> Result<(), String> {
-        // TODO(acp-agents): and refuse an `acp.hooks_adapter` that
-        // `tddy_agent_backend::adapters::AcpHooksAdapters::builtin()` does not hold, and a spec whose
-        // `run.transport` is `acp` but which declares no `acp` section.
+        // A spec whose `run.transport` is `acp` but which declares no `acp` section is refused where
+        // an ACP launch reads the section: this seam sees the `coding_agent` section alone.
+        // TODO(acp-agents): `ExtensionOwner::validate` would need the run section to refuse it here.
         let agent = parse_section(tool_id, section).map_err(|error| match error {
             SpecError::Invalid { message, .. } => message,
             other => other.to_string(),
         })?;
+        if let Some(name) = agent
+            .acp
+            .as_ref()
+            .and_then(|acp| acp.hooks_adapter.as_ref())
+        {
+            if !AcpHooksAdapters::builtin().contains(name) {
+                return Err(format!(
+                    "acp.hooks_adapter {name} is not an ACP hooks adapter this build has"
+                ));
+            }
+        }
         let launch_adapters = LaunchAdapters::builtin();
         if let Some(name) = &agent.models.adapter {
             if launch_adapters.models(name).is_none() {
