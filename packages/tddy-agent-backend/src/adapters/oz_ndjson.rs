@@ -4,6 +4,7 @@
 
 use std::io::BufRead;
 
+use crate::backend::headless_driver::oz_ndjson::OzTurn;
 use crate::backend::headless_driver::HeadlessHarness;
 use crate::error::BackendError;
 use crate::stream::StreamResult;
@@ -31,21 +32,42 @@ impl StreamAdapter for OzNdjson {
         stdout: &mut dyn BufRead,
         sinks: StreamSinks<'_>,
     ) -> Result<StreamResult, BackendError> {
-        // TODO(headless-others): implement.
-        let _ = (stdout, sinks);
-        todo!("headless-others: OzNdjson::read_stream")
+        let StreamSinks {
+            mut on_debug_line,
+            mut on_conversation_line,
+            ..
+        } = sinks;
+        let mut turn = OzTurn::without_updates();
+        let mut raw_lines = Vec::new();
+        for line in stdout.lines() {
+            let line = line.map_err(|e| BackendError::InvocationFailed(e.to_string()))?;
+            if let Some(sink) = on_conversation_line.as_mut() {
+                sink(&line);
+            }
+            if let Some(sink) = on_debug_line.as_mut() {
+                sink(&line);
+            }
+            turn.push_line(&line);
+            raw_lines.push(line);
+        }
+        let (result_text, session_id) = turn.into_reading();
+        Ok(StreamResult {
+            result_text,
+            session_id: session_id.unwrap_or_default(),
+            questions: Vec::new(),
+            raw_lines,
+            stream_errors: Vec::new(),
+        })
     }
 
     /// Zero only: an `oz` run has no structured result.
     fn exit_ok(&self, exit_code: i32, stream: &StreamResult, exit_ok_if_structured: bool) -> bool {
-        // TODO(headless-others): implement.
-        let _ = (exit_code, stream, exit_ok_if_structured);
-        todo!("headless-others: OzNdjson::exit_ok")
+        let _ = (stream, exit_ok_if_structured);
+        exit_code == 0
     }
 
     fn turn_format(&self) -> Option<HeadlessHarness> {
-        // TODO(headless-others): implement — the driver's Oz transcript.
-        todo!("headless-others: OzNdjson::turn_format")
+        Some(HeadlessHarness::Oz)
     }
 }
 

@@ -4,11 +4,12 @@
 use std::path::{Path, PathBuf};
 
 use super::cursor::{placed_path, render_cursor_mcp_json};
+use super::headless_mcp;
 use super::{McpServerCommand, SlotError};
 use crate::{McpFormat, McpSlot};
 
 /// The registration file's name, as `write_claude_mcp_config` names it.
-const MCP_CONFIG_FILENAME: &str = "claude-mcp-config.json";
+pub(crate) const MCP_CONFIG_FILENAME: &str = "claude-mcp-config.json";
 
 /// A registration file: the path it is written to, and its bytes.
 pub type RegistrationFile = (PathBuf, Vec<u8>);
@@ -16,13 +17,15 @@ pub type RegistrationFile = (PathBuf, Vec<u8>);
 /// The registration file for `server` in `slot`, and the argv that passes it. A file slot writes
 /// it under `scratch_dir` and passes `--mcp-config <path>`, then the slot's `strict_flag` when it
 /// declares one. A placed slot writes it where the agent reads it — its `{home}` resolved against
-/// `home` — and passes no argv.
+/// `home` — and passes no argv. The headless kinds render through [`headless_mcp`]; an inline slot
+/// writes no file, and a workdir slot's is under `workdir`.
 pub fn render_mcp(
     slot: &McpSlot,
     server: &McpServerCommand,
     scratch_dir: &Path,
+    workdir: &Path,
     home: Option<&Path>,
-) -> Result<(RegistrationFile, Vec<String>), SlotError> {
+) -> Result<(Option<RegistrationFile>, Vec<String>), SlotError> {
     match slot {
         McpSlot::File {
             flag,
@@ -32,20 +35,30 @@ pub fn render_mcp(
             let path = scratch_dir.join(MCP_CONFIG_FILENAME);
             let mut argv = vec![flag.clone(), path.to_string_lossy().into_owned()];
             argv.extend(strict_flag.iter().cloned());
-            Ok((registration(format, server, path), argv))
+            Ok((Some(registration(format, server, path)), argv))
         }
         McpSlot::Placed { path, format } => {
             let path = placed_path(path, home)?;
-            Ok((registration(format, server, path), Vec::new()))
+            Ok((Some(registration(format, server, path)), Vec::new()))
         }
         // `slots::render` refuses an unsupported slot given a tool server before it gets here.
         McpSlot::Unsupported => {
             unreachable!("an unsupported mcp slot registers no server: slots::render refuses it")
         }
-        // TODO(headless-others): the headless kinds render through `headless_mcp`.
-        McpSlot::Inline { .. } | McpSlot::Argv { .. } | McpSlot::Workdir { .. } => {
-            todo!("headless-others: render_mcp for the headless MCP kinds")
+        McpSlot::Inline { flag, key_prefix } => Ok((
+            None,
+            headless_mcp::render_inline_mcp(flag, key_prefix, server),
+        )),
+        McpSlot::Argv { flag } => {
+            let (file, argv) = headless_mcp::render_argv_mcp(flag, server, scratch_dir);
+            Ok((Some(file), argv))
         }
+        McpSlot::Workdir { path, format } => Ok((
+            Some(headless_mcp::render_workdir_mcp(
+                path, *format, server, workdir,
+            )),
+            Vec::new(),
+        )),
     }
 }
 
@@ -105,6 +118,7 @@ mod tests {
             &a_file_slot(Some("--strict-mcp-config")),
             &the_tddy_tools_server(BTreeMap::new()),
             scratch,
+            Path::new("/work"),
             None,
         )
         .unwrap();
@@ -130,6 +144,7 @@ mod tests {
             &a_file_slot(None),
             &the_tddy_tools_server(BTreeMap::new()),
             scratch,
+            Path::new("/work"),
             None,
         )
         .unwrap();

@@ -55,17 +55,40 @@ pub const HEADLESS_WRITTEN_FILES: &str = "written-files";
 /// after what an earlier plan of the conversation recorded. Written before the files themselves,
 /// so a plan that fails part-way leaves nothing the record does not name.
 pub fn record_written_files(dir: &Path, files: &[PathBuf]) -> std::io::Result<()> {
-    // TODO(headless-others): implement.
-    let _ = (dir, files);
-    todo!("headless-others: record_written_files")
+    use std::io::Write;
+
+    let mut record = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(dir.join(HEADLESS_WRITTEN_FILES))?;
+    let lines: String = files
+        .iter()
+        .map(|file| format!("{}\n", file.display()))
+        .collect();
+    record.write_all(lines.as_bytes())
 }
 
 /// Remove every file `dir`'s [`HEADLESS_WRITTEN_FILES`] records. A recorded file already gone is
 /// not an error; a missing record removes nothing. Returns the files removed, in recorded order.
 pub fn remove_recorded_files(dir: &Path) -> std::io::Result<Vec<PathBuf>> {
-    // TODO(headless-others): implement.
-    let _ = dir;
-    todo!("headless-others: remove_recorded_files")
+    let record = match std::fs::read_to_string(dir.join(HEADLESS_WRITTEN_FILES)) {
+        Ok(record) => record,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
+        Err(e) => return Err(e),
+    };
+    let mut removed = Vec::new();
+    for file in record
+        .lines()
+        .filter(|line| !line.is_empty())
+        .map(PathBuf::from)
+    {
+        match std::fs::remove_file(&file) {
+            Ok(()) => removed.push(file),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+            Err(e) => return Err(e),
+        }
+    }
+    Ok(removed)
 }
 
 /// Close headless conversation `conversation_id` under `tddy_data_dir`: the files its record names
@@ -76,10 +99,14 @@ pub fn close_headless_conversation(
     tddy_data_dir: &Path,
     conversation_id: &str,
 ) -> std::io::Result<Vec<PathBuf>> {
-    // TODO(headless-others): implement — and `AgentRoster::conversation_closed`
-    // (`tddy-session-agents` `coding_agent.rs`) calls it in place of its bare `remove_dir_all`.
-    let _ = (tddy_data_dir, conversation_id);
-    todo!("headless-others: close_headless_conversation")
+    let dir = headless_conversation_dir(tddy_data_dir, conversation_id);
+    let removed = remove_recorded_files(&dir)?;
+    match std::fs::remove_dir_all(&dir) {
+        Ok(()) => {}
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+        Err(e) => return Err(e),
+    }
+    Ok(removed)
 }
 
 /// Remove the files every headless conversation of the daemon `daemon_instance_id` left under
@@ -108,8 +135,7 @@ pub fn sweep_headless_dirs(
         if owner.trim() != daemon_instance_id {
             continue;
         }
-        // TODO(headless-others): `remove_recorded_files(&dir)?` first, so a worktree file the
-        // conversation's plan wrote (`.cursor/mcp.json`) goes with it.
+        remove_recorded_files(&dir)?;
         std::fs::remove_dir_all(&dir)?;
         if let Some(conversation) = dir.file_name().and_then(|name| name.to_str()) {
             swept.push(conversation.to_string());

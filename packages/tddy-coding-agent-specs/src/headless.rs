@@ -160,7 +160,8 @@ impl HeadlessRenderer for SpecHeadlessRenderer {
         if let Some(mcp) = &headless.mcp {
             spec.agent.mcp = mcp.clone();
         }
-        // TODO(headless-others): the turn records `written` before anything is written.
+        // `written` is the paths of `files` (the MCP registrations): a launcher records them with
+        // `mcp_written_paths` at plan time, before the turn renders, so nothing is written unrecorded.
         let RenderedSlots {
             argv_extra, files, ..
         } = slots::render(
@@ -249,7 +250,7 @@ mod tests {
             Err(HeadlessSpecError::UnknownAdapter {
                 agent: "claude".to_string(),
                 adapter: "claude-ndjson-v2".to_string(),
-                registered: "claude-stream-json".to_string(),
+                registered: "claude-stream-json, codex-jsonl, cursor-stream, oz-ndjson".to_string(),
             })
         );
     }

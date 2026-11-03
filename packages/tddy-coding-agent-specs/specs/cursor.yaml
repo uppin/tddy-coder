@@ -49,6 +49,8 @@ extensions:
     models:
       default: composer-2.5
       curated: [composer-2.5, gpt-5.3-codex, claude-4.6-sonnet-medium-thinking]
+      list_command: ["{binary}", --list-models]
+      adapter: cursor-models
     context_globs: [AGENTS.md, ".agents/**", ".cursor/**"]
     # --- Headless (`#agent-tools 9/12`): one `agent -p` per turn, for the workflow backend
     # (`tddy-coder --agent cursor`) and a headless coding subagent. It renders byte-for-byte what
@@ -62,10 +64,6 @@ extensions:
     # Headless, Cursor reads the worktree's `.cursor/mcp.json` rather than `{home}`'s: the file is
     # the conversation's, recorded in `headless/<conversation>/written-files` and removed on close.
     # The output is read by the `cursor-stream` adapter (`tddy_agent_backend::adapters`).
-    #
-    # TODO(headless-others): `models` gains `list_command: ["{binary}", --list-models]` and
-    # `adapter: cursor-models` — an edit of the `models` section `#agent-tools 7/12` owns, so it
-    # waits for the developer's consent (see the changeset).
     headless:
       argv:
         - "{binary}"

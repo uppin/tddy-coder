@@ -6,6 +6,7 @@ use std::io::BufRead;
 
 use crate::backend::headless_driver::HeadlessHarness;
 use crate::error::BackendError;
+use crate::stream::codex::{codex_jsonl_last_error_message, parse_codex_jsonl_output};
 use crate::stream::StreamResult;
 
 use super::{StreamAdapter, StreamSinks};
@@ -32,22 +33,43 @@ impl StreamAdapter for CodexJsonl {
         stdout: &mut dyn BufRead,
         sinks: StreamSinks<'_>,
     ) -> Result<StreamResult, BackendError> {
-        // TODO(headless-others): implement.
-        let _ = (stdout, sinks);
-        todo!("headless-others: CodexJsonl::read_stream")
+        let StreamSinks {
+            mut on_debug_line,
+            mut on_conversation_line,
+            ..
+        } = sinks;
+        let mut raw_lines = Vec::new();
+        for line in stdout.lines() {
+            let line = line.map_err(|e| BackendError::InvocationFailed(e.to_string()))?;
+            if let Some(sink) = on_conversation_line.as_mut() {
+                sink(&line);
+            }
+            if let Some(sink) = on_debug_line.as_mut() {
+                sink(&line);
+            }
+            raw_lines.push(line);
+        }
+        let parsed = parse_codex_jsonl_output(&raw_lines);
+        let stream_errors = codex_jsonl_last_error_message(&raw_lines)
+            .into_iter()
+            .collect();
+        Ok(StreamResult {
+            result_text: parsed.result_text,
+            session_id: parsed.session_id.unwrap_or_default(),
+            questions: Vec::new(),
+            raw_lines,
+            stream_errors,
+        })
     }
 
     /// Zero, or `exit_ok_if_structured` and a non-empty result — what the backend tolerates for a
     /// planning goal today (`claude_nonzero_exit_ok_if_structured_response` and parsed output).
     fn exit_ok(&self, exit_code: i32, stream: &StreamResult, exit_ok_if_structured: bool) -> bool {
-        // TODO(headless-others): implement.
-        let _ = (exit_code, stream, exit_ok_if_structured);
-        todo!("headless-others: CodexJsonl::exit_ok")
+        exit_code == 0 || (exit_ok_if_structured && !stream.result_text.trim().is_empty())
     }
 
     fn turn_format(&self) -> Option<HeadlessHarness> {
-        // TODO(headless-others): implement — the driver's Codex transcript.
-        todo!("headless-others: CodexJsonl::turn_format")
+        Some(HeadlessHarness::Codex)
     }
 }
 

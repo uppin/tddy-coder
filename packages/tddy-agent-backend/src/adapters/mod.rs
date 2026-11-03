@@ -112,10 +112,16 @@ impl AdapterRegistry {
     /// Every adapter this build registers: [`CLAUDE_STREAM_JSON`] ([`ClaudeStreamJson`]).
     /// `#agent-tools 9/12` adds Cursor's, Codex's and Oz's.
     pub fn builtin() -> Self {
-        // TODO(headless-others): and `CursorStream`, `CodexJsonl` and `OzNdjson` — which widens
-        // `the_builtin_registry_lists_claude_stream_json` below at #798's green.
-        let claude: Arc<dyn StreamAdapter> = Arc::new(ClaudeStreamJson);
-        let adapters = BTreeMap::from([(claude.name().to_string(), claude)]);
+        let all: [Arc<dyn StreamAdapter>; 4] = [
+            Arc::new(ClaudeStreamJson),
+            Arc::new(CursorStream),
+            Arc::new(CodexJsonl),
+            Arc::new(OzNdjson),
+        ];
+        let adapters = all
+            .into_iter()
+            .map(|adapter| (adapter.name().to_string(), adapter))
+            .collect();
         Self { adapters }
     }
 
@@ -150,7 +156,10 @@ mod tests {
         let names: Vec<&str> = registry.names().collect();
 
         // Then
-        assert_eq!(names, vec![CLAUDE_STREAM_JSON]);
+        assert_eq!(
+            names,
+            vec![CLAUDE_STREAM_JSON, CODEX_JSONL, CURSOR_STREAM, OZ_NDJSON]
+        );
     }
 
     #[test]

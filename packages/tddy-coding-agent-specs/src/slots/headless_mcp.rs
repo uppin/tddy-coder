@@ -10,6 +10,8 @@
 
 use std::path::{Path, PathBuf};
 
+use super::cursor::placed_path;
+use super::mcp::{mcp_servers_json, MCP_CONFIG_FILENAME};
 use super::{McpServerCommand, SlotError};
 use crate::{McpFormat, McpSlot};
 
@@ -21,10 +23,24 @@ pub const ARGV_MCP_FILE: &str = "mcp.json";
 /// `env_vars`, in that order. Values are TOML (JSON's spelling of a string and a list of strings,
 /// which TOML reads the same); `env_vars` lists the environment's **names** only, never a value.
 pub fn render_inline_mcp(flag: &str, key_prefix: &str, server: &McpServerCommand) -> Vec<String> {
-    // TODO(headless-others): implement — `argv::codex_mcp_server_overrides` moves here; green
-    // deletes it with `headless_driver/argv.rs`.
-    let _ = (flag, key_prefix, server);
-    todo!("headless-others: render_inline_mcp")
+    let key = |field: &str| format!("{key_prefix}.{}.{field}", server.name);
+    let env_names: Vec<&str> = server.env.keys().map(String::as_str).collect();
+    [
+        (
+            key("command"),
+            toml_value(&server.command.to_string_lossy()),
+        ),
+        (key("args"), toml_value(&server.args)),
+        (key("env_vars"), toml_value(&env_names)),
+    ]
+    .into_iter()
+    .flat_map(|(key, value)| [flag.to_string(), format!("{key}={value}")])
+    .collect()
+}
+
+/// A string or a list of strings as a TOML value. JSON's spelling of both is valid TOML.
+fn toml_value(value: &impl serde::Serialize) -> String {
+    serde_json::to_string(value).expect("strings always serialize as JSON")
 }
 
 /// `server` written to `<scratch_dir>/`[`ARGV_MCP_FILE`] in the servers-by-name shape
@@ -35,9 +51,17 @@ pub fn render_argv_mcp(
     server: &McpServerCommand,
     scratch_dir: &Path,
 ) -> ((PathBuf, Vec<u8>), Vec<String>) {
-    // TODO(headless-others): implement — the bytes `mcp_servers_by_name` writes today.
-    let _ = (flag, server, scratch_dir);
-    todo!("headless-others: render_argv_mcp")
+    let path = scratch_dir.join(ARGV_MCP_FILE);
+    let mut entry = serde_json::json!({
+        "command": server.command.to_string_lossy(),
+        "args": server.args,
+    });
+    if !server.env.is_empty() {
+        entry["env"] = serde_json::json!(server.env);
+    }
+    let servers = serde_json::json!({ server.name.as_str(): entry });
+    let argv = vec![flag.to_string(), path.to_string_lossy().into_owned()];
+    ((path, servers.to_string().into_bytes()), argv)
 }
 
 /// `server` written to `<workdir>/<path>` in `format`. A `cursor-mcp-json` registration is the
@@ -50,9 +74,12 @@ pub fn render_workdir_mcp(
     server: &McpServerCommand,
     workdir: &Path,
 ) -> (PathBuf, Vec<u8>) {
-    // TODO(headless-others): implement.
-    let _ = (path, format, server, workdir);
-    todo!("headless-others: render_workdir_mcp")
+    let bytes = match format {
+        McpFormat::ClaudeMcpJson | McpFormat::CursorMcpJson => {
+            mcp_servers_json(server).to_string().into_bytes()
+        }
+    };
+    (workdir.join(path), bytes)
 }
 
 /// The files `slot` writes for a launch on `workdir` with `scratch_dir` and `home`, without
@@ -69,9 +96,13 @@ pub fn mcp_written_paths(
     scratch_dir: &Path,
     home: Option<&Path>,
 ) -> Result<Vec<PathBuf>, SlotError> {
-    // TODO(headless-others): implement.
-    let _ = (slot, workdir, scratch_dir, home);
-    todo!("headless-others: mcp_written_paths")
+    Ok(match slot {
+        McpSlot::File { .. } => vec![scratch_dir.join(MCP_CONFIG_FILENAME)],
+        McpSlot::Placed { path, .. } => vec![placed_path(path, home)?],
+        McpSlot::Argv { .. } => vec![scratch_dir.join(ARGV_MCP_FILE)],
+        McpSlot::Workdir { path, .. } => vec![workdir.join(path)],
+        McpSlot::Inline { .. } | McpSlot::Unsupported => Vec::new(),
+    })
 }
 
 #[cfg(test)]

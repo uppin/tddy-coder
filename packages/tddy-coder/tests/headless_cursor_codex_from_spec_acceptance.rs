@@ -23,8 +23,9 @@ use tddy_core::{
 
 const PROMPT: &str = "Plan the feature";
 const SYSTEM_PROMPT: &str = "You plan.";
-/// The prompt both CLIs are handed: neither takes a system prompt, so it is merged in front.
-const MERGED_PROMPT: &str = "You plan.\n\nPlan the feature";
+/// The prompt both CLIs are handed — neither takes a system prompt, so it is merged in front —
+/// as the stubs record it: one line per argv entry, so the prompt's own lines are entries here.
+const MERGED_PROMPT_LINES: [&str; 3] = ["You plan.", "", "Plan the feature"];
 /// The start of the hint `codex_openai_auth_remediation` appends to a sign-in failure today.
 const SIGN_IN_REMEDIATION: &str = "Fix: not signed in to OpenAI for Codex.";
 
@@ -234,7 +235,9 @@ async fn tddy_coder_agent_cursor_drives_a_stub_whose_argv_equals_todays_includin
                 "--resume",
                 "chat-1",
                 "-p",
-                MERGED_PROMPT,
+                MERGED_PROMPT_LINES[0],
+                MERGED_PROMPT_LINES[1],
+                MERGED_PROMPT_LINES[2],
                 "--model",
                 "composer-2.5",
                 "--output-format",
@@ -297,7 +300,9 @@ async fn tddy_coder_agent_codex_drives_a_stub_whose_argv_equals_todays_including
                 "-m",
                 "gpt-5.3-codex",
                 "th-1",
-                MERGED_PROMPT,
+                MERGED_PROMPT_LINES[0],
+                MERGED_PROMPT_LINES[1],
+                MERGED_PROMPT_LINES[2],
             ]),
         )
     );

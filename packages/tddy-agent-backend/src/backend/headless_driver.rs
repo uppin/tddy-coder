@@ -10,11 +10,11 @@
 
 mod argv;
 mod codex_jsonl;
-mod oz_ndjson;
+pub(crate) mod oz_ndjson;
 mod stream_json;
 mod transcript;
 
-use std::collections::{BTreeMap, VecDeque};
+use std::collections::VecDeque;
 use std::io;
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
@@ -107,12 +107,16 @@ pub struct HeadlessCommand {
     /// driven by `tests/headless_driver_acceptance.rs` and by the argv unit tests. Deleting it needs
     /// those moved to a renderer first. Cursor, Codex and Oz follow in `#agent-tools 9/12`.
     ///
-    /// TODO(headless-others): green makes it every arm's only path — `cursor.yaml`, `codex.yaml`
-    /// and `oz.yaml` — and deletes `argv.rs` (`cursor()`, `codex()`, `oz()`,
-    /// `codex_mcp_server_overrides`). A rendered turn binds [`Self::profile`] as the param
-    /// `profile` (Oz's `--profile`) and nothing as `force`, `plan` or `sandbox_mode`, so Cursor runs
-    /// read-only and Codex `workspace-write`, as by hand. `HeadlessHarness` stays: the adapters'
-    /// `turn_format` returns it, and `#agent-tools 12/12` collapses it.
+    /// Cursor, Codex and Oz render from `cursor.yaml`, `codex.yaml` and `oz.yaml` the same way. A
+    /// rendered turn binds [`Self::profile`] as the param `profile` (Oz's `--profile`) and nothing as
+    /// `force`, `plan` or `sandbox_mode`, so Cursor runs read-only and Codex `workspace-write`, as by
+    /// hand. `HeadlessHarness` stays: the adapters' `turn_format` returns it, and
+    /// `#agent-tools 12/12` collapses it.
+    ///
+    /// TODO(headless-others): `argv.rs` (`cursor()`, `codex()`, `oz()`, `codex_mcp_server_overrides`)
+    /// still builds a turn's argv when `renderer` is `None`, which `tests/headless_driver_acceptance.rs`
+    /// and the argv unit tests drive; deleting it needs those moved to a renderer first —
+    /// `docs/dev/todo/2026-11-03-headless-others-legacy-argv-deletion.md`.
     pub renderer: Option<Arc<dyn HeadlessRenderer>>,
     /// With a [`Self::renderer`]: where each turn's rendered registration files (the MCP config)
     /// are written — the conversation's own directory, never the worktree, since the registration
@@ -366,7 +370,12 @@ impl HeadlessDriver {
                 .or_else(|| renderer.tool_server()),
             workdir: turn_workdir(self.command.cwd.as_deref())?,
             scratch_dir,
-            params: BTreeMap::new(),
+            params: self
+                .command
+                .profile
+                .iter()
+                .map(|profile| ("profile".to_string(), profile.clone()))
+                .collect(),
             route_args: Vec::new(),
         };
         let invocation = renderer.render(&turn)?;

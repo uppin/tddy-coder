@@ -108,10 +108,6 @@ pub enum SlotError {
 /// flag, the allow flags, the deny flags, the permission-prompt flag, the MCP flag — the order the
 /// hand-built launch used.
 pub fn render(spec: &CodingAgentSpec, inputs: &SlotInputs<'_>) -> Result<RenderedSlots, SlotError> {
-    // TODO(headless-others): and the headless MCP kinds — `McpSlot::Inline`
-    // (`headless_mcp::render_inline_mcp`), `McpSlot::Argv` (`headless_mcp::render_argv_mcp`) and
-    // `McpSlot::Workdir` (`headless_mcp::render_workdir_mcp`) — and fill `RenderedSlots::written`
-    // with every file the MCP slot writes (`headless_mcp::mcp_written_paths`).
     let agent = &spec.agent;
     let mut rendered = RenderedSlots::default();
 
@@ -163,9 +159,13 @@ pub fn render(spec: &CodingAgentSpec, inputs: &SlotInputs<'_>) -> Result<Rendere
             &agent.mcp,
             server,
             &inputs.scratch_dir,
+            &inputs.workdir,
             inputs.home.as_deref(),
         )?;
-        rendered.files.push(file);
+        if let Some(file) = file {
+            rendered.written.push(file.0.clone());
+            rendered.files.push(file);
+        }
         rendered.argv_extra.extend(argv);
     }
     if let Some(params) = &inputs.hooks {

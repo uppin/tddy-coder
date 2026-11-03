@@ -3,6 +3,7 @@
 //! rewritten. A launch adapter ([`super::LaunchAdapters`]), as `opencode-models` is.
 
 use super::launch::ModelsAdapter;
+use crate::backend::cursor::parse_cursor_model_list;
 use crate::backend::BackendModels;
 
 /// [`CursorModels`]'s name.
@@ -19,10 +20,7 @@ impl ModelsAdapter for CursorModels {
     }
 
     fn parse_models(&self, stdout: &str) -> BackendModels {
-        // TODO(headless-others): implement — `backend::cursor::parse_cursor_model_list`, which
-        // moves here when `CursorBackend::list_models_sync` reads through the spec.
-        let _ = stdout;
-        todo!("headless-others: CursorModels::parse_models")
+        parse_cursor_model_list(stdout)
     }
 }
 

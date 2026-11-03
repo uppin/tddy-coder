@@ -19,8 +19,8 @@ use tddy_core::workflow::graph::ExecutionStatus;
 use tddy_core::{
     backend_from_label, backend_selection_question, default_model_for_agent, get_session_for_tag,
     output::SESSIONS_SUBDIR, preselected_index_for_agent, read_changeset, read_session_metadata,
-    AnyBackend, ClaudeAcpBackend, CodexAcpBackend, CodexBackend, CodingBackend, CursorBackend,
-    GoalId, OpenCodeAcpBackend, PendingWorkflowStart, ProgressEvent, SharedBackend, StubBackend,
+    AnyBackend, ClaudeAcpBackend, CodexAcpBackend, CodexBackend, CodingBackend, GoalId,
+    OpenCodeAcpBackend, PendingWorkflowStart, ProgressEvent, SharedBackend, StubBackend,
     WorkflowEngine, WorkflowRecipe,
 };
 use tddy_discovery;
@@ -2505,14 +2505,6 @@ fn apply_agent_from_changeset_if_needed(args: &mut Args) -> anyhow::Result<()> {
     Ok(())
 }
 
-/// Resolve Cursor `agent` executable: `--cursor-agent-path` / config, then `TDDY_CURSOR_AGENT`, then `agent` on `PATH`.
-fn resolve_cursor_agent_binary(cursor_agent_path: Option<&Path>) -> PathBuf {
-    cursor_agent_path
-        .map(PathBuf::from)
-        .or_else(|| std::env::var_os("TDDY_CURSOR_AGENT").map(PathBuf::from))
-        .unwrap_or_else(|| PathBuf::from(CursorBackend::DEFAULT_CLI_BINARY))
-}
-
 /// Create backend once at startup (plain mode, no progress events).
 /// StubBackend always uses InMemoryToolExecutor (no tddy-tools): stub simulates the agent,
 /// so it stores results directly. ProcessToolExecutor is for real agents (Claude/Cursor/Codex)
@@ -2558,26 +2550,29 @@ fn create_backend(
         return Ok(SharedBackend::from_arc(Arc::new(backend)));
     }
     let backend: AnyBackend = match agent {
+        // Rendered from `cursor.yaml`'s headless section; an explicit `--cursor-agent-path` names
+        // the spec's binary.
         "cursor" => {
-            let path = resolve_cursor_agent_binary(cursor_agent_path);
-            log::info!(
-                "[tddy-coder] Cursor backend: CLI binary `{}` (full argv logged when a goal invokes the backend)",
-                path.display()
+            let host = crate::headless_from_spec::host_naming_binary(
+                tool_host,
+                crate::headless_from_spec::CURSOR_BINARY_ENV,
+                cursor_agent_path,
             );
-            // TODO(headless-others): build it with
-            // `crate::headless_from_spec::cursor_backend_from_spec`, so the spec is the only path.
-            AnyBackend::Cursor(CursorBackend::with_path(path).with_progress(on_progress))
+            let cursor = crate::headless_from_spec::cursor_backend_from_spec(tools_dir, host)?;
+            AnyBackend::Cursor(cursor.with_progress(on_progress))
         }
         "claude-acp" => AnyBackend::ClaudeAcp(ClaudeAcpBackend::new()),
+        // Rendered from `codex.yaml`'s headless section; an explicit `--codex-cli-path` names the
+        // spec's binary.
         "codex" => {
-            let path = resolve_codex_binary(codex_cli_path);
-            log::info!(
-                "[tddy-coder] Codex backend: CLI binary `{}`",
-                path.display()
+            let host = crate::headless_from_spec::host_naming_binary(
+                tool_host,
+                crate::headless_from_spec::CODEX_BINARY_ENV,
+                codex_cli_path,
             );
-            // TODO(headless-others): build it with
-            // `crate::headless_from_spec::codex_backend_from_spec`, so the spec is the only path.
-            AnyBackend::Codex(CodexBackend::with_path(path))
+            AnyBackend::Codex(crate::headless_from_spec::codex_backend_from_spec(
+                tools_dir, host,
+            )?)
         }
         "codex-acp" => {
             let acp_bin = resolve_codex_acp_binary(codex_acp_cli_path, codex_cli_path);

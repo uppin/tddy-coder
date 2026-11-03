@@ -6,8 +6,10 @@ use std::io::BufRead;
 
 use crate::backend::headless_driver::HeadlessHarness;
 use crate::error::BackendError;
+use crate::stream::cursor::process_cursor_stream;
 use crate::stream::StreamResult;
 
+use super::claude_stream_json::STRUCTURED_RESPONSE_MARKER;
 use super::{StreamAdapter, StreamSinks};
 
 /// [`CursorStream`]'s name.
@@ -27,25 +29,26 @@ impl StreamAdapter for CursorStream {
         stdout: &mut dyn BufRead,
         sinks: StreamSinks<'_>,
     ) -> Result<StreamResult, BackendError> {
-        // TODO(headless-others): implement — `stream::cursor::process_cursor_stream(stdout,
-        // sinks.on_progress, sinks.on_raw_output, sinks.on_debug_line, sinks.on_conversation_line,
-        // 0)`, its error as `BackendError::InvocationFailed("stream parse error: …")` as
-        // `CursorBackend::invoke_sync` maps it today.
-        let _ = (stdout, sinks);
-        todo!("headless-others: CursorStream::read_stream")
+        process_cursor_stream(
+            stdout,
+            sinks.on_progress,
+            sinks.on_raw_output,
+            sinks.on_debug_line,
+            sinks.on_conversation_line,
+            0,
+        )
+        .map_err(|e| BackendError::InvocationFailed(format!("stream parse error: {e}")))
     }
 
     /// Zero, or `exit_ok_if_structured` and a structured result — Claude's rule; `cursor.yaml`
     /// sets no `exit_ok_if_structured`, so a non-zero exit fails as it does today.
     fn exit_ok(&self, exit_code: i32, stream: &StreamResult, exit_ok_if_structured: bool) -> bool {
-        // TODO(headless-others): implement.
-        let _ = (exit_code, stream, exit_ok_if_structured);
-        todo!("headless-others: CursorStream::exit_ok")
+        exit_code == 0
+            || (exit_ok_if_structured && stream.result_text.contains(STRUCTURED_RESPONSE_MARKER))
     }
 
     fn turn_format(&self) -> Option<HeadlessHarness> {
-        // TODO(headless-others): implement — the driver's stream-json transcript for Cursor.
-        todo!("headless-others: CursorStream::turn_format")
+        Some(HeadlessHarness::Cursor)
     }
 }
 

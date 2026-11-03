@@ -15,7 +15,7 @@ use std::collections::BTreeMap;
 use std::fmt;
 use std::sync::Arc;
 
-use super::{OpenCodeModels, WarpResumeToken};
+use super::{CursorModels, OpenCodeModels, WarpResumeToken};
 use crate::backend::BackendModels;
 
 /// How an agent's model-listing command's stdout becomes its model catalogue.
@@ -61,12 +61,14 @@ impl LaunchAdapters {
     /// Every launch adapter this build registers: [`super::OPENCODE_MODELS`]
     /// ([`super::OpenCodeModels`]) and [`super::WARP_RESUME_TOKEN`] ([`super::WarpResumeToken`]).
     pub fn builtin() -> Self {
-        // TODO(headless-others): and `CursorModels` (`cursor-models`) — which widens
-        // `the_builtin_launch_adapters_are_opencode_models_and_warp_resume_token` at #798's green.
-        let models: Arc<dyn ModelsAdapter> = Arc::new(OpenCodeModels);
+        let models: [Arc<dyn ModelsAdapter>; 2] =
+            [Arc::new(OpenCodeModels), Arc::new(CursorModels)];
         let resume_token: Arc<dyn ResumeTokenAdapter> = Arc::new(WarpResumeToken);
         Self {
-            models: BTreeMap::from([(models.name().to_string(), models)]),
+            models: models
+                .into_iter()
+                .map(|adapter| (adapter.name().to_string(), adapter))
+                .collect(),
             resume_tokens: BTreeMap::from([(resume_token.name().to_string(), resume_token)]),
         }
     }
@@ -96,7 +98,7 @@ impl LaunchAdapters {
 mod tests {
     use pretty_assertions::assert_eq;
 
-    use super::super::{OPENCODE_MODELS, WARP_RESUME_TOKEN};
+    use super::super::{CURSOR_MODELS, OPENCODE_MODELS, WARP_RESUME_TOKEN};
     use super::*;
 
     #[test]
@@ -111,7 +113,13 @@ mod tests {
         );
 
         // Then
-        assert_eq!(names, (vec![OPENCODE_MODELS], vec![WARP_RESUME_TOKEN]));
+        assert_eq!(
+            names,
+            (
+                vec![CURSOR_MODELS, OPENCODE_MODELS],
+                vec![WARP_RESUME_TOKEN]
+            )
+        );
     }
 
     #[test]
