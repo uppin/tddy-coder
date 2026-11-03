@@ -53,9 +53,6 @@ struct TerminalEntry {
     worktree_path: PathBuf,
     model: String,
     tmux_session: Option<String>,
-    /// The OS user the terminal was started as, when it was started as one. A tmux session is
-    /// killed as this user, so shutdown reaches the same tmux server the session was started on.
-    os_user: Option<String>,
 }
 
 /// `session_id → (terminal_id → TerminalEntry)`.
@@ -120,6 +117,11 @@ pub struct CliSessionManager {
     main_recordings: capture_recorder::MainRecordings,
     /// How often a running `main` terminal is rewritten to its recording.
     recording_interval: Duration,
+    /// How often a detached tmux-run agent (its client ended, its tmux session alive) is checked
+    /// for being gone.
+    detach_watch_interval: Duration,
+    /// The watchers of detached tmux-run agents: `session_id → watcher`, stopped by a re-attach.
+    detached_watchers: tmux_reattach::DetachedWatchers,
 }
 
 /// Backward-compatible alias for [`CliSessionManager`].
@@ -151,6 +153,8 @@ impl CliSessionManager {
             exit_settlements: Arc::new(RwLock::new(HashMap::new())),
             main_recordings: Arc::new(RwLock::new(HashMap::new())),
             recording_interval: RECORDING_INTERVAL,
+            detach_watch_interval: tmux_reattach::DETACH_WATCH_INTERVAL,
+            detached_watchers: tmux_reattach::DetachedWatchers::default(),
         }
     }
 
@@ -169,6 +173,9 @@ mod control_lease;
 mod terminals;
 
 mod tmux_main;
+
+mod tmux_reattach;
+pub use tmux_reattach::{classify_main_exit, MainExit};
 
 mod relaunch;
 

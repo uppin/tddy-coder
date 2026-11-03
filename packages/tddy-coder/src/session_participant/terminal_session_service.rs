@@ -73,6 +73,7 @@ pub fn coder_terminal_session_entry(svc: Arc<SessionConnectionService>) -> Servi
         roster: Arc::new(CoderTerminalRoster::new(Arc::clone(&svc))),
         // A tool session's terminals are not recorded: its history ends with its process.
         recorded_history: Arc::new(tddy_terminal_rpc::NoRecordedHistory),
+        main_reattach: Arc::new(tddy_terminal_rpc::NoMainReattach),
         // A tool session offers no tmux: its terminals run bash only.
         tmux: Arc::new(tddy_terminal_rpc::NoTmux),
         initial_frame_bytes: tddy_terminal_rpc::bridge::DEFAULT_INITIAL_FRAME_BYTES,

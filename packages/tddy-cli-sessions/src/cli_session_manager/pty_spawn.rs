@@ -12,6 +12,8 @@ use tddy_task::TaskHandle;
 
 use super::{ExitSettlements, TerminalEntry};
 
+use super::tmux_reattach::{classify_ended_main, TmuxRun};
+
 use tddy_terminal_rpc::pty_runtime::PtyRuntime;
 
 use tddy_terminal_rpc::pty_runtime::PtySpawnSpec;
@@ -110,7 +112,6 @@ impl CliSessionManager {
                     worktree_path: handle.worktree_path.clone(),
                     model: handle.model.clone(),
                     tmux_session: handle.tmux_session.clone(),
-                    os_user: os_user.map(str::to_string),
                 },
             );
 
@@ -126,6 +127,7 @@ impl CliSessionManager {
             terminal_id.to_string(),
             handle.task_id.clone(),
             on_exit,
+            TmuxRun::new(tmux_session, os_user),
         );
 
         log::info!(
@@ -196,12 +198,12 @@ impl CliSessionManager {
         terminal_id: String,
         task_id: TaskId,
         on_exit: Option<PendingExit>,
+        tmux_run: TmuxRun,
     ) {
         let terminals = Arc::clone(&self.terminals);
         let exit_settlements = Arc::clone(&self.exit_settlements);
-        let managed_workflows = Arc::clone(&self.managed_workflows);
-        let exposed_terminals = Arc::clone(&self.exposed_terminals);
         let task_registry = self.task_registry.clone();
+        let detach_watch = self.detach_watch();
         tokio::spawn(async move {
             let task = match task_registry.get(&task_id).await {
                 Some(t) => t,
@@ -222,6 +224,12 @@ impl CliSessionManager {
                 let key = (session_id.clone(), terminal_id.clone());
                 pending.finish(&task, key, &exit_settlements).await;
             }
+            // Only a main's exit can end the agent: a tab is a client of nothing the session keeps.
+            let main_exit = if terminal_id == MAIN_TERMINAL_ID {
+                Some(classify_ended_main(tmux_run.clone()).await)
+            } else {
+                None
+            };
             let mut reg = terminals.write().await;
             if let Some(tools) = reg.get_mut(&session_id) {
                 if tools
@@ -234,13 +242,8 @@ impl CliSessionManager {
                     reg.remove(&session_id);
                 }
             }
-            // The main claude terminal exiting ends the session — drop its managed workflow so the
-            // per-session toolcall listener socket is cleaned up, and forget how it was exposed to
-            // LiveKit: there is no terminal left to bridge, and an entry nobody removes would keep
-            // a dead session's block waiting for a consumer that could only find an empty PTY.
-            if terminal_id == MAIN_TERMINAL_ID {
-                managed_workflows.write().await.remove(&session_id);
-                exposed_terminals.write().await.remove(&session_id);
+            if let Some(exit) = main_exit {
+                detach_watch.main_ended(session_id, exit, tmux_run).await;
             }
         });
     }

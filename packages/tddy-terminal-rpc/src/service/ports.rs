@@ -188,6 +188,30 @@ pub trait TerminalRoster: Send + Sync {
     async fn list(&self, session_id: &str) -> Vec<TerminalDescriptor>;
 }
 
+/// Brings a session's `main` terminal back when the host has none registered but its agent still
+/// runs — a tmux-run agent that outlived its client or its daemon (`#tmux-agent` 2/3).
+///
+/// Consulted by the stream, history and input handlers for the `main` terminal **only** when
+/// [`TerminalSessionPorts::terminals`] has no running one; the handler then asks the store again.
+#[async_trait]
+pub trait MainReattach: Send + Sync {
+    /// Re-attach `session_id`'s main terminal on behalf of `os_user` (the requester's OS user, as
+    /// the service resolved it from the token). `true` when a main terminal is registered now;
+    /// `false` when the session's agent is not running, or the host has nothing to re-attach.
+    /// Single-flight per session: concurrent first accesses attach one client.
+    async fn reattach_main(&self, os_user: &str, session_id: &str) -> bool;
+}
+
+/// A host whose main terminals end with their process: nothing is ever re-attached.
+pub struct NoMainReattach;
+
+#[async_trait]
+impl MainReattach for NoMainReattach {
+    async fn reattach_main(&self, _os_user: &str, _session_id: &str) -> bool {
+        false
+    }
+}
+
 /// Everything the nine handlers need from the host they run on.
 ///
 /// A struct rather than six positional parameters: two of them are resolvers of the same shape
@@ -207,6 +231,8 @@ pub struct TerminalSessionPorts {
     /// The history of a terminal that is no longer running — `GetTerminalHistory` reads it only when
     /// [`Self::terminals`] has no running terminal by that id.
     pub recorded_history: Arc<dyn super::RecordedTerminalHistory>,
+    /// Brings the `main` terminal back when [`Self::terminals`] has none running.
+    pub main_reattach: Arc<dyn MainReattach>,
     /// The tmux sessions `ListTmuxSessions` answers with.
     pub tmux: Arc<dyn TmuxHost>,
     /// The per-frame replay budget: how many bytes of retained output one open frame may carry.

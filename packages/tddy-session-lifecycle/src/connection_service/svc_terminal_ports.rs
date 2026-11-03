@@ -18,8 +18,8 @@ use tddy_core::cli_harness::{cli_harness, CliLaunch};
 use tddy_daemon_kernel::privilege_drop::EffectiveIdentity;
 use tddy_rpc::Status;
 use tddy_terminal_rpc::service::{
-    ControlChange, ControlClaim, TerminalControl, TerminalDescriptor, TerminalKind, TerminalLaunch,
-    TerminalRoster, TerminalSessionPorts, TmuxHost,
+    ControlChange, ControlClaim, MainReattach, TerminalControl, TerminalDescriptor, TerminalKind,
+    TerminalLaunch, TerminalRoster, TerminalSessionPorts, TmuxHost,
 };
 use tokio::sync::broadcast;
 
@@ -120,9 +120,65 @@ impl DaemonSessionHost {
                     self.tddy_data_dir.clone(),
                 ),
             ),
+            main_reattach: Arc::new(TmuxMainReattach::new(
+                Arc::clone(&self.claude_cli_manager),
+                self.tddy_data_dir.clone(),
+            )),
             tmux,
             initial_frame_bytes: tddy_terminal_rpc::bridge::DEFAULT_INITIAL_FRAME_BYTES,
         }
+    }
+}
+
+/// Re-attaches the main terminal of a tmux-run session whose agent outlived its client or its
+/// daemon, on the first access that finds no main registered.
+///
+/// Single-flight per session: concurrent first accesses wait on one lock, and the second finds the
+/// main the first attached.
+struct TmuxMainReattach {
+    manager: Arc<CliSessionManager>,
+    tddy_data_dir: PathBuf,
+    in_flight: tokio::sync::Mutex<std::collections::HashMap<String, Arc<tokio::sync::Mutex<()>>>>,
+}
+
+impl TmuxMainReattach {
+    fn new(manager: Arc<CliSessionManager>, tddy_data_dir: PathBuf) -> Self {
+        TmuxMainReattach {
+            manager,
+            tddy_data_dir,
+            in_flight: tokio::sync::Mutex::default(),
+        }
+    }
+}
+
+#[async_trait]
+impl MainReattach for TmuxMainReattach {
+    async fn reattach_main(&self, os_user: &str, session_id: &str) -> bool {
+        let gate = Arc::clone(
+            self.in_flight
+                .lock()
+                .await
+                .entry(session_id.to_string())
+                .or_default(),
+        );
+        let attached = {
+            let _one_at_a_time = gate.lock().await;
+            self.manager.get(session_id).await.is_some()
+                || tddy_agent_launch::claude_cli_tmux::reattach_recorded_main(
+                    &self.manager,
+                    &self.tddy_data_dir,
+                    os_user,
+                    session_id,
+                )
+                .await
+        };
+        // The last access out forgets the session's gate (every clone is taken under this lock, so
+        // a count of two — the map's and this one — means nobody else holds or waits on it).
+        let mut in_flight = self.in_flight.lock().await;
+        if Arc::strong_count(&gate) == 2 {
+            in_flight.remove(session_id);
+        }
+        attached
     }
 }
 

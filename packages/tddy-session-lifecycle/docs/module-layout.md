@@ -60,6 +60,7 @@ module, so it reads the host's private fields directly and needs `pub(super)` at
 | `svc_session_files_ports.rs` | the host's session-files impl |
 | `svc_session_files_ports/svc_peer_routed_session_files.rs` | `PeerRoutedSessionFiles` |
 | `svc_activity_ports.rs`, `svc_terminal_ports.rs` | the activity and terminal families' ports |
+| `svc_terminal_ports.rs` — `TmuxMainReattach` | the daemon's `MainReattach` port (`#tmux-agent` 2/3): re-attaches a tmux-run session's `main` terminal on the first stream, input or history read that finds none, through `tddy_agent_launch::claude_cli_tmux::reattach_recorded_main` with the daemon's data dir; single-flight per session (a per-session gate, forgotten by the last access out), and a main already registered when the gate opens answers `true` without attaching |
 | `svc_terminal_ports/tmux_host.rs` | `HostTmux`, the daemon's `TmuxHost`: `list` runs `tddy_cli_sessions::tmux::list_tmux_sessions` as the asking OS user, off the executor. The tmux helpers the roster builds tabs with (`tmux_attach_argv`, `tmux_session_name`, `tmux_new_session_argv`, `tmux_binary`, `ensure_reachable`) live in `tddy_cli_sessions::tmux`. A submodule, so `connection_service.rs` declares nothing for it |
 | `svc_terminal_ports/recorded_worktree.rs` | `recorded_worktree`: where a stopped session's tabs start — the worktree its session directory records under the daemon's data dir, or `FAILED_PRECONDITION` naming the session. A submodule, so `connection_service.rs` declares nothing for it |
 

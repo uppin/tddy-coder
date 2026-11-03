@@ -1,7 +1,7 @@
 # `tddy-cli-sessions`: module layout
 
 The daemon's CLI session PTY runtime: PTY-hosted `claude`, `cursor` and every other registered CLI harness's sessions (`opencode`, `muse`, `warp`) and their terminals. About
-**1.7k production lines** in 12 modules; no function over 100 lines. It depends on neither
+**3.0k production lines** in 17 modules (2026-11-03); no function over 100 lines. It depends on neither
 `tddy-session-split`, `tddy-agent-launch` nor `tddy-session-agents`.
 
 | Module | Holds |
@@ -12,6 +12,7 @@ The daemon's CLI session PTY runtime: PTY-hosted `claude`, `cursor` and every ot
 | `cli_session_manager/pty_terminal_service.rs` | `pty_terminal_service(handle)`: serves `terminal.TerminalService` against a PTY handle, built from `tddy-rpc` types only, so any transport can host it. Every open starts with a snapshot frame taken under the capture lock (`tddy_terminal_rpc::session::snapshot_and_subscribe`), then live frames stamped with contiguous offsets; a `request_snapshot` after the opening message, or a lagged receiver, re-takes the snapshot at a new sequence point. No raw replay and no `trigger_redraw` — `PtyHandle::trigger_redraw` remains for the host's legacy bridge |
 | `tmux.rs` | the host's tmux, everything **run as the session's OS user** through the kernel's `run_output_as_user`: `tmux_binary` (`TDDY_TMUX_BINARY`, else `tmux`), `tmux_attach_argv` (`-T clipboard attach-session -t =<name>`), `tmux_session_name` / `tmux_new_session_argv` (the `tmux-new` tab), `list_tmux_sessions` + `parse_list_sessions` ("no server running" is `[]`), `ensure_reachable` (refuses a user this daemon cannot become); and the agent's tmux session — `agent_tmux_session_name` (`tddy-<full session id>`, `:`/`.` → `_`), `agent_new_session_args` / `start_agent_tmux_session` (`new-session -d -s -c -- <pane command>`; returns the pane pid; the pane's environment — the user's `HOME`/`PATH` under the session env — goes through `tmux/pane_env.rs`: a fresh `0600` file under `<session dir>/tmux-env/` (`0700`), both handed to the session's OS user when the daemon is another, written as shell-quoted `export K='v'` lines; the pane runs `/bin/sh -c '. "$1"; rm -f -- "$1"; shift; exec "$@"' sh <file> <argv>`, so no value is on any argv; a failed start removes the file), `kill_tmux_session` (an absent session or server is not an error), `tmux_session_alive`, `pane_pid` (`=<name>:`). Lives here, below `tddy-agent-launch` and `tddy-session-lifecycle`, so both use it |
 | `cli_session_manager/tmux_main.rs` | `attach_main_to_tmux(session_id, worktree, os_user, kind, name)`: the session's **main** terminal as a tmux client of the agent's tmux session, run as `os_user` and recorded with `tmux_session = Some(name)`; an ordinary main, exit hook included |
+| `cli_session_manager/tmux_reattach.rs` | a tmux-run agent outliving its client (`#tmux-agent` 2/3): `classify_main_exit(tmux_session, probe) -> MainExit` (`ClientOnly` when the recorded tmux session is alive, `AgentEnded` otherwise; a PTY-run main never probes) and `classify_ended_main` (the probe on the blocking pool; one that does not finish is `ClientOnly`, so nothing is torn down on a guess); `reattach_main(session_id, os_user, name, worktree, kind)` — `attach_main_to_tmux`, or the main already attached to `name`, stopping the session's watcher; `has_managed_workflow`; and the **detach watcher** `DetachWatch` (`main_ended`: `AgentEnded` drops the managed workflow and the exposure, `ClientOnly` starts a watcher polling `tmux_session_alive` every `DETACH_WATCH_INTERVAL`, 10 s, `with_detach_watch_interval` for tests, which runs the same cleanup once the tmux session is gone). The watcher registry is closed by `kill_all`, so the clients a shutdown cancels start no watcher |
 | `session_toolcall.rs` | the per-session toolcall listener and the managed-workflow wiring for claude-cli sessions: a `WorkflowController` positioned at the recipe's start goal behind a per-session `transition` handler, and `ManagedWorkflow` |
 
 The argv of every spawn comes from the [CLI harness registry](../../tddy-agent-backend/docs/architecture.md#cli-harnesses-cli_harness):
@@ -31,11 +32,11 @@ tmux session name is recorded on `PtyHandle::tmux_session` and on the terminal's
 listing — or a handle rebuilt from the index — still names it. Stopping it ends the client, which
 detaches it.
 
-Each index entry also records the OS user it was started as (`TerminalEntry::os_user`). `kill_all`
-(daemon shutdown) first empties the index (`drain_terminals`) and kills the tmux session of every
-**main** terminal that names one — a tmux-run agent's — as that user, logging and continuing on a
-failure; a tab's tmux session is the user's and is never killed, its client is only stopped. Then it
-cancels every task and SIGKILLs what outlives 5 s, as before.
+`kill_all` (daemon shutdown) closes the detach-watcher registry, empties the index
+(`drain_terminals`), cancels every task and SIGKILLs what outlives 5 s. A tmux-run main is only a tmux
+client, so cancelling it **detaches** it and the agent's tmux session keeps running; a tab's tmux
+session is the user's and is never touched. A main's end is classified (`tmux_reattach.rs`): only the
+agent's end — not a client's — drops the session's managed workflow and exposure.
 
 `with_claude_launch_flags(argv, initial_prompt, append_system_prompt_file, extra_args)` (`argv.rs`)
 inserts `--append-system-prompt-file` and the extra arguments before any positional prompt; the PTY
