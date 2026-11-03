@@ -7,7 +7,8 @@ use tddy_projects::project_storage::ProjectData;
 use tddy_service::proto::session::{GithubSource, StartSessionRequest};
 
 use crate::start_request_checks::{
-    forwarded_start_request, record_requested_github_source, refuse_an_orchestrated_tool_start,
+    forwarded_start_request, record_requested_github_source, refuse_a_conflicting_tmux_run_start,
+    refuse_an_orchestrated_tool_start,
 };
 
 const PROJECT_ID: &str = "11111111-2222-4333-8444-555555555555";
@@ -172,4 +173,75 @@ fn a_tool_start_with_no_orchestrator_is_accepted() {
         ..Default::default()
     })
     .is_ok());
+}
+
+fn a_tmux_run_claude_start() -> StartSessionRequest {
+    StartSessionRequest {
+        session_type: "claude-cli".to_string(),
+        run_in_tmux: true,
+        ..Default::default()
+    }
+}
+
+#[test]
+fn a_tmux_run_start_with_a_sandboxed_codebase_is_refused_naming_the_conflict() {
+    // Given
+    let req = StartSessionRequest {
+        sandboxed_codebase: true,
+        ..a_tmux_run_claude_start()
+    };
+
+    // When
+    let refusal = refuse_a_conflicting_tmux_run_start(&req).unwrap_err();
+
+    // Then
+    assert_eq!(refusal.code(), tddy_rpc::Code::InvalidArgument);
+    assert!(
+        refusal.message().contains("sandboxed_codebase"),
+        "{}",
+        refusal.message()
+    );
+    assert!(
+        refusal.message().contains("run_in_tmux"),
+        "{}",
+        refusal.message()
+    );
+}
+
+#[test]
+fn a_tmux_run_start_with_a_split_placement_is_refused_naming_the_conflict() {
+    // Given
+    let req = StartSessionRequest {
+        codebase_daemon_instance_id: "build-box-2".to_string(),
+        ..a_tmux_run_claude_start()
+    };
+
+    // When
+    let refusal = refuse_a_conflicting_tmux_run_start(&req).unwrap_err();
+
+    // Then
+    assert_eq!(refusal.code(), tddy_rpc::Code::InvalidArgument);
+    assert!(
+        refusal.message().contains("codebase_daemon_instance_id"),
+        "{}",
+        refusal.message()
+    );
+}
+
+#[test]
+fn a_tmux_run_start_on_a_plain_placement_is_not_refused() {
+    assert!(refuse_a_conflicting_tmux_run_start(&a_tmux_run_claude_start()).is_ok());
+}
+
+#[test]
+fn a_split_placement_without_tmux_is_not_refused_here() {
+    // Given
+    let req = StartSessionRequest {
+        session_type: "claude-cli".to_string(),
+        codebase_daemon_instance_id: "build-box-2".to_string(),
+        ..Default::default()
+    };
+
+    // Then
+    assert!(refuse_a_conflicting_tmux_run_start(&req).is_ok());
 }

@@ -85,6 +85,8 @@ impl tddy_core::toolcall::ConversationSpawnHandler for GrillMeConversationSpawnH
             crate::project_home_launch::StartRole::ordinary(),
             // A child conversation cuts its own worktree.
             "",
+            // A spawned child conversation's agent is the PTY child itself, never run in tmux.
+            false,
             // The orchestrator's owner's vault: a child is the same owner's, on the same project.
             &self.account_access,
             // A child conversation runs on its vendor: the orchestrator's account is not inherited.

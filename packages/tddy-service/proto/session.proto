@@ -696,6 +696,9 @@ message StartSessionRequest {
   // The daemon running `orchestrator_session_id`. Empty or the creating daemon = that daemon;
   // any other is recorded beside it (`Changeset.orchestrator_daemon_instance_id`).
   string orchestrator_daemon_instance_id = 46;
+  // Claude CLI only: run the agent inside a tmux session on the host, as the session's OS user, with
+  // the main terminal attached as a tmux client. Refused with `sandbox`; other session types ignore it.
+  bool run_in_tmux = 47;
   // Removed: discovery_subagent (single-name alias), fastcontext_url/fastcontext_model/
   // fastcontext_max_turns/subagent_replaces. All specialized-agent configuration (name, model,
   // base_url, max_turns, replaces) now comes exclusively from `specialized_agents` resolved

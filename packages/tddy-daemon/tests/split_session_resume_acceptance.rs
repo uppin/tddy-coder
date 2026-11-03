@@ -336,6 +336,7 @@ fn a_stopped_split_session() -> SessionMetadata {
         ssh_config_host: None,
         managed_codebase: false,
         session_role: None,
+        tmux_session: None,
     }
 }
 

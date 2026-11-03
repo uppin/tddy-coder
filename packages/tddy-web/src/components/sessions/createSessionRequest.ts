@@ -52,6 +52,8 @@ export interface CreateSessionFormValues {
   placementWithdrawsPermissionBypass: boolean;
   initialPrompt: string;
   sandbox: boolean;
+  /** Run the claude agent inside tmux on the host. Sent as `run_in_tmux` for claude-cli only. */
+  runInTmux?: boolean;
   managedCodebase: boolean;
   sandboxedCodebase: boolean;
   isSplitCodebase: boolean;
@@ -222,6 +224,10 @@ export function buildStartSessionRequest(
     stackNodeId,
     ...claudeCliAgentChoices(form),
     sandbox,
+    // Only this claude-cli return carries the field: the other session types omit it, which the
+    // proto reads as the default. Never sent with the sandbox, the jailed codebase or a split
+    // placement, each of which the daemon refuses together with it.
+    runInTmux: (form.runInTmux ?? false) && !sandbox && !sandboxedCodebase && !isSplitCodebase,
     managedCodebase,
     // The third placement. Choosing it cleared the two above and the codebase host in the form,
     // so they go out cleared here without being restated — the request says what the screen says.

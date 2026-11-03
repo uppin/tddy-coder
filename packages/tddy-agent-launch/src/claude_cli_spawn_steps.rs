@@ -1,3 +1,4 @@
+use crate::claude_cli_tmux::ClaudeCliTmuxLaunch;
 use crate::hooks_and_urls;
 use crate::managed_launch;
 use tddy_cli_sessions::cli_session_manager::CliSessionManager;
@@ -333,11 +334,23 @@ pub(super) struct ClaudeCliProcess<'a> {
     pub(super) env_extra: Vec<(String, String)>,
     /// A main's launch, carried out only now that nothing before the spawn can refuse the start.
     pub(super) main: Option<crate::project_home_launch::MainLaunchPlan<'a>>,
+    /// Run `claude` inside a tmux session instead of as the PTY child ([`crate::claude_cli_tmux`]).
+    pub(super) run_in_tmux: bool,
+    /// The session's directory: a tmux-run agent's pane environment file is written under it.
+    pub(super) session_dir: PathBuf,
+}
+
+/// A started claude-cli agent: the pid the session records, and the tmux session it runs in when
+/// it was started with `run_in_tmux`.
+pub(super) struct SpawnedClaudeCli {
+    /// The agent's pid: the PTY child's, or — for a tmux-run agent — the pane's process.
+    pub(super) pid: u32,
+    pub(super) tmux_session: Option<String>,
 }
 
 pub(super) async fn spawn_claude_cli_process(
     launch: ClaudeCliProcess<'_>,
-) -> Result<Arc<tddy_cli_sessions::cli_session_manager::pty_handle::PtyHandle>, Status> {
+) -> Result<SpawnedClaudeCli, Status> {
     let ClaudeCliProcess {
         os_user,
         session_id,
@@ -353,29 +366,67 @@ pub(super) async fn spawn_claude_cli_process(
         append_system_prompt_file,
         env_extra,
         main,
+        run_in_tmux,
+        session_dir,
     } = launch;
     let role_launch = crate::project_home_launch::RoleLaunch::of(main)?;
-    let handle = manager
-        .start_with_options(
-            &session_id_owned,
-            worktree_clone,
-            &model_owned,
-            &binary_owned,
-            initial_prompt_opt.as_deref(),
-            permission_mode_opt.as_deref(),
-            dangerously_skip_permissions,
-            false,
-            append_system_prompt_file.as_deref(),
-            role_launch.extra_args,
-            env_extra.into_iter().chain(role_launch.env).collect(),
-            Some(os_user),
-        )
-        .await
-        .map_err(|e| Status::internal(format!("failed to spawn claude-cli: {}", e)))?;
+    let launch = ClaudeCliTmuxLaunch {
+        os_user,
+        session_id: &session_id_owned,
+        worktree_path: worktree_clone,
+        model: &model_owned,
+        binary: &binary_owned,
+        initial_prompt: initial_prompt_opt.as_deref(),
+        permission_mode: permission_mode_opt.as_deref(),
+        dangerously_skip_permissions,
+        resume: false,
+        append_system_prompt_file: append_system_prompt_file.as_deref(),
+        extra_args: role_launch.extra_args,
+        env: env_extra.into_iter().chain(role_launch.env).collect(),
+        session_dir,
+    };
+    let spawned = if run_in_tmux {
+        let launched = crate::claude_cli_tmux::start_claude_in_tmux(&manager, launch).await?;
+        SpawnedClaudeCli {
+            pid: launched.pane_pid,
+            tmux_session: Some(launched.tmux_session),
+        }
+    } else {
+        SpawnedClaudeCli {
+            pid: start_claude_in_pty(&manager, launch).await?,
+            tmux_session: None,
+        }
+    };
     if let Some(mw) = managed {
         manager.attach_managed_workflow(session_id, mw).await;
     }
-    Ok(handle)
+    Ok(spawned)
+}
+
+/// Start claude as the session's main PTY child, as every claude-cli start did before tmux mode,
+/// and return its pid.
+async fn start_claude_in_pty(
+    manager: &CliSessionManager,
+    launch: ClaudeCliTmuxLaunch<'_>,
+) -> Result<u32, Status> {
+    let handle = manager
+        .start_with_options(
+            launch.session_id,
+            launch.worktree_path,
+            launch.model,
+            launch.binary,
+            launch.initial_prompt,
+            launch.permission_mode,
+            launch.dangerously_skip_permissions,
+            launch.resume,
+            launch.append_system_prompt_file,
+            launch.extra_args,
+            launch.env,
+            Some(launch.os_user),
+        )
+        .await
+        .map_err(|e| Status::internal(format!("failed to spawn claude-cli: {}", e)))?;
+    Ok(handle.pid)
 }
 
 pub(super) fn claude_cli_livekit_room(

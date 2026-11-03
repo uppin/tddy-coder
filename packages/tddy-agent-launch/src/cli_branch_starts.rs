@@ -151,6 +151,7 @@ impl LaunchSessions {
             req.managed_codebase,
             req.session_role.trim(),
             req.repo_path.trim(),
+            req.run_in_tmux,
             &route_sources,
             progress,
         )

@@ -236,6 +236,34 @@ describe("create session request builder", () => {
     expect(request.managedCodebase).to.equal(false);
   });
 
+  it("sends run_in_tmux for a plain claude-cli placement", () => {
+    // Given
+    const form = aFormWith({ sessionType: "claude-cli", runInTmux: true });
+
+    // When
+    const request = buildStartSessionRequest(form, null, []);
+
+    // Then
+    expect(request.runInTmux).to.equal(true);
+  });
+
+  it("never sends run_in_tmux with a placement the daemon refuses it with", () => {
+    for (const placement of [
+      { sandbox: true },
+      { sandboxedCodebase: true },
+      { managedCodebase: true, isSplitCodebase: true, codebaseDaemonInstanceId: "build-box-2" },
+    ]) {
+      // Given a tmux choice left on beside that placement
+      const form = aFormWith({ sessionType: "claude-cli", runInTmux: true, ...placement });
+
+      // When
+      const request = buildStartSessionRequest(form, null, []);
+
+      // Then
+      expect(request.runInTmux, JSON.stringify(placement)).to.equal(false);
+    }
+  });
+
   it("replaces the branch fields with a conflict resolution's own", () => {
     // Given a form holding the branch the daemon refused
     const form = aFormWith({ sessionType: "claude-cli", newBranchName: "feature/taken" });

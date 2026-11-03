@@ -98,6 +98,7 @@ fn write_claude_cli_session(session_dir: &std::path::Path, initial_activity_stat
         ssh_config_host: None,
         managed_codebase: false,
         session_role: None,
+        tmux_session: None,
     };
     write_session_metadata(session_dir, &meta).unwrap();
 }

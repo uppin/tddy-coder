@@ -113,6 +113,7 @@ pub fn starting_session_metadata(
         ssh_config_host: None,
         managed_codebase: false,
         session_role: None,
+        tmux_session: None,
     }
 }
 

@@ -194,3 +194,23 @@ async fn list_terminal_sessions_reports_a_tmux_tab_with_its_tmux_session_name() 
     assert_eq!(listed.kind, "tmux");
     assert_eq!(listed.tmux_session, "alpha");
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[serial_test::serial]
+async fn daemon_shutdown_detaches_a_tmux_tab_and_leaves_its_tmux_session_running() {
+    // Given an attached tab on a tmux session the user started themselves
+    let tmux = PrivateTmux::started().with_session("alpha", 1);
+    let daemon = a_daemon_with_a_running_session().await;
+    daemon
+        .start_tmux_tab("alpha")
+        .await
+        .expect("a tmux tab starts");
+    until_attached(&tmux, "alpha", 1).await;
+
+    // When the daemon shuts down
+    daemon.manager.kill_all().await;
+
+    // Then the tab's client is gone and the user's tmux session is still there
+    until_attached(&tmux, "alpha", 0).await;
+    assert!(tmux.has_session("alpha"));
+}

@@ -30,6 +30,9 @@ export function useCreateSessionPlacement({
   agentHostInstanceId,
 }: UseCreateSessionPlacementArgs) {
   const [sandbox, setSandbox] = useState(false);
+  // Run the claude agent inside a tmux session on the host (docs/ft/daemon/claude-cli-session.md § tmux mode).
+  // Exclusive with every placement that is not a plain agent on this host — see `runInTmuxUnavailable`.
+  const [runInTmux, setRunInTmux] = useState(false);
   const [managedCodebase, setManagedCodebase] = useState(false);
   // The inverted placement: this session's own checkout inside a `--workspace-tools` jail, with the
   // agent beside it, unconfined and stripped of its native filesystem and shell tools.
@@ -138,6 +141,19 @@ export function useCreateSessionPlacement({
    */
   const placementWithdrawsPermissionBypass = isSplitCodebase || sandboxedCodebase;
 
+  /**
+   * Whether the placement rules out a tmux-run agent. The daemon refuses `run_in_tmux` with the
+   * sandbox (the agent runs in its own jail), the jailed codebase (no agent on the host to run) and
+   * a split placement (the worktree is on another daemon), so the control is disabled for all three.
+   */
+  const runInTmuxUnavailable = sandbox || sandboxedCodebase || isSplitCodebase;
+
+  // Choosing one of those placements clears the tmux choice rather than leaving it set behind a
+  // disabled control: the screen must show what the request will carry.
+  useEffect(() => {
+    if (runInTmuxUnavailable) setRunInTmux(false);
+  }, [runInTmuxUnavailable]);
+
   const applyPlacement = (toggled: CodebasePlacementChoice, on: boolean) => {
     const next = placementAfterToggling(currentPlacement, toggled, on);
     setSandboxedCodebase(next === "sandboxedCodebase");
@@ -164,6 +180,9 @@ export function useCreateSessionPlacement({
   return {
     sandbox,
     setSandbox,
+    runInTmux,
+    setRunInTmux,
+    runInTmuxUnavailable,
     managedCodebase,
     setManagedCodebase,
     sandboxedCodebase,

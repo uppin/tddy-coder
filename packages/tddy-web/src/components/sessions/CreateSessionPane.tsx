@@ -147,6 +147,9 @@ export function CreateSessionPane({
   const {
     sandbox,
     setSandbox,
+    runInTmux,
+    setRunInTmux,
+    runInTmuxUnavailable,
     managedCodebase,
     setManagedCodebase,
     sandboxedCodebase,
@@ -264,6 +267,7 @@ export function CreateSessionPane({
     placementWithdrawsPermissionBypass,
     initialPrompt,
     sandbox,
+    runInTmux,
     managedCodebase,
     sandboxedCodebase,
     isSplitCodebase,
@@ -391,6 +395,9 @@ export function CreateSessionPane({
           placementWithdrawsPermissionBypass={placementWithdrawsPermissionBypass}
           sandbox={sandbox}
           setSandbox={setSandbox}
+          runInTmux={runInTmux}
+          setRunInTmux={setRunInTmux}
+          runInTmuxUnavailable={runInTmuxUnavailable}
           applyPlacement={applyPlacement}
           sandboxedCodebase={sandboxedCodebase}
           sandboxedCodebaseUnavailableReason={sandboxedCodebaseUnavailableReason}

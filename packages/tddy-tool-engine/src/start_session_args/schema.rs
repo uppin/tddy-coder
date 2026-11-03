@@ -189,6 +189,10 @@ fn schema_offering(choices: Option<&StartChoices>) -> Value {
         boolean("Index the worktree before the agent starts and offer it SemanticSearch."),
     );
     offer(
+        "run_in_tmux",
+        boolean("For claude-cli: run the agent in a tmux session of its own on the host, as the session's OS user, so it outlives the terminal attached to it. Exclusive with `sandbox`, `sandboxed_codebase` and `codebase_daemon_instance_id`."),
+    );
+    offer(
         "specialized_agents",
         json!({
             "type": "array",

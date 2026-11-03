@@ -361,6 +361,7 @@ async fn resuming_a_managed_claude_cli_session_re_wires_orchestration_and_socket
         ssh_config_host: None,
         managed_codebase: false,
         session_role: None,
+        tmux_session: None,
     };
     write_session_metadata(&session_dir, &meta).unwrap();
 

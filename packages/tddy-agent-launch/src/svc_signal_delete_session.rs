@@ -1,3 +1,4 @@
+use tddy_cli_sessions::tmux::{agent_tmux_session_name, kill_tmux_session};
 use tddy_daemon_kernel::user_paths::projects_path_for_user;
 use tddy_session_activity::session_deletion;
 
@@ -81,6 +82,15 @@ impl LaunchSessions {
             sessions_base,
             os_user
         );
+        // The agent of a tmux-run session lives in its tmux session, so that is killed before
+        // anything else of the session is torn down: a refused kill refuses the delete with the
+        // session intact, and a retry kills whatever is left.
+        kill_recorded_tmux_session(
+            os_user,
+            session_id,
+            &unified_session_dir_path(&sessions_base, session_id),
+        )
+        .await?;
         let projects_dir_opt = projects_path_for_user(os_user, Some(&self.tddy_data_dir));
         // A split session's worktree lives on another daemon, which must lose it first: deleting
         // this side alone would leave a checkout on a host with no session left to reclaim it. A
@@ -134,6 +144,55 @@ impl LaunchSessions {
         )?;
         log::info!("DeleteSession: successfully removed session {}", session_id);
         Ok(Response::new(DeleteSessionResponse { ok: true }))
+    }
+}
+
+/// Kill the tmux session that a tmux-run session's agent runs in, as the OS user the session runs as,
+/// before the session is deleted. A session that records no tmux session has nothing to kill, and
+/// killing a tmux session that is already gone is not an error.
+///
+/// When `.session.yaml` cannot be read the recorded name is not available, but the name is derived
+/// from the session id ([`agent_tmux_session_name`]), so that name is killed: the session may have
+/// been tmux-run, and a tmux session left behind would keep its agent running with nothing to
+/// reclaim it. A host where tmux cannot be run at all is logged and does not block deleting the
+/// broken session, since a session that was never tmux-run cannot have a tmux session to leak.
+async fn kill_recorded_tmux_session(
+    os_user: &str,
+    session_id: &str,
+    session_dir: &Path,
+) -> Result<(), Status> {
+    if !session_dir.is_dir() {
+        // Nothing of this session is on this daemon: the directory check in the delete refuses it.
+        return Ok(());
+    }
+    let (name, recorded) = match read_session_metadata(session_dir) {
+        Ok(metadata) => match metadata.tmux_session {
+            Some(name) => (name, true),
+            None => return Ok(()),
+        },
+        Err(error) => {
+            log::warn!(
+                "DeleteSession: no readable .session.yaml in {}, killing the tmux session named by the id: {error}",
+                session_dir.display()
+            );
+            (agent_tmux_session_name(session_id), false)
+        }
+    };
+    let os_user = os_user.to_string();
+    let killed = tokio::task::spawn_blocking(move || kill_tmux_session(&os_user, &name))
+        .await
+        .map_err(|e| Status::internal(format!("the tmux kill did not finish: {e}")))?;
+    match killed {
+        Ok(()) => Ok(()),
+        Err(error) if recorded => Err(Status::internal(format!(
+            "could not kill the session's tmux session: {error}"
+        ))),
+        Err(error) => {
+            log::warn!(
+                "DeleteSession: could not look for the tmux session of {session_id}, whose metadata is unreadable: {error}"
+            );
+            Ok(())
+        }
     }
 }
 

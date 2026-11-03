@@ -105,6 +105,64 @@ Linux's unprivileged-userns restriction does not apply. See
     `mcp__tddy-tools__*` tool calls executed on the host worktree.
 22. On non-macOS, `sandbox = true` returns `failed_precondition` (no fallback).
 
+## tmux mode (`StartSessionRequest.run_in_tmux = true`)
+
+A claude-cli session created with **Run the agent in tmux** (`run_in_tmux = true`) runs Claude inside a
+**detached tmux session on the session's host, as the session's OS user**, in the session's worktree.
+The session's main terminal is a tmux client attached to it, so the agent is an ordinary tmux session
+on the host: it shows in `tmux ls` and can be attached from any terminal over SSH.
+
+- **Name.** `tddy-<full session id>` (a `:` or `.` becomes `_`, as tmux itself substitutes). The whole
+  id, never a prefix: the leading characters of a UUIDv7 are its millisecond timestamp, so a prefix
+  repeats across sessions started close together. The name is recorded as `tmux_session` in
+  `.session.yaml`, and it is derivable from the id alone.
+- **Launch.** `tmux new-session -d -s <name> -c <worktree> -- /bin/sh -c '. "$1"; rm -f -- "$1";
+  shift; exec "$@"' sh <env file> <claude argv>` runs as the session's OS user — the argv is the one a
+  PTY start builds. A pane inherits the tmux *server's* environment, not a client's, so the pane's
+  environment — the target user's `HOME` and configured `PATH`, then the session's on top (toolcall
+  socket, hooks, provider route, renderer settings) — is handed over in a **file**, never on an argv:
+  the daemon writes it as `export K='v'` lines (shell-quoted) to a fresh file under
+  `<session dir>/tmux-env/`, created with mode `0600` and owned by the session's OS user (the directory
+  is `0700`, the user's too), and the pane sources it, deletes it and `exec`s Claude. No value —
+  the provider token included — appears on any process's argv. A start that fails removes the file
+  itself. Then the main terminal runs `tmux -T clipboard attach-session -t =<name>` as that user.
+- **pid.** The recorded `pid` is tmux's `#{pane_pid}` — the Claude process — not the client's. Liveness,
+  **SignalSession** and the delete's process teardown act on the agent.
+- **Delete** kills the tmux session (as the session's OS user) **before** anything else of the session
+  is torn down, then terminates the recorded pane pid (SIGTERM, then SIGKILL), so an agent that ignores
+  SIGHUP is gone too. A recorded tmux session that cannot be killed refuses the delete with the session
+  intact. When `.session.yaml` cannot be read, the delete kills `tddy-<session id>` anyway — the name
+  is authoritative — treating "no such session" as fine, and a tmux that cannot be run at all is
+  logged without blocking the delete of the broken session.
+- **Daemon shutdown** kills each tmux-run agent's tmux session, as the OS user it was started as, with
+  the other terminals; a failed kill is logged and shutdown continues. A **tmux tab**'s session is the
+  user's own and is never killed: its client is stopped, which detaches it.
+- **Resume** of a terminated tmux-run session kills any leftover tmux session of that name, then starts
+  a fresh one running Claude's resume argv (`--resume <id>`).
+- **A failed attach** kills the tmux session that start created: nothing records it, so nothing could
+  stop it later.
+
+`run_in_tmux` is refused with `INVALID_ARGUMENT` naming the conflict, before routing and before anything
+is created, together with:
+
+| With | Why |
+|---|---|
+| `sandbox` | the agent runs in its own jail, not in a tmux session on the host |
+| `sandboxed_codebase` | that placement withdraws the agent's native tools and jails the code — there is no host agent to run in tmux |
+| `codebase_daemon_instance_id` (split placement) | the worktree is on another daemon, and the tmux session runs in a worktree on this host |
+
+Other session types ignore `run_in_tmux`. The agent-facing StartSession tool offers it as a boolean
+beside `sandbox`. On a supervised install a tmux-run session for another OS user is refused with
+`CannotBecomeUser` rather than run as the daemon user.
+
+Known limitations:
+
+- `SessionMetadata` is `deny_unknown_fields`, so a daemon older than tmux mode cannot read a tmux-run
+  session's record (downgrades are not supported).
+- The tmux control commands (`new-session`, `kill-session`, `display-message`) drop privilege through
+  the kernel's `run_output_as_user`, the client through the PTY runtime — the same split as tmux tabs,
+  see [`docs/dev/todo/2026-11-02-tmux-listing-and-tab-use-two-privilege-drops.md`](../../dev/todo/2026-11-02-tmux-listing-and-tab-use-two-privilege-drops.md).
+
 ## Running on a provider account
 
 A claude-cli session can run Claude Code on one of the operator's
@@ -209,6 +267,7 @@ it on Anthropic. A session with no record resumes on the vendor.
 session_type: claude-cli    # optional; absent/empty = "tool"
 model: opus                 # optional; stored for resume
 sandbox: true               # optional; darwin Seatbelt jail (macOS only)
+tmux_session: tddy-<id>     # optional; the tmux session a tmux-run agent runs in (pid is its pane's)
 ```
 
 `repo_path` reuses the existing field to store the **worktree absolute path** (not the main repo path, unlike tool sessions which may store the project repo root).
@@ -510,6 +569,7 @@ message StartSessionRequest {
   string session_type = 7;  // "tool" (default) or "claude-cli"
   string model        = 8;  // model id for claude-cli sessions
   bool   sandbox      = 15; // when true with session_type "claude-cli": darwin Seatbelt spawn (macOS only)
+  bool   run_in_tmux  = 47; // claude-cli: run the agent in a tmux session on the host (see § tmux mode)
 }
 
 // SessionEntry (in ListSessionsResponse) gains:

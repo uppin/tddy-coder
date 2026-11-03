@@ -359,6 +359,7 @@ async fn cursor_cli_session_enrichment_reads_from_metadata() {
         ssh_config_host: None,
         managed_codebase: false,
         session_role: None,
+        tmux_session: None,
     };
     tddy_core::write_session_metadata(&session_dir, &meta).unwrap();
 

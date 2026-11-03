@@ -85,6 +85,9 @@ pub(crate) async fn spawn_claude_cli_session_inner(
     // A checkout to run in directly (a project's home worktree) instead of cutting a session
     // worktree. Empty cuts one, as every other claude-cli start does.
     repo_path: &str,
+    // Run the agent inside a tmux session (`StartSessionRequest.run_in_tmux`); the main terminal is
+    // then a tmux client and the recorded pid is the pane's.
+    run_in_tmux: bool,
     // What the session's vault says about the project's GitHub account — read once, here, for the
     // commit identity the agent is launched with.
     account_access: &SessionAccountAccess,
@@ -275,7 +278,7 @@ pub(crate) async fn spawn_claude_cli_session_inner(
         managed_codebase,
     )?;
     progress.begin_phase(StartStep::Agent);
-    let handle = claude_cli_spawn_steps::spawn_claude_cli_process(
+    let spawned = claude_cli_spawn_steps::spawn_claude_cli_process(
         claude_cli_spawn_steps::ClaudeCliProcess {
             os_user,
             session_id,
@@ -291,13 +294,15 @@ pub(crate) async fn spawn_claude_cli_session_inner(
             append_system_prompt_file,
             env_extra,
             main: role.main,
+            run_in_tmux,
+            session_dir: session_dir.clone(),
         },
     )
     .await?;
     progress.end_phase(StartStep::Agent);
     record_main_terminal(claude_cli_manager, tddy_data_dir, session_id).await;
 
-    let pid = handle.pid;
+    let pid = spawned.pid;
 
     // Write .session.yaml.
     let meta = tddy_core::SessionMetadata {
@@ -313,6 +318,7 @@ pub(crate) async fn spawn_claude_cli_session_inner(
         },
         managed_codebase,
         session_role: Some(role.name.to_string()).filter(|role| !role.is_empty()),
+        tmux_session: spawned.tmux_session,
         ..tddy_session_split::service_util::starting_session_metadata(
             session_id,
             project_id,

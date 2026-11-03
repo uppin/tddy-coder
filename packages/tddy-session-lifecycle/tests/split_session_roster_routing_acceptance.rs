@@ -305,6 +305,7 @@ fn write_session(sessions_base: &Path, session_id: &str, agents: Vec<SessionAgen
             ssh_config_host: None,
             managed_codebase: false,
             session_role: None,
+            tmux_session: None,
         },
     )
     .expect("write session metadata");

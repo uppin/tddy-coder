@@ -11,6 +11,7 @@ use tddy_rpc::Response;
 use std::path::PathBuf;
 
 use crate::claude_cli_spawn::record_main_terminal;
+use crate::claude_cli_tmux::{relaunch_claude_cli, ClaudeCliTmuxLaunch};
 use crate::hooks_and_urls;
 
 use crate::launch_ports::LaunchSessions;
@@ -127,25 +128,25 @@ impl LaunchSessions {
             &mut env_extra,
         )?;
 
-        let handle = manager
-            .resume_with_options(
-                &session_id_owned,
-                worktree_path,
-                &model,
-                &binary_owned,
-                append_system_prompt_file.as_deref(),
-                split_args,
-                env_extra,
-            )
-            .await
-            .map_err(|e| Status::internal(format!("failed to relaunch claude-cli: {}", e)))?;
+        let in_tmux = meta.tmux_session.is_some();
+        let launch = ClaudeCliTmuxLaunch {
+            os_user,
+            session_id: &session_id_owned,
+            worktree_path,
+            model: &model,
+            binary: &binary_owned,
+            append_system_prompt_file: append_system_prompt_file.as_deref(),
+            extra_args: split_args,
+            env: env_extra,
+            session_dir: session_dir.clone(),
+            ..Default::default()
+        };
+        let pid = relaunch_claude_cli(&manager, in_tmux, launch).await?;
 
         if let Some(mw) = managed {
             manager.attach_managed_workflow(&session_id_owned, mw).await;
         }
         record_main_terminal(&manager, &self.tddy_data_dir, &session_id_owned).await;
-
-        let pid = handle.pid;
 
         // Update .session.yaml with new pid and active status.
         let now = chrono::Utc::now().to_rfc3339();

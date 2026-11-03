@@ -274,6 +274,7 @@ fn a_session(session_id: &str, session_type: &str, managed: bool) -> SessionMeta
         ssh_config_host: None,
         managed_codebase: false,
         session_role: None,
+        tmux_session: None,
     }
 }
 

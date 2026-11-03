@@ -6,7 +6,7 @@
 **Metrics:** **119 lines** · nesting 4 · **9 parameters** · budget 60 / 4 / 5
 **Thresholds breached:** length 119 > 60; parameters 9 > 5
 **Restructure:** an options struct for the parameters; `extract_method --variant module` for the length
-**Status:** Open — partially fixed 2026-10-24 (144 → 142 lines; still over the 60-line and 5-parameter budgets)
+**Status:** Open — 142 lines, still over the 60-line and 5-parameter budgets (last partial fix 2026-10-26, #766)
 **Deferred:** by the developer 2026-11-03 (#session-tabs sweep: code issues deferred, logic issues solved)
 **Moved:** 2026-10-09 by `#carve` 21/21 (#536), engine move into `tddy-agent-launch`, from `packages/tddy-session-lifecycle/src/connection_service/svc_resume_claude_cli_session.rs:21`
 
@@ -27,6 +27,7 @@
 | 2026-10-26 | 141 | 8 incl. `&self` | **better** by 1 (142 → 141) in #766 (`#home-inbox` 1/8): the resumed agent's notify wiring is one call to the new `LaunchSessions::resumed_notify` (role and hook-token gates inside `notify_env::resumed_agent_notify_launch`), and the reply moved to `resumed_without_livekit`; the green phase had grown it to 159. Fn line to closing brace on `origin/feature/start-parity/spawn-conversation` (dfdfe8d93) and HEAD; no coverage run. Still open, unclaimed |
 | 2026-11-02 | 142 | 8 incl. `&self` | touched by #805 (`#session-tabs` 2/7) and **unchanged in shape**: +1 line (141 → 142), one call to `claude_cli_spawn::record_main_terminal` registering the resumed main terminal's recording (the green phase had added a 9-line inline call). No branch added. Fn line to closing brace on `origin/feature/session-tabs/dormant-tabs` (a35ebd026) and HEAD; no coverage run. Still open, unclaimed |
 | 2026-11-03 | 142 | 8 incl. `&self` | **unchanged** since #805 at master `162a66978` (fn line 22 to closing brace, 142 lines). `tddy-tools analyze` (199 tests across 99 files, join 62.5%): complexity **14**, CRAP **210** — never executed by this crate's own tests. Still open, unclaimed |
+| 2026-11-03 | 142 | 8 incl. `&self` | touched by #814 (`#tmux-agent` 1/3) and **unchanged in length** at the end (142 → 142; 141 mid-wrap): the relaunch is one call to `claude_cli_tmux::relaunch_claude_cli` (tmux-run sessions resume in a fresh tmux session, the rest as the PTY child, as before), taking a `ClaudeCliTmuxLaunch` built with `..Default::default()`; the green phase had grown it to 147. One `meta.tmux_session.is_some()` read added, no branch added here. **Then 142** (= base) once the launch also carries `session_dir` for the tmux pane's env file (one line).  Fn line to closing brace on `origin/master` (`2e4af52ac`) and HEAD; no coverage run (an instrumented build was not run for disk). Still open, unclaimed, deferred by the developer |
 
 ## What grew it
 

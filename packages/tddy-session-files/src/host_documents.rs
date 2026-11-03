@@ -541,6 +541,7 @@ mod tests {
             ssh_config_host: None,
             managed_codebase: false,
             session_role: None,
+            tmux_session: None,
             cursor_chat_id: None,
             harness_resume_token: None,
         };

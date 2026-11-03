@@ -110,6 +110,7 @@ impl CliSessionManager {
                     worktree_path: handle.worktree_path.clone(),
                     model: handle.model.clone(),
                     tmux_session: handle.tmux_session.clone(),
+                    os_user: os_user.map(str::to_string),
                 },
             );
 

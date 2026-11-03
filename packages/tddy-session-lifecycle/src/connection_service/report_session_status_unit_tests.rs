@@ -83,6 +83,7 @@ fn write_claude_cli_session(session_dir: &std::path::Path, hook_token: &str) {
         ssh_config_host: None,
         managed_codebase: false,
         session_role: None,
+        tmux_session: None,
     };
     tddy_core::write_session_metadata(session_dir, &metadata).unwrap();
 }
@@ -211,6 +212,7 @@ async fn report_session_status_rejects_non_claude_cli_session() {
         ssh_config_host: None,
         managed_codebase: false,
         session_role: None,
+        tmux_session: None,
     };
     tddy_core::write_session_metadata(&session_dir, &metadata).unwrap();
 

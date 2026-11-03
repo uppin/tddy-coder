@@ -712,6 +712,7 @@ fn a_managed_session(session_id: &str, repo_path: &Path) -> SessionMetadata {
         ssh_config_host: None,
         managed_codebase: false,
         session_role: None,
+        tmux_session: None,
     }
 }
 
