@@ -2,7 +2,7 @@
 //! overrides, Oz's `--mcp <path>` file, and a headless Cursor's worktree `.cursor/mcp.json` — and
 //! the paths each kind writes, so a launch can record them with its conversation.
 //!
-//! PRD: `docs/ft/coder/1-WIP/PRD-2026-10-31-headless-cursor-codex-oz-from-specs.md`.
+//! PRD: `docs/ft/coder/changelog/2026-11-03-headless-cursor-codex-oz-from-specs.md`.
 //!
 //! Each renderer reproduces what a hand-built path writes today: `headless_driver/argv.rs`'s
 //! `codex_mcp_server_overrides`, and `coding_agent_launcher.rs`'s `mcp_servers_by_name` (Oz) and

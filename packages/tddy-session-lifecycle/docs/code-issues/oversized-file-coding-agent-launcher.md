@@ -25,3 +25,7 @@ The headless launch is one cohesive group (~265 lines) that shares only `CodingA
 ## Measurement update 2026-11-02 — #agent-tools 6/12 (#795)
 
 **Regressed:** 872 → 967 production lines: `with_coding_agents`, `headless_plan_from_spec` and `headless_provider_env` (extracted from `headless_plan`). The hand-built Claude `mcp_servers_wrapped` registration stays for launchers built without coding agents. **Status:** Open — deferred to the #agent-tools sweep node (developer, 2026-11-02).
+
+## Measurement update 2026-11-03 — #agent-tools 9/12 (#798)
+
+**Regressed:** 967 → 1036 production lines: every headless harness planned from its spec, and the written-file record. `write_cursor_project_mcp_config`, `mcp_servers_by_name`, `headless_program` and `OZ_BINARY` stay until their deletion is approved (`docs/dev/todo/2026-11-03-headless-others-legacy-argv-deletion.md`). Regressed by #798 (`#agent-tools` 9/12). **Status:** Open — deferred to the #agent-tools sweep node (developer, 2026-11-03).

@@ -2,7 +2,7 @@
 //! `codex.yaml`'s `coding_agent.headless` sections render each invocation, and the adapters they
 //! name read the output (`#agent-tools 9/12`).
 //!
-//! PRD: `docs/ft/coder/1-WIP/PRD-2026-10-31-headless-cursor-codex-oz-from-specs.md`.
+//! PRD: `docs/ft/coder/changelog/2026-11-03-headless-cursor-codex-oz-from-specs.md`.
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;

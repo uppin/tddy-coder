@@ -18,3 +18,7 @@
 ## What would close it
 
 Move `run_rendered_turn` and its `HeadlessTurn` assembly into a `headless_driver/rendered.rs` sibling (engine-driven, `code-restructuring`), or delete the hand-built Claude turn once its tests use a renderer (#798 moves Cursor, Codex and Oz onto the spec too).
+
+## Measurement update 2026-11-03 — #agent-tools 9/12 (#798)
+
+**Regressed:** 547 → 563 production lines: Cursor, Codex and Oz turns render from their specs. `headless_driver/argv.rs` stays until its deletion is approved (`docs/dev/todo/2026-11-03-headless-others-legacy-argv-deletion.md`). Regressed by #798 (`#agent-tools` 9/12). **Status:** Open — deferred to the #agent-tools sweep node (developer, 2026-11-03).

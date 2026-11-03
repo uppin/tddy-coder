@@ -48,7 +48,7 @@ pub fn claim_headless_conversation_dir(
 /// The file in a headless conversation's directory listing, one absolute path per line, every file
 /// its plan wrote **outside** that directory — a worktree's `.cursor/mcp.json` — so the close and
 /// the start-up sweep remove those too (`#agent-tools 9/12`;
-/// `docs/dev/todo/2026-10-25-cursor-project-mcp-config-outlives-its-conversation.md`).
+/// `docs/dev/changesets/2026-11-03-agent-tools-headless-others.md`).
 pub const HEADLESS_WRITTEN_FILES: &str = "written-files";
 
 /// Record `files` — a plan's `RenderedSlots::written` — in `dir`'s [`HEADLESS_WRITTEN_FILES`],

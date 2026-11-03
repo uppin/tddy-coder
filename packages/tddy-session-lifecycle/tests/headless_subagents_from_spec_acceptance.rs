@@ -5,7 +5,7 @@
 //! conversation: on its close, and on the start-up sweep of a daemon that lost it
 //! (`#agent-tools 9/12`).
 //!
-//! PRD: `docs/ft/coder/1-WIP/PRD-2026-10-31-headless-cursor-codex-oz-from-specs.md`.
+//! PRD: `docs/ft/coder/changelog/2026-11-03-headless-cursor-codex-oz-from-specs.md`.
 //!
 //! The daemon config names CLIs that do not exist, so only the binaries the specs resolve — stubs
 //! on a fixture `ToolHost` — can run. Each stub records its argv and the registration it was

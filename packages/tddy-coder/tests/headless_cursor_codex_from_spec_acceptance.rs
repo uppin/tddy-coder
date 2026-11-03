@@ -4,7 +4,7 @@
 //! today — the resume and the thread id included — while a Codex auth failure still carries
 //! today's sign-in remediation (`#agent-tools 9/12`).
 //!
-//! PRD: `docs/ft/coder/1-WIP/PRD-2026-10-31-headless-cursor-codex-oz-from-specs.md`.
+//! PRD: `docs/ft/coder/changelog/2026-11-03-headless-cursor-codex-oz-from-specs.md`.
 //!
 //! The host is a fixture whose environment names stub `agent`, `codex` and `tddy-tools` binaries;
 //! nothing of the real machine resolves.

@@ -9,7 +9,7 @@
 //!
 //! The specs are read straight from the embedded files (no registry, no host resolution).
 //!
-//! PRD: `docs/ft/coder/1-WIP/PRD-2026-10-31-headless-cursor-codex-oz-from-specs.md`.
+//! PRD: `docs/ft/coder/changelog/2026-11-03-headless-cursor-codex-oz-from-specs.md`.
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};

@@ -2,8 +2,8 @@
 //! worktree's `.cursor/mcp.json` — are recorded with the conversation, and its close and the
 //! start-up sweep remove what is recorded (`#agent-tools 9/12`).
 //!
-//! PRD: `docs/ft/coder/1-WIP/PRD-2026-10-31-headless-cursor-codex-oz-from-specs.md`;
-//! `docs/dev/todo/2026-10-25-cursor-project-mcp-config-outlives-its-conversation.md`.
+//! PRD: `docs/ft/coder/changelog/2026-11-03-headless-cursor-codex-oz-from-specs.md`;
+//! `docs/dev/changesets/2026-11-03-agent-tools-headless-others.md`.
 
 use std::path::PathBuf;
 
