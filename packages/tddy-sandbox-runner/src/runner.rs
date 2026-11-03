@@ -1902,12 +1902,22 @@ pub(crate) fn finish_runner_run(entry: &str, result: Result<()>) -> Result<()> {
 
 /// Shut the jail's server down shortly after its one process exits, once the output it wrote has
 /// been delivered.
+///
+/// The wait for the exit is a detached thread, not a `spawn_blocking` task: the runtime waits for
+/// its blocking tasks when it shuts down, so one parked on a process that is still running kept the
+/// runner alive — holding the PTY open, so the process never saw a hangup — after its server had
+/// already returned (an stdio host going away, or the runner's task being dropped).
 fn notify_when_the_process_exits(
     done_rx: std::sync::mpsc::Receiver<i32>,
     shutdown_notify: Arc<tokio::sync::Notify>,
 ) {
+    let (exited_tx, exited_rx) = tokio::sync::oneshot::channel::<()>();
+    std::thread::spawn(move || {
+        let _ = done_rx.recv();
+        let _ = exited_tx.send(());
+    });
     tokio::spawn(async move {
-        let _ = tokio::task::spawn_blocking(move || done_rx.recv()).await;
+        let _ = exited_rx.await;
         tokio::time::sleep(Duration::from_millis(300)).await;
         shutdown_notify.notify_one();
     });

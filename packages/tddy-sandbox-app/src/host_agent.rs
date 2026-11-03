@@ -188,7 +188,7 @@ pub fn build_host_agent_argv(args: HostAgentArgs) -> Result<Vec<String>> {
             workdir: host_config_dir.clone(),
             scratch_dir: host_config_dir.clone(),
             mcp_server: Some(McpServerCommand {
-                name: "tddy-tools".to_string(),
+                name: crate::agent_spec::TOOL_SERVER_DEP.to_string(),
                 command: tddy_tools_path,
                 args: vec!["--mcp".to_string()],
                 env: mcp_env,

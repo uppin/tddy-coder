@@ -280,7 +280,7 @@ const DEFAULT_MCP_RUST_LOG: &str = "info,tddy_tools=debug,tddy_discovery=debug";
 /// Prepare sandbox dirs, context, and spawn `sandbox-exec` → `tddy-sandbox-runner --exec-plan`.
 ///
 /// The agent is launched the way the daemon launches one: its argv and slots rendered from its
-/// spec ([`agent_exec_plan_with_env`]), its home, files, secrets, policy and egress lowered from
+/// spec ([`agent_exec_plan_for_jail`]), its home, files, secrets, policy and egress lowered from
 /// its tool definition ([`lower_tool_jail`]), and the runner told to exec the plan. Nothing here
 /// names an agent.
 #[cfg(target_os = "macos")]
@@ -355,7 +355,11 @@ pub async fn spawn_claude_sandbox(params: SpawnParams) -> Result<SpawnedSandbox>
 
     // The one `tddy-tools` the jail holds is the one the agent's MCP registration runs.
     let mut agent: ChosenAgent = params.agent;
-    for dep in agent.deps.iter_mut().filter(|dep| dep.id == "tddy-tools") {
+    for dep in agent
+        .deps
+        .iter_mut()
+        .filter(|dep| dep.id == crate::agent_spec::TOOL_SERVER_DEP)
+    {
         dep.binary = PathBuf::from(&tddy_tools_path);
     }
     let closure: Vec<_> = agent.deps.iter().chain([&agent.tool]).cloned().collect();

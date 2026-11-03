@@ -167,7 +167,7 @@ pub fn choose_agent(id: &str, tddy_home: &Path) -> Result<ChosenAgent, AgentChoi
 }
 
 /// The id of the dep every coding agent reaches its tools through.
-const TOOL_SERVER_DEP: &str = "tddy-tools";
+pub(crate) const TOOL_SERVER_DEP: &str = "tddy-tools";
 
 /// What the session adds to the launch beyond the jail's paths: the roster the agent's tool server
 /// serves and the tools that roster takes away.

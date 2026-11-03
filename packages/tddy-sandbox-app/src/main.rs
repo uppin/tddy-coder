@@ -68,7 +68,7 @@ struct Args {
     #[arg(long, default_value = "claude")]
     agent: String,
 
-    /// Model passed to the in-jail agent (default: the agent's own spec default for `claude`).
+    /// Model passed to the agent (default: the chosen spec's `models.default`).
     #[arg(long)]
     model: Option<String>,
 
