@@ -4,8 +4,12 @@ use std::collections::BTreeMap;
 use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
-use tddy_actions::tool::{ArgvItem, ExtensionOwner, RunSection, ToolDef, Transport};
+use tddy_actions::tool::{
+    render_argv, ArgvItem, ExtensionOwner, ResolvedTool, RunSection, TemplateParams, ToolDef,
+    ToolError, ToolHost, Transport,
+};
 use tddy_agent_backend::adapters::{AcpHooksAdapters, AdapterRegistry, LaunchAdapters};
+use tddy_agent_backend::AcpAgentCommand;
 use thiserror::Error;
 
 use crate::headless::validate_headless;
@@ -228,10 +232,64 @@ impl AcpSection {
     }
 }
 
+/// Why an agent's ACP command cannot be rendered.
+#[derive(Debug, Clone, PartialEq, Eq, Error)]
+pub enum AcpCommandError {
+    #[error("agent {agent} declares no acp section, so it has no ACP command")]
+    NoAcpSection { agent: String },
+    #[error("agent {agent}'s acp command renders no program")]
+    EmptyCommand { agent: String },
+    #[error(transparent)]
+    Render(#[from] ToolError),
+}
+
+/// Whether `def`'s binary was not named by its `binary.env` on `host`: it was found by the `PATH`
+/// search for `binary.command`, as `bunx` is. A `coding_agent.acp.command` that runs a package
+/// through a runner renders `package_runner` from this.
+pub fn package_runner(def: &ToolDef, host: &dyn ToolHost) -> bool {
+    match def.binary.env.as_deref() {
+        Some(var) => host.env_var(var).is_none(),
+        None => true,
+    }
+}
+
 impl CodingAgentSpec {
     /// The agent's ACP declaration, if it has one.
     pub fn acp(&self) -> Option<&AcpSection> {
         self.agent.acp.as_ref()
+    }
+
+    /// The command an ACP launch of this agent runs: its `coding_agent.acp.command` rendered with
+    /// `tool` (the agent's resolved binary) as `{binary}`, `package_runner` and `route_args` bound,
+    /// and the section's own `env`. The first rendered entry is the program.
+    pub fn acp_command(
+        &self,
+        tool: &ResolvedTool,
+        package_runner: bool,
+        route_args: Vec<String>,
+    ) -> Result<AcpAgentCommand, AcpCommandError> {
+        let acp = self.acp().ok_or_else(|| AcpCommandError::NoAcpSection {
+            agent: self.id.clone(),
+        })?;
+        let params = TemplateParams::new()
+            .with_flag("package_runner", package_runner)
+            .with_list("route_args", route_args);
+        let argv = render_argv(&acp.run_section(), tool, &params)?;
+        let (program, args) = argv
+            .split_first()
+            .ok_or_else(|| AcpCommandError::EmptyCommand {
+                agent: self.id.clone(),
+            })?;
+        Ok(AcpAgentCommand {
+            program: PathBuf::from(program),
+            args: args.to_vec(),
+            env: acp
+                .env
+                .iter()
+                .map(|(name, value)| (name.clone(), value.clone()))
+                .collect(),
+            cwd: None,
+        })
     }
 
     /// The MCP slot an ACP launch registers its tool server through: `acp.mcp`, else
