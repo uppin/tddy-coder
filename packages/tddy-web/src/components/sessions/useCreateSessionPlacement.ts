@@ -29,10 +29,16 @@ export function useCreateSessionPlacement({
   daemonInstanceId,
   agentHostInstanceId,
 }: UseCreateSessionPlacementArgs) {
-  const [sandbox, setSandbox] = useState(false);
+  const [sandbox, setSandboxState] = useState(false);
   // Run the claude agent inside a tmux session on the host (docs/ft/daemon/1-WIP/PRD-2026-11-03-claude-cli-in-tmux.md).
   // Exclusive with the sandbox; the Create pane disables the control while the sandbox is on.
   const [runInTmux, setRunInTmux] = useState(false);
+  // Switching the sandbox on clears the tmux choice rather than leaving it set behind a disabled
+  // control: the daemon refuses the pair, and the screen must show what the request will carry.
+  const setSandbox = (on: boolean) => {
+    setSandboxState(on);
+    if (on) setRunInTmux(false);
+  };
   const [managedCodebase, setManagedCodebase] = useState(false);
   // The inverted placement: this session's own checkout inside a `--workspace-tools` jail, with the
   // agent beside it, unconfined and stripped of its native filesystem and shell tools.

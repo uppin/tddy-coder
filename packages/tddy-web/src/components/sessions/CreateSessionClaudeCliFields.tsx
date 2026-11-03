@@ -62,6 +62,8 @@ export function CreateSessionClaudeCliFields({
   placementWithdrawsPermissionBypass,
   sandbox,
   setSandbox,
+  runInTmux,
+  setRunInTmux,
   applyPlacement,
   sandboxedCodebase,
   sandboxedCodebaseUnavailableReason,
@@ -152,6 +154,26 @@ export function CreateSessionClaudeCliFields({
           jailSharesTheFilesystemRoot={jailSharesTheFilesystemRoot}
           applyPlacement={applyPlacement}
         />
+      )}
+
+      {/* Run the agent inside tmux on the host, so its terminal can be attached to from anywhere.
+          The daemon refuses it with the sandbox, so it is disabled while the sandbox is on. Not
+          offered on the project's home session: that start spec does not carry the choice, so a
+          checked box there would be dropped without a word. */}
+      {!placementFixed && (
+        <div>
+          <label className="flex items-center gap-2 text-sm text-muted-foreground">
+            <input
+              data-testid="create-session-tmux-toggle"
+              type="checkbox"
+              className="h-4 w-4 rounded border-input"
+              checked={runInTmux}
+              onChange={(e) => setRunInTmux(e.target.checked)}
+              disabled={sandbox}
+            />
+            Run the agent in tmux
+          </label>
+        </div>
       )}
 
       <div>

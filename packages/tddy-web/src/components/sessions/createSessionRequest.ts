@@ -224,8 +224,9 @@ export function buildStartSessionRequest(
     stackNodeId,
     ...claudeCliAgentChoices(form),
     sandbox,
-    // claude-cli only: the other session types never run in tmux yet, so they send the default.
-    runInTmux: form.runInTmux ?? false,
+    // Only this claude-cli return carries the field: the other session types omit it, which the
+    // proto reads as the default. Never sent together with the sandbox, which the daemon refuses.
+    runInTmux: (form.runInTmux ?? false) && !sandbox,
     managedCodebase,
     // The third placement. Choosing it cleared the two above and the codebase host in the form,
     // so they go out cleared here without being restated — the request says what the screen says.
