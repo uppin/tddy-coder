@@ -19,6 +19,10 @@ pub enum ToolError {
     /// A tool's `deps` names an id no source defines.
     #[error("tool {tool} depends on unknown tool {dep}")]
     UnknownDep { tool: String, dep: String },
+    /// A `binary.sibling_of` names an id that is not one of the tool's `deps`, so the binary would
+    /// sit beside a dep that is never resolved beside it.
+    #[error("tool {tool} sits beside {dep}, which is not one of its deps")]
+    SiblingNotDep { tool: String, dep: String },
     /// The deps form a cycle, listed in order and closed on its first id.
     #[error("tool dependency cycle: {}", cycle.join(" → "))]
     DepCycle { cycle: Vec<String> },
