@@ -95,4 +95,49 @@ describe("CreateSession run-in-tmux option", () => {
     // Then
     byTestId(TEST_IDS.createSessionTmuxToggle).should("be.disabled");
   });
+
+  const everyCliHarnessType = [
+    { sessionType: "cursor-cli", button: TEST_IDS.createSessionTypeCursorCliBtn },
+    { sessionType: "opencode-cli", button: TEST_IDS.createSessionTypeOpenCodeCliBtn },
+    { sessionType: "muse-cli", button: TEST_IDS.createSessionTypeMuseCliBtn },
+    { sessionType: "warp-cli", button: TEST_IDS.createSessionTypeWarpCliBtn },
+  ];
+
+  it('the Create pane offers "Run the agent in tmux" for every CLI harness type', () => {
+    // Given
+    mountCreatePane(aCreateSessionBackend());
+
+    everyCliHarnessType.forEach(({ button }) => {
+      // When
+      byTestId(button).click();
+
+      // Then
+      byTestId(TEST_IDS.createSessionTmuxToggle).should("be.visible");
+      cy.contains("Run the agent in tmux").should("be.visible");
+    });
+  });
+
+  everyCliHarnessType
+    .filter(({ sessionType }) => ["opencode-cli", "muse-cli", "warp-cli"].includes(sessionType))
+    .forEach(({ sessionType, button }) => {
+      it(`${sessionType} sends run_in_tmux when checked`, () => {
+        // Given
+        const backend = aCreateSessionBackend();
+        mountCreatePane(backend);
+
+        // When
+        byTestId(button).click();
+        byTestId(TEST_IDS.createSessionProjectSelect).select("proj-1");
+        byTestId(TEST_IDS.createSessionTmuxToggle).check();
+        byTestId(TEST_IDS.createSessionSubmitBtn).should("not.be.disabled").click();
+
+        // Then
+        cy.wrap(null).should(() => {
+          const calls = backend.callsTo(SessionService.method.startSession);
+          expect(calls).to.have.length(1);
+          expect(calls[0].sessionType).to.eq(sessionType);
+          expect(calls[0].runInTmux).to.eq(true);
+        });
+      });
+    });
 });

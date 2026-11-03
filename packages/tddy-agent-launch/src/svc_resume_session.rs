@@ -248,6 +248,7 @@ impl LaunchSessions {
         crate::cursor_cli_spawn::resume_cursor_cli_session(
             &self.claude_cli_manager,
             &self.config,
+            os_user,
             &req.session_id,
             session_dir,
             metadata,

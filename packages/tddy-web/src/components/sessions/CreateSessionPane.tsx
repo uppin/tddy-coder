@@ -1,4 +1,5 @@
 import React, { useMemo, useState } from "react";
+import { CreateSessionRunInTmuxToggle } from "./CreateSessionRunInTmuxToggle";
 import { projectSelectOptions } from "../../lib/projectSelectOptions";
 import type { BaseBranchOption } from "./prstack/baseBranchChoice";
 import type { BranchWorktreeIntent } from "../../lib/branchConflict";
@@ -377,6 +378,18 @@ export function CreateSessionPane({
           recipe={recipe}
           setRecipe={setRecipe}
           semanticIndex={semanticIndex}
+        />
+      )}
+
+      {/* "Run the agent in tmux": every CLI harness type but claude-cli, whose fields own theirs */}
+      {(sessionType === "cursor-cli" ||
+        sessionType === "opencode-cli" ||
+        sessionType === "muse-cli" ||
+        sessionType === "warp-cli") && (
+        <CreateSessionRunInTmuxToggle
+          runInTmux={runInTmux}
+          setRunInTmux={setRunInTmux}
+          sandbox={sandbox}
         />
       )}
 

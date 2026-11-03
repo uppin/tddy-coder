@@ -177,6 +177,9 @@ mod tmux_main;
 mod tmux_reattach;
 pub use tmux_reattach::{classify_main_exit, MainExit};
 
+mod tmux_exit_hook;
+pub use tmux_exit_hook::exit_hook_capture;
+
 mod relaunch;
 
 mod launch;

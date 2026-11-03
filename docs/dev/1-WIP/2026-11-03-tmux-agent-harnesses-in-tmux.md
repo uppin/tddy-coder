@@ -4,7 +4,7 @@
 **Status:** 🚧 In Progress
 **Type:** Feature
 **Complexity**: 4 — four harnesses' start/resume, cursor's identity switch in tmux mode, exit-hook source for tmux-run mains (remain-on-exit + capture-pane for Warp's token), web request/pane changes
-**Stack:** `#tmux-agent 3/3` — branch `feature/tmux-agent/harnesses-in-tmux`, base `feature/tmux-agent/tmux-resume`
+**Stack:** `#tmux-agent 3/3` — **PR:** [#816](https://github.com/uppin/tddy-coder/pull/816) — branch `feature/tmux-agent/harnesses-in-tmux`, base `feature/tmux-agent/tmux-resume`
 **PRD:** [PRD-2026-11-03-harnesses-in-tmux.md](../../ft/daemon/1-WIP/PRD-2026-11-03-harnesses-in-tmux.md)
 
 ## Initial Discovery
@@ -76,18 +76,18 @@ Real dependency edges: `n1 → n2 → n3`, `n1 → n3`
 ### Acceptance tests
 
 **`tddy-session-lifecycle`**: `packages/tddy-session-lifecycle/tests/cli_harness_tmux_acceptance.rs` (private tmux, stub harness binaries via `cli_harnesses.<type>.binary_path`, serial)
-- [ ] `each_cli_harness_starts_in_tmux_as_the_session_os_user`
-- [ ] `each_cli_harness_resumes_in_a_fresh_tmux_session_with_its_resume_argv`
-- [ ] `a_live_tmux_run_harness_session_is_reattached_on_resume`
-- [ ] `a_warp_session_in_tmux_records_its_resume_token_from_the_final_screen`
-- [ ] `a_client_exit_does_not_run_a_harness_exit_hook`
+- [x] `each_cli_harness_starts_in_tmux_as_the_session_os_user`
+- [x] `each_cli_harness_resumes_in_a_fresh_tmux_session_with_its_resume_argv`
+- [x] `a_live_tmux_run_harness_session_is_reattached_on_resume`
+- [x] `a_warp_session_in_tmux_records_its_resume_token_from_the_final_screen`
+- [x] `a_client_exit_does_not_run_a_harness_exit_hook`
 
 **`tddy-web`**: `packages/tddy-web/cypress/component/CreateSessionRunInTmuxAcceptance.cy.tsx` (extended)
-- [ ] `the Create pane offers "Run the agent in tmux" for every CLI harness type`
-- [ ] `opencode, muse and warp send run_in_tmux when checked`
+- [x] `the Create pane offers "Run the agent in tmux" for every CLI harness type`
+- [x] `opencode, muse and warp send run_in_tmux when checked` (one case per type: `opencode-cli|muse-cli|warp-cli sends run_in_tmux when checked`)
 
 ### Unit / integration tests
-- [ ] `tddy-cli-sessions`: `start_agent_tmux_session` with `remain_on_exit` sets the option; exit-hook source reads `capture-pane` on agent exit only.
+- [x] `tddy-cli-sessions`: `remain_on_exit_args` / `capture_pane_args` arg shape (unit, `tmux.rs`); `exit_hook_capture` reads the pane on agent exit only (`tests/tmux_exit_hook.rs`) — red on stubs.
 
 ## Decisions & Trade-offs
 
@@ -100,10 +100,10 @@ Real dependency edges: `n1 → n2 → n3`, `n1 → n3`
 - [x] Cross-check `packages/*/docs/code-issues/` and `docs/dev/todo/` for items this change touches (Step 2b)
 - [x] Create/update PRD documentation
 - [x] Create changeset (this document)
-- [ ] Create failing acceptance tests
-- [ ] Run acceptance tests (verify they fail)
-- [ ] USER REVIEW — acceptance tests
-- [ ] TDD Red — write failing unit/integration tests
+- [x] Create failing acceptance tests
+- [x] Run acceptance tests (verify they fail) — web and cli-sessions run red; lifecycle compile-checked only, red on n1/n2 stubs
+- [x] USER REVIEW — acceptance tests — waived by the developer 2026-11-03 (reviewed with the stack at the end)
+- [x] TDD Red — write failing unit/integration tests
 - [ ] TDD Green — implement with quality code
 - [ ] Update documentation with progress
 - [ ] Repeat Red→Green→Update cycle until feature complete
@@ -120,6 +120,12 @@ Real dependency edges: `n1 → n2 → n3`, `n1 → n3`
 - [ ] Final validation (/validate-changes)
 - [ ] Linting and formatting (`cargo clippy -p {package} -- -D warnings`, `cargo fmt`)
 - [ ] USER REVIEW — scope developed, every gap approved: ready to wrap
+
+## Baseline before green
+
+Scoped to `tddy-cli-sessions`, `tddy-agent-launch`, `tddy-session-lifecycle` (`cargo check --all-targets` and `cargo clippy --all-targets -- -D warnings` clean on the rebased tree). Red, run: `tddy-cli-sessions` 2 unit tests (`tmux.rs`) + 2 in `tests/tmux_exit_hook.rs`, all failing on `unimplemented!`; `CreateSessionRunInTmuxAcceptance.cy.tsx` 7 of 7 failing — the toggle is not rendered (n1's 3 cases are red on n1's stub, the 4 new ones on this node's). Red, **not run** (heavy test link, shared disk): the five `cli_harness_tmux_acceptance` tests — compile-checked; every one starts through n1's launcher, and resumes through n2's re-attach, so they stay red until n1 and n2 are green (this node is wave 3). Not run: the rest of the workspace (CI's).
+
+Surface published: `remain_on_exit: bool` on `start_agent_tmux_session` (n1's function is still a stub, so it has no callers to update — n1's launcher passes `false`, this node's `cli_harness_tmux` passes `on_exit.is_some()`); `tddy-agent-launch::cli_harness_tmux` (`start_harness_in_tmux`, `resume_harness_in_tmux`) wired into the generic harness `launch` and cursor start/resume; `tddy-cli-sessions` `remain_on_exit_args`, `capture_pane_args`, `capture_final_screen`, `exit_hook_capture`, `CliSessionManager::run_exit_hook_on_agent_exit`; web `CreateSessionRunInTmuxToggle` (stub, rendered for cursor/opencode/muse/warp) and `createSessionRequest.ts` sending `runInTmux` for them. The claude-cli toggle is still n1's to render; the green phase should unify the two.
 
 ## Refactoring Needed
 ### From /red (TDD red phase)

@@ -95,6 +95,8 @@ pub async fn spawn_cursor_cli_session_inner(
         // starts under the checkout's own identity.
         &SessionAccountAccess::none(),
         &AttachmentProgressSink::discarding(),
+        // A caller of this entry point runs the agent as the PTY child.
+        false,
     )
     .await
 }
@@ -148,6 +150,9 @@ pub(crate) async fn spawn_cursor_cli_session_reporting(
     account_access: &SessionAccountAccess,
     // Where the start's phases (worktree, semantic index, agent) are announced.
     progress: &AttachmentProgressSink,
+    // Run the agent inside a tmux session as the session's OS user
+    // (`StartSessionRequest.run_in_tmux`, `#tmux-agent` 3/3).
+    run_in_tmux: bool,
 ) -> Result<Response<StartSessionResponse>, Status> {
     if model.trim().is_empty() {
         return Err(Status::invalid_argument(
@@ -265,7 +270,7 @@ pub(crate) async fn spawn_cursor_cli_session_reporting(
     // `.session.yaml` below, and passed as `--resume <id>` on every later spawn so a resume
     // continues this chat instead of opening a new one.
     progress.begin_phase(StartStep::Agent);
-    let (cursor_chat_id, handle) = spawn_cursor_cli_process(
+    let (cursor_chat_id, launched) = spawn_cursor_cli_process(
         cli_manager,
         session_id,
         model,
@@ -273,11 +278,12 @@ pub(crate) async fn spawn_cursor_cli_session_reporting(
         binary_path,
         initial_prompt_opt,
         session_env,
+        run_in_tmux.then_some(os_user),
     )
     .await?;
     progress.end_phase(StartStep::Agent);
 
-    let pid = handle.pid;
+    let pid = launched.pid;
     write_cursor_cli_session_metadata(CursorCliSessionRecord {
         session_id,
         model,
@@ -290,6 +296,7 @@ pub(crate) async fn spawn_cursor_cli_session_reporting(
         hook_token,
         cursor_chat_id,
         pid,
+        tmux_session: launched.tmux_session,
     })?;
     // The roster naming them is on disk now, so the clones belong to the session rather than to the
     // start that claimed them.
@@ -338,6 +345,7 @@ fn prepare_cursor_cli_launch(
     (binary_path, initial_prompt_opt)
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn spawn_cursor_cli_process(
     cli_manager: &Arc<CliSessionManager>,
     session_id: &str,
@@ -346,13 +354,10 @@ async fn spawn_cursor_cli_process(
     binary_path: String,
     initial_prompt_opt: Option<String>,
     session_env: Vec<(String, String)>,
-) -> Result<
-    (
-        String,
-        Arc<tddy_cli_sessions::cli_session_manager::pty_handle::PtyHandle>,
-    ),
-    Status,
-> {
+    // The session's OS user when the agent runs in tmux (as that user); `None` runs it as the PTY
+    // child, as the daemon.
+    tmux_os_user: Option<&str>,
+) -> Result<(String, LaunchedCursor), Status> {
     let cursor_chat_id = chat::mint_cursor_chat_id(&binary_path, worktree_path)
         .await
         .map_err(|e| {
@@ -360,6 +365,33 @@ async fn spawn_cursor_cli_process(
                 "failed to create the Cursor chat for session {session_id}: {e}"
             ))
         })?;
+    if let Some(os_user) = tmux_os_user {
+        let launched = crate::cli_harness_tmux::start_harness_in_tmux(
+            cli_manager,
+            crate::cli_harness_tmux::HarnessTmuxLaunch {
+                os_user,
+                session_id,
+                worktree_path: worktree_path.to_path_buf(),
+                kind: "cursor-cli",
+                argv: CliSessionManager::build_cursor_argv(
+                    &binary_path,
+                    model,
+                    Some(&cursor_chat_id),
+                    initial_prompt_opt.as_deref(),
+                ),
+                env: session_env,
+                on_exit: None,
+            },
+        )
+        .await?;
+        return Ok((
+            cursor_chat_id,
+            LaunchedCursor {
+                pid: launched.pane_pid,
+                tmux_session: Some(launched.tmux_session),
+            },
+        ));
+    }
     let handle = cli_manager
         .start_cursor(
             session_id,
@@ -372,7 +404,19 @@ async fn spawn_cursor_cli_process(
         )
         .await
         .map_err(|e| Status::internal(format!("failed to spawn cursor-cli: {}", e)))?;
-    Ok((cursor_chat_id, handle))
+    Ok((
+        cursor_chat_id,
+        LaunchedCursor {
+            pid: handle.pid,
+            tmux_session: None,
+        },
+    ))
+}
+
+/// A started cursor-cli agent: the pid the session records, and the tmux session it runs in.
+pub(crate) struct LaunchedCursor {
+    pub(crate) pid: u32,
+    pub(crate) tmux_session: Option<String>,
 }
 
 /// What a started cursor-cli session's `.session.yaml` records.
@@ -388,6 +432,8 @@ struct CursorCliSessionRecord<'a> {
     hook_token: String,
     cursor_chat_id: String,
     pid: u32,
+    /// The tmux session the agent runs in, when it was started with `run_in_tmux`.
+    tmux_session: Option<String>,
 }
 
 fn write_cursor_cli_session_metadata(launch: CursorCliSessionRecord<'_>) -> Result<(), Status> {
@@ -403,10 +449,12 @@ fn write_cursor_cli_session_metadata(launch: CursorCliSessionRecord<'_>) -> Resu
         hook_token,
         cursor_chat_id,
         pid,
+        tmux_session,
     } = launch;
     let meta = SessionMetadata {
         repo_path: Some(worktree_path.to_string_lossy().to_string()),
         pid: Some(pid),
+        tmux_session,
         model: Some(model.to_string()),
         cursor_chat_id: Some(cursor_chat_id),
         harness_resume_token: None,

@@ -52,7 +52,7 @@ export interface CreateSessionFormValues {
   placementWithdrawsPermissionBypass: boolean;
   initialPrompt: string;
   sandbox: boolean;
-  /** Run the claude agent inside tmux on the host. Sent as `run_in_tmux` for claude-cli only. */
+  /** Run the agent inside tmux on the host. Sent as `run_in_tmux` for every CLI harness type. */
   runInTmux?: boolean;
   managedCodebase: boolean;
   sandboxedCodebase: boolean;
@@ -168,6 +168,7 @@ export function buildStartSessionRequest(
       permissionMode: "",
       initialPrompt,
       sandbox,
+      runInTmux: form.runInTmux ?? false,
       managedCodebase,
       specializedAgents: selectedAgentIds,
       clonePlacedAgents,
@@ -203,6 +204,7 @@ export function buildStartSessionRequest(
       // codebase, specialized agents or semantic index.
       initialPrompt: "",
       sandbox: false,
+      runInTmux: form.runInTmux ?? false,
       managedCodebase: false,
       specializedAgents: [],
       clonePlacedAgents: [],

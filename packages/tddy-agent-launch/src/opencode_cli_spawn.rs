@@ -71,6 +71,9 @@ pub(crate) struct CliHarnessStart<'a> {
     pub account_access: &'a SessionAccountAccess,
     pub route_sources: &'a RouteSources,
     pub progress: &'a AttachmentProgressSink,
+    /// Run the harness inside a tmux session as the session's OS user
+    /// (`StartSessionRequest.run_in_tmux`, `#tmux-agent` 3/3).
+    pub run_in_tmux: bool,
 }
 
 /// The binary `harness` is run as: its environment variable, then
@@ -122,6 +125,7 @@ pub(crate) async fn start_cli_harness_session(
         account_access,
         route_sources,
         progress,
+        run_in_tmux,
     } = start;
     let project_id = project_id.trim();
     let repo_path = repo_path.trim();
@@ -228,12 +232,14 @@ pub(crate) async fn start_cli_harness_session(
         },
         launch_extras(route.unwrap_or_default(), env, token_recorder),
         Some(os_user),
+        HarnessRun::start(run_in_tmux),
     )
     .await?;
     progress.end_phase(StartStep::Agent);
 
     let pid = launched.pid;
     let meta = SessionMetadata {
+        tmux_session: launched.tmux_session,
         repo_path: Some(worktree_path.to_string_lossy().to_string()),
         pid: Some(pid),
         model: Some(model.to_string()).filter(|model| !model.is_empty()),
@@ -363,11 +369,13 @@ async fn resume_cli_harness_session(
         },
         launch_extras(route, git_environment, token_recorder),
         Some(os_user),
+        HarnessRun::resume(meta.tmux_session.is_some()),
     )
     .await?;
 
     let mut updated = meta;
     updated.pid = Some(launched.pid);
+    updated.tmux_session = launched.tmux_session;
     updated.status = "active".to_string();
     updated.updated_at = chrono::Utc::now().to_rfc3339();
     write_session_metadata(session_dir, &updated)
@@ -398,9 +406,41 @@ fn launch_extras(
     }
 }
 
+/// How a harness is run: as the PTY child, or inside tmux — and whether the launch starts the
+/// session's agent or resumes it.
+#[derive(Clone, Copy)]
+struct HarnessRun {
+    in_tmux: bool,
+    resume: bool,
+}
+
+impl HarnessRun {
+    fn start(in_tmux: bool) -> Self {
+        Self {
+            in_tmux,
+            resume: false,
+        }
+    }
+
+    fn resume(in_tmux: bool) -> Self {
+        Self {
+            in_tmux,
+            resume: true,
+        }
+    }
+}
+
+/// A launched harness: the pid the session records, and the tmux session it runs in (if any).
+struct LaunchedHarness {
+    pid: u32,
+    tmux_session: Option<String>,
+}
+
 /// Spawn `harness` with `launch`, followed by `extras`, as `os_user` — the session owner, whose
 /// `HOME` and configured `PATH` extra the child must run under, or its user-local binary and
-/// credentials are never found (a systemd daemon's own `PATH` is minimal).
+/// credentials are never found (a systemd daemon's own `PATH` is minimal). In tmux
+/// (`run.in_tmux`) the harness runs in a session of its own, re-attached on a resume when alive.
+#[allow(clippy::too_many_arguments)]
 async fn launch(
     cli_manager: &Arc<CliSessionManager>,
     harness: &CliHarness,
@@ -409,8 +449,34 @@ async fn launch(
     launch: &CliLaunch<'_>,
     extras: HarnessLaunchExtras,
     os_user: Option<&str>,
-) -> Result<Arc<tddy_cli_sessions::cli_session_manager::pty_handle::PtyHandle>, Status> {
-    cli_manager
+    run: HarnessRun,
+) -> Result<LaunchedHarness, Status> {
+    if run.in_tmux {
+        let os_user = os_user.ok_or_else(|| {
+            Status::failed_precondition("a tmux-run harness needs the session's OS user")
+        })?;
+        let mut argv = (harness.argv)(launch);
+        argv.extend(extras.args);
+        let tmux_launch = crate::cli_harness_tmux::HarnessTmuxLaunch {
+            os_user,
+            session_id,
+            worktree_path: worktree_path.to_path_buf(),
+            kind: harness.session_type,
+            argv,
+            env: extras.env,
+            on_exit: extras.on_exit,
+        };
+        let launched = if run.resume {
+            crate::cli_harness_tmux::resume_harness_in_tmux(cli_manager, tmux_launch).await?
+        } else {
+            crate::cli_harness_tmux::start_harness_in_tmux(cli_manager, tmux_launch).await?
+        };
+        return Ok(LaunchedHarness {
+            pid: launched.pane_pid,
+            tmux_session: Some(launched.tmux_session),
+        });
+    }
+    let handle = cli_manager
         .launch_cli_harness(
             harness,
             session_id,
@@ -420,5 +486,9 @@ async fn launch(
             os_user,
         )
         .await
-        .map_err(|e| Status::internal(format!("failed to spawn {}: {e}", harness.session_type)))
+        .map_err(|e| Status::internal(format!("failed to spawn {}: {e}", harness.session_type)))?;
+    Ok(LaunchedHarness {
+        pid: handle.pid,
+        tmux_session: None,
+    })
 }

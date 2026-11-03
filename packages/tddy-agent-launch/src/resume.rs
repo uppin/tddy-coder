@@ -24,6 +24,8 @@ use std::sync::Arc;
 pub async fn resume_cursor_cli_session(
     cli_manager: &Arc<CliSessionManager>,
     config: &DaemonConfig,
+    // The session's OS user: a tmux-run cursor resumes as this user.
+    os_user: &str,
     session_id: &str,
     session_dir: &Path,
     meta: SessionMetadata,
@@ -71,20 +73,44 @@ pub async fn resume_cursor_cli_session(
         }
     };
 
-    let handle = cli_manager
-        .resume_cursor(
-            session_id,
-            worktree_path.clone(),
-            &model,
-            &binary_path,
-            Some(&chat_id),
-            git_environment,
+    let (pid, tmux_session) = if meta.tmux_session.is_some() {
+        // A tmux-run session is re-attached when its tmux session is alive, else started fresh,
+        // as the session's OS user (`#tmux-agent` 3/3).
+        let launched = crate::cli_harness_tmux::resume_harness_in_tmux(
+            cli_manager,
+            crate::cli_harness_tmux::HarnessTmuxLaunch {
+                os_user,
+                session_id,
+                worktree_path: worktree_path.clone(),
+                kind: "cursor-cli",
+                argv: CliSessionManager::build_cursor_argv(
+                    &binary_path,
+                    &model,
+                    Some(&chat_id),
+                    None,
+                ),
+                env: git_environment,
+                on_exit: None,
+            },
         )
-        .await
-        .map_err(|e| Status::internal(format!("failed to resume cursor-cli: {}", e)))?;
-
-    let pid = handle.pid;
+        .await?;
+        (launched.pane_pid, Some(launched.tmux_session))
+    } else {
+        let handle = cli_manager
+            .resume_cursor(
+                session_id,
+                worktree_path.clone(),
+                &model,
+                &binary_path,
+                Some(&chat_id),
+                git_environment,
+            )
+            .await
+            .map_err(|e| Status::internal(format!("failed to resume cursor-cli: {}", e)))?;
+        (handle.pid, None)
+    };
     let mut updated = meta;
+    updated.tmux_session = tmux_session;
     updated.cursor_chat_id = Some(chat_id);
     updated.pid = Some(pid);
     updated.status = "active".to_string();

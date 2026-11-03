@@ -269,6 +269,7 @@ impl LaunchSessions {
             &clones,
             &self.host.session_account_access(&req.session_token),
             progress,
+            req.run_in_tmux,
         )
         .await
     }
@@ -357,6 +358,7 @@ impl LaunchSessions {
                 account_access: &self.host.session_account_access(&req.session_token),
                 route_sources: &route_sources,
                 progress,
+                run_in_tmux: req.run_in_tmux,
             },
         )
         .await

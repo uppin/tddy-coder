@@ -242,6 +242,10 @@ pub fn agent_new_session_args(name: &str, worktree: &Path, command: &[String]) -
 /// `env` on top — is written to a `0600` file under `session_dir` that the pane sources, deletes and
 /// replaces with `argv` ([`pane_env`]). No value is on tmux's argv. A start that fails removes the
 /// file itself.
+///
+/// `remain_on_exit` keeps the pane — dead, with its final screen — after the agent exits, so an
+/// exit hook can read it with [`capture_final_screen`] (`#tmux-agent` 3/3); the hook's owner then
+/// ends the session with [`kill_tmux_session`].
 pub fn start_agent_tmux_session(
     os_user: &str,
     name: &str,
@@ -249,6 +253,7 @@ pub fn start_agent_tmux_session(
     session_dir: &Path,
     env: &[(String, String)],
     argv: &[String],
+    remain_on_exit: bool,
 ) -> Result<u32, TmuxError> {
     let account = resolve_pty_os_user(os_user).map_err(TmuxError::new)?;
     let owner = (EffectiveIdentity::current().uid != account.uid).then_some(PaneEnvOwner {
@@ -271,7 +276,55 @@ pub fn start_agent_tmux_session(
         remove_pane_env_file(&env_file);
         return Err(error);
     }
+    if remain_on_exit {
+        keep_pane_after_exit(os_user, name)?;
+    }
     pane_pid(os_user, name)
+}
+
+/// Set `remain-on-exit` on session `name`, and if that fails, end the session: a start that reports
+/// an error must not leave an agent running that its caller believes never started.
+fn keep_pane_after_exit(os_user: &str, name: &str) -> Result<(), TmuxError> {
+    let args = remain_on_exit_args(name);
+    let set = run_tmux_as_user(os_user, &args).and_then(|output| {
+        if output.status.success() {
+            Ok(())
+        } else {
+            Err(TmuxError::new(format!(
+                "tmux could not keep the pane of session {name:?} after exit: {}",
+                stderr_of(&output)
+            )))
+        }
+    });
+    if let Err(error) = set {
+        let _ = kill_tmux_session(os_user, name);
+        return Err(error);
+    }
+    Ok(())
+}
+
+/// The arguments of `tmux set-option` that keep session `name`'s pane after its process exits:
+/// `set-option -t =<name> remain-on-exit on` (`=` stops tmux matching a prefix).
+pub fn remain_on_exit_args(name: &str) -> Vec<String> {
+    // TODO(harnesses-in-tmux): implement
+    let _ = name;
+    unimplemented!("TODO(harnesses-in-tmux): remain_on_exit_args")
+}
+
+/// The arguments of `tmux capture-pane` that print session `name`'s pane with its whole scrollback:
+/// `capture-pane -p -S - -t =<name>`.
+pub fn capture_pane_args(name: &str) -> Vec<String> {
+    // TODO(harnesses-in-tmux): implement
+    let _ = name;
+    unimplemented!("TODO(harnesses-in-tmux): capture_pane_args")
+}
+
+/// The final screen of the dead pane of `os_user`'s tmux session `name` — everything the agent
+/// printed, scrollback included. The exit-hook source of a tmux-run main.
+pub fn capture_final_screen(os_user: &str, name: &str) -> Result<String, TmuxError> {
+    // TODO(harnesses-in-tmux): implement
+    let _ = (os_user, name);
+    unimplemented!("TODO(harnesses-in-tmux): capture_final_screen")
 }
 
 /// Kill the tmux session `name` of `os_user`, and with it the agent running in it. Killing a
@@ -395,6 +448,22 @@ fn pane_environment(account: &ResolvedPtyUser, env: &[(String, String)]) -> Vec<
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn remain_on_exit_is_set_on_exactly_the_named_session() {
+        assert_eq!(
+            remain_on_exit_args("tddy-1234abcd"),
+            vec!["set-option", "-t", "=tddy-1234abcd", "remain-on-exit", "on"]
+        );
+    }
+
+    #[test]
+    fn the_final_screen_is_the_whole_scrollback_of_exactly_the_named_session() {
+        assert_eq!(
+            capture_pane_args("tddy-1234abcd"),
+            vec!["capture-pane", "-p", "-S", "-", "-t", "=tddy-1234abcd"]
+        );
+    }
 
     #[test]
     fn the_listing_reads_name_windows_and_attached_clients_per_line() {
