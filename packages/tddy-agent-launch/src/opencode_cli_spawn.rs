@@ -222,12 +222,7 @@ pub(crate) async fn start_cli_harness_session(
     let launched = launch(
         cli_manager,
         harness,
-        HarnessSession {
-            session_id,
-            worktree_path: &worktree_path,
-            session_dir: &session_dir,
-            os_user,
-        },
+        HarnessSession::new(session_id, &worktree_path, &session_dir, os_user),
         &CliLaunch {
             binary: &binary,
             model: launch_model,
@@ -373,12 +368,7 @@ async fn resume_cli_harness_session(
     let launched = launch(
         cli_manager,
         harness,
-        HarnessSession {
-            session_id,
-            worktree_path: &worktree_path,
-            session_dir,
-            os_user,
-        },
+        HarnessSession::new(session_id, &worktree_path, session_dir, os_user),
         &CliLaunch {
             binary: &binary,
             conversation_id: meta.harness_resume_token.as_deref(),

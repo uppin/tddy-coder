@@ -192,6 +192,16 @@ impl CliSessionManager {
         task_ids
     }
 
+    /// Stop every watcher of a tmux-run agent — detached and exit-hook alike — and start no more:
+    /// the agents outlive the daemon, and the next daemon's re-attach watches them again.
+    async fn close_tmux_watchers(&self) {
+        self.detached_watchers.write().await.close();
+        self.exit_hook_watched
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .close();
+    }
+
     /// Stop all tracked PTY processes across every session: cancel each task (see
     /// [`Self::drain_terminals`]), wait up to 5 s, then SIGKILL any child PIDs that remain. Clears
     /// the terminal index on completion. A tmux-run agent's tmux session is left running.
@@ -201,13 +211,7 @@ impl CliSessionManager {
     pub async fn kill_all(&self) {
         // Closed before the clients are cancelled: each cancelled tmux-run main exits as a client
         // only, and a watcher started for it now would outlive the shutdown.
-        self.detached_watchers.write().await.close();
-        // The same for the exit-hook watchers: the agent outlives the daemon, and the next
-        // daemon's re-attach watches it again.
-        self.exit_hook_watched
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .close();
+        self.close_tmux_watchers().await;
         let task_ids = self.drain_terminals().await;
         if task_ids.is_empty() {
             log::debug!(

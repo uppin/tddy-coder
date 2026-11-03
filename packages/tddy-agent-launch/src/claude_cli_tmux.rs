@@ -288,43 +288,19 @@ pub async fn reattach_recorded_main(
     }
     let worktree_path =
         tddy_core::repo_root_for_session(&session_dir).unwrap_or_else(|| session_dir.clone());
-    let reattached = match meta.session_type.as_deref().unwrap_or("claude-cli") {
-        "claude-cli" => {
-            let launch = ClaudeCliTmuxLaunch {
-                os_user,
-                session_id,
-                worktree_path,
-                resume: true,
-                ..Default::default()
-            };
-            match reattach_claude_in_tmux(manager, launch).await {
-                Ok(_) => {
-                    crate::claude_cli_spawn::record_main_terminal(
-                        manager,
-                        tddy_data_dir,
-                        session_id,
-                    )
-                    .await;
-                    Ok(true)
-                }
-                Err(error) => Err(error),
-            }
-        }
+    let recorded = crate::cli_harness_tmux::RecordedHarness {
+        os_user,
+        session_id,
+        session_type: meta.session_type.as_deref().unwrap_or("claude-cli"),
+        worktree_path,
+        session_dir: &session_dir,
+    };
+    let reattached = if recorded.session_type == "claude-cli" {
+        reattach_recorded_claude(manager, tddy_data_dir, recorded).await
+    } else {
         // Every other CLI harness re-attaches through its own tmux path, which watches its
         // agent's exit again (`#tmux-agent` 3/3).
-        session_type => {
-            crate::cli_harness_tmux::reattach_recorded_harness(
-                manager,
-                crate::cli_harness_tmux::RecordedHarness {
-                    os_user,
-                    session_id,
-                    session_type,
-                    worktree_path,
-                    session_dir: &session_dir,
-                },
-            )
-            .await
-        }
+        crate::cli_harness_tmux::reattach_recorded_harness(manager, recorded).await
     };
     match reattached {
         Ok(attached) => attached,
@@ -337,6 +313,26 @@ pub async fn reattach_recorded_main(
             false
         }
     }
+}
+
+/// [`reattach_claude_in_tmux`] for a recorded claude-cli session, registering its main recording
+/// as a start registers it.
+async fn reattach_recorded_claude(
+    manager: &CliSessionManager,
+    tddy_data_dir: &Path,
+    recorded: crate::cli_harness_tmux::RecordedHarness<'_>,
+) -> Result<bool, Status> {
+    let launch = ClaudeCliTmuxLaunch {
+        os_user: recorded.os_user,
+        session_id: recorded.session_id,
+        worktree_path: recorded.worktree_path,
+        resume: true,
+        ..Default::default()
+    };
+    reattach_claude_in_tmux(manager, launch).await?;
+    crate::claude_cli_spawn::record_main_terminal(manager, tddy_data_dir, recorded.session_id)
+        .await;
+    Ok(true)
 }
 
 /// Relaunch a resumed claude-cli agent and return the pid to record. A session that ran in tmux

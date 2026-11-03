@@ -56,12 +56,28 @@ pub(super) struct LaunchedHarness {
 
 /// The session a harness is launched for.
 pub(super) struct HarnessSession<'a> {
-    pub(super) session_id: &'a str,
-    pub(super) worktree_path: &'a Path,
+    session_id: &'a str,
+    worktree_path: &'a Path,
     /// The session's directory, which holds a tmux pane's environment file.
-    pub(super) session_dir: &'a Path,
+    session_dir: &'a Path,
     /// The session owner, whose `HOME` and configured `PATH` extra the child runs under.
-    pub(super) os_user: &'a str,
+    os_user: &'a str,
+}
+
+impl<'a> HarnessSession<'a> {
+    pub(super) fn new(
+        session_id: &'a str,
+        worktree_path: &'a Path,
+        session_dir: &'a Path,
+        os_user: &'a str,
+    ) -> Self {
+        HarnessSession {
+            session_id,
+            worktree_path,
+            session_dir,
+            os_user,
+        }
+    }
 }
 
 /// Spawn `harness` with `launch`, followed by `extras`, as the session's OS user — whose `HOME` and

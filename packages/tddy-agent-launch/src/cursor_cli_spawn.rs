@@ -18,6 +18,7 @@ use tddy_service::proto::session::start_phase::Step as StartStep;
 use tddy_session_files::attachment_progress::AttachmentProgressSink;
 use tddy_worktree_service::branch_intent::{BranchIntentPolicy, BranchIntentRequest};
 
+use crate::cli_harness_tmux::HarnessTmuxLaunch;
 pub use crate::{chat, resume};
 pub use chat::*;
 
@@ -91,11 +92,9 @@ pub async fn spawn_cursor_cli_session_inner(
         create_remote_branch,
         task_registry,
         agent_clones,
-        // A caller of this entry point holds no vault to read an account with, so the session
-        // starts under the checkout's own identity.
+        // No vault (the checkout's own identity) and no tmux run (the agent is the PTY child).
         &SessionAccountAccess::none(),
         &AttachmentProgressSink::discarding(),
-        // A caller of this entry point runs the agent as the PTY child.
         false,
     )
     .await
@@ -150,8 +149,7 @@ pub(crate) async fn spawn_cursor_cli_session_reporting(
     account_access: &SessionAccountAccess,
     // Where the start's phases (worktree, semantic index, agent) are announced.
     progress: &AttachmentProgressSink,
-    // Run the agent inside a tmux session as the session's OS user
-    // (`StartSessionRequest.run_in_tmux`, `#tmux-agent` 3/3).
+    // `StartSessionRequest.run_in_tmux`: run the agent in tmux, as the session's OS user.
     run_in_tmux: bool,
 ) -> Result<Response<StartSessionResponse>, Status> {
     if model.trim().is_empty() {
@@ -385,32 +383,22 @@ async fn spawn_cursor_cli_process(
             ))
         })?;
     if let Some(os_user) = tmux_os_user {
-        let launched = crate::cli_harness_tmux::start_harness_in_tmux(
-            cli_manager,
-            crate::cli_harness_tmux::HarnessTmuxLaunch {
-                os_user,
-                session_id,
-                worktree_path: worktree_path.to_path_buf(),
-                session_dir: session_dir.to_path_buf(),
-                kind: "cursor-cli",
-                argv: CliSessionManager::build_cursor_argv(
-                    &binary_path,
-                    model,
-                    Some(&cursor_chat_id),
-                    initial_prompt_opt.as_deref(),
-                ),
-                env: session_env,
-                on_exit: None,
-            },
-        )
-        .await?;
-        return Ok((
-            cursor_chat_id,
-            LaunchedCursor {
-                pid: launched.pane_pid,
-                tmux_session: Some(launched.tmux_session),
-            },
-        ));
+        let argv = CliSessionManager::build_cursor_argv(
+            &binary_path,
+            model,
+            Some(&cursor_chat_id),
+            initial_prompt_opt.as_deref(),
+        );
+        let launch = HarnessTmuxLaunch::cursor(
+            os_user,
+            session_id,
+            worktree_path,
+            session_dir,
+            argv,
+            session_env,
+        );
+        let launched = crate::cli_harness_tmux::start_harness_in_tmux(cli_manager, launch).await?;
+        return Ok((cursor_chat_id, LaunchedCursor::in_tmux(launched)));
     }
     let handle = cli_manager
         .start_cursor(
@@ -437,6 +425,16 @@ async fn spawn_cursor_cli_process(
 pub(crate) struct LaunchedCursor {
     pub(crate) pid: u32,
     pub(crate) tmux_session: Option<String>,
+}
+
+impl LaunchedCursor {
+    /// An agent run in tmux: the pane's pid, and the tmux session's name.
+    pub(crate) fn in_tmux(launched: crate::cli_harness_tmux::TmuxLaunched) -> Self {
+        LaunchedCursor {
+            pid: launched.pane_pid,
+            tmux_session: Some(launched.tmux_session),
+        }
+    }
 }
 
 /// What a started cursor-cli session's `.session.yaml` records.

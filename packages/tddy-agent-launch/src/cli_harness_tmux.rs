@@ -44,6 +44,30 @@ pub struct HarnessTmuxLaunch<'a> {
     pub on_exit: Option<ExitHook>,
 }
 
+impl<'a> HarnessTmuxLaunch<'a> {
+    /// A cursor-cli agent's launch: `argv` built by `CliSessionManager::build_cursor_argv`, and no
+    /// exit hook, so its pane is not kept after the agent exits.
+    pub fn cursor(
+        os_user: &'a str,
+        session_id: &'a str,
+        worktree_path: &Path,
+        session_dir: &Path,
+        argv: Vec<String>,
+        env: Vec<(String, String)>,
+    ) -> Self {
+        HarnessTmuxLaunch {
+            os_user,
+            session_id,
+            worktree_path: worktree_path.to_path_buf(),
+            session_dir: session_dir.to_path_buf(),
+            kind: "cursor-cli",
+            argv,
+            env,
+            on_exit: None,
+        }
+    }
+}
+
 /// Start the harness in a new tmux session for `launch.session_id` and attach the session's main
 /// terminal to it; with `on_exit`, the hook source is registered
 /// ([`CliSessionManager::run_exit_hook_on_agent_exit`]).

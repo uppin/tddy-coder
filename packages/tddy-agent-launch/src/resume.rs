@@ -1,6 +1,6 @@
 use tddy_core::write_session_metadata;
 
-use crate::cursor_cli_spawn::chat;
+use crate::cursor_cli_spawn::{chat, LaunchedCursor};
 use tddy_daemon_kernel::config::resolve_cursor_binary_path;
 
 use std::path::PathBuf;
@@ -47,71 +47,23 @@ pub async fn resume_cursor_cli_session(
     }
 
     let binary_path = resolve_cursor_binary_path(config);
-    // The chat to reattach to. A session started before chat ids were recorded has no way back to
-    // its original chat, so its first resume adopts a fresh one and pins it below — every later
-    // resume then reattaches instead of starting over again.
-    let chat_id = match meta
-        .cursor_chat_id
-        .as_deref()
-        .map(str::trim)
-        .filter(|id| !id.is_empty())
-    {
-        Some(id) => id.to_string(),
-        None => {
-            let adopted = chat::mint_cursor_chat_id(&binary_path, &worktree_path)
-                .await
-                .map_err(|e| {
-                    Status::internal(format!(
-                        "failed to create the Cursor chat for session {session_id}: {e}"
-                    ))
-                })?;
-            log::info!(
-                target: "tddy_daemon::cursor_cli_spawn",
-                "resume_cursor_cli_session {session_id}: no cursor_chat_id on record; adopted chat {adopted} for this and every later resume"
-            );
-            adopted
-        }
-    };
+    let chat_id = chat_to_resume(&meta, session_id, &binary_path, &worktree_path).await?;
 
-    let (pid, tmux_session) = if meta.tmux_session.is_some() {
-        // A tmux-run session is re-attached when its tmux session is alive, else started fresh,
-        // as the session's OS user (`#tmux-agent` 3/3).
-        let launched = crate::cli_harness_tmux::resume_harness_in_tmux(
-            cli_manager,
-            crate::cli_harness_tmux::HarnessTmuxLaunch {
-                os_user,
-                session_id,
-                worktree_path: worktree_path.clone(),
-                session_dir: session_dir.to_path_buf(),
-                kind: "cursor-cli",
-                argv: CliSessionManager::build_cursor_argv(
-                    &binary_path,
-                    &model,
-                    Some(&chat_id),
-                    None,
-                ),
-                env: git_environment,
-                on_exit: None,
-            },
-        )
-        .await?;
-        (launched.pane_pid, Some(launched.tmux_session))
-    } else {
-        let handle = cli_manager
-            .resume_cursor(
-                session_id,
-                worktree_path.clone(),
-                &model,
-                &binary_path,
-                Some(&chat_id),
-                git_environment,
-            )
-            .await
-            .map_err(|e| Status::internal(format!("failed to resume cursor-cli: {}", e)))?;
-        (handle.pid, None)
-    };
-    let mut updated = meta;
-    updated.tmux_session = tmux_session;
+    let launched = relaunch_cursor(
+        cli_manager,
+        CursorRelaunch {
+            os_user,
+            session_id,
+            session_dir,
+            worktree_path: &worktree_path,
+            argv: (&binary_path, &model, &chat_id),
+            env: git_environment,
+            in_tmux: meta.tmux_session.is_some(),
+        },
+    )
+    .await?;
+    let (pid, mut updated) = (launched.pid, meta);
+    updated.tmux_session = launched.tmux_session;
     updated.cursor_chat_id = Some(chat_id);
     updated.pid = Some(pid);
     updated.status = "active".to_string();
@@ -125,4 +77,86 @@ pub async fn resume_cursor_cli_session(
         livekit_url: String::new(),
         livekit_server_identity: String::new(),
     }))
+}
+
+/// What a resumed cursor-cli agent is relaunched with.
+struct CursorRelaunch<'a> {
+    os_user: &'a str,
+    session_id: &'a str,
+    session_dir: &'a Path,
+    worktree_path: &'a Path,
+    /// The binary, the model and the chat id its argv resumes.
+    argv: (&'a str, &'a str, &'a str),
+    env: Vec<(String, String)>,
+    /// The session ran its agent in tmux.
+    in_tmux: bool,
+}
+
+/// Relaunch a resumed cursor-cli agent: a tmux-run one is re-attached while its tmux session is
+/// alive, else started fresh, as the session's OS user (`#tmux-agent` 3/3); any other is the PTY
+/// child again.
+async fn relaunch_cursor(
+    cli_manager: &CliSessionManager,
+    relaunch: CursorRelaunch<'_>,
+) -> Result<LaunchedCursor, Status> {
+    let (binary_path, model, chat_id) = relaunch.argv;
+    if relaunch.in_tmux {
+        let argv = CliSessionManager::build_cursor_argv(binary_path, model, Some(chat_id), None);
+        let launch = crate::cli_harness_tmux::HarnessTmuxLaunch::cursor(
+            relaunch.os_user,
+            relaunch.session_id,
+            relaunch.worktree_path,
+            relaunch.session_dir,
+            argv,
+            relaunch.env,
+        );
+        let launched = crate::cli_harness_tmux::resume_harness_in_tmux(cli_manager, launch).await?;
+        return Ok(LaunchedCursor::in_tmux(launched));
+    }
+    let handle = cli_manager
+        .resume_cursor(
+            relaunch.session_id,
+            relaunch.worktree_path.to_path_buf(),
+            model,
+            binary_path,
+            Some(chat_id),
+            relaunch.env,
+        )
+        .await
+        .map_err(|e| Status::internal(format!("failed to resume cursor-cli: {}", e)))?;
+    Ok(LaunchedCursor {
+        pid: handle.pid,
+        tmux_session: None,
+    })
+}
+
+/// The chat a resume reattaches to. A session started before chat ids were recorded has no way back
+/// to its original chat, so its first resume adopts a fresh one, which the resume pins — every later
+/// resume then reattaches instead of starting over again.
+async fn chat_to_resume(
+    meta: &SessionMetadata,
+    session_id: &str,
+    binary_path: &str,
+    worktree_path: &Path,
+) -> Result<String, Status> {
+    if let Some(id) = meta
+        .cursor_chat_id
+        .as_deref()
+        .map(str::trim)
+        .filter(|id| !id.is_empty())
+    {
+        return Ok(id.to_string());
+    }
+    let adopted = chat::mint_cursor_chat_id(binary_path, worktree_path)
+        .await
+        .map_err(|e| {
+            Status::internal(format!(
+                "failed to create the Cursor chat for session {session_id}: {e}"
+            ))
+        })?;
+    log::info!(
+        target: "tddy_daemon::cursor_cli_spawn",
+        "resume_cursor_cli_session {session_id}: no cursor_chat_id on record; adopted chat {adopted} for this and every later resume"
+    );
+    Ok(adopted)
 }
