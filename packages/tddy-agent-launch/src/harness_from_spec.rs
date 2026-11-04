@@ -91,8 +91,8 @@ pub(crate) struct CliSessionType {
     /// The id of the spec that launches the session type (`opencode`), interned.
     pub spec_id: &'static str,
     /// The provider harness the session's route is resolved for; `None` for an agent no provider
-    /// route serves (a new agent: `TODO(agent-registry)` — its spec's `route.providers` is not yet
-    /// what routes are built from).
+    /// route serves (a new agent: `TODO(route-support)`, #agent-tools n13 — its spec's `route.providers`
+    /// is not yet what routes are built from).
     pub route: Option<Harness>,
 }
 
@@ -112,8 +112,8 @@ fn interned(name: &str) -> &'static str {
 
 /// The agent id of the one CLI agent whose session has its own bespoke launch path (the hook,
 /// tmux and recipe handling of Claude Code's TUI).
-// TODO(agent-registry): claude and cursor still launch through their own paths, selected here by
-// the spec's id; unifying them with the generic launch removes this
+// TODO(cli-spec-launch): #agent-tools n14 — claude and cursor still launch through their own paths,
+// selected here by the spec's id; unifying them with the generic launch removes this
 // (docs/dev/todo/2026-11-04-claude-and-cursor-launch-by-agent-id.md).
 const CLAUDE_AGENT_ID: &str = "claude";
 /// The agent id of the CLI agent with the Cursor launch path; see [`CLAUDE_AGENT_ID`].
@@ -206,8 +206,9 @@ fn cli_session_spec<'a>(
 /// The binary `spec_id` runs for a `session_type` session: `cli_harnesses.<session type>.binary_path`
 /// after the binary's own environment variable, as the daemon has always read them, when that names a
 /// path. `None` leaves the binary to the spec's own resolution on the host.
-// TODO(agent-registry): `cli_harnesses` is refused at load; only the binary's environment variable
-// is left to read, and the DaemonConfig section goes with the rest of the removal
+// TODO(agent-config-removal): #agent-tools n15 — `cli_harnesses` is refused at load; only the
+// binary's environment variable is left to read, and the DaemonConfig section goes with the rest of
+// the removal
 // (docs/dev/todo/2026-11-04-removed-agent-config-readers-remain.md).
 pub(crate) fn configured_cli_binary(
     agents: &HostCodingAgents,

@@ -1,7 +1,9 @@
 # 2026-11-04 — Claude and Cursor still launch through their own paths, selected by agent id
 
 **Category:** Gap
-**Source:** `#agent-tools` 12/12 (#801), `TODO(agent-registry)` at `packages/tddy-agent-launch/src/harness_from_spec.rs`
+**Owner:** `#agent-tools` n14 `cli-spec-launch` — moved out of #801 by the developer on 2026-11-04, to be planned on top of
+`feature/agent-tools/agent-registry`. Code markers: `TODO(cli-spec-launch)`.
+**Source:** `#agent-tools` 12/12 (#801), `TODO(cli-spec-launch)` at `packages/tddy-agent-launch/src/harness_from_spec.rs`
 (`CLAUDE_AGENT_ID`, `CURSOR_AGENT_ID`)
 
 ## What is there
@@ -18,6 +20,6 @@ paths (`BranchIntentPolicy::claude_cli()` / `cursor_cli()`) is also fixed in Rus
 Fold the two paths into the generic launch (or declare the launcher in the spec) and read
 `branch_name_required` from the spec in every path.
 
-**Changeset ACs left open:** the claude/cursor halves of "every `session_type == "claude-cli"` gate
+**#801 ACs moved to n14:** the claude/cursor halves of "every `session_type == "claude-cli"` gate
 is `spec.has(…)`" for launch dispatch and branch intent (the scan pins comparisons of session-type
 literals only).

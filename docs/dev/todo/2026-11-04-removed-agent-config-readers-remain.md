@@ -1,8 +1,13 @@
 # 2026-11-04 — The daemon.yaml agent sections are refused, but their types and readers remain
 
 **Category:** Deferred removal
-**Source:** `#agent-tools` 12/12 (#801), `TODO(agent-registry)` at `packages/tddy-agent-launch/src/harness_from_spec.rs`,
-`packages/tddy-daemon-kernel/src/config/agent_cli.rs`, `packages/tddy-coder/src/run.rs`
+**Owner:** `#agent-tools` n15 `agent-config-removal` — moved out of #801 by the developer on 2026-11-04, to be planned on top of
+`feature/agent-tools/agent-registry`. Code markers: `TODO(agent-config-removal)`.
+**Source:** `#agent-tools` 12/12 (#801), `TODO(agent-config-removal)` at `packages/tddy-agent-launch/src/harness_from_spec.rs`
+(`configured_cli_binary`), `packages/tddy-agent-backend/src/cli_harness.rs` (`requires_model`),
+`packages/tddy-session-lifecycle/src/test_util.rs` (`daemon_config_from_fixture_file`) and
+`packages/tddy-telegram-control/src/telegram_session_control/chaining_and_listing.rs`; the types are in
+`packages/tddy-daemon-kernel/src/config/agent_cli.rs` and `packages/tddy-coder/src/run.rs`
 
 ## What is there
 
@@ -31,3 +36,13 @@ call site, give `tddy-coder` a spec-plus-adapter backend, and hand the Telegram 
 
 **Changeset ACs left open:** "Removed: `AnyBackend`, `BUILTIN_BACKEND_AGENT_IDS`, the daemon.yaml agent
 sections' types"; `tddy-coder --agent` accepting an arbitrary registry id (the *listing* is done).
+
+## Node n15 scope
+
+- Remove `ClaudeCliConfig`, `CursorCliConfig`, `CliHarnessConfig`, the `DaemonConfig` fields and their readers.
+- Remove `AnyBackend`, `BUILTIN_BACKEND_AGENT_IDS` and `create_backend`; add a generic spec-plus-adapter
+  backend so `tddy-coder --agent <any registry id>` builds (today `backend_agent_ids` lists what could be offered).
+- Wire `coding_agent.answer_wait_secs` at the hook and `AwaitQuestionAnswer` call sites.
+- Migrate the fixtures off `daemon_config_from_fixture_file` (40 files name it on #801's head) and delete it.
+- Restore worktree removal on a Telegram-initiated delete (hand the Telegram controller the registry).
+- Remove the `TDDY_*_CLI` / `TDDY_*_BINARY` overrides a spec's `binary.env` does not name (PRD *Summary*, breaking).

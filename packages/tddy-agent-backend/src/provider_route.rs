@@ -63,8 +63,8 @@ impl Harness {
     }
 
     /// Every harness with the id it is named by.
-    // TODO(agent-registry): the harness enumeration is the registry's to hold (`route.providers`
-    // and `route.shape` of each spec); route bodies are still selected by this enum
+    // TODO(route-support): #agent-tools n13 — the harness enumeration is the registry's to hold
+    // (`route.providers` and `route.shape` of each spec); route bodies are still selected by this enum
     // (docs/dev/todo/2026-11-04-provider-route-harness-enum-remains.md).
     const IDS: [(Harness, &'static str); 11] = [
         (Harness::Claude, "claude"),

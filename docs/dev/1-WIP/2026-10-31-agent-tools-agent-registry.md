@@ -38,16 +38,20 @@ State A below is distilled from that file. Grep traces and file dumps are not re
 ## Responsibility
 
 - `CodingAgentSpec.capabilities: BTreeSet<Capability>`, with `Capability::{Hooks, AskUserQuestion, SplitHost, ProjectHomeMain, RequiresModel, BranchNameRequired, KeepWorktreeOnDelete, OperatorNotify}`.
-- `CodingAgentSpec.route: RouteSupport { providers: Vec<ProviderKind>, shape: RouteShape::{Env, Args, ConfigFile} }`, which replaces `provider_route::Harness`'s matrix.
+- `CodingAgentSpec.route: RouteSupport { providers: Vec<ProviderKind>, shape: RouteShape::{Env, Args, ConfigFile} }`, read from each spec's `route.providers`/`shape` and reported by the agent catalog. Building routes from it, in place of `provider_route::Harness`'s matrix, is n13's (see *Moved to later nodes*).
 - `tddy_coding_agent_specs::CodingAgentRegistry::{all(), get(id), for_session_type(st)}`.
-- Every `session_type == "claude-cli"` or `"cursor-cli"` gate is replaced by `spec.has(Capability::…)`. A source-scan test pins that no gate names an agent.
-- `tddy_daemon_kernel` config refuses `claude_cli`, `cursor_cli` and `cli_harnesses` with `moved to <tddyhome>/tools/<id>.yaml (<field> → <spec field>)`.
+- Every `session_type == "claude-cli"` or `"cursor-cli"` gate is replaced by `spec.has(Capability::…)`. A source-scan test pins that no gate compares a session type with an agent's name. The launch dispatch by agent id (`CLAUDE_AGENT_ID`/`CURSOR_AGENT_ID`) and the claude/cursor branch policies are n14's.
+- `tddy_daemon_kernel` config refuses `claude_cli`, `cursor_cli` and `cli_harnesses` at `DaemonConfig::load` with `moved to <tddyhome>/tools/<id>.yaml (<field> → <spec field>)`. Deleting the config types and their readers is n15's.
+- `coding_agent.answer_wait_secs` declared and read through `CodingAgentSpec::answer_wait_secs`; wiring it into the hook and `AwaitQuestionAnswer` call sites is n15's.
 - `AgentInfo.{kind, harness, route_providers}`, and the web pane asks for routes only where `route_providers` is non-empty.
 
 ## Boundaries
 
 - No spec-editing UI. No new agent.
 - Adapters (the Rust protocol code) stay where they are.
+- The route layer is not rewritten: route bodies are still selected by `provider_route::Harness` (n13).
+- Claude and Cursor keep their own launch paths (n14).
+- The removed daemon.yaml sections' types and readers, `AnyBackend`, `BUILTIN_BACKEND_AGENT_IDS` and `create_backend` stay; `tddy-coder --agent` builds only ids with a backend adapter (n15).
 
 ## Dependencies
 
@@ -61,14 +65,16 @@ implementing one here collides with the PR that owns it.
 
 ## Draft PR contract
 
-The first push publishes `Capability`, `RouteSupport`, `CodingAgentRegistry`, the `AgentInfo` proto fields, the config refusal error type, each spec's `capabilities` lines, the source-scan test, and the failing tests below. Unimplemented bodies are `// TODO(agent-registry): implement`.
+The first push published `Capability`, `RouteSupport`, `CodingAgentRegistry`, the `AgentInfo` proto fields, the config refusal error type, each spec's `capabilities` lines, the source-scan test, and the failing tests below. Unimplemented bodies were `// TODO(agent-registry): implement`; none remain.
+
+The removals the contract named (`AnyBackend`, `provider_route::Harness`, `BUILTIN_BACKEND_AGENT_IDS`, the daemon.yaml agent config types) are **not** part of this PR's delivered contract: the developer moved them to n13–n15 on 2026-11-04 (see *Moved to later nodes*).
 
 ## Green wave
 
 **Wave:** 7 of 7
 **Greenable independently:** after every earlier node is green: the gates and enums it collapses are only fully spec-backed then
 **Concurrent with:** none
-**Blocks:** nothing (top of the stack)
+**Blocks:** n13 `route-support`, n14 `cli-spec-launch`, n15 `agent-config-removal` (planned on top of this node, 2026-11-04)
 
 Real dependency edges, as opposed to the branch line:
 
@@ -99,7 +105,19 @@ Real dependency edges, as opposed to the branch line:
 - `config.example.yaml`, `dev.daemon.yaml`, `desktop.yaml.production`.
 - Docs at wrap: `docs/ft/daemon/session-agent-roster.md`, `harness-profiles.md`, all `*-cli-session.md`; a changelog entry for the breaking change.
 ### Removed
-- `AnyBackend` (replaced by a spec-plus-adapter backend), `provider_route::Harness`, `BUILTIN_BACKEND_AGENT_IDS`, and the daemon.yaml agent sections
+- Nothing here. The planned removals moved to later nodes: `provider_route::Harness` → n13; `AnyBackend`, `BUILTIN_BACKEND_AGENT_IDS`, `create_backend` and the daemon.yaml agent config types → n15. The daemon.yaml agent sections are *refused* at load here.
+
+## Moved to later nodes
+
+Decided by the developer on 2026-11-04, after #801's [G] stage. Each item is out of #801's scope and is that node's to plan and deliver. The markers name the node (`TODO(route-support)`, `TODO(cli-spec-launch)`, `TODO(agent-config-removal)`), and each has a `docs/dev/todo/` entry.
+
+| Item (from Responsibility, Delta or the PRD) | Node | Entry |
+|---|---|---|
+| Move the route types down into `tddy-agent-backend`; remove `provider_route::Harness`; route bodies chosen by `RouteSupport` from `route.providers`, so a dropped-in agent gets a route | n13 `route-support` | [2026-11-04-provider-route-harness-enum-remains.md](../todo/2026-11-04-provider-route-harness-enum-remains.md) |
+| Claude and Cursor launch through the generic spec path: no `CLAUDE_AGENT_ID`/`CURSOR_AGENT_ID` dispatch; branch intent from the spec's `branch_name_required` (the launch-dispatch and branch-intent halves of the "every gate is `spec.has(…)`" AC) | n14 `cli-spec-launch` | [2026-11-04-claude-and-cursor-launch-by-agent-id.md](../todo/2026-11-04-claude-and-cursor-launch-by-agent-id.md) |
+| Remove `ClaudeCliConfig`/`CursorCliConfig`/`CliHarnessConfig`, the `DaemonConfig` fields and their readers; remove `AnyBackend`, `BUILTIN_BACKEND_AGENT_IDS`, `create_backend`; a generic spec-plus-adapter backend so `tddy-coder --agent <any id>` builds (the PRD AC's "accepts any registry id" half); wire `answer_wait_secs` at its call sites; migrate the ~38 fixtures off `daemon_config_from_fixture_file` and delete it; restore worktree removal on a Telegram delete; remove the `TDDY_*` overrides a spec does not name | n15 `agent-config-removal` | [2026-11-04-removed-agent-config-readers-remain.md](../todo/2026-11-04-removed-agent-config-readers-remain.md) |
+
+Not moved, left for the `#agent-tools` sweep node: `spec_for_session_type`'s last caller ([2026-11-04-spec-for-session-type-is-unused.md](../todo/2026-11-04-spec-for-session-type-is-unused.md)).
 
 ## Testing Strategy
 

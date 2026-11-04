@@ -1,7 +1,9 @@
 # 2026-11-04 — `provider_route::Harness` still enumerates the agents a route body is chosen for
 
 **Category:** Deferred removal
-**Source:** `#agent-tools` 12/12 (#801), `TODO(agent-registry)` in
+**Owner:** `#agent-tools` n13 `route-support` — moved out of #801 by the developer on 2026-11-04, to be planned on top of
+`feature/agent-tools/agent-registry`. Code markers: `TODO(route-support)`.
+**Source:** `#agent-tools` 12/12 (#801), `TODO(route-support)` in
 `packages/tddy-agent-backend/src/provider_route.rs` and `packages/tddy-agent-launch/src/session_provider_route.rs`
 
 ## What is there
@@ -29,3 +31,10 @@ Select the route body by `RouteSupport` (`shape` + `providers`), key refusals by
 the two exists nowhere today).
 
 **Changeset ACs left open:** "`RouteSupport` replaces `provider_route::Harness`'s matrix".
+
+## Node n13 scope
+
+Move the route types down into `tddy-agent-backend`, remove `provider_route::Harness`, and let
+`RouteSupport` from each spec's `route.providers`/`shape` decide which route body a start gets, so an
+agent dropped into `<tddyhome>/tools` gets a route. Markers: `harness_from_spec.rs` (`HarnessFromSpec::route`),
+`session_provider_route.rs` (`no_provider_route_serves_the_agent`), `provider_route.rs` (`Harness::IDS`).
