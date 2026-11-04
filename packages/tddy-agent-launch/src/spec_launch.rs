@@ -295,8 +295,54 @@ fn write_slot_file(path: &Path, bytes: &[u8]) -> Result<(), SpecLaunchError> {
     tddy_core::atomic_file::write_atomic(path, bytes).map_err(|e| slot_file(e.to_string()))
 }
 
+/// Write `bytes` to `path` on the SSH target `alias`, creating its directory: the slot file of an
+/// agent whose worktree lives there, not on this host.
+fn write_slot_file_over_ssh(alias: &str, path: &Path, bytes: &[u8]) -> Result<(), SpecLaunchError> {
+    use std::io::Write as _;
+    use tddy_core::ssh_exec::{shell_single_quote, ssh_batch_command};
+    let slot_file = |message: String| SpecLaunchError::SlotFile {
+        path: path.to_path_buf(),
+        message: format!("over ssh to {alias}: {message}"),
+    };
+    let target = path.to_string_lossy();
+    let dir = path
+        .parent()
+        .map(|p| p.to_string_lossy())
+        .unwrap_or_default();
+    let remote = format!(
+        "mkdir -p {} && cat > {}",
+        shell_single_quote(&dir),
+        shell_single_quote(&target)
+    );
+    let mut command = ssh_batch_command(alias, &remote);
+    command
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::piped());
+    let mut child = command.spawn().map_err(|e| slot_file(e.to_string()))?;
+    child
+        .stdin
+        .take()
+        .ok_or_else(|| slot_file("no stdin".to_string()))?
+        .write_all(bytes)
+        .map_err(|e| slot_file(e.to_string()))?;
+    let output = child
+        .wait_with_output()
+        .map_err(|e| slot_file(e.to_string()))?;
+    if output.status.success() {
+        Ok(())
+    } else {
+        Err(slot_file(
+            String::from_utf8_lossy(&output.stderr).trim().to_string(),
+        ))
+    }
+}
+
 /// A `claude-cli` start or resume, as the launch steps before the spawn have settled it.
 pub struct ClaudeCliLaunch<'a> {
+    /// The SSH target the worktree lives on, when the session's checkout is remote: the slot files
+    /// are then written there over ssh, never at that path on this host.
+    pub remote_host: Option<&'a str>,
     pub agents: &'a HostCodingAgents,
     /// Where daemon.yaml `claude_cli.binary_path` is read from.
     pub config: &'a DaemonConfig,
@@ -377,6 +423,11 @@ pub async fn launch_claude_cli(
     )
     .map_err(SpecLaunchError::Slots)?;
     slots.argv_extra.extend(launch.extra_args);
+    if let Some(alias) = launch.remote_host {
+        for (path, bytes) in std::mem::take(&mut slots.files) {
+            write_slot_file_over_ssh(alias, &path, &bytes)?;
+        }
+    }
 
     launch_host_pty(
         &agent,

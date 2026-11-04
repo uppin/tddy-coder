@@ -308,6 +308,7 @@ pub(crate) async fn spawn_claude_cli_session_inner(
             main: role.main,
             run_in_tmux,
             session_dir: session_dir.clone(),
+            ssh_alias: ssh_alias.to_string(),
         },
     )
     .await?;

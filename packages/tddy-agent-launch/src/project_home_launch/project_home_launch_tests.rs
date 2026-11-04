@@ -97,6 +97,7 @@ async fn a_main_launched_from_the_claude_spec_gets_its_tool_flags_and_mcp_file_f
 
     // When
     let handle = launch_claude_cli(ClaudeCliLaunch {
+        remote_host: None,
         agents: &agents,
         config: &config,
         manager: &manager,
