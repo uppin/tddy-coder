@@ -199,7 +199,10 @@ change what the running session's main agent is allowed to call; detaching and r
 A roster entry is one of two **kinds**. A `MODEL` entry is a definition or registry assistant — a
 model behind an endpoint, driven by tddy's own read/grep loop. A `CODING_AGENT` entry is a coding
 agent — Claude Code (`claude-agent-acp`), Codex (`codex-acp`), OpenCode (`opencode acp`) — that the
-daemon launches and talks to over ACP. `SubagentInfo` (the `ListSubagents` row) carries the same
+daemon launches and talks to over ACP. Each ACP launch renders from the agent's tool definition
+(`claude-acp.yaml`, `codex-acp.yaml`, `opencode.yaml`'s `coding_agent.acp`): the command, the MCP
+servers sent with `session/new`, and a managed session's native-tool withdrawal. `codex-acp` resolves
+beside the resolved `codex`, never from `PATH`. `SubagentInfo` (the `ListSubagents` row) carries the same
 `kind` and `harness` (fields 8 and 9).
 
 **What is offered.** `ListSubagents` lists, after the model rows, as `CODING_AGENT` rows:

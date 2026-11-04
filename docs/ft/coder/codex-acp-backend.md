@@ -10,8 +10,8 @@
 ## CLI and configuration
 
 - **`--agent codex-acp`** selects **`CodexAcpBackend`**.
-- **`codex-acp` executable:** resolved like other CLIs—**`TDDY_CODEX_ACP_CLI`**, optional config **`codex_acp_cli_path`**, optional **`--codex-acp-cli-path`**, else the **`codex-acp`** name on **`PATH`** (constant **`DEFAULT_CODEX_ACP_BINARY`**).
-- **OAuth helper:** uses the same **`codex`** binary resolution as **`CodexBackend`** (**`TDDY_CODEX_CLI`**, **`--codex-cli-path`**, config, then **`PATH`**) to run **`codex login`** when ACP **`new_session`** / **`load_session`** fails with an auth-like error and **`session_dir`** is set. That reuses the **`BROWSER`** / **`codex_oauth_authorize.url`** contract documented for headless OAuth (see [Codex OAuth web relay](../web/codex-oauth-web-relay.md)).
+- **`codex-acp` executable:** declared by **`codex-acp.yaml`** (`tddy-coding-agent-specs`), whose `binary.sibling_of: codex` resolves it as **`codex-acp` in the directory of the resolved `codex`** — so a `<tddyhome>/tools/codex.yaml` override that moves `codex` moves `codex-acp` with it. **`TDDY_CODEX_ACP_CLI`**, config **`codex_acp_cli_path`** or **`--codex-acp-cli-path`** name it outright. **`PATH` is not searched for `codex-acp`** (a change in `#agent-tools 11/12`, #800): one absent beside `codex` is refused, naming both.
+- **OAuth helper:** the spec's `codex-acp-login` hooks adapter; it runs the resolved `codex` dep — the same **`codex`** binary resolution as **`CodexBackend`** (**`TDDY_CODEX_CLI`**, **`--codex-cli-path`**, config, then **`PATH`**) to run **`codex login`** when ACP **`new_session`** / **`load_session`** fails with an auth-like error and **`session_dir`** is set. That reuses the **`BROWSER`** / **`codex_oauth_authorize.url`** contract documented for headless OAuth (see [Codex OAuth web relay](../web/codex-oauth-web-relay.md)).
 
 ## Behavior
 

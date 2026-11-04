@@ -29,3 +29,7 @@ The headless launch is one cohesive group (~265 lines) that shares only `CodingA
 ## Measurement update 2026-11-03 — #agent-tools 9/12 (#798)
 
 **Regressed:** 967 → 1036 production lines: every headless harness planned from its spec, and the written-file record. `write_cursor_project_mcp_config`, `mcp_servers_by_name`, `headless_program` and `OZ_BINARY` stay until their deletion is approved (`docs/dev/todo/2026-11-03-headless-others-legacy-argv-deletion.md`). Regressed by #798 (`#agent-tools` 9/12). **Status:** Open — deferred to the #agent-tools sweep node (developer, 2026-11-03).
+
+## Measurement update 2026-11-04 — #agent-tools 11/12 (#800)
+
+**Regressed:** 1036 → 1291 production lines: the ACP launches planned from their specs (`acp_plan_from_spec`, `acp_mcp_servers_from_spec`, `acp_session_meta_from_spec`, the `session_meta_for` override, the inline OpenCode route config). The hand-built ACP path (`harness_command`, `apply_route`, `claude_agent_acp_command`, `opencode_route_config`, `opencode_withdrawal_config`, the ACP constants) stays for launchers built without coding agents (`docs/dev/todo/2026-11-04-acp-hand-built-launch-path-for-agentless-launchers.md`); deleting it is the sweep's first cut here. **Status:** Open — deferred to the #agent-tools sweep node (developer, 2026-11-04).

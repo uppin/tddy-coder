@@ -5,7 +5,7 @@
 //! `codex` dep, so an override that moves `codex` moves it too; and a managed session still refuses
 //! `codex-acp`, whose spec declares `tool_deny: unsupported` (`#agent-tools 11/12`).
 //!
-//! PRD: `docs/ft/coder/1-WIP/PRD-2026-10-31-acp-agents-from-specs.md`.
+//! PRD: `docs/ft/coder/changelog/2026-11-04-acp-agents-from-specs.md`.
 //!
 //! Every agent binary is a shell wrapper on a fixture `ToolHost` that records its argv and the
 //! inline OpenCode config it was handed, then `exec`s `tddy-acp-stub`, which records each

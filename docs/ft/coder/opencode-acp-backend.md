@@ -17,7 +17,8 @@ OpenCode; the interactive OpenCode TUI is the **`opencode-cli`** terminal sessio
   seventh option, **OpenCode**, after every other backend.
 - **Binary:** `--opencode-cli-path`, `TDDY_OPENCODE_CLI`, coder-config `opencode_cli_path`, else
   **`opencode`** on `PATH` (`OpenCodeAcpBackend::DEFAULT_CLI_BINARY`). It is the same binary the
-  `opencode-cli` harness runs, so one override names both.
+  `opencode-cli` harness runs, so one override names both. The command, `opencode acp`, renders
+  from `opencode.yaml`'s `coding_agent.acp` section (`#agent-tools 11/12`, #800).
 - **Models:** the default is **`fireworks/kimi-k2`**, an OpenCode `provider/model` id. `tddy-tools
   list-models --agent opencode [--opencode-cli-path <PATH>]` asks the agent: the models of a new ACP
   session. The daemon's model probe for an `opencode` tool session passes the binary it resolved for
@@ -45,7 +46,7 @@ OpenCode; the interactive OpenCode TUI is the **`opencode-cli`** terminal sessio
 On a provider account the tool session's route file ([provider accounts § Tool
 sessions](../daemon/provider-accounts.md#tool-sessions)) is applied to the agent child:
 
-- The route's generated `opencode.json` is written owner-only (`0600`) into a fresh owner-only
+- The `opencode-route-file` hooks adapter `opencode.yaml` names writes the route's generated `opencode.json` (`0600`) into a fresh owner-only
   (`0700`) directory under the temporary directory, and `OPENCODE_CONFIG` names it. The directory is
   removed when the worker ends. A route file name that is not a bare file name is refused, so no route
   writes outside that directory.

@@ -26,7 +26,7 @@ Product contract: [Sandbox builder § Declared tools](../../../docs/ft/coder/san
 - **Resolve** walks deps depth-first, each tool once, deps before dependents. The first tool the host
   cannot satisfy fails the whole closure. Two tools in one closure with the same `binary.command` are
   `DuplicateCommand`: both would claim one link in the jail's `bin/`.
-- **Binary source** order: a `binary.target` (another `tddy-build` target's output) first — resolved by `ToolHost::target_output`, which only `tddy-build`'s run host answers, so such a tool is `Unresolvable` anywhere else; a target output that is not executable is refused — then the `env` override, then the first `PATH` directory holding `command`.
+- **Binary source** order: a `binary.target` (another `tddy-build` target's output) first — resolved by `ToolHost::target_output`, which only `tddy-build`'s run host answers, so such a tool is `Unresolvable` anywhere else; a target output that is not executable is refused — then the `env` override, then — for a `binary.sibling_of: <dep id>` tool — `command` in the directory of that dep's resolved binary (`resolve_sibling`; absent there is `Unresolvable` naming both, and `PATH` is not searched; the dep must be in `deps`), else the first `PATH` directory holding `command`.
 - **`ProcessToolHost`** drops relative and empty `PATH` entries (they name the daemon's working
   directory). An unset `PATH` is an empty search, reported as `PATH (empty)`, and refuses the tool.
 - **Render** emits one argv entry per literal, with `{name}` replaced and `{binary}` bound to the

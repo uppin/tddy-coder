@@ -227,8 +227,8 @@ pub trait CodingAgentLauncher: Send + Sync {
     /// default today's per-harness answer, [`crate::withdrawal_session_meta`]; a launcher holding
     /// the agent specs answers from them.
     ///
-    /// TODO(acp-agents): `tddy-session-agents`' `start_acp_session` asks this instead of calling
-    /// `withdrawal_session_meta` itself, and green drops the default once every launcher has specs.
+    /// TODO(acp-agents): drop this default once every launcher holds the agent specs (the
+    /// `#agent-tools` sweep; `docs/dev/todo/2026-11-04-acp-hand-built-launch-path-for-agentless-launchers.md`).
     async fn session_meta_for(
         &self,
         launch: &CodingAgentLaunch,

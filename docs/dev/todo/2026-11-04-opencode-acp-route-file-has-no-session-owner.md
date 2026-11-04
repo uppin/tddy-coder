@@ -2,7 +2,7 @@
 
 **Category:** Deferred from `acp-agents` (#800, `#agent-tools 11/12`)
 
-**Source:** `docs/dev/1-WIP/2026-10-31-agent-tools-acp-agents.md`, § Decisions & Trade-offs
+**Source:** `docs/dev/changesets/2026-11-04-agent-tools-acp-agents.md`, § Deferred
 
 ## What remains
 

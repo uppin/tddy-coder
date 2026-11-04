@@ -2,7 +2,7 @@
 
 **Category:** Open decision from `acp-agents` (#800, `#agent-tools 11/12`)
 
-**Source:** `docs/dev/1-WIP/2026-10-31-agent-tools-acp-agents.md`, § Testing Strategy
+**Source:** `docs/dev/changesets/2026-11-04-agent-tools-acp-agents.md`, § Decisions
 (`an_unknown_agent_id_is_refused_naming_the_registry_ids`)
 
 ## What remains

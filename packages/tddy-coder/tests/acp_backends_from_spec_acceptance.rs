@@ -4,7 +4,7 @@
 //! command its hand-built constructor spawns today — `bunx claude-agent-acp`, `codex-acp` beside
 //! `codex`, `opencode acp` — then answers a turn over ACP (`#agent-tools 11/12`).
 //!
-//! PRD: `docs/ft/coder/1-WIP/PRD-2026-10-31-acp-agents-from-specs.md`.
+//! PRD: `docs/ft/coder/changelog/2026-11-04-acp-agents-from-specs.md`.
 //!
 //! The host is a fixture: its `PATH` is one directory holding a `bunx`, and its environment names
 //! stub `codex`, `opencode` and `tddy-tools` binaries. Every agent binary is a shell wrapper that

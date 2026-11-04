@@ -16,13 +16,25 @@ A coding agent can write, so a launch the daemon cannot honour **exactly** is re
 
 ## The harness command
 
+A launcher holding the daemon's coding agents (`with_coding_agents`, which `for_daemon` installs
+through `host_coding_agents`) plans an ACP launch from the agent's spec (`acp_plan_from_spec`,
+`#agent-tools 11/12`): the command renders from `coding_agent.acp.command`, the MCP servers from the
+`acp-session` slot (`acp_mcp_servers_from_spec`, sent as `session/new` `mcp_servers`) and a managed
+session's withdrawal from `tool_deny` (`acp_session_meta_from_spec`, the `session_meta_for`
+override; `config_env` merged into `OPENCODE_CONFIG_CONTENT`). The specs give:
+
 | Harness | Program and args |
 |---|---|
-| `claude-acp` | `bunx claude-agent-acp`, or the binary `TDDY_CLAUDE_AGENT_ACP_CLI` names (no args) |
-| `codex-acp` | `codex-acp` on `PATH`, or `TDDY_CODEX_ACP_CLI` |
+| `claude-acp` | `bunx claude-agent-acp`, or the binary `TDDY_CLAUDE_AGENT_ACP_CLI` names (no args; `package_runner` param) |
+| `codex-acp` | `codex-acp` beside the resolved `codex` dep (`sibling_of`), or `TDDY_CODEX_ACP_CLI` — never `PATH` |
 | `opencode` | `opencode acp` |
 
-The working directory is the session's worktree. Any other harness is refused.
+The working directory is the session's worktree. Any other harness is refused. A launcher built
+without coding agents (`new`, `with_identity` — tests only) still plans the same three by hand
+(`harness_command`, `apply_route`); the `#agent-tools` sweep deletes that path
+([todo](../../../docs/dev/todo/2026-11-04-acp-hand-built-launch-path-for-agentless-launchers.md)).
+The OpenCode route config stays inline in `OPENCODE_CONFIG_CONTENT`, since a session has no owner for
+a route file ([todo](../../../docs/dev/todo/2026-11-04-opencode-acp-route-file-has-no-session-owner.md)).
 
 ## The provider route
 

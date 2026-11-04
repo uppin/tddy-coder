@@ -1,7 +1,7 @@
 //! ACP hooks adapters: the Rust code a declared ACP agent's driver runs with, by name
 //! (`#agent-tools 11/12`).
 //!
-//! PRD: `docs/ft/coder/1-WIP/PRD-2026-10-31-acp-agents-from-specs.md`.
+//! PRD: `docs/ft/coder/changelog/2026-11-04-acp-agents-from-specs.md`.
 //!
 //! A spec's `coding_agent.acp` section declares *how the agent is launched*. What the driver does
 //! around a session — run `codex login` and retry once on an auth-like error, hold a route's

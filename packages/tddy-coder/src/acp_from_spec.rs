@@ -3,7 +3,7 @@
 //! the agent command, and the hooks adapters they name run around the driver
 //! (`#agent-tools 11/12`).
 //!
-//! PRD: `docs/ft/coder/1-WIP/PRD-2026-10-31-acp-agents-from-specs.md`.
+//! PRD: `docs/ft/coder/changelog/2026-11-04-acp-agents-from-specs.md`.
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};

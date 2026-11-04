@@ -1,7 +1,7 @@
 //! The ACP slots (`#agent-tools 11/12`): the tool server as `session/new` `mcp_servers`, and native
 //! tools withdrawn through `_meta` or inline config, as a spec's [`crate::AcpSection`] declares.
 //!
-//! PRD: `docs/ft/coder/1-WIP/PRD-2026-10-31-acp-agents-from-specs.md`.
+//! PRD: `docs/ft/coder/changelog/2026-11-04-acp-agents-from-specs.md`.
 
 use tddy_agent_backend::McpServerSpec;
 
