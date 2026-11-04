@@ -16,6 +16,12 @@ export interface SelectableAgent {
   /** The daemon's caption. Empty for rows the daemon captions by id. */
   readonly label: string;
   readonly daemonInstanceId: string;
+  /**
+   * The provider kinds a route can point this agent at, from its spec (`AgentInfo.routeProviders`).
+   * Empty: the agent always runs on its own vendor, or is a specialized definition — no route is
+   * asked for. Absent: the daemon did not say.
+   */
+  readonly routeProviders?: readonly string[];
 }
 
 /**

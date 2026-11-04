@@ -139,6 +139,7 @@ export function CreateSessionPane({
     hostsAdvertised,
     agentHostInstanceId,
     selectedAgentId,
+    selectedAgentRouteProviders,
     selectedAgentValue,
   } = useCreateSessionAgentSelection({
     catalogClient,
@@ -186,6 +187,7 @@ export function CreateSessionPane({
     sessionType,
     selectedAgentId,
     daemonInstanceId,
+    selectedAgentRouteProviders,
     initialModel: initialValues?.model,
   });
 
