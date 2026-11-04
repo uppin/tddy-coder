@@ -126,6 +126,9 @@ pub fn embedded_spec(id: &str) -> Result<CodingAgentSpec, SpecError> {
 ///
 /// The one place a session type meets a spec id: the launchers and harness profiles resolve
 /// through it instead of the `CliHarness` table.
+// TODO(agent-registry): `CodingAgentRegistry::for_session_type` replaces this closed table; its one
+// caller left is `harness_profile_start::profile_spec_id`, and deleting it is outside the changeset's
+// Removed list (docs/dev/todo/2026-11-04-spec-for-session-type-is-unused.md).
 pub fn spec_for_session_type(session_type: &str) -> Option<&'static str> {
     match session_type {
         "claude-cli" => Some("claude"),
