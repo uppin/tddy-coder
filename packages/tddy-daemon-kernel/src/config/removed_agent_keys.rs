@@ -70,7 +70,89 @@ impl std::error::Error for RemovedAgentConfigError {}
 pub fn refuse_removed_agent_keys(
     document: &serde_yaml::Value,
 ) -> Result<(), RemovedAgentConfigError> {
-    // TODO(agent-registry): implement.
-    let _ = document;
-    todo!("agent-registry: refuse_removed_agent_keys")
+    let Some(top_level) = document.as_mapping() else {
+        return Ok(());
+    };
+    let mut removed = Vec::new();
+    if let Some(section) = top_level.get("claude_cli") {
+        removed.push(removed_key("claude_cli", "claude", section, claude_move));
+    }
+    if let Some(section) = top_level.get("cursor_cli") {
+        removed.push(removed_key("cursor_cli", "cursor", section, cursor_move));
+    }
+    if let Some(harnesses) = top_level
+        .get("cli_harnesses")
+        .and_then(serde_yaml::Value::as_mapping)
+    {
+        for (session_type, section) in harnesses {
+            let Some(session_type) = session_type.as_str() else {
+                continue;
+            };
+            let tool = session_type
+                .strip_suffix("-cli")
+                .unwrap_or(session_type)
+                .to_string();
+            removed.push(removed_key(
+                &format!("cli_harnesses.{session_type}"),
+                &tool,
+                section,
+                harness_move,
+            ));
+        }
+    }
+    if removed.is_empty() {
+        Ok(())
+    } else {
+        Err(RemovedAgentConfigError { removed })
+    }
+}
+
+/// The removed `key`, with each field of `section` and where `to` says it went.
+fn removed_key(
+    key: &str,
+    tool: &str,
+    section: &serde_yaml::Value,
+    to: fn(&str) -> &'static str,
+) -> RemovedAgentKey {
+    let moved = section
+        .as_mapping()
+        .into_iter()
+        .flatten()
+        .filter_map(|(field, _)| field.as_str())
+        .map(|field| (field.to_string(), to(field).to_string()))
+        .collect();
+    RemovedAgentKey {
+        key: key.to_string(),
+        tool: tool.to_string(),
+        moved,
+    }
+}
+
+fn claude_move(field: &str) -> &'static str {
+    match field {
+        "binary_path" => "binary.command",
+        "claude_home_dir" => "home.key",
+        "fullscreen" => "run.env",
+        "answer_wait_secs" => "coding_agent.answer_wait_secs",
+        "tddy_tools_path" => "tools/tddy-tools.yaml binary.command",
+        "daemon_url" => "listen.advertise_url in daemon.yaml",
+        _ => "no replacement",
+    }
+}
+
+fn cursor_move(field: &str) -> &'static str {
+    match field {
+        "binary_path" => "binary.command",
+        "cursor_home_dir" => "home.key",
+        "tddy_tools_path" => "tools/tddy-tools.yaml binary.command",
+        "daemon_url" => "listen.advertise_url in daemon.yaml",
+        _ => "no replacement",
+    }
+}
+
+fn harness_move(field: &str) -> &'static str {
+    match field {
+        "binary_path" => "binary.command",
+        _ => "no replacement",
+    }
 }

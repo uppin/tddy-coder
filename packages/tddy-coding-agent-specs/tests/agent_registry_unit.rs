@@ -228,12 +228,8 @@ fn an_unknown_capability_is_refused_at_load_naming_it() {
 
 #[test]
 fn route_support_reads_the_providers_and_shape_of_the_route_section() {
-    // Given — opencode.yaml's route, declaring what OpenCode can be routed to
-    let opencode = the_builtin_yaml("opencode").replace(
-        "      key_env: TDDY_OPENCODE_PROVIDER_KEY\n",
-        "      key_env: TDDY_OPENCODE_PROVIDER_KEY\n      providers: [openai_responses, openai_chat]\n      shape: config_file\n",
-    );
-    let spec = the_spec_in("opencode", &opencode);
+    // Given — opencode.yaml's route, which declares what OpenCode can be routed to
+    let spec = the_spec_in("opencode", the_builtin_yaml("opencode"));
 
     // When
     let support = spec.route_support();

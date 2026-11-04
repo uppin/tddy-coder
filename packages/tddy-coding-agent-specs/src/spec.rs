@@ -192,9 +192,25 @@ pub struct CodingAgentSection {
     /// is not a [`Capability`] is refused at load. Empty for an agent that offers none.
     #[serde(default, skip_serializing_if = "BTreeSet::is_empty")]
     pub capabilities: BTreeSet<Capability>,
+    /// How long an orchestrated session's permission hook waits for its orchestrator's answer
+    /// before the agent shows its own prompt, in seconds (`#agent-tools 12/12`; was daemon.yaml
+    /// `claude_cli.answer_wait_secs`). [`DEFAULT_ANSWER_WAIT_SECS`] when absent.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub answer_wait_secs: Option<u64>,
 }
 
+/// How long an orchestrated session's permission hook waits for its orchestrator's answer when the
+/// agent's spec sets no `coding_agent.answer_wait_secs`.
+pub const DEFAULT_ANSWER_WAIT_SECS: u64 = 120;
+
 impl CodingAgentSpec {
+    /// `coding_agent.answer_wait_secs`, or [`DEFAULT_ANSWER_WAIT_SECS`].
+    pub fn answer_wait_secs(&self) -> u64 {
+        self.agent
+            .answer_wait_secs
+            .unwrap_or(DEFAULT_ANSWER_WAIT_SECS)
+    }
+
     /// The capabilities the agent declares.
     pub fn capabilities(&self) -> &BTreeSet<Capability> {
         &self.agent.capabilities
@@ -202,16 +218,19 @@ impl CodingAgentSpec {
 
     /// Whether the agent declares `capability` — the question every agent gate asks.
     pub fn has(&self, capability: Capability) -> bool {
-        // TODO(agent-registry): implement.
-        let _ = capability;
-        todo!("agent-registry: CodingAgentSpec::has")
+        self.agent.capabilities.contains(&capability)
     }
 
     /// What a provider route can do with the agent: `coding_agent.route.providers` and `.shape`, or
     /// no providers when the spec has no `route` section — an agent that cannot be routed.
     pub fn route_support(&self) -> RouteSupport {
-        // TODO(agent-registry): implement.
-        todo!("agent-registry: CodingAgentSpec::route_support")
+        match &self.agent.route {
+            Some(route) => RouteSupport {
+                providers: route.providers.clone(),
+                shape: route.shape,
+            },
+            None => RouteSupport::default(),
+        }
     }
 }
 

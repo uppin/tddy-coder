@@ -28,18 +28,22 @@ impl CodingAgentRegistry {
     /// The registry of a host: [`crate::load_agent_registry`] over `overrides_dir`
     /// (`<tddyhome>/tools`), then [`Self::from_tools`].
     pub fn load(overrides_dir: &Path) -> Result<Self, RegistryError> {
-        // TODO(agent-registry): implement — `Self::from_tools(load_agent_registry(overrides_dir)?)`.
-        let _ = overrides_dir;
-        todo!("agent-registry: CodingAgentRegistry::load")
+        Self::from_tools(crate::load_agent_registry(overrides_dir)?)
     }
 
     /// The coding agents among `tools`: every tool with a `coding_agent` extension, viewed through
     /// [`CodingAgentSpec::of`]. A tool whose extension does not validate refuses the whole
     /// registry, naming it; a tool without one (`tddy-tools`, `git`) is not an agent and is skipped.
     pub fn from_tools(tools: ToolRegistry) -> Result<Self, RegistryError> {
-        // TODO(agent-registry): implement.
-        let _ = tools;
-        todo!("agent-registry: CodingAgentRegistry::from_tools")
+        let mut agents = std::collections::BTreeMap::new();
+        for id in tools.ids() {
+            let Some(def) = tools.get(id) else { continue };
+            if !def.extensions.contains_key(crate::CODING_AGENT_EXTENSION) {
+                continue;
+            }
+            agents.insert(id.to_string(), CodingAgentSpec::of(def)?);
+        }
+        Ok(Self { tools, agents })
     }
 
     /// The tool registry the agents were read from — what a launcher resolves their binaries and
@@ -50,15 +54,12 @@ impl CodingAgentRegistry {
 
     /// Every agent, ordered by id.
     pub fn all(&self) -> Vec<&CodingAgentSpec> {
-        // TODO(agent-registry): implement.
-        todo!("agent-registry: CodingAgentRegistry::all")
+        self.agents.values().collect()
     }
 
     /// The agent named `id`.
     pub fn get(&self, id: &str) -> Option<&CodingAgentSpec> {
-        // TODO(agent-registry): implement.
-        let _ = id;
-        todo!("agent-registry: CodingAgentRegistry::get")
+        self.agents.get(id)
     }
 
     /// The agent a session of `session_type` runs: `<id>-cli` names agent `<id>` when that agent's
@@ -68,9 +69,9 @@ impl CodingAgentRegistry {
     ///
     /// Replaces [`crate::spec_for_session_type`]'s closed table.
     pub fn for_session_type(&self, session_type: &str) -> Option<&CodingAgentSpec> {
-        // TODO(agent-registry): implement.
-        let _ = session_type;
-        todo!("agent-registry: CodingAgentRegistry::for_session_type")
+        let id = session_type.strip_suffix(CLI_SESSION_TYPE_SUFFIX)?;
+        self.get(id)
+            .filter(|spec| spec.run.transport == tddy_actions::tool::Transport::Pty)
     }
 }
 

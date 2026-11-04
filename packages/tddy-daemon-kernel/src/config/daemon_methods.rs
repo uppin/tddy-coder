@@ -30,6 +30,16 @@ fn refuse_obsolete_supervisor_block(contents: &str, path: &std::path::Path) -> a
     Ok(())
 }
 
+/// Refuse the `claude_cli:`, `cursor_cli:` and `cli_harnesses:` sections (`#agent-tools 12/12`),
+/// naming the tool file each moved to. Checked on the untyped document, like the `supervisor:`
+/// block, so a leftover section never looks like a setting that still does something.
+fn refuse_removed_agent_sections(contents: &str, path: &std::path::Path) -> anyhow::Result<()> {
+    let document: serde_yaml::Value = serde_yaml::from_str(contents)
+        .map_err(|e| anyhow::anyhow!("failed to parse config {}: {}", path.display(), e))?;
+    crate::config::refuse_removed_agent_keys(&document)
+        .map_err(|e| anyhow::anyhow!("{}: {}", path.display(), e))
+}
+
 impl DaemonConfig {
     /// Default subdirectory under home for cloned project repos when `repos_base_path` is unset.
     pub fn repos_base_path_or_default(&self) -> &str {
@@ -41,12 +51,7 @@ impl DaemonConfig {
         let contents = std::fs::read_to_string(path)
             .map_err(|e| anyhow::anyhow!("failed to read config {}: {}", path.display(), e))?;
         refuse_obsolete_supervisor_block(&contents, path)?;
-        // TODO(agent-registry): refuse the removed agent sections here, before typed
-        // deserialization — `crate::config::refuse_removed_agent_keys(&document)` over the parsed
-        // document, its error prefixed with `path` as the `supervisor:` refusal is — then delete
-        // `claude_cli`, `cursor_cli` and `cli_harnesses` from `DaemonConfig` (and `agent_cli.rs`'s
-        // section types) along with every reader of them. Not wired at contract stage: start-up
-        // still accepts the sections, so the config tests that parse them stay green until then.
+        refuse_removed_agent_sections(&contents, path)?;
         let config: Self = serde_yaml::from_str(&contents)
             .map_err(|e| anyhow::anyhow!("failed to parse config {}: {}", path.display(), e))?;
         config

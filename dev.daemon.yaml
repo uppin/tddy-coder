@@ -127,10 +127,9 @@ telegram:
 # fullscreen (default true): force Claude's fullscreen renderer (CLAUDE_CODE_NO_FLICKER=1), which the
 # web terminal needs to wheel-scroll Claude; it also overrides Claude's own fall back to the classic
 # renderer after a failed fullscreen launch. false leaves the renderer to Claude.
-# Commented out: with the section absent, binary_path defaults to "claude" and is auto-resolved.
-# claude_cli:
-#   binary_path: claude
-#   fullscreen: true
+# The agent sections `claude_cli:`, `cursor_cli:` and `cli_harnesses:` are removed (#agent-tools 12/12):
+# the daemon refuses to start with one. An agent's binary, home and renderer live in its tool file,
+# `<tddyhome>/tools/<id>.yaml` (an override of the built-in spec).
 
 # Git behavior for the daemon's remote fetches (resolving/updating integration bases on StartSession).
 # ssh_command overrides GIT_SSH_COMMAND for those fetches ONLY — it is not exported to the process

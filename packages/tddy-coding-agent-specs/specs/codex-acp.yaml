@@ -50,6 +50,10 @@ extensions:
     # What a session of this agent offers (`#agent-tools 12/12`): the gates read these, never the
     # agent's name. Unknown words are refused at load.
     capabilities: []
+    # Which providers a route can point the agent at, and how it reaches it (`#agent-tools 12/12`).
+    route:
+      providers: [openai_responses]
+      shape: args
     models:
       default: gpt-5
       curated: [gpt-5]

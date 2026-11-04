@@ -20,6 +20,8 @@ tddy-coding-subagent = { path = "../tddy-coding-subagent" }
 # (`#project-home` 5/7).
 tddy-session-activity = { path = "../tddy-session-activity" }
 tddy-agent-launch = { path = "../tddy-agent-launch" }
+# The registry `ListAgents` reads each agent's kind and route support from (`#agent-tools 12/12`).
+tddy-coding-agent-specs = { path = "../tddy-coding-agent-specs" }
 tddy-core = { path = "../tddy-core" }
 tddy-daemon-kernel = { path = "../tddy-daemon-kernel" }
 tddy-daemon-sandbox = { path = "../tddy-daemon-sandbox" }
@@ -74,7 +76,6 @@ pretty_assertions = { workspace = true }
 # `tddy-code-restructuring`; test-only.
 tddy-lsp = { path = "../tddy-lsp" }
 tddy-sandbox = { path = "../tddy-sandbox" }
-tddy-coding-agent-specs = { path = "../tddy-coding-agent-specs" }
 tddy-session-tool-client = { path = "../tddy-session-tool-client" }
 # The exec-tool suites that moved here with `ExecToolRpcHandler` — the workspace-jail and seatbelt
 # suites among them, and the session-room test that calls a tool through a room — bring what they

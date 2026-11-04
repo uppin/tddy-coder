@@ -53,6 +53,8 @@ extensions:
     # is environment only — no configuration file — and hands its key in `META_API_KEY`.
     route:
       required_in_jail: true
+      providers: [meta]
+      shape: env
       key_env: META_API_KEY
     placements: [host, jail]
 # --- Jail sections: what a sandboxed launch lowers into the jail. ---------------------------------
