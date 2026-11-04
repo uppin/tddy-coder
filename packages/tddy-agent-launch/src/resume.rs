@@ -26,6 +26,8 @@ use tddy_cli_sessions::cli_session_manager::CliSessionManager;
 
 use std::sync::Arc;
 
+// TODO(cursor-cli): bundle the resume args (sweep)
+#[allow(clippy::too_many_arguments)]
 pub async fn resume_cursor_cli_session(
     cli_manager: &Arc<CliSessionManager>,
     config: &DaemonConfig,
