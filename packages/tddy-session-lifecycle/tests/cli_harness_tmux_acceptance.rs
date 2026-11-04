@@ -171,18 +171,20 @@ fn a_session_host(
     // A harness session is launched from its tool definition: the host has coding agents, as the
     // daemon runtime gives them.
     let coding_agents = cursor_cli_support::coding_agents_over(&data_dir);
-    let host = Arc::new(DaemonSessionHost::new(
-        config.clone(),
-        sessions_base_resolver,
-        data_dir,
-        user_resolver,
-        None,
-        tddy_spawn::supervisor_client::SpawnBackendChoice::ForkedWorker,
-        tddy_session_lifecycle::peer_routing::PeerRouting::local_only(&config),
-        Arc::new(tddy_daemon_kernel::operator_channel::NoOperatorChannel),
-        manager,
-    )
-    .with_coding_agents(coding_agents));
+    let host = Arc::new(
+        DaemonSessionHost::new(
+            config.clone(),
+            sessions_base_resolver,
+            data_dir,
+            user_resolver,
+            None,
+            tddy_spawn::supervisor_client::SpawnBackendChoice::ForkedWorker,
+            tddy_session_lifecycle::peer_routing::PeerRouting::local_only(&config),
+            Arc::new(tddy_daemon_kernel::operator_channel::NoOperatorChannel),
+            manager,
+        )
+        .with_coding_agents(coding_agents),
+    );
     host.install_sandbox_rpc_bridge();
     host
 }
