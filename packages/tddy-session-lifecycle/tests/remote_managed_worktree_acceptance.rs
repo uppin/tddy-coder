@@ -157,7 +157,8 @@ fn an_agent_def_on_this_host(tddy_data_dir: &Path, name: &str) {
 #[test]
 fn an_empty_codebase_daemon_is_co_located() {
     // When
-    let placement = classify_codebase_placement(LOCAL_INSTANCE_ID, "", &[], true, "claude-cli");
+    let placement =
+        classify_codebase_placement(LOCAL_INSTANCE_ID, "", &[], true, "claude-cli", true);
 
     // Then — every session created before this feature existed takes exactly this path
     assert_eq!(placement, Ok(CodebasePlacement::CoLocated));
@@ -172,6 +173,7 @@ fn a_codebase_daemon_matching_the_local_instance_is_co_located() {
         &[CODEBASE_PEER_ID.to_string()],
         true,
         "claude-cli",
+        true,
     );
 
     // Then — naming your own daemon is the explicit spelling of "co-located", not a split
@@ -187,6 +189,7 @@ fn a_known_peer_with_managed_codebase_on_a_claude_cli_session_is_a_split_placeme
         &[CODEBASE_PEER_ID.to_string()],
         true,
         "claude-cli",
+        true,
     );
 
     // Then
@@ -207,6 +210,7 @@ fn a_split_placement_without_managed_codebase_is_rejected_naming_the_flag() {
         &[CODEBASE_PEER_ID.to_string()],
         false,
         "claude-cli",
+        true,
     )
     .expect_err("a split placement without managed_codebase must be refused");
 
@@ -226,6 +230,7 @@ fn a_split_placement_on_a_cursor_cli_session_is_rejected_naming_the_session_type
         &[CODEBASE_PEER_ID.to_string()],
         true,
         "cursor-cli",
+        false,
     )
     .expect_err("cursor-cli cannot be split in v1");
 
@@ -245,6 +250,7 @@ fn a_split_placement_on_a_tool_session_is_rejected_naming_the_session_type() {
         &[CODEBASE_PEER_ID.to_string()],
         true,
         "tool",
+        false,
     )
     .expect_err("tddy-coder sessions cannot be split in v1");
 
@@ -267,6 +273,7 @@ fn an_unknown_codebase_daemon_is_rejected_naming_the_id_and_the_common_room() {
         &eligible,
         true,
         "claude-cli",
+        true,
     )
     .expect_err("an unreachable codebase daemon must be refused");
 

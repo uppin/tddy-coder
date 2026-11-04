@@ -5,7 +5,7 @@ use tddy_core::{write_session_github_source, SessionGithubSource};
 
 use crate::cli_harness_jail::require_sandbox_hosts;
 use crate::stack_seed_validation::validate_stack_seed_base_session;
-use tddy_core::cli_harness::{cli_harness_requires_model, CliHarness};
+use tddy_core::cli_harness::CliHarness;
 
 use tddy_daemon_kernel::user_paths::projects_path_for_user;
 use tddy_session_split::service_util;
@@ -143,11 +143,17 @@ pub(crate) fn refuse_a_conflicting_tmux_run_start(req: &StartSessionRequest) -> 
     Ok(())
 }
 
-/// claude-cli and cursor-cli always need a model: a start naming either type without one is
-/// refused before anything is created.
-pub(crate) fn refuse_a_cli_start_without_a_model(req: &StartSessionRequest) -> Result<(), Status> {
+/// An agent that declares `requires_model` always needs a model: a start naming its session type
+/// without one is refused before anything is created.
+pub(crate) fn refuse_a_cli_start_without_a_model(
+    req: &StartSessionRequest,
+    agents: Option<&crate::spec_launch::HostCodingAgents>,
+) -> Result<(), Status> {
     let session_type = req.session_type.trim();
-    if cli_harness_requires_model(session_type) && req.model.trim().is_empty() {
+    let requires_model = agents
+        .and_then(|agents| agents.agents().for_session_type(session_type))
+        .is_some_and(|spec| spec.has(tddy_coding_agent_specs::Capability::RequiresModel));
+    if requires_model && req.model.trim().is_empty() {
         return Err(Status::invalid_argument(format!(
             "model is required for {session_type} sessions"
         )));
@@ -185,7 +191,7 @@ impl LaunchSessions {
         req: &StartSessionRequest,
         os_user: &str,
     ) -> Result<Option<BranchConflict>, Status> {
-        refuse_a_cli_start_without_a_model(req)?;
+        refuse_a_cli_start_without_a_model(req, self.coding_agents.as_deref())?;
         refuse_an_orchestrated_tool_start(req)?;
         self.owned_branch_conflict(os_user, req).await
     }

@@ -55,20 +55,30 @@ impl Harness {
     /// The id this harness is named by — the inverse of [`Harness::from_agent_or_session_type`].
     #[must_use]
     pub fn id(self) -> &'static str {
-        match self {
-            Harness::Claude => "claude",
-            Harness::ClaudeAcp => "claude-acp",
-            Harness::ClaudeCli => "claude-cli",
-            Harness::Codex => "codex",
-            Harness::CodexAcp => "codex-acp",
-            Harness::OpenCode => "opencode",
-            Harness::OpenCodeCli => "opencode-cli",
-            Harness::MuseCli => "muse-cli",
-            Harness::WarpCli => "warp-cli",
-            Harness::Cursor => "cursor",
-            Harness::CursorCli => "cursor-cli",
-        }
+        Harness::IDS
+            .iter()
+            .find(|(harness, _)| *harness == self)
+            .map(|(_, id)| *id)
+            .expect("every harness has an id")
     }
+
+    /// Every harness with the id it is named by.
+    // TODO(agent-registry): the harness enumeration is the registry's to hold (`route.providers`
+    // and `route.shape` of each spec); route bodies are still selected by this enum
+    // (docs/dev/todo/2026-11-04-provider-route-harness-enum-remains.md).
+    const IDS: [(Harness, &'static str); 11] = [
+        (Harness::Claude, "claude"),
+        (Harness::ClaudeAcp, "claude-acp"),
+        (Harness::ClaudeCli, "claude-cli"),
+        (Harness::Codex, "codex"),
+        (Harness::CodexAcp, "codex-acp"),
+        (Harness::OpenCode, "opencode"),
+        (Harness::OpenCodeCli, "opencode-cli"),
+        (Harness::MuseCli, "muse-cli"),
+        (Harness::WarpCli, "warp-cli"),
+        (Harness::Cursor, "cursor"),
+        (Harness::CursorCli, "cursor-cli"),
+    ];
 
     const ALL: [Harness; 11] = [
         Harness::Claude,

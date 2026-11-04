@@ -194,7 +194,12 @@ pub(crate) async fn start_cli_harness_session(
             selected_integration_base_ref,
             selected_branch_to_work_on,
         },
-        BranchIntentPolicy::cli_harness(kind.name),
+        BranchIntentPolicy::cli_agent(
+            kind.name,
+            agent
+                .spec
+                .has(tddy_coding_agent_specs::Capability::BranchNameRequired),
+        ),
         None,
         &session_dir,
         stack_parent.session_id(),

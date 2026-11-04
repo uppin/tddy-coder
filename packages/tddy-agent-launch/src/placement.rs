@@ -37,6 +37,9 @@ pub struct PlacementRequest {
     pub sandbox: bool,
     pub sandboxed_codebase: bool,
     pub session_type: String,
+    /// Whether the agent the session type runs declares `split_host` — the capability both a split
+    /// codebase and a jailed codebase need of an agent (`#agent-tools 12/12`).
+    pub session_type_splits_host: bool,
     pub recipe: String,
     /// Whether the request asks the agent to skip its permission prompts.
     ///
@@ -69,6 +72,7 @@ pub fn classify_placement(request: &PlacementRequest) -> Result<CodebasePlacemen
             &request.eligible_ids,
             request.managed_codebase,
             &request.session_type,
+            request.session_type_splits_host,
         );
     }
 
@@ -88,9 +92,9 @@ pub fn classify_placement(request: &PlacementRequest) -> Result<CodebasePlacemen
         );
     }
     let session_type = request.session_type.trim();
-    if session_type != "claude-cli" {
+    if !request.session_type_splits_host {
         return Err(format!(
-            "sandboxed_codebase is only supported for session_type \"claude-cli\", not {session_type:?}: the placement's confinement is the withdrawal of the agent's native filesystem and shell tools, and no other agent's tool surface can be withdrawn"
+            "sandboxed_codebase is only supported for an agent that declares split_host, and {session_type:?} does not: the placement's confinement is the withdrawal of the agent's native filesystem and shell tools, and no other agent's tool surface can be withdrawn"
         ));
     }
     let recipe = request.recipe.trim();
@@ -122,15 +126,16 @@ pub fn classify_placement(request: &PlacementRequest) -> Result<CodebasePlacemen
 /// this must never change.
 ///
 /// A split needs `managed_codebase` (an agent that kept its native filesystem tools has nothing to
-/// proxy through) and `session_type == "claude-cli"` (only Claude's `--allowedTools` /
-/// `--disallowedTools` make the restriction enforceable rather than advisory — see the PRD
-/// § Why claude-cli only), and the named daemon must be in the current eligible list.
+/// proxy through) and an agent that declares `split_host` (`split_host`: only Claude's
+/// `--allowedTools` / `--disallowedTools` make the restriction enforceable rather than advisory —
+/// see the PRD § Why claude-cli only), and the named daemon must be in the current eligible list.
 pub fn classify_codebase_placement(
     local_instance_id: &str,
     requested_codebase_id: &str,
     eligible_ids: &[String],
     managed_codebase: bool,
     session_type: &str,
+    session_type_splits_host: bool,
 ) -> Result<CodebasePlacement, String> {
     let requested = requested_codebase_id.trim();
     if requested.is_empty() || requested == local_instance_id.trim() {
@@ -142,9 +147,9 @@ pub fn classify_codebase_placement(
         ));
     }
     let session_type = session_type.trim();
-    if session_type != "claude-cli" {
+    if !session_type_splits_host {
         return Err(format!(
-            "codebase_daemon_instance_id {requested:?} is only supported for session_type \"claude-cli\", not {session_type:?}: no other agent can be prevented from using its native filesystem tools"
+            "codebase_daemon_instance_id {requested:?} is only supported for an agent that declares split_host, and {session_type:?} does not: no other agent can be prevented from using its native filesystem tools"
         ));
     }
     if !eligible_ids.iter().any(|id| id.trim() == requested) {
@@ -160,9 +165,14 @@ pub fn classify_codebase_placement(
 
 pub(crate) fn classify_start_placement(
     req: &StartSessionRequest,
+    agents: Option<&crate::spec_launch::HostCodingAgents>,
     local_id: String,
     eligible_ids: Vec<String>,
 ) -> Result<CodebasePlacement, Status> {
+    let session_type = req.session_type.trim();
+    let session_type_splits_host = agents
+        .and_then(|agents| agents.agents().for_session_type(session_type))
+        .is_some_and(|spec| spec.has(tddy_coding_agent_specs::Capability::SplitHost));
     let placement = classify_placement(&PlacementRequest {
         local_instance_id: local_id.clone(),
         requested_codebase_id: req.codebase_daemon_instance_id.clone(),
@@ -170,7 +180,8 @@ pub(crate) fn classify_start_placement(
         managed_codebase: req.managed_codebase,
         sandbox: req.sandbox,
         sandboxed_codebase: req.sandboxed_codebase,
-        session_type: req.session_type.trim().to_string(),
+        session_type: session_type.to_string(),
+        session_type_splits_host,
         recipe: req.recipe.clone(),
         dangerously_skip_permissions: req.dangerously_skip_permissions,
     })

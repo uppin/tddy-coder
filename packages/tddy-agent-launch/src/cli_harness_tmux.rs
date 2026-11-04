@@ -296,8 +296,8 @@ fn recorded_exit_hook(
     session_type: &str,
     session_dir: &Path,
 ) -> Result<Option<ExitHook>, Status> {
-    let generic = tddy_core::cli_harness::cli_harness(session_type).is_some()
-        && !matches!(session_type, "claude-cli" | "cursor-cli");
+    let generic = crate::harness_from_spec::recorded_cli_launcher(tddy_data_dir, session_type)?
+        == Some(crate::harness_from_spec::CliLauncher::Generic);
     if !generic {
         return Ok(None);
     }

@@ -410,6 +410,10 @@ fn runner_argv(argv: RunnerArgv<'_>) -> Vec<String> {
         for tool in argv.tool_ids {
             runner_argv.extend(["--egress-tool".to_string(), tool.clone()]);
         }
+    } else {
+        // No shim port: the jail's policy reaches no host. The runner is told so, or it starts the
+        // shim its default policy implies and the profile (which grants no loopback bind) refuses it.
+        runner_argv.extend(["--egress-policy".to_string(), argv.egress.to_runner_arg()]);
     }
     runner_argv
 }

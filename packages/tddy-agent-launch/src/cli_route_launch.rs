@@ -98,7 +98,7 @@ pub fn cli_route_launch(
 /// — and nothing written — when no account was chosen, so the harness runs on the person's own setup.
 pub fn start_cli_route(
     access: &SessionAccountAccess,
-    route_harness: Harness,
+    route_harness: impl Into<Option<Harness>>,
     spec: &CodingAgentSpec,
     sources: &RouteSources,
     model: &str,
@@ -107,6 +107,9 @@ pub fn start_cli_route(
     let Some(account_id) = choose_route(sources) else {
         return Ok(None);
     };
+    let route_harness = route_harness
+        .into()
+        .ok_or_else(crate::session_provider_route::no_provider_route_serves_the_agent)?;
     let route = route_on_account(access, route_harness, &account_id, model)?;
     let launch = write_cli_route(spec, &route, session_dir)?;
     write_session_provider_account(
@@ -125,7 +128,7 @@ pub fn start_cli_route(
 /// Nothing for a session on the person's own setup.
 pub fn resume_cli_route(
     access: &SessionAccountAccess,
-    route_harness: Harness,
+    route_harness: impl Into<Option<Harness>>,
     spec: &CodingAgentSpec,
     session_dir: &Path,
 ) -> Result<CliRouteLaunch, Status> {
@@ -133,6 +136,9 @@ pub fn resume_cli_route(
     let Some(model) = model else {
         return Ok(CliRouteLaunch::default());
     };
+    let route_harness = route_harness
+        .into()
+        .ok_or_else(crate::session_provider_route::no_provider_route_serves_the_agent)?;
     match resolve_session_route(access, route_harness, &sources, &model)? {
         Some(route) => write_cli_route(spec, &route, session_dir),
         None => Ok(CliRouteLaunch::default()),

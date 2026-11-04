@@ -55,6 +55,24 @@ fn new_connection_service(sessions_base: PathBuf) -> Arc<DaemonSessionHost> {
     service
 }
 
+/// The coding agents of a fixture host: every built-in spec, with no `<tddyhome>/tools` overrides,
+/// resolved against this process. What a suite that never wires its own coding agents gets, so the
+/// capability gates have agents to read.
+///
+/// # Panics
+/// When the built-in specs do not load, which no build passes.
+#[must_use]
+pub fn builtin_coding_agents() -> Arc<tddy_agent_launch::spec_launch::HostCodingAgents> {
+    let registry = tddy_coding_agent_specs::load_agent_registry(std::path::Path::new(
+        "/nonexistent-tddy-home/tools",
+    ))
+    .expect("the built-in coding agents load");
+    Arc::new(tddy_agent_launch::spec_launch::HostCodingAgents::new(
+        registry,
+        Arc::new(tddy_actions::tool::ProcessToolHost),
+    ))
+}
+
 /// The host [`test_service`] wraps, before it goes behind its `Arc` — for a suite above this crate
 /// that must install more on it first (`tddy-daemon-rpc`'s families), and then calls
 /// [`DaemonSessionHost::install_sandbox_rpc_bridge`] itself, as [`test_service`] does.
@@ -82,6 +100,7 @@ pub fn test_host(sessions_base: PathBuf) -> DaemonSessionHost {
         Arc::new(tddy_daemon_kernel::operator_channel::NoOperatorChannel),
         Arc::new(CliSessionManager::new()),
     )
+    .with_coding_agents(builtin_coding_agents())
 }
 
 /// The credentials a [`signing_test_host`] accepts for [`TEST_USER`], each minted with that host's
@@ -149,7 +168,8 @@ pub fn signing_test_host(sessions_base: PathBuf) -> (DaemonSessionHost, SignedTe
         Arc::new(tddy_daemon_kernel::operator_channel::NoOperatorChannel),
         Arc::new(CliSessionManager::new()),
     )
-    .with_session_tokens(tokens);
+    .with_session_tokens(tokens)
+    .with_coding_agents(builtin_coding_agents());
     (host, credentials)
 }
 

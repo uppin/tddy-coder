@@ -14,4 +14,18 @@ impl DaemonSessionHost {
         self.coding_agents = Some(agents);
         self
     }
+
+    /// [`Self::with_coding_agents`] with `agents`, unless the host already has some (builder): what
+    /// a test fixture that builds a host and never wires its own uses, so the gates that read an
+    /// agent's capabilities see the built-in specs rather than none.
+    #[must_use]
+    pub fn with_coding_agents_if_none(
+        self,
+        agents: std::sync::Arc<tddy_agent_launch::spec_launch::HostCodingAgents>,
+    ) -> Self {
+        if self.coding_agents.is_some() {
+            return self;
+        }
+        self.with_coding_agents(agents)
+    }
 }

@@ -38,11 +38,17 @@ pub(super) fn list_models_probe_args(
         "--agent".to_string(),
         agent.to_string(),
     ];
-    let path_flag = match agent {
-        "cursor" => Some("--cursor-cli-path"),
-        "opencode" | "opencode-cli" => Some("--opencode-cli-path"),
-        _ => None,
-    };
+    // The binary-path flag `tddy-tools list-models` takes for the agents it probes by binary.
+    // TODO(harness-clis): goes with the legacy `cli_harness` descriptors.
+    const PATH_FLAGS: [(&str, &str); 3] = [
+        ("cursor", "--cursor-cli-path"),
+        ("opencode", "--opencode-cli-path"),
+        ("opencode-cli", "--opencode-cli-path"),
+    ];
+    let path_flag = PATH_FLAGS
+        .iter()
+        .find(|(listed, _)| *listed == agent)
+        .map(|(_, flag)| *flag);
     if let (Some(flag), Some(path)) = (path_flag, binary_path) {
         args.push(flag.to_string());
         args.push(path.to_string_lossy().into_owned());

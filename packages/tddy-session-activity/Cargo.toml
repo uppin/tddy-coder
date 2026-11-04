@@ -12,6 +12,8 @@ path = "src/lib.rs"
 # `SessionActivityStatus::from_wire` — the statuses a reported hook may carry, and the mapping from
 # each to the notification it raises.
 tddy-core = { path = "../tddy-core" }
+# The coding-agent registry whose capabilities gate the hook-driven RPCs (`#agent-tools 12/12`).
+tddy-coding-agent-specs = { path = "../tddy-coding-agent-specs" }
 # `AgentActivityHub` and `now_unix_ms`, node 1's. Consumed unchanged: the hub's broadcast semantics
 # belong to the kernel. Also the operator-channel port and its `awaits_operator` rule, and the
 # `SessionNotification` types the port names — re-exported from `session_notifications`.

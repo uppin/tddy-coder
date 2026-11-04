@@ -286,7 +286,7 @@ async fn a_main_with_no_hook_token_is_refused_naming_the_tool_and_why_and_publis
     refused
         .assert_refused_saying("NotifyOperator")
         .assert_refused_saying("no hook token")
-        .assert_refused_saying("claude-cli and cursor-cli")
+        .assert_refused_saying("declares operator_notify")
         .assert_not_saying("session_type");
     assert_eq!(
         world.agent_notifications(),

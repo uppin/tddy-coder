@@ -31,6 +31,28 @@ impl CodingAgentRegistry {
         Self::from_tools(crate::load_agent_registry(overrides_dir)?)
     }
 
+    /// A registry of no agents: every lookup is `None`, every gate refuses. What a service holds
+    /// when its host has no coding agents installed.
+    pub fn empty() -> Self {
+        Self {
+            tools: ToolRegistry::default(),
+            agents: std::collections::BTreeMap::new(),
+        }
+    }
+
+    /// The registry of the built-in specs alone, with no `<tddyhome>/tools` overrides: for a
+    /// caller that has no host to read overrides from (a test fixture, an embedded render).
+    pub fn builtin() -> Result<Self, RegistryError> {
+        let specs = crate::builtin_specs();
+        let sources: Vec<(&str, &str)> = tddy_actions::tool::BUILTIN_TOOLS
+            .iter()
+            .chain(tddy_actions::tool::BUILTIN_SUPPORT_TOOLS)
+            .chain(&specs)
+            .copied()
+            .collect();
+        Self::from_tools(ToolRegistry::from_embedded(&sources)?)
+    }
+
     /// The coding agents among `tools`: every tool with a `coding_agent` extension, viewed through
     /// [`CodingAgentSpec::of`]. A tool whose extension does not validate refuses the whole
     /// registry, naming it; a tool without one (`tddy-tools`, `git`) is not an agent and is skipped.

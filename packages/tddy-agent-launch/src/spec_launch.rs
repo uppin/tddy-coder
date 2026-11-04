@@ -19,7 +19,7 @@ use tddy_cli_sessions::cli_session_manager::{CliSessionManager, ExitHook};
 use tddy_coding_agent_specs::slots::{
     self, McpServerCommand, RenderedSlots, SlotError, SlotInputs,
 };
-use tddy_coding_agent_specs::{CodingAgentSpec, SpecError};
+use tddy_coding_agent_specs::{CodingAgentRegistry, CodingAgentSpec, SpecError};
 use tddy_daemon_kernel::config::DaemonConfig;
 
 /// The coding agents this host can launch: the agent registry
@@ -30,12 +30,41 @@ use tddy_daemon_kernel::config::DaemonConfig;
 /// gates move onto specs (`docs/dev/todo/2026-11-02-claude-cli-hand-built-launch-removal.md`).
 pub struct HostCodingAgents {
     registry: ToolRegistry,
+    agents: Arc<CodingAgentRegistry>,
     host: Arc<dyn ToolHost>,
 }
 
 impl HostCodingAgents {
+    /// The agents of `registry` (a [`tddy_coding_agent_specs::load_agent_registry`] result) on `host`.
+    ///
+    /// # Panics
+    /// When a tool of `registry` has a `coding_agent` extension and no `run:` section — a host
+    /// start reads its registry through [`Self::try_new`] and refuses instead.
     pub fn new(registry: ToolRegistry, host: Arc<dyn ToolHost>) -> Self {
-        Self { registry, host }
+        Self::try_new(registry, host).expect("a registry holding only usable coding agents")
+    }
+
+    /// [`Self::new`], refused when a tool with a `coding_agent` extension is not a usable agent.
+    pub fn try_new(
+        registry: ToolRegistry,
+        host: Arc<dyn ToolHost>,
+    ) -> Result<Self, tddy_coding_agent_specs::RegistryError> {
+        let agents = Arc::new(CodingAgentRegistry::from_tools(registry.clone())?);
+        Ok(Self {
+            registry,
+            agents,
+            host,
+        })
+    }
+
+    /// The coding agents among the tools: what a gate asks for an agent's capabilities.
+    pub fn agents(&self) -> &CodingAgentRegistry {
+        &self.agents
+    }
+
+    /// [`Self::agents`], shared with a service that gates on it.
+    pub fn agents_shared(&self) -> Arc<CodingAgentRegistry> {
+        Arc::clone(&self.agents)
     }
 
     pub fn registry(&self) -> &ToolRegistry {

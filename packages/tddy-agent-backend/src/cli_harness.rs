@@ -75,6 +75,10 @@ pub struct CliHarness {
     /// The argument list, binary first.
     pub argv: fn(&CliLaunch<'_>) -> Vec<String>,
     pub models: CliModelSource,
+    /// Whether a start of this session type must name a model.
+    // TODO(agent-registry): the launch reads the agent's `requires_model` capability from its spec;
+    // this copy serves only the legacy start-session schema until this module is deleted.
+    pub requires_model: bool,
 }
 
 /// The registry, in the order the session-type toggle offers the harnesses.
@@ -89,6 +93,7 @@ static CLI_HARNESSES: [CliHarness; 5] = [
         route_config_env: None,
         argv: claude_cli_argv,
         models: CliModelSource::Curated(claude_cli_models),
+        requires_model: true,
     },
     CliHarness {
         session_type: "cursor-cli",
@@ -100,6 +105,7 @@ static CLI_HARNESSES: [CliHarness; 5] = [
         route_config_env: None,
         argv: cursor_cli_argv,
         models: CliModelSource::Curated(cursor_cli_models),
+        requires_model: true,
     },
     CliHarness {
         session_type: "opencode-cli",
@@ -111,6 +117,7 @@ static CLI_HARNESSES: [CliHarness; 5] = [
         route_config_env: Some("OPENCODE_CONFIG"),
         argv: opencode_cli_argv,
         models: CliModelSource::ListedByBinary(&["models"]),
+        requires_model: false,
     },
     MUSE_CLI,
     WARP_CLI,
@@ -129,11 +136,11 @@ pub fn cli_harness(session_type: &str) -> Option<&'static CliHarness> {
         .find(|harness| harness.session_type == session_type)
 }
 
-/// Whether a start of `session_type` must name a model: claude-cli and cursor-cli are refused
-/// without one, every other session type picks its own.
+/// Whether a start of `session_type` must name a model, by the legacy descriptor: claude-cli and
+/// cursor-cli are refused without one, every other session type picks its own.
 #[must_use]
 pub fn cli_harness_requires_model(session_type: &str) -> bool {
-    matches!(session_type, "claude-cli" | "cursor-cli")
+    cli_harness(session_type).is_some_and(|harness| harness.requires_model)
 }
 
 /// The catalogue a harness that lists its own models printed — one `provider/model` per line, as

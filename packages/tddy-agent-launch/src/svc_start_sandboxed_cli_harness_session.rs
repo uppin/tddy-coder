@@ -125,7 +125,13 @@ impl LaunchSessions {
                 selected_integration_base_ref: req.selected_integration_base_ref.trim(),
                 selected_branch_to_work_on: req.selected_branch_to_work_on.trim(),
             },
-            BranchIntentPolicy::cli_harness(kind.name),
+            BranchIntentPolicy::cli_agent(
+                kind.name,
+                session_agent
+                    .agent
+                    .spec
+                    .has(tddy_coding_agent_specs::Capability::BranchNameRequired),
+            ),
             None,
             &session_dir,
             stack_parent.session_id(),

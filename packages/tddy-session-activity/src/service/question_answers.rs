@@ -18,6 +18,7 @@ use std::time::Duration;
 
 use std::path::Path;
 
+use tddy_coding_agent_specs::Capability;
 use tddy_core::pending_question::read_pending_question;
 use tddy_core::read_changeset;
 use tddy_discovery::subagent::PermissionAnswer;
@@ -66,10 +67,11 @@ impl ActivityServiceImpl {
     ) -> Result<Response<AwaitQuestionAnswerResponse>, Status> {
         let (_sessions_base, session_dir) = self.hook_session_dir(&req.os_user, &req.session_id)?;
         let meta = self.hook_session(&session_dir)?;
-        if meta.session_type.as_deref() != Some("claude-cli") {
-            return Err(Status::failed_precondition(
-                "session_type is not claude-cli",
-            ));
+        let session_type = meta.session_type.as_deref().unwrap_or("");
+        if !self.session_offers(session_type, Capability::AskUserQuestion) {
+            return Err(Status::failed_precondition(format!(
+                "session_type {session_type:?} is not an agent session that declares ask_user_question"
+            )));
         }
         if meta.hook_token.as_deref().unwrap_or("") != req.hook_token {
             return Err(Status::permission_denied("invalid hook_token"));

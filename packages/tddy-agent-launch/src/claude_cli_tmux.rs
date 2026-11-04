@@ -295,7 +295,20 @@ pub async fn reattach_recorded_main(
         worktree_path,
         session_dir: &session_dir,
     };
-    let reattached = if recorded.session_type == "claude-cli" {
+    let launcher =
+        match crate::harness_from_spec::recorded_cli_launcher(tddy_data_dir, recorded.session_type)
+        {
+            Ok(launcher) => launcher,
+            Err(error) => {
+                log::warn!(
+                    target: "tddy_daemon::claude_cli_session",
+                    "could not re-attach the main terminal of {session_id}: {}",
+                    error.message()
+                );
+                return false;
+            }
+        };
+    let reattached = if launcher == Some(crate::harness_from_spec::CliLauncher::Claude) {
         reattach_recorded_claude(manager, tddy_data_dir, recorded).await
     } else {
         // Every other CLI harness re-attaches through its own tmux path, which watches its

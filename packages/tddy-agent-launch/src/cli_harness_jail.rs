@@ -147,11 +147,12 @@ pub(crate) fn jail_route_config_env(
 /// for any other session type.
 #[allow(dead_code)]
 pub(crate) fn sandboxed_agent_kind(session_type: &str) -> Option<&'static str> {
-    match session_type {
-        "opencode-cli" => Some("opencode"),
-        "muse-cli" => Some("muse"),
-        _ => None,
-    }
+    // The legacy runner `--agent-kind` table: orphaned data, not a gate on what a session offers.
+    const RUNNER_HOSTED: &[(&str, &str)] = &[("opencode-cli", "opencode"), ("muse-cli", "muse")];
+    RUNNER_HOSTED
+        .iter()
+        .find(|(hosted, _)| *hosted == session_type)
+        .map(|(_, kind)| *kind)
 }
 
 /// The runner's `--agent-kind` for `harness`, or the refusal of a sandboxed start of a harness the

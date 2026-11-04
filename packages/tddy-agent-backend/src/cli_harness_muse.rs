@@ -65,4 +65,5 @@ pub const MUSE_CLI: CliHarness = CliHarness {
     route_config_env: None,
     argv: muse_argv,
     models: CliModelSource::Curated(muse_cli_models),
+    requires_model: false,
 };

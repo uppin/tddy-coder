@@ -13836,6 +13836,7 @@ dependencies = [
  "rstest 0.24.0",
  "serde",
  "serde_json",
+ "tddy-coding-agent-specs",
  "tddy-core",
  "tddy-daemon-extensions",
  "tddy-daemon-kernel",
