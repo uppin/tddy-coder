@@ -8,8 +8,8 @@
 //! launcher renders the template with `tddy_actions::tool::render_argv` and the slots with
 //! [`slots::render`]; nothing in that path hard-codes an agent.
 
-pub mod claude_tools;
 mod capability;
+pub mod claude_tools;
 pub mod headless;
 mod registry;
 mod route;

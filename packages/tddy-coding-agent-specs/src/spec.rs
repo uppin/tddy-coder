@@ -12,11 +12,11 @@ use tddy_agent_backend::adapters::{AcpHooksAdapters, AdapterRegistry, LaunchAdap
 use tddy_agent_backend::AcpAgentCommand;
 use thiserror::Error;
 
+use crate::capability::Capability;
 use crate::headless::validate_headless;
+use crate::route::{ProviderKind, RouteShape, RouteSupport};
 use crate::slots::hooks;
 use crate::slots::tools::render_flag_per_value;
-use crate::capability::Capability;
-use crate::route::{ProviderKind, RouteShape, RouteSupport};
 
 /// The `extensions:` key this crate owns.
 pub const CODING_AGENT_EXTENSION: &str = "coding_agent";
