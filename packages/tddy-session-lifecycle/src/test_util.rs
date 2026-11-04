@@ -55,6 +55,20 @@ fn new_connection_service(sessions_base: PathBuf) -> Arc<DaemonSessionHost> {
     service
 }
 
+/// A fixture's `daemon.yaml` read as a typed [`DaemonConfig`], without the start-up refusal of the
+/// removed `claude_cli:`, `cursor_cli:` and `cli_harnesses:` sections (`#agent-tools 12/12`).
+///
+/// Fixtures that point an agent at a stub binary still set it through those sections, whose typed
+/// fields remain until their removal (`docs/dev/todo/2026-11-04-removed-agent-config-readers-remain.md`).
+/// Start-up never reads a config this way: it goes through [`DaemonConfig::load`], which refuses them.
+// TODO(agent-registry): migrate the fixtures to a `<tddyhome>/tools/<id>.yaml` override and delete this.
+pub fn daemon_config_from_fixture_file(path: &std::path::Path) -> anyhow::Result<DaemonConfig> {
+    let contents = std::fs::read_to_string(path)
+        .map_err(|e| anyhow::anyhow!("failed to read {}: {e}", path.display()))?;
+    serde_yaml::from_str(&contents)
+        .map_err(|e| anyhow::anyhow!("failed to parse {}: {e}", path.display()))
+}
+
 /// The coding agents of a fixture host: every built-in spec, with no `<tddyhome>/tools` overrides,
 /// resolved against this process. What a suite that never wires its own coding agents gets, so the
 /// capability gates have agents to read.

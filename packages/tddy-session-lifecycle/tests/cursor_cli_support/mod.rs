@@ -568,7 +568,8 @@ cursor_cli:
     );
     let config_path = dir.path().join("daemon.yaml");
     std::fs::write(&config_path, yaml).unwrap();
-    let config = DaemonConfig::load(&config_path).expect("config must parse");
+    let config = tddy_session_lifecycle::test_util::daemon_config_from_fixture_file(&config_path)
+        .expect("config must parse");
     (dir, config)
 }
 

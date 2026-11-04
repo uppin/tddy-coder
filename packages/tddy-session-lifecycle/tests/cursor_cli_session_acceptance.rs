@@ -52,7 +52,8 @@ cursor_cli:
     );
     let config_path = dir.join("daemon.yaml");
     std::fs::write(&config_path, yaml).unwrap();
-    DaemonConfig::load(&config_path).expect("config must parse")
+    tddy_session_lifecycle::test_util::daemon_config_from_fixture_file(&config_path)
+        .expect("config must parse")
 }
 
 /// Write a stub `cursor-agent` that mints [`STUB_CHAT_ID`] and otherwise idles on stdin.

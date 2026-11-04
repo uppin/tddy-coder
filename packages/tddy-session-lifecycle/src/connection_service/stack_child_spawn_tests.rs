@@ -74,7 +74,8 @@ fn a_pr_stack_orchestrator() -> Orchestrator {
         ),
     )
     .expect("write daemon config");
-    let config = DaemonConfig::load(&config_path).expect("daemon config must parse");
+    let config = crate::test_util::daemon_config_from_fixture_file(&config_path)
+        .expect("daemon config must parse");
 
     let sessions_base = sessions.path().to_path_buf();
     let resolver: SessionsBaseResolver = Arc::new(move |_| Some(sessions_base.clone()));
@@ -91,7 +92,8 @@ fn a_pr_stack_orchestrator() -> Orchestrator {
         crate::peer_routing::PeerRouting::local_only(&config),
         Arc::new(tddy_daemon_kernel::operator_channel::NoOperatorChannel),
         Arc::new(CliSessionManager::new()),
-    );
+    )
+    .with_coding_agents_if_none(crate::test_util::builtin_coding_agents());
 
     let orchestrator = Orchestrator {
         service,

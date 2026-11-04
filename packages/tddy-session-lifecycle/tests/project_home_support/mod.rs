@@ -68,7 +68,8 @@ pub struct HomeDaemon {
 /// carries `extra_row_yaml` (e.g. a `home_session_id:` line), with `extra_config_yaml` appended to
 /// its daemon config (e.g. a `project_home:` block).
 pub fn a_home_daemon(repo: &Path, extra_row_yaml: &str, extra_config_yaml: &str) -> HomeDaemon {
-    build_home_daemon(repo, extra_row_yaml, extra_config_yaml, false)
+    // A host with no coding agents refuses every agent session, so a home daemon always has them.
+    build_home_daemon(repo, extra_row_yaml, extra_config_yaml, true)
 }
 
 /// [`a_home_daemon`] with the daemon's coding agents installed, as the daemon runtime installs
@@ -239,7 +240,8 @@ claude_cli:
     );
     let config_path = dir.path().join("daemon.yaml");
     std::fs::write(&config_path, yaml).unwrap();
-    let config = DaemonConfig::load(&config_path).expect("config must parse");
+    let config = tddy_session_lifecycle::test_util::daemon_config_from_fixture_file(&config_path)
+        .expect("config must parse");
     (dir, config)
 }
 

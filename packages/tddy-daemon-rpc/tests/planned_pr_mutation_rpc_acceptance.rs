@@ -252,17 +252,20 @@ impl Orchestrator {
             Arc::new(move |_| Some(resolved.clone()));
         let user_resolver: SessionUserResolver =
             Arc::new(|token| (token == TOKEN).then(|| "u".to_string()));
-        TestDaemon::from_host(DaemonSessionHost::new(
-            config.clone(),
-            sessions_base_resolver,
-            sessions_base,
-            user_resolver,
-            None,
-            tddy_spawn::supervisor_client::SpawnBackendChoice::ForkedWorker,
-            tddy_session_lifecycle::peer_routing::PeerRouting::local_only(&config),
-            Arc::new(tddy_daemon_kernel::operator_channel::NoOperatorChannel),
-            Arc::new(CliSessionManager::new()),
-        ))
+        TestDaemon::from_host(
+            DaemonSessionHost::new(
+                config.clone(),
+                sessions_base_resolver,
+                sessions_base,
+                user_resolver,
+                None,
+                tddy_spawn::supervisor_client::SpawnBackendChoice::ForkedWorker,
+                tddy_session_lifecycle::peer_routing::PeerRouting::local_only(&config),
+                Arc::new(tddy_daemon_kernel::operator_channel::NoOperatorChannel),
+                Arc::new(CliSessionManager::new()),
+            )
+            .with_coding_agents_if_none(tddy_session_lifecycle::test_util::builtin_coding_agents()),
+        )
     }
 
     // --- reading the result back ---

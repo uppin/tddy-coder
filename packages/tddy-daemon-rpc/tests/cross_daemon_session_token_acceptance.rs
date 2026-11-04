@@ -88,17 +88,20 @@ fn a_peer_daemon(
     .expect("auth wiring should produce a session resolver");
     let base = data_dir.clone();
     let sessions_base_resolver: SessionsBaseResolver = Arc::new(move |_| Some(base.clone()));
-    TestDaemon::from_host(DaemonSessionHost::new(
-        config.clone(),
-        sessions_base_resolver,
-        data_dir,
-        resolver,
-        None,
-        tddy_spawn::supervisor_client::SpawnBackendChoice::ForkedWorker,
-        tddy_session_lifecycle::peer_routing::PeerRouting::local_only(&config),
-        Arc::new(tddy_daemon_kernel::operator_channel::NoOperatorChannel),
-        Arc::new(CliSessionManager::new()),
-    ))
+    TestDaemon::from_host(
+        DaemonSessionHost::new(
+            config.clone(),
+            sessions_base_resolver,
+            data_dir,
+            resolver,
+            None,
+            tddy_spawn::supervisor_client::SpawnBackendChoice::ForkedWorker,
+            tddy_session_lifecycle::peer_routing::PeerRouting::local_only(&config),
+            Arc::new(tddy_daemon_kernel::operator_channel::NoOperatorChannel),
+            Arc::new(CliSessionManager::new()),
+        )
+        .with_coding_agents_if_none(tddy_session_lifecycle::test_util::builtin_coding_agents()),
+    )
 }
 
 #[tokio::test]

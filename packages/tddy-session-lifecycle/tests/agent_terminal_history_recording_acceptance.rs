@@ -374,4 +374,5 @@ fn session_host(
         Arc::new(tddy_daemon_kernel::operator_channel::NoOperatorChannel),
         manager,
     )
+    .with_coding_agents_if_none(tddy_session_lifecycle::test_util::builtin_coding_agents())
 }

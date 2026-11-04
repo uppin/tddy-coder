@@ -32,6 +32,7 @@ fn make_unit_service(sessions_base: std::path::PathBuf) -> DaemonSessionHost {
         Arc::new(tddy_daemon_kernel::operator_channel::NoOperatorChannel),
         Arc::new(CliSessionManager::new()),
     )
+    .with_coding_agents_if_none(crate::test_util::builtin_coding_agents())
 }
 
 /// Unit: delete_session rejects an invalid session token before touching the filesystem.

@@ -64,7 +64,8 @@ fn a_split_session_whose_codebase_read_may_take(budget_secs: u64) -> ASplitSessi
         crate::peer_routing::PeerRouting::local_only(&config),
         Arc::new(tddy_daemon_kernel::operator_channel::NoOperatorChannel),
         Arc::new(CliSessionManager::new()),
-    );
+    )
+    .with_coding_agents_if_none(crate::test_util::builtin_coding_agents());
     ASplitSession {
         _data_dir: data_dir,
         _checkout: checkout,

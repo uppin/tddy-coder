@@ -190,23 +190,26 @@ livekit:
     let user_resolver: SessionUserResolver =
         Arc::new(move |token| (token == VALID_TOKEN).then(|| resolved_user.clone()));
 
-    let service = TestDaemon::from_host(DaemonSessionHost::new(
-        config.clone(),
-        sessions_base_resolver,
-        data_dir.path().to_path_buf(),
-        user_resolver,
-        None,
-        tddy_spawn::supervisor_client::SpawnBackendChoice::ForkedWorker,
-        tddy_daemon_livekit::peer_routing::peer_routing_over(
-            &config,
-            Some(LiveKitDiscoveryHandles {
-                eligible_daemon_source: Arc::new(ACommonRoomWithTheOrchestratorHost),
-                common_room_livekit_room: Arc::new(tokio::sync::RwLock::new(None)),
-            }),
-        ),
-        Arc::new(tddy_daemon_kernel::operator_channel::NoOperatorChannel),
-        Arc::new(CliSessionManager::new()),
-    ));
+    let service = TestDaemon::from_host(
+        DaemonSessionHost::new(
+            config.clone(),
+            sessions_base_resolver,
+            data_dir.path().to_path_buf(),
+            user_resolver,
+            None,
+            tddy_spawn::supervisor_client::SpawnBackendChoice::ForkedWorker,
+            tddy_daemon_livekit::peer_routing::peer_routing_over(
+                &config,
+                Some(LiveKitDiscoveryHandles {
+                    eligible_daemon_source: Arc::new(ACommonRoomWithTheOrchestratorHost),
+                    common_room_livekit_room: Arc::new(tokio::sync::RwLock::new(None)),
+                }),
+            ),
+            Arc::new(tddy_daemon_kernel::operator_channel::NoOperatorChannel),
+            Arc::new(CliSessionManager::new()),
+        )
+        .with_coding_agents_if_none(tddy_session_lifecycle::test_util::builtin_coding_agents()),
+    );
 
     ADaemonInTheCommonRoom {
         service,

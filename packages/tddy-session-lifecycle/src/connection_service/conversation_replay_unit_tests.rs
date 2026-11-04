@@ -39,6 +39,7 @@ fn a_service(sessions_base: std::path::PathBuf) -> DaemonSessionHost {
         Arc::new(tddy_daemon_kernel::operator_channel::NoOperatorChannel),
         Arc::new(CliSessionManager::new()),
     )
+    .with_coding_agents_if_none(crate::test_util::builtin_coding_agents())
 }
 
 /// A session whose own transcript says one thing and whose conversation `conv-1` another, so a

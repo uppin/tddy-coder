@@ -35,6 +35,7 @@ fn minimal_service_with_tracker(tracker: Arc<IdleTimeoutTracker>) -> TestDaemon 
             Arc::new(tddy_daemon_kernel::operator_channel::NoOperatorChannel),
             Arc::new(ClaudeCliSessionManager::new()),
         )
+        .with_coding_agents_if_none(tddy_session_lifecycle::test_util::builtin_coding_agents())
         .with_idle_tracker(tracker),
     )
 }

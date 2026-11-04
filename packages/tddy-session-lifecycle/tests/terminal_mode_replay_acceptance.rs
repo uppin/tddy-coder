@@ -85,7 +85,8 @@ fn make_service(
         tddy_session_lifecycle::peer_routing::PeerRouting::local_only(&config),
         Arc::new(tddy_daemon_kernel::operator_channel::NoOperatorChannel),
         manager,
-    );
+    )
+    .with_coding_agents_if_none(tddy_session_lifecycle::test_util::builtin_coding_agents());
     (service.terminal_session_service(), cfg_dir, sessions)
 }
 

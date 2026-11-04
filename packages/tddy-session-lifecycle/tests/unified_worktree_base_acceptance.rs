@@ -60,16 +60,23 @@ allowed_tools:
     );
     let config_path = dir.path().join("daemon.yaml");
     std::fs::write(&config_path, yaml).unwrap();
-    let config = DaemonConfig::load(&config_path).expect("config must parse");
+    let config = tddy_session_lifecycle::test_util::daemon_config_from_fixture_file(&config_path)
+        .expect("config must parse");
     (dir, config)
 }
 
 fn minimal_service(config: DaemonConfig, sessions_base: PathBuf) -> DaemonSessionHost {
-    // A cursor-cli host is a host with coding agents: a Cursor session launches from its spec.
-    let cursor_agents = config
-        .cursor_cli
-        .is_some()
-        .then(|| cursor_cli_support::coding_agents_over(&sessions_base));
+    // A host with no coding agents refuses every agent session: a Cursor or Claude session launches
+    // from its spec, so every host here has them, with the stub the config names as `claude`.
+    let cursor_agents = Some(cursor_cli_support::coding_agents_over(&sessions_base));
+    if let Some(stub) = config
+        .claude_cli
+        .as_ref()
+        .map(|claude_cli| claude_cli.binary_path.clone())
+        .filter(|path| path.contains('/'))
+    {
+        let _ = std::os::unix::fs::symlink(stub, sessions_base.join("tool-bin").join("claude"));
+    }
     let tddy_data_dir = sessions_base.clone();
     let sessions_base_resolver: SessionsBaseResolver =
         Arc::new(move |_| Some(sessions_base.clone()));

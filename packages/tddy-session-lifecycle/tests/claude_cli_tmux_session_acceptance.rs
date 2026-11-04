@@ -107,7 +107,8 @@ fn a_config_running(stub_agent: &Path) -> (tempfile::TempDir, DaemonConfig) {
     );
     let path = dir.path().join("daemon.yaml");
     std::fs::write(&path, yaml).unwrap();
-    let config = DaemonConfig::load(&path).expect("config must parse");
+    let config = tddy_session_lifecycle::test_util::daemon_config_from_fixture_file(&path)
+        .expect("config must parse");
     (dir, config)
 }
 
@@ -122,17 +123,20 @@ fn a_session_host(
     let user = this_os_user();
     let user_resolver: UserResolver =
         Arc::new(move |token| (token == VALID_TOKEN).then(|| user.clone()));
-    let host = Arc::new(DaemonSessionHost::new(
-        config.clone(),
-        sessions_base_resolver,
-        data_dir,
-        user_resolver,
-        None,
-        tddy_spawn::supervisor_client::SpawnBackendChoice::ForkedWorker,
-        tddy_session_lifecycle::peer_routing::PeerRouting::local_only(&config),
-        Arc::new(tddy_daemon_kernel::operator_channel::NoOperatorChannel),
-        manager,
-    ));
+    let host = Arc::new(
+        DaemonSessionHost::new(
+            config.clone(),
+            sessions_base_resolver,
+            data_dir,
+            user_resolver,
+            None,
+            tddy_spawn::supervisor_client::SpawnBackendChoice::ForkedWorker,
+            tddy_session_lifecycle::peer_routing::PeerRouting::local_only(&config),
+            Arc::new(tddy_daemon_kernel::operator_channel::NoOperatorChannel),
+            manager,
+        )
+        .with_coding_agents_if_none(tddy_session_lifecycle::test_util::builtin_coding_agents()),
+    );
     host.install_sandbox_rpc_bridge();
     host
 }

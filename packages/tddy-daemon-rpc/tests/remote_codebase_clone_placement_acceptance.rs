@@ -156,6 +156,7 @@ fn a_daemon(
         Arc::new(NoOperatorChannel),
         Arc::new(ClaudeCliSessionManager::new()),
     )
+    .with_coding_agents_if_none(tddy_session_lifecycle::test_util::builtin_coding_agents())
 }
 
 /// The codebase host's session worktree holds a conversation's committed change, written through its

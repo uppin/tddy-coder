@@ -109,17 +109,20 @@ fn service_with_known_codebase_peer_and_config(
         }) as Arc<dyn EligibleDaemonSource>,
         common_room_livekit_room: Arc::new(tokio::sync::RwLock::new(None)),
     };
-    TestDaemon::from_arc(Arc::new(DaemonSessionHost::new(
-        config.clone(),
-        resolver,
-        sessions_base,
-        user_resolver_valid(),
-        None,
-        tddy_spawn::supervisor_client::SpawnBackendChoice::ForkedWorker,
-        tddy_daemon_livekit::peer_routing::peer_routing_over(&config, Some(discovery)),
-        Arc::new(tddy_daemon_kernel::operator_channel::NoOperatorChannel),
-        Arc::new(ClaudeCliSessionManager::new()),
-    )))
+    TestDaemon::from_arc(Arc::new(
+        DaemonSessionHost::new(
+            config.clone(),
+            resolver,
+            sessions_base,
+            user_resolver_valid(),
+            None,
+            tddy_spawn::supervisor_client::SpawnBackendChoice::ForkedWorker,
+            tddy_daemon_livekit::peer_routing::peer_routing_over(&config, Some(discovery)),
+            Arc::new(tddy_daemon_kernel::operator_channel::NoOperatorChannel),
+            Arc::new(ClaudeCliSessionManager::new()),
+        )
+        .with_coding_agents_if_none(tddy_session_lifecycle::test_util::builtin_coding_agents()),
+    ))
 }
 
 /// A managed claude-cli start request placing the codebase on `codebase_daemon_instance_id`.
