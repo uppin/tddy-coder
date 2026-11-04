@@ -44,7 +44,7 @@ fn test_binaries_of(crate_name: &str) -> BTreeSet<String> {
 /// kind cannot move at all, because `CARGO_MANIFEST_DIR` would then name whichever crate it landed
 /// in and the assertion would silently be about something else. `tddy-workflow-recipes`'
 /// `proto_workflow_contracts.rs` is the same shape and stays put for the same reason.
-const BELONGS_HERE: [&str; 32] = [
+const BELONGS_HERE: [&str; 33] = [
     "session_agent_remote_acceptance.rs",
     "remote_managed_worktree_cross_host_acceptance.rs",
     "split_session_resume_acceptance.rs",
@@ -93,6 +93,8 @@ const BELONGS_HERE: [&str; 32] = [
     "unbundle_endpoint.rs",
     // Reads this package's own `Cargo.toml`.
     "unbundle_tools_dependency_dropped.rs",
+    // Runs this crate's own `tddy-daemon` binary against a daemon.yaml its start-up must refuse.
+    "removed_agent_config_acceptance.rs",
 ];
 
 /// AC5 — only the suites that exercise this crate remain.

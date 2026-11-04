@@ -5,9 +5,12 @@
 //!
 //! Start-up reads its configuration through `DaemonConfig::load` before anything else
 //! (`src/main.rs`, and the desktop host's `config_source`), so a refusal there is a refusal to
-//! start: no logger, no listener, no spawn worker.
+//! start: no logger, no listener, no spawn worker. The refusals are read from this crate's own
+//! `tddy-daemon` binary, started with the file as its `--config`.
 
 use std::path::{Path, PathBuf};
+use std::process::{Command, Stdio};
+use std::time::{Duration, Instant};
 
 use pretty_assertions::assert_eq;
 use tddy_daemon::config::DaemonConfig;
@@ -25,11 +28,44 @@ fn a_daemon_yaml(body: &str) -> (tempfile::TempDir, PathBuf) {
     (dir, path)
 }
 
-/// Why start-up refused the daemon.yaml at `path`.
+/// How long a refused start-up may take to exit: it fails before the logger, the spawn worker or
+/// any listener exists, so anything near this means the daemon started instead.
+const STARTUP_REFUSAL_DEADLINE: Duration = Duration::from_secs(30);
+
+/// Why the `tddy-daemon` binary refused to start with the daemon.yaml at `path`: the error it
+/// exits with, as `main` reports it (`Error: <message>` on stderr).
 fn the_startup_refusal(path: &Path) -> String {
-    DaemonConfig::load(path)
-        .map(|_| ())
-        .expect_err("start-up must refuse a removed agent section")
+    let mut daemon = Command::new(env!("CARGO_BIN_EXE_tddy-daemon"))
+        .arg("--config")
+        .arg(path)
+        .env_remove("TDDY_DAEMON_CONFIG")
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("start tddy-daemon");
+    let started = Instant::now();
+    let status = loop {
+        if let Some(status) = daemon.try_wait().expect("poll tddy-daemon") {
+            break status;
+        }
+        if started.elapsed() > STARTUP_REFUSAL_DEADLINE {
+            let _ = daemon.kill();
+            let _ = daemon.wait();
+            panic!("tddy-daemon was still running after {STARTUP_REFUSAL_DEADLINE:?}: start-up must refuse a removed agent section");
+        }
+        std::thread::sleep(Duration::from_millis(25));
+    };
+    let output = daemon.wait_with_output().expect("tddy-daemon's stderr");
+    assert!(
+        !status.success(),
+        "start-up must refuse a removed agent section"
+    );
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    stderr
+        .trim()
+        .strip_prefix("Error: ")
+        .unwrap_or_else(|| panic!("tddy-daemon's error, as main reports it: {stderr:?}"))
         .to_string()
 }
 

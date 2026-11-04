@@ -106,8 +106,10 @@ impl RecordingLauncher {
     }
 
     fn recorded(&self, event: &str) -> Vec<serde_json::Value> {
-        std::fs::read_to_string(self.dir.join("record.jsonl"))
-            .unwrap_or_default()
+        let text = std::fs::read_to_string(self.dir.join("record.jsonl")).unwrap_or_default();
+        // Only the lines the stub has finished writing: the last one may still be half-written.
+        let complete = text.rfind('\n').map_or("", |end| &text[..=end]);
+        complete
             .lines()
             .map(|line| serde_json::from_str::<serde_json::Value>(line).expect("JSON line"))
             .filter(|line| line["event"] == event)
@@ -930,12 +932,19 @@ async fn cancelling_a_turn_paused_on_a_permission_request_answers_it_cancelled_a
 
     // Then the request was answered cancelled, and the conversation is still open
     assert!(response.conversation_kept, "{response:?}");
-    let outcomes = session.launcher.recorded("permission_outcome");
-    assert_eq!(
-        outcomes.last().map(|outcome| outcome["outcome"].clone()),
-        Some(serde_json::json!("cancelled")),
-        "the agent saw its request cancelled: {outcomes:?}"
-    );
+    // The stub records the outcome as it receives it, so its line may land just after the response.
+    tddy_testing_commons::wait::eventually(
+        "the agent to see its request cancelled",
+        Duration::from_secs(10),
+        || {
+            let outcomes = session.launcher.recorded("permission_outcome");
+            match outcomes.last().map(|outcome| outcome["outcome"].clone()) {
+                Some(outcome) if outcome == serde_json::json!("cancelled") => Ok(()),
+                _ => Err(format!("recorded outcomes: {outcomes:?}")),
+            }
+        },
+    )
+    .await;
     let (_, next) = session.prompt(&conversation_id, "Carry on").await;
     assert_eq!(next, "EndTurn", "the conversation answers again");
 }
