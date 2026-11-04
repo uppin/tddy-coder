@@ -76,7 +76,7 @@ pub struct CliHarness {
     pub argv: fn(&CliLaunch<'_>) -> Vec<String>,
     pub models: CliModelSource,
     /// Whether a start of this session type must name a model.
-    // TODO(agent-config-removal): #agent-tools n15 — the launch reads the agent's `requires_model`
+    // TODO(agent-config-removal): #agent-tools n19 `agent-config-removal` — the launch reads the agent's `requires_model`
     // capability from its spec; this copy serves only the legacy start-session schema until this
     // module is deleted (docs/dev/todo/2026-11-04-removed-agent-config-readers-remain.md).
     pub requires_model: bool,

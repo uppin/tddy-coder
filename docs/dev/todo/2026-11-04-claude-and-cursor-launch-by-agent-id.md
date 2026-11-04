@@ -1,9 +1,13 @@
 # 2026-11-04 — Claude and Cursor still launch through their own paths, selected by agent id
 
 **Category:** Gap
-**Owner:** `#agent-tools` n14 `cli-spec-launch` — moved out of #801 by the developer on 2026-11-04, to be planned on top of
-`feature/agent-tools/agent-registry`. Code markers: `TODO(cli-spec-launch)`.
-**Source:** `#agent-tools` 12/12 (#801), `TODO(cli-spec-launch)` at `packages/tddy-agent-launch/src/harness_from_spec.rs`
+**Owner:** `#agent-tools` n14 `cli-spec-features` ([#820](https://github.com/uppin/tddy-coder/pull/820)) (`feature/agent-tools/cli-spec-features`: claude and cursor
+features — managed workflow, hooks, slots, conversation id, ssh, tmux via `plan_host_pty` — on the generic CLI
+spec path), then n17 `cli-dispatch-collapse` ([#823](https://github.com/uppin/tddy-coder/pull/823)) (`feature/agent-tools/cli-dispatch-collapse`: the
+`CliLauncher`/`CLAUDE_AGENT_ID`/`CURSOR_AGENT_ID` dispatch and the hand-built paths deleted, branch intent from
+the spec, child spawns through specs) — moved out of #801 by the developer on 2026-11-04, to be planned on top of
+`feature/agent-tools/agent-registry`. Code markers: `TODO(cli-dispatch-collapse)`.
+**Source:** `#agent-tools` 12/19 (#801), `TODO(cli-dispatch-collapse)` at `packages/tddy-agent-launch/src/harness_from_spec.rs`
 (`CLAUDE_AGENT_ID`, `CURSOR_AGENT_ID`)
 
 ## What is there
@@ -20,6 +24,6 @@ paths (`BranchIntentPolicy::claude_cli()` / `cursor_cli()`) is also fixed in Rus
 Fold the two paths into the generic launch (or declare the launcher in the spec) and read
 `branch_name_required` from the spec in every path.
 
-**#801 ACs moved to n14:** the claude/cursor halves of "every `session_type == "claude-cli"` gate
+**#801 ACs moved to n17 `cli-dispatch-collapse` ([#823](https://github.com/uppin/tddy-coder/pull/823)):** the claude/cursor halves of "every `session_type == "claude-cli"` gate
 is `spec.has(…)`" for launch dispatch and branch intent (the scan pins comparisons of session-type
 literals only).

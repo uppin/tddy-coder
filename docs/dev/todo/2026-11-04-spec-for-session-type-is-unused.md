@@ -1,7 +1,9 @@
 # 2026-11-04 — `spec_for_session_type` is replaced by the registry but still has one caller
 
 **Category:** Dead code
-**Source:** `#agent-tools` 12/12 (#801), `TODO(agent-registry)` at `packages/tddy-coding-agent-specs/src/lib.rs`
+**Owner:** `#agent-tools` n13 `route-support` ([#819](https://github.com/uppin/tddy-coder/pull/819)) (`feature/agent-tools/route-support`) — moved out of #801 by the developer on 2026-11-04, to be planned on top of
+`feature/agent-tools/agent-registry`.
+**Source:** `#agent-tools` 12/19 (#801), `TODO(route-support)` at `packages/tddy-coding-agent-specs/src/lib.rs`
 
 ## What is there
 

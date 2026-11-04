@@ -1,10 +1,10 @@
 # Changeset: One coding-agent registry: agent enums and string gates become spec capabilities
 
 **Created:** 2026-10-31
-**Status:** 🚧 In Progress
+**Status:** ✅ Complete (scope re-cut 2026-11-04: see *Moved to later nodes*)
 **Type:** Feature (breaking configuration change)
 **Complexity**: 5 — six or more crates (`tddy-agent-backend`, `tddy-coder`, `tddy-session-activity`, `tddy-session-lifecycle`, `tddy-daemon-rpc`, `tddy-daemon-kernel`, `tddy-worktree-service`, `tddy-web` picker); breaking config removal; ~15 string gates
-**Stack:** `#agent-tools 12/12` — branch `feature/agent-tools/agent-registry`, base `feature/agent-tools/acp-agents`
+**Stack:** `#agent-tools 12/19` — branch `feature/agent-tools/agent-registry`, base `feature/agent-tools/acp-agents`
 **PR:** [#801](https://github.com/uppin/tddy-coder/pull/801)
 **PRD:** [PRD-2026-10-31-coding-agent-registry.md](../../ft/daemon/1-WIP/PRD-2026-10-31-coding-agent-registry.md)
 
@@ -19,39 +19,40 @@ State A below is distilled from that file. Grep traces and file dumps are not re
 | Record | Verdict |
 |---|---|
 | [2026-10-22-tool-session-provider-picker-needs-harness-metadata.md](../todo/2026-10-22-tool-session-provider-picker-needs-harness-metadata.md) | ✅ **RESOLVED HERE.** `AgentInfo` carries the spec's kind, harness and route support, and the pane asks for routes only for agents whose spec supports them |
-| `packages/tddy-agent-backend/docs/code-issues/oversized-file-backend-mod.md` | ⚠ During. Seams A–D are the model, selection and context tables that move into the registry. Re-measure at wrap, and promote to ✅ if closed |
-| `packages/tddy-agent-launch/docs/code-issues/complexity-svc-start-session-core-start-session-core.md` | ⚠ During. The session-type `match` in `start_here` becomes a spec lookup |
+| `packages/tddy-agent-backend/docs/code-issues/oversized-file-backend-mod.md` | — Untouched (850, unchanged): the backend selection it holds moved to n16 `spec-backend` ([#822](https://github.com/uppin/tddy-coder/pull/822)) with `AnyBackend` |
+| `packages/tddy-agent-launch/docs/code-issues/complexity-svc-start-session-core-start-session-core.md` | ⚠ Regressed, recorded: `start_here` 343 → 348 (the registry lookup); restructuring deferred to the sweep node; n17 `cli-dispatch-collapse` ([#823](https://github.com/uppin/tddy-coder/pull/823)) collapses the branches |
 | [2026-09-16-the-shipped-binary-set-is-restated-in-eight-places-and-one-is-pinned.md](../todo/2026-09-16-the-shipped-binary-set-is-restated-in-eight-places-and-one-is-pinned.md) | — Unrelated (no new binary) |
 
 ## Affected Packages
 
-- [ ] [`tddy-coding-agent-specs`](../../../packages/tddy-coding-agent-specs/README.md): `capabilities`, `route.providers`/`shape`, `answer_wait_secs`; `CodingAgentRegistry` (list, by id, by session type)
-- [ ] [`tddy-agent-backend`](../../../packages/tddy-agent-backend/README.md): `AnyBackend`, `Harness`, `build_backend` and the selection, model and context tables replaced by registry lookups
-- [ ] [`tddy-coder`](../../../packages/tddy-coder/README.md): `create_backend`, `BUILTIN_BACKEND_AGENT_IDS`, `--agent` and the interactive selection read the registry
-- [ ] [`tddy-session-activity`](../../../packages/tddy-session-activity/README.md): hook reports, question answers and operator notifications gate on capabilities
-- [ ] [`tddy-session-lifecycle`](../../../packages/tddy-session-lifecycle/README.md): session deletion, project-home and split gate on capabilities
-- [ ] [`tddy-daemon-rpc`](../../../packages/tddy-daemon-rpc/README.md): notify gate; `AgentInfo` gains kind, harness and route support
-- [ ] [`tddy-worktree-service`](../../../packages/tddy-worktree-service/README.md): branch intent gates on a capability
-- [ ] [`tddy-daemon-kernel`](../../../packages/tddy-daemon-kernel/README.md): daemon.yaml `claude_cli:`, `cursor_cli:` and `cli_harnesses:` removed; start refuses them with the replacement named
-- [ ] [`tddy-web`](../../../packages/tddy-web/README.md): the provider picker reads route support
+- [x] [`tddy-coding-agent-specs`](../../../packages/tddy-coding-agent-specs/README.md): `capabilities`, `route.providers`/`shape`, `answer_wait_secs`; `CodingAgentRegistry` (list, by id, by session type)
+- [x] [`tddy-agent-backend`](../../../packages/tddy-agent-backend/README.md): the model catalog and `Harness::id` read tables, not agent-name gates. Replacing `Harness` → **moved to n13 `route-support` ([#819](https://github.com/uppin/tddy-coder/pull/819))**; `AnyBackend` / `build_backend` → **n16 `spec-backend` ([#822](https://github.com/uppin/tddy-coder/pull/822))**
+- [x] [`tddy-coder`](../../../packages/tddy-coder/README.md): `--agent`'s accepted ids and the interactive selection read the registry (`agent_registry_cli`). Removing `create_backend` / `BUILTIN_BACKEND_AGENT_IDS` → **moved to n16 `spec-backend` ([#822](https://github.com/uppin/tddy-coder/pull/822))**
+- [x] [`tddy-session-activity`](../../../packages/tddy-session-activity/README.md): hook reports, question answers and operator notifications gate on capabilities
+- [x] [`tddy-session-lifecycle`](../../../packages/tddy-session-lifecycle/README.md): session deletion, project-home and split gate on capabilities
+- [x] [`tddy-daemon-rpc`](../../../packages/tddy-daemon-rpc/README.md): notify gate; `AgentInfo` gains kind, harness and route support
+- [x] [`tddy-worktree-service`](../../../packages/tddy-worktree-service/README.md): `BranchIntentPolicy::cli_agent(st, branch_name_required)` for the generic launch. The claude/cursor policies from the spec → **moved to n17 `cli-dispatch-collapse` ([#823](https://github.com/uppin/tddy-coder/pull/823))**
+- [x] [`tddy-daemon-kernel`](../../../packages/tddy-daemon-kernel/README.md): start refuses daemon.yaml `claude_cli:`, `cursor_cli:` and `cli_harnesses:` with the replacement named. Deleting the types → **moved to n19 `agent-config-removal` ([#825](https://github.com/uppin/tddy-coder/pull/825))**
+- [x] [`tddy-web`](../../../packages/tddy-web/README.md): the provider picker reads route support
 
 ## Responsibility
 
 - `CodingAgentSpec.capabilities: BTreeSet<Capability>`, with `Capability::{Hooks, AskUserQuestion, SplitHost, ProjectHomeMain, RequiresModel, BranchNameRequired, KeepWorktreeOnDelete, OperatorNotify}`.
-- `CodingAgentSpec.route: RouteSupport { providers: Vec<ProviderKind>, shape: RouteShape::{Env, Args, ConfigFile} }`, read from each spec's `route.providers`/`shape` and reported by the agent catalog. Building routes from it, in place of `provider_route::Harness`'s matrix, is n13's (see *Moved to later nodes*).
+- `CodingAgentSpec.route: RouteSupport { providers: Vec<ProviderKind>, shape: RouteShape::{Env, Args, ConfigFile} }`, read from each spec's `route.providers`/`shape` and reported by the agent catalog. Building routes from it, in place of `provider_route::Harness`'s matrix, is n13 `route-support` ([#819](https://github.com/uppin/tddy-coder/pull/819))'s (see *Moved to later nodes*).
 - `tddy_coding_agent_specs::CodingAgentRegistry::{all(), get(id), for_session_type(st)}`.
-- Every `session_type == "claude-cli"` or `"cursor-cli"` gate is replaced by `spec.has(Capability::…)`. A source-scan test pins that no gate compares a session type with an agent's name. The launch dispatch by agent id (`CLAUDE_AGENT_ID`/`CURSOR_AGENT_ID`) and the claude/cursor branch policies are n14's.
-- `tddy_daemon_kernel` config refuses `claude_cli`, `cursor_cli` and `cli_harnesses` at `DaemonConfig::load` with `moved to <tddyhome>/tools/<id>.yaml (<field> → <spec field>)`. Deleting the config types and their readers is n15's.
-- `coding_agent.answer_wait_secs` declared and read through `CodingAgentSpec::answer_wait_secs`; wiring it into the hook and `AwaitQuestionAnswer` call sites is n15's.
+- Every `session_type == "claude-cli"` or `"cursor-cli"` gate is replaced by `spec.has(Capability::…)`. A source-scan test pins that no gate compares a session type with an agent's name. The launch dispatch by agent id (`CLAUDE_AGENT_ID`/`CURSOR_AGENT_ID`) and the claude/cursor branch policies are n17 `cli-dispatch-collapse` ([#823](https://github.com/uppin/tddy-coder/pull/823))'s.
+- `tddy_daemon_kernel` config refuses `claude_cli`, `cursor_cli` and `cli_harnesses` at `DaemonConfig::load` with `moved to <tddyhome>/tools/<id>.yaml (<field> → <spec field>)`. Deleting the config types and their readers is n19 `agent-config-removal` ([#825](https://github.com/uppin/tddy-coder/pull/825))'s.
+- `coding_agent.answer_wait_secs` declared and read through `CodingAgentSpec::answer_wait_secs`; wiring it into the hook and `AwaitQuestionAnswer` call sites is n19 `agent-config-removal` ([#825](https://github.com/uppin/tddy-coder/pull/825))'s.
 - `AgentInfo.{kind, harness, route_providers}`, and the web pane asks for routes only where `route_providers` is non-empty.
 
 ## Boundaries
 
 - No spec-editing UI. No new agent.
 - Adapters (the Rust protocol code) stay where they are.
-- The route layer is not rewritten: route bodies are still selected by `provider_route::Harness` (n13).
-- Claude and Cursor keep their own launch paths (n14).
-- The removed daemon.yaml sections' types and readers, `AnyBackend`, `BUILTIN_BACKEND_AGENT_IDS` and `create_backend` stay; `tddy-coder --agent` builds only ids with a backend adapter (n15).
+- The route layer is not rewritten: route bodies are still selected by `provider_route::Harness` (`route-support`).
+- Claude and Cursor keep their own launch features and paths (`cli-spec-features`, `cli-dispatch-collapse`); headless backends stay bespoke (`headless-driver`).
+- `AnyBackend`, `BUILTIN_BACKEND_AGENT_IDS` and `create_backend` stay, and `tddy-coder --agent` builds only ids with a backend adapter (`spec-backend`).
+- The removed daemon.yaml sections' types and readers stay (`agent-config-removal`). Telegram spawn and pickers are not spec-driven (`telegram-spec-launch`).
 
 ## Dependencies
 
@@ -67,14 +68,14 @@ implementing one here collides with the PR that owns it.
 
 The first push published `Capability`, `RouteSupport`, `CodingAgentRegistry`, the `AgentInfo` proto fields, the config refusal error type, each spec's `capabilities` lines, the source-scan test, and the failing tests below. Unimplemented bodies were `// TODO(agent-registry): implement`; none remain.
 
-The removals the contract named (`AnyBackend`, `provider_route::Harness`, `BUILTIN_BACKEND_AGENT_IDS`, the daemon.yaml agent config types) are **not** part of this PR's delivered contract: the developer moved them to n13–n15 on 2026-11-04 (see *Moved to later nodes*).
+The removals the contract named (`AnyBackend`, `provider_route::Harness`, `BUILTIN_BACKEND_AGENT_IDS`, the daemon.yaml agent config types) are **not** part of this PR's delivered contract: the developer moved them to n13 `route-support` ([#819](https://github.com/uppin/tddy-coder/pull/819)), n16 `spec-backend` ([#822](https://github.com/uppin/tddy-coder/pull/822)) and n19 `agent-config-removal` ([#825](https://github.com/uppin/tddy-coder/pull/825)) on 2026-11-04 (see *Moved to later nodes*).
 
 ## Green wave
 
 **Wave:** 7 of 7
 **Greenable independently:** after every earlier node is green: the gates and enums it collapses are only fully spec-backed then
 **Concurrent with:** none
-**Blocks:** n13 `route-support`, n14 `cli-spec-launch`, n15 `agent-config-removal` (planned on top of this node, 2026-11-04)
+**Blocks:** n13 `route-support` ([#819](https://github.com/uppin/tddy-coder/pull/819)), n14 `cli-spec-features` ([#820](https://github.com/uppin/tddy-coder/pull/820)), n15 `headless-driver` ([#821](https://github.com/uppin/tddy-coder/pull/821)), n16 `spec-backend` ([#822](https://github.com/uppin/tddy-coder/pull/822)), n17 `cli-dispatch-collapse` ([#823](https://github.com/uppin/tddy-coder/pull/823)), n18 `telegram-spec-launch` ([#824](https://github.com/uppin/tddy-coder/pull/824)), n19 `agent-config-removal` ([#825](https://github.com/uppin/tddy-coder/pull/825)) (planned on top of this node, 2026-11-04)
 
 Real dependency edges, as opposed to the branch line:
 
@@ -105,19 +106,21 @@ Real dependency edges, as opposed to the branch line:
 - `config.example.yaml`, `dev.daemon.yaml`, `desktop.yaml.production`.
 - Docs at wrap: `docs/ft/daemon/session-agent-roster.md`, `harness-profiles.md`, all `*-cli-session.md`; a changelog entry for the breaking change.
 ### Removed
-- Nothing here. The planned removals moved to later nodes: `provider_route::Harness` → n13; `AnyBackend`, `BUILTIN_BACKEND_AGENT_IDS`, `create_backend` and the daemon.yaml agent config types → n15. The daemon.yaml agent sections are *refused* at load here.
+- Nothing here. The planned removals moved to later nodes: `provider_route::Harness` and `spec_for_session_type` → n13 `route-support` ([#819](https://github.com/uppin/tddy-coder/pull/819)); `AnyBackend`, `BUILTIN_BACKEND_AGENT_IDS` and `create_backend` → n16 `spec-backend` ([#822](https://github.com/uppin/tddy-coder/pull/822)); the daemon.yaml agent config types → n19 `agent-config-removal` ([#825](https://github.com/uppin/tddy-coder/pull/825)). The daemon.yaml agent sections are *refused* at load here.
 
 ## Moved to later nodes
 
-Decided by the developer on 2026-11-04, after #801's [G] stage. Each item is out of #801's scope and is that node's to plan and deliver. The markers name the node (`TODO(route-support)`, `TODO(cli-spec-launch)`, `TODO(agent-config-removal)`), and each has a `docs/dev/todo/` entry.
+Decided by the developer on 2026-11-04, after #801's [G] stage. Each item is out of #801's scope and is that node's to plan and deliver. The finer split (seven nodes, branches `feature/agent-tools/<name>`) was approved on 2026-11-04. The markers name the node (`TODO(route-support)`, `TODO(cli-dispatch-collapse)`, `TODO(agent-config-removal)`), and each item has a `docs/dev/todo/` entry.
 
 | Item (from Responsibility, Delta or the PRD) | Node | Entry |
 |---|---|---|
-| Move the route types down into `tddy-agent-backend`; remove `provider_route::Harness`; route bodies chosen by `RouteSupport` from `route.providers`, so a dropped-in agent gets a route | n13 `route-support` | [2026-11-04-provider-route-harness-enum-remains.md](../todo/2026-11-04-provider-route-harness-enum-remains.md) |
-| Claude and Cursor launch through the generic spec path: no `CLAUDE_AGENT_ID`/`CURSOR_AGENT_ID` dispatch; branch intent from the spec's `branch_name_required` (the launch-dispatch and branch-intent halves of the "every gate is `spec.has(…)`" AC) | n14 `cli-spec-launch` | [2026-11-04-claude-and-cursor-launch-by-agent-id.md](../todo/2026-11-04-claude-and-cursor-launch-by-agent-id.md) |
-| Remove `ClaudeCliConfig`/`CursorCliConfig`/`CliHarnessConfig`, the `DaemonConfig` fields and their readers; remove `AnyBackend`, `BUILTIN_BACKEND_AGENT_IDS`, `create_backend`; a generic spec-plus-adapter backend so `tddy-coder --agent <any id>` builds (the PRD AC's "accepts any registry id" half); wire `answer_wait_secs` at its call sites; migrate the ~38 fixtures off `daemon_config_from_fixture_file` and delete it; restore worktree removal on a Telegram delete; remove the `TDDY_*` overrides a spec does not name | n15 `agent-config-removal` | [2026-11-04-removed-agent-config-readers-remain.md](../todo/2026-11-04-removed-agent-config-readers-remain.md) |
-
-Not moved, left for the `#agent-tools` sweep node: `spec_for_session_type`'s last caller ([2026-11-04-spec-for-session-type-is-unused.md](../todo/2026-11-04-spec-for-session-type-is-unused.md)).
+| Move the route types into `tddy-agent-backend::provider_route`; remove `provider_route::Harness`; route bodies chosen by `RouteSupport` from `route.providers`, so a dropped-in agent gets a route; delete `spec_for_session_type` | n13 `route-support` ([#819](https://github.com/uppin/tddy-coder/pull/819)) | [2026-11-04-provider-route-harness-enum-remains.md](../todo/2026-11-04-provider-route-harness-enum-remains.md), [2026-11-04-spec-for-session-type-is-unused.md](../todo/2026-11-04-spec-for-session-type-is-unused.md) |
+| Claude and Cursor features on the generic CLI spec path (managed workflow, hooks, slots, conversation id, ssh, tmux via `plan_host_pty`) | n14 `cli-spec-features` ([#820](https://github.com/uppin/tddy-coder/pull/820)) | [2026-11-04-claude-and-cursor-launch-by-agent-id.md](../todo/2026-11-04-claude-and-cursor-launch-by-agent-id.md) |
+| One generic headless driver from the spec replaces the bespoke headless backends | n15 `headless-driver` ([#821](https://github.com/uppin/tddy-coder/pull/821)) | — (planned by that node) |
+| `SpecBackend{Headless,Acp}` replaces `AnyBackend`; `tddy-coder --agent <any id>` builds (the PRD AC's "accepts any registry id" half); `BUILTIN_BACKEND_AGENT_IDS` and `create_backend` go | n16 `spec-backend` ([#822](https://github.com/uppin/tddy-coder/pull/822)) | [2026-11-04-removed-agent-config-readers-remain.md](../todo/2026-11-04-removed-agent-config-readers-remain.md) § backend |
+| No `CliLauncher`/`CLAUDE_AGENT_ID`/`CURSOR_AGENT_ID` dispatch; the hand-built paths deleted; branch intent from the spec's `branch_name_required`; child spawns through specs (the launch-dispatch and branch-intent halves of the "every gate is `spec.has(…)`" AC) | n17 `cli-dispatch-collapse` ([#823](https://github.com/uppin/tddy-coder/pull/823)) | [2026-11-04-claude-and-cursor-launch-by-agent-id.md](../todo/2026-11-04-claude-and-cursor-launch-by-agent-id.md) |
+| Telegram spawn and pickers from the specs | n18 `telegram-spec-launch` ([#824](https://github.com/uppin/tddy-coder/pull/824)) | — (planned by that node) |
+| Remove `ClaudeCliConfig`/`CursorCliConfig`/`CliHarnessConfig`, the `DaemonConfig` fields and their readers; wire `answer_wait_secs` at its call sites; migrate the fixtures off `daemon_config_from_fixture_file` and delete it; restore worktree removal on a Telegram delete; the Claude fullscreen renderer from `run.env`; the `TDDY_*` overrides a spec does not name | n19 `agent-config-removal` ([#825](https://github.com/uppin/tddy-coder/pull/825)) | [2026-11-04-removed-agent-config-readers-remain.md](../todo/2026-11-04-removed-agent-config-readers-remain.md), [2026-11-04-telegram-delete-leaves-agent-worktrees.md](../todo/2026-11-04-telegram-delete-leaves-agent-worktrees.md) |
 
 ## Testing Strategy
 
@@ -125,33 +128,33 @@ Not moved, left for the `#agent-tools` sweep node: `spec_for_session_type`'s las
 
 **`tddy-session-lifecycle`: `packages/tddy-session-lifecycle/tests/yaml_only_agent_acceptance.rs`**
 
-- [ ] `a_new_agent_dropped_into_tddyhome_tools_appears_in_the_hosts_agent_list_starts_on_the_host_and_offers_its_declared_capabilities` (stub binary, existing adapters, no Rust change; fixture `tests/agent_registry_support/mod.rs`)
-- [ ] `jailed::a_new_agent_dropped_into_tddyhome_tools_starts_in_a_jail` (macOS only — a real Seatbelt jail; CI never runs it)
-- [ ] `removing_hooks_from_an_override_of_claude_yaml_turns_off_hook_based_activity_for_claude`
+- [x] ✅ `a_new_agent_dropped_into_tddyhome_tools_appears_in_the_hosts_agent_list_starts_on_the_host_and_offers_its_declared_capabilities` (stub binary, existing adapters, no Rust change; fixture `tests/agent_registry_support/mod.rs`)
+- [x] ✅ `jailed::a_new_agent_dropped_into_tddyhome_tools_starts_in_a_jail` (macOS only — a real Seatbelt jail; CI never runs it)
+- [x] ✅ `removing_hooks_from_an_override_of_claude_yaml_turns_off_hook_based_activity_for_claude`
 
 **`tddy-daemon`: `packages/tddy-daemon/tests/removed_agent_config_acceptance.rs`**
 
-- [ ] `a_daemon_yaml_with_claude_cli_fails_startup_naming_tddyhome_tools_claude_yaml`
-- [ ] `the_same_for_cursor_cli_and_cli_harnesses`
+- [x] ✅ `a_daemon_yaml_with_claude_cli_fails_startup_naming_tddyhome_tools_claude_yaml`
+- [x] ✅ `the_same_for_cursor_cli_and_cli_harnesses`
 
 **`tddy-coder`: `packages/tddy-coder/tests/agent_registry_cli_acceptance.rs`**
 
-- [ ] `tddy_coder_agent_accepts_any_registry_id_and_the_interactive_selection_lists_the_registry`
+- [x] ✅ `tddy_coder_agent_accepts_any_registry_id_and_the_interactive_selection_lists_the_registry` — the accepted list and the selection are the registry's. Building a backend for any listed id (a dropped-in agent has no backend adapter) → **moved to n16 `spec-backend` ([#822](https://github.com/uppin/tddy-coder/pull/822))**
 
 **`tddy-web`: `packages/tddy-web/cypress/component/CreateSessionProviderPicker.cy.tsx`**
 
-- [ ] `does not request provider routes for an agent whose route support is empty` (`mountWithRpc` + `anInMemoryRpcBackend`)
+- [x] ✅ `does not request provider routes for an agent whose route support is empty` (`mountWithRpc` + `anInMemoryRpcBackend`)
 
 **`tddy-daemon-rpc`: `packages/tddy-daemon-rpc/tests/agent_catalog_acceptance.rs`**
 
-- [ ] `the_agent_catalog_reports_kind_harness_and_route_support_per_agent`
+- [x] ✅ `the_agent_catalog_reports_kind_harness_and_route_support_per_agent`
 
 ### Unit / integration tests
 
-- [ ] `tddy-coding-agent-specs` registry (`tests/agent_registry_unit.rs`): the registry lists every built-in by id; `for_session_type` for every built-in CLI session type and `None` for `tool`/`workspace`/a bare id/an ACP-only agent; every built-in declares the capabilities its old gates granted; `has`; an unknown capability is refused at load naming file and word; `route_support` reads `route.providers`/`shape`; no `route` section → not routable.
-- [ ] `tddy-daemon-kernel` config (`tests/removed_agent_keys_unit.rs`): each removed key yields its specific migration message; a daemon.yaml without one is accepted.
-- [ ] `tddy-daemon`: `a_daemon_yaml_without_an_agent_section_still_starts` (positive control, passes today).
-- [ ] `tddy-session-lifecycle` `no_agent_name_gates.rs`: `the_scan_finds_a_gate_in_each_shape_and_skips_comments_values_and_tests` (scanner positive control, passes today).
+- [x] ✅ `tddy-coding-agent-specs` registry (`tests/agent_registry_unit.rs`, 8 tests): the registry lists every built-in by id; `for_session_type` for every built-in CLI session type and `None` for `tool`/`workspace`/a bare id/an ACP-only agent; every built-in declares the capabilities its old gates granted; `has`; an unknown capability is refused at load naming file and word; `route_support` reads `route.providers`/`shape`; no `route` section → not routable.
+- [x] ✅ `tddy-daemon-kernel` config (`tests/removed_agent_keys_unit.rs`, 4 tests): each removed key yields its specific migration message; a daemon.yaml without one is accepted.
+- [x] ✅ `tddy-daemon`: `a_daemon_yaml_without_an_agent_section_still_starts` (positive control, passes today).
+- [x] ✅ `tddy-session-lifecycle` `no_agent_name_gates.rs`: `the_scan_finds_a_gate_in_each_shape_and_skips_comments_values_and_tests` (scanner positive control) and `no_gate_in_the_session_crates_compares_a_session_type_with_an_agents_name` (the scan itself, 0 gates; the agent-id launch dispatch is not a session-type comparison and is n17 `cli-dispatch-collapse` ([#823](https://github.com/uppin/tddy-coder/pull/823))'s).
 
 ### Test level decisions
 
@@ -177,27 +180,27 @@ Not moved, left for the `#agent-tools` sweep node: `spec_for_session_type`'s las
 - [x] Run acceptance tests (verify they fail)
 - [x] USER REVIEW — acceptance tests — waived by the developer 2026-10-31: pass 2 runs without per-node review
 - [x] TDD Red — write failing unit/integration tests
-- [ ] TDD Green — implement with quality code
-- [ ] Update documentation with progress
-- [ ] Repeat Red→Green→Update cycle until feature complete
-- [ ] Run the touched packages' tests (`./test -p {package}` per package) — verify 100% pass
-- [ ] Validate changes (/validate-changes)
-- [ ] Refactor issues from change validation
-- [ ] USER REVIEW — development complete
-- [ ] Validate tests (/validate-tests)
-- [ ] Refactor test issues
-- [ ] Validate production readiness (/validate-prod-ready)
-- [ ] Refactor production readiness issues
-- [ ] Analyze code quality (/analyze-clean-code)
-- [ ] Refactor code quality issues
-- [ ] Final validation (/validate-changes)
-- [ ] Linting and formatting (`cargo clippy -p {package} -- -D warnings`, `cargo fmt`)
-- [ ] USER REVIEW — scope developed, every gap approved: ready to wrap
+- [x] TDD Green — implement with quality code
+- [x] Update documentation with progress
+- [x] Repeat Red→Green→Update cycle until feature complete
+- [x] Run the touched packages' tests (scoped; see the PR body's verification) — green except environment failures named there
+- [x] Validate changes (/validate-changes)
+- [x] Refactor issues from change validation
+- [x] USER REVIEW — development complete — scope re-cut by the developer 2026-11-04 (*Moved to later nodes*); unattended [W] stage
+- [x] Validate tests (/validate-tests)
+- [x] Refactor test issues
+- [x] Validate production readiness (/validate-prod-ready)
+- [x] Refactor production readiness issues
+- [x] Analyze code quality (/analyze-clean-code)
+- [x] Refactor code quality issues
+- [x] Final validation (/validate-changes)
+- [x] Linting and formatting (`cargo clippy -p {package} -- -D warnings`, `cargo fmt`)
+- [x] USER REVIEW — scope developed, every gap approved: ready to wrap — every gap is a developer-approved move to a later node
 
 ## Refactoring Needed
 ### From /red (TDD red phase)
 
-**Published surface (contract, `#agent-tools 12/12`):**
+**Published surface (contract, `#agent-tools 12/19`):**
 - `tddy-coding-agent-specs`: `Capability` (closed enum, 8 variants, `ALL`, `as_str`) in `src/capability.rs`; `ProviderKind`, `RouteShape`, `RouteSupport` in `src/route.rs`; `CodingAgentRegistry::{load, from_tools, tools, all, get, for_session_type}`, `RegistryError`, `CLI_SESSION_TYPE_SUFFIX` in `src/registry.rs`; `CodingAgentSection.capabilities: BTreeSet<Capability>`, `RouteSlot.{providers, shape}`, `CodingAgentSpec::{capabilities, has, route_support}` in `src/spec.rs`. A `capabilities:` line in each of the 9 built-in specs (claude: hooks, ask_user_question, split_host, project_home_main, requires_model, branch_name_required, operator_notify; cursor: hooks, requires_model, keep_worktree_on_delete, operator_notify; the rest `[]`).
 - `tddy-daemon-kernel`: `config::{refuse_removed_agent_keys, RemovedAgentConfigError, RemovedAgentKey}` (`src/config/removed_agent_keys.rs`), and a `TODO(agent-registry)` at `DaemonConfig::load`. **Not wired**: start-up still accepts the sections, so today's config tests stay green.
 - `tddy-service` `catalog.proto` `AgentInfo.{kind (types.AgentKind), harness, route_providers}`; TS regenerated (`packages/tddy-web/src/gen/catalog_pb.ts`, `scripts/generated-code.sh write packages/tddy-web`). `tddy-daemon-rpc` `agent_rows.rs` fills the new fields with defaults and a `TODO(agent-registry)`.
@@ -228,14 +231,23 @@ Not moved, left for the `#agent-tools` sweep node: `spec_for_session_type`'s las
 
 **Deletions green needs approval for:** `BUILTIN_BACKEND_AGENT_IDS`, `AnyBackend`, `provider_route::Harness`, `spec_for_session_type`, `cli_harness_requires_model`, `agent_cli.rs`'s `ClaudeCliConfig`/`CursorCliConfig`/`CliHarnessConfig` and the `DaemonConfig` fields (all named in `### Removed`; no file deletion was made here).
 ### From /validate-changes
+- 🔧 Fixed: `tddy-daemon` `test_placement` refused `removed_agent_config_acceptance.rs` (a suite that only called `DaemonConfig::load`). The refusal tests run the `tddy-daemon` binary with the file as `--config` (bounded 30 s) and the suite is in `BELONGS_HERE`.
+- 🔧 Fixed: the telegram `TODO` named a missing `docs/dev/todo/` file; the entry exists.
+- ℹ `write_slot_file_over_ssh` waits on `ssh -o BatchMode=yes` with no deadline — the same as every `tddy_git::ssh_exec` call; left as is.
+- ℹ `DaemonSessionHost::with_coding_agents_if_none` and `test_util::builtin_coding_agents` are fixture builders in `src/` (the crate's existing `test_util` pattern).
+- ℹ `for_session_type` resolves `codex-cli` and `oz-cli` too (PTY `run:` sections), so they take the generic CLI launch.
 ### From /validate-tests
+- 🔧 Fixed (flake): `ensure_project_home_session_acceptance`'s `argv_of` waited for `ARGV` and could read the line half-printed; it waits for the stub's next line (bounded, `PTY_STUB_OUTPUT`).
+- 🔧 Fixed (flake, pre-existing race, test untouched by this PR): `coding_subagent_acceptance`'s `recorded` parsed a half-written last JSONL line; it parses complete lines only, and the cancelled-outcome check waits for the line (bounded 10 s).
 ### From /validate-prod-ready
+- No debug output, mocks or stubs in production code. `TODO` markers this PR leaves each name their node and a `docs/dev/todo/` entry (see *Moved to later nodes*).
 ### From /analyze-clean-code
+- File-length gate (production lines, against `origin/feature/agent-tools/acp-agents`): `provider_route.rs` 492 → 502, `claude_cli_spawn_steps.rs` 534 → 537, `svc_start_session_core.rs` 497 → 502, `spec.rs` 656 → 711, `chaining_and_listing.rs` 518 → 522, `CreateSessionPane.tsx` 524 → 526. Not split — restructuring deferred to the `#agent-tools` sweep node by the developer; each is recorded in `packages/*/docs/code-issues/`. `start_here` 343 → 348 recorded on its complexity record.
 
 ## Validation Results
 | Validation | Last Run | Status |
 |------------|----------|--------|
-| /validate-changes | Not yet run | Pending |
-| /validate-tests | Not yet run | Pending |
-| /validate-prod-ready | Not yet run | Pending |
-| /analyze-clean-code | Not yet run | Pending |
+| /validate-changes | 2026-11-04 | ✅ stack gate clean (10 own commits over `origin/feature/agent-tools/acp-agents`); 1 test-placement failure fixed |
+| /validate-tests | 2026-11-04 | ✅ 2 flakes fixed with bounded waits |
+| /validate-prod-ready | 2026-11-04 | ✅ |
+| /analyze-clean-code | 2026-11-04 | ⚠ 6 files over 500 recorded, not split (deferred to the sweep node) |

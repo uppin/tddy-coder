@@ -1,9 +1,9 @@
 # 2026-11-04 — `provider_route::Harness` still enumerates the agents a route body is chosen for
 
 **Category:** Deferred removal
-**Owner:** `#agent-tools` n13 `route-support` — moved out of #801 by the developer on 2026-11-04, to be planned on top of
+**Owner:** `#agent-tools` n13 `route-support` ([#819](https://github.com/uppin/tddy-coder/pull/819)) (`feature/agent-tools/route-support`) — moved out of #801 by the developer on 2026-11-04, to be planned on top of
 `feature/agent-tools/agent-registry`. Code markers: `TODO(route-support)`.
-**Source:** `#agent-tools` 12/12 (#801), `TODO(route-support)` in
+**Source:** `#agent-tools` 12/19 (#801), `TODO(route-support)` in
 `packages/tddy-agent-backend/src/provider_route.rs` and `packages/tddy-agent-launch/src/session_provider_route.rs`
 
 ## What is there
@@ -32,9 +32,10 @@ the two exists nowhere today).
 
 **Changeset ACs left open:** "`RouteSupport` replaces `provider_route::Harness`'s matrix".
 
-## Node n13 scope
+## Node n13 `route-support` ([#819](https://github.com/uppin/tddy-coder/pull/819)) scope
 
-Move the route types down into `tddy-agent-backend`, remove `provider_route::Harness`, and let
+Move the route types into `tddy-agent-backend::provider_route`, remove `provider_route::Harness`, and let
 `RouteSupport` from each spec's `route.providers`/`shape` decide which route body a start gets, so an
 agent dropped into `<tddyhome>/tools` gets a route. Markers: `harness_from_spec.rs` (`HarnessFromSpec::route`),
-`session_provider_route.rs` (`no_provider_route_serves_the_agent`), `provider_route.rs` (`Harness::IDS`).
+`session_provider_route.rs` (`no_provider_route_serves_the_agent`), `provider_route.rs` (`Harness::IDS`). The same node deletes `spec_for_session_type`
+([2026-11-04-spec-for-session-type-is-unused.md](2026-11-04-spec-for-session-type-is-unused.md)).

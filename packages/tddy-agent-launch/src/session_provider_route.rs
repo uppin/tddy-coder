@@ -221,7 +221,7 @@ pub fn start_route(
 
 /// The refusal of a provider account for an agent no provider route serves: one dropped into
 /// `<tddy-home>/tools` has no route body, so it runs on its own setup or not at all.
-// TODO(route-support): #agent-tools n13 — route bodies are still selected by
+// TODO(route-support): #agent-tools n13 `route-support` — route bodies are still selected by
 // `provider_route::Harness`, not by the spec's `route.providers`/`shape` (docs/dev/todo/2026-11-04-provider-route-harness-enum-remains.md).
 pub(crate) fn no_provider_route_serves_the_agent() -> Status {
     Status::failed_precondition(

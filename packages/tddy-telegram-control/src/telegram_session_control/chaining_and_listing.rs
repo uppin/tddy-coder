@@ -413,9 +413,9 @@ impl<S: TelegramSender + Send + Sync> TelegramSessionControlHarness<S> {
             &self.sessions_base,
             session_id,
             None,
-            // TODO(agent-config-removal): #agent-tools n15 — this controller holds no coding-agent
+            // TODO(agent-config-removal): #agent-tools n19 `agent-config-removal` — this controller holds no coding-agent
             // registry, so a deleted agent session's worktree is no longer removed with it
-            // (docs/dev/todo/2026-11-04-removed-agent-config-readers-remain.md).
+            // (docs/dev/todo/2026-11-04-telegram-delete-leaves-agent-worktrees.md).
             None,
         )
         .map_err(|s| anyhow::anyhow!("{}", s.message))?;
