@@ -1,7 +1,7 @@
 //! Acceptance: `tddy-coder --agent` accepts any coding-agent registry id that can take a turn
 //! without a terminal, and the interactive selection lists the registry (`#agent-tools 12/12`).
 //!
-//! PRD: `docs/ft/daemon/1-WIP/PRD-2026-10-31-coding-agent-registry.md` § Acceptance Criteria.
+//! Feature doc: `docs/ft/daemon/session-agent-roster.md`.
 //!
 //! The registry is loaded from a `<tddyhome>/tools` of the test's own holding one new agent,
 //! `acme`, declared in YAML alone: a headless turn read by the existing `claude-stream-json`

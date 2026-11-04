@@ -1,7 +1,7 @@
 //! `tddy-coder --agent` and its interactive selection, read from the coding-agent registry
 //! (`#agent-tools 12/12`).
 //!
-//! PRD: `docs/ft/daemon/1-WIP/PRD-2026-10-31-coding-agent-registry.md`. Replaces
+//! Feature doc: `docs/ft/daemon/session-agent-roster.md`. Replaces
 //! `run::BUILTIN_BACKEND_AGENT_IDS` and `tddy_agent_backend::backend_selection_question`'s fixed
 //! options: a workflow backend can be built from any registry agent that declares a way to take a
 //! turn without a terminal — a `coding_agent.headless` or a `coding_agent.acp` section — so an

@@ -1,7 +1,7 @@
 //! Acceptance: an agent is added by dropping one YAML file into `<tddyhome>/tools/`, and an agent's
 //! gates are its declared capabilities rather than its name (`#agent-tools 12/12`).
 //!
-//! PRD: `docs/ft/daemon/1-WIP/PRD-2026-10-31-coding-agent-registry.md` § Acceptance Criteria.
+//! Feature doc: `docs/ft/daemon/session-agent-roster.md`.
 //!
 //! The daemon is the real `DaemonSessionHost` given the coding-agent registry over its
 //! `<tddyhome>/tools` (see `agent_registry_support`); its daemon.yaml has no agent section. The

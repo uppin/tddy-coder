@@ -432,12 +432,13 @@ test-owned pipe, record encoding). `tddy-spawn/tests/pre_exec_safety.rs` scans t
 
 `config.rs` holds `DaemonConfig` with its `Default` and its field-level `impl`,
 `TelegramConfig`, `ListenConfig`, `LiveKitConfig`, the serde defaults those name, and the facades below.
-About 440 production lines (production code excluding `#[cfg(test)]` items). Eight modules under
+About 440 production lines (production code excluding `#[cfg(test)]` items). Nine modules under
 `src/config/` hold the rest:
 
 | Module | Holds |
 |---|---|
-| `agent_cli` | `ClaudeCliConfig`, `CursorCliConfig`, their defaults, every `resolve_claude_*` / `resolve_cursor_*`, the `CLAUDE_*` / `CURSOR_*` env consts, the shim and `PATH` search; `CliHarnessConfig { binary_path }`, the value type of `DaemonConfig.cli_harnesses` (`cli_harnesses: { opencode-cli: { binary_path } }`, keyed by session type), and `DaemonConfig::cli_harness_binary(session_type, default_binary, binary_env)` — the environment variable when non-blank, else the config entry when non-blank, else the default |
+| `agent_cli` | `ClaudeCliConfig`, `CursorCliConfig`, their defaults, every `resolve_claude_*` / `resolve_cursor_*`, the `CLAUDE_*` / `CURSOR_*` env consts, the shim and `PATH` search; `CliHarnessConfig { binary_path }`, the value type of `DaemonConfig.cli_harnesses` (`cli_harnesses: { opencode-cli: { binary_path } }`, keyed by session type), and `DaemonConfig::cli_harness_binary(session_type, default_binary, binary_env)` — the environment variable when non-blank, else the config entry when non-blank, else the default. These types remain, but a config that `DaemonConfig::load` accepts never sets `claude_cli`, `cursor_cli` or `cli_harnesses`, so only the environment variables and defaults answer |
+| `removed_agent_keys` | `refuse_removed_agent_keys(&serde_yaml::Value)`, called by `DaemonConfig::load` on the untyped document: a top-level `claude_cli:`, `cursor_cli:` or `cli_harnesses:` is refused with a `RemovedAgentConfigError` — one `RemovedAgentKey { key, tool, moved }` per section, naming `<tddyhome>/tools/<id>.yaml` and where each field went (`binary_path` → `binary.command`, `claude_home_dir` / `cursor_home_dir` → `home.key`, `fullscreen` → `run.env`, `answer_wait_secs` → `coding_agent.answer_wait_secs`, `tddy_tools_path` → `tools/tddy-tools.yaml binary.command`, `daemon_url` → `listen.advertise_url`); a `cli_harnesses.<type>` entry names its session type's tool (`opencode-cli` → `opencode`) |
 | `daemon_methods` | the second `impl DaemonConfig`: `load`, the accessors, `apply_*_env_override(s)`, `validate_for_relay` |
 | `sections` | `RelayConfig`, `LocalConfig`, `KeyringConfig`, `GitConfig`, `SandboxCgroupConfig`, `IndexDaemonConfig` with their defaults |
 | `env_overrides` | `merge_timing_env`, `merge_telegram_env` and their parsers |

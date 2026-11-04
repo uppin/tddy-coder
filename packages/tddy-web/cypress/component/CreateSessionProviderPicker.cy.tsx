@@ -6,8 +6,8 @@
  * specialized agent definition (a MODEL row) and an agent that always runs on its own vendor have
  * none, so the pane neither offers the provider field nor asks `ListProviderRoutes` for them.
  *
- * PRD: docs/ft/daemon/1-WIP/PRD-2026-10-31-coding-agent-registry.md
- * Closes docs/dev/todo/2026-10-22-tool-session-provider-picker-needs-harness-metadata.md
+ * Feature doc: docs/ft/daemon/session-agent-roster.md
+ * Closes the tool-session provider picker's missing harness metadata (#801).
  */
 import { createClient } from "@connectrpc/connect";
 import { anInMemoryRpcBackend, type InMemoryRpcBackend } from "tddy-connectrpc-testkit";

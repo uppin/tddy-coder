@@ -59,14 +59,19 @@ its own GUI and the headless `oz` CLI, neither of which the session can use. Ins
 The CLI carries its own sign-in — a browser/device-code login on first run, separate from the Warp
 desktop app's — so a first session's terminal may open on the login flow before any conversation.
 
-`TDDY_WARP_CLI` when set and non-blank, else `cli_harnesses.warp-cli.binary_path` in `daemon.yaml`,
-else `warp` on `PATH`:
+`TDDY_WARP_CLI` (the spec's `binary.env`) when set and non-blank, else the `binary.command` of the
+`warp` spec, `warp` on `PATH`. A different binary is declared by overriding the spec
+([Declared tools](../../../packages/tddy-actions/docs/declared-tools.md)):
 
 ```yaml
-cli_harnesses:
-  warp-cli:
-    binary_path: /opt/homebrew/bin/warp
+# <tddyhome>/tools/warp.yaml — replaces the built-in `warp` spec whole (same `id`)
+id: warp
+binary: { command: /opt/homebrew/bin/warp }
+# …the rest of the built-in spec, unchanged
 ```
+
+A `cli_harnesses:` section in `daemon.yaml` is refused at start-up
+([Removed `daemon.yaml` sections](systemd-install.md#removed-daemonyaml-sections)).
 
 ## Models
 

@@ -107,7 +107,7 @@ Every `cursor-cli` launch — host start, host resume, jailed start — renders 
 
 | Fact | Declared as |
 |---|---|
-| Binary | `agent`, overridable by `TDDY_CURSOR_AGENT`; daemon.yaml `cursor_cli.binary_path`, when it names a path, is the binary run |
+| Binary | `agent`, overridable by `TDDY_CURSOR_AGENT`; a `<tddyhome>/tools/cursor.yaml` override sets `binary.command` |
 | Argv | `agent [--resume {chat_id}] [--model {model}] <slots> [{prompt}]`. When the resolved binary is the published launcher script, the bundled `node` and its `index.js` run instead (`node_launcher` / `node_entry`) — the wrapper cannot resolve its own install dir in a jail |
 | MCP | `kind: placed`, `{home}/.cursor/mcp.json`, format `cursor-mcp-json`. Rendered in a jail only, into the persistent home; a **host** launch registers no MCP server, so the user's own `$HOME/.cursor/mcp.json` is never touched |
 | Instructions | `rules_file: .cursor/rules/tddy-managed-workflow.mdc` — the managed workflow's prompt, written whole on every launch |
@@ -137,10 +137,15 @@ Every `cursor-cli` launch — host start, host resume, jailed start — renders 
 
 ### Config
 
-Optional `cursor_cli:` block in `daemon.yaml`:
+`daemon.yaml` has no `cursor_cli:` block; one is refused at start-up
+([Removed `daemon.yaml` sections](systemd-install.md#removed-daemonyaml-sections)). The Cursor binary
+is `binary.command` of `cursor.yaml` (`<tddyhome>/tools/cursor.yaml` overrides it) or `TDDY_CURSOR_AGENT`;
+the Cursor home is the spec's `home.key`; the `--daemon` URL hooks carry is the daemon's
+`listen.advertise_url`, unread when `--daemon-socket` is given, which every rendered hook is.
 
-- `binary_path` — Cursor Agent CLI binary, when it names a path (otherwise `cursor.yaml`'s `agent` / `TDDY_CURSOR_AGENT`)
-- `daemon_url` — the `--daemon` URL hooks carry; unread when `--daemon-socket` is given, which every rendered hook is
+The `cursor` spec declares the capabilities `hooks`, `requires_model`, `keep_worktree_on_delete` and
+`operator_notify`: hook status reports and operator notifications are accepted from a `cursor-cli`
+session, a model is required to start one, and `DeleteSession` leaves its worktree in place.
 
 ### Web UI
 

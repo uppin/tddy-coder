@@ -1,7 +1,7 @@
 //! Acceptance: a daemon.yaml that still carries a removed agent section fails start-up, naming the
 //! `<tddyhome>/tools/<id>.yaml` that replaces it (`#agent-tools 12/12`).
 //!
-//! PRD: `docs/ft/daemon/1-WIP/PRD-2026-10-31-coding-agent-registry.md` § Acceptance Criteria.
+//! Feature doc: `docs/ft/daemon/session-agent-roster.md`.
 //!
 //! Start-up reads its configuration through `DaemonConfig::load` before anything else
 //! (`src/main.rs`, and the desktop host's `config_source`), so a refusal there is a refusal to

@@ -1,7 +1,7 @@
 //! The coding-agent registry: the one enumeration of the agents a host offers
 //! (`#agent-tools 12/12`).
 //!
-//! PRD: `docs/ft/daemon/1-WIP/PRD-2026-10-31-coding-agent-registry.md`. It replaces the parallel
+//! Feature doc: `docs/ft/daemon/session-agent-roster.md`. It replaces the parallel
 //! lists — `AnyBackend`, `provider_route::Harness`, `BUILTIN_BACKEND_AGENT_IDS`,
 //! `backend_selection_question`'s options and the session-type string tables. An agent is in it
 //! when its tool file has a `coding_agent` extension: a built-in spec, an override of one, or a new

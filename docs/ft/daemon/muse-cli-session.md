@@ -70,14 +70,19 @@ PTY.
 
 ## The binary
 
-`TDDY_MUSE_CLI` when set and non-blank, else `cli_harnesses.muse-cli.binary_path` in `daemon.yaml`,
-else `muse` on `PATH`:
+`TDDY_MUSE_CLI` (the spec's `binary.env`) when set and non-blank, else the `binary.command` of the
+`muse` spec, `muse` on `PATH`. A different binary is declared by overriding the spec, a whole
+replacement by `id` ([Declared tools](../../../packages/tddy-actions/docs/declared-tools.md)):
 
 ```yaml
-cli_harnesses:
-  muse-cli:
-    binary_path: /opt/muse/bin/muse
+# <tddyhome>/tools/muse.yaml — replaces the built-in `muse` spec whole (same `id`)
+id: muse
+binary: { command: /opt/muse/bin/muse }
+# …the rest of the built-in spec, unchanged
 ```
+
+A `cli_harnesses:` section in `daemon.yaml` is refused at start-up
+([Removed `daemon.yaml` sections](systemd-install.md#removed-daemonyaml-sections)).
 
 ## Models
 

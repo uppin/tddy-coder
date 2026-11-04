@@ -2,7 +2,7 @@
 //! `cli_harnesses:` — are refused with the tool file that replaces each, and where each of its
 //! fields went.
 //!
-//! PRD: `docs/ft/daemon/1-WIP/PRD-2026-10-31-coding-agent-registry.md`.
+//! Feature doc: `docs/ft/daemon/session-agent-roster.md`.
 
 use pretty_assertions::assert_eq;
 use tddy_daemon_kernel::config::{refuse_removed_agent_keys, RemovedAgentKey};

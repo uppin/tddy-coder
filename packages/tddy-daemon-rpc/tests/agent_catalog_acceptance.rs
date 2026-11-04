@@ -1,8 +1,8 @@
 //! Acceptance: `CatalogService.ListAgents` reports each agent's kind, harness and route support,
 //! read from the coding-agent registry (`#agent-tools 12/12`).
 //!
-//! PRD: `docs/ft/daemon/1-WIP/PRD-2026-10-31-coding-agent-registry.md` § Acceptance Criteria.
-//! Closes `docs/dev/todo/2026-10-22-tool-session-provider-picker-needs-harness-metadata.md`: a
+//! Feature doc: `docs/ft/daemon/session-agent-roster.md`.
+//! Closes the tool-session provider picker's missing harness metadata (#801): a
 //! picker asks for provider routes only for an agent whose `route_providers` is non-empty.
 //!
 //! The daemon's `<tddyhome>/tools` is empty, so the registry is the built-in specs.

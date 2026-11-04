@@ -1,7 +1,7 @@
 //! `coding_agent.capabilities`: what a session of the agent offers, declared rather than inferred
 //! from its name (`#agent-tools 12/12`).
 //!
-//! PRD: `docs/ft/daemon/1-WIP/PRD-2026-10-31-coding-agent-registry.md`. Every gate that used to
+//! Feature doc: `docs/ft/daemon/session-agent-roster.md`. Every gate that used to
 //! read `session_type == "claude-cli"` asks the agent's spec instead —
 //! [`crate::CodingAgentSpec::has`]. The set is closed: a capability is code that reads it, so a
 //! word no code reads is refused when the spec loads, never ignored.

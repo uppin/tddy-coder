@@ -1,7 +1,7 @@
 //! `coding_agent.route.{providers, shape}`: which model providers an agent can be routed to, and
 //! how a route reaches it (`#agent-tools 12/12`).
 //!
-//! PRD: `docs/ft/daemon/1-WIP/PRD-2026-10-31-coding-agent-registry.md`. This is the data that
+//! Feature doc: `docs/ft/daemon/session-agent-roster.md`. This is the data that
 //! replaces `tddy_agent_backend::provider_route::Harness`'s matrix: Claude Code takes Anthropic
 //! Messages through its environment, Codex OpenAI Responses through its arguments, OpenCode
 //! Responses or Chat Completions through a configuration file, Muse Code Meta only, and an agent

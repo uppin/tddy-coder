@@ -1,7 +1,7 @@
 //! The daemon.yaml agent sections `#agent-tools 12/12` removes: `claude_cli:`, `cursor_cli:` and
 //! `cli_harnesses:`.
 //!
-//! PRD: `docs/ft/daemon/1-WIP/PRD-2026-10-31-coding-agent-registry.md`. What they configured now
+//! Feature doc: `docs/ft/daemon/session-agent-roster.md`. What they configured now
 //! lives in the agent's tool file, `<tddyhome>/tools/<id>.yaml` — an override of the built-in spec.
 //! A daemon.yaml that still carries one is refused at start-up, naming that file and where each of
 //! its fields went, rather than ignored: a leftover section must not look like a setting that still

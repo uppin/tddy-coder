@@ -1,7 +1,7 @@
 //! The coding-agent registry (`#agent-tools 12/12`): one enumeration of the agents a host offers,
 //! each with the capabilities and route support its spec declares.
 //!
-//! PRD: `docs/ft/daemon/1-WIP/PRD-2026-10-31-coding-agent-registry.md`.
+//! Feature doc: `docs/ft/daemon/session-agent-roster.md`.
 //!
 //! Each registry here is loaded from a `<tddyhome>/tools` of the test's own — empty, so the
 //! built-ins are what loads, unless a test drops a file in.

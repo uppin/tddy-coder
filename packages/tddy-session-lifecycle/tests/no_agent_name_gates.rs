@@ -1,6 +1,6 @@
 //! Source scan: no gate compares a session type with an agent's name (`#agent-tools 12/12`).
 //!
-//! PRD: `docs/ft/daemon/1-WIP/PRD-2026-10-31-coding-agent-registry.md`. What a session of an agent
+//! Feature doc: `docs/ft/daemon/session-agent-roster.md`. What a session of an agent
 //! offers is declared in its spec's `capabilities` and read through
 //! `tddy_coding_agent_specs::CodingAgentSpec::has`; the agent a session type runs is
 //! `CodingAgentRegistry::for_session_type`. So no production code in the crates that held the
