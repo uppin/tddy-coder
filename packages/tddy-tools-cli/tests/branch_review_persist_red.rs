@@ -51,8 +51,9 @@ fn submit_branch_review_cli_without_a_session_fails_and_writes_nothing() {
     assert_eq!(
         (
             output.status.code(),
-            String::from_utf8_lossy(&output.stderr)
-                .contains("pass --socket <path>, run from a directory at or below a .tddy/session.json"),
+            String::from_utf8_lossy(&output.stderr).contains(
+                "pass --socket <path>, run from a directory at or below a .tddy/session.json"
+            ),
             dir.path().join("review.md").exists(),
         ),
         (Some(1), true, false)

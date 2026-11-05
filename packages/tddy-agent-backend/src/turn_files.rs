@@ -74,18 +74,19 @@ impl TurnFiles {
         contents: &[u8],
         workdir: &Path,
     ) -> Result<(), BackendError> {
-        if let Some(parent) = path.parent().filter(|parent| {
-            path.starts_with(workdir) && *parent != workdir && !parent.exists()
-        }) {
+        if let Some(parent) = path
+            .parent()
+            .filter(|parent| path.starts_with(workdir) && *parent != workdir && !parent.exists())
+        {
             self.created_dirs.push(parent.to_path_buf());
         }
         if let Ok(relative) = path.strip_prefix(workdir) {
             // Excluded before it is written, so it is never an untracked file git would offer.
             exclude_from_git(workdir, &format!("/{}", relative.to_string_lossy()))?;
         }
-        crate::atomic_file::write_atomic_with_mode(path, contents, OWNER_ONLY_FILE).map_err(|e| {
-            BackendError::InvocationFailed(format!("could not write {}: {e}", path.display()))
-        })?;
+        crate::atomic_file::write_atomic_with_mode(path, contents, OWNER_ONLY_FILE).map_err(
+            |e| BackendError::InvocationFailed(format!("could not write {}: {e}", path.display())),
+        )?;
         self.written.push(path.to_path_buf());
         Ok(())
     }

@@ -19,7 +19,7 @@ use tddy_actions::tool::ToolHost;
 use tddy_agent_launch::spec_launch::HostCodingAgents;
 use tddy_coding_agent_specs::load_agent_registry;
 use tddy_coding_subagent::{CodingAgentDef, CodingAgentLaunch, CodingAgentLauncher};
-use tddy_core::{ConversationDriver, HeadlessDriver, HeadlessHarness};
+use tddy_core::{ConversationDriver, HeadlessDriver};
 use tddy_daemon_kernel::config::DaemonConfig;
 use tddy_session_lifecycle::coding_agent_as_user::DropContext;
 use tddy_session_lifecycle::coding_agent_launcher::DaemonCodingAgentLauncher;
@@ -206,7 +206,7 @@ async fn a_headless_claude_coding_subagent_launches_with_mcp_config_and_approval
         .headless_command_for(&a_headless_claude_launch(worktree.path()))
         .await
         .expect("the claude conversation is planned from its spec");
-    let driver = HeadlessDriver::new(HeadlessHarness::Claude, command);
+    let driver = HeadlessDriver::new(command);
 
     // When
     let turn = tokio::time::timeout(

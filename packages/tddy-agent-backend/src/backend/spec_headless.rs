@@ -39,9 +39,7 @@ use crate::stream::{self, ProgressEvent};
 use crate::turn_files::TurnFiles;
 
 use super::routed::route_child_env;
-use super::turn_process::{
-    describe_deadline, spawn_turn, strip_tddy_env, TurnCommand, TurnGroup,
-};
+use super::turn_process::{describe_deadline, spawn_turn, strip_tddy_env, TurnCommand, TurnGroup};
 use super::{
     curated_models_for_agent, BackendModels, CodingBackend, InvokeRequest, InvokeResponse,
     SessionMode,
@@ -206,7 +204,9 @@ impl SpecHeadlessBackend {
         allowed_tools.extend(request.extra_allowed_tools.iter().flatten().cloned());
         Ok(HeadlessTurn {
             prompt,
-            model: protocol.route_model.model_for(request.model.clone(), &route_args),
+            model: protocol
+                .route_model
+                .model_for(request.model.clone(), &route_args),
             session,
             permission_mode,
             append_system_prompt_file: system_prompt_file.map(Path::to_path_buf),
@@ -224,16 +224,19 @@ impl SpecHeadlessBackend {
         })
     }
 
-    /// The request's system prompt text: the file's, else the inline one.
-    fn system_text(request: &InvokeRequest) -> Result<Option<String>, BackendError> {
-        match &request.system_prompt_path {
-            Some(path) => std::fs::read_to_string(path).map(Some).map_err(|e| {
-                BackendError::InvocationFailed(format!(
-                    "failed to read system_prompt_path {}: {e}",
-                    path.display()
-                ))
-            }),
-            None => Ok(request.system_prompt.clone()),
+    /// The request's system prompt text: the file's, else the inline one. A prompt that goes in
+    /// front of the user's has to be read, and an unreadable file is an error; one passed to the
+    /// agent as a file is only read for the conversation log, best effort.
+    fn system_text(&self, request: &InvokeRequest) -> Result<Option<String>, BackendError> {
+        let Some(path) = &request.system_prompt_path else {
+            return Ok(request.system_prompt.clone());
+        };
+        match (std::fs::read_to_string(path), self.protocol.system_prompt) {
+            (Ok(text), _) => Ok(Some(text)),
+            (Err(e), SystemPromptDelivery::Prepend) => Err(BackendError::InvocationFailed(
+                format!("failed to read system_prompt_path {}: {e}", path.display()),
+            )),
+            (Err(_), SystemPromptDelivery::Flag) => Ok(None),
         }
     }
 
@@ -250,7 +253,7 @@ impl SpecHeadlessBackend {
         let mut env: Vec<(String, String)> = self
             .provider_route
             .iter()
-            .flat_map(|route| route_child_env(route))
+            .flat_map(route_child_env)
             .map(|(name, value)| (name.to_string(), value.to_string()))
             .collect();
         env.extend(render_env(
@@ -282,7 +285,7 @@ impl CodingBackend for SpecHeadlessBackend {
     /// the turn deadline, with a bounded stderr grace.
     async fn invoke(&self, request: InvokeRequest) -> Result<InvokeResponse, BackendError> {
         let workdir = turn_workdir(request.working_dir.as_deref())?;
-        let system_text = Self::system_text(&request)?;
+        let system_text = self.system_text(&request)?;
         // A system prompt passed as a file is the request's own, or its inline text in a temporary
         // file the turn removes.
         let (system_prompt_path, temp_system_prompt) = match (
@@ -303,7 +306,12 @@ impl CodingBackend for SpecHeadlessBackend {
             }
             _ => (None, None),
         };
-        let turn = self.turn_for(&request, system_text.as_deref(), system_prompt_path.as_deref(), &workdir)?;
+        let turn = self.turn_for(
+            &request,
+            system_text.as_deref(),
+            system_prompt_path.as_deref(),
+            &workdir,
+        )?;
         let invocation = self.renderer.render(&turn)?;
         let env = self.child_env(&invocation, &request)?;
 
@@ -315,7 +323,10 @@ impl CodingBackend for SpecHeadlessBackend {
                 &workdir,
                 &SessionPointer {
                     socket: socket.clone(),
-                    repo_dir: request.working_dir.clone().unwrap_or_else(|| workdir.clone()),
+                    repo_dir: request
+                        .working_dir
+                        .clone()
+                        .unwrap_or_else(|| workdir.clone()),
                     session_dir: request.session_dir.clone(),
                     remote: request
                         .remote
@@ -348,9 +359,8 @@ impl CodingBackend for SpecHeadlessBackend {
             system_text,
             progress_callback: self.progress_callback.clone(),
         };
-        let mut reader = tokio::task::spawn_blocking(move || {
-            read_turn(read, child, stdout, stderr, &reaped)
-        });
+        let mut reader =
+            tokio::task::spawn_blocking(move || read_turn(read, child, stdout, stderr, &reaped));
         let outcome = match tokio::time::timeout(self.turn_deadline, &mut reader).await {
             Ok(joined) => joined.map_err(|e| BackendError::InvocationFailed(e.to_string()))?,
             Err(_elapsed) => {
@@ -381,11 +391,7 @@ impl CodingBackend for SpecHeadlessBackend {
         let Some(listing) = &self.model_listing else {
             return Ok(curated_models_for_agent(self.name()));
         };
-        let shown = format!(
-            "{} {}",
-            listing.program.display(),
-            listing.argv.join(" ")
-        );
+        let shown = format!("{} {}", listing.program.display(), listing.argv.join(" "));
         let mut command = tokio::process::Command::new(&listing.program);
         command
             .args(&listing.argv)
@@ -524,7 +530,11 @@ fn read_turn(
         StreamSinks {
             on_progress: &mut on_progress,
             on_raw_output: &mut on_raw_output,
-            on_debug_line: if debug { Some(&mut on_debug_line) } else { None },
+            on_debug_line: if debug {
+                Some(&mut on_debug_line)
+            } else {
+                None
+            },
             on_conversation_line: if has_conversation {
                 Some(&mut on_conversation_line)
             } else {
@@ -545,11 +555,10 @@ fn read_turn(
         request.goal_id
     );
 
-    if !invocation.adapter.exit_ok(
-        exit_code,
-        &stream_result,
-        invocation.exit_ok_if_structured,
-    ) {
+    if !invocation
+        .adapter
+        .exit_ok(exit_code, &stream_result, invocation.exit_ok_if_structured)
+    {
         let detail = invocation.adapter.failure_detail(&stream_result, &stderr);
         return Err(BackendError::InvocationFailed(if detail.is_empty() {
             format!("{agent_id} exited with code {exit_code}")

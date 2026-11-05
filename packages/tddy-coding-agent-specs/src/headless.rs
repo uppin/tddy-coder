@@ -11,11 +11,11 @@ use std::collections::BTreeMap;
 use std::path::PathBuf;
 
 use tddy_actions::tool::{render_argv, ResolvedTool, RunSection, TemplateParams, Transport};
-use tddy_agent_backend::adapters::{HeadlessModelListing, LaunchAdapters};
 use tddy_agent_backend::adapters::{
     AdapterError, AdapterRegistry, HeadlessInvocation, HeadlessMcpServer, HeadlessRenderer,
     HeadlessTurn,
 };
+use tddy_agent_backend::adapters::{HeadlessModelListing, LaunchAdapters};
 use tddy_agent_backend::SessionMode;
 // `#agent-tools 15/19`: the protocol fields of `coding_agent.headless`, which live beside the port
 // in `tddy-agent-backend` (this crate depends on it) and are named here for spec readers.
@@ -45,7 +45,9 @@ pub enum HeadlessSpecError {
         registered: String,
     },
     /// Its `models.adapter` names no launch adapter this build registers.
-    #[error("coding agent {agent}: models adapter {adapter} is not a launch adapter this build has")]
+    #[error(
+        "coding agent {agent}: models adapter {adapter} is not a launch adapter this build has"
+    )]
     UnknownModelsAdapter { agent: String, adapter: String },
     /// Its `models.list_command` does not render.
     #[error("coding agent {agent}: models.list_command does not render: {reason}")]

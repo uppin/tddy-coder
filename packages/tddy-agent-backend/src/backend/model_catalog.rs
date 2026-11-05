@@ -11,8 +11,8 @@ use anyhow::Context;
 use serde::Serialize;
 
 use super::{
-    AnyBackend, BackendModels, ClaudeAcpBackend, ClaudeCodeBackend, CodexAcpBackend, CodexBackend,
-    CodingBackend, CursorBackend, OpenCodeAcpBackend, StubBackend,
+    curated_models_for_agent, AnyBackend, BackendModels, ClaudeAcpBackend, CodexAcpBackend,
+    CodingBackend, OpenCodeAcpBackend, StubBackend,
 };
 use crate::cli_harness::{cli_harness, models_from_listing, CliHarness, CliModelSource};
 
@@ -104,12 +104,54 @@ pub async fn resolve_agent_models(
             CliModelSource::ListedByBinary(args) => list_by_binary(harness, args, paths).await,
         };
     }
+    // The headless workflow agents have no backend to ask here — theirs is built from a spec, in
+    // `tddy-coder`. Claude and Codex cannot enumerate their models; Cursor's binary can.
+    match agent {
+        "claude" | "codex" => return Ok(curated_models_for_agent(agent)),
+        "cursor" => return list_cursor_models(paths).await,
+        _ => {}
+    }
     let backend =
         build_backend(agent, paths).with_context(|| format!("no backend for agent {:?}", agent))?;
     backend
         .list_models()
         .await
         .with_context(|| format!("listing models for agent {:?}", agent))
+}
+
+/// The models Cursor's `agent --list-models` prints, under [`MODEL_LISTING_DEADLINE`]. A binary that
+/// cannot be run, that exits non-zero, that does not end in time or that lists nothing is an error.
+async fn list_cursor_models(paths: &BackendCliPaths) -> anyhow::Result<BackendModels> {
+    use crate::adapters::{CursorModels, ModelsAdapter as _};
+    let binary = paths
+        .cursor_cli_path
+        .as_deref()
+        .unwrap_or_else(|| Path::new("agent"));
+    let output = tokio::time::timeout(
+        super::spec_headless::MODEL_LISTING_DEADLINE,
+        tokio::process::Command::new(binary)
+            .arg("--list-models")
+            .stdin(std::process::Stdio::null())
+            .kill_on_drop(true)
+            .output(),
+    )
+    .await
+    .with_context(|| format!("{} --list-models did not end in time", binary.display()))?
+    .with_context(|| format!("running {} --list-models", binary.display()))?;
+    anyhow::ensure!(
+        output.status.success(),
+        "{} --list-models exited with {}: {}",
+        binary.display(),
+        output.status,
+        String::from_utf8_lossy(&output.stderr).trim()
+    );
+    let models = CursorModels.parse_models(&String::from_utf8_lossy(&output.stdout));
+    anyhow::ensure!(
+        !models.models.is_empty(),
+        "{} --list-models returned no models",
+        binary.display()
+    );
+    Ok(models)
 }
 
 /// The catalogue `harness`'s own binary prints when run with `args`. A binary that cannot be run or
@@ -145,16 +187,10 @@ async fn list_by_binary(
 /// Construct the backend for `agent`, honoring any CLI-path overrides. Errors on an unknown agent.
 fn build_backend(agent: &str, paths: &BackendCliPaths) -> anyhow::Result<AnyBackend> {
     let backend = match agent.trim() {
-        "claude" => AnyBackend::Claude(ClaudeCodeBackend::new()),
         "claude-acp" => AnyBackend::ClaudeAcp(match &paths.claude_acp_cli_path {
             Some(p) => ClaudeAcpBackend::with_agent_path(p.clone()),
             None => ClaudeAcpBackend::new(),
         }),
-        "cursor" => AnyBackend::Cursor(match &paths.cursor_cli_path {
-            Some(p) => CursorBackend::with_path(p.clone()),
-            None => CursorBackend::new(),
-        }),
-        "codex" => AnyBackend::Codex(CodexBackend::new()),
         "codex-acp" => AnyBackend::CodexAcp(match &paths.codex_acp_cli_path {
             Some(p) => CodexAcpBackend::with_agent_path(p.clone()),
             None => CodexAcpBackend::new(),

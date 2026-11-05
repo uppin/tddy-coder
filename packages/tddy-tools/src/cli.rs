@@ -196,6 +196,11 @@ pub async fn run_submit(args: SubmitArgs) -> Result<()> {
         relay_submit(std::path::Path::new(&socket_path), &goal, &data).await?;
     } else {
         // Nothing to report to: a validated submission that reached no session is not a success.
+        //
+        // TODO(headless-driver): this branch used to persist a `branch-review` submission's
+        // `review.md` into `TDDY_SESSION_DIR` and report success with no socket — deleted with the
+        // local no-session success path; see
+        // `docs/dev/todo/2026-11-05-headless-driver-unplanned-deletions.md`.
         output_error(&no_session_message(), 1);
     }
 

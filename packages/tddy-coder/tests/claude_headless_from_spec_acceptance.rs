@@ -1,11 +1,12 @@
 //! Acceptance: the `claude` workflow backend (`tddy-coder --agent claude`) is rendered from
 //! `claude.yaml`'s `coding_agent.headless` section, and a stub `claude` records exactly the argv
-//! the hand-built `build_claude_args` passes today — for the plan goal, for accept-edits, and for a
-//! resume — while a `<tddyhome>/tools/claude.yaml` override changes it.
+//! the bespoke Claude backend passed (`build_claude_args`, deleted in `#agent-tools 15/19`) — for
+//! the plan goal, for accept-edits, and for a resume — while a `<tddyhome>/tools/claude.yaml`
+//! override changes it.
 //!
 //! Changeset: `docs/dev/changesets/2026-11-02-agent-tools-claude-headless.md` (`#agent-tools 6/12`).
 //!
-//! The goldens below are `build_claude_args`' output for the same requests, with the MCP config at
+//! The goldens below are the bespoke backend's output for the same requests, with the MCP config at
 //! its new home: `<session_dir>/claude-mcp-config.json`, written by the MCP slot, rather than a
 //! temp file. The host is a fixture whose environment names a stub `claude` and a stub
 //! `tddy-tools`; nothing of the real machine resolves.
@@ -17,7 +18,7 @@ use std::sync::Arc;
 
 use pretty_assertions::assert_eq;
 use tddy_actions::tool::ToolHost;
-use tddy_coder::claude_from_spec::claude_backend_from_spec;
+use tddy_coder::headless_from_spec::headless_backend_from_spec;
 use tddy_coding_agent_specs::builtin_specs;
 use tddy_core::{
     CodingBackend, GoalHints, GoalId, InvokeRequest, InvokeResponse, PermissionHint, SessionMode,
@@ -171,7 +172,7 @@ impl AWorkspace {
     }
 
     async fn invoke(&self, request: InvokeRequest) -> InvokeResponse {
-        claude_backend_from_spec(&self.tools_dir(), self.host())
+        headless_backend_from_spec("claude", &self.tools_dir(), self.host())
             .expect("the claude backend renders from its spec")
             .invoke(request)
             .await
@@ -203,9 +204,9 @@ fn an_accept_edits_goal() -> GoalHints {
     }
 }
 
-/// `build_claude_args`' argv for `PROMPT` on opus, with `middle` (permission mode and session) and
+/// The bespoke backend's argv for `PROMPT` on opus, with `middle` (permission mode and session) and
 /// `allowed` tools, the workspace's system prompt and its MCP config.
-fn todays_argv(
+fn the_bespoke_backends_argv(
     workspace: &AWorkspace,
     after_verbose: &[&str],
     middle: &[&str],
@@ -233,7 +234,8 @@ fn todays_argv(
 }
 
 #[tokio::test]
-async fn tddy_coder_agent_claude_drives_a_stub_whose_argv_equals_todays_for_the_plan_goal() {
+async fn tddy_coder_agent_claude_drives_a_stub_whose_argv_equals_the_bespoke_backends_for_the_plan_goal(
+) {
     // Given
     let workspace = a_workspace();
     let request = workspace.request(the_plan_goal(), SessionMode::Fresh("sess-1".to_string()));
@@ -245,7 +247,7 @@ async fn tddy_coder_agent_claude_drives_a_stub_whose_argv_equals_todays_for_the_
     assert_eq!(response.output, "The plan is ready.");
     assert_eq!(
         workspace.argv(),
-        todays_argv(
+        the_bespoke_backends_argv(
             &workspace,
             &[],
             &[
@@ -287,7 +289,7 @@ async fn the_same_for_accept_edits_and_for_resume() {
     // Then
     assert_eq!(
         workspace.argv(),
-        todays_argv(
+        the_bespoke_backends_argv(
             &workspace,
             &[],
             &[
@@ -325,7 +327,7 @@ async fn a_tddyhome_override_of_claude_yaml_changes_the_headless_argv() {
     // Then
     assert_eq!(
         workspace.argv(),
-        todays_argv(
+        the_bespoke_backends_argv(
             &workspace,
             &["--include-partial-messages"],
             &[

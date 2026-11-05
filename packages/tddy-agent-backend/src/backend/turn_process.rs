@@ -47,8 +47,9 @@ pub(crate) struct TurnCommand<'a> {
     pub(crate) inherit_stdin: bool,
 }
 
-/// Spawns `turn.program` as the leader of a new process group, with stdout and stderr piped.
-pub(crate) fn spawn_turn(turn: &TurnCommand<'_>) -> Result<std::process::Child, BackendError> {
+/// The command one turn's child is started with: `turn.program` as the leader of a new process
+/// group, `TDDY_*` variables stripped from what it inherits, stdout and stderr piped.
+pub(crate) fn spawn_turn_command(turn: &TurnCommand<'_>) -> std::process::Command {
     use std::os::unix::process::CommandExt as _;
     let mut command = std::process::Command::new(turn.program);
     command.args(turn.argv).current_dir(turn.cwd);
@@ -64,7 +65,12 @@ pub(crate) fn spawn_turn(turn: &TurnCommand<'_>) -> Result<std::process::Child, 
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped())
         .process_group(0);
-    command.spawn().map_err(|e| {
+    command
+}
+
+/// Spawns [`spawn_turn_command`].
+pub(crate) fn spawn_turn(turn: &TurnCommand<'_>) -> Result<std::process::Child, BackendError> {
+    spawn_turn_command(turn).spawn().map_err(|e| {
         if e.kind() == io::ErrorKind::NotFound {
             BackendError::BinaryNotFound(turn.program.to_string_lossy().to_string())
         } else {
@@ -113,12 +119,12 @@ impl Drop for TurnGroup {
     }
 }
 
-/// Registers a process group a turn spawned elsewhere (a conversation's CLI), unregistered when the
-/// guard drops.
-pub(crate) struct RunningGroup(u32);
+/// Registers a process group a turn spawned elsewhere (a conversation's CLI) as running, so
+/// [`kill_running_turns`] reaches it; unregistered when the guard drops.
+pub struct RunningGroup(u32);
 
 impl RunningGroup {
-    pub(crate) fn new(pgid: u32) -> Self {
+    pub fn new(pgid: u32) -> Self {
         running_groups().insert(pgid);
         Self(pgid)
     }
@@ -162,9 +168,9 @@ pub(crate) fn describe_deadline(duration: Duration) -> String {
     let secs = duration.as_secs();
     if duration.subsec_nanos() != 0 {
         format!("{}ms", duration.as_millis())
-    } else if secs != 0 && secs % 3600 == 0 {
+    } else if secs != 0 && secs.is_multiple_of(3600) {
         format!("{}h", secs / 3600)
-    } else if secs != 0 && secs % 60 == 0 {
+    } else if secs != 0 && secs.is_multiple_of(60) {
         format!("{}m", secs / 60)
     } else {
         format!("{secs}s")

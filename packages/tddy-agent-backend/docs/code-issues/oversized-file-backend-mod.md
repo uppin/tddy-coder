@@ -37,3 +37,7 @@
 ## Measurement update 2026-11-02 — #agent-tools 6/12 (#795)
 
 **Unchanged:** 851 production lines. #795 touched one line (`SessionMode` derives `PartialEq, Eq`).
+
+## Measurement update 2026-11-05 — #agent-tools 15/19 (#821)
+
+**Partly fixed:** 851 → **815 production lines** (seam A closed): the global child-process slot (`CHILD_PID`, `set_child_pid`, `clear_child_pid`, `get_child_pid`, both `kill_child_process` variants) is gone, replaced by per-turn process groups in `backend/turn_process.rs` (`kill_running_turns`); the `AnyBackend` arms for Claude, Cursor and Codex now hold the one `SpecHeadlessBackend`. Seams B–D remain. **Status:** Open — partially fixed 2026-11-05; unclaimed.

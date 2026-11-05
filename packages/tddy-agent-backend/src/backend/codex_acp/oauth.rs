@@ -18,8 +18,7 @@ fn invoke_codex_oauth_login_blocking(
     codex_bin: PathBuf,
     session_dir: PathBuf,
 ) -> Result<(), BackendError> {
-    let backend = crate::backend::CodexBackend::with_path(codex_bin);
-    let mut child = backend.spawn_oauth_login(&session_dir)?;
+    let mut child = crate::backend::spawn_codex_oauth_login(&codex_bin, &session_dir)?;
     let status = child
         .wait()
         .map_err(|e| BackendError::InvocationFailed(format!("codex login wait: {e}")))?;

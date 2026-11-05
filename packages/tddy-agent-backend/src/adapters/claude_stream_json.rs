@@ -4,8 +4,8 @@
 use std::io::BufRead;
 
 use crate::backend::acp_driver::AcpUpdateSink;
-use crate::backend::headless_driver::transcript::Transcript;
-use crate::backend::headless_driver::HeadlessHarness;
+use crate::backend::headless_driver::stream_json::StreamJsonTurn;
+use crate::backend::headless_driver::transcript::Updates;
 use crate::error::BackendError;
 use crate::stream::{self, StreamResult};
 
@@ -45,9 +45,6 @@ impl StreamAdapter for ClaudeStreamJson {
             || (exit_ok_if_structured && stream.result_text.contains(STRUCTURED_RESPONSE_MARKER))
     }
 
-    fn turn_format(&self) -> Option<HeadlessHarness> {
-        Some(HeadlessHarness::Claude)
-    }
     fn failure_detail(&self, stream: &StreamResult, stderr: &str) -> String {
         if stream.stream_errors.is_empty() {
             stderr.trim().to_string()
@@ -57,7 +54,10 @@ impl StreamAdapter for ClaudeStreamJson {
     }
 
     fn transcript(&self, updates: Option<AcpUpdateSink>) -> Option<Box<dyn TurnTranscript>> {
-        Some(Box::new(Transcript::new(HeadlessHarness::Claude, updates)))
+        Some(Box::new(StreamJsonTurn::new(
+            "claude",
+            Updates::new(updates),
+        )))
     }
 }
 
@@ -247,17 +247,5 @@ mod tests {
 
         // Then
         assert!(!ok);
-    }
-
-    #[test]
-    fn a_claude_stream_is_decoded_by_the_drivers_claude_transcript() {
-        // Given
-        let adapter = ClaudeStreamJson;
-
-        // When
-        let format = adapter.turn_format();
-
-        // Then
-        assert_eq!(format, Some(HeadlessHarness::Claude));
     }
 }

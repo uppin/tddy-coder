@@ -2,18 +2,28 @@
 //!
 //! Each CLI is a fake: a shell script that appends its argv to a record file and prints the event
 //! stream the real CLI prints (claude / cursor stream-json, codex JSONL). Real CLIs are not run.
+//! What a turn is spawned with comes from a fixture renderer standing in for the agent's spec (the
+//! specs crate, which implements the real one, cannot be named here; the argv each real spec renders
+//! is pinned by its render goldens), so what these tests pin is what the driver hands the renderer
+//! and what it does with the stream the adapter reads.
 //!
 //! Feature: docs/ft/daemon/session-agent-roster.md § Coding agents
 
+use std::collections::BTreeMap;
 use std::os::unix::fs::PermissionsExt;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
+use tddy_agent_backend::adapters::{
+    AdapterRegistry, HeadlessInvocation, HeadlessMcpServer, HeadlessRenderer, HeadlessTurn,
+    CLAUDE_STREAM_JSON, CODEX_JSONL, CURSOR_STREAM, OZ_NDJSON,
+};
 use tddy_agent_backend::{
     AcpStopReason, AcpUpdate, AcpUpdateSink, ConversationDriver, HeadlessCommand, HeadlessDriver,
-    HeadlessHarness,
+    McpServerSpec,
 };
+use tddy_session_store::error::BackendError;
 
 const TURN_DEADLINE: Duration = Duration::from_secs(10);
 
@@ -50,13 +60,78 @@ fn a_fake_cli(stream: &[serde_json::Value], sleep_secs: u32) -> FakeCli {
     FakeCli { dir }
 }
 
+/// A renderer standing in for an agent's spec: `-p <prompt>`, `--resume <session>` on a resumed turn,
+/// `--model <model>`, run through the adapter it names, recording every turn it renders.
+#[derive(Debug)]
+struct AFixtureRenderer {
+    agent: &'static str,
+    adapter: &'static str,
+    program: PathBuf,
+    turns: Mutex<Vec<HeadlessTurn>>,
+}
+
+impl HeadlessRenderer for AFixtureRenderer {
+    fn agent_id(&self) -> &str {
+        self.agent
+    }
+
+    fn tool_server(&self) -> Option<HeadlessMcpServer> {
+        None
+    }
+
+    fn render(&self, turn: &HeadlessTurn) -> Result<HeadlessInvocation, BackendError> {
+        self.turns.lock().expect("turns").push(turn.clone());
+        let mut argv = vec!["-p".to_string(), turn.prompt.clone()];
+        if let Some(model) = &turn.model {
+            argv.extend(["--model".to_string(), model.clone()]);
+        }
+        if let Some(session) = &turn.session {
+            if session.is_resume() {
+                argv.extend(["--resume".to_string(), session.session_id().to_string()]);
+            }
+        }
+        Ok(HeadlessInvocation {
+            program: self.program.clone(),
+            argv,
+            env: Vec::new(),
+            files: Vec::new(),
+            adapter: AdapterRegistry::builtin()
+                .get(self.adapter)
+                .expect("the adapter is registered"),
+            exit_ok_if_structured: false,
+        })
+    }
+}
+
 impl FakeCli {
     fn command(&self) -> HeadlessCommand {
         HeadlessCommand {
-            program: self.dir.path().join("cli"),
             cwd: Some(self.dir.path().to_path_buf()),
+            scratch_dir: Some(self.dir.path().join("conversation")),
             ..HeadlessCommand::default()
         }
+    }
+
+    /// A conversation of `agent`, whose stream the adapter `adapter` reads.
+    fn driver(
+        &self,
+        agent: &'static str,
+        adapter: &'static str,
+        command: HeadlessCommand,
+    ) -> (HeadlessDriver, Arc<AFixtureRenderer>) {
+        let renderer = Arc::new(AFixtureRenderer {
+            agent,
+            adapter,
+            program: self.dir.path().join("cli"),
+            turns: Mutex::new(Vec::new()),
+        });
+        (
+            HeadlessDriver::new(HeadlessCommand {
+                renderer: Some(renderer.clone()),
+                ..command
+            }),
+            renderer,
+        )
     }
 
     /// The arguments of each invocation, in order.
@@ -108,7 +183,7 @@ fn collecting() -> (AcpUpdateSink, Arc<Mutex<Vec<AcpUpdate>>>) {
 async fn a_claude_turn_returns_its_final_text_and_the_next_turn_resumes_its_session() {
     // Given
     let cli = a_fake_cli(&claude_stream("cl-1", "Fixed it."), 0);
-    let driver = HeadlessDriver::new(HeadlessHarness::Claude, cli.command());
+    let (driver, _) = cli.driver("claude", CLAUDE_STREAM_JSON, cli.command());
 
     // When
     let first = a_turn(&driver, "Fix the bug").await;
@@ -119,19 +194,15 @@ async fn a_claude_turn_returns_its_final_text_and_the_next_turn_resumes_its_sess
     assert_eq!(first.text, "Fixed it.");
     assert_eq!(driver.session_id().as_deref(), Some("cl-1"));
     let calls = cli.invocations();
-    assert!(
-        calls[0].contains("-p") && calls[0].contains("stream-json"),
-        "{}",
-        calls[0]
-    );
-    assert!(calls[1].contains("--resume cl-1"), "{}", calls[1]);
+    assert_eq!(calls[0], "-p Fix the bug");
+    assert_eq!(calls[1], "-p Now add a test --resume cl-1");
 }
 
 #[tokio::test]
 async fn a_cursor_turn_returns_its_final_text_and_the_next_turn_resumes_its_chat() {
     // Given
     let cli = a_fake_cli(&claude_stream("cu-1", "Renamed."), 0);
-    let driver = HeadlessDriver::new(HeadlessHarness::Cursor, cli.command());
+    let (driver, _) = cli.driver("cursor", CURSOR_STREAM, cli.command());
 
     // When
     let first = a_turn(&driver, "Rename it").await;
@@ -140,14 +211,14 @@ async fn a_cursor_turn_returns_its_final_text_and_the_next_turn_resumes_its_chat
     // Then
     assert_eq!(first.text, "Renamed.");
     let calls = cli.invocations();
-    assert!(calls[1].contains("--resume cu-1"), "{}", calls[1]);
+    assert_eq!(calls[1], "-p And the tests --resume cu-1");
 }
 
 #[tokio::test]
 async fn a_codex_turn_returns_its_final_text_and_the_next_turn_resumes_its_thread() {
     // Given
     let cli = a_fake_cli(&codex_stream("th-1", "Done."), 0);
-    let driver = HeadlessDriver::new(HeadlessHarness::Codex, cli.command());
+    let (driver, _) = cli.driver("codex", CODEX_JSONL, cli.command());
 
     // When
     let first = a_turn(&driver, "Do it").await;
@@ -156,19 +227,16 @@ async fn a_codex_turn_returns_its_final_text_and_the_next_turn_resumes_its_threa
     // Then
     assert_eq!(first.text, "Done.");
     let calls = cli.invocations();
-    assert!(
-        calls[0].starts_with("exec") && calls[0].contains("--json"),
-        "{}",
-        calls[0]
-    );
-    assert!(calls[1].contains("resume th-1"), "{}", calls[1]);
+    assert_eq!(calls[0], "-p Do it");
+    assert_eq!(calls[1], "-p Again --resume th-1");
 }
 
 #[tokio::test]
 async fn cancelling_a_headless_turn_kills_the_cli_and_returns_cancelled() {
     // Given
     let cli = a_fake_cli(&claude_stream("cl-1", "never"), 30);
-    let driver = Arc::new(HeadlessDriver::new(HeadlessHarness::Claude, cli.command()));
+    let (driver, _) = cli.driver("claude", CLAUDE_STREAM_JSON, cli.command());
+    let driver = Arc::new(driver);
     let turn_driver = Arc::clone(&driver);
     let turn = tokio::spawn(async move { turn_driver.prompt_turn("Work".to_string(), None).await });
     tokio::time::sleep(Duration::from_millis(300)).await;
@@ -198,7 +266,7 @@ async fn headless_tool_calls_become_transcript_updates() {
         ],
         0,
     );
-    let driver = HeadlessDriver::new(HeadlessHarness::Claude, cli.command());
+    let (driver, _) = cli.driver("claude", CLAUDE_STREAM_JSON, cli.command());
     let (sink, updates) = collecting();
 
     // When
@@ -230,7 +298,7 @@ async fn a_codex_turns_tool_calls_arrive_at_turn_end() {
         } }),
     );
     let cli = a_fake_cli(&stream, 0);
-    let driver = HeadlessDriver::new(HeadlessHarness::Codex, cli.command());
+    let (driver, _) = cli.driver("codex", CODEX_JSONL, cli.command());
     let (sink, updates) = collecting();
 
     // When
@@ -252,11 +320,12 @@ async fn a_codex_turns_tool_calls_arrive_at_turn_end() {
 }
 
 #[tokio::test]
-async fn the_model_and_the_permission_prompt_tool_reach_claudes_argv() {
+async fn the_model_the_permission_prompt_tool_and_the_withdrawn_tools_reach_the_renderer() {
     // Given
     let cli = a_fake_cli(&claude_stream("cl-1", "ok"), 0);
-    let driver = HeadlessDriver::new(
-        HeadlessHarness::Claude,
+    let (driver, renderer) = cli.driver(
+        "claude",
+        CLAUDE_STREAM_JSON,
         HeadlessCommand {
             model: Some("sonnet".to_string()),
             permission_prompt_tool: Some("mcp__tddy-tools__approval_prompt".to_string()),
@@ -269,26 +338,45 @@ async fn the_model_and_the_permission_prompt_tool_reach_claudes_argv() {
     a_turn(&driver, "Go").await;
 
     // Then
-    let call = &cli.invocations()[0];
-    assert!(call.contains("--model sonnet"), "{call}");
-    assert!(
-        call.contains("--permission-prompt-tool mcp__tddy-tools__approval_prompt"),
-        "{call}"
+    let turns = renderer.turns.lock().expect("turns");
+    assert_eq!(
+        (
+            turns[0].model.as_deref(),
+            turns[0].permission_prompt_tool.as_deref(),
+            turns[0].denied_tools.clone(),
+        ),
+        (
+            Some("sonnet"),
+            Some("mcp__tddy-tools__approval_prompt"),
+            vec!["Bash".to_string(), "Edit".to_string()]
+        )
     );
-    assert!(call.contains("--disallowedTools"), "{call}");
-    let _ = cli.path();
 }
 
-#[test]
-fn harness_ids_round_trip() {
-    for harness in [
-        HeadlessHarness::Claude,
-        HeadlessHarness::Cursor,
-        HeadlessHarness::Codex,
-    ] {
-        assert_eq!(HeadlessHarness::from_id(harness.id()), Some(harness));
-    }
-    assert_eq!(HeadlessHarness::from_id("claude-acp"), None);
+#[tokio::test]
+async fn a_turn_without_a_scratch_directory_is_refused_before_anything_is_spawned() {
+    // Given
+    let cli = a_fake_cli(&claude_stream("cl-1", "ok"), 0);
+    let (driver, _) = cli.driver(
+        "claude",
+        CLAUDE_STREAM_JSON,
+        HeadlessCommand {
+            scratch_dir: None,
+            ..cli.command()
+        },
+    );
+
+    // When
+    let refused = driver.prompt_turn("Go".to_string(), None).await;
+
+    // Then
+    assert_eq!(
+        (refused.map_err(|e| e.to_string()), cli.invocations()),
+        (
+            Err("a rendered claude turn writes its registration files to a scratch directory, and the conversation names none".to_string()),
+            Vec::<String>::new()
+        )
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -311,7 +399,7 @@ fn an_oz_capture(name: &str) -> Vec<serde_json::Value> {
 async fn an_oz_turn_returns_its_text_and_the_next_turn_continues_its_conversation() {
     // Given
     let cli = a_fake_cli(&an_oz_capture("text_turn.ndjson"), 0);
-    let driver = HeadlessDriver::new(HeadlessHarness::Oz, cli.command());
+    let (driver, _) = cli.driver("oz", OZ_NDJSON, cli.command());
 
     // When
     let first = a_turn(&driver, "Reply with ok").await;
@@ -322,25 +410,13 @@ async fn an_oz_turn_returns_its_text_and_the_next_turn_continues_its_conversatio
     assert_eq!(first.text, "ok\n");
     assert_eq!(driver.session_id().as_deref(), Some("conv-0001"));
     let calls = cli.invocations();
-    assert!(
-        calls[0].starts_with("agent run") && calls[0].contains("--output-format ndjson"),
-        "{}",
-        calls[0]
-    );
-    assert!(
-        calls[0].contains("-p Reply with ok") || calls[0].contains("--prompt Reply with ok"),
-        "{}",
-        calls[0]
-    );
-    assert!(
-        !calls[0].contains("--conversation"),
-        "a first turn opens a conversation: {}",
-        calls[0]
-    );
-    assert!(
-        calls[1].contains("--conversation conv-0001"),
-        "{}",
-        calls[1]
+    assert_eq!(
+        calls,
+        vec![
+            "-p Reply with ok".to_string(),
+            "-p And again --resume conv-0001".to_string()
+        ],
+        "a first turn opens a conversation, the next resumes it"
     );
 }
 
@@ -348,7 +424,7 @@ async fn an_oz_turn_returns_its_text_and_the_next_turn_continues_its_conversatio
 async fn an_oz_turns_commands_and_edits_become_tool_calls_with_their_results() {
     // Given
     let cli = a_fake_cli(&an_oz_capture("tool_turn.ndjson"), 0);
-    let driver = HeadlessDriver::new(HeadlessHarness::Oz, cli.command());
+    let (driver, _) = cli.driver("oz", OZ_NDJSON, cli.command());
     let (sink, updates) = collecting();
 
     // When
@@ -390,16 +466,21 @@ async fn an_oz_turns_commands_and_edits_become_tool_calls_with_their_results() {
 }
 
 #[tokio::test]
-async fn the_worktree_model_mcp_and_profile_reach_ozs_argv() {
+async fn the_worktree_model_tool_server_and_profile_reach_the_renderer_for_oz() {
     // Given
     let cli = a_fake_cli(&an_oz_capture("text_turn.ndjson"), 0);
-    let mcp = cli.path().join("mcp.json");
-    std::fs::write(&mcp, "{}").expect("mcp config");
-    let driver = HeadlessDriver::new(
-        HeadlessHarness::Oz,
+    let server = McpServerSpec {
+        name: "tddy-tools".to_string(),
+        command: PathBuf::from("/opt/tddy/bin/tddy-tools"),
+        args: vec!["--mcp".to_string()],
+        env: Vec::new(),
+    };
+    let (driver, renderer) = cli.driver(
+        "oz",
+        OZ_NDJSON,
         HeadlessCommand {
             model: Some("claude-sonnet".to_string()),
-            mcp_config: Some(mcp.clone()),
+            mcp_server: Some(server),
             profile: Some("tddy-subagent".to_string()),
             ..cli.command()
         },
@@ -409,12 +490,24 @@ async fn the_worktree_model_mcp_and_profile_reach_ozs_argv() {
     a_turn(&driver, "Go").await;
 
     // Then
-    let call = &cli.invocations()[0];
-    assert!(
-        call.contains(&format!("-C {}", cli.path().display())),
-        "{call}"
+    let turns = renderer.turns.lock().expect("turns");
+    assert_eq!(
+        (
+            turns[0].workdir.clone(),
+            turns[0].model.as_deref(),
+            turns[0].mcp_server.clone(),
+            turns[0].params.clone(),
+        ),
+        (
+            cli.path().to_path_buf(),
+            Some("claude-sonnet"),
+            Some(HeadlessMcpServer {
+                name: "tddy-tools".to_string(),
+                command: PathBuf::from("/opt/tddy/bin/tddy-tools"),
+                args: vec!["--mcp".to_string()],
+                env: BTreeMap::new(),
+            }),
+            BTreeMap::from([("profile".to_string(), "tddy-subagent".to_string())]),
+        )
     );
-    assert!(call.contains("--model claude-sonnet"), "{call}");
-    assert!(call.contains(&format!("--mcp {}", mcp.display())), "{call}");
-    assert!(call.contains("--profile tddy-subagent"), "{call}");
 }

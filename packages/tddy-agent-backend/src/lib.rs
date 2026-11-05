@@ -32,17 +32,16 @@ pub use backend::acp_driver::{
     SessionErrorVerdict,
 };
 pub use backend::headless_driver::{
-    AcpConversation, ConversationDriver, HeadlessCommand, HeadlessDriver, HeadlessHarness,
+    AcpConversation, ConversationDriver, HeadlessCommand, HeadlessDriver,
 };
 pub use backend::{
-    backend_from_label, backend_selection_question, build_claude_args, clear_child_pid,
-    codex_acp_route_args, default_model_for_agent, get_child_pid, kill_child_process,
-    preselected_index_for_agent, recipe_cli_name_from_selection_label, set_child_pid,
-    workflow_recipe_selection_question, AgentOutputSink, AnyBackend, ClarificationQuestion,
-    ClaudeAcpBackend, ClaudeCodeBackend, ClaudeInvokeConfig, CodexAcpBackend, CodexBackend,
-    CodingBackend, CursorBackend, InMemoryToolExecutor, InvokeRequest, InvokeResponse, MockBackend,
-    OpenCodeAcpBackend, PermissionMode, ProcessToolExecutor, QuestionOption, RemoteToolEnv,
-    SessionMode, SharedBackend, StubBackend, ToolExecutor, CODEX_OAUTH_AUTHORIZE_URL_FILENAME,
+    backend_from_label, backend_selection_question, codex_acp_route_args, default_model_for_agent,
+    kill_running_turns, preselected_index_for_agent, recipe_cli_name_from_selection_label,
+    spawn_codex_oauth_login, workflow_recipe_selection_question, AgentOutputSink, AnyBackend,
+    ClarificationQuestion, ClaudeAcpBackend, CodexAcpBackend, CodingBackend, InMemoryToolExecutor,
+    InvokeRequest, InvokeResponse, MockBackend, OpenCodeAcpBackend, ProcessToolExecutor,
+    QuestionOption, RemoteToolEnv, RunningGroup, SessionMode, SharedBackend, StubBackend,
+    ToolExecutor, CODEX_DEFAULT_CLI_BINARY, CODEX_OAUTH_AUTHORIZE_URL_FILENAME,
     CODEX_THREAD_ID_FILENAME,
 };
 // `#agent-tools 15/19`: the one headless workflow backend, configured by an agent's spec.

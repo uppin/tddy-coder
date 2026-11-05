@@ -44,7 +44,6 @@ use std::io::BufRead;
 use std::sync::Arc;
 
 use crate::backend::acp_driver::{AcpTurnEnd, AcpUpdateSink};
-use crate::backend::headless_driver::HeadlessHarness;
 use crate::error::BackendError;
 use crate::stream::{ProgressEvent, StreamResult};
 
@@ -118,21 +117,13 @@ pub trait StreamAdapter: Send + Sync + fmt::Debug {
     /// non-zero exit whose result carries a structured response still counts as success.
     fn exit_ok(&self, exit_code: i32, stream: &StreamResult, exit_ok_if_structured: bool) -> bool;
 
-    /// Which of the headless driver's turn transcripts decodes this stream into conversation
-    /// updates; `None` for an adapter no conversation driver reads.
-    ///
-    /// TODO(headless-driver): replaced by [`Self::transcript`]; deleted with `HeadlessHarness` once
-    /// `HeadlessDriver` and the launcher read the transcript factory.
-    fn turn_format(&self) -> Option<HeadlessHarness>;
-
     /// The detail a failed workflow turn's error carries after its exit code, from what the child
     /// streamed and the stderr it left (`#agent-tools 15/19`): Claude's stream errors joined (else
     /// its stderr), Codex's last stream error (else a brief of its stderr) with the sign-in
     /// remediation appended to an auth failure, Cursor's and Oz's stderr. Empty when there is none.
     fn failure_detail(&self, stream: &StreamResult, stderr: &str) -> String;
 
-    /// A conversation transcript decoding this stream into `updates` (`#agent-tools 15/19`), the
-    /// factory that replaces [`Self::turn_format`] and the closed `HeadlessHarness` it names;
+    /// A conversation transcript decoding this stream into `updates` (`#agent-tools 15/19`);
     /// `None` for an adapter no conversation driver reads.
     fn transcript(&self, updates: Option<AcpUpdateSink>) -> Option<Box<dyn TurnTranscript>>;
 }

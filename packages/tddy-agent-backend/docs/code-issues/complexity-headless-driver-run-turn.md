@@ -23,3 +23,7 @@ reads as spawn → read → reap → finish.
 ## Measurement update 2026-11-02 — #agent-tools 6/12 (#795)
 
 **Moved:** the spawn-free read loop of `run_turn` became `HeadlessDriver::read_turn` (shared with the new `run_rendered_turn`, 53 lines). `read_turn`: **81 lines**, budget 60. **Status:** Open — deferred to the #agent-tools sweep node (developer, 2026-11-02).
+
+## Measurement update 2026-11-05 — #agent-tools 15/19 (#821)
+
+**Regressed:** `HeadlessDriver::run_turn` is now the one turn path (the renderer-less `run_turn` and `run_rendered_turn` merged, `argv.rs` deleted): **91 lines**, nesting 3, budget 60 — render, transcript, write, env, spawn. `read_turn`: **73 lines** (was 81). Still deferred to the #agent-tools sweep node; the same extraction closes it: `HeadlessTurn` assembly and the env rendering into a `headless_driver/rendered.rs` sibling.

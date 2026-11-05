@@ -1,5 +1,5 @@
-//! The headless-renderer port: `ClaudeCodeBackend` and `HeadlessDriver` launching from a rendered
-//! declaration and reading the child through the adapter it names.
+//! The headless-renderer port: `SpecHeadlessBackend` (with Claude's protocol) and `HeadlessDriver`
+//! launching from a rendered declaration and reading the child through the adapter it names.
 //!
 //! The renderer is a fixture — the spec-driven one lives in `tddy-coding-agent-specs`, which this
 //! crate cannot name — so these tests pin what each consumer hands the port and what it does with
@@ -15,12 +15,14 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use tddy_agent_backend::adapters::{
-    AdapterRegistry, HeadlessInvocation, HeadlessMcpServer, HeadlessRenderer, HeadlessTurn,
+    AdapterRegistry, FreshSession, GoalParams, HeadlessInvocation, HeadlessMcpServer,
+    HeadlessProtocol, HeadlessRenderer, HeadlessTurn, RouteModel, ScratchDir, SystemPromptDelivery,
     CLAUDE_STREAM_JSON,
 };
+use tddy_agent_backend::provider_route::{RouteSupport, RoutedAgent};
 use tddy_agent_backend::{
-    ClaudeCodeBackend, CodingBackend, ConversationDriver, HeadlessCommand, HeadlessDriver,
-    HeadlessHarness, InvokeRequest, McpServerSpec, SessionMode,
+    CodingBackend, ConversationDriver, HeadlessCommand, HeadlessDriver, InvokeRequest,
+    McpServerSpec, SessionMode, SpecHeadlessBackend,
 };
 use tddy_session_store::error::BackendError;
 use tddy_workflow::{GoalHints, GoalId, PermissionHint};
@@ -31,13 +33,14 @@ const TDDY_TOOLS: &str = "/opt/tddy/bin/tddy-tools";
 const A_STRUCTURED_RESULT: &str = "<structured-response goal=\"plan\">{}</structured-response>";
 
 /// A fake agent in its own directory: records each invocation's argv (one line) and the contents of
-/// `registration.json` beside it, prints `stream`, and exits with `exit_code`.
+/// `session/registration.json` beside it, prints `stream`, and exits with `exit_code`.
 struct AFakeAgent {
     dir: tempfile::TempDir,
 }
 
 fn a_fake_agent(stream: &[serde_json::Value], exit_code: i32) -> AFakeAgent {
     let dir = tempfile::tempdir().expect("tempdir");
+    std::fs::create_dir(dir.path().join("work")).expect("the agent's working directory");
     let output = dir.path().join("stream.jsonl");
     let lines: Vec<String> = stream.iter().map(|event| event.to_string()).collect();
     std::fs::write(&output, lines.join("\n") + "\n").expect("write stream");
@@ -47,7 +50,7 @@ fn a_fake_agent(stream: &[serde_json::Value], exit_code: i32) -> AFakeAgent {
         format!(
             "#!/bin/sh\necho \"$*\" >> '{argv}'\ncat '{registration}' >> '{seen}' 2>/dev/null\ncat '{output}'\nexit {exit_code}\n",
             argv = dir.path().join("argv.log").display(),
-            registration = dir.path().join("registration.json").display(),
+            registration = dir.path().join("session").join("registration.json").display(),
             seen = dir.path().join("registration.seen").display(),
             output = output.display(),
         ),
@@ -88,7 +91,7 @@ fn a_claude_stream(session: &str, result: &str) -> Vec<serde_json::Value> {
 }
 
 /// A renderer that records every turn it is asked for and renders `["--rendered", <prompt>]` for
-/// `program`, with `registration.json` (beside the program) as its one file.
+/// `program`, with `session/registration.json` (beside the program) as its one file.
 #[derive(Debug)]
 struct ARecordingRenderer {
     program: PathBuf,
@@ -141,7 +144,9 @@ impl HeadlessRenderer for ARecordingRenderer {
             argv: vec!["--rendered".to_string(), turn.prompt.clone()],
             env: Vec::new(),
             files: vec![(
-                self.program.with_file_name("registration.json"),
+                self.program
+                    .with_file_name("session")
+                    .join("registration.json"),
                 b"{\"rendered\":true}".to_vec(),
             )],
             adapter,
@@ -172,7 +177,7 @@ fn a_request(hints: GoalHints, session: SessionMode, agent: &AFakeAgent) -> Invo
         hints,
         model: Some("opus".to_string()),
         session: Some(session),
-        working_dir: Some(agent.path().to_path_buf()),
+        working_dir: Some(agent.path().join("work")),
         debug: false,
         agent_output: false,
         agent_output_sink: None,
@@ -203,17 +208,47 @@ fn the_expected_turn(
         denied_tools: Vec::new(),
         permission_prompt_tool: Some(APPROVAL_TOOL.to_string()),
         mcp_server: Some(the_tool_server()),
-        workdir: agent.path().to_path_buf(),
+        workdir: agent.path().join("work"),
         scratch_dir: agent.path().join("session"),
         params: BTreeMap::new(),
         route_args: Vec::new(),
     }
 }
 
-/// A backend whose own binary does not exist: only the rendered program can run.
-fn a_backend_rendered_by(renderer: Arc<ARecordingRenderer>) -> ClaudeCodeBackend {
-    ClaudeCodeBackend::with_path(PathBuf::from("/nonexistent/claude-is-never-run"))
-        .with_headless_renderer(renderer)
+/// `claude.yaml`'s protocol: the system prompt as a file, `plan`/`acceptEdits` by the goal, the
+/// approval tool and the tool server, a route's `--model` replacing the request's, the caller's
+/// session id, the registration in the session directory.
+fn claudes_protocol() -> HeadlessProtocol {
+    let params = |mode: &str| BTreeMap::from([("permission_mode".to_string(), mode.to_string())]);
+    HeadlessProtocol {
+        system_prompt: SystemPromptDelivery::Flag,
+        goal_params: GoalParams {
+            read_only_plan: params("plan"),
+            accept_edits: params("acceptEdits"),
+            ..GoalParams::default()
+        },
+        approval_tool: true,
+        workflow_mcp: true,
+        route_model: RouteModel::ReplacedIfRouteHas {
+            flag: "--model".to_string(),
+        },
+        fresh_session: FreshSession::Caller,
+        scratch: ScratchDir::SessionDir,
+    }
+}
+
+/// A backend over the recording renderer: only the rendered program can run.
+fn a_backend_rendered_by(renderer: Arc<ARecordingRenderer>) -> SpecHeadlessBackend {
+    SpecHeadlessBackend::new(
+        renderer,
+        claudes_protocol(),
+        RoutedAgent {
+            id: "claude".to_string(),
+            product: "Claude Code".to_string(),
+            support: RouteSupport::default(),
+            key_env: None,
+        },
+    )
 }
 
 #[tokio::test]
@@ -395,29 +430,25 @@ async fn a_non_zero_exit_with_a_structured_result_fails_when_the_declaration_doe
     // Then
     assert_eq!(
         response.map(|r| r.exit_code).map_err(|e| e.to_string()),
-        Err("Claude Code CLI exited with code 1".to_string())
+        Err("claude exited with code 1".to_string())
     );
 }
 
 fn a_rendered_driver(agent: &AFakeAgent, renderer: Arc<ARecordingRenderer>) -> HeadlessDriver {
-    HeadlessDriver::new(
-        HeadlessHarness::Claude,
-        HeadlessCommand {
-            program: PathBuf::from("/nonexistent/claude-is-never-run"),
-            cwd: Some(agent.path().to_path_buf()),
-            model: Some("sonnet".to_string()),
-            permission_prompt_tool: Some(APPROVAL_TOOL.to_string()),
-            mcp_server: Some(McpServerSpec {
-                name: "tddy-tools".to_string(),
-                command: PathBuf::from(TDDY_TOOLS),
-                args: vec!["--mcp".to_string()],
-                env: vec![("TDDY_CONVERSATION_ID".to_string(), "conv-1".to_string())],
-            }),
-            scratch_dir: Some(agent.path().join("conv-1")),
-            renderer: Some(renderer),
-            ..HeadlessCommand::default()
-        },
-    )
+    HeadlessDriver::new(HeadlessCommand {
+        renderer: Some(renderer),
+        cwd: Some(agent.path().to_path_buf()),
+        model: Some("sonnet".to_string()),
+        permission_prompt_tool: Some(APPROVAL_TOOL.to_string()),
+        mcp_server: Some(McpServerSpec {
+            name: "tddy-tools".to_string(),
+            command: PathBuf::from(TDDY_TOOLS),
+            args: vec!["--mcp".to_string()],
+            env: vec![("TDDY_CONVERSATION_ID".to_string(), "conv-1".to_string())],
+        }),
+        scratch_dir: Some(agent.path().join("conv-1")),
+        ..HeadlessCommand::default()
+    })
 }
 
 /// The turn a rendered driver should hand its renderer for `prompt`, resuming `resume`.

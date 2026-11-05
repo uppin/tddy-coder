@@ -19,20 +19,15 @@
 //!   ([`tddy_session_split::coding_agent_wiring`]).
 //!
 //! **A headless harness** (`claude`, `cursor`, `codex`, `oz`) runs its CLI once per turn rather than
-//! speaking ACP: [`DaemonCodingAgentLauncher::headless_command_for`] names that CLI, the binary a
-//! daemon's own session of it resolves, on the conversation's worktree, with the route's environment.
-//! It runs only as the daemon's own user, so a session of another OS user is refused. A `claude`
-//! conversation is also handed `tddy-tools --mcp` through an owner-only MCP config under the daemon's
-//! data directory, its permission prompts routed to that server. With the coding agents installed,
-//! every headless harness is planned from its tool definition, and Cursor, Codex and Oz are handed
-//! the server as their MCP slots declare — a worktree `.cursor/mcp.json`, inline `-c` overrides, an
+//! speaking ACP: [`DaemonCodingAgentLauncher::headless_command_for`] names that CLI, the binary its
+//! tool definition resolves, on the conversation's worktree, with the route's environment. It runs
+//! only as the daemon's own user, so a session of another OS user is refused. Every headless harness
+//! is planned from its tool definition: a `claude` conversation is handed `tddy-tools --mcp` through
+//! an owner-only MCP config under the daemon's data directory, its permission prompts routed to that
+//! server, and Cursor, Codex and Oz are handed the server as their MCP slots declare — a worktree `.cursor/mcp.json`, inline `-c` overrides, an
 //! `--mcp` file — with what the conversation will write recorded for its close and the sweep. A
-//! daemon whose coding agents did not load refuses every headless harness.
-//!
-//! TODO(headless-others): a launcher built without coding agents (`with_identity` and the tests that
-//! construct one) still plans by hand — `headless_program`, `mcp_servers_by_name`,
-//! `write_cursor_project_mcp_config`, `OZ_BINARY`; deleting them needs those tests moved to
-//! installed coding agents (`docs/dev/todo/2026-11-03-headless-others-legacy-argv-deletion.md`).
+//! daemon whose coding agents did not load, and a launcher built without any, refuse every headless
+//! harness: nothing is planned by hand.
 //!
 //! **The harness binary.** `claude-acp` runs as `bunx claude-agent-acp` unless
 //! `TDDY_CLAUDE_AGENT_ACP_CLI` names a `claude-agent-acp` binary; `codex-acp` as `codex-acp` unless
@@ -55,7 +50,7 @@ use tddy_coding_agent_specs::package_runner;
 use tddy_coding_agent_specs::slots::acp::{acp_mcp_servers, acp_withdrawal, AcpWithdrawal};
 use tddy_coding_agent_specs::slots::headless_mcp::mcp_written_paths;
 use tddy_coding_agent_specs::slots::McpServerCommand;
-use tddy_coding_agent_specs::CodingAgentSpec;
+use tddy_coding_agent_specs::{CodingAgentSpec, McpSlot};
 use tddy_coding_subagent::launcher::{record_written_files, HEADLESS_DIR, SESSION_TOKEN_ENV};
 use tddy_coding_subagent::{
     confinement_of_spec, opencode_withdrawal_config, refuse_unless_confinable,
@@ -65,10 +60,8 @@ use tddy_coding_subagent::{
 };
 use tddy_core::adapters::AdapterRegistry;
 use tddy_core::provider_route::{HarnessRoute, RouteChoice, RouteSources};
-use tddy_core::{AcpAgentCommand, HeadlessCommand, HeadlessHarness, McpServerSpec};
-use tddy_daemon_kernel::config::{
-    resolve_claude_binary_path, resolve_cursor_binary_path, DaemonConfig,
-};
+use tddy_core::{AcpAgentCommand, HeadlessCommand, McpServerSpec};
+use tddy_daemon_kernel::config::DaemonConfig;
 use tddy_daemon_kernel::daemon_identity::local_base_instance_id_for_config;
 use tddy_discovery::subagent::SubagentError;
 use tddy_subagent_worktree::ConversationId;
@@ -93,16 +86,9 @@ const OPENCODE_BINARY: &str = "opencode";
 const OPENCODE_ACP_SUBCOMMAND: &str = "acp";
 /// The directory under `<tddyhome>` a supervised launch's relay sockets are bound in.
 const RELAY_SOCKET_DIR: &str = "relay";
-/// The MCP config file a headless CLI reads, in its conversation's directory.
-const MCP_CONFIG_FILE: &str = "mcp.json";
-/// The mode the MCP config is written with. It carries the agent's tool credential, so only its
-/// owner may read it.
-const MCP_CONFIG_MODE: u32 = 0o600;
 /// The tool Claude Code's permission prompts are routed to: `approval_prompt` on the `tddy-tools`
 /// server (`mcp__<server>__<tool>`).
 const APPROVAL_PROMPT_TOOL: &str = "mcp__tddy-tools__approval_prompt";
-/// The `oz` binary a headless run is started with, looked up on `PATH`.
-const OZ_BINARY: &str = "oz";
 
 /// Resolves the provider route a launch runs on: `None` for the harness's own login.
 pub type RouteResolver =
@@ -129,12 +115,10 @@ pub struct DaemonLauncherDeps {
     pub tokens: Option<tddy_daemon_auth::SessionTokens>,
 }
 
-/// What a headless conversation is launched with: the daemon's config, which names the CLI binaries
-/// the way the daemon's own sessions of those CLIs do, and the directory a conversation keeps the MCP
-/// config its CLI reads.
+/// What a headless conversation is launched with: the directory a conversation keeps the MCP config
+/// its CLI reads in.
 #[derive(Clone)]
 struct HeadlessWiring {
-    config: Arc<DaemonConfig>,
     data_dir: PathBuf,
     /// This daemon's durable instance id, which every conversation directory it creates is tagged
     /// with, so its start-up sweep removes only its own.
@@ -182,15 +166,10 @@ pub struct DaemonCodingAgentLauncher {
     /// Where a headless conversation's permission approvals are bound at launch. `None` leaves them
     /// unbound, so every approval for such a conversation is refused.
     approval_routes: Option<Arc<ApprovalRoutes>>,
-    /// The coding agents declared as tools (`#agent-tools 6/12`): with them, a headless `claude`
-    /// conversation is rendered from `claude.yaml`'s `coding_agent.headless` section. `None` plans it
-    /// by hand.
-    ///
-    /// TODO(claude-headless): `for_daemon` installs them, so a daemon's Claude conversations render from
-    /// the spec. The hand-built `mcp_servers_wrapped` registration stays for a launcher built without
-    /// coding agents (`with_identity` and the tests that construct one); deleting it needs those moved.
-    /// `#agent-tools 11/12`: with them, the ACP harnesses are planned from their specs too
-    /// (`acp_plan_from_spec`).
+    /// The coding agents declared as tools (`#agent-tools 6/12`): with them, every headless harness
+    /// is rendered from its spec's `coding_agent.headless` section (`#agent-tools 15/19`: a launcher
+    /// without them refuses a headless launch — nothing is planned by hand), and, since
+    /// `#agent-tools 11/12`, the ACP harnesses are planned from their specs too (`acp_plan_from_spec`).
     coding_agents: Option<Arc<HostCodingAgents>>,
     /// Why `for_daemon`'s coding agents did not load. A headless `claude` conversation is refused with
     /// it, never planned by hand: a tool file that does not load must not start the agent some other way.
@@ -212,16 +191,12 @@ impl DaemonCodingAgentLauncher {
     }
 
     /// With the daemon's config and data directory, a headless coding agent can be opened through
-    /// this launcher: its CLI resolves as the daemon's own sessions of that CLI do, and a claude
-    /// conversation keeps its MCP config under `data_dir`.
+    /// this launcher: a conversation keeps its MCP config under `data_dir`, tagged with the
+    /// instance id `config` names.
     #[must_use]
     pub fn with_headless_wiring(mut self, config: DaemonConfig, data_dir: PathBuf) -> Self {
         let owner = local_base_instance_id_for_config(&config);
-        self.headless = Some(HeadlessWiring {
-            config: Arc::new(config),
-            data_dir,
-            owner,
-        });
+        self.headless = Some(HeadlessWiring { data_dir, owner });
         self
     }
 
@@ -345,6 +320,22 @@ impl DaemonCodingAgentLauncher {
         let files = self.claim_conversation_files(launch, wiring, conversation)?;
         let scratch_dir = files.dir.clone();
         self.record_written_files(launch, &agent.spec, &scratch_dir)?;
+        // What the spec declares, not which agent it is: an agent that routes its permission prompts
+        // to the tool server says so (`headless.approval_tool`), and one whose MCP slot is inline
+        // forwards the server's variables from its own environment, by name, so no credential is
+        // put on the argv.
+        let routes_approvals = agent
+            .spec
+            .headless()
+            .is_some_and(|headless| headless.approval_tool);
+        let forwards_server_env = matches!(
+            agent
+                .spec
+                .headless()
+                .and_then(|headless| headless.mcp.as_ref())
+                .unwrap_or(&agent.spec.agent.mcp),
+            McpSlot::Inline { .. }
+        );
         let renderer = SpecHeadlessRenderer::new(
             agent.spec,
             agent.tool,
@@ -352,24 +343,18 @@ impl DaemonCodingAgentLauncher {
             AdapterRegistry::builtin(),
         )
         .map_err(|reason| Self::refuse(launch, &reason.to_string()))?;
-        // Only Claude routes its permission prompts to the tool server; the others declare no
-        // permission-prompt slot. Codex forwards the server's variables from its own environment,
-        // by name, so no credential is put on the argv.
-        let claude = harness == HeadlessHarness::Claude.id();
-        if claude {
+        if routes_approvals {
             self.bind_approvals(launch, conversation, &server)?;
         }
-        if harness == HeadlessHarness::Codex.id() {
+        if forwards_server_env {
             env.extend(server.env.iter().cloned());
         }
         files.keep();
         Ok(HeadlessCommand {
-            program,
             env,
             cwd: Some(launch.worktree.clone()),
             model: Some(launch.def.model.clone()),
-            mcp_config: None,
-            permission_prompt_tool: claude.then(|| APPROVAL_PROMPT_TOOL.to_string()),
+            permission_prompt_tool: routes_approvals.then(|| APPROVAL_PROMPT_TOOL.to_string()),
             disallowed_tools: Vec::new(),
             profile: None,
             mcp_server: Some(server),
@@ -758,8 +743,6 @@ impl DaemonCodingAgentLauncher {
         })?;
         refuse_unless_confinable(&launch.def.harness, launch.managed)
             .map_err(|reason| Self::refuse(launch, &reason))?;
-        let harness = HeadlessHarness::from_id(&launch.def.harness)
-            .ok_or_else(|| Self::refuse(launch, "this daemon has no headless command for it"))?;
         // A conversation's tool calls are named by its id, so a headless one without an id has
         // nothing to name them by, and no id is guessed.
         let conversation = launch.conversation_id.as_deref().ok_or_else(|| {
@@ -784,65 +767,12 @@ impl DaemonCodingAgentLauncher {
         if let Some(reason) = &self.coding_agents_error {
             return Err(Self::refuse(launch, reason));
         }
-        let program = headless_program(&wiring.config, harness);
-        self.refuse_unless_daemon_user(launch, &program)?;
-        let env = self.headless_provider_env(launch)?;
-        let server = self.tool_server_spec(launch)?;
-        let mut command = HeadlessCommand {
-            program: PathBuf::from(program),
-            env,
-            cwd: Some(launch.worktree.clone()),
-            model: Some(launch.def.model.clone()),
-            mcp_config: None,
-            permission_prompt_tool: None,
-            disallowed_tools: Vec::new(),
-            profile: None,
-            mcp_server: None,
-            renderer: None,
-            scratch_dir: None,
-        };
-        let refused_config = |e: io::Error| {
-            Self::refuse(launch, &format!("its MCP config could not be written: {e}"))
-        };
-        match harness {
-            HeadlessHarness::Claude => {
-                let files = self.claim_conversation_files(launch, wiring, conversation.as_str())?;
-                let path = write_owner_only_json(
-                    &files.dir.join(MCP_CONFIG_FILE),
-                    &mcp_servers_wrapped(&server),
-                )
-                .map_err(refused_config)?;
-                // Bound only once everything the plan writes is written, so a plan that fails part-way
-                // leaves no route holding the agent's credential.
-                self.bind_approvals(launch, conversation.as_str(), &server)?;
-                files.keep();
-                command.mcp_config = Some(path);
-                command.permission_prompt_tool = Some(APPROVAL_PROMPT_TOOL.to_string());
-            }
-            HeadlessHarness::Oz => {
-                let files = self.claim_conversation_files(launch, wiring, conversation.as_str())?;
-                let path = write_owner_only_json(
-                    &files.dir.join(MCP_CONFIG_FILE),
-                    &mcp_servers_by_name(&server),
-                )
-                .map_err(refused_config)?;
-                files.keep();
-                command.mcp_config = Some(path);
-            }
-            HeadlessHarness::Cursor => {
-                command.mcp_config = Some(
-                    write_cursor_project_mcp_config(&launch.worktree, &server)
-                        .map_err(|reason| Self::refuse(launch, &reason))?,
-                );
-            }
-            HeadlessHarness::Codex => {
-                // Its variables reach the CLI's own environment, which codex forwards to the server by
-                // name: no credential is put on the argv.
-                command.env.extend(server.env.iter().cloned());
-                command.mcp_server = Some(server);
-            }
-        }
-        Ok(command)
+        // Nothing is planned by hand: a daemon without the coding agents installed has no argv to
+        // start a headless CLI with, and says so.
+        Err(Self::refuse(
+            launch,
+            "this daemon has no coding agents installed, so it has no definition of the headless CLI to start",
+        ))
     }
 
     /// Records, in the claimed directory `scratch_dir`, every file the turns of `spec`'s headless
@@ -878,8 +808,11 @@ impl DaemonCodingAgentLauncher {
             }
             // Ignored before it is written, so the credential is never an untracked file git would
             // offer.
-            exclude_from_git(&launch.worktree, &format!("/{}", relative.display()))
-                .map_err(|reason| Self::refuse(launch, &reason))?;
+            tddy_core::turn_files::exclude_from_git(
+                &launch.worktree,
+                &format!("/{}", relative.display()),
+            )
+            .map_err(|reason| Self::refuse(launch, &reason.to_string()))?;
         }
         record_written_files(scratch_dir, &written).map_err(|e| {
             Self::refuse(
@@ -982,17 +915,6 @@ pub fn sweep_headless_files_left_by_this_daemon(
     )
 }
 
-/// The program a headless harness's CLI runs. Claude and Cursor run the binary a daemon's own session
-/// of that CLI resolves; Codex and Oz have no such resolver, so they run by name from `PATH`.
-fn headless_program(config: &DaemonConfig, harness: HeadlessHarness) -> String {
-    match harness {
-        HeadlessHarness::Claude => resolve_claude_binary_path(config),
-        HeadlessHarness::Cursor => resolve_cursor_binary_path(config),
-        HeadlessHarness::Codex => tddy_core::CodexBackend::DEFAULT_CLI_BINARY.to_string(),
-        HeadlessHarness::Oz => OZ_BINARY.to_string(),
-    }
-}
-
 /// The environment a headless CLI takes from `route`: its plain pairs and its secret pairs. A headless
 /// CLI reads no route file and takes no route argument but its model, which is the session's own
 /// model; the route's environment pins its provider's model. Anything else the route needs is refused,
@@ -1026,105 +948,6 @@ fn headless_route_env(
             .map(|(name, secret)| (name.clone(), secret.expose().to_string())),
     );
     Ok(env)
-}
-
-/// `server` as an MCP config entry: its command, arguments and environment.
-fn mcp_server_entry(server: &McpServerSpec) -> serde_json::Value {
-    let env: serde_json::Map<String, serde_json::Value> = server
-        .env
-        .iter()
-        .map(|(name, value)| (name.clone(), serde_json::Value::String(value.clone())))
-        .collect();
-    serde_json::json!({
-        "command": server.command.display().to_string(),
-        "args": server.args,
-        "env": env,
-    })
-}
-
-/// The MCP config claude and cursor read: servers by name under `mcpServers`.
-fn mcp_servers_wrapped(server: &McpServerSpec) -> serde_json::Value {
-    serde_json::json!({ "mcpServers": mcp_servers_by_name(server) })
-}
-
-/// The MCP config `oz --mcp` reads: servers by name at the top level.
-fn mcp_servers_by_name(server: &McpServerSpec) -> serde_json::Value {
-    let mut servers = serde_json::Map::new();
-    servers.insert(server.name.clone(), mcp_server_entry(server));
-    serde_json::Value::Object(servers)
-}
-
-/// Write `config` to `path`, owner only: an MCP config carries the agent's tool credential. Returns
-/// the path. Its contents are never logged.
-fn write_owner_only_json(path: &Path, config: &serde_json::Value) -> io::Result<PathBuf> {
-    tddy_core::atomic_file::write_atomic_with_mode(path, config.to_string(), MCP_CONFIG_MODE)?;
-    Ok(path.to_path_buf())
-}
-
-/// The project MCP config cursor reads from the worktree it runs in.
-const CURSOR_PROJECT_MCP_CONFIG: &str = ".cursor/mcp.json";
-
-/// Write cursor's project MCP config into `worktree`, owner only and ignored by git there, so the
-/// agent's credential it carries is never committed. An existing one is refused, never overwritten:
-/// it may be the repository's own, and tracked. Returns its path.
-fn write_cursor_project_mcp_config(
-    worktree: &Path,
-    server: &McpServerSpec,
-) -> Result<PathBuf, String> {
-    let path = worktree.join(CURSOR_PROJECT_MCP_CONFIG);
-    if path.symlink_metadata().is_ok() {
-        return Err(format!(
-            "its worktree already has a {CURSOR_PROJECT_MCP_CONFIG}, which is not overwritten"
-        ));
-    }
-    // Ignored before it is written, so the credential is never an untracked file git would offer.
-    exclude_from_git(worktree, &format!("/{CURSOR_PROJECT_MCP_CONFIG}"))?;
-    write_owner_only_json(&path, &mcp_servers_wrapped(server))
-        .map_err(|e| format!("its {CURSOR_PROJECT_MCP_CONFIG} could not be written: {e}"))
-}
-
-/// Add `pattern` to the `info/exclude` of the repository `worktree` is a checkout of, unless it is
-/// there already. Refused when `worktree` is not a git checkout: nothing would keep the file out of a
-/// commit.
-fn exclude_from_git(worktree: &Path, pattern: &str) -> Result<(), String> {
-    let output = std::process::Command::new("git")
-        .arg("-C")
-        .arg(worktree)
-        .args(["rev-parse", "--path-format=absolute", "--git-common-dir"])
-        .output()
-        .map_err(|e| format!("git could not be run to keep its MCP config out of commits: {e}"))?;
-    if !output.status.success() {
-        return Err(format!(
-            "its worktree {} is not a git checkout, so nothing would keep its MCP config out of a commit: {}",
-            worktree.display(),
-            String::from_utf8_lossy(&output.stderr).trim()
-        ));
-    }
-    let common_dir = PathBuf::from(String::from_utf8_lossy(&output.stdout).trim());
-    let exclude = common_dir.join("info").join("exclude");
-    let existing = match std::fs::read_to_string(&exclude) {
-        Ok(existing) => existing,
-        Err(e) if e.kind() == io::ErrorKind::NotFound => String::new(),
-        Err(e) => return Err(format!("{} could not be read: {e}", exclude.display())),
-    };
-    if existing.lines().any(|line| line.trim() == pattern) {
-        return Ok(());
-    }
-    let separator = if existing.is_empty() || existing.ends_with('\n') {
-        ""
-    } else {
-        "\n"
-    };
-    std::fs::create_dir_all(common_dir.join("info"))
-        .and_then(|()| {
-            use std::io::Write as _;
-            std::fs::OpenOptions::new()
-                .create(true)
-                .append(true)
-                .open(&exclude)?
-                .write_all(format!("{separator}{pattern}\n").as_bytes())
-        })
-        .map_err(|e| format!("{} could not be written: {e}", exclude.display()))
 }
 
 /// The program and arguments `claude-acp` runs as: the `claude-agent-acp` binary `override_cli`

@@ -8,7 +8,7 @@ use tddy_coder_cli::LiveKitParticipantHost;
 
 /// When Codex runs `BROWSER <url>` with `TDDY_CODEX_OAUTH_OUT` set (during `codex exec` or
 /// `codex login`), write the authorize URL and exit without starting the full CLI (see
-/// `CodexBackend::spawn_oauth_login`, LiveKit participant metadata).
+/// `spawn_codex_oauth_login`, LiveKit participant metadata).
 fn codex_oauth_browser_hook_early_exit() {
     let args: Vec<String> = std::env::args().collect();
     if std::env::var_os("TDDY_CODEX_OAUTH_OUT").is_none() {

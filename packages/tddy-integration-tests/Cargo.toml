@@ -33,6 +33,7 @@ tddy-testing-commons = { path = "../tddy-testing-commons" }
 
 [dev-dependencies]
 tddy-coder = { path = "../tddy-coder" }
+tddy-actions = { path = "../tddy-actions" }
 tddy-sandbox-runner = { path = "../tddy-sandbox-runner" }
 bytes = "1"
 tempfile = "3"

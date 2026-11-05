@@ -1,7 +1,7 @@
 # 2026-11-05 — Codex's OAuth capture still hands the headless agent one `TDDY_*` variable
 
 **Category:** Deferred from `#agent-tools` 15/19 (#821, headless-driver), to the Codex OAuth follow-up stack
-**Source:** `packages/tddy-coding-agent-specs/specs/codex.yaml` (`coding_agent.headless.env`); `packages/tddy-agent-backend/src/backend/codex.rs` (`CODEX_OAUTH_AUTHORIZE_URL_FILENAME`, today's `BROWSER`/`TDDY_CODEX_OAUTH_OUT` in `run_child`)
+**Source:** `packages/tddy-coding-agent-specs/specs/codex.yaml` (`coding_agent.headless.env`); `packages/tddy-agent-backend/src/backend/codex.rs` (`CODEX_OAUTH_AUTHORIZE_URL_FILENAME`, `spawn_codex_oauth_login`'s `BROWSER`/`TDDY_CODEX_OAUTH_OUT`)
 
 The stack rule is that a headless agent's process sees no `TDDY_*` variable: the generic headless
 backend strips every inherited one, and a `tddy-tools` the agent runs finds its session through

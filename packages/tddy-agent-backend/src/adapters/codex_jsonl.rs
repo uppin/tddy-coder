@@ -5,10 +5,10 @@
 use std::io::BufRead;
 
 use crate::backend::acp_driver::AcpUpdateSink;
-use crate::backend::headless_driver::transcript::Transcript;
-use crate::backend::headless_driver::HeadlessHarness;
-use crate::error::BackendError;
 use crate::backend::codex::login_text::codex_openai_auth_remediation;
+use crate::backend::headless_driver::codex_jsonl::CodexTurn;
+use crate::backend::headless_driver::transcript::Updates;
+use crate::error::BackendError;
 use crate::stream::codex::{
     codex_jsonl_last_error_message, codex_stderr_brief_for_user, parse_codex_jsonl_output,
 };
@@ -73,9 +73,6 @@ impl StreamAdapter for CodexJsonl {
         exit_code == 0 || (exit_ok_if_structured && !stream.result_text.trim().is_empty())
     }
 
-    fn turn_format(&self) -> Option<HeadlessHarness> {
-        Some(HeadlessHarness::Codex)
-    }
     fn failure_detail(&self, stream: &StreamResult, stderr: &str) -> String {
         let detail = stream
             .stream_errors
@@ -90,7 +87,7 @@ impl StreamAdapter for CodexJsonl {
     }
 
     fn transcript(&self, updates: Option<AcpUpdateSink>) -> Option<Box<dyn TurnTranscript>> {
-        Some(Box::new(Transcript::new(HeadlessHarness::Codex, updates)))
+        Some(Box::new(CodexTurn::new(Updates::new(updates))))
     }
 }
 
@@ -231,14 +228,5 @@ mod tests {
 
         // Then
         assert_eq!(ok, (true, true, false, false));
-    }
-
-    #[test]
-    fn a_codex_stream_is_decoded_by_the_drivers_codex_transcript() {
-        // When
-        let format = CodexJsonl.turn_format();
-
-        // Then
-        assert_eq!(format, Some(HeadlessHarness::Codex));
     }
 }

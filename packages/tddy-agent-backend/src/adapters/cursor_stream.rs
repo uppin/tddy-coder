@@ -5,8 +5,8 @@
 use std::io::BufRead;
 
 use crate::backend::acp_driver::AcpUpdateSink;
-use crate::backend::headless_driver::transcript::Transcript;
-use crate::backend::headless_driver::HeadlessHarness;
+use crate::backend::headless_driver::stream_json::StreamJsonTurn;
+use crate::backend::headless_driver::transcript::Updates;
 use crate::error::BackendError;
 use crate::stream::cursor::process_cursor_stream;
 use crate::stream::StreamResult;
@@ -49,16 +49,16 @@ impl StreamAdapter for CursorStream {
             || (exit_ok_if_structured && stream.result_text.contains(STRUCTURED_RESPONSE_MARKER))
     }
 
-    fn turn_format(&self) -> Option<HeadlessHarness> {
-        Some(HeadlessHarness::Cursor)
-    }
     fn failure_detail(&self, stream: &StreamResult, stderr: &str) -> String {
         let _ = stream;
         stderr.trim().to_string()
     }
 
     fn transcript(&self, updates: Option<AcpUpdateSink>) -> Option<Box<dyn TurnTranscript>> {
-        Some(Box::new(Transcript::new(HeadlessHarness::Cursor, updates)))
+        Some(Box::new(StreamJsonTurn::new(
+            "cursor",
+            Updates::new(updates),
+        )))
     }
 }
 
@@ -208,14 +208,5 @@ mod tests {
 
         // Then
         assert_eq!(ok, (true, false));
-    }
-
-    #[test]
-    fn a_cursor_stream_is_decoded_by_the_drivers_cursor_transcript() {
-        // When
-        let format = CursorStream.turn_format();
-
-        // Then
-        assert_eq!(format, Some(HeadlessHarness::Cursor));
     }
 }

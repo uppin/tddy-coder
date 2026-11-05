@@ -203,9 +203,9 @@ All ✅ **settled at red** (orchestrator, under the user's "don't stop"; each pi
 - [x] Run acceptance tests (verify they fail)
 - [x] USER REVIEW — acceptance tests (waived by the user: "finish without stopping"; decisions taken by the orchestrator)
 - [x] TDD Red — write failing unit/integration tests
-- [ ] TDD Green — implement with quality code
-- [ ] Update documentation with progress
-- [ ] Repeat Red→Green→Update cycle until feature complete
+- [x] TDD Green — implement with quality code
+- [x] Update documentation with progress
+- [x] Repeat Red→Green→Update cycle until feature complete
 - [ ] Run the touched packages' tests (`./test -p {package}` per package) — verify 100% pass
 - [ ] Validate changes (/validate-changes)
 - [ ] Refactor issues from change validation
@@ -226,6 +226,10 @@ All ✅ **settled at red** (orchestrator, under the user's "don't stop"; each pi
 - The launcher's `exclude_from_git` (`tddy-session-lifecycle`) duplicates `turn_files::exclude_from_git`; it moves when `write_cursor_project_mcp_config` is deleted (`TODO(headless-driver)`).
 - `HeadlessDriver` (conversations) still passes its command env; it shares the core at green and must apply the same no-`TDDY_*` rule and `render_env`.
 - `two_concurrent_turns_cancel_only_their_own_process` currently fails after its 20 s wait ("the agent never wrote agent.pid") because the spawned turns panic on the `todo!()` — the panic, not a hang.
+### From /green
+- Deferred, each with a record: a Codex conversation's tool-server `TDDY_*` variables still ride `HeadlessCommand::env` (`docs/dev/todo/2026-11-05-headless-conversation-tool-server-env.md`); what the green phase deleted beyond **Removed** (`docs/dev/todo/2026-11-05-headless-driver-unplanned-deletions.md`); Codex's `TDDY_CODEX_OAUTH_OUT` (`docs/dev/todo/2026-11-05-codex-oauth-out-env-in-headless-agent.md`).
+- Code issues measured, restructuring left to the sweep node: `oversized-file-spec-headless` (621 lines), `complexity-spec-headless-read-turn` (146), `complexity-spec-headless-invoke` (88), `complexity-headless-driver-run-turn` (91, regressed). Closed by deletion: `complexity-claude-run-child`, `oversized-file-{claude,cursor,codex,headless-driver}`; `oversized-file-backend-mod` 851 → 815 (seam A closed).
+- Decided at green: `BackendError::InvocationFailed` displays its message as it is (the contract's failure texts have no `backend invocation failed: ` frame); the spec renderer passes no allowed tools to an agent whose `tool_allow` is `unsupported`; `HeadlessCommand` keeps an optional `renderer` and a turn without one is refused; `tddy-tools` adopts the session it resolved into its own process environment at start-up (`session_source::adopt_session`), so the MCP server's relays and path rules read one place; `tddy-tui`'s Ctrl+C calls `kill_running_turns`, which kills every running turn's process group.
 ### From /validate-changes
 ### From /validate-tests
 ### From /validate-prod-ready

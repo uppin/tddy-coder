@@ -19,8 +19,8 @@ use tddy_core::workflow::graph::ExecutionStatus;
 use tddy_core::{
     backend_from_label, backend_selection_question, default_model_for_agent, get_session_for_tag,
     output::SESSIONS_SUBDIR, preselected_index_for_agent, read_changeset, read_session_metadata,
-    AnyBackend, CodexBackend, CodingBackend, GoalId, PendingWorkflowStart, ProgressEvent,
-    SharedBackend, StubBackend, WorkflowEngine, WorkflowRecipe,
+    AnyBackend, CodingBackend, GoalId, PendingWorkflowStart, ProgressEvent, SharedBackend,
+    StubBackend, WorkflowEngine, WorkflowRecipe,
 };
 use tddy_discovery;
 use tddy_workflow_recipes::{parse_evaluate_response, parse_refactor_response};
@@ -452,7 +452,7 @@ pub fn run_main(mut args: Args, host: ParticipantHost) {
     let ctrlc_pressed_for_handler = ctrlc_pressed.clone();
 
     ctrlc::set_handler(move || {
-        tddy_core::kill_child_process();
+        tddy_core::kill_running_turns();
         ctrlc_pressed_for_handler.store(true, Ordering::Relaxed);
         shutdown_for_handler.store(true, Ordering::Relaxed);
         let _ = crossterm::execute!(
@@ -1322,7 +1322,6 @@ fn run_codex_oauth_login(args: &Args) -> anyhow::Result<()> {
         "--codex-oauth-login requires --session-dir or --session-id so the artifact directory is known",
     )?;
     let codex_bin = resolve_codex_binary(args.codex_cli_path.as_deref());
-    let backend = CodexBackend::with_path(codex_bin);
     let url_file = session_dir.join(tddy_core::CODEX_OAUTH_AUTHORIZE_URL_FILENAME);
     eprintln!("Codex browser OAuth login (OpenAI). This is not `--device-auth`.");
     eprintln!(
@@ -1332,8 +1331,7 @@ fn run_codex_oauth_login(args: &Args) -> anyhow::Result<()> {
     eprintln!(
         "Complete sign-in in a browser on this host; Codex listens on localhost for the callback until finished or interrupted."
     );
-    let mut child = backend
-        .spawn_oauth_login(&session_dir)
+    let mut child = tddy_core::spawn_codex_oauth_login(&codex_bin, &session_dir)
         .map_err(|e| anyhow::anyhow!("{}", e))?;
     let status = child.wait().context("wait on codex login")?;
     if !status.success() {
@@ -2557,8 +2555,10 @@ fn create_backend(
                 crate::headless_from_spec::CURSOR_BINARY_ENV,
                 cursor_agent_path,
             );
-            let cursor = crate::headless_from_spec::cursor_backend_from_spec(tools_dir, host)?;
-            AnyBackend::Cursor(cursor.with_progress(on_progress))
+            AnyBackend::Cursor(
+                crate::headless_from_spec::headless_backend_from_spec("cursor", tools_dir, host)?
+                    .with_progress(on_progress),
+            )
         }
         // Rendered from `claude-acp.yaml`'s `coding_agent.acp` on this host's tools.
         "claude-acp" => AnyBackend::ClaudeAcp(crate::acp_from_spec::claude_acp_backend_from_spec(
@@ -2572,9 +2572,10 @@ fn create_backend(
                 crate::headless_from_spec::CODEX_BINARY_ENV,
                 codex_cli_path,
             );
-            AnyBackend::Codex(crate::headless_from_spec::codex_backend_from_spec(
-                tools_dir, host,
-            )?)
+            AnyBackend::Codex(
+                crate::headless_from_spec::headless_backend_from_spec("codex", tools_dir, host)?
+                    .with_progress(on_progress),
+            )
         }
         // Rendered from `codex-acp.yaml`'s `coding_agent.acp`: an explicit `--codex-acp-cli-path`
         // names its binary, and an explicit `--codex-cli-path` names the `codex` dep its login runs.
@@ -2608,10 +2609,10 @@ fn create_backend(
         "stub" => AnyBackend::Stub(StubBackend::new()),
         // Rendered from `claude.yaml`'s headless section on this host's tools, so the spec is the
         // only path a `claude` workflow takes.
-        "claude" => {
-            let claude = crate::claude_from_spec::claude_backend_from_spec(tools_dir, tool_host)?;
-            AnyBackend::Claude(claude.with_progress(on_progress))
-        }
+        "claude" => AnyBackend::Claude(
+            crate::headless_from_spec::headless_backend_from_spec("claude", tools_dir, tool_host)?
+                .with_progress(on_progress),
+        ),
         unknown => {
             let known = specialized_agent_defs
                 .iter()

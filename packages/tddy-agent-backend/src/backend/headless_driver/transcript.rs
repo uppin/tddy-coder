@@ -6,19 +6,13 @@ use std::process::ExitStatus;
 use crate::backend::acp_driver::{AcpStopReason, AcpTurnEnd, AcpUpdate, AcpUpdateSink};
 use crate::error::BackendError;
 
-use super::codex_jsonl::CodexTurn;
-use super::oz_ndjson::OzTurn;
-use super::stream_json::StreamJsonTurn;
-use super::HeadlessHarness;
-
 pub(crate) use crate::adapters::{TurnEnding as Ending, TurnFinished as Finished};
-use crate::adapters::TurnTranscript;
 
 /// The sink a turn's updates go to, when the caller gave one.
-pub(super) struct Updates(Option<AcpUpdateSink>);
+pub(crate) struct Updates(Option<AcpUpdateSink>);
 
 impl Updates {
-    pub(super) fn new(sink: Option<AcpUpdateSink>) -> Self {
+    pub(crate) fn new(sink: Option<AcpUpdateSink>) -> Self {
         Self(sink)
     }
 
@@ -26,53 +20,6 @@ impl Updates {
         if let Some(sink) = &self.0 {
             sink(update);
         }
-    }
-}
-
-/// The transcript of one turn, in the shape its harness streams.
-pub(crate) enum Transcript {
-    StreamJson(StreamJsonTurn),
-    Codex(CodexTurn),
-    Oz(OzTurn),
-}
-
-impl Transcript {
-    pub(crate) fn new(harness: HeadlessHarness, sink: Option<AcpUpdateSink>) -> Self {
-        let updates = Updates::new(sink);
-        match harness {
-            HeadlessHarness::Claude | HeadlessHarness::Cursor => {
-                Self::StreamJson(StreamJsonTurn::new(harness, updates))
-            }
-            HeadlessHarness::Codex => Self::Codex(CodexTurn::new(updates)),
-            HeadlessHarness::Oz => Self::Oz(OzTurn::new(updates)),
-        }
-    }
-
-    /// One stdout line as it arrives.
-    pub(crate) fn push_line(&mut self, line: &str) {
-        match self {
-            Self::StreamJson(turn) => turn.push_line(line),
-            Self::Codex(turn) => turn.push_line(line),
-            Self::Oz(turn) => turn.push_line(line),
-        }
-    }
-
-    pub(crate) fn finish(self, ending: Ending<'_>) -> Finished {
-        match self {
-            Self::StreamJson(turn) => turn.finish(ending),
-            Self::Codex(turn) => turn.finish(ending),
-            Self::Oz(turn) => turn.finish(ending),
-        }
-    }
-}
-
-impl TurnTranscript for Transcript {
-    fn push_line(&mut self, line: &str) {
-        Transcript::push_line(self, line);
-    }
-
-    fn finish(self: Box<Self>, ending: Ending<'_>) -> Finished {
-        Transcript::finish(*self, ending)
     }
 }
 
@@ -93,17 +40,10 @@ pub(super) fn cancelled(text: String) -> Result<AcpTurnEnd, BackendError> {
 }
 
 /// A CLI that exited non-zero without a usable result: its status and the detail it left.
-pub(super) fn exit_error(
-    harness: HeadlessHarness,
-    status: ExitStatus,
-    detail: &str,
-) -> BackendError {
+pub(super) fn exit_error(agent: &str, status: ExitStatus, detail: &str) -> BackendError {
     let detail = match detail.trim() {
         "" => "no error output",
         trimmed => trimmed,
     };
-    BackendError::InvocationFailed(format!(
-        "{} turn exited with {status}: {detail}",
-        harness.id()
-    ))
+    BackendError::InvocationFailed(format!("{agent} turn exited with {status}: {detail}"))
 }

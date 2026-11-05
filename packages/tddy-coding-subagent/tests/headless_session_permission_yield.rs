@@ -9,9 +9,16 @@
 use std::os::unix::fs::PermissionsExt;
 use std::time::Duration;
 
+use std::path::PathBuf;
+use std::sync::Arc;
+
+use tddy_agent_backend::adapters::{
+    AdapterError, AdapterRegistry, HeadlessInvocation, HeadlessMcpServer, HeadlessRenderer,
+    HeadlessTurn, CLAUDE_STREAM_JSON,
+};
+
 use tddy_agent_backend::{
-    HeadlessCommand, HeadlessHarness, PermissionDecision, PermissionHandler, PermissionOptionView,
-    PermissionRequest,
+    HeadlessCommand, PermissionDecision, PermissionHandler, PermissionOptionView, PermissionRequest,
 };
 use tddy_coding_subagent::CodingAgentSession;
 use tddy_discovery::subagent::{
@@ -54,11 +61,51 @@ fn a_fake_claude(stream: &[serde_json::Value], sleep_secs: u32) -> FakeClaude {
     FakeClaude { dir }
 }
 
+/// A renderer standing in for claude's spec: `-p <prompt>`, `--resume <session>` on a resumed turn,
+/// read through `claude-stream-json`. The argv a real spec renders is pinned by its render goldens.
+#[derive(Debug)]
+struct ARenderer {
+    program: PathBuf,
+}
+
+impl HeadlessRenderer for ARenderer {
+    fn agent_id(&self) -> &str {
+        "claude"
+    }
+
+    fn tool_server(&self) -> Option<HeadlessMcpServer> {
+        None
+    }
+
+    fn render(&self, turn: &HeadlessTurn) -> Result<HeadlessInvocation, AdapterError> {
+        let mut argv = vec!["-p".to_string(), turn.prompt.clone()];
+        if let Some(model) = &turn.model {
+            argv.extend(["--model".to_string(), model.clone()]);
+        }
+        if let Some(session) = turn.session.as_ref().filter(|session| session.is_resume()) {
+            argv.extend(["--resume".to_string(), session.session_id().to_string()]);
+        }
+        Ok(HeadlessInvocation {
+            program: self.program.clone(),
+            argv,
+            env: Vec::new(),
+            files: Vec::new(),
+            adapter: AdapterRegistry::builtin()
+                .get(CLAUDE_STREAM_JSON)
+                .expect("claude-stream-json is registered"),
+            exit_ok_if_structured: false,
+        })
+    }
+}
+
 impl FakeClaude {
     fn command(&self) -> HeadlessCommand {
         HeadlessCommand {
-            program: self.dir.path().join("claude"),
             cwd: Some(self.dir.path().to_path_buf()),
+            scratch_dir: Some(self.dir.path().join("conversation")),
+            renderer: Some(Arc::new(ARenderer {
+                program: self.dir.path().join("claude"),
+            })),
             ..HeadlessCommand::default()
         }
     }
@@ -128,13 +175,9 @@ async fn a_headless_turn_yields_a_permission_request_parked_on_its_session_and_r
 ) {
     // Given
     let claude = a_fake_claude(&claude_stream("cl-1", "Fixed it."), 2);
-    let mut session = CodingAgentSession::start_headless(
-        HeadlessHarness::Claude,
-        claude.command(),
-        "sonnet".to_string(),
-    )
-    .await
-    .expect("the headless session starts");
+    let mut session = CodingAgentSession::start_headless(claude.command(), "sonnet".to_string())
+        .await
+        .expect("the headless session starts");
     let permissions = session.permissions();
     let asking = tokio::spawn(async move {
         tokio::time::sleep(REQUEST_DELAY).await;

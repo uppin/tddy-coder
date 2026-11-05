@@ -5,7 +5,6 @@ pub mod acp_from_spec;
 pub mod acp_host;
 pub mod agent_registry_cli;
 pub mod build_executor;
-pub mod claude_from_spec;
 mod codex_binaries;
 pub mod config;
 pub mod conversation_spawn_relay;

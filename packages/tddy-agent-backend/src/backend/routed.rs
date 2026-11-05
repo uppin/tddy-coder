@@ -7,42 +7,35 @@
 //! the file `OPENCODE_CONFIG` names. The other routed harnesses take everything from the environment
 //! and the arguments, and write no file.
 
-use crate::provider_route::{HarnessRoute, RouteRefusal};
+use crate::provider_route::HarnessRoute;
 
-use super::{
-    AnyBackend, ClaudeAcpBackend, ClaudeCodeBackend, CodexAcpBackend, CodexBackend,
-    OpenCodeAcpBackend,
-};
+use super::{AnyBackend, ClaudeAcpBackend, CodexAcpBackend, OpenCodeAcpBackend};
 
 impl AnyBackend {
     /// Run this backend on `route`. Refused, with the reason, for a backend that cannot be routed —
-    /// Cursor and the stub; never silently ignored.
+    /// an agent whose spec declares no provider (Cursor) and the stub; never silently ignored.
     pub fn with_provider_route(self, route: HarnessRoute) -> Result<Self, String> {
         match self {
-            AnyBackend::Claude(b) => Ok(AnyBackend::Claude(b.with_provider_route(route))),
+            AnyBackend::Claude(b) => b
+                .with_provider_route(route)
+                .map(AnyBackend::Claude)
+                .map_err(|refusal| refusal.to_string()),
             AnyBackend::ClaudeAcp(b) => Ok(AnyBackend::ClaudeAcp(b.with_provider_route(route))),
-            AnyBackend::Codex(b) => Ok(AnyBackend::Codex(b.with_provider_route(route))),
+            AnyBackend::Codex(b) => b
+                .with_provider_route(route)
+                .map(AnyBackend::Codex)
+                .map_err(|refusal| refusal.to_string()),
             AnyBackend::CodexAcp(b) => Ok(AnyBackend::CodexAcp(b.with_provider_route(route))),
             AnyBackend::OpenCode(b) => Ok(AnyBackend::OpenCode(b.with_provider_route(route))),
-            AnyBackend::Cursor(_) => Err(RouteRefusal::AgentCannotBeRouted {
-                agent: "cursor".to_string(),
-                product: "Cursor".to_string(),
-            }
-            .to_string()),
+            AnyBackend::Cursor(b) => b
+                .with_provider_route(route)
+                .map(AnyBackend::Cursor)
+                .map_err(|refusal| refusal.to_string()),
             AnyBackend::Stub(_) => Err(
                 "the stub backend cannot run on a provider account: it makes no provider call"
                     .to_string(),
             ),
         }
-    }
-}
-
-impl ClaudeCodeBackend {
-    /// `claude -p` on a provider account: the route's environment on every child, and its arguments.
-    #[must_use]
-    pub fn with_provider_route(mut self, route: HarnessRoute) -> Self {
-        self.provider_route = Some(route);
-        self
     }
 }
 
@@ -52,15 +45,6 @@ impl ClaudeAcpBackend {
     #[must_use]
     pub fn with_provider_route(mut self, route: HarnessRoute) -> Self {
         self.set_provider_route(route);
-        self
-    }
-}
-
-impl CodexBackend {
-    /// `codex exec` on a provider account: the route's `-c model_provider…` arguments and its key.
-    #[must_use]
-    pub fn with_provider_route(mut self, route: HarnessRoute) -> Self {
-        self.provider_route = Some(route);
         self
     }
 }
@@ -98,18 +82,6 @@ pub(super) fn route_child_env(route: &HarnessRoute) -> impl Iterator<Item = (&st
                 .iter()
                 .map(|(name, secret)| (name.as_str(), secret.expose())),
         )
-}
-
-/// Splice `route`'s arguments onto `args`, the argv a backend built for its request. The route
-/// names the model it runs (`model_flag <model>`), so that flag replaces the request's own: the
-/// child is given one model, the route's.
-pub(super) fn splice_route_args(args: &mut Vec<String>, route: &HarnessRoute, model_flag: &str) {
-    if route.args.iter().any(|arg| arg == model_flag) {
-        if let Some(at) = args.iter().position(|arg| arg == model_flag) {
-            args.drain(at..(at + 2).min(args.len()));
-        }
-    }
-    args.extend(route.args.iter().cloned());
 }
 
 /// The route's arguments as `codex-acp` takes them. It accepts `-c key=value` overrides, as `codex`

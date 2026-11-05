@@ -8,8 +8,8 @@ use std::time::Duration;
 use async_trait::async_trait;
 use tddy_agent_backend::{
     AcpAgentCommand, AcpConversation, AcpDriver, AcpStopReason, AcpToolStatus, AcpTurnEnd,
-    AcpUpdate, AcpUpdateSink, ConversationDriver, HeadlessCommand, HeadlessDriver, HeadlessHarness,
-    NoHooks, OpenSession,
+    AcpUpdate, AcpUpdateSink, ConversationDriver, HeadlessCommand, HeadlessDriver, NoHooks,
+    OpenSession,
 };
 use tddy_discovery::openai::TokenUsage;
 use tddy_discovery::subagent::{
@@ -118,12 +118,10 @@ impl CodingAgentSession {
     /// A headless conversation: `command` runs the harness's CLI once per turn, and every turn after
     /// the first resumes the session the CLI named on the first. Nothing runs until a turn is taken.
     pub async fn start_headless(
-        harness: HeadlessHarness,
         command: HeadlessCommand,
         model: String,
     ) -> Result<Self, SubagentError> {
-        let conversation: Arc<dyn ConversationDriver> =
-            Arc::new(HeadlessDriver::new(harness, command));
+        let conversation: Arc<dyn ConversationDriver> = Arc::new(HeadlessDriver::new(command));
         Ok(Self::with_conversation(
             conversation,
             None,

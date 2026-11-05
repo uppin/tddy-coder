@@ -8,8 +8,9 @@ use serde::Deserialize;
 use crate::backend::acp_driver::{AcpToolStatus, AcpUpdate};
 use crate::stream::claude::tool_use_detail;
 
+use crate::adapters::TurnTranscript;
+
 use super::transcript::{cancelled, ended, exit_error, Ending, Finished, Updates};
-use super::HeadlessHarness;
 
 #[derive(Debug, Deserialize)]
 struct Event {
@@ -72,7 +73,8 @@ struct ResultEvent {
 }
 
 pub(crate) struct StreamJsonTurn {
-    harness: HeadlessHarness,
+    /// The agent whose stream this is, for the messages an exit names it in.
+    agent: &'static str,
     updates: Updates,
     session_id: Option<String>,
     assistant_text: String,
@@ -80,9 +82,9 @@ pub(crate) struct StreamJsonTurn {
 }
 
 impl StreamJsonTurn {
-    pub(super) fn new(harness: HeadlessHarness, updates: Updates) -> Self {
+    pub(crate) fn new(agent: &'static str, updates: Updates) -> Self {
         Self {
-            harness,
+            agent,
             updates,
             session_id: None,
             assistant_text: String::new(),
@@ -90,14 +92,11 @@ impl StreamJsonTurn {
         }
     }
 
-    pub(super) fn push_line(&mut self, line: &str) {
+    pub(crate) fn push_line(&mut self, line: &str) {
         let event: Event = match serde_json::from_str(line) {
             Ok(event) => event,
             Err(e) => {
-                log::debug!(
-                    "[headless] {} stream line is not an event: {e}",
-                    self.harness.id()
-                );
+                log::debug!("[headless] {} stream line is not an event: {e}", self.agent);
                 return;
             }
         };
@@ -166,7 +165,7 @@ impl StreamJsonTurn {
         }
     }
 
-    pub(super) fn finish(self, ending: Ending<'_>) -> Finished {
+    pub(crate) fn finish(self, ending: Ending<'_>) -> Finished {
         let session_id = self.session_id.clone();
         let result = match ending {
             Ending::Cancelled => cancelled(self.text_so_far()),
@@ -179,15 +178,25 @@ impl StreamJsonTurn {
                     text,
                     is_error: true,
                 }) => Err(exit_error(
-                    self.harness,
+                    self.agent,
                     status,
                     text.as_deref().unwrap_or(stderr),
                 )),
                 _ if status.success() => ended(self.assistant_text.clone()),
-                _ => Err(exit_error(self.harness, status, stderr)),
+                _ => Err(exit_error(self.agent, status, stderr)),
             },
         };
         Finished { session_id, result }
+    }
+}
+
+impl TurnTranscript for StreamJsonTurn {
+    fn push_line(&mut self, line: &str) {
+        StreamJsonTurn::push_line(self, line);
+    }
+
+    fn finish(self: Box<Self>, ending: Ending<'_>) -> Finished {
+        StreamJsonTurn::finish(*self, ending)
     }
 }
 

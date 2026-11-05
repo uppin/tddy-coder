@@ -7,8 +7,9 @@ use serde_json::json;
 
 use crate::backend::acp_driver::{AcpToolStatus, AcpUpdate};
 
+use crate::adapters::TurnTranscript;
+
 use super::transcript::{cancelled, ended, exit_error, Ending, Finished, Updates};
-use super::HeadlessHarness;
 
 #[derive(Debug, Deserialize)]
 struct Event {
@@ -52,8 +53,18 @@ pub(crate) struct OzTurn {
     pending: Vec<PendingCall>,
 }
 
+impl TurnTranscript for OzTurn {
+    fn push_line(&mut self, line: &str) {
+        OzTurn::push_line(self, line);
+    }
+
+    fn finish(self: Box<Self>, ending: Ending<'_>) -> Finished {
+        OzTurn::finish(*self, ending)
+    }
+}
+
 impl OzTurn {
-    pub(super) fn new(updates: Updates) -> Self {
+    pub(crate) fn new(updates: Updates) -> Self {
         Self {
             updates,
             session_id: None,
@@ -160,14 +171,12 @@ impl OzTurn {
         });
     }
 
-    pub(super) fn finish(self, ending: Ending<'_>) -> Finished {
+    pub(crate) fn finish(self, ending: Ending<'_>) -> Finished {
         let session_id = self.session_id.clone();
         let result = match ending {
             Ending::Cancelled => cancelled(self.text),
             Ending::Exited { status, .. } if status.success() => ended(self.text),
-            Ending::Exited { status, stderr } => {
-                Err(exit_error(HeadlessHarness::Oz, status, stderr))
-            }
+            Ending::Exited { status, stderr } => Err(exit_error("oz", status, stderr)),
         };
         Finished { session_id, result }
     }
