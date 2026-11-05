@@ -13,6 +13,7 @@ use tddy_rpc::{Response, Status};
 use tddy_service::proto::session::{ResumeSessionRequest, ResumeSessionResponse};
 use tddy_session_agents::agent_roster;
 
+use crate::cli_agent_steps::resumed_conversation;
 use crate::cli_harness_jail::{jail_route_config_env, require_jail_route, CliJail};
 use crate::harness_from_spec::{
     harness_template_params, resolve_session_agent, CliSessionAgent, CliSessionType, HarnessLaunch,
@@ -35,6 +36,8 @@ struct CliHarnessRelaunch<'a> {
     /// The provider route the resume re-resolved; `None` for the agent's own setup.
     route: Option<HarnessRoute>,
     session_env: Vec<(String, String)>,
+    /// The record the start wrote: the conversation the resume continues, and its recorded model.
+    metadata: &'a SessionMetadata,
 }
 
 impl LaunchSessions {
@@ -93,6 +96,7 @@ impl LaunchSessions {
                 agents: &metadata.agents,
                 route,
                 session_env,
+                metadata: &metadata,
             })
             .await?;
 
@@ -128,6 +132,7 @@ impl LaunchSessions {
             agents,
             route,
             session_env,
+            metadata,
         } = relaunch;
 
         // The readiness gate a start applies: a resumed subagent is only as usable as a fresh one if
@@ -163,12 +168,15 @@ impl LaunchSessions {
             &scratch_dir,
         ));
 
-        // A resume continues the agent's own session: its argv is the spec's `resume` branch alone, the
-        // model and route arguments belong to the start.
-        let params = harness_template_params(&HarnessLaunch {
+        // A resume continues the agent's own conversation (the spec's `resume` branch): its session
+        // id or minted chat, which re-binds the recorded model, or its worktree. The route's
+        // arguments belong to the start.
+        let conversation = resumed_conversation(&session_agent.agent.spec, metadata)?;
+        let params = harness_template_params(&conversation.bound(HarnessLaunch {
+            model: metadata.model.as_deref().unwrap_or_default(),
             resume: true,
             ..HarnessLaunch::default()
-        });
+        }));
         let jail = JailSession {
             session_id,
             project_id,

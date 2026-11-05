@@ -5,9 +5,6 @@ pub mod claude_cli_spawn;
 pub mod claude_cli_spawn_steps;
 pub mod claude_cli_tmux;
 mod claude_jail;
-// TODO(cli-spec-features): the generic start and resume call these steps at green; until then the
-// contract's bodies are unreached outside their unit tests.
-#[allow(dead_code)]
 mod cli_agent_steps;
 pub mod cli_branch_starts;
 pub mod cli_harness_tmux;

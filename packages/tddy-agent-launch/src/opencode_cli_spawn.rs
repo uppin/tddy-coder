@@ -21,7 +21,6 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use tddy_cli_sessions::cli_session_manager::CliSessionManager;
-use tddy_coding_agent_specs::Capability;
 use tddy_core::output::SESSIONS_SUBDIR;
 use tddy_core::provider_route::RouteSources;
 use tddy_core::{write_session_metadata, SessionMetadata};
@@ -266,7 +265,7 @@ pub(crate) async fn start_cli_harness_session(
         account_access.session_identity_in(session_id, os_user, &session_dir, project.as_ref());
     env.extend(identity.git_environment);
     let recipe_name = managed.as_ref().map(|managed| managed.recipe.name().to_string());
-    let wiring = wire_session_agent(SessionWiringInputs {
+    let mut wiring = wire_session_agent(SessionWiringInputs {
         spec,
         config,
         tddy_data_dir,
@@ -308,17 +307,16 @@ pub(crate) async fn start_cli_harness_session(
     progress.begin_phase(StartStep::Agent);
     let route = route.unwrap_or_default();
     let remote_host = Some(ssh_alias).filter(|alias| !alias.is_empty());
-    let hooks = wiring
-        .hooks
-        .as_ref()
-        .filter(|_| spec.has(Capability::Hooks));
+    let toolset = std::mem::take(&mut wiring.toolset);
+    let role_args = std::mem::take(&mut wiring.extra_args);
+    let hook_params = wiring.hook_params(spec, session_id, os_user);
     let mut slots = render_host_launch_slots(
         agent,
         &worktree_path,
         &session_dir,
         HostLaunchSlots {
-            toolset: wiring.toolset,
-            hooks: hooks.map(|hooks| hooks.params(session_id, os_user)),
+            toolset,
+            hooks: hook_params,
             system_prompt_file: wiring.system_prompt_file.as_deref(),
             remote_host,
             home: None,
@@ -326,10 +324,10 @@ pub(crate) async fn start_cli_harness_session(
     )?;
     // The role's flags, then the route's arguments, follow the spec's own argv; the route's
     // environment follows the session's.
-    slots.argv_extra.extend(wiring.extra_args);
+    slots.argv_extra.extend(role_args);
     slots.argv_extra.extend(route.args);
     write_slot_files_on_target(&mut slots, remote_host)?;
-    env.extend(wiring.env);
+    env.extend(std::mem::take(&mut wiring.env));
     env.extend(route.env);
     let params = harness_template_params(&conversation.bound(HarnessLaunch {
         model: launch_model,

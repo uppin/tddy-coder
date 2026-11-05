@@ -264,6 +264,25 @@ pub(crate) fn conversation_mint_refused(
     }
 }
 
+/// A managed codebase in a jail is refused: the jailed generic launch wires no workflow to drive it,
+/// and starting without one would run an agent the operator believes is managed.
+// TODO(cli-spec-features): the bespoke jailed claude start carries a managed workflow
+// (`claude_jail::ClaudeJail.managed`); the generic jailed launch does not yet
+// (docs/dev/todo/2026-11-05-generic-jail-managed-workflow.md).
+pub(crate) fn refuse_a_managed_codebase_in_a_jail(
+    spec: &CodingAgentSpec,
+    req: &tddy_service::proto::session::StartSessionRequest,
+) -> Result<(), Status> {
+    if req.managed_codebase {
+        return Err(Status::failed_precondition(format!(
+            "a managed codebase in a jail is not launched from the spec yet: {} runs managed on the \
+             host only",
+            spec.id
+        )));
+    }
+    Ok(())
+}
+
 /// A starting session's standing role, refused for an agent that cannot hold it: a project-home
 /// main (`PROJECT_HOME_ROLE`) of a spec that does not declare `project_home_main` is refused
 /// `FAILED_PRECONDITION` naming the agent. An ordinary session (an empty role) is admitted.
@@ -309,6 +328,9 @@ pub(crate) struct ManagedWiring {
 pub(crate) struct SessionWiring {
     /// The session's hooks (a spec declaring `hooks` or `operator_notify`), with their token.
     pub hooks: Option<ClaudeCliHooks>,
+    /// The agent-tool socket an adapter that reports over it is given when the daemon is not
+    /// embedded (the daemon always owns one), `None` when the hooks need none.
+    pub hook_socket: Option<String>,
     /// The managed workflow to attach to the session once its agent is spawned.
     pub workflow: Option<ManagedWorkflow>,
     /// Passed with the spec's `append_system_prompt` flag: a managed recipe's prompt, composed with
@@ -394,8 +416,12 @@ pub(crate) fn wire_session_agent(inputs: SessionWiringInputs<'_>) -> Result<Sess
     if let Some(registration) = toolset.mcp.as_mut() {
         registration.server.env.extend(tool_server_env);
     }
+    let hook_socket = hooks
+        .as_ref()
+        .and_then(|hooks| socket_for_hooks(spec, hooks, tddy_data_dir));
     Ok(SessionWiring {
         hooks,
+        hook_socket,
         workflow,
         system_prompt_file,
         env: process_env,
@@ -489,6 +515,42 @@ impl LaunchSessions {
             env: process_env,
             extra_args,
             toolset,
+        })
+    }
+}
+
+/// The daemon's agent-tool socket, for a spec whose hooks adapter reports over it and `hooks` carry
+/// none: that adapter refuses params without one (`SlotError::NoDaemonSocket`), so it is given the
+/// path the bespoke Cursor launch always passed.
+fn socket_for_hooks(
+    spec: &CodingAgentSpec,
+    hooks: &ClaudeCliHooks,
+    tddy_data_dir: &Path,
+) -> Option<String> {
+    let adapter = tddy_coding_agent_specs::slots::hooks::adapter(&spec.agent.hooks.adapter).ok()?;
+    let needs_a_socket = adapter
+        .try_render(Path::new("/"), &hooks.params("probe", "probe"))
+        .is_err();
+    needs_a_socket.then(|| {
+        tddy_daemon_kernel::agent_tool_socket_path(tddy_data_dir)
+            .to_string_lossy()
+            .into_owned()
+    })
+}
+
+impl SessionWiring {
+    /// The hook parameters of `session_id`'s start, when the spec declares `hooks`.
+    pub(crate) fn hook_params<'a>(
+        &'a self,
+        spec: &CodingAgentSpec,
+        session_id: &'a str,
+        os_user: &'a str,
+    ) -> Option<HookCommandParams<'a>> {
+        let hooks = self.hooks.as_ref().filter(|_| spec.has(Capability::Hooks))?;
+        let params = hooks.params(session_id, os_user);
+        Some(HookCommandParams {
+            daemon_socket: params.daemon_socket.or(self.hook_socket.as_deref()),
+            ..params
         })
     }
 }

@@ -51,7 +51,7 @@ extensions:
     # agent's name. Unknown words are refused at load.
     # The chat id `agent create-chat` prints, minted before the first start (bounded: 30 s) and passed as `--resume`.
     conversation: { kind: minted, adapter: cursor-create-chat }
-    capabilities: [managed_workflow, hooks, requires_model, keep_worktree_on_delete, operator_notify]
+    capabilities: [hooks, managed_workflow, requires_model, keep_worktree_on_delete, operator_notify]
     models:
       default: composer-2.5
       curated: [composer-2.5, gpt-5.3-codex, claude-4.6-sonnet-medium-thinking]

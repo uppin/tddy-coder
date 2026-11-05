@@ -314,6 +314,10 @@ impl LaunchSessions {
         refuse_an_unsupported_cli_session_start(&session_agent.agent.spec, kind.name, req)?;
         if req.sandbox {
             self.require_sandbox_placement(kind.name)?;
+            crate::cli_agent_steps::refuse_a_managed_codebase_in_a_jail(
+                &session_agent.agent.spec,
+                req,
+            )?;
         }
         let start = self.cli_start_prelude(req, progress, os_user).await?;
         let sessions_base = start.sessions_base.clone();

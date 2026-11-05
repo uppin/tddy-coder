@@ -269,9 +269,15 @@ impl AStubReport {
     fn parse(terminal: &str) -> Self {
         let lines = terminal
             .split(['\r', '\n'])
-            .filter_map(|line| line.trim_start().strip_prefix("STUB "))
+            // A terminal repaint (a tmux client re-attaching) puts cursor escapes in front of the
+            // first line: the report starts where its marker does.
+            .filter_map(|line| line.find("STUB ").map(|at| &line[at + "STUB ".len()..]))
             .filter_map(|line| line.split_once('='))
-            .map(|(key, value)| (key.to_string(), value.trim_end().to_string()))
+            // A value ends where a repaint's next escape starts.
+            .map(|(key, value)| {
+                let value = value.split('\u{1b}').next().unwrap_or_default();
+                (key.to_string(), value.trim_end().to_string())
+            })
             .collect();
         Self { lines }
     }
@@ -569,7 +575,7 @@ impl ARegistryDaemon {
         let ensured = self
             .service
             .ensure_project_home_session(Request::direct(EnsureProjectHomeSessionRequest {
-                session_token: VALID_TOKEN.to_string(),
+                session_token: a_caller_token().to_string(),
                 project_id: TEST_PROJECT_ID.to_string(),
                 daemon_instance_id: String::new(),
                 start: Some(StartSessionRequest {
@@ -779,6 +785,38 @@ fn a_daemon_config_without_agent_sections() -> (tempfile::TempDir, DaemonConfig)
     (dir, config)
 }
 
+/// This daemon's signing identity (`#agent-tools 14/19`): a project's main is given a credential of
+/// its own, minted under the verified caller, so the daemon must be able to verify the caller's token
+/// and sign the agent's.
+fn this_daemons_session_tokens() -> &'static tddy_daemon_auth::SessionTokens {
+    static TOKENS: std::sync::OnceLock<tddy_daemon_auth::SessionTokens> =
+        std::sync::OnceLock::new();
+    TOKENS.get_or_init(|| {
+        let home = tempfile::tempdir().expect("a directory for the daemon's key");
+        let key = tddy_daemon_auth::DaemonSigningKey::load_or_generate(
+            &home.path().join("signing_key.pem"),
+        )
+        .expect("the daemon generates its keypair");
+        tddy_daemon_auth::SessionTokens::new(&key, Arc::new(tddy_daemon_auth::StandaloneKeyDirectory))
+    })
+}
+
+/// The credential a caller presents when it sets a project's main up, signed with
+/// [`this_daemons_session_tokens`]'s key.
+fn a_caller_token() -> &'static str {
+    static TOKEN: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+    TOKEN.get_or_init(|| {
+        this_daemons_session_tokens()
+            .signer()
+            .mint_access(&tddy_github::GitHubUser {
+                id: 4242,
+                login: current_os_user(),
+                avatar_url: "https://avatars.githubusercontent.com/u/4242?v=4".to_string(),
+                name: "Test User".to_string(),
+            })
+    })
+}
+
 fn a_session_host(config: DaemonConfig, tddy_home: PathBuf) -> DaemonSessionHost {
     let sessions_base = tddy_home.clone();
     let user = current_os_user();
@@ -786,19 +824,20 @@ fn a_session_host(config: DaemonConfig, tddy_home: PathBuf) -> DaemonSessionHost
         config.clone(),
         Arc::new(move |_| Some(sessions_base.clone())),
         tddy_home,
-        Arc::new(move |token| (token == VALID_TOKEN).then(|| user.clone())),
+        Arc::new(move |token| (token == VALID_TOKEN || token == a_caller_token()).then(|| user.clone())),
         None,
         tddy_spawn::supervisor_client::SpawnBackendChoice::ForkedWorker,
         tddy_session_lifecycle::peer_routing::PeerRouting::local_only(&config),
         Arc::new(tddy_daemon_kernel::operator_channel::NoOperatorChannel),
         Arc::new(ClaudeCliSessionManager::new()),
     )
+    .with_session_tokens(this_daemons_session_tokens().clone())
 }
 
 fn register_project(projects_dir: &Path, repo_path: &Path) {
     std::fs::create_dir_all(projects_dir).unwrap();
     let yaml = format!(
-        "projects:\n  - project_id: {TEST_PROJECT_ID}\n    name: yaml-only-agent\n    git_url: \"\"\n    main_repo_path: {}\n",
+        "projects:\n  - project_id: {TEST_PROJECT_ID}\n    name: yaml-only-agent\n    git_url: \"\"\n    main_repo_path: {}\n    main_branch_ref: origin/main\n",
         repo_path.display()
     );
     std::fs::write(projects_dir.join("projects.yaml"), yaml).unwrap();

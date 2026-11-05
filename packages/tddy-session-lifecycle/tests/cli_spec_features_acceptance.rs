@@ -113,7 +113,18 @@ async fn a_copy_of_claude_yaml_under_another_id_starts_in_tmux_with_the_argv_the
         .expect("the stopped acme-cli session resumes");
     let resumed = daemon.stub_report(&session_id).await;
 
-    // Then — the claude spec's argv in tmux on both, the conversation being the session id
+    // Then — the claude spec's argv in tmux on both, the conversation being the session id, and the
+    // operator-notify guidance (the copy declares `operator_notify`) appended to the system prompt
+    let notify_prompt = [
+        "--append-system-prompt-file".to_string(),
+        daemon
+            .tddy_home
+            .join("sessions")
+            .join(&session_id)
+            .join("agent-system-prompt.md")
+            .to_string_lossy()
+            .into_owned(),
+    ];
     assert_eq!(
         (
             started.argv(),
@@ -121,8 +132,8 @@ async fn a_copy_of_claude_yaml_under_another_id_starts_in_tmux_with_the_argv_the
             daemon.metadata_of(&session_id).tmux_session.is_some(),
         ),
         (
-            claude_start_argv(&daemon.stub_path(), &session_id),
-            claude_resume_argv(&daemon.stub_path(), &session_id),
+            [claude_start_argv(&daemon.stub_path(), &session_id), notify_prompt.to_vec()].concat(),
+            [claude_resume_argv(&daemon.stub_path(), &session_id), notify_prompt.to_vec()].concat(),
             true,
         )
     );
