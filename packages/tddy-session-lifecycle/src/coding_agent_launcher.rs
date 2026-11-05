@@ -170,6 +170,9 @@ pub struct DaemonCodingAgentLauncher {
     /// is rendered from its spec's `coding_agent.headless` section (`#agent-tools 15/19`: a launcher
     /// without them refuses a headless launch — nothing is planned by hand), and, since
     /// `#agent-tools 11/12`, the ACP harnesses are planned from their specs too (`acp_plan_from_spec`).
+    // TODO(agent-config-removal): non-optional at green (settled at red) — `new`/`with_identity` take
+    // the coding agents, and the agentless hand-built paths are deleted
+    // (docs/dev/todo/2026-11-04-acp-hand-built-launch-path-for-agentless-launchers.md).
     coding_agents: Option<Arc<HostCodingAgents>>,
     /// Why `for_daemon`'s coding agents did not load. A headless `claude` conversation is refused with
     /// it, never planned by hand: a tool file that does not load must not start the agent some other way.

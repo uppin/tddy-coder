@@ -285,6 +285,11 @@ fn agent_home_banner(
     };
     let home = match &tool.home {
         HomeSection::Persistent { key } => tddy_home.join("homes").join(key),
+        HomeSection::Path { path } => {
+            // TODO(agent-config-removal): implement — the operator's directory as named.
+            let _ = path;
+            todo!("agent-config-removal: the banner of a path home")
+        }
         HomeSection::Session => return Vec::new(),
     };
     vec![format!(

@@ -5,9 +5,12 @@
 //! ```yaml
 //! home: { kind: persistent, key: claude }   # <tddyhome>/homes/claude, mounted rw, kept across sessions
 //! # home: { kind: session }                 # a fresh per-session home under the jail's scratch
+//! # home: { kind: path, path: /srv/claude }  # an operator's own directory, mounted rw (`#agent-tools 19/19`)
 //! ```
 //!
 //! A missing section is a session home. Lowering is `tddy-sandbox-recipes`' `lower_home`.
+
+use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
 
@@ -18,6 +21,10 @@ pub enum HomeSection {
     /// names it, mounted read-write so what the tool writes there (refreshed credentials, history)
     /// survives the session.
     Persistent { key: String },
+    /// An absolute directory the operator names, mounted read-write and kept across sessions — what
+    /// daemon.yaml `claude_cli.claude_home_dir` was before `#agent-tools 19/19` removed it. A
+    /// relative path is refused at load.
+    Path { path: PathBuf },
     /// A home that lives and dies with the session.
     #[default]
     Session,

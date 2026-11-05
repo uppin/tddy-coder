@@ -104,7 +104,69 @@ pub fn builtin_coding_agents_for(
     .expect("the built-in coding agents load")
 }
 
-/// The host [`test_service`] wraps, before it goes behind its `Arc` — for a suite above this crate
+/// The built-in coding agents on a fixture host that maps each `(agent id, binary)` of `binaries`
+/// through that agent's spec — its `binary.env` (`TDDY_CLAUDE_BINARY`, `TDDY_CURSOR_AGENT`,
+/// `TDDY_TOOLS_BINARY`, …) answers `binary` on this host alone, never in the process environment.
+/// The host's `PATH` is empty, so an agent `binaries` does not name is unavailable rather than
+/// found on the machine running the test (`#agent-tools 19/19`). What a fixture installs its stub
+/// agents with in place of a daemon.yaml `claude_cli.binary_path`.
+///
+/// # Panics
+/// When the built-in specs do not load, or `binaries` names an id that is not a built-in tool or
+/// whose spec declares no `binary.env`.
+#[must_use]
+pub fn coding_agents_with_binaries(
+    binaries: &[(&str, &std::path::Path)],
+) -> Arc<tddy_agent_launch::spec_launch::HostCodingAgents> {
+    let registry = tddy_coding_agent_specs::load_agent_registry(std::path::Path::new(
+        "/nonexistent-tddy-home/tools",
+    ))
+    .expect("the built-in coding agents load");
+    let env = binaries
+        .iter()
+        .map(|(id, binary)| {
+            let def = registry
+                .get(id)
+                .unwrap_or_else(|| panic!("{id} is a built-in tool"));
+            let var = def
+                .binary
+                .env
+                .clone()
+                .unwrap_or_else(|| panic!("{id}'s spec names its binary's variable"));
+            (var, binary.to_string_lossy().into_owned())
+        })
+        .collect();
+    Arc::new(tddy_agent_launch::spec_launch::HostCodingAgents::new(
+        registry,
+        Arc::new(AHostOfBinaries { env }),
+    ))
+}
+
+/// [`coding_agents_with_binaries`]' host: its environment is the binaries' variables, its `PATH`
+/// is empty, its filesystem is the real one.
+struct AHostOfBinaries {
+    env: std::collections::BTreeMap<String, String>,
+}
+
+impl tddy_actions::tool::ToolHost for AHostOfBinaries {
+    fn env_var(&self, name: &str) -> Option<String> {
+        self.env.get(name).cloned()
+    }
+
+    fn path_dirs(&self) -> Vec<PathBuf> {
+        Vec::new()
+    }
+
+    fn is_executable_file(&self, path: &std::path::Path) -> bool {
+        tddy_actions::tool::ToolHost::is_executable_file(&tddy_actions::tool::ProcessToolHost, path)
+    }
+
+    fn canonicalize(&self, path: &std::path::Path) -> std::io::Result<PathBuf> {
+        std::fs::canonicalize(path)
+    }
+}
+
+/// The host [`test_service`] wraps,/// The host [`test_service`] wraps, before it goes behind its `Arc` — for a suite above this crate
 /// that must install more on it first (`tddy-daemon-rpc`'s families), and then calls
 /// [`DaemonSessionHost::install_sandbox_rpc_bridge`] itself, as [`test_service`] does.
 #[must_use]

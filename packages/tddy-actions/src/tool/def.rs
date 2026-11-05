@@ -109,6 +109,8 @@ impl ToolDef {
                 ),
             });
         }
+        // TODO(agent-config-removal): refuse a `home: { kind: path }` whose path is not absolute,
+        // naming the file: "home.path <path> is not an absolute directory".
         serde_yaml::from_str(yaml).map_err(|e| parse_error(file, &e))
     }
 }

@@ -34,12 +34,37 @@ pub fn host_coding_agents(
     Ok(Arc::new(agents))
 }
 
+/// The daemon's host over `base` (`#agent-tools 19/19`), with no daemon.yaml input: the coding
+/// agents' binaries are found where the daemon has always found them, but every place searched is
+/// `base`'s — its environment, its `$HOME`, its `PATH` — and named in the refusal when none holds
+/// the binary.
+///
+/// - A spec's `binary.env` (`TDDY_CLAUDE_BINARY`, `TDDY_TOOLS_BINARY`, …) set on `base` wins.
+/// - `PATH` is `base`'s `$HOME/.local/bin` (where Claude's installer puts `claude`), then `base`'s
+///   own `PATH` without wrapper-shim directories (`~/.superset/bin`), which cannot resolve inside a
+///   jail.
+/// - `tddy-tools` with no `TDDY_TOOLS_BINARY` is the sibling of the daemon binary `./install` lays
+///   out, as `resolve_tddy_tools_path` finds it.
+///
+/// What none of these locates is refused by the spec's resolution
+/// (`tool <id> is unavailable: searched <binary.env> (unset), PATH (<dirs>)`) — there is no
+/// "configured value as-is" last step.
+pub fn daemon_tool_host(base: Arc<dyn ToolHost>) -> Arc<dyn ToolHost> {
+    // TODO(agent-config-removal): implement — replaces `DaemonToolHost`'s `config` and its
+    // `resolve_claude_binary_path` / `claude_cli.tddy_tools_path` reads; `host_coding_agents` then
+    // passes `daemon_tool_host(Arc::new(ProcessToolHost))`.
+    let _ = base;
+    todo!("agent-config-removal: daemon_tool_host")
+}
+
 /// The daemon process as a [`ToolHost`], with `claude`, `agent` (Cursor) and `tddy-tools` found
 /// the way the hand-built launches found them: a fixture's `claude_cli.binary_path` /
 /// `cursor_cli.binary_path`, then the host auto-resolution (`~/.local/bin`, then `PATH` without
 /// wrapper shims), and the configured, `CARGO_BIN_EXE_` or sibling `tddy-tools` that `./install`
 /// relies on.
 /// A binary those rules do not locate is left to the spec's own `PATH` search.
+// TODO(agent-config-removal): deleted at green with its `config` — replaced by
+// [`daemon_tool_host`].
 struct DaemonToolHost {
     config: DaemonConfig,
 }

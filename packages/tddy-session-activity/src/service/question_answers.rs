@@ -45,6 +45,9 @@ pub struct AnswerWaitPorts {
     pub pending: Arc<PendingAnswers>,
     pub presence: Arc<dyn OrchestratorPresence>,
     /// `claude_cli.answer_wait_secs`. Injected so a test can hold a hook for milliseconds.
+    // TODO(agent-config-removal): removed at green — the hold is per session,
+    // `crate::answer_wait::session_answer_wait` over the session's recorded wait and this service's
+    // agents; a test records a short wait in the session directory instead.
     pub wait: Duration,
 }
 
@@ -103,6 +106,8 @@ impl ActivityServiceImpl {
                 &req.session_id,
                 permission_request_view(&question, has_suggestions),
             );
+            // TODO(agent-config-removal): hold for `session_answer_wait(&session_dir, session_type,
+            // &self.agents)` — the wait the session's launch wrote into its hooks file.
             match pending.wait(&req.request_id, self.answers.wait).await {
                 WaitOutcome::Answered(delivered) => answered_response(delivered),
                 WaitOutcome::TimedOut => outcome_only(AwaitQuestionOutcome::TimedOut),

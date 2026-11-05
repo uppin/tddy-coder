@@ -314,3 +314,140 @@ fn no_agent_id_literal_is_compared_or_dispatched_on_in_agent_launch() {
          agent's id"
     );
 }
+
+// ---------------------------------------------------------------------------
+// The fixtures start every agent from a daemon.yaml with no agent section (`#agent-tools 19/19`)
+// ---------------------------------------------------------------------------
+
+/// What sets or reads a removed daemon.yaml agent section: the YAML keys, the typed config, its
+/// fields, and the fixture reader that bypassed the start-up refusal to parse them.
+const REMOVED_AGENT_CONFIG: &[&str] = &[
+    "daemon_config_from_fixture_file",
+    "claude_cli:",
+    "cursor_cli:",
+    "cli_harnesses:",
+    "ClaudeCliConfig",
+    "CursorCliConfig",
+    "CliHarnessConfig",
+];
+
+/// Field reads of the removed sections, matched only where the name ends (so
+/// `.claude_cli_manager` is not one).
+const REMOVED_AGENT_CONFIG_FIELDS: &[&str] = &[".claude_cli", ".cursor_cli"];
+
+/// The files whose subject is the refusal of those sections, and this scan itself.
+const REFUSAL_SUITES: &[&str] = &[
+    "no_agent_name_gates.rs",
+    "removed_agent_config_acceptance.rs",
+    "telegram_reads_no_agent_config.rs",
+];
+
+/// One line that sets or reads a removed agent section.
+#[derive(Debug, PartialEq, Eq)]
+struct RemovedAgentConfigUse {
+    file: PathBuf,
+    line: usize,
+    text: String,
+}
+
+/// Whether `line` reads `field` as a whole name.
+fn reads_field(line: &str, field: &str) -> bool {
+    line.match_indices(field).any(|(at, _)| {
+        line[at + field.len()..]
+            .chars()
+            .next()
+            .is_none_or(|next| !(next.is_alphanumeric() || next == '_'))
+    })
+}
+
+/// Every use of a removed agent section in `text`, attributed to `file`. Comments are skipped.
+fn removed_agent_config_uses_in(file: &Path, text: &str) -> Vec<RemovedAgentConfigUse> {
+    text.lines()
+        .enumerate()
+        .filter(|(_, line)| !line.trim_start().starts_with("//"))
+        .filter(|(_, line)| {
+            REMOVED_AGENT_CONFIG.iter().any(|name| line.contains(name))
+                || REMOVED_AGENT_CONFIG_FIELDS
+                    .iter()
+                    .any(|field| reads_field(line, field))
+        })
+        .map(|(index, line)| RemovedAgentConfigUse {
+            file: file.to_path_buf(),
+            line: index + 1,
+            text: line.trim().to_string(),
+        })
+        .collect()
+}
+
+/// The sources that built the ~40 fixtures from a removed section (changeset § State A): this
+/// crate whole, and the test suites of the crates whose fixtures called
+/// `daemon_config_from_fixture_file` or spelled the typed sections.
+fn the_fixture_sources() -> Vec<PathBuf> {
+    let packages = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .expect("tddy-session-lifecycle lives under packages/")
+        .to_path_buf();
+    let roots = [
+        packages.join("tddy-session-lifecycle/src"),
+        packages.join("tddy-session-lifecycle/tests"),
+        packages.join("tddy-daemon/tests"),
+        packages.join("tddy-daemon-rpc/tests"),
+        packages.join("tddy-telegram-control/tests"),
+    ];
+    rust_sources_under(&roots)
+        .into_iter()
+        .filter(|file| {
+            !REFUSAL_SUITES
+                .iter()
+                .any(|suite| file.file_name().is_some_and(|name| name == *suite))
+        })
+        .collect()
+}
+
+#[test]
+fn the_removed_agent_config_scan_finds_keys_types_fields_and_the_fixture_reader_and_skips_comments()
+{
+    // Given — each shape a fixture used, beside lines that are not uses
+    let file = Path::new("fixture.rs");
+    let text = concat!(
+        "let config = daemon_config_from_fixture_file(&path).unwrap();\n",
+        "\"claude_cli:\\n  binary_path: /stub\\n\"\n",
+        "cursor_cli: Some(CursorCliConfig { binary_path: stub }),\n",
+        "if let Some(claude) = config.claude_cli.as_ref() {\n",
+        "// a comment naming claude_cli: and .cursor_cli\n",
+        "let manager = self.claude_cli_manager.clone();\n",
+    );
+
+    // When
+    let uses = removed_agent_config_uses_in(file, text);
+
+    // Then
+    assert_eq!(
+        uses.iter().map(|found| found.line).collect::<Vec<_>>(),
+        vec![1, 2, 3, 4]
+    );
+}
+
+#[test]
+fn the_fixtures_start_every_agent_from_a_daemon_yaml_with_no_agent_section() {
+    // Given
+    let sources = the_fixture_sources();
+
+    // When
+    let uses: Vec<RemovedAgentConfigUse> = sources
+        .iter()
+        .flat_map(|file| {
+            let text = std::fs::read_to_string(file)
+                .unwrap_or_else(|e| panic!("{} is readable: {e}", file.display()));
+            removed_agent_config_uses_in(file, &text)
+        })
+        .collect();
+
+    // Then
+    assert_eq!(
+        uses,
+        Vec::<RemovedAgentConfigUse>::new(),
+        "a fixture installs its agents the stack's way — a `<tddyhome>/tools/<id>.yaml` override or \
+         `test_util::coding_agents_with_binaries` — on a daemon.yaml `DaemonConfig::load` accepts"
+    );
+}

@@ -7,6 +7,11 @@
 use pretty_assertions::assert_eq;
 use tddy_daemon_kernel::config::{refuse_removed_agent_keys, RemovedAgentKey};
 
+/// Where `claude_cli.claude_home_dir` went (`#agent-tools 19/19`): an absolute directory, so the
+/// `home:` path form of a `<tddyhome>/tools/claude.yaml` override, not a `home.key` under
+/// `<tddyhome>/homes`.
+const CLAUDE_HOME_PATH_FORM: &str = "home: { kind: path, path: <dir> }";
+
 fn a_document(yaml: &str) -> serde_yaml::Value {
     serde_yaml::from_str(yaml).expect("the daemon.yaml parses")
 }
@@ -37,13 +42,13 @@ fn a_claude_cli_section_is_refused_naming_claude_yaml_and_each_field_it_set() {
                 tool: "claude".to_string(),
                 moved: moved(&[
                     ("binary_path", "binary.command"),
-                    ("claude_home_dir", "home.key"),
+                    ("claude_home_dir", CLAUDE_HOME_PATH_FORM),
                     ("fullscreen", "run.env"),
                     ("answer_wait_secs", "coding_agent.answer_wait_secs"),
                 ]),
             }],
             "daemon.yaml `claude_cli:` is removed: moved to <tddyhome>/tools/claude.yaml \
-             (binary_path → binary.command, claude_home_dir → home.key, fullscreen → run.env, \
+             (binary_path → binary.command, claude_home_dir → home: { kind: path, path: <dir> }, fullscreen → run.env, \
              answer_wait_secs → coding_agent.answer_wait_secs)"
                 .to_string(),
         )

@@ -128,6 +128,8 @@ pub struct LaunchSessions {
     /// The coding agents declared as tools (`#agent-tools 2/12`). `None` until the daemon runtime
     /// installs them; every CLI agent's start, resume and child is then refused
     /// `FAILED_PRECONDITION`.
+    // TODO(agent-config-removal): non-optional at green — every launcher has coding agents, and the
+    // "no coding agents" refusals become a construction-time guarantee.
     pub coding_agents: Option<Arc<crate::spec_launch::HostCodingAgents>>,
     /// The host's capabilities that are not fields.
     pub host: Arc<dyn LaunchHost>,

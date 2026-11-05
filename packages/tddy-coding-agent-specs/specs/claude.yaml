@@ -5,8 +5,7 @@
 #          <slot flags> [PROMPT]
 # Slot flags go before the prompt: `--mcp-config` is variadic and would swallow a bare positional.
 #
-# Override whole with `<tddyhome>/tools/claude.yaml`. `TDDY_CLAUDE_BINARY` (and, until
-# `#agent-tools 12/12`, daemon.yaml `claude_cli.binary_path`) still names the binary.
+# Override whole with `<tddyhome>/tools/claude.yaml`. `TDDY_CLAUDE_BINARY` names the binary.
 schema_version: 1
 id: claude
 summary: Claude Code CLI — the interactive coding agent behind claude-cli sessions
@@ -27,7 +26,10 @@ run:
         - { if: permission_mode, then: ["--permission-mode", "{permission_mode}"], else: ["--permission-mode", "auto"] }
     - { splice: slots }
     - { if: prompt, then: ["{prompt}"] }
-  env: {}
+  # Claude's fullscreen renderer (`#agent-tools 19/19`; was daemon.yaml `claude_cli.fullscreen`):
+  # only it enables the alternate screen and mouse tracking the web terminal scrolls with. An
+  # override of this file without the variable runs the inline renderer.
+  env: { CLAUDE_CODE_NO_FLICKER: "1" }
 extensions:
   coding_agent:
     product: Claude Code

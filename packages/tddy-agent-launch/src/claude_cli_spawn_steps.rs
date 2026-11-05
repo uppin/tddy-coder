@@ -44,6 +44,11 @@ impl ClaudeCliHooks {
 /// `tddy_data_dir` is the data dir the daemon *resolved* — `TDDY_DATA_DIR` included, which a
 /// configuration file need not agree with (`./desktop-dev` sets it absolute beside a relative
 /// `tmp/.tddy`) — because an embedded daemon's agent-tool socket path is digested from it.
+// TODO(agent-config-removal): the wait is the agent spec's `coding_agent.answer_wait_secs`
+// (`CodingAgentSpec::answer_wait_secs`), recorded with
+// `tddy_session_activity::answer_wait::record_answer_wait` in the session directory so the server
+// hold matches this timeout; tddy-tools comes from the agent's resolved `tddy-tools` dep and the url
+// from `daemon_hook_urls::local_daemon_hook_url` (`listen.advertise_url`) — no `claude_cli` read.
 pub(super) fn claude_cli_hooks(config: &DaemonConfig, tddy_data_dir: &Path) -> ClaudeCliHooks {
     let tddy_tools_path = tddy_daemon_sandbox::sandbox_session::resolve_tddy_tools_path(
         config

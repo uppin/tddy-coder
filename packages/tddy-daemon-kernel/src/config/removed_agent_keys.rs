@@ -131,6 +131,8 @@ fn removed_key(
 fn claude_move(field: &str) -> &'static str {
     match field {
         "binary_path" => "binary.command",
+        // TODO(agent-config-removal): "home: { kind: path, path: <dir> }" — the removed knob was an
+        // absolute directory, which `HomeSection::Path` now holds.
         "claude_home_dir" => "home.key",
         "fullscreen" => "run.env",
         "answer_wait_secs" => "coding_agent.answer_wait_secs",

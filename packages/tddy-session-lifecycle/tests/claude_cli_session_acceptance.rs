@@ -737,6 +737,117 @@ async fn a_host_without_coding_agents_refuses_a_claude_cli_and_a_cursor_cli_star
     );
 }
 
+/// A machine with no `claude` anywhere: a `$HOME` whose `.local/bin` is empty, one `PATH`
+/// directory that does not hold it, and `tddy-tools` named by `TDDY_TOOLS_BINARY`. Nothing of the
+/// real machine — whose `~/.local/bin/claude` a developer's laptop has — reaches resolution.
+struct AMachineWithoutClaude {
+    home: PathBuf,
+    path_dir: PathBuf,
+    tddy_tools: PathBuf,
+    _dir: tempfile::TempDir,
+}
+
+fn a_machine_without_claude() -> AMachineWithoutClaude {
+    use std::os::unix::fs::PermissionsExt as _;
+    let dir = tempfile::tempdir().unwrap();
+    let root = std::fs::canonicalize(dir.path()).unwrap();
+    let home = root.join("home");
+    std::fs::create_dir_all(home.join(".local/bin")).unwrap();
+    let path_dir = root.join("usr/local/bin");
+    std::fs::create_dir_all(&path_dir).unwrap();
+    let tddy_tools = root.join("install/tddy-tools");
+    std::fs::create_dir_all(tddy_tools.parent().unwrap()).unwrap();
+    std::fs::write(&tddy_tools, "#!/bin/sh\nexit 0\n").unwrap();
+    std::fs::set_permissions(&tddy_tools, std::fs::Permissions::from_mode(0o755)).unwrap();
+    AMachineWithoutClaude {
+        home,
+        path_dir,
+        tddy_tools,
+        _dir: dir,
+    }
+}
+
+impl tddy_actions::tool::ToolHost for AMachineWithoutClaude {
+    fn env_var(&self, name: &str) -> Option<String> {
+        match name {
+            "HOME" => Some(self.home.to_string_lossy().into_owned()),
+            "TDDY_TOOLS_BINARY" => Some(self.tddy_tools.to_string_lossy().into_owned()),
+            _ => None,
+        }
+    }
+
+    fn path_dirs(&self) -> Vec<PathBuf> {
+        vec![self.path_dir.clone()]
+    }
+
+    fn is_executable_file(&self, path: &std::path::Path) -> bool {
+        use std::os::unix::fs::PermissionsExt as _;
+        std::fs::metadata(path).is_ok_and(|m| m.is_file() && m.permissions().mode() & 0o111 != 0)
+    }
+
+    fn canonicalize(&self, path: &std::path::Path) -> std::io::Result<PathBuf> {
+        std::fs::canonicalize(path)
+    }
+}
+
+/// A daemon.yaml with no agent section, as `DaemonConfig::load` reads one at start-up.
+fn a_config_without_agent_sections() -> (tempfile::TempDir, DaemonConfig) {
+    let dir = tempfile::tempdir().unwrap();
+    let user = current_os_user();
+    let config_path = dir.path().join("daemon.yaml");
+    std::fs::write(
+        &config_path,
+        format!("users:\n  - github_user: \"{user}\"\n    os_user: \"{user}\"\n"),
+    )
+    .unwrap();
+    let config = DaemonConfig::load(&config_path).expect("config must load");
+    (dir, config)
+}
+
+/// **a_claude_cli_start_whose_binary_is_not_found_…** (`#agent-tools 19/19`): the daemon's host
+/// finds `claude` through `TDDY_CLAUDE_BINARY`, then `$HOME/.local/bin`, then `PATH` — and when
+/// none holds it, the start is refused naming the agent, its spec's `binary.env` and every place
+/// searched. There is no daemon.yaml `claude_cli.binary_path` to fall back to, and no "as-is" bare
+/// `claude` handed to the spawn.
+#[tokio::test]
+async fn a_claude_cli_start_whose_binary_is_not_found_is_refused_naming_its_binary_env() {
+    // Given — a registered project, a daemon.yaml with no agent section, and no claude anywhere
+    let repo_dir = tempfile::tempdir().unwrap();
+    create_test_repo_with_origin(repo_dir.path());
+    let sessions_tmp = tempfile::tempdir().unwrap();
+    let sessions_base = sessions_tmp.path().join(current_os_user());
+    register_project(&sessions_base.join("projects"), repo_dir.path());
+    let machine = Arc::new(a_machine_without_claude());
+    let (_cfg_dir, config) = a_config_without_agent_sections();
+    let registry = tddy_coding_agent_specs::load_agent_registry(&sessions_base.join("tools"))
+        .expect("the built-in agents load");
+    let host = a_host_without_coding_agents(config, sessions_base.clone()).with_coding_agents(
+        Arc::new(tddy_agent_launch::spec_launch::HostCodingAgents::new(
+            registry,
+            tddy_agent_launch::host_coding_agents::daemon_tool_host(machine.clone()),
+        )),
+    );
+
+    // When
+    let started = host
+        .start_session(Request::direct(a_cli_start_of("claude-cli")))
+        .await
+        .map(|response| response.into_inner().session_id);
+
+    // Then — refused, naming claude, TDDY_CLAUDE_BINARY and the host's search path
+    assert_eq!(
+        started.map_err(|status| (status.code, status.message)),
+        Err((
+            Code::FailedPrecondition,
+            format!(
+                "tool claude is unavailable: searched TDDY_CLAUDE_BINARY (unset), PATH ({}:{})",
+                machine.home.join(".local/bin").display(),
+                machine.path_dir.display(),
+            ),
+        ))
+    );
+}
+
 // ---------------------------------------------------------------------------
 // initial_prompt tests
 // ---------------------------------------------------------------------------

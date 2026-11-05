@@ -235,6 +235,11 @@ pub fn lower_home(home: &HomeSection, paths: &JailPaths<'_>) -> Result<HomeGrant
                 home,
             })
         }
+        HomeSection::Path { path } => {
+            // TODO(agent-config-removal): implement — `path`, canonical, mounted read-write.
+            let _ = path;
+            todo!("agent-config-removal: lower_home of a path home")
+        }
         HomeSection::Session => Ok(HomeGrant {
             home: paths.session_home.to_path_buf(),
             mount: None,

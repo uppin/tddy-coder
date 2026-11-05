@@ -140,6 +140,32 @@ fn a_persistent_home_is_lowered_to_homes_key_mounted_read_write() {
     );
 }
 
+/// `home: { kind: path, path: … }` (`#agent-tools 19/19`) — what daemon.yaml
+/// `claude_cli.claude_home_dir` was: the operator's own directory, used as named rather than under
+/// `<tddyhome>/homes`.
+#[test]
+fn a_path_home_is_the_operators_directory_mounted_read_write() {
+    // Given
+    let layout = ALayout::new();
+    let operators_home = layout.host_home.join("srv-claude-home");
+    std::fs::create_dir_all(&operators_home).unwrap();
+    let section = HomeSection::Path {
+        path: operators_home.clone(),
+    };
+
+    // When
+    let grant = lower_home(&section, &layout.paths());
+
+    // Then
+    assert_eq!(
+        grant,
+        Ok(HomeGrant {
+            home: operators_home.clone(),
+            mount: Some(MountSpec::read_write(operators_home)),
+        })
+    );
+}
+
 #[test]
 fn a_session_home_is_the_jails_own_scratch_home_with_no_mount() {
     // Given
