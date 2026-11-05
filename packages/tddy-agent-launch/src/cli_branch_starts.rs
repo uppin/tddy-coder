@@ -21,7 +21,6 @@ use crate::launch_ports::LaunchSessions;
 use crate::placement::managed_recipe_for;
 use crate::session_provider_route::{
     sandboxed_start_route, session_route_sources_with_default, start_route, RouteAgent,
-    CLAUDE_ROUTE_AGENT,
 };
 use crate::start_request_checks::{
     refuse_a_cli_start_without_a_model, refuse_an_unsupported_cli_session_start,
@@ -49,10 +48,7 @@ impl LaunchSessions {
         let sources = session_route_sources_with_default(req, "claude-cli", &access)?;
         start_route(
             &access,
-            RouteAgent::OnHost {
-                agents: self.coding_agents.as_deref(),
-                id: CLAUDE_ROUTE_AGENT,
-            },
+            RouteAgent::claude_on(self.coding_agents.as_deref()),
             &sources,
             req.model.trim(),
         )?;
@@ -116,10 +112,7 @@ impl LaunchSessions {
             .join(&start.session_id);
         sandboxed_start_route(
             &access,
-            RouteAgent::OnHost {
-                agents: self.coding_agents.as_deref(),
-                id: CLAUDE_ROUTE_AGENT,
-            },
+            RouteAgent::claude_on(self.coding_agents.as_deref()),
             &sources,
             req.model.trim(),
             &session_dir,

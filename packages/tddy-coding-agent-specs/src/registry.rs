@@ -2,7 +2,7 @@
 //! (`#agent-tools 12/12`).
 //!
 //! Feature doc: `docs/ft/daemon/session-agent-roster.md`. It replaces the parallel
-//! lists — `AnyBackend`, `provider_route::Harness`, `BUILTIN_BACKEND_AGENT_IDS`,
+//! lists — `AnyBackend`, the old `provider_route::Harness` enum, `BUILTIN_BACKEND_AGENT_IDS`,
 //! `backend_selection_question`'s options and the session-type string tables. An agent is in it
 //! when its tool file has a `coding_agent` extension: a built-in spec, an override of one, or a new
 //! file dropped into `<tddyhome>/tools/`. Adding an agent is a YAML file.

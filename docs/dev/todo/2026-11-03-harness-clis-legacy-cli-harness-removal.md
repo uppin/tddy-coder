@@ -82,8 +82,9 @@ These keep compiling and passing until they move onto specs. None is edited for 
 
 ## What would close it
 
-1. Move every table consumer above onto `spec_for_session_type` and the spec's sections (`route`,
-   `models`, `resume`, `placements`, `binary`). The `route_harness` comes from `Harness::from_agent_or_session_type`.
+1. Move every table consumer above onto `CodingAgentRegistry::for_session_type` and the spec's sections
+   (`route`, `models`, `resume`, `placements`, `binary`). The descriptor's `route_harness` field is gone
+   (`#agent-tools` 13/19): a route is built from the spec's `RoutedAgent`.
 2. Move `materialise_route_files` and `route_config_env` in `tddy-sandbox-recipes` onto the spec's
    `route.files_dir` and `route.config_env`. Today the jail writes `provider-route` by convention, and the
    launch sets the configuration variable itself (`cli_harness_jail::jail_route_config_env`). The app's

@@ -762,10 +762,7 @@ fn a_cli_session_type_carries_the_route_support_its_spec_declares() {
 fn an_agent_asked_for_by_a_host_with_no_coding_agents_is_refused_when_a_route_is_asked() {
     // Given Ada holds her account, and the host has no coding agents installed
     let (_dir, access) = a_daemon_where_ada_holds(&[adas_meta_account()], true);
-    let on_host = crate::session_provider_route::RouteAgent::OnHost {
-        agents: None,
-        id: crate::session_provider_route::CLAUDE_ROUTE_AGENT,
-    };
+    let on_host = crate::session_provider_route::RouteAgent::claude_on(None);
 
     // When a start chooses the account, and one chooses nothing
     let routed = start_route(&access, on_host, &on_account("meta-hackathon"), "m")

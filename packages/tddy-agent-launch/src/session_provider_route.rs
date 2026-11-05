@@ -327,7 +327,15 @@ impl<'a> From<&'a RoutedAgent> for RouteAgent<'a> {
     }
 }
 
-impl RouteAgent<'_> {
+impl<'a> RouteAgent<'a> {
+    /// Claude Code among a host's coding agents: the spec the `claude-cli` session type runs.
+    pub fn claude_on(agents: Option<&'a HostCodingAgents>) -> Self {
+        RouteAgent::OnHost {
+            agents,
+            id: CLAUDE_ROUTE_AGENT,
+        }
+    }
+
     /// The agent the route is resolved for.
     pub fn resolve(&self) -> Result<RoutedAgent, Status> {
         match self {

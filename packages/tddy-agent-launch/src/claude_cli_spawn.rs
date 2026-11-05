@@ -31,7 +31,7 @@ use tddy_session_files::attachment_progress::AttachmentProgressSink;
 
 use crate::session_acting_identity::SessionAccountAccess;
 
-use crate::session_provider_route::{start_route, RouteAgent, StartRoute, CLAUDE_ROUTE_AGENT};
+use crate::session_provider_route::{start_route, RouteAgent, StartRoute};
 use tddy_core::provider_route::RouteSources;
 
 use tddy_service::proto::session::start_phase::Step as StartStep;
@@ -412,10 +412,7 @@ pub(crate) fn create_routed_session_dir(
     model: &str,
     coding_agents: Option<&HostCodingAgents>,
 ) -> Result<(PathBuf, Option<StartRoute>), Status> {
-    let agent = RouteAgent::OnHost {
-        agents: coding_agents,
-        id: CLAUDE_ROUTE_AGENT,
-    };
+    let agent = RouteAgent::claude_on(coding_agents);
     let provider_route = start_route(account_access, agent, route_sources, model)?;
     let session_dir = sessions_base.join(SESSIONS_SUBDIR).join(session_id);
     std::fs::create_dir_all(&session_dir)

@@ -124,7 +124,8 @@ pane after exit until the (empty) resume-token read. Same refusals as
 Muse Code talks only to Meta, so it runs on a `meta` [provider account](provider-accounts.md) and no
 other: any other preset is refused `INVALID_ARGUMENT` with the reason (a Fireworks account: "… does
 not accept a fireworks account; it runs on Meta only"). The route is the account's key alone,
-delivered in the child's `META_API_KEY` — no file, no endpoint, no extra argument — so the launch keeps the session's own
+delivered in the child's `META_API_KEY` (`muse.yaml`'s `route.key_env`; the body is chosen by the
+spec's `shape: env` and `providers: [meta]`) — no file, no endpoint, no extra argument — so the launch keeps the session's own
 `--model`. The account id and model are recorded beside the session (never the key), so a resume
 re-applies them. A start that chooses no account (and has no default) injects no key.
 

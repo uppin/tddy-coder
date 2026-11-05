@@ -19,7 +19,7 @@ use tddy_cli_sessions::cli_session_manager::CliSessionManager;
 
 use crate::launch_ports::LaunchSessions;
 use crate::project_home_launch::ResumedFlags;
-use crate::session_provider_route::{resume_route_env, RouteAgent, CLAUDE_ROUTE_AGENT};
+use crate::session_provider_route::{resume_route_env, RouteAgent};
 use crate::spec_launch::{launch_claude_cli, ClaudeCliLaunch};
 
 impl LaunchSessions {
@@ -293,10 +293,7 @@ impl LaunchSessions {
     ) -> Result<Vec<(String, String)>, Status> {
         let route_env = resume_route_env(
             &self.host.session_account_access(session_token),
-            RouteAgent::OnHost {
-                agents: self.coding_agents.as_deref(),
-                id: CLAUDE_ROUTE_AGENT,
-            },
+            RouteAgent::claude_on(self.coding_agents.as_deref()),
             session_dir,
         )?;
         Ok(git_environment

@@ -36,4 +36,4 @@ The headless launch is one cohesive group (~265 lines) that shares only `CodingA
 
 ## Measurement update 2026-11-05 — #agent-tools 13/19 (#819)
 
-**Unchanged in kind:** 1291 → 1297 production lines (+6). `route_from_vault` reads the launch's agent from the host's registry (`routed_agent_on_host`) instead of the closed `Harness` table, and takes the registry as a parameter. No cut here; the sweep's first cut stays the hand-built ACP path. **Status:** Open — deferred to the #agent-tools sweep node (developer, 2026-11-03).
+**Worse by 3:** 1291 → 1294 production lines (+3; counted to the first `#[cfg(test)]` at `7ab752605` and at the wrap). `route_from_vault` reads the launch's agent from the host's registry (`routed_agent_on_host`) instead of the closed `Harness` table, and takes the registry as a parameter. No cut here; the sweep's first cut stays the hand-built ACP path. **Status:** Open — deferred to the #agent-tools sweep node (developer, 2026-11-03).

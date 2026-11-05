@@ -96,7 +96,7 @@ fn cannot_be_routed(agent: &RoutedAgent) -> RouteRefusal {
     }
 }
 
-fn not_yet_routable(agent: &RoutedAgent) -> RouteRefusal {
+pub(super) fn not_yet_routable(agent: &RoutedAgent) -> RouteRefusal {
     RouteRefusal::NotYetRoutable {
         agent: agent.id.clone(),
         product: agent.product.clone(),

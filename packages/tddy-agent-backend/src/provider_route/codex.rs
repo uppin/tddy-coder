@@ -1,7 +1,7 @@
 //! The `toml_args` arm of [`super::resolve_route`]: an account declared as a Responses provider through
 //! `-c` config overrides.
 
-use super::by_spec::served_protocols;
+use super::by_spec::{not_yet_routable, served_protocols};
 use super::{route_supported, HarnessRoute, RouteRefusal, RouteTarget, RoutedAgent};
 
 /// Codex reads its providers from `config.toml`, and each override it is given is a `-c` argument.
@@ -15,10 +15,7 @@ pub(super) fn toml_args_route(
 ) -> Result<HarnessRoute, RouteRefusal> {
     route_supported(agent, &target.preset, &served_protocols(&target.endpoints))?;
     let Some(key_env) = agent.key_env.as_deref() else {
-        return Err(RouteRefusal::NotYetRoutable {
-            agent: agent.id.clone(),
-            product: agent.product.clone(),
-        });
+        return Err(not_yet_routable(agent));
     };
     let Some(root) = target.endpoints.openai_responses.as_deref() else {
         return Err(RouteRefusal::ProtocolNotServed {
@@ -28,10 +25,7 @@ pub(super) fn toml_args_route(
         });
     };
     let Some(name) = codex_provider_name(&target.preset) else {
-        return Err(RouteRefusal::NotYetRoutable {
-            agent: agent.id.clone(),
-            product: agent.product.clone(),
-        });
+        return Err(not_yet_routable(agent));
     };
     let id = CODEX_ROUTE_PROVIDER_ID;
     Ok(HarnessRoute {
