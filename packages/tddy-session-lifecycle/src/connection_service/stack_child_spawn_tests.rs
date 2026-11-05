@@ -392,9 +392,10 @@ fn write_argv_recording_stub(dir: &Path, record_to: &Path, environment_to: &Path
     std::fs::write(
         &script,
         format!(
-            // The environment lands by rename, so a reader never sees the file half-written.
-            "#!/bin/sh\nenv > '{env}.partial' && mv '{env}.partial' '{env}'\nprintf '%s\\n' \"$@\" > '{}'\n",
-            record_to.display(),
+            // Both records land by rename, so a reader never sees a file half-written: a reader
+            // polling for the command line could otherwise read it truncated, mid-`printf`.
+            "#!/bin/sh\nenv > '{env}.partial' && mv '{env}.partial' '{env}'\nprintf '%s\\n' \"$@\" > '{argv}.partial' && mv '{argv}.partial' '{argv}'\n",
+            argv = record_to.display(),
             env = environment_to.display()
         ),
     )
