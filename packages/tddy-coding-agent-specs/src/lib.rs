@@ -22,9 +22,9 @@ use tddy_actions::tool::{ToolError, ToolRegistry, BUILTIN_SUPPORT_TOOLS, BUILTIN
 
 pub use capability::Capability;
 pub use registry::{CodingAgentRegistry, RegistryError, CLI_SESSION_TYPE_SUFFIX};
-pub use route::{ProviderKind, RouteShape, RouteSupport};
+pub use route::{ProviderKind, RouteShape, RouteSupport, RoutedAgent};
 pub use spec::{
-    package_runner, AcpCommandError, AcpSection, AgentVariant, CodingAgentExtension,
+    package_runner, routed_agent, AcpCommandError, AcpSection, AgentVariant, CodingAgentExtension,
     CodingAgentSection, CodingAgentSpec, FlagSlot, HeadlessSection, HooksSlot, InstructionsSlot,
     McpFormat, McpSlot, ModelsSection, Placement, PlacementError, ResumeSlot, RouteSlot, SpecError,
     ToolSlot, Unsupported, VariantError, CODING_AGENT_EXTENSION, DEFAULT_ANSWER_WAIT_SECS,

@@ -3,8 +3,9 @@
 **Created:** 2026-11-04
 **Status:** 🚧 In Progress
 **Type:** Refactor (with a behaviour gain: a dropped-in agent gets a route)
-**Complexity**: 4 — five crates (`tddy-agent-backend`, `tddy-coding-agent-specs`, `tddy-agent-launch`, `tddy-session-lifecycle`, `tddy-daemon`); a cross-crate move of n12's published types (kept by re-export); a spec-vocabulary rename in four built-in YAMLs; ~6 route suites rewritten. Not 5: no proto, no concurrency, no data migration
+**Complexity**: 4 (re-checked at red, unchanged: the contract adds `product` and the rename but no new crate, proto or concurrency) — five crates (`tddy-agent-backend`, `tddy-coding-agent-specs`, `tddy-agent-launch`, `tddy-session-lifecycle`, `tddy-daemon`); a cross-crate move of n12's published types (kept by re-export); a spec-vocabulary rename in four built-in YAMLs; ~6 route suites rewritten. Not 5: no proto, no concurrency, no data migration
 **Stack:** `#agent-tools 13/19` — branch `feature/agent-tools/route-support`, base `feature/agent-tools/agent-registry` (#801)
+**PR:** [#819](https://github.com/uppin/tddy-coder/pull/819) (draft)
 **PRD:** none of its own. It delivers the "`RouteSupport` replaces `provider_route::Harness`" criterion of the registry PRD on `feature/agent-tools/agent-registry`: `docs/ft/daemon/1-WIP/PRD-2026-10-31-coding-agent-registry.md`
 
 ## Initial Discovery
@@ -35,10 +36,11 @@ State A below is distilled from that file. Grep traces are not repeated here.
 
 - `ProviderKind`, `RouteShape` and `RouteSupport` live in `tddy-agent-backend::provider_route` (new file `provider_route/support.rs`) and are re-exported from `tddy_coding_agent_specs` under the paths n12 published, so no consumer import changes. The move is forced by the edge `tddy-coding-agent-specs → tddy-agent-backend`: the reverse edge is a cycle.
 - The name clash with the `tddy_accounts::RouteSupport` **trait** is resolved at the one use site that imports both (`tddy-daemon/src/provider_route_support.rs`), by importing the trait under an alias. Neither public name changes.
-- `RoutedAgent { id, product, support, key_env }` is what a route body knows about an agent, built from its spec by `routed_agent(&CodingAgentSpec)`.
+- `RoutedAgent { id, product, support, key_env }` (owned) is what a route body knows about an agent, built from its spec by `routed_agent(&CodingAgentSpec)`. `product` is the new **`coding_agent.product`** spec key (`product: Claude Code`), read through `CodingAgentSpec::product()`, which answers the agent id when the key is absent. Every built-in spec declares it.
 - The route body is chosen by **(shape, provider served)**: `(env, anthropic)` → the Anthropic-env body (today's `claude_code_route`), `(env, meta)` → the key-only body writing the spec's `route.key_env`, `(toml_args, openai_responses)` → today's `codex_route`, `(json_config_file, openai_responses | openai_chat)` → today's `opencode_route`. `bodies_accept(shape)` returns the providers a body exists for.
 - **Shapes are renamed after the body format they are**, never after an agent: `args` → `toml_args` (`-c key=value` TOML overrides), `config_file` → `json_config_file`; `env` stays. Function names follow (`claude_code_route` → `anthropic_env_route`, `codex_route` → `toml_args_route`, `opencode_route` → `json_config_file_route`, `muse_route` → `key_env_route`). An override file using an old word is refused at load naming the new one.
-- `RouteRefusal` variants carry the agent id and product name, not a `Harness`.
+- `RouteRefusal` variants carry the agent id and product name, not a `Harness`. A refusal's text names the **product only**, exactly as the `Harness` refusals did: `Acme Code cannot be pointed at another provider; it always runs on its own vendor`; a spec with no `product` shows its id in its place. `NotYetRoutable` keeps today's `{product} ({id}) cannot run on a provider account in this build yet`. The existing `Warp cannot be pointed…` pins (`tddy-agent-backend/tests/warp_cli_acceptance.rs:189`, `tddy-session-lifecycle/tests/warp_cli_session.rs:455`) stand unchanged.
+- `opencode.yaml`'s `route.key_env` is `OPENCODE_PROVIDER_KEY`, not `TDDY_OPENCODE_PROVIDER_KEY`: the agent process sees no `TDDY_*` route variable. The route file is otherwise byte-identical (`OPENCODE_ROUTE_KEY_ENV` is deleted, and the body writes `{env:<route.key_env>}`).
 - A dropped-in YAML agent with a `route` section is routable through the same bodies. A spec with **no** `route` is unroutable and refused (`AgentCannotBeRouted`), never defaulted to `env` + anthropic (`RouteShape`'s serde `Default` stays a parse default only). A declared pair no body serves is `NotYetRoutable`, a refusal.
 - String-keyed callers (`tool_session_route.rs`, `harness_profile_start.rs`, `coding_agent_launcher.rs:1272`, `HarnessRouteSupport`) resolve through `CodingAgentRegistry::get(id)` or `for_session_type(st)`. An id the registry does not know is refused ("unknown agent"), never resolved to claude.
 - Vault `default_for` metadata keeps matching both id forms (`claude-cli` and `claude`); no stored record is migrated.
@@ -54,7 +56,7 @@ State A below is distilled from that file. Grep traces are not repeated here.
 - No file split or restructuring; code-issue records only (sweep node).
 
 **Stack-wide rules this node keeps:**
-- The agent process sees no `TDDY_*` variable. `opencode.yaml`'s `route.key_env: TDDY_OPENCODE_PROVIDER_KEY` breaks this today; renaming it (to a non-`TDDY_` name) is in scope here because the key-env body is rewritten here — **open, confirm at red**.
+- The agent process sees no `TDDY_*` route variable: `opencode.yaml`'s `route.key_env` is renamed to `OPENCODE_PROVIDER_KEY` here (**settled 2026-11-05**).
 - No fallback: an unknown agent id or a spec without `route` is refused, never routed as claude.
 - No hangs: the route path is pure data; `HarnessRouteSupport` gets the already-loaded registry and never loads from disk per RPC.
 - Fixtures install coding agents (`with_coding_agents`) and the sandbox RPC bridge; Linux jail tests self-skip without user namespaces.
@@ -72,7 +74,20 @@ implementing one here collides with the PR that owns it.
 
 ## Draft PR contract
 
-The first push of this PR publishes: `provider_route/support.rs` with the moved types and the renamed `RouteShape` words; `RoutedAgent`, the agent-keyed `RouteRefusal`, `bodies_accept`, `routed_agent`, the new signatures of `resolve_route`/`route_supported`/`agent_routable`; the failing acceptance tests and drift test below. Unimplemented bodies are `// TODO(route-support): implement`.
+The contract commit publishes **the surface only** — the `Harness`-keyed entry points and every caller of them are left byte-untouched, and `/green` moves the callers and deletes `Harness` in one go:
+
+| Symbol | Where | State |
+|---|---|---|
+| `ProviderKind`, `RouteSupport` (moved verbatim) | `tddy-agent-backend/src/provider_route/support.rs`, re-exported at `provider_route::*` and by `tddy_coding_agent_specs` under n12's paths | implemented |
+| `RouteShape::{Env, TomlArgs, JsonConfigFile}` (YAML `env`/`toml_args`/`json_config_file`; the three built-in YAMLs use the new words) | `support.rs` | implemented; the old-word refusal is `TODO(route-support)` |
+| `RoutedAgent { id, product, support, key_env }` | `support.rs` | implemented |
+| `bodies_accept(RouteShape) -> &'static [ProviderKind]` | `support.rs` | `TODO(route-support)` |
+| `by_spec::RouteRefusal` (agent-keyed; `Display` names the product, as the `Harness` text did) | `tddy-agent-backend/src/provider_route/by_spec.rs` | implemented |
+| `by_spec::{route_supported, agent_routable, resolve_route}(&RoutedAgent, …)` | `by_spec.rs` | `TODO(route-support)` |
+| `CodingAgentSection.product` | `tddy-coding-agent-specs/src/spec.rs` | implemented (parsed); the built-in YAMLs do not declare it yet |
+| `CodingAgentSpec::product()`, `routed_agent(&CodingAgentSpec) -> RoutedAgent` | `tddy-coding-agent-specs/src/spec.rs` | `TODO(route-support)` |
+
+At green, `by_spec`'s functions and `RouteRefusal` take the names of the `Harness`-keyed ones at `provider_route` (which are deleted), so a child imports `tddy_agent_backend::provider_route::{RoutedAgent, RouteRefusal, resolve_route}`. A child that compiles against the contract commit imports them from `provider_route::by_spec`.
 
 ## Green wave
 
@@ -109,10 +124,11 @@ Real dependency edges, as opposed to the branch line:
 - `packages/tddy-coding-agent-specs/tests/route_body_drift_acceptance.rs`
 ### Modified
 - `tddy-agent-backend`: `provider_route.rs` (body table, refusals), `provider_route/codex.rs`, `backend/routed.rs` (refusal only), `cli_harness{,_muse,_warp}.rs` (drop `route_harness`)
-- `tddy-coding-agent-specs`: `src/route.rs` (re-export), `src/spec.rs` (`routed_agent`), `src/lib.rs`; `specs/{codex,codex-acp,opencode}.yaml` (`shape` words)
+- `tddy-coding-agent-specs`: `src/route.rs` (re-export), `src/spec.rs` (`routed_agent`, `product`), `src/lib.rs`; `specs/{codex,codex-acp,opencode}.yaml` (`shape` words); every built-in spec (`product:`); `opencode.yaml` (`route.key_env: OPENCODE_PROVIDER_KEY`)
+- `OPENCODE_PROVIDER_KEY` rename also reaches `tddy-agent-launch/src/{sandboxed_cli_harness_tests,session_provider_route_tests,cli_route_launch_tests}.rs`, `tddy-integration-tests/tests/opencode_acp_backend.rs`, `tddy-session-lifecycle/tests/sandboxed_cli_harness_acceptance.rs:309`
 - `tddy-agent-launch`: `harness_from_spec.rs`, `session_provider_route.rs`, `cli_route_launch.rs`, `tool_session_route.rs`, `harness_profile_start.rs`, the five claude route sites
 - `tddy-session-lifecycle`: `coding_agent_launcher.rs:67,1272`
-- `tddy-daemon`: `provider_route_support.rs`, `account_linking.rs:277` (passes the loaded registry)
+- `tddy-daemon`: `provider_route_support.rs`, `account_linking.rs:277` (passes the loaded registry), `runtime/mount_accounts.rs` (hands `accounts_service_over` the registry `mount_host.rs` loads — `HostCodingAgents::agents_shared()`)
 - Tests: `tddy-agent-backend/tests/{provider_route,codex_route,opencode_route,muse_cli,warp_cli,cli_harness}_acceptance.rs`; `tddy-agent-launch/src/{session_provider_route_tests,default_route_tests,tool_session_route_tests}.rs`
 - Docs at wrap: `docs/ft/daemon/provider-accounts.md`, `harness-profiles.md`, `opencode-cli-session.md`, `muse-cli-session.md`, `packages/tddy-agent-backend/docs/architecture.md`, `packages/tddy-coding-agent-specs/docs/coding-agent-specs.md` (route section)
 ### Removed
@@ -127,28 +143,54 @@ Real dependency edges, as opposed to the branch line:
 
 ### Acceptance tests
 
-**`tddy-session-lifecycle`: `packages/tddy-session-lifecycle/tests/yaml_only_agent_acceptance.rs`** (fixture `tests/agent_registry_support/mod.rs` `a_daemon_with_tools`, plus a vault account as `harness_clis_support` builds one; the stub reports its environment)
+Written and verified failing (2026-11-05); ✅ approved by the developer 2026-11-05 with one change — refusals name the product only (applied, re-verified).
+
+**`tddy-session-lifecycle`: `packages/tddy-session-lifecycle/tests/yaml_only_agent_acceptance.rs`** (fixture `tests/agent_registry_support/mod.rs`, extended with `a_registry_daemon().with_tool(..).with_profile(..).with_a_meta_account().build()`, `acme_yaml_declaring(lines)` and a stub that reports `ANTHROPIC_{BASE_URL,AUTH_TOKEN,MODEL}`)
 
 - [ ] `a_new_agent_dropped_into_tddyhome_tools_with_an_anthropic_env_route_starts_on_a_provider_account_with_the_accounts_endpoint_in_its_environment`
-- [ ] `a_new_agent_without_a_route_section_is_refused_on_a_provider_account_naming_the_agent_and_spawns_nothing`
+- [ ] `a_new_agent_without_a_route_section_is_refused_on_a_provider_account_naming_the_agent_and_spawns_nothing` — pins `InvalidArgument` and `Acme Code cannot be pointed at another provider; it always runs on its own vendor`
+- [ ] `a_harness_profile_naming_a_dropped_in_agent_starts_its_session_type` — **moved here** from `harness_clis_from_spec_acceptance.rs`: its stub binary and dropped-in tool file are this fixture's
 
 **`tddy-coding-agent-specs`: `packages/tddy-coding-agent-specs/tests/route_body_drift_acceptance.rs`**
 
-- [ ] `every_built_in_specs_route_providers_are_exactly_what_its_route_body_accepts`
+- [ ] `every_built_in_specs_route_providers_are_ones_its_route_body_accepts_and_resolves` — **renamed** from `…are_exactly_what_its_route_body_accepts`: `bodies_accept(env)` is `[anthropic, meta]` while Claude declares only `[anthropic]`, so the claim is "a subset that resolves", pinned as a literal table
 - [ ] `an_override_using_a_removed_route_shape_word_is_refused_at_load_naming_the_new_word`
+- [ ] `every_built_in_spec_declares_the_product_its_route_refusals_name` — **new**, decision 2
+- [ ] `an_agent_without_a_route_is_refused_naming_the_product_its_spec_declares` — **new**, decision 2 (`Cursor cannot be pointed…`)
 
-**`tddy-daemon`: `packages/tddy-daemon/tests/provider_route_listing_acceptance.rs`**
+**`tddy-daemon`: `packages/tddy-daemon/tests/provider_route_listing_acceptance.rs`** (real `runtime::build`, stub GitHub, a Meta and an OpenAI-compatible account)
 
 - [ ] `list_provider_routes_for_a_dropped_in_agent_offers_the_accounts_its_spec_providers_serve`
 
-**`tddy-session-lifecycle`: `packages/tddy-session-lifecycle/tests/harness_clis_from_spec_acceptance.rs`**
+**`tddy-session-lifecycle`: `packages/tddy-session-lifecycle/tests/harness_clis_from_spec_acceptance.rs`** — regression, decision 1
 
-- [ ] `a_harness_profile_naming_a_dropped_in_agent_starts_its_session_type`
-- [ ] Regression: the existing routed opencode and muse cases keep byte-identical route files and environment
+- [ ] `a_routed_opencode_start_writes_the_same_route_file_with_its_key_in_opencode_provider_key` — **new**: the host route file is byte-identical apart from `{env:OPENCODE_PROVIDER_KEY}`, the key is in `OPENCODE_PROVIDER_KEY`, and `TDDY_OPENCODE_PROVIDER_KEY` is unset
+- [ ] The existing routed opencode cases (`a_harness_profile_naming_opencode_starts_from_the_spec`, `jailed::host_and_jailed_opencode_cli_…`, `jailed::each_jail_reaches_…`) now read the key from `OPENCODE_PROVIDER_KEY`, and so does `tddy-coding-agent-specs/tests/harness_specs_acceptance.rs` `opencode_yaml_requires_a_route_in_a_jail_…` (`key_env`); the muse cases are unchanged and pass
 
 ### Unit / integration tests
 
-- [ ] `tddy-agent-backend` (`tests/provider_route_acceptance.rs`, rewritten): `route_supported` truth table per (provider, preset, protocols); `(env, meta)` writes the key into the spec's `key_env`; `(toml_args, anthropic)` is `NotYetRoutable`; empty providers is `AgentCannotBeRouted`; every refusal's `Display` names the agent id.
+Written and verified failing at the contract commit (2026-11-05), each on a `TODO(route-support)` body of this node's surface:
+
+**`tddy-agent-backend/tests/route_by_spec_unit.rs`** (new; the `Harness`-keyed `provider_route_acceptance.rs` is left for green to fold in or delete with `Harness`)
+- [ ] `a_shapes_bodies_accept_the_providers_a_body_exists_for` (3 cases)
+- [ ] `route_supported_answers_the_agents_declared_providers_against_the_account` (9 cases: the provider ↔ protocol and Meta ↔ preset truth table, refusal texts naming the product)
+- [ ] `an_agent_that_declares_no_provider_is_refused_by_both_entry_points_carrying_its_id`
+- [ ] `a_declared_pair_no_body_serves_is_not_yet_routable_and_names_the_product_and_id` (`(toml_args, anthropic)`)
+- [ ] `every_agent_a_body_serves_is_routable`
+- [ ] `an_env_route_to_meta_hands_the_key_in_the_specs_key_env_and_nothing_else`
+- [ ] `an_env_route_to_meta_for_an_agent_without_a_key_env_is_refused_as_not_yet_routable` — no fallback variable for the key
+- [ ] `an_anthropic_env_route_is_byte_identical_to_claude_codes_harness_route`
+- [ ] `a_toml_args_route_is_byte_identical_to_codexs_harness_route`
+- [ ] `a_json_config_file_route_reads_its_key_from_the_specs_key_env`
+
+**`tddy-coding-agent-specs/tests/routed_agent_unit.rs`** (new)
+- [ ] `a_spec_declaring_a_product_is_named_by_it`
+- [ ] `a_spec_declaring_no_product_is_named_by_its_id`
+- [ ] `a_routed_agent_carries_the_specs_id_product_route_support_and_key_env`
+- [ ] `a_spec_without_a_route_is_a_routed_agent_with_no_providers_named_by_its_id`
+- [ ] `a_removed_shape_word_is_refused_naming_the_word_that_replaced_it`
+
+Still to be written at green, with the callers they exercise (those callers are untouched by the contract commit):
 - [ ] `tddy-daemon` (`provider_route_support.rs` inline): `HarnessRouteSupport` resolves `claude-cli` and `claude` to the same support; an unknown id is refused.
 - [ ] `tddy-agent-launch` (`session_provider_route_tests.rs`): `CliSessionType` carries its spec's support; a vault default stored as `claude-cli` and one stored as `claude` both apply.
 
@@ -164,18 +206,20 @@ Real dependency edges, as opposed to the branch line:
 
 - **Placement: `tddy-agent-backend`, re-exported by specs** (discovery option A). No new crate, no new edge; same precedent as the adapters the specs name. Rejected: `tddy-actions` (coding-agent vocabulary in the generic tool crate), a new `tddy-route-support` crate (worth it only if `tddy-accounts` moves off string keys).
 - **Clash: alias at the use site** rather than renaming n12's published struct or the accounts trait.
-- **Shape renames are breaking for override files**; refused loudly at load, named in the stack's changelog entry (n19).
-- Open: where `product` (the operator-facing name in refusals) comes from — the spec `summary` head or a new `coding_agent.product` key. No Rust test pins today's text; decide at red.
+- **Shape renames are breaking for override files**; refused loudly at load, named in the stack's changelog entry (n19). ✅ **Settled 2026-11-05** (developer): `args` → `toml_args`, `config_file` → `json_config_file`, an old word refused at load naming the new one.
+- ✅ **Settled 2026-11-05** (developer): `product` is a new `coding_agent.product` spec key, the operator-facing name route refusals use, declared in every built-in spec; absent, the agent id is used. At the 6e review the developer settled that refusals name the **product only**, not `{product} ({id})` — the `Warp cannot be pointed…` text and its pins stand.
+- ✅ **Settled 2026-11-05** (developer): `opencode.yaml`'s `route.key_env` is `OPENCODE_PROVIDER_KEY`; the agent process sees no `TDDY_*` route variable, and routed opencode keeps byte-identical route files apart from the variable name.
+- **Contract commit leaves the `Harness` path untouched** (coordinator, 2026-11-05): the new entry points and the agent-keyed `RouteRefusal` are published in `provider_route::by_spec` so nothing of the parent's code churns twice; `/green` promotes them to `provider_route` and deletes `Harness`.
 
 ## TODO
 
 - [x] Record initial discovery (`2026-11-04-agent-tools-route-support-initial-discovery.md`)
 - [x] Cross-check `packages/*/docs/code-issues/` and `docs/dev/todo/` for items this change touches (Step 2b)
 - [x] Create changeset (this document)
-- [ ] Create failing acceptance tests
-- [ ] Run acceptance tests (verify they fail)
-- [ ] USER REVIEW — acceptance tests
-- [ ] TDD Red — write failing unit/integration tests
+- [x] Create failing acceptance tests
+- [x] Run acceptance tests (verify they fail)
+- [x] USER REVIEW — acceptance tests (approved 2026-11-05: refusals name the product only)
+- [x] TDD Red — write failing unit/integration tests
 - [ ] TDD Green — implement with quality code
 - [ ] Update documentation with progress
 - [ ] Repeat Red→Green→Update cycle until feature complete
@@ -195,6 +239,8 @@ Real dependency edges, as opposed to the branch line:
 
 ## Refactoring Needed
 ### From /red (TDD red phase)
+- A dropped-in env/anthropic agent whose own argv carries `--model {model}` gets the Anthropic-env body's `--model` too (`cli_route_launch` appends route args; `launch_model_for` keeps the model for an env route). The acceptance tests do not pin argv; decide at green whether the body's `--model` is dropped when the spec's argv names the model.
+- The jail filters `TDDY_*` out of the agent's env (`jail_launch.rs:341`) and hands them to the MCP server (`:120`): check at green how the renamed opencode key reaches a jailed agent.
 ### From /validate-changes
 ### From /validate-tests
 ### From /validate-prod-ready

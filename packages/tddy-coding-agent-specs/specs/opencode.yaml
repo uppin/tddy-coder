@@ -61,7 +61,7 @@ extensions:
     route:
       required_in_jail: true
       providers: [openai_responses, openai_chat]
-      shape: config_file
+      shape: json_config_file
       config_env: OPENCODE_CONFIG
       files_dir: provider-route
       key_env: TDDY_OPENCODE_PROVIDER_KEY

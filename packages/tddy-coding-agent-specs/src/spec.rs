@@ -14,7 +14,7 @@ use thiserror::Error;
 
 use crate::capability::Capability;
 use crate::headless::validate_headless;
-use crate::route::{ProviderKind, RouteShape, RouteSupport};
+use crate::route::{ProviderKind, RouteShape, RouteSupport, RoutedAgent};
 use crate::slots::hooks;
 use crate::slots::tools::render_flag_per_value;
 
@@ -197,6 +197,10 @@ pub struct CodingAgentSection {
     /// `claude_cli.answer_wait_secs`). [`DEFAULT_ANSWER_WAIT_SECS`] when absent.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub answer_wait_secs: Option<u64>,
+    /// The operator-facing name a route refusal leads with (`#agent-tools 13/19`): `Claude Code`,
+    /// `Muse Code`. Read through [`CodingAgentSpec::product`], which answers the id when absent.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub product: Option<String>,
 }
 
 /// How long an orchestrated session's permission hook waits for its orchestrator's answer when the
@@ -232,6 +236,21 @@ impl CodingAgentSpec {
             None => RouteSupport::default(),
         }
     }
+
+    /// `coding_agent.product`, or the agent id when the spec declares none.
+    pub fn product(&self) -> &str {
+        // TODO(route-support): implement — `self.agent.product`, else `self.id`.
+        todo!("route-support: CodingAgentSpec::product")
+    }
+}
+
+/// What a route body knows of `spec` (`#agent-tools 13/19`): its id, its product, its route
+/// support and its `route.key_env`. A spec without a `route` section gives an agent with no
+/// providers, which every route body refuses.
+pub fn routed_agent(spec: &CodingAgentSpec) -> RoutedAgent {
+    // TODO(route-support): implement — id, `product()`, `route_support()`, `route.key_env`.
+    let _ = spec;
+    todo!("route-support: routed_agent")
 }
 
 /// `coding_agent.acp`: one ACP launch of the agent (`#agent-tools 11/12`).
@@ -463,7 +482,7 @@ pub struct RouteSlot {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub providers: Vec<ProviderKind>,
     /// How the route reaches the agent (`#agent-tools 12/12`): environment (the default),
-    /// arguments, or a configuration file.
+    /// `-c` TOML arguments (`toml_args`), or a JSON configuration file (`json_config_file`).
     #[serde(default)]
     pub shape: RouteShape,
 }

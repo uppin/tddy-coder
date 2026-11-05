@@ -11,9 +11,12 @@
 //! Meta, and Cursor's agent cannot be redirected. A harness whose route body has not been built yet
 //! answers [`RouteRefusal::NotYetRoutable`] — a refusal, never a silent run on the vendor.
 
+pub mod by_spec;
 mod codex;
+mod support;
 use codex::codex_route;
 pub use codex::{CODEX_ROUTE_KEY_ENV, CODEX_ROUTE_PROVIDER_ID};
+pub use support::{bodies_accept, ProviderKind, RouteShape, RouteSupport, RoutedAgent};
 
 use crate::cli_harness_muse::MUSE_ROUTE_KEY_ENV;
 

@@ -127,7 +127,7 @@ async fn a_harness_profile_naming_opencode_starts_from_the_spec() {
     let report = daemon.stub_report(&session_id).await;
 
     // Then — opencode.yaml's argv on the route's model, its config file named in OPENCODE_CONFIG
-    // and its key in TDDY_OPENCODE_PROVIDER_KEY, as the spec's `route` section declares
+    // and its key in OPENCODE_PROVIDER_KEY, as the spec's `route` section declares
     let config = report
         .route_config()
         .expect("the routed launch names its configuration file");
@@ -136,7 +136,7 @@ async fn a_harness_profile_naming_opencode_starts_from_the_spec() {
             daemon.metadata_of(&session_id).session_type,
             report.argv(),
             config["model"].clone(),
-            report.env("TDDY_OPENCODE_PROVIDER_KEY"),
+            report.env("OPENCODE_PROVIDER_KEY"),
         ),
         (
             Some("opencode-cli".to_string()),
@@ -147,6 +147,55 @@ async fn a_harness_profile_naming_opencode_starts_from_the_spec() {
             ],
             serde_json::json!(format!("tddy-route/{TEST_MODEL}")),
             META_KEY.to_string(),
+        )
+    );
+}
+
+#[tokio::test]
+#[serial_test::serial]
+async fn a_routed_opencode_start_writes_the_same_route_file_with_its_key_in_opencode_provider_key()
+{
+    // Given — opencode-cli on the host, on the Meta account (which serves OpenAI Responses)
+    let daemon = a_harness_daemon(ADaemonSpec::of(AHarness::OpenCode));
+
+    // When
+    let (session_id, _host) = daemon
+        .start(daemon.a_start(false, Some(META_ACCOUNT), None))
+        .await
+        .expect("a host opencode-cli start on the Meta account succeeds");
+    let report = daemon.stub_report(&session_id).await;
+
+    // Then — the route file is byte for byte the one OpenCode was always given, but for the
+    // variable its key is read from: the agent sees no `TDDY_*` route variable
+    let the_route_file_reading_its_key_from = |key_env: &str| {
+        serde_json::to_string_pretty(&serde_json::json!({
+            "model": format!("tddy-route/{TEST_MODEL}"),
+            "provider": {
+                "tddy-route": {
+                    "npm": "@ai-sdk/openai",
+                    "options": {
+                        "baseURL": "https://api.meta.ai/v1",
+                        "apiKey": format!("{{env:{key_env}}}"),
+                    },
+                    "models": {
+                        (TEST_MODEL): { "options": { "include": ["reasoning.encrypted_content"] } },
+                    },
+                },
+            },
+        }))
+        .unwrap()
+        .replace('\n', "")
+    };
+    assert_eq!(
+        (
+            report.route_config_text().to_string(),
+            report.env("OPENCODE_PROVIDER_KEY"),
+            report.env("TDDY_OPENCODE_PROVIDER_KEY"),
+        ),
+        (
+            the_route_file_reading_its_key_from("OPENCODE_PROVIDER_KEY"),
+            META_KEY.to_string(),
+            "UNSET".to_string(),
         )
     );
 }
@@ -297,7 +346,7 @@ mod jailed {
                     .map(|dir| dir.to_path_buf()),
                 started.route_config_mode(),
                 started.route_config().map(|config| config["model"].clone()),
-                started.env("TDDY_OPENCODE_PROVIDER_KEY"),
+                started.env("OPENCODE_PROVIDER_KEY"),
                 resumed.argv()[1..].to_vec(),
             ),
             (
@@ -382,7 +431,7 @@ mod jailed {
             (
                 opencode_report.connect_status(&route_target),
                 opencode_report.connect_status(&undeclared_target),
-                opencode_report.env("TDDY_OPENCODE_PROVIDER_KEY"),
+                opencode_report.env("OPENCODE_PROVIDER_KEY"),
                 muse_report.connect_status(&route_target),
                 muse_report.connect_status(&undeclared_target),
             ),

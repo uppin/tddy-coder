@@ -268,6 +268,7 @@ mod tests {
                 acp: None,
                 capabilities: Default::default(),
                 answer_wait_secs: None,
+                product: None,
             },
         }
     }
