@@ -15,7 +15,7 @@ mod by_spec;
 mod codex;
 mod support;
 pub use by_spec::{agent_routable, resolve_route, route_supported, RouteRefusal};
-pub use codex::{CODEX_ROUTE_KEY_ENV, CODEX_ROUTE_PROVIDER_ID};
+pub use codex::CODEX_ROUTE_PROVIDER_ID;
 pub use support::{bodies_accept, ProviderKind, RouteShape, RouteSupport, RoutedAgent};
 
 /// A secret route value. Its `Debug` never shows the value, so a route can be logged.

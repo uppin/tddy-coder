@@ -1,5 +1,5 @@
 //! The Codex route: a Responses-API provider declared through `-c` overrides, with the key in the
-//! variable that provider names as its `env_key`.
+//! spec's `route.key_env` (`CODEX_PROVIDER_KEY`), the variable that provider names as its `env_key`.
 //!
 //! Feature: docs/ft/coder/1-WIP/PRD-2026-10-18-provider-route-tool-route.md
 
@@ -7,8 +7,7 @@ mod route_agents;
 
 use route_agents::codex_named;
 use tddy_agent_backend::provider_route::{
-    resolve_route, RouteEndpoints, RouteRefusal, RouteSecret, RouteTarget, CODEX_ROUTE_KEY_ENV,
-    CODEX_ROUTE_PROVIDER_ID,
+    resolve_route, RouteEndpoints, RouteRefusal, RouteSecret, RouteTarget, CODEX_ROUTE_PROVIDER_ID,
 };
 
 fn on_meta(model: &str) -> RouteTarget {
@@ -43,7 +42,7 @@ fn codex_on_meta_declares_a_responses_provider_through_config_overrides() {
                 "-c".to_string(),
                 format!("model_providers.{id}.base_url=\"https://api.meta.ai/v1\""),
                 "-c".to_string(),
-                format!("model_providers.{id}.env_key=\"{CODEX_ROUTE_KEY_ENV}\""),
+                format!("model_providers.{id}.env_key=\"CODEX_PROVIDER_KEY\""),
                 "-c".to_string(),
                 format!("model_providers.{id}.wire_api=\"responses\""),
                 "-m".to_string(),
@@ -55,7 +54,7 @@ fn codex_on_meta_declares_a_responses_provider_through_config_overrides() {
             .iter()
             .map(|(k, v)| (k.as_str(), v.expose()))
             .collect();
-        assert_eq!(secrets, vec![(CODEX_ROUTE_KEY_ENV, "a-meta-key")]);
+        assert_eq!(secrets, vec![("CODEX_PROVIDER_KEY", "a-meta-key")]);
     }
 }
 

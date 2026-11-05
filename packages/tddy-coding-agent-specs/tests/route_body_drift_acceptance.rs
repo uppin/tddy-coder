@@ -13,7 +13,9 @@ use std::path::{Path, PathBuf};
 
 use pretty_assertions::assert_eq;
 use tddy_agent_backend::provider_route::{agent_routable, resolve_route};
-use tddy_agent_backend::provider_route::{bodies_accept, RouteEndpoints, RouteSecret, RouteTarget};
+use tddy_agent_backend::provider_route::{
+    bodies_accept, HarnessRoute, RouteEndpoints, RouteSecret, RouteTarget,
+};
 use tddy_coding_agent_specs::{
     builtin_specs, routed_agent, CodingAgentRegistry, CodingAgentSpec, ProviderKind,
 };
@@ -273,4 +275,88 @@ fn every_id_a_route_was_once_chosen_by_resolves_through_the_registry_to_its_spec
         (registry.get("stub"), registry.for_session_type("tool")),
         (None, None)
     );
+}
+
+/// Every variable name `route` hands the agent process: its plain and secret environment.
+fn the_variables_handed_by(route: &HarnessRoute) -> Vec<String> {
+    route
+        .env
+        .iter()
+        .map(|(name, _)| name.clone())
+        .chain(route.secret_env.iter().map(|(name, _)| name.clone()))
+        .collect()
+}
+
+#[test]
+fn a_routed_codex_hands_its_key_in_codex_provider_key_and_never_in_a_tddy_variable() {
+    // Given
+    let (_home, registry) = the_builtin_registry();
+
+    for id in ["codex", "codex-acp"] {
+        let agent = routed_agent(
+            registry
+                .get(id)
+                .unwrap_or_else(|| panic!("{id} is built in")),
+        );
+
+        // When
+        let route = resolve_route(&agent, &an_account_serving(ProviderKind::OpenaiResponses))
+            .unwrap_or_else(|refusal| panic!("{id}: {refusal}"));
+
+        // Then — the key is in the spec's `route.key_env`, which the provider names as its
+        // `env_key`; `TDDY_ROUTE_API_KEY` is not set
+        let secrets: Vec<(&str, &str)> = route
+            .secret_env
+            .iter()
+            .map(|(name, value)| (name.as_str(), value.expose()))
+            .collect();
+        assert_eq!(
+            secrets,
+            vec![("CODEX_PROVIDER_KEY", "a-provider-key")],
+            "{id}"
+        );
+        assert!(
+            route
+                .args
+                .contains(&"model_providers.tddy-route.env_key=\"CODEX_PROVIDER_KEY\"".to_string()),
+            "{id}: {:?}",
+            route.args
+        );
+        assert!(
+            !the_variables_handed_by(&route).contains(&"TDDY_ROUTE_API_KEY".to_string()),
+            "{id}"
+        );
+    }
+}
+
+#[test]
+fn no_built_in_route_hands_the_agent_process_a_tddy_variable() {
+    // Given
+    let (_home, registry) = the_builtin_registry();
+
+    // When — every route a built-in resolves, on an account for each provider it serves
+    let tddy_variables: Vec<(String, String)> = registry
+        .all()
+        .into_iter()
+        .filter(|spec| spec.route_support().is_routable())
+        .flat_map(|spec| {
+            let agent = routed_agent(spec);
+            the_providers_its_body_serves(spec)
+                .into_iter()
+                .filter_map(move |provider| {
+                    resolve_route(&agent, &an_account_serving(provider)).ok()
+                })
+                .flat_map(|route| {
+                    let mut named = the_variables_handed_by(&route);
+                    named.extend(route.args.clone());
+                    named
+                })
+                .filter(|named| named.contains("TDDY_"))
+                .map(move |named| (spec.id.clone(), named))
+                .collect::<Vec<_>>()
+        })
+        .collect();
+
+    // Then — the agent process sees no `TDDY_*` route variable, by name or in an argument
+    assert_eq!(tddy_variables, Vec::<(String, String)>::new());
 }

@@ -110,7 +110,8 @@ pub struct RoutedAgent {
     pub product: String,
     /// `coding_agent.route.{providers, shape}`; no providers for a spec without `route`.
     pub support: RouteSupport,
-    /// `coding_agent.route.key_env`: the variable a key-only or file route hands the key in.
+    /// `coding_agent.route.key_env`: the variable every body but the Anthropic-env one hands the
+    /// key in. A body that needs it refuses an agent without one (`NotYetRoutable`).
     pub key_env: Option<String>,
 }
 

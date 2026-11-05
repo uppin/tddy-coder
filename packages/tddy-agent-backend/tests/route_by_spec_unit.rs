@@ -46,14 +46,14 @@ fn claude() -> RoutedAgent {
     )
 }
 
-/// Codex's spec: OpenAI Responses, through `-c` TOML overrides.
+/// Codex's spec: OpenAI Responses, through `-c` TOML overrides, its key in `CODEX_PROVIDER_KEY`.
 fn codex() -> RoutedAgent {
     an_agent(
         "codex",
         "Codex",
         RouteShape::TomlArgs,
         &[ProviderKind::OpenaiResponses],
-        None,
+        Some("CODEX_PROVIDER_KEY"),
     )
 }
 
@@ -282,6 +282,30 @@ fn an_env_route_to_meta_for_an_agent_without_a_key_env_is_refused_as_not_yet_rou
 }
 
 #[test]
+fn a_toml_args_route_for_an_agent_without_a_key_env_is_refused_as_not_yet_routable() {
+    // Given — a Responses route with no variable to name as the provider's `env_key`
+    let agent = an_agent(
+        "lark",
+        "Lark",
+        RouteShape::TomlArgs,
+        &[ProviderKind::OpenaiResponses],
+        None,
+    );
+
+    // When
+    let answer = resolve_route(&agent, &a_meta_account()).map(|_| ());
+
+    // Then — no fallback variable: the key is never handed in a name the spec did not declare
+    assert_eq!(
+        answer,
+        Err(RouteRefusal::NotYetRoutable {
+            agent: "lark".to_string(),
+            product: "Lark".to_string(),
+        })
+    );
+}
+
+#[test]
 fn an_anthropic_env_route_pins_the_endpoint_and_every_model_alias_and_hands_the_key_as_a_secret() {
     // When
     let route = resolve_route(&claude(), &a_meta_account()).expect("Claude Code routes");
@@ -324,7 +348,7 @@ fn a_toml_args_route_declares_a_responses_provider_through_config_overrides() {
         "-c".to_string(),
         format!("model_providers.{id}.base_url=\"https://api.meta.ai/v1\""),
         "-c".to_string(),
-        format!("model_providers.{id}.env_key=\"TDDY_ROUTE_API_KEY\""),
+        format!("model_providers.{id}.env_key=\"CODEX_PROVIDER_KEY\""),
         "-c".to_string(),
         format!("model_providers.{id}.wire_api=\"responses\""),
         "-m".to_string(),
@@ -335,7 +359,7 @@ fn a_toml_args_route_declares_a_responses_provider_through_config_overrides() {
         (route.env.clone(), secrets_of(&route), route.args.clone()),
         (
             Vec::new(),
-            vec![("TDDY_ROUTE_API_KEY".to_string(), A_KEY.to_string())],
+            vec![("CODEX_PROVIDER_KEY".to_string(), A_KEY.to_string())],
             args,
         )
     );

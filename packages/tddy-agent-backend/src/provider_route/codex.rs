@@ -6,13 +6,20 @@ use super::{route_supported, HarnessRoute, RouteRefusal, RouteTarget, RoutedAgen
 
 /// Codex reads its providers from `config.toml`, and each override it is given is a `-c` argument.
 /// The account is declared as a Responses provider under [`CODEX_ROUTE_PROVIDER_ID`] and selected
-/// with `model_provider`, so the person's own providers are untouched. The key is named by the
-/// provider's `env_key` and delivered in that variable, never as an argument. `-m` pins the model.
+/// with `model_provider`, so the person's own providers are untouched. The key is delivered in the
+/// spec's `route.key_env`, which the provider names as its `env_key` — never as an argument, and
+/// never in a `TDDY_*` variable. `-m` pins the model.
 pub(super) fn toml_args_route(
     agent: &RoutedAgent,
     target: &RouteTarget,
 ) -> Result<HarnessRoute, RouteRefusal> {
     route_supported(agent, &target.preset, &served_protocols(&target.endpoints))?;
+    let Some(key_env) = agent.key_env.as_deref() else {
+        return Err(RouteRefusal::NotYetRoutable {
+            agent: agent.id.clone(),
+            product: agent.product.clone(),
+        });
+    };
     let Some(root) = target.endpoints.openai_responses.as_deref() else {
         return Err(RouteRefusal::ProtocolNotServed {
             agent: agent.id.clone(),
@@ -29,7 +36,7 @@ pub(super) fn toml_args_route(
     let id = CODEX_ROUTE_PROVIDER_ID;
     Ok(HarnessRoute {
         env: Vec::new(),
-        secret_env: vec![(CODEX_ROUTE_KEY_ENV.to_string(), target.api_key.clone())],
+        secret_env: vec![(key_env.to_string(), target.api_key.clone())],
         files: Vec::new(),
         args: vec![
             "-c".to_string(),
@@ -39,10 +46,7 @@ pub(super) fn toml_args_route(
             "-c".to_string(),
             format!("model_providers.{id}.base_url={}", toml_string(root)),
             "-c".to_string(),
-            format!(
-                "model_providers.{id}.env_key={}",
-                toml_string(CODEX_ROUTE_KEY_ENV)
-            ),
+            format!("model_providers.{id}.env_key={}", toml_string(key_env)),
             "-c".to_string(),
             format!("model_providers.{id}.wire_api={}", toml_string("responses")),
             "-m".to_string(),
@@ -75,6 +79,3 @@ fn codex_provider_name(preset: &str) -> Option<&'static str> {
 /// The provider id a Codex route declares the account under (`-c model_providers.<id>.*`), so the
 /// person's own `~/.codex/config.toml` providers are never shadowed.
 pub const CODEX_ROUTE_PROVIDER_ID: &str = "tddy-route";
-
-/// The variable a Codex route's key is delivered in; the route names it as the provider's `env_key`.
-pub const CODEX_ROUTE_KEY_ENV: &str = "TDDY_ROUTE_API_KEY";

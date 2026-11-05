@@ -87,7 +87,16 @@ fn a_codex_tool_session_on_meta_is_handed_a_route_file_with_its_provider() {
         .args
         .iter()
         .any(|a| a.contains("wire_api=\"responses\"")));
-    assert_eq!(route.secret_env[0].1.expose(), "a-meta-key");
+    let secrets: Vec<(&str, &str)> = route
+        .secret_env
+        .iter()
+        .map(|(name, value)| (name.as_str(), value.expose()))
+        .collect();
+    assert_eq!(
+        secrets,
+        vec![("CODEX_PROVIDER_KEY", "a-meta-key")],
+        "codex.yaml's route.key_env, never TDDY_ROUTE_API_KEY"
+    );
 }
 
 #[test]

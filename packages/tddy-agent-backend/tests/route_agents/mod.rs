@@ -46,7 +46,7 @@ pub fn codex_named(id: &str) -> RoutedAgent {
         "Codex",
         RouteShape::TomlArgs,
         &[ProviderKind::OpenaiResponses],
-        None,
+        Some("CODEX_PROVIDER_KEY"),
     )
 }
 

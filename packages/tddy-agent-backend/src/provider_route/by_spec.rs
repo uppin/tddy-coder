@@ -180,9 +180,9 @@ fn served_providers(agent: &RoutedAgent) -> Vec<ProviderKind> {
 
 fn body_has_its_inputs(agent: &RoutedAgent, provider: ProviderKind) -> bool {
     match (agent.support.shape, provider) {
-        (RouteShape::Env, ProviderKind::Meta) | (RouteShape::JsonConfigFile, _) => {
-            agent.key_env.is_some()
-        }
+        (RouteShape::Env, ProviderKind::Meta)
+        | (RouteShape::TomlArgs, _)
+        | (RouteShape::JsonConfigFile, _) => agent.key_env.is_some(),
         _ => true,
     }
 }

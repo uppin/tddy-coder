@@ -54,6 +54,9 @@ extensions:
     route:
       providers: [openai_responses]
       shape: toml_args
+      # The variable the key is handed in; the route names it as the provider's `env_key`. Never a
+      # `TDDY_*` name: the agent process sees no tddy route variable.
+      key_env: CODEX_PROVIDER_KEY
     models:
       default: gpt-5.3-codex
       curated: [gpt-5.3-codex]
