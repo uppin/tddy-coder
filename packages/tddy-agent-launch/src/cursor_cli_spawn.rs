@@ -458,7 +458,6 @@ async fn spawn_cursor_from_spec(
             model,
             env,
             os_user: None,
-            without_inherited_tddy: false,
         },
         None,
     )

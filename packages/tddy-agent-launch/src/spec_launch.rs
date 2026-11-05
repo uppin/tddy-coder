@@ -171,9 +171,6 @@ pub struct HostPtySession<'a> {
     pub env: Vec<(String, String)>,
     /// The session owner; `None` runs the agent as the daemon.
     pub os_user: Option<&'a str>,
-    /// Run the agent without the `TDDY_*` variables the daemon's own environment holds (the generic
-    /// CLI launch's stack rule): it sees only what `env` names.
-    pub without_inherited_tddy: bool,
 }
 
 /// Why a spec-driven launch did not start.
@@ -281,9 +278,34 @@ pub async fn launch_host_pty(
     session: HostPtySession<'_>,
     on_exit: Option<ExitHook>,
 ) -> Result<Arc<PtyHandle>, SpecLaunchError> {
+    spawn_host_pty(agent, params, slots, worktree, session, on_exit, false).await
+}
+
+/// [`launch_host_pty`] for the generic CLI launch: the agent runs without the `TDDY_*` variables
+/// the daemon's own environment holds (stack rule) — it sees only what `session.env` names.
+pub(crate) async fn launch_host_pty_without_inherited_tddy(
+    agent: &HostAgent,
+    params: &TemplateParams,
+    slots: &RenderedSlots,
+    worktree: &Path,
+    session: HostPtySession<'_>,
+    on_exit: Option<ExitHook>,
+) -> Result<Arc<PtyHandle>, SpecLaunchError> {
+    spawn_host_pty(agent, params, slots, worktree, session, on_exit, true).await
+}
+
+async fn spawn_host_pty(
+    agent: &HostAgent,
+    params: &TemplateParams,
+    slots: &RenderedSlots,
+    worktree: &Path,
+    session: HostPtySession<'_>,
+    on_exit: Option<ExitHook>,
+    without_inherited_tddy: bool,
+) -> Result<Arc<PtyHandle>, SpecLaunchError> {
     let HostPtyPlan { argv, env } = plan_host_pty(agent, params, slots)?;
     let env: Vec<(String, String)> = env.into_iter().chain(session.env).collect();
-    let argv = if session.without_inherited_tddy {
+    let argv = if without_inherited_tddy {
         without_inherited_tddy_variables(argv, &env)
     } else {
         argv
@@ -438,7 +460,6 @@ pub async fn launch_claude_cli(
             model: launch.model,
             env: launch.env,
             os_user: launch.os_user,
-            without_inherited_tddy: false,
         },
         None,
     )

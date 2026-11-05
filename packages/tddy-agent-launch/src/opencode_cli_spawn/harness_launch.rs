@@ -8,7 +8,7 @@ use tddy_cli_sessions::cli_session_manager::{CliSessionManager, ExitHook};
 use tddy_coding_agent_specs::slots::RenderedSlots;
 use tddy_rpc::Status;
 
-use crate::spec_launch::{launch_host_pty, plan_host_pty, HostAgent, HostPtySession};
+use crate::spec_launch::{launch_host_pty_without_inherited_tddy, plan_host_pty, HostAgent, HostPtySession};
 
 /// How a harness is run: as the PTY child, or inside tmux — and whether the launch starts the
 /// session's agent or resumes it.
@@ -129,7 +129,7 @@ pub(super) async fn launch(
             tmux_session: Some(launched.tmux_session),
         });
     }
-    let handle = launch_host_pty(
+    let handle = launch_host_pty_without_inherited_tddy(
         agent,
         params,
         slots,
@@ -141,7 +141,6 @@ pub(super) async fn launch(
             model,
             env,
             os_user: Some(os_user),
-            without_inherited_tddy: true,
         },
         on_exit,
     )
