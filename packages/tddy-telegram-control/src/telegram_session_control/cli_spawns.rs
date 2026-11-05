@@ -3,6 +3,33 @@
 use crate::telegram_session_control::*;
 
 impl<S: TelegramSender + Send + Sync> TelegramSessionControlHarness<S> {
+    /// Handle the model pick of a pending CLI start (`tcm:<model_idx>|p:<proj_idx>|s:<session_id>`)
+    /// and start it: the pending session's agent (its session type) and the model at `model_idx` of
+    /// that agent's spec go to the daemon's generic start through the session starter, with the
+    /// branch the pending session chose and the agent's spec-required branch name. The started
+    /// session replaces the pending one; a branch another session holds is answered with the
+    /// conflict keyboard, and nothing is started.
+    pub async fn handle_telegram_model_pick_callback(
+        &self,
+        chat_id: i64,
+        model_idx: usize,
+        proj_idx: usize,
+        session_id: &str,
+    ) -> anyhow::Result<()> {
+        // TODO(telegram-spec-launch): implement — replaces `handle_telegram_claude_model_callback`,
+        // `handle_telegram_cursor_model_callback`, `spawn_telegram_claude_cli` and
+        // `spawn_telegram_cursor_cli`.
+        let _ = (
+            chat_id,
+            model_idx,
+            proj_idx,
+            session_id,
+            &self.coding_agents,
+            &self.session_starter,
+        );
+        todo!("telegram-spec-launch: handle_telegram_model_pick_callback")
+    }
+
     /// Handle the model-picker callback (`tcm:<model_idx>|p:<proj_idx>|s:<session_id>`).
     ///
     /// Persists the chosen model into `changeset.yaml`, then triggers

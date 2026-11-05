@@ -297,6 +297,9 @@ pub use tddy_agent_launch::{
 
 mod svc_launch_delegators;
 
+/// The host as a satellite's session-starter port (`#agent-tools 18/19`).
+pub mod operator_session_starter;
+
 mod svc_agent_host_ports;
 
 mod svc_agent_roster_delegators;

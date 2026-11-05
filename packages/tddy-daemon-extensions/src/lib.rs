@@ -13,6 +13,8 @@
 //!   daemon and written by the bridge, so neither side depends on the other to agree on it.
 //! - [`desktop_inspect`] — the one line a bridge run with `--inspect` reports a desktop's
 //!   advertised sign-in methods on, shared the same way.
+//! - [`session_starter`] — start a session for an operator a satellite has already identified,
+//!   through the daemon's one generic start; bound late, once the host exists.
 //! - [`integration_status`] — the one place an integration's live state is recorded, so "is it
 //!   configured, is it up" is answered once instead of re-derived per caller.
 
@@ -26,6 +28,7 @@ pub mod room_directory;
 pub mod room_tokens;
 pub mod session_reach;
 pub mod session_rooms;
+pub mod session_starter;
 pub mod split_rooms;
 pub mod terminal_exposure;
 
@@ -41,6 +44,10 @@ pub use session_reach::{
     NoSessionReach, OpenedRoom, ReachableSessions, ReachedSession, SessionReach,
 };
 pub use session_rooms::{NoSessionRooms, SessionRooms};
+pub use session_starter::{
+    LateBoundSessionStarter, NoSessionStarter, OperatorBranchChoice, OperatorBranchConflict,
+    OperatorSessionStart, OperatorStartOutcome, SessionStarter,
+};
 pub use split_rooms::{
     NoSplitRooms, RemoteSnapshotSource, SessionTokenMinter, SplitAgentJoin, SplitRoomHosting,
     WorktreeSnapshot,

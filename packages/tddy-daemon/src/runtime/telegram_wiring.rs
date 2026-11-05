@@ -178,7 +178,13 @@ pub(super) fn build_telegram(
             Some(telegram_tracked),
         )
         .with_session_rooms(registries.shared_session_rooms.clone())
-        .with_terminal_exposure(Arc::clone(&plugins.terminal_exposure)),
+        .with_terminal_exposure(Arc::clone(&plugins.terminal_exposure))
+        .with_session_starter(
+            Arc::clone(&registries.session_starter) as Arc<dyn tddy_daemon_extensions::SessionStarter>
+        ),
+        // TODO(telegram-spec-launch): `.with_coding_agents(...)` — the host's registry, loaded once
+        // before Telegram is built (`host_coding_agents`) and shared with `build_session_host`
+        // instead of loaded there.
     ));
 
     TelegramWiring {

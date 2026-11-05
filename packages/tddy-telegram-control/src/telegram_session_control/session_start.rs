@@ -179,6 +179,21 @@ impl<S: TelegramSender + Send + Sync> TelegramSessionControlHarness<S> {
         })
     }
 
+    /// `/start-agent <prompt>`: start any CLI agent the host's coding-agent registry offers.
+    ///
+    /// Writes the pending session's changeset (`initial_prompt`, a name from the prompt, a
+    /// new-branch intent) and sends the **agent** keyboard ([`TelegramAgentChoices`]); the agent
+    /// pick then continues as `/start-claude` does, from the project keyboard. A host without
+    /// coding agents is refused, and nothing is created.
+    pub async fn handle_start_agent(
+        &mut self,
+        cmd: StartAgentCommand,
+    ) -> anyhow::Result<StartAgentOutcome> {
+        // TODO(telegram-spec-launch): implement
+        let _ = (cmd, &self.coding_agents);
+        todo!("telegram-spec-launch: handle_start_agent")
+    }
+
     /// `/start-cursor <prompt>`: start a Cursor Agent CLI session seeded with `prompt`.
     pub async fn handle_start_cursor(
         &mut self,

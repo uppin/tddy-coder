@@ -345,6 +345,9 @@ impl BuildContext {
         // started over the socket is visible over every other transport.
         let connection_arc = Arc::new(connection_impl);
         connection_arc.install_sandbox_rpc_bridge();
+        // TODO(telegram-spec-launch): bind the host into the satellites' session starter —
+        // `self.registries.session_starter.bind(Arc::new(HostSessionStarter::new(
+        // Arc::clone(&connection_arc))))` — so a Telegram start reaches the generic start.
         self.session_host = Some(Arc::clone(&connection_arc));
         // The periodic project-home auto-stop reaps through the same host the sessions run on.
         self.tasks.project_home_reaper = Some(Arc::clone(&connection_arc));

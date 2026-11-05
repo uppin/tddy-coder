@@ -53,6 +53,7 @@ use tddy_telegram::telegram_tracked_session::{
 
 pub use crate::telegram_session_control::types::*;
 
+mod agent_choices;
 mod callbacks;
 mod chaining_and_listing;
 mod cli_spawns;
@@ -63,6 +64,7 @@ mod types;
 mod workflow_launch;
 mod workflow_spawn;
 
+pub use agent_choices::*;
 pub use callbacks::*;
 pub use workflow_spawn::*;
 
@@ -108,6 +110,17 @@ pub struct TelegramSessionControlHarness<S: TelegramSender + Send + Sync> {
     /// then reports no room, as it does when the exposure fails. `main` injects the daemon's own
     /// with [`Self::with_terminal_exposure`].
     terminal_exposure: Arc<dyn tddy_daemon_extensions::TerminalExposure>,
+    /// The host's coding agents: the CLI agents a start offers and each one's models.
+    ///
+    /// Defaults to [`tddy_coding_agent_specs::CodingAgentRegistry::empty`] — a host without coding
+    /// agents, whose every CLI start is refused. `main` injects the host's own with
+    /// [`Self::with_coding_agents`].
+    coding_agents: Arc<tddy_coding_agent_specs::CodingAgentRegistry>,
+    /// The daemon's generic session start, which a CLI start goes through.
+    ///
+    /// Defaults to [`tddy_daemon_extensions::NoSessionStarter`], which refuses every start. `main`
+    /// injects the daemon's late-bound one with [`Self::with_session_starter`].
+    session_starter: Arc<dyn tddy_daemon_extensions::SessionStarter>,
 }
 
 impl<S: TelegramSender + Send + Sync> TelegramSessionControlHarness<S> {
@@ -208,7 +221,29 @@ impl<S: TelegramSender + Send + Sync> TelegramSessionControlHarness<S> {
             )),
             session_rooms: Arc::new(tddy_daemon_extensions::NoSessionRooms),
             terminal_exposure: Arc::new(tddy_daemon_extensions::NoTerminalExposure),
+            coding_agents: Arc::new(tddy_coding_agent_specs::CodingAgentRegistry::empty()),
+            session_starter: Arc::new(tddy_daemon_extensions::NoSessionStarter),
         }
+    }
+
+    /// Share the host's coding agents (builder): the CLI agents a Telegram start offers and the
+    /// models of each, read from their specs.
+    pub fn with_coding_agents(
+        mut self,
+        agents: Arc<tddy_coding_agent_specs::CodingAgentRegistry>,
+    ) -> Self {
+        self.coding_agents = agents;
+        self
+    }
+
+    /// Share the daemon's session starter (builder), so a Telegram CLI start goes through the same
+    /// generic start a web start does.
+    pub fn with_session_starter(
+        mut self,
+        starter: Arc<dyn tddy_daemon_extensions::SessionStarter>,
+    ) -> Self {
+        self.session_starter = starter;
+        self
     }
 
     /// Share the daemon's session-room registry (builder), so **Delete** closes the room of a

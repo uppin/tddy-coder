@@ -217,6 +217,20 @@ impl<S: TelegramSender + Send + Sync> TelegramSessionControlHarness<S> {
             .await
     }
 
+    /// Handle the agent pick of a `/start-agent` session (`tsa:<agent_idx>|s:<session_id>`):
+    /// record the chosen agent's session type on the pending session, then send the project
+    /// keyboard. An index the registry's CLI agents do not reach is refused.
+    pub async fn handle_telegram_agent_pick_callback(
+        &self,
+        chat_id: i64,
+        agent_idx: usize,
+        session_id: &str,
+    ) -> anyhow::Result<()> {
+        // TODO(telegram-spec-launch): implement
+        let _ = (chat_id, agent_idx, session_id, &self.coding_agents);
+        todo!("telegram-spec-launch: handle_telegram_agent_pick_callback")
+    }
+
     pub async fn handle_telegram_branch_callback(
         &self,
         chat_id: i64,

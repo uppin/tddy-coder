@@ -27,8 +27,10 @@ use tddy_telegram::telegram_tracked_session::{
 };
 use tddy_telegram_control::telegram_notifier::InMemoryTelegramSender;
 use tddy_telegram_control::telegram_session_control::{
-    collect_outbound_messages, parse_telegram_branch_conflict_callback, CapturedTelegramMessage,
-    StartClaudeCommand, TelegramSessionControlHarness, TelegramWorkflowSpawn,
+    collect_outbound_messages, parse_telegram_branch_conflict_callback,
+    telegram_agent_pick_callback, telegram_model_choices, telegram_model_pick_callback,
+    CapturedTelegramMessage, StartClaudeCommand, TelegramAgentChoices,
+    TelegramSessionControlHarness, TelegramWorkflowSpawn,
 };
 use tddy_testing_commons::{a_session_metadata, fs::write_session_yaml};
 
@@ -465,4 +467,36 @@ async fn telegram_branch_conflict_suggested_name_keeps_a_new_branch_under_the_su
             selected_branch_to_work_on: None,
         }
     );
+}
+
+/// The largest project index a fixture of this size could show — two digits, as a host with up to
+/// a hundred projects writes it.
+const WIDEST_PROJECT_INDEX: usize = 99;
+
+#[test]
+fn every_registry_backed_picker_callback_fits_in_64_bytes() {
+    // Given — the built-in agents, a uuid session id, and the widest project index
+    let registry =
+        tddy_coding_agent_specs::CodingAgentRegistry::builtin().expect("the built-in agents load");
+    let offered = TelegramAgentChoices::of(&registry);
+
+    // When — every agent button, and every model button of every agent
+    let agent_buttons = (0..offered.choices().len())
+        .map(|agent_idx| telegram_agent_pick_callback(agent_idx, OWNER_SESSION));
+    let model_buttons = offered.choices().iter().flat_map(|choice| {
+        let spec = registry
+            .for_session_type(&choice.session_type)
+            .expect("an offered agent has a spec");
+        let offered_models = telegram_model_choices(spec).map(|m| m.len()).unwrap_or(0);
+        (0..offered_models).map(|model_idx| {
+            telegram_model_pick_callback(model_idx, WIDEST_PROJECT_INDEX, OWNER_SESSION)
+        })
+    });
+    let over_the_limit: Vec<String> = agent_buttons
+        .chain(model_buttons)
+        .filter(|data| data.len() > 64)
+        .collect();
+
+    // Then — Telegram rejects callback_data over 64 bytes
+    assert_eq!(over_the_limit, Vec::<String>::new());
 }
