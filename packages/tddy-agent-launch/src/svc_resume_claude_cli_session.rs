@@ -24,6 +24,7 @@ use crate::spec_launch::{launch_claude_cli, ClaudeCliLaunch};
 
 impl LaunchSessions {
     /// Handle `ResumeSession` for `session_type = "claude-cli"` sessions.
+    // TODO(cli-dispatch-collapse): deleted at green — § Removed of docs/dev/1-WIP/2026-11-04-agent-tools-cli-dispatch-collapse.md.
     pub(crate) async fn resume_claude_cli_session(
         &self,
         os_user: &str,
@@ -189,6 +190,7 @@ impl LaunchSessions {
     /// coding agents, the hand-built argv otherwise. A resume never replays the
     /// prompt or carries a permission mode over, never rewrites the hooks file its start wrote, and
     /// runs as the daemon.
+    // TODO(cli-dispatch-collapse): deleted at green — § Removed of docs/dev/1-WIP/2026-11-04-agent-tools-cli-dispatch-collapse.md.
     async fn relaunch_claude_cli(
         &self,
         session_id: &str,

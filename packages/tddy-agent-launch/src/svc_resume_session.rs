@@ -11,7 +11,7 @@ use crate::session_coordinate_handlers::bridge_conn_resume_response;
 
 use tddy_core::read_session_metadata;
 
-use crate::harness_from_spec::{cli_launcher, cli_session_type, CliLauncher};
+use crate::harness_from_spec::{cli_launcher, launcher_of, CliLauncher};
 
 use tddy_core::session_lifecycle::unified_session_dir_path;
 
@@ -55,10 +55,13 @@ impl LaunchSessions {
 
         // Which resume path a CLI agent's session takes is read from the agent its recorded session
         // type names in the host's registry.
-        let cli_launcher = cli_launcher(
+        let cli_kind = cli_launcher(
             self.coding_agents.as_deref(),
             metadata.session_type.as_deref().unwrap_or(""),
         )?;
+        // TODO(cli-dispatch-collapse): the claude and cursor arms below go at green — every CLI
+        // agent resumes through `resume_cli_harness` / `resume_sandboxed_cli_harness`.
+        let cli_launcher = cli_kind.map(|kind| launcher_of(kind.spec_id));
 
         // --- claude-cli branch: resume without LiveKit ---
         if cli_launcher == Some(CliLauncher::Claude) {
@@ -85,12 +88,7 @@ impl LaunchSessions {
 
         // --- any other CLI coding agent its spec launches (opencode-cli, muse-cli, warp-cli): resume
         // without LiveKit ---
-        if let (Some(CliLauncher::Generic), Some(session_type), Some(agents)) = (
-            cli_launcher,
-            metadata.session_type.as_deref(),
-            self.coding_agents.as_deref(),
-        ) {
-            let kind = cli_session_type(agents, session_type)?;
+        if let (Some(CliLauncher::Generic), Some(kind)) = (cli_launcher, cli_kind) {
             // A sandboxed session resumes in its jail and never on the host's PTY.
             if metadata.sandbox == Some(true) {
                 return bridge_conn_resume_response(
@@ -234,6 +232,7 @@ impl LaunchSessions {
     /// Resume a cursor-cli session on this host's PTY: its process is given the project's account
     /// identity pairs again and its notify environment, rebuilt from the hook token its record
     /// holds.
+    // TODO(cli-dispatch-collapse): deleted at green — § Removed of docs/dev/1-WIP/2026-11-04-agent-tools-cli-dispatch-collapse.md.
     async fn resume_cursor_cli(
         &self,
         os_user: &str,

@@ -18,7 +18,7 @@ use tddy_service::proto::session::start_phase::Step as StartStep;
 use tddy_service::proto::session::{StartSessionRequest, StartSessionResponse};
 use tddy_session_agents::seed_codebase::{SeedCodebase, SeededAgentClones};
 use tddy_session_files::attachment_progress::AttachmentProgressSink;
-use tddy_worktree_service::branch_intent::{BranchIntentPolicy, BranchIntentRequest};
+use tddy_worktree_service::branch_intent::BranchIntentRequest;
 
 use crate::cli_agent_steps::{start_conversation, ConversationStart};
 use crate::cli_harness_jail::{jail_route_config_env, require_jail_route, CliJail};
@@ -127,13 +127,7 @@ impl LaunchSessions {
                 selected_integration_base_ref: req.selected_integration_base_ref.trim(),
                 selected_branch_to_work_on: req.selected_branch_to_work_on.trim(),
             },
-            BranchIntentPolicy::cli_agent(
-                kind.name,
-                session_agent
-                    .agent
-                    .spec
-                    .has(tddy_coding_agent_specs::Capability::BranchNameRequired),
-            ),
+            crate::harness_from_spec::cli_branch_intent(kind, &session_agent.agent.spec),
             None,
             &session_dir,
             stack_parent.session_id(),

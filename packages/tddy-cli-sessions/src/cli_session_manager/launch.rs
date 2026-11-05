@@ -98,6 +98,9 @@ impl CliSessionManager {
     /// Spawn a new Cursor Agent CLI process for `session_id` in `worktree_path`.
     ///
     /// `chat_id` — the Cursor chat the session owns, launched into via `--resume <chat_id>`.
+    // TODO(cli-dispatch-collapse): kept — Telegram's launcher still calls it
+    // (`tddy-telegram-control/src/telegram_session_control/cli_spawns.rs`); `#agent-tools 18/19`
+    // `telegram-spec-launch` deletes it (docs/dev/todo/2026-11-03-cursor-hand-built-launch-paths.md).
     #[allow(clippy::too_many_arguments)]
     pub async fn start_cursor(
         &self,
@@ -162,6 +165,9 @@ impl CliSessionManager {
     ///
     /// `permission_mode` — forwarded as `--permission-mode <mode>` to the claude binary.
     /// `None` or empty/whitespace defaults to `"auto"`.
+    // TODO(cli-dispatch-collapse): kept — Telegram's launcher still calls it
+    // (`tddy-telegram-control/src/telegram_session_control/cli_spawns.rs`); `#agent-tools 18/19`
+    // `telegram-spec-launch` deletes it (docs/dev/todo/2026-11-03-cursor-hand-built-launch-paths.md).
     pub async fn start(
         &self,
         session_id: &str,

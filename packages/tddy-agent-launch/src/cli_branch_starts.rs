@@ -68,6 +68,7 @@ impl LaunchSessions {
         Ok(())
     }
 
+    // TODO(cli-dispatch-collapse): deleted at green — § Removed of docs/dev/1-WIP/2026-11-04-agent-tools-cli-dispatch-collapse.md.
     pub(super) async fn start_sandboxed_claude_cli_from_request(
         &self,
         req: &StartSessionRequest,
@@ -132,6 +133,7 @@ impl LaunchSessions {
         )
     }
 
+    // TODO(cli-dispatch-collapse): deleted at green — § Removed of docs/dev/1-WIP/2026-11-04-agent-tools-cli-dispatch-collapse.md.
     pub(super) async fn start_claude_cli_from_request(
         &self,
         req: &StartSessionRequest,
@@ -210,6 +212,7 @@ impl LaunchSessions {
         })
     }
 
+    // TODO(cli-dispatch-collapse): deleted at green — § Removed of docs/dev/1-WIP/2026-11-04-agent-tools-cli-dispatch-collapse.md.
     pub(super) async fn start_sandboxed_cursor_cli_from_request(
         &self,
         req: &StartSessionRequest,
@@ -242,6 +245,7 @@ impl LaunchSessions {
         .await
     }
 
+    // TODO(cli-dispatch-collapse): deleted at green — § Removed of docs/dev/1-WIP/2026-11-04-agent-tools-cli-dispatch-collapse.md.
     #[allow(clippy::too_many_arguments)]
     pub(super) async fn spawn_cursor_cli_from_request(
         &self,

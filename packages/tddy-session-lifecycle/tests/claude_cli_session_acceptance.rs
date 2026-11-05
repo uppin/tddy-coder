@@ -633,6 +633,108 @@ async fn claude_cli_start_session_requires_project() {
     );
 }
 
+/// A daemon host over `sessions_base` that was given **no** coding agents — the host a daemon
+/// whose `<tddyhome>/tools` registry failed to load runs as. Nothing else differs from
+/// [`minimal_service`].
+fn a_host_without_coding_agents(config: DaemonConfig, sessions_base: PathBuf) -> DaemonSessionHost {
+    let tddy_data_dir = sessions_base.clone();
+    let sessions_base_resolver: SessionsBaseResolver =
+        Arc::new(move |_| Some(sessions_base.clone()));
+    let resolved_user = current_os_user();
+    let user_resolver: UserResolver =
+        Arc::new(move |token| (token == VALID_TOKEN).then(|| resolved_user.clone()));
+    DaemonSessionHost::new(
+        config.clone(),
+        sessions_base_resolver,
+        tddy_data_dir,
+        user_resolver,
+        None,
+        tddy_spawn::supervisor_client::SpawnBackendChoice::ForkedWorker,
+        tddy_session_lifecycle::peer_routing::PeerRouting::local_only(&config),
+        Arc::new(tddy_daemon_kernel::operator_channel::NoOperatorChannel),
+        Arc::new(ClaudeCliSessionManager::new()),
+    )
+}
+
+/// A host start of `session_type` on a registered project, naming its branch.
+fn a_cli_start_of(session_type: &str) -> StartSessionRequest {
+    StartSessionRequest {
+        session_token: VALID_TOKEN.to_string(),
+        project_id: TEST_PROJECT_ID.to_string(),
+        session_type: session_type.to_string(),
+        model: TEST_MODEL.to_string(),
+        branch_worktree_intent: "new_branch_from_base".to_string(),
+        new_branch_name: format!("{session_type}-work"),
+        ..Default::default()
+    }
+}
+
+/// The session directories `sessions_base` holds.
+fn sessions_under(sessions_base: &std::path::Path) -> Vec<String> {
+    std::fs::read_dir(sessions_base.join("sessions"))
+        .map(|entries| {
+            entries
+                .map(|entry| entry.expect("a readable entry").file_name())
+                .map(|name| name.to_string_lossy().into_owned())
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// **a_host_without_coding_agents_refuses_…**: the spec is the only launch a CLI agent has
+/// (`#agent-tools 17/19`), so a host whose coding agents are missing refuses a claude-cli and a
+/// cursor-cli start `FAILED_PRECONDITION` — the agents' hand-built launches are gone, and nothing
+/// is spawned or recorded in their place. The stub `claude` the daemon config still names (the
+/// hand-built launch's binary) is never run.
+#[tokio::test]
+async fn a_host_without_coding_agents_refuses_a_claude_cli_and_a_cursor_cli_start_failed_precondition_spawning_nothing(
+) {
+    // Given — a registered project, a stub claude in the config, and no coding agents
+    let repo_dir = tempfile::tempdir().unwrap();
+    create_test_repo_with_origin(repo_dir.path());
+    let sessions_tmp = tempfile::tempdir().unwrap();
+    let sessions_base = sessions_tmp.path().join(current_os_user());
+    register_project(&sessions_base.join("projects"), repo_dir.path());
+    let stub_dir = tempfile::tempdir().unwrap();
+    let stub = write_echo_argv_script(stub_dir.path());
+    let (_cfg_dir, config) = write_config_with_claude_cli_binary(stub.to_str().unwrap());
+    let host = a_host_without_coding_agents(config, sessions_base.clone());
+
+    // When
+    let claude = host
+        .start_session(Request::direct(a_cli_start_of("claude-cli")))
+        .await
+        .map(|response| response.into_inner().session_id);
+    let cursor = host
+        .start_session(Request::direct(a_cli_start_of("cursor-cli")))
+        .await
+        .map(|response| response.into_inner().session_id);
+
+    // Then — both refused, naming the missing coding agents, and no session was created
+    assert_eq!(
+        (
+            claude.map_err(|status| (status.code, status.message)),
+            cursor.map_err(|status| (status.code, status.message)),
+            sessions_under(&sessions_base),
+        ),
+        (
+            Err((
+                Code::FailedPrecondition,
+                "this host has no coding agents installed: a claude-cli session is launched from \
+                 its tool definition"
+                    .to_string()
+            )),
+            Err((
+                Code::FailedPrecondition,
+                "this host has no coding agents installed: a cursor-cli session is launched from \
+                 its tool definition"
+                    .to_string()
+            )),
+            Vec::<String>::new(),
+        )
+    );
+}
+
 // ---------------------------------------------------------------------------
 // initial_prompt tests
 // ---------------------------------------------------------------------------

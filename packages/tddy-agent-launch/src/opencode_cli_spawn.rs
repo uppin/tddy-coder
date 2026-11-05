@@ -31,7 +31,7 @@ use tddy_service::proto::session::{
     ResumeSessionRequest, ResumeSessionResponse, StartSessionResponse,
 };
 use tddy_session_files::attachment_progress::AttachmentProgressSink;
-use tddy_worktree_service::branch_intent::{BranchIntentPolicy, BranchIntentRequest};
+use tddy_worktree_service::branch_intent::BranchIntentRequest;
 
 use crate::cli_agent_steps::{
     refuse_a_role_the_agent_cannot_hold, render_host_launch_slots, resumed_conversation,
@@ -194,12 +194,7 @@ pub(crate) async fn start_cli_harness_session(
             selected_integration_base_ref,
             selected_branch_to_work_on,
         },
-        BranchIntentPolicy::cli_agent(
-            kind.name,
-            agent
-                .spec
-                .has(tddy_coding_agent_specs::Capability::BranchNameRequired),
-        ),
+        crate::harness_from_spec::cli_branch_intent(kind, &agent.spec),
         None,
         &session_dir,
         stack_parent.session_id(),

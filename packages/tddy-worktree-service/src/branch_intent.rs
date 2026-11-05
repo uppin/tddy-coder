@@ -60,6 +60,7 @@ pub struct BranchIntentPolicy {
 
 impl BranchIntentPolicy {
     /// claude-cli, co-located or sandboxed: a named intent must name its branch.
+    // TODO(cli-dispatch-collapse): deleted at green — § Removed of docs/dev/1-WIP/2026-11-04-agent-tools-cli-dispatch-collapse.md.
     pub const fn claude_cli() -> Self {
         Self {
             generated_branch_prefix: "claude-cli",
@@ -69,6 +70,7 @@ impl BranchIntentPolicy {
     }
 
     /// cursor-cli, co-located or sandboxed: a `new_branch_from_base` with no name generates one.
+    // TODO(cli-dispatch-collapse): deleted at green — § Removed of docs/dev/1-WIP/2026-11-04-agent-tools-cli-dispatch-collapse.md.
     pub const fn cursor_cli() -> Self {
         Self {
             generated_branch_prefix: "cursor-cli",
@@ -94,6 +96,8 @@ impl BranchIntentPolicy {
 
     /// A CLI harness that is cut a worktree of its own (`opencode-cli`, `muse-cli`): as cursor-cli,
     /// a `new_branch_from_base` with no name generates one, under the harness's session type.
+    // TODO(cli-dispatch-collapse): deleted at green if no caller remains once the claude and cursor
+    // constructors go.
     pub const fn cli_harness(session_type: &'static str) -> Self {
         Self {
             generated_branch_prefix: session_type,

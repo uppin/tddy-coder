@@ -44,6 +44,10 @@ impl tddy_core::toolcall::ConversationSpawnHandler for GrillMeConversationSpawnH
         }
 
         let child_session_id = Uuid::new_v4().to_string();
+        // TODO(cli-dispatch-collapse): the child runs its parent's agent, not claude — resolve it
+        // with `harness_from_spec::child_session_type(self.service.coding_agents.as_deref(),
+        // meta.session_type.as_deref())` (refused without coding agents) and start it through
+        // `opencode_cli_spawn::start_cli_harness_session`.
         let response = spawn_claude_cli_session_inner(
             &self.config,
             &self.tddy_data_dir,

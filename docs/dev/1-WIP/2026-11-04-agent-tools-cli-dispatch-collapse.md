@@ -3,8 +3,9 @@
 **Created:** 2026-11-04
 **Status:** 🚧 In Progress
 **Type:** Refactor (planned deletions)
-**Complexity**: 4 — more than one crate (`tddy-agent-launch`, `tddy-worktree-service`, `tddy-cli-sessions`, `tddy-session-lifecycle` suites); ordering of tmux re-attach after a daemon restart; ~5,000 lines of bespoke claude/cursor launch removed with their suites re-pointed. Not 5: #820 built every replacement; this node deletes and re-points
+**Complexity**: 4 (re-scored at red, unchanged) — more than one crate (`tddy-agent-launch`, `tddy-worktree-service`, `tddy-cli-sessions`, `tddy-session-lifecycle` suites); ordering of tmux re-attach after a daemon restart; ~5,000 lines of bespoke claude/cursor launch removed with their suites re-pointed. Not 5: #820 built every replacement; this node deletes and re-points
 **Stack:** `#agent-tools 17/19` — branch `feature/agent-tools/cli-dispatch-collapse`, base `feature/agent-tools/spec-backend` (#822)
+**PR:** [#823](https://github.com/uppin/tddy-coder/pull/823) (draft)
 **PRD:** none of its own. Serves the registry PRD on `feature/agent-tools/agent-registry` (`docs/ft/daemon/1-WIP/PRD-2026-10-31-coding-agent-registry.md`): no agent is selected by id
 
 ## Initial Discovery
@@ -65,9 +66,38 @@ implementing one here collides with the PR that owns it.
 | `n15`, `n16` (#821, #822) | (line predecessors only) | nothing — no real edge | — |
 | `n12` agent-registry (#801) | `Capability::BranchNameRequired`, `no_agent_name_gates.rs` | branch intent; the scan is extended | change n12's scan rules for other crates |
 
+**Parent-green needs found at red (6e/6f).** Each test below fails today for this node's reason, and
+can only *pass* once `n14` (#820) is green too, because after this node's green every claude/cursor
+start runs #820's generic path:
+
+| Test | Needs from #820 green |
+|---|---|
+| `a_claude_cli_start_in_tmux_runs_the_argv_the_claude_spec_renders_and_resumes_the_same_way` | `harness_template_params` binding `session_id`/`permission_mode` (claude's conversation slot) |
+| `removing_branch_name_required_…_generate_one`, `a_pr_stack_child_of_a_cursor_cli_session_starts_a_cursor_cli_child`, `a_conversation_child_of_a_cursor_cli_session_starts_a_cursor_cli_child` | the generic host launch's conversation mint (`cursor-create-chat`), hooks and participant metadata |
+| `a_daemon_restart_reattaches_…_from_the_installed_coding_agents` | the generic managed workflow (`Capability::ManagedWorkflow`): the suite's start is a managed `tdd` claude-cli start |
+| `no_agent_id_literal_is_compared_or_dispatched_on_in_agent_launch` | #820's green lifting `project_home_start_spec::READ_ONLY_SESSION_TYPE = "claude-cli"` (its changeset names it); the rest of the scan's hits are this node's |
+
+The unit tests in `harness_from_spec/cli_agent_dispatch_unit_tests.rs` need nothing from a parent.
+The baseline's other red — `cli_agent_steps` and `harness_from_spec` TODOs, `cli_spec_features_acceptance`,
+eight `yaml_only_agent_acceptance` tests — is #819/#820's, recorded in § Validation Results, not this node's.
+
 ## Draft PR contract
 
-The first push of this PR publishes: `cli_launcher`'s new signature, `reattach_recorded_main(manager, &HostCodingAgents, os_user, session_id)`, the extended source scan, and the failing tests below. No deletion lands in the contract commit; deletions are green's work.
+The contract commit publishes (unimplemented bodies are `// TODO(cli-dispatch-collapse): implement`; every symbol green deletes carries `// TODO(cli-dispatch-collapse): deleted at green`):
+
+| Crate | Symbol | Body |
+|---|---|---|
+| `tddy-agent-launch` | `harness_from_spec::cli_launcher(agents, st) -> Result<Option<CliSessionType>, Status>` | done (signature change; the start and resume dispatch read `launcher_of(kind.spec_id)` until green deletes it) |
+| | `harness_from_spec::recorded_cli_session_type(agents, recorded) -> Result<Option<CliSessionType>, Status>` — the re-attach's source: `None` for a record without a session type, never `"claude-cli"` | TODO |
+| | `harness_from_spec::child_session_type(agents, parent_session_type) -> Result<CliSessionType, Status>` — a conversation / pr-stack child runs its parent's agent | TODO |
+| | `harness_from_spec::cli_branch_intent(kind, spec) -> BranchIntentPolicy` — `cli_agent(kind.name, spec.has(BranchNameRequired))`, the one branch-intent source | done; the generic start and the sandboxed harness start use it |
+| | `claude_cli_tmux::reattach_recorded_main(manager, agents: Option<&HostCodingAgents>, tddy_data_dir, os_user, session_id) -> bool` | signature done (the session-lifecycle `TmuxMainReattach` passes the host's coding agents); body TODO. `tddy_data_dir` stays: it is where the record lives |
+| `tddy-session-lifecycle` (tests) | `agent_registry_support::builtin_yaml_run_as_the_stub` | done |
+
+No deletion lands in the contract commit; deletions are green's work. No new `start_cli_agent_session` entry: the children start through #820's `opencode_cli_spawn::start_cli_harness_session` with the `CliSessionType` `child_session_type` resolves.
+
+**Planned deletions at green** (all already in § Removed): `CliLauncher`, `launcher_of`, `CLAUDE_AGENT_ID` ×2, `CURSOR_AGENT_ID` ×2, `recorded_cli_launcher`, `recorded_resume_token_adapter`, `spawn_hand_built`, `start_claude_in_pty`, `install_claude_cli_hooks`, the hand-built `relaunch_claude_cli` arm of `resume_claude_cli_session`, `spawn_cursor_cli_process`, `prepare_cursor_cli_launch`, `start_claude_in_tmux`, `claude_cli_tmux::relaunch_claude_cli`, `reattach_recorded_claude`, the `unwrap_or("claude-cli")`, `launch_claude_cli`, `start_claude_cli_from_request`, `spawn_claude_cli_session_inner`, `spawn_cursor_cli_session_inner`, `spawn_cursor_cli_session_reporting`, `spawn_cursor_cli_from_request`, `start_sandboxed_claude_cli_from_request`, `start_sandboxed_cursor_cli_from_request`, `resume_claude_cli_session`, `resume_cursor_cli`, `launch_jailed_claude`, `launch_jailed_cursor`, `BranchIntentPolicy::{claude_cli, cursor_cli}` (`cli_harness` if callerless), `CliSessionManager::{build_claude_argv, with_claude_launch_flags}` only if callerless after Telegram. Files emptied by these are to be listed here by green before it deletes them. **Kept** with `TODO(cli-dispatch-collapse)` for Telegram (n18): `install_cursor_hooks_in_worktree`, `mint_cursor_chat_id`, `CliSessionManager::start`, `start_cursor` — `docs/dev/todo/2026-11-03-cursor-hand-built-launch-paths.md` is narrowed to them.
+Lines the scan finds that green must also rewrite (modified, not deleted): `start_request_checks::TMUX_RUN_SESSION_TYPES`, `hooks_and_urls.rs` (`agent: "claude"`), `jail_session_files.rs`, `svc_relaunch_sandboxed_runner.rs`, `cli_harness_tmux.rs` (`kind: "cursor-cli"`), `cli_branch_starts.rs`, `resume.rs`, `spec_launch.rs`, `claude_cli_spawn{,_steps}.rs`, `claude_cli_tmux.rs`, `cursor_cli_spawn.rs`, `svc_start_sandboxed_cursor_cli_session.rs`.
 
 ## Green wave
 
@@ -98,7 +128,9 @@ Real dependency edges, as opposed to the branch line:
 ## Delta
 
 ### New
-- `packages/tddy-session-lifecycle/tests/no_agent_id_dispatch.rs` (or a new case in `no_agent_name_gates.rs`)
+- The agent-id scan: two new cases in `packages/tddy-session-lifecycle/tests/no_agent_name_gates.rs`
+- `packages/tddy-session-lifecycle/src/connection_service/stack_child_spawn_agent_tests.rs`
+- `packages/tddy-agent-launch/src/harness_from_spec/cli_agent_dispatch_unit_tests.rs`
 ### Modified
 - `tddy-agent-launch`: `harness_from_spec.rs`, `svc_start_session_core.rs`, `svc_resume_session.rs`, `cli_harness_tmux.rs`, `cli_branch_starts.rs`, `conversation_spawn_handler.rs`, `child_spawn_handler.rs`, `opencode_cli_spawn.rs`, `svc_start_sandboxed_cli_harness_session.rs`, `project_home_start_spec.rs`, `start_request_checks.rs:103`, `jail_session_files.rs:70,107`, `svc_relaunch_sandboxed_runner.rs:124`
 - `tddy-worktree-service/src/branch_intent.rs`
@@ -121,33 +153,35 @@ Real dependency edges, as opposed to the branch line:
 
 **`tddy-session-lifecycle`: `packages/tddy-session-lifecycle/tests/claude_cli_session_acceptance.rs`**
 
-- [ ] `a_host_without_coding_agents_refuses_a_claude_cli_and_a_cursor_cli_start_failed_precondition_spawning_nothing`
+- [x] `a_host_without_coding_agents_refuses_a_claude_cli_and_a_cursor_cli_start_failed_precondition_spawning_nothing` — **passes at red by design**: the start refusal already holds since #801; it guards that the deletions keep it. The red no-agents case is the child spawn below
 
 **`tddy-session-lifecycle`: `packages/tddy-session-lifecycle/tests/yaml_only_agent_acceptance.rs`**
 
-- [ ] `removing_branch_name_required_from_an_override_of_claude_yaml_lets_a_blank_new_branch_name_generate_one`
+- [x] `removing_branch_name_required_from_an_override_of_claude_yaml_lets_a_blank_new_branch_name_generate_one`
 
 **`tddy-session-lifecycle`: `packages/tddy-session-lifecycle/tests/claude_cli_tmux_reattach_acceptance.rs`**
 
-- [ ] `a_daemon_restart_reattaches_a_tmux_claude_cli_session_from_the_installed_coding_agents`
-- [ ] `a_recorded_session_without_a_session_type_is_not_reattached`
+- [x] `a_daemon_restart_reattaches_a_tmux_claude_cli_session_from_the_installed_coding_agents`
+- [x] `a_recorded_session_without_a_session_type_is_not_reattached`
 
 **`tddy-session-lifecycle`: `packages/tddy-session-lifecycle/tests/claude_cli_tmux_session_acceptance.rs`**
 
-- [ ] `a_claude_cli_start_in_tmux_runs_the_argv_the_claude_spec_renders_and_resumes_the_same_way`
+- [x] `a_claude_cli_start_in_tmux_runs_the_argv_the_claude_spec_renders_and_resumes_the_same_way`
 
-**`tddy-session-lifecycle`: `packages/tddy-session-lifecycle/tests/stack_child_spawn_agent_acceptance.rs`**
+**`tddy-session-lifecycle`: `packages/tddy-session-lifecycle/src/connection_service/stack_child_spawn_agent_tests.rs`** (in-crate, not under `tests/`: the handlers are built from `DaemonSessionHost::launch_sessions`, which is `pub(crate)`)
 
-- [ ] `a_pr_stack_child_of_a_cursor_cli_session_starts_a_cursor_cli_child`
+- [x] `a_pr_stack_child_of_a_cursor_cli_session_starts_a_cursor_cli_child`
+- [x] `a_conversation_child_of_a_cursor_cli_session_starts_a_cursor_cli_child`
+- [x] `a_host_without_coding_agents_refuses_a_pr_stack_child_failed_precondition_spawning_nothing`
 
 **`tddy-session-lifecycle`: `packages/tddy-session-lifecycle/tests/no_agent_name_gates.rs`**
 
-- [ ] `no_agent_id_literal_is_compared_or_dispatched_on_in_agent_launch`
+- [x] `no_agent_id_literal_is_compared_or_dispatched_on_in_agent_launch`
 
 ### Unit / integration tests
 
-- [ ] `tddy-agent-launch`: `cli_launcher` returns the session type for every built-in CLI agent and `None` for `tool`/`workspace`.
-- [ ] `tddy-worktree-service`: before deleting them, a one-off equivalence check that `cli_agent(st, spec.has(BranchNameRequired))` equals `claude_cli()`/`cursor_cli()` for the built-in specs (deleted with them).
+- [x] `tddy-agent-launch` (`src/harness_from_spec/cli_agent_dispatch_unit_tests.rs`): `cli_launcher` returns the session type for every built-in CLI agent and `None` for `tool`/`workspace`, and refuses a host without coding agents; `recorded_cli_session_type` (no session type → `None`, claude-cli from the installed agents, workspace → `None`, no agents → refused); `child_session_type` (cursor-cli and opencode-cli parents, a parent with no session type, a tool parent, no agents).
+- [x] `tddy-agent-launch` (same file, not `tddy-worktree-service`, which cannot read the specs): the one-off equivalence check that `cli_branch_intent` equals `claude_cli()`/`cursor_cli()` for the built-in specs (deleted with them; passes by design).
 - [ ] The existing 20 claude/cursor suites pass unchanged on the generic path.
 
 ### Test level decisions
@@ -159,18 +193,20 @@ Real dependency edges, as opposed to the branch line:
 
 ## Decisions & Trade-offs
 
-- Telegram's callers keep four cursor/claude helpers alive one node longer (n18 deletes them), rather than widening this node into Telegram.
-- Open: which agent a conversation/pr-stack child gets when the request names none — the parent's (proposed) or a refusal.
+- **Settled (orchestrator, 2026-11-05):** Telegram's callers keep four cursor/claude helpers alive one node longer — `install_cursor_hooks_in_worktree`, `mint_cursor_chat_id`, `CliSessionManager::start`, `start_cursor`, each with `TODO(cli-dispatch-collapse)`; `docs/dev/todo/2026-11-03-cursor-hand-built-launch-paths.md` is narrowed to them and n18 deletes them.
+- **Settled (orchestrator, 2026-11-05):** a conversation or pr-stack child whose request names no agent gets **its parent session's agent** (`child_session_type`), never a hard-coded claude; pinned by `a_pr_stack_child_of_a_cursor_cli_session_starts_a_cursor_cli_child` and `a_conversation_child_of_a_cursor_cli_session_starts_a_cursor_cli_child`. A parent with no recorded session type, or a non-CLI one, refuses the child.
+- **Settled (orchestrator, 2026-11-05):** no coding agents installed → `FAILED_PRECONDITION` for claude and cursor starts (and children), with no hand-built fallback; the `unwrap_or("claude-cli")` re-attach default goes.
+- **Settled (orchestrator, 2026-11-05):** re-attach reads the installed `HostCodingAgents`, not `<data>/tools`. `reattach_recorded_main` takes `Option<&HostCodingAgents>` (a host without them re-attaches nothing, logged) and keeps `tddy_data_dir` for the record's location — a deviation from the planned four-argument signature.
 
 ## TODO
 
 - [x] Record initial discovery (`2026-11-04-agent-tools-cli-dispatch-collapse-initial-discovery.md`)
 - [x] Cross-check `packages/*/docs/code-issues/` and `docs/dev/todo/` for items this change touches (Step 2b)
 - [x] Create changeset (this document)
-- [ ] Create failing acceptance tests
-- [ ] Run acceptance tests (verify they fail)
-- [ ] USER REVIEW — acceptance tests
-- [ ] TDD Red — write failing unit/integration tests
+- [x] Create failing acceptance tests
+- [x] Run acceptance tests (verify they fail)
+- [x] USER REVIEW — acceptance tests (waived by the orchestrator: "finish without stopping")
+- [x] TDD Red — write failing unit/integration tests
 - [ ] TDD Green — implement with quality code
 - [ ] Update documentation with progress
 - [ ] Repeat Red→Green→Update cycle until feature complete
@@ -202,3 +238,5 @@ Real dependency edges, as opposed to the branch line:
 | /validate-tests | Not yet run | Pending |
 | /validate-prod-ready | Not yet run | Pending |
 | /analyze-clean-code | Not yet run | Pending |
+
+**Red baseline (2026-11-05, plan commit `afee32846` on `6b20fead8`, `~/.local/bin` off `PATH`, no `TDDY_TOOLS_BINARY`).** Scoped to this node's packages: `cargo build`, `cargo fmt --check` and `cargo clippy --all-targets -D warnings` for `tddy-agent-launch`, `tddy-worktree-service`, `tddy-cli-sessions` and `tddy-session-lifecycle` are clean. Inherited red, not this node's: `tddy-agent-launch --lib` 16 (`cli_agent_steps`, `harness_from_spec`, `start_request_checks::managed_workflow_tests`: #820's TODOs); `cli_spec_features_acceptance` 7/7 and 8 of `yaml_only_agent_acceptance` (#819/#820). Environment, not code: `tddy-worktree-service` `remote_git_livekit_acceptance` (12, LiveKit) and `worktree_size_calculator_acceptance` (1). **Fixture gap:** `stack_child_spawn_tests` (7) and 4 of `claude_cli_session_acceptance` fail with "tool tddy-tools is unavailable" — they use `test_util::builtin_coding_agents()` (`ProcessToolHost`), which finds `tddy-tools` only on `PATH`, not via `CARGO_BIN_EXE`/`target/debug`. `cli_harness` suites were not run locally (CI's).

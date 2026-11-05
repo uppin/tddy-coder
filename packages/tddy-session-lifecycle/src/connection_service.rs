@@ -533,6 +533,9 @@ pub use tddy_daemon_kernel::daemon_hook_urls;
 /// [`DaemonSessionHost::local_agent_codebase_access`] seam, for the same reason.
 #[cfg(test)]
 mod jail_relaunch_unit_tests;
+/// A conversation or pr-stack child runs its parent session's agent (`#agent-tools 17/19`).
+#[cfg(test)]
+mod stack_child_spawn_agent_tests;
 /// The spawn *wiring*, both ways in: a child of a planned PR must come up holding the
 /// orchestrator's documents and knowing to read its boundaries — whether the orchestrator agent
 /// spawned it through `pr_spawn_child` or the operator started it from the Start-session dialog.

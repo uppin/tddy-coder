@@ -104,6 +104,8 @@ pub(crate) fn refuse_an_unsupported_cli_harness_start(
 }
 
 /// The session types that run their agent in tmux. Any other type ignores `run_in_tmux`.
+// TODO(cli-dispatch-collapse): every CLI agent session type runs in tmux (read from the registry),
+// not this list of names.
 pub(crate) const TMUX_RUN_SESSION_TYPES: [&str; 5] = [
     "claude-cli",
     "cursor-cli",

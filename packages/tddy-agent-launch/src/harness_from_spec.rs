@@ -17,12 +17,14 @@ use std::sync::Arc;
 
 use tddy_actions::tool::TemplateParams;
 use tddy_coding_agent_specs::{
-    routed_agent, CodingAgentRegistry, CodingAgentSpec, Placement, CLI_SESSION_TYPE_SUFFIX,
+    routed_agent, Capability, CodingAgentRegistry, CodingAgentSpec, Placement,
+    CLI_SESSION_TYPE_SUFFIX,
 };
 use tddy_core::adapters::{LaunchAdapters, ResumeTokenAdapter};
 use tddy_core::provider_route::RoutedAgent;
 use tddy_daemon_kernel::config::DaemonConfig;
 use tddy_rpc::Status;
+use tddy_worktree_service::branch_intent::BranchIntentPolicy;
 
 use crate::cursor_from_spec::NodeLauncher;
 use crate::launch_ports::LaunchSessions;
@@ -155,15 +157,17 @@ fn interned(name: &str) -> &'static str {
 
 /// The agent id of the one CLI agent whose session has its own bespoke launch path (the hook,
 /// tmux and recipe handling of Claude Code's TUI).
-// TODO(cli-dispatch-collapse): #agent-tools n17 `cli-dispatch-collapse` — claude and cursor still
-// launch through their own paths, selected here by the spec's id; unifying them with the generic
-// launch removes this
+// TODO(cli-dispatch-collapse): deleted at green with `CliLauncher` and `launcher_of` — claude and
+// cursor still launch through their own paths, selected here by the spec's id; #agent-tools n17
+// `cli-dispatch-collapse` routes them through the generic launch
 // (docs/dev/todo/2026-11-04-claude-and-cursor-launch-by-agent-id.md).
 const CLAUDE_AGENT_ID: &str = "claude";
 /// The agent id of the CLI agent with the Cursor launch path; see [`CLAUDE_AGENT_ID`].
+// TODO(cli-dispatch-collapse): deleted at green.
 const CURSOR_AGENT_ID: &str = "cursor";
 
 /// Which launch path a CLI session type takes.
+// TODO(cli-dispatch-collapse): deleted at green — every CLI agent takes the generic path.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum CliLauncher {
     /// The Claude Code TUI's path.
@@ -174,34 +178,36 @@ pub(crate) enum CliLauncher {
     Generic,
 }
 
-/// The launch path of `session_type`, from the coding agents this host has: `None` for a session
-/// type that is no agent's (a tool or workspace session), a refusal for an agent session type no
-/// installed spec launches, or when the host has no coding agents at all.
+/// The CLI session type `session_type` names, from the coding agents this host has: `None` for a
+/// session type that is no agent's (a tool or workspace session), a refusal for an agent session
+/// type no installed spec launches, or when the host has no coding agents at all. Every CLI agent
+/// starts, resumes and re-attaches through the one generic launch from what this returns; nothing
+/// reads which agent it is (`#agent-tools 17/19`).
 pub(crate) fn cli_launcher(
     agents: Option<&HostCodingAgents>,
     session_type: &str,
-) -> Result<Option<CliLauncher>, Status> {
+) -> Result<Option<CliSessionType>, Status> {
     if !session_type.ends_with(CLI_SESSION_TYPE_SUFFIX) {
         return Ok(None);
     }
-    let agents = agents.ok_or_else(|| {
-        Status::failed_precondition(format!(
-            "this host has no coding agents installed: a {session_type} session is launched from \
-             its tool definition"
-        ))
-    })?;
-    let spec = agents
-        .agents()
-        .for_session_type(session_type)
-        .ok_or_else(|| {
-            Status::failed_precondition(format!("no coding agent spec launches {session_type}"))
-        })?;
-    Ok(Some(launcher_of(&spec.id)))
+    let agents = agents.ok_or_else(|| no_coding_agents_for(session_type))?;
+    cli_session_type(agents, session_type).map(Some)
+}
+
+/// The refusal of a `session_type` start, resume or re-attach on a host with no coding agents: the
+/// spec is the only launch a CLI agent has, so there is no hand-built one to fall back to.
+fn no_coding_agents_for(session_type: &str) -> Status {
+    Status::failed_precondition(format!(
+        "this host has no coding agents installed: a {session_type} session is launched from its \
+         tool definition"
+    ))
 }
 
 /// [`cli_launcher`] for a recorded session whose host has no [`HostCodingAgents`] at hand — a tmux
 /// re-attach after a daemon restart — read from the tools `tddy_data_dir` declares. `None` for a
 /// session type no installed spec launches.
+// TODO(cli-dispatch-collapse): deleted at green — re-attach reads the installed coding agents
+// through `recorded_cli_session_type`.
 pub(crate) fn recorded_cli_launcher(
     tddy_data_dir: &Path,
     session_type: &str,
@@ -213,8 +219,59 @@ pub(crate) fn recorded_cli_launcher(
         .map(|spec| launcher_of(&spec.id)))
 }
 
+/// The CLI session type a recorded session re-attaches as after a daemon restart, read from the
+/// coding agents this daemon installed — never from `<tddyhome>/tools`, and never defaulted: a
+/// record without a session type, or with one that is no CLI agent's, is `None` (nothing to
+/// re-attach), and a host with no coding agents is refused like a start.
+// TODO(cli-dispatch-collapse): wired at green; only its unit tests reach it until then.
+#[allow(dead_code)]
+pub(crate) fn recorded_cli_session_type(
+    agents: Option<&HostCodingAgents>,
+    recorded_session_type: Option<&str>,
+) -> Result<Option<CliSessionType>, Status> {
+    // TODO(cli-dispatch-collapse): implement — `None` for a record without a session type, then
+    // `cli_launcher(agents, recorded)`; it replaces `recorded_cli_launcher` and the
+    // `unwrap_or("claude-cli")` in `claude_cli_tmux::reattach_recorded_main`.
+    let _ = (agents, recorded_session_type);
+    Err(Status::unimplemented(
+        "TODO(cli-dispatch-collapse): recorded_cli_session_type",
+    ))
+}
+
+/// The CLI session type a conversation or pr-stack child of a session runs: its parent session's
+/// own (`parent_session_type`, as the parent's `.session.yaml` records it) — the request a child is
+/// spawned from names no agent, and no agent is a default. Refused (`FAILED_PRECONDITION`) when the
+/// host has no coding agents, when the parent records no session type, or when the parent's is no
+/// CLI agent's.
+// TODO(cli-dispatch-collapse): wired at green; only its unit tests reach it until then.
+#[allow(dead_code)]
+pub(crate) fn child_session_type(
+    agents: Option<&HostCodingAgents>,
+    parent_session_type: Option<&str>,
+) -> Result<CliSessionType, Status> {
+    // TODO(cli-dispatch-collapse): implement — the parent's session type through `cli_launcher`,
+    // refused when it is `None`; `conversation_spawn_handler` and `child_spawn_handler` then start
+    // the child through `start_cli_harness_session` instead of `spawn_claude_cli_session_inner`.
+    let _ = (agents, parent_session_type);
+    Err(Status::unimplemented(
+        "TODO(cli-dispatch-collapse): child_session_type",
+    ))
+}
+
+/// How a session of `kind` resolves its branch fields: the generated branch carries the session
+/// type, and a `new_branch_from_base` that names no branch is refused exactly when the agent's spec
+/// declares `branch_name_required`. The one branch-intent source of every CLI agent start
+/// (`#agent-tools 17/19`), replacing `BranchIntentPolicy::{claude_cli, cursor_cli}`.
+pub(crate) fn cli_branch_intent(
+    kind: CliSessionType,
+    spec: &CodingAgentSpec,
+) -> BranchIntentPolicy {
+    BranchIntentPolicy::cli_agent(kind.name, spec.has(Capability::BranchNameRequired))
+}
+
 /// The launch path of the agent `agent_id`.
-fn launcher_of(agent_id: &str) -> CliLauncher {
+// TODO(cli-dispatch-collapse): deleted at green with `CliLauncher`.
+pub(crate) fn launcher_of(agent_id: &str) -> CliLauncher {
     match agent_id {
         CLAUDE_AGENT_ID => CliLauncher::Claude,
         CURSOR_AGENT_ID => CliLauncher::Cursor,
@@ -325,8 +382,9 @@ pub(crate) fn resume_token_adapter(
 /// The resume-token adapter of a recorded `session_type` session's spec, read from the tools
 /// `tddy_data_dir` declares: a tmux re-attach (`#tmux-agent`) after a daemon restart has no
 /// coding agents at hand, only the session's record.
-// TODO(agent-tools-cascade): confirm the re-attach should read the spec from `<tddyhome>/tools`
-// rather than from the daemon's installed `HostCodingAgents` (the launch's source).
+// TODO(cli-dispatch-collapse): deleted at green — the re-attach reads the spec from the daemon's
+// installed `HostCodingAgents` (the launch's source), not from `<tddyhome>/tools`; this closes the
+// `TODO(agent-tools-cascade)` that asked which.
 pub(crate) fn recorded_resume_token_adapter(
     tddy_data_dir: &Path,
     session_type: &str,
@@ -340,6 +398,8 @@ impl LaunchSessions {
     /// Refuses a sandboxed start of `session_type` when the spec of its agent places that agent off
     /// the jail. The spec is read from the tools this daemon's data directory declares, so the
     /// refusal does not depend on which coding agents the host has installed.
+    // TODO(cli-dispatch-collapse): read the placement from `self.coding_agents` at green, as the
+    // re-attach does — `<tddyhome>/tools` is not where the launch reads its spec from.
     pub(crate) fn require_sandbox_placement(&self, session_type: &str) -> Result<(), Status> {
         let registry = CodingAgentRegistry::load(&self.tddy_data_dir.join("tools"))
             .map_err(|e| Status::internal(format!("load the coding agent tools: {e}")))?;
@@ -350,6 +410,9 @@ impl LaunchSessions {
         )
     }
 }
+
+#[cfg(test)]
+mod cli_agent_dispatch_unit_tests;
 
 #[cfg(test)]
 mod tests {

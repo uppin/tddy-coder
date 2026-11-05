@@ -14,6 +14,7 @@ use std::path::{Path, PathBuf};
 use tddy_daemon_kernel::config::{resolve_cursor_binary_path, DaemonConfig};
 
 /// The `cursor` tool's id in the agent registry.
+// TODO(cli-dispatch-collapse): deleted at green — § Removed of docs/dev/1-WIP/2026-11-04-agent-tools-cli-dispatch-collapse.md.
 pub const CURSOR_AGENT_ID: &str = "cursor";
 
 /// `cursor_cli.binary_path` (or `TDDY_CURSOR_AGENT`) when it names a path; a bare name leaves the

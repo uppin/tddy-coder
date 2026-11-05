@@ -122,6 +122,7 @@ impl DaemonSessionHost {
             ),
             main_reattach: Arc::new(TmuxMainReattach::new(
                 Arc::clone(&self.claude_cli_manager),
+                self.coding_agents.clone(),
                 self.tddy_data_dir.clone(),
             )),
             tmux,
@@ -137,14 +138,21 @@ impl DaemonSessionHost {
 /// main the first attached.
 struct TmuxMainReattach {
     manager: Arc<CliSessionManager>,
+    /// The coding agents this daemon installed: what a record is re-attached as.
+    coding_agents: Option<Arc<tddy_agent_launch::spec_launch::HostCodingAgents>>,
     tddy_data_dir: PathBuf,
     in_flight: tokio::sync::Mutex<std::collections::HashMap<String, Arc<tokio::sync::Mutex<()>>>>,
 }
 
 impl TmuxMainReattach {
-    fn new(manager: Arc<CliSessionManager>, tddy_data_dir: PathBuf) -> Self {
+    fn new(
+        manager: Arc<CliSessionManager>,
+        coding_agents: Option<Arc<tddy_agent_launch::spec_launch::HostCodingAgents>>,
+        tddy_data_dir: PathBuf,
+    ) -> Self {
         TmuxMainReattach {
             manager,
+            coding_agents,
             tddy_data_dir,
             in_flight: tokio::sync::Mutex::default(),
         }
@@ -166,6 +174,7 @@ impl MainReattach for TmuxMainReattach {
             self.manager.get(session_id).await.is_some()
                 || tddy_agent_launch::claude_cli_tmux::reattach_recorded_main(
                     &self.manager,
+                    self.coding_agents.as_deref(),
                     &self.tddy_data_dir,
                     os_user,
                     session_id,

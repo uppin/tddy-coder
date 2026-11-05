@@ -50,6 +50,7 @@ pub(crate) async fn record_main_terminal(
     manager.record_main_capture(session_id, path).await;
 }
 
+// TODO(cli-dispatch-collapse): deleted at green — § Removed of docs/dev/1-WIP/2026-11-04-agent-tools-cli-dispatch-collapse.md.
 #[allow(clippy::too_many_arguments)]
 pub(crate) async fn spawn_claude_cli_session_inner(
     config: &DaemonConfig,

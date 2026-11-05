@@ -31,6 +31,7 @@ pub use crate::{chat, resume};
 pub use chat::*;
 
 /// [`spawn_cursor_cli_session_reporting`] for a caller with nobody watching the start's steps.
+// TODO(cli-dispatch-collapse): deleted at green — § Removed of docs/dev/1-WIP/2026-11-04-agent-tools-cli-dispatch-collapse.md.
 #[allow(clippy::too_many_arguments)]
 pub async fn spawn_cursor_cli_session_inner(
     config: &DaemonConfig,
@@ -111,6 +112,7 @@ pub async fn spawn_cursor_cli_session_inner(
     .await
 }
 
+// TODO(cli-dispatch-collapse): deleted at green — § Removed of docs/dev/1-WIP/2026-11-04-agent-tools-cli-dispatch-collapse.md.
 #[allow(clippy::too_many_arguments)]
 pub(crate) async fn spawn_cursor_cli_session_reporting(
     config: &DaemonConfig,
@@ -506,6 +508,7 @@ fn started_without_livekit(session_id: &str) -> Response<StartSessionResponse> {
 
 // TODO(cursor-cli): dead since a host without coding agents refuses; deleted with the per-agent body
 // of this module once approved: docs/dev/todo/2026-11-03-cursor-hand-built-launch-paths.md.
+// TODO(cli-dispatch-collapse): deleted at green — § Removed of docs/dev/1-WIP/2026-11-04-agent-tools-cli-dispatch-collapse.md.
 #[allow(dead_code)]
 fn prepare_cursor_cli_launch(
     config: &DaemonConfig,
@@ -549,6 +552,7 @@ struct CursorProcess<'a> {
 
 // TODO(cursor-cli): dead since a host without coding agents refuses; deleted with the per-agent body
 // of this module once approved: docs/dev/todo/2026-11-03-cursor-hand-built-launch-paths.md.
+// TODO(cli-dispatch-collapse): deleted at green — § Removed of docs/dev/1-WIP/2026-11-04-agent-tools-cli-dispatch-collapse.md.
 #[allow(dead_code)]
 async fn spawn_cursor_cli_process(
     cli_manager: &Arc<CliSessionManager>,

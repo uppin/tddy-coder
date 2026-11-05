@@ -6,6 +6,7 @@
 //! identity maps to the OS user running the test, and the agent is a stub `claude` that records how
 //! it was launched. Serial — the tmux socket directory is process-wide environment.
 
+mod agent_registry_support;
 mod support;
 
 use std::path::{Path, PathBuf};
@@ -634,4 +635,90 @@ fn a_tmux_session_reads_alive_while_it_runs_and_not_alive_once_killed() {
     assert!(!tmux.has_session("alpha"));
     assert!(!tmux_session_alive(&user, "alpha"));
     kill_tmux_session(&user, "alpha").expect("killing an absent session is not an error");
+}
+
+// ---------------------------------------------------------------------------
+// The claude spec's argv in tmux (`#agent-tools 17/19`)
+// ---------------------------------------------------------------------------
+
+/// The argument an override of claude.yaml adds after its binary, which no hand-built claude argv
+/// carries: an argv holding it was rendered from the spec.
+const SPEC_MARK: &str = "--rendered-from-claude-yaml";
+
+/// The built-in claude.yaml run as the stub, its argv marked with [`SPEC_MARK`] — an operator's
+/// override, launched as `claude-cli`.
+fn claude_yaml_marked_as_rendered_from_the_spec() -> String {
+    let claude = agent_registry_support::builtin_yaml_run_as_the_stub("claude");
+    let binary = "    - \"{binary}\"\n";
+    assert!(
+        claude.contains(binary),
+        "claude.yaml's argv starts with its binary"
+    );
+    claude.replacen(binary, &format!("{binary}    - {SPEC_MARK}\n"), 1)
+}
+
+/// The argv the marked claude spec renders for a host start of `session_id` on `model`, with no
+/// prompt and no permission mode chosen — and for its resume, `--resume` with the same id.
+fn the_marked_claude_argv(
+    stub: &str,
+    model: &str,
+    conversation: &str,
+    session_id: &str,
+) -> Vec<String> {
+    [
+        stub,
+        SPEC_MARK,
+        "--model",
+        model,
+        conversation,
+        session_id,
+        "--permission-mode",
+        "auto",
+    ]
+    .map(str::to_string)
+    .to_vec()
+}
+
+#[tokio::test]
+#[serial_test::serial]
+async fn a_claude_cli_start_in_tmux_runs_the_argv_the_claude_spec_renders_and_resumes_the_same_way()
+{
+    // Given — a private tmux, and claude.yaml overridden with a marked argv
+    let _tmux = PrivateTmux::started();
+    let daemon = agent_registry_support::a_daemon_with_tools(&[(
+        "claude.yaml",
+        &claude_yaml_marked_as_rendered_from_the_spec(),
+    )]);
+
+    // When — started in tmux, stopped, then resumed
+    let (session_id, _host) = daemon
+        .start(StartSessionRequest {
+            new_branch_name: "claude-in-tmux".to_string(),
+            ..daemon.a_tmux_start("claude-cli")
+        })
+        .await
+        .expect("a tmux claude-cli start succeeds");
+    let started = daemon.stub_report(&session_id).await;
+    daemon.stop(&session_id).await;
+    daemon
+        .resume(&session_id)
+        .await
+        .expect("the stopped claude-cli session resumes");
+    let resumed = daemon.stub_report(&session_id).await;
+
+    // Then — the spec's argv in tmux on both, the conversation being the session id
+    let stub = daemon.stub_path();
+    let model = agent_registry_support::ACME_MODEL;
+    assert_eq!(
+        (
+            started.argv(),
+            resumed.argv(),
+            daemon.metadata_of(&session_id).tmux_session.is_some(),
+        ),
+        (
+            the_marked_claude_argv(&stub, model, "--session-id", &session_id),
+            the_marked_claude_argv(&stub, model, "--resume", &session_id),
+            true,
+        )
+    );
 }

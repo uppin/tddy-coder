@@ -428,6 +428,7 @@ impl LaunchSessions {
     /// Launch the `cursor` spec's agent in a jail for `launch` and return the runner's pid: its argv
     /// from `cursor.yaml`, its `{home}/.cursor/mcp.json` registration of `tddy-tools` in the
     /// persistent cursor home, and its rules file in the context directory.
+    // TODO(cli-dispatch-collapse): deleted at green — § Removed of docs/dev/1-WIP/2026-11-04-agent-tools-cli-dispatch-collapse.md.
     async fn launch_jailed_cursor(
         &self,
         agents: &HostCodingAgents,

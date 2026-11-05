@@ -204,6 +204,7 @@ pub(super) fn claude_cli_hooks(config: &DaemonConfig, tddy_data_dir: &Path) -> C
 /// the `claude` spec's `hooks` slot instead. Claude Code reads this file on startup and wires the
 /// six lifecycle hooks. Write failure is warn-and-continue so it never blocks the session from
 /// starting.
+// TODO(cli-dispatch-collapse): deleted at green — § Removed of docs/dev/1-WIP/2026-11-04-agent-tools-cli-dispatch-collapse.md.
 pub(super) fn install_claude_cli_hooks(
     config: &DaemonConfig,
     tddy_data_dir: &Path,
@@ -446,6 +447,7 @@ pub(super) async fn spawn_claude_cli_process(
 
 /// Start claude as the session's main PTY child, as every claude-cli start did before tmux mode,
 /// and return its pid.
+// TODO(cli-dispatch-collapse): deleted at green — § Removed of docs/dev/1-WIP/2026-11-04-agent-tools-cli-dispatch-collapse.md.
 async fn start_claude_in_pty(
     manager: &CliSessionManager,
     launch: ClaudeCliTmuxLaunch<'_>,
@@ -505,6 +507,7 @@ impl ClaudeCliProcess<'_> {
 
     /// The hand-built argv, for a host without coding agents or a tmux-run start; the hooks file
     /// is already written. A tmux-run agent runs in its own tmux session, the rest as the PTY child.
+    // TODO(cli-dispatch-collapse): deleted at green — § Removed of docs/dev/1-WIP/2026-11-04-agent-tools-cli-dispatch-collapse.md.
     async fn spawn_hand_built(self, role_launch: RoleLaunch) -> Result<SpawnedClaudeCli, Status> {
         let env = self.env_extra.into_iter().chain(role_launch.env).collect();
         let launch = ClaudeCliTmuxLaunch {

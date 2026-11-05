@@ -11,8 +11,7 @@ use tddy_task::CancellationToken;
 
 use tddy_core::session_lifecycle::unified_session_dir_path;
 
-use crate::cursor_cli_spawn::no_coding_agents;
-use crate::harness_from_spec::{cli_launcher, cli_session_type, CliLauncher};
+use crate::harness_from_spec::{cli_launcher, launcher_of, CliLauncher};
 use crate::placement::CodebasePlacement;
 
 use tddy_session_split::split_start::resolve_split_agent_placement;
@@ -382,7 +381,10 @@ impl LaunchSessions {
 
         // Which launch path a CLI agent's session takes is read from the agent the session type
         // names in the host's registry, never from the session type's spelling.
-        let cli_launcher = cli_launcher(self.coding_agents.as_deref(), req.session_type.trim())?;
+        let cli_kind = cli_launcher(self.coding_agents.as_deref(), req.session_type.trim())?;
+        // TODO(cli-dispatch-collapse): the claude and cursor arms below go at green — every CLI
+        // agent starts through `start_cli_harness(kind, …)`, and `launcher_of` is deleted.
+        let cli_launcher = cli_kind.map(|kind| launcher_of(kind.spec_id));
 
         // --- claude-cli branch: no LiveKit; resolves project and creates a real git worktree ---
         if cli_launcher == Some(CliLauncher::Claude) {
@@ -463,9 +465,7 @@ impl LaunchSessions {
 
         // --- any other CLI coding agent its spec launches (opencode-cli, muse-cli, warp-cli): a PTY,
         // no LiveKit ---
-        if cli_launcher == Some(CliLauncher::Generic) {
-            let agents = self.coding_agents.as_deref().ok_or_else(no_coding_agents)?;
-            let kind = cli_session_type(agents, req.session_type.trim())?;
+        if let (Some(CliLauncher::Generic), Some(kind)) = (cli_launcher, cli_kind) {
             return self.start_cli_harness(kind, &req, progress, os_user).await;
         }
 

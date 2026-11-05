@@ -19,8 +19,8 @@ mod support;
 use std::collections::BTreeSet;
 
 use agent_registry_support::{
-    a_daemon_with_tools, a_registry_daemon, acme_yaml_declaring, ACME_MODEL, ACME_YAML,
-    META_ACCOUNT, META_ANTHROPIC_ROOT, META_KEY, MINTED_CHAT_ID,
+    a_daemon_with_tools, a_registry_daemon, acme_yaml_declaring, builtin_yaml_run_as_the_stub,
+    ACME_MODEL, ACME_YAML, META_ACCOUNT, META_ANTHROPIC_ROOT, META_KEY, MINTED_CHAT_ID,
 };
 use pretty_assertions::assert_eq;
 use tddy_coding_agent_specs::{builtin_specs, Capability};
@@ -125,6 +125,56 @@ async fn removing_hooks_from_an_override_of_claude_yaml_turns_off_hook_based_act
             Ok(()),
             Some("Running".to_string()),
         )
+    );
+}
+
+/// The built-in claude.yaml run as the stub, with `branch_name_required` struck from its
+/// capabilities — an operator's override.
+fn claude_yaml_without_branch_name_required() -> String {
+    let claude = builtin_yaml_run_as_the_stub("claude");
+    let without = claude.replace("branch_name_required, ", "");
+    assert_ne!(
+        without, claude,
+        "the override strikes branch_name_required from claude.yaml"
+    );
+    without
+}
+
+/// The branch `worktree` has checked out.
+fn the_branch_checked_out_in(worktree: &std::path::Path) -> String {
+    let out = std::process::Command::new("git")
+        .args(["rev-parse", "--abbrev-ref", "HEAD"])
+        .current_dir(worktree)
+        .output()
+        .expect("git runs");
+    String::from_utf8_lossy(&out.stdout).trim().to_string()
+}
+
+/// Branch intent is the spec's (`#agent-tools 17/19`): a claude-cli start reads
+/// `branch_name_required` from the claude spec it launches, not from a policy the claude launch path
+/// hard-codes, so an override that drops the capability lets a blank new branch name through and the
+/// branch is generated under the session type.
+#[tokio::test]
+#[serial_test::serial]
+async fn removing_branch_name_required_from_an_override_of_claude_yaml_lets_a_blank_new_branch_name_generate_one(
+) {
+    // Given — claude.yaml overridden without branch_name_required
+    let claude = claude_yaml_without_branch_name_required();
+    let daemon = a_daemon_with_tools(&[("claude.yaml", claude.as_str())]);
+
+    // When — a new branch from the base that names no branch
+    let started = daemon
+        .start(daemon.a_start("claude-cli", false))
+        .await
+        .map(|(session_id, _host)| session_id);
+
+    // Then — the start succeeds on the branch generated for it
+    let session_id = started
+        .map_err(|status| (status.code, status.message))
+        .expect("a claude-cli start with a blank new branch name succeeds");
+    assert_eq!(
+        the_branch_checked_out_in(&daemon.worktree_of(&session_id)),
+        format!("claude-cli/{}", &session_id[..8])
     );
 }
 

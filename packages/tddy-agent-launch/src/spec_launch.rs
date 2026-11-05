@@ -440,10 +440,12 @@ pub struct McpRegistration {
 }
 
 /// The agent every `claude-cli` session runs.
+// TODO(cli-dispatch-collapse): deleted at green — § Removed of docs/dev/1-WIP/2026-11-04-agent-tools-cli-dispatch-collapse.md.
 pub(crate) const CLAUDE_AGENT_ID: &str = "claude";
 
 /// Launch a `claude-cli` session from the `claude` spec: resolve it, render its slots and its argv,
 /// and spawn it with [`launch_host_pty`].
+// TODO(cli-dispatch-collapse): deleted at green — § Removed of docs/dev/1-WIP/2026-11-04-agent-tools-cli-dispatch-collapse.md.
 pub async fn launch_claude_cli(
     launch: ClaudeCliLaunch<'_>,
 ) -> Result<Arc<PtyHandle>, SpecLaunchError> {

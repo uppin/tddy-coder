@@ -58,6 +58,7 @@ pub struct TmuxLaunched {
 /// [`CliSessionManager::with_claude_launch_flags`]).
 /// The pane is started with `launch.env` on it (from a file, never an argv), and its pid is the
 /// agent's.
+// TODO(cli-dispatch-collapse): deleted at green — § Removed of docs/dev/1-WIP/2026-11-04-agent-tools-cli-dispatch-collapse.md.
 pub async fn start_claude_in_tmux(
     manager: &CliSessionManager,
     launch: ClaudeCliTmuxLaunch<'_>,
@@ -257,12 +258,25 @@ pub async fn agent_tmux_session_is_alive(os_user: &str, session_id: &str) -> Res
 /// [`crate::cli_harness_tmux::reattach_recorded_harness`]. `false` when the record is unreadable,
 /// the session did not run in tmux, its tmux session is gone, its agent has exited or the attach
 /// failed (logged); nothing is relaunched.
+///
+/// Which agent the record is re-attached as is read from `agents` — the coding agents this daemon
+/// installed, the source every start and resume reads — through its recorded session type alone
+/// (`#agent-tools 17/19`): a record without one is skipped with a warning, never re-attached as a
+/// default agent, and a host with no coding agents (`None`) re-attaches nothing (logged as the
+/// `FAILED_PRECONDITION` a start would be refused with). `tddy_data_dir` is only where the session's
+/// record lives.
 pub async fn reattach_recorded_main(
     manager: &CliSessionManager,
+    agents: Option<&crate::spec_launch::HostCodingAgents>,
     tddy_data_dir: &Path,
     os_user: &str,
     session_id: &str,
 ) -> bool {
+    // TODO(cli-dispatch-collapse): implement — resolve the record through
+    // `harness_from_spec::recorded_cli_session_type(agents, meta.session_type)` (no
+    // `unwrap_or("claude-cli")`), re-attach every agent through
+    // `cli_harness_tmux::reattach_recorded_harness`, and delete `reattach_recorded_claude`.
+    let _ = agents;
     use tddy_core::session_lifecycle::{unified_session_dir_path, validate_session_id_segment};
     if validate_session_id_segment(session_id).is_err() {
         return false;
@@ -330,6 +344,8 @@ pub async fn reattach_recorded_main(
 
 /// [`reattach_claude_in_tmux`] for a recorded claude-cli session, registering its main recording
 /// as a start registers it.
+// TODO(cli-dispatch-collapse): deleted at green, with `start_claude_in_tmux` and
+// `relaunch_claude_cli`.
 async fn reattach_recorded_claude(
     manager: &CliSessionManager,
     tddy_data_dir: &Path,
@@ -351,6 +367,7 @@ async fn reattach_recorded_claude(
 /// Relaunch a resumed claude-cli agent and return the pid to record. A session that ran in tmux
 /// (`in_tmux`) re-attaches to its tmux session when that still lives, and otherwise starts a fresh
 /// one; a session that did not run in tmux is relaunched as the PTY child, exactly as before.
+// TODO(cli-dispatch-collapse): deleted at green — § Removed of docs/dev/1-WIP/2026-11-04-agent-tools-cli-dispatch-collapse.md.
 pub async fn relaunch_claude_cli(
     manager: &CliSessionManager,
     in_tmux: bool,

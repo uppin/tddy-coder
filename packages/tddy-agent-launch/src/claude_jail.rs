@@ -56,6 +56,7 @@ pub(crate) struct ClaudeJail<'a> {
 
 impl LaunchSessions {
     /// Launch `claude` in a jail for `launch` and return the runner's pid.
+    // TODO(cli-dispatch-collapse): deleted at green — § Removed of docs/dev/1-WIP/2026-11-04-agent-tools-cli-dispatch-collapse.md.
     pub(crate) async fn launch_jailed_claude(&self, launch: ClaudeJail<'_>) -> Result<u32, Status> {
         let agents = self.coding_agents.as_deref().ok_or_else(|| {
             Status::failed_precondition(
