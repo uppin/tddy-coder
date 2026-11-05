@@ -22,10 +22,15 @@ fn persist_review_md_from_submit_accepts_minimal_valid_json() {
     assert!(path.is_file(), "expected {}", path.display());
 }
 
+/// The CLI used to write `review.md` itself when a `branch-review` submission found no socket but a
+/// `TDDY_SESSION_DIR` — a local run that reported success without reaching any session. A
+/// `tddy-tools` with no session to report to is an error now (`#agent-tools 15/19`), so nothing is
+/// persisted and the agent is told where a session could have come from.
 #[test]
-fn submit_branch_review_cli_writes_review_md_when_session_dir_set() {
+fn submit_branch_review_cli_without_a_session_fails_and_writes_nothing() {
     // Given
     let dir = tempfile::tempdir().expect("tempdir");
+    let nowhere = tempfile::tempdir().expect("a directory with no pointer above it");
     let json = serde_json::json!({
         "goal": "branch-review",
         "summary": "Done.",
@@ -38,24 +43,18 @@ fn submit_branch_review_cli_writes_review_md_when_session_dir_set() {
     let mut cmd = cargo_bin_cmd!("tddy-tools");
     cmd.env_remove("TDDY_SOCKET")
         .env("TDDY_SESSION_DIR", dir.path())
+        .current_dir(nowhere.path())
         .args(["submit", "--goal", "branch-review", "--data", &json]);
-    let assert = cmd.assert().success();
+    let output = cmd.output().expect("run tddy-tools submit");
 
     // Then
-    let out = String::from_utf8_lossy(&assert.get_output().stdout);
-    assert!(
-        out.contains("\"status\":\"ok\""),
-        "expected ok JSON on stdout; got {out}"
-    );
-    assert!(
-        out.contains("branch-review"),
-        "expected 'branch-review' in stdout; got {out}"
-    );
-
-    let path = dir.path().join("review.md");
-    assert!(
-        path.is_file(),
-        "CLI must persist review.md under TDDY_SESSION_DIR; missing {}",
-        path.display()
+    assert_eq!(
+        (
+            output.status.code(),
+            String::from_utf8_lossy(&output.stderr)
+                .contains("pass --socket <path>, run from a directory at or below a .tddy/session.json"),
+            dir.path().join("review.md").exists(),
+        ),
+        (Some(1), true, false)
     );
 }

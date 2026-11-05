@@ -71,7 +71,7 @@ struct ResultEvent {
     is_error: bool,
 }
 
-pub(super) struct StreamJsonTurn {
+pub(crate) struct StreamJsonTurn {
     harness: HeadlessHarness,
     updates: Updates,
     session_id: Option<String>,

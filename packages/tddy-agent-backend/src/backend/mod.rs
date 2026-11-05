@@ -3,7 +3,7 @@
 mod acp;
 pub mod acp_driver;
 mod claude;
-mod codex;
+pub(crate) mod codex;
 pub mod codex_acp;
 mod context_globs;
 pub(crate) mod cursor;
@@ -13,6 +13,7 @@ pub mod model_catalog;
 mod opencode_acp;
 mod routed;
 pub mod spec_headless;
+pub(crate) mod turn_process;
 pub use routed::codex_acp_route_args;
 mod stub;
 mod tool_executor;

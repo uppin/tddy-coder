@@ -395,7 +395,7 @@ async fn a_non_zero_exit_with_a_structured_result_fails_when_the_declaration_doe
     // Then
     assert_eq!(
         response.map(|r| r.exit_code).map_err(|e| e.to_string()),
-        Err("backend invocation failed: Claude Code CLI exited with code 1".to_string())
+        Err("Claude Code CLI exited with code 1".to_string())
     );
 }
 

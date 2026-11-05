@@ -10,7 +10,7 @@ use std::sync::Arc;
 use anyhow::{anyhow, Context};
 use tddy_actions::tool::{ResolvedTool, ToolHost};
 use tddy_coding_agent_specs::headless::SpecHeadlessRenderer;
-use tddy_coding_agent_specs::{load_agent_registry, CodingAgentSpec};
+use tddy_coding_agent_specs::{load_agent_registry, routed_agent, CodingAgentSpec};
 use tddy_core::adapters::AdapterRegistry;
 use tddy_core::{CodexBackend, CursorBackend, SpecHeadlessBackend};
 
@@ -75,6 +75,15 @@ fn renderer_for(
     tools_dir: &Path,
     host: &dyn ToolHost,
 ) -> anyhow::Result<SpecHeadlessRenderer> {
+    renderer_and_spec_for(agent, tools_dir, host).map(|(_, renderer)| renderer)
+}
+
+/// [`renderer_for`], with the agent's spec the renderer was built from.
+fn renderer_and_spec_for(
+    agent: &str,
+    tools_dir: &Path,
+    host: &dyn ToolHost,
+) -> anyhow::Result<(CodingAgentSpec, SpecHeadlessRenderer)> {
     let registry = load_agent_registry(tools_dir).context("the coding agent registry")?;
     let def = registry
         .get(agent)
@@ -85,12 +94,9 @@ fn renderer_for(
     let tool: ResolvedTool = closure
         .pop()
         .ok_or_else(|| anyhow!("`{agent}` resolved to no tool"))?;
-    Ok(SpecHeadlessRenderer::new(
-        spec,
-        tool,
-        &closure,
-        AdapterRegistry::builtin(),
-    )?)
+    let renderer =
+        SpecHeadlessRenderer::new(spec.clone(), tool, &closure, AdapterRegistry::builtin())?;
+    Ok((spec, renderer))
 }
 
 /// A `cursor` backend rendered from its declaration: the agent registry loaded with `tools_dir`
@@ -131,8 +137,12 @@ pub fn headless_backend_from_spec(
     tools_dir: &Path,
     host: Arc<dyn ToolHost>,
 ) -> anyhow::Result<SpecHeadlessBackend> {
-    // TODO(headless-driver): implement — `renderer_for`, then `SpecHeadlessBackend::new(renderer,
-    // renderer.protocol(), routed_agent(&spec))` with `renderer.model_listing()?`.
-    let _ = (agent, tools_dir, host);
-    todo!("headless-driver: headless_backend_from_spec")
+    let (spec, renderer) = renderer_and_spec_for(agent, tools_dir, host.as_ref())?;
+    let protocol = renderer.protocol();
+    let listing = renderer.model_listing()?;
+    let backend = SpecHeadlessBackend::new(Arc::new(renderer), protocol, routed_agent(&spec));
+    Ok(match listing {
+        Some(listing) => backend.with_model_listing(listing),
+        None => backend,
+    })
 }

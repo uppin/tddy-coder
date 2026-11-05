@@ -644,8 +644,15 @@ pub struct HeadlessSection {
 impl HeadlessSection {
     /// The protocol a workflow turn of this agent runs with: this section's protocol fields.
     pub fn protocol(&self) -> HeadlessProtocol {
-        // TODO(headless-driver): implement.
-        todo!("headless-driver: HeadlessSection::protocol")
+        HeadlessProtocol {
+            system_prompt: self.system_prompt,
+            goal_params: self.goal_params.clone(),
+            approval_tool: self.approval_tool,
+            workflow_mcp: self.workflow_mcp,
+            route_model: self.route_model.clone(),
+            fresh_session: self.fresh_session,
+            scratch: self.scratch,
+        }
     }
 
     /// This section as a `stdio` run section, for `render_argv`.

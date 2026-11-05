@@ -63,7 +63,26 @@ impl std::error::Error for SessionPointerError {}
 pub fn find_session_pointer(
     start: &Path,
 ) -> Result<Option<(PathBuf, SessionPointer)>, SessionPointerError> {
-    // TODO(headless-driver): implement.
-    let _ = start;
-    todo!("headless-driver: find_session_pointer")
+    for dir in start.ancestors() {
+        let path = dir.join(SESSION_POINTER_FILE);
+        let text = match std::fs::read_to_string(&path) {
+            Ok(text) => text,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => continue,
+            Err(e) if e.kind() == std::io::ErrorKind::NotADirectory => continue,
+            Err(e) => {
+                return Err(SessionPointerError {
+                    path,
+                    reason: e.to_string(),
+                })
+            }
+        };
+        return match serde_json::from_str::<SessionPointer>(&text) {
+            Ok(pointer) => Ok(Some((path, pointer))),
+            Err(e) => Err(SessionPointerError {
+                path,
+                reason: e.to_string(),
+            }),
+        };
+    }
+    Ok(None)
 }

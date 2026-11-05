@@ -11,19 +11,8 @@ use super::oz_ndjson::OzTurn;
 use super::stream_json::StreamJsonTurn;
 use super::HeadlessHarness;
 
-/// How a turn's CLI process ended.
-pub(super) enum Ending<'a> {
-    /// The caller cancelled the turn and the process was killed.
-    Cancelled,
-    /// The process exited on its own; `stderr` is the tail it kept.
-    Exited { status: ExitStatus, stderr: &'a str },
-}
-
-/// A turn's end: the session the CLI named during it, if any, and the turn's result.
-pub(super) struct Finished {
-    pub(super) session_id: Option<String>,
-    pub(super) result: Result<AcpTurnEnd, BackendError>,
-}
+pub(crate) use crate::adapters::{TurnEnding as Ending, TurnFinished as Finished};
+use crate::adapters::TurnTranscript;
 
 /// The sink a turn's updates go to, when the caller gave one.
 pub(super) struct Updates(Option<AcpUpdateSink>);
@@ -41,14 +30,14 @@ impl Updates {
 }
 
 /// The transcript of one turn, in the shape its harness streams.
-pub(super) enum Transcript {
+pub(crate) enum Transcript {
     StreamJson(StreamJsonTurn),
     Codex(CodexTurn),
     Oz(OzTurn),
 }
 
 impl Transcript {
-    pub(super) fn new(harness: HeadlessHarness, sink: Option<AcpUpdateSink>) -> Self {
+    pub(crate) fn new(harness: HeadlessHarness, sink: Option<AcpUpdateSink>) -> Self {
         let updates = Updates::new(sink);
         match harness {
             HeadlessHarness::Claude | HeadlessHarness::Cursor => {
@@ -60,7 +49,7 @@ impl Transcript {
     }
 
     /// One stdout line as it arrives.
-    pub(super) fn push_line(&mut self, line: &str) {
+    pub(crate) fn push_line(&mut self, line: &str) {
         match self {
             Self::StreamJson(turn) => turn.push_line(line),
             Self::Codex(turn) => turn.push_line(line),
@@ -68,12 +57,22 @@ impl Transcript {
         }
     }
 
-    pub(super) fn finish(self, ending: Ending<'_>) -> Finished {
+    pub(crate) fn finish(self, ending: Ending<'_>) -> Finished {
         match self {
             Self::StreamJson(turn) => turn.finish(ending),
             Self::Codex(turn) => turn.finish(ending),
             Self::Oz(turn) => turn.finish(ending),
         }
+    }
+}
+
+impl TurnTranscript for Transcript {
+    fn push_line(&mut self, line: &str) {
+        Transcript::push_line(self, line);
+    }
+
+    fn finish(self: Box<Self>, ending: Ending<'_>) -> Finished {
+        Transcript::finish(*self, ending)
     }
 }
 

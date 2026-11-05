@@ -22,6 +22,11 @@ struct Args {
     #[arg(long)]
     mcp: bool,
 
+    /// The session's toolcall socket. Without it the session is found through the nearest
+    /// `.tddy/session.json` at or above the working directory, then `TDDY_SOCKET`.
+    #[arg(long, global = true)]
+    socket: Option<std::path::PathBuf>,
+
     #[command(subcommand)]
     subcommand: Option<Subcommand>,
 }
@@ -170,6 +175,18 @@ async fn main() -> Result<()> {
     // all join their room through the tool client's transport.
     tddy_tools::session_tool_client::install_room_connector(Arc::clone(&connector))
         .expect("the room transport is installed once, at startup");
+
+    // The session this process reports to, found as `tddy_tools::session_source` orders: `--socket`,
+    // the pointer a headless turn wrote, `TDDY_SOCKET`. A command that needs one and finds none
+    // says so itself; a pointer that cannot be read stops everything, never skipped.
+    match tddy_tools::session_source::resolve_current_session(args.socket.as_deref()) {
+        Ok(session) => tddy_tools::session_source::adopt_session(&session),
+        Err(tddy_tools::session_source::SessionNotFound::Nowhere { .. }) => {}
+        Err(unreadable) => {
+            eprintln!("tddy-tools: {unreadable}");
+            std::process::exit(1);
+        }
+    }
 
     if args.mcp {
         return run_mcp_server().await;

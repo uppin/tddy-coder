@@ -177,9 +177,22 @@ pub struct GoalParams {
 impl GoalParams {
     /// The params a goal with `hints` binds.
     pub fn bind(&self, hints: &tddy_workflow::GoalHints) -> BTreeMap<String, String> {
-        // TODO(headless-driver): implement.
-        let _ = hints;
-        todo!("headless-driver: GoalParams::bind")
+        use tddy_workflow::PermissionHint;
+        let read_only = hints.permission == PermissionHint::ReadOnly;
+        let accepts_edits = hints.permission == PermissionHint::AcceptEdits;
+        let layers = [
+            (true, &self.always),
+            (hints.agent_cli_plan_mode, &self.plan_mode),
+            (hints.agent_cli_plan_mode && read_only, &self.read_only_plan),
+            (accepts_edits, &self.accept_edits),
+        ];
+        let mut bound = BTreeMap::new();
+        for (applies, params) in layers {
+            if applies {
+                bound.extend(params.iter().map(|(k, v)| (k.clone(), v.clone())));
+            }
+        }
+        bound
     }
 }
 
@@ -201,9 +214,13 @@ impl RouteModel {
     /// The model a turn requesting `model` runs with, on a route whose argv is `route_args`
     /// (empty when the turn is not routed).
     pub fn model_for(&self, model: Option<String>, route_args: &[String]) -> Option<String> {
-        // TODO(headless-driver): implement.
-        let _ = (model, route_args);
-        todo!("headless-driver: RouteModel::model_for")
+        match self {
+            Self::Kept => model,
+            Self::Replaced if route_args.is_empty() => model,
+            Self::Replaced => None,
+            Self::ReplacedIfRouteHas { flag } if route_args.iter().any(|arg| arg == flag) => None,
+            Self::ReplacedIfRouteHas { .. } => model,
+        }
     }
 }
 
@@ -259,9 +276,24 @@ pub fn render_env(
     env: &[(String, String)],
     template: &EnvTemplate,
 ) -> Result<Vec<(String, String)>, BackendError> {
-    // TODO(headless-driver): implement.
-    let _ = (env, template);
-    todo!("headless-driver: render_env")
+    env.iter()
+        .map(|(name, value)| {
+            let value = if value.contains("{session_dir}") {
+                let session_dir = template.session_dir.as_ref().ok_or_else(|| {
+                    BackendError::InvocationFailed(format!(
+                        "headless env {name} names {{session_dir}}, and the request has no session directory"
+                    ))
+                })?;
+                value.replace("{session_dir}", &session_dir.to_string_lossy())
+            } else {
+                value.clone()
+            };
+            Ok((
+                name.clone(),
+                value.replace("{self_exe}", &template.self_exe.to_string_lossy()),
+            ))
+        })
+        .collect()
 }
 
 /// How a spec lists its agent's models (`coding_agent.models.list_command` + `adapter`), rendered

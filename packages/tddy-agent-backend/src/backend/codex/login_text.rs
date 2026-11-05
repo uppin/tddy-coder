@@ -19,7 +19,7 @@ pub fn scrape_codex_oauth_authorize_url_from_text(s: &str) -> Option<String> {
 }
 
 /// When Codex/OpenAI returns 401-style text, append a short fix hint for the TUI.
-pub(super) fn codex_openai_auth_remediation(detail: &str) -> Option<&'static str> {
+pub(crate) fn codex_openai_auth_remediation(detail: &str) -> Option<&'static str> {
     let d = detail.to_lowercase();
     if !d.contains("401") {
         return None;

@@ -23,7 +23,7 @@ use std::process::{Command, Stdio};
 use std::sync::Arc;
 use tddy_workflow::PermissionHint;
 
-mod login_text;
+pub(crate) mod login_text;
 use login_text::codex_openai_auth_remediation;
 pub use login_text::{scrape_codex_oauth_authorize_url_from_text, write_codex_thread_id_file};
 

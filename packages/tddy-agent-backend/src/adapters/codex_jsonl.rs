@@ -5,9 +5,13 @@
 use std::io::BufRead;
 
 use crate::backend::acp_driver::AcpUpdateSink;
+use crate::backend::headless_driver::transcript::Transcript;
 use crate::backend::headless_driver::HeadlessHarness;
 use crate::error::BackendError;
-use crate::stream::codex::{codex_jsonl_last_error_message, parse_codex_jsonl_output};
+use crate::backend::codex::login_text::codex_openai_auth_remediation;
+use crate::stream::codex::{
+    codex_jsonl_last_error_message, codex_stderr_brief_for_user, parse_codex_jsonl_output,
+};
 use crate::stream::StreamResult;
 
 use super::{StreamAdapter, StreamSinks, TurnTranscript};
@@ -72,17 +76,21 @@ impl StreamAdapter for CodexJsonl {
     fn turn_format(&self) -> Option<HeadlessHarness> {
         Some(HeadlessHarness::Codex)
     }
-    /// Its last stream error, else `codex_stderr_brief_for_user` of its stderr, with `codex_openai_auth_remediation` appended to an auth failure.
     fn failure_detail(&self, stream: &StreamResult, stderr: &str) -> String {
-        // TODO(headless-driver): implement.
-        let _ = (stream, stderr);
-        todo!("headless-driver: codex_jsonl failure_detail")
+        let detail = stream
+            .stream_errors
+            .last()
+            .cloned()
+            .or_else(|| codex_stderr_brief_for_user(stderr))
+            .unwrap_or_default();
+        match codex_openai_auth_remediation(&detail) {
+            Some(hint) => format!("{detail}\n\n{hint}"),
+            None => detail,
+        }
     }
 
     fn transcript(&self, updates: Option<AcpUpdateSink>) -> Option<Box<dyn TurnTranscript>> {
-        // TODO(headless-driver): implement — the turn transcript `turn_format` names today.
-        let _ = updates;
-        todo!("headless-driver: codex_jsonl transcript")
+        Some(Box::new(Transcript::new(HeadlessHarness::Codex, updates)))
     }
 }
 

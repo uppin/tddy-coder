@@ -6,6 +6,7 @@ use std::io::BufRead;
 
 use crate::backend::acp_driver::AcpUpdateSink;
 use crate::backend::headless_driver::oz_ndjson::OzTurn;
+use crate::backend::headless_driver::transcript::Transcript;
 use crate::backend::headless_driver::HeadlessHarness;
 use crate::error::BackendError;
 use crate::stream::StreamResult;
@@ -70,17 +71,13 @@ impl StreamAdapter for OzNdjson {
     fn turn_format(&self) -> Option<HeadlessHarness> {
         Some(HeadlessHarness::Oz)
     }
-    /// Its trimmed stderr.
     fn failure_detail(&self, stream: &StreamResult, stderr: &str) -> String {
-        // TODO(headless-driver): implement.
-        let _ = (stream, stderr);
-        todo!("headless-driver: oz_ndjson failure_detail")
+        let _ = stream;
+        stderr.trim().to_string()
     }
 
     fn transcript(&self, updates: Option<AcpUpdateSink>) -> Option<Box<dyn TurnTranscript>> {
-        // TODO(headless-driver): implement — the turn transcript `turn_format` names today.
-        let _ = updates;
-        todo!("headless-driver: oz_ndjson transcript")
+        Some(Box::new(Transcript::new(HeadlessHarness::Oz, updates)))
     }
 }
 

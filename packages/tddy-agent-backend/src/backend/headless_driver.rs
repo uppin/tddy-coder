@@ -12,7 +12,7 @@ mod argv;
 mod codex_jsonl;
 pub(crate) mod oz_ndjson;
 mod stream_json;
-mod transcript;
+pub(crate) mod transcript;
 
 use std::collections::VecDeque;
 use std::io;

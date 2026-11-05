@@ -50,13 +50,20 @@ fn expected_schema_id_for_goal(goal: &str) -> &'static str {
     }
 }
 
+#[path = "support/session_listener.rs"]
+mod session_listener;
+
 /// Subprocess must not inherit `TDDY_SOCKET` from the parent (e.g. a running tddy-coder session),
-/// or submit/ask would relay to the live relay instead of the no-socket success path.
+/// or submit/ask would relay to the live relay instead of the session the test names (`--socket`)
+/// or, with none, the error that names all three places a session can come from.
 fn tddy_tools_bin() -> Command {
     let mut cmd = cargo_bin_cmd!("tddy-tools");
     cmd.env_remove("TDDY_SOCKET");
     cmd
 }
+
+/// The error a command that needs a session prints when it has none: all three sources.
+const NO_SESSION: &str = "no session to report to: pass --socket <path>, run from a directory at or below a .tddy/session.json";
 
 /// Path to the generated schema manifest once the proto → JSON Schema pipeline exists (PRD F2/F6).
 fn workflow_recipes_generated_manifest() -> std::path::PathBuf {
@@ -187,9 +194,12 @@ fn submit_rejects_invalid_json_for_plan_goal() {
 fn submit_accepts_minimal_valid_plan_payload_matching_schema() {
     // Given
     let valid_json = r##"{"goal":"plan","prd":"# PRD\n\n## Summary\nFeature X"}"##;
+    let session = session_listener::ASessionListener::start();
 
     let mut cmd = tddy_tools_bin();
-    cmd.args(["submit", "--goal", "plan", "--data", valid_json]);
+    cmd.arg("--socket")
+        .arg(&session.socket)
+        .args(["submit", "--goal", "plan", "--data", valid_json]);
     cmd.assert()
         .success()
         .stdout(predicates::str::contains("\"status\":\"ok\""))
@@ -213,8 +223,12 @@ fn submit_reads_from_stdin() {
     let valid_json =
         r##"{"goal":"plan","prd":"# PRD\n\n## Summary\nFeature X","todo":"- [ ] Task 1"}"##;
 
+    let session = session_listener::ASessionListener::start();
+
     let mut cmd = tddy_tools_bin();
-    cmd.args(["submit", "--goal", "plan"])
+    cmd.arg("--socket")
+        .arg(&session.socket)
+        .args(["submit", "--goal", "plan"])
         .write_stdin(valid_json);
     cmd.assert()
         .success()
@@ -226,8 +240,12 @@ fn submit_data_stdin_reads_json_from_stdin() {
     // Given
     let valid_json = r##"{"goal":"plan","prd":"# PRD\n\n## Summary\nFeature X. Session state is logged for debugging.","todo":"- [ ] Task 1"}"##;
 
+    let session = session_listener::ASessionListener::start();
+
     let mut cmd = tddy_tools_bin();
-    cmd.args(["submit", "--goal", "plan", "--data-stdin"])
+    cmd.arg("--socket")
+        .arg(&session.socket)
+        .args(["submit", "--goal", "plan", "--data-stdin"])
         .write_stdin(valid_json);
     cmd.assert()
         .success()
@@ -256,24 +274,60 @@ fn get_schema_unknown_goal_returns_error() {
 }
 
 #[test]
-fn ask_valid_questions_returns_success_when_no_socket() {
+fn ask_valid_questions_reaches_the_session_it_is_pointed_at() {
     // Given
     let questions = r#"{"questions":[{"header":"Scope","question":"Which modules?","options":[{"label":"A","description":"Option A"}],"multiSelect":false}]}"#;
+    let session = session_listener::ASessionListener::start();
 
     let mut cmd = tddy_tools_bin();
-    cmd.args(["ask", "--data", questions]);
+    cmd.arg("--socket")
+        .arg(&session.socket)
+        .args(["ask", "--data", questions]);
     cmd.assert()
         .success()
         .stdout(predicates::str::contains("\"status\":\"ok\""));
 }
 
 #[test]
+fn ask_and_submit_with_no_session_anywhere_fail_naming_all_three_sources() {
+    // Given — no `--socket`, no pointer above the working directory, no `TDDY_SOCKET`
+    let nowhere = tempfile::tempdir().expect("a directory with no pointer above it");
+    let questions = r#"{"questions":[{"header":"Scope","question":"Pick","options":[{"label":"A"}],"multiSelect":false}]}"#;
+    let valid_json = r##"{"goal":"plan","prd":"# PRD\n\n## Summary\nFeature X"}"##;
+
+    // When
+    let outcomes: Vec<(Option<i32>, bool)> = [
+        vec!["ask", "--data", questions],
+        vec!["submit", "--goal", "plan", "--data", valid_json],
+    ]
+    .iter()
+    .map(|args| {
+        let output = tddy_tools_bin()
+            .current_dir(nowhere.path())
+            .args(args)
+            .output()
+            .expect("run tddy-tools");
+        (
+            output.status.code(),
+            String::from_utf8_lossy(&output.stderr).contains(NO_SESSION),
+        )
+    })
+    .collect();
+
+    // Then
+    assert_eq!(outcomes, vec![(Some(1), true), (Some(1), true)]);
+}
+
+#[test]
 fn ask_accepts_options_without_description() {
     // Given
     let questions = r#"{"questions":[{"header":"Scope","question":"Pick one","options":[{"label":"Only label"}],"multiSelect":false}]}"#;
+    let session = session_listener::ASessionListener::start();
 
     let mut cmd = tddy_tools_bin();
-    cmd.args(["ask", "--data", questions]);
+    cmd.arg("--socket")
+        .arg(&session.socket)
+        .args(["ask", "--data", questions]);
     cmd.assert()
         .success()
         .stdout(predicates::str::contains("\"status\":\"ok\""));

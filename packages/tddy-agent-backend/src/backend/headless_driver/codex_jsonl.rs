@@ -9,7 +9,7 @@ use crate::stream::codex::{codex_jsonl_last_error_message, parse_codex_jsonl_out
 use super::transcript::{cancelled, ended, exit_error, Ending, Finished, Updates};
 use super::HeadlessHarness;
 
-pub(super) struct CodexTurn {
+pub(crate) struct CodexTurn {
     updates: Updates,
     lines: Vec<String>,
 }

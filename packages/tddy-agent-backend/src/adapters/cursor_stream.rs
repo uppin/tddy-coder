@@ -5,6 +5,7 @@
 use std::io::BufRead;
 
 use crate::backend::acp_driver::AcpUpdateSink;
+use crate::backend::headless_driver::transcript::Transcript;
 use crate::backend::headless_driver::HeadlessHarness;
 use crate::error::BackendError;
 use crate::stream::cursor::process_cursor_stream;
@@ -51,17 +52,13 @@ impl StreamAdapter for CursorStream {
     fn turn_format(&self) -> Option<HeadlessHarness> {
         Some(HeadlessHarness::Cursor)
     }
-    /// Its trimmed stderr.
     fn failure_detail(&self, stream: &StreamResult, stderr: &str) -> String {
-        // TODO(headless-driver): implement.
-        let _ = (stream, stderr);
-        todo!("headless-driver: cursor_stream failure_detail")
+        let _ = stream;
+        stderr.trim().to_string()
     }
 
     fn transcript(&self, updates: Option<AcpUpdateSink>) -> Option<Box<dyn TurnTranscript>> {
-        // TODO(headless-driver): implement — the turn transcript `turn_format` names today.
-        let _ = updates;
-        todo!("headless-driver: cursor_stream transcript")
+        Some(Box::new(Transcript::new(HeadlessHarness::Cursor, updates)))
     }
 }
 

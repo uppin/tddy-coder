@@ -88,7 +88,10 @@ fn start_id_of(data: &Option<String>) -> Result<String> {
 /// Relay `request` to the daemon over `TDDY_SOCKET` and print its answer.
 async fn relay_conversation_request(tool: &str, request: serde_json::Value) -> Result<()> {
     let Some(socket_path) = std::env::var_os("TDDY_SOCKET") else {
-        output_error(&format!("TDDY_SOCKET not set; {tool} not relayed"), 1);
+        output_error(
+            &format!("{tool} not relayed: {}", crate::cli::no_session_message()),
+            1,
+        );
         return Ok(());
     };
     let response_json = dispatch_toolcall(std::path::Path::new(&socket_path), request)
