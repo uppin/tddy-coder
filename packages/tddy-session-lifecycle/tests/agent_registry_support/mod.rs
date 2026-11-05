@@ -31,13 +31,17 @@ use tddy_credentials::{AccountId, CredentialStore, SecretString, SessionVaults};
 use tddy_daemon_kernel::config::DaemonConfig;
 use tddy_rpc::Request;
 use tddy_service::proto::activity::{ActivityService as _, ReportSessionStatusRequest};
-use tddy_service::proto::session::{SessionService as SessionServiceTrait, StartSessionRequest};
+use tddy_service::proto::session::{
+    EnsureProjectHomeSessionRequest, ResumeSessionRequest, SessionService as SessionServiceTrait,
+    StartSessionRequest,
+};
 use tddy_session_lifecycle::claude_cli_session::ClaudeCliSessionManager;
 use tddy_session_lifecycle::connection_service::DaemonSessionHost;
 use tddy_terminal_rpc::proto::terminal_session::{
     StreamReplayMode, StreamTerminalOutputRequest,
     TerminalSessionService as TerminalSessionServiceTrait,
 };
+use tddy_testing_commons::wait::eventually;
 
 pub const VALID_TOKEN: &str = "valid-token";
 pub const TEST_PROJECT_ID: &str = "yaml-only-agent-project";
@@ -107,6 +111,86 @@ pub fn acme_yaml_declaring(lines: &str) -> String {
     ACME_YAML.replacen(section, &format!("{section}{lines}"), 1)
 }
 
+/// The built-in `builtin.yaml` (`claude`, `cursor`) as an agent of its own under `id`
+/// (`#agent-tools 14/19`): its id and its binary's command are `id` (the stub), its binary's
+/// environment variable `TDDY_<ID>_CLI`. Everything else — argv, slots, capabilities, jail sections
+/// — is the built-in's, byte for byte, so its `<id>-cli` session launches through the generic path
+/// with exactly what the built-in declares.
+pub fn builtin_yaml_as(builtin: &str, id: &str) -> String {
+    let file_name = format!("/{builtin}.yaml");
+    let (_, yaml) = tddy_coding_agent_specs::builtin_specs()
+        .into_iter()
+        .find(|(path, _)| path.ends_with(&file_name))
+        .unwrap_or_else(|| panic!("{builtin}.yaml is built in"));
+    let def: tddy_actions::tool::ToolDef =
+        serde_yaml::from_str(yaml).expect("the built-in is a tool file");
+    let swaps = [
+        (format!("\nid: {builtin}\n"), format!("\nid: {id}\n")),
+        (
+            format!("\n  command: {}\n", def.binary.command),
+            format!("\n  command: {id}\n"),
+        ),
+        (
+            format!(
+                "\n  env: {}\n",
+                def.binary
+                    .env
+                    .clone()
+                    .expect("the built-in names its binary's variable")
+            ),
+            format!("\n  env: TDDY_{}_CLI\n", id.to_uppercase()),
+        ),
+    ];
+    swaps.iter().fold(yaml.to_string(), |copy, (from, to)| {
+        assert!(
+            copy.contains(from.as_str()),
+            "{builtin}.yaml holds {from:?}"
+        );
+        copy.replacen(from.as_str(), to, 1)
+    })
+}
+
+/// [`builtin_yaml_as`] of `cursor.yaml` under `id`, its conversation minted by
+/// `cursor-create-chat` within `secs` — replacing any `conversation:` line the built-in declares.
+pub fn cursor_copy_minting_within(id: &str, secs: u64) -> String {
+    let copy: String = builtin_yaml_as("cursor", id)
+        .lines()
+        .filter(|line| !line.trim_start().starts_with("conversation:"))
+        .map(|line| format!("{line}\n"))
+        .collect();
+    let section = "  coding_agent:\n";
+    assert!(
+        copy.contains(section),
+        "cursor.yaml has a coding_agent section"
+    );
+    copy.replacen(
+        section,
+        &format!(
+            "{section}    conversation: {{ kind: minted, adapter: cursor-create-chat, mint_deadline_secs: {secs} }}\n"
+        ),
+        1,
+    )
+}
+
+/// A `TDDY_*` variable in this process's — the daemon's — environment for as long as it lives.
+pub struct ATddyVariableInTheDaemon {
+    name: &'static str,
+}
+
+impl ATddyVariableInTheDaemon {
+    pub fn set(name: &'static str, value: &str) -> Self {
+        assert!(name.starts_with("TDDY_"), "{name} is a TDDY_ variable");
+        std::env::set_var(name, value);
+        Self { name }
+    }
+}
+
+impl Drop for ATddyVariableInTheDaemon {
+    fn drop(&mut self) {
+        std::env::remove_var(self.name);
+    }
+}
+
 /// The real `tddy-tools`, built beside this test binary.
 pub fn tddy_tools_binary() -> PathBuf {
     std::env::var_os("CARGO_BIN_EXE_tddy-tools")
@@ -130,8 +214,34 @@ pub fn current_os_user() -> String {
 /// ([`REPORTED_ENV`]), then waits on stdin. Every external command is named by its absolute path,
 /// so the report does not depend on `PATH`.
 pub fn a_stub_agent_script(marker: &Path) -> String {
+    a_stub_agent_script_minting(marker, &StubCreateChat::Prints)
+}
+
+/// What the stub does when it is run as `<binary> create-chat` — the `cursor-create-chat` mint
+/// (`#agent-tools 14/19`). It never touches the spawn marker: a mint is not the agent's spawn.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum StubCreateChat {
+    /// Prints [`MINTED_CHAT_ID`] and exits 0.
+    #[default]
+    Prints,
+    /// Never returns.
+    NeverReturns,
+}
+
+/// The chat the stub's `create-chat` mints.
+pub const MINTED_CHAT_ID: &str = "acme-chat-0001";
+
+/// [`a_stub_agent_script`] whose `create-chat` behaves as `create_chat`. Besides its argv, cwd and
+/// route environment it reports the names of every `TDDY_*` variable it was given
+/// (`tddy-env`) and whether `tddy-tools` is on its `PATH` (`tddy-tools`).
+pub fn a_stub_agent_script_minting(marker: &Path, create_chat: &StubCreateChat) -> String {
+    let create_chat = match create_chat {
+        StubCreateChat::Prints => format!("printf '%s\\n' '{MINTED_CHAT_ID}'; exit 0"),
+        StubCreateChat::NeverReturns => "exec /bin/sleep 3600".to_string(),
+    };
     format!(
         r#"#!/bin/sh
+if [ "$1" = "create-chat" ]; then {create_chat}; fi
 /usr/bin/touch "{marker}" 2>/dev/null
 printf 'STUB argv=%s' "$0"; for a in "$@"; do printf '|%s' "$a"; done; printf '\n'
 printf 'STUB cwd=%s\n' "$(/bin/pwd -P)"
@@ -139,6 +249,8 @@ for name in {reported_env}; do
   eval "value=\${{$name-UNSET}}"
   printf 'STUB env:%s=%s\n' "$name" "$value"
 done
+printf 'STUB tddy-env=%s\n' "$(/usr/bin/env | /usr/bin/sed -n 's/^\(TDDY_[A-Za-z0-9_]*\)=.*/\1/p' | /usr/bin/tr '\n' ' ')"
+if command -v tddy-tools >/dev/null 2>&1; then printf 'STUB tddy-tools=on-path\n'; else printf 'STUB tddy-tools=absent\n'; fi
 printf 'STUB-END\n'
 exec /bin/cat
 "#,
@@ -171,6 +283,35 @@ impl AStubReport {
             .split('|')
             .map(str::to_string)
             .collect()
+    }
+
+    /// The values every `flag` in the stub's argv is followed by, in order.
+    pub fn values_of(&self, flag: &str) -> Vec<String> {
+        self.argv()
+            .windows(2)
+            .filter(|pair| pair[0] == flag)
+            .map(|pair| pair[1].clone())
+            .collect()
+    }
+
+    /// The names of the `TDDY_*` variables the stub was given, in its environment's order.
+    pub fn tddy_variables(&self) -> Vec<String> {
+        self.lines
+            .get("tddy-env")
+            .unwrap_or_else(|| {
+                panic!(
+                    "the stub reported its TDDY_ names; it reported {:?}",
+                    self.lines
+                )
+            })
+            .split_whitespace()
+            .map(str::to_string)
+            .collect()
+    }
+
+    /// Whether `tddy-tools` was on the stub's `PATH`.
+    pub fn tddy_tools_on_path(&self) -> bool {
+        self.lines.get("tddy-tools").map(String::as_str) == Some("on-path")
     }
 
     /// `name` (one of [`REPORTED_ENV`]) as the stub saw it; `UNSET` when it was not set.
@@ -254,6 +395,7 @@ pub struct ARegistryDaemonBuilder {
     tools: Vec<(String, String)>,
     profiles: Vec<(String, String)>,
     meta_account: bool,
+    create_chat: StubCreateChat,
 }
 
 pub fn a_registry_daemon() -> ARegistryDaemonBuilder {
@@ -276,6 +418,12 @@ impl ARegistryDaemonBuilder {
     /// The owner has unlocked a vault holding [`META_ACCOUNT`].
     pub fn with_a_meta_account(mut self) -> Self {
         self.meta_account = true;
+        self
+    }
+
+    /// The stub's `create-chat` never returns (`#agent-tools 14/19`).
+    pub fn with_a_create_chat_that_never_returns(mut self) -> Self {
+        self.create_chat = StubCreateChat::NeverReturns;
         self
     }
 
@@ -308,7 +456,11 @@ fn a_daemon_built_from(spec: ARegistryDaemonBuilder) -> ARegistryDaemon {
     let stub_dir = tempfile::tempdir().unwrap();
     let stub_bin = std::fs::canonicalize(stub_dir.path()).unwrap();
     let stub = stub_bin.join("acme");
-    std::fs::write(&stub, a_stub_agent_script(&spawn_marker)).unwrap();
+    std::fs::write(
+        &stub,
+        a_stub_agent_script_minting(&spawn_marker, &spec.create_chat),
+    )
+    .unwrap();
     std::fs::set_permissions(&stub, std::fs::Permissions::from_mode(0o755)).unwrap();
     std::os::unix::fs::symlink(tddy_tools_binary(), stub_bin.join("tddy-tools")).unwrap();
 
@@ -382,6 +534,93 @@ impl ARegistryDaemon {
             sandbox,
             ..Default::default()
         }
+    }
+
+    /// [`Self::a_start`] on the host, its agent run in tmux (`#agent-tools 14/19`).
+    pub fn a_tmux_start(&self, session_type: &str) -> StartSessionRequest {
+        StartSessionRequest {
+            run_in_tmux: true,
+            ..self.a_start(session_type, false)
+        }
+    }
+
+    /// [`Self::a_start`] on the host over a managed codebase driven by `recipe`.
+    pub fn a_managed_start(&self, session_type: &str, recipe: &str) -> StartSessionRequest {
+        StartSessionRequest {
+            managed_codebase: true,
+            recipe: recipe.to_string(),
+            ..self.a_start(session_type, false)
+        }
+    }
+
+    /// [`Self::a_start`] whose checkout lives on the ssh target `alias`.
+    pub fn an_ssh_start(&self, session_type: &str, alias: &str) -> StartSessionRequest {
+        StartSessionRequest {
+            ssh_config_host: alias.to_string(),
+            ..self.a_start(session_type, false)
+        }
+    }
+
+    /// Set the project's main up from `start` (`EnsureProjectHomeSession`), answering its session.
+    pub async fn ensure_project_home(
+        &self,
+        start: StartSessionRequest,
+    ) -> Result<String, tddy_rpc::Status> {
+        let ensured = self
+            .service
+            .ensure_project_home_session(Request::direct(EnsureProjectHomeSessionRequest {
+                session_token: VALID_TOKEN.to_string(),
+                project_id: TEST_PROJECT_ID.to_string(),
+                daemon_instance_id: String::new(),
+                start: Some(StartSessionRequest {
+                    branch_worktree_intent: String::new(),
+                    ..start
+                }),
+            }))
+            .await?
+            .into_inner();
+        Ok(ensured
+            .session
+            .expect("an ensured main answers its session")
+            .session_id)
+    }
+
+    /// Stop `session_id`'s agent — kill the pid it records — and wait until it is gone.
+    pub async fn stop(&self, session_id: &str) {
+        let pid = self
+            .metadata_of(session_id)
+            .pid
+            .unwrap_or_else(|| panic!("{session_id} records its agent's pid"));
+        // SAFETY: a plain kill(2) of the stub this test started.
+        unsafe { libc::kill(pid as i32, libc::SIGKILL) };
+        eventually("the stopped agent is gone", TERMINAL_OBSERVE, || {
+            // SAFETY: signal 0 only probes whether the pid still exists.
+            match unsafe { libc::kill(pid as i32, 0) } {
+                0 => Err(format!("pid {pid} is still alive")),
+                _ => Ok(()),
+            }
+        })
+        .await;
+    }
+
+    /// Resume `session_id`.
+    pub async fn resume(&self, session_id: &str) -> Result<(), tddy_rpc::Status> {
+        self.service
+            .resume_session(Request::direct(ResumeSessionRequest {
+                session_token: VALID_TOKEN.to_string(),
+                session_id: session_id.to_string(),
+            }))
+            .await
+            .map(|_| ())
+    }
+
+    /// The checkout a started session runs in, as `.session.yaml` records it.
+    pub fn worktree_of(&self, session_id: &str) -> PathBuf {
+        PathBuf::from(
+            self.metadata_of(session_id)
+                .repo_path
+                .unwrap_or_else(|| panic!("{session_id} records its worktree")),
+        )
     }
 
     /// [`Self::a_start`] on the host, on the provider account `account`.

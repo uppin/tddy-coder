@@ -3,8 +3,9 @@
 **Created:** 2026-11-04
 **Status:** 🚧 In Progress
 **Type:** Feature
-**Complexity**: 5 — several row-4 signals: crates `tddy-agent-launch`, `tddy-coding-agent-specs` (+ 9 YAMLs for a new capability), `tddy-agent-backend` (a launch adapter), `tddy-session-lifecycle` suites; spawned-process, tmux and ssh I/O seams with new deadlines; a new spec slot whose shape is not settled (conversation id); inherited code issues on every file it grows
+**Complexity**: 5 — re-scored at the contract (2026-11-05), unchanged: four crates (`tddy-coding-agent-specs` + a slot module, `tddy-agent-backend` a new adapter trait, `tddy-agent-launch` a new step module and four touched files, `tddy-session-lifecycle` fixture + 12 acceptance tests); spawned-process (`create-chat`), tmux and ssh seams each with a deadline; the conversation slot now has a settled shape, but the green work also has to lift two gates the plan did not list (`project_home_start_spec::refuse_a_type_main_cannot_run`'s `claude-cli` literal, the generic start's ignored `ssh_config_host`), and it grows three files with open complexity records
 **Stack:** `#agent-tools 14/19` — branch `feature/agent-tools/cli-spec-features`, base `feature/agent-tools/route-support` (#819)
+**PR:** [#820](https://github.com/uppin/tddy-coder/pull/820) (draft)
 **PRD:** none of its own. Serves the registry PRD on `feature/agent-tools/agent-registry` (`docs/ft/daemon/1-WIP/PRD-2026-10-31-coding-agent-registry.md`): "adding an agent is a YAML file" for an agent with claude's or cursor's needs
 
 ## Initial Discovery
@@ -74,10 +75,32 @@ implementing one here collides with the PR that owns it.
 | `n13` route-support (#819) | `RoutedAgent`, `routed_agent(&spec)`, agent-keyed `RouteRefusal`; `CliSessionType.route: RouteSupport` | the generic path's route already takes the spec; claude/cursor copies route through it | add route bodies, touch `Harness` (gone) |
 | `n12` agent-registry (#801) | `Capability` (closed enum), `CodingAgentRegistry`, `HostCodingAgents`, `spec.has` | adds one variant, `ManagedWorkflow`; gates the new steps on capabilities | add other capabilities or change gate semantics |
 | `n8` harness-clis (#797), `n7` cursor-cli (#796), `n2` claude-host (#791) | `launch_host_pty`, `plan_host_pty`, `launch_jailed_cli_agent`, the `claude`/`cursor` specs and their slot renderers | extends the generic launch with their slots | change the specs' existing argv |
+| `n12` agent-registry (#801) | `slot_file_over_ssh::write_slot_file_over_ssh` bounded by `SLOT_FILE_OVER_SSH_DEADLINE` (60 s, `1818fb470`) | the generic ssh step reuses it; `SpecLaunchError::SlotFileOverSshTimedOut` becomes `DEADLINE_EXCEEDED` | add a second ssh deadline |
+
+**Sequencing recorded at the contract (6f).** No n14 test asserts n13 behaviour, and none injects a
+double for it: every n14 acceptance start runs **unrouted** (no provider account), so it never reaches
+n13's `TODO(route-support)` bodies (`routed_agent`, `CodingAgentSpec::product`, `by_spec`). The one
+exception is the fixture file itself: `agent_registry_support/mod.rs` and `yaml_only_agent_acceptance.rs`
+carry n13's red routed tests too, so n13's green and n14's green touch the same two files (additions
+only on both sides — a textual merge, not an edge). The refusal "naming the agent" names `spec.id`, not
+`product()`, so it does not wait on n13's `product` body.
 
 ## Draft PR contract
 
-The first push of this PR publishes: `Capability::ManagedWorkflow` and its YAML lines; the conversation-id slot types; the `cursor-create-chat` adapter signature with its deadline; the generic step functions' signatures (`HostLaunchSlots`, the widened `HarnessLaunch` template parameters); and the failing tests below. Unimplemented bodies are `// TODO(cli-spec-features): implement`.
+Published by the contract commit (unimplemented bodies are `// TODO(cli-spec-features): implement`):
+
+| Crate | Symbol | Body |
+|---|---|---|
+| `tddy-coding-agent-specs` | `Capability::ManagedWorkflow` (`managed_workflow`, in `ALL`) | done; **the YAML lines are green's** (`claude.yaml`, `cursor.yaml`), pinned by `claude_and_cursor_declare_managed_workflow_and_no_other_builtin_does` — green adds them to `agent_registry_unit::every_builtin_agent_declares_the_capabilities_its_old_gates_granted` too |
+| | `slots::conversation::{ConversationSlot, DEFAULT_CONVERSATION_MINT_DEADLINE_SECS}` — `coding_agent.conversation: { kind: daemon_session_id \| minted \| worktree \| resume_token }`, `minted` with `adapter` and optional `mint_deadline_secs` (30 s default) | types done; `ConversationSlot::mint_deadline` TODO |
+| | `CodingAgentSection.conversation`, `CodingAgentSpec::conversation()` (derived when absent: `resume_token` with a `resume` slot, else `worktree`) | TODO; the load refusals (unknown adapter, `resume_token` without `resume`) are a TODO in `CodingAgentExtension::validate` |
+| `tddy-agent-backend` | `adapters::conversation_id::{ConversationIdAdapter, ConversationMint, ConversationMintError, CursorCreateChat, CURSOR_CREATE_CHAT}`; `LaunchAdapters::{conversation_id, conversation_id_names}` (registered in `builtin()`) | registry done; `CursorCreateChat::mint` TODO |
+| `tddy-agent-launch` | `HarnessLaunch.{session_id, chat_id, permission_mode, dangerously_skip_permissions}` | fields done; `harness_template_params` binds them — TODO |
+| | `refuse_an_unsupported_cli_session_start(spec, session_type, req)` — now reads the spec; `start_cli_harness` resolves the agent first (no side effect) to pass it | signature done; capability gate TODO |
+| | `cli_agent_steps` (new, `#[allow(dead_code)]` until green wires it): `HostLaunchSlots`, `render_host_launch_slots`, `write_slot_files_on_target`, `LaunchConversation::{bound, recorded_chat_id}`, `ConversationStart`, `start_conversation`, `resumed_conversation`, `conversation_mint_refused`, `refuse_a_role_the_agent_cannot_hold` | TODO |
+| `tddy-session-lifecycle` (tests) | `agent_registry_support`: `builtin_yaml_as`, `cursor_copy_minting_within`, `StubCreateChat`, `MINTED_CHAT_ID`, `ATddyVariableInTheDaemon`, `a_tmux_start`/`a_managed_start`/`an_ssh_start`, `ensure_project_home`, `stop`, `resume`, `worktree_of`, `AStubReport::{values_of, tddy_variables, tddy_tools_on_path}` | done |
+
+Green also has to lift two gates the plan did not name: `project_home_start_spec::refuse_a_type_main_cannot_run` (`READ_ONLY_SESSION_TYPE = "claude-cli"`, a name gate) becomes `spec.has(ProjectHomeMain)`; and the generic start honours `ssh_config_host` (it cuts a local worktree today).
 
 ## Green wave
 
@@ -150,6 +173,29 @@ Real dependency edges, as opposed to the branch line:
 - [ ] `tddy-agent-launch`: `harness_template_params` binds `session_id`, `permission_mode` (default `auto`), `dangerously_skip_permissions`, `chat_id`; opencode/muse/warp argv unchanged (golden); `refuse_an_unsupported_cli_session_start` per capability.
 - [ ] `tddy-agent-backend`: `cursor-create-chat` returns the chat id a stub prints; times out against a stub that sleeps.
 
+### Red at the contract (2026-11-05)
+
+Every test below fails for n14's own missing implementation; none waits on n13's green (all starts are unrouted).
+
+| Test | Observed failure |
+|---|---|
+| `yaml_only_agent_acceptance`: `…hooks_and_managed_workflow_starts_over_a_managed_codebase…`, `the_agent_process_of_a_dropped_in_agent_sees_no_tddy_variable` | the start is refused `managed_codebase is not supported for acme-cli sessions` (no capability gate yet). The TDDY test turns into a stack-rule guard once green admits the start |
+| `…without_managed_workflow_is_refused_a_managed_codebase_naming_the_agent` | the refusal does not name the agent or `managed_workflow` |
+| `…conversation_is_the_daemon_session_id_resumes_with_the_same_id` | `argv placeholder {session_id} is unbound` |
+| `…conversation_is_minted_by_cursor_create_chat_resumes_its_minted_chat` | no `--resume CHAT` on either launch, no `cursor_chat_id` recorded (nothing is minted). Stop and resume already work in the fixture |
+| `cli_spec_features_acceptance`: tmux, ssh-target, jailed claude copy | `argv placeholder {session_id} is unbound` |
+| `…as_a_project_home_main…` | `only claude-cli can run main` (`refuse_a_type_main_cannot_run`'s name gate) |
+| `…cursor_yaml…starts_with_its_hooks_and_a_minted_chat_id` | no `--resume`, no chat recorded, no `.cursor/hooks.json` |
+| `a_cursor_chat_mint_that_never_returns…` | the start succeeds: nothing is minted |
+| `an_ssh_slot_write_that_never_returns…` | the start fails `Internal` (unbound `session_id`), not `DEADLINE_EXCEEDED`. At green it waits the real 60 s ssh deadline, on purpose |
+| specs `cli_spec_features_unit` (6 of 8) | `todo!` in `conversation()` / `mint_deadline()`; claude and cursor do not declare `managed_workflow` yet; the two load refusals load instead. `managed_workflow_is_written_as_its_snake_case_word` and `an_unknown_conversation_kind_is_refused_at_load` already pass at the contract: type-level guards |
+| backend `conversation_id_adapter_unit` (3 of 4) | `todo!` in `CursorCreateChat::mint`; the registry test passes |
+| agent-launch `cli_agent_steps_tests` (11) | `todo!` in each step |
+| agent-launch `harness_from_spec` (4 new) | the new parameters are not bound (`{session_id}` unbound for claude, no `--resume` for cursor). `opencode_muse_and_warp_render_the_same_argv…` passes: a golden guard |
+| agent-launch `start_request_checks::managed_workflow_tests` (2 of 3) | the gate refuses regardless of the spec; `an_unmanaged_start_of_any_agent_is_admitted` passes: a guard |
+
+**Pre-existing / parent red in the scoped baseline** (`origin/feature/agent-tools/route-support` 38937a5f2; not n14's): n13's contract red is `route_by_spec_unit` (20), `routed_agent_unit` (5), `route_body_drift_acceptance` (4), `harness_specs_acceptance::opencode_yaml_requires_a_route…` (1), `spec::tests` product (2), `yaml_only_agent_acceptance` routed/profile (3) and `harness_clis_from_spec_acceptance` routed/profile/jailed (4). Locally, a run without the `./test` bins built (`tddy-tools-cli`, `tddy-acp-stub`, `tddy-sandbox-runner`) also fails `acp_driver_*`, `clone_askpass_acceptance` and every session-lifecycle start with "tool tddy-tools is unavailable". That is environmental: all of them pass once the bins are built.
+
 ### Test level decisions
 
 | Aspect | Level | Rationale |
@@ -161,19 +207,24 @@ Real dependency edges, as opposed to the branch line:
 ## Decisions & Trade-offs
 
 - **Spec copies under another id** are the test vehicle: they reach the generic path today without a test-only branch.
-- **Jail is in scope** although the brief lists only host and tmux: n17 cannot delete the dispatch while the jailed claude/cursor starts have no generic equivalent. **Open — confirm with the developer**, or move the jail fold to n17.
-- Open: the conversation-id slot shape (`coding_agent.conversation { kind, adapter }` versus extending `ResumeSlot`); whether ssh remote checkout is generic or gated by a new capability (proposed: generic).
-- Open: `tddy-session-split/src/svc_spawn_split_agent.rs:262` still calls `CliSessionManager::start_with_options`; out of scope here.
+- ✅ **Settled (orchestrator, 2026-11-05): the jailed claude/cursor start is in n14's scope** — n17 cannot delete the dispatch while the jailed starts have no generic equivalent.
+- ✅ **Settled: the conversation-id slot** is `coding_agent.conversation { kind, adapter }` (a serde-tagged `ConversationSlot`), not an extended `ResumeSlot`: claude `daemon_session_id` (`--session-id`, `--resume` on resume, rendered from the session id); cursor `minted` by the `cursor-create-chat` launch adapter, recorded on `.session.yaml` `cursor_chat_id` (field rename left to the sweep); opencode/muse `worktree`; warp `resume_token`. **The mint has a deadline**: `mint_deadline_secs`, default 30 s; past it the start is refused `DEADLINE_EXCEEDED` naming the agent id, the adapter and the deadline, and nothing is spawned.
+- ✅ **Settled: ssh remote checkout is generic** for every CLI agent, not behind a capability. Slot files go to the target through n12's `write_slot_file_over_ssh`, reusing its 60 s `SLOT_FILE_OVER_SSH_DEADLINE`; a timeout is `DEADLINE_EXCEEDED` naming the host.
+- ✅ **Settled: `tddy-session-split/src/svc_spawn_split_agent.rs:262` (`CliSessionManager::start_with_options`) is out of scope.**
+- ✅ **Settled: `mint_cursor_chat_id` and `write_slot_file_over_ssh` get deadlines** — the first through the adapter above (green makes `chat::mint_cursor_chat_id` delegate to it), the second is n12's, reused.
+- **Settled at the contract — resume binds the recorded model for an id conversation.** The bespoke claude resume passes `--model`, so a resume whose conversation is `daemon_session_id` or `minted` binds the recorded model; a `worktree`/`resume_token` resume binds none (opencode/muse/warp argv unchanged, pinned by a golden).
+- **Settled at the contract — the `auto` permission default.** `harness_template_params` binds `permission_mode` only when the start chose one; `auto` is green's choice of either a params default or a spec `else` branch, pinned by `the_claude_spec_renders_through_the_generic_parameters_the_argv_the_bespoke_launch_built`. If it is a params default, the two existing exact-params tests in `harness_from_spec` get the binding too.
+- **Settled at the contract — the managed refusal resolves the agent first.** `start_cli_harness` resolves the session's agent (side-effect free) before refusing, so the refusal reads the spec. A managed start of an agent whose binary does not resolve now reports the resolution failure instead.
 
 ## TODO
 
 - [x] Record initial discovery (`2026-11-04-agent-tools-cli-spec-features-initial-discovery.md`)
 - [x] Cross-check `packages/*/docs/code-issues/` and `docs/dev/todo/` for items this change touches (Step 2b)
 - [x] Create changeset (this document)
-- [ ] Create failing acceptance tests
-- [ ] Run acceptance tests (verify they fail)
-- [ ] USER REVIEW — acceptance tests
-- [ ] TDD Red — write failing unit/integration tests
+- [x] Create failing acceptance tests
+- [x] Run acceptance tests (verify they fail)
+- [x] USER REVIEW — acceptance tests (waived for this run by the developer's "finish without stopping"; orchestrator, 2026-11-05)
+- [x] TDD Red — write failing unit/integration tests
 - [ ] TDD Green — implement with quality code
 - [ ] Update documentation with progress
 - [ ] Repeat Red→Green→Update cycle until feature complete

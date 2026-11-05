@@ -10,6 +10,7 @@ use tddy_core::cli_harness::CliHarness;
 use tddy_daemon_kernel::user_paths::projects_path_for_user;
 use tddy_session_split::service_util;
 
+use tddy_coding_agent_specs::CodingAgentSpec;
 use tddy_rpc::Status;
 
 use tddy_service::proto::session::{BranchConflict, StartSessionResponse};
@@ -58,13 +59,19 @@ pub(crate) fn record_requested_github_source(
         .map_err(|e| Status::internal(format!("failed to record the session's GitHub source: {e}")))
 }
 
-/// A start of a CLI coding agent that cannot be served is refused before anything is created: none of
-/// them has a workflow of its own for a managed codebase to drive. A sandboxed start's placement is
-/// the spec's own refusal (`LaunchSessions::require_sandbox_placement`), checked by the caller.
+/// A start of a CLI coding agent that cannot be served is refused before anything is created: a
+/// managed codebase is refused, `INVALID_ARGUMENT` naming the agent, for a spec that does not declare
+/// `managed_workflow` (`#agent-tools 14/19`). A sandboxed start's placement is the spec's own refusal
+/// (`LaunchSessions::require_sandbox_placement`), checked by the caller.
 pub(crate) fn refuse_an_unsupported_cli_session_start(
+    spec: &CodingAgentSpec,
     session_type: &str,
     req: &StartSessionRequest,
 ) -> Result<(), Status> {
+    // TODO(cli-spec-features): implement — admit `managed_codebase` when
+    // `spec.has(Capability::ManagedWorkflow)`; otherwise refuse "managed_codebase is not supported
+    // for {session_type} sessions: {spec.id} declares no managed_workflow".
+    let _ = spec;
     if req.managed_codebase {
         return Err(Status::invalid_argument(format!(
             "managed_codebase is not supported for {session_type} sessions"
@@ -317,5 +324,82 @@ impl LaunchSessions {
         )
         .map_err(tddy_service::to_rpc_status)?;
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod managed_workflow_tests {
+    use pretty_assertions::assert_eq;
+    use tddy_rpc::Code;
+
+    use super::*;
+
+    fn a_managed_start() -> StartSessionRequest {
+        StartSessionRequest {
+            managed_codebase: true,
+            ..Default::default()
+        }
+    }
+
+    fn the_builtin(id: &str) -> CodingAgentSpec {
+        tddy_coding_agent_specs::embedded_spec(id).expect("the spec is built in")
+    }
+
+    #[test]
+    fn a_managed_start_of_an_agent_declaring_managed_workflow_is_admitted() {
+        // When
+        let admitted = (
+            refuse_an_unsupported_cli_session_start(
+                &the_builtin("claude"),
+                "claude-cli",
+                &a_managed_start(),
+            )
+            .map_err(|status| status.message),
+            refuse_an_unsupported_cli_session_start(
+                &the_builtin("cursor"),
+                "cursor-cli",
+                &a_managed_start(),
+            )
+            .map_err(|status| status.message),
+        );
+
+        // Then
+        assert_eq!(admitted, (Ok(()), Ok(())));
+    }
+
+    #[test]
+    fn a_managed_start_of_an_agent_without_managed_workflow_is_refused_naming_the_agent() {
+        // When
+        let refused = refuse_an_unsupported_cli_session_start(
+            &the_builtin("opencode"),
+            "opencode-cli",
+            &a_managed_start(),
+        )
+        .map_err(|status| (status.code, status.message));
+
+        // Then
+        assert_eq!(
+            refused,
+            Err((
+                Code::InvalidArgument,
+                "managed_codebase is not supported for opencode-cli sessions: opencode declares no \
+                 managed_workflow"
+                    .to_string()
+            ))
+        );
+    }
+
+    #[test]
+    fn an_unmanaged_start_of_any_agent_is_admitted() {
+        // When
+        let admitted = refuse_an_unsupported_cli_session_start(
+            &the_builtin("opencode"),
+            "opencode-cli",
+            &StartSessionRequest::default(),
+        )
+        .map_err(|status| status.message);
+
+        // Then
+        assert_eq!(admitted, Ok(()));
     }
 }

@@ -15,7 +15,9 @@ use std::collections::BTreeMap;
 use std::fmt;
 use std::sync::Arc;
 
-use super::{CursorModels, OpenCodeModels, WarpResumeToken};
+use super::{
+    ConversationIdAdapter, CursorCreateChat, CursorModels, OpenCodeModels, WarpResumeToken,
+};
 use crate::backend::BackendModels;
 
 /// How an agent's model-listing command's stdout becomes its model catalogue.
@@ -43,6 +45,7 @@ pub trait ResumeTokenAdapter: Send + Sync + fmt::Debug {
 pub struct LaunchAdapters {
     models: BTreeMap<String, Arc<dyn ModelsAdapter>>,
     resume_tokens: BTreeMap<String, Arc<dyn ResumeTokenAdapter>>,
+    conversation_ids: BTreeMap<String, Arc<dyn ConversationIdAdapter>>,
 }
 
 impl fmt::Debug for LaunchAdapters {
@@ -53,23 +56,33 @@ impl fmt::Debug for LaunchAdapters {
                 "resume_tokens",
                 &self.resume_tokens.keys().collect::<Vec<_>>(),
             )
+            .field(
+                "conversation_ids",
+                &self.conversation_ids.keys().collect::<Vec<_>>(),
+            )
             .finish()
     }
 }
 
 impl LaunchAdapters {
     /// Every launch adapter this build registers: [`super::OPENCODE_MODELS`]
-    /// ([`super::OpenCodeModels`]) and [`super::WARP_RESUME_TOKEN`] ([`super::WarpResumeToken`]).
+    /// ([`super::OpenCodeModels`]), [`super::WARP_RESUME_TOKEN`] ([`super::WarpResumeToken`]) and
+    /// [`super::CURSOR_CREATE_CHAT`] ([`super::CursorCreateChat`]).
     pub fn builtin() -> Self {
         let models: [Arc<dyn ModelsAdapter>; 2] =
             [Arc::new(OpenCodeModels), Arc::new(CursorModels)];
         let resume_token: Arc<dyn ResumeTokenAdapter> = Arc::new(WarpResumeToken);
+        let conversation_id: Arc<dyn ConversationIdAdapter> = Arc::new(CursorCreateChat);
         Self {
             models: models
                 .into_iter()
                 .map(|adapter| (adapter.name().to_string(), adapter))
                 .collect(),
             resume_tokens: BTreeMap::from([(resume_token.name().to_string(), resume_token)]),
+            conversation_ids: BTreeMap::from([(
+                conversation_id.name().to_string(),
+                conversation_id,
+            )]),
         }
     }
 
@@ -81,6 +94,16 @@ impl LaunchAdapters {
     /// The resume-token adapter registered as `name`.
     pub fn resume_token(&self, name: &str) -> Option<Arc<dyn ResumeTokenAdapter>> {
         self.resume_tokens.get(name).cloned()
+    }
+
+    /// The conversation-id adapter registered as `name` (`#agent-tools 14/19`).
+    pub fn conversation_id(&self, name: &str) -> Option<Arc<dyn ConversationIdAdapter>> {
+        self.conversation_ids.get(name).cloned()
+    }
+
+    /// The registered conversation-id adapters' names, in order.
+    pub fn conversation_id_names(&self) -> impl Iterator<Item = &str> {
+        self.conversation_ids.keys().map(String::as_str)
     }
 
     /// The registered models adapters' names, in order.

@@ -295,11 +295,12 @@ impl LaunchSessions {
         progress: &AttachmentProgressSink,
         os_user: &str,
     ) -> Result<Response<StartSessionResponse>, Status> {
-        refuse_an_unsupported_cli_session_start(kind.name, req)?;
+        // Resolved first, with no side effect: the managed-codebase refusal reads the agent's spec.
+        let session_agent = resolve_session_agent(self.coding_agents.as_ref(), &self.config, kind)?;
+        refuse_an_unsupported_cli_session_start(&session_agent.agent.spec, kind.name, req)?;
         if req.sandbox {
             self.require_sandbox_placement(kind.name)?;
         }
-        let session_agent = resolve_session_agent(self.coding_agents.as_ref(), &self.config, kind)?;
         let start = self.cli_start_prelude(req, progress, os_user).await?;
         let sessions_base = start.sessions_base.clone();
         let session_id = start.session_id.clone();

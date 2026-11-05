@@ -15,6 +15,7 @@ use thiserror::Error;
 use crate::capability::Capability;
 use crate::headless::validate_headless;
 use crate::route::{ProviderKind, RouteShape, RouteSupport, RoutedAgent};
+use crate::slots::conversation::ConversationSlot;
 use crate::slots::hooks;
 use crate::slots::tools::render_flag_per_value;
 
@@ -73,6 +74,10 @@ impl ExtensionOwner for CodingAgentExtension {
                 ));
             }
         }
+        // TODO(cli-spec-features): implement — refuse a `conversation: { kind: minted }` whose
+        // adapter `LaunchAdapters::conversation_id` does not hold ("conversation.adapter {name} is
+        // not a launch adapter this build has"), and a `kind: resume_token` without a `resume`
+        // slot ("conversation kind resume_token needs a resume.adapter to read its token with").
         if agent.placements.is_empty() {
             return Err(
                 "placements is empty: an agent runs on at least one of host, jail".to_string(),
@@ -201,6 +206,11 @@ pub struct CodingAgentSection {
     /// `Muse Code`. Read through [`CodingAgentSpec::product`], which answers the id when absent.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub product: Option<String>,
+    /// How the session's own conversation is identified across its start and resumes
+    /// (`#agent-tools 14/19`): the daemon's session id, a minted id, the worktree, or a resume
+    /// token. Read through [`CodingAgentSpec::conversation`], which derives it when absent.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub conversation: Option<ConversationSlot>,
 }
 
 /// How long an orchestrated session's permission hook waits for its orchestrator's answer when the
@@ -235,6 +245,14 @@ impl CodingAgentSpec {
             },
             None => RouteSupport::default(),
         }
+    }
+
+    /// `coding_agent.conversation`; when the spec declares none, [`ConversationSlot::ResumeToken`]
+    /// for a spec with a `resume` slot and [`ConversationSlot::Worktree`] otherwise — what the
+    /// generic launch resumed by before the slot existed.
+    pub fn conversation(&self) -> ConversationSlot {
+        // TODO(cli-spec-features): implement — declared, else derived from `self.agent.resume`.
+        todo!("cli-spec-features: CodingAgentSpec::conversation")
     }
 
     /// `coding_agent.product`, or the agent id when the spec declares none.
