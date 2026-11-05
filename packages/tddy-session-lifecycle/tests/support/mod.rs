@@ -220,12 +220,18 @@ pub async fn start_main_terminal(manager: &ClaudeCliSessionManager, worktree: &P
         .then_reading_stdin()
         .build();
     manager
-        .start(
+        .start_with_options(
             SESSION_ID,
             worktree.to_path_buf(),
             "claude-opus-4-8",
             main.to_str().unwrap(),
             None,
+            None,
+            false,
+            false,
+            None,
+            Vec::new(),
+            Vec::new(),
             None,
         )
         .await

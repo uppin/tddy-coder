@@ -1,8 +1,15 @@
-//! `/start-workflow`, `/start-claude` and `/start-cursor`: session creation up to the model pick.
-//! (The model-pick keyboards are in `pickers`; the model-pick callbacks and the Claude and Cursor
-//! CLI spawns they end in are in `cli_spawns`.)
+//! `/start-workflow`, `/start-claude`, `/start-cursor` and `/start-agent`: session creation up to
+//! the agent, project, branch and model picks. (The keyboards are in `pickers`; the model-pick
+//! callback and the generic start it ends in are in `cli_spawns`.)
+
+use tddy_coding_agent_specs::CLI_SESSION_TYPE_SUFFIX;
 
 use super::*;
+
+/// The agent `/start-claude` picks.
+const CLAUDE_AGENT_ID: &str = "claude";
+/// The agent `/start-cursor` picks.
+const CURSOR_AGENT_ID: &str = "cursor";
 
 impl<S: TelegramSender + Send + Sync> TelegramSessionControlHarness<S> {
     /// Authorized chat: create session, emit recipe keyboard.
@@ -83,12 +90,13 @@ impl<S: TelegramSender + Send + Sync> TelegramSessionControlHarness<S> {
         })
     }
 
-    /// `/start-claude <prompt>`: start a Claude Code CLI session seeded with `prompt`.
+    /// `/start-claude <prompt>`: start a Claude Code CLI session seeded with `prompt` — a shortcut
+    /// for `/start-agent` that picks the `claude` agent itself.
     ///
-    /// Skips the recipe keyboard (recipes are tddy-coder-specific). Writes `session_type: claude-cli`
+    /// Skips the recipe keyboard (recipes are tddy-coder-specific). Writes the agent's session type
     /// and `initial_prompt` into `changeset.yaml`, then immediately shows the **project** keyboard.
-    /// Subsequent project → branch → model callbacks complete the flow and call
-    /// [`Self::spawn_telegram_claude_cli`].
+    /// The project → branch → model callbacks complete the flow and end in the daemon's generic
+    /// start ([`Self::handle_telegram_model_pick_callback`]).
     pub async fn handle_start_claude(
         &mut self,
         cmd: StartClaudeCommand,
@@ -100,79 +108,11 @@ impl<S: TelegramSender + Send + Sync> TelegramSessionControlHarness<S> {
             cmd.user_id,
             cmd.prompt.len()
         );
-        self.ensure_authorized(cmd.chat_id)?;
-
-        if let Some(ref map_path) = self.telegram_github_mapping_path {
-            let store = TelegramGithubMappingStore::open(map_path)?;
-            if store.get_github_login(cmd.user_id).is_none() {
-                anyhow::bail!(
-                    "Telegram account is not linked to GitHub. Use the bot's /link-github flow (or web OAuth) to connect your GitHub identity before starting a session."
-                );
-            }
-        }
-
-        let session_id = Uuid::new_v4().to_string();
-        let session_dir = unified_session_dir_path(&self.sessions_base, &session_id);
-        std::fs::create_dir_all(&session_dir)?;
-
-        // Write initial_prompt, derived name, and branch intent into the changeset.
-        // - name: needed so setup_worktree_for_session_with_optional_chain_base can derive a
-        //   branch name (feature/<slug>) when NewBranchFromBase intent is selected.
-        // - branch_worktree_intent: NewBranchFromBase is the sensible default for /start-claude
-        //   since we are always starting fresh; the branch callback reads and preserves this.
-        {
-            let trimmed = cmd.prompt.trim().to_string();
-            // Always set name — needed by claude_cli_branch_name_from_changeset to derive
-            // wf.new_branch_name (required by validate_workflow_branch_intent).
-            // Fall back to the short session id when the user sent /start-claude with no text.
-            let name = if !trimmed.is_empty() {
-                trimmed
-                    .split_whitespace()
-                    .take(6)
-                    .collect::<Vec<_>>()
-                    .join(" ")
-            } else {
-                format!("claude-{}", &session_id[..8.min(session_id.len())])
-            };
-            let initial_prompt = if !trimmed.is_empty() {
-                Some(trimmed)
-            } else {
-                None
-            };
-            let workflow = Some(tddy_core::ChangesetWorkflow {
-                branch_worktree_intent: Some(BranchWorktreeIntent::NewBranchFromBase),
-                ..Default::default()
-            });
-            let cs = Changeset {
-                name: Some(name),
-                initial_prompt,
-                workflow,
-                ..Default::default()
-            };
-            write_changeset(&session_dir, &cs)
-                .map_err(|e| anyhow::anyhow!("write changeset: {e}"))?;
-        }
-
-        // Write the claude-cli marker so the branch callback routes to claude-cli spawn.
-        self.persist_changeset_session_type_marker(&session_dir, "claude-cli")?;
-
-        log::debug!(
-            target: "tddy_daemon::telegram_session_control",
-            "handle_start_claude: created session_dir={}",
-            session_dir.display()
-        );
-
-        if let Ok(mut g) = self.telegram_tracked.lock() {
-            g.bind_chat_to_session_for_telegram_tracking(cmd.chat_id, &session_id);
-        }
-
-        // Send the project pick keyboard — the existing project/branch callbacks are reused.
-        self.send_project_pick_keyboard(cmd.chat_id, &session_id)
+        let session_id = self
+            .begin_pending_cli_start(cmd.chat_id, cmd.user_id, &cmd.prompt, Some(CLAUDE_AGENT_ID))
             .await?;
-
-        // messages is empty here — the project keyboard was sent via self.sender.
-        // In tests, callers hold an Arc<InMemoryTelegramSender> and use collect_outbound_messages
-        // externally to inspect what was sent; the outcome only carries the session_id.
+        // `messages` is empty: the keyboard went out through `self.sender`; tests read it with
+        // `collect_outbound_messages`.
         Ok(StartClaudeOutcome {
             session_id,
             messages: vec![],
@@ -189,24 +129,80 @@ impl<S: TelegramSender + Send + Sync> TelegramSessionControlHarness<S> {
         &mut self,
         cmd: StartAgentCommand,
     ) -> anyhow::Result<StartAgentOutcome> {
-        // TODO(telegram-spec-launch): implement
-        let _ = (cmd, &self.coding_agents);
-        todo!("telegram-spec-launch: handle_start_agent")
+        log::info!(
+            target: "tddy_daemon::telegram_session_control",
+            "handle_start_agent: chat_id={} user_id={} prompt_len={}",
+            cmd.chat_id,
+            cmd.user_id,
+            cmd.prompt.len()
+        );
+        let session_id = self
+            .begin_pending_cli_start(cmd.chat_id, cmd.user_id, &cmd.prompt, None)
+            .await?;
+        Ok(StartAgentOutcome {
+            session_id,
+            messages: vec![],
+        })
     }
 
-    /// `/start-cursor <prompt>`: start a Cursor Agent CLI session seeded with `prompt`.
+    /// `/start-cursor <prompt>`: start a Cursor Agent CLI session seeded with `prompt` — a shortcut
+    /// for `/start-agent` that picks the `cursor` agent itself.
     pub async fn handle_start_cursor(
         &mut self,
         cmd: StartCursorCommand,
     ) -> anyhow::Result<StartCursorOutcome> {
-        self.ensure_authorized(cmd.chat_id)?;
+        let session_id = self
+            .begin_pending_cli_start(cmd.chat_id, cmd.user_id, &cmd.prompt, Some(CURSOR_AGENT_ID))
+            .await?;
+        Ok(StartCursorOutcome {
+            session_id,
+            messages: vec![],
+        })
+    }
+
+    /// Create the pending (draft) session of a CLI start: its changeset carries the prompt, a name
+    /// derived from it and a new-branch intent. With `shortcut` (an agent id) the agent is already
+    /// picked and the **project** keyboard follows; without, the **agent** keyboard does.
+    ///
+    /// Refused before anything is created when the chat is not authorized, its Telegram account is
+    /// not linked to GitHub, the host has no coding agents, or the shortcut's agent is not a CLI
+    /// agent of the host.
+    async fn begin_pending_cli_start(
+        &self,
+        chat_id: i64,
+        user_id: u64,
+        prompt: &str,
+        shortcut: Option<&str>,
+    ) -> anyhow::Result<String> {
+        self.ensure_authorized(chat_id)?;
 
         if let Some(ref map_path) = self.telegram_github_mapping_path {
             let store = TelegramGithubMappingStore::open(map_path)?;
-            if store.get_github_login(cmd.user_id).is_none() {
+            if store.get_github_login(user_id).is_none() {
                 anyhow::bail!(
                     "Telegram account is not linked to GitHub. Use the bot's /link-github flow (or web OAuth) to connect your GitHub identity before starting a session."
                 );
+            }
+        }
+
+        let offered = TelegramAgentChoices::of(&self.coding_agents);
+        let session_type = shortcut.map(|agent_id| format!("{agent_id}{CLI_SESSION_TYPE_SUFFIX}"));
+        if offered.choices().is_empty() {
+            return Err(TelegramPickRefusal::NoCodingAgents {
+                session_type: session_type.unwrap_or_else(|| "CLI agent".to_string()),
+            }
+            .into());
+        }
+        if let Some(session_type) = &session_type {
+            if !offered
+                .choices()
+                .iter()
+                .any(|choice| &choice.session_type == session_type)
+            {
+                return Err(TelegramPickRefusal::UnknownSessionType {
+                    session_type: session_type.clone(),
+                }
+                .into());
             }
         }
 
@@ -214,8 +210,13 @@ impl<S: TelegramSender + Send + Sync> TelegramSessionControlHarness<S> {
         let session_dir = unified_session_dir_path(&self.sessions_base, &session_id);
         std::fs::create_dir_all(&session_dir)?;
 
+        // Write initial_prompt, a derived name and the branch intent into the changeset.
+        // - name: the first six words of the prompt; the branch an agent that requires one names is
+        //   derived from it when the branch is picked.
+        // - branch_worktree_intent: NewBranchFromBase is the sensible default, since a Telegram
+        //   start is always fresh; the branch callback reads and preserves it.
         {
-            let trimmed = cmd.prompt.trim().to_string();
+            let trimmed = prompt.trim().to_string();
             let name = if !trimmed.is_empty() {
                 trimmed
                     .split_whitespace()
@@ -223,7 +224,11 @@ impl<S: TelegramSender + Send + Sync> TelegramSessionControlHarness<S> {
                     .collect::<Vec<_>>()
                     .join(" ")
             } else {
-                format!("cursor-{}", &session_id[..8.min(session_id.len())])
+                format!(
+                    "{}-{}",
+                    shortcut.unwrap_or("agent"),
+                    &session_id[..8.min(session_id.len())]
+                )
             };
             let initial_prompt = if !trimmed.is_empty() {
                 Some(trimmed)
@@ -243,20 +248,28 @@ impl<S: TelegramSender + Send + Sync> TelegramSessionControlHarness<S> {
             write_changeset(&session_dir, &cs)
                 .map_err(|e| anyhow::anyhow!("write changeset: {e}"))?;
         }
-
-        self.persist_changeset_session_type_marker(&session_dir, "cursor-cli")?;
-
-        if let Ok(mut g) = self.telegram_tracked.lock() {
-            g.bind_chat_to_session_for_telegram_tracking(cmd.chat_id, &session_id);
+        if let Some(session_type) = &session_type {
+            self.persist_changeset_session_type_marker(&session_dir, session_type)?;
         }
 
-        self.send_project_pick_keyboard(cmd.chat_id, &session_id)
-            .await?;
+        log::debug!(
+            target: "tddy_daemon::telegram_session_control",
+            "begin_pending_cli_start: created session_dir={}",
+            session_dir.display()
+        );
 
-        Ok(StartCursorOutcome {
-            session_id,
-            messages: vec![],
-        })
+        if let Ok(mut g) = self.telegram_tracked.lock() {
+            g.bind_chat_to_session_for_telegram_tracking(chat_id, &session_id);
+        }
+
+        match session_type {
+            Some(_) => {
+                self.send_project_pick_keyboard(chat_id, &session_id)
+                    .await?
+            }
+            None => self.send_agent_pick_keyboard(chat_id, &session_id).await?,
+        }
+        Ok(session_id)
     }
 
     /// Write `session_type: <value>` into `changeset.yaml` (raw-YAML merge, preserves other fields).
@@ -278,31 +291,6 @@ impl<S: TelegramSender + Send + Sync> TelegramSessionControlHarness<S> {
         map.insert(
             serde_yaml::Value::String("session_type".into()),
             serde_yaml::Value::String(session_type.to_string()),
-        );
-        let out = serde_yaml::to_string(&root)?;
-        std::fs::write(&path, out)?;
-        Ok(())
-    }
-
-    /// Write `model: <value>` into `changeset.yaml` (raw-YAML merge, preserves other fields).
-    pub(super) fn persist_changeset_model(
-        &self,
-        session_dir: &Path,
-        model: &str,
-    ) -> anyhow::Result<()> {
-        let path = session_dir.join("changeset.yaml");
-        let raw = std::fs::read_to_string(&path).unwrap_or_default();
-        let mut root: serde_yaml::Value = if raw.trim().is_empty() {
-            serde_yaml::Mapping::new().into()
-        } else {
-            serde_yaml::from_str(&raw)?
-        };
-        let map = root
-            .as_mapping_mut()
-            .ok_or_else(|| anyhow::anyhow!("changeset.yaml root must be a mapping"))?;
-        map.insert(
-            serde_yaml::Value::String("model".into()),
-            serde_yaml::Value::String(model.to_string()),
         );
         let out = serde_yaml::to_string(&root)?;
         std::fs::write(&path, out)?;

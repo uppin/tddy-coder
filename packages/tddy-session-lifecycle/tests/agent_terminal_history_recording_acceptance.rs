@@ -88,12 +88,18 @@ impl RecordingDaemon {
         let recording = main_capture_recording_path(&self.data_dir, SESSION_ID);
         let main = self
             .manager
-            .start(
+            .start_with_options(
                 SESSION_ID,
                 self.worktree.clone(),
                 "claude-opus-4-8",
                 agent.to_str().unwrap(),
                 None,
+                None,
+                false,
+                false,
+                None,
+                Vec::new(),
+                Vec::new(),
                 None,
             )
             .await

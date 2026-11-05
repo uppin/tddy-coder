@@ -83,6 +83,28 @@ pub fn split_room_hosting(
     }
 }
 
+/// The registry of coding agents Telegram offers: the host's own (built-ins and
+/// `<tddy_data_dir>/tools`). A registry that does not load leaves Telegram with none to offer, so
+/// its CLI starts are refused in the chat; the daemon's own start refuses for the same file
+/// (`build_session_host`), so this is a report, not a fallback.
+// TODO(telegram-spec-launch): load the registry once before Telegram is built and share it with
+// `build_session_host` and `open_shared`, which each load it again.
+fn telegram_coding_agents(
+    config: &DaemonConfig,
+    tddy_data_dir: &Path,
+) -> Arc<tddy_coding_agent_specs::CodingAgentRegistry> {
+    match tddy_agent_launch::host_coding_agents::host_coding_agents(config, tddy_data_dir) {
+        Ok(agents) => agents.agents_shared(),
+        Err(e) => {
+            log::error!(
+                target: "tddy_daemon",
+                "telegram offers no coding agents: {e:#}"
+            );
+            Arc::new(tddy_coding_agent_specs::CodingAgentRegistry::empty())
+        }
+    }
+}
+
 pub(super) fn build_telegram(
     config: &DaemonConfig,
     tddy_data_dir: &Path,
@@ -178,13 +200,10 @@ pub(super) fn build_telegram(
             Some(telegram_tracked),
         )
         .with_session_rooms(registries.shared_session_rooms.clone())
-        .with_terminal_exposure(Arc::clone(&plugins.terminal_exposure))
+        .with_coding_agents(telegram_coding_agents(config, tddy_data_dir))
         .with_session_starter(
             Arc::clone(&registries.session_starter) as Arc<dyn tddy_daemon_extensions::SessionStarter>
         ),
-        // TODO(telegram-spec-launch): `.with_coding_agents(...)` — the host's registry, loaded once
-        // before Telegram is built (`host_coding_agents`) and shared with `build_session_host`
-        // instead of loaded there.
     ));
 
     TelegramWiring {

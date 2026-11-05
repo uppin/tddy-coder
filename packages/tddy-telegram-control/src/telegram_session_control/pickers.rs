@@ -226,9 +226,40 @@ impl<S: TelegramSender + Send + Sync> TelegramSessionControlHarness<S> {
         agent_idx: usize,
         session_id: &str,
     ) -> anyhow::Result<()> {
-        // TODO(telegram-spec-launch): implement
-        let _ = (chat_id, agent_idx, session_id, &self.coding_agents);
-        todo!("telegram-spec-launch: handle_telegram_agent_pick_callback")
+        self.ensure_authorized(chat_id)?;
+        let offered = TelegramAgentChoices::of(&self.coding_agents);
+        let choice = offered.at(agent_idx)?;
+        let session_dir = unified_session_dir_path(&self.sessions_base, session_id);
+        self.persist_changeset_session_type_marker(&session_dir, &choice.session_type)?;
+        self.send_project_pick_keyboard(chat_id, session_id).await
+    }
+
+    /// The agent keyboard of a `/start-agent` session: one button per CLI agent of the host's
+    /// registry, labelled by id (`tsa:<agent_idx>|s:<session_id>`).
+    pub(super) async fn send_agent_pick_keyboard(
+        &self,
+        chat_id: i64,
+        session_id: &str,
+    ) -> anyhow::Result<()> {
+        let offered = TelegramAgentChoices::of(&self.coding_agents);
+        let rows: InlineKeyboardRows = offered
+            .choices()
+            .iter()
+            .enumerate()
+            .map(|(agent_idx, choice)| {
+                let data = telegram_agent_pick_callback(agent_idx, session_id);
+                debug_assert!(
+                    data.len() <= 64,
+                    "Telegram callback_data exceeds 64 bytes: len={} data={data:?}",
+                    data.len()
+                );
+                vec![(choice.agent_id.clone(), data)]
+            })
+            .collect();
+        self.sender
+            .send_message_with_keyboard(chat_id, "Choose an agent for this session:", rows)
+            .await?;
+        Ok(())
     }
 
     pub async fn handle_telegram_branch_callback(
@@ -261,24 +292,18 @@ impl<S: TelegramSender + Send + Sync> TelegramSessionControlHarness<S> {
         let projects_dir = projects_dir_for_telegram_workflow_spawn(deps)?;
         let remote =
             effective_remote_name_for_project(&projects_dir, &project.project_id, repo_path)?;
-        // Read routing snapshot before modifying cs — we need session_type to set new_branch_name
-        // for claude-cli sessions (NewBranchFromBase requires new_branch_name to be set before
-        // setup_worktree_for_session_with_optional_chain_base is called).
+        // Read the routing snapshot before modifying cs — the pending session's agent decides
+        // whether its new branch is named here (`branch_name_required`) or by the start.
         let pre_snap = read_changeset_routing_snapshot(&session_dir).unwrap_or_default();
-        let is_claude_cli = pre_snap.session_type.as_deref() == Some("claude-cli");
-        let is_cursor_cli = pre_snap.session_type.as_deref() == Some("cursor-cli");
-        // Compute the derived branch name now while cs is still immutable (before get_or_insert_with
-        // takes a mutable borrow).
-        let derived_claude_cli_branch = if is_claude_cli {
-            claude_cli_branch_name_from_changeset(&cs)
-        } else {
-            None
-        };
-        let derived_cursor_cli_branch = if is_cursor_cli {
-            Some(cursor_cli_branch_name_from_session_id(session_id))
-        } else {
-            None
-        };
+        let cli_agent = pre_snap
+            .session_type
+            .as_deref()
+            .and_then(|session_type| self.coding_agents.for_session_type(session_type));
+        let derived_branch = cli_agent.and_then(|spec| {
+            cs.name
+                .as_deref()
+                .and_then(|name| telegram_new_branch_name(spec, name))
+        });
         if branch_idx == 0 {
             cs.worktree_integration_base_ref = None;
             if intent == Some(BranchWorktreeIntent::WorkOnSelectedBranch) {
@@ -292,13 +317,10 @@ impl<S: TelegramSender + Send + Sync> TelegramSessionControlHarness<S> {
                 let wf = cs.workflow.get_or_insert_with(Default::default);
                 wf.selected_integration_base_ref = Some(default_ref);
                 wf.selected_branch_to_work_on = None;
-                // For claude-cli sessions, derive new_branch_name from cs.name so
-                // validate_workflow_branch_intent / setup_worktree can proceed without waiting for
-                // tddy-coder to produce a branch_suggestion.
+                // An agent that requires a branch name has it derived from cs.name, so the start
+                // can name it; any other agent leaves the name to the start.
                 if wf.new_branch_name.is_none() {
-                    wf.new_branch_name = derived_claude_cli_branch
-                        .clone()
-                        .or_else(|| derived_cursor_cli_branch.clone());
+                    wf.new_branch_name = derived_branch.clone();
                 }
             }
         } else {
@@ -323,57 +345,24 @@ impl<S: TelegramSender + Send + Sync> TelegramSessionControlHarness<S> {
                 let wf = cs.workflow.get_or_insert_with(Default::default);
                 wf.selected_integration_base_ref = Some(chain.clone());
                 wf.selected_branch_to_work_on = None;
-                // Same: derive new_branch_name for claude-cli when the user picked a base branch.
+                // Same: derive the branch name when the user picked a base branch.
                 if wf.new_branch_name.is_none() {
-                    wf.new_branch_name = derived_claude_cli_branch
-                        .clone()
-                        .or_else(|| derived_cursor_cli_branch.clone());
+                    wf.new_branch_name = derived_branch.clone();
                 }
             }
         }
-        // pre_snap was already captured above (before cs modifications).
         write_changeset(&session_dir, &cs).map_err(|e| anyhow::anyhow!("write changeset: {e}"))?;
-        // Re-apply raw routing fields that write_changeset doesn't know about.
+        // Re-apply the raw routing field that write_changeset doesn't know about.
         if let Some(ref st) = pre_snap.session_type {
             self.persist_changeset_session_type_marker(&session_dir, st)?;
         }
-        if let Some(ref m) = pre_snap.model {
-            self.persist_changeset_model(&session_dir, m)?;
-        }
 
-        // Ask before the model picker when another session already owns the branch this pick just
-        // derived, instead of silently creating `<branch>-1` at spawn time. Telegram never goes
-        // through the `StartSession` guard, so the same check lives here. Only the claude-cli
-        // derivation (`feature/<slug(name)>`) can collide — `cursor-cli/<short-id>` is derived from
-        // the session uuid. Nothing is claimed here: no branch, no worktree.
-        // Per `docs/ft/daemon/session-branch-conflict.md` § Telegram.
-        if is_claude_cli && intent == Some(BranchWorktreeIntent::NewBranchFromBase) {
-            let derived_branch = cs.workflow.as_ref().and_then(|w| w.new_branch_name.clone());
-            if let Some(branch) = derived_branch {
-                if let Some(owner) = self.session_owning_branch(&branch).await? {
-                    return self
-                        .send_branch_conflict_keyboard(
-                            chat_id,
-                            proj_idx,
-                            session_id,
-                            &branch,
-                            &owner.session_id,
-                            repo_path,
-                        )
-                        .await;
-                }
-            }
-        }
-
-        // Route to the claude-cli model picker when the session was started via /start-claude.
-        if pre_snap.session_type.as_deref() == Some("claude-cli") {
+        // A CLI agent's pending session goes on to its model keyboard. Whether another session
+        // already holds the branch is the generic start's guard to answer, once the model is
+        // chosen — Telegram keeps no check of its own.
+        if pre_snap.session_type.is_some() {
             return self
-                .send_claude_model_pick_keyboard(chat_id, proj_idx, session_id)
-                .await;
-        }
-        if pre_snap.session_type.as_deref() == Some("cursor-cli") {
-            return self
-                .send_cursor_model_pick_keyboard(chat_id, proj_idx, session_id)
+                .send_model_pick_keyboard(chat_id, proj_idx, session_id)
                 .await;
         }
 
@@ -409,27 +398,54 @@ impl<S: TelegramSender + Send + Sync> TelegramSessionControlHarness<S> {
         Ok(())
     }
 
-    /// Send the Claude model pick keyboard (`tcm:` callbacks).
-    async fn send_claude_model_pick_keyboard(
+    /// Send the model keyboard of the pending session's agent (`tcm:` callbacks): the models its
+    /// spec offers, by id. An agent that offers none and requires none starts straight away.
+    pub(super) async fn send_model_pick_keyboard(
         &self,
         chat_id: i64,
         proj_idx: usize,
         session_id: &str,
     ) -> anyhow::Result<()> {
-        let mut rows: InlineKeyboardRows = Vec::new();
-        for (i, model) in CLAUDE_CLI_MODELS.iter().enumerate() {
-            let data = format!("{CB_TELEGRAM_CLAUDE_MODEL}{i}|p:{proj_idx}|s:{session_id}");
-            debug_assert!(
-                data.len() <= 64,
-                "Telegram callback_data exceeds 64 bytes: len={} data={data:?}",
-                data.len()
-            );
-            rows.push(vec![(model.label.clone(), data)]);
+        let session_dir = unified_session_dir_path(&self.sessions_base, session_id);
+        let spec = self.pending_session_agent(&session_dir)?;
+        let choices = telegram_model_choices(spec)?;
+        if choices.is_empty() {
+            return self
+                .start_pending_cli_session(chat_id, proj_idx, session_id, String::new())
+                .await;
         }
+        let rows: InlineKeyboardRows = choices
+            .iter()
+            .enumerate()
+            .map(|(model_idx, choice)| {
+                let data = telegram_model_pick_callback(model_idx, proj_idx, session_id);
+                debug_assert!(
+                    data.len() <= 64,
+                    "Telegram callback_data exceeds 64 bytes: len={} data={data:?}",
+                    data.len()
+                );
+                vec![(choice.label.clone(), data)]
+            })
+            .collect();
+        let intro = format!("Choose a model for the {} session:", spec.id);
         self.sender
-            .send_message_with_keyboard(chat_id, "Choose a model for the Claude CLI session:", rows)
+            .send_message_with_keyboard(chat_id, &intro, rows)
             .await?;
         Ok(())
+    }
+
+    /// The CLI agent the pending session at `session_dir` was started for — the registry's spec for
+    /// the session type its changeset records.
+    pub(super) fn pending_session_agent(
+        &self,
+        session_dir: &Path,
+    ) -> anyhow::Result<&tddy_coding_agent_specs::CodingAgentSpec> {
+        let session_type = read_changeset_routing_snapshot(session_dir)?
+            .session_type
+            .unwrap_or_default();
+        self.coding_agents
+            .for_session_type(&session_type)
+            .ok_or_else(|| TelegramPickRefusal::UnknownSessionType { session_type }.into())
     }
 
     /// The session that already owns `branch`, by the one rule every surface shares
@@ -452,21 +468,21 @@ impl<S: TelegramSender + Send + Sync> TelegramSessionControlHarness<S> {
         .map_err(|e| anyhow::anyhow!("branch owner scan join: {e}"))?
     }
 
-    /// Offer the three branch-conflict choices instead of the model picker: switch to the owning
-    /// session, add a second agent to the owned branch, or take the suggested suffixed name.
+    /// Offer the three branch-conflict choices once the start reported the branch held: switch to
+    /// the owning session, add a second agent to the owned branch, or take the suggested suffixed
+    /// name — the one the start's own guard offered.
     ///
     /// Claims nothing — the pending session keeps no branch and no worktree while the operator
     /// decides. Per `docs/ft/daemon/session-branch-conflict.md` § Telegram.
-    async fn send_branch_conflict_keyboard(
+    pub(super) async fn send_branch_conflict_keyboard(
         &self,
         chat_id: i64,
         proj_idx: usize,
         session_id: &str,
         branch: &str,
         owner_session_id: &str,
-        repo_root: &Path,
+        suggested: &str,
     ) -> anyhow::Result<()> {
-        let suggested = first_free_suffixed_branch_name_off_reactor(repo_root, branch).await?;
         let owner_label = telegram_label_for_session_id(owner_session_id);
         let mut rows: InlineKeyboardRows = Vec::new();
         for (label, choice) in [
@@ -569,36 +585,16 @@ impl<S: TelegramSender + Send + Sync> TelegramSessionControlHarness<S> {
                 wf.new_branch_name = Some(suggested);
             }
         }
-        // `write_changeset` does not know the raw routing markers, so they are re-read first and
+        // `write_changeset` does not know the raw routing marker, so it is re-read first and
         // re-applied after — same as the branch callback.
         let pre_snap = read_changeset_routing_snapshot(&session_dir).unwrap_or_default();
         write_changeset(&session_dir, &cs).map_err(|e| anyhow::anyhow!("write changeset: {e}"))?;
         if let Some(ref st) = pre_snap.session_type {
             self.persist_changeset_session_type_marker(&session_dir, st)?;
         }
-        if let Some(ref m) = pre_snap.model {
-            self.persist_changeset_model(&session_dir, m)?;
-        }
 
-        self.send_claude_model_pick_keyboard(chat_id, proj_idx, session_id)
+        self.send_model_pick_keyboard(chat_id, proj_idx, session_id)
             .await
-    }
-
-    async fn send_cursor_model_pick_keyboard(
-        &self,
-        chat_id: i64,
-        proj_idx: usize,
-        session_id: &str,
-    ) -> anyhow::Result<()> {
-        let mut rows: InlineKeyboardRows = Vec::new();
-        for (i, model) in CURSOR_CLI_MODELS.iter().enumerate() {
-            let data = format!("{CB_TELEGRAM_CURSOR_MODEL}{i}|p:{proj_idx}|s:{session_id}");
-            rows.push(vec![(model.label.clone(), data)]);
-        }
-        self.sender
-            .send_message_with_keyboard(chat_id, "Choose a model for the Cursor CLI session:", rows)
-            .await?;
-        Ok(())
     }
 
     pub async fn handle_telegram_agent_callback(

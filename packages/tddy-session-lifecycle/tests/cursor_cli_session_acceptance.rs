@@ -182,30 +182,6 @@ fn start_cursor_cli_request() -> StartSessionRequest {
     }
 }
 
-#[test]
-fn build_cursor_argv_includes_chat_model_and_optional_prompt() {
-    // Given / When
-    let argv = CliSessionManager::build_cursor_argv(
-        "/usr/bin/agent",
-        "gpt-5.3-codex",
-        Some("f8db82db-e154-41d0-ae72-312bdf6d4d80"),
-        Some("fix the bug"),
-    );
-
-    // Then
-    assert_eq!(
-        argv,
-        vec![
-            "/usr/bin/agent".to_string(),
-            "--resume".to_string(),
-            "f8db82db-e154-41d0-ae72-312bdf6d4d80".to_string(),
-            "--model".to_string(),
-            "gpt-5.3-codex".to_string(),
-            "fix the bug".to_string(),
-        ]
-    );
-}
-
 #[tokio::test]
 async fn cursor_cli_start_with_empty_branch_name_uses_default_branch() {
     let repo_dir = tempfile::tempdir().unwrap();

@@ -126,12 +126,18 @@ async fn start_main_terminal_whose_mouse_modes_have_been_trimmed_away(
     let worktree = tempfile::tempdir().unwrap();
     let stub = write_mouse_tracking_stub(worktree.path());
     let handle = manager
-        .start(
+        .start_with_options(
             SESSION_ID,
             worktree.path().to_path_buf(),
             "claude-opus-4-8",
             stub.to_str().unwrap(),
             None,
+            None,
+            false,
+            false,
+            None,
+            Vec::new(),
+            Vec::new(),
             None,
         )
         .await

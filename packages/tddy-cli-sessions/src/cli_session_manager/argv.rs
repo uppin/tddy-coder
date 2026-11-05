@@ -93,33 +93,4 @@ impl CliSessionManager {
         }
         argv
     }
-
-    /// Build the argv for the Cursor Agent CLI process.
-    ///
-    /// Arg order: `[binary, "--resume", chat_id, "--model", model, prompt?]`. `model` is omitted
-    /// when empty. `initial_prompt` is appended as a positional arg when non-empty (trimmed).
-    ///
-    /// `chat_id` is the Cursor chat the session owns (`cursor-agent create-chat`); passing it keeps
-    /// every spawn — first start and each resume — in the same chat. The `--resume` pair is emitted
-    /// only when a non-empty id is given: `--resume` takes an *optional* argument, so a bare flag
-    /// drops the CLI into an interactive chat picker that would wedge the PTY.
-    ///
-    /// The argv is the `cursor-cli` harness descriptor's ([`tddy_core::cli_harness::cli_harness`]).
-    pub fn build_cursor_argv(
-        binary_path: &str,
-        model: &str,
-        chat_id: Option<&str>,
-        initial_prompt: Option<&str>,
-    ) -> Vec<String> {
-        registered_argv(
-            "cursor-cli",
-            &CliLaunch {
-                binary: binary_path,
-                model,
-                conversation_id: chat_id,
-                initial_prompt,
-                ..CliLaunch::default()
-            },
-        )
-    }
 }

@@ -348,13 +348,19 @@ async fn claude_cli_session_pty_argv_includes_default_permission_mode() {
 
     // When
     let handle = manager
-        .start(
+        .start_with_options(
             "perm-mode-default-pty",
             worktree_dir.path().to_path_buf(),
             "claude-opus-4-8",
             stub_path.to_str().unwrap(),
             None, // initial_prompt
             None, // permission_mode → must default to "auto"
+            false,
+            false,
+            None,
+            Vec::new(),
+            Vec::new(),
+            None,
         )
         .await
         .expect("start with echo-argv stub and no permission_mode must succeed");
@@ -387,13 +393,19 @@ async fn claude_cli_session_pty_argv_includes_explicit_permission_mode() {
 
     // When
     let handle = manager
-        .start(
+        .start_with_options(
             "perm-mode-bypass-pty",
             worktree_dir.path().to_path_buf(),
             "claude-opus-4-8",
             stub_path.to_str().unwrap(),
             None,
             Some("bypassPermissions"),
+            false,
+            false,
+            None,
+            Vec::new(),
+            Vec::new(),
+            None,
         )
         .await
         .expect("start with bypassPermissions must succeed");
@@ -657,13 +669,19 @@ async fn resume_pty_argv_uses_default_permission_mode() {
 
     // Start with bypassPermissions.
     let _h1 = manager
-        .start(
+        .start_with_options(
             "perm-resume-test",
             worktree_dir.path().to_path_buf(),
             "claude-opus-4-8",
             stub_path.to_str().unwrap(),
             None,
             Some("bypassPermissions"),
+            false,
+            false,
+            None,
+            Vec::new(),
+            Vec::new(),
+            None,
         )
         .await
         .expect("initial start with bypassPermissions must succeed");

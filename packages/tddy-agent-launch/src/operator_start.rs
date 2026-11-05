@@ -13,7 +13,10 @@ use tddy_rpc::{Response, Status};
 use tddy_service::proto::session::{StartSessionRequest, StartSessionResponse};
 use tddy_session_files::attachment_progress::AttachmentProgressSink;
 
+use tddy_task::CancellationToken;
+
 use crate::launch_ports::LaunchSessions;
+use crate::placement::classify_start_placement;
 
 impl LaunchSessions {
     /// Start `req` as `os_user`, an operator a satellite identified. Refused like
@@ -26,10 +29,30 @@ impl LaunchSessions {
         req: StartSessionRequest,
         progress: &AttachmentProgressSink,
     ) -> Result<Response<StartSessionResponse>, Status> {
-        // TODO(telegram-spec-launch): implement — `refuse_a_requested_role`,
-        // `apply_harness_profile`, `refuse_a_conflicting_tmux_run_start`, then `start_here` with
-        // `os_user`, no agent def and a local placement (`classify_start_placement`).
-        let _ = (os_user, req, progress);
-        todo!("telegram-spec-launch: LaunchSessions::start_session_for_os_user")
+        if !req.session_token.trim().is_empty() {
+            return Err(Status::invalid_argument(
+                "an operator start is keyed by its OS user and carries no session token",
+            ));
+        }
+        if !req.daemon_instance_id.trim().is_empty() {
+            return Err(Status::invalid_argument(
+                "an operator start runs on this daemon and may not name a peer daemon",
+            ));
+        }
+        crate::harness_profile_request::refuse_a_requested_role(&req)?;
+        let req = self.apply_harness_profile(req)?;
+        crate::start_request_checks::refuse_a_conflicting_tmux_run_start(&req)?;
+        let (local_id, eligible_ids) = self.eligible_daemon_ids();
+        let placement =
+            classify_start_placement(&req, self.coding_agents.as_deref(), local_id, eligible_ids)?;
+        self.start_here(
+            req,
+            os_user,
+            None,
+            placement,
+            progress,
+            &CancellationToken::new(),
+        )
+        .await
     }
 }

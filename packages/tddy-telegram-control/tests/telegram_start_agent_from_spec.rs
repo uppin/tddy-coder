@@ -132,8 +132,10 @@ impl AStubBin {
         std::fs::canonicalize(self.dir.path()).unwrap()
     }
 
+    /// The stub's canonical path — the one the launch renders into the argv (a macOS tempdir is
+    /// reached through the `/private` symlink).
     fn binary(&self, name: &str) -> PathBuf {
-        self.dir.path().join(name)
+        self.path().join(name)
     }
 
     fn records_of(&self, name: &str) -> PathBuf {

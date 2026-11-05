@@ -141,7 +141,7 @@ impl LaunchSessions {
     }
 
     /// Start `req` on this daemon, the route and the placement already decided.
-    async fn start_here(
+    pub(crate) async fn start_here(
         &self,
         req: StartSessionRequest,
         os_user: &str,

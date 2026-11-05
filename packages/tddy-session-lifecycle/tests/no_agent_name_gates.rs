@@ -192,12 +192,8 @@ const AGENT_ID_TOKENS: &[&str] = &[
     "CURSOR_AGENT_ID",
 ];
 
-/// The `tddy-agent-launch` sources the scan may still find an agent id in, until
-/// `#agent-tools 18/19` (`telegram-spec-launch`) routes Telegram through the one launch. Empty:
-/// what Telegram still calls in this crate (`chat::install_cursor_hooks_in_worktree`,
-/// `chat::mint_cursor_chat_id`, re-exported through `cursor_cli_spawn`) names no agent, and its
-/// `CliSessionManager::{start, start_cursor}` live in `tddy-cli-sessions`, which this scan does not
-/// read.
+/// The `tddy-agent-launch` sources the scan may still find an agent id in. Empty: Telegram now
+/// starts through the one launch (`#agent-tools 18/19`), so nothing is kept for it.
 const STILL_NEEDED_BY_TELEGRAM: &[&str] = &[];
 
 /// One production line of `tddy-agent-launch` that names an agent.

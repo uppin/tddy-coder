@@ -108,9 +108,11 @@ impl LateBoundSessionStarter {
 
     /// Bind the host's starter. A second bind is refused, the first kept: a daemon has one host.
     pub fn bind(&self, starter: Arc<dyn SessionStarter>) -> Result<(), Status> {
-        // TODO(telegram-spec-launch): implement
-        let _ = starter;
-        todo!("telegram-spec-launch: LateBoundSessionStarter::bind")
+        self.bound.set(starter).map_err(|_| {
+            Status::failed_precondition(
+                "a session starter is already bound on this daemon; the first is kept",
+            )
+        })
     }
 }
 
@@ -120,10 +122,10 @@ impl SessionStarter for LateBoundSessionStarter {
         &self,
         start: OperatorSessionStart,
     ) -> Result<OperatorStartOutcome, Status> {
-        // TODO(telegram-spec-launch): implement — forward to the bound starter; refuse with
-        // `not_bound` before the bind.
-        let _ = (&self.bound, start);
-        todo!("telegram-spec-launch: LateBoundSessionStarter::start_for_operator")
+        match self.bound.get() {
+            Some(starter) => starter.start_for_operator(start).await,
+            None => Err(not_bound(&start)),
+        }
     }
 }
 
