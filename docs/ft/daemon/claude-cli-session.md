@@ -436,7 +436,8 @@ run:
     - { if: resume, then: ["--resume", "{session_id}"], else: ["--session-id", "{session_id}"] }
     - if: dangerously_skip_permissions
       then: ["--dangerously-skip-permissions"]
-      else: ["--permission-mode", "{permission_mode}"]
+      else:
+        - { if: permission_mode, then: ["--permission-mode", "{permission_mode}"], else: ["--permission-mode", "auto"] }
     - { splice: slots }                   # the slot flags, before the prompt
     - { if: prompt, then: ["{prompt}"] }
   env: {}
@@ -448,6 +449,8 @@ extensions:
     permission_prompt: { flag: --permission-prompt-tool }
     instructions: { files: [CLAUDE.md, AGENTS.md], append_system_prompt: { flag: --append-system-prompt-file } }
     hooks: { adapter: claude-settings-local }
+    conversation: { kind: daemon_session_id }   # --session-id on a start, --resume on a resume
+    capabilities: [hooks, managed_workflow, ask_user_question, split_host, project_home_main, requires_model, branch_name_required, operator_notify]
     models: { default: opus, curated: [opus, sonnet, haiku, …] }
     context_globs: [AGENTS.md, ".agents/**", CLAUDE.md, ".claude/**", .mcp.json]
 ```
@@ -483,6 +486,38 @@ extensions:
 A host without coding agents keeps the hand-built argv. Only the session-lifecycle suites build such
 a host; the daemon always installs coding agents. The sandboxed `claude-cli` path renders the same
 definition through the jail launcher ([§ The jail](#the-jail-from-the-claude-tool-definition)).
+
+### The generic CLI spec launch serves Claude's needs
+
+The generic CLI launch — the one every agent without a bespoke path takes, `<id>-cli` for a
+`<tddyhome>/tools/<id>.yaml` — gives an agent what `claude.yaml` declares, each feature keyed on a
+spec slot or capability and never on the agent's id. A copy of `claude.yaml` dropped in under another
+id therefore starts, in tmux, as a project's main and on an ssh checkout with the argv, files and
+environment the `claude-cli` launch produces:
+
+- **Conversation.** `coding_agent.conversation: { kind: daemon_session_id }` binds the daemon's
+  session id: `--session-id <id>` on a start, `--resume <id>` with the recorded model on a resume.
+- **Managed workflow.** `managed_workflow` admits a managed-codebase start; the recipe's prompt is
+  appended through `--append-system-prompt-file` and the workflow is attached once the agent runs. An
+  agent without it is refused `INVALID_ARGUMENT`, naming the agent and `managed_workflow`.
+- **Hooks and notify.** `hooks` writes the hooks adapter's settings file; `operator_notify` appends the
+  notify guidance and gives the agent `tddy-tools notify`'s session variables.
+- **Project-home main.** `project_home_main` admits the role (any other agent is refused, naming the
+  agents that can run main); the role is recorded before the spawn and the main's tools are restricted
+  through the `tool_allow` / `tool_deny` slots and its `tddy-tools --mcp` registration.
+- **tmux.** The spec's rendered argv runs in the session's own tmux session, on a start and a resume.
+- **ssh checkout.** On an ssh checkout the slot files are written on the target over ssh (bounded by
+  the 60 s slot-write deadline; a target that never answers refuses the start `DEADLINE_EXCEEDED`
+  naming the host), never at that path on this host.
+- **No `TDDY_*` variable.** The agent process sees no `TDDY_*` variable but the notify ones its spec
+  declares: a host PTY runs under `env -u` for each the daemon holds, and a tmux pane unsets every
+  one it inherited from the tmux server before it execs the agent. A managed workflow's or a main's
+  `TDDY_*` pair is carried by the agent's tool-server registration (`mcp` env), never the process.
+- **Jail.** The generic jailed start and resume bind the same conversation, permission mode and
+  session id. A managed codebase in a jail is refused `FAILED_PRECONDITION` naming the agent: the
+  generic jailed launch carries no managed workflow yet.
+
+The built-in `claude` id still dispatches to the `claude-cli` launch above.
 
 ### Worktree naming
 

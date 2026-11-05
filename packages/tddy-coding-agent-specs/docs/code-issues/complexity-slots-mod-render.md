@@ -14,6 +14,7 @@
 | Run | Lines | Note |
 |---|---|---|
 | 2026-11-03 | 59 → 65 | #797 pushed it over: the `McpSlot::Unsupported` refusal before the MCP render (6 lines) |
+| 2026-11-05 | 69 (unchanged) | touched by #820 (one line in the module, not in `render`); measured on `origin/feature/agent-tools/route-support` (`3c29698cd`) and HEAD at #820's wrap |
 
 ## What would close it
 

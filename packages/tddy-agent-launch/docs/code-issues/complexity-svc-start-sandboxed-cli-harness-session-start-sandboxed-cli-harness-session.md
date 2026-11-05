@@ -1,12 +1,12 @@
 # complexity: start_sandboxed_cli_harness_session
 
-**Location:** `packages/tddy-agent-launch/src/svc_start_sandboxed_cli_harness_session.rs:76` — `LaunchSessions::start_sandboxed_cli_harness_session`
+**Location:** `packages/tddy-agent-launch/src/svc_start_sandboxed_cli_harness_session.rs:78` — `LaunchSessions::start_sandboxed_cli_harness_session`
 **Category:** complexity
 **Detected:** 2026-10-22 by structural audit — `/pr-wrap` on PR #670 (`#provider-route` 9/9), which added the function
-**Metrics:** **214 lines** (fn line to closing brace) · brace depth 3 · CRAP not measured (no `analyze coverage` run)
+**Metrics:** **239 lines** (fn line to closing brace) · CRAP not measured (no `analyze coverage` run)
 **Thresholds breached:** length 214 > 60 (`/analyze-clean-code`)
 **Restructure:** required — `extract_method` × 4, `/code-restructuring` territory, blocked as below
-**Status:** Open — partially fixed 2026-11-03 by #797 (250 → 214): the launch runs through `launch_jailed`; the pre-launch sequence is still one function — **unclaimed**
+**Status:** Open — regressed 2026-11-05 by #820 (223 → 239) — unclaimed
 **Deferred:** to the #agent-tools sweep node (developer, 2026-11-02) — #797 claimed it and narrowed it, did not close it
 
 ## Measurement history
@@ -38,6 +38,7 @@ Two engine attempts at wrap (`tddy-tools restructure apply`, cold rust-analyzer)
 This is the third copy of the sandboxed start sequence, beside `start_sandboxed_claude_cli_session`
 (348 lines, its own record) and `start_sandboxed_cursor_cli_session` (430). Each copy drifts on its
 own: the jail env, the warm-up gate and the metadata write are written three times.
+| 2026-11-05 | 223 → 239 | **worse by 16** in #820: the jailed start mints or binds the conversation (`start_conversation`), binds the permission mode and the node launcher and records the minted chat; measured on `origin/feature/agent-tools/route-support` (`3c29698cd`) and HEAD at #820's wrap. Not split: restructuring deferred to the `#agent-tools` sweep node (n20) by the developer (2026-11-04) |
 
 ## What would close it
 

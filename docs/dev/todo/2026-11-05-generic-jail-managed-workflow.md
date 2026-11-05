@@ -1,7 +1,7 @@
 # 2026-11-05 — The generic jailed CLI launch wires no managed workflow
 
 **Category:** Gap
-**Owner:** `#agent-tools` n17 `cli-dispatch-collapse` ([#823](https://github.com/uppin/tddy-coder/pull/823)), which deletes the bespoke jailed claude start and so needs this. Code marker: `TODO(cli-spec-features)` at `packages/tddy-agent-launch/src/cli_agent_steps.rs` (`refuse_a_managed_codebase_in_a_jail`).
+**Owner:** `#agent-tools` n17 `cli-dispatch-collapse` ([#823](https://github.com/uppin/tddy-coder/pull/823)) — assigned by the stack orchestrator at #820's wrap (2026-11-05). n17 deletes the bespoke jailed claude start (`claude_jail::launch_jailed_claude`, the only jailed launch that carries a managed workflow), so **n17 must carry the managed workflow in the generic jailed launch before it deletes that path**; deleting it first would turn every sandboxed managed claude-cli start into this refusal. Code marker: `TODO(cli-spec-features)` at `packages/tddy-agent-launch/src/cli_agent_steps.rs` (`refuse_a_managed_codebase_in_a_jail`).
 **Source:** `#agent-tools` 14/19 (#820)
 
 ## What is there
