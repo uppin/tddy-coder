@@ -2,7 +2,7 @@
 //! with no `TDDY_*` variable in its environment, through the `.tddy/session.json` pointer the
 //! backend writes in the agent's working directory (`#agent-tools 15/19`).
 //!
-//! Changeset: `docs/dev/1-WIP/2026-11-04-agent-tools-headless-driver.md`. The command stays the one
+//! Changeset: `docs/dev/changesets/2026-11-05-agent-tools-headless-driver.md`. The command stays the one
 //! every workflow prompt already names, so no prompt changes.
 
 #![cfg(unix)]

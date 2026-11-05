@@ -292,6 +292,16 @@ fn ask_valid_questions_reaches_the_session_it_is_pointed_at() {
 fn ask_and_submit_with_no_session_anywhere_fail_naming_all_three_sources() {
     // Given — no `--socket`, no pointer above the working directory, no `TDDY_SOCKET`
     let nowhere = tempfile::tempdir().expect("a directory with no pointer above it");
+    // A pointer above TMPDIR (a run inside a live session's worktree) would be a real session to
+    // submit to; this test needs none.
+    assert!(
+        matches!(
+            tddy_core::session_pointer::find_session_pointer(nowhere.path()),
+            Ok(None)
+        ),
+        "no session pointer may sit above {}",
+        nowhere.path().display()
+    );
     let questions = r#"{"questions":[{"header":"Scope","question":"Pick","options":[{"label":"A"}],"multiSelect":false}]}"#;
     let valid_json = r##"{"goal":"plan","prd":"# PRD\n\n## Summary\nFeature X"}"##;
 

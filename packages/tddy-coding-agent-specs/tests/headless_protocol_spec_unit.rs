@@ -2,7 +2,7 @@
 //! what each built-in declares, that an unknown word is refused at load naming the file and the
 //! word, and the model listing a renderer hands the backend.
 //!
-//! Changeset: `docs/dev/1-WIP/2026-11-04-agent-tools-headless-driver.md`. The argv goldens
+//! Changeset: `docs/dev/changesets/2026-11-05-agent-tools-headless-driver.md`. The argv goldens
 //! (`headless_render_golden.rs`, `headless_others_render_golden.rs`) stay unchanged: these fields
 //! change no rendered argv.
 

@@ -2,7 +2,7 @@
 //! explicit `--socket`, then the `.tddy/session.json` pointer at or above its cwd, then
 //! `TDDY_SOCKET` — and the error that names all three when none does.
 //!
-//! Changeset: `docs/dev/1-WIP/2026-11-04-agent-tools-headless-driver.md`.
+//! Changeset: `docs/dev/changesets/2026-11-05-agent-tools-headless-driver.md`.
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -25,7 +25,7 @@ fn a_worktree_with_a_pointer() -> AWorktree {
         dir.path().join(".tddy/session.json"),
         serde_json::json!({
             "socket": "/run/tddy/from-pointer.sock",
-            "repo_dir": dir.path().to_string_lossy(),
+            "repo_dir": "/srv/checkouts/app",
             "session_dir": "/var/tddy/sessions/s1",
             "remote": { "TDDY_REMOTE_SESSION_ID": "remote-1" },
         })
@@ -78,6 +78,7 @@ fn an_explicit_socket_wins_over_the_pointer_and_the_environment() {
         session,
         Ok(ResolvedSession {
             socket: PathBuf::from("/run/tddy/from-arg.sock"),
+            repo_dir: None,
             session_dir: None,
             remote: BTreeMap::new(),
             source: SessionSource::Arg,
@@ -99,6 +100,7 @@ fn the_pointer_above_the_cwd_wins_over_the_environment() {
         session,
         Ok(ResolvedSession {
             socket: PathBuf::from("/run/tddy/from-pointer.sock"),
+            repo_dir: Some(PathBuf::from("/srv/checkouts/app")),
             session_dir: Some(PathBuf::from("/var/tddy/sessions/s1")),
             remote: BTreeMap::from([(
                 "TDDY_REMOTE_SESSION_ID".to_string(),
@@ -126,6 +128,7 @@ fn the_environment_is_read_only_when_no_argument_or_pointer_names_a_session() {
         session,
         Ok(ResolvedSession {
             socket: PathBuf::from("/run/tddy/from-env.sock"),
+            repo_dir: None,
             session_dir: Some(PathBuf::from("/var/tddy/sessions/s2")),
             remote: BTreeMap::new(),
             source: SessionSource::Env,

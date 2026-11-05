@@ -1,11 +1,11 @@
 //! Acceptance: the generic headless workflow backend never hangs on a turn and cancels only its
 //! own process group (`#agent-tools 15/19`).
 //!
-//! Changeset: `docs/dev/1-WIP/2026-11-04-agent-tools-headless-driver.md`.
+//! Changeset: `docs/dev/changesets/2026-11-05-agent-tools-headless-driver.md`.
 //!
 //! The renderer is a fixture — the spec-driven one lives in `tddy-coding-agent-specs`, which this
 //! crate cannot name; the parity tests against the real specs are in
-//! `tddy-coder/tests/spec_headless_backend_acceptance.rs`. The agents are shell scripts: a
+//! `tddy-coder/tests/spec_headless_backend.rs`. The agents are shell scripts: a
 //! *sleeper* that starts a grandchild and never ends, and a *quick* one that prints one
 //! stream-json result after a short pause.
 
@@ -182,9 +182,9 @@ async fn is_gone_soon(pid: u32) -> bool {
 #[tokio::test]
 async fn a_turn_that_never_ends_is_cancelled_at_its_deadline_and_its_whole_process_group_is_killed()
 {
-    // Given
+    // Given — a deadline long enough for the stub to record its pids on a loaded machine
     let agent = AStubAgent::that_never_ends();
-    let backend = agent.backend().with_turn_deadline(Duration::from_secs(1));
+    let backend = agent.backend().with_turn_deadline(Duration::from_secs(3));
 
     // When
     let outcome = tokio::time::timeout(NO_HANG, backend.invoke(agent.request()))
@@ -204,7 +204,7 @@ async fn a_turn_that_never_ends_is_cancelled_at_its_deadline_and_its_whole_proce
         ),
         (
             Err(
-                "lark turn did not end within its 1s deadline; its process group was killed"
+                "lark turn did not end within its 3s deadline; its process group was killed"
                     .to_string()
             ),
             true,
@@ -215,9 +215,10 @@ async fn a_turn_that_never_ends_is_cancelled_at_its_deadline_and_its_whole_proce
 
 #[tokio::test]
 async fn two_concurrent_turns_cancel_only_their_own_process() {
-    // Given — a turn that never ends, and one that answers after two seconds, running together
+    // Given — a turn that never ends, and one that answers after six seconds (well after the
+    // cancel and the checks below, even on a loaded machine), running together
     let hanging = AStubAgent::that_never_ends();
-    let answering = AStubAgent::that_answers_after(2, "The plan is ready.");
+    let answering = AStubAgent::that_answers_after(6, "The plan is ready.");
     let hanging_turn = {
         let backend = hanging.backend();
         let request = hanging.request();

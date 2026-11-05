@@ -106,6 +106,8 @@ pub async fn resolve_agent_models(
     }
     // The headless workflow agents have no backend to ask here — theirs is built from a spec, in
     // `tddy-coder`. Claude and Codex cannot enumerate their models; Cursor's binary can.
+    // TODO(spec-backend): these arms, like `build_backend`'s, branch on an agent's name; the listing
+    // comes from the spec's `models` section once `SpecBackend` replaces `AnyBackend` (n16).
     match agent {
         "claude" | "codex" => return Ok(curated_models_for_agent(agent)),
         "cursor" => return list_cursor_models(paths).await,
@@ -127,13 +129,16 @@ async fn list_cursor_models(paths: &BackendCliPaths) -> anyhow::Result<BackendMo
         .cursor_cli_path
         .as_deref()
         .unwrap_or_else(|| Path::new("agent"));
+    let mut command = tokio::process::Command::new(binary);
+    command
+        .arg("--list-models")
+        .stdin(std::process::Stdio::null())
+        .kill_on_drop(true);
+    // The agent's binary sees no `TDDY_*` variable, a model listing included.
+    super::turn_process::strip_tddy_env(command.as_std_mut());
     let output = tokio::time::timeout(
         super::spec_headless::MODEL_LISTING_DEADLINE,
-        tokio::process::Command::new(binary)
-            .arg("--list-models")
-            .stdin(std::process::Stdio::null())
-            .kill_on_drop(true)
-            .output(),
+        command.output(),
     )
     .await
     .with_context(|| format!("{} --list-models did not end in time", binary.display()))?

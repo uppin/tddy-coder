@@ -254,6 +254,36 @@ async fn cancelling_a_headless_turn_kills_the_cli_and_returns_cancelled() {
 }
 
 #[tokio::test]
+async fn a_conversation_turn_that_outlives_its_deadline_fails_and_its_cli_is_killed() {
+    // Given a CLI that would answer only after 30s, in a conversation whose turns may run 1s
+    let cli = a_fake_cli(&claude_stream("cl-1", "never"), 30);
+    let (driver, _) = cli.driver(
+        "claude",
+        CLAUDE_STREAM_JSON,
+        HeadlessCommand {
+            turn_deadline: Some(Duration::from_secs(1)),
+            ..cli.command()
+        },
+    );
+
+    // When a turn runs
+    let ended = tokio::time::timeout(TURN_DEADLINE, driver.prompt_turn("Work".to_string(), None))
+        .await
+        .expect("the turn ended at its deadline, long before the CLI would have answered");
+
+    // Then the turn fails naming its deadline
+    let error = ended
+        .expect_err("a turn that outlived its deadline is an error")
+        .to_string();
+    assert!(
+        error.contains(
+            "claude turn did not end within its 1s deadline; its process group was killed"
+        ),
+        "the error names the agent and the deadline: {error}"
+    );
+}
+
+#[tokio::test]
 async fn headless_tool_calls_become_transcript_updates() {
     // Given
     let cli = a_fake_cli(

@@ -360,6 +360,8 @@ impl DaemonCodingAgentLauncher {
             mcp_server: Some(server),
             renderer: Some(Arc::new(renderer)),
             scratch_dir: Some(scratch_dir),
+            // The driver's own deadline: no conversation turn waits unbounded.
+            turn_deadline: None,
         })
     }
 

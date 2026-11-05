@@ -6,12 +6,15 @@
 //! with the turn, Codex reports progress and hands its tools the remote session, and one stderr rule
 //! holds for every agent.
 //!
-//! Changeset: `docs/dev/1-WIP/2026-11-04-agent-tools-headless-driver.md`. The deadline and
-//! process-group tests are in `tddy-agent-backend/tests/spec_headless_backend_acceptance.rs`.
+//! Changeset: `docs/dev/changesets/2026-11-05-agent-tools-headless-driver.md`. The deadline and
+//! process-group tests are in `tddy-agent-backend/tests/spec_headless_turn_deadline.rs`.
 //!
 //! The host is a fixture whose environment names stub binaries; nothing of the real machine
 //! resolves. Each stub records its argv (one entry per line), the `TDDY_*` variables it sees, the
 //! session pointer and MCP registration it found, then prints one recorded run.
+//!
+//! Every test is `#[serial]`: one sets a `TDDY_*` variable in this process to prove a turn strips
+//! it, and a variable set while another test's turn spawns would reach that turn's stub.
 
 use std::collections::BTreeMap;
 use std::os::unix::fs::PermissionsExt;
@@ -362,6 +365,7 @@ fn the_sessions_pointer(workspace: &AWorkspace) -> serde_json::Value {
 // --- Any agent a spec declares ------------------------------------------------------------------
 
 #[tokio::test]
+#[serial]
 async fn a_headless_agent_declared_only_in_yaml_runs_a_workflow_turn_through_its_named_stream_adapter(
 ) {
     // Given
@@ -394,6 +398,7 @@ async fn a_headless_agent_declared_only_in_yaml_runs_a_workflow_turn_through_its
 }
 
 #[tokio::test]
+#[serial]
 async fn a_spec_without_a_route_section_refuses_a_provider_route() {
     // Given
     let workspace = a_workspace(CodexRun::Succeeds);
@@ -418,6 +423,7 @@ async fn a_spec_without_a_route_section_refuses_a_provider_route() {
 // --- Parity with the bespoke backends -----------------------------------------------------------
 
 #[tokio::test]
+#[serial]
 async fn the_claude_spec_turn_has_the_argv_mcp_config_and_session_id_the_claude_backend_produced() {
     // Given
     let workspace = a_workspace(CodexRun::Succeeds);
@@ -481,6 +487,7 @@ async fn the_claude_spec_turn_has_the_argv_mcp_config_and_session_id_the_claude_
 }
 
 #[tokio::test]
+#[serial]
 async fn the_cursor_spec_turn_prepends_the_system_prompt_and_forces_trust_as_the_cursor_backend_did(
 ) {
     // Given
@@ -537,6 +544,7 @@ async fn the_cursor_spec_turn_prepends_the_system_prompt_and_forces_trust_as_the
 }
 
 #[tokio::test]
+#[serial]
 async fn the_codex_spec_turn_runs_read_only_in_plan_mode_and_reports_the_auth_remediation_on_a_login_failure(
 ) {
     // Given
@@ -600,6 +608,7 @@ async fn the_codex_spec_turn_runs_read_only_in_plan_mode_and_reports_the_auth_re
 }
 
 #[tokio::test]
+#[serial]
 async fn cursor_list_models_runs_the_spec_resolved_binary() {
     // Given — the stub `agent` is named only by the host's `TDDY_CURSOR_AGENT`
     let workspace = a_workspace(CodexRun::Succeeds);
@@ -666,6 +675,7 @@ async fn a_headless_agent_process_sees_no_tddy_variable_even_when_the_daemon_has
 }
 
 #[tokio::test]
+#[serial]
 async fn a_turn_points_its_working_directory_at_the_session_for_a_shell_run_tddy_tools() {
     // Given
     let workspace = a_workspace(CodexRun::Succeeds);
@@ -698,6 +708,7 @@ async fn a_turn_points_its_working_directory_at_the_session_for_a_shell_run_tddy
 }
 
 #[tokio::test]
+#[serial]
 async fn the_mcp_config_a_claude_turn_wrote_is_removed_when_the_turn_ends() {
     // Given
     let workspace = a_workspace(CodexRun::Succeeds);
@@ -728,6 +739,7 @@ async fn the_mcp_config_a_claude_turn_wrote_is_removed_when_the_turn_ends() {
 }
 
 #[tokio::test]
+#[serial]
 async fn a_cursor_turn_git_excludes_the_mcp_config_it_writes_in_the_worktree_and_removes_it_after()
 {
     // Given
@@ -764,6 +776,7 @@ async fn a_cursor_turn_git_excludes_the_mcp_config_it_writes_in_the_worktree_and
 }
 
 #[tokio::test]
+#[serial]
 async fn a_codex_turn_reports_its_exit_as_progress_and_hands_its_tools_the_remote_session() {
     // Given — a codex backend with a progress callback, and a request with a remote and no sink
     let workspace = a_workspace(CodexRun::Succeeds);
@@ -815,6 +828,7 @@ async fn a_codex_turn_reports_its_exit_as_progress_and_hands_its_tools_the_remot
 }
 
 #[tokio::test]
+#[serial]
 async fn every_agents_response_keeps_its_stderr_when_it_left_any() {
     // Given — claude prints a warning on stderr next to a complete stream
     let workspace = a_workspace(CodexRun::Succeeds);

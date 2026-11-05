@@ -2,7 +2,7 @@
 //! workflow turn — `claude -p`, `agent -p`, `codex exec --json`, `oz agent run`, or any agent a
 //! YAML file declares — runs through [`SpecHeadlessBackend`], configured by the agent's spec.
 //!
-//! Changeset: `docs/dev/1-WIP/2026-11-04-agent-tools-headless-driver.md`.
+//! Changeset: `docs/dev/changesets/2026-11-05-agent-tools-headless-driver.md`.
 //!
 //! What differs between agents is data, never a Rust branch on an agent's name:
 //!
@@ -28,8 +28,7 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use crate::adapters::headless::{
-    render_env, turn_workdir, EnvTemplate, HeadlessModelListing, HeadlessProtocol,
-    SystemPromptDelivery,
+    render_env, EnvTemplate, HeadlessModelListing, HeadlessProtocol, SystemPromptDelivery,
 };
 use crate::adapters::{HeadlessInvocation, HeadlessRenderer, HeadlessTurn, StreamSinks};
 use crate::error::BackendError;
@@ -39,7 +38,9 @@ use crate::stream::{self, ProgressEvent};
 use crate::turn_files::TurnFiles;
 
 use super::routed::route_child_env;
-use super::turn_process::{describe_deadline, spawn_turn, strip_tddy_env, TurnCommand, TurnGroup};
+use super::turn_process::{
+    describe_deadline, spawn_turn, strip_tddy_env, TurnCommand, TurnGroup, STDERR_GRACE,
+};
 use super::{
     curated_models_for_agent, BackendModels, CodingBackend, InvokeRequest, InvokeResponse,
     SessionMode,
@@ -50,10 +51,6 @@ const APPROVAL_PROMPT_TOOL: &str = "mcp__tddy-tools__approval_prompt";
 
 /// How long a killed turn is given to wind down before its result is abandoned.
 const KILL_GRACE: Duration = Duration::from_secs(5);
-
-/// How long a finished turn waits for its stderr to close before it keeps what it has read: a
-/// grandchild that inherited the pipe can hold it open.
-const STDERR_GRACE: Duration = Duration::from_secs(2);
 
 /// How long a workflow turn may run before it is cancelled and its process group killed, when the
 /// backend is given no other deadline ([`SpecHeadlessBackend::with_turn_deadline`]).
@@ -274,6 +271,8 @@ struct TurnRead {
     agent_id: String,
     system_text: Option<String>,
     progress_callback: ProgressCallback,
+    /// The request's conversation log, opened for appending.
+    conversation: Option<std::fs::File>,
 }
 
 #[async_trait::async_trait]
@@ -284,7 +283,14 @@ impl CodingBackend for SpecHeadlessBackend {
     /// variable, its stdout read through the adapter, and its exit judged by the adapter — all under
     /// the turn deadline, with a bounded stderr grace.
     async fn invoke(&self, request: InvokeRequest) -> Result<InvokeResponse, BackendError> {
-        let workdir = turn_workdir(request.working_dir.as_deref())?;
+        // A workflow turn runs where the request says — never in whichever directory this process
+        // happens to run in: the turn's files and session pointer are written there.
+        let workdir = request.working_dir.clone().ok_or_else(|| {
+            BackendError::InvocationFailed(format!(
+                "a headless {} turn runs in the request's working directory, and the request names none",
+                self.agent_id()
+            ))
+        })?;
         let system_text = self.system_text(&request)?;
         // A system prompt passed as a file is the request's own, or its inline text in a temporary
         // file the turn removes.
@@ -323,10 +329,7 @@ impl CodingBackend for SpecHeadlessBackend {
                 &workdir,
                 &SessionPointer {
                     socket: socket.clone(),
-                    repo_dir: request
-                        .working_dir
-                        .clone()
-                        .unwrap_or_else(|| workdir.clone()),
+                    repo_dir: workdir.clone(),
                     session_dir: request.session_dir.clone(),
                     remote: request
                         .remote
@@ -342,6 +345,9 @@ impl CodingBackend for SpecHeadlessBackend {
             self.agent_id(),
             super::format_command_for_log(&invocation.program, &invocation.argv, 200)
         );
+        // Opened before the spawn, so a log that cannot be opened refuses the turn with no child to
+        // reap.
+        let conversation = open_conversation_log(&request)?;
         let mut child = spawn_turn(&TurnCommand {
             program: &invocation.program,
             argv: &invocation.argv,
@@ -358,6 +364,7 @@ impl CodingBackend for SpecHeadlessBackend {
             agent_id: self.agent_id().to_string(),
             system_text,
             progress_callback: self.progress_callback.clone(),
+            conversation,
         };
         let mut reader =
             tokio::task::spawn_blocking(move || read_turn(read, child, stdout, stderr, &reaped));
@@ -448,9 +455,17 @@ fn read_turn(
         agent_id,
         system_text,
         progress_callback,
+        mut conversation,
     } = read;
-    let stdout = stdout
-        .ok_or_else(|| BackendError::InvocationFailed("failed to capture stdout".to_string()))?;
+    let Some(stdout) = stdout else {
+        // Never the case for a piped stdout; the child is still reaped, so none is left behind.
+        let _ = child.kill();
+        let _ = child.wait();
+        reaped.store(true, Ordering::SeqCst);
+        return Err(BackendError::InvocationFailed(
+            "failed to capture stdout".to_string(),
+        ));
+    };
     let stderr_reader = stderr.map(read_stderr);
 
     let emit_progress = {
@@ -483,22 +498,6 @@ fn read_turn(
             log::debug!("[tddy-coder debug] {line}");
         }
     };
-    let mut conversation = request
-        .conversation_output_path
-        .as_ref()
-        .map(|path| {
-            std::fs::OpenOptions::new()
-                .create(true)
-                .append(true)
-                .open(path)
-                .map_err(|e| {
-                    BackendError::InvocationFailed(format!(
-                        "failed to open conversation output {}: {e}",
-                        path.display()
-                    ))
-                })
-        })
-        .transpose()?;
     if let Some(file) = conversation.as_mut() {
         let (session_id, is_resume) = request
             .session
@@ -583,6 +582,26 @@ fn read_turn(
         },
         stderr: Some(stderr).filter(|stderr| !stderr.trim().is_empty()),
     })
+}
+
+/// The request's conversation log, opened for appending, when it names one.
+fn open_conversation_log(request: &InvokeRequest) -> Result<Option<std::fs::File>, BackendError> {
+    request
+        .conversation_output_path
+        .as_ref()
+        .map(|path| {
+            std::fs::OpenOptions::new()
+                .create(true)
+                .append(true)
+                .open(path)
+                .map_err(|e| {
+                    BackendError::InvocationFailed(format!(
+                        "failed to open conversation output {}: {e}",
+                        path.display()
+                    ))
+                })
+        })
+        .transpose()
 }
 
 /// A child's stderr, read to its end on a thread of its own.

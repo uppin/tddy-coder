@@ -1,6 +1,6 @@
 //! Where a `tddy-tools` process finds the session it reports to (`#agent-tools 15/19`).
 //!
-//! Changeset: `docs/dev/1-WIP/2026-11-04-agent-tools-headless-driver.md`.
+//! Changeset: `docs/dev/changesets/2026-11-05-agent-tools-headless-driver.md`.
 //!
 //! A headless coding agent's environment carries no `TDDY_*` variable, so the `tddy-tools` it runs
 //! — from its shell (`tddy-tools submit …`, the command every workflow prompt names) or as its MCP
@@ -31,6 +31,8 @@ pub enum SessionSource {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ResolvedSession {
     pub socket: PathBuf,
+    /// The repository the session works in, where the source names one (the pointer does).
+    pub repo_dir: Option<PathBuf>,
     /// The session directory, where the source names one.
     pub session_dir: Option<PathBuf>,
     /// The remote tool environment the pointer carries, by variable name; empty otherwise.
@@ -77,6 +79,7 @@ pub fn resolve_session(
     if let Some(socket) = explicit_socket {
         return Ok(ResolvedSession {
             socket: socket.to_path_buf(),
+            repo_dir: None,
             session_dir: None,
             remote: BTreeMap::new(),
             source: SessionSource::Arg,
@@ -91,6 +94,7 @@ pub fn resolve_session(
     if let Some((path, pointer)) = pointer {
         return Ok(ResolvedSession {
             socket: pointer.socket,
+            repo_dir: Some(pointer.repo_dir),
             session_dir: pointer.session_dir,
             remote: pointer.remote,
             source: SessionSource::PointerFile(path),
@@ -99,6 +103,7 @@ pub fn resolve_session(
     match env(SOCKET_VARIABLE).filter(|socket| !socket.is_empty()) {
         Some(socket) => Ok(ResolvedSession {
             socket: PathBuf::from(socket),
+            repo_dir: None,
             session_dir: env("TDDY_SESSION_DIR")
                 .filter(|dir| !dir.is_empty())
                 .map(PathBuf::from),
@@ -128,18 +133,16 @@ pub fn resolve_current_session(
 /// Makes `session` this process's own environment — `TDDY_SOCKET`, `TDDY_SESSION_DIR`,
 /// `TDDY_REPO_DIR` and the `TDDY_REMOTE_*` pair — so the code that reads them (the MCP server's
 /// relays and path rules, the session tool client) finds the session whichever source named it.
-/// Called once, at startup, before any other thread reads the environment; the agent that ran
-/// this process never had these variables.
+/// Called once, at startup, before the async runtime starts a thread — writing the environment
+/// while another thread reads it is unsound. The agent that ran this process never had these
+/// variables, and a command it runs through the exec tools is started without them.
 pub fn adopt_session(session: &ResolvedSession) {
     std::env::set_var(SOCKET_VARIABLE, &session.socket);
     if let Some(dir) = &session.session_dir {
         std::env::set_var("TDDY_SESSION_DIR", dir);
     }
-    if let SessionSource::PointerFile(path) = &session.source {
-        // The pointer sits at `<repo>/.tddy/session.json`.
-        if let Some(repo) = path.parent().and_then(Path::parent) {
-            std::env::set_var("TDDY_REPO_DIR", repo);
-        }
+    if let Some(repo) = &session.repo_dir {
+        std::env::set_var("TDDY_REPO_DIR", repo);
     }
     for (name, value) in &session.remote {
         std::env::set_var(name, value);

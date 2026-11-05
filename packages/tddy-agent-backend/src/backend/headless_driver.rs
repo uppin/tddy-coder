@@ -31,7 +31,11 @@ use crate::adapters::{HeadlessRenderer, TurnTranscript};
 use crate::error::BackendError;
 
 use super::acp_driver::{AcpDriver, AcpTurnEnd, AcpUpdateSink, McpServerSpec};
-use super::turn_process::{kill_process_group, spawn_turn_command, RunningGroup, TurnCommand};
+use super::spec_headless::DEFAULT_TURN_DEADLINE;
+use super::turn_process::{
+    describe_deadline, kill_process_group, spawn_turn_command, RunningGroup, TurnCommand,
+    STDERR_GRACE,
+};
 use super::SessionMode;
 use transcript::{Ending, Finished};
 
@@ -40,8 +44,6 @@ pub(crate) mod oz_ndjson;
 pub(crate) mod stream_json;
 pub(crate) mod transcript;
 
-/// How long a failed turn waits for its stderr to close before it reads the tail it kept.
-const STDERR_GRACE: Duration = Duration::from_secs(2);
 /// The last stderr lines a failed turn keeps for its error message.
 const STDERR_TAIL_LINES: usize = 20;
 
@@ -76,6 +78,9 @@ pub struct HeadlessCommand {
     /// The agent's declaration each turn's argv is rendered from (`coding_agent.headless`), and the
     /// adapter its stream is read through. A turn without one is refused: no argv is built by hand.
     pub renderer: Option<Arc<dyn HeadlessRenderer>>,
+    /// How long one turn may run before its process group is killed and the turn fails;
+    /// [`DEFAULT_TURN_DEADLINE`] when `None`. No headless wait is unbounded.
+    pub turn_deadline: Option<Duration>,
 }
 
 /// One headless conversation: its CLI, and the CLI's own session id once the first turn named it.
@@ -272,11 +277,17 @@ impl HeadlessDriver {
             .take()
             .map(|stderr| tokio::spawn(drain_stderr(stderr)));
         let mut lines = BufReader::new(stdout).lines();
+        let deadline = self.command.turn_deadline.unwrap_or(DEFAULT_TURN_DEADLINE);
+        let overrun = tokio::time::sleep(deadline);
+        tokio::pin!(overrun);
 
         let mut cancelled = loop {
             tokio::select! {
                 biased;
                 () = cancel.notified() => break true,
+                () = &mut overrun => {
+                    return Err(self.end_overrun(agent, &mut child, pgid, deadline).await);
+                }
                 line = lines.next_line() => match line {
                     Ok(Some(line)) => transcript.push_line(&line),
                     Ok(None) => break false,
@@ -293,6 +304,9 @@ impl HeadlessDriver {
             tokio::select! {
                 biased;
                 () = cancel.notified() => cancelled = true,
+                () = &mut overrun => {
+                    return Err(self.end_overrun(agent, &mut child, pgid, deadline).await);
+                }
                 _ = child.wait() => {}
             }
         }
@@ -324,6 +338,24 @@ impl HeadlessDriver {
             self.store_session(id);
         }
         result
+    }
+
+    /// Ends a turn that outlived its deadline: its process group killed, its child reaped, the
+    /// turn slot's group cleared. Returns the error the turn fails with.
+    async fn end_overrun(
+        &self,
+        agent: &str,
+        child: &mut Child,
+        pgid: Option<u32>,
+        deadline: Duration,
+    ) -> BackendError {
+        kill_turn(child, pgid);
+        let _ = child.wait().await;
+        self.set_pgid(None);
+        BackendError::InvocationFailed(format!(
+            "{agent} turn did not end within its {} deadline; its process group was killed",
+            describe_deadline(deadline)
+        ))
     }
 }
 

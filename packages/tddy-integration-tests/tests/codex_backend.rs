@@ -284,8 +284,8 @@ fn codex_backend_reports_binary_not_found_when_built() {
 
     // Then
     assert!(
-        err.to_lowercase().contains("codex"),
-        "message should name the binary: {err}"
+        err.contains("codex") && err.contains("definitely-no-such-binary-9f3a2c1b"),
+        "the message names the agent and the binary its spec could not resolve: {err}"
     );
 }
 

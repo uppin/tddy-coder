@@ -1,7 +1,7 @@
 //! The session pointer (`#agent-tools 15/19`): how a `tddy-tools` a headless agent runs finds its
 //! session without any `TDDY_*` variable in the agent's environment.
 //!
-//! Changeset: `docs/dev/1-WIP/2026-11-04-agent-tools-headless-driver.md`.
+//! Changeset: `docs/dev/changesets/2026-11-05-agent-tools-headless-driver.md`.
 //!
 //! Before each headless turn the backend writes [`SESSION_POINTER_FILE`] in the agent's working
 //! directory — the session's toolcall socket, its repo and its session directory, and the remote

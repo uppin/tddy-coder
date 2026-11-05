@@ -165,20 +165,14 @@ fn installed_languages() -> Result<index_client::ColdLanguages> {
     Ok(index_client::ColdLanguages { supports, verifies })
 }
 
-#[tokio::main]
-async fn main() -> Result<()> {
+fn main() -> Result<()> {
     init_logging();
 
     let args = Args::parse();
-    let connector = room_connector();
-    // Once, before anything dispatches: a split session's tool calls, roster and conversation calls
-    // all join their room through the tool client's transport.
-    tddy_tools::session_tool_client::install_room_connector(Arc::clone(&connector))
-        .expect("the room transport is installed once, at startup");
-
     // The session this process reports to, found as `tddy_tools::session_source` orders: `--socket`,
     // the pointer a headless turn wrote, `TDDY_SOCKET`. A command that needs one and finds none
-    // says so itself; a pointer that cannot be read stops everything, never skipped.
+    // says so itself; a pointer that cannot be read stops everything, never skipped. Adopted here,
+    // before the runtime starts any thread, because adopting writes this process's environment.
     match tddy_tools::session_source::resolve_current_session(args.socket.as_deref()) {
         Ok(session) => tddy_tools::session_source::adopt_session(&session),
         Err(tddy_tools::session_source::SessionNotFound::Nowhere { .. }) => {}
@@ -187,6 +181,19 @@ async fn main() -> Result<()> {
             std::process::exit(1);
         }
     }
+
+    tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()?
+        .block_on(run(args))
+}
+
+async fn run(args: Args) -> Result<()> {
+    let connector = room_connector();
+    // Once, before anything dispatches: a split session's tool calls, roster and conversation calls
+    // all join their room through the tool client's transport.
+    tddy_tools::session_tool_client::install_room_connector(Arc::clone(&connector))
+        .expect("the room transport is installed once, at startup");
 
     if args.mcp {
         return run_mcp_server().await;

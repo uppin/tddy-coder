@@ -19,6 +19,10 @@ use crate::error::BackendError;
 /// session pointer, never through the environment.
 pub(crate) const TDDY_ENV_PREFIX: &str = "TDDY_";
 
+/// How long a finished turn waits for its stderr to close before it keeps what it has read: a
+/// grandchild that inherited the pipe can hold it open. One grace for workflow and conversation turns.
+pub(crate) const STDERR_GRACE: std::time::Duration = std::time::Duration::from_secs(2);
+
 /// The process groups of the turns running now.
 static RUNNING_GROUPS: Mutex<BTreeSet<u32>> = Mutex::new(BTreeSet::new());
 

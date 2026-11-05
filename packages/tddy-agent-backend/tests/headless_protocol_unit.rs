@@ -2,7 +2,7 @@
 //! — goal hints to params, a route's model, templated env values, each adapter's failure detail and
 //! transcript, the backend's name, and the turn files and session pointer a turn leaves behind.
 //!
-//! Changeset: `docs/dev/1-WIP/2026-11-04-agent-tools-headless-driver.md`.
+//! Changeset: `docs/dev/changesets/2026-11-05-agent-tools-headless-driver.md`.
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};

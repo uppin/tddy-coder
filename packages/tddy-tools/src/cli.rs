@@ -200,7 +200,7 @@ pub async fn run_submit(args: SubmitArgs) -> Result<()> {
         // TODO(headless-driver): this branch used to persist a `branch-review` submission's
         // `review.md` into `TDDY_SESSION_DIR` and report success with no socket — deleted with the
         // local no-session success path; see
-        // `docs/dev/todo/2026-11-05-headless-driver-unplanned-deletions.md`.
+        // `docs/dev/changesets/2026-11-05-agent-tools-headless-driver.md`.
         output_error(&no_session_message(), 1);
     }
 

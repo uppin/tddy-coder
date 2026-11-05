@@ -1,7 +1,7 @@
 //! The files one headless turn writes — its MCP registration and its session pointer — and their
 //! removal when the turn ends (`#agent-tools 15/19`).
 //!
-//! Changeset: `docs/dev/1-WIP/2026-11-04-agent-tools-headless-driver.md`.
+//! Changeset: `docs/dev/changesets/2026-11-05-agent-tools-headless-driver.md`.
 //!
 //! A file under the agent's working directory (Cursor's `.cursor/mcp.json`, the
 //! [`crate::session_pointer::SESSION_POINTER_FILE`]) is git-excluded through the repository's
@@ -115,10 +115,6 @@ impl Drop for TurnFiles {
 
 /// Adds `pattern` (`/.cursor/mcp.json`) to the `info/exclude` of the repository `worktree` is a
 /// checkout of, unless it is there already. Refused when `worktree` is not a git checkout.
-///
-/// TODO(headless-driver): the launcher's `exclude_from_git` (`tddy-session-lifecycle`
-/// `coding_agent_launcher.rs`) is the same code; it moves onto this one when the launcher's
-/// `write_cursor_project_mcp_config` is deleted.
 pub fn exclude_from_git(worktree: &Path, pattern: &str) -> Result<(), BackendError> {
     let not_a_checkout = |detail: String| {
         BackendError::InvocationFailed(format!(
