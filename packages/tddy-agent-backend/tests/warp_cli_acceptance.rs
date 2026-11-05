@@ -6,8 +6,18 @@
 use tddy_agent_backend::cli_harness::{cli_harness, CliHarness, CliLaunch};
 use tddy_agent_backend::cli_harness_warp::{resume_token_from_output, warp_cli_models};
 use tddy_agent_backend::provider_route::{
-    resolve_route, Harness, RouteEndpoints, RouteRefusal, RouteSecret, RouteTarget,
+    resolve_route, RouteEndpoints, RouteRefusal, RouteSecret, RouteTarget,
 };
+
+mod route_agents;
+
+use route_agents::an_agent;
+use tddy_agent_backend::provider_route::RouteShape;
+
+/// Warp's spec: no route section, so no providers.
+fn warp_agent() -> tddy_agent_backend::provider_route::RoutedAgent {
+    an_agent("warp-cli", "Warp", RouteShape::Env, &[], None)
+}
 
 fn warp() -> &'static CliHarness {
     cli_harness("warp-cli").expect("warp-cli is registered")
@@ -39,7 +49,6 @@ fn warps_exit_banner(token: &str) -> Vec<u8> {
 fn warp_is_registered_as_a_cli_harness() {
     // Then
     assert_eq!(warp().label, "Warp");
-    assert_eq!(warp().route_harness, Harness::WarpCli);
     assert_eq!(warp().context_agent, "warp");
     assert_eq!(warp().default_binary, "warp");
     assert_eq!(warp().binary_env, "TDDY_WARP_CLI");
@@ -171,15 +180,16 @@ fn warp_accepts_no_provider_account() {
     // When
     let refusals: Vec<RouteRefusal> = ["anthropic", "fireworks", "meta", "openai"]
         .into_iter()
-        .map(|preset| resolve_route(Harness::WarpCli, &an_account(preset)).expect_err("refused"))
+        .map(|preset| resolve_route(&warp_agent(), &an_account(preset)).expect_err("refused"))
         .collect();
 
     // Then
     assert_eq!(
         refusals,
         vec![
-            RouteRefusal::HarnessCannotBeRouted {
-                harness: Harness::WarpCli
+            RouteRefusal::AgentCannotBeRouted {
+                agent: "warp-cli".to_string(),
+                product: "Warp".to_string(),
             };
             4
         ]

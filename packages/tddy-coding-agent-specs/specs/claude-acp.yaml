@@ -37,6 +37,7 @@ run:
   env: {}
 extensions:
   coding_agent:
+    product: Claude Code
     mcp: { kind: acp-session }
     tool_allow: unsupported
     tool_deny: { acp_meta: claudeCode.options.disallowedTools }

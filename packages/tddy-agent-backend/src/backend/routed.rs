@@ -7,7 +7,7 @@
 //! the file `OPENCODE_CONFIG` names. The other routed harnesses take everything from the environment
 //! and the arguments, and write no file.
 
-use crate::provider_route::{Harness, HarnessRoute, RouteRefusal};
+use crate::provider_route::{HarnessRoute, RouteRefusal};
 
 use super::{
     AnyBackend, ClaudeAcpBackend, ClaudeCodeBackend, CodexAcpBackend, CodexBackend,
@@ -24,8 +24,9 @@ impl AnyBackend {
             AnyBackend::Codex(b) => Ok(AnyBackend::Codex(b.with_provider_route(route))),
             AnyBackend::CodexAcp(b) => Ok(AnyBackend::CodexAcp(b.with_provider_route(route))),
             AnyBackend::OpenCode(b) => Ok(AnyBackend::OpenCode(b.with_provider_route(route))),
-            AnyBackend::Cursor(_) => Err(RouteRefusal::HarnessCannotBeRouted {
-                harness: Harness::Cursor,
+            AnyBackend::Cursor(_) => Err(RouteRefusal::AgentCannotBeRouted {
+                agent: "cursor".to_string(),
+                product: "Cursor".to_string(),
             }
             .to_string()),
             AnyBackend::Stub(_) => Err(

@@ -12676,6 +12676,7 @@ dependencies = [
  "tddy-agent-launch",
  "tddy-bsp",
  "tddy-coder",
+ "tddy-coding-agent-specs",
  "tddy-connectrpc",
  "tddy-core",
  "tddy-credential-sync",

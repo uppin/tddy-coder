@@ -239,8 +239,7 @@ impl CodingAgentSpec {
 
     /// `coding_agent.product`, or the agent id when the spec declares none.
     pub fn product(&self) -> &str {
-        // TODO(route-support): implement — `self.agent.product`, else `self.id`.
-        todo!("route-support: CodingAgentSpec::product")
+        self.agent.product.as_deref().unwrap_or(&self.id)
     }
 }
 
@@ -248,9 +247,16 @@ impl CodingAgentSpec {
 /// support and its `route.key_env`. A spec without a `route` section gives an agent with no
 /// providers, which every route body refuses.
 pub fn routed_agent(spec: &CodingAgentSpec) -> RoutedAgent {
-    // TODO(route-support): implement — id, `product()`, `route_support()`, `route.key_env`.
-    let _ = spec;
-    todo!("route-support: routed_agent")
+    RoutedAgent {
+        id: spec.id.clone(),
+        product: spec.product().to_string(),
+        support: spec.route_support(),
+        key_env: spec
+            .agent
+            .route
+            .as_ref()
+            .and_then(|route| route.key_env.clone()),
+    }
 }
 
 /// `coding_agent.acp`: one ACP launch of the agent (`#agent-tools 11/12`).
@@ -474,7 +480,7 @@ pub struct RouteSlot {
     /// (`provider-route`); `None` for a route with no files.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub files_dir: Option<String>,
-    /// The variable the route's key is handed in (`TDDY_OPENCODE_PROVIDER_KEY`, `META_API_KEY`).
+    /// The variable the route's key is handed in (`OPENCODE_PROVIDER_KEY`, `META_API_KEY`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub key_env: Option<String>,
     /// The providers a route can point the agent at (`#agent-tools 12/12`); empty for an agent that

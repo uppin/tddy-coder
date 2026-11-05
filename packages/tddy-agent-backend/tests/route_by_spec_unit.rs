@@ -2,17 +2,15 @@
 //!
 //! Feature doc: `docs/ft/daemon/provider-accounts.md`. Every agent here is a [`RoutedAgent`] built
 //! in the test — no spec is loaded — so each case shows the (shape, providers) that picks the body.
-//! The Anthropic-env and TOML-args bodies are pinned against the `Harness`-keyed routes they
-//! replace, so a routed Claude Code or Codex launch is byte-identical after the move.
+//! The Anthropic-env and TOML-args bodies are pinned as literals — what the `Harness`-keyed routes
+//! they replaced gave a routed Claude Code and Codex launch, byte for byte.
 
 use pretty_assertions::assert_eq;
 use rstest::rstest;
-use tddy_agent_backend::provider_route::by_spec::{
-    agent_routable, resolve_route, route_supported, RouteRefusal,
-};
 use tddy_agent_backend::provider_route::{
-    bodies_accept, resolve_route as resolve_harness_route, Harness, HarnessRoute, ProviderKind,
-    RouteEndpoints, RouteFile, RouteSecret, RouteShape, RouteSupport, RouteTarget, RoutedAgent,
+    agent_routable, bodies_accept, resolve_route, route_supported, HarnessRoute, ProviderKind,
+    RouteEndpoints, RouteFile, RouteRefusal, RouteSecret, RouteShape, RouteSupport, RouteTarget,
+    RoutedAgent,
 };
 
 const A_KEY: &str = "a-provider-key";
@@ -284,25 +282,63 @@ fn an_env_route_to_meta_for_an_agent_without_a_key_env_is_refused_as_not_yet_rou
 }
 
 #[test]
-fn an_anthropic_env_route_is_byte_identical_to_claude_codes_harness_route() {
+fn an_anthropic_env_route_pins_the_endpoint_and_every_model_alias_and_hands_the_key_as_a_secret() {
     // When
-    let by_spec = resolve_route(&claude(), &a_meta_account()).expect("Claude Code routes");
-    let by_harness =
-        resolve_harness_route(Harness::ClaudeCli, &a_meta_account()).expect("the harness routes");
+    let route = resolve_route(&claude(), &a_meta_account()).expect("Claude Code routes");
 
-    // Then
-    assert_eq!(by_spec, by_harness);
+    // Then — what a routed Claude Code launch has always been given
+    let pinned = |name: &str| (name.to_string(), A_MODEL.to_string());
+    assert_eq!(
+        route,
+        HarnessRoute {
+            env: vec![
+                (
+                    "ANTHROPIC_BASE_URL".to_string(),
+                    "https://api.meta.ai".to_string()
+                ),
+                pinned("ANTHROPIC_MODEL"),
+                pinned("ANTHROPIC_DEFAULT_OPUS_MODEL"),
+                pinned("ANTHROPIC_DEFAULT_SONNET_MODEL"),
+                pinned("ANTHROPIC_DEFAULT_HAIKU_MODEL"),
+                pinned("CLAUDE_CODE_SUBAGENT_MODEL"),
+            ],
+            secret_env: vec![("ANTHROPIC_AUTH_TOKEN".to_string(), RouteSecret::new(A_KEY))],
+            files: Vec::new(),
+            args: vec!["--model".to_string(), A_MODEL.to_string()],
+        }
+    );
 }
 
 #[test]
-fn a_toml_args_route_is_byte_identical_to_codexs_harness_route() {
+fn a_toml_args_route_declares_a_responses_provider_through_config_overrides() {
     // When
-    let by_spec = resolve_route(&codex(), &a_meta_account()).expect("Codex routes on Meta");
-    let by_harness =
-        resolve_harness_route(Harness::Codex, &a_meta_account()).expect("the harness routes");
+    let route = resolve_route(&codex(), &a_meta_account()).expect("Codex routes on Meta");
 
-    // Then
-    assert_eq!(by_spec, by_harness);
+    // Then — what a routed Codex launch has always been given
+    let id = "tddy-route";
+    let args: Vec<String> = [
+        "-c".to_string(),
+        format!("model_provider=\"{id}\""),
+        "-c".to_string(),
+        format!("model_providers.{id}.name=\"Meta\""),
+        "-c".to_string(),
+        format!("model_providers.{id}.base_url=\"https://api.meta.ai/v1\""),
+        "-c".to_string(),
+        format!("model_providers.{id}.env_key=\"TDDY_ROUTE_API_KEY\""),
+        "-c".to_string(),
+        format!("model_providers.{id}.wire_api=\"responses\""),
+        "-m".to_string(),
+        A_MODEL.to_string(),
+    ]
+    .into();
+    assert_eq!(
+        (route.env.clone(), secrets_of(&route), route.args.clone()),
+        (
+            Vec::new(),
+            vec![("TDDY_ROUTE_API_KEY".to_string(), A_KEY.to_string())],
+            args,
+        )
+    );
 }
 
 #[test]

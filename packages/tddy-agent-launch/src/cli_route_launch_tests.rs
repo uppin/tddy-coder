@@ -9,7 +9,9 @@ use std::os::unix::fs::PermissionsExt;
 use tddy_coding_agent_specs::{load_agent_registry, CodingAgentSpec};
 use tddy_core::provider_route::{HarnessRoute, RouteFile, RouteSecret};
 
-use crate::cli_route_launch::{cli_route_launch, launch_model_for, CliRouteLaunch};
+use crate::cli_route_launch::{
+    cli_route_launch, launch_model_for, routed_launch_model, CliRouteLaunch,
+};
 
 /// The built-in spec of the coding agent `id`, as a host loads it.
 fn the_spec(id: &str) -> CodingAgentSpec {
@@ -22,7 +24,7 @@ fn a_fireworks_opencode_route() -> HarnessRoute {
     HarnessRoute {
         env: Vec::new(),
         secret_env: vec![(
-            "TDDY_OPENCODE_PROVIDER_KEY".to_string(),
+            "OPENCODE_PROVIDER_KEY".to_string(),
             RouteSecret::new("a-fireworks-key"),
         )],
         files: vec![RouteFile {
@@ -71,7 +73,7 @@ fn an_opencode_session_on_fireworks_gets_a_config_naming_that_endpoint() {
         Some(written.to_str().expect("utf-8 path"))
     );
     assert_eq!(
-        value_of(&launch.env, "TDDY_OPENCODE_PROVIDER_KEY"),
+        value_of(&launch.env, "OPENCODE_PROVIDER_KEY"),
         Some("a-fireworks-key")
     );
     assert_eq!(launch.args, vec!["--model", "tddy-route/kimi-k2"]);
@@ -140,4 +142,36 @@ fn an_unrouted_opencode_launch_keeps_the_sessions_model() {
 
     // Then
     assert_eq!(model, "fireworks/kimi-k2");
+}
+
+#[test]
+fn a_routed_launch_whose_route_names_the_model_leaves_the_argv_without_one() {
+    // Given — a dropped-in agent whose argv renders `--model {model}` and whose env route also
+    // appends `--model <model>`: the launch would name the model twice
+    let acme = the_spec("muse");
+    let route_args = ["--model".to_string(), "pinned".to_string()];
+
+    // When
+    let (anthropic_env, codex_like, key_only) = (
+        routed_launch_model(&acme, Some(&route_args), "sonnet"),
+        routed_launch_model(
+            &acme,
+            Some(&["-m".to_string(), "pinned".to_string()]),
+            "sonnet",
+        ),
+        routed_launch_model(&acme, Some(&[]), "sonnet"),
+    );
+
+    // Then — the route's argument is the one model on the command line, and a route that names
+    // none (Muse Code's key-only route) leaves the session's own
+    assert_eq!((anthropic_env, codex_like, key_only), ("", "", "sonnet"));
+}
+
+#[test]
+fn an_unrouted_launch_keeps_the_sessions_model_whatever_the_agent() {
+    // Given
+    let muse = the_spec("muse");
+
+    // Then
+    assert_eq!(routed_launch_model(&muse, None, "sonnet"), "sonnet");
 }

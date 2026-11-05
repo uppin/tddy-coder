@@ -35,7 +35,7 @@ use tddy_session_files::attachment_progress::AttachmentProgressSink;
 use tddy_worktree_service::branch_intent::{BranchIntentPolicy, BranchIntentRequest};
 
 use crate::cli_resume_token::{resume_token_recorder, settled_resume_token};
-use crate::cli_route_launch::{launch_model_for, resume_cli_route, start_cli_route};
+use crate::cli_route_launch::{resume_cli_route, routed_launch_model, start_cli_route};
 use crate::cli_session_worktree::{
     provision_cli_worktree, semantic_index_env, CliWorktree, CliWorktreeStart,
 };
@@ -179,7 +179,6 @@ pub(crate) async fn start_cli_harness_session(
     // serve the agent fails the start, and the agent never silently runs on its own setup instead.
     let route = start_cli_route(
         account_access,
-        kind.route,
         &agent.spec,
         route_sources,
         model,
@@ -267,7 +266,11 @@ pub(crate) async fn start_cli_harness_session(
             .git_environment,
     );
 
-    let launch_model = launch_model_for(&agent.spec, route.is_some(), model);
+    let launch_model = routed_launch_model(
+        &agent.spec,
+        route.as_ref().map(|route| route.args.as_slice()),
+        model,
+    );
     let (on_exit, token_arm) =
         resume_token_recorder(session_dir.clone(), resume_token_adapter(&agent.spec)?);
     progress.begin_phase(StartStep::Agent);
@@ -405,7 +408,7 @@ async fn resume_cli_harness_session(
     session: ResumedSession<'_>,
 ) -> Result<Response<ResumeSessionResponse>, Status> {
     let CliSessionAgent { kind, agent, .. } = session_agent;
-    let kind = *kind;
+    let kind = kind.clone();
     let ResumedSession {
         session_id,
         session_dir,
@@ -425,7 +428,7 @@ async fn resume_cli_harness_session(
         )));
     }
 
-    let route = resume_cli_route(account_access, kind.route, &agent.spec, session_dir)?;
+    let route = resume_cli_route(account_access, &agent.spec, session_dir)?;
     let (on_exit, token_arm) = resume_token_recorder(
         session_dir.to_path_buf(),
         resume_token_adapter(&agent.spec)?,

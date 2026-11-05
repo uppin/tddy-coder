@@ -306,7 +306,7 @@ fn a_stub_harness_printing_its_launch(dir: &Path, name: &str) -> PathBuf {
         "#!/bin/sh\n\
          echo \"ARGV: $@\"\n\
          echo \"OPENCODE_CONFIG=$OPENCODE_CONFIG\"\n\
-         echo \"KEY=$TDDY_OPENCODE_PROVIDER_KEY\"\n\
+         echo \"KEY=$OPENCODE_PROVIDER_KEY\"\n\
          echo \"META=$META_API_KEY\"\n\
          cat\n",
     )

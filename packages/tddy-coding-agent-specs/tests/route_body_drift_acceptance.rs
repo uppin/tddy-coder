@@ -12,7 +12,7 @@ use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 use pretty_assertions::assert_eq;
-use tddy_agent_backend::provider_route::by_spec::{agent_routable, resolve_route};
+use tddy_agent_backend::provider_route::{agent_routable, resolve_route};
 use tddy_agent_backend::provider_route::{bodies_accept, RouteEndpoints, RouteSecret, RouteTarget};
 use tddy_coding_agent_specs::{
     builtin_specs, routed_agent, CodingAgentRegistry, CodingAgentSpec, ProviderKind,
@@ -223,5 +223,54 @@ fn an_agent_without_a_route_is_refused_naming_the_product_its_spec_declares() {
             "Cursor cannot be pointed at another provider; it always runs on its own vendor"
                 .to_string()
         )
+    );
+}
+
+#[test]
+fn every_id_a_route_was_once_chosen_by_resolves_through_the_registry_to_its_spec() {
+    // Given — the eleven ids the closed `Harness` table named: tool-session agents and CLI session
+    // types
+    let (_home, registry) = the_builtin_registry();
+
+    // When — an agent id is `get`, a session type is `for_session_type`
+    let resolved: Vec<(String, Option<String>)> = [
+        "claude",
+        "claude-acp",
+        "claude-cli",
+        "codex",
+        "codex-acp",
+        "opencode",
+        "opencode-cli",
+        "muse-cli",
+        "warp-cli",
+        "cursor",
+        "cursor-cli",
+    ]
+    .into_iter()
+    .map(|id| {
+        let spec = registry.get(id).or_else(|| registry.for_session_type(id));
+        (id.to_string(), spec.map(|spec| spec.id.clone()))
+    })
+    .collect();
+
+    // Then — a session type names the agent it runs; an id no spec holds is `None`, never claude
+    let expected = [
+        ("claude", "claude"),
+        ("claude-acp", "claude-acp"),
+        ("claude-cli", "claude"),
+        ("codex", "codex"),
+        ("codex-acp", "codex-acp"),
+        ("opencode", "opencode"),
+        ("opencode-cli", "opencode"),
+        ("muse-cli", "muse"),
+        ("warp-cli", "warp"),
+        ("cursor", "cursor"),
+        ("cursor-cli", "cursor"),
+    ]
+    .map(|(id, spec)| (id.to_string(), Some(spec.to_string())));
+    assert_eq!(resolved, expected.to_vec());
+    assert_eq!(
+        (registry.get("stub"), registry.for_session_type("tool")),
+        (None, None)
     );
 }

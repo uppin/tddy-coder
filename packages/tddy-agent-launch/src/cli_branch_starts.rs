@@ -20,13 +20,14 @@ use crate::harness_from_spec::{resolve_session_agent, CliSessionAgent, CliSessio
 use crate::launch_ports::LaunchSessions;
 use crate::placement::managed_recipe_for;
 use crate::session_provider_route::{
-    sandboxed_start_route, session_route_sources_with_default, start_route,
+    sandboxed_start_route, session_route_sources_with_default, start_route, RouteAgent,
+    CLAUDE_ROUTE_AGENT,
 };
 use crate::start_request_checks::{
     refuse_a_cli_start_without_a_model, refuse_an_unsupported_cli_session_start,
 };
 use tddy_core::output::SESSIONS_SUBDIR;
-use tddy_core::provider_route::{Harness, HarnessRoute};
+use tddy_core::provider_route::HarnessRoute;
 use tddy_service::proto::session::StartSessionRequest;
 use tddy_session_split::split_start::resolve_caller_chosen_session_id;
 
@@ -46,7 +47,15 @@ impl LaunchSessions {
         managed_recipe_for(req)?;
         let access = self.host.session_account_access(&req.session_token);
         let sources = session_route_sources_with_default(req, "claude-cli", &access)?;
-        start_route(&access, Harness::ClaudeCli, &sources, req.model.trim())?;
+        start_route(
+            &access,
+            RouteAgent::OnHost {
+                agents: self.coding_agents.as_deref(),
+                id: CLAUDE_ROUTE_AGENT,
+            },
+            &sources,
+            req.model.trim(),
+        )?;
         Ok(())
     }
 
@@ -107,7 +116,10 @@ impl LaunchSessions {
             .join(&start.session_id);
         sandboxed_start_route(
             &access,
-            Harness::ClaudeCli,
+            RouteAgent::OnHost {
+                agents: self.coding_agents.as_deref(),
+                id: CLAUDE_ROUTE_AGENT,
+            },
             &sources,
             req.model.trim(),
             &session_dir,
@@ -336,7 +348,7 @@ impl LaunchSessions {
             session_route_sources_with_default(req, session_agent.kind.name, &account_access)?;
         crate::opencode_cli_spawn::start_cli_harness_session(
             crate::opencode_cli_spawn::CliHarnessStart {
-                kind: session_agent.kind,
+                kind: session_agent.kind.clone(),
                 agent: &session_agent.agent,
                 config: &self.config,
                 tddy_data_dir: &self.tddy_data_dir,

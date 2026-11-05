@@ -3,9 +3,12 @@
 //!
 //! Feature: docs/ft/coder/1-WIP/PRD-2026-10-18-provider-route-tool-route.md
 
+mod route_agents;
+
+use route_agents::codex_named;
 use tddy_agent_backend::provider_route::{
-    resolve_route, Harness, RouteEndpoints, RouteRefusal, RouteSecret, RouteTarget,
-    CODEX_ROUTE_KEY_ENV, CODEX_ROUTE_PROVIDER_ID,
+    resolve_route, RouteEndpoints, RouteRefusal, RouteSecret, RouteTarget, CODEX_ROUTE_KEY_ENV,
+    CODEX_ROUTE_PROVIDER_ID,
 };
 
 fn on_meta(model: &str) -> RouteTarget {
@@ -23,10 +26,10 @@ fn on_meta(model: &str) -> RouteTarget {
 
 #[test]
 fn codex_on_meta_declares_a_responses_provider_through_config_overrides() {
-    for harness in [Harness::Codex, Harness::CodexAcp] {
+    for harness in ["codex", "codex-acp"].map(codex_named) {
         // When
-        let route = resolve_route(harness, &on_meta("muse-wonder-1.0"))
-            .unwrap_or_else(|refusal| panic!("{harness:?}: {refusal}"));
+        let route = resolve_route(&harness, &on_meta("muse-wonder-1.0"))
+            .unwrap_or_else(|refusal| panic!("{}: {refusal}", harness.id));
 
         // Then
         let id = CODEX_ROUTE_PROVIDER_ID;
@@ -72,10 +75,7 @@ fn codex_refuses_an_account_without_responses() {
 
     // Then
     assert!(matches!(
-        resolve_route(Harness::Codex, &fireworks),
-        Err(RouteRefusal::ProtocolNotServed {
-            harness: Harness::Codex,
-            ..
-        })
+        resolve_route(&codex_named("codex"), &fireworks),
+        Err(RouteRefusal::ProtocolNotServed { agent, .. }) if agent == "codex"
     ));
 }

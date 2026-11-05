@@ -64,7 +64,7 @@ use tddy_coding_subagent::{
     OPENCODE, OPENCODE_CONFIG_CONTENT, TDDY_TOOLS_MCP_ARG, TDDY_TOOLS_SERVER,
 };
 use tddy_core::adapters::AdapterRegistry;
-use tddy_core::provider_route::{Harness, HarnessRoute, RouteChoice, RouteSources};
+use tddy_core::provider_route::{HarnessRoute, RouteChoice, RouteSources};
 use tddy_core::{AcpAgentCommand, HeadlessCommand, HeadlessHarness, McpServerSpec};
 use tddy_daemon_kernel::config::{
     resolve_claude_binary_path, resolve_cursor_binary_path, DaemonConfig,
@@ -256,13 +256,16 @@ impl DaemonCodingAgentLauncher {
             }
             tddy_spawn::supervisor_client::SpawnBackendChoice::ForkedWorker => None,
         };
-        let route = route_from_vault(move |token| {
-            tddy_agent_launch::session_acting_identity::SessionAccountAccess::new(
-                vaults.clone(),
-                Arc::clone(&user_resolver),
-                token,
-            )
-        });
+        let route = route_from_vault(
+            move |token| {
+                tddy_agent_launch::session_acting_identity::SessionAccountAccess::new(
+                    vaults.clone(),
+                    Arc::clone(&user_resolver),
+                    token,
+                )
+            },
+            coding_agents.as_ref().ok().cloned(),
+        );
         let tool_host = tddy_session_split::coding_agent_wiring::CodingAgentToolHost {
             config,
             tddy_data_dir,
@@ -1257,31 +1260,31 @@ impl CodingAgentLauncher for DaemonCodingAgentLauncher {
 }
 
 /// The route resolver for a daemon whose vaults `access_for` reads: resolve the launch's provider
-/// account in the session owner's vault, as a tool session does.
+/// account in the session owner's vault, as a tool session does. The launch's agent is read from
+/// `agents`' registry: a host with none, or an agent it does not know, refuses.
 pub fn route_from_vault(
     access_for: impl Fn(&str) -> tddy_agent_launch::session_acting_identity::SessionAccountAccess
         + Send
         + Sync
         + 'static,
+    agents: Option<Arc<HostCodingAgents>>,
 ) -> RouteResolver {
     Arc::new(move |launch| {
         let Some(account) = launch.def.provider_account.clone() else {
             return Ok(None);
         };
-        let harness =
-            Harness::from_agent_or_session_type(&launch.def.harness).ok_or_else(|| {
-                SubagentError::from(format!(
-                    "'{}' is not a routable harness",
-                    launch.def.harness
-                ))
-            })?;
+        let agent = tddy_agent_launch::session_provider_route::routed_agent_on_host(
+            agents.as_deref(),
+            &launch.def.harness,
+        )
+        .map_err(|status| SubagentError::from(status.message().to_string()))?;
         let sources = RouteSources {
             session: Some(RouteChoice::Account(account)),
             ..RouteSources::default()
         };
         tddy_agent_launch::session_provider_route::resolve_session_route(
             &access_for(&launch.session_token),
-            harness,
+            &agent,
             &sources,
             &launch.def.model,
         )

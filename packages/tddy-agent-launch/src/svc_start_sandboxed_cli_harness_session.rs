@@ -21,7 +21,7 @@ use tddy_session_files::attachment_progress::AttachmentProgressSink;
 use tddy_worktree_service::branch_intent::{BranchIntentPolicy, BranchIntentRequest};
 
 use crate::cli_harness_jail::{jail_route_config_env, require_jail_route, CliJail};
-use crate::cli_route_launch::launch_model_for;
+use crate::cli_route_launch::routed_launch_model;
 use crate::cli_session_worktree::{
     provision_cli_worktree, semantic_index_env, CliWorktree, CliWorktreeStart,
 };
@@ -44,7 +44,7 @@ impl LaunchSessions {
         start: CliStart,
         progress: &AttachmentProgressSink,
     ) -> Result<Response<StartSessionResponse>, Status> {
-        let kind = session_agent.kind;
+        let kind = &session_agent.kind;
         let access = self.host.session_account_access(&req.session_token);
         let sources = session_route_sources_with_default(req, kind.name, &access)?;
         let session_dir = start
@@ -56,7 +56,7 @@ impl LaunchSessions {
             &session_agent.agent.spec,
             sandboxed_start_route(
                 &access,
-                kind.route,
+                (&kind.route).into(),
                 &sources,
                 req.model.trim(),
                 &session_dir,
@@ -82,7 +82,7 @@ impl LaunchSessions {
         route: Option<HarnessRoute>,
         progress: &AttachmentProgressSink,
     ) -> Result<Response<StartSessionResponse>, Status> {
-        let kind = session_agent.kind;
+        let kind = &session_agent.kind;
         let session_id = start.session_id.as_str();
         let session_token = req.session_token.as_str();
         let project_id = req.project_id.trim();
@@ -225,8 +225,11 @@ impl LaunchSessions {
             .as_ref()
             .map(|route| route.args.clone())
             .unwrap_or_default();
-        let launch_model =
-            launch_model_for(&session_agent.agent.spec, route.is_some(), req.model.trim());
+        let launch_model = routed_launch_model(
+            &session_agent.agent.spec,
+            route.as_ref().map(|route| route.args.as_slice()),
+            req.model.trim(),
+        );
         let params = harness_template_params(&HarnessLaunch {
             model: launch_model,
             prompt: Some(&start.initial_prompt),

@@ -31,8 +31,8 @@ use tddy_session_files::attachment_progress::AttachmentProgressSink;
 
 use crate::session_acting_identity::SessionAccountAccess;
 
-use crate::session_provider_route::{start_route, StartRoute};
-use tddy_core::provider_route::{Harness, RouteSources};
+use crate::session_provider_route::{start_route, RouteAgent, StartRoute, CLAUDE_ROUTE_AGENT};
+use tddy_core::provider_route::RouteSources;
 
 use tddy_service::proto::session::start_phase::Step as StartStep;
 
@@ -127,6 +127,7 @@ pub(crate) async fn spawn_claude_cli_session_inner(
         account_access,
         route_sources,
         model,
+        coding_agents,
     )?;
     let identity =
         account_access.session_identity_in(session_id, os_user, &session_dir, Some(&project));
@@ -409,8 +410,13 @@ pub(crate) fn create_routed_session_dir(
     account_access: &SessionAccountAccess,
     route_sources: &RouteSources,
     model: &str,
+    coding_agents: Option<&HostCodingAgents>,
 ) -> Result<(PathBuf, Option<StartRoute>), Status> {
-    let provider_route = start_route(account_access, Harness::ClaudeCli, route_sources, model)?;
+    let agent = RouteAgent::OnHost {
+        agents: coding_agents,
+        id: CLAUDE_ROUTE_AGENT,
+    };
+    let provider_route = start_route(account_access, agent, route_sources, model)?;
     let session_dir = sessions_base.join(SESSIONS_SUBDIR).join(session_id);
     std::fs::create_dir_all(&session_dir)
         .map_err(|e| Status::internal(format!("failed to create session dir: {}", e)))?;

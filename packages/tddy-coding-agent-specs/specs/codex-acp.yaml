@@ -40,6 +40,7 @@ run:
   env: {}
 extensions:
   coding_agent:
+    product: Codex
     mcp: { kind: acp-session }
     tool_allow: unsupported
     tool_deny: unsupported

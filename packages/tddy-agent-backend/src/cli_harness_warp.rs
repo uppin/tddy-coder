@@ -19,7 +19,6 @@
 use crate::adapters::{ResumeTokenAdapter, WarpResumeToken};
 use crate::backend::BackendModels;
 use crate::cli_harness::{CliHarness, CliLaunch, CliModelSource};
-use crate::provider_route::Harness;
 
 /// Warp offers no model to choose from outside its TUI.
 #[must_use]
@@ -59,7 +58,6 @@ pub fn resume_token_from_output(output: &[u8]) -> Option<String> {
 pub const WARP_CLI: CliHarness = CliHarness {
     session_type: "warp-cli",
     label: "Warp",
-    route_harness: Harness::WarpCli,
     context_agent: "warp",
     default_binary: "warp",
     binary_env: "TDDY_WARP_CLI",

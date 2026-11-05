@@ -2,16 +2,18 @@
 //! a [`RoutedAgent`] picks the body, and every refusal names the agent's product — its spec's
 //! `coding_agent.product`, or its id when the spec declares none.
 //!
-//! Feature doc: `docs/ft/daemon/provider-accounts.md`. This is the replacement of the
-//! [`super::Harness`]-keyed entry points beside it; once every caller has moved here those, and
-//! `Harness`, are deleted and these take their names at `provider_route`.
+//! Feature doc: `docs/ft/daemon/provider-accounts.md`. Re-exported at `provider_route`.
 //!
 //! **No fallback**: a spec without `route` is [`RouteRefusal::AgentCannotBeRouted`], never routed
 //! as `env` + Anthropic, and a declared pair no body serves is [`RouteRefusal::NotYetRoutable`],
 //! never a run on the vendor.
 
-use super::support::RoutedAgent;
-use super::{HarnessRoute, RouteTarget};
+use super::codex::toml_args_route;
+use super::support::{bodies_accept, ProviderKind, RouteShape, RoutedAgent};
+use super::{
+    openai_wire, opencode_config, HarnessRoute, RouteEndpoints, RouteTarget,
+    OPENCODE_ROUTE_PROVIDER_ID,
+};
 
 /// Why an agent cannot run on an account. Each carries the agent id, names the agent's product
 /// (the same text a `Harness` refusal had), and says what the operator would have to change.
@@ -64,6 +66,43 @@ impl std::fmt::Display for RouteRefusal {
 
 impl std::error::Error for RouteRefusal {}
 
+const ANTHROPIC_MESSAGES: &str = "anthropic-messages";
+const OPENAI_RESPONSES: &str = "openai-responses";
+const OPENAI_CHAT: &str = "openai-chat";
+const META_PRESET: &str = "meta";
+
+/// The wire protocol a provider is reached over; `None` for Meta, which is a preset.
+fn protocol_of(provider: ProviderKind) -> Option<&'static str> {
+    match provider {
+        ProviderKind::Anthropic => Some(ANTHROPIC_MESSAGES),
+        ProviderKind::OpenaiResponses => Some(OPENAI_RESPONSES),
+        ProviderKind::OpenaiChat => Some(OPENAI_CHAT),
+        ProviderKind::Meta => None,
+    }
+}
+
+/// Whether an account of `preset` serving `protocols` is one `provider` points at.
+fn account_serves(provider: ProviderKind, preset: &str, protocols: &[&str]) -> bool {
+    match protocol_of(provider) {
+        Some(protocol) => protocols.contains(&protocol),
+        None => preset == META_PRESET,
+    }
+}
+
+fn cannot_be_routed(agent: &RoutedAgent) -> RouteRefusal {
+    RouteRefusal::AgentCannotBeRouted {
+        agent: agent.id.clone(),
+        product: agent.product.clone(),
+    }
+}
+
+fn not_yet_routable(agent: &RoutedAgent) -> RouteRefusal {
+    RouteRefusal::NotYetRoutable {
+        agent: agent.id.clone(),
+        product: agent.product.clone(),
+    }
+}
+
 /// Whether `agent` can run on an account of `preset` serving `protocols` (wire spellings:
 /// `"anthropic-messages"`, `"openai-responses"`, `"openai-chat"`), as its declared providers say,
 /// without building a route.
@@ -72,28 +111,210 @@ pub fn route_supported(
     preset: &str,
     protocols: &[&str],
 ) -> Result<(), RouteRefusal> {
-    // TODO(route-support): implement — provider ↔ protocol (anthropic ↔ anthropic-messages,
-    // openai_responses ↔ openai-responses, openai_chat ↔ openai-chat), meta ↔ preset `meta`.
-    let _ = (agent, preset, protocols);
-    todo!("route-support: by_spec::route_supported")
+    supported_among(agent, &agent.support.providers, preset, protocols)
+}
+
+/// [`route_supported`] over `providers`, a subset of the agent's declared ones.
+fn supported_among(
+    agent: &RoutedAgent,
+    providers: &[ProviderKind],
+    preset: &str,
+    protocols: &[&str],
+) -> Result<(), RouteRefusal> {
+    if agent.support.providers.is_empty() {
+        return Err(cannot_be_routed(agent));
+    }
+    if providers
+        .iter()
+        .any(|provider| account_serves(*provider, preset, protocols))
+    {
+        return Ok(());
+    }
+    let needs = protocols_needed(providers);
+    if needs.is_empty() {
+        return Err(RouteRefusal::PresetNotAccepted {
+            agent: agent.id.clone(),
+            product: agent.product.clone(),
+            preset: preset.to_string(),
+        });
+    }
+    Err(RouteRefusal::ProtocolNotServed {
+        agent: agent.id.clone(),
+        product: agent.product.clone(),
+        needs: needs_display_name(&needs),
+    })
+}
+
+/// The protocol providers among `providers`, in order — what an account has to serve one of.
+fn protocols_needed(providers: &[ProviderKind]) -> Vec<ProviderKind> {
+    providers
+        .iter()
+        .copied()
+        .filter(|provider| protocol_of(*provider).is_some())
+        .collect()
+}
+
+/// The protocols an account has to serve one of, spelled for an operator. Closed over the lists a
+/// body table entry can produce.
+fn needs_display_name(needs: &[ProviderKind]) -> &'static str {
+    match needs {
+        [ProviderKind::Anthropic] => "Anthropic Messages",
+        [ProviderKind::OpenaiResponses] => "OpenAI Responses",
+        [ProviderKind::OpenaiChat] => "OpenAI Chat Completions",
+        _ => "OpenAI Responses or OpenAI Chat Completions",
+    }
+}
+
+/// The declared providers a route body exists for and can run — a key-carrying body needs a
+/// `route.key_env` to hand the key in.
+fn served_providers(agent: &RoutedAgent) -> Vec<ProviderKind> {
+    agent
+        .support
+        .providers
+        .iter()
+        .copied()
+        .filter(|provider| bodies_accept(agent.support.shape).contains(provider))
+        .filter(|provider| body_has_its_inputs(agent, *provider))
+        .collect()
+}
+
+fn body_has_its_inputs(agent: &RoutedAgent, provider: ProviderKind) -> bool {
+    match (agent.support.shape, provider) {
+        (RouteShape::Env, ProviderKind::Meta) | (RouteShape::JsonConfigFile, _) => {
+            agent.key_env.is_some()
+        }
+        _ => true,
+    }
 }
 
 /// Whether this build can run `agent` on any provider account at all: `Err` for an agent that
 /// declares no provider, and for a declared pair no body serves.
 pub fn agent_routable(agent: &RoutedAgent) -> Result<(), RouteRefusal> {
-    // TODO(route-support): implement.
-    let _ = agent;
-    todo!("route-support: by_spec::agent_routable")
+    if agent.support.providers.is_empty() {
+        return Err(cannot_be_routed(agent));
+    }
+    if served_providers(agent).is_empty() {
+        return Err(not_yet_routable(agent));
+    }
+    Ok(())
 }
 
-/// What `agent` needs to run on `target`: the body its (shape, provider served) picks.
+/// What `agent` needs to run on `target`: the body its (shape, provider served) picks. The first
+/// declared provider the account serves, among those a body exists for, picks it.
 pub fn resolve_route(
     agent: &RoutedAgent,
     target: &RouteTarget,
 ) -> Result<HarnessRoute, RouteRefusal> {
-    // TODO(route-support): implement — (env, anthropic) → anthropic_env_route, (env, meta) →
-    // key_env_route writing `agent.key_env`, (toml_args, openai_responses) → toml_args_route,
-    // (json_config_file, openai_responses | openai_chat) → json_config_file_route.
-    let _ = (agent, target);
-    todo!("route-support: by_spec::resolve_route")
+    agent_routable(agent)?;
+    let served = served_providers(agent);
+    let protocols = served_protocols(&target.endpoints);
+    supported_among(agent, &served, &target.preset, &protocols)?;
+    let provider = served
+        .iter()
+        .copied()
+        .find(|provider| account_serves(*provider, &target.preset, &protocols))
+        .ok_or_else(|| not_yet_routable(agent))?;
+    match (agent.support.shape, provider) {
+        (RouteShape::Env, ProviderKind::Anthropic) => anthropic_env_route(agent, target),
+        (RouteShape::Env, ProviderKind::Meta) => key_env_route(agent, target),
+        (RouteShape::TomlArgs, _) => toml_args_route(agent, target),
+        (RouteShape::JsonConfigFile, _) => json_config_file_route(agent, target),
+        _ => Err(not_yet_routable(agent)),
+    }
+}
+
+/// The wire spellings of the protocols `endpoints` serves, as [`route_supported`] takes them.
+pub(super) fn served_protocols(endpoints: &RouteEndpoints) -> Vec<&'static str> {
+    [
+        endpoints
+            .anthropic_messages
+            .as_ref()
+            .map(|_| ANTHROPIC_MESSAGES),
+        endpoints
+            .openai_responses
+            .as_ref()
+            .map(|_| OPENAI_RESPONSES),
+        endpoints.openai_chat.as_ref().map(|_| OPENAI_CHAT),
+    ]
+    .into_iter()
+    .flatten()
+    .collect()
+}
+
+/// An agent that reads its endpoint, key and every model choice from the environment (Claude
+/// Code): the base URL is the account's Anthropic Messages root, and each alias a model choice
+/// could fall through to is pinned to `target.model`, so no request reaches Anthropic.
+fn anthropic_env_route(
+    agent: &RoutedAgent,
+    target: &RouteTarget,
+) -> Result<HarnessRoute, RouteRefusal> {
+    let Some(root) = target.endpoints.anthropic_messages.as_ref() else {
+        return Err(RouteRefusal::ProtocolNotServed {
+            agent: agent.id.clone(),
+            product: agent.product.clone(),
+            needs: "Anthropic Messages",
+        });
+    };
+    let mut env = vec![("ANTHROPIC_BASE_URL".to_string(), root.clone())];
+    env.extend(
+        [
+            "ANTHROPIC_MODEL",
+            "ANTHROPIC_DEFAULT_OPUS_MODEL",
+            "ANTHROPIC_DEFAULT_SONNET_MODEL",
+            "ANTHROPIC_DEFAULT_HAIKU_MODEL",
+            "CLAUDE_CODE_SUBAGENT_MODEL",
+        ]
+        .map(|alias| (alias.to_string(), target.model.clone())),
+    );
+    Ok(HarnessRoute {
+        env,
+        secret_env: vec![("ANTHROPIC_AUTH_TOKEN".to_string(), target.api_key.clone())],
+        files: Vec::new(),
+        args: vec!["--model".to_string(), target.model.clone()],
+    })
+}
+
+/// An agent that talks only to Meta (Muse Code): a route on a Meta account needs no endpoint, file
+/// or argument — the account's key alone, as a secret variable in the spec's `route.key_env`. The
+/// route names no model (Meta's model ids need no provider prefix), so a routed launch keeps the
+/// session's own model in its `--model`.
+fn key_env_route(agent: &RoutedAgent, target: &RouteTarget) -> Result<HarnessRoute, RouteRefusal> {
+    let Some(key_env) = agent.key_env.as_ref() else {
+        return Err(not_yet_routable(agent));
+    };
+    Ok(HarnessRoute {
+        env: Vec::new(),
+        secret_env: vec![(key_env.clone(), target.api_key.clone())],
+        files: Vec::new(),
+        args: Vec::new(),
+    })
+}
+
+/// An agent that reads its provider from a JSON file the route names in its environment (OpenCode),
+/// the file reading the key from the spec's `route.key_env` — so the key travels as a secret
+/// variable and never as an argument. The model is selected on the provider the file declares, by
+/// the `--model` argument.
+fn json_config_file_route(
+    agent: &RoutedAgent,
+    target: &RouteTarget,
+) -> Result<HarnessRoute, RouteRefusal> {
+    let Some(key_env) = agent.key_env.as_ref() else {
+        return Err(not_yet_routable(agent));
+    };
+    let Some(wire) = openai_wire(&target.endpoints) else {
+        return Err(RouteRefusal::ProtocolNotServed {
+            agent: agent.id.clone(),
+            product: agent.product.clone(),
+            needs: "OpenAI Responses or OpenAI Chat Completions",
+        });
+    };
+    Ok(HarnessRoute {
+        env: Vec::new(),
+        secret_env: vec![(key_env.clone(), target.api_key.clone())],
+        files: vec![opencode_config(&target.model, wire, key_env)],
+        args: vec![
+            "--model".to_string(),
+            format!("{OPENCODE_ROUTE_PROVIDER_ID}/{}", target.model),
+        ],
+    })
 }

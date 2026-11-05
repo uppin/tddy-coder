@@ -88,8 +88,6 @@ impl CodingAgentRegistry {
     /// `run:` section is a PTY (`claude-cli` → `claude`, a dropped-in `acme.yaml` → `acme-cli`).
     /// `None` for a session type no agent stands for — `tool`, `workspace`, a bare agent id, and the
     /// `-cli` of an agent that runs only over ACP.
-    ///
-    /// Replaces [`crate::spec_for_session_type`]'s closed table.
     pub fn for_session_type(&self, session_type: &str) -> Option<&CodingAgentSpec> {
         let id = session_type.strip_suffix(CLI_SESSION_TYPE_SUFFIX)?;
         self.get(id)

@@ -3,15 +3,15 @@
 //! arguments collected for the PTY.
 //!
 //! What a route needs of its agent is the spec's `coding_agent.route` section
-//! (`tddy-coding-agent-specs`), and the provider harness it is resolved for is the session type's
-//! ([`Harness::from_agent_or_session_type`]).
+//! (`tddy-coding-agent-specs`), and the route's body is chosen by that same spec's support
+//! (`routed_agent`).
 
 use std::io;
 use std::path::Path;
 
-use tddy_coding_agent_specs::CodingAgentSpec;
+use tddy_coding_agent_specs::{routed_agent, CodingAgentSpec};
 use tddy_core::atomic_file::write_atomic_with_mode;
-use tddy_core::provider_route::{choose_route, Harness, HarnessRoute, RouteSources};
+use tddy_core::provider_route::{choose_route, HarnessRoute, RouteSources};
 use tddy_core::{write_session_provider_account, SessionProviderAccount};
 use tddy_rpc::Status;
 
@@ -58,6 +58,23 @@ pub(crate) fn launch_model_for<'a>(
     }
 }
 
+/// The model a launch of `spec` on a route whose arguments are `route_args` names on its own command line: blank when the route
+/// names the model itself in its arguments (`--model` or `-m`) — an agent whose argv already
+/// renders `--model {model}` would otherwise be given two — and [`launch_model_for`]'s rule
+/// otherwise.
+pub(crate) fn routed_launch_model<'a>(
+    spec: &CodingAgentSpec,
+    route_args: Option<&[String]>,
+    model: &'a str,
+) -> &'a str {
+    let route_names_the_model =
+        route_args.is_some_and(|args| args.iter().any(|arg| arg == "--model" || arg == "-m"));
+    if route_names_the_model {
+        return "";
+    }
+    launch_model_for(spec, route_args.is_some(), model)
+}
+
 /// Write `route`'s files into `session_dir` (mode 0600) and collect what the launch needs. An
 /// unrouted launch (`None`) adds nothing and writes nothing.
 pub fn cli_route_launch(
@@ -92,13 +109,12 @@ pub fn cli_route_launch(
     })
 }
 
-/// The launch a start of the `spec` agent (run by `route_harness`) on `model` is given on the account
+/// The launch a start of the `spec` agent on `model` is given on the account
 /// `sources` choose, resolved before anything is spawned. Writes the route's files into `session_dir`
 /// and records the account and model beside them (never the key), so a resume re-applies it. `None`
 /// — and nothing written — when no account was chosen, so the harness runs on the person's own setup.
 pub fn start_cli_route(
     access: &SessionAccountAccess,
-    route_harness: impl Into<Option<Harness>>,
     spec: &CodingAgentSpec,
     sources: &RouteSources,
     model: &str,
@@ -107,10 +123,7 @@ pub fn start_cli_route(
     let Some(account_id) = choose_route(sources) else {
         return Ok(None);
     };
-    let route_harness = route_harness
-        .into()
-        .ok_or_else(crate::session_provider_route::no_provider_route_serves_the_agent)?;
-    let route = route_on_account(access, route_harness, &account_id, model)?;
+    let route = route_on_account(access, &routed_agent(spec), &account_id, model)?;
     let launch = write_cli_route(spec, &route, session_dir)?;
     write_session_provider_account(
         session_dir,
@@ -123,12 +136,11 @@ pub fn start_cli_route(
     Ok(Some(launch))
 }
 
-/// The launch a resumed session of the `spec` agent (run by `route_harness`) is given: the route its
+/// The launch a resumed session of the `spec` agent is given: the route its
 /// start recorded, re-resolved against the owner's vault as it stands now, its files written again.
 /// Nothing for a session on the person's own setup.
 pub fn resume_cli_route(
     access: &SessionAccountAccess,
-    route_harness: impl Into<Option<Harness>>,
     spec: &CodingAgentSpec,
     session_dir: &Path,
 ) -> Result<CliRouteLaunch, Status> {
@@ -136,10 +148,7 @@ pub fn resume_cli_route(
     let Some(model) = model else {
         return Ok(CliRouteLaunch::default());
     };
-    let route_harness = route_harness
-        .into()
-        .ok_or_else(crate::session_provider_route::no_provider_route_serves_the_agent)?;
-    match resolve_session_route(access, route_harness, &sources, &model)? {
+    match resolve_session_route(access, &routed_agent(spec), &sources, &model)? {
         Some(route) => write_cli_route(spec, &route, session_dir),
         None => Ok(CliRouteLaunch::default()),
     }

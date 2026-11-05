@@ -50,11 +50,10 @@ impl std::fmt::Display for ProviderKind {
 /// How a provider route reaches the agent process, named after the body format it is — never
 /// after an agent. `Default` is a parse default only: a spec without a `route` section is not
 /// routable, whatever this says.
-// TODO(route-support): implement — a spec still writing a removed word (`args`, `config_file`) is
-// refused at load naming its replacement ("route.shape `args` was renamed to `toml_args`").
-#[derive(
-    Debug, Clone, Copy, Default, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize,
-)]
+///
+/// A spec still writing a removed word (`args`, `config_file`) is refused at load naming its
+/// replacement (`route.shape `args` was renamed to `toml_args``).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum RouteShape {
     /// Environment variables only (Anthropic Messages' base URL and key, or a key alone).
@@ -64,6 +63,26 @@ pub enum RouteShape {
     TomlArgs,
     /// A JSON configuration file named in the environment (was `config_file`).
     JsonConfigFile,
+}
+
+impl<'de> Deserialize<'de> for RouteShape {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let word = String::deserialize(deserializer)?;
+        match word.as_str() {
+            "env" => Ok(RouteShape::Env),
+            "toml_args" => Ok(RouteShape::TomlArgs),
+            "json_config_file" => Ok(RouteShape::JsonConfigFile),
+            "args" => Err(serde::de::Error::custom(
+                "route.shape `args` was renamed to `toml_args`",
+            )),
+            "config_file" => Err(serde::de::Error::custom(
+                "route.shape `config_file` was renamed to `json_config_file`",
+            )),
+            other => Err(serde::de::Error::custom(format!(
+                "unknown route.shape `{other}`; expected `env`, `toml_args` or `json_config_file`"
+            ))),
+        }
+    }
 }
 
 /// What a route can do with one agent: the providers it can point the agent at, and the shape it
@@ -98,8 +117,9 @@ pub struct RoutedAgent {
 /// The providers a route body exists for in `shape` — what the drift test pins every built-in
 /// spec's `route.providers` against.
 pub fn bodies_accept(shape: RouteShape) -> &'static [ProviderKind] {
-    // TODO(route-support): implement — env: [anthropic, meta]; toml_args: [openai_responses];
-    // json_config_file: [openai_responses, openai_chat].
-    let _ = shape;
-    todo!("route-support: bodies_accept")
+    match shape {
+        RouteShape::Env => &[ProviderKind::Anthropic, ProviderKind::Meta],
+        RouteShape::TomlArgs => &[ProviderKind::OpenaiResponses],
+        RouteShape::JsonConfigFile => &[ProviderKind::OpenaiResponses, ProviderKind::OpenaiChat],
+    }
 }

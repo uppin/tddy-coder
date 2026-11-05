@@ -19,9 +19,8 @@ use tddy_cli_sessions::cli_session_manager::CliSessionManager;
 
 use crate::launch_ports::LaunchSessions;
 use crate::project_home_launch::ResumedFlags;
-use crate::session_provider_route::resume_route_env;
+use crate::session_provider_route::{resume_route_env, RouteAgent, CLAUDE_ROUTE_AGENT};
 use crate::spec_launch::{launch_claude_cli, ClaudeCliLaunch};
-use tddy_core::provider_route::Harness;
 
 impl LaunchSessions {
     /// Handle `ResumeSession` for `session_type = "claude-cli"` sessions.
@@ -294,7 +293,10 @@ impl LaunchSessions {
     ) -> Result<Vec<(String, String)>, Status> {
         let route_env = resume_route_env(
             &self.host.session_account_access(session_token),
-            Harness::ClaudeCli,
+            RouteAgent::OnHost {
+                agents: self.coding_agents.as_deref(),
+                id: CLAUDE_ROUTE_AGENT,
+            },
             session_dir,
         )?;
         Ok(git_environment

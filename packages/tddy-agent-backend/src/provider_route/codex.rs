@@ -1,29 +1,30 @@
-//! The Codex arm of [`super::resolve_route`]: an account declared as a Responses provider through
+//! The `toml_args` arm of [`super::resolve_route`]: an account declared as a Responses provider through
 //! `-c` config overrides.
 
-use super::{route_supported, served_protocols, Harness, HarnessRoute, RouteRefusal, RouteTarget};
+use super::by_spec::served_protocols;
+use super::{route_supported, HarnessRoute, RouteRefusal, RouteTarget, RoutedAgent};
 
 /// Codex reads its providers from `config.toml`, and each override it is given is a `-c` argument.
 /// The account is declared as a Responses provider under [`CODEX_ROUTE_PROVIDER_ID`] and selected
 /// with `model_provider`, so the person's own providers are untouched. The key is named by the
 /// provider's `env_key` and delivered in that variable, never as an argument. `-m` pins the model.
-pub(super) fn codex_route(
-    harness: Harness,
+pub(super) fn toml_args_route(
+    agent: &RoutedAgent,
     target: &RouteTarget,
 ) -> Result<HarnessRoute, RouteRefusal> {
-    route_supported(
-        harness,
-        &target.preset,
-        &served_protocols(&target.endpoints),
-    )?;
+    route_supported(agent, &target.preset, &served_protocols(&target.endpoints))?;
     let Some(root) = target.endpoints.openai_responses.as_deref() else {
         return Err(RouteRefusal::ProtocolNotServed {
-            harness,
+            agent: agent.id.clone(),
+            product: agent.product.clone(),
             needs: "OpenAI Responses",
         });
     };
     let Some(name) = codex_provider_name(&target.preset) else {
-        return Err(RouteRefusal::NotYetRoutable(harness));
+        return Err(RouteRefusal::NotYetRoutable {
+            agent: agent.id.clone(),
+            product: agent.product.clone(),
+        });
     };
     let id = CODEX_ROUTE_PROVIDER_ID;
     Ok(HarnessRoute {

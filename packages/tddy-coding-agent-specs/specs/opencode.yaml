@@ -34,6 +34,7 @@ run:
   env: {}
 extensions:
   coding_agent:
+    product: OpenCode
     mcp: { kind: unsupported }
     tool_allow: unsupported
     tool_deny: unsupported
@@ -57,14 +58,14 @@ extensions:
     # A jail's `$HOME` is the session's own scratch, so the person's own OpenCode setup is not in
     # it: a jailed start without a provider route is refused. The route's configuration file is
     # written owner-only under `<scratch>/provider-route`, `OPENCODE_CONFIG` names it, and the key
-    # it reads is handed in `TDDY_OPENCODE_PROVIDER_KEY`.
+    # it reads is handed in `OPENCODE_PROVIDER_KEY`.
     route:
       required_in_jail: true
       providers: [openai_responses, openai_chat]
       shape: json_config_file
       config_env: OPENCODE_CONFIG
       files_dir: provider-route
-      key_env: TDDY_OPENCODE_PROVIDER_KEY
+      key_env: OPENCODE_PROVIDER_KEY
     placements: [host, jail]
     # --- ACP (`#agent-tools 11/12`): `opencode acp`, behind an `opencode` coding subagent and the
     # `opencode` workflow backend (`tddy-coder --agent opencode`). It renders what the launcher and

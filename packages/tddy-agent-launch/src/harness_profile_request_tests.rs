@@ -61,6 +61,11 @@ fn a_profile(harness: &str, provider_account: &str) -> HarnessProfile {
     }
 }
 
+/// The built-in coding agents, as a host without overrides has them.
+fn the_agents() -> tddy_coding_agent_specs::CodingAgentRegistry {
+    tddy_coding_agent_specs::CodingAgentRegistry::builtin().expect("the built-ins load")
+}
+
 fn a_start_as_the_profile() -> StartSessionRequest {
     StartSessionRequest {
         session_token: ADAS_SESSION.to_string(),
@@ -79,6 +84,7 @@ fn a_cli_profile_starts_its_session_type_on_its_account_and_model() {
         a_start_as_the_profile(),
         &a_profile("claude-cli", "Meta hackathon"),
         &access,
+        &the_agents(),
     )
     .expect("the profile starts");
 
@@ -99,6 +105,7 @@ fn a_tool_session_profile_starts_its_agent() {
         a_start_as_the_profile(),
         &a_profile("codex", "meta-hackathon"),
         &access,
+        &the_agents(),
     )
     .expect("the profile starts");
 
@@ -117,8 +124,13 @@ fn the_requests_own_model_is_kept() {
     };
 
     // When
-    let req = request_on_profile(start, &a_profile("claude-cli", "meta-hackathon"), &access)
-        .expect("the profile starts");
+    let req = request_on_profile(
+        start,
+        &a_profile("claude-cli", "meta-hackathon"),
+        &access,
+        &the_agents(),
+    )
+    .expect("the profile starts");
 
     // Then
     assert_eq!(req.model, "muse-spark");
@@ -137,8 +149,13 @@ fn a_session_level_account_wins_over_the_profiles() {
     };
 
     // When
-    let req = request_on_profile(start, &a_profile("claude-cli", "meta-hackathon"), &access)
-        .expect("the profile starts");
+    let req = request_on_profile(
+        start,
+        &a_profile("claude-cli", "meta-hackathon"),
+        &access,
+        &the_agents(),
+    )
+    .expect("the profile starts");
 
     // Then
     assert_eq!(req.provider_account_id, "meta-work");
@@ -154,8 +171,13 @@ fn a_session_that_chose_built_in_runs_the_profiles_harness_on_its_vendor() {
     };
 
     // When
-    let req = request_on_profile(start, &a_profile("claude-cli", "meta-hackathon"), &access)
-        .expect("the profile starts");
+    let req = request_on_profile(
+        start,
+        &a_profile("claude-cli", "meta-hackathon"),
+        &access,
+        &the_agents(),
+    )
+    .expect("the profile starts");
 
     // Then
     assert_eq!(req.session_type, "claude-cli");
@@ -173,6 +195,7 @@ fn a_profile_naming_an_account_the_person_does_not_hold_is_refused_with_the_reas
         a_start_as_the_profile(),
         &a_profile("claude-cli", "fireworks-main"),
         &access,
+        &the_agents(),
     )
     .expect_err("no such account");
 
@@ -195,6 +218,7 @@ fn a_profile_naming_no_harness_is_refused() {
         a_start_as_the_profile(),
         &a_profile("vim", "meta-hackathon"),
         &access,
+        &the_agents(),
     )
     .expect_err("vim is no harness");
 
