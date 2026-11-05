@@ -6,7 +6,7 @@ use std::thread;
 use std::time::Duration;
 
 use tddy_core::workflow::recipe::WorkflowRecipe;
-use tddy_core::{AnyBackend, Presenter, SharedBackend, StubBackend};
+use tddy_core::{Presenter, SharedBackend};
 use tddy_service::start_virtual_tui_session;
 use tddy_tui_testkit::TuiTestkit;
 use tddy_workflow_recipes::{BugfixRecipe, FreePromptingRecipe, TddRecipe};
@@ -41,7 +41,7 @@ fn spawn_stub_presenter_with_recipe(
     let presenter = Presenter::new("stub", "opus", recipe, output_dir.clone())
         .with_broadcast(event_tx)
         .with_intent_sender(intent_tx);
-    let backend = SharedBackend::from_any(AnyBackend::Stub(StubBackend::new()));
+    let backend = SharedBackend::stub();
     let mut presenter = presenter.with_worktree_dir(output_dir.clone());
     presenter.start_workflow(
         backend,

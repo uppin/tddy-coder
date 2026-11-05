@@ -22,7 +22,7 @@ use crossterm::event::{self, DisableMouseCapture, EnableMouseCapture, Event};
 use crossterm::execute;
 use crossterm::terminal::{EnterAlternateScreen, LeaveAlternateScreen};
 
-use tddy_core::backend::{AnyBackend, SharedBackend, StubBackend};
+use tddy_core::backend::SharedBackend;
 use tddy_core::Presenter;
 use tddy_e2e::rpc_frontend::{encode_resize, event_to_bytes};
 #[cfg(feature = "livekit")]
@@ -77,7 +77,7 @@ fn start_backend(
     let session_dir =
         std::env::temp_dir().join(format!("tddy-rpc-demo-session-{}", uuid::Uuid::new_v4()));
     std::fs::create_dir_all(&session_dir).unwrap();
-    let backend = SharedBackend::from_any(AnyBackend::Stub(StubBackend::new()));
+    let backend = SharedBackend::stub();
     let mut presenter = presenter.with_worktree_dir(output_dir.clone());
     presenter.start_workflow(
         backend,

@@ -41,3 +41,7 @@
 ## Measurement update 2026-11-05 — #agent-tools 15/19 (#821)
 
 **Partly fixed:** 851 → **815 production lines** (seam A closed): the global child-process slot (`CHILD_PID`, `set_child_pid`, `clear_child_pid`, `get_child_pid`, both `kill_child_process` variants) is gone, replaced by per-turn process groups in `backend/turn_process.rs` (`kill_running_turns`); the `AnyBackend` arms for Claude, Cursor and Codex now hold the one `SpecHeadlessBackend`. Seams B–D remain. **Status:** Open — partially fixed 2026-11-05; unclaimed.
+
+## Measurement update 2026-11-05 — #agent-tools 16/19 (#822)
+
+**Partly fixed:** 815 → **728 production lines**: `AnyBackend` and its five delegating matches are gone, replaced by `SpecBackend` in its own file (`backend/spec_backend.rs`); `SharedBackend::from_any` went with it. Seams B–D remain. **Status:** Open — partially fixed 2026-11-05; unclaimed.

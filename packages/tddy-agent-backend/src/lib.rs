@@ -37,7 +37,7 @@ pub use backend::headless_driver::{
 pub use backend::{
     backend_from_label, backend_selection_question, codex_acp_route_args, default_model_for_agent,
     kill_running_turns, preselected_index_for_agent, recipe_cli_name_from_selection_label,
-    spawn_codex_oauth_login, workflow_recipe_selection_question, AgentOutputSink, AnyBackend,
+    spawn_codex_oauth_login, workflow_recipe_selection_question, AgentOutputSink,
     ClarificationQuestion, ClaudeAcpBackend, CodexAcpBackend, CodingBackend, InMemoryToolExecutor,
     InvokeRequest, InvokeResponse, MockBackend, OpenCodeAcpBackend, ProcessToolExecutor,
     QuestionOption, RemoteToolEnv, RunningGroup, SessionMode, SharedBackend, StubBackend,

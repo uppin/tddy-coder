@@ -50,7 +50,7 @@ impl ADroppedInAcpAgent {
     /// The agent reads every request and answers none — not even `initialize`.
     fn that_never_answers(&self) -> AcpAgentCommand {
         let script = self.dir.path().join("acme-acp");
-        std::fs::write(&script, "#!/bin/sh\nexec cat > /dev/null\n").expect("write the agent");
+        std::fs::write(&script, "#!/bin/sh\ncat > /dev/null\n").expect("write the agent");
         std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755))
             .expect("make the agent executable");
         AcpAgentCommand {
@@ -111,11 +111,9 @@ async fn a_dropped_in_acp_agent_that_never_answers_session_new_is_refused_at_its
         outcome
             .map(|response| response.output)
             .map_err(|e| e.to_string()),
-        Err(
-            "backend invocation failed: the ACP agent `acme-acp` did not open a session within \
+        Err("the ACP agent `acme-acp` did not open a session within \
              1s; it is refused rather than waited on"
-                .to_string()
-        )
+            .to_string())
     );
 }
 

@@ -31,9 +31,14 @@ pub fn backend_agent_ids(registry: &CodingAgentRegistry) -> Vec<String> {
 /// [`STUB_BACKEND_ID`]. The daemon feeds them to `ModelRegistryStore::reserving_coding_agent_ids`,
 /// replacing the store's read of `run::BUILTIN_BACKEND_AGENT_IDS`.
 pub fn reserved_agent_ids(registry: &CodingAgentRegistry) -> Vec<String> {
-    // TODO(spec-backend): implement.
-    let _ = registry;
-    todo!("spec-backend: reserved_agent_ids")
+    let mut ids: Vec<String> = registry
+        .all()
+        .into_iter()
+        .map(|spec| spec.id.clone())
+        .collect();
+    ids.sort();
+    ids.push(STUB_BACKEND_ID.to_string());
+    ids
 }
 
 /// The interactive backend selection: one option per [`backend_agent_ids`] entry, labelled by its

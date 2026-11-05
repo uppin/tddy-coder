@@ -11,8 +11,8 @@ use anyhow::Context;
 use serde::Serialize;
 
 use super::{
-    curated_models_for_agent, AnyBackend, BackendModels, ClaudeAcpBackend, CodexAcpBackend,
-    CodingBackend, OpenCodeAcpBackend, StubBackend,
+    curated_models_for_agent, BackendModels, ClaudeAcpBackend, CodexAcpBackend, CodingBackend,
+    OpenCodeAcpBackend, StubBackend,
 };
 use crate::cli_harness::{cli_harness, models_from_listing, CliHarness, CliModelSource};
 
@@ -189,22 +189,26 @@ async fn list_by_binary(
     )))
 }
 
-/// Construct the backend for `agent`, honoring any CLI-path overrides. Errors on an unknown agent.
-fn build_backend(agent: &str, paths: &BackendCliPaths) -> anyhow::Result<AnyBackend> {
-    let backend = match agent.trim() {
-        "claude-acp" => AnyBackend::ClaudeAcp(match &paths.claude_acp_cli_path {
+/// Construct the backend `tddy-tools list-models` asks for `agent`, honoring any CLI-path
+/// overrides. Errors on an unknown agent.
+// TODO(spec-backend): build these from the agents' specs once model listing reads them; the three
+// bespoke ACP backends stay until then. See
+// docs/dev/todo/2026-11-05-model-listing-and-bespoke-acp-backends-remain.md.
+fn build_backend(agent: &str, paths: &BackendCliPaths) -> anyhow::Result<Box<dyn CodingBackend>> {
+    let backend: Box<dyn CodingBackend> = match agent.trim() {
+        "claude-acp" => Box::new(match &paths.claude_acp_cli_path {
             Some(p) => ClaudeAcpBackend::with_agent_path(p.clone()),
             None => ClaudeAcpBackend::new(),
         }),
-        "codex-acp" => AnyBackend::CodexAcp(match &paths.codex_acp_cli_path {
+        "codex-acp" => Box::new(match &paths.codex_acp_cli_path {
             Some(p) => CodexAcpBackend::with_agent_path(p.clone()),
             None => CodexAcpBackend::new(),
         }),
-        "opencode" => AnyBackend::OpenCode(match &paths.opencode_cli_path {
+        "opencode" => Box::new(match &paths.opencode_cli_path {
             Some(p) => OpenCodeAcpBackend::with_agent_path(p.clone()),
             None => OpenCodeAcpBackend::new(),
         }),
-        "stub" => AnyBackend::Stub(StubBackend::new()),
+        "stub" => Box::new(StubBackend::new()),
         other => anyhow::bail!("unknown agent {:?}", other),
     };
     Ok(backend)

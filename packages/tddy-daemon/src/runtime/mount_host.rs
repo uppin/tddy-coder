@@ -57,6 +57,12 @@ impl BuildContext {
         // This daemon's model registry: the providers it talks to, their models, and the
         // assistants composed from them. Opened before ConnectionService so an assistant is
         // listed by `ListAgents` as a selectable `--agent`.
+        // The coding agents this host's `--agent` answers to (built-ins and `<tddyhome>/tools`), so
+        // an assistant cannot take the name of any of them.
+        let reserved_coding_agent_ids = tddy_coder::agent_registry_cli::reserved_agent_ids(
+            tddy_agent_launch::host_coding_agents::host_coding_agents(config, tddy_data_dir)?
+                .agents(),
+        );
         let model_registry = Arc::new(
             tddy_model_registry::ModelRegistryStore::open(
                 &tddy_data_dir.join("models.db"),
@@ -66,7 +72,8 @@ impl BuildContext {
                 &tddy_data_dir.join("agents"),
             )
             .await?
-            .reserving_agent_ids(config.allowed_agents().iter().map(|a| a.id.clone())),
+            .reserving_agent_ids(config.allowed_agents().iter().map(|a| a.id.clone()))
+            .reserving_coding_agent_ids(reserved_coding_agent_ids),
         );
         // The project notification log the project-home inbox tools read: every attention
         // notification of a project's sessions, kept across restarts. Opened before the bus, which

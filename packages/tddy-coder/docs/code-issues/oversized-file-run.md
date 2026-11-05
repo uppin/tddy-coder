@@ -67,3 +67,5 @@ budget before this PR, which did not push it past; recorded, not split, by devel
 **Regressed, split deferred (2026-11-02, #795, #agent-tools 6/12):** 2,626 → 2,638 production lines. `create_backend` takes `tools_dir` and `claude` is built by `claude_from_spec::claude_backend_from_spec` (a new 41-line module, not in `run.rs`). deferred to the #agent-tools sweep node (developer, 2026-11-02).
 
 **Regressed, split deferred (2026-11-04, #800, #agent-tools 11/12):** 2,637 → 2,646 production lines. The `claude-acp`, `codex-acp` and `opencode` arms of `create_backend` are built by `acp_from_spec` (a new 120-line module, not in `run.rs`). Deferred to the #agent-tools sweep node (developer, 2026-11-04).
+
+**Shrank, split still deferred (2026-11-05, #822, #agent-tools 16/19):** 2,646 → **2,502 production lines** (-144). `create_backend` (~120 lines) and `BUILTIN_BACKEND_AGENT_IDS` left for `spec_backend_build.rs` (`create_workflow_backend`, `build_spec_backend`); `on_progress` went. Deferred to the #agent-tools sweep node (n20).

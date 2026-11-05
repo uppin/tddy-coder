@@ -18,9 +18,7 @@ use livekit::prelude::*;
 use prost::Message;
 use serial_test::serial;
 
-use tddy_core::{
-    AnyBackend, Presenter, PresenterEvent, SharedBackend, StubBackend, ViewConnection,
-};
+use tddy_core::{Presenter, PresenterEvent, SharedBackend, ViewConnection};
 use tddy_livekit::{LiveKitParticipant, RpcClient};
 use tddy_livekit_testkit::LiveKitTestkit;
 use tddy_service::proto::acp::{
@@ -96,7 +94,7 @@ fn a_running_presenter() -> (
     let mut presenter = Presenter::new("stub", "opus", Arc::new(TddRecipe), tddy_data_dir)
         .with_broadcast(event_tx)
         .with_intent_sender(intent_tx);
-    let backend = SharedBackend::from_any(AnyBackend::Stub(StubBackend::new()));
+    let backend = SharedBackend::stub();
     let output_dir = std::env::temp_dir().join(format!("tddy-acp-lk-out-{nanos}"));
     std::fs::create_dir_all(&output_dir).unwrap();
     presenter.start_workflow(

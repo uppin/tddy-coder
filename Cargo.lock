@@ -13371,7 +13371,6 @@ dependencies = [
  "serde_yaml",
  "sqlx",
  "tddy-acp",
- "tddy-coder",
  "tddy-daemon",
  "tddy-daemon-kernel",
  "tddy-discovery",
