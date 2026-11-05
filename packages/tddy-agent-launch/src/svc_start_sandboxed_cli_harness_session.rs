@@ -158,6 +158,7 @@ impl LaunchSessions {
                 create_remote_branch: req.create_remote_branch,
                 intent,
                 timeout: self.config.spawn_worker_request_timeout(),
+                ssh_alias: "",
             },
             &stack_parent,
             progress,

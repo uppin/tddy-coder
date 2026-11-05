@@ -12,13 +12,10 @@ use std::path::Path;
 
 use tddy_core::session_metadata::PROJECT_HOME_ROLE;
 use tddy_rpc::Status;
+use tddy_coding_agent_specs::{Capability, CLI_SESSION_TYPE_SUFFIX};
 use tddy_service::proto::session::StartSessionRequest;
 
-/// The one session type that can enforce managed-codebase mode, which is what makes main's
-/// read-only guarantee real. Cursor CLI has no tool allowlist to hold it to
-/// (`docs/dev/todo/2026-08-13-cursor-cli-cannot-enforce-managed-codebase-mode.md`); the other CLI
-/// harnesses and tool sessions have no managed mode at all.
-const READ_ONLY_SESSION_TYPE: &str = "claude-cli";
+use crate::spec_launch::HostCodingAgents;
 
 /// Refuses a spec asking for what main cannot be given: a standing role (granted by the daemon,
 /// never requested — see `LaunchSessions::start_session_core`) or a placement other than the home
@@ -52,11 +49,22 @@ pub(crate) fn refuse_what_main_cannot_honour(spec: &StartSessionRequest) -> Resu
     Ok(())
 }
 
-/// Refuses a start whose session type cannot be held read-only. `req` is the start after its
-/// harness profile was applied, so a profile cannot swap the type in after this check.
-pub(crate) fn refuse_a_type_main_cannot_run(req: &StartSessionRequest) -> Result<(), Status> {
+/// Refuses a start whose session type cannot be held read-only: one whose agent's spec does not
+/// declare `project_home_main` (`#agent-tools 14/19` — it was the literal `claude-cli`). `req` is the
+/// start after its harness profile was applied, so a profile cannot swap the type in after this
+/// check. Cursor CLI has no tool allowlist to hold it to
+/// (`docs/dev/todo/2026-08-13-cursor-cli-cannot-enforce-managed-codebase-mode.md`), and the other
+/// CLI harnesses and tool sessions have no managed mode at all: none of them declares it.
+pub(crate) fn refuse_a_type_main_cannot_run(
+    agents: Option<&HostCodingAgents>,
+    req: &StartSessionRequest,
+) -> Result<(), Status> {
     let session_type = req.session_type.trim();
-    if session_type == READ_ONLY_SESSION_TYPE {
+    let registry = agents.map(HostCodingAgents::agents);
+    let runs_main = registry
+        .and_then(|agents| agents.for_session_type(session_type))
+        .is_some_and(|spec| spec.has(Capability::ProjectHomeMain));
+    if runs_main {
         return Ok(());
     }
     let named = if session_type.is_empty() {
@@ -64,9 +72,20 @@ pub(crate) fn refuse_a_type_main_cannot_run(req: &StartSessionRequest) -> Result
     } else {
         session_type
     };
+    let can_run_main: Vec<String> = registry
+        .map(|agents| {
+            agents
+                .all()
+                .into_iter()
+                .filter(|spec| spec.has(Capability::ProjectHomeMain))
+                .map(|spec| format!("{}{CLI_SESSION_TYPE_SUFFIX}", spec.id))
+                .collect()
+        })
+        .unwrap_or_default();
     Err(Status::failed_precondition(format!(
         "a {named} session cannot enforce managed-codebase mode, so main could not be kept \
-         read-only; only {READ_ONLY_SESSION_TYPE} can run main"
+         read-only; only {} can run main",
+        can_run_main.join(", ")
     )))
 }
 

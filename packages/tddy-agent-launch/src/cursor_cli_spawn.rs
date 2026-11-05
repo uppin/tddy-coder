@@ -218,6 +218,7 @@ pub(crate) async fn spawn_cursor_cli_session_reporting(
             create_remote_branch,
             intent,
             timeout: config.spawn_worker_request_timeout(),
+            ssh_alias: "",
         },
         &stack_parent,
         progress,
@@ -457,6 +458,7 @@ async fn spawn_cursor_from_spec(
             model,
             env,
             os_user: None,
+            without_inherited_tddy: false,
         },
         None,
     )

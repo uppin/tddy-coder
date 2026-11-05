@@ -73,43 +73,14 @@ impl LaunchSessions {
         route_sources: &RouteSources,
         progress: &AttachmentProgressSink,
     ) -> Result<Response<StartSessionResponse>, Status> {
-        // A pr-stack orchestrator gets a child-spawn handler bound to its toolcall listener so the
-        // agent's `pr_spawn_child` relay can materialize planned nodes into child sessions.
-        let child_spawn_handler: Option<Arc<dyn tddy_core::toolcall::ChildSpawnHandler>> =
-            if managed_recipe
-                .as_ref()
-                .is_some_and(|r| r.name() == "pr-stack")
-            {
-                let session_dir = sessions_base.join(SESSIONS_SUBDIR).join(session_id);
-                Some(Arc::new(StackChildSpawnHandler {
-                    stack_parent_host: Arc::new(self.clone()),
-                    service: self.clone(),
-                    config: self.config.clone(),
-                    tddy_data_dir: self.tddy_data_dir.clone(),
-                    claude_cli_manager: Arc::clone(&self.claude_cli_manager),
-                    os_user: os_user.to_string(),
-                    project_id: project_id.to_string(),
-                    sessions_base: sessions_base.clone(),
-                    orchestrator_session_id: session_id.to_string(),
-                    orchestrator_session_dir: session_dir,
-                    account_access: self.host.session_account_access(session_token),
-                }))
-            } else {
-                None
-            };
-        // A grill-me session instead gets a conversation-spawn handler so the agent's
-        // `spawn_conversation` relay can start a fresh implementation conversation.
-        let conversation_spawn_handler = managed_recipe.as_ref().and_then(|recipe| {
-            self.conversation_spawn_handler_for(
-                recipe,
-                os_user,
-                session_id,
-                project_id,
-                &sessions_base,
-                &sessions_base.join(SESSIONS_SUBDIR).join(session_id),
-                self.host.session_account_access(session_token),
-            )
-        });
+        let (child_spawn_handler, conversation_spawn_handler) = self.managed_spawn_handlers(
+            &managed_recipe,
+            os_user,
+            session_id,
+            project_id,
+            &sessions_base,
+            session_token,
+        );
         spawn_claude_cli_session_inner(
             &self.config,
             &self.tddy_data_dir,
@@ -153,6 +124,62 @@ impl LaunchSessions {
             self.coding_agents.as_deref(),
         )
         .await
+    }
+
+    /// The handlers a managed session's toolcall listener is bound to: a pr-stack orchestrator's
+    /// child spawner (the agent's `pr_spawn_child` relay materializes planned nodes into child
+    /// sessions) and, for a grill-me session, the conversation spawner. Neither for any other
+    /// recipe, or for a session with none.
+    pub(crate) fn managed_spawn_handlers(
+        &self,
+        managed_recipe: &Option<Arc<dyn tddy_core::workflow::recipe::WorkflowRecipe>>,
+        os_user: &str,
+        session_id: &str,
+        project_id: &str,
+        sessions_base: &Path,
+        session_token: &str,
+    ) -> (
+        Option<Arc<dyn tddy_core::toolcall::ChildSpawnHandler>>,
+        Option<Arc<dyn tddy_core::toolcall::ConversationSpawnHandler>>,
+    ) {
+        // A pr-stack orchestrator gets a child-spawn handler bound to its toolcall listener so the
+        // agent's `pr_spawn_child` relay can materialize planned nodes into child sessions.
+        let child_spawn_handler: Option<Arc<dyn tddy_core::toolcall::ChildSpawnHandler>> =
+            if managed_recipe
+                .as_ref()
+                .is_some_and(|r| r.name() == "pr-stack")
+            {
+                let session_dir = sessions_base.join(SESSIONS_SUBDIR).join(session_id);
+                Some(Arc::new(StackChildSpawnHandler {
+                    stack_parent_host: Arc::new(self.clone()),
+                    service: self.clone(),
+                    config: self.config.clone(),
+                    tddy_data_dir: self.tddy_data_dir.clone(),
+                    claude_cli_manager: Arc::clone(&self.claude_cli_manager),
+                    os_user: os_user.to_string(),
+                    project_id: project_id.to_string(),
+                    sessions_base: sessions_base.to_path_buf(),
+                    orchestrator_session_id: session_id.to_string(),
+                    orchestrator_session_dir: session_dir,
+                    account_access: self.host.session_account_access(session_token),
+                }))
+            } else {
+                None
+            };
+        // A grill-me session instead gets a conversation-spawn handler so the agent's
+        // `spawn_conversation` relay can start a fresh implementation conversation.
+        let conversation_spawn_handler = managed_recipe.as_ref().and_then(|recipe| {
+            self.conversation_spawn_handler_for(
+                recipe,
+                os_user,
+                session_id,
+                project_id,
+                &sessions_base,
+                &sessions_base.join(SESSIONS_SUBDIR).join(session_id),
+                self.host.session_account_access(session_token),
+            )
+        });
+        (child_spawn_handler, conversation_spawn_handler)
     }
 
     /// Build the per-session [`ConversationSpawnHandler`] for a managed session when its recipe

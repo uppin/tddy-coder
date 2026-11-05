@@ -16,6 +16,23 @@ use async_trait::async_trait;
 /// [`CursorCreateChat`]'s name.
 pub const CURSOR_CREATE_CHAT: &str = "cursor-create-chat";
 
+/// `create-chat` prints a **bare** chat id on stdout and exits 0 ("Create a new empty chat and
+/// return its ID" — cursor-agent 2026.07.23). Anything else — no output, a banner, a prompt, an
+/// error message — is not a chat id, and pinning it to the session would send every later resume
+/// into a chat that does not exist.
+pub fn parse_created_chat_id(stdout: &str) -> Result<String, String> {
+    let chat_id = stdout.trim();
+    if chat_id.is_empty() {
+        return Err("printed no chat id on stdout".to_string());
+    }
+    if chat_id.split_whitespace().count() > 1 {
+        return Err(format!(
+            "printed {chat_id:?} on stdout, which is not a bare chat id"
+        ));
+    }
+    Ok(chat_id.to_string())
+}
+
 /// One mint: the agent's resolved binary, the directory it runs in, the environment set on it on
 /// top of the daemon's, and how long it may take.
 #[derive(Debug, Clone, Copy)]
@@ -72,10 +89,36 @@ impl ConversationIdAdapter for CursorCreateChat {
     }
 
     async fn mint(&self, mint: ConversationMint<'_>) -> Result<String, ConversationMintError> {
-        // TODO(cli-spec-features): implement — `<binary> create-chat` in `workdir` with `env`,
-        // killed at `deadline` (TimedOut); a non-zero exit or a stdout that is not one bare word is
-        // Failed (the rule `tddy_agent_launch::chat::parse_created_chat_id` holds today).
-        let _ = mint;
-        todo!("cli-spec-features: CursorCreateChat::mint")
+        let command = format!("`{} create-chat`", mint.binary.display());
+        let mut child = tokio::process::Command::new(mint.binary);
+        child
+            .arg("create-chat")
+            .current_dir(mint.workdir)
+            .envs(mint.env.iter().map(|(k, v)| (k, v)))
+            .stdin(std::process::Stdio::null())
+            .kill_on_drop(true);
+        // `output()` owns the child; dropping its future at the deadline kills it (`kill_on_drop`).
+        let output = match tokio::time::timeout(mint.deadline, child.output()).await {
+            Err(_) => {
+                return Err(ConversationMintError::TimedOut {
+                    after: mint.deadline,
+                })
+            }
+            Ok(Err(e)) => {
+                return Err(ConversationMintError::Failed(format!(
+                    "{command} could not be run: {e}"
+                )))
+            }
+            Ok(Ok(output)) => output,
+        };
+        if !output.status.success() {
+            return Err(ConversationMintError::Failed(format!(
+                "{command} exited with {}: {}",
+                output.status,
+                String::from_utf8_lossy(&output.stderr).trim()
+            )));
+        }
+        parse_created_chat_id(&String::from_utf8_lossy(&output.stdout))
+            .map_err(|e| ConversationMintError::Failed(format!("{command} {e}")))
     }
 }

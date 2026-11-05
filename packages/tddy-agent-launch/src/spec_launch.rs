@@ -171,6 +171,9 @@ pub struct HostPtySession<'a> {
     pub env: Vec<(String, String)>,
     /// The session owner; `None` runs the agent as the daemon.
     pub os_user: Option<&'a str>,
+    /// Run the agent without the `TDDY_*` variables the daemon's own environment holds (the generic
+    /// CLI launch's stack rule): it sees only what `env` names.
+    pub without_inherited_tddy: bool,
 }
 
 /// Why a spec-driven launch did not start.
@@ -279,7 +282,12 @@ pub async fn launch_host_pty(
     on_exit: Option<ExitHook>,
 ) -> Result<Arc<PtyHandle>, SpecLaunchError> {
     let HostPtyPlan { argv, env } = plan_host_pty(agent, params, slots)?;
-    let env = env.into_iter().chain(session.env).collect();
+    let env: Vec<(String, String)> = env.into_iter().chain(session.env).collect();
+    let argv = if session.without_inherited_tddy {
+        without_inherited_tddy_variables(argv, &env)
+    } else {
+        argv
+    };
     session
         .manager
         .spawn_rendered_main(
@@ -294,6 +302,26 @@ pub async fn launch_host_pty(
         )
         .await
         .map_err(|e| SpecLaunchError::Spawn(e.to_string()))
+}
+
+/// `argv` run under `env -u NAME` for each `TDDY_*` variable the daemon's own environment holds and
+/// `env` does not set: the agent process sees no `TDDY_*` variable the launch did not name
+/// (`#agent-tools` stack rule). A PTY child inherits the daemon's environment, which a daemon
+/// started from a dev shell or a test fills with its own `TDDY_*` configuration.
+fn without_inherited_tddy_variables(argv: Vec<String>, env: &[(String, String)]) -> Vec<String> {
+    let mut inherited: Vec<String> = std::env::vars_os()
+        .filter_map(|(name, _)| name.into_string().ok())
+        .filter(|name| name.starts_with("TDDY_") && !env.iter().any(|(set, _)| set == name))
+        .collect();
+    if inherited.is_empty() {
+        return argv;
+    }
+    inherited.sort();
+    ["/usr/bin/env".to_string()]
+        .into_iter()
+        .chain(inherited.into_iter().flat_map(|name| ["-u".to_string(), name]))
+        .chain(argv)
+        .collect()
 }
 
 fn write_slot_file(path: &Path, bytes: &[u8]) -> Result<(), SpecLaunchError> {
@@ -410,6 +438,7 @@ pub async fn launch_claude_cli(
             model: launch.model,
             env: launch.env,
             os_user: launch.os_user,
+            without_inherited_tddy: false,
         },
         None,
     )

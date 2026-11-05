@@ -51,8 +51,13 @@ impl ConversationSlot {
     /// How long a `minted` conversation's mint may take; `None` for every other kind, which mints
     /// nothing.
     pub fn mint_deadline(&self) -> Option<Duration> {
-        // TODO(cli-spec-features): implement — `mint_deadline_secs`, else
-        // DEFAULT_CONVERSATION_MINT_DEADLINE_SECS, for `Minted`; `None` otherwise.
-        todo!("cli-spec-features: ConversationSlot::mint_deadline")
+        match self {
+            Self::Minted {
+                mint_deadline_secs, ..
+            } => Some(Duration::from_secs(
+                mint_deadline_secs.unwrap_or(DEFAULT_CONVERSATION_MINT_DEADLINE_SECS),
+            )),
+            _ => None,
+        }
     }
 }

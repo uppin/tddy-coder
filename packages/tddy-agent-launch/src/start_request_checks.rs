@@ -10,7 +10,7 @@ use tddy_core::cli_harness::CliHarness;
 use tddy_daemon_kernel::user_paths::projects_path_for_user;
 use tddy_session_split::service_util;
 
-use tddy_coding_agent_specs::CodingAgentSpec;
+use tddy_coding_agent_specs::{Capability, CodingAgentSpec};
 use tddy_rpc::Status;
 
 use tddy_service::proto::session::{BranchConflict, StartSessionResponse};
@@ -68,13 +68,11 @@ pub(crate) fn refuse_an_unsupported_cli_session_start(
     session_type: &str,
     req: &StartSessionRequest,
 ) -> Result<(), Status> {
-    // TODO(cli-spec-features): implement — admit `managed_codebase` when
-    // `spec.has(Capability::ManagedWorkflow)`; otherwise refuse "managed_codebase is not supported
-    // for {session_type} sessions: {spec.id} declares no managed_workflow".
-    let _ = spec;
-    if req.managed_codebase {
+    if req.managed_codebase && !spec.has(Capability::ManagedWorkflow) {
         return Err(Status::invalid_argument(format!(
-            "managed_codebase is not supported for {session_type} sessions"
+            "managed_codebase is not supported for {session_type} sessions: {} declares no \
+             managed_workflow",
+            spec.id
         )));
     }
     Ok(())

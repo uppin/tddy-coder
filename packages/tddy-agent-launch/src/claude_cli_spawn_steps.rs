@@ -338,6 +338,27 @@ pub(super) fn record_role_before_spawn(
     worktree_path: &Path,
     managed_codebase: bool,
 ) -> Result<(), Status> {
+    record_role_of_session_type_before_spawn(
+        session_dir,
+        session_id,
+        project_id,
+        session_role,
+        "claude-cli",
+        worktree_path,
+        managed_codebase,
+    )
+}
+
+/// [`record_role_before_spawn`] for a session of any CLI agent: `session_type` is the record's.
+pub(super) fn record_role_of_session_type_before_spawn(
+    session_dir: &Path,
+    session_id: &str,
+    project_id: &str,
+    session_role: &str,
+    session_type: &str,
+    worktree_path: &Path,
+    managed_codebase: bool,
+) -> Result<(), Status> {
     if session_role.is_empty() {
         return Ok(());
     }
@@ -345,7 +366,7 @@ pub(super) fn record_role_before_spawn(
         repo_path: Some(worktree_path.to_string_lossy().to_string()),
         managed_codebase,
         session_role: Some(session_role.to_string()),
-        ..service_util::starting_session_metadata(session_id, project_id, "claude-cli")
+        ..service_util::starting_session_metadata(session_id, project_id, session_type)
     };
     tddy_core::write_session_metadata(session_dir, &meta)
         .map_err(|e| Status::internal(format!("failed to record the session's role: {e}")))

@@ -141,6 +141,7 @@ pub(super) async fn launch(
             model,
             env,
             os_user: Some(os_user),
+            without_inherited_tddy: true,
         },
         on_exit,
     )

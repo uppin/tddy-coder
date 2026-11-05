@@ -74,10 +74,22 @@ impl ExtensionOwner for CodingAgentExtension {
                 ));
             }
         }
-        // TODO(cli-spec-features): implement — refuse a `conversation: { kind: minted }` whose
-        // adapter `LaunchAdapters::conversation_id` does not hold ("conversation.adapter {name} is
-        // not a launch adapter this build has"), and a `kind: resume_token` without a `resume`
-        // slot ("conversation kind resume_token needs a resume.adapter to read its token with").
+        match &agent.conversation {
+            Some(ConversationSlot::Minted { adapter, .. })
+                if launch_adapters.conversation_id(adapter).is_none() =>
+            {
+                return Err(format!(
+                    "conversation.adapter {adapter} is not a launch adapter this build has"
+                ));
+            }
+            Some(ConversationSlot::ResumeToken) if agent.resume.is_none() => {
+                return Err(
+                    "conversation kind resume_token needs a resume.adapter to read its token with"
+                        .to_string(),
+                );
+            }
+            _ => {}
+        }
         if agent.placements.is_empty() {
             return Err(
                 "placements is empty: an agent runs on at least one of host, jail".to_string(),
@@ -251,8 +263,11 @@ impl CodingAgentSpec {
     /// for a spec with a `resume` slot and [`ConversationSlot::Worktree`] otherwise — what the
     /// generic launch resumed by before the slot existed.
     pub fn conversation(&self) -> ConversationSlot {
-        // TODO(cli-spec-features): implement — declared, else derived from `self.agent.resume`.
-        todo!("cli-spec-features: CodingAgentSpec::conversation")
+        match (&self.agent.conversation, &self.agent.resume) {
+            (Some(declared), _) => declared.clone(),
+            (None, Some(_)) => ConversationSlot::ResumeToken,
+            (None, None) => ConversationSlot::Worktree,
+        }
     }
 
     /// `coding_agent.product`, or the agent id when the spec declares none.

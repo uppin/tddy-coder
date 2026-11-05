@@ -62,23 +62,29 @@ pub struct HarnessLaunch<'a> {
 /// with `resume_token` bound when a non-blank one was recorded. A resume binds neither model nor
 /// prompt — the agent continues the session it had.
 pub fn harness_template_params(launch: &HarnessLaunch<'_>) -> TemplateParams {
-    // TODO(cli-spec-features): implement — bind `session_id`, `chat_id`, `permission_mode`
-    // (non-blank) and the `dangerously_skip_permissions` flag on a start and on a resume, and the
-    // recorded `model` on a resume whose conversation is an id (`session_id` or `chat_id`) — the
-    // argv the bespoke claude/cursor launches render (`claude_template_params`,
-    // `cursor_template_params`), which this then replaces.
-    let _ = (
-        launch.session_id,
-        launch.chat_id,
-        launch.permission_mode,
-        launch.dangerously_skip_permissions,
-    );
+    let by_id = launch.session_id.is_some() || launch.chat_id.is_some();
+    let params = TemplateParams::new()
+        .with_opt("session_id", non_blank(launch.session_id))
+        .with_opt("chat_id", non_blank(launch.chat_id))
+        .with_opt("permission_mode", non_blank(launch.permission_mode))
+        .with_flag(
+            "dangerously_skip_permissions",
+            launch.dangerously_skip_permissions,
+        );
     if launch.resume {
-        return TemplateParams::new()
+        // A resume by an id re-binds the recorded model (the bespoke resume passed `--model`); a
+        // resume by the worktree or a token binds neither model nor prompt.
+        let model = if by_id {
+            non_blank(Some(launch.model))
+        } else {
+            None
+        };
+        return params
             .with_flag("resume", true)
-            .with_opt("resume_token", non_blank(launch.resume_token));
+            .with_opt("resume_token", non_blank(launch.resume_token))
+            .with_opt("model", model);
     }
-    TemplateParams::new()
+    params
         .with_opt("model", non_blank(Some(launch.model)))
         .with_opt("prompt", non_blank(launch.prompt))
 }

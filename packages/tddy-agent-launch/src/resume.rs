@@ -149,6 +149,7 @@ async fn relaunch_cursor(
             model: relaunch.model,
             env: relaunch.env,
             os_user: None,
+            without_inherited_tddy: false,
         },
         None,
     )

@@ -179,7 +179,7 @@ impl LaunchSessions {
             session_token: session_token.to_string(),
             ..spec
         })?;
-        refuse_a_type_main_cannot_run(&spec)?;
+        refuse_a_type_main_cannot_run(self.coding_agents.as_deref(), &spec)?;
         let home = home_worktree_for(project)?;
         let start = on_home_worktree(spec, &project.project_id, &home);
         self.refuse_a_claude_cli_start_up_front(&start)?;

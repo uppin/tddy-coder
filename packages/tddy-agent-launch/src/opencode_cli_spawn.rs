@@ -21,7 +21,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use tddy_cli_sessions::cli_session_manager::CliSessionManager;
-use tddy_coding_agent_specs::slots::{self, RenderedSlots, SlotInputs};
+use tddy_coding_agent_specs::Capability;
 use tddy_core::output::SESSIONS_SUBDIR;
 use tddy_core::provider_route::RouteSources;
 use tddy_core::{write_session_metadata, SessionMetadata};
@@ -34,6 +34,11 @@ use tddy_service::proto::session::{
 use tddy_session_files::attachment_progress::AttachmentProgressSink;
 use tddy_worktree_service::branch_intent::{BranchIntentPolicy, BranchIntentRequest};
 
+use crate::cli_agent_steps::{
+    refuse_a_role_the_agent_cannot_hold, render_host_launch_slots, resumed_conversation,
+    start_conversation, wire_session_agent, write_slot_files_on_target, ConversationStart,
+    HostLaunchSlots, ManagedWiring, ResumedWiring, SessionWiringInputs,
+};
 use crate::cli_resume_token::{resume_token_recorder, settled_resume_token};
 use crate::cli_route_launch::{resume_cli_route, routed_launch_model, start_cli_route};
 use crate::cli_session_worktree::{
@@ -45,6 +50,7 @@ use crate::harness_from_spec::{
 };
 use crate::session_acting_identity::SessionAccountAccess;
 use crate::spec_launch::HostAgent;
+use crate::project_home_launch::StartRole;
 use crate::stack_parent::SpawnStackParent;
 use harness_launch::{launch, HarnessRun, HarnessSession, HarnessSpecLaunch};
 
@@ -85,6 +91,17 @@ pub(crate) struct CliHarnessStart<'a> {
     /// Run the harness inside a tmux session as the session's OS user
     /// (`StartSessionRequest.run_in_tmux`, `#tmux-agent` 3/3).
     pub run_in_tmux: bool,
+    /// `StartSessionRequest.permission_mode`; blank leaves the spec's own default.
+    pub permission_mode: &'a str,
+    pub dangerously_skip_permissions: bool,
+    /// The ssh `Host` alias the checkout lives on; empty for a checkout on this host.
+    pub ssh_config_host: &'a str,
+    /// Whether the session was started over a managed codebase; recorded on the session.
+    pub managed_codebase: bool,
+    /// The managed workflow the session is driven by, for a spec declaring `managed_workflow`.
+    pub managed: Option<ManagedWiring>,
+    /// The session's standing role, recorded before its agent is spawned.
+    pub role: StartRole<'a>,
 }
 
 // TODO(harness-clis): orphaned from the production launch; only the legacy jail's
@@ -106,32 +123,6 @@ pub(crate) fn harness_binary(
         binary,
         tddy_daemon_kernel::config::find_real_harness_on_host,
     )
-}
-
-/// The slots a host launch of `agent` fills. The CLI agents declare none of them on a host launch
-/// (no MCP registration, no tool lists, no hooks, no instruction files), so this adds nothing a spec
-/// does not already name; a value a slot refuses is refused by `slots::render`, never dropped.
-fn render_host_slots(
-    agent: &HostAgent,
-    worktree: &Path,
-    session_dir: &Path,
-) -> Result<RenderedSlots, Status> {
-    slots::render(
-        &agent.spec,
-        &SlotInputs {
-            workdir: worktree.to_path_buf(),
-            scratch_dir: session_dir.to_path_buf(),
-            mcp_server: None,
-            allowed_tools: Vec::new(),
-            denied_tools: Vec::new(),
-            permission_prompt_tool: None,
-            preamble: None,
-            append_system_prompt_file: None,
-            hooks: None,
-            home: None,
-        },
-    )
-    .map_err(|e| Status::internal(e.to_string()))
 }
 
 /// Start a CLI harness session: cut its worktree, apply its provider route, spawn the agent from its
@@ -167,9 +158,19 @@ pub(crate) async fn start_cli_harness_session(
         route_sources,
         progress,
         run_in_tmux,
+        permission_mode,
+        dangerously_skip_permissions,
+        ssh_config_host,
+        managed_codebase,
+        managed,
+        role,
     } = start;
     let project_id = project_id.trim();
     let repo_path = repo_path.trim();
+    let ssh_alias = ssh_config_host.trim();
+    let spec = &agent.spec;
+    let role_name = role.name;
+    refuse_a_role_the_agent_cannot_hold(spec, role_name)?;
 
     let session_dir = sessions_base.join(SESSIONS_SUBDIR).join(session_id);
     std::fs::create_dir_all(&session_dir)
@@ -202,7 +203,7 @@ pub(crate) async fn start_cli_harness_session(
         None,
         &session_dir,
         stack_parent.session_id(),
-        None,
+        managed.as_ref().map(|managed| managed.recipe.as_ref()),
     )?;
 
     let CliWorktree {
@@ -226,6 +227,7 @@ pub(crate) async fn start_cli_harness_session(
             create_remote_branch,
             intent,
             timeout: config.spawn_worker_request_timeout(),
+            ssh_alias,
         },
         &stack_parent,
         progress,
@@ -260,11 +262,22 @@ pub(crate) async fn start_cli_harness_session(
     .await?;
     // The agent's commits carry the project's account identity; a refusal starts the session under
     // the checkout's own, with the reason logged.
-    env.extend(
-        account_access
-            .session_identity_in(session_id, os_user, &session_dir, project.as_ref())
-            .git_environment,
-    );
+    let identity =
+        account_access.session_identity_in(session_id, os_user, &session_dir, project.as_ref());
+    env.extend(identity.git_environment);
+    let recipe_name = managed.as_ref().map(|managed| managed.recipe.name().to_string());
+    let wiring = wire_session_agent(SessionWiringInputs {
+        spec,
+        config,
+        tddy_data_dir,
+        os_user,
+        session_id,
+        session_dir: &session_dir,
+        worktree: &worktree_path,
+        managed,
+        role,
+        github_credential_handler: identity.github_credential,
+    })?;
 
     let launch_model = routed_launch_model(
         &agent.spec,
@@ -273,17 +286,58 @@ pub(crate) async fn start_cli_harness_session(
     );
     let (on_exit, token_arm) =
         resume_token_recorder(session_dir.clone(), resume_token_adapter(&agent.spec)?);
+    // The role is on disk before the agent exists, so the daemon never reads a home session as
+    // ordinary.
+    crate::claude_cli_spawn_steps::record_role_of_session_type_before_spawn(
+        &session_dir,
+        session_id,
+        project_id,
+        role_name,
+        kind.name,
+        &worktree_path,
+        managed_codebase,
+    )?;
+    let conversation = start_conversation(ConversationStart {
+        spec,
+        binary: &agent.tool.binary,
+        worktree: &worktree_path,
+        env: &env,
+        session_id,
+    })
+    .await?;
     progress.begin_phase(StartStep::Agent);
     let route = route.unwrap_or_default();
-    let mut slots = render_host_slots(agent, &worktree_path, &session_dir)?;
-    // The route's arguments follow the spec's own argv, and its environment follows the session's.
+    let remote_host = Some(ssh_alias).filter(|alias| !alias.is_empty());
+    let hooks = wiring
+        .hooks
+        .as_ref()
+        .filter(|_| spec.has(Capability::Hooks));
+    let mut slots = render_host_launch_slots(
+        agent,
+        &worktree_path,
+        &session_dir,
+        HostLaunchSlots {
+            toolset: wiring.toolset,
+            hooks: hooks.map(|hooks| hooks.params(session_id, os_user)),
+            system_prompt_file: wiring.system_prompt_file.as_deref(),
+            remote_host,
+            home: None,
+        },
+    )?;
+    // The role's flags, then the route's arguments, follow the spec's own argv; the route's
+    // environment follows the session's.
+    slots.argv_extra.extend(wiring.extra_args);
     slots.argv_extra.extend(route.args);
+    write_slot_files_on_target(&mut slots, remote_host)?;
+    env.extend(wiring.env);
     env.extend(route.env);
-    let params = harness_template_params(&HarnessLaunch {
+    let params = harness_template_params(&conversation.bound(HarnessLaunch {
         model: launch_model,
         prompt: Some(initial_prompt),
+        permission_mode: Some(permission_mode),
+        dangerously_skip_permissions,
         ..HarnessLaunch::default()
-    });
+    }));
     let launched = launch(
         cli_manager,
         HarnessSession::new(session_id, &worktree_path, &session_dir, os_user),
@@ -300,6 +354,10 @@ pub(crate) async fn start_cli_harness_session(
     )
     .await?;
     progress.end_phase(StartStep::Agent);
+    if let Some(workflow) = wiring.workflow {
+        cli_manager.attach_managed_workflow(session_id, workflow).await;
+    }
+    crate::claude_cli_spawn::record_main_terminal(cli_manager, tddy_data_dir, session_id).await;
 
     let pid = launched.pid;
     let meta = SessionMetadata {
@@ -309,6 +367,12 @@ pub(crate) async fn start_cli_harness_session(
         model: Some(model.to_string()).filter(|model| !model.is_empty()),
         agents_rev: tddy_session_agents::agent_roster::started_roster_rev(agents),
         agents: agents.to_vec(),
+        hook_token: wiring.hooks.map(|hooks| hooks.hook_token),
+        recipe: recipe_name.clone(),
+        ssh_config_host: remote_host.map(str::to_string),
+        managed_codebase,
+        session_role: Some(role_name.to_string()).filter(|role| !role.is_empty()),
+        cursor_chat_id: conversation.recorded_chat_id().map(str::to_string),
         ..tddy_session_split::service_util::starting_session_metadata(
             session_id, project_id, kind.name,
         )
@@ -320,6 +384,32 @@ pub(crate) async fn start_cli_harness_session(
     // The roster naming them is on disk now, so the clones belong to the session rather than to the
     // start that claimed them.
     seeded_clones.keep();
+    // What the session tells the fleet about itself, published when its terminal is first bridged
+    // into LiveKit; the stack association is the load-bearing part (D37).
+    let branch = crate::hooks_and_urls::spawned_branch_of_session(
+        &session_dir,
+        Some(selected_branch_to_work_on)
+            .filter(|branch| !branch.is_empty())
+            .unwrap_or(new_branch_name),
+    );
+    cli_manager
+        .expose_terminal_to_livekit(
+            session_id,
+            tddy_core::session_participant_metadata::SessionParticipantMetadata {
+                agent: spec.id.clone(),
+                ..crate::hooks_and_urls::claude_cli_participant_metadata(
+                    &crate::hooks_and_urls::StartingClaudeCliSession {
+                        session_id,
+                        model,
+                        recipe: recipe_name.as_deref().unwrap_or_default(),
+                        worktree_path: &worktree_path,
+                        branch: &branch,
+                        stack_parent: &stack_parent,
+                    },
+                )
+            },
+        )
+        .await;
 
     log::info!(
         target: "tddy_daemon::connection_service",
@@ -363,13 +453,32 @@ impl crate::launch_ports::LaunchSessions {
         // The previous run's recorder may still be writing the token it printed as it exited.
         metadata.harness_resume_token =
             settled_resume_token(&self.claude_cli_manager, &req.session_id, session_dir).await?;
-        let session_agent = resolve_session_agent(self.coding_agents.as_ref(), &self.config, kind)?;
+        let session_agent =
+            resolve_session_agent(self.coding_agents.as_ref(), &self.config, kind.clone())?;
         let identity = self.host.session_identity(
             os_user,
             &req.session_id,
             &metadata.project_id,
             &req.session_token,
         );
+        let worktree = metadata
+            .repo_path
+            .as_ref()
+            .map(PathBuf::from)
+            .unwrap_or_else(|| session_dir.to_path_buf());
+        // A worktree that is gone leaves nothing to resume: refused before anything is re-wired.
+        refuse_a_resume_without_its_worktree(kind.name, &worktree)?;
+        let wiring = self
+            .resumed_session_wiring(
+                &session_agent.agent.spec,
+                &metadata,
+                session_dir,
+                &worktree,
+                os_user,
+                &req.session_token,
+                identity.github_credential,
+            )
+            .await?;
         resume_cli_harness_session(
             &session_agent,
             &self.claude_cli_manager,
@@ -380,6 +489,8 @@ impl crate::launch_ports::LaunchSessions {
                 meta: metadata,
                 git_environment: identity.git_environment,
                 os_user,
+                wiring,
+                tddy_data_dir: &self.tddy_data_dir,
             },
         )
         .await
@@ -396,6 +507,23 @@ struct ResumedSession<'a> {
     git_environment: Vec<(String, String)>,
     /// The OS user the session runs as, for the child's `HOME`/`PATH` overrides.
     os_user: &'a str,
+    /// What the resumed agent is given again: a role's restriction, the managed workflow, notify.
+    wiring: ResumedWiring,
+    /// Where the main terminal's recording is kept.
+    tddy_data_dir: &'a Path,
+}
+
+/// A session whose worktree is gone has nothing for its agent to continue.
+fn refuse_a_resume_without_its_worktree(
+    session_type: &str,
+    worktree_path: &Path,
+) -> Result<(), Status> {
+    if worktree_path.exists() {
+        return Ok(());
+    }
+    Err(Status::failed_precondition(format!(
+        "worktree no longer exists; cannot resume {session_type} session"
+    )))
 }
 
 /// Resume a CLI harness session: the agent's spec rendered with `resume` (`--continue`, or its
@@ -415,33 +543,46 @@ async fn resume_cli_harness_session(
         meta,
         git_environment,
         os_user,
+        wiring,
+        tddy_data_dir,
     } = session;
     let worktree_path = meta
         .repo_path
         .as_ref()
         .map(PathBuf::from)
         .unwrap_or_else(|| session_dir.to_path_buf());
-    if !worktree_path.exists() {
-        return Err(Status::failed_precondition(format!(
-            "worktree no longer exists; cannot resume {} session",
-            kind.name
-        )));
-    }
+    refuse_a_resume_without_its_worktree(kind.name, &worktree_path)?;
 
     let route = resume_cli_route(account_access, &agent.spec, session_dir)?;
     let (on_exit, token_arm) = resume_token_recorder(
         session_dir.to_path_buf(),
         resume_token_adapter(&agent.spec)?,
     );
-    let mut slots = render_host_slots(agent, &worktree_path, session_dir)?;
+    let spec = &agent.spec;
+    let conversation = resumed_conversation(spec, &meta)?;
+    let remote_host = meta.ssh_config_host.as_deref().filter(|alias| !alias.is_empty());
+    let mut slots = render_host_launch_slots(
+        agent,
+        &worktree_path,
+        session_dir,
+        HostLaunchSlots {
+            toolset: wiring.toolset,
+            system_prompt_file: wiring.system_prompt_file.as_deref(),
+            remote_host,
+            ..HostLaunchSlots::default()
+        },
+    )?;
+    slots.argv_extra.extend(wiring.extra_args);
     slots.argv_extra.extend(route.args);
+    write_slot_files_on_target(&mut slots, remote_host)?;
     let mut env = git_environment;
+    env.extend(wiring.env);
     env.extend(route.env);
-    let params = harness_template_params(&HarnessLaunch {
+    let params = harness_template_params(&conversation.bound(HarnessLaunch {
+        model: meta.model.as_deref().unwrap_or_default(),
         resume: true,
-        resume_token: meta.harness_resume_token.as_deref(),
         ..HarnessLaunch::default()
-    });
+    }));
     let launched = launch(
         cli_manager,
         HarnessSession::new(session_id, &worktree_path, session_dir, os_user),
@@ -457,6 +598,10 @@ async fn resume_cli_harness_session(
         HarnessRun::resume(meta.tmux_session.is_some()),
     )
     .await?;
+    if let Some(workflow) = wiring.workflow {
+        cli_manager.attach_managed_workflow(session_id, workflow).await;
+    }
+    crate::claude_cli_spawn::record_main_terminal(cli_manager, tddy_data_dir, session_id).await;
 
     let mut updated = meta;
     updated.pid = Some(launched.pid);

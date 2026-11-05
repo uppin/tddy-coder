@@ -44,11 +44,24 @@ impl LaunchSessions {
         refuse_a_cli_start_without_a_model(req, self.coding_agents.as_deref())?;
         resolve_caller_chosen_session_id(&req.requested_session_id, req.session_type.trim())?;
         managed_recipe_for(req)?;
+        // The agent the session type names — `claude` for `claude-cli`, a dropped-in copy for its own.
+        let session_type = req.session_type.trim();
+        let agent_id = self
+            .coding_agents
+            .as_deref()
+            .and_then(|agents| agents.agents().for_session_type(session_type))
+            .map(|spec| spec.id.clone())
+            .ok_or_else(|| {
+                Status::failed_precondition(format!("no coding agent spec launches {session_type}"))
+            })?;
         let access = self.host.session_account_access(&req.session_token);
-        let sources = session_route_sources_with_default(req, "claude-cli", &access)?;
+        let sources = session_route_sources_with_default(req, session_type, &access)?;
         start_route(
             &access,
-            RouteAgent::claude_on(self.coding_agents.as_deref()),
+            RouteAgent::OnHost {
+                agents: self.coding_agents.as_deref(),
+                id: &agent_id,
+            },
             &sources,
             req.model.trim(),
         )?;
@@ -296,7 +309,8 @@ impl LaunchSessions {
         os_user: &str,
     ) -> Result<Response<StartSessionResponse>, Status> {
         // Resolved first, with no side effect: the managed-codebase refusal reads the agent's spec.
-        let session_agent = resolve_session_agent(self.coding_agents.as_ref(), &self.config, kind)?;
+        let session_agent =
+            resolve_session_agent(self.coding_agents.as_ref(), &self.config, kind.clone())?;
         refuse_an_unsupported_cli_session_start(&session_agent.agent.spec, kind.name, req)?;
         if req.sandbox {
             self.require_sandbox_placement(kind.name)?;
@@ -340,6 +354,30 @@ impl LaunchSessions {
         let account_access = self.host.session_account_access(&req.session_token);
         let route_sources =
             session_route_sources_with_default(req, session_agent.kind.name, &account_access)?;
+        // A managed codebase driven by a recipe: admitted only for a spec declaring
+        // `managed_workflow` (`refuse_an_unsupported_cli_session_start`). An unknown recipe is a
+        // request error, never silently ignored.
+        let managed_recipe = managed_recipe_for(req)?;
+        let (child_spawn_handler, conversation_spawn_handler) = self.managed_spawn_handlers(
+            &managed_recipe,
+            os_user,
+            &start.session_id,
+            req.project_id.trim(),
+            &start.sessions_base,
+            &req.session_token,
+        );
+        let managed =
+            managed_recipe.map(|recipe| crate::cli_agent_steps::ManagedWiring {
+                recipe,
+                child_spawn_handler,
+                conversation_spawn_handler,
+            });
+        let role = self.start_role(
+            req.session_role.trim(),
+            &start.session_id,
+            &start.sessions_base,
+            &req.session_token,
+        )?;
         crate::opencode_cli_spawn::start_cli_harness_session(
             crate::opencode_cli_spawn::CliHarnessStart {
                 kind: session_agent.kind.clone(),
@@ -378,6 +416,12 @@ impl LaunchSessions {
                 route_sources: &route_sources,
                 progress,
                 run_in_tmux: req.run_in_tmux,
+                permission_mode: req.permission_mode.trim(),
+                dangerously_skip_permissions: req.dangerously_skip_permissions,
+                ssh_config_host: req.ssh_config_host.trim(),
+                managed_codebase: req.managed_codebase,
+                managed,
+                role,
             },
         )
         .await
