@@ -29,7 +29,7 @@ pub use backend::acp_driver::{
     AcpAgentCommand, AcpAgentHooks, AcpDriver, AcpSession, AcpStopReason, AcpToolStatus,
     AcpTurnEnd, AcpUpdate, AcpUpdateSink, AllowOnce, McpServerSpec, NoHooks, OpenSession,
     PermissionDecision, PermissionHandler, PermissionOptionView, PermissionRequest,
-    SessionErrorVerdict,
+    SessionErrorVerdict, SESSION_OPEN_DEADLINE,
 };
 pub use backend::headless_driver::{
     AcpConversation, ConversationDriver, HeadlessCommand, HeadlessDriver,
@@ -44,6 +44,8 @@ pub use backend::{
     ToolExecutor, CODEX_DEFAULT_CLI_BINARY, CODEX_OAUTH_AUTHORIZE_URL_FILENAME,
     CODEX_THREAD_ID_FILENAME,
 };
+// `#agent-tools 16/19`: the workflow backend built from any coding agent's spec.
+pub use backend::spec_backend::{SpecAcpBackend, SpecBackend, SpecBackendRefusal, SpecTransport};
 // `#agent-tools 15/19`: the one headless workflow backend, configured by an agent's spec.
 pub use backend::spec_headless::{
     SpecHeadlessBackend, DEFAULT_TURN_DEADLINE, MODEL_LISTING_DEADLINE,

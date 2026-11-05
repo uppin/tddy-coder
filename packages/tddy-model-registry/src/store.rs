@@ -156,6 +156,18 @@ impl ModelRegistryStore {
         self
     }
 
+    /// Also refuse assistant names colliding with these coding-agent ids — every agent of this
+    /// host's coding-agent registry and `stub` (`tddy_coder::agent_registry_cli::reserved_agent_ids`),
+    /// refused as `'<name>' is a coding backend` (`#agent-tools 16/19`). Replaces the store's own
+    /// read of `tddy_coder::run::BUILTIN_BACKEND_AGENT_IDS`, which listed seven ids and missed `oz`
+    /// and every agent dropped into `<tddyhome>/tools/`.
+    pub fn reserving_coding_agent_ids(self, ids: impl IntoIterator<Item = String>) -> Self {
+        // TODO(spec-backend): implement — store the ids; `reject_taken_name` refuses them in place
+        // of `BUILTIN_BACKEND_AGENT_IDS`, and this crate's `tddy-coder` dependency goes.
+        let _ = ids.into_iter();
+        self
+    }
+
     // --- Providers ---------------------------------------------------------
 
     /// Add a provider owned by `owner`. Its base URL identifies it: a second provider on the same

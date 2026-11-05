@@ -11,6 +11,7 @@ mod mock;
 pub mod model_catalog;
 mod opencode_acp;
 mod routed;
+pub mod spec_backend;
 pub mod spec_headless;
 pub use spec_headless::SpecHeadlessBackend;
 pub(crate) mod turn_process;

@@ -25,6 +25,17 @@ pub fn backend_agent_ids(registry: &CodingAgentRegistry) -> Vec<String> {
         .collect()
 }
 
+/// The names an assistant in the model registry may not take, because `--agent <name>` already
+/// means a coding agent on this host (`#agent-tools 16/19`): **every** registry agent's id —
+/// PTY-only ones (`muse`, `warp`) included, since each is a session type too — ordered by id, then
+/// [`STUB_BACKEND_ID`]. The daemon feeds them to `ModelRegistryStore::reserving_coding_agent_ids`,
+/// replacing the store's read of `run::BUILTIN_BACKEND_AGENT_IDS`.
+pub fn reserved_agent_ids(registry: &CodingAgentRegistry) -> Vec<String> {
+    // TODO(spec-backend): implement.
+    let _ = registry;
+    todo!("spec-backend: reserved_agent_ids")
+}
+
 /// The interactive backend selection: one option per [`backend_agent_ids`] entry, labelled by its
 /// id and described by its spec's `summary`.
 pub fn backend_selection_question_from(registry: &CodingAgentRegistry) -> ClarificationQuestion {
