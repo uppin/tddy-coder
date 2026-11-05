@@ -262,6 +262,53 @@ async fn notify_reads_its_credentials_from_the_environment_and_reports_success()
 }
 
 #[tokio::test]
+async fn notify_reads_its_session_from_the_pointer_when_its_environment_names_none() {
+    // Given a daemon's agent-tool socket, and an agent's worktree whose session pointer carries the
+    // notify session and no toolcall socket (`#agent-tools 17/19`: a daemon-launched CLI agent's
+    // environment holds no TDDY_ variable)
+    let socket = AnAgentToolSocket::accepting("notifyptr");
+    let worktree = tempfile::tempdir().expect("worktree");
+    std::fs::create_dir_all(worktree.path().join(".tddy")).expect(".tddy");
+    std::fs::create_dir_all(worktree.path().join("src")).expect("src");
+    std::fs::write(
+        worktree.path().join(".tddy/session.json"),
+        serde_json::json!({
+            "repo_dir": worktree.path().to_string_lossy(),
+            "notify": {
+                notify_env::SESSION_ID: SESSION_ID,
+                notify_env::OS_USER: OS_USER,
+                notify_env::HOOK_TOKEN: HOOK_TOKEN,
+                notify_env::DAEMON_SOCKET: socket.path.to_string_lossy(),
+            },
+        })
+        .to_string(),
+    )
+    .expect("pointer");
+
+    // When the agent notifies from its shell, below the pointer
+    let mut cmd = tddy_tools_without_a_session_environment();
+    cmd.current_dir(worktree.path().join("src"));
+    let ran = run(cmd, &["notify", "Parallel run finished"]).await;
+
+    // Then the daemon was sent the notification under the pointer's credentials
+    ran.assert_succeeded_saying("Notification sent");
+    assert_eq!(
+        socket.notification_received().map(|request| (
+            request.session_id,
+            request.os_user,
+            request.hook_token
+        )),
+        Some((
+            SESSION_ID.to_string(),
+            OS_USER.to_string(),
+            HOOK_TOKEN.to_string()
+        )),
+        "the socket was asked for {:?}",
+        socket.methods_called()
+    );
+}
+
+#[tokio::test]
 async fn notify_exits_non_zero_naming_the_reason_when_the_daemon_refuses() {
     // Given a daemon's agent-tool socket that refuses the notification's title
     let socket = AnAgentToolSocket::refusing_the_title("notifyrefused");

@@ -33,7 +33,10 @@ use tddy_rpc::Status;
 use tddy_cli_sessions::session_toolcall::ManagedWorkflow;
 use tddy_daemon_kernel::config::DaemonConfig;
 
+use tddy_core::session_pointer::SessionPointer;
+
 use crate::claude_cli_spawn_steps::{claude_cli_hooks, ClaudeCliHooks};
+use crate::cli_session_pointer::session_pointer_of;
 use crate::harness_from_spec::HarnessLaunch;
 use crate::launch_ports::LaunchSessions;
 use crate::managed_launch;
@@ -341,13 +344,18 @@ pub(crate) struct SessionWiring {
     pub extra_args: Vec<String>,
     /// The tool server, the pre-approved tools and the withdrawn ones.
     pub toolset: AgentToolset,
+    /// What a `tddy-tools` the agent runs from its shell finds its session by — the managed
+    /// workflow's socket and the operator-notify session — written into the worktree
+    /// ([`crate::cli_session_pointer`]); `None` when there is neither.
+    pub session_pointer: Option<SessionPointer>,
 }
 
 /// The wiring the spec's capabilities ask of a generic launch: hooks and operator notify for the
 /// agent that declares them, the managed workflow for a session driven by a recipe, and a main's
 /// tool restriction. A `TDDY_*` variable these steps produce belongs to the agent's tool server
-/// (`tddy-tools --mcp`'s registration) and is carried by its `env` block; it never reaches the agent
-/// process, whatever the spec declares.
+/// (`tddy-tools --mcp`'s registration) and is carried by its `env` block, and the session a
+/// shell-run `tddy-tools` reaches (the workflow socket, the operator-notify session) is the session
+/// pointer's; neither reaches the agent process, whatever the spec declares.
 pub(crate) fn wire_session_agent(inputs: SessionWiringInputs<'_>) -> Result<SessionWiring, Status> {
     let SessionWiringInputs {
         spec,
@@ -365,6 +373,7 @@ pub(crate) fn wire_session_agent(inputs: SessionWiringInputs<'_>) -> Result<Sess
         .then(|| claude_cli_hooks(config, tddy_data_dir));
     let mut process_env: Vec<(String, String)> = Vec::new();
     let mut tool_server_env: Vec<(String, String)> = Vec::new();
+    let mut notify_env: Vec<(String, String)> = Vec::new();
     let mut system_prompt_file: Option<PathBuf> = None;
     let mut workflow = None;
     if let Some(ManagedWiring {
@@ -406,12 +415,13 @@ pub(crate) fn wire_session_agent(inputs: SessionWiringInputs<'_>) -> Result<Sess
                 session_dir,
                 managed_prompt_file: system_prompt_file.as_deref(),
             },
-            &mut process_env,
+            &mut notify_env,
         )?;
     }
     let role_wiring = RoleWiring::of(role.main)?;
     route_tool_server_env(role_wiring.env, &mut process_env, &mut tool_server_env);
     let (extra_args, mut toolset) = spec_role_launch(role_wiring.main.as_ref());
+    let session_pointer = session_pointer_of(&tool_server_env, notify_env, worktree);
     carry_on_the_tool_server(
         spec,
         &mut toolset,
@@ -430,6 +440,7 @@ pub(crate) fn wire_session_agent(inputs: SessionWiringInputs<'_>) -> Result<Sess
         env: process_env,
         extra_args,
         toolset,
+        session_pointer,
     })
 }
 
@@ -440,10 +451,12 @@ pub(crate) fn wire_session_agent(inputs: SessionWiringInputs<'_>) -> Result<Sess
 pub(crate) struct ResumedWiring {
     pub workflow: Option<ManagedWorkflow>,
     pub system_prompt_file: Option<PathBuf>,
-    /// Never a `TDDY_*` variable but the notify pairs a spec declaring `operator_notify` asks for.
+    /// Never a `TDDY_*` variable.
     pub env: Vec<(String, String)>,
     pub extra_args: Vec<String>,
     pub toolset: AgentToolset,
+    /// The session pointer written again into the worktree, as at the start.
+    pub session_pointer: Option<SessionPointer>,
 }
 
 impl LaunchSessions {
@@ -462,6 +475,7 @@ impl LaunchSessions {
         let session_id = meta.session_id.as_str();
         let mut process_env = Vec::new();
         let mut tool_server_env = Vec::new();
+        let mut notify_env = Vec::new();
         let mut system_prompt_file = None;
         let mut workflow = None;
         if spec.has(Capability::ManagedWorkflow) {
@@ -504,12 +518,13 @@ impl LaunchSessions {
                 meta,
                 system_prompt_file.as_deref(),
             )?;
-            process_env.extend(notify.env);
+            notify_env.extend(notify.env);
             system_prompt_file = notify.append_system_prompt_file.or(system_prompt_file);
         }
         let role = self.resumed_role(meta, session_id, session_dir, session_token)?;
         route_tool_server_env(role.env, &mut process_env, &mut tool_server_env);
         let (extra_args, mut toolset) = spec_role_launch(role.main.as_ref());
+        let session_pointer = session_pointer_of(&tool_server_env, notify_env, worktree);
         carry_on_the_tool_server(
             spec,
             &mut toolset,
@@ -523,6 +538,7 @@ impl LaunchSessions {
             env: process_env,
             extra_args,
             toolset,
+            session_pointer,
         })
     }
 }

@@ -365,10 +365,11 @@ impl ACheckout {
 
 fn a_pointer(checkout: &Path) -> SessionPointer {
     SessionPointer {
-        socket: PathBuf::from("/run/tddy/s1.sock"),
+        socket: Some(PathBuf::from("/run/tddy/s1.sock")),
         repo_dir: checkout.to_path_buf(),
         session_dir: Some(PathBuf::from("/var/tddy/sessions/s1")),
         remote: BTreeMap::new(),
+        notify: BTreeMap::new(),
     }
 }
 

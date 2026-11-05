@@ -328,7 +328,7 @@ impl CodingBackend for SpecHeadlessBackend {
             turn_files.write_session_pointer(
                 &workdir,
                 &SessionPointer {
-                    socket: socket.clone(),
+                    socket: Some(socket.clone()),
                     repo_dir: workdir.clone(),
                     session_dir: request.session_dir.clone(),
                     remote: request
@@ -336,6 +336,7 @@ impl CodingBackend for SpecHeadlessBackend {
                         .as_ref()
                         .map(|remote| remote.env_pairs().into_iter().collect::<BTreeMap<_, _>>())
                         .unwrap_or_default(),
+                    notify: BTreeMap::new(),
                 },
             )?;
         }

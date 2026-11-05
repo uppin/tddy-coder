@@ -77,10 +77,11 @@ fn an_explicit_socket_wins_over_the_pointer_and_the_environment() {
     assert_eq!(
         session,
         Ok(ResolvedSession {
-            socket: PathBuf::from("/run/tddy/from-arg.sock"),
+            socket: Some(PathBuf::from("/run/tddy/from-arg.sock")),
             repo_dir: None,
             session_dir: None,
             remote: BTreeMap::new(),
+            notify: BTreeMap::new(),
             source: SessionSource::Arg,
         })
     );
@@ -99,13 +100,14 @@ fn the_pointer_above_the_cwd_wins_over_the_environment() {
     assert_eq!(
         session,
         Ok(ResolvedSession {
-            socket: PathBuf::from("/run/tddy/from-pointer.sock"),
+            socket: Some(PathBuf::from("/run/tddy/from-pointer.sock")),
             repo_dir: Some(PathBuf::from("/srv/checkouts/app")),
             session_dir: Some(PathBuf::from("/var/tddy/sessions/s1")),
             remote: BTreeMap::from([(
                 "TDDY_REMOTE_SESSION_ID".to_string(),
                 "remote-1".to_string()
             )]),
+            notify: BTreeMap::new(),
             source: SessionSource::PointerFile(worktree.pointer()),
         })
     );
@@ -127,10 +129,11 @@ fn the_environment_is_read_only_when_no_argument_or_pointer_names_a_session() {
     assert_eq!(
         session,
         Ok(ResolvedSession {
-            socket: PathBuf::from("/run/tddy/from-env.sock"),
+            socket: Some(PathBuf::from("/run/tddy/from-env.sock")),
             repo_dir: None,
             session_dir: Some(PathBuf::from("/var/tddy/sessions/s2")),
             remote: BTreeMap::new(),
+            notify: BTreeMap::new(),
             source: SessionSource::Env,
         })
     );

@@ -91,6 +91,9 @@ impl LaunchSessions {
             &unified_session_dir_path(&sessions_base, session_id),
         )
         .await?;
+        // A worktree kept after the delete (`keep_worktree_on_delete`) must not keep pointing a
+        // shell-run `tddy-tools` at a session that is gone.
+        remove_recorded_session_pointer(&unified_session_dir_path(&sessions_base, session_id));
         let projects_dir_opt = projects_path_for_user(os_user, Some(&self.tddy_data_dir));
         // A split session's worktree lives on another daemon, which must lose it first: deleting
         // this side alone would leave a checkout on a host with no session left to reclaim it. A
@@ -145,6 +148,17 @@ impl LaunchSessions {
         )?;
         log::info!("DeleteSession: successfully removed session {}", session_id);
         Ok(Response::new(DeleteSessionResponse { ok: true }))
+    }
+}
+
+/// Remove the session pointer ([`crate::cli_session_pointer`]) from the worktree the session in
+/// `session_dir` records, if it records one.
+fn remove_recorded_session_pointer(session_dir: &Path) {
+    if let Some(worktree) = read_session_metadata(session_dir)
+        .ok()
+        .and_then(|metadata| metadata.repo_path)
+    {
+        crate::cli_session_pointer::remove_session_pointer(Path::new(&worktree));
     }
 }
 

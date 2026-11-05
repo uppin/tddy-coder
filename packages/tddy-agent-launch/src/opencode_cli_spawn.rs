@@ -40,6 +40,7 @@ use crate::cli_agent_steps::{
 };
 use crate::cli_resume_token::{resume_token_recorder, settled_resume_token};
 use crate::cli_route_launch::{resume_cli_route, routed_launch_model, start_cli_route};
+use crate::cli_session_pointer::{place_session_pointer, removing_session_pointer_on_exit};
 use crate::cli_session_worktree::{
     provision_cli_worktree, semantic_index_env, CliWorktree, CliWorktreeStart,
 };
@@ -328,6 +329,9 @@ pub(crate) async fn start_cli_harness_session(
     slots.argv_extra.extend(role_args);
     slots.argv_extra.extend(route.args);
     write_slot_files_on_target(&mut slots, remote_host)?;
+    let pointer =
+        place_session_pointer(wiring.session_pointer.as_ref(), &worktree_path, remote_host)?;
+    let on_exit = removing_session_pointer_on_exit(on_exit, pointer, run_in_tmux);
     env.extend(std::mem::take(&mut wiring.env));
     env.extend(route.env);
     let launcher = node_launcher_of(&agent.tool.binary);
@@ -593,6 +597,9 @@ async fn resume_cli_harness_session(
     slots.argv_extra.extend(wiring.extra_args);
     slots.argv_extra.extend(route.args);
     write_slot_files_on_target(&mut slots, remote_host)?;
+    let pointer =
+        place_session_pointer(wiring.session_pointer.as_ref(), &worktree_path, remote_host)?;
+    let on_exit = removing_session_pointer_on_exit(on_exit, pointer, meta.tmux_session.is_some());
     let mut env = git_environment;
     env.extend(renderer_env.clone());
     env.extend(wiring.env);

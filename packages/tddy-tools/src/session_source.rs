@@ -30,13 +30,16 @@ pub enum SessionSource {
 /// The session a `tddy-tools` process reports to.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ResolvedSession {
-    pub socket: PathBuf,
+    /// The toolcall socket; `None` for a pointer that carries only the notify session.
+    pub socket: Option<PathBuf>,
     /// The repository the session works in, where the source names one (the pointer does).
     pub repo_dir: Option<PathBuf>,
     /// The session directory, where the source names one.
     pub session_dir: Option<PathBuf>,
     /// The remote tool environment the pointer carries, by variable name; empty otherwise.
     pub remote: BTreeMap<String, String>,
+    /// What `tddy-tools notify` reads its session from, as the pointer carries it; empty otherwise.
+    pub notify: BTreeMap<String, String>,
     pub source: SessionSource,
 }
 
@@ -78,10 +81,11 @@ pub fn resolve_session(
 ) -> Result<ResolvedSession, SessionNotFound> {
     if let Some(socket) = explicit_socket {
         return Ok(ResolvedSession {
-            socket: socket.to_path_buf(),
+            socket: Some(socket.to_path_buf()),
             repo_dir: None,
             session_dir: None,
             remote: BTreeMap::new(),
+            notify: BTreeMap::new(),
             source: SessionSource::Arg,
         });
     }
@@ -97,17 +101,19 @@ pub fn resolve_session(
             repo_dir: Some(pointer.repo_dir),
             session_dir: pointer.session_dir,
             remote: pointer.remote,
+            notify: pointer.notify,
             source: SessionSource::PointerFile(path),
         });
     }
     match env(SOCKET_VARIABLE).filter(|socket| !socket.is_empty()) {
         Some(socket) => Ok(ResolvedSession {
-            socket: PathBuf::from(socket),
+            socket: Some(PathBuf::from(socket)),
             repo_dir: None,
             session_dir: env("TDDY_SESSION_DIR")
                 .filter(|dir| !dir.is_empty())
                 .map(PathBuf::from),
             remote: BTreeMap::new(),
+            notify: BTreeMap::new(),
             source: SessionSource::Env,
         }),
         None => Err(SessionNotFound::Nowhere {
@@ -131,20 +137,23 @@ pub fn resolve_current_session(
 }
 
 /// Makes `session` this process's own environment — `TDDY_SOCKET`, `TDDY_SESSION_DIR`,
-/// `TDDY_REPO_DIR` and the `TDDY_REMOTE_*` pair — so the code that reads them (the MCP server's
-/// relays and path rules, the session tool client) finds the session whichever source named it.
+/// `TDDY_REPO_DIR`, the `TDDY_REMOTE_*` pair and the notify session `tddy-tools notify` reads — so
+/// the code that reads them (the MCP server's relays and path rules, the session tool client, the
+/// notify command) finds the session whichever source named it.
 /// Called once, at startup, before the async runtime starts a thread — writing the environment
 /// while another thread reads it is unsound. The agent that ran this process never had these
 /// variables, and a command it runs through the exec tools is started without them.
 pub fn adopt_session(session: &ResolvedSession) {
-    std::env::set_var(SOCKET_VARIABLE, &session.socket);
+    if let Some(socket) = &session.socket {
+        std::env::set_var(SOCKET_VARIABLE, socket);
+    }
     if let Some(dir) = &session.session_dir {
         std::env::set_var("TDDY_SESSION_DIR", dir);
     }
     if let Some(repo) = &session.repo_dir {
         std::env::set_var("TDDY_REPO_DIR", repo);
     }
-    for (name, value) in &session.remote {
+    for (name, value) in session.remote.iter().chain(&session.notify) {
         std::env::set_var(name, value);
     }
 }

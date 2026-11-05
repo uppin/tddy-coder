@@ -40,6 +40,8 @@ const RESUMED_SESSION_ID: &str = "01900000-0000-7000-8000-00000000c1a5";
 /// What a stub agent prints once it has recorded its launch.
 const LAUNCHED: &str = "STUB LAUNCHED";
 /// The environment a golden pins: what the launch sets, never what the daemon happens to inherit.
+/// The `TDDY_*` names are pinned to be absent: the operator-notify session reaches `tddy-tools`
+/// through the session pointer, never the agent's environment (`#agent-tools 17/19`).
 const PINNED_ENV: &[&str] = &[
     "CLAUDE_CODE_NO_FLICKER",
     "TDDY_DAEMON_URL",

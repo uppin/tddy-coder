@@ -9,6 +9,7 @@ pub mod cli_branch_starts;
 pub mod cli_harness_tmux;
 mod cli_resume_token;
 pub mod cli_route_launch;
+mod cli_session_pointer;
 mod cli_session_worktree;
 mod clone_backend;
 mod clone_planner;

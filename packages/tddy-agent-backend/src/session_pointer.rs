@@ -18,12 +18,15 @@ use serde::{Deserialize, Serialize};
 /// Where the pointer is written, relative to the agent's working directory.
 pub const SESSION_POINTER_FILE: &str = ".tddy/session.json";
 
-/// What a `tddy-tools` run by a headless agent needs to reach its session.
+/// What a `tddy-tools` run by a headless agent, or from the shell of a daemon-launched CLI agent,
+/// needs to reach its session.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct SessionPointer {
-    /// The session's toolcall socket (what `TDDY_SOCKET` named).
-    pub socket: PathBuf,
+    /// The session's toolcall socket (what `TDDY_SOCKET` named); `None` for a session with no
+    /// workflow listener whose pointer only carries [`Self::notify`].
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub socket: Option<PathBuf>,
     /// The repo the agent works in (what `TDDY_REPO_DIR` named).
     pub repo_dir: PathBuf,
     /// The session's directory (what `TDDY_SESSION_DIR` named); `None` for a session with none.
@@ -33,6 +36,12 @@ pub struct SessionPointer {
     /// session with no remote.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub remote: BTreeMap<String, String>,
+    /// What `tddy-tools notify` reads its session from (`session_activity::notify_env`: the session
+    /// id, OS user, hook token and daemon address), by variable name; empty for an agent that does
+    /// not notify its operator. The agent process is never given these as variables
+    /// (`#agent-tools 17/19`).
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub notify: BTreeMap<String, String>,
 }
 
 /// Why a pointer file that exists could not be read.
