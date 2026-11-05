@@ -36,7 +36,7 @@ config surface:
    tools) — now backed by any number of registered defs instead of one hardcoded `"fastcontext"` factory.
 2. The **standalone `tddy-sandbox-app` CLI** — `--specialized-agent <name>` (repeatable) selects one
    or more defs by name; there is no legacy single-name alias and no override flags.
-3. The **workflow backend** (`tddy-coder --agent fastcontext` / `create_backend`) — builds its
+3. The **workflow backend** (`tddy-coder --agent fastcontext` / `create_workflow_backend`) — builds its
    `FastContextBackend` from the resolved def's `model`/`base_url` instead of hardcoded literals.
 
 It also adds the missing UI surface: a collapsible **"Managed codebase"** section in the sandboxed
@@ -120,7 +120,7 @@ rest of `<tddyhome>/agents/` (or the builtin fastcontext def) from loading.
          tool schemas are advertised to the model, def.max_turns bounds the loop)
 ```
 
-The standalone `tddy-sandbox-app` CLI and the `tddy-coder` workflow backend (`create_backend`) resolve
+The standalone `tddy-sandbox-app` CLI and the `tddy-coder` workflow backend (`create_workflow_backend`) resolve
 the same `SpecializedAgentDef` set independently (no daemon in the loop for those two paths) via
 `tddy_discovery::agent_def::load_agent_defs(<tddyhome>/agents)` + `builtin_fastcontext_def()`.
 
@@ -191,14 +191,14 @@ of being limited to the single hardcoded FastContext discovery agent and CLI fla
 
 ### Workflow backend (`tddy-coder`)
 
-13. ~~`create_backend("fastcontext", …)` builds a `FastContextBackend`…~~ **Superseded.**
-    `create_backend` builds a `SpecializedAgentBackend` from the resolved def and nothing else;
+13. ~~`create_workflow_backend("fastcontext", …)` builds a `FastContextBackend`…~~ **Superseded.**
+    `create_workflow_backend` builds a `SpecializedAgentBackend` from the resolved def and nothing else;
     `name()` returns the def's own name. The `--fastcontext-url` / `--fastcontext-model` /
     `--fastcontext-max-turns` flags that could override a def's endpoint are **deleted** — a def is
     the whole configuration, pinned by
     `packages/tddy-coder/tests/specialized_agent_backend_acceptance.rs`.
 14. ~~*(partially implemented)* … `--agent`'s clap `value_parser` still hardcodes an allowlist~~
-    **Resolved.** `Args.agent` carries no static allowlist; `create_backend` refuses an unresolvable
+    **Resolved.** `Args.agent` carries no static allowlist; `create_workflow_backend` refuses an unresolvable
     name where the whole def set is known, naming the agents that do resolve.
 15. The def's `system_prompt` does **not** override a workflow goal's own system prompt — per-goal
     system prompts (`GoalHints`, `InvokeRequest.system_prompt`) remain the source of truth for the

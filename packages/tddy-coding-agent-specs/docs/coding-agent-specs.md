@@ -48,6 +48,25 @@ This crate owns that section's vocabulary. `tddy-actions` stays agent-agnostic.
 | `spec.rs` answer wait (`#agent-tools 12/19`) | `coding_agent.answer_wait_secs: Option<u64>`, read by `CodingAgentSpec::answer_wait_secs()` (`DEFAULT_ANSWER_WAIT_SECS` = 120 when absent): how long an orchestrated session's permission hook waits for its orchestrator's answer |
 | `lib.rs` fields (`#agent-tools 8/12`) | on `CodingAgentSection`: `route: Option<RouteSlot { required_in_jail, config_env, key_env, files_dir }>`, `models.{list_command, adapter}`, `resume: Option<ResumeSlot { adapter }>`, `placements: Vec<Placement>` (`Placement::anywhere()` by default; `CodingAgentSpec::require_placement`); `McpSlot::Unsupported`; the `unsupported` hooks adapter (`UnsupportedHooks`, `SlotError::HooksUnsupported`); a CLI session type resolves to its spec through `CodingAgentRegistry::for_session_type` |
 
+## Which transport a workflow turn takes
+
+`tddy-coder --agent <id>` builds a workflow backend for any agent in the registry
+(`tddy_coder::spec_backend_build::build_spec_backend`, `#agent-tools 16/19`). The spec's sections
+decide how it takes a turn (`tddy_agent_backend::SpecTransport::chosen`):
+
+| The spec declares | Nothing asked | ACP asked | Headless asked |
+|---|---|---|---|
+| `coding_agent.headless` and `coding_agent.acp` | **headless** | ACP | headless |
+| only `coding_agent.headless` | headless | refused (`TransportNotDeclared`) | headless |
+| only `coding_agent.acp` | ACP | ACP | refused (`TransportNotDeclared`) |
+| neither (a PTY-only agent: `muse`, `warp`) | refused (`NoTurnTransport`) | refused | refused |
+
+**Headless wins over ACP** when a spec declares both, unless the session or the request asks for
+ACP (`SpecBackendRequest.transport`). Every refusal names the agent. No agent ever falls back to
+another, and an id no agent answers to is refused listing the ids that can run a turn
+(`agent_registry_cli::backend_agent_ids`). A YAML-only ACP agent runs through the generic
+`SpecAcpBackend`: its rendered `acp.command`, the hooks adapter it names and that adapter's deps.
+
 ## The headless protocol
 
 A workflow turn of a headless agent (`tddy_agent_backend::SpecHeadlessBackend`) differs between
