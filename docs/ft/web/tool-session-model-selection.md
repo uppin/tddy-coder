@@ -88,11 +88,11 @@ pub struct BackendModels { pub models: Vec<BackendModel>, pub default_model: Str
 async fn list_models(&self) -> Result<BackendModels, BackendError>;
 ```
 
-- `CursorBackend::list_models` — spawns `<binary> --list-models`, parses the text catalog.
+- A headless agent whose spec declares a model listing (Cursor's `models.list_command: ["{binary}", --list-models]`, `adapter: cursor-models`) — `SpecHeadlessBackend::list_models` runs it with the spec-resolved binary under a 30 s deadline and parses the text catalog.
 - `ClaudeAcpBackend` / `CodexAcpBackend::list_models` — runs an ephemeral ACP `initialize` +
   `new_session` and reads `SessionModelState.available_models` (the handshake already exists; it
   currently discards `.models`).
-- `ClaudeCodeBackend` / `CodexBackend::list_models` — return the curated list from a
+- A headless agent whose spec declares no listing (`claude`, `codex`) — returns the curated list from a
   `curated_models_for_agent(name)` helper (single source of truth, kept in sync with
   `default_model_for_agent`).
 - A free function `claude_cli_models() -> BackendModels` for the claude-cli pseudo-agent.

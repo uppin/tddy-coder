@@ -108,7 +108,7 @@ tddy-coder follows a strict TDD workflow: plan → acceptance-tests → red → 
 2. Reads planning artifacts (PRD.md, progress.md, changeset.yaml, acceptance-tests.md, evaluation-report.md, refactoring-plan.md)
 3. Updates target repo documentation (feature docs, dev docs, changelogs, READMEs) per repo guidelines
 4. State transitions: `RefactorComplete` → `UpdatingDocs` → `DocsUpdated`
-5. CursorBackend supports UpdateDocs (unlike Validate/Refactor which require Agent tool)
+5. Any headless agent runs UpdateDocs (unlike Validate/Refactor, which rely on the Agent tool)
 
 ### Exit Output
 

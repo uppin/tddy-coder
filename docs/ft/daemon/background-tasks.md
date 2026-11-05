@@ -125,8 +125,9 @@ their own cleanup:
 3. Safety-net (registry-level, fires if body does not terminate within ~5 s):
    `SIGTERM → wait → SIGKILL` (mirroring `session_deletion.rs:66-90`).
 
-Child PIDs are tracked per-task in `TaskHandle.pid_slot: Arc<Mutex<Vec<u32>>>`, replacing the
-insufficient single global slot `CHILD_PID: AtomicU32` at `tddy-core/src/backend/mod.rs:134`.
+Child PIDs are tracked per-task in `TaskHandle.pid_slot: Arc<Mutex<Vec<u32>>>`. A headless agent
+turn's processes are tracked by their own process group (`tddy_agent_backend` `turn_process`), so a
+cancel reaches that turn and no other.
 
 ### Session starts run as tasks
 

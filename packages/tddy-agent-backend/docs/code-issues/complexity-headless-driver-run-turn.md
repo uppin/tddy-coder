@@ -3,7 +3,7 @@
 **Location:** `packages/tddy-agent-backend/src/backend/headless_driver.rs` — `HeadlessDriver::run_turn`
 **Category:** complexity
 **Detected:** 2026-10-25 — `/pr-wrap` step 4 (clean-code scan, fn line to closing brace) on PR #726 (`#coagents` 7/8)
-**Metrics:** **80 lines** · nesting 4 · 3 parameters · budget 60 / 4
+**Metrics:** **91 lines** (`run_turn`; `read_turn` 83) · nesting 4 · 3 parameters · budget 60 / 4
 **Thresholds breached:** length 80 > 60
 **Status:** Open — unclaimed
 
@@ -12,6 +12,7 @@
 | Run | Lines | Nesting | Note |
 |---|---|---|---|
 | 2026-10-25 | 80 | 4 | first detection — new in PR #726: spawn, the stdout/cancel `select!` loop, the post-EOF wait, kill, reap and the ending. Deferred to the `#coagents` sweep node by the developer (2026-10-25) |
+| 2026-11-05 | 91 (`run_turn`) · 83 (`read_turn`) | 4 | **regressed** by #821 (`#agent-tools` 15/19): `run_turn` renders every turn through the spec renderer (`render_env`, the transcript factory, the scratch directory), and the stdout/cancel `select!` loop lives in `read_turn`, which gained the turn-deadline arms at wrap (`end_overrun`). Deferred to the `#agent-tools` sweep node (n20) |
 
 ## What would close it
 

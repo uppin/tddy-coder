@@ -16,6 +16,7 @@
 | 2026-09-22 | 2682 | 2682 → 2682 in #493 — catalog paths repointed to `tddy_session_catalog`; not grown |
 | 2026-09-24 | 2707 | 2682 on the merge-base with `origin/master` (`4e7157d2`) → 2707 after #509 (`#keyring` 2/9): the `standalone_auth_provider` / `StandaloneAuthProvider` auth-flow declaration (step 1 V9) and transport stamping. Grown; the split is deferred with the developer's consent to a follow-up after `#keyring` lands, because #510 and #511 touch this file (`docs/dev/todo/2026-09-24-keyring-desktop-login-grew-thirteen-over-budget-files.md`). The step 3.5 gate read 2715; step 4's `build_auth_service_entry` cleanup took 8 back. First `#[cfg(test)]` now at L2708 |
 | 2026-10-21 | 2655 | 2655 → 2655 in #690 (`#satellite` 15/15): one string in `verify_tddy_tools_available` repointed to `cargo build -p tddy-tools-cli`. Touched, not grown |
+| 2026-11-05 | 2646 → 2647 | **regressed** by one line in #821 (`#agent-tools` 15/19): `create_backend`'s claude/cursor/codex arms build `SpecHeadlessBackend` through `headless_backend_from_spec`; measured against `origin/feature/agent-tools/cli-spec-features` (`4552a851c`). Not split: restructuring deferred to the `#agent-tools` sweep node (n20); n16 replaces `create_backend` |
 
 ## What would close it — designed seams
 

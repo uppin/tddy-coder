@@ -14,6 +14,13 @@ long-running background jobs (e.g. `Shell` with `block_until_ms = 0`).
   — dispatch one tool call. `registry: &TaskRegistry` holds background jobs spawned by
   `Shell`/`Await`; `session_id` tags jobs.
 - `execute_tool_with_env(...)` — variant that forwards an environment map to spawned shells.
+  A spawned command inherits neither a credential nor a session: the host's GitHub token variables
+  (`GH_TOKEN`, `GITHUB_TOKEN` and their enterprise forms) are removed, and so is every `TDDY_*`
+  variable, whether inherited from the host process (a `tddy-tools` that adopted its session, a
+  daemon started with some) or passed in the map (which the engine reads for itself, e.g.
+  `TDDY_SEMANTIC_INDEX_DB`). A `tddy-tools` the command runs finds its
+  session through the `.tddy/session.json` pointer in its cwd
+  ([session resolution](../tddy-tools/docs/session-resolution.md)).
 - `Shell`, `LocalShell`, `RemoteShell`, `session_shell`, `execute_tool_on_shell` — pick local disk
   vs OpenSSH (`BatchMode=yes`) for managed sessions with `ssh_config_host`; remote dispatch covers
   the full exec catalog with path containment against the remote worktree root.
