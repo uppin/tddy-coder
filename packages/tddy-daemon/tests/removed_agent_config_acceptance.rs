@@ -39,6 +39,10 @@ fn the_startup_refusal(path: &Path) -> String {
         .arg("--config")
         .arg(path)
         .env_remove("TDDY_DAEMON_CONFIG")
+        // `main` returns an `anyhow::Error`; with backtraces on (CI sets `RUST_BACKTRACE=1`) its
+        // report would carry a stack trace after the message.
+        .env("RUST_BACKTRACE", "0")
+        .env("RUST_LIB_BACKTRACE", "0")
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::piped())

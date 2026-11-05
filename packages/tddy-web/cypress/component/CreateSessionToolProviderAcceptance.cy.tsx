@@ -12,6 +12,7 @@ import { CreateSessionPane } from "../../src/components/sessions/CreateSessionPa
 import { SessionService } from "../../src/gen/session_pb";
 import { ProjectService } from "../../src/gen/project_pb";
 import { CatalogService } from "../../src/gen/catalog_pb";
+import { AgentKind } from "../../src/gen/types_pb";
 import { AccountsService } from "../../src/gen/accounts_pb";
 import { SessionFilesService } from "../../src/gen/session_files_pb";
 import { WorktreeService } from "../../src/gen/worktree_pb";
@@ -25,9 +26,11 @@ function aBackend(): InMemoryRpcBackend {
       projects: [{ projectId: "proj-1", name: "Test Project", mainRepoPath: "/repo" }],
     }))
     .onUnary(CatalogService.method.listAgents, () => ({
+      // As the daemon reports them from the specs: Codex can be routed to OpenAI Responses
+      // endpoints, Cursor declares no provider at all.
       agents: [
-        { id: "codex", label: "Codex" },
-        { id: "cursor", label: "Cursor" },
+        { id: "codex", label: "Codex", kind: AgentKind.CODING_AGENT, harness: "codex", routeProviders: ["openai_responses"] },
+        { id: "cursor", label: "Cursor", kind: AgentKind.CODING_AGENT, harness: "cursor", routeProviders: [] },
       ],
     }))
     .onUnary(CatalogService.method.listTools, () => ({

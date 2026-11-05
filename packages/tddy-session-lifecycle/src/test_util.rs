@@ -71,21 +71,20 @@ pub fn daemon_config_from_fixture_file(path: &std::path::Path) -> anyhow::Result
 }
 
 /// The coding agents of a fixture host: every built-in spec, with no `<tddyhome>/tools` overrides,
-/// resolved against this process. What a suite that never wires its own coding agents gets, so the
-/// capability gates have agents to read.
+/// resolved the way the daemon resolves them ([`tddy_agent_launch::host_coding_agents`]) — so
+/// `tddy-tools` is the build's own (`CARGO_BIN_EXE_tddy-tools`, or the sibling of the test binary in
+/// `target/debug`), never whichever one the developer's `PATH` happens to hold. What a suite that
+/// never wires its own coding agents gets, so the capability gates have agents to read.
 ///
 /// # Panics
 /// When the built-in specs do not load, which no build passes.
 #[must_use]
 pub fn builtin_coding_agents() -> Arc<tddy_agent_launch::spec_launch::HostCodingAgents> {
-    let registry = tddy_coding_agent_specs::load_agent_registry(std::path::Path::new(
-        "/nonexistent-tddy-home/tools",
-    ))
-    .expect("the built-in coding agents load");
-    Arc::new(tddy_agent_launch::spec_launch::HostCodingAgents::new(
-        registry,
-        Arc::new(tddy_actions::tool::ProcessToolHost),
-    ))
+    tddy_agent_launch::host_coding_agents::host_coding_agents(
+        &DaemonConfig::default(),
+        std::path::Path::new("/nonexistent-tddy-home"),
+    )
+    .expect("the built-in coding agents load")
 }
 
 /// The host [`test_service`] wraps, before it goes behind its `Arc` — for a suite above this crate
