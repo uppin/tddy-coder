@@ -3,11 +3,12 @@
 
 use std::io::BufRead;
 
+use crate::backend::acp_driver::AcpUpdateSink;
 use crate::backend::headless_driver::HeadlessHarness;
 use crate::error::BackendError;
 use crate::stream::{self, StreamResult};
 
-use super::{StreamAdapter, StreamSinks, CLAUDE_STREAM_JSON};
+use super::{StreamAdapter, StreamSinks, TurnTranscript, CLAUDE_STREAM_JSON};
 
 /// The marker a structured result carries; a non-zero exit with it is a success when the spec says
 /// so (the CLI can exit 1 after an `ExitPlanMode` despite a complete result).
@@ -45,6 +46,18 @@ impl StreamAdapter for ClaudeStreamJson {
 
     fn turn_format(&self) -> Option<HeadlessHarness> {
         Some(HeadlessHarness::Claude)
+    }
+    /// Its stream errors joined with `; `, else its trimmed stderr.
+    fn failure_detail(&self, stream: &StreamResult, stderr: &str) -> String {
+        // TODO(headless-driver): implement.
+        let _ = (stream, stderr);
+        todo!("headless-driver: claude_stream_json failure_detail")
+    }
+
+    fn transcript(&self, updates: Option<AcpUpdateSink>) -> Option<Box<dyn TurnTranscript>> {
+        // TODO(headless-driver): implement — the turn transcript `turn_format` names today.
+        let _ = updates;
+        todo!("headless-driver: claude_stream_json transcript")
     }
 }
 

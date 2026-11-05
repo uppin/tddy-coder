@@ -4,12 +4,13 @@
 
 use std::io::BufRead;
 
+use crate::backend::acp_driver::AcpUpdateSink;
 use crate::backend::headless_driver::HeadlessHarness;
 use crate::error::BackendError;
 use crate::stream::codex::{codex_jsonl_last_error_message, parse_codex_jsonl_output};
 use crate::stream::StreamResult;
 
-use super::{StreamAdapter, StreamSinks};
+use super::{StreamAdapter, StreamSinks, TurnTranscript};
 
 /// [`CodexJsonl`]'s name.
 pub const CODEX_JSONL: &str = "codex-jsonl";
@@ -70,6 +71,18 @@ impl StreamAdapter for CodexJsonl {
 
     fn turn_format(&self) -> Option<HeadlessHarness> {
         Some(HeadlessHarness::Codex)
+    }
+    /// Its last stream error, else `codex_stderr_brief_for_user` of its stderr, with `codex_openai_auth_remediation` appended to an auth failure.
+    fn failure_detail(&self, stream: &StreamResult, stderr: &str) -> String {
+        // TODO(headless-driver): implement.
+        let _ = (stream, stderr);
+        todo!("headless-driver: codex_jsonl failure_detail")
+    }
+
+    fn transcript(&self, updates: Option<AcpUpdateSink>) -> Option<Box<dyn TurnTranscript>> {
+        // TODO(headless-driver): implement — the turn transcript `turn_format` names today.
+        let _ = updates;
+        todo!("headless-driver: codex_jsonl transcript")
     }
 }
 

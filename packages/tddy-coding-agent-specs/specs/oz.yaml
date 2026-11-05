@@ -63,5 +63,11 @@ extensions:
         - { if: profile, then: [--profile, "{profile}"] }
       env: {}
       adapter: oz-ndjson
+      # --- The workflow turn's protocol (`#agent-tools 15/19`), read by `SpecHeadlessBackend`:
+      # what a `tddy-coder` workflow turn needs beyond the argv, reproducing the bespoke backend.
+      system_prompt: prepend
+      workflow_mcp: true
+      fresh_session: agent
+      scratch: session_dir
     # A headless CLI runs only as the daemon's own user, on its host.
     placements: [host]

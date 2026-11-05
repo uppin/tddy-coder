@@ -75,9 +75,24 @@ extensions:
         - { if: model, then: [-m, "{model}"] }
         - { if: resume, then: ["{session_id}"] }
         - "{prompt}"
+      # TODO(headless-driver): green declares Codex's OAuth capture here — `BROWSER: "{self_exe}"`
+      # and `TDDY_CODEX_OAUTH_OUT: "{session_dir}/codex_oauth_authorize.url"`, rendered by the
+      # backend's `render_env` (and by `HeadlessDriver`, which reads the same `env`). The latter is
+      # the one `TDDY_*` variable a headless agent still sees; it belongs to the Codex OAuth
+      # follow-up stack — docs/dev/todo/2026-11-05-codex-oauth-out-env-in-headless-agent.md
       env: {}
       adapter: codex-jsonl
       # A non-zero exit with a non-empty parsed result counts as success, as the backend tolerates
       # it for a planning goal today.
       exit_ok_if_structured: true
+      # --- The workflow turn's protocol (`#agent-tools 15/19`), read by `SpecHeadlessBackend`:
+      # what a `tddy-coder` workflow turn needs beyond the argv, reproducing the bespoke backend.
+      # No tool server is registered: a `tddy-tools` codex runs from its shell finds the session
+      # through `.tddy/session.json` in its working directory.
+      system_prompt: prepend
+      goal_params:
+        read_only_plan: { sandbox_mode: read-only }
+      route_model: { kind: replaced }
+      fresh_session: agent
+      scratch: session_dir
     placements: [host]

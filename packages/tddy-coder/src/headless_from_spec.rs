@@ -12,7 +12,7 @@ use tddy_actions::tool::{ResolvedTool, ToolHost};
 use tddy_coding_agent_specs::headless::SpecHeadlessRenderer;
 use tddy_coding_agent_specs::{load_agent_registry, CodingAgentSpec};
 use tddy_core::adapters::AdapterRegistry;
-use tddy_core::{CodexBackend, CursorBackend};
+use tddy_core::{CodexBackend, CursorBackend, SpecHeadlessBackend};
 
 /// `cursor.yaml`'s `binary.env`: the variable that names the Cursor `agent` binary.
 pub const CURSOR_BINARY_ENV: &str = "TDDY_CURSOR_AGENT";
@@ -114,4 +114,25 @@ pub fn codex_backend_from_spec(
 ) -> anyhow::Result<CodexBackend> {
     let renderer = renderer_for("codex", tools_dir, host.as_ref())?;
     Ok(CodexBackend::new().with_headless_renderer(Arc::new(renderer)))
+}
+
+/// The workflow backend of the declared headless coding agent `agent` (`#agent-tools 15/19`) —
+/// `claude`, `cursor`, `codex`, `oz`, or any agent a `<tddyhome>/tools` YAML declares with a
+/// `coding_agent.headless` section naming a registered adapter: the registry loaded with
+/// `tools_dir` applied, `agent` and its deps resolved against `host`, and a [`SpecHeadlessBackend`]
+/// over its `SpecHeadlessRenderer`, the section's protocol, its `routed_agent` and its model
+/// listing. Refused when the registry does not load, `agent` does not resolve, or its spec has no
+/// usable headless section.
+///
+/// Replaces [`cursor_backend_from_spec`], [`codex_backend_from_spec`] and
+/// `claude_from_spec::claude_backend_from_spec`, which are deleted with the bespoke backends.
+pub fn headless_backend_from_spec(
+    agent: &str,
+    tools_dir: &Path,
+    host: Arc<dyn ToolHost>,
+) -> anyhow::Result<SpecHeadlessBackend> {
+    // TODO(headless-driver): implement — `renderer_for`, then `SpecHeadlessBackend::new(renderer,
+    // renderer.protocol(), routed_agent(&spec))` with `renderer.model_listing()?`.
+    let _ = (agent, tools_dir, host);
+    todo!("headless-driver: headless_backend_from_spec")
 }

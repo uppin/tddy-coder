@@ -11,11 +11,17 @@ use std::collections::BTreeMap;
 use std::path::PathBuf;
 
 use tddy_actions::tool::{render_argv, ResolvedTool, TemplateParams};
+use tddy_agent_backend::adapters::HeadlessModelListing;
 use tddy_agent_backend::adapters::{
     AdapterError, AdapterRegistry, HeadlessInvocation, HeadlessMcpServer, HeadlessRenderer,
     HeadlessTurn,
 };
 use tddy_agent_backend::SessionMode;
+// `#agent-tools 15/19`: the protocol fields of `coding_agent.headless`, which live beside the port
+// in `tddy-agent-backend` (this crate depends on it) and are named here for spec readers.
+pub use tddy_agent_backend::adapters::{
+    FreshSession, GoalParams, HeadlessProtocol, RouteModel, ScratchDir, SystemPromptDelivery,
+};
 use thiserror::Error;
 
 use crate::slots::{self, McpServerCommand, RenderedSlots, SlotInputs};
@@ -90,6 +96,22 @@ impl SpecHeadlessRenderer {
             tool_server,
             adapters,
         })
+    }
+    /// The agent's model listing (`#agent-tools 15/19`): `coding_agent.models.list_command`
+    /// rendered with this renderer's resolved binary, and the launch adapter `models.adapter`
+    /// names. `None` for a spec that declares no listing, which `list_models` answers from the
+    /// curated catalogue.
+    pub fn model_listing(&self) -> Result<Option<HeadlessModelListing>, HeadlessSpecError> {
+        // TODO(headless-driver): implement — render `models.list_command` over `self.tool`, the
+        // adapter from `LaunchAdapters::builtin()`.
+        todo!("headless-driver: SpecHeadlessRenderer::model_listing")
+    }
+
+    /// The protocol a workflow turn of this agent runs with (`#agent-tools 15/19`): its
+    /// `coding_agent.headless` section's [`crate::HeadlessSection::protocol`].
+    pub fn protocol(&self) -> HeadlessProtocol {
+        // TODO(headless-driver): implement.
+        todo!("headless-driver: SpecHeadlessRenderer::protocol")
     }
 }
 
@@ -220,6 +242,13 @@ mod tests {
             adapter: adapter.to_string(),
             exit_ok_if_structured: false,
             mcp: None,
+            system_prompt: SystemPromptDelivery::default(),
+            goal_params: GoalParams::default(),
+            approval_tool: false,
+            workflow_mcp: false,
+            route_model: RouteModel::default(),
+            fresh_session: FreshSession::default(),
+            scratch: ScratchDir::default(),
         }
     }
 

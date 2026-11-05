@@ -43,6 +43,7 @@ use std::fmt;
 use std::io::BufRead;
 use std::sync::Arc;
 
+use crate::backend::acp_driver::{AcpTurnEnd, AcpUpdateSink};
 use crate::backend::headless_driver::HeadlessHarness;
 use crate::error::BackendError;
 use crate::stream::{ProgressEvent, StreamResult};
@@ -63,6 +64,12 @@ pub use codex_jsonl::{CodexJsonl, CODEX_JSONL};
 pub use cursor_models::{CursorModels, CURSOR_MODELS};
 pub use cursor_stream::{CursorStream, CURSOR_STREAM};
 pub use headless::{HeadlessInvocation, HeadlessMcpServer, HeadlessRenderer, HeadlessTurn};
+// `#agent-tools 15/19`: what a workflow turn runs with beyond its argv, declared as the spec's
+// `coding_agent.headless` protocol fields.
+pub use headless::{
+    render_env, EnvTemplate, FreshSession, GoalParams, HeadlessModelListing, HeadlessProtocol,
+    RouteModel, ScratchDir, SystemPromptDelivery,
+};
 pub use oz_ndjson::{OzNdjson, OZ_NDJSON};
 // `#agent-tools 8/12`: what a PTY launch reads its agent's own output through — a model listing,
 // a resume token. Not stream adapters, so a registry of their own ([`launch::LaunchAdapters`]).
@@ -113,7 +120,50 @@ pub trait StreamAdapter: Send + Sync + fmt::Debug {
 
     /// Which of the headless driver's turn transcripts decodes this stream into conversation
     /// updates; `None` for an adapter no conversation driver reads.
+    ///
+    /// TODO(headless-driver): replaced by [`Self::transcript`]; deleted with `HeadlessHarness` once
+    /// `HeadlessDriver` and the launcher read the transcript factory.
     fn turn_format(&self) -> Option<HeadlessHarness>;
+
+    /// The detail a failed workflow turn's error carries after its exit code, from what the child
+    /// streamed and the stderr it left (`#agent-tools 15/19`): Claude's stream errors joined (else
+    /// its stderr), Codex's last stream error (else a brief of its stderr) with the sign-in
+    /// remediation appended to an auth failure, Cursor's and Oz's stderr. Empty when there is none.
+    fn failure_detail(&self, stream: &StreamResult, stderr: &str) -> String;
+
+    /// A conversation transcript decoding this stream into `updates` (`#agent-tools 15/19`), the
+    /// factory that replaces [`Self::turn_format`] and the closed `HeadlessHarness` it names;
+    /// `None` for an adapter no conversation driver reads.
+    fn transcript(&self, updates: Option<AcpUpdateSink>) -> Option<Box<dyn TurnTranscript>>;
+}
+
+/// How a conversation turn's CLI process ended (`#agent-tools 15/19`).
+#[derive(Debug)]
+pub enum TurnEnding<'a> {
+    /// The caller cancelled the turn and its process group was killed.
+    Cancelled,
+    /// The process exited on its own; `stderr` is the tail it kept.
+    Exited {
+        status: std::process::ExitStatus,
+        stderr: &'a str,
+    },
+}
+
+/// A conversation turn's end: the session the CLI named during it, if any, and its result.
+#[derive(Debug)]
+pub struct TurnFinished {
+    pub session_id: Option<String>,
+    pub result: Result<AcpTurnEnd, BackendError>,
+}
+
+/// One conversation turn's transcript, fed the CLI's stdout a line at a time: the events become the
+/// same updates an ACP turn produces (`#agent-tools 15/19`).
+pub trait TurnTranscript: Send {
+    /// One stdout line as it arrives.
+    fn push_line(&mut self, line: &str);
+
+    /// The turn's end, once the process has.
+    fn finish(self: Box<Self>, ending: TurnEnding<'_>) -> TurnFinished;
 }
 
 /// The stream adapters this build has, by name.

@@ -135,3 +135,150 @@ pub(crate) fn turn_workdir(cwd: Option<&Path>) -> Result<PathBuf, BackendError> 
         }),
     }
 }
+
+// --- The protocol a workflow turn runs with (`#agent-tools 15/19`) -----------------------------
+//
+// What one headless agent's workflow turn needs beyond its argv, declared as the spec's
+// `coding_agent.headless` fields and read by `backend::SpecHeadlessBackend`. The types live here,
+// beside the port, and `tddy-coding-agent-specs` re-exports them for its `HeadlessSection`: the specs
+// crate depends on this one, so the reverse edge would be a cycle. Each is named after what it
+// does, never after an agent.
+
+/// How a workflow turn hands the agent its system prompt (`headless.system_prompt`).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SystemPromptDelivery {
+    /// As a file, through the spec's `append_system_prompt` slot (Claude's
+    /// `--append-system-prompt-file`); an inline prompt is written to a temp file the turn removes.
+    Flag,
+    /// In front of the prompt, separated by a blank line (Cursor, Codex, Oz).
+    #[default]
+    Prepend,
+}
+
+/// The template params a workflow turn binds by its goal's hints (`headless.goal_params`). Bound in
+/// this order, a later map overriding an earlier one's name: `always`, then `plan_mode` for a goal
+/// in the agent's plan mode, then `read_only_plan` for one that is also read-only, then
+/// `accept_edits` for a goal that accepts edits. A param named `permission_mode` fills the
+/// template's `{permission_mode}`.
+#[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct GoalParams {
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub always: BTreeMap<String, String>,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub plan_mode: BTreeMap<String, String>,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub read_only_plan: BTreeMap<String, String>,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub accept_edits: BTreeMap<String, String>,
+}
+
+impl GoalParams {
+    /// The params a goal with `hints` binds.
+    pub fn bind(&self, hints: &tddy_workflow::GoalHints) -> BTreeMap<String, String> {
+        // TODO(headless-driver): implement.
+        let _ = hints;
+        todo!("headless-driver: GoalParams::bind")
+    }
+}
+
+/// Whether a provider route's argv replaces the request's model (`headless.route_model`), written
+/// as `{ kind: kept }`, `{ kind: replaced }` or `{ kind: replaced_if_route_has, flag: --model }`.
+#[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+pub enum RouteModel {
+    /// The turn keeps its model, routed or not.
+    #[default]
+    Kept,
+    /// A routed turn names no model: the route's argv carries it (Codex's `-m`).
+    Replaced,
+    /// A routed turn names no model when the route's argv carries `flag` (Claude's `--model`).
+    ReplacedIfRouteHas { flag: String },
+}
+
+impl RouteModel {
+    /// The model a turn requesting `model` runs with, on a route whose argv is `route_args`
+    /// (empty when the turn is not routed).
+    pub fn model_for(&self, model: Option<String>, route_args: &[String]) -> Option<String> {
+        // TODO(headless-driver): implement.
+        let _ = (model, route_args);
+        todo!("headless-driver: RouteModel::model_for")
+    }
+}
+
+/// Who names a fresh session's id (`headless.fresh_session`).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum FreshSession {
+    /// The caller's id is passed (`--session-id <id>`).
+    Caller,
+    /// The agent mints its own, which the turn reads off its stream.
+    #[default]
+    Agent,
+}
+
+/// Where a workflow turn's registration files are written (`headless.scratch`).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ScratchDir {
+    /// The session directory, never the worktree: the registration can carry a credential.
+    #[default]
+    SessionDir,
+    /// The working directory, for a slot that writes under it (Cursor's `.cursor/mcp.json`).
+    Workdir,
+}
+
+/// Everything a workflow turn of one headless agent is run with beyond its argv.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct HeadlessProtocol {
+    pub system_prompt: SystemPromptDelivery,
+    pub goal_params: GoalParams,
+    /// The approval tool (`mcp__tddy-tools__approval_prompt`) is bound when the tool server is.
+    pub approval_tool: bool,
+    /// The workflow registers the agent's tool server (`HeadlessRenderer::tool_server`).
+    pub workflow_mcp: bool,
+    pub route_model: RouteModel,
+    pub fresh_session: FreshSession,
+    pub scratch: ScratchDir,
+}
+
+/// The values a spec's `headless.env` may name: `{session_dir}` and `{self_exe}`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct EnvTemplate {
+    /// The request's session directory; `None` refuses a value naming `{session_dir}`.
+    pub session_dir: Option<PathBuf>,
+    /// This process's own executable (Codex's `BROWSER` re-exec).
+    pub self_exe: PathBuf,
+}
+
+/// `env` with `{session_dir}` and `{self_exe}` in its values replaced by `template`'s. Refused,
+/// naming the variable, when a value names `{session_dir}` and the request has none — never set
+/// with the placeholder left in.
+pub fn render_env(
+    env: &[(String, String)],
+    template: &EnvTemplate,
+) -> Result<Vec<(String, String)>, BackendError> {
+    // TODO(headless-driver): implement.
+    let _ = (env, template);
+    todo!("headless-driver: render_env")
+}
+
+/// How a spec lists its agent's models (`coding_agent.models.list_command` + `adapter`), rendered
+/// with the spec-resolved binary.
+#[derive(Clone)]
+pub struct HeadlessModelListing {
+    pub program: PathBuf,
+    pub argv: Vec<String>,
+    pub adapter: Arc<dyn super::ModelsAdapter>,
+}
+
+impl fmt::Debug for HeadlessModelListing {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("HeadlessModelListing")
+            .field("program", &self.program)
+            .field("argv", &self.argv)
+            .field("adapter", &self.adapter.name())
+            .finish()
+    }
+}
