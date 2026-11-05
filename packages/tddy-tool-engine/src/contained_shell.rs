@@ -34,6 +34,14 @@ const GITHUB_TOKEN_VARIABLES: [&str; 4] = [
     "GITHUB_ENTERPRISE_TOKEN",
 ];
 
+/// The prefix of every variable that names a session or configures `tddy` itself — none of which a
+/// command an agent runs may see.
+const SESSION_VARIABLE_PREFIX: &str = "TDDY_";
+
+fn is_session_variable(name: &str) -> bool {
+    name.starts_with(SESSION_VARIABLE_PREFIX)
+}
+
 /// Why a contained shell command produced no output.
 #[derive(Debug)]
 pub(crate) enum ContainedShellError {
@@ -86,10 +94,24 @@ pub(crate) async fn run_contained_argv(
     for token_variable in GITHUB_TOKEN_VARIABLES {
         spawn.env_remove(token_variable);
     }
+    // Nor is it a session: a command an agent runs sees no `TDDY_*` variable — not the host
+    // process's own (a `tddy-tools` adopts the session it resolved into its environment, a daemon
+    // may have been started with some), and not one in `env`, which the engine reads for itself
+    // (`TDDY_SEMANTIC_INDEX_DB`). A `tddy-tools` the command runs finds its session through the
+    // `.tddy/session.json` pointer in its cwd.
+    for (name, _) in std::env::vars_os() {
+        if is_session_variable(&name.to_string_lossy()) {
+            spawn.env_remove(name);
+        }
+    }
     spawn
         .args(args)
         .current_dir(root)
-        .envs(env.iter().map(|(k, v)| (k.as_str(), v.as_str())))
+        .envs(
+            env.iter()
+                .filter(|(k, _)| !is_session_variable(k))
+                .map(|(k, v)| (k.as_str(), v.as_str())),
+        )
         // Never the caller's: in a jail that stream is the tool-IPC request pipe.
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
