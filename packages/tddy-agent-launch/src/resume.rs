@@ -1,7 +1,8 @@
 use tddy_core::write_session_metadata;
 
 use crate::cursor_cli_spawn::{chat, no_coding_agents, resolve_cursor_agent, LaunchedCursor};
-use crate::cursor_from_spec::{cursor_template_params, node_launcher_of};
+use crate::cursor_from_spec::node_launcher_of;
+use crate::harness_from_spec::{harness_template_params, HarnessLaunch};
 use crate::spec_launch::{
     launch_host_pty, plan_host_pty, HostAgent, HostCodingAgents, HostPtySession,
 };
@@ -61,12 +62,13 @@ pub async fn resume_cursor_cli_session(
     let binary_path = agent.tool.binary.to_string_lossy().into_owned();
     let chat_id = chat_to_resume(&meta, session_id, &binary_path, &worktree_path).await?;
 
-    let params = cursor_template_params(
-        &chat_id,
-        &model,
-        None,
-        node_launcher_of(&agent.tool.binary).as_ref(),
-    );
+    let launcher = node_launcher_of(&agent.tool.binary);
+    let params = harness_template_params(&HarnessLaunch {
+        model: &model,
+        chat_id: Some(&chat_id),
+        node_launcher: launcher.as_ref(),
+        ..HarnessLaunch::default()
+    });
     let launched = relaunch_cursor(
         cli_manager,
         &agent,

@@ -27,6 +27,7 @@ use pretty_assertions::assert_eq;
 use support::PrivateTmux;
 use tddy_rpc::Code;
 use tddy_service::proto::session::StartSessionRequest;
+use tddy_service::session_activity::notify_env;
 
 /// The id every copy is dropped in under.
 const COPY_ID: &str = "acme";
@@ -275,6 +276,47 @@ async fn a_copy_of_claude_yaml_under_another_id_on_an_ssh_host_writes_its_slot_f
             hooks_file.exists(),
         ),
         (Some(SSH_ALIAS.to_string()), true, false)
+    );
+}
+
+/// The `TDDY_*` variables the claude spec's `operator_notify` puts on the agent process, for
+/// `tddy-tools notify` (`session_activity::notify_env`). Every other `TDDY_*` name is one the agent
+/// must not see.
+const NOTIFY_VARIABLES: [&str; 5] = [
+    notify_env::SESSION_ID,
+    notify_env::OS_USER,
+    notify_env::HOOK_TOKEN,
+    notify_env::DAEMON_URL,
+    notify_env::DAEMON_SOCKET,
+];
+
+#[tokio::test]
+#[serial_test::serial]
+async fn a_copy_of_claude_yaml_under_another_id_on_an_ssh_host_runs_without_the_daemons_tddy_variables(
+) {
+    // Given — a TDDY_ variable in the daemon's own environment, claude.yaml as acme, and an ssh
+    // target that answers
+    let _leak = agent_registry_support::ATddyVariableInTheDaemon::set("TDDY_LEAK_PROBE", "1");
+    let _target = AnSshTarget::installed(false);
+    let daemon = a_daemon_with_a_claude_copy();
+
+    // When
+    let (session_id, _host) = daemon
+        .start(on_a_named_branch(
+            daemon.an_ssh_start(COPY_SESSION_TYPE, SSH_ALIAS),
+        ))
+        .await
+        .expect("an acme-cli start on an ssh target succeeds");
+    let started = daemon.stub_report(&session_id).await;
+
+    // Then — of the TDDY_ variables, only the spec-declared notify ones reach the agent
+    assert_eq!(
+        started
+            .tddy_variables()
+            .into_iter()
+            .filter(|name| !NOTIFY_VARIABLES.contains(&name.as_str()))
+            .collect::<Vec<_>>(),
+        Vec::<String>::new()
     );
 }
 

@@ -9,7 +9,8 @@ use tddy_coding_agent_specs::slots::RenderedSlots;
 use tddy_rpc::Status;
 
 use crate::spec_launch::{
-    launch_host_pty_without_inherited_tddy, plan_host_pty, HostAgent, HostPtySession,
+    in_a_pane_without_inherited_tddy, launch_host_pty_without_inherited_tddy, plan_host_pty,
+    HostAgent, HostPtySession,
 };
 
 /// How a harness is run: as the PTY child, or inside tmux — and whether the launch starts the
@@ -111,14 +112,15 @@ pub(super) async fn launch(
     };
     if run.in_tmux {
         let plan = plan_host_pty(agent, params, slots).map_err(failed)?;
+        let env: Vec<(String, String)> = plan.env.into_iter().chain(env).collect();
         let tmux_launch = crate::cli_harness_tmux::HarnessTmuxLaunch {
             os_user,
             session_id,
             worktree_path: worktree_path.to_path_buf(),
             session_dir: session_dir.to_path_buf(),
             kind,
-            argv: plan.argv,
-            env: plan.env.into_iter().chain(env).collect(),
+            argv: in_a_pane_without_inherited_tddy(plan.argv, &env),
+            env,
             on_exit,
         };
         let launched = if run.resume {

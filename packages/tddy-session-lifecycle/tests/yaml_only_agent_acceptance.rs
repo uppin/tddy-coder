@@ -14,6 +14,7 @@
 //! `jailed` module.
 
 mod agent_registry_support;
+mod support;
 
 use std::collections::BTreeSet;
 
@@ -463,6 +464,38 @@ async fn the_agent_process_of_a_dropped_in_agent_sees_no_tddy_variable() {
     assert_eq!(started.tddy_variables(), Vec::<String>::new());
 }
 
+#[tokio::test]
+#[serial_test::serial]
+async fn the_agent_process_of_a_dropped_in_agent_started_in_tmux_sees_no_tddy_variable() {
+    // Given — a TDDY_ variable in the daemon's own environment before its private tmux server
+    // starts (a pane inherits the server's environment, not the daemon's), and the dropped-in agent
+    // declaring hooks, managed workflow and a daemon-id conversation
+    let _leak = agent_registry_support::ATddyVariableInTheDaemon::set("TDDY_LEAK_PROBE", "1");
+    let _tmux = support::PrivateTmux::started();
+    let daemon =
+        a_daemon_with_tools(&[("acme.yaml", &acme_yaml_with_hooks_and_managed_workflow())]);
+
+    // When — a managed start in tmux
+    let start = tddy_service::proto::session::StartSessionRequest {
+        run_in_tmux: true,
+        ..daemon.a_managed_start("acme-cli", "tdd")
+    };
+    let (session_id, _host) = daemon
+        .start(start)
+        .await
+        .expect("a managed acme-cli start in tmux succeeds");
+    let started = daemon.stub_report(&session_id).await;
+
+    // Then — the pane runs the agent with no TDDY_ variable at all
+    assert_eq!(
+        (
+            daemon.metadata_of(&session_id).tmux_session.is_some(),
+            started.tddy_variables(),
+        ),
+        (true, Vec::<String>::new())
+    );
+}
+
 /// The jailed half of the YAML-only claim: macOS only, through a real Seatbelt jail.
 #[cfg(target_os = "macos")]
 mod jailed {
@@ -497,5 +530,24 @@ mod jailed {
                 Some(true),
             )
         );
+    }
+
+    #[tokio::test]
+    #[serial_test::serial]
+    async fn the_agent_process_of_a_dropped_in_agent_in_a_jail_sees_no_tddy_variable() {
+        // Given — a TDDY_ variable in the daemon's own environment
+        let _leak =
+            super::agent_registry_support::ATddyVariableInTheDaemon::set("TDDY_LEAK_PROBE", "1");
+        let daemon = a_daemon_with_tools(&[("acme.yaml", ACME_YAML)]);
+
+        // When
+        let (session_id, _jail) = daemon
+            .start(daemon.a_start("acme-cli", true))
+            .await
+            .expect("a jailed acme-cli start succeeds");
+        let started = daemon.stub_report(&session_id).await;
+
+        // Then
+        assert_eq!(started.tddy_variables(), Vec::<String>::new());
     }
 }

@@ -43,6 +43,7 @@ use crate::cli_route_launch::{resume_cli_route, routed_launch_model, start_cli_r
 use crate::cli_session_worktree::{
     provision_cli_worktree, semantic_index_env, CliWorktree, CliWorktreeStart,
 };
+use crate::cursor_from_spec::node_launcher_of;
 use crate::harness_from_spec::{
     harness_template_params, resolve_session_agent, resume_token_adapter, CliSessionAgent,
     CliSessionType, HarnessLaunch,
@@ -330,11 +331,13 @@ pub(crate) async fn start_cli_harness_session(
     write_slot_files_on_target(&mut slots, remote_host)?;
     env.extend(std::mem::take(&mut wiring.env));
     env.extend(route.env);
+    let launcher = node_launcher_of(&agent.tool.binary);
     let params = harness_template_params(&conversation.bound(HarnessLaunch {
         model: launch_model,
         prompt: Some(initial_prompt),
         permission_mode: Some(permission_mode),
         dangerously_skip_permissions,
+        node_launcher: launcher.as_ref(),
         ..HarnessLaunch::default()
     }));
     let launched = launch(
@@ -581,9 +584,11 @@ async fn resume_cli_harness_session(
     let mut env = git_environment;
     env.extend(wiring.env);
     env.extend(route.env);
+    let launcher = node_launcher_of(&agent.tool.binary);
     let params = harness_template_params(&conversation.bound(HarnessLaunch {
         model: meta.model.as_deref().unwrap_or_default(),
         resume: true,
+        node_launcher: launcher.as_ref(),
         ..HarnessLaunch::default()
     }));
     let launched = launch(

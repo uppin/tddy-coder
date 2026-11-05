@@ -1,14 +1,16 @@
-//! What an `opencode-cli`, `muse-cli` or `warp-cli` launch binds when it renders its tool
-//! definition (`tddy-coding-agent-specs/specs/{opencode,muse,warp}.yaml`) — on the host through
+//! What a CLI agent launch binds when it renders its tool definition
+//! (`tddy-coding-agent-specs/specs/*.yaml`) — on the host through
 //! [`crate::spec_launch::launch_host_pty`], in a jail through
 //! [`crate::launch_ports::LaunchSessions::launch_jailed`] — and the spec-driven refusal of a
 //! placement the spec excludes.
 //!
-//! Feature docs: `docs/ft/daemon/{opencode,muse,warp}-cli-session.md` (`#agent-tools 8/12`).
+//! Feature docs: `docs/ft/daemon/{claude,cursor,opencode,muse,warp}-cli-session.md`.
 //!
-//! Nothing here builds an argv: these are the template parameters the three specs name. A resume
-//! is `resume` for the agents that continue their worktree's session (`--continue`), and
-//! `resume_token` for Warp, whose token the `warp-resume-token` adapter read off the last run.
+//! Nothing here builds an argv: these are the template parameters the specs name. A resume is
+//! `resume` for the agents that continue their worktree's session (`--continue`), `resume_token`
+//! for Warp, whose token the `warp-resume-token` adapter read off the last run, and the
+//! conversation id (`session_id`, `chat_id`) for an agent whose `coding_agent.conversation` names
+//! one.
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -22,6 +24,7 @@ use tddy_core::provider_route::RoutedAgent;
 use tddy_daemon_kernel::config::DaemonConfig;
 use tddy_rpc::Status;
 
+use crate::cursor_from_spec::NodeLauncher;
 use crate::launch_ports::LaunchSessions;
 use crate::spec_launch::{HostAgent, HostCodingAgents};
 
@@ -55,15 +58,26 @@ pub struct HarnessLaunch<'a> {
     /// `StartSessionRequest.dangerously_skip_permissions`: bound as the
     /// `dangerously_skip_permissions` flag when set.
     pub dangerously_skip_permissions: bool,
+    /// The bundled runtime behind a launcher script (`cursor_from_spec::node_launcher_of`): bound as
+    /// `node_launcher` and `node_entry`, which a spec's argv runs instead of `{binary}`.
+    pub node_launcher: Option<&'a NodeLauncher>,
 }
 
-/// The parameters `opencode.yaml`, `muse.yaml` and `warp.yaml`'s `run.argv` is rendered with:
-/// `model` and `prompt` each bound when non-empty (trimmed) on a start; `resume` set on a resume,
-/// with `resume_token` bound when a non-blank one was recorded. A resume binds neither model nor
-/// prompt — the agent continues the session it had.
+/// The parameters every CLI agent spec's `run.argv` is rendered with: `model` and `prompt` each
+/// bound when non-empty (trimmed) on a start; `resume` set on a resume, with `resume_token` bound
+/// when a non-blank one was recorded. A resume binds no prompt, and the model only for a
+/// conversation by id (`session_id`, `chat_id`) — the agent continues the session it had. The
+/// conversation id, the permission mode, `dangerously_skip_permissions` and a node launcher are
+/// bound on both, each when given.
 pub fn harness_template_params(launch: &HarnessLaunch<'_>) -> TemplateParams {
     let by_id = launch.session_id.is_some() || launch.chat_id.is_some();
-    let params = TemplateParams::new()
+    let mut params = TemplateParams::new();
+    if let Some(launcher) = launch.node_launcher {
+        params = params
+            .with("node_launcher", &launcher.node.to_string_lossy())
+            .with("node_entry", &launcher.entry.to_string_lossy());
+    }
+    let params = params
         .with_opt("session_id", non_blank(launch.session_id))
         .with_opt("chat_id", non_blank(launch.chat_id))
         .with_opt("permission_mode", non_blank(launch.permission_mode))
@@ -345,6 +359,54 @@ mod tests {
     use tddy_rpc::Code;
 
     use super::*;
+
+    #[test]
+    fn a_cursor_start_binds_the_chat_model_and_prompt_it_was_given() {
+        // When
+        let params = harness_template_params(&HarnessLaunch {
+            model: "composer-2.5",
+            prompt: Some("  fix it  "),
+            chat_id: Some("chat-1"),
+            ..HarnessLaunch::default()
+        });
+
+        // Then
+        assert_eq!(
+            params,
+            TemplateParams::new()
+                .with("chat_id", "chat-1")
+                .with("model", "composer-2.5")
+                .with("prompt", "fix it")
+        );
+    }
+
+    #[test]
+    fn a_node_launcher_binds_its_node_and_entry() {
+        // Given
+        let launcher = NodeLauncher {
+            node: PathBuf::from("/opt/cursor-agent/versions/2026.10.1/node"),
+            entry: PathBuf::from("/opt/cursor-agent/versions/2026.10.1/index.js"),
+        };
+
+        // When
+        let params = harness_template_params(&HarnessLaunch {
+            chat_id: Some("chat-1"),
+            node_launcher: Some(&launcher),
+            ..HarnessLaunch::default()
+        });
+
+        // Then
+        assert_eq!(
+            params,
+            TemplateParams::new()
+                .with("chat_id", "chat-1")
+                .with("node_launcher", "/opt/cursor-agent/versions/2026.10.1/node")
+                .with(
+                    "node_entry",
+                    "/opt/cursor-agent/versions/2026.10.1/index.js"
+                )
+        );
+    }
 
     #[test]
     fn a_start_binds_the_model_and_prompt_it_was_given() {

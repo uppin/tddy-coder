@@ -15,6 +15,7 @@ use tddy_session_agents::agent_roster;
 
 use crate::cli_agent_steps::resumed_conversation;
 use crate::cli_harness_jail::{jail_route_config_env, require_jail_route, CliJail};
+use crate::cursor_from_spec::node_launcher_of;
 use crate::harness_from_spec::{
     harness_template_params, resolve_session_agent, CliSessionAgent, CliSessionType, HarnessLaunch,
 };
@@ -172,9 +173,11 @@ impl LaunchSessions {
         // id or minted chat, which re-binds the recorded model, or its worktree. The route's
         // arguments belong to the start.
         let conversation = resumed_conversation(&session_agent.agent.spec, metadata)?;
+        let launcher = node_launcher_of(&session_agent.agent.tool.binary);
         let params = harness_template_params(&conversation.bound(HarnessLaunch {
             model: metadata.model.as_deref().unwrap_or_default(),
             resume: true,
+            node_launcher: launcher.as_ref(),
             ..HarnessLaunch::default()
         }));
         let jail = JailSession {

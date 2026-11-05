@@ -14,10 +14,10 @@
 //!
 //! Feature docs: `docs/ft/daemon/claude-cli-session.md`, `docs/ft/daemon/cursor-cli-session.md`.
 //!
-//! The managed-workflow, operator-notify and participant-metadata steps reuse the helpers the
-//! bespoke claude path calls today (`claude_cli_spawn_steps::managed_claude_cli_launch`,
-//! `notify_env::agent_notify_unless_role`, `stack_parent::link_spawned_branch_without_failing_the_spawn`);
-//! green moves them behind `Capability::ManagedWorkflow` / `OperatorNotify` on the generic start.
+//! - [`wire_session_agent`] / [`LaunchSessions::resumed_session_wiring`]: the hooks, the managed
+//!   workflow (`Capability::ManagedWorkflow`), the operator-notify guidance
+//!   (`Capability::OperatorNotify`) and a main's tool restriction, on a start and again on a resume.
+//!   A `TDDY_*` pair any of them produces goes to the agent's tool server, never the agent process.
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;

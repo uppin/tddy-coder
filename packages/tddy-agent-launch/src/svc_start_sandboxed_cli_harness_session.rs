@@ -26,6 +26,7 @@ use crate::cli_route_launch::routed_launch_model;
 use crate::cli_session_worktree::{
     provision_cli_worktree, semantic_index_env, CliWorktree, CliWorktreeStart,
 };
+use crate::cursor_from_spec::node_launcher_of;
 use crate::harness_from_spec::{harness_template_params, CliSessionAgent, HarnessLaunch};
 use crate::launch_ports::LaunchSessions;
 use crate::relaunch_jail_dirs::{prepare_relaunch_dirs, refresh_relaunch_context_dir};
@@ -242,11 +243,13 @@ impl LaunchSessions {
             session_id,
         })
         .await?;
+        let launcher = node_launcher_of(&session_agent.agent.tool.binary);
         let params = harness_template_params(&conversation.bound(HarnessLaunch {
             model: launch_model,
             prompt: Some(&start.initial_prompt),
             permission_mode: Some(req.permission_mode.trim()),
             dangerously_skip_permissions: req.dangerously_skip_permissions,
+            node_launcher: launcher.as_ref(),
             ..HarnessLaunch::default()
         }));
 

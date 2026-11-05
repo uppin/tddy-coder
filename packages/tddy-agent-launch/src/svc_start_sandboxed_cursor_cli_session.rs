@@ -25,7 +25,8 @@ use std::path::PathBuf;
 
 use crate::claude_jail::{closure_defs, TDDY_TOOLS_ID};
 use crate::cursor_cli_spawn::resolve_cursor_agent;
-use crate::cursor_from_spec::{cursor_template_params, node_launcher_of};
+use crate::cursor_from_spec::node_launcher_of;
+use crate::harness_from_spec::{harness_template_params, HarnessLaunch};
 use crate::jail_launch::{jail_home, mcp_server_env, tool_ipc_socket, JailSpec, JailedSession};
 use crate::launch_ports::LaunchSessions;
 use crate::spec_launch::{HostAgent, HostCodingAgents};
@@ -481,12 +482,14 @@ impl LaunchSessions {
             },
         )
         .map_err(|e| Status::internal(e.to_string()))?;
-        let params = cursor_template_params(
-            launch.chat_id,
-            launch.model,
-            Some(launch.initial_prompt),
-            node_launcher_of(&agent.tool.binary).as_ref(),
-        );
+        let launcher = node_launcher_of(&agent.tool.binary);
+        let params = harness_template_params(&HarnessLaunch {
+            model: launch.model,
+            prompt: Some(launch.initial_prompt),
+            chat_id: Some(launch.chat_id),
+            node_launcher: launcher.as_ref(),
+            ..HarnessLaunch::default()
+        });
         self.launch_jailed(
             JailSpec {
                 agent,

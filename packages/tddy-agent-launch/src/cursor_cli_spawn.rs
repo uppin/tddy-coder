@@ -12,9 +12,8 @@ use crate::claude_jail::TDDY_TOOLS_ID;
 use crate::cli_session_worktree::{
     provision_cli_worktree, semantic_index_env, CliWorktree, CliWorktreeStart,
 };
-use crate::cursor_from_spec::{
-    configured_cursor_binary, cursor_template_params, node_launcher_of, CURSOR_AGENT_ID,
-};
+use crate::cursor_from_spec::{configured_cursor_binary, node_launcher_of, CURSOR_AGENT_ID};
+use crate::harness_from_spec::{harness_template_params, HarnessLaunch};
 use crate::session_acting_identity::SessionAccountAccess;
 use crate::spec_launch::{
     launch_host_pty, plan_host_pty, HostAgent, HostCodingAgents, HostPtySession,
@@ -425,12 +424,14 @@ async fn spawn_cursor_from_spec(
         },
     )
     .map_err(|e| Status::internal(e.to_string()))?;
-    let params = cursor_template_params(
-        &chat_id,
+    let launcher = node_launcher_of(&agent.tool.binary);
+    let params = harness_template_params(&HarnessLaunch {
         model,
-        Some(initial_prompt),
-        node_launcher_of(&agent.tool.binary).as_ref(),
-    );
+        prompt: Some(initial_prompt),
+        chat_id: Some(&chat_id),
+        node_launcher: launcher.as_ref(),
+        ..HarnessLaunch::default()
+    });
     if let Some(os_user) = tmux_os_user {
         // A tmux-run agent (`#tmux-agent`) runs the spec's argv in its own tmux session.
         let plan = plan_host_pty(&agent, &params, &slots)
