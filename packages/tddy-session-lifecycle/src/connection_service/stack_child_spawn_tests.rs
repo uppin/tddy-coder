@@ -93,7 +93,7 @@ fn a_pr_stack_orchestrator() -> Orchestrator {
         Arc::new(tddy_daemon_kernel::operator_channel::NoOperatorChannel),
         Arc::new(CliSessionManager::new()),
     )
-    .with_coding_agents_if_none(crate::test_util::builtin_coding_agents());
+    .with_coding_agents_if_none(crate::test_util::builtin_coding_agents_for(&config));
 
     let orchestrator = Orchestrator {
         service,

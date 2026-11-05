@@ -106,7 +106,9 @@ fn a_session_host(config: DaemonConfig, sessions_base: PathBuf) -> DaemonSession
         Arc::new(tddy_daemon_kernel::operator_channel::NoOperatorChannel),
         Arc::new(ClaudeCliSessionManager::new()),
     )
-    .with_coding_agents_if_none(tddy_session_lifecycle::test_util::builtin_coding_agents())
+    .with_coding_agents_if_none(
+        tddy_session_lifecycle::test_util::builtin_coding_agents_for(&config),
+    )
 }
 
 fn a_repository_whose_origin_is_itself(dir: &Path) {

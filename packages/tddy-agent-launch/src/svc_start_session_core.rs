@@ -11,7 +11,7 @@ use tddy_task::CancellationToken;
 
 use tddy_core::session_lifecycle::unified_session_dir_path;
 
-use crate::harness_from_spec::{cli_launcher, launcher_of, CliLauncher};
+use crate::harness_from_spec::cli_launcher;
 use crate::placement::CodebasePlacement;
 
 use tddy_session_split::split_start::resolve_split_agent_placement;
@@ -29,8 +29,6 @@ use tddy_service::proto::session::StartSessionResponse;
 use tddy_session_files::attachment_progress::AttachmentProgressSink;
 
 use tddy_service::proto::session::StartSessionRequest;
-
-use tddy_session_agents::agent_host_callbacks::DaemonSeedCloneClaimant;
 
 use tddy_service::proto::session::start_phase::Step as StartStep;
 
@@ -379,93 +377,9 @@ impl LaunchSessions {
             return Ok(started);
         }
 
-        // Which launch path a CLI agent's session takes is read from the agent the session type
-        // names in the host's registry, never from the session type's spelling.
-        let cli_kind = cli_launcher(self.coding_agents.as_deref(), req.session_type.trim())?;
-        // TODO(cli-dispatch-collapse): the claude and cursor arms below go at green — every CLI
-        // agent starts through `start_cli_harness(kind, …)`, and `launcher_of` is deleted.
-        let cli_launcher = cli_kind.map(|kind| launcher_of(kind.spec_id));
-
-        // --- claude-cli branch: no LiveKit; resolves project and creates a real git worktree ---
-        if cli_launcher == Some(CliLauncher::Claude) {
-            // A child of a planned PR is told where its boundaries are, however it was started: the
-            // dialog opens with the node's documents pre-attached but carries only the node's title
-            // and description as the prompt, so the line is added here rather than in the browser.
-            // Derived from what materialized, so it can only name a document the child holds.
-            let start = self.cli_start_prelude(&req, progress, os_user).await?;
-            let stack_parent_for_claude_cli = trim_to_option(&req.stack_parent);
-            // A managed-codebase claude-cli session with a recipe is launched workflow-aware. An
-            // unknown recipe is a request error (never silently ignored). Non-managed sessions and
-            // managed sessions without a recipe keep the plain launch (managed_recipe = None).
-            let managed_recipe = managed_recipe_for(&req)?;
-            if req.sandbox {
-                return self
-                    .start_sandboxed_claude_cli_from_request(
-                        &req,
-                        os_user,
-                        start,
-                        stack_parent_for_claude_cli.as_deref(),
-                        managed_recipe,
-                    )
-                    .await;
-            }
-            let sessions_base = start.sessions_base.clone();
-            let session_id = start.session_id.clone();
-            let started = self
-                .start_claude_cli_from_request(
-                    &req,
-                    os_user,
-                    start,
-                    stack_parent_for_claude_cli,
-                    managed_recipe,
-                    progress,
-                )
-                .await?;
-            self.announce_worktree_ready(&sessions_base, &session_id);
-            return Ok(started);
-        }
-
-        // --- cursor-cli branch: no LiveKit; spawns Cursor Agent CLI in a PTY worktree ---
-        if cli_launcher == Some(CliLauncher::Cursor) {
-            // Same rule as the claude-cli branch above: which agent runs a planned PR's child is
-            // not a reason for it to come up without its boundaries.
-            let start = self.cli_start_prelude(&req, progress, os_user).await?;
-            let managed_recipe = managed_recipe_for(&req)?;
-            if req.sandbox {
-                return self
-                    .start_sandboxed_cursor_cli_from_request(&req, os_user, start, managed_recipe)
-                    .await;
-            }
-            // Resolved before the spawn, not after: an agent the request names and this daemon
-            // cannot resolve fails the start, exactly as it does on the sandboxed paths, rather
-            // than persisting a roster entry that resolves to nothing on the next resume.
-            let started_agents = self
-                .agent_roster
-                .seeded_roster_records_placed(&req.specialized_agents, &req.clone_placed_agents)
-                .await?;
-            let clones = DaemonSeedCloneClaimant {
-                service: self.agent_roster.clone(),
-            };
-            let sessions_base = start.sessions_base.clone();
-            let session_id = start.session_id.clone();
-            let started = self
-                .spawn_cursor_cli_from_request(
-                    &req,
-                    os_user,
-                    start,
-                    managed_recipe,
-                    started_agents,
-                    clones,
-                    progress,
-                )
-                .await?;
-            self.announce_worktree_ready(&sessions_base, &session_id);
-            return Ok(started);
-        }
-
-        // --- any other CLI coding agent its spec launches (opencode-cli, muse-cli, warp-cli): a PTY,
-        // no LiveKit ---
-        if let (Some(CliLauncher::Generic), Some(kind)) = (cli_launcher, cli_kind) {
+        // Every CLI agent starts through the one spec-driven launch; which agent a session type
+        // names is read from the host's registry, never from the session type's spelling.
+        if let Some(kind) = cli_launcher(self.coding_agents.as_deref(), req.session_type.trim())? {
             return self.start_cli_harness(kind, &req, progress, os_user).await;
         }
 
@@ -495,7 +409,6 @@ impl LaunchSessions {
 }
 
 use crate::placement::classify_start_placement;
-use crate::placement::managed_recipe_for;
 pub use crate::{
     cli_branch_starts, start_request_checks, tool_session_spawn, tool_spawn_plan,
     workspace_branch_start,

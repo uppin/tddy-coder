@@ -268,6 +268,12 @@ impl AnOrchestrator {
                 std::fs::read_to_string(&launched)
                     .map(|log| log.trim().to_string())
                     .map_err(|e| format!("no agent has recorded a launch yet: {e}"))
+                    // The stub creates its log before it writes its name to it.
+                    .and_then(|log| {
+                        (!log.is_empty())
+                            .then_some(log)
+                            .ok_or_else(|| "the launch log is still empty".to_string())
+                    })
             },
         )
         .await

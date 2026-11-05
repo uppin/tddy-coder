@@ -19,8 +19,9 @@ use crate::cli_route_launch::{resume_cli_route, start_cli_route};
 use crate::session_acting_identity::SessionAccountAccess;
 use crate::session_provider_route::{
     pty_route_env, resolve_session_route, resume_route, resume_route_env, route_sources_on_resume,
-    sandboxed_start_route, session_route_sources, start_route,
+    sandboxed_start_route, session_route_sources, start_route, RouteAgent,
 };
+use crate::spec_launch::HostCodingAgents;
 use std::os::unix::fs::PermissionsExt;
 use tddy_coding_agent_specs::{load_agent_registry, routed_agent, CodingAgentSpec};
 use tddy_core::{
@@ -461,6 +462,14 @@ fn a_resumed_session_on_its_vendor_gets_no_route_env() {
     );
 }
 
+/// The agent `claude` among a host's coding agents, which a route is resolved for.
+fn on_the_claude_agent(agents: Option<&HostCodingAgents>) -> RouteAgent<'_> {
+    RouteAgent::OnHost {
+        agents,
+        id: "claude",
+    }
+}
+
 #[test]
 fn a_routed_claude_cli_start_records_its_account_in_the_session_dir_it_creates() {
     // Given Ada holds her Meta account in an unlocked vault
@@ -474,7 +483,7 @@ fn a_routed_claude_cli_start_records_its_account_in_the_session_dir_it_creates()
         &access,
         &on_account("meta-hackathon"),
         "muse-wonder-1.0",
-        Some(&the_host_agents()),
+        on_the_claude_agent(Some(&the_host_agents())),
     )
     .expect("the start proceeds");
 
@@ -502,7 +511,7 @@ fn a_refused_claude_cli_start_creates_no_session_dir() {
         &access,
         &on_account("meta-hackathon"),
         "muse-wonder-1.0",
-        Some(&the_host_agents()),
+        on_the_claude_agent(Some(&the_host_agents())),
     )
     .expect_err("a locked vault refuses");
 
@@ -529,7 +538,7 @@ fn a_claude_cli_start_on_its_vendor_creates_its_session_dir_with_no_record() {
         &access,
         &RouteSources::default(),
         "opus",
-        Some(&the_host_agents()),
+        on_the_claude_agent(Some(&the_host_agents())),
     )
     .expect("the start proceeds");
 
@@ -762,7 +771,7 @@ fn a_cli_session_type_carries_the_route_support_its_spec_declares() {
 fn an_agent_asked_for_by_a_host_with_no_coding_agents_is_refused_when_a_route_is_asked() {
     // Given Ada holds her account, and the host has no coding agents installed
     let (_dir, access) = a_daemon_where_ada_holds(&[adas_meta_account()], true);
-    let on_host = crate::session_provider_route::RouteAgent::claude_on(None);
+    let on_host = on_the_claude_agent(None);
 
     // When a start chooses the account, and one chooses nothing
     let routed = start_route(&access, on_host, &on_account("meta-hackathon"), "m")

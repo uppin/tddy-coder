@@ -102,6 +102,8 @@ fn build_home_daemon(
     if coding_agents {
         let tools_dir = std::fs::canonicalize(stub.path()).unwrap();
         std::os::unix::fs::symlink(tddy_tools_binary(), tools_dir.join("tddy-tools")).unwrap();
+        // The stub the config names stands for `claude` on the declared `PATH`.
+        std::os::unix::fs::symlink(&claude, tools_dir.join("claude")).unwrap();
         let registry = tddy_coding_agent_specs::load_agent_registry(&data.path().join("tools"))
             .expect("the agent registry loads");
         host = host.with_coding_agents(Arc::new(
@@ -274,20 +276,32 @@ fn minimal_service_with_manager(
 /// waiting for input — so a started main is still running when it is ensured again, and the idle
 /// reaper (which only considers live processes) is not racing a process exit. `cat` ends when the
 /// session is stopped (SIGTERM) or its terminal closes.
+///
+/// The variables are read from the `tddy-tools` server's `env` block in the MCP config the agent was
+/// launched with (`--mcp-config`): the agent's own environment carries no `TDDY_*`, its tool server's
+/// does.
 fn write_argv_and_env_script(dir: &Path) -> PathBuf {
     let script_path = dir.join("stub_claude_argv_env.sh");
+    let dump = |key: &str| {
+        format!(
+            "echo \"ENVDUMP {key}=[$(sed -n 's/.*\"{key}\": *\"\\([^\"]*\\)\".*/\\1/p' \"$cfg\" 2>/dev/null)]\"\n"
+        )
+    };
     std::fs::write(
         &script_path,
-        concat!(
-            "#!/bin/sh\n",
-            "echo \"ARGV: $@\"\n",
-            "echo \"ENVDUMP TDDY_SOCKET=[$TDDY_SOCKET]\"\n",
-            "echo \"ENVDUMP TDDY_REMOTE_SESSION_ID=[$TDDY_REMOTE_SESSION_ID]\"\n",
-            "echo \"ENVDUMP TDDY_REMOTE_SESSION_TOKEN=[$TDDY_REMOTE_SESSION_TOKEN]\"\n",
-            "echo \"ENVDUMP TDDY_REMOTE_DAEMON_URL=[$TDDY_REMOTE_DAEMON_URL]\"\n",
-            "echo \"ENVDUMP TDDY_REMOTE_DAEMON_SOCKET=[$TDDY_REMOTE_DAEMON_SOCKET]\"\n",
-            "exec cat >/dev/null\n",
-        ),
+        [
+            "#!/bin/sh\n".to_string(),
+            "echo \"ARGV: $@\"\n".to_string(),
+            "cfg=\"\"; prev=\"\"\n".to_string(),
+            "for a in \"$@\"; do if [ \"$prev\" = \"--mcp-config\" ]; then cfg=\"$a\"; fi; prev=\"$a\"; done\n".to_string(),
+            dump("TDDY_SOCKET"),
+            dump("TDDY_REMOTE_SESSION_ID"),
+            dump("TDDY_REMOTE_SESSION_TOKEN"),
+            dump("TDDY_REMOTE_DAEMON_URL"),
+            dump("TDDY_REMOTE_DAEMON_SOCKET"),
+            "exec cat >/dev/null\n".to_string(),
+        ]
+        .concat(),
     )
     .unwrap();
     use std::os::unix::fs::PermissionsExt;

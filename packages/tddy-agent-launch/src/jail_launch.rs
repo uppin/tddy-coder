@@ -36,7 +36,7 @@ use tddy_sandbox_recipes::homes::{persistent_home, HomeError};
 use tddy_sandbox_runner::{EgressGuard, ExecPlan, ExecPlanFile};
 use tddy_task::TerminalCapture;
 
-use crate::claude_cli_spawn_steps::record_role_before_spawn;
+use crate::claude_cli_spawn_steps::record_role_of_session_type_before_spawn;
 use crate::cli_harness_jail::canonical_exec_path;
 use crate::launch_ports::LaunchSessions;
 use crate::spec_launch::HostAgent;
@@ -64,6 +64,9 @@ pub struct JailSpec<'a> {
 
 /// The session a jail is launched for, beyond what [`JailSpec`] declares.
 pub struct JailedSession<'a> {
+    /// The CLI session type the jail runs (`.session.yaml`'s `session_type`), which the role's early
+    /// record names.
+    pub session_type: &'a str,
     pub jail: &'a JailSession<'a>,
     pub dirs: &'a JailDirs,
     /// Host-side env the session's relayed commands run with (a managed workflow's `TDDY_SOCKET`).
@@ -144,11 +147,12 @@ impl LaunchSessions {
             worktree_path,
             ..
         } = *session.jail;
-        record_role_before_spawn(
+        record_role_of_session_type_before_spawn(
             session_dir,
             session_id,
             project_id,
             role,
+            session.session_type,
             worktree_path,
             session.managed_codebase,
         )?;

@@ -1,33 +1,18 @@
-use crate::stack_parent;
-
 use crate::conversation_spawn::GrillMeConversationSpawnHandler;
 
 use crate::conversation_spawn::recipe_enables_conversation_spawn;
 
 use std::path::Path;
 
-use crate::claude_cli_spawn::spawn_claude_cli_session_inner;
-
 use crate::stack_child_spawn::StackChildSpawnHandler;
-
-use tddy_core::output::SESSIONS_SUBDIR;
-
-use tddy_rpc::Status;
-
-use tddy_service::proto::session::StartSessionResponse;
-
-use tddy_rpc::Response;
 
 use std::sync::Arc;
 
-use std::path::PathBuf;
-
-use tddy_session_files::attachment_progress::AttachmentProgressSink;
+use tddy_core::output::SESSIONS_SUBDIR;
 
 use crate::launch_ports::LaunchSessions;
 
 use crate::session_acting_identity::SessionAccountAccess;
-use tddy_core::provider_route::RouteSources;
 
 /// A managed session's child spawner and conversation spawner, each present only for its recipe.
 pub(crate) type ManagedSpawnHandlers = (
@@ -36,102 +21,6 @@ pub(crate) type ManagedSpawnHandlers = (
 );
 
 impl LaunchSessions {
-    #[allow(clippy::too_many_arguments)]
-    pub(crate) async fn start_claude_cli_session(
-        &self,
-        os_user: &str,
-        session_id: &str,
-        sessions_base: PathBuf,
-        model: &str,
-        project_id: &str,
-        branch_worktree_intent: &str,
-        new_branch_name: &str,
-        selected_integration_base_ref: &str,
-        selected_branch_to_work_on: &str,
-        initial_prompt: &str,
-        permission_mode: &str,
-        dangerously_skip_permissions: bool,
-        stack_parent: Option<&str>,
-        // The daemon whose sessions tree holds `stack_parent` (empty = this one), and the caller's
-        // token, which is what that daemon verifies the forwarded question with.
-        stack_parent_daemon_instance_id: &str,
-        // The planned node of that parent's stack this child materializes, named by the surface
-        // that started it. Empty = derive the node from the branch, locally (D34).
-        stack_node_id: &str,
-        session_token: &str,
-        // When `Some`, the session is launched workflow-aware: the recipe's orchestration prompt is
-        // injected and its `transition` tool advances a per-session `WorkflowController`.
-        managed_recipe: Option<Arc<dyn tddy_core::workflow::recipe::WorkflowRecipe>>,
-        // When true, index the worktree before launch and expose the `SemanticSearch` tool.
-        semantic_index: bool,
-        // When true (new_branch_from_base only), push the new branch to origin at session start.
-        create_remote_branch: bool,
-        ssh_config_host: &str,
-        // Whether the session is started in managed-codebase mode; recorded at start.
-        managed_codebase: bool,
-        // The session's standing role, recorded before its agent is spawned; empty for an ordinary one.
-        session_role: &str,
-        // A checkout to run in directly instead of cutting a session worktree; empty cuts one.
-        repo_path: &str,
-        // Run the agent inside a tmux session as the session's OS user (`StartSessionRequest.run_in_tmux`).
-        run_in_tmux: bool,
-        // Where the session's provider account is chosen; see `session_route_sources`.
-        route_sources: &RouteSources,
-        progress: &AttachmentProgressSink,
-    ) -> Result<Response<StartSessionResponse>, Status> {
-        let (child_spawn_handler, conversation_spawn_handler) = self.managed_spawn_handlers(
-            &managed_recipe,
-            os_user,
-            session_id,
-            project_id,
-            &sessions_base,
-            session_token,
-        );
-        spawn_claude_cli_session_inner(
-            &self.config,
-            &self.tddy_data_dir,
-            &self.claude_cli_manager,
-            os_user,
-            session_id,
-            sessions_base.clone(),
-            model,
-            project_id,
-            branch_worktree_intent,
-            new_branch_name,
-            selected_integration_base_ref,
-            selected_branch_to_work_on,
-            initial_prompt,
-            permission_mode,
-            dangerously_skip_permissions,
-            match stack_parent {
-                Some(session_id) => stack_parent::SpawnStackParent::OwnedBy {
-                    session_id,
-                    daemon_instance_id: stack_parent_daemon_instance_id,
-                    stack_node_id,
-                    session_token,
-                    host: self,
-                },
-                None => stack_parent::SpawnStackParent::NoParent,
-            },
-            managed_recipe,
-            child_spawn_handler,
-            conversation_spawn_handler,
-            semantic_index,
-            create_remote_branch,
-            ssh_config_host,
-            managed_codebase,
-            self.start_role(session_role, session_id, &sessions_base, session_token)?,
-            repo_path,
-            run_in_tmux,
-            &self.host.session_account_access(session_token),
-            route_sources,
-            &self.task_registry,
-            progress,
-            self.coding_agents.as_deref(),
-        )
-        .await
-    }
-
     /// The handlers a managed session's toolcall listener is bound to: a pr-stack orchestrator's
     /// child spawner (the agent's `pr_spawn_child` relay materializes planned nodes into child
     /// sessions) and, for a grill-me session, the conversation spawner. Neither for any other

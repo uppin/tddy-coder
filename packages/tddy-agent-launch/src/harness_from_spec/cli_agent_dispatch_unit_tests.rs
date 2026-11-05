@@ -237,12 +237,9 @@ fn a_child_on_a_host_without_coding_agents_is_refused_failed_precondition() {
 
 // ── cli_branch_intent ────────────────────────────────────────────────────────────────────────
 
-// TODO(cli-dispatch-collapse): a one-off equivalence check, deleted at green with
-// `BranchIntentPolicy::{claude_cli, cursor_cli}`: it proves the swap to the spec's
-// `branch_name_required` keeps the built-ins' behaviour before the constructors go.
 #[test]
-fn the_spec_branch_intent_of_the_builtin_claude_and_cursor_equals_their_bespoke_constructors() {
-    // Given
+fn the_spec_branch_intent_of_the_builtin_agents_follows_their_branch_name_required_capability() {
+    // Given the built-in claude (which declares branch_name_required) and cursor (which does not)
     let agents = the_builtin_coding_agents();
     let intent_of = |session_type: &str| {
         let kind = cli_session_type(&agents, session_type).expect("a built-in session type");
@@ -253,15 +250,15 @@ fn the_spec_branch_intent_of_the_builtin_claude_and_cursor_equals_their_bespoke_
         branch_behaviour(cli_branch_intent(kind, spec))
     };
 
-    // When
+    // When their intents are read from the specs
     let from_specs = (intent_of("claude-cli"), intent_of("cursor-cli"));
 
-    // Then
+    // Then claude refuses a blank new branch name and cursor generates one, each under its session type
     assert_eq!(
         from_specs,
         (
-            branch_behaviour(BranchIntentPolicy::claude_cli()),
-            branch_behaviour(BranchIntentPolicy::cursor_cli()),
+            ("claude-cli", BlankNewBranchName::Refuse),
+            ("cursor-cli", BlankNewBranchName::Generate),
         )
     );
 }

@@ -269,6 +269,50 @@ async fn a_relaunch_uses_the_same_launcher_and_renders_the_same_spec() {
     );
 }
 
+/// The value of `--append-system-prompt-file` on `argv`.
+fn the_appended_prompt_file(argv: &[String]) -> Option<&str> {
+    argv.windows(2)
+        .find(|pair| pair[0] == "--append-system-prompt-file")
+        .map(|pair| pair[1].as_str())
+}
+
+#[tokio::test]
+async fn a_managed_claude_in_a_jail_is_driven_by_its_workflow_and_stays_driven_on_a_resume() {
+    // Given — a sandboxed claude started over a managed codebase on the tdd recipe
+    let daemon = a_daemon_with_a_claude_home(ADaemonSpec::default());
+    let (session_id, _started_jail) = daemon.start_managed("tdd").await;
+    let started = daemon.stub_report(&session_id).await;
+
+    // When — its jail is relaunched by a resume
+    let _resumed_jail = daemon.resume(&session_id).await;
+    let resumed = daemon.stub_report(&session_id).await;
+
+    // Then — the session is recorded as managed on its recipe, and both launches hand the agent the
+    // recipe's orchestration prompt (the workflow's controller is what its `transition` reaches)
+    let record = daemon.metadata_of(&session_id);
+    let prompt = |report: &AStubReport| {
+        the_appended_prompt_file(&report.argv())
+            .and_then(|path| std::path::Path::new(path).file_name())
+            .map(|name| name.to_string_lossy().into_owned())
+    };
+    assert_eq!(
+        (
+            record.managed_codebase,
+            record.recipe.as_deref(),
+            record.sandbox,
+            prompt(&started),
+            prompt(&resumed),
+        ),
+        (
+            true,
+            Some("tdd"),
+            Some(true),
+            Some("orchestration-prompt.txt".to_string()),
+            Some("orchestration-prompt.txt".to_string()),
+        )
+    );
+}
+
 #[tokio::test]
 async fn claude_in_a_jail_reaches_a_declared_host_through_the_shim_and_is_refused_an_undeclared_one(
 ) {

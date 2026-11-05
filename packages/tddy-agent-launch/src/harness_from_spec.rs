@@ -12,7 +12,7 @@
 //! conversation id (`session_id`, `chat_id`) for an agent whose `coding_agent.conversation` names
 //! one.
 
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::sync::Arc;
 
 use tddy_actions::tool::TemplateParams;
@@ -155,29 +155,6 @@ fn interned(name: &str) -> &'static str {
     leaked
 }
 
-/// The agent id of the one CLI agent whose session has its own bespoke launch path (the hook,
-/// tmux and recipe handling of Claude Code's TUI).
-// TODO(cli-dispatch-collapse): deleted at green with `CliLauncher` and `launcher_of` — claude and
-// cursor still launch through their own paths, selected here by the spec's id; #agent-tools n17
-// `cli-dispatch-collapse` routes them through the generic launch
-// (docs/dev/todo/2026-11-04-claude-and-cursor-launch-by-agent-id.md).
-const CLAUDE_AGENT_ID: &str = "claude";
-/// The agent id of the CLI agent with the Cursor launch path; see [`CLAUDE_AGENT_ID`].
-// TODO(cli-dispatch-collapse): deleted at green.
-const CURSOR_AGENT_ID: &str = "cursor";
-
-/// Which launch path a CLI session type takes.
-// TODO(cli-dispatch-collapse): deleted at green — every CLI agent takes the generic path.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum CliLauncher {
-    /// The Claude Code TUI's path.
-    Claude,
-    /// The Cursor agent's path.
-    Cursor,
-    /// The spec-driven launch every other CLI agent shares.
-    Generic,
-}
-
 /// The CLI session type `session_type` names, from the coding agents this host has: `None` for a
 /// session type that is no agent's (a tool or workspace session), a refusal for an agent session
 /// type no installed spec launches, or when the host has no coding agents at all. Every CLI agent
@@ -203,39 +180,18 @@ fn no_coding_agents_for(session_type: &str) -> Status {
     ))
 }
 
-/// [`cli_launcher`] for a recorded session whose host has no [`HostCodingAgents`] at hand — a tmux
-/// re-attach after a daemon restart — read from the tools `tddy_data_dir` declares. `None` for a
-/// session type no installed spec launches.
-// TODO(cli-dispatch-collapse): deleted at green — re-attach reads the installed coding agents
-// through `recorded_cli_session_type`.
-pub(crate) fn recorded_cli_launcher(
-    tddy_data_dir: &Path,
-    session_type: &str,
-) -> Result<Option<CliLauncher>, Status> {
-    let registry = CodingAgentRegistry::load(&tddy_data_dir.join("tools"))
-        .map_err(|e| Status::internal(format!("load the coding agent tools: {e}")))?;
-    Ok(registry
-        .for_session_type(session_type)
-        .map(|spec| launcher_of(&spec.id)))
-}
-
 /// The CLI session type a recorded session re-attaches as after a daemon restart, read from the
 /// coding agents this daemon installed — never from `<tddyhome>/tools`, and never defaulted: a
 /// record without a session type, or with one that is no CLI agent's, is `None` (nothing to
 /// re-attach), and a host with no coding agents is refused like a start.
-// TODO(cli-dispatch-collapse): wired at green; only its unit tests reach it until then.
-#[allow(dead_code)]
 pub(crate) fn recorded_cli_session_type(
     agents: Option<&HostCodingAgents>,
     recorded_session_type: Option<&str>,
 ) -> Result<Option<CliSessionType>, Status> {
-    // TODO(cli-dispatch-collapse): implement — `None` for a record without a session type, then
-    // `cli_launcher(agents, recorded)`; it replaces `recorded_cli_launcher` and the
-    // `unwrap_or("claude-cli")` in `claude_cli_tmux::reattach_recorded_main`.
-    let _ = (agents, recorded_session_type);
-    Err(Status::unimplemented(
-        "TODO(cli-dispatch-collapse): recorded_cli_session_type",
-    ))
+    match recorded_session_type {
+        Some(session_type) => cli_launcher(agents, session_type),
+        None => Ok(None),
+    }
 }
 
 /// The CLI session type a conversation or pr-stack child of a session runs: its parent session's
@@ -243,19 +199,22 @@ pub(crate) fn recorded_cli_session_type(
 /// spawned from names no agent, and no agent is a default. Refused (`FAILED_PRECONDITION`) when the
 /// host has no coding agents, when the parent records no session type, or when the parent's is no
 /// CLI agent's.
-// TODO(cli-dispatch-collapse): wired at green; only its unit tests reach it until then.
-#[allow(dead_code)]
 pub(crate) fn child_session_type(
     agents: Option<&HostCodingAgents>,
     parent_session_type: Option<&str>,
 ) -> Result<CliSessionType, Status> {
-    // TODO(cli-dispatch-collapse): implement — the parent's session type through `cli_launcher`,
-    // refused when it is `None`; `conversation_spawn_handler` and `child_spawn_handler` then start
-    // the child through `start_cli_harness_session` instead of `spawn_claude_cli_session_inner`.
-    let _ = (agents, parent_session_type);
-    Err(Status::unimplemented(
-        "TODO(cli-dispatch-collapse): child_session_type",
-    ))
+    let parent = parent_session_type.filter(|session_type| !session_type.trim().is_empty());
+    let Some(parent) = parent else {
+        return Err(Status::failed_precondition(
+            "the parent session records no session type: a child runs its parent's agent",
+        ));
+    };
+    cli_launcher(agents, parent)?.ok_or_else(|| {
+        Status::failed_precondition(format!(
+            "the parent session is a {parent} session, which is no CLI agent's: a child runs its \
+             parent's agent"
+        ))
+    })
 }
 
 /// How a session of `kind` resolves its branch fields: the generated branch carries the session
@@ -267,16 +226,6 @@ pub(crate) fn cli_branch_intent(
     spec: &CodingAgentSpec,
 ) -> BranchIntentPolicy {
     BranchIntentPolicy::cli_agent(kind.name, spec.has(Capability::BranchNameRequired))
-}
-
-/// The launch path of the agent `agent_id`.
-// TODO(cli-dispatch-collapse): deleted at green with `CliLauncher`.
-pub(crate) fn launcher_of(agent_id: &str) -> CliLauncher {
-    match agent_id {
-        CLAUDE_AGENT_ID => CliLauncher::Claude,
-        CURSOR_AGENT_ID => CliLauncher::Cursor,
-        _ => CliLauncher::Generic,
-    }
 }
 
 /// The CLI session type `session_type` names, refused when no installed spec launches it: there is
@@ -332,6 +281,30 @@ pub(crate) struct CliSessionAgent {
     pub kind: CliSessionType,
     pub agent: HostAgent,
     pub agents: Arc<HostCodingAgents>,
+    /// The renderer variable the daemon's config asks of the agent ([`renderer_env`]).
+    pub renderer_env: Vec<(String, String)>,
+}
+
+/// The environment `config.claude_cli.fullscreen` asks of the agent `spec_id`: Claude Code's renderer
+/// variable, for the agent whose binary is the one the daemon names `TDDY_CLAUDE_BINARY` — the
+/// section configures that binary — and nothing for any other agent.
+// TODO(agent-config-removal): #agent-tools n19 `agent-config-removal` — the section moves into the
+// tool file's `run.env`; delete this with it (docs/dev/todo/2026-11-05-cli-spec-features-leftovers.md).
+fn renderer_env(
+    agents: &HostCodingAgents,
+    config: &DaemonConfig,
+    spec_id: &str,
+) -> Vec<(String, String)> {
+    let configures_the_claude_binary = agents
+        .registry()
+        .get(spec_id)
+        .and_then(|def| def.binary.env.as_deref())
+        == Some(tddy_daemon_kernel::config::CLAUDE_BINARY_ENV);
+    if configures_the_claude_binary {
+        config.claude_cli_renderer_env()
+    } else {
+        Vec::new()
+    }
 }
 
 /// The coding agent a CLI session of `kind` launches, resolved before anything is cut or spawned.
@@ -353,10 +326,12 @@ pub(crate) fn resolve_session_agent(
     let agent = agents
         .resolve(kind.spec_id, binary.as_deref())
         .map_err(|e| Status::failed_precondition(e.to_string()))?;
+    let renderer_env = renderer_env(&agents, config, kind.spec_id);
     Ok(CliSessionAgent {
         kind,
         agent,
         agents,
+        renderer_env,
     })
 }
 
@@ -379,32 +354,28 @@ pub(crate) fn resume_token_adapter(
         })
 }
 
-/// The resume-token adapter of a recorded `session_type` session's spec, read from the tools
-/// `tddy_data_dir` declares: a tmux re-attach (`#tmux-agent`) after a daemon restart has no
-/// coding agents at hand, only the session's record.
-// TODO(cli-dispatch-collapse): deleted at green — the re-attach reads the spec from the daemon's
-// installed `HostCodingAgents` (the launch's source), not from `<tddyhome>/tools`; this closes the
-// `TODO(agent-tools-cascade)` that asked which.
+/// The resume-token adapter the spec of a recorded `session_type` session reads a resume token
+/// with, read from the coding agents this daemon installed — the launch's own source — by a tmux
+/// re-attach after a daemon restart. `None` for an agent resumed by its worktree.
 pub(crate) fn recorded_resume_token_adapter(
-    tddy_data_dir: &Path,
+    agents: Option<&HostCodingAgents>,
     session_type: &str,
 ) -> Result<Option<Arc<dyn ResumeTokenAdapter>>, Status> {
-    let registry = CodingAgentRegistry::load(&tddy_data_dir.join("tools"))
-        .map_err(|e| Status::internal(format!("load the coding agent tools: {e}")))?;
-    resume_token_adapter(cli_session_spec(&registry, session_type)?)
+    let agents = agents.ok_or_else(|| no_coding_agents_for(session_type))?;
+    resume_token_adapter(cli_session_spec(agents.agents(), session_type)?)
 }
 
 impl LaunchSessions {
     /// Refuses a sandboxed start of `session_type` when the spec of its agent places that agent off
-    /// the jail. The spec is read from the tools this daemon's data directory declares, so the
-    /// refusal does not depend on which coding agents the host has installed.
-    // TODO(cli-dispatch-collapse): read the placement from `self.coding_agents` at green, as the
-    // re-attach does — `<tddyhome>/tools` is not where the launch reads its spec from.
+    /// the jail. The spec is read from the coding agents this host has installed, the source of
+    /// every launch.
     pub(crate) fn require_sandbox_placement(&self, session_type: &str) -> Result<(), Status> {
-        let registry = CodingAgentRegistry::load(&self.tddy_data_dir.join("tools"))
-            .map_err(|e| Status::internal(format!("load the coding agent tools: {e}")))?;
+        let agents = self
+            .coding_agents
+            .as_deref()
+            .ok_or_else(|| no_coding_agents_for(session_type))?;
         require_spec_placement(
-            cli_session_spec(&registry, session_type)?,
+            cli_session_spec(agents.agents(), session_type)?,
             session_type,
             Placement::Jail,
         )

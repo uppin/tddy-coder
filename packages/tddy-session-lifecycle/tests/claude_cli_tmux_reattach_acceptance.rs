@@ -23,9 +23,7 @@ use tddy_terminal_rpc::proto::terminal_session::{
     StreamReplayMode, StreamTerminalOutputRequest,
     TerminalSessionService as TerminalSessionServiceTrait,
 };
-use tddy_testing_commons::stub_scripts::{
-    a_stub_agent_script, read_last_appended_argv, read_recorded_env,
-};
+use tddy_testing_commons::stub_scripts::{a_stub_agent_script, read_last_appended_argv};
 use tddy_testing_commons::wait::{eventually, eventually_awaiting};
 
 use support::{this_os_user, until_attached, PrivateTmux, OBSERVE, VALID_TOKEN};
@@ -48,7 +46,6 @@ struct TmuxAgentDaemon {
     config: DaemonConfig,
     sessions_base: PathBuf,
     launches: PathBuf,
-    environment: PathBuf,
     tmux: PrivateTmux,
     _dirs: Vec<tempfile::TempDir>,
     _repo: tempfile::TempDir,
@@ -63,9 +60,7 @@ async fn a_daemon_over(manager: ClaudeCliSessionManager) -> TmuxAgentDaemon {
     let sessions_dir = tempfile::tempdir().unwrap();
     let stub_dir = tempfile::tempdir().unwrap();
     let launches = stub_dir.path().join("launches.log");
-    let environment = stub_dir.path().join("environment.txt");
     let stub = a_stub_agent_script(stub_dir.path(), "stub_claude.sh")
-        .recording_env_to(&environment, &["CLAUDE_CODE_NO_FLICKER", "TDDY_SOCKET"])
         .appending_argv_to(&launches)
         .then_reading_stdin()
         .build();
@@ -83,7 +78,6 @@ async fn a_daemon_over(manager: ClaudeCliSessionManager) -> TmuxAgentDaemon {
         config,
         sessions_base: sessions_dir.path().to_path_buf(),
         launches,
-        environment,
         tmux,
         _dirs: vec![sessions_dir, stub_dir, config_dir],
         _repo: repo,
@@ -127,7 +121,9 @@ fn a_session_host(
             Arc::new(tddy_daemon_kernel::operator_channel::NoOperatorChannel),
             manager,
         )
-        .with_coding_agents_if_none(tddy_session_lifecycle::test_util::builtin_coding_agents()),
+        .with_coding_agents_if_none(
+            tddy_session_lifecycle::test_util::builtin_coding_agents_for(&config),
+        ),
     );
     host.install_sandbox_rpc_bridge();
     host
@@ -242,13 +238,23 @@ impl TmuxAgentDaemon {
             .unwrap_or(0)
     }
 
-    /// The toolcall socket the agent was told to use (`TDDY_SOCKET`).
-    async fn toolcall_socket(&self) -> PathBuf {
-        let seen = eventually("the stub to record TDDY_SOCKET", OBSERVE, || {
-            read_recorded_env(&self.environment)
+    /// The toolcall socket the session's tool server was told to use (`TDDY_SOCKET`, in the `env` of
+    /// the `tddy-tools` registration the agent loads — the agent's own environment carries no
+    /// `TDDY_*`).
+    async fn toolcall_socket(&self, session_id: &str) -> PathBuf {
+        let registration = self.session_dir(session_id).join("claude-mcp-config.json");
+        let seen = eventually("the session to register its tool server", OBSERVE, || {
+            let text = std::fs::read_to_string(&registration)
+                .map_err(|e| format!("{} is not readable yet: {e}", registration.display()))?;
+            let json: serde_json::Value =
+                serde_json::from_str(&text).map_err(|e| format!("not JSON yet: {e}"))?;
+            json["mcpServers"]["tddy-tools"]["env"]["TDDY_SOCKET"]
+                .as_str()
+                .map(str::to_string)
+                .ok_or_else(|| "the registration carries no TDDY_SOCKET".to_string())
         })
         .await;
-        PathBuf::from(seen.get("TDDY_SOCKET").expect("TDDY_SOCKET is recorded"))
+        PathBuf::from(seen)
     }
 
     async fn is_running_in_tmux(&self) -> (String, u32) {
@@ -416,7 +422,7 @@ async fn a_client_exit_while_tmux_lives_keeps_the_sessions_toolcall_socket() {
     let (session_id, _) = daemon.is_running_in_tmux().await;
     let name = daemon.tmux_session_of(&session_id);
     until_attached(&daemon.tmux, &name, 1).await;
-    let socket = daemon.toolcall_socket().await;
+    let socket = daemon.toolcall_socket(&session_id).await;
     assert!(socket.exists(), "the socket exists while the session runs");
 
     // When the client exits (a detach) while tmux lives
@@ -440,7 +446,7 @@ async fn resuming_a_live_session_on_the_same_daemon_keeps_its_toolcall_socket_an
     let (session_id, _) = daemon.is_running_in_tmux().await;
     let name = daemon.tmux_session_of(&session_id);
     until_attached(&daemon.tmux, &name, 1).await;
-    let socket = daemon.toolcall_socket().await;
+    let socket = daemon.toolcall_socket(&session_id).await;
     assert!(daemon
         .tmux
         .tmux(&["detach-client", "-s", &name])
@@ -482,7 +488,7 @@ async fn a_detached_agents_end_runs_the_cleanup_when_its_watcher_notices() {
     let (session_id, _) = daemon.is_running_in_tmux().await;
     let name = daemon.tmux_session_of(&session_id);
     until_attached(&daemon.tmux, &name, 1).await;
-    let socket = daemon.toolcall_socket().await;
+    let socket = daemon.toolcall_socket(&session_id).await;
     assert!(daemon
         .tmux
         .tmux(&["detach-client", "-s", &name])
@@ -515,7 +521,7 @@ async fn an_agent_exit_runs_the_main_exit_cleanup_and_records_history() {
     let (session_id, _) = daemon.is_running_in_tmux().await;
     let name = daemon.tmux_session_of(&session_id);
     until_attached(&daemon.tmux, &name, 1).await;
-    let socket = daemon.toolcall_socket().await;
+    let socket = daemon.toolcall_socket(&session_id).await;
 
     // When the agent exits (its tmux session ends)
     assert!(daemon

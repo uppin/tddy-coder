@@ -1,4 +1,4 @@
-use crate::claude_cli_spawn::spawn_claude_cli_session_inner;
+use crate::cli_branch_starts::SpawnedChild;
 
 use tddy_session_files::attachment_progress::AttachmentProgressSink;
 
@@ -86,65 +86,35 @@ impl tddy_core::toolcall::ChildSpawnHandler for StackChildSpawnHandler {
                 &node_brief,
                 &materialized,
             );
-        // TODO(cli-dispatch-collapse): the child runs its parent's agent, not claude — resolve it
-        // with `harness_from_spec::child_session_type(self.service.coding_agents.as_deref(),
-        // meta.session_type.as_deref())` (refused without coding agents) and start it through
-        // `opencode_cli_spawn::start_cli_harness_session`.
-        let response = spawn_claude_cli_session_inner(
-            &self.config,
-            &self.tddy_data_dir,
-            &self.claude_cli_manager,
-            &self.os_user,
-            &child_session_id,
-            self.sessions_base.clone(),
-            &model,
-            &self.project_id,
-            "new_branch_from_base",
-            &new_branch_name,
-            "",
-            "",
-            &initial_prompt,
-            "auto",
-            false,
-            // The orchestrator is a session of this daemon, so its stack is resolved off this
-            // daemon's own disk and no credential travels anywhere.
-            stack_parent::SpawnStackParent::OwnedBy {
-                session_id: &self.orchestrator_session_id,
-                daemon_instance_id: &local_instance_id_for_config(&self.config),
-                // The orchestrator agent spawns by branch, in its own process on its own host, so
-                // the node is found from the branch here exactly as it always was (D34).
-                stack_node_id: "",
-                session_token: "",
-                host: self.stack_parent_host.as_ref(),
-            },
-            None,
-            None,
-            None,
-            // A spawned child session never runs its own semantic index.
-            false,
-            // Child spawns are created by the orchestrator agent, not the Start-Session dialog, and
-            // never push a remote branch here.
-            false,
-            "",
-            // A spawned child is never a managed-codebase session: the orchestrator does not ask for one.
-            false,
-            // A spawned child has no standing role.
-            crate::project_home_launch::StartRole::ordinary(),
-            // A child cuts its own worktree.
-            "",
-            // A spawned child's agent is the PTY child itself, never run in tmux.
-            false,
-            // The orchestrator's owner's vault: a child is the same owner's, on the same project.
-            &self.account_access,
-            // A child runs on its vendor: the orchestrator's account is not inherited.
-            &tddy_core::provider_route::RouteSources::default(),
-            &self.claude_cli_manager.task_registry(),
-            // Nobody watches a spawned child's start: the orchestrator is told its id, not its steps.
-            &tddy_session_files::attachment_progress::AttachmentProgressSink::discarding(),
-            self.service.coding_agents.as_deref(),
-        )
-        .await
-        .map_err(|status| status.message().to_string())?;
+        // The child runs its orchestrator's agent: the request names none.
+        let response = self
+            .service
+            .start_spawned_cli_child(SpawnedChild {
+                os_user: &self.os_user,
+                session_id: &child_session_id,
+                sessions_base: self.sessions_base.clone(),
+                model: &model,
+                project_id: &self.project_id,
+                new_branch_name: &new_branch_name,
+                selected_integration_base_ref: "",
+                initial_prompt: &initial_prompt,
+                // The orchestrator is a session of this daemon, so its stack is resolved off this
+                // daemon's own disk and no credential travels anywhere.
+                stack_parent: stack_parent::SpawnStackParent::OwnedBy {
+                    session_id: &self.orchestrator_session_id,
+                    daemon_instance_id: &local_instance_id_for_config(&self.config),
+                    // The orchestrator agent spawns by branch, in its own process on its own host,
+                    // so the node is found from the branch here exactly as it always was (D34).
+                    stack_node_id: "",
+                    session_token: "",
+                    host: self.stack_parent_host.as_ref(),
+                },
+                parent_session_type: meta.session_type.as_deref(),
+                // The orchestrator's owner's vault: a child is the same owner's, on the same project.
+                account_access: &self.account_access,
+            })
+            .await
+            .map_err(|status| status.message().to_string())?;
         Ok(response.into_inner().session_id)
     }
 }

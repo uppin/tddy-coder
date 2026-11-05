@@ -3,7 +3,7 @@
 mod cursor_cli_support;
 
 use std::path::PathBuf;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 
 use tddy_core::session_metadata::{read_session_metadata, SessionMetadata};
 use tddy_daemon_kernel::config::DaemonConfig;
@@ -14,11 +14,6 @@ use tddy_service::proto::session::{
 };
 use tddy_session_lifecycle::claude_cli_session::CliSessionManager;
 use tddy_session_lifecycle::connection_service::DaemonSessionHost;
-use tddy_session_lifecycle::connection_service::{
-    SeedCodebase, SeededAgentClones, SeededCloneGuard, SpawnStackParent, StackBaseLookup,
-    StackNodeLink, StackParentHost,
-};
-use tddy_session_lifecycle::cursor_cli_spawn::spawn_cursor_cli_session_inner;
 
 type SessionsBaseResolver = Arc<dyn Fn(&str) -> Option<PathBuf> + Send + Sync>;
 type UserResolver = Arc<dyn Fn(&str) -> Option<String> + Send + Sync>;
@@ -26,7 +21,6 @@ type UserResolver = Arc<dyn Fn(&str) -> Option<String> + Send + Sync>;
 const VALID_TOKEN: &str = "valid-token";
 const TEST_MODEL: &str = "claude-4.6-sonnet-medium-thinking";
 const TEST_PROJECT_ID: &str = "test-project";
-const TEST_SESSION_TOKEN: &str = "test-session-token";
 
 /// The chat id the stub `cursor-agent` mints for `create-chat`.
 const STUB_CHAT_ID: &str = "f8db82db-e154-41d0-ae72-312bdf6d4d80";
@@ -38,11 +32,12 @@ fn write_config_with_cursor_cli_binary(stub_binary: &str) -> (tempfile::TempDir,
 }
 
 fn load_cursor_cli_config(dir: &std::path::Path, stub_binary: &str) -> DaemonConfig {
+    let os_user = cursor_cli_support::current_os_user();
     let yaml = format!(
         r#"
 users:
   - github_user: "testuser"
-    os_user: "testuser"
+    os_user: "{os_user}"
 allowed_tools:
   - path: /bin/true
     label: true
@@ -87,6 +82,7 @@ fn write_config_with_stub_cursor_agent() -> (tempfile::TempDir, DaemonConfig) {
 
 fn minimal_service(config: DaemonConfig, sessions_base: PathBuf) -> DaemonSessionHost {
     let agents = cursor_cli_support::coding_agents_over(&sessions_base);
+    cursor_cli_support::install_the_configured_agent(&sessions_base, &config);
     let tddy_data_dir = sessions_base.clone();
     let sessions_base_resolver: SessionsBaseResolver =
         Arc::new(move |_| Some(sessions_base.clone()));
@@ -618,37 +614,6 @@ async fn cursor_cli_peer_spawn_rejects_a_repo_path_that_is_not_a_directory() {
     );
 }
 
-// ---------------------------------------------------------------------------
-// Seeded clones (PRD: docs/ft/daemon/session-agent-roster.md § Clones).
-//
-// A cursor-cli spawn no longer opens the session's LiveKit room: creating a session is local work,
-// and the room is opened when something first connects to the session over LiveKit
-// (`session_room_acceptance.rs` § Session creation is a local operation). What the spawn still
-// takes is the daemon that claims clones for peer-owned agents, which these starts name none of.
-// ---------------------------------------------------------------------------
-
-/// A daemon with no peer-owned agents to claim clones for.
-#[derive(Default)]
-struct ADaemonClaimingNoClones;
-
-fn a_daemon_claiming_no_clones() -> ADaemonClaimingNoClones {
-    ADaemonClaimingNoClones
-}
-
-#[async_trait::async_trait]
-impl SeededAgentClones for ADaemonClaimingNoClones {
-    /// These starts name no agent, so there is no peer to claim a checkout from.
-    async fn claim_for_seed(
-        &self,
-        _session_id: &str,
-        _codebase: &SeedCodebase,
-        _session_token: &str,
-        _records: &mut [tddy_core::SessionAgentRecord],
-    ) -> Result<SeededCloneGuard, Status> {
-        Ok(SeededCloneGuard::nothing_claimed())
-    }
-}
-
 /// A daemon that can start cursor-cli sessions: a project repo with an origin, a sessions base with
 /// that project registered, and a config pointing at a stub `cursor-agent`.
 struct ACursorCliDaemon {
@@ -656,8 +621,6 @@ struct ACursorCliDaemon {
     _config_dir: tempfile::TempDir,
     sessions: tempfile::TempDir,
     config: DaemonConfig,
-    agents: Arc<CliSessionManager>,
-    coding_agents: Arc<tddy_agent_launch::spec_launch::HostCodingAgents>,
 }
 
 fn a_cursor_cli_daemon() -> ACursorCliDaemon {
@@ -666,76 +629,34 @@ fn a_cursor_cli_daemon() -> ACursorCliDaemon {
     let sessions = tempfile::tempdir().unwrap();
     register_project(&sessions.path().join("projects"), repo.path());
     let (config_dir, config) = write_config_with_stub_cursor_agent();
-    let coding_agents = cursor_cli_support::coding_agents_over(sessions.path());
     ACursorCliDaemon {
         _repo: repo,
         _config_dir: config_dir,
         sessions,
         config,
-        agents: Arc::new(CliSessionManager::new()),
-        coding_agents,
     }
 }
 
 impl ACursorCliDaemon {
-    /// Start a cursor-cli session at the spawn helper itself, so the room host is the test's
-    /// instead of the one `DaemonSessionHost` builds for itself out of its LiveKit config.
-    async fn start_cursor_cli_session(
-        &self,
-        session_id: &str,
-        clones: &ADaemonClaimingNoClones,
-    ) -> Result<Response<StartSessionResponse>, Status> {
-        self.start_cursor_cli_session_under(session_id, clones, SpawnStackParent::NoParent)
+    /// Start a cursor-cli session through the daemon's `StartSession`, over this daemon's sessions
+    /// base and its stub agent.
+    async fn start_cursor_cli_session(&self) -> Result<Response<StartSessionResponse>, Status> {
+        self.start_cursor_cli_session_for(start_cursor_cli_request())
             .await
     }
 
-    /// [`Self::start_cursor_cli_session`] for a spawn that materializes a planned pr-stack node,
-    /// so the orchestrator's owner is the test's and not a daemon one host over.
-    async fn start_cursor_cli_session_under(
+    /// [`Self::start_cursor_cli_session`] for `request`.
+    async fn start_cursor_cli_session_for(
         &self,
-        session_id: &str,
-        clones: &ADaemonClaimingNoClones,
-        stack_parent: SpawnStackParent<'_>,
+        request: StartSessionRequest,
     ) -> Result<Response<StartSessionResponse>, Status> {
-        spawn_cursor_cli_session_inner(
-            &self.config,
-            self.sessions.path(),
-            &self.agents,
-            "testuser",
-            session_id,
-            TEST_SESSION_TOKEN,
-            self.sessions.path().to_path_buf(),
-            TEST_MODEL,
-            TEST_PROJECT_ID,
-            "new_branch_from_base",
-            "",
-            "",
-            "",
-            "",
-            stack_parent,
-            "",
-            false,
-            &mut [],
-            None,
-            false,
-            false,
-            &self.agents.task_registry(),
-            clones,
-            Some(&self.coding_agents),
-        )
-        .await
+        minimal_service(self.config.clone(), self.sessions.path().to_path_buf())
+            .start_session(Request::direct(request))
+            .await
     }
 
     fn session_dir(&self, session_id: &str) -> PathBuf {
         self.sessions.path().join("sessions").join(session_id)
-    }
-
-    /// The branch the started session actually created, as its own changeset records it.
-    fn branch_of(&self, session_id: &str) -> String {
-        tddy_core::read_changeset(&self.session_dir(session_id))
-            .expect("a started session writes a changeset")
-            .branch
-            .expect("a started session records the branch it created")
     }
 
     /// The checkout the started session recorded for itself in `.session.yaml`.
@@ -749,26 +670,23 @@ impl ACursorCliDaemon {
     }
 }
 
-/// A session id in the shape the daemon mints, for the start that needs no other setup.
-const A_LOCAL_SESSION_ID: &str = "019f9fdb-cf83-70d2-aef5-0000000000a1";
-
 #[tokio::test]
 async fn a_cursor_cli_session_is_started_out_of_local_work_alone() {
     // Given a daemon that can start cursor-cli sessions
     let daemon = a_cursor_cli_daemon();
-    let clones = a_daemon_claiming_no_clones();
 
     // When it starts one
-    daemon
-        .start_cursor_cli_session(A_LOCAL_SESSION_ID, &clones)
+    let started = daemon
+        .start_cursor_cli_session()
         .await
-        .expect("cursor-cli StartSession must succeed");
+        .expect("cursor-cli StartSession must succeed")
+        .into_inner();
 
     // Then the session is a real checkout of its own. Nothing about LiveKit took part in getting
-    // here — the spawn path is handed no room host at all, and the room this session is facilitated
-    // in is opened when something first connects to it over LiveKit.
+    // here — the start opens no room, and the room this session is facilitated in is opened when
+    // something first connects to it over LiveKit.
     assert!(
-        daemon.worktree_of(A_LOCAL_SESSION_ID).is_dir(),
+        daemon.worktree_of(&started.session_id).is_dir(),
         "a started cursor-cli session must own a checkout on disk"
     );
 }
@@ -805,91 +723,92 @@ async fn cursor_cli_peer_spawn_rejects_a_missing_repo_path() {
     );
 }
 
-/// One link a spawn recorded on its orchestrator's planned node.
-#[derive(Debug, Clone, PartialEq, Eq)]
-struct ARecordedLink {
-    orchestrator_session_id: String,
-    node_id: String,
-    child_session_id: String,
-    branch: String,
-}
-
-/// The daemon that owns the orchestrator, recording every link it is asked for. Standing in for a
-/// peer, because the point of the link being an RPC is that the orchestrator need not live here
-/// (D35).
-#[derive(Default)]
-struct ARecordingStackParentOwner {
-    linked: Mutex<Vec<ARecordedLink>>,
-}
-
-impl ARecordingStackParentOwner {
-    fn links_recorded(&self) -> Vec<ARecordedLink> {
-        self.linked
-            .lock()
-            .expect("link log is not poisoned")
-            .clone()
-    }
-}
-
-#[async_trait::async_trait]
-impl StackParentHost for ARecordingStackParentOwner {
-    /// These spawns plan no ordering, so the child's worktree takes the project default.
-    async fn chain_base_ref(
-        &self,
-        _lookup: &StackBaseLookup<'_>,
-    ) -> Result<Option<String>, Status> {
-        Ok(None)
-    }
-
-    async fn link_spawned_branch(&self, link: &StackNodeLink<'_>) -> Result<(), Status> {
-        self.linked
-            .lock()
-            .expect("link log is not poisoned")
-            .push(ARecordedLink {
-                orchestrator_session_id: link.orchestrator_session_id.to_string(),
-                node_id: link.node_id.to_string(),
-                child_session_id: link.child_session_id.to_string(),
-                branch: link.branch.to_string(),
-            });
-        Ok(())
-    }
-}
-
-const STACK_CHILD_SESSION_ID: &str = "019f9fdb-cf83-70d2-aef5-0000000000b2";
 const ORCHESTRATOR_SESSION_ID: &str = "019f9dd5-716d-7071-96ac-464ff7b98c2a";
+const PLANNED_BRANCH: &str = "feature/attach/attach-store";
+
+/// A pr-stack orchestrator on disk that planned the node `node_id` and has not materialized it.
+fn an_orchestrator_that_planned(
+    sessions_base: &std::path::Path,
+    repo: &std::path::Path,
+    node_id: &str,
+) {
+    let session_dir = sessions_base.join("sessions").join(ORCHESTRATOR_SESSION_ID);
+    std::fs::create_dir_all(&session_dir).expect("create the orchestrator's session dir");
+    tddy_core::changeset::write_changeset(
+        &session_dir,
+        &tddy_core::changeset::Changeset {
+            branch: Some("main".to_string()),
+            repo_path: Some(repo.to_string_lossy().into_owned()),
+            recipe: Some("pr-stack".to_string()),
+            stack: Some(tddy_core::changeset::Stack {
+                version: 1,
+                nodes: vec![tddy_core::changeset::StackNode {
+                    node_id: node_id.to_string(),
+                    title: node_id.to_string(),
+                    description: String::new(),
+                    branch_suggestion: Some(PLANNED_BRANCH.to_string()),
+                    branch: None,
+                    session_id: None,
+                    parents: vec![],
+                    pr_status: None,
+                    child_state: None,
+                    internal_status: None,
+                    display_order: None,
+                }],
+            }),
+            ..Default::default()
+        },
+    )
+    .expect("write the orchestrator's changeset");
+}
 
 #[tokio::test]
 async fn a_cursor_cli_child_records_its_branch_on_the_planned_node_it_materializes() {
     // Given — a cursor-cli spawn of a planned PR, exactly as the PR-Stack row starts one
-    let daemon = a_cursor_cli_daemon();
-    let clones = a_daemon_claiming_no_clones();
-    let orchestrators_daemon = ARecordingStackParentOwner::default();
+    let repo = tempfile::tempdir().unwrap();
+    create_test_repo_with_origin(repo.path());
+    let sessions = tempfile::tempdir().unwrap();
+    register_project(&sessions.path().join("projects"), repo.path());
+    let (_config_dir, config) = write_config_with_stub_cursor_agent();
+    let service = minimal_service(config, sessions.path().to_path_buf());
+    an_orchestrator_that_planned(sessions.path(), repo.path(), "attach-store");
+    let mut request = start_cursor_cli_request();
+    request.stack_parent = ORCHESTRATOR_SESSION_ID.to_string();
+    // The node is found from the branch the child creates, as for the orchestrator agent's own spawn
+    // (no `stack_node_id`): the planned branch names it.
+    request.branch_worktree_intent = "new_branch_from_base".to_string();
+    request.new_branch_name = PLANNED_BRANCH.to_string();
 
     // When
-    daemon
-        .start_cursor_cli_session_under(
-            STACK_CHILD_SESSION_ID,
-            &clones,
-            SpawnStackParent::OwnedBy {
-                session_id: ORCHESTRATOR_SESSION_ID,
-                daemon_instance_id: "host-a",
-                stack_node_id: "attach-store",
-                session_token: TEST_SESSION_TOKEN,
-                host: &orchestrators_daemon,
-            },
-        )
+    let started = service
+        .start_session(Request::direct(request))
         .await
-        .expect("a cursor-cli StartSession under a pr-stack orchestrator must succeed");
+        .expect("a cursor-cli StartSession under a pr-stack orchestrator must succeed")
+        .into_inner();
 
-    // Then — without this the node owns no branch on any host, and `Stack::base_ref_for_spawn`
-    // refuses every descendant of it forever
+    // Then — the node owns the branch the child created: without this the node owns no branch on any
+    // host, and `Stack::base_ref_for_spawn` refuses every descendant of it forever
+    let child_branch =
+        tddy_core::read_changeset(&sessions.path().join("sessions").join(&started.session_id))
+            .expect("a started session writes a changeset")
+            .branch
+            .expect("a started session records the branch it created");
+    let orchestrator = tddy_core::read_changeset(
+        &sessions
+            .path()
+            .join("sessions")
+            .join(ORCHESTRATOR_SESSION_ID),
+    )
+    .expect("the orchestrator's changeset");
+    let node = orchestrator
+        .stack
+        .expect("the orchestrator keeps its stack")
+        .nodes
+        .into_iter()
+        .find(|node| node.node_id == "attach-store")
+        .expect("the planned node");
     assert_eq!(
-        orchestrators_daemon.links_recorded(),
-        vec![ARecordedLink {
-            orchestrator_session_id: ORCHESTRATOR_SESSION_ID.to_string(),
-            node_id: "attach-store".to_string(),
-            child_session_id: STACK_CHILD_SESSION_ID.to_string(),
-            branch: daemon.branch_of(STACK_CHILD_SESSION_ID),
-        }],
+        (node.branch, node.session_id),
+        (Some(child_branch), Some(started.session_id))
     );
 }

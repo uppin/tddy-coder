@@ -103,20 +103,15 @@ pub(crate) fn refuse_an_unsupported_cli_harness_start(
     Ok(())
 }
 
-/// The session types that run their agent in tmux. Any other type ignores `run_in_tmux`.
-// TODO(cli-dispatch-collapse): every CLI agent session type runs in tmux (read from the registry),
-// not this list of names.
-pub(crate) const TMUX_RUN_SESSION_TYPES: [&str; 5] = [
-    "claude-cli",
-    "cursor-cli",
-    "opencode-cli",
-    "muse-cli",
-    "warp-cli",
-];
+/// Whether `session_type` is a CLI agent's, which runs its agent in tmux when asked. Any other type
+/// ignores `run_in_tmux`.
+fn runs_in_tmux(session_type: &str) -> bool {
+    session_type.ends_with(tddy_coding_agent_specs::CLI_SESSION_TYPE_SUFFIX)
+}
 
 /// A start that asks for a tmux-run agent together with a placement that is not a plain agent on
 /// this host is refused before anything is created, for every session type in
-/// [`TMUX_RUN_SESSION_TYPES`], naming the conflict:
+/// CLI agent session type, naming the conflict:
 ///
 /// - `sandbox` confines the agent in its own jail, which a tmux session on the host is not;
 /// - `sandboxed_codebase` withdraws the agent's native tools and jails the code, so there is no host
@@ -124,7 +119,7 @@ pub(crate) const TMUX_RUN_SESSION_TYPES: [&str; 5] = [
 /// - `codebase_daemon_instance_id` (split placement) puts the worktree on another daemon, while the
 ///   tmux session is as this host's OS user in a local worktree.
 pub(crate) fn refuse_a_conflicting_tmux_run_start(req: &StartSessionRequest) -> Result<(), Status> {
-    if !TMUX_RUN_SESSION_TYPES.contains(&req.session_type.trim()) || !req.run_in_tmux {
+    if !runs_in_tmux(req.session_type.trim()) || !req.run_in_tmux {
         return Ok(());
     }
     if req.sandbox {

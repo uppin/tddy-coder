@@ -34,7 +34,7 @@ use tddy_session_files::attachment_progress::AttachmentProgressSink;
 use tddy_worktree_service::branch_intent::BranchIntentRequest;
 
 use crate::cli_agent_steps::{
-    refuse_a_role_the_agent_cannot_hold, render_host_launch_slots, resumed_conversation,
+    refuse_a_role_the_agent_cannot_hold, render_host_launch_slots, resumed_or_adopted_conversation,
     start_conversation, wire_session_agent, write_slot_files_on_target, ConversationStart,
     HostLaunchSlots, ManagedWiring, ResumedWiring, SessionWiringInputs,
 };
@@ -60,6 +60,8 @@ pub(crate) struct CliHarnessStart<'a> {
     pub kind: CliSessionType,
     /// The coding agent the session launches, resolved on this host before anything is cut.
     pub agent: &'a HostAgent,
+    /// What the daemon's config adds to the agent's environment (its renderer).
+    pub renderer_env: Vec<(String, String)>,
     pub config: &'a DaemonConfig,
     pub tddy_data_dir: &'a Path,
     pub cli_manager: &'a Arc<CliSessionManager>,
@@ -133,6 +135,7 @@ pub(crate) async fn start_cli_harness_session(
     let CliHarnessStart {
         kind,
         agent,
+        renderer_env,
         config,
         tddy_data_dir,
         cli_manager,
@@ -194,7 +197,7 @@ pub(crate) async fn start_cli_harness_session(
             selected_integration_base_ref,
             selected_branch_to_work_on,
         },
-        crate::harness_from_spec::cli_branch_intent(kind, &agent.spec),
+        crate::harness_from_spec::cli_branch_intent(kind.clone(), &agent.spec),
         None,
         &session_dir,
         stack_parent.session_id(),
@@ -260,6 +263,7 @@ pub(crate) async fn start_cli_harness_session(
     let identity =
         account_access.session_identity_in(session_id, os_user, &session_dir, project.as_ref());
     env.extend(identity.git_environment);
+    env.extend(renderer_env);
     let recipe_name = managed
         .as_ref()
         .map(|managed| managed.recipe.name().to_string());
@@ -394,19 +398,17 @@ pub(crate) async fn start_cli_harness_session(
     cli_manager
         .expose_terminal_to_livekit(
             session_id,
-            tddy_core::session_participant_metadata::SessionParticipantMetadata {
-                agent: spec.id.clone(),
-                ..crate::hooks_and_urls::claude_cli_participant_metadata(
-                    &crate::hooks_and_urls::StartingClaudeCliSession {
-                        session_id,
-                        model,
-                        recipe: recipe_name.as_deref().unwrap_or_default(),
-                        worktree_path: &worktree_path,
-                        branch: &branch,
-                        stack_parent: &stack_parent,
-                    },
-                )
-            },
+            crate::hooks_and_urls::claude_cli_participant_metadata(
+                &crate::hooks_and_urls::StartingClaudeCliSession {
+                    agent: &spec.id,
+                    session_id,
+                    model,
+                    recipe: recipe_name.as_deref().unwrap_or_default(),
+                    worktree_path: &worktree_path,
+                    branch: &branch,
+                    stack_parent: &stack_parent,
+                },
+            ),
         )
         .await;
 
@@ -441,7 +443,7 @@ impl crate::launch_ports::LaunchSessions {
             // A tmux-run agent that exited unwatched left its token on its kept pane.
             crate::cli_harness_tmux::settle_unwatched_agent_exit(
                 &self.claude_cli_manager,
-                &self.tddy_data_dir,
+                self.coding_agents.as_deref(),
                 os_user,
                 &req.session_id,
                 kind.name,
@@ -534,7 +536,12 @@ async fn resume_cli_harness_session(
     account_access: &SessionAccountAccess,
     session: ResumedSession<'_>,
 ) -> Result<Response<ResumeSessionResponse>, Status> {
-    let CliSessionAgent { kind, agent, .. } = session_agent;
+    let CliSessionAgent {
+        kind,
+        agent,
+        renderer_env,
+        ..
+    } = session_agent;
     let kind = kind.clone();
     let ResumedSession {
         session_id,
@@ -558,7 +565,17 @@ async fn resume_cli_harness_session(
         resume_token_adapter(&agent.spec)?,
     );
     let spec = &agent.spec;
-    let conversation = resumed_conversation(spec, &meta)?;
+    let conversation = resumed_or_adopted_conversation(
+        ConversationStart {
+            spec,
+            binary: &agent.tool.binary,
+            worktree: &worktree_path,
+            env: &git_environment,
+            session_id,
+        },
+        &meta,
+    )
+    .await?;
     let remote_host = meta
         .ssh_config_host
         .as_deref()
@@ -577,6 +594,7 @@ async fn resume_cli_harness_session(
     slots.argv_extra.extend(route.args);
     write_slot_files_on_target(&mut slots, remote_host)?;
     let mut env = git_environment;
+    env.extend(renderer_env.clone());
     env.extend(wiring.env);
     env.extend(route.env);
     let launcher = node_launcher_of(&agent.tool.binary);
@@ -609,6 +627,10 @@ async fn resume_cli_harness_session(
     crate::claude_cli_spawn::record_main_terminal(cli_manager, tddy_data_dir, session_id).await;
 
     let mut updated = meta;
+    updated.cursor_chat_id = conversation
+        .recorded_chat_id()
+        .map(str::to_string)
+        .or(updated.cursor_chat_id);
     updated.pid = Some(launched.pid);
     updated.tmux_session = launched.tmux_session;
     updated.status = "active".to_string();

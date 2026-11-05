@@ -1,60 +1,23 @@
 //! Unit tests: what a claude-cli start launches its agent with, beyond the managed workflow's own.
 
 use super::*;
-use crate::project_home_launch::{project_home_wiring, ProjectHomeLaunch, RoleLaunch};
+use crate::project_home_launch::{project_home_wiring, spec_role_launch, ProjectHomeLaunch};
+use crate::spec_launch::McpRegistration;
+use std::path::PathBuf;
 
-fn the_accounts_git_pairs() -> Vec<(String, String)> {
-    vec![
-        ("GIT_AUTHOR_NAME".to_string(), "ada".to_string()),
-        ("GIT_COMMITTER_NAME".to_string(), "ada".to_string()),
-    ]
-}
-
-/// A start with no recipe and no index, so the only environment is the one under test.
-async fn the_launch_environment_with(
-    git_environment: Vec<(String, String)>,
-) -> Vec<(String, String)> {
-    let progress = tddy_session_files::attachment_progress::AttachmentProgressSink::discarding();
-    let registry = TaskRegistry::new();
-    let dir = tempfile::tempdir().expect("a temporary directory");
-    let (_, _, env_extra) = managed_claude_cli_launch(ManagedClaudeCliLaunch {
-        tddy_data_dir: dir.path(),
-        session_id: "s1",
-        managed_recipe: &None,
-        child_spawn_handler: None,
-        conversation_spawn_handler: None,
-        semantic_index: false,
-        progress: &progress,
-        task_registry: &registry,
-        session_dir: dir.path(),
-        worktree_path: dir.path(),
-        tddy_tools_path: String::new(),
-        git_environment,
-        github_credential_handler: None,
-    })
-    .await
-    .expect("a launch with nothing to prepare succeeds");
-    env_extra
-}
-
-#[tokio::test]
-async fn the_resolved_accounts_pairs_are_in_the_agents_environment() {
-    // Given a start whose project resolved to an account
-    // When the launch environment is built
-    let env = the_launch_environment_with(the_accounts_git_pairs()).await;
-
-    // Then the agent is launched with exactly those pairs
-    assert_eq!(env, the_accounts_git_pairs());
-}
-
-#[tokio::test]
-async fn a_start_that_resolved_nothing_adds_no_git_variables() {
-    // Given a start whose project resolved to no account
-    // When the launch environment is built
-    let env = the_launch_environment_with(Vec::new()).await;
-
-    // Then the agent inherits the checkout's identity: nothing is added
-    assert!(env.is_empty());
+/// A claude-cli start's hooks, their `.claude/settings.local.json` written into the worktree.
+fn install_claude_cli_hooks(
+    config: &DaemonConfig,
+    tddy_data_dir: &Path,
+    os_user: &str,
+    session_id: &str,
+    worktree_path: &Path,
+) {
+    let hooks = claude_cli_hooks(config, tddy_data_dir);
+    tddy_session_split::service_util::write_claude_hooks_settings(
+        worktree_path,
+        &hooks.params(session_id, os_user),
+    );
 }
 
 /// The loopback port a desktop daemon's GitHub sign-in returns on — and the only HTTP it answers.
@@ -198,40 +161,15 @@ fn on_a_regular_host_the_tool_use_hook_names_no_daemon_socket() {
     );
 }
 
-/// The values `--allowedTools` is given in `argv`, in order.
-fn allowed_tools_in(argv: &[String]) -> Vec<&str> {
-    argv.windows(2)
-        .filter(|pair| pair[0] == "--allowedTools")
-        .map(|pair| pair[1].as_str())
-        .collect()
-}
-
-#[test]
-fn a_project_home_spawn_is_pre_approved_exactly_the_project_home_tool_set() {
-    // Given the argument a project-home claude-cli spawn adds to its command line
-    let argv = role_allowed_tools_args(Some("project-home"));
-
-    // Then each tool of the set is its own --allowedTools value, and nothing else is added
-    let expected = tddy_tool_engine::read_only::project_home_allowed_tools();
-    assert_eq!(
-        allowed_tools_in(&argv),
-        expected.iter().map(String::as_str).collect::<Vec<_>>()
-    );
-    assert_eq!(argv.len(), expected.len() * 2);
-    assert!(!allowed_tools_in(&argv).contains(&"mcp__tddy-tools__Write"));
-}
-
-#[test]
-fn an_ordinary_spawn_adds_no_allowed_tools() {
-    // Given an ordinary session, and a role the daemon gives no tool set
-    // Then neither adds an argument, so the spawn's argv is what it always was
-    assert!(role_allowed_tools_args(None).is_empty());
-    assert!(role_allowed_tools_args(Some("")).is_empty());
-    assert!(role_allowed_tools_args(Some("some-other-role")).is_empty());
-}
-
 const A_MAIN: &str = "01a16dc6-ab4c-7dc3-844e-baca4514f86e";
 const A_MINTED_TOKEN: &str = "minted-for-the-agent";
+
+/// The flags and environment a main's launch gives its agent, as the `claude` spec's slots render
+/// them.
+struct RoleLaunch {
+    extra_args: Vec<String>,
+    env: Vec<(String, String)>,
+}
 
 /// A main's launch on `config` / `data_dir`, written into a fresh session dir.
 struct AMainLaunch {
@@ -242,8 +180,7 @@ struct AMainLaunch {
 impl AMainLaunch {
     fn on(config: &DaemonConfig, data_dir: &Path) -> Self {
         let session_dir = tempfile::tempdir().expect("a temporary session dir");
-        // The hand-built rendering: flags as argv, the MCP config written into the session dir.
-        let launch = project_home_wiring(ProjectHomeLaunch {
+        let wiring = project_home_wiring(ProjectHomeLaunch {
             config,
             tddy_data_dir: data_dir,
             session_dir: session_dir.path(),
@@ -251,11 +188,48 @@ impl AMainLaunch {
             agent_session_token: A_MINTED_TOKEN,
             tddy_tools_path: Path::new("/opt/tddy/bin/tddy-tools"),
         })
-        .and_then(|wiring| wiring.hand_built())
         .expect("a main's launch is built");
+        let (prompt_args, toolset) = spec_role_launch(wiring.main.as_ref());
+        let tools_dir = tempfile::tempdir().expect("an empty tools dir");
+        let agents = crate::spec_launch::HostCodingAgents::new(
+            tddy_coding_agent_specs::load_agent_registry(tools_dir.path())
+                .expect("the built-in coding agents load"),
+            std::sync::Arc::new(tddy_actions::tool::ProcessToolHost),
+        );
+        let spec = agents
+            .agents()
+            .for_session_type("claude-cli")
+            .expect("a built-in spec");
+        let (mcp_server, scratch_dir) = match toolset.mcp {
+            Some(McpRegistration { server, dir }) => (Some(server), dir),
+            None => (None, session_dir.path().to_path_buf()),
+        };
+        let mut rendered = tddy_coding_agent_specs::slots::render(
+            spec,
+            &tddy_coding_agent_specs::slots::SlotInputs {
+                workdir: session_dir.path().to_path_buf(),
+                scratch_dir,
+                mcp_server,
+                allowed_tools: toolset.allowed_tools,
+                denied_tools: toolset.denied_tools,
+                permission_prompt_tool: None,
+                preamble: None,
+                append_system_prompt_file: None,
+                hooks: None,
+                home: None,
+            },
+        )
+        .expect("the main's slots render");
+        for (path, bytes) in &rendered.files {
+            std::fs::write(path, bytes).expect("the slot's file is written");
+        }
+        rendered.argv_extra.extend(prompt_args);
         Self {
             session_dir,
-            launch,
+            launch: RoleLaunch {
+                extra_args: rendered.argv_extra,
+                env: wiring.env,
+            },
         }
     }
 
@@ -406,11 +380,12 @@ fn a_role_is_on_disk_before_the_agent_is_spawned() {
     let dir = tempfile::tempdir().expect("a temporary session dir");
 
     // When the role is recorded ahead of the spawn
-    record_role_before_spawn(
+    record_role_of_session_type_before_spawn(
         dir.path(),
         "home-1",
         "p-1",
         "project-home",
+        "cursor-cli",
         Path::new("/work/home"),
         true,
     )
@@ -421,6 +396,7 @@ fn a_role_is_on_disk_before_the_agent_is_spawned() {
     assert_eq!(record.session_role.as_deref(), Some("project-home"));
     assert_eq!(record.project_id, "p-1");
     assert_eq!(record.repo_path.as_deref(), Some("/work/home"));
+    assert_eq!(record.session_type.as_deref(), Some("cursor-cli"));
     assert_eq!(record.pid, None);
 }
 
@@ -430,8 +406,16 @@ fn an_ordinary_session_writes_nothing_before_the_spawn() {
     let dir = tempfile::tempdir().expect("a temporary session dir");
 
     // When a session with no role has its role recorded ahead of the spawn
-    record_role_before_spawn(dir.path(), "s-1", "p-1", "", Path::new("/work"), false)
-        .expect("nothing to record is not a failure");
+    record_role_of_session_type_before_spawn(
+        dir.path(),
+        "s-1",
+        "p-1",
+        "",
+        "claude-cli",
+        Path::new("/work"),
+        false,
+    )
+    .expect("nothing to record is not a failure");
 
     // Then no record exists yet: the spawn writes the first one, as it always did
     assert!(tddy_core::read_session_metadata(dir.path()).is_err());

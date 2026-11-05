@@ -136,7 +136,9 @@ fn a_session_host(
             Arc::new(tddy_daemon_kernel::operator_channel::NoOperatorChannel),
             manager,
         )
-        .with_coding_agents_if_none(tddy_session_lifecycle::test_util::builtin_coding_agents()),
+        .with_coding_agents_if_none(
+            tddy_session_lifecycle::test_util::builtin_coding_agents_for(&config),
+        ),
     );
     host.install_sandbox_rpc_bridge();
     host
@@ -679,6 +681,21 @@ fn the_marked_claude_argv(
     .to_vec()
 }
 
+/// `argv` without the system-prompt file the operator-notify guidance is appended with: the claude
+/// spec's `append_system_prompt` flag renders it, beyond what this test pins of the argv.
+fn without_the_notify_guidance(argv: Vec<String>) -> Vec<String> {
+    let mut kept = Vec::with_capacity(argv.len());
+    let mut rest = argv.into_iter();
+    while let Some(arg) = rest.next() {
+        if arg == "--append-system-prompt-file" {
+            rest.next();
+        } else {
+            kept.push(arg);
+        }
+    }
+    kept
+}
+
 #[tokio::test]
 #[serial_test::serial]
 async fn a_claude_cli_start_in_tmux_runs_the_argv_the_claude_spec_renders_and_resumes_the_same_way()
@@ -711,8 +728,8 @@ async fn a_claude_cli_start_in_tmux_runs_the_argv_the_claude_spec_renders_and_re
     let model = agent_registry_support::ACME_MODEL;
     assert_eq!(
         (
-            started.argv(),
-            resumed.argv(),
+            without_the_notify_guidance(started.argv()),
+            without_the_notify_guidance(resumed.argv()),
             daemon.metadata_of(&session_id).tmux_session.is_some(),
         ),
         (

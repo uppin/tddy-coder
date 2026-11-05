@@ -10,7 +10,9 @@ use tddy_cli_sessions::cli_session_manager::CliSessionManager;
 use tddy_testing_commons::wait::{a_capture_showing, PTY_STUB_OUTPUT};
 
 use super::*;
-use crate::spec_launch::{launch_claude_cli, ClaudeCliLaunch, HostCodingAgents};
+use crate::cli_agent_steps::{render_host_launch_slots, HostLaunchSlots};
+use crate::harness_from_spec::{harness_template_params, HarnessLaunch};
+use crate::spec_launch::{launch_host_pty, HostCodingAgents, HostPtySession};
 
 const A_MAIN: &str = "01a16dc6-ab4c-7dc3-844e-baca4514f86e";
 /// What the stub `claude` prints once it has recorded its argv.
@@ -95,26 +97,41 @@ async fn a_main_launched_from_the_claude_spec_gets_its_tool_flags_and_mcp_file_f
     let (extra_args, toolset) = spec_role_launch(wiring.main.as_ref());
     let manager = Arc::new(CliSessionManager::new());
 
-    // When
-    let handle = launch_claude_cli(ClaudeCliLaunch {
-        remote_host: None,
-        agents: &agents,
-        config: &config,
-        manager: &manager,
-        session_id: A_MAIN,
-        worktree: worktree.path(),
+    // When the main is launched through the generic host launch, from the `claude` spec
+    let agent = agents
+        .resolve("claude", None)
+        .expect("the claude agent resolves");
+    let params = harness_template_params(&HarnessLaunch {
         model: "opus",
-        resume: false,
-        initial_prompt: None,
-        permission_mode: None,
-        dangerously_skip_permissions: false,
-        append_system_prompt_file: None,
-        toolset,
-        hooks: None,
-        extra_args,
-        env: wiring.env,
-        os_user: None,
-    })
+        session_id: Some(A_MAIN),
+        ..HarnessLaunch::default()
+    });
+    let mut slots = render_host_launch_slots(
+        &agent,
+        worktree.path(),
+        session_dir.path(),
+        HostLaunchSlots {
+            toolset,
+            ..HostLaunchSlots::default()
+        },
+    )
+    .expect("the main's slots render");
+    slots.argv_extra.extend(extra_args);
+    let handle = launch_host_pty(
+        &agent,
+        &params,
+        &slots,
+        worktree.path(),
+        HostPtySession {
+            manager: &manager,
+            session_id: A_MAIN,
+            session_type: "claude-cli",
+            model: "opus",
+            env: wiring.env,
+            os_user: None,
+        },
+        None,
+    )
     .await
     .expect("the main is launched");
     a_capture_showing(&handle.capture, LAUNCHED, PTY_STUB_OUTPUT).await;

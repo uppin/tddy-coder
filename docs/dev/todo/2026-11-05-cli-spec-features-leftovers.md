@@ -4,6 +4,13 @@
 **Owner:** `#agent-tools` n17 `cli-dispatch-collapse` ([#823](https://github.com/uppin/tddy-coder/pull/823)) for the bespoke-path items; n19 `agent-config-removal` for the renderer env.
 **Source:** `#agent-tools` 14/19 (#820)
 
+> **Updated at `#agent-tools 17/19` green.** The bespoke tmux paths and the late-minted chat are
+> resolved (bullets 1 and 4 below stay as history); the managed environment is carried on the tool
+> server for a spec whose `mcp` slot names a file (`cli_agent_steps::carry_on_the_tool_server`) and
+> still reaches no one for a spec whose slot is `placed` in the agent's home (cursor) or `unsupported`;
+> the renderer variable is applied by `harness_from_spec::renderer_env` until n19 moves it into
+> `run.env`.
+
 - **Bespoke tmux start and resume** (`claude_cli_spawn_steps::spawn_claude_cli_process`, `svc_resume_claude_cli_session`) still build the hand-built argv; their two `TODO(agent-tools-cascade)` markers stay until n17 deletes both paths. The generic tmux start and resume render through `plan_host_pty` for every agent.
 - **Managed and role environment.** A `TDDY_*` pair a managed workflow (`TDDY_SOCKET`, `TDDY_SESSION_DIR`, `TDDY_REPO_DIR`) or a project-home role produces is carried on the agent's tool-server registration (`mcp` env), never on the agent process (stack rule). A managed agent whose spec declares no `mcp` slot therefore has no way to reach its controller; the bespoke path put them on the process.
 - **Renderer env.** `config.claude_cli_renderer_env()` (`claude_cli.fullscreen`) is not applied by the generic launch; it is config n19 removes.

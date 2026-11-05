@@ -324,6 +324,29 @@ impl AJailedClaudeDaemon {
         (session_id, guard)
     }
 
+    /// Start a sandboxed session over a managed codebase driven by `recipe`, and guard its jail.
+    pub async fn start_managed(&self, recipe: &str) -> (String, AJailGuard) {
+        let session_id = self
+            .service
+            .start_session(Request::direct(StartSessionRequest {
+                managed_codebase: true,
+                recipe: recipe.to_string(),
+                ..self.a_sandboxed_start(false)
+            }))
+            .await
+            .expect("a managed sandboxed claude-cli start succeeds")
+            .into_inner()
+            .session_id;
+        let guard = AJailGuard(self.pid_of(&session_id));
+        (session_id, guard)
+    }
+
+    /// The record `session_id`'s start wrote.
+    pub fn metadata_of(&self, session_id: &str) -> tddy_core::SessionMetadata {
+        read_session_metadata(&self.session_dir(session_id))
+            .expect("the session's .session.yaml is readable")
+    }
+
     /// Resume `session_id`, and guard the jail its resume relaunched.
     pub async fn resume(&self, session_id: &str) -> AJailGuard {
         self.service

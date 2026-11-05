@@ -89,7 +89,9 @@ fn minimal_service_with_manager(
         Arc::new(tddy_daemon_kernel::operator_channel::NoOperatorChannel),
         manager,
     )
-    .with_coding_agents_if_none(tddy_session_lifecycle::test_util::builtin_coding_agents())
+    .with_coding_agents_if_none(
+        tddy_session_lifecycle::test_util::builtin_coding_agents_for(&config),
+    )
 }
 
 /// Create a git repo with an origin remote pointing at itself so worktree setup succeeds.
@@ -134,12 +136,20 @@ fn write_echo_argv_script(dir: &std::path::Path) -> std::path::PathBuf {
     script_path
 }
 
-/// Executable stub that dumps `TDDY_SOCKET` (for asserting per-session env injection).
+/// Executable stub that dumps the `TDDY_SOCKET` of the tool-server registration it was launched with
+/// (for asserting per-session env injection): the agent's own environment carries no `TDDY_*`, the
+/// session's `tddy-tools --mcp` server does.
 fn write_env_echo_script(dir: &std::path::Path) -> std::path::PathBuf {
     let script_path = dir.join("stub_claude_env.sh");
     std::fs::write(
         &script_path,
-        "#!/bin/sh\necho \"ENVDUMP TDDY_SOCKET=[$TDDY_SOCKET]\"\n",
+        concat!(
+            "#!/bin/sh\n",
+            "cfg=\"\"; prev=\"\"\n",
+            "for a in \"$@\"; do if [ \"$prev\" = \"--mcp-config\" ]; then cfg=\"$a\"; fi; prev=\"$a\"; done\n",
+            "sock=$(sed -n 's/.*\"TDDY_SOCKET\": *\"\\([^\"]*\\)\".*/\\1/p' \"$cfg\" 2>/dev/null)\n",
+            "echo \"ENVDUMP TDDY_SOCKET=[$sock]\"\n",
+        ),
     )
     .unwrap();
     make_executable(&script_path);
@@ -152,7 +162,14 @@ fn write_argv_and_env_script(dir: &std::path::Path) -> std::path::PathBuf {
     let script_path = dir.join("stub_claude_argv_env.sh");
     std::fs::write(
         &script_path,
-        "#!/bin/sh\necho \"ARGV: $@\"\necho \"ENVDUMP TDDY_SOCKET=[$TDDY_SOCKET]\"\n",
+        concat!(
+            "#!/bin/sh\n",
+            "echo \"ARGV: $@\"\n",
+            "cfg=\"\"; prev=\"\"\n",
+            "for a in \"$@\"; do if [ \"$prev\" = \"--mcp-config\" ]; then cfg=\"$a\"; fi; prev=\"$a\"; done\n",
+            "sock=$(sed -n 's/.*\"TDDY_SOCKET\": *\"\\([^\"]*\\)\".*/\\1/p' \"$cfg\" 2>/dev/null)\n",
+            "echo \"ENVDUMP TDDY_SOCKET=[$sock]\"\n",
+        ),
     )
     .unwrap();
     make_executable(&script_path);

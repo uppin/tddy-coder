@@ -461,23 +461,30 @@ mod jailed {
             .expect("a jailed acme-cli start succeeds");
         let started = daemon.stub_report(&session_id).await;
 
-        // Then — the claude spec's argv inside the jail (the binary is the jail's own path), and
-        // the closure's tddy-tools on the jail's PATH
+        // Then — the claude spec's argv inside the jail (the binary is the jail's own path), followed
+        // by the slots a jailed agent is given: its tool lists, its permission prompt and the
+        // registration of `tddy-tools`, its only way to the code; and the closure's tddy-tools on
+        // the jail's PATH
         let meta = daemon.metadata_of(&session_id);
+        let spec_argv = claude_start_argv("", &session_id)
+            .into_iter()
+            .skip(1)
+            .collect::<Vec<_>>();
+        let argv = started.argv().into_iter().skip(1).collect::<Vec<_>>();
+        let slot_flags: Vec<&str> = argv[spec_argv.len().min(argv.len())..]
+            .iter()
+            .map(String::as_str)
+            .filter(|arg| arg.starts_with("--"))
+            .collect();
         assert_eq!(
             (
-                started.argv().into_iter().skip(1).collect::<Vec<_>>(),
+                argv[..spec_argv.len()].to_vec(),
+                slot_flags.contains(&"--mcp-config"),
+                slot_flags.contains(&"--permission-prompt-tool"),
                 started.tddy_tools_on_path(),
                 meta.sandbox,
             ),
-            (
-                claude_start_argv("", &session_id)
-                    .into_iter()
-                    .skip(1)
-                    .collect::<Vec<_>>(),
-                true,
-                Some(true),
-            )
+            (spec_argv, true, true, true, Some(true))
         );
     }
 }

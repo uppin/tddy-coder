@@ -31,8 +31,8 @@ impl CliSessionManager {
     /// in lockstep. A managed workflow's `--append-system-prompt-file` is inserted by
     /// [`Self::start_with_options`] (before any positional prompt), not here, so this builder stays
     /// focused on the base argv plus the positional prompt.
-    // TODO(cli-dispatch-collapse): deleted at green if no caller remains once the claude dispatch
-    // goes; Telegram's `CliSessionManager::start` is `#agent-tools 18/19`'s.
+    // TODO(cli-dispatch-collapse): kept while Telegram's `CliSessionManager::start` builds its argv
+    // with it; `#agent-tools 18/19` `telegram-spec-launch` deletes both together.
     pub fn build_claude_argv(
         binary_path: &str,
         model: &str,
@@ -60,11 +60,8 @@ impl CliSessionManager {
     /// `argv` — a [`Self::build_claude_argv`] result for `initial_prompt` — with
     /// `--append-system-prompt-file` and `extra_args` inserted before any positional prompt, so every
     /// flag precedes the prompt. This is the argv [`Self::start_with_options`] launches.
-    ///
-    /// Shared by the PTY launch and the tmux launch (`tddy_agent_launch::claude_cli_tmux`), so the
-    /// two cannot build different argument lists for the same session.
-    // TODO(cli-dispatch-collapse): deleted at green if no caller remains once the claude dispatch
-    // goes; Telegram's `CliSessionManager::start` is `#agent-tools 18/19`'s.
+    // TODO(cli-dispatch-collapse): kept while Telegram's `CliSessionManager::start` builds its argv
+    // with it; `#agent-tools 18/19` `telegram-spec-launch` deletes both together.
     pub fn with_claude_launch_flags(
         mut argv: Vec<String>,
         initial_prompt: Option<&str>,

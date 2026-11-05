@@ -250,7 +250,9 @@ async fn a_mirrored_session(suffix: &str) -> AMirroredSession {
             Arc::new(tddy_daemon_kernel::operator_channel::NoOperatorChannel),
             Arc::new(tddy_session_lifecycle::claude_cli_session::ClaudeCliSessionManager::new()),
         )
-        .with_coding_agents_if_none(tddy_session_lifecycle::test_util::builtin_coding_agents())
+        .with_coding_agents_if_none(
+            tddy_session_lifecycle::test_util::builtin_coding_agents_for(&config),
+        )
         .with_session_rooms(rooms.clone())
         .with_session_delta_stores(Arc::new(RoomsHostedByThisDaemon::new(rooms)))
         .with_session_reach(livekit_reach.clone())

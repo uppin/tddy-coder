@@ -230,7 +230,7 @@ fn sandboxed_session_spawn_argv_carries_stdio_and_no_grpc_flags() {
         )),
         include_str!(concat!(
             env!("CARGO_MANIFEST_DIR"),
-            "/../tddy-agent-launch/src/svc_start_sandboxed_cursor_cli_session.rs"
+            "/../tddy-agent-launch/src/svc_start_sandboxed_cli_harness_session.rs"
         )),
         include_str!(concat!(
             env!("CARGO_MANIFEST_DIR"),

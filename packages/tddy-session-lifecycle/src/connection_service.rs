@@ -291,9 +291,8 @@ pub use tddy_agent_launch::{
     session_coordinate_handlers, session_worktree_observer, stack_child_spawn, stack_parent,
     stack_seed_validation, svc_ensure_project_available_for_start, svc_index_workspace_worktree,
     svc_pr_status_for_caller, svc_relaunch_sandboxed_runner, svc_resume_claude_cli_session,
-    svc_resume_sandboxed_claude_cli_session, svc_start_claude_cli_session,
-    svc_start_sandboxed_claude_cli_session, svc_start_sandboxed_cursor_cli_session,
-    svc_start_session_core, worktree_source,
+    svc_start_claude_cli_session, svc_start_sandboxed_claude_cli_session, svc_start_session_core,
+    worktree_source,
 };
 
 mod svc_launch_delegators;

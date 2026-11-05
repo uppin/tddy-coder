@@ -69,6 +69,7 @@ fn minimal_service(config: DaemonConfig, sessions_base: PathBuf) -> DaemonSessio
     // A host with no coding agents refuses every agent session: a Cursor or Claude session launches
     // from its spec, so every host here has them, with the stub the config names as `claude`.
     let cursor_agents = Some(cursor_cli_support::coding_agents_over(&sessions_base));
+    cursor_cli_support::install_the_configured_agent(&sessions_base, &config);
     if let Some(stub) = config
         .claude_cli
         .as_ref()
