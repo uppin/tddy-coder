@@ -216,6 +216,12 @@ Every test below fails for n14's own missing implementation; none waits on n13's
 - **Settled at the contract — the `auto` permission default.** `harness_template_params` binds `permission_mode` only when the start chose one; `auto` is green's choice of either a params default or a spec `else` branch, pinned by `the_claude_spec_renders_through_the_generic_parameters_the_argv_the_bespoke_launch_built`. If it is a params default, the two existing exact-params tests in `harness_from_spec` get the binding too.
 - **Settled at the contract — the managed refusal resolves the agent first.** `start_cli_harness` resolves the session's agent (side-effect free) before refusing, so the refusal reads the spec. A managed start of an agent whose binary does not resolve now reports the resolution failure instead.
 
+## Green notes (2026-11-05)
+
+- **Fixture fixes the contract missed** (test support only): the registry fixture's project carries `main_branch_ref: origin/main` and the daemon a signing identity with a signed caller token (a project main needs both); `AStubReport::parse` finds the `STUB ` marker through a tmux repaint's cursor escapes and ends a value at the next escape. The tmux test's expected argv gained the notify guidance's `--append-system-prompt-file` (the claude copy declares `operator_notify`).
+- **`TDDY_*` rule.** The generic host PTY runs under `env -u` for each `TDDY_*` the daemon's environment holds (`launch_host_pty_without_inherited_tddy`); a managed or role `TDDY_*` pair goes to the tool server's `env` block, never the agent process. Notify pairs a spec declares via `operator_notify` stay on the process.
+- **Deferred:** managed workflow in a jail (refused), the bespoke tmux markers (n17 deletes them), renderer env, tmux pane scrub — see `docs/dev/todo/2026-11-05-generic-jail-managed-workflow.md` and `2026-11-05-cli-spec-features-leftovers.md`.
+
 ## TODO
 
 - [x] Record initial discovery (`2026-11-04-agent-tools-cli-spec-features-initial-discovery.md`)
@@ -225,7 +231,7 @@ Every test below fails for n14's own missing implementation; none waits on n13's
 - [x] Run acceptance tests (verify they fail)
 - [x] USER REVIEW — acceptance tests (waived for this run by the developer's "finish without stopping"; orchestrator, 2026-11-05)
 - [x] TDD Red — write failing unit/integration tests
-- [ ] TDD Green — implement with quality code
+- [x] TDD Green — implement with quality code
 - [ ] Update documentation with progress
 - [ ] Repeat Red→Green→Update cycle until feature complete
 - [ ] Run the touched packages' tests (`./test -p {package}` per package) — verify 100% pass
