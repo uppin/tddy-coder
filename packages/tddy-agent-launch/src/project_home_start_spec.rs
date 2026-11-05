@@ -10,9 +10,9 @@
 
 use std::path::Path;
 
+use tddy_coding_agent_specs::{Capability, CLI_SESSION_TYPE_SUFFIX};
 use tddy_core::session_metadata::PROJECT_HOME_ROLE;
 use tddy_rpc::Status;
-use tddy_coding_agent_specs::{Capability, CLI_SESSION_TYPE_SUFFIX};
 use tddy_service::proto::session::StartSessionRequest;
 
 use crate::spec_launch::HostCodingAgents;

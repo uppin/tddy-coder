@@ -47,9 +47,9 @@ use crate::harness_from_spec::{
     harness_template_params, resolve_session_agent, resume_token_adapter, CliSessionAgent,
     CliSessionType, HarnessLaunch,
 };
+use crate::project_home_launch::StartRole;
 use crate::session_acting_identity::SessionAccountAccess;
 use crate::spec_launch::HostAgent;
-use crate::project_home_launch::StartRole;
 use crate::stack_parent::SpawnStackParent;
 use harness_launch::{launch, HarnessRun, HarnessSession, HarnessSpecLaunch};
 
@@ -264,7 +264,9 @@ pub(crate) async fn start_cli_harness_session(
     let identity =
         account_access.session_identity_in(session_id, os_user, &session_dir, project.as_ref());
     env.extend(identity.git_environment);
-    let recipe_name = managed.as_ref().map(|managed| managed.recipe.name().to_string());
+    let recipe_name = managed
+        .as_ref()
+        .map(|managed| managed.recipe.name().to_string());
     let mut wiring = wire_session_agent(SessionWiringInputs {
         spec,
         config,
@@ -318,7 +320,6 @@ pub(crate) async fn start_cli_harness_session(
             toolset,
             hooks: hook_params,
             system_prompt_file: wiring.system_prompt_file.as_deref(),
-            remote_host,
             home: None,
         },
     )?;
@@ -353,7 +354,9 @@ pub(crate) async fn start_cli_harness_session(
     .await?;
     progress.end_phase(StartStep::Agent);
     if let Some(workflow) = wiring.workflow {
-        cli_manager.attach_managed_workflow(session_id, workflow).await;
+        cli_manager
+            .attach_managed_workflow(session_id, workflow)
+            .await;
     }
     crate::claude_cli_spawn::record_main_terminal(cli_manager, tddy_data_dir, session_id).await;
 
@@ -558,7 +561,10 @@ async fn resume_cli_harness_session(
     );
     let spec = &agent.spec;
     let conversation = resumed_conversation(spec, &meta)?;
-    let remote_host = meta.ssh_config_host.as_deref().filter(|alias| !alias.is_empty());
+    let remote_host = meta
+        .ssh_config_host
+        .as_deref()
+        .filter(|alias| !alias.is_empty());
     let mut slots = render_host_launch_slots(
         agent,
         &worktree_path,
@@ -566,7 +572,6 @@ async fn resume_cli_harness_session(
         HostLaunchSlots {
             toolset: wiring.toolset,
             system_prompt_file: wiring.system_prompt_file.as_deref(),
-            remote_host,
             ..HostLaunchSlots::default()
         },
     )?;
@@ -597,7 +602,9 @@ async fn resume_cli_harness_session(
     )
     .await?;
     if let Some(workflow) = wiring.workflow {
-        cli_manager.attach_managed_workflow(session_id, workflow).await;
+        cli_manager
+            .attach_managed_workflow(session_id, workflow)
+            .await;
     }
     crate::claude_cli_spawn::record_main_terminal(cli_manager, tddy_data_dir, session_id).await;
 

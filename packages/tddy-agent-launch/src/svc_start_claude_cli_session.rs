@@ -29,6 +29,12 @@ use crate::launch_ports::LaunchSessions;
 use crate::session_acting_identity::SessionAccountAccess;
 use tddy_core::provider_route::RouteSources;
 
+/// A managed session's child spawner and conversation spawner, each present only for its recipe.
+pub(crate) type ManagedSpawnHandlers = (
+    Option<Arc<dyn tddy_core::toolcall::ChildSpawnHandler>>,
+    Option<Arc<dyn tddy_core::toolcall::ConversationSpawnHandler>>,
+);
+
 impl LaunchSessions {
     #[allow(clippy::too_many_arguments)]
     pub(crate) async fn start_claude_cli_session(
@@ -138,10 +144,7 @@ impl LaunchSessions {
         project_id: &str,
         sessions_base: &Path,
         session_token: &str,
-    ) -> (
-        Option<Arc<dyn tddy_core::toolcall::ChildSpawnHandler>>,
-        Option<Arc<dyn tddy_core::toolcall::ConversationSpawnHandler>>,
-    ) {
+    ) -> ManagedSpawnHandlers {
         // A pr-stack orchestrator gets a child-spawn handler bound to its toolcall listener so the
         // agent's `pr_spawn_child` relay can materialize planned nodes into child sessions.
         let child_spawn_handler: Option<Arc<dyn tddy_core::toolcall::ChildSpawnHandler>> =
@@ -174,7 +177,7 @@ impl LaunchSessions {
                 os_user,
                 session_id,
                 project_id,
-                &sessions_base,
+                sessions_base,
                 &sessions_base.join(SESSIONS_SUBDIR).join(session_id),
                 self.host.session_account_access(session_token),
             )

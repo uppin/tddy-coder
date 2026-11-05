@@ -797,7 +797,10 @@ fn this_daemons_session_tokens() -> &'static tddy_daemon_auth::SessionTokens {
             &home.path().join("signing_key.pem"),
         )
         .expect("the daemon generates its keypair");
-        tddy_daemon_auth::SessionTokens::new(&key, Arc::new(tddy_daemon_auth::StandaloneKeyDirectory))
+        tddy_daemon_auth::SessionTokens::new(
+            &key,
+            Arc::new(tddy_daemon_auth::StandaloneKeyDirectory),
+        )
     })
 }
 
@@ -824,7 +827,9 @@ fn a_session_host(config: DaemonConfig, tddy_home: PathBuf) -> DaemonSessionHost
         config.clone(),
         Arc::new(move |_| Some(sessions_base.clone())),
         tddy_home,
-        Arc::new(move |token| (token == VALID_TOKEN || token == a_caller_token()).then(|| user.clone())),
+        Arc::new(move |token| {
+            (token == VALID_TOKEN || token == a_caller_token()).then(|| user.clone())
+        }),
         None,
         tddy_spawn::supervisor_client::SpawnBackendChoice::ForkedWorker,
         tddy_session_lifecycle::peer_routing::PeerRouting::local_only(&config),

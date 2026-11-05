@@ -39,9 +39,7 @@ use crate::launch_ports::LaunchSessions;
 use crate::managed_launch;
 use crate::project_home_launch::{spec_role_launch, RoleWiring, StartRole};
 use crate::slot_file_over_ssh::write_slot_file_over_ssh;
-use crate::spec_launch::{
-    AgentToolset, HostAgent, McpRegistration, SpecLaunchError,
-};
+use crate::spec_launch::{AgentToolset, HostAgent, McpRegistration, SpecLaunchError};
 
 /// What a generic host launch fills beyond its spec's own argv.
 #[derive(Default)]
@@ -53,8 +51,6 @@ pub(crate) struct HostLaunchSlots<'a> {
     pub hooks: Option<HookCommandParams<'a>>,
     /// Passed with the spec's `instructions.append_system_prompt` flag.
     pub system_prompt_file: Option<&'a Path>,
-    /// The ssh target the worktree lives on; `None` for a checkout on this host.
-    pub remote_host: Option<&'a str>,
     /// `{home}` of a placed MCP path: the host's `$HOME`.
     pub home: Option<PathBuf>,
 }
@@ -70,7 +66,6 @@ pub(crate) fn render_host_launch_slots(
         toolset,
         hooks,
         system_prompt_file,
-        remote_host: _,
         home,
     } = slots;
     let AgentToolset {
@@ -196,12 +191,14 @@ pub(crate) async fn start_conversation(
         ConversationSlot::Worktree => Ok(LaunchConversation::Worktree),
         ConversationSlot::ResumeToken => Ok(LaunchConversation::ResumeToken(None)),
         ConversationSlot::Minted { adapter, .. } => {
-            let minter = LaunchAdapters::builtin().conversation_id(adapter).ok_or_else(|| {
-                Status::failed_precondition(format!(
-                    "{} names conversation adapter {adapter}, which this build does not have",
-                    spec.id
-                ))
-            })?;
+            let minter = LaunchAdapters::builtin()
+                .conversation_id(adapter)
+                .ok_or_else(|| {
+                    Status::failed_precondition(format!(
+                        "{} names conversation adapter {adapter}, which this build does not have",
+                        spec.id
+                    ))
+                })?;
             let deadline = conversation
                 .mint_deadline()
                 .expect("a minted conversation has a mint deadline");
@@ -227,9 +224,7 @@ pub(crate) fn resumed_conversation(
     meta: &SessionMetadata,
 ) -> Result<LaunchConversation, Status> {
     Ok(match spec.conversation() {
-        ConversationSlot::DaemonSessionId => {
-            LaunchConversation::SessionId(meta.session_id.clone())
-        }
+        ConversationSlot::DaemonSessionId => LaunchConversation::SessionId(meta.session_id.clone()),
         ConversationSlot::Minted { adapter, .. } => match meta.cursor_chat_id.as_deref() {
             Some(chat) if !chat.trim().is_empty() => LaunchConversation::Minted(chat.to_string()),
             // TODO(cli-spec-features): a session recorded without its chat (started before the chat
@@ -445,6 +440,7 @@ pub(crate) struct ResumedWiring {
 
 impl LaunchSessions {
     /// The wiring a resume of `meta` gives `spec`'s agent again — none of it is in a persisted argv.
+    #[allow(clippy::too_many_arguments)]
     pub(crate) async fn resumed_session_wiring(
         &self,
         spec: &CodingAgentSpec,
@@ -473,8 +469,8 @@ impl LaunchSessions {
                     tddy_workflow_recipes::resolve_workflow_recipe_from_cli_name(recipe_name)
                         .map_err(Status::invalid_argument)?;
                 let resume_goal = LaunchSessions::managed_resume_goal(session_dir, &recipe);
-                let tddy_tools_path = claude_cli_hooks(&self.config, &self.tddy_data_dir)
-                    .tddy_tools_path;
+                let tddy_tools_path =
+                    claude_cli_hooks(&self.config, &self.tddy_data_dir).tddy_tools_path;
                 let launch = self.prepare_managed_workflow(
                     session_id,
                     recipe,
@@ -546,7 +542,10 @@ impl SessionWiring {
         session_id: &'a str,
         os_user: &'a str,
     ) -> Option<HookCommandParams<'a>> {
-        let hooks = self.hooks.as_ref().filter(|_| spec.has(Capability::Hooks))?;
+        let hooks = self
+            .hooks
+            .as_ref()
+            .filter(|_| spec.has(Capability::Hooks))?;
         let params = hooks.params(session_id, os_user);
         Some(HookCommandParams {
             daemon_socket: params.daemon_socket.or(self.hook_socket.as_deref()),

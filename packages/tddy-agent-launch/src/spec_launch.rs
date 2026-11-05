@@ -341,7 +341,11 @@ fn without_inherited_tddy_variables(argv: Vec<String>, env: &[(String, String)])
     inherited.sort();
     ["/usr/bin/env".to_string()]
         .into_iter()
-        .chain(inherited.into_iter().flat_map(|name| ["-u".to_string(), name]))
+        .chain(
+            inherited
+                .into_iter()
+                .flat_map(|name| ["-u".to_string(), name]),
+        )
         .chain(argv)
         .collect()
 }

@@ -132,8 +132,16 @@ async fn a_copy_of_claude_yaml_under_another_id_starts_in_tmux_with_the_argv_the
             daemon.metadata_of(&session_id).tmux_session.is_some(),
         ),
         (
-            [claude_start_argv(&daemon.stub_path(), &session_id), notify_prompt.to_vec()].concat(),
-            [claude_resume_argv(&daemon.stub_path(), &session_id), notify_prompt.to_vec()].concat(),
+            [
+                claude_start_argv(&daemon.stub_path(), &session_id),
+                notify_prompt.to_vec()
+            ]
+            .concat(),
+            [
+                claude_resume_argv(&daemon.stub_path(), &session_id),
+                notify_prompt.to_vec()
+            ]
+            .concat(),
             true,
         )
     );

@@ -370,12 +370,11 @@ impl LaunchSessions {
             &start.sessions_base,
             &req.session_token,
         );
-        let managed =
-            managed_recipe.map(|recipe| crate::cli_agent_steps::ManagedWiring {
-                recipe,
-                child_spawn_handler,
-                conversation_spawn_handler,
-            });
+        let managed = managed_recipe.map(|recipe| crate::cli_agent_steps::ManagedWiring {
+            recipe,
+            child_spawn_handler,
+            conversation_spawn_handler,
+        });
         let role = self.start_role(
             req.session_role.trim(),
             &start.session_id,
