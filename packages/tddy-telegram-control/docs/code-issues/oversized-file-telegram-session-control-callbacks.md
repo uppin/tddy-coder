@@ -13,6 +13,7 @@
 | Run | Production lines | Note |
 |---|---|---|
 | 2026-09-22 | 736 | first detection — created by #494's split of `telegram_session_control.rs` |
+| 2026-11-06 | 682 | `#agent-tools 18/19`: **−54** (736 → 682). `CLAUDE_CLI_MODELS`, `CURSOR_CLI_MODELS`, the `tcm:`/`tcur:` constants and their two parsers left; the registry-backed equivalents live in `agent_choices.rs`. Still over 500; not split here (sweep node n20). |
 
 ## What the tool found
 

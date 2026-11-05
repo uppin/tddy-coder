@@ -16,6 +16,7 @@
 | Run | Lines | Nesting | Branches | Early exits | Note |
 |---|---|---|---|---|---|
 | 2026-09-18 | 177 | 4 | 20 | 19 | first detection |
+| 2026-11-06 | 135 | 4 | — | — | `#agent-tools 18/19`: **−42** (177 → 135). The claude-only branch-conflict pre-check and the per-agent branch-name derivations are gone; the agent gate reads the registry. Branches/early exits and CRAP not re-derived. Still over 60; not decomposed here (sweep node n20). |
 
 ## What the tool found
 
