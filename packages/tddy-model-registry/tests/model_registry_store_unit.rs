@@ -953,7 +953,7 @@ async fn projects_an_assistant_onto_an_agent_def_carrying_its_model_endpoint_and
     // test says nothing about how provider ids are generated
     let def = assistant_to_agent_def(&assistant, &provider).expect("project the def");
 
-    // Then — everything `create_backend` needs to run it as `--agent repo-reader`
+    // Then — everything `create_workflow_backend` needs to run it as `--agent repo-reader`
     assert_eq!(def.name, "repo-reader");
     assert_eq!(def.label, Some("Repo Reader".to_string()));
     assert_eq!(def.model, "qwen3:32b");

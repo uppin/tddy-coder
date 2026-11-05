@@ -2501,7 +2501,7 @@ fn apply_agent_from_changeset_if_needed(args: &mut Args) -> anyhow::Result<()> {
 }
 
 #[cfg(test)]
-mod create_backend_specialized_agent_tests {
+mod create_workflow_backend_specialized_agent_tests {
     //! Unit tests: `create_workflow_backend` building a backend from a resolved `SpecializedAgentDef` —
     //! the def being the whole configuration, with no literal and no flag able to override it.
     //!

@@ -133,7 +133,7 @@ fn cli_accepts_recipe_review() {
     );
 }
 
-/// Codex agent is accepted on the CLI (`--agent codex`) once wired in clap + create_backend.
+/// Codex agent is accepted on the CLI (`--agent codex`) once wired in clap + `build_spec_backend`.
 #[test]
 fn cli_accepts_agent_codex() {
     // When
