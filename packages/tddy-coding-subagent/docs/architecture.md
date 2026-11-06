@@ -15,7 +15,7 @@ the daemon implements (`tddy-session-lifecycle::coding_agent_launcher`).
 | Module | Role |
 |---|---|
 | `catalog` | `CodingAgentDef { name, label, harness, model, provider_account }` from ACP harness profiles (`coding_agent_defs_in`) and ACP `allowed_agents` ids, profiles first; a profile shadows an allowed id of the same name. `ACP_HARNESSES = [CLAUDE_ACP, CODEX_ACP, OPENCODE]` |
-| `confinement` | `confinement_for(harness)` — `WithdrawsNativeTools` or `CannotWithdraw`; `refuse_unless_confinable(harness, managed)` is the one refusal both attach and launch use; `withdrawal_session_meta` (claude) and `opencode_withdrawal_config` (opencode) are the withdrawal itself |
+| `confinement` | `confinement_for(harness)` — `WithdrawsNativeTools` or `CannotWithdraw`; `refuse_unless_confinable(harness, managed)` is the one refusal both attach and launch use; `withdrawal_session_meta` (claude) and `opencode_withdrawal_config` (opencode) are the withdrawal itself. `confinement_of_spec(spec)` / `refuse_unless_spec_confinable(spec, managed)` answer the same from the agent's spec: `tool_deny: unsupported` is `CannotWithdraw` (`#agent-tools 11/12`). `CodingAgentLauncher::session_meta_for(launch)` is the ACP `_meta` the session opens with — by default `withdrawal_session_meta`, overridden by a launcher holding the specs |
 | `launcher` | `CodingAgentLauncher` port and `CodingAgentLaunch` (def, session id/user/token, worktree, managed) |
 | `permissions` | `DenyAndRecord` — the ACP `PermissionHandler` that rejects every request and records it for the turn's messages |
 | `session` | `CodingAgentSession` — one `dyn ConversationDriver` per conversation: an `AcpConversation` (one ACP agent process) or a `HeadlessDriver` (one CLI invocation per turn) |

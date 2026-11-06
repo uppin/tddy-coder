@@ -4,7 +4,7 @@ use std::path::PathBuf;
 
 use crate::error::BackendError;
 
-pub(super) fn acp_error_suggests_retry_oauth(msg: &str) -> bool {
+pub(crate) fn acp_error_suggests_retry_oauth(msg: &str) -> bool {
     let m = msg.to_lowercase();
     m.contains("auth")
         || m.contains("401")
@@ -32,7 +32,7 @@ fn invoke_codex_oauth_login_blocking(
     Ok(())
 }
 
-pub(super) async fn run_oauth_login_via_codex_cli(
+pub(crate) async fn run_oauth_login_via_codex_cli(
     codex_cli_path: PathBuf,
     session_dir: PathBuf,
 ) -> Result<(), BackendError> {

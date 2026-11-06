@@ -21,6 +21,7 @@ same `session/new` → `session/prompt` shape the codebase already uses for `Cla
 A subagent can also be a **coding agent** — Claude Code, Codex or OpenCode over ACP, launched by the
 daemon as the session's user on the session's worktree. The same `subagent_*` tools reach it; in a
 managed session it is managed too (native tools withdrawn, `tddy-tools --mcp` its only tool server).
+Its command, MCP servers and withdrawal render from the agent's tool definition (`#agent-tools 11/12`).
 See [Session agent roster § Coding agents](../daemon/session-agent-roster.md#coding-agents).
 
 ## ACP → MCP tool mapping

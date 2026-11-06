@@ -24,6 +24,9 @@
 //! ([`HomeSection`]), the files placed there and the env pointing at jail paths ([`FileItem`]),
 //! out-of-band secrets ([`SecretItem`]) and non-file allows ([`PolicySection`]). Like `network:`,
 //! these are generic — any tool may declare them, and `tddy-sandbox-recipes` lowers them.
+//!
+//! `#agent-tools 11/12` adds the ACP transport ([`Transport::Acp`]) and a binary found beside a
+//! dep's resolved binary ([`ToolBinary::sibling_of`], [`resolve_sibling`]).
 
 mod def;
 mod error;
@@ -46,7 +49,7 @@ pub use home::HomeSection;
 pub use network::{Egress, HostPattern, HostPatternError, NetworkSection, DEFAULT_EGRESS_PORT};
 pub use policy::PolicySection;
 pub use registry::{ToolRegistry, BUILTIN_SUPPORT_TOOLS, BUILTIN_TOOLS};
-pub use resolve::{ProcessToolHost, ResolvedTool, ToolHost};
+pub use resolve::{resolve_sibling, ProcessToolHost, ResolvedTool, ToolHost};
 pub use run::{ArgvItem, RunSection, Transport};
 pub use secrets::{RouteGuard, SecretItem, SecretItemSource};
 pub use template::{render_argv, TemplateParams};

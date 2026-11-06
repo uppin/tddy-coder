@@ -89,7 +89,7 @@ pub fn render_workdir_mcp(
 /// - [`McpSlot::Placed`] — its placed path (`{home}` bound to `home`, or [`SlotError::UnboundHome`]);
 /// - [`McpSlot::Argv`] — `<scratch_dir>/`[`ARGV_MCP_FILE`];
 /// - [`McpSlot::Workdir`] — `<workdir>/<path>`;
-/// - [`McpSlot::Inline`] and [`McpSlot::Unsupported`] — none.
+/// - [`McpSlot::Inline`], [`McpSlot::Unsupported`] and [`McpSlot::AcpSession`] — none.
 pub fn mcp_written_paths(
     slot: &McpSlot,
     workdir: &Path,
@@ -101,7 +101,8 @@ pub fn mcp_written_paths(
         McpSlot::Placed { path, .. } => vec![placed_path(path, home)?],
         McpSlot::Argv { .. } => vec![scratch_dir.join(ARGV_MCP_FILE)],
         McpSlot::Workdir { path, .. } => vec![workdir.join(path)],
-        McpSlot::Inline { .. } | McpSlot::Unsupported => Vec::new(),
+        // The acp-session servers travel in `session/new`, not a file.
+        McpSlot::Inline { .. } | McpSlot::Unsupported | McpSlot::AcpSession => Vec::new(),
     })
 }
 

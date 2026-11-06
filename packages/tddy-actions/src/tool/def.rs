@@ -75,6 +75,12 @@ pub struct ToolBinary {
     /// that knows a build graph answers it — and it wins over `env` and the `PATH` search.
     #[serde(default)]
     pub target: Option<TargetBinary>,
+    /// The id of a dep whose resolved binary this one sits beside (`#agent-tools 11/12`:
+    /// `codex-acp` ships next to `codex`): the binary is `command` in the directory of that dep's
+    /// resolved binary, so an override that moves the dep moves this one too. `env` still wins; the
+    /// `PATH` is not searched. The id must be one of the tool's `deps`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sibling_of: Option<String>,
 }
 
 /// A binary that another build target produces: `target`'s declared output at `path`.

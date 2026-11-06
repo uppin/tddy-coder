@@ -17,8 +17,9 @@ use std::sync::{Arc, Mutex};
 /// than at construction: a route set by [`ClaudeAcpBackend::with_provider_route`] has to be known
 /// before the agent exists.
 pub struct ClaudeAcpBackend {
-    agent_path: PathBuf,
-    agent_args: Vec<String>,
+    /// The command the agent is spawned with; a route's environment is added to it when the driver
+    /// starts.
+    command: AcpAgentCommand,
     /// The provider route the agent runs on (`with_provider_route`); `None` for the vendor.
     provider_route: Option<HarnessRoute>,
     driver: DriverSlot,
@@ -27,15 +28,24 @@ pub struct ClaudeAcpBackend {
 impl std::fmt::Debug for ClaudeAcpBackend {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("ClaudeAcpBackend")
-            .field("agent_path", &self.agent_path)
-            .field("agent_args", &self.agent_args)
+            .field("agent_path", &self.command.program)
+            .field("agent_args", &self.command.args)
             .finish()
     }
 }
 
+// The workflow backend is built from `claude-acp.yaml` (`tddy_coder::acp_from_spec`) with
+// [`ClaudeAcpBackend::with_command`]. This default still answers the model listing of
+// `model_catalog` until that reads the spec too.
+// TODO(acp-agents): retire this default once `model_catalog` lists models from the spec.
 impl Default for ClaudeAcpBackend {
     fn default() -> Self {
-        Self::unstarted(PathBuf::from("bunx"), vec!["claude-agent-acp".to_string()])
+        Self::with_command(AcpAgentCommand {
+            program: PathBuf::from("bunx"),
+            args: vec!["claude-agent-acp".to_string()],
+            env: Vec::new(),
+            cwd: None,
+        })
     }
 }
 
@@ -48,13 +58,19 @@ impl ClaudeAcpBackend {
     /// Create a backend that spawns the given binary (for tests with tddy-acp-stub).
     #[must_use]
     pub fn with_agent_path(path: PathBuf) -> Self {
-        Self::unstarted(path, Vec::new())
+        Self::with_command(AcpAgentCommand {
+            program: path,
+            args: Vec::new(),
+            env: Vec::new(),
+            cwd: None,
+        })
     }
 
-    fn unstarted(agent_path: PathBuf, agent_args: Vec<String>) -> Self {
+    /// Create a backend that spawns `command`, as `claude-acp.yaml`'s `coding_agent.acp` renders it.
+    #[must_use]
+    pub fn with_command(command: AcpAgentCommand) -> Self {
         Self {
-            agent_path,
-            agent_args,
+            command,
             provider_route: None,
             driver: Mutex::new(None),
         }
@@ -70,16 +86,10 @@ impl ClaudeAcpBackend {
     /// The driver, started on first use. The route's environment is given to the agent child.
     fn driver(&self) -> Result<Arc<AcpDriver>, BackendError> {
         acp_driver::started(&self.driver, || {
-            let command = AcpAgentCommand {
-                program: self.agent_path.clone(),
-                args: self.agent_args.clone(),
-                env: self
-                    .provider_route
-                    .as_ref()
-                    .map(acp_driver::route_env)
-                    .unwrap_or_default(),
-                cwd: None,
-            };
+            let mut command = self.command.clone();
+            if let Some(route) = &self.provider_route {
+                command.env.extend(acp_driver::route_env(route));
+            }
             AcpDriver::spawn(command, Arc::new(AllowOnce), Arc::new(NoHooks))
         })
     }

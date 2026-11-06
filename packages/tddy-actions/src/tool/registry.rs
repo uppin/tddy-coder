@@ -111,6 +111,9 @@ impl ToolRegistry {
         ids: &[&str],
         host: &dyn ToolHost,
     ) -> Result<Vec<ResolvedTool>, ToolError> {
+        // A `binary.sibling_of` resolves, after `env`, through `resolve_sibling` beside that dep's
+        // resolved binary: deps resolve first, so the dep is already in the closure. Load refuses a
+        // `sibling_of` that is not one of the tool's `deps`.
         let mut visited = BTreeSet::new();
         let mut closure = Vec::new();
         for id in ids {
@@ -135,7 +138,7 @@ impl ToolRegistry {
         for dep in &def.deps {
             self.visit(dep, host, visited, closure)?;
         }
-        let resolved = resolve_tool(def, host)?;
+        let resolved = resolve_tool(def, host, closure)?;
         if let Some(first) = closure.iter().find(|t| t.command == resolved.command) {
             return Err(ToolError::DuplicateCommand {
                 command: resolved.command,
@@ -171,8 +174,25 @@ impl ToolRegistry {
 
     fn validated(self) -> Result<Self, ToolError> {
         self.refuse_unknown_deps()?;
+        self.refuse_siblings_that_are_not_deps()?;
         self.refuse_dep_cycles()?;
         Ok(self)
+    }
+
+    /// A `binary.sibling_of` must name one of the tool's own deps: the binary sits beside a dep's
+    /// resolved binary, and only deps are resolved beside it.
+    fn refuse_siblings_that_are_not_deps(&self) -> Result<(), ToolError> {
+        for (id, (def, _)) in &self.tools {
+            if let Some(sibling) = &def.binary.sibling_of {
+                if !def.deps.contains(sibling) {
+                    return Err(ToolError::SiblingNotDep {
+                        tool: id.clone(),
+                        dep: sibling.clone(),
+                    });
+                }
+            }
+        }
+        Ok(())
     }
 
     fn refuse_unknown_deps(&self) -> Result<(), ToolError> {

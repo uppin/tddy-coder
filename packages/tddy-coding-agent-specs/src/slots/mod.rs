@@ -4,6 +4,7 @@
 //! Every renderer is pure except [`instructions`], which reads the files it prepends to. Nothing is
 //! written here: the launcher writes [`RenderedSlots::files`] before it spawns the agent.
 
+pub mod acp;
 pub mod cursor;
 pub mod headless_mcp;
 pub mod hooks;
@@ -191,6 +192,15 @@ fn render_tool_slot(
             agent: spec.id.clone(),
             slot: slot_name.to_string(),
         }),
+        // An ACP deny slot takes no argv flag: its withdrawal is `acp::acp_withdrawal`'s. Values for
+        // it are refused here, never dropped.
+        ToolSlot::AcpMeta { .. } | ToolSlot::ConfigEnv { .. } if values.is_empty() => {
+            Ok(Vec::new())
+        }
+        ToolSlot::AcpMeta { .. } | ToolSlot::ConfigEnv { .. } => Err(SlotError::SlotUnsupported {
+            agent: spec.id.clone(),
+            slot: slot_name.to_string(),
+        }),
     }
 }
 
@@ -255,6 +265,7 @@ mod tests {
                 resume: None,
                 placements: crate::Placement::anywhere(),
                 variants: BTreeMap::new(),
+                acp: None,
             },
         }
     }

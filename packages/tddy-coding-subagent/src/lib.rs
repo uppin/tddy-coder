@@ -19,8 +19,8 @@ pub use catalog::{
     OPENCODE,
 };
 pub use confinement::{
-    confinement_for, opencode_withdrawal_config, refuse_unless_confinable, withdrawal_session_meta,
-    Confinement, OPENCODE_CONFIG_CONTENT,
+    confinement_for, confinement_of_spec, opencode_withdrawal_config, refuse_unless_confinable,
+    refuse_unless_spec_confinable, withdrawal_session_meta, Confinement, OPENCODE_CONFIG_CONTENT,
 };
 pub use launcher::{
     AgentTransport, CodingAgentLaunch, CodingAgentLauncher, CONVERSATION_ID_ENV,

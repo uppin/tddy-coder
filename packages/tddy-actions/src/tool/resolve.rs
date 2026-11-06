@@ -2,7 +2,7 @@
 
 use std::path::{Path, PathBuf};
 
-use super::{NetworkSection, TargetBinary, ToolDef, ToolError};
+use super::{NetworkSection, TargetBinary, ToolBinary, ToolDef, ToolError};
 
 /// The environment a tool resolves against. Production uses the daemon's own process
 /// ([`ProcessToolHost`]); tests inject a fixture so resolution is host-independent.
@@ -83,20 +83,31 @@ pub struct ResolvedTool {
 }
 
 /// Resolve one definition against `host`: the canonical binary it names, and its declared reads.
-pub(super) fn resolve_tool(def: &ToolDef, host: &dyn ToolHost) -> Result<ResolvedTool, ToolError> {
+/// `resolved` is the closure resolved so far, deps first, so a `sibling_of` dep is in it.
+pub(super) fn resolve_tool(
+    def: &ToolDef,
+    host: &dyn ToolHost,
+    resolved: &[ResolvedTool],
+) -> Result<ResolvedTool, ToolError> {
     Ok(ResolvedTool {
         id: def.id.clone(),
         command: def.binary.command.clone(),
-        binary: locate_binary(def, host)?,
+        binary: locate_binary(def, host, resolved)?,
         reads: def.reads.clone(),
         network: def.network.clone(),
     })
 }
 
-/// The producing target's output when the binary is one, then the `env` override, then the first
-/// `PATH` directory holding the command. A target output that is not an executable, or an override
-/// that does not name one, refuses the tool: neither ever falls back to the search.
-fn locate_binary(def: &ToolDef, host: &dyn ToolHost) -> Result<PathBuf, ToolError> {
+/// The producing target's output when the binary is one, then the `env` override, then the dep the
+/// binary sits beside (`sibling_of`, which never searches the `PATH`), then the first `PATH`
+/// directory holding the command. A target output that is not an executable, an override that does
+/// not name one, and a sibling that is not beside its dep each refuse the tool: none falls back to
+/// the search.
+fn locate_binary(
+    def: &ToolDef,
+    host: &dyn ToolHost,
+    resolved: &[ResolvedTool],
+) -> Result<PathBuf, ToolError> {
     if let Some(target) = &def.binary.target {
         return match host.target_output(target) {
             Some(output) => target_output_binary(def, target, &output, host),
@@ -112,6 +123,15 @@ fn locate_binary(def: &ToolDef, host: &dyn ToolHost) -> Result<PathBuf, ToolErro
             Some(value) => return override_binary(def, var, &value, host),
             None => searched.push(format!("{var} (unset)")),
         }
+    }
+    if let Some(dep_id) = &def.binary.sibling_of {
+        let dep = resolved
+            .iter()
+            .find(|tool| &tool.id == dep_id)
+            .ok_or_else(|| {
+                unresolvable(def, format!("{dep_id} (not resolved before {})", def.id))
+            })?;
+        return resolve_sibling(&def.id, &def.binary, dep, host);
     }
     let dirs = host.path_dirs();
     for dir in &dirs {
@@ -180,4 +200,35 @@ fn join_dirs(dirs: &[PathBuf]) -> String {
         .map(|dir| dir.display().to_string())
         .collect::<Vec<_>>()
         .join(":")
+}
+
+/// Where `tool`'s binary is when it declares `sibling_of` (`#agent-tools 11/12`): `binary.command`
+/// in the directory of `dep`'s resolved binary, canonical. Refused as
+/// [`ToolError::Unresolvable`] when no executable file is there, naming both the path searched and
+/// the dep binary it was searched beside — never a fall back to the `PATH`.
+///
+/// [`super::ToolRegistry::resolve_closure`] calls it once `dep` is resolved; `binary.env` is tried
+/// before it.
+pub fn resolve_sibling(
+    tool: &str,
+    binary: &ToolBinary,
+    dep: &ResolvedTool,
+    host: &dyn ToolHost,
+) -> Result<PathBuf, ToolError> {
+    let refused = |searched: String| ToolError::Unresolvable {
+        tool: tool.to_string(),
+        searched,
+    };
+    let candidate = dep.binary.with_file_name(&binary.command);
+    let beside = format!(
+        "{} (beside {} at {})",
+        candidate.display(),
+        dep.id,
+        dep.binary.display()
+    );
+    if !host.is_executable_file(&candidate) {
+        return Err(refused(beside));
+    }
+    host.canonicalize(&candidate)
+        .map_err(|e| refused(format!("{} (cannot be resolved: {e})", candidate.display())))
 }

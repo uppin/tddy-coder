@@ -35,6 +35,9 @@ pub enum Transport {
     Pty,
     /// Piped stdin/stdout (a headless agent).
     Stdio,
+    /// The Agent Client Protocol — JSON-RPC over piped stdin/stdout, driven by tddy's ACP driver
+    /// (`#agent-tools 11/12`: `claude-agent-acp`, `codex-acp`, `opencode acp`).
+    Acp,
 }
 
 /// One argv template item: a literal (which may hold `{param}` placeholders), or a segment rendered
