@@ -222,17 +222,13 @@ impl AgentRoster {
         if ConversationId::parse(conversation_id).is_err() {
             return;
         }
-        let dir = tddy_coding_subagent::launcher::headless_conversation_dir(
+        if let Err(e) = tddy_coding_subagent::launcher::close_headless_conversation(
             &self.tddy_data_dir,
             conversation_id,
-        );
-        match std::fs::remove_dir_all(&dir) {
-            Ok(()) => {}
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
-            Err(e) => log::warn!(
-                "could not remove the headless files of conversation {conversation_id} at {}: {e}",
-                dir.display()
-            ),
+        ) {
+            log::warn!(
+                "could not remove the headless files of conversation {conversation_id}: {e}"
+            );
         }
     }
 

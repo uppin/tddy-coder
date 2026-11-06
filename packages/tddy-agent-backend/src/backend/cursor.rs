@@ -5,20 +5,65 @@
 //! Based on Baker CLI's executeWithCursor.
 
 use super::{InvokeRequest, InvokeResponse};
+use crate::adapters::headless::{turn_workdir, write_rendered_files};
+use crate::adapters::{CursorStream, HeadlessRenderer, HeadlessTurn, StreamAdapter, StreamSinks};
 use crate::error::BackendError;
-use crate::stream::cursor;
+use std::collections::BTreeMap;
 use std::io::Write;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::sync::{Arc, Mutex};
 
 /// Type for progress callback.
 type ProgressCallback = Option<Arc<Mutex<Box<dyn FnMut(&crate::stream::ProgressEvent) + Send>>>>;
 
+/// One Cursor child: what it is spawned with, and how its stdout is read.
+struct ChildLaunch<'a> {
+    program: &'a Path,
+    argv: &'a [String],
+    /// Set on the child on top of what the backend passes it.
+    env: &'a [(String, String)],
+    adapter: &'a dyn StreamAdapter,
+    exit_ok_if_structured: bool,
+    /// The system prompt's text, which the conversation log records.
+    system_prompt: Option<&'a str>,
+}
+
+/// Cursor CLI has no `--system-prompt`: the system content (the file at `system_prompt_path`, else
+/// `system_prompt`) is prepended to the user prompt.
+fn system_content(request: &InvokeRequest) -> Result<Option<String>, BackendError> {
+    match request.system_prompt_path {
+        Some(ref path) => std::fs::read_to_string(path).map(Some).map_err(|e| {
+            BackendError::InvocationFailed(format!(
+                "failed to read system_prompt_path {}: {}",
+                path.display(),
+                e
+            ))
+        }),
+        None => Ok(request.system_prompt.clone()),
+    }
+}
+
+/// `prompt` with `system` in front of it.
+fn merged_prompt(system: Option<&str>, prompt: &str) -> String {
+    match system {
+        Some(sys) => format!("{sys}\n\n{prompt}"),
+        None => prompt.to_string(),
+    }
+}
+
 /// Backend that invokes the Cursor agent CLI binary.
 pub struct CursorBackend {
     binary_path: PathBuf,
     progress_callback: ProgressCallback,
+    /// The agent's declaration its invocation is rendered from (`with_headless_renderer`,
+    /// `#agent-tools 9/12`); `None` builds the argv by hand ([`build_cursor_cli_args`]).
+    ///
+    /// TODO(headless-others): `create_backend("cursor")` passes one, so the spec is the workflow's
+    /// path. `build_cursor_cli_args` and `register_cursor_mcp_config` stay for a backend built
+    /// without a renderer (`with_path`); deleting them needs those callers moved to a renderer
+    /// first — `docs/dev/todo/2026-11-03-headless-others-legacy-argv-deletion.md`.
+    headless: Option<Arc<dyn HeadlessRenderer>>,
 }
 
 impl std::fmt::Debug for CursorBackend {
@@ -33,6 +78,7 @@ impl std::fmt::Debug for CursorBackend {
                     "None"
                 },
             )
+            .field("headless", &self.headless)
             .finish()
     }
 }
@@ -42,6 +88,7 @@ impl Clone for CursorBackend {
         Self {
             binary_path: self.binary_path.clone(),
             progress_callback: self.progress_callback.clone(),
+            headless: self.headless.clone(),
         }
     }
 }
@@ -61,6 +108,7 @@ impl CursorBackend {
         Self {
             binary_path: PathBuf::from(Self::DEFAULT_CLI_BINARY),
             progress_callback: None,
+            headless: None,
         }
     }
 
@@ -70,6 +118,7 @@ impl CursorBackend {
         Self {
             binary_path: path,
             progress_callback: None,
+            headless: None,
         }
     }
 
@@ -81,6 +130,65 @@ impl CursorBackend {
     {
         self.progress_callback = Some(Arc::new(Mutex::new(Box::new(f))));
         self
+    }
+
+    /// Render every invocation from `renderer` — `cursor.yaml`'s `coding_agent.headless` — instead
+    /// of building the argv by hand (`#agent-tools 9/12`).
+    #[must_use]
+    pub fn with_headless_renderer(mut self, renderer: Arc<dyn HeadlessRenderer>) -> Self {
+        self.headless = Some(renderer);
+        self
+    }
+
+    /// One invocation rendered from `renderer`: the system prompt merged into the prompt as today,
+    /// the goal's plan intent bound as the param `plan` and `force` always bound (the workflow
+    /// backend writes), the session onto `session_id`/`resume`, the working directory as `workdir`,
+    /// and [`HeadlessRenderer::tool_server`] onto the MCP slot — the headless `workdir` slot that
+    /// writes `<working_dir>/.cursor/mcp.json`; the rendered files written, the program spawned
+    /// with today's environment, and its stdout read through the adapter it names
+    /// (`cursor-stream`).
+    fn invoke_from_spec(
+        &self,
+        request: InvokeRequest,
+        renderer: &Arc<dyn HeadlessRenderer>,
+    ) -> Result<InvokeResponse, BackendError> {
+        let system_prompt = system_content(&request)?;
+        let workdir = turn_workdir(request.working_dir.as_deref())?;
+        // `plan` is bound for a goal that plans, `force` always: this backend serves the workflow,
+        // which writes. A param is bound by being present.
+        let mut params = BTreeMap::from([("force".to_string(), "1".to_string())]);
+        if request.hints.agent_cli_plan_mode {
+            params.insert("plan".to_string(), "1".to_string());
+        }
+        let turn = HeadlessTurn {
+            prompt: merged_prompt(system_prompt.as_deref(), &request.prompt),
+            model: request.model.clone(),
+            session: request.session.clone(),
+            permission_mode: None,
+            append_system_prompt_file: None,
+            allowed_tools: Vec::new(),
+            denied_tools: Vec::new(),
+            permission_prompt_tool: None,
+            mcp_server: renderer.tool_server(),
+            // Cursor's MCP slot writes under the workdir; nothing renders into a scratch directory.
+            scratch_dir: workdir.clone(),
+            workdir,
+            params,
+            route_args: Vec::new(),
+        };
+        let invocation = renderer.render(&turn)?;
+        write_rendered_files(&invocation.files)?;
+        self.run_child(
+            &request,
+            ChildLaunch {
+                program: &invocation.program,
+                argv: &invocation.argv,
+                env: &invocation.env,
+                adapter: invocation.adapter.as_ref(),
+                exit_ok_if_structured: invocation.exit_ok_if_structured,
+                system_prompt: system_prompt.as_deref(),
+            },
+        )
     }
 }
 
@@ -228,23 +336,11 @@ fn register_cursor_mcp_config(base_dir: &std::path::Path) -> Result<(), BackendE
 
 impl CursorBackend {
     fn invoke_sync(&self, request: InvokeRequest) -> Result<InvokeResponse, BackendError> {
-        // Cursor CLI has no --system-prompt; prepend system content to user prompt.
-        let system_content: Option<String> = if let Some(ref path) = request.system_prompt_path {
-            Some(std::fs::read_to_string(path).map_err(|e| {
-                BackendError::InvocationFailed(format!(
-                    "failed to read system_prompt_path {}: {}",
-                    path.display(),
-                    e
-                ))
-            })?)
-        } else {
-            request.system_prompt.clone()
-        };
-
-        let prompt = match system_content {
-            Some(ref sys) => format!("{}\n\n{}", sys, request.prompt),
-            None => request.prompt.clone(),
-        };
+        if let Some(renderer) = &self.headless {
+            return self.invoke_from_spec(request, renderer);
+        }
+        let system_prompt = system_content(&request)?;
+        let prompt = merged_prompt(system_prompt.as_deref(), &request.prompt);
 
         let mcp_base = request
             .working_dir
@@ -253,16 +349,35 @@ impl CursorBackend {
         register_cursor_mcp_config(mcp_base)?;
 
         let args = build_cursor_cli_args(&request, &prompt);
+        self.run_child(
+            &request,
+            ChildLaunch {
+                program: &self.binary_path,
+                argv: &args,
+                env: &[],
+                adapter: &CursorStream,
+                exit_ok_if_structured: false,
+                system_prompt: system_prompt.as_deref(),
+            },
+        )
+    }
 
-        let mut cmd = Command::new(&self.binary_path);
+    /// The spawn and read every Cursor invocation shares: `launch`'s program with its argv and
+    /// environment on top of the backend's own, its stdout read through `launch.adapter` into the
+    /// response, and its exit judged by that adapter.
+    fn run_child(
+        &self,
+        request: &InvokeRequest,
+        launch: ChildLaunch<'_>,
+    ) -> Result<InvokeResponse, BackendError> {
+        let system_content = launch.system_prompt;
+        let mut cmd = Command::new(launch.program);
         if let Some(ref wd) = request.working_dir {
             cmd.current_dir(wd);
         }
-        for arg in &args {
-            cmd.arg(arg);
-        }
+        cmd.args(launch.argv);
 
-        let resolved = super::claude::which_binary(&self.binary_path);
+        let resolved = super::claude::which_binary(launch.program);
         let cwd_str = request
             .working_dir
             .as_ref()
@@ -272,11 +387,11 @@ impl CursorBackend {
                     .map(|p| p.display().to_string())
                     .unwrap_or_else(|_| "(unknown)".into())
             });
-        let cmd_str = super::format_command_for_log(&self.binary_path, &args, 200);
+        let cmd_str = super::format_command_for_log(launch.program, launch.argv, 200);
         log::info!("[tddy-coder] Cursor backend command: {}", cmd_str);
         log::debug!(
             "[tddy-coder] Cursor backend spawning: {} (resolved: {})",
-            self.binary_path.display(),
+            launch.program.display(),
             resolved
         );
         log::debug!("[tddy-coder] cwd: {}", cwd_str);
@@ -291,7 +406,7 @@ impl CursorBackend {
             request.prompt.len(),
             &request.prompt[..request.prompt.floor_char_boundary(500)]
         );
-        if let Some(ref sys) = system_content {
+        if let Some(sys) = system_content {
             log::debug!(
                 "[tddy-coder] system_prompt ({} bytes): {}",
                 sys.len(),
@@ -314,6 +429,7 @@ impl CursorBackend {
                 cmd.env(key, value);
             }
         }
+        cmd.envs(launch.env.iter().map(|(key, value)| (key, value)));
         cmd.stdout(Stdio::piped());
         cmd.stderr(Stdio::piped());
         cmd.stdin(if request.inherit_stdin {
@@ -324,7 +440,7 @@ impl CursorBackend {
 
         let mut child = cmd.spawn().map_err(|e| {
             if e.kind() == std::io::ErrorKind::NotFound {
-                BackendError::BinaryNotFound(self.binary_path.to_string_lossy().to_string())
+                BackendError::BinaryNotFound(launch.program.to_string_lossy().to_string())
             } else {
                 BackendError::InvocationFailed(e.to_string())
             }
@@ -356,10 +472,6 @@ impl CursorBackend {
                 }
             }
         };
-
-        // A resumed `agent` invocation only emits its own new turn's stdout, not a replay of
-        // prior conversation history, so there is nothing to skip when echoing live output.
-        let skip_until_line = 0;
 
         let agent_output = request.agent_output;
         let agent_output_sink = request.agent_output_sink.clone();
@@ -423,24 +535,24 @@ impl CursorBackend {
             }
         };
 
-        let reader = std::io::BufReader::new(stdout_handle);
-        let stream_result = cursor::process_cursor_stream(
-            reader,
-            &mut on_progress,
-            &mut on_raw_output,
-            if request.debug {
-                Some(&mut on_debug_line)
-            } else {
-                None
+        let mut reader = std::io::BufReader::new(stdout_handle);
+        let stream_result = launch.adapter.read_stream(
+            &mut reader,
+            StreamSinks {
+                on_progress: &mut on_progress,
+                on_raw_output: &mut on_raw_output,
+                on_debug_line: if request.debug {
+                    Some(&mut on_debug_line)
+                } else {
+                    None
+                },
+                on_conversation_line: if request.conversation_output_path.is_some() {
+                    Some(&mut on_conversation_line)
+                } else {
+                    None
+                },
             },
-            if request.conversation_output_path.is_some() {
-                Some(&mut on_conversation_line)
-            } else {
-                None
-            },
-            skip_until_line,
-        )
-        .map_err(|e| BackendError::InvocationFailed(format!("stream parse error: {}", e)))?;
+        )?;
 
         let stderr_buf = stderr_thread
             .and_then(|j| j.join().ok())
@@ -458,7 +570,10 @@ impl CursorBackend {
             request.session
         );
 
-        if exit_code != 0 {
+        if !launch
+            .adapter
+            .exit_ok(exit_code, &stream_result, launch.exit_ok_if_structured)
+        {
             log::warn!(
                 "[tddy-coder] Cursor backend command failed (exit {}): {}",
                 exit_code,

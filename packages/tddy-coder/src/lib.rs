@@ -7,6 +7,7 @@ pub mod claude_from_spec;
 mod codex_binaries;
 pub mod config;
 pub mod conversation_spawn_relay;
+pub mod headless_from_spec;
 pub mod participant_host;
 pub mod plain;
 mod provider_route_arg;

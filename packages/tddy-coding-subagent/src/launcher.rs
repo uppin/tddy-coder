@@ -45,6 +45,70 @@ pub fn claim_headless_conversation_dir(
     std::fs::write(dir.join(HEADLESS_OWNER_FILE), daemon_instance_id)
 }
 
+/// The file in a headless conversation's directory listing, one absolute path per line, every file
+/// its plan wrote **outside** that directory — a worktree's `.cursor/mcp.json` — so the close and
+/// the start-up sweep remove those too (`#agent-tools 9/12`;
+/// `docs/dev/changesets/2026-11-03-agent-tools-headless-others.md`).
+pub const HEADLESS_WRITTEN_FILES: &str = "written-files";
+
+/// Record `files` — a plan's `RenderedSlots::written` — in `dir`'s [`HEADLESS_WRITTEN_FILES`],
+/// after what an earlier plan of the conversation recorded. Written before the files themselves,
+/// so a plan that fails part-way leaves nothing the record does not name.
+pub fn record_written_files(dir: &Path, files: &[PathBuf]) -> std::io::Result<()> {
+    use std::io::Write;
+
+    let mut record = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(dir.join(HEADLESS_WRITTEN_FILES))?;
+    let lines: String = files
+        .iter()
+        .map(|file| format!("{}\n", file.display()))
+        .collect();
+    record.write_all(lines.as_bytes())
+}
+
+/// Remove every file `dir`'s [`HEADLESS_WRITTEN_FILES`] records. A recorded file already gone is
+/// not an error; a missing record removes nothing. Returns the files removed, in recorded order.
+pub fn remove_recorded_files(dir: &Path) -> std::io::Result<Vec<PathBuf>> {
+    let record = match std::fs::read_to_string(dir.join(HEADLESS_WRITTEN_FILES)) {
+        Ok(record) => record,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
+        Err(e) => return Err(e),
+    };
+    let mut removed = Vec::new();
+    for file in record
+        .lines()
+        .filter(|line| !line.is_empty())
+        .map(PathBuf::from)
+    {
+        match std::fs::remove_file(&file) {
+            Ok(()) => removed.push(file),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+            Err(e) => return Err(e),
+        }
+    }
+    Ok(removed)
+}
+
+/// Close headless conversation `conversation_id` under `tddy_data_dir`: the files its record names
+/// ([`remove_recorded_files`]), then its directory. What `AgentRoster::conversation_closed` does
+/// for a closed conversation. A conversation with no directory is not an error. Returns the
+/// recorded files removed.
+pub fn close_headless_conversation(
+    tddy_data_dir: &Path,
+    conversation_id: &str,
+) -> std::io::Result<Vec<PathBuf>> {
+    let dir = headless_conversation_dir(tddy_data_dir, conversation_id);
+    let removed = remove_recorded_files(&dir)?;
+    match std::fs::remove_dir_all(&dir) {
+        Ok(()) => {}
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+        Err(e) => return Err(e),
+    }
+    Ok(removed)
+}
+
 /// Remove the files every headless conversation of the daemon `daemon_instance_id` left under
 /// `<tddy_data_dir>/headless/` — what that daemon left behind when it stopped without closing them.
 /// Called once at start-up, when the daemon holds no conversation (its conversation table is in
@@ -71,6 +135,7 @@ pub fn sweep_headless_dirs(
         if owner.trim() != daemon_instance_id {
             continue;
         }
+        remove_recorded_files(&dir)?;
         std::fs::remove_dir_all(&dir)?;
         if let Some(conversation) = dir.file_name().and_then(|name| name.to_str()) {
             swept.push(conversation.to_string());

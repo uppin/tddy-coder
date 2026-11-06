@@ -346,7 +346,10 @@ subagent is paused, not finished — its ACP prompt stays in flight, waiting on 
   binary the agent registry resolves, `--model`, `--resume`, the approval tool and the MCP
   registration (`<tddyhome>/headless/<conversation>/claude-mcp-config.json`, mode 0600) from its
   slots. When the daemon's coding agents do not load, a headless `claude` launch is refused with the
-  load error — never planned by hand. Headless
+  load error — never planned by hand. Headless `cursor`, `codex` and `oz` render the same way from
+  `cursor.yaml`, `codex.yaml` and `oz.yaml`, with MCP registered as each spec's slot kind: a worktree
+  `.cursor/mcp.json` (removed when the conversation closes), `-c mcp_servers.*` overrides, and an
+  `--mcp <file>`. When the coding agents do not load, all four are refused. Headless
   `cursor`, `codex` and `oz` cannot ask mid-turn and run under the fixed policy their row names
   ([Session agent roster § Coding agents](../daemon/session-agent-roster.md#coding-agents)).
 - **`toolCall.kind` is the agent's ACP tool kind** by its wire name (`edit`, `execute`, `read`, …),

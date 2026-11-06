@@ -12549,6 +12549,7 @@ version = "0.1.0"
 dependencies = [
  "async-trait",
  "log",
+ "pretty_assertions",
  "serde_json",
  "serial_test",
  "tddy-agent-backend",

@@ -44,7 +44,7 @@ struct PendingCall {
     tool: String,
 }
 
-pub(super) struct OzTurn {
+pub(crate) struct OzTurn {
     updates: Updates,
     session_id: Option<String>,
     text: String,
@@ -63,7 +63,17 @@ impl OzTurn {
         }
     }
 
-    pub(super) fn push_line(&mut self, line: &str) {
+    /// A turn that reports no updates, for a reader that wants only the text and the conversation.
+    pub(crate) fn without_updates() -> Self {
+        Self::new(Updates::new(None))
+    }
+
+    /// The agent's text so far and the conversation id the run named, if it has.
+    pub(crate) fn into_reading(self) -> (String, Option<String>) {
+        (self.text, self.session_id)
+    }
+
+    pub(crate) fn push_line(&mut self, line: &str) {
         let event: Event = match serde_json::from_str(line) {
             Ok(event) => event,
             Err(e) => {

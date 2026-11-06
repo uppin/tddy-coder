@@ -21,9 +21,13 @@
 //! naming the specs crate.
 
 mod claude_stream_json;
+mod codex_jsonl;
+mod cursor_models;
+mod cursor_stream;
 pub mod headless;
 pub mod launch;
 mod opencode_models;
+mod oz_ndjson;
 mod warp_resume_token;
 
 use std::collections::BTreeMap;
@@ -39,7 +43,13 @@ use crate::stream::{ProgressEvent, StreamResult};
 /// outside this crate.
 pub use crate::error::BackendError as AdapterError;
 pub use claude_stream_json::ClaudeStreamJson;
+// `#agent-tools 9/12`: the stream adapters of Cursor's, Codex's and Oz's headless runs, and Cursor's
+// model listing.
+pub use codex_jsonl::{CodexJsonl, CODEX_JSONL};
+pub use cursor_models::{CursorModels, CURSOR_MODELS};
+pub use cursor_stream::{CursorStream, CURSOR_STREAM};
 pub use headless::{HeadlessInvocation, HeadlessMcpServer, HeadlessRenderer, HeadlessTurn};
+pub use oz_ndjson::{OzNdjson, OZ_NDJSON};
 // `#agent-tools 8/12`: what a PTY launch reads its agent's own output through — a model listing,
 // a resume token. Not stream adapters, so a registry of their own ([`launch::LaunchAdapters`]).
 pub use launch::{LaunchAdapters, ModelsAdapter, ResumeTokenAdapter};
@@ -102,8 +112,16 @@ impl AdapterRegistry {
     /// Every adapter this build registers: [`CLAUDE_STREAM_JSON`] ([`ClaudeStreamJson`]).
     /// `#agent-tools 9/12` adds Cursor's, Codex's and Oz's.
     pub fn builtin() -> Self {
-        let claude: Arc<dyn StreamAdapter> = Arc::new(ClaudeStreamJson);
-        let adapters = BTreeMap::from([(claude.name().to_string(), claude)]);
+        let all: [Arc<dyn StreamAdapter>; 4] = [
+            Arc::new(ClaudeStreamJson),
+            Arc::new(CursorStream),
+            Arc::new(CodexJsonl),
+            Arc::new(OzNdjson),
+        ];
+        let adapters = all
+            .into_iter()
+            .map(|adapter| (adapter.name().to_string(), adapter))
+            .collect();
         Self { adapters }
     }
 
@@ -138,7 +156,10 @@ mod tests {
         let names: Vec<&str> = registry.names().collect();
 
         // Then
-        assert_eq!(names, vec![CLAUDE_STREAM_JSON]);
+        assert_eq!(
+            names,
+            vec![CLAUDE_STREAM_JSON, CODEX_JSONL, CURSOR_STREAM, OZ_NDJSON]
+        );
     }
 
     #[test]

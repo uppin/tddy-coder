@@ -309,12 +309,15 @@ removes the route and the directory, as a close does. At start-up, before it ser
 removes the `headless/` directories tagged with its own id: what a previous run left when it stopped
 without closing them. Another daemon's directories, and untagged ones, are left alone.
 
+A conversation's plan records every file it writes outside its directory — a cursor conversation's
+`<worktree>/.cursor/mcp.json` — in `headless/<conversation>/written-files`. Closing the conversation
+(`close_headless_conversation`) and the start-up sweep remove the recorded files before the
+directory, so a retry under the same conversation id is admitted.
+
 Known gaps of the headless transport:
 
 - `cursor`, `codex` and `oz` still cannot withdraw their native tools, so a managed session refuses
   all three — [`docs/dev/todo/2026-10-25-headless-cursor-codex-oz-cannot-withdraw-native-tools.md`](../../dev/todo/2026-10-25-headless-cursor-codex-oz-cannot-withdraw-native-tools.md).
-- A cursor conversation's `<worktree>/.cursor/mcp.json` is not removed when the conversation closes —
-  [`docs/dev/todo/2026-10-25-cursor-project-mcp-config-outlives-its-conversation.md`](../../dev/todo/2026-10-25-cursor-project-mcp-config-outlives-its-conversation.md).
 - Two daemons sharing a data directory that both fall back to the hostname as their durable id sweep
   each other's `headless/` directories —
   [`docs/dev/todo/2026-10-25-headless-sweep-cannot-tell-two-hostname-daemons-apart.md`](../../dev/todo/2026-10-25-headless-sweep-cannot-tell-two-hostname-daemons-apart.md).

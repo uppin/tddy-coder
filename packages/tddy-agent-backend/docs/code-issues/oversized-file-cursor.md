@@ -24,3 +24,7 @@
 | B | the second `impl CursorBackend` block, the invoke path (L229–519) | ~290 |
 
 19 lines over. Seam A alone brings it under budget. Prove the seams with `restructure check --deep` before applying them.
+
+## Measurement update 2026-11-03 — #agent-tools 9/12 (#798)
+
+**Regressed:** 519 → 634 production lines: `with_headless_renderer` and the spec-rendered `invoke_from_spec` path. `build_cursor_cli_args` and `register_cursor_mcp_config` stay until their deletion is approved (`docs/dev/todo/2026-11-03-headless-others-legacy-argv-deletion.md`); deleting them is seam A. Regressed by #798 (`#agent-tools` 9/12). **Status:** Open — deferred to the #agent-tools sweep node (developer, 2026-11-03).

@@ -11,14 +11,16 @@
 
 use super::routed::route_child_env;
 use super::{InvokeRequest, InvokeResponse};
+use crate::adapters::headless::{turn_workdir, write_rendered_files};
+use crate::adapters::{CodexJsonl, HeadlessRenderer, HeadlessTurn, StreamAdapter, StreamSinks};
 use crate::error::BackendError;
 use crate::provider_route::HarnessRoute;
-use crate::stream::codex::{
-    codex_jsonl_last_error_message, codex_stderr_brief_for_user, parse_codex_jsonl_output,
-};
+use crate::stream::codex::codex_stderr_brief_for_user;
+use std::collections::BTreeMap;
 use std::io::{BufRead, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
+use std::sync::Arc;
 use tddy_workflow::PermissionHint;
 
 mod login_text;
@@ -31,12 +33,30 @@ pub const CODEX_THREAD_ID_FILENAME: &str = "codex_thread_id";
 /// Basename written when Codex invokes `BROWSER` with the OpenAI authorize URL (`tddy-coder` hook).
 pub const CODEX_OAUTH_AUTHORIZE_URL_FILENAME: &str = "codex_oauth_authorize.url";
 
+/// One Codex child: what it is spawned with, and how its stdout is read.
+struct ChildLaunch<'a> {
+    program: &'a Path,
+    argv: &'a [String],
+    /// Set on the child on top of what the backend passes it.
+    env: &'a [(String, String)],
+    adapter: &'a dyn StreamAdapter,
+    exit_ok_if_structured: bool,
+}
+
 /// Backend that invokes the Codex CLI (`codex` on PATH by default).
 #[derive(Debug, Clone)]
 pub struct CodexBackend {
     binary_path: PathBuf,
     /// The provider route the child runs on (`with_provider_route`); `None` for the vendor.
     pub(super) provider_route: Option<HarnessRoute>,
+    /// The agent's declaration its invocation is rendered from (`with_headless_renderer`,
+    /// `#agent-tools 9/12`); `None` builds the argv by hand ([`build_codex_exec_argv`]).
+    ///
+    /// TODO(headless-others): `create_backend("codex")` passes one, so the spec is the workflow's
+    /// path. `build_codex_exec_argv` stays for a backend built without a renderer (`with_path`);
+    /// deleting it needs those callers moved to a renderer first —
+    /// `docs/dev/todo/2026-11-03-headless-others-legacy-argv-deletion.md`.
+    headless: Option<Arc<dyn HeadlessRenderer>>,
 }
 
 impl Default for CodexBackend {
@@ -53,6 +73,7 @@ impl CodexBackend {
         Self {
             binary_path: PathBuf::from(Self::DEFAULT_CLI_BINARY),
             provider_route: None,
+            headless: None,
         }
     }
 
@@ -61,7 +82,80 @@ impl CodexBackend {
         Self {
             binary_path: path,
             provider_route: None,
+            headless: None,
         }
+    }
+
+    /// Render every invocation from `renderer` — `codex.yaml`'s `coding_agent.headless` — instead
+    /// of building the argv by hand (`#agent-tools 9/12`).
+    #[must_use]
+    pub fn with_headless_renderer(mut self, renderer: Arc<dyn HeadlessRenderer>) -> Self {
+        self.headless = Some(renderer);
+        self
+    }
+
+    /// One invocation rendered from `renderer`: the merged prompt ([`merge_codex_prompt`]), the
+    /// param `sandbox_mode` bound to `read-only` for a read-only planning goal and to
+    /// `workspace-write` otherwise, the session onto `session_id`/`resume`, the working directory
+    /// as `workdir`, and the provider route's argv as `route_args` **in place of** the model (the
+    /// turn's `model` is `None` on a route). No tool server is registered, as today. The program is
+    /// spawned with today's environment (the route's, `BROWSER`/`TDDY_CODEX_OAUTH_OUT`, the
+    /// `TDDY_*` variables), its stdout read through the adapter it names (`codex-jsonl`), and a
+    /// failed exit's detail gets `login_text::codex_openai_auth_remediation`'s hint appended,
+    /// as `invoke_sync` appends it.
+    fn invoke_from_spec(
+        &self,
+        request: InvokeRequest,
+        renderer: &Arc<dyn HeadlessRenderer>,
+    ) -> Result<InvokeResponse, BackendError> {
+        // A route's argv carries its own model, which takes the request's place.
+        let route_args = self
+            .provider_route
+            .as_ref()
+            .map(|route| route.args.clone())
+            .unwrap_or_default();
+        let model = match self.provider_route {
+            Some(_) => None,
+            None => request.model.clone(),
+        };
+        // `read-only` for a read-only planning goal; every other turn binds `workspace-write`.
+        let sandbox_mode = if request.hints.agent_cli_plan_mode
+            && request.hints.permission == PermissionHint::ReadOnly
+        {
+            "read-only"
+        } else {
+            "workspace-write"
+        };
+        let workdir = turn_workdir(request.working_dir.as_deref())?;
+        let turn = HeadlessTurn {
+            prompt: merge_codex_prompt(&request)?,
+            model,
+            session: request.session.clone(),
+            permission_mode: None,
+            append_system_prompt_file: None,
+            allowed_tools: Vec::new(),
+            denied_tools: Vec::new(),
+            permission_prompt_tool: None,
+            // Codex registers no tool server on this path, as it does not today.
+            mcp_server: None,
+            // Codex's MCP slot is inline and writes no file; nothing renders into a scratch directory.
+            scratch_dir: workdir.clone(),
+            workdir,
+            params: BTreeMap::from([("sandbox_mode".to_string(), sandbox_mode.to_string())]),
+            route_args,
+        };
+        let invocation = renderer.render(&turn)?;
+        write_rendered_files(&invocation.files)?;
+        self.run_child(
+            &request,
+            ChildLaunch {
+                program: &invocation.program,
+                argv: &invocation.argv,
+                env: &invocation.env,
+                adapter: invocation.adapter.as_ref(),
+                exit_ok_if_structured: invocation.exit_ok_if_structured,
+            },
+        )
     }
 
     /// Run `codex login` with **browser OAuth** (the default `codex login` flow, **not** `--device-auth`).
@@ -150,18 +244,39 @@ impl CodexBackend {
     }
 
     fn invoke_sync(&self, request: InvokeRequest) -> Result<InvokeResponse, BackendError> {
+        if let Some(renderer) = &self.headless {
+            return self.invoke_from_spec(request, renderer);
+        }
         let merged_prompt = merge_codex_prompt(&request)?;
         let args = build_codex_exec_argv(&request, &merged_prompt, self.provider_route.as_ref());
+        self.run_child(
+            &request,
+            ChildLaunch {
+                program: &self.binary_path,
+                argv: &args,
+                env: &[],
+                adapter: &CodexJsonl,
+                // Match Claude backend: plan-style goals may see nonzero exit despite usable stdout.
+                exit_ok_if_structured: request.hints.claude_nonzero_exit_ok_if_structured_response,
+            },
+        )
+    }
 
-        let mut cmd = Command::new(&self.binary_path);
+    /// The spawn and read every Codex invocation shares: `launch`'s program with its argv and
+    /// environment on top of the backend's own, its stdout read through `launch.adapter` into the
+    /// response, and its exit judged by that adapter.
+    fn run_child(
+        &self,
+        request: &InvokeRequest,
+        launch: ChildLaunch<'_>,
+    ) -> Result<InvokeResponse, BackendError> {
+        let mut cmd = Command::new(launch.program);
         if let Some(ref wd) = request.working_dir {
             cmd.current_dir(wd);
         }
-        for arg in &args {
-            cmd.arg(arg);
-        }
+        cmd.args(launch.argv);
 
-        let resolved = super::claude::which_binary(&self.binary_path);
+        let resolved = super::claude::which_binary(launch.program);
         let cwd_str = request
             .working_dir
             .as_ref()
@@ -171,11 +286,11 @@ impl CodexBackend {
                     .map(|p| p.display().to_string())
                     .unwrap_or_else(|_| "(unknown)".into())
             });
-        let cmd_str = super::format_command_for_log(&self.binary_path, &args, 200);
+        let cmd_str = super::format_command_for_log(launch.program, launch.argv, 200);
         log::info!("[tddy-codex] command: {}", cmd_str);
         log::debug!(
             "[tddy-codex] spawning binary={} resolved={} cwd={}",
-            self.binary_path.display(),
+            launch.program.display(),
             resolved,
             cwd_str
         );
@@ -214,6 +329,7 @@ impl CodexBackend {
         if let Some(ref p) = request.session_dir {
             cmd.env("TDDY_SESSION_DIR", p);
         }
+        cmd.envs(launch.env.iter().map(|(key, value)| (key, value)));
         cmd.stdout(Stdio::piped());
         cmd.stderr(Stdio::piped());
         cmd.stdin(if request.inherit_stdin {
@@ -224,7 +340,7 @@ impl CodexBackend {
 
         let mut child = cmd.spawn().map_err(|e| {
             if e.kind() == std::io::ErrorKind::NotFound {
-                BackendError::BinaryNotFound(self.binary_path.to_string_lossy().to_string())
+                BackendError::BinaryNotFound(launch.program.to_string_lossy().to_string())
             } else {
                 BackendError::InvocationFailed(e.to_string())
             }
@@ -281,16 +397,25 @@ impl CodexBackend {
             let _ = f.flush();
         }
 
-        let reader = std::io::BufReader::new(stdout_handle);
-        let mut raw_lines: Vec<String> = Vec::new();
-        for line in reader.lines().map_while(Result::ok) {
-            log::debug!("[tddy-codex] stdout line ({} bytes)", line.len());
+        let mut on_conversation_line = |line: &str| {
             if let Some(ref mut f) = conv_file {
                 let _ = writeln!(f, "{}", line);
                 let _ = f.flush();
             }
-            raw_lines.push(line);
-        }
+        };
+        let mut on_debug_line =
+            |line: &str| log::debug!("[tddy-codex] stdout line ({} bytes)", line.len());
+        let mut reader = std::io::BufReader::new(stdout_handle);
+        let stream_result = launch.adapter.read_stream(
+            &mut reader,
+            StreamSinks {
+                // Codex reports no progress and no live output on this path.
+                on_progress: &mut |_| {},
+                on_raw_output: &mut |_| {},
+                on_debug_line: Some(&mut on_debug_line),
+                on_conversation_line: Some(&mut on_conversation_line),
+            },
+        )?;
 
         let stderr_buf = stderr_thread
             .and_then(|j| j.join().ok())
@@ -311,13 +436,11 @@ impl CodexBackend {
             log::debug!("[tddy-codex] stderr: {}", stderr_buf.trim());
         }
 
-        let parsed = parse_codex_jsonl_output(&raw_lines);
-
         if exit_code != 0 {
-            // Match Claude backend: plan-style goals may see nonzero exit despite usable stdout.
-            let tolerate_nonzero = request.hints.claude_nonzero_exit_ok_if_structured_response
-                && !parsed.result_text.trim().is_empty();
-            if tolerate_nonzero {
+            if launch
+                .adapter
+                .exit_ok(exit_code, &stream_result, launch.exit_ok_if_structured)
+            {
                 log::debug!(
                     "[tddy-codex] CLI exited with code {} but non-empty parsed output; treating as success",
                     exit_code
@@ -327,7 +450,10 @@ impl CodexBackend {
                     log::warn!("[tddy-codex] stderr: {}", stderr_buf.trim());
                 }
                 // JSONL `error` / `turn.failed` carry the real reason; stderr is often tracing noise.
-                let detail = codex_jsonl_last_error_message(&raw_lines)
+                let detail = stream_result
+                    .stream_errors
+                    .last()
+                    .cloned()
                     .or_else(|| codex_stderr_brief_for_user(&stderr_buf))
                     .unwrap_or_default();
                 let mut msg = if detail.is_empty() {
@@ -349,10 +475,10 @@ impl CodexBackend {
             }
         }
 
-        let raw_stream = if raw_lines.is_empty() {
+        let raw_stream = if stream_result.raw_lines.is_empty() {
             None
         } else {
-            Some(raw_lines.join("\n"))
+            Some(stream_result.raw_lines.join("\n"))
         };
         let stderr_opt = if stderr_buf.is_empty() {
             None
@@ -368,9 +494,10 @@ impl CodexBackend {
         }
 
         Ok(InvokeResponse {
-            output: parsed.result_text,
+            output: stream_result.result_text,
             exit_code,
-            session_id: parsed.session_id,
+            // The adapter reports no thread as an empty id.
+            session_id: Some(stream_result.session_id).filter(|id| !id.is_empty()),
             questions: vec![],
             raw_stream,
             stderr: stderr_opt,
