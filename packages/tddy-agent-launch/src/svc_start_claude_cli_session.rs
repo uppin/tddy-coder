@@ -150,6 +150,7 @@ impl LaunchSessions {
             route_sources,
             &self.task_registry,
             progress,
+            self.coding_agents.as_deref(),
         )
         .await
     }

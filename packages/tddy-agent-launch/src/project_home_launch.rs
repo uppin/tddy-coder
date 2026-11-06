@@ -10,10 +10,13 @@ use tddy_daemon_kernel::daemon_hook_urls;
 use tddy_rpc::Status;
 use tddy_session_split::split_session::SplitAgentWiring;
 
+use tddy_coding_agent_specs::slots::McpServerCommand;
+
 use crate::claude_cli_spawn_steps::role_allowed_tools_args;
 use crate::launch_ports::LaunchSessions;
+use crate::spec_launch::{AgentToolset, McpRegistration};
 
-/// What a project-home (main) agent's launch is built from. See [`project_home_launch`].
+/// What a project-home (main) agent's launch is built from. See [`project_home_wiring`].
 pub(crate) struct ProjectHomeLaunch<'a> {
     pub(crate) config: &'a DaemonConfig,
     /// The data dir the daemon *resolved*: an embedded host's agent-tool socket path digests it.
@@ -28,14 +31,23 @@ pub(crate) struct ProjectHomeLaunch<'a> {
     pub(crate) tddy_tools_path: &'a Path,
 }
 
-/// The flags and environment a session's role adds to its agent's launch.
+/// The flags and environment a session's role adds to its agent's launch, as the hand-built launch
+/// passes them: the flags already rendered to argv.
 #[derive(Debug, Default)]
 pub(crate) struct RoleLaunch {
     pub(crate) extra_args: Vec<String>,
     pub(crate) env: Vec<(String, String)>,
 }
 
-impl RoleLaunch {
+/// What a session's role adds to its agent's launch, before either launch path renders it: a main's
+/// [`MainAgentFlags`] (none for any other role) and the environment its tools reach the daemon by.
+#[derive(Debug, Default)]
+pub(crate) struct RoleWiring {
+    pub(crate) main: Option<MainAgentFlags>,
+    pub(crate) env: Vec<(String, String)>,
+}
+
+impl RoleWiring {
     /// What a role adds to its agent's launch: a main's [`MainLaunchPlan`] carried out, or nothing.
     pub(crate) fn of(main: Option<MainLaunchPlan<'_>>) -> Result<Self, Status> {
         Ok(main
@@ -44,17 +56,133 @@ impl RoleLaunch {
             .unwrap_or_default())
     }
 
-    /// A resumed agent's extra flags and environment: `split`'s wiring (none for a session that is
-    /// not split), then this role's.
+    /// This role as the hand-built launch passes it (see [`MainAgentFlags::hand_built_args`]).
+    pub(crate) fn hand_built(self) -> Result<RoleLaunch, Status> {
+        Ok(RoleLaunch {
+            extra_args: hand_built_role_args(self.main.as_ref())?,
+            env: self.env,
+        })
+    }
+
+    /// A resumed agent's flags — `split`'s pre-rendered wiring (none for a session that is not
+    /// split) and this role's flags — and its environment: `split`'s, then this role's.
     pub(crate) fn after_split(
         self,
         split: Option<SplitAgentWiring>,
-    ) -> (Vec<String>, Vec<(String, String)>) {
-        let (mut args, mut env) = split.map(|w| (w.extra_args, w.env)).unwrap_or_default();
-        args.extend(self.extra_args);
+    ) -> (ResumedFlags, Vec<(String, String)>) {
+        let (split_args, mut env) = split.map(|w| (w.extra_args, w.env)).unwrap_or_default();
         env.extend(self.env);
-        (args, env)
+        (
+            ResumedFlags {
+                split_args,
+                main: self.main,
+            },
+            env,
+        )
     }
+}
+
+/// A resumed agent's flags: a split session's wiring, pre-rendered (split sessions are
+/// `#agent-tools 10/12`'s), then a main's, rendered by whichever launch runs.
+#[derive(Debug)]
+pub(crate) struct ResumedFlags {
+    split_args: Vec<String>,
+    main: Option<MainAgentFlags>,
+}
+
+impl ResumedFlags {
+    /// The hand-built launch's flags: the split wiring, then the main's argv.
+    pub(crate) fn hand_built_args(self) -> Result<Vec<String>, Status> {
+        Ok([self.split_args, hand_built_role_args(self.main.as_ref())?].concat())
+    }
+
+    /// The spec-driven launch's inputs: the split wiring and the main's pre-rendered prompt flag,
+    /// and the main's toolset for the slots.
+    pub(crate) fn spec_launch(self) -> (Vec<String>, AgentToolset) {
+        let (role_args, toolset) = spec_role_launch(self.main.as_ref());
+        ([self.split_args, role_args].concat(), toolset)
+    }
+}
+
+/// A main's flags as launch inputs: its pre-approved tool set, every native filesystem and shell
+/// tool withdrawn, `tddy-tools --mcp` as its only MCP server (registered in its session dir), and
+/// its role prompt. The hand-built launch renders them to argv; the spec-driven launch hands them to
+/// the agent's slots.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct MainAgentFlags {
+    prompt_file: PathBuf,
+    session_dir: PathBuf,
+    tddy_tools_path: PathBuf,
+}
+
+impl MainAgentFlags {
+    fn allowed_tools() -> Vec<String> {
+        tddy_tool_engine::read_only::project_home_allowed_tools()
+    }
+
+    fn denied_tools() -> Vec<String> {
+        tddy_session_split::split_session::NATIVE_FILESYSTEM_TOOLS
+            .iter()
+            .map(|tool| (*tool).to_string())
+            .collect()
+    }
+
+    fn prompt_args(&self) -> Vec<String> {
+        vec![
+            "--append-system-prompt-file".to_string(),
+            self.prompt_file.to_string_lossy().into_owned(),
+        ]
+    }
+
+    /// The hand-built launch's flags: allow, deny, the role prompt, then the MCP config (written
+    /// now) loaded strictly.
+    pub(crate) fn hand_built_args(&self) -> Result<Vec<String>, Status> {
+        let mut args = role_allowed_tools_args(Some(PROJECT_HOME_ROLE));
+        for tool in Self::denied_tools() {
+            args.push("--disallowedTools".to_string());
+            args.push(tool);
+        }
+        args.extend(self.prompt_args());
+        args.extend(tddy_session_split::agent_argv::tddy_tools_only_mcp_args(
+            &self.session_dir,
+            &self.tddy_tools_path,
+        )?);
+        Ok(args)
+    }
+
+    /// The spec-driven launch's inputs: the toolset its slots render, and the role prompt
+    /// pre-rendered — the `append_system_prompt` slot takes one file, and a managed recipe's prompt
+    /// can take it on the same launch.
+    pub(crate) fn spec_launch(&self) -> (Vec<String>, AgentToolset) {
+        let server = McpServerCommand {
+            name: "tddy-tools".to_string(),
+            command: self.tddy_tools_path.clone(),
+            args: vec!["--mcp".to_string()],
+            env: tddy_session_split::agent_argv::tddy_tools_mcp_env(&self.session_dir),
+        };
+        let toolset = AgentToolset {
+            mcp: Some(McpRegistration {
+                server,
+                dir: self.session_dir.clone(),
+            }),
+            allowed_tools: Self::allowed_tools(),
+            denied_tools: Self::denied_tools(),
+        };
+        (self.prompt_args(), toolset)
+    }
+}
+
+/// `main`'s flags as the hand-built launch passes them; nothing for a session that is not a main.
+pub(crate) fn hand_built_role_args(main: Option<&MainAgentFlags>) -> Result<Vec<String>, Status> {
+    Ok(main
+        .map(MainAgentFlags::hand_built_args)
+        .transpose()?
+        .unwrap_or_default())
+}
+
+/// `main`'s flags as the spec-driven launch takes them; nothing for a session that is not a main.
+pub(crate) fn spec_role_launch(main: Option<&MainAgentFlags>) -> (Vec<String>, AgentToolset) {
+    main.map(MainAgentFlags::spec_launch).unwrap_or_default()
 }
 
 /// A starting session's standing role: its name, recorded in the session's record before the agent
@@ -85,10 +213,10 @@ pub(crate) struct MainLaunchPlan<'a> {
 }
 
 impl MainLaunchPlan<'_> {
-    /// The main's launch ([`project_home_launch`]) under the toolchain's `tddy-tools`, its prompt
-    /// and MCP config written into its session dir.
-    fn launch(self) -> Result<RoleLaunch, Status> {
-        project_home_launch(ProjectHomeLaunch {
+    /// The main's wiring ([`project_home_wiring`]) under the toolchain's `tddy-tools`, its prompt
+    /// written into its session dir.
+    fn launch(self) -> Result<RoleWiring, Status> {
+        project_home_wiring(ProjectHomeLaunch {
             config: self.config,
             tddy_data_dir: self.tddy_data_dir,
             session_dir: &self.session_dir,
@@ -102,13 +230,14 @@ impl MainLaunchPlan<'_> {
     }
 }
 
-/// A main's launch: `tddy-tools --mcp` as its only MCP server, reaching this daemon as the main
+/// A main's wiring: `tddy-tools --mcp` as its only MCP server, reaching this daemon as the main
 /// (agent-tool socket on an embedded host, HTTP otherwise), every native filesystem and shell tool
-/// withdrawn, its tool set pre-approved, and the role prompt appended.
+/// withdrawn, its tool set pre-approved, and the role prompt appended ([`MainAgentFlags`]). The
+/// role prompt is written now.
 ///
 /// No `--permission-prompt-tool`: a main is an interactive terminal, so a call outside its
 /// pre-approved set prompts its operator there.
-pub(crate) fn project_home_launch(launch: ProjectHomeLaunch<'_>) -> Result<RoleLaunch, Status> {
+pub(crate) fn project_home_wiring(launch: ProjectHomeLaunch<'_>) -> Result<RoleWiring, Status> {
     let ProjectHomeLaunch {
         config,
         tddy_data_dir,
@@ -125,18 +254,6 @@ pub(crate) fn project_home_launch(launch: ProjectHomeLaunch<'_>) -> Result<RoleL
         ))
     })?;
 
-    let mut extra_args = role_allowed_tools_args(Some(PROJECT_HOME_ROLE));
-    for tool in tddy_session_split::split_session::NATIVE_FILESYSTEM_TOOLS {
-        extra_args.push("--disallowedTools".to_string());
-        extra_args.push((*tool).to_string());
-    }
-    extra_args.push("--append-system-prompt-file".to_string());
-    extra_args.push(prompt_file.to_string_lossy().into_owned());
-    extra_args.extend(tddy_session_split::agent_argv::tddy_tools_only_mcp_args(
-        session_dir,
-        tddy_tools_path,
-    )?);
-
     // The main's own id: its record holds the home worktree, so the daemon runs its tools there
     // under the project-home role guard. The socket is set only where something serves it.
     let env = tddy_session_split::split_session::colocated_jail_tool_env(
@@ -146,7 +263,14 @@ pub(crate) fn project_home_launch(launch: ProjectHomeLaunch<'_>) -> Result<RoleL
         tddy_daemon_kernel::embedded_host_agent_tool_socket(tddy_data_dir),
     )
     .env_pairs();
-    Ok(RoleLaunch { extra_args, env })
+    Ok(RoleWiring {
+        main: Some(MainAgentFlags {
+            prompt_file,
+            session_dir: session_dir.to_path_buf(),
+            tddy_tools_path: tddy_tools_path.to_path_buf(),
+        }),
+        env,
+    })
 }
 
 /// What a main is told it is, appended to its system prompt.
@@ -179,9 +303,9 @@ impl LaunchSessions {
         session_id: &str,
         session_dir: &Path,
         session_token: &str,
-    ) -> Result<RoleLaunch, Status> {
+    ) -> Result<RoleWiring, Status> {
         let role = meta.session_role.as_deref();
-        RoleLaunch::of(self.main_plan(
+        RoleWiring::of(self.main_plan(
             role,
             session_id,
             session_dir.to_path_buf(),
@@ -189,7 +313,7 @@ impl LaunchSessions {
         )?)
     }
 
-    /// For a main, the plan of its launch ([`project_home_launch`]) under a credential of its own,
+    /// For a main, the plan of its launch ([`project_home_wiring`]) under a credential of its own,
     /// minted now from the caller's `session_token` — the caller's lives minutes, the agent hours. A
     /// refusal fails the launch. Every other role has no plan and mints nothing.
     fn main_plan<'a>(
@@ -211,3 +335,6 @@ impl LaunchSessions {
         }))
     }
 }
+
+#[cfg(test)]
+mod project_home_launch_tests;

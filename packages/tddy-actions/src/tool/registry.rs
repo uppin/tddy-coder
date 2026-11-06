@@ -4,7 +4,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
 use super::resolve::resolve_tool;
-use super::{ResolvedTool, ToolDef, ToolError, ToolHost};
+use super::{ExtensionOwner, ResolvedTool, ToolDef, ToolError, ToolHost};
 
 /// The built-in tool files, embedded at build time: `(source path, YAML)`.
 pub const BUILTIN_TOOLS: &[(&str, &str)] = &[(
@@ -14,6 +14,18 @@ pub const BUILTIN_TOOLS: &[(&str, &str)] = &[(
 
 /// A tool definition and the file it was loaded from.
 type Entry = (ToolDef, PathBuf);
+
+/// Built-in tools that other tools depend on rather than a jail being granted directly:
+/// `tddy-tools`, the MCP relay and hook binary every coding agent lists in `deps`
+/// (`#agent-tools 2/12`).
+///
+/// Kept apart from [`BUILTIN_TOOLS`] so [`ToolRegistry::builtin`] keeps offering exactly the jail
+/// tools; a host that launches coding agents builds its registry from both lists (and the agent
+/// specs) with [`ToolRegistry::from_embedded`].
+pub const BUILTIN_SUPPORT_TOOLS: &[(&str, &str)] = &[(
+    "packages/tddy-actions/tools/tddy-tools.yaml",
+    include_str!("../../tools/tddy-tools.yaml"),
+)];
 
 /// Every tool this host knows, by id, with the file each came from.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -41,6 +53,34 @@ impl ToolRegistry {
         let mut tools = builtin.tools;
         tools.extend(read_overrides(overrides_dir)?);
         Self { tools }.validated()
+    }
+
+    /// A registry of exactly `sources` — embedded `(source path, YAML)` files, such as
+    /// [`BUILTIN_TOOLS`], [`BUILTIN_SUPPORT_TOOLS`] and an agent-spec crate's specs — validated as
+    /// [`Self::builtin`] validates its own: a duplicate id, an unknown dep and a dep cycle are
+    /// refused. Extensions are not checked here; [`Self::load_with_owners`] checks them.
+    pub fn from_embedded(sources: &[(&str, &str)]) -> Result<Self, ToolError> {
+        let mut tools = BTreeMap::new();
+        for &(source, yaml) in sources {
+            let file = PathBuf::from(source);
+            let def = ToolDef::parse(&file, yaml)?;
+            insert_unique(&mut tools, def, file)?;
+        }
+        Self { tools }.validated()
+    }
+
+    /// [`Self::load`], then every tool's `extensions:` checked against `owners`: a key no owner
+    /// [`ExtensionOwner::name`]s is [`ToolError::UnknownExtension`], a section its owner refuses is
+    /// [`ToolError::ExtensionRejected`] — both naming the file the tool came from (an override, or
+    /// the built-in's embedded path).
+    pub fn load_with_owners(
+        builtin: Self,
+        overrides_dir: &Path,
+        owners: &[&dyn ExtensionOwner],
+    ) -> Result<Self, ToolError> {
+        let registry = Self::load(builtin, overrides_dir)?;
+        registry.validate_extensions(owners)?;
+        Ok(registry)
     }
 
     pub fn get(&self, id: &str) -> Option<&ToolDef> {
@@ -96,6 +136,28 @@ impl ToolRegistry {
             });
         }
         closure.push(resolved);
+        Ok(())
+    }
+
+    fn validate_extensions(&self, owners: &[&dyn ExtensionOwner]) -> Result<(), ToolError> {
+        for (id, (def, file)) in &self.tools {
+            for (key, section) in &def.extensions {
+                let owner = owners
+                    .iter()
+                    .find(|owner| owner.name() == key)
+                    .ok_or_else(|| ToolError::UnknownExtension {
+                        file: file.clone(),
+                        owner: key.clone(),
+                    })?;
+                owner
+                    .validate(id, section)
+                    .map_err(|message| ToolError::ExtensionRejected {
+                        file: file.clone(),
+                        owner: key.clone(),
+                        message,
+                    })?;
+            }
+        }
         Ok(())
     }
 

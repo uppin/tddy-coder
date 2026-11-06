@@ -12156,10 +12156,14 @@ dependencies = [
  "chrono",
  "libc",
  "log",
+ "pretty_assertions",
  "prost 0.13.5",
  "serde_json",
+ "serde_yaml",
  "tddy-accounts",
+ "tddy-actions",
  "tddy-cli-sessions",
+ "tddy-coding-agent-specs",
  "tddy-core",
  "tddy-credentials",
  "tddy-daemon-extensions",
@@ -12520,6 +12524,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "tddy-coding-agent-specs"
+version = "0.1.0"
+dependencies = [
+ "pretty_assertions",
+ "serde",
+ "serde_json",
+ "serde_yaml",
+ "tddy-actions",
+ "tddy-agent-backend",
+ "tempfile",
+ "thiserror 1.0.69",
+]
+
+[[package]]
 name = "tddy-coding-subagent"
 version = "0.1.0"
 dependencies = [
@@ -12645,6 +12663,7 @@ dependencies = [
  "serial_test",
  "tddy-accounts",
  "tddy-actions",
+ "tddy-agent-launch",
  "tddy-bsp",
  "tddy-coder",
  "tddy-connectrpc",
@@ -13920,9 +13939,11 @@ dependencies = [
  "serde_yaml",
  "serial_test",
  "tddy-accounts",
+ "tddy-actions",
  "tddy-agent-launch",
  "tddy-cli-sessions",
  "tddy-coder",
+ "tddy-coding-agent-specs",
  "tddy-coding-subagent",
  "tddy-connectrpc",
  "tddy-core",

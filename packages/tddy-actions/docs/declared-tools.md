@@ -4,11 +4,14 @@ Product contract: [Sandbox builder § Declared tools](../../../docs/ft/coder/san
 
 | Module | Holds |
 |---|---|
-| `tool/def.rs` | `ToolDef { schema_version, id, summary, binary: ToolBinary { command, env }, deps, reads }` — serde, `deny_unknown_fields`; `ToolDef::parse(file, yaml)` checks `schema_version == 1` |
-| `tool/registry.rs` | `ToolRegistry` — `builtin()` (embedded `BUILTIN_TOOLS`), `load(builtin, overrides_dir)`, `get`, `origin`, `ids`, `resolve_closure(ids, host)` |
+| `tool/def.rs` | `ToolDef { schema_version, id, summary, binary: ToolBinary { command, env }, deps, reads, run: Option<RunSection>, extensions: BTreeMap<String, serde_yaml::Value> }` — serde, `deny_unknown_fields` (`run` and `extensions` default to empty); `ToolDef::parse(file, yaml)` checks `schema_version == 1` |
+| `tool/run.rs` | `RunSection { transport, argv: Vec<ArgvItem>, env }`, `Transport::{Pty, Stdio}`, `ArgvItem::{Lit, When { if_, then, else_ }, Splice { splice }}` (untagged) |
+| `tool/template.rs` | `TemplateParams` (`with`, `with_opt`, `with_flag`, `with_list`) and `render_argv(&RunSection, &ResolvedTool, &TemplateParams)` |
+| `tool/extensions.rs` | `ExtensionOwner` — `name()` and `validate(tool_id, section)` |
+| `tool/registry.rs` | `ToolRegistry` — `builtin()` (embedded `BUILTIN_TOOLS`), `from_embedded(sources)`, `load(builtin, overrides_dir)`, `load_with_owners(builtin, overrides_dir, owners)`, `get`, `origin`, `ids`, `resolve_closure(ids, host)`; `BUILTIN_SUPPORT_TOOLS` (`tddy-tools.yaml`) |
 | `tool/resolve.rs` | `ToolHost` (env, `PATH` dirs, executable check, canonicalize), `ProcessToolHost`, `ResolvedTool { id, command, binary, reads }` |
-| `tool/error.rs` | `ToolError` — `Parse`, `DuplicateId`, `UnknownDep`, `DepCycle`, `UnknownTool`, `Unresolvable`, `DuplicateCommand`, `Io` |
-| `tools/*.yaml` | built-in definitions (`rg.yaml`), embedded with `include_str!` |
+| `tool/error.rs` | `ToolError` — `Parse`, `DuplicateId`, `UnknownDep`, `DepCycle`, `UnknownTool`, `Unresolvable`, `DuplicateCommand`, `UnknownExtension`, `ExtensionRejected`, `UnboundPlaceholder`, `Io` |
+| `tools/*.yaml` | built-in definitions (`rg.yaml`, and the support tool `tddy-tools.yaml`), embedded with `include_str!` |
 
 ## Rules
 
@@ -21,8 +24,16 @@ Product contract: [Sandbox builder § Declared tools](../../../docs/ft/coder/san
   `DuplicateCommand`: both would claim one link in the jail's `bin/`.
 - **`ProcessToolHost`** drops relative and empty `PATH` entries (they name the daemon's working
   directory). An unset `PATH` is an empty search, reported as `PATH (empty)`, and refuses the tool.
+- **Render** emits one argv entry per literal, with `{name}` replaced and `{binary}` bound to the
+  resolved binary. A brace pair that does not enclose an identifier stays literal, and a substituted
+  value is never re-scanned. A `When` renders `then` when its parameter is bound to a non-empty
+  value and `else` otherwise, recursively. A `Splice` expands its list. An unbound name is
+  `UnboundPlaceholder`.
+- **Extensions** are checked by `load_with_owners` after the merge, so an override's section is what
+  is validated. An unclaimed key is `UnknownExtension` and a refused section is `ExtensionRejected`,
+  both naming the tool's file. `from_embedded` validates ids and deps only.
 - The crate has no sandbox dependency. Lowering a resolved set into grants is
   `tddy-sandbox-recipes::tool_grants`.
 
 Tests: `tests/tool_registry_acceptance.rs`, `tests/tool_resolve_unit.rs` (fixture `ToolHost` in
-`tests/support/`).
+`tests/support/`), `tool::template::tests` (the template grammar).

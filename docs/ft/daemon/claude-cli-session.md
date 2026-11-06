@@ -336,6 +336,72 @@ New `ClaudeCliSessionManager` in `tddy-daemon`:
 - **Resume**: opens a fresh PTY, re-exec's `claude --model <model>` in the existing worktree, updates the registry.
 - **Connect**: looks up existing `PtyHandle` — no re-exec if the process is alive.
 
+### Launch from the `claude` tool definition
+
+An unsandboxed `claude-cli` start and resume launch the agent from its **tool definition**,
+`claude.yaml`, through one spec-driven PTY launcher. Nothing in that launch path hard-codes Claude.
+The definition is embedded from `packages/tddy-coding-agent-specs/specs/claude.yaml`, and
+`<tddyhome>/tools/claude.yaml` replaces it **whole**:
+
+```yaml
+id: claude
+binary: { command: claude, env: TDDY_CLAUDE_BINARY }
+deps: [tddy-tools]                       # the MCP relay and hook binary, itself a built-in tool
+run:
+  transport: pty
+  argv:
+    - "{binary}"
+    - { if: model, then: ["--model", "{model}"] }
+    - { if: resume, then: ["--resume", "{session_id}"], else: ["--session-id", "{session_id}"] }
+    - if: dangerously_skip_permissions
+      then: ["--dangerously-skip-permissions"]
+      else: ["--permission-mode", "{permission_mode}"]
+    - { splice: slots }                   # the slot flags, before the prompt
+    - { if: prompt, then: ["{prompt}"] }
+  env: {}
+extensions:
+  coding_agent:
+    mcp: { kind: file, flag: --mcp-config, format: claude-mcp-json, strict_flag: --strict-mcp-config }
+    tool_allow: { flag: --allowedTools }
+    tool_deny: { flag: --disallowedTools }
+    permission_prompt: { flag: --permission-prompt-tool }
+    instructions: { files: [CLAUDE.md, AGENTS.md], append_system_prompt: { flag: --append-system-prompt-file } }
+    hooks: { adapter: claude-settings-local }
+    models: { default: opus, curated: [opus, sonnet, haiku, …] }
+    context_globs: [AGENTS.md, ".agents/**", CLAUDE.md, ".claude/**", .mcp.json]
+```
+
+- **Binary.** daemon.yaml `claude_cli.binary_path`, when it names a path, overrides the spec's
+  binary. Otherwise `TDDY_CLAUDE_BINARY` applies, then the host auto-resolution (`~/.local/bin`, then
+  `PATH` without wrapper shims), then the spec's `PATH` search. `tddy-tools` resolves through
+  `TDDY_TOOLS_BINARY`, then daemon.yaml `claude_cli.tddy_tools_path`, `CARGO_BIN_EXE_tddy-tools` or the
+  daemon's sibling, then `PATH`.
+- **Argv.** The template renders the session's model, id, permission mode (default `auto`), resume
+  flag and first prompt. A blank prompt is no prompt. The slot flags sit before the positional
+  prompt: `--mcp-config` is variadic, so the `strict_flag` that follows the config path keeps the
+  prompt from being swallowed.
+- **Slots.** The `coding_agent` extension declares the tddy integration points, and the launch fills
+  them:
+  - The hooks adapter writes `<worktree>/.claude/settings.local.json`, the six lifecycle hooks that
+    call `tddy-tools session-hook`.
+  - A session's appended system prompt goes through `--append-system-prompt-file`.
+  - A project-home main's pre-approved tools go through `--allowedTools`. Its withdrawn native
+    filesystem and shell tools go through `--disallowedTools`.
+  - The main's `tddy-tools --mcp` server is registered as `<session dir>/claude-mcp-config.json` and
+    loaded with `--mcp-config … --strict-mcp-config`.
+- **Not slotted.** A main's role prompt and a split session's wiring arrive as rendered flags after
+  the slot flags. The slot takes one prompt file, and a managed recipe's prompt can hold it.
+- **Refusals.** The launcher refuses a spec whose `run.transport` is not `pty`, naming the spec. A
+  tool file under `<tddyhome>/tools` that does not load fails daemon start, naming the file. That
+  covers an unknown field, an unknown slot kind, and an `extensions:` key no owner claims.
+- **Hooks are written at the spawn.** A hooks file that cannot be written fails the start.
+- **Resume** renders `--resume <id>` from the same template. It does not rewrite the hooks file or
+  replay the first prompt, and it runs with the default permission mode.
+
+A host without coding agents keeps the hand-built argv. Only the session-lifecycle suites build such
+a host; the daemon always installs coding agents. The sandboxed `claude-cli` path does not use this
+launcher.
+
 ### Worktree naming
 
 Branch: `claude-cli/<first-8-chars-of-session-uuid>`

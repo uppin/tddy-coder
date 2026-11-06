@@ -1,6 +1,9 @@
 use crate::claude_cli_tmux::ClaudeCliTmuxLaunch;
 use crate::hooks_and_urls;
 use crate::managed_launch;
+use crate::project_home_launch::{spec_role_launch, RoleLaunch, RoleWiring};
+use crate::spec_launch::{launch_claude_cli, ClaudeCliLaunch, HostCodingAgents};
+use tddy_cli_sessions::cli_session_manager::pty_handle::PtyHandle;
 use tddy_cli_sessions::cli_session_manager::CliSessionManager;
 use tddy_session_split::service_util;
 
@@ -145,44 +148,75 @@ pub(super) fn spawned_claude_cli_branch(
     Ok(spawned_branch)
 }
 
+/// The lifecycle hooks a claude-cli start wires its agent to: the relay that reports them, where it
+/// reports, and the per-session token the daemon checks.
+pub(super) struct ClaudeCliHooks {
+    pub(super) tddy_tools_path: String,
+    daemon_url: String,
+    daemon_socket: Option<String>,
+    pub(super) hook_token: String,
+    answer_wait_secs: u64,
+}
+
+impl ClaudeCliHooks {
+    /// The hooks' command parameters for `session_id`, run by `os_user`.
+    pub(super) fn params<'a>(
+        &'a self,
+        session_id: &'a str,
+        os_user: &'a str,
+    ) -> tddy_core::HookCommandParams<'a> {
+        tddy_core::HookCommandParams {
+            tddy_tools_path: &self.tddy_tools_path,
+            daemon_url: &self.daemon_url,
+            session_id,
+            os_user,
+            hook_token: &self.hook_token,
+            daemon_socket: self.daemon_socket.as_deref(),
+            answer_wait_secs: self.answer_wait_secs,
+        }
+    }
+}
+
+/// A claude-cli start's hooks, with a fresh per-session token.
+///
 /// `tddy_data_dir` is the data dir the daemon *resolved* — `TDDY_DATA_DIR` included, which a
 /// configuration file need not agree with (`./desktop-dev` sets it absolute beside a relative
 /// `tmp/.tddy`) — because an embedded daemon's agent-tool socket path is digested from it.
-pub(super) fn install_claude_cli_hooks(
-    config: &DaemonConfig,
-    tddy_data_dir: &Path,
-    os_user: &str,
-    session_id: &str,
-    worktree_path: &Path,
-) -> (String, String) {
+pub(super) fn claude_cli_hooks(config: &DaemonConfig, tddy_data_dir: &Path) -> ClaudeCliHooks {
     let tddy_tools_path = tddy_daemon_sandbox::sandbox_session::resolve_tddy_tools_path(
         config
             .claude_cli
             .as_ref()
             .and_then(|c| c.tddy_tools_path.as_deref()),
     );
+    ClaudeCliHooks {
+        tddy_tools_path,
+        daemon_url: daemon_hook_urls::claude_hook_daemon_url(config),
+        // An embedded daemon serves no HTTP RPC; its hooks report over this socket.
+        daemon_socket: tddy_daemon_kernel::embedded_host_agent_tool_socket(tddy_data_dir),
+        hook_token: Uuid::new_v4().to_string(),
+        answer_wait_secs: config.claude_cli_answer_wait_secs(),
+    }
+}
 
-    let daemon_url = daemon_hook_urls::claude_hook_daemon_url(config);
-    // An embedded daemon serves no HTTP RPC; its hooks report over this socket.
-    let daemon_socket = tddy_daemon_kernel::embedded_host_agent_tool_socket(tddy_data_dir);
-
-    // Generate a per-session hook token and write .claude/settings.local.json into the
-    // worktree. Claude Code reads this file on startup and wires the six lifecycle hooks.
-    // Write failure is warn-and-continue so it never blocks the session from starting.
-    let hook_token = Uuid::new_v4().to_string();
+/// A claude-cli start's hooks ([`claude_cli_hooks`]), their `.claude/settings.local.json` written
+/// into the worktree — the hand-built launch's writer; a spec-driven launch renders the file through
+/// the `claude` spec's `hooks` slot instead. Claude Code reads this file on startup and wires the
+/// six lifecycle hooks. Write failure is warn-and-continue so it never blocks the session from
+/// starting.
+pub(super) fn install_claude_cli_hooks(
+    config: &DaemonConfig,
+    tddy_data_dir: &Path,
+    os_user: &str,
+    session_id: &str,
+    worktree_path: &Path,
+) -> ClaudeCliHooks {
+    let hooks = claude_cli_hooks(config, tddy_data_dir);
     tddy_session_split::service_util::write_claude_hooks_settings(
         worktree_path,
-        &tddy_core::HookCommandParams {
-            tddy_tools_path: &tddy_tools_path,
-            daemon_url: &daemon_url,
-            session_id,
-            os_user,
-            hook_token: &hook_token,
-            daemon_socket: daemon_socket.as_deref(),
-            answer_wait_secs: config.claude_cli_answer_wait_secs(),
-        },
+        &hooks.params(session_id, os_user),
     );
-    (tddy_tools_path, hook_token)
+    hooks
 }
 
 /// The notify wiring a claude-cli start and resume apply — see [`crate::notify_env`].
@@ -332,6 +366,12 @@ pub(super) struct ClaudeCliProcess<'a> {
     pub(super) managed: Option<tddy_cli_sessions::session_toolcall::ManagedWorkflow>,
     pub(super) append_system_prompt_file: Option<PathBuf>,
     pub(super) env_extra: Vec<(String, String)>,
+    /// The coding agents declared as tools, when the host has them: the process is then launched
+    /// from the `claude` spec instead of the hand-built argv. `config` names daemon.yaml's
+    /// `claude_cli.binary_path`.
+    pub(super) coding_agents: Option<(&'a HostCodingAgents, &'a DaemonConfig)>,
+    /// The session's hooks: a spec-driven launch writes their settings through the `hooks` slot.
+    pub(super) hooks: &'a ClaudeCliHooks,
     /// A main's launch, carried out only now that nothing before the spawn can refuse the start.
     pub(super) main: Option<crate::project_home_launch::MainLaunchPlan<'a>>,
     /// Run `claude` inside a tmux session instead of as the PTY child ([`crate::claude_cli_tmux`]).
@@ -349,52 +389,30 @@ pub(super) struct SpawnedClaudeCli {
 }
 
 pub(super) async fn spawn_claude_cli_process(
-    launch: ClaudeCliProcess<'_>,
+    mut launch: ClaudeCliProcess<'_>,
 ) -> Result<SpawnedClaudeCli, Status> {
-    let ClaudeCliProcess {
-        os_user,
-        session_id,
-        dangerously_skip_permissions,
-        manager,
-        session_id_owned,
-        model_owned,
-        binary_owned,
-        worktree_clone,
-        initial_prompt_opt,
-        permission_mode_opt,
-        managed,
-        append_system_prompt_file,
-        env_extra,
-        main,
-        run_in_tmux,
-        session_dir,
-    } = launch;
-    let role_launch = crate::project_home_launch::RoleLaunch::of(main)?;
-    let launch = ClaudeCliTmuxLaunch {
-        os_user,
-        session_id: &session_id_owned,
-        worktree_path: worktree_clone,
-        model: &model_owned,
-        binary: &binary_owned,
-        initial_prompt: initial_prompt_opt.as_deref(),
-        permission_mode: permission_mode_opt.as_deref(),
-        dangerously_skip_permissions,
-        resume: false,
-        append_system_prompt_file: append_system_prompt_file.as_deref(),
-        extra_args: role_launch.extra_args,
-        env: env_extra.into_iter().chain(role_launch.env).collect(),
-        session_dir,
-    };
-    let spawned = if run_in_tmux {
-        let launched = crate::claude_cli_tmux::start_claude_in_tmux(&manager, launch).await?;
-        SpawnedClaudeCli {
-            pid: launched.pane_pid,
-            tmux_session: Some(launched.tmux_session),
+    let managed = launch.managed.take();
+    let manager = Arc::clone(&launch.manager);
+    let session_id = launch.session_id;
+    let role = RoleWiring::of(launch.main.take())?;
+    let spawned = match launch.coding_agents {
+        // TODO(agent-tools-cascade): a tmux-run start (`run_in_tmux`, #tmux-agent) still builds the
+        // hand-built argv in `claude_cli_tmux::start_claude_in_tmux` (and installs its hooks by
+        // hand); confirm the spec-rendered argv (`spec_launch::launch_claude_cli`) should be the one
+        // started in the agent's tmux pane.
+        Some((agents, config)) if !launch.run_in_tmux => {
+            let handle = launch
+                .spawn_from_spec(agents, config, role)
+                .await
+                .map_err(|e| Status::internal(format!("failed to spawn claude-cli: {}", e)))?;
+            SpawnedClaudeCli {
+                pid: handle.pid,
+                tmux_session: None,
+            }
         }
-    } else {
-        SpawnedClaudeCli {
-            pid: start_claude_in_pty(&manager, launch).await?,
-            tmux_session: None,
+        _ => {
+            let role_launch = role.hand_built()?;
+            launch.spawn_hand_built(role_launch).await?
         }
     };
     if let Some(mw) = managed {
@@ -427,6 +445,73 @@ async fn start_claude_in_pty(
         .await
         .map_err(|e| Status::internal(format!("failed to spawn claude-cli: {}", e)))?;
     Ok(handle.pid)
+}
+
+impl ClaudeCliProcess<'_> {
+    /// Launched from the `claude` spec: the main's tool flags and the hooks file go through the
+    /// spec's slots.
+    async fn spawn_from_spec(
+        self,
+        agents: &HostCodingAgents,
+        config: &DaemonConfig,
+        role: RoleWiring,
+    ) -> anyhow::Result<Arc<PtyHandle>> {
+        let (extra_args, toolset) = spec_role_launch(role.main.as_ref());
+        launch_claude_cli(ClaudeCliLaunch {
+            agents,
+            config,
+            manager: &self.manager,
+            session_id: &self.session_id_owned,
+            worktree: &self.worktree_clone,
+            model: &self.model_owned,
+            resume: false,
+            initial_prompt: self.initial_prompt_opt.as_deref(),
+            permission_mode: self.permission_mode_opt.as_deref(),
+            dangerously_skip_permissions: self.dangerously_skip_permissions,
+            append_system_prompt_file: self.append_system_prompt_file.as_deref(),
+            toolset,
+            hooks: Some(self.hooks.params(self.session_id, self.os_user)),
+            extra_args,
+            env: self.env_extra.into_iter().chain(role.env).collect(),
+            os_user: Some(self.os_user),
+        })
+        .await
+        .map_err(anyhow::Error::from)
+    }
+
+    /// The hand-built argv, for a host without coding agents or a tmux-run start; the hooks file
+    /// is already written. A tmux-run agent runs in its own tmux session, the rest as the PTY child.
+    async fn spawn_hand_built(self, role_launch: RoleLaunch) -> Result<SpawnedClaudeCli, Status> {
+        let env = self.env_extra.into_iter().chain(role_launch.env).collect();
+        let launch = ClaudeCliTmuxLaunch {
+            os_user: self.os_user,
+            session_id: &self.session_id_owned,
+            worktree_path: self.worktree_clone,
+            model: &self.model_owned,
+            binary: &self.binary_owned,
+            initial_prompt: self.initial_prompt_opt.as_deref(),
+            permission_mode: self.permission_mode_opt.as_deref(),
+            dangerously_skip_permissions: self.dangerously_skip_permissions,
+            resume: false,
+            append_system_prompt_file: self.append_system_prompt_file.as_deref(),
+            extra_args: role_launch.extra_args,
+            env,
+            session_dir: self.session_dir,
+        };
+        if self.run_in_tmux {
+            let launched =
+                crate::claude_cli_tmux::start_claude_in_tmux(&self.manager, launch).await?;
+            Ok(SpawnedClaudeCli {
+                pid: launched.pane_pid,
+                tmux_session: Some(launched.tmux_session),
+            })
+        } else {
+            Ok(SpawnedClaudeCli {
+                pid: start_claude_in_pty(&self.manager, launch).await?,
+                tmux_session: None,
+            })
+        }
+    }
 }
 
 pub(super) fn claude_cli_livekit_room(

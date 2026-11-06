@@ -131,6 +131,10 @@ tddy-livekit-testkit = { path = "../tddy-livekit-testkit" }
 livekit = "0.7"
 serial_test = "3"
 pretty_assertions = { workspace = true }
+# `claude_cli_from_spec_acceptance.rs` loads the agent registry and resolves it against a fixture
+# `ToolHost`, as the daemon runtime does against its own process (`#agent-tools 2/12`).
+tddy-actions = { path = "../tddy-actions" }
+tddy-coding-agent-specs = { path = "../tddy-coding-agent-specs" }
 reqwest = { version = "0.12", default-features = false, features = ["blocking", "json"] }
 scopeguard = "1"
 
