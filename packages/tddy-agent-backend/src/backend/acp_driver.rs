@@ -47,6 +47,9 @@ pub struct McpServerSpec {
     pub command: PathBuf,
     pub args: Vec<String>,
     pub env: Vec<(String, String)>,
+    /// The directory an inline registration starts the server in, where its session pointer lives
+    /// (`#agent-tools 21/28`); the agent's own working directory when `None`.
+    pub cwd: Option<PathBuf>,
 }
 
 /// What [`AcpDriver::open_session`] opens.

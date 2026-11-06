@@ -131,10 +131,10 @@ pub fn resolve_session(
             cause: UnreadablePointerCause::Invalid(e.reason),
         }
     })?;
-    // TODO(session-pointer): implement — a pointer whose `owner` is on this host is refused when that
-    // process is gone (`OwnerGone`) or the socket path it names is missing (`SocketMissing`); an
-    // owner on another host is not checked here.
     if let Some((path, pointer)) = pointer {
+        if let Some(cause) = unusable_on_this_host(&pointer) {
+            return Err(SessionNotFound::UnreadablePointer { path, cause });
+        }
         return Ok(ResolvedSession {
             socket: pointer.socket,
             repo_dir: Some(pointer.repo_dir),
@@ -159,6 +159,30 @@ pub fn resolve_session(
             cwd: cwd.to_path_buf(),
         }),
     }
+}
+
+/// Why `pointer` cannot be used from this host, when its owner runs here: the owner is gone, or
+/// the socket it names does not exist. An owner on another host (an ssh target) is not checked —
+/// its pid and its socket path are that host's — and neither is a pointer without an owner.
+fn unusable_on_this_host(
+    pointer: &tddy_core::session_pointer::SessionPointer,
+) -> Option<UnreadablePointerCause> {
+    let owner = pointer
+        .owner
+        .as_ref()
+        .filter(|owner| owner.is_on_this_host())?;
+    if !owner.is_running() {
+        return Some(UnreadablePointerCause::OwnerGone {
+            owner: owner.clone(),
+        });
+    }
+    pointer
+        .socket
+        .as_ref()
+        .filter(|socket| !socket.exists())
+        .map(|socket| UnreadablePointerCause::SocketMissing {
+            socket: socket.clone(),
+        })
 }
 
 /// The variable naming the session socket: the third source, for the daemon's own callers and tests.

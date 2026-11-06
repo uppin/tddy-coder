@@ -24,8 +24,9 @@ use tddy_cli_sessions::cli_session_manager::ExitHook;
 use tddy_core::session_pointer::{SessionPointer, SessionPointerOwner, SESSION_POINTER_FILE};
 use tddy_rpc::Status;
 
-use crate::slot_file_over_ssh::{write_over_ssh, SLOT_FILE_OVER_SSH_DEADLINE};
+use crate::slot_file_over_ssh::{run_over_ssh, SLOT_FILE_OVER_SSH_DEADLINE};
 use crate::spec_launch::SpecLaunchError;
+use tddy_core::ssh_exec::shell_single_quote;
 
 /// The pointer holds the agent's hook token: owner-only, as a headless turn writes it.
 const OWNER_ONLY_FILE: u32 = 0o600;
@@ -58,8 +59,9 @@ pub(crate) fn session_pointer_of(
             .cloned()
             .collect(),
         notify: notify.into_iter().collect(),
-        // TODO(session-pointer): implement — the daemon that launched the agent owns the pointer.
-        owner: None,
+        // The daemon that launched the agent owns the pointer; on an ssh target the agent's own
+        // pid replaces it once the agent has started ([`record_remote_owner`]).
+        owner: Some(SessionPointerOwner::this_process()),
     })
 }
 
@@ -118,20 +120,22 @@ pub(crate) fn place_session_pointer(
     let contents = serde_json::to_vec_pretty(pointer)
         .map_err(|e| Status::internal(format!("the session pointer cannot be encoded: {e}")))?;
     if let PointerHost::Ssh { ssh, alias: host } = host {
-        // TODO(session-pointer): implement — one bounded ssh command that adds the pointer to the
-        // target's `info/exclude` and writes it `umask 077`; returned for removal on exit
-        // (docs/dev/todo/2026-11-06-ssh-session-pointer-exclude-and-removal.md).
-        write_over_ssh(ssh, host, &path, &contents, SLOT_FILE_OVER_SSH_DEADLINE).map_err(
-            |error| match error {
-                SpecLaunchError::SlotFileOverSshTimedOut { .. } => {
-                    Status::deadline_exceeded(error.to_string())
-                }
-                other => Status::internal(format!(
-                    "failed to write the session pointer on {host}: {other}"
-                )),
+        run_over_ssh(
+            ssh,
+            host,
+            &path,
+            &place_command(worktree, &path),
+            &contents,
+            SLOT_FILE_OVER_SSH_DEADLINE,
+        )
+        .map_err(|error| ssh_status(&error, host, "write the session pointer"))?;
+        return Ok(Some(PlacedSessionPointer {
+            path,
+            host: PointerHost::Ssh {
+                ssh: ssh.clone(),
+                alias: host.clone(),
             },
-        )?;
-        return Ok(None);
+        }));
     }
     if inside_a_git_checkout(worktree)? {
         tddy_core::turn_files::exclude_from_git(worktree, &format!("/{SESSION_POINTER_FILE}"))
@@ -155,9 +159,39 @@ pub(crate) fn place_session_pointer(
     }))
 }
 
+/// The shell command that places the pointer file `path`, whose content is its stdin, on an ssh
+/// target: the pointer is added to the checkout's `info/exclude` unless it is there, and written
+/// `umask 077`. A `worktree` that is no checkout has nothing to exclude it from.
+fn place_command(worktree: &Path, path: &Path) -> String {
+    let pattern = format!("/{SESSION_POINTER_FILE}");
+    let dir = path.parent().unwrap_or(worktree);
+    format!(
+        "set -e; umask 077; \
+         if exclude=$(git -C {worktree} rev-parse --path-format=absolute --git-path info/exclude 2>/dev/null); then \
+         mkdir -p \"$(dirname \"$exclude\")\"; \
+         grep -qxF {pattern} \"$exclude\" 2>/dev/null || echo {pattern} >> \"$exclude\"; fi; \
+         mkdir -p {dir} && cat > {file}",
+        worktree = shell_single_quote(&worktree.to_string_lossy()),
+        pattern = shell_single_quote(&pattern),
+        dir = shell_single_quote(&dir.to_string_lossy()),
+        file = shell_single_quote(&path.to_string_lossy()),
+    )
+}
+
+/// The status a failed bounded ssh command on `host` is reported as.
+fn ssh_status(error: &SpecLaunchError, host: &str, doing: &str) -> Status {
+    match error {
+        SpecLaunchError::SlotFileOverSshTimedOut { .. } => {
+            Status::deadline_exceeded(error.to_string())
+        }
+        other => Status::internal(format!("failed to {doing} on {host}: {other}")),
+    }
+}
+
 /// Where an ssh launch's agent records its pid on the target, relative to its worktree, for
-/// [`record_remote_owner`] to read (and remove).
-// TODO(session-pointer): written by the ssh launch, read by `record_remote_owner`; drop the allow.
+/// [`record_remote_owner`] to read (and remove). The launch writes it as `$$` before it `exec`s the
+/// agent, so it is the agent's own pid.
+// `record_remote_owner` has no caller until an ssh agent launch exists.
 #[allow(dead_code)]
 pub(crate) const REMOTE_AGENT_PID_FILE: &str = ".tddy/agent.pid";
 
@@ -165,17 +199,62 @@ pub(crate) const REMOTE_AGENT_PID_FILE: &str = ".tddy/agent.pid";
 /// target's own name for itself (`hostname`) and the agent's pid ([`REMOTE_AGENT_PID_FILE`], which
 /// it removes), and rewrites the placed `pointer` owner-only with that owner, which it returns. A
 /// pointer on this host is refused: the daemon that placed it is its owner.
-// TODO(session-pointer): called by the ssh launch once its agent has started; drop the allow.
+// No caller until an ssh agent launch exists: today an ssh session's agent is not started on the
+// target, so there is no pid file to read.
 #[allow(dead_code)]
 pub(crate) fn record_remote_owner(
     placed: &PlacedSessionPointer,
     pointer: &SessionPointer,
 ) -> Result<SessionPointerOwner, Status> {
-    // TODO(session-pointer): implement
-    let _ = (placed, pointer);
-    Err(Status::unimplemented(
-        "the remote agent's owner is not recorded yet",
-    ))
+    let PointerHost::Ssh { ssh, alias } = &placed.host else {
+        return Err(Status::failed_precondition(format!(
+            "the session pointer {} is on this host: the daemon that placed it owns it",
+            placed.path.display()
+        )));
+    };
+    // The pointer, without an owner, as compact JSON: the target appends the owner it read.
+    let mut unowned = pointer.clone();
+    unowned.owner = None;
+    let body = serde_json::to_vec(&unowned)
+        .map_err(|e| Status::internal(format!("the session pointer cannot be encoded: {e}")))?;
+    let worktree = placed
+        .path
+        .parent()
+        .and_then(Path::parent)
+        .unwrap_or(&placed.path);
+    let pid_file = worktree.join(REMOTE_AGENT_PID_FILE);
+    let remote = format!(
+        "set -e; umask 077; \
+         pid=$(cat {pid_file}); rm -f {pid_file}; host=$(hostname); \
+         case \"$pid\" in ''|*[!0-9]*) echo \"the agent's pid file holds '$pid'\" >&2; exit 1;; esac; \
+         case \"$host\" in ''|*[!A-Za-z0-9._-]*) echo \"the host name '$host' is not a plain name\" >&2; exit 1;; esac; \
+         body=$(cat); \
+         printf '%s,\"owner\":{{\"pid\":%s,\"host\":\"%s\"}}}}' \"${{body%?}}\" \"$pid\" \"$host\" > {file}.owned; \
+         mv {file}.owned {file}; \
+         echo \"$pid $host\"",
+        pid_file = shell_single_quote(&pid_file.to_string_lossy()),
+        file = shell_single_quote(&placed.path.to_string_lossy()),
+    );
+    let printed = run_over_ssh(
+        ssh,
+        alias,
+        &placed.path,
+        &remote,
+        &body,
+        SLOT_FILE_OVER_SSH_DEADLINE,
+    )
+    .map_err(|error| ssh_status(&error, alias, "record the agent's owner"))?;
+    let unexpected = || {
+        Status::internal(format!(
+            "the target {alias} answered '{}' to the agent owner lookup",
+            printed.trim()
+        ))
+    };
+    let (pid, host) = printed.trim().split_once(' ').ok_or_else(unexpected)?;
+    Ok(SessionPointerOwner {
+        pid: pid.parse().map_err(|_| unexpected())?,
+        host: host.to_string(),
+    })
 }
 
 /// Whether `worktree` lies in a git checkout — one of its own, or one of a directory above it. Only
@@ -210,8 +289,24 @@ pub(crate) fn remove_session_pointer(worktree: &Path, host: &PointerHost) {
 fn remove_placed_pointer(placed: &PlacedSessionPointer) {
     match &placed.host {
         PointerHost::Local => remove_pointer_file(&placed.path),
-        PointerHost::Ssh { .. } => {
-            // TODO(session-pointer): implement — a bounded ssh `rm -f` of the pointer on the target.
+        PointerHost::Ssh { ssh, alias } => {
+            let removed = run_over_ssh(
+                ssh,
+                alias,
+                &placed.path,
+                &format!(
+                    "rm -f {}",
+                    shell_single_quote(&placed.path.to_string_lossy())
+                ),
+                &[],
+                SLOT_FILE_OVER_SSH_DEADLINE,
+            );
+            if let Err(e) = removed {
+                log::warn!(
+                    "could not remove the session pointer {} on {alias}: {e}",
+                    placed.path.display()
+                );
+            }
         }
     }
 }
@@ -244,7 +339,12 @@ pub(crate) fn removing_session_pointer_on_exit(
     }
     Some(Box::new(move |capture| {
         Box::pin(async move {
-            remove_placed_pointer(&pointer);
+            // An ssh target's removal waits on a bounded ssh: not on this runtime's thread.
+            if let Err(e) =
+                tokio::task::spawn_blocking(move || remove_placed_pointer(&pointer)).await
+            {
+                log::warn!("the session pointer's removal did not finish: {e}");
+            }
             if let Some(on_exit) = on_exit {
                 on_exit(capture).await;
             }

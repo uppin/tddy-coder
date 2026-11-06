@@ -50,10 +50,6 @@ pub(crate) fn write_over_ssh(
     bytes: &[u8],
     deadline: Duration,
 ) -> Result<(), SpecLaunchError> {
-    let failed = |message: String| SpecLaunchError::SlotFile {
-        path: path.to_path_buf(),
-        message: format!("over ssh to {alias}: {message}"),
-    };
     let dir = path
         .parent()
         .map(|p| p.to_string_lossy())
@@ -63,25 +59,52 @@ pub(crate) fn write_over_ssh(
         shell_single_quote(&dir),
         shell_single_quote(&path.to_string_lossy())
     );
+    run_over_ssh(ssh, alias, path, &remote, bytes, deadline).map(|_| ())
+}
+
+/// Runs the shell command `remote` on the ssh target `alias` through the ssh client `ssh`, with
+/// `stdin` on its standard input, and returns what it printed. `path` is the file the command is
+/// about, named by the errors. The ssh is bounded as every slot file write is: killed at `deadline`.
+pub(crate) fn run_over_ssh(
+    ssh: &Path,
+    alias: &str,
+    path: &Path,
+    remote: &str,
+    stdin: &[u8],
+    deadline: Duration,
+) -> Result<String, SpecLaunchError> {
+    let failed = |message: String| SpecLaunchError::SlotFile {
+        path: path.to_path_buf(),
+        message: format!("over ssh to {alias}: {message}"),
+    };
     let mut child = Command::new(ssh)
         .args(ssh_options())
         .arg("--")
         .arg(alias)
-        .arg(&remote)
+        .arg(remote)
         .stdin(Stdio::piped())
-        .stdout(Stdio::null())
+        .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()
         .map_err(|e| failed(e.to_string()))?;
 
-    // Both pipes are served off this thread, so a target that reads nothing or writes a lot cannot
+    // Every pipe is served off this thread, so a target that reads nothing or writes a lot cannot
     // hold the deadline loop below.
-    let mut stdin = child
+    let mut stdin_pipe = child
         .stdin
         .take()
         .ok_or_else(|| failed("no stdin".to_string()))?;
-    let payload = bytes.to_vec();
-    let writer = std::thread::spawn(move || stdin.write_all(&payload));
+    let payload = stdin.to_vec();
+    let writer = std::thread::spawn(move || stdin_pipe.write_all(&payload));
+    let mut stdout_pipe = child
+        .stdout
+        .take()
+        .ok_or_else(|| failed("no stdout".to_string()))?;
+    let printed = std::thread::spawn(move || {
+        let mut text = String::new();
+        let _ = stdout_pipe.read_to_string(&mut text);
+        text
+    });
     let mut stderr = child
         .stderr
         .take()
@@ -111,11 +134,13 @@ pub(crate) fn write_over_ssh(
     let written = writer
         .join()
         .unwrap_or_else(|_| Err(std::io::Error::other("the stdin writer panicked")));
+    let stdout = printed.join().unwrap_or_default();
     let stderr = reader.join().unwrap_or_default();
     if !status.success() {
         return Err(failed(stderr.trim().to_string()));
     }
-    written.map_err(|e| failed(e.to_string()))
+    written.map_err(|e| failed(e.to_string()))?;
+    Ok(stdout)
 }
 
 /// The ssh options every slot file write runs with: no prompt, and a connection that cannot hang.

@@ -84,6 +84,7 @@ fn the_conversations_tool_server() -> HeadlessMcpServer {
             ("TDDY_CONVERSATION_ID".to_string(), "conv-1".to_string()),
             ("TDDY_REMOTE_SESSION_TOKEN".to_string(), TOKEN.to_string()),
         ]),
+        cwd: None,
     }
 }
 
@@ -417,6 +418,7 @@ fn codexs_mcp_slot_renders_its_server_inline_and_writes_no_file() {
         command: PathBuf::from(TDDY_TOOLS),
         args: strings(&["--mcp"]),
         env: BTreeMap::from([("TDDY_REMOTE_SESSION_TOKEN".to_string(), TOKEN.to_string())]),
+        cwd: None,
     };
 
     // When

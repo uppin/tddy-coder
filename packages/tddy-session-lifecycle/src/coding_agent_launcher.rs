@@ -301,20 +301,20 @@ impl DaemonCodingAgentLauncher {
             .map_err(|reason| Self::refuse(launch, &reason.to_string()))?;
         let program = agent.tool.binary.clone();
         self.refuse_unless_daemon_user(launch, &program.to_string_lossy())?;
-        let mut env = self.headless_provider_env(launch)?;
-        let server = self.tool_server_spec(launch)?;
+        let env = self.headless_provider_env(launch)?;
+        let mut server = self.tool_server_spec(launch)?;
         let files = self.claim_conversation_files(launch, wiring, conversation)?;
         let scratch_dir = files.dir.clone();
         self.record_written_files(launch, &agent.spec, &scratch_dir)?;
         // What the spec declares, not which agent it is: an agent that routes its permission prompts
         // to the tool server says so (`headless.approval_tool`), and one whose MCP slot is inline
-        // forwards the server's variables from its own environment, by name, so no credential is
-        // put on the argv.
+        // registers the server on its argv, where a credential must not be: the server's variables
+        // go into the conversation's session pointer instead, which the server finds from its cwd.
         let routes_approvals = agent
             .spec
             .headless()
             .is_some_and(|headless| headless.approval_tool);
-        let forwards_server_env = matches!(
+        let registers_inline = matches!(
             agent
                 .spec
                 .headless()
@@ -332,8 +332,9 @@ impl DaemonCodingAgentLauncher {
         if routes_approvals {
             self.bind_approvals(launch, conversation, &server)?;
         }
-        if forwards_server_env {
-            env.extend(server.env.iter().cloned());
+        if registers_inline {
+            self.write_conversation_pointer(launch, &scratch_dir, std::mem::take(&mut server.env))?;
+            server.cwd = Some(scratch_dir.clone());
         }
         files.keep();
         Ok(HeadlessCommand {
@@ -348,6 +349,55 @@ impl DaemonCodingAgentLauncher {
             scratch_dir: Some(scratch_dir),
             // The driver's own deadline: no conversation turn waits unbounded.
             turn_deadline: None,
+        })
+    }
+
+    /// Writes the conversation's session pointer, `<scratch_dir>/.tddy/session.json` (owner-only),
+    /// carrying `server_env` — the conversation id and the minted credential — in its `remote`
+    /// map. It lives with the conversation directory, and is removed with it when the conversation
+    /// closes. The pointer's owner is this daemon.
+    fn write_conversation_pointer(
+        &self,
+        launch: &CodingAgentLaunch,
+        scratch_dir: &Path,
+        server_env: Vec<(String, String)>,
+    ) -> Result<(), SubagentError> {
+        use std::io::Write as _;
+        use std::os::unix::fs::OpenOptionsExt as _;
+        use tddy_core::session_pointer::{
+            SessionPointer, SessionPointerOwner, SESSION_POINTER_FILE,
+        };
+
+        let pointer = SessionPointer {
+            socket: None,
+            repo_dir: launch.worktree.clone(),
+            session_dir: None,
+            remote: server_env.into_iter().collect(),
+            notify: std::collections::BTreeMap::new(),
+            owner: Some(SessionPointerOwner::this_process()),
+        };
+        let path = scratch_dir.join(SESSION_POINTER_FILE);
+        let written = serde_json::to_vec_pretty(&pointer)
+            .map_err(|e| e.to_string())
+            .and_then(|contents| {
+                std::fs::create_dir_all(scratch_dir.join(".tddy")).map_err(|e| e.to_string())?;
+                std::fs::OpenOptions::new()
+                    .write(true)
+                    .create(true)
+                    .truncate(true)
+                    .mode(0o600)
+                    .open(&path)
+                    .and_then(|mut file| file.write_all(&contents))
+                    .map_err(|e| e.to_string())
+            });
+        written.map_err(|reason| {
+            Self::refuse(
+                launch,
+                &format!(
+                    "its conversation's session pointer could not be written at {}: {reason}",
+                    path.display()
+                ),
+            )
         })
     }
 
@@ -554,6 +604,7 @@ impl DaemonCodingAgentLauncher {
             command: server.command,
             args: server.args,
             env: server.env.into_iter().collect(),
+            cwd: None,
         })
     }
 
@@ -632,6 +683,7 @@ impl DaemonCodingAgentLauncher {
             command,
             args: vec![TDDY_TOOLS_MCP_ARG.to_string()],
             env,
+            cwd: None,
         })
     }
 

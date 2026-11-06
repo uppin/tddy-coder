@@ -75,6 +75,18 @@ impl SessionPointerOwner {
     pub fn is_on_this_host(&self) -> bool {
         self.host == this_host()
     }
+
+    /// Whether the owner's process is still running. Only meaningful when
+    /// [`Self::is_on_this_host`]: a pid says nothing on another host.
+    pub fn is_running(&self) -> bool {
+        let Ok(pid) = libc::pid_t::try_from(self.pid) else {
+            return false;
+        };
+        // SAFETY: signal 0 only checks that the process exists and may be signalled.
+        let status = unsafe { libc::kill(pid, 0) };
+        // `EPERM`: it exists, and belongs to another user.
+        status == 0 || std::io::Error::last_os_error().raw_os_error() == Some(libc::EPERM)
+    }
 }
 
 /// The name this host gives itself (`gethostname`, as `hostname` prints it).

@@ -33,7 +33,7 @@ use crate::adapters::headless::{
 use crate::adapters::{HeadlessInvocation, HeadlessRenderer, HeadlessTurn, StreamSinks};
 use crate::error::BackendError;
 use crate::provider_route::{agent_routable, HarnessRoute, RouteRefusal, RoutedAgent};
-use crate::session_pointer::SessionPointer;
+use crate::session_pointer::{SessionPointer, SessionPointerOwner};
 use crate::stream::{self, ProgressEvent};
 use crate::turn_files::TurnFiles;
 
@@ -344,8 +344,7 @@ impl CodingBackend for SpecHeadlessBackend {
                         .map(|remote| remote.env_pairs().into_iter().collect::<BTreeMap<_, _>>())
                         .unwrap_or_default(),
                     notify: BTreeMap::new(),
-                    // TODO(session-pointer): implement — this process owns the pointer.
-                    owner: None,
+                    owner: Some(SessionPointerOwner::this_process()),
                 },
             )?;
         }

@@ -629,6 +629,7 @@ fn carry_on_the_tool_server(
             command: PathBuf::from(tddy_tools_path),
             args: vec!["--mcp".to_string()],
             env: tool_server_env.into_iter().collect(),
+            cwd: None,
         },
         dir: session_dir.to_path_buf(),
     });

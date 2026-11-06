@@ -311,6 +311,7 @@ async fn mcp_servers_reach_session_new() {
         command: PathBuf::from("/usr/local/bin/tddy-tools"),
         args: vec!["--mcp".to_string()],
         env: vec![("TDDY_SESSION_ID".to_string(), "s-1".to_string())],
+        cwd: None,
     };
 
     // When

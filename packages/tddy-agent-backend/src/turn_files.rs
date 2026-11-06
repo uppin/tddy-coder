@@ -12,7 +12,7 @@ use std::io::Write as _;
 use std::path::{Path, PathBuf};
 
 use crate::error::BackendError;
-use crate::session_pointer::{SessionPointer, SESSION_POINTER_FILE};
+use crate::session_pointer::{SessionPointer, SessionPointerHeld, SESSION_POINTER_FILE};
 
 /// The mode a turn file is written with: an MCP registration can carry the agent's tool credential.
 const OWNER_ONLY_FILE: u32 = 0o600;
@@ -47,9 +47,12 @@ impl TurnFiles {
         let contents = serde_json::to_vec_pretty(pointer).map_err(|e| {
             BackendError::InvocationFailed(format!("the session pointer cannot be encoded: {e}"))
         })?;
-        // The pointer is this backend's own file: a stale one a crashed turn left is replaced.
-        // TODO(session-pointer): implement — refuse with `SessionPointerHeld` when the pointer there
-        // names another socket and its `owner` is alive on this host.
+        // The pointer is this backend's own file: a stale one a crashed turn left, or this
+        // session's from its previous turn, is replaced. One a live owner holds for another
+        // session is not.
+        if let Some(held) = held_pointer(&path, pointer) {
+            return Err(BackendError::InvocationFailed(held.to_string()));
+        }
         self.write_one_replacing(&path, &contents, workdir)
     }
 
@@ -113,6 +116,22 @@ impl Drop for TurnFiles {
             let _ = std::fs::remove_dir(dir);
         }
     }
+}
+
+/// The pointer at `path` when it is held for a session other than `incoming`'s: it names another
+/// socket, and its owner is running on this host. A file that is missing, unreadable, ownerless,
+/// owned elsewhere or by a process that has exited is not held.
+fn held_pointer(path: &Path, incoming: &SessionPointer) -> Option<SessionPointerHeld> {
+    let existing: SessionPointer = serde_json::from_slice(&std::fs::read(path).ok()?).ok()?;
+    let owner = existing
+        .owner
+        .clone()
+        .filter(|owner| owner.is_on_this_host() && owner.is_running())?;
+    (existing.socket != incoming.socket).then(|| SessionPointerHeld {
+        path: path.to_path_buf(),
+        socket: existing.socket,
+        owner,
+    })
 }
 
 /// Adds `pattern` (`/.cursor/mcp.json`) to the `info/exclude` of the repository `worktree` is a

@@ -52,11 +52,6 @@ const STDERR_TAIL_LINES: usize = 20;
 pub struct HeadlessCommand {
     /// Added to the inherited environment (a provider route's variables), on every turn, before the
     /// spec's own `headless.env`.
-    ///
-    /// TODO(headless-driver): a Codex conversation's tool server variables (`TDDY_*`) still ride
-    /// here, because Codex forwards them to its server by name from its own environment. They go
-    /// through the session pointer once a conversation has one —
-    /// `docs/dev/todo/2026-11-05-headless-conversation-tool-server-env.md`.
     pub env: Vec<(String, String)>,
     pub cwd: Option<PathBuf>,
     pub model: Option<String>,
@@ -366,6 +361,7 @@ fn headless_server(server: &McpServerSpec) -> HeadlessMcpServer {
         command: server.command.clone(),
         args: server.args.clone(),
         env: server.env.iter().cloned().collect(),
+        cwd: server.cwd.clone(),
     }
 }
 

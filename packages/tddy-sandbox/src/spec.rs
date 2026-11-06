@@ -37,15 +37,14 @@ impl SandboxSpec {
     pub fn short_ipc_socket_path(session_id: &str) -> PathBuf {
         let tmp =
             std::fs::canonicalize(std::env::temp_dir()).unwrap_or_else(|_| std::env::temp_dir());
-        // Keep the name short and collision-resistant without pulling in a hashing crate.
-        // TODO(session-pointer): implement — name it by an FNV-64 of the whole id: the first ten
-        // characters of a UUIDv7 are its millisecond timestamp, which two sessions can share.
-        let short: String = session_id
-            .chars()
-            .filter(|c| c.is_ascii_alphanumeric())
-            .take(10)
-            .collect();
-        tmp.join(format!("tddy-{short}-{}.sock", std::process::id()))
+        // FNV-1a 64 of the whole id: the first characters of a UUIDv7 are its millisecond
+        // timestamp, which two sessions can share, and no hashing crate is needed for this.
+        let hash = session_id
+            .bytes()
+            .fold(0xcbf2_9ce4_8422_2325_u64, |hash, byte| {
+                (hash ^ u64::from(byte)).wrapping_mul(0x0000_0100_0000_01b3)
+            });
+        tmp.join(format!("tddy-{hash:016x}-{}.sock", std::process::id()))
     }
 }
 

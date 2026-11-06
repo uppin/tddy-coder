@@ -45,7 +45,7 @@ tool-IPC sockets.
 ## Scope
 
 - [ ] Jail tool-IPC socket path unique per session id, within `SUN_LEN`
-- [ ] Pointer `owner_pid`; pointer-source resolution refuses a dead owner / missing socket (never `--socket`); old pointer without owner still resolves
+- [ ] Pointer `owner {pid, host}`; pointer-source resolution refuses a dead owner / missing socket (never `--socket`); old pointer without owner still resolves
 - [ ] A held pointer for another session is not overwritten
 - [ ] SSH: one bounded exclude + `0600` write; bounded removal on agent exit and on delete
 - [ ] Headless conversation pointer; inline MCP slot names no env; `forwards_server_env` deleted
@@ -168,7 +168,7 @@ Real edges: `session-pointer → split-remote-env, acp-subagent-leftovers, env-a
 - [x] Run acceptance tests (verify they fail)
 - [x] USER REVIEW — acceptance tests
 - [x] TDD Red — write failing unit/integration tests
-- [ ] TDD Green — implement with quality code
+- [x] TDD Green — implement with quality code
 - [ ] Update documentation with progress
 - [ ] Repeat Red→Green→Update cycle until feature complete
 - [ ] Run the touched packages' tests (`./test -p {package}` per package) — verify 100% pass

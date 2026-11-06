@@ -250,6 +250,7 @@ pub fn agent_exec_plan_with(
         command: jail.tddy_tools_path.clone(),
         args: vec!["--mcp".to_string()],
         env: server_env,
+        cwd: None,
     };
     // The lists are in the agent's own tool vocabulary, so an agent whose spec has no slot to take
     // them is given none, rather than refused for lists it never asked for.

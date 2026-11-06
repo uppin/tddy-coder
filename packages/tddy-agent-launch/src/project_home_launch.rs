@@ -85,6 +85,7 @@ impl MainAgentFlags {
             command: self.tddy_tools_path.clone(),
             args: vec!["--mcp".to_string()],
             env: tddy_session_split::agent_argv::tddy_tools_mcp_env(&self.session_dir),
+            cwd: None,
         };
         let toolset = AgentToolset {
             mcp: Some(McpRegistration {

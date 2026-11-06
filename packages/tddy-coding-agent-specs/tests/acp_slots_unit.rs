@@ -50,6 +50,7 @@ fn the_tool_server() -> McpServerCommand {
             ("TDDY_CONVERSATION_ID".to_string(), "conv-1".to_string()),
             ("TDDY_REMOTE_SESSION_TOKEN".to_string(), TOKEN.to_string()),
         ]),
+        cwd: None,
     }
 }
 
@@ -89,6 +90,7 @@ fn an_acp_session_slot_hands_the_tool_server_as_session_new_mcp_servers() {
             ("TDDY_CONVERSATION_ID".to_string(), "conv-1".to_string()),
             ("TDDY_REMOTE_SESSION_TOKEN".to_string(), TOKEN.to_string()),
         ],
+        cwd: None,
     };
     assert_eq!(
         servers,

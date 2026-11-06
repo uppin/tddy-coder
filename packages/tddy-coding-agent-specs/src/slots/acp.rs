@@ -44,6 +44,7 @@ pub fn acp_mcp_servers(
                 .iter()
                 .map(|(name, value)| (name.clone(), value.clone()))
                 .collect(),
+            cwd: None,
         }]),
         _ => Err(SlotError::SlotUnsupported {
             agent: spec.id.clone(),

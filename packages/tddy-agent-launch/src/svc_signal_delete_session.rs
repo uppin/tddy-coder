@@ -93,10 +93,14 @@ impl LaunchSessions {
         .await?;
         // A worktree kept after the delete (`keep_worktree_on_delete`) must not keep pointing a
         // shell-run `tddy-tools` at a session that is gone.
-        remove_recorded_session_pointer(
-            &unified_session_dir_path(&sessions_base, session_id),
-            Path::new("ssh"),
-        );
+        let session_dir = unified_session_dir_path(&sessions_base, session_id);
+        if let Err(e) = tokio::task::spawn_blocking(move || {
+            remove_recorded_session_pointer(&session_dir, Path::new("ssh"))
+        })
+        .await
+        {
+            log::warn!("the session pointer's removal did not finish: {e}");
+        }
         let projects_dir_opt = projects_path_for_user(os_user, Some(&self.tddy_data_dir));
         // A split session's worktree lives on another daemon, which must lose it first: deleting
         // this side alone would leave a checkout on a host with no session left to reclaim it. A
