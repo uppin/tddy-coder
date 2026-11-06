@@ -513,9 +513,7 @@ pub(crate) struct CliJailBinaries {
 
 /// Resolve the executables a sandboxed CLI harness's runner is started from.
 #[allow(dead_code)]
-pub(crate) fn resolve_cli_jail_binaries(
-    harness: &CliHarness,
-) -> Result<CliJailBinaries, Status> {
+pub(crate) fn resolve_cli_jail_binaries(harness: &CliHarness) -> Result<CliJailBinaries, Status> {
     let agent_kind = require_sandbox_hosts(harness)?;
     Ok(CliJailBinaries {
         tddy_tools_path: canonical_exec_path(

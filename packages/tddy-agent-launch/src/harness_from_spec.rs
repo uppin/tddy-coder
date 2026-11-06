@@ -324,8 +324,8 @@ mod cli_agent_dispatch_unit_tests;
 
 #[cfg(test)]
 mod tests {
-    use std::path::PathBuf;
     use pretty_assertions::assert_eq;
+    use std::path::PathBuf;
     use tddy_actions::tool::RunSection;
     use tddy_coding_agent_specs::{CodingAgentSection, WARP_SPEC_YAML};
     use tddy_rpc::Code;

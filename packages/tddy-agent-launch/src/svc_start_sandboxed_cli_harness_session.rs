@@ -25,8 +25,8 @@ use crate::cli_agent_steps::{
     start_conversation, ConversationStart,
 };
 use crate::cli_harness_jail::{
-    jail_route_config_env, prompt_ahead_of_slots, require_jail_route, CliJail, JailWiring,
-    agent_tddy_tools, TDDY_TOOLS_ID,
+    agent_tddy_tools, jail_route_config_env, prompt_ahead_of_slots, require_jail_route, CliJail,
+    JailWiring, TDDY_TOOLS_ID,
 };
 use crate::cli_route_launch::routed_launch_model;
 use crate::cli_session_worktree::{

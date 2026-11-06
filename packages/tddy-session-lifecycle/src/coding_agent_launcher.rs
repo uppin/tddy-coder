@@ -51,10 +51,10 @@ use tddy_coding_agent_specs::slots::McpServerCommand;
 use tddy_coding_agent_specs::{CodingAgentSpec, McpSlot};
 use tddy_coding_subagent::launcher::{record_written_files, HEADLESS_DIR, SESSION_TOKEN_ENV};
 use tddy_coding_subagent::{
-    confinement_of_spec, refuse_unless_confinable,
-    refuse_unless_spec_confinable, transport_of, AgentTransport, ApprovalRoutes, CodingAgentLaunch,
-    CodingAgentLauncher, Confinement, Transport, CODEX_ACP, CONVERSATION_ID_ENV,
-    OPENCODE, OPENCODE_CONFIG_CONTENT, TDDY_TOOLS_MCP_ARG, TDDY_TOOLS_SERVER,
+    confinement_of_spec, refuse_unless_confinable, refuse_unless_spec_confinable, transport_of,
+    AgentTransport, ApprovalRoutes, CodingAgentLaunch, CodingAgentLauncher, Confinement, Transport,
+    CODEX_ACP, CONVERSATION_ID_ENV, OPENCODE, OPENCODE_CONFIG_CONTENT, TDDY_TOOLS_MCP_ARG,
+    TDDY_TOOLS_SERVER,
 };
 use tddy_core::adapters::AdapterRegistry;
 use tddy_core::provider_route::{HarnessRoute, RouteChoice, RouteSources};
@@ -210,7 +210,7 @@ impl DaemonCodingAgentLauncher {
         let relay_dir = tddy_data_dir.join(RELAY_SOCKET_DIR);
         let headless_dir = tddy_data_dir.join(HEADLESS_DIR);
         let headless_config = config.clone();
-        let coding_agents = host_coding_agents(&config, &tddy_data_dir);
+        let coding_agents = host_coding_agents(&tddy_data_dir);
         let supervisor_socket = match spawn_backend {
             tddy_spawn::supervisor_client::SpawnBackendChoice::Supervisor { socket_path } => {
                 Some(socket_path)
@@ -561,7 +561,10 @@ impl DaemonCodingAgentLauncher {
     /// agents. Refused when they did not load — a tool file that does not load must not start the
     /// agent some other way — and for a harness that is not an ACP one, which nothing here plans by
     /// hand (`#agent-tools 19/19`).
-    fn acp_agents_for(&self, launch: &CodingAgentLaunch) -> Result<&HostCodingAgents, SubagentError> {
+    fn acp_agents_for(
+        &self,
+        launch: &CodingAgentLaunch,
+    ) -> Result<&HostCodingAgents, SubagentError> {
         if let Some(reason) = &self.coding_agents_error {
             return Err(Self::refuse(launch, reason));
         }

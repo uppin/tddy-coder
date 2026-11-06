@@ -114,8 +114,7 @@ impl LaunchSessions {
         os_user: &str,
     ) -> Result<Response<StartSessionResponse>, Status> {
         // Resolved first, with no side effect: the managed-codebase refusal reads the agent's spec.
-        let session_agent =
-            resolve_session_agent(&self.coding_agents, kind.clone())?;
+        let session_agent = resolve_session_agent(&self.coding_agents, kind.clone())?;
         refuse_an_unsupported_cli_session_start(&session_agent.agent.spec, kind.name, req)?;
         if req.sandbox {
             self.require_sandbox_placement(kind.name)?;

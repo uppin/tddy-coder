@@ -65,10 +65,9 @@ fn new_connection_service(sessions_base: PathBuf) -> Arc<DaemonSessionHost> {
 /// When the built-in specs do not load, which no build passes.
 #[must_use]
 pub fn builtin_coding_agents() -> Arc<tddy_agent_launch::spec_launch::HostCodingAgents> {
-    tddy_agent_launch::host_coding_agents::host_coding_agents(
-        &DaemonConfig::default(),
-        std::path::Path::new("/nonexistent-tddy-home"),
-    )
+    tddy_agent_launch::host_coding_agents::host_coding_agents(std::path::Path::new(
+        "/nonexistent-tddy-home",
+    ))
     .expect("the built-in coding agents load")
 }
 

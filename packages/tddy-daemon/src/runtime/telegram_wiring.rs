@@ -91,10 +91,9 @@ pub fn split_room_hosting(
 // `build_session_host` and `open_shared`, which each load it again
 // (docs/dev/todo/2026-11-06-telegram-loads-the-coding-agent-registry-a-third-time.md).
 fn telegram_coding_agents(
-    config: &DaemonConfig,
     tddy_data_dir: &Path,
 ) -> Arc<tddy_coding_agent_specs::CodingAgentRegistry> {
-    match tddy_agent_launch::host_coding_agents::host_coding_agents(config, tddy_data_dir) {
+    match tddy_agent_launch::host_coding_agents::host_coding_agents(tddy_data_dir) {
         Ok(agents) => agents.agents_shared(),
         Err(e) => {
             log::error!(
@@ -201,7 +200,7 @@ pub(super) fn build_telegram(
             Some(telegram_tracked),
         )
         .with_session_rooms(registries.shared_session_rooms.clone())
-        .with_coding_agents(telegram_coding_agents(config, tddy_data_dir))
+        .with_coding_agents(telegram_coding_agents(tddy_data_dir))
         .with_session_starter(
             Arc::clone(&registries.session_starter) as Arc<dyn tddy_daemon_extensions::SessionStarter>
         ),

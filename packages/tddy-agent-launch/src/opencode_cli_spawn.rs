@@ -467,8 +467,7 @@ impl crate::launch_ports::LaunchSessions {
         // The previous run's recorder may still be writing the token it printed as it exited.
         metadata.harness_resume_token =
             settled_resume_token(&self.claude_cli_manager, &req.session_id, session_dir).await?;
-        let session_agent =
-            resolve_session_agent(&self.coding_agents, kind.clone())?;
+        let session_agent = resolve_session_agent(&self.coding_agents, kind.clone())?;
         let identity = self.host.session_identity(
             os_user,
             &req.session_id,
@@ -563,10 +562,7 @@ async fn resume_cli_harness_session(
     account_access: &SessionAccountAccess,
     session: ResumedSession<'_>,
 ) -> Result<Response<ResumeSessionResponse>, Status> {
-    let CliSessionAgent {
-        kind,
-        agent, ..
-    } = session_agent;
+    let CliSessionAgent { kind, agent, .. } = session_agent;
     let kind = kind.clone();
     let ResumedSession {
         session_id,

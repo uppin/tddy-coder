@@ -151,8 +151,11 @@ impl tddy_discovery::catalog_service::CatalogHandler for CatalogRpcHandler {
     ) -> Result<Response<ListSubagentsResponse>, Status> {
         log::debug!("list_subagents RPC: resolving agent defs");
         let daemon_instance_id = local_instance_id_for_config(&self.config);
-        let defs =
-            resolvable_agent_defs(&self.agents.tddy_data_dir, self.agents.model_registry.as_deref()).await?;
+        let defs = resolvable_agent_defs(
+            &self.agents.tddy_data_dir,
+            self.agents.model_registry.as_deref(),
+        )
+        .await?;
         let resolved = defs.len();
         let mut subagents: Vec<CatalogSubagentInfo> = defs
             .into_iter()

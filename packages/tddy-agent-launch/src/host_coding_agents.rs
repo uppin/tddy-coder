@@ -6,7 +6,7 @@ use std::sync::Arc;
 
 use tddy_actions::tool::{ProcessToolHost, ToolHost};
 use tddy_coding_agent_specs::load_agent_registry;
-use tddy_daemon_kernel::config::{is_wrapper_shim_dir, DaemonConfig};
+use tddy_daemon_kernel::config::is_wrapper_shim_dir;
 
 use crate::spec_launch::HostCodingAgents;
 
@@ -15,17 +15,11 @@ const TDDY_TOOLS_BINARY_ENV: &str = "TDDY_TOOLS_BINARY";
 
 /// The coding agents of a daemon whose data directory is `tddy_data_dir`. A tool file under
 /// `<tddyhome>/tools` that does not load refuses the daemon's start, naming the file.
-pub fn host_coding_agents(
-    _config: &DaemonConfig,
-    tddy_data_dir: &Path,
-) -> anyhow::Result<Arc<HostCodingAgents>> {
+pub fn host_coding_agents(tddy_data_dir: &Path) -> anyhow::Result<Arc<HostCodingAgents>> {
     let registry = load_agent_registry(&tddy_data_dir.join("tools"))
         .map_err(|e| anyhow::anyhow!("load the coding agent tools: {e}"))?;
-    let agents = HostCodingAgents::try_new(
-        registry,
-        daemon_tool_host(Arc::new(ProcessToolHost)),
-    )
-    .map_err(|e| anyhow::anyhow!("load the coding agent tools: {e}"))?;
+    let agents = HostCodingAgents::try_new(registry, daemon_tool_host(Arc::new(ProcessToolHost)))
+        .map_err(|e| anyhow::anyhow!("load the coding agent tools: {e}"))?;
     Ok(Arc::new(agents))
 }
 

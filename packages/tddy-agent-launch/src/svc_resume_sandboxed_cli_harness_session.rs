@@ -15,7 +15,9 @@ use tddy_service::proto::session::{ResumeSessionRequest, ResumeSessionResponse};
 use tddy_session_agents::agent_roster;
 
 use crate::cli_agent_steps::{resumed_or_adopted_conversation, ConversationStart};
-use crate::cli_harness_jail::{agent_tddy_tools, jail_route_config_env, require_jail_route, CliJail, JailWiring};
+use crate::cli_harness_jail::{
+    agent_tddy_tools, jail_route_config_env, require_jail_route, CliJail, JailWiring,
+};
 use crate::cursor_from_spec::node_launcher_of;
 use crate::harness_from_spec::{
     harness_template_params, resolve_session_agent, CliSessionAgent, CliSessionType, HarnessLaunch,
@@ -60,8 +62,7 @@ impl LaunchSessions {
         metadata: SessionMetadata,
     ) -> Result<Response<ResumeSessionResponse>, Status> {
         // Resolved before the running jail is stopped: a resume the host cannot launch leaves it running.
-        let session_agent =
-            resolve_session_agent(&self.coding_agents, kind.clone())?;
+        let session_agent = resolve_session_agent(&self.coding_agents, kind.clone())?;
         if let Some(state) = self.sandbox_manager.remove(&req.session_id).await {
             state.stop();
         } else if let Some(pid) = metadata.pid {
