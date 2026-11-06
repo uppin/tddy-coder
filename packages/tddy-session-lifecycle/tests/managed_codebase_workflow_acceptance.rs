@@ -15,7 +15,7 @@ use tddy_core::changeset::read_changeset;
 use tddy_core::session_metadata::{write_session_metadata, SessionMetadata};
 use tddy_daemon_kernel::config::DaemonConfig;
 use tddy_rpc::{Code, Request};
-use tddy_session_lifecycle::claude_cli_session::ClaudeCliSessionManager;
+use tddy_session_lifecycle::claude_cli_session::CliSessionManager;
 use tddy_session_lifecycle::connection_service::DaemonSessionHost;
 
 use tddy_service::proto::session::{
@@ -74,7 +74,7 @@ users:
 fn minimal_service_with_manager(
     (config, agents): AConfigAndItsAgents,
     sessions_base: PathBuf,
-    manager: Arc<ClaudeCliSessionManager>,
+    manager: Arc<CliSessionManager>,
 ) -> DaemonSessionHost {
     let tddy_data_dir = sessions_base.clone();
     let sessions_base_resolver: SessionsBaseResolver =
@@ -218,7 +218,7 @@ async fn managed_claude_cli_session_seeds_changeset_with_recipe_start_goal() {
     let service = minimal_service_with_manager(
         config,
         sessions_tmp.path().to_path_buf(),
-        Arc::new(ClaudeCliSessionManager::new()),
+        Arc::new(CliSessionManager::new()),
     );
 
     // When
@@ -252,7 +252,7 @@ async fn managed_claude_cli_session_with_unknown_recipe_is_rejected() {
     let service = minimal_service_with_manager(
         config,
         sessions_tmp.path().to_path_buf(),
-        Arc::new(ClaudeCliSessionManager::new()),
+        Arc::new(CliSessionManager::new()),
     );
 
     // When
@@ -280,7 +280,7 @@ async fn managed_claude_cli_session_launches_claude_with_orchestration_prompt_fi
     let stub_dir = tempfile::tempdir().unwrap();
     let stub = write_echo_argv_script(stub_dir.path());
     let (_cfg_dir, config) = write_config_with_claude_cli_binary(stub.to_str().unwrap());
-    let manager = Arc::new(ClaudeCliSessionManager::new());
+    let manager = Arc::new(CliSessionManager::new());
     let service = minimal_service_with_manager(
         config,
         sessions_tmp.path().to_path_buf(),
@@ -318,7 +318,7 @@ async fn managed_claude_cli_session_launches_claude_with_tddy_socket_in_env() {
     let stub_dir = tempfile::tempdir().unwrap();
     let stub = write_env_echo_script(stub_dir.path());
     let (_cfg_dir, config) = write_config_with_claude_cli_binary(stub.to_str().unwrap());
-    let manager = Arc::new(ClaudeCliSessionManager::new());
+    let manager = Arc::new(CliSessionManager::new());
     let service = minimal_service_with_manager(
         config,
         sessions_tmp.path().to_path_buf(),
@@ -394,7 +394,7 @@ async fn resuming_a_managed_claude_cli_session_re_wires_orchestration_and_socket
     let stub_dir = tempfile::tempdir().unwrap();
     let stub = write_argv_and_env_script(stub_dir.path());
     let (_cfg_dir, config) = write_config_with_claude_cli_binary(stub.to_str().unwrap());
-    let manager = Arc::new(ClaudeCliSessionManager::new());
+    let manager = Arc::new(CliSessionManager::new());
     let service = minimal_service_with_manager(
         config,
         sessions_tmp.path().to_path_buf(),

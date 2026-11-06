@@ -43,6 +43,22 @@ message AgentInfo {
   // runs on its own vendor and for every MODEL row: a picker asks `ListProviderRoutes` only when
   // this is non-empty.
   repeated string route_providers = 5;
+  // The session type that starts this agent (`<id>-cli`), from its spec; empty for an agent
+  // with no PTY launch. The web offers session types from this, never from its own list.
+  string session_type = 6;
+  // The agent's spec capabilities (`requires_model`, `managed_workflow`, `hooks`, …), as
+  // declared in its YAML.
+  repeated string capabilities = 7;
+  // The parameter names the agent's launch argv binds (`model`, `permission_mode`,
+  // `dangerously_skip_permissions`, …), read from its spec's argv template.
+  repeated string run_params = 8;
+  // The permission modes the agent's launch takes, from its spec; empty when it binds none.
+  repeated string permission_modes = 9;
+  // The agent's default model id, from its spec.
+  string default_model = 10;
+  // The placements the agent's spec allows (`host`, `jail`). A client offers a sandboxed
+  // (jailed) start only for an agent that lists `jail`; absence never reads as allowed.
+  repeated string placements = 11;
 }
 
 message ListAgentModelsRequest {

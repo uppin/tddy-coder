@@ -48,7 +48,7 @@ use tddy_service::proto::session_agents_svc::{
     AgentPlacement, AttachSessionAgentRequest, OpenAgentConversationRequest,
     SessionAgentService as _,
 };
-use tddy_session_lifecycle::claude_cli_session::ClaudeCliSessionManager;
+use tddy_session_lifecycle::claude_cli_session::CliSessionManager;
 use tddy_session_lifecycle::connection_service::DaemonSessionHost;
 use tddy_session_lifecycle::peer_routing::PeerRouting;
 use tddy_session_lifecycle::test_util::{TEST_TOKEN, TEST_USER};
@@ -154,7 +154,7 @@ fn a_daemon(
         tddy_spawn::supervisor_client::SpawnBackendChoice::ForkedWorker,
         routing,
         Arc::new(NoOperatorChannel),
-        Arc::new(ClaudeCliSessionManager::new()),
+        Arc::new(CliSessionManager::new()),
     )
     .with_coding_agents_if_none(tddy_session_lifecycle::test_util::builtin_coding_agents())
 }

@@ -9,6 +9,8 @@
 
 import { create, toBinary } from "@bufbuild/protobuf";
 
+import { servedAgentWire } from "../servedAgents";
+
 import {
   ListProjectBranchesResponseSchema,
   ListProjectsResponseSchema,
@@ -170,6 +172,9 @@ export function listAgents(agents: Partial<AgentInfo>[]): Uint8Array {
         create(AgentInfoSchema, {
           id: "claude",
           label: "Claude (opus)",
+          // The spec-derived fields a daemon serves for this id; an explicit field on
+          // the fixture overrides them.
+          ...servedAgentWire(a.id ?? "claude"),
           ...a,
         }),
       ),
@@ -307,9 +312,10 @@ export function listDefaultAgents(): Uint8Array {
 }
 
 /**
- * The `claude-cli` catalog a stubbed daemon advertises, mirroring `tddy_core::backend::
- * claude_cli_models` — versionless aliases first, version-pinned ids after. The production catalog
- * lives in Rust; this is the fixture that stands in for it, so a change there is mirrored here.
+ * The `claude-cli` catalog a stubbed daemon advertises, mirroring the `claude` spec's curated
+ * models (`packages/tddy-coding-agent-specs/specs/claude.yaml`) — versionless aliases first,
+ * version-pinned ids after. The production catalog lives in that YAML; this is the fixture that
+ * stands in for it, so a change there is mirrored here.
  */
 export const DEFAULT_CLAUDE_CLI_MODELS: Array<{ id: string; label: string }> = [
   { id: "opus", label: "Claude Opus (latest)" },

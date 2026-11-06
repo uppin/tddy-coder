@@ -10,7 +10,7 @@ use tddy_core::read_session_metadata;
 use tddy_daemon_kernel::config::DaemonConfig;
 use tddy_rpc::Request;
 use tddy_service::proto::session::{SessionService as SessionServiceTrait, StartSessionRequest};
-use tddy_session_lifecycle::claude_cli_session::ClaudeCliSessionManager;
+use tddy_session_lifecycle::claude_cli_session::CliSessionManager;
 use tddy_session_lifecycle::connection_service::DaemonSessionHost;
 
 const VALID_TOKEN: &str = "valid-token";
@@ -60,7 +60,7 @@ users:
 fn minimal_service_with_manager(
     (config, agents): AConfigAndItsAgents,
     sessions_base: PathBuf,
-    manager: Arc<ClaudeCliSessionManager>,
+    manager: Arc<CliSessionManager>,
 ) -> DaemonSessionHost {
     let tddy_data_dir = sessions_base.clone();
     let sessions_base_resolver: SessionsBaseResolver =
@@ -153,7 +153,7 @@ async fn start_with_ssh_config_host_materializes_a_remote_worktree_path_on_metad
     let service = minimal_service_with_manager(
         config,
         sessions_tmp.path().to_path_buf(),
-        Arc::new(ClaudeCliSessionManager::new()),
+        Arc::new(CliSessionManager::new()),
     );
 
     // When

@@ -210,9 +210,7 @@ impl LaunchSessions {
         // serves (a daemon restart) is left running
         // (docs/dev/todo/2026-10-23-project-home-running-heuristic.md).
         if self.is_served(&previous.session_id).await {
-            self.claude_cli_manager
-                .stop_session(&previous.session_id)
-                .await;
+            self.cli_manager.stop_session(&previous.session_id).await;
             log::info!(
                 "{ENSURE_RPC}: stopped main {} of project {} to replace it",
                 previous.session_id,
@@ -244,7 +242,7 @@ impl LaunchSessions {
                 "{ENSURE_RPC}: stopping main {started} of project {project_id}: {}",
                 status.message
             );
-            self.claude_cli_manager.stop_session(&started).await;
+            self.cli_manager.stop_session(&started).await;
             return Err(status);
         }
         log::info!(
@@ -301,7 +299,7 @@ impl LaunchSessions {
     /// Whether this daemon still serves `session_id`'s terminal; the handle is dropped when the
     /// agent's process exits.
     async fn is_served(&self, session_id: &str) -> bool {
-        self.claude_cli_manager.get(session_id).await.is_some()
+        self.cli_manager.get(session_id).await.is_some()
     }
 
     /// Fast-forward a stopped main's home worktree to the project's main branch ref, then resume

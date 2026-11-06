@@ -47,8 +47,11 @@ pub(super) fn prepare_jail_dirs(session_dir: &Path) -> Result<JailDirs, Status> 
 }
 
 pub(super) fn prepare_jail_context_dir(
-    // The session type whose agent's context-file allow-list the jail is served.
-    session_type: &str,
+    // The context-file allow-list the jail is served: its agent's spec `context_globs`,
+    // resolved by the caller from the session's type.
+    globs: &[String],
+    // The agent's guidance files: its spec's `instructions.files`.
+    guidance_files: &[std::path::PathBuf],
     started_agents: &[tddy_core::SessionAgentRecord],
     worktree_path: &Path,
     context_dir: &Path,
@@ -66,10 +69,12 @@ pub(super) fn prepare_jail_context_dir(
             replaced: refs,
         })
         .collect();
+    let glob_refs: Vec<&str> = globs.iter().map(String::as_str).collect();
     let ctx = tddy_daemon_sandbox::sandbox_session::prepare_context_dir_with_subagent(
         worktree_path,
         &replacements,
-        tddy_session_files::context_files::context_globs_for_session_type(session_type),
+        &glob_refs,
+        guidance_files,
     )
     .map_err(Status::internal)?;
     tddy_daemon_sandbox::sandbox_session::copy_dir_all(ctx.path(), context_dir)

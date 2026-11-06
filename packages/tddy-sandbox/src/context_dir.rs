@@ -25,22 +25,16 @@ You MUST use the `mcp__tddy-tools__*` tools (Read, Write, StrReplace, Delete, Gr
 Await, ReadLints, SemanticSearch) for ALL file and shell operations.
 Do not use native tools to interact with the codebase.
 
-This directory is owned by the sync: `CLAUDE.md`, `AGENTS.md` and the agent-configuration trees
+This directory is owned by the sync: the guidance files and the agent-configuration trees
 beside them are re-read from the managed codebase while the session runs, and anything you write
 under those paths is replaced. Keep your work in the codebase itself, through the tools above.
 "#;
 
-/// The files an agent reads for guidance before anything else, and so the ones the preamble has to
-/// lead. Both are written even when the target repo has neither — a repo with no `CLAUDE.md` would
-/// otherwise leave the agent with nothing telling it where its codebase is.
-///
-/// Exported, and the *only* spelling of this list anywhere: the co-located builder here, the split
-/// builder (`tddy_daemon::split_session::build_split_context_dir`) and the re-sync writer
-/// (`tddy_daemon::context_sync`) all have to agree on which files carry the preamble, and they used
-/// to agree by each keeping their own copy. That is how a re-sync tick came to be able to delete a
-/// `CLAUDE.md` that both builders guarantee exists. A list every conventional filename has to be
-/// added to — `.cursorrules`, `GEMINI.md` — cannot be kept in step by remembering to.
-pub const PREAMBLE_FILES: &[&str] = &["CLAUDE.md", "AGENTS.md"];
+// The files an agent reads for guidance are its spec's `instructions.files`, passed in by
+// every caller (`guidance_files`): the preamble leads each of them, and each is written even
+// when the target repo has none — a repo with no guidance file would otherwise leave the
+// agent with nothing telling it where its codebase is. One list, read from the agent's YAML
+// spec, so a new agent's guidance files need no second spelling anywhere.
 
 /// Carried at the head of the preamble while the last re-sync is known to have failed.
 ///
@@ -64,8 +58,21 @@ pub struct SubagentReplacement<'a> {
 /// A replaced `Shell` gets its own paragraph instead of the generic subagent-delegation hint:
 /// commands then run only through declarative **session actions** (`request_action` — authored
 /// by the Shell-replacing agent — then `invoke_action`; see docs/ft/coder/no-bash-mode.md).
-pub fn managed_codebase_preamble(replacements: &[SubagentReplacement<'_>]) -> String {
+pub fn managed_codebase_preamble(
+    replacements: &[SubagentReplacement<'_>],
+    guidance_files: &[PathBuf],
+) -> String {
     let mut preamble = MANAGED_CODEBASE_PREAMBLE.to_string();
+    if !guidance_files.is_empty() {
+        let names: Vec<String> = guidance_files
+            .iter()
+            .map(|path| format!("`{}`", path.display()))
+            .collect();
+        preamble.push_str(&format!(
+            "\nThe guidance files owned by the sync are: {}.\n",
+            names.join(", ")
+        ));
+    }
 
     let shell_author = replacements
         .iter()
@@ -167,20 +174,21 @@ pub fn without_stale_marker(content: &str) -> String {
 /// link failure would be worse than the staleness — so the warning is how the agent learns not to
 /// trust what it is reading. Files the context dir does not have are left alone: the marker belongs
 /// to the guidance that is there, not to a file the backend never asked for.
-pub fn mark_context_stale(context_dir: &Path) -> anyhow::Result<()> {
-    rewrite_preamble_files(context_dir, with_stale_marker)
+pub fn mark_context_stale(context_dir: &Path, guidance_files: &[PathBuf]) -> anyhow::Result<()> {
+    rewrite_preamble_files(context_dir, guidance_files, with_stale_marker)
 }
 
 /// Withdraws the staleness line after a re-sync succeeds.
-pub fn clear_context_stale(context_dir: &Path) -> anyhow::Result<()> {
-    rewrite_preamble_files(context_dir, without_stale_marker)
+pub fn clear_context_stale(context_dir: &Path, guidance_files: &[PathBuf]) -> anyhow::Result<()> {
+    rewrite_preamble_files(context_dir, guidance_files, without_stale_marker)
 }
 
 fn rewrite_preamble_files(
     context_dir: &Path,
+    guidance_files: &[PathBuf],
     rewrite: impl Fn(&str) -> String,
 ) -> anyhow::Result<()> {
-    for filename in PREAMBLE_FILES {
+    for filename in guidance_files {
         let path = context_dir.join(filename);
         if !path.exists() {
             continue;
@@ -205,8 +213,12 @@ impl SandboxContextDir {
     ///
     /// `globs` is the session backend's allow-list, so a Cursor session gets `.cursor/` and a
     /// Claude one does not. Nothing else in the repository is copied.
-    pub fn create(source_dir: &Path, globs: &[&str]) -> anyhow::Result<Self> {
-        Self::create_with_subagent(source_dir, &[], globs)
+    pub fn create(
+        source_dir: &Path,
+        globs: &[&str],
+        guidance_files: &[PathBuf],
+    ) -> anyhow::Result<Self> {
+        Self::create_with_subagent(source_dir, &[], globs, guidance_files)
     }
 
     /// Like [`Self::create`], but the preamble names each entry in `replacements` next to the exec
@@ -215,12 +227,13 @@ impl SandboxContextDir {
         source_dir: &Path,
         replacements: &[SubagentReplacement<'_>],
         globs: &[&str],
+        guidance_files: &[PathBuf],
     ) -> anyhow::Result<Self> {
         let dir = tempfile::tempdir()?;
-        copy_context_from_repo(source_dir, dir.path(), globs)?;
+        copy_context_from_repo(source_dir, dir.path(), globs, guidance_files)?;
 
-        let preamble = managed_codebase_preamble(replacements);
-        for filename in PREAMBLE_FILES {
+        let preamble = managed_codebase_preamble(replacements, guidance_files);
+        for filename in guidance_files {
             let dest = dir.path().join(filename);
             let body = if dest.exists() {
                 std::fs::read_to_string(&dest)?
@@ -243,9 +256,14 @@ impl SandboxContextDir {
 /// The result stays writable. Re-sync writes into the live directory for as long as the session
 /// runs, and freezing it at 0444 would buy nothing anyway: the agent is held out by the jail's
 /// read-only mount and by the native-tool disallowlist, neither of which reads the file mode.
-pub fn copy_context_from_repo(source: &Path, dest: &Path, globs: &[&str]) -> anyhow::Result<()> {
+pub fn copy_context_from_repo(
+    source: &Path,
+    dest: &Path,
+    globs: &[&str],
+    guidance_files: &[PathBuf],
+) -> anyhow::Result<()> {
     std::fs::create_dir_all(dest)?;
-    for file in walk_context_files(source, globs)? {
+    for file in walk_context_files(source, globs, guidance_files)? {
         // Never through a link this loop already recreated ([`prepare_context_write`]).
         let target = prepare_context_write(dest, &file.rel_path)?;
         // A link is recreated rather than copied through, as the syncer does, so the directory a
@@ -351,6 +369,11 @@ mod tests {
     use super::*;
     use crate::spec::SandboxSpec;
 
+    /// The guidance files a session's spec declares, as test data.
+    fn guidance_files() -> Vec<PathBuf> {
+        vec![PathBuf::from("CLAUDE.md"), PathBuf::from("AGENTS.md")]
+    }
+
     /// The allow-list a Claude session syncs, spelled out here so these tests stay independent of
     /// tddy-core's per-backend table.
     const CLAUDE_GLOBS: &[&str] = &[
@@ -372,7 +395,7 @@ mod tests {
         .unwrap();
 
         // When
-        let ctx = SandboxContextDir::create(source_dir.path(), CLAUDE_GLOBS)
+        let ctx = SandboxContextDir::create(source_dir.path(), CLAUDE_GLOBS, &guidance_files())
             .expect("create must succeed");
         let claude_md =
             std::fs::read_to_string(ctx.path().join("CLAUDE.md")).expect("CLAUDE.md must exist");
@@ -393,7 +416,7 @@ mod tests {
     #[test]
     fn preamble_with_no_replaced_tools_is_the_static_constant() {
         // When
-        let rendered = managed_codebase_preamble(&[]);
+        let rendered = managed_codebase_preamble(&[], &[]);
 
         // Then
         assert_eq!(rendered, MANAGED_CODEBASE_PREAMBLE);
@@ -404,10 +427,13 @@ mod tests {
     #[test]
     fn preamble_single_agent_names_the_agent_and_its_tools() {
         // When
-        let rendered = managed_codebase_preamble(&[SubagentReplacement {
-            name: "explorer",
-            replaced: &["Grep", "Glob"],
-        }]);
+        let rendered = managed_codebase_preamble(
+            &[SubagentReplacement {
+                name: "explorer",
+                replaced: &["Grep", "Glob"],
+            }],
+            &[],
+        );
 
         // Then
         assert!(
@@ -429,16 +455,19 @@ mod tests {
     #[test]
     fn preamble_renders_per_agent_breakdown_for_multiple_agents() {
         // When
-        let rendered = managed_codebase_preamble(&[
-            SubagentReplacement {
-                name: "explorer",
-                replaced: &["Grep", "Glob"],
-            },
-            SubagentReplacement {
-                name: "my-linter",
-                replaced: &["ReadLints"],
-            },
-        ]);
+        let rendered = managed_codebase_preamble(
+            &[
+                SubagentReplacement {
+                    name: "explorer",
+                    replaced: &["Grep", "Glob"],
+                },
+                SubagentReplacement {
+                    name: "my-linter",
+                    replaced: &["ReadLints"],
+                },
+            ],
+            &[],
+        );
 
         // Then
         assert!(
@@ -465,10 +494,13 @@ mod tests {
     #[test]
     fn preamble_renders_the_session_action_surface_for_a_replaced_shell() {
         // When
-        let rendered = managed_codebase_preamble(&[SubagentReplacement {
-            name: "action-author",
-            replaced: &["Shell"],
-        }]);
+        let rendered = managed_codebase_preamble(
+            &[SubagentReplacement {
+                name: "action-author",
+                replaced: &["Shell"],
+            }],
+            &[],
+        );
 
         // Then — the actions surface is described and attributed to the author
         for needle in [
@@ -494,10 +526,13 @@ mod tests {
     #[test]
     fn preamble_splits_shell_from_an_agents_other_replacements() {
         // When
-        let rendered = managed_codebase_preamble(&[SubagentReplacement {
-            name: "do-everything",
-            replaced: &["Shell", "Grep"],
-        }]);
+        let rendered = managed_codebase_preamble(
+            &[SubagentReplacement {
+                name: "do-everything",
+                replaced: &["Shell", "Grep"],
+            }],
+            &[],
+        );
 
         // Then
         assert!(
@@ -516,10 +551,13 @@ mod tests {
     #[test]
     fn preamble_with_replaced_tools_still_lists_the_remaining_tools() {
         // When
-        let rendered = managed_codebase_preamble(&[SubagentReplacement {
-            name: "explorer",
-            replaced: &["Grep", "Glob"],
-        }]);
+        let rendered = managed_codebase_preamble(
+            &[SubagentReplacement {
+                name: "explorer",
+                replaced: &["Grep", "Glob"],
+            }],
+            &[],
+        );
 
         // Then
         assert!(
@@ -545,6 +583,7 @@ mod tests {
                 replaced: &["Grep", "Glob"],
             }],
             CLAUDE_GLOBS,
+            &guidance_files(),
         )
         .expect("create_with_subagent must succeed");
 
@@ -567,7 +606,7 @@ mod tests {
         std::fs::write(source_dir.path().join("CLAUDE.md"), "# CLAUDE.md\n").unwrap();
 
         // When
-        let ctx = SandboxContextDir::create(source_dir.path(), CLAUDE_GLOBS)
+        let ctx = SandboxContextDir::create(source_dir.path(), CLAUDE_GLOBS, &guidance_files())
             .expect("create must succeed");
         let claude_md = std::fs::read_to_string(ctx.path().join("CLAUDE.md")).unwrap();
 
@@ -593,7 +632,7 @@ mod tests {
         .unwrap();
 
         // When
-        let ctx = SandboxContextDir::create(source_dir.path(), CLAUDE_GLOBS)
+        let ctx = SandboxContextDir::create(source_dir.path(), CLAUDE_GLOBS, &guidance_files())
             .expect("create must succeed");
 
         // Then — guidance copied, codebase and node_modules omitted
@@ -643,7 +682,7 @@ mod tests {
         return;
 
         // When
-        let ctx = SandboxContextDir::create(source_dir.path(), CLAUDE_GLOBS)
+        let ctx = SandboxContextDir::create(source_dir.path(), CLAUDE_GLOBS, &guidance_files())
             .expect("create must succeed");
 
         // Then

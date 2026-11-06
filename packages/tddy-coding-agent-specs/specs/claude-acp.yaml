@@ -52,6 +52,7 @@ extensions:
     route:
       providers: [anthropic]
       shape: env
+    transcript_usage: true
     models:
       default: opus
       curated: [opus, sonnet, haiku]

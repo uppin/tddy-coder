@@ -23,6 +23,7 @@ fn spawn_conversation_accepts_every_start_session_argument() {
             label: "host-b".to_string(),
         }],
         recipes: vec!["tdd".to_string()],
+        agents: Vec::new(),
     })
     .into_iter()
     .collect();

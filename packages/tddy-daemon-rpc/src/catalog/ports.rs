@@ -194,43 +194,21 @@ impl tddy_discovery::catalog_service::CatalogHandler for CatalogRpcHandler {
     }
 }
 
-/// The CLI harness whose binary an agent's model probe runs. The `opencode` ACP agent runs the binary
-/// the `opencode-cli` harness lists with (`opencode acp` and `opencode models`), so it resolves that
-/// harness's binary; every other agent or session type is its own harness, or none.
-fn listing_harness_session(agent: &str) -> &str {
-    // TODO(harness-clis): goes with the legacy `cli_harness` descriptors this names.
-    const LISTED_AS: [(&str, &str); 1] = [("opencode", "opencode-cli")];
-    LISTED_AS
-        .iter()
-        .find(|(from, _)| *from == agent)
-        .map_or(agent, |(_, session_type)| session_type)
-}
-
 impl CatalogRpcHandler {
     /// The binary `agent`'s model probe is handed: the one its spec resolves to on this host, for the
     /// agents whose models are listed by their own binary (Cursor, and the CLI harnesses that ask
     /// theirs). Only an absolute path is forwarded.
     fn listing_binary(&self, agent: &str) -> Option<std::path::PathBuf> {
-        let lists_by_binary = agent == "cursor"
-            || tddy_core::cli_harness::cli_harness(listing_harness_session(agent)).is_some_and(
-                |harness| {
-                    matches!(
-                        harness.models,
-                        tddy_core::cli_harness::CliModelSource::ListedByBinary(_)
-                    )
-                },
-            );
-        if !lists_by_binary {
-            return None;
-        }
-        let session_type = if agent == "cursor" {
-            "cursor-cli"
-        } else {
-            listing_harness_session(agent)
-        };
+        // An agent lists its models by its own binary when its spec declares a
+        // `models.list_command`; its catalogue is otherwise its spec's curated list, which
+        // the probe answers without a binary.
         let agents = &self.agents.coding_agents;
-        let spec_id = agents.agents().for_session_type(session_type)?.id.clone();
-        let binary = agents.resolve(&spec_id, None).ok()?.tool.binary;
+        let spec = agents
+            .agents()
+            .get(agent)
+            .or_else(|| agents.agents().for_session_type(agent))?;
+        spec.agent.models.list_command.as_ref()?;
+        let binary = agents.resolve(&spec.id, None).ok()?.tool.binary;
         binary.is_absolute().then_some(binary)
     }
 }

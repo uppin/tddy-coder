@@ -31,10 +31,11 @@
 //! the resolved target must still be a file the walk lists, so nothing becomes readable that the
 //! manifest does not already carry under another name.
 //!
-//! **Why swapping that gate is safe: no caller supplies the globs.** They are compiled into
-//! `tddy_core::backend::context_globs_for_agent` and selected by the session's agent, so a request
-//! can pick a table row but cannot name a path set. There is no spelling of a request that widens
-//! the readable set to reach `.env`, which is exactly what the git gate was protecting against.
+//! **Why swapping that gate is safe: no caller supplies the globs.** They are read from the
+//! agent's YAML spec by the daemon that owns the registry and selected by the session's
+//! persisted type, so a request can pick a spec's row but cannot name a path set. There is no
+//! spelling of a request that widens the readable set to reach `.env`, which is exactly what
+//! the git gate was protecting against.
 //!
 //! One property of the sibling is preserved verbatim and is worth naming, because it constrains the
 //! order of the checks below: a path the allow-list does not name is refused with the same code
@@ -67,68 +68,66 @@ use tddy_daemon_kernel::HOST_DOCUMENT_FRAME_BYTES;
 /// codec entirely — one fewer layer between an agent and its `CLAUDE.md`.
 pub const CONTEXT_FILE_FRAME_BYTES: usize = HOST_DOCUMENT_FRAME_BYTES;
 
-/// The globs a session of `session_type` syncs.
+/// The shared context globs a session with no agent of its own syncs (`workspace`, and any
+/// session type no spec stands for): narrower than any agent's row, never the union of them.
+pub const SHARED_CONTEXT_GLOBS: &[&str] = &["AGENTS.md", ".agents/**"];
+
+/// The context globs a session syncs, from the globs its agent's spec declares
+/// (`coding_agent.context_globs`), resolved by the caller that owns the registry.
 ///
-/// Two vocabularies meet here and neither is wrong. `tddy-core`'s table is keyed on **agent** names
-/// (`claude`, `cursor`, `codex`) because that is what a `CodingBackend` calls itself and what the
-/// sandbox app already passes as `--agent-kind`. The daemon dispatches on **session type** strings
-/// (`claude-cli`, `cursor-cli`, `workspace`) because a session type names a spawn path, of which an
-/// agent is only one property — `workspace` runs no agent at all.
-///
-/// Mapping rather than renaming either side: the session type is persisted in `.session.yaml` and
-/// spoken by the web, and the agent name is spoken by the backends and by the sandbox CLI. A
-/// session type this does not know falls to `context_globs_for_agent`'s shared base, which can only
-/// ever sync less than a known backend.
-pub fn context_globs_for_session_type(session_type: &str) -> &'static [&'static str] {
-    tddy_core::backend::context_globs_for_agent(context_agent_for_session_type(session_type))
+/// No caller supplies globs of its own choosing: they come from the daemon's spec registry,
+/// keyed by the session's persisted type, so a request can pick a spec's row but cannot name
+/// a path set. `spec_globs` is `None` for a session with no agent (`workspace`, an unknown
+/// type), which syncs only the shared base.
+pub fn context_globs(spec_globs: Option<&[String]>) -> Vec<String> {
+    spec_globs.map(|globs| globs.to_vec()).unwrap_or_else(|| {
+        SHARED_CONTEXT_GLOBS
+            .iter()
+            .map(ToString::to_string)
+            .collect()
+    })
 }
 
-/// The agent name a session of `session_type` runs, in the vocabulary `tddy-core`'s table and the
-/// two context RPCs are keyed on.
+/// Which agent a **session**'s context allow-list belongs to, read from what the daemon
+/// persisted about it rather than from what the caller asked for.
 ///
-/// Named separately from [`context_globs_for_session_type`] because the split half sends the *name*
-/// across the wire and lets the serving daemon look the row up: a request that carried the globs
-/// themselves would let a caller name a path set, which is exactly what the compiled-in table exists
-/// to prevent.
-pub fn context_agent_for_session_type(session_type: &str) -> &'static str {
-    // A CLI harness session is served its descriptor's agent. Every other session type either runs
-    // no agent at all (`workspace`) or is not one this mapping knows, and both answer with the empty
-    // name so `context_globs_for_agent` yields its shared base — narrower than any backend's row,
-    // never the union of them.
-    tddy_core::cli_harness::cli_harness(session_type.trim())
-        .map_or("", |harness| harness.context_agent)
-}
-
-/// The agent whose allow-list a **session** is served, read from what the daemon persisted about it
-/// rather than from what the caller asked for.
-///
-/// This is the authoritative answer, and the reason it exists is a widening the request field would
-/// otherwise permit. `ReadContextFileRequest.agent` and `ContextManifestRequest.agent` are
-/// caller-chosen and authorization is per OS user, not per session
-/// (`DaemonSessionHost::authorize_exec_tool_caller`), so a caller holding a valid token for a
-/// `codex` session could name `cursor` and be served that row: `.claude/**`, `.cursor/**` and
-/// `.mcp.json` out of a checkout it was never granted them on — the very files that carry API
-/// tokens in MCP `env` blocks, and precisely the gitignored ones the git-listing gate used to
-/// refuse. Trusting the field makes the enforced bound the *union* of every table row instead of
-/// the session's own.
+/// This is the authoritative answer, and the reason it exists is a widening the request field
+/// would otherwise permit. `ReadContextFileRequest.agent` and `ContextManifestRequest.agent`
+/// are caller-chosen and authorization is per OS user, not per session, so a caller holding a
+/// valid token for one session could name another agent and be served its row. Trusting the
+/// field makes the enforced bound the *union* of every spec row instead of the session's own.
 ///
 /// Two persisted facts decide it, in this order:
 ///
-/// 1. **A paired agent means the split path.** The codebase half of a split placement is persisted
-///    as a `workspace` session — it runs no agent of its own — while the agent it stands in for
-///    lives on another daemon, whose `.session.yaml` this host cannot read. What *is* recorded here
-///    is the back-pointer to that agent ([`tddy_core::paired_agent`], written with the
-///    session precisely so it cannot be stamped on later), and split placement is `claude-cli` only
-///    (PRD `remote-managed-worktree.md` § Why claude-cli only). So a paired workspace session
-///    serves Claude's row. Deriving it from the pairing rather than from `req.agent` keeps the
-///    answer a property of what this daemon wrote down.
-/// 2. **Otherwise the session's own type**, through [`context_agent_for_session_type`] — a
-///    `workspace` session nobody is paired with runs no agent and gets the shared base.
-pub fn context_agent_for_session(meta: &tddy_core::SessionMetadata) -> &'static str {
+/// 1. **A paired agent means the split path.** The codebase half of a split placement is
+///    persisted as a `workspace` session — it runs no agent of its own — while the agent it
+///    stands in for lives on another daemon. What is recorded here is the back-pointer to
+///    that agent ([`tddy_core::paired_agent`], written with the session precisely so it
+///    cannot be stamped on later). The caller resolves [`SessionContextAgent::Paired`] to
+///    the split agent its registry offers; deriving it from the pairing rather than from
+///    `req.agent` keeps the answer a property of what this daemon wrote down.
+/// 2. **Otherwise the session's own type**: `<id>-cli` names agent `<id>`; a `workspace`
+///    session nobody is paired with runs no agent and gets the shared base.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SessionContextAgent {
+    /// The workspace half of a split placement: the agent lives on another daemon.
+    Paired,
+    /// The agent id the session's own type names, or `None` for a session with no agent.
+    Own(Option<String>),
+}
+
+/// See [`SessionContextAgent`].
+pub fn context_agent_for_session(meta: &tddy_core::SessionMetadata) -> SessionContextAgent {
     if tddy_core::paired_agent(meta).is_some() {
-        return context_agent_for_session_type("claude-cli");
+        return SessionContextAgent::Paired;
     }
-    context_agent_for_session_type(meta.session_type.as_deref().unwrap_or_default())
+    let session_type = meta.session_type.as_deref().unwrap_or_default().trim();
+    SessionContextAgent::Own(
+        session_type
+            .strip_suffix("-cli")
+            .filter(|id| !id.is_empty())
+            .map(str::to_string),
+    )
 }
 
 /// Every allow-listed path under `worktree_root`, with the hash that says whether it moved.
@@ -145,15 +144,17 @@ pub fn context_agent_for_session(meta: &tddy_core::SessionMetadata) -> &'static 
 pub fn context_manifest(
     worktree_root: &Path,
     globs: &[&str],
+    guidance_files: &[PathBuf],
     max_bytes: u64,
 ) -> Result<Vec<ContextManifestEntry>, Status> {
     log::debug!(
         "context_manifest: worktree_root={worktree_root:?} globs={globs:?} max_bytes={max_bytes}"
     );
-    let manifest = ContextManifest::of_worktree(worktree_root, globs, max_bytes).map_err(|e| {
-        log::error!("context_manifest: walking {worktree_root:?} failed: {e}");
-        Status::internal(format!("failed to build context manifest: {e}"))
-    })?;
+    let manifest = ContextManifest::of_worktree(worktree_root, globs, guidance_files, max_bytes)
+        .map_err(|e| {
+            log::error!("context_manifest: walking {worktree_root:?} failed: {e}");
+            Status::internal(format!("failed to build context manifest: {e}"))
+        })?;
     let entries: Vec<ContextManifestEntry> = manifest
         .entries()
         .iter()
@@ -200,6 +201,7 @@ pub fn read_context_file_bytes(
     worktree_root: &Path,
     rel_path: &str,
     globs: &[&str],
+    guidance_files: &[PathBuf],
     max_bytes: u64,
 ) -> Result<Vec<u8>, Status> {
     log::debug!(
@@ -211,7 +213,7 @@ pub fn read_context_file_bytes(
         rel_path,
         globs,
         max_bytes,
-        &mut WorktreeReach::of(worktree_root, globs),
+        &mut WorktreeReach::of(worktree_root, globs, guidance_files),
     )
 }
 
@@ -223,6 +225,7 @@ pub fn read_context_file_bytes_within(
     worktree_root: &Path,
     rel_path: &str,
     globs: &[&str],
+    guidance_files: &[PathBuf],
     max_bytes: u64,
     reach: &ContextReach,
 ) -> Result<Vec<u8>, Status> {
@@ -231,7 +234,7 @@ pub fn read_context_file_bytes_within(
         rel_path,
         globs,
         max_bytes,
-        &mut WorktreeReach::already_walked(worktree_root, globs, reach),
+        &mut WorktreeReach::already_walked(worktree_root, globs, guidance_files, reach),
     )
 }
 
@@ -283,6 +286,7 @@ pub fn read_context_files_bytes(
     worktree_root: &Path,
     rel_paths: &[String],
     globs: &[&str],
+    guidance_files: &[PathBuf],
     max_bytes: u64,
 ) -> Result<Vec<(String, Vec<u8>)>, Status> {
     log::debug!(
@@ -311,7 +315,7 @@ pub fn read_context_files_bytes(
     let mut resolved: Vec<(&String, PathBuf)> = Vec::with_capacity(rel_paths.len());
     let mut total_bytes: u64 = 0;
     // One walk for the whole batch.
-    let mut reach = WorktreeReach::of(worktree_root, globs);
+    let mut reach = WorktreeReach::of(worktree_root, globs, guidance_files);
     for rel_path in rel_paths {
         let canonical_file =
             resolve_allow_listed_context_file(worktree_root, rel_path, globs, &mut reach)?;
@@ -459,27 +463,53 @@ pub fn context_file_batch_frames(files: &[(String, Vec<u8>)]) -> Vec<ContextFile
 mod tests {
     use super::*;
 
-    /// The two vocabularies meet correctly: a `cursor-cli` session gets Cursor's list, which is the
-    /// one that includes `.cursor/**`, rather than the shared base an unmapped name would yield.
+    /// A caller's spec globs are the row a session syncs, as given.
     #[test]
-    fn a_cursor_cli_session_syncs_the_cursor_tree() {
+    fn spec_globs_are_served_as_given() {
+        // Given one agent's spec row (as its YAML declares it)
+        let row: Vec<String> = ["AGENTS.md", ".cursor/**"]
+            .iter()
+            .map(ToString::to_string)
+            .collect();
+
         // When
-        let globs = context_globs_for_session_type("cursor-cli");
+        let globs = context_globs(Some(&row));
 
         // Then
-        assert!(globs.contains(&".cursor/**"), "got {globs:?}");
+        assert!(globs.contains(&".cursor/**".to_string()), "got {globs:?}");
     }
 
-    /// A `workspace` session runs no agent, so it falls to the shared base — narrower than any
-    /// backend's list, never the union of them.
+    /// A session with no agent falls to the shared base — narrower than any agent's list,
+    /// never the union of them.
     #[test]
-    fn a_session_type_that_names_no_agent_falls_to_the_shared_base() {
+    fn a_session_with_no_agent_falls_to_the_shared_base() {
         // When
-        let globs = context_globs_for_session_type("workspace");
+        let globs = context_globs(None);
 
         // Then
-        assert!(!globs.contains(&".cursor/**"), "got {globs:?}");
-        assert!(!globs.contains(&".claude/**"), "got {globs:?}");
-        assert!(globs.contains(&"AGENTS.md"), "got {globs:?}");
+        assert!(!globs.contains(&".cursor/**".to_string()), "got {globs:?}");
+        assert!(!globs.contains(&".claude/**".to_string()), "got {globs:?}");
+        assert!(globs.contains(&"AGENTS.md".to_string()), "got {globs:?}");
+    }
+
+    /// A session's own type names its agent by stripping the `-cli` session-type suffix.
+    #[test]
+    fn a_sessions_own_type_names_its_agent() {
+        // Given
+        let meta: tddy_core::SessionMetadata = serde_json::from_value(serde_json::json!({
+            "session_id": "s1",
+            "project_id": "p1",
+            "created_at": "2026-01-01T00:00:00Z",
+            "updated_at": "2026-01-01T00:00:00Z",
+            "status": "running",
+            "session_type": "cursor-cli",
+        }))
+        .expect("a session record deserializes");
+
+        // Then
+        assert_eq!(
+            context_agent_for_session(&meta),
+            SessionContextAgent::Own(Some("cursor".to_string()))
+        );
     }
 }

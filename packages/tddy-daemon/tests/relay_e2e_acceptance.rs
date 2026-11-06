@@ -24,7 +24,7 @@ use tddy_host_service::multi_host::EligibleDaemonSource;
 use tddy_livekit_testkit::LiveKitTestkit;
 use tddy_rpc::Request;
 use tddy_service::proto::exec_tools::{ExecToolService, ListExecToolsRequest};
-use tddy_session_lifecycle::claude_cli_session::ClaudeCliSessionManager;
+use tddy_session_lifecycle::claude_cli_session::CliSessionManager;
 use tddy_session_lifecycle::connection_service::DaemonSessionHost;
 use tddy_session_lifecycle::relay_idle::IdleTimeoutTracker;
 
@@ -214,7 +214,7 @@ async fn relay_forwards_list_exec_tools_to_remote_peer() {
                 tddy_spawn::supervisor_client::SpawnBackendChoice::ForkedWorker,
                 tddy_session_lifecycle::peer_routing::PeerRouting::local_only(&config_b), // B has no discovery of its own — it only serves its local tools
                 Arc::new(tddy_daemon_kernel::operator_channel::NoOperatorChannel),
-                Arc::new(ClaudeCliSessionManager::new()),
+                Arc::new(CliSessionManager::new()),
             )
             .with_coding_agents_if_none(tddy_session_lifecycle::test_util::builtin_coding_agents()),
         )
@@ -278,7 +278,7 @@ async fn relay_forwards_list_exec_tools_to_remote_peer() {
                 }),
             ),
             Arc::new(tddy_daemon_kernel::operator_channel::NoOperatorChannel),
-            Arc::new(ClaudeCliSessionManager::new()),
+            Arc::new(CliSessionManager::new()),
         )
         .with_coding_agents_if_none(tddy_session_lifecycle::test_util::builtin_coding_agents()),
     );

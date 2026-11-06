@@ -26,7 +26,10 @@ use tddy_sandbox::{
 #[test]
 fn with_no_subagents_the_rendered_preamble_is_the_constant_itself() {
     // Then
-    assert_eq!(managed_codebase_preamble(&[]), MANAGED_CODEBASE_PREAMBLE);
+    assert_eq!(
+        managed_codebase_preamble(&[], &[]),
+        MANAGED_CODEBASE_PREAMBLE
+    );
 }
 
 /// The rule the whole managed-codebase arrangement rests on: native tools do not reach the
@@ -34,7 +37,7 @@ fn with_no_subagents_the_rendered_preamble_is_the_constant_itself() {
 #[test]
 fn the_preamble_directs_every_file_and_shell_operation_through_the_tddy_tools() {
     // When
-    let preamble = managed_codebase_preamble(&[]);
+    let preamble = managed_codebase_preamble(&[], &[]);
 
     // Then
     assert!(preamble.contains("mcp__tddy-tools__"));
@@ -51,10 +54,13 @@ fn the_preamble_directs_every_file_and_shell_operation_through_the_tddy_tools() 
 #[test]
 fn a_withdrawn_tool_is_named_beside_the_subagent_that_took_it() {
     // When
-    let preamble = managed_codebase_preamble(&[SubagentReplacement {
-        name: "explorer",
-        replaced: &["Grep", "Glob"],
-    }]);
+    let preamble = managed_codebase_preamble(
+        &[SubagentReplacement {
+            name: "explorer",
+            replaced: &["Grep", "Glob"],
+        }],
+        &[],
+    );
 
     // Then
     assert!(preamble.contains("explorer"));
@@ -67,10 +73,13 @@ fn a_withdrawn_tool_is_named_beside_the_subagent_that_took_it() {
 #[test]
 fn a_replaced_shell_gets_the_session_actions_paragraph() {
     // When
-    let preamble = managed_codebase_preamble(&[SubagentReplacement {
-        name: "commander",
-        replaced: &["Shell"],
-    }]);
+    let preamble = managed_codebase_preamble(
+        &[SubagentReplacement {
+            name: "commander",
+            replaced: &["Shell"],
+        }],
+        &[],
+    );
 
     // Then
     assert!(preamble.contains("request_action"));

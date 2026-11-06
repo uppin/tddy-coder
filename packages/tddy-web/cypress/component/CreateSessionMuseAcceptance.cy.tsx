@@ -4,6 +4,7 @@
  * Feature: docs/ft/daemon/muse-cli-session.md
  */
 import { createClient } from "@connectrpc/connect";
+import { servedAgentWire } from "../support/servedAgents";
 import { anInMemoryRpcBackend } from "tddy-connectrpc-testkit";
 import { CreateSessionPane } from "../../src/components/sessions/CreateSessionPane";
 import { SessionService } from "../../src/gen/session_pb";
@@ -22,7 +23,11 @@ describe("CreateSessionPane — Muse Code terminal sessions", () => {
       .onUnary(ProjectService.method.listProjects, () => ({
         projects: [{ projectId: "proj-1", name: "Test Project", mainRepoPath: "/repo" }],
       }))
-      .onUnary(CatalogService.method.listAgents, () => ({ agents: [] }))
+      .onUnary(CatalogService.method.listAgents, () => ({
+      agents: [
+        { id: "muse", label: "Muse Code", ...servedAgentWire("muse") },
+      ],
+    }))
       .onUnary(CatalogService.method.listTools, () => ({ tools: [] }))
       .onUnary(CatalogService.method.listAgentModels, (req) =>
         req.agent === "muse-cli"

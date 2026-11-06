@@ -48,7 +48,9 @@ extensions:
     capabilities: []
     models:
       default: muse-spark-1.3
-      curated: [muse-spark-1.3, muse-wonder-1.0]
+      curated:
+        - { id: muse-spark-1.3, label: "Muse Spark 1.3" }
+        - { id: muse-wonder-1.0, label: "Muse Wonder 1.0" }
     context_globs: [AGENTS.md, ".agents/**", ".muse/**"]
     # A jailed start without a provider route is refused: the jail holds no Meta login. The route
     # is environment only — no configuration file — and hands its key in `META_API_KEY`.

@@ -24,7 +24,7 @@ use tddy_daemon_extensions::{
     SessionStarter,
 };
 use tddy_daemon_kernel::config::DaemonConfig;
-use tddy_session_lifecycle::claude_cli_session::ClaudeCliSessionManager;
+use tddy_session_lifecycle::claude_cli_session::CliSessionManager;
 use tddy_telegram::telegram_tracked_session::{
     SharedTelegramTrackedSessionCoordinator, TelegramTrackedSessionCoordinator,
 };
@@ -137,7 +137,7 @@ fn build_harness(
         elicitation_select_options: Arc::new(Mutex::new(HashMap::new())),
         elicitation_multi_select_meta: Arc::new(Mutex::new(HashMap::new())),
         pending_elicitation_other: Arc::new(Mutex::new(HashMap::new())),
-        claude_cli_manager: Arc::new(ClaudeCliSessionManager::new()),
+        cli_manager: Arc::new(CliSessionManager::new()),
     });
     let tracked: SharedTelegramTrackedSessionCoordinator =
         Arc::new(Mutex::new(TelegramTrackedSessionCoordinator::new()));

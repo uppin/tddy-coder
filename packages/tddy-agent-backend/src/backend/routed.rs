@@ -9,38 +9,6 @@
 
 use crate::provider_route::HarnessRoute;
 
-use super::{ClaudeAcpBackend, CodexAcpBackend, OpenCodeAcpBackend};
-
-impl ClaudeAcpBackend {
-    /// `claude-agent-acp` on a provider account: the route's environment on the agent child. The
-    /// agent takes its model from that environment, so the route's arguments are not passed.
-    #[must_use]
-    pub fn with_provider_route(mut self, route: HarnessRoute) -> Self {
-        self.set_provider_route(route);
-        self
-    }
-}
-
-impl CodexAcpBackend {
-    /// `codex-acp` on a provider account: the route's overrides and key on the agent child.
-    #[must_use]
-    pub fn with_provider_route(mut self, route: HarnessRoute) -> Self {
-        self.set_provider_route(route);
-        self
-    }
-}
-
-impl OpenCodeAcpBackend {
-    /// `opencode acp` on a provider account: the route's key and its generated configuration on the
-    /// agent child, the configuration reached through `OPENCODE_CONFIG`. The route's `--model` is
-    /// not passed: the generated configuration already selects the model.
-    #[must_use]
-    pub fn with_provider_route(mut self, route: HarnessRoute) -> Self {
-        self.set_provider_route(route);
-        self
-    }
-}
-
 /// Every environment pair `route` gives a child: its plain pairs, then its secret pairs. Both reach
 /// the child's environment and neither reaches its argv.
 pub(super) fn route_child_env(route: &HarnessRoute) -> impl Iterator<Item = (&str, &str)> + '_ {

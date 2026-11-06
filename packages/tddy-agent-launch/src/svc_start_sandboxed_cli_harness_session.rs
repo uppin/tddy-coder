@@ -218,7 +218,17 @@ impl LaunchSessions {
         )?;
         let dirs = prepare_jail_dirs(&session_dir)?;
         prepare_jail_context_dir(
-            kind.name,
+            &tddy_session_files::context_files::context_globs(
+                self.coding_agents
+                    .agents()
+                    .get(kind.name)
+                    .map(|spec| spec.agent.context_globs.as_slice()),
+            ),
+            self.coding_agents
+                .agents()
+                .get(kind.name)
+                .map(|spec| spec.agent.instructions.files.as_slice())
+                .unwrap_or(&[]),
             &started_agents,
             &worktree_path,
             &dirs.context_dir,

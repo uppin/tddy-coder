@@ -17,7 +17,7 @@ use std::time::Duration;
 use futures_util::StreamExt;
 use tddy_daemon_kernel::config::DaemonConfig;
 use tddy_rpc::{Request, Status};
-use tddy_session_lifecycle::claude_cli_session::{ClaudeCliSessionManager, MAIN_TERMINAL_ID};
+use tddy_session_lifecycle::claude_cli_session::{CliSessionManager, MAIN_TERMINAL_ID};
 use tddy_session_lifecycle::connection_service::DaemonSessionHost;
 use tddy_terminal_rpc::proto::terminal_session::{
     SessionTerminalInput, SessionTerminalOutput, StreamReplayMode, StreamTerminalOutputRequest,
@@ -41,7 +41,7 @@ fn test_config() -> (tempfile::TempDir, DaemonConfig) {
 }
 
 fn make_service(
-    manager: Arc<ClaudeCliSessionManager>,
+    manager: Arc<CliSessionManager>,
 ) -> (
     tddy_terminal_rpc::TerminalSessionServiceImpl,
     tempfile::TempDir,
@@ -81,7 +81,7 @@ fn write_main_stub(dir: &std::path::Path) -> std::path::PathBuf {
     script
 }
 
-async fn start_main_terminal(manager: &ClaudeCliSessionManager) -> tempfile::TempDir {
+async fn start_main_terminal(manager: &CliSessionManager) -> tempfile::TempDir {
     let worktree = tempfile::tempdir().unwrap();
     let stub = write_main_stub(worktree.path());
     manager
@@ -89,11 +89,9 @@ async fn start_main_terminal(manager: &ClaudeCliSessionManager) -> tempfile::Tem
             SESSION_ID,
             worktree.path().to_path_buf(),
             "claude-opus-4-8",
-            stub.to_str().unwrap(),
+            vec![stub.to_str().unwrap().to_string()],
+            "claude-cli",
             None,
-            None,
-            false,
-            false,
             None,
             Vec::new(),
             Vec::new(),
@@ -156,7 +154,7 @@ where
 #[serial_test::serial]
 async fn acks_the_applied_input_offset_on_the_output_stream() {
     // Given — a running main terminal with an open output stream
-    let manager = Arc::new(ClaudeCliSessionManager::new());
+    let manager = Arc::new(CliSessionManager::new());
     let _worktree = start_main_terminal(&manager).await;
     let (service, _cfg, _sb) = make_service(Arc::clone(&manager));
 
@@ -186,7 +184,7 @@ async fn acks_the_applied_input_offset_on_the_output_stream() {
 #[serial_test::serial]
 async fn never_lowers_the_acked_offset_for_a_later_smaller_offset() {
     // Given
-    let manager = Arc::new(ClaudeCliSessionManager::new());
+    let manager = Arc::new(CliSessionManager::new());
     let _worktree = start_main_terminal(&manager).await;
     let (service, _cfg, _sb) = make_service(Arc::clone(&manager));
 

@@ -668,7 +668,17 @@ mod tests {
     }
 
     fn select_mode_fixture_with_prompt_h(prompt_h: u16) -> (AppMode, LayoutAreas) {
-        let question = tddy_core::backend_selection_question();
+        let option = |label: &str| tddy_core::QuestionOption {
+            label: label.to_string(),
+            description: String::new(),
+        };
+        let question = tddy_core::ClarificationQuestion {
+            header: "Backend".to_string(),
+            question: "Select the coding backend".to_string(),
+            options: vec![option("claude"), option("cursor")],
+            multi_select: false,
+            allow_other: false,
+        };
         let mode = AppMode::Select {
             question,
             question_index: 0,

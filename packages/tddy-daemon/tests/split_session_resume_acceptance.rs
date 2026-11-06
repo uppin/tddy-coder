@@ -47,7 +47,7 @@ use tddy_github::GitHubUser;
 use tddy_livekit_testkit::LiveKitTestkit;
 use tddy_rpc::Request;
 use tddy_service::proto::session::{ResumeSessionRequest, SessionService as SessionServiceTrait};
-use tddy_session_lifecycle::claude_cli_session::ClaudeCliSessionManager;
+use tddy_session_lifecycle::claude_cli_session::CliSessionManager;
 use tddy_session_lifecycle::connection_service::DaemonSessionHost;
 use tddy_session_lifecycle::test_util::wait_until_peer_discovered;
 use tddy_testing_commons::stub_scripts::{a_stub_agent_script, read_recorded_argv};
@@ -246,7 +246,7 @@ fn a_service(
             }),
         ),
         Arc::new(tddy_daemon_kernel::operator_channel::NoOperatorChannel),
-        Arc::new(ClaudeCliSessionManager::new()),
+        Arc::new(CliSessionManager::new()),
     )
     .with_coding_agents_if_none(
         tddy_session_lifecycle::test_util::coding_agents_with_binaries(&[(
@@ -846,7 +846,7 @@ async fn refuse_a_resume_that_cannot_read_the_roster(
         tddy_spawn::supervisor_client::SpawnBackendChoice::ForkedWorker,
         tddy_daemon_livekit::peer_routing::peer_routing_over(&config, discovery),
         Arc::new(tddy_daemon_kernel::operator_channel::NoOperatorChannel),
-        Arc::new(ClaudeCliSessionManager::new()),
+        Arc::new(CliSessionManager::new()),
     )
     .with_coding_agents_if_none(
         tddy_session_lifecycle::test_util::coding_agents_with_binaries(&[("claude", &claude_stub)]),

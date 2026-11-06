@@ -14,7 +14,7 @@ use std::time::Duration;
 use bytes::Bytes;
 use tddy_daemon_kernel::config::DaemonConfig;
 use tddy_rpc::Request;
-use tddy_session_lifecycle::claude_cli_session::ClaudeCliSessionManager;
+use tddy_session_lifecycle::claude_cli_session::CliSessionManager;
 use tddy_session_lifecycle::connection_service::DaemonSessionHost;
 use tddy_terminal_rpc::proto::terminal_session::{
     ListTmuxSessionsRequest, StartTerminalSessionRequest, StopTerminalSessionRequest,
@@ -106,7 +106,7 @@ impl Drop for PrivateTmux {
 /// A daemon serving one running session whose identity maps to the OS user running the test.
 pub struct TmuxTabDaemon {
     pub service: tddy_terminal_rpc::TerminalSessionServiceImpl,
-    pub manager: Arc<ClaudeCliSessionManager>,
+    pub manager: Arc<CliSessionManager>,
     pub worktree: PathBuf,
     _dirs: Vec<tempfile::TempDir>,
 }
@@ -115,7 +115,7 @@ pub async fn a_daemon_with_a_running_session() -> TmuxTabDaemon {
     let (config_dir, config) = a_config_mapping_to_this_user();
     let worktree = tempfile::tempdir().unwrap();
     let data_dir = tempfile::tempdir().unwrap();
-    let manager = Arc::new(ClaudeCliSessionManager::new());
+    let manager = Arc::new(CliSessionManager::new());
     start_main_terminal(&manager, worktree.path()).await;
     let service = session_host(config, data_dir.path().to_path_buf(), Arc::clone(&manager))
         .terminal_session_service();
@@ -215,7 +215,7 @@ pub fn a_config_mapping_to_this_user() -> (tempfile::TempDir, DaemonConfig) {
     (dir, config)
 }
 
-pub async fn start_main_terminal(manager: &ClaudeCliSessionManager, worktree: &Path) {
+pub async fn start_main_terminal(manager: &CliSessionManager, worktree: &Path) {
     let main = a_stub_agent_script(worktree, "stub_main.sh")
         .then_reading_stdin()
         .build();
@@ -224,11 +224,9 @@ pub async fn start_main_terminal(manager: &ClaudeCliSessionManager, worktree: &P
             SESSION_ID,
             worktree.to_path_buf(),
             "claude-opus-4-8",
-            main.to_str().unwrap(),
+            vec![main.to_str().unwrap().to_string()],
+            "claude-cli",
             None,
-            None,
-            false,
-            false,
             None,
             Vec::new(),
             Vec::new(),
@@ -241,7 +239,7 @@ pub async fn start_main_terminal(manager: &ClaudeCliSessionManager, worktree: &P
 pub fn session_host(
     config: DaemonConfig,
     data_dir: PathBuf,
-    manager: Arc<ClaudeCliSessionManager>,
+    manager: Arc<CliSessionManager>,
 ) -> DaemonSessionHost {
     let sessions_base = data_dir.clone();
     let sessions_base_resolver: SessionsBaseResolver =

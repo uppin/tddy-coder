@@ -10,8 +10,7 @@ use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
-use tddy_cli_sessions::cli_session_manager::{CliSessionManager, ExitHook, HarnessLaunchExtras};
-use tddy_core::cli_harness::{cli_harness, CliLaunch};
+use tddy_cli_sessions::cli_session_manager::{CliSessionManager, ExitHook};
 use tddy_testing_commons::wait::eventually_awaiting;
 use tokio::sync::oneshot;
 
@@ -56,19 +55,15 @@ async fn a_resume_waits_for_the_exit_hook_of_the_run_before() {
     let (release_tx, release_rx) = oneshot::channel();
     let (hook, seen_rx) = a_hook_held_until(release_rx);
     manager
-        .launch_cli_harness(
-            cli_harness("warp-cli").expect("warp-cli"),
+        .spawn_rendered_main(
             SESSION,
+            "agent-cli",
             dir.path().to_path_buf(),
-            &CliLaunch {
-                binary: &binary,
-                ..CliLaunch::default()
-            },
-            HarnessLaunchExtras {
-                on_exit: Some(hook),
-                ..HarnessLaunchExtras::default()
-            },
+            "",
+            vec![binary.to_string()],
+            Vec::new(),
             None,
+            Some(hook),
         )
         .await
         .expect("harness spawned");
@@ -117,19 +112,15 @@ async fn a_resume_does_not_wait_for_a_run_that_is_still_going() {
     let (_release_tx, release_rx) = oneshot::channel();
     let (hook, _seen_rx) = a_hook_held_until(release_rx);
     manager
-        .launch_cli_harness(
-            cli_harness("warp-cli").expect("warp-cli"),
+        .spawn_rendered_main(
             SESSION,
+            "agent-cli",
             dir.path().to_path_buf(),
-            &CliLaunch {
-                binary: &binary,
-                ..CliLaunch::default()
-            },
-            HarnessLaunchExtras {
-                on_exit: Some(hook),
-                ..HarnessLaunchExtras::default()
-            },
+            "",
+            vec![binary.to_string()],
+            Vec::new(),
             None,
+            Some(hook),
         )
         .await
         .expect("harness spawned");

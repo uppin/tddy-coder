@@ -741,7 +741,7 @@ async fn watch_task_list_with_remote_daemon_instance_id_returns_failed_precondit
 #[cfg(unix)]
 async fn bash_pty_terminal_appears_in_list_tasks_with_pty_channel() {
     // Given — shared TaskRegistry wired like ConnectionService (manager owns registry)
-    let manager = tddy_session_lifecycle::claude_cli_session::ClaudeCliSessionManager::new();
+    let manager = tddy_session_lifecycle::claude_cli_session::CliSessionManager::new();
     let bridge = test_bridge(manager.task_registry());
     let worktree = tempfile::tempdir().expect("temp dir");
 
@@ -786,7 +786,7 @@ async fn bash_pty_terminal_appears_in_list_tasks_with_pty_channel() {
 #[cfg(unix)]
 async fn list_tasks_includes_a_running_claude_cli_and_bash_task() {
     // Given — main claude-cli PTY plus an auxiliary bash terminal on the same session
-    let manager = tddy_session_lifecycle::claude_cli_session::ClaudeCliSessionManager::new();
+    let manager = tddy_session_lifecycle::claude_cli_session::CliSessionManager::new();
     let bridge = test_bridge(manager.task_registry());
     let worktree = tempfile::tempdir().expect("worktree");
     let stub = {
@@ -802,11 +802,9 @@ async fn list_tasks_includes_a_running_claude_cli_and_bash_task() {
             "list-both-kinds-session",
             worktree.path().to_path_buf(),
             "claude-opus-4-8",
-            stub.to_str().unwrap(),
+            vec![stub.to_str().unwrap().to_string()],
+            "claude-cli",
             None,
-            None,
-            false,
-            false,
             None,
             Vec::new(),
             Vec::new(),
@@ -852,7 +850,7 @@ async fn list_tasks_includes_a_running_claude_cli_and_bash_task() {
 #[cfg(unix)]
 async fn cancel_task_cancels_a_bash_pty_task() {
     // Given — a long-lived bash PTY tool
-    let manager = tddy_session_lifecycle::claude_cli_session::ClaudeCliSessionManager::new();
+    let manager = tddy_session_lifecycle::claude_cli_session::CliSessionManager::new();
     let registry = manager.task_registry();
     let bridge = test_bridge(registry.clone());
     let worktree = tempfile::tempdir().expect("worktree");
@@ -862,11 +860,9 @@ async fn cancel_task_cancels_a_bash_pty_task() {
             "cancel-bash-session",
             worktree.path().to_path_buf(),
             "claude-opus-4-8",
-            "/bin/sleep",
+            vec!["/bin/sleep".to_string()],
+            "claude-cli",
             None,
-            None,
-            false,
-            false,
             None,
             Vec::new(),
             Vec::new(),

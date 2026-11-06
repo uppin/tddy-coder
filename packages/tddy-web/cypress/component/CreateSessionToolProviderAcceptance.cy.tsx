@@ -7,6 +7,7 @@
  * PRD: docs/ft/coder/1-WIP/PRD-2026-10-18-provider-route-tool-route.md
  */
 import { createClient } from "@connectrpc/connect";
+import { servedAgentWire } from "../support/servedAgents";
 import { anInMemoryRpcBackend, type InMemoryRpcBackend } from "tddy-connectrpc-testkit";
 import { CreateSessionPane } from "../../src/components/sessions/CreateSessionPane";
 import { SessionService } from "../../src/gen/session_pb";
@@ -29,8 +30,8 @@ function aBackend(): InMemoryRpcBackend {
       // As the daemon reports them from the specs: Codex can be routed to OpenAI Responses
       // endpoints, Cursor declares no provider at all.
       agents: [
-        { id: "codex", label: "Codex", kind: AgentKind.CODING_AGENT, harness: "codex", routeProviders: ["openai_responses"] },
-        { id: "cursor", label: "Cursor", kind: AgentKind.CODING_AGENT, harness: "cursor", routeProviders: [] },
+        { id: "codex", label: "Codex", ...servedAgentWire("codex"), kind: AgentKind.CODING_AGENT, harness: "codex", routeProviders: ["openai_responses"] },
+        { id: "cursor", label: "Cursor", ...servedAgentWire("cursor"), kind: AgentKind.CODING_AGENT, harness: "cursor", routeProviders: [] },
       ],
     }))
     .onUnary(CatalogService.method.listTools, () => ({

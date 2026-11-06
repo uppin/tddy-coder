@@ -1,96 +1,98 @@
+//! How an already-rendered argv gains its launch flags.
+//!
+//! The argv itself is rendered from the agent's YAML spec by the caller that owns the spec
+//! (`CodingAgentSpec::render_run_argv`); this module only splices the flags a spawn carries
+//! (a system-prompt file, a spawn's extra args) into it, generically for any agent, and the
+//! sandbox-mode binary remapping in [`wrap_binary_for_sandbox`](super::wrap_binary_for_sandbox).
+
 use std::path::Path;
 
-use tddy_core::cli_harness::{cli_harness, CliLaunch};
-
-use super::CliSessionManager;
-
-/// The argv the CLI harness registered under `session_type` builds for `launch`. The registry is the
-/// one source of every CLI harness's argument list, so the session manager asks it rather than
-/// keeping a copy.
-fn registered_argv(session_type: &str, launch: &CliLaunch<'_>) -> Vec<String> {
-    let harness = cli_harness(session_type).expect("the session type is a registered CLI harness");
-    (harness.argv)(launch)
-}
-
-impl CliSessionManager {
-    /// Build the argv for the `claude` process.
-    ///
-    /// Exported so tests can assert the argument list without spawning a real PTY.
-    ///
-    /// Arg order: `[binary, "--model", model, <session flag>, id, "--permission-mode", mode, prompt?]`.
-    /// `model` is omitted when empty. The session flag is `--resume <id>` when `resume` is true
-    /// (continue an existing on-disk transcript) and `--session-id <id>` otherwise (assign the id to
-    /// a fresh session). `initial_prompt` is appended as a positional arg only when non-empty
-    /// (trimmed); an empty/whitespace prompt is treated as absent so the process is started
-    /// interactively without an injected first turn. `permission_mode` defaults to `"auto"` when
-    /// `None` or empty/whitespace.
-    ///
-    /// The argv is the `claude-cli` harness descriptor's
-    /// ([`tddy_core::cli_harness::cli_harness`]), which builds the base argv through the shared
-    /// [`tddy_core::claude_argv::build_claude_base_argv`] so this path and the sandboxed runner stay
-    /// in lockstep. A managed workflow's `--append-system-prompt-file` is inserted by
-    /// [`Self::start_with_options`] (before any positional prompt), not here, so this builder stays
-    /// focused on the base argv plus the positional prompt.
-    // The split agent's launch (`start_with_options`) is its last caller: Telegram's hand-built
-    // `start` went with `#agent-tools 18/19`.
-    pub fn build_claude_argv(
-        binary_path: &str,
-        model: &str,
-        session_id: &str,
-        initial_prompt: Option<&str>,
-        permission_mode: Option<&str>,
-        dangerously_skip_permissions: bool,
-        resume: bool,
-    ) -> Vec<String> {
-        registered_argv(
-            "claude-cli",
-            &CliLaunch {
-                binary: binary_path,
-                model,
-                session_id,
-                initial_prompt,
-                permission_mode,
-                dangerously_skip_permissions,
-                resume,
-                ..CliLaunch::default()
-            },
-        )
-    }
-
-    /// `argv` — a [`Self::build_claude_argv`] result for `initial_prompt` — with
-    /// `--append-system-prompt-file` and `extra_args` inserted before any positional prompt, so every
-    /// flag precedes the prompt. This is the argv [`Self::start_with_options`] launches.
-    // The split agent's launch (`start_with_options`) is its last caller: Telegram's hand-built
-    // `start` went with `#agent-tools 18/19`.
-    pub fn with_claude_launch_flags(
-        mut argv: Vec<String>,
+impl super::CliSessionManager {
+    /// `argv` with the flags a spawn adds: `--append-system-prompt-file <path>` when
+    /// `append_system_prompt_file` is given, then `extra_args` (a split session's tool
+    /// allowlist, `--mcp-config <path>`), each inserted before a trailing positional prompt
+    /// when the argv carries one (`initial_prompt`), so the flags precede the prompt.
+    pub(crate) fn with_launch_flags(
+        argv: Vec<String>,
         initial_prompt: Option<&str>,
         append_system_prompt_file: Option<&Path>,
-        extra_args: Vec<String>,
+        extra_args: &[String],
     ) -> Vec<String> {
-        // Insert before a trailing positional prompt (if any) so every flag precedes the prompt.
-        let has_positional_prompt = initial_prompt.is_some_and(|p| !p.trim().is_empty());
-        let insert_at = |argv: &Vec<String>| {
-            if has_positional_prompt {
-                argv.len() - 1
-            } else {
-                argv.len()
-            }
-        };
+        let mut with_flags = extra_args.to_vec();
         if let Some(path) = append_system_prompt_file {
-            let at = insert_at(&argv);
-            argv.splice(
-                at..at,
+            with_flags.splice(
+                0..0,
                 [
                     "--append-system-prompt-file".to_string(),
-                    path.to_string_lossy().into_owned(),
+                    path.display().to_string(),
                 ],
             );
         }
-        if !extra_args.is_empty() {
-            let at = insert_at(&argv);
-            argv.splice(at..at, extra_args);
+        if with_flags.is_empty() {
+            return argv;
         }
-        argv
+        let prompt_present = initial_prompt.is_some_and(|p| !p.trim().is_empty());
+        if prompt_present && !argv.is_empty() {
+            let mut argv = argv;
+            let prompt = argv.pop().expect("checked non-empty");
+            argv.extend(with_flags);
+            argv.push(prompt);
+            argv
+        } else {
+            let mut argv = argv;
+            argv.extend(with_flags);
+            argv
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::cli_session_manager::CliSessionManager;
+    use std::path::Path;
+
+    #[test]
+    fn extra_args_are_inserted_before_a_trailing_positional_prompt() {
+        let argv = CliSessionManager::with_launch_flags(
+            vec![
+                "/bin/agent".into(),
+                "--model".into(),
+                "m".into(),
+                "do it".into(),
+            ],
+            Some("do it"),
+            None,
+            &["--allowedTools".into(), "Read".into()],
+        );
+        assert_eq!(
+            argv,
+            vec![
+                "/bin/agent".to_string(),
+                "--model".to_string(),
+                "m".to_string(),
+                "--allowedTools".to_string(),
+                "Read".to_string(),
+                "do it".to_string(),
+            ],
+            "flags must precede the prompt"
+        );
+    }
+
+    #[test]
+    fn extra_args_append_at_the_end_when_there_is_no_prompt() {
+        let argv = CliSessionManager::with_launch_flags(
+            vec!["/bin/agent".into()],
+            None,
+            Some(Path::new("/tmp/prompt.md")),
+            &[],
+        );
+        assert_eq!(
+            argv,
+            vec![
+                "/bin/agent".to_string(),
+                "--append-system-prompt-file".to_string(),
+                "/tmp/prompt.md".to_string(),
+            ]
+        );
     }
 }

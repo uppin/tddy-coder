@@ -563,8 +563,9 @@ pub fn copy_dir_all(src: &Path, dst: &Path) -> Result<(), String> {
 pub fn prepare_context_dir(
     worktree_path: &Path,
     globs: &[&str],
+    guidance_files: &[std::path::PathBuf],
 ) -> Result<SandboxContextDir, String> {
-    SandboxContextDir::create(worktree_path, globs).map_err(|e| e.to_string())
+    SandboxContextDir::create(worktree_path, globs, guidance_files).map_err(|e| e.to_string())
 }
 
 /// Like [`prepare_context_dir`], but the prepended preamble names each entry in `replacements`
@@ -573,8 +574,9 @@ pub fn prepare_context_dir_with_subagent(
     worktree_path: &Path,
     replacements: &[tddy_sandbox::SubagentReplacement<'_>],
     globs: &[&str],
+    guidance_files: &[std::path::PathBuf],
 ) -> Result<SandboxContextDir, String> {
-    SandboxContextDir::create_with_subagent(worktree_path, replacements, globs)
+    SandboxContextDir::create_with_subagent(worktree_path, replacements, globs, guidance_files)
         .map_err(|e| e.to_string())
 }
 

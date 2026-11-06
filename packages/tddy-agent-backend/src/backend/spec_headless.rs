@@ -41,10 +41,7 @@ use super::routed::route_child_env;
 use super::turn_process::{
     describe_deadline, spawn_turn, strip_tddy_env, TurnCommand, TurnGroup, STDERR_GRACE,
 };
-use super::{
-    curated_models_for_agent, BackendModels, CodingBackend, InvokeRequest, InvokeResponse,
-    SessionMode,
-};
+use super::{BackendModels, CodingBackend, InvokeRequest, InvokeResponse, SessionMode};
 
 /// The tool the agent asks before anything not pre-approved.
 const APPROVAL_PROMPT_TOOL: &str = "mcp__tddy-tools__approval_prompt";
@@ -69,6 +66,7 @@ pub struct SpecHeadlessBackend {
     agent: RoutedAgent,
     provider_route: Option<HarnessRoute>,
     model_listing: Option<HeadlessModelListing>,
+    curated_models: BackendModels,
     progress_callback: ProgressCallback,
     turn_deadline: Duration,
 }
@@ -101,6 +99,7 @@ impl SpecHeadlessBackend {
             agent,
             provider_route: None,
             model_listing: None,
+            curated_models: BackendModels::default(),
             progress_callback: None,
             turn_deadline: DEFAULT_TURN_DEADLINE,
         }
@@ -118,6 +117,14 @@ impl SpecHeadlessBackend {
     #[must_use]
     pub fn with_model_listing(mut self, listing: HeadlessModelListing) -> Self {
         self.model_listing = Some(listing);
+        self
+    }
+
+    /// `list_models` answers `catalog` (the spec's `coding_agent.models` curated list, read by
+    /// the caller that built this backend from that spec) when the spec declares no listing.
+    #[must_use]
+    pub fn with_curated_models(mut self, catalog: BackendModels) -> Self {
+        self.curated_models = catalog;
         self
     }
 
@@ -397,7 +404,7 @@ impl CodingBackend for SpecHeadlessBackend {
     /// [`CodingBackend::name`].
     async fn list_models(&self) -> Result<BackendModels, BackendError> {
         let Some(listing) = &self.model_listing else {
-            return Ok(curated_models_for_agent(self.name()));
+            return Ok(self.curated_models.clone());
         };
         let shown = format!("{} {}", listing.program.display(), listing.argv.join(" "));
         let mut command = tokio::process::Command::new(&listing.program);

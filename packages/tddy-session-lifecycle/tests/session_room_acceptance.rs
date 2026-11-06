@@ -128,7 +128,14 @@ fn a_codebase_holding_no_agent_guidance() -> (
     let repo = tempfile::tempdir().expect("tempdir");
     let source = tddy_session_files::context_sync::LocalWorktreeSource::new(
         repo.path().to_path_buf(),
-        CLAUDE_CONTEXT_GLOBS,
+        CLAUDE_CONTEXT_GLOBS
+            .iter()
+            .map(ToString::to_string)
+            .collect(),
+        vec![
+            std::path::PathBuf::from("CLAUDE.md"),
+            std::path::PathBuf::from("AGENTS.md"),
+        ],
         A_GENEROUS_CONTEXT_CAP,
     );
     (repo, source)
@@ -325,7 +332,7 @@ struct FacilitatingDaemon {
     integrations: Arc<IntegrationStatusBoard>,
     /// The PTY manager the service was built with, so a test can ask whether a session still has a
     /// terminal at all.
-    agents: Arc<tddy_session_lifecycle::claude_cli_session::ClaudeCliSessionManager>,
+    agents: Arc<tddy_session_lifecycle::claude_cli_session::CliSessionManager>,
     config: DaemonConfig,
     /// This daemon's lobby — see [`a_lobby_of_its_own`].
     common_room: String,
@@ -411,8 +418,7 @@ impl FacilitatingDaemon {
         let staging = tempfile::tempdir().unwrap();
         // Held by the test as well as by the service: the manager owns the sessions' PTYs, and
         // "this session has no terminal to bridge" is a fact only it can be asked for.
-        let agents =
-            Arc::new(tddy_session_lifecycle::claude_cli_session::ClaudeCliSessionManager::new());
+        let agents = Arc::new(tddy_session_lifecycle::claude_cli_session::CliSessionManager::new());
         let identity = tempfile::tempdir().unwrap();
         let key = DaemonSigningKey::load_or_generate(&identity.path().join(SIGNING_KEY_FILE))
             .expect("the daemon generates its keypair");

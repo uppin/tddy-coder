@@ -29,7 +29,7 @@ use tddy_rpc::Request;
 use tddy_service::proto::session::{
     ResumeSessionRequest, SessionService as SessionServiceTrait, StartSessionRequest,
 };
-use tddy_session_lifecycle::claude_cli_session::ClaudeCliSessionManager;
+use tddy_session_lifecycle::claude_cli_session::CliSessionManager;
 use tddy_session_lifecycle::connection_service::DaemonSessionHost;
 use tddy_testing_commons::wait::{a_capture_showing, PTY_STUB_OUTPUT};
 
@@ -268,7 +268,7 @@ fn a_daemon_config() -> (tempfile::TempDir, DaemonConfig) {
 fn a_session_host(
     config: DaemonConfig,
     sessions_base: PathBuf,
-    manager: Arc<ClaudeCliSessionManager>,
+    manager: Arc<CliSessionManager>,
     coding_agents: Option<Arc<HostCodingAgents>>,
 ) -> Arc<DaemonSessionHost> {
     let tddy_data_dir = sessions_base.clone();
@@ -419,7 +419,7 @@ fn golden(name: &str) -> String {
 
 /// Start a host `claude-cli` session and wait until its agent has recorded its launch; the
 /// session id.
-async fn a_started_session(host: &DaemonSessionHost, manager: &ClaudeCliSessionManager) -> String {
+async fn a_started_session(host: &DaemonSessionHost, manager: &CliSessionManager) -> String {
     let session_id = host
         .start_session(Request::direct(a_claude_cli_start_request()))
         .await
@@ -430,7 +430,7 @@ async fn a_started_session(host: &DaemonSessionHost, manager: &ClaudeCliSessionM
     session_id
 }
 
-async fn agent_launched(manager: &ClaudeCliSessionManager, session_id: &str) {
+async fn agent_launched(manager: &CliSessionManager, session_id: &str) {
     let handle = manager
         .get(session_id)
         .await
@@ -462,7 +462,7 @@ async fn an_unsandboxed_claude_cli_start_runs_the_spec_binary_with_the_argv_its_
     let stubs = a_stub_bin();
     let home = a_tddy_home();
     let (_cfg, config) = a_daemon_config();
-    let manager = Arc::new(ClaudeCliSessionManager::new());
+    let manager = Arc::new(CliSessionManager::new());
     let host = a_session_host(
         config,
         sessions_tmp.path().to_path_buf(),
@@ -508,7 +508,7 @@ async fn a_claude_cli_resume_renders_resume_and_the_session_id_from_the_same_tem
     let stubs = a_stub_bin();
     let home = a_tddy_home();
     let (_cfg, config) = a_daemon_config();
-    let manager = Arc::new(ClaudeCliSessionManager::new());
+    let manager = Arc::new(CliSessionManager::new());
     let host = a_session_host(
         config,
         sessions_tmp.path().to_path_buf(),
@@ -552,7 +552,7 @@ async fn the_mcp_config_allow_deny_flags_permission_prompt_and_preamble_equal_to
     let stubs = a_stub_bin();
     let home = a_tddy_home();
     let (_cfg, config) = a_daemon_config();
-    let manager = Arc::new(ClaudeCliSessionManager::new());
+    let manager = Arc::new(CliSessionManager::new());
     let host = a_session_host(
         config,
         sessions_tmp.path().to_path_buf(),
@@ -616,7 +616,7 @@ async fn a_tddyhome_override_of_claude_yaml_adds_an_argv_token_that_reaches_the_
     let stubs = a_stub_bin();
     let home = a_tddy_home().with_claude_override_adding("--verbose");
     let (_cfg, config) = a_daemon_config();
-    let manager = Arc::new(ClaudeCliSessionManager::new());
+    let manager = Arc::new(CliSessionManager::new());
     let host = a_session_host(
         config,
         sessions_tmp.path().to_path_buf(),
@@ -650,7 +650,7 @@ async fn the_daemon_yaml_claude_binary_path_still_overrides_the_spec_binary() {
     let home = a_tddy_home();
     let (_cfg, config) = a_daemon_config();
     let agents = home.coding_agents_pinned_by(&stubs, &stubs.binary("claude-pinned"));
-    let manager = Arc::new(ClaudeCliSessionManager::new());
+    let manager = Arc::new(CliSessionManager::new());
     let host = a_session_host(
         config,
         sessions_tmp.path().to_path_buf(),

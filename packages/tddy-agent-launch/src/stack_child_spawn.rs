@@ -28,7 +28,7 @@ pub struct StackChildSpawnHandler {
     pub service: LaunchSessions,
     pub config: DaemonConfig,
     pub tddy_data_dir: PathBuf,
-    pub claude_cli_manager: Arc<CliSessionManager>,
+    pub cli_manager: Arc<CliSessionManager>,
     pub os_user: String,
     pub project_id: String,
     pub sessions_base: PathBuf,

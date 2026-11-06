@@ -15,6 +15,7 @@
  */
 
 import React from "react";
+import { servedAgentWire } from "../support/servedAgents";
 import { Room } from "livekit-client";
 import { createClient } from "@connectrpc/connect";
 import {
@@ -96,7 +97,7 @@ function aBaselineBackend(): InMemoryRpcBackend {
     )
     .onUnary(
       CatalogService.method.listAgents,
-      answering(CatalogService.method.listAgents, { agents: [{ id: "claude", label: "Claude" }] }),
+      answering(CatalogService.method.listAgents, { agents: [{ id: "claude", label: "Claude", ...servedAgentWire("claude"), }] }),
     )
     .onUnary(
       CatalogService.method.listTools,

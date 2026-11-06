@@ -114,6 +114,33 @@ pub fn choose_agent(id: &str, tddy_home: &Path) -> Result<ChosenAgent, AgentChoi
     choose_agent_on(id, tddy_home, &ProcessToolHost)
 }
 
+/// The default model of agent `id`'s spec, loaded the same way [`choose_agent`] loads the
+/// registry, without resolving anything on this host: for a caller whose agent runs elsewhere
+/// (the Linux daemon path), and so need not exist here at all.
+pub fn agent_default_model(id: &str, tddy_home: &Path) -> Result<String, AgentChoiceError> {
+    let registry =
+        load_agent_registry(&tddy_home.join(TOOLS_SUBDIR)).map_err(AgentChoiceError::Registry)?;
+    let mut known: Vec<String> = registry
+        .ids()
+        .filter(|tool| {
+            registry
+                .get(tool)
+                .is_some_and(|def| def.extensions.contains_key(CODING_AGENT_EXTENSION))
+        })
+        .map(str::to_string)
+        .collect();
+    known.sort();
+    let def = registry
+        .get(id)
+        .filter(|def| def.extensions.contains_key(CODING_AGENT_EXTENSION))
+        .ok_or_else(|| AgentChoiceError::Unknown {
+            id: id.to_string(),
+            known,
+        })?;
+    let spec = CodingAgentSpec::of(def).map_err(AgentChoiceError::Spec)?;
+    Ok(spec.agent.models.default.clone())
+}
+
 /// [`choose_agent`], with the agent and its deps resolved against `host` instead of this process's
 /// environment and `PATH`.
 pub fn choose_agent_on(

@@ -16,7 +16,7 @@ use std::time::Duration;
 use bytes::Bytes;
 use tddy_daemon_kernel::config::DaemonConfig;
 use tddy_rpc::{Code, Request};
-use tddy_session_lifecycle::claude_cli_session::ClaudeCliSessionManager;
+use tddy_session_lifecycle::claude_cli_session::CliSessionManager;
 use tddy_session_lifecycle::connection_service::DaemonSessionHost;
 use tddy_session_lifecycle::session_dir_recorded_history::main_capture_recording_path;
 use tddy_task::CaptureRecording;
@@ -39,7 +39,7 @@ const OBSERVE: Duration = Duration::from_secs(10);
 /// A daemon over a data dir the test owns, whose manager records running terminals every 50ms.
 struct RecordingDaemon {
     service: tddy_terminal_rpc::TerminalSessionServiceImpl,
-    manager: Arc<ClaudeCliSessionManager>,
+    manager: Arc<CliSessionManager>,
     data_dir: PathBuf,
     worktree: PathBuf,
     _dirs: Vec<tempfile::TempDir>,
@@ -50,7 +50,7 @@ fn a_daemon() -> RecordingDaemon {
     let worktree = tempfile::tempdir().unwrap();
     let (config_dir, config) = a_config();
     let manager =
-        Arc::new(ClaudeCliSessionManager::new().with_recording_interval(Duration::from_millis(50)));
+        Arc::new(CliSessionManager::new().with_recording_interval(Duration::from_millis(50)));
     let service = session_host(config, data_dir.path().to_path_buf(), Arc::clone(&manager))
         .terminal_session_service();
     RecordingDaemon {
@@ -69,7 +69,7 @@ impl RecordingDaemon {
         session_host(
             config,
             self.data_dir.clone(),
-            Arc::new(ClaudeCliSessionManager::new()),
+            Arc::new(CliSessionManager::new()),
         )
         .terminal_session_service()
     }
@@ -92,11 +92,9 @@ impl RecordingDaemon {
                 SESSION_ID,
                 self.worktree.clone(),
                 "claude-opus-4-8",
-                agent.to_str().unwrap(),
+                vec![agent.to_str().unwrap().to_string()],
+                "claude-cli",
                 None,
-                None,
-                false,
-                false,
                 None,
                 Vec::new(),
                 Vec::new(),
@@ -362,7 +360,7 @@ fn a_config() -> (tempfile::TempDir, DaemonConfig) {
 fn session_host(
     config: DaemonConfig,
     data_dir: PathBuf,
-    manager: Arc<ClaudeCliSessionManager>,
+    manager: Arc<CliSessionManager>,
 ) -> DaemonSessionHost {
     let sessions_base = data_dir.clone();
     let sessions_base_resolver: SessionsBaseResolver =

@@ -18,7 +18,7 @@ use tddy_service::proto::session::{
     DeleteSessionRequest, ListSessionsRequest, ResumeSessionRequest,
     SessionService as SessionServiceTrait, StartSessionRequest,
 };
-use tddy_session_lifecycle::claude_cli_session::ClaudeCliSessionManager;
+use tddy_session_lifecycle::claude_cli_session::CliSessionManager;
 use tddy_session_lifecycle::connection_service::DaemonSessionHost;
 use tddy_testing_commons::stub_scripts::{
     a_stub_agent_script, read_last_appended_argv, read_recorded_env,
@@ -40,7 +40,7 @@ type UserResolver = Arc<dyn Fn(&str) -> Option<String> + Send + Sync>;
 /// A daemon whose `claude` is a stub that records what it was launched with, then holds its pane.
 struct TmuxAgentDaemon {
     host: Arc<DaemonSessionHost>,
-    manager: Arc<ClaudeCliSessionManager>,
+    manager: Arc<CliSessionManager>,
     sessions_base: PathBuf,
     launches: PathBuf,
     environment: PathBuf,
@@ -80,7 +80,7 @@ async fn a_daemon_whose_agent(temperament: AgentTemperament) -> TmuxAgentDaemon 
         .build();
     let repo = a_registered_project(sessions_dir.path());
     let (config_dir, config) = a_config_running(&stub);
-    let manager = Arc::new(ClaudeCliSessionManager::new());
+    let manager = Arc::new(CliSessionManager::new());
     let host = a_session_host(
         config,
         sessions_dir.path().to_path_buf(),
@@ -122,7 +122,7 @@ fn a_config_running(stub_agent: &Path) -> (tempfile::TempDir, AConfigAndItsAgent
 fn a_session_host(
     (config, agents): AConfigAndItsAgents,
     sessions_base: PathBuf,
-    manager: Arc<ClaudeCliSessionManager>,
+    manager: Arc<CliSessionManager>,
 ) -> Arc<DaemonSessionHost> {
     let data_dir = sessions_base.clone();
     let sessions_base_resolver: SessionsBaseResolver =

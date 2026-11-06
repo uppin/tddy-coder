@@ -54,6 +54,15 @@ function aBackendFor(
 ): SessionServiceBackend {
   return aSessionServiceBackend({
     sessions: [aSession(sessionType)],
+    // The daemon serving this screen offers every CLI agent the menu lists; the tab
+    // labels are the labels it serves for them.
+    agents: [
+      { id: "claude", label: "Claude" },
+      { id: "cursor", label: "Cursor" },
+      { id: "opencode", label: "OpenCode" },
+      { id: "muse", label: "Muse Code" },
+      { id: "warp", label: "Warp" },
+    ],
     connectSession: () => ({ livekitRoom: "", livekitUrl: "", livekitServerIdentity: "" }),
     terminals,
     newTerminalId: (index) => `term-${index + 1}`,

@@ -22,6 +22,18 @@ export interface SelectableAgent {
    * asked for. Absent: the daemon did not say.
    */
   readonly routeProviders?: readonly string[];
+  /** The session type that starts this agent (`<id>-cli`), from its spec; empty for none. */
+  readonly sessionType: string;
+  /** The agent's spec capabilities (`managed_workflow`, `split_host`, …). */
+  readonly capabilities: readonly string[];
+  /** The parameter names the agent's launch argv binds (`model`, `prompt`, …). */
+  readonly runParams: readonly string[];
+  /** The permission modes the agent's launch takes, from its spec. */
+  readonly permissionModes: readonly string[];
+  /** The agent's default model id, from its spec. */
+  readonly defaultModel: string;
+  /** The placements the agent's spec allows (`host`, `jail`). */
+  readonly placements: readonly string[];
 }
 
 /**

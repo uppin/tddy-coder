@@ -10,7 +10,7 @@ use std::sync::Arc;
 use tddy_core::session_metadata::{read_session_metadata, write_session_metadata, SessionMetadata};
 use tddy_daemon_kernel::config::DaemonConfig;
 use tddy_rpc::{Code, Request};
-use tddy_session_lifecycle::claude_cli_session::ClaudeCliSessionManager;
+use tddy_session_lifecycle::claude_cli_session::CliSessionManager;
 use tddy_session_lifecycle::connection_service::DaemonSessionHost;
 
 use tddy_service::proto::session::{
@@ -23,6 +23,74 @@ type SessionsBaseResolver = Arc<dyn Fn(&str) -> Option<PathBuf> + Send + Sync>;
 type UserResolver = Arc<dyn Fn(&str) -> Option<String> + Send + Sync>;
 
 const VALID_TOKEN: &str = "valid-token";
+
+/// What the old argv builder produced, now rendered from the `claude` YAML spec's `run.argv`
+/// with the production binding (blank values trimmed away, as `harness_template_params`
+/// binds them): binary, model, session, permissions, prompt.
+#[allow(clippy::too_many_arguments)]
+fn spec_claude_argv(
+    binary: &str,
+    model: &str,
+    session_id: &str,
+    prompt: Option<&str>,
+    permission_mode: Option<&str>,
+    dangerously_skip_permissions: bool,
+    resume: bool,
+) -> Vec<String> {
+    let mut flags: Vec<&str> = Vec::new();
+    if resume {
+        flags.push("resume");
+    }
+    if dangerously_skip_permissions {
+        flags.push("dangerously_skip_permissions");
+    }
+    tddy_coding_agent_specs::CodingAgentRegistry::builtin_cached()
+        .get("claude")
+        .expect("the claude spec loads")
+        .render_run_argv(
+            std::path::Path::new(binary),
+            &[
+                ("model", model.trim()),
+                ("session_id", session_id),
+                (
+                    "permission_mode",
+                    permission_mode.map(str::trim).unwrap_or(""),
+                ),
+                ("prompt", prompt.map(str::trim).unwrap_or("")),
+            ],
+            &flags,
+        )
+        .expect("the claude argv renders")
+}
+
+/// The launch argv a `claude` session runs, rendered from its YAML spec with the stub as its
+/// binary: the manager spawns what it is given, so the argv these tests assert on comes from
+/// the spec (`packages/tddy-coding-agent-specs/specs/claude.yaml`), as production renders it.
+fn a_claude_argv(
+    stub: &std::path::Path,
+    session_id: &str,
+    permission_mode: Option<&str>,
+    resume: bool,
+) -> Vec<String> {
+    let mut flags: Vec<&str> = Vec::new();
+    if resume {
+        flags.push("resume");
+    }
+    tddy_coding_agent_specs::CodingAgentRegistry::builtin_cached()
+        .get("claude")
+        .expect("the claude spec loads")
+        .render_run_argv(
+            stub,
+            &[
+                ("model", TEST_MODEL),
+                ("session_id", session_id),
+                ("permission_mode", permission_mode.unwrap_or("")),
+            ],
+            &flags,
+        )
+        .expect("the claude argv renders")
+}
+
 const TEST_MODEL: &str = "claude-opus-4-8";
 const TEST_PROJECT_ID: &str = "test-project";
 // Safety-net ceiling, not an expected duration: `wait_for_capture_contains` returns the instant
@@ -76,14 +144,14 @@ fn minimal_service(config: AConfigAndItsAgents, sessions_base: PathBuf) -> Daemo
     minimal_service_with_manager(
         config,
         sessions_base,
-        Arc::new(tddy_session_lifecycle::claude_cli_session::ClaudeCliSessionManager::new()),
+        Arc::new(tddy_session_lifecycle::claude_cli_session::CliSessionManager::new()),
     )
 }
 
 fn minimal_service_with_manager(
     (config, agents): AConfigAndItsAgents,
     sessions_base: PathBuf,
-    manager: Arc<tddy_session_lifecycle::claude_cli_session::ClaudeCliSessionManager>,
+    manager: Arc<tddy_session_lifecycle::claude_cli_session::CliSessionManager>,
 ) -> DaemonSessionHost {
     let tddy_data_dir = sessions_base.clone();
     let sessions_base_resolver: SessionsBaseResolver =
@@ -667,7 +735,7 @@ fn a_host_without_coding_agents(config: DaemonConfig, sessions_base: PathBuf) ->
         tddy_spawn::supervisor_client::SpawnBackendChoice::ForkedWorker,
         tddy_session_lifecycle::peer_routing::PeerRouting::local_only(&config),
         Arc::new(tddy_daemon_kernel::operator_channel::NoOperatorChannel),
-        Arc::new(ClaudeCliSessionManager::new()),
+        Arc::new(CliSessionManager::new()),
     )
 }
 
@@ -804,7 +872,7 @@ async fn a_claude_cli_start_whose_binary_is_not_found_is_refused_naming_its_bina
 #[test]
 fn build_claude_argv_includes_positional_prompt_when_present() {
     // When / Then
-    let argv = ClaudeCliSessionManager::build_claude_argv(
+    let argv = spec_claude_argv(
         "/usr/local/bin/claude",
         "claude-opus-4-8",
         "test-session-id",
@@ -847,7 +915,7 @@ fn build_claude_argv_omits_when_empty_or_none() {
 
     // When / Then
     assert_eq!(
-        ClaudeCliSessionManager::build_claude_argv(
+        spec_claude_argv(
             "/usr/local/bin/claude",
             "claude-opus-4-8",
             "sid",
@@ -860,7 +928,7 @@ fn build_claude_argv_omits_when_empty_or_none() {
         "None initial_prompt must produce no positional arg"
     );
     assert_eq!(
-        ClaudeCliSessionManager::build_claude_argv(
+        spec_claude_argv(
             "/usr/local/bin/claude",
             "claude-opus-4-8",
             "sid",
@@ -873,7 +941,7 @@ fn build_claude_argv_omits_when_empty_or_none() {
         "empty string must produce no positional arg"
     );
     assert_eq!(
-        ClaudeCliSessionManager::build_claude_argv(
+        spec_claude_argv(
             "/usr/local/bin/claude",
             "claude-opus-4-8",
             "sid",
@@ -896,7 +964,7 @@ async fn claude_cli_session_passes_initial_prompt_as_positional_arg() {
     let stub_path = write_echo_argv_script(stub_dir.path());
 
     let worktree_dir = tempfile::tempdir().unwrap();
-    let manager = ClaudeCliSessionManager::new();
+    let manager = CliSessionManager::new();
 
     // When
     let handle = manager
@@ -904,11 +972,17 @@ async fn claude_cli_session_passes_initial_prompt_as_positional_arg() {
             "test-session-with-prompt",
             worktree_dir.path().to_path_buf(),
             "claude-opus-4-8",
-            stub_path.to_str().unwrap(),
+            spec_claude_argv(
+                stub_path.to_str().unwrap(),
+                TEST_MODEL,
+                "test-session-with-prompt",
+                Some("build a hello world app"),
+                None,
+                false,
+                false,
+            ),
+            "claude-cli",
             Some("build a hello world app"),
-            None,
-            false,
-            false,
             None,
             Vec::new(),
             Vec::new(),
@@ -941,7 +1015,7 @@ async fn claude_cli_session_empty_prompt_adds_no_positional_arg() {
     let stub_path = write_echo_argv_script(stub_dir.path());
 
     let worktree_dir = tempfile::tempdir().unwrap();
-    let manager = ClaudeCliSessionManager::new();
+    let manager = CliSessionManager::new();
 
     // When
     let handle = manager
@@ -949,11 +1023,17 @@ async fn claude_cli_session_empty_prompt_adds_no_positional_arg() {
             "test-session-empty-prompt",
             worktree_dir.path().to_path_buf(),
             "claude-opus-4-8",
-            stub_path.to_str().unwrap(),
+            spec_claude_argv(
+                stub_path.to_str().unwrap(),
+                TEST_MODEL,
+                "test-session-empty-prompt",
+                Some(""),
+                None,
+                false,
+                false,
+            ),
+            "claude-cli",
             Some(""), // empty — must not add a stray positional arg
-            None,
-            false,
-            false,
             None,
             Vec::new(),
             Vec::new(),
@@ -1002,7 +1082,7 @@ async fn start_session_claude_cli_threads_initial_prompt_from_request() {
 
     let (_cfg_dir, config) = write_config_with_claude_cli_binary(stub_path.to_str().unwrap());
 
-    let shared_manager = Arc::new(ClaudeCliSessionManager::new());
+    let shared_manager = Arc::new(CliSessionManager::new());
     let service = minimal_service_with_manager(
         config,
         sessions_tmp.path().to_path_buf(),
@@ -1043,7 +1123,7 @@ async fn start_session_claude_cli_threads_initial_prompt_from_request() {
     let handle = shared_manager
         .get(&session_id)
         .await
-        .expect("session must be present in the shared ClaudeCliSessionManager after start");
+        .expect("session must be present in the shared CliSessionManager after start");
 
     let output = a_capture_showing(&handle.capture, "ARGV:", PTY_STUB_OUTPUT).await;
 
@@ -1064,7 +1144,7 @@ async fn resume_does_not_replay_initial_prompt() {
     let stub_path = write_echo_argv_script(stub_dir.path());
 
     let worktree_dir = tempfile::tempdir().unwrap();
-    let manager = ClaudeCliSessionManager::new();
+    let manager = CliSessionManager::new();
 
     // Initial start — seeds a prompt.
     let _handle1 = manager
@@ -1072,11 +1152,17 @@ async fn resume_does_not_replay_initial_prompt() {
             "test-session-resume-noreplay",
             worktree_dir.path().to_path_buf(),
             "claude-opus-4-8",
-            stub_path.to_str().unwrap(),
+            spec_claude_argv(
+                stub_path.to_str().unwrap(),
+                TEST_MODEL,
+                "test-session-resume-noreplay",
+                Some("original prompt"),
+                None,
+                false,
+                false,
+            ),
+            "claude-cli",
             Some("original prompt"),
-            None,
-            false,
-            false,
             None,
             Vec::new(),
             Vec::new(),
@@ -1091,7 +1177,8 @@ async fn resume_does_not_replay_initial_prompt() {
             "test-session-resume-noreplay",
             worktree_dir.path().to_path_buf(),
             "claude-opus-4-8",
-            stub_path.to_str().unwrap(),
+            a_claude_argv(&stub_path, "test-session-resume-noreplay", None, true),
+            "claude-cli",
         )
         .await
         .expect("resume must succeed");

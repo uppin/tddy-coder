@@ -1,13 +1,22 @@
 import type { ReactNode } from "react";
 import type { DaemonHost } from "../../lib/participantRole";
 import { inputClass, labelClass } from "./createSessionFormStyles";
-import type { SessionType } from "./createSessionRequest";
 import type { CodebasePlacementChoice } from "./codebasePlacement";
 import { CreateSessionPermissionFields } from "./CreateSessionPermissionFields";
 import { CreateSessionSandboxedCodebaseToggle } from "./CreateSessionSandboxedCodebaseToggle";
 import { CreateSessionManagedCodebaseFields } from "./CreateSessionManagedCodebaseFields";
 
-export interface CreateSessionClaudeCliFieldsProps {
+export interface CreateSessionCliFieldsProps {
+  /** Whether the agent's launch binds a permission mode (its spec's argv): the permission controls. */
+  showsPermission: boolean;
+  /** The permission modes the agent's launch takes, from its spec. */
+  permissionModes: readonly string[];
+  /** Whether the agent can run a managed codebase (its spec's `managed_workflow`). */
+  showsManaged: boolean;
+  /** The agent's spec allows the jailed placement (`placements` includes `jail`): the Sandbox toggle. */
+  showsSandbox: boolean;
+  /** The agent's spec declares `split_host`: the Sandboxed codebase placement. */
+  showsSandboxedCodebase: boolean;
   modelField: ReactNode;
   agentPickerSection: ReactNode;
   permissionMode: string;
@@ -37,7 +46,8 @@ export interface CreateSessionClaudeCliFieldsProps {
   codebaseDaemonInstanceId: string;
   setCodebaseDaemonInstanceId: (codebaseDaemonInstanceId: string) => void;
   daemons: DaemonHost[];
-  sessionType: SessionType;
+  /** The served agent declares `split_host`, so the SSH exec-catalog host is offered with it. */
+  showsSshHost: boolean;
   sshListDaemonId: string;
   sessionToken: string;
   sshConfigHost: string;
@@ -50,8 +60,13 @@ export interface CreateSessionClaudeCliFieldsProps {
   placementFixed?: boolean;
 }
 
-/** Claude CLI session fields. */
-export function CreateSessionClaudeCliFields({
+/** A CLI agent's session fields, shaped by what its spec declares. */
+export function CreateSessionCliFields({
+  showsPermission,
+  permissionModes,
+  showsManaged,
+  showsSandbox,
+  showsSandboxedCodebase,
   modelField,
   agentPickerSection,
   permissionMode,
@@ -80,15 +95,15 @@ export function CreateSessionClaudeCliFields({
   codebaseDaemonInstanceId,
   setCodebaseDaemonInstanceId,
   daemons,
-  sessionType,
+  showsSshHost,
   sshListDaemonId,
   sessionToken,
   sshConfigHost,
   setSshConfigHost,
   placementFixed = false,
-}: CreateSessionClaudeCliFieldsProps) {
+}: CreateSessionCliFieldsProps) {
   /**
-   * The specialized-agent picker and the Semantic index, offered on **every** claude-cli placement.
+   * The specialized-agent picker and the Semantic index, offered on **every** CLI placement.
    *
    * Neither is a property of a placement. An agent is placeable on any host and reads the codebase
    * through the session's own placement; the index is built wherever the worktree is. They used to
@@ -133,19 +148,41 @@ export function CreateSessionClaudeCliFields({
     <>
       {modelField}
 
-      <CreateSessionPermissionFields
-        permissionMode={permissionMode}
-        setPermissionMode={setPermissionMode}
-        dangerouslySkipPermissions={dangerouslySkipPermissions}
-        setDangerouslySkipPermissions={setDangerouslySkipPermissions}
-        placementWithdrawsPermissionBypass={placementWithdrawsPermissionBypass}
-        sandbox={sandbox}
-        setSandbox={setSandbox}
-        applyPlacement={applyPlacement}
-        placementFixed={placementFixed}
-      />
+      {showsPermission ? (
+        <CreateSessionPermissionFields
+          permissionModes={permissionModes}
+          permissionMode={permissionMode}
+          setPermissionMode={setPermissionMode}
+          dangerouslySkipPermissions={dangerouslySkipPermissions}
+          setDangerouslySkipPermissions={setDangerouslySkipPermissions}
+          placementWithdrawsPermissionBypass={placementWithdrawsPermissionBypass}
+          sandbox={sandbox}
+          setSandbox={setSandbox}
+          applyPlacement={applyPlacement}
+          placementFixed={placementFixed}
+          showsSandbox={showsSandbox}
+        />
+      ) : (
+        !placementFixed && showsSandbox && (
+          <div>
+            <label className="flex items-center gap-2 text-sm text-muted-foreground">
+              <input
+                data-testid="create-session-sandbox-toggle"
+                type="checkbox"
+                className="h-4 w-4 rounded border-input"
+                checked={sandbox}
+                onChange={(e) => {
+                  setSandbox(e.target.checked);
+                  applyPlacement("sandbox", e.target.checked);
+                }}
+              />
+              Sandbox
+            </label>
+          </div>
+        )
+      )}
 
-      {!placementFixed && (
+      {!placementFixed && showsSandboxedCodebase && (
         <CreateSessionSandboxedCodebaseToggle
           sandboxedCodebase={sandboxedCodebase}
           sandboxedCodebaseUnavailableReason={sandboxedCodebaseUnavailableReason}
@@ -178,7 +215,7 @@ export function CreateSessionClaudeCliFields({
           a recipe, a seeded changeset and a toolcall listener. It is the orchestration axis and
           confines nothing, so it composes with any placement — including the jailed codebase.
           See docs/ft/coder/managed-codebase-workflow.md. */}
-      {!placementFixed && (
+      {!placementFixed && showsManaged && (
         <div>
           <label className="flex items-center gap-2 text-sm text-muted-foreground">
             <input
@@ -199,7 +236,7 @@ export function CreateSessionClaudeCliFields({
               codebaseDaemonInstanceId={codebaseDaemonInstanceId}
               setCodebaseDaemonInstanceId={setCodebaseDaemonInstanceId}
               daemons={daemons}
-              sessionType={sessionType}
+              showsSshHost={showsSshHost}
               sshListDaemonId={sshListDaemonId}
               sessionToken={sessionToken}
               sshConfigHost={sshConfigHost}

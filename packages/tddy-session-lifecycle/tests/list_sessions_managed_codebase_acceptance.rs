@@ -11,7 +11,7 @@ use tddy_rpc::Request;
 use tddy_service::proto::session::{
     ListSessionsRequest, SessionEntry, SessionService as SessionServiceTrait, StartSessionRequest,
 };
-use tddy_session_lifecycle::claude_cli_session::ClaudeCliSessionManager;
+use tddy_session_lifecycle::claude_cli_session::CliSessionManager;
 use tddy_session_lifecycle::connection_service::DaemonSessionHost;
 
 type SessionsBaseResolver = Arc<dyn Fn(&str) -> Option<PathBuf> + Send + Sync>;
@@ -62,7 +62,7 @@ users:
 fn minimal_service_with_manager(
     (config, agents): AConfigAndItsAgents,
     sessions_base: PathBuf,
-    manager: Arc<ClaudeCliSessionManager>,
+    manager: Arc<CliSessionManager>,
 ) -> DaemonSessionHost {
     let tddy_data_dir = sessions_base.clone();
     let sessions_base_resolver: SessionsBaseResolver =
@@ -151,7 +151,7 @@ fn a_daemon_with_a_project() -> World {
     let service = minimal_service_with_manager(
         config,
         sessions.path().to_path_buf(),
-        Arc::new(ClaudeCliSessionManager::new()),
+        Arc::new(CliSessionManager::new()),
     );
     World {
         service,

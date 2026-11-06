@@ -13,7 +13,7 @@ use std::time::Duration;
 
 use tddy_daemon_kernel::config::DaemonConfig;
 use tddy_rpc::{Code, Request};
-use tddy_session_lifecycle::claude_cli_session::{ClaudeCliSessionManager, MAIN_TERMINAL_ID};
+use tddy_session_lifecycle::claude_cli_session::{CliSessionManager, MAIN_TERMINAL_ID};
 use tddy_session_lifecycle::connection_service::DaemonSessionHost;
 use tddy_terminal_rpc::proto::terminal_session::{
     ListTerminalSessionsRequest, StartTerminalSessionRequest, StopTerminalSessionRequest,
@@ -105,7 +105,7 @@ async fn a_daemon_with_a_running_session() -> AgentTabDaemon {
         ("claude", &claude.binary),
     ]);
 
-    let manager = Arc::new(ClaudeCliSessionManager::new());
+    let manager = Arc::new(CliSessionManager::new());
     let worktree_dir = tempfile::tempdir().unwrap();
     let worktree = worktree_dir.path().canonicalize().unwrap();
     start_main_terminal(&manager, &worktree).await;
@@ -351,7 +351,7 @@ fn session_host(
     config: DaemonConfig,
     agents: Arc<tddy_agent_launch::spec_launch::HostCodingAgents>,
     sessions_base: PathBuf,
-    manager: Arc<ClaudeCliSessionManager>,
+    manager: Arc<CliSessionManager>,
 ) -> DaemonSessionHost {
     let tddy_data_dir = sessions_base.clone();
     let sessions_base_resolver: SessionsBaseResolver =
@@ -373,7 +373,7 @@ fn session_host(
 }
 
 /// Registers the session's main terminal — a stub that holds its PTY open — in `worktree`.
-async fn start_main_terminal(manager: &ClaudeCliSessionManager, worktree: &Path) {
+async fn start_main_terminal(manager: &CliSessionManager, worktree: &Path) {
     let main = a_stub_agent_script(worktree, "stub_main.sh")
         .then_reading_stdin()
         .build();
@@ -382,11 +382,9 @@ async fn start_main_terminal(manager: &ClaudeCliSessionManager, worktree: &Path)
             SESSION_ID,
             worktree.to_path_buf(),
             "claude-opus-4-8",
-            main.to_str().unwrap(),
+            vec![main.to_str().unwrap().to_string()],
+            "claude-cli",
             None,
-            None,
-            false,
-            false,
             None,
             Vec::new(),
             Vec::new(),

@@ -4,7 +4,7 @@ use std::path::Path;
 use tddy_rpc::Status;
 use tddy_sandbox::{
     is_reached_through_link, matches_context_globs, prepare_context_write, prepend_preamble,
-    ContextLink, PREAMBLE_FILES,
+    ContextLink,
 };
 use tddy_worktree_service::worktree_files::validate_rel_path_shape;
 
@@ -19,7 +19,7 @@ use tddy_worktree_service::worktree_files::validate_rel_path_shape;
 /// another host, so its spelling is the peer's choice: `matches_context_globs` normalizes
 /// internally and answers a bare `bool`, so `./CLAUDE.md` and `.claude\settings.json` both pass the
 /// gate and then arrive here spelled the way the peer wrote them. Keyed off the raw string,
-/// `./CLAUDE.md` fails the [`PREAMBLE_FILES`] lookup and is written **without the
+/// `./CLAUDE.md` fails the a guidance file lookup and is written **without the
 /// managed-codebase preamble** — the one invariant this feature exists to hold, lost with the file
 /// still landing in the right place — and `.claude\settings.json` joins to a single file with a
 /// literal backslash in its name on Linux, next to the `.claude/` directory the agent actually
@@ -34,6 +34,7 @@ pub(super) fn write_context_file(
     rel_path: &str,
     bytes: &[u8],
     preamble: &str,
+    guidance_files: &[std::path::PathBuf],
 ) -> Result<(), Status> {
     let Some(rel_path) = tddy_sandbox::normalized_context_path(rel_path) else {
         log::warn!(
@@ -56,7 +57,10 @@ pub(super) fn write_context_file(
     // silently behind a log line nobody reads. Both setup paths already refuse the same input
     // (`context_dir.rs`'s and `split_session.rs`'s `read_to_string`), so refusing here is what makes
     // a tick and a build agree rather than a fallback the CLAUDE.md forbids.
-    let payload = if PREAMBLE_FILES.contains(&rel_path) {
+    let payload = if guidance_files
+        .iter()
+        .any(|file| file.to_string_lossy().replace('\\', "/") == rel_path)
+    {
         let body = std::str::from_utf8(bytes).map_err(|e| {
             log::error!(
                 "context_sync: {rel_path} is not UTF-8 ({e}), so the managed-codebase preamble \
@@ -174,6 +178,7 @@ pub(super) fn remove_context_file(
     context_dir: &Path,
     rel_path: &str,
     globs: &[&str],
+    guidance_files: &[std::path::PathBuf],
     links: &[ContextLink],
     preamble: &str,
 ) -> Result<(), Status> {
@@ -188,7 +193,7 @@ pub(super) fn remove_context_file(
             "cannot delete {rel_path:?}: this session's allow-list does not name it"
         )));
     }
-    // Normalized for the same reason [`write_context_file`] normalizes: the `PREAMBLE_FILES`
+    // Normalized for the same reason [`write_context_file`] normalizes: the guidance-file
     // lookup and the `join` below must both be about the path the gate just approved, not about
     // whatever spelling of it a record or a peer's manifest happened to carry.
     let Some(rel_slashed) = tddy_sandbox::normalized_context_path(&rel_slashed) else {
@@ -200,8 +205,11 @@ pub(super) fn remove_context_file(
             "cannot delete {rel_path:?}: it names no relative path"
         )));
     };
-    if PREAMBLE_FILES.contains(&rel_slashed.as_str()) {
-        return write_context_file(context_dir, &rel_slashed, b"", preamble);
+    if guidance_files
+        .iter()
+        .any(|file| file.to_string_lossy().replace('\\', "/") == rel_slashed.as_str())
+    {
+        return write_context_file(context_dir, &rel_slashed, b"", preamble, guidance_files);
     }
 
     let target = context_dir.join(&rel_slashed);

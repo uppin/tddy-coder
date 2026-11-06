@@ -10,6 +10,7 @@
  * collapses so the new session's terminal is unobstructed in the main pane.
  */
 import React from "react";
+import { servedAgentWire } from "../support/servedAgents";
 import { SessionsDrawerScreen } from "../../src/components/sessions/SessionsDrawerScreen";
 import { DEFAULT_TEST_DAEMON, withSelectedDaemon } from "../support/rpc/withSelectedDaemon";
 import { aSessionServiceBackend } from "../support/rpc/daemonSessionHostBackend";
@@ -65,7 +66,7 @@ function backendThatCreates(before: (typeof EXISTING_SESSION_FIXTURE)[] = []) {
   let callCount = 0;
   return aSessionServiceBackend({
     projectsOverride: [{ projectId: "proj-1", name: "Test Project" }],
-    agents: [{ id: "claude", label: "Claude (opus)" }],
+    agents: [{ id: "claude", label: "Claude (opus)", ...servedAgentWire("claude"), }],
     listSessionsFactory: () => {
       callCount++;
       return callCount > 1 ? [...before, NEW_SESSION_FIXTURE] : before;

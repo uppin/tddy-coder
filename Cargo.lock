@@ -12533,6 +12533,7 @@ dependencies = [
 name = "tddy-coding-agent-specs"
 version = "0.1.0"
 dependencies = [
+ "glob",
  "pretty_assertions",
  "serde",
  "serde_json",
@@ -13214,7 +13215,9 @@ dependencies = [
  "serde_yaml",
  "serial_test",
  "tddy-actions",
+ "tddy-agent-backend",
  "tddy-coder",
+ "tddy-coding-agent-specs",
  "tddy-core",
  "tddy-daemon-auth",
  "tddy-rpc",
@@ -14454,6 +14457,7 @@ dependencies = [
  "tddy-bsp",
  "tddy-code-analysis",
  "tddy-code-restructuring",
+ "tddy-coding-agent-specs",
  "tddy-connectrpc",
  "tddy-core",
  "tddy-discovery",

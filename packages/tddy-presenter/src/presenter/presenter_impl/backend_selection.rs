@@ -25,6 +25,15 @@ impl Presenter {
         self.broadcast_mode_changed();
     }
 
+    /// Inject each selectable agent's default model (from its spec, read by the caller that
+    /// built the selection): what a backend selection answer preselects for that agent.
+    pub fn set_backend_default_models(
+        &mut self,
+        default_models: std::collections::BTreeMap<String, String>,
+    ) {
+        self.backend.default_models = default_models;
+    }
+
     /// Configure backend creation + first workflow start after interactive backend selection (tddy-coder TUI).
     pub fn configure_deferred_workflow_start(
         &mut self,
@@ -84,10 +93,19 @@ impl Presenter {
             return;
         }
         let label = q.options[idx].label.clone();
-        let (agent, model) = crate::backend::backend_from_label(&label);
-        let agent_str = agent.to_string();
+        // An option's label is its agent id (the selection is built from the coding-agent
+        // registry); its default model is the injected one for that id, or the id itself
+        // for an agent no spec stands for (`stub`).
+        let agent_str = label;
+        let model = self
+            .backend
+            .default_models
+            .get(&agent_str)
+            .filter(|model| !model.is_empty())
+            .cloned()
+            .unwrap_or_else(|| agent_str.clone());
         self.state.agent = agent_str.clone();
-        self.state.model = model.to_string();
+        self.state.model = model;
         if let Some(ref m) = self.backend.deferred_cli_model {
             self.state.model = m.clone();
         }

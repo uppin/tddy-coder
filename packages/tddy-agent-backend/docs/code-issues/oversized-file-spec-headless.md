@@ -3,10 +3,10 @@
 **Location:** `packages/tddy-agent-backend/src/backend/spec_headless.rs`
 **Category:** oversized-file
 **Detected:** 2026-11-05 — `/green` on #821 (`#agent-tools` 15/19), production lines counted to the first `#[cfg(test)]` (there is none: its tests are `tests/spec_headless_turn_deadline.rs` and `tests/headless_protocol_unit.rs`)
-**Metrics:** **646 production lines** · budget 500 · 1.3× over
-**Thresholds breached:** length 645 > 500
+**Metrics:** **653 production lines** (2026-11-06) · budget 500 · 1.3× over
+**Thresholds breached:** length 653 > 500
 **Restructure:** not designed
-**Status:** Open — deferred to the #agent-tools sweep node (restructuring is the sweep's, per the stack rules)
+**Status:** Open — the sweep (#828) grew it by 7 and did not split it; the restructuring deferred to the sweep remains to be scheduled — **unclaimed**
 **Verified:** machine-measured
 
 ## Measurement history
@@ -16,6 +16,7 @@
 | 2026-11-05 | 156 → 621 | first detection: the generic headless workflow backend replaced the three bespoke ones (2,524 lines, now deleted). The file holds the backend, its turn assembly from the protocol, the blocking stdout/exit reader and the stderr reader |
 | 2026-11-05 | 621 → 645 | `/pr-wrap` on #821: a turn with no working directory is refused, the conversation log opens before the spawn (`open_conversation_log`), a missing stdout reaps the child. Not split: the sweep node's |
 | 2026-11-06 | 645 → 646 | **worse by 1** in #823 (`#agent-tools` 17/19): the `notify` field of the pointer `invoke` writes. Restructuring is the sweep's (n20) |
+| 2026-11-06 | 646 → 653 | **worse by 7** in the sweep (#828, `#agent-tools` 20/28): `SpecHeadlessBackend::with_curated_models` reads the catalogue from the spec. The sweep did not split this file; the restructuring deferred here remains to be scheduled |
 
 ## What would close it
 

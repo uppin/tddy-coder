@@ -13,6 +13,7 @@
  */
 
 import React from "react";
+import { servedAgentWire } from "../support/servedAgents";
 import { createClient } from "@connectrpc/connect";
 import { anInMemoryRpcBackend, type InMemoryRpcBackend } from "tddy-connectrpc-testkit";
 import { SessionService } from "../../src/gen/session_pb";
@@ -64,7 +65,11 @@ function aCreateSessionBackend() {
     .onUnary(ProjectService.method.listProjects, () => ({
       projects: [{ projectId: "proj-1", name: "Test Project", mainRepoPath: "/repo" }],
     }))
-    .onUnary(CatalogService.method.listAgents, () => ({ agents: [] }))
+    .onUnary(CatalogService.method.listAgents, () => ({
+      agents: [
+        { id: "claude", label: "Claude", ...servedAgentWire("claude") },
+      ],
+    }))
     .onUnary(CatalogService.method.listTools, () => ({ tools: [] }))
     .onUnary(SessionService.method.startSession, () => ({ sessionId: "new-1" }));
 }

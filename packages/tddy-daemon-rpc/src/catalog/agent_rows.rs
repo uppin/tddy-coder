@@ -49,6 +49,38 @@ fn agent_info(registry: &CodingAgentRegistry, id: String, label: String) -> Cata
                 .iter()
                 .map(ToString::to_string)
                 .collect(),
+            // The agent's metadata, from its spec, for a client that names no agent: the
+            // session type that starts it, what it can do, what its launch argv binds, the
+            // permission modes it takes, and its default model.
+            session_type: registry
+                .for_session_type(&format!(
+                    "{}{}",
+                    spec.id,
+                    tddy_coding_agent_specs::CLI_SESSION_TYPE_SUFFIX
+                ))
+                .map(|_| {
+                    format!(
+                        "{}{}",
+                        spec.id,
+                        tddy_coding_agent_specs::CLI_SESSION_TYPE_SUFFIX
+                    )
+                })
+                .unwrap_or_default(),
+            capabilities: spec
+                .agent
+                .capabilities
+                .iter()
+                .map(|capability| capability.name().to_string())
+                .collect(),
+            run_params: spec.argv_params().into_iter().collect(),
+            permission_modes: spec.agent.permission_modes.clone(),
+            default_model: spec.agent.models.default.clone(),
+            placements: spec
+                .agent
+                .placements
+                .iter()
+                .map(|placement| placement.to_string())
+                .collect(),
             id,
             label,
         },

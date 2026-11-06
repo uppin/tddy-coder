@@ -85,14 +85,22 @@ fn a_context_host_allowing_a_read_to_take(budget: Duration) -> AContextHost {
     }
 }
 
-/// The one checkout this host serves, under Claude's compiled-in allow-list row.
+/// The one checkout this host serves, under one agent's spec allow-list row.
 struct TheCheckoutAt(PathBuf);
 
 impl SessionContextScopes for TheCheckoutAt {
     fn scope_for(&self, _: &str, _: &str, _: &str) -> Result<SessionContextScope, Status> {
         Ok(SessionContextScope {
             worktree_root: self.0.clone(),
-            globs: tddy_session_files::context_files::context_globs_for_session_type("claude-cli"),
+            globs: vec![
+                "AGENTS.md".to_string(),
+                "CLAUDE.md".to_string(),
+                ".claude/**".to_string(),
+            ],
+            guidance_files: vec![
+                std::path::PathBuf::from("CLAUDE.md"),
+                std::path::PathBuf::from("AGENTS.md"),
+            ],
         })
     }
 }

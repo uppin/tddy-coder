@@ -40,7 +40,7 @@ use tddy_github::GitHubUser;
 use tddy_host_service::multi_host::{DaemonInstanceId, EligibleDaemonInfo, EligibleDaemonSource};
 use tddy_rpc::Request;
 use tddy_service::proto::session::{SessionService as SessionServiceTrait, StartSessionRequest};
-use tddy_session_lifecycle::claude_cli_session::ClaudeCliSessionManager;
+use tddy_session_lifecycle::claude_cli_session::CliSessionManager;
 use tddy_session_lifecycle::connection_service::{
     classify_placement, CodebasePlacement, DaemonSessionHost, PlacementRequest,
 };
@@ -230,7 +230,7 @@ fn a_daemon(sessions_base: PathBuf, discovery: Option<LiveKitDiscoveryHandles>) 
             tddy_spawn::supervisor_client::SpawnBackendChoice::ForkedWorker,
             tddy_daemon_livekit::peer_routing::peer_routing_over(&test_config(), discovery),
             Arc::new(tddy_daemon_kernel::operator_channel::NoOperatorChannel),
-            Arc::new(ClaudeCliSessionManager::new()),
+            Arc::new(CliSessionManager::new()),
         )
         .with_coding_agents_if_none(
             // `/bin/cat` stands for `claude`, as the fixture config used to name it.

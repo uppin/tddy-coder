@@ -35,7 +35,7 @@ impl DaemonSessionHost {
         spawn_backend: tddy_spawn::supervisor_client::SpawnBackendChoice,
         peer_routing: PeerRouting,
         operator_channel: SharedOperatorChannel,
-        claude_cli_manager: Arc<CliSessionManager>,
+        cli_manager: Arc<CliSessionManager>,
     ) -> Self {
         let spawn_client = spawn_client.map(|(c, _pid)| Arc::new(c));
         // Declared tools resolve from `<tddyhome>/tools` at each jail start (`#agent-tools 1/12`).
@@ -43,7 +43,7 @@ impl DaemonSessionHost {
             tddy_daemon_sandbox::workspace_tool_sandbox::JailedWorkspaceSandboxProvisioner::for_tddy_home(
                 &tddy_data_dir,
             );
-        let task_registry = claude_cli_manager.task_registry();
+        let task_registry = cli_manager.task_registry();
         let demo_vm_state = Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::new()));
         let host_session_sockets =
             Arc::new(super::host_session_socket::HostSessionSockets::default());
@@ -67,7 +67,7 @@ impl DaemonSessionHost {
             spawn_backend,
             peer_routing,
             operator_channel,
-            claude_cli_manager,
+            cli_manager,
             sandbox_manager: Arc::new(
                 tddy_daemon_sandbox::sandbox_session::SandboxSessionManager::new(),
             ),

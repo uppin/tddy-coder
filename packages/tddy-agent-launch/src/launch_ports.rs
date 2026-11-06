@@ -87,7 +87,7 @@ pub struct LaunchSessions {
     pub tddy_data_dir: PathBuf,
     pub staging_base_dir: PathBuf,
     pub peer_routing: PeerRouting,
-    pub claude_cli_manager: Arc<CliSessionManager>,
+    pub cli_manager: Arc<CliSessionManager>,
     /// Sandboxed claude-cli sessions (darwin Seatbelt).
     pub sandbox_manager: Arc<tddy_daemon_sandbox::sandbox_session::SandboxSessionManager>,
     pub task_registry: TaskRegistry,

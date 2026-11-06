@@ -187,7 +187,7 @@ pub(super) fn build_telegram(
             elicitation_select_options: elicitation_select_options.clone(),
             elicitation_multi_select_meta: elicitation_multi_select_meta.clone(),
             pending_elicitation_other: Arc::new(StdMutex::new(HashMap::new())),
-            claude_cli_manager: Arc::clone(&registries.shared_claude_cli_manager),
+            cli_manager: Arc::clone(&registries.shared_cli_manager),
         },
     ));
     let harness = Arc::new(Mutex::new(

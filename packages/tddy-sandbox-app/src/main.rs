@@ -395,10 +395,15 @@ async fn run_linux(args: Args, cfg: config::SandboxAppConfig) -> Result<()> {
     let mut claude_args = cfg.claude_args;
     claude_args.extend(args.claude_args);
 
-    let model = args
-        .model
-        .or(cfg.model)
-        .unwrap_or_else(|| tddy_core::backend::CLAUDE_DEFAULT_MODEL.to_string());
+    // The default model is the chosen agent's spec's `models.default`, loaded without
+    // resolving anything on this host — the daemon runs the agent, not this client.
+    let session_base =
+        resolve_session_base(args.session_base.as_deref(), cfg.session_base.as_deref());
+    let model = match args.model.or(cfg.model) {
+        Some(model) => model,
+        None => tddy_sandbox_app::agent_spec::agent_default_model(&args.agent, &session_base)
+            .map_err(|e| anyhow::anyhow!(e))?,
+    };
     let permission_mode = args
         .permission_mode
         .or(cfg.permission_mode)
@@ -410,6 +415,9 @@ async fn run_linux(args: Args, cfg: config::SandboxAppConfig) -> Result<()> {
         model,
         permission_mode,
         managed_codebase,
+        // The refusal above leaves only the default agent, whose session type is its id's
+        // `-cli` spelling.
+        session_type: format!("{}-cli", args.agent),
         claude_args,
         specialized_agents,
     })
@@ -567,7 +575,7 @@ async fn run_macos(args: Args, cfg: config::SandboxAppConfig) -> Result<()> {
     // end-of-session token summary once the terminal bridge returns. The transcript reader behind
     // it reads one agent's transcripts, so only that agent's session has a main-agent row.
     let model_for_summary = model.clone();
-    let is_transcript_agent = agent.id == "claude";
+    let is_transcript_agent = agent.spec.agent.transcript_usage;
 
     // Register the reusable-LSP executor before spawning the jail, so the spawn-time
     // availability check can gate the in-jail `Lsp*` tools, and relayed `Lsp*` tool calls

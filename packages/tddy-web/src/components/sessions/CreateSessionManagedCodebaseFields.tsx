@@ -2,7 +2,6 @@ import type { DaemonHost } from "../../lib/participantRole";
 import { CreateSessionSshConfigSelect } from "./CreateSessionSshConfigSelect";
 import { inputClass, labelClass } from "./createSessionFormStyles";
 import { WORKFLOW_RECIPES } from "./createSessionRecipes";
-import type { SessionType } from "./createSessionRequest";
 
 export interface CreateSessionManagedCodebaseFieldsProps {
   isSplitCodebase: boolean;
@@ -12,7 +11,8 @@ export interface CreateSessionManagedCodebaseFieldsProps {
   codebaseDaemonInstanceId: string;
   setCodebaseDaemonInstanceId: (daemonInstanceId: string) => void;
   daemons: DaemonHost[];
-  sessionType: SessionType;
+  /** The served agent declares `split_host`, so the SSH exec-catalog host is offered with it. */
+  showsSshHost: boolean;
   sshListDaemonId: string;
   sessionToken: string;
   sshConfigHost: string;
@@ -20,7 +20,7 @@ export interface CreateSessionManagedCodebaseFieldsProps {
 }
 
 /**
- * What the claude-cli **Managed codebase** toggle opens: the recipe picker, the codebase host and
+ * What the **Managed codebase** toggle opens: the recipe picker, the codebase host and
  * the SSH host. Presentational — every value stays in `CreateSessionPane`, which decides what each
  * placement withdraws.
  *
@@ -38,7 +38,7 @@ export function CreateSessionManagedCodebaseFields({
   codebaseDaemonInstanceId,
   setCodebaseDaemonInstanceId,
   daemons,
-  sessionType,
+  showsSshHost,
   sshListDaemonId,
   sessionToken,
   sshConfigHost,
@@ -70,10 +70,10 @@ export function CreateSessionManagedCodebaseFields({
           </select>
         </div>
       )}
-      {/* Codebase host — which daemon's filesystem holds the worktree. Offered only in the
-          claude-cli copy of this block: only claude-cli can be *prevented* from touching a
-          local filesystem (--allowedTools/--disallowedTools), so it is the only session
-          type the daemon accepts a split placement for.
+      {/* Codebase host — which daemon's filesystem holds the worktree. Offered only for an
+          agent whose spec declares `split_host`: only it can be *prevented* from touching a
+          local filesystem (its spec's tool-withdrawal), so it is the only kind the daemon
+          accepts a split placement for.
           See docs/ft/daemon/remote-managed-worktree.md. */}
       {canChooseCodebaseHost && (
         <div>
@@ -96,7 +96,7 @@ export function CreateSessionManagedCodebaseFields({
           </select>
         </div>
       )}
-      {sessionType === "claude-cli" && (
+      {showsSshHost && (
         <CreateSessionSshConfigSelect
           key={sshListDaemonId}
           sessionToken={sessionToken}

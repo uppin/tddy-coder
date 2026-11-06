@@ -485,7 +485,7 @@ impl LaunchSessions {
         let mut workflow = None;
         if spec.has(Capability::ManagedWorkflow) {
             if let Some(recipe_name) = crate::svc_resume_claude_cli_session::resumed_recipe(
-                &self.claude_cli_manager,
+                &self.cli_manager,
                 meta,
                 os_user,
                 session_id,

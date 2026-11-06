@@ -43,6 +43,13 @@ function theSessionsScreen(refusal?: ConnectError) {
   const backend = aSessionServiceBackend({
     sessions: [{ sessionId: "b1", projectId: BETA }],
     projectsOverride: [BETA_WITHOUT_MAIN],
+    // The daemon offers four CLI agents; only claude's spec declares it can stand as main.
+    agents: [
+      { id: "claude", label: "Claude" },
+      { id: "cursor", label: "Cursor" },
+      { id: "opencode", label: "OpenCode" },
+      { id: "muse", label: "Muse Code" },
+    ],
   }).onUnary(SessionService.method.ensureProjectHomeSession, () => {
     if (refusal) throw refusal;
     return {

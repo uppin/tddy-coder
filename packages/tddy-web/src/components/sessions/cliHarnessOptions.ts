@@ -1,35 +1,84 @@
-import type { SessionType } from "./createSessionRequest";
+import type { SelectableAgent } from "./selectableAgentOptions";
 
-/** The session types the Create pane's toggle offers, in order, with each button's label. */
-export const SESSION_TYPE_OPTIONS: { id: SessionType; label: string }[] = [
-  { id: "tool", label: "Tool" },
-  { id: "claude-cli", label: "Claude CLI" },
-  { id: "cursor-cli", label: "Cursor CLI" },
-  { id: "opencode-cli", label: "OpenCode" },
-  { id: "muse-cli", label: "Muse Code" },
-  { id: "warp-cli", label: "Warp" },
-];
-
-/** A tool session's terminals are served by its tddy-coder participant, which runs bash only. */
+/** The session type that starts a workflow tool. */
 export const TOOL_SESSION_TYPE = "tool";
 
-/**
- * The CLI harnesses a terminal tab can run, in toggle order. Every session type but `tool`: a tool
- * session's terminals are served by its tddy-coder participant, which runs bash only.
- */
-export const CLI_HARNESS_OPTIONS = SESSION_TYPE_OPTIONS.filter(({ id }) => id !== TOOL_SESSION_TYPE);
-
-/** The kind of a login-shell terminal. */
+/** The terminal kind that opens the host's login shell in a tab. */
 export const BASH_KIND = "bash";
 
-/** The kind of a terminal attached to a tmux session on the host, named by its tmux session. */
+/** The terminal kind that attaches a tab to an existing tmux session on the host. */
 export const TMUX_KIND = "tmux";
 
-/** The kind of a terminal attached to a tmux session the tab creates in the session's worktree. */
+/**
+ * The terminal kind that creates a fresh tmux session on the host and attaches a tab to it.
+ * Only ever sent (with the name to give it); a live tab's kind is always {@link TMUX_KIND}.
+ */
 export const TMUX_NEW_KIND = "tmux-new";
 
-/** The name a terminal of `kind` is shown by: a harness's toggle label, or "Bash". */
+/** One session type the Create pane's toggle offers: its value and its label. */
+export interface SessionTypeOption {
+  id: string;
+  label: string;
+}
+
+/**
+ * The session types a daemon offers, from the agents it served (`ListAgents`): `tool`, then
+ * every agent with a PTY launch on that host, labelled by its spec's product. The bundle
+ * hard-codes no agent — an agent the daemon does not serve is not offered.
+ */
+export function sessionTypeOptions(
+  agents: readonly SelectableAgent[],
+  daemonInstanceId: string,
+  connectedInstanceId: string,
+): SessionTypeOption[] {
+  const wanted = new Set(
+    [daemonInstanceId, connectedInstanceId].filter((id) => id !== ""),
+  );
+  const onHost = (agent: SelectableAgent) =>
+    wanted.size === 0 || wanted.has(agent.daemonInstanceId);
+  const options: SessionTypeOption[] = [{ id: TOOL_SESSION_TYPE, label: "Tool" }];
+  const seen = new Set<string>([TOOL_SESSION_TYPE]);
+  for (const agent of agents) {
+    if (!onHost(agent) || agent.sessionType === "" || seen.has(agent.sessionType)) {
+      continue;
+    }
+    seen.add(agent.sessionType);
+    options.push({ id: agent.sessionType, label: agent.label || agent.id });
+  }
+  return options;
+}
+
+/** The CLI session types among `options` (every option but `tool`). */
+export function cliSessionTypeOptions(
+  options: readonly SessionTypeOption[],
+): SessionTypeOption[] {
+  return options.filter((option) => option.id !== TOOL_SESSION_TYPE);
+}
+
+/**
+ * The session-type options most recently derived from a daemon's agents, for readers that
+ * hold no catalog of their own (a terminal tab's label, the "+" menu's kinds). Registered by
+ * every agent listing; before the first one, only `tool` is known.
+ */
+let knownSessionTypeOptions: SessionTypeOption[] = [
+  { id: TOOL_SESSION_TYPE, label: "Tool" },
+];
+
+export function registerSessionTypeOptions(options: readonly SessionTypeOption[]): void {
+  if (options.length > 1) {
+    knownSessionTypeOptions = [...options];
+  }
+}
+
+export function knownSessionTypes(): SessionTypeOption[] {
+  return knownSessionTypeOptions;
+}
+
+/** What a terminal tab of `kind` is called, from the registered session-type options. */
 export function terminalKindLabel(kind: string): string {
   if (kind === BASH_KIND) return "Bash";
-  return SESSION_TYPE_OPTIONS.find(({ id }) => id === kind)?.label ?? kind;
+  if (kind === TMUX_KIND || kind === TMUX_NEW_KIND) return "tmux";
+  return (
+    knownSessionTypeOptions.find((option) => option.id === kind)?.label ?? kind
+  );
 }

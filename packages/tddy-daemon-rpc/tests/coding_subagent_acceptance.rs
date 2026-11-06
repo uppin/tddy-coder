@@ -501,7 +501,7 @@ async fn an_acp_allowed_agent_is_listed_as_a_coding_agent_with_its_default_model
             tddy_spawn::supervisor_client::SpawnBackendChoice::ForkedWorker,
             tddy_session_lifecycle::peer_routing::PeerRouting::local_only(&config),
             Arc::new(tddy_daemon_kernel::operator_channel::NoOperatorChannel),
-            Arc::new(tddy_session_lifecycle::claude_cli_session::ClaudeCliSessionManager::new()),
+            Arc::new(tddy_session_lifecycle::claude_cli_session::CliSessionManager::new()),
         ),
     );
 
@@ -523,7 +523,12 @@ async fn an_acp_allowed_agent_is_listed_as_a_coding_agent_with_its_default_model
     assert_eq!(coding[0].label, "Claude (ACP)");
     assert_eq!(
         coding[0].model,
-        tddy_core::default_model_for_agent("claude-acp")
+        tddy_coding_agent_specs::CodingAgentRegistry::builtin_cached()
+            .get("claude-acp")
+            .expect("the claude-acp spec loads")
+            .agent
+            .models
+            .default
     );
 }
 

@@ -54,7 +54,10 @@ extensions:
     capabilities: [hooks, managed_workflow, requires_model, keep_worktree_on_delete, operator_notify]
     models:
       default: composer-2.5
-      curated: [composer-2.5, gpt-5.3-codex, claude-4.6-sonnet-medium-thinking]
+      curated:
+        - { id: composer-2.5, label: "Composer 2.5" }
+        - { id: gpt-5.3-codex, label: "GPT-5.3 Codex" }
+        - { id: claude-4.6-sonnet-medium-thinking, label: "Claude 4.6 Sonnet (thinking)" }
       list_command: ["{binary}", --list-models]
       adapter: cursor-models
     context_globs: [AGENTS.md, ".agents/**", ".cursor/**"]

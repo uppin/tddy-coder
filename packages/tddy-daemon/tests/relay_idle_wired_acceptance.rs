@@ -11,7 +11,7 @@ use tddy_daemon::config::DaemonConfig;
 use tddy_daemon_rpc::test_util::TestDaemon;
 use tddy_rpc::Request;
 use tddy_service::proto::catalog::{CatalogService, ListToolsRequest};
-use tddy_session_lifecycle::claude_cli_session::ClaudeCliSessionManager;
+use tddy_session_lifecycle::claude_cli_session::CliSessionManager;
 use tddy_session_lifecycle::connection_service::DaemonSessionHost;
 use tddy_session_lifecycle::relay_idle::IdleTimeoutTracker;
 
@@ -33,7 +33,7 @@ fn minimal_service_with_tracker(tracker: Arc<IdleTimeoutTracker>) -> TestDaemon 
             tddy_spawn::supervisor_client::SpawnBackendChoice::ForkedWorker,
             tddy_session_lifecycle::peer_routing::PeerRouting::local_only(&DaemonConfig::default()),
             Arc::new(tddy_daemon_kernel::operator_channel::NoOperatorChannel),
-            Arc::new(ClaudeCliSessionManager::new()),
+            Arc::new(CliSessionManager::new()),
         )
         .with_idle_tracker(tracker),
     )

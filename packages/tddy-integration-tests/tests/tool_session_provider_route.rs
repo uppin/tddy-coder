@@ -11,7 +11,6 @@ use std::path::{Path, PathBuf};
 
 use tddy_core::backend::{CodingBackend, InvokeRequest};
 use tddy_core::provider_route::{HarnessRoute, RouteSecret};
-use tddy_core::{ClaudeAcpBackend, CodexAcpBackend};
 
 use common::{a_spec_backend, in_spec_workspace, spec_recorded};
 
@@ -136,18 +135,23 @@ fn acp_agents_spawn_with_the_route_applied() {
         let agent = a_recording_stub(dir.path(), "acp-agent", "");
         let route = a_route(&[("ROUTED", "yes")], ("ROUTE_KEY", "a-key"), &[]);
 
-        // When
-        if codex {
-            run(
-                CodexAcpBackend::with_agent_path(agent).with_provider_route(route),
-                a_request_in(dir.path()),
-            );
-        } else {
-            run(
-                ClaudeAcpBackend::with_agent_path(agent).with_provider_route(route),
-                a_request_in(dir.path()),
-            );
-        }
+        // When: the spec backend for that agent, on the route (its spec's shape and providers,
+        // read from its YAML — codex-acp routes OpenAI Responses as toml args with its key in
+        // `CODEX_PROVIDER_KEY`, claude-acp routes Anthropic through the environment)
+        let id = if codex { "codex-acp" } else { "claude-acp" };
+        let spec = tddy_coding_agent_specs::embedded_spec(id).expect("the agent's spec loads");
+        let backend = tddy_core::SpecAcpBackend::new(
+            tddy_coding_agent_specs::routed_agent(&spec),
+            tddy_core::AcpAgentCommand {
+                program: agent,
+                args: Vec::new(),
+                env: Vec::new(),
+                cwd: None,
+            },
+        )
+        .with_provider_route(route)
+        .expect("the agent is routable");
+        run(backend, a_request_in(dir.path()));
 
         // Then
         let env = recorded(dir.path(), "env.txt");

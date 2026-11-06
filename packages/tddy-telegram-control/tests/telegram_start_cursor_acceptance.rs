@@ -9,7 +9,7 @@ use tddy_coding_agent_specs::CodingAgentRegistry;
 use tddy_core::session_lifecycle::unified_session_dir_path;
 use tddy_daemon_extensions::{OperatorSessionStart, OperatorStartOutcome, SessionStarter};
 use tddy_daemon_kernel::config::DaemonConfig;
-use tddy_session_lifecycle::claude_cli_session::ClaudeCliSessionManager;
+use tddy_session_lifecycle::claude_cli_session::CliSessionManager;
 use tddy_telegram_control::telegram_notifier::InMemoryTelegramSender;
 use tddy_telegram_control::telegram_session_control::{
     collect_outbound_messages, read_changeset_routing_snapshot, telegram_model_choices,
@@ -99,7 +99,7 @@ fn build_harness(
         elicitation_select_options: Arc::new(Mutex::new(HashMap::new())),
         elicitation_multi_select_meta: Arc::new(Mutex::new(HashMap::new())),
         pending_elicitation_other: Arc::new(Mutex::new(HashMap::new())),
-        claude_cli_manager: Arc::new(ClaudeCliSessionManager::new()),
+        cli_manager: Arc::new(CliSessionManager::new()),
     });
     let harness = TelegramSessionControlHarness::with_workflow_spawn(
         vec![AUTHORIZED_CHAT],

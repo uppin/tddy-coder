@@ -17,6 +17,7 @@ import {
   type ListAccountsResponse,
   type ProviderAccounts,
 } from "../../gen/accounts_pb";
+import { CatalogService } from "../../gen/catalog_pb";
 import { useAuthContext } from "../../hooks/authProvider";
 import { useDaemonClient } from "../../rpc/selectedDaemon";
 import { reasonOf } from "./rpcReason";
@@ -115,6 +116,31 @@ function withChanged(providers: ProviderGroup[], changed: AccountSummary[]) {
 export function AccountsAppPage({ onNavigate }: { onNavigate: (path: string) => void }) {
   const { sessionToken } = useAuthContext();
   const client = useDaemonClient(AccountsService);
+  const catalogClient = useDaemonClient(CatalogService);
+
+  // The session types a provider account can be the default for, as this daemon serves them —
+  // the bundle names no harness of its own.
+  const [harnessOptions, setHarnessOptions] = useState<{ id: string; label: string }[]>([]);
+  useEffect(() => {
+    if (!catalogClient) return;
+    let current = true;
+    catalogClient
+      .listAgents({})
+      .then((res) => {
+        if (!current) return;
+        setHarnessOptions(
+          res.agents
+            .filter((agent) => agent.sessionType !== "")
+            .map((agent) => ({ id: agent.sessionType, label: agent.label || agent.id })),
+        );
+      })
+      .catch(() => {
+        // No catalogue, no options: existing defaults stay listed by id in the control.
+      });
+    return () => {
+      current = false;
+    };
+  }, [catalogClient]);
 
   const [outcome, setOutcome] = useState<AccountsOutcome | null>(null);
   // A failed rename or removal is reported beside the list rather than replacing it: the list the
@@ -260,6 +286,7 @@ export function AccountsAppPage({ onNavigate }: { onNavigate: (path: string) => 
           connectError={connectError}
           onListModels={listModels}
           onSetDefaults={setDefaults}
+          harnessOptions={harnessOptions}
         />
       ) : null}
     </AppShell>

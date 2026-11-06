@@ -38,6 +38,14 @@ const CLAUDE_GLOBS: &[&str] = &[
     ".agents/**",
 ];
 
+/// The guidance files the session's spec declares, as test data.
+fn guidance_files() -> Vec<std::path::PathBuf> {
+    vec![
+        std::path::PathBuf::from("CLAUDE.md"),
+        std::path::PathBuf::from("AGENTS.md"),
+    ]
+}
+
 const A_GENEROUS_CAP: u64 = 64 * 1024 * 1024;
 
 /// A real git worktree, because the point of this reader is what it does *differently* from the
@@ -101,11 +109,16 @@ impl AWorktree {
 }
 
 fn listed_paths(worktree: &AWorktree) -> Vec<String> {
-    context_manifest(worktree.path(), CLAUDE_GLOBS, A_GENEROUS_CAP)
-        .expect("manifest must build")
-        .into_iter()
-        .map(|e| e.rel_path)
-        .collect()
+    context_manifest(
+        worktree.path(),
+        CLAUDE_GLOBS,
+        &guidance_files(),
+        A_GENEROUS_CAP,
+    )
+    .expect("manifest must build")
+    .into_iter()
+    .map(|e| e.rel_path)
+    .collect()
 }
 
 // ---------------------------------------------------------------------------
@@ -153,6 +166,7 @@ fn the_bytes_of_a_gitignored_allow_listed_path_come_back() {
         worktree.path(),
         ".claude/skills/local/SKILL.md",
         CLAUDE_GLOBS,
+        &guidance_files(),
         A_GENEROUS_CAP,
     )
     .expect("read must succeed");
@@ -182,6 +196,7 @@ fn the_settings_file_the_daemon_owns_is_never_served() {
         worktree.path(),
         ".claude/settings.local.json",
         CLAUDE_GLOBS,
+        &guidance_files(),
         A_GENEROUS_CAP,
     );
 
@@ -214,7 +229,13 @@ fn a_gitignored_path_the_allow_list_does_not_name_stays_refused() {
         .committed();
 
     // When
-    let refusal = read_context_file_bytes(worktree.path(), ".env", CLAUDE_GLOBS, A_GENEROUS_CAP);
+    let refusal = read_context_file_bytes(
+        worktree.path(),
+        ".env",
+        CLAUDE_GLOBS,
+        &guidance_files(),
+        A_GENEROUS_CAP,
+    );
 
     // Then
     assert_eq!(
@@ -242,8 +263,13 @@ fn a_tracked_path_matching_no_glob_is_refused() {
         .committed();
 
     // When
-    let refusal =
-        read_context_file_bytes(worktree.path(), "src/main.rs", CLAUDE_GLOBS, A_GENEROUS_CAP);
+    let refusal = read_context_file_bytes(
+        worktree.path(),
+        "src/main.rs",
+        CLAUDE_GLOBS,
+        &guidance_files(),
+        A_GENEROUS_CAP,
+    );
 
     // Then
     assert_eq!(
@@ -270,7 +296,13 @@ fn a_traversing_or_absolute_path_is_refused(#[case] rel_path: &str) {
     worktree.with_file("CLAUDE.md", b"# rules\n").committed();
 
     // When
-    let refusal = read_context_file_bytes(worktree.path(), rel_path, CLAUDE_GLOBS, A_GENEROUS_CAP);
+    let refusal = read_context_file_bytes(
+        worktree.path(),
+        rel_path,
+        CLAUDE_GLOBS,
+        &guidance_files(),
+        A_GENEROUS_CAP,
+    );
 
     // Then
     assert!(refusal.is_err(), "{rel_path} must be refused, not resolved");
@@ -298,6 +330,7 @@ fn a_symlink_matching_a_glob_but_escaping_the_worktree_is_not_served() {
         worktree.path(),
         ".claude/escape.md",
         CLAUDE_GLOBS,
+        &guidance_files(),
         A_GENEROUS_CAP,
     );
 
@@ -362,7 +395,13 @@ fn a_symlink_to_a_file_the_allow_list_does_not_name_is_not_served(
     let worktree = a_worktree_whose_symlinks_alias_files_the_allow_list_withholds();
 
     // When
-    let refusal = read_context_file_bytes(worktree.path(), rel_path, CLAUDE_GLOBS, A_GENEROUS_CAP);
+    let refusal = read_context_file_bytes(
+        worktree.path(),
+        rel_path,
+        CLAUDE_GLOBS,
+        &guidance_files(),
+        A_GENEROUS_CAP,
+    );
 
     // Then
     let served = refusal.map(|bytes| String::from_utf8_lossy(&bytes).to_string());
@@ -395,6 +434,7 @@ fn a_batch_naming_a_symlink_to_a_file_the_allow_list_does_not_name_is_refused(
         worktree.path(),
         &["CLAUDE.md".to_string(), rel_path.to_string()],
         CLAUDE_GLOBS,
+        &guidance_files(),
         A_GENEROUS_CAP,
     );
 
@@ -454,8 +494,13 @@ fn the_manifest_marks_an_allow_listed_link_with_its_target() {
     let worktree = a_worktree_linking_its_skills_from_an_unlisted_tree();
 
     // When
-    let manifest = context_manifest(worktree.path(), CLAUDE_GLOBS, A_GENEROUS_CAP)
-        .expect("manifest must build");
+    let manifest = context_manifest(
+        worktree.path(),
+        CLAUDE_GLOBS,
+        &guidance_files(),
+        A_GENEROUS_CAP,
+    )
+    .expect("manifest must build");
 
     // Then
     let link = manifest
@@ -478,6 +523,7 @@ fn a_file_reached_only_through_an_allow_listed_link_is_served() {
         worktree.path(),
         "tools/agent-skills/tdd/SKILL.md",
         CLAUDE_GLOBS,
+        &guidance_files(),
         A_GENEROUS_CAP,
     );
 
@@ -501,6 +547,7 @@ fn a_file_beside_a_linked_tree_stays_refused() {
         worktree.path(),
         "tools/build.sh",
         CLAUDE_GLOBS,
+        &guidance_files(),
         A_GENEROUS_CAP,
     );
 
@@ -532,6 +579,7 @@ fn a_non_utf8_file_round_trips_byte_for_byte() {
         worktree.path(),
         ".claude/logo.png",
         CLAUDE_GLOBS,
+        &guidance_files(),
         A_GENEROUS_CAP,
     )
     .expect("read must succeed");
@@ -553,6 +601,7 @@ fn an_empty_allow_listed_file_reads_as_empty_rather_than_failing() {
         worktree.path(),
         ".claude/empty.json",
         CLAUDE_GLOBS,
+        &guidance_files(),
         A_GENEROUS_CAP,
     )
     .expect("read must succeed");
@@ -575,12 +624,18 @@ fn a_path_outside_the_allow_list_is_refused_identically_whether_or_not_it_exists
     worktree.with_file("secrets.txt", b"hunter2\n").committed();
 
     // When
-    let present =
-        read_context_file_bytes(worktree.path(), "secrets.txt", CLAUDE_GLOBS, A_GENEROUS_CAP);
+    let present = read_context_file_bytes(
+        worktree.path(),
+        "secrets.txt",
+        CLAUDE_GLOBS,
+        &guidance_files(),
+        A_GENEROUS_CAP,
+    );
     let absent = read_context_file_bytes(
         worktree.path(),
         "no-such-file.txt",
         CLAUDE_GLOBS,
+        &guidance_files(),
         A_GENEROUS_CAP,
     );
 
@@ -607,7 +662,13 @@ fn a_file_over_the_cap_is_refused_rather_than_truncated() {
         .committed();
 
     // When
-    let refusal = read_context_file_bytes(worktree.path(), ".claude/huge.md", CLAUDE_GLOBS, 1024);
+    let refusal = read_context_file_bytes(
+        worktree.path(),
+        ".claude/huge.md",
+        CLAUDE_GLOBS,
+        &guidance_files(),
+        1024,
+    );
 
     // Then
     let refusal = refusal.expect_err("an over-cap file must be refused");
@@ -629,8 +690,14 @@ fn a_file_exactly_at_the_cap_is_served() {
         .committed();
 
     // When
-    let bytes = read_context_file_bytes(worktree.path(), ".claude/exact.md", CLAUDE_GLOBS, 1024)
-        .expect("a file exactly at the cap must be served");
+    let bytes = read_context_file_bytes(
+        worktree.path(),
+        ".claude/exact.md",
+        CLAUDE_GLOBS,
+        &guidance_files(),
+        1024,
+    )
+    .expect("a file exactly at the cap must be served");
 
     // Then
     assert_eq!(bytes.len(), 1024);
@@ -663,6 +730,7 @@ fn a_batch_returns_every_requested_file_byte_for_byte() {
             ".claude/skills/tdd/SKILL.md".to_string(),
         ],
         CLAUDE_GLOBS,
+        &guidance_files(),
         A_GENEROUS_CAP,
     )
     .expect("the batch must be served");
@@ -699,6 +767,7 @@ fn an_empty_file_in_a_batch_comes_back_empty_rather_than_missing() {
         worktree.path(),
         &["CLAUDE.md".to_string(), ".mcp.json".to_string()],
         CLAUDE_GLOBS,
+        &guidance_files(),
         A_GENEROUS_CAP,
     )
     .expect("the batch must be served");
@@ -728,6 +797,7 @@ fn a_batch_naming_one_unlisted_path_serves_none_of_it() {
         worktree.path(),
         &["CLAUDE.md".to_string(), ".env".to_string()],
         CLAUDE_GLOBS,
+        &guidance_files(),
         A_GENEROUS_CAP,
     );
 
@@ -757,6 +827,7 @@ fn a_batch_over_the_aggregate_cap_is_refused_before_a_byte_is_read() {
         worktree.path(),
         &["CLAUDE.md".to_string(), "AGENTS.md".to_string()],
         CLAUDE_GLOBS,
+        &guidance_files(),
         1024,
     );
 
@@ -779,7 +850,13 @@ fn a_batch_naming_no_paths_is_refused() {
     worktree.with_file("CLAUDE.md", b"# rules\n").committed();
 
     // When
-    let refusal = read_context_files_bytes(worktree.path(), &[], CLAUDE_GLOBS, A_GENEROUS_CAP);
+    let refusal = read_context_files_bytes(
+        worktree.path(),
+        &[],
+        CLAUDE_GLOBS,
+        &guidance_files(),
+        A_GENEROUS_CAP,
+    );
 
     // Then
     assert_eq!(
@@ -801,6 +878,7 @@ fn a_batch_naming_the_same_path_twice_is_refused() {
         worktree.path(),
         &["CLAUDE.md".to_string(), "CLAUDE.md".to_string()],
         CLAUDE_GLOBS,
+        &guidance_files(),
         A_GENEROUS_CAP,
     );
 
@@ -830,6 +908,7 @@ fn a_gitignored_file_reached_through_an_allow_listed_link_is_refused() {
         worktree.path(),
         "tools/agent-skills/.cache/token.json",
         CLAUDE_GLOBS,
+        &guidance_files(),
         A_GENEROUS_CAP,
     );
 

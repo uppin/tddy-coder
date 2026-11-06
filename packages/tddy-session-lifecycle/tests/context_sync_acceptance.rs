@@ -235,7 +235,16 @@ fn the_populated_claude_md_still_opens_with_the_managed_codebase_preamble() {
     // Then
     let claude_md = read(&context_dir, "CLAUDE.md");
     assert!(
-        claude_md.starts_with(tddy_sandbox::managed_codebase_preamble(&[]).trim_start()),
+        claude_md.starts_with(
+            tddy_sandbox::managed_codebase_preamble(
+                &[],
+                &[
+                    std::path::PathBuf::from("CLAUDE.md"),
+                    std::path::PathBuf::from("AGENTS.md")
+                ]
+            )
+            .trim_start()
+        ),
         "the preamble must lead: {}",
         &claude_md[..claude_md.len().min(200)]
     );
@@ -279,7 +288,14 @@ fn a_tick_with_nothing_changed_fetches_the_manifest_and_transfers_no_content() {
         .holding(".claude/settings.json", "{}\n");
     let context_dir = build_split_context_dir(session_dir.path(), &[], CLAUDE_GLOBS, &host)
         .expect("build must succeed");
-    let syncer = ContextSyncer::new(context_dir, CLAUDE_GLOBS);
+    let syncer = ContextSyncer::new(
+        context_dir,
+        CLAUDE_GLOBS.iter().map(ToString::to_string).collect(),
+        vec![
+            std::path::PathBuf::from("CLAUDE.md"),
+            std::path::PathBuf::from("AGENTS.md"),
+        ],
+    );
     let reads_after_setup = host.reads();
     let manifests_after_setup = host.manifests();
 
@@ -310,7 +326,14 @@ fn a_tick_after_an_edit_transfers_only_the_file_that_changed() {
         .holding(".claude/settings.json", "{}\n");
     let context_dir = build_split_context_dir(session_dir.path(), &[], CLAUDE_GLOBS, &host)
         .expect("build must succeed");
-    let syncer = ContextSyncer::new(context_dir.clone(), CLAUDE_GLOBS);
+    let syncer = ContextSyncer::new(
+        context_dir.clone(),
+        CLAUDE_GLOBS.iter().map(ToString::to_string).collect(),
+        vec![
+            std::path::PathBuf::from("CLAUDE.md"),
+            std::path::PathBuf::from("AGENTS.md"),
+        ],
+    );
     let reads_after_setup = host.reads();
 
     // When
@@ -340,7 +363,14 @@ fn a_tick_deletes_a_file_the_project_removed() {
         .holding(".claude/skills/old/SKILL.md", "# retracted\n");
     let context_dir = build_split_context_dir(session_dir.path(), &[], CLAUDE_GLOBS, &host)
         .expect("build must succeed");
-    let syncer = ContextSyncer::new(context_dir.clone(), CLAUDE_GLOBS);
+    let syncer = ContextSyncer::new(
+        context_dir.clone(),
+        CLAUDE_GLOBS.iter().map(ToString::to_string).collect(),
+        vec![
+            std::path::PathBuf::from("CLAUDE.md"),
+            std::path::PathBuf::from("AGENTS.md"),
+        ],
+    );
 
     // When
     host.remove(".claude/skills/old/SKILL.md");
@@ -365,7 +395,14 @@ fn a_tick_never_deletes_the_preamble_file_the_agent_reads_its_orientation_from()
     let host = a_codebase_host().holding("CLAUDE.md", "# Project rules\n");
     let context_dir = build_split_context_dir(session_dir.path(), &[], CLAUDE_GLOBS, &host)
         .expect("build must succeed");
-    let syncer = ContextSyncer::new(context_dir.clone(), CLAUDE_GLOBS);
+    let syncer = ContextSyncer::new(
+        context_dir.clone(),
+        CLAUDE_GLOBS.iter().map(ToString::to_string).collect(),
+        vec![
+            std::path::PathBuf::from("CLAUDE.md"),
+            std::path::PathBuf::from("AGENTS.md"),
+        ],
+    );
 
     // When
     host.remove("CLAUDE.md");
@@ -403,7 +440,14 @@ fn a_deletion_recorded_for_a_path_outside_the_context_dir_never_reaches_the_file
     );
     std::fs::write(context_dir.join(SYNC_STATE_BASENAME), tampered_record)
         .expect("write the tampered record");
-    let syncer = ContextSyncer::new(context_dir, CLAUDE_GLOBS);
+    let syncer = ContextSyncer::new(
+        context_dir,
+        CLAUDE_GLOBS.iter().map(ToString::to_string).collect(),
+        vec![
+            std::path::PathBuf::from("CLAUDE.md"),
+            std::path::PathBuf::from("AGENTS.md"),
+        ],
+    );
 
     // When
     let outcome = syncer.tick(&host);
@@ -431,7 +475,14 @@ fn a_corrupt_sync_record_re_syncs_in_full_instead_of_wedging_the_session() {
     let context_dir = build_split_context_dir(session_dir.path(), &[], CLAUDE_GLOBS, &host)
         .expect("build must succeed");
     std::fs::write(context_dir.join(SYNC_STATE_BASENAME), "{ not json at all").expect("write");
-    let syncer = ContextSyncer::new(context_dir.clone(), CLAUDE_GLOBS);
+    let syncer = ContextSyncer::new(
+        context_dir.clone(),
+        CLAUDE_GLOBS.iter().map(ToString::to_string).collect(),
+        vec![
+            std::path::PathBuf::from("CLAUDE.md"),
+            std::path::PathBuf::from("AGENTS.md"),
+        ],
+    );
 
     // When
     host.edit(
@@ -486,7 +537,14 @@ fn a_failing_tick_keeps_the_session_and_marks_the_guidance_stale() {
     let host = a_codebase_host().holding("CLAUDE.md", "# Project rules\n");
     let context_dir = build_split_context_dir(session_dir.path(), &[], CLAUDE_GLOBS, &host)
         .expect("build must succeed");
-    let syncer = ContextSyncer::new(context_dir.clone(), CLAUDE_GLOBS);
+    let syncer = ContextSyncer::new(
+        context_dir.clone(),
+        CLAUDE_GLOBS.iter().map(ToString::to_string).collect(),
+        vec![
+            std::path::PathBuf::from("CLAUDE.md"),
+            std::path::PathBuf::from("AGENTS.md"),
+        ],
+    );
 
     // When
     host.unreachable("peer link dropped");
@@ -517,7 +575,14 @@ fn a_tick_that_recovers_clears_the_staleness_warning() {
     let host = a_codebase_host().holding("CLAUDE.md", "# Project rules\n");
     let context_dir = build_split_context_dir(session_dir.path(), &[], CLAUDE_GLOBS, &host)
         .expect("build must succeed");
-    let syncer = ContextSyncer::new(context_dir.clone(), CLAUDE_GLOBS);
+    let syncer = ContextSyncer::new(
+        context_dir.clone(),
+        CLAUDE_GLOBS.iter().map(ToString::to_string).collect(),
+        vec![
+            std::path::PathBuf::from("CLAUDE.md"),
+            std::path::PathBuf::from("AGENTS.md"),
+        ],
+    );
     host.unreachable("peer link dropped");
     let _ = syncer.tick(&host);
 
@@ -561,7 +626,11 @@ fn the_co_located_source_produces_the_same_manifest_as_a_remote_one() {
     // When
     let local = tddy_session_files::context_sync::LocalWorktreeSource::new(
         worktree.path().to_path_buf(),
-        CLAUDE_GLOBS,
+        CLAUDE_GLOBS.iter().map(ToString::to_string).collect(),
+        vec![
+            std::path::PathBuf::from("CLAUDE.md"),
+            std::path::PathBuf::from("AGENTS.md"),
+        ],
         A_GENEROUS_CAP,
     );
     let from_local = ContextSource::manifest(&local).expect("local manifest");
@@ -580,13 +649,24 @@ fn a_co_located_tick_picks_up_an_edit_to_the_worktree_beside_it() {
     std::fs::write(worktree.path().join("CLAUDE.md"), "# rules\n").expect("write");
     let source = tddy_session_files::context_sync::LocalWorktreeSource::new(
         worktree.path().to_path_buf(),
-        CLAUDE_GLOBS,
+        CLAUDE_GLOBS.iter().map(ToString::to_string).collect(),
+        vec![
+            std::path::PathBuf::from("CLAUDE.md"),
+            std::path::PathBuf::from("AGENTS.md"),
+        ],
         A_GENEROUS_CAP,
     );
     let session_dir = a_session_dir();
     let context_dir = build_split_context_dir(session_dir.path(), &[], CLAUDE_GLOBS, &source)
         .expect("build must succeed");
-    let syncer = ContextSyncer::new(context_dir.clone(), CLAUDE_GLOBS);
+    let syncer = ContextSyncer::new(
+        context_dir.clone(),
+        CLAUDE_GLOBS.iter().map(ToString::to_string).collect(),
+        vec![
+            std::path::PathBuf::from("CLAUDE.md"),
+            std::path::PathBuf::from("AGENTS.md"),
+        ],
+    );
 
     // When
     std::fs::write(
@@ -668,9 +748,16 @@ fn a_tick_after_a_rebuild_that_retracted_a_path_has_nothing_left_to_repair() {
     let reads_before = host.reads();
 
     // When
-    ContextSyncer::new(context_dir.clone(), CLAUDE_GLOBS)
-        .tick(&host)
-        .expect("the tick must succeed");
+    ContextSyncer::new(
+        context_dir.clone(),
+        CLAUDE_GLOBS.iter().map(ToString::to_string).collect(),
+        vec![
+            std::path::PathBuf::from("CLAUDE.md"),
+            std::path::PathBuf::from("AGENTS.md"),
+        ],
+    )
+    .tick(&host)
+    .expect("the tick must succeed");
 
     // Then
     assert_eq!(
@@ -712,7 +799,16 @@ fn a_guidance_file_served_under_a_redundant_dot_slash_still_leads_with_the_pream
     // Then
     let claude_md = read(&context_dir, "CLAUDE.md");
     assert!(
-        claude_md.starts_with(tddy_sandbox::managed_codebase_preamble(&[]).trim_start()),
+        claude_md.starts_with(
+            tddy_sandbox::managed_codebase_preamble(
+                &[],
+                &[
+                    std::path::PathBuf::from("CLAUDE.md"),
+                    std::path::PathBuf::from("AGENTS.md")
+                ]
+            )
+            .trim_start()
+        ),
         "the preamble must lead however the path was spelled: {}",
         &claude_md[..claude_md.len().min(200)]
     );
@@ -893,7 +989,14 @@ fn a_tick_after_a_link_is_retargeted_repoints_the_symlink() {
         .linking(".claude/skills", ".agents/skills");
     let context_dir = build_split_context_dir(session_dir.path(), &[], CLAUDE_GLOBS, &host)
         .expect("build must succeed");
-    let syncer = ContextSyncer::new(context_dir.clone(), CLAUDE_GLOBS);
+    let syncer = ContextSyncer::new(
+        context_dir.clone(),
+        CLAUDE_GLOBS.iter().map(ToString::to_string).collect(),
+        vec![
+            std::path::PathBuf::from("CLAUDE.md"),
+            std::path::PathBuf::from("AGENTS.md"),
+        ],
+    );
 
     // When
     host.relink(".claude/skills", ".agents/skills-next");
@@ -918,7 +1021,14 @@ fn a_tick_that_drops_a_link_removes_the_symlink_and_keeps_its_target() {
         .linking(".claude/skills", ".agents/skills");
     let context_dir = build_split_context_dir(session_dir.path(), &[], CLAUDE_GLOBS, &host)
         .expect("build must succeed");
-    let syncer = ContextSyncer::new(context_dir.clone(), CLAUDE_GLOBS);
+    let syncer = ContextSyncer::new(
+        context_dir.clone(),
+        CLAUDE_GLOBS.iter().map(ToString::to_string).collect(),
+        vec![
+            std::path::PathBuf::from("CLAUDE.md"),
+            std::path::PathBuf::from("AGENTS.md"),
+        ],
+    );
 
     // When
     host.unlink(".claude/skills");
@@ -1056,7 +1166,11 @@ fn a_co_located_read_answers_from_the_manifest_it_serves() {
     std::fs::create_dir_all(worktree.path().join(".claude")).expect("mkdir");
     let source = tddy_session_files::context_sync::LocalWorktreeSource::new(
         worktree.path().to_path_buf(),
-        CLAUDE_GLOBS,
+        CLAUDE_GLOBS.iter().map(ToString::to_string).collect(),
+        vec![
+            std::path::PathBuf::from("CLAUDE.md"),
+            std::path::PathBuf::from("AGENTS.md"),
+        ],
         A_GENEROUS_CAP,
     );
     ContextSource::manifest(&source).expect("manifest");

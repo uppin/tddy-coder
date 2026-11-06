@@ -146,7 +146,7 @@ pub struct TelegramWorkflowSpawn {
     pub pending_elicitation_other: Arc<Mutex<HashMap<i64, String>>>,
     /// Shared registry of active Claude Code CLI sessions, injected so Telegram-launched sessions
     /// are attachable via the terminal-stream RPCs (same `Arc` as `DaemonSessionHost`).
-    pub claude_cli_manager: Arc<tddy_session_lifecycle::cli_session_manager::CliSessionManager>,
+    pub cli_manager: Arc<tddy_session_lifecycle::cli_session_manager::CliSessionManager>,
 }
 
 /// What a Telegram-started workflow session runs, resolved from config and the project registry

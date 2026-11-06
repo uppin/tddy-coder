@@ -15,8 +15,36 @@
 import type { SessionAttachmentInit } from "../../src/hooks/useSessionAttachments";
 import {
   buildStartSessionRequest,
+  type CliAgentFeatures,
   type CreateSessionFormValues,
 } from "../../src/components/sessions/createSessionRequest";
+
+/**
+ * The features the pane derives from the wire row a daemon serves for `claude`
+ * (`cypress/support/servedAgents.ts`): its argv binds a model, a permission mode, the
+ * bypass and a prompt; its spec declares `managed_workflow` and `split_host`; a route
+ * can point it at Anthropic.
+ */
+const CLAUDE_FEATURES: CliAgentFeatures = {
+  bindsModel: true,
+  bindsPermissionMode: true,
+  bindsSkipPermissions: true,
+  bindsPrompt: true,
+  managedWorkflow: true,
+  splitHost: true,
+  providerRoutable: true,
+};
+
+/** The same derivation for `cursor`: no permission mode or bypass in its argv, no `split_host`. */
+const CURSOR_FEATURES: CliAgentFeatures = {
+  bindsModel: true,
+  bindsPermissionMode: false,
+  bindsSkipPermissions: false,
+  bindsPrompt: true,
+  managedWorkflow: true,
+  splitHost: false,
+  providerRoutable: false,
+};
 
 /**
  * A form holding nothing but a token and a project — every other value at the empty state the pane
@@ -34,6 +62,7 @@ function aFormWith(values: Partial<CreateSessionFormValues>): CreateSessionFormV
     selectedBranchToWorkOn: "",
     daemonInstanceId: "",
     sessionType: "claude-cli",
+    cliFeatures: CLAUDE_FEATURES,
     toolPath: "",
     selectedAgentId: "",
     recipe: "tdd",
@@ -138,6 +167,7 @@ describe("create session request builder", () => {
     // Given a cursor-cli session whose form still holds a host picked while it was claude-cli
     const form = aFormWith({
       sessionType: "cursor-cli",
+      cliFeatures: CURSOR_FEATURES,
       managedCodebase: true,
       codebaseDaemonInstanceId: "host-b",
       isSplitCodebase: true,

@@ -4,10 +4,11 @@ import { Plus } from "lucide-react";
 import type { TmuxSessionInfo } from "../../gen/terminal_session_pb";
 import {
   BASH_KIND,
-  CLI_HARNESS_OPTIONS,
   TMUX_KIND,
   TMUX_NEW_KIND,
   TOOL_SESSION_TYPE,
+  cliSessionTypeOptions,
+  knownSessionTypes,
   terminalKindLabel,
 } from "./cliHarnessOptions";
 import { nextTmuxSessionName } from "./tmuxSessionName";
@@ -127,10 +128,13 @@ export function NewTerminalMenu({
     };
   }, [menuOpen]);
 
-  // Bash, then every CLI harness this session can run — the same list the Create pane offers.
+  // Bash, then every CLI agent kind a daemon has served this client — the same list the
+  // Create pane offers, registered from its `ListAgents` answers.
   const menuKinds = [
     BASH_KIND,
-    ...(sessionType === TOOL_SESSION_TYPE ? [] : CLI_HARNESS_OPTIONS.map(({ id }) => id)),
+    ...(sessionType === TOOL_SESSION_TYPE
+      ? []
+      : cliSessionTypeOptions(knownSessionTypes()).map(({ id }) => id)),
   ];
 
   return (

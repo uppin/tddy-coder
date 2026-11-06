@@ -33,7 +33,7 @@ use tddy_service::proto::session::{
     DeleteSessionRequest, SessionService as SessionServiceTrait, StartKeepAlive, StartSessionEvent,
     StartSessionRequest, StartSessionResponse,
 };
-use tddy_session_lifecycle::claude_cli_session::ClaudeCliSessionManager;
+use tddy_session_lifecycle::claude_cli_session::CliSessionManager;
 use tddy_session_lifecycle::connection_service::{
     classify_codebase_placement, CodebasePlacement, DaemonSessionHost,
 };
@@ -119,7 +119,7 @@ fn service_with_known_codebase_peer_and_config(
             tddy_spawn::supervisor_client::SpawnBackendChoice::ForkedWorker,
             tddy_daemon_livekit::peer_routing::peer_routing_over(&config, Some(discovery)),
             Arc::new(tddy_daemon_kernel::operator_channel::NoOperatorChannel),
-            Arc::new(ClaudeCliSessionManager::new()),
+            Arc::new(CliSessionManager::new()),
         )
         .with_coding_agents_if_none(tddy_session_lifecycle::test_util::builtin_coding_agents()),
     ))

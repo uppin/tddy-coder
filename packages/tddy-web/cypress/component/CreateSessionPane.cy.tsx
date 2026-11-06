@@ -6,6 +6,7 @@
  * and error handling.
  */
 import React from "react";
+import { servedAgentWire } from "../support/servedAgents";
 import { create, fromBinary } from "@bufbuild/protobuf";
 import { createClient } from "@connectrpc/connect";
 import { createConnectTransport } from "@connectrpc/connect-web";
@@ -75,7 +76,7 @@ function createTestSessionFilesClient() {
 // ---------------------------------------------------------------------------
 
 const TEST_PROJECT = { projectId: "proj-test", name: "Test Project", mainRepoPath: "/home/dev/test" };
-const TEST_AGENT = { id: "claude", label: "Claude (opus)" };
+const TEST_AGENT = { id: "claude", label: "Claude (opus)", ...servedAgentWire("claude"), };
 const TEST_TOOL_PATH = "/usr/bin/tddy-coder";
 
 function interceptBaseline() {

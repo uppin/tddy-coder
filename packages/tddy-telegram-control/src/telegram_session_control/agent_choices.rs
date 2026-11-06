@@ -93,7 +93,7 @@ pub fn telegram_model_choices(
             models
                 .curated
                 .iter()
-                .map(String::as_str)
+                .map(|model| model.id())
                 .filter(|id| Some(*id) != default),
         )
         .collect();

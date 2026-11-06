@@ -12,6 +12,7 @@
  */
 
 import React from "react";
+import { servedAgentWire } from "../support/servedAgents";
 import { Code, ConnectError, createClient } from "@connectrpc/connect";
 import { anInMemoryRpcBackend, type InMemoryRpcBackend } from "tddy-connectrpc-testkit";
 import { SessionService } from "../../src/gen/session_pb";
@@ -42,7 +43,7 @@ interface AgentRow {
   readonly label: string;
 }
 
-const CLAUDE: AgentRow = { id: "claude", label: "Claude" };
+const CLAUDE: AgentRow = { id: "claude", label: "Claude", ...servedAgentWire("claude"), };
 const REVIEWER: AgentRow = { id: "reviewer", label: "Reviewer" };
 
 // ---------------------------------------------------------------------------

@@ -14,7 +14,6 @@ use async_trait::async_trait;
 use tddy_cli_sessions::tmux::{
     ensure_reachable, tmux_attach_argv, tmux_binary, tmux_new_session_argv, tmux_session_name,
 };
-use tddy_core::cli_harness::{cli_harness, CliLaunch};
 use tddy_daemon_kernel::privilege_drop::EffectiveIdentity;
 use tddy_rpc::Status;
 use tddy_terminal_rpc::service::{
@@ -46,7 +45,7 @@ impl DaemonSessionHost {
     #[must_use]
     pub fn terminal_sessions(&self) -> DaemonTerminalSessionStore {
         DaemonTerminalSessionStore::new(
-            Arc::clone(&self.claude_cli_manager),
+            Arc::clone(&self.cli_manager),
             Arc::clone(&self.sandbox_manager),
         )
     }
@@ -61,7 +60,7 @@ impl DaemonSessionHost {
     #[must_use]
     pub fn terminal_control(&self) -> Arc<dyn TerminalControl> {
         Arc::new(CliManagerTerminalControl::new(Arc::clone(
-            &self.claude_cli_manager,
+            &self.cli_manager,
         )))
     }
 
@@ -109,7 +108,7 @@ impl DaemonSessionHost {
             terminals: Arc::new(self.terminal_sessions()),
             control: self.terminal_control(),
             roster: Arc::new(CliManagerTerminalRoster::new(
-                Arc::clone(&self.claude_cli_manager),
+                Arc::clone(&self.cli_manager),
                 self.launch_coding_agents(),
                 self.tddy_data_dir.clone(),
                 Arc::clone(&tmux),
@@ -120,7 +119,7 @@ impl DaemonSessionHost {
                 ),
             ),
             main_reattach: Arc::new(TmuxMainReattach::new(
-                Arc::clone(&self.claude_cli_manager),
+                Arc::clone(&self.cli_manager),
                 self.coding_agents.clone(),
                 self.tddy_data_dir.clone(),
             )),
@@ -271,41 +270,36 @@ impl TerminalRoster for CliManagerTerminalRoster {
                 .await
                 .map_err(|e| Status::internal(format!("failed to start terminal: {e}")))?,
             TerminalKind::Agent(kind) => {
-                let harness = cli_harness(kind).ok_or_else(|| {
-                    Status::invalid_argument(format!("unknown terminal kind {kind:?}"))
-                })?;
-                // The binary is the agent spec's, resolved on this host (`#agent-tools 19/19`): its
-                // `binary.env`, then the host's search, refusing what is found nowhere. The argv is
-                // still the legacy table's (docs/dev/todo/2026-11-03-harness-clis-legacy-cli-harness-removal.md).
-                let spec_id = self
+                let spec = self
                     .coding_agents
                     .agents()
-                    .for_session_type(harness.session_type)
-                    .map(|spec| spec.id.clone())
+                    .for_session_type(kind)
                     .ok_or_else(|| {
-                        Status::failed_precondition(format!(
-                            "no coding agent spec launches {}",
-                            harness.session_type
-                        ))
+                        Status::invalid_argument(format!("unknown terminal kind {kind:?}"))
                     })?;
+                // The binary is the agent spec's, resolved on this host (`#agent-tools 19/19`): its
+                // `binary.env`, then the host's search, refusing what is found nowhere.
                 let binary = self
                     .coding_agents
-                    .resolve(&spec_id, None)
+                    .resolve(&spec.id, None)
                     .map_err(|e| Status::failed_precondition(e.to_string()))?
                     .tool
-                    .binary
-                    .to_string_lossy()
-                    .into_owned();
-                // A tab is a conversation of its own: a harness told a session id (Claude Code)
-                // gets a fresh one, never the session's.
+                    .binary;
+                // A tab is a conversation of its own: an agent told a session id gets a fresh
+                // one, never the session's. The argv is the spec's `run.argv` rendered with it.
                 let conversation_id = uuid::Uuid::now_v7().to_string();
-                let argv = (harness.argv)(&CliLaunch {
-                    binary: &binary,
-                    session_id: &conversation_id,
-                    ..CliLaunch::default()
-                });
+                let argv = spec
+                    .render_run_argv(
+                        &binary,
+                        &[
+                            ("session_id", conversation_id.as_str()),
+                            ("chat_id", conversation_id.as_str()),
+                        ],
+                        &[],
+                    )
+                    .map_err(|e| Status::failed_precondition(e.to_string()))?;
                 self.manager
-                    .start_agent_terminal(session_id, worktree, harness.session_type, argv)
+                    .start_agent_terminal(session_id, worktree, kind, argv)
                     .await
                     .map_err(|e| Status::internal(format!("failed to start terminal: {e}")))?
             }

@@ -24,9 +24,9 @@ export function CreateSessionSandboxedCodebaseToggle({
     <>
       {/* Sandboxed codebase — the inverted placement: the checkout goes in the
           `--workspace-tools` jail and the agent runs beside it, unconfined, reaching the code
-          only through mcp__tddy-tools__*. Offered here only: claude-cli is the one agent whose
-          native filesystem and shell tools can be withdrawn, so it is the only session type the
-          daemon accepts this placement for.
+          only through mcp__tddy-tools__*. Offered only for an agent whose spec declares
+          `split_host` — the one whose native filesystem and shell tools can be withdrawn, so
+          it is the only kind the daemon accepts this placement for.
           See docs/ft/daemon/amendments/PRD-2026-09-18-sandboxed-codebase-from-the-web.md. */}
       <div>
         <label className="flex items-center gap-2 text-sm text-muted-foreground">

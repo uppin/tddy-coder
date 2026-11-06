@@ -145,7 +145,7 @@ impl LaunchSessions {
         session_dir: PathBuf,
         arrived_over: RequestTransport,
     ) -> Result<(), Status> {
-        let worktree_root = match facilitated_checkout(metadata) {
+        let worktree_root = match facilitated_checkout(metadata, self.coding_agents.agents()) {
             FacilitatedCheckout::NotFacilitated => return Ok(()),
             FacilitatedCheckout::NoCheckout => {
                 log::debug!(
@@ -183,11 +183,15 @@ impl LaunchSessions {
         self.tell_the_reach(&req.session_id, &metadata, session_dir, arrived_over)
             .await?;
 
-        // The *terminal* room, which is a different room with different participants. A CLI harness
-        // (claude-cli, cursor-cli, opencode-cli) or workspace session has none: its PTY is served
+        // The *terminal* room, which is a different room with different participants. A CLI
+        // session (an agent's `<id>-cli`) or workspace session has none: its PTY is served
         // over gRPC and bridged into the lobby, never into a room of its own, so these answer with
         // empty coordinates — as they did before the session room above existed.
-        if tddy_core::cli_harness::cli_harness(session_type).is_some()
+        if self
+            .coding_agents
+            .agents()
+            .for_session_type(session_type)
+            .is_some()
             || session_type == "workspace"
         {
             return Ok(Response::new(ConnectSessionResponse {

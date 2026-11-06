@@ -15,7 +15,7 @@ use tddy_rpc::Request;
 use tddy_service::proto::session::{
     ResumeSessionRequest, SessionService as SessionServiceTrait, StartSessionRequest,
 };
-use tddy_session_lifecycle::claude_cli_session::ClaudeCliSessionManager;
+use tddy_session_lifecycle::claude_cli_session::CliSessionManager;
 use tddy_session_lifecycle::connection_service::DaemonSessionHost;
 use tddy_session_lifecycle::session_dir_recorded_history::main_capture_recording_path;
 use tddy_task::CaptureRecording;
@@ -71,7 +71,7 @@ allowed_tools:
 fn minimal_service_with_manager(
     (config, agents): AConfigAndItsAgents,
     sessions_base: PathBuf,
-    manager: Arc<ClaudeCliSessionManager>,
+    manager: Arc<CliSessionManager>,
 ) -> DaemonSessionHost {
     let tddy_data_dir = sessions_base.clone();
     let sessions_base_resolver: SessionsBaseResolver =
@@ -143,8 +143,8 @@ fn write_staying_alive_stub(dir: &std::path::Path) -> PathBuf {
     script_path
 }
 
-fn a_manager_recording_every_50_ms() -> Arc<ClaudeCliSessionManager> {
-    Arc::new(ClaudeCliSessionManager::new().with_recording_interval(Duration::from_millis(50)))
+fn a_manager_recording_every_50_ms() -> Arc<CliSessionManager> {
+    Arc::new(CliSessionManager::new().with_recording_interval(Duration::from_millis(50)))
 }
 
 /// A safety net for the stub to print and the periodic write to land, not a prediction.

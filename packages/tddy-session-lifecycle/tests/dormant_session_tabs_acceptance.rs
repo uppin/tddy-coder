@@ -14,7 +14,7 @@ use std::time::Duration;
 
 use tddy_daemon_kernel::config::DaemonConfig;
 use tddy_rpc::{Code, Request};
-use tddy_session_lifecycle::claude_cli_session::ClaudeCliSessionManager;
+use tddy_session_lifecycle::claude_cli_session::CliSessionManager;
 use tddy_session_lifecycle::connection_service::DaemonSessionHost;
 use tddy_terminal_rpc::proto::terminal_session::{
     StartTerminalSessionRequest, TerminalSessionService as TerminalSessionServiceTrait,
@@ -34,7 +34,7 @@ const SPAWN_OBSERVE: Duration = Duration::from_secs(10);
 /// A daemon with a stub Muse Code harness configured, over a data dir the test writes sessions into.
 struct DormantTabDaemon {
     service: tddy_terminal_rpc::TerminalSessionServiceImpl,
-    manager: Arc<ClaudeCliSessionManager>,
+    manager: Arc<CliSessionManager>,
     data_dir: PathBuf,
     muse_cwd_log: PathBuf,
     _data_dir: tempfile::TempDir,
@@ -65,7 +65,7 @@ fn a_daemon() -> DormantTabDaemon {
         .build();
     let (config_dir, config) = a_config_naming_muse(&muse);
     let data_dir = tempfile::tempdir().unwrap();
-    let manager = Arc::new(ClaudeCliSessionManager::new());
+    let manager = Arc::new(CliSessionManager::new());
     let service = session_host(config, data_dir.path().to_path_buf(), Arc::clone(&manager))
         .terminal_session_service();
     DormantTabDaemon {
@@ -110,11 +110,9 @@ impl DormantTabDaemon {
                 SESSION_ID,
                 worktree.to_path_buf(),
                 "claude-opus-4-8",
-                main.to_str().unwrap(),
+                vec![main.to_str().unwrap().to_string()],
+                "claude-cli",
                 None,
-                None,
-                false,
-                false,
                 None,
                 Vec::new(),
                 Vec::new(),
@@ -288,7 +286,7 @@ fn a_config_naming_muse(muse: &Path) -> (tempfile::TempDir, AConfigAndItsAgents)
 fn session_host(
     (config, agents): AConfigAndItsAgents,
     data_dir: PathBuf,
-    manager: Arc<ClaudeCliSessionManager>,
+    manager: Arc<CliSessionManager>,
 ) -> DaemonSessionHost {
     let sessions_base = data_dir.clone();
     let sessions_base_resolver: SessionsBaseResolver =

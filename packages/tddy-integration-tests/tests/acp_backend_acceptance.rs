@@ -1,4 +1,4 @@
-//! Acceptance tests for ClaudeAcpBackend.
+//! Acceptance tests for the spec ACP backend (claude-acp).
 //!
 //! These tests verify the ACP backend behavior using tddy-acp-stub as the agent.
 //! Run with: cargo test -p tddy-integration-tests acp_ --no-fail-fast -- --test-threads=1
@@ -10,8 +10,27 @@ use std::path::PathBuf;
 
 use agent_client_protocol::{self as acp, Agent as _, Client};
 use serial_test::serial;
-use tddy_core::{ClaudeAcpBackend, CodingBackend, InvokeRequest};
+use tddy_core::{CodingBackend, InvokeRequest};
 use tokio_util::compat::{TokioAsyncReadCompatExt, TokioAsyncWriteCompatExt};
+
+/// A spec backend for the stub agent, as the agent's spec builds it: its routed agent and a
+/// command that spawns the stub.
+fn a_spec_backend(path: std::path::PathBuf) -> tddy_core::SpecAcpBackend {
+    tddy_core::SpecAcpBackend::new(
+        tddy_core::provider_route::RoutedAgent {
+            id: "claude-acp".to_string(),
+            product: "Claude".to_string(),
+            support: tddy_core::provider_route::RouteSupport::default(),
+            key_env: None,
+        },
+        tddy_core::AcpAgentCommand {
+            program: path,
+            args: Vec::new(),
+            env: Vec::new(),
+            cwd: None,
+        },
+    )
+}
 
 fn stub_agent_path() -> PathBuf {
     let manifest_dir = std::env::var("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR");
@@ -31,12 +50,12 @@ fn make_request(prompt: &str, session: Option<tddy_core::SessionMode>) -> Invoke
     req
 }
 
-/// ClaudeAcpBackend has name "claude-acp".
+/// The spec backend has name "claude-acp".
 #[tokio::test]
 #[serial]
 async fn acp_backend_has_correct_name() {
     // When
-    let backend = ClaudeAcpBackend::new();
+    let backend = a_spec_backend(std::path::PathBuf::from("claude-agent-acp"));
 
     // Then
     assert_eq!(backend.name(), "claude-acp");
@@ -50,11 +69,11 @@ async fn acp_backend_with_stub_path_constructs() {
     let path = stub_agent_path();
 
     // When
-    let _backend = ClaudeAcpBackend::with_agent_path(path);
+    let _backend = a_spec_backend(path);
 
     // Then
     assert_eq!(
-        ClaudeAcpBackend::with_agent_path(PathBuf::from("/tmp/stub")).name(),
+        a_spec_backend(PathBuf::from("/tmp/stub")).name(),
         "claude-acp"
     );
 }
@@ -75,7 +94,7 @@ async fn acp_backend_prompt_round_trip_returns_accumulated_text() {
     let scenario_path = scenario_dir.join("one-chunk.json");
     std::fs::write(&scenario_path, scenario).unwrap();
     std::env::set_var("TDDY_ACP_SCENARIO", &scenario_path);
-    let backend = ClaudeAcpBackend::with_agent_path(path);
+    let backend = a_spec_backend(path);
     let req = make_request("Hello, stub!", None);
     let result: Result<_, _> =
         tokio::time::timeout(std::time::Duration::from_secs(5), backend.invoke(req)).await;
@@ -100,7 +119,7 @@ async fn acp_backend_fresh_session_creates_new_session() {
     let scenario_path = scenario_dir.join("empty-chunks.json");
     std::fs::write(&scenario_path, scenario).unwrap();
     std::env::set_var("TDDY_ACP_SCENARIO", &scenario_path);
-    let backend = ClaudeAcpBackend::with_agent_path(path);
+    let backend = a_spec_backend(path);
     let req = make_request(
         "Session test",
         Some(tddy_core::SessionMode::Fresh("sess-1".to_string())),

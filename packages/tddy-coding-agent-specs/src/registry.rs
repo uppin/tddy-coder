@@ -53,6 +53,17 @@ impl CodingAgentRegistry {
         Self::from_tools(ToolRegistry::from_embedded(&sources)?)
     }
 
+    /// The built-in registry, built once: for a caller that held only the old static agent table
+    /// and has no host registry to hand (a schema, a facilitated check). The same agents
+    /// [`Self::builtin`] loads, cached — parsing the embedded YAML on every call would make a
+    /// predicate out of a parse.
+    pub fn builtin_cached() -> &'static Self {
+        static BUILTIN: std::sync::OnceLock<CodingAgentRegistry> = std::sync::OnceLock::new();
+        BUILTIN.get_or_init(|| {
+            CodingAgentRegistry::builtin().expect("the built-in coding agent specs load")
+        })
+    }
+
     /// The coding agents among `tools`: every tool with a `coding_agent` extension, viewed through
     /// [`CodingAgentSpec::of`]. A tool whose extension does not validate refuses the whole
     /// registry, naming it; a tool without one (`tddy-tools`, `git`) is not an agent and is skipped.

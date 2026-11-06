@@ -65,7 +65,14 @@ impl SplitSessions {
         // process left behind: the repository moved on while the session was stopped, and a resumed
         // agent reading a snapshot from before the stop is reading rules that may have been
         // retracted.
-        let agent = tddy_session_files::context_files::context_agent_for_session_type("claude-cli");
+        let agent_spec = crate::agent_argv::split_agent_spec()?;
+        let agent = agent_spec.id.as_str();
+        let glob_refs: Vec<&str> = agent_spec
+            .agent
+            .context_globs
+            .iter()
+            .map(String::as_str)
+            .collect();
         let context = self
             .split_context_from_codebase_host(
                 session_token,
@@ -89,7 +96,7 @@ impl SplitSessions {
                 session_token,
             },
             &withdrawals,
-            tddy_core::backend::context_globs_for_agent(agent),
+            &glob_refs,
             &context,
         )?;
         // The roster just read goes with the agent too, so its first `tools/list` is right before

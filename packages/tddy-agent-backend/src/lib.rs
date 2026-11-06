@@ -6,11 +6,7 @@
 
 pub mod adapters;
 pub mod backend;
-pub mod claude_argv;
 pub mod claude_hooks;
-pub mod cli_harness;
-pub mod cli_harness_muse;
-pub mod cli_harness_warp;
 pub mod cursor_hooks;
 pub mod provider_route;
 pub mod provider_route_file;
@@ -35,14 +31,12 @@ pub use backend::headless_driver::{
     AcpConversation, ConversationDriver, HeadlessCommand, HeadlessDriver,
 };
 pub use backend::{
-    backend_from_label, backend_selection_question, codex_acp_route_args, default_model_for_agent,
-    kill_running_turns, preselected_index_for_agent, recipe_cli_name_from_selection_label,
+    codex_acp_route_args, kill_running_turns, recipe_cli_name_from_selection_label,
     spawn_codex_oauth_login, workflow_recipe_selection_question, AgentOutputSink,
-    ClarificationQuestion, ClaudeAcpBackend, CodexAcpBackend, CodingBackend, InMemoryToolExecutor,
-    InvokeRequest, InvokeResponse, MockBackend, OpenCodeAcpBackend, ProcessToolExecutor,
-    QuestionOption, RemoteToolEnv, RunningGroup, SessionMode, SharedBackend, StubBackend,
-    ToolExecutor, CODEX_DEFAULT_CLI_BINARY, CODEX_OAUTH_AUTHORIZE_URL_FILENAME,
-    CODEX_THREAD_ID_FILENAME,
+    ClarificationQuestion, CodingBackend, InMemoryToolExecutor, InvokeRequest, InvokeResponse,
+    MockBackend, ProcessToolExecutor, QuestionOption, RemoteToolEnv, RunningGroup, SessionMode,
+    SharedBackend, StubBackend, ToolExecutor, CODEX_DEFAULT_CLI_BINARY,
+    CODEX_OAUTH_AUTHORIZE_URL_FILENAME, CODEX_THREAD_ID_FILENAME,
 };
 // `#agent-tools 16/19`: the workflow backend built from any coding agent's spec.
 pub use backend::spec_backend::{SpecAcpBackend, SpecBackend, SpecBackendRefusal, SpecTransport};

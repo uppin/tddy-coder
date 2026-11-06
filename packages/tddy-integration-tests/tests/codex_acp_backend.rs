@@ -1,4 +1,4 @@
-//! Acceptance tests for [`CodexAcpBackend`] (`codex-acp` over ACP, stubbed via `tddy-acp-stub`).
+//! Acceptance tests for the spec ACP backend (`codex-acp` over ACP, stubbed via `tddy-acp-stub`).
 //!
 //! Run with: `cargo build -p tddy-acp-stub` then `cargo test -p tddy-integration-tests codex_acp_ -- --test-threads=1`
 
@@ -7,9 +7,27 @@ mod common;
 use std::path::PathBuf;
 
 use serial_test::serial;
-use tddy_core::backend::codex_acp::DEFAULT_CODEX_ACP_BINARY;
 use tddy_core::CODEX_OAUTH_AUTHORIZE_URL_FILENAME;
-use tddy_core::{CodexAcpBackend, CodingBackend, InvokeRequest, SessionMode};
+use tddy_core::{CodingBackend, InvokeRequest, SessionMode};
+
+/// A spec backend for the stub agent, as the agent's spec builds it: its routed agent and a
+/// command that spawns the stub.
+fn a_spec_backend(path: std::path::PathBuf) -> tddy_core::SpecAcpBackend {
+    tddy_core::SpecAcpBackend::new(
+        tddy_core::provider_route::RoutedAgent {
+            id: "codex-acp".to_string(),
+            product: "Codex".to_string(),
+            support: tddy_core::provider_route::RouteSupport::default(),
+            key_env: None,
+        },
+        tddy_core::AcpAgentCommand {
+            program: path,
+            args: Vec::new(),
+            env: Vec::new(),
+            cwd: None,
+        },
+    )
+}
 
 fn stub_agent_path() -> PathBuf {
     let manifest_dir = std::env::var("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR");
@@ -32,7 +50,7 @@ fn make_request(prompt: &str, session: Option<SessionMode>) -> InvokeRequest {
 #[serial]
 async fn codex_acp_backend_has_correct_name() {
     // Given
-    let backend = CodexAcpBackend::new();
+    let backend = a_spec_backend(std::path::PathBuf::from("codex-acp"));
 
     // Then
     assert_eq!(backend.name(), "codex-acp");
@@ -43,11 +61,11 @@ async fn codex_acp_backend_has_correct_name() {
 async fn codex_acp_backend_with_stub_path_constructs() {
     // Given
     let path = stub_agent_path();
-    let _backend = CodexAcpBackend::with_agent_path(path);
+    let _backend = a_spec_backend(path);
 
     // Then
     assert_eq!(
-        CodexAcpBackend::with_agent_path(PathBuf::from("/tmp/no-such-stub")).name(),
+        a_spec_backend(PathBuf::from("/tmp/no-such-stub")).name(),
         "codex-acp"
     );
 }
@@ -69,7 +87,7 @@ async fn codex_acp_backend_fresh_session_returns_session_id() {
     let scenario_path = scenario_dir.join("empty.json");
     std::fs::write(&scenario_path, scenario).unwrap();
     std::env::set_var("TDDY_ACP_SCENARIO", &scenario_path);
-    let backend = CodexAcpBackend::with_agent_path(path);
+    let backend = a_spec_backend(path);
     let req = make_request("Hello", Some(SessionMode::Fresh("sess-1".to_string())));
 
     // When
@@ -99,7 +117,7 @@ async fn codex_acp_backend_resume_uses_load_session() {
     let scenario_path = scenario_dir.join("resume.json");
     std::fs::write(&scenario_path, scenario).unwrap();
     std::env::set_var("TDDY_ACP_SCENARIO", &scenario_path);
-    let backend = CodexAcpBackend::with_agent_path(path);
+    let backend = a_spec_backend(path);
     let req = make_request(
         "Continue",
         Some(SessionMode::Resume("thread-xyz".to_string())),
@@ -115,10 +133,16 @@ async fn codex_acp_backend_resume_uses_load_session() {
 
 #[test]
 fn default_codex_acp_binary_constant_matches_cli() {
-    // Given
+    // Given — the binary name is the spec's `binary.command` (`codex-acp.yaml`), not a constant
 
     // Then
-    assert_eq!(DEFAULT_CODEX_ACP_BINARY, "codex-acp");
+    assert_eq!(
+        tddy_coding_agent_specs::CodingAgentRegistry::builtin_cached()
+            .tools()
+            .get("codex-acp")
+            .map(|tool| tool.binary.command.as_str()),
+        Some("codex-acp")
+    );
 }
 
 #[test]

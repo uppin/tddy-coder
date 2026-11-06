@@ -174,6 +174,24 @@ pub struct HostChoice {
     pub label: String,
 }
 
+/// One coding agent a session can start as, as plain data the daemon injects: the agent's
+/// metadata lives in its YAML spec, loaded by the daemon (the composition root), and this
+/// crate only renders what it is handed — it names no agent and reads no spec.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AgentChoice {
+    /// The session type that starts this agent (`<id>-cli`).
+    pub session_type: String,
+    /// The toggle's label for it (the spec's `product`).
+    pub label: String,
+    /// A start of this type must name a model (the spec's `requires_model` capability).
+    pub requires_model: bool,
+    /// The permission modes its launch takes (the spec's `permission_modes`).
+    pub permission_modes: Vec<String>,
+    /// A provider route can point this agent elsewhere (its spec names route providers);
+    /// `false` runs only on its own vendor, so no provider account can run it.
+    pub routable: bool,
+}
+
 /// The closed lists the schema offers as enums that only the daemon knows.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct StartChoices {
@@ -181,6 +199,8 @@ pub struct StartChoices {
     pub hosts: Vec<HostChoice>,
     /// The workflow recipes the daemon supports.
     pub recipes: Vec<String>,
+    /// Every coding agent this daemon starts, injected from its spec registry.
+    pub agents: Vec<AgentChoice>,
 }
 
 /// What the caller's context supplies for [`CONTEXT_FILLED_FIELDS`].

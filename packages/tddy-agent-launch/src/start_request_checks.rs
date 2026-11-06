@@ -3,9 +3,7 @@ use std::path::Path;
 
 use tddy_core::{write_session_github_source, SessionGithubSource};
 
-use crate::cli_harness_jail::require_sandbox_hosts;
 use crate::stack_seed_validation::validate_stack_seed_base_session;
-use tddy_core::cli_harness::CliHarness;
 
 use tddy_daemon_kernel::user_paths::projects_path_for_user;
 use tddy_session_split::service_util;
@@ -74,31 +72,6 @@ pub(crate) fn refuse_an_unsupported_cli_session_start(
              managed_workflow",
             spec.id
         )));
-    }
-    Ok(())
-}
-
-// TODO(harness-clis): orphaned from the production start, which refuses through the spec
-// (`refuse_an_unsupported_cli_session_start`, `require_sandbox_placement`). Pinned by
-// `cli_harness_start_checks_unit_tests`; removal is deferred:
-// docs/dev/todo/2026-11-03-harness-clis-legacy-cli-harness-removal.md
-/// A start of a registered CLI harness that cannot be served is refused before anything is
-/// created: none of them has a workflow of its own for a managed codebase to drive, and a sandboxed
-/// one must be a harness the sandbox runner hosts (refused naming the runner, before any provider
-/// route is resolved).
-#[allow(dead_code)]
-pub(crate) fn refuse_an_unsupported_cli_harness_start(
-    harness: &CliHarness,
-    req: &StartSessionRequest,
-) -> Result<(), Status> {
-    if req.managed_codebase {
-        return Err(Status::invalid_argument(format!(
-            "managed_codebase is not supported for {} sessions",
-            harness.session_type
-        )));
-    }
-    if req.sandbox {
-        require_sandbox_hosts(harness)?;
     }
     Ok(())
 }

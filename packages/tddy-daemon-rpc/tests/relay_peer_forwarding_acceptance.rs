@@ -18,7 +18,7 @@ use tddy_daemon_rpc::test_util::TestDaemon;
 use tddy_host_service::multi_host::{DaemonInstanceId, EligibleDaemonInfo, EligibleDaemonSource};
 use tddy_rpc::Request;
 use tddy_service::proto::exec_tools::{ExecToolService, ExecuteToolRequest, ListExecToolsRequest};
-use tddy_session_lifecycle::claude_cli_session::ClaudeCliSessionManager;
+use tddy_session_lifecycle::claude_cli_session::CliSessionManager;
 use tddy_session_lifecycle::connection_service::DaemonSessionHost;
 use tddy_session_lifecycle::test_util::TEST_TOKEN;
 
@@ -92,7 +92,7 @@ fn service_with_known_remote_peer(config: DaemonConfig, sessions_base: PathBuf) 
             tddy_spawn::supervisor_client::SpawnBackendChoice::ForkedWorker,
             tddy_daemon_livekit::peer_routing::peer_routing_over(&config, Some(discovery)),
             Arc::new(tddy_daemon_kernel::operator_channel::NoOperatorChannel),
-            Arc::new(ClaudeCliSessionManager::new()),
+            Arc::new(CliSessionManager::new()),
         )
         .with_coding_agents_if_none(tddy_session_lifecycle::test_util::builtin_coding_agents()),
     )
@@ -217,7 +217,7 @@ async fn execute_tool_with_unknown_remote_instance_id_returns_invalid_argument()
             tddy_spawn::supervisor_client::SpawnBackendChoice::ForkedWorker,
             tddy_session_lifecycle::peer_routing::PeerRouting::local_only(&test_config()), // no livekit discovery
             Arc::new(tddy_daemon_kernel::operator_channel::NoOperatorChannel),
-            Arc::new(ClaudeCliSessionManager::new()),
+            Arc::new(CliSessionManager::new()),
         )
         .with_coding_agents_if_none(tddy_session_lifecycle::test_util::builtin_coding_agents()),
     );
@@ -298,7 +298,7 @@ async fn list_exec_tools_with_unknown_instance_id_returns_invalid_argument() {
             tddy_spawn::supervisor_client::SpawnBackendChoice::ForkedWorker,
             tddy_session_lifecycle::peer_routing::PeerRouting::local_only(&test_config()), // no livekit discovery
             Arc::new(tddy_daemon_kernel::operator_channel::NoOperatorChannel),
-            Arc::new(ClaudeCliSessionManager::new()),
+            Arc::new(CliSessionManager::new()),
         )
         .with_coding_agents_if_none(tddy_session_lifecycle::test_util::builtin_coding_agents()),
     );

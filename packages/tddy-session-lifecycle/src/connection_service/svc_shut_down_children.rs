@@ -20,7 +20,7 @@ impl DaemonSessionHost {
     /// daemon belongs to the runtime, which stops it beside this call. The crash-detector and
     /// restart-policy half of that entry stays open.
     pub async fn shut_down_children(&self) {
-        self.claude_cli_manager.kill_all().await;
+        self.cli_manager.kill_all().await;
         let stopped = self.workspace_sandboxes.stop_all().await;
         if !stopped.is_empty() {
             log::info!(

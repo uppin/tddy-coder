@@ -4,6 +4,13 @@
 **Owner:** `#agent-tools` n17 `cli-dispatch-collapse` ([#823](https://github.com/uppin/tddy-coder/pull/823)); the sweep node (n20) deletes them once approved.
 **Source:** `#agent-tools` 17/19 (green)
 
+> **Narrowed at the sweep's wrap (2026-11-06, #828).** The sweep deleted the legacy
+> `--agent-kind` helpers below the line in `cli_harness_jail.rs` and the `CliHarness` table they
+> served. Everything in the table below still stands: each item was re-checked in the tree at the
+> sweep's HEAD and still carries its `#[allow(dead_code)]` and `TODO` marker. Their deletion is
+> approval-gated, and the sweep's approved scope did not include it, so they wait for a deletion
+> pass the developer approves — the `chat::*` row's `NodeLauncher` users included.
+
 Deleting the planned bespoke claude and cursor launches (§ Removed of
 `docs/dev/changesets/2026-11-06-agent-tools-cli-dispatch-collapse.md`) left these items with no production
 caller. None is in that list, so none was deleted: each carries `#[allow(dead_code)]` and a

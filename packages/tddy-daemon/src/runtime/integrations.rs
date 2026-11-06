@@ -15,7 +15,7 @@ use tddy_telegram_control::telegram_session_subscriber::TelegramDaemonHooks;
 pub(super) struct Registries {
     pub(super) common_room: Arc<SupervisedCommonRoom>,
     pub(super) config_service_authenticator: tddy_service::SessionTokenAuthenticator,
-    pub(super) shared_claude_cli_manager: Arc<CliSessionManager>,
+    pub(super) shared_cli_manager: Arc<CliSessionManager>,
     pub(super) shared_session_rooms: Arc<SessionRoomRegistry>,
     pub(super) shared_session_admissions: Arc<SessionAdmissionRegistry>,
     /// The daemon's generic session start as a satellite's port: handed to Telegram, which is built
@@ -37,9 +37,9 @@ impl Registries {
                 DaemonConfigServiceServer::<DaemonConfigServiceImpl>::NAME,
             );
 
-        // Create one shared ClaudeCliSessionManager — injected into both the Telegram spawn path and
+        // Create one shared CliSessionManager — injected into both the Telegram spawn path and
         // DaemonSessionHost so that Telegram-launched sessions are attachable via the terminal RPCs.
-        let shared_claude_cli_manager =
+        let shared_cli_manager =
             Arc::new(tddy_session_lifecycle::cli_session_manager::CliSessionManager::new());
 
         // One registry of hosted session rooms for the whole daemon: `StartSession` opens rooms in it
@@ -56,7 +56,7 @@ impl Registries {
         Self {
             common_room,
             config_service_authenticator,
-            shared_claude_cli_manager,
+            shared_cli_manager,
             shared_session_rooms,
             shared_session_admissions,
             session_starter: Arc::new(tddy_daemon_extensions::LateBoundSessionStarter::new()),

@@ -14,7 +14,7 @@ use std::time::Duration;
 use bytes::Bytes;
 use tddy_daemon_kernel::config::DaemonConfig;
 use tddy_rpc::{Code, Request};
-use tddy_session_lifecycle::claude_cli_session::{ClaudeCliSessionManager, MAIN_TERMINAL_ID};
+use tddy_session_lifecycle::claude_cli_session::{CliSessionManager, MAIN_TERMINAL_ID};
 use tddy_session_lifecycle::connection_service::DaemonSessionHost;
 
 use tddy_terminal_rpc::proto::terminal_session::{
@@ -44,7 +44,7 @@ fn test_config() -> (tempfile::TempDir, DaemonConfig) {
 fn minimal_service_with_manager(
     config: DaemonConfig,
     sessions_base: PathBuf,
-    manager: Arc<ClaudeCliSessionManager>,
+    manager: Arc<CliSessionManager>,
 ) -> DaemonSessionHost {
     let tddy_data_dir = sessions_base.clone();
     let sessions_base_resolver: SessionsBaseResolver =
@@ -77,7 +77,7 @@ fn minimal_service_with_manager(
 /// terminal methods left that service with `#unbundle` node 6, and this is the daemon's own served
 /// implementation of them — the same one `runtime::build` registers, over the same managers.
 fn make_service(
-    manager: Arc<ClaudeCliSessionManager>,
+    manager: Arc<CliSessionManager>,
 ) -> (
     tddy_terminal_rpc::TerminalSessionServiceImpl,
     tempfile::TempDir,
@@ -108,7 +108,7 @@ fn write_main_stub(dir: &std::path::Path) -> std::path::PathBuf {
 
 /// Pre-register the main `claude` terminal for `SESSION_ID` in a fresh worktree, returning the
 /// worktree temp-dir guard (must stay alive for the worktree to exist).
-async fn start_main_terminal(manager: &ClaudeCliSessionManager) -> tempfile::TempDir {
+async fn start_main_terminal(manager: &CliSessionManager) -> tempfile::TempDir {
     let worktree = tempfile::tempdir().unwrap();
     let stub = write_main_stub(worktree.path());
     manager
@@ -116,11 +116,9 @@ async fn start_main_terminal(manager: &ClaudeCliSessionManager) -> tempfile::Tem
             SESSION_ID,
             worktree.path().to_path_buf(),
             "claude-opus-4-8",
-            stub.to_str().unwrap(),
+            vec![stub.to_str().unwrap().to_string()],
+            "claude-cli",
             None,
-            None,
-            false,
-            false,
             None,
             Vec::new(),
             Vec::new(),
@@ -146,7 +144,7 @@ fn pid_alive(pid: u32) -> bool {
 #[serial_test::serial]
 async fn start_terminal_registers_under_fresh_id_distinct_from_main() {
     // Given
-    let manager = ClaudeCliSessionManager::new();
+    let manager = CliSessionManager::new();
     let worktree = tempfile::tempdir().unwrap();
 
     // When
@@ -173,7 +171,7 @@ async fn start_terminal_registers_under_fresh_id_distinct_from_main() {
 #[serial_test::serial]
 async fn list_terminals_includes_main_reserved_id_and_started_shell() {
     // Given
-    let manager = ClaudeCliSessionManager::new();
+    let manager = CliSessionManager::new();
     let _worktree = start_main_terminal(&manager).await;
     let shell = manager
         .start_terminal(SESSION_ID, _worktree.path().to_path_buf(), SHELL)
@@ -210,7 +208,7 @@ async fn list_terminals_includes_main_reserved_id_and_started_shell() {
 #[serial_test::serial]
 async fn started_terminal_runs_login_shell_in_worktree() {
     // Given
-    let manager = ClaudeCliSessionManager::new();
+    let manager = CliSessionManager::new();
     let worktree = tempfile::tempdir().unwrap();
     let marker = worktree
         .path()
@@ -238,7 +236,7 @@ async fn started_terminal_runs_login_shell_in_worktree() {
 #[serial_test::serial]
 async fn get_terminal_resolves_started_terminal_by_id() {
     // Given
-    let manager = ClaudeCliSessionManager::new();
+    let manager = CliSessionManager::new();
     let worktree = tempfile::tempdir().unwrap();
     let handle = manager
         .start_terminal(SESSION_ID, worktree.path().to_path_buf(), SHELL)
@@ -274,7 +272,7 @@ async fn get_terminal_resolves_started_terminal_by_id() {
 #[serial_test::serial]
 async fn stop_terminal_kills_process_and_deregisters() {
     // Given
-    let manager = ClaudeCliSessionManager::new();
+    let manager = CliSessionManager::new();
     let worktree = tempfile::tempdir().unwrap();
     let handle = manager
         .start_terminal(SESSION_ID, worktree.path().to_path_buf(), SHELL)
@@ -325,7 +323,7 @@ async fn stop_terminal_kills_process_and_deregisters() {
 #[serial_test::serial]
 async fn start_terminal_session_returns_fresh_terminal_id() {
     // Given
-    let manager = Arc::new(ClaudeCliSessionManager::new());
+    let manager = Arc::new(CliSessionManager::new());
     let _worktree = start_main_terminal(&manager).await;
     let (service, _cfg, _sb) = make_service(Arc::clone(&manager));
 
@@ -356,7 +354,7 @@ async fn start_terminal_session_returns_fresh_terminal_id() {
 #[serial_test::serial]
 async fn list_terminal_sessions_returns_main_and_started() {
     // Given
-    let manager = Arc::new(ClaudeCliSessionManager::new());
+    let manager = Arc::new(CliSessionManager::new());
     let _worktree = start_main_terminal(&manager).await;
     let (service, _cfg, _sb) = make_service(Arc::clone(&manager));
 
@@ -402,7 +400,7 @@ async fn list_terminal_sessions_returns_main_and_started() {
 #[serial_test::serial]
 async fn stop_terminal_session_removes_from_list() {
     // Given
-    let manager = Arc::new(ClaudeCliSessionManager::new());
+    let manager = Arc::new(CliSessionManager::new());
     let _worktree = start_main_terminal(&manager).await;
     let (service, _cfg, _sb) = make_service(Arc::clone(&manager));
 
@@ -453,7 +451,7 @@ async fn stop_terminal_session_removes_from_list() {
 #[serial_test::serial]
 async fn stop_terminal_session_rejecting_main_returns_invalid_argument() {
     // Given
-    let manager = Arc::new(ClaudeCliSessionManager::new());
+    let manager = Arc::new(CliSessionManager::new());
     let _worktree = start_main_terminal(&manager).await;
     let (service, _cfg, _sb) = make_service(Arc::clone(&manager));
 
@@ -481,7 +479,7 @@ async fn stop_terminal_session_rejecting_main_returns_invalid_argument() {
 #[tokio::test]
 async fn terminal_session_rpcs_require_valid_token() {
     // Given
-    let manager = Arc::new(ClaudeCliSessionManager::new());
+    let manager = Arc::new(CliSessionManager::new());
     let (service, _cfg, _sb) = make_service(Arc::clone(&manager));
 
     // When / Then — start
@@ -526,7 +524,7 @@ async fn terminal_session_rpcs_require_valid_token() {
 #[serial_test::serial]
 async fn stream_terminal_output_routes_by_terminal_id() {
     // Given
-    let manager = Arc::new(ClaudeCliSessionManager::new());
+    let manager = Arc::new(CliSessionManager::new());
     let _worktree = start_main_terminal(&manager).await;
     let (service, _cfg, _sb) = make_service(Arc::clone(&manager));
 
@@ -588,7 +586,7 @@ async fn stream_terminal_output_routes_by_terminal_id() {
 #[serial_test::serial]
 async fn send_terminal_input_targets_identified_terminal() {
     // Given
-    let manager = Arc::new(ClaudeCliSessionManager::new());
+    let manager = Arc::new(CliSessionManager::new());
     let _worktree = start_main_terminal(&manager).await;
     let (service, _cfg, _sb) = make_service(Arc::clone(&manager));
 

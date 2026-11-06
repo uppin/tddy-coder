@@ -66,20 +66,49 @@ impl DaemonSessionHost {
         sessions_base: &Path,
         session_id: &str,
         requested_agent: &str,
-    ) -> Result<&'static [&'static str], Status> {
+    ) -> Result<(Vec<String>, Vec<std::path::PathBuf>), Status> {
         let session_dir = unified_session_dir_path(sessions_base, session_id);
         let meta = tddy_core::read_session_metadata(&session_dir).map_err(|e| {
             log::warn!("{rpc_name}: session {session_id} has no readable .session.yaml: {e}");
             Status::failed_precondition("session not found or .session.yaml missing")
         })?;
-        let agent = crate::context_files::context_agent_for_session(&meta);
-        if agent != requested_agent.trim() {
+        let registry = self
+            .coding_agents()
+            .map(|agents| agents.agents_shared())
+            .unwrap_or_else(|| {
+                std::sync::Arc::new(tddy_coding_agent_specs::CodingAgentRegistry::empty())
+            });
+        // The agent whose spec row this session is served: its own type's agent, or — for the
+        // workspace half of a split placement — the split agent this daemon's registry offers
+        // (the one declaring `split_host`), never the caller's `requested_agent`.
+        let agent_id: Option<String> = match crate::context_files::context_agent_for_session(&meta)
+        {
+            crate::context_files::SessionContextAgent::Own(id) => id,
+            crate::context_files::SessionContextAgent::Paired => registry
+                .all()
+                .into_iter()
+                .find(|spec| {
+                    spec.agent
+                        .capabilities
+                        .contains(&tddy_coding_agent_specs::Capability::SplitHost)
+                })
+                .map(|spec| spec.id.clone()),
+        };
+        let agent_name = agent_id.as_deref().unwrap_or_default();
+        if agent_name != requested_agent.trim() {
             log::debug!(
                 "{rpc_name}: session {session_id} was asked for the {requested_agent:?} context \
-                 allow-list; serving {agent:?}, the row its own persisted session_type names"
+                 allow-list; serving {agent_name:?}, the row its own persisted session_type names"
             );
         }
-        Ok(tddy_core::backend::context_globs_for_agent(agent))
+        let spec = agent_id.as_ref().and_then(|id| registry.get(id));
+        Ok((
+            tddy_session_files::context_files::context_globs(
+                spec.map(|spec| spec.agent.context_globs.as_slice()),
+            ),
+            spec.map(|spec| spec.agent.instructions.files.clone())
+                .unwrap_or_default(),
+        ))
     }
 
     /// [`PeerRouting::common_room_slot`](crate::peer_routing::PeerRouting::common_room_slot) of this host.

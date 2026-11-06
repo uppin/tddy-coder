@@ -28,6 +28,14 @@ const SESSION_AGENT_SERVICE: &str = tddy_session_agents::SERVICE_NAME;
 /// read from `tddy-service` so the hook, the runner's relay and this bridge agree on the name.
 const ACTIVITY_SERVICE: &str = tddy_service::session_activity::ACTIVITY_SERVICE;
 
+/// No coding agents, for a host that resolved none: the start choices then offer no agent.
+static EMPTY_CODING_AGENTS: std::sync::OnceLock<tddy_coding_agent_specs::CodingAgentRegistry> =
+    std::sync::OnceLock::new();
+
+fn empty_coding_agents() -> &'static tddy_coding_agent_specs::CodingAgentRegistry {
+    EMPTY_CODING_AGENTS.get_or_init(tddy_coding_agent_specs::CodingAgentRegistry::empty)
+}
+
 /// Refuses a relayed hook report that names a session other than the one the jail was built for: a
 /// jail reports its own hooks, and no other session's.
 fn refuse_other_session(
@@ -275,7 +283,12 @@ impl tddy_sandbox_runner::HostRpcHandler for DaemonRpcHandler {
                 super::svc_list_exec_tools_wiring::list_exec_tools_from_jail(
                     &self.bound,
                     payload,
-                    &super::svc_list_exec_tools_wiring::start_choices(&conn.peer_routing()),
+                    &super::svc_list_exec_tools_wiring::start_choices(
+                        &conn.peer_routing(),
+                        conn.coding_agents()
+                            .map(|agents| agents.agents())
+                            .unwrap_or_else(|| empty_coding_agents()),
+                    ),
                 ),
             ),
             _ => tddy_rpc::RpcResult::Unary(Err(tddy_rpc::Status::not_found(format!(

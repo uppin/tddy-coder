@@ -62,9 +62,7 @@ fn harness_with_workflow_projects(
         elicitation_select_options: Arc::new(Mutex::new(HashMap::new())),
         elicitation_multi_select_meta: Arc::new(Mutex::new(HashMap::new())),
         pending_elicitation_other: Arc::new(Mutex::new(HashMap::new())),
-        claude_cli_manager: Arc::new(
-            tddy_session_lifecycle::claude_cli_session::ClaudeCliSessionManager::new(),
-        ),
+        cli_manager: Arc::new(tddy_session_lifecycle::claude_cli_session::CliSessionManager::new()),
     });
     let h = TelegramSessionControlHarness::with_workflow_spawn(
         allowed,
@@ -1338,9 +1336,7 @@ fn harness_with_workflow_projects_and_agents(
         elicitation_select_options: Arc::new(Mutex::new(HashMap::new())),
         elicitation_multi_select_meta: Arc::new(Mutex::new(HashMap::new())),
         pending_elicitation_other: Arc::new(Mutex::new(HashMap::new())),
-        claude_cli_manager: Arc::new(
-            tddy_session_lifecycle::claude_cli_session::ClaudeCliSessionManager::new(),
-        ),
+        cli_manager: Arc::new(tddy_session_lifecycle::claude_cli_session::CliSessionManager::new()),
     });
     let h = TelegramSessionControlHarness::with_workflow_spawn(
         allowed,

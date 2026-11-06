@@ -11,6 +11,7 @@
  */
 
 import React from "react";
+import { servedAgentWire } from "../support/servedAgents";
 import { Room } from "livekit-client";
 import { createClient } from "@connectrpc/connect";
 import { anInMemoryRpcBackend, type InMemoryRpcBackend } from "tddy-connectrpc-testkit";
@@ -60,7 +61,7 @@ function aCreateSessionBackend(projects: ProjectRowFixture[]): InMemoryRpcBacken
         daemonInstanceId: p.daemonInstanceId,
       })),
     }))
-    .onUnary(CatalogService.method.listAgents, () => ({ agents: [{ id: "claude", label: "Claude" }] }))
+    .onUnary(CatalogService.method.listAgents, () => ({ agents: [{ id: "claude", label: "Claude", ...servedAgentWire("claude"), }] }))
     .onUnary(CatalogService.method.listTools, () => ({
       tools: [{ path: "/usr/bin/tddy-coder", label: "tddy-coder" }],
     }))

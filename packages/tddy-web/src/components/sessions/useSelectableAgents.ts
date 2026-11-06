@@ -7,7 +7,7 @@
  * cannot offer an assistant created on another host — not merely hard to find, absent — which is the
  * bug this exists to fix.
  *
- * `AgentInfo` is `{ id, label }` — nothing on the wire says which host answered — so the host is
+ * Nothing on the wire says which host answered — so the host is
  * stamped on here, from the instance id the read was addressed to. That attribution is exact because
  * the caller chose the destination, and it needs no proto or daemon change. It stops being exact only
  * if a daemon ever forwards `ListAgents` to its peers, at which point an answer no longer speaks for
@@ -41,6 +41,12 @@ const AGENT_READER: HostReader<CatalogClient, SelectableAgent> = {
       label: info.label,
       daemonInstanceId,
       routeProviders: info.routeProviders,
+      sessionType: info.sessionType,
+      capabilities: info.capabilities,
+      runParams: info.runParams,
+      permissionModes: info.permissionModes,
+      defaultModel: info.defaultModel,
+      placements: info.placements,
     }));
   },
   // `id@host` is unique across hosts by construction, and reusing the option value's format keeps the

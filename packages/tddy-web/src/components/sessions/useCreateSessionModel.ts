@@ -22,6 +22,11 @@ export interface UseCreateSessionModelArgs {
    * no route is asked for. `undefined`: the catalog did not say, so the daemon is asked.
    */
   selectedAgentRouteProviders?: readonly string[];
+  /**
+   * The provider kinds a route can point the CLI session's agent at, from its served metadata.
+   * Empty: it always runs on its own vendor, so no route is asked for. `undefined`: not served.
+   */
+  cliRouteProviders?: readonly string[];
   /** The caller's pre-filled model, if any. */
   initialModel: string | undefined;
 }
@@ -40,6 +45,7 @@ export function useCreateSessionModel({
   selectedAgentId,
   daemonInstanceId,
   selectedAgentRouteProviders,
+  cliRouteProviders,
   initialModel,
 }: UseCreateSessionModelArgs) {
   const [model, setModel] = useState(initialModel ?? "");
@@ -54,16 +60,16 @@ export function useCreateSessionModel({
   const vendorModels = useAgentModels(catalogClient, sessionToken, modelAgentKey, daemonInstanceId);
 
   // The provider field is offered for the harness the session runs: a CLI session type names its
-  // harness, and a tool session runs the agent it picked. Warp runs only on its own vendor, so it
-  // names no harness and no provider is looked up or offered for it. The daemon says which accounts
-  // that harness can run on and why not; the form keeps no matrix of its own.
-  // The catalog says which agents a route can point elsewhere (`AgentInfo.routeProviders`): a tool
-  // session's agent with none — a specialized definition, or an agent that always runs on its own
-  // vendor — is never asked about.
-  const providerHarness =
-    sessionType === "tool" && selectedAgentRouteProviders?.length === 0
-      ? null
-      : providerHarnessFor(sessionType, selectedAgentId);
+  // harness, and a tool session runs the agent it picked. The catalog says which agents a route
+  // can point elsewhere (`AgentInfo.routeProviders`): an agent with none — a specialized
+  // definition, or one that always runs on its own vendor — names no harness and no provider is
+  // looked up or offered for it. The daemon says which accounts that harness can run on and why
+  // not; the form keeps no matrix of its own.
+  const providerHarness = providerHarnessFor(
+    sessionType,
+    selectedAgentId,
+    sessionType === "tool" ? selectedAgentRouteProviders : cliRouteProviders,
+  );
   const providerRoutes = useProviderRoutes(accountsClient, sessionToken, providerHarness);
   // A provider choice belongs to the harness it was made for: switching session type or agent
   // clears it.
@@ -105,11 +111,16 @@ export function useCreateSessionModel({
 }
 
 /**
- * The harness whose provider accounts the form offers: the agent a tool session picked, the session
- * type of a CLI session, and none for Warp, which runs only on its own vendor.
+ * The harness whose provider accounts the form offers: the agent a tool session picked, or the
+ * session type of a CLI session — and none for an agent whose served metadata says no route can
+ * point it elsewhere (`routeProviders` empty), since it runs only on its own vendor.
  */
-function providerHarnessFor(sessionType: SessionType, selectedAgentId: string): string | null {
+function providerHarnessFor(
+  sessionType: SessionType,
+  selectedAgentId: string,
+  routeProviders: readonly string[] | undefined,
+): string | null {
+  if (routeProviders !== undefined && routeProviders.length === 0) return null;
   if (sessionType === "tool") return selectedAgentId || null;
-  if (sessionType === "warp-cli") return null;
   return sessionType;
 }

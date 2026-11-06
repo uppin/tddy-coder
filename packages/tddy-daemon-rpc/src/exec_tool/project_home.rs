@@ -69,6 +69,14 @@ use tddy_worktree_service::session_target::HomeCaller;
 use tddy_worktree_service::worktrees::WorktreeSizeCalculator;
 
 use super::home_terminal_leases::{HomeTerminalClaimKey, HomeTerminalLeases};
+
+/// No coding agents, for a handler whose launch sessions were never attached: its start
+/// choices then offer no agent.
+fn empty_coding_agents() -> &'static tddy_coding_agent_specs::CodingAgentRegistry {
+    static EMPTY: std::sync::OnceLock<tddy_coding_agent_specs::CodingAgentRegistry> =
+        std::sync::OnceLock::new();
+    EMPTY.get_or_init(tddy_coding_agent_specs::CodingAgentRegistry::empty)
+}
 use super::project_home_remote::PeerSessionLists;
 use super::ExecToolRpcHandler;
 use crate::exec_tool::project_home::caller::project_home_caller;
@@ -208,7 +216,13 @@ impl ExecToolRpcHandler {
         })?;
         Ok(session_offered_catalog_for(
             session_tool_role(&metadata),
-            &start_choices(&self.peer_routing),
+            &start_choices(
+                &self.peer_routing,
+                self.session_launch
+                    .get()
+                    .map(|launch| launch.coding_agents.agents())
+                    .unwrap_or_else(|| empty_coding_agents()),
+            ),
         ))
     }
 

@@ -9,6 +9,7 @@
  */
 
 import React from "react";
+import { servedAgentWire } from "../support/servedAgents";
 import { SessionsDrawerScreen } from "../../src/components/sessions/SessionsDrawerScreen";
 import { withSelectedDaemon } from "../support/rpc/withSelectedDaemon";
 import { type ProjectEntry } from "../../src/gen/project_pb";
@@ -46,6 +47,8 @@ const ORCHESTRATOR_SESSION: Partial<SessionEntry> = {
   pendingElicitation: false,
   orchestratorSessionId: "",
   recipe: "pr-stack",
+  // The child runs as the same kind of session as its orchestrator parent.
+  sessionType: "claude-cli",
   stackPlanJson: aStackPlanJson(1, [
     aPlannedNode({
       nodeId: "n1",
@@ -71,7 +74,7 @@ const PROJECT: Partial<ProjectEntry> = {
 function aPrStackModalBackend() {
   return aSessionsDrawerBackend([ORCHESTRATOR_SESSION])
     .onUnary(ProjectService.method.listProjects, () => ({ projects: [PROJECT] }))
-    .onUnary(CatalogService.method.listAgents, () => ({ agents: [{ id: "claude", label: "Claude" }] }))
+    .onUnary(CatalogService.method.listAgents, () => ({ agents: [{ id: "claude", label: "Claude", ...servedAgentWire("claude"), }] }))
     .onUnary(CatalogService.method.listAgentModels, () => ({
       models: [{ id: "claude-opus-4-8", label: "Claude Opus 4.8" }],
       defaultModel: "claude-opus-4-8",

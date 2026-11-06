@@ -257,37 +257,89 @@ impl SplitSessions {
             std::time::Duration::from_secs(answer_wait_secs),
         )
         .map_err(|e| Status::internal(format!("failed to record the answer wait: {e}")))?;
-        crate::service_util::write_claude_hooks_settings(
-            &context_dir,
-            &tddy_core::HookCommandParams {
-                tddy_tools_path: &tddy_tools_path.to_string_lossy(),
-                daemon_url: &daemon_hook_urls::advertise_daemon_url(&self.config),
-                session_id,
-                os_user,
-                hook_token: &hook_token,
-                // An embedded daemon serves no HTTP RPC; its hooks report over this socket.
-                daemon_socket: self.agent_tool_socket_for_embedded_host().as_deref(),
-                answer_wait_secs,
+        // The hooks file is the one the split agent's spec's hooks slot renders, written
+        // under the context dir the agent runs in.
+        let agent_tool_socket = self.agent_tool_socket_for_embedded_host();
+        let hook_params = tddy_core::HookCommandParams {
+            tddy_tools_path: &tddy_tools_path.to_string_lossy(),
+            daemon_url: &tddy_daemon_kernel::daemon_hook_urls::advertise_daemon_url(&self.config),
+            session_id,
+            os_user,
+            hook_token: &hook_token,
+            // An embedded daemon serves no HTTP RPC; its hooks report over this socket.
+            daemon_socket: agent_tool_socket.as_deref(),
+            answer_wait_secs,
+        };
+        match tddy_coding_agent_specs::slots::render(
+            &crate::agent_argv::split_agent_spec()?,
+            &tddy_coding_agent_specs::slots::SlotInputs {
+                workdir: context_dir.clone(),
+                scratch_dir: context_dir.clone(),
+                mcp_server: None,
+                allowed_tools: Vec::new(),
+                denied_tools: Vec::new(),
+                permission_prompt_tool: None,
+                preamble: None,
+                append_system_prompt_file: None,
+                hooks: Some(hook_params),
+                home: None,
             },
-        );
+        ) {
+            Ok(rendered) => {
+                for (path, bytes) in &rendered.files {
+                    if let Some(parent) = path.parent() {
+                        let _ = std::fs::create_dir_all(parent);
+                    }
+                    if let Err(e) = std::fs::write(path, bytes) {
+                        log::warn!(
+                            "session {session_id}: failed to write {} — hooks will not fire: {e}",
+                            path.display()
+                        );
+                    }
+                }
+            }
+            Err(e) => {
+                log::warn!("session {session_id}: failed to render its hooks file: {e}");
+            }
+        }
+        // The launch argv is rendered from the split agent's spec — the same template a
+        // spec-driven launch renders — with this start's model, session, permission mode and
+        // prompt bound.
+        let spec = crate::agent_argv::split_agent_spec()?;
+        let argv = spec
+            .render_run_argv(
+                std::path::Path::new(&(self.agent_binary)(&spec.id)?),
+                &[
+                    ("session_id", session_id),
+                    ("chat_id", session_id),
+                    ("model", req.model.trim()),
+                    ("permission_mode", req.permission_mode.trim()),
+                    ("prompt", initial_prompt.trim()),
+                ],
+                if req.dangerously_skip_permissions {
+                    &["dangerously_skip_permissions"][..]
+                } else {
+                    &[][..]
+                },
+            )
+            .map_err(|e| Status::internal(format!("rendering the split agent's argv: {e}")))?;
+        let session_type = format!("{}-cli", spec.id);
         let handle = self
-            .claude_cli_manager
+            .cli_manager
             .start_with_options(
                 session_id,
                 context_dir,
                 req.model.trim(),
-                &(self.claude_binary)()?,
+                argv,
+                &session_type,
                 Some(initial_prompt.trim()).filter(|p| !p.is_empty()),
-                Some(req.permission_mode.trim()).filter(|m| !m.is_empty()),
-                req.dangerously_skip_permissions,
-                false,
                 None,
                 extra_args,
                 remote.env_pairs().into_iter().chain(roster_seed).collect(),
                 Some(os_user),
             )
             .await
-            .map_err(|e| Status::internal(format!("failed to spawn claude-cli: {e}")))?;
+            .map_err(|e| Status::internal(format!("failed to spawn {session_type}: {e}")))?;
         Ok((hook_token, handle))
     }
 
@@ -359,7 +411,14 @@ impl SplitSessions {
         tddy_tools_path: &std::path::Path,
         withdrawals: Vec<(String, Vec<String>)>,
     ) -> Result<(std::path::PathBuf, Vec<String>), Status> {
-        let agent = tddy_session_files::context_files::context_agent_for_session_type("claude-cli");
+        let agent_spec = crate::agent_argv::split_agent_spec()?;
+        let agent = agent_spec.id.as_str();
+        let glob_refs: Vec<&str> = agent_spec
+            .agent
+            .context_globs
+            .iter()
+            .map(String::as_str)
+            .collect();
         let context = self
             .split_context_from_codebase_host(
                 &req.session_token,
@@ -372,7 +431,7 @@ impl SplitSessions {
         let context_dir = crate::split_session::build_split_context_dir(
             session_dir,
             &withdrawals,
-            tddy_core::backend::context_globs_for_agent(agent),
+            &glob_refs,
             &context,
         )?;
         let extra_args = crate::split_session::split_claude_extra_args(
