@@ -173,7 +173,9 @@ async fn a_claude_capable_project_home_world() -> World {
         Arc::new(tddy_daemon_kernel::operator_channel::NoOperatorChannel),
         Arc::new(CliSessionManager::new()),
     )
-    .with_coding_agents_if_none(tddy_session_lifecycle::test_util::builtin_coding_agents());
+    .with_coding_agents_if_none(
+        tddy_session_lifecycle::test_util::builtin_coding_agents_for(&config),
+    );
     let service = TestDaemon::from_host(host);
     service.as_arc().install_sandbox_rpc_bridge();
     a_project_home_world_on(service, sessions).await

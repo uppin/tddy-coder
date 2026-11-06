@@ -77,7 +77,9 @@ fn minimal_service_with_manager(
         Arc::new(tddy_daemon_kernel::operator_channel::NoOperatorChannel),
         manager,
     )
-    .with_coding_agents_if_none(tddy_session_lifecycle::test_util::builtin_coding_agents())
+    .with_coding_agents_if_none(
+        tddy_session_lifecycle::test_util::builtin_coding_agents_for(&config),
+    )
 }
 
 /// Create a git repo with an origin remote pointing at itself so worktree setup succeeds.
