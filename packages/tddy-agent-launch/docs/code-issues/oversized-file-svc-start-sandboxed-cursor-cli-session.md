@@ -3,10 +3,10 @@
 **Location:** `packages/tddy-agent-launch/src/svc_start_sandboxed_cursor_cli_session.rs`
 **Category:** oversized-file
 **Detected:** 2026-11-03 — `/pr-wrap` step 3.5 file-length gate on #796 (`#agent-tools` 7/12), production lines counted to the first `#[cfg(test)]`
-**Metrics:** **549 production lines** · budget 500 · **1.1× over**
+**Metrics:** **552 production lines** · budget 500 · **1.1× over**
 **Thresholds breached:** length 549 > 500
 **Restructure:** not designed — deferred to the #agent-tools sweep node (developer, 2026-11-02)
-**Status:** Open — unclaimed
+**Status:** Open — regressed 2026-11-05 by #820 (+3) — unclaimed
 **Verified:** ⚠ **not hand-verified** — the line count is machine-measured
 
 ## Measurement history
@@ -14,6 +14,7 @@
 | Run | Production lines | Note |
 |---|---|---|
 | 2026-11-03 | 467 → 549 | #796 (`#agent-tools` 7/12) pushed it past the budget: `CursorJail`, `launch_jailed_cursor` and `write_jail_hooks` (the jailed start through `launch_jailed`), replacing the hand-built runner argv and bridge (which shrank `start_sandboxed_cursor_cli_session` ~431 → ~363 lines). Not split: the developer deferred all code-restructuring decisions in `#agent-tools` to the stack's sweep node (developer, 2026-11-02) |
+| 2026-11-05 | 549 → 552 | **worse by 3** in #820: the jailed start binds through `harness_template_params` instead of `cursor_template_params`; measured on `origin/feature/agent-tools/route-support` (`3c29698cd`) and HEAD at #820's wrap. Not split: restructuring deferred to the `#agent-tools` sweep node (n20) by the developer (2026-11-04) |
 
 ## What would close it
 

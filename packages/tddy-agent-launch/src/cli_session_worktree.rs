@@ -36,6 +36,9 @@ pub(crate) struct CliWorktreeStart<'a> {
     /// The intent the session's changeset recorded.
     pub intent: tddy_core::BranchWorktreeIntent,
     pub timeout: Duration,
+    /// The ssh `Host` alias the checkout lives on (`StartSessionRequest.ssh_config_host`); empty cuts
+    /// a worktree on this host. The remote checkout is cloned from the project's git url.
+    pub ssh_alias: &'a str,
 }
 
 /// The worktree a CLI harness session runs in, and the project it belongs to.
@@ -78,7 +81,7 @@ pub(crate) async fn provision_cli_worktree(
                 )
                 .await?;
             progress.begin_phase(StartStep::Worktree);
-            let path = cut_worktree(start, &repo_root, chain_base_ref).await?;
+            let path = cut_worktree(start, &repo_root, &project.git_url, chain_base_ref).await?;
             progress.end_phase(StartStep::Worktree);
             // The child's branch now exists, so the planned node it materializes can record it —
             // which is what makes that node's descendants spawnable at all, since they base onto
@@ -129,18 +132,23 @@ pub(crate) async fn provision_cli_worktree(
 async fn cut_worktree(
     start: &CliWorktreeStart<'_>,
     repo_root: &Path,
+    git_url: &str,
     chain_base_ref: Option<String>,
 ) -> Result<PathBuf, Status> {
     let worktree_base_ref =
         tddy_core::select_worktree_base_ref(start.selected_integration_base_ref, chain_base_ref);
-    let wt = tddy_session_split::service_util::create_session_worktree(
-        start.timeout,
-        start.cut_label,
-        repo_root,
-        start.session_dir,
-        worktree_base_ref,
-    )
-    .await?;
+    let wt = if start.ssh_alias.is_empty() {
+        tddy_session_split::service_util::create_session_worktree(
+            start.timeout,
+            start.cut_label,
+            repo_root,
+            start.session_dir,
+            worktree_base_ref,
+        )
+        .await?
+    } else {
+        remote_worktree(start, git_url).await?
+    };
     tddy_session_split::service_util::push_new_branch_to_origin_if_requested(
         start.create_remote_branch,
         start.intent,
@@ -150,6 +158,25 @@ async fn cut_worktree(
     )
     .await?;
     Ok(wt)
+}
+
+/// The session's checkout on the ssh target `start.ssh_alias`, cloned from `git_url`.
+async fn remote_worktree(start: &CliWorktreeStart<'_>, git_url: &str) -> Result<PathBuf, Status> {
+    let (alias, git_url, session_id) = (
+        start.ssh_alias.to_string(),
+        git_url.to_string(),
+        start.session_id.to_string(),
+    );
+    let remote_path = tddy_session_split::service_util::spawn_blocking_with_timeout(
+        start.timeout,
+        "start_cli_harness_session: create remote worktree",
+        move || {
+            tddy_core::setup_worktree_for_session_over_ssh(&alias, &git_url, &session_id)
+                .map_err(|e| anyhow::anyhow!("remote worktree setup failed: {}", e))
+        },
+    )
+    .await?;
+    Ok(PathBuf::from(remote_path))
 }
 
 fn spawned_branch(

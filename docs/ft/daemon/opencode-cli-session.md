@@ -128,7 +128,7 @@ Context files served to the session's agent: `AGENTS.md`, `.agents/**`, `opencod
 
 ## Resume and delete
 
-- **Resume** relaunches `opencode --continue` in the session's worktree, with neither model nor prompt.
+- **Resume** relaunches `opencode --continue` in the session's worktree, with neither model nor prompt: `opencode.yaml` declares no `coding_agent.conversation`, so its conversation is the worktree's own.
   tddy never learns OpenCode's own session id; a session owns its worktree, so the worktree's last
   OpenCode session is this one. The session's provider route is re-resolved from the owner's vault as
   it stands now and its configuration regenerated. A resume whose worktree is gone is refused with

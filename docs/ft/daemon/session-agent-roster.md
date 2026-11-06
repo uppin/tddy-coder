@@ -199,7 +199,12 @@ change what the running session's main agent is allowed to call; detaching and r
 A host's coding agents are the specs of its coding-agent registry — the built-ins plus every
 `<tddyhome>/tools/<id>.yaml` that declares `coding_agent:` — so an agent that exists only as a YAML file is a
 coding agent without a code change; what it may do is its spec's `coding_agent.capabilities`, not a
-session-type string. A roster entry is one of two **kinds**. A `MODEL` entry is a definition or registry assistant — a
+session-type string. Its CLI session (`<id>-cli`) takes the generic spec launch, which serves every
+capability `claude.yaml` and `cursor.yaml` declare — a managed workflow with hooks for
+`managed_workflow`, a project's main for `project_home_main`, the operator-notify guidance for
+`operator_notify` — and identifies its conversation by `coding_agent.conversation` (the daemon's
+session id, an id a launch adapter mints, the worktree, or a resume token); see
+[Claude CLI session § The generic CLI spec launch](claude-cli-session.md#the-generic-cli-spec-launch-serves-claudes-needs). A roster entry is one of two **kinds**. A `MODEL` entry is a definition or registry assistant — a
 model behind an endpoint, driven by tddy's own read/grep loop. A `CODING_AGENT` entry is a coding
 agent — Claude Code (`claude-agent-acp`), Codex (`codex-acp`), OpenCode (`opencode acp`) — that the
 daemon launches and talks to over ACP. Each ACP launch renders from the agent's tool definition

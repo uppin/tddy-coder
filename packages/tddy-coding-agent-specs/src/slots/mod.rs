@@ -5,6 +5,7 @@
 //! written here: the launcher writes [`RenderedSlots::files`] before it spawns the agent.
 
 pub mod acp;
+pub mod conversation;
 pub mod cursor;
 pub mod headless_mcp;
 pub mod hooks;
@@ -269,6 +270,7 @@ mod tests {
                 capabilities: Default::default(),
                 answer_wait_secs: None,
                 product: None,
+                conversation: None,
             },
         }
     }

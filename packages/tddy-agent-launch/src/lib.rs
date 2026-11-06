@@ -5,6 +5,7 @@ pub mod claude_cli_spawn;
 pub mod claude_cli_spawn_steps;
 pub mod claude_cli_tmux;
 mod claude_jail;
+mod cli_agent_steps;
 pub mod cli_branch_starts;
 pub mod cli_harness_tmux;
 mod cli_resume_token;

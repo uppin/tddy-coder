@@ -7,17 +7,20 @@
 //! `<tddyhome>/tools` (see `agent_registry_support`); its daemon.yaml has no agent section. The
 //! new agent, `acme`, names only adapters that already exist. The routed starts (`#agent-tools
 //! 13/19`) run on a Meta account in the owner's unlocked vault, and the stub reports the route
-//! environment it was given. The jailed start runs a real Seatbelt jail with the real
+//! environment it was given. The starts of `#agent-tools 14/19` drive the generic launch's managed
+//! workflow, hooks, conversation slot and `TDDY_*`-free environment with dropped-in agents that
+//! declare them. The jailed start runs a real Seatbelt jail with the real
 //! `tddy-sandbox-runner`, so it is macOS-only: CI (ubuntu) never runs the
 //! `jailed` module.
 
 mod agent_registry_support;
+mod support;
 
 use std::collections::BTreeSet;
 
 use agent_registry_support::{
     a_daemon_with_tools, a_registry_daemon, acme_yaml_declaring, ACME_MODEL, ACME_YAML,
-    META_ACCOUNT, META_ANTHROPIC_ROOT, META_KEY,
+    META_ACCOUNT, META_ANTHROPIC_ROOT, META_KEY, MINTED_CHAT_ID,
 };
 use pretty_assertions::assert_eq;
 use tddy_coding_agent_specs::{builtin_specs, Capability};
@@ -238,6 +241,261 @@ async fn a_harness_profile_naming_a_dropped_in_agent_starts_its_session_type() {
     );
 }
 
+// --- The generic launch serves claude's and cursor's needs (`#agent-tools 14/19`) -------------
+
+/// `acme.yaml` whose argv splices its slots and whose instructions take an appended system prompt
+/// file, declaring `hooks` and `managed_workflow` — the shape a managed workflow needs, under no name
+/// Rust knows.
+fn acme_yaml_with_hooks_and_managed_workflow() -> String {
+    let managed = ACME_YAML
+        .replace(
+            "    - { if: prompt, then: [\"{prompt}\"] }\n",
+            "    - { splice: slots }\n    - { if: prompt, then: [\"{prompt}\"] }\n",
+        )
+        .replace(
+            "      files: [AGENTS.md]\n",
+            "      files: [AGENTS.md]\n      append_system_prompt: { flag: --append-system-prompt-file }\n",
+        )
+        .replace(
+            "capabilities: [hooks, requires_model]",
+            "capabilities: [hooks, requires_model, managed_workflow]",
+        );
+    assert_eq!(
+        managed.matches("managed_workflow").count()
+            + managed.matches("{ splice: slots }").count()
+            + managed.matches("--append-system-prompt-file").count(),
+        3,
+        "acme.yaml gains a slots splice, an appended prompt and managed_workflow"
+    );
+    managed
+}
+
+/// `acme.yaml` whose conversation is the daemon's session id: `--session-id` on a start, `--resume`
+/// with the same id on a resume.
+fn acme_yaml_conversing_by_the_daemon_session_id() -> String {
+    let declared = acme_yaml_declaring("    conversation: { kind: daemon_session_id }\n").replace(
+        "    - { if: prompt, then: [\"{prompt}\"] }\n",
+        "    - { if: resume, then: [\"--resume\", \"{session_id}\"], else: [\"--session-id\", \"{session_id}\"] }\n    - { if: prompt, then: [\"{prompt}\"] }\n",
+    );
+    assert!(
+        declared.contains("--session-id"),
+        "acme.yaml's argv names the session id"
+    );
+    declared
+}
+
+/// `acme.yaml` whose conversation is a chat `cursor-create-chat` mints, resumed as `--resume CHAT`.
+fn acme_yaml_conversing_by_a_minted_chat() -> String {
+    let declared = acme_yaml_declaring(
+        "    conversation: { kind: minted, adapter: cursor-create-chat }\n",
+    )
+    .replace(
+        "    - { if: prompt, then: [\"{prompt}\"] }\n",
+        "    - { if: chat_id, then: [\"--resume\", \"{chat_id}\"] }\n    - { if: prompt, then: [\"{prompt}\"] }\n",
+    );
+    assert!(
+        declared.contains("{chat_id}"),
+        "acme.yaml's argv names the chat"
+    );
+    declared
+}
+
+#[tokio::test]
+#[serial_test::serial]
+async fn a_dropped_in_agent_declaring_hooks_and_managed_workflow_starts_over_a_managed_codebase_with_its_hooks_file_written_and_the_recipe_prompt_appended(
+) {
+    // Given
+    let daemon =
+        a_daemon_with_tools(&[("acme.yaml", &acme_yaml_with_hooks_and_managed_workflow())]);
+
+    // When
+    let (session_id, _host) = daemon
+        .start(daemon.a_managed_start("acme-cli", "tdd"))
+        .await
+        .expect("a managed acme-cli start succeeds");
+    let started = daemon.stub_report(&session_id).await;
+
+    // Then — managed on the tdd recipe, claude-settings-local's hooks file in the worktree, and the
+    // recipe's orchestration prompt handed over as a file that exists
+    let meta = daemon.metadata_of(&session_id);
+    let prompt_files: Vec<bool> = started
+        .values_of("--append-system-prompt-file")
+        .iter()
+        .map(|path| std::path::Path::new(path).is_file())
+        .collect();
+    assert_eq!(
+        (
+            meta.managed_codebase,
+            meta.recipe,
+            daemon
+                .worktree_of(&session_id)
+                .join(".claude/settings.local.json")
+                .is_file(),
+            prompt_files,
+        ),
+        (true, Some("tdd".to_string()), true, vec![true])
+    );
+}
+
+#[tokio::test]
+#[serial_test::serial]
+async fn a_dropped_in_agent_without_managed_workflow_is_refused_a_managed_codebase_naming_the_agent(
+) {
+    // Given — acme.yaml as dropped in: no managed_workflow
+    let daemon = a_daemon_with_tools(&[("acme.yaml", ACME_YAML)]);
+
+    // When
+    let refusal = daemon
+        .start(daemon.a_managed_start("acme-cli", "tdd"))
+        .await
+        .map(|(session_id, _host)| session_id)
+        .expect_err("an agent without managed_workflow is not started over a managed codebase");
+
+    // Then — refused naming the agent and the capability it lacks; nothing spawned
+    assert_eq!(
+        (refusal.code, refusal.message, daemon.spawn_marker.exists()),
+        (
+            Code::InvalidArgument,
+            "managed_codebase is not supported for acme-cli sessions: acme declares no \
+             managed_workflow"
+                .to_string(),
+            false,
+        )
+    );
+}
+
+#[tokio::test]
+#[serial_test::serial]
+async fn a_dropped_in_agent_whose_conversation_is_the_daemon_session_id_resumes_with_the_same_id() {
+    // Given
+    let daemon = a_daemon_with_tools(&[(
+        "acme.yaml",
+        &acme_yaml_conversing_by_the_daemon_session_id(),
+    )]);
+
+    // When — started, stopped, then resumed
+    let (session_id, _host) = daemon
+        .start(daemon.a_start("acme-cli", false))
+        .await
+        .expect("a host acme-cli start succeeds");
+    let started = daemon.stub_report(&session_id).await;
+    daemon.stop(&session_id).await;
+    daemon
+        .resume(&session_id)
+        .await
+        .expect("the stopped acme-cli session resumes");
+    let resumed = daemon.stub_report(&session_id).await;
+
+    // Then — the session id names the conversation on both launches; the resume keeps its model
+    let stub = daemon.stub_path();
+    assert_eq!(
+        (started.argv(), resumed.argv()),
+        (
+            vec![
+                stub.clone(),
+                "--model".to_string(),
+                ACME_MODEL.to_string(),
+                "--session-id".to_string(),
+                session_id.clone(),
+            ],
+            vec![
+                stub,
+                "--model".to_string(),
+                ACME_MODEL.to_string(),
+                "--resume".to_string(),
+                session_id.clone(),
+            ],
+        )
+    );
+}
+
+#[tokio::test]
+#[serial_test::serial]
+async fn a_dropped_in_agent_whose_conversation_is_minted_by_cursor_create_chat_resumes_its_minted_chat(
+) {
+    // Given — the stub's `create-chat` prints MINTED_CHAT_ID
+    let daemon = a_daemon_with_tools(&[("acme.yaml", &acme_yaml_conversing_by_a_minted_chat())]);
+
+    // When — started, stopped, then resumed
+    let (session_id, _host) = daemon
+        .start(daemon.a_start("acme-cli", false))
+        .await
+        .expect("a host acme-cli start succeeds");
+    let started = daemon.stub_report(&session_id).await;
+    daemon.stop(&session_id).await;
+    daemon
+        .resume(&session_id)
+        .await
+        .expect("the stopped acme-cli session resumes");
+    let resumed = daemon.stub_report(&session_id).await;
+
+    // Then — the minted chat is recorded and named by both launches
+    assert_eq!(
+        (
+            started.values_of("--resume"),
+            resumed.values_of("--resume"),
+            daemon.metadata_of(&session_id).cursor_chat_id,
+        ),
+        (
+            vec![MINTED_CHAT_ID.to_string()],
+            vec![MINTED_CHAT_ID.to_string()],
+            Some(MINTED_CHAT_ID.to_string()),
+        )
+    );
+}
+
+#[tokio::test]
+#[serial_test::serial]
+async fn the_agent_process_of_a_dropped_in_agent_sees_no_tddy_variable() {
+    // Given — a TDDY_ variable in the daemon's own environment, and a dropped-in agent declaring
+    // hooks, managed workflow and a daemon-id conversation
+    let _leak = agent_registry_support::ATddyVariableInTheDaemon::set("TDDY_LEAK_PROBE", "1");
+    let daemon =
+        a_daemon_with_tools(&[("acme.yaml", &acme_yaml_with_hooks_and_managed_workflow())]);
+
+    // When
+    let (session_id, _host) = daemon
+        .start(daemon.a_managed_start("acme-cli", "tdd"))
+        .await
+        .expect("a managed acme-cli start succeeds");
+    let started = daemon.stub_report(&session_id).await;
+
+    // Then
+    assert_eq!(started.tddy_variables(), Vec::<String>::new());
+}
+
+#[tokio::test]
+#[serial_test::serial]
+async fn the_agent_process_of_a_dropped_in_agent_started_in_tmux_sees_no_tddy_variable() {
+    // Given — a TDDY_ variable in the daemon's own environment before its private tmux server
+    // starts (a pane inherits the server's environment, not the daemon's), and the dropped-in agent
+    // declaring hooks, managed workflow and a daemon-id conversation
+    let _leak = agent_registry_support::ATddyVariableInTheDaemon::set("TDDY_LEAK_PROBE", "1");
+    let _tmux = support::PrivateTmux::started();
+    let daemon =
+        a_daemon_with_tools(&[("acme.yaml", &acme_yaml_with_hooks_and_managed_workflow())]);
+
+    // When — a managed start in tmux
+    let start = tddy_service::proto::session::StartSessionRequest {
+        run_in_tmux: true,
+        ..daemon.a_managed_start("acme-cli", "tdd")
+    };
+    let (session_id, _host) = daemon
+        .start(start)
+        .await
+        .expect("a managed acme-cli start in tmux succeeds");
+    let started = daemon.stub_report(&session_id).await;
+
+    // Then — the pane runs the agent with no TDDY_ variable at all
+    assert_eq!(
+        (
+            daemon.metadata_of(&session_id).tmux_session.is_some(),
+            started.tddy_variables(),
+        ),
+        (true, Vec::<String>::new())
+    );
+}
+
 /// The jailed half of the YAML-only claim: macOS only, through a real Seatbelt jail.
 #[cfg(target_os = "macos")]
 mod jailed {
@@ -272,5 +530,24 @@ mod jailed {
                 Some(true),
             )
         );
+    }
+
+    #[tokio::test]
+    #[serial_test::serial]
+    async fn the_agent_process_of_a_dropped_in_agent_in_a_jail_sees_no_tddy_variable() {
+        // Given — a TDDY_ variable in the daemon's own environment
+        let _leak =
+            super::agent_registry_support::ATddyVariableInTheDaemon::set("TDDY_LEAK_PROBE", "1");
+        let daemon = a_daemon_with_tools(&[("acme.yaml", ACME_YAML)]);
+
+        // When
+        let (session_id, _jail) = daemon
+            .start(daemon.a_start("acme-cli", true))
+            .await
+            .expect("a jailed acme-cli start succeeds");
+        let started = daemon.stub_report(&session_id).await;
+
+        // Then
+        assert_eq!(started.tddy_variables(), Vec::<String>::new());
     }
 }

@@ -22,7 +22,7 @@ As a developer, I want to start a raw Cursor Agent CLI session from the tddy web
    - **Sandbox** and **Managed codebase** toggles are available (parity with Claude CLI).
 2. **Start New Session** issues `StartSession` with `session_type = "cursor-cli"`, the chosen `model`, and optional `sandbox`, `managed_codebase`, `recipe`, and `specialized_agents`.
 3. The daemon creates a git worktree on branch `cursor-cli/{short_id}` (auto-default when `new_branch_name` is empty).
-4. The daemon mints the session's Cursor chat (`agent create-chat`) and records its id before the agent starts.
+4. The daemon mints the session's Cursor chat (`agent create-chat`, the `cursor-create-chat` launch adapter) and records its id before the agent starts. The mint is bounded by 30 s: a `create-chat` that never answers is killed and the start is refused `DEADLINE_EXCEEDED`, naming the agent, the adapter and the deadline; nothing is spawned.
 5. The daemon launches the agent from `cursor.yaml`: `agent --resume <chat> --model <model> [<prompt>]`, with `<worktree>/.cursor/hooks.json` rendered for it.
 6. `StartSessionResponse` returns `session_id`; LiveKit fields are empty.
 
@@ -114,6 +114,10 @@ Every `cursor-cli` launch — host start, host resume, jailed start — renders 
 | Hooks | `adapter: cursor-hooks-json` (above) |
 | Tool allow / deny / permission prompt | `unsupported`: a launch that fills one is refused, never dropped. Managed-codebase enforcement reads this — see [`2026-08-13-cursor-cli-cannot-enforce-managed-codebase-mode.md`](../../dev/todo/2026-08-13-cursor-cli-cannot-enforce-managed-codebase-mode.md) |
 | Models | default `composer-2.5`, plus a curated list |
+| Conversation | `conversation: { kind: minted, adapter: cursor-create-chat }` — the chat minted before the first start (`mint_deadline_secs`, default 30), recorded as `cursor_chat_id` and bound as `chat_id` on every launch |
+| Capabilities | `hooks`, `managed_workflow`, `requires_model`, `keep_worktree_on_delete`, `operator_notify` |
+
+The generic CLI launch serves the same needs from the spec alone: a copy of `cursor.yaml` dropped in under another id mints and records its chat, resumes it with `--resume <chat>`, writes `.cursor/hooks.json` and binds the node launcher, exactly as `cursor-cli` does ([Claude CLI session § The generic CLI spec launch](claude-cli-session.md#the-generic-cli-spec-launch-serves-claudes-needs)). A generic resume of a minted conversation whose session recorded no chat is refused `FAILED_PRECONDITION`. The built-in `cursor` id still dispatches to the `cursor-cli` launch.
 
 ## Telegram `/start-cursor`
 

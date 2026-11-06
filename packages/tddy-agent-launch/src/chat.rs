@@ -97,24 +97,11 @@ pub fn resumed_cursor_notify_env(
 
 /// The chat id printed by `cursor-agent create-chat`, or a description of what came out instead.
 ///
-/// `create-chat` prints a **bare** chat id on stdout and exits 0 ("Create a new empty chat and
-/// return its ID" — cursor-agent 2026.07.23). Anything else — no output, a banner, a prompt, an
-/// error message — is not a chat id, and pinning it to the session would send every later resume
-/// into a chat that does not exist.
-pub fn parse_created_chat_id(stdout: &str) -> Result<String, String> {
-    let chat_id = stdout.trim();
-    if chat_id.is_empty() {
-        return Err("printed no chat id on stdout".to_string());
-    }
-    if chat_id.split_whitespace().count() > 1 {
-        return Err(format!(
-            "printed {chat_id:?} on stdout, which is not a bare chat id"
-        ));
-    }
-    Ok(chat_id.to_string())
-}
+pub use tddy_core::adapters::conversation_id::parse_created_chat_id;
 
-/// Mint the Cursor chat a session will own by running `<binary_path> create-chat` in `worktree_path`.
+/// Mint the Cursor chat a session will own by running `<binary_path> create-chat` in `worktree_path`,
+/// through the `cursor-create-chat` launch adapter, bounded by
+/// [`tddy_coding_agent_specs::slots::conversation::DEFAULT_CONVERSATION_MINT_DEADLINE_SECS`].
 ///
 /// Only `create-chat` mints real chat ids, so a failure here is returned to the caller: starting the
 /// agent without one would produce a session no resume can reattach to.
@@ -122,19 +109,16 @@ pub async fn mint_cursor_chat_id(
     binary_path: &str,
     worktree_path: &Path,
 ) -> Result<String, String> {
-    let output = tokio::process::Command::new(binary_path)
-        .arg("create-chat")
-        .current_dir(worktree_path)
-        .output()
+    use tddy_core::adapters::{ConversationIdAdapter, ConversationMint, CursorCreateChat};
+    CursorCreateChat
+        .mint(ConversationMint {
+            binary: Path::new(binary_path),
+            workdir: worktree_path,
+            env: &[],
+            deadline: std::time::Duration::from_secs(
+                tddy_coding_agent_specs::slots::conversation::DEFAULT_CONVERSATION_MINT_DEADLINE_SECS,
+            ),
+        })
         .await
-        .map_err(|e| format!("`{binary_path} create-chat` could not be run: {e}"))?;
-    if !output.status.success() {
-        return Err(format!(
-            "`{binary_path} create-chat` exited with {}: {}",
-            output.status,
-            String::from_utf8_lossy(&output.stderr).trim()
-        ));
-    }
-    parse_created_chat_id(&String::from_utf8_lossy(&output.stdout))
-        .map_err(|e| format!("`{binary_path} create-chat` {e}"))
+        .map_err(|e| e.to_string())
 }

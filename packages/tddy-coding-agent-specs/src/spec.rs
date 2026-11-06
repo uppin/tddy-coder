@@ -15,6 +15,7 @@ use thiserror::Error;
 use crate::capability::Capability;
 use crate::headless::validate_headless;
 use crate::route::{ProviderKind, RouteShape, RouteSupport, RoutedAgent};
+use crate::slots::conversation::ConversationSlot;
 use crate::slots::hooks;
 use crate::slots::tools::render_flag_per_value;
 
@@ -72,6 +73,22 @@ impl ExtensionOwner for CodingAgentExtension {
                     resume.adapter
                 ));
             }
+        }
+        match &agent.conversation {
+            Some(ConversationSlot::Minted { adapter, .. })
+                if launch_adapters.conversation_id(adapter).is_none() =>
+            {
+                return Err(format!(
+                    "conversation.adapter {adapter} is not a launch adapter this build has"
+                ));
+            }
+            Some(ConversationSlot::ResumeToken) if agent.resume.is_none() => {
+                return Err(
+                    "conversation kind resume_token needs a resume.adapter to read its token with"
+                        .to_string(),
+                );
+            }
+            _ => {}
         }
         if agent.placements.is_empty() {
             return Err(
@@ -201,6 +218,11 @@ pub struct CodingAgentSection {
     /// `Muse Code`. Read through [`CodingAgentSpec::product`], which answers the id when absent.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub product: Option<String>,
+    /// How the session's own conversation is identified across its start and resumes
+    /// (`#agent-tools 14/19`): the daemon's session id, a minted id, the worktree, or a resume
+    /// token. Read through [`CodingAgentSpec::conversation`], which derives it when absent.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub conversation: Option<ConversationSlot>,
 }
 
 /// How long an orchestrated session's permission hook waits for its orchestrator's answer when the
@@ -234,6 +256,17 @@ impl CodingAgentSpec {
                 shape: route.shape,
             },
             None => RouteSupport::default(),
+        }
+    }
+
+    /// `coding_agent.conversation`; when the spec declares none, [`ConversationSlot::ResumeToken`]
+    /// for a spec with a `resume` slot and [`ConversationSlot::Worktree`] otherwise — what the
+    /// generic launch resumed by before the slot existed.
+    pub fn conversation(&self) -> ConversationSlot {
+        match (&self.agent.conversation, &self.agent.resume) {
+            (Some(declared), _) => declared.clone(),
+            (None, Some(_)) => ConversationSlot::ResumeToken,
+            (None, None) => ConversationSlot::Worktree,
         }
     }
 

@@ -109,6 +109,14 @@ unstructured free-form session.
 12. Applies to **both** sandboxed and non-sandboxed **claude-cli** and **cursor-cli** sessions. The explicit
     `managed_codebase` + `recipe` request drives it; `TDDY_AGENT_DRIVEN` remains only for the
     `tddy-coder` path and is unaffected.
+12a. Any CLI agent whose spec declares the `managed_workflow` capability (`claude.yaml` and
+    `cursor.yaml` among the built-ins, or a dropped-in `<tddyhome>/tools/<id>.yaml`) runs a managed
+    session through the generic spec launch: the recipe's prompt goes through the spec's
+    `append_system_prompt` flag and the workflow is attached once the agent runs. The managed
+    `TDDY_*` pairs (`TDDY_SOCKET`, `TDDY_SESSION_DIR`, `TDDY_REPO_DIR`) are carried by the agent's
+    `tddy-tools --mcp` registration, never the agent process. A managed start of an agent without
+    `managed_workflow` is rejected with `INVALID_ARGUMENT`, naming the agent; a managed start of a
+    generic agent in a jail is rejected with `FAILED_PRECONDITION`.
 
 ### Concurrency
 13. The transition handler is per-session (per-instance on `ToolcallRpcService`), so concurrent managed

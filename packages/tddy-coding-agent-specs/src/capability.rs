@@ -31,11 +31,16 @@ pub enum Capability {
     KeepWorktreeOnDelete,
     /// The session may notify its operator (`NotifyOperator`, the project-home notify tool).
     OperatorNotify,
+    /// The agent can be started over a managed codebase and driven by a workflow recipe: the
+    /// recipe's orchestration prompt reaches it through its `instructions.append_system_prompt`
+    /// slot (`#agent-tools 14/19`). A start with `managed_codebase` of an agent without it is
+    /// refused.
+    ManagedWorkflow,
 }
 
 impl Capability {
     /// Every capability, in declaration order.
-    pub const ALL: [Capability; 8] = [
+    pub const ALL: [Capability; 9] = [
         Capability::Hooks,
         Capability::AskUserQuestion,
         Capability::SplitHost,
@@ -44,6 +49,7 @@ impl Capability {
         Capability::BranchNameRequired,
         Capability::KeepWorktreeOnDelete,
         Capability::OperatorNotify,
+        Capability::ManagedWorkflow,
     ];
 
     /// The word a spec writes it as.
@@ -57,6 +63,7 @@ impl Capability {
             Capability::BranchNameRequired => "branch_name_required",
             Capability::KeepWorktreeOnDelete => "keep_worktree_on_delete",
             Capability::OperatorNotify => "operator_notify",
+            Capability::ManagedWorkflow => "managed_workflow",
         }
     }
 }

@@ -313,7 +313,7 @@ impl LaunchSessions {
 /// toolcall socket of the workflow this daemon already serves: that workflow is kept, never
 /// replaced — replacing it would drop the old listener, which unlinks the very socket the agent is
 /// using. Only a daemon with no such workflow (a restart) prepares one, and it binds the same path.
-async fn resumed_recipe<'m>(
+pub(crate) async fn resumed_recipe<'m>(
     manager: &CliSessionManager,
     meta: &'m tddy_core::SessionMetadata,
     os_user: &str,

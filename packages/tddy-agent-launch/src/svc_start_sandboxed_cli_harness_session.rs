@@ -20,11 +20,13 @@ use tddy_session_agents::seed_codebase::{SeedCodebase, SeededAgentClones};
 use tddy_session_files::attachment_progress::AttachmentProgressSink;
 use tddy_worktree_service::branch_intent::{BranchIntentPolicy, BranchIntentRequest};
 
+use crate::cli_agent_steps::{start_conversation, ConversationStart};
 use crate::cli_harness_jail::{jail_route_config_env, require_jail_route, CliJail};
 use crate::cli_route_launch::routed_launch_model;
 use crate::cli_session_worktree::{
     provision_cli_worktree, semantic_index_env, CliWorktree, CliWorktreeStart,
 };
+use crate::cursor_from_spec::node_launcher_of;
 use crate::harness_from_spec::{harness_template_params, CliSessionAgent, HarnessLaunch};
 use crate::launch_ports::LaunchSessions;
 use crate::relaunch_jail_dirs::{prepare_relaunch_dirs, refresh_relaunch_context_dir};
@@ -158,6 +160,7 @@ impl LaunchSessions {
                 create_remote_branch: req.create_remote_branch,
                 intent,
                 timeout: self.config.spawn_worker_request_timeout(),
+                ssh_alias: "",
             },
             &stack_parent,
             progress,
@@ -230,11 +233,25 @@ impl LaunchSessions {
             route.as_ref().map(|route| route.args.as_slice()),
             req.model.trim(),
         );
-        let params = harness_template_params(&HarnessLaunch {
+        // The conversation the spec declares: the session id, or a chat minted on the host (the jail
+        // holds no credentials to mint it with), bound with the permission mode the start chose.
+        let conversation = start_conversation(ConversationStart {
+            spec: &session_agent.agent.spec,
+            binary: &session_agent.agent.tool.binary,
+            worktree: &worktree_path,
+            env: &[],
+            session_id,
+        })
+        .await?;
+        let launcher = node_launcher_of(&session_agent.agent.tool.binary);
+        let params = harness_template_params(&conversation.bound(HarnessLaunch {
             model: launch_model,
             prompt: Some(&start.initial_prompt),
+            permission_mode: Some(req.permission_mode.trim()),
+            dangerously_skip_permissions: req.dangerously_skip_permissions,
+            node_launcher: launcher.as_ref(),
             ..HarnessLaunch::default()
-        });
+        }));
 
         progress.begin_phase(StartStep::Agent);
         let jail = JailSession {
@@ -270,6 +287,7 @@ impl LaunchSessions {
             pid: Some(pid),
             model: Some(req.model.trim().to_string()),
             sandbox: Some(true),
+            cursor_chat_id: conversation.recorded_chat_id().map(str::to_string),
             agents_rev: tddy_session_agents::agent_roster::started_roster_rev(&started_agents),
             agents: started_agents,
             ..tddy_session_split::service_util::starting_session_metadata(

@@ -278,8 +278,38 @@ pub async fn launch_host_pty(
     session: HostPtySession<'_>,
     on_exit: Option<ExitHook>,
 ) -> Result<Arc<PtyHandle>, SpecLaunchError> {
+    spawn_host_pty(agent, params, slots, worktree, session, on_exit, false).await
+}
+
+/// [`launch_host_pty`] for the generic CLI launch: the agent runs without the `TDDY_*` variables
+/// the daemon's own environment holds (stack rule) — it sees only what `session.env` names.
+pub(crate) async fn launch_host_pty_without_inherited_tddy(
+    agent: &HostAgent,
+    params: &TemplateParams,
+    slots: &RenderedSlots,
+    worktree: &Path,
+    session: HostPtySession<'_>,
+    on_exit: Option<ExitHook>,
+) -> Result<Arc<PtyHandle>, SpecLaunchError> {
+    spawn_host_pty(agent, params, slots, worktree, session, on_exit, true).await
+}
+
+async fn spawn_host_pty(
+    agent: &HostAgent,
+    params: &TemplateParams,
+    slots: &RenderedSlots,
+    worktree: &Path,
+    session: HostPtySession<'_>,
+    on_exit: Option<ExitHook>,
+    without_inherited_tddy: bool,
+) -> Result<Arc<PtyHandle>, SpecLaunchError> {
     let HostPtyPlan { argv, env } = plan_host_pty(agent, params, slots)?;
-    let env = env.into_iter().chain(session.env).collect();
+    let env: Vec<(String, String)> = env.into_iter().chain(session.env).collect();
+    let argv = if without_inherited_tddy {
+        without_inherited_tddy_variables(argv, &env)
+    } else {
+        argv
+    };
     session
         .manager
         .spawn_rendered_main(
@@ -294,6 +324,61 @@ pub async fn launch_host_pty(
         )
         .await
         .map_err(|e| SpecLaunchError::Spawn(e.to_string()))
+}
+
+/// `argv` run under `env -u NAME` for each `TDDY_*` variable the daemon's own environment holds and
+/// `env` does not set: the agent process sees no `TDDY_*` variable the launch did not name
+/// (`#agent-tools` stack rule). A PTY child inherits the daemon's environment, which a daemon
+/// started from a dev shell or a test fills with its own `TDDY_*` configuration.
+fn without_inherited_tddy_variables(argv: Vec<String>, env: &[(String, String)]) -> Vec<String> {
+    let mut inherited: Vec<String> = std::env::vars_os()
+        .filter_map(|(name, _)| name.into_string().ok())
+        .filter(|name| name.starts_with("TDDY_") && !env.iter().any(|(set, _)| set == name))
+        .collect();
+    if inherited.is_empty() {
+        return argv;
+    }
+    inherited.sort();
+    ["/usr/bin/env".to_string()]
+        .into_iter()
+        .chain(
+            inherited
+                .into_iter()
+                .flat_map(|name| ["-u".to_string(), name]),
+        )
+        .chain(argv)
+        .collect()
+}
+
+/// What a tmux pane runs before the agent, as `sh -c SCRIPT sh "<kept names>" <argv…>`: unset every
+/// `TDDY_*` variable the pane holds except the space-separated names in `$1`, then `exec` the argv.
+/// The names are read with a pattern that admits only shell names, so `unset` never fails.
+const PANE_WITHOUT_INHERITED_TDDY: &str = r#"keep=" $1 "; shift; for name in $(/usr/bin/env | /usr/bin/sed -n 's/^\(TDDY_[A-Za-z0-9_]*\)=.*/\1/p'); do case "$keep" in *" $name "*) ;; *) unset "$name" ;; esac; done; exec "$@""#;
+
+/// `argv` for a tmux pane, run without any `TDDY_*` variable but those `env` sets (`#agent-tools`
+/// stack rule). A pane inherits the tmux *server's* environment — taken from whichever process
+/// started that server, a daemon from a dev shell or a test among them — which the daemon cannot
+/// read, so unlike [`without_inherited_tddy_variables`] the names are found in the pane itself.
+pub(crate) fn in_a_pane_without_inherited_tddy(
+    argv: Vec<String>,
+    env: &[(String, String)],
+) -> Vec<String> {
+    let kept = env
+        .iter()
+        .map(|(name, _)| name.as_str())
+        .filter(|name| name.starts_with("TDDY_"))
+        .collect::<Vec<_>>()
+        .join(" ");
+    [
+        "/bin/sh".to_string(),
+        "-c".to_string(),
+        PANE_WITHOUT_INHERITED_TDDY.to_string(),
+        "sh".to_string(),
+        kept,
+    ]
+    .into_iter()
+    .chain(argv)
+    .collect()
 }
 
 fn write_slot_file(path: &Path, bytes: &[u8]) -> Result<(), SpecLaunchError> {
@@ -365,7 +450,18 @@ pub async fn launch_claude_cli(
     let agent = launch
         .agents
         .resolve(CLAUDE_AGENT_ID, configured_binary(launch.config).as_deref())?;
-    let params = claude_template_params(&launch);
+    // The permission mode defaults to `auto` in claude.yaml itself; a blank prompt is no prompt.
+    let params = crate::harness_from_spec::harness_template_params(
+        &crate::harness_from_spec::HarnessLaunch {
+            model: launch.model,
+            prompt: launch.initial_prompt,
+            resume: launch.resume,
+            session_id: Some(launch.session_id),
+            permission_mode: launch.permission_mode,
+            dangerously_skip_permissions: launch.dangerously_skip_permissions,
+            ..Default::default()
+        },
+    );
     let AgentToolset {
         mcp,
         allowed_tools,
@@ -416,29 +512,6 @@ pub async fn launch_claude_cli(
     .await
 }
 
-/// The `claude` template's parameters for `launch`. The permission mode defaults to `auto`, and a
-/// blank prompt is no prompt — both as the hand-built argv had them.
-fn claude_template_params(launch: &ClaudeCliLaunch<'_>) -> TemplateParams {
-    TemplateParams::new()
-        .with("model", launch.model)
-        .with("session_id", launch.session_id)
-        .with_flag("resume", launch.resume)
-        .with_flag(
-            "dangerously_skip_permissions",
-            launch.dangerously_skip_permissions,
-        )
-        .with(
-            "permission_mode",
-            non_blank(launch.permission_mode).unwrap_or("auto"),
-        )
-        .with_opt("prompt", non_blank(launch.initial_prompt))
-}
-
-/// `value` trimmed, or `None` when nothing but whitespace is left.
-fn non_blank(value: Option<&str>) -> Option<&str> {
-    value.map(str::trim).filter(|v| !v.is_empty())
-}
-
 /// daemon.yaml `claude_cli.binary_path` when it names a path; a bare name leaves the binary to the
 /// spec's own resolution.
 pub(crate) fn configured_binary(config: &DaemonConfig) -> Option<PathBuf> {
@@ -448,4 +521,51 @@ pub(crate) fn configured_binary(config: &DaemonConfig) -> Option<PathBuf> {
         .map(|claude_cli| claude_cli.binary_path.as_str())
         .filter(|path| path.contains('/'))
         .map(PathBuf::from)
+}
+
+#[cfg(test)]
+mod pane_without_inherited_tddy_tests {
+    use super::in_a_pane_without_inherited_tddy;
+
+    /// The `TDDY_*` names a command prints from its own environment.
+    fn tddy_names_seen_by(argv: &[String], inherited: &[(&str, &str)]) -> Vec<String> {
+        let output = std::process::Command::new(&argv[0])
+            .args(&argv[1..])
+            .env_clear()
+            .envs(inherited.iter().copied())
+            .output()
+            .expect("the pane command runs");
+        let mut names: Vec<String> = String::from_utf8_lossy(&output.stdout)
+            .lines()
+            .filter_map(|line| line.split_once('=').map(|(name, _)| name.to_string()))
+            .filter(|name| name.starts_with("TDDY_"))
+            .collect();
+        names.sort();
+        names
+    }
+
+    #[test]
+    fn a_pane_drops_every_inherited_tddy_variable_and_keeps_the_ones_the_launch_sets() {
+        // Given — a pane environment holding an inherited TDDY_ variable and one the launch set
+        let argv = in_a_pane_without_inherited_tddy(
+            vec!["/usr/bin/env".to_string()],
+            &[
+                ("TDDY_DAEMON_URL".to_string(), "http://daemon".to_string()),
+                ("PATH".to_string(), "/usr/bin:/bin".to_string()),
+            ],
+        );
+
+        // When
+        let seen = tddy_names_seen_by(
+            &argv,
+            &[
+                ("TDDY_LEAK_PROBE", "1"),
+                ("TDDY_DAEMON_URL", "http://daemon"),
+                ("PATH", "/usr/bin:/bin"),
+            ],
+        );
+
+        // Then
+        assert_eq!(seen, vec!["TDDY_DAEMON_URL".to_string()]);
+    }
 }

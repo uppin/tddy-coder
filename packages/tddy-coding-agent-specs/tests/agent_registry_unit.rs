@@ -159,6 +159,7 @@ fn every_builtin_agent_declares_the_capabilities_its_old_gates_granted() {
             (
                 "claude",
                 capabilities(&[
+                    Capability::ManagedWorkflow,
                     Capability::Hooks,
                     Capability::AskUserQuestion,
                     Capability::SplitHost,
@@ -174,6 +175,7 @@ fn every_builtin_agent_declares_the_capabilities_its_old_gates_granted() {
             (
                 "cursor",
                 capabilities(&[
+                    Capability::ManagedWorkflow,
                     Capability::Hooks,
                     Capability::RequiresModel,
                     Capability::KeepWorktreeOnDelete,

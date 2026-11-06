@@ -28,6 +28,7 @@ pub mod acp_hooks;
 mod claude_stream_json;
 mod codex_acp_login;
 mod codex_jsonl;
+pub mod conversation_id;
 mod cursor_models;
 mod cursor_stream;
 pub mod headless;
@@ -66,6 +67,12 @@ pub use oz_ndjson::{OzNdjson, OZ_NDJSON};
 // `#agent-tools 8/12`: what a PTY launch reads its agent's own output through — a model listing,
 // a resume token. Not stream adapters, so a registry of their own ([`launch::LaunchAdapters`]).
 pub use launch::{LaunchAdapters, ModelsAdapter, ResumeTokenAdapter};
+// `#agent-tools 14/19`: what mints a session's conversation id before its first start (Cursor's
+// `agent create-chat`), named by a spec's `coding_agent.conversation`.
+pub use conversation_id::{
+    ConversationIdAdapter, ConversationMint, ConversationMintError, CursorCreateChat,
+    CURSOR_CREATE_CHAT,
+};
 pub use opencode_models::{OpenCodeModels, OPENCODE_MODELS};
 pub use warp_resume_token::{WarpResumeToken, WARP_RESUME_TOKEN};
 
