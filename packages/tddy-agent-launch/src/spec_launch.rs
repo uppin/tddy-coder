@@ -188,16 +188,23 @@ impl fmt::Display for SpecLaunchError {
 
 impl std::error::Error for SpecLaunchError {}
 
-/// Spawn `agent` in a PTY in `worktree`: refuse a spec whose `run.transport` is not `pty`, write
-/// `slots.files`, render `run.argv` with `params` plus `slots.argv_extra` bound to the `slots`
-/// list, and register the process under `session`.
-pub async fn launch_host_pty(
+/// What a spec renders for one host launch: the argv and the spec's own `run.env`, the slot files
+/// already written. A launcher that does not spawn through [`launch_host_pty`] — a tmux-run agent
+/// (`#tmux-agent`) — starts this argv itself.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct HostPtyPlan {
+    pub argv: Vec<String>,
+    pub env: Vec<(String, String)>,
+}
+
+/// Plan `agent`'s host launch: refuse a spec whose `run.transport` is not `pty`, write
+/// `slots.files`, and render `run.argv` with `params` plus `slots.argv_extra` bound to the `slots`
+/// list.
+pub fn plan_host_pty(
     agent: &HostAgent,
     params: &TemplateParams,
     slots: &RenderedSlots,
-    worktree: &Path,
-    session: HostPtySession<'_>,
-) -> Result<Arc<PtyHandle>, SpecLaunchError> {
+) -> Result<HostPtyPlan, SpecLaunchError> {
     if agent.spec.run.transport != Transport::Pty {
         return Err(SpecLaunchError::TransportNotPty {
             spec: agent.spec.id.clone(),
@@ -215,8 +222,21 @@ pub async fn launch_host_pty(
         .env
         .iter()
         .map(|(name, value)| (name.clone(), value.clone()))
-        .chain(session.env)
         .collect();
+    Ok(HostPtyPlan { argv, env })
+}
+
+/// Spawn `agent` in a PTY in `worktree` from its [`plan_host_pty`], and register the process under
+/// `session`.
+pub async fn launch_host_pty(
+    agent: &HostAgent,
+    params: &TemplateParams,
+    slots: &RenderedSlots,
+    worktree: &Path,
+    session: HostPtySession<'_>,
+) -> Result<Arc<PtyHandle>, SpecLaunchError> {
+    let HostPtyPlan { argv, env } = plan_host_pty(agent, params, slots)?;
+    let env = env.into_iter().chain(session.env).collect();
     session
         .manager
         .spawn_rendered_main(
@@ -320,6 +340,7 @@ pub async fn launch_claude_cli(
             preamble: None,
             append_system_prompt_file: launch.append_system_prompt_file.map(Path::to_path_buf),
             hooks: launch.hooks,
+            home: launch.agents.host().env_var("HOME").map(PathBuf::from),
         },
     )
     .map_err(SpecLaunchError::Slots)?;

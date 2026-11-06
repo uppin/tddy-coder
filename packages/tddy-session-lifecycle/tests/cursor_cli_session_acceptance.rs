@@ -1,5 +1,7 @@
 //! Acceptance tests: Cursor Agent CLI session type (PRD: docs/ft/daemon/cursor-cli-session.md).
 
+mod cursor_cli_support;
+
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
@@ -83,6 +85,7 @@ fn write_config_with_stub_cursor_agent() -> (tempfile::TempDir, DaemonConfig) {
 }
 
 fn minimal_service(config: DaemonConfig, sessions_base: PathBuf) -> DaemonSessionHost {
+    let agents = cursor_cli_support::coding_agents_over(&sessions_base);
     let tddy_data_dir = sessions_base.clone();
     let sessions_base_resolver: SessionsBaseResolver =
         Arc::new(move |_| Some(sessions_base.clone()));
@@ -104,6 +107,7 @@ fn minimal_service(config: DaemonConfig, sessions_base: PathBuf) -> DaemonSessio
         Arc::new(tddy_daemon_kernel::operator_channel::NoOperatorChannel),
         Arc::new(CliSessionManager::new()),
     )
+    .with_coding_agents(agents)
 }
 
 fn create_test_repo_with_origin(dir: &std::path::Path) {
@@ -652,6 +656,7 @@ struct ACursorCliDaemon {
     sessions: tempfile::TempDir,
     config: DaemonConfig,
     agents: Arc<CliSessionManager>,
+    coding_agents: Arc<tddy_agent_launch::spec_launch::HostCodingAgents>,
 }
 
 fn a_cursor_cli_daemon() -> ACursorCliDaemon {
@@ -660,12 +665,14 @@ fn a_cursor_cli_daemon() -> ACursorCliDaemon {
     let sessions = tempfile::tempdir().unwrap();
     register_project(&sessions.path().join("projects"), repo.path());
     let (config_dir, config) = write_config_with_stub_cursor_agent();
+    let coding_agents = cursor_cli_support::coding_agents_over(sessions.path());
     ACursorCliDaemon {
         _repo: repo,
         _config_dir: config_dir,
         sessions,
         config,
         agents: Arc::new(CliSessionManager::new()),
+        coding_agents,
     }
 }
 
@@ -713,6 +720,7 @@ impl ACursorCliDaemon {
             false,
             &self.agents.task_registry(),
             clones,
+            Some(&self.coding_agents),
         )
         .await
     }

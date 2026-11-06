@@ -30,12 +30,9 @@ pub fn install_cursor_hooks_in_worktree(
         session_id,
         os_user,
         hook_token: &hook_token,
-        // TODO: on an embedded daemon (Tddy Desktop) `daemon_url` is only the GitHub sign-in
-        // callback, so every cursor hook report is a swallowed 404 — the bug claude-cli hooks were
-        // fixed for by passing the agent-tool socket. Not done here: this installer is also called
-        // for sandboxed cursor sessions (whose jail may not reach a $TMPDIR socket) and from
-        // tddy-telegram-control, and neither caller hands it the daemon's resolved data dir.
-        // Tracked in `docs/dev/todo/2026-10-17-desktop-cursor-hooks-reach-daemon.md`.
+        // The hand-built path, reporting over HTTP. No daemon path calls it: every Cursor launch
+        // renders its hooks through the `cursor-hooks-json` adapter, over the daemon's agent-tool
+        // socket. Deleted once approved: docs/dev/todo/2026-11-03-cursor-hand-built-launch-paths.md.
         daemon_socket: None,
         // Cursor hooks never wait for an answer; the value is unread.
         answer_wait_secs: config.claude_cli_answer_wait_secs(),
@@ -58,7 +55,7 @@ pub fn install_cursor_hooks_in_worktree(
 /// The URL a cursor-cli session's hooks — and its `tddy-tools notify` — report to:
 /// `cursor_cli.daemon_url`, then `claude_cli.daemon_url`, then this daemon's own web listener, the
 /// same last resort every hook URL falls back to.
-fn cursor_hook_daemon_url(config: &DaemonConfig) -> String {
+pub(crate) fn cursor_hook_daemon_url(config: &DaemonConfig) -> String {
     tddy_daemon_kernel::config::resolve_cursor_cli_daemon_url(config)
         .unwrap_or_else(|| tddy_daemon_kernel::daemon_hook_urls::local_daemon_hook_url(config))
 }

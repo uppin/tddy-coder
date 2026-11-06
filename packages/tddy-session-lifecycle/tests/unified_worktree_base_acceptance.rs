@@ -6,6 +6,8 @@
 //! cursor-cli and claude-cli session types — the cursor-cli path was the
 //! regression (hardcoded `None` for the chain base).
 
+mod cursor_cli_support;
+
 use std::path::PathBuf;
 use std::process::Command;
 use std::sync::Arc;
@@ -63,6 +65,11 @@ allowed_tools:
 }
 
 fn minimal_service(config: DaemonConfig, sessions_base: PathBuf) -> DaemonSessionHost {
+    // A cursor-cli host is a host with coding agents: a Cursor session launches from its spec.
+    let cursor_agents = config
+        .cursor_cli
+        .is_some()
+        .then(|| cursor_cli_support::coding_agents_over(&sessions_base));
     let tddy_data_dir = sessions_base.clone();
     let sessions_base_resolver: SessionsBaseResolver =
         Arc::new(move |_| Some(sessions_base.clone()));
@@ -74,7 +81,7 @@ fn minimal_service(config: DaemonConfig, sessions_base: PathBuf) -> DaemonSessio
             None
         }
     });
-    DaemonSessionHost::new(
+    let service = DaemonSessionHost::new(
         config.clone(),
         sessions_base_resolver,
         tddy_data_dir,
@@ -84,7 +91,11 @@ fn minimal_service(config: DaemonConfig, sessions_base: PathBuf) -> DaemonSessio
         tddy_session_lifecycle::peer_routing::PeerRouting::local_only(&config),
         Arc::new(tddy_daemon_kernel::operator_channel::NoOperatorChannel),
         Arc::new(CliSessionManager::new()),
-    )
+    );
+    match cursor_agents {
+        Some(agents) => service.with_coding_agents(agents),
+        None => service,
+    }
 }
 
 fn create_test_repo_with_origin(dir: &std::path::Path) {

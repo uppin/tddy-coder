@@ -4,19 +4,28 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use tddy_core::output::SESSIONS_SUBDIR;
-use tddy_core::{write_session_metadata, SessionMetadata};
+use tddy_core::{write_session_metadata, HookCommandParams, SessionMetadata};
 use tddy_rpc::{Response, Status};
 use tddy_service::proto::session::StartSessionResponse;
 
+use crate::claude_jail::TDDY_TOOLS_ID;
 use crate::cli_session_worktree::{
     provision_cli_worktree, semantic_index_env, CliWorktree, CliWorktreeStart,
 };
+use crate::cursor_from_spec::{
+    configured_cursor_binary, cursor_template_params, node_launcher_of, CURSOR_AGENT_ID,
+};
 use crate::session_acting_identity::SessionAccountAccess;
+use crate::spec_launch::{
+    launch_host_pty, plan_host_pty, HostAgent, HostCodingAgents, HostPtySession,
+};
 use tddy_cli_sessions::cli_session_manager::CliSessionManager;
+use tddy_coding_agent_specs::slots::{self, SlotInputs};
 use tddy_daemon_kernel::config::{resolve_cursor_binary_path, DaemonConfig};
 use tddy_service::proto::session::start_phase::Step as StartStep;
 use tddy_session_files::attachment_progress::AttachmentProgressSink;
 use tddy_worktree_service::branch_intent::{BranchIntentPolicy, BranchIntentRequest};
+use uuid::Uuid;
 
 use crate::cli_harness_tmux::HarnessTmuxLaunch;
 pub use crate::{chat, resume};
@@ -67,6 +76,8 @@ pub async fn spawn_cursor_cli_session_inner(
     // naming the concrete daemon type would drag it through every caller of a function that
     // otherwise mentions nothing of the kind.
     agent_clones: &dyn tddy_session_agents::seed_codebase::SeededAgentClones,
+    // The coding agents this host launches from. A host without them refuses.
+    coding_agents: Option<&HostCodingAgents>,
 ) -> Result<Response<StartSessionResponse>, Status> {
     spawn_cursor_cli_session_reporting(
         config,
@@ -96,6 +107,7 @@ pub async fn spawn_cursor_cli_session_inner(
         &SessionAccountAccess::none(),
         &AttachmentProgressSink::discarding(),
         false,
+        coding_agents,
     )
     .await
 }
@@ -151,7 +163,11 @@ pub(crate) async fn spawn_cursor_cli_session_reporting(
     progress: &AttachmentProgressSink,
     // `StartSessionRequest.run_in_tmux`: run the agent in tmux, as the session's OS user.
     run_in_tmux: bool,
+    // The coding agents this host launches from: the `cursor` spec renders the agent's argv, hooks
+    // and rules. A host without them refuses.
+    coding_agents: Option<&HostCodingAgents>,
 ) -> Result<Response<StartSessionResponse>, Status> {
+    let coding_agents = coding_agents.ok_or_else(no_coding_agents)?;
     if model.trim().is_empty() {
         return Err(Status::invalid_argument(
             "model is required for cursor-cli sessions",
@@ -228,16 +244,8 @@ pub(crate) async fn spawn_cursor_cli_session_reporting(
         )
         .await?;
 
-    let hook_token =
-        chat::install_cursor_hooks_in_worktree(config, &worktree_path, session_id, os_user);
-
-    let (binary_path, initial_prompt_opt) = prepare_cursor_cli_launch(
-        config,
-        initial_prompt,
-        managed_codebase,
-        &managed_recipe,
-        &worktree_path,
-    );
+    // The hooks file is rendered through the `cursor` spec's `hooks` slot, at spawn.
+    let hook_token = Uuid::new_v4().to_string();
 
     // Semantic index: index the worktree into the session dir before launch (blocking; a missing
     // embedder or a failed index aborts the start — no unindexed fallback), and point the
@@ -268,19 +276,36 @@ pub(crate) async fn spawn_cursor_cli_session_reporting(
     // `.session.yaml` below, and passed as `--resume <id>` on every later spawn so a resume
     // continues this chat instead of opening a new one.
     progress.begin_phase(StartStep::Agent);
-    let (cursor_chat_id, launched) = spawn_cursor_cli_process(
-        cli_manager,
-        CursorProcess {
-            session_id,
-            model,
-            worktree_path: &worktree_path,
-            binary_path,
-            initial_prompt: initial_prompt_opt,
-            env: session_env,
-            tmux_os_user: run_in_tmux.then_some(os_user),
-            session_dir: &session_dir,
+    // The hook token is on record before the agent starts: its first hook fires during the launch,
+    // and a report is refused until the session names the token.
+    write_session_metadata(
+        &session_dir,
+        &SessionMetadata {
+            hook_token: Some(hook_token.clone()),
+            ..tddy_session_split::service_util::starting_session_metadata(
+                session_id,
+                project_id,
+                "cursor-cli",
+            )
         },
     )
+    .map_err(|e| Status::internal(format!("failed to write session metadata: {e}")))?;
+    let (cursor_chat_id, launched) = spawn_cursor_from_spec(CursorSpecStart {
+        agents: coding_agents,
+        config,
+        tddy_data_dir,
+        cli_manager,
+        session_id,
+        model,
+        os_user,
+        worktree_path: &worktree_path,
+        hook_token: &hook_token,
+        initial_prompt,
+        managed_recipe: managed_recipe.as_deref(),
+        env: session_env,
+        tmux_os_user: run_in_tmux.then_some(os_user),
+        session_dir: &session_dir,
+    })
     .await?;
     progress.end_phase(StartStep::Agent);
 
@@ -311,6 +336,159 @@ pub(crate) async fn spawn_cursor_cli_session_reporting(
     Ok(started_without_livekit(session_id))
 }
 
+/// What a host start launches its Cursor agent with, from the `cursor` spec.
+struct CursorSpecStart<'a> {
+    agents: &'a HostCodingAgents,
+    config: &'a DaemonConfig,
+    tddy_data_dir: &'a Path,
+    cli_manager: &'a Arc<CliSessionManager>,
+    session_id: &'a str,
+    model: &'a str,
+    os_user: &'a str,
+    worktree_path: &'a Path,
+    hook_token: &'a str,
+    initial_prompt: &'a str,
+    managed_recipe: Option<&'a dyn tddy_core::workflow::recipe::WorkflowRecipe>,
+    env: Vec<(String, String)>,
+    /// The session's OS user when the agent runs in tmux (`run_in_tmux`, as that user); `None`
+    /// runs it as the PTY child, as the daemon.
+    tmux_os_user: Option<&'a str>,
+    /// The session's directory, which holds a tmux pane's environment file.
+    session_dir: &'a Path,
+}
+
+/// Start the session's Cursor agent from the `cursor` spec on this host (`#agent-tools 7/12`): the
+/// chat the session owns, minted now and returned for the session to record; its hooks file, which
+/// reports over the daemon's agent-tool socket; and its argv, rendered from `cursor.yaml`.
+async fn spawn_cursor_from_spec(
+    start: CursorSpecStart<'_>,
+) -> Result<(String, LaunchedCursor), Status> {
+    let CursorSpecStart {
+        agents,
+        config,
+        tddy_data_dir,
+        cli_manager,
+        session_id,
+        model,
+        os_user,
+        worktree_path,
+        hook_token,
+        initial_prompt,
+        managed_recipe,
+        env,
+        tmux_os_user,
+        session_dir,
+    } = start;
+    let agent = resolve_cursor_agent(agents, config)?;
+    let chat_id = chat::mint_cursor_chat_id(&agent.tool.binary.to_string_lossy(), worktree_path)
+        .await
+        .map_err(|e| {
+            Status::internal(format!(
+                "failed to create the Cursor chat for session {session_id}: {e}"
+            ))
+        })?;
+    let tddy_tools = agent.dep(TDDY_TOOLS_ID).ok_or_else(|| {
+        Status::failed_precondition(format!(
+            "the {CURSOR_AGENT_ID} tool does not depend on {TDDY_TOOLS_ID}"
+        ))
+    })?;
+    let tddy_tools_path = tddy_tools.binary.to_string_lossy().into_owned();
+    let daemon_socket = tddy_daemon_kernel::agent_tool_socket_path(tddy_data_dir)
+        .to_string_lossy()
+        .into_owned();
+    let daemon_url = chat::cursor_hook_daemon_url(config);
+    let hooks = HookCommandParams {
+        tddy_tools_path: &tddy_tools_path,
+        daemon_url: &daemon_url,
+        session_id,
+        os_user,
+        hook_token,
+        daemon_socket: Some(&daemon_socket),
+        answer_wait_secs: config.claude_cli_answer_wait_secs(),
+    };
+    let slots = slots::render(
+        &agent.spec,
+        &SlotInputs {
+            workdir: worktree_path.to_path_buf(),
+            scratch_dir: worktree_path.to_path_buf(),
+            // No MCP registration on the host: the user's own `$HOME/.cursor/mcp.json` is theirs.
+            mcp_server: None,
+            allowed_tools: Vec::new(),
+            denied_tools: Vec::new(),
+            permission_prompt_tool: None,
+            preamble: managed_recipe
+                .map(|recipe| format!("Managed workflow recipe: {}", recipe.name())),
+            append_system_prompt_file: None,
+            hooks: Some(hooks),
+            home: agents.host().env_var("HOME").map(PathBuf::from),
+        },
+    )
+    .map_err(|e| Status::internal(e.to_string()))?;
+    let params = cursor_template_params(
+        &chat_id,
+        model,
+        Some(initial_prompt),
+        node_launcher_of(&agent.tool.binary).as_ref(),
+    );
+    if let Some(os_user) = tmux_os_user {
+        // A tmux-run agent (`#tmux-agent`) runs the spec's argv in its own tmux session.
+        let plan = plan_host_pty(&agent, &params, &slots)
+            .map_err(|e| Status::internal(format!("failed to spawn cursor-cli: {e}")))?;
+        let launch = HarnessTmuxLaunch::cursor(
+            os_user,
+            session_id,
+            worktree_path,
+            session_dir,
+            plan.argv,
+            plan.env.into_iter().chain(env).collect(),
+        );
+        let launched = crate::cli_harness_tmux::start_harness_in_tmux(cli_manager, launch).await?;
+        return Ok((chat_id, LaunchedCursor::in_tmux(launched)));
+    }
+    let handle = launch_host_pty(
+        &agent,
+        &params,
+        &slots,
+        worktree_path,
+        HostPtySession {
+            manager: cli_manager,
+            session_id,
+            session_type: "cursor-cli",
+            model,
+            env,
+            os_user: None,
+        },
+    )
+    .await
+    .map_err(|e| Status::internal(format!("failed to spawn cursor-cli: {e}")))?;
+    Ok((
+        chat_id,
+        LaunchedCursor {
+            pid: handle.pid,
+            tmux_session: None,
+        },
+    ))
+}
+
+/// A host without coding agents has no `cursor` tool to launch from.
+pub(crate) fn no_coding_agents() -> Status {
+    Status::failed_precondition(
+        "this host has no coding agents installed: a cursor-cli session is launched from the \
+         `cursor` tool definition",
+    )
+}
+
+/// The `cursor` agent as this host satisfies its spec. `cursor_cli.binary_path`, when it names a
+/// path, is the binary it runs.
+pub(crate) fn resolve_cursor_agent(
+    agents: &HostCodingAgents,
+    config: &DaemonConfig,
+) -> Result<HostAgent, Status> {
+    agents
+        .resolve(CURSOR_AGENT_ID, configured_cursor_binary(config).as_deref())
+        .map_err(|e| Status::failed_precondition(e.to_string()))
+}
+
 /// The answer to a cursor-cli start: the session, with no LiveKit room — its terminal is bridged
 /// when a consumer arrives.
 fn started_without_livekit(session_id: &str) -> Response<StartSessionResponse> {
@@ -323,6 +501,9 @@ fn started_without_livekit(session_id: &str) -> Response<StartSessionResponse> {
     })
 }
 
+// TODO(cursor-cli): dead since a host without coding agents refuses; deleted with the per-agent body
+// of this module once approved: docs/dev/todo/2026-11-03-cursor-hand-built-launch-paths.md.
+#[allow(dead_code)]
 fn prepare_cursor_cli_launch(
     config: &DaemonConfig,
     initial_prompt: &str,
@@ -347,6 +528,8 @@ fn prepare_cursor_cli_launch(
 }
 
 /// What one cursor-cli agent process is started with.
+// TODO(cursor-cli): dead with `spawn_cursor_cli_process` below.
+#[allow(dead_code)]
 struct CursorProcess<'a> {
     session_id: &'a str,
     model: &'a str,
@@ -361,6 +544,9 @@ struct CursorProcess<'a> {
     session_dir: &'a Path,
 }
 
+// TODO(cursor-cli): dead since a host without coding agents refuses; deleted with the per-agent body
+// of this module once approved: docs/dev/todo/2026-11-03-cursor-hand-built-launch-paths.md.
+#[allow(dead_code)]
 async fn spawn_cursor_cli_process(
     cli_manager: &Arc<CliSessionManager>,
     process: CursorProcess<'_>,

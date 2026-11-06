@@ -4,6 +4,7 @@
 //! Every renderer is pure except [`instructions`], which reads the files it prepends to. Nothing is
 //! written here: the launcher writes [`RenderedSlots::files`] before it spawns the agent.
 
+pub mod cursor;
 pub mod hooks;
 pub mod instructions;
 pub mod mcp;
@@ -51,6 +52,10 @@ pub struct SlotInputs<'a> {
     /// session, so a per-tab activity identity is a later parameter rather than a second writer
     /// (`docs/dev/todo/2026-10-24-claude-agent-tab-shares-session-hooks.md`).
     pub hooks: Option<HookCommandParams<'a>>,
+    /// The agent's home on this launch — what `{home}` in a [`crate::McpSlot::Placed`] path
+    /// resolves to: the jail's persistent home, or the host's `$HOME` (`#agent-tools 7/12`). `None`
+    /// refuses a placed path that names `{home}` ([`SlotError::UnboundHome`]).
+    pub home: Option<PathBuf>,
 }
 
 /// What a launch adds: argv entries (spliced before the prompt) and files to write, each with its
@@ -74,6 +79,16 @@ pub enum SlotError {
     /// list of tools to withdraw from an agent that cannot withdraw any. Refused, never dropped.
     #[error("{agent} cannot take {slot}: its spec declares it unsupported")]
     SlotUnsupported { agent: String, slot: String },
+    /// The hooks adapter reports over the daemon's agent-tool socket and the launch gave it none.
+    /// Refused rather than falling back to `daemon_url`, which on an embedded daemon answers every
+    /// report with a 404 the hook swallows (`#agent-tools 7/12`).
+    #[error(
+        "hooks adapter {adapter} needs the daemon's agent-tool socket and the launch gave none"
+    )]
+    NoDaemonSocket { adapter: String },
+    /// A placed registration path names `{home}` and the launch bound no home.
+    #[error("{path} names {{home}} and the launch bound no home")]
+    UnboundHome { path: String },
 }
 
 /// Every slot of `spec` filled from `inputs`. `argv_extra` is ordered: the append-system-prompt
@@ -100,6 +115,13 @@ pub fn render(spec: &CodingAgentSpec, inputs: &SlotInputs<'_>) -> Result<Rendere
                 &inputs.workdir,
                 preamble,
             )?);
+        if let Some(rules_file) = &agent.instructions.rules_file {
+            rendered.files.push(cursor::render_rules_file(
+                &inputs.workdir,
+                rules_file,
+                preamble,
+            ));
+        }
     }
 
     let prompt_tool: Vec<String> = inputs.permission_prompt_tool.iter().cloned().collect();
@@ -114,13 +136,20 @@ pub fn render(spec: &CodingAgentSpec, inputs: &SlotInputs<'_>) -> Result<Rendere
     }
 
     if let Some(server) = &inputs.mcp_server {
-        let (file, argv) = mcp::render_mcp(&agent.mcp, server, &inputs.scratch_dir);
+        let (file, argv) = mcp::render_mcp(
+            &agent.mcp,
+            server,
+            &inputs.scratch_dir,
+            inputs.home.as_deref(),
+        )?;
         rendered.files.push(file);
         rendered.argv_extra.extend(argv);
     }
     if let Some(params) = &inputs.hooks {
         let adapter = hooks::adapter(&agent.hooks.adapter)?;
-        rendered.files.push(adapter.render(&inputs.workdir, params));
+        rendered
+            .files
+            .push(adapter.try_render(&inputs.workdir, params)?);
     }
     Ok(rendered)
 }
@@ -186,6 +215,7 @@ mod tests {
                 instructions: InstructionsSlot {
                     files: vec![PathBuf::from("CLAUDE.md"), PathBuf::from("AGENTS.md")],
                     append_system_prompt: Some(flag("--append-system-prompt-file")),
+                    rules_file: None,
                 },
                 hooks: HooksSlot {
                     adapter: "claude-settings-local".to_string(),
@@ -212,6 +242,7 @@ mod tests {
             preamble: None,
             append_system_prompt_file: None,
             hooks: None,
+            home: None,
         }
     }
 

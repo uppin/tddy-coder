@@ -10,6 +10,7 @@
 //! `agent_terminal_tabs_acceptance.rs`. Serial — the tmux socket directory is process-wide
 //! environment.
 
+mod cursor_cli_support;
 mod support;
 
 use std::path::{Path, PathBuf};
@@ -167,17 +168,23 @@ fn a_session_host(
     let user = this_os_user();
     let user_resolver: UserResolver =
         Arc::new(move |token| (token == VALID_TOKEN).then(|| user.clone()));
-    let host = Arc::new(DaemonSessionHost::new(
-        config.clone(),
-        sessions_base_resolver,
-        data_dir,
-        user_resolver,
-        None,
-        tddy_spawn::supervisor_client::SpawnBackendChoice::ForkedWorker,
-        tddy_session_lifecycle::peer_routing::PeerRouting::local_only(&config),
-        Arc::new(tddy_daemon_kernel::operator_channel::NoOperatorChannel),
-        manager,
-    ));
+    // A harness session is launched from its tool definition: the host has coding agents, as the
+    // daemon runtime gives them.
+    let coding_agents = cursor_cli_support::coding_agents_over(&data_dir);
+    let host = Arc::new(
+        DaemonSessionHost::new(
+            config.clone(),
+            sessions_base_resolver,
+            data_dir,
+            user_resolver,
+            None,
+            tddy_spawn::supervisor_client::SpawnBackendChoice::ForkedWorker,
+            tddy_session_lifecycle::peer_routing::PeerRouting::local_only(&config),
+            Arc::new(tddy_daemon_kernel::operator_channel::NoOperatorChannel),
+            manager,
+        )
+        .with_coding_agents(coding_agents),
+    );
     host.install_sandbox_rpc_bridge();
     host
 }

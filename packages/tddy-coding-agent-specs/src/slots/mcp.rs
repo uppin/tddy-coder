@@ -1,26 +1,57 @@
-//! The `mcp` slot: the tool server registration file and the flag that loads it.
+//! The `mcp` slot: the tool server registration file and the flag that loads it, or the path a
+//! placed registration is written to.
 
 use std::path::{Path, PathBuf};
 
-use super::McpServerCommand;
+use super::cursor::{placed_path, render_cursor_mcp_json};
+use super::{McpServerCommand, SlotError};
 use crate::{McpFormat, McpSlot};
 
 /// The registration file's name, as `write_claude_mcp_config` names it.
 const MCP_CONFIG_FILENAME: &str = "claude-mcp-config.json";
 
-/// The registration file for `server` in `slot`'s format, under `scratch_dir`, and the argv that
-/// passes it (`--mcp-config <path>`, then the slot's `strict_flag` when it declares one).
+/// A registration file: the path it is written to, and its bytes.
+pub type RegistrationFile = (PathBuf, Vec<u8>);
+
+/// The registration file for `server` in `slot`, and the argv that passes it. A file slot writes
+/// it under `scratch_dir` and passes `--mcp-config <path>`, then the slot's `strict_flag` when it
+/// declares one. A placed slot writes it where the agent reads it — its `{home}` resolved against
+/// `home` — and passes no argv.
 pub fn render_mcp(
     slot: &McpSlot,
     server: &McpServerCommand,
     scratch_dir: &Path,
-) -> ((PathBuf, Vec<u8>), Vec<String>) {
-    let McpSlot::File {
-        flag,
-        format,
-        strict_flag,
-    } = slot;
-    let McpFormat::ClaudeMcpJson = format;
+    home: Option<&Path>,
+) -> Result<(RegistrationFile, Vec<String>), SlotError> {
+    match slot {
+        McpSlot::File {
+            flag,
+            format,
+            strict_flag,
+        } => {
+            let path = scratch_dir.join(MCP_CONFIG_FILENAME);
+            let mut argv = vec![flag.clone(), path.to_string_lossy().into_owned()];
+            argv.extend(strict_flag.iter().cloned());
+            Ok((registration(format, server, path), argv))
+        }
+        McpSlot::Placed { path, format } => {
+            let path = placed_path(path, home)?;
+            Ok((registration(format, server, path), Vec::new()))
+        }
+    }
+}
+
+/// `server` registered in `format`, written to `path`.
+fn registration(format: &McpFormat, server: &McpServerCommand, path: PathBuf) -> RegistrationFile {
+    match format {
+        McpFormat::ClaudeMcpJson => (path, mcp_servers_json(server).to_string().into_bytes()),
+        McpFormat::CursorMcpJson => render_cursor_mcp_json(server, &path),
+    }
+}
+
+/// `server` as an `mcpServers` registration: `{"mcpServers": {name: {command, args, env?}}}`, its
+/// `env` omitted when empty. The shape both formats write.
+pub(crate) fn mcp_servers_json(server: &McpServerCommand) -> serde_json::Value {
     let mut entry = serde_json::json!({
         "command": server.command.to_string_lossy(),
         "args": server.args,
@@ -28,11 +59,7 @@ pub fn render_mcp(
     if !server.env.is_empty() {
         entry["env"] = serde_json::json!(server.env);
     }
-    let config = serde_json::json!({ "mcpServers": { server.name.as_str(): entry } });
-    let path = scratch_dir.join(MCP_CONFIG_FILENAME);
-    let mut argv = vec![flag.clone(), path.to_string_lossy().into_owned()];
-    argv.extend(strict_flag.iter().cloned());
-    ((path, config.to_string().into_bytes()), argv)
+    serde_json::json!({ "mcpServers": { server.name.as_str(): entry } })
 }
 
 #[cfg(test)]
@@ -70,7 +97,9 @@ mod tests {
             &a_file_slot(Some("--strict-mcp-config")),
             &the_tddy_tools_server(BTreeMap::new()),
             scratch,
-        );
+            None,
+        )
+        .unwrap();
 
         // Then
         assert_eq!(
@@ -93,7 +122,9 @@ mod tests {
             &a_file_slot(None),
             &the_tddy_tools_server(BTreeMap::new()),
             scratch,
-        );
+            None,
+        )
+        .unwrap();
 
         // Then
         assert_eq!(

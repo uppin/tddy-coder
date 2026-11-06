@@ -271,6 +271,7 @@ impl LaunchSessions {
             &self.host.session_account_access(&req.session_token),
             progress,
             req.run_in_tmux,
+            self.coding_agents.as_deref(),
         )
         .await
     }

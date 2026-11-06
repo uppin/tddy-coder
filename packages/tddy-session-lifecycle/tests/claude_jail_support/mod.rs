@@ -98,7 +98,9 @@ impl AStubReport {
     fn parse(terminal: &str) -> Self {
         let lines = terminal
             .split(['\r', '\n'])
-            .filter_map(|line| line.trim_start().strip_prefix("STUB "))
+            // A stream opens with a snapshot of the screen, whose first row follows its reset and
+            // mode sequences — so a report line is found anywhere in its row, not only at its start.
+            .filter_map(|line| line.split_once("STUB ").map(|(_, report)| report))
             .filter_map(|line| line.split_once('='))
             .map(|(key, value)| (key.to_string(), value.trim_end().to_string()))
             .collect();

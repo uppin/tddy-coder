@@ -20,13 +20,13 @@ use tddy_sandbox_recipes::{
 };
 use tddy_session_agents::roster_replacement::roster_replacement_pairs;
 
-use crate::jail_launch::{mcp_server_env, JailSpec, JailedSession};
+use crate::jail_launch::{jail_home, mcp_server_env, JailSpec, JailedSession};
 use crate::launch_ports::LaunchSessions;
 use crate::spec_launch::{configured_binary, HostAgent, CLAUDE_AGENT_ID};
 use crate::svc_start_sandboxed_claude_cli_session::{JailDirs, JailSession};
 
-/// The dep of the `claude` tool that serves its MCP tools.
-const TDDY_TOOLS_ID: &str = "tddy-tools";
+/// The dep of the `claude` and `cursor` tools that serves their MCP tools.
+pub(crate) const TDDY_TOOLS_ID: &str = "tddy-tools";
 
 /// A sandboxed `claude-cli` launch, as its start or relaunch has settled it.
 pub(crate) struct ClaudeJail<'a> {
@@ -86,6 +86,20 @@ impl LaunchSessions {
             args: vec!["--mcp".to_string()],
             env: mcp_server_env(launch.jail.session_id, launch.dirs, &launch.env),
         };
+        let tool_def = defs
+            .iter()
+            .find(|def| def.id == agent.tool.id)
+            .ok_or_else(|| {
+                Status::internal(format!(
+                    "the registry holds no definition of {}",
+                    agent.tool.id
+                ))
+            })?;
+        let home = jail_home(
+            tool_def,
+            &self.tddy_data_dir,
+            &launch.dirs.scratch_dir.join("home"),
+        )?;
         let mut rendered = slots::render(
             &jailed(&agent.spec),
             &SlotInputs {
@@ -98,6 +112,7 @@ impl LaunchSessions {
                 preamble: None,
                 append_system_prompt_file: launch.append_system_prompt_file.map(Path::to_path_buf),
                 hooks: None,
+                home: Some(home),
             },
         )
         .map_err(|e| Status::internal(e.to_string()))?;
@@ -146,13 +161,14 @@ impl LaunchSessions {
 // (docs/dev/todo/2026-11-02-jailed-claude-loads-project-mcp-json.md).
 fn jailed(spec: &CodingAgentSpec) -> CodingAgentSpec {
     let mut spec = spec.clone();
-    let McpSlot::File { strict_flag, .. } = &mut spec.agent.mcp;
-    *strict_flag = None;
+    if let McpSlot::File { strict_flag, .. } = &mut spec.agent.mcp {
+        *strict_flag = None;
+    }
     spec
 }
 
 /// The definition of `agent`'s own tool and of each of its deps.
-fn closure_defs(
+pub(crate) fn closure_defs(
     registry: &tddy_actions::tool::ToolRegistry,
     agent: &HostAgent,
 ) -> Result<Vec<ToolDef>, Status> {
