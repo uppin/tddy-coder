@@ -10,7 +10,15 @@
 //! match. A descriptor may live in a module of its own ([`crate::cli_harness_muse`],
 //! [`crate::cli_harness_warp`]).
 
-use crate::backend::{claude_cli_models, cursor_cli_models, BackendModel, BackendModels};
+// TODO(harness-clis): delete this module — every descriptor field has a home in a
+// `tddy-coding-agent-specs/specs/*.yaml` (`#agent-tools 8/12`): the argv is `run.argv`, the binary
+// `binary`, `route_config_env` `coding_agent.route.config_env`, `models` `coding_agent.models`
+// (`opencode-models` for the listed kind), the session type `spec_for_session_type`. Deleting a
+// file needs the developer's approval (CLAUDE.md § ASK).
+// Removal is deferred: docs/dev/todo/2026-11-03-harness-clis-legacy-cli-harness-removal.md
+
+use crate::adapters::{ModelsAdapter, OpenCodeModels};
+use crate::backend::{claude_cli_models, cursor_cli_models, BackendModels};
 use crate::cli_harness_muse::MUSE_CLI;
 use crate::cli_harness_warp::WARP_CLI;
 use crate::provider_route::Harness;
@@ -132,20 +140,7 @@ pub fn cli_harness_requires_model(session_type: &str) -> bool {
 /// `opencode models` does. Blank lines are skipped; the first model is the default.
 #[must_use]
 pub fn models_from_listing(stdout: &str) -> BackendModels {
-    let models: Vec<BackendModel> = stdout
-        .lines()
-        .map(str::trim)
-        .filter(|id| !id.is_empty())
-        .map(|id| BackendModel::new(id, id))
-        .collect();
-    let default_model = models
-        .first()
-        .map(|model| model.id.clone())
-        .unwrap_or_default();
-    BackendModels {
-        models,
-        default_model,
-    }
+    OpenCodeModels.parse_models(stdout)
 }
 
 /// A value with its surrounding whitespace removed, or `None` when nothing but whitespace is left.

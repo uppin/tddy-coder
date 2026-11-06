@@ -22,7 +22,7 @@ use crate::session_provider_route::{
     sandboxed_start_route, session_route_sources, start_route,
 };
 use std::os::unix::fs::PermissionsExt;
-use tddy_core::cli_harness::cli_harness;
+use tddy_coding_agent_specs::{load_agent_registry, CodingAgentSpec};
 use tddy_core::{
     read_session_provider_account, write_session_provider_account, SessionProviderAccount,
     SESSION_PROVIDER_ACCOUNT_FILENAME,
@@ -85,6 +85,13 @@ fn value_of<'a>(pairs: &'a [(String, String)], key: &str) -> Option<&'a str> {
         .iter()
         .find(|(k, _)| k == key)
         .map(|(_, v)| v.as_str())
+}
+
+/// The built-in spec of the coding agent `id`, as a host loads it.
+fn the_spec(id: &str) -> CodingAgentSpec {
+    let tools = tempfile::tempdir().expect("a tools directory");
+    let registry = load_agent_registry(tools.path()).expect("the built-in agents load");
+    CodingAgentSpec::of(registry.get(id).expect("registered")).expect("a coding agent")
 }
 
 #[test]
@@ -526,12 +533,13 @@ fn an_opencode_start_on_a_meta_account_writes_its_config_and_launches_with_it() 
     // Given Ada holds her Meta account, and OpenCode's session directory is empty
     let (_dir, access) = a_daemon_where_ada_holds(&[adas_meta_account()], true);
     let session_dir = tempfile::tempdir().expect("a session directory");
-    let opencode = cli_harness("opencode-cli").expect("registered");
+    let opencode = the_spec("opencode");
 
     // When an opencode-cli start chooses the account
     let launch = start_cli_route(
         &access,
-        opencode,
+        Harness::OpenCodeCli,
+        &opencode,
         &on_account("meta-hackathon"),
         "muse-wonder-1.0",
         session_dir.path(),
@@ -568,12 +576,13 @@ fn an_opencode_start_that_chooses_nothing_writes_nothing_and_records_nothing() {
     // Given
     let (_dir, access) = a_daemon_where_ada_holds(&[adas_meta_account()], true);
     let session_dir = tempfile::tempdir().expect("a session directory");
-    let opencode = cli_harness("opencode-cli").expect("registered");
+    let opencode = the_spec("opencode");
 
     // When
     let launch = start_cli_route(
         &access,
-        opencode,
+        Harness::OpenCodeCli,
+        &opencode,
         &RouteSources::default(),
         "anthropic/claude-sonnet-4",
         session_dir.path(),
@@ -593,12 +602,13 @@ fn an_opencode_start_records_its_account_and_model_but_never_its_key() {
     // Given
     let (_dir, access) = a_daemon_where_ada_holds(&[adas_meta_account()], true);
     let session_dir = tempfile::tempdir().expect("a session directory");
-    let opencode = cli_harness("opencode-cli").expect("registered");
+    let opencode = the_spec("opencode");
 
     // When
     start_cli_route(
         &access,
-        opencode,
+        Harness::OpenCodeCli,
+        &opencode,
         &on_account("meta-hackathon"),
         "muse-wonder-1.0",
         session_dir.path(),
@@ -633,12 +643,13 @@ fn an_opencode_start_on_an_account_that_serves_neither_openai_protocol_is_refuse
     };
     let (_dir, access) = a_daemon_where_ada_holds(&[account], true);
     let session_dir = tempfile::tempdir().expect("a session directory");
-    let opencode = cli_harness("opencode-cli").expect("registered");
+    let opencode = the_spec("opencode");
 
     // When
     let refusal = start_cli_route(
         &access,
-        opencode,
+        Harness::OpenCodeCli,
+        &opencode,
         &on_account("anthropic-direct"),
         "claude-sonnet-4",
         session_dir.path(),
@@ -666,10 +677,11 @@ fn a_resumed_opencode_session_regenerates_its_config_from_the_vault_as_it_stands
         },
     )
     .expect("recorded at start");
-    let opencode = cli_harness("opencode-cli").expect("registered");
+    let opencode = the_spec("opencode");
 
     // When it resumes
-    let launch = resume_cli_route(&access, opencode, session_dir.path()).expect("re-resolved");
+    let launch = resume_cli_route(&access, Harness::OpenCodeCli, &opencode, session_dir.path())
+        .expect("re-resolved");
 
     // Then the config is written again and the key comes from the vault
     assert!(session_dir.path().join("opencode.json").is_file());
@@ -685,11 +697,12 @@ fn a_resumed_opencode_session_on_its_own_setup_gets_no_route() {
     // Given a session directory with no account record
     let (_dir, access) = a_daemon_where_ada_holds(&[adas_meta_account()], true);
     let session_dir = tempfile::tempdir().expect("a session directory");
-    let opencode = cli_harness("opencode-cli").expect("registered");
+    let opencode = the_spec("opencode");
 
     // When / Then
     assert_eq!(
-        resume_cli_route(&access, opencode, session_dir.path()).expect("no record"),
+        resume_cli_route(&access, Harness::OpenCodeCli, &opencode, session_dir.path())
+            .expect("no record"),
         crate::cli_route_launch::CliRouteLaunch::default()
     );
 }

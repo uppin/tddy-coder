@@ -35,6 +35,9 @@ account, not an endpoint. Profiles are edited as YAML only; there is no UI edito
 | `claude-cli`, `opencode-cli`, `muse-cli`, `cursor-cli` | a CLI session of that type |
 | `claude`, `claude-acp`, `codex`, `codex-acp`, `opencode`, `cursor` | a tool session with that agent |
 
+A CLI `harness:` is resolved to its tool definition's id (`spec_for_session_type`, e.g.
+`opencode-cli` → `opencode`), and the session starts from that spec.
+
 Any other harness is refused (`INVALID_ARGUMENT`) when the profile is started. Whether the harness can
 run on the account at all is the [capability matrix](provider-accounts.md#running-a-harness-on-an-account)'s call.
 

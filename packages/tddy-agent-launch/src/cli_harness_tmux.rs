@@ -241,6 +241,7 @@ pub struct RecordedHarness<'a> {
 /// ends the tmux session.
 pub async fn reattach_recorded_harness(
     manager: &CliSessionManager,
+    tddy_data_dir: &Path,
     recorded: RecordedHarness<'_>,
 ) -> Result<bool, Status> {
     let RecordedHarness {
@@ -252,7 +253,7 @@ pub async fn reattach_recorded_harness(
     } = recorded;
     let name = agent_tmux_session_name(session_id);
     let state = probe_pane_state(os_user, &name).await?;
-    let on_exit = recorded_exit_hook(session_type, session_dir);
+    let on_exit = recorded_exit_hook(tddy_data_dir, session_type, session_dir)?;
     match (state, on_exit) {
         (PaneState::Running, on_exit) => {
             let running = RunningHarness {
@@ -288,17 +289,23 @@ pub async fn reattach_recorded_harness(
 
 /// The exit hook a re-attached harness is watched with — the one its launch registered. Every
 /// harness the generic launcher runs (opencode, muse, warp) records the resume token its run
-/// prints as it exits; claude-cli and cursor-cli register none. The session's metadata is already
-/// on disk, so the recorder is armed at once.
-fn recorded_exit_hook(session_type: &str, session_dir: &Path) -> Option<ExitHook> {
+/// prints as it exits, read with its spec's resume adapter; claude-cli and cursor-cli register
+/// none. The session's metadata is already on disk, so the recorder is armed at once.
+fn recorded_exit_hook(
+    tddy_data_dir: &Path,
+    session_type: &str,
+    session_dir: &Path,
+) -> Result<Option<ExitHook>, Status> {
     let generic = tddy_core::cli_harness::cli_harness(session_type).is_some()
         && !matches!(session_type, "claude-cli" | "cursor-cli");
     if !generic {
-        return None;
+        return Ok(None);
     }
-    let (hook, arm) = resume_token_recorder(session_dir.to_path_buf());
+    let adapter =
+        crate::harness_from_spec::recorded_resume_token_adapter(tddy_data_dir, session_type)?;
+    let (hook, arm) = resume_token_recorder(session_dir.to_path_buf(), adapter);
     arm.arm();
-    Some(hook)
+    Ok(hook)
 }
 
 /// Run the exit hook of a tmux-run harness whose agent exited while no daemon watched it, on the
@@ -307,12 +314,13 @@ fn recorded_exit_hook(session_type: &str, session_dir: &Path) -> Option<ExitHook
 /// running agent, a gone tmux session or a harness with no exit hook.
 pub(crate) async fn settle_unwatched_agent_exit(
     manager: &CliSessionManager,
+    tddy_data_dir: &Path,
     os_user: &str,
     session_id: &str,
     session_type: &str,
     session_dir: &Path,
 ) -> Result<(), Status> {
-    let Some(on_exit) = recorded_exit_hook(session_type, session_dir) else {
+    let Some(on_exit) = recorded_exit_hook(tddy_data_dir, session_type, session_dir)? else {
         return Ok(());
     };
     let name = agent_tmux_session_name(session_id);

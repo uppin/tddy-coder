@@ -52,11 +52,47 @@ impl HooksAdapter for ClaudeSettingsLocal {
     }
 }
 
+/// The adapter of an agent that takes no lifecycle hooks (`#agent-tools 8/12`: OpenCode, Muse and
+/// Warp on today's launch), named `unsupported`: a launch that passes it hook params is refused
+/// ([`SlotError::HooksUnsupported`]) rather than given no hooks silently.
+///
+/// TODO(harness-clis): a stand-in. The word belongs on the slot — `hooks: unsupported`, as
+/// `ToolSlot` takes it — which is a type change to `#agent-tools 2/12`'s `HooksSlot`; until the
+/// developer decides it, an adapter carries the declaration.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct UnsupportedHooks;
+
+/// [`UnsupportedHooks`]'s name.
+pub const UNSUPPORTED_HOOKS: &str = "unsupported";
+
+impl HooksAdapter for UnsupportedHooks {
+    fn name(&self) -> &'static str {
+        UNSUPPORTED_HOOKS
+    }
+
+    fn render(&self, _workdir: &Path, _params: &HookCommandParams<'_>) -> (PathBuf, Vec<u8>) {
+        // This adapter has no hooks file to write, and `render` has no refusal to return: every
+        // launch goes through `try_render`, which refuses the params.
+        unreachable!(
+            "the unsupported hooks adapter writes no file: its try_render refuses the params"
+        )
+    }
+
+    fn try_render(
+        &self,
+        _workdir: &Path,
+        _params: &HookCommandParams<'_>,
+    ) -> Result<(PathBuf, Vec<u8>), SlotError> {
+        Err(SlotError::HooksUnsupported)
+    }
+}
+
 /// The adapter named `name`; an unknown name is [`SlotError::UnknownHooksAdapter`].
 pub fn adapter(name: &str) -> Result<&'static dyn HooksAdapter, SlotError> {
     match name {
         CLAUDE_SETTINGS_LOCAL => Ok(&ClaudeSettingsLocal),
         CURSOR_HOOKS_JSON => Ok(&CursorHooksJson),
+        UNSUPPORTED_HOOKS => Ok(&UnsupportedHooks),
         _ => Err(SlotError::UnknownHooksAdapter {
             name: name.to_string(),
         }),
@@ -76,6 +112,26 @@ mod tests {
 
         // Then
         assert_eq!(resolved, Ok(CLAUDE_SETTINGS_LOCAL));
+    }
+
+    #[test]
+    fn the_unsupported_hooks_adapter_refuses_hook_params() {
+        // Given
+        let params = HookCommandParams {
+            tddy_tools_path: "/opt/tddy/tddy-tools",
+            daemon_url: "http://127.0.0.1:8899",
+            session_id: "01900000-0000-7000-8000-0000000000a1",
+            os_user: "dev",
+            hook_token: "a-hook-token",
+            daemon_socket: None,
+            answer_wait_secs: 120,
+        };
+
+        // When
+        let refused = UnsupportedHooks.try_render(Path::new("/work/session"), &params);
+
+        // Then
+        assert_eq!(refused, Err(SlotError::HooksUnsupported));
     }
 
     #[test]

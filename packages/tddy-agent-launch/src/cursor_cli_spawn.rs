@@ -458,6 +458,7 @@ async fn spawn_cursor_from_spec(
             env,
             os_user: None,
         },
+        None,
     )
     .await
     .map_err(|e| Status::internal(format!("failed to spawn cursor-cli: {e}")))?;

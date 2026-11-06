@@ -16,7 +16,8 @@ pub struct ProfileStart {
     pub model: String,
 }
 
-/// What `profile` starts; `Err` when its `harness` names no harness this daemon runs.
+/// What `profile` starts; `Err` when its `harness` names no harness this daemon runs. A CLI profile's
+/// start is then the session type's start, which launches from that type's spec.
 pub fn profile_start(profile: &HarnessProfile) -> Result<ProfileStart, String> {
     let harness = Harness::from_agent_or_session_type(&profile.harness).ok_or_else(|| {
         format!(
@@ -43,4 +44,12 @@ pub fn profile_start(profile: &HarnessProfile) -> Result<ProfileStart, String> {
         choice: RouteChoice::Account(profile.provider_account.clone()),
         model: profile.model.clone(),
     })
+}
+
+/// The id of the agent spec `profile`'s harness launches from (`#agent-tools 8/12`): its CLI
+/// session type through `tddy_coding_agent_specs::spec_for_session_type` (`opencode-cli` →
+/// `opencode`); `None` for a profile that starts a tool session, or names no harness.
+pub fn profile_spec_id(profile: &HarnessProfile) -> Option<&'static str> {
+    let start = profile_start(profile).ok()?;
+    tddy_coding_agent_specs::spec_for_session_type(start.session_type.as_deref()?)
 }

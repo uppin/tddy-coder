@@ -38,6 +38,10 @@ pub fn render_mcp(
             let path = placed_path(path, home)?;
             Ok((registration(format, server, path), Vec::new()))
         }
+        // `slots::render` refuses an unsupported slot given a tool server before it gets here.
+        McpSlot::Unsupported => {
+            unreachable!("an unsupported mcp slot registers no server: slots::render refuses it")
+        }
     }
 }
 

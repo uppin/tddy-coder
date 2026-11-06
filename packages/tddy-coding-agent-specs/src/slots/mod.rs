@@ -16,7 +16,7 @@ use std::path::PathBuf;
 use tddy_agent_backend::claude_hooks::HookCommandParams;
 use thiserror::Error;
 
-use crate::{CodingAgentSpec, ToolSlot};
+use crate::{CodingAgentSpec, McpSlot, ToolSlot};
 
 /// The MCP server a launch registers with its agent (`tddy-tools --mcp`).
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -86,6 +86,10 @@ pub enum SlotError {
         "hooks adapter {adapter} needs the daemon's agent-tool socket and the launch gave none"
     )]
     NoDaemonSocket { adapter: String },
+    /// The launch passed hook params to an agent whose spec declares no hooks
+    /// (`hooks: { adapter: unsupported }`, `#agent-tools 8/12`).
+    #[error("the agent's spec declares no lifecycle hooks, and the launch passed hook params")]
+    HooksUnsupported,
     /// A placed registration path names `{home}` and the launch bound no home.
     #[error("{path} names {{home}} and the launch bound no home")]
     UnboundHome { path: String },
@@ -136,6 +140,12 @@ pub fn render(spec: &CodingAgentSpec, inputs: &SlotInputs<'_>) -> Result<Rendere
     }
 
     if let Some(server) = &inputs.mcp_server {
+        if matches!(agent.mcp, McpSlot::Unsupported) {
+            return Err(SlotError::SlotUnsupported {
+                agent: spec.id.clone(),
+                slot: "mcp".to_string(),
+            });
+        }
         let (file, argv) = mcp::render_mcp(
             &agent.mcp,
             server,
@@ -223,9 +233,14 @@ mod tests {
                 models: ModelsSection {
                     default: "opus".to_string(),
                     curated: vec!["opus".to_string()],
+                    list_command: None,
+                    adapter: None,
                 },
                 context_globs: vec!["CLAUDE.md".to_string()],
                 headless: None,
+                route: None,
+                resume: None,
+                placements: crate::Placement::anywhere(),
             },
         }
     }
@@ -477,5 +492,81 @@ mod tests {
 
         // Then
         assert_eq!(rendered.argv_extra, Vec::<String>::new());
+    }
+
+    /// An agent that registers no MCP server declares `mcp: unsupported`; a launch that hands it a
+    /// tool server is refused by name, never started without the server it was promised.
+    #[test]
+    fn a_tool_server_for_an_agent_whose_mcp_is_unsupported_is_refused() {
+        // Given
+        let dir = tempfile::tempdir().unwrap();
+        let mut spec = a_claude_spec();
+        spec.agent.mcp = McpSlot::Unsupported;
+        let mut inputs = no_inputs(dir.path(), dir.path());
+        inputs.mcp_server = Some(McpServerCommand {
+            name: "tddy-tools".to_string(),
+            command: PathBuf::from("/opt/tddy/bin/tddy-tools"),
+            args: strings(&["--mcp"]),
+            env: BTreeMap::new(),
+        });
+
+        // When
+        let refused = render(&spec, &inputs).unwrap_err();
+
+        // Then
+        assert_eq!(
+            refused,
+            SlotError::SlotUnsupported {
+                agent: "claude".to_string(),
+                slot: "mcp".to_string(),
+            }
+        );
+    }
+
+    /// The positive control: with no tool server to register, an `unsupported` mcp slot renders
+    /// neither a registration file nor a flag.
+    #[test]
+    fn an_unsupported_mcp_slot_with_no_tool_server_renders_nothing() {
+        // Given
+        let dir = tempfile::tempdir().unwrap();
+        let mut spec = a_claude_spec();
+        spec.agent.mcp = McpSlot::Unsupported;
+
+        // When
+        let rendered = render(&spec, &no_inputs(dir.path(), dir.path())).unwrap();
+
+        // Then
+        assert_eq!(rendered, RenderedSlots::default());
+    }
+
+    /// An agent whose hooks are `unsupported` refuses hook params instead of writing no hooks file
+    /// and reporting nothing (`#agent-tools 8/12`).
+    #[test]
+    fn hook_params_for_an_agent_whose_hooks_are_unsupported_are_refused() {
+        // Given
+        let dir = tempfile::tempdir().unwrap();
+        let mut spec = a_claude_spec();
+        spec.agent.hooks = HooksSlot {
+            adapter: "unsupported".to_string(),
+        };
+        let params = HookCommandParams {
+            tddy_tools_path: "/opt/tddy/bin/tddy-tools",
+            daemon_url: "http://127.0.0.1:8899",
+            session_id: "0190-a",
+            os_user: "dev",
+            hook_token: "token-1",
+            daemon_socket: None,
+            answer_wait_secs: 300,
+        };
+        let inputs = SlotInputs {
+            hooks: Some(params),
+            ..no_inputs(dir.path(), dir.path())
+        };
+
+        // When
+        let refused = render(&spec, &inputs);
+
+        // Then
+        assert_eq!(refused, Err(SlotError::HooksUnsupported));
     }
 }

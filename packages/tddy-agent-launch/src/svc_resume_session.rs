@@ -9,8 +9,10 @@ use std::path::PathBuf;
 
 use crate::session_coordinate_handlers::bridge_conn_resume_response;
 
-use tddy_core::cli_harness::cli_harness;
+use tddy_coding_agent_specs::spec_for_session_type;
 use tddy_core::read_session_metadata;
+
+use crate::harness_from_spec::cli_session_type;
 
 use tddy_core::session_lifecycle::unified_session_dir_path;
 
@@ -75,23 +77,23 @@ impl LaunchSessions {
             );
         }
 
-        // --- any other registered CLI harness (opencode-cli, muse-cli): resume without LiveKit ---
-        if let Some(harness) = metadata.session_type.as_deref().and_then(cli_harness) {
+        // --- any other CLI coding agent its spec launches (opencode-cli, muse-cli, warp-cli): resume
+        // without LiveKit ---
+        if let Some(session_type) = metadata
+            .session_type
+            .as_deref()
+            .filter(|session_type| spec_for_session_type(session_type).is_some())
+        {
+            let kind = cli_session_type(session_type)?;
             // A sandboxed session resumes in its jail and never on the host's PTY.
             if metadata.sandbox == Some(true) {
                 return bridge_conn_resume_response(
-                    self.resume_sandboxed_cli_harness(
-                        harness,
-                        os_user,
-                        &req,
-                        &session_dir,
-                        metadata,
-                    )
-                    .await,
+                    self.resume_sandboxed_cli_harness(kind, os_user, &req, &session_dir, metadata)
+                        .await,
                 );
             }
             return bridge_conn_resume_response(
-                self.resume_cli_harness(harness, os_user, &req, &session_dir, metadata)
+                self.resume_cli_harness(kind, os_user, &req, &session_dir, metadata)
                     .await,
             );
         }

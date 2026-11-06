@@ -58,10 +58,30 @@ pub(crate) fn record_requested_github_source(
         .map_err(|e| Status::internal(format!("failed to record the session's GitHub source: {e}")))
 }
 
+/// A start of a CLI coding agent that cannot be served is refused before anything is created: none of
+/// them has a workflow of its own for a managed codebase to drive. A sandboxed start's placement is
+/// the spec's own refusal (`LaunchSessions::require_sandbox_placement`), checked by the caller.
+pub(crate) fn refuse_an_unsupported_cli_session_start(
+    session_type: &str,
+    req: &StartSessionRequest,
+) -> Result<(), Status> {
+    if req.managed_codebase {
+        return Err(Status::invalid_argument(format!(
+            "managed_codebase is not supported for {session_type} sessions"
+        )));
+    }
+    Ok(())
+}
+
+// TODO(harness-clis): orphaned from the production start, which refuses through the spec
+// (`refuse_an_unsupported_cli_session_start`, `require_sandbox_placement`). Pinned by
+// `cli_harness_start_checks_unit_tests`; removal is deferred:
+// docs/dev/todo/2026-11-03-harness-clis-legacy-cli-harness-removal.md
 /// A start of a registered CLI harness that cannot be served is refused before anything is
 /// created: none of them has a workflow of its own for a managed codebase to drive, and a sandboxed
 /// one must be a harness the sandbox runner hosts (refused naming the runner, before any provider
 /// route is resolved).
+#[allow(dead_code)]
 pub(crate) fn refuse_an_unsupported_cli_harness_start(
     harness: &CliHarness,
     req: &StartSessionRequest,

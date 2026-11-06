@@ -5,7 +5,7 @@
 use tddy_core::provider_route::{choose_route, RouteChoice, RouteSources};
 use tddy_discovery::harness_profile::HarnessProfile;
 
-use crate::harness_profile_start::{profile_start, ProfileStart};
+use crate::harness_profile_start::{profile_spec_id, profile_start, ProfileStart};
 
 fn a_profile(harness: &str) -> HarnessProfile {
     HarnessProfile {
@@ -132,4 +132,31 @@ mod through_the_tool_session_route {
         assert!(route.args.iter().any(|a| a == "muse-wonder-1.0"));
         assert_eq!(route.secret_env[0].1.expose(), "a-meta-key");
     }
+}
+
+#[test]
+fn a_cli_harness_profile_names_the_spec_its_session_type_launches_from() {
+    // When
+    let ids: Vec<Option<&str>> = ["opencode-cli", "muse-cli", "warp-cli", "claude-cli"]
+        .into_iter()
+        .map(|harness| profile_spec_id(&a_profile(harness)))
+        .collect();
+
+    // Then
+    assert_eq!(
+        ids,
+        vec![Some("opencode"), Some("muse"), Some("warp"), Some("claude")]
+    );
+}
+
+#[test]
+fn a_tool_session_profile_names_no_spec_while_its_cli_twin_does() {
+    // When
+    let ids = (
+        profile_spec_id(&a_profile("opencode")),
+        profile_spec_id(&a_profile("opencode-cli")),
+    );
+
+    // Then — `opencode` starts a tool session, which no CLI spec stands for
+    assert_eq!(ids, (None, Some("opencode")));
 }

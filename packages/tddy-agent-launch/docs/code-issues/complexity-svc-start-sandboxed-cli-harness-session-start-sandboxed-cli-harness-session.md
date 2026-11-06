@@ -1,12 +1,13 @@
 # complexity: start_sandboxed_cli_harness_session
 
-**Location:** `packages/tddy-agent-launch/src/svc_start_sandboxed_cli_harness_session.rs:90` — `LaunchSessions::start_sandboxed_cli_harness_session`
+**Location:** `packages/tddy-agent-launch/src/svc_start_sandboxed_cli_harness_session.rs:76` — `LaunchSessions::start_sandboxed_cli_harness_session`
 **Category:** complexity
 **Detected:** 2026-10-22 by structural audit — `/pr-wrap` on PR #670 (`#provider-route` 9/9), which added the function
-**Metrics:** **250 lines** (fn line to closing brace) · brace depth 3 · CRAP not measured (no `analyze coverage` run)
-**Thresholds breached:** length 250 > 60 (`/analyze-clean-code`)
+**Metrics:** **214 lines** (fn line to closing brace) · brace depth 3 · CRAP not measured (no `analyze coverage` run)
+**Thresholds breached:** length 214 > 60 (`/analyze-clean-code`)
 **Restructure:** required — `extract_method` × 4, `/code-restructuring` territory, blocked as below
-**Status:** Open — **unclaimed**. Added by #670 and not closed in it: a `/green-yolo` stop condition, left for the developer
+**Status:** Open — partially fixed 2026-11-03 by #797 (250 → 214): the launch runs through `launch_jailed`; the pre-launch sequence is still one function — **unclaimed**
+**Deferred:** to the #agent-tools sweep node (developer, 2026-11-02) — #797 claimed it and narrowed it, did not close it
 
 ## Measurement history
 
@@ -15,6 +16,7 @@
 | 2026-10-22 | 277 | 3 | as #670's green phase wrote it: the sandboxed Cursor start's sequence (roster warm-up, worktree, seeded clones, jail dirs, runner argv, env, spawn, bridge, metadata) for `opencode-cli` / `muse-cli` |
 | 2026-10-22 | 250 | 3 | same PR, at wrap: the engine extracted `bridge_and_register_cli_harness_jail` (−27) and moved the pure helpers to `cli_harness_jail.rs` (the file went from 560 to 390 production lines) |
 | 2026-10-24 | 250 | — | **Not touched** by `fix-main-agent-harness-se-e79c8de0` (`c1df8e142..4348f160a`): length by brace matching is identical at both. `/analyze-code-issues` re-run: complexity 22, **CRAP 506**, never entered, either by this crate's own tests or by the session-lifecycle `ensure_project_home_session_acceptance` + `project_home_idle_stop_acceptance` (27 tests), with every workspace crate instrumented |
+| 2026-11-03 | 214 | — | #797 (`#agent-tools` 8/12): **better, not clean.** 250 → 214 (`:76`–`:289`, fn line to closing brace on `origin/feature/agent-tools/cursor-cli` `ca7814b57` and HEAD; no coverage run). The runner argv, env, spawn and bridge moved onto the shared jail launcher (`launch_jailed_cli_agent` → `launch_jailed`, with `JailSession` / `JailDirs`), and the argv renders from the spec (`harness_from_spec.rs`). What is left inline is the pre-launch sequence: route check, roster warm-up, worktree, seeded clones, jail dirs and metadata. Extracting it is deferred to the sweep node (developer, 2026-11-02) |
 
 ## What the tool found
 
@@ -38,7 +40,7 @@ own: the jail env, the warm-up gate and the metadata write are written three tim
 
 ## What would close it
 
-Parameter structs first, written by hand as wiring (`JailSession` / `JailDirs` / `JailLaunch` in
+**Remaining (2026-11-03):** the pre-launch sequence (route check, roster warm-up, worktree, seeded clones, jail dirs, metadata); the launch half is closed by #797. Parameter structs first, written by hand as wiring (`JailSession` / `JailDirs` / `JailLaunch` in
 `svc_start_sandboxed_claude_cli_session.rs` are the shape). Then the four extractions go through the
 engine with no more than seven parameters each, and the roster warm-up range is cut so that its
 leading comment stays in the caller. Better still, the shared jail launcher the sandboxed Claude

@@ -4,6 +4,10 @@
 //! Only the interactive TUI is integrated. Muse Code's headless protocols (`muse exec --json`,
 //! `muse serve`) are undocumented; see the backlog.
 
+// TODO(harness-clis): delete this module — the descriptor is `specs/muse.yaml`, the curated
+// models its `coding_agent.models`, `MUSE_ROUTE_KEY_ENV` its `coding_agent.route.key_env`.
+// Removal is deferred: docs/dev/todo/2026-11-03-harness-clis-legacy-cli-harness-removal.md
+
 use crate::backend::{BackendModel, BackendModels};
 use crate::cli_harness::{CliHarness, CliLaunch, CliModelSource};
 use crate::provider_route::Harness;

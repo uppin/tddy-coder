@@ -173,14 +173,30 @@ fn with_route_hosts(declared: EgressPolicy, route: Option<&HarnessRoute>) -> Egr
     }
 }
 
-/// The `host:port` of every `http(s)` URL in `route`'s environment — its base URL, whatever the
-/// variable is named. The port is the scheme's own when the URL names none.
+/// The `host:port` of every `http(s)` URL `route` names: in its environment, whatever the variable is
+/// named, and in its files — OpenCode's configuration names its provider's base URL there, not in the
+/// environment. The port is the scheme's own when the URL names none.
 pub fn route_hosts(route: &HarnessRoute) -> Vec<HostPattern> {
-    route
-        .env
+    let env_urls = route.env.iter().filter_map(|(_, value)| url_host(value));
+    let file_urls = route
+        .files
         .iter()
-        .filter_map(|(_, value)| url_host(value))
-        .collect()
+        .flat_map(|file| urls_in(&file.contents))
+        .filter_map(url_host);
+    env_urls.chain(file_urls).collect()
+}
+
+/// The `http(s)` URLs written in `text`: each is a whitespace- or punctuation-delimited token that
+/// starts with its scheme, which is how a configuration file quotes one.
+fn urls_in(text: &str) -> impl Iterator<Item = &str> {
+    text.split(|c: char| {
+        c.is_whitespace()
+            || matches!(
+                c,
+                '"' | '\'' | ',' | '{' | '}' | '[' | ']' | '(' | ')' | '\\'
+            )
+    })
+    .filter(|token| token.starts_with("http://") || token.starts_with("https://"))
 }
 
 fn url_host(value: &str) -> Option<HostPattern> {
@@ -256,6 +272,26 @@ mod tests {
                 HostPattern::new("127.0.0.1", 4242),
             ]
         );
+    }
+
+    #[test]
+    fn a_base_url_a_route_file_names_is_admitted_as_well() {
+        // Given — OpenCode's configuration names its provider's base URL in the file, not the
+        // environment, and the key is referenced rather than written
+        let route = HarnessRoute {
+            files: vec![tddy_core::provider_route::RouteFile {
+                name: "opencode.json".to_string(),
+                contents: r#"{"provider":{"route":{"options":{"baseURL":"http://127.0.0.1:9000/v1","apiKey":"{env:KEY}"}}}}"#
+                    .to_string(),
+            }],
+            ..HarnessRoute::default()
+        };
+
+        // When
+        let hosts = route_hosts(&route);
+
+        // Then
+        assert_eq!(hosts, vec![HostPattern::new("127.0.0.1", 9000)]);
     }
 
     #[test]

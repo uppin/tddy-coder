@@ -58,6 +58,10 @@ impl LaunchSessions {
         Ok((managed, append_system_prompt_file, session_env))
     }
 
+    // TODO(harness-clis): orphaned — a CLI agent's jailed resume relaunches through `launch_jailed`
+    // (`svc_resume_sandboxed_cli_harness_session`), not the sandbox runner's argv. Removal is deferred:
+    // docs/dev/todo/2026-11-03-harness-clis-legacy-cli-harness-removal.md
+    #[allow(dead_code)]
     pub(super) fn relaunch_jail_env(
         &self,
         launch: RelaunchJailEnv<'_>,
@@ -87,6 +91,8 @@ impl LaunchSessions {
         Ok(env)
     }
 
+    // TODO(harness-clis): orphaned with `relaunch_jail_env` (see above); removal is deferred.
+    #[allow(dead_code)]
     pub(super) async fn spawn_relaunched_runner(
         &self,
         launch: RelaunchedRunnerSpawn<'_>,
@@ -143,6 +149,8 @@ impl LaunchSessions {
         Ok(handle)
     }
 
+    // TODO(harness-clis): orphaned with `relaunch_jail_env` (see above); removal is deferred.
+    #[allow(dead_code)]
     pub(super) async fn bridge_relaunched_jail(
         &self,
         launch: RelaunchedJailBridge<'_>,
