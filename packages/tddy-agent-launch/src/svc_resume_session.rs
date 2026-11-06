@@ -67,8 +67,15 @@ impl LaunchSessions {
                 );
             }
             return bridge_conn_resume_response(
-                self.resume_cli_harness(kind, os_user, &req, &session_dir, metadata)
-                    .await,
+                self.resume_cli_harness(
+                    kind,
+                    os_user,
+                    &req,
+                    &sessions_base,
+                    &session_dir,
+                    metadata,
+                )
+                .await,
             );
         }
 

@@ -433,16 +433,30 @@ pub(crate) async fn start_cli_harness_session(
 }
 
 impl crate::launch_ports::LaunchSessions {
-    /// The resume of a CLI harness session: the session's commit identity and its owner's vault,
-    /// then [`resume_cli_harness_session`].
+    /// The resume of a CLI harness session: a split session's re-derived wiring, the session's
+    /// commit identity and its owner's vault, then [`resume_cli_harness_session`].
     pub(crate) async fn resume_cli_harness(
         &self,
         kind: CliSessionType,
         os_user: &str,
         req: &ResumeSessionRequest,
+        sessions_base: &Path,
         session_dir: &Path,
         mut metadata: SessionMetadata,
     ) -> Result<Response<ResumeSessionResponse>, Status> {
+        // Nothing of a split session's tool transport survives a stop, and its roster lives beside
+        // its codebase: both are re-derived from the persisted pairing (with a fresh join token),
+        // and a codebase host that cannot be read refuses the resume. `None` for a co-located one.
+        let split = self
+            .split_sessions
+            .resume_split_wiring(
+                &metadata,
+                sessions_base,
+                session_dir,
+                &req.session_id,
+                &req.session_token,
+            )
+            .await?;
         if metadata.tmux_session.is_some() {
             // A tmux-run agent that exited unwatched left its token on its kept pane.
             crate::cli_harness_tmux::settle_unwatched_agent_exit(
@@ -466,10 +480,11 @@ impl crate::launch_ports::LaunchSessions {
             &metadata.project_id,
             &req.session_token,
         );
-        let worktree = metadata
-            .repo_path
+        // A split agent runs in its context directory, standing in for the checkout it does not have.
+        let worktree = split
             .as_ref()
-            .map(PathBuf::from)
+            .map(|split| split.context_dir.clone())
+            .or_else(|| metadata.repo_path.as_ref().map(PathBuf::from))
             .unwrap_or_else(|| session_dir.to_path_buf());
         // A worktree that is gone leaves nothing to resume: refused before anything is re-wired.
         refuse_a_resume_without_its_worktree(kind.name, &worktree)?;
@@ -492,7 +507,15 @@ impl crate::launch_ports::LaunchSessions {
                 session_id: &req.session_id,
                 session_dir,
                 meta: metadata,
-                git_environment: identity.git_environment,
+                worktree,
+                // A split agent has no checkout: its commits are made by the tools on the codebase
+                // daemon, never by this process's environment.
+                git_environment: if split.is_some() {
+                    Vec::new()
+                } else {
+                    identity.git_environment
+                },
+                split,
                 os_user,
                 wiring,
                 tddy_data_dir: &self.tddy_data_dir,
@@ -507,9 +530,14 @@ struct ResumedSession<'a> {
     session_id: &'a str,
     session_dir: &'a Path,
     meta: SessionMetadata,
+    /// Where the agent resumes: its worktree, or a split agent's context directory.
+    worktree: PathBuf,
     /// The project's account identity pairs the resumed agent's commits carry (empty keeps the
-    /// checkout's own).
+    /// checkout's own, and a split agent's).
     git_environment: Vec<(String, String)>,
+    /// A split session's re-derived wiring: its pre-rendered flags (the roster's withdrawals, the
+    /// `tddy-tools` registration) and its `TDDY_REMOTE_*` transport, as its split spawn gives them.
+    split: Option<tddy_session_split::split_session::SplitAgentWiring>,
     /// The OS user the session runs as, for the child's `HOME`/`PATH` overrides.
     os_user: &'a str,
     /// What the resumed agent is given again: a role's restriction, the managed workflow, notify.
@@ -551,17 +579,16 @@ async fn resume_cli_harness_session(
         session_id,
         session_dir,
         meta,
+        worktree: worktree_path,
         git_environment,
+        split,
         os_user,
         wiring,
         tddy_data_dir,
     } = session;
-    let worktree_path = meta
-        .repo_path
-        .as_ref()
-        .map(PathBuf::from)
-        .unwrap_or_else(|| session_dir.to_path_buf());
-    refuse_a_resume_without_its_worktree(kind.name, &worktree_path)?;
+    let (split_args, split_env) = split
+        .map(|split| (split.extra_args, split.env))
+        .unwrap_or_default();
 
     let route = resume_cli_route(account_access, &agent.spec, session_dir)?;
     let (on_exit, token_arm) = resume_token_recorder(
@@ -594,6 +621,7 @@ async fn resume_cli_harness_session(
             ..HostLaunchSlots::default()
         },
     )?;
+    slots.argv_extra.extend(split_args);
     slots.argv_extra.extend(wiring.extra_args);
     slots.argv_extra.extend(route.args);
     write_slot_files_on_target(&mut slots, remote_host)?;
@@ -601,6 +629,7 @@ async fn resume_cli_harness_session(
         place_session_pointer(wiring.session_pointer.as_ref(), &worktree_path, remote_host)?;
     let on_exit = removing_session_pointer_on_exit(on_exit, pointer, meta.tmux_session.is_some());
     let mut env = git_environment;
+    env.extend(split_env);
     env.extend(renderer_env.clone());
     env.extend(wiring.env);
     env.extend(route.env);
