@@ -201,7 +201,10 @@ fn a_pointers_notify_map_sets_only_the_names_tddy_tools_notify_reads() {
     assert_eq!(
         env,
         vec![
-            ("TDDY_REPO_DIR".to_string(), "/srv/checkouts/app".to_string()),
+            (
+                "TDDY_REPO_DIR".to_string(),
+                "/srv/checkouts/app".to_string()
+            ),
             ("TDDY_SESSION_ID".to_string(), "s1".to_string()),
         ]
     );
