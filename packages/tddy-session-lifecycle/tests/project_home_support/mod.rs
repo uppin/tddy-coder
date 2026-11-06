@@ -16,7 +16,7 @@ use tddy_service::proto::session::{
     EnsureProjectHomeSessionRequest, EnsureProjectHomeSessionResponse,
     SessionService as SessionServiceTrait, StartSessionRequest,
 };
-use tddy_session_lifecycle::claude_cli_session::ClaudeCliSessionManager;
+use tddy_session_lifecycle::claude_cli_session::CliSessionManager;
 use tddy_session_lifecycle::connection_service::DaemonSessionHost;
 
 type SessionsBaseResolver = Arc<dyn Fn(&str) -> Option<PathBuf> + Send + Sync>;
@@ -58,7 +58,7 @@ pub struct HomeDaemon {
     /// Shared, with its sandbox RPC bridge installed as the daemon runtime installs it, so a
     /// sandboxed main's jail can reach it (`#agent-tools 5/12`).
     pub service: Arc<DaemonSessionHost>,
-    pub manager: Arc<ClaudeCliSessionManager>,
+    pub manager: Arc<CliSessionManager>,
     pub data: tempfile::TempDir,
     _stub: tempfile::TempDir,
     _cfg: tempfile::TempDir,
@@ -96,7 +96,7 @@ fn build_home_daemon(
     let stub = tempfile::tempdir().unwrap();
     let claude = write_argv_and_env_script(stub.path());
     let (cfg, config) = write_daemon_config(extra_config_yaml);
-    let manager = Arc::new(ClaudeCliSessionManager::new());
+    let manager = Arc::new(CliSessionManager::new());
     let mut host =
         minimal_service_with_manager(config, data.path().to_path_buf(), Arc::clone(&manager));
     if coding_agents {
@@ -247,7 +247,7 @@ users:
 fn minimal_service_with_manager(
     config: DaemonConfig,
     sessions_base: PathBuf,
-    manager: Arc<ClaudeCliSessionManager>,
+    manager: Arc<CliSessionManager>,
 ) -> DaemonSessionHost {
     let tddy_data_dir = sessions_base.clone();
     let sessions_base_resolver: SessionsBaseResolver =

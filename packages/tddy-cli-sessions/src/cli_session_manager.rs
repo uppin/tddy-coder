@@ -127,9 +127,6 @@ pub struct CliSessionManager {
     exit_hook_watched: tmux_exit_hook::ExitHookWatched,
 }
 
-/// Backward-compatible alias for [`CliSessionManager`].
-pub type ClaudeCliSessionManager = CliSessionManager;
-
 impl Default for CliSessionManager {
     fn default() -> Self {
         Self::new()
@@ -222,54 +219,6 @@ mod tests {
         argv.iter().any(|a| a == flag)
     }
 
-    #[test]
-    fn resuming_builds_the_argv_with_resume_not_session_id() {
-        // Given — a resume of an existing session
-        let resume = true;
-
-        // When
-        let argv = ClaudeCliSessionManager::build_claude_argv(
-            "claude",
-            "claude-opus-4-8",
-            "019f5514-c0eb-7893-b32f-a02043a6e5cf",
-            None,
-            None,
-            false,
-            resume,
-        );
-
-        // Then — the id is passed to --resume and --session-id is absent
-        assert_eq!(
-            value_after(&argv, "--resume"),
-            Some("019f5514-c0eb-7893-b32f-a02043a6e5cf")
-        );
-        assert!(!contains_flag(&argv, "--session-id"));
-    }
-
-    #[test]
-    fn a_fresh_start_builds_the_argv_with_session_id_not_resume() {
-        // Given — a fresh (non-resume) start
-        let resume = false;
-
-        // When
-        let argv = ClaudeCliSessionManager::build_claude_argv(
-            "claude",
-            "claude-opus-4-8",
-            "019f5514-c0eb-7893-b32f-a02043a6e5cf",
-            None,
-            None,
-            false,
-            resume,
-        );
-
-        // Then — the id is assigned via --session-id and --resume is absent
-        assert_eq!(
-            value_after(&argv, "--session-id"),
-            Some("019f5514-c0eb-7893-b32f-a02043a6e5cf")
-        );
-        assert!(!contains_flag(&argv, "--resume"));
-    }
-
     fn pid_is_alive(pid: u32) -> bool {
         // kill -0 checks existence without sending a signal; ESRCH means dead
         let ret = unsafe { libc::kill(pid as i32, 0) };
@@ -287,13 +236,10 @@ mod tests {
         !pid_is_alive(pid)
     }
 
-    /// kill_all terminates a running PTY process registered under a session.
-    ///
-    /// AC: After kill_all() returns, the process is dead (kill -0 → ESRCH).
     #[tokio::test]
     #[cfg(unix)]
     async fn kill_all_terminates_registered_pty_processes() {
-        let manager = ClaudeCliSessionManager::new();
+        let manager = CliSessionManager::new();
         let worktree = tempfile::tempdir().expect("temp dir");
 
         let handle = manager
@@ -322,7 +268,7 @@ mod tests {
     #[tokio::test]
     #[cfg(unix)]
     async fn kill_all_terminates_all_sessions() {
-        let manager = ClaudeCliSessionManager::new();
+        let manager = CliSessionManager::new();
         let worktree = tempfile::tempdir().expect("temp dir");
         let mut pids = Vec::new();
 
@@ -358,7 +304,7 @@ mod tests {
     #[tokio::test]
     #[cfg(unix)]
     async fn kill_all_clears_the_registry() {
-        let manager = ClaudeCliSessionManager::new();
+        let manager = CliSessionManager::new();
         let worktree = tempfile::tempdir().expect("temp dir");
 
         manager
@@ -392,7 +338,7 @@ mod tests {
     /// AC: No panic or error on a freshly constructed manager.
     #[tokio::test]
     async fn kill_all_is_safe_on_empty_manager() {
-        let manager = ClaudeCliSessionManager::new();
+        let manager = CliSessionManager::new();
         manager.kill_all().await; // must not panic
     }
 
@@ -403,7 +349,7 @@ mod tests {
     #[cfg(unix)]
     async fn surfaces_the_underlying_reason_when_the_binary_cannot_be_spawned() {
         // Given
-        let manager = ClaudeCliSessionManager::new();
+        let manager = CliSessionManager::new();
         let worktree = tempfile::tempdir().expect("temp dir");
 
         // When
@@ -433,7 +379,7 @@ mod tests {
     #[cfg(unix)]
     async fn fails_to_start_when_the_os_user_cannot_be_resolved() {
         // Given a manager and a session pinned to a user that does not exist on this host
-        let manager = ClaudeCliSessionManager::new();
+        let manager = CliSessionManager::new();
         let worktree = tempfile::tempdir().expect("temp dir");
 
         // When starting the session as that unresolvable user
@@ -442,11 +388,9 @@ mod tests {
                 "unknown-os-user-session",
                 worktree.path().to_path_buf(),
                 "some-model",
-                "/bin/sh",
+                vec!["/bin/sh".to_string()],
+                "agent-cli",
                 None,
-                None,
-                false,
-                false,
                 None,
                 Vec::new(),
                 Vec::new(),
@@ -471,7 +415,7 @@ mod tests {
     #[cfg(unix)]
     async fn does_not_mask_a_spawn_failure_as_a_ready_timeout() {
         // Given
-        let manager = ClaudeCliSessionManager::new();
+        let manager = CliSessionManager::new();
         let worktree = tempfile::tempdir().expect("temp dir");
 
         // When

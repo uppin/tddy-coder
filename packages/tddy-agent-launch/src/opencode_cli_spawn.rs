@@ -56,7 +56,7 @@ use crate::stack_parent::SpawnStackParent;
 use harness_launch::{launch, HarnessRun, HarnessSession, HarnessSpecLaunch};
 
 /// Everything one CLI harness start reads.
-pub(crate) struct CliHarnessStart<'a> {
+pub(crate) struct CliSessionStart<'a> {
     /// The CLI session type the session runs, with the spec that launches it.
     pub kind: CliSessionType,
     /// The coding agent the session launches, resolved on this host before anything is cut.
@@ -105,31 +105,10 @@ pub(crate) struct CliHarnessStart<'a> {
     pub role: StartRole<'a>,
 }
 
-// TODO(harness-clis): orphaned from the production launch; only the legacy jail's
-// `resolve_cli_jail_binaries` still names it. Removal is deferred: docs/dev/todo/2026-11-03-harness-clis-legacy-cli-harness-removal.md
-/// The binary a CLI harness is run as before its spec launched it: its environment variable, then
-/// the registry's default. A bare default name is resolved on the host — `~/.local/bin/<name>`, then
-/// `$PATH`. (The daemon.yaml `cli_harnesses.<session type>.binary_path` step is gone with that
-/// section, `#agent-tools 19/19`.)
-#[allow(dead_code)]
-pub(crate) fn harness_binary(harness: &tddy_core::cli_harness::CliHarness) -> String {
-    let binary = std::env::var(harness.binary_env)
-        .ok()
-        .map(|value| value.trim().to_string())
-        .filter(|value| !value.is_empty())
-        .unwrap_or_else(|| harness.default_binary.to_string());
-    tddy_daemon_kernel::config::resolve_harness_binary_name(
-        binary,
-        tddy_daemon_kernel::config::find_real_harness_on_host,
-    )
-}
-
-/// Start a CLI harness session: cut its worktree, apply its provider route, spawn the agent from its
-/// spec in a PTY and record `.session.yaml`.
 pub(crate) async fn start_cli_harness_session(
-    start: CliHarnessStart<'_>,
+    start: CliSessionStart<'_>,
 ) -> Result<Response<StartSessionResponse>, Status> {
-    let CliHarnessStart {
+    let CliSessionStart {
         kind,
         agent,
         config,
@@ -455,7 +434,7 @@ impl crate::launch_ports::LaunchSessions {
         if metadata.tmux_session.is_some() {
             // A tmux-run agent that exited unwatched left its token on its kept pane.
             crate::cli_harness_tmux::settle_unwatched_agent_exit(
-                &self.claude_cli_manager,
+                &self.cli_manager,
                 Some(&*self.coding_agents),
                 os_user,
                 &req.session_id,
@@ -466,7 +445,7 @@ impl crate::launch_ports::LaunchSessions {
         }
         // The previous run's recorder may still be writing the token it printed as it exited.
         metadata.harness_resume_token =
-            settled_resume_token(&self.claude_cli_manager, &req.session_id, session_dir).await?;
+            settled_resume_token(&self.cli_manager, &req.session_id, session_dir).await?;
         let session_agent = resolve_session_agent(&self.coding_agents, kind.clone())?;
         let identity = self.host.session_identity(
             os_user,
@@ -495,7 +474,7 @@ impl crate::launch_ports::LaunchSessions {
             .await?;
         resume_cli_harness_session(
             &session_agent,
-            &self.claude_cli_manager,
+            &self.cli_manager,
             &self.host.session_account_access(&req.session_token),
             ResumedSession {
                 session_id: &req.session_id,

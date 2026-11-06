@@ -65,15 +65,22 @@ pub(crate) struct ContextFile {
 ///   ([`is_withheld_through_a_link`]) — `.claude -> .agents/claude` would otherwise expose
 ///   `.agents/claude/settings.local.json` as the daemon-owned `.claude/settings.local.json`.
 ///
-/// **A preamble file is never a link.** A symlink at a [`PREAMBLE_FILES`] path is *followed*
+/// **A preamble file is never a link.** A symlink at a `instructions.files` path is *followed*
 /// ([`followed_preamble_target`]): listed as an ordinary file whose bytes are its target's, so the
 /// managed-codebase preamble always leads the file the agent reads. Its target is not pulled in by
 /// that — it is listed only if a glob names it on its own.
 ///
 /// A dangling link is skipped: it has no bytes to sync and never had.
-pub(crate) fn walk_context_files(root: &Path, globs: &[&str]) -> anyhow::Result<Vec<ContextFile>> {
+pub(crate) fn walk_context_files(
+    root: &Path,
+    globs: &[&str],
+    guidance_files: &[std::path::PathBuf],
+) -> anyhow::Result<Vec<ContextFile>> {
     let root = std::fs::canonicalize(root)?;
-    Ok(context_tree(&root, globs)?.files.into_values().collect())
+    Ok(context_tree(&root, globs, guidance_files)?
+        .files
+        .into_values()
+        .collect())
 }
 
 /// What the walk lists, keyed by path, and the links that travel.
@@ -89,10 +96,22 @@ struct ContextTree {
 /// ignores; drop the links [`is_withheld_through_a_link`] withholds; withhold the listed files it
 /// withholds; pull in what the surviving links reach; drop the pulled-in files git ignores or the
 /// predicate withholds.
-fn context_tree(root: &Path, globs: &[&str]) -> anyhow::Result<ContextTree> {
+fn context_tree(
+    root: &Path,
+    globs: &[&str],
+    guidance_files: &[std::path::PathBuf],
+) -> anyhow::Result<ContextTree> {
     let mut listed = BTreeMap::new();
     let mut found_links = Vec::new();
-    collect_allow_listed(root, "", root, globs, &mut listed, &mut found_links)?;
+    collect_allow_listed(
+        root,
+        "",
+        root,
+        globs,
+        guidance_files,
+        &mut listed,
+        &mut found_links,
+    )?;
 
     // A followed preamble link reads its bytes from somewhere other than its own path.
     let followed_targets: BTreeMap<String, String> = listed
@@ -185,9 +204,13 @@ impl ContextReach {
 }
 
 /// What the walk of `root` lists ([`ContextReach`]).
-pub fn context_reach(root: &Path, globs: &[&str]) -> anyhow::Result<ContextReach> {
+pub fn context_reach(
+    root: &Path,
+    globs: &[&str],
+    guidance_files: &[std::path::PathBuf],
+) -> anyhow::Result<ContextReach> {
     let root = std::fs::canonicalize(root)?;
-    let tree = context_tree(&root, globs)?;
+    let tree = context_tree(&root, globs, guidance_files)?;
     let files = tree
         .files
         .into_values()
@@ -211,6 +234,7 @@ fn collect_allow_listed(
     dir_rel: &str,
     root: &Path,
     globs: &[&str],
+    guidance_files: &[std::path::PathBuf],
     found: &mut BTreeMap<String, ContextFile>,
     links: &mut Vec<(PathBuf, ContextLink)>,
 ) -> anyhow::Result<()> {
@@ -228,8 +252,9 @@ fn collect_allow_listed(
         // `symlink_metadata`, so a link is seen as a link rather than as whatever it points at.
         let file_type = std::fs::symlink_metadata(entry.path())?.file_type();
         if file_type.is_symlink() {
-            if is_preamble_path(&rel_path) {
-                if let Some(target) = resolve_preamble_link(&entry.path(), &rel_path, root, globs)?
+            if is_preamble_path(&rel_path, guidance_files) {
+                if let Some(target) =
+                    resolve_preamble_link(&entry.path(), &rel_path, root, globs, guidance_files)?
                 {
                     found.insert(
                         rel_path.clone(),
@@ -247,7 +272,9 @@ fn collect_allow_listed(
             if !names_a_link(&rel_path, globs) {
                 continue;
             }
-            let Some((target, link)) = resolve_link(&entry.path(), &rel_path, root, globs)? else {
+            let Some((target, link)) =
+                resolve_link(&entry.path(), &rel_path, root, globs, guidance_files)?
+            else {
                 continue;
             };
             found.insert(
@@ -261,7 +288,15 @@ fn collect_allow_listed(
             links.push((target, link));
         } else if file_type.is_dir() {
             if could_contain_matches(&rel_path, globs) {
-                collect_allow_listed(&entry.path(), &rel_path, root, globs, found, links)?;
+                collect_allow_listed(
+                    &entry.path(),
+                    &rel_path,
+                    root,
+                    globs,
+                    guidance_files,
+                    found,
+                    links,
+                )?;
             }
         } else if file_type.is_file() && matches_context_globs(&rel_path, globs) {
             found.insert(
@@ -393,11 +428,12 @@ fn resolve_link(
     link_rel: &str,
     root: &Path,
     globs: &[&str],
+    guidance_files: &[std::path::PathBuf],
 ) -> anyhow::Result<Option<(PathBuf, ContextLink)>> {
     let Some((target, target_rel)) = resolve_within_root(entry, root)? else {
         return Ok(None);
     };
-    match allow_listed_link(link_rel, &target_rel, globs) {
+    match allow_listed_link(link_rel, &target_rel, globs, guidance_files) {
         Some(link) => Ok(Some((target, link))),
         None => {
             log::debug!(
@@ -416,11 +452,12 @@ fn resolve_preamble_link(
     link_rel: &str,
     root: &Path,
     globs: &[&str],
+    guidance_files: &[std::path::PathBuf],
 ) -> anyhow::Result<Option<PathBuf>> {
     let Some((target, target_rel)) = resolve_within_root(entry, root)? else {
         return Ok(None);
     };
-    if followed_preamble_target(link_rel, &target_rel, globs).is_none() {
+    if followed_preamble_target(link_rel, &target_rel, globs, guidance_files).is_none() {
         log::debug!(
             "context_manifest: {link_rel} -> {target_rel} is not allow-listed or reaches a \
              withheld path; skipping it"

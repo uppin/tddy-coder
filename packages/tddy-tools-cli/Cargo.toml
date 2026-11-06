@@ -29,6 +29,9 @@ tddy-discovery = { path = "../tddy-discovery" }
 tddy-livekit = { path = "../tddy-livekit" }
 tddy-room-client = { path = "../tddy-room-client" }
 tddy-tools = { path = "../tddy-tools" }
+# The binary is the composition root for the coding-agent specs: it reads the registry and
+# injects plain catalogues into the library (list-models), which names no agent.
+tddy-coding-agent-specs = { path = "../tddy-coding-agent-specs" }
 # `extensions`: the args and the dispatch live in the crate that installs them.
 tddy-zed-extensions = { path = "../tddy-zed-extensions" }
 

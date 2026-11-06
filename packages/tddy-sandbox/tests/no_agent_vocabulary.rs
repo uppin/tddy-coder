@@ -95,7 +95,7 @@ fn the_scan_finds_an_agent_named_in_any_casing() {
 }
 
 #[test]
-#[ignore = "TODO(jail-agnostic): tddy-sandbox still names CLAUDE.md/AGENTS.md — threading deferred to the #agent-tools sweep (docs/dev/todo/2026-11-03-tddy-sandbox-still-names-the-guidance-files-of-two-agents.md)"]
+#[ignore = "TODO(jail-agnostic): guidance files are threaded from the spec (#agent-tools sweep, 2026-11-06); comments, fixtures and CONTEXT_EXCLUDE_GLOBS still spell agent names (docs/dev/todo/2026-11-03-tddy-sandbox-still-names-the-guidance-files-of-two-agents.md)"]
 fn tddy_sandbox_and_tddy_sandbox_recipes_name_no_coding_agent() {
     // Given
     let sources = rust_sources_under(&the_jail_crates());

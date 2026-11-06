@@ -20,7 +20,7 @@ import { useSessionAttachment } from "./useSessionAttachment";
 import { sessionsDrawerPathForSession, SESSIONS_DRAWER_ROUTE, SESSIONS_NEW_ROUTE } from "../../routing/appRoutes";
 import { detectIsMobile, useIsMobile } from "../../hooks/useIsMobile";
 import { resolveShortcutsForSession } from "../../lib/toolShortcuts";
-import { isCliTerminalSession } from "../../constants/claudeCliModels";
+import { isCliSessionType } from "./codingAgentMetadata";
 import { useSessionsDrawerInspector } from "./useSessionsDrawerInspector";
 import { useSessionsDrawerClients } from "./useSessionsDrawerClients";
 import { useProjectHomeSetup } from "./useProjectHomeSetup";
@@ -192,7 +192,7 @@ export function SessionsDrawerScreen({
   const mobileShortcuts = useMemo(
     () =>
       resolveShortcutsForSession(
-        isCliTerminalSession(selectedSession?.agent ?? ""),
+        isCliSessionType(selectedSession?.agent ?? ""),
         selectedSession?.tool ?? "",
       ),
     [selectedSession],

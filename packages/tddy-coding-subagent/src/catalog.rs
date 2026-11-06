@@ -78,7 +78,10 @@ fn allowed_agent_def(id: &str, label: &Option<String>) -> CodingAgentDef {
         name: id.to_string(),
         label: label.clone(),
         harness: id.to_string(),
-        model: tddy_agent_backend::default_model_for_agent(id).to_string(),
+        model: tddy_coding_agent_specs::CodingAgentRegistry::builtin_cached()
+            .get(id)
+            .map(|spec| spec.agent.models.default.clone())
+            .unwrap_or_default(),
         provider_account: None,
     }
 }

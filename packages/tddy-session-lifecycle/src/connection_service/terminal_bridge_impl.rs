@@ -43,7 +43,7 @@ impl DaemonSessionHost {
             ),
         };
         match self
-            .claude_cli_manager
+            .cli_manager
             .ensure_exposed_terminal(session_id, &at, self.terminal_exposure.as_ref())
             .await
         {

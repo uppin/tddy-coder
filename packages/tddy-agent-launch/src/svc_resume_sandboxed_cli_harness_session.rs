@@ -176,7 +176,22 @@ impl LaunchSessions {
 
         let (sandbox_root, egress_dir, scratch_dir, scratch_tmp, context_dir) =
             prepare_relaunch_dirs(session_dir)?;
-        refresh_relaunch_context_dir(worktree_path, agents, &context_dir, session_agent.kind.name)?;
+        refresh_relaunch_context_dir(
+            worktree_path,
+            agents,
+            &context_dir,
+            &tddy_session_files::context_files::context_globs(
+                self.coding_agents
+                    .agents()
+                    .get(session_agent.kind.name)
+                    .map(|spec| spec.agent.context_globs.as_slice()),
+            ),
+            self.coding_agents
+                .agents()
+                .get(session_agent.kind.name)
+                .map(|spec| spec.agent.instructions.files.as_slice())
+                .unwrap_or(&[]),
+        )?;
 
         // Re-wire the managed workflow of a managed session: the controller resumes at the goal
         // persisted in changeset.yaml, its prompt goes into the jail-visible context directory, and

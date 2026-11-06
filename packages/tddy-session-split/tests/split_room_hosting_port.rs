@@ -327,8 +327,8 @@ fn a_facilitating_daemon_whose_codebase_host(codebase_host: ACodebaseHost) -> AF
         workspace_sandbox_provisioner: Arc::new(JailedWorkspaceSandboxProvisioner::for_tddy_home(
             data_dir.path(),
         )),
-        claude_cli_manager: Arc::new(CliSessionManager::new()),
-        claude_binary: Arc::new(|| Ok("/bin/cat".to_string())),
+        cli_manager: Arc::new(CliSessionManager::new()),
+        agent_binary: Arc::new(|_| Ok("/bin/cat".to_string())),
         session_tokens: Some(tokens.clone()),
         agent_roster: an_agent_roster_with_nothing_attached(
             config,

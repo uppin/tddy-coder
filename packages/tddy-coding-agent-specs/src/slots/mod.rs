@@ -256,7 +256,7 @@ mod tests {
                 },
                 models: ModelsSection {
                     default: "opus".to_string(),
-                    curated: vec!["opus".to_string()],
+                    curated: vec![crate::CuratedModel::Id("opus".to_string())],
                     list_command: None,
                     adapter: None,
                 },
@@ -271,6 +271,8 @@ mod tests {
                 answer_wait_secs: None,
                 product: None,
                 conversation: None,
+                permission_modes: Vec::new(),
+                transcript_usage: false,
             },
         }
     }

@@ -21,3 +21,5 @@ tddy-agent-backend = { path = "../tddy-agent-backend" }
 [dev-dependencies]
 pretty_assertions = { workspace = true }
 tempfile = "3"
+# `spec_context_globs_acceptance`: every declared glob must compile in the matcher that reads it.
+glob = "0.3"

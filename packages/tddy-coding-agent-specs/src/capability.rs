@@ -66,6 +66,11 @@ impl Capability {
             Capability::ManagedWorkflow => "managed_workflow",
         }
     }
+
+    /// The capability's YAML/wire spelling (see [`Self::as_str`]).
+    pub fn name(&self) -> &'static str {
+        self.as_str()
+    }
 }
 
 impl std::fmt::Display for Capability {

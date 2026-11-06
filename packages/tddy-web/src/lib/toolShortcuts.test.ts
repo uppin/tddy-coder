@@ -173,9 +173,9 @@ describe("toolIdentifierFromPath", () => {
 });
 
 describe("resolveShortcutsForSession", () => {
-  it("returns claude-cli shortcuts for a claude-cli session", () => {
+  it("returns cli shortcuts for a cli session", () => {
     const result = resolveShortcutsForSession(true, "");
-    expect(result).toBe(TOOL_SHORTCUTS["claude-cli"]);
+    expect(result).toBe(TOOL_SHORTCUTS["cli"]);
   });
 
   it("returns tddy-coder shortcuts for a managed tddy-coder session", () => {
@@ -200,8 +200,8 @@ describe("TOOL_SHORTCUTS", () => {
     expect((TOOL_SHORTCUTS["tddy-coder"] ?? []).length).toBeGreaterThan(0);
   });
 
-  it("provides at least one shortcut for claude-cli", () => {
-    expect((TOOL_SHORTCUTS["claude-cli"] ?? []).length).toBeGreaterThan(0);
+  it("provides at least one shortcut for cli sessions", () => {
+    expect((TOOL_SHORTCUTS["cli"] ?? []).length).toBeGreaterThan(0);
   });
 
   it("each shortcut has a non-empty label and a non-empty keys array", () => {

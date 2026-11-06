@@ -40,6 +40,7 @@ fn any_choices() -> StartChoices {
             label: "host-b".to_string(),
         }],
         recipes: vec!["tdd".to_string()],
+        agents: Vec::new(),
     }
 }
 

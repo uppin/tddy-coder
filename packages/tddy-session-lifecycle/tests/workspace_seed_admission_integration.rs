@@ -37,7 +37,7 @@ use tddy_service::proto::session::{
 };
 use tddy_service::proto::session_agents_svc::{ListSessionAgentsRequest, SessionAgentService as _};
 use tddy_service::proto::types::AgentKind;
-use tddy_session_lifecycle::claude_cli_session::ClaudeCliSessionManager;
+use tddy_session_lifecycle::claude_cli_session::CliSessionManager;
 use tddy_session_lifecycle::connection_service::DaemonSessionHost;
 use tddy_session_lifecycle::peer_routing::PeerRouting;
 use tddy_session_lifecycle::test_util::{TestDaemon, TEST_TOKEN, TEST_USER};
@@ -230,7 +230,7 @@ fn a_codebase_host_in_a_common_room() -> ACodebaseHostInACommonRoom {
         tddy_spawn::supervisor_client::SpawnBackendChoice::ForkedWorker,
         peer_routing,
         Arc::new(NoOperatorChannel),
-        Arc::new(ClaudeCliSessionManager::new()),
+        Arc::new(CliSessionManager::new()),
     )
     .with_coding_agents_if_none(tddy_session_lifecycle::test_util::builtin_coding_agents())
     .with_session_reach(Arc::new(ASessionRoomThatOpens));

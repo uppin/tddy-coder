@@ -7,24 +7,34 @@
 import { useState } from "react";
 import { Button } from "../ui/button";
 
-/** The session types a provider account can be the default for. */
-const HARNESS_OPTIONS: { id: string; label: string }[] = [
-  { id: "claude-cli", label: "Claude CLI" },
-  { id: "opencode-cli", label: "OpenCode CLI" },
-  { id: "muse-cli", label: "Muse Code" },
-];
+/** One session type a provider account can be the default for, as the daemon served it. */
+export interface HarnessOption {
+  id: string;
+  label: string;
+}
 
 export function ProviderAccountDefaultsControl({
   rowId,
   current,
+  options,
   onSave,
 }: {
   rowId: string;
   /** The harnesses the account is the default for now. */
   current: string[];
+  /** The session types the daemon serves, from its `ListAgents` answer. */
+  options: readonly HarnessOption[];
   onSave: (harnesses: string[]) => void;
 }) {
   const [draft, setDraft] = useState<string[]>(current);
+  // A default named for a harness the daemon no longer serves stays selectable, captioned by
+  // its id, so an existing default is never silently dropped by opening this control.
+  const allOptions = [
+    ...options,
+    ...current
+      .filter((id) => !options.some((option) => option.id === id))
+      .map((id) => ({ id, label: id })),
+  ];
   return (
     <span className="flex items-center gap-2">
       <label className="text-xs text-muted-foreground" htmlFor={`${rowId}-default-for`}>
@@ -40,7 +50,7 @@ export function ProviderAccountDefaultsControl({
           setDraft(Array.from(event.target.selectedOptions, (option) => option.value))
         }
       >
-        {HARNESS_OPTIONS.map((harness) => (
+        {allOptions.map((harness) => (
           <option key={harness.id} value={harness.id}>
             {harness.label}
           </option>

@@ -26,7 +26,17 @@ const HOST_C = "server-3";
 
 /** One agent as a host offers it. `label` is empty for a config agent the daemon captions by id. */
 function aSelectableAgent(id: string, label: string, daemonInstanceId: string): SelectableAgent {
-  return { id, label, daemonInstanceId };
+  return {
+    id,
+    label,
+    daemonInstanceId,
+    sessionType: "",
+    capabilities: [],
+    runParams: [],
+    permissionModes: [],
+    defaultModel: "",
+    placements: [],
+  };
 }
 
 describe("selectableAgentValue", () => {

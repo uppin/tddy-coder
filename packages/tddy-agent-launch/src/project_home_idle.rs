@@ -138,7 +138,7 @@ impl LaunchSessions {
         // The stop an explicit termination makes: the tracked terminal is cancelled (SIGTERM, then
         // SIGKILL to its child) and forgotten, so ensure no longer sees it as running. Nothing in
         // `.session.yaml` changes, so the next ensure resumes the same conversation.
-        self.claude_cli_manager.stop_session(session_id).await;
+        self.cli_manager.stop_session(session_id).await;
         if exits_within(pid, EXIT_WAIT).await {
             return true;
         }

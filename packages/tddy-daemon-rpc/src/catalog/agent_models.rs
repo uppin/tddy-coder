@@ -25,10 +25,9 @@ pub(super) fn agent_models_cache() -> &'static std::sync::Mutex<
 }
 
 /// Build the `tddy-tools list-models` argv for an agent probe. Always `["list-models", "--agent",
-/// <agent>]`; appends `["--cursor-cli-path", <path>]` when probing `cursor`, or
-/// `["--opencode-cli-path", <path>]` when probing `opencode` or `opencode-cli` (one binary, run as
-/// `opencode acp` by the first and as `opencode models` by the second), with a resolved
-/// `binary_path`, so the impersonated child execs the fully-qualified binary instead of a PATH lookup.
+/// <agent>]`; appends `["--binary-path", <path>]` when the caller resolved the binary the
+/// agent's spec lists its models with, so the impersonated child execs the fully-qualified
+/// binary instead of a PATH lookup.
 pub(super) fn list_models_probe_args(
     agent: &str,
     binary_path: Option<&std::path::Path>,
@@ -38,19 +37,8 @@ pub(super) fn list_models_probe_args(
         "--agent".to_string(),
         agent.to_string(),
     ];
-    // The binary-path flag `tddy-tools list-models` takes for the agents it probes by binary.
-    // TODO(harness-clis): goes with the legacy `cli_harness` descriptors.
-    const PATH_FLAGS: [(&str, &str); 3] = [
-        ("cursor", "--cursor-cli-path"),
-        ("opencode", "--opencode-cli-path"),
-        ("opencode-cli", "--opencode-cli-path"),
-    ];
-    let path_flag = PATH_FLAGS
-        .iter()
-        .find(|(listed, _)| *listed == agent)
-        .map(|(_, flag)| *flag);
-    if let (Some(flag), Some(path)) = (path_flag, binary_path) {
-        args.push(flag.to_string());
+    if let Some(path) = binary_path {
+        args.push("--binary-path".to_string());
         args.push(path.to_string_lossy().into_owned());
     }
     args

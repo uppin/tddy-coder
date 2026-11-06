@@ -49,9 +49,19 @@ extensions:
     route:
       providers: [anthropic]
       shape: env
+    # The permission modes a picker offers for `{permission_mode}` (the sweep: this list lived
+    # in Rust — `tddy-tool-engine`'s schema and the web — and is agent metadata, so it lives here).
+    permission_modes: [auto, default, acceptEdits, plan, bypassPermissions]
+    transcript_usage: true
     models:
       default: opus
-      curated: [opus, sonnet, haiku, claude-opus-5, claude-sonnet-5, claude-haiku-4-5-20251001]
+      curated:
+        - { id: opus, label: "Claude Opus (latest)" }
+        - { id: sonnet, label: "Claude Sonnet (latest)" }
+        - { id: haiku, label: "Claude Haiku (latest)" }
+        - { id: claude-opus-5, label: "Claude Opus 5 (pinned)" }
+        - { id: claude-sonnet-5, label: "Claude Sonnet 5 (pinned)" }
+        - { id: claude-haiku-4-5-20251001, label: "Claude Haiku 4.5 (pinned)" }
     context_globs: [AGENTS.md, ".agents/**", CLAUDE.md, ".claude/**", .mcp.json]
     # --- Headless (`#agent-tools 6/12`): one `claude -p` per turn, for the workflow backend
     # (`tddy-coder --agent claude`) and a headless coding subagent. It renders byte-for-byte what

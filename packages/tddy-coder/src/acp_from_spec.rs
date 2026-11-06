@@ -11,9 +11,9 @@ use std::sync::Arc;
 
 use anyhow::{anyhow, ensure, Context};
 use tddy_actions::tool::ToolHost;
-use tddy_coding_agent_specs::{load_agent_registry, package_runner, CodingAgentSpec};
+use tddy_coding_agent_specs::{load_agent_registry, package_runner, routed_agent, CodingAgentSpec};
 use tddy_core::adapters::{AcpHooksAdapter, AcpHooksAdapters};
-use tddy_core::{AcpAgentCommand, ClaudeAcpBackend, CodexAcpBackend, OpenCodeAcpBackend};
+use tddy_core::{AcpAgentCommand, SpecAcpBackend};
 
 /// `codex-acp.yaml`'s `binary.env`: the variable that names the `codex-acp` binary.
 pub const CODEX_ACP_BINARY_ENV: &str = "TDDY_CODEX_ACP_CLI";
@@ -29,6 +29,8 @@ pub(crate) struct AcpLaunch {
     pub(crate) hooks: Option<Arc<dyn AcpHooksAdapter>>,
     /// The agent's resolved deps, by tool id (`codex`, the binary a hooks adapter runs).
     pub(crate) deps: BTreeMap<String, PathBuf>,
+    /// What a route body knows of the agent, from its spec.
+    pub(crate) agent: tddy_coding_agent_specs::RoutedAgent,
 }
 
 /// The launch of agent `id` on `host`: the registry loaded with `tools_dir` applied, `id` and its
@@ -65,6 +67,7 @@ pub(crate) fn acp_launch(
         command,
         hooks,
         deps,
+        agent: routed_agent(&spec),
     })
 }
 
@@ -76,13 +79,13 @@ pub(crate) fn acp_launch(
 pub fn claude_acp_backend_from_spec(
     tools_dir: &Path,
     host: Arc<dyn ToolHost>,
-) -> anyhow::Result<ClaudeAcpBackend> {
+) -> anyhow::Result<SpecAcpBackend> {
     let launch = acp_launch(tools_dir, host.as_ref(), "claude-acp")?;
     ensure!(
         launch.hooks.is_none(),
         "claude-acp's spec names a hooks adapter, which its backend does not run"
     );
-    Ok(ClaudeAcpBackend::with_command(launch.command))
+    Ok(SpecAcpBackend::new(launch.agent, launch.command))
 }
 
 /// A `codex-acp` backend from its declaration, as [`claude_acp_backend_from_spec`] for
@@ -92,16 +95,12 @@ pub fn claude_acp_backend_from_spec(
 pub fn codex_acp_backend_from_spec(
     tools_dir: &Path,
     host: Arc<dyn ToolHost>,
-) -> anyhow::Result<CodexAcpBackend> {
+) -> anyhow::Result<SpecAcpBackend> {
     let launch = acp_launch(tools_dir, host.as_ref(), "codex-acp")?;
     let hooks = launch.hooks.ok_or_else(|| {
         anyhow!("codex-acp's spec names no hooks adapter, so it has no login retry")
     })?;
-    Ok(CodexAcpBackend::with_launch(
-        launch.command,
-        hooks,
-        launch.deps,
-    ))
+    Ok(SpecAcpBackend::new(launch.agent, launch.command).with_hooks(hooks, launch.deps))
 }
 
 /// An `opencode` backend from `opencode.yaml`'s `coding_agent.acp`, as
@@ -111,14 +110,10 @@ pub fn codex_acp_backend_from_spec(
 pub fn opencode_acp_backend_from_spec(
     tools_dir: &Path,
     host: Arc<dyn ToolHost>,
-) -> anyhow::Result<OpenCodeAcpBackend> {
+) -> anyhow::Result<SpecAcpBackend> {
     let launch = acp_launch(tools_dir, host.as_ref(), "opencode")?;
     let hooks = launch.hooks.ok_or_else(|| {
         anyhow!("opencode's spec names no hooks adapter, so its route file has no holder")
     })?;
-    Ok(OpenCodeAcpBackend::with_launch(
-        launch.command,
-        hooks,
-        launch.deps,
-    ))
+    Ok(SpecAcpBackend::new(launch.agent, launch.command).with_hooks(hooks, launch.deps))
 }

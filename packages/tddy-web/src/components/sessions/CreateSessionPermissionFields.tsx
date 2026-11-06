@@ -13,6 +13,8 @@ export interface CreateSessionPermissionFieldsProps {
   applyPlacement: (toggled: CodebasePlacementChoice, on: boolean) => void;
   /** The placement is not the operator's to choose (main's): the Sandbox toggle is not offered. */
   placementFixed?: boolean;
+  /** The permission modes the agent's launch takes, from its spec as its daemon served them. */
+  permissionModes: readonly string[];
 }
 
 /**
@@ -30,6 +32,7 @@ export function CreateSessionPermissionFields({
   setSandbox,
   applyPlacement,
   placementFixed = false,
+  permissionModes,
 }: CreateSessionPermissionFieldsProps) {
   const toggleSandbox = (on: boolean) => {
     setSandbox(on);
@@ -50,11 +53,11 @@ export function CreateSessionPermissionFields({
           onChange={(e) => setPermissionMode(e.target.value)}
           disabled={dangerouslySkipPermissions}
         >
-          <option value="auto">auto</option>
-          <option value="default">default</option>
-          <option value="acceptEdits">acceptEdits</option>
-          <option value="plan">plan</option>
-          <option value="bypassPermissions">bypassPermissions</option>
+          {permissionModes.map((mode) => (
+            <option key={mode} value={mode}>
+              {mode}
+            </option>
+          ))}
         </select>
       </div>
 

@@ -118,12 +118,18 @@ pub fn build_split_context_dir(
         .map_err(|e| Status::internal(format!("failed to create split context dir: {e}")))?;
     let borrowed = agent_argv::borrowed_withdrawals(withdrawals);
     let replacements = agent_argv::subagent_replacements(withdrawals, &borrowed);
-    let preamble = tddy_sandbox::managed_codebase_preamble(&replacements);
 
+    // The guidance files the preamble leads are the split agent's spec's `instructions.files`.
+    let guidance_files = crate::agent_argv::split_agent_spec()
+        .map(|spec| spec.agent.instructions.files)
+        .unwrap_or_default();
+    let preamble = tddy_sandbox::managed_codebase_preamble(&replacements, &guidance_files);
+    let glob_strings: Vec<String> = globs.iter().map(ToString::to_string).collect();
     tddy_session_files::context_sync::ContextSyncer::populate(
         &context_dir,
         &preamble,
-        globs,
+        &glob_strings,
+        &guidance_files,
         source,
     )?;
 
@@ -131,19 +137,23 @@ pub fn build_split_context_dir(
     // the agent something saying where its codebase is. `prepend_preamble` is a no-op on a file the
     // populate step already led with the preamble, so this neither doubles the notice nor discards
     // the project's text.
-    for filename in tddy_sandbox::PREAMBLE_FILES {
+    for filename in &guidance_files {
         let path = context_dir.join(filename);
         let body = match std::fs::read_to_string(&path) {
             Ok(body) => body,
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => String::new(),
             Err(e) => {
                 return Err(Status::internal(format!(
-                    "failed to read split context {filename}: {e}"
+                    "failed to read split context {}: {e}",
+                    filename.display()
                 )))
             }
         };
         std::fs::write(&path, tddy_sandbox::prepend_preamble(&preamble, &body)).map_err(|e| {
-            Status::internal(format!("failed to write split context {filename}: {e}"))
+            Status::internal(format!(
+                "failed to write split context {}: {e}",
+                filename.display()
+            ))
         })?;
     }
     Ok(context_dir)
@@ -932,7 +942,11 @@ mod tests {
         let repo = tempfile::tempdir().unwrap();
         let source = tddy_session_files::context_sync::LocalWorktreeSource::new(
             repo.path().to_path_buf(),
-            CLAUDE_GLOBS,
+            CLAUDE_GLOBS.iter().map(ToString::to_string).collect(),
+            vec![
+                std::path::PathBuf::from("CLAUDE.md"),
+                std::path::PathBuf::from("AGENTS.md"),
+            ],
             A_GENEROUS_CONTEXT_CAP,
         );
         (repo, source)

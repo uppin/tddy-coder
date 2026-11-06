@@ -29,7 +29,7 @@ use tddy_rpc::Request;
 use tddy_service::proto::session::{
     ResumeSessionRequest, SessionService as SessionServiceTrait, StartSessionRequest,
 };
-use tddy_session_lifecycle::claude_cli_session::ClaudeCliSessionManager;
+use tddy_session_lifecycle::claude_cli_session::CliSessionManager;
 use tddy_session_lifecycle::connection_service::DaemonSessionHost;
 use tddy_terminal_rpc::proto::terminal_session::{
     StreamReplayMode, StreamTerminalOutputRequest,
@@ -156,7 +156,7 @@ cat
 fn a_session_host(
     config: DaemonConfig,
     sessions_base: PathBuf,
-    manager: Arc<ClaudeCliSessionManager>,
+    manager: Arc<CliSessionManager>,
 ) -> Arc<DaemonSessionHost> {
     // A host with no coding agents refuses every agent session, so every host here has them.
     a_session_host_serving(config, sessions_base, manager, true)
@@ -167,7 +167,7 @@ fn a_session_host(
 fn a_session_host_with_coding_agents(
     config: DaemonConfig,
     sessions_base: PathBuf,
-    manager: Arc<ClaudeCliSessionManager>,
+    manager: Arc<CliSessionManager>,
 ) -> Arc<DaemonSessionHost> {
     a_session_host_serving(config, sessions_base, manager, true)
 }
@@ -175,7 +175,7 @@ fn a_session_host_with_coding_agents(
 fn a_session_host_serving(
     config: DaemonConfig,
     sessions_base: PathBuf,
-    manager: Arc<ClaudeCliSessionManager>,
+    manager: Arc<CliSessionManager>,
     coding_agents: bool,
 ) -> Arc<DaemonSessionHost> {
     let tddy_data_dir = sessions_base.clone();
@@ -345,7 +345,7 @@ fn an_exited_host_session(sessions_base: &Path, worktree: &Path) {
 
 /// What a host session's agent printed, once it shows `expected`.
 async fn host_agent_output_showing(
-    manager: &ClaudeCliSessionManager,
+    manager: &CliSessionManager,
     session_id: &str,
     expected: &str,
 ) -> String {
@@ -404,7 +404,7 @@ async fn a_host_session_starts_claude_in_fullscreen_by_default() {
     let stub_dir = tempfile::tempdir().unwrap();
     let stub = a_stub_agent_reporting_its_launch(stub_dir.path());
     let (_cfg, config) = a_daemon_config(sessions_tmp.path(), &stub, Renderer::AsBuiltIn);
-    let manager = Arc::new(ClaudeCliSessionManager::new());
+    let manager = Arc::new(CliSessionManager::new());
     let host = a_session_host(
         config,
         sessions_tmp.path().to_path_buf(),
@@ -432,7 +432,7 @@ async fn a_host_session_starts_claude_inline_when_an_override_of_claude_yaml_dro
     let stub_dir = tempfile::tempdir().unwrap();
     let stub = a_stub_agent_reporting_its_launch(stub_dir.path());
     let (_cfg, config) = a_daemon_config(sessions_tmp.path(), &stub, Renderer::OverriddenWithoutIt);
-    let manager = Arc::new(ClaudeCliSessionManager::new());
+    let manager = Arc::new(CliSessionManager::new());
     let host = a_session_host(
         config,
         sessions_tmp.path().to_path_buf(),
@@ -461,7 +461,7 @@ async fn resuming_a_host_session_relaunches_claude_in_fullscreen_by_default() {
     let stub_dir = tempfile::tempdir().unwrap();
     let stub = a_stub_agent_reporting_its_launch(stub_dir.path());
     let (_cfg, config) = a_daemon_config(sessions_tmp.path(), &stub, Renderer::AsBuiltIn);
-    let manager = Arc::new(ClaudeCliSessionManager::new());
+    let manager = Arc::new(CliSessionManager::new());
     let host = a_session_host(
         config,
         sessions_tmp.path().to_path_buf(),
@@ -491,7 +491,7 @@ async fn resuming_a_host_session_relaunches_claude_inline_when_an_override_of_cl
     let stub_dir = tempfile::tempdir().unwrap();
     let stub = a_stub_agent_reporting_its_launch(stub_dir.path());
     let (_cfg, config) = a_daemon_config(sessions_tmp.path(), &stub, Renderer::OverriddenWithoutIt);
-    let manager = Arc::new(ClaudeCliSessionManager::new());
+    let manager = Arc::new(CliSessionManager::new());
     let host = a_session_host(
         config,
         sessions_tmp.path().to_path_buf(),
@@ -526,7 +526,7 @@ async fn a_sandboxed_session_starts_claude_in_fullscreen_by_default() {
     let host = a_session_host_with_coding_agents(
         config,
         sessions_tmp.path().to_path_buf(),
-        Arc::new(ClaudeCliSessionManager::new()),
+        Arc::new(CliSessionManager::new()),
     );
 
     // When
@@ -558,7 +558,7 @@ async fn a_sandboxed_session_starts_claude_inline_when_an_override_of_claude_yam
     let host = a_session_host_with_coding_agents(
         config,
         sessions_tmp.path().to_path_buf(),
-        Arc::new(ClaudeCliSessionManager::new()),
+        Arc::new(CliSessionManager::new()),
     );
 
     // When
@@ -593,7 +593,7 @@ async fn resuming_a_sandboxed_session_relaunches_claude_in_fullscreen_by_default
     let starting_host = a_session_host_with_coding_agents(
         inline_config,
         sessions_tmp.path().to_path_buf(),
-        Arc::new(ClaudeCliSessionManager::new()),
+        Arc::new(CliSessionManager::new()),
     );
     let session_id = starting_host
         .start_session(Request::direct(a_claude_cli_start_request(true)))
@@ -606,7 +606,7 @@ async fn resuming_a_sandboxed_session_relaunches_claude_in_fullscreen_by_default
     let resuming_host = a_session_host_with_coding_agents(
         default_config,
         sessions_tmp.path().to_path_buf(),
-        Arc::new(ClaudeCliSessionManager::new()),
+        Arc::new(CliSessionManager::new()),
     );
 
     // When
@@ -648,7 +648,7 @@ async fn a_host_start_launch_line(renderer: Renderer) -> String {
     let stub_dir = tempfile::tempdir().unwrap();
     let stub = a_stub_agent_reporting_its_launch(stub_dir.path());
     let (_cfg, config) = a_daemon_config(sessions_tmp.path(), &stub, renderer);
-    let manager = Arc::new(ClaudeCliSessionManager::new());
+    let manager = Arc::new(CliSessionManager::new());
     let host = a_session_host(
         config,
         sessions_tmp.path().to_path_buf(),
@@ -702,7 +702,7 @@ mod jailed {
         let host = a_session_host_with_coding_agents(
             config,
             sessions_tmp.path().to_path_buf(),
-            Arc::new(ClaudeCliSessionManager::new()),
+            Arc::new(CliSessionManager::new()),
         );
         let session_id = host
             .start_session(Request::direct(a_claude_cli_start_request(true)))

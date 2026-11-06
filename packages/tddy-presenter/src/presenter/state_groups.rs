@@ -148,6 +148,10 @@ pub struct BackendSelection {
     pub pending_start: Option<PendingWorkflowStart>,
     /// Overrides the per-backend default model after selection (CLI `--model`).
     pub deferred_cli_model: Option<String>,
+    /// Each selectable agent's default model, injected by the caller that built the
+    /// selection from the agents' specs (`coding_agent.models.default`). This crate reads
+    /// no spec: an agent absent here defaults to its own id (`stub`).
+    pub default_models: std::collections::BTreeMap<String, String>,
     /// The active workflow definition (TDD, bug-fix, …).
     pub recipe: Arc<dyn WorkflowRecipe>,
     /// After `/recipe` from the feature slash menu: the operator is picking TDD vs bugfix.
@@ -166,6 +170,7 @@ impl BackendSelection {
             deferred_factory: None,
             pending_start: None,
             deferred_cli_model: None,
+            default_models: std::collections::BTreeMap::new(),
             recipe,
             recipe_slash_selection_pending: false,
             recipe_resolver: None,

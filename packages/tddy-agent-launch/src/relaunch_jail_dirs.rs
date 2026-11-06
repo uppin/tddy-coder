@@ -39,8 +39,11 @@ pub(super) fn refresh_relaunch_context_dir(
     worktree_path: &Path,
     agents: &[tddy_core::SessionAgentRecord],
     context_dir: &PathBuf,
-    // The session type whose agent's context-file allow-list the jail is served.
-    session_type: &str,
+    // The context-file allow-list the jail is served: its agent's spec `context_globs`,
+    // resolved by the caller from the session's agent.
+    globs: &[String],
+    // The agent's guidance files: its spec's `instructions.files`.
+    guidance_files: &[std::path::PathBuf],
 ) -> Result<(), Status> {
     let replacement_pairs = roster_replacement_pairs(agents);
     let replacement_refs: Vec<Vec<&str>> = replacement_pairs
@@ -55,10 +58,12 @@ pub(super) fn refresh_relaunch_context_dir(
             replaced: refs,
         })
         .collect();
+    let glob_refs: Vec<&str> = globs.iter().map(String::as_str).collect();
     let ctx = tddy_daemon_sandbox::sandbox_session::prepare_context_dir_with_subagent(
         worktree_path,
         &replacements,
-        tddy_session_files::context_files::context_globs_for_session_type(session_type),
+        &glob_refs,
+        guidance_files,
     )
     .map_err(|e| Status::internal(format!("prepare context dir: {e}")))?;
     if context_dir.exists() {

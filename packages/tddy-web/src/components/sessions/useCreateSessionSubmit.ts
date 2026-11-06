@@ -65,12 +65,12 @@ export function useCreateSessionSubmit({
     // so it is refused in the form instead.
     if (attachmentProblem !== null) return false;
     // A model is required and comes from the daemon-advertised catalog; a failed/loading probe
-    // leaves `model` empty, which disables Create (no fallback). Warp takes no model, so its Create
-    // needs only the project.
+    // leaves `model` empty, which disables Create (no fallback). An agent whose launch binds
+    // no model takes none, so its Create needs only the project.
     if (sessionType === "tool") {
       return Boolean(projectId && selectedAgentId && toolPath && model);
     }
-    if (sessionType === "warp-cli") {
+    if (form.cliFeatures !== undefined && !form.cliFeatures.bindsModel) {
       return Boolean(projectId);
     }
     return Boolean(projectId && model);

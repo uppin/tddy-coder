@@ -1,36 +1,29 @@
+import { hasCapability } from "./codingAgentMetadata";
+import { TOOL_SESSION_TYPE } from "./cliHarnessOptions";
+import type { SelectableAgent } from "./selectableAgentOptions";
+
 /**
- * Which session types can run a project's **main** (project-home session).
+ * Why a session of `sessionType` cannot be a project's **main**, or `null` when it can. A form
+ * holds this beside its type picker: main is not a session that merely looks right, it is the
+ * project's standing record (`docs/ft/daemon/projects.md` § *Every project has a main*), and a
+ * type that cannot be one is refused by the daemon *by name* — the form saying so first keeps
+ * the refusal off the wire.
  *
- * main is read-only, and the daemon can hold only a `claude-cli` agent to that: every other type
- * either has no tool allowlist or cannot run in managed-codebase mode. The main variant of the
- * New-session form shows every type and disables the others with the reason this returns. The
- * daemon refuses them on its own (`EnsureProjectHomeSession`), so this is the explanation, not the
- * guard.
+ * Main is a managed-workflow run on the project's own repository, and the agent must declare
+ * it can stand as one: its spec's `project_home_main` capability is the whole test, read from
+ * the metadata its daemon served. The bundle names no agent.
  *
- * PRD: docs/ft/web/session-drawer.md
+ * `undefined` (no start attempted yet) is a tool session's absence rather than a type that
+ * cannot run main, so it answers the same as `tool`.
  */
-
-import type { SessionType } from "./createSessionRequest";
-
-/** Why `sessionType` cannot run main, or `null` when it can. */
-export function whyMainCannotRun(sessionType: SessionType): string | null {
-  switch (sessionType) {
-    case "claude-cli":
-      return null;
-    case "cursor-cli":
-      // docs/dev/todo/2026-08-13-cursor-cli-cannot-enforce-managed-codebase-mode.md
-      return "Cursor CLI has no tool allowlist, so it could still use its own file tools and main would not stay read-only.";
-    case "tool":
-      return cannotRunManaged("Tool sessions");
-    case "opencode-cli":
-      return cannotRunManaged("OpenCode");
-    case "muse-cli":
-      return cannotRunManaged("Muse Code");
-    case "warp-cli":
-      return cannotRunManaged("Warp");
+export function whyMainCannotRun(
+  sessionType: string | undefined,
+  agent: SelectableAgent | undefined,
+): string | null {
+  const normalized = sessionType ?? TOOL_SESSION_TYPE;
+  if (normalized === TOOL_SESSION_TYPE) {
+    return "A workflow session cannot be a project's main: main is a coding agent's own session on the project's repository.";
   }
-}
-
-function cannotRunManaged(label: string): string {
-  return `${label} cannot run in managed-codebase mode, so main would not stay read-only.`;
+  if (hasCapability(agent, "project_home_main")) return null;
+  return "This agent's spec does not offer it as a project's main: main needs an agent that declares it can stand as one.";
 }

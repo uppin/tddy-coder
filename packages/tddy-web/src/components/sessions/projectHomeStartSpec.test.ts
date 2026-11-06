@@ -8,8 +8,8 @@
 import { describe, expect, it } from "bun:test";
 import { buildProjectHomeStartSpec, type CreateSessionFormValues } from "./createSessionRequest";
 
-/** A filled-in Claude CLI form, branch and placement fields included as the pane holds them. */
-function aClaudeCliForm(overrides: Partial<CreateSessionFormValues> = {}): CreateSessionFormValues {
+/** A filled-in CLI form, branch and placement fields included as the pane holds them. */
+function aCliForm(overrides: Partial<CreateSessionFormValues> = {}): CreateSessionFormValues {
   return {
     sessionToken: "tok",
     projectId: "proj-beta",
@@ -19,7 +19,16 @@ function aClaudeCliForm(overrides: Partial<CreateSessionFormValues> = {}): Creat
     selectedBaseBranch: "origin/master",
     selectedBranchToWorkOn: "feature/y",
     daemonInstanceId: "host-1",
-    sessionType: "claude-cli",
+    sessionType: "acme-cli",
+    cliFeatures: {
+      bindsModel: true,
+      bindsPermissionMode: true,
+      bindsSkipPermissions: true,
+      bindsPrompt: true,
+      managedWorkflow: true,
+      splitHost: true,
+      providerRoutable: true,
+    },
     toolPath: "",
     selectedAgentId: "",
     recipe: "tdd",
@@ -50,14 +59,14 @@ function aClaudeCliForm(overrides: Partial<CreateSessionFormValues> = {}): Creat
 describe("buildProjectHomeStartSpec", () => {
   it("carries the session type, model, provider, permission mode and initial prompt the operator chose", () => {
     // Given
-    const form = aClaudeCliForm();
+    const form = aCliForm();
 
     // When
     const spec = buildProjectHomeStartSpec(form);
 
     // Then
     expect(spec).toMatchObject({
-      sessionType: "claude-cli",
+      sessionType: "acme-cli",
       model: "sonnet",
       providerAccountId: "acct-meta",
       providerBuiltIn: false,
@@ -71,7 +80,7 @@ describe("buildProjectHomeStartSpec", () => {
 
   it("carries no project, branch, stack or placement fields", () => {
     // Given a form still holding a project, branch, stack and placement
-    const form = aClaudeCliForm();
+    const form = aCliForm();
 
     // When
     const spec = buildProjectHomeStartSpec(form);
@@ -93,7 +102,7 @@ describe("buildProjectHomeStartSpec", () => {
 
   it("withdraws a permission bypass the form's placement withdrew", () => {
     // Given
-    const form = aClaudeCliForm({ dangerouslySkipPermissions: true, placementWithdrawsPermissionBypass: true });
+    const form = aCliForm({ dangerouslySkipPermissions: true, placementWithdrawsPermissionBypass: true });
 
     // When
     const spec = buildProjectHomeStartSpec(form);

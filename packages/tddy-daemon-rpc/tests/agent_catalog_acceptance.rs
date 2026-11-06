@@ -42,21 +42,39 @@ fn a_daemon_allowing(ids: &[&str]) -> (tempfile::TempDir, TestDaemon) {
             tddy_spawn::supervisor_client::SpawnBackendChoice::ForkedWorker,
             tddy_session_lifecycle::peer_routing::PeerRouting::local_only(&config),
             Arc::new(tddy_daemon_kernel::operator_channel::NoOperatorChannel),
-            Arc::new(tddy_session_lifecycle::claude_cli_session::ClaudeCliSessionManager::new()),
+            Arc::new(tddy_session_lifecycle::claude_cli_session::CliSessionManager::new()),
         )
         .with_coding_agents_if_none(tddy_session_lifecycle::test_util::builtin_coding_agents()),
     );
     (home, daemon)
 }
 
-/// The row a registry agent is listed as.
+/// The row a registry agent is listed as: its spec's metadata, as `ListAgents` serves it.
 fn a_coding_agent(id: &str, route_providers: &[&str]) -> AgentInfo {
+    let registry = tddy_coding_agent_specs::CodingAgentRegistry::builtin_cached();
+    let spec = registry.get(id).expect("the agent's spec loads");
     AgentInfo {
         id: id.to_string(),
         label: id.to_string(),
         kind: AgentKind::CodingAgent as i32,
         harness: id.to_string(),
         route_providers: route_providers.iter().map(|p| p.to_string()).collect(),
+        session_type: format!("{id}-cli"),
+        capabilities: spec
+            .agent
+            .capabilities
+            .iter()
+            .map(|capability| capability.name().to_string())
+            .collect(),
+        run_params: spec.argv_params().into_iter().collect(),
+        permission_modes: spec.agent.permission_modes.clone(),
+        default_model: spec.agent.models.default.clone(),
+        placements: spec
+            .agent
+            .placements
+            .iter()
+            .map(|placement| placement.to_string())
+            .collect(),
     }
 }
 
@@ -87,6 +105,7 @@ async fn the_agent_catalog_reports_kind_harness_and_route_support_per_agent() {
                 kind: AgentKind::Model as i32,
                 harness: String::new(),
                 route_providers: Vec::new(),
+                ..Default::default()
             },
         ]
     );

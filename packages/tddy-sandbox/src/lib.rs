@@ -34,7 +34,6 @@ pub use context_dir::{
     clear_context_stale, copy_context_from_repo, copy_tree, copy_tree_within_root,
     managed_codebase_preamble, mark_context_stale, prepend_preamble, with_stale_marker,
     without_stale_marker, SandboxContextDir, SubagentReplacement, MANAGED_CODEBASE_PREAMBLE,
-    PREAMBLE_FILES,
 };
 pub use context_manifest::{
     diff_manifests, matches_context_globs, normalized_context_path, sha256_hex, ContextEntry,

@@ -178,12 +178,12 @@ impl DaemonSessionHost {
             reachable_sessions: Arc::new(self.clone()),
             workspace_sandboxes: Arc::clone(&self.workspace_sandboxes),
             workspace_sandbox_provisioner: Arc::clone(&self.workspace_sandbox_provisioner),
-            claude_cli_manager: Arc::clone(&self.claude_cli_manager),
-            claude_binary: {
+            cli_manager: Arc::clone(&self.cli_manager),
+            agent_binary: {
                 let agents = self.launch_coding_agents();
-                Arc::new(move || {
+                Arc::new(move |agent_id: &str| {
                     agents
-                        .resolve("claude", None)
+                        .resolve(agent_id, None)
                         .map(|agent| agent.tool.binary.to_string_lossy().into_owned())
                         .map_err(|e| tddy_rpc::Status::failed_precondition(e.to_string()))
                 })
@@ -205,7 +205,7 @@ impl DaemonSessionHost {
             tddy_data_dir: self.tddy_data_dir.clone(),
             staging_base_dir: self.staging_base_dir.clone(),
             peer_routing: self.peer_routing.clone(),
-            claude_cli_manager: Arc::clone(&self.claude_cli_manager),
+            cli_manager: Arc::clone(&self.cli_manager),
             sandbox_manager: Arc::clone(&self.sandbox_manager),
             task_registry: self.task_registry.clone(),
             host_session_sockets: Arc::clone(&self.host_session_sockets),

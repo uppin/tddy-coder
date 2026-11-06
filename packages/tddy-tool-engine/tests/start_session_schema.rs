@@ -7,11 +7,35 @@ use std::collections::BTreeSet;
 
 use pretty_assertions::assert_eq;
 use serde_json::Value;
-use tddy_core::cli_harness::{cli_harness_requires_model, cli_harnesses};
 use tddy_service::proto::session::StartSessionRequest;
 use tddy_tool_engine::start_session_args::{
-    start_session_schema, HostChoice, StartChoices, StartContext, StartSessionArgs,
+    start_session_schema, AgentChoice, HostChoice, StartChoices, StartContext, StartSessionArgs,
 };
+
+/// One agent a daemon offers, as injected data: a harness that must name a model (and takes
+/// permission modes) and one that need not.
+fn an_agent(session_type: &str, requires_model: bool) -> AgentChoice {
+    AgentChoice {
+        session_type: session_type.to_string(),
+        label: session_type.to_string(),
+        requires_model,
+        permission_modes: if requires_model {
+            [
+                "auto",
+                "default",
+                "acceptEdits",
+                "plan",
+                "bypassPermissions",
+            ]
+            .iter()
+            .map(ToString::to_string)
+            .collect()
+        } else {
+            Vec::new()
+        },
+        routable: true,
+    }
+}
 
 fn choices() -> StartChoices {
     StartChoices {
@@ -30,6 +54,7 @@ fn choices() -> StartChoices {
             "bugfix".to_string(),
             "pr-stack".to_string(),
         ],
+        agents: vec![an_agent("claude-cli", true), an_agent("warp-cli", false)],
     }
 }
 
@@ -59,10 +84,15 @@ fn values_requiring(discriminant: &str, field: &str) -> BTreeSet<String> {
 }
 
 #[test]
-fn session_type_offers_tool_workspace_and_every_registered_cli_harness() {
+fn session_type_offers_tool_workspace_and_every_injected_cli_agent() {
     // Given
     let mut expected = vec!["tool".to_string(), "workspace".to_string()];
-    expected.extend(cli_harnesses().iter().map(|h| h.session_type.to_string()));
+    expected.extend(
+        choices()
+            .agents
+            .iter()
+            .map(|agent| agent.session_type.clone()),
+    );
 
     // Then
     assert_eq!(enum_of("session_type"), expected);
@@ -100,11 +130,11 @@ fn permission_mode_and_branch_intent_are_their_closed_lists() {
 #[test]
 fn model_is_required_exactly_for_the_harnesses_that_need_one() {
     // Given
-    let expected: BTreeSet<String> = cli_harnesses()
+    let expected: BTreeSet<String> = choices()
+        .agents
         .iter()
-        .map(|h| h.session_type)
-        .filter(|t| cli_harness_requires_model(t))
-        .map(str::to_string)
+        .filter(|agent| agent.requires_model)
+        .map(|agent| agent.session_type.clone())
         .collect();
 
     // Then

@@ -1,4 +1,3 @@
-import type { SessionType } from "./createSessionRequest";
 
 export interface CreateSessionRunInTmuxToggleProps {
   runInTmux: boolean;
@@ -34,18 +33,5 @@ export function CreateSessionRunInTmuxToggle({
         Run the agent in tmux
       </label>
     </div>
-  );
-}
-
-/**
- * Whether the pane shows the toggle in its shared slot for `sessionType`: every CLI harness type
- * but claude-cli, which places it among its own placement fields.
- */
-export function showsTheSharedTmuxToggle(sessionType: SessionType): boolean {
-  return (
-    sessionType === "cursor-cli" ||
-    sessionType === "opencode-cli" ||
-    sessionType === "muse-cli" ||
-    sessionType === "warp-cli"
   );
 }

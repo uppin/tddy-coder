@@ -95,7 +95,7 @@ pub struct DaemonSessionHost {
     /// Where each presenter event of a workflow session goes besides the notification bus — the
     /// Telegram chat surface, on a daemon that has one; `NoOperatorChannel` when none is configured.
     operator_channel: tddy_daemon_kernel::operator_channel::SharedOperatorChannel,
-    claude_cli_manager: Arc<CliSessionManager>,
+    cli_manager: Arc<CliSessionManager>,
     /// Sandboxed claude-cli sessions (darwin Seatbelt).
     sandbox_manager: Arc<tddy_daemon_sandbox::sandbox_session::SandboxSessionManager>,
     /// The per-session jails sandboxed `workspace` sessions dispatch their tools through

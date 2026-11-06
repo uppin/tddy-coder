@@ -16,7 +16,7 @@ use tddy_rpc::Request;
 use tddy_service::proto::session::{
     ResumeSessionRequest, SessionService as SessionServiceTrait, StartSessionRequest,
 };
-use tddy_session_lifecycle::claude_cli_session::ClaudeCliSessionManager;
+use tddy_session_lifecycle::claude_cli_session::CliSessionManager;
 use tddy_session_lifecycle::connection_service::DaemonSessionHost;
 use tddy_terminal_rpc::bridge::MAIN_TERMINAL_ID;
 use tddy_terminal_rpc::proto::terminal_session::{
@@ -42,7 +42,7 @@ type UserResolver = Arc<dyn Fn(&str) -> Option<String> + Send + Sync>;
 /// A daemon whose `claude` is a stub that records what it was launched with, then holds its pane.
 struct TmuxAgentDaemon {
     host: Arc<DaemonSessionHost>,
-    manager: Arc<ClaudeCliSessionManager>,
+    manager: Arc<CliSessionManager>,
     config: AConfigAndItsAgents,
     sessions_base: PathBuf,
     launches: PathBuf,
@@ -52,10 +52,10 @@ struct TmuxAgentDaemon {
 }
 
 async fn a_daemon_with_a_private_tmux() -> TmuxAgentDaemon {
-    a_daemon_over(ClaudeCliSessionManager::new()).await
+    a_daemon_over(CliSessionManager::new()).await
 }
 
-async fn a_daemon_over(manager: ClaudeCliSessionManager) -> TmuxAgentDaemon {
+async fn a_daemon_over(manager: CliSessionManager) -> TmuxAgentDaemon {
     let tmux = PrivateTmux::started();
     let sessions_dir = tempfile::tempdir().unwrap();
     let stub_dir = tempfile::tempdir().unwrap();
@@ -107,7 +107,7 @@ fn a_config_running(stub_agent: &Path) -> (tempfile::TempDir, AConfigAndItsAgent
 fn a_session_host(
     (config, agents): AConfigAndItsAgents,
     sessions_base: PathBuf,
-    manager: Arc<ClaudeCliSessionManager>,
+    manager: Arc<CliSessionManager>,
 ) -> Arc<DaemonSessionHost> {
     let data_dir = sessions_base.clone();
     let sessions_base_resolver: SessionsBaseResolver =
@@ -231,7 +231,7 @@ impl TmuxAgentDaemon {
         a_session_host(
             self.config.clone(),
             self.sessions_base.clone(),
-            Arc::new(ClaudeCliSessionManager::new()),
+            Arc::new(CliSessionManager::new()),
         )
     }
 
@@ -485,8 +485,7 @@ async fn resuming_a_live_session_on_the_same_daemon_keeps_its_toolcall_socket_an
 async fn a_detached_agents_end_runs_the_cleanup_when_its_watcher_notices() {
     // Given a tmux-run session whose client has exited, watched every 50 ms
     let daemon = a_daemon_over(
-        ClaudeCliSessionManager::new()
-            .with_detach_watch_interval(std::time::Duration::from_millis(50)),
+        CliSessionManager::new().with_detach_watch_interval(std::time::Duration::from_millis(50)),
     )
     .await;
     let (session_id, _) = daemon.is_running_in_tmux().await;

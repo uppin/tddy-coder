@@ -317,6 +317,8 @@ pub async fn spawn_claude_sandbox(params: SpawnParams) -> Result<SpawnedSandbox>
     // The jail's cwd carries what *this* agent reads for guidance and nothing else: the globs are
     // the agent's own spec's.
     let context_globs: Vec<String> = params.agent.spec.agent.context_globs.clone();
+    let guidance_files: Vec<std::path::PathBuf> =
+        params.agent.spec.agent.instructions.files.clone();
     let specialized_defs = params.specialized_defs;
     let replacement_pairs = specialized_agent_replacement_pairs(&specialized_defs);
     let ctx: SandboxContextDir = tokio::task::spawn_blocking(move || {
@@ -333,7 +335,12 @@ pub async fn spawn_claude_sandbox(params: SpawnParams) -> Result<SpawnedSandbox>
             })
             .collect();
         let globs: Vec<&str> = context_globs.iter().map(String::as_str).collect();
-        SandboxContextDir::create_with_subagent(&repo_for_context, &replacements, &globs)
+        SandboxContextDir::create_with_subagent(
+            &repo_for_context,
+            &replacements,
+            &globs,
+            &guidance_files,
+        )
     })
     .await
     .context("context prep task join")??;

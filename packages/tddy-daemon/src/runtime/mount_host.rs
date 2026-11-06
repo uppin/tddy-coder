@@ -183,7 +183,7 @@ impl BuildContext {
     }
 
     pub(super) fn manage_index_daemon(&mut self, config_arc: &Arc<DaemonConfig>) {
-        let shared_claude_cli_manager = &self.registries.shared_claude_cli_manager;
+        let shared_cli_manager = &self.registries.shared_cli_manager;
         // The warm code-intelligence index, when this daemon was configured to manage one. Its
         // lifecycle is owned here and its *index* is owned by the process itself — the two are
         // split because rust-analyzer's handshake is fixed at spawn and this daemon's registry
@@ -195,7 +195,7 @@ impl BuildContext {
             let configured = &config_arc.index_daemon.clone().unwrap_or_default();
             let index_daemon = crate::index_daemon::IndexDaemonRegistry::new(
                 crate::index_daemon::IndexDaemonSpawn::from_config(configured),
-                shared_claude_cli_manager.task_registry(),
+                shared_cli_manager.task_registry(),
             );
             log::info!(
                 target: "tddy_daemon::index_daemon",
@@ -238,7 +238,7 @@ impl BuildContext {
         let sessions_base_resolver = &mount.sessions_base_resolver;
         let user_resolver = mount.user_resolver.clone();
         let livekit_discovery = mount.livekit_discovery.take();
-        let shared_claude_cli_manager = &self.registries.shared_claude_cli_manager;
+        let shared_cli_manager = &self.registries.shared_cli_manager;
         let shared_session_rooms = &self.registries.shared_session_rooms;
         let shared_session_admissions = &self.registries.shared_session_admissions;
         let room_tokens = &self.identity.keys.room_tokens;
@@ -263,7 +263,7 @@ impl BuildContext {
             options.spawn_backend.clone(),
             tddy_daemon_livekit::peer_routing::peer_routing_over(config, livekit_discovery),
             self.operator_channel(),
-            Arc::clone(shared_claude_cli_manager),
+            Arc::clone(shared_cli_manager),
         );
 
         let coding_agents =

@@ -10,7 +10,26 @@ use std::path::{Path, PathBuf};
 use serial_test::serial;
 use tddy_core::backend::{resolve_agent_models, BackendCliPaths};
 use tddy_core::provider_route::{HarnessRoute, RouteFile, RouteSecret};
-use tddy_core::{CodingBackend, OpenCodeAcpBackend};
+use tddy_core::CodingBackend;
+
+/// A spec backend for the stub agent, as the agent's spec builds it: its routed agent and a
+/// command that spawns the stub.
+fn a_spec_backend(path: std::path::PathBuf) -> tddy_core::SpecAcpBackend {
+    tddy_core::SpecAcpBackend::new(
+        tddy_core::provider_route::RoutedAgent {
+            id: "opencode".to_string(),
+            product: "OpenCode".to_string(),
+            support: tddy_core::provider_route::RouteSupport::default(),
+            key_env: None,
+        },
+        tddy_core::AcpAgentCommand {
+            program: path,
+            args: Vec::new(),
+            env: Vec::new(),
+            cwd: None,
+        },
+    )
+}
 
 fn stub_agent_path() -> PathBuf {
     let workspace_root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
@@ -35,7 +54,7 @@ async fn tddy_coder_completes_a_turn_with_opencode_over_acp() {
     // Given
     assert!(stub_agent_path().exists(), "build tddy-acp-stub first");
     with_an_empty_turn_scenario();
-    let backend = OpenCodeAcpBackend::with_agent_path(stub_agent_path());
+    let backend = a_spec_backend(stub_agent_path());
 
     // When
     let response = tokio::time::timeout(
@@ -58,7 +77,7 @@ async fn opencode_lists_the_models_its_agent_advertises() {
     with_an_empty_turn_scenario();
 
     // When
-    let models = OpenCodeAcpBackend::with_agent_path(stub_agent_path())
+    let models = a_spec_backend(stub_agent_path())
         .list_models()
         .await
         .expect("models");
@@ -121,7 +140,7 @@ async fn a_routed_opencode_agent_gets_the_generated_config_and_key() {
     request.working_dir = Some(dir.path().to_path_buf());
 
     // When
-    let _ = OpenCodeAcpBackend::with_agent_path(agent)
+    let _ = a_spec_backend(agent)
         .with_provider_route(route)
         .invoke(request)
         .await;

@@ -178,7 +178,7 @@ pub fn split_claude_extra_args(
 }
 
 /// The agent a split session runs on this host: `claude.yaml`, as embedded.
-fn split_agent_spec() -> Result<CodingAgentSpec, Status> {
+pub(crate) fn split_agent_spec() -> Result<CodingAgentSpec, Status> {
     embedded_spec("claude").map_err(|e| Status::internal(format!("the host agent's spec: {e}")))
 }
 

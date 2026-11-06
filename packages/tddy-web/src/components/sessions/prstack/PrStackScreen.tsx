@@ -341,7 +341,8 @@ export function PrStackScreen({
         // dialog before confirming, and one the spawning daemon cannot look up at all when the
         // orchestrator lives on another host.
         stackNodeId: startSessionNode.nodeId,
-        sessionType: "claude-cli",
+        // The child runs as the same kind of session as its orchestrator parent.
+        sessionType: session.sessionType,
         branchIntent: ownedBranch ? "work_on_selected_branch" : "new_branch_from_base",
         selectedBranch: ownedBranch,
         // The planned branch (feature/<stack>/<node>, pre-filled by the pr-stack agent) — only

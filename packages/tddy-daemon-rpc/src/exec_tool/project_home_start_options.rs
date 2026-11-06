@@ -51,11 +51,28 @@ pub(super) async fn describe_start_options(
     project_id: &str,
     query: StartOptionsQuery,
 ) -> anyhow::Result<StartOptions> {
-    let agents = agent_choices(sources.catalog).await?;
+    let listed = listed_agents(sources.catalog).await?;
+    let agents = listed
+        .iter()
+        .map(|agent| LabelledChoice {
+            id: agent.id.clone(),
+            label: agent.label.clone(),
+        })
+        .collect();
+    let harness_choices: Vec<tddy_tool_engine::start_session_args::AgentChoice> = listed
+        .iter()
+        .map(|agent| tddy_tool_engine::start_session_args::AgentChoice {
+            session_type: agent.session_type.clone(),
+            label: agent.label.clone(),
+            requires_model: agent.capabilities.iter().any(|c| c == "requires_model"),
+            permission_modes: agent.permission_modes.clone(),
+            routable: !agent.route_providers.is_empty(),
+        })
+        .collect();
     let subagents = subagent_names(sources.catalog).await?;
     let (models, models_unavailable) = model_choices(&sources, &query).await?;
     let (provider_routes, provider_routes_unavailable) =
-        provider_route_choices(&sources, &query).await;
+        provider_route_choices(&sources, &query, &harness_choices).await;
     let (ssh_config_hosts, ssh_config_hosts_unavailable) =
         ssh_config_hosts(sources.host_service, sources.session_token).await?;
     let branches = branch_names(sources.projects, sources.session_token, project_id).await?;
@@ -81,20 +98,15 @@ pub(super) async fn describe_start_options(
 }
 
 /// The agents this host's catalogue offers, as the agent picker lists them.
-async fn agent_choices(catalog: &CatalogRpcHandler) -> anyhow::Result<Vec<LabelledChoice>> {
+async fn listed_agents(
+    catalog: &CatalogRpcHandler,
+) -> anyhow::Result<Vec<tddy_service::proto::catalog::AgentInfo>> {
     let listed = catalog
         .list_agents(Request::direct(ListAgentsRequest {}))
         .await
         .map_err(status_error)?
         .into_inner();
-    Ok(listed
-        .agents
-        .into_iter()
-        .map(|agent| LabelledChoice {
-            id: agent.id,
-            label: agent.label,
-        })
-        .collect())
+    Ok(listed.agents)
 }
 
 /// The subagents this host resolves, each qualified by this host as `name@daemon_instance_id`.
@@ -180,8 +192,9 @@ async fn account_models(
 async fn provider_route_choices(
     sources: &StartOptionsSources<'_>,
     query: &StartOptionsQuery,
+    agents: &[tddy_tool_engine::start_session_args::AgentChoice],
 ) -> (Vec<ProviderRouteChoice>, String) {
-    let harness = match provider_harness(query) {
+    let harness = match provider_harness(query, agents) {
         Ok(harness) => harness,
         Err(reason) => return (Vec::new(), reason),
     };

@@ -217,7 +217,14 @@ impl SplitSessions {
             .split_roster_from_codebase_host(session_token, checkout_session_id, &local_instance_id)
             .await?;
         let withdrawals = crate::split_session::wire_roster_withdrawals(&roster.agents);
-        let agent = tddy_session_files::context_files::context_agent_for_session_type("claude-cli");
+        let agent_spec = crate::agent_argv::split_agent_spec()?;
+        let agent = agent_spec.id.as_str();
+        let glob_refs: Vec<&str> = agent_spec
+            .agent
+            .context_globs
+            .iter()
+            .map(String::as_str)
+            .collect();
         let context = self
             .split_context_from_codebase_host(
                 session_token,
@@ -238,7 +245,7 @@ impl SplitSessions {
         let context_dir = crate::split_session::build_split_context_dir(
             session_dir,
             &withdrawals,
-            tddy_core::backend::context_globs_for_agent(agent),
+            &glob_refs,
             &context,
         )?;
         // What this placement is actually made of, on one line. Everything here was previously

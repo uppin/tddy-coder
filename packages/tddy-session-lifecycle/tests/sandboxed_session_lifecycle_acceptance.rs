@@ -13,7 +13,7 @@ use tddy_service::proto::session::{
     DeleteSessionRequest, ResumeSessionRequest, SessionService as SessionServiceTrait,
     StartSessionRequest,
 };
-use tddy_session_lifecycle::claude_cli_session::ClaudeCliSessionManager;
+use tddy_session_lifecycle::claude_cli_session::CliSessionManager;
 use tddy_session_lifecycle::connection_service::DaemonSessionHost;
 use tddy_testing_commons::process_is_alive;
 
@@ -70,7 +70,7 @@ fn minimal_service(config: DaemonConfig, sessions_base: PathBuf) -> DaemonSessio
         tddy_spawn::supervisor_client::SpawnBackendChoice::ForkedWorker,
         tddy_session_lifecycle::peer_routing::PeerRouting::local_only(&config),
         Arc::new(tddy_daemon_kernel::operator_channel::NoOperatorChannel),
-        Arc::new(ClaudeCliSessionManager::new()),
+        Arc::new(CliSessionManager::new()),
     )
 }
 

@@ -289,7 +289,7 @@ async fn a_daemon(
             }),
         ),
         Arc::new(tddy_daemon_kernel::operator_channel::NoOperatorChannel),
-        Arc::new(tddy_session_lifecycle::claude_cli_session::ClaudeCliSessionManager::new()),
+        Arc::new(tddy_session_lifecycle::claude_cli_session::CliSessionManager::new()),
     )
     .with_coding_agents_if_none(
         tddy_session_lifecycle::test_util::coding_agents_with_binaries(&[(
@@ -1195,8 +1195,16 @@ async fn a_split_sessions_linked_claude_md_still_leads_with_the_managed_codebase
     );
     let text = std::fs::read_to_string(&claude_md).expect("CLAUDE.md must be readable");
     assert!(
-        text.starts_with(tddy_sandbox::managed_codebase_preamble(&[]).trim_start())
-            && text.contains("# Project rules"),
+        text.starts_with(
+            tddy_sandbox::managed_codebase_preamble(
+                &[],
+                &[
+                    std::path::PathBuf::from("CLAUDE.md"),
+                    std::path::PathBuf::from("AGENTS.md")
+                ]
+            )
+            .trim_start()
+        ) && text.contains("# Project rules"),
         "CLAUDE.md must lead with the preamble and carry AGENTS.md's text: {text}"
     );
 }

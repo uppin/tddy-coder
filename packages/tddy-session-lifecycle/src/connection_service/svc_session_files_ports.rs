@@ -180,7 +180,7 @@ impl DaemonSessionHost {
                 daemon_instance_id: String::new(),
                 conversation_id: String::new(),
             })?;
-        let globs = self.context_globs_for_session(
+        let (globs, guidance_files) = self.context_globs_for_session(
             CONTEXT_SCOPE_CALLER,
             &sessions_base,
             session_id,
@@ -189,6 +189,7 @@ impl DaemonSessionHost {
         Ok(SessionContextScope {
             worktree_root,
             globs,
+            guidance_files,
         })
     }
 }

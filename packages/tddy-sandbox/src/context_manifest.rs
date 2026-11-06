@@ -295,7 +295,7 @@ pub struct ContextEntry {
     /// target is listed as entries of its own. Its `size_bytes` is `0` and its `sha256` is
     /// [`sha256_hex`] of the target's spelling, so a retargeted link is a changed entry.
     ///
-    /// Never `Some` at a [`PREAMBLE_FILES`](crate::context_dir::PREAMBLE_FILES) path: a symlink there is followed, and listed as an
+    /// Never `Some` at a a guidance file (`instructions.files`) path: a symlink there is followed, and listed as an
     /// ordinary file whose hash and size are its target's ([`followed_preamble_target`](links::followed_preamble_target)).
     pub symlink_target: Option<String>,
 }
@@ -330,9 +330,14 @@ impl ContextManifest {
     ///   whose every consumer then fails on it — and at setup that is a session which cannot start
     ///   at all. Omitting it is a *narrowing*: the agent sees less guidance, never guidance from
     ///   somewhere it should not have reached. A file that large is not guidance in any case.
-    pub fn of_worktree(root: &Path, globs: &[&str], max_bytes: u64) -> anyhow::Result<Self> {
+    pub fn of_worktree(
+        root: &Path,
+        globs: &[&str],
+        guidance_files: &[std::path::PathBuf],
+        max_bytes: u64,
+    ) -> anyhow::Result<Self> {
         let mut entries = Vec::new();
-        for file in walk_context_files(root, globs)? {
+        for file in walk_context_files(root, globs, guidance_files)? {
             if let Some(target) = file.symlink_target {
                 // A link carries no bytes; its identity is where it points, so retargeting it
                 // changes its hash and the diff fetches it although no file's bytes moved.

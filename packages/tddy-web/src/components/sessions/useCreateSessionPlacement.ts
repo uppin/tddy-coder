@@ -10,6 +10,10 @@ import {
 
 export interface UseCreateSessionPlacementArgs {
   sessionType: SessionType;
+  /** The served agent declares it can stand on one host against a codebase on another (`split_host`). */
+  agentCanSplit: boolean;
+  /** The served agent's spec allows a jailed (`sandbox`) placement (`placements: [jail]`). */
+  agentOffersJail: boolean;
   daemons: DaemonHost[];
   /** The host the form will ask for, exactly as the form holds it (empty = the connected daemon). */
   daemonInstanceId: string;
@@ -25,6 +29,8 @@ export interface UseCreateSessionPlacementArgs {
  */
 export function useCreateSessionPlacement({
   sessionType,
+  agentCanSplit,
+  agentOffersJail,
   daemons,
   daemonInstanceId,
   agentHostInstanceId,
@@ -47,15 +53,14 @@ export function useCreateSessionPlacement({
   /**
    * Whether placing the codebase on another daemon is even on offer.
    *
-   * claude-cli only: it is the one agent that can be *prevented* from touching a local filesystem
-   * (`--allowedTools`/`--disallowedTools`), so it is the only type the daemon accepts a split for.
-   * And never without a common room to name a host in.
+   * Only an agent whose spec declares `split_host`: it is the one that can be *prevented* from
+   * touching a local filesystem (its spec's tool-withdrawal), so it is the only kind the daemon
+   * accepts a split for. And never without a common room to name a host in.
    *
    * This is what the selector renders on. `isSplitCodebase` below builds on it rather than
    * restating it, so the control's visibility and everything a split withdraws cannot drift apart.
    */
-  const canChooseCodebaseHost =
-    sessionType === "claude-cli" && managedCodebase && daemons.length > 0;
+  const canChooseCodebaseHost = agentCanSplit && managedCodebase && daemons.length > 0;
 
   /**
    * The session's worktree lives on a daemon other than the one running its agent — see
@@ -155,14 +160,15 @@ export function useCreateSessionPlacement({
     if (runInTmuxUnavailable) setRunInTmux(false);
   }, [runInTmuxUnavailable]);
 
-  // The placement state is shared across session types, but only claude-cli offers the jailed
-  // codebase, and only claude-cli and cursor-cli the sandbox. Switching to a type without the
-  // control clears what another type left on, or it would disable the tmux choice (and withhold it
-  // from the request) with nothing on screen to say why.
+  // The placement state is shared across session types, but only an agent whose spec declares
+  // `split_host` offers the jailed codebase, and only one whose placements include `jail` the
+  // sandbox. Switching to an agent without the placement clears what another agent left on, or
+  // it would disable the tmux choice (and withhold it from the request) with nothing on screen
+  // to say why.
   useEffect(() => {
-    if (!sessionTypeOffersSandbox(sessionType)) setSandbox(false);
-    if (sessionType !== "claude-cli") setSandboxedCodebase(false);
-  }, [sessionType]);
+    if (!agentOffersJail) setSandbox(false);
+    if (!agentCanSplit) setSandboxedCodebase(false);
+  }, [sessionType, agentOffersJail, agentCanSplit]);
 
   const applyPlacement = (toggled: CodebasePlacementChoice, on: boolean) => {
     const next = placementAfterToggling(currentPlacement, toggled, on);
@@ -208,9 +214,4 @@ export function useCreateSessionPlacement({
     applyPlacement,
     sshListDaemonId,
   };
-}
-
-/** Whether the Create pane offers the Sandbox toggle for `sessionType`. */
-function sessionTypeOffersSandbox(sessionType: SessionType): boolean {
-  return sessionType === "claude-cli" || sessionType === "cursor-cli";
 }

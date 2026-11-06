@@ -158,7 +158,7 @@ impl BuildContext {
         DaemonRuntime {
             entries: self.identity.rpc_entries,
             config: self.config,
-            cli_sessions: self.registries.shared_claude_cli_manager,
+            cli_sessions: self.registries.shared_cli_manager,
             session_host: self.session_host,
             lifecycle_telegram: self.lifecycle_telegram,
             relay_shutdown: self.relay_shutdown,

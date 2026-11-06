@@ -12,7 +12,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file catalog.proto.
  */
 export const file_catalog: GenFile = /*@__PURE__*/
-  fileDesc("Cg1jYXRhbG9nLnByb3RvEgdjYXRhbG9nInAKCUFnZW50SW5mbxIKCgJpZBgBIAEoCRINCgVsYWJlbBgCIAEoCRIeCgRraW5kGAMgASgOMhAudHlwZXMuQWdlbnRLaW5kEg8KB2hhcm5lc3MYBCABKAkSFwoPcm91dGVfcHJvdmlkZXJzGAUgAygJIloKFkxpc3RBZ2VudE1vZGVsc1JlcXVlc3QSFQoNc2Vzc2lvbl90b2tlbhgBIAEoCRINCgVhZ2VudBgCIAEoCRIaChJkYWVtb25faW5zdGFuY2VfaWQYAyABKAkiVAoXTGlzdEFnZW50TW9kZWxzUmVzcG9uc2USIgoGbW9kZWxzGAEgAygLMhIuY2F0YWxvZy5Nb2RlbEluZm8SFQoNZGVmYXVsdF9tb2RlbBgCIAEoCSITChFMaXN0QWdlbnRzUmVxdWVzdCI4ChJMaXN0QWdlbnRzUmVzcG9uc2USIgoGYWdlbnRzGAEgAygLMhIuY2F0YWxvZy5BZ2VudEluZm8iFgoUTGlzdFN1YmFnZW50c1JlcXVlc3QiQQoVTGlzdFN1YmFnZW50c1Jlc3BvbnNlEigKCXN1YmFnZW50cxgBIAMoCzIVLmNhdGFsb2cuU3ViYWdlbnRJbmZvIhIKEExpc3RUb29sc1JlcXVlc3QiNQoRTGlzdFRvb2xzUmVzcG9uc2USIAoFdG9vbHMYASADKAsyES5jYXRhbG9nLlRvb2xJbmZvIiYKCU1vZGVsSW5mbxIKCgJpZBgBIAEoCRINCgVsYWJlbBgCIAEoCSLoAQoMU3ViYWdlbnRJbmZvEgwKBG5hbWUYASABKAkSDQoFbGFiZWwYAiABKAkSDQoFbW9kZWwYAyABKAkSGgoSZGFlbW9uX2luc3RhbmNlX2lkGAQgASgJEhAKCGFnZW50X2lkGAUgASgJEhAKCHJlcGxhY2VzGAYgAygJEg0KBXRvb2xzGAcgAygJEh4KBGtpbmQYCCABKA4yEC50eXBlcy5BZ2VudEtpbmQSDwoHaGFybmVzcxgJIAEoCRIRCgl0cmFuc3BvcnQYCiABKAkSGQoRcGVybWlzc2lvbl9wb2xpY3kYCyABKAkiJwoIVG9vbEluZm8SDAoEcGF0aBgBIAEoCRINCgVsYWJlbBgCIAEoCTLBAgoOQ2F0YWxvZ1NlcnZpY2USQgoJTGlzdFRvb2xzEhkuY2F0YWxvZy5MaXN0VG9vbHNSZXF1ZXN0GhouY2F0YWxvZy5MaXN0VG9vbHNSZXNwb25zZRJFCgpMaXN0QWdlbnRzEhouY2F0YWxvZy5MaXN0QWdlbnRzUmVxdWVzdBobLmNhdGFsb2cuTGlzdEFnZW50c1Jlc3BvbnNlElQKD0xpc3RBZ2VudE1vZGVscxIfLmNhdGFsb2cuTGlzdEFnZW50TW9kZWxzUmVxdWVzdBogLmNhdGFsb2cuTGlzdEFnZW50TW9kZWxzUmVzcG9uc2USTgoNTGlzdFN1YmFnZW50cxIdLmNhdGFsb2cuTGlzdFN1YmFnZW50c1JlcXVlc3QaHi5jYXRhbG9nLkxpc3RTdWJhZ2VudHNSZXNwb25zZWIGcHJvdG8z", [file_types]);
+  fileDesc("Cg1jYXRhbG9nLnByb3RvEgdjYXRhbG9nIvUBCglBZ2VudEluZm8SCgoCaWQYASABKAkSDQoFbGFiZWwYAiABKAkSHgoEa2luZBgDIAEoDjIQLnR5cGVzLkFnZW50S2luZBIPCgdoYXJuZXNzGAQgASgJEhcKD3JvdXRlX3Byb3ZpZGVycxgFIAMoCRIUCgxzZXNzaW9uX3R5cGUYBiABKAkSFAoMY2FwYWJpbGl0aWVzGAcgAygJEhIKCnJ1bl9wYXJhbXMYCCADKAkSGAoQcGVybWlzc2lvbl9tb2RlcxgJIAMoCRIVCg1kZWZhdWx0X21vZGVsGAogASgJEhIKCnBsYWNlbWVudHMYCyADKAkiWgoWTGlzdEFnZW50TW9kZWxzUmVxdWVzdBIVCg1zZXNzaW9uX3Rva2VuGAEgASgJEg0KBWFnZW50GAIgASgJEhoKEmRhZW1vbl9pbnN0YW5jZV9pZBgDIAEoCSJUChdMaXN0QWdlbnRNb2RlbHNSZXNwb25zZRIiCgZtb2RlbHMYASADKAsyEi5jYXRhbG9nLk1vZGVsSW5mbxIVCg1kZWZhdWx0X21vZGVsGAIgASgJIhMKEUxpc3RBZ2VudHNSZXF1ZXN0IjgKEkxpc3RBZ2VudHNSZXNwb25zZRIiCgZhZ2VudHMYASADKAsyEi5jYXRhbG9nLkFnZW50SW5mbyIWChRMaXN0U3ViYWdlbnRzUmVxdWVzdCJBChVMaXN0U3ViYWdlbnRzUmVzcG9uc2USKAoJc3ViYWdlbnRzGAEgAygLMhUuY2F0YWxvZy5TdWJhZ2VudEluZm8iEgoQTGlzdFRvb2xzUmVxdWVzdCI1ChFMaXN0VG9vbHNSZXNwb25zZRIgCgV0b29scxgBIAMoCzIRLmNhdGFsb2cuVG9vbEluZm8iJgoJTW9kZWxJbmZvEgoKAmlkGAEgASgJEg0KBWxhYmVsGAIgASgJIugBCgxTdWJhZ2VudEluZm8SDAoEbmFtZRgBIAEoCRINCgVsYWJlbBgCIAEoCRINCgVtb2RlbBgDIAEoCRIaChJkYWVtb25faW5zdGFuY2VfaWQYBCABKAkSEAoIYWdlbnRfaWQYBSABKAkSEAoIcmVwbGFjZXMYBiADKAkSDQoFdG9vbHMYByADKAkSHgoEa2luZBgIIAEoDjIQLnR5cGVzLkFnZW50S2luZBIPCgdoYXJuZXNzGAkgASgJEhEKCXRyYW5zcG9ydBgKIAEoCRIZChFwZXJtaXNzaW9uX3BvbGljeRgLIAEoCSInCghUb29sSW5mbxIMCgRwYXRoGAEgASgJEg0KBWxhYmVsGAIgASgJMsECCg5DYXRhbG9nU2VydmljZRJCCglMaXN0VG9vbHMSGS5jYXRhbG9nLkxpc3RUb29sc1JlcXVlc3QaGi5jYXRhbG9nLkxpc3RUb29sc1Jlc3BvbnNlEkUKCkxpc3RBZ2VudHMSGi5jYXRhbG9nLkxpc3RBZ2VudHNSZXF1ZXN0GhsuY2F0YWxvZy5MaXN0QWdlbnRzUmVzcG9uc2USVAoPTGlzdEFnZW50TW9kZWxzEh8uY2F0YWxvZy5MaXN0QWdlbnRNb2RlbHNSZXF1ZXN0GiAuY2F0YWxvZy5MaXN0QWdlbnRNb2RlbHNSZXNwb25zZRJOCg1MaXN0U3ViYWdlbnRzEh0uY2F0YWxvZy5MaXN0U3ViYWdlbnRzUmVxdWVzdBoeLmNhdGFsb2cuTGlzdFN1YmFnZW50c1Jlc3BvbnNlYgZwcm90bzM", [file_types]);
 
 /**
  * @generated from message catalog.AgentInfo
@@ -54,6 +54,52 @@ export type AgentInfo = Message<"catalog.AgentInfo"> & {
    * @generated from field: repeated string route_providers = 5;
    */
   routeProviders: string[];
+
+  /**
+   * The session type that starts this agent (`<id>-cli`), from its spec; empty for an agent
+   * with no PTY launch. The web offers session types from this, never from its own list.
+   *
+   * @generated from field: string session_type = 6;
+   */
+  sessionType: string;
+
+  /**
+   * The agent's spec capabilities (`requires_model`, `managed_workflow`, `hooks`, …), as
+   * declared in its YAML.
+   *
+   * @generated from field: repeated string capabilities = 7;
+   */
+  capabilities: string[];
+
+  /**
+   * The parameter names the agent's launch argv binds (`model`, `permission_mode`,
+   * `dangerously_skip_permissions`, …), read from its spec's argv template.
+   *
+   * @generated from field: repeated string run_params = 8;
+   */
+  runParams: string[];
+
+  /**
+   * The permission modes the agent's launch takes, from its spec; empty when it binds none.
+   *
+   * @generated from field: repeated string permission_modes = 9;
+   */
+  permissionModes: string[];
+
+  /**
+   * The agent's default model id, from its spec.
+   *
+   * @generated from field: string default_model = 10;
+   */
+  defaultModel: string;
+
+  /**
+   * The placements the agent's spec allows (`host`, `jail`). A client offers a sandboxed
+   * (jailed) start only for an agent that lists `jail`; absence never reads as allowed.
+   *
+   * @generated from field: repeated string placements = 11;
+   */
+  placements: string[];
 };
 
 /**

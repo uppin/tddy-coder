@@ -1,8 +1,15 @@
 import React, { useMemo, useState } from "react";
+import { CreateSessionRunInTmuxToggle } from "./CreateSessionRunInTmuxToggle";
 import {
-  CreateSessionRunInTmuxToggle,
-  showsTheSharedTmuxToggle,
-} from "./CreateSessionRunInTmuxToggle";
+  registerSessionTypeOptions,
+  sessionTypeOptions,
+} from "./cliHarnessOptions";
+import {
+  agentForSessionType,
+  allowsPlacement,
+  bindsParam,
+  hasCapability,
+} from "./codingAgentMetadata";
 import { projectSelectOptions } from "../../lib/projectSelectOptions";
 import type { BaseBranchOption } from "./prstack/baseBranchChoice";
 import type { BranchWorktreeIntent } from "../../lib/branchConflict";
@@ -18,8 +25,7 @@ import { BUILT_IN_PROVIDER, CreateSessionProviderField } from "./CreateSessionPr
 import { CreateSessionAgentPickerSection } from "./CreateSessionAgentPickerSection";
 import { useSpecializedAgentPicks } from "./useSpecializedAgentPicks";
 import { CreateSessionToolFields } from "./CreateSessionToolFields";
-import { CreateSessionCursorCliFields } from "./CreateSessionCursorCliFields";
-import { CreateSessionClaudeCliFields } from "./CreateSessionClaudeCliFields";
+import { CreateSessionCliFields } from "./CreateSessionCliFields";
 import { CreateSessionBranchFields } from "./CreateSessionBranchFields";
 import { CreateSessionHostAndProjectFields } from "./CreateSessionHostAndProjectFields";
 import { CreateSessionAttachmentsSection } from "./CreateSessionAttachmentsSection";
@@ -67,7 +73,7 @@ export function CreateSessionPane({
 
   // The main variant fixes the project and host, and opens on the one type that can run main.
   const [sessionType, setSessionType] = useState<SessionType>(
-    projectHome ? "claude-cli" : (initialValues?.sessionType ?? "tool"),
+    projectHome ? "" : (initialValues?.sessionType ?? "tool"),
   );
   const [projectId, setProjectId] = useState(projectHome?.projectId ?? initialValues?.projectId ?? "");
   // The *name* of the agent the operator picked (`claude`, an assistant's name). Which host offers it
@@ -149,6 +155,43 @@ export function CreateSessionPane({
     agent,
   });
 
+  // The session types this form offers and the fields it shows follow the agents the target
+  // daemon served — their specs' session types, capabilities and argv params — never a list
+  // of the bundle's own.
+  const typeOptions = sessionTypeOptions(
+    offeredAgents,
+    daemonInstanceId,
+    connectedInstanceId,
+  );
+  registerSessionTypeOptions(typeOptions);
+  const sessionAgent = agentForSessionType(
+    offeredAgents,
+    daemonInstanceId,
+    connectedInstanceId,
+    sessionType,
+  );
+
+  // The main variant opens on the one type that can run main: the first main-capable agent
+  // the project's daemon serves.
+  const mainSessionType = typeOptions.find(
+    (option) =>
+      option.id !== "tool" &&
+      hasCapability(
+        agentForSessionType(
+          offeredAgents,
+          daemonInstanceId,
+          connectedInstanceId,
+          option.id,
+        ),
+        "project_home_main",
+      ),
+  )?.id;
+  React.useEffect(() => {
+    if (projectHome && mainSessionType && sessionType !== mainSessionType) {
+      setSessionType(mainSessionType);
+    }
+  }, [projectHome, mainSessionType, sessionType]);
+
   const {
     sandbox,
     setSandbox,
@@ -169,7 +212,14 @@ export function CreateSessionPane({
     placementWithdrawsPermissionBypass,
     applyPlacement,
     sshListDaemonId,
-  } = useCreateSessionPlacement({ sessionType, daemons, daemonInstanceId, agentHostInstanceId });
+  } = useCreateSessionPlacement({
+    sessionType,
+    agentCanSplit: hasCapability(sessionAgent, "split_host"),
+    agentOffersJail: allowsPlacement(sessionAgent, "jail"),
+    daemons,
+    daemonInstanceId,
+    agentHostInstanceId,
+  });
 
   const {
     model,
@@ -188,6 +238,7 @@ export function CreateSessionPane({
     selectedAgentId,
     daemonInstanceId,
     selectedAgentRouteProviders,
+    cliRouteProviders: sessionAgent?.routeProviders,
     initialModel: initialValues?.model,
   });
 
@@ -258,6 +309,15 @@ export function CreateSessionPane({
     selectedBranchToWorkOn,
     daemonInstanceId,
     sessionType,
+    cliFeatures: {
+      bindsModel: bindsParam(sessionAgent, "model"),
+      bindsPermissionMode: bindsParam(sessionAgent, "permission_mode"),
+      bindsSkipPermissions: bindsParam(sessionAgent, "dangerously_skip_permissions"),
+      bindsPrompt: bindsParam(sessionAgent, "prompt"),
+      managedWorkflow: hasCapability(sessionAgent, "managed_workflow"),
+      splitHost: hasCapability(sessionAgent, "split_host"),
+      providerRoutable: providerHarness !== null,
+    },
     toolPath,
     selectedAgentId,
     recipe,
@@ -330,9 +390,12 @@ export function CreateSessionPane({
 
       {/* Session type toggle; the main variant disables every type that cannot run main. */}
       <CreateSessionTypeToggle
+        options={typeOptions}
         sessionType={sessionType}
         setSessionType={setSessionType}
-        disabledReason={projectHome && whyMainCannotRun}
+        disabledReason={
+          projectHome ? whyMainCannotRun(sessionType, sessionAgent) : null
+        }
       />
 
       {!projectHome && (
@@ -377,34 +440,13 @@ export function CreateSessionPane({
         />
       )}
 
-      {/* Cursor CLI session fields */}
-      {sessionType === "cursor-cli" && (
-        <CreateSessionCursorCliFields
-          modelField={modelField}
-          agentPickerSection={agentPickerSection}
-          sandbox={sandbox}
-          setSandbox={setSandbox}
-          initialPrompt={initialPrompt}
-          setInitialPrompt={setInitialPrompt}
-          managedCodebase={managedCodebase}
-          setManagedCodebase={setManagedCodebase}
-          setSemanticIndex={setSemanticIndex}
-          setSelectedAgentIds={agentPicks.setSelectedAgentIds}
-          recipe={recipe}
-          setRecipe={setRecipe}
-          semanticIndex={semanticIndex}
-        />
-      )}
-
-      {/* "Run the agent in tmux"; claude-cli places it in its own fields. */}
-      {showsTheSharedTmuxToggle(sessionType) && runInTmuxToggle}
-
-      {/* OpenCode and Muse Code session fields: the model alone, from the daemon's list */}
-      {(sessionType === "opencode-cli" || sessionType === "muse-cli") && modelField}
-
-      {/* Claude CLI session fields */}
-      {sessionType === "claude-cli" && (
-        <CreateSessionClaudeCliFields
+      {/* A CLI agent's fields, shaped by what its spec declares: the permission controls
+          when its launch binds a permission mode, the managed block when it can run one. */}
+      {sessionAgent !== undefined && (
+        <CreateSessionCliFields
+          showsPermission={bindsParam(sessionAgent, "permission_mode")}
+          permissionModes={sessionAgent.permissionModes}
+          showsManaged={hasCapability(sessionAgent, "managed_workflow")}
           modelField={modelField}
           agentPickerSection={agentPickerSection}
           permissionMode={permissionMode}
@@ -433,7 +475,7 @@ export function CreateSessionPane({
           codebaseDaemonInstanceId={codebaseDaemonInstanceId}
           setCodebaseDaemonInstanceId={setCodebaseDaemonInstanceId}
           daemons={daemons}
-          sessionType={sessionType}
+          showsSshHost={hasCapability(sessionAgent, "split_host")}
           sshListDaemonId={sshListDaemonId}
           sessionToken={sessionToken}
           sshConfigHost={sshConfigHost}

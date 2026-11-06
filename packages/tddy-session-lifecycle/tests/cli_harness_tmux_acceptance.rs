@@ -21,7 +21,7 @@ use tddy_rpc::Request;
 use tddy_service::proto::session::{
     ResumeSessionRequest, SessionService as SessionServiceTrait, StartSessionRequest,
 };
-use tddy_session_lifecycle::claude_cli_session::ClaudeCliSessionManager;
+use tddy_session_lifecycle::claude_cli_session::CliSessionManager;
 use tddy_session_lifecycle::connection_service::DaemonSessionHost;
 use tddy_terminal_rpc::bridge::MAIN_TERMINAL_ID;
 use tddy_terminal_rpc::proto::terminal_session::{
@@ -80,7 +80,7 @@ const HARNESSES: [Harness; 4] = [
 /// A daemon whose harnesses are stubs that record how they were launched.
 struct HarnessTmuxDaemon {
     host: Arc<DaemonSessionHost>,
-    manager: Arc<ClaudeCliSessionManager>,
+    manager: Arc<CliSessionManager>,
     config: DaemonConfig,
     stub: PathBuf,
     sessions_base: PathBuf,
@@ -101,7 +101,7 @@ async fn a_daemon_with_a_private_tmux(exits_with_banner: bool) -> HarnessTmuxDae
     let stub = a_stub_harness(stub_dir.path(), &launches, &users, exits_with_banner);
     let repo = a_registered_project(sessions_dir.path());
     let (config_dir, config) = a_config_running();
-    let manager = Arc::new(ClaudeCliSessionManager::new());
+    let manager = Arc::new(CliSessionManager::new());
     let host = a_session_host(
         config.clone(),
         &stub,
@@ -159,7 +159,7 @@ fn a_session_host(
     config: DaemonConfig,
     stub: &Path,
     sessions_base: PathBuf,
-    manager: Arc<ClaudeCliSessionManager>,
+    manager: Arc<CliSessionManager>,
 ) -> Arc<DaemonSessionHost> {
     let data_dir = sessions_base.clone();
     let sessions_base_resolver: SessionsBaseResolver =
@@ -287,8 +287,8 @@ impl HarnessTmuxDaemon {
     }
 
     /// [`Self::restarted`], with the restarted daemon's terminal manager.
-    fn restarted_with_its_manager(&self) -> (Arc<DaemonSessionHost>, Arc<ClaudeCliSessionManager>) {
-        let manager = Arc::new(ClaudeCliSessionManager::new());
+    fn restarted_with_its_manager(&self) -> (Arc<DaemonSessionHost>, Arc<CliSessionManager>) {
+        let manager = Arc::new(CliSessionManager::new());
         let host = a_session_host(
             self.config.clone(),
             &self.stub,
@@ -313,7 +313,7 @@ impl HarnessTmuxDaemon {
         Self::until_the_main_left(&self.manager, session_id).await;
     }
 
-    async fn until_the_main_left(manager: &ClaudeCliSessionManager, session_id: &str) {
+    async fn until_the_main_left(manager: &CliSessionManager, session_id: &str) {
         eventually_awaiting(
             "the main terminal to leave the registry",
             OBSERVE,

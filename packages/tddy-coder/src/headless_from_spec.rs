@@ -107,7 +107,18 @@ pub fn headless_backend_from_spec(
     let (spec, renderer) = renderer_and_spec_for(agent, tools_dir, host.as_ref())?;
     let protocol = renderer.protocol();
     let listing = renderer.model_listing()?;
-    let backend = SpecHeadlessBackend::new(Arc::new(renderer), protocol, routed_agent(&spec));
+    let curated = tddy_core::backend::BackendModels {
+        models: spec
+            .agent
+            .models
+            .curated
+            .iter()
+            .map(|model| tddy_core::backend::BackendModel::new(model.id(), model.label()))
+            .collect(),
+        default_model: spec.agent.models.default.clone(),
+    };
+    let backend = SpecHeadlessBackend::new(Arc::new(renderer), protocol, routed_agent(&spec))
+        .with_curated_models(curated);
     Ok(match listing {
         Some(listing) => backend.with_model_listing(listing),
         None => backend,

@@ -102,7 +102,7 @@ fn test_service(config: DaemonConfig, tddy_data_dir: PathBuf) -> TestDaemon {
                 }),
             ),
             Arc::new(tddy_daemon_kernel::operator_channel::NoOperatorChannel),
-            Arc::new(tddy_session_lifecycle::claude_cli_session::ClaudeCliSessionManager::new()),
+            Arc::new(tddy_session_lifecycle::claude_cli_session::CliSessionManager::new()),
         )
         .with_coding_agents_if_none(tddy_session_lifecycle::test_util::builtin_coding_agents()),
     )

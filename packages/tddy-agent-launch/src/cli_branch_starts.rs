@@ -182,12 +182,12 @@ impl LaunchSessions {
             &req.session_token,
         )?;
         crate::opencode_cli_spawn::start_cli_harness_session(
-            crate::opencode_cli_spawn::CliHarnessStart {
+            crate::opencode_cli_spawn::CliSessionStart {
                 kind: session_agent.kind.clone(),
                 agent: &session_agent.agent,
                 config: &self.config,
                 tddy_data_dir: &self.tddy_data_dir,
-                cli_manager: &self.claude_cli_manager,
+                cli_manager: &self.cli_manager,
                 os_user,
                 session_id: &start.session_id,
                 session_token: &req.session_token,
@@ -267,12 +267,12 @@ impl LaunchSessions {
         // A child runs on its vendor: the orchestrator's account is not inherited.
         let route_sources = tddy_core::provider_route::RouteSources::default();
         crate::opencode_cli_spawn::start_cli_harness_session(
-            crate::opencode_cli_spawn::CliHarnessStart {
+            crate::opencode_cli_spawn::CliSessionStart {
                 kind: session_agent.kind.clone(),
                 agent: &session_agent.agent,
                 config: &self.config,
                 tddy_data_dir: &self.tddy_data_dir,
-                cli_manager: &self.claude_cli_manager,
+                cli_manager: &self.cli_manager,
                 os_user: child.os_user,
                 session_id: child.session_id,
                 // The orchestrator is a session of this daemon: nothing leaves the host, so no

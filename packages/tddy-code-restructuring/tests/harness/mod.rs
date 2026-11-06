@@ -2300,7 +2300,7 @@ pub fn a_crate_whose_impl_member_calls_an_associated_fn_the_seam_moves() -> AFix
 /// A type whose associated function the seam at lines 12–14 moves, called **through the type's
 /// name** from the file's own `#[cfg(test)] mod tests`: `Gauge::doubled(2)`.
 ///
-/// `cli_session_manager.rs`'s tests call `ClaudeCliSessionManager::build_claude_argv(…)` this way.
+/// `cli_session_manager.rs`'s tests call `CliSessionManager::build_claude_argv(…)` this way.
 pub fn a_crate_whose_tests_call_an_associated_fn_the_seam_moves_through_the_type(
 ) -> AFixtureWorkspace {
     a_crate_whose_gauge_reads_then(
@@ -2330,7 +2330,7 @@ pub fn a_crate_whose_tests_call_an_associated_fn_the_seam_moves_through_the_type
 }
 
 /// The same, called through a **type alias** of the type: `Meter::doubled(2)`, where
-/// `pub type Meter = Gauge;`. `ClaudeCliSessionManager` is such an alias.
+/// `pub type Meter = Gauge;`. `CliSessionManager` is such an alias.
 pub fn a_crate_whose_tests_call_an_associated_fn_the_seam_moves_through_an_alias(
 ) -> AFixtureWorkspace {
     a_crate_whose_gauge_reads_then(

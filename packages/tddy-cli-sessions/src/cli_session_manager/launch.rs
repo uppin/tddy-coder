@@ -4,11 +4,9 @@ use super::CliSessionManager;
 
 use std::path::Path;
 
-use tddy_core::cli_harness::{CliHarness, CliLaunch};
-
 use super::pty_spawn::ExitHook;
 
-/// What a [`CliSessionManager::launch_cli_harness`] launch adds to the harness's own argv.
+/// What a rendered launch adds to the argv its launcher rendered.
 #[derive(Default)]
 pub struct HarnessLaunchExtras {
     /// Follow the harness's argv (a provider route's `--model`).
@@ -26,44 +24,6 @@ use std::sync::Arc;
 use std::path::PathBuf;
 
 impl CliSessionManager {
-    /// Spawn `harness` for `session_id` in `worktree_path`, its argv built by the registry from
-    /// `launch` (`launch.resume` continues the worktree's session instead of starting one).
-    ///
-    /// `extras` adds to that launch: arguments after the harness's own argv, environment on top of
-    /// the daemon's, and the work to finish once the process exits (see [`HarnessLaunchExtras`]).
-    ///
-    /// `os_user` — the session owner, whose `HOME` and configured `PATH` extra the child must run
-    /// under (the same overrides a claude-cli launch applies); `None` runs the child as the daemon.
-    //
-    // TODO(harness-clis): no daemon launch calls this any more — the OpenCode, Muse and Warp starts
-    // launch from their specs through `spec_launch::launch_host_pty`. Pinned by `tests/exit_hook.rs`;
-    // removal is deferred: docs/dev/todo/2026-11-03-harness-clis-legacy-cli-harness-removal.md
-    pub async fn launch_cli_harness(
-        &self,
-        harness: &CliHarness,
-        session_id: &str,
-        worktree_path: PathBuf,
-        launch: &CliLaunch<'_>,
-        extras: HarnessLaunchExtras,
-        os_user: Option<&str>,
-    ) -> anyhow::Result<Arc<pty_handle::PtyHandle>> {
-        let mut argv = (harness.argv)(launch);
-        argv.extend(extras.args);
-        self.spawn_tool(
-            session_id,
-            MAIN_TERMINAL_ID,
-            harness.session_type,
-            worktree_path,
-            launch.model,
-            argv,
-            extras.env,
-            os_user,
-            extras.on_exit,
-            None,
-        )
-        .await
-    }
-
     /// Spawn `argv` — already rendered, by a launcher that owns the agent's argument template — as
     /// `session_id`'s main terminal, registered under `session_type`. `env` is applied on top of the
     /// daemon's; `os_user` is the session owner, or `None` to run as the daemon. `on_exit` runs once
@@ -95,24 +55,23 @@ impl CliSessionManager {
         .await
     }
 
-    /// Spawn a new claude CLI process for `session_id` in `worktree_path`, with managed-workflow
-    /// launch options. Returns an `Arc<PtyHandle>`; the child is monitored in a background std
-    /// thread and the session leaves the registry when it exits.
+    /// Spawn a new CLI process for `session_id` in `worktree_path` from an argv the caller
+    /// rendered from the agent's spec, with managed-workflow launch options. Returns an
+    /// `Arc<PtyHandle>`; the child is monitored in a background std thread and the session
+    /// leaves the registry when it exits.
     ///
-    /// `initial_prompt` — when `Some` and non-empty, appended as a positional CLI argument so that
-    /// `claude` receives it as the first user turn. **Resume** always passes `None`: re-injecting
-    /// the original prompt would create a duplicate user turn.
+    /// `argv` — the agent's launch argv, already rendered (binary first, the model, the
+    /// session id, the prompt as its trailing positional when it carries one).
     ///
-    /// `permission_mode` — forwarded as `--permission-mode <mode>`. `None` or empty/whitespace
-    /// defaults to `"auto"`.
+    /// `initial_prompt` — the prompt bound in `argv`, named only so the launch flags below
+    /// can be spliced before it. **Resume** always passes `None`: re-injecting the original
+    /// prompt would create a duplicate user turn.
     ///
-    /// `resume` — when true, continue the existing on-disk transcript via `--resume <id>` instead of
-    /// assigning the id to a fresh session via `--session-id <id>`. Only [`Self::resume_with_options`]
-    /// passes true; fresh starts pass false.
+    /// `session_type` — registered as the session's tool label (`<id>-cli`).
     ///
-    /// `append_system_prompt_file` — when `Some`, inserted as `--append-system-prompt-file <path>`
-    /// (before any positional prompt) so `claude` appends that file to its system prompt (a managed
-    /// workflow's orchestration prompt).
+    /// `append_system_prompt_file` — when `Some`, inserted as
+    /// `--append-system-prompt-file <path>` (before any positional prompt) so the agent
+    /// appends that file to its system prompt (a managed workflow's orchestration prompt).
     ///
     /// `env` — extra environment variables set on the spawned process (e.g. a managed session's
     /// per-session `TDDY_SOCKET` and a `PATH` that resolves `tddy-tools`).
@@ -126,34 +85,20 @@ impl CliSessionManager {
         session_id: &str,
         worktree_path: PathBuf,
         model: &str,
-        binary_path: &str,
+        argv: Vec<String>,
+        session_type: &str,
         initial_prompt: Option<&str>,
-        permission_mode: Option<&str>,
-        dangerously_skip_permissions: bool,
-        resume: bool,
         append_system_prompt_file: Option<&Path>,
         extra_args: Vec<String>,
         env: Vec<(String, String)>,
         os_user: Option<&str>,
     ) -> anyhow::Result<Arc<pty_handle::PtyHandle>> {
-        let argv = Self::with_claude_launch_flags(
-            Self::build_claude_argv(
-                binary_path,
-                model,
-                session_id,
-                initial_prompt,
-                permission_mode,
-                dangerously_skip_permissions,
-                resume,
-            ),
-            initial_prompt,
-            append_system_prompt_file,
-            extra_args,
-        );
+        let argv =
+            Self::with_launch_flags(argv, initial_prompt, append_system_prompt_file, &extra_args);
         self.spawn_tool(
             session_id,
             MAIN_TERMINAL_ID,
-            "claude-cli",
+            session_type,
             worktree_path,
             model,
             argv,

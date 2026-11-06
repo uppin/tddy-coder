@@ -78,6 +78,7 @@ pub async fn run(params: DaemonClientParams) -> Result<()> {
         codebase_mode,
         &params.claude_args,
         &params.specialized_agents,
+        &format!("{}-cli", params.agent.spec.id),
     );
 
     let session_id = client
@@ -150,9 +151,10 @@ fn map_daemon_status(action: &str, status: &Status) -> anyhow::Error {
 }
 
 /// Assemble the daemon `StartSession` request from the app's resolved sandbox params. Pure so it is
-/// unit-testable without a daemon. Always a sandboxed claude-cli session; `managed_codebase` is
-/// derived from `codebase_mode` ("managed" => true, anything else e.g. "mounted" => false). Extra
-/// `claude_args` are forwarded to the in-jail `claude`; `specialized_agents` names are resolved by
+/// unit-testable without a daemon. Always a sandboxed CLI session of the app's agent;
+/// `managed_codebase` is derived from `codebase_mode` ("managed" => true, anything else e.g.
+/// "mounted" => false). Extra agent args are forwarded to the in-jail agent;
+/// `specialized_agents` names are resolved by
 /// the daemon against its own agents pool.
 pub fn start_session_request_from(
     session_token: &str,
@@ -162,10 +164,12 @@ pub fn start_session_request_from(
     codebase_mode: &str,
     claude_args: &[String],
     specialized_agents: &[String],
+    // The session type that starts the app's agent: its spec id's `-cli` spelling.
+    session_type: &str,
 ) -> StartSessionRequest {
     StartSessionRequest {
         session_token: session_token.to_string(),
-        session_type: "claude-cli".into(),
+        session_type: session_type.into(),
         sandbox: true,
         repo_path: repo.to_string_lossy().into_owned(),
         model: model.to_string(),
@@ -343,6 +347,7 @@ mod tests {
             "managed",
             &claude_args,
             &[],
+            "claude-cli",
         );
 
         // Then
@@ -362,8 +367,16 @@ mod tests {
     #[test]
     fn maps_mounted_codebase_mode_to_a_non_managed_request() {
         // Given / When — codebase_mode "mounted"
-        let req =
-            start_session_request_from("tok", Path::new("/r"), "m", "auto", "mounted", &[], &[]);
+        let req = start_session_request_from(
+            "tok",
+            Path::new("/r"),
+            "m",
+            "auto",
+            "mounted",
+            &[],
+            &[],
+            "acme-cli",
+        );
 
         // Then
         assert!(!req.managed_codebase);

@@ -31,6 +31,14 @@ const CLAUDE_GLOBS: &[&str] = &[
     ".agents/**",
 ];
 
+/// The guidance files the session's spec declares, as test data.
+fn guidance_files() -> Vec<std::path::PathBuf> {
+    vec![
+        std::path::PathBuf::from("CLAUDE.md"),
+        std::path::PathBuf::from("AGENTS.md"),
+    ]
+}
+
 /// The per-file cap a manifest is built under, wide enough that no fixture here brushes it. A test
 /// that is *about* the cap names its own, so the two concerns never quietly swap places.
 const A_GENEROUS_CAP: u64 = 64 * 1024 * 1024;
@@ -78,7 +86,7 @@ impl ATargetRepo {
     }
 
     fn manifest_capped_at(&self, max_bytes: u64) -> ContextManifest {
-        ContextManifest::of_worktree(self.path(), CLAUDE_GLOBS, max_bytes)
+        ContextManifest::of_worktree(self.path(), CLAUDE_GLOBS, &guidance_files(), max_bytes)
             .expect("manifest must build")
     }
 }
@@ -581,7 +589,7 @@ fn a_failed_re_sync_marks_the_context_stale_in_the_preamble() {
     .expect("write");
 
     // When
-    mark_context_stale(ctx.path()).expect("mark_context_stale must succeed");
+    mark_context_stale(ctx.path(), &guidance_files()).expect("mark_context_stale must succeed");
 
     // Then
     let claude_md = std::fs::read_to_string(ctx.path().join("CLAUDE.md")).expect("read");
@@ -603,10 +611,10 @@ fn a_successful_re_sync_clears_the_staleness_line() {
     let ctx = tempfile::tempdir().expect("tempdir");
     let original = "## Managed Codebase\n\nThe real codebase is elsewhere.\n\n# Project rules\n";
     std::fs::write(ctx.path().join("CLAUDE.md"), original).expect("write");
-    mark_context_stale(ctx.path()).expect("mark");
+    mark_context_stale(ctx.path(), &guidance_files()).expect("mark");
 
     // When
-    clear_context_stale(ctx.path()).expect("clear_context_stale must succeed");
+    clear_context_stale(ctx.path(), &guidance_files()).expect("clear_context_stale must succeed");
 
     // Then
     let claude_md = std::fs::read_to_string(ctx.path().join("CLAUDE.md")).expect("read");
@@ -626,8 +634,8 @@ fn marking_stale_twice_leaves_exactly_one_warning() {
     .expect("write");
 
     // When
-    mark_context_stale(ctx.path()).expect("mark");
-    mark_context_stale(ctx.path()).expect("mark again");
+    mark_context_stale(ctx.path(), &guidance_files()).expect("mark");
+    mark_context_stale(ctx.path(), &guidance_files()).expect("mark again");
 
     // Then
     let claude_md = std::fs::read_to_string(ctx.path().join("CLAUDE.md")).expect("read");

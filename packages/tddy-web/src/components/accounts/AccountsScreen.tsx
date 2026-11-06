@@ -111,6 +111,8 @@ export interface AccountsScreenProps {
   onListModels?: (accountId: string) => Promise<string[]>;
   /** Make a provider account the default for these harnesses. When absent the row has no control. */
   onSetDefaults?: (provider: string, accountId: string, harnesses: string[]) => void;
+  /** The session types the daemon serves, for the "Default for" control; from its `ListAgents`. */
+  harnessOptions?: readonly { id: string; label: string }[];
 }
 
 export function AccountsScreen({
@@ -123,13 +125,14 @@ export function AccountsScreen({
   connectError = null,
   onListModels,
   onSetDefaults,
+  harnessOptions = [],
 }: AccountsScreenProps) {
   return (
     <div data-testid="accounts-screen">
       {onConnectProviderAccount && outcome.kind === "listed" ? (
         <ConnectApiKey onConnect={onConnectProviderAccount} error={connectError} />
       ) : null}
-      {renderOutcome(outcome, onRename, onRemove, onAddAccount, onListModels, onSetDefaults)}
+      {renderOutcome(outcome, onRename, onRemove, onAddAccount, onListModels, onSetDefaults, harnessOptions)}
       {linkAttempt ? <LinkAttemptView attempt={linkAttempt} /> : null}
     </div>
   );
@@ -192,6 +195,7 @@ function renderOutcome(
   onAddAccount: AccountsScreenProps["onAddAccount"],
   onListModels: AccountsScreenProps["onListModels"],
   onSetDefaults: AccountsScreenProps["onSetDefaults"],
+  harnessOptions: readonly { id: string; label: string }[],
 ) {
   switch (outcome.kind) {
     case "uninitialized":
@@ -250,6 +254,7 @@ function renderOutcome(
                     onRemove={onRemove}
                     onListModels={onListModels}
                     onSetDefaults={onSetDefaults}
+                    harnessOptions={harnessOptions}
                   />
                 ))}
               </ul>
@@ -291,6 +296,7 @@ interface AccountRowViewProps {
   onRemove: AccountsScreenProps["onRemove"];
   onListModels: AccountsScreenProps["onListModels"];
   onSetDefaults: AccountsScreenProps["onSetDefaults"];
+  harnessOptions: readonly { id: string; label: string }[];
 }
 
 function AccountRowView({
@@ -301,6 +307,7 @@ function AccountRowView({
   onRemove,
   onListModels,
   onSetDefaults,
+  harnessOptions,
 }: AccountRowViewProps) {
   const rowId = `accounts-row-${provider}-${account.accountId}`;
   const [draftLabel, setDraftLabel] = useState(account.label);
@@ -353,6 +360,7 @@ function AccountRowView({
           key={account.defaultFor.join(",")}
           rowId={rowId}
           current={account.defaultFor}
+          options={harnessOptions}
           onSave={(harnesses) => onSetDefaults(provider, account.accountId, harnesses)}
         />
       ) : null}

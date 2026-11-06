@@ -11,20 +11,22 @@ use std::path::PathBuf;
 impl CliSessionManager {
     /// Resume (relaunch) an existing plain session by spawning a new process in the same worktree.
     ///
-    /// Always passes `initial_prompt = None`: a resumed session continues via `--session-id`
+    /// Always passes `initial_prompt = None`: a resumed session continues via the resume argv its caller rendered
     /// and must not replay the original prompt (that would inject a duplicate user turn).
     pub async fn resume(
         &self,
         session_id: &str,
         worktree_path: PathBuf,
         model: &str,
-        binary_path: &str,
+        argv: Vec<String>,
+        session_type: &str,
     ) -> anyhow::Result<Arc<pty_handle::PtyHandle>> {
         self.resume_with_options(
             session_id,
             worktree_path,
             model,
-            binary_path,
+            argv,
+            session_type,
             None,
             Vec::new(),
             Vec::new(),
@@ -46,7 +48,8 @@ impl CliSessionManager {
         session_id: &str,
         worktree_path: PathBuf,
         model: &str,
-        binary_path: &str,
+        argv: Vec<String>,
+        session_type: &str,
         append_system_prompt_file: Option<&Path>,
         extra_args: Vec<String>,
         env: Vec<(String, String)>,
@@ -55,11 +58,9 @@ impl CliSessionManager {
             session_id,
             worktree_path,
             model,
-            binary_path,
+            argv,
+            session_type,
             None,
-            None,
-            false,
-            true,
             append_system_prompt_file,
             extra_args,
             env,

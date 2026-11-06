@@ -567,7 +567,7 @@ async fn run_macos(args: Args, cfg: config::SandboxAppConfig) -> Result<()> {
     // end-of-session token summary once the terminal bridge returns. The transcript reader behind
     // it reads one agent's transcripts, so only that agent's session has a main-agent row.
     let model_for_summary = model.clone();
-    let is_transcript_agent = agent.id == "claude";
+    let is_transcript_agent = agent.spec.agent.transcript_usage;
 
     // Register the reusable-LSP executor before spawning the jail, so the spawn-time
     // availability check can gate the in-jail `Lsp*` tools, and relayed `Lsp*` tool calls

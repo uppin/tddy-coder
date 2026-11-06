@@ -4,13 +4,35 @@ import type {
   StartSessionRequestInit,
 } from "../../hooks/useSessionAttachments";
 
-export type SessionType =
-  | "tool"
-  | "claude-cli"
-  | "cursor-cli"
-  | "opencode-cli"
-  | "muse-cli"
-  | "warp-cli";
+/** A session type: `tool`, or a coding agent's `<id>-cli` as its daemon served it. */
+export type SessionType = string;
+
+/**
+ * What the agent behind a CLI session type may be asked for, derived in the pane from the
+ * metadata the target daemon served for that agent (`ListAgents`): the params its launch
+ * argv binds, the capabilities its spec declares, and whether a provider route can point
+ * it elsewhere. The request builder reads only this — it names no agent.
+ */
+export interface CliAgentFeatures {
+  bindsModel: boolean;
+  bindsPermissionMode: boolean;
+  bindsSkipPermissions: boolean;
+  bindsPrompt: boolean;
+  managedWorkflow: boolean;
+  splitHost: boolean;
+  providerRoutable: boolean;
+}
+
+/** An agent that may be asked for nothing: the fail-closed shape for an unserved type. */
+export const NO_CLI_FEATURES: CliAgentFeatures = {
+  bindsModel: false,
+  bindsPermissionMode: false,
+  bindsSkipPermissions: false,
+  bindsPrompt: false,
+  managedWorkflow: false,
+  splitHost: false,
+  providerRoutable: false,
+};
 
 /**
  * Whether the daemon cuts the session's worktree itself — and so can push the new branch to origin
@@ -35,6 +57,8 @@ export interface CreateSessionFormValues {
   selectedBranchToWorkOn: string;
   daemonInstanceId: string;
   sessionType: SessionType;
+  /** What the agent behind `sessionType` may be asked for; absent for a tool session. */
+  cliFeatures?: CliAgentFeatures;
   toolPath: string;
   selectedAgentId: string;
   recipe: string;
@@ -154,65 +178,11 @@ export function buildStartSessionRequest(
       sandbox: false,
     };
   }
-  if (sessionType === "cursor-cli") {
-    return {
-      ...commonParams,
-      toolPath: "",
-      agent: "",
-      recipe: managedCodebase ? recipe : "",
-      stackParent,
-      stackParentDaemonInstanceId,
-      stackNodeId,
-      sessionType: "cursor-cli",
-      model,
-      permissionMode: "",
-      initialPrompt,
-      sandbox,
-      runInTmux: runInTmuxChoice(form),
-      managedCodebase,
-      specializedAgents: selectedAgentIds,
-      clonePlacedAgents,
-      semanticIndex,
-      // cursor-agent has no tool allowlist, so a split codebase could only be suggested to it,
-      // never enforced — the daemon refuses such a request. Both managed-codebase blocks share
-      // state, so a host picked while the form was claude-cli must not survive the switch here.
-      codebaseDaemonInstanceId: "",
-    };
-  }
-  if (sessionType === "opencode-cli" || sessionType === "muse-cli" || sessionType === "warp-cli") {
-    return {
-      ...commonParams,
-      toolPath: "",
-      agent: "",
-      recipe: "",
-      stackParent,
-      stackParentDaemonInstanceId,
-      stackNodeId,
-      sessionType,
-      // Warp takes no model: its CLI has no model flag, and the model is chosen in-session. So the
-      // request names none, whatever the catalog reported for the harness.
-      model: sessionType === "warp-cli" ? "" : model,
-      // The provider field is offered to every CLI harness but Warp, so the account the operator
-      // chose goes out as chosen rather than being dropped in favour of the vendor; the daemon
-      // refuses one the harness cannot run on (Muse Code runs only on Meta). Warp is offered no
-      // provider, so the form holds none for it to send.
-      providerAccountId,
-      providerBuiltIn,
-      permissionMode: "",
-      // The form offers OpenCode and Muse Code only a model, and Warp neither, so the request
-      // clears what another session type left in the form: no first prompt, sandbox, managed
-      // codebase, specialized agents or semantic index.
-      initialPrompt: "",
-      sandbox: false,
-      // The one choice these types keep from the form: the tmux run the operator asked for.
-      runInTmux: runInTmuxChoice(form),
-      managedCodebase: false,
-      specializedAgents: [],
-      clonePlacedAgents: [],
-      semanticIndex: false,
-      codebaseDaemonInstanceId: "",
-    };
-  }
+  const features = form.cliFeatures ?? NO_CLI_FEATURES;
+  // A split placement only exists for an agent whose spec declares it can stand on one
+  // host against a codebase on another; for any other agent a codebase host picked while
+  // the form showed a different agent must not survive into the request.
+  const split = features.splitHost && isSplitCodebase;
   return {
     ...commonParams,
     toolPath: "",
@@ -221,31 +191,29 @@ export function buildStartSessionRequest(
     // split session does not have — the daemon refuses the combination. The form defaults
     // `recipe` to a non-empty value, so without this a split session would be created as a
     // request that cannot succeed.
-    recipe: managedCodebase && !isSplitCodebase ? recipe : "",
+    recipe: features.managedWorkflow && managedCodebase && !split ? recipe : "",
     stackParent,
     stackParentDaemonInstanceId,
     stackNodeId,
-    ...claudeCliAgentChoices(form),
+    ...cliAgentChoices(form, features),
     sandbox,
     runInTmux: runInTmuxChoice(form),
-    managedCodebase,
+    managedCodebase: features.managedWorkflow ? managedCodebase : false,
     // The third placement. Choosing it cleared the two above and the codebase host in the form,
     // so they go out cleared here without being restated — the request says what the screen says.
     sandboxedCodebase,
-    // A remote worktree is reachable only through the mcp__tddy-tools__* proxy that managed
-    // codebase installs, so a placement chosen before the toggle was switched off would name a
-    // combination the daemon refuses.
-    codebaseDaemonInstanceId: isSplitCodebase ? codebaseDaemonInstanceId : "",
-    sshConfigHost,
+    codebaseDaemonInstanceId: split ? codebaseDaemonInstanceId : "",
+    // The SSH host belongs to the managed block: it names the exec catalog's OpenSSH host
+    // for a managed session, split or co-located.
+    sshConfigHost: features.managedWorkflow && managedCodebase ? sshConfigHost : "",
   };
 }
 
 /**
- * Whether the request carries `run_in_tmux`: the operator's choice, for every CLI harness type, and
+ * Whether the request carries `run_in_tmux`: the operator's choice, for every CLI session type, and
  * never with the sandbox, the jailed codebase or a split placement, each of which the daemon
- * refuses together with it. Read off the form rather than off the request: the opencode, muse and
- * warp returns send `sandbox: false` whatever the form holds. (The pane clears a sandbox or jailed
- * codebase left on from another session type when it switches to one without the control —
+ * refuses together with it. (The pane clears a sandbox or jailed codebase left on from another
+ * session type when it switches to an agent whose spec does not offer the placement —
  * `useCreateSessionPlacement` — so the form does not hold one there.)
  */
 function runInTmuxChoice(form: CreateSessionFormValues): boolean {
@@ -255,25 +223,29 @@ function runInTmuxChoice(form: CreateSessionFormValues): boolean {
 }
 
 /**
- * What the operator chose for a claude-cli agent, independent of where it runs: model, provider,
- * permissions, first prompt, specialized agents and semantic index. Shared by the New-session
- * request and the main start spec so the two cannot drift.
+ * What the operator chose for the form's CLI agent, independent of where it runs — each field
+ * sent only when the agent's served metadata says it may be asked for it: the model and the
+ * first prompt only when its launch argv binds them, the permission fields only when it binds
+ * a permission mode or the bypass, the provider only when a route can point it elsewhere.
+ * Shared by the New-session request and the main start spec so the two cannot drift.
  */
-function claudeCliAgentChoices(form: CreateSessionFormValues) {
+function cliAgentChoices(form: CreateSessionFormValues, features: CliAgentFeatures) {
   return {
-    sessionType: "claude-cli",
-    model: form.model,
-    providerAccountId: form.providerAccountId,
-    providerBuiltIn: form.providerBuiltIn,
-    permissionMode: form.permissionMode,
-    dangerouslySkipPermissions: form.placementWithdrawsPermissionBypass
-      ? false
-      : form.dangerouslySkipPermissions,
-    initialPrompt: form.initialPrompt,
+    sessionType: form.sessionType,
+    model: features.bindsModel ? form.model : "",
+    providerAccountId: features.providerRoutable ? form.providerAccountId : undefined,
+    providerBuiltIn: features.providerRoutable ? form.providerBuiltIn : undefined,
+    permissionMode: features.bindsPermissionMode ? form.permissionMode : "",
+    dangerouslySkipPermissions: features.bindsSkipPermissions
+      ? form.placementWithdrawsPermissionBypass
+        ? false
+        : form.dangerouslySkipPermissions
+      : undefined,
+    initialPrompt: features.bindsPrompt ? form.initialPrompt : "",
     // Both ride along on any placement, split or jailed or neither, and on whether the codebase is
     // managed or not — an agent reads the codebase through its own placement, and the index is
     // built wherever the worktree is. Nothing gates them here: the picker and the toggle are shown
-    // on every claude-cli placement, so what the form holds is what the screen showed.
+    // on every CLI placement, so what the form holds is what the screen showed.
     specializedAgents: form.selectedAgentIds,
     clonePlacedAgents: pickedClonePlacedAgents(form.clonePlacedAgentIds, form.selectedAgentIds),
     semanticIndex: form.semanticIndex,
@@ -282,11 +254,11 @@ function claudeCliAgentChoices(form: CreateSessionFormValues) {
 
 /**
  * The start spec the main variant of the form sends in `EnsureProjectHomeSession.start`: the
- * claude-cli request without the fields the daemon owns for main — project, branch, placement and
+ * CLI request without the fields the daemon owns for main — project, branch, placement and
  * stack — so the spec says only what the operator chose.
  */
 export function buildProjectHomeStartSpec(form: CreateSessionFormValues): StartSessionRequestInit {
-  return claudeCliAgentChoices(form);
+  return cliAgentChoices(form, form.cliFeatures ?? NO_CLI_FEATURES);
 }
 
 /** A placement names an agent that is picked: one left on a since-unpicked agent goes nowhere. */

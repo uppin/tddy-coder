@@ -28,7 +28,7 @@ use tddy_core::changeset::Changeset;
 use tddy_core::output::SESSIONS_SUBDIR;
 use tddy_core::session_metadata::{read_session_metadata, SessionMetadata};
 use tddy_daemon_kernel::config::DaemonConfig;
-use tddy_session_lifecycle::claude_cli_session::ClaudeCliSessionManager;
+use tddy_session_lifecycle::claude_cli_session::CliSessionManager;
 use tddy_session_lifecycle::connection_service::operator_session_starter::HostSessionStarter;
 use tddy_session_lifecycle::connection_service::DaemonSessionHost;
 use tddy_telegram_control::telegram_notifier::{session_telegram_label, InMemoryTelegramSender};
@@ -342,7 +342,7 @@ impl AWorldBuilder {
             .then(|| the_coding_agents(&tools, &stubs));
 
         let config = a_daemon_config();
-        let manager = Arc::new(ClaudeCliSessionManager::new());
+        let manager = Arc::new(CliSessionManager::new());
         let host_base = sessions_base.clone();
         let host = DaemonSessionHost::new(
             config.clone(),
@@ -375,7 +375,7 @@ impl AWorldBuilder {
             elicitation_select_options: Default::default(),
             elicitation_multi_select_meta: Default::default(),
             pending_elicitation_other: Default::default(),
-            claude_cli_manager: manager,
+            cli_manager: manager,
         });
         let registry = coding_agents
             .as_ref()

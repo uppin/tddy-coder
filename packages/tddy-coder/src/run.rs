@@ -15,8 +15,7 @@ use std::sync::{Arc, Mutex};
 use tddy_core::usage_watcher::{spawn_session_usage_watcher, SessionUsageWatchConfig};
 use tddy_core::workflow::graph::ExecutionStatus;
 use tddy_core::{
-    backend_from_label, backend_selection_question, default_model_for_agent, get_session_for_tag,
-    output::SESSIONS_SUBDIR, preselected_index_for_agent, read_changeset, read_session_metadata,
+    get_session_for_tag, output::SESSIONS_SUBDIR, read_changeset, read_session_metadata,
     CodingBackend, GoalId, PendingWorkflowStart, SharedBackend, WorkflowEngine, WorkflowRecipe,
 };
 use tddy_discovery;
@@ -214,11 +213,11 @@ fn assign_default_session_id(args: &mut Args) {
 
 /// Plain stdin menu when `--agent` was omitted (single-goal mode).
 fn resolve_agent_for_single_goal_plain(_args: &Args) -> anyhow::Result<String> {
-    let q = backend_selection_question();
+    let q = crate::agent_registry_cli::builtin_backend_selection_question();
     let label = plain::read_backend_selection_plain(&q)?;
-    let (agent, _) = backend_from_label(&label);
-    verify_tddy_tools_available(agent)?;
-    Ok(agent.to_string())
+    let (agent, _) = crate::agent_registry_cli::agent_and_default_model(&label);
+    verify_tddy_tools_available(&agent)?;
+    Ok(agent)
 }
 
 /// Plain stdin menu when `--agent` was omitted (full workflow, no TUI).
@@ -226,11 +225,11 @@ fn resolve_agent_for_full_workflow_plain(args: &Args) -> anyhow::Result<String> 
     if let Some(ref a) = args.agent {
         return Ok(a.clone());
     }
-    let q = backend_selection_question();
+    let q = crate::agent_registry_cli::builtin_backend_selection_question();
     let label = plain::read_backend_selection_plain(&q)?;
-    let (agent, _) = backend_from_label(&label);
-    verify_tddy_tools_available(agent)?;
-    Ok(agent.to_string())
+    let (agent, _) = crate::agent_registry_cli::agent_and_default_model(&label);
+    verify_tddy_tools_available(&agent)?;
+    Ok(agent)
 }
 
 /// Resolve the tddy data directory from args (CLI `--tddy-data-dir`), falling back to the
@@ -1828,7 +1827,7 @@ fn run_daemon(args: &Args, shutdown: Arc<AtomicBool>, host: ParticipantHost) -> 
             agent_str,
             args.model
                 .as_deref()
-                .unwrap_or_else(|| default_model_for_agent(agent_str)),
+                .unwrap_or_else(|| crate::agent_registry_cli::default_model_for_agent(agent_str)),
             recipe_arc_for_args(args)?,
             tddy_data_dir.clone(),
         )
@@ -2115,7 +2114,7 @@ fn run_daemon(args: &Args, shutdown: Arc<AtomicBool>, host: ParticipantHost) -> 
                         model: args
                             .model
                             .as_deref()
-                            .unwrap_or_else(|| default_model_for_agent(agent_str))
+                            .unwrap_or_else(|| crate::agent_registry_cli::default_model_for_agent(agent_str))
                             .to_string(),
                         poll_interval: SESSION_USAGE_POLL_INTERVAL,
                     },
@@ -2152,7 +2151,7 @@ fn run_daemon(args: &Args, shutdown: Arc<AtomicBool>, host: ParticipantHost) -> 
                 model: args
                     .model
                     .as_deref()
-                    .unwrap_or_else(|| default_model_for_agent(agent_str))
+                    .unwrap_or_else(|| crate::agent_registry_cli::default_model_for_agent(agent_str))
                     .to_string(),
                 recipe: args
                     .recipe
@@ -2959,10 +2958,9 @@ fn build_goal_context(
 ) -> std::collections::HashMap<String, serde_json::Value> {
     let inherit_stdin = io::stdin().is_terminal();
     let mut ctx = std::collections::HashMap::new();
-    let model_val = args
-        .model
-        .clone()
-        .unwrap_or_else(|| default_model_for_agent(resolved_agent_for_model).to_string());
+    let model_val = args.model.clone().unwrap_or_else(|| {
+        crate::agent_registry_cli::default_model_for_agent(resolved_agent_for_model).to_string()
+    });
     ctx.insert(
         "model".to_string(),
         serde_json::to_value(model_val).unwrap(),
@@ -3227,14 +3225,14 @@ fn run_full_workflow_tui(
             let m = args
                 .model
                 .as_deref()
-                .unwrap_or_else(|| default_model_for_agent(a));
+                .unwrap_or_else(|| crate::agent_registry_cli::default_model_for_agent(a));
             Presenter::new(a, m, recipe_arc_for_args(args)?, tddy_data_dir.clone())
         }
         None => {
             let m = args
                 .model
                 .as_deref()
-                .unwrap_or_else(|| default_model_for_agent("claude"));
+                .unwrap_or_else(|| crate::agent_registry_cli::default_model_for_agent("claude"));
             Presenter::new(
                 "claude",
                 m,
@@ -3261,8 +3259,15 @@ fn run_full_workflow_tui(
     let presenter = Arc::new(Mutex::new(presenter));
 
     if args.agent.is_none() {
-        let q = backend_selection_question();
-        let idx = preselected_index_for_agent("claude");
+        let q = crate::agent_registry_cli::builtin_backend_selection_question();
+        let idx = crate::agent_registry_cli::preselected_index_for_agent(
+            crate::agent_registry_cli::backend_agent_ids(
+                tddy_coding_agent_specs::CodingAgentRegistry::builtin_cached(),
+            )
+            .first()
+            .map(String::as_str)
+            .unwrap_or(""),
+        );
         let cursor_path_for_factory = args.cursor_agent_path.clone();
         let codex_path_for_factory = args.codex_cli_path.clone();
         let codex_acp_path_for_factory = args.codex_acp_cli_path.clone();
@@ -3271,6 +3276,9 @@ fn run_full_workflow_tui(
         let specialized_agent_defs_for_factory = resolve_specialized_agent_defs(args)?;
         let provider_route_for_factory = load_provider_route(args.provider_route_path.as_deref())?;
         let mut p = presenter.lock().unwrap();
+        p.set_backend_default_models(crate::agent_registry_cli::backend_default_models(
+            tddy_coding_agent_specs::CodingAgentRegistry::builtin_cached(),
+        ));
         p.configure_deferred_workflow_start(
             Box::new(move |agent: &str| {
                 verify_tddy_tools_available(agent).map_err(|e| e.to_string())?;

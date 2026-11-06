@@ -9,7 +9,26 @@
 use std::path::{Path, PathBuf};
 
 use serial_test::serial;
-use tddy_agent_backend::{ClaudeAcpBackend, CodingBackend, InvokeRequest, SessionMode};
+use tddy_agent_backend::{CodingBackend, InvokeRequest, SessionMode};
+
+/// A spec backend for the stub agent, as the agent's spec builds it: its routed agent and a
+/// command that spawns the stub.
+fn a_spec_backend(path: std::path::PathBuf) -> tddy_agent_backend::SpecAcpBackend {
+    tddy_agent_backend::SpecAcpBackend::new(
+        tddy_agent_backend::provider_route::RoutedAgent {
+            id: "claude-acp".to_string(),
+            product: "Claude".to_string(),
+            support: tddy_agent_backend::provider_route::RouteSupport::default(),
+            key_env: None,
+        },
+        tddy_agent_backend::AcpAgentCommand {
+            program: path,
+            args: Vec::new(),
+            env: Vec::new(),
+            cwd: None,
+        },
+    )
+}
 
 fn stub_agent_path() -> PathBuf {
     let manifest_dir = std::env::var("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR");
@@ -60,7 +79,7 @@ async fn claude_acp_honours_the_requested_model() {
     let mut scenario = one_empty_turn();
     scenario["models"] = serde_json::json!(["sonnet", "opus"]);
     let record = a_stub_recording_into(dir.path(), scenario);
-    let backend = ClaudeAcpBackend::with_agent_path(stub_agent_path());
+    let backend = a_spec_backend(stub_agent_path());
 
     // When
     backend
@@ -83,7 +102,7 @@ async fn claude_acp_resume_survives_a_new_backend() {
     // Given
     let dir = tempfile::tempdir().expect("tempdir");
     a_stub_recording_into(dir.path(), one_empty_turn());
-    let first = ClaudeAcpBackend::with_agent_path(stub_agent_path());
+    let first = a_spec_backend(stub_agent_path());
     let session_id = first
         .invoke(InvokeRequest {
             session: Some(SessionMode::Fresh("tddy-1".to_string())),
@@ -96,7 +115,7 @@ async fn claude_acp_resume_survives_a_new_backend() {
     drop(first);
     let second_dir = tempfile::tempdir().expect("tempdir");
     let record = a_stub_recording_into(second_dir.path(), one_empty_turn());
-    let second = ClaudeAcpBackend::with_agent_path(stub_agent_path());
+    let second = a_spec_backend(stub_agent_path());
 
     // When
     second

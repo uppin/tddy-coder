@@ -9,7 +9,8 @@ export const TOOL_SHORTCUTS: Record<string, ToolShortcutDef[]> = {
     { label: "Ctrl+C", keys: ["Ctrl", "C"] },
     { label: "Escape", keys: ["Escape"] },
   ],
-  "claude-cli": [
+  // The keys a CLI agent's terminal answers, offered for any `<id>-cli` session type.
+  "cli": [
     { label: "Shift+Tab", keys: ["Shift", "Tab"] },
     { label: "Alt+M", keys: ["Alt", "M"] },
     { label: "Escape", keys: ["Escape"] },
@@ -102,10 +103,10 @@ export function toolIdentifierFromPath(toolPath: string): string {
 }
 
 export function resolveShortcutsForSession(
-  isClaudeCli: boolean,
+  isCliSession: boolean,
   toolPath: string,
 ): ToolShortcutDef[] {
-  if (isClaudeCli) return TOOL_SHORTCUTS["claude-cli"] ?? [];
+  if (isCliSession) return TOOL_SHORTCUTS["cli"] ?? [];
   const id = toolIdentifierFromPath(toolPath);
   return TOOL_SHORTCUTS[id] ?? TOOL_SHORTCUTS["default"] ?? [];
 }

@@ -1,18 +1,21 @@
-use crate::start_session_args::StartChoices;
 use crate::start_session_args::ATTACHMENT_SCOPES;
+use crate::start_session_args::{AgentChoice, StartChoices};
 use serde_json::{json, Map, Value};
-use tddy_core::cli_harness::{cli_harness_requires_model, cli_harnesses};
 use tddy_service::proto::types::HostDocumentScope;
 
-/// The permission modes a claude-cli session takes; empty is the daemon's default (`auto`).
-const PERMISSION_MODES: [&str; 6] = [
-    "",
-    "auto",
-    "default",
-    "acceptEdits",
-    "plan",
-    "bypassPermissions",
-];
+/// The permission modes the injected agents' launches take, in injected order, with the empty
+/// choice (the agent's own default) first.
+fn permission_modes(agents: &[AgentChoice]) -> Vec<String> {
+    let mut modes = vec![String::new()];
+    for agent in agents {
+        for mode in &agent.permission_modes {
+            if !modes.contains(mode) {
+                modes.push(mode.clone());
+            }
+        }
+    }
+    modes
+}
 
 const NEW_BRANCH_FROM_BASE: &str = "new_branch_from_base";
 const WORK_ON_SELECTED_BRANCH: &str = "work_on_selected_branch";
@@ -43,20 +46,21 @@ pub fn offered_start_fields(choices: &StartChoices) -> Vec<String> {
 }
 
 fn schema_offering(choices: Option<&StartChoices>) -> Value {
-    let harnesses = cli_harnesses();
+    let no_agents: &[AgentChoice] = &[];
+    let agents: &[AgentChoice] = choices.map_or(no_agents, |choices| choices.agents.as_slice());
     let session_types: Vec<&str> = ["tool", "workspace"]
         .into_iter()
-        .chain(harnesses.iter().map(|harness| harness.session_type))
+        .chain(agents.iter().map(|agent| agent.session_type.as_str()))
         .collect();
-    let harness_list = harnesses
+    let harness_list = agents
         .iter()
-        .map(|harness| format!("`{}` ({})", harness.session_type, harness.label))
+        .map(|agent| format!("`{}` ({})", agent.session_type, agent.label))
         .collect::<Vec<_>>()
         .join(", ");
-    let needing_a_model: Vec<&str> = harnesses
+    let needing_a_model: Vec<&str> = agents
         .iter()
-        .map(|harness| harness.session_type)
-        .filter(|session_type| cli_harness_requires_model(session_type))
+        .filter(|agent| agent.requires_model)
+        .map(|agent| agent.session_type.as_str())
         .collect();
 
     let mut properties = Map::new();
@@ -88,7 +92,7 @@ fn schema_offering(choices: Option<&StartChoices>) -> Value {
     offer(
         "model",
         string(&format!(
-            "Model id or alias for the session's agent (for `claude-cli`: `opus`, `sonnet`, …). \
+            "Model id or alias for the session's agent. \
              Required for {}: a start of those without one is refused. Other session types pick \
              their own when empty.",
             needing_a_model
@@ -138,13 +142,13 @@ fn schema_offering(choices: Option<&StartChoices>) -> Value {
         "permission_mode",
         json!({
             "type": "string",
-            "enum": PERMISSION_MODES,
-            "description": "The claude-cli permission mode; empty is `auto`. Ignored with `dangerously_skip_permissions`."
+            "enum": permission_modes(agents),
+            "description": "The session agent's permission mode; empty is its own default. Ignored with `dangerously_skip_permissions`."
         }),
     );
     offer(
         "dangerously_skip_permissions",
-        boolean("For claude-cli: skip every permission prompt (`--dangerously-skip-permissions`). Replaces `permission_mode`."),
+        boolean("Skip every permission prompt (`--dangerously-skip-permissions`). Replaces `permission_mode`."),
     );
     offer(
         "stack_parent",
@@ -170,15 +174,15 @@ fn schema_offering(choices: Option<&StartChoices>) -> Value {
     );
     offer(
         "managed_codebase",
-        boolean("For claude-cli: the agent reaches the worktree only through the tddy-tools exec tools, never its own filesystem tools."),
+        boolean("The agent reaches the worktree only through the tddy-tools exec tools, never its own filesystem tools."),
     );
     offer(
         "sandboxed_codebase",
-        boolean("For claude-cli: jail the session's checkout and run the agent beside it, unconfined, with its filesystem and shell tools withdrawn. Exclusive with `sandbox`, `managed_codebase` and `codebase_daemon_instance_id`."),
+        boolean("Jail the session's checkout and run the agent beside it, unconfined, with its filesystem and shell tools withdrawn. Exclusive with `sandbox`, `managed_codebase` and `codebase_daemon_instance_id`."),
     );
     offer(
         "codebase_daemon_instance_id",
-        string("The host that holds the session's worktree, when it is not the host the agent runs on. Requires `managed_codebase` and `claude-cli`. Empty keeps them together."),
+        string("The host that holds the session's worktree, when it is not the host the agent runs on. Requires `managed_codebase`. Empty keeps them together."),
     );
     offer(
         "ssh_config_host",
@@ -190,7 +194,7 @@ fn schema_offering(choices: Option<&StartChoices>) -> Value {
     );
     offer(
         "run_in_tmux",
-        boolean("For claude-cli: run the agent in a tmux session of its own on the host, as the session's OS user, so it outlives the terminal attached to it. Exclusive with `sandbox`, `sandboxed_codebase` and `codebase_daemon_instance_id`."),
+        boolean("Run the agent in a tmux session of its own on the host, as the session's OS user, so it outlives the terminal attached to it. Exclusive with `sandbox`, `sandboxed_codebase` and `codebase_daemon_instance_id`."),
     );
     offer(
         "specialized_agents",
@@ -265,7 +269,7 @@ fn host_property(choices: Option<&StartChoices>) -> Value {
 
 fn recipe_property(choices: Option<&StartChoices>) -> Value {
     let mut property = string(
-        "The workflow recipe a `tool` session (or a managed claude-cli / cursor-cli session) runs; empty is the default.",
+        "The workflow recipe a `tool` session (or a managed CLI-agent session) runs; empty is the default.",
     );
     if let Some(choices) = choices {
         property["enum"] = std::iter::once("")

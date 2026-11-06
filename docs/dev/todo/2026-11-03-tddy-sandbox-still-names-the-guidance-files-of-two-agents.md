@@ -6,10 +6,22 @@
 
 ## What is left
 
-`tddy-sandbox-recipes` is clean. `tddy-sandbox` still spells agent names in `src/`: the constants
-`MANAGED_CODEBASE_PREAMBLE` and `PREAMBLE_FILES` (`["CLAUDE.md", "AGENTS.md"]`) in `context_dir.rs`,
-and `.claude/**`, `CLAUDE.md`, `Claude Code` in the comments and in-source tests of `context_dir.rs`,
-`context_manifest.rs`, `context_manifest/{links,walk}.rs`, `exec_reads.rs` and `builder.rs`.
+**Narrowed by the `#agent-tools` sweep (2026-11-06):** the functional half is done.
+`PREAMBLE_FILES` is deleted; every caller threads the agent's spec `instructions.files`
+beside the globs (`walk_context_files`, `ContextManifest::of_worktree`,
+`SandboxContextDir::create*`, `ContextSyncer`, split and lifecycle call sites), and
+`managed_codebase_preamble` names the guidance files it is handed. What remains is
+vocabulary, not behaviour:
+
+- `CONTEXT_EXCLUDE_GLOBS` (`context_manifest.rs`) still hard-codes
+  `.claude/settings.local.json`, the daemon-owned hooks file one agent's adapter
+  writes; withholding it for every agent is harmless but the path is one agent's.
+  Making it spec data means threading withheld paths beside the guidance files.
+- Comments and in-source test fixtures in `context_dir.rs`, `context_manifest.rs`,
+  `context_manifest/{links,walk}.rs`, `exec_reads.rs` and `builder.rs` still spell
+  agent names (`CLAUDE.md`, `.claude/**`, a vendor binary name) as examples. The
+  scan in `no_agent_vocabulary.rs` stays `#[ignore]`d until they use neutral names
+  (`RULES.md`, `.agent-config/**`).
 
 ## Why it is not a move
 

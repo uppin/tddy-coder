@@ -15,10 +15,27 @@ fn install_claude_cli_hooks(
 ) {
     let claude = tddy_coding_agent_specs::embedded_spec("claude").expect("claude.yaml is built in");
     let hooks = claude_cli_hooks(config, tddy_data_dir, &claude, "/usr/local/bin/tddy-tools");
-    tddy_session_split::service_util::write_claude_hooks_settings(
-        worktree_path,
-        &hooks.params(session_id, os_user),
-    );
+    let rendered = tddy_coding_agent_specs::slots::render(
+        &claude,
+        &tddy_coding_agent_specs::slots::SlotInputs {
+            workdir: worktree_path.to_path_buf(),
+            scratch_dir: worktree_path.to_path_buf(),
+            mcp_server: None,
+            allowed_tools: Vec::new(),
+            denied_tools: Vec::new(),
+            permission_prompt_tool: None,
+            preamble: None,
+            append_system_prompt_file: None,
+            hooks: Some(hooks.params(session_id, os_user)),
+            home: None,
+        },
+    )
+    .expect("the hooks slot renders");
+    for (path, bytes) in &rendered.files {
+        std::fs::create_dir_all(path.parent().expect("a hooks file has a parent"))
+            .expect("the hooks directory is created");
+        std::fs::write(path, bytes).expect("the hooks file is written");
+    }
 }
 
 /// The loopback port a desktop daemon's GitHub sign-in returns on — and the only HTTP it answers.
