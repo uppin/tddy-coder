@@ -5,6 +5,7 @@
  * `ListAgentModels("cursor-cli")` and `StartSession.sessionType = "cursor-cli"`.
  */
 import React from "react";
+import { servedAgentWire } from "../support/servedAgents";
 import { createClient } from "@connectrpc/connect";
 import { anInMemoryRpcBackend, type InMemoryRpcBackend } from "tddy-connectrpc-testkit";
 import { CreateSessionPane } from "../../src/components/sessions/CreateSessionPane";
@@ -52,7 +53,7 @@ function aBackendForCursorCliSession() {
       projects: [{ projectId: "proj-cursor", name: "Cursor Project", mainRepoPath: "/repo" }],
     }))
     .onUnary(CatalogService.method.listAgents, () => ({
-      agents: [{ id: "claude", label: "Claude" }],
+      agents: [{ id: "claude", label: "Claude", ...servedAgentWire("claude"), }, { id: "cursor", label: "Cursor", ...servedAgentWire("cursor"), },],
     }))
     .onUnary(CatalogService.method.listTools, () => ({
       tools: [{ path: "/usr/bin/tddy-coder", label: "tddy-coder" }],

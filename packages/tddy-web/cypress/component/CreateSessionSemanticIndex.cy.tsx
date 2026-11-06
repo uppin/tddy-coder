@@ -9,6 +9,7 @@
  * StartSession request the component actually sent — mirrors CreateSessionManagedWorkflow.cy.tsx.
  */
 import React from "react";
+import { servedAgentWire } from "../support/servedAgents";
 import { createClient } from "@connectrpc/connect";
 import { anInMemoryRpcBackend } from "tddy-connectrpc-testkit";
 import { CreateSessionPane } from "../../src/components/sessions/CreateSessionPane";
@@ -30,7 +31,12 @@ function aCreateSessionBackend() {
     .onUnary(ProjectService.method.listProjects, () => ({
       projects: [{ projectId: "proj-1", name: "Test Project", mainRepoPath: "/repo" }],
     }))
-    .onUnary(CatalogService.method.listAgents, () => ({ agents: [] }))
+    .onUnary(CatalogService.method.listAgents, () => ({
+      agents: [
+        { id: "claude", label: "Claude", ...servedAgentWire("claude") },
+        { id: "cursor", label: "Cursor", ...servedAgentWire("cursor") },
+      ],
+    }))
     .onUnary(CatalogService.method.listTools, () => ({ tools: [] }))
     .onUnary(CatalogService.method.listSubagents, () => ({
       // Qualified by its owning daemon, the way the picker lists and submits agents

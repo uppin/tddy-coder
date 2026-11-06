@@ -12,6 +12,7 @@
  */
 
 import React from "react";
+import { servedAgentWire } from "../support/servedAgents";
 import { CatalogService } from "../../src/gen/catalog_pb";
 import { ProjectService } from "../../src/gen/project_pb";
 import { Room } from "livekit-client";
@@ -91,7 +92,7 @@ function anAttachmentBackendWithoutStart(): InMemoryRpcBackend {
       projects: [{ projectId: "proj-1", name: "Test Project", mainRepoPath: "/repo" }],
     }))
     .onUnary(CatalogService.method.listAgents, () => ({
-      agents: [{ id: "claude", label: "Claude" }],
+      agents: [{ id: "claude", label: "Claude", ...servedAgentWire("claude"), }],
     }))
     .onUnary(CatalogService.method.listTools, () => ({
       tools: [{ path: "/usr/bin/tddy-coder", label: "tddy-coder" }],

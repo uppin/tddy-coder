@@ -8,6 +8,7 @@
  * Feature: docs/ft/daemon/opencode-cli-session.md
  */
 import { createClient } from "@connectrpc/connect";
+import { servedAgentWire } from "../support/servedAgents";
 import { anInMemoryRpcBackend, type InMemoryRpcBackend } from "tddy-connectrpc-testkit";
 import { CreateSessionPane } from "../../src/components/sessions/CreateSessionPane";
 import { SessionService } from "../../src/gen/session_pb";
@@ -29,7 +30,7 @@ function aBackend(): InMemoryRpcBackend {
     .onUnary(ProjectService.method.listProjects, () => ({
       projects: [{ projectId: "proj-1", name: "Test Project", mainRepoPath: "/repo" }],
     }))
-    .onUnary(CatalogService.method.listAgents, () => ({ agents: [{ id: "claude", label: "Claude" }] }))
+    .onUnary(CatalogService.method.listAgents, () => ({ agents: [{ id: "claude", label: "Claude", ...servedAgentWire("claude"), }, { id: "cursor", label: "Cursor", ...servedAgentWire("cursor"), }, { id: "opencode", label: "OpenCode", ...servedAgentWire("opencode"), },] }))
     .onUnary(CatalogService.method.listTools, () => ({
       tools: [{ path: "/usr/bin/tddy-coder", label: "tddy-coder" }],
     }))

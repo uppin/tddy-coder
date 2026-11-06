@@ -10,6 +10,7 @@
  * the component actually sent and observe the models the daemon advertised.
  */
 import React from "react";
+import { servedAgentWire } from "../support/servedAgents";
 import { createClient, ConnectError, Code } from "@connectrpc/connect";
 import { anInMemoryRpcBackend, type InMemoryRpcBackend } from "tddy-connectrpc-testkit";
 import { CreateSessionPane } from "../../src/components/sessions/CreateSessionPane";
@@ -52,8 +53,8 @@ function aBackendWithModels({ cursorFails = false }: { cursorFails?: boolean } =
     }))
     .onUnary(CatalogService.method.listAgents, () => ({
       agents: [
-        { id: "claude", label: "Claude" },
-        { id: "cursor", label: "Cursor" },
+        { id: "claude", label: "Claude", ...servedAgentWire("claude"), },
+        { id: "cursor", label: "Cursor", ...servedAgentWire("cursor"), },
       ],
     }))
     .onUnary(CatalogService.method.listTools, () => ({

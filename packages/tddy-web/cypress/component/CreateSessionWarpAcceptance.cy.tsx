@@ -5,6 +5,7 @@
  * Feature: docs/ft/daemon/warp-cli-session.md
  */
 import { createClient } from "@connectrpc/connect";
+import { servedAgentWire } from "../support/servedAgents";
 import { anInMemoryRpcBackend } from "tddy-connectrpc-testkit";
 import { CreateSessionPane } from "../../src/components/sessions/CreateSessionPane";
 import { SessionService } from "../../src/gen/session_pb";
@@ -23,7 +24,11 @@ function aDaemonWithOneProject() {
     .onUnary(ProjectService.method.listProjects, () => ({
       projects: [{ projectId: "proj-1", name: "Test Project", mainRepoPath: "/repo" }],
     }))
-    .onUnary(CatalogService.method.listAgents, () => ({ agents: [] }))
+    .onUnary(CatalogService.method.listAgents, () => ({
+      agents: [
+        { id: "warp", label: "Warp", ...servedAgentWire("warp") },
+      ],
+    }))
     .onUnary(CatalogService.method.listTools, () => ({ tools: [] }))
     .onUnary(CatalogService.method.listAgentModels, () => ({ models: [], defaultModel: "" }))
     .onUnary(AccountsService.method.listProviderRoutes, () => ({

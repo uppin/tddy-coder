@@ -10,12 +10,16 @@ export interface CreateSessionTypeToggleProps {
    *  shape recorded for it, so the parent wires both here. */
   onSelect?: (sessionType: string) => void;
   /**
-   * Why the type is not the operator's to choose, or `null` when it is. Set on a start whose type
-   * follows from what it is a start *of* — a project's main can only be a managed-capable session
-   * type, so the toggle states the one correct type instead of offering a dead control.
+   * Why a type cannot be chosen here, per type, or absent when every type can be chosen.
+   * Set on a start whose types follow from what it is a start *of* — a project's main can
+   * only be a main-capable session type, so each other type is disabled with its reason
+   * stated beside it instead of offering a dead control.
    */
-  disabledReason?: string | null;
+  disabledReason?: (sessionType: string) => string | null;
 }
+
+/** The id of the element saying why `sessionType` is disabled; the button is described by it. */
+const reasonIdOf = (sessionType: string) => `create-session-type-reason-${sessionType}`;
 
 /** Tool vs which of the daemon's CLI agents, as a segmented toggle. */
 export function CreateSessionTypeToggle({
@@ -23,21 +27,23 @@ export function CreateSessionTypeToggle({
   sessionType,
   setSessionType,
   onSelect,
-  disabledReason = null,
+  disabledReason = () => null,
 }: CreateSessionTypeToggleProps) {
-  const disabled = disabledReason !== null;
+  const withReasons = options.map((option) => ({
+    ...option,
+    reason: disabledReason(option.id),
+  }));
+  const disabled = withReasons.filter((option) => option.reason !== null);
   return (
     <div>
       <span className={labelClass}>Session type</span>
       <div
         role="group"
         aria-label="Session type"
-        aria-disabled={disabled}
-        title={disabledReason ?? undefined}
         data-testid="create-session-type-toggle"
         className="mt-1 flex flex-wrap gap-1"
       >
-        {options.map(({ id, label }) => {
+        {withReasons.map(({ id, label, reason }) => {
           const isActive = sessionType === id;
           return (
             <button
@@ -45,7 +51,8 @@ export function CreateSessionTypeToggle({
               type="button"
               data-testid={`create-session-type-${id}`}
               aria-pressed={isActive}
-              disabled={disabled}
+              aria-describedby={reason !== null ? reasonIdOf(id) : undefined}
+              disabled={reason !== null}
               onClick={() => {
                 setSessionType(id);
                 onSelect?.(id);
@@ -53,7 +60,7 @@ export function CreateSessionTypeToggle({
               className={
                 isActive
                   ? "rounded-md bg-primary px-3 py-1.5 text-sm font-medium text-primary-foreground"
-                  : "rounded-md border border-input bg-background px-3 py-1.5 text-sm hover:bg-accent"
+                  : "rounded-md border border-input bg-background px-3 py-1.5 text-sm hover:bg-accent disabled:cursor-not-allowed disabled:opacity-50"
               }
             >
               {label}
@@ -61,8 +68,17 @@ export function CreateSessionTypeToggle({
           );
         })}
       </div>
-      {disabledReason !== null && (
-        <p className="mt-1 text-xs text-muted-foreground">{disabledReason}</p>
+      {disabled.length > 0 && (
+        <ul className="mt-1 space-y-1 text-xs text-muted-foreground">
+          {disabled.map(({ id, label, reason }) => (
+            <li key={id}>
+              <span className="font-medium">{label}:</span>{" "}
+              <span id={reasonIdOf(id)} data-testid={reasonIdOf(id)}>
+                {reason}
+              </span>
+            </li>
+          ))}
+        </ul>
       )}
     </div>
   );

@@ -7,6 +7,7 @@
  * Uses the in-memory ConnectRPC backend so the assertions read the request the component sent.
  */
 import React from "react";
+import { servedAgentWire } from "../support/servedAgents";
 import { createClient } from "@connectrpc/connect";
 import { anInMemoryRpcBackend } from "tddy-connectrpc-testkit";
 import { CreateSessionPane } from "../../src/components/sessions/CreateSessionPane";
@@ -27,7 +28,15 @@ function aCreateSessionBackend() {
     .onUnary(ProjectService.method.listProjects, () => ({
       projects: [{ projectId: "proj-1", name: "Test Project", mainRepoPath: "/repo" }],
     }))
-    .onUnary(CatalogService.method.listAgents, () => ({ agents: [] }))
+    .onUnary(CatalogService.method.listAgents, () => ({
+      agents: [
+        { id: "claude", label: "Claude", ...servedAgentWire("claude") },
+        { id: "cursor", label: "Cursor", ...servedAgentWire("cursor") },
+        { id: "opencode", label: "OpenCode", ...servedAgentWire("opencode") },
+        { id: "muse", label: "Muse Code", ...servedAgentWire("muse") },
+        { id: "warp", label: "Warp", ...servedAgentWire("warp") },
+      ],
+    }))
     .onUnary(CatalogService.method.listTools, () => ({ tools: [] }))
     .onUnary(SessionService.method.startSession, () => ({ sessionId: "run-in-tmux-new-1" }));
 }
@@ -141,7 +150,7 @@ describe("CreateSession run-in-tmux option", () => {
       });
     });
 
-  it("a sandbox left on from claude-cli does not disable the option for opencode-cli", () => {
+  it("a sandbox left on from claude-cli does not disable the option for warp-cli", () => {
     // Given a claude-cli form with the sandbox on
     const backend = aCreateSessionBackend();
     mountCreatePane(backend);
@@ -149,8 +158,9 @@ describe("CreateSession run-in-tmux option", () => {
     byTestId(TEST_IDS.createSessionSandboxToggle).check();
     byTestId(TEST_IDS.createSessionTmuxToggle).should("be.disabled");
 
-    // When the operator switches to opencode-cli, which has no sandbox control, and asks for tmux
-    byTestId(TEST_IDS.createSessionTypeOpenCodeCliBtn).click();
+    // When the operator switches to warp-cli, whose spec offers no jailed placement (so the
+    // sandbox left on is cleared with its control), and asks for tmux
+    byTestId(TEST_IDS.createSessionTypeWarpCliBtn).click();
     byTestId(TEST_IDS.createSessionProjectSelect).select("proj-1");
     byTestId(TEST_IDS.createSessionTmuxToggle).should("not.be.disabled").check();
     byTestId(TEST_IDS.createSessionSubmitBtn).should("not.be.disabled").click();
@@ -159,7 +169,7 @@ describe("CreateSession run-in-tmux option", () => {
     cy.wrap(null).should(() => {
       const calls = backend.callsTo(SessionService.method.startSession);
       expect(calls).to.have.length(1);
-      expect(calls[0].sessionType).to.eq("opencode-cli");
+      expect(calls[0].sessionType).to.eq("warp-cli");
       expect(calls[0].runInTmux).to.eq(true);
     });
   });

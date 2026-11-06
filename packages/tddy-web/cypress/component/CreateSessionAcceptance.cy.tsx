@@ -7,6 +7,7 @@
  * and exercise the full flow via the in-memory backend.
  */
 import React from "react";
+import { servedAgentWire } from "../support/servedAgents";
 import { ConnectError, Code } from "@connectrpc/connect";
 import { SessionService } from "../../src/gen/session_pb";
 import { SessionsDrawerScreen } from "../../src/components/sessions/SessionsDrawerScreen";
@@ -166,8 +167,8 @@ describe("CreateSession acceptance — button, form, and post-create navigation"
     const backend = aSessionServiceBackend({
       sessions: [],
       agents: [
-        { id: "claude", label: "Claude (opus)" },
-        { id: "codex", label: "Codex" },
+        { id: "claude", label: "Claude (opus)", ...servedAgentWire("claude"), },
+        { id: "codex", label: "Codex", ...servedAgentWire("codex"), },
       ],
     });
 
@@ -296,7 +297,7 @@ describe("CreateSession acceptance — button, form, and post-create navigation"
     const backend = aSessionServiceBackend({
       sessions: [],
       projectsOverride: [{ projectId: "proj-1", name: "Test Project" }],
-      agents: [{ id: "claude", label: "Claude (opus)" }],
+      agents: [{ id: "claude", label: "Claude (opus)", ...servedAgentWire("claude"), }],
       startSession: {
         sessionId: NEW_SESSION_ID,
         livekitRoom: `room-${NEW_SESSION_ID}`,
@@ -330,7 +331,7 @@ describe("CreateSession acceptance — button, form, and post-create navigation"
     const backend = aSessionServiceBackend({
       sessions: [],
       projectsOverride: [{ projectId: "proj-1", name: "Test Project" }],
-      agents: [{ id: "claude", label: "Claude (opus)" }],
+      agents: [{ id: "claude", label: "Claude (opus)", ...servedAgentWire("claude"), }],
     }).onUnary(SessionService.method.startSession, async () => {
       throw new ConnectError("internal error", Code.Internal);
     });
@@ -374,7 +375,7 @@ describe("CreateSession acceptance — post-creation list refresh", () => {
     let callCount = 0;
     const backend = aSessionServiceBackend({
       projectsOverride: [{ projectId: "proj-1", name: "Test Project" }],
-      agents: [{ id: "claude", label: "Claude (opus)" }],
+      agents: [{ id: "claude", label: "Claude (opus)", ...servedAgentWire("claude"), }],
       listSessionsFactory: () => {
         callCount++;
         return callCount > 1 ? [NEW_SESSION_FIXTURE] : [];
@@ -414,7 +415,7 @@ describe("CreateSession acceptance — post-creation list refresh", () => {
     let callCount = 0;
     const backend = aSessionServiceBackend({
       projectsOverride: [{ projectId: "proj-1", name: "Test Project" }],
-      agents: [{ id: "claude", label: "Claude (opus)" }],
+      agents: [{ id: "claude", label: "Claude (opus)", ...servedAgentWire("claude"), }],
       listSessionsFactory: () => {
         callCount++;
         return callCount > 1 ? [NEW_SESSION_FIXTURE] : [];

@@ -13,6 +13,8 @@ export interface CreateSessionPermissionFieldsProps {
   applyPlacement: (toggled: CodebasePlacementChoice, on: boolean) => void;
   /** The placement is not the operator's to choose (main's): the Sandbox toggle is not offered. */
   placementFixed?: boolean;
+  /** The agent's spec allows the jailed placement (`placements` includes `jail`): the Sandbox toggle. */
+  showsSandbox?: boolean;
   /** The permission modes the agent's launch takes, from its spec as its daemon served them. */
   permissionModes: readonly string[];
 }
@@ -32,6 +34,7 @@ export function CreateSessionPermissionFields({
   setSandbox,
   applyPlacement,
   placementFixed = false,
+  showsSandbox = true,
   permissionModes,
 }: CreateSessionPermissionFieldsProps) {
   const toggleSandbox = (on: boolean) => {
@@ -85,7 +88,7 @@ export function CreateSessionPermissionFields({
           placement it confines the codebase host — the jail runs on the daemon holding the
           checkout, not the agent host. The combination with codebase_daemon_instance_id is
           admitted and the jail is placed on the codebase host. */}
-      {!placementFixed && (
+      {!placementFixed && showsSandbox && (
         <div>
           <label className="flex items-center gap-2 text-sm text-muted-foreground">
             <input

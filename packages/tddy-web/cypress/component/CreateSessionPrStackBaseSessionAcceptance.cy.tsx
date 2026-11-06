@@ -13,6 +13,7 @@
  */
 
 import React from "react";
+import { servedAgentWire } from "../support/servedAgents";
 import { Code, ConnectError, createClient } from "@connectrpc/connect";
 import { anInMemoryRpcBackend } from "tddy-connectrpc-testkit";
 import { CreateSessionPane } from "../../src/components/sessions/CreateSessionPane";
@@ -114,7 +115,7 @@ function aCreateSessionBackend(
       ],
     }))
     .onUnary(CatalogService.method.listAgents, () => ({
-      agents: [{ id: "claude", name: "Claude" }],
+      agents: [{ id: "claude", label: "Claude", ...servedAgentWire("claude"), }],
     }))
     .onUnary(CatalogService.method.listTools, () => ({
       tools: [{ path: "/usr/bin/tddy-coder", version: "0.1.0" }],

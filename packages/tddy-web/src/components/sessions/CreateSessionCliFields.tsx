@@ -13,6 +13,10 @@ export interface CreateSessionCliFieldsProps {
   permissionModes: readonly string[];
   /** Whether the agent can run a managed codebase (its spec's `managed_workflow`). */
   showsManaged: boolean;
+  /** The agent's spec allows the jailed placement (`placements` includes `jail`): the Sandbox toggle. */
+  showsSandbox: boolean;
+  /** The agent's spec declares `split_host`: the Sandboxed codebase placement. */
+  showsSandboxedCodebase: boolean;
   modelField: ReactNode;
   agentPickerSection: ReactNode;
   permissionMode: string;
@@ -61,6 +65,8 @@ export function CreateSessionCliFields({
   showsPermission,
   permissionModes,
   showsManaged,
+  showsSandbox,
+  showsSandboxedCodebase,
   modelField,
   agentPickerSection,
   permissionMode,
@@ -154,9 +160,10 @@ export function CreateSessionCliFields({
           setSandbox={setSandbox}
           applyPlacement={applyPlacement}
           placementFixed={placementFixed}
+          showsSandbox={showsSandbox}
         />
       ) : (
-        !placementFixed && (
+        !placementFixed && showsSandbox && (
           <div>
             <label className="flex items-center gap-2 text-sm text-muted-foreground">
               <input
@@ -175,7 +182,7 @@ export function CreateSessionCliFields({
         )
       )}
 
-      {!placementFixed && (
+      {!placementFixed && showsSandboxedCodebase && (
         <CreateSessionSandboxedCodebaseToggle
           sandboxedCodebase={sandboxedCodebase}
           sandboxedCodebaseUnavailableReason={sandboxedCodebaseUnavailableReason}

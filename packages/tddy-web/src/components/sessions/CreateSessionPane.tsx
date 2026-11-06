@@ -394,7 +394,18 @@ export function CreateSessionPane({
         sessionType={sessionType}
         setSessionType={setSessionType}
         disabledReason={
-          projectHome ? whyMainCannotRun(sessionType, sessionAgent) : null
+          projectHome
+            ? (type) =>
+                whyMainCannotRun(
+                  type,
+                  agentForSessionType(
+                    offeredAgents,
+                    daemonInstanceId,
+                    connectedInstanceId,
+                    type,
+                  ),
+                )
+            : undefined
         }
       />
 
@@ -447,7 +458,9 @@ export function CreateSessionPane({
           showsPermission={bindsParam(sessionAgent, "permission_mode")}
           permissionModes={sessionAgent.permissionModes}
           showsManaged={hasCapability(sessionAgent, "managed_workflow")}
-          modelField={modelField}
+          showsSandbox={allowsPlacement(sessionAgent, "jail")}
+          showsSandboxedCodebase={hasCapability(sessionAgent, "split_host")}
+          modelField={bindsParam(sessionAgent, "model") ? modelField : null}
           agentPickerSection={agentPickerSection}
           permissionMode={permissionMode}
           setPermissionMode={setPermissionMode}

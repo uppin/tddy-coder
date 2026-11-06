@@ -16,6 +16,7 @@
  */
 
 import React from "react";
+import { servedAgentWire } from "../support/servedAgents";
 import { SessionsDrawerScreen } from "../../src/components/sessions/SessionsDrawerScreen";
 import { type ProjectEntry } from "../../src/gen/project_pb";
 import { ProjectService } from "../../src/gen/project_pb";
@@ -106,7 +107,7 @@ function anAttachDocsOrchestratorWithRepointedUi(): Partial<SessionEntry> {
 function aRepointedBaseBackend(orchestrator: Partial<SessionEntry>) {
   return aSessionsDrawerBackend([orchestrator])
     .onUnary(ProjectService.method.listProjects, () => ({ projects: [PROJECT] }))
-    .onUnary(CatalogService.method.listAgents, () => ({ agents: [{ id: "claude", label: "Claude" }] }))
+    .onUnary(CatalogService.method.listAgents, () => ({ agents: [{ id: "claude", label: "Claude", ...servedAgentWire("claude"), }] }))
     .onUnary(CatalogService.method.listAgentModels, () => ({
       models: [{ id: "claude-opus-4-8", label: "Claude Opus 4.8" }],
       defaultModel: "claude-opus-4-8",

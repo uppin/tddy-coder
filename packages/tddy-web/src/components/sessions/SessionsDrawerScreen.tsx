@@ -21,6 +21,9 @@ import { sessionsDrawerPathForSession, SESSIONS_DRAWER_ROUTE, SESSIONS_NEW_ROUTE
 import { detectIsMobile, useIsMobile } from "../../hooks/useIsMobile";
 import { resolveShortcutsForSession } from "../../lib/toolShortcuts";
 import { isCliSessionType } from "./codingAgentMetadata";
+import { registerSessionTypeOptions, sessionTypeOptions } from "./cliHarnessOptions";
+import { useSelectableAgents } from "./useSelectableAgents";
+import { CatalogService } from "../../gen/catalog_pb";
 import { useSessionsDrawerInspector } from "./useSessionsDrawerInspector";
 import { useSessionsDrawerClients } from "./useSessionsDrawerClients";
 import { useProjectHomeSetup } from "./useProjectHomeSetup";
@@ -63,7 +66,7 @@ export function SessionsDrawerScreen({
   const callerLogin = user?.login ? user.login : null;
 
   const drawerClients = useSessionsDrawerClients();
-  const { client, projectClient } = drawerClients;
+  const { client, projectClient, catalogClient } = drawerClients;
 
   // One daemon-level notification feed for the whole drawer, however many rows it has (NFR1). The
   // dots are written into `sessionNotificationRegistry`, which each row reads for itself; what comes
@@ -332,6 +335,12 @@ export function SessionsDrawerScreen({
   return (
     <UploadProgressProvider>
     <TooltipProvider delayDuration={0}>
+      {catalogClient && (
+        <SessionTypeOptionsRegistrar
+          catalogClient={catalogClient}
+          instanceId={selectedInstanceId ?? ""}
+        />
+      )}
       {/* 100dvh (via AppShell fullbleed): on mobile 100vh includes the area behind the browser
           chrome, which would push the bottom keyboard bar off the visible screen. */}
       <AppShell
@@ -440,4 +449,22 @@ export function SessionsDrawerScreen({
     </TooltipProvider>
     </UploadProgressProvider>
   );
+}
+
+/**
+ * Registers the session types the selected daemon serves, from its `ListAgents` answer, for
+ * readers that hold no catalog of their own (a terminal tab's label, the "+" menu's kinds).
+ * Without a listing of its own this screen left those readers with only `tool` until some
+ * Create pane happened to mount. Renders nothing.
+ */
+function SessionTypeOptionsRegistrar({
+  catalogClient,
+  instanceId,
+}: {
+  catalogClient: Client<typeof CatalogService>;
+  instanceId: string;
+}) {
+  const { agents } = useSelectableAgents(catalogClient, instanceId);
+  registerSessionTypeOptions(sessionTypeOptions(agents, instanceId, instanceId));
+  return null;
 }

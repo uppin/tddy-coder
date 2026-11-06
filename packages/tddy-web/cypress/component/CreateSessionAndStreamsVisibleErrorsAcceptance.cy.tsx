@@ -11,6 +11,7 @@
  */
 
 import React from "react";
+import { servedAgentWire } from "../support/servedAgents";
 import { Room } from "livekit-client";
 import { create } from "@bufbuild/protobuf";
 import { Code, ConnectError, createClient, type Client } from "@connectrpc/connect";
@@ -81,7 +82,7 @@ function aCreateSessionBackend(): InMemoryRpcBackend {
       defaultModel: "claude-opus-4-8",
     }))
     .onUnary(ProjectService.method.listProjects, () => ({ projects: [ONLY_PROJECT] }))
-    .onUnary(CatalogService.method.listAgents, () => ({ agents: [{ id: "claude", label: "Claude" }] }))
+    .onUnary(CatalogService.method.listAgents, () => ({ agents: [{ id: "claude", label: "Claude", ...servedAgentWire("claude"), }] }))
     .onUnary(CatalogService.method.listTools, () => ({
       tools: [{ path: "/usr/bin/tddy-coder", label: "tddy-coder" }],
     }))

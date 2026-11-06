@@ -24,6 +24,7 @@
 import { create } from "@bufbuild/protobuf";
 import { ConnectError, Code } from "@connectrpc/connect";
 import { anInMemoryRpcBackend, type InMemoryRpcBackend } from "tddy-connectrpc-testkit";
+import { servedAgentWire } from "../servedAgents";
 import { AuthService } from "../../../src/gen/auth_pb";
 import { GenerateTokenResponseSchema, RefreshTokenResponseSchema, TokenService } from "../../../src/gen/token_pb";
 import {
@@ -136,7 +137,14 @@ function aProjectEntry(overrides: Partial<ProjectEntry>): ProjectEntry {
 }
 
 function anAgentInfo(overrides: Partial<AgentInfo>): AgentInfo {
-  return create(AgentInfoSchema, { id: "claude", label: "Claude (opus)", ...overrides });
+  return create(AgentInfoSchema, {
+    id: "claude",
+    label: "Claude (opus)",
+    // The spec-derived fields a daemon serves for this id; an explicit field on the
+    // fixture overrides them.
+    ...servedAgentWire(overrides.id ?? "claude"),
+    ...overrides,
+  });
 }
 
 // ---------------------------------------------------------------------------

@@ -16,6 +16,7 @@
  */
 
 import React from "react";
+import { servedAgentWire } from "../support/servedAgents";
 import { CatalogService } from "../../src/gen/catalog_pb";
 import { ProjectService } from "../../src/gen/project_pb";
 import { SessionsDrawerScreen } from "../../src/components/sessions/SessionsDrawerScreen";
@@ -100,7 +101,7 @@ function anOrchestratorBackend(
   return aSessionsDrawerBackend([orchestrator])
     .onUnary(ProjectService.method.listProjects, () => ({ projects: [PROJECT] }))
     .onUnary(CatalogService.method.listAgents, () => ({
-      agents: [{ id: "claude", label: "Claude" }],
+      agents: [{ id: "claude", label: "Claude", ...servedAgentWire("claude"), }],
     }))
     .onUnary(CatalogService.method.listAgentModels, () => ({
       models: [{ id: "claude-opus-4-8", label: "Claude Opus 4.8" }],
