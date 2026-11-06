@@ -15,10 +15,10 @@ use std::sync::Arc;
 
 use tddy_actions::tool::TemplateParams;
 use tddy_coding_agent_specs::{
-    CodingAgentRegistry, CodingAgentSpec, Placement, CLI_SESSION_TYPE_SUFFIX,
+    routed_agent, CodingAgentRegistry, CodingAgentSpec, Placement, CLI_SESSION_TYPE_SUFFIX,
 };
 use tddy_core::adapters::{LaunchAdapters, ResumeTokenAdapter};
-use tddy_core::provider_route::Harness;
+use tddy_core::provider_route::RoutedAgent;
 use tddy_daemon_kernel::config::DaemonConfig;
 use tddy_rpc::Status;
 
@@ -81,19 +81,19 @@ pub fn require_spec_placement(
 }
 
 /// A CLI session type the specs launch, as the launch path reads it: its name as a static string, the
-/// spec that launches it and the provider harness its route is resolved for. It replaces the
+/// spec that launches it and what its provider route is built from. It replaces the
 /// `CliHarness` descriptor on the spec-driven paths; every field has a home in the spec or the route.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct CliSessionType {
     /// The session type's name (`opencode-cli`), interned: the worktree and branch policy take a
     /// static string, and an agent dropped into `<tddyhome>/tools` has no static name of its own.
     pub name: &'static str,
     /// The id of the spec that launches the session type (`opencode`), interned.
     pub spec_id: &'static str,
-    /// The provider harness the session's route is resolved for; `None` for an agent no provider
-    /// route serves (a new agent: `TODO(route-support)`, #agent-tools n13 `route-support` — its spec's `route.providers`
-    /// is not yet what routes are built from).
-    pub route: Option<Harness>,
+    /// What the session's provider route is built from: its spec's id, product and route support
+    /// (`routed_agent`). An agent whose spec declares no route is refused when a route is asked of
+    /// it, naming its product.
+    pub route: RoutedAgent,
 }
 
 /// `name` as a `'static` string, one allocation per distinct name for the life of the process: the
@@ -190,7 +190,7 @@ pub(crate) fn cli_session_type(
     Ok(CliSessionType {
         name: interned(session_type),
         spec_id: interned(&spec.id),
-        route: Harness::from_agent_or_session_type(session_type),
+        route: routed_agent(spec),
     })
 }
 

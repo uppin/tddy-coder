@@ -15,6 +15,15 @@ impl DaemonSessionHost {
         self
     }
 
+    /// The coding agents this host launches, when it has any: what a service that gates on an
+    /// agent's spec (the accounts service's route matrix) reads, never loading them again.
+    #[must_use]
+    pub fn coding_agents(
+        &self,
+    ) -> Option<&std::sync::Arc<tddy_agent_launch::spec_launch::HostCodingAgents>> {
+        self.coding_agents.as_ref()
+    }
+
     /// [`Self::with_coding_agents`] with `agents`, unless the host already has some (builder): what
     /// a test fixture that builds a host and never wires its own uses, so the gates that read an
     /// agent's capabilities see the built-in specs rather than none.

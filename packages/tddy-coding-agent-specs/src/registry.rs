@@ -2,7 +2,7 @@
 //! (`#agent-tools 12/12`).
 //!
 //! Feature doc: `docs/ft/daemon/session-agent-roster.md`. It replaces the parallel
-//! lists — `AnyBackend`, `provider_route::Harness`, `BUILTIN_BACKEND_AGENT_IDS`,
+//! lists — `AnyBackend`, the old `provider_route::Harness` enum, `BUILTIN_BACKEND_AGENT_IDS`,
 //! `backend_selection_question`'s options and the session-type string tables. An agent is in it
 //! when its tool file has a `coding_agent` extension: a built-in spec, an override of one, or a new
 //! file dropped into `<tddyhome>/tools/`. Adding an agent is a YAML file.
@@ -88,8 +88,6 @@ impl CodingAgentRegistry {
     /// `run:` section is a PTY (`claude-cli` → `claude`, a dropped-in `acme.yaml` → `acme-cli`).
     /// `None` for a session type no agent stands for — `tool`, `workspace`, a bare agent id, and the
     /// `-cli` of an agent that runs only over ACP.
-    ///
-    /// Replaces [`crate::spec_for_session_type`]'s closed table.
     pub fn for_session_type(&self, session_type: &str) -> Option<&CodingAgentSpec> {
         let id = session_type.strip_suffix(CLI_SESSION_TYPE_SUFFIX)?;
         self.get(id)

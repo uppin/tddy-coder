@@ -6,10 +6,13 @@
 //! the stub and the real `tddy-tools`. The daemon.yaml carries no agent section at all.
 //!
 //! The stub touches a spawn marker, then reports one `STUB <key>=<value>` line per observation
-//! (argv joined with `|`, then cwd), then `STUB-END`, and waits on stdin so the session stays up.
+//! (argv joined with `|`, then cwd, then the route environment a provider account gives it), then
+//! `STUB-END`, and waits on stdin so the session stays up.
 //!
 //! The shape follows `harness_clis_support` (`#agent-tools 8/12`), cut to what a YAML-only agent
-//! needs: no vault, no provider accounts, no resume.
+//! needs: no resume. A daemon built [`ARegistryDaemonBuilder::with_a_meta_account`] has an owner
+//! whose unlocked vault holds [`META_ACCOUNT`] (`#agent-tools 13/19`), and one built
+//! [`ARegistryDaemonBuilder::with_profile`] has harness profiles in `<tddyhome>/agents`.
 #![allow(dead_code)]
 
 use std::collections::BTreeMap;
@@ -19,10 +22,12 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use futures_util::StreamExt;
+use tddy_accounts::{endpoints_for, preset, ProviderAccount};
 use tddy_actions::tool::ToolHost;
 use tddy_agent_launch::spec_launch::HostCodingAgents;
 use tddy_coding_agent_specs::CodingAgentRegistry;
 use tddy_core::session_metadata::{read_session_metadata, write_session_metadata, SessionMetadata};
+use tddy_credentials::{AccountId, CredentialStore, SecretString, SessionVaults};
 use tddy_daemon_kernel::config::DaemonConfig;
 use tddy_rpc::Request;
 use tddy_service::proto::activity::{ActivityService as _, ReportSessionStatusRequest};
@@ -39,6 +44,14 @@ pub const TEST_PROJECT_ID: &str = "yaml-only-agent-project";
 pub const HOOK_TOKEN: &str = "a-per-session-hook-token";
 /// The model a start chooses.
 pub const ACME_MODEL: &str = "acme-1";
+/// The Meta account the owner's vault holds in a daemon built with one, and its key. Meta serves
+/// Anthropic Messages at [`META_ANTHROPIC_ROOT`].
+pub const META_ACCOUNT: &str = "meta-hackathon";
+pub const META_KEY: &str = "a-meta-key-for-acme";
+pub const META_ANTHROPIC_ROOT: &str = "https://api.meta.ai";
+const PASSPHRASE: &str = "correct horse battery staple";
+/// The variables the stub reports, `UNSET` when it was not given one.
+const REPORTED_ENV: &str = "ANTHROPIC_BASE_URL ANTHROPIC_AUTH_TOKEN ANTHROPIC_MODEL";
 
 /// How long a stub has to report on its terminal.
 const TERMINAL_OBSERVE: Duration = Duration::from_secs(90);
@@ -83,6 +96,17 @@ policy:
   exec_paths: [/usr/bin, /usr/libexec, /bin, /sbin, /System, /Library]
 "#;
 
+/// [`ACME_YAML`] with `lines` added to its `coding_agent` section — each indented four spaces, as
+/// that section's keys are.
+pub fn acme_yaml_declaring(lines: &str) -> String {
+    let section = "  coding_agent:\n";
+    assert!(
+        ACME_YAML.contains(section),
+        "acme.yaml has a coding_agent section"
+    );
+    ACME_YAML.replacen(section, &format!("{section}{lines}"), 1)
+}
+
 /// The real `tddy-tools`, built beside this test binary.
 pub fn tddy_tools_binary() -> PathBuf {
     std::env::var_os("CARGO_BIN_EXE_tddy-tools")
@@ -102,18 +126,24 @@ pub fn current_os_user() -> String {
         .into_owned()
 }
 
-/// A stub agent: touches `marker`, reports its argv and cwd, then waits on stdin. Every external
-/// command is named by its absolute path, so the report does not depend on `PATH`.
+/// A stub agent: touches `marker`, reports its argv, cwd and the route variables
+/// ([`REPORTED_ENV`]), then waits on stdin. Every external command is named by its absolute path,
+/// so the report does not depend on `PATH`.
 pub fn a_stub_agent_script(marker: &Path) -> String {
     format!(
         r#"#!/bin/sh
 /usr/bin/touch "{marker}" 2>/dev/null
 printf 'STUB argv=%s' "$0"; for a in "$@"; do printf '|%s' "$a"; done; printf '\n'
 printf 'STUB cwd=%s\n' "$(/bin/pwd -P)"
+for name in {reported_env}; do
+  eval "value=\${{$name-UNSET}}"
+  printf 'STUB env:%s=%s\n' "$name" "$value"
+done
 printf 'STUB-END\n'
 exec /bin/cat
 "#,
         marker = marker.display(),
+        reported_env = REPORTED_ENV,
     )
 }
 
@@ -141,6 +171,14 @@ impl AStubReport {
             .split('|')
             .map(str::to_string)
             .collect()
+    }
+
+    /// `name` (one of [`REPORTED_ENV`]) as the stub saw it; `UNSET` when it was not set.
+    pub fn env(&self, name: &str) -> String {
+        self.lines
+            .get(&format!("env:{name}"))
+            .unwrap_or_else(|| panic!("the stub reported {name}; it reported {:?}", self.lines))
+            .clone()
     }
 }
 
@@ -196,11 +234,57 @@ pub struct ARegistryDaemon {
     _stub_dir: tempfile::TempDir,
     _marker_dir: tempfile::TempDir,
     _config_dir: tempfile::TempDir,
+    _vault_dir: Option<tempfile::TempDir>,
 }
 
 /// A daemon whose `<tddyhome>/tools` holds `tools` (`(file name, YAML)`), with the stub installed
 /// as `acme`.
 pub fn a_daemon_with_tools(tools: &[(&str, &str)]) -> ARegistryDaemon {
+    tools
+        .iter()
+        .fold(a_registry_daemon(), |daemon, (name, yaml)| {
+            daemon.with_tool(name, yaml)
+        })
+        .build()
+}
+
+/// How an [`ARegistryDaemon`] is built: no tools, no profiles and no vault until a test adds them.
+#[derive(Default)]
+pub struct ARegistryDaemonBuilder {
+    tools: Vec<(String, String)>,
+    profiles: Vec<(String, String)>,
+    meta_account: bool,
+}
+
+pub fn a_registry_daemon() -> ARegistryDaemonBuilder {
+    ARegistryDaemonBuilder::default()
+}
+
+impl ARegistryDaemonBuilder {
+    /// `<tddyhome>/tools/<name>` holds `yaml`.
+    pub fn with_tool(mut self, name: &str, yaml: &str) -> Self {
+        self.tools.push((name.to_string(), yaml.to_string()));
+        self
+    }
+
+    /// `<tddyhome>/agents/<name>.yaml` holds the harness profile `yaml`.
+    pub fn with_profile(mut self, name: &str, yaml: &str) -> Self {
+        self.profiles.push((name.to_string(), yaml.to_string()));
+        self
+    }
+
+    /// The owner has unlocked a vault holding [`META_ACCOUNT`].
+    pub fn with_a_meta_account(mut self) -> Self {
+        self.meta_account = true;
+        self
+    }
+
+    pub fn build(self) -> ARegistryDaemon {
+        a_daemon_built_from(self)
+    }
+}
+
+fn a_daemon_built_from(spec: ARegistryDaemonBuilder) -> ARegistryDaemon {
     let repo_dir = tempfile::tempdir().unwrap();
     create_test_repo_with_origin(repo_dir.path());
     let tddy_home_dir = tempfile::tempdir().unwrap();
@@ -208,8 +292,13 @@ pub fn a_daemon_with_tools(tools: &[(&str, &str)]) -> ARegistryDaemon {
     register_project(&tddy_home.join("projects"), repo_dir.path());
     let tools_dir = tddy_home.join("tools");
     std::fs::create_dir_all(&tools_dir).unwrap();
-    for (name, yaml) in tools {
+    for (name, yaml) in &spec.tools {
         std::fs::write(tools_dir.join(name), yaml).unwrap();
+    }
+    let agents_dir = tddy_home.join("agents");
+    std::fs::create_dir_all(&agents_dir).unwrap();
+    for (name, yaml) in &spec.profiles {
+        std::fs::write(agents_dir.join(format!("{name}.yaml")), yaml).unwrap();
     }
     let host_home_dir = tempfile::tempdir().unwrap();
     let host_home = std::fs::canonicalize(host_home_dir.path()).unwrap();
@@ -225,15 +314,19 @@ pub fn a_daemon_with_tools(tools: &[(&str, &str)]) -> ARegistryDaemon {
 
     let (config_dir, config) = a_daemon_config_without_agent_sections();
     let registry = CodingAgentRegistry::load(&tools_dir).expect("the coding-agent registry loads");
-    let host = a_session_host(config, tddy_home.clone()).with_coding_agents(Arc::new(
-        HostCodingAgents::new(
-            registry.tools().clone(),
-            Arc::new(AFixtureHost {
-                path: vec![stub_bin.clone()],
-                home: host_home.clone(),
-            }),
-        ),
-    ));
+    let vault_dir = spec.meta_account.then(|| tempfile::tempdir().unwrap());
+    let host = a_session_host(config, tddy_home.clone());
+    let host = match &vault_dir {
+        Some(dir) => host.with_credential_vaults(vaults_holding_the_meta_account(dir.path())),
+        None => host,
+    };
+    let host = host.with_coding_agents(Arc::new(HostCodingAgents::new(
+        registry.tools().clone(),
+        Arc::new(AFixtureHost {
+            path: vec![stub_bin.clone()],
+            home: host_home.clone(),
+        }),
+    )));
     let service = Arc::new(host);
     service.install_sandbox_rpc_bridge();
     ARegistryDaemon {
@@ -248,7 +341,33 @@ pub fn a_daemon_with_tools(tools: &[(&str, &str)]) -> ARegistryDaemon {
         _stub_dir: stub_dir,
         _marker_dir: marker_dir,
         _config_dir: config_dir,
+        _vault_dir: vault_dir,
     }
+}
+
+/// The vaults of a daemon on which the owner has unlocked a vault holding [`META_ACCOUNT`].
+fn vaults_holding_the_meta_account(dir: &Path) -> Arc<SessionVaults> {
+    let owner = current_os_user();
+    let passphrase = SecretString::new(PASSPHRASE);
+    let store =
+        CredentialStore::create(&CredentialStore::path_in(dir, &owner), &passphrase, &owner)
+            .expect("the owner's vault is created");
+    let meta = preset("meta").expect("the meta preset");
+    let account = ProviderAccount {
+        account: AccountId::new(META_ACCOUNT),
+        preset: meta,
+        label: "Meta hackathon".to_string(),
+        endpoints: endpoints_for(meta, None, None).expect("meta endpoints"),
+        api_key: SecretString::new(META_KEY),
+    };
+    store
+        .put(account.to_record(1_760_000_000))
+        .expect("the record is retained");
+    let vaults = Arc::new(SessionVaults::new(dir));
+    vaults
+        .unlock(&owner, &passphrase)
+        .expect("the passphrase opens the vault");
+    vaults
 }
 
 impl ARegistryDaemon {
@@ -262,6 +381,24 @@ impl ARegistryDaemon {
             branch_worktree_intent: "new_branch_from_base".to_string(),
             sandbox,
             ..Default::default()
+        }
+    }
+
+    /// [`Self::a_start`] on the host, on the provider account `account`.
+    pub fn a_start_on_account(&self, session_type: &str, account: &str) -> StartSessionRequest {
+        StartSessionRequest {
+            provider_account_id: account.to_string(),
+            ..self.a_start(session_type, false)
+        }
+    }
+
+    /// A host start through the harness profile `profile`: no session type and no model of its own.
+    pub fn a_start_through_profile(&self, profile: &str) -> StartSessionRequest {
+        StartSessionRequest {
+            session_type: String::new(),
+            model: String::new(),
+            agent: profile.to_string(),
+            ..self.a_start("", false)
         }
     }
 

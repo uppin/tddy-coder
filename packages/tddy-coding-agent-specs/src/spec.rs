@@ -14,7 +14,7 @@ use thiserror::Error;
 
 use crate::capability::Capability;
 use crate::headless::validate_headless;
-use crate::route::{ProviderKind, RouteShape, RouteSupport};
+use crate::route::{ProviderKind, RouteShape, RouteSupport, RoutedAgent};
 use crate::slots::hooks;
 use crate::slots::tools::render_flag_per_value;
 
@@ -197,6 +197,10 @@ pub struct CodingAgentSection {
     /// `claude_cli.answer_wait_secs`). [`DEFAULT_ANSWER_WAIT_SECS`] when absent.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub answer_wait_secs: Option<u64>,
+    /// The operator-facing name a route refusal leads with (`#agent-tools 13/19`): `Claude Code`,
+    /// `Muse Code`. Read through [`CodingAgentSpec::product`], which answers the id when absent.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub product: Option<String>,
 }
 
 /// How long an orchestrated session's permission hook waits for its orchestrator's answer when the
@@ -231,6 +235,27 @@ impl CodingAgentSpec {
             },
             None => RouteSupport::default(),
         }
+    }
+
+    /// `coding_agent.product`, or the agent id when the spec declares none.
+    pub fn product(&self) -> &str {
+        self.agent.product.as_deref().unwrap_or(&self.id)
+    }
+}
+
+/// What a route body knows of `spec` (`#agent-tools 13/19`): its id, its product, its route
+/// support and its `route.key_env`. A spec without a `route` section gives an agent with no
+/// providers, which every route body refuses.
+pub fn routed_agent(spec: &CodingAgentSpec) -> RoutedAgent {
+    RoutedAgent {
+        id: spec.id.clone(),
+        product: spec.product().to_string(),
+        support: spec.route_support(),
+        key_env: spec
+            .agent
+            .route
+            .as_ref()
+            .and_then(|route| route.key_env.clone()),
     }
 }
 
@@ -455,7 +480,7 @@ pub struct RouteSlot {
     /// (`provider-route`); `None` for a route with no files.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub files_dir: Option<String>,
-    /// The variable the route's key is handed in (`TDDY_OPENCODE_PROVIDER_KEY`, `META_API_KEY`).
+    /// The variable the route's key is handed in (`OPENCODE_PROVIDER_KEY`, `META_API_KEY`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub key_env: Option<String>,
     /// The providers a route can point the agent at (`#agent-tools 12/12`); empty for an agent that
@@ -463,7 +488,7 @@ pub struct RouteSlot {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub providers: Vec<ProviderKind>,
     /// How the route reaches the agent (`#agent-tools 12/12`): environment (the default),
-    /// arguments, or a configuration file.
+    /// `-c` TOML arguments (`toml_args`), or a JSON configuration file (`json_config_file`).
     #[serde(default)]
     pub shape: RouteShape,
 }

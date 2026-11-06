@@ -31,6 +31,7 @@ run:
   env: {}
 extensions:
   coding_agent:
+    product: Oz
     mcp: { kind: argv, flag: --mcp }
     tool_allow: unsupported
     tool_deny: unsupported

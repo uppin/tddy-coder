@@ -21,7 +21,7 @@ fn an_opencode_route_on(model: &str) -> HarnessRoute {
     HarnessRoute {
         env: Vec::new(),
         secret_env: vec![(
-            "TDDY_OPENCODE_PROVIDER_KEY".to_string(),
+            "OPENCODE_PROVIDER_KEY".to_string(),
             RouteSecret::new("a-fireworks-key"),
         )],
         files: vec![RouteFile {

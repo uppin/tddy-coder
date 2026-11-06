@@ -6,7 +6,6 @@
 use tddy_agent_backend::cli_harness::{
     cli_harness, cli_harness_requires_model, cli_harnesses, models_from_listing, CliLaunch,
 };
-use tddy_agent_backend::provider_route::Harness;
 
 fn opencode() -> &'static tddy_agent_backend::cli_harness::CliHarness {
     cli_harness("opencode-cli").expect("opencode-cli is registered")
@@ -44,7 +43,6 @@ fn a_tool_or_workspace_session_is_no_cli_harness() {
 #[test]
 fn opencode_is_routed_as_opencode_and_reads_its_config_from_opencode_config() {
     // Then
-    assert_eq!(opencode().route_harness, Harness::OpenCodeCli);
     assert_eq!(opencode().context_agent, "opencode");
     assert_eq!(opencode().default_binary, "opencode");
     assert_eq!(opencode().binary_env, "TDDY_OPENCODE_CLI");

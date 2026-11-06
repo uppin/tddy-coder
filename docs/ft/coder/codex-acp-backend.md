@@ -19,7 +19,7 @@
 - **Lifecycle:** **`initialize`** once, then **`new_session`** or **`load_session`** (resume), then **`prompt`** with merged Codex-style prompts (**`merge_codex_prompt`**).
 - **Progress:** **`session_notification`** maps agent chunks, tool calls, and plan entries to **`ProgressSink`** (**`TaskProgress`**, **`ToolUse`**, **`TaskStarted`**).
 - **Permissions:** **`request_permission`** auto-approves with a one-shot allow option when enabled.
-- **Provider account:** with `--provider-route-path` the agent is spawned with the route's `-c model_provider…` overrides, the model as `-c model="<model>"` (`codex-acp` has no `-m`) and the key in `TDDY_ROUTE_API_KEY` — see [provider accounts § Tool sessions](../daemon/provider-accounts.md#tool-sessions).
+- **Provider account:** with `--provider-route-path` the agent is spawned with the route's `-c model_provider…` overrides, the model as `-c model="<model>"` (`codex-acp` has no `-m`) and the key in `CODEX_PROVIDER_KEY` (the spec's `route.key_env`) — see [provider accounts § Tool sessions](../daemon/provider-accounts.md#tool-sessions).
 - **Tests:** **`tddy-acp-stub`** can stand in for **`codex-acp`**; stub **`initialize`** advertises **`load_session`**. Integration coverage includes **`codex_acp_backend`** and **`acp_backend_acceptance`**.
 
 ## Coexistence with `CodexBackend`

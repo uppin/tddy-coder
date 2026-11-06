@@ -167,9 +167,11 @@ selects the model on it:
 | OpenAI Responses (preferred) | `@ai-sdk/openai`, `baseURL` = the Responses root | `options.include = ["reasoning.encrypted_content"]`, so reasoning is carried across turns |
 | only OpenAI Chat Completions | `@ai-sdk/openai-compatible`, `baseURL` = the Chat root | — |
 
-The key is referenced in the file as `{env:TDDY_OPENCODE_PROVIDER_KEY}` and never written into it. The
-child is launched with `OPENCODE_CONFIG=<session dir>/opencode.json`, `TDDY_OPENCODE_PROVIDER_KEY=<key>`
-and `--model tddy-route/<model>`. The account id and model are recorded beside the session (never the
+The key is referenced in the file as `{env:OPENCODE_PROVIDER_KEY}` (`opencode.yaml`'s
+`route.key_env`) and never written into it. The child is launched with
+`OPENCODE_CONFIG=<session dir>/opencode.json`, `OPENCODE_PROVIDER_KEY=<key>` and
+`--model tddy-route/<model>`; it sees no `TDDY_*` route variable. A jailed start hands the key into
+the jail the same way. The account id and model are recorded beside the session (never the
 key), so a resume re-applies them. A start that chooses no account writes no configuration and runs on
 the person's own OpenCode setup.
 

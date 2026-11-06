@@ -13,15 +13,14 @@
 // TODO(harness-clis): delete this module — every descriptor field has a home in a
 // `tddy-coding-agent-specs/specs/*.yaml` (`#agent-tools 8/12`): the argv is `run.argv`, the binary
 // `binary`, `route_config_env` `coding_agent.route.config_env`, `models` `coding_agent.models`
-// (`opencode-models` for the listed kind), the session type `spec_for_session_type`. Deleting a
-// file needs the developer's approval (CLAUDE.md § ASK).
+// (`opencode-models` for the listed kind), the session type `CodingAgentRegistry::for_session_type`.
+// Deleting a file needs the developer's approval (CLAUDE.md § ASK).
 // Removal is deferred: docs/dev/todo/2026-11-03-harness-clis-legacy-cli-harness-removal.md
 
 use crate::adapters::{ModelsAdapter, OpenCodeModels};
 use crate::backend::{claude_cli_models, cursor_cli_models, BackendModels};
 use crate::cli_harness_muse::MUSE_CLI;
 use crate::cli_harness_warp::WARP_CLI;
-use crate::provider_route::Harness;
 
 /// What one start or resume of a CLI harness is launched with.
 #[derive(Debug, Clone, Default)]
@@ -61,8 +60,6 @@ pub struct CliHarness {
     pub session_type: &'static str,
     /// What the session-type toggle calls it.
     pub label: &'static str,
-    /// The harness a provider route is resolved for.
-    pub route_harness: Harness,
     /// The agent whose context-file allow-list the session is served.
     pub context_agent: &'static str,
     /// The binary run when the daemon config and the environment name none.
@@ -87,7 +84,6 @@ static CLI_HARNESSES: [CliHarness; 5] = [
     CliHarness {
         session_type: "claude-cli",
         label: "Claude CLI",
-        route_harness: Harness::ClaudeCli,
         context_agent: "claude",
         default_binary: "claude",
         binary_env: "TDDY_CLAUDE_BINARY",
@@ -99,7 +95,6 @@ static CLI_HARNESSES: [CliHarness; 5] = [
     CliHarness {
         session_type: "cursor-cli",
         label: "Cursor CLI",
-        route_harness: Harness::CursorCli,
         context_agent: "cursor",
         default_binary: "agent",
         binary_env: "TDDY_CURSOR_AGENT",
@@ -111,7 +106,6 @@ static CLI_HARNESSES: [CliHarness; 5] = [
     CliHarness {
         session_type: "opencode-cli",
         label: "OpenCode",
-        route_harness: Harness::OpenCodeCli,
         context_agent: "opencode",
         default_binary: "opencode",
         binary_env: "TDDY_OPENCODE_CLI",

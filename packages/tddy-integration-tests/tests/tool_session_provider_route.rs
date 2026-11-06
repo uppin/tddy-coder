@@ -66,7 +66,7 @@ fn codex_on_meta_runs_exec_with_a_responses_provider_and_the_key_in_env() {
     );
     let route = a_route(
         &[],
-        ("TDDY_ROUTE_API_KEY", "a-meta-key"),
+        ("CODEX_PROVIDER_KEY", "a-meta-key"),
         &[
             "-c",
             "model_provider=\"tddy-route\"",
@@ -86,7 +86,7 @@ fn codex_on_meta_runs_exec_with_a_responses_provider_and_the_key_in_env() {
     assert!(argv.contains("model_provider=\"tddy-route\""), "{argv}");
     assert!(argv.contains("muse-wonder-1.0"), "{argv}");
     assert!(!argv.contains("a-meta-key"), "the key is never an argument");
-    assert!(recorded(dir.path(), "env.txt").contains("TDDY_ROUTE_API_KEY=a-meta-key"));
+    assert!(recorded(dir.path(), "env.txt").contains("CODEX_PROVIDER_KEY=a-meta-key"));
 }
 
 #[test]

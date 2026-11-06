@@ -34,6 +34,7 @@ run:
   env: {}
 extensions:
   coding_agent:
+    product: Muse Code
     mcp: { kind: unsupported }
     tool_allow: unsupported
     tool_deny: unsupported

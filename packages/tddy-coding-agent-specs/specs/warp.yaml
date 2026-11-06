@@ -31,6 +31,7 @@ run:
   env: {}
 extensions:
   coding_agent:
+    product: Warp
     mcp: { kind: unsupported }
     tool_allow: unsupported
     tool_deny: unsupported

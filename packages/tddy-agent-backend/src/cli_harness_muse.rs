@@ -1,22 +1,14 @@
-//! Muse Code (Meta's `muse` CLI) as a CLI harness: its descriptor, its curated models and the
-//! variable its key is handed in.
+//! Muse Code (Meta's `muse` CLI) as a CLI harness: its descriptor and its curated models.
 //!
 //! Only the interactive TUI is integrated. Muse Code's headless protocols (`muse exec --json`,
 //! `muse serve`) are undocumented; see the backlog.
 
 // TODO(harness-clis): delete this module — the descriptor is `specs/muse.yaml`, the curated
-// models its `coding_agent.models`, `MUSE_ROUTE_KEY_ENV` its `coding_agent.route.key_env`.
+// models its `coding_agent.models`.
 // Removal is deferred: docs/dev/todo/2026-11-03-harness-clis-legacy-cli-harness-removal.md
 
 use crate::backend::{BackendModel, BackendModels};
 use crate::cli_harness::{CliHarness, CliLaunch, CliModelSource};
-use crate::provider_route::Harness;
-
-/// The variable Muse Code reads a Model API key from for non-interactive use, as secondary sources
-/// (2026-10) name it.
-// TODO(muse-cli-facts): unconfirmed against a real `muse`, as are `--model`, `--continue` and the
-// `.muse/` tree — see docs/dev/todo/2026-10-22-muse-code-cli-facts-unconfirmed.md.
-pub const MUSE_ROUTE_KEY_ENV: &str = "META_API_KEY";
 
 /// The Muse models offered when no Meta account lists its own.
 #[must_use]
@@ -58,7 +50,6 @@ fn muse_argv(launch: &CliLaunch<'_>) -> Vec<String> {
 pub const MUSE_CLI: CliHarness = CliHarness {
     session_type: "muse-cli",
     label: "Muse Code",
-    route_harness: Harness::MuseCli,
     context_agent: "muse",
     default_binary: "muse",
     binary_env: "TDDY_MUSE_CLI",

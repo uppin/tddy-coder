@@ -3,11 +3,18 @@
 //!
 //! Feature: docs/ft/daemon/opencode-cli-session.md
 
+mod route_agents;
+
+use route_agents::opencode_named;
 use serde_json::Value;
 use tddy_agent_backend::provider_route::{
-    opencode_config_for, resolve_route, Harness, RouteEndpoints, RouteSecret, RouteTarget,
-    OPENCODE_ROUTE_KEY_ENV, OPENCODE_ROUTE_PROVIDER_ID,
+    opencode_config_for, resolve_route, RouteEndpoints, RouteSecret, RouteTarget,
+    OPENCODE_ROUTE_PROVIDER_ID,
 };
+
+/// The variable OpenCode's spec (`route.key_env`) hands the key in: the agent process sees no
+/// `TDDY_*` route variable.
+const OPENCODE_KEY_ENV: &str = "OPENCODE_PROVIDER_KEY";
 
 fn on_meta(model: &str) -> RouteTarget {
     RouteTarget {
@@ -35,7 +42,8 @@ fn on_baseten(model: &str) -> RouteTarget {
 }
 
 fn config_of(target: &RouteTarget) -> Value {
-    let file = opencode_config_for(target).expect("an account that serves an OpenAI protocol");
+    let file = opencode_config_for(target, OPENCODE_KEY_ENV)
+        .expect("an account that serves an OpenAI protocol");
     assert_eq!(file.name, "opencode.json");
     serde_json::from_str(&file.contents).expect("valid JSON")
 }
@@ -51,7 +59,7 @@ fn opencode_on_meta_prefers_responses_and_carries_reasoning() {
     assert_eq!(provider["options"]["baseURL"], "https://api.meta.ai/v1");
     assert_eq!(
         provider["options"]["apiKey"],
-        format!("{{env:{OPENCODE_ROUTE_KEY_ENV}}}")
+        format!("{{env:{OPENCODE_KEY_ENV}}}")
     );
     let model = &provider["models"]["muse-spark-1.3"];
     assert_eq!(
@@ -81,7 +89,8 @@ fn opencode_on_baseten_uses_chat_completions() {
 #[test]
 fn the_generated_config_holds_no_key() {
     // When
-    let file = opencode_config_for(&on_meta("muse-spark-1.3")).expect("Meta serves Responses");
+    let file = opencode_config_for(&on_meta("muse-spark-1.3"), OPENCODE_KEY_ENV)
+        .expect("Meta serves Responses");
 
     // Then
     assert!(!file.contents.contains("a-meta-key"));
@@ -89,22 +98,25 @@ fn the_generated_config_holds_no_key() {
 
 #[test]
 fn an_opencode_route_carries_the_config_the_key_and_the_model_argument() {
-    for harness in [Harness::OpenCodeCli, Harness::OpenCode] {
+    for harness in ["opencode-cli", "opencode"].map(opencode_named) {
         // When
-        let route = resolve_route(harness, &on_meta("muse-wonder-1.0"))
-            .unwrap_or_else(|refusal| panic!("{harness:?}: {refusal}"));
+        let route = resolve_route(&harness, &on_meta("muse-wonder-1.0"))
+            .unwrap_or_else(|refusal| panic!("{}: {refusal}", harness.id));
 
         // Then
         assert_eq!(
             route.files,
-            vec![opencode_config_for(&on_meta("muse-wonder-1.0")).expect("Meta serves Responses")]
+            vec![
+                opencode_config_for(&on_meta("muse-wonder-1.0"), OPENCODE_KEY_ENV)
+                    .expect("Meta serves Responses")
+            ]
         );
         let secrets: Vec<(&str, &str)> = route
             .secret_env
             .iter()
             .map(|(k, v)| (k.as_str(), v.expose()))
             .collect();
-        assert_eq!(secrets, vec![(OPENCODE_ROUTE_KEY_ENV, "a-meta-key")]);
+        assert_eq!(secrets, vec![(OPENCODE_KEY_ENV, "a-meta-key")]);
         assert_eq!(
             route.args,
             vec![
@@ -129,7 +141,7 @@ fn opencode_refuses_an_account_that_serves_neither_openai_protocol() {
     };
 
     // Then
-    assert!(resolve_route(Harness::OpenCodeCli, &anthropic_only).is_err());
+    assert!(resolve_route(&opencode_named("opencode-cli"), &anthropic_only).is_err());
 }
 
 #[test]
@@ -146,5 +158,5 @@ fn no_config_is_generated_for_an_account_that_serves_neither_openai_protocol() {
     };
 
     // Then
-    assert_eq!(opencode_config_for(&anthropic_only), None);
+    assert_eq!(opencode_config_for(&anthropic_only, OPENCODE_KEY_ENV), None);
 }

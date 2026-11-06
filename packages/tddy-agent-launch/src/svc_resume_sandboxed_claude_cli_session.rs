@@ -1,8 +1,7 @@
 use crate::launch_ports::LaunchSessions;
-use crate::session_provider_route::resume_route;
+use crate::session_provider_route::{resume_route, RouteAgent};
 use std::path::PathBuf;
 use std::time::Duration;
-use tddy_core::provider_route::Harness;
 use tddy_rpc::Response;
 use tddy_rpc::Status;
 use tddy_service::proto::session::ResumeSessionResponse;
@@ -48,7 +47,7 @@ impl LaunchSessions {
         // now: a removed account refuses the resume rather than running it on the vendor.
         let route = resume_route(
             &self.host.session_account_access(session_token),
-            Harness::ClaudeCli,
+            RouteAgent::claude_on(self.coding_agents.as_deref()),
             &session_dir,
         )?;
         let pid = self

@@ -29,6 +29,7 @@ run:
   env: {}
 extensions:
   coding_agent:
+    product: Claude Code
     mcp: { kind: file, flag: --mcp-config, format: claude-mcp-json, strict_flag: --strict-mcp-config }
     tool_allow: { flag: --allowedTools }
     tool_deny: { flag: --disallowedTools }

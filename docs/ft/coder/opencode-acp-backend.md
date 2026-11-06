@@ -50,7 +50,7 @@ sessions](../daemon/provider-accounts.md#tool-sessions)) is applied to the agent
   (`0700`) directory under the temporary directory, and `OPENCODE_CONFIG` names it. The directory is
   removed when the worker ends. A route file name that is not a bare file name is refused, so no route
   writes outside that directory.
-- The account's key is in the child's environment (`TDDY_OPENCODE_PROVIDER_KEY`), which the
+- The account's key is in the child's environment (`OPENCODE_PROVIDER_KEY`, the spec's `route.key_env`), which the
   configuration reads; it is never an argument.
 - The route's `--model tddy-route/<model>` argument is **not** passed to `opencode acp`: the generated
   configuration already selects that model. Whether `opencode acp` accepts `--model` was not checked

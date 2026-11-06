@@ -107,7 +107,7 @@ async fn a_routed_opencode_agent_gets_the_generated_config_and_key() {
     std::fs::set_permissions(&agent, std::fs::Permissions::from_mode(0o755)).unwrap();
     let route = HarnessRoute {
         secret_env: vec![(
-            "TDDY_OPENCODE_PROVIDER_KEY".to_string(),
+            "OPENCODE_PROVIDER_KEY".to_string(),
             RouteSecret::new("fw-key"),
         )],
         files: vec![RouteFile {
@@ -130,7 +130,7 @@ async fn a_routed_opencode_agent_gets_the_generated_config_and_key() {
     // names, and the agent is run as `opencode acp` with nothing else on its command line
     let recorded = |name: &str| std::fs::read_to_string(dir.path().join(name)).unwrap_or_default();
     let env = recorded("env.txt");
-    assert!(env.contains("TDDY_OPENCODE_PROVIDER_KEY=fw-key"), "{env}");
+    assert!(env.contains("OPENCODE_PROVIDER_KEY=fw-key"), "{env}");
     assert!(env.contains("OPENCODE_CONFIG="), "{env}");
     assert_eq!(recorded("config.txt"), r#"{"model":"tddy-route/kimi"}"#);
     assert_eq!(recorded("args.txt").trim(), "acp");

@@ -163,6 +163,7 @@ impl LaunchSessions {
         // re-resolved against the owner's vault as it stands now, and a refusal resumes nothing.
         let provider_route_json = resumed_tool_session_route_json(
             &self.host.session_account_access(&req.session_token),
+            self.coding_agents.as_deref(),
             resume_agent.as_deref().unwrap_or_default(),
             &session_dir,
         )?;

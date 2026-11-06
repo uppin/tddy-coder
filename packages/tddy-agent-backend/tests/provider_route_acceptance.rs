@@ -7,9 +7,12 @@
 //!
 //! Feature: docs/ft/daemon/provider-accounts.md (Running a harness on an account)
 
+mod route_agents;
+
+use route_agents::{claude_named, codex_named, cursor_named, muse_named, opencode_named};
 use tddy_agent_backend::provider_route::{
-    choose_route, harness_routable, resolve_route, route_supported, Harness, RouteChoice,
-    RouteEndpoints, RouteRefusal, RouteSecret, RouteSources, RouteTarget,
+    agent_routable, choose_route, resolve_route, route_supported, RouteChoice, RouteEndpoints,
+    RouteRefusal, RouteSecret, RouteSources, RouteTarget,
 };
 
 const META_KEY: &str = "a-meta-key";
@@ -48,10 +51,10 @@ fn value_of<'a>(pairs: &'a [(String, String)], key: &str) -> Option<&'a str> {
 
 #[test]
 fn claude_code_on_meta_gets_the_messages_root_the_key_and_every_alias_pinned() {
-    for harness in [Harness::ClaudeCli, Harness::Claude, Harness::ClaudeAcp] {
+    for harness in ["claude", "claude-acp", "claude-cli"].map(claude_named) {
         // When
-        let route = resolve_route(harness, &a_meta_account_running("muse-wonder-1.0"))
-            .unwrap_or_else(|refusal| panic!("{harness:?} routes on Meta: {refusal}"));
+        let route = resolve_route(&harness, &a_meta_account_running("muse-wonder-1.0"))
+            .unwrap_or_else(|refusal| panic!("{} routes on Meta: {refusal}", harness.id));
 
         // Then
         assert_eq!(
@@ -68,7 +71,8 @@ fn claude_code_on_meta_gets_the_messages_root_the_key_and_every_alias_pinned() {
             assert_eq!(
                 value_of(&route.env, alias),
                 Some("muse-wonder-1.0"),
-                "{harness:?} {alias}"
+                "{} {alias}",
+                harness.id
             );
         }
         let secrets: Vec<(&str, &str)> = route
@@ -91,33 +95,32 @@ fn claude_code_on_meta_gets_the_messages_root_the_key_and_every_alias_pinned() {
 #[test]
 fn claude_code_refuses_an_account_without_anthropic_messages() {
     // When
-    let refusal = resolve_route(Harness::ClaudeCli, &a_baseten_account()).expect_err("refused");
+    let refusal =
+        resolve_route(&claude_named("claude"), &a_baseten_account()).expect_err("refused");
 
     // Then
     assert!(matches!(
-        refusal,
-        RouteRefusal::ProtocolNotServed {
-            harness: Harness::ClaudeCli,
-            ..
-        }
+        &refusal,
+        RouteRefusal::ProtocolNotServed { agent, .. } if agent == "claude"
     ));
     assert!(refusal.to_string().contains("Anthropic Messages"));
 }
 
 #[test]
 fn cursor_cannot_be_routed_whatever_the_account() {
-    for harness in [Harness::Cursor, Harness::CursorCli] {
+    for harness in ["cursor", "cursor-cli"].map(cursor_named) {
         // When
-        let refusal = resolve_route(harness, &a_meta_account_running("muse-spark-1.3"))
+        let refusal = resolve_route(&harness, &a_meta_account_running("muse-spark-1.3"))
             .expect_err("cursor is never routed");
-        let support = route_supported(harness, "meta", &["anthropic-messages", "openai-chat"]);
+        let support = route_supported(&harness, "meta", &["anthropic-messages", "openai-chat"]);
+        let cannot_be_routed = RouteRefusal::AgentCannotBeRouted {
+            agent: harness.id.clone(),
+            product: "Cursor".to_string(),
+        };
 
         // Then
-        assert_eq!(refusal, RouteRefusal::HarnessCannotBeRouted { harness });
-        assert_eq!(
-            support,
-            Err(RouteRefusal::HarnessCannotBeRouted { harness })
-        );
+        assert_eq!(refusal, cannot_be_routed);
+        assert_eq!(support, Err(cannot_be_routed));
         assert!(refusal.to_string().contains("Cursor"));
     }
 }
@@ -127,41 +130,16 @@ fn the_matrix_answers_without_building_a_route() {
     // Then
     assert_eq!(
         route_supported(
-            Harness::ClaudeCli,
+            &claude_named("claude-cli"),
             "fireworks",
             &["anthropic-messages", "openai-chat"]
         ),
         Ok(())
     );
     assert!(matches!(
-        route_supported(Harness::ClaudeCli, "baseten", &["openai-chat"]),
+        route_supported(&claude_named("claude-cli"), "baseten", &["openai-chat"]),
         Err(RouteRefusal::ProtocolNotServed { .. })
     ));
-}
-
-#[test]
-fn every_harness_id_names_its_harness_and_back() {
-    for id in [
-        "claude",
-        "claude-acp",
-        "claude-cli",
-        "codex",
-        "codex-acp",
-        "opencode",
-        "opencode-cli",
-        "muse-cli",
-        "warp-cli",
-        "cursor",
-        "cursor-cli",
-    ] {
-        // When
-        let harness = Harness::from_agent_or_session_type(id).unwrap_or_else(|| panic!("{id}"));
-
-        // Then
-        assert_eq!(harness.id(), id);
-    }
-    assert_eq!(Harness::from_agent_or_session_type("stub"), None);
-    assert_eq!(Harness::from_agent_or_session_type("tool"), None);
 }
 
 #[test]
@@ -218,7 +196,7 @@ fn an_explicit_built_in_choice_overrides_every_lower_level() {
 fn a_route_can_be_logged_without_its_key() {
     // Given
     let route = resolve_route(
-        Harness::ClaudeCli,
+        &claude_named("claude-cli"),
         &a_meta_account_running("muse-spark-1.3"),
     )
     .expect("routes");
@@ -228,24 +206,29 @@ fn a_route_can_be_logged_without_its_key() {
 }
 
 #[test]
-fn every_harness_but_cursor_and_warp_answers_routable() {
+fn every_agent_but_cursor_and_warp_answers_routable() {
     // Then Claude Code, Codex, OpenCode and Muse Code are routable; Cursor and Warp never are
-    for harness in [
-        Harness::Claude,
-        Harness::ClaudeAcp,
-        Harness::ClaudeCli,
-        Harness::Codex,
-        Harness::CodexAcp,
-        Harness::OpenCode,
-        Harness::OpenCodeCli,
-        Harness::MuseCli,
-    ] {
-        assert_eq!(harness_routable(harness), Ok(()));
+    let routable = [
+        claude_named("claude"),
+        claude_named("claude-acp"),
+        claude_named("claude-cli"),
+        codex_named("codex"),
+        codex_named("codex-acp"),
+        opencode_named("opencode"),
+        opencode_named("opencode-cli"),
+        muse_named("muse-cli"),
+    ];
+    for agent in &routable {
+        assert_eq!(agent_routable(agent), Ok(()), "{}", agent.id);
     }
-    for harness in [Harness::Cursor, Harness::CursorCli, Harness::WarpCli] {
+    for id in ["cursor", "cursor-cli", "warp-cli"] {
+        let agent = cursor_named(id);
         assert_eq!(
-            harness_routable(harness),
-            Err(RouteRefusal::HarnessCannotBeRouted { harness })
+            agent_routable(&agent),
+            Err(RouteRefusal::AgentCannotBeRouted {
+                agent: id.to_string(),
+                product: "Cursor".to_string(),
+            })
         );
     }
 }

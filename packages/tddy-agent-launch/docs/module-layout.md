@@ -234,7 +234,7 @@ to a claude-cli session (behaviour:
   `cli_route_launch(spec, route, session_dir) -> CliRouteLaunch { env, args }` writes the route's
   files `0600` (`write_atomic_with_mode`) into the session directory and points the spec's
   `route.config_env` (`OPENCODE_CONFIG`) at the first; `None` adds and writes nothing.
-  `start_cli_route(access, route_harness, spec, sources, model, session_dir)` resolves the chosen account
+  `start_cli_route(access, agent, spec, sources, model, session_dir)` (`agent` the spec's `RoutedAgent`) resolves the chosen account
   (`route_on_account`), writes the files and records `provider-account.yaml`; `resume_cli_route`
   re-resolves the record and writes the files again. opencode-cli and muse-cli use them.
   `launch_model_for(spec, routed, model)` is the model the launch names itself: blank for a routed

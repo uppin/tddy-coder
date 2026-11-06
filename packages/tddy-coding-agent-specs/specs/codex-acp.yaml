@@ -40,6 +40,7 @@ run:
   env: {}
 extensions:
   coding_agent:
+    product: Codex
     mcp: { kind: acp-session }
     tool_allow: unsupported
     tool_deny: unsupported
@@ -53,7 +54,10 @@ extensions:
     # Which providers a route can point the agent at, and how it reaches it (`#agent-tools 12/12`).
     route:
       providers: [openai_responses]
-      shape: args
+      shape: toml_args
+      # The variable the key is handed in; the route names it as the provider's `env_key`. Never a
+      # `TDDY_*` name: the agent process sees no tddy route variable.
+      key_env: CODEX_PROVIDER_KEY
     models:
       default: gpt-5
       curated: [gpt-5]

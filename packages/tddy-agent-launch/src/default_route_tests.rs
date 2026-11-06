@@ -5,7 +5,8 @@
 use std::sync::Arc;
 
 use tddy_accounts::{endpoints_for, preset, ProviderAccount, META_DEFAULT_FOR};
-use tddy_core::provider_route::{Harness, RouteChoice, RouteSources};
+use tddy_coding_agent_specs::{routed_agent, CodingAgentRegistry};
+use tddy_core::provider_route::{RouteChoice, RouteSources};
 use tddy_credentials::{AccountId, CredentialStore, SecretString, SessionVaults};
 
 use crate::session_acting_identity::SessionAccountAccess;
@@ -20,6 +21,12 @@ const ADAS_SESSION: &str = "session-token-for-ada";
 const PASSPHRASE: &str = "correct horse battery staple";
 
 fn ada_whose_meta_account_is_the_claude_cli_default() -> (tempfile::TempDir, SessionAccountAccess) {
+    ada_whose_meta_account_is_the_default_for("claude-cli")
+}
+
+fn ada_whose_meta_account_is_the_default_for(
+    harness: &str,
+) -> (tempfile::TempDir, SessionAccountAccess) {
     let dir = tempfile::tempdir().expect("dir");
     let passphrase = SecretString::new(PASSPHRASE);
     let store =
@@ -36,7 +43,7 @@ fn ada_whose_meta_account_is_the_claude_cli_default() -> (tempfile::TempDir, Ses
     .to_record(1_760_000_000);
     record
         .metadata
-        .insert(META_DEFAULT_FOR.to_string(), "claude-cli".to_string());
+        .insert(META_DEFAULT_FOR.to_string(), harness.to_string());
     store.put(record).expect("stored");
     let vaults = Arc::new(SessionVaults::new(dir.path()));
     vaults.unlock(ADA, &passphrase).expect("unlocked");
@@ -46,6 +53,12 @@ fn ada_whose_meta_account_is_the_claude_cli_default() -> (tempfile::TempDir, Ses
         ADAS_SESSION,
     );
     (dir, access)
+}
+
+/// What a claude-cli start's route is built from: the built-in `claude` spec.
+fn the_claude() -> tddy_core::provider_route::RoutedAgent {
+    let registry = CodingAgentRegistry::builtin().expect("the built-ins load");
+    routed_agent(registry.get("claude").expect("claude is built in"))
 }
 
 fn value_of<'a>(pairs: &'a [(String, String)], key: &str) -> Option<&'a str> {
@@ -67,7 +80,7 @@ fn a_claude_cli_start_without_an_account_uses_the_persons_default() {
     };
 
     // When
-    let route = resolve_session_route(&access, Harness::ClaudeCli, &sources, "muse-spark-1.3")
+    let route = resolve_session_route(&access, &the_claude(), &sources, "muse-spark-1.3")
         .expect("resolves")
         .expect("the default applies");
 
@@ -92,7 +105,7 @@ fn an_explicit_built_in_choice_overrides_the_default() {
 
     // Then
     assert_eq!(
-        resolve_session_route(&access, Harness::ClaudeCli, &sources, "opus").expect("resolves"),
+        resolve_session_route(&access, &the_claude(), &sources, "opus").expect("resolves"),
         None
     );
 }
@@ -167,4 +180,30 @@ fn an_explicit_built_in_start_does_not_need_the_vault_unlocked() {
     // Then
     assert_eq!(sources.session, Some(RouteChoice::BuiltIn));
     assert_eq!(sources.user_default, None);
+}
+
+#[test]
+fn a_default_stored_under_either_id_form_applies_to_its_own_form() {
+    // Given Ada's Meta account is the default for `claude-cli` (the session type) and `claude`
+    // (the agent): both spellings are written by the accounts screen, and none is migrated
+    let (_dir, access) = ada_whose_meta_account_is_the_claude_cli_default();
+    let (_other_dir, other) = ada_whose_meta_account_is_the_default_for("claude");
+
+    // Then
+    assert_eq!(
+        (
+            access
+                .default_provider_account("claude-cli")
+                .expect("reads"),
+            access.default_provider_account("claude").expect("reads"),
+            other.default_provider_account("claude").expect("reads"),
+            other.default_provider_account("claude-cli").expect("reads"),
+        ),
+        (
+            Some("meta-hackathon".to_string()),
+            None,
+            Some("meta-hackathon".to_string()),
+            None,
+        )
+    );
 }

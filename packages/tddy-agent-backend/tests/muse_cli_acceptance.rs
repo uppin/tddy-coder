@@ -4,10 +4,17 @@
 //! Feature: docs/ft/daemon/muse-cli-session.md
 
 use tddy_agent_backend::cli_harness::{cli_harness, CliLaunch};
-use tddy_agent_backend::cli_harness_muse::{muse_cli_models, MUSE_ROUTE_KEY_ENV};
+use tddy_agent_backend::cli_harness_muse::muse_cli_models;
 use tddy_agent_backend::provider_route::{
-    resolve_route, Harness, RouteEndpoints, RouteRefusal, RouteSecret, RouteTarget,
+    resolve_route, RouteEndpoints, RouteRefusal, RouteSecret, RouteTarget,
 };
+
+mod route_agents;
+
+use route_agents::muse_named;
+
+/// The variable Muse Code's spec (`route.key_env`) hands the key in.
+const MUSE_KEY_ENV: &str = "META_API_KEY";
 
 fn an_account(preset: &str) -> RouteTarget {
     RouteTarget {
@@ -29,7 +36,6 @@ fn muse_code_is_registered_as_a_cli_harness() {
 
     // Then
     assert_eq!(muse.label, "Muse Code");
-    assert_eq!(muse.route_harness, Harness::MuseCli);
     assert_eq!(muse.default_binary, "muse");
 }
 
@@ -67,7 +73,8 @@ fn a_resumed_muse_session_continues_its_session() {
 #[test]
 fn muse_on_meta_is_handed_the_key_and_nothing_else() {
     // When
-    let route = resolve_route(Harness::MuseCli, &an_account("meta")).expect("routes on Meta");
+    let route =
+        resolve_route(&muse_named("muse-cli"), &an_account("meta")).expect("routes on Meta");
 
     // Then
     let secrets: Vec<(&str, &str)> = route
@@ -75,7 +82,7 @@ fn muse_on_meta_is_handed_the_key_and_nothing_else() {
         .iter()
         .map(|(k, v)| (k.as_str(), v.expose()))
         .collect();
-    assert_eq!(secrets, vec![(MUSE_ROUTE_KEY_ENV, "a-key")]);
+    assert_eq!(secrets, vec![(MUSE_KEY_ENV, "a-key")]);
     assert!(route.env.is_empty());
     assert!(route.files.is_empty());
 }
@@ -84,9 +91,10 @@ fn muse_on_meta_is_handed_the_key_and_nothing_else() {
 fn muse_accepts_only_meta_accounts() {
     // Then
     assert_eq!(
-        resolve_route(Harness::MuseCli, &an_account("fireworks")).expect_err("refused"),
+        resolve_route(&muse_named("muse-cli"), &an_account("fireworks")).expect_err("refused"),
         RouteRefusal::PresetNotAccepted {
-            harness: Harness::MuseCli,
+            agent: "muse-cli".to_string(),
+            product: "Muse Code".to_string(),
             preset: "fireworks".to_string()
         }
     );

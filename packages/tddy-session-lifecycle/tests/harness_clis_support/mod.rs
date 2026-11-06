@@ -132,7 +132,7 @@ pub fn a_stub_harness_script(harness: AHarness, marker: &Path, probes: &[String]
 /usr/bin/touch "{marker}" 2>/dev/null
 printf 'STUB argv=%s' "$0"; for a in "$@"; do printf '|%s' "$a"; done; printf '\n'
 printf 'STUB cwd=%s\n' "$(/bin/pwd -P)"
-for name in HOME OPENCODE_CONFIG TDDY_OPENCODE_PROVIDER_KEY META_API_KEY HTTPS_PROXY; do
+for name in HOME OPENCODE_CONFIG OPENCODE_PROVIDER_KEY TDDY_OPENCODE_PROVIDER_KEY META_API_KEY HTTPS_PROXY; do
   eval "value=\${{$name-UNSET}}"
   printf 'STUB env:%s=%s\n' "$name" "$value"
 done
@@ -195,6 +195,11 @@ impl AStubReport {
                     .unwrap_or_else(|e| panic!("the route configuration is JSON ({e}): {json}")),
             ),
         }
+    }
+
+    /// The bytes of the file `OPENCODE_CONFIG` names, its newlines removed.
+    pub fn route_config_text(&self) -> &str {
+        self.line("config")
     }
 
     /// The octal mode of the file `OPENCODE_CONFIG` names (`600`).

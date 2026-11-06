@@ -14,6 +14,7 @@
 | Run | Lines | Note |
 |---|---|---|
 | 2026-11-03 | 61 → 74 | #797: the host resume renders the spec's resume argv and wires the resume adapter's `on_exit` hook |
+| 2026-11-05 | 74 (unchanged) | touched by #819 (`#agent-tools` 13/19): `resume_cli_route` reads the agent from the spec; measured fn line to closing brace on `origin/feature/agent-tools/agent-registry` (`7ab752605`) and HEAD; no coverage run. Restructuring deferred to the #agent-tools sweep node (developer, 2026-11-04) |
 
 ## What would close it
 

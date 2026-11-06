@@ -48,7 +48,8 @@ impl LaunchSessions {
         metadata: SessionMetadata,
     ) -> Result<Response<ResumeSessionResponse>, Status> {
         // Resolved before the running jail is stopped: a resume the host cannot launch leaves it running.
-        let session_agent = resolve_session_agent(self.coding_agents.as_ref(), &self.config, kind)?;
+        let session_agent =
+            resolve_session_agent(self.coding_agents.as_ref(), &self.config, kind.clone())?;
         if let Some(state) = self.sandbox_manager.remove(&req.session_id).await {
             state.stop();
         } else if let Some(pid) = metadata.pid {
@@ -68,7 +69,7 @@ impl LaunchSessions {
             &session_agent.agent.spec,
             resume_route(
                 &self.host.session_account_access(&req.session_token),
-                kind.route,
+                (&kind.route).into(),
                 session_dir,
             )?,
         )?;

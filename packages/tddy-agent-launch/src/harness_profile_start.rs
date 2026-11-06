@@ -1,7 +1,8 @@
 //! Starting a session from a harness profile: which session type or tool-session agent runs, on
 //! which account, with which model — the `agent_definition` level of the route.
 
-use tddy_core::provider_route::{Harness, RouteChoice};
+use tddy_coding_agent_specs::CodingAgentRegistry;
+use tddy_core::provider_route::RouteChoice;
 use tddy_discovery::harness_profile::HarnessProfile;
 
 /// What a profile starts.
@@ -16,27 +17,27 @@ pub struct ProfileStart {
     pub model: String,
 }
 
-/// What `profile` starts; `Err` when its `harness` names no harness this daemon runs. A CLI profile's
-/// start is then the session type's start, which launches from that type's spec.
-pub fn profile_start(profile: &HarnessProfile) -> Result<ProfileStart, String> {
-    let harness = Harness::from_agent_or_session_type(&profile.harness).ok_or_else(|| {
-        format!(
+/// What `profile` starts; `Err` when its `harness` names no coding agent this host has. A name
+/// ending `-cli` is a CLI session type, launched from the spec of the agent it runs; any other name
+/// is a tool-session agent, which must be one the host can run headless or over ACP. A CLI
+/// profile's start is then the session type's start.
+pub fn profile_start(
+    profile: &HarnessProfile,
+    agents: &CodingAgentRegistry,
+) -> Result<ProfileStart, String> {
+    let name = profile.harness.as_str();
+    let (session_type, agent) = if agents.for_session_type(name).is_some() {
+        (Some(name.to_string()), None)
+    } else if agents
+        .get(name)
+        .is_some_and(|spec| spec.acp().is_some() || spec.headless().is_some())
+    {
+        (None, Some(name.to_string()))
+    } else {
+        return Err(format!(
             "profile {:?} names {:?}, which is no harness this daemon runs",
             profile.name, profile.harness
-        )
-    })?;
-    let (session_type, agent) = match harness {
-        Harness::ClaudeCli
-        | Harness::OpenCodeCli
-        | Harness::MuseCli
-        | Harness::WarpCli
-        | Harness::CursorCli => (Some(harness.id().to_string()), None),
-        Harness::Claude
-        | Harness::ClaudeAcp
-        | Harness::Codex
-        | Harness::CodexAcp
-        | Harness::OpenCode
-        | Harness::Cursor => (None, Some(harness.id().to_string())),
+        ));
     };
     Ok(ProfileStart {
         session_type,
@@ -47,9 +48,11 @@ pub fn profile_start(profile: &HarnessProfile) -> Result<ProfileStart, String> {
 }
 
 /// The id of the agent spec `profile`'s harness launches from (`#agent-tools 8/12`): its CLI
-/// session type through `tddy_coding_agent_specs::spec_for_session_type` (`opencode-cli` →
-/// `opencode`); `None` for a profile that starts a tool session, or names no harness.
-pub fn profile_spec_id(profile: &HarnessProfile) -> Option<&'static str> {
-    let start = profile_start(profile).ok()?;
-    tddy_coding_agent_specs::spec_for_session_type(start.session_type.as_deref()?)
+/// session type through [`CodingAgentRegistry::for_session_type`] (`opencode-cli` → `opencode`);
+/// `None` for a profile that starts a tool session, or names no harness.
+pub fn profile_spec_id(profile: &HarnessProfile, agents: &CodingAgentRegistry) -> Option<String> {
+    let start = profile_start(profile, agents).ok()?;
+    agents
+        .for_session_type(start.session_type.as_deref()?)
+        .map(|spec| spec.id.clone())
 }

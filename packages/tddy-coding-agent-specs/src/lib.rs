@@ -22,9 +22,9 @@ use tddy_actions::tool::{ToolError, ToolRegistry, BUILTIN_SUPPORT_TOOLS, BUILTIN
 
 pub use capability::Capability;
 pub use registry::{CodingAgentRegistry, RegistryError, CLI_SESSION_TYPE_SUFFIX};
-pub use route::{ProviderKind, RouteShape, RouteSupport};
+pub use route::{ProviderKind, RouteShape, RouteSupport, RoutedAgent};
 pub use spec::{
-    package_runner, AcpCommandError, AcpSection, AgentVariant, CodingAgentExtension,
+    package_runner, routed_agent, AcpCommandError, AcpSection, AgentVariant, CodingAgentExtension,
     CodingAgentSection, CodingAgentSpec, FlagSlot, HeadlessSection, HooksSlot, InstructionsSlot,
     McpFormat, McpSlot, ModelsSection, Placement, PlacementError, ResumeSlot, RouteSlot, SpecError,
     ToolSlot, Unsupported, VariantError, CODING_AGENT_EXTENSION, DEFAULT_ANSWER_WAIT_SECS,
@@ -120,26 +120,6 @@ pub fn embedded_spec(id: &str) -> Result<CodingAgentSpec, SpecError> {
     CodingAgentSpec::of(&def)
 }
 
-/// The id of the agent spec a CLI session type runs (`claude-cli` → `claude`, `cursor-cli` →
-/// `cursor`, `opencode-cli` → `opencode`, `muse-cli` → `muse`, `warp-cli` → `warp`); `None` for a
-/// session type no spec stands for — a tool or workspace session (`#agent-tools 8/12`).
-///
-/// The one place a session type meets a spec id: the launchers and harness profiles resolve
-/// through it instead of the `CliHarness` table.
-// TODO(route-support): #agent-tools n13 `route-support` deletes this. `CodingAgentRegistry::
-// for_session_type` replaces this closed table; its one caller left is
-// `harness_profile_start::profile_spec_id` (docs/dev/todo/2026-11-04-spec-for-session-type-is-unused.md).
-pub fn spec_for_session_type(session_type: &str) -> Option<&'static str> {
-    match session_type {
-        "claude-cli" => Some("claude"),
-        "cursor-cli" => Some("cursor"),
-        "opencode-cli" => Some("opencode"),
-        "muse-cli" => Some("muse"),
-        "warp-cli" => Some("warp"),
-        _ => None,
-    }
-}
-
 /// The registry a host that launches coding agents uses: `tddy-actions`' built-in and support
 /// tools plus [`builtin_specs`], with `<tddyhome>/tools` (`overrides_dir`) applied and every
 /// `extensions:` section validated by [`CodingAgentExtension`].
@@ -153,52 +133,4 @@ pub fn load_agent_registry(overrides_dir: &Path) -> Result<ToolRegistry, ToolErr
         .collect();
     let builtin = ToolRegistry::from_embedded(&sources)?;
     ToolRegistry::load_with_owners(builtin, overrides_dir, &[&CodingAgentExtension])
-}
-
-#[cfg(test)]
-mod spec_for_session_type_tests {
-    use pretty_assertions::assert_eq;
-
-    use super::spec_for_session_type;
-
-    #[test]
-    fn every_cli_session_type_names_its_agent_spec() {
-        // When
-        let resolved: Vec<Option<&str>> = [
-            "claude-cli",
-            "cursor-cli",
-            "opencode-cli",
-            "muse-cli",
-            "warp-cli",
-        ]
-        .into_iter()
-        .map(spec_for_session_type)
-        .collect();
-
-        // Then
-        assert_eq!(
-            resolved,
-            vec![
-                Some("claude"),
-                Some("cursor"),
-                Some("opencode"),
-                Some("muse"),
-                Some("warp"),
-            ]
-        );
-    }
-
-    #[test]
-    fn a_session_type_no_spec_stands_for_is_none_while_a_cli_one_resolves() {
-        // When
-        let resolved = (
-            spec_for_session_type("tool"),
-            spec_for_session_type("workspace"),
-            spec_for_session_type("opencode"),
-            spec_for_session_type("opencode-cli"),
-        );
-
-        // Then — `opencode` is a tool-session agent, not a session type
-        assert_eq!(resolved, (None, None, None, Some("opencode")));
-    }
 }

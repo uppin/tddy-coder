@@ -50,9 +50,9 @@ fn opencode_yaml_requires_a_route_in_a_jail_names_its_config_file_and_key_and_li
                 required_in_jail: true,
                 config_env: Some("OPENCODE_CONFIG".to_string()),
                 files_dir: Some("provider-route".to_string()),
-                key_env: Some("TDDY_OPENCODE_PROVIDER_KEY".to_string()),
+                key_env: Some("OPENCODE_PROVIDER_KEY".to_string()),
                 providers: vec![ProviderKind::OpenaiResponses, ProviderKind::OpenaiChat],
-                shape: RouteShape::ConfigFile,
+                shape: RouteShape::JsonConfigFile,
             }),
             ModelsSection {
                 default: String::new(),

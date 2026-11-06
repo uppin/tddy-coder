@@ -6,21 +6,25 @@
 
 use std::path::Path;
 
-use tddy_core::provider_route::{choose_route, Harness, RouteSources};
+use tddy_core::provider_route::{choose_route, RouteSources};
 use tddy_core::provider_route_file::route_to_json;
 use tddy_rpc::Status;
 
 use crate::session_acting_identity::SessionAccountAccess;
-use crate::session_provider_route::{resolve_session_route, route_sources_on_resume};
+use crate::session_provider_route::{
+    resolve_session_route, route_sources_on_resume, routed_agent_on_host,
+};
+use crate::spec_launch::HostCodingAgents;
 
 /// The route-file JSON for `agent` running `model` after precedence; `None` for the vendor.
 ///
 /// A session that chooses no account gets no route and never reads the vault. A session that does
-/// choose one is refused, with the reason, when `agent` is not a harness (a specialized definition
-/// is its own endpoint, and `stub` runs no provider) or when the harness cannot run on an account
-/// at all (Cursor). Nothing falls back to the vendor.
+/// choose one is refused, with the reason, when `agent` is no installed coding agent (a specialized
+/// definition is its own endpoint, and `stub` runs no provider), when the host has no coding agents
+/// at all, or when the agent's spec declares no route (Cursor). Nothing falls back to the vendor.
 pub fn tool_session_route_json(
     access: &SessionAccountAccess,
+    agents: Option<&HostCodingAgents>,
     agent: &str,
     sources: &RouteSources,
     model: &str,
@@ -34,13 +38,8 @@ pub fn tool_session_route_json(
              the harness that runs it",
         ));
     }
-    let harness = Harness::from_agent_or_session_type(agent).ok_or_else(|| {
-        Status::invalid_argument(format!(
-            "the {agent:?} agent cannot run on a provider account: only a harness can, and a \
-             specialized agent definition is its own endpoint"
-        ))
-    })?;
-    Ok(resolve_session_route(access, harness, sources, model)?.map(|route| route_to_json(&route)))
+    let routed = routed_agent_on_host(agents, agent)?;
+    Ok(resolve_session_route(access, &routed, sources, model)?.map(|route| route_to_json(&route)))
 }
 
 /// The route a resumed tool session runs on again: the account and model its start recorded beside
@@ -48,6 +47,7 @@ pub fn tool_session_route_json(
 /// chose the vendor.
 pub fn resumed_tool_session_route_json(
     access: &SessionAccountAccess,
+    agents: Option<&HostCodingAgents>,
     agent: &str,
     session_dir: &Path,
 ) -> Result<Option<String>, Status> {
@@ -55,5 +55,5 @@ pub fn resumed_tool_session_route_json(
     let Some(model) = model else {
         return Ok(None);
     };
-    tool_session_route_json(access, agent, &sources, &model)
+    tool_session_route_json(access, agents, agent, &sources, &model)
 }

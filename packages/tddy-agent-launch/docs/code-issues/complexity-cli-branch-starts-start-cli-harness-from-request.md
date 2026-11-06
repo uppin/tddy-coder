@@ -14,6 +14,7 @@
 | Run | Lines | Note |
 |---|---|---|
 | 2026-11-03 | 0 → 61 (new over the threshold; 41 lines changed) | #797: the request branch resolves the session type to a spec id, checks the spec's placements and coding agents before dispatching host or jail |
+| 2026-11-05 | 60 (unchanged) | touched by #819 (`#agent-tools` 13/19) at the route call; measured fn line to closing brace on `origin/feature/agent-tools/agent-registry` (`7ab752605`) and HEAD; no coverage run. Restructuring deferred to the #agent-tools sweep node (developer, 2026-11-04) |
 
 ## What would close it
 

@@ -33,3 +33,7 @@ The headless launch is one cohesive group (~265 lines) that shares only `CodingA
 ## Measurement update 2026-11-04 — #agent-tools 11/12 (#800)
 
 **Regressed:** 1036 → 1291 production lines: the ACP launches planned from their specs (`acp_plan_from_spec`, `acp_mcp_servers_from_spec`, `acp_session_meta_from_spec`, the `session_meta_for` override, the inline OpenCode route config). The hand-built ACP path (`harness_command`, `apply_route`, `claude_agent_acp_command`, `opencode_route_config`, `opencode_withdrawal_config`, the ACP constants) stays for launchers built without coding agents (`docs/dev/todo/2026-11-04-acp-hand-built-launch-path-for-agentless-launchers.md`); deleting it is the sweep's first cut here. **Status:** Open — deferred to the #agent-tools sweep node (developer, 2026-11-04).
+
+## Measurement update 2026-11-05 — #agent-tools 13/19 (#819)
+
+**Worse by 3:** 1291 → 1294 production lines (+3; counted to the first `#[cfg(test)]` at `7ab752605` and at the wrap). `route_from_vault` reads the launch's agent from the host's registry (`routed_agent_on_host`) instead of the closed `Harness` table, and takes the registry as a parameter. No cut here; the sweep's first cut stays the hand-built ACP path. **Status:** Open — deferred to the #agent-tools sweep node (developer, 2026-11-03).

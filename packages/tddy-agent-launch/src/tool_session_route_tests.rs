@@ -5,8 +5,9 @@
 use std::sync::Arc;
 
 use tddy_accounts::{endpoints_for, preset, presets, PresetEndpoint, ProviderAccount};
+use tddy_coding_agent_specs::routed_agent;
 use tddy_core::provider_route::{
-    resolve_route, Harness, RouteChoice, RouteEndpoints, RouteSecret, RouteSources, RouteTarget,
+    resolve_route, RouteChoice, RouteEndpoints, RouteSecret, RouteSources, RouteTarget,
 };
 use tddy_core::provider_route_file::route_from_json;
 use tddy_credentials::{AccountId, CredentialStore, SecretString, SessionVaults};
@@ -48,6 +49,15 @@ fn ada_holding_a_meta_account() -> (tempfile::TempDir, SessionAccountAccess) {
     (dir, access)
 }
 
+/// The coding agents of a fixture host: every built-in spec, resolved as the daemon resolves them.
+fn the_host_agents() -> Arc<crate::spec_launch::HostCodingAgents> {
+    crate::host_coding_agents::host_coding_agents(
+        &tddy_daemon_kernel::config::DaemonConfig::default(),
+        std::path::Path::new("/nonexistent-tddy-home"),
+    )
+    .expect("the built-in coding agents load")
+}
+
 fn on_meta() -> RouteSources {
     RouteSources {
         session: Some(RouteChoice::Account("meta-hackathon".to_string())),
@@ -61,9 +71,15 @@ fn a_codex_tool_session_on_meta_is_handed_a_route_file_with_its_provider() {
     let (_dir, access) = ada_holding_a_meta_account();
 
     // When
-    let json = tool_session_route_json(&access, "codex", &on_meta(), "muse-wonder-1.0")
-        .expect("resolves")
-        .expect("a route");
+    let json = tool_session_route_json(
+        &access,
+        Some(&the_host_agents()),
+        "codex",
+        &on_meta(),
+        "muse-wonder-1.0",
+    )
+    .expect("resolves")
+    .expect("a route");
 
     // Then
     let route = route_from_json(&json).expect("a route file");
@@ -71,7 +87,16 @@ fn a_codex_tool_session_on_meta_is_handed_a_route_file_with_its_provider() {
         .args
         .iter()
         .any(|a| a.contains("wire_api=\"responses\"")));
-    assert_eq!(route.secret_env[0].1.expose(), "a-meta-key");
+    let secrets: Vec<(&str, &str)> = route
+        .secret_env
+        .iter()
+        .map(|(name, value)| (name.as_str(), value.expose()))
+        .collect();
+    assert_eq!(
+        secrets,
+        vec![("CODEX_PROVIDER_KEY", "a-meta-key")],
+        "codex.yaml's route.key_env, never TDDY_ROUTE_API_KEY"
+    );
 }
 
 #[test]
@@ -80,8 +105,14 @@ fn a_cursor_tool_session_with_an_account_is_refused() {
     let (_dir, access) = ada_holding_a_meta_account();
 
     // When
-    let refusal = tool_session_route_json(&access, "cursor", &on_meta(), "composer-2.5")
-        .expect_err("refused");
+    let refusal = tool_session_route_json(
+        &access,
+        Some(&the_host_agents()),
+        "cursor",
+        &on_meta(),
+        "composer-2.5",
+    )
+    .expect_err("refused");
 
     // Then
     assert_eq!(refusal.code(), Code::InvalidArgument);
@@ -94,8 +125,14 @@ fn a_specialized_agent_definition_with_an_account_is_refused() {
     let (_dir, access) = ada_holding_a_meta_account();
 
     // When
-    let refusal = tool_session_route_json(&access, "repo-explorer", &on_meta(), "m")
-        .expect_err("a definition is its own endpoint");
+    let refusal = tool_session_route_json(
+        &access,
+        Some(&the_host_agents()),
+        "repo-explorer",
+        &on_meta(),
+        "m",
+    )
+    .expect_err("a definition is its own endpoint");
 
     // Then
     assert_eq!(refusal.code(), Code::InvalidArgument);
@@ -108,8 +145,14 @@ fn a_tool_session_that_chooses_nothing_gets_no_route_file() {
 
     // Then
     assert_eq!(
-        tool_session_route_json(&access, "claude", &RouteSources::default(), "opus")
-            .expect("no choice"),
+        tool_session_route_json(
+            &access,
+            Some(&the_host_agents()),
+            "claude",
+            &RouteSources::default(),
+            "opus"
+        )
+        .expect("no choice"),
         None
     );
 }
@@ -120,8 +163,14 @@ fn a_tool_session_on_an_account_that_names_no_agent_is_refused() {
     let (_dir, access) = ada_holding_a_meta_account();
 
     // When
-    let refusal =
-        tool_session_route_json(&access, "", &on_meta(), "muse-wonder-1.0").expect_err("refused");
+    let refusal = tool_session_route_json(
+        &access,
+        Some(&the_host_agents()),
+        "",
+        &on_meta(),
+        "muse-wonder-1.0",
+    )
+    .expect_err("refused");
 
     // Then
     assert_eq!(refusal.code(), Code::InvalidArgument);
@@ -146,7 +195,9 @@ fn codex_declares_every_responses_preset_under_the_label_the_accounts_table_give
         };
 
         // When
-        let route = resolve_route(Harness::Codex, &target)
+        let agents = the_host_agents();
+        let codex = routed_agent(agents.agents().get("codex").expect("codex is built in"));
+        let route = resolve_route(&codex, &target)
             .unwrap_or_else(|refusal| panic!("{}: {refusal}", preset.id));
 
         // Then the Codex provider carries the preset's own label
