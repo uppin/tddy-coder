@@ -128,21 +128,19 @@ fn a_placed_pointer_is_found_from_the_worktree_owner_only_and_kept_out_of_git() 
 }
 
 #[test]
-fn a_pointer_is_refused_in_a_worktree_that_is_not_a_git_checkout() {
-    // Given
+fn a_worktree_that_is_no_git_checkout_gets_its_pointer_with_nothing_to_exclude_it_from() {
+    // Given — a plain directory: no repository holds it, so none can commit the pointer
     let not_a_checkout = tempfile::tempdir().unwrap();
     let pointer = the_pointer_in(not_a_checkout.path());
 
     // When
-    let placed = place_session_pointer(Some(&pointer), not_a_checkout.path(), None);
+    let placed = place_session_pointer(Some(&pointer), not_a_checkout.path(), None)
+        .expect("the pointer is written");
 
     // Then
     assert_eq!(
-        (
-            placed.map_err(|status| status.code()).err(),
-            not_a_checkout.path().join(".tddy").exists()
-        ),
-        (Some(tddy_rpc::Code::Internal), false)
+        find_session_pointer(not_a_checkout.path()).unwrap(),
+        Some((placed.expect("a local pointer"), pointer))
     );
 }
 

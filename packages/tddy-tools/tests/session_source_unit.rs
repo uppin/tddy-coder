@@ -178,3 +178,31 @@ fn a_pointer_that_does_not_parse_is_an_error_never_skipped_for_the_environment()
         Err(Some(worktree.pointer()))
     );
 }
+
+#[test]
+fn a_pointers_notify_map_sets_only_the_names_tddy_tools_notify_reads() {
+    // Given — a pointer naming the notify session, and a name notify does not read
+    let session = ResolvedSession {
+        socket: None,
+        repo_dir: Some(PathBuf::from("/srv/checkouts/app")),
+        session_dir: None,
+        remote: BTreeMap::new(),
+        notify: BTreeMap::from([
+            ("TDDY_SESSION_ID".to_string(), "s1".to_string()),
+            ("PATH".to_string(), "/planted".to_string()),
+        ]),
+        source: SessionSource::Env,
+    };
+
+    // When
+    let env = tddy_tools::session_source::session_environment(&session);
+
+    // Then — no socket is adopted, and PATH is not
+    assert_eq!(
+        env,
+        vec![
+            ("TDDY_REPO_DIR".to_string(), "/srv/checkouts/app".to_string()),
+            ("TDDY_SESSION_ID".to_string(), "s1".to_string()),
+        ]
+    );
+}

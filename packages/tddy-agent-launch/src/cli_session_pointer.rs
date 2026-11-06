@@ -6,7 +6,7 @@
 //! `TDDY_REPO_DIR`) to the agent's tool server registration only, and the operator-notify session
 //! (`session_activity::notify_env`) to nobody. Both are written instead as the `.tddy/session.json`
 //! pointer n15 introduced for headless agents ([`tddy_core::session_pointer::SessionPointer`]), in
-//! the session's worktree, git-excluded through `info/exclude`
+//! the session's worktree, git-excluded through `info/exclude` when the worktree is a checkout
 //! ([`tddy_core::turn_files::exclude_from_git`]). `tddy-tools` walks up from its cwd to it
 //! (`packages/tddy-tools/docs/session-resolution.md`).
 //!
@@ -93,8 +93,10 @@ pub(crate) fn place_session_pointer(
         })?;
         return Ok(None);
     }
-    tddy_core::turn_files::exclude_from_git(worktree, &format!("/{SESSION_POINTER_FILE}"))
-        .map_err(|e| Status::internal(e.to_string()))?;
+    if inside_a_git_checkout(worktree)? {
+        tddy_core::turn_files::exclude_from_git(worktree, &format!("/{SESSION_POINTER_FILE}"))
+            .map_err(|e| Status::internal(e.to_string()))?;
+    }
     if let Some(dir) = path.parent() {
         std::fs::create_dir_all(dir)
             .map_err(|e| Status::internal(format!("failed to create {}: {e}", dir.display())))?;
@@ -108,6 +110,26 @@ pub(crate) fn place_session_pointer(
         },
     )?;
     Ok(Some(path))
+}
+
+/// Whether `worktree` lies in a git checkout — one of its own, or one of a directory above it. Only
+/// a checkout can commit the pointer, so only a checkout's `info/exclude` needs it: a session whose
+/// worktree is no checkout at all (a peer given a plain directory, a resume in its session
+/// directory) gets its pointer with nothing to exclude it from. Refused when git cannot be run.
+fn inside_a_git_checkout(worktree: &Path) -> Result<bool, Status> {
+    std::process::Command::new("git")
+        .arg("-C")
+        .arg(worktree)
+        .args(["rev-parse", "--git-common-dir"])
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status()
+        .map(|status| status.success())
+        .map_err(|e| {
+            Status::internal(format!(
+                "git could not be run to keep the session pointer out of commits: {e}"
+            ))
+        })
 }
 
 /// Remove `worktree`'s pointer, if any: the session is gone.

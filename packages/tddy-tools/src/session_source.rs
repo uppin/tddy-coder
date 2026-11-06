@@ -144,16 +144,42 @@ pub fn resolve_current_session(
 /// while another thread reads it is unsound. The agent that ran this process never had these
 /// variables, and a command it runs through the exec tools is started without them.
 pub fn adopt_session(session: &ResolvedSession) {
-    if let Some(socket) = &session.socket {
-        std::env::set_var(SOCKET_VARIABLE, socket);
-    }
-    if let Some(dir) = &session.session_dir {
-        std::env::set_var("TDDY_SESSION_DIR", dir);
-    }
-    if let Some(repo) = &session.repo_dir {
-        std::env::set_var("TDDY_REPO_DIR", repo);
-    }
-    for (name, value) in session.remote.iter().chain(&session.notify) {
+    for (name, value) in session_environment(session) {
         std::env::set_var(name, value);
     }
 }
+
+/// The variables [`adopt_session`] sets for `session`. Of a pointer's `notify` map, only the names
+/// `tddy-tools notify` reads: a pointer is a file found by walking up from the cwd, and must not be
+/// able to set `PATH` or anything else in this process.
+pub fn session_environment(session: &ResolvedSession) -> Vec<(String, String)> {
+    let path = |path: &Path| path.to_string_lossy().into_owned();
+    let mut env = Vec::new();
+    if let Some(socket) = &session.socket {
+        env.push((SOCKET_VARIABLE.to_string(), path(socket)));
+    }
+    if let Some(dir) = &session.session_dir {
+        env.push(("TDDY_SESSION_DIR".to_string(), path(dir)));
+    }
+    if let Some(repo) = &session.repo_dir {
+        env.push(("TDDY_REPO_DIR".to_string(), path(repo)));
+    }
+    env.extend(session.remote.clone());
+    env.extend(
+        session
+            .notify
+            .iter()
+            .filter(|(name, _)| NOTIFY_VARIABLES.contains(&name.as_str()))
+            .map(|(name, value)| (name.clone(), value.clone())),
+    );
+    env
+}
+
+/// What a pointer's `notify` may set: [`tddy_service::session_activity::notify_env`]'s names.
+const NOTIFY_VARIABLES: [&str; 5] = [
+    tddy_service::session_activity::notify_env::SESSION_ID,
+    tddy_service::session_activity::notify_env::OS_USER,
+    tddy_service::session_activity::notify_env::HOOK_TOKEN,
+    tddy_service::session_activity::notify_env::DAEMON_URL,
+    tddy_service::session_activity::notify_env::DAEMON_SOCKET,
+];
