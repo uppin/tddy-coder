@@ -24,3 +24,17 @@ outside #800's scope. The developer chose to keep it for this node and not to ad
 
 The `#agent-tools` sweep node migrates the session-lifecycle and `tddy-daemon-rpc` fixtures to
 `with_coding_agents`, then deletes the hand-built path and the items listed above.
+
+## Narrowed by `#agent-tools` 19/19 (`agent-config-removal`)
+
+`DaemonCodingAgentLauncher` now holds its coding agents unconditionally (an empty registry when none
+are installed), and `coding_agent_launcher.rs` plans nothing by hand: `harness_command`,
+`apply_route`'s hand-built branch, `claude_agent_acp_command`, the ACP/binary constants and the
+hand-built `mcp_servers_for` / `session_meta_for` answers are deleted, their tests moved onto stub
+binaries behind the spec path.
+
+**Still open (a different crate, so not this node's):** `tddy-coding-subagent` keeps
+`withdrawal_session_meta`, `opencode_withdrawal_config`, `CLAUDE_NATIVE_TOOLS`, `OPENCODE_NATIVE_TOOLS`
+and `ACP_HARNESSES`. The first is the default body of `CodingAgentLauncher::session_meta_for`
+(`launcher.rs`) and `ACP_HARNESSES` backs `transport_of`; deleting them changes that trait's default
+and its own unit tests, which the sweep node (n20) owns.

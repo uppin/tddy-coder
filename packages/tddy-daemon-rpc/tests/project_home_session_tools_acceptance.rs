@@ -145,8 +145,8 @@ async fn a_project_home_world() -> World {
     a_project_home_world_on(test_service(sessions.path().to_path_buf()), sessions).await
 }
 
-/// The same world, on a daemon that can spawn `claude-cli` sessions: its config points
-/// `claude_cli.binary_path` at `/bin/cat` (works in a PTY without the real binary — same stub as
+/// The same world, on a daemon that can spawn `claude-cli` sessions: its coding agents bind
+/// `claude` to `/bin/cat` (works in a PTY without the real binary — same stub as
 /// `claude_cli_session_acceptance.rs`), and its user resolver answers the current OS user, whom
 /// the spawn impersonates (a fabricated name does not resolve during the spawn).
 async fn a_claude_capable_project_home_world() -> World {
@@ -174,7 +174,10 @@ async fn a_claude_capable_project_home_world() -> World {
         Arc::new(CliSessionManager::new()),
     )
     .with_coding_agents_if_none(
-        tddy_session_lifecycle::test_util::builtin_coding_agents_for(&config),
+        tddy_session_lifecycle::test_util::coding_agents_with_binaries(&[(
+            "claude",
+            std::path::Path::new("/bin/cat"),
+        )]),
     );
     let service = TestDaemon::from_host(host);
     service.as_arc().install_sandbox_rpc_bridge();
@@ -222,7 +225,7 @@ fn current_os_user() -> String {
         .into_owned()
 }
 
-/// A daemon config whose `claude` is `/bin/cat` — a stub that works in a PTY without the real
+/// A daemon config for the current user; the host's `claude` is `/bin/cat` — a stub that works in a PTY without the real
 /// binary (a positional argument would make `cat` open it as a file, but the start under test
 /// never gets that far on the red side, and the metadata assertion needs no output on green).
 fn a_config_with_a_stub_claude() -> DaemonConfig {
@@ -233,14 +236,11 @@ fn a_config_with_a_stub_claude() -> DaemonConfig {
 users:
   - github_user: "{user}"
     os_user: "{user}"
-claude_cli:
-  binary_path: /bin/cat
 "#
     );
     let config_path = dir.path().join("daemon.yaml");
     std::fs::write(&config_path, yaml).unwrap();
-    tddy_session_lifecycle::test_util::daemon_config_from_fixture_file(&config_path)
-        .expect("config must parse")
+    DaemonConfig::load(&config_path).expect("config must parse")
 }
 
 fn listed_ids(response: &ExecuteToolResponse) -> Vec<String> {

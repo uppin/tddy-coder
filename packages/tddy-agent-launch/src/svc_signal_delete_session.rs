@@ -144,7 +144,7 @@ impl LaunchSessions {
             &sessions_base,
             session_id,
             projects_dir_opt.as_deref(),
-            self.coding_agents.as_deref().map(|agents| agents.agents()),
+            Some(self.coding_agents.agents()),
         )?;
         log::info!("DeleteSession: successfully removed session {}", session_id);
         Ok(Response::new(DeleteSessionResponse { ok: true }))

@@ -13,7 +13,8 @@ fn install_claude_cli_hooks(
     session_id: &str,
     worktree_path: &Path,
 ) {
-    let hooks = claude_cli_hooks(config, tddy_data_dir);
+    let claude = tddy_coding_agent_specs::embedded_spec("claude").expect("claude.yaml is built in");
+    let hooks = claude_cli_hooks(config, tddy_data_dir, &claude, "/usr/local/bin/tddy-tools");
     tddy_session_split::service_util::write_claude_hooks_settings(
         worktree_path,
         &hooks.params(session_id, os_user),
@@ -504,7 +505,7 @@ fn a_claude_cli_session_is_launched_with_the_notify_environment_and_the_guidance
     // Then its agent's environment names its session, its owner, its hook token and the daemon's
     // URL — exactly what `tddy-tools notify` reads
     let expected =
-        the_environment_reaching_the_url(&daemon_hook_urls::claude_hook_daemon_url(&host.config));
+        the_environment_reaching_the_url(&daemon_hook_urls::advertise_daemon_url(&host.config));
     assert_eq!(wiring.environment(), as_borrowed(&expected));
     // And its system prompt is appended the paragraph telling it when to notify
     assert!(
@@ -541,7 +542,7 @@ fn a_resumed_claude_cli_session_carries_the_notify_environment_again() {
 
     // Then its new process is given the same notify environment its first one was
     let expected =
-        the_environment_reaching_the_url(&daemon_hook_urls::claude_hook_daemon_url(&host.config));
+        the_environment_reaching_the_url(&daemon_hook_urls::advertise_daemon_url(&host.config));
     assert_eq!(wiring.environment(), as_borrowed(&expected));
 }
 

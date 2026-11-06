@@ -55,21 +55,6 @@ fn new_connection_service(sessions_base: PathBuf) -> Arc<DaemonSessionHost> {
     service
 }
 
-/// A fixture's `daemon.yaml` read as a typed [`DaemonConfig`], without the start-up refusal of the
-/// removed `claude_cli:`, `cursor_cli:` and `cli_harnesses:` sections (`#agent-tools 12/12`).
-///
-/// Fixtures that point an agent at a stub binary still set it through those sections, whose typed
-/// fields remain until their removal (`docs/dev/todo/2026-11-04-removed-agent-config-readers-remain.md`).
-/// Start-up never reads a config this way: it goes through [`DaemonConfig::load`], which refuses them.
-// TODO(agent-config-removal): #agent-tools n19 `agent-config-removal` — migrate the fixtures to a
-// `<tddyhome>/tools/<id>.yaml` override and delete this.
-pub fn daemon_config_from_fixture_file(path: &std::path::Path) -> anyhow::Result<DaemonConfig> {
-    let contents = std::fs::read_to_string(path)
-        .map_err(|e| anyhow::anyhow!("failed to read {}: {e}", path.display()))?;
-    serde_yaml::from_str(&contents)
-        .map_err(|e| anyhow::anyhow!("failed to parse {}: {e}", path.display()))
-}
-
 /// The coding agents of a fixture host: every built-in spec, with no `<tddyhome>/tools` overrides,
 /// resolved the way the daemon resolves them ([`tddy_agent_launch::host_coding_agents`]) — so
 /// `tddy-tools` is the build's own (`CARGO_BIN_EXE_tddy-tools`, or the sibling of the test binary in
@@ -87,28 +72,12 @@ pub fn builtin_coding_agents() -> Arc<tddy_agent_launch::spec_launch::HostCoding
     .expect("the built-in coding agents load")
 }
 
-/// [`builtin_coding_agents`] for a fixture whose `config` points an agent at a stub binary
-/// (`claude_cli.binary_path`, read as the daemon reads it for `claude`): the stub is what a start of
-/// that agent launches, instead of whichever `claude` the developer's `PATH` happens to hold.
-///
-/// # Panics
-/// When the built-in specs do not load, which no build passes.
-#[must_use]
-pub fn builtin_coding_agents_for(
-    config: &DaemonConfig,
-) -> Arc<tddy_agent_launch::spec_launch::HostCodingAgents> {
-    tddy_agent_launch::host_coding_agents::host_coding_agents(
-        config,
-        std::path::Path::new("/nonexistent-tddy-home"),
-    )
-    .expect("the built-in coding agents load")
-}
-
 /// The built-in coding agents on a fixture host that maps each `(agent id, binary)` of `binaries`
 /// through that agent's spec — its `binary.env` (`TDDY_CLAUDE_BINARY`, `TDDY_CURSOR_AGENT`,
 /// `TDDY_TOOLS_BINARY`, …) answers `binary` on this host alone, never in the process environment.
 /// The host's `PATH` is empty, so an agent `binaries` does not name is unavailable rather than
-/// found on the machine running the test (`#agent-tools 19/19`). What a fixture installs its stub
+/// found on the machine running the test (`#agent-tools 19/19`) — except `tddy-tools`, which the
+/// daemon's host finds beside the daemon binary, here the build's own. What a fixture installs its stub
 /// agents with in place of a daemon.yaml `claude_cli.binary_path`.
 ///
 /// # Panics
@@ -138,7 +107,7 @@ pub fn coding_agents_with_binaries(
         .collect();
     Arc::new(tddy_agent_launch::spec_launch::HostCodingAgents::new(
         registry,
-        Arc::new(AHostOfBinaries { env }),
+        tddy_agent_launch::host_coding_agents::daemon_tool_host(Arc::new(AHostOfBinaries { env })),
     ))
 }
 

@@ -24,7 +24,6 @@ use tddy_coding_agent_specs::slots::{self, McpServerCommand, SlotInputs};
 use tddy_coding_agent_specs::{CodingAgentSpec, McpSlot, ToolSlot};
 use tddy_core::cli_harness::CliHarness;
 use tddy_core::provider_route::HarnessRoute;
-use tddy_daemon_kernel::config::DaemonConfig;
 use tddy_rpc::Status;
 use tddy_session_agents::roster_replacement::roster_replacement_pairs;
 
@@ -36,6 +35,21 @@ use crate::svc_start_sandboxed_claude_cli_session::{JailDirs, JailSession};
 
 /// The dep of an agent's tool that serves its MCP tools in a jail (`tddy-tools --mcp`).
 pub(crate) const TDDY_TOOLS_ID: &str = "tddy-tools";
+
+/// The `tddy-tools` binary `agent`'s tool file depends on, as the host resolved it
+/// (`#agent-tools 19/19`): the one a session's hooks, managed workflow and tool server run, with no
+/// daemon.yaml input. An agent that does not depend on it is refused.
+pub(crate) fn agent_tddy_tools(agent: &HostAgent) -> Result<String, Status> {
+    agent
+        .dep(TDDY_TOOLS_ID)
+        .map(|tool| tool.binary.to_string_lossy().into_owned())
+        .ok_or_else(|| {
+            Status::failed_precondition(format!(
+                "the {} tool does not depend on {TDDY_TOOLS_ID}",
+                agent.spec.id
+            ))
+        })
+}
 
 /// A sandboxed CLI agent's launch, as its start or resume has settled it.
 pub(crate) struct CliJail<'a> {
@@ -500,21 +514,18 @@ pub(crate) struct CliJailBinaries {
 /// Resolve the executables a sandboxed CLI harness's runner is started from.
 #[allow(dead_code)]
 pub(crate) fn resolve_cli_jail_binaries(
-    config: &DaemonConfig,
     harness: &CliHarness,
 ) -> Result<CliJailBinaries, Status> {
     let agent_kind = require_sandbox_hosts(harness)?;
     Ok(CliJailBinaries {
         tddy_tools_path: canonical_exec_path(
-            &tddy_daemon_sandbox::sandbox_session::resolve_tddy_tools_path(
-                tddy_daemon_kernel::config::resolve_cursor_cli_tddy_tools_path(config).as_deref(),
-            ),
+            &tddy_daemon_sandbox::sandbox_session::resolve_tddy_tools_path(None),
         ),
         sandbox_runner_path: canonical_exec_path(
             &tddy_daemon_sandbox::sandbox_session::resolve_sandbox_runner_path(),
         ),
         agent_binary: resolve_jail_agent_binary(
-            &crate::opencode_cli_spawn::harness_binary(config, harness),
+            &crate::opencode_cli_spawn::harness_binary(harness),
             &std::env::var("PATH").unwrap_or_default(),
         )?,
         agent_kind,

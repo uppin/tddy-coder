@@ -65,7 +65,8 @@ impl RecordingLauncher {
                     )],
                 ))
             }),
-        );
+        )
+        .with_coding_agents(tddy_session_lifecycle::test_util::builtin_coding_agents());
         Arc::new(Self {
             launches: Mutex::new(Vec::new()),
             served: Mutex::new(Vec::new()),

@@ -39,15 +39,15 @@ impl LaunchSessions {
         &self,
         req: &StartSessionRequest,
     ) -> Result<(), Status> {
-        refuse_a_cli_start_without_a_model(req, self.coding_agents.as_deref())?;
+        refuse_a_cli_start_without_a_model(req, Some(&*self.coding_agents))?;
         resolve_caller_chosen_session_id(&req.requested_session_id, req.session_type.trim())?;
         managed_recipe_for(req)?;
         // The agent the session type names — `claude` for `claude-cli`, a dropped-in copy for its own.
         let session_type = req.session_type.trim();
         let agent_id = self
             .coding_agents
-            .as_deref()
-            .and_then(|agents| agents.agents().for_session_type(session_type))
+            .agents()
+            .for_session_type(session_type)
             .map(|spec| spec.id.clone())
             .ok_or_else(|| {
                 Status::failed_precondition(format!("no coding agent spec launches {session_type}"))
@@ -57,7 +57,7 @@ impl LaunchSessions {
         start_route(
             &access,
             RouteAgent::OnHost {
-                agents: self.coding_agents.as_deref(),
+                agents: Some(&*self.coding_agents),
                 id: &agent_id,
             },
             &sources,
@@ -115,7 +115,7 @@ impl LaunchSessions {
     ) -> Result<Response<StartSessionResponse>, Status> {
         // Resolved first, with no side effect: the managed-codebase refusal reads the agent's spec.
         let session_agent =
-            resolve_session_agent(self.coding_agents.as_ref(), &self.config, kind.clone())?;
+            resolve_session_agent(&self.coding_agents, kind.clone())?;
         refuse_an_unsupported_cli_session_start(&session_agent.agent.spec, kind.name, req)?;
         if req.sandbox {
             self.require_sandbox_placement(kind.name)?;
@@ -186,7 +186,6 @@ impl LaunchSessions {
             crate::opencode_cli_spawn::CliHarnessStart {
                 kind: session_agent.kind.clone(),
                 agent: &session_agent.agent,
-                renderer_env: session_agent.renderer_env.clone(),
                 config: &self.config,
                 tddy_data_dir: &self.tddy_data_dir,
                 cli_manager: &self.claude_cli_manager,
@@ -260,8 +259,8 @@ impl LaunchSessions {
         &self,
         child: SpawnedChild<'_>,
     ) -> Result<Response<StartSessionResponse>, Status> {
-        let kind = child_session_type(self.coding_agents.as_deref(), child.parent_session_type)?;
-        let session_agent = resolve_session_agent(self.coding_agents.as_ref(), &self.config, kind)?;
+        let kind = child_session_type(Some(&*self.coding_agents), child.parent_session_type)?;
+        let session_agent = resolve_session_agent(&self.coding_agents, kind)?;
         let mut started_agents = Vec::new();
         let clones = tddy_session_agents::agent_host_callbacks::DaemonSeedCloneClaimant {
             service: self.agent_roster.clone(),
@@ -272,7 +271,6 @@ impl LaunchSessions {
             crate::opencode_cli_spawn::CliHarnessStart {
                 kind: session_agent.kind.clone(),
                 agent: &session_agent.agent,
-                renderer_env: session_agent.renderer_env.clone(),
                 config: &self.config,
                 tddy_data_dir: &self.tddy_data_dir,
                 cli_manager: &self.claude_cli_manager,

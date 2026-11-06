@@ -44,8 +44,8 @@ fn a_non_cursor_probe_omits_the_cursor_cli_path_flag() {
 }
 
 /// The OpenCode model probe hands `tddy-tools` the binary the daemon resolved for the harness
-/// (`cli_harness_binary`: the environment, then `cli_harnesses.opencode-cli.binary_path`, then
-/// `opencode`), so the impersonated child execs it without a PATH lookup that lacks its install dir.
+/// (the host's resolution of the harness spec's binary), so the impersonated child execs it without
+/// a PATH lookup that lacks its install dir.
 #[test]
 fn an_opencode_cli_probe_carries_the_resolved_opencode_binary_path() {
     // Given

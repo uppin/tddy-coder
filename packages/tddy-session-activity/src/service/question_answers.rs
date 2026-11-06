@@ -10,12 +10,10 @@
 //!    host is asked of that host over the peer query, `#home-inbox` 10/11.)
 //! 2. the pending question must be the `request_id` asked for. A permission is held as a permission
 //!    prompt; any other kind is a question, held with its answers (`8/9`);
-//! 3. a waiter is opened in [`PendingAnswers`] and held for at most [`AnswerWaitPorts::wait`] →
+//! 3. a waiter is opened in [`PendingAnswers`] and held for at most [`session_answer_wait`] →
 //!    `ANSWERED` (with the option, or the per-question answers), or `TIMED_OUT`.
 
 use std::sync::Arc;
-use std::time::Duration;
-
 use std::path::Path;
 
 use tddy_coding_agent_specs::Capability;
@@ -28,6 +26,7 @@ use tddy_service::proto::activity::{
     IsSessionTerminalServedRequest, IsSessionTerminalServedResponse,
 };
 
+use crate::answer_wait::session_answer_wait;
 use crate::answers::permission_request_view;
 use crate::pending_answers::{
     DeliveredAnswer, DeliveredQuestionAnswers, QuestionWaitOutcome, WaitOutcome,
@@ -38,17 +37,12 @@ use crate::pending_answers::PendingAnswers;
 use crate::service::ActivityServiceImpl;
 
 /// What `AwaitQuestionAnswer` needs from the daemon: the registry the answer tool delivers into,
-/// whether an orchestrator is present, and how long a hook may be held.
+/// and whether an orchestrator is present.
 #[derive(Clone)]
 pub struct AnswerWaitPorts {
     /// Shared with `AnswerSessionPermission`; one per daemon.
     pub pending: Arc<PendingAnswers>,
     pub presence: Arc<dyn OrchestratorPresence>,
-    /// `claude_cli.answer_wait_secs`. Injected so a test can hold a hook for milliseconds.
-    // TODO(agent-config-removal): removed at green — the hold is per session,
-    // `crate::answer_wait::session_answer_wait` over the session's recorded wait and this service's
-    // agents; a test records a short wait in the session directory instead.
-    pub wait: Duration,
 }
 
 impl Default for AnswerWaitPorts {
@@ -58,7 +52,6 @@ impl Default for AnswerWaitPorts {
         Self {
             pending: Arc::new(PendingAnswers::new()),
             presence: Arc::new(NoOrchestratorIsActive),
-            wait: Duration::from_secs(tddy_daemon_kernel::config::DEFAULT_ANSWER_WAIT_SECS),
         }
     }
 }
@@ -98,7 +91,9 @@ impl ActivityServiceImpl {
                 ))
             })?;
 
-        // 3. Hold the hook until it is answered or the deadline passes.
+        // 3. Hold the hook until it is answered or the deadline passes — the wait this session's
+        // launch recorded, which is the timeout it wrote into the agent's hooks file.
+        let hold = session_answer_wait(&session_dir, session_type, &self.agents);
         let pending = &self.answers.pending;
         let response = if question.kind == "permission" {
             let has_suggestions = has_permission_suggestions(&req.permission_suggestions_json);
@@ -106,16 +101,14 @@ impl ActivityServiceImpl {
                 &req.session_id,
                 permission_request_view(&question, has_suggestions),
             );
-            // TODO(agent-config-removal): hold for `session_answer_wait(&session_dir, session_type,
-            // &self.agents)` — the wait the session's launch wrote into its hooks file.
-            match pending.wait(&req.request_id, self.answers.wait).await {
+            match pending.wait(&req.request_id, hold).await {
                 WaitOutcome::Answered(delivered) => answered_response(delivered),
                 WaitOutcome::TimedOut => outcome_only(AwaitQuestionOutcome::TimedOut),
             }
         } else {
             pending.open_question(&req.session_id, question);
             match pending
-                .wait_for_question(&req.request_id, self.answers.wait)
+                .wait_for_question(&req.request_id, hold)
                 .await
             {
                 QuestionWaitOutcome::Answered(delivered) => answered_question_response(delivered),

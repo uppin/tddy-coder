@@ -15,7 +15,7 @@ use tddy_service::proto::session::{ResumeSessionRequest, ResumeSessionResponse};
 use tddy_session_agents::agent_roster;
 
 use crate::cli_agent_steps::{resumed_or_adopted_conversation, ConversationStart};
-use crate::cli_harness_jail::{jail_route_config_env, require_jail_route, CliJail, JailWiring};
+use crate::cli_harness_jail::{agent_tddy_tools, jail_route_config_env, require_jail_route, CliJail, JailWiring};
 use crate::cursor_from_spec::node_launcher_of;
 use crate::harness_from_spec::{
     harness_template_params, resolve_session_agent, CliSessionAgent, CliSessionType, HarnessLaunch,
@@ -61,7 +61,7 @@ impl LaunchSessions {
     ) -> Result<Response<ResumeSessionResponse>, Status> {
         // Resolved before the running jail is stopped: a resume the host cannot launch leaves it running.
         let session_agent =
-            resolve_session_agent(self.coding_agents.as_ref(), &self.config, kind.clone())?;
+            resolve_session_agent(&self.coding_agents, kind.clone())?;
         if let Some(state) = self.sandbox_manager.remove(&req.session_id).await {
             state.stop();
         } else if let Some(pid) = metadata.pid {
@@ -180,9 +180,7 @@ impl LaunchSessions {
         // Re-wire the managed workflow of a managed session: the controller resumes at the goal
         // persisted in changeset.yaml, its prompt goes into the jail-visible context directory, and
         // the host-side env the relayed `tddy-tools transition` runs with carries `TDDY_SOCKET`.
-        let tddy_tools_path =
-            crate::claude_cli_spawn_steps::claude_cli_hooks(&self.config, &self.tddy_data_dir)
-                .tddy_tools_path;
+        let tddy_tools_path = agent_tddy_tools(&session_agent.agent)?;
         let (managed, system_prompt_file, session_env) = self.relaunch_managed_workflow(
             session_id,
             session_dir,
@@ -203,7 +201,6 @@ impl LaunchSessions {
         env.extend(self.jail_daemon_identity_env());
         env.extend(self.lsp_tools_env(worktree_path));
         env.extend(self.restructure_tools_env());
-        env.extend(session_agent.renderer_env.iter().cloned());
         env.extend(jail_route_config_env(
             &session_agent.agent.spec,
             route.as_ref(),

@@ -488,12 +488,6 @@ mod seeded_roster_records_unit_tests;
 #[cfg(test)]
 mod stack_child_link_tests;
 
-#[cfg(test)]
-mod start_session_binary_resolution_tests;
-
-#[cfg(test)]
-mod resume_session_binary_resolution_tests;
-
 pub use worktree_source::*;
 
 #[cfg(test)]

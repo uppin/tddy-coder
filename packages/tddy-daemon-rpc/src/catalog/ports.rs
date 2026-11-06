@@ -109,28 +109,9 @@ impl tddy_discovery::catalog_service::CatalogHandler for CatalogRpcHandler {
         // resolves it, so the impersonated child execs a fully-qualified binary instead of doing a
         // PATH lookup that lacks the install dir. Only an absolute path is forwarded — a bare-name
         // resolution keeps the existing behavior (no path flag).
-        let listing_binary = if agent == "cursor" {
-            Some(tddy_daemon_kernel::config::resolve_cursor_binary_path(
-                &self.config,
-            ))
-        } else {
-            tddy_core::cli_harness::cli_harness(listing_harness_session(&agent))
-                .filter(|harness| {
-                    matches!(
-                        harness.models,
-                        tddy_core::cli_harness::CliModelSource::ListedByBinary(_)
-                    )
-                })
-                .map(|harness| {
-                    self.config.cli_harness_binary(
-                        harness.session_type,
-                        harness.default_binary,
-                        harness.binary_env,
-                    )
-                })
-        }
-        .filter(|path| std::path::Path::new(path).is_absolute())
-        .map(std::path::PathBuf::from);
+        // The binary is the agent spec's, resolved on this host (`#agent-tools 19/19`); an agent whose
+        // spec cannot be resolved here is probed with no path flag.
+        let listing_binary = self.listing_binary(&agent);
         let probe_args = list_models_probe_args(&agent, listing_binary.as_deref());
         let probe = tokio::task::spawn_blocking(move || {
             spawner::run_capture_as_user(&os_user, &tools_path, &probe_args)
@@ -220,4 +201,39 @@ fn listing_harness_session(agent: &str) -> &str {
         .iter()
         .find(|(from, _)| *from == agent)
         .map_or(agent, |(_, session_type)| session_type)
+}
+
+impl CatalogRpcHandler {
+    /// The binary `agent`'s model probe is handed: the one its spec resolves to on this host, for the
+    /// agents whose models are listed by their own binary (Cursor, and the CLI harnesses that ask
+    /// theirs). Only an absolute path is forwarded.
+    fn listing_binary(&self, agent: &str) -> Option<std::path::PathBuf> {
+        let lists_by_binary = agent == "cursor"
+            || tddy_core::cli_harness::cli_harness(listing_harness_session(agent)).is_some_and(
+                |harness| {
+                    matches!(
+                        harness.models,
+                        tddy_core::cli_harness::CliModelSource::ListedByBinary(_)
+                    )
+                },
+            );
+        if !lists_by_binary {
+            return None;
+        }
+        // Loaded as the daemon loads them (the built-in specs and `<tddyhome>/tools`), per probe:
+        // a probe spawns a process anyway, and this keeps the handler's field set within budget.
+        let agents = tddy_agent_launch::host_coding_agents::host_coding_agents(
+            &self.config,
+            &self.tddy_data_dir,
+        )
+        .ok()?;
+        let session_type = if agent == "cursor" {
+            "cursor-cli"
+        } else {
+            listing_harness_session(agent)
+        };
+        let spec_id = agents.agents().for_session_type(session_type)?.id.clone();
+        let binary = agents.resolve(&spec_id, None).ok()?.tool.binary;
+        binary.is_absolute().then_some(binary)
+    }
 }

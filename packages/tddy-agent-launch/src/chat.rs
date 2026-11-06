@@ -2,12 +2,10 @@ use std::path::Path;
 
 use tddy_daemon_kernel::config::DaemonConfig;
 
-/// The URL a cursor-cli session's hooks — and its `tddy-tools notify` — report to:
-/// `cursor_cli.daemon_url`, then `claude_cli.daemon_url`, then this daemon's own web listener, the
-/// same last resort every hook URL falls back to.
+/// The URL a cursor-cli session's hooks — and its `tddy-tools notify` — report to: the daemon's
+/// own (`listen.advertise_url`, else its web listener), the one every agent's hooks use.
 pub(crate) fn cursor_hook_daemon_url(config: &DaemonConfig) -> String {
-    tddy_daemon_kernel::config::resolve_cursor_cli_daemon_url(config)
-        .unwrap_or_else(|| tddy_daemon_kernel::daemon_hook_urls::local_daemon_hook_url(config))
+    tddy_daemon_kernel::daemon_hook_urls::advertise_daemon_url(config)
 }
 
 /// The environment a cursor-cli agent is given so `tddy-tools notify` can reach its operator

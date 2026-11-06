@@ -34,6 +34,8 @@ struct SplitAgentProcess<'a> {
     roster_seed: Vec<(String, String)>,
     context_dir: std::path::PathBuf,
     extra_args: Vec<String>,
+    /// The session's directory, where the hook wait its launch wrote is recorded.
+    session_dir: &'a std::path::Path,
 }
 
 impl SplitSessions {
@@ -139,6 +141,7 @@ impl SplitSessions {
                 roster_seed: crate::split_session::roster_seed_env_pairs(&roster),
                 context_dir,
                 extra_args,
+                session_dir: &session_dir,
             })
             .await?;
 
@@ -242,19 +245,29 @@ impl SplitSessions {
             roster_seed,
             context_dir,
             extra_args,
+            session_dir,
         } = launch;
         let hook_token = Uuid::new_v4().to_string();
+        // The agent's hook is told to wait this long, so the daemon holds it for as long: recorded
+        // beside `.session.yaml`, where `AwaitQuestionAnswer` reads it. A split agent has no tool
+        // file of its own to read the wait from, so it is the specs' default.
+        let answer_wait_secs = tddy_coding_agent_specs::DEFAULT_ANSWER_WAIT_SECS;
+        tddy_session_activity::answer_wait::record_answer_wait(
+            session_dir,
+            std::time::Duration::from_secs(answer_wait_secs),
+        )
+        .map_err(|e| Status::internal(format!("failed to record the answer wait: {e}")))?;
         crate::service_util::write_claude_hooks_settings(
             &context_dir,
             &tddy_core::HookCommandParams {
                 tddy_tools_path: &tddy_tools_path.to_string_lossy(),
-                daemon_url: &daemon_hook_urls::claude_hook_daemon_url(&self.config),
+                daemon_url: &daemon_hook_urls::advertise_daemon_url(&self.config),
                 session_id,
                 os_user,
                 hook_token: &hook_token,
                 // An embedded daemon serves no HTTP RPC; its hooks report over this socket.
                 daemon_socket: self.agent_tool_socket_for_embedded_host().as_deref(),
-                answer_wait_secs: self.config.claude_cli_answer_wait_secs(),
+                answer_wait_secs,
             },
         );
         let handle = self
@@ -263,7 +276,7 @@ impl SplitSessions {
                 session_id,
                 context_dir,
                 req.model.trim(),
-                &crate::service_util::resolve_start_session_claude_binary(&self.config),
+                &(self.claude_binary)()?,
                 Some(initial_prompt.trim()).filter(|p| !p.is_empty()),
                 Some(req.permission_mode.trim()).filter(|m| !m.is_empty()),
                 req.dangerously_skip_permissions,

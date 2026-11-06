@@ -170,7 +170,6 @@ fn write_livekit_daemon_yaml(
     ws_url: &str,
     daemon_instance_id: &str,
     os_user: &str,
-    claude_binary: &str,
 ) -> (tempfile::TempDir, PathBuf) {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("daemon.yaml");
@@ -185,8 +184,6 @@ users:
 allowed_tools:
   - path: {true_path}
     label: t
-claude_cli:
-  binary_path: {claude_binary}
 livekit:
   enabled: true
   url: {ws_url}
@@ -249,10 +246,8 @@ async fn a_daemon(
     claude_binary: &str,
     codebase_provisioner: Option<Arc<dyn WorkspaceSandboxProvisioner>>,
 ) -> Daemon {
-    let (config_dir, config_path) =
-        write_livekit_daemon_yaml(ws_url, instance_id, os_user, claude_binary);
-    let config =
-        tddy_session_lifecycle::test_util::daemon_config_from_fixture_file(&config_path).unwrap();
+    let (config_dir, config_path) = write_livekit_daemon_yaml(ws_url, instance_id, os_user);
+    let config = tddy_daemon_kernel::config::DaemonConfig::load(&config_path).unwrap();
 
     let sessions = tempfile::tempdir().unwrap();
     register_project(&sessions.path().join("projects"), repo);
@@ -296,7 +291,12 @@ async fn a_daemon(
         Arc::new(tddy_daemon_kernel::operator_channel::NoOperatorChannel),
         Arc::new(tddy_session_lifecycle::claude_cli_session::ClaudeCliSessionManager::new()),
     )
-    .with_coding_agents_if_none(tddy_session_lifecycle::test_util::builtin_coding_agents())
+    .with_coding_agents_if_none(
+        tddy_session_lifecycle::test_util::coding_agents_with_binaries(&[(
+            "claude",
+            Path::new(claude_binary),
+        )]),
+    )
     .with_session_tokens(tokens);
     let rooms = Arc::new(tddy_daemon_livekit::session_room::SessionRoomRegistry::new());
     let service = daemon_rpc_participant::with_the_livekit_room_ports(

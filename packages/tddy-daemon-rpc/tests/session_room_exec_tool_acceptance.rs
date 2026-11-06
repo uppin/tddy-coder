@@ -153,16 +153,11 @@ fn livekit_yaml_block(ws_url: &str) -> String {
     )
 }
 
-fn write_daemon_yaml(
-    ws_url: &str,
-    os_user: &str,
-    claude_binary: &Path,
-) -> (tempfile::TempDir, PathBuf) {
+fn write_daemon_yaml(ws_url: &str, os_user: &str) -> (tempfile::TempDir, PathBuf) {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("daemon.yaml");
     let true_path = true_bin();
     let livekit = livekit_yaml_block(ws_url);
-    let claude_binary = claude_binary.display();
     let yaml = format!(
         r#"
 daemon_instance_id: {INSTANCE_ID}
@@ -172,8 +167,6 @@ users:
 allowed_tools:
   - path: {true_path}
     label: t
-claude_cli:
-  binary_path: {claude_binary}
 session_room:
   poll_interval_ms: {POLL_INTERVAL_MS}
 {livekit}"#
@@ -229,10 +222,9 @@ impl FacilitatingDaemon {
             .then_reading_stdin()
             .build();
 
-        let (config_dir, config_path) = write_daemon_yaml(&ws_url, &os_user, &claude_stub);
-        let config =
-            tddy_session_lifecycle::test_util::daemon_config_from_fixture_file(&config_path)
-                .expect("daemon.yaml must load");
+        let (config_dir, config_path) = write_daemon_yaml(&ws_url, &os_user);
+        let config = tddy_daemon_kernel::config::DaemonConfig::load(&config_path)
+            .expect("daemon.yaml must load");
 
         let sessions = tempfile::tempdir().unwrap();
         register_project(&sessions.path().join("projects"), repo_dir.path());
@@ -264,7 +256,10 @@ impl FacilitatingDaemon {
             Arc::new(tddy_session_lifecycle::claude_cli_session::ClaudeCliSessionManager::new()),
         )
         .with_coding_agents_if_none(
-            tddy_session_lifecycle::test_util::builtin_coding_agents_for(&config),
+            tddy_session_lifecycle::test_util::coding_agents_with_binaries(&[(
+                "claude",
+                &claude_stub,
+            )]),
         )
         .with_staging_base_dir(staging.path().to_path_buf())
         .with_session_rooms(rooms)

@@ -57,7 +57,7 @@ fn a_daemon_with_a_project() -> ADaemonWithAProject {
     a_repository_whose_origin_is_itself(repo.path());
     let sessions = tempfile::tempdir().expect("a sessions directory");
     register_project(&sessions.path().join("projects"), repo.path());
-    let (config_dir, config) = a_config_launching_claude_as("/bin/cat");
+    let (config_dir, config) = a_config_for_the_current_user();
     ADaemonWithAProject {
         service: a_session_host(config, sessions.path().to_path_buf()),
         _repo: repo,
@@ -75,16 +75,13 @@ fn current_os_user() -> String {
         .into_owned()
 }
 
-fn a_config_launching_claude_as(binary: &str) -> (tempfile::TempDir, DaemonConfig) {
+fn a_config_for_the_current_user() -> (tempfile::TempDir, DaemonConfig) {
     let dir = tempfile::tempdir().expect("a config directory");
     let user = current_os_user();
-    let yaml = format!(
-        "users:\n  - github_user: \"{user}\"\n    os_user: \"{user}\"\nclaude_cli:\n  binary_path: {binary}\n"
-    );
+    let yaml = format!("users:\n  - github_user: \"{user}\"\n    os_user: \"{user}\"\n");
     let path = dir.path().join("daemon.yaml");
     std::fs::write(&path, yaml).expect("write the config");
-    let config = tddy_session_lifecycle::test_util::daemon_config_from_fixture_file(&path)
-        .expect("the config parses");
+    let config = DaemonConfig::load(&path).expect("the config parses");
     (dir, config)
 }
 
@@ -107,7 +104,10 @@ fn a_session_host(config: DaemonConfig, sessions_base: PathBuf) -> DaemonSession
         Arc::new(ClaudeCliSessionManager::new()),
     )
     .with_coding_agents_if_none(
-        tddy_session_lifecycle::test_util::builtin_coding_agents_for(&config),
+        tddy_session_lifecycle::test_util::coding_agents_with_binaries(&[(
+            "claude",
+            Path::new("/bin/cat"),
+        )]),
     )
 }
 
@@ -333,7 +333,7 @@ fn a_daemon_whose_project_is_not_cloned_yet() -> ADaemonThatMustClone {
         ),
     )
     .expect("register the project");
-    let (config_dir, config) = a_config_launching_claude_as("/bin/cat");
+    let (config_dir, config) = a_config_for_the_current_user();
     ADaemonThatMustClone {
         service: a_session_host(config, sessions.path().to_path_buf()),
         working_copy,

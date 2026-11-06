@@ -41,7 +41,15 @@ fn current_os_user() -> String {
         .into_owned()
 }
 
-fn write_config_with_claude_cli_binary(stub_binary: &str) -> (tempfile::TempDir, DaemonConfig) {
+/// A daemon config, and the coding agents the host installs: `claude` is the stub.
+type AConfigAndItsAgents = (
+    DaemonConfig,
+    Arc<tddy_agent_launch::spec_launch::HostCodingAgents>,
+);
+
+fn write_config_with_claude_cli_binary(
+    stub_binary: &str,
+) -> (tempfile::TempDir, AConfigAndItsAgents) {
     let dir = tempfile::tempdir().unwrap();
     let user = current_os_user();
     let yaml = format!(
@@ -52,18 +60,19 @@ users:
 allowed_tools:
   - path: /bin/true
     label: true
-claude_cli:
-  binary_path: {stub_binary}
 "#
     );
     let config_path = dir.path().join("daemon.yaml");
     std::fs::write(&config_path, yaml).unwrap();
-    let config = tddy_session_lifecycle::test_util::daemon_config_from_fixture_file(&config_path)
-        .expect("config must parse");
-    (dir, config)
+    let config = DaemonConfig::load(&config_path).expect("config must parse");
+    let agents = tddy_session_lifecycle::test_util::coding_agents_with_binaries(&[(
+        "claude",
+        std::path::Path::new(stub_binary),
+    )]);
+    (dir, (config, agents))
 }
 
-fn minimal_service(config: DaemonConfig, sessions_base: PathBuf) -> DaemonSessionHost {
+fn minimal_service(config: AConfigAndItsAgents, sessions_base: PathBuf) -> DaemonSessionHost {
     minimal_service_with_manager(
         config,
         sessions_base,
@@ -72,7 +81,7 @@ fn minimal_service(config: DaemonConfig, sessions_base: PathBuf) -> DaemonSessio
 }
 
 fn minimal_service_with_manager(
-    config: DaemonConfig,
+    (config, agents): AConfigAndItsAgents,
     sessions_base: PathBuf,
     manager: Arc<tddy_session_lifecycle::claude_cli_session::ClaudeCliSessionManager>,
 ) -> DaemonSessionHost {
@@ -98,9 +107,7 @@ fn minimal_service_with_manager(
         Arc::new(tddy_daemon_kernel::operator_channel::NoOperatorChannel),
         manager,
     )
-    .with_coding_agents_if_none(
-        tddy_session_lifecycle::test_util::builtin_coding_agents_for(&config),
-    )
+    .with_coding_agents_if_none(agents)
 }
 
 /// Create a git repo with an origin remote pointing at itself so that
@@ -367,11 +374,14 @@ users:
     let cfg_dir = tempfile::tempdir().unwrap();
     let cfg_path = cfg_dir.path().join("d.yaml");
     std::fs::write(&cfg_path, config_yaml).unwrap();
-    let config =
-        tddy_session_lifecycle::test_util::daemon_config_from_fixture_file(&cfg_path).unwrap();
+    let config = DaemonConfig::load(&cfg_path).unwrap();
+    let agents = tddy_session_lifecycle::test_util::coding_agents_with_binaries(&[(
+        "claude",
+        std::path::Path::new("/bin/cat"),
+    )]);
 
     let sessions_base = sessions_tmp.path().join(current_os_user());
-    let service = minimal_service(config, sessions_base);
+    let service = minimal_service((config, agents), sessions_base);
 
     // When
     let sessions = service
@@ -513,9 +523,12 @@ users:
     let cfg_dir = tempfile::tempdir().unwrap();
     let cfg_path = cfg_dir.path().join("d.yaml");
     std::fs::write(&cfg_path, config_yaml).unwrap();
-    let config =
-        tddy_session_lifecycle::test_util::daemon_config_from_fixture_file(&cfg_path).unwrap();
-    let service = minimal_service(config, sessions_tmp.path().to_path_buf());
+    let config = DaemonConfig::load(&cfg_path).unwrap();
+    let agents = tddy_session_lifecycle::test_util::coding_agents_with_binaries(&[(
+        "claude",
+        std::path::Path::new("/bin/cat"),
+    )]);
+    let service = minimal_service((config, agents), sessions_tmp.path().to_path_buf());
 
     // When
     let err = service
@@ -669,72 +682,6 @@ fn a_cli_start_of(session_type: &str) -> StartSessionRequest {
         new_branch_name: format!("{session_type}-work"),
         ..Default::default()
     }
-}
-
-/// The session directories `sessions_base` holds.
-fn sessions_under(sessions_base: &std::path::Path) -> Vec<String> {
-    std::fs::read_dir(sessions_base.join("sessions"))
-        .map(|entries| {
-            entries
-                .map(|entry| entry.expect("a readable entry").file_name())
-                .map(|name| name.to_string_lossy().into_owned())
-                .collect()
-        })
-        .unwrap_or_default()
-}
-
-/// **a_host_without_coding_agents_refuses_…**: the spec is the only launch a CLI agent has
-/// (`#agent-tools 17/19`), so a host whose coding agents are missing refuses a claude-cli and a
-/// cursor-cli start `FAILED_PRECONDITION` — the agents' hand-built launches are gone, and nothing
-/// is spawned or recorded in their place. The stub `claude` the daemon config still names (the
-/// hand-built launch's binary) is never run.
-#[tokio::test]
-async fn a_host_without_coding_agents_refuses_a_claude_cli_and_a_cursor_cli_start_failed_precondition_spawning_nothing(
-) {
-    // Given — a registered project, a stub claude in the config, and no coding agents
-    let repo_dir = tempfile::tempdir().unwrap();
-    create_test_repo_with_origin(repo_dir.path());
-    let sessions_tmp = tempfile::tempdir().unwrap();
-    let sessions_base = sessions_tmp.path().join(current_os_user());
-    register_project(&sessions_base.join("projects"), repo_dir.path());
-    let stub_dir = tempfile::tempdir().unwrap();
-    let stub = write_echo_argv_script(stub_dir.path());
-    let (_cfg_dir, config) = write_config_with_claude_cli_binary(stub.to_str().unwrap());
-    let host = a_host_without_coding_agents(config, sessions_base.clone());
-
-    // When
-    let claude = host
-        .start_session(Request::direct(a_cli_start_of("claude-cli")))
-        .await
-        .map(|response| response.into_inner().session_id);
-    let cursor = host
-        .start_session(Request::direct(a_cli_start_of("cursor-cli")))
-        .await
-        .map(|response| response.into_inner().session_id);
-
-    // Then — both refused, naming the missing coding agents, and no session was created
-    assert_eq!(
-        (
-            claude.map_err(|status| (status.code, status.message)),
-            cursor.map_err(|status| (status.code, status.message)),
-            sessions_under(&sessions_base),
-        ),
-        (
-            Err((
-                Code::FailedPrecondition,
-                "this host has no coding agents installed: a claude-cli session is launched from \
-                 its tool definition"
-                    .to_string()
-            )),
-            Err((
-                Code::FailedPrecondition,
-                "this host has no coding agents installed: a cursor-cli session is launched from \
-                 its tool definition"
-                    .to_string()
-            )),
-            Vec::<String>::new(),
-        )
-    );
 }
 
 /// A machine with no `claude` anywhere: a `$HOME` whose `.local/bin` is empty, one `PATH`

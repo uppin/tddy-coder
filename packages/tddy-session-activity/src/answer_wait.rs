@@ -16,7 +16,7 @@
 use std::path::Path;
 use std::time::Duration;
 
-use tddy_coding_agent_specs::CodingAgentRegistry;
+use tddy_coding_agent_specs::{CodingAgentRegistry, DEFAULT_ANSWER_WAIT_SECS};
 
 /// The file in a session directory holding the wait its start recorded, in milliseconds.
 pub const ANSWER_WAIT_FILE: &str = "answer-wait-ms";
@@ -27,19 +27,19 @@ pub const ANSWER_WAIT_FILE: &str = "answer-wait-ms";
 /// # Errors
 /// When the record cannot be written.
 pub fn record_answer_wait(session_dir: &Path, wait: Duration) -> std::io::Result<()> {
-    // TODO(agent-config-removal): implement — write `wait.as_millis()` to
-    // `session_dir/ANSWER_WAIT_FILE`.
-    let _ = (session_dir, wait);
-    todo!("agent-config-removal: record_answer_wait")
+    std::fs::write(
+        session_dir.join(ANSWER_WAIT_FILE),
+        wait.as_millis().to_string(),
+    )
 }
 
 /// The answer wait the start of the session in `session_dir` recorded; `None` when it recorded
 /// none (or the record does not parse).
 #[must_use]
 pub fn recorded_answer_wait(session_dir: &Path) -> Option<Duration> {
-    // TODO(agent-config-removal): implement — read `session_dir/ANSWER_WAIT_FILE` as milliseconds.
-    let _ = session_dir;
-    todo!("agent-config-removal: recorded_answer_wait")
+    let text = std::fs::read_to_string(session_dir.join(ANSWER_WAIT_FILE)).ok()?;
+    let millis: u64 = text.trim().parse().ok()?;
+    Some(Duration::from_millis(millis))
 }
 
 /// How long the hook of the session in `session_dir`, of `session_type`, is held: its recorded
@@ -51,9 +51,11 @@ pub fn session_answer_wait(
     session_type: &str,
     agents: &CodingAgentRegistry,
 ) -> Duration {
-    // TODO(agent-config-removal): implement — `recorded_answer_wait`, then
-    // `agents.for_session_type(session_type).map(CodingAgentSpec::answer_wait_secs)`, then the
-    // specs' default.
-    let _ = (session_dir, session_type, agents);
-    todo!("agent-config-removal: session_answer_wait")
+    recorded_answer_wait(session_dir).unwrap_or_else(|| {
+        Duration::from_secs(
+            agents
+                .for_session_type(session_type)
+                .map_or(DEFAULT_ANSWER_WAIT_SECS, |spec| spec.answer_wait_secs()),
+        )
+    })
 }

@@ -145,12 +145,10 @@ impl TheStubClis {
     }
 }
 
-/// A daemon config whose own CLIs do not exist.
+/// A daemon config that names no CLIs: each agent comes from its tool definition alone.
 fn a_daemon_config() -> DaemonConfig {
-    serde_yaml::from_str(
-        "users:\n  - github_user: u\n    os_user: u\ncursor_cli:\n  binary_path: /nonexistent/agent-is-never-run\n",
-    )
-    .expect("daemon config should parse")
+    serde_yaml::from_str("users:\n  - github_user: u\n    os_user: u\n")
+        .expect("daemon config should parse")
 }
 
 fn this_user() -> String {

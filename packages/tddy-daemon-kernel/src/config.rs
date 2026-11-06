@@ -150,16 +150,6 @@ pub struct DaemonConfig {
     /// Optional Telegram bot notifications (see `telegram_notifier` module).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub telegram: Option<TelegramConfig>,
-    /// Claude Code CLI session configuration (spawning interactive `claude` processes in PTYs).
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub claude_cli: Option<agent_cli::ClaudeCliConfig>,
-    /// Cursor Agent CLI session configuration (spawning interactive `agent` processes in PTYs).
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub cursor_cli: Option<agent_cli::CursorCliConfig>,
-    /// Further CLI harnesses (OpenCode, Muse Code), keyed by session type — `opencode-cli:`,
-    /// `muse-cli:`. Absent entries run the harness's default binary.
-    #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
-    pub cli_harnesses: std::collections::BTreeMap<String, agent_cli::CliHarnessConfig>,
     /// When set, this daemon runs in relay mode: no web bundle, idle-timeout auto-shutdown,
     /// forwards RPCs to a remote peer via LiveKit.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -243,9 +233,6 @@ impl Default for DaemonConfig {
             daemon_instance_id_append_startup_timestamp: false,
             codex_oauth_loopback_proxy_eligible: default_codex_oauth_loopback_proxy_eligible(),
             telegram: None,
-            claude_cli: None,
-            cursor_cli: None,
-            cli_harnesses: std::collections::BTreeMap::new(),
             relay: None,
             tddy_data_dir: None,
             screen_sharing: None,
@@ -305,17 +292,8 @@ mod screen_sharing;
 mod sections;
 mod timings;
 #[cfg(test)]
-use agent_cli::{
-    choose_claude_binary, choose_cursor_binary, find_real_harness_in, is_wrapper_shim_dir,
-    ClaudeBinaryChoice, CursorBinaryChoice,
-};
-pub use agent_cli::{
-    find_real_harness_on_host, resolve_claude_binary_path, resolve_claude_home_dir,
-    resolve_cursor_binary_path, resolve_cursor_cli_daemon_url, resolve_cursor_cli_tddy_tools_path,
-    resolve_cursor_home_dir, resolve_harness_binary_name, ClaudeCliConfig, CursorCliConfig,
-    CLAUDE_BINARY_ENV, CLAUDE_FULLSCREEN_ENV, CLAUDE_HOME_ENV, CURSOR_BINARY_ENV, CURSOR_HOME_ENV,
-    DEFAULT_ANSWER_WAIT_SECS,
-};
+use agent_cli::find_real_harness_in;
+pub use agent_cli::{find_real_harness_on_host, is_wrapper_shim_dir, resolve_harness_binary_name};
 
 pub use removed_agent_keys::{refuse_removed_agent_keys, RemovedAgentConfigError, RemovedAgentKey};
 
@@ -990,168 +968,8 @@ mod startup_and_warmup_timing_tests {
 }
 
 #[cfg(test)]
-mod claude_cli_config_tests {
+mod sandbox_config_tests {
     use super::*;
-
-    /// When `claude_cli:` is omitted from YAML entirely, `DaemonConfig::claude_cli` is `None`.
-    #[test]
-    fn claude_cli_absent_when_not_in_yaml() {
-        let yaml = "users:\n  - github_user: \"u\"\n    os_user: \"u\"\n";
-        let c: DaemonConfig = serde_yaml::from_str(yaml).expect("parse");
-        assert!(
-            c.claude_cli.is_none(),
-            "claude_cli must be absent when not configured"
-        );
-    }
-
-    /// `tddy_tools_path` and `daemon_url` both default to `None` when the section is present
-    /// but the new fields are not specified.
-    #[test]
-    fn claude_cli_config_defaults_new_paths_to_none() {
-        let yaml = "
-users:
-  - github_user: u
-    os_user: u
-claude_cli:
-  binary_path: /usr/local/bin/claude
-";
-        let c: DaemonConfig = serde_yaml::from_str(yaml).expect("parse");
-        let cli = c.claude_cli.as_ref().expect("claude_cli must be present");
-        assert_eq!(
-            cli.tddy_tools_path, None,
-            "tddy_tools_path must default to None"
-        );
-        assert_eq!(cli.daemon_url, None, "daemon_url must default to None");
-    }
-
-    /// When both new fields are explicit, they round-trip correctly through YAML parsing.
-    #[test]
-    fn claude_cli_config_parses_explicit_tddy_tools_path_and_daemon_url() {
-        let yaml = "
-users:
-  - github_user: u
-    os_user: u
-claude_cli:
-  binary_path: claude
-  tddy_tools_path: /usr/local/bin/tddy-tools
-  daemon_url: http://127.0.0.1:9000
-";
-        let c: DaemonConfig = serde_yaml::from_str(yaml).expect("parse");
-        let cli = c.claude_cli.as_ref().expect("claude_cli must be present");
-        assert_eq!(
-            cli.tddy_tools_path.as_deref(),
-            Some("/usr/local/bin/tddy-tools")
-        );
-        assert_eq!(cli.daemon_url.as_deref(), Some("http://127.0.0.1:9000"));
-    }
-
-    /// A non-empty env override always wins, even over an explicit config path.
-    #[test]
-    fn env_override_wins_over_configured_path() {
-        assert!(matches!(
-            choose_claude_binary(Some("/opt/claude"), "/usr/local/bin/claude"),
-            ClaudeBinaryChoice::Explicit(p) if p == "/opt/claude"
-        ));
-    }
-
-    /// What `claude_cli:` says about `fullscreen` once parsed, read back through the serialized
-    /// section so the assertion pins the YAML contract an operator writes.
-    fn parsed_fullscreen(claude_cli_section: &str) -> serde_yaml::Value {
-        let yaml = format!("users:\n  - github_user: u\n    os_user: u\n{claude_cli_section}");
-        let c: DaemonConfig = serde_yaml::from_str(&yaml).expect("parse");
-        let cli = c.claude_cli.as_ref().expect("claude_cli must be present");
-        serde_yaml::to_value(cli).expect("serialize claude_cli")["fullscreen"].clone()
-    }
-
-    /// The web terminal can only scroll Claude when Claude runs its fullscreen renderer, so a
-    /// `claude_cli:` section that does not mention `fullscreen` keeps it on.
-    #[test]
-    fn fullscreen_is_on_when_the_claude_cli_section_does_not_mention_it() {
-        // Given
-        let section = "claude_cli:\n  binary_path: /usr/local/bin/claude\n";
-
-        // When
-        let fullscreen = parsed_fullscreen(section);
-
-        // Then
-        assert_eq!(fullscreen, serde_yaml::Value::Bool(true));
-    }
-
-    /// An operator can turn the forced fullscreen renderer off.
-    #[test]
-    fn fullscreen_false_is_accepted_and_kept() {
-        // Given
-        let section = "claude_cli:\n  binary_path: /usr/local/bin/claude\n  fullscreen: false\n";
-
-        // When
-        let fullscreen = parsed_fullscreen(section);
-
-        // Then
-        assert_eq!(fullscreen, serde_yaml::Value::Bool(false));
-    }
-
-    /// A blank/whitespace env override is ignored (falls through to config/auto).
-    #[test]
-    fn blank_env_override_is_ignored() {
-        assert!(matches!(
-            choose_claude_binary(Some("   "), "claude"),
-            ClaudeBinaryChoice::Auto
-        ));
-    }
-
-    /// A configured value naming a path is explicit; a bare name auto-resolves from the host.
-    #[test]
-    fn configured_path_is_explicit_but_bare_name_auto_resolves() {
-        assert!(matches!(
-            choose_claude_binary(None, "/usr/local/bin/claude"),
-            ClaudeBinaryChoice::Explicit(_)
-        ));
-        assert!(matches!(
-            choose_claude_binary(None, "claude"),
-            ClaudeBinaryChoice::Auto
-        ));
-    }
-
-    /// `claude_home_dir` round-trips from YAML, and a configured value is what the resolver returns
-    /// (when the `TDDY_SANDBOX_CLAUDE_HOME` env override is not set, the normal case in tests).
-    #[test]
-    fn claude_home_dir_parses_and_resolves_from_config() {
-        let yaml = "
-users:
-  - github_user: u
-    os_user: u
-claude_cli:
-  binary_path: claude
-  claude_home_dir: /custom/claude-home
-";
-        let c: DaemonConfig = serde_yaml::from_str(yaml).expect("parse");
-        assert_eq!(
-            c.claude_cli.as_ref().unwrap().claude_home_dir.as_deref(),
-            Some(Path::new("/custom/claude-home"))
-        );
-        if std::env::var_os(agent_cli::CLAUDE_HOME_ENV).is_none() {
-            assert_eq!(
-                resolve_claude_home_dir(&c),
-                PathBuf::from("/custom/claude-home"),
-                "a configured claude_home_dir must be returned when the env override is unset"
-            );
-        }
-    }
-
-    /// With no `claude_cli` section the resolver falls back to `$HOME/.tddy/sandbox-claude-home`.
-    #[test]
-    fn claude_home_dir_defaults_under_tddy_when_unconfigured() {
-        if std::env::var_os(agent_cli::CLAUDE_HOME_ENV).is_some() {
-            return; // env override in effect; default path not exercised
-        }
-        let c = DaemonConfig::default();
-        let resolved = agent_cli::resolve_claude_home_dir(&c);
-        assert!(
-            resolved.ends_with(".tddy/sandbox-claude-home"),
-            "default home must be under ~/.tddy: {}",
-            resolved.display()
-        );
-    }
 
     /// The per-OS config file wins over the generic one when both are present.
     #[test]
@@ -1215,38 +1033,8 @@ claude_cli:
 }
 
 #[cfg(test)]
-mod cursor_cli_config_tests {
+mod harness_binary_resolution_tests {
     use super::*;
-
-    /// The cursor `agent` binary must get the same host auto-resolution as `claude`: a bare name
-    /// (the default `"agent"`) means "auto-resolve to the real binary", while a value naming a path
-    /// is used verbatim. Without this, the bare `"agent"` reaches the model probe / PTY spawn and
-    /// fails "binary not found: agent" once the child does a PATH lookup that lacks the install dir.
-    #[test]
-    fn cursor_bare_name_auto_resolves_but_a_configured_path_is_explicit() {
-        assert!(matches!(
-            choose_cursor_binary(None, "agent"),
-            CursorBinaryChoice::Auto
-        ));
-        assert!(matches!(
-            choose_cursor_binary(None, "/opt/cursor/agent"),
-            CursorBinaryChoice::Explicit(p) if p == "/opt/cursor/agent"
-        ));
-    }
-
-    /// A non-empty env override wins over the configured value (same precedence as claude); a blank
-    /// override is ignored and falls through to auto-resolution.
-    #[test]
-    fn cursor_env_override_wins_and_blank_is_ignored() {
-        assert!(matches!(
-            choose_cursor_binary(Some("/opt/agent"), "agent"),
-            CursorBinaryChoice::Explicit(p) if p == "/opt/agent"
-        ));
-        assert!(matches!(
-            choose_cursor_binary(Some("   "), "agent"),
-            CursorBinaryChoice::Auto
-        ));
-    }
 
     /// Host auto-resolution finds `agent` under the target user's `~/.local/bin` and returns it as
     /// an **absolute** path (mirroring `find_real_claude_on_host`), so the impersonated child execs

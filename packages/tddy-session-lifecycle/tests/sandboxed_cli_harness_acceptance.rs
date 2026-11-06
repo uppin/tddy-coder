@@ -76,11 +76,11 @@ fn a_sandboxed_daemon_for(session_type: &str, stub_name: &str) -> SandboxedHarne
     let sessions_dir = tempfile::tempdir().unwrap();
     register_project(&sessions_dir.path().join("projects"), repo_dir.path());
     let stub = a_stub_harness_printing_its_launch(repo_dir.path(), stub_name);
-    let (config_dir, config) = daemon_config_with_cli_harness_binary(session_type, &stub);
+    let (config_dir, config) = a_daemon_config();
     let vault_dir = tempfile::tempdir().unwrap();
     let sessions_base = sessions_dir.path().to_path_buf();
     let service = Arc::new(
-        session_host(config, sessions_base.clone())
+        session_host(config, session_type, &stub, sessions_base.clone())
             .with_credential_vaults(vaults_holding_a_meta_account(vault_dir.path())),
     );
     service.install_sandbox_rpc_bridge();
@@ -338,10 +338,7 @@ fn vaults_holding_a_meta_account(dir: &Path) -> Arc<SessionVaults> {
     vaults
 }
 
-fn daemon_config_with_cli_harness_binary(
-    session_type: &str,
-    binary: &Path,
-) -> (tempfile::TempDir, DaemonConfig) {
+fn a_daemon_config() -> (tempfile::TempDir, DaemonConfig) {
     let dir = tempfile::tempdir().unwrap();
     let yaml = format!(
         r#"
@@ -351,21 +348,26 @@ users:
 allowed_tools:
   - path: /bin/true
     label: true
-cli_harnesses:
-  {session_type}:
-    binary_path: {binary}
-"#,
-        binary = binary.display()
+"#
     );
     let config_path = dir.path().join("daemon.yaml");
     std::fs::write(&config_path, yaml).unwrap();
-    let config = tddy_session_lifecycle::test_util::daemon_config_from_fixture_file(&config_path)
-        .expect("config must parse");
+    let config = DaemonConfig::load(&config_path).expect("config must parse");
     (dir, config)
 }
 
-fn session_host(config: DaemonConfig, sessions_base: PathBuf) -> DaemonSessionHost {
+/// A session host whose coding agents resolve `binary` as the agent a `session_type` session
+/// launches (its spec's binary on the host's `PATH`).
+fn session_host(
+    config: DaemonConfig,
+    session_type: &str,
+    binary: &Path,
+    sessions_base: PathBuf,
+) -> DaemonSessionHost {
     let agents = coding_agents_over(&sessions_base);
+    let command = session_type.strip_suffix("-cli").unwrap_or(session_type);
+    std::os::unix::fs::symlink(binary, sessions_base.join("tool-bin").join(command))
+        .expect("the harness binary is installed on the host's PATH");
     let tddy_data_dir = sessions_base.clone();
     DaemonSessionHost::new(
         config.clone(),

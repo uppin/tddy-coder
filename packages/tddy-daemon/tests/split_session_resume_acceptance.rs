@@ -168,14 +168,9 @@ fn a_claude_stub_recording_its_launch(dir: &Path, env_file: &Path, argv_file: &P
 
 /// A daemon that can wire a split session: LiveKit credentials for the real common room, and a
 /// spawnable `claude`.
-fn a_daemon_config(
-    ws_url: &str,
-    instance_id: &str,
-    claude_binary: &Path,
-) -> (tempfile::TempDir, DaemonConfig) {
+fn a_daemon_config(ws_url: &str, instance_id: &str) -> (tempfile::TempDir, DaemonConfig) {
     let dir = tempfile::tempdir().unwrap();
     let user = current_os_user();
-    let claude_binary = claude_binary.display();
     let common_room = the_common_room();
     let yaml = format!(
         r#"
@@ -186,8 +181,6 @@ users:
 allowed_tools:
   - path: /bin/true
     label: true
-claude_cli:
-  binary_path: {claude_binary}
 livekit:
   enabled: true
   url: {ws_url}
@@ -198,14 +191,18 @@ livekit:
     );
     let config_path = dir.path().join("daemon.yaml");
     std::fs::write(&config_path, yaml).unwrap();
-    let config = tddy_session_lifecycle::test_util::daemon_config_from_fixture_file(&config_path)
-        .expect("config must parse");
+    let config =
+        tddy_daemon_kernel::config::DaemonConfig::load(&config_path).expect("config must parse");
     (dir, config)
 }
 
 /// A service wired to the real common room, so it can be discovered as a peer and can route a call
 /// to one.
-fn a_service(config: DaemonConfig, sessions_base: PathBuf) -> DaemonSessionHost {
+fn a_service(
+    config: DaemonConfig,
+    sessions_base: PathBuf,
+    claude_binary: &Path,
+) -> DaemonSessionHost {
     let key = the_signing_key_of(
         config
             .daemon_instance_id
@@ -252,7 +249,10 @@ fn a_service(config: DaemonConfig, sessions_base: PathBuf) -> DaemonSessionHost 
         Arc::new(ClaudeCliSessionManager::new()),
     )
     .with_coding_agents_if_none(
-        tddy_session_lifecycle::test_util::builtin_coding_agents_for(&config),
+        tddy_session_lifecycle::test_util::coding_agents_with_binaries(&[(
+            "claude",
+            claude_binary,
+        )]),
     )
     .with_session_tokens(tokens);
     let rooms = Arc::new(tddy_daemon_livekit::session_room::SessionRoomRegistry::new());
@@ -491,9 +491,8 @@ async fn resume_a_split_session_whose_roster_holds(
         &a_workspace_session_holding(agents, &codebase_worktree),
     )
     .unwrap();
-    let (codebase_config_dir, codebase_config) =
-        a_daemon_config(&ws_url, CODEBASE_INSTANCE_ID, &claude_stub);
-    let codebase_service = Arc::new(a_service(codebase_config, codebase_base));
+    let (codebase_config_dir, codebase_config) = a_daemon_config(&ws_url, CODEBASE_INSTANCE_ID);
+    let codebase_service = Arc::new(a_service(codebase_config, codebase_base, &claude_stub));
 
     // The agent host: the stopped session, and no repository at all.
     let agent_sessions = tempfile::tempdir().unwrap();
@@ -501,9 +500,8 @@ async fn resume_a_split_session_whose_roster_holds(
     let agent_session_dir = agent_base.join("sessions").join(AGENT_SESSION_ID);
     std::fs::create_dir_all(&agent_session_dir).unwrap();
     write_session_metadata(&agent_session_dir, &a_stopped_split_session()).unwrap();
-    let (agent_config_dir, agent_config) =
-        a_daemon_config(&ws_url, FACILITATING_INSTANCE_ID, &claude_stub);
-    let agent_service = Arc::new(a_service(agent_config, agent_base));
+    let (agent_config_dir, agent_config) = a_daemon_config(&ws_url, FACILITATING_INSTANCE_ID);
+    let agent_service = Arc::new(a_service(agent_config, agent_base, &claude_stub));
 
     let codebase_rpc_run = serve_on_the_common_room(
         &livekit,
@@ -825,11 +823,8 @@ async fn refuse_a_resume_that_cannot_read_the_roster(
     std::fs::create_dir_all(&session_dir).unwrap();
     write_session_metadata(&session_dir, &a_stopped_split_session()).unwrap();
 
-    let (_config_dir, config) = a_daemon_config(
-        "ws://livekit.invalid:7880",
-        FACILITATING_INSTANCE_ID,
-        &claude_stub,
-    );
+    let (_config_dir, config) =
+        a_daemon_config("ws://livekit.invalid:7880", FACILITATING_INSTANCE_ID);
     let tddy_data_dir = sessions_base.clone();
     let resolver: SessionsBaseResolver = Arc::new(move |_| Some(sessions_base.clone()));
     let resolved_user = current_os_user();
@@ -854,7 +849,7 @@ async fn refuse_a_resume_that_cannot_read_the_roster(
         Arc::new(ClaudeCliSessionManager::new()),
     )
     .with_coding_agents_if_none(
-        tddy_session_lifecycle::test_util::builtin_coding_agents_for(&config),
+        tddy_session_lifecycle::test_util::coding_agents_with_binaries(&[("claude", &claude_stub)]),
     )
     .with_session_tokens(SessionTokens::new(
         &the_signing_key_of(FACILITATING_INSTANCE_ID),

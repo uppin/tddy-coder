@@ -110,25 +110,21 @@ fn an_orchestrator_of(session_type: &str, recipe: &str, agents: HostAgents) -> A
     let stub_dir = tempfile::tempdir().expect("stub dir");
     let stubs = std::fs::canonicalize(stub_dir.path()).expect("stub dir is canonical");
     let launched = stubs.join("launched.log");
-    let claude = a_stub_agent(&stubs, "claude", &launched);
+    a_stub_agent(&stubs, "claude", &launched);
     a_stub_agent(&stubs, "agent", &launched);
     std::os::unix::fs::symlink(the_tddy_tools_binary(), stubs.join("tddy-tools"))
         .expect("tddy-tools beside the stubs");
 
-    // The daemon config still names a claude binary — the hand-built launch's — so a child that
-    // fell back to it would run the claude stub and be seen.
+    // The claude stub sits beside the others, so a child that launched some agent other than its
+    // parent's would run it and be seen.
     let config_dir = tempfile::tempdir().expect("config dir");
     let config_path = config_dir.path().join("daemon.yaml");
     std::fs::write(
         &config_path,
-        format!(
-            "users:\n  - github_user: \"{os_user}\"\n    os_user: \"{os_user}\"\nclaude_cli:\n  binary_path: {}\n",
-            claude.display()
-        ),
+        format!("users:\n  - github_user: \"{os_user}\"\n    os_user: \"{os_user}\"\n"),
     )
     .expect("write daemon config");
-    let config = crate::test_util::daemon_config_from_fixture_file(&config_path)
-        .expect("daemon config parses");
+    let config = crate::config::DaemonConfig::load(&config_path).expect("daemon config parses");
 
     let sessions_base = sessions.path().to_path_buf();
     let resolver: SessionsBaseResolver = Arc::new(move |_| Some(sessions_base.clone()));
@@ -386,8 +382,8 @@ async fn a_conversation_child_of_a_cursor_cli_session_starts_a_cursor_cli_child(
 #[tokio::test]
 async fn a_host_without_coding_agents_refuses_a_pr_stack_child_failed_precondition_spawning_nothing(
 ) {
-    // Given — a cursor-cli pr-stack orchestrator on a host given no coding agents, whose daemon
-    // config still names a claude binary
+    // Given — a cursor-cli pr-stack orchestrator on a host given no coding agents, beside a claude
+    // stub that must not be run in their place
     let orchestrator = an_orchestrator_of("cursor-cli", "pr-stack", HostAgents::None);
 
     // When
@@ -396,7 +392,7 @@ async fn a_host_without_coding_agents_refuses_a_pr_stack_child_failed_preconditi
         .spawn_child(NODE_ID)
         .await;
 
-    // Then — refused naming the missing coding agents; no child session, no agent launched
+    // Then — refused naming the session type no spec launches; no child session, no agent launched
     assert_eq!(
         (
             refused,
@@ -404,11 +400,7 @@ async fn a_host_without_coding_agents_refuses_a_pr_stack_child_failed_preconditi
             orchestrator.agents_launched_so_far(),
         ),
         (
-            Err(
-                "this host has no coding agents installed: a cursor-cli session is launched from \
-                 its tool definition"
-                    .to_string()
-            ),
+            Err("no coding agent spec launches cursor-cli".to_string()),
             Vec::<String>::new(),
             String::new(),
         )

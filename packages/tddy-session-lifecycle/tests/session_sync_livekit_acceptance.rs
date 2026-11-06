@@ -199,11 +199,10 @@ async fn a_mirrored_session(suffix: &str) -> AMirroredSession {
     let config_path = config_dir.path().join("daemon.yaml");
     std::fs::write(
         &config_path,
-        a_daemon_yaml(&ws_url, &agent_binary, &config_dir.path().join("auth")),
+        a_daemon_yaml(&ws_url, &config_dir.path().join("auth")),
     )
     .expect("write daemon.yaml");
-    let config = tddy_session_lifecycle::test_util::daemon_config_from_fixture_file(&config_path)
-        .expect("daemon.yaml must load");
+    let config = DaemonConfig::load(&config_path).expect("daemon.yaml must load");
 
     // The daemon's real auth wiring: one resolver verifies the session token everywhere, as in
     // production — the RPCs in the room, the git transport, and the mint the transport calls.
@@ -251,7 +250,10 @@ async fn a_mirrored_session(suffix: &str) -> AMirroredSession {
             Arc::new(tddy_session_lifecycle::claude_cli_session::ClaudeCliSessionManager::new()),
         )
         .with_coding_agents_if_none(
-            tddy_session_lifecycle::test_util::builtin_coding_agents_for(&config),
+            tddy_session_lifecycle::test_util::coding_agents_with_binaries(&[(
+                "claude",
+                agent_binary.as_path(),
+            )]),
         )
         .with_session_rooms(rooms.clone())
         .with_session_delta_stores(Arc::new(RoomsHostedByThisDaemon::new(rooms)))
@@ -614,21 +616,19 @@ fn a_project_at(repo: &Path) -> ProjectData {
 }
 
 /// The `daemon.yaml` of a daemon that runs agents, hosts their rooms and serves its projects.
-fn a_daemon_yaml(ws_url: &str, agent_binary: &Path, auth_storage: &Path) -> String {
+fn a_daemon_yaml(ws_url: &str, auth_storage: &Path) -> String {
     let room = common_room();
     format!(
         "daemon_instance_id: {INSTANCE_ID}\n\
          users:\n  - github_user: \"{GITHUB_USER}\"\n    os_user: \"{}\"\n\
          github:\n  stub: true\n\
          auth_storage: {}\n\
-         claude_cli:\n  binary_path: {}\n\
          session_room:\n  poll_interval_ms: {POLL_INTERVAL_MS}\n\
          livekit:\n  enabled: true\n  url: {ws_url}\n  api_key: {LK_API_KEY}\n  \
          api_secret: {LK_API_SECRET}\n  \
          common_room: {room}\n",
         serving_os_user(),
         auth_storage.display(),
-        agent_binary.display(),
     )
 }
 

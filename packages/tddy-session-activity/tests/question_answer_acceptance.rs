@@ -159,6 +159,8 @@ fn a_host_whose_child_asks(question: PendingQuestion) -> AnActivityHost {
     let data_dir = tempfile::tempdir().expect("a temporary data dir");
     let child_dir = data_dir.path().join("sessions").join(CHILD);
     write_claude_cli_session(&child_dir);
+    tddy_session_activity::answer_wait::record_answer_wait(&child_dir, A_LONG_WAIT)
+        .expect("the wait the child's start recorded");
     let changeset = tddy_core::Changeset {
         orchestrator_session_id: Some(HOME.to_string()),
         ..Default::default()
@@ -189,7 +191,6 @@ fn a_host_whose_child_asks(question: PendingQuestion) -> AnActivityHost {
     .with_question_answers(AnswerWaitPorts {
         pending: Arc::clone(&pending),
         presence: Arc::new(presence),
-        wait: A_LONG_WAIT,
     });
     AnActivityHost {
         data_dir,

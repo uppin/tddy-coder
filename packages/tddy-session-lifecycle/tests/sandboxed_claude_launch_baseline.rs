@@ -7,7 +7,7 @@
 //!
 //! These tests passed on the hand-built launch and stay green on the shared jail launcher
 //! (`tddy_agent_launch::jail_launch`) that replaced it, which launches `claude` from its tool
-//! definition and so needs the daemon's coding agents installed. The jail home is configured at
+//! definition and so needs the daemon's coding agents installed. The jail home is
 //! `<tddyhome>/homes/claude` — where the launcher puts Claude's persistent home — so the same
 //! assertions hold on both sides of the replacement.
 //!
@@ -24,10 +24,7 @@ const CREDENTIALS: &str = r#"{"claudeAiOauth":{"accessToken":"baseline"}}"#;
 /// A daemon whose persistent Claude home is `<tddyhome>/homes/claude`, already holding
 /// [`CREDENTIALS`].
 fn a_daemon_with_a_home_holding_credentials() -> claude_jail_support::AJailedClaudeDaemon {
-    let daemon = a_jailed_claude_daemon(ADaemonSpec {
-        configured_claude_home: "homes/claude",
-        ..ADaemonSpec::default()
-    });
+    let daemon = a_jailed_claude_daemon(ADaemonSpec::default());
     let credentials = daemon
         .tddy_home
         .join("homes/claude/.claude/.credentials.json");

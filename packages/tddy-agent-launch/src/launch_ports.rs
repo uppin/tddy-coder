@@ -125,12 +125,10 @@ pub struct LaunchSessions {
     /// Told of each started session's worktree. `None` on a host whose embedder acts on nothing of
     /// the kind.
     pub worktree_observer: Option<Arc<dyn SessionWorktreeObserver>>,
-    /// The coding agents declared as tools (`#agent-tools 2/12`). `None` until the daemon runtime
-    /// installs them; every CLI agent's start, resume and child is then refused
-    /// `FAILED_PRECONDITION`.
-    // TODO(agent-config-removal): non-optional at green — every launcher has coding agents, and the
-    // "no coding agents" refusals become a construction-time guarantee.
-    pub coding_agents: Option<Arc<crate::spec_launch::HostCodingAgents>>,
+    /// The coding agents declared as tools (`#agent-tools 2/12`). Every launch has them
+    /// (`#agent-tools 19/19`): a host that installed none is given an empty registry, whose every
+    /// agent session is refused for naming no spec — nothing is launched by hand.
+    pub coding_agents: Arc<crate::spec_launch::HostCodingAgents>,
     /// The host's capabilities that are not fields.
     pub host: Arc<dyn LaunchHost>,
     /// What extends a session's reach beyond this host when it is connected to.

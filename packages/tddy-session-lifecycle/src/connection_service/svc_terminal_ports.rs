@@ -25,7 +25,6 @@ use tokio::sync::broadcast;
 
 use super::DaemonSessionHost;
 use crate::cli_session_manager::CliSessionManager;
-use crate::config::DaemonConfig;
 use crate::terminal_session_adapter::DaemonTerminalSessionStore;
 
 mod recorded_worktree;
@@ -111,7 +110,7 @@ impl DaemonSessionHost {
             control: self.terminal_control(),
             roster: Arc::new(CliManagerTerminalRoster::new(
                 Arc::clone(&self.claude_cli_manager),
-                self.config.clone(),
+                self.launch_coding_agents(),
                 self.tddy_data_dir.clone(),
                 Arc::clone(&tmux),
             )),
@@ -232,7 +231,8 @@ impl TerminalControl for CliManagerTerminalControl {
 /// The terminals of a session, spawned as tasks by [`CliSessionManager`].
 struct CliManagerTerminalRoster {
     manager: Arc<CliSessionManager>,
-    config: DaemonConfig,
+    /// The coding agents an agent tab's binary is resolved from: the spec's, never daemon.yaml's.
+    coding_agents: Arc<tddy_agent_launch::spec_launch::HostCodingAgents>,
     /// Where session directories live — a stopped session's worktree is read from its record.
     tddy_data_dir: PathBuf,
     /// The host's tmux, which a tmux tab's session name is checked against before anything spawns.
@@ -242,13 +242,13 @@ struct CliManagerTerminalRoster {
 impl CliManagerTerminalRoster {
     fn new(
         manager: Arc<CliSessionManager>,
-        config: DaemonConfig,
+        coding_agents: Arc<tddy_agent_launch::spec_launch::HostCodingAgents>,
         tddy_data_dir: PathBuf,
         tmux: Arc<dyn TmuxHost>,
     ) -> Self {
         CliManagerTerminalRoster {
             manager,
-            config,
+            coding_agents,
             tddy_data_dir,
             tmux,
         }
@@ -274,11 +274,28 @@ impl TerminalRoster for CliManagerTerminalRoster {
                 let harness = cli_harness(kind).ok_or_else(|| {
                     Status::invalid_argument(format!("unknown terminal kind {kind:?}"))
                 })?;
-                let binary = self.config.cli_harness_binary(
-                    harness.session_type,
-                    harness.default_binary,
-                    harness.binary_env,
-                );
+                // The binary is the agent spec's, resolved on this host (`#agent-tools 19/19`): its
+                // `binary.env`, then the host's search, refusing what is found nowhere. The argv is
+                // still the legacy table's (docs/dev/todo/2026-11-03-harness-clis-legacy-cli-harness-removal.md).
+                let spec_id = self
+                    .coding_agents
+                    .agents()
+                    .for_session_type(harness.session_type)
+                    .map(|spec| spec.id.clone())
+                    .ok_or_else(|| {
+                        Status::failed_precondition(format!(
+                            "no coding agent spec launches {}",
+                            harness.session_type
+                        ))
+                    })?;
+                let binary = self
+                    .coding_agents
+                    .resolve(&spec_id, None)
+                    .map_err(|e| Status::failed_precondition(e.to_string()))?
+                    .tool
+                    .binary
+                    .to_string_lossy()
+                    .into_owned();
                 // A tab is a conversation of its own: a harness told a session id (Claude Code)
                 // gets a fresh one, never the session's.
                 let conversation_id = uuid::Uuid::now_v7().to_string();

@@ -300,11 +300,7 @@ pub(crate) fn jail_home(
                 HomeError::Io { .. } => Status::internal(error.to_string()),
             })
         }
-        HomeSection::Path { path } => {
-            // TODO(agent-config-removal): implement — the operator's directory as named.
-            let _ = path;
-            todo!("agent-config-removal: jail_home of a path home")
-        }
+        HomeSection::Path { path } => Ok(path.clone()),
         HomeSection::Session => Ok(session_home.to_path_buf()),
     }
 }

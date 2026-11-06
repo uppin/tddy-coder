@@ -223,20 +223,16 @@ impl ATddyHome {
         self.coding_agents_with(stubs, BTreeMap::new())
     }
 
-    /// [`Self::coding_agents`] on a host the daemon's config also names `claude` on: the runtime's
-    /// tool host answers `TDDY_CLAUDE_BINARY` from `claude_cli.binary_path`.
-    fn coding_agents_pinned_by(
-        &self,
-        stubs: &AStubBin,
-        config: &DaemonConfig,
-    ) -> Arc<HostCodingAgents> {
-        let pinned = config
-            .claude_cli
-            .as_ref()
-            .map(|claude_cli| claude_cli.binary_path.clone())
-            .filter(|path| path.contains('/'))
-            .map(|path| ("TDDY_CLAUDE_BINARY".to_string(), path));
-        self.coding_agents_with(stubs, pinned.into_iter().collect())
+    /// [`Self::coding_agents`] on a host whose environment also answers `TDDY_CLAUDE_BINARY`
+    /// with `pinned`: the spec's `binary.env` names `claude` ahead of the `PATH`.
+    fn coding_agents_pinned_by(&self, stubs: &AStubBin, pinned: &Path) -> Arc<HostCodingAgents> {
+        self.coding_agents_with(
+            stubs,
+            BTreeMap::from([(
+                "TDDY_CLAUDE_BINARY".to_string(),
+                pinned.to_string_lossy().into_owned(),
+            )]),
+        )
     }
 
     fn coding_agents_with(
@@ -255,24 +251,16 @@ impl ATddyHome {
     }
 }
 
-/// A daemon config naming the stub `tddy-tools`, and `claude_cli.binary_path` when given.
-fn a_daemon_config(
-    stubs: &AStubBin,
-    binary_path: Option<&Path>,
-) -> (tempfile::TempDir, DaemonConfig) {
+/// A daemon config for the current OS user: the agents come from the host's coding agents.
+fn a_daemon_config() -> (tempfile::TempDir, DaemonConfig) {
     let dir = tempfile::tempdir().unwrap();
     let user = current_os_user();
-    let binary_line = binary_path
-        .map(|path| format!("  binary_path: {}\n", path.display()))
-        .unwrap_or_default();
     let yaml = format!(
-        "users:\n  - github_user: \"{user}\"\n    os_user: \"{user}\"\nallowed_tools:\n  - path: /bin/true\n    label: true\nclaude_cli:\n  tddy_tools_path: {}\n{binary_line}",
-        stubs.binary("tddy-tools").display()
+        "users:\n  - github_user: \"{user}\"\n    os_user: \"{user}\"\nallowed_tools:\n  - path: /bin/true\n    label: true\n"
     );
     let config_path = dir.path().join("daemon.yaml");
     std::fs::write(&config_path, yaml).unwrap();
-    let config = tddy_session_lifecycle::test_util::daemon_config_from_fixture_file(&config_path)
-        .expect("config must parse");
+    let config = DaemonConfig::load(&config_path).expect("config must parse");
     (dir, config)
 }
 
@@ -468,12 +456,12 @@ fn worktree_of(sessions_base: &Path, session_id: &str) -> PathBuf {
 #[tokio::test]
 #[serial_test::serial]
 async fn an_unsandboxed_claude_cli_start_runs_the_spec_binary_with_the_argv_its_template_renders() {
-    // Given — no daemon.yaml binary_path: the spec's binary, found on the fixture PATH, is used
+    // Given — no pinned binary: the spec's binary, found on the fixture PATH, is used
     let sessions_tmp = tempfile::tempdir().unwrap();
     let _repo = a_registered_project(sessions_tmp.path());
     let stubs = a_stub_bin();
     let home = a_tddy_home();
-    let (_cfg, config) = a_daemon_config(&stubs, None);
+    let (_cfg, config) = a_daemon_config();
     let manager = Arc::new(ClaudeCliSessionManager::new());
     let host = a_session_host(
         config,
@@ -519,7 +507,7 @@ async fn a_claude_cli_resume_renders_resume_and_the_session_id_from_the_same_tem
     an_exited_host_session(sessions_tmp.path(), worktree.path());
     let stubs = a_stub_bin();
     let home = a_tddy_home();
-    let (_cfg, config) = a_daemon_config(&stubs, None);
+    let (_cfg, config) = a_daemon_config();
     let manager = Arc::new(ClaudeCliSessionManager::new());
     let host = a_session_host(
         config,
@@ -563,7 +551,7 @@ async fn the_mcp_config_allow_deny_flags_permission_prompt_and_preamble_equal_to
     let _repo = a_registered_project(sessions_tmp.path());
     let stubs = a_stub_bin();
     let home = a_tddy_home();
-    let (_cfg, config) = a_daemon_config(&stubs, None);
+    let (_cfg, config) = a_daemon_config();
     let manager = Arc::new(ClaudeCliSessionManager::new());
     let host = a_session_host(
         config,
@@ -627,7 +615,7 @@ async fn a_tddyhome_override_of_claude_yaml_adds_an_argv_token_that_reaches_the_
     let _repo = a_registered_project(sessions_tmp.path());
     let stubs = a_stub_bin();
     let home = a_tddy_home().with_claude_override_adding("--verbose");
-    let (_cfg, config) = a_daemon_config(&stubs, None);
+    let (_cfg, config) = a_daemon_config();
     let manager = Arc::new(ClaudeCliSessionManager::new());
     let host = a_session_host(
         config,
@@ -655,13 +643,13 @@ async fn a_tddyhome_override_of_claude_yaml_adds_an_argv_token_that_reaches_the_
 #[tokio::test]
 #[serial_test::serial]
 async fn the_daemon_yaml_claude_binary_path_still_overrides_the_spec_binary() {
-    // Given — a second stub agent, named only by daemon.yaml; the fixture PATH still has `claude`
+    // Given — a second stub agent, named only by `TDDY_CLAUDE_BINARY`; the fixture PATH still has `claude`
     let sessions_tmp = tempfile::tempdir().unwrap();
     let _repo = a_registered_project(sessions_tmp.path());
     let stubs = a_stub_bin().with_recording_agent("claude-pinned");
     let home = a_tddy_home();
-    let (_cfg, config) = a_daemon_config(&stubs, Some(&stubs.binary("claude-pinned")));
-    let agents = home.coding_agents_pinned_by(&stubs, &config);
+    let (_cfg, config) = a_daemon_config();
+    let agents = home.coding_agents_pinned_by(&stubs, &stubs.binary("claude-pinned"));
     let manager = Arc::new(ClaudeCliSessionManager::new());
     let host = a_session_host(
         config,

@@ -62,7 +62,7 @@ pub struct CliHarness {
     pub label: &'static str,
     /// The agent whose context-file allow-list the session is served.
     pub context_agent: &'static str,
-    /// The binary run when the daemon config and the environment name none.
+    /// The binary run when the environment names none.
     pub default_binary: &'static str,
     /// The environment variable that overrides the binary (`TDDY_CLAUDE_BINARY`, …).
     pub binary_env: &'static str,
@@ -73,9 +73,9 @@ pub struct CliHarness {
     pub argv: fn(&CliLaunch<'_>) -> Vec<String>,
     pub models: CliModelSource,
     /// Whether a start of this session type must name a model.
-    // TODO(agent-config-removal): #agent-tools n19 `agent-config-removal` — the launch reads the agent's `requires_model`
-    // capability from its spec; this copy serves only the legacy start-session schema until this
-    // module is deleted (docs/dev/todo/2026-11-04-removed-agent-config-readers-remain.md).
+    // TODO(harness-clis): the launch reads the agent's `requires_model` capability from its spec;
+    // this copy serves only the legacy start-session schema until this module is deleted
+    // (docs/dev/todo/2026-11-03-harness-clis-legacy-cli-harness-removal.md).
     pub requires_model: bool,
 }
 

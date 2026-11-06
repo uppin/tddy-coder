@@ -61,8 +61,6 @@ pub(crate) struct CliHarnessStart<'a> {
     pub kind: CliSessionType,
     /// The coding agent the session launches, resolved on this host before anything is cut.
     pub agent: &'a HostAgent,
-    /// What the daemon's config adds to the agent's environment (its renderer).
-    pub renderer_env: Vec<(String, String)>,
     pub config: &'a DaemonConfig,
     pub tddy_data_dir: &'a Path,
     pub cli_manager: &'a Arc<CliSessionManager>,
@@ -110,18 +108,16 @@ pub(crate) struct CliHarnessStart<'a> {
 // TODO(harness-clis): orphaned from the production launch; only the legacy jail's
 // `resolve_cli_jail_binaries` still names it. Removal is deferred: docs/dev/todo/2026-11-03-harness-clis-legacy-cli-harness-removal.md
 /// The binary a CLI harness is run as before its spec launched it: its environment variable, then
-/// `cli_harnesses.<session type>.binary_path` in the daemon config, then the registry's default. A
-/// bare default name is resolved on the host — `~/.local/bin/<name>`, then `$PATH`.
+/// the registry's default. A bare default name is resolved on the host — `~/.local/bin/<name>`, then
+/// `$PATH`. (The daemon.yaml `cli_harnesses.<session type>.binary_path` step is gone with that
+/// section, `#agent-tools 19/19`.)
 #[allow(dead_code)]
-pub(crate) fn harness_binary(
-    config: &DaemonConfig,
-    harness: &tddy_core::cli_harness::CliHarness,
-) -> String {
-    let binary = config.cli_harness_binary(
-        harness.session_type,
-        harness.default_binary,
-        harness.binary_env,
-    );
+pub(crate) fn harness_binary(harness: &tddy_core::cli_harness::CliHarness) -> String {
+    let binary = std::env::var(harness.binary_env)
+        .ok()
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+        .unwrap_or_else(|| harness.default_binary.to_string());
     tddy_daemon_kernel::config::resolve_harness_binary_name(
         binary,
         tddy_daemon_kernel::config::find_real_harness_on_host,
@@ -136,7 +132,6 @@ pub(crate) async fn start_cli_harness_session(
     let CliHarnessStart {
         kind,
         agent,
-        renderer_env,
         config,
         tddy_data_dir,
         cli_manager,
@@ -264,12 +259,12 @@ pub(crate) async fn start_cli_harness_session(
     let identity =
         account_access.session_identity_in(session_id, os_user, &session_dir, project.as_ref());
     env.extend(identity.git_environment);
-    env.extend(renderer_env);
     let recipe_name = managed
         .as_ref()
         .map(|managed| managed.recipe.name().to_string());
     let mut wiring = wire_session_agent(SessionWiringInputs {
         spec,
+        tddy_tools_path: &crate::cli_harness_jail::agent_tddy_tools(agent)?,
         config,
         tddy_data_dir,
         os_user,
@@ -461,7 +456,7 @@ impl crate::launch_ports::LaunchSessions {
             // A tmux-run agent that exited unwatched left its token on its kept pane.
             crate::cli_harness_tmux::settle_unwatched_agent_exit(
                 &self.claude_cli_manager,
-                self.coding_agents.as_deref(),
+                Some(&*self.coding_agents),
                 os_user,
                 &req.session_id,
                 kind.name,
@@ -473,7 +468,7 @@ impl crate::launch_ports::LaunchSessions {
         metadata.harness_resume_token =
             settled_resume_token(&self.claude_cli_manager, &req.session_id, session_dir).await?;
         let session_agent =
-            resolve_session_agent(self.coding_agents.as_ref(), &self.config, kind.clone())?;
+            resolve_session_agent(&self.coding_agents, kind.clone())?;
         let identity = self.host.session_identity(
             os_user,
             &req.session_id,
@@ -490,7 +485,7 @@ impl crate::launch_ports::LaunchSessions {
         refuse_a_resume_without_its_worktree(kind.name, &worktree)?;
         let wiring = self
             .resumed_session_wiring(
-                &session_agent.agent.spec,
+                &session_agent.agent,
                 &metadata,
                 session_dir,
                 &worktree,
@@ -570,9 +565,7 @@ async fn resume_cli_harness_session(
 ) -> Result<Response<ResumeSessionResponse>, Status> {
     let CliSessionAgent {
         kind,
-        agent,
-        renderer_env,
-        ..
+        agent, ..
     } = session_agent;
     let kind = kind.clone();
     let ResumedSession {
@@ -630,7 +623,6 @@ async fn resume_cli_harness_session(
     let on_exit = removing_session_pointer_on_exit(on_exit, pointer, meta.tmux_session.is_some());
     let mut env = git_environment;
     env.extend(split_env);
-    env.extend(renderer_env.clone());
     env.extend(wiring.env);
     env.extend(route.env);
     let launcher = node_launcher_of(&agent.tool.binary);

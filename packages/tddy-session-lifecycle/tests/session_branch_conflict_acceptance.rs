@@ -67,14 +67,11 @@ users:
 allowed_tools:
   - path: /bin/true
     label: true
-claude_cli:
-  binary_path: /bin/cat
 "#
     );
     let config_path = dir.path().join("daemon.yaml");
     std::fs::write(&config_path, yaml).unwrap();
-    let config = tddy_session_lifecycle::test_util::daemon_config_from_fixture_file(&config_path)
-        .expect("config must parse");
+    let config = DaemonConfig::load(&config_path).expect("config must parse");
     (dir, config)
 }
 
@@ -97,7 +94,10 @@ fn a_service(config: DaemonConfig, sessions_base: PathBuf) -> DaemonSessionHost 
         Arc::new(CliSessionManager::new()),
     )
     .with_coding_agents_if_none(
-        tddy_session_lifecycle::test_util::builtin_coding_agents_for(&config),
+        tddy_session_lifecycle::test_util::coding_agents_with_binaries(&[(
+            "claude",
+            Path::new("/bin/cat"),
+        )]),
     )
 }
 
