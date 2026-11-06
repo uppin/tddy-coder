@@ -28,7 +28,7 @@ use tddy_sandbox_app::sandboxed_session::{
 use tddy_sandbox_app::{bridge, host_agent, spawn};
 
 #[cfg(target_os = "macos")]
-use spawn::{spawn_claude_sandbox, AgentKind, SpawnParams};
+use spawn::{spawn_claude_sandbox, SpawnParams};
 #[cfg(target_os = "macos")]
 use std::sync::atomic::{AtomicBool, Ordering};
 #[cfg(target_os = "macos")]
@@ -60,30 +60,21 @@ struct Args {
     #[arg(long, env = "TDDY_SESSION_BASE")]
     session_base: Option<PathBuf>,
 
-    /// Agent kind: `claude` (default), `cursor` (`agent` binary), or `opencode` / `muse`, which this
-    /// app parses but does not start yet (a jailed session of either needs a provider account).
+    /// The coding agent to jail, by its spec id in the tool registry (`claude`, `cursor`, …) —
+    /// `<session-base>/tools/<id>.yaml` overrides the embedded spec, and the spec's own binary
+    /// override (e.g. `TDDY_CLAUDE_BINARY`) names its binary. An id the registry does not hold is
+    /// refused, naming the ones it does; one whose jailed session needs a provider account this app
+    /// does not pass is refused too (`#agent-tools 10/12`).
     #[arg(long, default_value = "claude")]
-    agent_kind: String,
+    agent: String,
 
-    /// Claude model passed to the in-jail `claude` binary (default: the versionless `opus` alias).
+    /// Model passed to the agent (default: the chosen spec's `models.default`).
     #[arg(long)]
     model: Option<String>,
 
-    /// Claude permission mode (e.g. auto, bypassPermissions, plan).
+    /// Permission mode (e.g. auto, bypassPermissions, plan), for an agent whose spec takes one.
     #[arg(long)]
     permission_mode: Option<String>,
-
-    /// Path to the `claude` binary (default: `claude` on PATH).
-    #[arg(long)]
-    claude_binary: Option<String>,
-
-    /// Path to the Cursor `agent` binary when `--agent-kind cursor` (default: `agent` on PATH).
-    #[arg(long)]
-    cursor_binary: Option<String>,
-
-    /// Persistent jail `$HOME` for Cursor (`agent`). Default: `$HOME/.tddy/sandbox-cursor-home`.
-    #[arg(long, env = "TDDY_SANDBOX_CURSOR_HOME")]
-    cursor_home_dir: Option<PathBuf>,
 
     /// Path to `tddy-tools` for in-jail MCP (default: sibling of this binary).
     #[arg(long)]
@@ -96,16 +87,6 @@ struct Args {
     /// Working directory for Claude inside the jail (default: the mounted repo root).
     #[arg(long)]
     cwd: Option<PathBuf>,
-
-    /// Persistent jail `$HOME`, mounted read-write and reused across sandbox restarts (settings,
-    /// session history, credentials). Kept separate from the real `~/.claude`.
-    /// Default: `$HOME/.tddy/sandbox-claude-home`.
-    ///
-    /// Deliberately shared across all `tddy-sandbox-app` invocations on this host, not
-    /// per-session — mirrors how a real user's `~/.claude` is shared across concurrent `claude`
-    /// CLI sessions today; this is intentional, not an oversight.
-    #[arg(long, env = "TDDY_SANDBOX_CLAUDE_HOME")]
-    claude_home_dir: Option<PathBuf>,
 
     /// `--codebase-mode sandboxed` only: the jail's `$HOME`, mounted read-write and reused across
     /// sessions. This is the **build home** — `~/.cargo`, `~/.bun` and every other dependency
@@ -274,18 +255,8 @@ fn default_session_base() -> PathBuf {
         .join(".tddy")
 }
 
-#[cfg(target_os = "macos")]
-fn default_claude_home_dir() -> PathBuf {
-    default_session_base().join("sandbox-claude-home")
-}
-
-#[cfg(target_os = "macos")]
-fn default_cursor_home_dir() -> PathBuf {
-    default_session_base().join("sandbox-cursor-home")
-}
-
 /// Where a `sandboxed` session's build keeps its `$HOME` when nothing named one: beside the
-/// persistent agent homes under `~/.tddy`, and outside the `sessions/` tree that is discarded with
+/// persistent agent homes under `~/.tddy/homes`, and outside the `sessions/` tree that is discarded with
 /// the session it belongs to.
 #[cfg(target_os = "macos")]
 fn default_codebase_home_dir() -> PathBuf {
@@ -296,32 +267,31 @@ fn default_codebase_home_dir() -> PathBuf {
 ///
 /// Empty for `sandboxed`, and that omission is the honest answer rather than a missing one. Those
 /// homes belong to an agent *inside* a jail; a `sandboxed` session's agent is an ordinary host
-/// process using the host's own `~/.claude`, and the jail home named here would be neither created
-/// nor mounted. Printing it would tell an operator their credentials were confined when they are
-/// the one thing in the session that is not.
+/// process using the host's own home, and the jail home named here would be neither created nor
+/// mounted. Printing it would tell an operator their credentials were confined when they are the
+/// one thing in the session that is not.
 #[cfg(target_os = "macos")]
 fn agent_home_banner(
     mode: CodebaseMode,
-    agent_kind: AgentKind,
-    claude_home_dir: &std::path::Path,
-    cursor_home_dir: &std::path::Path,
+    agent: &tddy_sandbox_app::agent_spec::ChosenAgent,
+    tddy_home: &std::path::Path,
 ) -> Vec<String> {
+    use tddy_actions::tool::HomeSection;
     if mode == CodebaseMode::Sandboxed {
         return Vec::new();
     }
-    let (home, flag) = match agent_kind {
-        AgentKind::Claude => (claude_home_dir, "claude_home_dir"),
-        AgentKind::Cursor => (cursor_home_dir, "cursor_home_dir"),
-        // This app names no persistent home for a kind it does not start (see `spawn`).
-        AgentKind::OpenCode | AgentKind::Muse => return Vec::new(),
+    let Some(tool) = agent.defs.iter().find(|def| def.id == agent.tool.id) else {
+        return Vec::new();
     };
-    vec![
-        format!(
-            "agent_kind={agent_kind:?} persistent_home={} (persistent across restarts)",
-            home.display()
-        ),
-        format!("{flag}={} (persistent across restarts)", home.display()),
-    ]
+    let home = match &tool.home {
+        HomeSection::Persistent { key } => tddy_home.join("homes").join(key),
+        HomeSection::Session => return Vec::new(),
+    };
+    vec![format!(
+        "agent={} persistent_home={} (persistent across restarts)",
+        agent.id,
+        home.display()
+    )]
 }
 
 /// Repoint `<session-base>/sessions/latest` at `<session_id>` (best-effort; failures are ignored —
@@ -379,6 +349,15 @@ async fn main() -> Result<()> {
 /// daemon-hosted sandboxed session (see `daemon_client`). The in-process Seatbelt path is macOS-only.
 #[cfg(target_os = "linux")]
 async fn run_linux(args: Args, cfg: config::SandboxAppConfig) -> Result<()> {
+    // The daemon starts the session type it is asked for; this client asks for the default agent
+    // only. Refused rather than started as a different agent than the one named.
+    if args.agent != "claude" {
+        anyhow::bail!(
+            "--agent {}: the Linux daemon path starts the default agent's session only; \
+             run on macOS, or use --agent claude",
+            args.agent
+        );
+    }
     // `--codebase-mode`/`--remote-codebase` on the CLI win; otherwise fall back to config.
     let codebase_mode = args.codebase_mode.or(cfg.codebase_mode);
     let mode = resolve_codebase_mode(codebase_mode.as_deref(), args.remote_codebase)
@@ -458,16 +437,11 @@ async fn run_macos(args: Args, cfg: config::SandboxAppConfig) -> Result<()> {
         eprintln!("verbose logging enabled (RUST_LOG)");
     }
 
-    let agent_kind = AgentKind::parse(&args.agent_kind).map_err(|e| anyhow::anyhow!(e))?;
-
-    let claude_home_dir = args
-        .claude_home_dir
-        .or(cfg.claude_home_dir)
-        .unwrap_or_else(default_claude_home_dir);
-    let cursor_home_dir = args
-        .cursor_home_dir
-        .or(cfg.cursor_home_dir)
-        .unwrap_or_else(default_cursor_home_dir);
+    // The registry holds what the agent is: its spec, its binary as this host resolves it, and the
+    // definition its jail is lowered from. Refused here, before anything is created, when the id
+    // names no coding agent or one whose jailed session needs an account this app cannot give.
+    let agent = tddy_sandbox_app::agent_spec::choose_agent(&args.agent, &session_base)
+        .map_err(|e| anyhow::anyhow!(e))?;
 
     // Resolved before the banner, because the banner depends on it: which homes a session actually
     // uses is a question about the placement, and `sandboxed` answers it differently.
@@ -476,7 +450,7 @@ async fn run_macos(args: Args, cfg: config::SandboxAppConfig) -> Result<()> {
     let mode = resolve_codebase_mode(codebase_mode.as_deref(), args.remote_codebase)
         .map_err(|e| anyhow::anyhow!(e))?;
 
-    for line in agent_home_banner(mode, agent_kind, &claude_home_dir, &cursor_home_dir) {
+    for line in agent_home_banner(mode, &agent, &session_base) {
         eprintln!("{line}");
     }
     match mode {
@@ -492,7 +466,7 @@ async fn run_macos(args: Args, cfg: config::SandboxAppConfig) -> Result<()> {
     // Named agents come from the CLI flag and the config list; inline defs come from the config.
     let mut named_agents = args.specialized_agent;
     named_agents.extend(cfg.specialized_agents);
-    refuse_unservable_sandboxed_session(mode, agent_kind).map_err(|e| anyhow::anyhow!(e))?;
+    refuse_unservable_sandboxed_session(mode, &agent.spec).map_err(|e| anyhow::anyhow!(e))?;
     // Resolved the same way the modes that honour it resolve it (CLI over config), because a
     // working directory the config named is just as ignored as one the flag named.
     let cwd = args.cwd.or(cfg.cwd);
@@ -535,8 +509,9 @@ async fn run_macos(args: Args, cfg: config::SandboxAppConfig) -> Result<()> {
         // of stalling the main agent's first subagent call. No fallback — the CLI is never spawned
         // if warm-up fails.
         eprintln!(
-            "waking {} specialized agent(s) before starting {agent_kind:?} …",
-            specialized_defs.len()
+            "waking {} specialized agent(s) before starting {} …",
+            specialized_defs.len(),
+            agent.id
         );
         let warmup_options = tddy_discovery::warmup::WarmupOptions::default();
         tokio::select! {
@@ -560,7 +535,7 @@ async fn run_macos(args: Args, cfg: config::SandboxAppConfig) -> Result<()> {
     let model = args
         .model
         .or(cfg.model)
-        .unwrap_or_else(|| tddy_core::backend::CLAUDE_DEFAULT_MODEL.to_string());
+        .unwrap_or_else(|| agent.spec.agent.models.default.clone());
     let permission_mode = args
         .permission_mode
         .or(cfg.permission_mode)
@@ -573,7 +548,7 @@ async fn run_macos(args: Args, cfg: config::SandboxAppConfig) -> Result<()> {
             repo: args.repo,
             session_id,
             session_dir,
-            claude_binary: args.claude_binary.or(cfg.claude_binary),
+            agent,
             tddy_tools_path: args.tddy_tools_path.or(cfg.tddy_tools_path),
             sandbox_runner_path: args.sandbox_runner_path.or(cfg.sandbox_runner_path),
             codebase_home_base: codebase_home_base.unwrap_or_else(default_codebase_home_dir),
@@ -587,11 +562,11 @@ async fn run_macos(args: Args, cfg: config::SandboxAppConfig) -> Result<()> {
         .await;
     }
 
-    // Captured before `model`/`claude_home_dir`/`agent_kind` move into `SpawnParams` — used to
-    // build the end-of-session token summary once the terminal bridge returns.
+    // Captured before `model` and `agent` move into `SpawnParams` — used to build the
+    // end-of-session token summary once the terminal bridge returns. The transcript reader behind
+    // it reads one agent's transcripts, so only that agent's session has a main-agent row.
     let model_for_summary = model.clone();
-    let claude_home_for_summary = claude_home_dir.clone();
-    let is_claude_agent = agent_kind == AgentKind::Claude;
+    let is_transcript_agent = agent.id == "claude";
 
     // Register the reusable-LSP executor before spawning the jail, so the spawn-time
     // availability check can gate the in-jail `Lsp*` tools, and relayed `Lsp*` tool calls
@@ -614,22 +589,19 @@ async fn run_macos(args: Args, cfg: config::SandboxAppConfig) -> Result<()> {
 
     let spawned = tokio::select! {
         res = spawn_claude_sandbox(SpawnParams {
-            agent_kind,
+            agent,
+            tddy_home: session_base.clone(),
             repo: args.repo,
             session_id: session_id.clone(),
             model,
             permission_mode,
-            claude_binary: args.claude_binary.or(cfg.claude_binary),
-            cursor_binary: args.cursor_binary.or(cfg.cursor_binary),
             tddy_tools_path: args.tddy_tools_path.or(cfg.tddy_tools_path),
             sandbox_runner_path: args.sandbox_runner_path.or(cfg.sandbox_runner_path),
             session_dir: session_dir.clone(),
             cwd,
-            claude_home_dir,
-            cursor_home_dir,
             codebase_mode: mode,
             specialized_defs,
-            claude_args,
+            agent_args: claude_args,
             mcp_log_level: args.mcp_log_level.or(cfg.mcp_log_level),
         }) => res?,
         _ = tokio::signal::ctrl_c() => {
@@ -691,9 +663,9 @@ async fn run_macos(args: Args, cfg: config::SandboxAppConfig) -> Result<()> {
     print_token_summary(
         &session_dir,
         &session_id,
-        &claude_home_for_summary,
+        &spawned.home,
         &model_for_summary,
-        is_claude_agent,
+        is_transcript_agent,
     );
 
     if let Err(e) = bridge_result {
@@ -706,35 +678,41 @@ async fn run_macos(args: Args, cfg: config::SandboxAppConfig) -> Result<()> {
 
 /// What a `sandboxed` session cannot serve, refused before anything is spawned.
 ///
-/// One combination, and it is structural: `--agent-kind cursor` keeps today's placement because
-/// Cursor's tool surface is not withdrawable the way Claude's `--disallowedTools` makes Claude's —
-/// an inverted placement could not make the confinement claim, so quietly keeping the old one would
-/// leave the caller confining the agent under a flag that promises to confine the code.
+/// One combination, and it is structural: an agent whose spec cannot withdraw its own tools keeps
+/// today's placement, because the mode withdraws the agent's native filesystem and shell tools so
+/// that the jail is the only route to the checkout. An inverted placement could not make that
+/// confinement claim for such an agent, and quietly keeping the old one would leave the caller
+/// confining the agent under a flag that promises to confine the code.
 ///
 /// A specialized agent is **not** such a combination, though this once refused one. The roster is
 /// read by `tddy_discovery::roster::subagents_from_env` in whichever process runs `tddy-tools --mcp`,
-/// and this mode has one of those — on the host, spawned by the host agent from the MCP config the
-/// app writes ([`host_agent::host_mcp_env`]). What it never had is an *in-jail* one, which the
-/// roster never needed.
+/// and this mode has one — on the host, spawned by the host agent from the MCP config the app
+/// writes ([`host_agent::host_mcp_env`]). What it never had is an *in-jail* one, which the roster
+/// never needed.
 ///
 /// Any other mode is served exactly as it is today: this refuses a combination, never a mode.
 #[cfg(target_os = "macos")]
 fn refuse_unservable_sandboxed_session(
     mode: CodebaseMode,
-    agent_kind: AgentKind,
+    agent: &tddy_coding_agent_specs::CodingAgentSpec,
 ) -> Result<(), String> {
     if mode != CodebaseMode::Sandboxed {
         return Ok(());
     }
-    if agent_kind == AgentKind::Cursor {
-        return Err(
-            "--codebase-mode sandboxed cannot be combined with --agent-kind cursor: the mode \
-             withdraws the agent's native filesystem and shell tools so that the jail is the only \
-             route to the checkout, and Cursor's tool surface is not withdrawable the way Claude's \
-             --disallowedTools makes Claude's. Use --agent-kind claude, or keep today's placement \
-             with --codebase-mode mounted or managed."
-                .to_string(),
-        );
+    if agent.agent.tool_deny.flag().is_none()
+        || !agent
+            .agent
+            .variants
+            .contains_key(tddy_coding_agent_specs::HOST_AGENT_VARIANT)
+    {
+        return Err(format!(
+            "--codebase-mode sandboxed cannot be combined with --agent {id}: the mode withdraws the \
+             agent's native filesystem and shell tools so that the jail is the only route to the \
+             checkout, and {id}'s spec declares no way to withdraw them (no tool_deny flag, or no \
+             host_agent variant). Use an agent that does, or keep today's placement with \
+             --codebase-mode mounted or managed.",
+            id = agent.id
+        ));
     }
     Ok(())
 }
@@ -766,7 +744,8 @@ struct SandboxedCodebaseRun {
     repo: PathBuf,
     session_id: String,
     session_dir: PathBuf,
-    claude_binary: Option<String>,
+    /// The agent that runs on this host, resolved from the registry.
+    agent: tddy_sandbox_app::agent_spec::ChosenAgent,
     tddy_tools_path: Option<String>,
     sandbox_runner_path: Option<String>,
     /// Where this host keeps its build homes (the `--codebase-home-dir` base). The session's own
@@ -824,10 +803,6 @@ fn sandboxed_codebase_params(
 async fn run_sandboxed_codebase(run: SandboxedCodebaseRun) -> Result<()> {
     use anyhow::Context;
 
-    // Resolved before the jail is built: a session whose agent binary cannot be found should fail
-    // while there is still no `sandbox-exec` child to clean up.
-    let claude_binary = spawn::resolve_claude_binary(run.claude_binary.as_deref())
-        .map_err(|e| anyhow::anyhow!(e))?;
     // Resolved once, for both ends: the jail is told which `tddy-tools` it holds, and the agent's
     // MCP server on this host runs that same one. A session pointed at a specific build must not
     // get it on one side of the boundary and the default sibling on the other.
@@ -866,11 +841,17 @@ async fn run_sandboxed_codebase(run: SandboxedCodebaseRun) -> Result<()> {
     );
     eprintln!(
         "host tools withdrawn: {}",
-        tddy_sandbox_recipes::build_host_agent_disallowlist().join(", ")
+        run.agent
+            .spec
+            .agent
+            .variants
+            .get(tddy_coding_agent_specs::HOST_AGENT_VARIANT)
+            .map(|variant| variant.withdraw_native.join(", "))
+            .unwrap_or_default()
     );
 
     let argv = host_agent::build_host_agent_argv(host_agent::HostAgentArgs {
-        claude_binary,
+        agent: run.agent.clone(),
         model: run.model.clone(),
         permission_mode: run.permission_mode,
         session_id: run.session_id.clone(),
@@ -987,6 +968,28 @@ mod tests {
 
     const NO_AGENTS_DIR: &str = "/nonexistent-agents-dir-for-tests";
 
+    /// The embedded spec of agent `id`, with no binary resolved: the refusals read declarations only.
+    fn the_spec_of(id: &str) -> tddy_coding_agent_specs::CodingAgentSpec {
+        tddy_coding_agent_specs::embedded_spec(id).expect("an embedded agent spec")
+    }
+
+    /// An agent as the registry would hand it over, resolved to a binary that exists nowhere.
+    fn a_chosen_agent(id: &str) -> tddy_sandbox_app::agent_spec::ChosenAgent {
+        tddy_sandbox_app::agent_spec::ChosenAgent {
+            id: id.to_string(),
+            spec: the_spec_of(id),
+            defs: Vec::new(),
+            tool: tddy_actions::tool::ResolvedTool {
+                id: id.to_string(),
+                command: id.to_string(),
+                binary: PathBuf::from("/usr/local/bin").join(id),
+                reads: Vec::new(),
+                network: Default::default(),
+            },
+            deps: Vec::new(),
+        }
+    }
+
     fn an_agent_named(name: &str) -> Vec<String> {
         vec![name.to_string()]
     }
@@ -1016,7 +1019,7 @@ mod tests {
     fn a_sandboxed_session_refuses_a_cursor_agent() {
         // Given / When
         let message =
-            refuse_unservable_sandboxed_session(CodebaseMode::Sandboxed, AgentKind::Cursor)
+            refuse_unservable_sandboxed_session(CodebaseMode::Sandboxed, &the_spec_of("cursor"))
                 .expect_err(
                     "a sandboxed session must refuse an agent whose tools it cannot withdraw",
                 );
@@ -1034,7 +1037,7 @@ mod tests {
     fn a_sandboxed_session_with_a_plain_claude_agent_is_served() {
         // Given / When
         let served =
-            refuse_unservable_sandboxed_session(CodebaseMode::Sandboxed, AgentKind::Claude);
+            refuse_unservable_sandboxed_session(CodebaseMode::Sandboxed, &the_spec_of("claude"));
 
         // Then
         assert_eq!(served, Ok(()));
@@ -1045,7 +1048,8 @@ mod tests {
     #[test]
     fn a_mounted_session_still_serves_a_cursor_agent() {
         // Given / When
-        let served = refuse_unservable_sandboxed_session(CodebaseMode::Mounted, AgentKind::Cursor);
+        let served =
+            refuse_unservable_sandboxed_session(CodebaseMode::Mounted, &the_spec_of("cursor"));
 
         // Then
         assert_eq!(served, Ok(()));
@@ -1059,7 +1063,7 @@ mod tests {
         inline: &[tddy_discovery::agent_def::SpecializedAgentDef],
         agents_dir: &Path,
     ) -> Result<Vec<String>, String> {
-        refuse_unservable_sandboxed_session(CodebaseMode::Sandboxed, AgentKind::Claude)?;
+        refuse_unservable_sandboxed_session(CodebaseMode::Sandboxed, &the_spec_of("claude"))?;
         config::resolve_session_agents(named, inline, agents_dir)
             .map(|defs| defs.into_iter().map(|def| def.name).collect())
             .map_err(|e| e.to_string())
@@ -1135,6 +1139,21 @@ mod tests {
         assert_eq!(served, Ok(()));
     }
 
+    /// `id` as the registry hands it over, with the tool definition its persistent home is read from.
+    fn a_chosen_agent_with_a_persistent_home(
+        id: &str,
+    ) -> tddy_sandbox_app::agent_spec::ChosenAgent {
+        let mut agent = a_chosen_agent(id);
+        let (path, yaml) = tddy_coding_agent_specs::builtin_specs()
+            .into_iter()
+            .find(|(path, _)| path.ends_with(&format!("/{id}.yaml")))
+            .expect("an embedded spec");
+        agent.defs =
+            vec![tddy_actions::tool::ToolDef::parse(Path::new(path), yaml)
+                .expect("a tool definition")];
+        agent
+    }
+
     /// The jail homes the banner names belong to an agent *inside* a jail. A `sandboxed` session's
     /// agent runs on this host with the real `~/.claude`, and that home is never created or
     /// mounted — printing it would tell an operator their credentials were confined when they are
@@ -1144,9 +1163,8 @@ mod tests {
         // Given / When
         let lines = agent_home_banner(
             CodebaseMode::Sandboxed,
-            AgentKind::Claude,
-            Path::new("/Users/dev/.tddy/sandbox-claude-home"),
-            Path::new("/Users/dev/.tddy/sandbox-cursor-home"),
+            &a_chosen_agent_with_a_persistent_home("claude"),
+            Path::new("/Users/dev/.tddy"),
         );
 
         // Then
@@ -1159,16 +1177,15 @@ mod tests {
         // Given / When
         let lines = agent_home_banner(
             CodebaseMode::Mounted,
-            AgentKind::Claude,
-            Path::new("/Users/dev/.tddy/sandbox-claude-home"),
-            Path::new("/Users/dev/.tddy/sandbox-cursor-home"),
+            &a_chosen_agent_with_a_persistent_home("claude"),
+            Path::new("/Users/dev/.tddy"),
         );
 
         // Then
         assert!(
             lines
                 .iter()
-                .any(|line| line.contains("/Users/dev/.tddy/sandbox-claude-home")),
+                .any(|line| line.contains("/Users/dev/.tddy/homes/claude")),
             "a mounted session's agent runs from the jail home and the banner must say so; \
              lines were: {lines:?}"
         );
@@ -1316,7 +1333,7 @@ mod tests {
             repo: PathBuf::from("/Users/dev/code/my-app"),
             session_id: "019d1e2f-3456-7890-abcd-ef0123456789".to_string(),
             session_dir: PathBuf::from("/Users/dev/.tddy/sessions/019d1e2f"),
-            claude_binary: None,
+            agent: a_chosen_agent("claude"),
             tddy_tools_path: None,
             sandbox_runner_path: None,
             codebase_home_base: codebase_home_base.to_path_buf(),

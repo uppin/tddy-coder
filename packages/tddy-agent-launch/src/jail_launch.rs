@@ -219,6 +219,8 @@ impl LaunchSessions {
             host_home: None,
             cgroup: self.config.sandbox_cgroup_config(),
             route: session.route,
+            context_dir: Some(session.dirs.context_dir.clone()),
+            stdio: true,
         };
         let egress_dir = &session.dirs.egress_dir;
         let plan = build_tool_jail_plan(spawn, grants).map_err(sandbox_error_to_status)?;

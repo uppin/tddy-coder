@@ -127,6 +127,10 @@ impl LaunchSessions {
                 host_home: None,
                 cgroup: self.config.sandbox_cgroup_config(),
                 route,
+                // TODO(harness-clis): orphaned with the rest of this relaunch path, which names the
+                // runner's flags; it reaches neither field (see the removal todo above).
+                context_dir: None,
+                stdio: true,
             },
         )
         .map_err(|e| {

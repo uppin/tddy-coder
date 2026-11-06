@@ -71,6 +71,16 @@ pub fn cgroup_limits_from(limits: &tddy_sandbox::ResourceLimits) -> CgroupLimits
     }
 }
 
+/// Whether the confined process speaks RPC over its stdio: [`SandboxPlan::stdio`]
+/// (`#agent-tools 10/12`), whatever its argv says — mirroring `tddy-sandbox-darwin`.
+pub(crate) fn stdio_mode_of(plan: &SandboxPlan) -> bool {
+    plan.stdio
+}
+
+// TODO(jail-agnostic): `plan.context_dir` is carried but adds no read-only bind here, unlike the
+// Seatbelt backend's carve-out — a new capability, not added in #799
+// (docs/dev/todo/2026-11-03-cgroups-has-no-context-dir-carve-out.md).
+
 /// Spawn a sandboxed process from an explicit [`SandboxPlan`]: RO bind-mount the declared reads,
 /// materialize copies/symlinks/secrets, apply env + cgroup limits from the plan.
 ///
@@ -118,7 +128,7 @@ pub fn spawn_plan(plan: SandboxPlan) -> Result<SandboxHandle, SandboxError> {
     // `--stdio` dedicates the sandboxed process's stdin/stdout to RPC framing (see
     // `tddy_core::stdio_safety`, `tddy-stdio`) instead of the `--grpc-uds`/`--grpc-listen-port`
     // transport — pipe both back to the caller, mirroring `tddy-sandbox-darwin::spawn_plan`.
-    let stdio_mode = plan.spec.command.iter().any(|arg| arg == "--stdio");
+    let stdio_mode = stdio_mode_of(&plan);
 
     let mut cmd = Command::new(&plan.spec.command[0]);
     cmd.args(&plan.spec.command[1..]);
@@ -777,7 +787,40 @@ mod tests {
             limits,
             stdin: None,
             cgroup: Default::default(),
+            context_dir: None,
+            stdio: false,
         }
+    }
+
+    #[test]
+    fn a_plan_marked_stdio_is_spawned_in_stdio_mode_without_the_flag_in_its_argv() {
+        // Given — a plan that says stdio, running a command that never spells `--stdio`
+        let mut plan = a_plan(vec![], ResourceLimits::default());
+        plan.spec.command = vec!["/bin/cat".into()];
+        plan.stdio = true;
+
+        // When
+        let stdio_mode = stdio_mode_of(&plan);
+
+        // Then
+        assert!(stdio_mode, "the plan's `stdio` decides, not the argv");
+    }
+
+    #[test]
+    fn a_plan_not_marked_stdio_is_not_spawned_in_stdio_mode_whatever_its_argv_says() {
+        // Given — `--stdio` in the argv, but the plan does not ask for it
+        let mut plan = a_plan(vec![], ResourceLimits::default());
+        plan.spec.command = vec!["/bin/cat".into(), "--stdio".into()];
+        plan.stdio = false;
+
+        // When
+        let stdio_mode = stdio_mode_of(&plan);
+
+        // Then
+        assert!(
+            !stdio_mode,
+            "an argv token must no longer switch the transport"
+        );
     }
 
     #[test]

@@ -6,7 +6,7 @@
 //! test app (curl) → in-jail HTTPS_PROXY shim → SessionChannel (AF_UNIX) → host relay → TLS server
 //! ```
 //!
-//! The runner is driven in-process via `run_sandbox_runner` (no Seatbelt / no cgroups), the host
+//! The runner is driven in-process via `run_exec_plan` (no Seatbelt / no cgroups), the host
 //! side uses the shared, reusable `run_host_relay`, and the upstream is a real TLS server with a
 //! self-signed certificate. The host relay only moves bytes — the TLS handshake is end-to-end
 //! between curl and the server — so a `TLS_ECHO` body proving the round-trip can only appear if the
@@ -18,9 +18,10 @@ use std::time::Duration;
 
 use bytes::Bytes;
 use tddy_sandbox_runner::{
-    connect_sandbox_client_uds, run_host_relay, run_sandbox_runner, ExecuteToolResponse,
+    connect_sandbox_client_uds, run_exec_plan, run_host_relay, ExecuteToolResponse,
     HostRelayConfig, HostToolHandler, SandboxRunnerArgs,
 };
+use tddy_testing_commons::sandbox_fixtures::write_exec_plan_with_shim;
 use tddy_testing_commons::CONNECT_PROBE_TUNNEL_OK;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpListener;
@@ -189,31 +190,23 @@ async fn routes_https_egress_from_jail_through_the_host_relay_to_a_tls_server() 
             grpc_socket: Some(uds_path.clone()),
             tool_ipc_socket: tmp.path().join("tool_ipc.sock"),
             tddy_tools_path: Some(tddy_tools_path()),
-            claude_binary: claude.to_string_lossy().to_string(),
-            agent_kind: "claude".to_string(),
-            agent_binary: None,
             model: TEST_MODEL.to_string(),
             ready_marker: ready_marker.clone(),
-            permission_mode: "auto".to_string(),
-            dangerously_skip_permissions: false,
-            resume: false,
-            append_system_prompt_file: None,
             grpc_listen_port: None,
             egress_shim_port: None,
             egress_policy: "any".to_string(),
             egress_tool: vec![],
             grpc_uds: Some(uds_path.clone()),
             pty_command: vec![],
-            claude_arg: vec![],
-            agent_arg: vec![],
-            mcp_log_level: None,
             stdio: false,
             initial_cols: 80,
             initial_rows: 24,
         };
 
+        // The agent is the probe script, run from an exec plan with the egress shim on.
+        let plan = write_exec_plan_with_shim(tmp.path(), &[&claude.to_string_lossy()], true);
         let runner_task = tokio::spawn(async move {
-            let _ = run_sandbox_runner(args).await;
+            let _ = run_exec_plan(args, plan).await;
         });
         wait_for_ready(&ready_marker, Duration::from_secs(15)).await;
 

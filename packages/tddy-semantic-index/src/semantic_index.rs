@@ -8,7 +8,7 @@
 //!    `SemanticSearch` tool resolves against the per-session index.
 //!
 //! Tool availability itself is gated by
-//! [`tddy_sandbox_recipes::effective_replaced_tools`] (SemanticSearch joins the "replaced" set when
+//! `tddy_coding_agent_specs::claude_tools::effective_replaced_tools` (SemanticSearch joins the "replaced" set when
 //! indexing is off). See docs/ft/coder/semantic-index.md.
 
 use std::path::{Path, PathBuf};

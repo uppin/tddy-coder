@@ -351,7 +351,7 @@ fn seed_once(host_file: &Path, dest: &Path) -> std::io::Result<()> {
 /// link followable. A host path that does not exist mirrors nothing.
 ///
 /// A home an older launch seeded holds a real directory of links where a mirror of a directory goes
-/// (`.local/share/claude/versions`). One that holds nothing but links is that older mirror, and is
+/// (a tool's versioned install directory). One that holds nothing but links is that older mirror, and is
 /// replaced; any other directory is the tool's own, is left alone and is not mirrored over.
 fn mirror(host_path: &Path, link: &Path, grants: &mut FileGrants) -> std::io::Result<()> {
     let Ok(target) = std::fs::canonicalize(host_path) else {

@@ -9,6 +9,7 @@
 
 use std::path::PathBuf;
 use std::time::Duration;
+use tddy_testing_commons::sandbox_fixtures::write_exec_plan;
 
 use async_trait::async_trait;
 use prost::Message;
@@ -125,12 +126,10 @@ async fn round_trips_an_echo_over_stdio_through_a_real_seatbelt_jail() {
         tools.to_string_lossy().to_string(),
         "--ready-marker".into(),
         ready_marker.to_string_lossy().to_string(),
-        "--claude-binary".into(),
-        "/bin/sleep".into(),
-        "--model".into(),
-        "claude-opus-4-8".into(),
-        "--permission-mode".into(),
-        "auto".into(),
+        "--exec-plan".into(),
+        write_exec_plan(&project, &["/bin/sleep", "--model", "claude-opus-4-8"])
+            .to_string_lossy()
+            .to_string(),
         "--stdio".into(),
     ];
 
@@ -163,6 +162,8 @@ async fn round_trips_an_echo_over_stdio_through_a_real_seatbelt_jail() {
             host_home: None,
             cgroup: Default::default(),
             route: None,
+            context_dir: Some(context.clone()),
+            stdio: true,
         })
         .expect("spawn sandbox-runner"),
     );
@@ -277,12 +278,10 @@ async fn dispatches_a_tool_call_through_run_host_relay_over_stdio_through_a_real
         tools.to_string_lossy().to_string(),
         "--ready-marker".into(),
         ready_marker.to_string_lossy().to_string(),
-        "--claude-binary".into(),
-        "/bin/sleep".into(),
-        "--model".into(),
-        "claude-opus-4-8".into(),
-        "--permission-mode".into(),
-        "auto".into(),
+        "--exec-plan".into(),
+        write_exec_plan(&project, &["/bin/sleep", "--model", "claude-opus-4-8"])
+            .to_string_lossy()
+            .to_string(),
         "--stdio".into(),
     ];
 
@@ -315,6 +314,8 @@ async fn dispatches_a_tool_call_through_run_host_relay_over_stdio_through_a_real
             host_home: None,
             cgroup: Default::default(),
             route: None,
+            context_dir: Some(context.clone()),
+            stdio: true,
         })
         .expect("spawn sandbox-runner"),
     );

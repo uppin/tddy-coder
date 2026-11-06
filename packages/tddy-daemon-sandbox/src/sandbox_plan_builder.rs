@@ -130,11 +130,6 @@ pub fn build_action_sandbox_plan(
         &ipc_stub,
         &sandbox.output_dir,
     );
-    if recipe == SandboxRecipe::ClaudeCli {
-        env.extend(tddy_sandbox_recipes::claude_runner_env_overlay(
-            &scratch_tmp,
-        ));
-    }
     env.extend(extra_env);
 
     build_process_plan(ProcessPlanRequest {
@@ -245,6 +240,8 @@ pub fn build_action_runner_plan(
         host_home: std::env::var_os("HOME").map(PathBuf::from),
         // The jail runs an action's command and hosts no agent, so it takes no provider route.
         route: None,
+        context_dir: Some(context_dir.clone()),
+        stdio: false,
     })?;
 
     Ok(ActionRunnerArtifacts {

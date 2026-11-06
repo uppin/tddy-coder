@@ -2,11 +2,11 @@
 
 **Product Area**: Coder
 **Status**: Implemented
-**Updated**: 2026-11-02
+**Updated**: 2026-11-03
 
 > **`tddy-sandbox`** is generic (`SandboxBuilder`, `exec_reads`, `scratch_runner_env`, `cwd`,
-> `extra_read_paths`). Product recipes (Claude CLI reads/copies/policy, generic exec, MCP argv) live
-> in **`tddy-sandbox-recipes`**. **`tddy-daemon`** `sandbox_plan_builder` assembles plans from
+> `extra_read_paths`). The generic recipe shapes (`Generic`, `Shell`, `RunnerPty`) and the lowering of
+> tool definitions (`tool_grants`) live in **`tddy-sandbox-recipes`**, which names no coding agent. **`tddy-daemon`** `sandbox_plan_builder` assembles plans from
 > `ActionSpec` sandbox metadata; sandbox crates do not import `tddy-actions`.
 
 ## Summary
@@ -67,11 +67,12 @@ needs" set lives in one reviewable recipe; and a non-leaking secret channel deli
    cgroup limits).
 7. **Explicit symlinks.** Symlinks created inside the jail are declared as `SymlinkSpec` and
    materialized by each backend.
-8. **Single Claude recipe.** `claude_required_reads()`, `claude_required_copies(host_home)`, and
-   `claude_policy()` in `tddy-sandbox-recipes` are the one reviewable source of what a recipe-built
-   Claude jail needs; `tddy-sandbox-app` and split sessions call them via
-   `tddy-sandbox-recipes::claude_cli`. The daemon's sandboxed `claude-cli` session is built from the
-   `claude` tool definition instead ([§ Jail sections](#jail-sections)).
+8. **Every agent jail is a tool plan.** No recipe knows a coding agent. A jailed agent's reads,
+   copies, home, secrets, policy and egress are lowered from its tool definition, and its argv is
+   rendered from its spec ([§ Jail sections](#jail-sections)). This holds for the daemon's sessions,
+   for `tddy-sandbox-app --agent <id>` and for split sessions. The plan states the jail's guidance
+   directory and transport itself (`SandboxPlan.context_dir`, `SandboxPlan.stdio`). No backend infers
+   them from the runner's argv.
 9. **Action sandbox plans.** `tddy-daemon` `sandbox_plan_builder` maps `ActionSpec` + `SandboxRequest`
    to process or runner-PTY plans: `SandboxRecipe::RunnerPty` for in-jail PTY (`--pty-command` on
    `tddy-sandbox-runner`); `generic_exec_policy` for confined Rust binaries; `cwd` and
@@ -295,6 +296,8 @@ both casings (`NO_PROXY` bypassing loopback) when the plan asks for the shim and
 runner learns nothing about which tool it is running; the jail ends when that one process exits.
 `--exec-plan` and `--workspace-tools` are exclusive.
 
-**First client:** the sandboxed `claude-cli` session —
-[Claude CLI session § The jail](../daemon/claude-cli-session.md#the-jail-from-the-claude-tool-definition).
-The other jailed CLIs still run from their recipes.
+**Clients:** every jailed coding agent. That covers the daemon's sandboxed sessions
+([Claude CLI session § The jail](../daemon/claude-cli-session.md#the-jail-from-the-claude-tool-definition),
+[Cursor CLI session](../daemon/cursor-cli-session.md)), `tddy-sandbox-app --agent <id>`, and split
+sessions. The runner has no agent mode left to fall back to: started with neither `--exec-plan`, nor
+`--pty-command`, nor `--workspace-tools`, it refuses to boot (`nothing to run`).

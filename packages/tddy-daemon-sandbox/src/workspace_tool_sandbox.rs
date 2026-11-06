@@ -261,6 +261,8 @@ pub fn build_workspace_tool_plan(
             host_home: None,
             // The jail hosts the session's tools and no agent, so it takes no provider route.
             route: None,
+            context_dir: Some(layout.context_dir.clone()),
+            stdio: true,
         })?;
     // The policy and the OAuth callback come from the tools, not the recipe: a plan built from
     // tools declares its own network.

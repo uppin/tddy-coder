@@ -50,6 +50,11 @@ tddy-sandbox-cgroups = { path = "../tddy-sandbox-cgroups" }
 libc = "0.2"
 
 [dev-dependencies]
+# `write_exec_plan`: the process a runner test puts in the PTY; `eventually` — the recording tests
+# wait on a file the periodic recorder writes.
+tddy-testing-commons = { path = "../tddy-testing-commons" }
+# `workspace_exec_tool_names`, pinned to the tool catalog by `tool_catalog_sync`.
+tddy-coding-agent-specs = { path = "../tddy-coding-agent-specs" }
 pretty_assertions = { workspace = true }
 # The reference emulator a jailed terminal's snapshot is rendered in.
 vt100 = "0.15"
@@ -57,8 +62,6 @@ prost = "0.13"
 # `task_service_peer_cancel.rs` scripts the peer daemon behind a `CommonRoom`.
 tddy-daemon-extensions = { path = "../tddy-daemon-extensions" }
 tempfile = "3"
-# `eventually` — the recording tests wait on a file the periodic recorder writes.
-tddy-testing-commons = { path = "../tddy-testing-commons" }
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "time", "process", "io-util"] }
 # The exec-tool server the jailed runner relays to, mounted directly by
 # `sandbox_stdio_seatbelt_acceptance.rs`.

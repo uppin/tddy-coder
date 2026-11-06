@@ -18,7 +18,6 @@ tddy-core = { path = "../tddy-core" }
 tddy-discovery = { path = "../tddy-discovery" }
 tddy-rpc = { path = "../tddy-rpc" }
 tddy-sandbox = { path = "../tddy-sandbox" }
-tddy-sandbox-recipes = { path = "../tddy-sandbox-recipes" }
 tddy-service = { path = "../tddy-service" }
 tddy-stdio = { path = "../tddy-stdio" }
 # The in-jail half of a sandboxed `workspace` session's tool call: `--workspace-tools` runs the
@@ -46,4 +45,5 @@ reqwest = { version = "0.12", default-features = false, features = ["rustls-tls"
 futures-util = "0.3"
 
 [dev-dependencies]
+pretty_assertions = { workspace = true }
 tempfile = "3"

@@ -10,14 +10,14 @@ use std::collections::BTreeMap;
 use std::path::Path;
 
 use tddy_actions::tool::{TemplateParams, ToolDef};
+use tddy_coding_agent_specs::claude_tools::{
+    build_claude_allowlist, build_claude_disallowlist, effective_replaced_tools,
+    PERMISSION_PROMPT_TOOL,
+};
 use tddy_coding_agent_specs::slots::{self, McpServerCommand, SlotInputs};
 use tddy_coding_agent_specs::{CodingAgentSpec, McpSlot};
 use tddy_core::provider_route::HarnessRoute;
 use tddy_rpc::Status;
-use tddy_sandbox_recipes::{
-    build_claude_allowlist, build_claude_disallowlist, effective_replaced_tools,
-    PERMISSION_PROMPT_TOOL,
-};
 use tddy_session_agents::roster_replacement::roster_replacement_pairs;
 
 use crate::jail_launch::{jail_home, mcp_server_env, JailSpec, JailedSession};

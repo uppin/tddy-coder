@@ -30,6 +30,9 @@ futures-util = "0.3"
 bytes = "1"
 uuid = { version = "1", features = ["v7"] }
 tddy-core = { path = "../tddy-core" }
+# `--agent <spec id>` (`#agent-tools 10/12`): the registry and the spec renderers the daemon uses.
+tddy-actions = { path = "../tddy-actions" }
+tddy-coding-agent-specs = { path = "../tddy-coding-agent-specs" }
 # The sandbox subsystem only. `tddy-daemon` itself left this manifest with `#unbundle`
 # node 3: the Linux path talks to a running daemon over gRPC and never linked it, and the
 # macOS path needed `sandbox_session`, which is now its own crate.
@@ -38,7 +41,6 @@ tddy-discovery = { path = "../tddy-discovery" }
 tddy-lsp = { path = "../tddy-lsp" }
 tddy-lsp-executor = { path = "../tddy-lsp-executor" }
 tddy-sandbox = { path = "../tddy-sandbox" }
-tddy-sandbox-recipes = { path = "../tddy-sandbox-recipes" }
 tddy-sandbox-runner = { path = "../tddy-sandbox-runner" }
 tddy-service = { path = "../tddy-service" }
 tddy-task = { path = "../tddy-task" }
@@ -63,8 +65,8 @@ prost = "0.13"
 libc = "0.2"
 
 [dev-dependencies]
+pretty_assertions = { workspace = true }
 tempfile = "3"
-serial_test = "3"
 # The acceptance suite watches a real jail come up and go away; `wait::eventually` is the
 # workspace's one polling helper, and its failures name the last state observed.
 tddy-testing-commons = { path = "../tddy-testing-commons" }

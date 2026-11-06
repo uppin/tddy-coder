@@ -26,7 +26,7 @@ tddy-host-service = { path = "../tddy-host-service" }
 tddy-projects = { path = "../tddy-projects" }
 tddy-rpc = { path = "../tddy-rpc" }
 tddy-sandbox = { path = "../tddy-sandbox" }
-tddy-sandbox-recipes = { path = "../tddy-sandbox-recipes" }
+tddy-coding-agent-specs = { path = "../tddy-coding-agent-specs" }
 tddy-semantic-index = { path = "../tddy-semantic-index" }
 tddy-service = { path = "../tddy-service" }
 tddy-session-activity = { path = "../tddy-session-activity" }

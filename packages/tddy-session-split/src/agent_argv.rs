@@ -1,8 +1,10 @@
 // Served by the agent's own `tddy-tools --mcp` child, the same one that carries the exec tools to
 // the codebase daemon.
-use tddy_sandbox_recipes::PERMISSION_PROMPT_TOOL;
-
-use crate::split_session::NATIVE_FILESYSTEM_TOOLS;
+use tddy_coding_agent_specs::claude_tools::{
+    build_claude_allowlist, build_claude_disallowlist, PERMISSION_PROMPT_TOOL,
+};
+use tddy_coding_agent_specs::slots::{self, McpServerCommand, SlotInputs};
+use tddy_coding_agent_specs::{embedded_spec, CodingAgentSpec, McpSlot, HOST_AGENT_VARIANT};
 
 use std::collections::BTreeMap;
 
@@ -121,12 +123,22 @@ pub fn split_claude_extra_args(
     tddy_tools_path: &str,
     withdrawals: &[(String, Vec<String>)],
 ) -> Result<Vec<String>, Status> {
-    let mcp_args = tddy_tools_only_mcp_args(session_dir, Path::new(tddy_tools_path))?;
+    let spec = split_agent_spec()?;
+    // The variant carries the flags that keep the checkout's own configuration off this host
+    // (`--strict-mcp-config`, `--setting-sources user`) and withdraws every native filesystem and
+    // shell tool, so the slots below add only what the session's roster changes.
+    let mut args = spec
+        .variant_args(HOST_AGENT_VARIANT)
+        .map_err(|e| Status::internal(e.to_string()))?;
+    let natives = spec
+        .agent
+        .variants
+        .get(HOST_AGENT_VARIANT)
+        .map(|variant| variant.withdraw_native.as_slice())
+        .unwrap_or_default();
 
     let withdrawn = withdrawn_tools(withdrawals);
     let withdrawn_refs: Vec<&str> = withdrawn.iter().map(String::as_str).collect();
-
-    let mut args = Vec::new();
     // Every exec tool the roster leaves alone is pre-approved: they are all reachable, they simply
     // execute on the codebase daemon. The subagent tools are pre-approved whether or not this
     // session has agents *yet* — unlike the jail, which reads a seed fixed at spawn, a split
@@ -135,35 +147,71 @@ pub fn split_claude_extra_args(
     // pre-approving them on a session with no agents: `tddy-tools` advertises them only while the
     // roster has someone to address, so the flag names a tool the model is never offered.
     let subagent_tools_are_pre_approved = true;
-    for tool in tddy_sandbox_recipes::build_claude_allowlist(
-        subagent_tools_are_pre_approved,
-        &withdrawn_refs,
-    ) {
-        args.push("--allowedTools".to_string());
-        args.push(tool);
-    }
     // Dropping a tool from `--allowedTools` only un-pre-approves it. A split session's *native*
-    // routes are already hard-disabled below, but a withdrawn tool's proxied `mcp__tddy-tools__`
-    // form is the route this agent actually had, and it stays callable through the permission
-    // prompt until `--disallowedTools` names it (`PermissionServer::decide` allows every
-    // `mcp__tddy-tools__*` call it is asked about).
-    let mut disallowed: Vec<String> = NATIVE_FILESYSTEM_TOOLS
-        .iter()
-        .map(|tool| (*tool).to_string())
+    // routes are already hard-disabled by the variant, but a withdrawn tool's proxied
+    // `mcp__tddy-tools__` form is the route this agent actually had, and it stays callable through
+    // the permission prompt until `--disallowedTools` names it (`PermissionServer::decide` allows
+    // every `mcp__tddy-tools__*` call it is asked about).
+    let denied_tools: Vec<String> = build_claude_disallowlist(&withdrawn_refs)
+        .into_iter()
+        .filter(|tool| !natives.contains(tool))
         .collect();
-    for tool in tddy_sandbox_recipes::build_claude_disallowlist(&withdrawn_refs) {
-        if !disallowed.contains(&tool) {
-            disallowed.push(tool);
-        }
-    }
-    for tool in disallowed {
-        args.push("--disallowedTools".to_string());
-        args.push(tool);
-    }
-    args.push("--permission-prompt-tool".to_string());
-    args.push(PERMISSION_PROMPT_TOOL.to_string());
-    args.extend(mcp_args);
+    let mut rendered = slots::render(
+        &without_strict_mcp_flag(&spec),
+        &SlotInputs {
+            workdir: session_dir.to_path_buf(),
+            scratch_dir: session_dir.to_path_buf(),
+            mcp_server: Some(tddy_tools_server(session_dir, Path::new(tddy_tools_path))),
+            allowed_tools: build_claude_allowlist(subagent_tools_are_pre_approved, &withdrawn_refs),
+            denied_tools,
+            permission_prompt_tool: Some(PERMISSION_PROMPT_TOOL.to_string()),
+            preamble: None,
+            append_system_prompt_file: None,
+            hooks: None,
+            home: None,
+        },
+    )
+    .map_err(|e| Status::internal(e.to_string()))?;
+    write_registrations(&mut rendered.files)?;
+    args.extend(rendered.argv_extra);
     Ok(args)
+}
+
+/// The agent a split session runs on this host: `claude.yaml`, as embedded.
+fn split_agent_spec() -> Result<CodingAgentSpec, Status> {
+    embedded_spec("claude").map_err(|e| Status::internal(format!("the host agent's spec: {e}")))
+}
+
+/// `spec` without the MCP slot's strict flag, for a launch whose variant already passes it.
+fn without_strict_mcp_flag(spec: &CodingAgentSpec) -> CodingAgentSpec {
+    let mut spec = spec.clone();
+    if let McpSlot::File { strict_flag, .. } = &mut spec.agent.mcp {
+        *strict_flag = None;
+    }
+    spec
+}
+
+/// `tddy-tools --mcp` as `session_dir`'s session registers it.
+fn tddy_tools_server(session_dir: &Path, tddy_tools_path: &Path) -> McpServerCommand {
+    McpServerCommand {
+        name: "tddy-tools".to_string(),
+        command: tddy_tools_path.to_path_buf(),
+        args: vec!["--mcp".to_string()],
+        env: tddy_tools_mcp_env(session_dir),
+    }
+}
+
+/// Write each of `files` — the registration the slots rendered — at its path.
+fn write_registrations(files: &mut Vec<(PathBuf, Vec<u8>)>) -> Result<(), Status> {
+    for (path, contents) in files.drain(..) {
+        if let Some(dir) = path.parent() {
+            std::fs::create_dir_all(dir)
+                .map_err(|e| Status::internal(format!("failed to write MCP config: {e}")))?;
+        }
+        tddy_core::atomic_file::write_atomic(&path, contents)
+            .map_err(|e| Status::internal(format!("failed to write MCP config: {e}")))?;
+    }
+    Ok(())
 }
 
 /// The `env` block of the `tddy-tools --mcp` server a session under `session_dir` registers: its log
@@ -197,15 +245,15 @@ pub fn tddy_tools_only_mcp_args(
     session_dir: &Path,
     tddy_tools_path: &Path,
 ) -> Result<Vec<String>, Status> {
-    let mcp_config = tddy_sandbox_recipes::write_claude_mcp_config(
+    let spec = split_agent_spec()?;
+    let (file, argv) = slots::mcp::render_mcp(
+        &spec.agent.mcp,
+        &tddy_tools_server(session_dir, tddy_tools_path),
         session_dir,
-        tddy_tools_path,
-        &tddy_tools_mcp_env(session_dir),
+        session_dir,
+        None,
     )
-    .map_err(|e| Status::internal(format!("failed to write MCP config: {e}")))?;
-    Ok(vec![
-        "--mcp-config".to_string(),
-        mcp_config.to_string_lossy().into_owned(),
-        "--strict-mcp-config".to_string(),
-    ])
+    .map_err(|e| Status::internal(e.to_string()))?;
+    write_registrations(&mut file.into_iter().collect())?;
+    Ok(argv)
 }

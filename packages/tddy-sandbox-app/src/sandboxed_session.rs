@@ -383,7 +383,7 @@ pub async fn provision_with_interrupt(
         sandbox_runner_path,
         session_id: params.session_id.clone(),
         repo: repo.clone(),
-        context_dir,
+        context_dir: context_dir.clone(),
         tool_ipc_socket: jail_tool_ipc_socket.clone(),
         tddy_tools_path,
         ready_marker: ready_marker.clone(),
@@ -427,6 +427,9 @@ pub async fn provision_with_interrupt(
         // the delegated base at runtime (ignored by the macOS backend).
         cgroup: tddy_sandbox::CgroupConfig::default(),
         route: None,
+        context_dir: Some(context_dir.clone()),
+        // Loopback gRPC, not stdio: the host agent owns the app's own stdio.
+        stdio: false,
     })
     .map_err(|e| anyhow::anyhow!("build the jail's sandbox plan: {e}"))?;
 

@@ -74,7 +74,7 @@ pretty_assertions = { workspace = true }
 # `tddy-code-restructuring`; test-only.
 tddy-lsp = { path = "../tddy-lsp" }
 tddy-sandbox = { path = "../tddy-sandbox" }
-tddy-sandbox-recipes = { path = "../tddy-sandbox-recipes" }
+tddy-coding-agent-specs = { path = "../tddy-coding-agent-specs" }
 tddy-session-tool-client = { path = "../tddy-session-tool-client" }
 # The exec-tool suites that moved here with `ExecToolRpcHandler` — the workspace-jail and seatbelt
 # suites among them, and the session-room test that calls a tool through a room — bring what they
