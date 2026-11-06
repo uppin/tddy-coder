@@ -30,11 +30,11 @@ beside them are re-read from the managed codebase while the session runs, and an
 under those paths is replaced. Keep your work in the codebase itself, through the tools above.
 "#;
 
-/// The files an agent reads for guidance are its spec's `instructions.files`, passed in by
-/// every caller (`guidance_files`): the preamble leads each of them, and each is written even
-/// when the target repo has none — a repo with no guidance file would otherwise leave the
-/// agent with nothing telling it where its codebase is. One list, read from the agent's YAML
-/// spec, so a new agent's guidance files need no second spelling anywhere.
+// The files an agent reads for guidance are its spec's `instructions.files`, passed in by
+// every caller (`guidance_files`): the preamble leads each of them, and each is written even
+// when the target repo has none — a repo with no guidance file would otherwise leave the
+// agent with nothing telling it where its codebase is. One list, read from the agent's YAML
+// spec, so a new agent's guidance files need no second spelling anywhere.
 
 /// Carried at the head of the preamble while the last re-sync is known to have failed.
 ///
