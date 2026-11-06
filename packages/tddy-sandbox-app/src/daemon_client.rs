@@ -38,6 +38,9 @@ pub struct DaemonClientParams {
     pub model: String,
     pub permission_mode: String,
     pub managed_codebase: bool,
+    /// The session type that starts the app's agent (its spec id's `-cli` spelling), resolved
+    /// by the caller from the agent it chose.
+    pub session_type: String,
     pub claude_args: Vec<String>,
     /// Names of specialized subagents to wire into the session. The daemon resolves each name
     /// against its own `<tddyhome>/agents` (+ builtins); an unknown name is a daemon-side request
@@ -78,7 +81,7 @@ pub async fn run(params: DaemonClientParams) -> Result<()> {
         codebase_mode,
         &params.claude_args,
         &params.specialized_agents,
-        &format!("{}-cli", params.agent.spec.id),
+        &params.session_type,
     );
 
     let session_id = client

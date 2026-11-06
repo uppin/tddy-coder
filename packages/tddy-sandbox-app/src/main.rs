@@ -410,6 +410,9 @@ async fn run_linux(args: Args, cfg: config::SandboxAppConfig) -> Result<()> {
         model,
         permission_mode,
         managed_codebase,
+        // The refusal above leaves only the default agent, whose session type is its id's
+        // `-cli` spelling.
+        session_type: format!("{}-cli", args.agent),
         claude_args,
         specialized_agents,
     })

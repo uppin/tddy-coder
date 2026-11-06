@@ -207,9 +207,7 @@ impl CatalogRpcHandler {
             .agents()
             .get(agent)
             .or_else(|| agents.agents().for_session_type(agent))?;
-        if spec.agent.models.list_command.is_none() {
-            return None;
-        }
+        spec.agent.models.list_command.as_ref()?;
         let binary = agents.resolve(&spec.id, None).ok()?.tool.binary;
         binary.is_absolute().then_some(binary)
     }
