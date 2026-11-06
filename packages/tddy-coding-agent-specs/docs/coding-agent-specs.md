@@ -48,6 +48,42 @@ This crate owns that section's vocabulary. `tddy-actions` stays agent-agnostic.
 | `spec.rs` answer wait (`#agent-tools 12/19`) | `coding_agent.answer_wait_secs: Option<u64>`, read by `CodingAgentSpec::answer_wait_secs()` (`DEFAULT_ANSWER_WAIT_SECS` = 120 when absent): how long an orchestrated session's permission hook waits for its orchestrator's answer. Since `#agent-tools 19/19` it is the only source: the launch writes it into the hooks file (`timeout = wait + 10`) and records it beside the session, and `AwaitQuestionAnswer` holds for the recorded value |
 | `lib.rs` fields (`#agent-tools 8/12`) | on `CodingAgentSection`: `route: Option<RouteSlot { required_in_jail, config_env, key_env, files_dir }>`, `models.{list_command, adapter}`, `resume: Option<ResumeSlot { adapter }>`, `placements: Vec<Placement>` (`Placement::anywhere()` by default; `CodingAgentSpec::require_placement`); `McpSlot::Unsupported`; the `unsupported` hooks adapter (`UnsupportedHooks`, `SlotError::HooksUnsupported`); a CLI session type resolves to its spec through `CodingAgentRegistry::for_session_type` |
 
+## The only home of agent metadata (the sweep, `#agent-tools` 20/28)
+
+Since the sweep (PR #828), a spec is the **only** place an agent's metadata lives. The legacy
+Rust descriptor table (`CliHarness`, `claude_argv`, the curated-model and context-glob tables,
+the bespoke ACP backends) is deleted; nothing in production names an agent's binary, argv,
+models or capabilities outside `specs/*.yaml`. Protocol adapters (stream parsers, hook-file
+writers) stay as Rust, selected by the name a spec gives them; they own no metadata.
+
+| Metadata | Spec home |
+|---|---|
+| session type, label/product | `id` (`<id>-cli` for a PTY agent), `coding_agent.product` |
+| binary, env override, route config env | tool `binary`, `coding_agent.route.config_env` |
+| CLI argv (PTY + headless) | `run.argv`, `coding_agent.headless.argv` |
+| models (curated / listed) | `coding_agent.models` (`CuratedModel`: a bare id, or `{ id, label }`) |
+| context globs, instructions files | `coding_agent.context_globs`, `instructions.files` |
+| requires-model, placements, capabilities | `coding_agent.capabilities`, `placements` |
+| permission modes, transcript usage | `coding_agent.permission_modes`, `coding_agent.transcript_usage` |
+
+The argv templates double as the CLI-arg schema: `CodingAgentSpec::argv_params()` is the set of
+params a spec's `run.argv` binds, `binds_argv_param(param)` answers for one, `render_run_argv`
+renders a launch from bound values, and `model_listing_argv()` / `curated_models()` answer the
+model catalogue. `CodingAgentRegistry::builtin_cached()` is the process-wide builtin view for
+consumers that held only the old static table.
+
+**No package depends on this crate to learn about an agent.** Specs are injected as plain data
+by binary and composition-root modules — `AgentChoice` into `tddy-tool-engine`, a
+`default_models` map into `tddy-presenter`, `[AgentModels]` into `tddy-tools`, guidance files
+and globs as values into sandbox and session code. The only crate that depends on this one for
+agent metadata is `tddy-tools-cli`, a binary crate.
+
+The web bundle reads the same metadata off the wire, never from a table of its own: the serving
+daemon's `GET /api/config` (`ClientConfig.allowed_agents`) for its own selection, and
+`CatalogService.ListAgents` per target host. `AgentInfo` carries the spec-derived fields
+(`session_type`, `capabilities`, `run_params`, `permission_modes`, `default_model`,
+`placements`) beside `id` and `label`.
+
 ## Which transport a workflow turn takes
 
 `tddy-coder --agent <id>` builds a workflow backend for any agent in the registry

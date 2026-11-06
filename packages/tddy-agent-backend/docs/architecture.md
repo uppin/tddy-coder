@@ -18,7 +18,7 @@ not the other way round, so the edge runs one way, engine → backend.
 (`the_agent_backend_does_not_depend_on_the_workflow_engine`). `agent-client-protocol` and
 `tokio-util` are dependencies here, for the ACP backends.
 
-`tddy-core` re-exports this crate whole (`pub use tddy_agent_backend::*;`), so every `tddy_core::{backend, stream, token_accounting, claude_argv, claude_hooks, cursor_hooks, spawn_env, provider_route}::…` path consumers name resolves unchanged. New code should name `tddy_agent_backend` directly.
+`tddy-core` re-exports this crate whole (`pub use tddy_agent_backend::*;`), so every `tddy_core::{backend, stream, token_accounting, claude_hooks, cursor_hooks, spawn_env, provider_route}::…` path consumers name resolves unchanged. New code should name `tddy_agent_backend` directly.
 `backend::write_codex_thread_id_file` is `pub` because the workflow engine calls it across the
 crate boundary. It is not API.
 
@@ -30,7 +30,7 @@ crate boundary. It is not API.
   - **Working directory.** A turn runs in the request's `working_dir`; a request with none is refused, never run in the process's directory. The rendered files (an MCP registration, the temporary system prompt) and the session pointer are written through `TurnFiles` — those under the working directory git-excluded, so it must be a git checkout — and removed when the turn ends, however it ends.
   - **Process and deadline.** The program runs in a process group of its own (turn processes, below); stdout is read through the spec's stream adapter on a blocking thread and the exit judged by the adapter's `exit_ok`. A turn has a deadline — `DEFAULT_TURN_DEADLINE` (4 h) unless `with_turn_deadline` sets one: an overrun kills the group and fails `"<agent> turn did not end within its <deadline> deadline; its process group was killed"`. Dropping a turn's future kills its group and no other. A finished turn waits at most `STDERR_GRACE` (2 s) for its stderr to close.
   - **Result.** A failed turn is `"<agent> exited with code <n>: <failure_detail>"` (no `: …` when the adapter's detail is empty) — `BackendError::InvocationFailed` displays its message as it is. A response carries the child's stderr whenever it left any, one rule for every agent. Progress events go to the request's `progress_sink`, else the `with_progress` callback; with `agent_output` set, no sink and `TDDY_QUIET` unset, raw agent output goes to stderr for the plain CLI.
-  - **`name()`** is the spec id (`claude`, `cursor`, `codex`, `oz`, or a YAML-only agent's), which the workflow engine's Codex thread-id swap and the context-glob and model tables key on. **`list_models`** runs the spec's model listing (`models.list_command` rendered with the spec-resolved binary, read by its models adapter) under `MODEL_LISTING_DEADLINE` (30 s), with no `TDDY_*` variable; a binary that fails, overruns or lists nothing is an error. A spec with no listing answers from `curated_models_for_agent(name)`.
+  - **`name()`** is the spec id (`claude`, `cursor`, `codex`, `oz`, or a YAML-only agent's), which the workflow engine's Codex thread-id swap and the context-glob and model tables key on. **`list_models`** runs the spec's model listing (`models.list_command` rendered with the spec-resolved binary, read by its models adapter) under `MODEL_LISTING_DEADLINE` (30 s), with no `TDDY_*` variable; a binary that fails, overruns or lists nothing is an error. A spec with no listing answers from its `curated_models()`.
   - Tests: `tests/spec_headless_turn_deadline.rs` (a turn past its deadline has its whole group, grandchild included, killed; two concurrent turns cancel only their own), `tests/headless_protocol_unit.rs` (goal params, route-replaces-model, `render_env`, each adapter's `failure_detail` and transcript, turn files and the pointer), and `tddy-coder/tests/spec_headless_backend.rs` (the four built-ins and a YAML-only agent through their real specs against stub CLIs: argv, MCP files, session ids, error texts, the absent `TDDY_*` variables, the pointer).
 - **SpecBackend** (`backend/spec_backend.rs`, `#agent-tools 16/19`): the workflow backend `tddy-coder --agent <id>` runs for any registry agent, built by `tddy_coder::spec_backend_build::build_spec_backend`. `SpecBackend { Headless(SpecHeadlessBackend), Acp(SpecAcpBackend) }` delegates `invoke`, `name` (the spec id), `submit_channel`, `action_invoke_cache_eligible` and `list_models`; `transport()`, `with_provider_route(route) -> Result<Self, RouteRefusal>`. Nothing in it names an agent. **Transport rule** — `SpecTransport::chosen(agent, declares_headless, declares_acp, asked)`: a transport asked for that the spec declares is taken; nothing asked and both declared → `Headless`; one declared → that one; asked for one not declared → `SpecBackendRefusal::TransportNotDeclared`; neither declared (a PTY-only agent such as `muse`, `warp`) → `SpecBackendRefusal::NoTurnTransport`. Each refusal names the agent; none falls back to another agent.
   - **SpecAcpBackend**: an ACP agent's workflow backend from its spec's `coding_agent.acp` section — `new(RoutedAgent, AcpAgentCommand)`, `with_hooks(adapter, deps)` (the hooks adapter the spec names and the deps it reads), `with_session_open_deadline(Duration)` (default `SESSION_OPEN_DEADLINE`), `with_provider_route`. The driver starts on the first turn: route env, then the adapter's `prepare`; the adapter's open scope brackets each session open, one open at a time, and a hooks failure (a failed `codex login`) is the error reported in place of the session error it followed. The request's system prompt is merged into the prompt (`merge_codex_prompt`), never dropped. A session open past the deadline is refused as ``the ACP agent `<id>` did not open a session within <deadline>; it is refused rather than waited on``.
@@ -141,61 +141,21 @@ Tests: `tests/provider_route_file.rs` (round-trip, owner-only load, a group-read
 `tddy-integration-tests/tests/tool_session_provider_route.rs` drives each backend against stub binaries that record
 argv and env.
 
-## CLI harnesses (`cli_harness`)
+## CLI agents — no descriptor table
 
-The coding agents a session runs interactively in a terminal pane, one **descriptor** per session
-type, in the order the web's session-type toggle offers them: `claude-cli`, `cursor-cli`,
-`opencode-cli`, `muse-cli`, `warp-cli`. Code that needs a per-session-type answer asks the registry
-(`cli_harness(session_type) -> Option<&'static CliHarness>`, `cli_harnesses()`) instead of matching on
-the string, so a further harness is one more descriptor. A descriptor may live in a module of its own
-(`cli_harness_muse::MUSE_CLI`, `cli_harness_warp::WARP_CLI`, each a `const` so the registry array can hold its value). `tddy_core::cli_harness`
-re-exports the registry.
-
-| `CliHarness` field | `claude-cli` | `cursor-cli` | `opencode-cli` | `muse-cli` | `warp-cli` |
-|---|---|---|---|---|---|
-| `label` | Claude CLI | Cursor CLI | OpenCode | Muse Code | Warp |
-| `context_agent` | `claude` | `cursor` | `opencode` | `muse` | `warp` |
-| `default_binary` / `binary_env` | `claude` / `TDDY_CLAUDE_BINARY` | `agent` / `TDDY_CURSOR_AGENT` | `opencode` / `TDDY_OPENCODE_CLI` | `muse` / `TDDY_MUSE_CLI` | `warp` / `TDDY_WARP_CLI` |
-| `route_config_env` | — | — | `OPENCODE_CONFIG` | — | — |
-| `models` | `Curated(claude_cli_models)` | `Curated(cursor_cli_models)` | `ListedByBinary(["models"])` | `Curated(muse_cli_models)`: `muse-spark-1.3` (default), `muse-wonder-1.0` | `Curated(warp_cli_models)`: empty, no default |
-
-`argv: fn(&CliLaunch) -> Vec<String>` builds the argument list, binary first, from a `CliLaunch`
-(`binary`, `model`, `session_id`, `conversation_id`, `initial_prompt`, `permission_mode`,
-`dangerously_skip_permissions`, `resume`). Claude's goes through `claude_argv::build_claude_base_argv`
-plus a non-blank positional prompt; Cursor's is `[--resume <chat>] [--model <m>] [<prompt>]`;
-OpenCode's is `[--model <m>] [--prompt <p>]` on a start and `--continue` alone on a resume; Muse
-Code's is `[--model <m>] [<prompt>]` on a start (a blank prompt is none) and `--continue` alone on a
-resume. Warp's is the binary alone on a start, whatever model and prompt are set, and
-`--resume <conversation_id>` on a resume when `conversation_id` is non-blank (a resume without one
-starts fresh, never a bare `--resume`); model, prompt and permission fields are ignored.
-
-Warp prints its resume handle only as it exits, so `cli_harness_warp::resume_token_from_output(&[u8])
--> Option<String>` reads it back from a terminal's raw output: it strips escape sequences — CSI
-(`ESC [` … a final byte), the string sequences OSC, DCS, SOS, PM and APC (closed by BEL or `ESC \`),
-and other escapes (intermediate bytes, then one final byte) — turns `\r` into line breaks, and returns
-the word after the **last** `warp --resume` on a line; `None` when there is none. `tddy-agent-launch`
-records it as `SessionMetadata.harness_resume_token` and passes it back as `CliLaunch.conversation_id`.
-`models_from_listing(stdout)` reads a `ListedByBinary` harness's catalogue, one `provider/model` per
-line, blank lines skipped, the first the default. `resolve_agent_models` answers a CLI harness from its
-descriptor: curated, or by running its binary (`BackendCliPaths.opencode_cli_path` overrides the
-`opencode` binary); a binary that fails is an error, never an empty list.
-
-`context_globs_for_agent` and `SHARED_CONTEXT_GLOBS` (`AGENTS.md`, `.agents/**`) live in
-`backend/context_globs.rs`, re-exported as `backend::context_globs_for_agent`. The `opencode` row is
-`AGENTS.md`, `.agents/**`, `opencode.json`, `.opencode/**`; the `muse` row is `AGENTS.md`,
-`.agents/**`, `.muse/**`; the `warp` row is `AGENTS.md`, `.agents/**`, `WARP.md`.
-
-Muse Code's argv, its key variable and its `.muse/` tree come from secondary sources, not a real
-`muse` (`TODO(muse-cli-facts)`, `docs/dev/todo/2026-10-22-muse-code-cli-facts-unconfirmed.md`).
-Warp's argv and exit line follow Warp's published reference, unchecked against a real `warp`
-(`TODO(warp-cli-facts)`).
-
-Tests: `tests/cli_harness_acceptance.rs` (the registry, OpenCode's argv and listing),
-`tests/muse_cli_acceptance.rs` (Muse Code's descriptor, argv, route and curated models),
-`tests/warp_cli_acceptance.rs` (Warp's descriptor, argv, the resume-token reader — escape codes
-including OSC, DCS and single-character escapes, `\r`, several lines, none — the route refusal and the
-empty catalogue), `tests/context_globs_acceptance.rs` (the per-agent rows),
-`tests/opencode_model_catalog.rs` (`resolve_agent_models("opencode-cli")` against a stub binary).
+This crate holds no per-agent descriptor. Until the `#agent-tools` sweep (20/28, #828) a
+`CliHarness` registry (`cli_harness`, with `cli_harness_muse` / `cli_harness_warp` and
+`claude_argv`) answered per-session-type questions — label, binary and its env override, route
+config env, argv, model source, context agent — from Rust. Every field had a YAML home, so the
+table and its curated-model and context-glob companions are deleted: an agent's session type,
+argv, models and globs are read from its spec in `tddy-coding-agent-specs`
+(`CodingAgentSpec::{render_run_argv, argv_params, curated_models, model_listing_argv}`,
+`coding_agent.context_globs`), and this crate receives them as values from its callers.
+`SpecAcpBackend` runs every ACP agent from its spec's rendered `acp.command`; the bespoke
+`ClaudeAcpBackend` / `CodexAcpBackend` / `OpenCodeAcpBackend` are deleted with the table.
+Protocol adapters under `adapters` keep their protocol names — they are implementations a spec
+selects by name, and own no metadata. See
+[`tddy-coding-agent-specs` § The only home of agent metadata](../../tddy-coding-agent-specs/docs/coding-agent-specs.md#the-only-home-of-agent-metadata-the-sweep-agent-tools-2028).
 
 ## Token accounting (`token_accounting`)
 
