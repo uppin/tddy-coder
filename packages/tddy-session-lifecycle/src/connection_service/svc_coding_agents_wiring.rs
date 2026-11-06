@@ -27,7 +27,8 @@ impl DaemonSessionHost {
     /// The coding agents every launch is given (`#agent-tools 19/19`): those installed, or — on a host
     /// that installed none — an empty registry, whose every agent session is refused for naming no
     /// spec. Nothing is launched by hand.
-    pub(crate) fn launch_coding_agents(
+    #[must_use]
+    pub fn launch_coding_agents(
         &self,
     ) -> std::sync::Arc<tddy_agent_launch::spec_launch::HostCodingAgents> {
         self.coding_agents

@@ -54,8 +54,8 @@ impl tddy_discovery::catalog_service::CatalogHandler for CatalogRpcHandler {
         log::debug!("list_agents RPC: mapping config allowlist to AgentInfo");
         let agents = listed_agents(
             &self.config,
-            &self.tddy_data_dir,
-            self.model_registry.as_deref(),
+            &self.agents.tddy_data_dir,
+            self.agents.model_registry.as_deref(),
         )
         .await?;
         log::info!("list_agents RPC: returning {} agent(s)", agents.len());
@@ -152,7 +152,7 @@ impl tddy_discovery::catalog_service::CatalogHandler for CatalogRpcHandler {
         log::debug!("list_subagents RPC: resolving agent defs");
         let daemon_instance_id = local_instance_id_for_config(&self.config);
         let defs =
-            resolvable_agent_defs(&self.tddy_data_dir, self.model_registry.as_deref()).await?;
+            resolvable_agent_defs(&self.agents.tddy_data_dir, self.agents.model_registry.as_deref()).await?;
         let resolved = defs.len();
         let mut subagents: Vec<CatalogSubagentInfo> = defs
             .into_iter()
@@ -165,7 +165,7 @@ impl tddy_discovery::catalog_service::CatalogHandler for CatalogRpcHandler {
             })
             .collect();
         subagents.extend(coding_agent_rows(
-            &self.tddy_data_dir,
+            &self.agents.tddy_data_dir,
             &self.config,
             &daemon_instance_id,
             &subagents,
@@ -179,8 +179,8 @@ impl tddy_discovery::catalog_service::CatalogHandler for CatalogRpcHandler {
              model registry {}]: {:?}",
             subagents.len(),
             resolved,
-            self.tddy_data_dir.join("agents").display(),
-            if self.model_registry.is_some() {
+            self.agents.tddy_data_dir.join("agents").display(),
+            if self.agents.model_registry.is_some() {
                 "attached"
             } else {
                 "absent"
@@ -220,18 +220,12 @@ impl CatalogRpcHandler {
         if !lists_by_binary {
             return None;
         }
-        // Loaded as the daemon loads them (the built-in specs and `<tddyhome>/tools`), per probe:
-        // a probe spawns a process anyway, and this keeps the handler's field set within budget.
-        let agents = tddy_agent_launch::host_coding_agents::host_coding_agents(
-            &self.config,
-            &self.tddy_data_dir,
-        )
-        .ok()?;
         let session_type = if agent == "cursor" {
             "cursor-cli"
         } else {
             listing_harness_session(agent)
         };
+        let agents = &self.agents.coding_agents;
         let spec_id = agents.agents().for_session_type(session_type)?.id.clone();
         let binary = agents.resolve(&spec_id, None).ok()?.tool.binary;
         binary.is_absolute().then_some(binary)
