@@ -11,7 +11,7 @@
 //! a declared pair no body serves answers [`RouteRefusal::NotYetRoutable`] — a refusal, never a
 //! silent run on the vendor. See [`by_spec`].
 
-mod by_spec;
+pub mod by_spec;
 mod codex;
 mod support;
 pub use by_spec::{agent_routable, resolve_route, route_supported, RouteRefusal};

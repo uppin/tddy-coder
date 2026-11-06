@@ -27,3 +27,4 @@
 Seams A–C together leave the file at around 860 lines, so seam D is needed to get under budget.
 Prove the seams with `restructure check --deep` before applying them.
 | 2026-09-28 | 1,152 | +13 in PR #555 (`#subagent-control` 3/5): the `usage_notes` column + migration and the `update_assistant` signature widening (with a `too_many_arguments` allow, why-commented) |
+| 2026-11-05 | 1,165 | +13 in PR #822 (`#agent-tools` 16/19): `reserved_coding_agent_ids` and `reserving_coding_agent_ids`, replacing the `tddy_coder::run::BUILTIN_BACKEND_AGENT_IDS` read. **Regressed, split deferred** to the `#agent-tools` sweep node (n20) |

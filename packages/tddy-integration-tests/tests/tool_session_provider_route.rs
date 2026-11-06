@@ -9,7 +9,7 @@ use std::fs;
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 
-use tddy_core::backend::{AnyBackend, CodingBackend, InvokeRequest};
+use tddy_core::backend::{CodingBackend, InvokeRequest};
 use tddy_core::provider_route::{HarnessRoute, RouteSecret};
 use tddy_core::{ClaudeAcpBackend, CodexAcpBackend};
 
@@ -157,18 +157,15 @@ fn acp_agents_spawn_with_the_route_applied() {
 }
 
 #[test]
-fn cursor_and_the_stub_cannot_be_routed() {
+fn cursor_cannot_be_routed() {
     // Given
     let route = a_route(&[], ("K", "v"), &[]);
     let (cursor, _dir) = a_spec_backend("cursor", "exit 0");
 
-    // Then
-    let refusal = AnyBackend::Cursor(cursor).with_provider_route(route.clone());
+    // Then (the stub's refusal is pinned in `tddy-coder`'s `spec_backend_build` tests)
+    let refusal = cursor.with_provider_route(route);
     assert_eq!(
-        refusal.err().as_deref(),
+        refusal.err().map(|r| r.to_string()).as_deref(),
         Some("Cursor cannot be pointed at another provider; it always runs on its own vendor")
     );
-    assert!(AnyBackend::Stub(tddy_core::StubBackend::new())
-        .with_provider_route(route)
-        .is_err());
 }

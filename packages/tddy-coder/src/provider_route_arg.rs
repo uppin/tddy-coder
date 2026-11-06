@@ -7,7 +7,6 @@
 use std::path::Path;
 
 use tddy_core::provider_route::HarnessRoute;
-use tddy_core::AnyBackend;
 
 /// The route the file at `path` holds; `None` when no path was given. A file another account can
 /// read, or one that is not a route, is an error. The message names the path and never the
@@ -33,17 +32,4 @@ pub(crate) fn refuse_route_for_definition(
         );
     }
     Ok(())
-}
-
-/// `backend` on `route`, or unchanged without one. A backend that cannot be routed is refused.
-pub(crate) fn apply_provider_route(
-    backend: AnyBackend,
-    route: Option<HarnessRoute>,
-) -> anyhow::Result<AnyBackend> {
-    match route {
-        Some(route) => backend
-            .with_provider_route(route)
-            .map_err(anyhow::Error::msg),
-        None => Ok(backend),
-    }
 }

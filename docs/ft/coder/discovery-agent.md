@@ -58,7 +58,7 @@ all existing consumers remain source-compatible via a re-export shim.
 
 ```
 tddy-coder
-  └─ create_backend("fastcontext") → SharedBackend::from_arc(FastContextBackend)
+  └─ create_workflow_backend("fastcontext") → SharedBackend::from_arc(FastContextBackend)
        │
        └─ tddy-discovery crate
             ├─ openai.rs   — /v1/chat/completions HTTP client (reqwest)
@@ -70,7 +70,7 @@ tddy-coder
 ```
 
 The `FastContextBackend` implements the `CodingBackend` trait from `tddy-core` and is wired via
-`SharedBackend::from_arc` — no `AnyBackend` enum variant is required.
+`SharedBackend::from_arc` — no backend enum variant is required.
 
 Remote routing reuses the existing `ExecuteTool`/`ListExecTools` RPCs documented in
 [remote-codebase-mode.md](../daemon/remote-codebase-mode.md). The `RemoteToolEnv` (daemon URL, session
@@ -121,13 +121,13 @@ from the right files without requiring a manual search.
 
 ### Phase D — surface wiring
 
-13. `create_backend("fastcontext", ...)` in `tddy-coder` returns a `SharedBackend` wrapping a
+13. `create_workflow_backend("fastcontext", ...)` in `tddy-coder` returns a `SharedBackend` wrapping a
     `FastContextBackend` with `name() == "fastcontext"`.
 14. `--agent fastcontext` is accepted as a valid CLI argument in `tddy-coder`.
 15. `dev.daemon.yaml::allowed_agents` includes `fastcontext`.
 16. `fastcontext_url` is configurable in the YAML config and defaults to `http://localhost:30000`.
 17. `fastcontext_model` is configurable via CLI flag and YAML config, defaults to
-    `microsoft/FastContext-1.0-4B-RL`, and is threaded through `create_backend` to
+    `microsoft/FastContext-1.0-4B-RL`, and is threaded through `create_workflow_backend` to
     `FastContextBackend::new` unchanged — enabling any OpenAI-compatible model tag, including
     locally-served models via Ollama.
 

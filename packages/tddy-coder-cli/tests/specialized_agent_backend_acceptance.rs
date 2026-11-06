@@ -6,8 +6,8 @@
 //! one hardcoded agent name and that `dev.daemon.yaml` listed it under `allowed_agents`.
 //!
 //! What is checked here is only what the *binary* exposes — its argument surface and its help text.
-//! Whether `create_backend` builds a backend from a def and refuses an unknown name is checked in
-//! `run.rs`'s own test module, where the function is callable directly and no process needs
+//! Whether `create_workflow_backend` builds a backend from a def and refuses an unknown name is
+//! checked in `run.rs`'s own test module, where the function is callable directly and no process needs
 //! spawning to observe a return value.
 
 use assert_cmd::cargo::cargo_bin_cmd;

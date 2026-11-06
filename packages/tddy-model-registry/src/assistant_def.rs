@@ -1,6 +1,6 @@
 //! Projecting a stored assistant onto a [`SpecializedAgentDef`] — the mapping that makes an
-//! assistant created in the web a selectable `--agent <name>`, since `create_backend` resolves a
-//! named def before anything else.
+//! assistant created in the web a selectable `--agent <name>`, since `tddy-coder`'s
+//! `create_workflow_backend` resolves a named def before anything else.
 
 use tddy_discovery::agent_def::{SpecializedAgentDef, SubagentTool};
 use tddy_service::proto::models::{AssistantEntry, ProviderEntry};

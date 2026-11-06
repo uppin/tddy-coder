@@ -7,7 +7,7 @@ mod common;
 
 use std::collections::HashMap;
 use std::sync::Arc;
-use tddy_core::backend::{MockBackend, StubBackend};
+use tddy_core::backend::MockBackend;
 use tddy_core::changeset::{write_changeset, Changeset};
 use tddy_core::workflow::context::Context;
 use tddy_core::workflow::graph::{ExecutionStatus, GraphBuilder};
@@ -15,7 +15,7 @@ use tddy_core::workflow::runner::FlowRunner;
 use tddy_core::workflow::session::{FileSessionStorage, Session, SessionStorage};
 use tddy_core::workflow::task::{EchoTask, NextAction, Task};
 use tddy_core::GoalId;
-use tddy_core::{AnyBackend, SharedBackend};
+use tddy_core::SharedBackend;
 use tddy_workflow_recipes::tdd::graph::build_tdd_workflow_graph;
 
 #[tokio::test]
@@ -255,7 +255,7 @@ async fn workflow_engine_run_goal_plan_completes() {
     // When
     let _ = write_changeset(&session_dir, &init_cs);
 
-    let backend: SharedBackend = SharedBackend::from_any(AnyBackend::Stub(StubBackend::new()));
+    let backend: SharedBackend = SharedBackend::stub();
     let engine = common::tdd_engine(backend.clone(), storage_dir.clone());
 
     let mut context_values = HashMap::new();
@@ -315,7 +315,7 @@ async fn workflow_engine_run_full_workflow_completes_with_stub() {
     // When
     let _ = write_changeset(&session_dir, &init_cs);
 
-    let backend: SharedBackend = SharedBackend::from_any(AnyBackend::Stub(StubBackend::new()));
+    let backend: SharedBackend = SharedBackend::stub();
     let engine = common::tdd_engine(backend.clone(), storage_dir.clone());
 
     let mut context_values = HashMap::new();

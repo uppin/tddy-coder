@@ -29,7 +29,7 @@ pub use backend::acp_driver::{
     AcpAgentCommand, AcpAgentHooks, AcpDriver, AcpSession, AcpStopReason, AcpToolStatus,
     AcpTurnEnd, AcpUpdate, AcpUpdateSink, AllowOnce, McpServerSpec, NoHooks, OpenSession,
     PermissionDecision, PermissionHandler, PermissionOptionView, PermissionRequest,
-    SessionErrorVerdict,
+    SessionErrorVerdict, SESSION_OPEN_DEADLINE,
 };
 pub use backend::headless_driver::{
     AcpConversation, ConversationDriver, HeadlessCommand, HeadlessDriver,
@@ -37,13 +37,15 @@ pub use backend::headless_driver::{
 pub use backend::{
     backend_from_label, backend_selection_question, codex_acp_route_args, default_model_for_agent,
     kill_running_turns, preselected_index_for_agent, recipe_cli_name_from_selection_label,
-    spawn_codex_oauth_login, workflow_recipe_selection_question, AgentOutputSink, AnyBackend,
+    spawn_codex_oauth_login, workflow_recipe_selection_question, AgentOutputSink,
     ClarificationQuestion, ClaudeAcpBackend, CodexAcpBackend, CodingBackend, InMemoryToolExecutor,
     InvokeRequest, InvokeResponse, MockBackend, OpenCodeAcpBackend, ProcessToolExecutor,
     QuestionOption, RemoteToolEnv, RunningGroup, SessionMode, SharedBackend, StubBackend,
     ToolExecutor, CODEX_DEFAULT_CLI_BINARY, CODEX_OAUTH_AUTHORIZE_URL_FILENAME,
     CODEX_THREAD_ID_FILENAME,
 };
+// `#agent-tools 16/19`: the workflow backend built from any coding agent's spec.
+pub use backend::spec_backend::{SpecAcpBackend, SpecBackend, SpecBackendRefusal, SpecTransport};
 // `#agent-tools 15/19`: the one headless workflow backend, configured by an agent's spec.
 pub use backend::spec_headless::{
     SpecHeadlessBackend, DEFAULT_TURN_DEADLINE, MODEL_LISTING_DEADLINE,

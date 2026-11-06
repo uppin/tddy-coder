@@ -125,7 +125,7 @@ coding-backend id, or a `<tddyhome>/agents` def; an empty or whitespace-padded n
 
 The registry is a **third `SpecializedAgentDef` source** alongside builtins and
 `<tddyhome>/agents/*.yaml`, so an assistant created in the UI resolves and starts. `StartSession`
-accepts it, and `create_backend` no longer falls through to Claude for an unrecognised agent — an
+accepts it, and `create_workflow_backend` no longer falls through to Claude for an unrecognised agent — an
 unknown id is an error naming the known agents.
 
 The resolved def reaches the spawned child as **`--agent-def-path <file>`**, written `0600` and
@@ -154,7 +154,7 @@ whose last enumeration failed are marked stale, so a stale catalog is not read a
 - **Per-daemon SQLite, merged in the web** — providers describe local reality (a GPU, a machine's
   credentials), and merging client-side keeps failure isolated per daemon.
 - **An assistant *is* a persisted `SpecializedAgentDef`** — that type already carried model, base URL,
-  system prompt and tools, and `create_backend` already resolved any named def.
+  system prompt and tools, and `create_workflow_backend` already resolved any named def.
 - **No fallbacks anywhere** — a failed probe, an unreachable peer, an unsupported operation and a
   refused workspace each surface as a distinct, visible error.
 

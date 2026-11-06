@@ -9,35 +9,7 @@
 
 use crate::provider_route::HarnessRoute;
 
-use super::{AnyBackend, ClaudeAcpBackend, CodexAcpBackend, OpenCodeAcpBackend};
-
-impl AnyBackend {
-    /// Run this backend on `route`. Refused, with the reason, for a backend that cannot be routed —
-    /// an agent whose spec declares no provider (Cursor) and the stub; never silently ignored.
-    pub fn with_provider_route(self, route: HarnessRoute) -> Result<Self, String> {
-        match self {
-            AnyBackend::Claude(b) => b
-                .with_provider_route(route)
-                .map(AnyBackend::Claude)
-                .map_err(|refusal| refusal.to_string()),
-            AnyBackend::ClaudeAcp(b) => Ok(AnyBackend::ClaudeAcp(b.with_provider_route(route))),
-            AnyBackend::Codex(b) => b
-                .with_provider_route(route)
-                .map(AnyBackend::Codex)
-                .map_err(|refusal| refusal.to_string()),
-            AnyBackend::CodexAcp(b) => Ok(AnyBackend::CodexAcp(b.with_provider_route(route))),
-            AnyBackend::OpenCode(b) => Ok(AnyBackend::OpenCode(b.with_provider_route(route))),
-            AnyBackend::Cursor(b) => b
-                .with_provider_route(route)
-                .map(AnyBackend::Cursor)
-                .map_err(|refusal| refusal.to_string()),
-            AnyBackend::Stub(_) => Err(
-                "the stub backend cannot run on a provider account: it makes no provider call"
-                    .to_string(),
-            ),
-        }
-    }
-}
+use super::{ClaudeAcpBackend, CodexAcpBackend, OpenCodeAcpBackend};
 
 impl ClaudeAcpBackend {
     /// `claude-agent-acp` on a provider account: the route's environment on the agent child. The

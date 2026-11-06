@@ -25,7 +25,7 @@ production lines.
 
 | Module | Owns |
 |---|---|
-| `backend` | `CodingBackend`, `AnyBackend`, `SharedBackend`, every backend, `InvokeRequest`/`InvokeResponse`, `model_catalog`, `ToolExecutor` |
+| `backend` | `CodingBackend`, `SpecBackend`, `SharedBackend`, every backend, `InvokeRequest`/`InvokeResponse`, `model_catalog`, `ToolExecutor` |
 | `stream` | the Claude, Cursor and Codex stream parsers, `ProgressEvent` |
 | `token_accounting` | `TokenUsage`, `ConversationRecord` |
 | `claude_argv`, `claude_hooks`, `cursor_hooks` | launch argv and hook config |

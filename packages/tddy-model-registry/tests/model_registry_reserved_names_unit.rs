@@ -131,7 +131,7 @@ async fn a_name_free_on_this_daemon_is_accepted() {
 #[tokio::test]
 async fn a_coding_backend_id_is_refused() {
     // Given
-    let registry = a_registry_reserving(&[]).await;
+    let registry = a_registry_on_a_host_with_coding_agents(&["claude", "cursor", "stub"]).await;
 
     // When
     let outcome = registry.when_creating_an_assistant_named("cursor").await;
@@ -279,4 +279,86 @@ async fn a_name_padded_with_whitespace_is_refused() {
                 .to_string()
         )
     );
+}
+
+// ---------------------------------------------------------------------------
+// Coding-agent ids, from the host's registry (`#agent-tools 16/19`)
+// ---------------------------------------------------------------------------
+//
+// The daemon feeds the store every coding-agent registry id (`reserved_agent_ids`), so an agent
+// dropped into `<tddyhome>/tools/` reserves its name as a builtin does — the store no longer reads a
+// fixed list of seven from `tddy-coder`.
+
+/// A registry on a host whose coding-agent registry declares `coding_agent_ids` (and nothing in
+/// `allowed_agents`).
+async fn a_registry_on_a_host_with_coding_agents(coding_agent_ids: &[&str]) -> Registry {
+    let dir = tempfile::tempdir().expect("a tempdir for the registry db");
+    let agents_dir = dir.path().join("agents");
+    let store = Arc::new(
+        ModelRegistryStore::open(&dir.path().join("models.db"), THIS_DAEMON, &agents_dir)
+            .await
+            .expect("open the registry store")
+            .reserving_coding_agent_ids(coding_agent_ids.iter().map(|id| id.to_string())),
+    );
+    store
+        .create_provider(
+            NewProvider {
+                kind: ProviderKind::Ollama,
+                label: "Workstation Ollama".to_string(),
+                base_url: "http://127.0.0.1:11434".to_string(),
+                api_key: None,
+            },
+            THE_OPERATOR,
+        )
+        .await
+        .expect("the provider must be created");
+    Registry {
+        _dir: dir,
+        agents_dir,
+        store,
+    }
+}
+
+#[tokio::test]
+async fn an_assistant_named_like_a_dropped_in_registry_agent_is_refused() {
+    // Given — `acme` is declared only by a `<tddyhome>/tools/acme.yaml`
+    let registry = a_registry_on_a_host_with_coding_agents(&["acme", "claude", "stub"]).await;
+
+    // When
+    let outcome = registry.when_creating_an_assistant_named("acme").await;
+
+    // Then
+    assert_eq!(
+        outcome,
+        Err("invalid name: 'acme' is a coding backend".to_string())
+    );
+}
+
+#[tokio::test]
+async fn an_assistant_named_oz_is_refused_once_the_registry_declares_it() {
+    // Given — `oz` was never in the fixed list the store used to read
+    let registry = a_registry_on_a_host_with_coding_agents(&["claude", "oz", "stub"]).await;
+
+    // When
+    let outcome = registry.when_creating_an_assistant_named("oz").await;
+
+    // Then
+    assert_eq!(
+        outcome,
+        Err("invalid name: 'oz' is a coding backend".to_string())
+    );
+}
+
+#[tokio::test]
+async fn an_assistant_named_like_no_registry_agent_is_accepted() {
+    // Given
+    let registry = a_registry_on_a_host_with_coding_agents(&["acme", "claude", "stub"]).await;
+
+    // When
+    let outcome = registry
+        .when_creating_an_assistant_named("repo-explorer")
+        .await;
+
+    // Then
+    assert_eq!(outcome, Ok(()));
 }

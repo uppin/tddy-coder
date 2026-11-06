@@ -19,6 +19,7 @@ mod worker;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
 
 use tokio::sync::{mpsc, oneshot};
 
@@ -220,6 +221,20 @@ pub struct NoHooks;
 
 impl AcpAgentHooks for NoHooks {}
 
+/// How long one session open — the connection's `initialize` when it is the first request, then
+/// `session/new` or `session/load` and any `session/set_model` — may take before it is refused
+/// (`#agent-tools 16/19`): an agent that never answers is never waited on forever.
+pub const SESSION_OPEN_DEADLINE: Duration = Duration::from_secs(120);
+
+/// A deadline as a refusal spells it: whole seconds as `2s`, otherwise milliseconds.
+pub(crate) fn humantime_deadline(deadline: Duration) -> String {
+    if deadline.subsec_nanos() == 0 {
+        format!("{}s", deadline.as_secs())
+    } else {
+        format!("{}ms", deadline.as_millis())
+    }
+}
+
 /// How many requests may wait for the worker before a caller waits to send one.
 const COMMAND_QUEUE_DEPTH: usize = 16;
 
@@ -392,9 +407,39 @@ impl AcpDriver {
     }
 
     /// `session/new` (or `session/load` for `open.resume`), then `session/set_model` if asked.
+    ///
+    /// Bounded by [`SESSION_OPEN_DEADLINE`]: [`Self::open_session_within`].
     pub async fn open_session(&self, open: OpenSession) -> Result<AcpSession, BackendError> {
-        self.request(|reply| worker::Command::OpenSession { open, reply })
-            .await
+        self.open_session_within(open, SESSION_OPEN_DEADLINE).await
+    }
+
+    /// [`Self::open_session`], refused once it has not answered within `deadline` — the agent
+    /// never answering `initialize`, `session/new` or `session/load` included. The refusal names
+    /// the program and the deadline (`the ACP agent <program> did not open a session within 2s`);
+    /// the driver is unusable afterwards and its child is ended when it is dropped.
+    pub async fn open_session_within(
+        &self,
+        open: OpenSession,
+        deadline: Duration,
+    ) -> Result<AcpSession, BackendError> {
+        match self.open_session_until(open, deadline).await {
+            Some(opened) => opened,
+            None => Err(BackendError::InvocationFailed(format!(
+                "the ACP agent {} did not open a session within {}",
+                self.program.display(),
+                humantime_deadline(deadline)
+            ))),
+        }
+    }
+
+    /// The session open, or `None` once `deadline` has passed without an answer.
+    pub(crate) async fn open_session_until(
+        &self,
+        open: OpenSession,
+        deadline: Duration,
+    ) -> Option<Result<AcpSession, BackendError>> {
+        let opening = self.request(|reply| worker::Command::OpenSession { open, reply });
+        tokio::time::timeout(deadline, opening).await.ok()
     }
 
     /// One `session/prompt` with `prompt` as its text. Every update goes to `updates` and, mapped

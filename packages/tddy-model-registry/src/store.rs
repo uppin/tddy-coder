@@ -89,6 +89,8 @@ pub struct ModelRegistryStore {
     /// this daemon's `allowed_agents` config entries. Supplied at open time
     /// ([`ModelRegistryStore::reserving_agent_ids`]) because the store cannot read daemon config.
     reserved_agent_ids: Vec<String>,
+    /// The coding-agent ids `--agent` already means (`reserving_coding_agent_ids`).
+    reserved_coding_agent_ids: Vec<String>,
     /// This daemon's `<tddyhome>/agents` directory — the other `--agent` def source, whose names
     /// an assistant may not take either.
     ///
@@ -144,6 +146,7 @@ impl ModelRegistryStore {
             pool,
             daemon_instance_id: daemon_instance_id.to_string(),
             reserved_agent_ids: Vec::new(),
+            reserved_coding_agent_ids: Vec::new(),
             agents_dir: agents_dir.to_path_buf(),
         })
     }
@@ -153,6 +156,16 @@ impl ModelRegistryStore {
     /// configured coding backend would make which one starts depend on resolution order.
     pub fn reserving_agent_ids(mut self, ids: impl IntoIterator<Item = String>) -> Self {
         self.reserved_agent_ids = ids.into_iter().collect();
+        self
+    }
+
+    /// Also refuse assistant names colliding with these coding-agent ids — every agent of this
+    /// host's coding-agent registry and `stub` (`tddy_coder::agent_registry_cli::reserved_agent_ids`),
+    /// refused as `'<name>' is a coding backend` (`#agent-tools 16/19`). Replaces the store's own
+    /// read of `tddy_coder::run::BUILTIN_BACKEND_AGENT_IDS`, which listed seven ids and missed `oz`
+    /// and every agent dropped into `<tddyhome>/tools/`.
+    pub fn reserving_coding_agent_ids(mut self, ids: impl IntoIterator<Item = String>) -> Self {
+        self.reserved_coding_agent_ids = ids.into_iter().collect();
         self
     }
 
@@ -669,7 +682,7 @@ impl ModelRegistryStore {
         // with, the name simply already means something else on this daemon. `InvalidName` is what
         // that is — `AlreadyExists` would tell a caller to go and delete the assistant that is in
         // the way, and there is no such assistant.
-        if tddy_coder::run::BUILTIN_BACKEND_AGENT_IDS.contains(&name) {
+        if self.reserved_coding_agent_ids.iter().any(|id| id == name) {
             return Err(ModelRegistryError::InvalidName(format!(
                 "'{name}' is a coding backend"
             )));

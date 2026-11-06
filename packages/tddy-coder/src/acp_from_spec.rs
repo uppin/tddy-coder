@@ -22,20 +22,24 @@ pub const CODEX_ACP_BINARY_ENV: &str = "TDDY_CODEX_ACP_CLI";
 pub const OPENCODE_BINARY_ENV: &str = "TDDY_OPENCODE_CLI";
 
 /// What a spec-declared ACP backend is built from.
-struct AcpLaunch {
+pub(crate) struct AcpLaunch {
     /// The command, rendered from the spec's `coding_agent.acp.command`.
-    command: AcpAgentCommand,
+    pub(crate) command: AcpAgentCommand,
     /// The hooks adapter the spec names, when it names one.
-    hooks: Option<Arc<dyn AcpHooksAdapter>>,
+    pub(crate) hooks: Option<Arc<dyn AcpHooksAdapter>>,
     /// The agent's resolved deps, by tool id (`codex`, the binary a hooks adapter runs).
-    deps: BTreeMap<String, PathBuf>,
+    pub(crate) deps: BTreeMap<String, PathBuf>,
 }
 
 /// The launch of agent `id` on `host`: the registry loaded with `tools_dir` applied, `id` and its
 /// deps resolved against `host`, its `coding_agent.acp.command` rendered, and its hooks adapter
 /// looked up by the name the spec gives. A provider route is not applied here: a backend applies it
 /// when it is set.
-fn acp_launch(tools_dir: &Path, host: &dyn ToolHost, id: &str) -> anyhow::Result<AcpLaunch> {
+pub(crate) fn acp_launch(
+    tools_dir: &Path,
+    host: &dyn ToolHost,
+    id: &str,
+) -> anyhow::Result<AcpLaunch> {
     let registry = load_agent_registry(tools_dir).context("the coding agent registry")?;
     let def = registry
         .get(id)

@@ -1190,7 +1190,7 @@ says why on its row. An unreadable roster is not an empty one, at any depth.
 
 44. `resolve_agent_defs` over an **empty** directory returns an empty list — there is no builtin.
 45. No Rust identifier, default value or shipped file contains `fastcontext`.
-46. `create_backend` builds a backend whose model, base URL and turn budget come **only** from the
+46. `create_workflow_backend` builds a backend whose model, base URL and turn budget come **only** from the
     resolved def; the `--fastcontext-*` flags no longer exist and cannot override it.
 47. A session started with an empty roster starts normally, with the full native tool set.
 

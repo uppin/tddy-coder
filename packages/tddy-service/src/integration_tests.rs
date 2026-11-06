@@ -535,8 +535,7 @@ mod tests {
     use crate::TddyRemoteService;
     use std::sync::Arc;
 
-    use tddy_core::AnyBackend;
-    use tddy_core::{Presenter, PresenterHandle, SharedBackend, StubBackend};
+    use tddy_core::{Presenter, PresenterHandle, SharedBackend};
     use tddy_workflow_recipes::TddRecipe;
 
     use crate::test_util::spawn_server_and_connect;
@@ -557,7 +556,7 @@ mod tests {
         let mut presenter = Presenter::new("stub", "opus", Arc::new(TddRecipe), tddy_data_dir)
             .with_broadcast(event_tx)
             .with_intent_sender(intent_tx);
-        let backend = SharedBackend::from_any(AnyBackend::Stub(StubBackend::new()));
+        let backend = SharedBackend::stub();
         let output_dir = std::env::temp_dir().join("tddy-service-test");
         std::fs::create_dir_all(&output_dir).unwrap();
         presenter.start_workflow(
@@ -675,8 +674,7 @@ mod tddy_remote_livekit_acceptance {
     use crate::proto::remote::TddyRemoteServer;
     use crate::TddyRemoteService;
 
-    use tddy_core::AnyBackend;
-    use tddy_core::{Presenter, PresenterHandle, SharedBackend, StubBackend};
+    use tddy_core::{Presenter, PresenterHandle, SharedBackend};
     use tddy_workflow_recipes::TddRecipe;
 
     #[test]
@@ -712,7 +710,7 @@ mod tddy_remote_livekit_acceptance {
         let mut presenter = Presenter::new("stub", "opus", Arc::new(TddRecipe), tddy_data_dir)
             .with_broadcast(event_tx)
             .with_intent_sender(intent_tx);
-        let backend = SharedBackend::from_any(AnyBackend::Stub(StubBackend::new()));
+        let backend = SharedBackend::stub();
         let output_dir = std::env::temp_dir().join("tddy-service-livekit-test");
         std::fs::create_dir_all(&output_dir).unwrap();
         presenter.start_workflow(
@@ -849,9 +847,7 @@ mod session_view_adapter_surface_acceptance {
     };
     use crate::session_view_adapter_surface;
 
-    use tddy_core::{
-        AnyBackend, Presenter, PresenterEvent, SharedBackend, StubBackend, ViewConnection,
-    };
+    use tddy_core::{Presenter, PresenterEvent, SharedBackend, ViewConnection};
     use tddy_workflow_recipes::TddRecipe;
 
     type ViewFactory = Arc<dyn Fn() -> Option<ViewConnection> + Send + Sync>;
@@ -877,7 +873,7 @@ mod session_view_adapter_surface_acceptance {
         let mut presenter = Presenter::new("stub", "opus", Arc::new(TddRecipe), tddy_data_dir)
             .with_broadcast(event_tx)
             .with_intent_sender(intent_tx);
-        let backend = SharedBackend::from_any(AnyBackend::Stub(StubBackend::new()));
+        let backend = SharedBackend::stub();
         let output_dir = std::env::temp_dir().join("tddy-service-surface-out");
         std::fs::create_dir_all(&output_dir).unwrap();
         presenter.start_workflow(

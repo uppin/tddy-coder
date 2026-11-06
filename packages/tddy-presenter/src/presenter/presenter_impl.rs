@@ -1080,7 +1080,6 @@ mod tests {
     #[test]
     fn start_slash_restart_unblocks_workflow_waiting_for_first_feature_input() {
         use crate::presenter::presenter_test_recipe::EmptyPresenterTestRecipe;
-        use crate::{AnyBackend, StubBackend};
 
         // Given
         let tmp_guard = tempfile::tempdir().unwrap();
@@ -1095,7 +1094,7 @@ mod tests {
             tmp.clone(),
         )
         .with_recipe_resolver(resolver);
-        let backend = SharedBackend::from_any(AnyBackend::Stub(StubBackend::new()));
+        let backend = SharedBackend::stub();
         p.start_workflow(
             backend,
             tmp.clone(),

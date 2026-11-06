@@ -16,7 +16,6 @@ use super::acp_driver::{
     self, AcpAgentCommand, AcpDriver, AcpSession, AllowOnce, DriverSlot, OpenSession,
 };
 use super::codex::merge_codex_prompt;
-use super::routed::codex_acp_route_args;
 use super::{InvokeRequest, InvokeResponse};
 use crate::adapters::{AcpHooksAdapter, AcpHooksLaunch, AcpOpenScope, CodexAcpLogin, CODEX_DEP};
 use crate::error::BackendError;
@@ -144,14 +143,13 @@ impl CodexAcpBackend {
         self.open_scope = Mutex::new(None);
     }
 
-    /// The driver, started on first use. On a route the agent is given the route's `-c` overrides,
-    /// and its environment; the hooks adapter then prepares the command and the hooks the driver
+    /// The driver, started on first use. On a route the agent is given the route's environment; the
+    /// hooks adapter then adds the route's `-c` overrides and prepares the command and the hooks the driver
     /// runs with.
     fn driver(&self) -> Result<Arc<AcpDriver>, BackendError> {
         acp_driver::started(&self.driver, || {
             let mut command = self.command.clone();
             if let Some(route) = &self.provider_route {
-                command.args.extend(codex_acp_route_args(route));
                 command.env.extend(acp_driver::route_env(route));
             }
             let prepared = self.hooks.prepare(AcpHooksLaunch {

@@ -11,6 +11,7 @@ mod mock;
 pub mod model_catalog;
 mod opencode_acp;
 mod routed;
+pub mod spec_backend;
 pub mod spec_headless;
 pub use spec_headless::SpecHeadlessBackend;
 pub(crate) mod turn_process;
@@ -37,26 +38,6 @@ pub use stub::StubBackend;
 pub use tddy_workflow::questions::{ClarificationQuestion, QuestionOption};
 use tddy_workflow::{GoalHints, GoalId};
 pub use tool_executor::{InMemoryToolExecutor, ProcessToolExecutor, ToolExecutor};
-
-/// Enum dispatch for CLI backend selection (avoids trait object overhead).
-/// tddy-coder uses claude/cursor only. tddy-demo uses stub (via lib, not CLI).
-///
-/// `Claude`, `Cursor` and `Codex` hold the one generic headless backend, configured by the agent's
-/// spec (`#agent-tools 15/19`); `feature/agent-tools/spec-backend` replaces the enum itself.
-#[derive(Debug)]
-pub enum AnyBackend {
-    /// `claude -p` (`claude.yaml`).
-    Claude(SpecHeadlessBackend),
-    ClaudeAcp(ClaudeAcpBackend),
-    /// Cursor's `agent -p` (`cursor.yaml`).
-    Cursor(SpecHeadlessBackend),
-    /// OpenAI Codex CLI (`codex exec`, `codex exec resume`, `--json`; `codex.yaml`).
-    Codex(SpecHeadlessBackend),
-    /// OpenAI Codex via `codex-acp` (ACP over stdio).
-    CodexAcp(CodexAcpBackend),
-    Stub(StubBackend),
-    OpenCode(OpenCodeAcpBackend),
-}
 
 /// Shared backend wrapper for "create once at startup" pattern.
 /// Wraps `Arc<dyn CodingBackend>` so the same backend can be reused across multiple Workflows.
@@ -93,11 +74,6 @@ impl CodingBackend for SharedBackend {
 }
 
 impl SharedBackend {
-    /// Create a SharedBackend from an AnyBackend (or any CodingBackend).
-    pub fn from_any(backend: AnyBackend) -> Self {
-        Self(std::sync::Arc::new(backend))
-    }
-
     /// Create SharedBackend from an Arc<dyn CodingBackend> (e.g. for MockBackend in tests).
     pub fn from_arc(inner: std::sync::Arc<dyn CodingBackend>) -> Self {
         Self(inner)
@@ -106,69 +82,6 @@ impl SharedBackend {
     /// Get the inner Arc for use with graph builders that require Arc<dyn CodingBackend>.
     pub fn as_arc(&self) -> std::sync::Arc<dyn CodingBackend> {
         self.0.clone()
-    }
-}
-
-#[async_trait::async_trait]
-impl CodingBackend for AnyBackend {
-    async fn invoke(&self, request: InvokeRequest) -> Result<InvokeResponse, BackendError> {
-        match self {
-            AnyBackend::Claude(b) => b.invoke(request).await,
-            AnyBackend::ClaudeAcp(b) => b.invoke(request).await,
-            AnyBackend::Cursor(b) => b.invoke(request).await,
-            AnyBackend::Codex(b) => b.invoke(request).await,
-            AnyBackend::CodexAcp(b) => b.invoke(request).await,
-            AnyBackend::Stub(b) => b.invoke(request).await,
-            AnyBackend::OpenCode(b) => b.invoke(request).await,
-        }
-    }
-
-    fn name(&self) -> &str {
-        match self {
-            AnyBackend::Claude(b) => b.name(),
-            AnyBackend::ClaudeAcp(b) => b.name(),
-            AnyBackend::Cursor(b) => b.name(),
-            AnyBackend::Codex(b) => b.name(),
-            AnyBackend::CodexAcp(b) => b.name(),
-            AnyBackend::Stub(b) => b.name(),
-            AnyBackend::OpenCode(b) => b.name(),
-        }
-    }
-
-    fn submit_channel(&self) -> Option<&crate::toolcall::SubmitResultChannel> {
-        match self {
-            AnyBackend::Claude(b) => b.submit_channel(),
-            AnyBackend::ClaudeAcp(b) => b.submit_channel(),
-            AnyBackend::Cursor(b) => b.submit_channel(),
-            AnyBackend::Codex(b) => b.submit_channel(),
-            AnyBackend::CodexAcp(b) => b.submit_channel(),
-            AnyBackend::Stub(b) => b.submit_channel(),
-            AnyBackend::OpenCode(b) => b.submit_channel(),
-        }
-    }
-
-    fn action_invoke_cache_eligible(&self) -> bool {
-        match self {
-            AnyBackend::Claude(b) => b.action_invoke_cache_eligible(),
-            AnyBackend::ClaudeAcp(b) => b.action_invoke_cache_eligible(),
-            AnyBackend::Cursor(b) => b.action_invoke_cache_eligible(),
-            AnyBackend::Codex(b) => b.action_invoke_cache_eligible(),
-            AnyBackend::CodexAcp(b) => b.action_invoke_cache_eligible(),
-            AnyBackend::Stub(b) => b.action_invoke_cache_eligible(),
-            AnyBackend::OpenCode(b) => b.action_invoke_cache_eligible(),
-        }
-    }
-
-    async fn list_models(&self) -> Result<BackendModels, BackendError> {
-        match self {
-            AnyBackend::Claude(b) => b.list_models().await,
-            AnyBackend::ClaudeAcp(b) => b.list_models().await,
-            AnyBackend::Cursor(b) => b.list_models().await,
-            AnyBackend::Codex(b) => b.list_models().await,
-            AnyBackend::CodexAcp(b) => b.list_models().await,
-            AnyBackend::Stub(b) => b.list_models().await,
-            AnyBackend::OpenCode(b) => b.list_models().await,
-        }
     }
 }
 
