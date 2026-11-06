@@ -20,6 +20,46 @@ type SessionsBaseResolver = Arc<dyn Fn(&str) -> Option<PathBuf> + Send + Sync>;
 type UserResolver = Arc<dyn Fn(&str) -> Option<String> + Send + Sync>;
 
 const VALID_TOKEN: &str = "valid-token";
+
+/// What the old argv builder produced, now rendered from the `claude` YAML spec's `run.argv`
+/// with the production binding (blank values trimmed away, as `harness_template_params`
+/// binds them): binary, model, session, permissions, prompt.
+#[allow(clippy::too_many_arguments)]
+fn spec_claude_argv(
+    binary: &str,
+    model: &str,
+    session_id: &str,
+    prompt: Option<&str>,
+    permission_mode: Option<&str>,
+    dangerously_skip_permissions: bool,
+    resume: bool,
+) -> Vec<String> {
+    let mut flags: Vec<&str> = Vec::new();
+    if resume {
+        flags.push("resume");
+    }
+    if dangerously_skip_permissions {
+        flags.push("dangerously_skip_permissions");
+    }
+    tddy_coding_agent_specs::CodingAgentRegistry::builtin_cached()
+        .get("claude")
+        .expect("the claude spec loads")
+        .render_run_argv(
+            std::path::Path::new(binary),
+            &[
+                ("model", model.trim()),
+                ("session_id", session_id),
+                (
+                    "permission_mode",
+                    permission_mode.map(str::trim).unwrap_or(""),
+                ),
+                ("prompt", prompt.map(str::trim).unwrap_or("")),
+            ],
+            &flags,
+        )
+        .expect("the claude argv renders")
+}
+
 /// The launch argv a `claude` session runs, rendered from its YAML spec with the stub as its
 /// binary: the manager spawns what it is given, so the argv these tests assert on comes from
 /// the spec (`packages/tddy-coding-agent-specs/specs/claude.yaml`), as production renders it.
@@ -166,7 +206,7 @@ fn write_echo_argv_script(dir: &std::path::Path) -> std::path::PathBuf {
 }
 
 // ---------------------------------------------------------------------------
-// Unit tests — build_claude_argv with permission_mode (5th argument)
+// Unit tests — the spec-rendered argv with permission_mode (5th argument)
 //
 // These tests fully specify the argv layout. The existing tests in
 // `claude_cli_session_acceptance.rs` that call build_claude_argv with 4 args
@@ -179,7 +219,7 @@ fn write_echo_argv_script(dir: &std::path::Path) -> std::path::PathBuf {
 #[test]
 fn build_claude_argv_default_permission_mode_is_auto() {
     // When / Then
-    let argv = CliSessionManager::build_claude_argv(
+    let argv = spec_claude_argv(
         "/usr/local/bin/claude",
         "claude-opus-4-8",
         "test-session",
@@ -206,7 +246,7 @@ fn build_claude_argv_default_permission_mode_is_auto() {
 #[test]
 fn build_claude_argv_explicit_bypass_permissions() {
     // When / Then
-    let argv = CliSessionManager::build_claude_argv(
+    let argv = spec_claude_argv(
         "/usr/local/bin/claude",
         "claude-opus-4-8",
         "test-session",
@@ -232,7 +272,7 @@ fn build_claude_argv_explicit_bypass_permissions() {
 #[test]
 fn build_claude_argv_accept_edits_mode() {
     // When / Then
-    let argv = CliSessionManager::build_claude_argv(
+    let argv = spec_claude_argv(
         "/usr/local/bin/claude",
         "claude-opus-4-8",
         "test-session",
@@ -259,7 +299,7 @@ fn build_claude_argv_accept_edits_mode() {
 #[test]
 fn build_claude_argv_empty_string_defaults_to_auto() {
     // When / Then
-    let argv = CliSessionManager::build_claude_argv(
+    let argv = spec_claude_argv(
         "/usr/local/bin/claude",
         "claude-opus-4-8",
         "test-session",
@@ -286,7 +326,7 @@ fn build_claude_argv_empty_string_defaults_to_auto() {
 #[test]
 fn build_claude_argv_whitespace_defaults_to_auto() {
     // When / Then
-    let argv = CliSessionManager::build_claude_argv(
+    let argv = spec_claude_argv(
         "/usr/local/bin/claude",
         "claude-opus-4-8",
         "test-session",
@@ -314,7 +354,7 @@ fn build_claude_argv_whitespace_defaults_to_auto() {
 #[test]
 fn build_claude_argv_permission_mode_before_positional_prompt() {
     // When / Then
-    let argv = CliSessionManager::build_claude_argv(
+    let argv = spec_claude_argv(
         "/usr/local/bin/claude",
         "claude-opus-4-8",
         "test-session",
@@ -346,7 +386,7 @@ fn build_claude_argv_permission_mode_before_positional_prompt() {
 #[test]
 fn build_claude_argv_permission_mode_appears_once() {
     // When / Then
-    let argv = CliSessionManager::build_claude_argv(
+    let argv = spec_claude_argv(
         "/usr/local/bin/claude",
         "claude-opus-4-8",
         "test-session",
@@ -530,7 +570,7 @@ async fn start_session_rpc_threads_permission_mode_to_pty() {
 #[test]
 fn build_claude_argv_exact_structure_default_mode_no_prompt() {
     // When / Then
-    let argv = CliSessionManager::build_claude_argv(
+    let argv = spec_claude_argv(
         "/usr/local/bin/claude",
         "claude-opus-4-8",
         "sess-abc",
@@ -560,7 +600,7 @@ fn build_claude_argv_exact_structure_default_mode_no_prompt() {
 #[test]
 fn build_claude_argv_exact_structure_bypass_with_prompt() {
     // When / Then
-    let argv = CliSessionManager::build_claude_argv(
+    let argv = spec_claude_argv(
         "claude",
         "claude-opus-4-8",
         "sess-xyz",
@@ -591,7 +631,7 @@ fn build_claude_argv_exact_structure_bypass_with_prompt() {
 #[test]
 fn build_claude_argv_exact_structure_no_model() {
     // When / Then
-    let argv = CliSessionManager::build_claude_argv(
+    let argv = spec_claude_argv(
         "claude",
         "", // empty model → --model flag omitted
         "sess-nomodel",
@@ -618,7 +658,7 @@ fn build_claude_argv_exact_structure_no_model() {
 #[test]
 fn build_claude_argv_plan_mode() {
     // When / Then
-    let argv = CliSessionManager::build_claude_argv(
+    let argv = spec_claude_argv(
         "claude",
         "claude-opus-4-8",
         "sess-plan",
@@ -645,7 +685,7 @@ fn build_claude_argv_plan_mode() {
 #[test]
 fn build_claude_argv_default_mode_string() {
     // When / Then
-    let argv_explicit_default = CliSessionManager::build_claude_argv(
+    let argv_explicit_default = spec_claude_argv(
         "claude",
         "claude-opus-4-8",
         "sess-default",
@@ -654,7 +694,7 @@ fn build_claude_argv_default_mode_string() {
         false,
         false,
     );
-    let argv_none = CliSessionManager::build_claude_argv(
+    let argv_none = spec_claude_argv(
         "claude",
         "claude-opus-4-8",
         "sess-default",

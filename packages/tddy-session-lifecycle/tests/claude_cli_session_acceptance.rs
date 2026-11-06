@@ -23,6 +23,46 @@ type SessionsBaseResolver = Arc<dyn Fn(&str) -> Option<PathBuf> + Send + Sync>;
 type UserResolver = Arc<dyn Fn(&str) -> Option<String> + Send + Sync>;
 
 const VALID_TOKEN: &str = "valid-token";
+
+/// What the old argv builder produced, now rendered from the `claude` YAML spec's `run.argv`
+/// with the production binding (blank values trimmed away, as `harness_template_params`
+/// binds them): binary, model, session, permissions, prompt.
+#[allow(clippy::too_many_arguments)]
+fn spec_claude_argv(
+    binary: &str,
+    model: &str,
+    session_id: &str,
+    prompt: Option<&str>,
+    permission_mode: Option<&str>,
+    dangerously_skip_permissions: bool,
+    resume: bool,
+) -> Vec<String> {
+    let mut flags: Vec<&str> = Vec::new();
+    if resume {
+        flags.push("resume");
+    }
+    if dangerously_skip_permissions {
+        flags.push("dangerously_skip_permissions");
+    }
+    tddy_coding_agent_specs::CodingAgentRegistry::builtin_cached()
+        .get("claude")
+        .expect("the claude spec loads")
+        .render_run_argv(
+            std::path::Path::new(binary),
+            &[
+                ("model", model.trim()),
+                ("session_id", session_id),
+                (
+                    "permission_mode",
+                    permission_mode.map(str::trim).unwrap_or(""),
+                ),
+                ("prompt", prompt.map(str::trim).unwrap_or("")),
+            ],
+            &flags,
+        )
+        .expect("the claude argv renders")
+}
+
 /// The launch argv a `claude` session runs, rendered from its YAML spec with the stub as its
 /// binary: the manager spawns what it is given, so the argv these tests assert on comes from
 /// the spec (`packages/tddy-coding-agent-specs/specs/claude.yaml`), as production renders it.
@@ -832,7 +872,7 @@ async fn a_claude_cli_start_whose_binary_is_not_found_is_refused_naming_its_bina
 #[test]
 fn build_claude_argv_includes_positional_prompt_when_present() {
     // When / Then
-    let argv = CliSessionManager::build_claude_argv(
+    let argv = spec_claude_argv(
         "/usr/local/bin/claude",
         "claude-opus-4-8",
         "test-session-id",
@@ -875,7 +915,7 @@ fn build_claude_argv_omits_when_empty_or_none() {
 
     // When / Then
     assert_eq!(
-        CliSessionManager::build_claude_argv(
+        spec_claude_argv(
             "/usr/local/bin/claude",
             "claude-opus-4-8",
             "sid",
@@ -888,7 +928,7 @@ fn build_claude_argv_omits_when_empty_or_none() {
         "None initial_prompt must produce no positional arg"
     );
     assert_eq!(
-        CliSessionManager::build_claude_argv(
+        spec_claude_argv(
             "/usr/local/bin/claude",
             "claude-opus-4-8",
             "sid",
@@ -901,7 +941,7 @@ fn build_claude_argv_omits_when_empty_or_none() {
         "empty string must produce no positional arg"
     );
     assert_eq!(
-        CliSessionManager::build_claude_argv(
+        spec_claude_argv(
             "/usr/local/bin/claude",
             "claude-opus-4-8",
             "sid",
@@ -932,7 +972,15 @@ async fn claude_cli_session_passes_initial_prompt_as_positional_arg() {
             "test-session-with-prompt",
             worktree_dir.path().to_path_buf(),
             "claude-opus-4-8",
-            a_claude_argv(&stub_path, "test-session-with-prompt", None, false),
+            spec_claude_argv(
+                stub_path.to_str().unwrap(),
+                TEST_MODEL,
+                "test-session-with-prompt",
+                Some("build a hello world app"),
+                None,
+                false,
+                false,
+            ),
             "claude-cli",
             Some("build a hello world app"),
             None,
@@ -975,7 +1023,15 @@ async fn claude_cli_session_empty_prompt_adds_no_positional_arg() {
             "test-session-empty-prompt",
             worktree_dir.path().to_path_buf(),
             "claude-opus-4-8",
-            a_claude_argv(&stub_path, "test-session-empty-prompt", None, false),
+            spec_claude_argv(
+                stub_path.to_str().unwrap(),
+                TEST_MODEL,
+                "test-session-empty-prompt",
+                Some(""),
+                None,
+                false,
+                false,
+            ),
             "claude-cli",
             Some(""), // empty — must not add a stray positional arg
             None,
@@ -1096,7 +1152,15 @@ async fn resume_does_not_replay_initial_prompt() {
             "test-session-resume-noreplay",
             worktree_dir.path().to_path_buf(),
             "claude-opus-4-8",
-            a_claude_argv(&stub_path, "test-session-resume-noreplay", None, false),
+            spec_claude_argv(
+                stub_path.to_str().unwrap(),
+                TEST_MODEL,
+                "test-session-resume-noreplay",
+                Some("original prompt"),
+                None,
+                false,
+                false,
+            ),
             "claude-cli",
             Some("original prompt"),
             None,

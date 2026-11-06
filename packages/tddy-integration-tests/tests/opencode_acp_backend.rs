@@ -8,27 +8,32 @@ use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 
 use serial_test::serial;
-use tddy_core::backend::{resolve_agent_models, BackendCliPaths};
 use tddy_core::provider_route::{HarnessRoute, RouteFile, RouteSecret};
 use tddy_core::CodingBackend;
 
-/// A spec backend for the stub agent, as the agent's spec builds it: its routed agent and a
-/// command that spawns the stub.
+/// A spec backend for the stub agent, as the agent's spec builds it: its routed agent (from
+/// `opencode.yaml`, so a provider route is accepted), a command that spawns the stub, and the
+/// hooks adapter its spec names, which materialises a route's config file for the agent.
 fn a_spec_backend(path: std::path::PathBuf) -> tddy_core::SpecAcpBackend {
+    let spec = tddy_coding_agent_specs::embedded_spec("opencode").expect("the opencode spec loads");
+    let hooks = tddy_agent_backend::adapters::AcpHooksAdapters::builtin()
+        .get(
+            spec.acp()
+                .and_then(|acp| acp.hooks_adapter.as_deref())
+                .expect("opencode's spec names a hooks adapter"),
+        )
+        .expect("this build has opencode's hooks adapter");
     tddy_core::SpecAcpBackend::new(
-        tddy_core::provider_route::RoutedAgent {
-            id: "opencode".to_string(),
-            product: "OpenCode".to_string(),
-            support: tddy_core::provider_route::RouteSupport::default(),
-            key_env: None,
-        },
+        tddy_coding_agent_specs::routed_agent(&spec),
         tddy_core::AcpAgentCommand {
             program: path,
-            args: Vec::new(),
+            // The spec's `acp.command`: the binary run as `opencode acp`.
+            args: vec!["acp".to_string()],
             env: Vec::new(),
             cwd: None,
         },
     )
+    .with_hooks(hooks, std::collections::BTreeMap::new())
 }
 
 fn stub_agent_path() -> PathBuf {
@@ -93,16 +98,11 @@ async fn list_models_asks_the_opencode_binary_it_is_given() {
     assert!(stub_agent_path().exists(), "build tddy-acp-stub first");
     with_an_empty_turn_scenario();
 
-    // When
-    let catalog = resolve_agent_models(
-        "opencode",
-        &BackendCliPaths {
-            opencode_cli_path: Some(stub_agent_path()),
-            ..BackendCliPaths::default()
-        },
-    )
-    .await
-    .expect("opencode is a known agent");
+    // When — the backend built for the binary it is given lists that agent's models
+    let catalog = a_spec_backend(stub_agent_path())
+        .list_models()
+        .await
+        .expect("opencode is a known agent");
 
     // Then
     assert!(!catalog.models.is_empty());
@@ -142,6 +142,7 @@ async fn a_routed_opencode_agent_gets_the_generated_config_and_key() {
     // When
     let _ = a_spec_backend(agent)
         .with_provider_route(route)
+        .expect("opencode's spec declares a route, so a provider route is accepted")
         .invoke(request)
         .await;
 

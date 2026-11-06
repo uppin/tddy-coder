@@ -7,7 +7,6 @@ mod common;
 use std::path::PathBuf;
 
 use serial_test::serial;
-use tddy_core::backend::codex_acp::DEFAULT_CODEX_ACP_BINARY;
 use tddy_core::CODEX_OAUTH_AUTHORIZE_URL_FILENAME;
 use tddy_core::{CodingBackend, InvokeRequest, SessionMode};
 
@@ -134,10 +133,16 @@ async fn codex_acp_backend_resume_uses_load_session() {
 
 #[test]
 fn default_codex_acp_binary_constant_matches_cli() {
-    // Given
+    // Given — the binary name is the spec's `binary.command` (`codex-acp.yaml`), not a constant
 
     // Then
-    assert_eq!(DEFAULT_CODEX_ACP_BINARY, "codex-acp");
+    assert_eq!(
+        tddy_coding_agent_specs::CodingAgentRegistry::builtin_cached()
+            .tools()
+            .get("codex-acp")
+            .map(|tool| tool.binary.command.as_str()),
+        Some("codex-acp")
+    );
 }
 
 #[test]

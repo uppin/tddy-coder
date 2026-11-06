@@ -32,6 +32,10 @@ pretty_assertions = { workspace = true }
 tddy-testing-commons = { path = "../tddy-testing-commons" }
 
 [dev-dependencies]
+# Test fixtures are built from the agents' YAML specs (their routed-agent shape, their binary
+# names) — the specs are data for tests here, never a production dependency of this crate.
+tddy-coding-agent-specs = { path = "../tddy-coding-agent-specs" }
+tddy-agent-backend = { path = "../tddy-agent-backend" }
 tddy-coder = { path = "../tddy-coder" }
 tddy-actions = { path = "../tddy-actions" }
 tddy-sandbox-runner = { path = "../tddy-sandbox-runner" }

@@ -69,7 +69,12 @@ fn an_acp_allowed_agent_is_a_coding_agent_on_its_default_model() {
     assert_eq!(defs[0].label.as_deref(), Some("Claude (ACP)"));
     assert_eq!(
         defs[0].model,
-        tddy_agent_backend::default_model_for_agent("claude-acp")
+        tddy_coding_agent_specs::CodingAgentRegistry::builtin_cached()
+            .get("claude-acp")
+            .expect("the claude-acp spec loads")
+            .agent
+            .models
+            .default
     );
     assert_eq!(defs[0].provider_account, None);
 }
