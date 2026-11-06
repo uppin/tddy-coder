@@ -28,7 +28,6 @@ use serial_test::serial;
 use tddy_connectrpc::connect_router;
 use tddy_core::session_lifecycle::unified_session_dir_path;
 use tddy_core::SessionMetadata;
-use tddy_daemon::config::DaemonConfig;
 use tddy_daemon_rpc::test_util::TestDaemon;
 use tddy_livekit::LiveKitParticipant;
 use tddy_livekit_testkit::LiveKitTestkit;
@@ -261,7 +260,8 @@ async fn a_fleet_with_peers(peers: &[(&str, &[&str])], model_base_url: &str) -> 
         repos_bases.push(repos_base);
         let (cfg_dir, cfg_path) =
             write_daemon_yaml(&ws_url, Some(instance_id), &os_user, &repos_base_path);
-        let config = DaemonConfig::load(&cfg_path).expect("peer config");
+        let config = tddy_session_lifecycle::test_util::daemon_config_from_fixture_file(&cfg_path)
+            .expect("peer config");
         configs.push(cfg_dir);
 
         let sessions = tempfile::tempdir().expect("peer sessions tempdir");
@@ -326,7 +326,8 @@ async fn a_fleet_with_peers(peers: &[(&str, &[&str])], model_base_url: &str) -> 
     let repos_base_path_a = repos_base_a.path().to_string_lossy().into_owned();
     repos_bases.push(repos_base_a);
     let (cfg_dir_a, cfg_path_a) = write_daemon_yaml(&ws_url, None, &os_user, &repos_base_path_a);
-    let config_a = DaemonConfig::load(&cfg_path_a).expect("daemon A config");
+    let config_a = tddy_session_lifecycle::test_util::daemon_config_from_fixture_file(&cfg_path_a)
+        .expect("daemon A config");
     configs.push(cfg_dir_a);
 
     let sessions_a = tempfile::tempdir().expect("sessions A tempdir");

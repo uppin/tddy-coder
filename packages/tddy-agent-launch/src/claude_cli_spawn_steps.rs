@@ -378,6 +378,8 @@ pub(super) struct ClaudeCliProcess<'a> {
     pub(super) run_in_tmux: bool,
     /// The session's directory: a tmux-run agent's pane environment file is written under it.
     pub(super) session_dir: PathBuf,
+    /// The SSH target the worktree lives on; empty for a local checkout.
+    pub(super) ssh_alias: String,
 }
 
 /// A started claude-cli agent: the pid the session records, and the tmux session it runs in when
@@ -458,6 +460,7 @@ impl ClaudeCliProcess<'_> {
     ) -> anyhow::Result<Arc<PtyHandle>> {
         let (extra_args, toolset) = spec_role_launch(role.main.as_ref());
         launch_claude_cli(ClaudeCliLaunch {
+            remote_host: Some(self.ssh_alias.as_str()).filter(|alias| !alias.is_empty()),
             agents,
             config,
             manager: &self.manager,

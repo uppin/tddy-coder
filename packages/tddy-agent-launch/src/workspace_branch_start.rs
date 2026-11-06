@@ -114,6 +114,8 @@ impl LaunchSessions {
             sessions_base,
             session_id,
             projects_dir.as_deref(),
+            // A `workspace` session owns its worktree whatever agents the host has.
+            None,
         ) {
             log::warn!(
                 "StartSession: could not remove session {session_id} after its \

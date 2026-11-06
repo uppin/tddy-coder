@@ -232,6 +232,7 @@ fn a_codebase_host_in_a_common_room() -> ACodebaseHostInACommonRoom {
         Arc::new(NoOperatorChannel),
         Arc::new(ClaudeCliSessionManager::new()),
     )
+    .with_coding_agents_if_none(tddy_session_lifecycle::test_util::builtin_coding_agents())
     .with_session_reach(Arc::new(ASessionRoomThatOpens));
 
     ACodebaseHostInACommonRoom {

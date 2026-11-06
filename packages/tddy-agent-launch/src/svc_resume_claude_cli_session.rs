@@ -203,6 +203,7 @@ impl LaunchSessions {
             Some(agents) => {
                 let (extra_args, toolset) = flags.spec_launch();
                 launch_claude_cli(ClaudeCliLaunch {
+                    remote_host: None,
                     agents,
                     config: &self.config,
                     manager: &self.claude_cli_manager,

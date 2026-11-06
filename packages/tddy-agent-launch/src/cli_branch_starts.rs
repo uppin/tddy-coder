@@ -41,7 +41,7 @@ impl LaunchSessions {
         &self,
         req: &StartSessionRequest,
     ) -> Result<(), Status> {
-        refuse_a_cli_start_without_a_model(req)?;
+        refuse_a_cli_start_without_a_model(req, self.coding_agents.as_deref())?;
         resolve_caller_chosen_session_id(&req.requested_session_id, req.session_type.trim())?;
         managed_recipe_for(req)?;
         let access = self.host.session_account_access(&req.session_token);

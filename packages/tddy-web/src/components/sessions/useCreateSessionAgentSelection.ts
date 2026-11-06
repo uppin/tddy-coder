@@ -31,6 +31,8 @@ export interface CreateSessionAgentSelection {
   /** The host whose agents the session can actually be started as. */
   agentHostInstanceId: string;
   selectedAgentId: string;
+  /** The provider kinds the selected agent's spec says a route can point it at; see `SelectableAgent`. */
+  selectedAgentRouteProviders: readonly string[] | undefined;
   /** The agent select's value for the selected agent; `""` when there is none. */
   selectedAgentValue: string;
 }
@@ -81,6 +83,7 @@ export function useCreateSessionAgentSelection({
     hostsAdvertised,
     agentHostInstanceId,
     selectedAgentId: selectedAgent?.id ?? "",
+    selectedAgentRouteProviders: selectedAgent?.routeProviders,
     selectedAgentValue:
       selectedAgent === null ? "" : selectableAgentValue(selectedAgent, hostsAdvertised),
   };

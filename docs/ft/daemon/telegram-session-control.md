@@ -53,6 +53,7 @@ Full-daemon wiring (OAuth callback **`state`** validation on the HTTP side, **`T
 - If a live PID exists in **`.session.yaml`**, the daemon terminates the process before directory removal.
 - The session's room is closed first, through the `SessionRooms` port, before the directory goes.
 - Bot sends a confirmation message after successful deletion.
+- A `/delete` does not remove an agent session's git worktree: only `ConnectionService::DeleteSession` passes the host's coding agents that decide which sessions' worktrees go (known gap, owned by the `#agent-tools` node `agent-config-removal`).
 
 ### Branch/worktree intent (`/start-workflow` after recipe)
 

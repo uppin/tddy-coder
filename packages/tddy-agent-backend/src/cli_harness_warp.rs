@@ -66,4 +66,5 @@ pub const WARP_CLI: CliHarness = CliHarness {
     route_config_env: None,
     argv: warp_argv,
     models: CliModelSource::Curated(warp_cli_models),
+    requires_model: false,
 };

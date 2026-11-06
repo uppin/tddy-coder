@@ -44,7 +44,10 @@ run on the account at all is the [capability matrix](provider-accounts.md#runnin
 ## In the agent list
 
 `ListAgents` offers every profile after the configured agents and registry assistants, under its
-`label` (or name); its id is the profile name.
+`label` (or name); its id is the profile name. A row whose id names a spec in the host's coding-agent
+registry (built-in or `<tddyhome>/tools/<id>.yaml`) is a `CODING_AGENT` row carrying that spec's `harness`
+and `route_providers`; the create-session pane asks for provider routes only when `route_providers` is
+non-empty. Every other row is `MODEL`.
 
 A profile whose harness speaks ACP (`claude-acp`, `codex-acp`, `opencode`) is also offered by
 `ListSubagents` as a **coding agent** a session can attach to its roster — see

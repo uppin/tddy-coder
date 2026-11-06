@@ -45,7 +45,8 @@ claude_cli:
     );
     let config_path = dir.path().join("daemon.yaml");
     std::fs::write(&config_path, yaml).unwrap();
-    let config = DaemonConfig::load(&config_path).expect("config must parse");
+    let config = tddy_session_lifecycle::test_util::daemon_config_from_fixture_file(&config_path)
+        .expect("config must parse");
     (dir, config)
 }
 
@@ -76,6 +77,7 @@ fn minimal_service_with_manager(
         Arc::new(tddy_daemon_kernel::operator_channel::NoOperatorChannel),
         manager,
     )
+    .with_coding_agents_if_none(tddy_session_lifecycle::test_util::builtin_coding_agents())
 }
 
 /// Create a git repo with an origin remote pointing at itself so worktree setup succeeds.

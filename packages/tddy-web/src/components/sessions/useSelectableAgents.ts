@@ -40,6 +40,7 @@ const AGENT_READER: HostReader<CatalogClient, SelectableAgent> = {
       id: info.id,
       label: info.label,
       daemonInstanceId,
+      routeProviders: info.routeProviders,
     }));
   },
   // `id@host` is unique across hosts by construction, and reusing the option value's format keeps the

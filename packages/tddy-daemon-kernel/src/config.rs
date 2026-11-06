@@ -299,6 +299,7 @@ pub(crate) mod access;
 mod agent_cli;
 mod daemon_methods;
 mod env_overrides;
+mod removed_agent_keys;
 mod sandbox_paths;
 mod screen_sharing;
 mod sections;
@@ -315,6 +316,8 @@ pub use agent_cli::{
     CLAUDE_BINARY_ENV, CLAUDE_FULLSCREEN_ENV, CLAUDE_HOME_ENV, CURSOR_BINARY_ENV, CURSOR_HOME_ENV,
     DEFAULT_ANSWER_WAIT_SECS,
 };
+
+pub use removed_agent_keys::{refuse_removed_agent_keys, RemovedAgentConfigError, RemovedAgentKey};
 
 use crate::config::access::AllowedTool;
 #[cfg(test)]

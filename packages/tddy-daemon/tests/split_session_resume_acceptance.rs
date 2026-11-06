@@ -198,7 +198,8 @@ livekit:
     );
     let config_path = dir.path().join("daemon.yaml");
     std::fs::write(&config_path, yaml).unwrap();
-    let config = DaemonConfig::load(&config_path).expect("config must parse");
+    let config = tddy_session_lifecycle::test_util::daemon_config_from_fixture_file(&config_path)
+        .expect("config must parse");
     (dir, config)
 }
 
@@ -250,6 +251,7 @@ fn a_service(config: DaemonConfig, sessions_base: PathBuf) -> DaemonSessionHost 
         Arc::new(tddy_daemon_kernel::operator_channel::NoOperatorChannel),
         Arc::new(ClaudeCliSessionManager::new()),
     )
+    .with_coding_agents_if_none(tddy_session_lifecycle::test_util::builtin_coding_agents())
     .with_session_tokens(tokens);
     let rooms = Arc::new(tddy_daemon_livekit::session_room::SessionRoomRegistry::new());
     let service = daemon_rpc_participant::with_the_livekit_room_ports(
@@ -849,6 +851,7 @@ async fn refuse_a_resume_that_cannot_read_the_roster(
         Arc::new(tddy_daemon_kernel::operator_channel::NoOperatorChannel),
         Arc::new(ClaudeCliSessionManager::new()),
     )
+    .with_coding_agents_if_none(tddy_session_lifecycle::test_util::builtin_coding_agents())
     .with_session_tokens(SessionTokens::new(
         &the_signing_key_of(FACILITATING_INSTANCE_ID),
         Arc::new(StandaloneKeyDirectory),

@@ -31,6 +31,18 @@ service CatalogService {
 message AgentInfo {
   string id = 1;
   string label = 2;
+  // CODING_AGENT for an agent the daemon's coding-agent registry holds (a spec, built in or a
+  // `<tddyhome>/tools/<id>.yaml`); MODEL for a specialized agent definition or registry assistant
+  // (`#agent-tools 12/12`).
+  types.AgentKind kind = 3;
+  // For a CODING_AGENT row, the id of the spec it runs (`claude`, `codex-acp`, `opencode`). Empty
+  // for MODEL rows.
+  string harness = 4;
+  // The provider kinds a route can point this agent at, as its spec's `route.providers` spells
+  // them (`anthropic`, `openai_responses`, `openai_chat`, `meta`). Empty for an agent that always
+  // runs on its own vendor and for every MODEL row: a picker asks `ListProviderRoutes` only when
+  // this is non-empty.
+  repeated string route_providers = 5;
 }
 
 message ListAgentModelsRequest {

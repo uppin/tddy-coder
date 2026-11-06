@@ -168,7 +168,7 @@ Claude-specific flag (`--claude-binary`, `--claude-arg`, `--permission-mode`, `-
 `--append-system-prompt-file`) reaches the runner from the daemon.
 
 **The home's location.** The daemon's jailed Claude home is always `<tddyhome>/homes/claude`:
-daemon.yaml `claude_cli.claude_home_dir` and `TDDY_SANDBOX_CLAUDE_HOME` do not decide it (the
+the spec's `home.key` (`claude`) and `TDDY_SANDBOX_CLAUDE_HOME` do not move it (the
 standalone `tddy-sandbox-app` still uses its own `claude_home_dir`). The first sandboxed start finding
 `<tddyhome>/sandbox-claude-home` renames it to `homes/claude` once, credentials and history kept. A
 start that finds both refuses with `FAILED_PRECONDITION` naming both, and touches neither. A custom
@@ -452,11 +452,12 @@ extensions:
     context_globs: [AGENTS.md, ".agents/**", CLAUDE.md, ".claude/**", .mcp.json]
 ```
 
-- **Binary.** daemon.yaml `claude_cli.binary_path`, when it names a path, overrides the spec's
-  binary. Otherwise `TDDY_CLAUDE_BINARY` applies, then the host auto-resolution (`~/.local/bin`, then
+- **Binary.** A `<tddyhome>/tools/claude.yaml` override's `binary.command` replaces the spec's
+  binary; `TDDY_CLAUDE_BINARY` applies, then the host auto-resolution (`~/.local/bin`, then
   `PATH` without wrapper shims), then the spec's `PATH` search. `tddy-tools` resolves through
-  `TDDY_TOOLS_BINARY`, then daemon.yaml `claude_cli.tddy_tools_path`, `CARGO_BIN_EXE_tddy-tools` or the
-  daemon's sibling, then `PATH`.
+  `TDDY_TOOLS_BINARY`, then `CARGO_BIN_EXE_tddy-tools` or the daemon's sibling, then `PATH`; its
+  `binary.command` is overridden by `<tddyhome>/tools/tddy-tools.yaml`. daemon.yaml `claude_cli:`
+  (`binary_path`, `tddy_tools_path`) is refused at start-up.
 - **Argv.** The template renders the session's model, id, permission mode (default `auto`), resume
   flag and first prompt. A blank prompt is no prompt. The slot flags sit before the positional
   prompt: `--mcp-config` is variadic, so the `strict_flag` that follows the config path keeps the
@@ -528,14 +529,9 @@ host the agent also inherits the daemon's environment; a sandboxed agent's envir
 so the variable has to be added there too. Both paths add it from one helper,
 `DaemonConfig::claude_cli_renderer_env`.
 
-```yaml
-claude_cli:
-  fullscreen: false   # default true; also true when `claude_cli:` is absent
-```
-
-`false` leaves the renderer to Claude (its own setting, or `/tui`). Forcing it also overrides Claude's
-own switch back to the classic renderer after a fullscreen launch failed to start, so a machine where
-fullscreen crashes needs `fullscreen: false`.
+daemon.yaml `claude_cli.fullscreen` is refused at start-up: the field moved to the spec's `run.env`
+(`<tddyhome>/tools/claude.yaml`). Forcing the renderer also overrides Claude's own switch back to the
+classic renderer after a fullscreen launch failed to start.
 
 ## Session table display
 
@@ -601,8 +597,8 @@ so the activity log carries no row for it at all.
 
 The `PermissionRequest` hook and the `PreToolUse` hook of `AskUserQuestion` (matched to that tool
 alone) run `session-hook --await-answer --await-timeout-secs <wait + 5>`, with Claude's hook
-`timeout` set to `<wait + 10>`, where `<wait>` is `claude_cli.answer_wait_secs`
-(default 120). After its report it calls `ActivityService.AwaitQuestionAnswer` with the report's
+`timeout` set to `<wait + 10>`, where `<wait>` is the answer wait, 120 s (the spec declares it as
+`coding_agent.answer_wait_secs`; the hook timeout and `AwaitQuestionAnswer` use the 120 s default). After its report it calls `ActivityService.AwaitQuestionAnswer` with the report's
 `request_id` and, for a permission, Claude's `permission_suggestions` (as JSON; empty when none). A
 `PreToolUse` of any other tool never waits. The daemon, with the
 same authentication as `ReportSessionStatus`:
@@ -665,7 +661,9 @@ the wait ends.
 The resulting JSON is written to `<worktree>/.claude/settings.local.json`. The `hook_token` is also
 stored in `.session.yaml` for validation on inbound `ReportSessionStatus` calls.
 
-Config (`claude_cli:` block) may override `tddy_tools_path` (default: `current_exe` sibling → `"tddy-tools"`), `daemon_url` (default: `http://127.0.0.1:{web_port}`) and `answer_wait_secs` (default 120).
+The `tddy-tools` binary is `binary.command` of `tools/tddy-tools.yaml` (default: `current_exe` sibling → `"tddy-tools"`), the hook's `daemon_url` is the daemon's `listen.advertise_url` (default: `http://127.0.0.1:{web_port}`) and `answer_wait_secs` is 120. A daemon.yaml `claude_cli:` block is refused at start-up.
+
+**Capabilities.** The `claude` spec declares `hooks`, `ask_user_question`, `split_host`, `project_home_main`, `requires_model`, `branch_name_required` and `operator_notify`. Hook status reports need `hooks`; `AwaitQuestionAnswer` needs `ask_user_question`; operator notifications and the `notify` tool need `operator_notify`; a split or sandboxed-codebase placement needs `split_host`. Gates read the spec, not the session-type string.
 
 ### Which transport a hook reports over
 

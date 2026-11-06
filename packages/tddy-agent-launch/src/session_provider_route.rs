@@ -219,16 +219,29 @@ pub fn start_route(
     }))
 }
 
+/// The refusal of a provider account for an agent no provider route serves: one dropped into
+/// `<tddy-home>/tools` has no route body, so it runs on its own setup or not at all.
+// TODO(route-support): #agent-tools n13 `route-support` — route bodies are still selected by
+// `provider_route::Harness`, not by the spec's `route.providers`/`shape` (docs/dev/todo/2026-11-04-provider-route-harness-enum-remains.md).
+pub(crate) fn no_provider_route_serves_the_agent() -> Status {
+    Status::failed_precondition(
+        "no provider route serves this agent: it can run only on its own setup",
+    )
+}
+
 /// The route a resumed session runs on: the account its start recorded, re-resolved against the
 /// owner's vault as it stands now. `None` for a session on its vendor.
 pub fn resume_route(
     access: &SessionAccountAccess,
-    harness: Harness,
+    harness: impl Into<Option<Harness>>,
     session_dir: &Path,
 ) -> Result<Option<HarnessRoute>, Status> {
     let (sources, model) = route_sources_on_resume(session_dir)?;
     let Some(model) = model else {
         return Ok(None);
+    };
+    let Some(harness) = harness.into() else {
+        return Err(no_provider_route_serves_the_agent());
     };
     resolve_session_route(access, harness, &sources, &model)
 }
@@ -237,7 +250,7 @@ pub fn resume_route(
 /// re-resolved against the owner's vault as it stands now. Empty for a session on its vendor.
 pub fn resume_route_env(
     access: &SessionAccountAccess,
-    harness: Harness,
+    harness: impl Into<Option<Harness>>,
     session_dir: &Path,
 ) -> Result<Vec<(String, String)>, Status> {
     Ok(resume_route(access, harness, session_dir)?
@@ -252,7 +265,7 @@ pub fn resume_route_env(
 /// re-applies them. The jail receives the route through its secret files and environment.
 pub fn sandboxed_start_route(
     access: &SessionAccountAccess,
-    harness: Harness,
+    harness: impl Into<Option<Harness>>,
     sources: &RouteSources,
     model: &str,
     session_dir: &Path,
@@ -260,6 +273,9 @@ pub fn sandboxed_start_route(
     let Some(account_id) = choose_route(sources) else {
         return Ok(None);
     };
+    let harness = harness
+        .into()
+        .ok_or_else(no_provider_route_serves_the_agent)?;
     let route = route_on_account(access, harness, &account_id, model)?;
     std::fs::create_dir_all(session_dir)
         .map_err(|e| Status::internal(format!("failed to create session dir: {e}")))?;

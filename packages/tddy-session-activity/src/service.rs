@@ -32,7 +32,9 @@ mod rpc;
 pub use question_answers::AnswerWaitPorts;
 
 use std::path::PathBuf;
+use std::sync::Arc;
 
+use tddy_coding_agent_specs::{Capability, CodingAgentRegistry};
 use tddy_core::session_lifecycle::{unified_session_dir_path, validate_session_id_segment};
 use tddy_daemon_kernel::HOST_DOCUMENT_FRAME_BYTES;
 use tddy_rpc::{Response, Status};
@@ -49,6 +51,10 @@ pub struct ActivityServiceImpl {
     ports: ActivityPorts,
     /// What `AwaitQuestionAnswer` holds a hook with (`#home-inbox` 6/8).
     answers: AnswerWaitPorts,
+    /// The coding agents whose declared capabilities gate the hook-driven RPCs
+    /// (`#agent-tools 12/12`). Empty until [`Self::with_agents`]: a host with no coding agents
+    /// refuses every hook report rather than guessing which sessions may make one.
+    agents: Arc<CodingAgentRegistry>,
 }
 
 impl ActivityServiceImpl {
@@ -59,7 +65,22 @@ impl ActivityServiceImpl {
         Self {
             ports,
             answers: AnswerWaitPorts::default(),
+            agents: Arc::new(CodingAgentRegistry::empty()),
         }
+    }
+
+    /// Gate the hook-driven RPCs on the capabilities `agents` declare (builder).
+    #[must_use]
+    pub fn with_agents(mut self, agents: Arc<CodingAgentRegistry>) -> Self {
+        self.agents = agents;
+        self
+    }
+
+    /// Whether the session of `session_type` runs an agent that declares `capability`.
+    fn session_offers(&self, session_type: &str, capability: Capability) -> bool {
+        self.agents
+            .for_session_type(session_type)
+            .is_some_and(|spec| spec.has(capability))
     }
 
     /// Hold `AwaitQuestionAnswer` callers with `answers` (builder).

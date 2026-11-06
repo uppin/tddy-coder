@@ -22,7 +22,6 @@ use prost::Message;
 use serial_test::serial;
 use tddy_core::session_lifecycle::unified_session_dir_path;
 use tddy_daemon_extensions::IntegrationStatusBoard;
-use tddy_daemon_kernel::config::DaemonConfig;
 use tddy_daemon_livekit::session_room::{session_room_name, SessionRoomRegistry};
 use tddy_daemon_livekit::{LiveKitSessionReach, LIVEKIT_INTEGRATION_ID};
 use tddy_livekit::{LiveKitRpcClientFactory, RpcClient};
@@ -231,7 +230,9 @@ impl FacilitatingDaemon {
             .build();
 
         let (config_dir, config_path) = write_daemon_yaml(&ws_url, &os_user, &claude_stub);
-        let config = DaemonConfig::load(&config_path).expect("daemon.yaml must load");
+        let config =
+            tddy_session_lifecycle::test_util::daemon_config_from_fixture_file(&config_path)
+                .expect("daemon.yaml must load");
 
         let sessions = tempfile::tempdir().unwrap();
         register_project(&sessions.path().join("projects"), repo_dir.path());
@@ -262,6 +263,7 @@ impl FacilitatingDaemon {
             Arc::new(tddy_daemon_kernel::operator_channel::NoOperatorChannel),
             Arc::new(tddy_session_lifecycle::claude_cli_session::ClaudeCliSessionManager::new()),
         )
+        .with_coding_agents_if_none(tddy_session_lifecycle::test_util::builtin_coding_agents())
         .with_staging_base_dir(staging.path().to_path_buf())
         .with_session_rooms(rooms)
         .with_session_reach(reach.clone());

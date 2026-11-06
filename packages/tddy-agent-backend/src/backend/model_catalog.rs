@@ -40,10 +40,12 @@ pub struct BackendCliPaths {
 impl BackendCliPaths {
     /// The override for the binary a CLI harness lists its models with, when one was given.
     fn listing_binary_override(&self, session_type: &str) -> Option<&Path> {
-        match session_type {
-            "opencode-cli" => self.opencode_cli_path.as_deref(),
-            _ => None,
-        }
+        // The legacy per-session-type override table (`TODO(harness-clis)`: goes with `cli_harness`).
+        let overrides = [("opencode-cli", self.opencode_cli_path.as_deref())];
+        overrides
+            .into_iter()
+            .find(|(listed, _)| *listed == session_type)
+            .and_then(|(_, path)| path)
     }
 }
 

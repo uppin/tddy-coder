@@ -9,10 +9,9 @@ use std::path::PathBuf;
 
 use crate::session_coordinate_handlers::bridge_conn_resume_response;
 
-use tddy_coding_agent_specs::spec_for_session_type;
 use tddy_core::read_session_metadata;
 
-use crate::harness_from_spec::cli_session_type;
+use crate::harness_from_spec::{cli_launcher, cli_session_type, CliLauncher};
 
 use tddy_core::session_lifecycle::unified_session_dir_path;
 
@@ -54,8 +53,15 @@ impl LaunchSessions {
         let metadata = read_session_metadata(&session_dir)
             .map_err(|_| Status::not_found("session not found"))?;
 
+        // Which resume path a CLI agent's session takes is read from the agent its recorded session
+        // type names in the host's registry.
+        let cli_launcher = cli_launcher(
+            self.coding_agents.as_deref(),
+            metadata.session_type.as_deref().unwrap_or(""),
+        )?;
+
         // --- claude-cli branch: resume without LiveKit ---
-        if metadata.session_type.as_deref() == Some("claude-cli") {
+        if cli_launcher == Some(CliLauncher::Claude) {
             return bridge_conn_resume_response(
                 self.resume_claude_cli_session(
                     os_user,
@@ -70,7 +76,7 @@ impl LaunchSessions {
         }
 
         // --- cursor-cli branch: resume without LiveKit ---
-        if metadata.session_type.as_deref() == Some("cursor-cli") {
+        if cli_launcher == Some(CliLauncher::Cursor) {
             return bridge_conn_resume_response(
                 self.resume_cursor_cli(os_user, &req, &session_dir, metadata)
                     .await,
@@ -79,12 +85,12 @@ impl LaunchSessions {
 
         // --- any other CLI coding agent its spec launches (opencode-cli, muse-cli, warp-cli): resume
         // without LiveKit ---
-        if let Some(session_type) = metadata
-            .session_type
-            .as_deref()
-            .filter(|session_type| spec_for_session_type(session_type).is_some())
-        {
-            let kind = cli_session_type(session_type)?;
+        if let (Some(CliLauncher::Generic), Some(session_type), Some(agents)) = (
+            cli_launcher,
+            metadata.session_type.as_deref(),
+            self.coding_agents.as_deref(),
+        ) {
+            let kind = cli_session_type(agents, session_type)?;
             // A sandboxed session resumes in its jail and never on the host's PTY.
             if metadata.sandbox == Some(true) {
                 return bridge_conn_resume_response(

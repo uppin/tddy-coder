@@ -315,7 +315,8 @@ async fn start_session_remote_daemon_instance_id_routes_to_peer() {
         tddy_session_lifecycle::peer_routing::PeerRouting::local_only(&config_b),
         Arc::new(tddy_daemon_kernel::operator_channel::NoOperatorChannel),
         Arc::new(tddy_session_lifecycle::claude_cli_session::ClaudeCliSessionManager::new()),
-    );
+    )
+    .with_coding_agents_if_none(tddy_session_lifecycle::test_util::builtin_coding_agents());
 
     // Daemon B's discovery participant: bare instance id, publishes the advertisement A discovers.
     tddy_daemon::runtime::spawn_common_room_discovery_task(
@@ -394,7 +395,8 @@ async fn start_session_remote_daemon_instance_id_routes_to_peer() {
         ),
         Arc::new(tddy_daemon_kernel::operator_channel::NoOperatorChannel),
         Arc::new(tddy_session_lifecycle::claude_cli_session::ClaudeCliSessionManager::new()),
-    );
+    )
+    .with_coding_agents_if_none(tddy_session_lifecycle::test_util::builtin_coding_agents());
 
     tokio::time::timeout(Duration::from_secs(45), async {
         loop {

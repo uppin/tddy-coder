@@ -17,6 +17,11 @@ export interface UseCreateSessionModelArgs {
   /** The agent a tool session starts as (empty when none is selectable). */
   selectedAgentId: string;
   daemonInstanceId: string;
+  /**
+   * The provider kinds the selected tool-session agent's spec says a route can point it at. Empty:
+   * no route is asked for. `undefined`: the catalog did not say, so the daemon is asked.
+   */
+  selectedAgentRouteProviders?: readonly string[];
   /** The caller's pre-filled model, if any. */
   initialModel: string | undefined;
 }
@@ -34,6 +39,7 @@ export function useCreateSessionModel({
   sessionType,
   selectedAgentId,
   daemonInstanceId,
+  selectedAgentRouteProviders,
   initialModel,
 }: UseCreateSessionModelArgs) {
   const [model, setModel] = useState(initialModel ?? "");
@@ -51,10 +57,13 @@ export function useCreateSessionModel({
   // harness, and a tool session runs the agent it picked. Warp runs only on its own vendor, so it
   // names no harness and no provider is looked up or offered for it. The daemon says which accounts
   // that harness can run on and why not; the form keeps no matrix of its own.
-  // TODO(tool-route): the catalog does not say which agents are specialized definitions, which are
-  // not harnesses; for one of those the form still asks the daemon, which answers "unknown harness"
-  // and so hides the field (docs/dev/todo/2026-10-22-tool-session-provider-picker-needs-harness-metadata.md).
-  const providerHarness = providerHarnessFor(sessionType, selectedAgentId);
+  // The catalog says which agents a route can point elsewhere (`AgentInfo.routeProviders`): a tool
+  // session's agent with none — a specialized definition, or an agent that always runs on its own
+  // vendor — is never asked about.
+  const providerHarness =
+    sessionType === "tool" && selectedAgentRouteProviders?.length === 0
+      ? null
+      : providerHarnessFor(sessionType, selectedAgentId);
   const providerRoutes = useProviderRoutes(accountsClient, sessionToken, providerHarness);
   // A provider choice belongs to the harness it was made for: switching session type or agent
   // clears it.

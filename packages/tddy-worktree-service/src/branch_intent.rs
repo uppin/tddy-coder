@@ -77,6 +77,21 @@ impl BranchIntentPolicy {
         }
     }
 
+    /// A CLI agent session of `session_type`, whose spec declares (`branch_name_required`) or does
+    /// not declare whether a `new_branch_from_base` must name its branch; where it need not, one is
+    /// generated under the session type (`#agent-tools 12/12`).
+    pub const fn cli_agent(session_type: &'static str, branch_name_required: bool) -> Self {
+        Self {
+            generated_branch_prefix: session_type,
+            blank_new_branch_name: if branch_name_required {
+                BlankNewBranchName::Refuse
+            } else {
+                BlankNewBranchName::Generate
+            },
+            unrecognized_intent: UnrecognizedIntent::DefaultToGeneratedBranch,
+        }
+    }
+
     /// A CLI harness that is cut a worktree of its own (`opencode-cli`, `muse-cli`): as cursor-cli,
     /// a `new_branch_from_base` with no name generates one, under the harness's session type.
     pub const fn cli_harness(session_type: &'static str) -> Self {

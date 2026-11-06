@@ -6,7 +6,6 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use tddy_core::session_lifecycle::unified_session_dir_path;
-use tddy_daemon_kernel::config::DaemonConfig;
 use tddy_rpc::{Request, RequestMetadata, RequestTransport};
 use tddy_service::proto::session::{
     ConnectSessionRequest, ConnectSessionResponse, DeleteSessionRequest, ResumeSessionRequest,
@@ -81,7 +80,8 @@ fn a_host_with_nothing_wired() -> AHostWithNothingWired {
         ),
     )
     .unwrap();
-    let config = DaemonConfig::load(&config_path).expect("daemon.yaml must load");
+    let config = tddy_session_lifecycle::test_util::daemon_config_from_fixture_file(&config_path)
+        .expect("daemon.yaml must load");
 
     let sessions = tempfile::tempdir().unwrap();
     let projects_dir = sessions.path().join("projects");
@@ -105,7 +105,8 @@ fn a_host_with_nothing_wired() -> AHostWithNothingWired {
         PeerRouting::local_only(&config),
         Arc::new(tddy_daemon_kernel::operator_channel::NoOperatorChannel),
         Arc::new(tddy_session_lifecycle::claude_cli_session::ClaudeCliSessionManager::new()),
-    );
+    )
+    .with_coding_agents_if_none(tddy_session_lifecycle::test_util::builtin_coding_agents());
     AHostWithNothingWired {
         host,
         sessions_base: sessions.path().to_path_buf(),

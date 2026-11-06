@@ -21,6 +21,14 @@ use tddy_daemon_kernel::session_notification::{
 };
 use tddy_daemon_kernel::AgentActivityHub;
 use tddy_rpc::{Code, Request, Status};
+
+/// The coding agents of a host with no overrides: every built-in spec, as the hook gates read them.
+fn the_builtin_agents() -> std::sync::Arc<tddy_coding_agent_specs::CodingAgentRegistry> {
+    std::sync::Arc::new(
+        tddy_coding_agent_specs::CodingAgentRegistry::builtin()
+            .expect("the built-in specs form a registry"),
+    )
+}
 use tddy_service::proto::activity::{
     ActivityService as _, ReportSessionStatusRequest, ReportSessionStatusResponse,
 };
@@ -85,7 +93,8 @@ impl AnActivityHost {
             session_labels: Arc::new(EverySessionIsLabelled),
             deltas: Arc::new(NoSessionDeltaStores),
             daemon_instance_id: THIS_HOST.to_string(),
-        });
+        })
+        .with_agents(the_builtin_agents());
         Self {
             data_dir,
             service,

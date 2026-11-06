@@ -234,6 +234,7 @@ fn a_daemon(sessions_base: PathBuf, discovery: Option<LiveKitDiscoveryHandles>) 
             Arc::new(tddy_daemon_kernel::operator_channel::NoOperatorChannel),
             Arc::new(ClaudeCliSessionManager::new()),
         )
+        .with_coding_agents_if_none(tddy_session_lifecycle::test_util::builtin_coding_agents())
         .with_session_tokens(this_daemons_session_tokens().clone()),
     ))
 }
@@ -297,6 +298,7 @@ fn a_placement_request() -> PlacementRequest {
         sandbox: false,
         sandboxed_codebase: false,
         session_type: "claude-cli".to_string(),
+        session_type_splits_host: true,
         recipe: String::new(),
         dangerously_skip_permissions: false,
     }
@@ -452,6 +454,7 @@ fn a_sandboxed_codebase_request_for_cursor_cli_is_refused_naming_the_withdrawabl
     // Given a cursor-cli request asking for the codebase to be jailed
     let request = PlacementRequest {
         session_type: "cursor-cli".to_string(),
+        session_type_splits_host: false,
         ..a_jailed_codebase_placement_request()
     };
 
@@ -471,6 +474,7 @@ fn a_sandboxed_codebase_request_for_a_tool_session_is_refused_naming_the_session
     // Given a tddy-coder tool session asking for the codebase to be jailed
     let request = PlacementRequest {
         session_type: "tool".to_string(),
+        session_type_splits_host: false,
         ..a_jailed_codebase_placement_request()
     };
 

@@ -241,17 +241,20 @@ fn test_service(
         Arc::new(move |_| Some(sessions_base.clone()));
     let user_resolver: UserResolver =
         Arc::new(|token| (token == TEST_TOKEN).then(|| "testuser".to_string()));
-    Arc::new(DaemonSessionHost::new(
-        config.clone(),
-        sessions_base_resolver,
-        tddy_data_dir,
-        user_resolver,
-        None,
-        tddy_spawn::supervisor_client::SpawnBackendChoice::ForkedWorker,
-        tddy_session_lifecycle::peer_routing::PeerRouting::local_only(&config),
-        Arc::new(tddy_daemon_kernel::operator_channel::NoOperatorChannel),
-        Arc::new(tddy_session_lifecycle::claude_cli_session::ClaudeCliSessionManager::new()),
-    ))
+    Arc::new(
+        DaemonSessionHost::new(
+            config.clone(),
+            sessions_base_resolver,
+            tddy_data_dir,
+            user_resolver,
+            None,
+            tddy_spawn::supervisor_client::SpawnBackendChoice::ForkedWorker,
+            tddy_session_lifecycle::peer_routing::PeerRouting::local_only(&config),
+            Arc::new(tddy_daemon_kernel::operator_channel::NoOperatorChannel),
+            Arc::new(tddy_session_lifecycle::claude_cli_session::ClaudeCliSessionManager::new()),
+        )
+        .with_coding_agents_if_none(tddy_session_lifecycle::test_util::builtin_coding_agents()),
+    )
     .session_files_service()
 }
 

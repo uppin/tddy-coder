@@ -72,7 +72,7 @@ Three existing terms are already spoken for and are **not** what this document m
 
 | Existing term | What it is | Not this |
 |---|---|---|
-| **Agent** (`ListAgents`) | A *coding backend*: `claude`, `cursor`, `codex-acp` | — |
+| **Agent** (`ListAgents`) | A *coding backend*: `claude`, `cursor`, `codex-acp`. A row the host's coding-agent registry holds is a `CODING_AGENT` carrying its spec's `harness` id and `route_providers`; any other is a `MODEL` row | — |
 | **Subagent sessions** | Peer *sessions* spawned under an orchestrator, linked by `orchestrator_session_id` | Not roster entries. They share the Agents tab's tree with roster agents, and the same `SessionAgentStatus` badge, but a daemon runs no loop for them |
 | **Assistant** (`models.proto`) | A registry row: model + prompt + tools, projected to a `SpecializedAgentDef` | One *source* of a roster agent, not the roster entry itself |
 
@@ -196,7 +196,10 @@ change what the running session's main agent is allowed to call; detaching and r
 
 ### Coding agents
 
-A roster entry is one of two **kinds**. A `MODEL` entry is a definition or registry assistant — a
+A host's coding agents are the specs of its coding-agent registry — the built-ins plus every
+`<tddyhome>/tools/<id>.yaml` that declares `coding_agent:` — so an agent that exists only as a YAML file is a
+coding agent without a code change; what it may do is its spec's `coding_agent.capabilities`, not a
+session-type string. A roster entry is one of two **kinds**. A `MODEL` entry is a definition or registry assistant — a
 model behind an endpoint, driven by tddy's own read/grep loop. A `CODING_AGENT` entry is a coding
 agent — Claude Code (`claude-agent-acp`), Codex (`codex-acp`), OpenCode (`opencode acp`) — that the
 daemon launches and talks to over ACP. Each ACP launch renders from the agent's tool definition

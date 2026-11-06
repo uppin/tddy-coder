@@ -89,7 +89,8 @@ fn a_daemon_config(stub_agent: &Path, renderer: Renderer) -> (tempfile::TempDir,
     );
     let config_path = dir.path().join("daemon.yaml");
     std::fs::write(&config_path, yaml).unwrap();
-    let config = DaemonConfig::load(&config_path).expect("config must parse");
+    let config = tddy_session_lifecycle::test_util::daemon_config_from_fixture_file(&config_path)
+        .expect("config must parse");
     (dir, config)
 }
 
@@ -121,7 +122,8 @@ fn a_session_host(
     sessions_base: PathBuf,
     manager: Arc<ClaudeCliSessionManager>,
 ) -> Arc<DaemonSessionHost> {
-    a_session_host_serving(config, sessions_base, manager, false)
+    // A host with no coding agents refuses every agent session, so every host here has them.
+    a_session_host_serving(config, sessions_base, manager, true)
 }
 
 /// A daemon that has its coding agents installed, as the runtime does: a sandboxed Claude is
@@ -169,6 +171,16 @@ fn a_session_host_serving(
         let tools_dir = std::fs::canonicalize(tools_dir).unwrap();
         let _ = std::fs::remove_file(tools_dir.join("tddy-tools"));
         std::os::unix::fs::symlink(tddy_tools_binary(), tools_dir.join("tddy-tools")).unwrap();
+        // The stub the config names stands for `claude` on the declared `PATH`.
+        if let Some(stub) = config
+            .claude_cli
+            .as_ref()
+            .map(|claude_cli| claude_cli.binary_path.clone())
+            .filter(|path| path.contains('/'))
+        {
+            let _ = std::fs::remove_file(tools_dir.join("claude"));
+            std::os::unix::fs::symlink(stub, tools_dir.join("claude")).unwrap();
+        }
         let registry =
             tddy_coding_agent_specs::load_agent_registry(&sessions_base_dir.join("tools"))
                 .expect("the agent registry loads");

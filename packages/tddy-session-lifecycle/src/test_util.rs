@@ -55,6 +55,38 @@ fn new_connection_service(sessions_base: PathBuf) -> Arc<DaemonSessionHost> {
     service
 }
 
+/// A fixture's `daemon.yaml` read as a typed [`DaemonConfig`], without the start-up refusal of the
+/// removed `claude_cli:`, `cursor_cli:` and `cli_harnesses:` sections (`#agent-tools 12/12`).
+///
+/// Fixtures that point an agent at a stub binary still set it through those sections, whose typed
+/// fields remain until their removal (`docs/dev/todo/2026-11-04-removed-agent-config-readers-remain.md`).
+/// Start-up never reads a config this way: it goes through [`DaemonConfig::load`], which refuses them.
+// TODO(agent-config-removal): #agent-tools n19 `agent-config-removal` — migrate the fixtures to a
+// `<tddyhome>/tools/<id>.yaml` override and delete this.
+pub fn daemon_config_from_fixture_file(path: &std::path::Path) -> anyhow::Result<DaemonConfig> {
+    let contents = std::fs::read_to_string(path)
+        .map_err(|e| anyhow::anyhow!("failed to read {}: {e}", path.display()))?;
+    serde_yaml::from_str(&contents)
+        .map_err(|e| anyhow::anyhow!("failed to parse {}: {e}", path.display()))
+}
+
+/// The coding agents of a fixture host: every built-in spec, with no `<tddyhome>/tools` overrides,
+/// resolved the way the daemon resolves them ([`tddy_agent_launch::host_coding_agents`]) — so
+/// `tddy-tools` is the build's own (`CARGO_BIN_EXE_tddy-tools`, or the sibling of the test binary in
+/// `target/debug`), never whichever one the developer's `PATH` happens to hold. What a suite that
+/// never wires its own coding agents gets, so the capability gates have agents to read.
+///
+/// # Panics
+/// When the built-in specs do not load, which no build passes.
+#[must_use]
+pub fn builtin_coding_agents() -> Arc<tddy_agent_launch::spec_launch::HostCodingAgents> {
+    tddy_agent_launch::host_coding_agents::host_coding_agents(
+        &DaemonConfig::default(),
+        std::path::Path::new("/nonexistent-tddy-home"),
+    )
+    .expect("the built-in coding agents load")
+}
+
 /// The host [`test_service`] wraps, before it goes behind its `Arc` — for a suite above this crate
 /// that must install more on it first (`tddy-daemon-rpc`'s families), and then calls
 /// [`DaemonSessionHost::install_sandbox_rpc_bridge`] itself, as [`test_service`] does.
@@ -82,6 +114,7 @@ pub fn test_host(sessions_base: PathBuf) -> DaemonSessionHost {
         Arc::new(tddy_daemon_kernel::operator_channel::NoOperatorChannel),
         Arc::new(CliSessionManager::new()),
     )
+    .with_coding_agents(builtin_coding_agents())
 }
 
 /// The credentials a [`signing_test_host`] accepts for [`TEST_USER`], each minted with that host's
@@ -149,7 +182,8 @@ pub fn signing_test_host(sessions_base: PathBuf) -> (DaemonSessionHost, SignedTe
         Arc::new(tddy_daemon_kernel::operator_channel::NoOperatorChannel),
         Arc::new(CliSessionManager::new()),
     )
-    .with_session_tokens(tokens);
+    .with_session_tokens(tokens)
+    .with_coding_agents(builtin_coding_agents());
     (host, credentials)
 }
 

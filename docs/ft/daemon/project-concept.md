@@ -491,7 +491,7 @@ The rule is "type only while you hold it", since leases are never released.
 
 A claude-cli session started by an orchestrator (its changeset's `orchestrator_session_id`) holds
 its `PermissionRequest` hook open for that orchestrator's decision, for at most
-`claude_cli.answer_wait_secs` ([Claude Code CLI session § Waiting for an orchestrator's answer](claude-cli-session.md#waiting-for-an-orchestrators-answer)).
+the answer wait (120 s; declared as `coding_agent.answer_wait_secs` in the agent's spec) ([Claude Code CLI session § Waiting for an orchestrator's answer](claude-cli-session.md#waiting-for-an-orchestrators-answer)).
 `AnswerSessionPermission` gives that decision.
 
 - **The request** is offered in the same shape as an ACP subagent's (`PermissionRequestView`): the

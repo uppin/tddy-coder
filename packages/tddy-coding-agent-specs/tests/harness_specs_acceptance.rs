@@ -8,7 +8,8 @@
 use pretty_assertions::assert_eq;
 use tddy_actions::tool::{ArgvItem, ToolRegistry};
 use tddy_coding_agent_specs::{
-    load_agent_registry, CodingAgentSpec, McpSlot, ModelsSection, Placement, ResumeSlot, RouteSlot,
+    load_agent_registry, CodingAgentSpec, McpSlot, ModelsSection, Placement, ProviderKind,
+    ResumeSlot, RouteShape, RouteSlot,
 };
 
 fn the_builtin_registry() -> (tempfile::TempDir, ToolRegistry) {
@@ -50,6 +51,8 @@ fn opencode_yaml_requires_a_route_in_a_jail_names_its_config_file_and_key_and_li
                 config_env: Some("OPENCODE_CONFIG".to_string()),
                 files_dir: Some("provider-route".to_string()),
                 key_env: Some("TDDY_OPENCODE_PROVIDER_KEY".to_string()),
+                providers: vec![ProviderKind::OpenaiResponses, ProviderKind::OpenaiChat],
+                shape: RouteShape::ConfigFile,
             }),
             ModelsSection {
                 default: String::new(),
@@ -91,6 +94,8 @@ fn muse_yaml_requires_a_route_in_a_jail_hands_its_key_in_meta_api_key_and_runs_w
                 config_env: None,
                 files_dir: None,
                 key_env: Some("META_API_KEY".to_string()),
+                providers: vec![ProviderKind::Meta],
+                shape: RouteShape::Env,
             }),
             "muse-spark-1.3".to_string(),
             None,

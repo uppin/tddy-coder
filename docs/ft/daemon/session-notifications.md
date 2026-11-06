@@ -49,7 +49,7 @@ every tool call into a message.
 ## Agent-written notifications
 
 Every other notification is a fixed sentence the daemon writes. An agent in a daemon-launched
-claude-cli or cursor-cli session can instead tell its operator, in its own words, what finished or
+session whose agent declares `operator_notify` (claude, cursor) can instead tell its operator, in its own words, what finished or
 what is blocked:
 
 ```bash
@@ -70,7 +70,7 @@ tddy-tools notify "Parallel run finished" --body "4 done, **1 blocked**" --level
   session's hooks already hold, so exporting them grants nothing new — see
   [Claude Code CLI session § Notifying the operator](claude-cli-session.md#notifying-the-operator).
 - **Authenticated like a hook.** `ActivityService.ReportOperatorNotification` refuses a session that
-  is not claude-cli or cursor-cli (`FAILED_PRECONDITION`), then a session that recorded no hook token
+  does not run an agent declaring `operator_notify` (`FAILED_PRECONDITION`), then a session that recorded no hook token
   or a token that does not match it (`PERMISSION_DENIED`).
 - **What is published.** One `ATTENTION_REQUIRED` notification with source `AGENT`. Its `text` is the
   title, so a surface that knows nothing of agent notifications still shows one line; beside it the
@@ -92,13 +92,13 @@ names the tool rather than the command:
   its session token and read its role from its own record; the daemon then presents the `hook_token`
   that session's `.session.yaml` records. The tool takes no session argument, so a session notifies
   as itself only, and the token is never in the tool's answer or a log.
-- **Refused, naming why.** A main that is not claude-cli or cursor-cli, or records no hook token, is
+- **Refused, naming why.** A main whose agent does not declare `operator_notify`, or records no hook token, is
   refused with `NotifyOperator: this session has no hook token (only claude-cli and cursor-cli
   sessions can notify)`; nothing is published. A session without the role is not offered the tool.
 - See [Project concept § Project-home tools](project-concept.md#project-home-tools).
 
 Who cannot notify: a sandboxed claude-cli session (it has no hooks and no hook token), and a
-standing-role main that is not claude-cli or cursor-cli.
+standing-role main whose agent does not declare `operator_notify`.
 
 ## The drawer indicator
 

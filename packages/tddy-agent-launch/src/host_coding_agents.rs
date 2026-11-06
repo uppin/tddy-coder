@@ -21,12 +21,14 @@ pub fn host_coding_agents(
 ) -> anyhow::Result<Arc<HostCodingAgents>> {
     let registry = load_agent_registry(&tddy_data_dir.join("tools"))
         .map_err(|e| anyhow::anyhow!("load the coding agent tools: {e}"))?;
-    Ok(Arc::new(HostCodingAgents::new(
+    let agents = HostCodingAgents::try_new(
         registry,
         Arc::new(DaemonToolHost {
             config: config.clone(),
         }),
-    )))
+    )
+    .map_err(|e| anyhow::anyhow!("load the coding agent tools: {e}"))?;
+    Ok(Arc::new(agents))
 }
 
 /// The daemon process as a [`ToolHost`], with `claude` and `tddy-tools` found the way the hand-built

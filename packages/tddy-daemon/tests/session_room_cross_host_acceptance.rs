@@ -25,7 +25,6 @@ use prost::Message;
 use serial_test::serial;
 use tddy_core::session_lifecycle::unified_session_dir_path;
 use tddy_daemon::common_room_key_directory::{advertised_signing_key, CommonRoomKeyDirectory};
-use tddy_daemon::config::DaemonConfig;
 use tddy_daemon::runtime::{spawn_common_room_discovery_task, split_room_hosting};
 use tddy_daemon_auth::{DaemonSigningKey, SessionTokens};
 use tddy_daemon_livekit::livekit_peer_discovery::{
@@ -277,7 +276,8 @@ async fn a_daemon(
     claude_binary: &str,
 ) -> Daemon {
     let (config_dir, config_path) = write_daemon_yaml(ws_url, instance_id, os_user, claude_binary);
-    let config = DaemonConfig::load(&config_path).expect("daemon.yaml must load");
+    let config = tddy_session_lifecycle::test_util::daemon_config_from_fixture_file(&config_path)
+        .expect("daemon.yaml must load");
 
     let sessions = tempfile::tempdir().unwrap();
     register_project(&sessions.path().join("projects"), repo);
@@ -321,6 +321,7 @@ async fn a_daemon(
         Arc::new(tddy_daemon_kernel::operator_channel::NoOperatorChannel),
         Arc::new(tddy_session_lifecycle::claude_cli_session::ClaudeCliSessionManager::new()),
     )
+    .with_coding_agents_if_none(tddy_session_lifecycle::test_util::builtin_coding_agents())
     .with_session_tokens(tokens);
     let rooms = Arc::new(tddy_daemon_livekit::session_room::SessionRoomRegistry::new());
     let service = daemon_rpc_participant::with_the_livekit_room_ports(

@@ -195,6 +195,7 @@ async fn a_daemon_with_a_registry() -> Harness {
             Arc::new(tddy_daemon_kernel::operator_channel::NoOperatorChannel),
             Arc::new(tddy_session_lifecycle::claude_cli_session::ClaudeCliSessionManager::new()),
         )
+        .with_coding_agents_if_none(tddy_session_lifecycle::test_util::builtin_coding_agents())
         .with_model_registry(Arc::clone(&store)),
     );
 

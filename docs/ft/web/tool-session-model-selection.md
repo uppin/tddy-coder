@@ -108,8 +108,9 @@ Constructs the backend for `<agent>` (same binary-resolution rules as `tddy-code
 A CLI session type is answered from its harness descriptor: `--agent claude-cli` and
 `--agent cursor-cli` return their curated catalogs, `--agent opencode-cli` runs `opencode models`
 (the binary `--opencode-cli-path` names, else `opencode`) and returns one model per printed line. The
-daemon forwards the binary it resolved for the harness (`cli_harnesses.opencode-cli.binary_path`)
-when that is an absolute path, as it does Cursor's.
+daemon forwards the binary it resolved for the harness (the `binary.command` of a
+`<tddyhome>/tools/opencode.yaml` override, or the environment variable the spec's `binary.env`
+names) when that is an absolute path, as it does Cursor's.
 
 ### Daemon
 
@@ -215,11 +216,6 @@ must not silently look available.
   catalogs all originate from the daemon/`tddy-core`.
 
 ## Known limitations
-
-- **The built-in option is labelled "Anthropic (built in)" for every harness**, including a Codex tool
-  session (whose vendor is OpenAI), and a specialized agent definition shows the daemon's "unknown
-  harness" reason in the field. Both need harness metadata from the daemon
-  (`docs/dev/todo/2026-10-22-tool-session-provider-picker-needs-harness-metadata.md`).
 
 - **Retained `CLAUDE_CLI_MODELS` for the legacy `ConnectionScreen`** — `CreateSessionPane` no longer
   reads the hardcoded `packages/tddy-web/src/constants/claudeCliModels.ts` `CLAUDE_CLI_MODELS`

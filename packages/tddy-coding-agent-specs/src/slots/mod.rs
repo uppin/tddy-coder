@@ -266,6 +266,8 @@ mod tests {
                 placements: crate::Placement::anywhere(),
                 variants: BTreeMap::new(),
                 acp: None,
+                capabilities: Default::default(),
+                answer_wait_secs: None,
             },
         }
     }

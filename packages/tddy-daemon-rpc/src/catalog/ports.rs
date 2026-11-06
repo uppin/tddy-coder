@@ -214,8 +214,10 @@ impl tddy_discovery::catalog_service::CatalogHandler for CatalogRpcHandler {
 /// the `opencode-cli` harness lists with (`opencode acp` and `opencode models`), so it resolves that
 /// harness's binary; every other agent or session type is its own harness, or none.
 fn listing_harness_session(agent: &str) -> &str {
-    match agent {
-        "opencode" => "opencode-cli",
-        other => other,
-    }
+    // TODO(harness-clis): goes with the legacy `cli_harness` descriptors this names.
+    const LISTED_AS: [(&str, &str); 1] = [("opencode", "opencode-cli")];
+    LISTED_AS
+        .iter()
+        .find(|(from, _)| *from == agent)
+        .map_or(agent, |(_, session_type)| session_type)
 }

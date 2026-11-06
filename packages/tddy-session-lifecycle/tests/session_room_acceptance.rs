@@ -403,7 +403,9 @@ impl FacilitatingDaemon {
         let common_room = a_lobby_of_its_own();
         let (config_dir, config_path) =
             write_daemon_yaml(ws_url.as_deref(), &common_room, &os_user, &claude_stub);
-        let config = DaemonConfig::load(&config_path).expect("daemon.yaml must load");
+        let config =
+            tddy_session_lifecycle::test_util::daemon_config_from_fixture_file(&config_path)
+                .expect("daemon.yaml must load");
 
         let sessions = tempfile::tempdir().unwrap();
         register_project(&sessions.path().join("projects"), repo_dir.path());
@@ -451,6 +453,7 @@ impl FacilitatingDaemon {
             Arc::new(tddy_daemon_kernel::operator_channel::NoOperatorChannel),
             Arc::clone(&agents),
         )
+        .with_coding_agents_if_none(tddy_session_lifecycle::test_util::builtin_coding_agents())
         .with_staging_base_dir(staging.path().to_path_buf())
         .with_session_rooms(rooms)
         .with_split_rooms(Arc::clone(&split_rooms));

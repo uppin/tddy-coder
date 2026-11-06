@@ -153,7 +153,8 @@ fn a_config_running(stub: &Path) -> (tempfile::TempDir, DaemonConfig) {
     );
     let path = dir.path().join("daemon.yaml");
     std::fs::write(&path, yaml).unwrap();
-    let config = DaemonConfig::load(&path).expect("config must parse");
+    let config = tddy_session_lifecycle::test_util::daemon_config_from_fixture_file(&path)
+        .expect("config must parse");
     (dir, config)
 }
 

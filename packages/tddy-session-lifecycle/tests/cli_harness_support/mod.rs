@@ -57,7 +57,8 @@ cli_harnesses:
     );
     let config_path = dir.path().join("daemon.yaml");
     std::fs::write(&config_path, yaml).unwrap();
-    DaemonConfig::load(&config_path).expect("config must parse")
+    tddy_session_lifecycle::test_util::daemon_config_from_fixture_file(&config_path)
+        .expect("config must parse")
 }
 
 /// A session host over `sessions_base` serving [`VALID_TOKEN`], with `manager` running its PTYs and

@@ -149,6 +149,8 @@ impl SplitSessions {
             sessions_base,
             checkout_session_id,
             projects_dir.as_deref(),
+            // The checkout is a `workspace` session: it owns its worktree whatever agents the host has.
+            None,
         ) {
             Ok(()) => log::info!(
                 "StartSession: tore down jailed checkout session {checkout_session_id} after its agent could not be spawned"

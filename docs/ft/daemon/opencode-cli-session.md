@@ -84,14 +84,19 @@ with the start's statuses.
 
 ## The binary
 
-The binary is resolved as: `TDDY_OPENCODE_CLI` when set and non-blank, else
-`cli_harnesses.opencode-cli.binary_path` in `daemon.yaml`, else `opencode` on `PATH`:
+The binary is resolved as: `TDDY_OPENCODE_CLI` (the spec's `binary.env`) when set and non-blank,
+else the `binary.command` of the `opencode` spec, `opencode` on `PATH`. A different binary is
+declared by overriding the spec ([Declared tools](../../../packages/tddy-actions/docs/declared-tools.md)):
 
 ```yaml
-cli_harnesses:
-  opencode-cli:
-    binary_path: /home/dev/.opencode/bin/opencode
+# <tddyhome>/tools/opencode.yaml — replaces the built-in `opencode` spec whole (same `id`)
+id: opencode
+binary: { command: /home/dev/.opencode/bin/opencode }
+# …the rest of the built-in spec, unchanged
 ```
+
+A `cli_harnesses:` section in `daemon.yaml` is refused at start-up
+([Removed `daemon.yaml` sections](systemd-install.md#removed-daemonyaml-sections)).
 
 The same resolution is used for the start, the resume and the model-list probe.
 

@@ -44,7 +44,11 @@ fn a_config_launching_claude_as(binary: &str) -> (tempfile::TempDir, DaemonConfi
     );
     let path = dir.path().join("daemon.yaml");
     std::fs::write(&path, yaml).expect("write the config");
-    (dir, DaemonConfig::load(&path).expect("the config parses"))
+    (
+        dir,
+        tddy_session_lifecycle::test_util::daemon_config_from_fixture_file(&path)
+            .expect("the config parses"),
+    )
 }
 
 fn a_session_host(config: DaemonConfig, sessions_base: PathBuf) -> DaemonSessionHost {
@@ -65,6 +69,7 @@ fn a_session_host(config: DaemonConfig, sessions_base: PathBuf) -> DaemonSession
         Arc::new(tddy_daemon_kernel::operator_channel::NoOperatorChannel),
         Arc::new(ClaudeCliSessionManager::new()),
     )
+    .with_coding_agents_if_none(tddy_session_lifecycle::test_util::builtin_coding_agents())
 }
 
 /// A daemon whose project must be cloned from `git_url` into `<sessions>/repos/<project>`.

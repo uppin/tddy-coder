@@ -8,8 +8,11 @@
 //! launcher renders the template with `tddy_actions::tool::render_argv` and the slots with
 //! [`slots::render`]; nothing in that path hard-codes an agent.
 
+mod capability;
 pub mod claude_tools;
 pub mod headless;
+mod registry;
+mod route;
 pub mod slots;
 mod spec;
 
@@ -17,11 +20,15 @@ use std::path::Path;
 
 use tddy_actions::tool::{ToolError, ToolRegistry, BUILTIN_SUPPORT_TOOLS, BUILTIN_TOOLS};
 
+pub use capability::Capability;
+pub use registry::{CodingAgentRegistry, RegistryError, CLI_SESSION_TYPE_SUFFIX};
+pub use route::{ProviderKind, RouteShape, RouteSupport};
 pub use spec::{
     package_runner, AcpCommandError, AcpSection, AgentVariant, CodingAgentExtension,
     CodingAgentSection, CodingAgentSpec, FlagSlot, HeadlessSection, HooksSlot, InstructionsSlot,
     McpFormat, McpSlot, ModelsSection, Placement, PlacementError, ResumeSlot, RouteSlot, SpecError,
-    ToolSlot, Unsupported, VariantError, CODING_AGENT_EXTENSION, HOST_AGENT_VARIANT,
+    ToolSlot, Unsupported, VariantError, CODING_AGENT_EXTENSION, DEFAULT_ANSWER_WAIT_SECS,
+    HOST_AGENT_VARIANT,
 };
 
 /// `specs/cursor.yaml` (`#agent-tools 7/12`), embedded.
@@ -119,6 +126,9 @@ pub fn embedded_spec(id: &str) -> Result<CodingAgentSpec, SpecError> {
 ///
 /// The one place a session type meets a spec id: the launchers and harness profiles resolve
 /// through it instead of the `CliHarness` table.
+// TODO(route-support): #agent-tools n13 `route-support` deletes this. `CodingAgentRegistry::
+// for_session_type` replaces this closed table; its one caller left is
+// `harness_profile_start::profile_spec_id` (docs/dev/todo/2026-11-04-spec-for-session-type-is-unused.md).
 pub fn spec_for_session_type(session_type: &str) -> Option<&'static str> {
     match session_type {
         "claude-cli" => Some("claude"),

@@ -11,9 +11,8 @@ use tddy_task::CancellationToken;
 
 use tddy_core::session_lifecycle::unified_session_dir_path;
 
-use tddy_coding_agent_specs::spec_for_session_type;
-
-use crate::harness_from_spec::cli_session_type;
+use crate::cursor_cli_spawn::no_coding_agents;
+use crate::harness_from_spec::{cli_launcher, cli_session_type, CliLauncher};
 use crate::placement::CodebasePlacement;
 
 use tddy_session_split::split_start::resolve_split_agent_placement;
@@ -132,7 +131,8 @@ impl LaunchSessions {
         let orchestrator = trim_to_option(&req.orchestrator_session_id);
         let orchestrator_host =
             trim_to_option(&req.orchestrator_daemon_instance_id).filter(|host| *host != local_id);
-        let placement = classify_start_placement(&req, local_id, eligible_ids)?;
+        let placement =
+            classify_start_placement(&req, self.coding_agents.as_deref(), local_id, eligible_ids)?;
         refuse_an_orchestrated_tool_start(&req)?;
         let started = self
             .start_here(req, os_user, agent_def, placement, progress, cancel)
@@ -168,7 +168,7 @@ impl LaunchSessions {
         // auto-provision below: claude-cli always requires a model, so reject an empty one up front
         // — a bad request should fail fast with INVALID_ARGUMENT, not a project NotFound. The
         // per-session-type handlers re-check as defense-in-depth (and for the resume/child paths).
-        refuse_a_cli_start_without_a_model(&req)?;
+        refuse_a_cli_start_without_a_model(&req, self.coding_agents.as_deref())?;
 
         // Neither placement below puts a repository where the agent runs, so both skip the project
         // auto-provision and the whole worktree-bearing dispatch that follows: a split resolves the
@@ -380,8 +380,12 @@ impl LaunchSessions {
             return Ok(started);
         }
 
+        // Which launch path a CLI agent's session takes is read from the agent the session type
+        // names in the host's registry, never from the session type's spelling.
+        let cli_launcher = cli_launcher(self.coding_agents.as_deref(), req.session_type.trim())?;
+
         // --- claude-cli branch: no LiveKit; resolves project and creates a real git worktree ---
-        if req.session_type.trim() == "claude-cli" {
+        if cli_launcher == Some(CliLauncher::Claude) {
             // A child of a planned PR is told where its boundaries are, however it was started: the
             // dialog opens with the node's documents pre-attached but carries only the node's title
             // and description as the prompt, so the line is added here rather than in the browser.
@@ -420,7 +424,7 @@ impl LaunchSessions {
         }
 
         // --- cursor-cli branch: no LiveKit; spawns Cursor Agent CLI in a PTY worktree ---
-        if req.session_type.trim() == "cursor-cli" {
+        if cli_launcher == Some(CliLauncher::Cursor) {
             // Same rule as the claude-cli branch above: which agent runs a planned PR's child is
             // not a reason for it to come up without its boundaries.
             let start = self.cli_start_prelude(&req, progress, os_user).await?;
@@ -459,8 +463,9 @@ impl LaunchSessions {
 
         // --- any other CLI coding agent its spec launches (opencode-cli, muse-cli, warp-cli): a PTY,
         // no LiveKit ---
-        if spec_for_session_type(req.session_type.trim()).is_some() {
-            let kind = cli_session_type(req.session_type.trim())?;
+        if cli_launcher == Some(CliLauncher::Generic) {
+            let agents = self.coding_agents.as_deref().ok_or_else(no_coding_agents)?;
+            let kind = cli_session_type(agents, req.session_type.trim())?;
             return self.start_cli_harness(kind, &req, progress, os_user).await;
         }
 

@@ -55,6 +55,10 @@ impl TestDaemon {
     /// the handlers share its state from here on (see [`RpcHandlers::install`]).
     #[must_use]
     pub fn from_host(host: DaemonSessionHost) -> Self {
+        // A host the suite gave no coding agents gets the built-in specs, so the hook and
+        // notification gates have agents to read.
+        let host = host
+            .with_coding_agents_if_none(tddy_session_lifecycle::test_util::builtin_coding_agents());
         let (host, handlers) = RpcHandlers::install(host);
         Self {
             daemon: tddy_session_lifecycle::test_util::TestDaemon::from_arc(Arc::new(host)),

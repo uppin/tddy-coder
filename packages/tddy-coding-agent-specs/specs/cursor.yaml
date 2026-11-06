@@ -46,6 +46,9 @@ extensions:
       files: []
       rules_file: .cursor/rules/tddy-managed-workflow.mdc
     hooks: { adapter: cursor-hooks-json }
+    # What a session of this agent offers (`#agent-tools 12/12`): the gates read these, never the
+    # agent's name. Unknown words are refused at load.
+    capabilities: [hooks, requires_model, keep_worktree_on_delete, operator_notify]
     models:
       default: composer-2.5
       curated: [composer-2.5, gpt-5.3-codex, claude-4.6-sonnet-medium-thinking]

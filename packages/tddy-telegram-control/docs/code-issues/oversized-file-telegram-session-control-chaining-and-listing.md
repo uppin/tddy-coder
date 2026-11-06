@@ -3,8 +3,8 @@
 **Location:** `packages/tddy-telegram-control/src/telegram_session_control/chaining_and_listing.rs`
 **Category:** oversized-file
 **Detected:** 2026-09-22 by the `/pr-wrap` file-length gate and `/analyze-clean-code` on #494 (`#carve` 8/11)
-**Metrics:** **518 production lines** (no `#[cfg(test)]` module) · budget 500 · **+18**, measured to the first `#[cfg(test)]`
-**Thresholds breached:** length 518 > 500
+**Metrics:** **522 production lines** (no `#[cfg(test)]` module) · budget 500 · **+22**, measured to the first `#[cfg(test)]`
+**Thresholds breached:** length 522 > 500
 **Restructure:** required — see *What would close it*
 **Status:** Open — **unclaimed**; produced by a move-only split, deferral consented by the developer (`docs/dev/todo/2026-09-22-telegram-control-plane-left-over-budget-by-a-move-only-node.md`)
 
@@ -13,6 +13,7 @@
 | Run | Production lines | Note |
 |---|---|---|
 | 2026-09-22 | 518 | first detection — created by #494's split of `telegram_session_control.rs` |
+| 2026-11-04 | 518 → 522 | **regressed** by PR #801 (`#agent-tools` 12/19), against `origin/feature/agent-tools/acp-agents`: `handle_delete_session` passes `delete_session_directory` its new `agents` argument (`None`, with a `TODO(agent-config-removal)` — n19 `agent-config-removal` ([#825](https://github.com/uppin/tddy-coder/pull/825)) hands this controller the registry; n18 `telegram-spec-launch` ([#824](https://github.com/uppin/tddy-coder/pull/824)) moves its spawn and pickers onto the specs). Not split: restructuring deferred to the `#agent-tools` sweep node by the developer (2026-11-04) |
 
 ## What the tool found
 

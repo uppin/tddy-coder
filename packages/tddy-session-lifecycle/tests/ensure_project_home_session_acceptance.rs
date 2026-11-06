@@ -70,7 +70,9 @@ impl World {
             .get(session_id)
             .await
             .expect("the agent is running");
-        a_capture_showing(&handle.capture, "ARGV", PTY_STUB_OUTPUT).await
+        // The line the stub echoes after its argv, so the whole `ARGV:` line is in the capture:
+        // waiting for `ARGV` alone can read the line while the stub is still printing it.
+        a_capture_showing(&handle.capture, "ENVDUMP TDDY_SOCKET=[", PTY_STUB_OUTPUT).await
     }
 
     /// What `session_id`'s agent was launched with, once the stub has echoed all of it.

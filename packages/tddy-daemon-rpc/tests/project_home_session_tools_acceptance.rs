@@ -172,7 +172,8 @@ async fn a_claude_capable_project_home_world() -> World {
         PeerRouting::local_only(&config),
         Arc::new(tddy_daemon_kernel::operator_channel::NoOperatorChannel),
         Arc::new(CliSessionManager::new()),
-    );
+    )
+    .with_coding_agents_if_none(tddy_session_lifecycle::test_util::builtin_coding_agents());
     let service = TestDaemon::from_host(host);
     service.as_arc().install_sandbox_rpc_bridge();
     a_project_home_world_on(service, sessions).await
@@ -236,7 +237,8 @@ claude_cli:
     );
     let config_path = dir.path().join("daemon.yaml");
     std::fs::write(&config_path, yaml).unwrap();
-    DaemonConfig::load(&config_path).expect("config must parse")
+    tddy_session_lifecycle::test_util::daemon_config_from_fixture_file(&config_path)
+        .expect("config must parse")
 }
 
 fn listed_ids(response: &ExecuteToolResponse) -> Vec<String> {
