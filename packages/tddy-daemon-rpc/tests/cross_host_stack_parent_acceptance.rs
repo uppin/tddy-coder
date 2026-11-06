@@ -177,14 +177,11 @@ livekit:
   url: ws://127.0.0.1:7880
   api_key: devkey
   api_secret: devsecret
-claude_cli:
-  binary_path: /bin/cat
 "#
     );
     let config_path = data_dir.path().join("daemon.yaml");
     std::fs::write(&config_path, config_yaml).expect("write daemon config");
-    // A fixture loader: the production one refuses `claude_cli:`, which names this fixture's stub.
-    let config = tddy_session_lifecycle::test_util::daemon_config_from_fixture_file(&config_path)
+    let config = tddy_daemon_kernel::config::DaemonConfig::load(&config_path)
         .expect("load daemon config");
 
     let base = data_dir.path().to_path_buf();
@@ -214,7 +211,10 @@ claude_cli:
         // A claude-cli start resolves its agent before it asks for its stack parent: the stub keeps
         // the host's own `claude` (or its absence, on CI) out of a test about the parent.
         .with_coding_agents_if_none(
-            tddy_session_lifecycle::test_util::builtin_coding_agents_for(&config),
+            tddy_session_lifecycle::test_util::coding_agents_with_binaries(&[(
+                "claude",
+                std::path::Path::new("/bin/cat"),
+            )]),
         ),
     );
 
