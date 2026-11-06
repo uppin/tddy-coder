@@ -13,3 +13,9 @@ Out of #665's scope (web and daemon starts).
 
 **What would close it:** the Telegram start resolving a route the way `tool_session_route_json` does —
 at least the owner's per-harness default once `#provider-route` 5/9 lands — and passing its JSON here.
+
+**Re-checked 2026-11-06 (`#agent-tools` 18/19, #824):** Telegram's CLI agent starts
+(`/start-agent`, `/start-claude`, `/start-cursor`) now go through the generic start, so they take
+its route resolution — but with no session token, so no vault account can be opened, and there is
+still no account picker in Telegram. The `/start-workflow` spawn (`workflow_spawn.rs`) is unchanged
+and still passes `provider_route_json: None`. Still open.

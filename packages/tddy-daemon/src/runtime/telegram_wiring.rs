@@ -87,8 +87,9 @@ pub fn split_room_hosting(
 /// `<tddy_data_dir>/tools`). A registry that does not load leaves Telegram with none to offer, so
 /// its CLI starts are refused in the chat; the daemon's own start refuses for the same file
 /// (`build_session_host`), so this is a report, not a fallback.
-// TODO(telegram-spec-launch): load the registry once before Telegram is built and share it with
-// `build_session_host` and `open_shared`, which each load it again.
+// TODO(sweep): load the registry once before Telegram is built and share it with
+// `build_session_host` and `open_shared`, which each load it again
+// (docs/dev/todo/2026-11-06-telegram-loads-the-coding-agent-registry-a-third-time.md).
 fn telegram_coding_agents(
     config: &DaemonConfig,
     tddy_data_dir: &Path,

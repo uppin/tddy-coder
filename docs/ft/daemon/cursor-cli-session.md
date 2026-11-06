@@ -127,7 +127,7 @@ A conversation or pr-stack child of a cursor-cli orchestrator is itself a cursor
 
 ## Telegram `/start-cursor`
 
-`/start-cursor <prompt>` follows **project → branch → model** (`tcur:` callbacks), then spawns with the prompt as a positional arg. See [telegram-session-control.md](telegram-session-control.md#start-cursor-flow).
+`/start-cursor <prompt>` pre-picks the `cursor` agent and follows **project → branch → model** — the models of `cursor.yaml` (`tcm:` callbacks) — then starts through the daemon's generic start, like a web start: the spec's argv, `.cursor/hooks.json`, and a chat minted by `cursor-create-chat` under its deadline. See [telegram-session-control.md](telegram-session-control.md#cli-agent-starts-start-agent-start-claude-start-cursor).
 
 ## Architecture
 

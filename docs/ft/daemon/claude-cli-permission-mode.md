@@ -44,7 +44,7 @@ The Claude Code CLI accepts `--permission-mode <mode>`:
 
 ### Daemon — PTY spawning
 
-7. `ClaudeCliSessionManager::start()` accepts a `permission_mode: Option<&str>` parameter and
+7. `ClaudeCliSessionManager::start_with_options()` (the split agent's launch; every other claude-cli start renders `claude.yaml`) accepts a `permission_mode: Option<&str>` parameter and
    passes it to `build_claude_argv`.
 8. `ClaudeCliSessionManager::resume()` continues to pass `None` (no permission override on resume).
 

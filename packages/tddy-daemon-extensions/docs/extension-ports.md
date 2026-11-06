@@ -58,8 +58,30 @@ gone, or the exposure answered with a failed precondition, and an error for any 
 
 `LiveKitTerminalExposure` implements the port in `tddy-daemon-livekit`. The daemon builds it once
 from the `livekit:` block, or the null object without credentials, and hands it to the session host
-(`with_terminal_exposure`) and to the Telegram harness, whose start announces its terminal's room at
-once.
+(`with_terminal_exposure`). A Telegram-started session is exposed by that host, as a web-started one
+is: the Telegram harness holds no exposure port of its own since `#agent-tools 18/19`.
+
+## The session-starter port (`session_starter`)
+
+A satellite that takes commands from an operator — Telegram is the first — starts sessions through
+the daemon's one generic start, so its sessions get the spec launch, hooks, provider route, tmux and
+the start's own branch-conflict guard. It cannot name the session host, and it is built before the
+host exists, so it holds this port.
+
+| Item | Role |
+|---|---|
+| `OperatorSessionStart` | A start for an operator the satellite already identified: `os_user` (the operator's mapped OS user — no session token is minted or passed), `project_id`, `session_type` (`<id>-cli`), `model` (empty: none), `initial_prompt`, `branch`. |
+| `OperatorBranchChoice` | `NewBranchFromBase { new_branch_name, integration_base_ref }` (an empty name lets the start generate one) or `WorkOnBranch { branch }`. |
+| `SessionStarter` | `start_for_operator(start)`: `Started { session_id }`, or `BranchConflict(OperatorBranchConflict { branch, owner_session_id, suggested_branch_name })` with nothing created. Every refusal of the generic start is its `Status`. |
+| `NoSessionStarter` | Nothing wired: every start is refused `FAILED_PRECONDITION`, naming its session type. |
+| `LateBoundSessionStarter` | Bound once (`bind`), after the host exists; a second bind is refused and the first kept. A start before the bind is refused `FAILED_PRECONDITION` — never queued, never waited on. |
+
+The session host implements it as `HostSessionStarter` (`tddy-session-lifecycle`,
+`connection_service::operator_session_starter`), over `LaunchSessions::start_session_for_os_user`
+(`tddy-agent-launch`, `operator_start.rs`): the generic start minus the token-to-user step, with
+`on_branch_conflict = "reject"`, refusing a request that names a session token or a peer daemon. The
+daemon creates one `LateBoundSessionStarter` (`Registries::session_starter`), hands it to Telegram
+(`with_session_starter`), and binds the host into it in `install_session_host`.
 
 ## The integration status board (`integration_status`)
 

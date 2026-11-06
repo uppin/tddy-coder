@@ -6,7 +6,7 @@
 **Metrics:** **705 production lines** (no `#[cfg(test)]` module) · budget 500 · **+205**, measured to the first `#[cfg(test)]`
 **Thresholds breached:** length 705 > 500
 **Restructure:** required — see *What would close it*
-**Status:** Open — narrowed 2026-10-22 (706 → 617, `spawn_telegram_workflow` moved to `workflow_launch.rs`); regressed 2026-10-08 (705 → 706 in #516, `#keyring` 9/9) — **unclaimed**; produced by a move-only split, deferral consented by the developer (`docs/dev/todo/2026-09-22-telegram-control-plane-left-over-budget-by-a-move-only-node.md`)
+**Status:** Open — regressed 2026-11-06 (617 → 627 in #824, `#agent-tools` 18/19; split deferred to the sweep node n20 by the developer); narrowed 2026-10-22 (706 → 617, `spawn_telegram_workflow` moved to `workflow_launch.rs`); regressed 2026-10-08 (705 → 706 in #516, `#keyring` 9/9) — **unclaimed**; produced by a move-only split, deferral consented by the developer (`docs/dev/todo/2026-09-22-telegram-control-plane-left-over-budget-by-a-move-only-node.md`)
 
 ## Measurement history
 

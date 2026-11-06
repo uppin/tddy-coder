@@ -872,7 +872,7 @@ claude --model <model> --session-id <id> "build feature X"
 
 ### Telegram: `/start-claude <prompt>`
 
-The Telegram `/start-claude <prompt>` flow (see [telegram-session-control.md](telegram-session-control.md)) seeds the session with the user's message. After project → branch → model selection, `spawn_telegram_claude_cli` reads `initial_prompt` from `changeset.yaml` and passes it to `ClaudeCliSessionManager::start(…, initial_prompt)`.
+The Telegram `/start-claude <prompt>` flow (see [telegram-session-control.md](telegram-session-control.md#cli-agent-starts-start-agent-start-claude-start-cursor)) seeds the session with the user's message. After project → branch → model selection (the models of `claude.yaml`), Telegram sends `initial_prompt` as the request's `initial_prompt` through the daemon's generic start, so the session gets the same spec launch, hooks file and hook token as a web start.
 
 ### Resume does not replay
 
