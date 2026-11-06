@@ -13,6 +13,12 @@
 //! needs: no resume. A daemon built [`ARegistryDaemonBuilder::with_a_meta_account`] has an owner
 //! whose unlocked vault holds [`META_ACCOUNT`] (`#agent-tools 13/19`), and one built
 //! [`ARegistryDaemonBuilder::with_profile`] has harness profiles in `<tddyhome>/agents`.
+//!
+//! `#agent-tools 19/19` adds the answer wait: [`builtin_yaml_run_as_the_stub_waiting`] overrides
+//! claude.yaml with an `answer_wait_secs`, [`ARegistryDaemon::an_orchestrator_of`] makes a started
+//! session orchestrated by a running acme session, and [`ARegistryDaemon::the_permission_hook_of`]
+//! holds its hook in the daemon's real `AwaitQuestionAnswer`. [`ARegistryDaemon::restart_with_tool`]
+//! is a daemon restarted over the same `<tddyhome>` after an operator edited a tool file.
 #![allow(dead_code)]
 
 use std::collections::BTreeMap;
@@ -26,11 +32,15 @@ use tddy_accounts::{endpoints_for, preset, ProviderAccount};
 use tddy_actions::tool::ToolHost;
 use tddy_agent_launch::spec_launch::HostCodingAgents;
 use tddy_coding_agent_specs::CodingAgentRegistry;
+use tddy_core::pending_question::{write_pending_question, PendingQuestion};
 use tddy_core::session_metadata::{read_session_metadata, write_session_metadata, SessionMetadata};
 use tddy_credentials::{AccountId, CredentialStore, SecretString, SessionVaults};
 use tddy_daemon_kernel::config::DaemonConfig;
 use tddy_rpc::Request;
-use tddy_service::proto::activity::{ActivityService as _, ReportSessionStatusRequest};
+use tddy_service::proto::activity::{
+    ActivityService as _, AwaitQuestionAnswerRequest, AwaitQuestionOutcome,
+    ReportSessionStatusRequest,
+};
 use tddy_service::proto::session::{
     EnsureProjectHomeSessionRequest, ResumeSessionRequest, SessionService as SessionServiceTrait,
     StartSessionRequest,
@@ -166,6 +176,23 @@ pub fn builtin_yaml_run_as_the_stub(builtin: &str) -> String {
     let command = format!("\n  command: {}\n", def.binary.command);
     assert!(yaml.contains(&command), "{builtin}.yaml holds {command:?}");
     yaml.replacen(&command, "\n  command: acme\n", 1)
+}
+
+/// [`builtin_yaml_run_as_the_stub`] of `claude.yaml`, its `coding_agent` section declaring
+/// `answer_wait_secs: <secs>` — an operator's override of how long an orchestrated claude-cli
+/// session's permission hook waits for its orchestrator (`#agent-tools 19/19`).
+pub fn builtin_yaml_run_as_the_stub_waiting(secs: u64) -> String {
+    let claude = builtin_yaml_run_as_the_stub("claude");
+    let section = "  coding_agent:\n";
+    assert!(
+        claude.contains(section),
+        "claude.yaml has a coding_agent section"
+    );
+    claude.replacen(
+        section,
+        &format!("{section}    answer_wait_secs: {secs}\n"),
+        1,
+    )
 }
 
 /// [`builtin_yaml_as`] of `cursor.yaml` under `id`, its conversation minted by
@@ -419,6 +446,12 @@ pub struct ARegistryDaemon {
     pub stub_bin: PathBuf,
     /// Touched by the stub when it is spawned.
     pub spawn_marker: PathBuf,
+    /// The daemon.yaml it was started with — no agent section.
+    config: DaemonConfig,
+    /// The fixture host's `$HOME`.
+    host_home: PathBuf,
+    /// The owner's unlocked vaults, when built with a Meta account.
+    vaults: Option<Arc<SessionVaults>>,
     _repo_dir: tempfile::TempDir,
     _tddy_home_dir: tempfile::TempDir,
     _host_home_dir: tempfile::TempDir,
@@ -524,26 +557,26 @@ fn a_daemon_built_from(spec: ARegistryDaemonBuilder) -> ARegistryDaemon {
     let (config_dir, config) = a_daemon_config_without_agent_sections();
     let registry = CodingAgentRegistry::load(&tools_dir).expect("the coding-agent registry loads");
     let vault_dir = spec.meta_account.then(|| tempfile::tempdir().unwrap());
-    let host = a_session_host(config, tddy_home.clone());
-    let host = match &vault_dir {
-        Some(dir) => host.with_credential_vaults(vaults_holding_the_meta_account(dir.path())),
-        None => host,
-    };
-    let host = host.with_coding_agents(Arc::new(HostCodingAgents::new(
-        registry.tools().clone(),
-        Arc::new(AFixtureHost {
-            path: vec![stub_bin.clone()],
-            home: host_home.clone(),
-        }),
-    )));
-    let service = Arc::new(host);
-    service.install_sandbox_rpc_bridge();
+    let vaults = vault_dir
+        .as_ref()
+        .map(|dir| vaults_holding_the_meta_account(dir.path()));
+    let service = a_running_daemon(
+        &config,
+        &tddy_home,
+        &registry,
+        &stub_bin,
+        &host_home,
+        vaults.clone(),
+    );
     ARegistryDaemon {
         service,
         registry,
         tddy_home,
         stub_bin,
         spawn_marker,
+        config,
+        host_home,
+        vaults,
         _repo_dir: repo_dir,
         _tddy_home_dir: tddy_home_dir,
         _host_home_dir: host_home_dir,
@@ -552,6 +585,33 @@ fn a_daemon_built_from(spec: ARegistryDaemonBuilder) -> ARegistryDaemon {
         _config_dir: config_dir,
         _vault_dir: vault_dir,
     }
+}
+
+/// The session host the daemon runtime builds over `tddy_home`: given `registry` as its coding
+/// agents, resolved against a fixture host whose `PATH` is the stub, with the sandbox RPC bridge.
+fn a_running_daemon(
+    config: &DaemonConfig,
+    tddy_home: &Path,
+    registry: &CodingAgentRegistry,
+    stub_bin: &Path,
+    host_home: &Path,
+    vaults: Option<Arc<SessionVaults>>,
+) -> Arc<DaemonSessionHost> {
+    let host = a_session_host(config.clone(), tddy_home.to_path_buf());
+    let host = match vaults {
+        Some(vaults) => host.with_credential_vaults(vaults),
+        None => host,
+    };
+    let host = host.with_coding_agents(Arc::new(HostCodingAgents::new(
+        registry.tools().clone(),
+        Arc::new(AFixtureHost {
+            path: vec![stub_bin.to_path_buf()],
+            home: host_home.to_path_buf(),
+        }),
+    )));
+    let service = Arc::new(host);
+    service.install_sandbox_rpc_bridge();
+    service
 }
 
 /// The vaults of a daemon on which the owner has unlocked a vault holding [`META_ACCOUNT`].
@@ -779,6 +839,107 @@ impl ARegistryDaemon {
         self.tddy_home.join("sessions").join(session_id)
     }
 
+    /// The daemon restarted over the same `<tddyhome>` after an operator wrote `yaml` to
+    /// `<tddyhome>/tools/<name>`: the registry is loaded again, as a daemon start loads it. The
+    /// sessions it started are on disk; their agents belonged to the stopped daemon.
+    pub fn restart_with_tool(mut self, name: &str, yaml: &str) -> Self {
+        let tools_dir = self.tddy_home.join("tools");
+        std::fs::write(tools_dir.join(name), yaml).unwrap();
+        self.registry =
+            CodingAgentRegistry::load(&tools_dir).expect("the coding-agent registry loads");
+        self.service = a_running_daemon(
+            &self.config,
+            &self.tddy_home,
+            &self.registry,
+            &self.stub_bin,
+            &self.host_home,
+            self.vaults.clone(),
+        );
+        self
+    }
+
+    /// Make `child` orchestrated by a running session: an acme-cli session is started on the host
+    /// (its tool file must be installed), its terminal is served once its stub has reported, and
+    /// `child`'s changeset names it as `#start-parity` 2/9's start records an orchestrator.
+    /// Answers the orchestrator's session id.
+    pub async fn an_orchestrator_of(&self, child: &str) -> String {
+        let (orchestrator, _host) = self
+            .start(self.a_start("acme-cli", false))
+            .await
+            .expect("the orchestrating acme-cli session starts on the host");
+        self.stub_report(&orchestrator).await;
+        let child_dir = self.session_dir(child);
+        let mut changeset = tddy_core::read_changeset(&child_dir).unwrap_or_default();
+        changeset.orchestrator_session_id = Some(orchestrator.clone());
+        changeset.orchestrator_daemon_instance_id = None;
+        tddy_core::write_changeset(&child_dir, &changeset).unwrap();
+        orchestrator
+    }
+
+    /// `session_id`'s agent asks for permission to run `cargo publish` as [`PERMISSION_REQUEST_ID`],
+    /// as `#home-inbox` 3/8 records it.
+    pub fn asks_for_a_permission(&self, session_id: &str) {
+        write_pending_question(
+            &self.session_dir(session_id),
+            &PendingQuestion {
+                kind: "permission".to_string(),
+                question: "Run Bash: cargo publish".to_string(),
+                request_id: PERMISSION_REQUEST_ID.to_string(),
+                tool_name: "Bash".to_string(),
+                tool_input_json: r#"{"command":"cargo publish"}"#.to_string(),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+    }
+
+    /// `session_id`'s `PermissionRequest` hook held in this daemon's `AwaitQuestionAnswer` — with
+    /// the hook token its start recorded — for at most `budget`.
+    pub async fn the_permission_hook_of(&self, session_id: &str, budget: Duration) -> AHeldHook {
+        let request = AwaitQuestionAnswerRequest {
+            session_id: session_id.to_string(),
+            hook_token: self
+                .metadata_of(session_id)
+                .hook_token
+                .unwrap_or_else(|| panic!("{session_id} records its hook token")),
+            os_user: current_os_user(),
+            request_id: PERMISSION_REQUEST_ID.to_string(),
+            permission_suggestions_json: String::new(),
+        };
+        let activity = self.service.activity_service();
+        let started = tokio::time::Instant::now();
+        let answered = tokio::time::timeout(
+            budget,
+            activity.await_question_answer(Request::direct(request)),
+        )
+        .await;
+        let held = started.elapsed();
+        AHeldHook {
+            outcome: answered.ok().map(|answer| {
+                answer
+                    .map(|response| response.into_inner().outcome)
+                    .map_err(|status| status.message)
+            }),
+            held,
+        }
+    }
+
+    /// The `timeout` the hooks file written into `session_id`'s worktree gives its
+    /// `PermissionRequest` hook — how long Claude lets that hook run.
+    pub fn permission_hook_timeout_of(&self, session_id: &str) -> u64 {
+        let settings = self
+            .worktree_of(session_id)
+            .join(".claude/settings.local.json");
+        let json: serde_json::Value = serde_json::from_str(
+            &std::fs::read_to_string(&settings)
+                .unwrap_or_else(|e| panic!("{} is written: {e}", settings.display())),
+        )
+        .expect("the hooks file is JSON");
+        json["hooks"]["PermissionRequest"][0]["hooks"][0]["timeout"]
+            .as_u64()
+            .unwrap_or_else(|| panic!("the PermissionRequest hook has a timeout: {json:#}"))
+    }
+
     pub fn metadata_of(&self, session_id: &str) -> SessionMetadata {
         read_session_metadata(&self.session_dir(session_id)).expect("the session records metadata")
     }
@@ -821,6 +982,30 @@ impl ARegistryDaemon {
             "the stub finished its report within {TERMINAL_OBSERVE:?}; it showed: {seen}"
         );
         AStubReport::parse(&seen)
+    }
+}
+
+/// The request id a held permission hook waits on.
+pub const PERMISSION_REQUEST_ID: &str = "req-cargo-publish";
+
+/// A permission hook held in `AwaitQuestionAnswer`.
+#[derive(Debug)]
+pub struct AHeldHook {
+    /// The outcome it was released with, or `None` when it was still held at the budget.
+    pub outcome: Option<Result<i32, String>>,
+    /// How long it was held.
+    pub held: Duration,
+}
+
+impl AHeldHook {
+    /// The hold in whole seconds — a hold of `n` seconds and a few milliseconds of RPC is `n`.
+    pub fn whole_seconds(&self) -> u64 {
+        self.held.as_secs()
+    }
+
+    /// The `TIMED_OUT` outcome, as the hook reads it.
+    pub fn timed_out() -> Option<Result<i32, String>> {
+        Some(Ok(AwaitQuestionOutcome::TimedOut as i32))
     }
 }
 

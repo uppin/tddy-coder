@@ -729,6 +729,99 @@ async fn telegram_delete_session_removes_and_confirms() {
     );
 }
 
+/// An agent session as a start records it: `session_type`, its worktree at `worktree`.
+fn an_agent_session(
+    base: &std::path::Path,
+    session_id: &str,
+    session_type: &str,
+    worktree: &std::path::Path,
+) {
+    let session_dir = base.join("sessions").join(session_id);
+    std::fs::create_dir_all(&session_dir).unwrap();
+    let metadata = tddy_core::SessionMetadata {
+        session_id: session_id.to_string(),
+        project_id: "proj-1".to_string(),
+        created_at: "2026-11-04T08:00:00Z".to_string(),
+        updated_at: "2026-11-04T08:00:30Z".to_string(),
+        status: "inactive".to_string(),
+        repo_path: Some(worktree.to_string_lossy().into_owned()),
+        pid: None,
+        tool: None,
+        livekit_room: None,
+        pending_elicitation: false,
+        previous_session_id: None,
+        session_type: Some(session_type.to_string()),
+        model: None,
+        cursor_chat_id: None,
+        harness_resume_token: None,
+        activity_status: None,
+        hook_token: None,
+        sandbox: None,
+        agent: None,
+        recipe: None,
+        agents: Vec::new(),
+        agents_rev: 0,
+        legacy_specialized_agents: Vec::new(),
+        codebase_daemon_instance_id: None,
+        codebase_session_id: None,
+        agent_daemon_instance_id: None,
+        agent_session_id: None,
+        ssh_config_host: None,
+        managed_codebase: false,
+        session_role: None,
+        tmux_session: None,
+    };
+    tddy_core::write_session_metadata(&session_dir, &metadata).unwrap();
+}
+
+/// A daemon-managed worktree — under a project's `.worktrees` — holding one file.
+fn a_daemon_managed_worktree(repo: &std::path::Path, name: &str) -> std::path::PathBuf {
+    let worktree = repo.join(".worktrees").join(name);
+    std::fs::create_dir_all(&worktree).unwrap();
+    std::fs::write(worktree.join("README.md"), "work in progress\n").unwrap();
+    worktree
+}
+
+/// `/delete` follows each agent's spec, as a web delete does (`#agent-tools 19/19`): claude.yaml
+/// does not declare `keep_worktree_on_delete`, so a claude-cli session's worktree goes with it;
+/// cursor.yaml does, so a cursor-cli session's stays.
+#[tokio::test]
+async fn a_telegram_delete_of_a_claude_cli_session_removes_its_worktree_and_of_a_cursor_cli_session_keeps_it(
+) {
+    // Given
+    let tmp = tempfile::tempdir().unwrap();
+    let repo = tmp.path().join("repo");
+    let claude_worktree = a_daemon_managed_worktree(&repo, "claude-session");
+    let cursor_worktree = a_daemon_managed_worktree(&repo, "cursor-session");
+    an_agent_session(tmp.path(), "claude-cli-1", "claude-cli", &claude_worktree);
+    an_agent_session(tmp.path(), "cursor-cli-1", "cursor-cli", &cursor_worktree);
+    let (harness, _sender) = harness_with_sender(vec![AUTHORIZED_CHAT], tmp.path().to_path_buf());
+    let harness = harness.with_coding_agents(Arc::new(
+        tddy_coding_agent_specs::CodingAgentRegistry::builtin().expect("the built-in agents load"),
+    ));
+
+    // When
+    harness
+        .handle_delete_session(AUTHORIZED_CHAT, "claude-cli-1")
+        .await
+        .expect("the claude-cli session is deleted");
+    harness
+        .handle_delete_session(AUTHORIZED_CHAT, "cursor-cli-1")
+        .await
+        .expect("the cursor-cli session is deleted");
+
+    // Then
+    assert_eq!(
+        (
+            tmp.path().join("sessions/claude-cli-1").exists(),
+            claude_worktree.exists(),
+            tmp.path().join("sessions/cursor-cli-1").exists(),
+            cursor_worktree.exists(),
+        ),
+        (false, false, false, true)
+    );
+}
+
 /// `/delete` with non-existent session id returns an error.
 #[tokio::test]
 async fn telegram_delete_nonexistent_session_returns_error() {

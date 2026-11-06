@@ -99,22 +99,28 @@ async fn a_daemon_whose_agent(temperament: AgentTemperament) -> TmuxAgentDaemon 
     }
 }
 
-fn a_config_running(stub_agent: &Path) -> (tempfile::TempDir, DaemonConfig) {
+/// A daemon config, and the coding agents the host installs: `claude` is the stub.
+type AConfigAndItsAgents = (
+    DaemonConfig,
+    Arc<tddy_agent_launch::spec_launch::HostCodingAgents>,
+);
+
+fn a_config_running(stub_agent: &Path) -> (tempfile::TempDir, AConfigAndItsAgents) {
     let dir = tempfile::tempdir().unwrap();
     let user = this_os_user();
     let yaml = format!(
-        "users:\n  - github_user: \"{user}\"\n    os_user: \"{user}\"\nallowed_tools:\n  - path: /bin/true\n    label: true\nclaude_cli:\n  binary_path: {}\n",
-        stub_agent.display()
+        "users:\n  - github_user: \"{user}\"\n    os_user: \"{user}\"\nallowed_tools:\n  - path: /bin/true\n    label: true\n"
     );
     let path = dir.path().join("daemon.yaml");
     std::fs::write(&path, yaml).unwrap();
-    let config = tddy_session_lifecycle::test_util::daemon_config_from_fixture_file(&path)
-        .expect("config must parse");
-    (dir, config)
+    let config = DaemonConfig::load(&path).expect("config must parse");
+    let agents =
+        tddy_session_lifecycle::test_util::coding_agents_with_binaries(&[("claude", stub_agent)]);
+    (dir, (config, agents))
 }
 
 fn a_session_host(
-    config: DaemonConfig,
+    (config, agents): AConfigAndItsAgents,
     sessions_base: PathBuf,
     manager: Arc<ClaudeCliSessionManager>,
 ) -> Arc<DaemonSessionHost> {
@@ -136,9 +142,7 @@ fn a_session_host(
             Arc::new(tddy_daemon_kernel::operator_channel::NoOperatorChannel),
             manager,
         )
-        .with_coding_agents_if_none(
-            tddy_session_lifecycle::test_util::builtin_coding_agents_for(&config),
-        ),
+        .with_coding_agents_if_none(agents),
     );
     host.install_sandbox_rpc_bridge();
     host

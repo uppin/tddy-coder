@@ -127,8 +127,6 @@ fn a_daemon(sessions_base: std::path::PathBuf) -> TestDaemon {
 users:
   - github_user: "{user}"
     os_user: "{user}"
-claude_cli:
-  binary_path: /bin/cat
 "#
     );
     let config: DaemonConfig = serde_yaml::from_str(&yaml).expect("config must parse");
@@ -155,7 +153,12 @@ claude_cli:
             Arc::new(tddy_daemon_kernel::operator_channel::NoOperatorChannel),
             Arc::new(ClaudeCliSessionManager::new()),
         )
-        .with_coding_agents_if_none(tddy_session_lifecycle::test_util::builtin_coding_agents())
+        .with_coding_agents_if_none(
+            tddy_session_lifecycle::test_util::coding_agents_with_binaries(&[(
+                "claude",
+                Path::new("/bin/cat"),
+            )]),
+        )
         .with_session_tokens(this_daemons_session_tokens().clone()),
     )
 }

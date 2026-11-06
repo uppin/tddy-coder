@@ -190,8 +190,6 @@ impl ToolHost for AFixtureHost {
 
 /// How a [`AJailedClaudeDaemon`] is built.
 pub struct ADaemonSpec {
-    /// `claude_cli.claude_home_dir`, relative to `<tddyhome>` — today's persistent jail home.
-    pub configured_claude_home: &'static str,
     /// Give the host its coding agents (the agent registry from `<tddyhome>/tools`, resolved
     /// against a fixture host whose `PATH` is the stub `claude` and the real `tddy-tools`), as the
     /// daemon runtime does.
@@ -207,7 +205,6 @@ pub struct ADaemonSpec {
 impl Default for ADaemonSpec {
     fn default() -> Self {
         Self {
-            configured_claude_home: "configured-claude-home",
             coding_agents: true,
             probes: Vec::new(),
             claude_override: None,
@@ -261,8 +258,7 @@ pub fn a_jailed_claude_daemon(spec: ADaemonSpec) -> AJailedClaudeDaemon {
     std::fs::set_permissions(&stub_claude, std::fs::Permissions::from_mode(0o755)).unwrap();
     std::os::unix::fs::symlink(tddy_tools_binary(), stub_bin.join("tddy-tools")).unwrap();
 
-    let (config_dir, config) =
-        a_daemon_config(&stub_claude, &tddy_home.join(spec.configured_claude_home));
+    let (config_dir, config) = a_daemon_config();
     let vault_dir = tempfile::tempdir().unwrap();
     let mut host = a_session_host(config, tddy_home.clone());
     if let Some(base_url) = &spec.route_base_url {
@@ -420,10 +416,7 @@ impl AJailedClaudeDaemon {
     }
 }
 
-fn a_daemon_config(
-    stub_claude: &Path,
-    claude_home_dir: &Path,
-) -> (tempfile::TempDir, DaemonConfig) {
+fn a_daemon_config() -> (tempfile::TempDir, DaemonConfig) {
     let dir = tempfile::tempdir().unwrap();
     let yaml = format!(
         r#"
@@ -433,19 +426,11 @@ users:
 allowed_tools:
   - path: /bin/true
     label: true
-claude_cli:
-  binary_path: {stub}
-  tddy_tools_path: {tddy_tools}
-  claude_home_dir: {home}
-"#,
-        stub = stub_claude.display(),
-        tddy_tools = tddy_tools_binary().display(),
-        home = claude_home_dir.display(),
+"#
     );
     let config_path = dir.path().join("daemon.yaml");
     std::fs::write(&config_path, yaml).unwrap();
-    let config = tddy_session_lifecycle::test_util::daemon_config_from_fixture_file(&config_path)
-        .expect("config must parse");
+    let config = DaemonConfig::load(&config_path).expect("config must parse");
     (dir, config)
 }
 

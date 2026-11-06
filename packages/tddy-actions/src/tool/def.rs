@@ -109,7 +109,16 @@ impl ToolDef {
                 ),
             });
         }
-        serde_yaml::from_str(yaml).map_err(|e| parse_error(file, &e))
+        let def: Self = serde_yaml::from_str(yaml).map_err(|e| parse_error(file, &e))?;
+        if let HomeSection::Path { path } = &def.home {
+            if !path.is_absolute() {
+                return Err(ToolError::Parse {
+                    file: file.to_path_buf(),
+                    message: format!("home.path {} is not an absolute directory", path.display()),
+                });
+            }
+        }
+        Ok(def)
     }
 }
 

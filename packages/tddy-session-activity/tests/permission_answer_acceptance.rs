@@ -152,6 +152,8 @@ impl HostBuilder {
         let data_dir = tempfile::tempdir().expect("a temporary data dir");
         let child_dir = data_dir.path().join("sessions").join(CHILD);
         write_claude_cli_session(&child_dir);
+        tddy_session_activity::answer_wait::record_answer_wait(&child_dir, self.wait)
+            .expect("the wait the child's start recorded");
         write_orchestrator(&child_dir, &self.orchestrator);
         write_pending_question(&child_dir, &the_permission_question())
             .expect("the child's pending question");
@@ -182,7 +184,6 @@ impl HostBuilder {
         .with_question_answers(AnswerWaitPorts {
             pending: Arc::clone(&pending),
             presence: Arc::new(presence),
-            wait: self.wait,
         });
         AnActivityHost {
             data_dir,

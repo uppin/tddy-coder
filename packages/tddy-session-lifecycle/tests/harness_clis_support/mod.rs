@@ -317,7 +317,7 @@ pub fn a_harness_daemon(spec: ADaemonSpec) -> AHarnessDaemon {
     std::fs::set_permissions(&stub, std::fs::Permissions::from_mode(0o755)).unwrap();
     std::os::unix::fs::symlink(tddy_tools_binary(), stub_bin.join("tddy-tools")).unwrap();
 
-    let (config_dir, config) = a_daemon_config(spec.harness, &stub);
+    let (config_dir, config) = a_daemon_config();
     let vault_dir = tempfile::tempdir().unwrap();
     let vaults = vaults_holding_the_accounts(vault_dir.path(), spec.compatible_base_url.as_deref());
     let registry = load_agent_registry(&tddy_home.join("tools")).expect("the agent registry loads");
@@ -578,7 +578,7 @@ fn vaults_holding_the_accounts(
     vaults
 }
 
-fn a_daemon_config(harness: AHarness, stub: &Path) -> (tempfile::TempDir, DaemonConfig) {
+fn a_daemon_config() -> (tempfile::TempDir, DaemonConfig) {
     let dir = tempfile::tempdir().unwrap();
     let user = current_os_user();
     let yaml = format!(
@@ -589,17 +589,11 @@ users:
 allowed_tools:
   - path: /bin/true
     label: true
-cli_harnesses:
-  {session_type}:
-    binary_path: {stub}
-"#,
-        session_type = harness.session_type(),
-        stub = stub.display(),
+"#
     );
     let config_path = dir.path().join("daemon.yaml");
     std::fs::write(&config_path, yaml).unwrap();
-    let config = tddy_session_lifecycle::test_util::daemon_config_from_fixture_file(&config_path)
-        .expect("config must parse");
+    let config = DaemonConfig::load(&config_path).expect("config must parse");
     (dir, config)
 }
 

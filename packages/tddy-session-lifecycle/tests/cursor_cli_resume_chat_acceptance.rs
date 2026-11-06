@@ -208,10 +208,15 @@ fn a_cursor_cli_daemon() -> CursorCliDaemon {
     let stub_dir = tempfile::tempdir().unwrap();
     let agent = a_stub_cursor_agent(stub_dir.path());
 
-    let config = daemon_config_with_cursor_binary(agent.binary_path.to_str().unwrap());
+    let config = daemon_config_with_cursor_binary();
     let sessions_base = sessions_dir.path().to_path_buf();
     let manager = Arc::new(CliSessionManager::new());
-    let service = connection_service(config, sessions_base.clone(), Arc::clone(&manager));
+    let service = connection_service(
+        config,
+        agent.binary_path.to_str().unwrap(),
+        sessions_base.clone(),
+        Arc::clone(&manager),
+    );
 
     CursorCliDaemon {
         service,
@@ -324,7 +329,7 @@ fn a_cursor_cli_start_request() -> StartSessionRequest {
     }
 }
 
-fn daemon_config_with_cursor_binary(binary_path: &str) -> DaemonConfig {
+fn daemon_config_with_cursor_binary() -> DaemonConfig {
     let dir = tempfile::tempdir().unwrap();
     let os_user = cursor_cli_support::current_os_user();
     let yaml = format!(
@@ -335,24 +340,22 @@ users:
 allowed_tools:
   - path: /bin/true
     label: true
-cursor_cli:
-  binary_path: {binary_path}
 "#
     );
     let config_path = dir.path().join("daemon.yaml");
     std::fs::write(&config_path, yaml).unwrap();
-    tddy_session_lifecycle::test_util::daemon_config_from_fixture_file(&config_path)
-        .expect("config must parse")
+    DaemonConfig::load(&config_path).expect("config must parse")
 }
 
 fn connection_service(
     config: DaemonConfig,
+    stub: &str,
     sessions_base: PathBuf,
     manager: Arc<CliSessionManager>,
 ) -> DaemonSessionHost {
     let tddy_data_dir = sessions_base.clone();
     let agents = cursor_cli_support::coding_agents_over(&sessions_base);
-    cursor_cli_support::install_the_configured_agent(&sessions_base, &config);
+    cursor_cli_support::install_the_configured_agent(&sessions_base, stub);
     let sessions_base_resolver: SessionsBaseResolver =
         Arc::new(move |_| Some(sessions_base.clone()));
     let user_resolver: UserResolver =

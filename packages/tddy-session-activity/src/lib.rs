@@ -17,6 +17,7 @@
 //! [`tddy_service::session_activity::next_tick`] for why — and is re-exported here because this is
 //! the crate that stamps the ticks.
 
+pub mod answer_wait;
 pub mod answers;
 pub mod orchestrator_presence;
 pub mod pending_answers;

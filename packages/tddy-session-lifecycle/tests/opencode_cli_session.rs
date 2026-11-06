@@ -20,8 +20,7 @@ use tddy_session_lifecycle::connection_service::DaemonSessionHost;
 
 mod cli_harness_support;
 use cli_harness_support::{
-    create_test_repo_with_origin, daemon_config_with_cli_harness_binary, register_project,
-    session_host, VALID_TOKEN,
+    a_daemon_config, create_test_repo_with_origin, register_project, session_host, VALID_TOKEN,
 };
 use tddy_testing_commons::stub_scripts::{a_stub_agent_script, read_last_appended_argv};
 use tddy_testing_commons::wait::{eventually, eventually_awaiting};
@@ -71,10 +70,16 @@ fn a_daemon_with_a_stub_for(session_type: &str, stub_name: &str) -> CliHarnessDa
         .then_reading_stdin()
         .build();
 
-    let config = daemon_config_with_cli_harness_binary(session_type, &binary);
+    let config = a_daemon_config();
     let sessions_base = sessions_dir.path().to_path_buf();
     let manager = Arc::new(CliSessionManager::new());
-    let service = session_host(config, sessions_base.clone(), Arc::clone(&manager));
+    let service = session_host(
+        config,
+        session_type,
+        &binary,
+        sessions_base.clone(),
+        Arc::clone(&manager),
+    );
     CliHarnessDaemon {
         service,
         manager,

@@ -80,7 +80,7 @@ impl LaunchSessions {
                         &local_daemon_id,
                         &session_agent_inference,
                         &agent_activity_hub,
-                        coding_agents.as_deref(),
+                        Some(&*coding_agents),
                         s,
                     )?;
                     out.push(entry);

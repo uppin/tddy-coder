@@ -193,7 +193,7 @@ impl LaunchSessions {
         req: &StartSessionRequest,
         os_user: &str,
     ) -> Result<Option<BranchConflict>, Status> {
-        refuse_a_cli_start_without_a_model(req, self.coding_agents.as_deref())?;
+        refuse_a_cli_start_without_a_model(req, Some(&*self.coding_agents))?;
         refuse_an_orchestrated_tool_start(req)?;
         self.owned_branch_conflict(os_user, req).await
     }

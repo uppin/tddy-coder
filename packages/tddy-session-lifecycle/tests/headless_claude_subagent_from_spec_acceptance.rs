@@ -113,12 +113,10 @@ impl AStubClaude {
     }
 }
 
-/// A daemon config whose own `claude` does not exist.
+/// A daemon config that names no `claude`: the agent comes from its tool definition alone.
 fn a_daemon_config() -> DaemonConfig {
-    serde_yaml::from_str(
-        "users:\n  - github_user: u\n    os_user: u\nclaude_cli:\n  binary_path: /nonexistent/claude-is-never-run\n",
-    )
-    .expect("daemon config should parse")
+    serde_yaml::from_str("users:\n  - github_user: u\n    os_user: u\n")
+        .expect("daemon config should parse")
 }
 
 fn this_user() -> String {

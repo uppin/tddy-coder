@@ -74,13 +74,11 @@ fn a_host_with_nothing_wired() -> AHostWithNothingWired {
         &config_path,
         format!(
             "users:\n  - github_user: \"{user}\"\n    os_user: \"{user}\"\n\
-             allowed_tools:\n  - path: /bin/true\n    label: true\n\
-             claude_cli:\n  binary_path: {}\n",
-            claude.display()
+             allowed_tools:\n  - path: /bin/true\n    label: true\n"
         ),
     )
     .unwrap();
-    let config = tddy_session_lifecycle::test_util::daemon_config_from_fixture_file(&config_path)
+    let config = tddy_session_lifecycle::config::DaemonConfig::load(&config_path)
         .expect("daemon.yaml must load");
 
     let sessions = tempfile::tempdir().unwrap();
@@ -107,7 +105,10 @@ fn a_host_with_nothing_wired() -> AHostWithNothingWired {
         Arc::new(tddy_session_lifecycle::claude_cli_session::ClaudeCliSessionManager::new()),
     )
     .with_coding_agents_if_none(
-        tddy_session_lifecycle::test_util::builtin_coding_agents_for(&config),
+        tddy_session_lifecycle::test_util::coding_agents_with_binaries(&[(
+            "claude",
+            claude.as_path(),
+        )]),
     );
     AHostWithNothingWired {
         host,

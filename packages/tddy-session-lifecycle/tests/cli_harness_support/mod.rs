@@ -1,6 +1,6 @@
 //! The fixture the CLI-harness daemon suites (`opencode_cli_session`, `warp_cli_session`) build
 //! their daemon from: a real git repo with `origin/main`, a projects registry naming it, a daemon
-//! config pointing one CLI harness at a stub binary, and a `DaemonSessionHost` serving a test user.
+//! config, a stub binary installed as one CLI harness's agent on the host, and a `DaemonSessionHost` serving a test user.
 //!
 //! The daemon's coding agents are installed as the daemon runtime installs them (see
 //! [`coding_agents_over`]): a CLI harness session is launched from its agent's spec, so a session
@@ -37,8 +37,8 @@ pub fn current_os_user() -> String {
         .into_owned()
 }
 
-/// A daemon config whose `session_type` harness runs `binary`.
-pub fn daemon_config_with_cli_harness_binary(session_type: &str, binary: &Path) -> DaemonConfig {
+/// A daemon config serving the current OS user.
+pub fn a_daemon_config() -> DaemonConfig {
     let dir = tempfile::tempdir().unwrap();
     let user = current_os_user();
     let yaml = format!(
@@ -49,26 +49,28 @@ users:
 allowed_tools:
   - path: /bin/true
     label: true
-cli_harnesses:
-  {session_type}:
-    binary_path: {binary}
-"#,
-        binary = binary.display()
+"#
     );
     let config_path = dir.path().join("daemon.yaml");
     std::fs::write(&config_path, yaml).unwrap();
-    tddy_session_lifecycle::test_util::daemon_config_from_fixture_file(&config_path)
-        .expect("config must parse")
+    DaemonConfig::load(&config_path).expect("config must parse")
 }
 
 /// A session host over `sessions_base` serving [`VALID_TOKEN`], with `manager` running its PTYs and
-/// the coding agents of [`coding_agents_over`] installed.
+/// the coding agents of [`coding_agents_over`] installed, with `binary` installed as the agent a
+/// `session_type` session launches (its spec's binary: `opencode`, `muse`, `warp`, on the host's
+/// `PATH`).
 pub fn session_host(
     config: DaemonConfig,
+    session_type: &str,
+    binary: &Path,
     sessions_base: PathBuf,
     manager: Arc<CliSessionManager>,
 ) -> DaemonSessionHost {
     let agents = coding_agents_over(&sessions_base);
+    let command = session_type.strip_suffix("-cli").unwrap_or(session_type);
+    std::os::unix::fs::symlink(binary, sessions_base.join("tool-bin").join(command))
+        .expect("the harness binary is installed on the host's PATH");
     let tddy_data_dir = sessions_base.clone();
     let sessions_base_resolver: SessionsBaseResolver =
         Arc::new(move |_| Some(sessions_base.clone()));
@@ -92,7 +94,7 @@ pub fn session_host(
 /// The coding agents a daemon keeping its state in `tddy_home` launches from, as the daemon runtime
 /// binds them: the agent registry loaded from `<tddyhome>/tools`, resolved against a host whose `PATH`
 /// holds the real `tddy-tools` and whose `$HOME` is a directory of the test's. The harness binary
-/// itself is the daemon config's `cli_harnesses.<session type>.binary_path`.
+/// itself is installed by [`session_host`].
 pub fn coding_agents_over(tddy_home: &Path) -> Arc<HostCodingAgents> {
     let tools_dir = tddy_home.join("tools");
     std::fs::create_dir_all(&tools_dir).unwrap();

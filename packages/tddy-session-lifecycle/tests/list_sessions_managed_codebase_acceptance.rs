@@ -31,7 +31,15 @@ fn current_os_user() -> String {
         .into_owned()
 }
 
-fn write_config_with_claude_cli_binary(stub_binary: &str) -> (tempfile::TempDir, DaemonConfig) {
+/// A daemon config, and the coding agents the host installs: `claude` is the stub.
+type AConfigAndItsAgents = (
+    DaemonConfig,
+    Arc<tddy_agent_launch::spec_launch::HostCodingAgents>,
+);
+
+fn write_config_with_claude_cli_binary(
+    stub_binary: &str,
+) -> (tempfile::TempDir, AConfigAndItsAgents) {
     let dir = tempfile::tempdir().unwrap();
     let user = current_os_user();
     let yaml = format!(
@@ -39,19 +47,20 @@ fn write_config_with_claude_cli_binary(stub_binary: &str) -> (tempfile::TempDir,
 users:
   - github_user: "{user}"
     os_user: "{user}"
-claude_cli:
-  binary_path: {stub_binary}
 "#
     );
     let config_path = dir.path().join("daemon.yaml");
     std::fs::write(&config_path, yaml).unwrap();
-    let config = tddy_session_lifecycle::test_util::daemon_config_from_fixture_file(&config_path)
-        .expect("config must parse");
-    (dir, config)
+    let config = DaemonConfig::load(&config_path).expect("config must parse");
+    let agents = tddy_session_lifecycle::test_util::coding_agents_with_binaries(&[(
+        "claude",
+        std::path::Path::new(stub_binary),
+    )]);
+    (dir, (config, agents))
 }
 
 fn minimal_service_with_manager(
-    config: DaemonConfig,
+    (config, agents): AConfigAndItsAgents,
     sessions_base: PathBuf,
     manager: Arc<ClaudeCliSessionManager>,
 ) -> DaemonSessionHost {
@@ -77,9 +86,7 @@ fn minimal_service_with_manager(
         Arc::new(tddy_daemon_kernel::operator_channel::NoOperatorChannel),
         manager,
     )
-    .with_coding_agents_if_none(
-        tddy_session_lifecycle::test_util::builtin_coding_agents_for(&config),
-    )
+    .with_coding_agents_if_none(agents)
 }
 
 /// Create a git repo with an origin remote pointing at itself so worktree setup succeeds.

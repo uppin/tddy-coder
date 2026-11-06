@@ -129,7 +129,7 @@ impl LaunchSessions {
         let orchestrator_host =
             trim_to_option(&req.orchestrator_daemon_instance_id).filter(|host| *host != local_id);
         let placement =
-            classify_start_placement(&req, self.coding_agents.as_deref(), local_id, eligible_ids)?;
+            classify_start_placement(&req, Some(&*self.coding_agents), local_id, eligible_ids)?;
         refuse_an_orchestrated_tool_start(&req)?;
         let started = self
             .start_here(req, os_user, agent_def, placement, progress, cancel)
@@ -165,7 +165,7 @@ impl LaunchSessions {
         // auto-provision below: claude-cli always requires a model, so reject an empty one up front
         // — a bad request should fail fast with INVALID_ARGUMENT, not a project NotFound. The
         // per-session-type handlers re-check as defense-in-depth (and for the resume/child paths).
-        refuse_a_cli_start_without_a_model(&req, self.coding_agents.as_deref())?;
+        refuse_a_cli_start_without_a_model(&req, Some(&*self.coding_agents))?;
 
         // Neither placement below puts a repository where the agent runs, so both skip the project
         // auto-provision and the whole worktree-bearing dispatch that follows: a split resolves the
@@ -379,7 +379,7 @@ impl LaunchSessions {
 
         // Every CLI agent starts through the one spec-driven launch; which agent a session type
         // names is read from the host's registry, never from the session type's spelling.
-        if let Some(kind) = cli_launcher(self.coding_agents.as_deref(), req.session_type.trim())? {
+        if let Some(kind) = cli_launcher(Some(&*self.coding_agents), req.session_type.trim())? {
             return self.start_cli_harness(kind, &req, progress, os_user).await;
         }
 

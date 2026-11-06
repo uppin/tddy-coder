@@ -65,7 +65,8 @@ impl ScenarioLauncher {
                     )],
                 ))
             }),
-        );
+        )
+        .with_coding_agents(tddy_session_lifecycle::test_util::builtin_coding_agents());
         Arc::new(Self {
             dir: dir.to_path_buf(),
             daemons_own,

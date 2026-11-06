@@ -216,7 +216,7 @@ impl ToolHost for AFixtureHost {
 /// The coding agents a daemon keeping its state in `tddy_home` launches from, as the daemon runtime
 /// binds them: the agent registry loaded from `<tddyhome>/tools`, resolved against a host whose
 /// `PATH` holds the real `tddy-tools` and whose `$HOME` is a directory of the test's. The `agent`
-/// itself is the daemon config's `cursor_cli.binary_path`. For a suite whose Given is a host with
+/// itself is the stub the suite installs with [`install_the_configured_agent`]. For a suite whose Given is a host with
 /// coding agents but whose stub `agent` is its own.
 pub fn coding_agents_over(tddy_home: &Path) -> Arc<HostCodingAgents> {
     let tools_dir = tddy_home.join("tools");
@@ -236,17 +236,19 @@ pub fn coding_agents_over(tddy_home: &Path) -> Arc<HostCodingAgents> {
     ))
 }
 
-/// Installs the stub `agent` a suite's daemon config names (`cursor_cli.binary_path`) on the host
-/// [`coding_agents_over`] resolves against, the way an agent is installed on a host: as `agent` on
-/// its `PATH`. A config that names no path installs nothing.
-pub fn install_the_configured_agent(tddy_home: &Path, config: &DaemonConfig) {
-    if let Some(stub) = config
-        .cursor_cli
-        .as_ref()
-        .map(|cursor_cli| cursor_cli.binary_path.clone())
-        .filter(|path| path.contains('/'))
-    {
-        let _ = std::os::unix::fs::symlink(stub, tddy_home.join("tool-bin").join("agent"));
+/// Installs the stub `agent` of a suite on the host [`coding_agents_over`] resolves against, the
+/// way an agent is installed on a host: as `agent` on its `PATH`. A `stub` that is not a path
+/// (no `/`) installs nothing.
+pub fn install_the_configured_agent(tddy_home: &Path, stub: &str) {
+    install_an_agent_as(tddy_home, "agent", stub);
+}
+
+/// Installs `stub` as the command `command` (`claude`, `opencode`, `muse`, `warp`, `agent`, ...) on
+/// the `PATH` of the host [`coding_agents_over`] resolves against. A `stub` that is not a path
+/// (no `/`) installs nothing.
+pub fn install_an_agent_as(tddy_home: &Path, command: &str, stub: &str) {
+    if stub.contains('/') {
+        let _ = std::os::unix::fs::symlink(stub, tddy_home.join("tool-bin").join(command));
     }
 }
 
@@ -303,7 +305,7 @@ pub fn a_cursor_daemon(spec: ADaemonSpec) -> ACursorDaemon {
     std::fs::set_permissions(&stub_agent, std::fs::Permissions::from_mode(0o755)).unwrap();
     std::os::unix::fs::symlink(tddy_tools_binary(), stub_bin.join("tddy-tools")).unwrap();
 
-    let (config_dir, config) = a_daemon_config(&stub_agent);
+    let (config_dir, config) = a_daemon_config();
     let registry = load_agent_registry(&tddy_home.join("tools")).expect("the agent registry loads");
     let host = a_session_host(config, tddy_home.clone()).with_coding_agents(Arc::new(
         HostCodingAgents::new(
@@ -562,7 +564,7 @@ pub fn tddy_names<'a>(names: impl IntoIterator<Item = &'a String>) -> BTreeSet<S
         .collect()
 }
 
-fn a_daemon_config(stub_agent: &Path) -> (tempfile::TempDir, DaemonConfig) {
+fn a_daemon_config() -> (tempfile::TempDir, DaemonConfig) {
     let dir = tempfile::tempdir().unwrap();
     let user = current_os_user();
     let yaml = format!(
@@ -573,17 +575,11 @@ users:
 allowed_tools:
   - path: /bin/true
     label: true
-cursor_cli:
-  binary_path: {stub}
-  tddy_tools_path: {tddy_tools}
-"#,
-        stub = stub_agent.display(),
-        tddy_tools = tddy_tools_binary().display(),
+"#
     );
     let config_path = dir.path().join("daemon.yaml");
     std::fs::write(&config_path, yaml).unwrap();
-    let config = tddy_session_lifecycle::test_util::daemon_config_from_fixture_file(&config_path)
-        .expect("config must parse");
+    let config = DaemonConfig::load(&config_path).expect("config must parse");
     (dir, config)
 }
 

@@ -96,7 +96,7 @@ pub fn agent_notify_launch(launch: AgentNotifyLaunch<'_>) -> Result<AgentNotifyW
         session_dir,
         managed_prompt_file,
     } = launch;
-    let daemon_url = daemon_hook_urls::claude_hook_daemon_url(config);
+    let daemon_url = daemon_hook_urls::advertise_daemon_url(config);
     // An embedded daemon serves no HTTP RPC; its agents notify over this socket, as its hooks report.
     let daemon_socket = tddy_daemon_kernel::embedded_host_agent_tool_socket(tddy_data_dir);
     let env = notify_env_pairs(

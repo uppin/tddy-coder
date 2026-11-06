@@ -131,7 +131,8 @@ fn removed_key(
 fn claude_move(field: &str) -> &'static str {
     match field {
         "binary_path" => "binary.command",
-        "claude_home_dir" => "home.key",
+        // The removed knob was an operator's own absolute directory, which `HomeSection::Path` holds.
+        "claude_home_dir" => "home: { kind: path, path: <dir> }",
         "fullscreen" => "run.env",
         "answer_wait_secs" => "coding_agent.answer_wait_secs",
         "tddy_tools_path" => "tools/tddy-tools.yaml binary.command",

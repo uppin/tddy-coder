@@ -157,6 +157,32 @@ fn two_override_files_with_one_id_are_refused_naming_both_files() {
     );
 }
 
+/// `home: { kind: path }` (`#agent-tools 19/19`) names the operator's own directory; a relative
+/// one would name wherever the daemon happened to start, so it is refused at load.
+#[test]
+fn a_path_home_that_is_not_absolute_is_refused_naming_the_file_and_the_path() {
+    // Given
+    let tools = a_tools_dir().with_file(
+        "rg.yaml",
+        &format!(
+            "{}home: {{ kind: path, path: srv/claude-home }}\n",
+            a_tool_yaml("rg", "rg", &[])
+        ),
+    );
+
+    // When
+    let refused = ToolRegistry::load(ToolRegistry::builtin().unwrap(), tools.path()).unwrap_err();
+
+    // Then
+    assert_eq!(
+        refused,
+        ToolError::Parse {
+            file: tools.file("rg.yaml"),
+            message: "home.path srv/claude-home is not an absolute directory".into(),
+        }
+    );
+}
+
 #[test]
 fn a_file_naming_another_schema_version_is_refused() {
     // Given

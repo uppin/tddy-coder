@@ -35,7 +35,7 @@ use tddy_daemon_kernel::config::DaemonConfig;
 
 use tddy_core::session_pointer::SessionPointer;
 
-use crate::claude_cli_spawn_steps::{claude_cli_hooks, ClaudeCliHooks};
+use crate::claude_cli_spawn_steps::{claude_cli_hooks, record_hook_answer_wait, ClaudeCliHooks};
 use crate::cli_session_pointer::session_pointer_of;
 use crate::harness_from_spec::HarnessLaunch;
 use crate::launch_ports::LaunchSessions;
@@ -304,6 +304,9 @@ pub(crate) fn refuse_a_role_the_agent_cannot_hold(
 /// What a generic launch's session wiring is built from.
 pub(crate) struct SessionWiringInputs<'a> {
     pub spec: &'a CodingAgentSpec,
+    /// The agent's resolved `tddy-tools` dependency: what its hooks, managed workflow and tool
+    /// server run.
+    pub tddy_tools_path: &'a str,
     pub config: &'a DaemonConfig,
     pub tddy_data_dir: &'a Path,
     pub os_user: &'a str,
@@ -359,6 +362,7 @@ pub(crate) struct SessionWiring {
 pub(crate) fn wire_session_agent(inputs: SessionWiringInputs<'_>) -> Result<SessionWiring, Status> {
     let SessionWiringInputs {
         spec,
+        tddy_tools_path,
         config,
         tddy_data_dir,
         os_user,
@@ -370,7 +374,10 @@ pub(crate) fn wire_session_agent(inputs: SessionWiringInputs<'_>) -> Result<Sess
         github_credential_handler,
     } = inputs;
     let hooks = (spec.has(Capability::Hooks) || spec.has(Capability::OperatorNotify))
-        .then(|| claude_cli_hooks(config, tddy_data_dir));
+        .then(|| claude_cli_hooks(config, tddy_data_dir, spec, tddy_tools_path));
+    if let Some(hooks) = &hooks {
+        record_hook_answer_wait(session_dir, hooks)?;
+    }
     let mut process_env: Vec<(String, String)> = Vec::new();
     let mut tool_server_env: Vec<(String, String)> = Vec::new();
     let mut notify_env: Vec<(String, String)> = Vec::new();
@@ -382,10 +389,6 @@ pub(crate) fn wire_session_agent(inputs: SessionWiringInputs<'_>) -> Result<Sess
         conversation_spawn_handler,
     }) = managed
     {
-        let tddy_tools_path = match &hooks {
-            Some(hooks) => hooks.tddy_tools_path.clone(),
-            None => claude_cli_hooks(config, tddy_data_dir).tddy_tools_path,
-        };
         let launch = managed_launch::prepare_managed_workflow_inner(
             tddy_data_dir,
             session_id,
@@ -393,7 +396,7 @@ pub(crate) fn wire_session_agent(inputs: SessionWiringInputs<'_>) -> Result<Sess
             session_dir,
             worktree,
             session_dir,
-            &tddy_tools_path,
+            tddy_tools_path,
             None,
             child_spawn_handler,
             conversation_spawn_handler,
@@ -426,7 +429,7 @@ pub(crate) fn wire_session_agent(inputs: SessionWiringInputs<'_>) -> Result<Sess
         spec,
         &mut toolset,
         tool_server_env,
-        &claude_cli_hooks(config, tddy_data_dir).tddy_tools_path,
+        tddy_tools_path,
         session_dir,
     );
     let hook_socket = hooks
@@ -464,7 +467,7 @@ impl LaunchSessions {
     #[allow(clippy::too_many_arguments)]
     pub(crate) async fn resumed_session_wiring(
         &self,
-        spec: &CodingAgentSpec,
+        agent: &HostAgent,
         meta: &SessionMetadata,
         session_dir: &Path,
         worktree: &Path,
@@ -472,6 +475,8 @@ impl LaunchSessions {
         session_token: &str,
         github_credential_handler: Option<Arc<dyn tddy_core::toolcall::GithubCredentialHandler>>,
     ) -> Result<ResumedWiring, Status> {
+        let spec = &agent.spec;
+        let tddy_tools_path = crate::cli_harness_jail::agent_tddy_tools(agent)?;
         let session_id = meta.session_id.as_str();
         let mut process_env = Vec::new();
         let mut tool_server_env = Vec::new();
@@ -491,8 +496,6 @@ impl LaunchSessions {
                     tddy_workflow_recipes::resolve_workflow_recipe_from_cli_name(recipe_name)
                         .map_err(Status::invalid_argument)?;
                 let resume_goal = LaunchSessions::managed_resume_goal(session_dir, &recipe);
-                let tddy_tools_path =
-                    claude_cli_hooks(&self.config, &self.tddy_data_dir).tddy_tools_path;
                 let launch = self.prepare_managed_workflow(
                     session_id,
                     recipe,
@@ -529,7 +532,7 @@ impl LaunchSessions {
             spec,
             &mut toolset,
             tool_server_env,
-            &claude_cli_hooks(&self.config, &self.tddy_data_dir).tddy_tools_path,
+            &tddy_tools_path,
             session_dir,
         );
         Ok(ResumedWiring {

@@ -30,10 +30,8 @@ const SESSION_ID: &str = "1780828020298-coding";
 const CONVERSATION: &str = "conv-1";
 
 fn a_daemon_config() -> DaemonConfig {
-    serde_yaml::from_str(
-        "users:\n  - github_user: u\n    os_user: u\nclaude_cli:\n  binary_path: /opt/tddy/bin/claude\n",
-    )
-    .expect("daemon config should parse")
+    serde_yaml::from_str("users:\n  - github_user: u\n    os_user: u\n")
+        .expect("daemon config should parse")
 }
 
 fn this_user() -> String {
@@ -586,7 +584,7 @@ async fn a_headless_plan_tags_its_conversations_files_with_this_daemons_durable_
     let headless = tempfile::tempdir().expect("headless dir");
     let worktree = tempfile::tempdir().expect("worktree");
     let config: DaemonConfig = serde_yaml::from_str(
-        "users:\n  - github_user: u\n    os_user: u\nclaude_cli:\n  binary_path: /opt/tddy/bin/claude\n\
+        "users:\n  - github_user: u\n    os_user: u\n\
          daemon_instance_id: dev\ndaemon_instance_id_append_startup_timestamp: true\n",
     )
     .expect("daemon config should parse");

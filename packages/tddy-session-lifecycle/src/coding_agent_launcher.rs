@@ -13,8 +13,8 @@
 //!   `-c` overrides for `codex-acp`, the route's config file as inline `OPENCODE_CONFIG_CONTENT` for
 //!   `opencode`.
 //! - **A managed session** — the harness's native tools are withdrawn
-//!   ([`tddy_coding_subagent::opencode_withdrawal_config`] for `opencode`; `claude-acp` through
-//!   `_meta` at `session/new`) and
+//!   (the spec's `acp.withdraw_native`: inline config for `opencode`, `_meta` at `session/new` for
+//!   `claude-acp`) and
 //!   the agent is handed `tddy-tools --mcp` with a credential minted for it
 //!   ([`tddy_session_split::coding_agent_wiring`]).
 //!
@@ -29,16 +29,14 @@
 //! daemon whose coding agents did not load, and a launcher built without any, refuse every headless
 //! harness: nothing is planned by hand.
 //!
-//! **The harness binary.** `claude-acp` runs as `bunx claude-agent-acp` unless
-//! `TDDY_CLAUDE_AGENT_ACP_CLI` names a `claude-agent-acp` binary; `codex-acp` as `codex-acp` unless
-//! `TDDY_CODEX_ACP_CLI` names one. On a supervised host the program is what
-//! `allowed_relay_tool_paths` must list, and its arguments are not allowlisted — so allowlisting
-//! `bunx` lets the session user run any npm package; set `TDDY_CLAUDE_AGENT_ACP_CLI` and allowlist
-//! that binary instead.
+//! **The harness binary** is the agent spec's: `claude-acp` runs as the spec declares (`bunx
+//! claude-agent-acp` unless `TDDY_CLAUDE_AGENT_ACP_CLI` names a binary), `codex-acp` and `opencode`
+//! likewise. On a supervised host the program is what `allowed_relay_tool_paths` must list, and its
+//! arguments are not allowlisted — so allowlisting `bunx` lets the session user run any npm package;
+//! set `TDDY_CLAUDE_AGENT_ACP_CLI` and allowlist that binary instead.
 //!
 //! Feature: docs/ft/daemon/session-agent-roster.md § Coding agents
 
-use std::ffi::OsString;
 use std::io;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -53,10 +51,10 @@ use tddy_coding_agent_specs::slots::McpServerCommand;
 use tddy_coding_agent_specs::{CodingAgentSpec, McpSlot};
 use tddy_coding_subagent::launcher::{record_written_files, HEADLESS_DIR, SESSION_TOKEN_ENV};
 use tddy_coding_subagent::{
-    confinement_of_spec, opencode_withdrawal_config, refuse_unless_confinable,
-    refuse_unless_spec_confinable, transport_of, AgentTransport, ApprovalRoutes, CodingAgentLaunch,
-    CodingAgentLauncher, Confinement, Transport, CLAUDE_ACP, CODEX_ACP, CONVERSATION_ID_ENV,
-    OPENCODE, OPENCODE_CONFIG_CONTENT, TDDY_TOOLS_MCP_ARG, TDDY_TOOLS_SERVER,
+    confinement_of_spec, refuse_unless_confinable, refuse_unless_spec_confinable, transport_of,
+    AgentTransport, ApprovalRoutes, CodingAgentLaunch, CodingAgentLauncher, Confinement, Transport,
+    CODEX_ACP, CONVERSATION_ID_ENV, OPENCODE, OPENCODE_CONFIG_CONTENT, TDDY_TOOLS_MCP_ARG,
+    TDDY_TOOLS_SERVER,
 };
 use tddy_core::adapters::AdapterRegistry;
 use tddy_core::provider_route::{HarnessRoute, RouteChoice, RouteSources};
@@ -69,21 +67,6 @@ use tddy_subagent_worktree::ConversationId;
 use crate::coding_agent_as_user::{run_as_session_user, AsUserRefusal, DropContext};
 use crate::coding_agent_relay::{start_relayed, RelayEndpoint};
 
-/// Env var naming the `codex-acp` binary, as the workflow backend reads it.
-const CODEX_ACP_CLI_ENV: &str = "TDDY_CODEX_ACP_CLI";
-/// The `codex-acp` binary looked up on `PATH` when [`CODEX_ACP_CLI_ENV`] is unset.
-const CODEX_ACP_BINARY: &str = "codex-acp";
-/// Env var naming a `claude-agent-acp` binary to run in place of `bunx claude-agent-acp` — what a
-/// supervised host allowlists instead of `bunx`, whose arguments the allowlist cannot pin.
-const CLAUDE_AGENT_ACP_CLI_ENV: &str = "TDDY_CLAUDE_AGENT_ACP_CLI";
-/// The package runner `claude-agent-acp` runs through when [`CLAUDE_AGENT_ACP_CLI_ENV`] is unset.
-const BUNX: &str = "bunx";
-/// The npm package (and binary) of Claude Code's ACP adapter.
-const CLAUDE_AGENT_ACP: &str = "claude-agent-acp";
-/// The `opencode` binary.
-const OPENCODE_BINARY: &str = "opencode";
-/// The `opencode` subcommand that speaks ACP over stdio.
-const OPENCODE_ACP_SUBCOMMAND: &str = "acp";
 /// The directory under `<tddyhome>` a supervised launch's relay sockets are bound in.
 const RELAY_SOCKET_DIR: &str = "relay";
 /// The tool Claude Code's permission prompts are routed to: `approval_prompt` on the `tddy-tools`
@@ -170,7 +153,10 @@ pub struct DaemonCodingAgentLauncher {
     /// is rendered from its spec's `coding_agent.headless` section (`#agent-tools 15/19`: a launcher
     /// without them refuses a headless launch — nothing is planned by hand), and, since
     /// `#agent-tools 11/12`, the ACP harnesses are planned from their specs too (`acp_plan_from_spec`).
-    coding_agents: Option<Arc<HostCodingAgents>>,
+    ///
+    /// Always present (`#agent-tools 19/19`): a launcher built without any holds an empty registry,
+    /// which refuses every agent launch for naming no spec — nothing is planned by hand.
+    coding_agents: Arc<HostCodingAgents>,
     /// Why `for_daemon`'s coding agents did not load. A headless `claude` conversation is refused with
     /// it, never planned by hand: a tool file that does not load must not start the agent some other way.
     coding_agents_error: Option<String>,
@@ -224,7 +210,7 @@ impl DaemonCodingAgentLauncher {
         let relay_dir = tddy_data_dir.join(RELAY_SOCKET_DIR);
         let headless_dir = tddy_data_dir.join(HEADLESS_DIR);
         let headless_config = config.clone();
-        let coding_agents = host_coding_agents(&config, &tddy_data_dir);
+        let coding_agents = host_coding_agents(&tddy_data_dir);
         let supervisor_socket = match spawn_backend {
             tddy_spawn::supervisor_client::SpawnBackendChoice::Supervisor { socket_path } => {
                 Some(socket_path)
@@ -280,7 +266,7 @@ impl DaemonCodingAgentLauncher {
             relay: None,
             headless: None,
             approval_routes: None,
-            coding_agents: None,
+            coding_agents: tddy_agent_launch::host_coding_agents::no_coding_agents(),
             coding_agents_error: None,
         }
     }
@@ -290,7 +276,7 @@ impl DaemonCodingAgentLauncher {
     /// `coding_agent.headless`, and its MCP registration and approval tool from its slots.
     #[must_use]
     pub fn with_coding_agents(mut self, agents: Arc<HostCodingAgents>) -> Self {
-        self.coding_agents = Some(agents);
+        self.coding_agents = agents;
         self
     }
 
@@ -571,30 +557,27 @@ impl DaemonCodingAgentLauncher {
         })
     }
 
-    /// Refuses an ACP harness when this daemon's coding agents did not load: a tool file that does
-    /// not load must not start the agent some other way (the rule `headless_plan` keeps for the
-    /// headless harnesses). Every other launch passes.
-    fn refuse_acp_when_agents_failed(
+    /// The agents a launch of `launch`'s harness over ACP is planned from: this daemon's coding
+    /// agents. Refused when they did not load — a tool file that does not load must not start the
+    /// agent some other way — and for a harness that is not an ACP one, which nothing here plans by
+    /// hand (`#agent-tools 19/19`).
+    fn acp_agents_for(
         &self,
         launch: &CodingAgentLaunch,
-    ) -> Result<(), SubagentError> {
-        match &self.coding_agents_error {
-            Some(reason) if transport_of(&launch.def.harness) == Some(Transport::Acp) => {
-                Err(Self::refuse(launch, reason))
-            }
-            _ => Ok(()),
+    ) -> Result<&HostCodingAgents, SubagentError> {
+        if let Some(reason) = &self.coding_agents_error {
+            return Err(Self::refuse(launch, reason));
         }
-    }
-
-    /// The agents a launch of `launch`'s harness over ACP is planned from: the installed coding
-    /// agents, for an ACP harness; `None` plans it by hand.
-    fn acp_agents_for(&self, launch: &CodingAgentLaunch) -> Option<&HostCodingAgents> {
-        // `#agent-tools 11/12`: ACP harnesses are planned from `claude-acp.yaml`, `codex-acp.yaml`
-        // and `opencode.yaml`'s `coding_agent.acp` once the coding agents are installed.
-        let agents = self.coding_agents.as_deref()?;
-        (tddy_coding_subagent::transport_of(&launch.def.harness)
-            == Some(tddy_coding_subagent::Transport::Acp))
-        .then_some(agents)
+        if transport_of(&launch.def.harness) != Some(Transport::Acp) {
+            return Err(Self::refuse(
+                launch,
+                &format!(
+                    "this daemon has no ACP command for the '{}' harness",
+                    launch.def.harness
+                ),
+            ));
+        }
+        Ok(&self.coding_agents)
     }
 
     fn refuse(launch: &CodingAgentLaunch, reason: &str) -> SubagentError {
@@ -602,57 +585,6 @@ impl DaemonCodingAgentLauncher {
             "coding agent '{}' ({}) cannot be launched: {reason}",
             launch.def.name, launch.def.harness
         ))
-    }
-
-    fn harness_command(
-        launch: &CodingAgentLaunch,
-    ) -> Result<(PathBuf, Vec<String>), SubagentError> {
-        match launch.def.harness.as_str() {
-            CLAUDE_ACP => Ok(claude_agent_acp_command(std::env::var_os(
-                CLAUDE_AGENT_ACP_CLI_ENV,
-            ))),
-            CODEX_ACP => Ok((
-                std::env::var_os(CODEX_ACP_CLI_ENV)
-                    .map(PathBuf::from)
-                    .unwrap_or_else(|| PathBuf::from(CODEX_ACP_BINARY)),
-                Vec::new(),
-            )),
-            OPENCODE => Ok((
-                PathBuf::from(OPENCODE_BINARY),
-                vec![OPENCODE_ACP_SUBCOMMAND.to_string()],
-            )),
-            other => Err(Self::refuse(
-                launch,
-                &format!("this daemon has no ACP command for the '{other}' harness"),
-            )),
-        }
-    }
-
-    /// Apply `route` to the harness command: every harness gets its environment; `codex-acp` its
-    /// `-c` overrides; `opencode` its config file as inline config.
-    fn apply_route(
-        launch: &CodingAgentLaunch,
-        command: &mut AcpAgentCommand,
-        route: &HarnessRoute,
-    ) -> Result<(), SubagentError> {
-        command.env.extend(route.env.iter().cloned());
-        command.env.extend(
-            route
-                .secret_env
-                .iter()
-                .map(|(name, secret)| (name.clone(), secret.expose().to_string())),
-        );
-        match launch.def.harness.as_str() {
-            CODEX_ACP => command.args.extend(tddy_core::codex_acp_route_args(route)),
-            OPENCODE => {
-                if let Some(config) = Self::opencode_route_config(launch, route)? {
-                    merge_inline_config(command, OPENCODE_CONFIG_CONTENT, config)
-                        .map_err(|reason| Self::refuse(launch, &reason))?;
-                }
-            }
-            _ => {}
-        }
-        Ok(())
     }
 
     /// The route's OpenCode config file as JSON; `None` for a route that carries none.
@@ -676,42 +608,8 @@ impl DaemonCodingAgentLauncher {
         &self,
         launch: &CodingAgentLaunch,
     ) -> Result<AcpAgentCommand, SubagentError> {
-        if let Some(agents) = self.acp_agents_for(launch) {
-            return self.acp_plan_from_spec(launch, agents);
-        }
-        self.refuse_acp_when_agents_failed(launch)?;
-        // TODO(acp-agents): reached only by a launcher built without coding agents (`new`,
-        // `with_identity`, and the tests that construct them); `for_daemon` installs them or
-        // refuses above. Green deletes this branch with `harness_command`, `apply_route` and the
-        // ACP constants once those launchers are built with coding agents
-        // (`tddy-daemon-rpc`'s acceptance suites and this file's tests are the blockers).
-        refuse_unless_confinable(&launch.def.harness, launch.managed)
-            .map_err(|reason| Self::refuse(launch, &reason))?;
-        let (program, args) = Self::harness_command(launch)?;
-        let mut command = AcpAgentCommand {
-            program,
-            args,
-            env: Vec::new(),
-            cwd: Some(launch.worktree.clone()),
-        };
-        if let Some(account) = launch.def.provider_account.as_deref() {
-            let route = (self.route)(launch)?.ok_or_else(|| {
-                Self::refuse(
-                    launch,
-                    &format!("provider account '{account}' resolved to no route"),
-                )
-            })?;
-            Self::apply_route(launch, &mut command, &route)?;
-        }
-        let withdrawal = launch
-            .managed
-            .then(|| opencode_withdrawal_config(&launch.def.harness))
-            .flatten();
-        if let Some(withdrawal) = withdrawal {
-            merge_inline_config(&mut command, OPENCODE_CONFIG_CONTENT, withdrawal)
-                .map_err(|reason| Self::refuse(launch, &reason))?;
-        }
-        Ok(command)
+        let agents = self.acp_agents_for(launch)?;
+        self.acp_plan_from_spec(launch, agents)
     }
 
     fn plan(&self, launch: &CodingAgentLaunch) -> Result<AcpAgentCommand, SubagentError> {
@@ -762,19 +660,13 @@ impl DaemonCodingAgentLauncher {
         // `#agent-tools 9/12`: every headless harness — Cursor, Codex and Oz as well as Claude — is
         // planned from its spec once the coding agents are installed (`cursor.yaml`, `codex.yaml`,
         // `oz.yaml`).
-        if let Some(agents) = &self.coding_agents {
-            return self.headless_plan_from_spec(launch, wiring, conversation.as_str(), agents);
-        }
         // A tool file that does not load must not start any agent some other way.
         if let Some(reason) = &self.coding_agents_error {
             return Err(Self::refuse(launch, reason));
         }
-        // Nothing is planned by hand: a daemon without the coding agents installed has no argv to
-        // start a headless CLI with, and says so.
-        Err(Self::refuse(
-            launch,
-            "this daemon has no coding agents installed, so it has no definition of the headless CLI to start",
-        ))
+        // Nothing is planned by hand: an agent no installed spec declares has no argv to start a
+        // headless CLI with (`agents.resolve` says so).
+        self.headless_plan_from_spec(launch, wiring, conversation.as_str(), &self.coding_agents)
     }
 
     /// Records, in the claimed directory `scratch_dir`, every file the turns of `spec`'s headless
@@ -952,15 +844,6 @@ fn headless_route_env(
     Ok(env)
 }
 
-/// The program and arguments `claude-acp` runs as: the `claude-agent-acp` binary `override_cli`
-/// names, on its own; or, when none is named, `bunx claude-agent-acp`.
-fn claude_agent_acp_command(override_cli: Option<OsString>) -> (PathBuf, Vec<String>) {
-    match override_cli {
-        Some(cli) => (PathBuf::from(cli), Vec::new()),
-        None => (PathBuf::from(BUNX), vec![CLAUDE_AGENT_ACP.to_string()]),
-    }
-}
-
 /// The environment a provider route gives a harness's process: its plain pairs, then its secret ones.
 fn harness_route_env(route: &HarnessRoute) -> Vec<(String, String)> {
     route
@@ -1050,28 +933,16 @@ impl CodingAgentLauncher for DaemonCodingAgentLauncher {
         &self,
         launch: &CodingAgentLaunch,
     ) -> Result<Vec<McpServerSpec>, SubagentError> {
-        if let Some(agents) = self.acp_agents_for(launch) {
-            return self.acp_mcp_servers_from_spec(launch, agents);
-        }
-        self.refuse_acp_when_agents_failed(launch)?;
-        if !launch.managed {
-            return Ok(Vec::new());
-        }
-        Ok(vec![self.tool_server_spec(launch)?])
+        let agents = self.acp_agents_for(launch)?;
+        self.acp_mcp_servers_from_spec(launch, agents)
     }
 
     async fn session_meta_for(
         &self,
         launch: &CodingAgentLaunch,
     ) -> Result<Option<serde_json::Map<String, serde_json::Value>>, SubagentError> {
-        if let Some(agents) = self.acp_agents_for(launch) {
-            return self.acp_session_meta_from_spec(launch, agents);
-        }
-        self.refuse_acp_when_agents_failed(launch)?;
-        Ok(launch
-            .managed
-            .then(|| tddy_coding_subagent::withdrawal_session_meta(&launch.def.harness))
-            .flatten())
+        let agents = self.acp_agents_for(launch)?;
+        self.acp_session_meta_from_spec(launch, agents)
     }
 
     /// The headless command [`Self::headless_plan`] settles: refused unless the daemon can run the
@@ -1123,7 +994,7 @@ mod headless_tests;
 #[cfg(test)]
 mod tests {
     use super::*;
-    use tddy_coding_subagent::CodingAgentDef;
+    use tddy_coding_subagent::{CodingAgentDef, CLAUDE_ACP};
     use tddy_core::provider_route::RouteSecret;
 
     /// The model every launch in these tests runs.
@@ -1219,6 +1090,53 @@ mod tests {
                 ))
             }),
         )
+        .with_coding_agents(the_acp_agents())
+    }
+
+    /// The directory holding the stub binaries [`the_acp_agents`] resolves to, made once and
+    /// canonical, as the host resolves a binary (`/var` is `/private/var` on macOS).
+    fn the_stubs() -> &'static Path {
+        use std::os::unix::fs::PermissionsExt;
+        static STUBS: std::sync::OnceLock<(tempfile::TempDir, PathBuf)> =
+            std::sync::OnceLock::new();
+        &STUBS
+            .get_or_init(|| {
+                let dir = tempfile::tempdir().expect("a directory for the stub agents");
+                let canonical = std::fs::canonicalize(dir.path()).expect("a canonical path");
+                for name in [
+                    "claude-agent-acp",
+                    "codex-acp",
+                    "codex",
+                    "opencode",
+                    "tddy-tools",
+                ] {
+                    let file = canonical.join(name);
+                    std::fs::write(&file, "#!/bin/sh\nexit 0\n").expect("a stub agent");
+                    std::fs::set_permissions(&file, std::fs::Permissions::from_mode(0o755))
+                        .expect("an executable stub agent");
+                }
+                (dir, canonical)
+            })
+            .1
+    }
+
+    /// The ACP coding agents of a host whose binaries are the stubs ([`the_stubs`]).
+    fn the_acp_agents() -> Arc<HostCodingAgents> {
+        let stub = |name: &str| the_stubs().join(name);
+        let (claude, codex_acp, codex, opencode, tddy_tools) = (
+            stub("claude-agent-acp"),
+            stub("codex-acp"),
+            stub("codex"),
+            stub("opencode"),
+            stub("tddy-tools"),
+        );
+        crate::test_util::coding_agents_with_binaries(&[
+            ("claude-acp", claude.as_path()),
+            ("codex-acp", codex_acp.as_path()),
+            ("codex", codex.as_path()),
+            ("opencode", opencode.as_path()),
+            ("tddy-tools", tddy_tools.as_path()),
+        ])
     }
 
     async fn command(
@@ -1264,7 +1182,7 @@ mod tests {
         // Then
         assert_eq!(
             (command.program, command.args),
-            (PathBuf::from("opencode"), vec!["acp".to_string()])
+            (the_stubs().join("opencode"), vec!["acp".to_string()])
         );
     }
 
@@ -1283,36 +1201,6 @@ mod tests {
         );
     }
 
-    #[test]
-    fn claude_runs_through_bunx_when_no_claude_agent_acp_binary_is_named() {
-        // When
-        let (program, args) = claude_agent_acp_command(None);
-
-        // Then
-        assert_eq!(
-            (program, args),
-            (PathBuf::from("bunx"), vec!["claude-agent-acp".to_string()])
-        );
-    }
-
-    #[test]
-    fn a_named_claude_agent_acp_binary_runs_on_its_own() {
-        // Given
-        let named = OsString::from("/opt/claude/bin/claude-agent-acp");
-
-        // When
-        let (program, args) = claude_agent_acp_command(Some(named));
-
-        // Then
-        assert_eq!(
-            (program, args),
-            (
-                PathBuf::from("/opt/claude/bin/claude-agent-acp"),
-                Vec::new()
-            )
-        );
-    }
-
     #[tokio::test]
     async fn a_session_of_another_user_is_refused_by_an_unprivileged_daemon() {
         // Given
@@ -1322,7 +1210,8 @@ mod tests {
             an_unprivileged_identity(),
             Arc::new(|_| Ok(None)),
             Arc::new(|_| Err(SubagentError::from("unused"))),
-        );
+        )
+        .with_coding_agents(the_acp_agents());
 
         // When
         let refusal = command(&launcher, &launch).await.expect_err("refused");
@@ -1479,7 +1368,7 @@ mod tests {
         let refusal = command(&a_launcher(), &launch).await.expect_err("refused");
 
         // Then
-        assert!(refusal.contains("cannot be withdrawn"), "{refusal}");
+        assert!(refusal.contains("cannot withdraw its native"), "{refusal}");
     }
 
     #[tokio::test]
@@ -1565,6 +1454,7 @@ mod tests {
             Arc::new(|_| Ok(None)),
             Arc::new(|_| Err(SubagentError::from("unused"))),
         )
+        .with_coding_agents(the_acp_agents())
         .with_supervisor_relay(RelayEndpoint {
             spawner: supervisor.clone(),
             socket_dir: dir.path().join("r"),

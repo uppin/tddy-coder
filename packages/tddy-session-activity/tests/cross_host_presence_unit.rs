@@ -93,6 +93,8 @@ fn a_host_whose_child_is_orchestrated_on(
         ..Default::default()
     };
     tddy_core::write_changeset(&child_dir, &changeset).expect("the child's changeset");
+    tddy_session_activity::answer_wait::record_answer_wait(&child_dir, A_SHORT_WAIT)
+        .expect("the wait the child's start recorded");
     write_pending_question(
         &child_dir,
         &PendingQuestion {
@@ -129,7 +131,6 @@ fn a_host_whose_child_is_orchestrated_on(
     .with_question_answers(AnswerWaitPorts {
         pending: Arc::new(PendingAnswers::new()),
         presence: Arc::clone(&presence) as Arc<dyn OrchestratorPresence>,
-        wait: A_SHORT_WAIT,
     });
     AHost {
         data_dir,

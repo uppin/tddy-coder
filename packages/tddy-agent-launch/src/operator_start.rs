@@ -44,7 +44,7 @@ impl LaunchSessions {
         crate::start_request_checks::refuse_a_conflicting_tmux_run_start(&req)?;
         let (local_id, eligible_ids) = self.eligible_daemon_ids();
         let placement =
-            classify_start_placement(&req, self.coding_agents.as_deref(), local_id, eligible_ids)?;
+            classify_start_placement(&req, Some(&*self.coding_agents), local_id, eligible_ids)?;
         self.start_here(
             req,
             os_user,

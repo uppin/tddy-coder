@@ -68,14 +68,10 @@ fn a_pr_stack_orchestrator() -> Orchestrator {
     let config_path = config_dir.path().join("daemon.yaml");
     std::fs::write(
         &config_path,
-        format!(
-            "users:\n  - github_user: \"{os_user}\"\n    os_user: \"{os_user}\"\nclaude_cli:\n  binary_path: {}\n",
-            stub.display()
-        ),
+        format!("users:\n  - github_user: \"{os_user}\"\n    os_user: \"{os_user}\"\n"),
     )
     .expect("write daemon config");
-    let config = crate::test_util::daemon_config_from_fixture_file(&config_path)
-        .expect("daemon config must parse");
+    let config = crate::config::DaemonConfig::load(&config_path).expect("daemon config must parse");
 
     let sessions_base = sessions.path().to_path_buf();
     let resolver: SessionsBaseResolver = Arc::new(move |_| Some(sessions_base.clone()));
@@ -93,7 +89,9 @@ fn a_pr_stack_orchestrator() -> Orchestrator {
         Arc::new(tddy_daemon_kernel::operator_channel::NoOperatorChannel),
         Arc::new(CliSessionManager::new()),
     )
-    .with_coding_agents_if_none(crate::test_util::builtin_coding_agents_for(&config));
+    .with_coding_agents_if_none(crate::test_util::coding_agents_with_binaries(&[(
+        "claude", &stub,
+    )]));
 
     let orchestrator = Orchestrator {
         service,

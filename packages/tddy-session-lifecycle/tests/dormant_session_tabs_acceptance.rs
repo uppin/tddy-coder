@@ -269,22 +269,24 @@ async fn a_live_session_still_starts_tabs_in_its_main_terminals_worktree() {
 // Fixtures
 // ---------------------------------------------------------------------------
 
-fn a_config_naming_muse(muse: &Path) -> (tempfile::TempDir, DaemonConfig) {
+/// A daemon config, and the coding agents the host installs: `muse` is the stub.
+type AConfigAndItsAgents = (
+    DaemonConfig,
+    Arc<tddy_agent_launch::spec_launch::HostCodingAgents>,
+);
+
+fn a_config_naming_muse(muse: &Path) -> (tempfile::TempDir, AConfigAndItsAgents) {
     let dir = tempfile::tempdir().unwrap();
-    let yaml = format!(
-        "users:\n  - github_user: \"testuser\"\n    os_user: \"testuser\"\ncli_harnesses:\n  \
-         muse-cli:\n    binary_path: {}\n",
-        muse.display()
-    );
+    let yaml = "users:\n  - github_user: \"testuser\"\n    os_user: \"testuser\"\n";
     let path = dir.path().join("daemon.yaml");
     std::fs::write(&path, yaml).unwrap();
-    let config = tddy_session_lifecycle::test_util::daemon_config_from_fixture_file(&path)
-        .expect("config must parse");
-    (dir, config)
+    let config = DaemonConfig::load(&path).expect("config must parse");
+    let agents = tddy_session_lifecycle::test_util::coding_agents_with_binaries(&[("muse", muse)]);
+    (dir, (config, agents))
 }
 
 fn session_host(
-    config: DaemonConfig,
+    (config, agents): AConfigAndItsAgents,
     data_dir: PathBuf,
     manager: Arc<ClaudeCliSessionManager>,
 ) -> DaemonSessionHost {
@@ -304,5 +306,5 @@ fn session_host(
         Arc::new(tddy_daemon_kernel::operator_channel::NoOperatorChannel),
         manager,
     )
-    .with_coding_agents_if_none(tddy_session_lifecycle::test_util::builtin_coding_agents())
+    .with_coding_agents_if_none(agents)
 }

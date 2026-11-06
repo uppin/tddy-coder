@@ -11,7 +11,9 @@
 //! workflow, hooks, conversation slot and `TDDY_*`-free environment with dropped-in agents that
 //! declare them. The jailed start runs a real Seatbelt jail with the real
 //! `tddy-sandbox-runner`, so it is macOS-only: CI (ubuntu) never runs the
-//! `jailed` module.
+//! `jailed` module. The answer-wait starts of `#agent-tools 19/19` run claude.yaml overridden with
+//! an `answer_wait_secs` (the stub standing for `claude`), orchestrated by a running acme session,
+//! and hold the child's permission hook in the daemon's real `AwaitQuestionAnswer`.
 
 mod agent_registry_support;
 mod support;
@@ -20,11 +22,14 @@ use std::collections::BTreeSet;
 
 use agent_registry_support::{
     a_daemon_with_tools, a_registry_daemon, acme_yaml_declaring, builtin_yaml_run_as_the_stub,
-    ACME_MODEL, ACME_YAML, META_ACCOUNT, META_ANTHROPIC_ROOT, META_KEY, MINTED_CHAT_ID,
+    builtin_yaml_run_as_the_stub_waiting, AHeldHook, ACME_MODEL, ACME_YAML, META_ACCOUNT,
+    META_ANTHROPIC_ROOT, META_KEY, MINTED_CHAT_ID,
 };
 use pretty_assertions::assert_eq;
 use tddy_coding_agent_specs::{builtin_specs, Capability};
+use tddy_core::claude_hooks::CLAUDE_HOOK_TIMEOUT_MARGIN_SECS;
 use tddy_rpc::Code;
+use tddy_service::proto::session::StartSessionRequest;
 
 /// The built-in claude.yaml with `hooks` struck from its capabilities — an operator's override.
 fn claude_yaml_without_hooks() -> String {
@@ -547,6 +552,97 @@ async fn the_agent_process_of_a_dropped_in_agent_started_in_tmux_sees_no_tddy_va
 }
 
 /// The jailed half of the YAML-only claim: macOS only, through a real Seatbelt jail.
+/// How long a test lets a permission hook be held: the 2-second wait the override declares, and
+/// room for the RPC — far short of the 120-second default a daemon-wide wait would hold it for.
+const HOLD_BUDGET: std::time::Duration = std::time::Duration::from_secs(8);
+
+/// A host claude-cli start naming its new branch, as `branch_name_required` asks.
+fn a_claude_cli_start(
+    daemon: &agent_registry_support::ARegistryDaemon,
+    branch: &str,
+) -> StartSessionRequest {
+    StartSessionRequest {
+        model: "opus".to_string(),
+        new_branch_name: branch.to_string(),
+        ..daemon.a_start("claude-cli", false)
+    }
+}
+
+#[tokio::test]
+#[serial_test::serial]
+async fn an_override_of_claude_yaml_with_answer_wait_secs_holds_a_permission_hook_that_long_and_writes_that_timeout_into_the_hooks_file(
+) {
+    // Given — claude.yaml overridden to wait 2 seconds; acme installed to orchestrate
+    let claude = builtin_yaml_run_as_the_stub_waiting(2);
+    let daemon = a_daemon_with_tools(&[("claude.yaml", claude.as_str()), ("acme.yaml", ACME_YAML)]);
+    let (child, _host) = daemon
+        .start(a_claude_cli_start(&daemon, "answer-wait/held"))
+        .await
+        .expect("a host claude-cli start succeeds");
+    daemon.an_orchestrator_of(&child).await;
+    daemon.asks_for_a_permission(&child);
+
+    // When
+    let hook = daemon.the_permission_hook_of(&child, HOLD_BUDGET).await;
+
+    // Then — released TIMED_OUT after the override's 2 seconds, and Claude was told to let the
+    // hook run that long plus its margin
+    assert_eq!(
+        (
+            hook.outcome.clone(),
+            hook.whole_seconds(),
+            daemon.permission_hook_timeout_of(&child),
+        ),
+        (
+            AHeldHook::timed_out(),
+            2,
+            2 + CLAUDE_HOOK_TIMEOUT_MARGIN_SECS,
+        ),
+        "the hook was held {:?}",
+        hook.held
+    );
+}
+
+#[tokio::test]
+#[serial_test::serial]
+async fn editing_answer_wait_secs_after_a_start_does_not_change_that_sessions_hold() {
+    // Given — started while claude.yaml waited 2 seconds; the operator then raises it to 60 and
+    // the daemon restarts
+    let daemon = a_daemon_with_tools(&[
+        (
+            "claude.yaml",
+            builtin_yaml_run_as_the_stub_waiting(2).as_str(),
+        ),
+        ("acme.yaml", ACME_YAML),
+    ]);
+    let (child, _host) = daemon
+        .start(a_claude_cli_start(&daemon, "answer-wait/edited"))
+        .await
+        .expect("a host claude-cli start succeeds");
+    let daemon = daemon.restart_with_tool("claude.yaml", &builtin_yaml_run_as_the_stub_waiting(60));
+    daemon.an_orchestrator_of(&child).await;
+    daemon.asks_for_a_permission(&child);
+
+    // When
+    let hook = daemon.the_permission_hook_of(&child, HOLD_BUDGET).await;
+
+    // Then — held for the 2 seconds its hooks file was written with, not the edited 60
+    assert_eq!(
+        (
+            hook.outcome.clone(),
+            hook.whole_seconds(),
+            daemon.permission_hook_timeout_of(&child),
+        ),
+        (
+            AHeldHook::timed_out(),
+            2,
+            2 + CLAUDE_HOOK_TIMEOUT_MARGIN_SECS,
+        ),
+        "the hook was held {:?}",
+        hook.held
+    );
+}
+
 #[cfg(target_os = "macos")]
 mod jailed {
     use pretty_assertions::assert_eq;

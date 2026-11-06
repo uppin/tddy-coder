@@ -14,6 +14,7 @@
 |---|---|---|
 | 2026-09-22 | 518 | first detection — created by #494's split of `telegram_session_control.rs` |
 | 2026-11-04 | 518 → 522 | **regressed** by PR #801 (`#agent-tools` 12/19), against `origin/feature/agent-tools/acp-agents`: `handle_delete_session` passes `delete_session_directory` its new `agents` argument (`None`, with a `TODO(agent-config-removal)` — n19 `agent-config-removal` ([#825](https://github.com/uppin/tddy-coder/pull/825)) hands this controller the registry; n18 `telegram-spec-launch` ([#824](https://github.com/uppin/tddy-coder/pull/824)) moves its spawn and pickers onto the specs). Not split: restructuring deferred to the `#agent-tools` sweep node by the developer (2026-11-04) |
+| 2026-11-06 | 522 → 521 | **better by 1** in #825 (`#agent-tools` 19/19): `handle_delete_session` passes the controller's coding-agent registry to `delete_session_directory` (the `TODO(agent-config-removal)` is gone). Still over budget. Not split: restructuring deferred to the `#agent-tools` sweep node (n20) by the developer |
 
 ## What the tool found
 

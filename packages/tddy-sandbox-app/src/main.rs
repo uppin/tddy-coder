@@ -285,6 +285,7 @@ fn agent_home_banner(
     };
     let home = match &tool.home {
         HomeSection::Persistent { key } => tddy_home.join("homes").join(key),
+        HomeSection::Path { path } => path.clone(),
         HomeSection::Session => return Vec::new(),
     };
     vec![format!(

@@ -56,7 +56,7 @@ impl LaunchSessions {
         // Every CLI agent resumes through the one spec-driven launch, read from the agent its
         // recorded session type names in the host's registry.
         if let Some(kind) = cli_launcher(
-            self.coding_agents.as_deref(),
+            Some(&*self.coding_agents),
             metadata.session_type.as_deref().unwrap_or(""),
         )? {
             // A sandboxed session resumes in its jail and never on the host's PTY.
@@ -138,7 +138,7 @@ impl LaunchSessions {
         // re-resolved against the owner's vault as it stands now, and a refusal resumes nothing.
         let provider_route_json = resumed_tool_session_route_json(
             &self.host.session_account_access(&req.session_token),
-            self.coding_agents.as_deref(),
+            Some(&*self.coding_agents),
             resume_agent.as_deref().unwrap_or_default(),
             &session_dir,
         )?;

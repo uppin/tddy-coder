@@ -81,6 +81,9 @@ pub trait SplitHost: AgentHostCallbacks {
     fn session_agents(&self) -> Arc<SplitSessionAgents>;
 }
 
+/// How a split agent's `claude` binary is found: the host's coding agents resolve it.
+pub type ClaudeBinary = Arc<dyn Fn() -> Result<String, Status> + Send + Sync>;
+
 /// The session host's split fields, owned, plus its callbacks.
 ///
 /// Built per call by the host (`DaemonSessionHost::split_sessions`). Every shared field is the
@@ -101,6 +104,9 @@ pub struct SplitSessions {
     pub workspace_sandbox_provisioner:
         Arc<dyn tddy_daemon_sandbox::workspace_tool_sandbox::WorkspaceSandboxProvisioner>,
     pub claude_cli_manager: Arc<CliSessionManager>,
+    /// The `claude` binary a split agent is spawned with: the host's `claude` coding agent as it
+    /// resolves on this host, refused when it is found nowhere (`#agent-tools 19/19`).
+    pub claude_binary: ClaudeBinary,
     pub session_tokens: Option<tddy_daemon_auth::SessionTokens>,
     /// The agent topic's handle: the split start resolves the request's agent defs through it.
     pub agent_roster: AgentRoster,

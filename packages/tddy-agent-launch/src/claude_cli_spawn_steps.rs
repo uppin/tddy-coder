@@ -6,6 +6,7 @@ use tddy_rpc::Status;
 
 use std::path::Path;
 
+use tddy_coding_agent_specs::CodingAgentSpec;
 use tddy_daemon_kernel::config::DaemonConfig;
 
 use tddy_daemon_kernel::daemon_hook_urls;
@@ -17,7 +18,7 @@ pub(super) struct ClaudeCliHooks {
     daemon_url: String,
     daemon_socket: Option<String>,
     pub(super) hook_token: String,
-    answer_wait_secs: u64,
+    pub(super) answer_wait_secs: u64,
 }
 
 impl ClaudeCliHooks {
@@ -44,21 +45,38 @@ impl ClaudeCliHooks {
 /// `tddy_data_dir` is the data dir the daemon *resolved* — `TDDY_DATA_DIR` included, which a
 /// configuration file need not agree with (`./desktop-dev` sets it absolute beside a relative
 /// `tmp/.tddy`) — because an embedded daemon's agent-tool socket path is digested from it.
-pub(super) fn claude_cli_hooks(config: &DaemonConfig, tddy_data_dir: &Path) -> ClaudeCliHooks {
-    let tddy_tools_path = tddy_daemon_sandbox::sandbox_session::resolve_tddy_tools_path(
-        config
-            .claude_cli
-            .as_ref()
-            .and_then(|c| c.tddy_tools_path.as_deref()),
-    );
+///
+/// Nothing is read from a daemon.yaml agent section (`#agent-tools 19/19`): `tddy_tools_path` is the
+/// agent's resolved `tddy-tools` dependency, the url is the daemon's own (`listen.advertise_url`),
+/// and the answer wait is the agent spec's `coding_agent.answer_wait_secs` — which the launch
+/// records beside the session ([`record_hook_answer_wait`]) so the server's hold matches it.
+pub(super) fn claude_cli_hooks(
+    config: &DaemonConfig,
+    tddy_data_dir: &Path,
+    spec: &CodingAgentSpec,
+    tddy_tools_path: &str,
+) -> ClaudeCliHooks {
     ClaudeCliHooks {
-        tddy_tools_path,
-        daemon_url: daemon_hook_urls::claude_hook_daemon_url(config),
+        tddy_tools_path: tddy_tools_path.to_string(),
+        daemon_url: daemon_hook_urls::advertise_daemon_url(config),
         // An embedded daemon serves no HTTP RPC; its hooks report over this socket.
         daemon_socket: tddy_daemon_kernel::embedded_host_agent_tool_socket(tddy_data_dir),
         hook_token: Uuid::new_v4().to_string(),
-        answer_wait_secs: config.claude_cli_answer_wait_secs(),
+        answer_wait_secs: spec.answer_wait_secs(),
     }
+}
+
+/// Record the wait `hooks` were written with beside the session in `session_dir`, so
+/// `AwaitQuestionAnswer` holds the agent's hook for as long as the agent was told to wait.
+pub(crate) fn record_hook_answer_wait(
+    session_dir: &Path,
+    hooks: &ClaudeCliHooks,
+) -> Result<(), Status> {
+    tddy_session_activity::answer_wait::record_answer_wait(
+        session_dir,
+        std::time::Duration::from_secs(hooks.answer_wait_secs),
+    )
+    .map_err(|e| Status::internal(format!("failed to record the answer wait: {e}")))
 }
 
 /// The notify wiring a claude-cli start and resume apply — see [`crate::notify_env`].

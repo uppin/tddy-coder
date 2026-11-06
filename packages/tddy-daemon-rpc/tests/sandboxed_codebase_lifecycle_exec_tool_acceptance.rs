@@ -153,8 +153,6 @@ users:
   - github_user: "{user}"
     os_user: "{user}"
 daemon_instance_id: "{LOCAL_INSTANCE_ID}"
-claude_cli:
-  binary_path: /bin/cat
 "#
     );
     serde_yaml::from_str(&yaml).expect("config must parse")
@@ -194,7 +192,12 @@ fn a_daemon_with_no_common_room(sessions_base: PathBuf) -> TestDaemon {
             Arc::new(tddy_daemon_kernel::operator_channel::NoOperatorChannel),
             Arc::new(ClaudeCliSessionManager::new()),
         )
-        .with_coding_agents_if_none(tddy_session_lifecycle::test_util::builtin_coding_agents())
+        .with_coding_agents_if_none(
+            tddy_session_lifecycle::test_util::coding_agents_with_binaries(&[(
+                "claude",
+                Path::new("/bin/cat"),
+            )]),
+        )
         .with_session_tokens(this_daemons_session_tokens().clone()),
     )
 }

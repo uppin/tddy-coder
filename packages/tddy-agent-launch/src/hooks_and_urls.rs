@@ -1,7 +1,5 @@
 use crate::stack_parent;
 
-use tddy_daemon_kernel::config::DaemonConfig;
-
 use std::path::Path;
 
 /// The branch a spawn actually operates on: the branch it creates, or — under
@@ -140,11 +138,4 @@ pub fn spawned_branch_of_session(session_dir: &Path, requested_branch: &str) -> 
             requested_branch.trim().to_string()
         }
     }
-}
-
-/// Resolve the `claude` binary for a ResumeSession relaunch through the same host resolver as
-/// StartSession, so an explicitly configured path is honored and a bare name is resolved to a host
-/// path instead of being spawned against the daemon's minimal systemd PATH.
-pub fn resolve_resume_session_claude_binary(config: &DaemonConfig) -> String {
-    tddy_daemon_kernel::config::resolve_claude_binary_path(config)
 }

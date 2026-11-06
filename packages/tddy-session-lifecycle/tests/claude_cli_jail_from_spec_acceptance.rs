@@ -385,10 +385,7 @@ async fn a_routed_session_reaches_its_base_url_host_and_carries_no_oauth_token_s
 #[tokio::test]
 async fn an_existing_sandbox_claude_home_is_migrated_to_homes_claude_once_with_its_credentials() {
     // Given — the home a recipe left at <tddyhome>/sandbox-claude-home, holding credentials
-    let daemon = a_jailed_claude_daemon(ADaemonSpec {
-        configured_claude_home: "sandbox-claude-home",
-        ..ADaemonSpec::default()
-    });
+    let daemon = a_jailed_claude_daemon(ADaemonSpec::default());
     let legacy = daemon.tddy_home.join("sandbox-claude-home");
     a_home_holding_credentials(&legacy, CREDENTIALS);
 

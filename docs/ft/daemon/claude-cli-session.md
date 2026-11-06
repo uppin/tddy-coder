@@ -169,10 +169,13 @@ Claude-specific flag (`--claude-binary`, `--claude-arg`, `--permission-mode`, `-
 
 **The home's location.** The daemon's jailed Claude home is always `<tddyhome>/homes/claude`:
 the spec's `home.key` (`claude`) and `TDDY_SANDBOX_CLAUDE_HOME` do not move it (the
-standalone `tddy-sandbox-app` still uses its own `claude_home_dir`). The first sandboxed start finding
+standalone `tddy-sandbox-app` still uses its own home). An operator who wants a directory of their
+own declares `home: { kind: path, path: <absolute dir> }` in a `<tddyhome>/tools/claude.yaml`
+override: that directory is mounted read-write, and a relative path is refused when the tool file
+loads (`#agent-tools` 19/19). The first sandboxed start finding
 `<tddyhome>/sandbox-claude-home` renames it to `homes/claude` once, credentials and history kept. A
-start that finds both refuses with `FAILED_PRECONDITION` naming both, and touches neither. A custom
-`claude_home_dir` elsewhere is not migrated: the new home is seeded from the host's
+start that finds both refuses with `FAILED_PRECONDITION` naming both, and touches neither. A former daemon.yaml
+`claude_home_dir` is not migrated: the new home is seeded from the host's
 `~/.claude/.credentials.json`.
 
 **Role.** The launcher records the session's `session_role` before the spawn, so a project-home main
@@ -581,10 +584,10 @@ enables mouse tracking (DECSET `1049`, `1000`/`1002`, `1006`). The web terminal 
 the TUI only once mouse tracking is on, and its live pane keeps no scrollback of its own, so an inline
 Claude cannot be scrolled from the browser at all.
 
-The daemon forces the renderer with **`CLAUDE_CODE_NO_FLICKER=1`** in the agent's environment. On the
-host the agent also inherits the daemon's environment; a sandboxed agent's environment is constructed,
-so the variable has to be added there too. Both paths add it from one helper,
-`DaemonConfig::claude_cli_renderer_env`.
+The renderer is forced by **`CLAUDE_CODE_NO_FLICKER=1`**, which the built-in `claude.yaml` declares
+in its `run.env` (`#agent-tools` 19/19). Nothing outside the spec adds it: the host start, the
+resume, the jailed start and the jail relaunch all take the agent's environment from `run.env`, so a
+`<tddyhome>/tools/claude.yaml` override without it starts Claude inline.
 
 daemon.yaml `claude_cli.fullscreen` is refused at start-up: the field moved to the spec's `run.env`
 (`<tddyhome>/tools/claude.yaml`). Forcing the renderer also overrides Claude's own switch back to the
@@ -654,8 +657,11 @@ so the activity log carries no row for it at all.
 
 The `PermissionRequest` hook and the `PreToolUse` hook of `AskUserQuestion` (matched to that tool
 alone) run `session-hook --await-answer --await-timeout-secs <wait + 5>`, with Claude's hook
-`timeout` set to `<wait + 10>`, where `<wait>` is the answer wait, 120 s (the spec declares it as
-`coding_agent.answer_wait_secs`; the hook timeout and `AwaitQuestionAnswer` use the 120 s default). After its report it calls `ActivityService.AwaitQuestionAnswer` with the report's
+`timeout` set to `<wait + 10>`, where `<wait>` is the agent spec's `coding_agent.answer_wait_secs`
+(120 s when absent). The start records that wait beside the session (`answer-wait-ms`, next to
+`.session.yaml`), and `AwaitQuestionAnswer` holds the hook for the recorded value, so the hold always
+equals the hook timeout the agent was launched with; editing `answer_wait_secs` changes new sessions
+only. A session with no record is held for its spec's value (`#agent-tools` 19/19). After its report it calls `ActivityService.AwaitQuestionAnswer` with the report's
 `request_id` and, for a permission, Claude's `permission_suggestions` (as JSON; empty when none). A
 `PreToolUse` of any other tool never waits. The daemon, with the
 same authentication as `ReportSessionStatus`:

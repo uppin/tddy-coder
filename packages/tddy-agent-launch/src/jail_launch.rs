@@ -300,6 +300,7 @@ pub(crate) fn jail_home(
                 HomeError::Io { .. } => Status::internal(error.to_string()),
             })
         }
+        HomeSection::Path { path } => Ok(path.clone()),
         HomeSection::Session => Ok(session_home.to_path_buf()),
     }
 }

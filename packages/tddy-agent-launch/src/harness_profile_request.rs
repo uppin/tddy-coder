@@ -80,14 +80,7 @@ impl LaunchSessions {
             return Ok(req);
         };
         let access = self.host.session_account_access(&req.session_token);
-        let agents = self.coding_agents.as_deref().ok_or_else(|| {
-            Status::failed_precondition(format!(
-                "this host has no coding agents installed: the harness profile {:?} is started \
-                 from its agent's spec",
-                profile.name
-            ))
-        })?;
-        request_on_profile(req, &profile, &access, agents.agents())
+        request_on_profile(req, &profile, &access, self.coding_agents.agents())
     }
 }
 

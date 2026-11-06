@@ -114,10 +114,9 @@ mod through_the_tool_session_route {
             Arc::new(|t: &str| (t == "tok").then(|| "ada".to_string())),
             "tok",
         );
-        let agents = crate::host_coding_agents::host_coding_agents(
-            &tddy_daemon_kernel::config::DaemonConfig::default(),
-            std::path::Path::new("/nonexistent-tddy-home"),
-        )
+        let agents = crate::host_coding_agents::host_coding_agents(std::path::Path::new(
+            "/nonexistent-tddy-home",
+        ))
         .expect("the built-in coding agents load");
         let start = profile_start(&a_profile("codex"), agents.agents()).expect("starts");
 

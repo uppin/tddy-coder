@@ -6,7 +6,7 @@
 //! The fixtures mirror `claude_cli_tmux_session_acceptance.rs` and
 //! `claude_cli_tmux_reattach_acceptance.rs` (TODO(tmux-agent): share them through `tests/support/`
 //! — the same follow-up those files name); the harnesses are stub scripts named in
-//! `cli_harnesses.<type>.binary_path` (cursor: `cursor_cli.binary_path`), the pattern of
+//! installed on the host as each agent's binary (`agent`, `opencode`, `muse`, `warp`), the pattern of
 //! `agent_terminal_tabs_acceptance.rs`. Serial — the tmux socket directory is process-wide
 //! environment.
 
@@ -82,6 +82,7 @@ struct HarnessTmuxDaemon {
     host: Arc<DaemonSessionHost>,
     manager: Arc<ClaudeCliSessionManager>,
     config: DaemonConfig,
+    stub: PathBuf,
     sessions_base: PathBuf,
     launches: PathBuf,
     users: PathBuf,
@@ -99,10 +100,11 @@ async fn a_daemon_with_a_private_tmux(exits_with_banner: bool) -> HarnessTmuxDae
     let users = stub_dir.path().join("users.log");
     let stub = a_stub_harness(stub_dir.path(), &launches, &users, exits_with_banner);
     let repo = a_registered_project(sessions_dir.path());
-    let (config_dir, config) = a_config_running(&stub);
+    let (config_dir, config) = a_config_running();
     let manager = Arc::new(ClaudeCliSessionManager::new());
     let host = a_session_host(
         config.clone(),
+        &stub,
         sessions_dir.path().to_path_buf(),
         Arc::clone(&manager),
     );
@@ -110,6 +112,7 @@ async fn a_daemon_with_a_private_tmux(exits_with_banner: bool) -> HarnessTmuxDae
         host,
         manager,
         config,
+        stub,
         sessions_base: sessions_dir.path().to_path_buf(),
         launches,
         users,
@@ -140,26 +143,21 @@ fn a_stub_harness(dir: &Path, launches: &Path, users: &Path, exits_with_banner: 
     }
 }
 
-fn a_config_running(stub: &Path) -> (tempfile::TempDir, DaemonConfig) {
+fn a_config_running() -> (tempfile::TempDir, DaemonConfig) {
     let dir = tempfile::tempdir().unwrap();
     let user = this_os_user();
-    let harnesses: String = ["opencode-cli", "muse-cli", "warp-cli"]
-        .iter()
-        .map(|t| format!("  {t}:\n    binary_path: {}\n", stub.display()))
-        .collect();
     let yaml = format!(
-        "users:\n  - github_user: \"{user}\"\n    os_user: \"{user}\"\nallowed_tools:\n  - path: /bin/true\n    label: true\ncursor_cli:\n  binary_path: {}\ncli_harnesses:\n{harnesses}",
-        stub.display()
+        "users:\n  - github_user: \"{user}\"\n    os_user: \"{user}\"\nallowed_tools:\n  - path: /bin/true\n    label: true\n"
     );
     let path = dir.path().join("daemon.yaml");
     std::fs::write(&path, yaml).unwrap();
-    let config = tddy_session_lifecycle::test_util::daemon_config_from_fixture_file(&path)
-        .expect("config must parse");
+    let config = DaemonConfig::load(&path).expect("config must parse");
     (dir, config)
 }
 
 fn a_session_host(
     config: DaemonConfig,
+    stub: &Path,
     sessions_base: PathBuf,
     manager: Arc<ClaudeCliSessionManager>,
 ) -> Arc<DaemonSessionHost> {
@@ -172,7 +170,10 @@ fn a_session_host(
     // A harness session is launched from its tool definition: the host has coding agents, as the
     // daemon runtime gives them.
     let coding_agents = cursor_cli_support::coding_agents_over(&data_dir);
-    cursor_cli_support::install_the_configured_agent(&data_dir, &config);
+    // The stub is every harness's binary on the host's `PATH`.
+    for command in ["agent", "opencode", "muse", "warp"] {
+        cursor_cli_support::install_an_agent_as(&data_dir, command, stub.to_str().unwrap());
+    }
     let host = Arc::new(
         DaemonSessionHost::new(
             config.clone(),
@@ -290,6 +291,7 @@ impl HarnessTmuxDaemon {
         let manager = Arc::new(ClaudeCliSessionManager::new());
         let host = a_session_host(
             self.config.clone(),
+            &self.stub,
             self.sessions_base.clone(),
             Arc::clone(&manager),
         );

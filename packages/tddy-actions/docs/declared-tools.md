@@ -10,7 +10,7 @@ Product contract: [Sandbox builder § Declared tools](../../../docs/ft/coder/san
 | `tool/extensions.rs` | `ExtensionOwner` — `name()` and `validate(tool_id, section)` |
 | `tool/registry.rs` | `ToolRegistry` — `builtin()` (embedded `BUILTIN_TOOLS`), `from_embedded(sources)`, `load(builtin, overrides_dir)`, `load_with_owners(builtin, overrides_dir, owners)`, `get`, `origin`, `ids`, `resolve_closure(ids, host)`; `BUILTIN_SUPPORT_TOOLS` (`tddy-tools.yaml`) |
 | `tool/resolve.rs` | `ToolHost` (env, `PATH` dirs, executable check, canonicalize, `target_output(&TargetBinary) -> Option<PathBuf>` — a default answering `None`), `ProcessToolHost`, `ResolvedTool { id, command, binary, reads }` |
-| `tool/home.rs` | `HomeSection::{Persistent { key }, Session}` (tag `kind`, lowercase; default `Session`) |
+| `tool/home.rs` | `HomeSection::{Persistent { key }, Path { path }, Session}` (tag `kind`, lowercase; default `Session`). `Path` (`#agent-tools 19/19`) is an operator's own absolute directory, mounted read-write; `ToolDef::parse` refuses a relative one, naming the file and the path |
 | `tool/files.rs` | `FileItem::{SeedOnce { from_host, to }, Mirror { from_host, to }, Overlay { env, value }}` (tag `kind`, kebab-case). `from_host` is relative to the host user's home, `to` to the tool's; an overlay `value` may name `{home}` and `{tmp}` |
 | `tool/secrets.rs` | `SecretItem { env, source: SecretItemSource, when: Option<RouteGuard> }`, `SecretItemSource::{HostEnv { var }, HostFile { path }}` (tag `kind`, kebab-case), `RouteGuard::{Unrouted, Routed}` |
 | `tool/policy.rs` | `PolicySection { jit, fork, exec_paths, sysctl_read }`, every field defaulting to no allow |

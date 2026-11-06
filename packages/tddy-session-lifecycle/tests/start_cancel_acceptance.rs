@@ -36,19 +36,13 @@ fn current_os_user() -> String {
         .into_owned()
 }
 
-fn a_config_launching_claude_as(binary: &str) -> (tempfile::TempDir, DaemonConfig) {
+fn a_config_for_the_current_user() -> (tempfile::TempDir, DaemonConfig) {
     let dir = tempfile::tempdir().expect("a config directory");
     let user = current_os_user();
-    let yaml = format!(
-        "users:\n  - github_user: \"{user}\"\n    os_user: \"{user}\"\nclaude_cli:\n  binary_path: {binary}\n"
-    );
+    let yaml = format!("users:\n  - github_user: \"{user}\"\n    os_user: \"{user}\"\n");
     let path = dir.path().join("daemon.yaml");
     std::fs::write(&path, yaml).expect("write the config");
-    (
-        dir,
-        tddy_session_lifecycle::test_util::daemon_config_from_fixture_file(&path)
-            .expect("the config parses"),
-    )
+    (dir, DaemonConfig::load(&path).expect("the config parses"))
 }
 
 fn a_session_host(config: DaemonConfig, sessions_base: PathBuf) -> DaemonSessionHost {
@@ -70,7 +64,10 @@ fn a_session_host(config: DaemonConfig, sessions_base: PathBuf) -> DaemonSession
         Arc::new(ClaudeCliSessionManager::new()),
     )
     .with_coding_agents_if_none(
-        tddy_session_lifecycle::test_util::builtin_coding_agents_for(&config),
+        tddy_session_lifecycle::test_util::coding_agents_with_binaries(&[(
+            "claude",
+            Path::new("/bin/cat"),
+        )]),
     )
 }
 
@@ -95,7 +92,7 @@ fn a_daemon_cloning_from(git_url: &str) -> ADaemon {
         ),
     )
     .unwrap();
-    let (config_dir, config) = a_config_launching_claude_as("/bin/cat");
+    let (config_dir, config) = a_config_for_the_current_user();
     ADaemon {
         service: a_session_host(config, sessions.path().to_path_buf()),
         working_copy,
@@ -141,7 +138,7 @@ fn a_daemon_whose_worktree_cut_is_slow() -> ADaemonWithASlowCut {
         ),
     )
     .unwrap();
-    let (config_dir, config) = a_config_launching_claude_as("/bin/cat");
+    let (config_dir, config) = a_config_for_the_current_user();
     ADaemonWithASlowCut {
         service: a_session_host(config, sessions.path().to_path_buf()),
         repo,

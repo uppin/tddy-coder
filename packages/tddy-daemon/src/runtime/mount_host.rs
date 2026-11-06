@@ -60,8 +60,7 @@ impl BuildContext {
         // The coding agents this host's `--agent` answers to (built-ins and `<tddyhome>/tools`), so
         // an assistant cannot take the name of any of them.
         let reserved_coding_agent_ids = tddy_coder::agent_registry_cli::reserved_agent_ids(
-            tddy_agent_launch::host_coding_agents::host_coding_agents(config, tddy_data_dir)?
-                .agents(),
+            tddy_agent_launch::host_coding_agents::host_coding_agents(tddy_data_dir)?.agents(),
         );
         let model_registry = Arc::new(
             tddy_model_registry::ModelRegistryStore::open(
@@ -268,7 +267,7 @@ impl BuildContext {
         );
 
         let coding_agents =
-            tddy_agent_launch::host_coding_agents::host_coding_agents(config, tddy_data_dir)?;
+            tddy_agent_launch::host_coding_agents::host_coding_agents(tddy_data_dir)?;
 
         Ok(crate::livekit_host_ports::with_livekit_room_ports(
         connection_impl,

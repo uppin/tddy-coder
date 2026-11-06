@@ -102,11 +102,8 @@ fn the_routed(id: &str) -> RoutedAgent {
 
 /// The coding agents of a fixture host: every built-in spec, resolved as the daemon resolves them.
 fn the_host_agents() -> Arc<crate::spec_launch::HostCodingAgents> {
-    crate::host_coding_agents::host_coding_agents(
-        &tddy_daemon_kernel::config::DaemonConfig::default(),
-        std::path::Path::new("/nonexistent-tddy-home"),
-    )
-    .expect("the built-in coding agents load")
+    crate::host_coding_agents::host_coding_agents(std::path::Path::new("/nonexistent-tddy-home"))
+        .expect("the built-in coding agents load")
 }
 
 #[test]

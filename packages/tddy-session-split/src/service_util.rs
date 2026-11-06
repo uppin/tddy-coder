@@ -7,7 +7,6 @@ use tddy_core::BranchWorktreeIntent;
 use tddy_rpc::Status;
 
 use std::time::Duration;
-use tddy_daemon_kernel::config::DaemonConfig;
 
 /// Build a session's semantic index over its worktree into its session dir, blocking until the
 /// index is terminal.
@@ -317,13 +316,4 @@ pub fn write_claude_hooks_settings(cwd: &Path, params: &tddy_core::HookCommandPa
             params.session_id
         );
     }
-}
-
-/// Resolve the `claude` binary for the interactive (non-sandboxed) StartSession path.
-///
-/// Delegates to [`tddy_daemon_kernel::config::resolve_claude_binary_path`] so the interactive and
-/// sandboxed spawn paths never diverge on which `claude` they pick (explicit config path honored;
-/// bare name auto-resolved to a real host install).
-pub fn resolve_start_session_claude_binary(config: &DaemonConfig) -> String {
-    tddy_daemon_kernel::config::resolve_claude_binary_path(config)
 }

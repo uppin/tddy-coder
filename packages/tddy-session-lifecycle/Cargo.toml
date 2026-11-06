@@ -107,6 +107,9 @@ tddy-demo-vm-service = { path = "../tddy-demo-vm-service" }
 tddy-agent-launch = { path = "../tddy-agent-launch" }
 # The headless `claude` conversation is rendered from its declaration (`#agent-tools 6/12`).
 tddy-coding-agent-specs = { path = "../tddy-coding-agent-specs" }
+# `test_util::coding_agents_with_binaries` hosts the fixture binaries behind a `ToolHost` (`#agent-tools 19/19`);
+# the `claude_cli_from_spec_acceptance.rs` suite resolves against one too.
+tddy-actions = { path = "../tddy-actions" }
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"
@@ -133,9 +136,6 @@ tddy-livekit-testkit = { path = "../tddy-livekit-testkit" }
 livekit = "0.7"
 serial_test = "3"
 pretty_assertions = { workspace = true }
-# `claude_cli_from_spec_acceptance.rs` loads the agent registry and resolves it against a fixture
-# `ToolHost`, as the daemon runtime does against its own process (`#agent-tools 2/12`).
-tddy-actions = { path = "../tddy-actions" }
 reqwest = { version = "0.12", default-features = false, features = ["blocking", "json"] }
 scopeguard = "1"
 

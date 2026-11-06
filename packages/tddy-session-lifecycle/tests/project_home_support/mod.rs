@@ -95,14 +95,14 @@ fn build_home_daemon(
     write_project_registry(data.path(), repo, extra_row_yaml);
     let stub = tempfile::tempdir().unwrap();
     let claude = write_argv_and_env_script(stub.path());
-    let (cfg, config) = write_daemon_config(claude.to_str().unwrap(), extra_config_yaml);
+    let (cfg, config) = write_daemon_config(extra_config_yaml);
     let manager = Arc::new(ClaudeCliSessionManager::new());
     let mut host =
         minimal_service_with_manager(config, data.path().to_path_buf(), Arc::clone(&manager));
     if coding_agents {
         let tools_dir = std::fs::canonicalize(stub.path()).unwrap();
         std::os::unix::fs::symlink(tddy_tools_binary(), tools_dir.join("tddy-tools")).unwrap();
-        // The stub the config names stands for `claude` on the declared `PATH`.
+        // The stub stands for `claude` on the declared `PATH`.
         std::os::unix::fs::symlink(&claude, tools_dir.join("claude")).unwrap();
         let registry = tddy_coding_agent_specs::load_agent_registry(&data.path().join("tools"))
             .expect("the agent registry loads");
@@ -228,7 +228,7 @@ fn write_project_registry(data: &Path, repo: &Path, extra_row_yaml: &str) {
     .unwrap();
 }
 
-fn write_daemon_config(stub_binary: &str, extra_yaml: &str) -> (tempfile::TempDir, DaemonConfig) {
+fn write_daemon_config(extra_yaml: &str) -> (tempfile::TempDir, DaemonConfig) {
     let dir = tempfile::tempdir().unwrap();
     let user = current_os_user();
     let yaml = format!(
@@ -236,14 +236,11 @@ fn write_daemon_config(stub_binary: &str, extra_yaml: &str) -> (tempfile::TempDi
 users:
   - github_user: "{user}"
     os_user: "{user}"
-claude_cli:
-  binary_path: {stub_binary}
 {extra_yaml}"#
     );
     let config_path = dir.path().join("daemon.yaml");
     std::fs::write(&config_path, yaml).unwrap();
-    let config = tddy_session_lifecycle::test_util::daemon_config_from_fixture_file(&config_path)
-        .expect("config must parse");
+    let config = DaemonConfig::load(&config_path).expect("config must parse");
     (dir, config)
 }
 

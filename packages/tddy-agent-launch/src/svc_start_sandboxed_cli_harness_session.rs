@@ -25,8 +25,8 @@ use crate::cli_agent_steps::{
     start_conversation, ConversationStart,
 };
 use crate::cli_harness_jail::{
-    jail_route_config_env, prompt_ahead_of_slots, require_jail_route, CliJail, JailWiring,
-    TDDY_TOOLS_ID,
+    agent_tddy_tools, jail_route_config_env, prompt_ahead_of_slots, require_jail_route, CliJail,
+    JailWiring, TDDY_TOOLS_ID,
 };
 use crate::cli_route_launch::routed_launch_model;
 use crate::cli_session_worktree::{
@@ -212,6 +212,7 @@ impl LaunchSessions {
             &session_agent.agent,
             &self.config,
             &worktree_path,
+            &session_dir,
             session_id,
             os_user,
         )?;
@@ -232,9 +233,7 @@ impl LaunchSessions {
         // Managed workflow: the per-session controller and toolcall listener, the recipe's prompt in
         // the jail-visible context directory, and the host-side env the relayed `tddy-tools
         // transition` runs with. The relay's commit identity belongs there too, managed or not.
-        let tddy_tools_path =
-            crate::claude_cli_spawn_steps::claude_cli_hooks(&self.config, &self.tddy_data_dir)
-                .tddy_tools_path;
+        let tddy_tools_path = agent_tddy_tools(&session_agent.agent)?;
         let (managed, system_prompt_file, session_env) = self.managed_jail_env(
             &jail,
             os_user,
@@ -262,8 +261,6 @@ impl LaunchSessions {
         env.extend(self.lsp_tools_env(&worktree_path));
         env.extend(self.restructure_tools_env());
         env.extend(semantic_env);
-        // The jail's env is built here, not inherited, so the renderer choice is carried in.
-        env.extend(session_agent.renderer_env.iter().cloned());
         env.extend(jail_route_config_env(
             &session_agent.agent.spec,
             route.as_ref(),
@@ -376,26 +373,32 @@ fn write_jail_hooks(
     agent: &HostAgent,
     config: &DaemonConfig,
     worktree: &Path,
+    session_dir: &Path,
     session_id: &str,
     os_user: &str,
 ) -> Result<Option<String>, Status> {
     let spec = &agent.spec;
-    let probe = crate::claude_cli_spawn_steps::claude_cli_hooks(config, Path::new("/"));
-    if !spec.has(tddy_coding_agent_specs::Capability::Hooks)
-        || !hooks_report_over_the_agent_tool_socket(spec, &probe)
-    {
-        return Ok(None);
-    }
     let tddy_tools = agent.dep(TDDY_TOOLS_ID).ok_or_else(|| {
         Status::failed_precondition(format!(
             "the {} tool does not depend on {TDDY_TOOLS_ID}",
             spec.id
         ))
     })?;
-    let hook_token = uuid::Uuid::new_v4().to_string();
     let tddy_tools_path = tddy_tools.binary.to_string_lossy().into_owned();
+    let probe = crate::claude_cli_spawn_steps::claude_cli_hooks(
+        config,
+        Path::new("/"),
+        spec,
+        &tddy_tools_path,
+    );
+    if !spec.has(tddy_coding_agent_specs::Capability::Hooks)
+        || !hooks_report_over_the_agent_tool_socket(spec, &probe)
+    {
+        return Ok(None);
+    }
+    let hook_token = uuid::Uuid::new_v4().to_string();
     let daemon_socket = tool_ipc_socket(session_id).to_string_lossy().into_owned();
-    let daemon_url = tddy_daemon_kernel::daemon_hook_urls::claude_hook_daemon_url(config);
+    let daemon_url = tddy_daemon_kernel::daemon_hook_urls::advertise_daemon_url(config);
     let params = HookCommandParams {
         tddy_tools_path: &tddy_tools_path,
         daemon_url: &daemon_url,
@@ -403,8 +406,9 @@ fn write_jail_hooks(
         os_user,
         hook_token: &hook_token,
         daemon_socket: Some(&daemon_socket),
-        answer_wait_secs: config.claude_cli_answer_wait_secs(),
+        answer_wait_secs: probe.answer_wait_secs,
     };
+    crate::claude_cli_spawn_steps::record_hook_answer_wait(session_dir, &probe)?;
     let adapter = tddy_coding_agent_specs::slots::hooks::adapter(&spec.agent.hooks.adapter)
         .map_err(|e| Status::internal(e.to_string()))?;
     let (path, bytes) = adapter

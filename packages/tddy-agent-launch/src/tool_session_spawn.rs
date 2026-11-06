@@ -69,7 +69,7 @@ impl LaunchSessions {
         // vault, an agent that cannot run on an account) starts nothing.
         let provider_route_json = tool_session_route_json(
             &self.host.session_account_access(&req.session_token),
-            self.coding_agents.as_deref(),
+            Some(&*self.coding_agents),
             agent_for_spawn.as_deref().unwrap_or_default(),
             &session_route_sources(&req),
             model_for_spawn.as_deref().unwrap_or_default(),

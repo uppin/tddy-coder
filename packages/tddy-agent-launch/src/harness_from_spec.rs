@@ -12,7 +12,6 @@
 //! conversation id (`session_id`, `chat_id`) for an agent whose `coding_agent.conversation` names
 //! one.
 
-use std::path::PathBuf;
 use std::sync::Arc;
 
 use tddy_actions::tool::TemplateParams;
@@ -22,7 +21,6 @@ use tddy_coding_agent_specs::{
 };
 use tddy_core::adapters::{LaunchAdapters, ResumeTokenAdapter};
 use tddy_core::provider_route::RoutedAgent;
-use tddy_daemon_kernel::config::DaemonConfig;
 use tddy_rpc::Status;
 use tddy_worktree_service::branch_intent::BranchIntentPolicy;
 
@@ -253,85 +251,28 @@ fn cli_session_spec<'a>(
     })
 }
 
-/// The binary `spec_id` runs for a `session_type` session: `cli_harnesses.<session type>.binary_path`
-/// after the binary's own environment variable, as the daemon has always read them, when that names a
-/// path. `None` leaves the binary to the spec's own resolution on the host.
-// TODO(agent-config-removal): #agent-tools n19 `agent-config-removal` — `cli_harnesses` is refused at load; only the
-// binary's environment variable is left to read, and the DaemonConfig section goes with the rest of
-// the removal
-// (docs/dev/todo/2026-11-04-removed-agent-config-readers-remain.md).
-pub(crate) fn configured_cli_binary(
-    agents: &HostCodingAgents,
-    config: &DaemonConfig,
-    session_type: &str,
-    spec_id: &str,
-) -> Option<PathBuf> {
-    let binary_env = agents
-        .registry()
-        .get(spec_id)
-        .and_then(|def| def.binary.env.clone())
-        .unwrap_or_default();
-    let configured = config.cli_harness_binary(session_type, "", &binary_env);
-    configured.contains('/').then(|| PathBuf::from(configured))
-}
-
 /// A CLI session's coding agent as this host satisfies it: the session type, the agent resolved from
 /// the installed coding agents, and those agents (a jail reads their registry and host).
 pub(crate) struct CliSessionAgent {
     pub kind: CliSessionType,
     pub agent: HostAgent,
     pub agents: Arc<HostCodingAgents>,
-    /// The renderer variable the daemon's config asks of the agent ([`renderer_env`]).
-    pub renderer_env: Vec<(String, String)>,
-}
-
-/// The environment `config.claude_cli.fullscreen` asks of the agent `spec_id`: Claude Code's renderer
-/// variable, for the agent whose binary is the one the daemon names `TDDY_CLAUDE_BINARY` — the
-/// section configures that binary — and nothing for any other agent.
-// TODO(agent-config-removal): #agent-tools n19 `agent-config-removal` — the section moves into the
-// tool file's `run.env`; delete this with it (docs/dev/todo/2026-11-05-cli-spec-features-leftovers.md).
-fn renderer_env(
-    agents: &HostCodingAgents,
-    config: &DaemonConfig,
-    spec_id: &str,
-) -> Vec<(String, String)> {
-    let configures_the_claude_binary = agents
-        .registry()
-        .get(spec_id)
-        .and_then(|def| def.binary.env.as_deref())
-        == Some(tddy_daemon_kernel::config::CLAUDE_BINARY_ENV);
-    if configures_the_claude_binary {
-        config.claude_cli_renderer_env()
-    } else {
-        Vec::new()
-    }
 }
 
 /// The coding agent a CLI session of `kind` launches, resolved before anything is cut or spawned.
-/// Refused when the host has no coding agents: the spec is the only launch these sessions have, so
-/// there is no hand-built one to use.
+/// The spec is the only launch these sessions have, so there is no hand-built one to use.
 pub(crate) fn resolve_session_agent(
-    agents: Option<&Arc<HostCodingAgents>>,
-    config: &DaemonConfig,
+    agents: &Arc<HostCodingAgents>,
     kind: CliSessionType,
 ) -> Result<CliSessionAgent, Status> {
-    let agents = agents.cloned().ok_or_else(|| {
-        Status::failed_precondition(format!(
-            "this host has no coding agents installed: a {} session is launched from its tool \
-             definition",
-            kind.name
-        ))
-    })?;
-    let binary = configured_cli_binary(&agents, config, kind.name, kind.spec_id);
+    let agents = Arc::clone(agents);
     let agent = agents
-        .resolve(kind.spec_id, binary.as_deref())
+        .resolve(kind.spec_id, None)
         .map_err(|e| Status::failed_precondition(e.to_string()))?;
-    let renderer_env = renderer_env(&agents, config, kind.spec_id);
     Ok(CliSessionAgent {
         kind,
         agent,
         agents,
-        renderer_env,
     })
 }
 
@@ -370,12 +311,8 @@ impl LaunchSessions {
     /// the jail. The spec is read from the coding agents this host has installed, the source of
     /// every launch.
     pub(crate) fn require_sandbox_placement(&self, session_type: &str) -> Result<(), Status> {
-        let agents = self
-            .coding_agents
-            .as_deref()
-            .ok_or_else(|| no_coding_agents_for(session_type))?;
         require_spec_placement(
-            cli_session_spec(agents.agents(), session_type)?,
+            cli_session_spec(self.coding_agents.agents(), session_type)?,
             session_type,
             Placement::Jail,
         )
@@ -388,6 +325,7 @@ mod cli_agent_dispatch_unit_tests;
 #[cfg(test)]
 mod tests {
     use pretty_assertions::assert_eq;
+    use std::path::PathBuf;
     use tddy_actions::tool::RunSection;
     use tddy_coding_agent_specs::{CodingAgentSection, WARP_SPEC_YAML};
     use tddy_rpc::Code;
