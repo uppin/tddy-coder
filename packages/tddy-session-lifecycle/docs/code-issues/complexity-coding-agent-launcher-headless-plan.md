@@ -40,3 +40,7 @@ hand the server.
 
 2026-10-25 — Counted at PR #776's tip and at its base (#727, `ff19a0863`, 59 lines) by brace
 matching from the `fn` line, strings and comments stripped.
+
+## Measurement update 2026-11-02 — #agent-tools 6/12 (#795)
+
+`headless_plan` is **93 lines** (fn line to closing brace): the provider-route env moved out to `headless_provider_env`, the Claude-from-spec branch (8 lines) came in. **Status:** Open — deferred to the #agent-tools sweep node (developer, 2026-11-02).

@@ -89,6 +89,7 @@ its changeset wraps.
 - **tddy-service**: gRPC service, proto definitions, event conversion (renamed from tddy-grpc; contains EchoServiceImpl, TerminalServiceImpl, DaemonService)
 - **tddy-demo**: Same app with StubBackend for demos and E2E tests
 - **tddy-livekit-web**: ConnectRPC Transport over LiveKit data channels for browser clients calling Rust RPC services
+- **Claude Code CLI**: `--agent claude` is rendered from its tool definition — `claude.yaml`'s `coding_agent.headless` section (`<tddyhome>/tools/claude.yaml` overrides it) gives the `claude -p … --output-format stream-json --verbose` argv, with the goal's permission mode (`plan`, `acceptEdits`), the session id or `--resume`, the system prompt, allowed tools, `tddy-tools` as the MCP server (`<session_dir>/claude-mcp-config.json`) and its `approval_prompt` as the permission-prompt tool. Its output is read by the stream adapter the section names (`claude-stream-json`); a spec naming an adapter this build does not register is refused at load. A non-zero exit whose result carries a structured response is a success (`exit_ok_if_structured: true`) for every goal, not only plan. A `claude.yaml` that does not load refuses the backend; there is no hand-built fallback
 - **Claude Code CLI / Cursor / Codex / Codex ACP**: LLM backends invoked via subprocess; Codex uses `codex exec` JSONL (`--json`); Codex ACP uses the **`codex-acp`** stdio agent and **`agent-client-protocol`** (see [codex-acp-backend.md](codex-acp-backend.md))
 
 ## Change History

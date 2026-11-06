@@ -31,6 +31,7 @@ libc = "0.2"
 # `tddy-sandbox` depends on no workspace crate, so this direction adds no cycle.
 glob = "0.3"
 tddy-sandbox = { path = "../tddy-sandbox" }
+pretty_assertions = { workspace = true }
 rstest = { workspace = true }
 serial_test = "3"
 tempfile = "3"

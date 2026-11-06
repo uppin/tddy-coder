@@ -21,3 +21,7 @@ The headless launch is one cohesive group (~265 lines) that shares only `CodingA
 `refuse_unless_daemon_user`, `headless_program`, `headless_route_env` and `write_mcp_config` into a
 `coding_agent_launcher/headless.rs` sibling (engine-driven, `code-restructuring`; the
 `headless_tests.rs` module already lives there) takes the file under budget.
+
+## Measurement update 2026-11-02 — #agent-tools 6/12 (#795)
+
+**Regressed:** 872 → 967 production lines: `with_coding_agents`, `headless_plan_from_spec` and `headless_provider_env` (extracted from `headless_plan`). The hand-built Claude `mcp_servers_wrapped` registration stays for launchers built without coding agents. **Status:** Open — deferred to the #agent-tools sweep node (developer, 2026-11-02).

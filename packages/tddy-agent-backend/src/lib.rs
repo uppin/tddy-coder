@@ -4,6 +4,7 @@
 //!
 //! Extracted from `tddy-core`, which re-exports every module and root item at its old path.
 
+pub mod adapters;
 pub mod backend;
 pub mod claude_argv;
 pub mod claude_hooks;
