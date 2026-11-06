@@ -207,18 +207,6 @@ pub use pty_terminal_service::*;
 mod tests {
     use super::*;
 
-    /// The token immediately following `flag` in an argv, or `None` if the flag is absent.
-    fn value_after<'a>(argv: &'a [String], flag: &str) -> Option<&'a str> {
-        argv.iter()
-            .position(|a| a == flag)
-            .and_then(|i| argv.get(i + 1))
-            .map(String::as_str)
-    }
-
-    fn contains_flag(argv: &[String], flag: &str) -> bool {
-        argv.iter().any(|a| a == flag)
-    }
-
     fn pid_is_alive(pid: u32) -> bool {
         // kill -0 checks existence without sending a signal; ESRCH means dead
         let ret = unsafe { libc::kill(pid as i32, 0) };
