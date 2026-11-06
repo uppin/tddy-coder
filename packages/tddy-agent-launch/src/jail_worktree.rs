@@ -15,6 +15,9 @@ use tddy_session_activity::user_sessions_path::projects_path_for_user;
 use tddy_session_split::service_util;
 
 impl LaunchSessions {
+    // TODO(cli-dispatch-collapse): callerless since the bespoke jailed claude start went; an
+    // unplanned deletion, left for approval (docs/dev/todo/2026-11-05-callerless-bespoke-launch-helpers.md).
+    #[allow(dead_code)]
     pub(super) fn project_default_branch_ref(
         &self,
         os_user: &str,
@@ -36,6 +39,9 @@ impl LaunchSessions {
         project_default_branch_ref
     }
 
+    // TODO(cli-dispatch-collapse): callerless since the bespoke jailed claude start went; an
+    // unplanned deletion, left for approval (docs/dev/todo/2026-11-05-callerless-bespoke-launch-helpers.md).
+    #[allow(dead_code)]
     pub(super) async fn create_jail_project_worktree(
         &self,
         branch: &JailBranch<'_>,
@@ -81,6 +87,9 @@ impl LaunchSessions {
         Ok(wt)
     }
 
+    // TODO(cli-dispatch-collapse): callerless since the bespoke jailed claude start went; an
+    // unplanned deletion, left for approval (docs/dev/todo/2026-11-05-callerless-bespoke-launch-helpers.md).
+    #[allow(dead_code)]
     pub(super) async fn link_jail_branch_to_stack_node(
         &self,
         branch: &JailBranch<'_>,

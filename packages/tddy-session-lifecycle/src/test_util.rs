@@ -87,6 +87,23 @@ pub fn builtin_coding_agents() -> Arc<tddy_agent_launch::spec_launch::HostCoding
     .expect("the built-in coding agents load")
 }
 
+/// [`builtin_coding_agents`] for a fixture whose `config` points an agent at a stub binary
+/// (`claude_cli.binary_path`, read as the daemon reads it for `claude`): the stub is what a start of
+/// that agent launches, instead of whichever `claude` the developer's `PATH` happens to hold.
+///
+/// # Panics
+/// When the built-in specs do not load, which no build passes.
+#[must_use]
+pub fn builtin_coding_agents_for(
+    config: &DaemonConfig,
+) -> Arc<tddy_agent_launch::spec_launch::HostCodingAgents> {
+    tddy_agent_launch::host_coding_agents::host_coding_agents(
+        config,
+        std::path::Path::new("/nonexistent-tddy-home"),
+    )
+    .expect("the built-in coding agents load")
+}
+
 /// The host [`test_service`] wraps, before it goes behind its `Arc` — for a suite above this crate
 /// that must install more on it first (`tddy-daemon-rpc`'s families), and then calls
 /// [`DaemonSessionHost::install_sandbox_rpc_bridge`] itself, as [`test_service`] does.

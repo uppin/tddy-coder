@@ -71,6 +71,9 @@ impl LaunchSessions {
         ))
     }
 
+    // TODO(cli-dispatch-collapse): callerless since the bespoke jailed claude start went; an
+    // unplanned deletion, left for approval (docs/dev/todo/2026-11-05-callerless-bespoke-launch-helpers.md).
+    #[allow(dead_code)]
     pub(super) async fn warm_up_jail_agents(
         &self,
         specialized_agents: &[String],
@@ -159,6 +162,9 @@ impl LaunchSessions {
         Ok((managed, append_system_prompt_file, session_env))
     }
 
+    // TODO(cli-dispatch-collapse): callerless since the bespoke jailed claude start went; an
+    // unplanned deletion, left for approval (docs/dev/todo/2026-11-05-callerless-bespoke-launch-helpers.md).
+    #[allow(dead_code)]
     pub(super) async fn jail_semantic_index_env(
         &self,
         session_id: &str,

@@ -126,7 +126,8 @@ pub struct LaunchSessions {
     /// the kind.
     pub worktree_observer: Option<Arc<dyn SessionWorktreeObserver>>,
     /// The coding agents declared as tools (`#agent-tools 2/12`). `None` until the daemon runtime
-    /// installs them; a `claude-cli` start or resume then keeps the hand-built launch.
+    /// installs them; every CLI agent's start, resume and child is then refused
+    /// `FAILED_PRECONDITION`.
     pub coding_agents: Option<Arc<crate::spec_launch::HostCodingAgents>>,
     /// The host's capabilities that are not fields.
     pub host: Arc<dyn LaunchHost>,

@@ -236,6 +236,20 @@ pub fn coding_agents_over(tddy_home: &Path) -> Arc<HostCodingAgents> {
     ))
 }
 
+/// Installs the stub `agent` a suite's daemon config names (`cursor_cli.binary_path`) on the host
+/// [`coding_agents_over`] resolves against, the way an agent is installed on a host: as `agent` on
+/// its `PATH`. A config that names no path installs nothing.
+pub fn install_the_configured_agent(tddy_home: &Path, config: &DaemonConfig) {
+    if let Some(stub) = config
+        .cursor_cli
+        .as_ref()
+        .map(|cursor_cli| cursor_cli.binary_path.clone())
+        .filter(|path| path.contains('/'))
+    {
+        let _ = std::os::unix::fs::symlink(stub, tddy_home.join("tool-bin").join("agent"));
+    }
+}
+
 /// How an [`ACursorDaemon`] is built.
 #[derive(Default)]
 pub struct ADaemonSpec {

@@ -95,6 +95,15 @@ fn a_service_with_coding_agents(
     std::fs::create_dir_all(&stub_bin).unwrap();
     let stub_bin = std::fs::canonicalize(stub_bin).unwrap();
     std::os::unix::fs::symlink(tddy_tools_binary(), stub_bin.join("tddy-tools")).unwrap();
+    // The stub the config names stands for `claude` on the declared `PATH`.
+    if let Some(stub) = config
+        .claude_cli
+        .as_ref()
+        .map(|claude_cli| claude_cli.binary_path.clone())
+        .filter(|path| path.contains('/'))
+    {
+        std::os::unix::fs::symlink(stub, stub_bin.join("claude")).unwrap();
+    }
     let registry = tddy_coding_agent_specs::load_agent_registry(&sessions_base.join("tools"))
         .expect("the agent registry loads");
     let host = Arc::new(

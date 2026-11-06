@@ -64,10 +64,13 @@ tddy-tools notify "Parallel run finished" --body "4 done, **1 blocked**" --level
 - **Not fail-quiet.** Unlike the hooks, the command prints `Notification sent` on success and exits
   non-zero with the reason when the environment is missing, the daemon cannot be reached, or the
   daemon refuses.
-- **Credentials come from the agent's environment.** The launch exports `TDDY_SESSION_ID`,
+- **Credentials come from the session pointer.** The launch writes `TDDY_SESSION_ID`,
   `TDDY_OS_USER`, `TDDY_HOOK_TOKEN` and exactly one of `TDDY_DAEMON_SOCKET` (an embedded daemon's
-  agent-tool socket) or `TDDY_DAEMON_URL`, at start and again at resume. These are the credentials the
-  session's hooks already hold, so exporting them grants nothing new — see
+  agent-tool socket) or `TDDY_DAEMON_URL` into the `notify` map of the owner-only
+  `<worktree>/.tddy/session.json`, at start and again at resume; the agent process is given none of
+  them as variables, and the command adopts them from the pointer it finds at or above its cwd.
+  These are the credentials the session's hooks already hold, so they
+  grant nothing new — see
   [Claude Code CLI session § Notifying the operator](claude-cli-session.md#notifying-the-operator).
 - **Authenticated like a hook.** `ActivityService.ReportOperatorNotification` refuses a session that
   does not run an agent declaring `operator_notify` (`FAILED_PRECONDITION`), then a session that recorded no hook token

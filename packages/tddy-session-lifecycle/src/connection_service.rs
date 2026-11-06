@@ -236,7 +236,7 @@ pub struct DaemonSessionHost {
     /// whose embedder acts on nothing of the kind.
     worktree_observer: Option<Arc<dyn SessionWorktreeObserver>>,
     /// The coding agents declared as tools, installed with [`Self::with_coding_agents`]. `None`
-    /// keeps the hand-built `claude-cli` launch (`#agent-tools 2/12`).
+    /// refuses every CLI agent's start, resume and child `FAILED_PRECONDITION` (`#agent-tools 17/19`).
     coding_agents: Option<Arc<tddy_agent_launch::spec_launch::HostCodingAgents>>,
     /// What extends a session's reach beyond this host when it is connected to — see
     /// [`tddy_daemon_extensions::SessionReach`]. [`tddy_daemon_extensions::NoSessionReach`] until
@@ -291,9 +291,8 @@ pub use tddy_agent_launch::{
     session_coordinate_handlers, session_worktree_observer, stack_child_spawn, stack_parent,
     stack_seed_validation, svc_ensure_project_available_for_start, svc_index_workspace_worktree,
     svc_pr_status_for_caller, svc_relaunch_sandboxed_runner, svc_resume_claude_cli_session,
-    svc_resume_sandboxed_claude_cli_session, svc_start_claude_cli_session,
-    svc_start_sandboxed_claude_cli_session, svc_start_sandboxed_cursor_cli_session,
-    svc_start_session_core, worktree_source,
+    svc_start_claude_cli_session, svc_start_sandboxed_claude_cli_session, svc_start_session_core,
+    worktree_source,
 };
 
 mod svc_launch_delegators;
@@ -533,6 +532,9 @@ pub use tddy_daemon_kernel::daemon_hook_urls;
 /// [`DaemonSessionHost::local_agent_codebase_access`] seam, for the same reason.
 #[cfg(test)]
 mod jail_relaunch_unit_tests;
+/// A conversation or pr-stack child runs its parent session's agent (`#agent-tools 17/19`).
+#[cfg(test)]
+mod stack_child_spawn_agent_tests;
 /// The spawn *wiring*, both ways in: a child of a planned PR must come up holding the
 /// orchestrator's documents and knowing to read its boundaries — whether the orchestrator agent
 /// spawned it through `pr_spawn_child` or the operator started it from the Start-session dialog.

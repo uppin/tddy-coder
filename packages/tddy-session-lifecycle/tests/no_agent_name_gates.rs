@@ -171,3 +171,150 @@ fn no_gate_in_the_session_crates_compares_a_session_type_with_an_agents_name() {
          (`CodingAgentRegistry::for_session_type`), never its name"
     );
 }
+
+// ── No agent id in tddy-agent-launch (`#agent-tools 17/19`) ───────────────────────────────────
+//
+// Every CLI agent starts, resumes and re-attaches through one spec-driven launch, so the launch
+// crate has no reason left to spell an agent: not to compare a session type or an agent id, not to
+// dispatch on one, and not to record one as a default. This scan is stricter than the gate scan
+// above — **any** production line of `tddy-agent-launch` naming an agent id or its session type is
+// a finding, whether or not it compares — because a launch that writes `"claude-cli"` into a record
+// or a route is the same hard-coded agent as one that matches on it.
+
+/// What names an agent in `tddy-agent-launch`: the built-in agents' ids and session types as
+/// string literals, and the constants that held them.
+const AGENT_ID_TOKENS: &[&str] = &[
+    "\"claude\"",
+    "\"cursor\"",
+    "\"claude-cli\"",
+    "\"cursor-cli\"",
+    "CLAUDE_AGENT_ID",
+    "CURSOR_AGENT_ID",
+];
+
+/// The `tddy-agent-launch` sources the scan may still find an agent id in, until
+/// `#agent-tools 18/19` (`telegram-spec-launch`) routes Telegram through the one launch. Empty:
+/// what Telegram still calls in this crate (`chat::install_cursor_hooks_in_worktree`,
+/// `chat::mint_cursor_chat_id`, re-exported through `cursor_cli_spawn`) names no agent, and its
+/// `CliSessionManager::{start, start_cursor}` live in `tddy-cli-sessions`, which this scan does not
+/// read.
+const STILL_NEEDED_BY_TELEGRAM: &[&str] = &[];
+
+/// One production line of `tddy-agent-launch` that names an agent.
+#[derive(Debug, PartialEq, Eq)]
+struct AgentIdLiteral {
+    file: PathBuf,
+    line: usize,
+    text: String,
+}
+
+/// Whether `file` is a test module of its own (`…_tests.rs`, `…_test.rs`), which may build a
+/// session of any agent.
+fn is_a_test_module(file: &Path) -> bool {
+    file.file_stem()
+        .and_then(|stem| stem.to_str())
+        .is_some_and(|stem| stem.ends_with("tests") || stem.ends_with("_test"))
+}
+
+/// Every line of `text` naming an agent, attributed to `file`, read up to its first `#[cfg(test)]`
+/// and skipping comments.
+fn agent_id_literals_in(file: &Path, text: &str) -> Vec<AgentIdLiteral> {
+    text.lines()
+        .take_while(|line| !line.trim_start().starts_with("#[cfg(test)]"))
+        .enumerate()
+        .filter(|(_, line)| !line.trim_start().starts_with("//"))
+        .filter(|(_, line)| AGENT_ID_TOKENS.iter().any(|token| line.contains(token)))
+        .map(|(index, line)| AgentIdLiteral {
+            file: file.to_path_buf(),
+            line: index + 1,
+            text: line.trim().to_string(),
+        })
+        .collect()
+}
+
+/// `tddy-agent-launch/src`.
+fn the_launch_crate() -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .expect("tddy-session-lifecycle lives under packages/")
+        .join("tddy-agent-launch")
+        .join("src")
+}
+
+#[test]
+fn the_agent_id_scan_finds_a_literal_or_a_constant_in_any_shape_and_skips_comments_and_tests() {
+    // Given — every way an agent was named, beside lines that do not name one
+    let file = Path::new("launch.rs");
+    let text = concat!(
+        "    session_type: \"cursor-cli\",\n",
+        "        .resolve(CLAUDE_AGENT_ID, None)?;\n",
+        "        agent: \"claude\".to_string(),\n",
+        "// a comment naming \"claude-cli\"\n",
+        "    let id = spec.id.as_str();\n",
+        "#[cfg(test)]\n",
+        "    session_type: \"claude-cli\",\n",
+    );
+
+    // When
+    let literals = agent_id_literals_in(file, text);
+
+    // Then
+    assert_eq!(
+        literals,
+        vec![
+            AgentIdLiteral {
+                file: file.to_path_buf(),
+                line: 1,
+                text: "session_type: \"cursor-cli\",".to_string(),
+            },
+            AgentIdLiteral {
+                file: file.to_path_buf(),
+                line: 2,
+                text: ".resolve(CLAUDE_AGENT_ID, None)?;".to_string(),
+            },
+            AgentIdLiteral {
+                file: file.to_path_buf(),
+                line: 3,
+                text: "agent: \"claude\".to_string(),".to_string(),
+            },
+        ]
+    );
+}
+
+#[test]
+fn no_agent_id_literal_is_compared_or_dispatched_on_in_agent_launch() {
+    // Given — the launch crate's production sources
+    let sources: Vec<PathBuf> = rust_sources_under(&[the_launch_crate()])
+        .into_iter()
+        .filter(|file| !is_a_test_module(file))
+        .collect();
+    assert!(
+        sources
+            .iter()
+            .any(|file| file.ends_with("tddy-agent-launch/src/svc_start_session_core.rs")),
+        "the scan must read tddy-agent-launch, but it read {sources:#?}"
+    );
+
+    // When
+    let literals: Vec<AgentIdLiteral> = sources
+        .iter()
+        .flat_map(|file| {
+            let text = std::fs::read_to_string(file).expect("a readable source file");
+            agent_id_literals_in(file, &text)
+        })
+        .filter(|literal| {
+            !STILL_NEEDED_BY_TELEGRAM
+                .iter()
+                .any(|kept| literal.file.ends_with(kept))
+        })
+        .collect();
+
+    // Then
+    assert_eq!(
+        literals,
+        vec![],
+        "a CLI launch reads its agent from the installed coding agents (`cli_launcher`, \
+         `CliSessionType`) and its behaviour from the spec (`CodingAgentSpec::has`), never from an \
+         agent's id"
+    );
+}

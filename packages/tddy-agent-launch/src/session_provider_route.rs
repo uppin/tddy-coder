@@ -304,9 +304,6 @@ pub fn routed_agent_on_host(
     routed_agent_in(agents.agents(), id)
 }
 
-/// The agent id Claude Code's sessions are routed as: the spec the `claude-cli` session type runs.
-pub const CLAUDE_ROUTE_AGENT: &str = "claude";
-
 /// The agent a route is resolved for, built only when a route is actually asked for: a session that
 /// chose no account never needs its agent's spec, so a host without coding agents still starts it.
 #[derive(Clone, Copy)]
@@ -328,14 +325,6 @@ impl<'a> From<&'a RoutedAgent> for RouteAgent<'a> {
 }
 
 impl<'a> RouteAgent<'a> {
-    /// Claude Code among a host's coding agents: the spec the `claude-cli` session type runs.
-    pub fn claude_on(agents: Option<&'a HostCodingAgents>) -> Self {
-        RouteAgent::OnHost {
-            agents,
-            id: CLAUDE_ROUTE_AGENT,
-        }
-    }
-
     /// The agent the route is resolved for.
     pub fn resolve(&self) -> Result<RoutedAgent, Status> {
         match self {

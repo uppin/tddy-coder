@@ -158,6 +158,15 @@ fn a_service_with_coding_agents(
     sessions_base: PathBuf,
     stub_bin: PathBuf,
 ) -> Arc<DaemonSessionHost> {
+    // The stub the config names stands for `claude` on the declared `PATH`.
+    if let Some(stub) = config
+        .claude_cli
+        .as_ref()
+        .map(|claude_cli| claude_cli.binary_path.clone())
+        .filter(|path| path.contains('/'))
+    {
+        let _ = std::os::unix::fs::symlink(stub, stub_bin.join("claude"));
+    }
     let registry = tddy_coding_agent_specs::load_agent_registry(&sessions_base.join("tools"))
         .expect("the agent registry loads");
     let host = Arc::new(

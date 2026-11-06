@@ -6,7 +6,10 @@ use std::sync::Arc;
 
 use tddy_actions::tool::{ProcessToolHost, ToolHost};
 use tddy_coding_agent_specs::load_agent_registry;
-use tddy_daemon_kernel::config::{resolve_claude_binary_path, DaemonConfig, CLAUDE_BINARY_ENV};
+use tddy_daemon_kernel::config::{
+    resolve_claude_binary_path, resolve_cursor_binary_path, DaemonConfig, CLAUDE_BINARY_ENV,
+    CURSOR_BINARY_ENV,
+};
 
 use crate::spec_launch::HostCodingAgents;
 
@@ -31,9 +34,11 @@ pub fn host_coding_agents(
     Ok(Arc::new(agents))
 }
 
-/// The daemon process as a [`ToolHost`], with `claude` and `tddy-tools` found the way the hand-built
-/// launch found them: the host `claude` auto-resolution (`~/.local/bin`, then `PATH` without wrapper
-/// shims) and the configured, `CARGO_BIN_EXE_` or sibling `tddy-tools` that `./install` relies on.
+/// The daemon process as a [`ToolHost`], with `claude`, `agent` (Cursor) and `tddy-tools` found
+/// the way the hand-built launches found them: a fixture's `claude_cli.binary_path` /
+/// `cursor_cli.binary_path`, then the host auto-resolution (`~/.local/bin`, then `PATH` without
+/// wrapper shims), and the configured, `CARGO_BIN_EXE_` or sibling `tddy-tools` that `./install`
+/// relies on.
 /// A binary those rules do not locate is left to the spec's own `PATH` search.
 struct DaemonToolHost {
     config: DaemonConfig,
@@ -43,6 +48,10 @@ impl DaemonToolHost {
     fn located(&self, name: &str) -> Option<String> {
         let located = match name {
             CLAUDE_BINARY_ENV => resolve_claude_binary_path(&self.config),
+            // The host's real `agent`, as the deleted bespoke Cursor launch found it.
+            // TODO(agent-config-removal): the `cursor_cli.binary_path` step serves only fixtures
+            // (start-up refuses the section) and goes with its typed field in `#agent-tools 19/19`.
+            CURSOR_BINARY_ENV => resolve_cursor_binary_path(&self.config),
             TDDY_TOOLS_BINARY_ENV => tddy_daemon_sandbox::sandbox_session::resolve_tddy_tools_path(
                 self.config
                     .claude_cli
@@ -73,3 +82,6 @@ impl ToolHost for DaemonToolHost {
         ProcessToolHost.canonicalize(path)
     }
 }
+
+#[cfg(test)]
+mod host_coding_agents_unit_tests;

@@ -5,6 +5,7 @@
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 use std::time::Duration;
 
 use tddy_core::provider_route::HarnessRoute;
@@ -13,14 +14,15 @@ use tddy_rpc::{Response, Status};
 use tddy_service::proto::session::{ResumeSessionRequest, ResumeSessionResponse};
 use tddy_session_agents::agent_roster;
 
-use crate::cli_agent_steps::resumed_conversation;
-use crate::cli_harness_jail::{jail_route_config_env, require_jail_route, CliJail};
+use crate::cli_agent_steps::{resumed_or_adopted_conversation, ConversationStart};
+use crate::cli_harness_jail::{jail_route_config_env, require_jail_route, CliJail, JailWiring};
 use crate::cursor_from_spec::node_launcher_of;
 use crate::harness_from_spec::{
     harness_template_params, resolve_session_agent, CliSessionAgent, CliSessionType, HarnessLaunch,
 };
 use crate::launch_ports::LaunchSessions;
 use crate::relaunch_jail_dirs::{prepare_relaunch_dirs, refresh_relaunch_context_dir};
+use crate::session_acting_identity::SessionIdentity;
 use crate::session_provider_route::resume_route;
 use crate::svc_start_sandboxed_claude_cli_session::{JailDirs, JailSession};
 
@@ -36,7 +38,13 @@ struct CliHarnessRelaunch<'a> {
     agents: &'a [SessionAgentRecord],
     /// The provider route the resume re-resolved; `None` for the agent's own setup.
     route: Option<HarnessRoute>,
-    session_env: Vec<(String, String)>,
+    /// The project's account identity the relayed host-side commands run under, resolved from the
+    /// session's own start token.
+    identity: SessionIdentity,
+    os_user: &'a str,
+    /// The recipe the session's record names: its managed workflow is re-wired, resuming at the
+    /// goal persisted in `changeset.yaml`.
+    managed_recipe: Option<Arc<dyn tddy_core::workflow::recipe::WorkflowRecipe>>,
     /// The record the start wrote: the conversation the resume continues, and its recorded model.
     metadata: &'a SessionMetadata,
 }
@@ -83,10 +91,20 @@ impl LaunchSessions {
             &metadata.project_id,
             &req.session_token,
         );
-        // No managed workflow is re-wired: a CLI session has none to drive.
-        let (session_env, _github_credential) = self.jail_relay_identity(identity, os_user)?;
+        // A recipe in the record marks a managed session; its workflow is re-wired on resume.
+        let managed_recipe = match metadata
+            .recipe
+            .as_deref()
+            .filter(|name| !name.trim().is_empty())
+        {
+            Some(name) => Some(
+                tddy_workflow_recipes::resolve_workflow_recipe_from_cli_name(name)
+                    .map_err(Status::invalid_argument)?,
+            ),
+            None => None,
+        };
 
-        let pid = self
+        let (pid, adopted_chat) = self
             .relaunch_sandboxed_cli_harness(CliHarnessRelaunch {
                 session_agent: &session_agent,
                 session_id: &req.session_id,
@@ -96,7 +114,9 @@ impl LaunchSessions {
                 worktree_path: &worktree_path,
                 agents: &metadata.agents,
                 route,
-                session_env,
+                identity,
+                os_user,
+                managed_recipe,
                 metadata: &metadata,
             })
             .await?;
@@ -105,6 +125,7 @@ impl LaunchSessions {
             updated_at: chrono::Utc::now().to_rfc3339(),
             status: "active".to_string(),
             pid: Some(pid),
+            cursor_chat_id: adopted_chat.or(metadata.cursor_chat_id.clone()),
             ..metadata
         };
         write_session_metadata(session_dir, &updated)
@@ -122,7 +143,7 @@ impl LaunchSessions {
     async fn relaunch_sandboxed_cli_harness(
         &self,
         relaunch: CliHarnessRelaunch<'_>,
-    ) -> Result<u32, Status> {
+    ) -> Result<(u32, Option<String>), Status> {
         let CliHarnessRelaunch {
             session_agent,
             session_id,
@@ -132,7 +153,9 @@ impl LaunchSessions {
             worktree_path,
             agents,
             route,
-            session_env,
+            identity,
+            os_user,
+            managed_recipe,
             metadata,
         } = relaunch;
 
@@ -154,6 +177,23 @@ impl LaunchSessions {
             prepare_relaunch_dirs(session_dir)?;
         refresh_relaunch_context_dir(worktree_path, agents, &context_dir, session_agent.kind.name)?;
 
+        // Re-wire the managed workflow of a managed session: the controller resumes at the goal
+        // persisted in changeset.yaml, its prompt goes into the jail-visible context directory, and
+        // the host-side env the relayed `tddy-tools transition` runs with carries `TDDY_SOCKET`.
+        let tddy_tools_path =
+            crate::claude_cli_spawn_steps::claude_cli_hooks(&self.config, &self.tddy_data_dir)
+                .tddy_tools_path;
+        let (managed, system_prompt_file, session_env) = self.relaunch_managed_workflow(
+            session_id,
+            session_dir,
+            worktree_path,
+            managed_recipe,
+            &context_dir,
+            &tddy_tools_path,
+            os_user,
+            identity,
+        )?;
+
         // The daemon's environment for the session, as its start gave it — but for the semantic index,
         // which a resume does not rebuild: `SemanticSearch` stays withdrawn.
         let mut env: BTreeMap<String, String> = BTreeMap::new();
@@ -163,6 +203,7 @@ impl LaunchSessions {
         env.extend(self.jail_daemon_identity_env());
         env.extend(self.lsp_tools_env(worktree_path));
         env.extend(self.restructure_tools_env());
+        env.extend(session_agent.renderer_env.iter().cloned());
         env.extend(jail_route_config_env(
             &session_agent.agent.spec,
             route.as_ref(),
@@ -172,7 +213,17 @@ impl LaunchSessions {
         // A resume continues the agent's own conversation (the spec's `resume` branch): its session
         // id or minted chat, which re-binds the recorded model, or its worktree. The route's
         // arguments belong to the start.
-        let conversation = resumed_conversation(&session_agent.agent.spec, metadata)?;
+        let conversation = resumed_or_adopted_conversation(
+            ConversationStart {
+                spec: &session_agent.agent.spec,
+                binary: &session_agent.agent.tool.binary,
+                worktree: worktree_path,
+                env: &[],
+                session_id,
+            },
+            metadata,
+        )
+        .await?;
         let launcher = node_launcher_of(&session_agent.agent.tool.binary);
         let params = harness_template_params(&conversation.bound(HarnessLaunch {
             model: metadata.model.as_deref().unwrap_or_default(),
@@ -194,16 +245,26 @@ impl LaunchSessions {
             scratch_tmp,
             context_dir,
         };
-        self.launch_jailed_cli_agent(CliJail {
-            session_agent,
-            jail: &jail,
-            dirs: &dirs,
-            params,
-            route_args: Vec::new(),
-            env,
-            session_env,
-            route,
-        })
-        .await
+        let pid = self
+            .launch_jailed_cli_agent(CliJail {
+                session_agent,
+                jail: &jail,
+                dirs: &dirs,
+                params,
+                route_args: Vec::new(),
+                env,
+                session_env,
+                route,
+                wiring: JailWiring {
+                    agents,
+                    managed,
+                    system_prompt_file,
+                    managed_codebase: false,
+                    passthrough_args: Vec::new(),
+                    role: "",
+                },
+            })
+            .await?;
+        Ok((pid, conversation.recorded_chat_id().map(str::to_string)))
     }
 }

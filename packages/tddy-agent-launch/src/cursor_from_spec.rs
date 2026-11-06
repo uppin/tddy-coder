@@ -1,8 +1,8 @@
 //! What a `cursor-cli` launch resolves before it renders the `cursor` tool definition
 //! (`tddy-coding-agent-specs/specs/cursor.yaml`) with `harness_from_spec::harness_template_params`
 //! — on the host through [`crate::spec_launch::launch_host_pty`], in a jail through
-//! [`crate::launch_ports::LaunchSessions::launch_jailed`]: the configured binary and the bundled
-//! runtime behind Cursor's launcher script.
+//! [`crate::launch_ports::LaunchSessions::launch_jailed`]: the bundled runtime behind Cursor's
+//! launcher script.
 //!
 //! PRD: `docs/ft/daemon/cursor-cli-session.md` (`#agent-tools 7/12`).
 //!
@@ -10,19 +10,6 @@
 //! as `cursor_chat_id`), so a start and every resume render the same template with the same id.
 
 use std::path::{Path, PathBuf};
-
-use tddy_daemon_kernel::config::{resolve_cursor_binary_path, DaemonConfig};
-
-/// The `cursor` tool's id in the agent registry.
-pub const CURSOR_AGENT_ID: &str = "cursor";
-
-/// `cursor_cli.binary_path` (or `TDDY_CURSOR_AGENT`) when it names a path; a bare name leaves the
-/// binary to the spec's own resolution.
-pub(crate) fn configured_cursor_binary(config: &DaemonConfig) -> Option<PathBuf> {
-    Some(resolve_cursor_binary_path(config))
-        .filter(|path| path.contains('/'))
-        .map(PathBuf::from)
-}
 
 /// The bundled runtime a Cursor launcher script execs: `<install>/node` against
 /// `<install>/index.js`. Run directly in a jail, where the script cannot resolve its own install

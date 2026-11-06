@@ -453,7 +453,9 @@ impl FacilitatingDaemon {
             Arc::new(tddy_daemon_kernel::operator_channel::NoOperatorChannel),
             Arc::clone(&agents),
         )
-        .with_coding_agents_if_none(tddy_session_lifecycle::test_util::builtin_coding_agents())
+        .with_coding_agents_if_none(
+            tddy_session_lifecycle::test_util::builtin_coding_agents_for(&config),
+        )
         .with_staging_base_dir(staging.path().to_path_buf())
         .with_session_rooms(rooms)
         .with_split_rooms(Arc::clone(&split_rooms));

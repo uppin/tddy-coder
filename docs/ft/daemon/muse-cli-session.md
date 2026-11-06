@@ -32,7 +32,7 @@ protocols (`muse exec --json`, `muse serve`) are undocumented, so there is no Mu
 3. A chosen account is resolved **before anything is cut or spawned** (see
    [Running on a Meta account](#running-on-a-meta-account)).
 4. The daemon cuts a worktree for the session on `muse-cli/<short id>` when `new_branch_name` is empty
-   (`BranchIntentPolicy::cli_harness("muse-cli")`), pushing it when **Create remote branch** is set.
+   (`harness_from_spec::cli_branch_intent`: `BranchIntentPolicy::cli_agent("muse-cli", false)` — the spec declares no `branch_name_required`), pushing it when **Create remote branch** is set.
 5. The daemon spawns `muse [--model <model>] [<first prompt>]` in the worktree. `--model` is passed only
    when a model was chosen, and a blank first prompt is none.
 6. `StartSessionResponse` returns `session_id`; LiveKit fields are empty.

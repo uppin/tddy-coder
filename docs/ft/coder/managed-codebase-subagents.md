@@ -819,9 +819,10 @@ fully migrated onto the array model.
     resolves `specialized_agents` names once per call (unknown name ⇒ `InvalidArgument`, naming the
     unresolvable agent); `specialized_subagent_env` builds the `TDDY_SUBAGENT`/`TDDY_SUBAGENTS_JSON`
     env pair from the already-resolved defs. The per-agent `SubagentReplacement` list feeds
-    `prepare_context_dir_with_subagent` for both `start_sandboxed_claude_cli_session` and
-    `relaunch_sandboxed_runner` (the latter takes a `specialized_agents: &[String]` parameter, so a
-    resumed session re-resolves and re-wires the same defs it started with). There is no
+    `prepare_context_dir_with_subagent` for both the sandboxed CLI start
+    (`svc_start_sandboxed_cli_harness_session`, through `prepare_jail_context_dir`) and its relaunch
+    (`svc_resume_sandboxed_cli_harness_session`, through `refresh_relaunch_context_dir`), so a
+    resumed session re-resolves and re-wires the same defs it started with. There is no
     `discovery_subagent` field, and therefore no mutual-exclusivity concern to guard against.
 23. `SessionMetadata` has a `specialized_agents: Vec<String>` field
     (`#[serde(default, skip_serializing_if = "Vec::is_empty")]`) — omitted from `.session.yaml` when

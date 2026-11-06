@@ -326,11 +326,12 @@ fn a_cursor_cli_start_request() -> StartSessionRequest {
 
 fn daemon_config_with_cursor_binary(binary_path: &str) -> DaemonConfig {
     let dir = tempfile::tempdir().unwrap();
+    let os_user = cursor_cli_support::current_os_user();
     let yaml = format!(
         r#"
 users:
   - github_user: "testuser"
-    os_user: "testuser"
+    os_user: "{os_user}"
 allowed_tools:
   - path: /bin/true
     label: true
@@ -351,6 +352,7 @@ fn connection_service(
 ) -> DaemonSessionHost {
     let tddy_data_dir = sessions_base.clone();
     let agents = cursor_cli_support::coding_agents_over(&sessions_base);
+    cursor_cli_support::install_the_configured_agent(&sessions_base, &config);
     let sessions_base_resolver: SessionsBaseResolver =
         Arc::new(move |_| Some(sessions_base.clone()));
     let user_resolver: UserResolver =

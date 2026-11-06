@@ -31,7 +31,7 @@ Only the interactive TUI is integrated — argv, no stream parsing. Warp's headl
    a project is chosen — no model is needed.
 2. **Start New Session** issues `StartSession` with `session_type = "warp-cli"` and an empty `model`.
 3. The daemon cuts a worktree for the session on `warp-cli/<short id>` when `new_branch_name` is empty
-   (`BranchIntentPolicy::cli_harness("warp-cli")`), pushing it when **Create remote branch** is set.
+   (`harness_from_spec::cli_branch_intent`: `BranchIntentPolicy::cli_agent("warp-cli", false)` — the spec declares no `branch_name_required`), pushing it when **Create remote branch** is set.
 4. The daemon spawns `warp` in the worktree, with no arguments.
 5. `StartSessionResponse` returns `session_id`; LiveKit fields are empty.
 

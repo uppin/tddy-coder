@@ -28,7 +28,7 @@ that serves OpenAI Responses or OpenAI Chat Completions.
 3. A chosen account is resolved **before anything is cut or spawned** (see
    [Running on a provider account](#running-on-a-provider-account)).
 4. The daemon cuts a worktree for the session on `opencode-cli/<short id>` when `new_branch_name` is
-   empty (`BranchIntentPolicy::cli_harness("opencode-cli")`), pushing it when **Create remote branch** is set.
+   empty (`harness_from_spec::cli_branch_intent`: `BranchIntentPolicy::cli_agent("opencode-cli", false)` — the spec declares no `branch_name_required`), pushing it when **Create remote branch** is set.
 5. The daemon spawns `opencode [--model <provider/model>] [--prompt <first prompt>]` in the worktree.
    `--model` is passed only when a model was chosen — an empty model leaves the choice to OpenCode.
 6. `StartSessionResponse` returns `session_id`; LiveKit fields are empty.
@@ -147,8 +147,8 @@ The pane's environment carries the session's own (the provider route's key inclu
 - **Resume** re-attaches while the tmux session is alive; otherwise it starts a fresh tmux session
   running `opencode --continue`.
 - **Re-attach after a restart.** The first stream, input or history read of the session's `main`
-  terminal on a daemon that has none re-attaches it, dispatched by the session type `.session.yaml`
-  records, so the main keeps its kind (`opencode-cli`). The agent is never relaunched and the recorded `pid`
+  terminal on a daemon that has none re-attaches it as the agent the session type `.session.yaml`
+  records names among the host's installed coding agents, so the main keeps its kind (`opencode-cli`). The agent is never relaunched and the recorded `pid`
   is unchanged.
 - The shared harness path registers the resume-token reader as an exit hook (see
   [Warp § tmux mode](warp-cli-session.md#tmux-mode)), so the pane is kept after `opencode` exits until

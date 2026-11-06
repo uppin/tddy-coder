@@ -40,6 +40,8 @@ const RESUMED_SESSION_ID: &str = "01900000-0000-7000-8000-00000000c1a5";
 /// What a stub agent prints once it has recorded its launch.
 const LAUNCHED: &str = "STUB LAUNCHED";
 /// The environment a golden pins: what the launch sets, never what the daemon happens to inherit.
+/// The `TDDY_*` names are pinned to be absent: the operator-notify session reaches `tddy-tools`
+/// through the session pointer, never the agent's environment (`#agent-tools 17/19`).
 const PINNED_ENV: &[&str] = &[
     "CLAUDE_CODE_NO_FLICKER",
     "TDDY_DAEMON_URL",
@@ -218,12 +220,36 @@ impl ATddyHome {
 
     /// The coding agents the daemon would install from this home, resolving against `stubs`.
     fn coding_agents(&self, stubs: &AStubBin) -> Arc<HostCodingAgents> {
+        self.coding_agents_with(stubs, BTreeMap::new())
+    }
+
+    /// [`Self::coding_agents`] on a host the daemon's config also names `claude` on: the runtime's
+    /// tool host answers `TDDY_CLAUDE_BINARY` from `claude_cli.binary_path`.
+    fn coding_agents_pinned_by(
+        &self,
+        stubs: &AStubBin,
+        config: &DaemonConfig,
+    ) -> Arc<HostCodingAgents> {
+        let pinned = config
+            .claude_cli
+            .as_ref()
+            .map(|claude_cli| claude_cli.binary_path.clone())
+            .filter(|path| path.contains('/'))
+            .map(|path| ("TDDY_CLAUDE_BINARY".to_string(), path));
+        self.coding_agents_with(stubs, pinned.into_iter().collect())
+    }
+
+    fn coding_agents_with(
+        &self,
+        stubs: &AStubBin,
+        env: BTreeMap<String, String>,
+    ) -> Arc<HostCodingAgents> {
         let registry = load_agent_registry(&self.tools()).expect("the agent registry loads");
         Arc::new(HostCodingAgents::new(
             registry,
             Arc::new(AFixtureHost {
                 path: vec![stubs.path()],
-                env: BTreeMap::new(),
+                env,
             }),
         ))
     }
@@ -635,12 +661,13 @@ async fn the_daemon_yaml_claude_binary_path_still_overrides_the_spec_binary() {
     let stubs = a_stub_bin().with_recording_agent("claude-pinned");
     let home = a_tddy_home();
     let (_cfg, config) = a_daemon_config(&stubs, Some(&stubs.binary("claude-pinned")));
+    let agents = home.coding_agents_pinned_by(&stubs, &config);
     let manager = Arc::new(ClaudeCliSessionManager::new());
     let host = a_session_host(
         config,
         sessions_tmp.path().to_path_buf(),
         Arc::clone(&manager),
-        Some(home.coding_agents(&stubs)),
+        Some(agents),
     );
 
     // When

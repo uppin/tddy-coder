@@ -1,12 +1,12 @@
 # complexity: start_sandboxed_cli_harness_session
 
-**Location:** `packages/tddy-agent-launch/src/svc_start_sandboxed_cli_harness_session.rs:78` — `LaunchSessions::start_sandboxed_cli_harness_session`
+**Location:** `packages/tddy-agent-launch/src/svc_start_sandboxed_cli_harness_session.rs:92` — `LaunchSessions::start_sandboxed_cli_harness_session`
 **Category:** complexity
 **Detected:** 2026-10-22 by structural audit — `/pr-wrap` on PR #670 (`#provider-route` 9/9), which added the function
-**Metrics:** **239 lines** (fn line to closing brace) · CRAP not measured (no `analyze coverage` run)
+**Metrics:** **278 lines** (fn line to closing brace) · CRAP not measured (no `analyze coverage` run)
 **Thresholds breached:** length 214 > 60 (`/analyze-clean-code`)
 **Restructure:** required — `extract_method` × 4, `/code-restructuring` territory, blocked as below
-**Status:** Open — regressed 2026-11-05 by #820 (223 → 239) — unclaimed
+**Status:** Open — regressed 2026-11-06 by #823 (239 → 278) — unclaimed
 **Deferred:** to the #agent-tools sweep node (developer, 2026-11-02) — #797 claimed it and narrowed it, did not close it
 
 ## Measurement history
@@ -39,6 +39,7 @@ This is the third copy of the sandboxed start sequence, beside `start_sandboxed_
 (348 lines, its own record) and `start_sandboxed_cursor_cli_session` (430). Each copy drifts on its
 own: the jail env, the warm-up gate and the metadata write are written three times.
 | 2026-11-05 | 223 → 239 | **worse by 16** in #820: the jailed start mints or binds the conversation (`start_conversation`), binds the permission mode and the node launcher and records the minted chat; measured on `origin/feature/agent-tools/route-support` (`3c29698cd`) and HEAD at #820's wrap. Not split: restructuring deferred to the `#agent-tools` sweep node (n20) by the developer (2026-11-04) |
+| 2026-11-06 | 239 → 278 | — | **worse by 39** in #823 (`#agent-tools` 17/19): the generic jail now serves claude and cursor — the managed workflow, the role, the hooks written into the worktree before the context copy (`write_jail_hooks`), the passthrough args; measured fn line to closing brace on `origin/feature/agent-tools/spec-backend` (`d325fba73`) and HEAD; no coverage run. Not split: restructuring deferred to the `#agent-tools` sweep node (n20) by the developer |
 
 ## What would close it
 

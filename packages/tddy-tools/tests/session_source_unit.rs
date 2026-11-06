@@ -77,10 +77,11 @@ fn an_explicit_socket_wins_over_the_pointer_and_the_environment() {
     assert_eq!(
         session,
         Ok(ResolvedSession {
-            socket: PathBuf::from("/run/tddy/from-arg.sock"),
+            socket: Some(PathBuf::from("/run/tddy/from-arg.sock")),
             repo_dir: None,
             session_dir: None,
             remote: BTreeMap::new(),
+            notify: BTreeMap::new(),
             source: SessionSource::Arg,
         })
     );
@@ -99,13 +100,14 @@ fn the_pointer_above_the_cwd_wins_over_the_environment() {
     assert_eq!(
         session,
         Ok(ResolvedSession {
-            socket: PathBuf::from("/run/tddy/from-pointer.sock"),
+            socket: Some(PathBuf::from("/run/tddy/from-pointer.sock")),
             repo_dir: Some(PathBuf::from("/srv/checkouts/app")),
             session_dir: Some(PathBuf::from("/var/tddy/sessions/s1")),
             remote: BTreeMap::from([(
                 "TDDY_REMOTE_SESSION_ID".to_string(),
                 "remote-1".to_string()
             )]),
+            notify: BTreeMap::new(),
             source: SessionSource::PointerFile(worktree.pointer()),
         })
     );
@@ -127,10 +129,11 @@ fn the_environment_is_read_only_when_no_argument_or_pointer_names_a_session() {
     assert_eq!(
         session,
         Ok(ResolvedSession {
-            socket: PathBuf::from("/run/tddy/from-env.sock"),
+            socket: Some(PathBuf::from("/run/tddy/from-env.sock")),
             repo_dir: None,
             session_dir: Some(PathBuf::from("/var/tddy/sessions/s2")),
             remote: BTreeMap::new(),
+            notify: BTreeMap::new(),
             source: SessionSource::Env,
         })
     );
@@ -173,5 +176,36 @@ fn a_pointer_that_does_not_parse_is_an_error_never_skipped_for_the_environment()
             SessionNotFound::Nowhere { .. } => None,
         }),
         Err(Some(worktree.pointer()))
+    );
+}
+
+#[test]
+fn a_pointers_notify_map_sets_only_the_names_tddy_tools_notify_reads() {
+    // Given — a pointer naming the notify session, and a name notify does not read
+    let session = ResolvedSession {
+        socket: None,
+        repo_dir: Some(PathBuf::from("/srv/checkouts/app")),
+        session_dir: None,
+        remote: BTreeMap::new(),
+        notify: BTreeMap::from([
+            ("TDDY_SESSION_ID".to_string(), "s1".to_string()),
+            ("PATH".to_string(), "/planted".to_string()),
+        ]),
+        source: SessionSource::Env,
+    };
+
+    // When
+    let env = tddy_tools::session_source::session_environment(&session);
+
+    // Then — no socket is adopted, and PATH is not
+    assert_eq!(
+        env,
+        vec![
+            (
+                "TDDY_REPO_DIR".to_string(),
+                "/srv/checkouts/app".to_string()
+            ),
+            ("TDDY_SESSION_ID".to_string(), "s1".to_string()),
+        ]
     );
 }

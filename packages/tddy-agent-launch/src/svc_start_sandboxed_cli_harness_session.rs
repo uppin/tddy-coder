@@ -12,28 +12,42 @@ use std::collections::BTreeMap;
 
 use tddy_core::output::SESSIONS_SUBDIR;
 use tddy_core::provider_route::HarnessRoute;
-use tddy_core::{write_session_metadata, SessionMetadata};
+use tddy_core::HookCommandParams;
 use tddy_rpc::{Response, Status};
 use tddy_service::proto::session::start_phase::Step as StartStep;
 use tddy_service::proto::session::{StartSessionRequest, StartSessionResponse};
 use tddy_session_agents::seed_codebase::{SeedCodebase, SeededAgentClones};
 use tddy_session_files::attachment_progress::AttachmentProgressSink;
-use tddy_worktree_service::branch_intent::{BranchIntentPolicy, BranchIntentRequest};
+use tddy_worktree_service::branch_intent::BranchIntentRequest;
 
-use crate::cli_agent_steps::{start_conversation, ConversationStart};
-use crate::cli_harness_jail::{jail_route_config_env, require_jail_route, CliJail};
+use crate::cli_agent_steps::{
+    hooks_report_over_the_agent_tool_socket, refuse_a_role_the_agent_cannot_hold,
+    start_conversation, ConversationStart,
+};
+use crate::cli_harness_jail::{
+    jail_route_config_env, prompt_ahead_of_slots, require_jail_route, CliJail, JailWiring,
+    TDDY_TOOLS_ID,
+};
 use crate::cli_route_launch::routed_launch_model;
 use crate::cli_session_worktree::{
     provision_cli_worktree, semantic_index_env, CliWorktree, CliWorktreeStart,
 };
 use crate::cursor_from_spec::node_launcher_of;
 use crate::harness_from_spec::{harness_template_params, CliSessionAgent, HarnessLaunch};
+use crate::jail_launch::tool_ipc_socket;
+use crate::jail_session_files::{
+    prepare_jail_context_dir, prepare_jail_dirs, write_jail_session_metadata, JailRecord,
+};
 use crate::launch_ports::LaunchSessions;
-use crate::relaunch_jail_dirs::{prepare_relaunch_dirs, refresh_relaunch_context_dir};
+use crate::placement::managed_recipe_for;
 use crate::session_provider_route::{sandboxed_start_route, session_route_sources_with_default};
+use crate::spec_launch::HostAgent;
 use crate::stack_parent::SpawnStackParent;
-use crate::svc_start_sandboxed_claude_cli_session::{JailDirs, JailSession};
+use crate::svc_start_sandboxed_claude_cli_session::JailSession;
 use crate::svc_start_session_core::CliStart;
+use crate::worktree_source::sandbox_claude_passthrough_args;
+use std::path::Path;
+use tddy_daemon_kernel::config::DaemonConfig;
 
 impl LaunchSessions {
     /// The sandboxed start of a CLI coding agent: its provider route resolved before anything is
@@ -88,6 +102,12 @@ impl LaunchSessions {
         let session_id = start.session_id.as_str();
         let session_token = req.session_token.as_str();
         let project_id = req.project_id.trim();
+        let session_role = req.session_role.trim();
+        refuse_a_role_the_agent_cannot_hold(&session_agent.agent.spec, session_role)?;
+        // A managed codebase driven by a recipe: admitted only for a spec declaring
+        // `managed_workflow` (`refuse_an_unsupported_cli_session_start`). An unknown recipe is a
+        // request error, never silently ignored.
+        let managed_recipe = managed_recipe_for(req)?;
         let session_dir = start.sessions_base.join(SESSIONS_SUBDIR).join(session_id);
         std::fs::create_dir_all(&session_dir)
             .map_err(|e| Status::internal(format!("failed to create session dir: {e}")))?;
@@ -127,17 +147,11 @@ impl LaunchSessions {
                 selected_integration_base_ref: req.selected_integration_base_ref.trim(),
                 selected_branch_to_work_on: req.selected_branch_to_work_on.trim(),
             },
-            BranchIntentPolicy::cli_agent(
-                kind.name,
-                session_agent
-                    .agent
-                    .spec
-                    .has(tddy_coding_agent_specs::Capability::BranchNameRequired),
-            ),
+            crate::harness_from_spec::cli_branch_intent(kind.clone(), &session_agent.agent.spec),
             None,
             &session_dir,
             stack_parent.session_id(),
-            None,
+            managed_recipe.as_deref(),
         )?;
         let CliWorktree {
             path: worktree_path,
@@ -168,8 +182,9 @@ impl LaunchSessions {
         .await?;
 
         // The clones this session's seeded agents read, claimed now: the worktree they mirror exists.
-        // The jail does not yet put the tddy-tools tools in front of the agent's own tools, so a
-        // withdrawal is not enforced here.
+        // A jail that registers `tddy-tools` for its agent (its spec's `mcp` slot) is what puts
+        // `mcp__tddy-tools__*` in front of the main agent's file tools, which is what makes a
+        // withdrawal enforceable (`session_enforces_a_withdrawal`).
         let clones = tddy_session_agents::agent_host_callbacks::DaemonSeedCloneClaimant {
             service: self.agent_roster.clone(),
         };
@@ -180,16 +195,54 @@ impl LaunchSessions {
                     session_dir.clone(),
                     worktree_path.clone(),
                     project_id,
-                    false,
+                    !matches!(
+                        session_agent.agent.spec.agent.mcp,
+                        tddy_coding_agent_specs::McpSlot::Unsupported
+                    ),
                 ),
                 session_token,
                 &mut started_agents,
             )
             .await?;
 
-        let (sandbox_root, egress_dir, scratch_dir, scratch_tmp, context_dir) =
-            prepare_relaunch_dirs(&session_dir)?;
-        refresh_relaunch_context_dir(&worktree_path, &started_agents, &context_dir, kind.name)?;
+        // The agent's hooks reach the daemon over the session's tool-IPC socket, the one socket a
+        // jail can reach: written into the worktree now, because the jail reads a copy of it taken
+        // after this.
+        let hook_token = write_jail_hooks(
+            &session_agent.agent,
+            &self.config,
+            &worktree_path,
+            session_id,
+            os_user,
+        )?;
+        let dirs = prepare_jail_dirs(&session_dir)?;
+        prepare_jail_context_dir(
+            kind.name,
+            &started_agents,
+            &worktree_path,
+            &dirs.context_dir,
+        )?;
+        let jail = JailSession {
+            session_id,
+            project_id,
+            session_token,
+            session_dir: &session_dir,
+            worktree_path: &worktree_path,
+        };
+        // Managed workflow: the per-session controller and toolcall listener, the recipe's prompt in
+        // the jail-visible context directory, and the host-side env the relayed `tddy-tools
+        // transition` runs with. The relay's commit identity belongs there too, managed or not.
+        let tddy_tools_path =
+            crate::claude_cli_spawn_steps::claude_cli_hooks(&self.config, &self.tddy_data_dir)
+                .tddy_tools_path;
+        let (managed, system_prompt_file, session_env) = self.managed_jail_env(
+            &jail,
+            os_user,
+            &start.sessions_base,
+            &managed_recipe,
+            &dirs.context_dir,
+            &tddy_tools_path,
+        )?;
 
         let semantic_env = semantic_index_env(
             &self.tddy_data_dir,
@@ -209,18 +262,13 @@ impl LaunchSessions {
         env.extend(self.lsp_tools_env(&worktree_path));
         env.extend(self.restructure_tools_env());
         env.extend(semantic_env);
+        // The jail's env is built here, not inherited, so the renderer choice is carried in.
+        env.extend(session_agent.renderer_env.iter().cloned());
         env.extend(jail_route_config_env(
             &session_agent.agent.spec,
             route.as_ref(),
-            &scratch_dir,
+            &dirs.scratch_dir,
         ));
-
-        // The jailed agent's commits carry the project's account identity, carried by the relay that
-        // runs under this daemon's environment rather than the agent's.
-        let identity = self
-            .host
-            .session_identity(os_user, session_id, project_id, session_token);
-        let (session_env, _github_credential) = self.jail_relay_identity(identity, os_user)?;
 
         // A start is launched with the spec's model and first prompt, as on the host; a route that
         // names the model itself (OpenCode's configuration file) leaves it to the route's arguments.
@@ -244,9 +292,20 @@ impl LaunchSessions {
         })
         .await?;
         let launcher = node_launcher_of(&session_agent.agent.tool.binary);
+        // The client's pass-through arguments go ahead of the slot flags, and with them the first
+        // prompt when the spec's MCP flag would swallow it as a trailing positional.
+        let prompt_ahead = prompt_ahead_of_slots(&session_agent.agent.spec);
+        let passthrough_args = sandbox_claude_passthrough_args(
+            &req.claude_args,
+            if prompt_ahead {
+                &start.initial_prompt
+            } else {
+                ""
+            },
+        );
         let params = harness_template_params(&conversation.bound(HarnessLaunch {
             model: launch_model,
-            prompt: Some(&start.initial_prompt),
+            prompt: Some(start.initial_prompt.as_str()).filter(|_| !prompt_ahead),
             permission_mode: Some(req.permission_mode.trim()),
             dangerously_skip_permissions: req.dangerously_skip_permissions,
             node_launcher: launcher.as_ref(),
@@ -254,20 +313,6 @@ impl LaunchSessions {
         }));
 
         progress.begin_phase(StartStep::Agent);
-        let jail = JailSession {
-            session_id,
-            project_id,
-            session_token,
-            session_dir: &session_dir,
-            worktree_path: &worktree_path,
-        };
-        let dirs = JailDirs {
-            sandbox_root,
-            egress_dir,
-            scratch_dir,
-            scratch_tmp,
-            context_dir,
-        };
         let pid = self
             .launch_jailed_cli_agent(CliJail {
                 session_agent,
@@ -278,24 +323,32 @@ impl LaunchSessions {
                 env,
                 session_env,
                 route,
+                wiring: JailWiring {
+                    agents: &started_agents,
+                    managed,
+                    system_prompt_file,
+                    managed_codebase: req.managed_codebase,
+                    passthrough_args,
+                    role: session_role,
+                },
             })
             .await?;
         progress.end_phase(StartStep::Agent);
 
-        let meta = SessionMetadata {
-            repo_path: Some(worktree_path.to_string_lossy().to_string()),
-            pid: Some(pid),
-            model: Some(req.model.trim().to_string()),
-            sandbox: Some(true),
-            cursor_chat_id: conversation.recorded_chat_id().map(str::to_string),
-            agents_rev: tddy_session_agents::agent_roster::started_roster_rev(&started_agents),
-            agents: started_agents,
-            ..tddy_session_split::service_util::starting_session_metadata(
-                session_id, project_id, kind.name,
-            )
-        };
-        write_session_metadata(&session_dir, &meta)
-            .map_err(|e| Status::internal(format!("failed to write session metadata: {e}")))?;
+        write_jail_session_metadata(
+            &jail,
+            JailRecord {
+                session_type: kind.name,
+                model: req.model.trim(),
+                managed_recipe,
+                started_agents,
+                pid,
+                managed_codebase: req.managed_codebase,
+                session_role,
+                chat_id: conversation.recorded_chat_id(),
+                hook_token,
+            },
+        )?;
         // The roster naming them is on disk now, so the clones belong to the session.
         seeded_clones.keep();
 
@@ -314,4 +367,54 @@ impl LaunchSessions {
             branch_conflict: None,
         }))
     }
+}
+
+/// The agent's hooks written into `worktree`, each event reporting over the session's tool-IPC
+/// socket, when its spec declares `hooks` and its adapter reports over a socket — a jail has no other
+/// way to reach the daemon. Returns the per-session token they report with, to be recorded.
+fn write_jail_hooks(
+    agent: &HostAgent,
+    config: &DaemonConfig,
+    worktree: &Path,
+    session_id: &str,
+    os_user: &str,
+) -> Result<Option<String>, Status> {
+    let spec = &agent.spec;
+    let probe = crate::claude_cli_spawn_steps::claude_cli_hooks(config, Path::new("/"));
+    if !spec.has(tddy_coding_agent_specs::Capability::Hooks)
+        || !hooks_report_over_the_agent_tool_socket(spec, &probe)
+    {
+        return Ok(None);
+    }
+    let tddy_tools = agent.dep(TDDY_TOOLS_ID).ok_or_else(|| {
+        Status::failed_precondition(format!(
+            "the {} tool does not depend on {TDDY_TOOLS_ID}",
+            spec.id
+        ))
+    })?;
+    let hook_token = uuid::Uuid::new_v4().to_string();
+    let tddy_tools_path = tddy_tools.binary.to_string_lossy().into_owned();
+    let daemon_socket = tool_ipc_socket(session_id).to_string_lossy().into_owned();
+    let daemon_url = tddy_daemon_kernel::daemon_hook_urls::claude_hook_daemon_url(config);
+    let params = HookCommandParams {
+        tddy_tools_path: &tddy_tools_path,
+        daemon_url: &daemon_url,
+        session_id,
+        os_user,
+        hook_token: &hook_token,
+        daemon_socket: Some(&daemon_socket),
+        answer_wait_secs: config.claude_cli_answer_wait_secs(),
+    };
+    let adapter = tddy_coding_agent_specs::slots::hooks::adapter(&spec.agent.hooks.adapter)
+        .map_err(|e| Status::internal(e.to_string()))?;
+    let (path, bytes) = adapter
+        .try_render(worktree, &params)
+        .map_err(|e| Status::internal(e.to_string()))?;
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)
+            .map_err(|e| Status::internal(format!("create {}: {e}", parent.display())))?;
+    }
+    tddy_core::atomic_file::write_atomic(&path, bytes)
+        .map_err(|e| Status::internal(format!("write {}: {e}", path.display())))?;
+    Ok(Some(hook_token))
 }

@@ -134,6 +134,15 @@ fn minimal_service(config: DaemonConfig, sessions_base: PathBuf) -> Arc<DaemonSe
     let tool_bin = sessions_base.join("tool-bin");
     std::fs::create_dir_all(&tool_bin).unwrap();
     std::os::unix::fs::symlink(tddy_tools_binary(), tool_bin.join("tddy-tools")).unwrap();
+    // The stub the config names stands for `agent` on the declared `PATH`.
+    if let Some(stub) = config
+        .cursor_cli
+        .as_ref()
+        .map(|cursor_cli| cursor_cli.binary_path.clone())
+        .filter(|path| path.contains('/'))
+    {
+        std::os::unix::fs::symlink(stub, tool_bin.join("agent")).unwrap();
+    }
     let host = ACursorToolHost {
         path: vec![tool_bin],
         home: sessions_base.join("home"),

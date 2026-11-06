@@ -11,6 +11,9 @@ use tddy_daemon_kernel::config::DaemonConfig;
 /// Write `.cursor/hooks.json` under `worktree_path` for a cursor-cli session.
 ///
 /// Returns the generated per-session hook token (also embedded in hook commands).
+// TODO(cli-dispatch-collapse): kept — Telegram's launcher still calls it
+// (`tddy-telegram-control/src/telegram_session_control/cli_spawns.rs`); `#agent-tools 18/19`
+// `telegram-spec-launch` deletes it (docs/dev/todo/2026-11-03-cursor-hand-built-launch-paths.md).
 pub fn install_cursor_hooks_in_worktree(
     config: &DaemonConfig,
     worktree_path: &Path,
@@ -105,6 +108,9 @@ pub use tddy_core::adapters::conversation_id::parse_created_chat_id;
 ///
 /// Only `create-chat` mints real chat ids, so a failure here is returned to the caller: starting the
 /// agent without one would produce a session no resume can reattach to.
+// TODO(cli-dispatch-collapse): kept — Telegram's launcher still calls it
+// (`tddy-telegram-control/src/telegram_session_control/cli_spawns.rs`); `#agent-tools 18/19`
+// `telegram-spec-launch` deletes it (docs/dev/todo/2026-11-03-cursor-hand-built-launch-paths.md).
 pub async fn mint_cursor_chat_id(
     binary_path: &str,
     worktree_path: &Path,

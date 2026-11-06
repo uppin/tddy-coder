@@ -23,9 +23,7 @@ use tddy_terminal_rpc::proto::terminal_session::{
     StreamReplayMode, StreamTerminalOutputRequest,
     TerminalSessionService as TerminalSessionServiceTrait,
 };
-use tddy_testing_commons::stub_scripts::{
-    a_stub_agent_script, read_last_appended_argv, read_recorded_env,
-};
+use tddy_testing_commons::stub_scripts::{a_stub_agent_script, read_last_appended_argv};
 use tddy_testing_commons::wait::{eventually, eventually_awaiting};
 
 use support::{this_os_user, until_attached, PrivateTmux, OBSERVE, VALID_TOKEN};
@@ -48,7 +46,6 @@ struct TmuxAgentDaemon {
     config: DaemonConfig,
     sessions_base: PathBuf,
     launches: PathBuf,
-    environment: PathBuf,
     tmux: PrivateTmux,
     _dirs: Vec<tempfile::TempDir>,
     _repo: tempfile::TempDir,
@@ -63,9 +60,7 @@ async fn a_daemon_over(manager: ClaudeCliSessionManager) -> TmuxAgentDaemon {
     let sessions_dir = tempfile::tempdir().unwrap();
     let stub_dir = tempfile::tempdir().unwrap();
     let launches = stub_dir.path().join("launches.log");
-    let environment = stub_dir.path().join("environment.txt");
     let stub = a_stub_agent_script(stub_dir.path(), "stub_claude.sh")
-        .recording_env_to(&environment, &["CLAUDE_CODE_NO_FLICKER", "TDDY_SOCKET"])
         .appending_argv_to(&launches)
         .then_reading_stdin()
         .build();
@@ -83,7 +78,6 @@ async fn a_daemon_over(manager: ClaudeCliSessionManager) -> TmuxAgentDaemon {
         config,
         sessions_base: sessions_dir.path().to_path_buf(),
         launches,
-        environment,
         tmux,
         _dirs: vec![sessions_dir, stub_dir, config_dir],
         _repo: repo,
@@ -127,7 +121,9 @@ fn a_session_host(
             Arc::new(tddy_daemon_kernel::operator_channel::NoOperatorChannel),
             manager,
         )
-        .with_coding_agents_if_none(tddy_session_lifecycle::test_util::builtin_coding_agents()),
+        .with_coding_agents_if_none(
+            tddy_session_lifecycle::test_util::builtin_coding_agents_for(&config),
+        ),
     );
     host.install_sandbox_rpc_bridge();
     host
@@ -242,13 +238,23 @@ impl TmuxAgentDaemon {
             .unwrap_or(0)
     }
 
-    /// The toolcall socket the agent was told to use (`TDDY_SOCKET`).
-    async fn toolcall_socket(&self) -> PathBuf {
-        let seen = eventually("the stub to record TDDY_SOCKET", OBSERVE, || {
-            read_recorded_env(&self.environment)
+    /// The toolcall socket the session's tool server was told to use (`TDDY_SOCKET`, in the `env` of
+    /// the `tddy-tools` registration the agent loads — the agent's own environment carries no
+    /// `TDDY_*`).
+    async fn toolcall_socket(&self, session_id: &str) -> PathBuf {
+        let registration = self.session_dir(session_id).join("claude-mcp-config.json");
+        let seen = eventually("the session to register its tool server", OBSERVE, || {
+            let text = std::fs::read_to_string(&registration)
+                .map_err(|e| format!("{} is not readable yet: {e}", registration.display()))?;
+            let json: serde_json::Value =
+                serde_json::from_str(&text).map_err(|e| format!("not JSON yet: {e}"))?;
+            json["mcpServers"]["tddy-tools"]["env"]["TDDY_SOCKET"]
+                .as_str()
+                .map(str::to_string)
+                .ok_or_else(|| "the registration carries no TDDY_SOCKET".to_string())
         })
         .await;
-        PathBuf::from(seen.get("TDDY_SOCKET").expect("TDDY_SOCKET is recorded"))
+        PathBuf::from(seen)
     }
 
     async fn is_running_in_tmux(&self) -> (String, u32) {
@@ -416,7 +422,7 @@ async fn a_client_exit_while_tmux_lives_keeps_the_sessions_toolcall_socket() {
     let (session_id, _) = daemon.is_running_in_tmux().await;
     let name = daemon.tmux_session_of(&session_id);
     until_attached(&daemon.tmux, &name, 1).await;
-    let socket = daemon.toolcall_socket().await;
+    let socket = daemon.toolcall_socket(&session_id).await;
     assert!(socket.exists(), "the socket exists while the session runs");
 
     // When the client exits (a detach) while tmux lives
@@ -440,7 +446,7 @@ async fn resuming_a_live_session_on_the_same_daemon_keeps_its_toolcall_socket_an
     let (session_id, _) = daemon.is_running_in_tmux().await;
     let name = daemon.tmux_session_of(&session_id);
     until_attached(&daemon.tmux, &name, 1).await;
-    let socket = daemon.toolcall_socket().await;
+    let socket = daemon.toolcall_socket(&session_id).await;
     assert!(daemon
         .tmux
         .tmux(&["detach-client", "-s", &name])
@@ -482,7 +488,7 @@ async fn a_detached_agents_end_runs_the_cleanup_when_its_watcher_notices() {
     let (session_id, _) = daemon.is_running_in_tmux().await;
     let name = daemon.tmux_session_of(&session_id);
     until_attached(&daemon.tmux, &name, 1).await;
-    let socket = daemon.toolcall_socket().await;
+    let socket = daemon.toolcall_socket(&session_id).await;
     assert!(daemon
         .tmux
         .tmux(&["detach-client", "-s", &name])
@@ -515,7 +521,7 @@ async fn an_agent_exit_runs_the_main_exit_cleanup_and_records_history() {
     let (session_id, _) = daemon.is_running_in_tmux().await;
     let name = daemon.tmux_session_of(&session_id);
     until_attached(&daemon.tmux, &name, 1).await;
-    let socket = daemon.toolcall_socket().await;
+    let socket = daemon.toolcall_socket(&session_id).await;
 
     // When the agent exits (its tmux session ends)
     assert!(daemon
@@ -537,4 +543,108 @@ async fn an_agent_exit_runs_the_main_exit_cleanup_and_records_history() {
         &session_id,
     );
     assert!(recording.exists(), "the main's history was recorded");
+}
+
+// ---------------------------------------------------------------------------
+// Re-attach reads the installed coding agents (`#agent-tools 17/19`)
+// ---------------------------------------------------------------------------
+
+impl TmuxAgentDaemon {
+    /// `<tddyhome>/tools` now holds a file that is no tool definition, so a registry loaded from it
+    /// is refused — what the directory looks like when an operator's override is mid-edit. The
+    /// coding agents a daemon was *given* are unaffected.
+    fn has_a_tools_dir_that_no_longer_loads(&self) {
+        let tools = self.sessions_base.join("tools");
+        std::fs::create_dir_all(&tools).unwrap();
+        std::fs::write(tools.join("half-written.yaml"), "schema_version: [1\n").unwrap();
+    }
+
+    /// `session_id`'s `.session.yaml` no longer records a session type — a record written before
+    /// session types were recorded, or one damaged since.
+    fn forgets_the_session_type_of(&self, session_id: &str) {
+        let mut meta = self.metadata_of(session_id);
+        meta.session_type = None;
+        tddy_core::write_session_metadata(&self.session_dir(session_id), &meta).unwrap();
+    }
+}
+
+/// A client's first stream of `session_id`'s main terminal on `host`, answered or refused.
+async fn first_stream_of_the_main_terminal(
+    host: &DaemonSessionHost,
+    session_id: &str,
+) -> Result<(), tddy_rpc::Status> {
+    host.terminal_session_service()
+        .stream_terminal_output(Request::direct(StreamTerminalOutputRequest {
+            session_token: VALID_TOKEN.to_string(),
+            session_id: session_id.to_string(),
+            terminal_id: MAIN_TERMINAL_ID.to_string(),
+            initial_cols: 0,
+            initial_rows: 0,
+            mode: StreamReplayMode::Tail as i32,
+            from_offset: 0,
+            control_token: String::new(),
+        }))
+        .await
+        .map(|_| ())
+}
+
+/// Whether `host` has a main terminal registered for `session_id`.
+async fn has_a_main_terminal(host: &DaemonSessionHost, session_id: &str) -> bool {
+    host.terminal_sessions()
+        .get_terminal(session_id, MAIN_TERMINAL_ID)
+        .await
+        .is_some()
+}
+
+#[tokio::test]
+#[serial_test::serial]
+async fn a_daemon_restart_reattaches_a_tmux_claude_cli_session_from_the_installed_coding_agents() {
+    // Given a tmux-run claude-cli session that outlived its daemon, and a restarted daemon given its
+    // coding agents while `<tddyhome>/tools` holds a file that no longer loads
+    let daemon = a_daemon_with_a_private_tmux().await;
+    let (session_id, agent_pid) = daemon.is_running_in_tmux().await;
+    let name = daemon.tmux_session_of(&session_id);
+    daemon.host.shut_down_children().await;
+    let fresh = daemon.restarted();
+    daemon.has_a_tools_dir_that_no_longer_loads();
+
+    // When a client first streams the session's main terminal from the fresh daemon
+    let streamed = first_stream_of_the_main_terminal(&fresh, &session_id).await;
+
+    // Then the main is re-attached from the installed agents — `<tddyhome>/tools` is not read —
+    // and the agent was not relaunched
+    assert_eq!(
+        (
+            streamed.map_err(|status| status.message),
+            has_a_main_terminal(&fresh, &session_id).await,
+            daemon.launch_count(),
+            daemon.metadata_of(&session_id).pid,
+        ),
+        (Ok(()), true, 1, Some(agent_pid))
+    );
+    until_attached(&daemon.tmux, &name, 1).await;
+}
+
+#[tokio::test]
+#[serial_test::serial]
+async fn a_recorded_session_without_a_session_type_is_not_reattached() {
+    // Given a tmux-run session that outlived its daemon, whose record no longer names its session
+    // type
+    let daemon = a_daemon_with_a_private_tmux().await;
+    let (session_id, _) = daemon.is_running_in_tmux().await;
+    daemon.host.shut_down_children().await;
+    daemon.forgets_the_session_type_of(&session_id);
+    let fresh = daemon.restarted();
+
+    // When a client first streams the session's main terminal from the fresh daemon
+    let _refused = first_stream_of_the_main_terminal(&fresh, &session_id).await;
+
+    // Then nothing is re-attached as a default agent, and nothing is relaunched
+    assert_eq!(
+        (
+            has_a_main_terminal(&fresh, &session_id).await,
+            daemon.launch_count(),
+        ),
+        (false, 1)
+    );
 }

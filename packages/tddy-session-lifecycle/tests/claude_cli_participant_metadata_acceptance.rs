@@ -31,6 +31,7 @@ const BRANCH: &str = "feature/attach-docs/attach-store";
 /// A starting claude-cli session that materializes a planned node of a pr-stack orchestrator.
 fn a_starting_child_of<'a>(stack_parent: &'a SpawnStackParent<'a>) -> StartingClaudeCliSession<'a> {
     StartingClaudeCliSession {
+        agent: "claude",
         session_id: SESSION,
         model: "claude-opus-4-8",
         recipe: "tdd",

@@ -150,6 +150,24 @@ pub fn builtin_yaml_as(builtin: &str, id: &str) -> String {
     })
 }
 
+/// The built-in `builtin.yaml` (`claude`, `cursor`) overriding itself from `<tddyhome>/tools`
+/// (`#agent-tools 17/19`): its id — so its session type — is still the built-in's, but its binary's
+/// command is the stub (`acme`), so a `claude-cli` or `cursor-cli` session runs the stub through
+/// whatever launch the daemon picks for the built-in. Everything else is the built-in's, byte for
+/// byte.
+pub fn builtin_yaml_run_as_the_stub(builtin: &str) -> String {
+    let file_name = format!("/{builtin}.yaml");
+    let (_, yaml) = tddy_coding_agent_specs::builtin_specs()
+        .into_iter()
+        .find(|(path, _)| path.ends_with(&file_name))
+        .unwrap_or_else(|| panic!("{builtin}.yaml is built in"));
+    let def: tddy_actions::tool::ToolDef =
+        serde_yaml::from_str(yaml).expect("the built-in is a tool file");
+    let command = format!("\n  command: {}\n", def.binary.command);
+    assert!(yaml.contains(&command), "{builtin}.yaml holds {command:?}");
+    yaml.replacen(&command, "\n  command: acme\n", 1)
+}
+
 /// [`builtin_yaml_as`] of `cursor.yaml` under `id`, its conversation minted by
 /// `cursor-create-chat` within `secs` — replacing any `conversation:` line the built-in declares.
 pub fn cursor_copy_minting_within(id: &str, secs: u64) -> String {
@@ -214,8 +232,13 @@ pub fn current_os_user() -> String {
 /// ([`REPORTED_ENV`]), then waits on stdin. Every external command is named by its absolute path,
 /// so the report does not depend on `PATH`.
 pub fn a_stub_agent_script(marker: &Path) -> String {
-    a_stub_agent_script_minting(marker, &StubCreateChat::Prints)
+    a_stub_agent_script_minting(marker, &StubCreateChat::Prints, false)
 }
+
+/// What the stub runs from its own shell, in a directory below its cwd, when built to submit
+/// ([`ARegistryDaemonBuilder::with_a_stub_that_submits_from_its_shell`]): the command every workflow
+/// prompt names, with a `plan` payload. It reports the command's stdout as `submit`.
+pub const STUB_SUBMIT: &str = r##"tddy-tools submit --goal plan --data '{"goal":"plan","prd":"# PRD\n\n## Summary\nFeature X","todo":"- [ ] Task 1"}'"##;
 
 /// What the stub does when it is run as `<binary> create-chat` — the `cursor-create-chat` mint
 /// (`#agent-tools 14/19`). It never touches the spawn marker: a mint is not the agent's spawn.
@@ -233,11 +256,23 @@ pub const MINTED_CHAT_ID: &str = "acme-chat-0001";
 
 /// [`a_stub_agent_script`] whose `create-chat` behaves as `create_chat`. Besides its argv, cwd and
 /// route environment it reports the names of every `TDDY_*` variable it was given
-/// (`tddy-env`) and whether `tddy-tools` is on its `PATH` (`tddy-tools`).
-pub fn a_stub_agent_script_minting(marker: &Path, create_chat: &StubCreateChat) -> String {
+/// (`tddy-env`) and whether `tddy-tools` is on its `PATH` (`tddy-tools`). With `submit`, it runs
+/// [`STUB_SUBMIT`] from its shell and reports the answer (`submit`) before `STUB-END`.
+pub fn a_stub_agent_script_minting(
+    marker: &Path,
+    create_chat: &StubCreateChat,
+    submit: bool,
+) -> String {
     let create_chat = match create_chat {
         StubCreateChat::Prints => format!("printf '%s\\n' '{MINTED_CHAT_ID}'; exit 0"),
         StubCreateChat::NeverReturns => "exec /bin/sleep 3600".to_string(),
+    };
+    let submit = if submit {
+        format!(
+            "/bin/mkdir -p src && printf 'STUB submit=%s\\n' \"$(cd src && {STUB_SUBMIT} 2>/dev/null | /usr/bin/tr '\\n' ' ')\"\n"
+        )
+    } else {
+        String::new()
     };
     format!(
         r#"#!/bin/sh
@@ -251,7 +286,7 @@ for name in {reported_env}; do
 done
 printf 'STUB tddy-env=%s\n' "$(/usr/bin/env | /usr/bin/sed -n 's/^\(TDDY_[A-Za-z0-9_]*\)=.*/\1/p' | /usr/bin/tr '\n' ' ')"
 if command -v tddy-tools >/dev/null 2>&1; then printf 'STUB tddy-tools=on-path\n'; else printf 'STUB tddy-tools=absent\n'; fi
-printf 'STUB-END\n'
+{submit}printf 'STUB-END\n'
 exec /bin/cat
 "#,
         marker = marker.display(),
@@ -313,6 +348,15 @@ impl AStubReport {
             .split_whitespace()
             .map(str::to_string)
             .collect()
+    }
+
+    /// The answer [`STUB_SUBMIT`] printed, parsed as the JSON `tddy-tools` answers with; `Null`
+    /// when it printed none.
+    pub fn submit_answer(&self) -> serde_json::Value {
+        let printed = self.lines.get("submit").unwrap_or_else(|| {
+            panic!("the stub reported its submit; it reported {:?}", self.lines)
+        });
+        serde_json::from_str(printed.trim()).unwrap_or(serde_json::Value::Null)
     }
 
     /// Whether `tddy-tools` was on the stub's `PATH`.
@@ -402,6 +446,7 @@ pub struct ARegistryDaemonBuilder {
     profiles: Vec<(String, String)>,
     meta_account: bool,
     create_chat: StubCreateChat,
+    submits: bool,
 }
 
 pub fn a_registry_daemon() -> ARegistryDaemonBuilder {
@@ -430,6 +475,12 @@ impl ARegistryDaemonBuilder {
     /// The stub's `create-chat` never returns (`#agent-tools 14/19`).
     pub fn with_a_create_chat_that_never_returns(mut self) -> Self {
         self.create_chat = StubCreateChat::NeverReturns;
+        self
+    }
+
+    /// The stub runs [`STUB_SUBMIT`] from its own shell once started (`#agent-tools 17/19`).
+    pub fn with_a_stub_that_submits_from_its_shell(mut self) -> Self {
+        self.submits = true;
         self
     }
 
@@ -464,7 +515,7 @@ fn a_daemon_built_from(spec: ARegistryDaemonBuilder) -> ARegistryDaemon {
     let stub = stub_bin.join("acme");
     std::fs::write(
         &stub,
-        a_stub_agent_script_minting(&spawn_marker, &spec.create_chat),
+        a_stub_agent_script_minting(&spawn_marker, &spec.create_chat, spec.submits),
     )
     .unwrap();
     std::fs::set_permissions(&stub, std::fs::Permissions::from_mode(0o755)).unwrap();

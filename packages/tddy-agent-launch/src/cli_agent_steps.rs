@@ -33,7 +33,10 @@ use tddy_rpc::Status;
 use tddy_cli_sessions::session_toolcall::ManagedWorkflow;
 use tddy_daemon_kernel::config::DaemonConfig;
 
+use tddy_core::session_pointer::SessionPointer;
+
 use crate::claude_cli_spawn_steps::{claude_cli_hooks, ClaudeCliHooks};
+use crate::cli_session_pointer::session_pointer_of;
 use crate::harness_from_spec::HarnessLaunch;
 use crate::launch_ports::LaunchSessions;
 use crate::managed_launch;
@@ -216,9 +219,9 @@ pub(crate) async fn start_conversation(
     }
 }
 
-/// The conversation a resume of `meta` binds: the session id, the recorded minted id (minted now
-/// and recorded when none was, as `resume::chat_to_resume` adopts one today), the worktree, or the
-/// recorded resume token.
+/// The conversation a resume of `meta` binds: the session id, the recorded minted id, the worktree,
+/// or the recorded resume token. A minted conversation the session never recorded is refused here;
+/// [`resumed_or_adopted_conversation`] adopts one instead.
 pub(crate) fn resumed_conversation(
     spec: &CodingAgentSpec,
     meta: &SessionMetadata,
@@ -227,9 +230,6 @@ pub(crate) fn resumed_conversation(
         ConversationSlot::DaemonSessionId => LaunchConversation::SessionId(meta.session_id.clone()),
         ConversationSlot::Minted { adapter, .. } => match meta.cursor_chat_id.as_deref() {
             Some(chat) if !chat.trim().is_empty() => LaunchConversation::Minted(chat.to_string()),
-            // TODO(cli-spec-features): a session recorded without its chat (started before the chat
-            // was minted at start) is minted again by `resume::chat_to_resume` on the bespoke path;
-            // the generic resume refuses rather than start a conversation the session never had.
             _ => {
                 return Err(Status::failed_precondition(format!(
                     "{} recorded no conversation minted by {adapter}: it cannot be resumed",
@@ -242,6 +242,32 @@ pub(crate) fn resumed_conversation(
             LaunchConversation::ResumeToken(meta.harness_resume_token.clone())
         }
     })
+}
+
+/// [`resumed_conversation`], but a session recorded without the conversation its spec mints — one
+/// started before the conversation was minted at start — adopts a fresh one now, which the resume
+/// records: every later resume then continues it instead of starting over again.
+pub(crate) async fn resumed_or_adopted_conversation(
+    start: ConversationStart<'_>,
+    meta: &SessionMetadata,
+) -> Result<LaunchConversation, Status> {
+    let recorded_nothing = match start.spec.conversation() {
+        ConversationSlot::Minted { .. } => meta
+            .cursor_chat_id
+            .as_deref()
+            .is_none_or(|chat| chat.trim().is_empty()),
+        _ => false,
+    };
+    if !recorded_nothing {
+        return resumed_conversation(start.spec, meta);
+    }
+    let session_id = start.session_id.to_string();
+    let adopted = start_conversation(start).await?;
+    log::info!(
+        target: "tddy_daemon::cursor_cli_spawn",
+        "resume of {session_id}: no conversation on record; adopted a minted one for this and every later resume"
+    );
+    Ok(adopted)
 }
 
 /// The refusal of a start whose conversation `adapter` did not mint an id for `agent_id`:
@@ -257,25 +283,6 @@ pub(crate) fn conversation_mint_refused(
         ConversationMintError::TimedOut { .. } => Status::deadline_exceeded(message),
         ConversationMintError::Failed(_) => Status::failed_precondition(message),
     }
-}
-
-/// A managed codebase in a jail is refused: the jailed generic launch wires no workflow to drive it,
-/// and starting without one would run an agent the operator believes is managed.
-// TODO(cli-spec-features): the bespoke jailed claude start carries a managed workflow
-// (`claude_jail::ClaudeJail.managed`); the generic jailed launch does not yet
-// (docs/dev/todo/2026-11-05-generic-jail-managed-workflow.md).
-pub(crate) fn refuse_a_managed_codebase_in_a_jail(
-    spec: &CodingAgentSpec,
-    req: &tddy_service::proto::session::StartSessionRequest,
-) -> Result<(), Status> {
-    if req.managed_codebase {
-        return Err(Status::failed_precondition(format!(
-            "a managed codebase in a jail is not launched from the spec yet: {} runs managed on the \
-             host only",
-            spec.id
-        )));
-    }
-    Ok(())
 }
 
 /// A starting session's standing role, refused for an agent that cannot hold it: a project-home
@@ -337,13 +344,18 @@ pub(crate) struct SessionWiring {
     pub extra_args: Vec<String>,
     /// The tool server, the pre-approved tools and the withdrawn ones.
     pub toolset: AgentToolset,
+    /// What a `tddy-tools` the agent runs from its shell finds its session by — the managed
+    /// workflow's socket and the operator-notify session — written into the worktree
+    /// ([`crate::cli_session_pointer`]); `None` when there is neither.
+    pub session_pointer: Option<SessionPointer>,
 }
 
 /// The wiring the spec's capabilities ask of a generic launch: hooks and operator notify for the
 /// agent that declares them, the managed workflow for a session driven by a recipe, and a main's
 /// tool restriction. A `TDDY_*` variable these steps produce belongs to the agent's tool server
-/// (`tddy-tools --mcp`'s registration) and is carried by its `env` block; it never reaches the agent
-/// process, whatever the spec declares.
+/// (`tddy-tools --mcp`'s registration) and is carried by its `env` block, and the session a
+/// shell-run `tddy-tools` reaches (the workflow socket, the operator-notify session) is the session
+/// pointer's; neither reaches the agent process, whatever the spec declares.
 pub(crate) fn wire_session_agent(inputs: SessionWiringInputs<'_>) -> Result<SessionWiring, Status> {
     let SessionWiringInputs {
         spec,
@@ -361,6 +373,7 @@ pub(crate) fn wire_session_agent(inputs: SessionWiringInputs<'_>) -> Result<Sess
         .then(|| claude_cli_hooks(config, tddy_data_dir));
     let mut process_env: Vec<(String, String)> = Vec::new();
     let mut tool_server_env: Vec<(String, String)> = Vec::new();
+    let mut notify_env: Vec<(String, String)> = Vec::new();
     let mut system_prompt_file: Option<PathBuf> = None;
     let mut workflow = None;
     if let Some(ManagedWiring {
@@ -402,15 +415,20 @@ pub(crate) fn wire_session_agent(inputs: SessionWiringInputs<'_>) -> Result<Sess
                 session_dir,
                 managed_prompt_file: system_prompt_file.as_deref(),
             },
-            &mut process_env,
+            &mut notify_env,
         )?;
     }
     let role_wiring = RoleWiring::of(role.main)?;
     route_tool_server_env(role_wiring.env, &mut process_env, &mut tool_server_env);
     let (extra_args, mut toolset) = spec_role_launch(role_wiring.main.as_ref());
-    if let Some(registration) = toolset.mcp.as_mut() {
-        registration.server.env.extend(tool_server_env);
-    }
+    let session_pointer = session_pointer_of(&tool_server_env, notify_env, worktree);
+    carry_on_the_tool_server(
+        spec,
+        &mut toolset,
+        tool_server_env,
+        &claude_cli_hooks(config, tddy_data_dir).tddy_tools_path,
+        session_dir,
+    );
     let hook_socket = hooks
         .as_ref()
         .and_then(|hooks| socket_for_hooks(spec, hooks, tddy_data_dir));
@@ -422,6 +440,7 @@ pub(crate) fn wire_session_agent(inputs: SessionWiringInputs<'_>) -> Result<Sess
         env: process_env,
         extra_args,
         toolset,
+        session_pointer,
     })
 }
 
@@ -432,10 +451,12 @@ pub(crate) fn wire_session_agent(inputs: SessionWiringInputs<'_>) -> Result<Sess
 pub(crate) struct ResumedWiring {
     pub workflow: Option<ManagedWorkflow>,
     pub system_prompt_file: Option<PathBuf>,
-    /// Never a `TDDY_*` variable but the notify pairs a spec declaring `operator_notify` asks for.
+    /// Never a `TDDY_*` variable.
     pub env: Vec<(String, String)>,
     pub extra_args: Vec<String>,
     pub toolset: AgentToolset,
+    /// The session pointer written again into the worktree, as at the start.
+    pub session_pointer: Option<SessionPointer>,
 }
 
 impl LaunchSessions {
@@ -454,6 +475,7 @@ impl LaunchSessions {
         let session_id = meta.session_id.as_str();
         let mut process_env = Vec::new();
         let mut tool_server_env = Vec::new();
+        let mut notify_env = Vec::new();
         let mut system_prompt_file = None;
         let mut workflow = None;
         if spec.has(Capability::ManagedWorkflow) {
@@ -496,38 +518,58 @@ impl LaunchSessions {
                 meta,
                 system_prompt_file.as_deref(),
             )?;
-            process_env.extend(notify.env);
+            notify_env.extend(notify.env);
             system_prompt_file = notify.append_system_prompt_file.or(system_prompt_file);
         }
         let role = self.resumed_role(meta, session_id, session_dir, session_token)?;
         route_tool_server_env(role.env, &mut process_env, &mut tool_server_env);
         let (extra_args, mut toolset) = spec_role_launch(role.main.as_ref());
-        if let Some(registration) = toolset.mcp.as_mut() {
-            registration.server.env.extend(tool_server_env);
-        }
+        let session_pointer = session_pointer_of(&tool_server_env, notify_env, worktree);
+        carry_on_the_tool_server(
+            spec,
+            &mut toolset,
+            tool_server_env,
+            &claude_cli_hooks(&self.config, &self.tddy_data_dir).tddy_tools_path,
+            session_dir,
+        );
         Ok(ResumedWiring {
             workflow,
             system_prompt_file,
             env: process_env,
             extra_args,
             toolset,
+            session_pointer,
         })
     }
 }
 
+/// Whether `spec`'s hooks adapter reports over the daemon's agent-tool socket: it refuses params
+/// that carry none (`SlotError::NoDaemonSocket`), where the hooks of an adapter that reports over
+/// HTTP render with none.
+pub(crate) fn hooks_report_over_the_agent_tool_socket(
+    spec: &CodingAgentSpec,
+    hooks: &ClaudeCliHooks,
+) -> bool {
+    let Ok(adapter) = tddy_coding_agent_specs::slots::hooks::adapter(&spec.agent.hooks.adapter)
+    else {
+        return false;
+    };
+    let probe = HookCommandParams {
+        daemon_socket: None,
+        ..hooks.params("probe", "probe")
+    };
+    adapter.try_render(Path::new("/"), &probe).is_err()
+}
+
 /// The daemon's agent-tool socket, for a spec whose hooks adapter reports over it and `hooks` carry
-/// none: that adapter refuses params without one (`SlotError::NoDaemonSocket`), so it is given the
-/// path the bespoke Cursor launch always passed.
+/// none: that adapter refuses params without one, so it is given the path the bespoke Cursor launch
+/// always passed.
 fn socket_for_hooks(
     spec: &CodingAgentSpec,
     hooks: &ClaudeCliHooks,
     tddy_data_dir: &Path,
 ) -> Option<String> {
-    let adapter = tddy_coding_agent_specs::slots::hooks::adapter(&spec.agent.hooks.adapter).ok()?;
-    let needs_a_socket = adapter
-        .try_render(Path::new("/"), &hooks.params("probe", "probe"))
-        .is_err();
-    needs_a_socket.then(|| {
+    hooks_report_over_the_agent_tool_socket(spec, hooks).then(|| {
         tddy_daemon_kernel::agent_tool_socket_path(tddy_data_dir)
             .to_string_lossy()
             .into_owned()
@@ -552,6 +594,41 @@ impl SessionWiring {
             ..params
         })
     }
+}
+
+/// Gives the `TDDY_*` pairs a session's wiring produced (a managed workflow's `TDDY_SOCKET`) to the
+/// agent's tool server: the pairs join the registration of a role's toolset, and a session with none
+/// is registered `tddy-tools --mcp` with them — in a file of the session's directory, for a spec whose
+/// `mcp` slot names a file. A spec whose slot places its registration in the agent's home
+/// (`$HOME/.cursor/mcp.json`) or takes none registers nothing: that file is the operator's, and the
+/// pairs reach no one (docs/dev/todo/2026-11-05-cli-spec-features-leftovers.md).
+fn carry_on_the_tool_server(
+    spec: &CodingAgentSpec,
+    toolset: &mut AgentToolset,
+    tool_server_env: Vec<(String, String)>,
+    tddy_tools_path: &str,
+    session_dir: &Path,
+) {
+    if let Some(registration) = toolset.mcp.as_mut() {
+        registration.server.env.extend(tool_server_env);
+        return;
+    }
+    let names_a_file = matches!(
+        spec.agent.mcp,
+        tddy_coding_agent_specs::McpSlot::File { .. }
+    );
+    if tool_server_env.is_empty() || !names_a_file {
+        return;
+    }
+    toolset.mcp = Some(McpRegistration {
+        server: tddy_coding_agent_specs::slots::McpServerCommand {
+            name: "tddy-tools".to_string(),
+            command: PathBuf::from(tddy_tools_path),
+            args: vec!["--mcp".to_string()],
+            env: tool_server_env.into_iter().collect(),
+        },
+        dir: session_dir.to_path_buf(),
+    });
 }
 
 /// `pairs` split: a `TDDY_*` pair is the tool server's, the rest the agent process's.

@@ -93,7 +93,7 @@ fn a_pr_stack_orchestrator() -> Orchestrator {
         Arc::new(tddy_daemon_kernel::operator_channel::NoOperatorChannel),
         Arc::new(CliSessionManager::new()),
     )
-    .with_coding_agents_if_none(crate::test_util::builtin_coding_agents());
+    .with_coding_agents_if_none(crate::test_util::builtin_coding_agents_for(&config));
 
     let orchestrator = Orchestrator {
         service,
@@ -392,9 +392,10 @@ fn write_argv_recording_stub(dir: &Path, record_to: &Path, environment_to: &Path
     std::fs::write(
         &script,
         format!(
-            // The environment lands by rename, so a reader never sees the file half-written.
-            "#!/bin/sh\nenv > '{env}.partial' && mv '{env}.partial' '{env}'\nprintf '%s\\n' \"$@\" > '{}'\n",
-            record_to.display(),
+            // Both records land by rename, so a reader never sees a file half-written: a reader
+            // polling for the command line could otherwise read it truncated, mid-`printf`.
+            "#!/bin/sh\nenv > '{env}.partial' && mv '{env}.partial' '{env}'\nprintf '%s\\n' \"$@\" > '{argv}.partial' && mv '{argv}.partial' '{argv}'\n",
+            argv = record_to.display(),
             env = environment_to.display()
         ),
     )

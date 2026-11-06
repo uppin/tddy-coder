@@ -37,13 +37,15 @@ unchanged (no `tddy-tools` change, no proto change — `StartSessionRequest.reci
 - **Sandboxed** sessions never mount the repo; the agent's `Shell` tool relays back to the daemon and
   runs `sh -c "<command>"` on the host in the worktree, so the `tddy-tools transition` child inherits
   the daemon-provided per-session env.
-- **Non-sandboxed** sessions spawn `claude` in a host PTY; any `tddy-tools` child inherits the PTY env.
+- **Non-sandboxed** sessions spawn the agent in a host PTY (or tmux pane) with no `TDDY_*` variable;
+  a `tddy-tools` it runs from its shell finds the socket in the `.tddy/session.json` pointer the launch
+  writes into the worktree, and its `tddy-tools --mcp` server gets it in its registration's env.
 
 The single blocker was that the transition-handler registry (`toolcall/transition.rs`) is
 process-global — unsafe for a daemon serving concurrent sessions. It is made **per-instance** on
 `ToolcallRpcService`, and the daemon hosts **one toolcall listener per session** whose handler is that
-session's `WorkflowController`. The listener socket path is injected as `TDDY_SOCKET` into the
-per-session env (alongside a `PATH` that resolves `tddy-tools`).
+session's `WorkflowController`. The listener socket path is the `TDDY_SOCKET` of the relay's
+per-session env (sandboxed), and of the tool-server registration and session pointer (host).
 
 ## Architecture
 
@@ -55,15 +57,16 @@ Web CreateSessionPane (claude-cli | cursor-cli)
                                            specialized_agents = ["fastcontext"]
         │
         ▼
-  daemon start_session → start_(sandboxed_)claude_cli_session | start_sandboxed_cursor_cli_session (managed_recipe)
+  daemon start_session → start_cli_harness_session | start_sandboxed_cli_harness_session (managed_recipe)
         │  seed changeset.yaml state = recipe.start_goal()
         │  set_up_managed_workflow: WorkflowController + per-session toolcall listener
         │  launch claude with --append-system-prompt-file <orchestration prompt>
         │    OR cursor with .cursor/rules/tddy-managed-workflow.mdc (no --append-system-prompt-file)
-        │  inject per-session env: TDDY_SOCKET=<listener>, PATH=<tddy-tools dir>:…
+        │  TDDY_SOCKET=<listener> → the tddy-tools MCP server env and <worktree>/.tddy/session.json
+        │    (never the agent process env)
         ▼
   Agent runs → `tddy-tools transition --to <goal>` (on host)
-        │  TDDY_SOCKET relay → per-session ToolcallRpcService → WorkflowController
+        │  socket from the session pointer → per-session ToolcallRpcService → WorkflowController
         ▼
   WorkflowController validates edge, persists state.current → changeset.yaml
 ```
@@ -99,8 +102,9 @@ unstructured free-form session.
    whose content equals `recipe.orchestration_system_prompt(start_goal)`.
    A managed **cursor-cli** session writes the same orchestration text to
    `<worktree>/.cursor/rules/tddy-managed-workflow.mdc` (Cursor has no `--append-system-prompt-file`).
-9. A managed CLI session launches with a per-session `TDDY_SOCKET` (the session's
-   toolcall listener) and a `PATH` that resolves `tddy-tools` in its environment.
+9. A managed CLI session's per-session `TDDY_SOCKET` (the session's toolcall listener) reaches its
+   `tddy-tools` — through the session pointer and the tool-server registration on the host, through
+   the Shell relay's env in a jail — never the agent process's environment.
 10. An **unmanaged** CLI session (`managed_codebase = false`) launches with no orchestration
     prompt and no workflow wiring (behavior unchanged from today).
 11. A host-side `transition` for a managed session validates against the recipe graph and persists the
@@ -114,9 +118,10 @@ unstructured free-form session.
     session through the generic spec launch: the recipe's prompt goes through the spec's
     `append_system_prompt` flag and the workflow is attached once the agent runs. The managed
     `TDDY_*` pairs (`TDDY_SOCKET`, `TDDY_SESSION_DIR`, `TDDY_REPO_DIR`) are carried by the agent's
-    `tddy-tools --mcp` registration, never the agent process. A managed start of an agent without
-    `managed_workflow` is rejected with `INVALID_ARGUMENT`, naming the agent; a managed start of a
-    generic agent in a jail is rejected with `FAILED_PRECONDITION`.
+    `tddy-tools --mcp` registration and the worktree's `.tddy/session.json` pointer, never the agent
+    process. A managed start of an agent without `managed_workflow` is rejected with
+    `INVALID_ARGUMENT`, naming the agent. A jailed managed start carries its workflow through
+    `managed_jail_env` (the Shell relay's session env) and writes no pointer.
 
 ### Concurrency
 13. The transition handler is per-session (per-instance on `ToolcallRpcService`), so concurrent managed

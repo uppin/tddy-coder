@@ -27,7 +27,6 @@ use pretty_assertions::assert_eq;
 use support::PrivateTmux;
 use tddy_rpc::Code;
 use tddy_service::proto::session::StartSessionRequest;
-use tddy_service::session_activity::notify_env;
 
 /// The id every copy is dropped in under.
 const COPY_ID: &str = "acme";
@@ -279,17 +278,6 @@ async fn a_copy_of_claude_yaml_under_another_id_on_an_ssh_host_writes_its_slot_f
     );
 }
 
-/// The `TDDY_*` variables the claude spec's `operator_notify` puts on the agent process, for
-/// `tddy-tools notify` (`session_activity::notify_env`). Every other `TDDY_*` name is one the agent
-/// must not see.
-const NOTIFY_VARIABLES: [&str; 5] = [
-    notify_env::SESSION_ID,
-    notify_env::OS_USER,
-    notify_env::HOOK_TOKEN,
-    notify_env::DAEMON_URL,
-    notify_env::DAEMON_SOCKET,
-];
-
 #[tokio::test]
 #[serial_test::serial]
 async fn a_copy_of_claude_yaml_under_another_id_on_an_ssh_host_runs_without_the_daemons_tddy_variables(
@@ -309,14 +297,45 @@ async fn a_copy_of_claude_yaml_under_another_id_on_an_ssh_host_runs_without_the_
         .expect("an acme-cli start on an ssh target succeeds");
     let started = daemon.stub_report(&session_id).await;
 
-    // Then — of the TDDY_ variables, only the spec-declared notify ones reach the agent
+    // Then — no TDDY_ variable reaches the agent, the operator-notify ones included
+    assert_eq!(started.tddy_variables(), Vec::<String>::new());
+}
+
+#[tokio::test]
+#[serial_test::serial]
+async fn a_managed_claude_copys_shell_run_tddy_tools_submit_reaches_its_session_with_no_tddy_variable_in_the_agent(
+) {
+    // Given — claude.yaml as acme, whose stub runs `tddy-tools submit` from its own shell
+    let daemon = a_registry_daemon()
+        .with_tool("acme.yaml", &builtin_yaml_as("claude", COPY_ID))
+        .with_a_stub_that_submits_from_its_shell()
+        .build();
+
+    // When — a managed `tdd` start on the host
+    let (session_id, _host) = daemon
+        .start(on_a_named_branch(
+            daemon.a_managed_start(COPY_SESSION_TYPE, "tdd"),
+        ))
+        .await
+        .expect("a managed acme-cli start succeeds");
+    let started = daemon.stub_report(&session_id).await;
+
+    // Then — the agent saw no TDDY_ variable; its submission was answered by the session (an
+    // answer carrying its goal), never "no session to report to"; and the pointer it was answered
+    // through also carries the session `tddy-tools notify` reports for
+    let answer = started.submit_answer();
+    let pointer =
+        tddy_core::session_pointer::find_session_pointer(&daemon.worktree_of(&session_id))
+            .expect("the pointer parses")
+            .map(|(_, pointer)| pointer.notify.get("TDDY_SESSION_ID").cloned());
     assert_eq!(
-        started
-            .tddy_variables()
-            .into_iter()
-            .filter(|name| !NOTIFY_VARIABLES.contains(&name.as_str()))
-            .collect::<Vec<_>>(),
-        Vec::<String>::new()
+        (started.tddy_variables(), answer["goal"].clone(), pointer),
+        (
+            Vec::<String>::new(),
+            serde_json::json!("plan"),
+            Some(Some(session_id.clone()))
+        ),
+        "the stub's submit answered {answer}"
     );
 }
 
@@ -461,23 +480,30 @@ mod jailed {
             .expect("a jailed acme-cli start succeeds");
         let started = daemon.stub_report(&session_id).await;
 
-        // Then — the claude spec's argv inside the jail (the binary is the jail's own path), and
-        // the closure's tddy-tools on the jail's PATH
+        // Then — the claude spec's argv inside the jail (the binary is the jail's own path), followed
+        // by the slots a jailed agent is given: its tool lists, its permission prompt and the
+        // registration of `tddy-tools`, its only way to the code; and the closure's tddy-tools on
+        // the jail's PATH
         let meta = daemon.metadata_of(&session_id);
+        let spec_argv = claude_start_argv("", &session_id)
+            .into_iter()
+            .skip(1)
+            .collect::<Vec<_>>();
+        let argv = started.argv().into_iter().skip(1).collect::<Vec<_>>();
+        let slot_flags: Vec<&str> = argv[spec_argv.len().min(argv.len())..]
+            .iter()
+            .map(String::as_str)
+            .filter(|arg| arg.starts_with("--"))
+            .collect();
         assert_eq!(
             (
-                started.argv().into_iter().skip(1).collect::<Vec<_>>(),
+                argv[..spec_argv.len()].to_vec(),
+                slot_flags.contains(&"--mcp-config"),
+                slot_flags.contains(&"--permission-prompt-tool"),
                 started.tddy_tools_on_path(),
                 meta.sandbox,
             ),
-            (
-                claude_start_argv("", &session_id)
-                    .into_iter()
-                    .skip(1)
-                    .collect::<Vec<_>>(),
-                true,
-                Some(true),
-            )
+            (spec_argv, true, true, true, Some(true))
         );
     }
 }

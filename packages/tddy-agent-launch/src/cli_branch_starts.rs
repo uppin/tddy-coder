@@ -1,5 +1,7 @@
 use crate::stack_parent;
 
+use crate::harness_from_spec::child_session_type;
+
 use uuid::Uuid;
 
 use tddy_session_split::attached_initial_prompt::attached_initial_prompt;
@@ -12,21 +14,17 @@ use tddy_service::proto::session::StartSessionResponse;
 
 use tddy_rpc::Response;
 
-use std::sync::Arc;
+use std::path::PathBuf;
 
 use crate::svc_start_session_core::CliStart;
 
 use crate::harness_from_spec::{resolve_session_agent, CliSessionAgent, CliSessionType};
 use crate::launch_ports::LaunchSessions;
 use crate::placement::managed_recipe_for;
-use crate::session_provider_route::{
-    sandboxed_start_route, session_route_sources_with_default, start_route, RouteAgent,
-};
+use crate::session_provider_route::{session_route_sources_with_default, start_route, RouteAgent};
 use crate::start_request_checks::{
     refuse_a_cli_start_without_a_model, refuse_an_unsupported_cli_session_start,
 };
-use tddy_core::output::SESSIONS_SUBDIR;
-use tddy_core::provider_route::HarnessRoute;
 use tddy_service::proto::session::StartSessionRequest;
 use tddy_session_split::split_start::resolve_caller_chosen_session_id;
 
@@ -68,115 +66,6 @@ impl LaunchSessions {
         Ok(())
     }
 
-    pub(super) async fn start_sandboxed_claude_cli_from_request(
-        &self,
-        req: &StartSessionRequest,
-        os_user: &str,
-        start: CliStart,
-        stack_parent_for_claude_cli: Option<&str>,
-        managed_recipe: Option<Arc<dyn tddy_core::workflow::recipe::WorkflowRecipe + 'static>>,
-    ) -> Result<Response<StartSessionResponse>, Status> {
-        let route = self.sandboxed_claude_route(req, &start)?;
-        self.start_sandboxed_claude_cli_session(
-            os_user,
-            &start.session_id,
-            &req.session_token,
-            start.sessions_base,
-            req.model.trim(),
-            req.project_id.trim(),
-            req.repo_path.trim(),
-            req.branch_worktree_intent.trim(),
-            req.new_branch_name.trim(),
-            req.selected_integration_base_ref.trim(),
-            req.selected_branch_to_work_on.trim(),
-            &start.initial_prompt,
-            &req.claude_args,
-            req.permission_mode.trim(),
-            req.dangerously_skip_permissions,
-            stack_parent_for_claude_cli,
-            req.stack_parent_daemon_instance_id.trim(),
-            req.stack_node_id.trim(),
-            req.managed_codebase,
-            &req.specialized_agents,
-            &req.clone_placed_agents,
-            managed_recipe,
-            req.semantic_index,
-            req.create_remote_branch,
-            route,
-            req.session_role.trim(),
-        )
-        .await
-    }
-
-    /// The provider route a sandboxed claude-cli start runs on: the account the request or the
-    /// person's default chooses, and `None` for the vendor. The person's default counts, so a
-    /// locked vault refuses rather than starting on the vendor. Resolved before the session's
-    /// directory is created, so a refused start leaves nothing on disk.
-    fn sandboxed_claude_route(
-        &self,
-        req: &StartSessionRequest,
-        start: &CliStart,
-    ) -> Result<Option<HarnessRoute>, Status> {
-        let access = self.host.session_account_access(&req.session_token);
-        let sources = session_route_sources_with_default(req, "claude-cli", &access)?;
-        let session_dir = start
-            .sessions_base
-            .join(SESSIONS_SUBDIR)
-            .join(&start.session_id);
-        sandboxed_start_route(
-            &access,
-            RouteAgent::claude_on(self.coding_agents.as_deref()),
-            &sources,
-            req.model.trim(),
-            &session_dir,
-        )
-    }
-
-    pub(super) async fn start_claude_cli_from_request(
-        &self,
-        req: &StartSessionRequest,
-        os_user: &str,
-        start: CliStart,
-        stack_parent_for_claude_cli: Option<String>,
-        managed_recipe: Option<Arc<dyn tddy_core::workflow::recipe::WorkflowRecipe + 'static>>,
-        progress: &AttachmentProgressSink,
-    ) -> Result<Response<StartSessionResponse>, Status> {
-        let route_sources = session_route_sources_with_default(
-            req,
-            "claude-cli",
-            &self.host.session_account_access(&req.session_token),
-        )?;
-        self.start_claude_cli_session(
-            os_user,
-            &start.session_id,
-            start.sessions_base,
-            req.model.trim(),
-            req.project_id.trim(),
-            req.branch_worktree_intent.trim(),
-            req.new_branch_name.trim(),
-            req.selected_integration_base_ref.trim(),
-            req.selected_branch_to_work_on.trim(),
-            &start.initial_prompt,
-            req.permission_mode.trim(),
-            req.dangerously_skip_permissions,
-            stack_parent_for_claude_cli.as_deref(),
-            req.stack_parent_daemon_instance_id.trim(),
-            req.stack_node_id.trim(),
-            &req.session_token,
-            managed_recipe,
-            req.semantic_index,
-            req.create_remote_branch,
-            req.ssh_config_host.trim(),
-            req.managed_codebase,
-            req.session_role.trim(),
-            req.repo_path.trim(),
-            req.run_in_tmux,
-            &route_sources,
-            progress,
-        )
-        .await
-    }
-
     /// Where a new CLI-agent session lives, the id it is given, and its first prompt.
     pub(super) async fn cli_start_prelude(
         &self,
@@ -209,90 +98,6 @@ impl LaunchSessions {
             initial_prompt,
         })
     }
-
-    pub(super) async fn start_sandboxed_cursor_cli_from_request(
-        &self,
-        req: &StartSessionRequest,
-        os_user: &str,
-        start: CliStart,
-        managed_recipe: Option<Arc<dyn tddy_core::workflow::recipe::WorkflowRecipe + 'static>>,
-    ) -> Result<Response<StartSessionResponse>, Status> {
-        self.start_sandboxed_cursor_cli_session(
-            os_user,
-            &start.session_id,
-            &req.session_token,
-            start.sessions_base,
-            req.model.trim(),
-            req.project_id.trim(),
-            req.branch_worktree_intent.trim(),
-            req.new_branch_name.trim(),
-            req.selected_integration_base_ref.trim(),
-            req.selected_branch_to_work_on.trim(),
-            Some(req.stack_parent.trim()).filter(|s| !s.is_empty()),
-            req.stack_parent_daemon_instance_id.trim(),
-            req.stack_node_id.trim(),
-            &start.initial_prompt,
-            req.managed_codebase,
-            &req.specialized_agents,
-            &req.clone_placed_agents,
-            managed_recipe,
-            req.semantic_index,
-            req.create_remote_branch,
-        )
-        .await
-    }
-
-    #[allow(clippy::too_many_arguments)]
-    pub(super) async fn spawn_cursor_cli_from_request(
-        &self,
-        req: &StartSessionRequest,
-        os_user: &str,
-        start: CliStart,
-        managed_recipe: Option<Arc<dyn tddy_core::workflow::recipe::WorkflowRecipe + 'static>>,
-        mut started_agents: Vec<tddy_core::SessionAgentRecord>,
-        clones: tddy_session_agents::agent_host_callbacks::DaemonSeedCloneClaimant,
-        progress: &AttachmentProgressSink,
-    ) -> Result<Response<StartSessionResponse>, Status> {
-        crate::cursor_cli_spawn::spawn_cursor_cli_session_reporting(
-            &self.config,
-            &self.tddy_data_dir,
-            &self.claude_cli_manager,
-            os_user,
-            &start.session_id,
-            &req.session_token,
-            start.sessions_base,
-            req.model.trim(),
-            req.project_id.trim(),
-            req.branch_worktree_intent.trim(),
-            req.new_branch_name.trim(),
-            req.selected_integration_base_ref.trim(),
-            req.selected_branch_to_work_on.trim(),
-            req.repo_path.trim(),
-            match Some(req.stack_parent.trim()).filter(|s| !s.is_empty()) {
-                Some(session_id) => stack_parent::SpawnStackParent::OwnedBy {
-                    session_id,
-                    daemon_instance_id: req.stack_parent_daemon_instance_id.trim(),
-                    stack_node_id: req.stack_node_id.trim(),
-                    session_token: &req.session_token,
-                    host: self,
-                },
-                None => stack_parent::SpawnStackParent::NoParent,
-            },
-            &start.initial_prompt,
-            req.managed_codebase,
-            &mut started_agents,
-            managed_recipe,
-            req.semantic_index,
-            req.create_remote_branch,
-            &self.task_registry,
-            &clones,
-            &self.host.session_account_access(&req.session_token),
-            progress,
-            req.run_in_tmux,
-            self.coding_agents.as_deref(),
-        )
-        .await
-    }
 }
 
 impl LaunchSessions {
@@ -314,10 +119,6 @@ impl LaunchSessions {
         refuse_an_unsupported_cli_session_start(&session_agent.agent.spec, kind.name, req)?;
         if req.sandbox {
             self.require_sandbox_placement(kind.name)?;
-            crate::cli_agent_steps::refuse_a_managed_codebase_in_a_jail(
-                &session_agent.agent.spec,
-                req,
-            )?;
         }
         let start = self.cli_start_prelude(req, progress, os_user).await?;
         let sessions_base = start.sessions_base.clone();
@@ -385,6 +186,7 @@ impl LaunchSessions {
             crate::opencode_cli_spawn::CliHarnessStart {
                 kind: session_agent.kind.clone(),
                 agent: &session_agent.agent,
+                renderer_env: session_agent.renderer_env.clone(),
                 config: &self.config,
                 tddy_data_dir: &self.tddy_data_dir,
                 cli_manager: &self.claude_cli_manager,
@@ -425,6 +227,90 @@ impl LaunchSessions {
                 managed_codebase: req.managed_codebase,
                 managed,
                 role,
+            },
+        )
+        .await
+    }
+}
+
+/// What a conversation or pr-stack child is started from. The request that spawns one names no
+/// agent: it runs its parent session's own ([`child_session_type`]).
+pub(crate) struct SpawnedChild<'a> {
+    pub os_user: &'a str,
+    pub session_id: &'a str,
+    pub sessions_base: PathBuf,
+    pub model: &'a str,
+    pub project_id: &'a str,
+    pub new_branch_name: &'a str,
+    pub selected_integration_base_ref: &'a str,
+    pub initial_prompt: &'a str,
+    /// The orchestrator the child descends from.
+    pub stack_parent: stack_parent::SpawnStackParent<'a>,
+    /// The orchestrator's recorded session type, whose agent the child runs.
+    pub parent_session_type: Option<&'a str>,
+    /// The owner's vault the child resolves its project's account over.
+    pub account_access: &'a crate::session_acting_identity::SessionAccountAccess,
+}
+
+impl LaunchSessions {
+    /// Start a conversation or pr-stack child through the one CLI launch, as its parent's agent: a
+    /// host without coding agents, a parent that records no session type and a parent that is no
+    /// CLI agent's refuse it `FAILED_PRECONDITION` before anything is cut.
+    pub(crate) async fn start_spawned_cli_child(
+        &self,
+        child: SpawnedChild<'_>,
+    ) -> Result<Response<StartSessionResponse>, Status> {
+        let kind = child_session_type(self.coding_agents.as_deref(), child.parent_session_type)?;
+        let session_agent = resolve_session_agent(self.coding_agents.as_ref(), &self.config, kind)?;
+        let mut started_agents = Vec::new();
+        let clones = tddy_session_agents::agent_host_callbacks::DaemonSeedCloneClaimant {
+            service: self.agent_roster.clone(),
+        };
+        // A child runs on its vendor: the orchestrator's account is not inherited.
+        let route_sources = tddy_core::provider_route::RouteSources::default();
+        crate::opencode_cli_spawn::start_cli_harness_session(
+            crate::opencode_cli_spawn::CliHarnessStart {
+                kind: session_agent.kind.clone(),
+                agent: &session_agent.agent,
+                renderer_env: session_agent.renderer_env.clone(),
+                config: &self.config,
+                tddy_data_dir: &self.tddy_data_dir,
+                cli_manager: &self.claude_cli_manager,
+                os_user: child.os_user,
+                session_id: child.session_id,
+                // The orchestrator is a session of this daemon: nothing leaves the host, so no
+                // peer is asked with a token.
+                session_token: "",
+                sessions_base: child.sessions_base,
+                model: child.model,
+                project_id: child.project_id,
+                // A child cuts its own worktree.
+                repo_path: "",
+                branch_worktree_intent: "new_branch_from_base",
+                new_branch_name: child.new_branch_name,
+                selected_integration_base_ref: child.selected_integration_base_ref,
+                selected_branch_to_work_on: "",
+                stack_parent: child.stack_parent,
+                initial_prompt: child.initial_prompt,
+                agents: &mut started_agents,
+                // A spawned child never runs its own semantic index, nor pushes a remote branch.
+                semantic_index: false,
+                create_remote_branch: false,
+                task_registry: &self.task_registry,
+                agent_clones: &clones,
+                account_access: child.account_access,
+                route_sources: &route_sources,
+                // Nobody watches a spawned child's start: the orchestrator is told its id.
+                progress: &AttachmentProgressSink::discarding(),
+                // A spawned child's agent is the PTY child itself, never run in tmux.
+                run_in_tmux: false,
+                permission_mode: "",
+                dangerously_skip_permissions: false,
+                ssh_config_host: "",
+                // A spawned child is never a managed-codebase session, and has no standing role.
+                managed_codebase: false,
+                managed: None,
+                role: crate::project_home_launch::StartRole::ordinary(),
             },
         )
         .await

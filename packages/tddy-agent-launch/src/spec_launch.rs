@@ -16,18 +16,14 @@ use tddy_actions::tool::{
 };
 use tddy_cli_sessions::cli_session_manager::pty_handle::PtyHandle;
 use tddy_cli_sessions::cli_session_manager::{CliSessionManager, ExitHook};
-use tddy_coding_agent_specs::slots::{
-    self, McpServerCommand, RenderedSlots, SlotError, SlotInputs,
-};
+use tddy_coding_agent_specs::slots::{McpServerCommand, RenderedSlots, SlotError};
 use tddy_coding_agent_specs::{CodingAgentRegistry, CodingAgentSpec, SpecError};
-use tddy_daemon_kernel::config::DaemonConfig;
 
 /// The coding agents this host can launch: the agent registry
 /// (`tddy_coding_agent_specs::load_agent_registry`) and the host its tools resolve against.
 ///
-/// Installed on the session host by the daemon runtime; a host without it launches `claude-cli`
-/// the hand-built way. `TODO(agent-tools 12/12)`: the hand-built way goes once the session-type
-/// gates move onto specs (`docs/dev/todo/2026-11-02-claude-cli-hand-built-launch-removal.md`).
+/// Installed on the session host by the daemon runtime; a host without it refuses every CLI agent's
+/// start, resume and child with `FAILED_PRECONDITION`, and re-attaches nothing.
 pub struct HostCodingAgents {
     registry: ToolRegistry,
     agents: Arc<CodingAgentRegistry>,
@@ -392,36 +388,6 @@ fn write_slot_file(path: &Path, bytes: &[u8]) -> Result<(), SpecLaunchError> {
     tddy_core::atomic_file::write_atomic(path, bytes).map_err(|e| slot_file(e.to_string()))
 }
 
-/// A `claude-cli` start or resume, as the launch steps before the spawn have settled it.
-pub struct ClaudeCliLaunch<'a> {
-    /// The SSH target the worktree lives on, when the session's checkout is remote: the slot files
-    /// are then written there over ssh, never at that path on this host.
-    pub remote_host: Option<&'a str>,
-    pub agents: &'a HostCodingAgents,
-    /// Where daemon.yaml `claude_cli.binary_path` is read from.
-    pub config: &'a DaemonConfig,
-    pub manager: &'a Arc<CliSessionManager>,
-    pub session_id: &'a str,
-    pub worktree: &'a Path,
-    pub model: &'a str,
-    /// Continue the existing transcript (`--resume`) rather than assign the id (`--session-id`).
-    pub resume: bool,
-    pub initial_prompt: Option<&'a str>,
-    pub permission_mode: Option<&'a str>,
-    pub dangerously_skip_permissions: bool,
-    pub append_system_prompt_file: Option<&'a Path>,
-    /// The tool server registered and the tools pre-approved and withdrawn, through the slots.
-    pub toolset: AgentToolset,
-    /// The session the `hooks` slot writes its settings for; `None` leaves the hooks file alone (a
-    /// resume, which keeps the file its start wrote).
-    pub hooks: Option<tddy_core::HookCommandParams<'a>>,
-    /// Flags already rendered by the caller (a split session's wiring), placed after the slot flags
-    /// and before the prompt.
-    pub extra_args: Vec<String>,
-    pub env: Vec<(String, String)>,
-    pub os_user: Option<&'a str>,
-}
-
 /// What a launch hands its agent to call: the tool server it registers, the tools it pre-approves
 /// and the tools it withdraws. Rendered by the agent's `mcp`, `tool_allow` and `tool_deny` slots.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -437,90 +403,6 @@ pub struct AgentToolset {
 pub struct McpRegistration {
     pub server: McpServerCommand,
     pub dir: PathBuf,
-}
-
-/// The agent every `claude-cli` session runs.
-pub(crate) const CLAUDE_AGENT_ID: &str = "claude";
-
-/// Launch a `claude-cli` session from the `claude` spec: resolve it, render its slots and its argv,
-/// and spawn it with [`launch_host_pty`].
-pub async fn launch_claude_cli(
-    launch: ClaudeCliLaunch<'_>,
-) -> Result<Arc<PtyHandle>, SpecLaunchError> {
-    let agent = launch
-        .agents
-        .resolve(CLAUDE_AGENT_ID, configured_binary(launch.config).as_deref())?;
-    // The permission mode defaults to `auto` in claude.yaml itself; a blank prompt is no prompt.
-    let params = crate::harness_from_spec::harness_template_params(
-        &crate::harness_from_spec::HarnessLaunch {
-            model: launch.model,
-            prompt: launch.initial_prompt,
-            resume: launch.resume,
-            session_id: Some(launch.session_id),
-            permission_mode: launch.permission_mode,
-            dangerously_skip_permissions: launch.dangerously_skip_permissions,
-            ..Default::default()
-        },
-    );
-    let AgentToolset {
-        mcp,
-        allowed_tools,
-        denied_tools,
-    } = launch.toolset;
-    let (mcp_server, scratch_dir) = match mcp {
-        Some(McpRegistration { server, dir }) => (Some(server), dir),
-        None => (None, launch.worktree.to_path_buf()),
-    };
-    let mut slots = slots::render(
-        &agent.spec,
-        &SlotInputs {
-            workdir: launch.worktree.to_path_buf(),
-            scratch_dir,
-            mcp_server,
-            allowed_tools,
-            denied_tools,
-            permission_prompt_tool: None,
-            preamble: None,
-            append_system_prompt_file: launch.append_system_prompt_file.map(Path::to_path_buf),
-            hooks: launch.hooks,
-            home: launch.agents.host().env_var("HOME").map(PathBuf::from),
-        },
-    )
-    .map_err(SpecLaunchError::Slots)?;
-    slots.argv_extra.extend(launch.extra_args);
-    if let Some(alias) = launch.remote_host {
-        for (path, bytes) in std::mem::take(&mut slots.files) {
-            crate::slot_file_over_ssh::write_slot_file_over_ssh(alias, &path, &bytes)?;
-        }
-    }
-
-    launch_host_pty(
-        &agent,
-        &params,
-        &slots,
-        launch.worktree,
-        HostPtySession {
-            manager: launch.manager,
-            session_id: launch.session_id,
-            session_type: "claude-cli",
-            model: launch.model,
-            env: launch.env,
-            os_user: launch.os_user,
-        },
-        None,
-    )
-    .await
-}
-
-/// daemon.yaml `claude_cli.binary_path` when it names a path; a bare name leaves the binary to the
-/// spec's own resolution.
-pub(crate) fn configured_binary(config: &DaemonConfig) -> Option<PathBuf> {
-    config
-        .claude_cli
-        .as_ref()
-        .map(|claude_cli| claude_cli.binary_path.as_str())
-        .filter(|path| path.contains('/'))
-        .map(PathBuf::from)
 }
 
 #[cfg(test)]

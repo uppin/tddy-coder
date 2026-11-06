@@ -172,6 +172,7 @@ fn a_session_host(
     // A harness session is launched from its tool definition: the host has coding agents, as the
     // daemon runtime gives them.
     let coding_agents = cursor_cli_support::coding_agents_over(&data_dir);
+    cursor_cli_support::install_the_configured_agent(&data_dir, &config);
     let host = Arc::new(
         DaemonSessionHost::new(
             config.clone(),
