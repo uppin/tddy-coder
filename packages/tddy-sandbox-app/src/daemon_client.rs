@@ -321,7 +321,6 @@ async fn run_daemon_terminal_bridge(
 mod tests {
     use super::*;
 
-
     /// Resolved daemon-client params for a request-building test.
     fn app_params(
         repo: &str,
@@ -350,7 +349,14 @@ mod tests {
 
         // When
         let req = start_session_request_from(
-            &app_params("/home/dev/proj", "claude-opus-4-8", "plan", "claude-cli", claude_args, vec![]),
+            &app_params(
+                "/home/dev/proj",
+                "claude-opus-4-8",
+                "plan",
+                "claude-cli",
+                claude_args,
+                vec![],
+            ),
             "tok",
             "managed",
         );
