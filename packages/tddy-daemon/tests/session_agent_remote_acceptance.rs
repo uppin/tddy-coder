@@ -328,6 +328,7 @@ async fn a_fleet_with_peers(peers: &[(&str, &[&str])], model_base_url: &str) -> 
     let (cfg_dir_a, cfg_path_a) = write_daemon_yaml(&ws_url, None, &os_user, &repos_base_path_a);
     let config_a = tddy_session_lifecycle::test_util::daemon_config_from_fixture_file(&cfg_path_a)
         .expect("daemon A config");
+    let stub_cursor_agent_a = write_stub_cursor_agent(cfg_dir_a.path());
     configs.push(cfg_dir_a);
 
     let sessions_a = tempfile::tempdir().expect("sessions A tempdir");
@@ -409,11 +410,11 @@ async fn a_fleet_with_peers(peers: &[(&str, &[&str])], model_base_url: &str) -> 
         Arc::new(tddy_session_lifecycle::claude_cli_session::ClaudeCliSessionManager::new()),
     )
     // A's co-located cursor-cli start launches from the `cursor` tool definition, so A has its
-    // coding agents, bound the way the daemon runtime binds them (`#agent-tools 7/12`).
-    .with_coding_agents(
-        tddy_agent_launch::host_coding_agents::host_coding_agents(&config_a, sessions_a.path())
-            .expect("daemon A's coding agents load"),
-    );
+    // coding agents (`#agent-tools 7/12`), resolving `agent` to the stub.
+    .with_coding_agents(coding_agents_launching(
+        sessions_a.path(),
+        &stub_cursor_agent_a,
+    ));
     let session_admissions =
         Arc::new(tddy_daemon_livekit::session_admission_service::SessionAdmissionRegistry::new());
     let session_rooms_for_admissions =
@@ -576,6 +577,58 @@ fn write_stub_cursor_agent(dir: &Path) -> PathBuf {
     script_path
 }
 
+/// A host whose environment and `PATH` are declared: nothing of the machine's own `PATH` or
+/// `TDDY_*` variables reaches resolution.
+struct AFixtureHost {
+    env: HashMap<String, String>,
+}
+
+impl tddy_actions::tool::ToolHost for AFixtureHost {
+    fn env_var(&self, name: &str) -> Option<String> {
+        self.env.get(name).cloned()
+    }
+
+    fn path_dirs(&self) -> Vec<PathBuf> {
+        Vec::new()
+    }
+
+    fn is_executable_file(&self, path: &Path) -> bool {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::metadata(path).is_ok_and(|m| m.is_file() && m.permissions().mode() & 0o111 != 0)
+    }
+
+    fn canonicalize(&self, path: &Path) -> std::io::Result<PathBuf> {
+        std::fs::canonicalize(path)
+    }
+}
+
+/// The coding agents of a daemon keeping its state in `tddy_home`: the agent registry it loads from
+/// `<tddyhome>/tools`, resolved against a host where `cursor.yaml`'s `binary.env`
+/// (`TDDY_CURSOR_AGENT`) names `stub_agent` and `TDDY_TOOLS_BINARY` names this build's `tddy-tools`.
+/// A cursor-cli start therefore launches the stub on a host with no Cursor CLI installed — CI's —
+/// and never whichever `agent` the developer's `PATH` holds.
+fn coding_agents_launching(
+    tddy_home: &Path,
+    stub_agent: &Path,
+) -> Arc<tddy_agent_launch::spec_launch::HostCodingAgents> {
+    let registry = tddy_coding_agent_specs::load_agent_registry(&tddy_home.join("tools"))
+        .expect("daemon A's agent registry loads");
+    let env = HashMap::from([
+        (
+            "TDDY_CURSOR_AGENT".to_string(),
+            stub_agent.display().to_string(),
+        ),
+        (
+            "TDDY_TOOLS_BINARY".to_string(),
+            tddy_daemon_sandbox::sandbox_session::resolve_tddy_tools_path(None),
+        ),
+    ]);
+    Arc::new(tddy_agent_launch::spec_launch::HostCodingAgents::new(
+        registry,
+        Arc::new(AFixtureHost { env }),
+    ))
+}
+
 fn write_daemon_yaml(
     ws_url: &str,
     instance_id: Option<&str>,
@@ -584,8 +637,6 @@ fn write_daemon_yaml(
 ) -> (tempfile::TempDir, PathBuf) {
     let dir = tempfile::tempdir().expect("config tempdir");
     let path = dir.path().join("daemon.yaml");
-    let cursor_binary = write_stub_cursor_agent(dir.path());
-    let cursor_binary = cursor_binary.display();
     let id_block = instance_id
         .map(|id| format!("daemon_instance_id: {id}\n"))
         .unwrap_or_default();
@@ -606,8 +657,6 @@ repos_base_path: {repos_base_path}
 allowed_tools:
   - path: {true_path}
     label: t
-cursor_cli:
-  binary_path: {cursor_binary}
 livekit:
   enabled: true
   url: {ws_url}

@@ -86,12 +86,18 @@ fn make_service(
 async fn start_main_terminal(manager: &ClaudeCliSessionManager) -> tempfile::TempDir {
     let worktree = tempfile::tempdir().unwrap();
     manager
-        .start(
+        .start_with_options(
             SESSION_ID,
             worktree.path().to_path_buf(),
             "claude-opus-4-8",
             MAIN_STUB,
             None,
+            None,
+            false,
+            false,
+            None,
+            Vec::new(),
+            Vec::new(),
             None,
         )
         .await

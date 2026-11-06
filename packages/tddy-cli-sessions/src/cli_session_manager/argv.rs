@@ -31,8 +31,8 @@ impl CliSessionManager {
     /// in lockstep. A managed workflow's `--append-system-prompt-file` is inserted by
     /// [`Self::start_with_options`] (before any positional prompt), not here, so this builder stays
     /// focused on the base argv plus the positional prompt.
-    // TODO(cli-dispatch-collapse): kept while Telegram's `CliSessionManager::start` builds its argv
-    // with it; `#agent-tools 18/19` `telegram-spec-launch` deletes both together.
+    // The split agent's launch (`start_with_options`) is its last caller: Telegram's hand-built
+    // `start` went with `#agent-tools 18/19`.
     pub fn build_claude_argv(
         binary_path: &str,
         model: &str,
@@ -60,8 +60,8 @@ impl CliSessionManager {
     /// `argv` — a [`Self::build_claude_argv`] result for `initial_prompt` — with
     /// `--append-system-prompt-file` and `extra_args` inserted before any positional prompt, so every
     /// flag precedes the prompt. This is the argv [`Self::start_with_options`] launches.
-    // TODO(cli-dispatch-collapse): kept while Telegram's `CliSessionManager::start` builds its argv
-    // with it; `#agent-tools 18/19` `telegram-spec-launch` deletes both together.
+    // The split agent's launch (`start_with_options`) is its last caller: Telegram's hand-built
+    // `start` went with `#agent-tools 18/19`.
     pub fn with_claude_launch_flags(
         mut argv: Vec<String>,
         initial_prompt: Option<&str>,
@@ -92,34 +92,5 @@ impl CliSessionManager {
             argv.splice(at..at, extra_args);
         }
         argv
-    }
-
-    /// Build the argv for the Cursor Agent CLI process.
-    ///
-    /// Arg order: `[binary, "--resume", chat_id, "--model", model, prompt?]`. `model` is omitted
-    /// when empty. `initial_prompt` is appended as a positional arg when non-empty (trimmed).
-    ///
-    /// `chat_id` is the Cursor chat the session owns (`cursor-agent create-chat`); passing it keeps
-    /// every spawn — first start and each resume — in the same chat. The `--resume` pair is emitted
-    /// only when a non-empty id is given: `--resume` takes an *optional* argument, so a bare flag
-    /// drops the CLI into an interactive chat picker that would wedge the PTY.
-    ///
-    /// The argv is the `cursor-cli` harness descriptor's ([`tddy_core::cli_harness::cli_harness`]).
-    pub fn build_cursor_argv(
-        binary_path: &str,
-        model: &str,
-        chat_id: Option<&str>,
-        initial_prompt: Option<&str>,
-    ) -> Vec<String> {
-        registered_argv(
-            "cursor-cli",
-            &CliLaunch {
-                binary: binary_path,
-                model,
-                conversation_id: chat_id,
-                initial_prompt,
-                ..CliLaunch::default()
-            },
-        )
     }
 }

@@ -18,6 +18,9 @@ pub(super) struct Registries {
     pub(super) shared_claude_cli_manager: Arc<CliSessionManager>,
     pub(super) shared_session_rooms: Arc<SessionRoomRegistry>,
     pub(super) shared_session_admissions: Arc<SessionAdmissionRegistry>,
+    /// The daemon's generic session start as a satellite's port: handed to Telegram, which is built
+    /// before the host, and bound to the host once it exists (`install_session_host`).
+    pub(super) session_starter: Arc<tddy_daemon_extensions::LateBoundSessionStarter>,
 }
 
 impl Registries {
@@ -56,6 +59,7 @@ impl Registries {
             shared_claude_cli_manager,
             shared_session_rooms,
             shared_session_admissions,
+            session_starter: Arc::new(tddy_daemon_extensions::LateBoundSessionStarter::new()),
         }
     }
 }

@@ -85,12 +85,18 @@ async fn start_main_terminal(manager: &ClaudeCliSessionManager) -> tempfile::Tem
     let worktree = tempfile::tempdir().unwrap();
     let stub = write_main_stub(worktree.path());
     manager
-        .start(
+        .start_with_options(
             SESSION_ID,
             worktree.path().to_path_buf(),
             "claude-opus-4-8",
             stub.to_str().unwrap(),
             None,
+            None,
+            false,
+            false,
+            None,
+            Vec::new(),
+            Vec::new(),
             None,
         )
         .await

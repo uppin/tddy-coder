@@ -798,12 +798,18 @@ async fn list_tasks_includes_a_running_claude_cli_and_bash_task() {
     };
 
     manager
-        .start(
+        .start_with_options(
             "list-both-kinds-session",
             worktree.path().to_path_buf(),
             "claude-opus-4-8",
             stub.to_str().unwrap(),
             None,
+            None,
+            false,
+            false,
+            None,
+            Vec::new(),
+            Vec::new(),
             None,
         )
         .await
@@ -852,12 +858,18 @@ async fn cancel_task_cancels_a_bash_pty_task() {
     let worktree = tempfile::tempdir().expect("worktree");
 
     manager
-        .start(
+        .start_with_options(
             "cancel-bash-session",
             worktree.path().to_path_buf(),
             "claude-opus-4-8",
             "/bin/sleep",
             None,
+            None,
+            false,
+            false,
+            None,
+            Vec::new(),
+            Vec::new(),
             None,
         )
         .await

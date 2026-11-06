@@ -14,6 +14,7 @@
 |---|---|---|---|---|
 | 2026-09-09 | 7,832 / 2,756 | 88 / 52 | 0% | first CRAP report the repo produced |
 | 2026-09-15 | unchanged | 88 / 52 | 0% | re-confirmed; **#494 relocates them unchanged** |
+| 2026-11-06 | not re-derived | — | — | `#agent-tools 18/19` (#824) touched both: `telegram_callback_handler` 421 → 415 lines (the claude/cursor model-callback branches became one `tcm:` branch plus the `tsa:` agent pick), `telegram_message_handler` 156 → 171 (the `/start-agent` branch). No coverage run; both stay untested by unit tests. Sweep node (n20) |
 
 ## What the tool found
 

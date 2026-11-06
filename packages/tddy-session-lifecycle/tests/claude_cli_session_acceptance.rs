@@ -842,12 +842,18 @@ async fn claude_cli_session_passes_initial_prompt_as_positional_arg() {
 
     // When
     let handle = manager
-        .start(
+        .start_with_options(
             "test-session-with-prompt",
             worktree_dir.path().to_path_buf(),
             "claude-opus-4-8",
             stub_path.to_str().unwrap(),
             Some("build a hello world app"),
+            None,
+            false,
+            false,
+            None,
+            Vec::new(),
+            Vec::new(),
             None,
         )
         .await
@@ -881,12 +887,18 @@ async fn claude_cli_session_empty_prompt_adds_no_positional_arg() {
 
     // When
     let handle = manager
-        .start(
+        .start_with_options(
             "test-session-empty-prompt",
             worktree_dir.path().to_path_buf(),
             "claude-opus-4-8",
             stub_path.to_str().unwrap(),
             Some(""), // empty — must not add a stray positional arg
+            None,
+            false,
+            false,
+            None,
+            Vec::new(),
+            Vec::new(),
             None,
         )
         .await
@@ -998,12 +1010,18 @@ async fn resume_does_not_replay_initial_prompt() {
 
     // Initial start — seeds a prompt.
     let _handle1 = manager
-        .start(
+        .start_with_options(
             "test-session-resume-noreplay",
             worktree_dir.path().to_path_buf(),
             "claude-opus-4-8",
             stub_path.to_str().unwrap(),
             Some("original prompt"),
+            None,
+            false,
+            false,
+            None,
+            Vec::new(),
+            Vec::new(),
             None,
         )
         .await

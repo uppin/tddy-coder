@@ -454,32 +454,6 @@ pub(super) async fn first_free_suffixed_branch_name_off_reactor(
     .map_err(|e| anyhow::anyhow!("suggested branch name join: {e}"))
 }
 
-/// Branch name for cursor-cli Telegram sessions: `cursor-cli/<first-8-chars-of-session-id>`.
-pub(super) fn cursor_cli_branch_name_from_session_id(session_id: &str) -> String {
-    let short_id = &session_id[..8.min(session_id.len())];
-    format!("cursor-cli/{short_id}")
-}
-
-/// Derive a git branch name for a `/start-claude` session from the changeset `name` field.
-///
-/// Returns `Some("feature/<slug>")` when `cs.name` is set, `None` otherwise.
-/// The slug replaces non-alphanumeric characters with hyphens and collapses consecutive hyphens —
-/// matching the logic in `tddy_core::worktree::slugify_for_branch`.
-pub(super) fn claude_cli_branch_name_from_changeset(cs: &Changeset) -> Option<String> {
-    cs.name.as_deref().map(|name| {
-        let slug: String = name
-            .to_lowercase()
-            .chars()
-            .map(|c| if c.is_ascii_alphanumeric() { c } else { '-' })
-            .collect::<String>()
-            .split('-')
-            .filter(|s| !s.is_empty())
-            .collect::<Vec<_>>()
-            .join("-");
-        format!("feature/{}", slug)
-    })
-}
-
 #[cfg(test)]
 mod local_gh_tests {
     use std::collections::HashMap;

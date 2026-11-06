@@ -1,5 +1,5 @@
-//! The CLI harness descriptors reproduce, argument for argument, the claude-cli and cursor-cli
-//! launches the session manager has always built.
+//! The CLI harness descriptor reproduces, argument for argument, the claude-cli launch the session
+//! manager builds for the split agent.
 //!
 //! These pin the descriptor refactor as behaviour-preserving: every pair below must stay equal for
 //! the start and resume shapes those sessions use.
@@ -13,12 +13,8 @@ fn claude_argv_through_the_descriptor(launch: &CliLaunch<'_>) -> Vec<String> {
     (cli_harness("claude-cli").expect("claude-cli").argv)(launch)
 }
 
-fn cursor_argv_through_the_descriptor(launch: &CliLaunch<'_>) -> Vec<String> {
-    (cli_harness("cursor-cli").expect("cursor-cli").argv)(launch)
-}
-
 #[test]
-fn claude_cli_and_cursor_cli_argv_are_unchanged_through_the_descriptor() {
+fn claude_cli_argv_is_unchanged_through_the_descriptor() {
     // Claude: fresh start with a prompt and a permission mode, a resume, and the skip flag.
     for (prompt, mode, skip, resume) in [
         (Some("hello"), Some("plan"), false, false),
@@ -47,27 +43,6 @@ fn claude_cli_and_cursor_cli_argv_are_unchanged_through_the_descriptor() {
                 resume
             ),
             "claude prompt={prompt:?} mode={mode:?} skip={skip} resume={resume}"
-        );
-    }
-
-    // Cursor: a chat id or none, a model or none, a prompt or none.
-    for (chat, model, prompt) in [
-        (Some("chat-1"), "composer-2.5", Some("go")),
-        (None, "", None),
-        (Some("  "), "gpt-5.2", Some("  ")),
-    ] {
-        let launch = CliLaunch {
-            binary: "agent",
-            model,
-            session_id: "sess-7",
-            conversation_id: chat,
-            initial_prompt: prompt,
-            ..CliLaunch::default()
-        };
-        assert_eq!(
-            cursor_argv_through_the_descriptor(&launch),
-            CliSessionManager::build_cursor_argv("agent", model, chat, prompt),
-            "cursor chat={chat:?} model={model:?} prompt={prompt:?}"
         );
     }
 }

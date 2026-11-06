@@ -345,6 +345,15 @@ impl BuildContext {
         // started over the socket is visible over every other transport.
         let connection_arc = Arc::new(connection_impl);
         connection_arc.install_sandbox_rpc_bridge();
+        // The satellites were built before this host: they hold the late-bound port, and this is
+        // where it reaches the host's generic start.
+        if let Err(refused) = self.registries.session_starter.bind(Arc::new(
+            tddy_session_lifecycle::connection_service::operator_session_starter::HostSessionStarter::new(
+                Arc::clone(&connection_arc),
+            ),
+        )) {
+            log::error!(target: "tddy_daemon", "session starter not bound: {}", refused.message);
+        }
         self.session_host = Some(Arc::clone(&connection_arc));
         // The periodic project-home auto-stop reaps through the same host the sessions run on.
         self.tasks.project_home_reaper = Some(Arc::clone(&connection_arc));

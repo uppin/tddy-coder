@@ -129,7 +129,7 @@ pub fn request_on_profile(
 }
 
 /// A caller-sent start may not name a standing role; see [`LaunchSessions::start_session_core`].
-fn refuse_a_requested_role(req: &StartSessionRequest) -> Result<(), Status> {
+pub(crate) fn refuse_a_requested_role(req: &StartSessionRequest) -> Result<(), Status> {
     if req.session_role.trim().is_empty() {
         return Ok(());
     }

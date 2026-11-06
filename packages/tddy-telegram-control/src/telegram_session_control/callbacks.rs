@@ -61,11 +61,6 @@ pub const CB_TELEGRAM_INTENT: &str = "intent:";
 /// `parent_tail8` = last 8 chars of the parent session id — stable regardless of list order.
 /// The child session id is validated by [`validate_session_id_segment`] on callback dispatch.
 pub const CB_TELEGRAM_CHAIN_PARENT: &str = "tcp:";
-/// Claude Code CLI model picker: `tcm:<model_idx>|p:<proj_idx>|s:<session_id>`.
-/// Model index refers to [`CLAUDE_CLI_MODELS`].
-pub const CB_TELEGRAM_CLAUDE_MODEL: &str = "tcm:";
-/// Cursor Agent CLI model picker: `tcur:<model_idx>|p:<proj_idx>|s:<session_id>`.
-pub const CB_TELEGRAM_CURSOR_MODEL: &str = "tcur:";
 /// Branch-conflict prompt: `tbc:<choice>:<proj_idx>:<session_id>`, where `<choice>` is the
 /// [`TelegramBranchConflictChoice`] code.
 ///
@@ -73,21 +68,6 @@ pub const CB_TELEGRAM_CURSOR_MODEL: &str = "tcur:";
 /// `callback_data` at 64 bytes — it is re-derived from the changeset when the callback arrives.
 /// Per `docs/ft/daemon/session-branch-conflict.md` § Telegram.
 pub const CB_TELEGRAM_BRANCH_CONFLICT: &str = "tbc:";
-/// Claude models offered by the Telegram model-picker keyboard, in button order.
-///
-/// Derived from [`tddy_core::backend::claude_cli_models`] rather than listed again here, so the
-/// Telegram picker, the tddy-web dropdown and the daemon's `--model` default cannot drift apart.
-/// Index 0 is the versionless `opus` alias — an operator who takes the first button tracks the
-/// latest Opus instead of whichever generation was current when the daemon was built.
-/// Per `docs/ft/daemon/claude-cli-session.md`.
-pub static CLAUDE_CLI_MODELS: LazyLock<Vec<BackendModel>> =
-    LazyLock::new(|| tddy_core::backend::claude_cli_models().models);
-
-/// Cursor models offered by the Telegram model-picker keyboard, from
-/// [`tddy_core::backend::cursor_cli_models`] for the same reason.
-pub static CURSOR_CLI_MODELS: LazyLock<Vec<BackendModel>> =
-    LazyLock::new(|| tddy_core::backend::cursor_cli_models().models);
-
 /// Parsed [`CallbackQuery::data`](https://core.telegram.org/bots/api#callbackquery) for session list actions.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SessionControlCallback {
@@ -158,40 +138,6 @@ pub fn parse_start_cursor_prompt(message_text: &str) -> Option<String> {
     let trimmed = message_text.trim();
     let rest = trimmed.strip_prefix(START_CURSOR_CMD)?;
     Some(rest.trim().to_string())
-}
-
-/// Decode `tcm:<model_idx>|p:<proj_idx>|s:<session_id>` (Claude model pick after branch).
-pub fn parse_telegram_claude_model_callback(callback_data: &str) -> Option<(usize, usize, String)> {
-    let rest = callback_data.strip_prefix(CB_TELEGRAM_CLAUDE_MODEL)?;
-    let (model_part, after_p) = rest.split_once("|p:")?;
-    let model_idx: usize = model_part.parse().ok()?;
-    if model_idx >= CLAUDE_CLI_MODELS.len() {
-        return None;
-    }
-    let (proj_part, sess_part) = after_p.split_once("|s:")?;
-    let proj_idx: usize = proj_part.parse().ok()?;
-    let session_id = sess_part.trim().to_string();
-    if session_id.is_empty() {
-        return None;
-    }
-    Some((model_idx, proj_idx, session_id))
-}
-
-/// Decode `tcur:<model_idx>|p:<proj_idx>|s:<session_id>` (Cursor model pick after branch).
-pub fn parse_telegram_cursor_model_callback(callback_data: &str) -> Option<(usize, usize, String)> {
-    let rest = callback_data.strip_prefix(CB_TELEGRAM_CURSOR_MODEL)?;
-    let (model_part, after_p) = rest.split_once("|p:")?;
-    let model_idx: usize = model_part.parse().ok()?;
-    if model_idx >= CURSOR_CLI_MODELS.len() {
-        return None;
-    }
-    let (proj_part, sess_part) = after_p.split_once("|s:")?;
-    let proj_idx: usize = proj_part.parse().ok()?;
-    let session_id = sess_part.trim().to_string();
-    if session_id.is_empty() {
-        return None;
-    }
-    Some((model_idx, proj_idx, session_id))
 }
 
 /// Parse `/sessions` command (with optional offset from callback data).

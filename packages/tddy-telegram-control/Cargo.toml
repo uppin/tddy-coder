@@ -22,6 +22,10 @@ uuid = { version = "1", features = ["v4"] }
 # `tddy-telegram`, its other user is `tddy-daemon`'s `runtime.rs`, which builds the `Bot`.
 teloxide = { version = "0.17.0", features = ["macros", "rustls"], default-features = false }
 tddy-core = { path = "../tddy-core" }
+# `CodingAgentRegistry`: the CLI agents Telegram offers and each agent's models, read from the
+# host's registry rather than named here (`#agent-tools 18/19`). Already in this crate's graph
+# through `tddy-session-lifecycle`.
+tddy-coding-agent-specs = { path = "../tddy-coding-agent-specs" }
 # `OperatorChannel`, the port `TelegramDaemonHooks` implements, and the `SessionNotification` types
 # it names. (`DaemonConfig` is the kernel's too, but this crate names it through
 # `tddy_session_lifecycle::config`, which re-exports it.)
@@ -48,6 +52,10 @@ tddy-session-lifecycle = { path = "../tddy-session-lifecycle" }
 
 [dev-dependencies]
 tempfile = "3"
+pretty_assertions = { workspace = true }
+# The spec-launch fixture: a host's coding agents resolved against a declared `ToolHost`.
+tddy-actions = { path = "../tddy-actions" }
+tddy-agent-launch = { path = "../tddy-agent-launch" }
 serial_test = "3"
 tddy-github = { path = "../tddy-github" }
 tddy-projects = { path = "../tddy-projects" }

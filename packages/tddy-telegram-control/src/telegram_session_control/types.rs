@@ -28,6 +28,16 @@ pub struct StartCursorCommand {
     pub prompt: String,
 }
 
+/// Simulated Telegram `/start-agent <prompt>` command: start any CLI agent the host's registry
+/// offers — the agent keyboard comes before the project keyboard.
+#[derive(Debug, Clone)]
+pub struct StartAgentCommand {
+    pub chat_id: i64,
+    pub user_id: u64,
+    /// Full text after `/start-agent` (trimmed) — seeds the first user prompt for the CLI.
+    pub prompt: String,
+}
+
 /// Simulated Telegram `/chain-workflow` (stacked session) with feature text; parent session is
 /// selected in a first step before project / integration base / agent (PRD).
 #[derive(Debug, Clone)]
@@ -72,6 +82,13 @@ pub struct StartClaudeOutcome {
 /// Result of handling `/start-cursor`.
 #[derive(Debug, Clone)]
 pub struct StartCursorOutcome {
+    pub session_id: String,
+    pub messages: Vec<CapturedTelegramMessage>,
+}
+
+/// Result of handling `/start-agent`: the pending session's id + anything sent to Telegram.
+#[derive(Debug, Clone)]
+pub struct StartAgentOutcome {
     pub session_id: String,
     pub messages: Vec<CapturedTelegramMessage>,
 }

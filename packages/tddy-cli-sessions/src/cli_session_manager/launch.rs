@@ -95,106 +95,16 @@ impl CliSessionManager {
         .await
     }
 
-    /// Spawn a new Cursor Agent CLI process for `session_id` in `worktree_path`.
+    /// Spawn a new claude CLI process for `session_id` in `worktree_path`, with managed-workflow
+    /// launch options. Returns an `Arc<PtyHandle>`; the child is monitored in a background std
+    /// thread and the session leaves the registry when it exits.
     ///
-    /// `chat_id` — the Cursor chat the session owns, launched into via `--resume <chat_id>`.
-    // TODO(cli-dispatch-collapse): kept — Telegram's launcher still calls it
-    // (`tddy-telegram-control/src/telegram_session_control/cli_spawns.rs`); `#agent-tools 18/19`
-    // `telegram-spec-launch` deletes it (docs/dev/todo/2026-11-03-cursor-hand-built-launch-paths.md).
-    #[allow(clippy::too_many_arguments)]
-    pub async fn start_cursor(
-        &self,
-        session_id: &str,
-        worktree_path: PathBuf,
-        model: &str,
-        binary_path: &str,
-        chat_id: Option<&str>,
-        initial_prompt: Option<&str>,
-        // Extra per-session env pairs applied to the cursor process (e.g. `TDDY_SEMANTIC_INDEX_DB`).
-        env: Vec<(String, String)>,
-    ) -> anyhow::Result<Arc<pty_handle::PtyHandle>> {
-        let argv = Self::build_cursor_argv(binary_path, model, chat_id, initial_prompt);
-        self.spawn_tool(
-            session_id,
-            MAIN_TERMINAL_ID,
-            "cursor-cli",
-            worktree_path,
-            model,
-            argv,
-            env,
-            None,
-            None,
-            None,
-        )
-        .await
-    }
-
-    /// Resume a Cursor CLI session into `chat_id` (never replays the initial prompt).
-    pub async fn resume_cursor(
-        &self,
-        session_id: &str,
-        worktree_path: PathBuf,
-        model: &str,
-        binary_path: &str,
-        chat_id: Option<&str>,
-        // Extra per-session env pairs applied to the cursor process.
-        env: Vec<(String, String)>,
-    ) -> anyhow::Result<Arc<pty_handle::PtyHandle>> {
-        self.start_cursor(
-            session_id,
-            worktree_path,
-            model,
-            binary_path,
-            chat_id,
-            None,
-            env,
-        )
-        .await
-    }
-
-    /// Spawn a new claude CLI process for `session_id` in `worktree_path`.
+    /// `initial_prompt` — when `Some` and non-empty, appended as a positional CLI argument so that
+    /// `claude` receives it as the first user turn. **Resume** always passes `None`: re-injecting
+    /// the original prompt would create a duplicate user turn.
     ///
-    /// Returns an `Arc<PtyHandle>` on success. The child process is monitored in a background
-    /// std thread; when it exits the session is removed from the registry.
-    ///
-    /// `initial_prompt` — when `Some` and non-empty, appended as a positional CLI argument so
-    /// that `claude` receives it as the first user turn. Pass `None` (or `Some("")`) for an
-    /// interactive session with no seeded prompt. **Resume** (`resume()`) always passes `None`
-    /// because the session is continued via `--session-id`; re-injecting the original prompt
-    /// would create a duplicate user turn.
-    ///
-    /// `permission_mode` — forwarded as `--permission-mode <mode>` to the claude binary.
-    /// `None` or empty/whitespace defaults to `"auto"`.
-    // TODO(cli-dispatch-collapse): kept — Telegram's launcher still calls it
-    // (`tddy-telegram-control/src/telegram_session_control/cli_spawns.rs`); `#agent-tools 18/19`
-    // `telegram-spec-launch` deletes it (docs/dev/todo/2026-11-03-cursor-hand-built-launch-paths.md).
-    pub async fn start(
-        &self,
-        session_id: &str,
-        worktree_path: PathBuf,
-        model: &str,
-        binary_path: &str,
-        initial_prompt: Option<&str>,
-        permission_mode: Option<&str>,
-    ) -> anyhow::Result<Arc<pty_handle::PtyHandle>> {
-        self.start_with_options(
-            session_id,
-            worktree_path,
-            model,
-            binary_path,
-            initial_prompt,
-            permission_mode,
-            false,
-            false,
-            None,
-            Vec::new(),
-            Vec::new(),
-            None,
-        )
-        .await
-    }
-
-    /// Like [`Self::start`], plus managed-workflow launch options.
+    /// `permission_mode` — forwarded as `--permission-mode <mode>`. `None` or empty/whitespace
+    /// defaults to `"auto"`.
     ///
     /// `resume` — when true, continue the existing on-disk transcript via `--resume <id>` instead of
     /// assigning the id to a fresh session via `--session-id <id>`. Only [`Self::resume_with_options`]
