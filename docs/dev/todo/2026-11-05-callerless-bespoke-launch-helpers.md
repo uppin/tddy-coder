@@ -5,7 +5,7 @@
 **Source:** `#agent-tools` 17/19 (green)
 
 Deleting the planned bespoke claude and cursor launches (§ Removed of
-`docs/dev/1-WIP/2026-11-04-agent-tools-cli-dispatch-collapse.md`) left these items with no production
+`docs/dev/changesets/2026-11-06-agent-tools-cli-dispatch-collapse.md`) left these items with no production
 caller. None is in that list, so none was deleted: each carries `#[allow(dead_code)]` and a
 `TODO(cli-dispatch-collapse)` naming this record.
 

@@ -103,11 +103,9 @@ forwarded source, and carry no `github-source.yaml`; see
 
 | Path | Commit pairs | Token handler | Where the pairs go |
 |---|---|---|---|
-| co-located claude-cli start / resume | yes | yes | the agent's `env_extra` |
-| sandboxed claude-cli start and relaunch | yes | yes | `session_env` |
-| sandboxed cursor-cli start | yes | yes | `session_env` |
-| plain cursor-cli start / resume | yes | none — runs no toolcall listener | the cursor process env |
-| agent-spawned children (`spawn-child`, `spawn-conversation`) | yes | yes, via the child's own start | as the claude-cli start |
+| co-located CLI start / resume (claude-cli, cursor-cli, every `*-cli` agent — one launch) | yes | yes, when the session runs a toolcall listener (a managed workflow); none otherwise | the agent's process env |
+| sandboxed CLI start and relaunch | yes | yes | `session_env` |
+| agent-spawned children (`spawn-child`, `spawn-conversation`) | yes | yes, via the child's own start | as the co-located CLI start |
 | tool session (`tddy-coder`) start / resume | yes | yes — over the per-OS-user host-session socket | the child's environment, over the spawn wire |
 | split-agent | not applicable | none | — |
 
@@ -125,9 +123,6 @@ as the account that project assigns, resolved over the owner's vault the orchest
 The token stays in daemon memory; the child gets pairs and, via its own handler, per-call tokens. A
 child spawned after the orchestrator's token expired is refused with `NoSuchSession` and starts under
 the checkout's identity.
-
-**Not supported.** Sandboxed cursor-cli resume (`resume_cursor_cli_session` ignores `sandbox`), so
-there is no relaunch to carry an identity.
 
 ## Tool sessions: the token over the per-OS-user host-session socket
 

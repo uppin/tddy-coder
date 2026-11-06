@@ -3,15 +3,16 @@
 **Location:** `packages/tddy-agent-launch/src/cli_agent_steps.rs`
 **Category:** oversized-file
 **Detected:** 2026-11-05 by `/pr-wrap` on PR #820 (`#agent-tools` 14/19), measured on `origin/feature/agent-tools/route-support` (`3c29698cd`) and HEAD at #820's wrap
-**Metrics:** **571 production lines** (counted to the first `#[cfg(test)]`) · budget 500 · **1.14× over**
+**Metrics:** **648 production lines** (counted to the first `#[cfg(test)]`) · budget 500 · **1.30× over**
 **Thresholds breached:** length 571 > 500
-**Status:** Open — unclaimed
+**Status:** Open — regressed 2026-11-06 by #823 (571 → 648) — unclaimed
 
 ## Measurement history
 
 | Run | Production lines | Note |
 |---|---|---|
 | 2026-11-05 | 0 → 571 | first detection — #820 added the module: the generic launch's spec-keyed steps (slots, ssh slot writes, conversation, role and jail refusals) and the session wiring on a start and a resume. Not split: restructuring deferred to the `#agent-tools` sweep node (n20) by the developer (2026-11-04) |
+| 2026-11-06 | 571 → 648 | **worse by 77** in #823 (`#agent-tools` 17/19): `resumed_or_adopted_conversation`, `carry_on_the_tool_server`, `hooks_report_over_the_agent_tool_socket`, and the session pointer on `SessionWiring`/`ResumedWiring` (the notify pairs routed to it). Not split: restructuring deferred to the `#agent-tools` sweep node (n20) by the developer |
 
 ## What would close it
 

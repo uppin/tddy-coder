@@ -33,15 +33,14 @@ one discards. Each session type's start reports its slow steps through the sink 
 
 | Start | Steps reported |
 |---|---|
-| claude-cli | clone when the project is not on the host (`provision_project_for_start`, with git's progress), worktree (`cut_claude_cli_worktree`), semantic index when requested, agent (`spawn_claude_cli_process`) |
-| cursor-cli | the same three, in `spawn_cursor_cli_session_reporting`; `spawn_cursor_cli_session_inner` is its wrapper for a caller with nobody watching |
+| every CLI agent (claude-cli, cursor-cli, any `*-cli`) | clone when the project is not on the host (`provision_project_for_start`, with git's progress), worktree and semantic index when requested (`cli_session_worktree::provision_cli_worktree`), agent (`opencode_cli_spawn::start_cli_harness_session`; `svc_start_sandboxed_cli_harness_session` in a jail) |
 | workspace | worktree (the seed), semantic index when requested; the jail is built after the index and reports nothing |
 
 A step that fails reports no end. `stream_start_session_at_session_coordinate` sends the terminal
 event only after the task forwarding the sink's events has drained, so a result never overtakes a
 phase's end; a forwarding task that ends abnormally is logged.
 
-**Not covered.** The sandboxed claude-cli and cursor-cli starts, the tool start and the split start
+**Not covered.** The tool start and the split start
 report no phases and announce no worktree. Children spawned by a PR-stack orchestrator
 (`StackChildSpawnHandler`) and by a grill-me conversation (`GrillMeConversationSpawnHandler`) pass a
 discarding sink and announce nothing.

@@ -62,13 +62,14 @@ The linking key is now the spawn's **effective branch** (`connection_service::ef
 - a new-branch spawn ignores `selected_branch_to_work_on` entirely — the dialog sends that field
   unconditionally, so "prefer whichever field is non-empty" would pick the wrong one.
 
-Applied at the **node-link** sites in both spawn paths that take a `stack_parent`
-(`spawn_claude_cli_session_inner`, `start_sandboxed_claude_cli_session`), so **a resumed spawn re-links
-its node** and the recovery sticks. `resolve_chain_base_ref` deliberately keeps keying on
-`new_branch_name`: under `work_on_selected_branch` a resolved chain base would make worktree setup run a
-real `fetch_chain_pr_integration_base` — a fetch that can fail, and that is pointless for a resume which
-creates no branch. `start_sandboxed_cursor_cli_session` takes no `stack_parent` at all and is unaffected
-(tracked in `docs/dev/TODO.md`).
+Applied at the **node-link** sites of the CLI spawn paths, which every CLI agent takes and which all
+take a `stack_parent` (`opencode_cli_spawn::start_cli_harness_session` on the host,
+`svc_start_sandboxed_cli_harness_session` in a jail, both through
+`cli_session_worktree::provision_cli_worktree`), so **a resumed spawn re-links its node** and the
+recovery sticks. `resolve_chain_base_ref` deliberately keeps keying on `new_branch_name`: under
+`work_on_selected_branch` a resolved chain base would make worktree setup run a real
+`fetch_chain_pr_integration_base` — a fetch that can fail, and that is pointless for a resume which
+creates no branch.
 
 **Branch resolution helpers** (free functions in `changeset.rs`): `resolve_stack_node_branch(sessions_root, node) -> Option<String>` — the node's own `branch`, else the `branch` in its child session's changeset (a missing session directory resolves to `None`, never an error) — and `read_stack_with_resolved_branches(sessions_root, orchestrator_session_id)`, the orchestrator's stack with every node's `branch` hydrated through that resolver. The hydrated copy is read-only; persisting it would write a fallback-derived branch onto a node that never recorded one.
 

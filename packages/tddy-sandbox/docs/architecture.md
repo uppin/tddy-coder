@@ -280,7 +280,7 @@ subtree) — `spawn` returns `SandboxError::Unsupported`. Callers map this to gR
 
 ## Consumers
 
-- **`tddy-daemon`**: `start_sandboxed_claude_cli_session`, `sandbox_session.rs`
+- **`tddy-daemon`**: `start_sandboxed_cli_harness_session` (`tddy-agent-launch`), `sandbox_session.rs`
 - **`tddy-tools`**: `sandbox-runner` subcommand (in-jail entrypoint)
 
 ## See also

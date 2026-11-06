@@ -230,13 +230,16 @@ on the host: it shows in `tmux ls` and can be attached from any terminal over SS
 - **Re-attach.** A session whose tmux session is alive and has no main terminal registered gets one
   re-attached — the agent is **never relaunched**, and the recorded `pid` is re-read from the pane:
   - on **Resume**. A daemon that still serves the session's managed workflow (a client that detached
-    from this daemon) keeps it, so the agent's `TDDY_SOCKET` stays bound; a restarted daemon, which has
+    from this daemon) keeps it, so the socket its session pointer and tool server name stays bound; a restarted daemon, which has
     none, prepares one bound to the same `tddy-wf-<id>.sock` path. A main already attached to that tmux
     session is returned as it is, so a second Resume adds no second client;
   - on the **first stream, input or history read** of its `main` terminal — the session reads active
     (its pane pid lives), so the web never offers Resume. The re-attach reads `.session.yaml`, probes
-    tmux as the requester's OS user, attaches, and registers the main recording; it is single-flight per
-    session, so concurrent first accesses attach one client.
+    tmux as the requester's OS user, resolves the agent from the recorded session type among the host's
+    installed coding agents, attaches, and registers the main recording; it is single-flight per
+    session, so concurrent first accesses attach one client. A record without a session type is
+    skipped with a warning (it is never re-attached as claude-cli), and a host without coding agents
+    re-attaches nothing.
 - **Resume** of a tmux-run session whose tmux session is gone kills any leftover tmux session of that
   name, then starts a fresh one running Claude's resume argv (`--resume <id>`).
 - **A failed attach** kills the tmux session that start created: nothing records it, so nothing could
@@ -344,7 +347,10 @@ to the jail's egress hosts. A resume relaunches the jail on the account the star
 A sandboxed start that chooses nothing is unchanged.
 
 A **child** session a pr-stack orchestrator spawns, and a **conversation** a grill-me orchestrator
-spawns, run on the vendor: the orchestrator's account is not inherited.
+spawns, run the orchestrator's own agent (a claude-cli orchestrator's child is a claude-cli session,
+a cursor-cli one's a cursor-cli session) on the vendor: the orchestrator's account is not inherited.
+A host without coding agents, or an orchestrator that records no CLI session type, refuses the child
+`FAILED_PRECONDITION`.
 
 ### Persistence and resume
 
@@ -483,14 +489,16 @@ extensions:
 - **Resume** renders `--resume <id>` from the same template. It does not rewrite the hooks file or
   replay the first prompt, and it runs with the default permission mode.
 
-A host without coding agents keeps the hand-built argv. Only the session-lifecycle suites build such
-a host; the daemon always installs coding agents. The sandboxed `claude-cli` path renders the same
-definition through the jail launcher ([§ The jail](#the-jail-from-the-claude-tool-definition)).
+There is no other launch: a host without coding agents refuses every claude-cli start, resume and
+child `FAILED_PRECONDITION`, and re-attaches nothing after a restart (logged). Only the
+session-lifecycle suites build such a host; the daemon always installs coding agents. The sandboxed
+`claude-cli` path renders the same definition through the jail launcher
+([§ The jail](#the-jail-from-the-claude-tool-definition)).
 
 ### The generic CLI spec launch serves Claude's needs
 
-The generic CLI launch — the one every agent without a bespoke path takes, `<id>-cli` for a
-`<tddyhome>/tools/<id>.yaml` — gives an agent what `claude.yaml` declares, each feature keyed on a
+The generic CLI launch — the one launch every CLI agent takes, `claude-cli` and `cursor-cli`
+included, `<id>-cli` for a `<tddyhome>/tools/<id>.yaml` — gives an agent what `claude.yaml` declares, each feature keyed on a
 spec slot or capability and never on the agent's id. A copy of `claude.yaml` dropped in under another
 id therefore starts, in tmux, as a project's main and on an ssh checkout with the argv, files and
 environment the `claude-cli` launch produces:
@@ -501,7 +509,8 @@ environment the `claude-cli` launch produces:
   appended through `--append-system-prompt-file` and the workflow is attached once the agent runs. An
   agent without it is refused `INVALID_ARGUMENT`, naming the agent and `managed_workflow`.
 - **Hooks and notify.** `hooks` writes the hooks adapter's settings file; `operator_notify` appends the
-  notify guidance and gives the agent `tddy-tools notify`'s session variables.
+  notify guidance and puts `tddy-tools notify`'s session into the session pointer
+  ([§ Notifying the operator](#notifying-the-operator)).
 - **Project-home main.** `project_home_main` admits the role (any other agent is refused, naming the
   agents that can run main); the role is recorded before the spawn and the main's tools are restricted
   through the `tool_allow` / `tool_deny` slots and its `tddy-tools --mcp` registration.
@@ -509,15 +518,28 @@ environment the `claude-cli` launch produces:
 - **ssh checkout.** On an ssh checkout the slot files are written on the target over ssh (bounded by
   the 60 s slot-write deadline; a target that never answers refuses the start `DEADLINE_EXCEEDED`
   naming the host), never at that path on this host.
-- **No `TDDY_*` variable.** The agent process sees no `TDDY_*` variable but the notify ones its spec
-  declares: a host PTY runs under `env -u` for each the daemon holds, and a tmux pane unsets every
-  one it inherited from the tmux server before it execs the agent. A managed workflow's or a main's
-  `TDDY_*` pair is carried by the agent's tool-server registration (`mcp` env), never the process.
+- **No `TDDY_*` variable.** The agent process sees no `TDDY_*` variable: a host PTY runs under
+  `env -u` for each the daemon holds, and a tmux pane unsets every one it inherited from the tmux
+  server before it execs the agent. A managed workflow's or a main's `TDDY_*` pair is carried by the
+  agent's tool-server registration (`mcp` env), never the process.
+- **Session pointer.** So a `tddy-tools submit`, `transition`, `ask` or `notify` the agent runs from
+  its own shell still reaches the session, the launch writes `<worktree>/.tddy/session.json` at every
+  start and resume ([tddy-tools session resolution](../../../packages/tddy-tools/docs/session-resolution.md)):
+  the managed workflow's socket, session and repo directories, and the operator-notify session. It is
+  owner-only (`0600`), added to the repository's `info/exclude` when the worktree is in a git
+  checkout, replaced on resume, and removed when the agent exits (in tmux only when the launch has an
+  exit hook, which keeps the pane) and when the session is deleted. On an ssh checkout it is written
+  on the target through the bounded slot write, and is neither excluded nor removed there
+  ([todo](../../dev/todo/2026-11-06-ssh-session-pointer-exclude-and-removal.md)). A jailed session
+  writes none: its shell relay carries the session.
 - **Jail.** The generic jailed start and resume bind the same conversation, permission mode and
-  session id. A managed codebase in a jail is refused `FAILED_PRECONDITION` naming the agent: the
-  generic jailed launch carries no managed workflow yet.
+  session id, and carry a managed workflow for a spec declaring `managed_workflow`.
+- **Branch intent.** A `new_branch_from_base` start naming no branch is refused exactly when the
+  spec declares `branch_name_required` (`claude` does, `cursor` does not).
 
-The built-in `claude` id still dispatches to the `claude-cli` launch above.
+No agent id is compared in the launch: a source scan
+(`tddy-session-lifecycle/tests/no_agent_name_gates.rs`) pins that no `"claude"` / `"cursor"` /
+`"claude-cli"` / `"cursor-cli"` literal is dispatched on in `tddy-agent-launch`.
 
 ### Worktree naming
 
@@ -739,8 +761,11 @@ A daemon-launched claude-cli agent can notify its operator in its own words with
 [Session notifications § Agent-written notifications](session-notifications.md#agent-written-notifications)).
 The launch gives it two things, at start and again at resume:
 
-- **The environment** the command reads (`tddy_agent_launch::notify_env::notify_env_pairs`; the names
-  live in `tddy_service::session_activity::notify_env`):
+- **The notify session** the command reads (`tddy_agent_launch::notify_env::notify_env_pairs`; the
+  names live in `tddy_service::session_activity::notify_env`). It is not exported to the agent
+  process: it is written into the session pointer's `notify` map
+  ([§ The generic CLI spec launch](#the-generic-cli-spec-launch-serves-claudes-needs)), and the
+  `tddy-tools notify` the agent runs adopts it from there (only these five names):
 
   | Variable | Value |
   |---|---|
@@ -750,7 +775,7 @@ The launch gives it two things, at start and again at resume:
   | `TDDY_DAEMON_SOCKET` | the embedded daemon's agent-tool socket, when one is listening (the same rule as the hooks' `--daemon-socket`) |
   | `TDDY_DAEMON_URL` | otherwise, the hooks' daemon URL |
 
-  Exactly one of the last two is exported: an embedded daemon serves no HTTP RPC, so a URL there would
+  Exactly one of the last two is given: an embedded daemon serves no HTTP RPC, so a URL there would
   reach nothing.
 - **One guidance paragraph** in its system prompt (`agent_notify_guidance.md`): the command exists,
   use it when long work finishes or something blocks while the operator is likely away, never for
@@ -762,13 +787,13 @@ A resume rebuilds both from the `hook_token` recorded in `.session.yaml`; a sess
 none is given nothing. Not wired:
 
 - **A session with a standing role** (`session_role`, e.g. the project-home main). It has no shell to
-  run the command, so neither the environment nor the guidance is given. It notifies with the
+  run the command, so neither the notify session nor the guidance is given. It notifies with the
   `NotifyOperator` exec tool instead, and its role prompt names that tool
   ([Session notifications § A session with no shell](session-notifications.md#a-session-with-no-shell-notifyoperator)).
 - **A sandboxed session.** It has no hooks and no hook token.
 
-A cursor-cli session is given the same environment at start and resume (its socket and URL are its
-hooks'), but no guidance paragraph: its CLI has no system-prompt flag this relies on.
+A cursor-cli session gets the same notify session through its pointer at start and resume (its
+socket and URL are its hooks').
 
 ## Proto delta
 

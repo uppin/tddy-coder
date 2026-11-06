@@ -22,9 +22,8 @@ use tddy_coding_agent_specs::{CodingAgentRegistry, CodingAgentSpec, SpecError};
 /// The coding agents this host can launch: the agent registry
 /// (`tddy_coding_agent_specs::load_agent_registry`) and the host its tools resolve against.
 ///
-/// Installed on the session host by the daemon runtime; a host without it launches `claude-cli`
-/// the hand-built way. `TODO(agent-tools 12/12)`: the hand-built way goes once the session-type
-/// gates move onto specs (`docs/dev/todo/2026-11-02-claude-cli-hand-built-launch-removal.md`).
+/// Installed on the session host by the daemon runtime; a host without it refuses every CLI agent's
+/// start, resume and child with `FAILED_PRECONDITION`, and re-attaches nothing.
 pub struct HostCodingAgents {
     registry: ToolRegistry,
     agents: Arc<CodingAgentRegistry>,

@@ -110,8 +110,8 @@ fn runs_in_tmux(session_type: &str) -> bool {
 }
 
 /// A start that asks for a tmux-run agent together with a placement that is not a plain agent on
-/// this host is refused before anything is created, for every session type in
-/// CLI agent session type, naming the conflict:
+/// this host is refused before anything is created, for every CLI agent's session type (`*-cli`),
+/// naming the conflict:
 ///
 /// - `sandbox` confines the agent in its own jail, which a tmux session on the host is not;
 /// - `sandboxed_codebase` withdraws the agent's native tools and jails the code, so there is no host

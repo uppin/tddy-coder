@@ -108,7 +108,7 @@ rest of `<tddyhome>/agents/` (or the builtin fastcontext def) from loading.
         │                                                                  │
         │ resolve selected defs by name              StartSessionRequest  │ managed_codebase,
         ▼                                                (fields 17-18)   ▼ specialized_agents[]
-   daemon start_sandboxed_claude_cli_session
+   daemon start_sandboxed_cli_harness_session
         │  serialize resolved defs → TDDY_SUBAGENTS_JSON env var (jail has no host FS in managed mode)
         │  managed_codebase ⇒ SandboxRunnerSpawn.mounts = [] (repo not mounted)
         ▼

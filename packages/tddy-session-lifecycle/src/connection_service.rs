@@ -236,7 +236,7 @@ pub struct DaemonSessionHost {
     /// whose embedder acts on nothing of the kind.
     worktree_observer: Option<Arc<dyn SessionWorktreeObserver>>,
     /// The coding agents declared as tools, installed with [`Self::with_coding_agents`]. `None`
-    /// keeps the hand-built `claude-cli` launch (`#agent-tools 2/12`).
+    /// refuses every CLI agent's start, resume and child `FAILED_PRECONDITION` (`#agent-tools 17/19`).
     coding_agents: Option<Arc<tddy_agent_launch::spec_launch::HostCodingAgents>>,
     /// What extends a session's reach beyond this host when it is connected to — see
     /// [`tddy_daemon_extensions::SessionReach`]. [`tddy_daemon_extensions::NoSessionReach`] until
