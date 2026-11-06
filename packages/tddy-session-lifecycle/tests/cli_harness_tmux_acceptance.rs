@@ -406,7 +406,13 @@ async fn each_cli_harness_resumes_in_a_fresh_tmux_session_with_its_resume_argv()
         // Then the harness is launched again, with its resume argv, in a tmux session with a client
         let resumed = daemon.tmux_session_of(&session_id);
         until_attached(&daemon.tmux, &resumed, 1).await;
+        // Wait for the relaunch itself: a cursor start already launches with `--resume <chat>`, so
+        // the resume flag alone matches the first launch before the relaunch is appended.
         let argv = eventually("the harness to be relaunched", OBSERVE, || {
+            let launches = daemon.launch_count();
+            if launches < 2 {
+                return Err(format!("{launches} launch(es) recorded so far"));
+            }
             let argv = read_last_appended_argv(&daemon.launches)?;
             argv.contains(&harness.resume_flag.to_string())
                 .then_some(argv.clone())
