@@ -51,7 +51,7 @@ pub struct DaemonClientParams {
 /// Drive the whole Linux flow: connect the daemon socket, mint a local peer-trust token, start the
 /// sandboxed claude-cli session, then proxy the local terminal to it until the session ends.
 pub async fn run(params: DaemonClientParams) -> Result<()> {
-    let socket = resolve_daemon_socket_path(params.daemon_socket);
+    let socket = resolve_daemon_socket_path(params.daemon_socket.clone());
     eprintln!("connecting to tddy-daemon at {}", socket.display());
     let channel = connect_daemon_channel(&socket).await?;
     let mut token_client = LocalTokenServiceClient::new(channel.clone());
