@@ -45,9 +45,10 @@ and `project_repo_root` (the project registered for an OS user, and its checkout
 deadline); `index_session_worktree` (blocks until the index is terminal; a missing embedder or failed index
 is an error, with no unindexed fallback); `spawn_blocking_with_timeout` and `await_supervised_with_timeout`
 (public, for the RPC handlers above the wiring crate); `push_new_branch_to_origin_if_requested`;
-`resume_agent_and_recipe`; and `write_claude_hooks_settings` and `resolve_start_session_claude_binary`
-(through `config::resolve_claude_binary_path`, so the interactive and sandboxed paths never pick
-differently). The "trim, and treat empty as unset" conversion is `tddy_daemon_kernel::trim_to_option`.
+`resume_agent_and_recipe`; and `write_claude_hooks_settings`. A split agent's `claude` binary is
+`SplitSessions.claude_binary` — the host's `claude` coding agent as it resolves on that host, refused
+when found nowhere (`#agent-tools` 19/19) — so the interactive and sandboxed paths never pick
+differently. The "trim, and treat empty as unset" conversion is `tddy_daemon_kernel::trim_to_option`.
 
 ## Edges
 

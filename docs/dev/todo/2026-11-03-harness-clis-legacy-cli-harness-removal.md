@@ -29,7 +29,8 @@ Production code outside the launch path still reads the table, and tests pin the
 - **Table consumers that are not part of the launch switch:**
   - `tddy-agent-launch/src/facilitation.rs:33` and `session_coordinate_handlers.rs:188` (`cli_harness(..).is_some()`);
   - `tddy-agent-launch/src/start_request_checks.rs` (`cli_harness_requires_model`, and the legacy refusal);
-  - `tddy-session-lifecycle/src/connection_service/svc_terminal_ports.rs:180`;
+  - `tddy-session-lifecycle/src/connection_service/svc_terminal_ports.rs` (the agent tab's argv; its binary
+    comes from the spec since `#agent-tools 19/19`);
   - `tddy-session-activity/src/session_list_enrichment.rs`, `tddy-session-files/src/context_files.rs`;
   - `tddy-daemon-rpc/src/catalog/ports.rs`, `tddy-tool-engine/src/start_session_args/schema.rs` (`cli_harnesses()`);
   - `tddy-cli-sessions/src/cli_session_manager/{argv,launch}.rs`;
@@ -96,3 +97,14 @@ These keep compiling and passing until they move onto specs. None is edited for 
 Separate deferrals in the same specs are not closed by this entry: the `hooks: unsupported`
 amendment to `HooksSlot` (`TODO(harness-clis)` in `specs/{opencode,muse,warp}.yaml` and
 `slots/hooks.rs`), and the Warp jail (`docs/dev/todo/2026-10-24-warp-cli-sandbox.md`).
+
+## Narrowed by `#agent-tools` 19/19 (`agent-config-removal`, #825)
+
+The daemon.yaml side of the table is gone: `DaemonConfig::cli_harness_binary`, `CliHarnessConfig` and
+`DaemonConfig.cli_harnesses` are deleted. An agent terminal tab (`svc_terminal_ports.rs`) and the
+catalogue's model probe (`catalog/ports.rs`) resolve the harness's binary through the host's coding
+agents (the spec's `binary.env`, then the host search, refused when found nowhere); only the argv and
+the model source still come from the table. `harness_binary` (`opencode_cli_spawn.rs`) reads the
+environment, then the descriptor's default — no config step. `cli_harness.rs`'s `requires_model`
+copy is now marked `TODO(harness-clis)` (it was `TODO(agent-config-removal)`). The rest of this
+record stands; the sweep node (n20) owns it.

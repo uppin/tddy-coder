@@ -1,4 +1,4 @@
-# 2026-11-04 — The daemon.yaml agent sections and their readers are deleted
+# 2026-11-06 — The daemon.yaml agent sections and their readers are deleted
 
 `#agent-tools` 19/19 ([#825](https://github.com/uppin/tddy-coder/pull/825)).
 
@@ -29,3 +29,14 @@
   (`keep_worktree_on_delete`).
 - **Every launcher holds the coding agents.** A host that installed none holds an empty registry, so
   every agent session is refused for naming no spec; the hand-built ACP launch path is deleted.
+- **Tool-file route shapes use the body-format words** (from `#agent-tools` 13/19, #819, listed here
+  for operators migrating overrides in one pass): `route.shape: args` is now `toml_args` and
+  `config_file` is `json_config_file`; a tool file still writing the old word is refused when it
+  loads, naming the new one.
+- **The catalogue's model probe resolves an agent's binary as its launch does** — through the host's
+  coding agents, never a separate load of the tool files.
+
+**Migrating a daemon.yaml:** delete the `claude_cli:`, `cursor_cli:` and `cli_harnesses:` sections and
+write each field you set into `<tddyhome>/tools/<id>.yaml` per the table above (`claude.yaml`,
+`cursor.yaml`, `opencode.yaml`, …). The daemon refuses to start while a section is present and names
+each field's replacement.

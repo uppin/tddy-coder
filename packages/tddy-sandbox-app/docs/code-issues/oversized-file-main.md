@@ -14,6 +14,7 @@
 |---|---|---|
 | 2026-10-22 | 976 | first record; 973 at PR #670's merge-base (`655970c72`), already over budget. +3 in #670: the `--agent-kind` doc and the `agent_home_banner` arm for the two kinds the app does not start. |
 | 2026-11-03 | 957 | **better** by 19 in PR #799 (`#agent-tools` 10/12): `--agent <spec id>` replaces `--agent-kind`, `--claude-binary`, `--cursor-binary`, `--claude-home-dir` and `--cursor-home-dir`. The Linux path refuses an agent other than claude (+9) |
+**Worse by 1:** 957 → 958 production lines (#825, `#agent-tools` 19/19): the banner names a `home: { kind: path }` home (`HomeSection::Path`). Not split: restructuring deferred to the `#agent-tools` sweep node (n20) by the developer. **Status:** Open — regressed 2026-11-06 by #825.
 
 ## What the tool found
 
