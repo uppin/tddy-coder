@@ -20,6 +20,7 @@ fn the_builtin_registry_offers_rg() {
         Some(ToolBinary {
             command: "rg".into(),
             env: Some("TDDY_RG_BINARY".into()),
+            target: None,
         })
     );
 }
@@ -39,6 +40,7 @@ fn an_override_file_replaces_a_builtin_whole_by_id() {
         Some(ToolBinary {
             command: "ripgrep-nightly".into(),
             env: None,
+            target: None,
         })
     );
     assert_eq!(registry.origin("rg"), Some(tools.file("rg.yaml").as_path()));

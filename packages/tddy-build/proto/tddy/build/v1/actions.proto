@@ -11,8 +11,12 @@ message BuildAction {
   map<string, string> env = 5;
   repeated FileSet    inputs  = 6;
   repeated OutputDecl outputs = 7;
-  repeated string tool_dep_ids = 8;    // ToolTarget ids whose bin_dirs go on PATH
+  repeated string tool_dep_ids = 8;    // tool target ids; their resolved tool closure goes on PATH
   string working_dir = 9;              // run cwd, relative to repo root (empty = repo root)
+  // Run hermetically through the executor's ActionSandbox: inputs read-only, declared outputs the
+  // only writable paths, the tool closure the only executables, network lowered from the closure.
+  // `tddy build --hermetic` sets it for every action of a run.
+  bool sandbox = 10;
 }
 
 enum ActionType {

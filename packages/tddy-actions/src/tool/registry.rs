@@ -55,6 +55,14 @@ impl ToolRegistry {
         Self { tools }.validated()
     }
 
+    /// This registry plus one more definition, held under `origin` — a build target's id, for an
+    /// inline tool target. An id already held is refused as a duplicate, and the result is validated
+    /// as [`Self::load`] validates its own.
+    pub fn with_tool(mut self, def: ToolDef, origin: PathBuf) -> Result<Self, ToolError> {
+        insert_unique(&mut self.tools, def, origin)?;
+        self.validated()
+    }
+
     /// A registry of exactly `sources` — embedded `(source path, YAML)` files, such as
     /// [`BUILTIN_TOOLS`], [`BUILTIN_SUPPORT_TOOLS`] and an agent-spec crate's specs — validated as
     /// [`Self::builtin`] validates its own: a duplicate id, an unknown dep and a dep cycle are

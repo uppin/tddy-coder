@@ -36,6 +36,7 @@
 //! `ManagedWorkflow`'s.
 
 pub mod action_service;
+pub mod build_action_sandbox;
 mod conversation_tool;
 mod main_recording;
 pub mod sandbox_action;

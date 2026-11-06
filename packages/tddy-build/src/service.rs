@@ -9,7 +9,7 @@ use serde_json::{json, Value};
 use crate::capabilities::BuildMode;
 use crate::discovery::discover_build_manifests;
 use crate::error::BuildError;
-use crate::executor::{execute_target, ExecuteOptions};
+use crate::executor::{execute_target, execute_target_with_tools, BuildTools, ExecuteOptions};
 use crate::graph::BuildGraph;
 use crate::manifest::BuildTarget;
 use crate::plugin::PluginRegistry;
@@ -80,6 +80,32 @@ pub async fn build_json(
         ..ExecuteOptions::default()
     };
     let record = execute_target(repo_root, &graph, target, &opts, mode, registry).await?;
+
+    let mut value =
+        serde_json::to_value(&record).map_err(|e| BuildError::Manifest(e.to_string()))?;
+    if let Value::Object(map) = &mut value {
+        map.insert("status".to_string(), Value::String("ok".to_string()));
+    }
+    Ok(value)
+}
+
+/// [`build_json`] with the build's tools and options: `tools` resolve each action's tool
+/// dependencies and run the hermetic ones, per `opts` (`#agent-tools 4/12`).
+pub async fn build_json_with_tools(
+    repo_root: &Path,
+    target: &str,
+    opts: &ExecuteOptions,
+    mode: BuildMode,
+    registry: &PluginRegistry,
+    tools: &BuildTools,
+) -> Result<Value, BuildError> {
+    let manifests = discover_build_manifests(repo_root)?
+        .into_iter()
+        .map(|(_, manifest)| manifest)
+        .collect();
+    let graph = BuildGraph::from_manifests(manifests)?;
+    let record =
+        execute_target_with_tools(repo_root, &graph, target, opts, mode, registry, tools).await?;
 
     let mut value =
         serde_json::to_value(&record).map_err(|e| BuildError::Manifest(e.to_string()))?;

@@ -96,6 +96,56 @@ pub fn compute_cache_key(action: &BuildAction, input_fingerprints: &[FileFingerp
     key
 }
 
+/// [`compute_cache_key`] with the resolved tool binaries' fingerprints folded in
+/// (`#agent-tools 4/12`): changing a tool's binary invalidates every action using it. Independent
+/// of `tool_fingerprints`' order, as the input fingerprints are.
+///
+/// An action with no tools keeps [`compute_cache_key`]'s own key, so entries written before tools
+/// were fingerprinted stay valid.
+pub fn compute_cache_key_with_tools(
+    action: &BuildAction,
+    input_fingerprints: &[FileFingerprint],
+    tool_fingerprints: &[FileFingerprint],
+) -> String {
+    let key = compute_cache_key(action, input_fingerprints);
+    if tool_fingerprints.is_empty() {
+        return key;
+    }
+
+    let mut hasher = Sha256::new();
+    hasher.update(key.as_bytes());
+    hasher.update(b"|tools|");
+    let mut tools: Vec<&FileFingerprint> = tool_fingerprints.iter().collect();
+    tools.sort_by(|a, b| (&a.path, a.size, a.mtime_ms).cmp(&(&b.path, b.size, b.mtime_ms)));
+    for fp in tools {
+        hasher.update(format!("{}:{}:{};", fp.path, fp.size, fp.mtime_ms).as_bytes());
+    }
+    format!("sha256:{}", hex::encode(hasher.finalize()))
+}
+
+/// The key a build run records for `action`: [`compute_cache_key_with_tools`] plus whether the
+/// action runs `hermetic` (the effective mode — `sandbox: true` or a `--hermetic` run). An entry an
+/// unconfined run wrote therefore never serves a hermetic run, nor the reverse.
+///
+/// An unconfined run keeps [`compute_cache_key_with_tools`]'s own key, so entries written before
+/// the mode was recorded stay valid for unconfined runs.
+pub fn compute_run_cache_key(
+    action: &BuildAction,
+    input_fingerprints: &[FileFingerprint],
+    tool_fingerprints: &[FileFingerprint],
+    hermetic: bool,
+) -> String {
+    let key = compute_cache_key_with_tools(action, input_fingerprints, tool_fingerprints);
+    if !hermetic {
+        return key;
+    }
+
+    let mut hasher = Sha256::new();
+    hasher.update(key.as_bytes());
+    hasher.update(b"|hermetic|");
+    format!("sha256:{}", hex::encode(hasher.finalize()))
+}
+
 /// Load the cache entry for `{target_id}/{action_id}`, returning it only when its
 /// recorded key matches `expected_key` and every output path still exists.
 pub fn lookup_cache(
@@ -156,7 +206,7 @@ fn cache_entry_path(repo_root: &Path, target_id: &str, action_id: &str) -> PathB
 }
 
 /// Make an id filesystem-safe (target ids contain `/` and `:`).
-fn sanitize(id: &str) -> String {
+pub(crate) fn sanitize(id: &str) -> String {
     id.chars()
         .map(|c| match c {
             '/' | ':' | '\\' | ' ' => '_',
@@ -275,6 +325,80 @@ mod tests {
 
         // When / Then
         assert_ne!(base, compute_cache_key(&other, &fps()));
+    }
+
+    fn a_tool_binary(size: u64, mtime_ms: u64) -> FileFingerprint {
+        FileFingerprint {
+            path: "/opt/tools/bin/stamp".to_string(),
+            size,
+            mtime_ms,
+        }
+    }
+
+    fn another_tool_binary() -> FileFingerprint {
+        FileFingerprint {
+            path: "/opt/tools/bin/zip".to_string(),
+            size: 7,
+            mtime_ms: 7,
+        }
+    }
+
+    #[test]
+    fn key_changes_when_a_tool_binary_fingerprint_changes() {
+        // Given
+        let action = sample_action();
+        let before = compute_cache_key_with_tools(&action, &fps(), &[a_tool_binary(100, 1)]);
+
+        // When — the tool is rebuilt: same path, new size and mtime
+        let after = compute_cache_key_with_tools(&action, &fps(), &[a_tool_binary(140, 2)]);
+
+        // Then
+        assert_ne!(before, after);
+    }
+
+    #[test]
+    fn key_with_tools_differs_from_the_key_without_them() {
+        // Given
+        let action = sample_action();
+
+        // When
+        let with_tools = compute_cache_key_with_tools(&action, &fps(), &[a_tool_binary(100, 1)]);
+
+        // Then
+        assert_ne!(with_tools, compute_cache_key(&action, &fps()));
+    }
+
+    #[test]
+    fn key_is_independent_of_tool_fingerprint_order() {
+        // Given
+        let action = sample_action();
+        let forward = [a_tool_binary(100, 1), another_tool_binary()];
+        let reversed = [another_tool_binary(), a_tool_binary(100, 1)];
+
+        // When
+        let key_forward = compute_cache_key_with_tools(&action, &fps(), &forward);
+        let key_reversed = compute_cache_key_with_tools(&action, &fps(), &reversed);
+
+        // Then
+        assert_eq!(key_forward, key_reversed);
+    }
+
+    #[test]
+    fn run_key_differs_between_a_hermetic_and_an_unconfined_run() {
+        // Given
+        let action = sample_action();
+        let tools = [a_tool_binary(100, 1)];
+
+        // When
+        let unconfined = compute_run_cache_key(&action, &fps(), &tools, false);
+        let hermetic = compute_run_cache_key(&action, &fps(), &tools, true);
+
+        // Then
+        assert_ne!(hermetic, unconfined);
+        assert_eq!(
+            unconfined,
+            compute_cache_key_with_tools(&action, &fps(), &tools)
+        );
     }
 
     #[test]

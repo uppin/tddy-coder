@@ -16,6 +16,9 @@
 //!
 //! `#agent-tools 3/12` adds which hosts a tool may reach ([`NetworkSection`]); the jail's shim and
 //! host relay enforce the union of a tool set's declarations.
+//!
+//! `#agent-tools 4/12` lets a tool's binary be a `tddy-build` target's output ([`TargetBinary`]),
+//! answered by [`ToolHost::target_output`] on a host that knows a build graph.
 
 mod def;
 mod error;
@@ -26,7 +29,7 @@ mod resolve;
 mod run;
 mod template;
 
-pub use def::{ToolBinary, ToolDef, TOOL_SCHEMA_VERSION};
+pub use def::{TargetBinary, ToolBinary, ToolDef, TOOL_SCHEMA_VERSION};
 pub use error::ToolError;
 pub use extensions::ExtensionOwner;
 pub use network::{Egress, HostPattern, HostPatternError, NetworkSection, DEFAULT_EGRESS_PORT};
