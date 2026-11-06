@@ -80,6 +80,8 @@ fn runner_args(tmp: &Path, claude_binary: &Path) -> (SandboxRunnerArgs, PathBuf)
         append_system_prompt_file: None,
         grpc_listen_port: None,
         egress_shim_port: None,
+        egress_policy: "any".to_string(),
+        egress_tool: vec![],
         grpc_uds: None,
         pty_command: vec![],
         claude_arg: vec![],

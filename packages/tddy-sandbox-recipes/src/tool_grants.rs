@@ -13,12 +13,15 @@
 //!   away);
 //! - **a name on `PATH`** — a jail-local `bin/` directory of links, one per tool, placed first on
 //!   the jail's `PATH`.
+//!
+//! [`lower_network`] lowers the same tool set's `network:` sections into the jail's egress policy
+//! (`#agent-tools 3/12`).
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-use tddy_actions::tool::ResolvedTool;
-use tddy_sandbox::{ReadReason, ReadSpec, SymlinkSpec};
+use tddy_actions::tool::{Egress, ResolvedTool};
+use tddy_sandbox::{EgressPolicy, HostPattern, ReadReason, ReadSpec, SymlinkSpec};
 
 /// What a resolved tool set adds to a jail's plan.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -146,4 +149,41 @@ fn push_unique<T: PartialEq>(items: &mut Vec<T>, item: T) {
     if !items.contains(&item) {
         items.push(item);
     }
+}
+
+/// Lower `tools`' `network:` sections into one jail's egress policy and whether it takes an OAuth
+/// callback (`#agent-tools 3/12`).
+///
+/// The union rule: one tool declaring `any` makes the whole jail [`EgressPolicy::Any`] — the honest
+/// reading of a jail that hosts one unrestricted tool; `hosts` lists concatenate, in tool order and
+/// without repeats; `none` contributes nothing, so a set of only `none` tools is
+/// [`EgressPolicy::None`] and its jail starts no shim. `oauth_inbound` is true when any tool
+/// declares it.
+pub fn lower_network(tools: &[ResolvedTool]) -> (EgressPolicy, bool) {
+    let oauth_inbound = tools.iter().any(|tool| tool.network.oauth_inbound);
+    // Stays `None` unless a tool declares hosts; networkless tools keep no host list.
+    let mut hosts: Option<Vec<HostPattern>> = None;
+    for tool in tools {
+        match &tool.network.egress {
+            Egress::None => {}
+            Egress::Any => return (EgressPolicy::Any, oauth_inbound),
+            Egress::Hosts(declared) => {
+                let lowered = hosts.get_or_insert_with(Vec::new);
+                for declared_pattern in declared {
+                    // `HostPattern::parse` lowercases and applies the 443 default, so equal hosts
+                    // compare equal here.
+                    let pattern =
+                        HostPattern::new(declared_pattern.host(), declared_pattern.port());
+                    if !lowered.contains(&pattern) {
+                        lowered.push(pattern);
+                    }
+                }
+            }
+        }
+    }
+    let policy = match hosts {
+        Some(hosts) => EgressPolicy::Hosts(hosts),
+        None => EgressPolicy::None,
+    };
+    (policy, oauth_inbound)
 }

@@ -64,7 +64,8 @@ pub(crate) struct SpawnHarnessPtyParams<'a> {
     /// Resume the harness's own last session rather than start one.
     pub(crate) resume: bool,
     pub(crate) cwd: &'a Path,
-    pub(crate) egress_shim: &'a str,
+    /// The in-jail egress shim's URL, or `None` when the jail's policy is `none` and it has none.
+    pub(crate) egress_shim: Option<&'a str>,
     pub(crate) relay: Arc<SandboxSessionRelay>,
     pub(crate) initial_cols: u16,
     pub(crate) initial_rows: u16,
@@ -86,7 +87,7 @@ pub(crate) fn spawn_harness_pty(params: SpawnHarnessPtyParams<'_>) -> Result<Pty
     .map_err(anyhow::Error::msg)?;
     let (stdin_tx, stdin_rx) = std::sync::mpsc::channel::<Bytes>();
     let cwd = params.cwd.to_path_buf();
-    let egress_shim = params.egress_shim.to_string();
+    let egress_shim = params.egress_shim.map(str::to_string);
     let relay = params.relay;
     let (initial_cols, initial_rows) = (params.initial_cols, params.initial_rows);
 

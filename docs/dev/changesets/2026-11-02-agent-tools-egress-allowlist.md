@@ -1,0 +1,19 @@
+# 2026-11-02 — A tool declares the hosts it may reach, and the jail enforces it
+
+**Type:** Feature (security) · **Stack:** `#agent-tools` 3/12 ([#792](https://github.com/uppin/tddy-coder/pull/792)) · **Packages:** tddy-actions, tddy-sandbox, tddy-sandbox-recipes, tddy-sandbox-runner, tddy-daemon-sandbox; mechanical struct-literal fields in tddy-sandbox-app, tddy-sandbox-darwin, tddy-sandbox-qemu, tddy-integration-tests, tddy-agent-launch (tests)
+
+State A: `NetworkSpec { loopback_allow_ports, allow_oauth_inbound }`; the runner's CONNECT shim and the host relay's `spawn_tunnel` dialed any `host:port`; no allowlist existed.
+
+State B: `tddy_actions::tool::{NetworkSection, Egress, HostPattern}` (`tool/network.rs`) and `ResolvedTool.network`; `tddy_sandbox::{EgressPolicy, HostPattern}` (`network.rs`) with `admits` and the `--egress-policy` wire form, `NetworkSpec.egress` (default `Any`); `tddy_sandbox_recipes::lower_network` (union rule, case-insensitive de-duplication); `tddy_sandbox_runner::egress_policy::{EgressGuard, EgressRefusal}` checked by the shim (`open_relay_tunnel`, so CONNECT and plain-HTTP forward) and by `run_host_relay`'s `TunnelOpen` (`HostRelayConfig::with_egress`, `check_wire_port` refuses a port no `u16` holds). `start_egress_shim_for_policy` starts no shim under `none`; the PTY proxy env is then omitted (`harness_pty.rs` and the claude/cursor PTY take `Option<&str>`). `build_workspace_tool_plan` lowers its tools' network: shim port (bind-then-release `pick_free_loopback_port`, the same small race as `sandbox_plan_builder.rs`), `loopback_allow_ports = [shim_port]`, `--egress-policy` / `--egress-tool`, `NetworkSpec.egress`, `allow_oauth_inbound`. A parent test fixture (`an_unknown_field_is_refused_…`) uses `colour: blue` now that `network` is a real field.
+
+Decisions: `hosts: []` is `Hosts([])` (admits nothing) rather than `None`, so the wire form round-trips; `HostPattern::parse` also refuses a path and labels outside `[A-Za-z0-9-]`; two `HostPattern` types (serde/tool vocabulary in `tddy-actions`, plain in `tddy-sandbox`) so neither crate depends on the other. **Open for the developer:** `EgressPolicy::default()` is `Any`, so every `NetworkSpec::default()` jail (darwin/cgroups backends, tests) stays unrestricted; the alternative is a required field touching every backend. Not decided here because it is a security default.
+
+Deferred: [`docs/dev/todo/2026-11-02-workspace-jail-serves-no-egress-tunnels.md`](../todo/2026-11-02-workspace-jail-serves-no-egress-tunnels.md) — the workspace jail's daemon side answers no `TunnelOpen`, so a declared host is unreachable there (fails closed; `rg` declares no network). Code issues (re-measured, splits deferred because every file is shared with later `#agent-tools` nodes): `runner.rs` 2,742 → 2,799, `host_relay.rs` 1,033 → 1,062, `run_host_relay_inner` 284 → 301, `workspace_tool_sandbox.rs` 684 → 713, `tddy-sandbox` `builder.rs` 573 → 577.
+
+Product: [sandbox-builder.md § Tool egress](../../ft/coder/sandbox-builder.md#tool-egress). Package: [tddy-actions declared-tools.md](../../../packages/tddy-actions/docs/declared-tools.md), [tddy-sandbox-darwin troubleshooting.md](../../../packages/tddy-sandbox-darwin/docs/troubleshooting.md).
+
+## Validation (2026-11-02, `/validate-changes` + `/pr-wrap`, macOS)
+
+- Stack gate: rebased onto `origin/feature/agent-tools/claude-host` `85f0153d1` (one conflict in `docs/ft/coder/1-OVERVIEW.md`, both sides kept); `origin/<base>..HEAD` is this PR's three commits only.
+- Boundary: no coding agent declares hosts; `claude.yaml` / `tddy-coding-agent-specs` untouched; `network: def.network.clone()` in `resolve_tool` is this node's line.
+- Test note: `tool_egress_allowlist_acceptance` takes ~60 s on macOS because the in-process runner's `/bin/sleep 60` PTY child outlives the test body.

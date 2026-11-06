@@ -32,6 +32,11 @@ Product contract: [Sandbox builder § Declared tools](../../../docs/ft/coder/san
 - **Extensions** are checked by `load_with_owners` after the merge, so an override's section is what
   is validated. An unclaimed key is `UnknownExtension` and a refused section is `ExtensionRejected`,
   both naming the tool's file. `from_embedded` validates ids and deps only.
+- **`network:`** (`tool/network.rs`): `NetworkSection { egress: Egress::{None, Any, Hosts}, oauth_inbound }`,
+  absent means `none`. `HostPattern::parse` validates `host[:port]` / `*.domain[:port]` (port default
+  443, lowercased); a bad pattern refuses the load naming the tool. `Egress` has hand-written serde
+  because serde_yaml 0.9 reads a derived enum only as a YAML tag, never as `{ hosts: [...] }`.
+  `ResolvedTool.network` carries the section for `tool_grants::lower_network`.
 - The crate has no sandbox dependency. Lowering a resolved set into grants is
   `tddy-sandbox-recipes::tool_grants`.
 

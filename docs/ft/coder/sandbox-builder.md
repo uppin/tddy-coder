@@ -192,3 +192,49 @@ declares its mapping slots. See
 in `deps`) is a built-in. It sits apart from the jail tool set, so `ToolRegistry::builtin()` keeps
 offering exactly the jail tools. A host that launches coding agents builds its registry from both
 sets and the agent specs.
+
+## Tool egress
+
+Since `#agent-tools 3/12` ([#792](https://github.com/uppin/tddy-coder/pull/792)), a tool definition
+declares which hosts it may reach, and the jail enforces it:
+
+```yaml
+network:
+  egress: none            # the default when the section is absent: no shim at all
+  # egress: any           # unrestricted (what every agent jail still has)
+  # egress: { hosts: ["api.anthropic.com:443", "*.statsig.com", "127.0.0.1:8080"] }
+  oauth_inbound: false    # loopback inbound for an OAuth callback
+```
+
+**Patterns** are `host[:port]` or `*.domain[:port]`; the port defaults to 443, hosts are matched
+case-insensitively, and `*.domain` does not match the apex. A malformed pattern (a scheme, a path, an
+inner `*`, port 0, an empty label or a character outside `[A-Za-z0-9-]`) is refused at registry load,
+naming the tool. `hosts: []` is a policy that admits nothing — the shim starts and refuses every host.
+
+**Union** (`tddy-sandbox-recipes::tool_grants::lower_network`): one tool declaring `any` makes the
+jail `any`; host lists concatenate in tool order without repeats; `none` contributes nothing, so a set
+of only `none` tools is `EgressPolicy::None`. `oauth_inbound` is true when any tool declares it. A
+plan built from tools sets `NetworkSpec.egress` and `allow_oauth_inbound` from this; recipe-built
+agent jails keep `EgressPolicy::Any` (the `NetworkSpec` default) until their own nodes declare hosts.
+
+**Enforcement, at two points, independently:**
+
+- **The runner's egress shim** checks every `CONNECT` and plain-HTTP forward. An undeclared host is
+  answered `403 Forbidden` whose body is the refusal line, and no `TunnelOpen` is sent. Under `none`
+  the shim does not start and the PTY is given no `HTTPS_PROXY` / `TDDY_EGRESS_SHIM`.
+- **The host relay's `TunnelOpen`** (`HostRelayConfig::with_egress`) refuses an undeclared host with a
+  failed `TunnelOpenAck`, so a jailed process that speaks the relay protocol directly is refused too.
+  A port no `u16` holds is refused under every policy.
+
+The runner receives the policy as `--egress-policy <none|any|hosts:h:p,…>` (default `any`) plus one
+`--egress-tool <id>` per tool. Every refusal reads
+`egress to <host>:<port> refused for session <id>: not declared by tool set [<ids>]` — in the session's
+`sandbox-runner.log` from the shim, and through the host logger (target
+`tddy_sandbox_runner::egress`) from the relay.
+
+The workspace tool jail lowers its tools' network: it starts a shim only when a tool declares `hosts`
+or `any`, allows the jail that one loopback port, and passes the policy and tool ids. Its daemon side
+does not yet serve tunnels, so a declared host is refused nothing but also reached nowhere there — see
+[`docs/dev/todo/2026-11-02-workspace-jail-serves-no-egress-tunnels.md`](../../dev/todo/2026-11-02-workspace-jail-serves-no-egress-tunnels.md).
+
+Out of scope: path or method filtering, DNS pinning, TLS inspection (the tunnel stays end-to-end TLS).

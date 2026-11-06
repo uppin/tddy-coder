@@ -3,7 +3,7 @@
 **Location:** `packages/tddy-sandbox-runner/src/runner.rs`
 **Category:** oversized-file
 **Detected:** 2026-09-26 by `structural audit` — `/pr-wrap` step 3.5 file-length gate on PR #545
-**Metrics:** **2,742 production lines** (2026-10-25) (counted to the module-level `#[cfg(test)]`) · budget 500 ·
+**Metrics:** **2,799 production lines** (2026-10-25) (counted to the module-level `#[cfg(test)]`) · budget 500 ·
 **5.2× over**
 **Thresholds breached:** length 2,742 > 500
 **Restructure:** required — `extract_module --to_file`, `/code-restructuring` territory
@@ -18,6 +18,7 @@
 | 2026-10-01 | 2,639 | **worse** by 28 over master's 2,611 in PR #560 (`#agent-worktree` 1/4): `call_tool(conversation_id, …)` and the `ConversationWorktree` relay arm. The jail-side root and session binding live in `conversation_root.rs` |
 | 2026-10-22 | 2,698 | **worse** by 59 in PR #670 (`#provider-route` 9/9): the `--agent-kind opencode \| muse` dispatch arm (+20; the PTY spawn itself is in the new `harness_pty.rs`), and two pre-existing relay fixes — `acknowledge_attach` (+17) and `release_outbound` with its two call sites (+17) — plus `pub(crate)` on the PTY helpers `harness_pty.rs` reuses. Not split in #670: the orchestrator scoped decomposition to files the PR pushed past 500, and this one was 5.2× over before it |
 | 2026-10-25 | 2,742 | **worse** by 44 in PR #762 (`#term-snapshot` 3/4): the terminal backlog carries `TerminalBacklogItem::{Output, Resized}`, `push_terminal_size`, and the generic and claude PTY threads report the size after `openpty` and after each accepted resize. Split deferred with the developer's consent (code issues may be deferred in `#term-snapshot`) |
+| 2026-11-02 | 2,799 | **worse** by 57 in PR #792 (`#agent-tools` 3/12): `--egress-policy` / `--egress-tool` args, `runner_egress_guard`, `start_egress_shim_for_policy` (a `none` policy starts no shim), the guard threaded through the shim's CONNECT and HTTP-forward paths, and the PTY proxy env made optional. The policy check itself lives in the new `egress_policy.rs`. Not split: the file is stack-shared with every later `#agent-tools` node, so a split is deferred to after the stack lands (pr-wrap step 3.5) |
 
 ## What the tool found
 

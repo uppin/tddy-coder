@@ -3,7 +3,7 @@
 **Location:** `packages/tddy-sandbox/src/builder.rs`
 **Category:** oversized-file
 **Detected:** 2026-10-22 by `/pr-wrap` step 3.5 file-length gate on PR #670 (`#provider-route` 9/9)
-**Metrics:** **573 production lines** (counted to the first `#[cfg(test)]`) · budget 500
+**Metrics:** **577 production lines** (counted to the first `#[cfg(test)]`) · budget 500
 **Thresholds breached:** length 573 > 500
 **Restructure:** required — not designed, `/code-restructuring` territory
 **Status:** Open — **unclaimed**
@@ -13,6 +13,7 @@
 | Run | Production lines | Note |
 |---|---|---|
 | 2026-10-22 | 573 | first record; 562 at PR #670's merge-base (`655970c72`), already over budget. +11 in #670: a hand-written `Debug` for `SecretSource`, so a literal secret in a plan never reaches a log line. |
+| 2026-11-02 | 577 | **worse** by 4 in PR #792 (`#agent-tools` 3/12): `NetworkSpec.egress` and its doc. `EgressPolicy` itself is in the new `network.rs`. Not split: stack-shared |
 
 ## What the tool found
 

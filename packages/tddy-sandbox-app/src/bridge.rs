@@ -185,6 +185,8 @@ pub async fn run_terminal_bridge(
             terminal_events: None,
             initial_cols: cols as u32,
             initial_rows: rows as u32,
+            // The app's jail is recipe-built, so it keeps today's unrestricted egress.
+            egress: tddy_sandbox_runner::EgressGuard::unrestricted(session_id),
         },
         stdin_rx,
     )

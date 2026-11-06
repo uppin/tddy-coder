@@ -353,6 +353,10 @@ pub fn build_runner_plan(params: RunnerPlanRequest) -> Result<SandboxPlan, Sandb
         // A routed session's key is its route's; the host's own OAuth exchange is not opened beside it.
         allow_oauth_inbound: !routed
             && matches!(recipe, SandboxRecipe::ClaudeCli | SandboxRecipe::CursorCli),
+        // A recipe-built jail keeps today's unrestricted egress until its agent's node declares
+        // hosts (`#agent-tools` 5, 7 and 8). A jail lowered from tools overrides this with
+        // `tool_grants::lower_network`'s union.
+        egress: tddy_sandbox::EgressPolicy::Any,
     })
     .env_map(env);
     if let Some(route) = &params.route {

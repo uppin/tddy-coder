@@ -19,6 +19,7 @@ fn a_resolved_tool(id: &str, binary: &str) -> ResolvedTool {
         command: id.into(),
         binary: PathBuf::from(binary),
         reads: vec![],
+        network: Default::default(),
     }
 }
 

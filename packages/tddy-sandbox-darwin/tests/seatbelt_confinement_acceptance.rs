@@ -77,6 +77,7 @@ fn strict_claude_plan(
         .network(NetworkSpec {
             loopback_allow_ports: vec![],
             allow_oauth_inbound: true,
+            egress: Default::default(),
         })
         .env_map(env)
         .build()
