@@ -21,10 +21,10 @@
 use std::path::{Path, PathBuf};
 
 use tddy_cli_sessions::cli_session_manager::ExitHook;
-use tddy_core::session_pointer::{SessionPointer, SESSION_POINTER_FILE};
+use tddy_core::session_pointer::{SessionPointer, SessionPointerOwner, SESSION_POINTER_FILE};
 use tddy_rpc::Status;
 
-use crate::slot_file_over_ssh::write_slot_file_over_ssh;
+use crate::slot_file_over_ssh::{write_over_ssh, SLOT_FILE_OVER_SSH_DEADLINE};
 use crate::spec_launch::SpecLaunchError;
 
 /// The pointer holds the agent's hook token: owner-only, as a headless turn writes it.
@@ -58,7 +58,44 @@ pub(crate) fn session_pointer_of(
             .cloned()
             .collect(),
         notify: notify.into_iter().collect(),
+        // TODO(session-pointer): implement — the daemon that launched the agent owns the pointer.
+        owner: None,
     })
+}
+
+/// The host a session's worktree, and so its pointer, is on (`#agent-tools 21/28`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum PointerHost {
+    /// This host.
+    Local,
+    /// The ssh target `alias`, reached through the ssh client `ssh`.
+    Ssh { ssh: PathBuf, alias: String },
+}
+
+impl PointerHost {
+    /// The host of a session whose worktree is on `remote_host` (its `ssh_config_host`), reached
+    /// through the `ssh` on `PATH`; this host when it names none.
+    pub(crate) fn of(remote_host: Option<&str>) -> Self {
+        Self::through(Path::new("ssh"), remote_host)
+    }
+
+    /// [`Self::of`], reaching an ssh target through the ssh client `ssh`.
+    pub(crate) fn through(ssh: &Path, remote_host: Option<&str>) -> Self {
+        match remote_host.filter(|alias| !alias.trim().is_empty()) {
+            Some(alias) => PointerHost::Ssh {
+                ssh: ssh.to_path_buf(),
+                alias: alias.to_string(),
+            },
+            None => PointerHost::Local,
+        }
+    }
+}
+
+/// A pointer a launch placed, and the host it is on: what its agent's exit removes.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct PlacedSessionPointer {
+    pub(crate) path: PathBuf,
+    pub(crate) host: PointerHost,
 }
 
 /// Where `worktree`'s pointer lives.
@@ -66,31 +103,34 @@ pub(crate) fn session_pointer_path(worktree: &Path) -> PathBuf {
     worktree.join(SESSION_POINTER_FILE)
 }
 
-/// Write `pointer` into `worktree`: on this host, git-excluded and owner-only, returning the path to
-/// remove when the agent exits; on `remote_host`, through the bounded ssh slot-file write, returning
-/// `None` (the target's file is not this host's to remove). `None` writes nothing.
+/// Write `pointer` into `worktree` on `host`, git-excluded and owner-only, returning what to remove
+/// when the agent exits. On an ssh target the exclude and the write are one bounded ssh command.
+/// `None` writes nothing.
 pub(crate) fn place_session_pointer(
     pointer: Option<&SessionPointer>,
     worktree: &Path,
-    remote_host: Option<&str>,
-) -> Result<Option<PathBuf>, Status> {
+    host: &PointerHost,
+) -> Result<Option<PlacedSessionPointer>, Status> {
     let Some(pointer) = pointer else {
         return Ok(None);
     };
     let path = session_pointer_path(worktree);
     let contents = serde_json::to_vec_pretty(pointer)
         .map_err(|e| Status::internal(format!("the session pointer cannot be encoded: {e}")))?;
-    if let Some(host) = remote_host {
-        // TODO(cli-dispatch-collapse): the target's `info/exclude` is not updated, and the file is
-        // not removed on exit (docs/dev/todo/2026-11-06-ssh-session-pointer-exclude-and-removal.md).
-        write_slot_file_over_ssh(host, &path, &contents).map_err(|error| match error {
-            SpecLaunchError::SlotFileOverSshTimedOut { .. } => {
-                Status::deadline_exceeded(error.to_string())
-            }
-            other => Status::internal(format!(
-                "failed to write the session pointer on {host}: {other}"
-            )),
-        })?;
+    if let PointerHost::Ssh { ssh, alias: host } = host {
+        // TODO(session-pointer): implement — one bounded ssh command that adds the pointer to the
+        // target's `info/exclude` and writes it `umask 077`; returned for removal on exit
+        // (docs/dev/todo/2026-11-06-ssh-session-pointer-exclude-and-removal.md).
+        write_over_ssh(ssh, host, &path, &contents, SLOT_FILE_OVER_SSH_DEADLINE).map_err(
+            |error| match error {
+                SpecLaunchError::SlotFileOverSshTimedOut { .. } => {
+                    Status::deadline_exceeded(error.to_string())
+                }
+                other => Status::internal(format!(
+                    "failed to write the session pointer on {host}: {other}"
+                )),
+            },
+        )?;
         return Ok(None);
     }
     if inside_a_git_checkout(worktree)? {
@@ -109,7 +149,33 @@ pub(crate) fn place_session_pointer(
             ))
         },
     )?;
-    Ok(Some(path))
+    Ok(Some(PlacedSessionPointer {
+        path,
+        host: PointerHost::Local,
+    }))
+}
+
+/// Where an ssh launch's agent records its pid on the target, relative to its worktree, for
+/// [`record_remote_owner`] to read (and remove).
+// TODO(session-pointer): written by the ssh launch, read by `record_remote_owner`; drop the allow.
+#[allow(dead_code)]
+pub(crate) const REMOTE_AGENT_PID_FILE: &str = ".tddy/agent.pid";
+
+/// Once the agent has started on the ssh target `placed` is on: one bounded ssh command reads the
+/// target's own name for itself (`hostname`) and the agent's pid ([`REMOTE_AGENT_PID_FILE`], which
+/// it removes), and rewrites the placed `pointer` owner-only with that owner, which it returns. A
+/// pointer on this host is refused: the daemon that placed it is its owner.
+// TODO(session-pointer): called by the ssh launch once its agent has started; drop the allow.
+#[allow(dead_code)]
+pub(crate) fn record_remote_owner(
+    placed: &PlacedSessionPointer,
+    pointer: &SessionPointer,
+) -> Result<SessionPointerOwner, Status> {
+    // TODO(session-pointer): implement
+    let _ = (placed, pointer);
+    Err(Status::unimplemented(
+        "the remote agent's owner is not recorded yet",
+    ))
 }
 
 /// Whether `worktree` lies in a git checkout — one of its own, or one of a directory above it. Only
@@ -132,9 +198,22 @@ fn inside_a_git_checkout(worktree: &Path) -> Result<bool, Status> {
         })
 }
 
-/// Remove `worktree`'s pointer, if any: the session is gone.
-pub(crate) fn remove_session_pointer(worktree: &Path) {
-    remove_pointer_file(&session_pointer_path(worktree));
+/// Remove `worktree`'s pointer on `host`, if any: the session is gone.
+pub(crate) fn remove_session_pointer(worktree: &Path, host: &PointerHost) {
+    remove_placed_pointer(&PlacedSessionPointer {
+        path: session_pointer_path(worktree),
+        host: host.clone(),
+    });
+}
+
+/// Remove `placed`, on the host it is on.
+fn remove_placed_pointer(placed: &PlacedSessionPointer) {
+    match &placed.host {
+        PointerHost::Local => remove_pointer_file(&placed.path),
+        PointerHost::Ssh { .. } => {
+            // TODO(session-pointer): implement — a bounded ssh `rm -f` of the pointer on the target.
+        }
+    }
 }
 
 fn remove_pointer_file(path: &Path) {
@@ -154,7 +233,7 @@ fn remove_pointer_file(path: &Path) {
 /// and the pointer's removal is no reason to keep one. That pointer goes with the session's delete.
 pub(crate) fn removing_session_pointer_on_exit(
     on_exit: Option<ExitHook>,
-    pointer: Option<PathBuf>,
+    pointer: Option<PlacedSessionPointer>,
     in_tmux: bool,
 ) -> Option<ExitHook> {
     let Some(pointer) = pointer else {
@@ -165,7 +244,7 @@ pub(crate) fn removing_session_pointer_on_exit(
     }
     Some(Box::new(move |capture| {
         Box::pin(async move {
-            remove_pointer_file(&pointer);
+            remove_placed_pointer(&pointer);
             if let Some(on_exit) = on_exit {
                 on_exit(capture).await;
             }

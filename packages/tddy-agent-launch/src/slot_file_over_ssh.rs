@@ -43,7 +43,7 @@ pub(crate) fn write_slot_file_over_ssh(
 }
 
 /// [`write_slot_file_over_ssh`] through the ssh client `ssh`, bounded by `deadline`.
-fn write_over_ssh(
+pub(crate) fn write_over_ssh(
     ssh: &Path,
     alias: &str,
     path: &Path,

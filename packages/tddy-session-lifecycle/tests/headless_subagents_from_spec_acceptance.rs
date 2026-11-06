@@ -61,7 +61,8 @@ impl ToolHost for AFixtureHost {
 
 /// Stub `agent`, `codex` and `oz` CLIs and a stub `tddy-tools`, in one directory. Each CLI records
 /// its argv (one entry per line) to `<name>.argv`; `agent` copies the worktree's
-/// `.cursor/mcp.json` it runs with to `agent.mcp`, `oz` the `--mcp` file to `oz.mcp`.
+/// `.cursor/mcp.json` it runs with to `agent.mcp`, `oz` the `--mcp` file to `oz.mcp`, and `codex`
+/// its environment to `codex.env`.
 struct TheStubClis {
     dir: tempfile::TempDir,
 }
@@ -88,11 +89,13 @@ printf '%s\n' '{{"type":"result","subtype":"success","result":"Fixed it.","sessi
             format!(
                 r#"#!/bin/sh
 for a in "$@"; do printf '%s\n' "$a"; done > '{argv}'
+/usr/bin/env > '{env}'
 printf '%s\n' '{{"type":"thread.started","thread_id":"th-1"}}'
 printf '%s\n' '{{"type":"item.completed","item":{{"id":"item_1","type":"agent_message","text":"Fixed it."}}}}'
 printf '%s\n' '{{"type":"turn.completed"}}'
 "#,
                 argv = record("codex.argv"),
+                env = record("codex.env"),
             ),
         ),
         (
@@ -133,6 +136,17 @@ impl TheStubClis {
             .unwrap_or_else(|e| panic!("the {cli} stub ran: {e}"))
             .lines()
             .map(str::to_string)
+            .collect()
+    }
+
+    /// The variables of `names` that `cli` ran with, by name.
+    fn env_seen(&self, cli: &str, names: &[&str]) -> BTreeMap<String, String> {
+        std::fs::read_to_string(self.dir.path().join(format!("{cli}.env")))
+            .unwrap_or_else(|e| panic!("the {cli} stub recorded its environment: {e}"))
+            .lines()
+            .filter_map(|line| line.split_once('='))
+            .filter(|(name, _)| names.contains(name))
+            .map(|(name, value)| (name.to_string(), value.to_string()))
             .collect()
     }
 
@@ -297,6 +311,7 @@ async fn headless_cursor_codex_and_oz_subagents_launch_with_mcp_rendered_as_file
 
     // Then — Cursor: a worktree `.cursor/mcp.json`; Codex: inline `-c`; Oz: an `--mcp` file
     let codex_argv = stubs.argv("codex");
+    let codex_conversation_dir = data_dir.path().join("headless").join("conv-codex");
     let oz_mcp_file = data_dir
         .path()
         .join("headless")
@@ -321,8 +336,10 @@ async fn headless_cursor_codex_and_oz_subagents_launch_with_mcp_rendered_as_file
             vec![
                 format!("mcp_servers.tddy-tools.command=\"{TDDY_TOOLS_PATH}\""),
                 "mcp_servers.tddy-tools.args=[\"--mcp\"]".to_string(),
-                "mcp_servers.tddy-tools.env_vars=[\"TDDY_CONVERSATION_ID\",\"TDDY_REMOTE_SESSION_TOKEN\"]"
-                    .to_string(),
+                format!(
+                    "mcp_servers.tddy-tools.cwd=\"{}\"",
+                    codex_conversation_dir.display()
+                ),
             ],
             false,
             Some(oz_mcp_file.to_string_lossy().into_owned()),
@@ -383,5 +400,56 @@ async fn the_startup_sweep_removes_a_recorded_file_of_a_conversation_the_daemon_
     assert_eq!(
         (swept, registration.exists()),
         (vec!["conv-1".to_string()], false)
+    );
+}
+
+/// The variables the launch's tool server is given ([`the_tool_server_entry`]).
+const TOOL_SERVER_VARIABLES: [&str; 2] = ["TDDY_REMOTE_SESSION_TOKEN", "TDDY_CONVERSATION_ID"];
+
+#[tokio::test]
+async fn a_headless_codex_conversation_carries_no_tddy_env_and_resolves_through_its_pointer() {
+    // Given
+    let data_dir = tempfile::tempdir().expect("data dir");
+    let worktree = a_git_worktree();
+    let stubs = the_stub_clis();
+    let launcher = a_launcher_with_coding_agents(data_dir.path(), &stubs);
+    let conversation_dir = data_dir.path().join("headless").join("conv-codex");
+
+    // When
+    one_turn(&launcher, "codex", "conv-codex", worktree.path()).await;
+
+    // Then — Codex itself is given none of the tool server's variables, its inline registration
+    // forwards none and starts the server in the conversation directory, where the conversation's
+    // pointer carries them for it instead
+    let found = tddy_core::session_pointer::find_session_pointer(&conversation_dir)
+        .expect("the conversation's pointer is readable")
+        .map(|(path, pointer)| (path, pointer.remote));
+    assert_eq!(
+        (
+            stubs.env_seen("codex", &TOOL_SERVER_VARIABLES),
+            config_overrides(&stubs.argv("codex")),
+            found,
+        ),
+        (
+            BTreeMap::new(),
+            vec![
+                format!("mcp_servers.tddy-tools.command=\"{TDDY_TOOLS_PATH}\""),
+                "mcp_servers.tddy-tools.args=[\"--mcp\"]".to_string(),
+                format!(
+                    "mcp_servers.tddy-tools.cwd=\"{}\"",
+                    conversation_dir.display()
+                ),
+            ],
+            Some((
+                conversation_dir.join(".tddy").join("session.json"),
+                BTreeMap::from([
+                    ("TDDY_CONVERSATION_ID".to_string(), "conv-codex".to_string()),
+                    (
+                        "TDDY_REMOTE_SESSION_TOKEN".to_string(),
+                        MINTED_TOKEN.to_string()
+                    ),
+                ])
+            )),
+        )
     );
 }

@@ -3,7 +3,8 @@
 **Date**: 2026-11-06
 **Status**: 🚧 In Progress
 **Type**: Feature
-**Complexity**: 4 — five crates; the pointer file format changes (a contract read by `tddy-tools`); ssh process seam
+**Complexity**: 5 — five crates; pointer file format changes (contract read by tddy-tools); ssh seam with remote owner lookup
+**PR**: #829 — https://github.com/uppin/tddy-coder/pull/829
 
 ## Initial Discovery
 
@@ -85,14 +86,28 @@ Unit and integration level; no LiveKit (cheap RPC rule). The ssh path uses the s
 
 | Test | File |
 |---|---|
-| `two_sessions_minted_in_the_same_millisecond_get_different_tool_ipc_sockets` | `packages/tddy-sandbox/src/spec.rs` (`#[cfg(test)]`) |
-| `a_pointer_whose_owner_is_gone_is_an_error_naming_the_pointer` | `packages/tddy-tools/tests/session_source_unit.rs` |
-| `a_pointer_naming_a_missing_socket_is_an_error_but_an_explicit_socket_is_not_prechecked` | `packages/tddy-tools/tests/session_source_unit.rs` |
-| `a_pointer_without_an_owner_still_resolves` | `packages/tddy-tools/tests/session_source_unit.rs` |
-| `a_held_pointer_for_another_session_is_not_overwritten` | `packages/tddy-agent-backend/tests/session_pointer.rs` |
-| `an_ssh_pointer_is_excluded_owner_only_and_bounded` | `packages/tddy-agent-launch/src/cli_session_pointer/cli_session_pointer_unit_tests.rs` |
-| `an_ssh_pointer_is_removed_when_the_agent_exits_and_when_the_session_is_deleted` | `packages/tddy-agent-launch/src/cli_session_pointer/cli_session_pointer_unit_tests.rs` |
-| `a_headless_codex_conversation_carries_no_tddy_env_and_resolves_through_its_pointer` | `packages/tddy-session-lifecycle/tests/headless_subagents_from_spec_acceptance.rs` |
+| `two_sessions_minted_in_the_same_millisecond_get_different_tool_ipc_sockets` | `packages/tddy-sandbox/src/spec.rs:174` |
+| `a_pointer_whose_owner_is_gone_is_an_error_naming_the_pointer` | `packages/tddy-tools/tests/session_source_unit.rs:277` |
+| `a_pointer_naming_a_missing_socket_is_an_error_but_an_explicit_socket_is_not_prechecked` | `packages/tddy-tools/tests/session_source_unit.rs:308` |
+| `a_pointer_without_an_owner_still_resolves` (guard — passes by nature) | `packages/tddy-tools/tests/session_source_unit.rs:335` |
+| `a_held_pointer_for_another_session_is_not_overwritten` | `packages/tddy-agent-backend/tests/session_pointer.rs:72` |
+| `an_ssh_pointer_is_excluded_owner_only_and_bounded` (also: the remote agent's `{pid, host}` is recorded) | `packages/tddy-agent-launch/src/cli_session_pointer/cli_session_pointer_unit_tests.rs:298` |
+| `an_ssh_pointer_is_removed_when_the_agent_exits_and_when_the_session_is_deleted` | `packages/tddy-agent-launch/src/cli_session_pointer/cli_session_pointer_unit_tests.rs:368` |
+| `a_headless_codex_conversation_carries_no_tddy_env_and_resolves_through_its_pointer` | `packages/tddy-session-lifecycle/tests/headless_subagents_from_spec_acceptance.rs:410` |
+
+### Unit / integration tests (red)
+
+| Test | File | State at contract |
+|---|---|---|
+| `the_tool_ipc_socket_is_named_by_an_fnv64_of_the_whole_session_id_and_the_daemons_pid` | `packages/tddy-sandbox/src/spec.rs:186` | failing |
+| `the_tool_ipc_socket_of_a_long_session_id_still_fits_sun_len` | `packages/tddy-sandbox/src/spec.rs:205` | guard (passes) |
+| `a_pointer_owned_on_another_host_is_resolved_without_checking_its_pid_or_socket` | `packages/tddy-tools/tests/session_source_unit.rs:351` | guard (passes) |
+| `a_pointer_whose_owner_is_gone_is_replaced_by_the_next_session` | `packages/tddy-agent-backend/tests/session_pointer.rs:112` | guard (passes) |
+| `the_same_sessions_pointer_is_replaced_on_its_next_turn` | `packages/tddy-agent-backend/tests/session_pointer.rs:147` | guard (passes) |
+| `a_pointer_without_an_owner_is_written_and_read_without_the_field` | `packages/tddy-agent-backend/tests/session_pointer.rs:174` | guard (passes) |
+| `the_pointer_carries_the_managed_socket_and_the_notify_session` (expectation: owner = this process) | `packages/tddy-agent-launch/src/cli_session_pointer/cli_session_pointer_unit_tests.rs:61` | failing |
+| `the_owner_of_a_pointer_on_this_host_is_not_looked_up_over_ssh` | `packages/tddy-agent-launch/src/cli_session_pointer/cli_session_pointer_unit_tests.rs:352` | failing |
+| `headless_cursor_codex_and_oz_subagents_launch_with_mcp_rendered_as_file_inline_and_argv` (codex overrides: no `env_vars`, `cwd`) | `packages/tddy-session-lifecycle/tests/headless_subagents_from_spec_acceptance.rs:298` | failing |
 
 ## Responsibility
 
@@ -134,6 +149,14 @@ Real edges: `session-pointer → split-remote-env, acp-subagent-leftovers, env-a
 - Liveness is `owner_pid` + socket existence, not a token handshake: cheap, local, and enough to stop dialling a dead session. A recycled pid is caught by the socket check.
 - An owner-less pointer stays readable so a newer `tddy-tools` works against an older daemon.
 - FNV-64 over the whole id instead of a new hashing crate.
+- The owner is `SessionPointerOwner { pid, host }` (`owner: Option<…>` replaces the planned `owner_pid`) — developer, 2026-11-06. A local pointer is owned by the daemon on this host; an ssh pointer by the remote agent on the target, `host` as the target names itself (`hostname`).
+- `tddy-tools` checks the owner's liveness, and the socket path, only when the owner's host is the host it runs on.
+- The remote agent's pid comes from `.tddy/agent.pid` on the target, written as `$$` by the ssh launch before `exec`, read and removed by `record_remote_owner` in one bounded ssh command — developer, 2026-11-06.
+- The headless conversation's pointer lives in the conversation directory, and Codex's inline MCP slot gets a `cwd` override (`mcp_servers.tddy-tools.cwd="<conversation dir>"`) so `tddy-tools` finds it — developer.
+- The conversation id and minted token ride in the pointer's `remote` map — developer.
+- `SessionPointerHeld` is carried as `BackendError::InvocationFailed(held.to_string())`: `BackendError` lives in `tddy-session-store`, which this node does not touch.
+- `SessionNotFound::UnreadablePointer.reason: String` became `cause: UnreadablePointerCause` (`Invalid(String)`, `OwnerGone { owner }`, `SocketMissing { socket }`).
+- `deny_unknown_fields` stays: an older `tddy-tools` rejects a newer pointer carrying `owner`; only newer-tools / older-daemon is supported.
 
 ## TODO
 
@@ -141,10 +164,10 @@ Real edges: `session-pointer → split-remote-env, acp-subagent-leftovers, env-a
 - [x] Cross-check `packages/*/docs/code-issues/` and `docs/dev/todo/` for items this change touches (Step 2b)
 - [x] Create/update PRD documentation
 - [x] Create changeset (this document)
-- [ ] Create failing acceptance tests
-- [ ] Run acceptance tests (verify they fail)
-- [ ] USER REVIEW — acceptance tests
-- [ ] TDD Red — write failing unit/integration tests
+- [x] Create failing acceptance tests
+- [x] Run acceptance tests (verify they fail)
+- [x] USER REVIEW — acceptance tests
+- [x] TDD Red — write failing unit/integration tests
 - [ ] TDD Green — implement with quality code
 - [ ] Update documentation with progress
 - [ ] Repeat Red→Green→Update cycle until feature complete
@@ -164,7 +187,8 @@ Real edges: `session-pointer → split-remote-env, acp-subagent-leftovers, env-a
 
 ## Technical Debt & Production Readiness
 
-_(populated during development)_
+- Pre-existing, not this node's: `claude_cli_from_spec_acceptance::an_unsandboxed_claude_cli_start_runs_the_spec_binary_with_the_argv_its_template_renders` fails on macOS (`/tmp` vs `/private/tmp` in `--append-system-prompt-file`).
+- A full `./test -p tddy-session-lifecycle` exceeds 10 minutes locally; its whole-package result is CI's. Locally this node runs `--test headless_subagents_from_spec_acceptance`.
 
 ## Refactoring Needed
 

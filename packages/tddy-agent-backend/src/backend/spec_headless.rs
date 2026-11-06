@@ -344,6 +344,8 @@ impl CodingBackend for SpecHeadlessBackend {
                         .map(|remote| remote.env_pairs().into_iter().collect::<BTreeMap<_, _>>())
                         .unwrap_or_default(),
                     notify: BTreeMap::new(),
+                    // TODO(session-pointer): implement — this process owns the pointer.
+                    owner: None,
                 },
             )?;
         }

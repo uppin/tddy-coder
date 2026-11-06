@@ -38,6 +38,8 @@ impl SandboxSpec {
         let tmp =
             std::fs::canonicalize(std::env::temp_dir()).unwrap_or_else(|_| std::env::temp_dir());
         // Keep the name short and collision-resistant without pulling in a hashing crate.
+        // TODO(session-pointer): implement — name it by an FNV-64 of the whole id: the first ten
+        // characters of a UUIDv7 are its millisecond timestamp, which two sessions can share.
         let short: String = session_id
             .chars()
             .filter(|c| c.is_ascii_alphanumeric())
@@ -147,5 +149,73 @@ impl SandboxHandle {
                 status.code()
             ))
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::SandboxSpec;
+
+    /// Two UUIDv7 session ids minted in the same millisecond: their first ten characters — the
+    /// timestamp — are the same, and only the random tail tells them apart.
+    const FIRST_SESSION: &str = "01a1b24a-f0b0-7501-8699-f9dc1f9f0acc";
+    const SECOND_SESSION: &str = "01a1b24a-f0b0-7a3c-b2d1-0c4e8f7a9b12";
+
+    /// The file name of `session_id`'s tool-IPC socket.
+    fn socket_name_of(session_id: &str) -> String {
+        SandboxSpec::short_ipc_socket_path(session_id)
+            .file_name()
+            .expect("a socket path names a file")
+            .to_string_lossy()
+            .into_owned()
+    }
+
+    #[test]
+    fn two_sessions_minted_in_the_same_millisecond_get_different_tool_ipc_sockets() {
+        // Given two jails of this daemon, for sessions minted in the same millisecond
+
+        // When
+        let first = SandboxSpec::short_ipc_socket_path(FIRST_SESSION);
+        let second = SandboxSpec::short_ipc_socket_path(SECOND_SESSION);
+
+        // Then
+        assert_ne!(first, second);
+    }
+
+    #[test]
+    fn the_tool_ipc_socket_is_named_by_an_fnv64_of_the_whole_session_id_and_the_daemons_pid() {
+        // Given
+        // FNV-1a 64 of FIRST_SESSION, computed independently of the code under test.
+        let fnv64_of_the_first_session = "69d37be2277167c1";
+
+        // When
+        let name = socket_name_of(FIRST_SESSION);
+
+        // Then
+        assert_eq!(
+            name,
+            format!(
+                "tddy-{fnv64_of_the_first_session}-{}.sock",
+                std::process::id()
+            )
+        );
+    }
+
+    #[test]
+    fn the_tool_ipc_socket_of_a_long_session_id_still_fits_sun_len() {
+        // Given — an id far longer than a UUID
+        let long_session_id = "s".repeat(400);
+
+        // When
+        let socket = SandboxSpec::short_ipc_socket_path(&long_session_id);
+
+        // Then — macOS caps `sun_path` at 104 bytes, its terminating NUL included. A bound, not an
+        // exact length: the temp dir the path lives under differs per host.
+        assert!(
+            socket.as_os_str().len() < 104,
+            "{} is {} bytes",
+            socket.display(),
+            socket.as_os_str().len()
+        );
     }
 }

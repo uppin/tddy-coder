@@ -48,6 +48,8 @@ impl TurnFiles {
             BackendError::InvocationFailed(format!("the session pointer cannot be encoded: {e}"))
         })?;
         // The pointer is this backend's own file: a stale one a crashed turn left is replaced.
+        // TODO(session-pointer): implement — refuse with `SessionPointerHeld` when the pointer there
+        // names another socket and its `owner` is alive on this host.
         self.write_one_replacing(&path, &contents, workdir)
     }
 
