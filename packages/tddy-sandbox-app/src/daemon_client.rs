@@ -73,16 +73,7 @@ pub async fn run(params: DaemonClientParams) -> Result<()> {
     if !params.specialized_agents.is_empty() {
         eprintln!("specialized_agents={}", params.specialized_agents.join(","));
     }
-    let request = start_session_request_from(
-        &session_token,
-        &params.repo,
-        &params.model,
-        &params.permission_mode,
-        codebase_mode,
-        &params.claude_args,
-        &params.specialized_agents,
-        &params.session_type,
-    );
+    let request = start_session_request_from(&params, &session_token, codebase_mode);
 
     let session_id = client
         .start_session(request)
@@ -160,26 +151,20 @@ fn map_daemon_status(action: &str, status: &Status) -> anyhow::Error {
 /// `specialized_agents` names are resolved by
 /// the daemon against its own agents pool.
 pub fn start_session_request_from(
+    params: &DaemonClientParams,
     session_token: &str,
-    repo: &Path,
-    model: &str,
-    permission_mode: &str,
     codebase_mode: &str,
-    claude_args: &[String],
-    specialized_agents: &[String],
-    // The session type that starts the app's agent: its spec id's `-cli` spelling.
-    session_type: &str,
 ) -> StartSessionRequest {
     StartSessionRequest {
         session_token: session_token.to_string(),
-        session_type: session_type.into(),
+        session_type: params.session_type.clone(),
         sandbox: true,
-        repo_path: repo.to_string_lossy().into_owned(),
-        model: model.to_string(),
-        permission_mode: permission_mode.to_string(),
+        repo_path: params.repo.to_string_lossy().into_owned(),
+        model: params.model.clone(),
+        permission_mode: params.permission_mode.clone(),
         managed_codebase: codebase_mode == "managed",
-        claude_args: claude_args.to_vec(),
-        specialized_agents: specialized_agents.to_vec(),
+        claude_args: params.claude_args.clone(),
+        specialized_agents: params.specialized_agents.clone(),
         ..Default::default()
     }
 }
@@ -336,6 +321,28 @@ async fn run_daemon_terminal_bridge(
 mod tests {
     use super::*;
 
+
+    /// Resolved daemon-client params for a request-building test.
+    fn app_params(
+        repo: &str,
+        model: &str,
+        permission_mode: &str,
+        session_type: &str,
+        claude_args: Vec<String>,
+        specialized_agents: Vec<String>,
+    ) -> DaemonClientParams {
+        DaemonClientParams {
+            daemon_socket: None,
+            repo: PathBuf::from(repo),
+            model: model.to_string(),
+            permission_mode: permission_mode.to_string(),
+            managed_codebase: false,
+            session_type: session_type.to_string(),
+            claude_args,
+            specialized_agents,
+        }
+    }
+
     #[test]
     fn builds_a_sandboxed_claude_cli_request_from_app_params() {
         // Given — resolved params for a managed-codebase session with extra claude args
@@ -343,14 +350,9 @@ mod tests {
 
         // When
         let req = start_session_request_from(
+            &app_params("/home/dev/proj", "claude-opus-4-8", "plan", "claude-cli", claude_args, vec![]),
             "tok",
-            Path::new("/home/dev/proj"),
-            "claude-opus-4-8",
-            "plan",
             "managed",
-            &claude_args,
-            &[],
-            "claude-cli",
         );
 
         // Then
@@ -371,14 +373,9 @@ mod tests {
     fn maps_mounted_codebase_mode_to_a_non_managed_request() {
         // Given / When — codebase_mode "mounted"
         let req = start_session_request_from(
+            &app_params("/r", "m", "auto", "acme-cli", vec![], vec![]),
             "tok",
-            Path::new("/r"),
-            "m",
-            "auto",
             "mounted",
-            &[],
-            &[],
-            "acme-cli",
         );
 
         // Then
@@ -394,13 +391,9 @@ mod tests {
 
         // When
         let req = start_session_request_from(
+            &app_params("/r", "m", "auto", "acme-cli", vec![], agents),
             "tok",
-            Path::new("/r"),
-            "m",
-            "auto",
             "mounted",
-            &[],
-            &agents,
         );
 
         // Then

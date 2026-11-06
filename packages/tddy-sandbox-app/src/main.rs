@@ -395,10 +395,15 @@ async fn run_linux(args: Args, cfg: config::SandboxAppConfig) -> Result<()> {
     let mut claude_args = cfg.claude_args;
     claude_args.extend(args.claude_args);
 
-    let model = args
-        .model
-        .or(cfg.model)
-        .unwrap_or_else(|| tddy_core::backend::CLAUDE_DEFAULT_MODEL.to_string());
+    // The default model is the chosen agent's spec's `models.default`, loaded without
+    // resolving anything on this host — the daemon runs the agent, not this client.
+    let session_base =
+        resolve_session_base(args.session_base.as_deref(), cfg.session_base.as_deref());
+    let model = match args.model.or(cfg.model) {
+        Some(model) => model,
+        None => tddy_sandbox_app::agent_spec::agent_default_model(&args.agent, &session_base)
+            .map_err(|e| anyhow::anyhow!(e))?,
+    };
     let permission_mode = args
         .permission_mode
         .or(cfg.permission_mode)
