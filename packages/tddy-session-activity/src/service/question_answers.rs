@@ -13,8 +13,8 @@
 //! 3. a waiter is opened in [`PendingAnswers`] and held for at most [`session_answer_wait`] →
 //!    `ANSWERED` (with the option, or the per-question answers), or `TIMED_OUT`.
 
-use std::sync::Arc;
 use std::path::Path;
+use std::sync::Arc;
 
 use tddy_coding_agent_specs::Capability;
 use tddy_core::pending_question::read_pending_question;
@@ -107,10 +107,7 @@ impl ActivityServiceImpl {
             }
         } else {
             pending.open_question(&req.session_id, question);
-            match pending
-                .wait_for_question(&req.request_id, hold)
-                .await
-            {
+            match pending.wait_for_question(&req.request_id, hold).await {
                 QuestionWaitOutcome::Answered(delivered) => answered_question_response(delivered),
                 QuestionWaitOutcome::TimedOut => outcome_only(AwaitQuestionOutcome::TimedOut),
             }

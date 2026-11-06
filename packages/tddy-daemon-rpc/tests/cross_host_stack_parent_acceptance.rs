@@ -181,8 +181,8 @@ livekit:
     );
     let config_path = data_dir.path().join("daemon.yaml");
     std::fs::write(&config_path, config_yaml).expect("write daemon config");
-    let config = tddy_daemon_kernel::config::DaemonConfig::load(&config_path)
-        .expect("load daemon config");
+    let config =
+        tddy_daemon_kernel::config::DaemonConfig::load(&config_path).expect("load daemon config");
 
     let base = data_dir.path().to_path_buf();
     let sessions_base_resolver: SessionsBaseResolver = Arc::new(move |_| Some(base.clone()));

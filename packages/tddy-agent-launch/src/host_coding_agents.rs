@@ -98,4 +98,3 @@ impl ToolHost for DaemonToolHost {
         self.base.canonicalize(path)
     }
 }
-
