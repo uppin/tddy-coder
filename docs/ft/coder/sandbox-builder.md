@@ -2,7 +2,7 @@
 
 **Product Area**: Coder
 **Status**: Implemented
-**Updated**: 2026-06-29
+**Updated**: 2026-11-02
 
 > **`tddy-sandbox`** is generic (`SandboxBuilder`, `exec_reads`, `scratch_runner_env`, `cwd`,
 > `extra_read_paths`). Product recipes (Claude CLI reads/copies/policy, generic exec, MCP argv) live
@@ -124,3 +124,47 @@ needs" set lives in one reviewable recipe; and a non-leaking secret channel deli
 
 Strong assertions: exact rule strings / tuples (no "contains > 0"), explicit absence of the
 wildcard, and the negative argv assertion for the secret channel.
+
+## Declared tools
+
+Since `#agent-tools 1/12` ([#790](https://github.com/uppin/tddy-coder/pull/790)), a binary a jail runs
+by name comes from a **tool definition**, not from a plan builder looking one binary up. A tool is
+the Bazel-style "executable plus what it needs":
+
+```yaml
+# built-in: packages/tddy-actions/tools/rg.yaml
+schema_version: 1
+id: rg
+summary: ripgrep — content search behind the Grep exec tool
+binary:
+  command: rg            # searched on the daemon's PATH, symlinks canonicalized
+  env: TDDY_RG_BINARY    # optional: an absolute path that wins over the PATH search
+deps: []                 # other tool ids; their grants join this tool's
+reads: []                # extra host paths the tool needs readable
+```
+
+**Sources.** Built-ins are embedded from `packages/tddy-actions/tools/*.yaml`. Files in
+`<tddyhome>/tools/*.yaml` override them: a file with a built-in's `id` replaces it **whole** (never
+field by field), and a new `id` adds a tool. Loading refuses, naming the files and ids involved: an
+unknown field, two files with one `id` in the same source, a dep on an unknown id, and a dep cycle.
+
+**Resolution** against the host: the `env` override first (one that is not an executable file refuses
+the tool, it never falls back to the search), then `command` on the daemon's `PATH` (absolute entries
+only), then canonicalize. An unresolvable binary is an error naming the tool and what was searched,
+e.g. `tool rg is unavailable: searched TDDY_RG_BINARY (unset), PATH (/usr/bin:/bin)`. A dep closure in
+which two tools share one `binary.command` is refused naming both ids, since only one of them could
+own the name on the jail's `PATH`.
+
+**Lowering** (`tddy-sandbox-recipes::tool_grants`; generic `tddy-sandbox` does not learn tools):
+
+- the binary is a **literal executable read** — the file, never its directory, so a Homebrew `rg`
+  does not make the rest of `/opt/homebrew/bin` executable;
+- its dynamic libraries (`otool -L` on macOS) and the nearest non-symlinked ancestor of each become
+  reads;
+- a jail-local `bin/` directory of links, one per tool, goes first on the jail's `PATH`, ahead of the
+  system directories.
+
+On macOS the Seatbelt renderer emits `process-exec*` for an exec literal as well as an exec subpath;
+agent jails declare only exec subpaths, so their profiles are unchanged.
+
+**First client:** the workspace tool jail (below) runs `Grep` through the declared `rg`.

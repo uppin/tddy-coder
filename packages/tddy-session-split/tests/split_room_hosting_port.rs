@@ -324,7 +324,9 @@ fn a_facilitating_daemon_whose_codebase_host(codebase_host: ACodebaseHost) -> AF
         split_rooms: Arc::clone(&split_rooms) as Arc<dyn SplitRoomHosting>,
         reachable_sessions: Arc::clone(&rest_of_the_host) as Arc<dyn ReachableSessions>,
         workspace_sandboxes: Arc::new(WorkspaceSandboxRegistry::new()),
-        workspace_sandbox_provisioner: Arc::new(JailedWorkspaceSandboxProvisioner),
+        workspace_sandbox_provisioner: Arc::new(JailedWorkspaceSandboxProvisioner::for_tddy_home(
+            data_dir.path(),
+        )),
         claude_cli_manager: Arc::new(CliSessionManager::new()),
         session_tokens: Some(tokens.clone()),
         agent_roster: an_agent_roster_with_nothing_attached(
