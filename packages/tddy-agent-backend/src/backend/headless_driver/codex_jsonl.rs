@@ -6,27 +6,38 @@ use serde_json::{json, Value};
 use crate::backend::acp_driver::{AcpToolStatus, AcpUpdate};
 use crate::stream::codex::{codex_jsonl_last_error_message, parse_codex_jsonl_output};
 
-use super::transcript::{cancelled, ended, exit_error, Ending, Finished, Updates};
-use super::HeadlessHarness;
+use crate::adapters::TurnTranscript;
 
-pub(super) struct CodexTurn {
+use super::transcript::{cancelled, ended, exit_error, Ending, Finished, Updates};
+
+pub(crate) struct CodexTurn {
     updates: Updates,
     lines: Vec<String>,
 }
 
+impl TurnTranscript for CodexTurn {
+    fn push_line(&mut self, line: &str) {
+        CodexTurn::push_line(self, line);
+    }
+
+    fn finish(self: Box<Self>, ending: Ending<'_>) -> Finished {
+        CodexTurn::finish(*self, ending)
+    }
+}
+
 impl CodexTurn {
-    pub(super) fn new(updates: Updates) -> Self {
+    pub(crate) fn new(updates: Updates) -> Self {
         Self {
             updates,
             lines: Vec::new(),
         }
     }
 
-    pub(super) fn push_line(&mut self, line: &str) {
+    pub(crate) fn push_line(&mut self, line: &str) {
         self.lines.push(line.to_string());
     }
 
-    pub(super) fn finish(self, ending: Ending<'_>) -> Finished {
+    pub(crate) fn finish(self, ending: Ending<'_>) -> Finished {
         self.emit_command_executions();
         let parsed = parse_codex_jsonl_output(&self.lines);
         let result = match ending {
@@ -35,7 +46,7 @@ impl CodexTurn {
             Ending::Exited { status, stderr } => {
                 let detail = codex_jsonl_last_error_message(&self.lines)
                     .unwrap_or_else(|| stderr.to_string());
-                Err(exit_error(HeadlessHarness::Codex, status, &detail))
+                Err(exit_error("codex", status, &detail))
             }
         };
         Finished {

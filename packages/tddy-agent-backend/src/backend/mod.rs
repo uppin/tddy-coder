@@ -3,29 +3,31 @@
 mod acp;
 pub mod acp_driver;
 mod claude;
-mod codex;
+pub(crate) mod codex;
 pub mod codex_acp;
 mod context_globs;
-pub(crate) mod cursor;
 pub mod headless_driver;
 mod mock;
 pub mod model_catalog;
 mod opencode_acp;
 mod routed;
+pub mod spec_headless;
+pub use spec_headless::SpecHeadlessBackend;
+pub(crate) mod turn_process;
 pub use routed::codex_acp_route_args;
+pub use turn_process::{kill_running_turns, RunningGroup};
 mod stub;
 mod tool_executor;
 
 pub use acp::ClaudeAcpBackend;
-pub use claude::{
-    build_claude_args, read_claude_subagent_usages, read_claude_transcript_usage,
-    ClaudeCodeBackend, ClaudeInvokeConfig, PermissionMode,
-};
+pub use claude::{read_claude_subagent_usages, read_claude_transcript_usage};
 pub use codex::write_codex_thread_id_file;
-pub use codex::{CodexBackend, CODEX_OAUTH_AUTHORIZE_URL_FILENAME, CODEX_THREAD_ID_FILENAME};
+pub use codex::{
+    spawn_codex_oauth_login, CODEX_DEFAULT_CLI_BINARY, CODEX_OAUTH_AUTHORIZE_URL_FILENAME,
+    CODEX_THREAD_ID_FILENAME,
+};
 pub use codex_acp::CodexAcpBackend;
 pub use context_globs::context_globs_for_agent;
-pub use cursor::CursorBackend;
 pub use mock::MockBackend;
 pub use model_catalog::{
     render_models_json, resolve_agent_models, BackendCliPaths, CLAUDE_CLI_AGENT, CURSOR_CLI_AGENT,
@@ -38,13 +40,18 @@ pub use tool_executor::{InMemoryToolExecutor, ProcessToolExecutor, ToolExecutor}
 
 /// Enum dispatch for CLI backend selection (avoids trait object overhead).
 /// tddy-coder uses claude/cursor only. tddy-demo uses stub (via lib, not CLI).
+///
+/// `Claude`, `Cursor` and `Codex` hold the one generic headless backend, configured by the agent's
+/// spec (`#agent-tools 15/19`); `feature/agent-tools/spec-backend` replaces the enum itself.
 #[derive(Debug)]
 pub enum AnyBackend {
-    Claude(ClaudeCodeBackend),
+    /// `claude -p` (`claude.yaml`).
+    Claude(SpecHeadlessBackend),
     ClaudeAcp(ClaudeAcpBackend),
-    Cursor(CursorBackend),
-    /// OpenAI Codex CLI (`codex exec`, `codex exec resume`, `--json`).
-    Codex(CodexBackend),
+    /// Cursor's `agent -p` (`cursor.yaml`).
+    Cursor(SpecHeadlessBackend),
+    /// OpenAI Codex CLI (`codex exec`, `codex exec resume`, `--json`; `codex.yaml`).
+    Codex(SpecHeadlessBackend),
     /// OpenAI Codex via `codex-acp` (ACP over stdio).
     CodexAcp(CodexAcpBackend),
     Stub(StubBackend),
@@ -167,35 +174,6 @@ impl CodingBackend for AnyBackend {
 
 use crate::error::BackendError;
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicU32, Ordering};
-
-static CHILD_PID: AtomicU32 = AtomicU32::new(0);
-
-/// Record the PID of a spawned child process so the SIGINT handler can kill it.
-pub fn set_child_pid(pid: u32) {
-    CHILD_PID.store(pid, Ordering::SeqCst);
-}
-
-/// Clear the child PID after the child has exited.
-pub fn clear_child_pid() {
-    CHILD_PID.store(0, Ordering::SeqCst);
-}
-
-/// Return the currently tracked child PID, or 0 if none.
-pub fn get_child_pid() -> u32 {
-    CHILD_PID.load(Ordering::SeqCst)
-}
-
-/// Kill the tracked child process. Returns true if the kill signal was delivered.
-#[cfg(unix)]
-pub fn kill_child_process() -> bool {
-    let pid = CHILD_PID.swap(0, Ordering::SeqCst);
-    if pid == 0 {
-        return false;
-    }
-    unsafe { libc::kill(pid as i32, libc::SIGKILL) == 0 }
-}
-
 /// Format binary + args as a shell-like command for debug logging.
 /// Truncates args longer than max_arg_len to keep logs readable.
 pub(crate) fn format_command_for_log(
@@ -227,20 +205,6 @@ pub(crate) fn format_command_for_log(
         parts.push(escaped);
     }
     parts.join(" ")
-}
-
-/// Non-unix stub: clears the tracked PID but cannot actually kill the process.
-#[cfg(not(unix))]
-pub fn kill_child_process() -> bool {
-    let pid = CHILD_PID.swap(0, Ordering::SeqCst);
-    if pid == 0 {
-        return false;
-    }
-    log::warn!(
-        "[tddy-core] kill_child_process: cannot kill pid {} on non-unix platform",
-        pid
-    );
-    false
 }
 
 /// Gather the full per-conversation token-usage snapshot for a session by merging every source,
@@ -852,31 +816,6 @@ pub trait CodingBackend: Send + Sync {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::Mutex;
-
-    // Serialize tests that mutate global CHILD_PID.
-    static TEST_LOCK: Mutex<()> = Mutex::new(());
-
-    fn lock_and_reset() -> std::sync::MutexGuard<'static, ()> {
-        let guard = TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
-        CHILD_PID.store(0, Ordering::SeqCst);
-        guard
-    }
-
-    #[test]
-    fn set_child_pid_stores_pid() {
-        let _lock = lock_and_reset();
-        set_child_pid(12345);
-        assert_eq!(get_child_pid(), 12345);
-    }
-
-    #[test]
-    fn clear_child_pid_resets_to_zero() {
-        let _lock = lock_and_reset();
-        set_child_pid(99999);
-        clear_child_pid();
-        assert_eq!(get_child_pid(), 0);
-    }
 
     fn ids(models: &BackendModels) -> Vec<&str> {
         models.models.iter().map(|m| m.id.as_str()).collect()
@@ -998,32 +937,6 @@ mod tests {
         let result = acp_models_from_session_state(None);
 
         assert!(matches!(result, Err(BackendError::InvocationFailed(_))));
-    }
-
-    #[test]
-    fn kill_child_process_returns_false_when_no_child() {
-        let _lock = lock_and_reset();
-        assert!(!kill_child_process());
-    }
-
-    #[cfg(unix)]
-    #[test]
-    fn kill_child_process_kills_running_child() {
-        let _lock = lock_and_reset();
-
-        let mut child = std::process::Command::new("sleep")
-            .arg("60")
-            .spawn()
-            .expect("failed to spawn sleep");
-        let pid = child.id();
-        set_child_pid(pid);
-
-        assert!(kill_child_process());
-        assert_eq!(get_child_pid(), 0);
-
-        // Reap the child so it doesn't remain a zombie, then verify it was killed.
-        let status = child.wait().expect("failed to wait on child");
-        assert!(!status.success());
     }
 
     #[test]

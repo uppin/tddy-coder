@@ -8,6 +8,9 @@
 //! [#411](../../../docs/dev/changesets/) closed for `write-stack-plan`.
 
 use assert_cmd::cargo::cargo_bin_cmd;
+
+#[path = "support/session_listener.rs"]
+mod session_listener;
 use serde_json::Value;
 use tddy_workflow_recipes::plan_pr_stack::write_stack_docs_system_prompt;
 
@@ -57,8 +60,8 @@ fn a_docs_payload_missing_its_changeset() -> String {
 }
 
 /// A `submit` invocation made the way the prompt instructs: `--goal write-stack-docs` with the body
-/// on stdin. `TDDY_SOCKET` is removed so the call takes the no-socket path and reports the goal it
-/// resolved rather than relaying to a live session's listener.
+/// on stdin. `TDDY_SOCKET` is removed and the call is pointed at a listener of its own with
+/// `--socket`, so it reports the goal it resolved rather than relaying to a live session.
 struct SubmitCall {
     goal_flag: String,
     payload: String,
@@ -78,8 +81,10 @@ impl SubmitCall {
     }
 
     fn run(self) -> SubmitOutcome {
+        let session = session_listener::ASessionListener::start();
         let mut cmd = cargo_bin_cmd!("tddy-tools");
         cmd.env_remove("TDDY_SOCKET");
+        cmd.arg("--socket").arg(&session.socket);
         cmd.args(["submit", "--goal", &self.goal_flag, "--data-stdin"]);
         cmd.write_stdin(self.payload.clone());
         let output = cmd.output().expect("run tddy-tools submit");

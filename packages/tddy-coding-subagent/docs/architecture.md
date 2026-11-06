@@ -98,7 +98,7 @@ missing `headless/` is not an error.
 
 ## Headless sessions
 
-`CodingAgentSession::start_headless(harness, command, model)` holds a `HeadlessDriver`; it is asked
+`CodingAgentSession::start_headless(command, model)` holds a `HeadlessDriver` (the agent is the command's renderer); it is asked
 for when `transport_of(def.harness)` is `Headless` (`tddy-session-agents` calls the launcher's
 `headless_command_for`). Turns, outcome mapping and transcript recording are the ACP session's.
 `permissions()` returns the session's `ParkedPermissions`, which the opener registers in

@@ -7,7 +7,7 @@ mod common;
 use std::sync::Arc;
 use tddy_core::changeset::read_changeset;
 use tddy_core::workflow::ids::WorkflowState;
-use tddy_core::{CodingBackend, CursorBackend, GoalId, MockBackend, SharedBackend, WorkflowEngine};
+use tddy_core::{CodingBackend, GoalId, MockBackend, SharedBackend, WorkflowEngine};
 
 use common::{ctx_update_docs, run_goal_until_done, write_changeset_with_state};
 
@@ -156,26 +156,28 @@ async fn update_docs_parses_structured_response() {
     let _ = std::fs::remove_dir_all(&session_dir);
 }
 
-/// CursorBackend must accept update-docs goal (same `agent` invocation path as other goals).
+/// The cursor spec backend must accept update-docs goal (same `agent` invocation path as other
+/// goals). A missing binary is now refused when the backend is built, so the goal is accepted over
+/// a stub that answers.
 #[tokio::test]
 async fn cursor_backend_accepts_update_docs() {
     // Given
-    let backend = CursorBackend::with_path(std::path::PathBuf::from("/nonexistent/agent"));
-    let req = common::stub_invoke_request("update-docs", "update-docs");
+    let (backend, dir) = common::a_spec_backend(
+        "cursor",
+        r##"printf '%s\n' '{"type":"result","result":"ok","session_id":"s1"}'"##,
+    );
+    let req = common::in_spec_workspace(
+        &dir,
+        common::stub_invoke_request("update-docs", "update-docs"),
+    );
 
     // When
     let result = backend.invoke(req).await;
 
-    // CursorBackend does NOT reject UpdateDocs. It may return BinaryNotFound
-    // (agent CLI not installed) or InvocationFailed for other reasons, but must
-    // NOT return InvocationFailed("update-docs is not supported").
-    if let Err(tddy_core::BackendError::InvocationFailed(ref msg)) = result {
-        // Then
-        assert!(
-            !msg.to_lowercase().contains("update-docs")
-                || !msg.to_lowercase().contains("not supported"),
-            "CursorBackend must accept update-docs goal, got: {}",
-            msg
-        );
-    }
+    // Then
+    assert!(
+        result.is_ok(),
+        "Cursor must accept the update-docs goal, got: {:?}",
+        result
+    );
 }

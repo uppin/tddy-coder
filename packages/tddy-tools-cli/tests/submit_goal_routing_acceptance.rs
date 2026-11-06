@@ -11,6 +11,9 @@
 use assert_cmd::cargo::cargo_bin_cmd;
 use serde_json::Value;
 
+#[path = "support/session_listener.rs"]
+mod session_listener;
+
 /// The shape the `write-stack-plan` hook actually parses into `StackPlanOutput`.
 fn a_valid_stack_plan_payload() -> String {
     r#"{"goal":"write-stack-plan","version":1,"prs":[{"node_id":"token-store","title":"Auth token store","description":"Store tokens in the keyring, with tests","branch_suggestion":"feature/auth/token-store","parents":[]}]}"#
@@ -23,8 +26,8 @@ fn a_stack_plan_payload_shaped_as_key_and_value() -> String {
     r#"{"key":"stack-plan","value":"version: 1\nprs: []\n"}"#.to_string()
 }
 
-/// A `submit` invocation. `TDDY_SOCKET` is removed so the call takes the no-socket path and
-/// reports the goal it resolved rather than relaying it to a live session's listener.
+/// A `submit` invocation. `TDDY_SOCKET` is removed and the call is pointed at a listener of its own
+/// with `--socket`, so it reports the goal it resolved rather than relaying it to a live session.
 struct SubmitCall {
     goal_flag: Option<String>,
     payload: String,
@@ -54,8 +57,10 @@ impl SubmitCall {
     }
 
     fn run(self) -> SubmitOutcome {
+        let session = session_listener::ASessionListener::start();
         let mut cmd = cargo_bin_cmd!("tddy-tools");
         cmd.env_remove("TDDY_SOCKET");
+        cmd.arg("--socket").arg(&session.socket);
         cmd.arg("submit");
         if let Some(ref goal) = self.goal_flag {
             cmd.args(["--goal", goal]);

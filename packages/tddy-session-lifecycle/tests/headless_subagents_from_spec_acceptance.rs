@@ -23,7 +23,7 @@ use tddy_agent_launch::spec_launch::HostCodingAgents;
 use tddy_coding_agent_specs::load_agent_registry;
 use tddy_coding_subagent::launcher::close_headless_conversation;
 use tddy_coding_subagent::{CodingAgentDef, CodingAgentLaunch, CodingAgentLauncher};
-use tddy_core::{ConversationDriver, HeadlessDriver, HeadlessHarness};
+use tddy_core::{ConversationDriver, HeadlessDriver};
 use tddy_daemon_kernel::config::DaemonConfig;
 use tddy_session_lifecycle::coding_agent_as_user::DropContext;
 use tddy_session_lifecycle::coding_agent_launcher::{
@@ -235,22 +235,22 @@ fn a_launcher_with_coding_agents(
 /// One turn of conversation `conversation` of `harness`, planned by `launcher`.
 async fn one_turn(
     launcher: &DaemonCodingAgentLauncher,
-    harness: HeadlessHarness,
+    harness: &str,
     conversation: &str,
     worktree: &Path,
 ) -> String {
     let command = launcher
-        .headless_command_for(&a_headless_launch(harness.id(), conversation, worktree))
+        .headless_command_for(&a_headless_launch(harness, conversation, worktree))
         .await
-        .unwrap_or_else(|e| panic!("the {} conversation is planned: {e}", harness.id()));
-    let driver = HeadlessDriver::new(harness, command);
+        .unwrap_or_else(|e| panic!("the {harness} conversation is planned: {e}"));
+    let driver = HeadlessDriver::new(command);
     tokio::time::timeout(
         TURN_DEADLINE,
         driver.prompt_turn("Fix it".to_string(), None),
     )
     .await
     .expect("the turn ended in time")
-    .unwrap_or_else(|e| panic!("the {} turn succeeds: {e}", harness.id()))
+    .unwrap_or_else(|e| panic!("the {harness} turn succeeds: {e}"))
     .text
 }
 
@@ -292,21 +292,9 @@ async fn headless_cursor_codex_and_oz_subagents_launch_with_mcp_rendered_as_file
 
     // When
     let replies = (
-        one_turn(
-            &launcher,
-            HeadlessHarness::Cursor,
-            "conv-cursor",
-            worktree.path(),
-        )
-        .await,
-        one_turn(
-            &launcher,
-            HeadlessHarness::Codex,
-            "conv-codex",
-            worktree.path(),
-        )
-        .await,
-        one_turn(&launcher, HeadlessHarness::Oz, "conv-oz", worktree.path()).await,
+        one_turn(&launcher, "cursor", "conv-cursor", worktree.path()).await,
+        one_turn(&launcher, "codex", "conv-codex", worktree.path()).await,
+        one_turn(&launcher, "oz", "conv-oz", worktree.path()).await,
     );
 
     // Then — Cursor: a worktree `.cursor/mcp.json`; Codex: inline `-c`; Oz: an `--mcp` file
@@ -354,13 +342,7 @@ async fn a_closed_cursor_conversation_leaves_no_cursor_mcp_json_and_a_retry_unde
     let stubs = the_stub_clis();
     let launcher = a_launcher_with_coding_agents(data_dir.path(), &stubs);
     let registration = worktree.path().join(".cursor").join("mcp.json");
-    one_turn(
-        &launcher,
-        HeadlessHarness::Cursor,
-        "conv-1",
-        worktree.path(),
-    )
-    .await;
+    one_turn(&launcher, "cursor", "conv-1", worktree.path()).await;
     assert!(
         registration.exists(),
         "the positive control: the turn wrote it"
@@ -389,13 +371,7 @@ async fn the_startup_sweep_removes_a_recorded_file_of_a_conversation_the_daemon_
     let stubs = the_stub_clis();
     let launcher = a_launcher_with_coding_agents(data_dir.path(), &stubs);
     let registration = worktree.path().join(".cursor").join("mcp.json");
-    one_turn(
-        &launcher,
-        HeadlessHarness::Cursor,
-        "conv-1",
-        worktree.path(),
-    )
-    .await;
+    one_turn(&launcher, "cursor", "conv-1", worktree.path()).await;
     assert!(
         registration.exists(),
         "the positive control: the turn wrote it"

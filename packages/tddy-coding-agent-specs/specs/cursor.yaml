@@ -88,6 +88,16 @@ extensions:
       env: {}
       adapter: cursor-stream
       mcp: { kind: workdir, path: .cursor/mcp.json, format: cursor-mcp-json }
+      # --- The workflow turn's protocol (`#agent-tools 15/19`), read by `SpecHeadlessBackend`:
+      # what a `tddy-coder` workflow turn needs beyond the argv, reproducing the bespoke backend.
+      # `.cursor/mcp.json` is written in the worktree, git-excluded, and removed with the turn.
+      system_prompt: prepend
+      goal_params:
+        always: { force: "1" }
+        plan_mode: { plan: "1" }
+      workflow_mcp: true
+      fresh_session: agent
+      scratch: workdir
 # --- Jail sections: what a sandboxed launch lowers into the jail. ---------------------------------
 # A persistent home at <tddyhome>/homes/cursor, mounted rw: Cursor's refreshed login and its config
 # survive the session.

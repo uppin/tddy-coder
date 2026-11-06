@@ -30,7 +30,7 @@ pub const DEFAULT_CODEX_ACP_BINARY: &str = "codex-acp";
 fn resolve_codex_cli_for_oauth() -> PathBuf {
     std::env::var_os("TDDY_CODEX_CLI")
         .map(PathBuf::from)
-        .unwrap_or_else(|| PathBuf::from(super::CodexBackend::DEFAULT_CLI_BINARY))
+        .unwrap_or_else(|| PathBuf::from(super::codex::CODEX_DEFAULT_CLI_BINARY))
 }
 
 /// A `codex-acp` that cannot be found is reported with where to get one.

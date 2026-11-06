@@ -6,7 +6,10 @@ use thiserror::Error;
 /// Errors from coding backends (Claude Code CLI, etc.).
 #[derive(Error, Debug, Clone)]
 pub enum BackendError {
-    #[error("backend invocation failed: {0}")]
+    /// A backend turn that failed, named by what failed: the message is shown as it is. (It used to
+    /// carry a "backend invocation failed: " frame, which every failure of a turn repeated in front
+    /// of its own words — `#agent-tools 15/19`.)
+    #[error("{0}")]
     InvocationFailed(String),
 
     #[error("binary not found: {0}")]

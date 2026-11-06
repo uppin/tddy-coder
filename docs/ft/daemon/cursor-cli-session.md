@@ -177,9 +177,9 @@ When `StartSession.sandbox = true`:
 
 When `managed_codebase = true`, the daemon seeds `changeset.yaml`, writes orchestration guidance to `.cursor/rules/tddy-managed-workflow.mdc` in the worktree (the definition's `rules_file`), sets `TDDY_SOCKET`, and exposes `subagent_new_session` / `prompt` / `cancel` via MCP. `specialized_agents` resolves to `TDDY_SUBAGENTS_JSON` / `TDDY_SUBAGENT` in the `tddy-tools` MCP server's env; the jailed agent's own process sees no `TDDY_*` variable.
 
-### Workflow `CursorBackend::invoke`
+### Workflow turns (`--agent cursor`)
 
-`CursorBackend::invoke` registers `tddy-tools --mcp` and `permission-prompt-tool` for headless tool approvals (same model as `ClaudeCodeBackend`), and exports `TDDY_SOCKET`, `TDDY_REPO_DIR`, `TDDY_SESSION_DIR`, and `TDDY_REMOTE_*` (`RemoteToolEnv`) into the invoke subprocess.
+A workflow turn is a `SpecHeadlessBackend` turn rendered from `cursor.yaml`'s `coding_agent.headless` section: `agent -p … --force --trust --approve-mcps` (`--plan` for a planning goal), the system prompt in front of the prompt, `tddy-tools --mcp` registered in `<worktree>/.cursor/mcp.json` — git-excluded while the turn runs and removed when it ends. The agent's environment carries no `TDDY_*` variable; its `tddy-tools` finds the session through the `.tddy/session.json` pointer the turn writes in the worktree (socket, repo and session directory, and the `TDDY_REMOTE_*` remote tool environment). See [tddy-agent-backend architecture](../../../packages/tddy-agent-backend/docs/architecture.md#backend-backend).
 
 ## Known follow-ups
 

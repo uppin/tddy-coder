@@ -10,16 +10,22 @@
 use std::collections::BTreeMap;
 use std::path::PathBuf;
 
-use tddy_actions::tool::{render_argv, ResolvedTool, TemplateParams};
+use tddy_actions::tool::{render_argv, ResolvedTool, RunSection, TemplateParams, Transport};
 use tddy_agent_backend::adapters::{
     AdapterError, AdapterRegistry, HeadlessInvocation, HeadlessMcpServer, HeadlessRenderer,
     HeadlessTurn,
 };
+use tddy_agent_backend::adapters::{HeadlessModelListing, LaunchAdapters};
 use tddy_agent_backend::SessionMode;
+// `#agent-tools 15/19`: the protocol fields of `coding_agent.headless`, which live beside the port
+// in `tddy-agent-backend` (this crate depends on it) and are named here for spec readers.
+pub use tddy_agent_backend::adapters::{
+    FreshSession, GoalParams, HeadlessProtocol, RouteModel, ScratchDir, SystemPromptDelivery,
+};
 use thiserror::Error;
 
 use crate::slots::{self, McpServerCommand, RenderedSlots, SlotInputs};
-use crate::{CodingAgentSpec, HeadlessSection};
+use crate::{CodingAgentSpec, HeadlessSection, ToolSlot};
 
 /// The id of the dep a headless agent's tool server runs (`tddy-tools --mcp`).
 pub const TOOL_SERVER_DEP: &str = "tddy-tools";
@@ -38,6 +44,14 @@ pub enum HeadlessSpecError {
         /// The registered names, comma-joined.
         registered: String,
     },
+    /// Its `models.adapter` names no launch adapter this build registers.
+    #[error(
+        "coding agent {agent}: models adapter {adapter} is not a launch adapter this build has"
+    )]
+    UnknownModelsAdapter { agent: String, adapter: String },
+    /// Its `models.list_command` does not render.
+    #[error("coding agent {agent}: models.list_command does not render: {reason}")]
+    ListCommand { agent: String, reason: String },
 }
 
 /// `section`'s adapter checked against `adapters`: refused, naming the adapter and what is
@@ -90,6 +104,56 @@ impl SpecHeadlessRenderer {
             tool_server,
             adapters,
         })
+    }
+    /// The agent's model listing (`#agent-tools 15/19`): `coding_agent.models.list_command`
+    /// rendered with this renderer's resolved binary, and the launch adapter `models.adapter`
+    /// names. `None` for a spec that declares no listing, which `list_models` answers from the
+    /// curated catalogue.
+    pub fn model_listing(&self) -> Result<Option<HeadlessModelListing>, HeadlessSpecError> {
+        let agent = &self.spec.id;
+        let models = &self.spec.agent.models;
+        let (Some(list_command), Some(adapter_name)) = (&models.list_command, &models.adapter)
+        else {
+            return Ok(None);
+        };
+        let adapter = LaunchAdapters::builtin()
+            .models(adapter_name)
+            .ok_or_else(|| HeadlessSpecError::UnknownModelsAdapter {
+                agent: agent.clone(),
+                adapter: adapter_name.clone(),
+            })?;
+        let section = RunSection {
+            transport: Transport::Stdio,
+            argv: list_command.clone(),
+            env: BTreeMap::new(),
+        };
+        let mut argv = render_argv(&section, &self.tool, &TemplateParams::new()).map_err(|e| {
+            HeadlessSpecError::ListCommand {
+                agent: agent.clone(),
+                reason: e.to_string(),
+            }
+        })?;
+        if argv.is_empty() {
+            return Err(HeadlessSpecError::ListCommand {
+                agent: agent.clone(),
+                reason: "it renders no program".to_string(),
+            });
+        }
+        let program = PathBuf::from(argv.remove(0));
+        Ok(Some(HeadlessModelListing {
+            program,
+            argv,
+            adapter,
+        }))
+    }
+
+    /// The protocol a workflow turn of this agent runs with (`#agent-tools 15/19`): its
+    /// `coding_agent.headless` section's [`crate::HeadlessSection::protocol`].
+    pub fn protocol(&self) -> HeadlessProtocol {
+        self.spec
+            .headless()
+            .map(crate::HeadlessSection::protocol)
+            .unwrap_or_default()
     }
 }
 
@@ -170,7 +234,15 @@ impl HeadlessRenderer for SpecHeadlessRenderer {
                 workdir: turn.workdir.clone(),
                 scratch_dir: turn.scratch_dir.clone(),
                 mcp_server: turn.mcp_server.as_ref().map(mcp_server_command),
-                allowed_tools: turn.allowed_tools.clone(),
+                // A goal's allowed tools are pre-approval hints for the agent's own prompts. An agent
+                // whose spec declares `tool_allow` unsupported approves under its own mode (Cursor's
+                // `--force`, Codex's sandbox), as the workflow backends always ran it: it is passed
+                // none, where a launch's withdraw list is refused rather than dropped.
+                allowed_tools: if matches!(self.spec.agent.tool_allow, ToolSlot::Unsupported(_)) {
+                    Vec::new()
+                } else {
+                    turn.allowed_tools.clone()
+                },
                 denied_tools: turn.denied_tools.clone(),
                 permission_prompt_tool: turn.permission_prompt_tool.clone(),
                 preamble: None,
@@ -220,6 +292,13 @@ mod tests {
             adapter: adapter.to_string(),
             exit_ok_if_structured: false,
             mcp: None,
+            system_prompt: SystemPromptDelivery::default(),
+            goal_params: GoalParams::default(),
+            approval_tool: false,
+            workflow_mcp: false,
+            route_model: RouteModel::default(),
+            fresh_session: FreshSession::default(),
+            scratch: ScratchDir::default(),
         }
     }
 

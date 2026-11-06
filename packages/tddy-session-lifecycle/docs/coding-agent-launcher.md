@@ -82,33 +82,38 @@ not allowlisted, so allowlisting `bunx` lets the daemon run any npm package as t
 ## A headless conversation
 
 `headless_command_for` (`headless_plan`) builds the `HeadlessCommand` for `claude`, `cursor`, `codex`
-or `oz`, refusing rather than starting anything weaker:
+or `oz` from the agent's declaration (`claude.yaml`, `cursor.yaml`, `codex.yaml`, `oz.yaml`), refusing
+rather than starting anything weaker:
 
 - the launcher must be wired (`with_headless_wiring(config, <tddy_data_dir>/headless)`, which
-  `for_daemon` does), the harness confinable for the session (`refuse_unless_confinable` — no
-  headless CLI is, so a managed session refuses), and the launch must carry a plain conversation id;
-- the program is the binary the daemon's own sessions of that CLI resolve (`resolve_claude_binary_path`,
-  `resolve_cursor_binary_path`), `codex` or `oz` from `PATH`, on the launch's worktree with the
-  session's model;
+  `for_daemon` does) and hold the host's coding agents (`with_coding_agents`; a tool file that does
+  not load refuses every headless launch, and nothing is planned by hand), the harness confinable for
+  the session (`refuse_unless_confinable` — no headless CLI is, so a managed session refuses), and the
+  launch must carry a plain conversation id;
+- `HostCodingAgents::resolve` names the agent's spec and binary; the command runs on the launch's
+  worktree with the session's model, its argv rendered at each turn by a `SpecHeadlessRenderer` (the
+  command's `renderer`) — the command names no program of its own;
 - the CLI runs as the daemon's own user: `refuse_unless_daemon_user` probes `run_as_session_user`, and
   any wrap (`setpriv`, a relay) is a refusal;
 - a provider route contributes its `env` and `secret_env`; a route that writes a file or passes
   arguments other than `--model <the session's model>` is refused;
-- every CLI is handed the `tddy-tools --mcp` spec (`tool_server_spec`, with `TDDY_CONVERSATION_ID`)
-  in its own shape:
-  - `claude`: `<tddy_data_dir>/headless/<conversation>/mcp.json` (`{"mcpServers": …}`, `0600`,
-    atomic) and the prompt tool `mcp__tddy-tools__approval_prompt`. `bind_approvals` registers
-    (conversation, session, the spec's `TDDY_REMOTE_SESSION_TOKEN`) in `ApprovalRoutes`
-    (`with_approval_routes`) — **last**, once the file is written, so a plan that fails part-way
-    leaves no route; a spec with no token is refused;
-  - `oz`: the same directory's `mcp.json` with the servers at the top level, passed as `--mcp <path>`;
-  - `cursor`: `<worktree>/.cursor/mcp.json` (`mcpServers`, `0600`). `/.cursor/mcp.json` is added to
-    the repository's `info/exclude` (through `git rev-parse --git-common-dir`) **before** the file is
-    written; an existing file is refused by name, and a worktree that is not a git checkout is refused;
-  - `codex`: `HeadlessCommand.mcp_server`, which the argv builder turns into
-    `-c mcp_servers.<name>.{command,args,env_vars}` overrides; the server's `env` is added to the
-    CLI's own environment, so only the variables' names are on the argv.
-- the conversation directory (claude, oz) is created by `claim_conversation_files`, tagged with this
+- every CLI is handed the `tddy-tools --mcp` spec (`tool_server_spec`, with `TDDY_CONVERSATION_ID`) as
+  the command's `mcp_server`, which the spec's MCP slot renders into the agent's own shape at the
+  first turn (see [Session agent roster § Coding agents](../../../docs/ft/daemon/session-agent-roster.md#coding-agents)):
+  - an agent whose spec sets `headless.approval_tool` (`claude`) gets the prompt tool
+    `mcp__tddy-tools__approval_prompt`, and `bind_approvals` registers (conversation, session, the
+    spec's `TDDY_REMOTE_SESSION_TOKEN`) in `ApprovalRoutes` (`with_approval_routes`) — **last**, once
+    the plan is complete, so a plan that fails part-way leaves no route; a spec with no token is
+    refused;
+  - an agent whose MCP slot is `inline` (`codex`) has the server's `env` added to the command's own,
+    since Codex forwards the variables to its server by name — only their names are on the argv;
+  - a slot that writes into the worktree (`cursor`'s `.cursor/mcp.json`) is recorded first
+    (`record_written_files`): an existing file there is refused by name, the path is added to the
+    repository's `info/exclude` (`tddy_agent_backend::turn_files::exclude_from_git`) before anything
+    is written, and a worktree that is not a git checkout is refused;
+- the conversation directory is the command's `scratch_dir`, where the turns write their
+  registration files; the command's `turn_deadline` is the driver's default.
+- the conversation directory is created by `claim_conversation_files`, tagged with this
   daemon's **durable** instance id (`local_base_instance_id_for_config`, held in `HeadlessWiring`),
   and removed again by its `ClaimedFiles` guard unless the plan completes.
 

@@ -13,7 +13,10 @@ use tddy_agent_backend::AcpAgentCommand;
 use thiserror::Error;
 
 use crate::capability::Capability;
-use crate::headless::validate_headless;
+use crate::headless::{
+    validate_headless, FreshSession, GoalParams, HeadlessProtocol, RouteModel, ScratchDir,
+    SystemPromptDelivery,
+};
 use crate::route::{ProviderKind, RouteShape, RouteSupport, RoutedAgent};
 use crate::slots::conversation::ConversationSlot;
 use crate::slots::hooks;
@@ -606,9 +609,52 @@ pub struct HeadlessSection {
     /// session). `None` uses `coding_agent.mcp`. Added by the 2026-10-31 amendment.
     #[serde(default)]
     pub mcp: Option<McpSlot>,
+    // --- The workflow turn's protocol (`#agent-tools 15/19`): what a workflow turn of the agent
+    // needs beyond its argv, read by `SpecHeadlessBackend` through [`Self::protocol`]. Each is named
+    // after what it does, never after an agent; an unknown word is refused at load.
+    /// How the workflow's system prompt reaches the agent: `flag` (the `append_system_prompt` slot)
+    /// or `prepend` (in front of the prompt). `prepend` when absent.
+    #[serde(default)]
+    pub system_prompt: SystemPromptDelivery,
+    /// The template params a goal's hints bind: `always`, `plan_mode`, `read_only_plan`,
+    /// `accept_edits`, each a map of param name to value.
+    #[serde(default)]
+    pub goal_params: GoalParams,
+    /// The workflow binds the approval tool (`mcp__tddy-tools__approval_prompt`) when it registers
+    /// the tool server.
+    #[serde(default)]
+    pub approval_tool: bool,
+    /// The workflow registers the agent's tool server (its `tddy-tools` dep with `--mcp`).
+    #[serde(default)]
+    pub workflow_mcp: bool,
+    /// Whether a provider route's argv replaces the request's model: `{ kind: kept }`,
+    /// `{ kind: replaced }` or `{ kind: replaced_if_route_has, flag: <flag> }`. `kept` when absent.
+    #[serde(default)]
+    pub route_model: RouteModel,
+    /// Who names a fresh session's id: `caller` (passed as `session_id`) or `agent`. `agent` when
+    /// absent.
+    #[serde(default)]
+    pub fresh_session: FreshSession,
+    /// Where the turn's registration files go: `session_dir` or `workdir`. `session_dir` when
+    /// absent.
+    #[serde(default)]
+    pub scratch: ScratchDir,
 }
 
 impl HeadlessSection {
+    /// The protocol a workflow turn of this agent runs with: this section's protocol fields.
+    pub fn protocol(&self) -> HeadlessProtocol {
+        HeadlessProtocol {
+            system_prompt: self.system_prompt,
+            goal_params: self.goal_params.clone(),
+            approval_tool: self.approval_tool,
+            workflow_mcp: self.workflow_mcp,
+            route_model: self.route_model.clone(),
+            fresh_session: self.fresh_session,
+            scratch: self.scratch,
+        }
+    }
+
     /// This section as a `stdio` run section, for `render_argv`.
     pub fn run_section(&self) -> RunSection {
         RunSection {

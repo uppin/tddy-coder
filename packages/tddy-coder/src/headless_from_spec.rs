@@ -1,6 +1,6 @@
-//! The `cursor` and `codex` workflow backends from their tool definitions: `cursor.yaml`'s and
-//! `codex.yaml`'s `coding_agent.headless` sections render each invocation, and the adapters they
-//! name read the output (`#agent-tools 9/12`).
+//! The headless workflow backends from their tool definitions: an agent's `coding_agent.headless`
+//! section renders each invocation, and the adapter it names reads the output
+//! (`#agent-tools 6/12`, `9/12`; one backend for every agent since `15/19`).
 //!
 //! PRD: `docs/ft/coder/changelog/2026-11-03-headless-cursor-codex-oz-from-specs.md`.
 
@@ -10,9 +10,9 @@ use std::sync::Arc;
 use anyhow::{anyhow, Context};
 use tddy_actions::tool::{ResolvedTool, ToolHost};
 use tddy_coding_agent_specs::headless::SpecHeadlessRenderer;
-use tddy_coding_agent_specs::{load_agent_registry, CodingAgentSpec};
+use tddy_coding_agent_specs::{load_agent_registry, routed_agent, CodingAgentSpec};
 use tddy_core::adapters::AdapterRegistry;
-use tddy_core::{CodexBackend, CursorBackend};
+use tddy_core::SpecHeadlessBackend;
 
 /// `cursor.yaml`'s `binary.env`: the variable that names the Cursor `agent` binary.
 pub const CURSOR_BINARY_ENV: &str = "TDDY_CURSOR_AGENT";
@@ -68,13 +68,14 @@ impl ToolHost for HostNamingBinary {
     }
 }
 
-/// A [`SpecHeadlessRenderer`] over the declared coding agent `agent`: the registry loaded with
-/// `tools_dir` applied, `agent` and its deps resolved against `host`.
-fn renderer_for(
+/// A [`SpecHeadlessRenderer`] over the declared coding agent `agent` — the registry loaded with
+/// `tools_dir` applied, `agent` and its deps resolved against `host` — with the spec it was built
+/// from.
+fn renderer_and_spec_for(
     agent: &str,
     tools_dir: &Path,
     host: &dyn ToolHost,
-) -> anyhow::Result<SpecHeadlessRenderer> {
+) -> anyhow::Result<(CodingAgentSpec, SpecHeadlessRenderer)> {
     let registry = load_agent_registry(tools_dir).context("the coding agent registry")?;
     let def = registry
         .get(agent)
@@ -85,33 +86,30 @@ fn renderer_for(
     let tool: ResolvedTool = closure
         .pop()
         .ok_or_else(|| anyhow!("`{agent}` resolved to no tool"))?;
-    Ok(SpecHeadlessRenderer::new(
-        spec,
-        tool,
-        &closure,
-        AdapterRegistry::builtin(),
-    )?)
+    let renderer =
+        SpecHeadlessRenderer::new(spec.clone(), tool, &closure, AdapterRegistry::builtin())?;
+    Ok((spec, renderer))
 }
 
-/// A `cursor` backend rendered from its declaration: the agent registry loaded with `tools_dir`
-/// (`<tddyhome>/tools`) applied, `cursor` and its deps resolved against `host`, and a
-/// `SpecHeadlessRenderer` over the result installed with `with_headless_renderer`. Refused when the
-/// registry does not load, `cursor` does not resolve, or its spec has no usable headless section.
-pub fn cursor_backend_from_spec(
+/// The workflow backend of the declared headless coding agent `agent` (`#agent-tools 15/19`) —
+/// `claude`, `cursor`, `codex`, `oz`, or any agent a `<tddyhome>/tools` YAML declares with a
+/// `coding_agent.headless` section naming a registered adapter: the registry loaded with
+/// `tools_dir` applied, `agent` and its deps resolved against `host`, and a [`SpecHeadlessBackend`]
+/// over its `SpecHeadlessRenderer`, the section's protocol, its `routed_agent` and its model
+/// listing. Refused when the registry does not load, `agent` does not resolve, or its spec has no
+/// usable headless section.
+///
+pub fn headless_backend_from_spec(
+    agent: &str,
     tools_dir: &Path,
     host: Arc<dyn ToolHost>,
-) -> anyhow::Result<CursorBackend> {
-    let renderer = renderer_for("cursor", tools_dir, host.as_ref())?;
-    Ok(CursorBackend::new().with_headless_renderer(Arc::new(renderer)))
-}
-
-/// A `codex` backend rendered from its declaration, as [`cursor_backend_from_spec`] for `codex`.
-/// `TDDY_CODEX_CLI` names the binary through the spec's `binary.env`; a provider route is applied
-/// afterwards with `with_provider_route`, as today.
-pub fn codex_backend_from_spec(
-    tools_dir: &Path,
-    host: Arc<dyn ToolHost>,
-) -> anyhow::Result<CodexBackend> {
-    let renderer = renderer_for("codex", tools_dir, host.as_ref())?;
-    Ok(CodexBackend::new().with_headless_renderer(Arc::new(renderer)))
+) -> anyhow::Result<SpecHeadlessBackend> {
+    let (spec, renderer) = renderer_and_spec_for(agent, tools_dir, host.as_ref())?;
+    let protocol = renderer.protocol();
+    let listing = renderer.model_listing()?;
+    let backend = SpecHeadlessBackend::new(Arc::new(renderer), protocol, routed_agent(&spec));
+    Ok(match listing {
+        Some(listing) => backend.with_model_listing(listing),
+        None => backend,
+    })
 }

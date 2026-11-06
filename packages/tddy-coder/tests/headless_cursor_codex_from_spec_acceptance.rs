@@ -1,8 +1,8 @@
 //! Acceptance: the `cursor` and `codex` workflow backends (`tddy-coder --agent cursor|codex`) are
 //! rendered from `cursor.yaml`'s and `codex.yaml`'s `coding_agent.headless` sections, and stub CLIs
-//! record exactly the argv the hand-built `build_cursor_cli_args` and `build_codex_exec_argv` pass
-//! today — the resume and the thread id included — while a Codex auth failure still carries
-//! today's sign-in remediation (`#agent-tools 9/12`).
+//! record exactly the argv the bespoke backends passed (`build_cursor_cli_args` and
+//! `build_codex_exec_argv`, deleted in `#agent-tools 15/19`) — the resume and the thread id
+//! included — while a Codex auth failure still carries the sign-in remediation (`#agent-tools 9/12`).
 //!
 //! PRD: `docs/ft/coder/changelog/2026-11-03-headless-cursor-codex-oz-from-specs.md`.
 //!
@@ -16,17 +16,15 @@ use std::sync::Arc;
 
 use pretty_assertions::assert_eq;
 use tddy_actions::tool::ToolHost;
-use tddy_coder::headless_from_spec::{codex_backend_from_spec, cursor_backend_from_spec};
-use tddy_core::{
-    CodexBackend, CodingBackend, GoalHints, GoalId, InvokeRequest, PermissionHint, SessionMode,
-};
+use tddy_coder::headless_from_spec::headless_backend_from_spec;
+use tddy_core::{CodingBackend, GoalHints, GoalId, InvokeRequest, PermissionHint, SessionMode};
 
 const PROMPT: &str = "Plan the feature";
 const SYSTEM_PROMPT: &str = "You plan.";
 /// The prompt both CLIs are handed — neither takes a system prompt, so it is merged in front —
 /// as the stubs record it: one line per argv entry, so the prompt's own lines are entries here.
 const MERGED_PROMPT_LINES: [&str; 3] = ["You plan.", "", "Plan the feature"];
-/// The start of the hint `codex_openai_auth_remediation` appends to a sign-in failure today.
+/// The start of the hint `codex_openai_auth_remediation` appends to a sign-in failure.
 const SIGN_IN_REMEDIATION: &str = "Fix: not signed in to OpenAI for Codex.";
 
 /// A host with nothing of the real machine: the env it is given, and executable files.
@@ -73,6 +71,13 @@ fn a_workspace(codex: CodexRun) -> AWorkspace {
     for sub in ["tools", "session", "repo", "bin"] {
         std::fs::create_dir(dir.path().join(sub)).expect("workspace dir");
     }
+    // The cursor registration is written in the repo, which has to be a git checkout.
+    let git = std::process::Command::new("git")
+        .args(["init", "-q"])
+        .current_dir(dir.path().join("repo"))
+        .status()
+        .expect("git runs");
+    assert!(git.success(), "the repo is a git checkout");
     std::fs::write(dir.path().join("system-prompt.md"), SYSTEM_PROMPT).expect("system prompt");
     let record = |name: &str| dir.path().join(name).display().to_string();
     let codex_run = match codex {
@@ -94,10 +99,12 @@ fn a_workspace(codex: CodexRun) -> AWorkspace {
             format!(
                 r#"#!/bin/sh
 for a in "$@"; do printf '%s\n' "$a"; done > '{argv}'
+/bin/cat .cursor/mcp.json > '{mcp}' 2>/dev/null
 printf '%s\n' '{{"type":"system","subtype":"init","session_id":"chat-1"}}'
 printf '%s\n' '{{"type":"result","subtype":"success","result":"The plan is ready.","session_id":"chat-1"}}'
 "#,
                 argv = record("agent.argv"),
+                mcp = record("agent.mcp"),
             ),
         ),
         (
@@ -203,10 +210,11 @@ fn strings(items: &[&str]) -> Vec<String> {
 }
 
 #[tokio::test]
-async fn tddy_coder_agent_cursor_drives_a_stub_whose_argv_equals_todays_including_resume() {
+async fn tddy_coder_agent_cursor_drives_a_stub_whose_argv_equals_the_bespoke_backends_including_resume(
+) {
     // Given
     let workspace = a_workspace(CodexRun::Succeeds);
-    let backend = cursor_backend_from_spec(&workspace.tools_dir(), workspace.host())
+    let backend = headless_backend_from_spec("cursor", &workspace.tools_dir(), workspace.host())
         .expect("the cursor backend renders from its spec");
     let request = workspace.request(
         the_plan_goal(),
@@ -220,10 +228,10 @@ async fn tddy_coder_agent_cursor_drives_a_stub_whose_argv_equals_todays_includin
         .await
         .expect("the invocation succeeds");
 
-    // Then — `build_cursor_cli_args`' argv for the same request
+    // Then — the bespoke backend's argv for the same request
     let registration: serde_json::Value = serde_json::from_str(
-        &std::fs::read_to_string(workspace.repo().join(".cursor/mcp.json"))
-            .expect("the registration is in the repo"),
+        &std::fs::read_to_string(workspace.dir.path().join("agent.mcp"))
+            .expect("the stub saw the registration in the repo"),
     )
     .expect("the registration is JSON");
     assert_eq!(
@@ -262,10 +270,11 @@ async fn tddy_coder_agent_cursor_drives_a_stub_whose_argv_equals_todays_includin
 }
 
 #[tokio::test]
-async fn tddy_coder_agent_codex_drives_a_stub_whose_argv_equals_todays_including_the_thread_id() {
+async fn tddy_coder_agent_codex_drives_a_stub_whose_argv_equals_the_bespoke_backends_including_the_thread_id(
+) {
     // Given
     let workspace = a_workspace(CodexRun::Succeeds);
-    let backend = codex_backend_from_spec(&workspace.tools_dir(), workspace.host())
+    let backend = headless_backend_from_spec("codex", &workspace.tools_dir(), workspace.host())
         .expect("the codex backend renders from its spec");
     let request = workspace.request(
         an_accept_edits_goal(),
@@ -279,7 +288,7 @@ async fn tddy_coder_agent_codex_drives_a_stub_whose_argv_equals_todays_including
         .await
         .expect("the invocation succeeds");
 
-    // Then — `build_codex_exec_argv`' argv for the same request
+    // Then — the bespoke backend's argv for the same request
     assert_eq!(
         (
             response.output,
@@ -308,40 +317,29 @@ async fn tddy_coder_agent_codex_drives_a_stub_whose_argv_equals_todays_including
     );
 }
 
-/// A preserved-behaviour pin: no login retry exists on this path today, only the hint. It fails
-/// only if the spec path loses what the hand-built path appends.
+/// A preserved-behaviour pin: no login retry exists on this path, only the hint. It fails only if
+/// the spec path loses what the bespoke backend appended.
 #[tokio::test]
-async fn a_codex_auth_error_still_carries_todays_sign_in_remediation_through_the_spec() {
+async fn a_codex_auth_error_still_carries_the_sign_in_remediation_through_the_spec() {
     // Given
     let workspace = a_workspace(CodexRun::IsNotSignedIn);
-    let request = || {
-        workspace.request(
-            the_plan_goal(),
-            "gpt-5.3-codex",
-            SessionMode::Fresh("unused".to_string()),
-        )
-    };
-    let todays = CodexBackend::with_path(workspace.bin("codex"))
-        .invoke(request())
-        .await
-        .map(|_| ())
-        .map_err(|e| e.to_string());
-    let backend = codex_backend_from_spec(&workspace.tools_dir(), workspace.host())
+    let backend = headless_backend_from_spec("codex", &workspace.tools_dir(), workspace.host())
         .expect("the codex backend renders from its spec");
 
     // When
-    let from_spec = backend
-        .invoke(request())
+    let failure = backend
+        .invoke(workspace.request(
+            the_plan_goal(),
+            "gpt-5.3-codex",
+            SessionMode::Fresh("unused".to_string()),
+        ))
         .await
         .map(|_| ())
         .map_err(|e| e.to_string());
 
-    // Then — the positive control first: today's path appends the hint
+    // Then
     assert_eq!(
-        (
-            todays.map_err(|e| e.contains(SIGN_IN_REMEDIATION)),
-            from_spec.map_err(|e| e.contains(SIGN_IN_REMEDIATION)),
-        ),
-        (Err(true), Err(true))
+        failure.map_err(|e| e.contains(SIGN_IN_REMEDIATION)),
+        Err(true)
     );
 }

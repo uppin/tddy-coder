@@ -11,7 +11,7 @@
 
 - **`--agent codex-acp`** selects **`CodexAcpBackend`**.
 - **`codex-acp` executable:** declared by **`codex-acp.yaml`** (`tddy-coding-agent-specs`), whose `binary.sibling_of: codex` resolves it as **`codex-acp` in the directory of the resolved `codex`** — so a `<tddyhome>/tools/codex.yaml` override that moves `codex` moves `codex-acp` with it. **`TDDY_CODEX_ACP_CLI`**, config **`codex_acp_cli_path`** or **`--codex-acp-cli-path`** name it outright. **`PATH` is not searched for `codex-acp`** (a change in `#agent-tools 11/12`, #800): one absent beside `codex` is refused, naming both.
-- **OAuth helper:** the spec's `codex-acp-login` hooks adapter; it runs the resolved `codex` dep — the same **`codex`** binary resolution as **`CodexBackend`** (**`TDDY_CODEX_CLI`**, **`--codex-cli-path`**, config, then **`PATH`**) to run **`codex login`** when ACP **`new_session`** / **`load_session`** fails with an auth-like error and **`session_dir`** is set. That reuses the **`BROWSER`** / **`codex_oauth_authorize.url`** contract documented for headless OAuth (see [Codex OAuth web relay](../web/codex-oauth-web-relay.md)).
+- **OAuth helper:** the spec's `codex-acp-login` hooks adapter; it runs the resolved `codex` dep — the same **`codex`** binary resolution as **`--agent codex`** (**`TDDY_CODEX_CLI`**, **`--codex-cli-path`**, config, then **`PATH`**) to run **`codex login`** when ACP **`new_session`** / **`load_session`** fails with an auth-like error and **`session_dir`** is set. That reuses the **`BROWSER`** / **`codex_oauth_authorize.url`** contract documented for headless OAuth (see [Codex OAuth web relay](../web/codex-oauth-web-relay.md)).
 
 ## Behavior
 
@@ -22,7 +22,7 @@
 - **Provider account:** with `--provider-route-path` the agent is spawned with the route's `-c model_provider…` overrides, the model as `-c model="<model>"` (`codex-acp` has no `-m`) and the key in `CODEX_PROVIDER_KEY` (the spec's `route.key_env`) — see [provider accounts § Tool sessions](../daemon/provider-accounts.md#tool-sessions).
 - **Tests:** **`tddy-acp-stub`** can stand in for **`codex-acp`**; stub **`initialize`** advertises **`load_session`**. Integration coverage includes **`codex_acp_backend`** and **`acp_backend_acceptance`**.
 
-## Coexistence with `CodexBackend`
+## Coexistence with `--agent codex`
 
 **Shared ACP driver:** `codex-acp` runs on the same ACP client driver as `claude-acp` and `opencode`
 (see [OpenCode ACP backend § Behavior](opencode-acp-backend.md#behavior)): off a provider route the
@@ -30,7 +30,7 @@ requested model is set on the session and one the agent does not advertise is re
 advertised ones; dropping the backend ends the agent process. The `codex login` retry above runs once
 per failed session call, and a failed login is the error reported.
 
-**`--agent codex`** remains the JSONL **`codex exec`** integration. Operators choose per session whether to use ACP or JSONL; both backends share **`codex_thread_id`** persistence rules in **`workflow/task.rs`**.
+**`--agent codex`** is the JSONL **`codex exec`** integration, a headless turn rendered from `codex.yaml`. Operators choose per session whether to use ACP or JSONL; both backends share **`codex_thread_id`** persistence rules in **`workflow/task.rs`**.
 
 ## Related documentation
 

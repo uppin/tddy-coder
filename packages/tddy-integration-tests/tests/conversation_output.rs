@@ -7,11 +7,12 @@ mod common;
 use std::fs;
 use std::sync::{Arc, Mutex};
 use tddy_core::{
-    AgentOutputSink, ClaudeCodeBackend, CodingBackend, CursorBackend, MockBackend, SessionMode,
-    SharedBackend, WorkflowEngine,
+    AgentOutputSink, CodingBackend, MockBackend, SessionMode, SharedBackend, WorkflowEngine,
 };
 
-use common::run_plan_with_conversation_output;
+use common::{
+    a_spec_backend, in_spec_workspace, run_plan_with_conversation_output, spec_workspace_root,
+};
 
 /// Plan output as JSON (tddy-tools submit format). MockBackend stores this via store_submit_result.
 const PLAN_OUTPUT: &str = r##"{"goal":"plan","prd":"# Feature PRD\n\n## Summary\nTest feature.\n\n## TODO\n\n- [ ] Task 1"}"##;
@@ -89,38 +90,22 @@ async fn mock_backend_creates_no_file_when_path_not_set() {
     let _ = std::fs::remove_dir_all(&tmp);
 }
 
-/// CursorBackend writes raw stdout bytes to file when conversation_output_path is set.
+/// The cursor spec turn writes raw stdout bytes to file when conversation_output_path is set.
 #[tokio::test]
 #[cfg(unix)]
 async fn cursor_backend_writes_raw_stream_to_conversation_output_file() {
-    let tmp = std::env::temp_dir().join("tddy-conv-output-cursor");
-    let _ = std::fs::remove_dir_all(&tmp);
-    std::fs::create_dir_all(&tmp).expect("create tmp");
-    let output_file = tmp.join("cursor-conv.ndjson");
-
     let expected_raw = r#"{"type":"system","thread_id":"t1"}
 {"type":"result","result":"done","session_id":"t1"}"#;
 
-    let script = r##"#!/bin/sh
-printf '%s\n' '{"type":"system","thread_id":"t1"}'
+    let script = r##"printf '%s\n' '{"type":"system","thread_id":"t1"}'
 printf '%s\n' '{"type":"result","result":"done","session_id":"t1"}'
-exit 0
-"##
-    .to_string();
-    let script_path = tmp.join("agent");
-    fs::write(&script_path, script).expect("write script");
-    {
-        use std::os::unix::fs::PermissionsExt;
-        let mut perms = fs::metadata(&script_path).unwrap().permissions();
-        perms.set_mode(0o755);
-        fs::set_permissions(&script_path, perms).unwrap();
-    }
-
-    let backend = CursorBackend::with_path(script_path);
+exit 0"##;
+    let (backend, dir) = a_spec_backend("cursor", script);
+    let output_file = spec_workspace_root(&dir).join("cursor-conv.ndjson");
     let mut req = common::stub_invoke_request("test", "plan");
     req.conversation_output_path = Some(output_file.clone());
 
-    let result = backend.invoke(req).await;
+    let result = backend.invoke(in_spec_workspace(&dir, req)).await;
     assert!(result.is_ok(), "invoke should succeed: {:?}", result);
 
     let content = fs::read_to_string(&output_file).expect("conversation file should exist");
@@ -144,8 +129,6 @@ exit 0
         expected_raw.trim(),
         "remaining lines should contain raw NDJSON stream"
     );
-
-    let _ = std::fs::remove_dir_all(&tmp);
 }
 
 // ---------------------------------------------------------------------------
@@ -161,17 +144,6 @@ exit 0
 // Reproduced live: a pr-stack session's `analyze-stack` retry started with 282 already-persisted
 // lines but only emitted 56 of its own, so its entire output was skipped and never reached the
 // presenter's `AgentOutput` stream (and therefore never reached the web chat UI).
-
-fn write_executable_script(path: &std::path::Path, body: &str) {
-    fs::write(path, body).expect("write script");
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        let mut perms = fs::metadata(path).unwrap().permissions();
-        perms.set_mode(0o755);
-        fs::set_permissions(path, perms).unwrap();
-    }
-}
 
 /// A sink that records every chunk it's given, for asserting live-streamed agent output.
 fn recording_agent_output_sink() -> (AgentOutputSink, Arc<Mutex<Vec<String>>>) {
@@ -203,23 +175,14 @@ async fn cursor_backend_streams_agent_output_on_resume_of_a_session_with_a_long_
     // Given — a session that already has 282 persisted lines from prior turns (matches the
     // live pr-stack reproduction), and this invocation's own fresh output is a short 2-line
     // NDJSON stream (system init + one assistant text chunk)
-    let tmp = std::env::temp_dir().join("tddy-cursor-resume-long-history");
-    let _ = std::fs::remove_dir_all(&tmp);
-    std::fs::create_dir_all(&tmp).expect("create tmp");
-
-    let conversation_output_path = tmp.join("conversation.jsonl");
+    let script = r#"printf '%s\n' '{"type":"system","subtype":"init","session_id":"thread-1"}'
+printf '%s\n' '{"type":"assistant","message":{"content":[{"type":"text","text":"Analysis complete: two PRs needed."}]}}'
+exit 0"#;
+    let (backend, dir) = a_spec_backend("cursor", script);
+    let conversation_output_path = spec_workspace_root(&dir).join("conversation.jsonl");
     conversation_file_with_prior_history(&conversation_output_path, 282);
 
-    let script = r#"#!/bin/sh
-printf '%s\n' '{"type":"system","subtype":"init","session_id":"thread-1"}'
-printf '%s\n' '{"type":"assistant","message":{"content":[{"type":"text","text":"Analysis complete: two PRs needed."}]}}'
-exit 0
-"#;
-    let script_path = tmp.join("agent");
-    write_executable_script(&script_path, script);
-
     let (sink, recorded) = recording_agent_output_sink();
-    let backend = CursorBackend::with_path(script_path);
     let mut req = common::stub_invoke_request("Analyze the stack", "plan");
     req.session = Some(SessionMode::Resume("thread-1".to_string()));
     req.agent_output = true;
@@ -227,7 +190,7 @@ exit 0
     req.conversation_output_path = Some(conversation_output_path);
 
     // When
-    let result = backend.invoke(req).await;
+    let result = backend.invoke(in_spec_workspace(&dir, req)).await;
 
     // Then
     assert!(result.is_ok(), "invoke should succeed: {:?}", result);
@@ -238,8 +201,6 @@ exit 0
          prior history, but no matching chunk was recorded: {:?}",
         *chunks
     );
-
-    let _ = std::fs::remove_dir_all(&tmp);
 }
 
 #[tokio::test]
@@ -247,24 +208,15 @@ exit 0
 async fn claude_backend_streams_agent_output_on_resume_of_a_session_with_a_long_conversation_history(
 ) {
     // Given — same scenario as the Cursor case above, for Claude's identical skip_until_line logic
-    let tmp = std::env::temp_dir().join("tddy-claude-resume-long-history");
-    let _ = std::fs::remove_dir_all(&tmp);
-    std::fs::create_dir_all(&tmp).expect("create tmp");
-
-    let conversation_output_path = tmp.join("conversation.jsonl");
-    conversation_file_with_prior_history(&conversation_output_path, 282);
-
-    let script = r#"#!/bin/sh
-printf '%s\n' '{"type":"system","subtype":"init","session_id":"sess-1"}'
+    let script = r#"printf '%s\n' '{"type":"system","subtype":"init","session_id":"sess-1"}'
 printf '%s\n' '{"type":"assistant","message":{"content":[{"type":"text","text":"Analysis complete: two PRs needed."}]}}'
 printf '%s\n' '{"type":"result","subtype":"success","result":"Analysis complete: two PRs needed.","session_id":"sess-1","is_error":false}'
-exit 0
-"#;
-    let script_path = tmp.join("claude");
-    write_executable_script(&script_path, script);
+exit 0"#;
+    let (backend, dir) = a_spec_backend("claude", script);
+    let conversation_output_path = spec_workspace_root(&dir).join("conversation.jsonl");
+    conversation_file_with_prior_history(&conversation_output_path, 282);
 
     let (sink, recorded) = recording_agent_output_sink();
-    let backend = ClaudeCodeBackend::with_path(script_path);
     let mut req = common::stub_invoke_request("Analyze the stack", "plan");
     req.session = Some(SessionMode::Resume("sess-1".to_string()));
     req.agent_output = true;
@@ -272,7 +224,7 @@ exit 0
     req.conversation_output_path = Some(conversation_output_path);
 
     // When
-    let result = backend.invoke(req).await;
+    let result = backend.invoke(in_spec_workspace(&dir, req)).await;
 
     // Then
     assert!(result.is_ok(), "invoke should succeed: {:?}", result);
@@ -283,6 +235,4 @@ exit 0
          prior history, but no matching chunk was recorded: {:?}",
         *chunks
     );
-
-    let _ = std::fs::remove_dir_all(&tmp);
 }

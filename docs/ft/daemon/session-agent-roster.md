@@ -284,8 +284,10 @@ conversation has no turn of its own to cancel, so `subagent_cancel` still closes
 
 **A headless conversation** runs one CLI invocation per turn, resuming the CLI's own session
 (`--resume <id>`, `exec resume <thread>`, `--conversation <id>`), and maps its stream to the same
-updates, outcome and transcript as an ACP turn. Cancel kills the CLI's process group; the turn ends
-`cancelled`. It opens only when:
+updates, outcome and transcript as an ACP turn. Each turn's argv is rendered from the agent's spec,
+and its stdout read by the adapter the spec names. Cancel kills the CLI's process group; the turn ends
+`cancelled`. A turn that outlives its deadline (4 h) has its process group killed and fails naming
+the deadline. It opens only when:
 
 - the entry is **`clone`**-placed — a headless CLI names its tool calls and approvals by the
   conversation id, which a shared-placement attach does not have;

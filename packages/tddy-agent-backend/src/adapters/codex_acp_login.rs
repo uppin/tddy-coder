@@ -152,7 +152,7 @@ mod tests {
         assert_eq!(
             refused,
             Err(
-                "backend invocation failed: hooks adapter codex-acp-login needs the codex dep, and the \
+                "hooks adapter codex-acp-login needs the codex dep, and the \
                  launch resolved none"
                     .to_string()
             )

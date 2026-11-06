@@ -479,3 +479,151 @@ pub async fn run_goal_until_done(
         }
     }
 }
+
+// ---------------------------------------------------------------------------
+// Spec-driven headless backend over a stub binary (`#agent-tools 15/19`)
+// ---------------------------------------------------------------------------
+
+/// A host with nothing of the real machine: the env it is given, and executable files.
+struct AFixtureHost {
+    env: std::collections::BTreeMap<String, String>,
+}
+
+impl tddy_actions::tool::ToolHost for AFixtureHost {
+    fn env_var(&self, name: &str) -> Option<String> {
+        self.env.get(name).cloned()
+    }
+
+    fn path_dirs(&self) -> Vec<PathBuf> {
+        Vec::new()
+    }
+
+    fn is_executable_file(&self, path: &std::path::Path) -> bool {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::metadata(path).is_ok_and(|m| m.is_file() && m.permissions().mode() & 0o111 != 0)
+    }
+
+    fn canonicalize(&self, path: &std::path::Path) -> std::io::Result<PathBuf> {
+        std::fs::canonicalize(path)
+    }
+}
+
+/// The file name of the binary a spec's agent runs.
+fn stub_binary_name(agent: &str) -> &'static str {
+    match agent {
+        "claude" => "claude",
+        "cursor" => "agent",
+        "codex" => "codex",
+        other => panic!("no stub binary is known for agent {other}"),
+    }
+}
+
+/// The directory a [`a_spec_backend`] fixture lives in, canonicalised (`/var` vs `/private/var`).
+pub fn spec_workspace_root(dir: &tempfile::TempDir) -> PathBuf {
+    std::fs::canonicalize(dir.path()).expect("workspace root")
+}
+
+/// A [`tddy_core::SpecHeadlessBackend`] for `agent` (`claude`, `cursor` or `codex`) over a stub
+/// binary. The stub first records its argv (one entry per line) to `argv.txt` and its whole
+/// environment to `env.txt` in the workspace root, then runs `stub_script` (shell lines).
+///
+/// The workspace holds an empty `tools/`, `bin/` with the stub (and a `tddy-tools` stub), a
+/// `session/` directory and `repo/`, a git checkout. [`in_spec_workspace`] points a request at them.
+pub fn a_spec_backend(
+    agent: &str,
+    stub_script: &str,
+) -> (tddy_core::SpecHeadlessBackend, tempfile::TempDir) {
+    use std::os::unix::fs::PermissionsExt;
+    let dir = tempfile::tempdir().expect("workspace");
+    let root = spec_workspace_root(&dir);
+    for sub in ["tools", "bin", "session", "repo"] {
+        std::fs::create_dir(root.join(sub)).expect("workspace dir");
+    }
+    let git = std::process::Command::new("git")
+        .args(["init", "-q"])
+        .current_dir(root.join("repo"))
+        .status()
+        .expect("git runs");
+    assert!(git.success(), "the repo is a git checkout");
+    let stub = format!(
+        "#!/bin/sh\nfor a in \"$@\"; do printf '%s\\n' \"$a\"; done > '{argv}'\nenv > '{env}'\n{stub_script}\n",
+        argv = root.join("argv.txt").display(),
+        env = root.join("env.txt").display(),
+    );
+    for (name, script) in [
+        (stub_binary_name(agent), stub.as_str()),
+        ("tddy-tools", "#!/bin/sh\n"),
+    ] {
+        let path = root.join("bin").join(name);
+        std::fs::write(&path, script).expect("write stub");
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).expect("chmod");
+    }
+    let bin = |name: &str| root.join("bin").join(name).to_string_lossy().into_owned();
+    let host: Arc<dyn tddy_actions::tool::ToolHost> = Arc::new(AFixtureHost {
+        env: std::collections::BTreeMap::from([
+            ("TDDY_CLAUDE_BINARY".to_string(), bin("claude")),
+            ("TDDY_CURSOR_AGENT".to_string(), bin("agent")),
+            ("TDDY_CODEX_CLI".to_string(), bin("codex")),
+            ("TDDY_TOOLS_BINARY".to_string(), bin("tddy-tools")),
+        ]),
+    });
+    let backend = tddy_coder::headless_from_spec::headless_backend_from_spec(
+        agent,
+        &root.join("tools"),
+        host,
+    )
+    .unwrap_or_else(|e| panic!("the {agent} backend renders from its spec: {e:#}"));
+    (backend, dir)
+}
+
+/// `request` run in the fixture's git checkout, with its session directory, unless it names its own.
+pub fn in_spec_workspace(dir: &tempfile::TempDir, mut request: InvokeRequest) -> InvokeRequest {
+    let root = spec_workspace_root(dir);
+    request.working_dir.get_or_insert_with(|| root.join("repo"));
+    request
+        .session_dir
+        .get_or_insert_with(|| root.join("session"));
+    request
+}
+
+/// What the stub recorded: `argv.txt` (one entry per line) or `env.txt`.
+pub fn spec_recorded(dir: &tempfile::TempDir, file: &str) -> String {
+    std::fs::read_to_string(spec_workspace_root(dir).join(file))
+        .unwrap_or_else(|e| panic!("the stub recorded {file}: {e}"))
+}
+
+/// The argv the stub saw, one entry per line (a multi-line argument spans entries).
+pub fn spec_argv(dir: &tempfile::TempDir) -> Vec<String> {
+    spec_recorded(dir, "argv.txt")
+        .lines()
+        .map(str::to_string)
+        .collect()
+}
+
+/// Building the `agent` backend over a host whose binary does not exist: the error text.
+pub fn a_spec_backend_over_a_missing_binary(
+    agent: &str,
+) -> Result<tddy_core::SpecHeadlessBackend, String> {
+    use std::os::unix::fs::PermissionsExt;
+    let dir = tempfile::tempdir().expect("workspace");
+    let root = spec_workspace_root(&dir);
+    for sub in ["tools", "bin"] {
+        std::fs::create_dir(root.join(sub)).expect("workspace dir");
+    }
+    let tools = root.join("bin").join("tddy-tools");
+    std::fs::write(&tools, "#!/bin/sh\n").expect("write stub");
+    std::fs::set_permissions(&tools, std::fs::Permissions::from_mode(0o755)).expect("chmod");
+    let missing = root.join("bin").join("definitely-no-such-binary-9f3a2c1b");
+    let missing = missing.to_string_lossy().into_owned();
+    let tools = tools.to_string_lossy().into_owned();
+    let host: Arc<dyn tddy_actions::tool::ToolHost> = Arc::new(AFixtureHost {
+        env: std::collections::BTreeMap::from([
+            ("TDDY_CLAUDE_BINARY".to_string(), missing.clone()),
+            ("TDDY_CURSOR_AGENT".to_string(), missing.clone()),
+            ("TDDY_CODEX_CLI".to_string(), missing.clone()),
+            ("TDDY_TOOLS_BINARY".to_string(), tools),
+        ]),
+    });
+    tddy_coder::headless_from_spec::headless_backend_from_spec(agent, &root.join("tools"), host)
+        .map_err(|e| format!("{e:#}"))
+}

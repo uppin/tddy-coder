@@ -8,7 +8,6 @@
 
 use std::path::{Path, PathBuf};
 
-use tddy_agent_backend::HeadlessHarness;
 use tddy_coding_subagent::{
     coding_agent_defs_in, refuse_unless_confinable, transport_of, AgentTransport, CodingAgentDef,
     CodingAgentLaunch, CodingAgentLauncher, CodingAgentSession, Transport,
@@ -163,19 +162,13 @@ async fn start_headless_session(
 ) -> Result<CodingAgentSession, Status> {
     let refused =
         |e: tddy_discovery::subagent::SubagentError| Status::failed_precondition(e.to_string());
-    let harness = HeadlessHarness::from_id(&launch.def.harness).ok_or_else(|| {
-        Status::failed_precondition(format!(
-            "coding agent '{}' is not a headless harness",
-            launch.def.name
-        ))
-    })?;
     let mut command = launcher
         .headless_command_for(launch)
         .await
         .map_err(refused)?;
     // The CLI runs the model the session reports, whatever model the launcher named.
     command.model = Some(launch.def.model.clone());
-    CodingAgentSession::start_headless(harness, command, launch.def.model.clone())
+    CodingAgentSession::start_headless(command, launch.def.model.clone())
         .await
         .map_err(refused)
 }

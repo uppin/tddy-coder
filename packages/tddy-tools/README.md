@@ -1,7 +1,7 @@
 # tddy-tools
 
 The library behind the `tddy-tools` binary an agent talks to. Three things in one executable: a CLI
-of machine-readable subcommands an agent invokes over `TDDY_SOCKET`, a Claude Code
+of machine-readable subcommands an agent invokes over its session's toolcall socket, a Claude Code
 `--permission-prompt-tool` decision engine, and an `rmcp` MCP server over stdio that routes every
 tool a session can call. The binary itself is built by
 [`tddy-tools-cli`](../tddy-tools-cli/README.md), which binds the LiveKit room transport; this crate
@@ -151,6 +151,10 @@ writing anything. See [Rust code restructuring](../../docs/ft/coder/rust-code-re
 Twenty-one `TDDY_*` variables, `TDDY_SOCKET` read at 43 sites, are how an in-jail agent reaches its
 host and how a host declares what it serves. They are not renamed — an agent inside a jail has no
 other way in — and several are now read from other crates under their original spellings.
+A headless coding agent is the exception: its environment carries no `TDDY_*` variable, and the
+`tddy-tools` it runs finds its session through `--socket`, then the nearest `.tddy/session.json` at
+or above its cwd, then `TDDY_SOCKET`, and adopts what it found into its own environment at start-up
+— see [Session resolution](./docs/session-resolution.md).
 `TDDY_TOOLS_LOG_FILE` redirects `env_logger` to a file (append), so an in-jail server's logs land
 where the host can read them instead of vanishing into a captured stderr.
 
@@ -165,6 +169,7 @@ regardless of which crate implements it.
 ## Documentation
 
 ### Technical implementation (how)
+- [Session resolution](./docs/session-resolution.md) — `--socket`, the session pointer, `TDDY_SOCKET`; `adopt_session`
 - [GitHub credential](./docs/github-credential.md) — how the PR tools ask the session's host for the project account's token
 - [Changesets](./docs/changesets/) — applied changeset history
 - [JSON Schema embedding and validation](../tddy-workflow-recipes/docs/json-schema.md) — the schema library behind `submit` / `get-schema` / `list-schemas`

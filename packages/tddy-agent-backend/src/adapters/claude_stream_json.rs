@@ -3,11 +3,13 @@
 
 use std::io::BufRead;
 
-use crate::backend::headless_driver::HeadlessHarness;
+use crate::backend::acp_driver::AcpUpdateSink;
+use crate::backend::headless_driver::stream_json::StreamJsonTurn;
+use crate::backend::headless_driver::transcript::Updates;
 use crate::error::BackendError;
 use crate::stream::{self, StreamResult};
 
-use super::{StreamAdapter, StreamSinks, CLAUDE_STREAM_JSON};
+use super::{StreamAdapter, StreamSinks, TurnTranscript, CLAUDE_STREAM_JSON};
 
 /// The marker a structured result carries; a non-zero exit with it is a success when the spec says
 /// so (the CLI can exit 1 after an `ExitPlanMode` despite a complete result).
@@ -43,8 +45,19 @@ impl StreamAdapter for ClaudeStreamJson {
             || (exit_ok_if_structured && stream.result_text.contains(STRUCTURED_RESPONSE_MARKER))
     }
 
-    fn turn_format(&self) -> Option<HeadlessHarness> {
-        Some(HeadlessHarness::Claude)
+    fn failure_detail(&self, stream: &StreamResult, stderr: &str) -> String {
+        if stream.stream_errors.is_empty() {
+            stderr.trim().to_string()
+        } else {
+            stream.stream_errors.join("; ")
+        }
+    }
+
+    fn transcript(&self, updates: Option<AcpUpdateSink>) -> Option<Box<dyn TurnTranscript>> {
+        Some(Box::new(StreamJsonTurn::new(
+            "claude",
+            Updates::new(updates),
+        )))
     }
 }
 
@@ -234,17 +247,5 @@ mod tests {
 
         // Then
         assert!(!ok);
-    }
-
-    #[test]
-    fn a_claude_stream_is_decoded_by_the_drivers_claude_transcript() {
-        // Given
-        let adapter = ClaudeStreamJson;
-
-        // When
-        let format = adapter.turn_format();
-
-        // Then
-        assert_eq!(format, Some(HeadlessHarness::Claude));
     }
 }

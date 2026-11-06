@@ -79,6 +79,17 @@ extensions:
       adapter: claude-stream-json
       # `claude -p` can exit 1 after an ExitPlanMode despite a complete structured result.
       exit_ok_if_structured: true
+      # --- The workflow turn's protocol (`#agent-tools 15/19`), read by `SpecHeadlessBackend`:
+      # what a `tddy-coder` workflow turn needs beyond the argv, reproducing the bespoke backend.
+      system_prompt: flag
+      goal_params:
+        read_only_plan: { permission_mode: plan }
+        accept_edits: { permission_mode: acceptEdits }
+      approval_tool: true
+      workflow_mcp: true
+      route_model: { kind: replaced_if_route_has, flag: --model }
+      fresh_session: caller
+      scratch: session_dir
     # --- Variants (`#agent-tools 10/12`): the same agent, launched differently. ------------------
     # `host_agent` is the agent a split session runs on this host against a codebase that lives on
     # another daemon or in a jail. `--strict-mcp-config` loads only the `--mcp-config` the launch

@@ -261,7 +261,7 @@ impl acp::Agent for AcpAgent {
 
     async fn cancel(&self, _args: acp::CancelNotification) -> Result<(), acp::Error> {
         // TODO(acp): interrupt the in-flight workflow turn (SIGINT the backend child, see
-        // `tddy_core::backend::kill_child_process`) instead of letting it run to completion.
+        // `tddy_core::kill_running_turns`) instead of letting it run to completion.
         Ok(())
     }
 }

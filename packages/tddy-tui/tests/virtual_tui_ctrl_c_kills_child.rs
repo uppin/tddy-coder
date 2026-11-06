@@ -1,10 +1,10 @@
 //! Reproduces: Web/RPC terminal sends Ctrl+C as a single byte (ETX, 0x03). The local TUI
-//! (`event_loop`) handles Ctrl+C by calling `tddy_core::kill_child_process()` so the tracked
+//! (`event_loop`) handles Ctrl+C by calling `tddy_core::kill_running_turns()` so the running turns'
 //! backend child is interrupted. VirtualTui must do the same; otherwise Ctrl+C “has no effect”
 //! on the underlying process even though the client logs `[terminal→server] Ctrl+C (1 bytes) [3]`.
 //!
 //! Acceptance: after sending 0x03 through the VirtualTui input path (same as RPC → `input_tx`),
-//! the process registered via `set_child_pid` must be terminated, matching local TUI behavior.
+//! the process group registered as a running turn must be terminated, matching local TUI behavior.
 
 #![cfg(unix)]
 
@@ -18,8 +18,7 @@ use tokio::sync::mpsc;
 
 use tddy_core::presenter::PresenterEvent;
 use tddy_core::{
-    clear_child_pid, set_child_pid, ActivityEntry, ActivityKind, AppMode, PresenterState,
-    UserIntent, ViewConnection,
+    ActivityEntry, ActivityKind, AppMode, PresenterState, RunningGroup, UserIntent, ViewConnection,
 };
 use tddy_tui::run_virtual_tui;
 
@@ -47,14 +46,15 @@ fn running_presenter_state() -> PresenterState {
 
 #[test]
 fn virtual_tui_rpc_ctrl_c_byte_kills_tracked_child_like_local_tui() {
-    clear_child_pid();
+    use std::os::unix::process::CommandExt as _;
 
     let mut child = Command::new("sleep")
         .arg("60")
+        .process_group(0)
         .spawn()
         .expect("spawn sleep child for Ctrl+C kill test");
     let pid = child.id();
-    set_child_pid(pid);
+    let running_turn = RunningGroup::new(pid);
 
     let (event_tx, _) = tokio::sync::broadcast::channel::<PresenterEvent>(16);
     let (intent_tx, intent_rx) = std::sync::mpsc::channel::<UserIntent>();
@@ -97,7 +97,7 @@ fn virtual_tui_rpc_ctrl_c_byte_kills_tracked_child_like_local_tui() {
     }
 
     drop(intent_rx);
-    clear_child_pid();
+    drop(running_turn);
 
     if !exited {
         let _ = child.kill();
@@ -107,7 +107,7 @@ fn virtual_tui_rpc_ctrl_c_byte_kills_tracked_child_like_local_tui() {
 
     assert!(
         exited,
-        "Ctrl+C byte (0x03) over VirtualTui input must kill the tracked child process (parity with local TUI kill_child_process); child pid {} still running",
+        "Ctrl+C byte (0x03) over VirtualTui input must kill the tracked child process (parity with local TUI kill_running_turns); child pid {} still running",
         pid
     );
 }

@@ -1,10 +1,17 @@
-//! The headless command the daemon's launcher settles for a headless coding agent: the CLI it runs,
-//! the route it runs on, the MCP config a claude conversation reads, and the refusals that keep a
-//! launch from running weaker than asked.
+//! The headless command the daemon's launcher settles for a headless coding agent: its spec's
+//! renderer, the route it runs on, the tool server it is handed, and the refusals that keep a launch
+//! from running weaker than asked. Every launcher here has the coding agents installed against a host
+//! of stub binaries, as a daemon has; what a turn renders from them is pinned by
+//! `tests/headless_subagents_from_spec_acceptance.rs` and
+//! `tests/headless_claude_subagent_from_spec_acceptance.rs`.
 
+use std::collections::BTreeMap;
 use std::os::unix::fs::PermissionsExt;
+use std::sync::OnceLock;
 
 use super::*;
+use tddy_actions::tool::ToolHost;
+use tddy_coding_agent_specs::load_agent_registry;
 use tddy_coding_subagent::CodingAgentDef;
 use tddy_core::provider_route::{RouteFile, RouteSecret};
 
@@ -63,8 +70,70 @@ fn a_headless_launch(harness: &str, worktree: &Path) -> CodingAgentLaunch {
     }
 }
 
-/// A launcher wired for headless conversations, keeping their MCP configs under `data_dir`, whose
-/// provider route resolves to `route`.
+/// A host with nothing of the real machine: the env it is given, and executable files.
+struct AFixtureHost {
+    env: BTreeMap<String, String>,
+}
+
+impl ToolHost for AFixtureHost {
+    fn env_var(&self, name: &str) -> Option<String> {
+        self.env.get(name).cloned()
+    }
+
+    fn path_dirs(&self) -> Vec<PathBuf> {
+        Vec::new()
+    }
+
+    fn is_executable_file(&self, path: &Path) -> bool {
+        std::fs::metadata(path).is_ok_and(|m| m.is_file() && m.permissions().mode() & 0o111 != 0)
+    }
+
+    fn canonicalize(&self, path: &Path) -> std::io::Result<PathBuf> {
+        std::fs::canonicalize(path)
+    }
+}
+
+/// The directory of stub CLIs every launcher here resolves its agents against, made once.
+fn the_stub_clis() -> &'static Path {
+    static STUBS: OnceLock<tempfile::TempDir> = OnceLock::new();
+    STUBS
+        .get_or_init(|| {
+            let dir = tempfile::tempdir().expect("stub dir");
+            for name in ["claude", "agent", "codex", "oz", "tddy-tools"] {
+                let path = dir.path().join(name);
+                std::fs::write(&path, "#!/bin/sh\n").expect("write stub");
+                std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755))
+                    .expect("chmod");
+            }
+            dir
+        })
+        .path()
+}
+
+/// The coding agents installed as a daemon has them, their binaries the stubs.
+fn the_coding_agents() -> Arc<HostCodingAgents> {
+    let tools = tempfile::tempdir().expect("an empty <tddyhome>/tools");
+    let registry = load_agent_registry(tools.path()).expect("the agent registry loads");
+    let stub = |name: &str| {
+        std::fs::canonicalize(the_stub_clis().join(name))
+            .expect("stub path")
+            .to_string_lossy()
+            .into_owned()
+    };
+    let host = AFixtureHost {
+        env: BTreeMap::from([
+            ("TDDY_CLAUDE_BINARY".to_string(), stub("claude")),
+            ("TDDY_CURSOR_AGENT".to_string(), stub("agent")),
+            ("TDDY_CODEX_CLI".to_string(), stub("codex")),
+            ("TDDY_OZ_CLI".to_string(), stub("oz")),
+            ("TDDY_TOOLS_BINARY".to_string(), stub("tddy-tools")),
+        ]),
+    };
+    Arc::new(HostCodingAgents::new(registry, Arc::new(host)))
+}
+
+/// A launcher wired for headless conversations, keeping their files under `data_dir`, with the coding
+/// agents installed, whose provider route resolves to `route`.
 fn a_headless_launcher(data_dir: &Path, route: Option<HarnessRoute>) -> DaemonCodingAgentLauncher {
     DaemonCodingAgentLauncher::with_identity(
         the_daemons_own_identity(),
@@ -83,6 +152,7 @@ fn a_headless_launcher(data_dir: &Path, route: Option<HarnessRoute>) -> DaemonCo
         }),
     )
     .with_headless_wiring(a_daemon_config(), data_dir.to_path_buf())
+    .with_coding_agents(the_coding_agents())
 }
 
 /// The names in `dir`, empty when nothing was written there.
@@ -103,7 +173,7 @@ fn entries_in(dir: &Path) -> Vec<String> {
 }
 
 #[tokio::test]
-async fn a_headless_claude_runs_the_cli_the_daemon_resolves_on_its_worktree_and_model() {
+async fn a_headless_claude_runs_on_its_worktree_and_model_rendered_from_its_spec() {
     // Given
     let data_dir = tempfile::tempdir().expect("data dir");
     let worktree = tempfile::tempdir().expect("worktree");
@@ -115,58 +185,41 @@ async fn a_headless_claude_runs_the_cli_the_daemon_resolves_on_its_worktree_and_
         .await
         .expect("the claude CLI is settled");
 
-    // Then
+    // Then — the spec's renderer, the worktree and the model, the approvals routed to the tool server
     assert_eq!(
-        command.program,
-        PathBuf::from(resolve_claude_binary_path(&a_daemon_config()))
+        (
+            command.renderer.as_ref().map(|r| r.agent_id().to_string()),
+            command.cwd.as_deref(),
+            command.model.as_deref(),
+            command.permission_prompt_tool.as_deref(),
+        ),
+        (
+            Some("claude".to_string()),
+            Some(worktree.path()),
+            Some(MODEL),
+            Some("mcp__tddy-tools__approval_prompt"),
+        )
     );
-    assert_eq!(command.cwd.as_deref(), Some(worktree.path()));
-    assert_eq!(command.model.as_deref(), Some(MODEL));
-}
-
-#[tokio::test]
-async fn a_headless_claude_is_handed_tddy_tools_through_an_owner_only_mcp_config() {
-    // Given
-    let data_dir = tempfile::tempdir().expect("data dir");
-    let worktree = tempfile::tempdir().expect("worktree");
-    let launch = a_headless_launch("claude", worktree.path());
-
-    // When
-    let command = a_headless_launcher(data_dir.path(), None)
-        .headless_command_for(&launch)
-        .await
-        .expect("the claude CLI is settled");
-
-    // Then
-    let config_path = command
-        .mcp_config
-        .clone()
-        .expect("claude reads an MCP config");
+    let server = command
+        .mcp_server
+        .expect("claude is handed the tool server");
     assert_eq!(
-        config_path,
-        data_dir.path().join(CONVERSATION).join(MCP_CONFIG_FILE)
-    );
-    assert!(
-        !config_path.starts_with(worktree.path()),
-        "the credential stays out of the worktree: {config_path:?}"
-    );
-    let mode = std::fs::metadata(&config_path)
-        .expect("the config was written")
-        .permissions()
-        .mode();
-    assert_eq!(mode & 0o777, 0o600, "owner only");
-    let written: serde_json::Value = serde_json::from_str(
-        &std::fs::read_to_string(&config_path).expect("the config is readable"),
-    )
-    .expect("the config is JSON");
-    let server = &written["mcpServers"][TDDY_TOOLS_SERVER];
-    assert_eq!(server["command"], TDDY_TOOLS_PATH);
-    assert_eq!(server["args"], serde_json::json!([TDDY_TOOLS_MCP_ARG]));
-    assert_eq!(server["env"][SESSION_TOKEN_ENV_NAME], MINTED_TOKEN);
-    assert_eq!(server["env"][CONVERSATION_ID_ENV], CONVERSATION);
-    assert_eq!(
-        command.permission_prompt_tool.as_deref(),
-        Some("mcp__tddy-tools__approval_prompt")
+        (
+            server.command,
+            server.args,
+            server
+                .env
+                .contains(&(SESSION_TOKEN_ENV_NAME.to_string(), MINTED_TOKEN.to_string())),
+            server
+                .env
+                .contains(&(CONVERSATION_ID_ENV.to_string(), CONVERSATION.to_string())),
+        ),
+        (
+            PathBuf::from(TDDY_TOOLS_PATH),
+            vec![TDDY_TOOLS_MCP_ARG.to_string()],
+            true,
+            true
+        )
     );
 }
 
@@ -336,7 +389,7 @@ async fn a_launcher_not_wired_for_headless_conversations_refuses_one() {
 }
 
 #[tokio::test]
-async fn cursor_runs_its_resolved_cli() {
+async fn cursor_is_rendered_from_its_spec_with_no_permission_prompt_tool() {
     // Given
     let data_dir = tempfile::tempdir().expect("data dir");
     let worktree = a_git_worktree();
@@ -350,11 +403,11 @@ async fn cursor_runs_its_resolved_cli() {
 
     // Then
     assert_eq!(
-        command.program,
-        PathBuf::from(resolve_cursor_binary_path(&a_daemon_config()))
-    );
-    assert!(
-        command.permission_prompt_tool.is_none(),
+        (
+            command.renderer.as_ref().map(|r| r.agent_id().to_string()),
+            command.permission_prompt_tool,
+        ),
+        (Some("cursor".to_string()), None),
         "cursor has no permission-prompt tool to route approvals to"
     );
 }
@@ -383,35 +436,8 @@ fn git_ignores(worktree: &Path, path: &str) -> bool {
         .success()
 }
 
-/// `path`'s JSON, and its permission bits.
-fn written_json(path: &Path) -> (serde_json::Value, u32) {
-    let mode = std::fs::metadata(path)
-        .unwrap_or_else(|e| panic!("{} was written: {e}", path.display()))
-        .permissions()
-        .mode();
-    let json = serde_json::from_str(&std::fs::read_to_string(path).expect("readable"))
-        .expect("the config is JSON");
-    (json, mode & 0o777)
-}
-
-/// The server entry is the launch's tool server: `tddy-tools --mcp`, its credential and
-/// conversation in its environment.
-fn assert_is_the_tool_server(server: &serde_json::Value) {
-    assert_eq!(server["command"], TDDY_TOOLS_PATH, "{server}");
-    assert_eq!(
-        server["args"],
-        serde_json::json!([TDDY_TOOLS_MCP_ARG]),
-        "{server}"
-    );
-    assert_eq!(
-        server["env"][SESSION_TOKEN_ENV_NAME], MINTED_TOKEN,
-        "{server}"
-    );
-    assert_eq!(server["env"][CONVERSATION_ID_ENV], CONVERSATION, "{server}");
-}
-
 #[tokio::test]
-async fn a_headless_cursor_is_handed_tddy_tools_through_its_worktrees_cursor_mcp_config() {
+async fn a_headless_cursors_mcp_config_is_kept_out_of_git_before_its_turns_write_it() {
     // Given
     let data_dir = tempfile::tempdir().expect("data dir");
     let worktree = a_git_worktree();
@@ -423,26 +449,7 @@ async fn a_headless_cursor_is_handed_tddy_tools_through_its_worktrees_cursor_mcp
         .await
         .expect("the cursor CLI is settled");
 
-    // Then cursor reads it from the project it runs in, in cursor's own shape, owner only
-    let (written, mode) = written_json(&worktree.path().join(".cursor/mcp.json"));
-    assert_is_the_tool_server(&written["mcpServers"][TDDY_TOOLS_SERVER]);
-    assert_eq!(mode, 0o600, "owner only");
-}
-
-#[tokio::test]
-async fn a_headless_cursors_mcp_config_is_never_committed_from_its_worktree() {
-    // Given
-    let data_dir = tempfile::tempdir().expect("data dir");
-    let worktree = a_git_worktree();
-    let launch = a_headless_launch("cursor", worktree.path());
-
-    // When
-    a_headless_launcher(data_dir.path(), None)
-        .headless_command_for(&launch)
-        .await
-        .expect("the cursor CLI is settled");
-
-    // Then the credential it holds is ignored by git, so the agent cannot commit it
+    // Then the credential it will hold is ignored by git, so the agent cannot commit it
     assert!(
         git_ignores(worktree.path(), ".cursor/mcp.json"),
         "the worktree's .cursor/mcp.json is ignored by git"
@@ -474,34 +481,6 @@ async fn a_headless_cursor_refuses_a_worktree_that_already_has_a_cursor_mcp_conf
         std::fs::read_to_string(worktree.path().join(".cursor/mcp.json")).expect("still there"),
         "{\"mcpServers\":{\"theirs\":{}}}"
     );
-}
-
-#[tokio::test]
-async fn a_headless_oz_is_handed_tddy_tools_through_an_owner_only_mcp_file_in_its_own_shape() {
-    // Given
-    let data_dir = tempfile::tempdir().expect("data dir");
-    let worktree = tempfile::tempdir().expect("worktree");
-    let launch = a_headless_launch("oz", worktree.path());
-
-    // When
-    let command = a_headless_launcher(data_dir.path(), None)
-        .headless_command_for(&launch)
-        .await
-        .expect("the oz CLI is settled");
-
-    // Then oz is handed the file (`--mcp <path>`), servers keyed by name at the top level
-    let path = command
-        .mcp_config
-        .clone()
-        .expect("oz is handed an MCP file");
-    assert_eq!(
-        path,
-        data_dir.path().join(CONVERSATION).join(MCP_CONFIG_FILE)
-    );
-    let (written, mode) = written_json(&path);
-    assert!(written.get("mcpServers").is_none(), "no wrapper: {written}");
-    assert_is_the_tool_server(&written[TDDY_TOOLS_SERVER]);
-    assert_eq!(mode, 0o600, "owner only");
 }
 
 #[tokio::test]
@@ -575,28 +554,6 @@ async fn a_headless_plan_whose_mcp_config_cannot_be_written_leaves_no_approval_r
 }
 
 #[tokio::test]
-async fn codex_and_oz_run_by_name_from_the_path() {
-    // Given
-    let data_dir = tempfile::tempdir().expect("data dir");
-    let worktree = tempfile::tempdir().expect("worktree");
-    let launcher = a_headless_launcher(data_dir.path(), None);
-
-    // When
-    let codex = launcher
-        .headless_command_for(&a_headless_launch("codex", worktree.path()))
-        .await
-        .expect("the codex CLI is settled");
-    let oz = launcher
-        .headless_command_for(&a_headless_launch("oz", worktree.path()))
-        .await
-        .expect("the oz CLI is settled");
-
-    // Then
-    assert_eq!(codex.program, PathBuf::from("codex"));
-    assert_eq!(oz.program, PathBuf::from("oz"));
-}
-
-#[tokio::test]
 async fn the_start_up_sweep_removes_what_this_daemon_planned_and_leaves_another_daemons_files() {
     // Given a data directory where this daemon planned a headless conversation, and another daemon
     // sharing the directory has one of its own
@@ -649,7 +606,8 @@ async fn a_headless_plan_tags_its_conversations_files_with_this_daemons_durable_
             ))
         }),
     )
-    .with_headless_wiring(config, headless.path().to_path_buf());
+    .with_headless_wiring(config, headless.path().to_path_buf())
+    .with_coding_agents(the_coding_agents());
 
     // When
     launcher

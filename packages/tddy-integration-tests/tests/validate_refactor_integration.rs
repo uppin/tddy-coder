@@ -14,9 +14,7 @@ mod common;
 
 use std::sync::Arc;
 use tddy_core::changeset::read_changeset;
-use tddy_core::{
-    BackendError, CodingBackend, CursorBackend, GoalId, MockBackend, SharedBackend, WorkflowEngine,
-};
+use tddy_core::{CodingBackend, GoalId, MockBackend, SharedBackend, WorkflowEngine};
 
 use common::{
     ctx_validate, run_goal_until_done, write_changeset_with_state,
@@ -110,22 +108,27 @@ async fn validate_requires_session_dir_with_evaluation_report() {
     let _ = std::fs::remove_dir_all(&session_dir);
 }
 
-/// CursorBackend must not return the legacy "validate is not supported on the Cursor backend"
-/// error; Validate uses the same invocation path as other goals (Claude parity). A missing
-/// binary yields `BinaryNotFound` after attempting spawn, not a pre-spawn rejection.
+/// The cursor spec backend must not return the legacy "validate is not supported on the Cursor
+/// backend" error; Validate uses the same invocation path as other goals (Claude parity). A missing
+/// binary is now refused when the backend is built, so the goal is accepted over a stub that answers.
 #[tokio::test]
 async fn validate_cursor_backend_does_not_reject_goal_before_spawn() {
-    let backend = CursorBackend::with_path(std::path::PathBuf::from("/nonexistent/cursor"));
-    let req = common::stub_invoke_request("validate refactor", "validate");
+    // Given
+    let (backend, dir) = common::a_spec_backend(
+        "cursor",
+        r##"printf '%s\n' '{"type":"result","result":"ok","session_id":"s1"}'"##,
+    );
+    let req = common::in_spec_workspace(
+        &dir,
+        common::stub_invoke_request("validate refactor", "validate"),
+    );
 
+    // When
     let result = backend.invoke(req).await;
 
+    // Then
     assert!(
-        !matches!(
-            &result,
-            Err(BackendError::InvocationFailed(ref m))
-                if m == "validate is not supported on the Cursor backend"
-        ),
+        result.is_ok(),
         "Validate on Cursor must be implemented like Claude; got {:?}",
         result
     );

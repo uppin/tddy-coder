@@ -68,7 +68,7 @@ When **`right_chrome_reserve_cols`** includes the Stop strip (terminal wider tha
 
 - **Label**: Same light box-drawing frame as Enter; the key cell uses **U+25A0** (■) in **red** (`Color::Red`) instead of U+23CE.
 - **Hit-testing**: `stop_button_rect` matches `paint_stop_affordance`; left-click maps to **`UserIntent::Interrupt`**, which the local event loop and `VirtualTui` handle by calling **`ctrl_c_interrupt_session`** (same as **Ctrl+C** / byte **0x03** over the terminal stream). The intent is not sent to the presenter.
-- **Semantics**: **`ctrl_c_interrupt_session`** only **`kill_child_process`** (tracked agent/backend PID). It does **not** set the workflow **`shutdown`** flag — the TUI and presenter keep running; full teardown uses the **`ctrlc`** SIGINT handler or daemon shutdown.
+- **Semantics**: **`ctrl_c_interrupt_session`** only **`kill_running_turns`** — it kills the process group of every headless agent turn running now. It does **not** set the workflow **`shutdown`** flag — the TUI and presenter keep running; full teardown uses the **`ctrlc`** SIGINT handler or daemon shutdown.
 - **E2E / stable screens**: The same `TDDY_E2E_NO_ENTER_AFFORDANCE` gate skips both Enter and Stop overlay paint.
 - **Narrow terminals**: If only the four-column Enter reserve fits, `stop_button_rect` is empty and the Stop affordance is omitted.
 
