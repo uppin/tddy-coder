@@ -47,6 +47,8 @@ const ORCHESTRATOR_SESSION: Partial<SessionEntry> = {
   pendingElicitation: false,
   orchestratorSessionId: "",
   recipe: "pr-stack",
+  // The child runs as the same kind of session as its orchestrator parent.
+  sessionType: "claude-cli",
   stackPlanJson: aStackPlanJson(1, [
     aPlannedNode({
       nodeId: "n1",

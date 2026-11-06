@@ -30,8 +30,8 @@ function aBackend(): InMemoryRpcBackend {
       // As the daemon reports them from the specs: Codex can be routed to OpenAI Responses
       // endpoints, Cursor declares no provider at all.
       agents: [
-        { id: "codex", label: "Codex", ...servedAgentWire("codex"),, kind: AgentKind.CODING_AGENT, harness: "codex", routeProviders: ["openai_responses"] },
-        { id: "cursor", label: "Cursor", ...servedAgentWire("cursor"),, kind: AgentKind.CODING_AGENT, harness: "cursor", routeProviders: [] },
+        { id: "codex", label: "Codex", ...servedAgentWire("codex"), kind: AgentKind.CODING_AGENT, harness: "codex", routeProviders: ["openai_responses"] },
+        { id: "cursor", label: "Cursor", ...servedAgentWire("cursor"), kind: AgentKind.CODING_AGENT, harness: "cursor", routeProviders: [] },
       ],
     }))
     .onUnary(CatalogService.method.listTools, () => ({
