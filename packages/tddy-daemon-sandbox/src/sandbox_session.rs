@@ -404,6 +404,9 @@ impl tddy_rpc::RpcService for NoCallbackSandboxService {
 /// Dial the sandboxed runner over its stdio-served `SessionChannel` and drive the host side via
 /// the shared relay. PTY output fans into the broadcast channel (live subscribers) and the
 /// rolling capture buffer (late subscribers); tool calls run in `worktree_path`.
+///
+/// The relay admits every host the jail asks to tunnel to; [`dial_and_bridge_with_egress`] holds it
+/// to a policy.
 #[allow(clippy::too_many_arguments)]
 pub async fn dial_and_bridge(
     session_id: &str,
@@ -417,6 +420,41 @@ pub async fn dial_and_bridge(
     session_dir: PathBuf,
     agent_activity_hub: Arc<tddy_daemon_kernel::AgentActivityHub>,
     rpc_handler: Arc<dyn tddy_sandbox_runner::HostRpcHandler>,
+) -> Result<(), String> {
+    dial_and_bridge_with_egress(
+        session_id,
+        worktree_path,
+        handle,
+        task_registry,
+        stdout_tx,
+        capture,
+        stdin_rx,
+        session_env,
+        session_dir,
+        agent_activity_hub,
+        rpc_handler,
+        tddy_sandbox_runner::EgressGuard::unrestricted(session_id),
+    )
+    .await
+}
+
+/// [`dial_and_bridge`] with the jail's egress policy enforced on the host relay's `TunnelOpen`s,
+/// independently of the in-jail shim: a jailed process that speaks the relay protocol directly is
+/// refused here too (`#agent-tools 3/12`).
+#[allow(clippy::too_many_arguments)]
+pub async fn dial_and_bridge_with_egress(
+    session_id: &str,
+    worktree_path: PathBuf,
+    handle: &mut tddy_sandbox::SandboxHandle,
+    task_registry: tddy_task::TaskRegistry,
+    stdout_tx: broadcast::Sender<Bytes>,
+    capture: Arc<StdMutex<TerminalCapture>>,
+    stdin_rx: mpsc::UnboundedReceiver<Bytes>,
+    session_env: Arc<Vec<(String, String)>>,
+    session_dir: PathBuf,
+    agent_activity_hub: Arc<tddy_daemon_kernel::AgentActivityHub>,
+    rpc_handler: Arc<dyn tddy_sandbox_runner::HostRpcHandler>,
+    egress: tddy_sandbox_runner::EgressGuard,
 ) -> Result<(), String> {
     log::info!(
         target: "tddy_daemon_sandbox::sandbox_session",
@@ -445,7 +483,8 @@ pub async fn dial_and_bridge(
         handler,
         rpc_handler,
         tddy_sandbox_runner::HostRelayConfig::new(session_id, term_tx)
-            .with_terminal_events(events_tx),
+            .with_terminal_events(events_tx)
+            .with_egress(egress),
         stdin_rx,
     )
     .await?;

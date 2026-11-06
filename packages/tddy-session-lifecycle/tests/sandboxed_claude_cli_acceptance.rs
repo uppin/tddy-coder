@@ -120,6 +120,80 @@ fn minimal_service(config: DaemonConfig, sessions_base: PathBuf) -> DaemonSessio
     )
 }
 
+/// `<sessions_base>/stub-bin` holding a stub `claude` and a link to the built `tddy-tools`: what
+/// the `claude` tool definition resolves against on a host whose coding agents are installed.
+#[cfg(not(target_os = "macos"))]
+fn a_stub_bin_with_claude_and_tddy_tools(sessions_base: &std::path::Path) -> PathBuf {
+    use std::os::unix::fs::PermissionsExt;
+    let stub_bin = a_stub_bin_with_tddy_tools(sessions_base);
+    let claude = stub_bin.join("claude");
+    std::fs::write(&claude, "#!/bin/sh\nexit 0\n").unwrap();
+    std::fs::set_permissions(&claude, std::fs::Permissions::from_mode(0o755)).unwrap();
+    stub_bin
+}
+
+/// `<sessions_base>/stub-bin` holding a link to the built `tddy-tools`: the `PATH` a sandboxed
+/// `claude-cli` start resolves the jail's `tddy-tools` on, while `claude` itself is the configured
+/// `claude_cli.binary_path`.
+fn a_stub_bin_with_tddy_tools(sessions_base: &std::path::Path) -> PathBuf {
+    let stub_bin = sessions_base.join("stub-bin");
+    std::fs::create_dir_all(&stub_bin).unwrap();
+    let stub_bin = std::fs::canonicalize(stub_bin).unwrap();
+    let tddy_tools = std::env::var_os("CARGO_BIN_EXE_tddy-tools")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| {
+            PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../target/debug/tddy-tools")
+        });
+    std::os::unix::fs::symlink(tddy_tools, stub_bin.join("tddy-tools")).unwrap();
+    stub_bin
+}
+
+/// [`minimal_service`] with the daemon's coding agents installed, as the runtime installs them: a
+/// sandboxed `claude-cli` session is launched from the `claude` tool definition, resolved on a
+/// `PATH` of `stub_bin` alone. A sandboxed launch reaches the jail over the sandbox RPC bridge,
+/// which the daemon runtime installs at mount.
+fn a_service_with_coding_agents(
+    config: DaemonConfig,
+    sessions_base: PathBuf,
+    stub_bin: PathBuf,
+) -> Arc<DaemonSessionHost> {
+    let registry = tddy_coding_agent_specs::load_agent_registry(&sessions_base.join("tools"))
+        .expect("the agent registry loads");
+    let host = Arc::new(
+        minimal_service(config, sessions_base).with_coding_agents(Arc::new(
+            tddy_agent_launch::spec_launch::HostCodingAgents::new(
+                registry,
+                Arc::new(APathHost(vec![stub_bin])),
+            ),
+        )),
+    );
+    host.install_sandbox_rpc_bridge();
+    host
+}
+
+/// A tool host with a declared `PATH` over the real filesystem: nothing of the real machine's
+/// `PATH` or `TDDY_*_BINARY` variables reaches resolution.
+struct APathHost(Vec<PathBuf>);
+
+impl tddy_actions::tool::ToolHost for APathHost {
+    fn env_var(&self, _name: &str) -> Option<String> {
+        None
+    }
+
+    fn path_dirs(&self) -> Vec<PathBuf> {
+        self.0.clone()
+    }
+
+    fn is_executable_file(&self, path: &std::path::Path) -> bool {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::metadata(path).is_ok_and(|m| m.is_file() && m.permissions().mode() & 0o111 != 0)
+    }
+
+    fn canonicalize(&self, path: &std::path::Path) -> std::io::Result<PathBuf> {
+        std::fs::canonicalize(path)
+    }
+}
+
 fn create_test_repo_with_origin(dir: &std::path::Path) {
     let run = |args: &[&str], envs: &[(&str, &str)]| {
         let mut cmd = std::process::Command::new("git");
@@ -215,8 +289,10 @@ async fn start_session_sandbox_unsupported_on_non_darwin() {
     create_test_repo_with_origin(repo_dir.path());
     let sessions_tmp = tempfile::tempdir().unwrap();
     register_project(&sessions_tmp.path().join("projects"), repo_dir.path());
-    let (_cfg_dir, config) = write_config_with_claude_cli_binary("claude");
-    let service = minimal_service(config, sessions_tmp.path().to_path_buf());
+    let stub_bin = a_stub_bin_with_claude_and_tddy_tools(sessions_tmp.path());
+    let (_cfg_dir, config) =
+        write_config_with_claude_cli_binary(stub_bin.join("claude").to_str().unwrap());
+    let service = a_service_with_coding_agents(config, sessions_tmp.path().to_path_buf(), stub_bin);
 
     // When
     let err = service
@@ -249,7 +325,8 @@ async fn sandboxed_claude_cli_start_persists_metadata_and_empty_livekit() {
     register_project(&sessions_tmp.path().join("projects"), repo_dir.path());
     let stub = write_echo_argv_script(repo_dir.path());
     let (_cfg_dir, config) = write_config_with_claude_cli_binary(stub.to_str().unwrap());
-    let service = minimal_service(config, sessions_tmp.path().to_path_buf());
+    let stub_bin = a_stub_bin_with_tddy_tools(sessions_tmp.path());
+    let service = a_service_with_coding_agents(config, sessions_tmp.path().to_path_buf(), stub_bin);
 
     // When
     let resp = service
@@ -330,7 +407,8 @@ async fn sandboxed_claude_cli_connect_session_returns_empty_livekit() {
     register_project(&sessions_tmp.path().join("projects"), repo_dir.path());
     let stub = write_echo_argv_script(repo_dir.path());
     let (_cfg_dir, config) = write_config_with_claude_cli_binary(stub.to_str().unwrap());
-    let service = minimal_service(config, sessions_tmp.path().to_path_buf());
+    let stub_bin = a_stub_bin_with_tddy_tools(sessions_tmp.path());
+    let service = a_service_with_coding_agents(config, sessions_tmp.path().to_path_buf(), stub_bin);
 
     let session_id = service
         .start_session(Request::direct(sandbox_start_request()))
@@ -367,7 +445,8 @@ async fn sandboxed_claude_cli_terminal_io_round_trips() {
     register_project(&sessions_tmp.path().join("projects"), repo_dir.path());
     let stub = write_echo_argv_script(repo_dir.path());
     let (_cfg_dir, config) = write_config_with_claude_cli_binary(stub.to_str().unwrap());
-    let service = minimal_service(config, sessions_tmp.path().to_path_buf());
+    let stub_bin = a_stub_bin_with_tddy_tools(sessions_tmp.path());
+    let service = a_service_with_coding_agents(config, sessions_tmp.path().to_path_buf(), stub_bin);
 
     let session_id = service
         .start_session(Request::direct(sandbox_start_request()))
@@ -458,7 +537,8 @@ async fn sandboxed_claude_cli_tool_exec_via_ipc_reads_host_worktree() {
     register_project(&sessions_tmp.path().join("projects"), repo_dir.path());
     let stub = write_echo_argv_script(repo_dir.path());
     let (_cfg_dir, config) = write_config_with_claude_cli_binary(stub.to_str().unwrap());
-    let service = minimal_service(config, sessions_tmp.path().to_path_buf());
+    let stub_bin = a_stub_bin_with_tddy_tools(sessions_tmp.path());
+    let service = a_service_with_coding_agents(config, sessions_tmp.path().to_path_buf(), stub_bin);
 
     let session_id = service
         .start_session(Request::direct(sandbox_start_request()))
@@ -514,7 +594,8 @@ async fn sandboxed_claude_cli_start_wires_specialized_agents_env_and_metadata() 
     an_agent_def_pointing_fastcontext_at(sessions_tmp.path(), &inference_endpoint.base_url());
     let stub = write_echo_argv_and_subagent_env_script(repo_dir.path());
     let (_cfg_dir, config) = write_config_with_fast_agent_warmup(stub.to_str().unwrap());
-    let service = minimal_service(config, sessions_tmp.path().to_path_buf());
+    let stub_bin = a_stub_bin_with_tddy_tools(sessions_tmp.path());
+    let service = a_service_with_coding_agents(config, sessions_tmp.path().to_path_buf(), stub_bin);
     let request = StartSessionRequest {
         specialized_agents: vec!["fastcontext".to_string()],
         ..sandbox_start_request()
@@ -533,7 +614,8 @@ async fn sandboxed_claude_cli_start_wires_specialized_agents_env_and_metadata() 
     let persisted_roster: Vec<&str> = meta.agents.iter().map(|a| a.name.as_str()).collect();
     assert_eq!(persisted_roster, vec!["fastcontext"]);
 
-    // Then — the jailed process actually received TDDY_SUBAGENT in its env
+    // Then — the jail's `tddy-tools` MCP server, which reads the roster, is given TDDY_SUBAGENT in
+    // its env block (the agent process itself is given no `TDDY_*` variable)
     let stream_resp = service
         .terminal_session_service()
         .stream_terminal_output(Request::direct(StreamTerminalOutputRequest {
@@ -550,20 +632,35 @@ async fn sandboxed_claude_cli_start_wires_specialized_agents_env_and_metadata() 
         .expect("stream_terminal_output must succeed for sandbox session");
     let mut stream = stream_resp.into_inner();
 
-    let saw_subagent_env = tokio::time::timeout(Duration::from_secs(30), async {
+    let launched_argv = tokio::time::timeout(Duration::from_secs(30), async {
+        let mut text = String::new();
         while let Some(Ok(msg)) = stream.next().await {
-            let text = String::from_utf8_lossy(&msg.data);
-            if text.contains("TDDY_SUBAGENT=fastcontext") {
-                return true;
+            text.push_str(&String::from_utf8_lossy(&msg.data));
+            if let Some(line) = text
+                .lines()
+                .find(|line| line.starts_with("ARGV: ") && line.contains("claude-mcp-config.json"))
+            {
+                return Some(line.to_string());
             }
         }
-        false
+        None
     })
     .await
-    .unwrap_or(false);
-
-    assert!(
-        saw_subagent_env,
-        "jailed process env must include TDDY_SUBAGENT=fastcontext"
+    .ok()
+    .flatten()
+    .expect("the jailed agent must report the argv it was launched with");
+    let mcp_config_path = launched_argv
+        .split_whitespace()
+        .skip_while(|arg| *arg != "--mcp-config")
+        .nth(1)
+        .expect("the jailed agent must be given --mcp-config");
+    let mcp_config: serde_json::Value = serde_json::from_str(
+        &std::fs::read_to_string(mcp_config_path).expect("the MCP config the agent was given"),
+    )
+    .expect("the MCP config is JSON");
+    assert_eq!(
+        mcp_config["mcpServers"]["tddy-tools"]["env"]["TDDY_SUBAGENT"],
+        serde_json::json!("fastcontext"),
+        "the tddy-tools MCP server env must include TDDY_SUBAGENT=fastcontext: {mcp_config}"
     );
 }

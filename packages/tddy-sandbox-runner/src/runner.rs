@@ -1101,9 +1101,17 @@ pub(crate) struct PtyState {
     pub(crate) stdin_tx: std::sync::mpsc::Sender<Bytes>,
 }
 
+/// The environment a PTY child runs with, when it is not the runner's own.
+///
+/// `Some` replaces the runner's environment outright (`--exec-plan`: the child sees what its plan
+/// declares and nothing of the jail's control variables); `None` inherits it, as the generic
+/// confined-action mode always has.
+pub(crate) type ChildEnv = Option<std::collections::BTreeMap<String, String>>;
+
 fn run_generic_pty_thread(
     argv: Vec<String>,
     cwd: PathBuf,
+    child_env: ChildEnv,
     relay: Arc<SandboxSessionRelay>,
     stdin_rx: std::sync::mpsc::Receiver<Bytes>,
     initial_cols: u16,
@@ -1132,6 +1140,12 @@ fn run_generic_pty_thread(
         cmd.arg(arg);
     }
     cmd.cwd(&cwd);
+    if let Some(child_env) = child_env {
+        cmd.env_clear();
+        for (name, value) in child_env {
+            cmd.env(name, value);
+        }
+    }
     cmd.env("TERM", "xterm-256color");
     let mut child = pair
         .slave
@@ -1221,9 +1235,10 @@ fn run_generic_pty_thread(
     Ok(exit_code)
 }
 
-fn spawn_generic_pty(
+pub(crate) fn spawn_generic_pty(
     argv: Vec<String>,
     cwd: PathBuf,
+    child_env: ChildEnv,
     relay: Arc<SandboxSessionRelay>,
     initial_cols: u16,
     initial_rows: u16,
@@ -1235,6 +1250,7 @@ fn spawn_generic_pty(
         let code = match run_generic_pty_thread(
             argv,
             cwd,
+            child_env,
             relay_thread,
             stdin_rx,
             initial_cols,
@@ -1804,7 +1820,7 @@ const EGRESS_PROXY_BYPASS: &str = "127.0.0.1,localhost";
 /// Nothing at all when no shim was asked for: the daemon's `--workspace-tools` jail holds only a
 /// checkout, needs no network, and must keep the profile's flat denial rather than a proxy
 /// pointing at a port on which nothing listens.
-fn egress_proxy_env(shim_port: Option<u16>) -> Vec<(String, String)> {
+pub(crate) fn egress_proxy_env(shim_port: Option<u16>) -> Vec<(String, String)> {
     let Some(port) = shim_port else {
         return Vec::new();
     };
@@ -2398,7 +2414,7 @@ fn require_model(model: &str, agent_kind: &str) -> Result<()> {
 /// Boot-log wiring shared by every entry point: a fallback log directory beside the ready marker,
 /// the panic hook that turns an in-jail abort into a readable failure marker, and the startup
 /// environment dump.
-fn prepare_runner_boot(entry: &str, args: &SandboxRunnerArgs) {
+pub(crate) fn prepare_runner_boot(entry: &str, args: &SandboxRunnerArgs) {
     if let Some(parent) = args.ready_marker.parent() {
         set_boot_log_fallback(parent.to_path_buf());
     }
@@ -2409,7 +2425,7 @@ fn prepare_runner_boot(entry: &str, args: &SandboxRunnerArgs) {
 
 /// Record how a run ended. A failure is written to the failure marker the host reads back out of
 /// the jail's egress, since a jailed process's stderr is nobody's terminal.
-fn finish_runner_run(entry: &str, result: Result<()>) -> Result<()> {
+pub(crate) fn finish_runner_run(entry: &str, result: Result<()>) -> Result<()> {
     if let Err(ref err) = result {
         let message = format!("{err:#}");
         boot_log_error(entry, &message);
@@ -2421,10 +2437,23 @@ fn finish_runner_run(entry: &str, result: Result<()>) -> Result<()> {
     result
 }
 
+/// Shut the jail's server down shortly after its one process exits, once the output it wrote has
+/// been delivered.
+fn notify_when_the_process_exits(
+    done_rx: std::sync::mpsc::Receiver<i32>,
+    shutdown_notify: Arc<tokio::sync::Notify>,
+) {
+    tokio::spawn(async move {
+        let _ = tokio::task::spawn_blocking(move || done_rx.recv()).await;
+        tokio::time::sleep(Duration::from_millis(300)).await;
+        shutdown_notify.notify_one();
+    });
+}
+
 /// Run the sandbox gRPC server and claude PTY until shutdown.
 pub async fn run_sandbox_runner(args: SandboxRunnerArgs) -> Result<()> {
     prepare_runner_boot("run_sandbox_runner", &args);
-    let result = run_sandbox_runner_inner(args).await;
+    let result = run_sandbox_runner_inner(args, None).await;
     finish_runner_run("run_sandbox_runner", result)
 }
 
@@ -2440,7 +2469,13 @@ pub async fn run_workspace_tool_runner(args: SandboxRunnerArgs, worktree: PathBu
     finish_runner_run("run_workspace_tool_runner", result)
 }
 
-async fn run_sandbox_runner_inner(args: SandboxRunnerArgs) -> Result<()> {
+/// The runner's shared body. With `exec_plan`, the PTY runs the plan's argv and env
+/// ([`crate::exec_plan::run_exec_plan`]) instead of one of the agent modes' own; everything around
+/// it — the egress shim, the tool-IPC server, the `SessionChannel` — is the same.
+pub(crate) async fn run_sandbox_runner_inner(
+    args: SandboxRunnerArgs,
+    exec_plan: Option<crate::exec_plan::ExecPlan>,
+) -> Result<()> {
     boot_log("INFO", "boot: init_sandbox_egress_logging");
     init_sandbox_egress_logging();
     log::info!(
@@ -2464,6 +2499,8 @@ async fn run_sandbox_runner_inner(args: SandboxRunnerArgs) -> Result<()> {
     let _ = std::fs::remove_file(&args.ready_marker);
 
     let generic_pty = !args.pty_command.is_empty();
+    // A jail that ends with its one process: the confined-action mode and an exec plan.
+    let ends_with_its_process = generic_pty || exec_plan.is_some();
 
     boot_log(
         "INFO",
@@ -2475,10 +2512,9 @@ async fn run_sandbox_runner_inner(args: SandboxRunnerArgs) -> Result<()> {
     let relay = Arc::new(SandboxSessionRelay::default());
     let egress = Arc::new(runner_egress_guard(&args)?);
     // A `none` policy starts no shim, and the PTY below is then given no proxy environment.
-    let egress_shim =
-        start_egress_shim_for_policy(Arc::clone(&relay), egress, args.egress_shim_port)
-            .await?
-            .map(egress_shim_url);
+    let egress_shim_port =
+        start_egress_shim_for_policy(Arc::clone(&relay), egress, args.egress_shim_port).await?;
+    let egress_shim = egress_shim_port.map(egress_shim_url);
 
     boot_log(
         "INFO",
@@ -2500,7 +2536,23 @@ async fn run_sandbox_runner_inner(args: SandboxRunnerArgs) -> Result<()> {
     let shutdown_notify = Arc::new(tokio::sync::Notify::new());
 
     let pty =
-        if generic_pty {
+        if let Some(plan) = exec_plan {
+            boot_log(
+                "INFO",
+                &format!("boot: spawn exec plan argv={:?}", plan.argv),
+            );
+            let (pty_state, done_rx) = crate::exec_plan::spawn_exec_plan_pty(
+                &plan,
+                cwd,
+                egress_shim_port,
+                Arc::clone(&relay),
+                args.initial_cols,
+                args.initial_rows,
+            )
+            .inspect_err(|e| boot_log_error("spawn_exec_plan_pty", format!("{e:#}")))?;
+            notify_when_the_process_exits(done_rx, Arc::clone(&shutdown_notify));
+            pty_state
+        } else if generic_pty {
             boot_log(
                 "INFO",
                 &format!("boot: spawn_generic_pty argv={:?}", args.pty_command),
@@ -2508,17 +2560,13 @@ async fn run_sandbox_runner_inner(args: SandboxRunnerArgs) -> Result<()> {
             let (pty_state, done_rx) = spawn_generic_pty(
                 args.pty_command.clone(),
                 cwd,
+                None,
                 Arc::clone(&relay),
                 args.initial_cols,
                 args.initial_rows,
             )
             .inspect_err(|e| boot_log_error("spawn_generic_pty", format!("{e:#}")))?;
-            let notify = Arc::clone(&shutdown_notify);
-            tokio::spawn(async move {
-                let _ = tokio::task::spawn_blocking(move || done_rx.recv()).await;
-                tokio::time::sleep(Duration::from_millis(300)).await;
-                notify.notify_one();
-            });
+            notify_when_the_process_exits(done_rx, Arc::clone(&shutdown_notify));
             boot_log("INFO", "boot: generic pty thread spawned");
             pty_state
         } else if matches!(args.agent_kind.as_str(), "opencode" | "muse") {
@@ -2649,7 +2697,7 @@ async fn run_sandbox_runner_inner(args: SandboxRunnerArgs) -> Result<()> {
             &format!("gRPC listening on uds {}", uds_path.display()),
         );
         boot_log("INFO", "boot: serve sandbox gRPC (uds)");
-        let generic_pty_shutdown = generic_pty;
+        let generic_pty_shutdown = ends_with_its_process;
         let shutdown_notify = Arc::clone(&shutdown_notify);
         Server::builder()
             .add_service(TonicSandboxServiceServer::new(service))
@@ -2669,7 +2717,7 @@ async fn run_sandbox_runner_inner(args: SandboxRunnerArgs) -> Result<()> {
         return Ok(());
     }
 
-    let generic_pty_shutdown = generic_pty;
+    let generic_pty_shutdown = ends_with_its_process;
     let shutdown_notify = Arc::clone(&shutdown_notify);
     serve_over_loopback_grpc(
         service,

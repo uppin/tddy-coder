@@ -82,6 +82,7 @@ pub(super) fn write_jail_session_metadata(
     started_agents: Vec<tddy_core::SessionAgentRecord>,
     pid: u32,
     managed_codebase: bool,
+    session_role: &str,
 ) -> Result<(), Status> {
     let JailSession {
         session_id,
@@ -96,6 +97,7 @@ pub(super) fn write_jail_session_metadata(
         model: Some(model.to_string()),
         sandbox: Some(true),
         managed_codebase,
+        session_role: Some(session_role.to_string()).filter(|role| !role.is_empty()),
         recipe: managed_recipe.as_ref().map(|r| r.name().to_string()),
         agents_rev: agent_roster::started_roster_rev(&started_agents),
         agents: started_agents,

@@ -81,8 +81,9 @@ tddy-web new-session form or `tddy-tools pty-relay --sandbox`.
 |--------|------------------------|----------------------|
 | `claude` spawn | Direct PTY in worktree | jail (`sandbox-exec` on macOS / userns+cgroups on Linux) → `tddy-sandbox-runner` → PTY |
 | Filesystem | Full host worktree | Read-only context dir in jail; writes via MCP tools on host |
-| Network from agent | Host network | No direct egress (Seatbelt `deny network*` / Linux network namespace); LLM HTTPS tunneled over `SessionChannel` to a host relay (TLS end-to-end) |
+| Network from agent | Host network | No direct egress (Seatbelt `deny network*` / Linux network namespace); HTTPS tunneled over `SessionChannel` to a host relay (TLS end-to-end), only to the hosts `claude.yaml` declares plus a provider route's base-URL host |
 | Control channel | — | loopback TCP (macOS) / AF_UNIX (Linux, survives the network namespace) |
+| `HOME` | The host user's | `<tddyhome>/homes/claude`, persistent across sessions |
 | Resume / delete | PTY respawn / SIGTERM | Stop sandbox child + relaunch runner; same worktree teardown |
 | Unsupported host | Supported | `failed_precondition` (no userns / no writable cgroup v2 subtree / other OS) — no fallback |
 
@@ -104,6 +105,85 @@ Linux's unprivileged-userns restriction does not apply. See
 21. The agent reads a read-only context dir in the jail; codebase mutations flow through
     `mcp__tddy-tools__*` tool calls executed on the host worktree.
 22. On non-macOS, `sandbox = true` returns `failed_precondition` (no fallback).
+
+### The jail from the `claude` tool definition
+
+A sandboxed start and its relaunch launch Claude through the **shared jail launcher**, from the same
+`claude.yaml` the unsandboxed launch renders ([§ Launch](#launch-from-the-claude-tool-definition)).
+The definition's generic jail sections decide the jail; nothing on the daemon path hard-codes Claude:
+
+```yaml
+home: { kind: persistent, key: claude }            # <tddyhome>/homes/claude, mounted read-write
+files:
+  - { kind: seed-once, from_host: .claude/.credentials.json, to: .claude/.credentials.json }
+  - { kind: mirror, from_host: .local/bin/claude, to: .local/bin/claude }
+  - { kind: mirror, from_host: .local/share/claude/versions, to: .local/share/claude/versions }
+  - { kind: overlay, env: CLAUDE_CODE_TMPDIR, value: "{tmp}" }
+  - { kind: overlay, env: CLAUDE_TMPDIR, value: "{tmp}" }
+secrets:
+  - env: CLAUDE_CODE_OAUTH_TOKEN
+    source: { kind: host-env, var: CLAUDE_CODE_OAUTH_TOKEN }
+    when: unrouted                                  # a provider route brings its own credentials
+policy:
+  jit: true
+  fork: true
+  sysctl_read: true
+  exec_paths: [/usr/bin, /usr/libexec, /bin, /sbin, /System, /Library, /Applications, /opt/homebrew, /opt/local]
+network:
+  egress:
+    hosts: [api.anthropic.com, statsig.anthropic.com, sentry.io, console.anthropic.com, claude.ai]
+  oauth_inbound: true
+```
+
+The section vocabulary is the [sandbox builder's](../coder/sandbox-builder.md#jail-sections), shared
+by every tool. What Claude sees in the jail is an ordinary environment:
+
+- **`HOME`** is `<tddyhome>/homes/claude`, shared by every sandboxed Claude session and kept across
+  them, so refreshed OAuth tokens, history and settings survive. The host's `.credentials.json` is
+  copied in only when the home lacks one; Claude's own install (`~/.local/bin/claude`, its
+  `versions/`) is linked in where its startup self-check looks for it.
+- **`PATH`** is a jail-local directory of the declared tools (`claude`, `tddy-tools`) ahead of the
+  system directories. `CLAUDE_CODE_TMPDIR` / `CLAUDE_TMPDIR` point into the jail's tmp.
+- **`HTTPS_PROXY`** (both casings, loopback bypassed) points at the runner's egress shim.
+- **No `TDDY_*` variable.** The `tddy-tools --mcp` server Claude registers carries what it needs —
+  `TDDY_SANDBOX_TOOL_IPC`, `TDDY_SANDBOX_SESSION_ID`, its log and accounting files, and the daemon's
+  `TDDY_*` additions for the session — in its own `env` block of the MCP config.
+- **Argv** is `claude.yaml`'s template: `--model`, `--session-id` (or `--resume` on a relaunch), the
+  permission mode (blank is `auto`) or `--dangerously-skip-permissions`, the client's pass-through
+  args and first prompt, then the slot flags — `--append-system-prompt-file`, the roster's
+  `--allowedTools` / `--disallowedTools`, `--permission-prompt-tool`, and `--mcp-config` with the
+  config in the jail's tmp. The MCP slot is rendered **without** `--strict-mcp-config`, so a jailed
+  agent loads the project's own `.mcp.json` beside `tddy-tools`; whether it should is open
+  ([todo](../../dev/todo/2026-11-02-jailed-claude-loads-project-mcp-json.md)).
+
+**Network.** The jail reaches the declared hosts through the shim and is refused every other one,
+both at the shim (`403`) and at the host relay's `TunnelOpen`. A session on a provider route also
+reaches the route's base-URL host, carries no `CLAUDE_CODE_OAUTH_TOKEN`, and opens no OAuth inbound
+port; an unrouted session gets the host's token (when the daemon's environment has one) through the
+`TDDY_SECRET_*` channel, and the loopback OAuth callback.
+
+**The runner is told what to exec.** The daemon writes the rendered argv, env and slot files to
+`<session>/sandbox/exec-plan.json` and spawns `tddy-sandbox-runner --exec-plan` on it. No
+Claude-specific flag (`--claude-binary`, `--claude-arg`, `--permission-mode`, `--resume`,
+`--append-system-prompt-file`) reaches the runner from the daemon.
+
+**The home's location.** The daemon's jailed Claude home is always `<tddyhome>/homes/claude`:
+daemon.yaml `claude_cli.claude_home_dir` and `TDDY_SANDBOX_CLAUDE_HOME` do not decide it (the
+standalone `tddy-sandbox-app` still uses its own `claude_home_dir`). The first sandboxed start finding
+`<tddyhome>/sandbox-claude-home` renames it to `homes/claude` once, credentials and history kept. A
+start that finds both refuses with `FAILED_PRECONDITION` naming both, and touches neither. A custom
+`claude_home_dir` elsewhere is not migrated: the new home is seeded from the host's
+`~/.claude/.credentials.json`.
+
+**Role.** The launcher records the session's `session_role` before the spawn, so a project-home main
+set up in a jail is listed with `session_role: project-home`. A jailed main is launched with an
+ordinary sandboxed session's tool flags, not the main's role wiring
+([todo](../../dev/todo/2026-10-24-sandboxed-main-needs-session-role.md)).
+
+**Requirements.** A sandboxed start on a host without coding agents installed is
+`FAILED_PRECONDITION`; the daemon always installs them. The jail is exercised by tests on macOS
+Seatbelt only: no CI host runs a Linux jail
+([todo](../../dev/todo/2026-11-02-ci-runs-no-linux-jail.md)).
 
 ## tmux mode (`StartSessionRequest.run_in_tmux = true`)
 
@@ -258,8 +338,9 @@ above. The jail receives the route in two parts:
   runner sets it on the agent child only and unlinks the file, so the key never appears in the jail's
   environment map or on argv.
 
-The host's `CLAUDE_CODE_OAUTH_TOKEN` is not injected beside a route, and the jail's OAuth inbound port
-is not opened. A resume relaunches the jail on the account the start recorded, re-resolved as below.
+The host's `CLAUDE_CODE_OAUTH_TOKEN` is not injected beside a route (`claude.yaml` guards it
+`when: unrouted`), the jail's OAuth inbound port is not opened, and the route's base-URL host is added
+to the jail's egress hosts. A resume relaunches the jail on the account the start recorded, re-resolved as below.
 A sandboxed start that chooses nothing is unchanged.
 
 A **child** session a pr-stack orchestrator spawns, and a **conversation** a grill-me orchestrator
@@ -399,8 +480,8 @@ extensions:
   replay the first prompt, and it runs with the default permission mode.
 
 A host without coding agents keeps the hand-built argv. Only the session-lifecycle suites build such
-a host; the daemon always installs coding agents. The sandboxed `claude-cli` path does not use this
-launcher.
+a host; the daemon always installs coding agents. The sandboxed `claude-cli` path renders the same
+definition through the jail launcher ([§ The jail](#the-jail-from-the-claude-tool-definition)).
 
 ### Worktree naming
 

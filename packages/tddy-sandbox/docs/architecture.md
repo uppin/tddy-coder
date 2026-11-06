@@ -166,6 +166,27 @@ The egress shim exists exactly when `--egress-shim-port` asks for one, and its p
 reaches the tool engine's subprocesses, which is what lets a jailed `cargo` or `bun` fetch through
 the host's CONNECT relay with TLS still end-to-end.
 
+### The `--exec-plan` jail: a process the runner knows nothing about
+
+`tddy-sandbox-runner --exec-plan <file>` runs one process the host rendered: the file is an
+`ExecPlan { argv, env, files, egress_shim }` (`tddy_sandbox_runner::exec_plan`), written by the
+daemon's jail launcher at `<session>/sandbox/exec-plan.json`. Boot, the `SessionChannel` server, the
+egress shim and the in-jail tool-IPC server are the agent modes' own (`run_sandbox_runner_inner`);
+what differs is the PTY:
+
+- the plan's `files` are written at their jail paths, creating parent directories;
+- the child's environment is replaced, not inherited: the runner's own minus every `TDDY_SANDBOX_*`
+  control variable, plus the plan's `env` with each `TDDY_SECRET_<NAME>` resolved to `<NAME>` and its
+  file unlinked (`resolve_secret_envs`, as the agent modes resolve it), plus — when `egress_shim` is
+  set and the policy started a shim — `HTTPS_PROXY` / `HTTP_PROXY` in both casings with `NO_PROXY`
+  bypassing loopback (`ExecPlan::child_env`);
+- the jail shuts down shortly after that one process exits, as the confined-action mode does.
+
+No agent flag (`--claude-binary`, `--claude-arg`, `--permission-mode`, `--resume`, …) is read, and
+`--exec-plan` conflicts with `--workspace-tools`. An empty `argv` or an unreadable plan fails the
+boot through the failure marker. Product contract:
+[Sandbox builder § Jail sections](../../../docs/ft/coder/sandbox-builder.md#jail-sections).
+
 ### Codebase modes: which side of the jail the agent is on
 
 `tddy-sandbox-app` places the agent and the checkout independently:
@@ -209,7 +230,7 @@ allow-lists:
 | `MountSpec { host, jail, writable }` | A host directory made available in the jail. macOS grants read (+write+exec when `writable`) at the real path (no remap); Linux bind-mounts it (rw when `writable`). |
 | `CopySpec { src, dest, optional, mode }` | A file copied into the writable jail tree before spawn. |
 | `SymlinkSpec { link, target }` | A symlink created inside the jail tree. |
-| `SecretSpec { env_name, source }` | Out-of-band secret: written to a `0600` `scratch/.secrets/<NAME>` file referenced by `TDDY_SECRET_<NAME>`; the value never enters the broad env or `sandbox-exec` argv. The runner reads it and sets it on the inner `claude` child only, then unlinks. |
+| `SecretSpec { env_name, source }` | Out-of-band secret: written to a `0600` `scratch/.secrets/<NAME>` file referenced by `TDDY_SECRET_<NAME>`; the value never enters the broad env or `sandbox-exec` argv. The runner reads it and sets it on the confined child only, then unlinks. `SandboxBuilder::secret` adds one before `build()`; `SandboxPlan::add_secret` adds one to a plan assembled before its secrets were known (a tool jail, whose secrets come from the tool's definition). |
 | `PolicySpec` | dynamic-code-generation, process-fork, mach-lookup, sysctl-read, pseudo-tty, `process-exec*` paths. |
 | `NetworkSpec { loopback_allow_ports, allow_oauth_inbound }` | Loopback TCP allows; `allow_oauth_inbound` permits the ephemeral OAuth callback listener. |
 | `ResourceLimits` | cgroup v2 memory/cpu/pids (Linux). |

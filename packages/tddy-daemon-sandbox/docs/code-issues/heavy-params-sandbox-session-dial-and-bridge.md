@@ -16,6 +16,7 @@
 | 2026-09-19 | 12 | first detection; signature unchanged by PR #518 |
 | 2026-10-22 | 12 | unchanged; PR #670 adds a fourth caller (`svc_start_sandboxed_cli_harness_session`), so an options struct now pays off at four sites |
 | 2026-10-25 | 12 | unchanged; PR #762 (`#term-snapshot` 3/4) carries the jail's size on the existing relay (`HostRelayConfig::with_terminal_events`) rather than a new parameter, and moves the terminal forwarder out of the body into `forward_jail_terminal_events` |
+| 2026-11-02 | 12 (+ a 12-parameter sibling) | **worse** in PR #794 (`#agent-tools` 5/12): `dial_and_bridge_with_egress` takes the same eleven plus the jail's `EgressGuard`; `dial_and_bridge` forwards to it with an unrestricted guard. The `DialAndBridge` struct would now serve five call sites and both functions. deferred to the #agent-tools sweep node (developer, 2026-11-02) |
 
 ## What the tool found
 

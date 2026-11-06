@@ -4,12 +4,16 @@ Product contract: [Sandbox builder § Declared tools](../../../docs/ft/coder/san
 
 | Module | Holds |
 |---|---|
-| `tool/def.rs` | `ToolDef { schema_version, id, summary, binary: ToolBinary { command, env, target: Option<TargetBinary { target, path }> }, deps, reads, run: Option<RunSection>, extensions: BTreeMap<String, serde_yaml::Value> }` — serde, `deny_unknown_fields` (`run` and `extensions` default to empty); `ToolDef::parse(file, yaml)` checks `schema_version == 1` |
+| `tool/def.rs` | `ToolDef { schema_version, id, summary, binary: ToolBinary { command, env, target: Option<TargetBinary { target, path }> }, deps, reads, run: Option<RunSection>, extensions: BTreeMap<String, serde_yaml::Value>, network, home, files, secrets, policy }` — serde, `deny_unknown_fields` (`run`, `extensions` and the five sandbox sections default to empty); `ToolDef::parse(file, yaml)` checks `schema_version == 1` |
 | `tool/run.rs` | `RunSection { transport, argv: Vec<ArgvItem>, env }`, `Transport::{Pty, Stdio}`, `ArgvItem::{Lit, When { if_, then, else_ }, Splice { splice }}` (untagged) |
 | `tool/template.rs` | `TemplateParams` (`with`, `with_opt`, `with_flag`, `with_list`) and `render_argv(&RunSection, &ResolvedTool, &TemplateParams)` |
 | `tool/extensions.rs` | `ExtensionOwner` — `name()` and `validate(tool_id, section)` |
 | `tool/registry.rs` | `ToolRegistry` — `builtin()` (embedded `BUILTIN_TOOLS`), `from_embedded(sources)`, `load(builtin, overrides_dir)`, `load_with_owners(builtin, overrides_dir, owners)`, `get`, `origin`, `ids`, `resolve_closure(ids, host)`; `BUILTIN_SUPPORT_TOOLS` (`tddy-tools.yaml`) |
 | `tool/resolve.rs` | `ToolHost` (env, `PATH` dirs, executable check, canonicalize, `target_output(&TargetBinary) -> Option<PathBuf>` — a default answering `None`), `ProcessToolHost`, `ResolvedTool { id, command, binary, reads }` |
+| `tool/home.rs` | `HomeSection::{Persistent { key }, Session}` (tag `kind`, lowercase; default `Session`) |
+| `tool/files.rs` | `FileItem::{SeedOnce { from_host, to }, Mirror { from_host, to }, Overlay { env, value }}` (tag `kind`, kebab-case). `from_host` is relative to the host user's home, `to` to the tool's; an overlay `value` may name `{home}` and `{tmp}` |
+| `tool/secrets.rs` | `SecretItem { env, source: SecretItemSource, when: Option<RouteGuard> }`, `SecretItemSource::{HostEnv { var }, HostFile { path }}` (tag `kind`, kebab-case), `RouteGuard::{Unrouted, Routed}` |
+| `tool/policy.rs` | `PolicySection { jit, fork, exec_paths, sysctl_read }`, every field defaulting to no allow |
 | `tool/error.rs` | `ToolError` — `Parse`, `DuplicateId`, `UnknownDep`, `DepCycle`, `UnknownTool`, `Unresolvable`, `DuplicateCommand`, `UnknownExtension`, `ExtensionRejected`, `UnboundPlaceholder`, `Io` |
 | `tools/*.yaml` | built-in definitions (`rg.yaml`, and the support tool `tddy-tools.yaml`), embedded with `include_str!` |
 
@@ -38,6 +42,11 @@ Product contract: [Sandbox builder § Declared tools](../../../docs/ft/coder/san
   443, lowercased); a bad pattern refuses the load naming the tool. `Egress` has hand-written serde
   because serde_yaml 0.9 reads a derived enum only as a YAML tag, never as `{ hosts: [...] }`.
   `ResolvedTool.network` carries the section for `tool_grants::lower_network`.
+- **`home:`, `files:`, `secrets:`, `policy:`** are plain serde types with no behaviour here; they are
+  read from the `ToolDef` (not from `ResolvedTool`) and lowered by `tool_grants::{lower_home,
+  lower_files, lower_secrets, lower_policy}`. A secret's `host-env` source is read through the same
+  `ToolHost` the tool resolved against. Product contract:
+  [Sandbox builder § Jail sections](../../../docs/ft/coder/sandbox-builder.md#jail-sections).
 - The crate has no sandbox dependency. Lowering a resolved set into grants is
   `tddy-sandbox-recipes::tool_grants`.
 

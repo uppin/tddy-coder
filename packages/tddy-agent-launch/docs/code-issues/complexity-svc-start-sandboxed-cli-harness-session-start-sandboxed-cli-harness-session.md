@@ -41,9 +41,9 @@ own: the jail env, the warm-up gate and the metadata write are written three tim
 Parameter structs first, written by hand as wiring (`JailSession` / `JailDirs` / `JailLaunch` in
 `svc_start_sandboxed_claude_cli_session.rs` are the shape). Then the four extractions go through the
 engine with no more than seven parameters each, and the roster warm-up range is cut so that its
-leading comment stays in the caller. Better still, a shared launch sequence for all three sandboxed
-starts, which waits on coverage
-([`docs/dev/todo/2026-09-24-lifecycle-shared-sandboxed-jail-launch-needs-coverage-first.md`](../../../../docs/dev/todo/2026-09-24-lifecycle-shared-sandboxed-jail-launch-needs-coverage-first.md)).
+leading comment stays in the caller. Better still, the shared jail launcher the sandboxed Claude
+start and relaunch use (`LaunchSessions::launch_jailed`, `jail_launch.rs`, #794), which
+`#agent-tools` 8/12 ([#797](https://github.com/uppin/tddy-coder/pull/797)) moves this start onto.
 This function is the first of the three with a passing jail acceptance suite on macOS
 (`tddy-session-lifecycle/tests/sandboxed_cli_harness_acceptance.rs`), so it is the safe one to cut
 first.

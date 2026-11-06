@@ -210,6 +210,10 @@ mod tests {
                 run: None,
                 extensions: BTreeMap::new(),
                 network: NetworkSection::default(),
+                home: Default::default(),
+                files: vec![],
+                secrets: vec![],
+                policy: Default::default(),
             }))
         );
     }

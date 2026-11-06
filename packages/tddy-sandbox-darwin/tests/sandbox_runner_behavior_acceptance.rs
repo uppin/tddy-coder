@@ -175,7 +175,7 @@ async fn sandbox_runner_relays_claude_llm_egress_via_session_channel() {
         );
 
         let tmp = tempfile::tempdir().unwrap();
-        let probe_claude = write_egress_probe_claude_script(tmp.path());
+        let probe_claude = write_egress_probe_claude_script(tmp.path(), "127.0.0.1", echo_port);
         let (args, egress) = runner_args(tmp.path(), &probe_claude);
         let ready_marker = args.ready_marker.clone();
 

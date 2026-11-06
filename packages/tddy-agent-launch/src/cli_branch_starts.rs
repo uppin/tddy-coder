@@ -85,6 +85,7 @@ impl LaunchSessions {
             req.semantic_index,
             req.create_remote_branch,
             route,
+            req.session_role.trim(),
         )
         .await
     }

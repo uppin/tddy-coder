@@ -22,7 +22,7 @@ const READ_ONLY_SESSION_TYPE: &str = "claude-cli";
 
 /// Refuses a spec asking for what main cannot be given: a standing role (granted by the daemon,
 /// never requested — see `LaunchSessions::start_session_core`) or a placement other than the home
-/// worktree on this host (a sandbox, another codebase host, an SSH exec target, an agent clone or
+/// worktree on this host (a sandboxed codebase, another codebase host, an SSH exec target, an agent clone or
 /// a split agent).
 pub(crate) fn refuse_what_main_cannot_honour(spec: &StartSessionRequest) -> Result<(), Status> {
     if !spec.session_role.trim().is_empty() {
@@ -32,10 +32,7 @@ pub(crate) fn refuse_what_main_cannot_honour(spec: &StartSessionRequest) -> Resu
             spec.session_role
         )));
     }
-    // TODO: the sandboxed claude-cli path drops `session_role`; carry it there, then allow a
-    // sandboxed main (docs/dev/todo/2026-10-24-sandboxed-main-needs-session-role.md).
     let placement = [
-        (spec.sandbox, "sandbox"),
         (spec.sandboxed_codebase, "sandboxed_codebase"),
         (
             !spec.codebase_daemon_instance_id.trim().is_empty(),

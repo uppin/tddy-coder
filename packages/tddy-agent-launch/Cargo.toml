@@ -27,6 +27,7 @@ tddy-pr-stack = { path = "../tddy-pr-stack" }
 tddy-projects = { path = "../tddy-projects" }
 tddy-rpc = { path = "../tddy-rpc" }
 tddy-sandbox = { path = "../tddy-sandbox" }
+tddy-sandbox-recipes = { path = "../tddy-sandbox-recipes" }
 tddy-sandbox-runner = { path = "../tddy-sandbox-runner" }
 tddy-semantic-index = { path = "../tddy-semantic-index" }
 tddy-service = { path = "../tddy-service" }

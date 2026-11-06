@@ -10,8 +10,10 @@ use std::sync::Arc;
 
 use tddy_core::provider_route::HarnessRoute;
 
+use crate::claude_jail::ClaudeJail;
 use crate::launch_ports::LaunchSessions;
 use crate::session_acting_identity::SessionIdentity;
+use crate::svc_start_sandboxed_claude_cli_session::{JailDirs, JailSession};
 
 /// What the relaunched runner's env is built from.
 pub struct RelaunchJailEnv<'a> {
@@ -66,6 +68,10 @@ impl LaunchSessions {
         &self,
         os_user: &str,
         session_id: &str,
+        // The project and the caller's token the session was started with, which the jail's
+        // launch names and its tools' account lookups read the vault with.
+        project_id: &str,
+        session_token: &str,
         session_dir: &Path,
         worktree_path: &Path,
         model: &str,
@@ -140,95 +146,52 @@ impl LaunchSessions {
             identity,
         )?;
 
-        let (tddy_tools_path, sandbox_runner_path, claude_binary, scratch_home) =
-            self.resolve_relaunch_binaries(tddy_tools_path);
-
-        let tool_ipc_socket = tddy_sandbox::SandboxSpec::short_ipc_socket_path(session_id);
-        let ready_marker = sandbox_root.join("sandbox.ready");
-        let _ = std::fs::remove_file(&tool_ipc_socket);
-        let _ = std::fs::remove_file(&ready_marker);
-        let profile_path = sandbox_root.join("sandbox.sb");
-        let perm = if permission_mode.trim().is_empty() {
-            "auto"
-        } else {
-            permission_mode.trim()
-        };
-
-        let egress_shim_port = tddy_daemon_sandbox::sandbox_session::pick_free_loopback_port()
-            .map_err(Status::internal)?;
-        let loopback_allow_ports = vec![egress_shim_port];
-
-        let mut runner_argv = vec![
-            sandbox_runner_path,
-            "--session-id".into(),
-            session_id.to_string(),
-            "--context-dir".into(),
-            context_dir.to_string_lossy().to_string(),
-            "--tool-ipc-socket".into(),
-            tool_ipc_socket.to_string_lossy().to_string(),
-            "--tddy-tools-path".into(),
-            tddy_tools_path.clone(),
-            "--ready-marker".into(),
-            ready_marker.to_string_lossy().to_string(),
-            "--claude-binary".into(),
-            claude_binary,
-            "--model".into(),
-            model.to_string(),
-            "--permission-mode".into(),
-            perm.to_string(),
-            "--egress-shim-port".into(),
-            egress_shim_port.to_string(),
-            "--stdio".into(),
-        ];
-        if resume {
-            runner_argv.push("--resume".into());
+        // The session's daemon-added environment, as its start gave it — but for the semantic
+        // index, which a relaunch does not rebuild: `SemanticSearch` stays withdrawn.
+        let mut env: std::collections::BTreeMap<String, String> = std::collections::BTreeMap::new();
+        if !specialized_defs.is_empty() {
+            env.extend(self.specialized_subagent_env(&specialized_defs)?);
         }
-        if let Some(prompt_path) = &append_system_prompt_file {
-            runner_argv.push("--append-system-prompt-file".into());
-            runner_argv.push(prompt_path.to_string_lossy().to_string());
-        }
-
-        let mut env = self.relaunch_jail_env(RelaunchJailEnv {
-            session_id,
-            worktree_path,
-            specialized_defs,
-            egress_dir: &egress_dir,
-            scratch_tmp,
-            scratch_home: &scratch_home,
-            tool_ipc_socket: &tool_ipc_socket,
-        })?;
-        // Claude-only: `relaunch_jail_env` is shared with the other harnesses' sandboxed resume.
+        env.extend(self.jail_daemon_identity_env());
+        env.extend(self.lsp_tools_env(worktree_path));
+        env.extend(self.restructure_tools_env());
         env.extend(self.config.claude_cli_renderer_env());
 
-        let handle = self
-            .spawn_relaunched_runner(RelaunchedRunnerSpawn {
-                sandbox_root,
-                egress_dir: &egress_dir,
-                scratch_dir,
-                scratch_home,
-                tool_ipc_socket,
-                ready_marker: &ready_marker,
-                profile_path,
-                loopback_allow_ports,
-                runner_argv,
-                env,
-                route,
-            })
-            .await?;
-
-        let pid = self
-            .bridge_relaunched_jail(RelaunchedJailBridge {
-                session_id,
-                session_dir,
-                worktree_path,
-                egress_dir,
-                managed,
-                session_env,
-                ready_marker,
-                handle,
-            })
-            .await?;
-        Ok(pid)
+        let jail = JailSession {
+            session_id,
+            project_id,
+            session_token,
+            session_dir,
+            worktree_path,
+        };
+        let jail_dirs = JailDirs {
+            sandbox_root,
+            egress_dir,
+            scratch_dir,
+            scratch_tmp,
+            context_dir,
+        };
+        // The same launcher the start uses, rendering the same `claude` definition with `resume`
+        // bound. The role was recorded by the start and rides in the session's metadata, which the
+        // resume keeps.
+        self.launch_jailed_claude(ClaudeJail {
+            jail: &jail,
+            dirs: &jail_dirs,
+            model,
+            resume,
+            permission_mode,
+            dangerously_skip_permissions: false,
+            passthrough_args: Vec::new(),
+            append_system_prompt_file: append_system_prompt_file.as_deref(),
+            agents,
+            env,
+            session_env,
+            managed,
+            managed_codebase: false,
+            route,
+            role: "",
+        })
+        .await
     }
 }
 

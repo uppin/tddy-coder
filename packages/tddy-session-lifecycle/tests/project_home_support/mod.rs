@@ -55,7 +55,9 @@ pub fn a_caller_token() -> &'static str {
 
 /// A daemon serving one project: what a suite's `World` holds, beside the project's repo.
 pub struct HomeDaemon {
-    pub service: DaemonSessionHost,
+    /// Shared, with its sandbox RPC bridge installed as the daemon runtime installs it, so a
+    /// sandboxed main's jail can reach it (`#agent-tools 5/12`).
+    pub service: Arc<DaemonSessionHost>,
     pub manager: Arc<ClaudeCliSessionManager>,
     pub data: tempfile::TempDir,
     _stub: tempfile::TempDir,
@@ -66,20 +68,88 @@ pub struct HomeDaemon {
 /// carries `extra_row_yaml` (e.g. a `home_session_id:` line), with `extra_config_yaml` appended to
 /// its daemon config (e.g. a `project_home:` block).
 pub fn a_home_daemon(repo: &Path, extra_row_yaml: &str, extra_config_yaml: &str) -> HomeDaemon {
+    build_home_daemon(repo, extra_row_yaml, extra_config_yaml, false)
+}
+
+/// [`a_home_daemon`] with the daemon's coding agents installed, as the daemon runtime installs
+/// them: the agent registry, resolved against a host whose `PATH` holds the stub `claude` and the
+/// real `tddy-tools`. A sandboxed main is launched from the `claude` tool definition and needs them.
+// Used by the suite that sets a main up in a sandbox; the others include this module too.
+#[allow(dead_code)]
+pub fn a_home_daemon_with_coding_agents(
+    repo: &Path,
+    extra_row_yaml: &str,
+    extra_config_yaml: &str,
+) -> HomeDaemon {
+    build_home_daemon(repo, extra_row_yaml, extra_config_yaml, true)
+}
+
+fn build_home_daemon(
+    repo: &Path,
+    extra_row_yaml: &str,
+    extra_config_yaml: &str,
+    coding_agents: bool,
+) -> HomeDaemon {
     let data = tempfile::tempdir().unwrap();
     write_project_registry(data.path(), repo, extra_row_yaml);
     let stub = tempfile::tempdir().unwrap();
     let claude = write_argv_and_env_script(stub.path());
     let (cfg, config) = write_daemon_config(claude.to_str().unwrap(), extra_config_yaml);
     let manager = Arc::new(ClaudeCliSessionManager::new());
-    let service =
+    let mut host =
         minimal_service_with_manager(config, data.path().to_path_buf(), Arc::clone(&manager));
+    if coding_agents {
+        let tools_dir = std::fs::canonicalize(stub.path()).unwrap();
+        std::os::unix::fs::symlink(tddy_tools_binary(), tools_dir.join("tddy-tools")).unwrap();
+        let registry = tddy_coding_agent_specs::load_agent_registry(&data.path().join("tools"))
+            .expect("the agent registry loads");
+        host = host.with_coding_agents(Arc::new(
+            tddy_agent_launch::spec_launch::HostCodingAgents::new(
+                registry,
+                Arc::new(APathHost(vec![tools_dir])),
+            ),
+        ));
+    }
+    let service = Arc::new(host);
+    service.install_sandbox_rpc_bridge();
     HomeDaemon {
         service,
         manager,
         data,
         _stub: stub,
         _cfg: cfg,
+    }
+}
+
+/// The real `tddy-tools`, built beside this test binary.
+fn tddy_tools_binary() -> PathBuf {
+    std::env::var_os("CARGO_BIN_EXE_tddy-tools")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| {
+            PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../target/debug/tddy-tools")
+        })
+}
+
+/// A tool host with a declared `PATH` over the real filesystem: nothing of the real machine's `PATH`
+/// or `TDDY_*_BINARY` variables reaches resolution.
+struct APathHost(Vec<PathBuf>);
+
+impl tddy_actions::tool::ToolHost for APathHost {
+    fn env_var(&self, _name: &str) -> Option<String> {
+        None
+    }
+
+    fn path_dirs(&self) -> Vec<PathBuf> {
+        self.0.clone()
+    }
+
+    fn is_executable_file(&self, path: &Path) -> bool {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::metadata(path).is_ok_and(|m| m.is_file() && m.permissions().mode() & 0o111 != 0)
+    }
+
+    fn canonicalize(&self, path: &Path) -> std::io::Result<PathBuf> {
+        std::fs::canonicalize(path)
     }
 }
 

@@ -7,7 +7,7 @@
 **CRAP:** **CRAP 2862** · complexity 53 · rank 2/50 in this crate · **never executed by any test**
 **Thresholds breached:** length 615 > 60; nesting 5 > 4 (`/analyze-clean-code`)
 **Restructure:** `extract_method` — `/code-restructuring` territory
-**Status:** Open — narrowed 2026-09-24 by #524 (615 → 342) — **unclaimed**
+**Status:** Open — partially fixed 2026-11-02 by #794 (349 → 281: the hand-built jail launch is gone; what remains is the 24-parameter signature and the session set-up before the launch) — deferred to the #agent-tools sweep node (developer, 2026-11-02) — **unclaimed**
 **Verified:** ⚠ **not hand-verified** — metrics are machine-measured and re-derivable; the finding itself has not been read by a person
 **Moved:** 2026-10-09 by `#carve` 21/21 (#536), engine move into `tddy-agent-launch`, from `packages/tddy-session-lifecycle/src/connection_service/svc_start_sandboxed_claude_cli_session.rs:96`
 
@@ -24,6 +24,7 @@
 | 2026-10-09 | 344 | — | — | — | `#carve` 21/21 (#536): **moved whole** from lifecycle into `tddy-agent-launch` (the receiver lifecycle's wiring crate now consumes). Length by brace matching (fn line to closing brace) is identical on `origin/master` (`468b368f9`, the old path) and on HEAD, so the move changed no length, nesting or branch; the new location is the only difference. Re-measured structurally only: complexity, CRAP and coverage were **not** re-derived (no `analyze coverage` run), so those figures stay the earlier ones. Still open, unclaimed |
 | 2026-10-23 | 349 | — | — | — | touched by #698 (`#project-home` 3/7): `managed_codebase` (was `_managed_codebase`) is passed on to `write_jail_session_metadata` (+1, 348 → 349 by brace matching, against `f7e2c5455`). No control flow added; nesting, branches and exits not re-derived |
 | 2026-10-24 | 349 | — | — | — | **Not touched** by `fix-main-agent-harness-se-e79c8de0` (`c1df8e142..4348f160a`): length by brace matching is identical at both. `/analyze-code-issues` re-run: complexity 26, **CRAP 702**, never entered, either by this crate's own tests or by the session-lifecycle `ensure_project_home_session_acceptance` + `project_home_idle_stop_acceptance` (27 tests), with every workspace crate instrumented |
+| 2026-11-02 | 281 | — | — | — | **better, not clean**, in PR #794 (`#agent-tools` 5/12), which claimed it: the runner argv, the persistent Claude home, the shim port and the spawn/bridge/register tail (~110 lines) moved behind `launch_jailed_claude` → `LaunchSessions::launch_jailed` (`claude_jail.rs`, `jail_launch.rs`). It gained one parameter (`session_role`, 23 → 24). What is left is DRY #1's request struct — its coverage now exists (`sandboxed_claude_launch_baseline`) — and an `extract_method` of the worktree resolution. Claim released; deferred to the #agent-tools sweep node (developer, 2026-11-02). Measured fn line to closing brace (`:85`–`:365`) |
 
 ## What the tool found
 
@@ -44,8 +45,10 @@ With no unit test in the file, nothing catches a behaviour change made while res
 
 ## What would close it
 
-Bring it under the `/analyze-clean-code` thresholds — length 615 > 60; nesting 5 > 4 — by `extract_method`
-along the branch structure. Anchor with `tddy-tools restructure anchors`, never by hand, then prove
+Narrowed 2026-11-02 (281 lines, 24 parameters): replace the positional signature with the request
+(`&StartSessionRequest` plus `CliStart`, as `start_sandboxed_claude_cli_from_request` already holds
+them), then `extract_method` the worktree resolution (`WorktreeSource` match) and the seed-clone claim,
+to bring it under the `/analyze-clean-code` thresholds — length > 60. Anchor with `tddy-tools restructure anchors`, never by hand, then prove
 the seam with `restructure check --deep` against a warm index (`./run-index-daemon`).
 
 ⚠ **Re-measure before acting.** This record was generated in a batch of 100 from one sweep. Confirm

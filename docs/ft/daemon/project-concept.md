@@ -145,10 +145,13 @@ With `start` (a `StartSessionRequest`, built by the New-session form's
 
 1. **The spec is checked; nothing starts or stops when it is refused.**
    - A `session_role` → `PERMISSION_DENIED`: the role is granted by the daemon, never requested.
-   - A placement other than the home worktree on this host — `sandbox`, `sandboxed_codebase`,
+   - A placement other than the home worktree on this host — `sandboxed_codebase`,
      `codebase_daemon_instance_id`, `ssh_config_host`, `agent_clone`, `split_agent` →
-     `INVALID_ARGUMENT` naming the field. A sandboxed main is refused because the sandboxed
-     `claude-cli` start does not carry the session's role.
+     `INVALID_ARGUMENT` naming the field. `sandbox` is allowed: a main set up in a jail on this host
+     is recorded with `session_role: project-home`, so the daemon's read-only refusal in
+     `ExecuteTool` applies to it. Its agent is launched with an ordinary jailed session's tools —
+     not the main's `tddy-tools`-only wiring or role prompt
+     ([todo](../../dev/todo/2026-10-24-sandboxed-main-needs-session-role.md)).
    - The harness profile named by `agent` is applied, then any session type but `claude-cli` →
      `FAILED_PRECONDITION` naming the type (`tool` for an empty one) and that main could not be kept
      read-only. Only `claude-cli` can enforce managed-codebase mode: Cursor CLI has no tool

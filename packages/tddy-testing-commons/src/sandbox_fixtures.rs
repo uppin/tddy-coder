@@ -22,17 +22,20 @@ pub fn process_is_alive(_pid: u32) -> bool {
     false
 }
 
-/// Fake claude script that probes direct TCP vs in-jail HTTP shim (SessionChannel egress path).
+/// Fake claude script that probes direct TCP vs the in-jail egress shim (SessionChannel egress path).
 ///
-/// Reads `TDDY_EGRESS_PROBE_HOST` / `TDDY_EGRESS_PROBE_PORT` for direct socket probe and
-/// `TDDY_EGRESS_SHIM` for the in-jail HTTP shim (sandbox-runner forwards via `EgressRequest`).
+/// The direct socket probe dials `host:port`, written into the script itself: the jailed agent is
+/// given no `TDDY_*` variable, so the target cannot reach it through the environment. The shim
+/// probe uses `HTTPS_PROXY`, the proxy the jail gives the agent (the runner's egress shim, which
+/// answers `GET /probe` by forwarding an `EgressRequest` to the host).
 /// Emits structured `EGRESS_PROBE:` markers on stdout (PTY-visible).
-pub fn write_egress_probe_claude_script(dir: &Path) -> PathBuf {
+pub fn write_egress_probe_claude_script(dir: &Path, host: &str, port: u16) -> PathBuf {
     let script = dir.join("egress_probe_claude.sh");
-    let body = r#"#!/bin/sh
+    let body = format!(
+        r#"#!/bin/sh
 echo "ARGV: $@"
-HOST="${TDDY_EGRESS_PROBE_HOST:-127.0.0.1}"
-PORT="${TDDY_EGRESS_PROBE_PORT:-9}"
+HOST="{host}"
+PORT="{port}"
 
 if nc -z -G 2 "$HOST" "$PORT" 2>/dev/null; then
   echo "EGRESS_PROBE: direct=ok"
@@ -40,17 +43,18 @@ else
   echo "EGRESS_PROBE: direct=denied"
 fi
 
-SHIM="${TDDY_EGRESS_SHIM:-}"
+SHIM="${{HTTPS_PROXY:-}}"
 if [ -z "$SHIM" ]; then
   echo "EGRESS_PROBE: session_channel=unset"
-elif curl -s -o /dev/null --connect-timeout 2 "${SHIM}/probe" 2>/dev/null; then
+elif curl -s -o /dev/null --noproxy '*' --connect-timeout 2 "${{SHIM}}/probe" 2>/dev/null; then
   echo "EGRESS_PROBE: session_channel=ok"
 else
   echo "EGRESS_PROBE: session_channel=denied"
 fi
 
 exec cat
-"#;
+"#
+    );
     std::fs::write(&script, body).expect("write egress probe script");
     #[cfg(unix)]
     {

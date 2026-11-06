@@ -121,7 +121,27 @@ fn a_session_host(
     sessions_base: PathBuf,
     manager: Arc<ClaudeCliSessionManager>,
 ) -> Arc<DaemonSessionHost> {
+    a_session_host_serving(config, sessions_base, manager, false)
+}
+
+/// A daemon that has its coding agents installed, as the runtime does: a sandboxed Claude is
+/// launched from its tool definition, which needs them. `tddy-tools` is on the declared `PATH`.
+fn a_session_host_with_coding_agents(
+    config: DaemonConfig,
+    sessions_base: PathBuf,
+    manager: Arc<ClaudeCliSessionManager>,
+) -> Arc<DaemonSessionHost> {
+    a_session_host_serving(config, sessions_base, manager, true)
+}
+
+fn a_session_host_serving(
+    config: DaemonConfig,
+    sessions_base: PathBuf,
+    manager: Arc<ClaudeCliSessionManager>,
+    coding_agents: bool,
+) -> Arc<DaemonSessionHost> {
     let tddy_data_dir = sessions_base.clone();
+    let sessions_base_dir = sessions_base.clone();
     let sessions_base_resolver: SessionsBaseResolver =
         Arc::new(move |_| Some(sessions_base.clone()));
     let resolved_user = current_os_user();
@@ -132,7 +152,7 @@ fn a_session_host(
             None
         }
     });
-    let host = Arc::new(DaemonSessionHost::new(
+    let mut host = DaemonSessionHost::new(
         config.clone(),
         sessions_base_resolver,
         tddy_data_dir,
@@ -142,10 +162,59 @@ fn a_session_host(
         tddy_session_lifecycle::peer_routing::PeerRouting::local_only(&config),
         Arc::new(tddy_daemon_kernel::operator_channel::NoOperatorChannel),
         manager,
-    ));
+    );
+    if coding_agents {
+        let tools_dir = sessions_base_dir.join("stub-bin");
+        std::fs::create_dir_all(&tools_dir).unwrap();
+        let tools_dir = std::fs::canonicalize(tools_dir).unwrap();
+        let _ = std::fs::remove_file(tools_dir.join("tddy-tools"));
+        std::os::unix::fs::symlink(tddy_tools_binary(), tools_dir.join("tddy-tools")).unwrap();
+        let registry =
+            tddy_coding_agent_specs::load_agent_registry(&sessions_base_dir.join("tools"))
+                .expect("the agent registry loads");
+        host = host.with_coding_agents(Arc::new(
+            tddy_agent_launch::spec_launch::HostCodingAgents::new(
+                registry,
+                Arc::new(APathHost(vec![tools_dir])),
+            ),
+        ));
+    }
+    let host = Arc::new(host);
     // A sandboxed launch reaches the jail over this bridge; the daemon runtime installs it at mount.
     host.install_sandbox_rpc_bridge();
     host
+}
+
+/// The real `tddy-tools`, built beside this test binary.
+fn tddy_tools_binary() -> PathBuf {
+    std::env::var_os("CARGO_BIN_EXE_tddy-tools")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| {
+            PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../target/debug/tddy-tools")
+        })
+}
+
+/// A tool host with a declared `PATH` over the real filesystem: nothing of the real machine's
+/// `PATH` or `TDDY_*_BINARY` variables reaches resolution.
+struct APathHost(Vec<PathBuf>);
+
+impl tddy_actions::tool::ToolHost for APathHost {
+    fn env_var(&self, _name: &str) -> Option<String> {
+        None
+    }
+
+    fn path_dirs(&self) -> Vec<PathBuf> {
+        self.0.clone()
+    }
+
+    fn is_executable_file(&self, path: &Path) -> bool {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::metadata(path).is_ok_and(|m| m.is_file() && m.permissions().mode() & 0o111 != 0)
+    }
+
+    fn canonicalize(&self, path: &Path) -> std::io::Result<PathBuf> {
+        std::fs::canonicalize(path)
+    }
 }
 
 /// A git repo with an `origin`, registered as the test project under `sessions_base/projects`.
@@ -414,7 +483,7 @@ async fn a_sandboxed_session_starts_claude_in_fullscreen_by_default() {
     let repo = a_registered_project(sessions_tmp.path());
     let stub = a_stub_agent_reporting_its_launch(repo.path());
     let (_cfg, config) = a_daemon_config(&stub, Renderer::Unstated);
-    let host = a_session_host(
+    let host = a_session_host_with_coding_agents(
         config,
         sessions_tmp.path().to_path_buf(),
         Arc::new(ClaudeCliSessionManager::new()),
@@ -445,7 +514,7 @@ async fn a_sandboxed_session_starts_claude_inline_when_fullscreen_is_turned_off(
     let repo = a_registered_project(sessions_tmp.path());
     let stub = a_stub_agent_reporting_its_launch(repo.path());
     let (_cfg, config) = a_daemon_config(&stub, Renderer::TurnedOff);
-    let host = a_session_host(
+    let host = a_session_host_with_coding_agents(
         config,
         sessions_tmp.path().to_path_buf(),
         Arc::new(ClaudeCliSessionManager::new()),
@@ -478,7 +547,7 @@ async fn resuming_a_sandboxed_session_relaunches_claude_in_fullscreen_by_default
     let repo = a_registered_project(sessions_tmp.path());
     let stub = a_stub_agent_reporting_its_launch(repo.path());
     let (_off_cfg, inline_config) = a_daemon_config(&stub, Renderer::TurnedOff);
-    let starting_host = a_session_host(
+    let starting_host = a_session_host_with_coding_agents(
         inline_config,
         sessions_tmp.path().to_path_buf(),
         Arc::new(ClaudeCliSessionManager::new()),
@@ -490,7 +559,7 @@ async fn resuming_a_sandboxed_session_relaunches_claude_in_fullscreen_by_default
         .into_inner()
         .session_id;
     let (_default_cfg, default_config) = a_daemon_config(&stub, Renderer::Unstated);
-    let resuming_host = a_session_host(
+    let resuming_host = a_session_host_with_coding_agents(
         default_config,
         sessions_tmp.path().to_path_buf(),
         Arc::new(ClaudeCliSessionManager::new()),

@@ -12,9 +12,9 @@ script are in the change history's "LoC assessment"):
 
 | Function | File | Lines | Why it stopped | Section |
 |---|---|---:|---|---|
-| `start_sandboxed_cursor_cli_session` | `connection_service/svc_start_sandboxed_cursor_cli_session.rs:31` | 414 | DRY #1 needs coverage first | [the jail-launch TODO](./2026-09-24-lifecycle-shared-sandboxed-jail-launch-needs-coverage-first.md) |
+| `start_sandboxed_cursor_cli_session` | `connection_service/svc_start_sandboxed_cursor_cli_session.rs:31` | 414 | DRY #1: moves onto the shared jail launcher (`LaunchSessions::launch_jailed`, #794) in [#796](https://github.com/uppin/tddy-coder/pull/796) | — |
 | `start_session_core` | `connection_service/svc_start_session_core.rs:51` | 358 | E4 refuses every range holding an early return | [E4](#e4--start_session_core-its-guards-are-refused-as-early-returns) |
-| `start_sandboxed_claude_cli_session` | `connection_service/svc_start_sandboxed_claude_cli_session.rs:96` | 342 | DRY #1, and the argv range panics rust-analyzer (U) | [the jail-launch TODO](./2026-09-24-lifecycle-shared-sandboxed-jail-launch-needs-coverage-first.md), [U](#u--the-runner-argv-ranges-stay-inline) |
+| `start_sandboxed_claude_cli_session` | `connection_service/svc_start_sandboxed_claude_cli_session.rs:96` | 342 | DRY #1, and the argv range panics rust-analyzer (U). Its jail launch and runner argv moved behind `launch_jailed_claude` in #794 (281 lines left) | [code issue](../../../packages/tddy-agent-launch/docs/code-issues/complexity-svc-start-sandboxed-claude-cli-session-start-sandboxed-claude-cli-session.md) |
 | `spawn_claude_cli_session_inner` | `connection_service/claude_cli_spawn.rs:29` | 255 | T refuses every range naming the PR-stack parent | [T](#t--the-two-cli-spawns-stop-where-they-name-the-pr-stack-parent) |
 | `spawn_cursor_cli_session_inner` | `cursor_cli_spawn.rs:23` | 244 | T, the same way | [T](#t--the-two-cli-spawns-stop-where-they-name-the-pr-stack-parent) |
 
@@ -185,5 +185,6 @@ The range is a `let mut` vector literal followed by the conditional pushes that 
 
 **What would close it:** a `runner_argv(…) -> Vec<String>` per caller, extracted by hand with the
 developer's consent, or by the engine once U is diagnosed. The three argv builders are also a DRY
-candidate for the shared jail launch, so the cheapest order is probably to do this as part of
-[DRY #1](./2026-09-24-lifecycle-shared-sandboxed-jail-launch-needs-coverage-first.md).
+candidate for the shared jail launch. The Claude start's and the Claude relaunch's argv builders are
+gone: both render the `claude` tool definition through `LaunchSessions::launch_jailed` (#794), and
+the Cursor start's goes the same way in [#796](https://github.com/uppin/tddy-coder/pull/796).
