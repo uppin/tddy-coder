@@ -3,7 +3,8 @@
 **Date**: 2026-11-06
 **Status**: 🚧 In Progress
 **Type**: Refactor
-**Complexity**: 4 — five crates; `tddy-tools list-models` CLI surface grows a tools dir; ~10 test files re-wired
+**Complexity**: 5 — re-scored at the contract (was 4): the `DaemonSessionHost::new` signature reaches ~117 constructor call sites in 116 files across 4 crates (session-lifecycle, daemon-rpc, daemon, and tddy-telegram-control's tests), not ~10; plus the `list-models --tools-dir` CLI surface and a new sandbox-app refusal
+**PR**: [#830](https://github.com/uppin/tddy-coder/pull/830) — `feature/agent-tools/host-registry`
 
 ## Initial Discovery
 
@@ -76,14 +77,28 @@ counting or injectable loader proves the single load (`Arc::ptr_eq` between Tele
 
 ## Acceptance Tests
 
-| Test | File |
-|---|---|
-| `a_daemon_with_an_unparseable_tool_spec_refuses_to_start_naming_the_file` | `packages/tddy-daemon/tests/host_registry_load.rs` |
-| `telegram_and_the_session_host_share_one_registry` | `packages/tddy-daemon/tests/host_registry_load.rs` |
-| `list_models_honours_a_tools_dir_override_of_the_curated_models` | `packages/tddy-tools/tests/list_models_catalog.rs` |
-| `the_catalog_probe_lists_the_hosts_override_not_the_builtins` | `packages/tddy-daemon-rpc/src/catalog/agent_models/probe_tests.rs` |
-| `the_pty_sandbox_offers_only_agents_with_a_pty_run` | `packages/tddy-sandbox-app/tests/agent_from_spec_acceptance.rs` |
-| `choosing_an_acp_only_agent_in_the_pty_sandbox_is_refused_naming_the_runnable_ones` | `packages/tddy-sandbox-app/tests/agent_from_spec_acceptance.rs` |
+| Test | File:line | Validates | At the contract |
+|---|---|---|---|
+| `a_daemon_with_an_unparseable_tool_spec_refuses_to_start_naming_the_file` | `packages/tddy-daemon/tests/host_registry_load.rs:17` | a daemon with a Telegram bot and no sign-in, with a broken `tools/claude.yaml`, refuses to start naming the file | 🔴 fails — builds Ok (Telegram's empty-registry branch) |
+| `telegram_and_the_session_host_share_one_registry` | `packages/tddy-daemon/tests/host_registry_load.rs:46` | Telegram's registry is `Arc::ptr_eq` the session host's | 🔴 fails — separate loads |
+| `list_models_honours_a_tools_dir_override_of_the_curated_models` | `packages/tddy-tools-cli/tests/list_models_tools_dir.rs:14` | `tddy-tools list-models --agent claude-cli --tools-dir` lists the override's models and default | 🔴 fails — lists the built-ins |
+| `the_catalog_probe_lists_the_hosts_override_not_the_builtins` | `packages/tddy-daemon-rpc/src/catalog/agent_models/probe_tests.rs:147` | the probe argv carries `--tools-dir <tddy home>/tools` | 🔴 fails — flag missing |
+| `the_pty_sandbox_offers_only_agents_with_a_pty_run` | `packages/tddy-sandbox-app/tests/agent_from_spec_acceptance.rs:258` | the `Unknown` refusal lists only PTY-runnable agents (replaces the old pinning test) | 🔴 fails — lists claude-acp, codex-acp |
+| `choosing_an_acp_only_agent_in_the_pty_sandbox_is_refused_naming_the_runnable_ones` | `packages/tddy-sandbox-app/tests/agent_from_spec_acceptance.rs:276` | claude-acp / codex-acp → `NotPtyRunnable { id, runnable }` | 🔴 fails — `Placement(NotPlaced)` |
+
+Unit/integration tests on the surface:
+
+| Test | File:line | At the contract |
+|---|---|---|
+| `list_models_refuses_a_tools_dir_that_does_not_load_naming_the_file` | `packages/tddy-tools-cli/tests/list_models_tools_dir.rs:70` | 🔴 fails — exits 0 |
+| `a_listed_agents_probe_carries_its_binary_and_the_hosts_tools_dir` | `packages/tddy-daemon-rpc/src/catalog/agent_models/probe_tests.rs:169` | 🔴 fails |
+| `a_daemon_without_a_telegram_bot_offers_no_telegram_registry` | `packages/tddy-daemon/tests/host_registry_load.rs:64` | guard (passes) |
+| `the_override_fixture_is_a_claude_spec_with_the_given_models` | `packages/tddy-tools-cli/tests/list_models_tools_dir.rs:43` | guard (passes) |
+| `the_acp_refusal_reads_as_the_agent_it_cannot_run_and_the_ones_it_can` | `packages/tddy-sandbox-app/tests/agent_from_spec_acceptance.rs:302` | guard (passes) |
+| `list_models_args_carry_the_hosts_tools_dir`, `list_models_args_without_a_tools_dir_name_none` | `packages/tddy-tools/tests/list_models_catalog.rs:98,116` | guards (pass) |
+| `a_host_launches_from_the_registry_it_was_constructed_over` | `packages/tddy-session-lifecycle/tests/host_coding_agents.rs:15` | guard (passes) |
+
+Pre-existing failures on this base (not this node's): `catalog::agent_models::probe_tests::{cursor_probe_args_carry_the_resolved_cursor_binary_path, a_non_cursor_probe_omits_the_cursor_cli_path_flag, an_opencode_cli_probe_carries_the_resolved_opencode_binary_path, an_opencode_acp_probe_carries_the_resolved_opencode_binary_path}` (expect the removed per-agent flags; fixed by #828's 50a79f061, not yet on this line); `claude_cli_from_spec_acceptance::an_unsandboxed_claude_cli_start_runs_the_spec_binary_with_the_argv_its_template_renders` (macOS /tmp); parent n21's two `session_source_unit` red tests.
 
 ## Responsibility
 
@@ -108,6 +123,19 @@ probe and the PTY sandbox read it.
 The first push after this plan: `DaemonSessionHost::new(…, coding_agents)` signature, the
 `list-models --tools-dir` flag (parsing only), plus the six acceptance tests above, failing.
 
+Published (contract commit):
+
+- `DaemonSessionHost::new(…, cli_manager, coding_agents: Arc<HostCodingAgents>)` —
+  `tddy-session-lifecycle/src/connection_service/svc_host_builders.rs`. Stores `Some(coding_agents)`;
+  the field stays `Option` and `with_coding_agents_if_none` + the three empty fallbacks stay until
+  green (`TODO(host-registry)`). Every caller's chained `.with_coding_agents[_if_none](x)` moved into
+  `new(…, x)`; callers with none pass `no_coding_agents()` (behaviour-identical to `None`).
+- `RuntimeTasks::telegram_coding_agents() -> Option<&Arc<CodingAgentRegistry>>` (`tddy-daemon/src/runtime/tasks.rs`),
+  backed by `TelegramInbound.coding_agents` — the read-only seam the sharing test uses.
+- `ListModelsArgs.tools_dir: Option<PathBuf>` (`--tools-dir`), not yet read (`tddy-tools-cli` `agent_models_catalog`, TODO).
+- `list_models_probe_args(agent, binary, tools_dir: &Path)` — ignores `tools_dir` (TODO); the handler passes `<tddy_data_dir>/tools`.
+- `AgentChoiceError::NotPtyRunnable { id, runnable }` + `Display` — not yet produced (TODO in `choose_agent_on`).
+
 ## Green wave
 
 **Wave:** 1 of 3
@@ -117,8 +145,22 @@ The first push after this plan: `DaemonSessionHost::new(…, coding_agents)` sig
 
 ## Decisions & Trade-offs
 
+- **Unconditional load (user, 2026-11-06):** a daemon with no sign-in also refuses a broken `tools/*.yaml` — the load happens before `Registries::open`, whatever is mounted.
+- **`NotPtyRunnable { id, runnable }` (user, 2026-11-06)** rather than reusing `Unknown`, whose message would say a registered agent is not in the registry.
+- **`RuntimeTasks::telegram_coding_agents()` accessor (user, 2026-11-06)**, no injectable/counting loader on `RuntimeOptions` — single load is proven by `Arc::ptr_eq` between Telegram's and the host's.
+- **`--tools-dir` stays optional (user, 2026-11-06):** absent, `list-models` lists the built-ins alone.
+
 - The probe keeps shelling out to `tddy-tools list-models` (one listing code path) and passes the tools dir, rather than the daemon answering curated agents itself.
 - Filtering ACP agents out of the PTY sandbox was chosen by the developer (2026-11-06) over keeping them offered.
+
+## Deviations found at the contract
+
+- Constructor call sites: ~117 in 116 files across 4 crates (incl. `tddy-telegram-control` tests), not ~10.
+- The CLI listing test lives in `packages/tddy-tools-cli/tests/list_models_tools_dir.rs`, not `tddy-tools/tests/list_models_catalog.rs`: the `tddy-tools` library reads no spec, so only the binary composes registry + listing. `list_models_catalog.rs` holds the flag-parsing guards.
+- The choose-agent todo is partly stale: choosing an ACP agent is already refused (by placement, `NotPlaced{Jail}`); only the offered list and the refusal's naming are wrong.
+- Green must add `--tools-dir` to the existing probe tests' exact argv vectors (incl. `an_opencode_cli_probe_without_a_resolved_path_omits_the_flag`, passing today).
+- Expected cascade conflict in `probe_tests.rs` with #828's 50a79f061 (both edit the probe calls' neighbourhood).
+- 4 `probe_tests` fail on this base before any change (see Acceptance Tests).
 
 ## TODO
 
@@ -126,10 +168,10 @@ The first push after this plan: `DaemonSessionHost::new(…, coding_agents)` sig
 - [x] Cross-check `packages/*/docs/code-issues/` and `docs/dev/todo/` for items this change touches (Step 2b)
 - [x] Create/update PRD documentation
 - [x] Create changeset (this document)
-- [ ] Create failing acceptance tests
-- [ ] Run acceptance tests (verify they fail)
-- [ ] USER REVIEW — acceptance tests
-- [ ] TDD Red — write failing unit/integration tests
+- [x] Create failing acceptance tests
+- [x] Run acceptance tests (verify they fail)
+- [x] USER REVIEW — acceptance tests
+- [x] TDD Red — write failing unit/integration tests
 - [ ] TDD Green — implement with quality code
 - [ ] Update documentation with progress
 - [ ] Repeat Red→Green→Update cycle until feature complete

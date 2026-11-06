@@ -53,6 +53,7 @@ fn make_unit_connection(sessions_base: std::path::PathBuf) -> DaemonSessionHost 
         tddy_session_lifecycle::peer_routing::PeerRouting::local_only(&config),
         Arc::new(tddy_daemon_kernel::operator_channel::NoOperatorChannel),
         Arc::new(CliSessionManager::new()),
+        tddy_agent_launch::host_coding_agents::no_coding_agents(),
     )
 }
 

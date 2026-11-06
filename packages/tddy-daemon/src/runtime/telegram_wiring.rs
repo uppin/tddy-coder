@@ -87,7 +87,7 @@ pub fn split_room_hosting(
 /// `<tddy_data_dir>/tools`). A registry that does not load leaves Telegram with none to offer, so
 /// its CLI starts are refused in the chat; the daemon's own start refuses for the same file
 /// (`build_session_host`), so this is a report, not a fallback.
-// TODO(sweep): load the registry once before Telegram is built and share it with
+// TODO(host-registry): implement — load the registry once before Telegram is built and share it with
 // `build_session_host` and `open_shared`, which each load it again
 // (docs/dev/todo/2026-11-06-telegram-loads-the-coding-agent-registry-a-third-time.md).
 fn telegram_coding_agents(
@@ -190,6 +190,7 @@ pub(super) fn build_telegram(
             cli_manager: Arc::clone(&registries.shared_cli_manager),
         },
     ));
+    let coding_agents = telegram_coding_agents(tddy_data_dir);
     let harness = Arc::new(Mutex::new(
         tddy_telegram_control::telegram_session_control::TelegramSessionControlHarness::with_workflow_spawn_and_telegram_tracked(
             tg.chat_ids.clone(),
@@ -200,7 +201,7 @@ pub(super) fn build_telegram(
             Some(telegram_tracked),
         )
         .with_session_rooms(registries.shared_session_rooms.clone())
-        .with_coding_agents(telegram_coding_agents(tddy_data_dir))
+        .with_coding_agents(Arc::clone(&coding_agents))
         .with_session_starter(
             Arc::clone(&registries.session_starter) as Arc<dyn tddy_daemon_extensions::SessionStarter>
         ),
@@ -209,6 +210,10 @@ pub(super) fn build_telegram(
     TelegramWiring {
         hooks: Some(hooks),
         identity_check,
-        inbound: Some(TelegramInbound { bot, harness }),
+        inbound: Some(TelegramInbound {
+            bot,
+            harness,
+            coding_agents,
+        }),
     }
 }

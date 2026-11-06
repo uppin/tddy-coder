@@ -25,6 +25,11 @@ use std::path::PathBuf;
 use crate::config::DaemonConfig;
 
 impl DaemonSessionHost {
+    /// A session host over `coding_agents`: the daemon's one coding-agent registry, loaded once at
+    /// start and shared with every other consumer (Telegram, the reserved-ids step, the model
+    /// probe). A host that legitimately has none is given an empty one
+    /// (`tddy_agent_launch::host_coding_agents::no_coding_agents`), whose every agent start is
+    /// refused `FAILED_PRECONDITION`.
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         config: DaemonConfig,
@@ -36,6 +41,7 @@ impl DaemonSessionHost {
         peer_routing: PeerRouting,
         operator_channel: SharedOperatorChannel,
         cli_manager: Arc<CliSessionManager>,
+        coding_agents: Arc<tddy_agent_launch::spec_launch::HostCodingAgents>,
     ) -> Self {
         let spawn_client = spawn_client.map(|(c, _pid)| Arc::new(c));
         // Declared tools resolve from `<tddyhome>/tools` at each jail start (`#agent-tools 1/12`).
@@ -122,7 +128,9 @@ impl DaemonSessionHost {
             // from this host (`with_rpc_families`).
             rpc_families: None,
             worktree_observer: None,
-            coding_agents: None,
+            // TODO(host-registry): implement — the field becomes non-optional, and
+            // `with_coding_agents_if_none` and the readers' empty-registry fallbacks are deleted.
+            coding_agents: Some(coding_agents),
             session_reach: Arc::new(tddy_daemon_extensions::NoSessionReach),
             terminal_exposure: Arc::new(tddy_daemon_extensions::NoTerminalExposure),
             split_rooms: Arc::new(tddy_daemon_extensions::NoSplitRooms),

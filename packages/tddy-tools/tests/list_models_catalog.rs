@@ -93,3 +93,37 @@ async fn a_curated_agents_catalogue_is_its_spec_list() {
     assert_eq!(catalogue.default_model, "acme-1");
     assert_eq!(catalogue.models[1].label, "Acme 2");
 }
+
+#[test]
+fn list_models_args_carry_the_hosts_tools_dir() {
+    use clap::Parser as _;
+
+    // When
+    let args = tddy_tools::list_models::ListModelsArgs::try_parse_from([
+        "list-models",
+        "--agent",
+        "claude-cli",
+        "--tools-dir",
+        "/home/dev/.tddy/tools",
+    ])
+    .expect("the flags parse");
+
+    // Then
+    assert_eq!(args.tools_dir, Some(PathBuf::from("/home/dev/.tddy/tools")));
+}
+
+#[test]
+fn list_models_args_without_a_tools_dir_name_none() {
+    use clap::Parser as _;
+
+    // When
+    let args = tddy_tools::list_models::ListModelsArgs::try_parse_from([
+        "list-models",
+        "--agent",
+        "claude-cli",
+    ])
+    .expect("the flags parse");
+
+    // Then
+    assert_eq!(args.tools_dir, None);
+}

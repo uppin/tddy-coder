@@ -172,8 +172,6 @@ async fn a_claude_capable_project_home_world() -> World {
         PeerRouting::local_only(&config),
         Arc::new(tddy_daemon_kernel::operator_channel::NoOperatorChannel),
         Arc::new(CliSessionManager::new()),
-    )
-    .with_coding_agents_if_none(
         tddy_session_lifecycle::test_util::coding_agents_with_binaries(&[(
             "claude",
             std::path::Path::new("/bin/cat"),

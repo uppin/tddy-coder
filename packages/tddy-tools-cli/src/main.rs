@@ -297,6 +297,8 @@ fn agent_models_catalog(
     use tddy_coding_agent_specs::CodingAgentRegistry;
     use tddy_tools::list_models::{AgentModels, AgentModelsSource};
 
+    // TODO(host-registry): implement — load from the built-ins plus `args.tools_dir`'s overrides
+    // when it is given, refusing a directory that does not load.
     let registry = CodingAgentRegistry::builtin_cached();
     registry
         .all()

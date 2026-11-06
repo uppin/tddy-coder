@@ -65,26 +65,24 @@ fn a_service(
         Arc::new(|token| (token == TEST_TOKEN).then(|| "testuser".to_string()));
     let eligible: Arc<dyn EligibleDaemonSource> =
         Arc::new(LocalOnlyEligibleDaemonSource::for_config(&config));
-    TestDaemon::from_host(
-        DaemonSessionHost::new(
-            config.clone(),
-            sessions_base_resolver,
-            tddy_data_dir,
-            user_resolver,
-            None,
-            spawn_backend,
-            tddy_daemon_livekit::peer_routing::peer_routing_over(
-                &config,
-                Some(LiveKitDiscoveryHandles {
-                    eligible_daemon_source: eligible,
-                    common_room_livekit_room: Arc::new(tokio::sync::RwLock::new(None)),
-                }),
-            ),
-            Arc::new(tddy_daemon_kernel::operator_channel::NoOperatorChannel),
-            Arc::new(tddy_session_lifecycle::claude_cli_session::CliSessionManager::new()),
-        )
-        .with_coding_agents_if_none(tddy_session_lifecycle::test_util::builtin_coding_agents()),
-    )
+    TestDaemon::from_host(DaemonSessionHost::new(
+        config.clone(),
+        sessions_base_resolver,
+        tddy_data_dir,
+        user_resolver,
+        None,
+        spawn_backend,
+        tddy_daemon_livekit::peer_routing::peer_routing_over(
+            &config,
+            Some(LiveKitDiscoveryHandles {
+                eligible_daemon_source: eligible,
+                common_room_livekit_room: Arc::new(tokio::sync::RwLock::new(None)),
+            }),
+        ),
+        Arc::new(tddy_daemon_kernel::operator_channel::NoOperatorChannel),
+        Arc::new(tddy_session_lifecycle::claude_cli_session::CliSessionManager::new()),
+        tddy_session_lifecycle::test_util::builtin_coding_agents(),
+    ))
 }
 
 #[tokio::test]

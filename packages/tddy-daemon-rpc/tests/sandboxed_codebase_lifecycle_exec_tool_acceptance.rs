@@ -191,8 +191,6 @@ fn a_daemon_with_no_common_room(sessions_base: PathBuf) -> TestDaemon {
             tddy_session_lifecycle::peer_routing::PeerRouting::local_only(&test_config()),
             Arc::new(tddy_daemon_kernel::operator_channel::NoOperatorChannel),
             Arc::new(CliSessionManager::new()),
-        )
-        .with_coding_agents_if_none(
             tddy_session_lifecycle::test_util::coding_agents_with_binaries(&[(
                 "claude",
                 Path::new("/bin/cat"),

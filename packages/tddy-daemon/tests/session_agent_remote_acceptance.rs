@@ -280,6 +280,7 @@ async fn a_fleet_with_peers(peers: &[(&str, &[&str])], model_base_url: &str) -> 
             tddy_session_lifecycle::peer_routing::PeerRouting::local_only(&config),
             Arc::new(tddy_daemon_kernel::operator_channel::NoOperatorChannel),
             Arc::new(tddy_session_lifecycle::claude_cli_session::CliSessionManager::new()),
+            tddy_agent_launch::host_coding_agents::no_coding_agents(),
         );
         let service = daemon_rpc_participant::with_the_livekit_room_ports(
             service,
@@ -408,10 +409,8 @@ async fn a_fleet_with_peers(peers: &[(&str, &[&str])], model_base_url: &str) -> 
         ),
         Arc::new(tddy_daemon_kernel::operator_channel::NoOperatorChannel),
         Arc::new(tddy_session_lifecycle::claude_cli_session::CliSessionManager::new()),
-    )
-    // A's co-located cursor-cli start launches from the `cursor` tool definition, so A has its
-    // coding agents, with the stub `cursor-agent` bound to the `cursor` tool's binary variable.
-    .with_coding_agents(
+        // A's co-located cursor-cli start launches from the `cursor` tool definition, so A has its
+        // coding agents, with the stub `cursor-agent` bound to the `cursor` tool's binary variable.
         tddy_session_lifecycle::test_util::coding_agents_with_binaries(&[(
             "cursor",
             &cursor_binary_a,

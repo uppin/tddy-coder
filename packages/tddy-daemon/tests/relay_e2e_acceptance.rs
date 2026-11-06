@@ -204,20 +204,18 @@ async fn relay_forwards_list_exec_tools_to_remote_peer() {
     let config_b = DaemonConfig::load(&path_b).unwrap();
     let sessions_b = tempfile::tempdir().unwrap();
     let service_b = Arc::new(
-        tddy_daemon_rpc::RpcHandlers::install(
-            DaemonSessionHost::new(
-                config_b.clone(),
-                sessions_resolver(sessions_b.path().to_path_buf()),
-                sessions_b.path().to_path_buf(),
-                valid_user_resolver(),
-                None,
-                tddy_spawn::supervisor_client::SpawnBackendChoice::ForkedWorker,
-                tddy_session_lifecycle::peer_routing::PeerRouting::local_only(&config_b), // B has no discovery of its own — it only serves its local tools
-                Arc::new(tddy_daemon_kernel::operator_channel::NoOperatorChannel),
-                Arc::new(CliSessionManager::new()),
-            )
-            .with_coding_agents_if_none(tddy_session_lifecycle::test_util::builtin_coding_agents()),
-        )
+        tddy_daemon_rpc::RpcHandlers::install(DaemonSessionHost::new(
+            config_b.clone(),
+            sessions_resolver(sessions_b.path().to_path_buf()),
+            sessions_b.path().to_path_buf(),
+            valid_user_resolver(),
+            None,
+            tddy_spawn::supervisor_client::SpawnBackendChoice::ForkedWorker,
+            tddy_session_lifecycle::peer_routing::PeerRouting::local_only(&config_b), // B has no discovery of its own — it only serves its local tools
+            Arc::new(tddy_daemon_kernel::operator_channel::NoOperatorChannel),
+            Arc::new(CliSessionManager::new()),
+            tddy_session_lifecycle::test_util::builtin_coding_agents(),
+        ))
         .0,
     );
 
@@ -262,26 +260,24 @@ async fn relay_forwards_list_exec_tools_to_remote_peer() {
         valid_user_resolver(),
     )
     .with_eligible_daemon_source(Arc::clone(&eligible));
-    let service_a = TestDaemon::from_host(
-        DaemonSessionHost::new(
-            config_a.clone(),
-            sessions_resolver(sessions_a.path().to_path_buf()),
-            sessions_a.path().to_path_buf(),
-            valid_user_resolver(),
-            None,
-            tddy_spawn::supervisor_client::SpawnBackendChoice::ForkedWorker,
-            tddy_daemon_livekit::peer_routing::peer_routing_over(
-                &config_a,
-                Some(LiveKitDiscoveryHandles {
-                    eligible_daemon_source: eligible,
-                    common_room_livekit_room: room_slot,
-                }),
-            ),
-            Arc::new(tddy_daemon_kernel::operator_channel::NoOperatorChannel),
-            Arc::new(CliSessionManager::new()),
-        )
-        .with_coding_agents_if_none(tddy_session_lifecycle::test_util::builtin_coding_agents()),
-    );
+    let service_a = TestDaemon::from_host(DaemonSessionHost::new(
+        config_a.clone(),
+        sessions_resolver(sessions_a.path().to_path_buf()),
+        sessions_a.path().to_path_buf(),
+        valid_user_resolver(),
+        None,
+        tddy_spawn::supervisor_client::SpawnBackendChoice::ForkedWorker,
+        tddy_daemon_livekit::peer_routing::peer_routing_over(
+            &config_a,
+            Some(LiveKitDiscoveryHandles {
+                eligible_daemon_source: eligible,
+                common_room_livekit_room: room_slot,
+            }),
+        ),
+        Arc::new(tddy_daemon_kernel::operator_channel::NoOperatorChannel),
+        Arc::new(CliSessionManager::new()),
+        tddy_session_lifecycle::test_util::builtin_coding_agents(),
+    ));
 
     // When
     // Wait until A's discovery sees B in the common room.

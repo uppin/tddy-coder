@@ -265,6 +265,7 @@ fn minimal_service_with_manager(
         tddy_session_lifecycle::peer_routing::PeerRouting::local_only(&config),
         Arc::new(tddy_daemon_kernel::operator_channel::NoOperatorChannel),
         manager,
+        tddy_agent_launch::host_coding_agents::no_coding_agents(),
     )
     .with_session_tokens(this_daemons_session_tokens().clone())
 }

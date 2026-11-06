@@ -69,8 +69,12 @@ pub struct AgentJail {
 /// Why `--agent` cannot start a jail.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum AgentChoiceError {
-    /// The registry holds no coding agent with this id.
+    /// The registry holds no coding agent with this id. `known` is every agent this app can run:
+    /// those whose spec's `run` is a PTY launch.
     Unknown { id: String, known: Vec<String> },
+    /// The agent's spec has no PTY `run` (an ACP-only agent), which a PTY sandbox cannot launch.
+    /// `runnable` names the agents it can.
+    NotPtyRunnable { id: String, runnable: Vec<String> },
     /// The spec's route is `required_in_jail` and this app passes none — what `--agent-kind
     /// opencode|muse` was refused with.
     RouteRequired { id: String },
@@ -91,6 +95,11 @@ impl fmt::Display for AgentChoiceError {
                 f,
                 "--agent {id:?} is not a coding agent in the registry; it holds {}",
                 known.join(", ")
+            ),
+            Self::NotPtyRunnable { id, runnable } => write!(
+                f,
+                "--agent {id} has no PTY run, so tddy-sandbox-app cannot start it; it runs {}",
+                runnable.join(", ")
             ),
             Self::RouteRequired { id } => write!(
                 f,
@@ -150,6 +159,8 @@ pub fn choose_agent_on(
 ) -> Result<ChosenAgent, AgentChoiceError> {
     let registry =
         load_agent_registry(&tddy_home.join(TOOLS_SUBDIR)).map_err(AgentChoiceError::Registry)?;
+    // TODO(host-registry): implement — keep only specs whose `run` is a PTY launch, and refuse an
+    // ACP-only agent with `AgentChoiceError::NotPtyRunnable` naming them.
     let mut known: Vec<String> = registry
         .ids()
         .filter(|tool| {

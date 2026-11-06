@@ -66,8 +66,8 @@ fn minimal_service_with_manager(
         tddy_session_lifecycle::peer_routing::PeerRouting::local_only(&config),
         Arc::new(tddy_daemon_kernel::operator_channel::NoOperatorChannel),
         manager,
+        tddy_session_lifecycle::test_util::builtin_coding_agents(),
     )
-    .with_coding_agents_if_none(tddy_session_lifecycle::test_util::builtin_coding_agents())
 }
 
 /// The terminal coordinate this daemon serves, wired to `manager`, with the temp-dir guards that

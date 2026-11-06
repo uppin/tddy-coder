@@ -170,8 +170,8 @@ fn minimal_service(
         tddy_session_lifecycle::peer_routing::PeerRouting::local_only(&config),
         Arc::new(tddy_daemon_kernel::operator_channel::NoOperatorChannel),
         Arc::new(CliSessionManager::new()),
-    )
-    .with_coding_agents(agents);
+        agents,
+    );
     let service = Arc::new(service);
     service.install_sandbox_rpc_bridge();
     service
