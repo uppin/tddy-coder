@@ -12,7 +12,6 @@ import { SessionDrawerItem } from "./SessionDrawerItem";
 import { SessionIndicatorDot } from "./SessionIndicatorDot";
 import { SessionDrawerSeparator } from "./SessionDrawerSeparator";
 import { sessionDrawerLabel } from "tddy-session-web";
-import { cn } from "tddy-ui-web";
 
 // The rows the session drawer renders — stack groups, activity partitions, a project group's body
 // and the collapsed strip's dots — split out of `SessionDrawer.tsx`, which keeps the drawer chrome
