@@ -1,8 +1,21 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import { act, cleanup, renderHook } from "@testing-library/react";
 import type { ReactNode } from "react";
-import { aPresenceDouble } from "../testkit";
-import { PresencePortProvider, type PresencePort, useHostPresence, useMediaPort, useRoomParticipants } from "./media";
+import { anInMemoryRpcBackend } from "tddy-connectrpc-testkit";
+import { create } from "@bufbuild/protobuf";
+import { TokenService, GenerateTokenResponseSchema } from "../gen/token_pb";
+import { aPresenceDouble, aRoomRpcDouble } from "../testkit";
+import {
+  PresencePortProvider,
+  type PresencePort,
+  RoomRpcPortProvider,
+  type RoomRpcPort,
+  useHostPresence,
+  useMediaPort,
+  useParticipantPresent,
+  useRoomClient,
+  useRoomParticipants,
+} from "./media";
 
 afterEach(cleanup);
 
@@ -54,5 +67,51 @@ describe("the presence port", () => {
   test("useMediaPort outside a provider throws naming the port", () => {
     // When / Then
     expect(() => renderHook(() => useMediaPort())).toThrow(/MediaPortProvider/);
+  });
+});
+
+function inRoomRpc(port: RoomRpcPort) {
+  return ({ children }: { children: ReactNode }) => <RoomRpcPortProvider port={port}>{children}</RoomRpcPortProvider>;
+}
+
+describe("the room-RPC port", () => {
+  test("useRoomClient calls the participant through the port", async () => {
+    // Given
+    const backend = anInMemoryRpcBackend().onUnary(TokenService.method.generateToken, (req) =>
+      create(GenerateTokenResponseSchema, { token: `for-${req.identity}`, ttlSeconds: 60n }),
+    );
+    const port = aRoomRpcDouble(backend);
+    const room = aPresenceDouble().room("session-room");
+
+    // When
+    const { result } = renderHook(() => useRoomClient(room, "daemon-host-a", TokenService), { wrapper: inRoomRpc(port) });
+    const reply = await result.current!.generateToken({ room: "session-room", identity: "alice" });
+
+    // Then
+    expect(reply.token).toBe("for-alice");
+  });
+
+  test("useRoomClient is null until the room is known", () => {
+    // Given
+    const port = aRoomRpcDouble(anInMemoryRpcBackend());
+
+    // When
+    const { result } = renderHook(() => useRoomClient(null, "daemon-host-a", TokenService), { wrapper: inRoomRpc(port) });
+
+    // Then
+    expect(result.current).toBeNull();
+  });
+
+  test("useParticipantPresent follows the participant joining and leaving", () => {
+    // Given
+    const port = aRoomRpcDouble(anInMemoryRpcBackend());
+    const room = aPresenceDouble().room("session-room");
+    const { result } = renderHook(() => useParticipantPresent(room, "daemon-host-a"), { wrapper: inRoomRpc(port) });
+
+    // When
+    act(() => port.setPresent(room, "daemon-host-a", true));
+
+    // Then
+    expect(result.current).toBe(true);
   });
 });
