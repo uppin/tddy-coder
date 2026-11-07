@@ -27,3 +27,4 @@ Green baseline before (`CreateSessionPane.cy.tsx`, `CreateSessionStartProgress.c
 
 ## Verified by hand
 2026-11-07 — `wc -l` at the wrap of PR #842 (`#web-split` 5/16): 581 → 581. The PR only re-points hook imports to `tddy-client-web`; still open, not split (later `#web-split` nodes move this file).
+2026-11-07 — `wc -l` at the wrap of PR #844 (`#web-split` 7/17): 581 → 581 (the move itself; no line changed beyond import paths). Still open, not split — the `#web-split` changeset for this node excludes it.

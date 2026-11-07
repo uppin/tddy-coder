@@ -24,3 +24,4 @@ the screen as layout. Green baseline first (`PrStackForceStartAcceptance.cy.tsx`
 
 ## Verified by hand
 2026-11-07 — `wc -l` at the wrap of PR #842 (`#web-split` 5/16): 705 → 705. The PR only re-points hook imports to `tddy-client-web`; still open, not split (later `#web-split` nodes move this file).
+2026-11-07 — `wc -l` at the wrap of PR #844 (`#web-split` 7/17): 704 → 702 against its base `feature/web-split/livekit` `bede09610`. The PR re-points the create-session imports to `tddy-session-create-web` (one import line); the passphrase scope is mounted at the app root, not around the dialog. Still open, not split.
