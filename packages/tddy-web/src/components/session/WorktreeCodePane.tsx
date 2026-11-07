@@ -3,8 +3,8 @@ import type { Client } from "@connectrpc/connect";
 
 import type { CodeNavigationService } from "tddy-client-web/gen/code_navigation_pb";
 import type { WorktreeService } from "tddy-client-web/gen/worktree_pb";
-import { WorktreeFileTree } from "./WorktreeFileTree";
-import { createWorktreeFilesApi } from "./worktreeFilesApi";
+import { WorktreeFileTree } from "tddy-ui-web";
+import { createWorktreeFilesApi } from "tddy-client-web";
 import { workflowPreviewKind } from "./sessionWorkflowPreview";
 import { renderSimpleMarkdown } from "./renderSimpleMarkdown";
 import { CodeBlock } from "./CodeBlock";

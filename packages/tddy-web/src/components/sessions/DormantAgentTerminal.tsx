@@ -6,7 +6,7 @@ import {
   createForwardHistoryFetcher,
   TerminalHistoryForwardLoader,
 } from "tddy-client-web";
-import { rpcFailureText } from "../../rpc/rpcFailure";
+import { rpcFailureText } from "tddy-client-web";
 import { useIsMobile } from "tddy-ui-web";
 import { Toast } from "tddy-ui-web";
 import { InlineError } from "tddy-ui-web";

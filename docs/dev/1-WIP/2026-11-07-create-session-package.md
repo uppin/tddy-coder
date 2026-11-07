@@ -1,7 +1,7 @@
 # Changeset: Create-session package (`tddy-session-create-web`)
 
 **Date**: 2026-11-07
-**Status**: 🚧 In Progress
+**Status**: 🚧 In Progress — green phase (implementation + moved specs)
 **Type**: Architecture Change
 **Complexity**: 4 — two packages (new package, `tddy-web` consumers incl. prstack's start-session), ~44 specs + page objects moved, an inherited oversized-file record
 
@@ -84,6 +84,43 @@ Originally planned:
 
 First push (commit 2): the package skeleton (manifest exporting the surface above, Cypress/Vite config, workflow), the ~44 specs `git mv`'d into `packages/tddy-session-create-web/cypress/component/` with imports pointing at the package, and its boundary rule test — failing until the modules move.
 
+## Deviations (green phase)
+
+Recorded where the red-phase contract met the code. Nothing here widens scope.
+
+- **`buildCreateSessionRequest` does not exist** — the request builder is `buildStartSessionRequest` (and `buildProjectHomeStartSpec`). The red boundary test and the Responsibility list named a fabricated symbol; the test and surface use the real name.
+- **Three more specs stay in `tddy-web`** (38 moved in red; 35 live in the package, one of them split):
+  `CreateSessionClonePassphraseAcceptance` and `CreateSessionClonePassphraseMount` pin the Hosts screen's
+  passphrase dialog (`HostPassphraseDialog`, `useHostPromptAnswer`, RSA-OAEP encryption, host-key pinning),
+  which `feature/web-split/hosts` owns; `ProjectHomeSetupLinkAcceptance` mounts `SessionDrawer` and the Projects
+  page. `SessionStartAndIndexingProgress` is split: its create-pane test stays in the package, its
+  session-header indexing test is `tddy-web`'s `SessionIndexingIndicatorAcceptance` (same assertions).
+- **`StartPassphrasePrompt` is a slot, not the dialog.** The package exports `StartPassphraseProvider` and a
+  `StartPassphrasePrompt` that mounts whatever component the host application supplies (and throws without a
+  provider — a clone asking for a passphrase nobody can answer would hang silently). `tddy-web` supplies
+  `HostStartPassphrasePrompt` (the old component, moved to `components/hosts/`) via `HostStartPassphraseScope`
+  around every create-session surface and in its Cypress `mount`.
+- **`baseBranchChoice()` stays with prstack.** It resolves a `StackNode` (`stackPlan`, `deriveStackBaseBranch`,
+  `prioritiseBaseBranchOptions`), which are the PR-stack screen's; create-session only ever used its `BaseBranchOption`
+  type. The package owns `BaseBranchOption` / `BaseBranchChoice` (`baseBranchOptions.ts`); `prstack/baseBranchChoice.ts`
+  re-exports them and keeps the function.
+- **Moved to `tddy-ui-web`:** `safeTestIdPart` (`testId.ts`, with its test) and `WorktreeFileTree` (its own minimal
+  `WorktreeFilesApi { listDir }`). **Moved to `tddy-client-web`:** `rpcFailure` (+ test), `randomUuid` (+ test),
+  `fileUploadChunks` (+ `UPLOAD_CHUNK_TIMEOUT_MS`) and `worktreeFilesApi`. All were shared with code that stays in
+  `tddy-web`; `tddy-web` imports them from the packages (no stubs).
+- **Also moved into the package** because only create-session used them: `useAgentModels`, `useProviderRoutes`,
+  `utils/stackParents`, `lib/{branchConflict,branchNames,projectSelectOptions,attachmentBasenames,attachmentBytes}`,
+  `agentPlacementChoice`, `AgentKindBadge`, `useSelectableAgents` (the drawer and the agent picker import them back from
+  the package).
+- **`CreateSessionSshConfigSelect` no longer reads `useLiveKitTransportFactoryIsOverridden`** (a test-only escape hatch in
+  production code); it is reachable when the host connection reports `connected`, which the clients-port double does.
+- **Package support is a copy where `tddy-web` keeps using the original** (`servedAgents`, `rpc/{responses,protoRpc,connectionRpcs,sessionFilesServiceBackend,sessionAgentRosterBackend,recordedRequests}`,
+  `util/fileDrop`, `pages/{createSessionPage,projectHomeSetupPage}`) — TODO: dedupe into a shared testkit when `session` moves.
+  `testIds.ts` is trimmed to the entries these specs use. `fixtures/*.json` and `branchConflictDialogPage` moved.
+- `cy.mountWithClients` + `mounts.tsx` (`mountWithHostBackends`: one backend per host, replacing `mountWithPerDaemonLiveKitRpc`) replace
+  `SelectedDaemonProvider`/`mountWithRpc`; targets are host ids, not LiveKit identities.
+- `lucide-react` and `@connectrpc/connect-web` (dev) added to the package manifest — already workspace dependencies.
+
 ## Green wave
 
 **Wave:** 4 of 9
@@ -99,11 +136,11 @@ Real dependency edges, as opposed to the branch line:
 
 ## Scope
 
-- [ ] Package skeleton + workflow
-- [ ] Modules moved (incl. `attachments/`, `baseBranchChoice`, `startProgress`); `tddy-web` imports rewritten
-- [ ] Specs, page objects, fixtures moved and green from the package config
-- [ ] Boundary rule
-- [ ] Code-issue record moved
+- [x] Package skeleton + workflow
+- [x] Modules moved (incl. `attachments/`, `baseBranchChoice`, `startProgress`); `tddy-web` imports rewritten
+- [ ] Specs, page objects, fixtures moved and green from the package config (sweep in progress)
+- [x] Boundary rule
+- [x] Code-issue record moved
 
 ## Technical Changes
 
@@ -163,7 +200,7 @@ Create-session lives in `tddy-web/src/components/sessions/` (~30 `CreateSession*
 - [x] Run acceptance tests (verify they fail)
 - [x] USER REVIEW — acceptance tests (developer waived the per-node review for this stack, 2026-11-07: "finish the rest without stopping")
 - [x] TDD Red — write failing unit/integration tests
-- [ ] TDD Green — implement with quality code
+- [x] TDD Green — implement with quality code (package specs: see Validation Results)
 - [ ] Update documentation with progress
 - [ ] Repeat Red→Green→Update cycle until feature complete
 - [ ] Run the touched packages' tests (`tddy-session-create-web` Cypress + boundary rule; `tddy-web` build + PR-stack start-session specs) — verify 100% pass

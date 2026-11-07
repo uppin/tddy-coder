@@ -21,6 +21,6 @@ describe("tddy-session-create-web package boundary", () => {
     const exported = Object.keys(require("../src/index.ts"));
 
     // Then
-    expect(exported).toEqual(expect.arrayContaining(["CreateSessionPane", "CreateSessionDialog", "CreateSessionStartProgress", "BranchConflictDialog", "StartPassphrasePrompt", "useCreateSessionSubmit", "useAvailableAgents", "useProjectBranches", "buildCreateSessionRequest", "SessionAttachmentList", "HostDocumentPicker"]));
+    expect(exported).toEqual(expect.arrayContaining(["CreateSessionPane", "CreateSessionDialog", "CreateSessionStartProgress", "BranchConflictDialog", "StartPassphrasePrompt", "useCreateSessionSubmit", "useAvailableAgents", "useProjectBranches", "buildStartSessionRequest", "SessionAttachmentList", "HostDocumentPicker"]));
   });
 });

@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from "react";
 import type { ToolDef } from "tddy-client-web/gen/exec_tools_pb";
 import { defaultArgsFromSchema } from "./toolSchema";
-import { rpcFailureText } from "../../rpc/rpcFailure";
+import { rpcFailureText } from "tddy-client-web";
 import { InlineError } from "tddy-ui-web";
 
 interface ToolCallInfo {

@@ -2,7 +2,7 @@ import React, { useState } from "react";
 import type { Client } from "@connectrpc/connect";
 import type { WorktreeService } from "tddy-client-web/gen/worktree_pb";
 import { useSessionWorktreeStats } from "../../rpc/useSessionWorktreeStats";
-import { hostNotConnected } from "../../rpc/rpcFailure";
+import { hostNotConnected } from "tddy-client-web";
 import { useActionFailure } from "../../hooks/useActionFailure";
 import { InlineError } from "tddy-ui-web";
 import { formatDiskBytes } from "./worktreeStatsFormat";

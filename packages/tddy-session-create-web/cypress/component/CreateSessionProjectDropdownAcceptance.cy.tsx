@@ -10,9 +10,9 @@
  * carries its project id in parentheses so the operator can tell which one they are picking.
  */
 
+import { aClientsPortDouble } from "tddy-client-web/testkit";
 import React from "react";
 import { servedAgentWire } from "../support/servedAgents";
-import { aDisconnectedRoom } from "tddy-livekit-web/testkit";
 import { createClient } from "@connectrpc/connect";
 import { anInMemoryRpcBackend, type InMemoryRpcBackend } from "tddy-connectrpc-testkit";
 import { CreateSessionPane } from "../../src/CreateSessionPane";
@@ -22,7 +22,6 @@ import { CatalogService } from "tddy-client-web/gen/catalog_pb";
 import { SessionFilesService } from "tddy-client-web/gen/session_files_pb";
 import { WorktreeService } from "tddy-client-web/gen/worktree_pb";
 import type { DaemonHost } from "tddy-client-web";
-import { SelectedDaemonProvider } from "../../src/rpc/selectedDaemon";
 import { createSessionPage } from "../support/pages/createSessionPage";
 
 // ---------------------------------------------------------------------------
@@ -78,9 +77,8 @@ function mountCreatePane(backend: InMemoryRpcBackend) {
   // The same host over the same wire, under the service that now serves the worktree RPCs.
   const sessionFilesClient = createClient(SessionFilesService, backend.transport());
   const worktreeClient = createClient(WorktreeService, backend.transport());
-  cy.mount(
-    <SelectedDaemonProvider room={aDisconnectedRoom()} daemons={DAEMON_HOSTS} servingInstanceId={LOCAL_HOST}>
-      <CreateSessionPane
+  cy.mountWithClients(
+    <CreateSessionPane
         client={client}
         projectClient={projectClient}
         catalogClient={catalogClient}
@@ -89,8 +87,8 @@ function mountCreatePane(backend: InMemoryRpcBackend) {
         sessionToken="fake-token"
         onCancel={cy.stub()}
         onCreated={cy.stub()}
-      />
-    </SelectedDaemonProvider>,
+      />,
+    anInMemoryRpcBackend(), { clients: aClientsPortDouble(anInMemoryRpcBackend(), { daemons: DAEMON_HOSTS }) },
   );
 }
 

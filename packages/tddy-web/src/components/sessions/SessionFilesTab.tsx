@@ -5,7 +5,7 @@ import { Button } from "tddy-ui-web";
 import { formatBytes } from "./formatTraffic";
 import { copyToClipboard } from "../../lib/clipboard";
 import { HOST_PATH_MIME } from "../../lib/hostPathDrag";
-import { hostNotConnected, rpcFailureText } from "../../rpc/rpcFailure";
+import { hostNotConnected, rpcFailureText } from "tddy-client-web";
 import { useKeyedActionFailure } from "../../hooks/useKeyedActionFailure";
 import { InlineError } from "tddy-ui-web";
 

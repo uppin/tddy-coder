@@ -10,7 +10,7 @@ import {
   cliSessionTypeOptions,
   knownSessionTypes,
   terminalKindLabel,
-} from "./cliHarnessOptions";
+} from "tddy-session-create-web";
 import { nextTmuxSessionName } from "./tmuxSessionName";
 import type { TmuxMenuState } from "./useTmuxSessions";
 

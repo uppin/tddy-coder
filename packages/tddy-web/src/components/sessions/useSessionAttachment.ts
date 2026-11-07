@@ -21,7 +21,7 @@ import { SessionService } from "tddy-client-web/gen/session_pb";
 import { attachmentHintFromReply } from "tddy-client-web";
 import type { SessionAttachmentHint, SessionAttachmentState } from "tddy-client-web/connections/session";
 import type { HostConnection } from "tddy-client-web/connections/types";
-import { rpcFailureText } from "../../rpc/rpcFailure";
+import { rpcFailureText } from "tddy-client-web";
 
 export type { SessionAttachmentState } from "tddy-client-web/connections/session";
 

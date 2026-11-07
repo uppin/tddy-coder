@@ -8,7 +8,7 @@ import { requestSessionsRefresh } from "../../lib/sessionsRefreshBridge";
 import { sessionNotificationRegistry } from "./sessionNotificationRegistry";
 import { useSessionNotifications } from "../../rpc/useSessionNotifications";
 import { useAuthContext } from "../../hooks/authProvider";
-import { hostNotConnected } from "../../rpc/rpcFailure";
+import { hostNotConnected } from "tddy-client-web";
 import { AppShell } from "../shell/AppShell";
 import { TooltipProvider } from "tddy-ui-web";
 import { SessionDrawer } from "./SessionDrawer";
@@ -18,14 +18,15 @@ import { useSessionAttachment } from "./useSessionAttachment";
 import { sessionsDrawerPathForSession, SESSIONS_DRAWER_ROUTE, SESSIONS_NEW_ROUTE } from "../../routing/appRoutes";
 import { detectIsMobile, useIsMobile } from "tddy-ui-web";
 import { resolveShortcutsForSession } from "../../lib/toolShortcuts";
-import { isCliSessionType } from "./codingAgentMetadata";
-import { registerSessionTypeOptions, sessionTypeOptions } from "./cliHarnessOptions";
-import { useSelectableAgents } from "./useSelectableAgents";
+import { isCliSessionType } from "tddy-session-create-web";
+import { registerSessionTypeOptions, sessionTypeOptions } from "tddy-session-create-web";
+import { useSelectableAgents } from "tddy-session-create-web";
 import { CatalogService } from "tddy-client-web/gen/catalog_pb";
 import { useSessionsDrawerInspector } from "./useSessionsDrawerInspector";
 import { useSessionsDrawerClients } from "./useSessionsDrawerClients";
 import { useProjectHomeSetup } from "./useProjectHomeSetup";
-import { ProjectHomeSetupPane } from "./ProjectHomeSetupPane";
+import { ProjectHomeSetupPane } from "tddy-session-create-web";
+import { HostStartPassphraseScope } from "../hosts/HostStartPassphrasePrompt";
 import { useSessionsDrawerAttachClaims } from "./useSessionsDrawerAttachClaims";
 import { useSessionsDrawerProjects } from "./useSessionsDrawerProjects";
 import { useSessionsDrawerProjectHomes } from "./useSessionsDrawerProjectHomes";
@@ -389,6 +390,7 @@ export function SessionsDrawerScreen({
           {/* A bad deep link surfaces "not found" in the detail pane only — the session list
               stays visible so the operator can pick a valid session. */}
           {setup !== null ? (
+            <HostStartPassphraseScope>
             <ProjectHomeSetupPane
               {...setup}
               project={projectOnHost(setup.projectId)}
@@ -397,6 +399,7 @@ export function SessionsDrawerScreen({
               onStart={(spec) => startProjectHome(setup.projectId, selectedInstanceId ?? "", spec)}
               onClose={projectHomeSetup.close}
             />
+            </HostStartPassphraseScope>
           ) : unknownSession ? (
             <SessionsDrawerUnknownSession onHome={handleUnknownHome} />
           ) : (

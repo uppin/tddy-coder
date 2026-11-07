@@ -12,6 +12,7 @@
  * appearing under host B is proof the fan-out reached B — not proof of a fixture.
  */
 
+import { mountWithHostBackends } from "../support/mounts";
 import React from "react";
 import { servedAgentWire } from "../support/servedAgents";
 import { createClient } from "@connectrpc/connect";
@@ -22,9 +23,7 @@ import { CatalogService } from "tddy-client-web/gen/catalog_pb";
 import { SessionFilesService } from "tddy-client-web/gen/session_files_pb";
 import { WorktreeService } from "tddy-client-web/gen/worktree_pb";
 import { CreateSessionPane } from "../../src/CreateSessionPane";
-import { daemonRpcIdentity, type DaemonHost } from "tddy-client-web";
-import { mountWithPerDaemonLiveKitRpc } from "../support/rpc/perDaemonLiveKitRpc";
-import { withSelectedDaemon } from "../support/rpc/withSelectedDaemon";
+import type { DaemonHost } from "tddy-client-web";
 import {
   aDaemonOfferingAgents,
   aDaemonThatCannotBeReached,
@@ -83,9 +82,8 @@ function mountPicker(hostB: InMemoryRpcBackend): InMemoryRpcBackend {
     CatalogService.method.listSubagents,
     () => ({ subagents: [anAvailableAgent("explorer", HOST_A.instanceId, ["Grep"])] }),
   );
-  mountWithPerDaemonLiveKitRpc(
-    withSelectedDaemon(
-      <CreateSessionPane
+  mountWithHostBackends(
+    <CreateSessionPane
         client={createClient(SessionService, hostABackend.transport())}
         projectClient={createClient(ProjectService, hostABackend.transport())}
         catalogClient={createClient(CatalogService, hostABackend.transport())}
@@ -95,13 +93,11 @@ function mountPicker(hostB: InMemoryRpcBackend): InMemoryRpcBackend {
         onCancel={cy.stub()}
         onCreated={cy.stub()}
       />,
-      [HOST_A, HOST_B],
-    ),
     {
-      [daemonRpcIdentity(HOST_A.instanceId)]: hostABackend,
-      [daemonRpcIdentity(HOST_B.instanceId)]: hostB,
+      [HOST_A.instanceId]: hostABackend,
+      [HOST_B.instanceId]: hostB,
     },
-    { httpBackend: hostABackend },
+    { httpBackend: hostABackend, daemons: [HOST_A, HOST_B] },
   );
   return hostABackend;
 }

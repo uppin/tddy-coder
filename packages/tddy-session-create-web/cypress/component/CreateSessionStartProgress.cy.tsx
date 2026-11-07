@@ -10,9 +10,9 @@
  * Feature docs: docs/ft/web/1-WIP/PRD-2026-10-24-start-progress-progress-ui.md
  */
 
+import { aClientsPortDouble } from "tddy-client-web/testkit";
 import React from "react";
 import { servedAgentWire } from "../support/servedAgents";
-import { aDisconnectedRoom } from "tddy-livekit-web/testkit";
 import { Code, ConnectError, createClient } from "@connectrpc/connect";
 import {
   create,
@@ -33,8 +33,6 @@ import { SessionFilesService } from "tddy-client-web/gen/session_files_pb";
 import { WorktreeService } from "tddy-client-web/gen/worktree_pb";
 import { CreateSessionPane } from "../../src/CreateSessionPane";
 import type { DaemonHost } from "tddy-client-web";
-import { SelectedDaemonProvider } from "../../src/rpc/selectedDaemon";
-import { mountWithRpc } from "../support/rpc/inMemory";
 import { createSessionPage } from "../support/pages/createSessionPage";
 
 const LOCAL_HOST = "workstation-1";
@@ -149,9 +147,8 @@ const MIB = 1024 * 1024;
 
 function mountTheCreatePane(backend: InMemoryRpcBackend) {
   const transport = backend.transport();
-  mountWithRpc(
-    <SelectedDaemonProvider room={aDisconnectedRoom()} daemons={DAEMON_HOSTS} servingInstanceId={LOCAL_HOST}>
-      <CreateSessionPane
+  cy.mountWithClients(
+    <CreateSessionPane
         client={createClient(SessionService, transport)}
         projectClient={createClient(ProjectService, transport)}
         catalogClient={createClient(CatalogService, transport)}
@@ -160,9 +157,8 @@ function mountTheCreatePane(backend: InMemoryRpcBackend) {
         sessionToken="fake-token"
         onCancel={cy.stub()}
         onCreated={cy.stub().as("onCreated")}
-      />
-    </SelectedDaemonProvider>,
-    backend,
+      />,
+    backend, { clients: aClientsPortDouble(backend, { daemons: DAEMON_HOSTS }) },
   );
 }
 

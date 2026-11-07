@@ -22,7 +22,7 @@ import {
   type SessionParticipant,
 } from "../../utils/crossHostSessions";
 import { subscribeSessionsRefresh } from "../../lib/sessionsRefreshBridge";
-import { hostNotConnectedText, rpcFailureText } from "../../rpc/rpcFailure";
+import { hostNotConnectedText, rpcFailureText } from "tddy-client-web";
 import { useHostLabel } from "tddy-client-web";
 
 /** Pulls the selected host's sessions (typically `client.listSessions(...)`). */

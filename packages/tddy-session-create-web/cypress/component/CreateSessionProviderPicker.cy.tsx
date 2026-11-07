@@ -19,7 +19,6 @@ import { AccountsService } from "tddy-client-web/gen/accounts_pb";
 import { SessionFilesService } from "tddy-client-web/gen/session_files_pb";
 import { WorktreeService } from "tddy-client-web/gen/worktree_pb";
 import { AgentKind } from "tddy-client-web/gen/types_pb";
-import { mountWithRpc } from "../support/rpc/inMemory";
 import { TEST_IDS, byTestId } from "../support/testIds";
 
 /** A coding agent from the registry, routable to `routeProviders`. */
@@ -66,7 +65,7 @@ function aBackend(): InMemoryRpcBackend {
 
 function mountWith(backend: InMemoryRpcBackend) {
   const transport = backend.transport();
-  mountWithRpc(
+  cy.mountWithClients(
     <CreateSessionPane
       client={createClient(SessionService, transport)}
       projectClient={createClient(ProjectService, transport)}
