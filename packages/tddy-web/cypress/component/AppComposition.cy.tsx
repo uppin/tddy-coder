@@ -20,7 +20,7 @@ describe("the composed app", () => {
     ["/sessions", "sessions-drawer"],
     ["/hosts", "hosts-screen"],
     ["/projects", "projects-screen"],
-    ["/rpc-playground", "rpc-playground-screen"],
+    ["/rpc-playground", "rpc-playground-home"],
   ] as const) {
     it(`routes ${path} to the package that owns it`, () => {
       // Given

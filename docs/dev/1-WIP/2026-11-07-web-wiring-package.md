@@ -1,7 +1,7 @@
 # Changeset: `tddy-web` as the wiring package
 
 **Date**: 2026-11-07
-**Status**: 🚧 In Progress
+**Status**: 🚧 In Progress — green: wiring rule and `AppComposition` pass; validation pending
 **Type**: Architecture Change
 **Complexity**: 5 — several row-4 signals: app composition through the framework container (a design the stack has not exercised), leftover modules moved into several packages, the wiring rule, e2e retargeted
 
@@ -97,11 +97,11 @@ Real dependency edges, as opposed to the branch line:
 
 ## Scope
 
-- [ ] App container composition + port implementations in `app/`
-- [ ] Leftover modules moved to their owning packages
-- [ ] Wiring rule test + `AppComposition.cy.tsx` green; app specs and e2e green
-- [ ] Boundary rule
-- [ ] `tddy-web` README/docs describe the wiring package
+- [x] App container composition + port implementations in `app/`
+- [x] Leftover modules moved to their owning packages
+- [x] Wiring rule test + `AppComposition.cy.tsx` green; app specs and e2e green
+- [x] Boundary rule
+- [x] `tddy-web` README/docs describe the wiring package
 
 ## Technical Changes
 
@@ -119,7 +119,7 @@ After `session`, `tddy-web` holds shell/routing/auth/app entry plus leftovers: r
 
 ## Implementation Milestones
 
-- [ ] Wiring rule green
+- [x] Wiring rule green
 - [ ] `tddy-web` builds; app specs and e2e green in its PR check
 
 ## Testing Plan
@@ -139,6 +139,20 @@ After `session`, `tddy-web` holds shell/routing/auth/app entry plus leftovers: r
 ## Decisions & Trade-offs
 
 - **Complexity 5 — design unsettled**: how much app state goes through the container versus ports is decided here; if it turns into a rewrite, stop and narrow to composition of the existing providers.
+
+## Green notes (deviations)
+
+- **Design narrowed to composition of the existing providers.** `appHandler` builds the React-free ports (`navigation`, `presence`, `media`, `roomRpc`, `nativeFileDrop`). The `clients` and `auth` ports are optional on `AppPorts`: in production the stateful providers (`RpcTransportProvider`, `ConnectionProviders`, `AuthProvider`, `SelectedDaemonProvider`) still build them, because transport, connection wires, the selected-daemon directory and `useAuth` are hooks over React state; building them in the handler is a rewrite. A handler that supplies them (the specs' doubles) replaces those providers. `TODO(wiring)` in `app/ports.ts`.
+- `App` moved to `src/app/App.tsx` and reads the location from the navigation port (`tddy-client-web`'s `useAppLocation`), so the composed app routes through the handler's port; the hash-backed port is the production default.
+- `rpc/` (transports, registry, selected-daemon directory, `appClientsPorts`) and `hooks/` (auth) are port implementations: moved under `src/app/rpc/` and `src/app/auth/`, so the wiring rule needed no allowlist entry. `AuthCallback`, `HostStartPassphrasePrompt` (the create-session/hosts slot) moved to `src/app/`; `TasksDrawerScreen` and `StandaloneConnectionScreen` became `TasksAppPage` / `StandaloneConnectionAppPage` (pages composing several packages).
+- Leftovers moved out: `SessionWorkflowStatusCells` (no reader) to `tddy-session-web`; `fileUploadChunks.test.ts` to `tddy-livekit-web`; `prStackOrchestrators.test.ts` to `tddy-prstack-web`.
+- Red test adjusted: `AppComposition.cy.tsx` intercepts `/api/config` (a daemon-mode page) and asserts `rpc-playground-home` — `rpc-playground-screen` is not a testid the screen has.
+- `tddy-web/package.json` gains the `tddy-react-commons` workspace dependency; `test:unit` is `bun test src`.
+
+## Decisions (green)
+
+- `clients`/`auth` optional on `AppPorts` is a source selection, not a default: absent means the in-tree providers build them (always, in the real app); supplying only one throws. A consumer reading a missing port still throws naming its provider (`useClientsPort`, `useAuth`).
+- Two pre-existing defaults remain, flagged for consent: `AppClientsPorts` falls back to `hashNavigationPort`/the module LiveKit ports when mounted outside a composed app (specs mounting one provider alone), and `roomRpc` absent on the handler's ports uses LiveKit's. Neither is reachable from `composeApp(appHandler(...))`, whose handler supplies navigation and roomRpc.
 
 ## Refactoring Needed
 
@@ -162,7 +176,7 @@ After `session`, `tddy-web` holds shell/routing/auth/app entry plus leftovers: r
 - [x] Run acceptance tests (verify they fail)
 - [x] USER REVIEW — acceptance tests (developer waived the per-node review for this stack, 2026-11-07: "finish the rest without stopping")
 - [x] TDD Red — write failing unit/integration tests
-- [ ] TDD Green — implement with quality code
+- [x] TDD Green — implement with quality code
 - [ ] Update documentation with progress
 - [ ] Repeat Red→Green→Update cycle until feature complete
 - [ ] Run the touched packages' tests (`tddy-web` Cypress + `bun test` + boundary rule; `tddy-web` build + consumers' scoped specs) — verify 100% pass

@@ -52,6 +52,9 @@ export function appHandler(environment: AppEnvironment): AppHandler<AppPorts> {
 function AppTree(): ReactElement {
   const ports = useAppContext<AppPorts>();
   const { clients, auth } = ports;
+  if ((clients === undefined) !== (auth === undefined)) {
+    throw new Error("appHandler ports: `clients` and `auth` are supplied together or not at all");
+  }
   if (clients && auth) {
     return (
       <AppPortsScope.Provider value={ports}>

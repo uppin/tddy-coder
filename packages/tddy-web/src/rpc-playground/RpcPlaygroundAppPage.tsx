@@ -10,7 +10,6 @@ import { GitHubLoginButton } from "tddy-workspace-web";
 import { AppShell } from "../components/shell/AppShell";
 import { useAuthContext } from "../app/auth/authProvider";
 import { presenceIdentityForUser } from "tddy-livekit-web";
-import { useAppLocation } from "../routing/useAppLocation";
 import {
   buildRegistry,
   findMethod,
@@ -22,6 +21,7 @@ import {
 } from "tddy-rpc-playground-web";
 import {
   PARAM_PARTICIPANT,
+  useAppLocation,
   useCapabilityAvailability,
   useHostConnection,
   useHostPresence,

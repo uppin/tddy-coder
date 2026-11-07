@@ -67,7 +67,7 @@ import {
   parseTerminalSessionIdFromPathname,
   SESSIONS_DRAWER_ROUTE,
 } from "../routing/appRoutes";
-import { useAppLocation } from "../routing/useAppLocation";
+import { useAppLocation } from "tddy-client-web";
 import { ConnectionForm } from "../components/connection/StandaloneConnectionAppPage";
 import { useHttpTransport } from "tddy-client-web";
 
