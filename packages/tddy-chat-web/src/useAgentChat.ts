@@ -339,7 +339,7 @@ export function useAgentChat(
       } catch (err) {
         if (!cancelled) {
           dbg("stream error after %d event(s): %o", eventCount, err);
-          console.debug("[useAgentChat] stream error", err);
+          dbg("stream error: %o", err);
           setStreamError(err instanceof Error ? err.message : String(err));
         }
       }

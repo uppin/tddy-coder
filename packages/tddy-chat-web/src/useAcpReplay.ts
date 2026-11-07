@@ -5,7 +5,11 @@ import { type ActivityService, StreamMode } from "tddy-client-web/gen/activity_p
 import { AcpAgentMessageSchema } from "tddy-client-web/gen/tddy/acp/v1/acp_pb";
 import { agentActivityRegistry, replayKeyOf } from "./agentActivityRegistry";
 import { createReplayProjector, projectReplayFrames } from "./acpReplayProjection";
+import { tddyDebug } from "tddy-client-web";
 import type { UseAgentChatResult } from "./useAgentChat";
+
+/** Replay diagnostics. Enable in DevTools: `localStorage.debug = 'tddy:acp:*'`. */
+const dbg = tddyDebug("tddy:acp:replay");
 
 /** Frames per transcript page — the tail the feed opens on, and the size of every page paged in
  *  behind it. Mirrors `tddy_service::acp_replay::DEFAULT_REPLAY_PAGE_SIZE`; stated explicitly rather
@@ -134,7 +138,7 @@ export function useAcpReplay(args: {
         if (cancelled) return;
         if (isNotFound(err)) agentActivityRegistry.markNotRecorded(key);
         // A stream aborted on unmount surfaces as an AbortError; ignore it (no fallback fabrication).
-        console.debug("[useAcpReplay] count stream error", err);
+        dbg("count stream error: %o", err);
       }
     })();
     return () => {
@@ -190,7 +194,7 @@ export function useAcpReplay(args: {
         if (isNotFound(err)) agentActivityRegistry.markNotRecorded(key);
         // A stream aborted on unmount surfaces as an AbortError; ignore it. Any other error while
         // still mounted leaves the transcript showing what it has (no fallback fabrication).
-        console.debug("[useAcpReplay] transcript stream error", err);
+        dbg("transcript stream error: %o", err);
       }
     })();
 
@@ -235,7 +239,7 @@ export function useAcpReplay(args: {
       } catch (err) {
         // The loaded range is left exactly as it was: no fabricated page, no partial one, and the
         // range is NOT closed — clearing the in-flight flag below is what makes a later scroll retry.
-        console.debug("[useAcpReplay] older page fetch failed", err);
+        dbg("older page fetch failed: %o", err);
       } finally {
         olderPageInFlight.current = false;
         agentActivityRegistry.setLoadingOlder(key, false);

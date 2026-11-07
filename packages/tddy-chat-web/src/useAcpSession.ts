@@ -1,16 +1,16 @@
 import { useEffect, useRef, useState } from "react";
-import { create } from "@bufbuild/protobuf";
 import type { Client } from "@connectrpc/connect";
 import { AsyncQueue } from "tddy-rpc-web";
 import { useParticipantProbe, useRoomClient, type RoomHandle } from "tddy-client-web";
-import {
-  AcpClientMessageSchema,
-  AcpService,
-  type AcpClientMessage,
-  type ModelSessionTarget,
-  type ToolCallUpdate,
-} from "tddy-client-web/gen/tddy/acp/v1/acp_pb";
+import { AcpService, type AcpClientMessage, type ToolCallUpdate } from "tddy-client-web/gen/tddy/acp/v1/acp_pb";
 import { tddyDebug } from "tddy-client-web";
+import {
+  acpHandshake,
+  acpPermissionReply,
+  acpPrompt,
+  acpQuestionOf,
+  type RegistryChatSession,
+} from "./acpSessionMessages";
 import { toolEntryText, toolStatusOf } from "./toolCallPresentation";
 import type {
   ChatMessage,
@@ -70,22 +70,7 @@ export function useAcpSession(
   );
 }
 
-/**
- * What a chat with a row of the daemon's model registry has to name in its handshake.
- *
- * Both halves are the session's own property rather than the stream's: one stream may open a
- * session for a different assistant next time, and each assistant runs its tools somewhere else.
- */
-export interface RegistryChatSession {
-  /** Which registry row this session speaks as — a model, or an assistant. */
-  readonly target: ModelSessionTarget;
-  /**
-   * The workspace an assistant's tools run in, on the daemon serving the chat. `""` for a chat that
-   * runs no tools; the daemon refuses an empty workspace for a tool-bearing assistant rather than
-   * choosing one on the operator's behalf.
-   */
-  readonly cwd: string;
-}
+export type { RegistryChatSession } from "./acpSessionMessages";
 
 /**
  * The ACP session itself, over a client the caller already holds.
@@ -275,21 +260,7 @@ export function useAcpSessionOverClient(
     // Open the stream by handshaking: initialize (id 1) then either session/load (resume) or
     // new_session (id 2). The first enqueued frame makes the LiveKit transport publish the
     // stream-open, running the server's Session handler.
-    queue.enqueue(create(AcpClientMessageSchema, { id: 1n, msg: { case: "initialize", value: {} } }));
-    queue.enqueue(
-      resumeSessionId
-        ? create(AcpClientMessageSchema, {
-            id: 2n,
-            msg: { case: "loadSession", value: { sessionId: { value: resumeSessionId }, cwd: "" } },
-          })
-        : create(AcpClientMessageSchema, {
-            id: 2n,
-            msg: {
-              case: "newSession",
-              value: { cwd: registry?.cwd ?? "", modelTarget: registry?.target },
-            },
-          }),
-    );
+    for (const frame of acpHandshake(resumeSessionId, registry)) queue.enqueue(frame);
 
     dbg("opening AcpService.Session (peer=%o)", peer?.name ?? "");
     (async () => {
@@ -365,30 +336,9 @@ export function useAcpSessionOverClient(
               break;
             }
             case "requestPermission": {
-              // tddy conventions: the `:multi` tool-call-id suffix marks a multi-select
-              // clarification; the question text + header ride the tool-call fields (title =
-              // question, raw_input = header); the "other" option is the free-text affordance.
-              const toolCall = msg.value.toolCall;
-              const isMulti = toolCall?.toolCallId?.value?.endsWith(":multi") ?? false;
-              const options = msg.value.options
-                .filter((o) => o.optionId?.value !== "other")
-                .map((o) => ({ label: o.name, description: "" }));
-              const allowOther = msg.value.options.some((o) => o.optionId?.value === "other");
-              setPendingQuestion({
-                kind: isMulti ? "multiSelect" : "select",
-                header: toolCall?.fields?.rawInput ?? "",
-                question: toolCall?.fields?.title ?? "",
-                options,
-                allowOther,
-              });
-              recordElicitation({
-                at: Date.now(),
-                kind: isMulti ? "multiSelect" : "select",
-                header: toolCall?.fields?.rawInput ?? "",
-                question: toolCall?.fields?.title ?? "",
-                options: options.map((o) => o.label),
-                allowOther,
-              });
+              const { pending, elicitation } = acpQuestionOf(msg.value, Date.now());
+              setPendingQuestion(pending);
+              recordElicitation(elicitation);
               break;
             }
             case "prompt":
@@ -407,7 +357,7 @@ export function useAcpSessionOverClient(
         dbg("stream closed (cancelled=%o)", cancelled);
       } catch (err) {
         if (!cancelled) {
-          console.debug("[useAcpSession] stream error", err);
+          dbg("stream error: %o", err);
           setStreamError(err instanceof Error ? err.message : String(err));
         }
       }
@@ -442,18 +392,7 @@ export function useAcpSessionOverClient(
   const sendPrompt = (text: string): boolean => {
     if (!canSend()) return false;
     hasSentRef.current = true;
-    queueRef.current!.enqueue(
-      create(AcpClientMessageSchema, {
-        id: nextIdRef.current++,
-        msg: {
-          case: "prompt",
-          value: {
-            sessionId: { value: sessionIdRef.current },
-            prompt: [{ block: { case: "text", value: { text } } }],
-          },
-        },
-      }),
-    );
+    queueRef.current!.enqueue(acpPrompt(nextIdRef.current++, sessionIdRef.current, text));
     setSendError(null);
     messagesRef.current.push({ key: `user-sent-${sentIndexRef.current++}`, text, from: "user", at: Date.now() });
     setMessages(messagesRef.current.slice());
@@ -464,19 +403,7 @@ export function useAcpSessionOverClient(
    *  answer (tddy conventions decoded by `convert_acp::permission_response_to_intent`). */
   const sendPermissionReply = (optionId: string): boolean => {
     if (!canSend()) return false;
-    queueRef.current!.enqueue(
-      create(AcpClientMessageSchema, {
-        id: nextIdRef.current++,
-        msg: {
-          case: "requestPermission",
-          value: {
-            outcome: {
-              outcome: { case: "selected", value: { optionId: { value: optionId } } },
-            },
-          },
-        },
-      }),
-    );
+    queueRef.current!.enqueue(acpPermissionReply(nextIdRef.current++, optionId));
     setSendError(null);
     setPendingQuestion(null);
     return true;

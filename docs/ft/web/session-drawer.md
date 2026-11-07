@@ -1183,7 +1183,7 @@ control (`tddy-service/proto/tddy/v1/remote.proto`), not a new backend concept:
   re-reads `stackPlanJson` after a `WorkflowComplete` / `StateChanged` event so edits appear
   without a manual refresh.
 
-**Component:** the reusable **`AgentChat`** (`src/components/chat/AgentChat.tsx`) +
+**Component:** the reusable **`AgentChat`** (`packages/tddy-chat-web/src/AgentChat.tsx`) +
 `useAgentChat` hook — see [Agent Chat](#agent-chat) below. `PrStackScreen` mounts `AgentChat`
 with a pr-stack-appropriate placeholder; the component itself is recipe-agnostic.
 
