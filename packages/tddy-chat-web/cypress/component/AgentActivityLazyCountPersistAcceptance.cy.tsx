@@ -19,7 +19,6 @@
 
 import React from "react";
 import { AgentActivityOverlay } from "../../src/AgentActivityOverlay";
-import { mountWithRpc } from "../support/rpc/inMemory";
 import { agentActivityPage } from "../support/pages/agentActivityPage";
 import { agentChatPage } from "../support/pages/agentChatPage";
 import { aReplayBackend, replayAgentText } from "../support/rpc/acpReplay";
@@ -27,7 +26,7 @@ import { aReplayBackend, replayAgentText } from "../support/rpc/acpReplay";
 type Backend = ReturnType<typeof aReplayBackend>["backend"];
 
 function mountOverlay(backend: Backend, sessionId: string) {
-  mountWithRpc(
+  cy.mountWithClients(
     <AgentActivityOverlay sessionId={sessionId} sessionToken="tok" sessionType="tool" />,
     backend,
   );
@@ -125,7 +124,7 @@ it("retains the transcript across a session switch without re-pulling the snapsh
   }
 
   // When — open A's overlay (pulls A's snapshot once), then switch away to B and back to A
-  mountWithRpc(<SwitchHarness />, backend);
+  cy.mountWithClients(<SwitchHarness />, backend);
   agentActivityPage.open();
   agentChatPage.chatMessage(0).should("have.text", "Session A transcript.");
   cy.wrap(opens).its("snapshot").should("equal", 1);

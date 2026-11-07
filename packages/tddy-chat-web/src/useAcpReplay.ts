@@ -3,7 +3,7 @@ import { fromBinary } from "@bufbuild/protobuf";
 import { Code, ConnectError, type Client } from "@connectrpc/connect";
 import { type ActivityService, StreamMode } from "tddy-client-web/gen/activity_pb";
 import { AcpAgentMessageSchema } from "tddy-client-web/gen/tddy/acp/v1/acp_pb";
-import { agentActivityRegistry, replayKeyOf } from "../sessions/agentActivityRegistry";
+import { agentActivityRegistry, replayKeyOf } from "./agentActivityRegistry";
 import { createReplayProjector, projectReplayFrames } from "./acpReplayProjection";
 import type { UseAgentChatResult } from "./useAgentChat";
 

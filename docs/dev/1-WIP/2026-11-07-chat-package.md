@@ -1,7 +1,7 @@
 # Changeset: Agent chat package (`tddy-chat-web`)
 
 **Date**: 2026-11-07
-**Status**: 🚧 In Progress
+**Status**: 🚧 In Progress — green (modules moved, 13 specs + 8 bun suites pass from the package)
 **Type**: Architecture Change
 **Complexity**: 4 — two packages (new package; sessions/prstack/models consumers), ~21 specs moved, a cycle cut (`agentActivityRegistry`)
 
@@ -95,11 +95,11 @@ Real dependency edges, as opposed to the branch line:
 
 ## Scope
 
-- [ ] `tddy-chat-web` skeleton + workflow
-- [ ] Modules moved; `tddy-web` (and sibling packages) import from `tddy-chat-web`
-- [ ] Specs, page objects, drivers moved and green from the package config
-- [ ] Boundary rule
-- [ ] Code-issue records and package docs moved
+- [x] `tddy-chat-web` skeleton + workflow
+- [x] Modules moved; `tddy-web` (and sibling packages) import from `tddy-chat-web`
+- [x] Specs, page objects, drivers moved and green from the package config
+- [x] Boundary rule
+- [ ] Code-issue records and package docs moved (wrap)
 
 ## Technical Changes
 
@@ -117,8 +117,8 @@ Real dependency edges, as opposed to the branch line:
 
 ## Implementation Milestones
 
-- [ ] `tddy-chat-web` specs green
-- [ ] `tddy-web` builds; consumers' scoped specs green
+- [x] `tddy-chat-web` specs green
+- [x] `tddy-web` builds; consumers' scoped specs green
 
 ## Testing Plan
 
@@ -133,6 +133,16 @@ Real dependency edges, as opposed to the branch line:
 - `src/packageBoundary.test.ts` — `tddy-chat-web imports nothing from tddy-web or livekit-client`.
 
 ## Technical Debt & Production Readiness
+
+## Green notes (deviations)
+
+- **Also moved** (only chat consumes them or chat cannot import them from sessions): `useAnswerAgentPermission`, `pendingPermission` (+ its 3 suites), `sessionRosterHalf`, `scrollFollow` (+ suite), `agentActivityRegistry.test`. tddy-web's session components import `rosterHalfOf`/`RosterHalf` from `tddy-chat-web`.
+- `AsyncQueue` is imported from `tddy-rpc-web` (where it lives; `tddy-livekit-rpc-web` only re-exports it) so the package imports nothing LiveKit. `react-syntax-highlighter` (already a tddy-web dependency, same range) moves with `AgentActivityDetailDialog`.
+- `AgentChat.stories.tsx` stays in tddy-web (Storybook is its) and imports from the package.
+- Support copied, not moved (the seven specs that stayed still use them): `agentChatPage`, `agentActivityPage`, `acpReplay`, `acpSession`, and a trimmed `testIds`. tddy-web's copies go when `feature/web-split/session` takes the stayed specs.
+- Specs mount with `cy.mountWithClients`; live-chat specs (`room={null}` before) use `mountWithChatRoom`, a RoomRpcPort double with the serving participant present. `AgentActivityClientIdentityAcceptance` asks the clients-port double's host connection for its memoised client instead of building a `LiveKitConnectionProvider` (the package may not import LiveKit); both assertions are kept.
+- The package's Cypress support loads no stylesheet and resets `agentActivityRegistry` before each test, exactly as tddy-web's support does — with a theme the overlay's full-width panel covers the harness controls.
+- `bun.lock` rewritten for the new dependencies (mirror URLs stripped).
 
 ## Decisions & Trade-offs
 
@@ -160,10 +170,10 @@ Real dependency edges, as opposed to the branch line:
 - [x] Run acceptance tests (verify they fail)
 - [x] USER REVIEW — acceptance tests (developer waived the per-node review for this stack, 2026-11-07: "finish the rest without stopping")
 - [x] TDD Red — write failing unit/integration tests
-- [ ] TDD Green — implement with quality code
-- [ ] Update documentation with progress
+- [x] TDD Green — implement with quality code
+- [x] Update documentation with progress
 - [ ] Repeat Red→Green→Update cycle until feature complete
-- [ ] Run the touched packages' tests (`tddy-chat-web` Cypress + `bun test` + boundary rule; `tddy-web` build + consumers' scoped specs) — verify 100% pass
+- [x] Run the touched packages' tests (`tddy-chat-web` Cypress + `bun test` + boundary rule; `tddy-web` build + consumers' scoped specs) — verify 100% pass
 - [ ] Validate changes (/validate-changes)
 - [ ] Refactor issues from change validation
 - [ ] USER REVIEW — development complete

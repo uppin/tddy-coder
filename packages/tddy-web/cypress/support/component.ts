@@ -1,7 +1,7 @@
 import React from "react";
 import { mount } from "cypress/react";
 import { mountWithRpc } from "./rpc/inMemory.tsx";
-import { agentActivityRegistry } from "../../src/components/sessions/agentActivityRegistry";
+import { agentActivityRegistry } from "tddy-chat-web";
 import { sessionNotificationRegistry } from "../../src/components/sessions/sessionNotificationRegistry";
 import { UploadProgressProvider } from "tddy-terminal-web";
 import { AppClientsPorts } from "../../src/rpc/appClientsPorts";

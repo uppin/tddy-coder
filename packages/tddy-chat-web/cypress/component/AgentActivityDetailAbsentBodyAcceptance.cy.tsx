@@ -13,7 +13,6 @@
 
 import React from "react";
 import { AgentActivityOverlay } from "../../src/AgentActivityOverlay";
-import { mountWithRpc } from "../support/rpc/inMemory";
 import { agentActivityPage } from "../support/pages/agentActivityPage";
 import {
   aReplayBackend,
@@ -27,7 +26,7 @@ import {
 import type { InMemoryRpcBackend } from "tddy-connectrpc-testkit";
 
 function mountOverlay(backend: InMemoryRpcBackend, sessionId: string) {
-  mountWithRpc(
+  cy.mountWithClients(
     <AgentActivityOverlay sessionId={sessionId} sessionToken="tok" sessionType="tool" />,
     backend,
   );

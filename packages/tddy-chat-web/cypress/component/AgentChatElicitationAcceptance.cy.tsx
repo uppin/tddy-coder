@@ -21,8 +21,8 @@ import {
   type ServerMessage,
   type ClarificationQuestionProto,
 } from "tddy-client-web/gen/tddy/v1/remote_pb";
-import { mountWithRpc } from "../support/rpc/inMemory";
 import { agentChatPage } from "../support/pages/agentChatPage";
+import { mountWithChatRoom } from "../support/mountWithChatRoom";
 
 function aClarificationQuestion(
   overrides: Partial<ClarificationQuestionProto> = {},
@@ -99,7 +99,7 @@ beforeEach(() => {
 it("renders a pending select question's header, text, and options and hides the free-text input", () => {
   // Given / When
   const { backend } = aScriptedQuestionBackend(selectModeMessage(aClarificationQuestion()));
-  mountWithRpc(<AgentChat room={null} placeholder="Message the agent…" />, backend);
+  mountWithChatRoom((room) => <AgentChat room={room} placeholder="Message the agent…" />, backend);
 
   // Then
   agentChatPage.chatQuestion().should("exist");
@@ -117,7 +117,7 @@ it("sends an AnswerSelect intent with the chosen option's index when an option i
   const { backend, sentIntents } = aScriptedQuestionBackend(
     selectModeMessage(aClarificationQuestion()),
   );
-  mountWithRpc(<AgentChat room={null} placeholder="Message the agent…" />, backend);
+  mountWithChatRoom((room) => <AgentChat room={room} placeholder="Message the agent…" />, backend);
 
   // When
   agentChatPage.chatOption(1).click();
@@ -135,7 +135,7 @@ it("sends an AnswerOther intent with the typed text when a custom answer is subm
   const { backend, sentIntents } = aScriptedQuestionBackend(
     selectModeMessage(aClarificationQuestion({ allowOther: true })),
   );
-  mountWithRpc(<AgentChat room={null} placeholder="Message the agent…" />, backend);
+  mountWithChatRoom((room) => <AgentChat room={room} placeholder="Message the agent…" />, backend);
 
   // When
   agentChatPage.answerOther("Codex, actually.");
@@ -161,7 +161,7 @@ it("sends an AnswerMultiSelect intent with all checked indices when Submit is cl
     multiSelect: true,
   });
   const { backend, sentIntents } = aScriptedQuestionBackend(multiSelectModeMessage(question));
-  mountWithRpc(<AgentChat room={null} placeholder="Message the agent…" />, backend);
+  mountWithChatRoom((room) => <AgentChat room={room} placeholder="Message the agent…" />, backend);
 
   // When — check the first and third options, leave the second unchecked
   agentChatPage.toggleMultiSelectOption(0);

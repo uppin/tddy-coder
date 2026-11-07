@@ -1,7 +1,7 @@
 import React from "react";
 import type { SessionEntry } from "tddy-client-web/gen/session_pb";
 import type { CommonRoomStatus, RoomHandle } from "tddy-client-web";
-import { AgentChat } from "../../chat/AgentChat";
+import { AgentChat } from "tddy-chat-web";
 
 export interface PrStackChatProps {
   session: SessionEntry;

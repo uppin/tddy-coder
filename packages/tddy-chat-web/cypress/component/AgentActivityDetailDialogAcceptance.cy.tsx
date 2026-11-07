@@ -14,7 +14,6 @@
 
 import React from "react";
 import { AgentActivityOverlay } from "../../src/AgentActivityOverlay";
-import { mountWithRpc } from "../support/rpc/inMemory";
 import { agentActivityPage } from "../support/pages/agentActivityPage";
 import {
   aReplayBackend,
@@ -29,7 +28,7 @@ import {
 type Backend = ReturnType<typeof aReplayBackend>["backend"];
 
 function mountOverlay(backend: Backend, sessionId: string) {
-  mountWithRpc(
+  cy.mountWithClients(
     <AgentActivityOverlay sessionId={sessionId} sessionToken="tok" sessionType="tool" />,
     backend,
   );

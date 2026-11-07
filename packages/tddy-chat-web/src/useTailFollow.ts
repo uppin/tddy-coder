@@ -14,7 +14,7 @@ import {
   isPinnedToBottom,
   scrollTopAfterPrepend,
   type ViewportMetrics,
-} from "../../lib/scrollFollow";
+} from "./scrollFollow";
 import type { ChatMessage } from "./useAgentChat";
 
 /** Nothing measured yet — the transcript reports this until its container has been laid out. */

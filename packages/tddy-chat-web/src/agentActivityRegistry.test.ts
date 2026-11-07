@@ -14,7 +14,7 @@
 
 import { describe, expect, it } from "bun:test";
 import { AgentActivityRegistry } from "./agentActivityRegistry";
-import type { ChatMessage } from "../chat/useAgentChat";
+import type { ChatMessage } from "./useAgentChat";
 
 /** One tool call's bodies, as `GetAcpToolCallDetail` resolves them. */
 function aToolDetail(command: string) {

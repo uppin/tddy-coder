@@ -4,8 +4,8 @@ import { PrismLight as SyntaxHighlighter } from "react-syntax-highlighter";
 import { oneDark, oneLight } from "react-syntax-highlighter/dist/esm/styles/prism";
 import json from "react-syntax-highlighter/dist/esm/languages/prism/json";
 import type { ActivityService } from "tddy-client-web/gen/activity_pb";
-import type { ChatMessage } from "../chat/useAgentChat";
-import { useAcpToolCallDetail, type ToolCallDetailErrorKind } from "../chat/useAcpToolCallDetail";
+import type { ChatMessage } from "./useAgentChat";
+import { useAcpToolCallDetail, type ToolCallDetailErrorKind } from "./useAcpToolCallDetail";
 
 SyntaxHighlighter.registerLanguage("json", json);
 

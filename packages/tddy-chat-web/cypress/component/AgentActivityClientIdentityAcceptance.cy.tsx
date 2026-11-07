@@ -17,14 +17,12 @@
  * PRD: docs/ft/web/agent-activity-pane.md § Persisted, lazily-counted activity.
  */
 
-import { openHostServedSession } from "../../src/rpc/connections/hostServedSession";
 import React from "react";
 import { createClient, type Transport } from "@connectrpc/connect";
-import { aDisconnectedRoom } from "tddy-livekit-web/testkit";
+import type { InMemoryRpcBackend } from "tddy-connectrpc-testkit";
+import { aClientsPortDouble } from "tddy-client-web/testkit";
 import { ActivityService } from "tddy-client-web/gen/activity_pb";
 import { AgentActivityOverlay } from "../../src/AgentActivityOverlay";
-import { LiveKitConnectionProvider } from "tddy-livekit-web";
-import { mountWithRpc } from "../support/rpc/inMemory";
 import { agentActivityPage } from "../support/pages/agentActivityPage";
 import { agentChatPage } from "../support/pages/agentChatPage";
 import { byTestId } from "../support/testIds";
@@ -43,15 +41,14 @@ const hostPage = {
  * render, from the session's own connection, so an unchanged route yields one stable client
  * identity.
  */
-function CachedClientHost({ transport }: { transport: Transport }) {
+function CachedClientHost({ backend }: { backend: InMemoryRpcBackend }) {
   const [renders, setRenders] = React.useState(0);
-  const session = React.useMemo(() => {
-    const provider = new LiveKitConnectionProvider(aDisconnectedRoom(), () => transport, null, openHostServedSession);
-    const host = provider.connectHost("i1");
-    if (!host) throw new Error("the provider must claim the host its own room reaches");
-    return host.openSession("cached-session", { sessionId: "cached-session" });
-  }, [transport]);
-  const client = session.clientFor(ActivityService);
+  const connection = React.useMemo(() => {
+    const host = aClientsPortDouble(backend, { daemons: [{ instanceId: "i1", label: "i1" }] }).connections.connectHost("i1");
+    if (!host) throw new Error("the clients port must claim the host it lists");
+    return host;
+  }, [backend]);
+  const client = connection.clientFor(ActivityService);
   return (
     <div>
       <button data-testid="host-rerender" onClick={() => setRenders((n) => n + 1)}>
@@ -104,7 +101,7 @@ it("keeps one subscription per feed while its host re-renders with an unchanged 
     counts: [1],
     snapshot: [replayAgentText("Analyzing the parser.", 1_000)],
   });
-  mountWithRpc(<CachedClientHost transport={backend.transport()} />, backend);
+  cy.mountWithClients(<CachedClientHost backend={backend} />, backend);
   agentActivityPage.open();
   agentChatPage.chatMessage(0).should("have.text", "Analyzing the parser.");
 
@@ -123,7 +120,7 @@ it("counts over the session-scoped transport once the session's routing is upgra
   // Given — the daemon-direct route reports 2 activities, the session-scoped route reports 7
   const daemonDirect = aReplayBackend({ counts: [2] });
   const sessionScoped = aReplayBackend({ counts: [7] });
-  mountWithRpc(
+  cy.mountWithClients(
     <UpgradingHost
       daemonDirect={daemonDirect.backend.transport()}
       sessionScoped={sessionScoped.backend.transport()}
