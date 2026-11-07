@@ -1,5 +1,5 @@
 ---
-description: /plan-pr-stack with an implementation pipeline bolted onto pass 2 - as soon as a node's contract commit is pushed and its green-wave needs are met, give it an ephemeral worktree and run /green, then /validate-changes + /pr-wrap, then a /fix-pr loop - [G] in a per-node subagent sized to the node, [W] and [F] as two long-lived serial walkers (one wrapper, one fixer, each in one reusable worktree) that take the nodes in line order - and remove each per-node worktree when its branch is free. A final **sweep node** is planned at the tail once the pipelines drain: it solves every code issue the stack added and every TODO it can, and the TODOs still open are put to the user. Planning (interview, pass 1, the 6e acceptance-test review) stays interactive. Pointed at a stack that is already partly done, it **resumes**: it reads each node's implementation status from git, GitHub and CI and starts every node at the stage it has not finished. Every subagent is started with an explicit model **and** effort taken from the changeset's complexity score, and the orchestrator tells the user which and why before each one starts
+description: /plan-pr-stack with an implementation pipeline bolted onto pass 2 - as soon as a node's contract commit is pushed and its green-wave needs are met, give it an ephemeral worktree and run /green, then /validate-changes + /pr-wrap, then a /fix-pr loop - [G] and [W] in per-node subagents sized to the node, [F] as ONE long-lived serial fixer working in one reusable worktree - and remove each per-node worktree once [W] has pushed. A final **sweep node** is planned at the tail once the pipelines drain: it solves every code issue the stack added and every TODO it can, and the TODOs still open are put to the user. Planning (interview, pass 1, the 6e acceptance-test review) stays interactive. Pointed at a stack that is already partly done, it **resumes**: it reads each node's implementation status from git, GitHub and CI and starts every node at the stage it has not finished. Every subagent is started with an explicit model **and** effort taken from the changeset's complexity score, and the orchestrator tells the user which and why before each one starts
 ---
 ## YOLO PR Stack — `/plan-pr-stack`, and every ready node implemented while pass 2 keeps going
 
@@ -11,18 +11,16 @@ pipeline only starts work that pass 2 would otherwise leave for the hand-off in 
 
 ```
 pass 2 lands PRₖ (contract commit pushed) → moves on to PRₖ₊₁
-        └─ PRₖ ready? ──► ephemeral worktree ──► [G] /green (lane 1, one at a time) ──► worktree freed once pushed
-                                                   │
-        serial [F] fixer (lane 2, ONE agent, ONE worktree) ── lowest PR whose [W] is done: /fix-pr until green ── F ✅ ──► next branch up
-        serial [W] wrapper (lane 3, ONE agent, ONE worktree) ── trails the fixer: rebase + lineage check ── /validate-changes + /pr-wrap ──► next
+        └─ PRₖ ready? ──► ephemeral worktree ──► [G] /green ──► [W] /validate-changes + /pr-wrap ──► worktree freed once pushed
+                                                   [G] and [W] = per-node background subagents, model sized to the node
+        serial [F] fixer (ONE agent, ONE reusable worktree) ── lowest PR whose [W] is done: /fix-pr until green ── F ✅ ──► next branch up
 ```
 
-Three lanes, **each capped at 1 by default**: `[G]` is a fresh subagent per node, in line order,
-blockers first; `[F]` and `[W]` are each **one long-lived agent for the whole stack**, working in one
-reusable worktree and moving up the line one node at a time. The serial agents keep their context across
-nodes — the stack's conventions, earlier answers, the code issues already seen — which is why they
-replace the per-node `[W]` agent that `[F]` used to continue. There is **no fan-out inside a stage**:
-a stage agent does not spawn helper subagents.
+`[G]` and `[W]` are per-node subagents, as ever. `[F]` is **one long-lived agent for the whole stack**,
+working in one reusable worktree and moving up the line one node at a time: it keeps its context across
+nodes (the stack's conventions, earlier answers, what already failed in CI), which is why it replaces
+the per-node continuation of `[W]`'s agent. The `[G]` lane is capped at 1 and the fixer is 1. There is
+**no fan-out inside a stage**: a stage agent does not spawn helper subagents.
 
 ```
 pipelines drain → cascade → collect the stack's open TODOs + code issues → plan the SWEEP node (tail) → its pipeline
@@ -97,8 +95,8 @@ the complexity score, and the stage it starts at. Then run Dispatch as normal, w
 - Each stage brief for a resumed node adds the facts the stage needs and says: **re-verify, do not
   redo.** `G:resume` gets the head SHA, the commits after the contract commit and the tests still
   failing, and builds on them. `W` re-runs its own validations rather than trusting that green was
-  proven. The serial `[W]` and `[F]` walkers start **fresh** on a resume, sized by the highest
-  complexity among the nodes they will walk, and first read each diff and changeset as they reach it.
+  proven. The serial `[F]` fixer starts **fresh** on a resume, sized by the highest `[W]`
+  row among the nodes it will walk, and first reads each diff and changeset as it reaches it.
 - **Nodes with `plan:` statuses are planned first**, interactively, because pass 2 is bottom-up and
   their acceptance tests need the user. The implementation pipelines of nodes already past their
   contract commit start alongside, as in the ordinary command — planning never waits on them and
@@ -143,10 +141,9 @@ packages, than planned) — never silently, and never more than one row.
 - **`[W]` raise.** `[W]`'s effective score is the complexity **+1** (cap 5) when `[G]` needed its
   retry, a file this PR grew has to be decomposed (`pr-wrap` step 3.5), or the code-issue gate found
   added issues. Opus · medium is the ceiling.
-- **`[W]` and `[F]` are serial walkers**, one agent each for the whole stack, so their model and effort
-  are chosen **once**, from the **highest** complexity score of the nodes they will walk (`[W]`'s row,
-  raised by one under the rule above; `[F]` takes `[W]`'s row). A replacement (context exhausted, harness
-  restart) is announced like any start and resumes at the node the ledger says it was on.
+- **`[F]` is one serial agent for the whole stack**, so its model and effort are chosen **once**, from
+  the **highest** `[W]` row among the nodes it will walk. A replacement (context exhausted, harness
+  restart, a reopened layer) is announced like any start and resumes at the node the ledger names.
 
 ### Announce the choice — every time a subagent starts
 
@@ -157,11 +154,11 @@ signals behind it:
 
 ```
 ▶ n3 #702 [G] /green → haiku · xhigh — complexity 4/5 (two crates, proto change); first attempt
-▶ stack [W] /validate-changes + /pr-wrap walker → sonnet · medium — highest complexity on the line 2/5 raised by 1: n1's [G] needed its retry
+▶ n1 #700 [W] /validate-changes + /pr-wrap → sonnet · medium — complexity 2/5 raised by 1: [G] needed its retry
 ↗ n3 #702 [G] retry → sonnet · medium — haiku · xhigh stopped 🔴 out of its depth on the proto seam
-▶ stack [F] /fix-pr walker → sonnet · medium — highest complexity on the line is 3/5; serial, one worktree, starts at n1 #700
+▶ stack [F] /fix-pr walker → sonnet · medium — highest [W] row on the line is sonnet · medium; serial, one worktree, starts at n1 #700
 ▶ n5 #705 [G] /green → haiku · high — complexity 3/5 moved up one row: contract commit has 14 failing tests, plan said 6
-▶ stack [W] walker (resume) → sonnet · low — complexity 1/5; first node n2 #701, evidence: scoped probe green on 3fa9c1e
+▶ n2 #701 [W] /validate-changes + /pr-wrap → sonnet · low — complexity 1/5; resuming at W, evidence: scoped probe green on 3fa9c1e
 ```
 
 The same model, effort and reason go in the ledger row. A user who disagrees can say so on the spot;
@@ -196,8 +193,8 @@ A node is **ready** when all of these hold:
 
 1. Its contract commit (commit 2) is pushed and its 6e was approved.
 2. It has no **started** pipeline: its ledger row is absent, `queued` or `blocked:n<j>`. A row in
-   `G`, `W`, `F`, `done` or `stopped` is excluded. (`W` and `F` rows are served by the serial walkers,
-   not dispatched here: dispatch only starts `[G]`.) (In resume mode a row is created at the node's
+   `G`, `W`, `F`, `done` or `stopped` is excluded. (`F` rows are served by the serial fixer, not
+   dispatched here.) (In resume mode a row is created at the node's
    derived stage — see *Step R3*.) `queued` and `blocked` rows are **re-evaluated by
    every dispatch** and move to `G` the moment rules 1 and 3–5 hold, which is how a node waiting for a
    free slot or a resumed blocker ever starts.
@@ -225,14 +222,14 @@ A node is **ready** when all of these hold:
    blocks it.
 5. The running count of `[G]` agents is below the **`[G]` lane's cap**.
 
-**Lane caps: `[G]` 1, serial `[F]` 1, serial `[W]` 1**, unless the user set other numbers in this
-request. Each worktree builds its own Rust `target/` (several GB per worktree, more with `tddy-web`
-deps), every green PR that lands makes the layers above it stale (`plan-pr-stack` Step 9 § *What
-concurrency costs*), and parallel cargo builds compete for the machine — three lanes are three
-worktrees, never one per node. Dispatch is **proactive**: `[G]` always works on the next ready node in
-stack order, blockers first, as dependencies deliver, so the `[G]` lane never idles while a ready node
-exists. Say the caps in the Step 1 decomposition approval so the user can
-change them before anything is created. Say there too that a **sweep node** will be appended at the tail
+**Lane caps: `[G]` 1, serial `[F]` 1**, unless the user set other numbers in this request. A node's
+`[W]` follows its own `[G]` in the same per-node worktree, so it adds no lane. Each worktree builds its
+own Rust `target/` (several GB per worktree, more with `tddy-web` deps), every green PR that lands
+makes the layers above it stale (`plan-pr-stack` Step 9 § *What concurrency costs*), and parallel
+cargo builds compete for the machine. Dispatch is **proactive**: `[G]` always takes the next ready
+node in stack order, blockers first, as dependencies deliver, so its lane never idles while a ready
+node exists. Say the caps in the Step 1 decomposition approval so the user can change them before
+anything is created. Say there too that a **sweep node** will be appended at the tail
 (see *The sweep node*), with its scope unknown until the stack has been implemented. Nodes that are
 ready beyond the cap queue in stack order, blockers first.
 
@@ -262,11 +259,9 @@ report says so. A changeset that names a different implementer wins.
 
 ### Ledger
 
-Keep one file in the scratchpad: `yolo-pr-stack-<slug>.md`, with **one row per lane agent** (`[G]`,
-serial `[F]`, serial `[W]`: agent id, model · effort and why, worktree path, the node it is on, last
-progress note) **plus one row per node** — branch, PR number, per-node worktree path (`[G]`'s; none
-once freed), stage (`queued · G · W · F · done · stopped:<stage> · blocked:n<j> · blocked:lineage · manual`; `W` means
-waiting for or in the wrapper, `F` for or in the fixer), the
+Keep one file in the scratchpad: `yolo-pr-stack-<slug>.md`, with **one row for the serial `[F]` fixer**
+(agent id, model · effort and why, worktree path, the node it is on, last progress note) **plus one row
+per node** — branch, PR number, per-node worktree path (none once freed), stage (`queued · G · W · F · done · stopped:<stage> · blocked:n<j> · blocked:lineage · manual`), the
 complexity score, **model · effort used per stage with the reason** (both attempts, when retried),
 head SHA at the last report. Update it on every report. It is the orchestrator's memory across a
 context reset: after one, re-derive stages from `git worktree list`, the branches' pushed state and
@@ -275,10 +270,7 @@ committed.
 
 ## The pipeline, per ready node
 
-### 0 — Ephemeral worktree (the `[G]` lane)
-
-Only `[G]` gets a per-node worktree. The serial walkers use their own reusable ones (see *Stage W* and
-*Stage F*).
+### 0 — Ephemeral worktree
 
 ```bash
 W="$(dirname "$PWD")/yolo-<slug>-<node>"                 # a sibling; named, never numbered
@@ -311,10 +303,10 @@ branch, which is the opposite of what is wanted. Bind in the prompt, and say all
 - The branch is a stack member and a successor's base: **commit and push** before reporting.
 - Report in the format at the end of this file, and nothing else.
 
-Fork-style context is not needed and costs tokens. Use a **fresh** subagent per node for `[G]`, and
-one long-lived agent each for `[W]` and `[F]` (below; their worktrees are bound the same way, with
-their own paths), with the brief above, the PR number or range, the changeset path, and the command to
-run. Name the stage's consent section below; do not paste the whole of this file.
+Fork-style context is not needed and costs tokens. Use a **fresh** subagent for `[G]` and a **fresh**
+one for `[W]`, and one long-lived agent for `[F]` (below; bound the same way to its own worktree), with the brief above, the PR number,
+the changeset path (or the range, for `[F]`), and the command to run. Name the stage's consent section below; do not paste the
+whole of this file.
 
 ### Stage G — `/green`
 
@@ -328,28 +320,13 @@ a claimed code issue, a refused restructure, tests or clippy still red.
 **Model and effort.** From the changeset's complexity score — *Sizing every subagent* above. Pass both
 `model` and `effort` on the Agent call and announce the choice first.
 
-### Stage W — `/validate-changes` + `/pr-wrap`, serial
+### Stage W — `/validate-changes` + `/pr-wrap`
 
-**One long-lived `[W]` agent for the whole stack**, in **one reusable worktree**
-(`yolo-<slug>-wrap`), trailing the fixer. It wraps a node **only after that node's line predecessor is
-`✅ done`** — every check green on its head, threads addressed — so a wrap never builds on a base that
-is still moving. For each node, in line order:
-
-1. **Rebase first, then check the lineage.** Once the orchestrator has freed its per-node worktree, `git switch` to the node's
-   branch, and rebase it onto its parent's current head in single mode (`git rebase --onto
-   origin/<parent> <old base tip>`). Then verify every link from the trunk up to this node is **linear**
-   (each branch contains its parent's tip, `git merge-base --is-ancestor`) and **conflict-free**
-   (`git merge-tree --write-tree <parent> <branch>` exits clean). If a link fails, **cascade first**
-   (`/pr-stack-rebase` over the stale span, rebase-only) before any validation.
-2. Run `.agents/commands/validate-changes.md`, then `.agents/commands/pr-wrap.md`, end to end,
-   answering their questions from `green-yolo.md` § *Consent* — gaps from `/validate-changes` go back to
-   `/green` **once**, inside this stage; apply
-   every cleanup, Minor included; decompose files this PR grew past 500 production lines; solve every
-   code issue this PR added; take your own recommendation per TODO; wrap docs, retitle, `gh pr ready`.
-3. Push with an explicit lease, send the report, then clean and `rm -rf target` **between nodes**.
-
-The orchestrator **frees each node's per-node worktree** (only if clean and fully pushed — step 3's
-checks) before a serial walker needs that branch: a branch checked out elsewhere cannot be switched to.
+Start only when `[G]` reported green and pushed. Run `.agents/commands/validate-changes.md`, then
+`.agents/commands/pr-wrap.md`, end to end in `<W>`, answering their questions from `green-yolo.md`
+§ *Consent* — gaps from `/validate-changes` go back to `/green` **once**, inside this stage; apply
+every cleanup, Minor included; decompose files this PR grew past 500 production lines; solve every
+code issue this PR added; take your own recommendation per TODO; wrap docs, retitle, `gh pr ready`.
 
 **One deliberate difference from `/green-yolo`: stack-shared files.** `green-yolo` splits a file that
 other stack PRs also modify and then cascades a rebase over the whole tail. That cannot run here —
@@ -362,15 +339,14 @@ top node to judge the stack's `docs/dev/todo/` delta and offer *Extra node* verd
 command that question belongs to *The sweep node* and its TODO gate, so `[W]` lists the delta in its
 report and does not ask.
 
-**Model and effort.** `[W]`'s row for the highest complexity on the line, raised by one when the
-*Sizing* rule says so — pass both `model` and `effort`, announce first. Per node, the 5-line progress
-note is due about every 50 minutes.
+**Model and effort.** `[W]`'s row for the node's complexity, raised by one when the *Sizing* rule says
+so — pass both `model` and `effort`, announce first.
 
 ### Stage F — `/fix-pr`, looped, serial
 
-**One long-lived `[F]` agent for the whole stack**, in **one reusable worktree**
-(`yolo-<slug>-fix`). It takes the **lowest PR whose `[W]` is done** and runs
-`.agents/commands/fix-pr.md` on it, **repeatedly**, until both hold on the **current head SHA**:
+**One long-lived `[F]` agent for the whole stack**, in **one reusable worktree** (`yolo-<slug>-fix`).
+It takes the **lowest PR whose `[W]` is done** and runs `.agents/commands/fix-pr.md` on it,
+**repeatedly**, until both hold on the **current head SHA**:
 
 - every check is terminal and passing (`scripts/ci-status.sh <N>`; readying the PR in `[W]` is what
   started its build), and
@@ -380,8 +356,9 @@ note is due about every 50 minutes.
 Then it sends the orchestrator `F ✅ #<N> <sha>` and **moves up**: worktree clean and nothing unpushed →
 `rm -rf target` → `git switch` to the next branch → single-mode rebase onto the parent's current head
 (`git rebase --onto origin/<parent> <old base tip>`; a plain rebase replays foreign commits once the
-parent was rewritten) → scoped gates → push with an explicit lease → the `/fix-pr` loop. The orchestrator
-frees a node's per-node worktree before the fixer needs its branch.
+parent was rewritten) → scoped gates → push with an explicit lease → the `/fix-pr` loop. A branch
+checked out elsewhere cannot be switched to, so the orchestrator **frees a node's per-node worktree**
+(only if clean and fully pushed — step 3's checks) before the fixer needs that branch.
 
 One `/fix-pr` run already re-checks running checks and fixes failures as they appear, so the loop is
 for what it hands back: a new push that restarts CI, a new comment. Between rounds the agent
@@ -393,7 +370,7 @@ stops, which end that PR's loop with a 🔴 and **never** re-run a flaky check u
 - a fix for one failure that keeps causing another → stop;
 - **a round cap of 5, per PR.** A fifth round with the PR still not green is a stop, not a sixth try.
 
-A stopped PR stops the walkers at that layer (everything above it needs it); the report says which.
+A stopped PR stops the fixer at that layer (everything above needs it); the report says which.
 
 **CI traps worth knowing.**
 
@@ -401,17 +378,17 @@ A stopped PR stops the walkers at that layer (everything above it needs it); the
   concurrency group ignores the event. Key groups on `github.event_name`.
 - GitHub may report a very large PR as `mergeable_state=dirty` with no real conflict and start **no PR
   checks**. Dispatching the workflows on the branch is the fallback, and it needs the user's consent
-  (it is a `#forcebuild`-class action, not pre-approved).
+  (not pre-approved).
 - Re-running runs that were **cancelled by our own dispatches** is not a flaky re-run.
 
 **This command does not merge.** That is `/green-yolo` Phase D, and nobody invoked it here. Landing
 stays with `/merge-pr-stack`.
 
-**Model and effort.** `[W]`'s row for the highest complexity on the line (see *Sizing*); the agent
-cannot change either once started, so there is no per-node escalation. A check that keeps failing or a
-thread arguing a design point is what the round cap and the stops are for: the stage stops and reports.
-If the agent is no longer resumable (context exhausted, harness restarted), start a fresh one with the
-same brief at the node the ledger names, announce it, and say so in the ledger.
+**Model and effort.** The highest `[W]` row among the nodes on the line (see *Sizing*); an agent cannot
+change either once started, so there is no per-node escalation. A check that keeps failing or a thread
+arguing a design point is what the round cap and the stops are for: the stage stops and reports. If the
+agent is no longer resumable (context exhausted, harness restarted), start a fresh one with the same
+brief at the node the ledger names, announce it, and say so in the ledger.
 
 ### Models on Cursor
 
@@ -423,8 +400,8 @@ order, the consent and the stops are identical on both harnesses.
 
 ### 3 — Free the per-node worktree
 
-A per-node worktree (`[G]`'s) is freed as soon as `[G]` reports and its head is pushed, and **always**
-before a serial walker needs that branch. A node itself is `done` when the fixer ends it with the green
+The per-node worktree is freed once `[W]` reports done and its head is pushed, and **always** before
+the serial fixer needs that branch. The node itself is `done` when the fixer ends it with the green
 condition above and `F ✅`. From the **orchestrator**:
 
 ```bash
@@ -434,8 +411,8 @@ git worktree remove --force "$W" && git worktree prune
 ```
 
 If anything is uncommitted or unpushed, do not remove: push it, or stop and ask. **Never delete the
-branch** — it is the PR, and successors are based on it. Mark the ledger row, then run the dispatch
-again. The two walker worktrees are removed at the end, under the same two checks.
+branch** — it is the PR, and successors are based on it. Update the ledger row, then run the
+dispatch again. The fixer's worktree is removed at the end, under the same two checks.
 
 A **stopped** node keeps its worktree: it holds the diagnosis context and the next human decision
 may be to resume there. Say where it is.
@@ -450,19 +427,18 @@ pipeline pins its own. So:
    **and the pipelines as running**. A Step 7b reorder while pipelines run is a stop: it rebuilds
    branches they have checked out. Wait for them to drain first, then reorder.
 2. **Wait for the pipelines to drain** — every ledger row `done`, `stopped`, `blocked` or `manual`,
-   and both serial walkers finished (their worktrees removed).
+   and the serial fixer finished (its worktree removed).
    The orchestrator is notified on each background subagent's completion; it does not poll in a loop.
 3. Run Step 8's cascade over whatever has no pinned branch. Greens moved the stack, so *"every layer
    already current"* is **not** the expected answer here, and a rebased layer is not a finding to
    alarm on — but a layer whose rebase changes its tests or build state is. Report each layer.
-4. A `stopped` node keeps its worktree (or is the branch a walker stopped on) and therefore its branch pinned: the cascade stops **at that
+4. A `stopped` node keeps its worktree and therefore its branch pinned: the cascade stops **at that
    layer** and reports it. Do not `--force` around it.
 5. **A rebased layer is not done until its new head is green.** Any layer whose head the cascade
    changed — or whose base moved after its own `[F]` finished, because a predecessor pushed during
    `[W]` or `[F]` — is **reopened**: set its row back to `F`, re-create its worktree (step 0), and run
    `[F]` again (the serial fixer, or a fresh one if it is gone), announced like any start, until the
-   green condition holds on the new head. A reopened layer's wrap is redone by `[W]` only if the
-   rebase changed its code. Cascade first, then reopen, bottom-up, so a layer is not re-run twice. The
+   green condition holds on the new head. Cascade first, then reopen, bottom-up, so a layer is not re-run twice. The
    final report lists every reopened layer.
 6. **Sweep.** With every layer green, run *The sweep node*: collect, plan, run its pipeline, then the
    TODO gate. The command is not finished until the gate has an answer for every open TODO. A
@@ -514,9 +490,8 @@ behaviour, split that behaviour out as its own TODO and still fix the issue.
 
 ### Run
 
-The ordinary pipeline: `[G]` `/code-restructuring`, then the serial `[W]` `/validate-changes` +
-`/pr-wrap` and serial `[F]` `/fix-pr` walkers take it as the last node, with the model rubric and consent
-above. Two additions:
+The ordinary pipeline: `[G]` `/code-restructuring`, `[W]` `/validate-changes` + `/pr-wrap`, then the
+serial `[F]` `/fix-pr` fixer, with the model rubric and consent above. Two additions:
 
 - `[W]` re-measures with `/analyze-code-issues`. The sweep node must add **no** code issue and must
   close **every** code issue in its backlog (record deleted by the commit that resolves it, per
@@ -550,9 +525,9 @@ TODOs."* Never defer on the user's behalf, and never end the command with the ta
 For every node's pipeline, on that node's branch only: commit and push the green work; apply
 `/pr-wrap`'s cleanups, decompositions and per-row recommendations; wrap docs, retitle and
 `gh pr ready`; fix checks and review comments, post `/fix-pr`'s evidence-backed replies, and push;
-remove a per-node or walker worktree with `git worktree remove --force` once step 3's tracked-changes and
-unpushed checks pass; `rm -rf target` between nodes in a walker worktree; `git switch`, single-mode
-rebase onto the parent and push with an explicit lease inside the walker worktrees — the force is for the untracked build artifacts only. Everything `green-yolo.md`
+remove a per-node or the fixer's worktree with `git worktree remove --force` once step 3's
+tracked-changes and unpushed checks pass; `rm -rf target` between nodes in the fixer's worktree;
+`git switch`, single-mode rebase onto the parent and push with an explicit lease inside it — the force is for the untracked build artifacts only. Everything `green-yolo.md`
 lists as **not pre-approvable** still stops that pipeline, and a stop never blocks pass 2 — only the
 nodes that need the stopped one.
 
@@ -584,17 +559,17 @@ The orchestrator reads only this, so a stage that finishes with "it seems to wor
 On top of `/plan-pr-stack` Step 9, add the **pipeline table**, one row per node:
 
 ```
-lanes    [G] haiku·high   [W] sonnet·med (yolo-<slug>-wrap)   [F] sonnet·med (yolo-<slug>-fix)   worktrees removed
-n1 #700  ✅ done      G haiku·low  (2 fix rounds)  per-node worktree freed
-n2 #701  ✅ done      G sonnet·low (1 fix round)   per-node worktree freed
-n3 #702  🔴 stopped:F G sonnet·med — F: third push failing `test`   fixer worktree kept at <path>
+fixer    [F] sonnet·med (yolo-<slug>-fix)   worktree removed
+n1 #700  ✅ done      G haiku·low  W sonnet·low  (2 fix rounds)  per-node worktree freed
+n2 #701  ✅ done      G sonnet·low W sonnet·med  (1 fix round)   per-node worktree freed
+n3 #702  🔴 stopped:F G sonnet·med W opus·low  — F: third push failing `test`   fixer worktree kept at <path>
 n4 #703  ⏸ blocked:n3 (needs n3's behaviour)      never started
 ```
 
 Then: every 🔴 with its stop reason, every **blocked** or **manual** node and what unblocks it, the
 stack-shared files `[W]` declined to split, and the cascade verdict per layer. The **sweep node** has
 its own row, then the backlog it took (code issues closed, TODOs closed) and the TODO gate's table
-with the user's answer per row. Name each lane agent's model · effort and replacements. A node that is not ✅ is stated plainly — no pipeline is "mostly done".
+with the user's answer per row. A node that is not ✅ is stated plainly — no pipeline is "mostly done".
 
 ## Rules
 
@@ -605,15 +580,15 @@ with the user's answer per row. Name each lane agent's model · effort and repla
 - **A node starts only when every dependency has delivered `/green`; one dependency still in `[G]`
   holds it back.** Wave 1 first; later waves as their predecessors' `[G]` stage reports, not when
   their contract commit lands.
-- **Three lanes, each capped at 1.** `[G]` is a fresh subagent per node, in stack order; `[F]` and `[W]`
-  are one long-lived serial agent each, in one reusable worktree each, trailing each other up the line.
-  `[W]` wraps a node only after its line predecessor is `✅ done`, always starting with a rebase onto
-  the parent and a lineage check. Stage agents do not fan out into helper subagents.
+- **Stages run in order: G → W → F.** `[G]` and `[W]` are separate fresh per-node subagents; `[F]` is
+  **one long-lived serial agent** in one reusable worktree that takes the lowest PR whose `[W]` is done.
+  A node's next stage starts on the previous one's report, never in parallel with it. The orchestrator
+  chains them; subagents do not spawn the next, and a stage agent never fans out into helpers.
 - **Progress notes every ~50 minutes** from every stage agent to `main`; a quiet agent is checked and
   resumed.
 - **Model and effort by the changeset's complexity score, always both.** On Claude Code `[G]` runs
-  Haiku (low → xhigh) up to Sonnet · medium, `[W]` Sonnet · low up to Opus · medium, the serial `[W]`/`[F]`
-  walkers are sized once by the line's highest complexity; on Cursor every stage uses its default model. **Announce one line to the user at
+  Haiku (low → xhigh) up to Sonnet · medium, `[W]` Sonnet · low up to Opus · medium, the serial `[F]`
+  fixer is sized once by the line's highest `[W]` row; on Cursor every stage uses its default model. **Announce one line to the user at
   each subagent start** (node, stage, model · effort, why) and record it in the ledger.
 - **Resume reads evidence, not memory.** A stack that is partly done restarts each node at its first
   unfinished stage; nothing done is redone, nothing unseen is trusted, and the status table shows the
@@ -622,15 +597,13 @@ with the user's answer per row. Name each lane agent's model · effort and repla
   the orchestrator confirms the head SHA is pushed before it starts the next stage.
 - **Scoped local gates in every stage.** No subagent runs a workspace build, a bare `./test` or a full
   Cypress run; whole-stack health is CI's.
-- **Lane caps 1 / 1 / 1** (`[G]`, serial `[F]`, serial `[W]`) by default, stated at the decomposition
-  approval.
+- **Lane caps `[G]` 1, serial `[F]` 1** by default, stated at the decomposition approval.
 - **A stop is local.** It halts that node and blocks only the nodes that need it. It keeps its
   worktree. Pass 2 and every unrelated pipeline carry on.
-- **Remove a worktree only when it is clean and nothing is unpushed.** Free a node's worktree before a
-  walker needs its branch. Never delete a branch.
-- **No `gh stack sync` / `rebase` from a pipeline worktree**, no merge from anywhere in this command,
-  and no cascade except `[W]`'s lineage cascade and the rebase-only cascade before `[G]` above a
-  contract-built span.
+- **Remove a worktree only when it is clean and nothing is unpushed.** Free a node's worktree before the
+  fixer needs its branch. Never delete a branch.
+- **No cascade, no `gh stack sync` / `rebase` from a pipeline worktree**, and no merge from anywhere
+  in this command.
 - **Reserve a sweep node, plan it after the pipelines drain.** No code issue the stack added or
   reopened exits it; the sweep node closes them all or stops 🔴. Open TODOs are shown to the user and
   each one is *continue* or *defer* — never silently left, never deferred for them.

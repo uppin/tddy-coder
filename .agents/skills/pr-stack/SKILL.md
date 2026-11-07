@@ -1170,11 +1170,9 @@ gigabytes, and half a dozen of them will exhaust a disk. Create per-node worktre
 session actually runs, and only for the nodes being worked. A node's worktree can always be
 recreated later from its branch.
 
-Under `/yolo-pr-stack` that means three lanes of at most one worktree each: a per-node worktree for
-the one `[G]` running, plus **one reusable worktree each** for the serial `[F]` fixer and `[W]` wrapper,
-which `git switch` up the line and `rm -rf target` between nodes. A branch checked out in one of them
-cannot be switched to in another, so a node's per-node worktree is freed (clean and fully pushed)
-before a walker needs it.
+Under `/yolo-pr-stack`, `/fix-pr` runs in **one reusable worktree** that `git switch`es up the line
+and `rm -rf target`s between nodes. A branch checked out in another worktree cannot be switched to, so
+a node's per-node worktree is freed (clean and fully pushed) before the fixer needs it.
 
 ### Delete a temporary worktree as soon as its branch is pushed
 
