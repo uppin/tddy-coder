@@ -1,4 +1,4 @@
-# 2026-10-18 — `tddy-livekit-web`'s `startEchoServer` task intermittently exceeds its 60 s timeout
+# 2026-10-18 — `tddy-livekit-rpc-web`'s `startEchoServer` task intermittently exceeds its 60 s timeout
 
 **Deferred (consent):** 2026-10-22 — user: "defer the remaining", given during `#satellite` 16/16, the sweep ([#695](https://github.com/uppin/tddy-coder/pull/695)). Not taken by the stack; stays open.
 **Category:** Flaky test (CI), cause not yet found
@@ -45,4 +45,4 @@ the next natural failure leaves no evidence, because the step discards docker's 
 
 **Why this is filed, not fixed:** the cause is a hypothesis between two candidates, and a fix chosen without the log
 would leave a hang inside docker itself unexplained. History: the same symptom was once attributed to a slow image
-pull, and the job gained a pre-pull step ("Pull the LiveKit image for tddy-livekit-web"); the failure outlived it.
+pull, and the job gained a pre-pull step ("Pull the LiveKit image for tddy-livekit-rpc-web"); the failure outlived it.

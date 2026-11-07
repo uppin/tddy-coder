@@ -38,7 +38,7 @@ both worse than reusing the existing envelope and dispatch machinery.
 
 - No TypeScript/Node stdio transport (Rust-to-Rust only for this change).
 - No changes to the LiveKit wire format's compatibility with the existing TypeScript client
-  (`tddy-livekit-web`).
+  (`tddy-livekit-rpc-web`).
 - No changes to `tddy-connectrpc` (HTTP/Connect transport) or its consumers.
 
 ## Real consumers (2026-07-01 follow-up)
@@ -148,7 +148,7 @@ the receiver disambiguates raw vs chunk on the first byte via `is_chunk_frame`. 
 (`client.rs::publish_request`, both `participant.rs` response drains) frame through
 `frame_for_transport`; receive paths (`client.rs`, `client_factory.rs`, `participant.rs`)
 reassemble per sender. The TypeScript client mirrors the codec byte-for-byte in
-`packages/tddy-livekit-web/src/chunking.ts`, wired into `transport.ts`
+`packages/tddy-livekit-rpc-web/src/chunking.ts`, wired into `transport.ts`
 (`publishRequest` + per-sender reassembly in `RoomRpcRegistry` and the standalone
 `LiveKitTransport`). Verified by a real-LiveKit `rpc_scenarios` test that round-trips a 370 KB
 oversized echo in both directions.
@@ -171,7 +171,7 @@ Two consequences, both now reflected in the code:
 
 - **Size requests to one packet where you can.** A payload that fits one packet is sent raw and is
   as reliable as any other RPC on the channel. `MAX_CHUNK_FRAME_BYTES` is exported from
-  `packages/tddy-livekit-web/src/index.ts` so a caller that generates payloads (chunked uploads,
+  `packages/tddy-livekit-rpc-web/src/index.ts` so a caller that generates payloads (chunked uploads,
   batched snapshots) can size them to stay under it and pin that in a test.
 - **`LiveKitTransport.unary` honours the Connect `timeoutMs` call option.** It previously accepted
   and ignored it, so no request on the LiveKit path had a deadline and a wedged call hung the caller
