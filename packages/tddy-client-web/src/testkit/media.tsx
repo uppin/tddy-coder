@@ -1,5 +1,6 @@
 /** Doubles for the presence and media ports: rooms are plain tokens, participants a mutable list. */
-import type { MediaPort, PresencePort, RoomHandle, RoomParticipant } from "../ports/media";
+import type { InMemoryRpcBackend } from "tddy-connectrpc-testkit";
+import type { MediaPort, PresencePort, RoomHandle, RoomParticipant, RoomRpcPort } from "../ports/media";
 
 export interface PresenceDouble extends PresencePort {
   /** A room handle for `name`, stable per name. */
@@ -21,5 +22,16 @@ export interface MediaDouble extends MediaPort {
 
 export function aMediaDouble(overrides: Partial<MediaPort> = {}): MediaDouble {
   void overrides;
+  throw new Error("TODO(livekit): implement");
+}
+
+export interface RoomRpcDouble extends RoomRpcPort {
+  /** Put `identity` in or out of `room`, re-rendering `useParticipantPresent` readers. */
+  setPresent(room: RoomHandle, identity: string, present: boolean): void;
+}
+
+/** A room-RPC port whose every client is `backend`'s; participants present only when set. */
+export function aRoomRpcDouble(backend: InMemoryRpcBackend): RoomRpcDouble {
+  void backend;
   throw new Error("TODO(livekit): implement");
 }
