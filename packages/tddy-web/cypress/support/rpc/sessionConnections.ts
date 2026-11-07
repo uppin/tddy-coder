@@ -14,13 +14,13 @@ import type { DescService } from "@bufbuild/protobuf";
 import type {
   SessionAttachmentHint,
   SessionConnection,
-} from "../../../src/rpc/connections/session";
+} from "tddy-client-web/connections/session";
 import type {
   TerminalFeed,
   TerminalFrame,
   TerminalOptions,
-} from "../../../src/rpc/connections/terminal";
-import type { ConnectionCapability, ConnectionStatus } from "../../../src/rpc/connections/types";
+} from "tddy-client-web/connections/terminal";
+import type { ConnectionCapability, ConnectionStatus } from "tddy-client-web/connections/types";
 
 const A_HOST = "local";
 

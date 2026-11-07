@@ -1,9 +1,7 @@
 import React, { useCallback, useMemo, useState } from "react";
 import { create } from "@bufbuild/protobuf";
 import type { Client } from "@connectrpc/connect";
-import { SessionService, SessionEntrySchema } from "../../gen/session_pb";
-import { useHostConnector } from "../../rpc/connections/registry";
-import { useHostLabel, useSelectedDaemon } from "../../rpc/selectedDaemon";
+import { SessionService, SessionEntrySchema } from "tddy-client-web/gen/session_pb";
 import { useHostPresence } from "../../rpc/hostDirectory/useHostPresence";
 import { UploadProgressProvider } from "../../rpc/uploadProgress";
 import { requestSessionsRefresh } from "../../lib/sessionsRefreshBridge";
@@ -22,7 +20,7 @@ import { resolveShortcutsForSession } from "../../lib/toolShortcuts";
 import { isCliSessionType } from "./codingAgentMetadata";
 import { registerSessionTypeOptions, sessionTypeOptions } from "./cliHarnessOptions";
 import { useSelectableAgents } from "./useSelectableAgents";
-import { CatalogService } from "../../gen/catalog_pb";
+import { CatalogService } from "tddy-client-web/gen/catalog_pb";
 import { useSessionsDrawerInspector } from "./useSessionsDrawerInspector";
 import { useSessionsDrawerClients } from "./useSessionsDrawerClients";
 import { useProjectHomeSetup } from "./useProjectHomeSetup";
@@ -46,6 +44,7 @@ import {
   SessionsDrawerPaneError,
   sessionsDrawerListNotices,
 } from "./SessionsDrawerNotices";
+import { useHostConnector, useHostLabel, useSelectedDaemon } from "tddy-client-web";
 
 // ---------------------------------------------------------------------------
 // Screen

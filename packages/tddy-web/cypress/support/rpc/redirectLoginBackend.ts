@@ -12,7 +12,7 @@
 
 import { anInMemoryRpcBackend, type InMemoryRpcBackend } from "tddy-connectrpc-testkit";
 import { create } from "@bufbuild/protobuf";
-import { AuthService, ExchangeCodeResponseSchema, type ExchangeCodeResponse } from "../../../src/gen/auth_pb";
+import { AuthService, ExchangeCodeResponseSchema, type ExchangeCodeResponse } from "tddy-client-web/gen/auth_pb";
 import {
   DEVICE_LOGIN_ACCESS_TOKEN,
   DEVICE_LOGIN_REFRESH_TOKEN,

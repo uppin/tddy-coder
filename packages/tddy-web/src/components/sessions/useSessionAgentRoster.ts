@@ -18,7 +18,7 @@
 
 import { useEffect, useState } from "react";
 import { ConnectError, type Client } from "@connectrpc/connect";
-import { SessionAgentService, type SessionAgentEntry } from "../../gen/session_agents_pb";
+import { SessionAgentService, type SessionAgentEntry } from "tddy-client-web/gen/session_agents_pb";
 
 export interface SessionAgentRosterState {
   /** The roster as of the last frame. Empty until the first one arrives. */

@@ -8,7 +8,7 @@
 
 import React from "react";
 import { Room } from "livekit-client";
-import { TaskStatusProto } from "../../../src/gen/tasks_pb";
+import { TaskStatusProto } from "tddy-client-web/gen/tasks_pb";
 import { TasksDrawerScreen } from "../../../src/components/tasks/TasksDrawerScreen";
 import type { DaemonHost } from "../../../src/lib/participantRole";
 import { SelectedDaemonProvider } from "../../../src/rpc/selectedDaemon";

@@ -16,12 +16,12 @@
 import React from "react";
 import { create } from "@bufbuild/protobuf";
 import { anInMemoryRpcBackend } from "tddy-connectrpc-testkit";
-import { SessionEntrySchema, type SessionEntry } from "../../src/gen/session_pb";
+import { SessionEntrySchema, type SessionEntry } from "tddy-client-web/gen/session_pb";
 import {
   AcpService,
   AcpAgentMessageSchema,
   type AcpClientMessage,
-} from "../../src/gen/tddy/acp/v1/acp_pb";
+} from "tddy-client-web/gen/tddy/acp/v1/acp_pb";
 import { WorkflowChatScreen } from "../../src/components/sessions/WorkflowChatScreen";
 import { mountWithRpc } from "../support/rpc/inMemory";
 import { agentChatPage } from "../support/pages/agentChatPage";

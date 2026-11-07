@@ -9,8 +9,8 @@
 import React from "react";
 import { create } from "@bufbuild/protobuf";
 import { createClient } from "@connectrpc/connect";
-import { ActivityService } from "../../src/gen/activity_pb";
-import { SessionEntrySchema } from "../../src/gen/session_pb";
+import { ActivityService } from "tddy-client-web/gen/activity_pb";
+import { SessionEntrySchema } from "tddy-client-web/gen/session_pb";
 import { SessionWithActivitySidebar } from "../../src/components/sessions/SessionWithActivitySidebar";
 import { mountWithRpc } from "../support/rpc/inMemory";
 import { agentActivityPage } from "../support/pages/agentActivityPage";

@@ -12,8 +12,8 @@ import { SELF_LABEL_SUFFIX, type DaemonHost } from "../../lib/participantRole";
 import { findListedDaemon } from "../../routing/selectedHost";
 import { useHostDirectorySource } from "../../rpc/hostDirectory/useHostDirectory";
 import { LIVEKIT_SOURCE_ID } from "../../rpc/hostDirectory/liveKitSource";
-import { useSelectedDaemon } from "../../rpc/selectedDaemon";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "tddy-ui-web";
+import { useSelectedDaemon } from "tddy-client-web";
 
 /**
  * Every daemon's own advertisement self-labels itself "{id} (this daemon)" from its own

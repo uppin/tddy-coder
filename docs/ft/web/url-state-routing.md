@@ -1,7 +1,7 @@
 # URL State Routing — every navigable selection lives in the URL
 
 **Applies to:** every daemon-mode screen
-**Modules:** `packages/tddy-web/src/routing/{appLocation,useAppLocation,appRoutes,selectedHost}.ts`
+**Modules:** `packages/tddy-client-web/src/appLocation.ts` (model), `packages/tddy-web/src/routing/{useAppLocation,appRoutes,selectedHost}.ts`
 **Added:** 2026-08-01
 
 ## Overview
@@ -161,7 +161,7 @@ string, not the hash.
 
 | Module | Role |
 |--------|------|
-| `routing/appLocation.ts` | Pure model — `AppLocation { path, params }`, parse/format, `withParams`, `withPath`, `screenRootOf`, and the param-name constants. The only place the URL's spelling is known. |
+| `tddy-client-web` `appLocation.ts` | Pure model — `AppLocation { path, params }`, parse/format, `withParams`, `withPath`, `screenRootOf`, and the param-name constants. The only place the URL's spelling is known. |
 | `routing/useAppLocation.ts` | A **module-level store** over `window.location.hash`, read via `useSyncExternalStore`. Module-level, not a React context, so a nested pane — and a component test that mounts one screen bare — shares the same source of truth without prop-drilling. Push assigns `location.hash`; replace uses `history.replaceState`; both notify synchronously. |
 | `routing/appRoutes.ts` | Path grammar: the route constants, `parse*`/`*Path` helpers, and `isInspectorTabName`. |
 | `routing/selectedHost.ts` | `resolveSelectedDaemonInstanceId` (the precedence above), `findListedDaemon`, the selection's `sessionStorage` accessors and the label memory (`rememberDaemonLabels`, `readRememberedDaemonLabel`), pure so they are unit-testable. |

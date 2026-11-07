@@ -16,11 +16,11 @@ import { createClient } from "@connectrpc/connect";
 import { createConnectTransport } from "@connectrpc/connect-web";
 import { create, toBinary } from "@bufbuild/protobuf";
 import { ConnectionState, Room } from "livekit-client";
-import { ConnectSessionResponseSchema } from "../../src/gen/session_pb";
-import { TokenService, GenerateTokenResponseSchema } from "../../src/gen/token_pb";
+import { ConnectSessionResponseSchema } from "tddy-client-web/gen/session_pb";
+import { TokenService, GenerateTokenResponseSchema } from "tddy-client-web/gen/token_pb";
 import { useSessionAttachment } from "../../src/components/sessions/useSessionAttachment";
 import { LiveKitConnectionProvider } from "../../src/rpc/connections/liveKit";
-import type { HostConnection } from "../../src/rpc/connections/types";
+import type { HostConnection } from "tddy-client-web/connections/types";
 import { toArrayBuffer } from "../support/rpc/protoRpc";
 import { byTestId } from "../support/testIds";
 

@@ -11,7 +11,7 @@
 import React from "react";
 import { SessionsDrawerScreen } from "../../src/components/sessions/SessionsDrawerScreen";
 import { withSelectedDaemon } from "../support/rpc/withSelectedDaemon";
-import { Protocol, ScreenSharingService } from "../../src/gen/screen_sharing_pb";
+import { Protocol, ScreenSharingService } from "tddy-client-web/gen/screen_sharing_pb";
 import { mountWithRpc } from "../support/rpc/inMemory";
 import { aSessionsDrawerBackend } from "../support/rpc/screenSharingBackend";
 import { sessionsDrawerPage as page } from "../support/pages/sessionsDrawerPage";

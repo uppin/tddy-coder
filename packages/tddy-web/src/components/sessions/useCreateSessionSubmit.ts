@@ -1,7 +1,7 @@
 import { useRef, useState } from "react";
 import { Code, ConnectError } from "@connectrpc/connect";
 import { flushSync } from "react-dom";
-import type { BranchConflict, StartTaskStarted } from "../../gen/session_pb";
+import type { BranchConflict, StartTaskStarted } from "tddy-client-web/gen/session_pb";
 import {
   startSessionOverridesFor,
   type BranchConflictResolution,

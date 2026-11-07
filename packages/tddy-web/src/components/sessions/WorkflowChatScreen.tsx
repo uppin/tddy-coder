@@ -1,6 +1,6 @@
 import React from "react";
-import type { SessionEntry } from "../../gen/session_pb";
-import type { SessionAttachmentHint } from "../../rpc/connections/session";
+import type { SessionEntry } from "tddy-client-web/gen/session_pb";
+import type { SessionAttachmentHint } from "tddy-client-web/connections/session";
 import { usePresenterLiveKitRoom } from "./usePresenterLiveKitRoom";
 import { AgentChat } from "../chat/AgentChat";
 

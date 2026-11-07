@@ -1,4 +1,4 @@
-import type { BranchResolution } from "../../../gen/pr_stack_pb";
+import type { BranchResolution } from "tddy-client-web/gen/pr_stack_pb";
 import type { StackChildSession } from "./stackChildSessions";
 import type { StackNode } from "./stackPlan";
 

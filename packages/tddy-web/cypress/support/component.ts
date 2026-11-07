@@ -4,9 +4,10 @@ import { mountWithRpc } from "./rpc/inMemory.tsx";
 import { agentActivityRegistry } from "../../src/components/sessions/agentActivityRegistry";
 import { sessionNotificationRegistry } from "../../src/components/sessions/sessionNotificationRegistry";
 import { UploadProgressProvider } from "../../src/rpc/uploadProgress";
+import { AppClientsPorts } from "../../src/rpc/appClientsPorts";
 import { create } from "@bufbuild/protobuf";
 import { registerServerStreamFallback } from "tddy-connectrpc-testkit";
-import { SessionService, StartSessionEventSchema } from "../../src/gen/session_pb";
+import { SessionService, StartSessionEventSchema } from "tddy-client-web/gen/session_pb";
 
 /** The Agent Activity and session-notification stores are app-lifetime module singletons; component
  *  tests share one JS context across cases, so clear their per-session state before each test to keep
@@ -32,9 +33,14 @@ beforeEach(() => {
  *  store). Mounting a terminal subtree without the provider would otherwise throw
  *  "upload-progress hooks must be used within an UploadProgressProvider" — the provider is inert
  *  when no upload hooks run, so wrapping unconditionally is safe. (createElement is used because this
- *  support file is `.ts`, not `.tsx`, so JSX syntax is not available here.) */
+ *  support file is `.ts`, not `.tsx`, so JSX syntax is not available here.)
+ *
+ *  Also mounts `AppClientsPorts`, as the app root does (`RpcTransportProvider`): the hooks from
+ *  `tddy-client-web` throw without a clients port, and a bare mount stands for a page whose
+ *  directory lists no daemon. A spec that wants hosts or a backend mounts its own providers, which
+ *  re-mount the ports from theirs. */
 Cypress.Commands.add("mount", (jsx, options = {}) => {
-  const wrapped = React.createElement(UploadProgressProvider, null, jsx);
+  const wrapped = React.createElement(AppClientsPorts, null, React.createElement(UploadProgressProvider, null, jsx));
   return mount(wrapped, { strict: false, ...options });
 });
 

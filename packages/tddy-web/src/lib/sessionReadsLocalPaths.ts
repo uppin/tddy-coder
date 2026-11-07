@@ -11,7 +11,7 @@
  * PRD: docs/ft/web/web-terminal.md § File drop upload
  */
 
-import type { SessionEntry } from "../gen/session_pb";
+import type { SessionEntry } from "tddy-client-web/gen/session_pb";
 import { daemonTransportFlavour, type TauriHostWindow } from "../rpc/daemonTransportFlavour";
 
 export function sessionReadsLocalPaths(

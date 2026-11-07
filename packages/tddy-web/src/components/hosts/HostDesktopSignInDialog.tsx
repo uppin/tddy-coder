@@ -28,7 +28,7 @@ import React, { useEffect, useState } from "react";
 import {
   DesktopAuthMethod,
   DesktopCredentialAnswerSchema,
-} from "../../gen/screen_sharing_pb";
+} from "tddy-client-web/gen/screen_sharing_pb";
 import { encryptForHost } from "../../lib/encryptForHost";
 import { acceptChangedHostKey, checkHostKey, type KeyPinVerdict } from "../../lib/hostKeyPinning";
 import type { HostPromptEventLike } from "../../rpc/useHostPrompts";

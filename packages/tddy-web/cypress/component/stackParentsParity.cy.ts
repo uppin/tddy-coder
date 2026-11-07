@@ -12,7 +12,7 @@
  */
 
 import { create } from "@bufbuild/protobuf";
-import { SessionEntrySchema, type SessionEntry } from "../../src/gen/session_pb";
+import { SessionEntrySchema, type SessionEntry } from "tddy-client-web/gen/session_pb";
 import { prStackOrchestrators, stackBaseSessionCandidates } from "../../src/utils/stackParents";
 import fixture from "../support/fixtures/stack-parent-candidates.json";
 

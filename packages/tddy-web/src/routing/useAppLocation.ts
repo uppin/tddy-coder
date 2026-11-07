@@ -10,13 +10,14 @@
  */
 
 import { useCallback, useSyncExternalStore } from "react";
+import type { NavigationPort } from "tddy-client-web";
 import {
   formatAppLocation,
   parseAppLocation,
   withParams,
   withPath,
   type AppLocation,
-} from "./appLocation";
+} from "tddy-client-web";
 
 const listeners = new Set<() => void>();
 
@@ -127,3 +128,14 @@ export function useAppLocation(): UseAppLocationResult {
   );
   return { location, navigate, setParams };
 }
+
+/**
+ * The page's URL hash as a {@link NavigationPort} — what `ClientsProvider`'s sibling
+ * `NavigationProvider` is given at the app root, so component packages read and change the same
+ * location `useAppLocation` does.
+ */
+export const hashNavigationPort: NavigationPort = {
+  location: readAppLocation,
+  navigate: navigateAppLocation,
+  subscribe,
+};

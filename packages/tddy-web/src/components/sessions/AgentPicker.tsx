@@ -1,13 +1,12 @@
 import React, { useState } from "react";
-import { CatalogService } from "../../gen/catalog_pb";
-import { AgentKind } from "../../gen/types_pb";
+import { CatalogService } from "tddy-client-web/gen/catalog_pb";
+import { AgentKind } from "tddy-client-web/gen/types_pb";
 import { safeTestIdPart } from "../../lib/testId";
-import { useSelectedDaemon } from "../../rpc/selectedDaemon";
-import { useHttpClient } from "../../rpc/transportProvider";
 import { Button } from "tddy-ui-web";
 import { AgentKindBadge } from "./AgentKindBadge";
 import type { AgentPlacementChoice } from "./agentPlacementChoice";
 import { useAvailableAgents, type AvailableAgent } from "./useAvailableAgents";
+import { useHttpClient, useSelectedDaemon } from "tddy-client-web";
 
 /**
  * The fanned-out picker for a specialized agent to attach to a session: every common-room daemon's

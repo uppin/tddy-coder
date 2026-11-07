@@ -6,7 +6,7 @@
  * reproduce the existing production behaviour exactly.
  *
  * Two transports live here. The **serving-daemon** transport (`httpTransport`,
- * `useHttpTransport`) reaches the daemon that serves this page, in whichever
+ * `useServingHttpTransport`) reaches the daemon that serves this page, in whichever
  * flavour its host calls for — same-origin `/rpc` in a browser, the host
  * application's IPC bridge inside the Tauri desktop app (see
  * `./daemonTransport`). The **LiveKit** transport reaches a daemon in the common
@@ -40,6 +40,7 @@ import type { Room } from "livekit-client";
 import { TrafficMeterRegistry } from "./trafficMeter";
 import { createDefaultDaemonTransport, type AuthTokenGate } from "./daemonTransport";
 import { wrapTransportWithAuthGate } from "./authGatedTransport";
+import { AppClientsPorts } from "./appClientsPorts";
 
 // The daemon transport and its flavour selection live in `./daemonTransport`; re-exported here
 // because this module is the transport seam every consumer already imports from.
@@ -194,7 +195,7 @@ export function RpcTransportProvider({
 
   return (
     <RpcTransportContext.Provider value={value}>
-      {children}
+      <AppClientsPorts>{children}</AppClientsPorts>
     </RpcTransportContext.Provider>
   );
 }
@@ -232,7 +233,7 @@ export function useAuthTokenGate(): AuthTokenGate {
  * pre-DI inline-factory behaviour. The fallback transport has no metering
  * interceptor (no registry is available without a provider).
  */
-export function useHttpTransport(): Transport {
+export function useServingHttpTransport(): Transport {
   const ctx = useContext(RpcTransportContext);
   const fallbackRef = useRef<Transport | null>(null);
   // Only when there is no provider. Building one regardless and discarding it was harmless while
@@ -243,18 +244,6 @@ export function useHttpTransport(): Transport {
   }
   fallbackRef.current ??= createDefaultDaemonTransport();
   return fallbackRef.current;
-}
-
-/**
- * Create and memoize a ConnectRPC client bound to this page's serving-daemon transport.
- *
- * Equivalent to `useMemo(() => createClient(Service, useHttpTransport()), [transport])`.
- */
-export function useHttpClient<S extends DescService>(service: S): Client<S> {
-  const transport = useHttpTransport();
-  // `service` is always a module-level constant so its reference is stable;
-  // including it in the dep array is correct without cost.
-  return useMemo(() => createClient(service, transport), [service, transport]);
 }
 
 /**

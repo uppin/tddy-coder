@@ -22,3 +22,6 @@ A hand TS split under `/pr-wrap` step 3.5's discipline (the restructure engine i
 baseline of the terminal component specs before, mechanical moves only, same green after. The
 listeners and handle methods are the natural seams (mouse/touch forwarding, wheel gate, history
 double buffer), each into a hook beside the component.
+
+## Verified by hand
+2026-11-07 — `wc -l` at the wrap of PR #842 (`#web-split` 5/16): 1005 → 1005. The PR only re-points hook imports to `tddy-client-web`; still open, not split (later `#web-split` nodes move this file).

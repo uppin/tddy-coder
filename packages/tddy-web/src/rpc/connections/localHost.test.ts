@@ -19,9 +19,9 @@ import {
   type WebviewIpcBridge,
   type WebviewIpcHost,
 } from "tddy-tauri-web";
-import { SessionService } from "../../gen/session_pb";
-import type { SessionConnection } from "./session";
-import type { HostConnection } from "./types";
+import { SessionService } from "tddy-client-web/gen/session_pb";
+import type { SessionConnection } from "tddy-client-web/connections/session";
+import type { HostConnection } from "tddy-client-web/connections/types";
 import { createIpcConnectionProvider, localHostRegistrationFor } from "./localHost";
 
 const THIS_HOST = "instance-this-host";

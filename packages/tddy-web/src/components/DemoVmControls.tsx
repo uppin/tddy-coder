@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { DemoVmService, DemoVmState } from "../gen/demo_vm_pb";
-import { useDaemonClient } from "../rpc/selectedDaemon";
+import { DemoVmService, DemoVmState } from "tddy-client-web/gen/demo_vm_pb";
 import { Button } from "tddy-ui-web";
+import { useDaemonClient } from "tddy-client-web";
 
 type VmStatus = {
   state: DemoVmState;

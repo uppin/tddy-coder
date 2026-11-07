@@ -15,12 +15,12 @@
 
 import type { Client, Transport } from "@connectrpc/connect";
 import type { DescService } from "@bufbuild/protobuf";
-import { TerminalSessionService } from "../../gen/terminal_session_pb";
+import { TerminalSessionService } from "tddy-client-web/gen/terminal_session_pb";
 import { capabilitiesForHint } from "./sessionAttachment";
-import type { SessionAttachmentHint, SessionConnection } from "./session";
-import type { TerminalFeed, TerminalOptions } from "./terminal";
+import type { SessionAttachmentHint, SessionConnection } from "tddy-client-web/connections/session";
+import type { TerminalFeed, TerminalOptions } from "tddy-client-web/connections/terminal";
 import { openDaemonTerminalFeed, TerminalResumePoint } from "./terminalFeed";
-import type { ConnectionStatus, HostConnection } from "./types";
+import type { ConnectionStatus, HostConnection } from "tddy-client-web/connections/types";
 
 /**
  * `sessionId` on `host`, reached over the host connection itself.

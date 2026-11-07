@@ -13,7 +13,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useSyncExternalStore } from "react";
 import type { Client } from "@connectrpc/connect";
-import { SessionService, type SessionEntry } from "../../gen/session_pb";
+import { SessionService, type SessionEntry } from "tddy-client-web/gen/session_pb";
 import type { SessionMetadata } from "../../lib/sessionParticipantMetadata";
 import { sortSessionsByCreation } from "../../utils/sessionSort";
 import {
@@ -23,7 +23,7 @@ import {
 } from "../../utils/crossHostSessions";
 import { subscribeSessionsRefresh } from "../../lib/sessionsRefreshBridge";
 import { hostNotConnectedText, rpcFailureText } from "../../rpc/rpcFailure";
-import { useHostLabel } from "../../rpc/selectedDaemon";
+import { useHostLabel } from "tddy-client-web";
 
 /** Pulls the selected host's sessions (typically `client.listSessions(...)`). */
 export type SessionFetcher = () => Promise<SessionEntry[]>;

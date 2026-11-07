@@ -8,13 +8,13 @@
 
 import { Code, ConnectError } from "@connectrpc/connect";
 import { anInMemoryRpcBackend, type InMemoryRpcBackend } from "tddy-connectrpc-testkit";
-import { AuthService } from "../../../src/gen/auth_pb";
+import { AuthService } from "tddy-client-web/gen/auth_pb";
 import {
   AccountsService,
   LinkState,
   type AccountSummary,
   type ProviderAccounts,
-} from "../../../src/gen/accounts_pb";
+} from "tddy-client-web/gen/accounts_pb";
 
 export const LINK_UPDATED_AT = 1_726_700_000n;
 export const LINK_USER_CODE = "WXYZ-1234";

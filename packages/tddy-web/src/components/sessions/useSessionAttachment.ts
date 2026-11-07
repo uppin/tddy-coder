@@ -17,13 +17,13 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { Client } from "@connectrpc/connect";
-import { SessionService } from "../../gen/session_pb";
+import { SessionService } from "tddy-client-web/gen/session_pb";
 import { attachmentHintFromReply } from "../../rpc/connections/sessionAttachment";
-import type { SessionAttachmentHint, SessionAttachmentState } from "../../rpc/connections/session";
-import type { HostConnection } from "../../rpc/connections/types";
+import type { SessionAttachmentHint, SessionAttachmentState } from "tddy-client-web/connections/session";
+import type { HostConnection } from "tddy-client-web/connections/types";
 import { rpcFailureText } from "../../rpc/rpcFailure";
 
-export type { SessionAttachmentState } from "../../rpc/connections/session";
+export type { SessionAttachmentState } from "tddy-client-web/connections/session";
 
 type ConnectionClient = Client<typeof SessionService>;
 

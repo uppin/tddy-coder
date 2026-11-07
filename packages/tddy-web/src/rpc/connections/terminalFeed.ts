@@ -17,14 +17,14 @@ import {
   type SessionTerminalInputSchema,
   StreamReplayMode,
   TerminalSessionService,
-} from "../../gen/terminal_session_pb";
+} from "tddy-client-web/gen/terminal_session_pb";
 import { tddyDebug } from "../../lib/debugMask";
 import { TerminalFrameContinuity } from "../../lib/terminalFrameContinuity";
 import { isFrameForTerminal } from "../../lib/terminalFrameIdentity";
 import { createForwardHistoryFetcher } from "../../lib/terminalHistoryLoader";
 import { InputRefusalTracker } from "./inputDelivery";
 import { TerminalStreamOffset } from "../../lib/terminalStreamOffset";
-import type { TerminalFeed, TerminalFrame, TerminalOptions, TerminalStream } from "./terminal";
+import type { TerminalFeed, TerminalFrame, TerminalOptions, TerminalStream } from "tddy-client-web/connections/terminal";
 
 const dTerm = tddyDebug("tddy:term:feed");
 

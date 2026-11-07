@@ -19,7 +19,7 @@ import { anInMemoryRpcBackend } from "tddy-connectrpc-testkit";
 import {
   TerminalSessionService,
   type SessionTerminalInput,
-} from "../../src/gen/terminal_session_pb";
+} from "tddy-client-web/gen/terminal_session_pb";
 import { GrpcSessionTerminal } from "../../src/components/sessions/GrpcSessionTerminal";
 import type { ConnectedSession } from "../../src/components/sessions/useTerminalControl";
 import { UploadProgressProvider } from "../../src/rpc/uploadProgress";

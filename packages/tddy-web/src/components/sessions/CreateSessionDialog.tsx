@@ -1,11 +1,11 @@
 import React from "react";
 import type { Client } from "@connectrpc/connect";
-import type { SessionService } from "../../gen/session_pb";
-import type { ProjectService } from "../../gen/project_pb";
-import type { CatalogService } from "../../gen/catalog_pb";
-import type { SessionFilesService } from "../../gen/session_files_pb";
-import type { WorktreeService } from "../../gen/worktree_pb";
-import type { TaskService } from "../../gen/tasks_pb";
+import type { SessionService } from "tddy-client-web/gen/session_pb";
+import type { ProjectService } from "tddy-client-web/gen/project_pb";
+import type { CatalogService } from "tddy-client-web/gen/catalog_pb";
+import type { SessionFilesService } from "tddy-client-web/gen/session_files_pb";
+import type { WorktreeService } from "tddy-client-web/gen/worktree_pb";
+import type { TaskService } from "tddy-client-web/gen/tasks_pb";
 import { Button } from "tddy-ui-web";
 import { CreateSessionPane, type CreateSessionInitialValues } from "./CreateSessionPane";
 

@@ -27,7 +27,7 @@ import {
   TmuxSessionInfoSchema,
   type SessionTerminalInput,
   type SessionTerminalOutput,
-} from "../../../src/gen/terminal_session_pb";
+} from "tddy-client-web/gen/terminal_session_pb";
 
 /** The token every `ClaimTerminalControl` grants — the lease input must present once claimed. */
 const GRANTED_CONTROL_TOKEN = "ctrl-1";

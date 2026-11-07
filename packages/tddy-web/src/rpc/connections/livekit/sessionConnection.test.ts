@@ -24,8 +24,8 @@
 import { describe, it, expect } from "bun:test";
 import type { Client, Transport } from "@connectrpc/connect";
 import { ConnectionState, type Room } from "livekit-client";
-import { SessionService } from "../../../gen/session_pb";
-import type { TokenService } from "../../../gen/token_pb";
+import { SessionService } from "tddy-client-web/gen/session_pb";
+import type { TokenService } from "tddy-client-web/gen/token_pb";
 import { daemonRpcIdentity } from "../../../lib/participantRole";
 import { LiveKitConnectionProvider, type LiveKitSessionResources } from "../liveKit";
 import { attachmentHintFromReply } from "../sessionAttachment";

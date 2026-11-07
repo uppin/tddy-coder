@@ -19,11 +19,11 @@ import React from "react";
 import { Room } from "livekit-client";
 import { create } from "@bufbuild/protobuf";
 import { anInMemoryRpcBackend, type InMemoryRpcBackend } from "tddy-connectrpc-testkit";
-import { GenerateTokenResponseSchema, TokenService } from "../../src/gen/token_pb";
+import { GenerateTokenResponseSchema, TokenService } from "tddy-client-web/gen/token_pb";
 import {
   DaemonConfigService,
   GetClientConfigResponseSchema,
-} from "../../src/gen/daemon_config_pb";
+} from "tddy-client-web/gen/daemon_config_pb";
 import { App } from "../../src/index";
 import { AuthProvider } from "../../src/hooks/authProvider";
 import { RpcTransportProvider } from "../../src/rpc/transportProvider";
@@ -40,13 +40,8 @@ import {
   localHostRegistrationFor,
 } from "../../src/rpc/connections/localHost";
 import { LocalHostConnections } from "../../src/rpc/connections/localHostRegistration";
-import {
-  ConnectionProviderRegistry,
-  ConnectionProviders,
-  useConnectionProviders,
-  useHostConnection,
-} from "../../src/rpc/connections/registry";
-import type { ConnectionProvider } from "../../src/rpc/connections/types";
+import { ConnectionProviders, useConnectionProviders } from "../../src/rpc/connections/registry";
+import type { ConnectionProvider } from "tddy-client-web/connections/types";
 import { LIVEKIT_SOURCE_ID } from "../../src/rpc/hostDirectory/liveKitSource";
 import type { HostDirectorySource } from "../../src/rpc/hostDirectory/types";
 import { useServingHostDirectorySource } from "../../src/rpc/hostDirectory/servingSource";
@@ -55,6 +50,8 @@ import {
   useHostDirectory,
 } from "../../src/rpc/hostDirectory/useHostDirectory";
 import { byTestId } from "../support/testIds";
+import { useHostConnection } from "tddy-client-web";
+import { ConnectionProviderRegistry } from "tddy-client-web";
 
 // ---------------------------------------------------------------------------
 // Fixtures

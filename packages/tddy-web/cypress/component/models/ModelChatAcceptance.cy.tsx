@@ -10,12 +10,12 @@
  */
 
 import React from "react";
-import { ModelLoadState, ModelRegistryService } from "../../../src/gen/models_pb";
+import { ModelLoadState, ModelRegistryService } from "tddy-client-web/gen/models_pb";
 import {
   AcpService,
   type AcpAgentMessage,
   type AcpClientMessage,
-} from "../../../src/gen/tddy/acp/v1/acp_pb";
+} from "tddy-client-web/gen/tddy/acp/v1/acp_pb";
 import { ModelsAppPage } from "../../../src/components/models/ModelsAppPage";
 import { daemonRpcIdentity, type DaemonHost } from "../../../src/lib/participantRole";
 import { withSelectedDaemon } from "../../support/rpc/withSelectedDaemon";

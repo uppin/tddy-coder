@@ -27,10 +27,10 @@
 
 import React, { useEffect, useMemo, useState } from "react";
 import type { Client } from "@connectrpc/connect";
-import type { SessionService, SessionEntry } from "../../../gen/session_pb";
-import { HostDocumentScope } from "../../../gen/types_pb";
-import type { SessionFilesService, SessionUploadEntry } from "../../../gen/session_files_pb";
-import type { WorktreeService } from "../../../gen/worktree_pb";
+import type { SessionService, SessionEntry } from "tddy-client-web/gen/session_pb";
+import { HostDocumentScope } from "tddy-client-web/gen/types_pb";
+import type { SessionFilesService, SessionUploadEntry } from "tddy-client-web/gen/session_files_pb";
+import type { WorktreeService } from "tddy-client-web/gen/worktree_pb";
 import { formatAttachmentBytes } from "../../../lib/attachmentBytes";
 import { WorktreeFileTree } from "../../session/WorktreeFileTree";
 import { createWorktreeFilesApi, type WorktreeFilesApi } from "../../session/worktreeFilesApi";

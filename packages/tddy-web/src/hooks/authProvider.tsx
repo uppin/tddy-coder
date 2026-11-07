@@ -1,4 +1,6 @@
 import { createContext, useContext, type ReactNode } from "react";
+import { AuthPortProvider } from "tddy-client-web";
+import { AppClientsPorts } from "../rpc/appClientsPorts";
 import { useAuth } from "./useAuth";
 
 type AuthContextValue = ReturnType<typeof useAuth>;
@@ -19,8 +21,21 @@ const AuthContext = createContext<AuthContextValue | null>(null);
  * required provider is the correct contract here.
  */
 export function AuthProvider({ children }: { children: ReactNode }) {
+  // `useAuth` reads the clients port, so the ports are mounted above the hook, not beside it.
+  return (
+    <AppClientsPorts>
+      <AuthProviderBody>{children}</AuthProviderBody>
+    </AppClientsPorts>
+  );
+}
+
+function AuthProviderBody({ children }: { children: ReactNode }) {
   const auth = useAuth();
-  return <AuthContext.Provider value={auth}>{children}</AuthContext.Provider>;
+  return (
+    <AuthContext.Provider value={auth}>
+      <AuthPortProvider port={auth}>{children}</AuthPortProvider>
+    </AuthContext.Provider>
+  );
 }
 
 /** Read the shared session/auth state. Throws when rendered outside an `AuthProvider`. */

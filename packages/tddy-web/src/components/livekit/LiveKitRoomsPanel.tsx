@@ -14,10 +14,9 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "tddy-ui-web";
 import type { LiveKitRoom, LiveKitRoomParticipant } from "../../lib/liveKitRoomsState";
 import { metadataCardText } from "../../lib/liveKitMetadataCard";
 import { safeTestIdPart } from "../../lib/testId";
-import { useHostConnection } from "../../rpc/connections/registry";
 import { useCapabilityAvailability } from "../../hooks/useCapabilityAvailability";
-import { useSelectedDaemon } from "../../rpc/selectedDaemon";
 import { useLiveKitRooms } from "../../rpc/useLiveKitRooms";
+import { useHostConnection, useSelectedDaemon } from "tddy-client-web";
 
 function formatInstant(ms: number): string {
   return new Date(ms).toLocaleString();

@@ -1,5 +1,5 @@
 import type { Client } from "@connectrpc/connect";
-import type { CodeNavigationService } from "../../gen/code_navigation_pb";
+import type { CodeNavigationService } from "tddy-client-web/gen/code_navigation_pb";
 import { currentPhaseHeadline, useCodeIndexProgress } from "./useCodeIndexProgress";
 
 export interface SessionIndexingIndicatorProps {

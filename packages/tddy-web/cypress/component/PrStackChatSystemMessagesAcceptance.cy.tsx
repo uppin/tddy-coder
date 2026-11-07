@@ -18,8 +18,8 @@
 import React from "react";
 import { SessionsDrawerScreen } from "../../src/components/sessions/SessionsDrawerScreen";
 import { withSelectedDaemon } from "../support/rpc/withSelectedDaemon";
-import { TddyRemote } from "../../src/gen/tddy/v1/remote_pb";
-import { AcpService, type AcpAgentMessage, type AcpClientMessage } from "../../src/gen/tddy/acp/v1/acp_pb";
+import { TddyRemote } from "tddy-client-web/gen/tddy/v1/remote_pb";
+import { AcpService, type AcpAgentMessage, type AcpClientMessage } from "tddy-client-web/gen/tddy/acp/v1/acp_pb";
 import { mountWithRpc } from "../support/rpc/inMemory";
 import { aSessionsDrawerBackend } from "../support/rpc/vncBackend";
 import { acpActivity, acpGoal, acpUserMessage } from "../support/rpc/acpSession";

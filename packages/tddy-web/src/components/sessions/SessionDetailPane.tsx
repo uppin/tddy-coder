@@ -1,5 +1,5 @@
 import React from "react";
-import type { SessionEntry } from "../../gen/session_pb";
+import type { SessionEntry } from "tddy-client-web/gen/session_pb";
 import type { SessionAttachmentState } from "./useSessionAttachment";
 import { Button } from "tddy-ui-web";
 
