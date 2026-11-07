@@ -11,6 +11,7 @@
 
 import React from "react";
 import { anInMemoryRpcBackend } from "tddy-connectrpc-testkit";
+import { rpcPlaygroundPage } from "../support/pages/rpcPlaygroundPage";
 import { byTestId, TEST_IDS } from "../support/testIds";
 
 import { RpcPlaygroundScreen } from "../../src/RpcPlaygroundScreen";
@@ -28,9 +29,11 @@ import { RpcPlaygroundScreen } from "../../src/RpcPlaygroundScreen";
 const A_CONNECTION_THAT_CARRIES_A_ROSTER = true;
 
 // Mock reflection response: a fake service tree with EchoService.
+const ECHO_SERVICE = "test.EchoService";
+
 const MOCK_SERVICES = [
   {
-    name: "test.EchoService",
+    name: ECHO_SERVICE,
     methods: [
       { name: "Echo", kind: "unary" as const },
       { name: "EchoServerStream", kind: "server_streaming" as const },
@@ -76,7 +79,7 @@ describe("RpcPlaygroundScreen — component (Cypress)", () => {
     );
 
     // When
-    cy.contains("test.EchoService").click();
+    rpcPlaygroundPage.expandService(ECHO_SERVICE);
 
     // Then
     cy.contains("Echo").should("be.visible");
@@ -99,8 +102,8 @@ describe("RpcPlaygroundScreen — component (Cypress)", () => {
     );
 
     // When
-    cy.contains("test.EchoService").click();
-    cy.get("[data-testid='rpc-method-test.EchoService-Echo']").click();
+    rpcPlaygroundPage.expandService(ECHO_SERVICE);
+    rpcPlaygroundPage.chooseMethod(ECHO_SERVICE, "Echo");
 
     // Then — default JSON for a method with no schema is the empty object
     byTestId(TEST_IDS.rpcRequestEditor).should("exist");
@@ -118,8 +121,8 @@ describe("RpcPlaygroundScreen — component (Cypress)", () => {
       />,
       anInMemoryRpcBackend(),
     );
-    cy.contains("test.EchoService").click();
-    cy.get("[data-testid='rpc-method-test.EchoService-Echo']").click();
+    rpcPlaygroundPage.expandService(ECHO_SERVICE);
+    rpcPlaygroundPage.chooseMethod(ECHO_SERVICE, "Echo");
 
     // When — switch to raw JSON, type a value, toggle back and forth
     byTestId(TEST_IDS.rpcEditorToggleRaw).click();
@@ -144,8 +147,8 @@ describe("RpcPlaygroundScreen — component (Cypress)", () => {
       />,
       anInMemoryRpcBackend(),
     );
-    cy.contains("test.EchoService").click();
-    cy.get("[data-testid='rpc-method-test.EchoService-Echo']").click();
+    rpcPlaygroundPage.expandService(ECHO_SERVICE);
+    rpcPlaygroundPage.chooseMethod(ECHO_SERVICE, "Echo");
 
     // When
     byTestId(TEST_IDS.rpcInvokeButton).click();
@@ -167,8 +170,8 @@ describe("RpcPlaygroundScreen — component (Cypress)", () => {
       />,
       anInMemoryRpcBackend(),
     );
-    cy.contains("test.EchoService").click();
-    cy.get("[data-testid='rpc-method-test.EchoService-Echo']").click();
+    rpcPlaygroundPage.expandService(ECHO_SERVICE);
+    rpcPlaygroundPage.chooseMethod(ECHO_SERVICE, "Echo");
 
     // When
     byTestId(TEST_IDS.rpcInvokeButton).click();

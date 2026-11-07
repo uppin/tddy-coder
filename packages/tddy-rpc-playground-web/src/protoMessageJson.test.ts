@@ -53,12 +53,13 @@ describe("parseRequestJson", () => {
     expect(result.value).toBeDefined();
   });
 
-  it("does not throw on empty string input", () => {
-    // FIXME(implementer): once protoMessageJson.ts is written, narrow to either
-    //   expect(result.error).toBeUndefined()   — if empty string yields a default proto value
-    //   expect(typeof result.error).toBe("string")  — if empty string is treated as a parse error
-    // The contract should be deterministic; the disjunction here documents the open design choice.
-    expect(() => parseRequestJson(EchoRequestSchema, "")).not.toThrow();
+  it("treats empty input as an empty request", () => {
+    // When
+    const result = parseRequestJson(EchoRequestSchema, "  ");
+
+    // Then
+    expect(result.error).toBeUndefined();
+    expect(result.value).toEqual({});
   });
 
   it("surfaces a string error for invalid JSON without throwing", () => {

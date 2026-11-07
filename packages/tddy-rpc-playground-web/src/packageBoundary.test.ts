@@ -21,6 +21,6 @@ describe("tddy-rpc-playground-web package boundary", () => {
     const exported = Object.keys(require("../src/index.ts"));
 
     // Then
-    expect(exported).toEqual(expect.arrayContaining(["RpcPlaygroundScreen", "invokeRpc", "buildRegistry","findMethod", "protoMessageJson"]));
+    expect(exported).toEqual(expect.arrayContaining(["RpcPlaygroundScreen", "invokeRpc", "buildRegistry", "findMethod", "protoMessageJson"]));
   });
 });

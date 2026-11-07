@@ -9,10 +9,7 @@ import {
 import { GitHubLoginButton } from "../components/GitHubLoginButton";
 import { AppShell } from "../components/shell/AppShell";
 import { useAuthContext } from "../hooks/authProvider";
-import { useRoomParticipants } from "tddy-client-web";
 import { presenceIdentityForUser } from "tddy-livekit-web";
-import { useCapabilityAvailability } from "tddy-client-web";
-import { useHostPresence } from "tddy-client-web";
 import { useAppLocation } from "../routing/useAppLocation";
 import {
   buildRegistry,
@@ -23,7 +20,14 @@ import {
   type ServiceInfo,
   type ServiceMethodKind,
 } from "tddy-rpc-playground-web";
-import { PARAM_PARTICIPANT, useHostConnection, useSelectedDaemon } from "tddy-client-web";
+import {
+  PARAM_PARTICIPANT,
+  useCapabilityAvailability,
+  useHostConnection,
+  useHostPresence,
+  useRoomParticipants,
+  useSelectedDaemon,
+} from "tddy-client-web";
 
 async function* once<T>(value: T): AsyncIterable<T> {
   yield value;

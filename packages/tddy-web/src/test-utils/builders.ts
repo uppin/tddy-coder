@@ -257,19 +257,3 @@ export function aCodexOAuthMeta(fields: {
     },
   });
 }
-
-// ---------------------------------------------------------------------------
-// RPC Playground: registry helpers
-// ---------------------------------------------------------------------------
-
-/**
- * Returns a registry pre-loaded with the EchoService descriptor fixture.
- * Requires registry.ts and the echoServiceDescriptor fixture to exist (Green phase).
- */
-export async function anEchoRegistry() {
-  const { buildRegistry } = await import("tddy-rpc-playground-web");
-  const { ECHO_SERVICE_DESCRIPTOR_FIXTURE } = await import(
-    "../../../tddy-rpc-playground-web/src/test-fixtures/echoServiceDescriptor"
-  );
-  return buildRegistry(ECHO_SERVICE_DESCRIPTOR_FIXTURE);
-}

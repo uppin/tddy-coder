@@ -13,7 +13,7 @@ import { beforeEach, describe, expect, it } from "bun:test";
 import type { Transport, UnaryResponse } from "@connectrpc/connect";
 import type { DescMethod, DescMethodUnary } from "@bufbuild/protobuf";
 import { Code } from "@connectrpc/connect";
-import { aFakeErrorTransport, aFakeStreamingTransport, aFakeUnaryTransport } from "../test-utils";
+import { aFakeErrorTransport, aFakeStreamingTransport, aFakeUnaryTransport } from "./test-utils/fakeTransports";
 
 import { invokeRpc, type InvokeResult } from "./invoke";
 
