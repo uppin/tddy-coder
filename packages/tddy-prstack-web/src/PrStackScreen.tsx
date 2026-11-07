@@ -16,7 +16,7 @@ import { AddPlannedPrForm, type AddPlannedPrFormSubmission } from "./AddPlannedP
 import { PrStackChat } from "./PrStackChat";
 import { parseStackPlan, type StackNode } from "./stackPlan";
 import { hydrateStackNodes } from "./hydrateStackNodes";
-import { stackChildSessions } from "./stackChildSessions";
+import { stackChildSessions, type StackChildMetadata } from "./stackChildSessions";
 import { useQueryBranch } from "./useQueryBranch";
 import { buildBranchQueries } from "./branchQueries";
 import { baseSyncView, canPullFromBase } from "./baseSyncStatus";
@@ -26,7 +26,6 @@ import { baseBranchChoice } from "./baseBranchChoice";
 import { resolveRepointTarget, startBlockers } from "./startBlockers";
 import { stackDocAttachments } from "./stackDocAttachments";
 import { CreateSessionDialog, remoteTrackingName, type CreateSessionInitialValues } from "tddy-session-create-web";
-import type { SessionMetadata } from "../../../lib/sessionParticipantMetadata";
 
 type ConnectionClient = Client<typeof SessionService>;
 type ProjectClient = Client<typeof ProjectService>;
@@ -44,7 +43,7 @@ type TaskClient = Client<typeof TaskService>;
  * which the poll set, the base resolution and every row depend on in turn — so the whole chain would
  * recompute on every render for a caller that never has any metadata at all.
  */
-const NO_SESSION_METADATA: ReadonlyMap<string, SessionMetadata> = new Map();
+const NO_SESSION_METADATA: ReadonlyMap<string, StackChildMetadata> = new Map();
 
 /** The reason map without `nodeId`'s entry, or the map itself when it holds none. */
 function withoutNode(errors: Record<string, string>, nodeId: string): Record<string, string> {
@@ -157,7 +156,7 @@ export interface PrStackScreenProps {
    * answers for one daemon's own sessions tree — so this is where a child running on another host
    * becomes joinable to the node it is working at all (D37, D38).
    */
-  sessionMetadataBySessionId?: ReadonlyMap<string, SessionMetadata>;
+  sessionMetadataBySessionId?: ReadonlyMap<string, StackChildMetadata>;
 }
 
 /**

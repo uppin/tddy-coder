@@ -1,109 +1,60 @@
 /**
- * Acceptance test: the full-screen Workflow Chat Screen must open its own dedicated LiveKit room
- * connection for the session's remote Presenter, derived from the session's own
- * `connectSession`/`resumeSession` attachment — the same room/url the terminal independently
- * connects to. If it sat on `SessionMainPane`'s always-null VNC-purpose `room` prop, the chat could
- * never send or receive anything (the exact bug that was fixed for the pr-stack chat).
+ * Acceptance test: the full-screen Workflow Chat Screen must open its own dedicated presenter room
+ * for the session's remote Presenter, derived from the session's own attachment hint — the same
+ * room the terminal independently connects to. If it sat on a room handed down from above (the
+ * always-null VNC-purpose `room` of the main pane), the chat could never send or receive anything
+ * (the exact bug that was fixed for the pr-stack chat).
+ *
+ * The room itself is the media port's: the screen asks it for the room the hint names.
  *
  * PRD: docs/ft/web/session-drawer.md § Per-Workflow Session Views.
  */
 
 import React from "react";
-import { create, fromBinary, toBinary } from "@bufbuild/protobuf";
-import { GenerateTokenRequestSchema, GenerateTokenResponseSchema } from "tddy-client-web/gen/token_pb";
-import { SessionMainPane } from "../../src/SessionMainPane";
-import type { SessionAttachmentState } from "../../src/useSessionAttachment";
-import { aSessionConnection } from "../support/rpc/sessionConnections";
-import { decodeProtoRequestBody, toArrayBuffer } from "../support/rpc/protoRpc";
+import { create } from "@bufbuild/protobuf";
+import { anInMemoryRpcBackend } from "tddy-connectrpc-testkit";
+import type { SessionAttachmentHint } from "tddy-client-web";
+import { SessionEntrySchema } from "tddy-client-web/gen/session_pb";
+import { WorkflowChatScreen } from "../../src/WorkflowChatScreen";
+import { anAttachmentHint, mountWithPresenterRoom } from "../support/mountWorkflowChat";
 
-// ---------------------------------------------------------------------------
-// Fixtures
-// ---------------------------------------------------------------------------
-
-const TDD_SESSION = {
+const TDD_SESSION = create(SessionEntrySchema, {
   sessionId: "tdd-presenter-room-aaaa-0000-0000-000000000001",
   createdAt: "2026-07-01T10:00:00Z",
   status: "active",
   repoPath: "/home/dev/workflow-chat-project",
-  pid: 0,
   isActive: true,
   projectId: "proj-workflow-chat-presenter-room",
-  daemonInstanceId: "",
-  workflowGoal: "",
-  pendingElicitation: false,
-  orchestratorSessionId: "",
   recipe: "tdd",
   sessionType: "tool",
-  stackPlanJson: "",
-};
+});
 
-const ATTACHED_OVER_A_ROOM = aSessionConnection(TDD_SESSION.sessionId).carriedByRoom(
-  "daemon-tdd-presenter-room-0001",
-  { url: "wss://livekit.internal:7880", serverIdentity: "daemon-tdd-presenter-room-0001" },
-);
-const LIVEKIT_ATTACHMENT: SessionAttachmentState = {
-  status: "connected",
-  connection: ATTACHED_OVER_A_ROOM.build(),
-};
-const LIVEKIT_HINT = ATTACHED_OVER_A_ROOM.buildHint();
-
-const GENERATE_TOKEN_OK = toArrayBuffer(
-  toBinary(
-    GenerateTokenResponseSchema,
-    create(GenerateTokenResponseSchema, { token: "lk-session-token", ttlSeconds: BigInt(600) }),
-  ),
-);
-
-// ---------------------------------------------------------------------------
-// Harness
-// ---------------------------------------------------------------------------
-
-function WorkflowChatMainPaneHarness() {
-  return (
-    <SessionMainPane
-      // No host connection in scope: this spec is not about the inspector's media tabs,
-      // and `host` is required so that saying so is a choice rather than an omission.
-      host={null}
-      selectedSession={TDD_SESSION as any}
-      attachment={LIVEKIT_ATTACHMENT}
-      attachmentHint={LIVEKIT_HINT}
-      inspectorState="closed"
-      onToggleInspector={cy.stub()}
-      onInspectorClose={cy.stub()}
-      onInspectorExpand={cy.stub()}
-      onInspectorRestore={cy.stub()}
-      onResume={cy.stub()}
-      onResumeSession={cy.stub()}
-      onDelete={cy.stub()}
-      onTerminate={cy.stub()}
-    />
-  );
+/** The hints the screen asked the media port to open a presenter room for. */
+function aPresenterRoomRequestLog() {
+  const hints: Array<SessionAttachmentHint | null> = [];
+  return {
+    hints,
+    asksFor: (hint: SessionAttachmentHint | null) => {
+      hints.push(hint);
+      return { room: null, status: "connecting" as const, error: null };
+    },
+  };
 }
 
-function interceptGenerateToken() {
-  cy.intercept("POST", "**/rpc/token.TokenService/GenerateToken", (req) => {
-    req.reply({ statusCode: 200, headers: { "Content-Type": "application/proto" }, body: GENERATE_TOKEN_OK });
-  }).as("generateToken");
-}
-
-// ---------------------------------------------------------------------------
-// Specs
-// ---------------------------------------------------------------------------
-
-describe("Workflow Chat Screen — opens its own presenter LiveKit room from the session's attachment", () => {
-  it("requests a browser LiveKit token scoped to the session's attached room, not the always-null VNC room", () => {
-    // Given — a tool workflow session already attached over LiveKit (connectSession has resolved)
-    interceptGenerateToken();
+describe("Workflow Chat Screen — opens its own presenter room from the session's attachment", () => {
+  it("asks the media port for the room the session's attachment names, not a room from above", () => {
+    // Given — a tool workflow session attached over a room, and a media port that records each request
+    const hint = anAttachmentHint(TDD_SESSION.sessionId);
+    const requests = aPresenterRoomRequestLog();
 
     // When
-    cy.mount(<WorkflowChatMainPaneHarness />);
+    mountWithPresenterRoom(
+      <WorkflowChatScreen session={TDD_SESSION} attachmentHint={hint} />,
+      anInMemoryRpcBackend(),
+      { usePresenterRoom: requests.asksFor },
+    );
 
-    // Then — the presenter connection targets the session's own attached room, proving
-    // WorkflowChatScreen opened its own LiveKit connection instead of sitting on the always-null
-    // `room` prop forever
-    cy.wait("@generateToken").then((interception) => {
-      const req = fromBinary(GenerateTokenRequestSchema, decodeProtoRequestBody(interception.request.body));
-      expect(req.room).to.equal(LIVEKIT_HINT.room);
-    });
+    // Then — the presenter connection targets the session's own attached room
+    cy.wrap(requests.hints).should("deep.include", hint);
   });
 });

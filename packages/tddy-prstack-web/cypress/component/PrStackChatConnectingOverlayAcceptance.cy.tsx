@@ -10,7 +10,9 @@
  */
 
 import React from "react";
+import { anInMemoryRpcBackend } from "tddy-connectrpc-testkit";
 import { PrStackChat } from "../../src/PrStackChat";
+import { mountWithPresenterRoom } from "../support/mountWorkflowChat";
 import { prStackScreenPage } from "../support/pages/prStackScreenPage";
 
 // ---------------------------------------------------------------------------
@@ -51,13 +53,14 @@ beforeEach(() => {
 it("shows a connecting overlay while the presenter room is still establishing its connection", () => {
   // Given — the presenter room's own connection lifecycle reports "connecting": the token
   // request or LiveKit handshake is still in flight (see usePresenterRoom / useCommonRoom)
-  cy.mount(
+  mountWithPresenterRoom(
     <PrStackChat
       session={PR_STACK_SESSION as any}
       room={null}
       livekitServerIdentity="server"
       roomStatus="connecting"
     />,
+    anInMemoryRpcBackend(),
   );
 
   // Then
@@ -69,13 +72,14 @@ it("shows a connecting overlay while the presenter room is still establishing it
 
 it("disables the send button while the presenter room is still connecting", () => {
   // Given — same in-flight connection as above
-  cy.mount(
+  mountWithPresenterRoom(
     <PrStackChat
       session={PR_STACK_SESSION as any}
       room={null}
       livekitServerIdentity="server"
       roomStatus="connecting"
     />,
+    anInMemoryRpcBackend(),
   );
 
   // Then — sending cannot be attempted at all, so the operator can never hit the
@@ -85,13 +89,14 @@ it("disables the send button while the presenter room is still connecting", () =
 
 it("does not show the connecting overlay once the presenter room has connected", () => {
   // Given — the connection lifecycle has settled into "connected"
-  cy.mount(
+  mountWithPresenterRoom(
     <PrStackChat
       session={PR_STACK_SESSION as any}
       room={null}
       livekitServerIdentity="server"
       roomStatus="connected"
     />,
+    anInMemoryRpcBackend(),
   );
 
   // Then

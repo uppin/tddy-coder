@@ -1,5 +1,5 @@
 import { describe, expect, it } from "bun:test";
-import { aStackNode } from "../../../test-utils";
+import { aStackNode } from "../test-utils/builders";
 import { baseBranchChoice } from "./baseBranchChoice";
 import type { StackNode } from "./stackPlan";
 

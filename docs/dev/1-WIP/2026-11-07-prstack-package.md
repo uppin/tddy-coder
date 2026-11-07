@@ -1,7 +1,7 @@
 # Changeset: PR-stack package (`tddy-prstack-web`)
 
 **Date**: 2026-11-07
-**Status**: 🚧 In Progress
+**Status**: 🚧 In Progress — green pushed; validation pending
 **Type**: Architecture Change
 **Complexity**: 4 — two packages (new package; sessions consumer), ~40 specs moved, three upward reaches cut, an inherited oversized-file record
 
@@ -105,11 +105,11 @@ Real dependency edges, as opposed to the branch line:
 
 ## Scope
 
-- [ ] `tddy-prstack-web` skeleton + workflow
-- [ ] Modules moved; `tddy-web` (and sibling packages) import from `tddy-prstack-web`
-- [ ] Specs, page objects, drivers moved and green from the package config
-- [ ] Boundary rule
-- [ ] Code-issue records and package docs moved
+- [x] `tddy-prstack-web` skeleton + workflow
+- [x] Modules moved; `tddy-web` (and sibling packages) import from `tddy-prstack-web`
+- [x] Specs, page objects, drivers moved and green from the package config
+- [x] Boundary rule
+- [x] Code-issue records moved (package feature docs move at wrap)
 
 ## Technical Changes
 
@@ -127,8 +127,8 @@ Real dependency edges, as opposed to the branch line:
 
 ## Implementation Milestones
 
-- [ ] `tddy-prstack-web` specs green
-- [ ] `tddy-web` builds; consumers' scoped specs green
+- [x] `tddy-prstack-web` specs green
+- [x] `tddy-web` builds; consumers' scoped specs green
 
 ## Testing Plan
 
@@ -140,6 +140,39 @@ Real dependency edges, as opposed to the branch line:
 
 - Moved: `PrStack*.cy.tsx`, `PlannedPr*.cy.tsx`, `WorkflowChat*.cy.tsx` — unchanged assertions.
 - `src/packageBoundary.test.ts` — `tddy-prstack-web imports nothing from tddy-web or livekit-client`.
+
+## Green notes (2026-11-07)
+
+Verified (scoped): `tddy-prstack-web` `bun test src` 149 pass (incl. boundary); its 6 Cypress specs one at a time
+(3 moved + 3 direct-mount, 10 tests, all pass); `scripts/livekit-import-boundary` + `web-workflows` 4 pass; `tddy-web`
+`bun run build` ok, `test:unit` 653 pass; 8 drawer-driven specs in `tddy-web` (Reorder, ViewRouting, StartSessionModal,
+ChatStreaming, Chat, PlannedPrList, WorkflowChatViewRouting, StartSessionDocAttachments) pass. Typecheck: no errors in
+`src/*.tsx` or `cypress/`; the remaining errors are the moved tests' and the builders' proto-message typing, carried
+verbatim from `tddy-web` (pre-existing pattern), plus two in dependency packages.
+
+Deviations from the draft contract:
+
+- **Surface names.** The boundary test listed `PrStackInspector` and `WorkflowChat`; neither exists as a module (the
+  inspector is `SessionInspectorDrawer`'s, in the session package). The list is now the real exports: `PrStackScreen`,
+  `PrStackChat`, `PlannedPrList`, `PlannedPrPanel`, `WorkflowChatScreen`.
+- **`PrStackStartSessionDocAttachmentsAcceptance` stays in `tddy-web`**: it drives the drawer, like the other 35. No
+  PR-stack spec that mounts the drawer moved; the package's own suite is the 3 moved specs plus 3 new direct-mount
+  specs (`PrStackScreenDirectMount`, `PrStackChatDirectMount`, `PlannedPrListStartSessionDirectMount`).
+- **`WorkflowChatPresenterRoomAcceptance` rewritten** to mount `WorkflowChatScreen` with a media-port double that
+  records the hint it is asked to open a room for — it used `SessionMainPane`, which stays in `tddy-web`. The
+  assertion is the same contract (the screen opens its own presenter room from the attachment).
+- **Upward reaches cut beyond the three planned:** `HostStartPassphraseScope` (the Hosts screen's) is no longer
+  mounted by `PrStackScreen` — the host application provides `StartPassphraseProvider`, as it does for
+  `CreateSessionPane` (`workflowViews` wraps the screen; the package's Cypress support provides a no-op prompt);
+  `SessionMetadata` became the package's own `StackChildMetadata` (the three fields the join reads, which
+  `tddy-web`'s parsed shape satisfies); `resolveNodeSession` (+ test) moved in — its only consumer was the list.
+- **Test support copied, not moved**, as earlier packages did: `prStackScreenPage`, `agentChatPage`, `acpSession`,
+  the `aPlannedNode`/`aStackPlanJson` fixtures and a trimmed `testIds` (the 36 drawer specs still read the originals
+  in `tddy-web`). `aStackNode`, `aStackChildSession`, `aBranchResolution` moved to `test-utils/builders.ts` (no
+  `tddy-web` reader); `aSessionEntry` is duplicated there.
+- **`PrStackScreen.tsx` 705 -> 704 lines** (not grown); the record moved with it.
+- Feature docs under `docs/ft/` and `packages/tddy-web/docs/` still name the old `components/sessions/prstack/` paths
+  — a wrap task.
 
 ## Technical Debt & Production Readiness
 
@@ -169,10 +202,10 @@ Real dependency edges, as opposed to the branch line:
 - [x] Run acceptance tests (verify they fail)
 - [x] USER REVIEW — acceptance tests (developer waived the per-node review for this stack, 2026-11-07: "finish the rest without stopping")
 - [x] TDD Red — write failing unit/integration tests
-- [ ] TDD Green — implement with quality code
-- [ ] Update documentation with progress
+- [x] TDD Green — implement with quality code
+- [x] Update documentation with progress
 - [ ] Repeat Red→Green→Update cycle until feature complete
-- [ ] Run the touched packages' tests (`tddy-prstack-web` Cypress + `bun test` + boundary rule; `tddy-web` build + consumers' scoped specs) — verify 100% pass
+- [x] Run the touched packages' tests (`tddy-prstack-web` Cypress + `bun test` + boundary rule; `tddy-web` build + consumers' scoped specs) — verify 100% pass
 - [ ] Validate changes (/validate-changes)
 - [ ] Refactor issues from change validation
 - [ ] USER REVIEW — development complete

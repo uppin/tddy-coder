@@ -1,7 +1,7 @@
 import { describe, expect, it } from "bun:test";
 import { create } from "@bufbuild/protobuf";
 import { BranchBaseSyncSchema } from "tddy-client-web/gen/pr_stack_pb";
-import { aBranchResolution } from "../../../test-utils";
+import { aBranchResolution } from "../test-utils/builders";
 import { baseSyncView, canPullFromBase } from "./baseSyncStatus";
 
 /**

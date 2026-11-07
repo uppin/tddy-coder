@@ -1,5 +1,5 @@
 import { describe, expect, it } from "bun:test";
-import { aSessionEntry } from "../test-utils";
+import { aSessionEntry } from "../test-utils/builders";
 import { resolveNodeSession } from "./resolveNodeSession";
 
 /**

@@ -23,7 +23,7 @@ import {
   type AcpClientMessage,
 } from "tddy-client-web/gen/tddy/acp/v1/acp_pb";
 import { WorkflowChatScreen } from "../../src/WorkflowChatScreen";
-import { mountWithRpc } from "../support/rpc/inMemory";
+import { anAttachmentHint, mountWithPresenterRoom } from "../support/mountWorkflowChat";
 import { agentChatPage } from "../support/pages/agentChatPage";
 
 // ---------------------------------------------------------------------------
@@ -106,7 +106,10 @@ it("resumes the reloaded session by asking the agent to load its id, not by star
   const backend = anInMemoryRpcBackend().implement(AcpService, { session });
 
   // When — the reloaded tddy-coder workflow chat mounts for that session
-  mountWithRpc(<WorkflowChatScreen session={RELOADED_SESSION} />, backend);
+  mountWithPresenterRoom(
+    <WorkflowChatScreen session={RELOADED_SESSION} attachmentHint={anAttachmentHint(RELOADED_SESSION.sessionId)} />,
+    backend,
+  );
 
   // Then — the client asked to load THIS session's id, proven by the agent's id-bearing confirmation
   agentChatPage.chatMessage(0).should("have.text", `Resumed ${RELOADED_SESSION.sessionId}`);
@@ -121,7 +124,10 @@ it("repaints the prior conversation (user and agent turns) the agent replays on 
   const backend = anInMemoryRpcBackend().implement(AcpService, { session });
 
   // When — the reloaded tddy-coder workflow chat mounts for that session
-  mountWithRpc(<WorkflowChatScreen session={RELOADED_SESSION} />, backend);
+  mountWithPresenterRoom(
+    <WorkflowChatScreen session={RELOADED_SESSION} attachmentHint={anAttachmentHint(RELOADED_SESSION.sessionId)} />,
+    backend,
+  );
 
   // Then — both prior turns reappear, in order, as their own bubbles (the user turn is not dropped)
   agentChatPage.chatMessage(0).should("have.text", PRIOR_USER_TURN);

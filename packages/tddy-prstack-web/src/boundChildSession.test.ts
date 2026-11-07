@@ -1,5 +1,5 @@
 import { describe, expect, it } from "bun:test";
-import { aBranchResolution, aSessionEntry, aStackNode } from "../../../test-utils";
+import { aBranchResolution, aSessionEntry, aStackNode } from "../test-utils/builders";
 import { boundChildSession } from "./boundChildSession";
 import type { StackNode } from "./stackPlan";
 

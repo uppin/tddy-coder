@@ -1,5 +1,18 @@
 import type { SessionEntry } from "tddy-client-web/gen/session_pb";
-import type { SessionMetadata } from "../../../lib/sessionParticipantMetadata";
+
+/**
+ * The participant-metadata facts the join reads. The host application parses a live participant's
+ * `session` metadata block and hands the result in; its parsed shape is a superset of this one, so
+ * the view names only what it uses and imports nothing from the application.
+ */
+export interface StackChildMetadata {
+  /** The pr-stack orchestrator that spawned the session, or empty for nobody's stack child. */
+  orchestratorSessionId: string;
+  /** The planned node it materializes, unique within its orchestrator's plan and nowhere else. */
+  stackNodeId: string;
+  /** The branch it created. */
+  branch: string;
+}
 
 /**
  * A session the PR-Stack view may join to a planned node: which session it is, which orchestrator
@@ -43,7 +56,7 @@ export interface StackChildSession {
  */
 export function stackChildSessions(
   sessions: SessionEntry[],
-  metadataBySessionId: ReadonlyMap<string, SessionMetadata>,
+  metadataBySessionId: ReadonlyMap<string, StackChildMetadata>,
 ): StackChildSession[] {
   const children: StackChildSession[] = [];
   for (const entry of sessions) {

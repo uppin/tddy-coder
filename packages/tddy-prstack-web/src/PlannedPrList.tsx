@@ -1,7 +1,7 @@
 import React, { useState } from "react";
 import type { SessionEntry } from "tddy-client-web/gen/session_pb";
 import type { BranchResolution } from "tddy-client-web/gen/pr_stack_pb";
-import { resolveNodeSession } from "../../../utils/resolveNodeSession";
+import { resolveNodeSession } from "./resolveNodeSession";
 import { PlannedPrRow } from "./PlannedPrRow";
 import { boundChildSession } from "./boundChildSession";
 import { plannedNameBranches, type BranchQuery } from "./branchQueries";

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "bun:test";
-import { aStackChildSession, aStackNode } from "../../../test-utils";
+import { aStackChildSession, aStackNode } from "../test-utils/builders";
 import { nodeChildSession, nodeChildSessionByIdentity } from "./nodeChildSession";
 
 /**

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "bun:test";
-import { aSessionEntry } from "../../../test-utils";
-import type { SessionMetadata } from "../../../lib/sessionParticipantMetadata";
+import { aSessionEntry } from "../test-utils/builders";
+import type { StackChildMetadata } from "./stackChildSessions";
 import { stackChildSessions } from "./stackChildSessions";
 
 /**
@@ -24,23 +24,8 @@ const ORCHESTRATOR = "pr-stack-session-1";
 const CHILD = "dddddddd-0000-4000-8000-000000000004";
 const BRANCH = "feature/attach-docs/attach-store";
 
-function aSessionMetadata(overrides: Partial<SessionMetadata> = {}): SessionMetadata {
-  return {
-    workflowGoal: "",
-    workflowState: "",
-    agent: "claude",
-    model: "sonnet-4",
-    activityStatus: "",
-    recipe: "tdd",
-    repoPath: "/home/dev/pr-stack-project",
-    elapsedDisplay: "",
-    pendingElicitation: false,
-    sessionId: CHILD,
-    orchestratorSessionId: ORCHESTRATOR,
-    stackNodeId: "n1",
-    branch: BRANCH,
-    ...overrides,
-  };
+function aSessionMetadata(overrides: Partial<StackChildMetadata> = {}): StackChildMetadata {
+  return { orchestratorSessionId: ORCHESTRATOR, stackNodeId: "n1", branch: BRANCH, ...overrides };
 }
 
 describe("stackChildSessions", () => {

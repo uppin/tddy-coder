@@ -1,5 +1,5 @@
 import { describe, expect, it } from "bun:test";
-import { aBranchResolution, aStackChildSession, aStackNode } from "../../../test-utils";
+import { aBranchResolution, aStackChildSession, aStackNode } from "../test-utils/builders";
 import { isNodeOrphaned } from "./isNodeOrphaned";
 
 /**

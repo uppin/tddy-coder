@@ -1,5 +1,5 @@
 import { describe, expect, it } from "bun:test";
-import { aStackNode } from "../../../test-utils";
+import { aStackNode } from "../test-utils/builders";
 import {
   branchlessNonMergedParent,
   deriveStackBaseBranch,
