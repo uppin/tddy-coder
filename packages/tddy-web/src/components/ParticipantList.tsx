@@ -10,7 +10,7 @@ import {
 } from "../hooks/useRoomParticipants";
 import { safeTestIdPart } from "../lib/testId";
 import { ParticipantVideoPreviewDialog } from "./ParticipantVideoPreviewDialog";
-import { Button } from "./ui/button";
+import { Button } from "tddy-ui-web";
 
 /** Inline SVG (Lucide `video` paths) — avoids lucide-react context issues in Cypress CT. */
 function VideoCameraIcon({ className }: { className?: string }) {

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { Button } from "@/components/ui/button";
+import { Button } from "tddy-ui-web";
 import { PARAM_METHOD, PARAM_SERVICE } from "@/routing/appLocation";
 import { useAppLocation } from "@/routing/useAppLocation";
 

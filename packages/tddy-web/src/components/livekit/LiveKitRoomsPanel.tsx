@@ -10,7 +10,7 @@
  */
 
 import { useEffect, useState } from "react";
-import { Tooltip, TooltipContent, TooltipTrigger } from "../ui/tooltip";
+import { Tooltip, TooltipContent, TooltipTrigger } from "tddy-ui-web";
 import type { LiveKitRoom, LiveKitRoomParticipant } from "../../lib/liveKitRoomsState";
 import { metadataCardText } from "../../lib/liveKitMetadataCard";
 import { safeTestIdPart } from "../../lib/testId";

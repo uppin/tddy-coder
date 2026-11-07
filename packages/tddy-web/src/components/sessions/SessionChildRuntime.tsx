@@ -4,7 +4,7 @@ import type { HostConnection } from "../../rpc/connections/types";
 import type { ToolShortcutDef } from "../../lib/toolShortcuts";
 import { hostNotConnectedText } from "../../rpc/rpcFailure";
 import { useHostLabel } from "../../rpc/selectedDaemon";
-import { InlineError } from "../ui/inline-error";
+import { InlineError } from "tddy-ui-web";
 import { SessionRuntime } from "./SessionRuntime";
 import type { SessionAgentClient, TerminalClient } from "./sessionRuntimeProps";
 import type { ByteDelta, SessionRuntimeState } from "./sessionRuntimeRegistry";

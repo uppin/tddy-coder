@@ -2,7 +2,7 @@ import type { DaemonHost } from "../../lib/participantRole";
 import type { ProjectEntry } from "../../gen/project_pb";
 import type { projectSelectOptions } from "../../lib/projectSelectOptions";
 import { inputClass, labelClass } from "./createSessionFormStyles";
-import { InlineError } from "../ui/inline-error";
+import { InlineError } from "tddy-ui-web";
 
 export interface CreateSessionHostAndProjectFieldsProps {
   daemons: DaemonHost[];

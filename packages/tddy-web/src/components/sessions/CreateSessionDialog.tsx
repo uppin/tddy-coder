@@ -6,7 +6,7 @@ import type { CatalogService } from "../../gen/catalog_pb";
 import type { SessionFilesService } from "../../gen/session_files_pb";
 import type { WorktreeService } from "../../gen/worktree_pb";
 import type { TaskService } from "../../gen/tasks_pb";
-import { Button } from "../ui/button";
+import { Button } from "tddy-ui-web";
 import { CreateSessionPane, type CreateSessionInitialValues } from "./CreateSessionPane";
 
 type ConnectionClient = Client<typeof SessionService>;

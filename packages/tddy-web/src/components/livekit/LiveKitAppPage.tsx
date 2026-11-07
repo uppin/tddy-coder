@@ -7,7 +7,7 @@ import { useHostConnection } from "../../rpc/connections/registry";
 import { useRoomParticipants } from "../../hooks/useRoomParticipants";
 import { ParticipantList } from "../ParticipantList";
 import { AppShell } from "../shell/AppShell";
-import { TooltipProvider } from "../ui/tooltip";
+import { TooltipProvider } from "tddy-ui-web";
 import { LiveKitRoomsPanel } from "./LiveKitRoomsPanel";
 
 /**

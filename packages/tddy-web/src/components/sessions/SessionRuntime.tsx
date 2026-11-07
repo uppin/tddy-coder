@@ -21,8 +21,7 @@ import { useHasCapability } from "../../rpc/connections/useHasCapability";
 import { sessionReadsLocalPaths } from "../../lib/sessionReadsLocalPaths";
 import type { TauriHostWindow } from "../../rpc/daemonTransportFlavour";
 import { useSelectedDaemon } from "../../rpc/selectedDaemon";
-import { cn } from "../../lib/utils";
-import { InlineError } from "../ui/inline-error";
+import { cn, InlineError } from "tddy-ui-web";
 
 export type { SessionRuntimeProps } from "./sessionRuntimeProps";
 

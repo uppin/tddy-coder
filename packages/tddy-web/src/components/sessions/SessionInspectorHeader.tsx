@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { Button } from "../ui/button";
+import { Button } from "tddy-ui-web";
 import type { InspectorDrawerState } from "./SessionInspectorDrawer";
 
 interface SessionInspectorHeaderProps {
