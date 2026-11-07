@@ -14,4 +14,5 @@ options and the desktop app's logging; it is not part of the CI redesign. The pa
 
 **What closing it takes:** add `log?: (message: string) => void` to `EnvelopeTransportOptions` and pass
 it to the transport it builds (with a test that a call logs through it), then delete the
-`tddy-tauri-web` entry from `scripts/web-lint-exclusions.json`.
+`tddy-tauri-web` entry from `scripts/web-lint-exclusions.json` — and the `tddy-hosts-web` entry
+(#web-split 12/17, PR #848), whose only error is this one, reached through `tddy-terminal-web`.
