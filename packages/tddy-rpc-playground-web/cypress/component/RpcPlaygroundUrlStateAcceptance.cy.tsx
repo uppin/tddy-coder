@@ -10,7 +10,7 @@
  */
 
 import React from "react";
-import { RpcPlaygroundScreen } from "../../src/rpc-playground/RpcPlaygroundScreen";
+import { RpcPlaygroundScreen } from "../../src/RpcPlaygroundScreen";
 import { rpcPlaygroundPage } from "../support/pages/rpcPlaygroundPage";
 import { appLocationPage } from "../support/pages/appLocationPage";
 

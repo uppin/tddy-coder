@@ -6,6 +6,7 @@
     "packages/tddy-client-web",
     "packages/tddy-session-create-web",
     "packages/tddy-terminal-web",
+    "packages/tddy-rpc-playground-web",
     "packages/tddy-web",
     "packages/tddy-livekit-web",
     "packages/tddy-rpc-web",
