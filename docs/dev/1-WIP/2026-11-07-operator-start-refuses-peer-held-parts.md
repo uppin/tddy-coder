@@ -114,9 +114,7 @@ Read at #857's base, #836's tip `ddef5cc6b`.
 
 ## Acceptance Tests
 
-| Test | File | Kind |
-|---|---|---|
-Pass 2 filled in the files; see the PR's test table for line numbers.
+Pass 2 filled in the files.
 
 | Test | File | Kind |
 |---|---|---|
