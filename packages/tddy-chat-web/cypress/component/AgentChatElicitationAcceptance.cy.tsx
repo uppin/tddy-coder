@@ -20,9 +20,15 @@ import {
   type ClientMessage,
   type ServerMessage,
   type ClarificationQuestionProto,
+  QuestionOptionProtoSchema,
 } from "tddy-client-web/gen/tddy/v1/remote_pb";
 import { agentChatPage } from "../support/pages/agentChatPage";
 import { mountWithChatRoom } from "../support/mountWithChatRoom";
+import { theOnlyIntent } from "../support/sentIntents";
+
+function anOption(label: string, description = "") {
+  return create(QuestionOptionProtoSchema, { label, description });
+}
 
 function aClarificationQuestion(
   overrides: Partial<ClarificationQuestionProto> = {},
@@ -30,10 +36,7 @@ function aClarificationQuestion(
   return {
     header: "Backend",
     question: "Which coding backend should drive this session?",
-    options: [
-      { label: "Claude", description: "Anthropic's Claude Code CLI" },
-      { label: "Cursor", description: "Cursor's composer agent" },
-    ],
+    options: [anOption("Claude", "Anthropic's Claude Code CLI"), anOption("Cursor", "Cursor's composer agent")],
     multiSelect: false,
     allowOther: true,
     recommendedOther: "",
@@ -124,9 +127,7 @@ it("sends an AnswerSelect intent with the chosen option's index when an option i
 
   // Then
   cy.wrap(sentIntents).should((intents) => {
-    expect(intents).to.have.length(1);
-    expect(intents[0].intent.case).to.equal("answerSelect");
-    expect(intents[0].intent.value.index).to.equal(1);
+    expect(theOnlyIntent(intents, "answerSelect").index).to.equal(1);
   });
 });
 
@@ -142,9 +143,7 @@ it("sends an AnswerOther intent with the typed text when a custom answer is subm
 
   // Then
   cy.wrap(sentIntents).should((intents) => {
-    expect(intents).to.have.length(1);
-    expect(intents[0].intent.case).to.equal("answerOther");
-    expect(intents[0].intent.value.text).to.equal("Codex, actually.");
+    expect(theOnlyIntent(intents, "answerOther").text).to.equal("Codex, actually.");
   });
 });
 
@@ -154,9 +153,9 @@ it("sends an AnswerMultiSelect intent with all checked indices when Submit is cl
     header: "Reviewers",
     question: "Which reviewers should be requested?",
     options: [
-      { label: "Alice", description: "" },
-      { label: "Bob", description: "" },
-      { label: "Carol", description: "" },
+      anOption("Alice"),
+      anOption("Bob"),
+      anOption("Carol"),
     ],
     multiSelect: true,
   });
@@ -170,9 +169,8 @@ it("sends an AnswerMultiSelect intent with all checked indices when Submit is cl
 
   // Then
   cy.wrap(sentIntents).should((intents) => {
-    expect(intents).to.have.length(1);
-    expect(intents[0].intent.case).to.equal("answerMultiSelect");
-    expect(intents[0].intent.value.indices).to.deep.equal([0, 2]);
-    expect(intents[0].intent.value.other).to.equal("");
+    const answer = theOnlyIntent(intents, "answerMultiSelect");
+    expect(answer.indices).to.deep.equal([0, 2]);
+    expect(answer.other).to.equal("");
   });
 });

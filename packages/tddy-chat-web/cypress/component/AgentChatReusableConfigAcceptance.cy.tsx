@@ -16,6 +16,7 @@ import { AgentChat } from "../../src/AgentChat";
 import { TddyRemote, type ClientMessage } from "tddy-client-web/gen/tddy/v1/remote_pb";
 import { agentChatPage } from "../support/pages/agentChatPage";
 import { mountWithChatRoom } from "../support/mountWithChatRoom";
+import { theOnlyIntent } from "../support/sentIntents";
 
 const PLACEHOLDER = "Ask the coding agent anything…";
 
@@ -63,9 +64,7 @@ it("sends the operator's first message as a SubmitFeatureInput intent on a fresh
 
   // Then
   cy.wrap(sentIntents).should((intents) => {
-    expect(intents).to.have.length(1);
-    expect(intents[0].intent.case).to.equal("submitFeatureInput");
-    expect(intents[0].intent.value.text).to.equal("Add a health-check endpoint.");
+    expect(theOnlyIntent(intents, "submitFeatureInput").text).to.equal("Add a health-check endpoint.");
   });
 });
 

@@ -11,6 +11,7 @@ const ROLE: Record<ChatMessage["from"], string> = {
   goal: "Goal",
   activity: "Activity",
   tool: "Tool",
+  subagent: "Subagent",
 };
 
 /**
