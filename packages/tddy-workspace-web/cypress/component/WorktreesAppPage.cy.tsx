@@ -4,8 +4,7 @@
  * Nine worktree methods left `session.SessionService` for `worktree.WorktreeService`, and the
  * daemon roster left it for `host.HostService` — but `ListProjects`, which this screen also reads,
  * stayed. So the screen now spans three services, and this spec pins the split: the backend serves
- * the worktree feed and the delete **only** under `worktree.WorktreeService`, the roster only under
- * `host.HostService`, and the project registry only under `session.SessionService`. A screen
+ * the worktree feed and the delete **only** under `worktree.WorktreeService`, the roster from the clients port, and the project registry only under `project.ProjectService`. A screen
  * that asked any of them of the wrong service gets `Unimplemented` and shows nothing.
  *
  * Changeset: `docs/dev/changesets/2026-09-09-unbundle-host-worktree-services.md`
@@ -13,30 +12,15 @@
 
 import { create } from "@bufbuild/protobuf";
 import { anInMemoryRpcBackend, type InMemoryRpcBackend } from "tddy-connectrpc-testkit";
-import { WorktreesAppPage } from "../../src/worktrees/WorktreesAppPage";
-import { AuthService } from "tddy-client-web/gen/auth_pb";
-import { ProjectService } from "tddy-client-web/gen/project_pb";
-import { ProjectEntrySchema } from "tddy-client-web/gen/project_pb";
-import {
-  GenerateTokenResponseSchema,
-  RefreshTokenResponseSchema,
-  TokenService,
-} from "tddy-client-web/gen/token_pb";
-import { HostService } from "tddy-client-web/gen/host_pb";
+import { anAuthDouble } from "tddy-client-web/testkit";
+import { WorktreesContent } from "../../src/worktrees/WorktreesContent";
+import { ProjectService, ProjectEntrySchema } from "tddy-client-web/gen/project_pb";
 import { WorktreeService, WorktreeSizeStatus } from "tddy-client-web/gen/worktree_pb";
-import {
-  aHostServiceFake,
-  DAEMON_LOCAL,
-} from "../support/rpc/hostServiceBackend";
 import {
   aWorktreeServiceFake,
   type WorktreeServiceControls,
   type WorktreeStatsRowInput,
 } from "../support/rpc/worktreeServiceBackend";
-import { ACCESS_TOKEN_KEY, CURRENT_ACCESS_TOKEN } from "../support/rpc/durableSessionBackend";
-import { aGitHubUser } from "../support/rpc/responses";
-import { mountWithRpc } from "../support/rpc/inMemory";
-import { withSelectedDaemon } from "../support/rpc/withSelectedDaemon";
 import { worktreesPage as page } from "../support/pages/worktreesPage";
 
 const PROJECT_ID = "proj-1";
@@ -64,19 +48,9 @@ function aDaemonServingTheSplit(snapshot: WorktreeStatsRowInput[]): ThreeService
   return {
     backend: anInMemoryRpcBackend()
       .implement(WorktreeService, worktreeHandlers)
-      .implement(HostService, aHostServiceFake({ daemons: [DAEMON_LOCAL] }).handlers)
-      // The two services every daemon-mode screen needs to get past the session gate. They are not
-      // part of the split; they are here because a signed-out screen renders a login prompt and
+      // The daemon roster and auth come from the port doubles (`aClientsPortDouble`, `anAuthDouble`),
+      // not from RPC: a signed-in auth double keeps the screen from rendering a login prompt, which
       // would make the assertions below vacuous.
-      .implement(AuthService, {
-        getAuthStatus: async () => ({ authenticated: true, user: aGitHubUser() }),
-      })
-      .implement(TokenService, {
-        generateToken: async () =>
-          create(GenerateTokenResponseSchema, { token: "mock-jwt-presence", ttlSeconds: 600n }),
-        refreshToken: async () =>
-          create(RefreshTokenResponseSchema, { token: "mock-jwt-presence", ttlSeconds: 600n }),
-      })
       .implement(ProjectService, {
         listProjects: async () => ({
           projects: [
@@ -85,7 +59,7 @@ function aDaemonServingTheSplit(snapshot: WorktreeStatsRowInput[]): ThreeService
               name: "Demo",
               gitUrl: "https://github.com/test/demo.git",
               mainRepoPath: "/repos/demo",
-              daemonInstanceId: DAEMON_LOCAL.instanceId,
+              daemonInstanceId: "",
             }),
           ],
         }),
@@ -95,7 +69,7 @@ function aDaemonServingTheSplit(snapshot: WorktreeStatsRowInput[]): ThreeService
 }
 
 function mountWorktrees(daemon: ThreeServiceDaemon) {
-  mountWithRpc(withSelectedDaemon(<WorktreesAppPage onNavigate={() => undefined} />), daemon.backend);
+  cy.mountWithClients(<WorktreesContent />, daemon.backend, { auth: anAuthDouble({ sessionToken: "session-token" }) });
 }
 
 describe("Worktrees screen over worktree.WorktreeService", () => {
@@ -103,10 +77,6 @@ describe("Worktrees screen over worktree.WorktreeService", () => {
     cy.viewport(1280, 800);
     cy.clearLocalStorage();
     cy.clearAllSessionStorage();
-    // A real, unexpired access token — the screen gates its content on `isAuthenticated`, and the
-    // client-side token gate decodes the token's `exp`. Set through a queued `cy.window()` so it
-    // survives the queued `clearLocalStorage()` above.
-    cy.window().then((win) => win.localStorage.setItem(ACCESS_TOKEN_KEY, CURRENT_ACCESS_TOKEN));
   });
 
   it("lists the project's worktrees from the daemon's worktree service, by name", () => {

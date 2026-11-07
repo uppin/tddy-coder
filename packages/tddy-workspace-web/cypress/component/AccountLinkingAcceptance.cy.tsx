@@ -17,14 +17,12 @@
 
 import { useState } from "react";
 import { anInMemoryRpcBackend } from "tddy-connectrpc-testkit";
-import { AccountsAppPage } from "../../src/accounts/AccountsAppPage";
+import { AccountsContent } from "../../src/accounts/AccountsContent";
 import {
   MAX_CONSECUTIVE_POLL_FAILURES,
   MIN_POLL_INTERVAL_SECONDS,
 } from "../../src/accounts/useLinkFlow";
 import { AccountsService, LinkState } from "tddy-client-web/gen/accounts_pb";
-import { mountWithRpc } from "../support/rpc/inMemory";
-import { withSelectedDaemon } from "../support/rpc/withSelectedDaemon";
 import {
   ADA,
   DAEMON_FAILURE_REASON,
@@ -42,7 +40,7 @@ import {
 import { accountsScreenPage } from "../support/pages/accountsScreenPage";
 
 function mountAccounts(daemon: LinkingDaemon) {
-  mountWithRpc(withSelectedDaemon(<AccountsAppPage onNavigate={() => {}} />), daemon.backend);
+  cy.mountWithClients(<AccountsContent />, daemon.backend);
 }
 
 /** The page with a way to leave it, so a spec can unmount it mid-attempt. */
@@ -50,7 +48,7 @@ function AccountsPageThatCanBeLeft() {
   const [here, setHere] = useState(true);
   return (
     <>
-      {here ? <AccountsAppPage onNavigate={() => {}} /> : null}
+      {here ? <AccountsContent /> : null}
       <button data-testid="leave-the-page" onClick={() => setHere(false)}>
         leave
       </button>
@@ -203,7 +201,7 @@ describe("Linking a second account", () => {
     it("stops polling once the page has been left", () => {
       const daemon = aDaemonWherePollsAre([LinkState.LINK_PENDING]);
       cy.clock();
-      mountWithRpc(withSelectedDaemon(<AccountsPageThatCanBeLeft />), daemon.backend);
+      cy.mountWithClients(<AccountsPageThatCanBeLeft />, daemon.backend);
       pressAddAccount();
 
       cy.get('[data-testid="leave-the-page"]').click();
@@ -303,9 +301,7 @@ describe("Linking a second account", () => {
     });
 
     it("marks no account when the session belongs to none of them", () => {
-      mountWithRpc(
-        withSelectedDaemon(<AccountsAppPage onNavigate={() => {}} />),
-        anInMemoryRpcBackend().implement(AccountsService, {
+      cy.mountWithClients(<AccountsContent />, anInMemoryRpcBackend().implement(AccountsService, {
           listAccounts: () => ({ providers: githubHolding([ADA, GRACE]), vaultLocked: false }),
         }),
       );
@@ -321,9 +317,7 @@ describe("Linking a second account", () => {
     });
 
     it("still offers to forget every other account", () => {
-      mountWithRpc(
-        withSelectedDaemon(<AccountsAppPage onNavigate={() => {}} />),
-        anInMemoryRpcBackend().implement(AccountsService, {
+      cy.mountWithClients(<AccountsContent />, anInMemoryRpcBackend().implement(AccountsService, {
           listAccounts: () => ({
             providers: githubHolding([ADA, GRACE]),
             vaultLocked: false,

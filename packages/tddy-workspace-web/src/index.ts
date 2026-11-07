@@ -1,2 +1,23 @@
-// TODO(workspace): implement — The accounts, projects, settings, models, tasks and worktrees screens and the sign-in dialogs move here.
-export {};
+/** tddy-workspace-web — accounts, projects, daemon settings, models and agents, tasks, worktrees, and the sign-in dialogs. */
+export { AccountsScreen, type AccountRow } from "./accounts/AccountsScreen";
+export { AccountsContent } from "./accounts/AccountsContent";
+export { ProjectsScreen, type AssignableAccount } from "./projects/ProjectsScreen";
+export { ProjectsContent } from "./projects/ProjectsContent";
+export { DaemonSettingsScreen } from "./settings/DaemonSettingsScreen";
+export { ModelsScreen } from "./models/ModelsScreen";
+export { ModelsContent } from "./models/ModelsContent";
+export { useModelRegistryFanOut } from "./models/useModelRegistryFanOut";
+export { TasksScreen } from "./tasks/TasksScreen";
+export { isTasksPath, parseTaskId, tasksPathForTask, TASKS_ROUTE } from "./tasks/tasksRoutes";
+export { WorktreesScreen } from "./worktrees/WorktreesScreen";
+export { WorktreesContent } from "./worktrees/WorktreesContent";
+export { SessionWorktreeTab } from "./worktrees/SessionWorktreeTab";
+export * from "./worktrees/worktreeStatsFormat";
+export * from "./lib/worktreeList";
+export * from "./lib/worktreeSize";
+export { CodexOAuthDialog } from "./signin/CodexOAuthDialog";
+export { DeviceLoginPanel } from "./signin/DeviceLoginPanel";
+export { CredentialVaultPrompt } from "./signin/CredentialVaultPrompt";
+export { DaemonLoginScreen } from "./signin/DaemonLoginScreen";
+export { GitHubLoginButton } from "./signin/GitHubLoginButton";
+export { UserAvatar } from "./signin/UserAvatar";

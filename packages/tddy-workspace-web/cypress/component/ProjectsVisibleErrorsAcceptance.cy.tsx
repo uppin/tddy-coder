@@ -8,20 +8,18 @@
  */
 
 import React from "react";
-import { aDisconnectedRoom } from "tddy-livekit-web/testkit";
 import { Code, ConnectError } from "@connectrpc/connect";
 import { anInMemoryRpcBackend } from "tddy-connectrpc-testkit";
-import { POLL_INTERVAL_MS } from "../../src/projects/ProjectsAppPage";
+import { POLL_INTERVAL_MS } from "../../src/projects/ProjectsContent";
 import { ProjectsScreen } from "../../src/projects/ProjectsScreen";
 import { ProjectService } from "tddy-client-web/gen/project_pb";
 import { AccountsService } from "tddy-client-web/gen/accounts_pb";
-import { mountWithRpc } from "../support/rpc/inMemory";
 import {
   aProject,
   aProjectsBackend,
   PROJECTS_DAEMON_HOSTS as DAEMON_HOSTS,
   PROJECTS_REMOTE_HOST as REMOTE_HOST,
-  projectsAppPage,
+  mountProjectsContent,
 } from "../support/rpc/projectsAppPageFixtures";
 import { projectsScreenPage } from "../support/pages/projectsScreenPage";
 
@@ -49,7 +47,6 @@ beforeEach(() => {
   cy.viewport(1280, 800);
   cy.clearLocalStorage();
   cy.clearAllSessionStorage();
-  window.localStorage.setItem("tddy_session_token", "fake-token");
 });
 
 // ---------------------------------------------------------------------------
@@ -61,7 +58,7 @@ it("shows the daemon's reason when creating a project fails, and keeps what was 
   const backend = aProjectsBackend((b) =>
     b.failWith(ProjectService.method.createProject, Code.FailedPrecondition, "git clone failed: repository not found"),
   );
-  mountWithRpc(projectsAppPage(), backend);
+  mountProjectsContent(backend);
 
   // When
   projectsScreenPage.openCreateProjectForm();
@@ -74,7 +71,7 @@ it("shows the daemon's reason when creating a project fails, and keeps what was 
 
 it("closes the create form only once the project was created", () => {
   // Given
-  mountWithRpc(projectsAppPage(), aProjectsBackend());
+  mountProjectsContent(aProjectsBackend());
 
   // When
   projectsScreenPage.openCreateProjectForm();
@@ -114,7 +111,7 @@ it("disables the create button while the request is in flight", () => {
 // screen's own error below it remains, so the screen never claims an empty registry either way.
 it("says the host is not connected instead of showing an empty list", () => {
   // Given a selected host that no wire reaches
-  cy.mount(projectsAppPage(null));
+  mountProjectsContent(aProjectsBackend(), "none");
 
   // Then
   projectsScreenPage.loadError().should("contain.text", "Not connected to workstation-1");
@@ -126,7 +123,7 @@ const ROOM_NOT_CONNECTED_REASON = "could not send request to daemon-workstation-
 
 it("shows the transport's reason on the list when the common room never connected", () => {
   // Given / When
-  cy.mount(projectsAppPage(aDisconnectedRoom()));
+  mountProjectsContent(aProjectsBackend(), { failingWith: ROOM_NOT_CONNECTED_REASON });
 
   // Then
   projectsScreenPage.loadError().should("have.text", ROOM_NOT_CONNECTED_REASON);
@@ -134,7 +131,7 @@ it("shows the transport's reason on the list when the common room never connecte
 
 it("shows the transport's reason on the create form when the common room never connected", () => {
   // Given
-  cy.mount(projectsAppPage(aDisconnectedRoom()));
+  mountProjectsContent(aProjectsBackend(), { failingWith: ROOM_NOT_CONNECTED_REASON });
 
   // When
   projectsScreenPage.openCreateProjectForm();
@@ -155,7 +152,7 @@ it("shows why the project list could not be loaded", () => {
   );
 
   // When
-  mountWithRpc(projectsAppPage(), backend);
+  mountProjectsContent(backend);
 
   // Then
   projectsScreenPage.loadError().should("contain.text", "project registry is unreadable");
@@ -172,7 +169,7 @@ it("clears the list error once a later poll succeeds", () => {
     })
     .onUnary(ProjectService.method.listProjectBranches, () => ({ branches: [], defaultRemote: "" }));
   cy.clock();
-  mountWithRpc(projectsAppPage(), backend);
+  mountProjectsContent(backend);
   projectsScreenPage.loadError().should("contain.text", "registry busy");
 
   // When the next poll runs
@@ -247,7 +244,7 @@ it("shows why the assignable accounts could not be loaded", () => {
   );
 
   // When
-  mountWithRpc(projectsAppPage(), backend);
+  mountProjectsContent(backend);
 
   // Then the projects still list; the account pickers say why they are empty
   projectsScreenPage.card("proj-alpha").should("exist");
@@ -265,7 +262,7 @@ it("says accounts are not enabled when the host's daemon serves no accounts serv
   );
 
   // When
-  mountWithRpc(projectsAppPage(), backend);
+  mountProjectsContent(backend);
 
   // Then the reason names the config that turns accounts on, not the router's words
   projectsScreenPage.card("proj-alpha").should("exist");

@@ -13,10 +13,9 @@
 
 import React from "react";
 import { ModelRegistryService } from "tddy-client-web/gen/models_pb";
-import { ModelsAppPage } from "../../../src/models/ModelsAppPage";
+import { ModelsContent } from "../../../src/models/ModelsContent";
 import type { DaemonHost } from "tddy-client-web";
-import { withSelectedDaemon } from "../../support/rpc/withSelectedDaemon";
-import { mountWithRpc } from "../../support/rpc/inMemory";
+import { mountModels } from "../../support/mountModels";
 import {
   aModelRegistryBackend,
   anAssistant,
@@ -49,10 +48,7 @@ const QWEN: ModelRef = {
 const REPO_READER: AssistantRef = { daemonInstanceId: FIXTURE_DAEMON, name: "repo-reader" };
 
 const mount = (backend: ReturnType<typeof aModelRegistryBackend>) =>
-  mountWithRpc(
-    withSelectedDaemon(<ModelsAppPage onNavigate={cy.stub()} />, [FIXTURE_HOST]),
-    backend,
-  );
+  mountModels(<ModelsContent />, backend, { daemons: [FIXTURE_HOST] });
 
 const aRegistryWithOneModel = () =>
   aModelRegistryBackend({ providers: [anOllamaProvider()], models: [anLlmModel()] });

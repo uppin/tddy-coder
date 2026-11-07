@@ -12,15 +12,13 @@
 
 import { Code, ConnectError } from "@connectrpc/connect";
 import { anInMemoryRpcBackend } from "tddy-connectrpc-testkit";
-import { AccountsAppPage } from "../../src/accounts/AccountsAppPage";
+import { AccountsContent } from "../../src/accounts/AccountsContent";
 import {
   AccountsService,
   SyncStatus,
   type AccountSummary,
   type ConnectProviderAccountRequest,
 } from "tddy-client-web/gen/accounts_pb";
-import { mountWithRpc } from "../support/rpc/inMemory";
-import { withSelectedDaemon } from "../support/rpc/withSelectedDaemon";
 import { recordedFields } from "../support/rpc/recordedRequests";
 import { accountsScreenPage } from "../support/pages/accountsScreenPage";
 
@@ -61,7 +59,7 @@ function aDaemon(answer: "accepts" | { refusesWith: string }) {
 }
 
 function mountAccounts(backend: ReturnType<typeof aDaemon>["backend"]) {
-  mountWithRpc(withSelectedDaemon(<AccountsAppPage onNavigate={() => {}} />), backend);
+  cy.mountWithClients(<AccountsContent />, backend);
 }
 
 describe("Connecting a provider account by API key", () => {

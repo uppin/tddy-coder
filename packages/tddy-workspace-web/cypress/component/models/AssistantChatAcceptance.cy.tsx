@@ -21,11 +21,9 @@ import {
   type AcpAgentMessage,
   type AcpClientMessage,
 } from "tddy-client-web/gen/tddy/acp/v1/acp_pb";
-import { ModelsAppPage } from "../../../src/models/ModelsAppPage";
+import { ModelsContent } from "../../../src/models/ModelsContent";
 import { daemonRpcIdentity, type DaemonHost } from "tddy-client-web";
-import { withSelectedDaemon } from "../../support/rpc/withSelectedDaemon";
-import { mountWithRpc } from "../../support/rpc/inMemory";
-import { mountWithPerDaemonLiveKitRpc } from "../../support/rpc/perDaemonLiveKitRpc";
+import { mountModels } from "../../support/mountModels";
 import {
   ACP_PERMISSION_DENIED,
   acpAgentChunk,
@@ -102,12 +100,7 @@ const anAnsweringAgent = () =>
  * in. The chat names that participant as the one serving its stream.
  */
 const mount = (backend: ReturnType<typeof aModelRegistryBackend>) =>
-  mountWithRpc(
-    withSelectedDaemon(<ModelsAppPage onNavigate={cy.stub()} />, [FIXTURE_HOST], [
-      daemonRpcIdentity(FIXTURE_DAEMON),
-    ]),
-    backend,
-  );
+  mountModels(<ModelsContent />, backend, { daemons: [FIXTURE_HOST] });
 
 // ---------------------------------------------------------------------------
 // Setup
@@ -117,9 +110,6 @@ beforeEach(() => {
   cy.viewport(1280, 800);
   cy.clearLocalStorage();
   cy.clearAllSessionStorage();
-  // Seed inside `cy.then` so it runs *after* the queued clears above; a bare synchronous
-  // `setItem` executes first and is then wiped, leaving the screen with no session token.
-  cy.then(() => window.localStorage.setItem("tddy_session_token", "fake-token"));
 });
 
 // ---------------------------------------------------------------------------
@@ -327,17 +317,10 @@ describe("AssistantChatAcceptance — routing to the assistant's owning daemon",
       .onUnary(ProjectService.method.listProjects, () =>
         listedProjects([aProject({ projectId: "proj-b", mainRepoPath: "/srv/checkouts/tddy-coder" })]),
       );
-    mountWithPerDaemonLiveKitRpc(
-      withSelectedDaemon(<ModelsAppPage onNavigate={cy.stub()} />, [HOST_A, HOST_B], [
-        daemonRpcIdentity(HOST_A.instanceId),
-        daemonRpcIdentity(HOST_B.instanceId),
-      ]),
-      {
-        [daemonRpcIdentity(HOST_A.instanceId)]: backendA,
-        [daemonRpcIdentity(HOST_B.instanceId)]: backendB,
-      },
-      { httpBackend: backendA },
-    );
+    mountModels(<ModelsContent />, backendA, {
+      daemons: [HOST_A, HOST_B],
+      backendsByHost: { [HOST_A.instanceId]: backendA, [HOST_B.instanceId]: backendB },
+    });
 
     // When
     page.openAssistantChat(REVIEWER_ON_B);

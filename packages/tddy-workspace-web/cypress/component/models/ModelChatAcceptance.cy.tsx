@@ -16,10 +16,9 @@ import {
   type AcpAgentMessage,
   type AcpClientMessage,
 } from "tddy-client-web/gen/tddy/acp/v1/acp_pb";
-import { ModelsAppPage } from "../../../src/models/ModelsAppPage";
+import { ModelsContent } from "../../../src/models/ModelsContent";
 import { daemonRpcIdentity, type DaemonHost } from "tddy-client-web";
-import { withSelectedDaemon } from "../../support/rpc/withSelectedDaemon";
-import { mountWithRpc } from "../../support/rpc/inMemory";
+import { mountModels } from "../../support/mountModels";
 import {
   acpAgentChunk,
   acpPromptEnd,
@@ -73,19 +72,11 @@ function aChattableRegistry(
  * fixture rather than an implicit "some room".
  */
 const mount = (backend: ReturnType<typeof aModelRegistryBackend>) =>
-  mountWithRpc(
-    withSelectedDaemon(<ModelsAppPage onNavigate={cy.stub()} />, [FIXTURE_HOST], [
-      daemonRpcIdentity(FIXTURE_DAEMON),
-    ]),
-    backend,
-  );
+  mountModels(<ModelsContent />, backend, { daemons: [FIXTURE_HOST] });
 
 /** The same screen after that daemon has dropped out of the common room. */
 const mountWithoutTheDaemonInTheRoom = (backend: ReturnType<typeof aModelRegistryBackend>) =>
-  mountWithRpc(
-    withSelectedDaemon(<ModelsAppPage onNavigate={cy.stub()} />, [FIXTURE_HOST], []),
-    backend,
-  );
+  mountModels(<ModelsContent />, backend, { daemons: [FIXTURE_HOST], hostStatus: "idle" });
 
 // ---------------------------------------------------------------------------
 // Setup
@@ -95,9 +86,6 @@ beforeEach(() => {
   cy.viewport(1280, 800);
   cy.clearLocalStorage();
   cy.clearAllSessionStorage();
-  // Seed inside `cy.then` so it runs *after* the queued clears above; a bare synchronous
-  // `setItem` executes first and is then wiped, leaving the screen with no session token.
-  cy.then(() => window.localStorage.setItem("tddy_session_token", "fake-token"));
 });
 
 // ---------------------------------------------------------------------------

@@ -17,7 +17,7 @@
  * fan-out).
  */
 
-import React, { useMemo, useState } from "react";
+import React, { useState } from "react";
 import { Code, ConnectError } from "@connectrpc/connect";
 import { create } from "@bufbuild/protobuf";
 import { anInMemoryRpcBackend, type InMemoryRpcBackend } from "tddy-connectrpc-testkit";
@@ -29,14 +29,11 @@ import {
   ModelRegistryService,
   ProviderKind,
 } from "tddy-client-web/gen/models_pb";
-import { ModelsAppPage } from "../../../src/models/ModelsAppPage";
+import { ModelsContent } from "../../../src/models/ModelsContent";
 import { useModelRegistryFanOut } from "../../../src/models/useModelRegistryFanOut";
-import { AuthProvider } from "../../../src/hooks/authProvider";
-import type { DaemonHost } from "tddy-client-web";
-import { SelectedDaemonProvider } from "../../../src/rpc/selectedDaemon";
-import { providerRowKey, type ProviderRow } from "../../../src/utils/mergeRegistryEntries";
-import { mountWithRpc } from "../../support/rpc/inMemory";
-import { aJoinedCommonRoom } from "../../support/rpc/withSelectedDaemon";
+import { ClientsProvider, useClientsPort, type DaemonHost } from "tddy-client-web";
+import { providerRowKey, type ProviderRow } from "../../../src/models/mergeRegistryEntries";
+import { mountModels } from "../../support/mountModels";
 import {
   aModelRegistryBackend,
   anLlmModel,
@@ -103,19 +100,35 @@ function aRegistryWithANeverAnsweringModelList(): {
   return { backend, read };
 }
 
+const FIXTURE_HOST: DaemonHost = {
+  instanceId: FIXTURE_DAEMON,
+  label: `${FIXTURE_DAEMON} (this daemon)`,
+};
+
+/**
+ * Republishes the clients port with a fresh `daemons` array holding the same daemon on every render,
+ * as the directory does on each participant event.
+ */
+function RebuiltDirectory({ children }: { children: React.ReactNode }) {
+  const port = useClientsPort();
+  const daemons: DaemonHost[] = [
+    { instanceId: FIXTURE_DAEMON, label: `${FIXTURE_DAEMON} (this daemon)` },
+  ];
+  return (
+    <ClientsProvider port={{ ...port, selectedDaemon: { ...port.selectedDaemon, daemons } }}>
+      {children}
+    </ClientsProvider>
+  );
+}
+
 /**
  * Rebuilds the `daemons` array on every render — the shape `useRoomParticipants` produces, where a
  * participant event yields a new array holding the same daemons.
  */
 function RebuiltDaemonListHarness() {
   const [rebuilds, setRebuilds] = useState(0);
-  const room = useMemo(() => aJoinedCommonRoom(), []);
-  const daemons: DaemonHost[] = [
-    { instanceId: FIXTURE_DAEMON, label: `${FIXTURE_DAEMON} (this daemon)` },
-  ];
   return (
-    <AuthProvider>
-      <SelectedDaemonProvider room={room} daemons={daemons}>
+    <RebuiltDirectory>
         <button
           type="button"
           data-testid={HARNESS_IDS.rebuildDaemons}
@@ -123,22 +136,16 @@ function RebuiltDaemonListHarness() {
         >
           rebuild {rebuilds}
         </button>
-        <ModelsAppPage onNavigate={() => {}} />
-      </SelectedDaemonProvider>
-    </AuthProvider>
+        <ModelsContent />
+    </RebuiltDirectory>
   );
 }
 
 /** Lets the test navigate away from the screen while its reads are still in flight. */
 function LeavableScreenHarness() {
   const [onScreen, setOnScreen] = useState(true);
-  const room = useMemo(() => aJoinedCommonRoom(), []);
-  const daemons: DaemonHost[] = [
-    { instanceId: FIXTURE_DAEMON, label: `${FIXTURE_DAEMON} (this daemon)` },
-  ];
   return (
-    <AuthProvider>
-      <SelectedDaemonProvider room={room} daemons={daemons}>
+    <RebuiltDirectory>
         <button
           type="button"
           data-testid={HARNESS_IDS.leaveScreen}
@@ -146,9 +153,8 @@ function LeavableScreenHarness() {
         >
           leave
         </button>
-        {onScreen ? <ModelsAppPage onNavigate={() => {}} /> : null}
-      </SelectedDaemonProvider>
-    </AuthProvider>
+        {onScreen ? <ModelsContent /> : null}
+    </RebuiltDirectory>
   );
 }
 
@@ -179,9 +185,6 @@ beforeEach(() => {
   cy.viewport(1280, 800);
   cy.clearLocalStorage();
   cy.clearAllSessionStorage();
-  // Seed inside `cy.then` so it runs *after* the queued clears above; a bare synchronous
-  // `setItem` executes first and is then wiped, leaving the screen with no session token.
-  cy.then(() => window.localStorage.setItem("tddy_session_token", "fake-token"));
 });
 
 // ---------------------------------------------------------------------------
@@ -195,7 +198,7 @@ describe("ModelsFanOutLifecycleAcceptance — reading the fleet without re-readi
       providers: [anOllamaProvider()],
       models: [anLlmModel({ loadState: ModelLoadState.NOT_LOADED })],
     });
-    mountWithRpc(<RebuiltDaemonListHarness />, backend);
+    mountModels(<RebuiltDaemonListHarness />, backend, { daemons: [FIXTURE_HOST] });
     page.row(QWEN).should("exist");
 
     // When — the daemon list is rebuilt three times, then the operator loads the model. The load's
@@ -214,7 +217,7 @@ describe("ModelsFanOutLifecycleAcceptance — reading the fleet without re-readi
   it("cancels a read still in flight when the screen is left", () => {
     // Given — a daemon whose model list has not answered, so the screen is still reading
     const { backend, read } = aRegistryWithANeverAnsweringModelList();
-    mountWithRpc(<LeavableScreenHarness />, backend);
+    mountModels(<LeavableScreenHarness />, backend, { daemons: [FIXTURE_HOST] });
     page.emptyStateStatus().should("equal", "loading");
 
     // When
@@ -229,14 +232,11 @@ describe("ModelsFanOutLifecycleAcceptance — reading the fleet without re-readi
   it("reports a refresh asked for while the common room is down instead of doing nothing", () => {
     // Given — the hook holds a provider, but there is no connection to its daemon
     const backend = aModelRegistryBackend({ providers: [anOllamaProvider()], models: [] });
-    mountWithRpc(
-      <AuthProvider>
-        <SelectedDaemonProvider room={null} daemons={[]}>
-          <DisconnectedRefreshHarness />
-        </SelectedDaemonProvider>
-      </AuthProvider>,
-      backend,
-    );
+    mountModels(<DisconnectedRefreshHarness />, backend, {
+      daemons: [],
+      reachable: false,
+      directoryStatus: "idle",
+    });
 
     // When
     byTestId(HARNESS_IDS.refresh).click();

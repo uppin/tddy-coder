@@ -9,17 +9,13 @@
  */
 
 import React from "react";
-import { WorktreesAppPage } from "../../src/worktrees/WorktreesAppPage";
+import { WorktreesContent } from "../../src/worktrees/WorktreesContent";
+import { aNavigationDouble, anAuthDouble } from "tddy-client-web/testkit";
 import { WorktreeSizeStatus } from "tddy-client-web/gen/worktree_pb";
-import { withSelectedDaemon } from "../support/rpc/withSelectedDaemon";
-import { mountWithRpc } from "../support/rpc/inMemory";
-import {
-  aSessionServiceBackend,
-  type WorktreeStatsRowInput,
-} from "../support/rpc/daemonSessionHostBackend";
-import { ACCESS_TOKEN_KEY, CURRENT_ACCESS_TOKEN } from "../support/rpc/durableSessionBackend";
+import { aWorktreesScreenBackend } from "../support/rpc/worktreesScreenBackend";
+import type { WorktreeStatsRowInput } from "../support/rpc/worktreeServiceBackend";
 import { worktreesPage } from "../support/pages/worktreesPage";
-import { appLocationPage } from "../support/pages/appLocationPage";
+import { navigationPage } from "../support/pages/navigationPage";
 
 // ---------------------------------------------------------------------------
 // Fixtures
@@ -50,15 +46,25 @@ const A_ROW: WorktreeStatsRowInput = {
   linesRemoved: 0n,
 };
 
+/** The navigation double the current test mounts into; `startAt` replaces it before mounting. */
+let navigation = aNavigationDouble("/worktrees");
+let appLocationPage = navigationPage(navigation);
+
+/** Put the app at `path` (a deep link) before mounting. */
+function startAt(path: string) {
+  navigation = aNavigationDouble(path);
+  appLocationPage = navigationPage(navigation);
+}
+
 function mountWorktrees() {
-  const backend = aSessionServiceBackend({
+  const { backend } = aWorktreesScreenBackend({
     projectsOverride: [ALPHA_PROJECT, BRAVO_PROJECT],
     worktreeStatsSnapshot: [A_ROW],
   });
-  mountWithRpc(
-    withSelectedDaemon(<WorktreesAppPage onNavigate={() => undefined} />),
-    backend,
-  );
+  cy.mountWithClients(<WorktreesContent />, backend, {
+    navigation,
+    auth: anAuthDouble({ sessionToken: "session-token" }),
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -69,11 +75,7 @@ beforeEach(() => {
   cy.viewport(1280, 800);
   cy.clearLocalStorage();
   cy.clearAllSessionStorage();
-  // `WorktreesAppPage` gates its content on `isAuthenticated`, and the client-side token gate
-  // decodes the token's `exp` — a placeholder string fails the gate and the screen never renders.
-  // Set it through a queued `cy.window()` so it survives the queued `clearLocalStorage()` above.
-  cy.window().then((win) => win.localStorage.setItem(ACCESS_TOKEN_KEY, CURRENT_ACCESS_TOKEN));
-  window.location.hash = "/worktrees";
+  startAt("/worktrees");
 });
 
 // ---------------------------------------------------------------------------
@@ -94,7 +96,7 @@ it("choosing a project records it in the URL", () => {
 
 it("a ?project= deep link selects that project on load", () => {
   // Given
-  appLocationPage.startAt(`/worktrees?project=${BRAVO_PROJECT.projectId}`);
+  startAt(`/worktrees?project=${BRAVO_PROJECT.projectId}`);
 
   // When
   mountWorktrees();
@@ -105,7 +107,7 @@ it("a ?project= deep link selects that project on load", () => {
 
 it("the resolved project is written back into a URL that carried none", () => {
   // Given — no project param, so the screen falls back to the first listed project
-  appLocationPage.startAt("/worktrees");
+  startAt("/worktrees");
 
   // When
   mountWorktrees();
@@ -116,7 +118,7 @@ it("the resolved project is written back into a URL that carried none", () => {
 
 it("a ?project= naming an unregistered project falls back to the first listed project", () => {
   // Given
-  appLocationPage.startAt("/worktrees?project=proj-deleted");
+  startAt("/worktrees?project=proj-deleted");
 
   // When
   mountWorktrees();

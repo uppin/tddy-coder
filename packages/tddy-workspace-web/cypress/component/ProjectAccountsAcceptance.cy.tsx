@@ -13,9 +13,9 @@
  */
 
 import React from "react";
-import { aDisconnectedRoom } from "tddy-livekit-web/testkit";
 import { anInMemoryRpcBackend, type InMemoryRpcBackend } from "tddy-connectrpc-testkit";
-import { ProjectsAppPage } from "../../src/projects/ProjectsAppPage";
+import { ProjectsContent } from "../../src/projects/ProjectsContent";
+import { aClientsPortDouble, anAuthDouble } from "tddy-client-web/testkit";
 import {
   ProjectsScreen,
   type AssignableAccount,
@@ -24,9 +24,6 @@ import { type ProjectEntry } from "tddy-client-web/gen/project_pb";
 import { AccountsService } from "tddy-client-web/gen/accounts_pb";
 import { ProjectService } from "tddy-client-web/gen/project_pb";
 import type { DaemonHost } from "tddy-client-web";
-import { SelectedDaemonProvider } from "../../src/rpc/selectedDaemon";
-import { AuthProvider } from "../../src/hooks/authProvider";
-import { mountWithRpc } from "../support/rpc/inMemory";
 import { projectsScreenPage } from "../support/pages/projectsScreenPage";
 
 // ---------------------------------------------------------------------------
@@ -110,18 +107,12 @@ function aProjectsBackend(projects: ProjectEntry[]): InMemoryRpcBackend {
     });
 }
 
-function mountProjectsAppPage() {
-  return (
-    <AuthProvider>
-      <SelectedDaemonProvider
-        room={aDisconnectedRoom()}
-        daemons={DAEMON_HOSTS}
-        servingInstanceId={LOCAL_HOST}
-      >
-        <ProjectsAppPage onNavigate={cy.stub()} />
-      </SelectedDaemonProvider>
-    </AuthProvider>
-  );
+/** The Projects screen over `backend`: the selected host is `LOCAL_HOST`, signed in with a session token. */
+function mountProjects(backend: InMemoryRpcBackend) {
+  return cy.mountWithClients(<ProjectsContent />, backend, {
+    clients: aClientsPortDouble(backend, { daemons: DAEMON_HOSTS, selectedInstanceId: LOCAL_HOST }),
+    auth: anAuthDouble({ sessionToken: "fake-token" }),
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -132,7 +123,6 @@ beforeEach(() => {
   cy.viewport(1280, 800);
   cy.clearLocalStorage();
   cy.clearAllSessionStorage();
-  window.localStorage.setItem("tddy_session_token", "fake-token");
 });
 
 // ---------------------------------------------------------------------------
@@ -307,12 +297,14 @@ it("assigns an account over the daemon and shows it after the list refreshes", (
     }));
 
   // When
-  mountWithRpc(mountProjectsAppPage(), backend);
+  mountProjects(backend);
   projectsScreenPage.assignAccount(PROJECT_ID, "github", "acct-octocat");
 
   // Then
   cy.wrap(backend).should((b) => {
     expect(b.callsTo(ProjectService.method.setProjectAccounts)).to.have.length(1);
   });
+  // The page object reads the selection once (`.then` does not retry), so first wait for the refreshed list.
+  projectsScreenPage.accountSelect(PROJECT_ID, "github").should("have.value", "acct-octocat");
   projectsScreenPage.assignedAccountId(PROJECT_ID, "github").should("equal", "acct-octocat");
 });

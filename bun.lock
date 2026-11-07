@@ -407,6 +407,7 @@
         "tddy-tauri-web": "workspace:*",
         "tddy-terminal-web": "workspace:*",
         "tddy-ui-web": "workspace:*",
+        "tddy-workspace-web": "workspace:*",
       },
       "devDependencies": {
         "@playwright/test": "^1.58.2",
@@ -440,6 +441,8 @@
       "dependencies": {
         "@bufbuild/protobuf": "^2.2.0",
         "@connectrpc/connect": "^2.0.0",
+        "lucide-react": "^1.7.0",
+        "tddy-chat-web": "workspace:*",
         "tddy-client-web": "workspace:*",
         "tddy-react-commons": "workspace:*",
         "tddy-ui-web": "workspace:*",

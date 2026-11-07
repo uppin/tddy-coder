@@ -13,16 +13,12 @@
  */
 
 import React from "react";
-import type { RoomHandle } from "tddy-client-web";
 import { Code } from "@connectrpc/connect";
 import { type InMemoryRpcBackend } from "tddy-connectrpc-testkit";
 import { ModelRegistryService } from "tddy-client-web/gen/models_pb";
-import { ModelsAppPage } from "../../../src/models/ModelsAppPage";
-import { AuthProvider } from "../../../src/hooks/authProvider";
+import { ModelsContent } from "../../../src/models/ModelsContent";
 import type { DaemonHost } from "tddy-client-web";
-import { SelectedDaemonProvider } from "../../../src/rpc/selectedDaemon";
-import { mountWithRpc } from "../../support/rpc/inMemory";
-import { aJoinedCommonRoom } from "../../support/rpc/withSelectedDaemon";
+import { mountModels } from "../../support/mountModels";
 import {
   aModelRegistryBackend,
   anAssistant,
@@ -44,20 +40,18 @@ const FIXTURE_HOST: DaemonHost = {
 /** Mount with an explicit common-room connection; `null` is a room that is not connected. */
 function mountWithRoom(
   backend: InMemoryRpcBackend,
-  options: { room: RoomHandle | null; daemons: DaemonHost[] },
+  options: { room: "connected" | null; daemons: DaemonHost[] },
 ) {
-  return mountWithRpc(
-    <AuthProvider>
-      <SelectedDaemonProvider room={options.room} daemons={options.daemons}>
-        <ModelsAppPage onNavigate={cy.stub()} />
-      </SelectedDaemonProvider>
-    </AuthProvider>,
-    backend,
-  );
+  const connected = options.room !== null;
+  return mountModels(<ModelsContent />, backend, {
+    daemons: options.daemons,
+    reachable: connected,
+    directoryStatus: connected ? "connected" : "idle",
+  });
 }
 
 const aConnectedDaemon = (backend: InMemoryRpcBackend) =>
-  mountWithRoom(backend, { room: aJoinedCommonRoom(), daemons: [FIXTURE_HOST] });
+  mountWithRoom(backend, { room: "connected", daemons: [FIXTURE_HOST] });
 
 // ---------------------------------------------------------------------------
 // Setup
@@ -67,9 +61,6 @@ beforeEach(() => {
   cy.viewport(1280, 800);
   cy.clearLocalStorage();
   cy.clearAllSessionStorage();
-  // Seed inside `cy.then` so it runs *after* the queued clears above; a bare synchronous
-  // `setItem` executes first and is then wiped, leaving the screen with no session token.
-  cy.then(() => window.localStorage.setItem("tddy_session_token", "fake-token"));
 });
 
 // ---------------------------------------------------------------------------

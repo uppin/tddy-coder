@@ -13,10 +13,9 @@ import {
   CreateAssistantResponseSchema,
   ModelRegistryService,
 } from "tddy-client-web/gen/models_pb";
-import { ModelsAppPage } from "../../../src/models/ModelsAppPage";
+import { ModelsContent } from "../../../src/models/ModelsContent";
 import type { DaemonHost } from "tddy-client-web";
-import { withSelectedDaemon } from "../../support/rpc/withSelectedDaemon";
-import { mountWithRpc } from "../../support/rpc/inMemory";
+import { mountModels } from "../../support/mountModels";
 import {
   aModelRegistryBackend,
   anAssistant,
@@ -51,10 +50,7 @@ const REPO_READER: AssistantRef = { daemonInstanceId: FIXTURE_DAEMON, name: "rep
 const CURSOR: AssistantRef = { daemonInstanceId: FIXTURE_DAEMON, name: "cursor" };
 
 const mount = (backend: ReturnType<typeof aModelRegistryBackend>) =>
-  mountWithRpc(
-    withSelectedDaemon(<ModelsAppPage onNavigate={cy.stub()} />, [FIXTURE_HOST]),
-    backend,
-  );
+  mountModels(<ModelsContent />, backend, { daemons: [FIXTURE_HOST] });
 
 const aRegistryWithOneModel = () =>
   aModelRegistryBackend({ providers: [anOllamaProvider()], models: [anLlmModel()] });
@@ -67,9 +63,6 @@ beforeEach(() => {
   cy.viewport(1280, 800);
   cy.clearLocalStorage();
   cy.clearAllSessionStorage();
-  // Seed inside `cy.then` so it runs *after* the queued clears above; a bare synchronous
-  // `setItem` executes first and is then wiped, leaving the screen with no session token.
-  cy.then(() => window.localStorage.setItem("tddy_session_token", "fake-token"));
 });
 
 // ---------------------------------------------------------------------------

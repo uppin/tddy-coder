@@ -9,22 +9,16 @@
  */
 
 import React from "react";
-import { aDisconnectedRoom } from "tddy-livekit-web/testkit";
+import { aNavigationDouble, anAuthDouble } from "tddy-client-web/testkit";
 import { TaskStatusProto } from "tddy-client-web/gen/tasks_pb";
-import { TasksDrawerScreen } from "../../src/tasks/TasksDrawerScreen";
-import type { DaemonHost } from "tddy-client-web";
-import { SelectedDaemonProvider } from "../../src/rpc/selectedDaemon";
-import { AuthProvider } from "../../src/hooks/authProvider";
+import { TasksScreen } from "../../src/tasks/TasksScreen";
 import { aTaskInfo, aTaskServiceBackend, snapshotTaskAdded } from "../support/rpc/taskRpcs";
-import { mountWithRecordingLiveKitRpc } from "../support/rpc/recordingLiveKitRpc";
 import { tasksDrawerPage } from "../support/pages/tasksDrawerPage";
-import { appLocationPage } from "../support/pages/appLocationPage";
+import { navigationPage } from "../support/pages/navigationPage";
 
 // ---------------------------------------------------------------------------
 // Fixtures
 // ---------------------------------------------------------------------------
-
-const DAEMON: DaemonHost = { instanceId: "udoo", label: "udoo (this daemon)" };
 
 const BUILD_TASK = aTaskInfo({
   taskId: "task-build-0000-0000-0000-000000000001",
@@ -43,20 +37,26 @@ const LINT_TASK = aTaskInfo({
   channels: [{ channelId: "0", name: "stdout" }],
 });
 
+/** The navigation double the current test mounted into; `startAt` replaces it before mounting. */
+let navigation = aNavigationDouble("/tasks");
+let appLocationPage = navigationPage(navigation);
+
+/** Put the app at `path` (a deep link) before mounting. */
+function startAt(path: string) {
+  navigation = aNavigationDouble(path);
+  appLocationPage = navigationPage(navigation);
+}
+
 /** Mount the tasks drawer with both fixture tasks in the initial `WatchTaskList` snapshot. */
 function mountTasksDrawer() {
   const backend = aTaskServiceBackend({
     watchTaskListEvents: [snapshotTaskAdded(BUILD_TASK), snapshotTaskAdded(LINT_TASK)],
     watchTaskOutput: "compiling…",
   });
-  mountWithRecordingLiveKitRpc(
-    <AuthProvider>
-      <SelectedDaemonProvider room={aDisconnectedRoom()} daemons={[DAEMON]}>
-        <TasksDrawerScreen />
-      </SelectedDaemonProvider>
-    </AuthProvider>,
-    backend,
-  );
+  cy.mountWithClients(<TasksScreen />, backend, {
+    navigation,
+    auth: anAuthDouble({ sessionToken: "fake-token" }),
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -67,8 +67,7 @@ beforeEach(() => {
   cy.viewport(1280, 800);
   cy.clearLocalStorage();
   cy.clearAllSessionStorage();
-  window.localStorage.setItem("tddy_session_token", "fake-token");
-  window.location.hash = "/tasks";
+  startAt("/tasks");
 });
 
 // ---------------------------------------------------------------------------
@@ -88,7 +87,7 @@ it("selecting a task puts its id in the URL", () => {
 
 it("a #/tasks/:taskId deep link opens that task's output pane on load", () => {
   // Given
-  appLocationPage.startAt(`/tasks/${LINT_TASK.taskId}`);
+  startAt(`/tasks/${LINT_TASK.taskId}`);
 
   // When
   mountTasksDrawer();
@@ -133,7 +132,7 @@ it("choosing an output channel records it in the URL", () => {
 
 it("a ?channel= deep link opens that output channel on load", () => {
   // Given
-  appLocationPage.startAt(`/tasks/${BUILD_TASK.taskId}?channel=1`);
+  startAt(`/tasks/${BUILD_TASK.taskId}?channel=1`);
 
   // When
   mountTasksDrawer();
@@ -144,7 +143,7 @@ it("a ?channel= deep link opens that output channel on load", () => {
 
 it("an unknown ?channel= value falls back to the task's first channel", () => {
   // Given — a channel id the task does not have
-  appLocationPage.startAt(`/tasks/${LINT_TASK.taskId}?channel=99`);
+  startAt(`/tasks/${LINT_TASK.taskId}?channel=99`);
 
   // When
   mountTasksDrawer();

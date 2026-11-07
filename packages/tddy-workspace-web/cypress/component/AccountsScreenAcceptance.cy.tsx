@@ -15,10 +15,8 @@
 
 import { Code, ConnectError } from "@connectrpc/connect";
 import { anInMemoryRpcBackend, type InMemoryRpcBackend } from "tddy-connectrpc-testkit";
-import { AccountsAppPage } from "../../src/accounts/AccountsAppPage";
+import { AccountsContent } from "../../src/accounts/AccountsContent";
 import { AccountsService, SyncStatus, type AccountSummary } from "tddy-client-web/gen/accounts_pb";
-import { mountWithRpc } from "../support/rpc/inMemory";
-import { withSelectedDaemon } from "../support/rpc/withSelectedDaemon";
 import { accountsScreenPage } from "../support/pages/accountsScreenPage";
 
 const UPDATED_AT = 1_726_700_000n;
@@ -59,7 +57,7 @@ function aBackendListing(
 }
 
 function mountAccounts(backend: InMemoryRpcBackend) {
-  mountWithRpc(withSelectedDaemon(<AccountsAppPage onNavigate={() => {}} />), backend);
+  cy.mountWithClients(<AccountsContent />, backend);
 }
 
 describe("Accounts screen", () => {

@@ -13,10 +13,9 @@ import React from "react";
 import { Code, ConnectError } from "@connectrpc/connect";
 import { anInMemoryRpcBackend } from "tddy-connectrpc-testkit";
 import { ModelLoadState, ModelRegistryService } from "tddy-client-web/gen/models_pb";
-import { ModelsAppPage } from "../../../src/models/ModelsAppPage";
+import { ModelsContent } from "../../../src/models/ModelsContent";
 import { daemonRpcIdentity, type DaemonHost } from "tddy-client-web";
-import { withSelectedDaemon } from "../../support/rpc/withSelectedDaemon";
-import { mountWithPerDaemonLiveKitRpc } from "../../support/rpc/perDaemonLiveKitRpc";
+import { mountModels } from "../../support/mountModels";
 import {
   aModelRegistryBackend,
   anAssistant,
@@ -191,14 +190,10 @@ function mountCrossHost(
   backendA: ReturnType<typeof aModelRegistryBackend>,
   backendB: ReturnType<typeof aModelRegistryBackend>,
 ) {
-  return mountWithPerDaemonLiveKitRpc(
-    withSelectedDaemon(<ModelsAppPage onNavigate={cy.stub()} />, [HOST_A, HOST_B]),
-    {
-      [daemonRpcIdentity(HOST_A.instanceId)]: backendA,
-      [daemonRpcIdentity(HOST_B.instanceId)]: backendB,
-    },
-    { httpBackend: backendA },
-  );
+  return mountModels(<ModelsContent />, backendA, {
+    daemons: [HOST_A, HOST_B],
+    backendsByHost: { [HOST_A.instanceId]: backendA, [HOST_B.instanceId]: backendB },
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -209,9 +204,6 @@ beforeEach(() => {
   cy.viewport(1280, 800);
   cy.clearLocalStorage();
   cy.clearAllSessionStorage();
-  // Seed inside `cy.then` so it runs *after* the queued clears above; a bare synchronous
-  // `setItem` executes first and is then wiped, leaving the screen with no session token.
-  cy.then(() => window.localStorage.setItem("tddy_session_token", "fake-token"));
 });
 
 // ---------------------------------------------------------------------------

@@ -46,8 +46,7 @@ function HmrOverlay() {
 }
 
 import { applyDebugMaskFromConfig, applyDebugMaskFromUrl } from "tddy-client-web";
-import { DaemonLoginScreen } from "./components/DaemonLoginScreen";
-import { CredentialVaultPrompt } from "./components/CredentialVaultPrompt";
+import { CredentialVaultPrompt, DaemonLoginScreen, isTasksPath } from "tddy-workspace-web";
 import { AuthCallback } from "./components/AuthCallback";
 import { LiveKitAppPage } from "./components/livekit/LiveKitAppPage";
 import { WorktreesAppPage } from "./components/worktrees/WorktreesAppPage";
@@ -62,7 +61,6 @@ import { SessionsDrawerScreen } from "./components/sessions/SessionsDrawerScreen
 import { SettingsAppPage } from "./components/settings/SettingsAppPage";
 import {
   isRpcPlaygroundPath,
-  isTasksPath,
   isVmsPath,
   isProjectsPath,
   isHostsPath,

@@ -2,26 +2,20 @@
  * Acceptance tests for the TasksDrawerScreen — real-time tasks list with channel output.
  *
  * `TaskService` is daemon-level RPC (`useDaemonClient`), routed over the shared common-room
- * LiveKit connection — see `aTaskServiceBackend` (in-memory fake) and `SelectedDaemonProvider`.
+ * port doubles — see `aTaskServiceBackend` (in-memory fake).
  * All auth is bypassed by pre-seeding localStorage with a fake session token.
  */
 
 import React from "react";
-import { aDisconnectedRoom } from "tddy-livekit-web/testkit";
+import { anAuthDouble } from "tddy-client-web/testkit";
 import { TaskStatusProto } from "tddy-client-web/gen/tasks_pb";
-import { TasksDrawerScreen } from "../../../src/tasks/TasksDrawerScreen";
-import type { DaemonHost } from "tddy-client-web";
-import { SelectedDaemonProvider } from "../../../src/rpc/selectedDaemon";
-import { AuthProvider } from "../../../src/hooks/authProvider";
+import { TasksScreen } from "../../../src/tasks/TasksScreen";
 import { aTaskInfo, aTaskServiceBackend, liveTaskUpdated, snapshotTaskAdded } from "../../support/rpc/taskRpcs";
-import { mountWithRecordingLiveKitRpc } from "../../support/rpc/recordingLiveKitRpc";
 import { tasksDrawerPage } from "../../support/pages/tasksDrawerPage";
 
 // ---------------------------------------------------------------------------
 // Fixtures
 // ---------------------------------------------------------------------------
-
-const DAEMON: DaemonHost = { instanceId: "udoo", label: "udoo (this daemon)" };
 
 const RUNNING_TASK = aTaskInfo({
   taskId: "task-running-0000-0000-0000-000000000001",
@@ -41,16 +35,9 @@ const COMPLETED_TASK = aTaskInfo({
   ],
 });
 
-/** Mounts `TasksDrawerScreen` with a single-daemon shared context routed to `backend`. */
+/** Mounts `TasksScreen` with the port doubles routed to `backend`. */
 function mountTasksDrawerScreen(backend: ReturnType<typeof aTaskServiceBackend>) {
-  mountWithRecordingLiveKitRpc(
-    <AuthProvider>
-      <SelectedDaemonProvider room={aDisconnectedRoom()} daemons={[DAEMON]}>
-        <TasksDrawerScreen />
-      </SelectedDaemonProvider>
-    </AuthProvider>,
-    backend,
-  );
+  cy.mountWithClients(<TasksScreen />, backend, { auth: anAuthDouble({ sessionToken: "fake-token" }) });
 }
 
 // ---------------------------------------------------------------------------
@@ -59,7 +46,6 @@ describe("TasksDrawerScreen — real-time task list and channel output", () => {
   beforeEach(() => {
     cy.clearLocalStorage();
     cy.clearAllSessionStorage();
-    window.localStorage.setItem("tddy_session_token", "fake-token");
   });
 
   // -------------------------------------------------------------------------

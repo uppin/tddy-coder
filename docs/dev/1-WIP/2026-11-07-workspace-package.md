@@ -1,7 +1,7 @@
 # Changeset: Workspace screens package (`tddy-workspace-web`)
 
 **Date**: 2026-11-07
-**Status**: 🚧 In Progress
+**Status**: 🚧 In Progress — green: modules moved, 33 specs green from the package config
 **Type**: Architecture Change
 **Complexity**: 4 — two packages (new package; app routes and sessions' worktree tab), ~56 specs moved, a cycle cut, an inherited oversized-file record
 
@@ -95,11 +95,11 @@ Real dependency edges, as opposed to the branch line:
 
 ## Scope
 
-- [ ] `tddy-workspace-web` skeleton + workflow
-- [ ] Modules moved; `tddy-web` (and sibling packages) import from `tddy-workspace-web`
-- [ ] Specs, page objects, drivers moved and green from the package config
-- [ ] Boundary rule
-- [ ] Code-issue records and package docs moved
+- [x] `tddy-workspace-web` skeleton + workflow
+- [x] Modules moved; `tddy-web` (and sibling packages) import from `tddy-workspace-web`
+- [x] Specs, page objects, drivers moved and green from the package config
+- [x] Boundary rule
+- [x] Code-issue record moved (package docs move at wrap)
 
 ## Technical Changes
 
@@ -117,8 +117,8 @@ Real dependency edges, as opposed to the branch line:
 
 ## Implementation Milestones
 
-- [ ] `tddy-workspace-web` specs green
-- [ ] `tddy-web` builds; consumers' scoped specs green
+- [x] `tddy-workspace-web` specs green
+- [x] `tddy-web` builds; consumers' scoped specs green
 
 ## Testing Plan
 
@@ -136,6 +136,20 @@ Real dependency edges, as opposed to the branch line:
 ## Decisions & Trade-offs
 
 - **One package for six small screens** (developer's granularity choice) — each is one daemon service's list/form.
+
+## Green: progress and deviations (2026-11-07)
+
+**Result:** `tddy-workspace-web` — `bun test src` 75 pass (incl. boundary rule), Cypress component 33 specs / 230 tests pass; `tddy-web` build and `test:unit` (800) pass; tddy-web specs run: DeviceLogin, CredentialVaultPrompt, RedirectLogin, AuthProviderRefresh, StandaloneFormTheme, DaemonSettingsRoute, ModelsNav, ProviderAccountDefaults, SessionWorktreeTab, worktreeToolParity.
+
+**Deviations from the draft contract**
+
+- **Seven specs went back to `tddy-web`** (`AuthProviderRefreshAcceptance`, `StandaloneFormThemeAcceptance`, `RedirectLoginAcceptance`, `DeviceLoginAcceptance`, `CredentialVaultPromptAcceptance`, `DaemonSettingsRouteAcceptance`, `models/ModelsNavAcceptance`): their subject is `tddy-web` wiring — the real `AuthProvider` (refresh, device/redirect flow, vault RPCs), `AppShell`, `index.tsx` — so they cannot run without importing `tddy-web`. They now import the sign-in components from `tddy-workspace-web`; their page objects/backends stayed with them. Moved: 33 specs, not 40.
+- `*AppPage` split as `HostsContent` was: `AccountsContent`, `ProjectsContent`, `ModelsContent`, `WorktreesContent` live in the package; the pages in `tddy-web` are shell wrappers. `TasksDrawerScreen` became `TasksScreen` (content) + a shell wrapper in `tddy-web`; its `tasks-drawer-screen` test id is on the content root. `WorktreesContent` renders the signed-out prompt itself; the page chooses the shell variant from `useAuth().isAuthenticated`.
+- `lib/codexOauthMetadata` does not exist (the dialog is self-contained); nothing moved. `SettingsAppPage` stayed in `tddy-web` (6 lines of wiring).
+- Shared helpers: `useActionFailure`, the session route builders (`sessionsDrawerPathForSession`, `sessionsProjectHomeSetupPath`, `singleSegmentAfter`, `decodeSegment`) and `AuthFlowDeclaration` moved into `tddy-client-web`; `standaloneFormStyles` into `tddy-ui-web`; the tasks route grammar into the package (`tasks/tasksRoutes.ts`). `tddy-web`'s `appRoutes` re-exports the session builders it still uses.
+- `AccountsScreen.stories.tsx` stayed in `tddy-web` (Storybook globs `tddy-web/src`).
+- Spec support is the package's own (`cypress/support/{pages,drivers,rpc,mountModels.tsx,testIds.ts}`), mounted with `cy.mountWithClients` and doubles; `testIds.ts` trimmed to what the specs use.
+- `useModelRegistryFanOut` moved with its code-issue record (613 -> 612 lines, not grown; record and todo paths updated).
 
 ## Refactoring Needed
 
@@ -159,10 +173,10 @@ Real dependency edges, as opposed to the branch line:
 - [x] Run acceptance tests (verify they fail)
 - [x] USER REVIEW — acceptance tests (developer waived the per-node review for this stack, 2026-11-07: "finish the rest without stopping")
 - [x] TDD Red — write failing unit/integration tests
-- [ ] TDD Green — implement with quality code
-- [ ] Update documentation with progress
+- [x] TDD Green — implement with quality code
+- [x] Update documentation with progress
 - [ ] Repeat Red→Green→Update cycle until feature complete
-- [ ] Run the touched packages' tests (`tddy-workspace-web` Cypress + `bun test` + boundary rule; `tddy-web` build + consumers' scoped specs) — verify 100% pass
+- [x] Run the touched packages' tests (`tddy-workspace-web` Cypress + `bun test` + boundary rule; `tddy-web` build + consumers' scoped specs) — verify 100% pass
 - [ ] Validate changes (/validate-changes)
 - [ ] Refactor issues from change validation
 - [ ] USER REVIEW — development complete

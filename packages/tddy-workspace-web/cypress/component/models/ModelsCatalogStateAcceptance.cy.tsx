@@ -13,7 +13,6 @@
  */
 
 import React from "react";
-import type { RoomHandle } from "tddy-client-web";
 import { create } from "@bufbuild/protobuf";
 import { type InMemoryRpcBackend } from "tddy-connectrpc-testkit";
 import {
@@ -21,12 +20,9 @@ import {
   ModelRegistryService,
   ProviderKind,
 } from "tddy-client-web/gen/models_pb";
-import { ModelsAppPage } from "../../../src/models/ModelsAppPage";
-import { AuthProvider } from "../../../src/hooks/authProvider";
+import { ModelsContent } from "../../../src/models/ModelsContent";
 import type { DaemonHost } from "tddy-client-web";
-import { SelectedDaemonProvider } from "../../../src/rpc/selectedDaemon";
-import { mountWithRpc } from "../../support/rpc/inMemory";
-import { aJoinedCommonRoom } from "../../support/rpc/withSelectedDaemon";
+import { mountModels } from "../../support/mountModels";
 import {
   aModelRegistryBackend,
   anLlmModel,
@@ -56,16 +52,14 @@ const QWEN: ModelRef = {
  */
 function mountWithRoom(
   backend: InMemoryRpcBackend,
-  options: { room: RoomHandle | null; daemons: DaemonHost[] },
+  options: { room: "connected" | null; daemons: DaemonHost[] },
 ) {
-  return mountWithRpc(
-    <AuthProvider>
-      <SelectedDaemonProvider room={options.room} daemons={options.daemons}>
-        <ModelsAppPage onNavigate={cy.stub()} />
-      </SelectedDaemonProvider>
-    </AuthProvider>,
-    backend,
-  );
+  const connected = options.room !== null;
+  return mountModels(<ModelsContent />, backend, {
+    daemons: options.daemons,
+    reachable: connected,
+    directoryStatus: connected ? "connected" : "idle",
+  });
 }
 
 /** A registry whose model list only answers once the test releases it. */
@@ -87,9 +81,6 @@ beforeEach(() => {
   cy.viewport(1280, 800);
   cy.clearLocalStorage();
   cy.clearAllSessionStorage();
-  // Seed inside `cy.then` so it runs *after* the queued clears above; a bare synchronous
-  // `setItem` executes first and is then wiped, leaving the screen with no session token.
-  cy.then(() => window.localStorage.setItem("tddy_session_token", "fake-token"));
 });
 
 // ---------------------------------------------------------------------------
@@ -127,7 +118,7 @@ describe("ModelsCatalogStateAcceptance — why the catalog is empty", () => {
     // Given — connected, but no daemon has joined
     // When
     mountWithRoom(aModelRegistryBackend({ providers: [], models: [] }), {
-      room: aJoinedCommonRoom(),
+      room: "connected",
       daemons: [],
     });
 
@@ -141,7 +132,7 @@ describe("ModelsCatalogStateAcceptance — why the catalog is empty", () => {
     const gate = new Promise<void>((resolve) => {
       release = resolve;
     });
-    mountWithRoom(aGatedRegistryBackend(gate), { room: aJoinedCommonRoom(), daemons: [FIXTURE_HOST] });
+    mountWithRoom(aGatedRegistryBackend(gate), { room: "connected", daemons: [FIXTURE_HOST] });
 
     // Then — the wait is stated, not rendered as "this fleet has no models"
     page.emptyStateStatus().should("equal", "loading");
@@ -157,7 +148,7 @@ describe("ModelsCatalogStateAcceptance — why the catalog is empty", () => {
     // Given — a daemon with a provider that offers nothing
     // When
     mountWithRoom(aModelRegistryBackend({ providers: [anOllamaProvider()], models: [] }), {
-      room: aJoinedCommonRoom(),
+      room: "connected",
       daemons: [FIXTURE_HOST],
     });
 
@@ -170,7 +161,7 @@ describe("ModelsCatalogStateAcceptance — why the catalog is empty", () => {
   it("refuses to add a provider while no daemon is selected", () => {
     // Given — connected, but nothing to attach a provider to
     const backend = aModelRegistryBackend({ providers: [], models: [] });
-    mountWithRoom(backend, { room: aJoinedCommonRoom(), daemons: [] });
+    mountWithRoom(backend, { room: "connected", daemons: [] });
 
     // When
     page.openAddProviderForm();

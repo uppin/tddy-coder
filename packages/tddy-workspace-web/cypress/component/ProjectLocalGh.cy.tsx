@@ -11,10 +11,10 @@
  */
 
 import React from "react";
-import { aDisconnectedRoom } from "tddy-livekit-web/testkit";
 import { create } from "@bufbuild/protobuf";
 import { anInMemoryRpcBackend, type InMemoryRpcBackend } from "tddy-connectrpc-testkit";
-import { ProjectsAppPage } from "../../src/projects/ProjectsAppPage";
+import { ProjectsContent } from "../../src/projects/ProjectsContent";
+import { aClientsPortDouble, anAuthDouble } from "tddy-client-web/testkit";
 import {
   ProjectsScreen,
   type AssignableAccount,
@@ -28,9 +28,6 @@ import {
   type HostGithubCli,
 } from "tddy-client-web/gen/host_pb";
 import type { DaemonHost } from "tddy-client-web";
-import { SelectedDaemonProvider } from "../../src/rpc/selectedDaemon";
-import { AuthProvider } from "../../src/hooks/authProvider";
-import { mountWithRpc } from "../support/rpc/inMemory";
 import { projectsScreenPage } from "../support/pages/projectsScreenPage";
 
 // ---------------------------------------------------------------------------
@@ -155,25 +152,18 @@ function aProjectsBackend(rows: ProjectEntry[]): InMemoryRpcBackend {
     }));
 }
 
-function mountProjectsAppPage() {
-  return (
-    <AuthProvider>
-      <SelectedDaemonProvider
-        room={aDisconnectedRoom()}
-        daemons={DAEMON_HOSTS.slice(0, 1)}
-        servingInstanceId={WORKSTATION}
-      >
-        <ProjectsAppPage onNavigate={cy.stub()} />
-      </SelectedDaemonProvider>
-    </AuthProvider>
-  );
+/** The Projects screen over `backend`: the selected host is `WORKSTATION`, signed in with a session token. */
+function mountProjects(backend: InMemoryRpcBackend) {
+  return cy.mountWithClients(<ProjectsContent />, backend, {
+    clients: aClientsPortDouble(backend, { daemons: DAEMON_HOSTS.slice(0, 1), selectedInstanceId: WORKSTATION }),
+    auth: anAuthDouble({ sessionToken: "fake-token" }),
+  });
 }
 
 beforeEach(() => {
   cy.viewport(1280, 800);
   cy.clearLocalStorage();
   cy.clearAllSessionStorage();
-  window.localStorage.setItem("tddy_session_token", "fake-token");
 });
 
 // ---------------------------------------------------------------------------
@@ -288,7 +278,7 @@ it("turns Local gh on over the daemon and shows it after the list refreshes", ()
   const backend = aProjectsBackend([aProjectRow({})]);
 
   // When Local gh is turned on
-  mountWithRpc(mountProjectsAppPage(), backend);
+  mountProjects(backend);
   projectsScreenPage.turnLocalGhOn(PROJECT_ID);
 
   // Then the daemon was told, and the refreshed card shows this host's gh login

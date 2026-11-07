@@ -16,7 +16,7 @@ import { anInMemoryRpcBackend } from "tddy-connectrpc-testkit";
 import { SessionVncTab } from "../../src/components/sessions/SessionVncTab";
 import { SessionScreenSharingTab } from "../../src/components/sessions/SessionScreenSharingTab";
 import { SessionFilesTab } from "../../src/components/sessions/SessionFilesTab";
-import { SessionWorktreeTab } from "../../src/components/sessions/SessionWorktreeTab";
+import { SessionWorktreeTab } from "tddy-workspace-web";
 import { SessionToolsTab } from "../../src/components/sessions/SessionToolsTab";
 import { SessionsDrawerScreen } from "../../src/components/sessions/SessionsDrawerScreen";
 import { SessionRuntime } from "../../src/components/sessions/SessionRuntime";

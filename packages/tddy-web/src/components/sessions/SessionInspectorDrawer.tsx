@@ -21,7 +21,7 @@ import { useAppLocation } from "../../routing/useAppLocation";
 import { SessionAgentRosterPane } from "./SessionAgentRosterPane";
 import { SessionToolsTab } from "./SessionToolsTab";
 import { SessionUsageTab } from "./SessionUsageTab";
-import { SessionWorktreeTab } from "./SessionWorktreeTab";
+import { SessionWorktreeTab } from "tddy-workspace-web";
 import { SessionFilesTab } from "./SessionFilesTab";
 import { SessionInspectorActivityTab } from "./SessionInspectorActivityTab";
 import { canResumeSession } from "./sessionBaseView";

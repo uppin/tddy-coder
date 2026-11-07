@@ -51,7 +51,8 @@
     "tddy-session-create-web": "workspace:*",
     "tddy-tauri-web": "workspace:*",
     "tddy-ui-web": "workspace:*",
-    "tddy-terminal-web": "workspace:*"
+    "tddy-terminal-web": "workspace:*",
+    "tddy-workspace-web": "workspace:*"
   },
   "devDependencies": {
     "@playwright/test": "^1.58.2",

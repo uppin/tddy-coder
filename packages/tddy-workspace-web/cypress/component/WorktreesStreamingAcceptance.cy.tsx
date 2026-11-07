@@ -1,7 +1,7 @@
 /**
  * Cypress component acceptance: Worktrees manager screen — lazy, streamed disk usage.
  *
- * `WorktreesAppPage` subscribes to `WorktreeService.StreamWorktreeStats` (daemon-routed, over the
+ * `WorktreesContent` subscribes to `WorktreeService.StreamWorktreeStats` (daemon-routed, over the
  * shared common-room LiveKit connection) and renders each worktree's size lifecycle live: a first
  * snapshot frame lists every worktree with its status, then per-worktree "updated" frames flip a
  * worktree from Calculating/None to Cached carrying its byte count. The screen also drives
@@ -14,17 +14,15 @@
  */
 
 import React from "react";
-import { WorktreesAppPage } from "../../src/worktrees/WorktreesAppPage";
+import { WorktreesContent } from "../../src/worktrees/WorktreesContent";
+import { anAuthDouble } from "tddy-client-web/testkit";
 import { WorktreeSizeStatus } from "tddy-client-web/gen/worktree_pb";
-import { withSelectedDaemon } from "../support/rpc/withSelectedDaemon";
-import { mountWithRpc } from "../support/rpc/inMemory";
 import {
-  aSessionServiceBackend,
-  type SessionServiceBackend,
-  type SessionServiceScenario,
-  type WorktreeStatsRowInput,
-} from "../support/rpc/daemonSessionHostBackend";
-import { ACCESS_TOKEN_KEY, CURRENT_ACCESS_TOKEN } from "../support/rpc/durableSessionBackend";
+  aWorktreesScreenBackend,
+  type WorktreesScreenBackend,
+  type WorktreesScreenScenario,
+} from "../support/rpc/worktreesScreenBackend";
+import type { WorktreeStatsRowInput } from "../support/rpc/worktreeServiceBackend";
 import { worktreesPage as page } from "../support/pages/worktreesPage";
 
 // ---------------------------------------------------------------------------
@@ -62,16 +60,16 @@ const NONE_ROW_CACHED_UPDATE: WorktreeStatsRowInput = {
 };
 
 function aWorktreesBackend(
-  overrides: Partial<SessionServiceScenario> = {},
-): SessionServiceBackend {
-  return aSessionServiceBackend({
+  overrides: Partial<WorktreesScreenScenario> = {},
+): WorktreesScreenBackend {
+  return aWorktreesScreenBackend({
     worktreeStatsSnapshot: [NONE_ROW, CACHED_ROW],
     ...overrides,
   });
 }
 
-function mountWorktrees(backend: SessionServiceBackend) {
-  mountWithRpc(withSelectedDaemon(<WorktreesAppPage onNavigate={() => undefined} />), backend);
+function mountWorktrees(backend: WorktreesScreenBackend) {
+  cy.mountWithClients(<WorktreesContent />, backend.backend, { auth: anAuthDouble({ sessionToken: "session-token" }) });
 }
 
 // ---------------------------------------------------------------------------
@@ -81,10 +79,6 @@ describe("Worktrees screen — streamed disk usage", () => {
     cy.viewport(1280, 800);
     cy.clearLocalStorage();
     cy.clearAllSessionStorage();
-    // A real, unexpired access token — WorktreesAppPage gates its content on `isAuthenticated`, and
-    // the client-side token gate decodes the token's `exp` (a malformed value fails the gate). Set it
-    // through a queued `cy.window()` so it survives the queued `clearLocalStorage()` above.
-    cy.window().then((win) => win.localStorage.setItem(ACCESS_TOKEN_KEY, CURRENT_ACCESS_TOKEN));
   });
 
   it("lists the biggest worktree first, with the never-sized one calculating at the bottom", () => {

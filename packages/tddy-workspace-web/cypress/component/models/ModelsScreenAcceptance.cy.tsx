@@ -11,10 +11,9 @@
 import React from "react";
 import { Code } from "@connectrpc/connect";
 import { ModelLoadState, ModelRegistryService } from "tddy-client-web/gen/models_pb";
-import { ModelsAppPage } from "../../../src/models/ModelsAppPage";
+import { ModelsContent } from "../../../src/models/ModelsContent";
 import type { DaemonHost } from "tddy-client-web";
-import { withSelectedDaemon } from "../../support/rpc/withSelectedDaemon";
-import { mountWithRpc } from "../../support/rpc/inMemory";
+import { mountModels } from "../../support/mountModels";
 import {
   aCloudModel,
   aCloudProvider,
@@ -67,9 +66,6 @@ beforeEach(() => {
   cy.viewport(1280, 800);
   cy.clearLocalStorage();
   cy.clearAllSessionStorage();
-  // Seed inside `cy.then` so it runs *after* the queued clears above; a bare synchronous
-  // `setItem` executes first and is then wiped, leaving the screen with no session token.
-  cy.then(() => window.localStorage.setItem("tddy_session_token", "fake-token"));
 });
 
 // ---------------------------------------------------------------------------
@@ -85,7 +81,7 @@ describe("ModelsScreenAcceptance — the model catalog", () => {
     });
 
     // When
-    mountWithRpc(withSelectedDaemon(<ModelsAppPage onNavigate={cy.stub()} />, [FIXTURE_HOST]), backend);
+    mountModels(<ModelsContent />, backend, { daemons: [FIXTURE_HOST] });
 
     // Then — `rowLabels` above waits for the embedding row to render, so the `timeout: 0`
     // absence below is read from a table that is already populated, not from an empty page
@@ -105,7 +101,7 @@ describe("ModelsScreenAcceptance — the model catalog", () => {
     });
 
     // When
-    mountWithRpc(withSelectedDaemon(<ModelsAppPage onNavigate={cy.stub()} />, [FIXTURE_HOST]), backend);
+    mountModels(<ModelsContent />, backend, { daemons: [FIXTURE_HOST] });
 
     // Then — each `timeout: 0` absence is preceded by a waiting assertion on the *same* row
     // (`rowLoadState`, then the action that row does offer), so the row is known to be rendered
@@ -124,7 +120,7 @@ describe("ModelsScreenAcceptance — the model catalog", () => {
       providers: [anOllamaProvider()],
       models: [anLlmModel({ loadState: ModelLoadState.NOT_LOADED })],
     });
-    mountWithRpc(withSelectedDaemon(<ModelsAppPage onNavigate={cy.stub()} />, [FIXTURE_HOST]), backend);
+    mountModels(<ModelsContent />, backend, { daemons: [FIXTURE_HOST] });
 
     // When
     page.loadModel(QWEN);
@@ -144,7 +140,7 @@ describe("ModelsScreenAcceptance — the model catalog", () => {
       providers: [anOllamaProvider()],
       models: [anLlmModel({ loadState: ModelLoadState.LOADED })],
     });
-    mountWithRpc(withSelectedDaemon(<ModelsAppPage onNavigate={cy.stub()} />, [FIXTURE_HOST]), backend);
+    mountModels(<ModelsContent />, backend, { daemons: [FIXTURE_HOST] });
 
     // When
     page.unloadModel(QWEN);
@@ -168,7 +164,7 @@ describe("ModelsScreenAcceptance — the model catalog", () => {
       Code.Unavailable,
       "connection refused: http://localhost:11434/api/generate",
     );
-    mountWithRpc(withSelectedDaemon(<ModelsAppPage onNavigate={cy.stub()} />, [FIXTURE_HOST]), backend);
+    mountModels(<ModelsContent />, backend, { daemons: [FIXTURE_HOST] });
 
     // When
     page.loadModel(QWEN);
@@ -192,7 +188,7 @@ describe("ModelsScreenAcceptance — the model catalog", () => {
     });
 
     // When
-    mountWithRpc(withSelectedDaemon(<ModelsAppPage onNavigate={cy.stub()} />, [FIXTURE_HOST]), backend);
+    mountModels(<ModelsContent />, backend, { daemons: [FIXTURE_HOST] });
 
     // Then — chat needs a positive `llm` label; `unknown` is the daemon refusing to guess, and the
     // web must not guess in its place. `rowLabels` waits for the row, so the absence below is read
@@ -214,7 +210,7 @@ describe("ModelsScreenAcceptance — the model catalog", () => {
     );
 
     // When
-    mountWithRpc(withSelectedDaemon(<ModelsAppPage onNavigate={cy.stub()} />, [FIXTURE_HOST]), backend);
+    mountModels(<ModelsContent />, backend, { daemons: [FIXTURE_HOST] });
 
     // Then — the lost list is named and the lists that arrived still render
     page
@@ -232,7 +228,7 @@ describe("ModelsScreenAcceptance — the model catalog", () => {
     });
 
     // When
-    mountWithRpc(withSelectedDaemon(<ModelsAppPage onNavigate={cy.stub()} />, [FIXTURE_HOST]), backend);
+    mountModels(<ModelsContent />, backend, { daemons: [FIXTURE_HOST] });
 
     // Then — the row publishes the value it was given rather than folding it into one of the three
     // states this build knows, which would make a daemon/web skew read as ordinary data
@@ -251,7 +247,7 @@ describe("ModelsScreenAcceptance — the model catalog", () => {
       providers: [anOllamaProvider(), aCloudProvider()],
       models: [anLlmModel(), aCloudModel()],
     });
-    mountWithRpc(withSelectedDaemon(<ModelsAppPage onNavigate={cy.stub()} />, [FIXTURE_HOST]), backend);
+    mountModels(<ModelsContent />, backend, { daemons: [FIXTURE_HOST] });
 
     // Then — the row states residency does not apply and offers neither action. `rowLoadState`
     // waits for the cloud row itself, so both `timeout: 0` absences run against a rendered row

@@ -5,24 +5,21 @@
  * Host selection is driven by the daemon-role participants in the common LiveKit room, so the
  * host-dependent behaviors are exercised against the presentational `ProjectsScreen` with an
  * explicit `daemons` prop; the RPC-wiring behaviors (list/create) are exercised against the
- * `ProjectsAppPage` container via the in-memory backend.
+ * `ProjectsContent` container via the in-memory backend.
  *
  * PRD: docs/ft/web/projects-screen-multi-host.md.
  */
 
 import React from "react";
-import { aDisconnectedRoom } from "tddy-livekit-web/testkit";
 import { anInMemoryRpcBackend, type InMemoryRpcBackend } from "tddy-connectrpc-testkit";
-import { ProjectsAppPage } from "../../src/projects/ProjectsAppPage";
+import { ProjectsContent } from "../../src/projects/ProjectsContent";
+import { ConnectionProviderRegistry } from "tddy-client-web";
+import { aClientsPortDouble, anAuthDouble } from "tddy-client-web/testkit";
+import { aHostConnection } from "../support/rpc/hostConnections";
 import { ProjectsScreen } from "../../src/projects/ProjectsScreen";
 import { type ProjectEntry } from "tddy-client-web/gen/project_pb";
 import { ProjectService } from "tddy-client-web/gen/project_pb";
 import type { DaemonHost } from "tddy-client-web";
-import { SelectedDaemonProvider } from "../../src/rpc/selectedDaemon";
-import { AuthProvider } from "../../src/hooks/authProvider";
-import { daemonRpcIdentity } from "tddy-client-web";
-import { mountWithRpc } from "../support/rpc/inMemory";
-import { mountWithRecordingLiveKitRpc } from "../support/rpc/recordingLiveKitRpc";
 import { projectsScreenPage } from "../support/pages/projectsScreenPage";
 
 // ---------------------------------------------------------------------------
@@ -55,7 +52,7 @@ function aProject(overrides: Partial<ProjectEntry>): ProjectEntry {
 const noBranches = () => Promise.resolve<{ branches: string[]; defaultRemote: string }>({ branches: [], defaultRemote: "" });
 
 /**
- * In-memory backend pre-seeded with the RPCs `ProjectsAppPage` calls on startup. `branches` seeds
+ * In-memory backend pre-seeded with the RPCs `ProjectsContent` calls on startup. `branches` seeds
  * the default-branch dropdown; `setProjectDefaultBranch` mutates the local project state so a
  * refreshed list reflects the new default.
  */
@@ -87,20 +84,31 @@ function aProjectsBackend(
     });
 }
 
+/** The Projects screen over `backend`: the selected host is `LOCAL_HOST`, signed in with a session token. */
+function mountProjects(backend: InMemoryRpcBackend, clients = aClientsPortDouble(backend, { daemons: DAEMON_HOSTS, selectedInstanceId: LOCAL_HOST })) {
+  return cy.mountWithClients(<ProjectsContent />, backend, {
+    clients,
+    auth: anAuthDouble({ sessionToken: "fake-token" }),
+  });
+}
+
 /**
- * `ProjectsAppPage` now reads its daemon list and RPC client from the shared
- * `SelectedDaemonProvider` context (see `DaemonSelectedRpcRoutingAcceptance.cy.tsx`) instead of
- * opening its own common-room connection — these container tests only care about the RPC-wiring
- * behavior, so a fixed single-host context is enough to get a non-null `useDaemonClient`.
+ * The same screen, with a host-connection provider that records every host it is asked to connect —
+ * the port's counterpart of the RPC-server identity every LiveKit client used to be built for.
  */
-function mountProjectsAppPage(onNavigate: (path: string) => void) {
-  return (
-    <AuthProvider>
-      <SelectedDaemonProvider room={aDisconnectedRoom()} daemons={DAEMON_HOSTS} servingInstanceId={LOCAL_HOST}>
-        <ProjectsAppPage onNavigate={onNavigate} />
-      </SelectedDaemonProvider>
-    </AuthProvider>
-  );
+function mountProjectsRecordingHostConnections(backend: InMemoryRpcBackend) {
+  const double = aClientsPortDouble(backend, { daemons: DAEMON_HOSTS, selectedInstanceId: LOCAL_HOST });
+  const targets: string[] = [];
+  const connections = new ConnectionProviderRegistry();
+  connections.register({
+    id: "recording",
+    connectHost: (hostId) => {
+      targets.push(hostId);
+      return aHostConnection(hostId).servingOver(backend.transport()).build();
+    },
+  });
+  mountProjects(backend, { ...double, connections });
+  return { targets };
 }
 
 // ---------------------------------------------------------------------------
@@ -111,7 +119,6 @@ beforeEach(() => {
   cy.viewport(1280, 800);
   cy.clearLocalStorage();
   cy.clearAllSessionStorage();
-  window.localStorage.setItem("tddy_session_token", "fake-token");
 });
 
 // ---------------------------------------------------------------------------
@@ -126,7 +133,7 @@ it("renders a project present on two hosts as one card with a row per host", () 
   ]);
 
   // When
-  mountWithRpc(mountProjectsAppPage(cy.stub()), backend);
+  mountProjects(backend);
 
   // Then
   projectsScreenPage.card("proj-alpha").should("exist");
@@ -140,7 +147,7 @@ it("shows the project id on its card", () => {
   const backend = aProjectsBackend([aProject({ projectId: "51777f55-9f23-47f1-a3e5-8997e2b036f2" })]);
 
   // When
-  mountWithRpc(mountProjectsAppPage(cy.stub()), backend);
+  mountProjects(backend);
 
   // Then
   projectsScreenPage
@@ -153,7 +160,7 @@ it("creates a project from the screen and shows it after the list refreshes", ()
   const backend = aProjectsBackend([]);
 
   // When
-  mountWithRpc(mountProjectsAppPage(cy.stub()), backend);
+  mountProjects(backend);
   projectsScreenPage.openCreateProjectForm();
   projectsScreenPage.fillAndSubmitCreateProjectForm({
     name: "beta",
@@ -235,15 +242,15 @@ it("sends the add-to-host RPC directly to the chosen host's daemon", () => {
     project: aProject({ projectId: "proj-alpha", daemonInstanceId: REMOTE_HOST }),
   }));
 
-  // When — the recording transport captures the RPC-server identity every LiveKit client is built for
-  const { targets } = mountWithRecordingLiveKitRpc(mountProjectsAppPage(cy.stub()), backend);
+  // When — the recording provider captures the host every client is connected for
+  const { targets } = mountProjectsRecordingHostConnections(backend);
   projectsScreenPage.openAddToHost("proj-alpha");
   projectsScreenPage.addProjectToHost("proj-alpha", REMOTE_HOST);
 
-  // Then — the add-to-host RPC is addressed to the chosen host's own RPC identity
-  // (daemon-server-2), not only the selected local daemon it double-hops through today.
+  // Then — a connection was resolved for the chosen host itself (server-2), not only the selected
+  // local daemon, and the add-to-host RPC names that host.
   cy.wrap(null).should(() => {
-    expect(targets).to.include(daemonRpcIdentity(REMOTE_HOST));
+    expect(targets).to.include(REMOTE_HOST);
     const calls = backend.callsTo(ProjectService.method.addProjectToHost);
     expect(calls).to.have.length(1);
     expect(calls[0].daemonInstanceId).to.equal(REMOTE_HOST);
@@ -403,7 +410,7 @@ it("sets the project default branch to the chosen remote branch", () => {
   );
 
   // When — the operator chooses origin/dev as the default branch
-  mountWithRpc(mountProjectsAppPage(cy.stub()), backend);
+  mountProjects(backend);
   projectsScreenPage.setDefaultBranch("proj-alpha", "origin/dev");
 
   // Then — SetProjectDefaultBranch is called with the chosen ref for that project
@@ -413,6 +420,8 @@ it("sets the project default branch to the chosen remote branch", () => {
     expect(calls[0].projectId).to.equal("proj-alpha");
     expect(calls[0].mainBranchRef).to.equal("origin/dev");
   });
+  // The page object reads the selection once (`.then` does not retry), so first wait for the refreshed list.
+  projectsScreenPage.defaultBranchSelect("proj-alpha").should("have.value", "origin/dev");
   projectsScreenPage.defaultBranchValue("proj-alpha").should("equal", "origin/dev");
 });
 

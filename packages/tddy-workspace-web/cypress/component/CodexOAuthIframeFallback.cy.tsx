@@ -1,5 +1,5 @@
 import React from "react";
-import { CodexOAuthDialog } from "../../src/CodexOAuthDialog";
+import { CodexOAuthDialog } from "../../src/signin/CodexOAuthDialog";
 import { byTestId, TEST_IDS } from "../support/testIds";
 
 describe("CodexOAuthDialog — iframe-blocked fallback", () => {
