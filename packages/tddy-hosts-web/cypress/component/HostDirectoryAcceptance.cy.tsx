@@ -20,7 +20,7 @@ import { useHostDirectory } from "../../src/rpc/hostDirectory/useHostDirectory";
 import { useHostPresence } from "../../src/rpc/hostDirectory/useHostPresence";
 import type { HostDirectorySource } from "../../src/rpc/hostDirectory/types";
 import { HostDirectorySources } from "../../src/rpc/hostDirectory/useHostDirectory";
-import { DaemonSelectorConnected } from "../../src/components/shell/DaemonSelector";
+import { DaemonSelectorConnected } from "../../src/shell/DaemonSelector";
 import { SelectedDaemonProvider } from "../../src/rpc/selectedDaemon";
 import { daemonSelectorPage } from "../support/pages/daemonSelectorPage";
 import { ConnectionProviders, ConnectionProviderRegistry } from "../../src/rpc/connections/registry";

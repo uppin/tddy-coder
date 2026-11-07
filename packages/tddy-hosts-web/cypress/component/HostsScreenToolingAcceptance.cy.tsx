@@ -20,7 +20,7 @@ import {
   HostGithubCliSchema,
   ProbeOutcome,
 } from "tddy-client-web/gen/host_pb";
-import { HostRowTooling } from "../../src/components/hosts/HostRowTooling";
+import { HostRowTooling } from "../../src/HostRowTooling";
 import { anInMemoryRpcBackend } from "tddy-connectrpc-testkit";
 import { mountWithRpc } from "../support/rpc/inMemory";
 import { withSelectedDaemon } from "../support/rpc/withSelectedDaemon";

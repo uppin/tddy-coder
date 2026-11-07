@@ -24,8 +24,8 @@ import {
   ScreenSharingService,
   type DesktopCredentialAnswer,
 } from "tddy-client-web/gen/screen_sharing_pb";
-import { HostRowRemoteDesktop } from "../../src/components/hosts/HostRowRemoteDesktop";
-import { HostRowTooling } from "../../src/components/hosts/HostRowTooling";
+import { HostRowRemoteDesktop } from "../../src/HostRowRemoteDesktop";
+import { HostRowTooling } from "../../src/HostRowTooling";
 import { mountWithRpc } from "../support/rpc/inMemory";
 import { withSelectedDaemon } from "../support/rpc/withSelectedDaemon";
 import { aHostConnection, aRegistryServing } from "../support/rpc/hostConnections";

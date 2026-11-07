@@ -12,7 +12,7 @@
 import { create } from "@bufbuild/protobuf";
 import { anInMemoryRpcBackend } from "tddy-connectrpc-testkit";
 import { HostRemoteDesktopSchema, ProbeOutcome } from "tddy-client-web/gen/host_pb";
-import { HostRowRemoteDesktop } from "../../src/components/hosts/HostRowRemoteDesktop";
+import { HostRowRemoteDesktop } from "../../src/HostRowRemoteDesktop";
 import { mountWithRpc } from "../support/rpc/inMemory";
 import { withSelectedDaemon } from "../support/rpc/withSelectedDaemon";
 import { hostRemoteDesktopPage } from "../support/pages/hostsScreenPage";

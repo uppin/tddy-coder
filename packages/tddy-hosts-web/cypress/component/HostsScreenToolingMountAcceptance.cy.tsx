@@ -18,7 +18,7 @@
 import { create } from "@bufbuild/protobuf";
 import { Code } from "@connectrpc/connect";
 import { anInMemoryRpcBackend, type InMemoryRpcBackend } from "tddy-connectrpc-testkit";
-import { HostsAppPage } from "../../src/components/hosts/HostsAppPage";
+import { HostsAppPage } from "../../src/HostsAppPage";
 import {
   GetHostToolingResponseSchema,
   HostGitIdentitySchema,

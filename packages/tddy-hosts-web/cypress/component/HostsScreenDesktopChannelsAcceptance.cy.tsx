@@ -18,7 +18,7 @@ import {
   ProbeOutcome,
 } from "tddy-client-web/gen/host_pb";
 import { DesktopAuthMethod, Protocol, ScreenSharingService } from "tddy-client-web/gen/screen_sharing_pb";
-import { HostRowRemoteDesktop } from "../../src/components/hosts/HostRowRemoteDesktop";
+import { HostRowRemoteDesktop } from "../../src/HostRowRemoteDesktop";
 import { mountWithRpc } from "../support/rpc/inMemory";
 import { withSelectedDaemon } from "../support/rpc/withSelectedDaemon";
 import { aHostPromptFeed } from "../support/rpc/hostPromptFeed";

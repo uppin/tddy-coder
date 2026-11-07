@@ -14,7 +14,7 @@
 
 import React, { useState } from "react";
 import { Room } from "livekit-client";
-import { DaemonSelectorConnected } from "../../src/components/shell/DaemonSelector";
+import { DaemonSelectorConnected } from "../../src/shell/DaemonSelector";
 import type { DaemonHost } from "../../src/lib/participantRole";
 import { SelectedDaemonProvider } from "../../src/rpc/selectedDaemon";
 import { appLocationPage } from "../support/pages/appLocationPage";
