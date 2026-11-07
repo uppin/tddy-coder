@@ -10,6 +10,35 @@
         "@zed-industries/claude-agent-acp": "0.22.2",
       },
     },
+    "packages/tddy-chat-web": {
+      "name": "tddy-chat-web",
+      "version": "0.1.0",
+      "dependencies": {
+        "@bufbuild/protobuf": "^2.2.0",
+        "@connectrpc/connect": "^2.0.0",
+        "tddy-client-web": "workspace:*",
+        "tddy-react-commons": "workspace:*",
+        "tddy-ui-web": "workspace:*",
+      },
+      "devDependencies": {
+        "@tailwindcss/vite": "^4.2.2",
+        "@types/bun": "latest",
+        "@types/react": "^19.0.0",
+        "@types/react-dom": "^19.0.0",
+        "@vitejs/plugin-react": "^4.3.0",
+        "babel-plugin-react-compiler": "^1.0.0",
+        "cypress": "^14.0.0",
+        "react": "^19.0.0",
+        "react-dom": "^19.0.0",
+        "tddy-connectrpc-testkit": "workspace:*",
+        "typescript": "^5.6.0",
+        "vite": "^6.0.0",
+      },
+      "peerDependencies": {
+        "react": "^19.0.0",
+        "react-dom": "^19.0.0",
+      },
+    },
     "packages/tddy-client-web": {
       "name": "tddy-client-web",
       "version": "0.1.0",
@@ -2306,6 +2335,8 @@
     "tar-fs": ["tar-fs@3.1.3", "https://npm.dev.wixpress.com/tar-fs/-/tar-fs-3.1.3.tgz", { "dependencies": { "pump": "^3.0.0", "tar-stream": "^3.1.5" }, "optionalDependencies": { "bare-fs": "^4.0.1", "bare-path": "^3.0.0" } }, "sha512-/hU4AXnIdZu+Gvl1pk0oI5f5HxWsCJRtY2aFaJdk9VvyL48DWU6iU5WAIPG+wIi1YvWA6eTJvIviP/tMAZZNwQ=="],
 
     "tar-stream": ["tar-stream@3.2.0", "https://npm.dev.wixpress.com/tar-stream/-/tar-stream-3.2.0.tgz", { "dependencies": { "b4a": "^1.6.4", "bare-fs": "^4.5.5", "fast-fifo": "^1.2.0", "streamx": "^2.15.0" } }, "sha512-ojzvCvVaNp6aOTFmG7jaRD0meowIAuPc3cMMhSgKiVWws1GyHbGd/xvnyuRKcKlMpt3qvxx6r0hreCNITP9hIg=="],
+
+    "tddy-chat-web": ["tddy-chat-web@workspace:packages/tddy-chat-web"],
 
     "tddy-client-web": ["tddy-client-web@workspace:packages/tddy-client-web"],
 

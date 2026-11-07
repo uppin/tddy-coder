@@ -7,6 +7,8 @@
 
 **Stack**: `#web-split` 10/16 — branch `feature/web-split/chat`, base `feature/web-split/playground`
 
+**PR**: [#847](https://github.com/uppin/tddy-coder/pull/847)
+
 ## Initial Discovery
 
 [2026-11-07-chat-package-initial-discovery.md](./2026-11-07-chat-package-initial-discovery.md)
@@ -68,6 +70,13 @@ implementing one here collides with the PR that owns it.
 | `n7`–`n9` | — (branch predecessors only) | nothing | — |
 
 ## Draft PR contract
+
+**As pushed (commit 2):** skeleton, workflow, boundary rule; **13** specs whose only session imports are
+modules that move with chat, plus the `acpReplayProjection` and `toolCallPresentation` suites, `git mv`'d —
+failing until the modules move. Chat-named specs that mount other session components stay in `tddy-web` for
+`feature/web-split/session`.
+
+Originally planned:
 
 First push (commit 2): the `tddy-chat-web` skeleton (manifest exporting the surface in `## Responsibility`, Cypress/Vite config, workflow), the specs, page objects and drivers listed below `git mv`'d into the package with imports pointing at it, and the boundary rule — failing until the modules move.
 
@@ -147,10 +156,10 @@ Real dependency edges, as opposed to the branch line:
 - [x] Cross-check `packages/*/docs/code-issues/` and `docs/dev/todo/` for items this change touches (Step 2b)
 - [x] Create/update PRD documentation
 - [x] Create changeset (this document)
-- [ ] Create failing acceptance tests
-- [ ] Run acceptance tests (verify they fail)
-- [ ] USER REVIEW — acceptance tests
-- [ ] TDD Red — write failing unit/integration tests
+- [x] Create failing acceptance tests
+- [x] Run acceptance tests (verify they fail)
+- [x] USER REVIEW — acceptance tests (developer waived the per-node review for this stack, 2026-11-07: "finish the rest without stopping")
+- [x] TDD Red — write failing unit/integration tests
 - [ ] TDD Green — implement with quality code
 - [ ] Update documentation with progress
 - [ ] Repeat Red→Green→Update cycle until feature complete

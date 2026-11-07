@@ -17,8 +17,8 @@
  */
 
 import React from "react";
-import { SessionActivitiesPane } from "../../src/components/sessions/SessionActivitiesPane";
-import { AgentActivityOverlay } from "../../src/components/sessions/AgentActivityOverlay";
+import { SessionActivitiesPane } from "../../src/SessionActivitiesPane";
+import { AgentActivityOverlay } from "../../src/AgentActivityOverlay";
 import { mountWithRpc } from "../support/rpc/inMemory";
 import { agentChatPage } from "../support/pages/agentChatPage";
 import { agentActivityPage } from "../support/pages/agentActivityPage";

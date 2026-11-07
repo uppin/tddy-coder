@@ -13,7 +13,7 @@
  */
 
 import React from "react";
-import { AgentActivityOverlay } from "../../src/components/sessions/AgentActivityOverlay";
+import { AgentActivityOverlay } from "../../src/AgentActivityOverlay";
 import { mountWithRpc } from "../support/rpc/inMemory";
 import { agentActivityPage } from "../support/pages/agentActivityPage";
 import {
