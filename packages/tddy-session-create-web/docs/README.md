@@ -22,4 +22,4 @@ imports nothing from `tddy-web` or `livekit-client` (`src/packageBoundary.test.t
 
 `bun test src` (helpers, the boundary rule, the passphrase slot) and `bun run cypress:component` — the
 component specs mount with `cy.mountWithClients` and per-host in-memory backends (`cypress/support/mounts.tsx`).
-Its PR check is `.github/workflows/web-tddy-session-create-web.yml`.
+CI: `.github/workflows/web.yml` (`Web lint` typechecks it; the `Web tests` shards run its suites).

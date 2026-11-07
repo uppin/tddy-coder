@@ -15,7 +15,7 @@ fn fixture() -> serde_json::Value {
     serde_json::from_str(
         &std::fs::read_to_string(
             PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-                .join("../tddy-web/cypress/support/fixtures/stack-parent-candidates.json"),
+                .join("../tddy-session-create-web/cypress/support/fixtures/stack-parent-candidates.json"),
         )
         .expect("the stack fixture exists"),
     )
