@@ -7,6 +7,8 @@
 
 **Stack**: `#web-split` 1/16 — branch `feature/web-split/web-ci`, base `master`
 
+**PR**: [#838](https://github.com/uppin/tddy-coder/pull/838)
+
 ## Initial Discovery
 
 [2026-11-07-per-package-web-checks-initial-discovery.md](./2026-11-07-per-package-web-checks-initial-discovery.md)
@@ -195,10 +197,10 @@ PR's own CI run (once ready) — a CI definition cannot be exercised locally.
 - [x] Cross-check `packages/*/docs/code-issues/` and `docs/dev/todo/` for items this change touches (Step 2b)
 - [x] Create/update PRD documentation
 - [x] Create changeset (this document)
-- [ ] Create failing acceptance tests
-- [ ] Run acceptance tests (verify they fail)
-- [ ] USER REVIEW — acceptance tests
-- [ ] TDD Red — write failing unit/integration tests
+- [x] Create failing acceptance tests
+- [x] Run acceptance tests (verify they fail)
+- [x] USER REVIEW — acceptance tests (developer waived the per-node review for this stack, 2026-11-07: "finish the rest without stopping")
+- [x] TDD Red — write failing unit/integration tests
 - [ ] TDD Green — implement with quality code
 - [ ] Update documentation with progress
 - [ ] Repeat Red→Green→Update cycle until feature complete
