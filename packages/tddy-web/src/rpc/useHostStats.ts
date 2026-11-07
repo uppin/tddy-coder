@@ -27,9 +27,8 @@
 import { useEffect, useState } from "react";
 import { HostService } from "tddy-client-web/gen/host_pb";
 import { subscribeHostStats } from "./hostStatsSubscription";
-import { useHostClient } from "./connections/registry";
-import { useDaemonClient } from "./selectedDaemon";
 import { useAuthContext } from "../hooks/authProvider";
+import { useDaemonClient, useHostClient } from "tddy-client-web";
 
 /** Free/total disk capacity for the selected daemon's default project directory. */
 export interface HostDiskStats {

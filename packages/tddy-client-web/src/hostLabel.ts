@@ -8,7 +8,7 @@
  * advertise themselves, does not use this.
  */
 
-import type { DaemonHost } from "../lib/participantRole";
+import type { DaemonHost } from "./ports/clients";
 
 /** The suffix a daemon appends to its own advertised label. */
 export const SELF_ADVERTISED_LABEL_SUFFIX = " (this daemon)";

@@ -1,7 +1,7 @@
 # Changeset: RPC interfaces and app ports (`tddy-client-web`)
 
 **Date**: 2026-11-07
-**Status**: 🚧 In Progress
+**Status**: 🚧 In Progress — green
 **Type**: Architecture Change
 **Complexity**: 4 — two packages (new `tddy-client-web`, ~550 import rewrites in `tddy-web`), a contract change (three ports over the existing connection model), codegen gate retargeted
 
@@ -108,12 +108,12 @@ Real dependency edges, as opposed to the branch line:
 
 ## Scope
 
-- [ ] Generated code moved; drift gate retargeted and green
-- [ ] Connection model + ClientsPort + hooks
-- [ ] NavigationPort, AuthPort + hooks
-- [ ] `tddy-web` provides the ports; import rewrites
-- [ ] Testkit (`mountWithClients`); `mountWithRpc` delegates
-- [ ] Boundary rule; workflow
+- [x] Generated code moved; drift gate retargeted and green
+- [x] Connection model + ClientsPort + hooks
+- [x] NavigationPort, AuthPort + hooks
+- [x] `tddy-web` provides the ports; import rewrites
+- [x] Testkit (`mountWithClients`); `mountWithRpc` delegates
+- [x] Boundary rule; workflow
 
 ## Technical Changes
 
@@ -132,13 +132,47 @@ Real dependency edges, as opposed to the branch line:
 
 ## Implementation Milestones
 
-- [ ] Drift gate green at the new path
-- [ ] Hook suites + `mountWithClients` spec green
-- [ ] `tddy-web` builds; scoped specs that exercise daemon/host clients still pass
+- [x] Drift gate green at the new path
+- [x] Hook suites + `mountWithClients` spec green
+- [x] `tddy-web` builds; scoped specs that exercise daemon/host clients still pass
 
 ## Testing Plan
 
 **Level:** `bun test` for hooks/registry against `tddy-connectrpc-testkit`; one Cypress component spec in the package proving `mountWithClients` end to end; a boundary rule.
+
+## Green progress and deviations
+
+Green (2026-11-07): 54 package `bun test` cases, `MountWithClients.cy.tsx`, drift gate, `tddy-web` build,
+727 `tddy-web` unit tests (`src/lib src/rpc src/hooks src/routing`) and ~30 `tddy-web` Cypress specs pass.
+
+Moved by `git mv`: `ConnectionProviderRegistry` (`connections/registry.ts`, with its test), `useHostFanOut`
+(`hostFanOut.ts`), `hostLabel` (+ test), `routing/appLocation` (+ test, `appLocation.ts`). The hooks keep their
+names; `tddy-web` call sites import them from `tddy-client-web` (~80 files).
+
+Deviations from the plan:
+
+- **Ports are plain React contexts**, not `tddy-react-commons/ports` `withPorts` — a package states its
+  needs as a context per port and a missing provider throws naming it; no default exists in the package.
+- **`ConnectionProviders` / `useConnectionProviders` / `HostReadiness` stay in `tddy-web`**
+  (`rpc/connections/registry.tsx`): they are the source side of the registry. Only the registry class moved.
+  `ClientsPort.connections` is the class itself; `ClientsPort.httpTransport` is a value, not a function.
+- **`AppClientsPorts`** (`tddy-web/src/rpc/appClientsPorts.tsx`) builds the three ports from `tddy-web`'s sources
+  (serving-daemon transport, registry, selected-daemon directory, hash navigation). `RpcTransportProvider`,
+  `ConnectionProviders`, `HostReadiness`, `AuthProvider` and `SelectedDaemonProvider` mount it, so the port in
+  scope is always built from the nearest source of each kind and every existing fixture keeps working. With no
+  `SelectedDaemonProvider` the directory source reports "no daemons" — what `useSelectedDaemon`'s
+  no-provider defaults used to say, now owned by the app's source, not the package. `cy.mount` in `tddy-web`
+  also mounts it (callers that relied on the old defaults get a provider, not a fallback).
+- **`tddy-web` components keep `useAppLocation` (hash store) and `useAuthContext`**; the app supplies
+  `hashNavigationPort` and `AuthProvider` additionally mounts `AuthPortProvider`. Rewriting those call
+  sites belongs to the nodes that move the components.
+- **Test fixes in the red suites**: `clientsPort.test.tsx` asserted `isAuthenticated` on `GetAuthStatusResponse`
+  (the field is `authenticated`); handlers return `create(...)` messages so `tsc` accepts them.
+- **`testkit/spy.ts`** returns bun's `mock` under `bun test` (the auth double's actions must satisfy
+  `toHaveBeenCalledTimes`) and a recording function elsewhere (Cypress bundle).
+- `mountWithRpc` mounts `withClients(<RpcTransportProvider …/>, backend)`.
+- Not run locally: the full Cypress suite and Storybook stories (CI); other bare-mount specs that used the old
+  no-provider defaults are covered by `cy.mount` mounting `AppClientsPorts`.
 
 ## Acceptance Tests
 
@@ -181,8 +215,8 @@ Real dependency edges, as opposed to the branch line:
 - [x] Run acceptance tests (verify they fail)
 - [x] USER REVIEW — acceptance tests (developer waived the per-node review for this stack, 2026-11-07: "finish the rest without stopping")
 - [x] TDD Red — write failing unit/integration tests
-- [ ] TDD Green — implement with quality code
-- [ ] Update documentation with progress
+- [x] TDD Green — implement with quality code
+- [x] Update documentation with progress
 - [ ] Repeat Red→Green→Update cycle until feature complete
 - [ ] Run the touched packages' tests (`bun test` in `packages/tddy-client-web`, its Cypress spec, `scripts/generated-code.sh check`; `tddy-web` build + scoped specs) — verify 100% pass
 - [ ] Validate changes (/validate-changes)

@@ -3,10 +3,17 @@
  * use instead of `tddy-web`'s providers: one in-memory RPC backend answers HTTP, daemon and host calls.
  */
 import type { ReactElement } from "react";
+import { createClient, type Transport } from "@connectrpc/connect";
+import type { DescService } from "@bufbuild/protobuf";
 import type { InMemoryRpcBackend } from "tddy-connectrpc-testkit";
-import type { ClientsPort, DaemonHost } from "../ports/clients";
-import type { AppLocation, NavigationPort } from "../ports/navigation";
-import type { AuthPort } from "../ports/auth";
+import { ConnectionProviderRegistry } from "../connections/registry";
+import type { ConnectionProvider, HostConnection } from "../connections/types";
+import { VaultState } from "../gen/auth_pb";
+import { formatAppLocation, parseAppLocation } from "../appLocation";
+import { ClientsProvider, type ClientsPort, type DaemonHost } from "../ports/clients";
+import { NavigationProvider, type AppLocation, type NavigationPort } from "../ports/navigation";
+import { AuthPortProvider, type AuthPort } from "../ports/auth";
+import { aSpy } from "./spy";
 
 export interface ClientsPortDoubleOptions {
   /** Hosts the double's directory lists; the first is selected. Default: one host, `host-a`. */
@@ -14,23 +21,104 @@ export interface ClientsPortDoubleOptions {
   selectedInstanceId?: string | null;
 }
 
+const DEFAULT_DAEMONS: DaemonHost[] = [{ instanceId: "host-a", label: "host-a" }];
+
+/** A host that answers every call from `transport`. Its clients are memoised per service. */
+function aHostConnectionOver(hostId: string, transport: Transport): HostConnection {
+  const clients = new Map<DescService, unknown>();
+  return {
+    hostId,
+    providerId: "in-memory",
+    status: "connected",
+    error: null,
+    capabilities: new Set(["rpc"]),
+    clientFor: <S extends DescService>(service: S) => {
+      if (!clients.has(service)) clients.set(service, createClient(service, transport));
+      return clients.get(service) as ReturnType<typeof createClient<S>>;
+    },
+    transport: () => transport,
+    openSession: () => {
+      throw new Error("the in-memory host double serves RPC only; it opens no session attachments");
+    },
+  };
+}
+
 /** A clients port whose every transport (HTTP and every host) is `backend`'s. */
 export function aClientsPortDouble(backend: InMemoryRpcBackend, options: ClientsPortDoubleOptions = {}): ClientsPort {
-  void backend;
-  void options;
-  throw new Error("TODO(clients): implement");
+  const transport = backend.transport();
+  const daemons = options.daemons ?? DEFAULT_DAEMONS;
+  const listed = new Set(daemons.map((d) => d.instanceId));
+  const connections = new ConnectionProviderRegistry();
+  const byHost = new Map<string, HostConnection>();
+  const provider: ConnectionProvider = {
+    id: "in-memory",
+    connectHost: (hostId) => {
+      if (!listed.has(hostId)) return null;
+      if (!byHost.has(hostId)) byHost.set(hostId, aHostConnectionOver(hostId, transport));
+      return byHost.get(hostId) ?? null;
+    },
+  };
+  connections.register(provider);
+  const selectedInstanceId =
+    options.selectedInstanceId !== undefined ? options.selectedInstanceId : (daemons[0]?.instanceId ?? null);
+  return {
+    httpTransport: transport,
+    connections,
+    selectedDaemon: {
+      daemons,
+      selectedInstanceId,
+      selectedLabel: daemons.find((d) => d.instanceId === selectedInstanceId)?.label ?? null,
+      selectDaemon: () => {},
+      directoryStatus: "connected",
+    },
+  };
 }
 
 /** An in-memory navigation port starting at `initial` (default `/`). */
-export function aNavigationDouble(initial?: string | AppLocation): NavigationPort & { readonly history: AppLocation[] } {
-  void initial;
-  throw new Error("TODO(clients): implement");
+export function aNavigationDouble(initial: string | AppLocation = "/"): NavigationPort & { readonly history: AppLocation[] } {
+  const asLocation = (to: string | AppLocation): AppLocation => (typeof to === "string" ? parseAppLocation(to) : to);
+  let current = asLocation(initial);
+  const history: AppLocation[] = [current];
+  const listeners = new Set<() => void>();
+  return {
+    history,
+    location: () => current,
+    navigate: (to, options) => {
+      const next = asLocation(to);
+      // The round trip through the hash spelling is what normalises a location, as the app's own port does.
+      current = parseAppLocation(formatAppLocation(next));
+      if (options?.replace) history[history.length - 1] = current;
+      else history.push(current);
+      for (const listener of [...listeners]) listener();
+    },
+    subscribe: (listener) => {
+      listeners.add(listener);
+      return () => {
+        listeners.delete(listener);
+      };
+    },
+  };
 }
 
 /** A signed-in (or, with overrides, any) auth port whose actions resolve and record their calls. */
 export function anAuthDouble(overrides: Partial<AuthPort> = {}): AuthPort {
-  void overrides;
-  throw new Error("TODO(clients): implement");
+  return {
+    user: null,
+    isAuthenticated: true,
+    isLoading: false,
+    error: null,
+    sessionToken: "double-token",
+    isRefreshing: false,
+    vaultState: VaultState.OPEN,
+    deviceLogin: { phase: "idle" },
+    login: aSpy(async () => {}),
+    handleCallback: aSpy(async () => {}),
+    logout: aSpy(async () => {}),
+    startDeviceLogin: aSpy(async () => {}),
+    unlockVault: aSpy(async () => {}),
+    resetVault: aSpy(async () => {}),
+    ...overrides,
+  };
 }
 
 export interface MountWithClientsOverrides {
@@ -41,8 +129,11 @@ export interface MountWithClientsOverrides {
 
 /** Wrap `element` in the three ports, backed by `backend` unless overridden. */
 export function withClients(element: ReactElement, backend: InMemoryRpcBackend, overrides: MountWithClientsOverrides = {}): ReactElement {
-  void element;
-  void backend;
-  void overrides;
-  throw new Error("TODO(clients): implement");
+  return (
+    <ClientsProvider port={overrides.clients ?? aClientsPortDouble(backend)}>
+      <NavigationProvider port={overrides.navigation ?? aNavigationDouble()}>
+        <AuthPortProvider port={overrides.auth ?? anAuthDouble()}>{element}</AuthPortProvider>
+      </NavigationProvider>
+    </ClientsProvider>
+  );
 }

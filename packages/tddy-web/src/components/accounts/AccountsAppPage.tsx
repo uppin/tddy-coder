@@ -19,7 +19,6 @@ import {
 } from "tddy-client-web/gen/accounts_pb";
 import { CatalogService } from "tddy-client-web/gen/catalog_pb";
 import { useAuthContext } from "../../hooks/authProvider";
-import { useDaemonClient } from "../../rpc/selectedDaemon";
 import { reasonOf } from "./rpcReason";
 import { useLinkFlow } from "./useLinkFlow";
 import { type ConnectProviderAccountInput } from "./ConnectProviderAccountForm";
@@ -31,6 +30,7 @@ import {
   type AccountsOutcome,
   type ProviderGroup,
 } from "./AccountsScreen";
+import { useDaemonClient } from "tddy-client-web";
 
 /** `SYNC_STATUS_UNSPECIFIED` maps to `null` — nothing has synced the account yet. */
 function syncStatusFromRpc(status: SyncStatus): AccountSyncStatus | null {

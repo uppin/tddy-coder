@@ -5,10 +5,10 @@ import type { HostConnection } from "tddy-client-web/connections/types";
 import { useActionFailure } from "../../hooks/useActionFailure";
 import { requestSessionsRefresh } from "../../lib/sessionsRefreshBridge";
 import { actionFailed, hostNotConnected } from "../../rpc/rpcFailure";
-import { useHostLabel } from "../../rpc/selectedDaemon";
 import { owningHostForSession } from "../../utils/crossHostSessions";
 import type { AttachClaim } from "./attachClaim";
 import type { UseSessionAttachmentResult } from "./useSessionAttachment";
+import { useHostLabel } from "tddy-client-web";
 
 export interface SessionsDrawerPaneActionsOptions {
   selectedSession: SessionEntry | null;

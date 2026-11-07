@@ -1,11 +1,11 @@
 import React from "react";
 import type { ProjectEntry } from "tddy-client-web/gen/project_pb";
 import type { StartSessionRequestInit } from "../../hooks/useSessionAttachments";
-import { useHostLabel } from "../../rpc/selectedDaemon";
 import { hostNotConnectedText } from "../../rpc/rpcFailure";
 import { Button } from "tddy-ui-web";
 import { CreateSessionPane } from "./CreateSessionPane";
 import { useSessionsDrawerClients } from "./useSessionsDrawerClients";
+import { useHostLabel } from "tddy-client-web";
 
 /**
  * The detail pane that sets up a project's **main** session (`/sessions/project-home/:projectId`),

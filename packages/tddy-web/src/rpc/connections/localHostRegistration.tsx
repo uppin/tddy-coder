@@ -16,11 +16,12 @@
 
 import { useRef, type ReactNode } from "react";
 import { tddyDebug } from "../../lib/debugMask";
-import { useAuthTokenGate, useHttpTransport, useTrafficMeterRegistry } from "../transportProvider";
+import { useAuthTokenGate, useTrafficMeterRegistry } from "../transportProvider";
 import { createDefaultWebviewIpcTransport } from "../daemonTransport";
 import { createIpcConnectionProvider, type LocalHostRegistration } from "./localHost";
 import { ConnectionProviders, useConnectionProviders } from "./registry";
 import type { ConnectionProvider } from "tddy-client-web/connections/types";
+import { useHttpTransport } from "tddy-client-web";
 
 /** Shares `localHost.ts`'s namespace: one mask turns the whole local-host story on. */
 const dRegistration = tddyDebug("tddy:rpc:local-host");

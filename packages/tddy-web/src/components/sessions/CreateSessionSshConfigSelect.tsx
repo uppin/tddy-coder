@@ -15,9 +15,9 @@ import {
   ListSshConfigHostsRequestSchema,
   ProbeOutcome,
 } from "tddy-client-web/gen/host_pb";
-import { useHostClient, useHostConnection } from "../../rpc/connections/registry";
 import { useLiveKitTransportFactoryIsOverridden } from "../../rpc/transportProvider";
 import { inputClass, labelClass } from "./createSessionFormStyles";
+import { useHostClient, useHostConnection } from "tddy-client-web";
 
 /**
  * Daemon whose `~/.ssh/config` the create-session SSH dropdown lists.
