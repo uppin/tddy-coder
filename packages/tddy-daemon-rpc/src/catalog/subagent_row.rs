@@ -40,11 +40,12 @@ pub(super) fn coding_agent_info(
     coding_agents: &tddy_coding_agent_specs::CodingAgentRegistry,
 ) -> Result<SubagentInfo, tddy_core::AgentIdError> {
     let record = coding_agent_record(def, daemon_instance_id)?;
-    // TODO(acp-subagent-leftovers): implement — the row's transport and policy from the harness's
-    // spec in `coding_agents` (`transport_and_policy_wire_of_spec`), not its name.
-    let _ = coding_agents;
-    let (transport, permission_policy) =
-        tddy_coding_subagent::transport_and_policy_wire(record.harness.as_deref().unwrap_or(""));
+    let (transport, permission_policy) = record
+        .harness
+        .as_deref()
+        .and_then(|harness| coding_agents.get(harness))
+        .map(tddy_coding_subagent::transport_and_policy_wire_of_spec)
+        .unwrap_or_default();
     Ok(SubagentInfo {
         agent_id: record.agent_id,
         label: record.label.unwrap_or_else(|| record.name.clone()),

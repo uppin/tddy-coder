@@ -636,3 +636,41 @@ async fn an_agent_whose_spec_declares_no_hooks_adapter_is_launched_with_the_comm
         )
     );
 }
+
+#[tokio::test]
+async fn a_routed_opencode_launch_keeps_its_route_inline_and_names_no_route_file() {
+    // Given — opencode declares `acp.hooks_adapter: opencode-route-file`, and its route carries a file
+    let data_dir = tempfile::tempdir().expect("data dir");
+    let worktree = tempfile::tempdir().expect("worktree");
+    let binaries = the_agent_binaries();
+    let route = HarnessRoute {
+        files: vec![tddy_core::provider_route::RouteFile {
+            name: "opencode.json".to_string(),
+            contents: r#"{"provider":{"acct":{}}}"#.to_string(),
+        }],
+        ..HarnessRoute::default()
+    };
+    let (launcher, _) = a_launcher_routed_to(
+        &data_dir.path().join("tools"),
+        an_env_naming(&binaries),
+        Some(route),
+    );
+
+    // When
+    let (command, _hooks) = the_launched_agent(
+        &launcher,
+        &a_routed_launch("opencode", false, worktree.path()),
+    )
+    .await;
+
+    // Then — a daemon-written route file would be unreadable by the session's OS user: the route
+    // stays inline, and no variable names a file
+    let names: Vec<&str> = command.env.iter().map(|(name, _)| name.as_str()).collect();
+    assert_eq!(
+        (
+            names.contains(&"OPENCODE_CONFIG"),
+            names.contains(&"OPENCODE_CONFIG_CONTENT")
+        ),
+        (false, true)
+    );
+}

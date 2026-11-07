@@ -15,13 +15,11 @@ pub mod user_permission_answers;
 
 pub use approval_routes::ApprovalRoutes;
 pub use catalog::{
-    coding_agent_defs, coding_agent_defs_from, coding_agent_defs_in, CodingAgentDef, ACP_HARNESSES,
-    CLAUDE_ACP, CODEX_ACP, OPENCODE,
+    coding_agent_defs, coding_agent_defs_from, coding_agent_defs_in, CodingAgentDef,
 };
 pub use confinement::{
-    confinement_for, confinement_of_spec, opencode_withdrawal_config, refuse_unless_confinable,
-    refuse_unless_registry_confinable, refuse_unless_spec_confinable, withdrawal_session_meta,
-    Confinement, OPENCODE_CONFIG_CONTENT,
+    confinable_acp_agents, confinement_of_spec, refuse_unless_registry_confinable,
+    refuse_unless_spec_confinable, Confinement, OPENCODE_CONFIG_CONTENT,
 };
 pub use launcher::{
     no_launch_hooks, AgentTransport, CodingAgentLaunch, CodingAgentLauncher, LaunchedAgent,
@@ -33,6 +31,6 @@ pub use session::{CancelHandle, CodingAgentSession};
 pub use transports::{
     permission_policy_of, permission_policy_of_spec, transport_and_policy_wire,
     transport_and_policy_wire_of_spec, transport_of, transport_of_spec, PermissionPolicy,
-    Transport, HEADLESS_HARNESSES,
+    Transport,
 };
 pub use user_permission_answers::{AnsweredBy, PermissionAnswering};

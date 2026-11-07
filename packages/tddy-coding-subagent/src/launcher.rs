@@ -271,22 +271,13 @@ pub trait CodingAgentLauncher: Send + Sync {
     ) -> Result<Vec<McpServerSpec>, SubagentError>;
 
     /// The `_meta` the ACP session is opened with (`#agent-tools 11/12`): in a managed session, the
-    /// native-tool withdrawal of an agent whose spec declares `tool_deny: { acp_meta: … }`. By
-    /// default today's per-harness answer, [`crate::withdrawal_session_meta`]; a launcher holding
-    /// the agent specs answers from them.
-    ///
-    /// TODO(acp-subagent-leftovers): implement — this default names agents
-    /// (`crate::withdrawal_session_meta`); it goes, so a launcher answers from its specs
-    /// (`docs/dev/todo/2026-11-04-acp-hand-built-launch-path-for-agentless-launchers.md`).
+    /// native-tool withdrawal of an agent whose spec declares `tool_deny: { acp_meta: … }`. Required:
+    /// a launcher answers from the agent specs it holds, and one that holds none says so (`Ok(None)`)
+    /// rather than inheriting an answer that names agents.
     async fn session_meta_for(
         &self,
         launch: &CodingAgentLaunch,
-    ) -> Result<Option<serde_json::Map<String, serde_json::Value>>, SubagentError> {
-        Ok(launch
-            .managed
-            .then(|| crate::withdrawal_session_meta(&launch.def.harness))
-            .flatten())
-    }
+    ) -> Result<Option<serde_json::Map<String, serde_json::Value>>, SubagentError>;
 
     /// The command a headless coding agent's CLI runs for every turn of `launch`'s conversation: the
     /// program, the environment it adds, its working directory and any MCP config it reads. Asked
