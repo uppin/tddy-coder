@@ -7,6 +7,8 @@
 
 **Stack**: `#web-split` 3/16 — branch `feature/web-split/ui`, base `feature/web-split/react-commons` (#839)
 
+**PR**: [#840](https://github.com/uppin/tddy-coder/pull/840)
+
 ## Initial Discovery
 
 [2026-11-07-ui-kit-package-initial-discovery.md](./2026-11-07-ui-kit-package-initial-discovery.md)
@@ -50,7 +52,8 @@ See the PRD. These modules import no generated code, no transport and no LiveKit
 - Its Cypress config and support (`mount` with the theme applied), and the specs that cover what it
   owns: `Button.cy.tsx`, `Toast.cy.tsx`, `useVisualViewport.cy.tsx`, and the specs of moved helpers.
 - The package boundary rule test for `tddy-ui-web` (no import of `tddy-web`, generated code,
-  `@connectrpc/*`, `livekit-client`).
+  `@connectrpc/*`, `livekit-client`), and the shared checker every later package's rule uses:
+  `scripts/web-package-boundary.ts` (`forbiddenImports(packageDir, rules)`) with its own tests.
 - `web-tddy-ui-web.yml`.
 
 ## Boundaries
@@ -129,10 +132,19 @@ via the same alias pattern as the other workspace packages, and `react` deduped 
 - `packages/tddy-ui-web/cypress/component/Button.cy.tsx` — moved, unchanged assertions.
 - `packages/tddy-ui-web/cypress/component/Toast.cy.tsx` — moved.
 - `packages/tddy-ui-web/cypress/component/useVisualViewport.cy.tsx` — moved.
-- `packages/tddy-ui-web/src/packageBoundary.test.ts` — `tddy-ui-web imports nothing from tddy-web,
-  generated code, connect or livekit` (scans its `src/`).
+- `packages/tddy-ui-web/src/packageBoundary.test.ts` — `imports nothing from tddy-web, generated code,
+  connect or livekit`; `owns the primitives, the theme and the shared hooks`.
+- `scripts/web-package-boundary.test.ts` — static/type/dynamic imports and re-exports found; a rule
+  matches subpaths but not a shared prefix; RegExp rules; a clean package is clean.
+
+Contract run: 2 + 5 `bun test` failures on `TODO(ui)`; the three moved Cypress specs import modules
+(`../../src/{button,toast,useVisualViewport}`) that do not exist yet, so their bundle fails to build.
 
 ## Technical Debt & Production Readiness
+
+- `scripts/web-package-boundary.ts` is read by every package's boundary test but is not one of
+  `scripts/web-affected.ts`'s `GLOBAL_INPUTS` (owned by #838): a change to it alone does not re-run
+  the packages' checks. For the sweep node — adding it there is #838's symbol, not this node's.
 
 ## Decisions & Trade-offs
 
@@ -157,10 +169,10 @@ via the same alias pattern as the other workspace packages, and `react` deduped 
 - [x] Cross-check `packages/*/docs/code-issues/` and `docs/dev/todo/` for items this change touches (Step 2b)
 - [x] Create/update PRD documentation
 - [x] Create changeset (this document)
-- [ ] Create failing acceptance tests
-- [ ] Run acceptance tests (verify they fail)
-- [ ] USER REVIEW — acceptance tests
-- [ ] TDD Red — write failing unit/integration tests
+- [x] Create failing acceptance tests
+- [x] Run acceptance tests (verify they fail)
+- [x] USER REVIEW — acceptance tests (developer waived the per-node review for this stack, 2026-11-07: "finish the rest without stopping")
+- [x] TDD Red — write failing unit/integration tests
 - [ ] TDD Green — implement with quality code
 - [ ] Update documentation with progress
 - [ ] Repeat Red→Green→Update cycle until feature complete

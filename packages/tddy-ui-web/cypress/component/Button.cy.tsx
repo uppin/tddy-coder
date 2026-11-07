@@ -1,5 +1,5 @@
 import React from "react";
-import { Button } from "../../src/components/ui/button";
+import { Button } from "../../src/button";
 
 describe("Button", () => {
   it("renders with a label and fires onClick when clicked", () => {
