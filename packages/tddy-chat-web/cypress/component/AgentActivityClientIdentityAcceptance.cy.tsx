@@ -21,7 +21,7 @@ import React from "react";
 import { createClient, type Transport } from "@connectrpc/connect";
 import { Room } from "livekit-client";
 import { ActivityService } from "tddy-client-web/gen/activity_pb";
-import { AgentActivityOverlay } from "../../src/components/sessions/AgentActivityOverlay";
+import { AgentActivityOverlay } from "../../src/AgentActivityOverlay";
 import { LiveKitConnectionProvider } from "../../src/rpc/connections/liveKit";
 import { mountWithRpc } from "../support/rpc/inMemory";
 import { agentActivityPage } from "../support/pages/agentActivityPage";
