@@ -140,6 +140,7 @@ mod tests {
             command: PathBuf::from("/opt/tddy/bin/tddy-tools"),
             args: vec!["--mcp".to_string()],
             env: BTreeMap::from([("TDDY_SESSION_ID".to_string(), "0190-c".to_string())]),
+            cwd: None,
         };
         let path = PathBuf::from("/homes/cursor/.cursor/mcp.json");
 
@@ -167,6 +168,7 @@ mod tests {
             command: PathBuf::from("/opt/tddy/bin/tddy-tools"),
             args: vec!["--mcp".to_string()],
             env: BTreeMap::new(),
+            cwd: None,
         };
         let path = PathBuf::from("/homes/cursor/.cursor/mcp.json");
 

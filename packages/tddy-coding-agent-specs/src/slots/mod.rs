@@ -30,6 +30,9 @@ pub struct McpServerCommand {
     pub args: Vec<String>,
     /// The server's `env` block; omitted from the registration when empty.
     pub env: BTreeMap<String, String>,
+    /// The directory an inline registration starts the server in (`cwd`), where the session
+    /// pointer it finds its session through lives (`#agent-tools 21/28`); no override when `None`.
+    pub cwd: Option<PathBuf>,
 }
 
 /// What one launch fills the slots with.
@@ -308,6 +311,7 @@ mod tests {
                 command: PathBuf::from("/opt/tddy/bin/tddy-tools"),
                 args: strings(&["--mcp"]),
                 env: BTreeMap::from([("RUST_LOG".to_string(), "info".to_string())]),
+                cwd: None,
             }),
             ..no_inputs(workdir.path(), scratch.path())
         };
@@ -546,6 +550,7 @@ mod tests {
             command: PathBuf::from("/opt/tddy/bin/tddy-tools"),
             args: strings(&["--mcp"]),
             env: BTreeMap::new(),
+            cwd: None,
         });
 
         // When

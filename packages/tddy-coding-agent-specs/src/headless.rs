@@ -185,6 +185,7 @@ fn mcp_server_command(server: &HeadlessMcpServer) -> McpServerCommand {
         command: server.command.clone(),
         args: server.args.clone(),
         env: server.env.clone(),
+        cwd: server.cwd.clone(),
     }
 }
 
@@ -199,6 +200,7 @@ impl HeadlessRenderer for SpecHeadlessRenderer {
             command: dep.binary.clone(),
             args: vec!["--mcp".to_string()],
             env: BTreeMap::new(),
+            cwd: None,
         })
     }
 

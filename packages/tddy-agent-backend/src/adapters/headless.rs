@@ -24,6 +24,8 @@ pub struct HeadlessMcpServer {
     pub args: Vec<String>,
     /// The server's `env` block; omitted from the registration when empty.
     pub env: BTreeMap<String, String>,
+    /// The directory an inline registration starts the server in (`cwd`); none when `None`.
+    pub cwd: Option<PathBuf>,
 }
 
 /// What one headless turn is launched with: the template's parameters and the slots' inputs.

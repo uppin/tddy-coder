@@ -504,6 +504,7 @@ async fn the_worktree_model_tool_server_and_profile_reach_the_renderer_for_oz() 
         command: PathBuf::from("/opt/tddy/bin/tddy-tools"),
         args: vec!["--mcp".to_string()],
         env: Vec::new(),
+        cwd: None,
     };
     let (driver, renderer) = cli.driver(
         "oz",
@@ -536,6 +537,7 @@ async fn the_worktree_model_tool_server_and_profile_reach_the_renderer_for_oz() 
                 command: PathBuf::from("/opt/tddy/bin/tddy-tools"),
                 args: vec!["--mcp".to_string()],
                 env: BTreeMap::new(),
+                cwd: None,
             }),
             BTreeMap::from([("profile".to_string(), "tddy-subagent".to_string())]),
         )

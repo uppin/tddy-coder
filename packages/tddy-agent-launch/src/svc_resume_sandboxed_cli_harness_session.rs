@@ -14,7 +14,8 @@ use tddy_rpc::{Response, Status};
 use tddy_service::proto::session::{ResumeSessionRequest, ResumeSessionResponse};
 use tddy_session_agents::agent_roster;
 
-use crate::cli_agent_steps::{resumed_or_adopted_conversation, ConversationStart};
+use crate::cli_agent_steps::conversation::resumed_or_adopted_conversation;
+use crate::cli_agent_steps::conversation::ConversationStart;
 use crate::cli_harness_jail::{
     agent_tddy_tools, jail_route_config_env, require_jail_route, CliJail, JailWiring,
 };

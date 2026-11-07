@@ -353,12 +353,15 @@ fn strings(items: &[&str]) -> Vec<String> {
     items.iter().map(|s| s.to_string()).collect()
 }
 
-/// The pointer a turn in `workspace` writes for a session with no remote.
+/// The pointer a turn in `workspace` writes for a session with no remote, owned by the backend's
+/// process — this one.
 fn the_sessions_pointer(workspace: &AWorkspace) -> serde_json::Value {
+    let owner = tddy_core::session_pointer::SessionPointerOwner::this_process();
     serde_json::json!({
         "socket": workspace.socket().to_string_lossy(),
         "repo_dir": workspace.repo().to_string_lossy(),
         "session_dir": workspace.session_dir().to_string_lossy(),
+        "owner": { "pid": owner.pid, "host": owner.host },
     })
 }
 

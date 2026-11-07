@@ -20,10 +20,10 @@ use tddy_session_agents::seed_codebase::{SeedCodebase, SeededAgentClones};
 use tddy_session_files::attachment_progress::AttachmentProgressSink;
 use tddy_worktree_service::branch_intent::BranchIntentRequest;
 
-use crate::cli_agent_steps::{
-    hooks_report_over_the_agent_tool_socket, refuse_a_role_the_agent_cannot_hold,
-    start_conversation, ConversationStart,
-};
+use crate::cli_agent_steps::conversation::refuse_a_role_the_agent_cannot_hold;
+use crate::cli_agent_steps::conversation::start_conversation;
+use crate::cli_agent_steps::conversation::ConversationStart;
+use crate::cli_agent_steps::hooks_report_over_the_agent_tool_socket;
 use crate::cli_harness_jail::{
     agent_tddy_tools, jail_route_config_env, prompt_ahead_of_slots, require_jail_route, CliJail,
     JailWiring, TDDY_TOOLS_ID,

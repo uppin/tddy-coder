@@ -8,8 +8,9 @@ use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 use pretty_assertions::assert_eq;
+use tddy_core::session_pointer::SessionPointerOwner;
 use tddy_tools::session_source::{
-    resolve_session, ResolvedSession, SessionNotFound, SessionSource,
+    resolve_session, ResolvedSession, SessionNotFound, SessionSource, UnreadablePointerCause,
 };
 
 /// A worktree holding a session pointer at its root, and a directory nested below it.
@@ -207,5 +208,157 @@ fn a_pointers_notify_map_sets_only_the_names_tddy_tools_notify_reads() {
             ),
             ("TDDY_SESSION_ID".to_string(), "s1".to_string()),
         ]
+    );
+}
+
+// --- `#agent-tools 21/28`: an owned pointer is refused once its owner or its socket is gone ---
+
+/// A worktree whose pointer names `socket` and is owned by `owner`, if anyone.
+fn a_worktree_with_an_owned_pointer(
+    socket: &Path,
+    owner: Option<SessionPointerOwner>,
+) -> AWorktree {
+    let worktree = a_worktree_without_a_pointer();
+    std::fs::create_dir_all(worktree.dir.path().join(".tddy")).expect(".tddy");
+    let mut pointer = serde_json::json!({
+        "socket": socket,
+        "repo_dir": "/srv/checkouts/app",
+    });
+    if let Some(owner) = owner {
+        pointer["owner"] = serde_json::json!({ "pid": owner.pid, "host": owner.host });
+    }
+    std::fs::write(worktree.pointer(), pointer.to_string()).expect("pointer");
+    worktree
+}
+
+/// A socket that exists: a listener bound in its own directory, kept for as long as the value is.
+struct ALiveSocket {
+    dir: tempfile::TempDir,
+    _listener: std::os::unix::net::UnixListener,
+}
+
+fn a_live_socket() -> ALiveSocket {
+    let dir = tempfile::tempdir().expect("socket dir");
+    let listener = std::os::unix::net::UnixListener::bind(dir.path().join("s.sock")).expect("bind");
+    ALiveSocket {
+        dir,
+        _listener: listener,
+    }
+}
+
+impl ALiveSocket {
+    fn path(&self) -> PathBuf {
+        self.dir.path().join("s.sock")
+    }
+}
+
+/// A process on this host that has exited and been reaped.
+fn an_exited_process_on_this_host() -> SessionPointerOwner {
+    let mut child = std::process::Command::new("true")
+        .spawn()
+        .expect("spawn true");
+    let pid = child.id();
+    child.wait().expect("reap");
+    SessionPointerOwner {
+        pid,
+        host: SessionPointerOwner::this_process().host,
+    }
+}
+
+/// An owner on an ssh target: a pid this host knows nothing of.
+fn an_owner_on_another_host() -> SessionPointerOwner {
+    SessionPointerOwner {
+        pid: an_exited_process_on_this_host().pid,
+        host: "buildbox.example".to_string(),
+    }
+}
+
+#[test]
+fn a_pointer_whose_owner_is_gone_is_an_error_naming_the_pointer() {
+    // Given — a pointer whose socket is still there, owned by a process here that has exited
+    let socket = a_live_socket();
+    let gone = an_exited_process_on_this_host();
+    let worktree = a_worktree_with_an_owned_pointer(&socket.path(), Some(gone.clone()));
+    let env = an_env(&[("TDDY_SOCKET", "/run/tddy/from-env.sock")]);
+
+    // When
+    let refused = resolve_session(None, &worktree.nested(), &env);
+
+    // Then — refused, never skipped for TDDY_SOCKET, and the message names the pointer
+    let message = format!(
+        "the session pointer {} could not be read: the session that wrote it (pid {} on {}) is \
+         no longer running",
+        worktree.pointer().display(),
+        gone.pid,
+        gone.host
+    );
+    assert_eq!(
+        refused.map_err(|e| (e.to_string(), e)),
+        Err((
+            message,
+            SessionNotFound::UnreadablePointer {
+                path: worktree.pointer(),
+                cause: UnreadablePointerCause::OwnerGone { owner: gone },
+            }
+        ))
+    );
+}
+
+#[test]
+fn a_pointer_naming_a_missing_socket_is_an_error_but_an_explicit_socket_is_not_prechecked() {
+    // Given — a pointer owned by this (live) process, naming a socket that does not exist
+    let missing = PathBuf::from("/run/tddy/no-such-session.sock");
+    let worktree =
+        a_worktree_with_an_owned_pointer(&missing, Some(SessionPointerOwner::this_process()));
+
+    // When
+    let through_the_pointer = resolve_session(None, &worktree.nested(), &an_env(&[]));
+    let through_the_argument = resolve_session(Some(&missing), &worktree.nested(), &an_env(&[]));
+
+    // Then
+    assert_eq!(
+        (
+            through_the_pointer,
+            through_the_argument.map(|session| session.source)
+        ),
+        (
+            Err(SessionNotFound::UnreadablePointer {
+                path: worktree.pointer(),
+                cause: UnreadablePointerCause::SocketMissing { socket: missing },
+            }),
+            Ok(SessionSource::Arg)
+        )
+    );
+}
+
+#[test]
+fn a_pointer_without_an_owner_still_resolves() {
+    // Given — a pointer an older daemon wrote: no owner, and a socket this host does not have
+    let socket = PathBuf::from("/run/tddy/older-daemon.sock");
+    let worktree = a_worktree_with_an_owned_pointer(&socket, None);
+
+    // When
+    let session = resolve_session(None, &worktree.nested(), &an_env(&[]));
+
+    // Then
+    assert_eq!(
+        session.map(|session| (session.socket, session.source)),
+        Ok((Some(socket), SessionSource::PointerFile(worktree.pointer())))
+    );
+}
+
+#[test]
+fn a_pointer_owned_on_another_host_is_resolved_without_checking_its_pid_or_socket() {
+    // Given — an ssh target's pointer: its owner's pid and its socket path are that host's
+    let socket = PathBuf::from("/run/tddy/on-the-target.sock");
+    let worktree = a_worktree_with_an_owned_pointer(&socket, Some(an_owner_on_another_host()));
+
+    // When
+    let session = resolve_session(None, &worktree.nested(), &an_env(&[]));
+
+    // Then
+    assert_eq!(
+        session.map(|session| (session.socket, session.source)),
+        Ok((Some(socket), SessionSource::PointerFile(worktree.pointer())))
     );
 }

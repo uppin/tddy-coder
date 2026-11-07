@@ -198,6 +198,7 @@ fn tddy_tools_server(session_dir: &Path, tddy_tools_path: &Path) -> McpServerCom
         command: tddy_tools_path.to_path_buf(),
         args: vec!["--mcp".to_string()],
         env: tddy_tools_mcp_env(session_dir),
+        cwd: None,
     }
 }
 

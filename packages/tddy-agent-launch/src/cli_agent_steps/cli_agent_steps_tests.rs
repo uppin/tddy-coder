@@ -13,6 +13,12 @@ use tddy_core::{HookCommandParams, SessionMetadata};
 use tddy_rpc::Code;
 
 use super::*;
+use crate::cli_agent_steps::conversation::conversation_mint_refused;
+use crate::cli_agent_steps::conversation::refuse_a_role_the_agent_cannot_hold;
+use crate::cli_agent_steps::conversation::resumed_conversation;
+use crate::cli_agent_steps::conversation::start_conversation;
+use crate::cli_agent_steps::conversation::ConversationStart;
+use crate::cli_agent_steps::conversation::LaunchConversation;
 use crate::harness_from_spec::HarnessLaunch;
 use crate::spec_launch::HostAgent;
 

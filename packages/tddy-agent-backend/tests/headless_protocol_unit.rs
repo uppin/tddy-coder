@@ -370,6 +370,7 @@ fn a_pointer(checkout: &Path) -> SessionPointer {
         session_dir: Some(PathBuf::from("/var/tddy/sessions/s1")),
         remote: BTreeMap::new(),
         notify: BTreeMap::new(),
+        owner: None,
     }
 }
 
