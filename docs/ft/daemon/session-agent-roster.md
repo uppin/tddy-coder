@@ -622,6 +622,26 @@ An unresolvable reference still fails the start with `INVALID_ARGUMENT` naming i
 started with a silently dropped agent — which would also be a session whose main agent kept the tools
 that agent was meant to take away from it, with only an absent roster to say so.
 
+### A start has a deadline
+
+A whole session start — routing, provisioning, the clone, the worktree cut, seeding, the agent's
+launch — runs under `session_start_timeout_secs` in `daemon.yaml` (default **600**, `0` means one
+second). Every start on a daemon is bounded by it: the web's unary and streamed starts, a peer's
+forwarded start, and an operator start (Telegram).
+
+When it expires the start is cancelled exactly as a caller's cancel would cancel it, and given 30 s
+to stop at its next checkpoint. A start that comes back with a session in that time has the session
+and the branch it cut removed; one that does not come back is dropped. Either way the caller gets
+`DEADLINE_EXCEEDED` naming the deadline and the step it was on (`the session start did not finish
+within 600s; it was on its clone step`). A start that answers the cancel with `CANCELLED` is still
+reported `DEADLINE_EXCEEDED`. Its progress events reach the caller before the error does.
+
+**Known limit.** An operator start carries no session token, and the split codebase half and the agent
+clones are deleted on their peers with one. An operator start that overran its deadline after creating
+either is left in place, and that is logged — see
+[the follow-up record](../../dev/todo/2026-11-07-operator-start-undo-of-peer-held-parts.md). A start
+dropped during the grace can leave a partially cut worktree (`TODO(start-cancel)`).
+
 ## Tool replacement, without behaviour
 
 A def's `replaces` is a list of exec-catalog tool names. The **union across the roster** is withdrawn

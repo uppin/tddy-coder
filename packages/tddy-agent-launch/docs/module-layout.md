@@ -67,6 +67,33 @@ sibling modules:
 | `svc_start_claude_cli_session.rs` | what a CLI start binds to a managed session's toolcall listener: `managed_spawn_handlers` (a pr-stack orchestrator's child spawner, a grill-me session's conversation spawner, neither for any other recipe), `conversation_spawn_handler_for`, and the tool session's host-socket registration (`register_tool_session_on_host_socket`, `ToolSessionHostRegistration`, `tool_session_spawned`) |
 | `svc_resume_claude_cli_session.rs` | `resumed_recipe`: the recipe a resume prepares a managed workflow for — none when the agent is live in tmux and this daemon still serves its workflow (a new listener would unlink the socket the agent uses). Every CLI resume is `opencode_cli_spawn::LaunchSessions::resume_cli_harness`, or `resume_sandboxed_cli_harness` for a sandboxed session |
 
+### The start deadline
+
+`start_here` runs its body (`start_here_body`) under `start_deadline::StartDeadline::new(config.session_start_timeout())`.
+Both entry points reach it: `start_session_core_cancellable` → `start_session_with_role` →
+`start_session_on_request` → `start_here`, and `start_session_for_os_user` → `start_here`.
+
+`StartDeadline::run(progress, cancel, start, undo)` hands `start` a sink of its own and reads that
+sink's channel **in the task that polls the start** (`Relay`), so the begun-and-not-ended phase it
+names at expiry is exact; a forwarding task would lag the timer. It races `sleep_until` against the
+start rather than wrapping it in `tokio::time::timeout`, because the grace (`START_CANCEL_GRACE`, 30 s,
+`with_cancel_grace` for tests) must keep polling the same future after the deadline. On expiry: cancel
+the token, poll for the grace, `undo` a session that came back, drop a start that did not, drain the
+relay, return `DEADLINE_EXCEEDED`. `undo` returns `()`: its failure is logged, not returned.
+
+The undo is `start_task::undo_a_timed_out_start`, keyed by OS user because an operator start carries
+no token: `remove_what_a_start_created` reads the cut branch (`branch_a_start_cut_as`), deletes the
+session (`delete_session_as`, the body of `DeleteSession` after `os_user_of_session_token`), then the
+branch. `undo_a_cancelled_start` (the streamed start's cancel) resolves its token with
+`os_user_of_session_token` and runs the same teardown. An operator start's peer-held parts (split
+codebase half, agent clones) are deleted with its empty token and so refused, leaving the session in
+place — `TODO(operator-start-undo)` in `start_task.rs`,
+`docs/dev/todo/2026-11-07-operator-start-undo-of-peer-held-parts.md`.
+
+The wiring tests are in `tddy-session-lifecycle/tests/session_start_deadline_acceptance.rs` (the
+`DaemonSessionHost` harness cannot be a dependency of this crate); their stuck step is an SSH clone to
+192.0.2.1 (TEST-NET-1), as in `start_cancel_acceptance`.
+
 ## Cloning a project for a start
 
 `ensure_project_available_for_start` clones the project's checkout when the host has none, with no

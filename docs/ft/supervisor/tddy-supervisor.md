@@ -157,6 +157,13 @@ Both are tracked in [docs/dev/TODO.md](../../dev/TODO.md). Session and repo-clon
 through the supervisor, and fail closed when it is unreachable — there is deliberately no fallback,
 because quietly spawning as the daemon user instead is the regression this feature removes.
 
+**Every call the daemon makes is bounded.** A unary call that has not answered within 60 s fails
+`Unavailable`, naming the method and the deadline (`the supervisor sent nothing for SpawnRelayed within
+60s`). A supervised clone waits at most 300 s for its first event, and then 300 s between events; a
+stream that goes quiet that long ends with the same `Unavailable` as its last item. git reports
+progress continuously while it transfers, so silence that long is a stopped supervisor or git, not a
+slow clone. Neither deadline is configurable.
+
 ## Acceptance criteria
 
 - [x] A host installed with `./install --systemd` runs one root tddy unit with `tddy-daemon` as its unprivileged child.
@@ -174,6 +181,8 @@ because quietly spawning as the daemon user instead is the regression this featu
 - [x] A supervised clone streams git's progress, then succeeds; a failed one's error carries git's own message.
 - [x] A supervised clone asking for an env key outside `allowed_env_keys` is refused, as `SpawnSession` is.
 - [x] Stopping a supervised clone (`StopSession(pid)`) ends git and leaves no destination directory.
+- [x] A supervisor that accepts a call and never answers fails it `Unavailable` naming the method within the call deadline — every unary call, not only `SpawnRelayed`.
+- [x] A supervised clone with no first event, or one that goes quiet after starting, fails `Unavailable` within its progress deadline.
 - [ ] **Not yet proven on a real host:** a session for OS user `alice` running as `alice` while the daemon runs as `tddy`; enforced cgroup limits; `stop_session` against a live supervisor. These need root plus a second account, and are the subject of a planned VM-backed acceptance test — see [docs/dev/TODO.md](../../dev/TODO.md).
 
 ## Related
