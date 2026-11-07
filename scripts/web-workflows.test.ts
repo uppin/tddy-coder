@@ -53,6 +53,20 @@ describe("web package workflows", () => {
     expect(strays).toEqual([]);
   });
 
+  test("every web workflow declares the permissions and concurrency the shared workflow needs", () => {
+    // Given — a called workflow cannot be granted more than its caller holds, so a caller without
+    // `checks: write` and `pull-requests: read` fails at startup; without `concurrency`, superseded runs pile up.
+    const required = [/^permissions:\s*$/m, /^\s+checks: write\b/m, /^\s+pull-requests: read\b/m, /^concurrency:\s*$/m];
+
+    // When
+    const incomplete = [...webWorkflowCallers()]
+      .filter(([, body]) => !required.every((pattern) => pattern.test(body)))
+      .map(([name]) => name);
+
+    // Then
+    expect(incomplete).toEqual([]);
+  });
+
   test("the shared workflow exists and ci.yml no longer runs the web suites", () => {
     // Given
     const ci = readFileSync(join(WORKFLOWS, "ci.yml"), "utf8");
