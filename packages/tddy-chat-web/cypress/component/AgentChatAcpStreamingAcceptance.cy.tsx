@@ -13,7 +13,7 @@
 import React from "react";
 import { create } from "@bufbuild/protobuf";
 import { anInMemoryRpcBackend } from "tddy-connectrpc-testkit";
-import { AgentChat } from "../../src/components/chat/AgentChat";
+import { AgentChat } from "../../src/AgentChat";
 import {
   AcpService,
   AcpAgentMessageSchema,

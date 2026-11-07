@@ -22,7 +22,7 @@ import React from "react";
 import { createClient, type Transport } from "@connectrpc/connect";
 import { aDisconnectedRoom } from "tddy-livekit-web/testkit";
 import { ActivityService } from "tddy-client-web/gen/activity_pb";
-import { AgentActivityOverlay } from "../../src/components/sessions/AgentActivityOverlay";
+import { AgentActivityOverlay } from "../../src/AgentActivityOverlay";
 import { LiveKitConnectionProvider } from "tddy-livekit-web";
 import { mountWithRpc } from "../support/rpc/inMemory";
 import { agentActivityPage } from "../support/pages/agentActivityPage";
