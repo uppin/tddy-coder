@@ -12,6 +12,7 @@
  * Feature: docs/ft/coder/pr-stacking.md#seeding-the-stack-from-an-existing-session-added-2026-08-13
  */
 
+import { aClientsPortDouble } from "tddy-client-web/testkit";
 import React from "react";
 import { servedAgentWire } from "../support/servedAgents";
 import { Code, ConnectError, createClient } from "@connectrpc/connect";
@@ -146,7 +147,8 @@ function mountPane(backend: ReturnType<typeof aCreateSessionBackend>) {
         onCreated={cy.stub()}
         initialValues={{ sessionType: "tool", projectId: PROJECT_ID, recipe: "pr-stack" }}
       />,
-    anInMemoryRpcBackend(),
+    backend,
+    { clients: aClientsPortDouble(backend, { daemons: [{ instanceId: "local", label: "local (this daemon)" }] }) },
   );
 }
 

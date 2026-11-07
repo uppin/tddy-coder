@@ -138,7 +138,7 @@ Real dependency edges, as opposed to the branch line:
 
 - [x] Package skeleton + workflow
 - [x] Modules moved (incl. `attachments/`, `baseBranchChoice`, `startProgress`); `tddy-web` imports rewritten
-- [ ] Specs, page objects, fixtures moved and green from the package config (sweep in progress)
+- [x] Specs, page objects, fixtures moved and green from the package config (35 specs, each run alone)
 - [x] Boundary rule
 - [x] Code-issue record moved
 
@@ -158,8 +158,8 @@ Create-session lives in `tddy-web/src/components/sessions/` (~30 `CreateSession*
 
 ## Implementation Milestones
 
-- [ ] Package specs green
-- [ ] `tddy-web` builds; PR-stack start-session specs still green
+- [x] Package specs green
+- [x] `tddy-web` builds; PR-stack start-session specs still green
 
 ## Testing Plan
 
@@ -190,6 +190,13 @@ Create-session lives in `tddy-web/src/components/sessions/` (~30 `CreateSession*
 
 ## Validation Results
 
+Scoped, local (full-workspace verification is CI's):
+
+- `tddy-session-create-web`: `bun test src` 87 pass / 0 fail (boundary + exported surface included); all 35 Cypress component specs run one at a time, all passing.
+- `tddy-ui-web`: `bun test src` 12 pass. `tddy-client-web`: `bun test src` 65 pass, 4 fail — the presence/media port tests that are `feature/web-split/livekit`'s (#843) red contract, not touched here.
+- `tddy-web`: `bun run build` succeeds; bun tests for `fileUploadChunks`, `prStackOrchestrators` and `prstack/` 155 pass; Cypress (one at a time): `CreateSessionAcceptance`, `...AndStreamsVisibleErrors`, `...AutoClosesDrawer`, `...BranchConflict`, `ProjectHomeSetupPaneAcceptance`, `CreateSessionClonePassphrase{Acceptance,Mount}`, `SessionIndexingIndicatorAcceptance`, `PrStackStartSessionModal`, `PrStackStartSessionDocAttachments` all passing. The other four PR-stack start-session specs were not run locally (CI).
+- Stack gate: no deletions and no #843-owned file (`ports/media.tsx`, `testkit/media.tsx`, the LiveKit import rule) touched; `#843` is a branch-line predecessor of this node, not a dependency.
+
 ## TODO
 
 - [x] Record initial discovery (`2026-11-07-create-session-package-initial-discovery.md`)
@@ -203,7 +210,7 @@ Create-session lives in `tddy-web/src/components/sessions/` (~30 `CreateSession*
 - [x] TDD Green — implement with quality code (package specs: see Validation Results)
 - [ ] Update documentation with progress
 - [ ] Repeat Red→Green→Update cycle until feature complete
-- [ ] Run the touched packages' tests (`tddy-session-create-web` Cypress + boundary rule; `tddy-web` build + PR-stack start-session specs) — verify 100% pass
+- [x] Run the touched packages' tests (`tddy-session-create-web` Cypress + boundary rule; `tddy-web` build + PR-stack start-session specs) — verify 100% pass
 - [ ] Validate changes (/validate-changes)
 - [ ] Refactor issues from change validation
 - [ ] USER REVIEW — development complete
