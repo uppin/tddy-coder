@@ -98,7 +98,7 @@ function aSubagentSession(
  * would pass for the wrong row.
  */
 function mountTree(roster: RosterBackend, sessions: SessionEntry[]) {
-  cy.mountWithRpc(
+  cy.mountWithClients(
     <SessionAgentRosterPane
       session={MAIN_SESSION}
       sessions={sessions}
@@ -367,7 +367,7 @@ describe("Agents tab — subagents as children of the main agent", () => {
     });
 
     // When
-    cy.mountWithRpc(
+    cy.mountWithClients(
       <SessionAgentRosterPane
         session={aSession({
           agentStatus: SessionAgentStatus.WAITING_FOR_INPUT,

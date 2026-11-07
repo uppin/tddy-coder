@@ -31,7 +31,7 @@ import type { SessionRuntimeState } from "tddy-session-web";
 import type { SessionAttachmentState } from "tddy-session-web";
 import { aSessionConnection } from "../support/rpc/sessionConnections";
 import { SessionsDrawerScreen } from "../../src/components/sessions/SessionsDrawerScreen";
-import { SessionMainPane } from "../../src/components/sessions/SessionMainPane";
+import { SessionMainPane } from "tddy-session-web";
 import { withSelectedDaemon } from "../support/rpc/withSelectedDaemon";
 import { aSessionServiceBackend } from "../support/rpc/daemonSessionHostBackend";
 import { mountWithRecordingLiveKitRpc } from "../support/rpc/recordingLiveKitRpc";

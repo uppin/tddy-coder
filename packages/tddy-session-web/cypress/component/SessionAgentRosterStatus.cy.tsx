@@ -77,7 +77,7 @@ function publish(
 }
 
 function mountPane(roster: RosterBackend) {
-  cy.mountWithRpc(
+  cy.mountWithClients(
     <SessionAgentRosterPane
       session={SESSION}
       sessions={[SESSION]}

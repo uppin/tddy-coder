@@ -27,7 +27,7 @@ import { create } from "@bufbuild/protobuf";
 import type { InMemoryRpcBackend } from "tddy-connectrpc-testkit";
 import { SessionEntrySchema } from "tddy-client-web/gen/session_pb";
 import { SessionAgentRosterPane } from "../../src/SessionAgentRosterPane";
-import { daemonRpcIdentity, type DaemonHost } from "tddy-client-web";
+import type { DaemonHost } from "tddy-client-web";
 import {
   aDaemonOfferingAgents,
   aDaemonThatCannotBeReached,
@@ -35,8 +35,7 @@ import {
   anAvailableAgent,
   type RosterBackend,
 } from "../support/rpc/sessionAgentRosterBackend";
-import { mountWithPerDaemonLiveKitRpc } from "../support/rpc/perDaemonLiveKitRpc";
-import { withSelectedDaemonServedBy } from "../support/rpc/withSelectedDaemon";
+import { mountWithPerHostClients } from "../support/rpc/perHostClients";
 import { sessionAgentRosterPage as page } from "../support/pages/sessionAgentRosterPage";
 
 const SESSION_ID = "1780828020298-split";
@@ -83,27 +82,30 @@ const SPLIT_SESSION = create(SessionEntrySchema, {
  * serves `roster` — standing in for the connected daemon forwarding the session-scoped calls, which
  * it does because those requests carry a routing field.
  *
- * Returns the LiveKit target identities the mounted tree actually addressed, which is how a test
- * says "over LiveKit RPC" rather than merely "answered by that host's backend".
+ * Returns the hosts the mounted tree actually dialled as peers, which is how a test says "reached
+ * through the connection registry" rather than merely "answered by that host's backend". That a
+ * peer is carried over LiveKit under `daemon-<hostId>` is pinned by `tddy-livekit-web`'s provider spec.
  */
 function mountPaneForASplitSession(
   roster: RosterBackend,
   codebaseHost: InMemoryRpcBackend,
-): { targets: string[] } {
-  return mountWithPerDaemonLiveKitRpc(
-    withSelectedDaemonServedBy(
+): { dialled: string[] } {
+  return mountWithPerHostClients(
+    (
       <SessionAgentRosterPane
         session={SPLIT_SESSION}
         sessions={[SPLIT_SESSION]}
         sessionToken="tok"
         daemonConnected
         onSwitchSubagent={cy.stub().as("switchSubagent")}
-      />,
-      [CONNECTED_HOST, CODEBASE_HOST],
-      CONNECTED_HOST.instanceId,
+      />
     ),
-    { [daemonRpcIdentity(CODEBASE_HOST.instanceId)]: codebaseHost },
-    { httpBackend: roster.backend },
+    { [CODEBASE_HOST.instanceId]: codebaseHost },
+    {
+      httpBackend: roster.backend,
+      daemons: [CONNECTED_HOST, CODEBASE_HOST],
+      servingInstanceId: CONNECTED_HOST.instanceId,
+    },
   );
 }
 
@@ -138,10 +140,10 @@ describe("Agent roster pane for a split session", () => {
     page.pickerOptionHost(FASTCONTEXT_CODEBASE).should("have.text", CODEBASE_HOST.instanceId);
   });
 
-  it("addresses the session's codebase host over LiveKit RPC, and no other host", () => {
+  it("addresses the session's codebase host as a peer through the connection registry, and no other host", () => {
     // Given
     const roster = aRosterServedOverHttp([anAvailableAgent("explorer", CONNECTED_HOST.instanceId)]);
-    const { targets } = mountPaneForASplitSession(
+    const { dialled } = mountPaneForASplitSession(
       roster,
       aDaemonOfferingAgents([anAvailableAgent("fastcontext", CODEBASE_HOST.instanceId)]),
     );
@@ -150,10 +152,10 @@ describe("Agent roster pane for a split session", () => {
     page.openPicker();
     page.pickerOption(FASTCONTEXT_CODEBASE).should("exist");
 
-    // Then — the codebase host was reached over the common room, and the connected host was read
-    // over the transport the browser already holds rather than addressed as a peer
+    // Then — the codebase host was reached as a peer, and the connected host was read over the
+    // transport the browser already holds rather than addressed as one
     cy.wrap(null).should(() => {
-      expect(targets).to.deep.equal([daemonRpcIdentity(CODEBASE_HOST.instanceId)]);
+      expect(Array.from(new Set(dialled))).to.deep.equal([CODEBASE_HOST.instanceId]);
     });
   });
 

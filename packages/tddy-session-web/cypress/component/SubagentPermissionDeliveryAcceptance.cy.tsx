@@ -16,7 +16,6 @@ import {
 } from "tddy-client-web/gen/session_agents_pb";
 import { SessionEntrySchema } from "tddy-client-web/gen/session_pb";
 import { SessionWithActivitySidebar } from "../../src/SessionWithActivitySidebar";
-import { mountWithRpc } from "../support/rpc/inMemory";
 import { recordedFields } from "../support/rpc/recordedRequests";
 import { byTestId } from "../support/testIds";
 import {
@@ -99,7 +98,7 @@ function mountASessionWhoseSubagentAsks(options: {
   backend.onUnary(SessionAgentService.method.answerAgentPermission, () =>
     create(AnswerAgentPermissionResponseSchema, { answeredBy: "alice" }),
   );
-  mountWithRpc(
+  cy.mountWithClients(
     <div style={{ display: "flex", flexDirection: "column", height: 700, width: 1200 }}>
       <SessionWithActivitySidebar
         session={create(SessionEntrySchema, {

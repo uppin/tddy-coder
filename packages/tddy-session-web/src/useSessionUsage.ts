@@ -18,7 +18,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { create } from "@bufbuild/protobuf";
-import { AsyncQueue } from "tddy-livekit-rpc-web";
+import { AsyncQueue } from "tddy-rpc-web";
 import { useRoomClient, useRoomStatus, type RoomHandle } from "tddy-client-web";
 import {
   ClientMessageSchema,

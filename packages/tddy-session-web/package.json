@@ -21,11 +21,18 @@
     "@bufbuild/protobuf": "^2.2.0",
     "@connectrpc/connect": "^2.0.0",
     "lucide-react": "^1.7.0",
+    "react-resizable-panels": "^3.0.6",
+    "react-syntax-highlighter": "^16.1.1",
+    "tddy-chat-web": "workspace:*",
     "tddy-client-web": "workspace:*",
+    "tddy-hosts-web": "workspace:*",
+    "tddy-prstack-web": "workspace:*",
     "tddy-react-commons": "workspace:*",
+    "tddy-rpc-web": "workspace:*",
     "tddy-session-create-web": "workspace:*",
     "tddy-terminal-web": "workspace:*",
-    "tddy-ui-web": "workspace:*"
+    "tddy-ui-web": "workspace:*",
+    "tddy-workspace-web": "workspace:*"
   },
   "peerDependencies": {
     "react": "^19.0.0",
@@ -36,6 +43,7 @@
     "@types/bun": "latest",
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",
+    "@types/react-syntax-highlighter": "^15.5.13",
     "@vitejs/plugin-react": "^4.3.0",
     "babel-plugin-react-compiler": "^1.0.0",
     "cypress": "^14.0.0",

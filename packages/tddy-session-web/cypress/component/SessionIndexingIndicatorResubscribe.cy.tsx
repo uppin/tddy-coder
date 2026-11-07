@@ -14,7 +14,6 @@
 import { createClient } from "@connectrpc/connect";
 import { CodeNavigationService } from "tddy-client-web/gen/code_navigation_pb";
 import { SessionIndexingIndicator } from "../../src/code/SessionIndexingIndicator";
-import { mountWithRpc } from "../support/rpc/inMemory";
 import { anIndexLoading } from "../support/rpc/codeSessionBackend";
 import {
   aSessionIndexWatchHost,
@@ -29,7 +28,7 @@ const INDEXING_38_TEXT = "Indexing — Indexing 38%";
 
 function mountTheHeaderOn(host: SessionIndexWatchHost) {
   const backend = host.backend();
-  mountWithRpc(
+  cy.mountWithClients(
     <SessionIndexingIndicator
       client={createClient(CodeNavigationService, backend.transport())}
       sessionToken="fake-token"

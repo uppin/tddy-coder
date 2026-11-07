@@ -18,7 +18,6 @@ import { create } from "@bufbuild/protobuf";
 import { anInMemoryRpcBackend, type InMemoryRpcBackend } from "tddy-connectrpc-testkit";
 import { CodeIndexProgressSchema, CodeNavigationService } from "tddy-client-web/gen/code_navigation_pb";
 import { SessionIndexingIndicator } from "../../src/code/SessionIndexingIndicator";
-import { mountWithRpc } from "../support/rpc/inMemory";
 import { sessionIndexingIndicatorPage } from "../support/pages/sessionIndexingIndicatorPage";
 
 const THE_SESSION = "session-indexing-1";
@@ -63,7 +62,7 @@ function aHostWarmingTheSessionsIndex(gate: Gate): InMemoryRpcBackend {
 }
 
 function mountTheIndexingIndicator(backend: InMemoryRpcBackend) {
-  mountWithRpc(
+  cy.mountWithClients(
     <SessionIndexingIndicator
       client={createClient(CodeNavigationService, backend.transport())}
       sessionToken="fake-token"

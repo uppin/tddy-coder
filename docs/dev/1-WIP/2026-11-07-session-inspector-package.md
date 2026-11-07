@@ -75,9 +75,9 @@ exports — failing until the modules move.
 
 ## Scope
 
-- [ ] Modules moved
-- [ ] Specs moved, on port doubles
-- [ ] Boundary rule green
+- [x] Modules moved
+- [x] Specs moved, on port doubles
+- [x] Boundary rule green
 
 ## Technical Changes
 
@@ -106,6 +106,30 @@ boundary rule. CI: the stack's single `web.yml` (affected-package shards).
 
 ## Refactoring Needed
 
+## Deviations (green)
+
+- **Moved**: 60 modules (`sessions/*` flat into `src/`, `session/*` into `src/code/`, plus `hooks/useKeyedActionFailure` and
+  `lib/codeLanguage`, which only they used) with their unit tests. `inspectorState`, `jailedCodebaseHalf`, `useMeterSnapshot`
+  and `SessionDetailPane` stay in tddy-web: the drawer hooks, status bar and traffic strip read them.
+- **Dependencies**: `useSessionUsage`/`useCodeSession` import `AsyncQueue` from `tddy-rpc-web` (where it lives; the
+  package may not import `tddy-livekit-rpc-web`). The package gains `tddy-chat-web`, `tddy-hosts-web`, `tddy-prstack-web`,
+  `tddy-rpc-web`, `tddy-workspace-web`, `react-resizable-panels`, `react-syntax-highlighter` (+ its types), the last
+  three moved out of tddy-web's `package.json`. `bun.lock` regenerated.
+- `SessionAgentClient` was declared twice (runtime props and main-pane props); main-pane props now import it.
+- **Specs**: the 19 inspector/agent/code-pane specs plus `GhosttyTerminalShrink`, `SessionInspectorMediaCapabilityAcceptance`,
+  `SessionMainPaneRoomTerminal`, `SessionMainPaneTerminalControl`, `SessionMainPaneUnscopedSession` run in the package on
+  `cy.mountWithClients`. Support copied (not moved: tddy-web specs still read it) into `cypress/support/`; `testIds.ts` gains
+  the keys they use; `sessionMainPanePage` is the slice of `sessionsDrawerPage` they need.
+- **`PrStackPresenterRoomAcceptance` stays in tddy-web** (returned from the package): both assertions are about the app's
+  HTTP transport minting the presenter-room token (`GenerateToken` carries the signed-in session token through the auth
+  gate), which the package cannot mount without tddy-web or livekit. It imports `SessionMainPane` from `tddy-session-web`.
+- `SessionAgentRosterSplitSession`: the per-daemon LiveKit mount became `perHostClients` (peers answered per host through
+  the connection registry). Its "targets" assertion now reads the hosts dialled as peers (deduplicated); the
+  `daemon-<hostId>` identity mapping is pinned by `tddy-livekit-web/src/connections/liveKit.test.ts`.
+- `SessionInspectorMediaCapabilityAcceptance`: `appLocationPage` hash set-up became the navigation port double;
+  `LIVEKIT_SOURCE_ID` comes from `tddy-client-web`.
+- Code issue `oversized-file-session-main-pane` moved to `packages/tddy-session-web/docs/code-issues/` (504 lines, unchanged).
+
 ## Validation Results
 
 ## TODO
@@ -118,8 +142,8 @@ boundary rule. CI: the stack's single `web.yml` (affected-package shards).
 - [x] Run acceptance tests (verify they fail)
 - [x] USER REVIEW — acceptance tests (developer waived the per-node review for this stack, 2026-11-07: "finish the rest without stopping")
 - [x] TDD Red — write failing unit/integration tests
-- [ ] TDD Green — implement with quality code
-- [ ] Update documentation with progress
+- [x] TDD Green — implement with quality code
+- [x] Update documentation with progress
 - [ ] Run the touched packages' tests — verify 100% pass
 - [ ] Validate changes (/validate-changes)
 - [ ] Refactor issues from change validation

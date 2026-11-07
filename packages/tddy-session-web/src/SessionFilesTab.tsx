@@ -6,7 +6,7 @@ import { formatBytes } from "tddy-ui-web";
 import { copyToClipboard } from "tddy-terminal-web";
 import { HOST_PATH_MIME } from "tddy-terminal-web";
 import { hostNotConnected, rpcFailureText } from "tddy-client-web";
-import { useKeyedActionFailure } from "../../hooks/useKeyedActionFailure";
+import { useKeyedActionFailure } from "./hooks/useKeyedActionFailure";
 
 export interface SessionFilesTabProps {
   client: Client<typeof SessionFilesService> | null;

@@ -17,7 +17,6 @@
 
 import React from "react";
 import { SessionAgentConversationPane } from "../../src/SessionAgentConversationPane";
-import { mountWithRpc } from "../support/rpc/inMemory";
 import {
   anAgentConversationBackend,
   type AgentConversationBackend,
@@ -31,7 +30,7 @@ const EXPLORER = "explorer@workstation-1";
 const CONVERSATION_ID = "conv-0198f0aa-0000-7000-8000-000000000001";
 
 function mountPane(conversation: AgentConversationBackend) {
-  mountWithRpc(
+  cy.mountWithClients(
     <SessionAgentConversationPane
       sessionId={SESSION_ID}
       sessionToken="tok"

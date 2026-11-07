@@ -12,7 +12,7 @@ import { VncPassphraseDialog } from "./VncPassphraseDialog";
 import { VncOverlay } from "tddy-hosts-web";
 import { applyVncTabAction, initialVncTabState } from "./vncTabState";
 import { rpcFailureText } from "tddy-client-web";
-import { useKeyedActionFailure } from "../../hooks/useKeyedActionFailure";
+import { useKeyedActionFailure } from "./hooks/useKeyedActionFailure";
 import { InlineError } from "tddy-ui-web";
 
 // ---------------------------------------------------------------------------

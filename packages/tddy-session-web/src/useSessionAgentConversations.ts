@@ -7,9 +7,9 @@ import {
   conversationForAgent,
   withAgentConversation,
   type AgentConversation,
-} from "tddy-session-web";
+} from "./agentConversationTabs";
 import { randomUuid } from "tddy-client-web";
-import type { SessionAgentClient } from "./sessionMainPaneProps";
+import type { SessionAgentClient } from "./sessionRuntimeProps";
 
 /**
  * The specialized agents attached to each session, and which of their conversations holds that

@@ -16,7 +16,6 @@ import {
   SessionAgentConversationPane,
 } from "../../src/SessionAgentConversationPane";
 import { SessionAgentService } from "tddy-client-web/gen/session_agents_pb";
-import { mountWithRpc } from "../support/rpc/inMemory";
 import { recordedFields } from "../support/rpc/recordedRequests";
 import {
   anAgentConversationBackend,
@@ -58,7 +57,7 @@ function PaneThatCanBeClosed({ callerLogin }: { callerLogin: string | null }) {
 /** Open the pane for `callerLogin` and wait until the daemon has the conversation to cancel. */
 function openAConversationFor(callerLogin: string | null): AgentConversationBackend {
   const conversation = anAgentConversationBackend({});
-  mountWithRpc(<PaneThatCanBeClosed callerLogin={callerLogin} />, conversation.backend);
+  cy.mountWithClients(<PaneThatCanBeClosed callerLogin={callerLogin} />, conversation.backend);
   cy.wrap(null).should(() => {
     expect(conversation.openedConversations()).to.have.length(1);
   });

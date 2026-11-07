@@ -10,7 +10,6 @@
  * docs/dev/todo/2026-08-01-tddy-web-inactive-session-activities-follow-ups.md).
  */
 
-import "../../src/index.css";
 import React from "react";
 import { SessionTerminalTabs } from "../../src/SessionTerminalTabs";
 import type { AgentConversation } from "../../src/agentConversationTabs";

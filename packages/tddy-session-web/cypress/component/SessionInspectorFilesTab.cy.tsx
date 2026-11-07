@@ -12,7 +12,6 @@ import { type InMemoryRpcBackend } from "tddy-connectrpc-testkit";
 import { type SessionEntry } from "tddy-client-web/gen/session_pb";
 import { SessionFilesService } from "tddy-client-web/gen/session_files_pb";
 import { SessionInspectorDrawer } from "../../src/SessionInspectorDrawer";
-import { mountWithRpc } from "../support/rpc/inMemory";
 import { aSessionFilesServiceBackend } from "../support/rpc/sessionFilesServiceBackend";
 import { sessionFilesTabPage as page } from "../support/pages/sessionFilesTabPage";
 
@@ -50,7 +49,7 @@ function aBackendWithOneUpload(): InMemoryRpcBackend {
 function mountDrawer(backend: InMemoryRpcBackend, onClose: Cypress.Agent<sinon.SinonStub>) {
   const sessionFilesClient = createClient(SessionFilesService, backend.transport());
   const noop = () => undefined;
-  mountWithRpc(
+  cy.mountWithClients(
     <SessionInspectorDrawer
       // No host connection in scope: this spec is not about the media tabs, and
       // `hostConnection` is required so that saying so is a choice rather than an omission.

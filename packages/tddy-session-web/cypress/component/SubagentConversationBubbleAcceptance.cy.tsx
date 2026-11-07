@@ -12,7 +12,6 @@ import { createClient } from "@connectrpc/connect";
 import { ActivityService } from "tddy-client-web/gen/activity_pb";
 import { SessionEntrySchema } from "tddy-client-web/gen/session_pb";
 import { SessionWithActivitySidebar } from "../../src/SessionWithActivitySidebar";
-import { mountWithRpc } from "../support/rpc/inMemory";
 import { agentActivityPage } from "../support/pages/agentActivityPage";
 import { byTestId } from "../support/testIds";
 import {
@@ -46,7 +45,7 @@ function aManagedSession() {
 
 function mountTheSession(backend: ReturnType<typeof aConversationReplayBackend>["backend"]) {
   const client = createClient(ActivityService, backend.transport());
-  mountWithRpc(
+  cy.mountWithClients(
     <div style={{ display: "flex", flexDirection: "column", height: 700, width: 1200 }}>
       <SessionWithActivitySidebar
         session={aManagedSession()}

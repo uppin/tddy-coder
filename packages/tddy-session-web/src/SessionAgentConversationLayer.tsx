@@ -1,9 +1,9 @@
 import React, { useCallback, useRef } from "react";
 import { createPortal } from "react-dom";
 import { safeTestIdPart } from "tddy-client-web";
-import type { AgentConversation } from "tddy-session-web";
+import type { AgentConversation } from "./agentConversationTabs";
 import { SessionAgentConversationPane } from "./SessionAgentConversationPane";
-import type { SessionAgentClient } from "tddy-session-web";
+import type { SessionAgentClient } from "./sessionRuntimeProps";
 
 /**
  * Where the bodies of agent conversations live.

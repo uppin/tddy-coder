@@ -13,8 +13,7 @@ import React, { useState } from "react";
 import { anInMemoryRpcBackend } from "tddy-connectrpc-testkit";
 // The real chain's shrink behavior lives in Tailwind utility classes (min-w-0, overflow-hidden) —
 // without the app stylesheet they are inert and the test pins a floor that production does not have.
-import "../../src/index.css";
-import { SessionMainPane } from "../../src/components/sessions/SessionMainPane";
+import { SessionMainPane } from "tddy-session-web";
 import type { SessionAttachmentState } from "tddy-session-web";
 import { aSessionConnection } from "../support/rpc/sessionConnections";
 import { byTestId, TEST_IDS } from "../support/testIds";

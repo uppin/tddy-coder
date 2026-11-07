@@ -11,11 +11,12 @@
  */
 
 import React from "react";
-import { SessionMainPane } from "../../src/components/sessions/SessionMainPane";
+import { SessionMainPane } from "tddy-session-web";
 import type { SessionAttachmentState } from "tddy-session-web";
 import { aSessionConnection } from "../support/rpc/sessionConnections";
-import type { SessionEntry, ProjectEntry } from "tddy-client-web/gen/session_pb";
-import { sessionsDrawerPage } from "../support/pages/sessionsDrawerPage";
+import type { SessionEntry } from "tddy-client-web/gen/session_pb";
+import type { ProjectEntry } from "tddy-client-web/gen/project_pb";
+import { sessionMainPanePage } from "../support/pages/sessionMainPanePage";
 
 // ---------------------------------------------------------------------------
 // Fixtures
@@ -95,6 +96,6 @@ it("renders the detail pane for a selected session that has no project id set", 
 
   // Then — the detail pane and its header controls render; the project resolution tolerated the
   // missing projectId instead of taking the pane down
-  sessionsDrawerPage.detailPane().should("exist");
-  sessionsDrawerPage.codeToggle().should("exist");
+  sessionMainPanePage.detailPane().should("exist");
+  sessionMainPanePage.codeToggle().should("exist");
 });

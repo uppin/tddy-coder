@@ -26,25 +26,37 @@
 
 import React from "react";
 import { anInMemoryRpcBackend } from "tddy-connectrpc-testkit";
-import { SessionMainPane } from "../../src/components/sessions/SessionMainPane";
+import { SessionMainPane } from "tddy-session-web";
 import type { SessionAttachmentState } from "tddy-session-web";
 import type { SessionRuntimeState } from "tddy-session-web";
 import type { SessionEntry } from "tddy-client-web/gen/session_pb";
 import { ScreenSharingService } from "tddy-client-web/gen/screen_sharing_pb";
 import { VncService } from "tddy-client-web/gen/vnc_pb";
 import type { ConnectionStatus, HostConnection } from "tddy-client-web/connections/types";
-import { LIVEKIT_SOURCE_ID } from "tddy-livekit-web";
-import { HostDirectorySources } from "tddy-client-web";
+import { HostDirectorySources, LIVEKIT_SOURCE_ID } from "tddy-client-web";
+import { aNavigationDouble } from "tddy-client-web/testkit";
 import type { HostDirectorySource } from "tddy-client-web";
-import { appLocationPage } from "../support/pages/appLocationPage";
-import { sessionsDrawerPage as page } from "../support/pages/sessionsDrawerPage";
+import { sessionMainPanePage as page } from "../support/pages/sessionMainPanePage";
 import { aHostConnection } from "../support/rpc/hostConnections";
-import { mountWithRpc } from "../support/rpc/inMemory";
 import { aSessionConnection } from "../support/rpc/sessionConnections";
 
 // ---------------------------------------------------------------------------
 // Fixtures
 // ---------------------------------------------------------------------------
+
+/**
+ * The location the navigation port starts at — a deep link is stated before mounting. Each spec
+ * starts from the sessions root again, so a link left by a previous spec cannot pre-select a tab.
+ */
+const appLocation = {
+  hash: "/sessions",
+  reset() {
+    this.hash = "/sessions";
+  },
+  startAt(hash: string) {
+    this.hash = hash;
+  },
+};
 
 const HOST_ID = "instance-media-capability";
 const SESSION_ID = "media-capability-session-0000-0000-000000000001";
@@ -148,13 +160,14 @@ function mountInspectorOn(
     />
   );
 
-  mountWithRpc(
+  cy.mountWithClients(
     commonRoom ? (
       <HostDirectorySources sources={[commonRoom]}>{inspector}</HostDirectorySources>
     ) : (
       inspector
     ),
     aBackendServingBothMediaTabs(),
+    { navigation: aNavigationDouble(appLocation.hash) },
   );
 }
 
@@ -164,7 +177,7 @@ function mountInspectorOn(
 
 beforeEach(() => {
   cy.viewport(1280, 800);
-  appLocationPage.reset();
+  appLocation.reset();
 });
 
 // ---------------------------------------------------------------------------
@@ -265,7 +278,7 @@ it("offers the media tabs for a dormant session on a host reached over LiveKit",
 
 it("lands an ?inspector=vnc link on Details on a host reached without LiveKit", () => {
   // Given a link naming the VNC tab — pasted, or carried over from a host that had video
-  appLocationPage.startAt(`/sessions/${SESSION_ID}?inspector=vnc`);
+  appLocation.startAt(`/sessions/${SESSION_ID}?inspector=vnc`);
 
   // When it opens on a host whose wire carries no tracks
   mountInspectorOn(aHostReachedWithoutLiveKit(), anAttachedRuntime());
@@ -278,7 +291,7 @@ it("lands an ?inspector=vnc link on Details on a host reached without LiveKit", 
 
 it("opens the VNC panel from an ?inspector=vnc link on a host reached over LiveKit", () => {
   // Given the same link
-  appLocationPage.startAt(`/sessions/${SESSION_ID}?inspector=vnc`);
+  appLocation.startAt(`/sessions/${SESSION_ID}?inspector=vnc`);
 
   // When it opens on a host on a common room
   mountInspectorOn(aHostReachedOverLiveKit(), anAttachedRuntime());
@@ -289,7 +302,7 @@ it("opens the VNC panel from an ?inspector=vnc link on a host reached over LiveK
 
 it("lands an ?inspector=screen-sharing link on Details on a host reached without LiveKit", () => {
   // Given a link naming the Screen Sharing tab
-  appLocationPage.startAt(`/sessions/${SESSION_ID}?inspector=screen-sharing`);
+  appLocation.startAt(`/sessions/${SESSION_ID}?inspector=screen-sharing`);
 
   // When it opens on a host whose wire carries no tracks
   mountInspectorOn(aHostReachedWithoutLiveKit(), anAttachedRuntime());
@@ -302,7 +315,7 @@ it("lands an ?inspector=screen-sharing link on Details on a host reached without
 
 it("opens the Screen Sharing panel from an ?inspector=screen-sharing link on a host reached over LiveKit", () => {
   // Given the same link
-  appLocationPage.startAt(`/sessions/${SESSION_ID}?inspector=screen-sharing`);
+  appLocation.startAt(`/sessions/${SESSION_ID}?inspector=screen-sharing`);
 
   // When it opens on a host on a common room
   mountInspectorOn(aHostReachedOverLiveKit(), anAttachedRuntime());

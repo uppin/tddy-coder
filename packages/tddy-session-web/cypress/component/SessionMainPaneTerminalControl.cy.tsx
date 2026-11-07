@@ -11,11 +11,11 @@
  */
 
 import React from "react";
-import { SessionMainPane } from "../../src/components/sessions/SessionMainPane";
+import { SessionMainPane } from "tddy-session-web";
 import type { SessionAttachmentState } from "tddy-session-web";
 import { aSessionConnection } from "../support/rpc/sessionConnections";
 import type { SessionEntry } from "tddy-client-web/gen/session_pb";
-import { sessionsDrawerPage as page } from "../support/pages/sessionsDrawerPage";
+import { sessionMainPanePage as page } from "../support/pages/sessionMainPanePage";
 
 // ---------------------------------------------------------------------------
 // Shared fixtures

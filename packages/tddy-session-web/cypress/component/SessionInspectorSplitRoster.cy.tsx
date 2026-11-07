@@ -17,7 +17,6 @@ import React from "react";
 import { createClient } from "@connectrpc/connect";
 import { SessionService, type SessionEntry } from "tddy-client-web/gen/session_pb";
 import { SessionInspectorDrawer } from "../../src/SessionInspectorDrawer";
-import { mountWithRpc } from "../support/rpc/inMemory";
 import {
   aSessionAgentRosterBackend,
   anAvailableAgent,
@@ -77,7 +76,7 @@ function aRosterOnTheCodebaseHost(): RosterBackend {
 function mountInspectorOn(session: typeof SPLIT_SESSION, roster: RosterBackend) {
   const client = createClient(SessionService, roster.backend.transport());
   const noop = () => undefined;
-  mountWithRpc(
+  cy.mountWithClients(
     <SessionInspectorDrawer
       // No host connection in scope: this spec is not about the media tabs, and
       // `hostConnection` is required so that saying so is a choice rather than an omission.

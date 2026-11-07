@@ -17,7 +17,7 @@
 
 import React from "react";
 import { anInMemoryRpcBackend } from "tddy-connectrpc-testkit";
-import { SessionMainPane } from "../../src/components/sessions/SessionMainPane";
+import { SessionMainPane } from "tddy-session-web";
 import type { SessionAttachmentState } from "tddy-session-web";
 import { aSessionConnection } from "../support/rpc/sessionConnections";
 import { byTestId, TEST_IDS } from "../support/testIds";

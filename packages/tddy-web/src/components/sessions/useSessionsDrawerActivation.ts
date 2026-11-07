@@ -6,7 +6,7 @@ import type { UseAppLocationResult } from "tddy-client-web";
 import { owningHostForSession } from "tddy-session-web";
 import { attachActionForSnapshot } from "tddy-session-web";
 import { nextInspectorState } from "./inspectorState";
-import type { InspectorDrawerState } from "./SessionInspectorDrawer";
+import type { InspectorDrawerState } from "tddy-session-web";
 import type { SessionRuntimeRegistry } from "tddy-session-web";
 import type { UseSessionAttachmentResult } from "tddy-session-web";
 import type { SessionsDrawerAttachClaims } from "./useSessionsDrawerAttachClaims";

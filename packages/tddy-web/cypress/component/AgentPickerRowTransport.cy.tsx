@@ -9,7 +9,7 @@
  */
 
 import React from "react";
-import { AgentPicker } from "../../src/components/sessions/AgentPicker";
+import { AgentPicker } from "tddy-session-web";
 import type { DaemonHost } from "tddy-client-web";
 import { withSelectedDaemonServedBy } from "../support/rpc/withSelectedDaemon";
 import {

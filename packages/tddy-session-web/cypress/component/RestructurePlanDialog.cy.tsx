@@ -40,7 +40,6 @@ import {
 import { WorktreeCodePane } from "../../src/code/WorktreeCodePane";
 import { RestructurePlanDialog } from "../../src/code/RestructurePlanDialog";
 import { createRestructurePlanApi } from "../../src/code/restructurePlanApi";
-import { mountWithRpc } from "../support/rpc/inMemory";
 import { requestFields } from "../support/rpc/recordedRequests";
 import { restructurePlanDialogPage } from "../support/pages/restructurePlanDialogPage";
 import { worktreeCodePanePage } from "../support/pages/worktreeCodePanePage";
@@ -239,7 +238,7 @@ function aHostWhereTheGeometryGroupFailsToCompile(): InMemoryRpcBackend {
 /** Mount the Code pane over `backend` and preview `relPath`, which sits one directory down. */
 function previewInTheCodePane(backend: InMemoryRpcBackend, relPath: string) {
   const transport = backend.transport();
-  mountWithRpc(
+  cy.mountWithClients(
     <WorktreeCodePane
       client={createClient(WorktreeService, transport)}
       navigationClient={createClient(CodeNavigationService, transport)}
@@ -257,7 +256,7 @@ function openThePlanDialog(backend: InMemoryRpcBackend) {
     createClient(CodeNavigationService, backend.transport()),
     WORKTREE,
   );
-  mountWithRpc(<RestructurePlanDialog api={api} relPath={THE_PLAN} onClose={() => {}} />, backend);
+  cy.mountWithClients(<RestructurePlanDialog api={api} relPath={THE_PLAN} onClose={() => {}} />, backend);
 }
 
 beforeEach(() => {

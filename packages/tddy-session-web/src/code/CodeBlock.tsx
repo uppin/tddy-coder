@@ -28,7 +28,7 @@ import toml from "react-syntax-highlighter/dist/esm/languages/prism/toml";
 import tsx from "react-syntax-highlighter/dist/esm/languages/prism/tsx";
 import yaml from "react-syntax-highlighter/dist/esm/languages/prism/yaml";
 
-import { codeLanguageForPath } from "../../lib/codeLanguage";
+import { codeLanguageForPath } from "../lib/codeLanguage";
 import type { CodePosition } from "./codeNavigationApi";
 import { NOTHING_DEFINABLE, type DefinableSource } from "./codeProbes";
 
