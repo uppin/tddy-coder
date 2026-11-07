@@ -28,8 +28,8 @@
 
 import React from "react";
 import { mount } from "cypress/react";
-import type { GhosttyTerminalSessionProps } from "../../../src/components/GhosttyTerminalSession";
-import { GhosttyTerminalSession } from "../../../src/components/GhosttyTerminalSession";
+import type { GhosttyTerminalSessionProps } from "../../../src/GhosttyTerminalSession";
+import { GhosttyTerminalSession } from "../../../src/GhosttyTerminalSession";
 import type { TerminalFeed, TerminalFrame, TerminalStream } from "tddy-client-web/connections/terminal";
 import type { ToolShortcutDef } from "../../../src/lib/toolShortcuts";
 import { byTestId, TEST_IDS } from "../testIds";

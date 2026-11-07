@@ -8,10 +8,10 @@ import React, {
   useState,
 } from "react";
 import { Terminal, FitAddon } from "ghostty-web";
-import { newGhosttyInstance } from "../lib/ghosttyInstance";
-import { copyToClipboard } from "../lib/clipboard";
-import { createOsc52Recognizer } from "../lib/osc52";
-import { watchDevicePixelRatio } from "../lib/terminalDprWatch";
+import { newGhosttyInstance } from "./lib/ghosttyInstance";
+import { copyToClipboard } from "./lib/clipboard";
+import { createOsc52Recognizer } from "./lib/osc52";
+import { watchDevicePixelRatio } from "./lib/terminalDprWatch";
 import {
   canPitchIn,
   canPitchOut,
@@ -22,18 +22,18 @@ import {
   pitchOutFontSize,
   reduceTrackpadPinchAccum,
   TRACKPAD_PINCH_STEP_ACCUM_PX,
-} from "../lib/terminalZoom";
+} from "./lib/terminalZoom";
 import {
   dispatchTerminalFontSizeSync,
   dispatchTerminalZoomBridge,
   isTerminalZoomDebugEnabled,
   parseTerminalZoomBridgeDetail,
   TERMINAL_ZOOM_BRIDGE_EVENT,
-} from "../lib/terminalZoomBridge";
+} from "./lib/terminalZoomBridge";
 import { TERMINAL_OVERLAY_FIXED_GRID_CHAR_WIDTH_EM } from "./connection/config";
-import { clientPointToTerminalCell } from "../lib/terminalMouseCellCoords";
+import { clientPointToTerminalCell } from "./lib/terminalMouseCellCoords";
 import { tddyDebug } from "tddy-client-web";
-import { computeScrollbar } from "../lib/terminalScrollbar";
+import { computeScrollbar } from "./lib/terminalScrollbar";
 
 // Namespaced `[tddy]` diagnostics enabled by the DEBUG mask (daemon `debug:` / localStorage.debug).
 // Scoped to the data flow behind terminal garbling / misalignment.

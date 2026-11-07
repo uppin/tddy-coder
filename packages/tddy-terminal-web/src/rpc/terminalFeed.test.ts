@@ -27,7 +27,7 @@ import {
   TerminalHistoryChunkSchema,
   type TerminalSessionService,
 } from "tddy-client-web/gen/terminal_session_pb";
-import { MAIN_TERMINAL_ID } from "../../lib/terminalFrameIdentity";
+import { MAIN_TERMINAL_ID } from "../lib/terminalFrameIdentity";
 import type { HistoryChunk } from "tddy-client-web";
 import type { TerminalFeed, TerminalHistoryFetcher, TerminalOptions } from "tddy-client-web/connections/terminal";
 import { openDaemonTerminalFeed, TerminalResumePoint } from "./terminalFeed";

@@ -31,7 +31,7 @@ import {
 } from "tddy-client-web/gen/worktree_pb";
 import { TerminalSessionService } from "tddy-client-web/gen/terminal_session_pb";
 import { mountWithRpc } from "../support/rpc/inMemory";
-import { UploadProgressProvider } from "../../src/rpc/uploadProgress";
+import { UploadProgressProvider } from "tddy-terminal-web";
 import { withSelectedDaemon } from "../support/rpc/withSelectedDaemon";
 import { aSessionFilesServiceBackend } from "../support/rpc/sessionFilesServiceBackend";
 import {

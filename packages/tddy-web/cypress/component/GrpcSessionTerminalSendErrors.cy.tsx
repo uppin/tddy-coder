@@ -39,8 +39,8 @@ import { Code, ConnectError, createClient, type Client } from "@connectrpc/conne
 import { anInMemoryRpcBackend } from "tddy-connectrpc-testkit";
 import { TerminalSessionService, type SessionTerminalInput } from "tddy-client-web/gen/terminal_session_pb";
 import { GrpcSessionTerminal } from "../../src/components/sessions/GrpcSessionTerminal";
-import { UploadProgressProvider } from "../../src/rpc/uploadProgress";
-import type { ConnectedSession } from "../../src/components/sessions/useTerminalControl";
+import { UploadProgressProvider } from "tddy-terminal-web";
+import type { ConnectedSession } from "tddy-terminal-web";
 import { byTestId, TEST_IDS } from "../support/testIds";
 
 // ---------------------------------------------------------------------------

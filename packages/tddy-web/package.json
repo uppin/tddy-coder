@@ -33,7 +33,6 @@
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "debug": "^4.4.3",
-    "ghostty-web": "^0.4.0",
     "livekit-client": "^2.17.0",
     "lucide-react": "^1.7.0",
     "radix-ui": "^1.4.3",
@@ -47,7 +46,8 @@
     "tddy-livekit-web": "workspace:*",
     "tddy-session-create-web": "workspace:*",
     "tddy-tauri-web": "workspace:*",
-    "tddy-ui-web": "workspace:*"
+    "tddy-ui-web": "workspace:*",
+    "tddy-terminal-web": "workspace:*"
   },
   "devDependencies": {
     "@playwright/test": "^1.58.2",

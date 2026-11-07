@@ -28,7 +28,7 @@ import {
   TerminalHistoryChunkSchema,
 } from "tddy-client-web/gen/terminal_session_pb";
 import { GrpcSessionTerminal } from "../../src/components/sessions/GrpcSessionTerminal";
-import { UploadProgressProvider } from "../../src/rpc/uploadProgress";
+import { UploadProgressProvider } from "tddy-terminal-web";
 import { byTestId, TEST_IDS } from "../support/testIds";
 
 type TerminalClient = Client<typeof TerminalSessionService>;

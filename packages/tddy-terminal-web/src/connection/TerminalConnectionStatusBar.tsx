@@ -1,5 +1,5 @@
 import React, { useEffect } from "react";
-import { tddyDevDebug } from "../../lib/tddyDevLog";
+import { tddyDevDebug } from "../lib/tddyDevLog";
 
 export interface TerminalConnectionStatusBarProps {
   children?: React.ReactNode;

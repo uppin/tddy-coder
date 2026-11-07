@@ -1,5 +1,5 @@
 import { describe, expect, it } from "bun:test";
-import { aConnectCounter } from "../../test-utils";
+import { aConnectCounter } from "../test-utils";
 import {
   applyDedicatedTerminalBackToMini,
   applyOverlayPreviewClickToFull,

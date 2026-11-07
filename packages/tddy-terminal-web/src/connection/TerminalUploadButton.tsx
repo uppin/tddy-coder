@@ -7,7 +7,7 @@
  */
 
 import React from "react";
-import { useSessionFileUpload, useDaemonUploadChunk } from "../../hooks/useSessionFileUpload";
+import { useSessionFileUpload, useDaemonUploadChunk } from "../hooks/useSessionFileUpload";
 
 export interface TerminalUploadButtonProps {
   sessionToken: string;

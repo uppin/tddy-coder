@@ -23,7 +23,9 @@
     "ghostty-web": "^0.4.0",
     "tddy-client-web": "workspace:*",
     "tddy-react-commons": "workspace:*",
-    "tddy-ui-web": "workspace:*"
+    "tddy-ui-web": "workspace:*",
+    "lucide-react": "^1.7.0",
+    "tddy-tauri-web": "workspace:*"
   },
   "peerDependencies": {
     "react": "^19.0.0",

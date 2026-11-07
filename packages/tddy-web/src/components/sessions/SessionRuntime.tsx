@@ -1,6 +1,6 @@
 import React, { useCallback, useMemo, useRef, useState } from "react";
 import { TerminalSessionService } from "tddy-client-web/gen/terminal_session_pb";
-import { GhosttyTerminalSession } from "../GhosttyTerminalSession";
+import { GhosttyTerminalSession } from "tddy-terminal-web";
 import { GrpcSessionTerminal } from "./GrpcSessionTerminal";
 import { useSessionTerminalFeed } from "./useSessionTerminalFeed";
 import { SessionTerminalTabs } from "./SessionTerminalTabs";
@@ -11,7 +11,7 @@ import { AGENT_TERMINAL_ID, useSessionTerminals } from "./useSessionTerminals";
 import { useTmuxSessions } from "./useTmuxSessions";
 import { useChildSessions } from "./useChildSessions";
 import { SessionConnectionOverlay } from "./SessionConnectionOverlay";
-import { useTerminalControl, type Session } from "./useTerminalControl";
+import { useTerminalControl, type Session } from "tddy-terminal-web";
 import { useSessionPaneFullscreen } from "./useSessionPaneFullscreen";
 import { useAgentTerminalFocus } from "./useAgentTerminalFocus";
 import type { ByteDelta } from "./sessionRuntimeRegistry";

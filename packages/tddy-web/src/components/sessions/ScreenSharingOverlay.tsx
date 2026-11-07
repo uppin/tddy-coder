@@ -13,7 +13,7 @@
 
 import React, { useEffect, useRef, useState } from "react";
 import { RoomEvent, type Room, type VideoTrack } from "livekit-client";
-import { exitDocumentFullscreen, isTargetInActiveFullscreen, useElementFullscreen } from "../../lib/browserFullscreen";
+import { exitDocumentFullscreen, isTargetInActiveFullscreen, useElementFullscreen } from "tddy-terminal-web";
 import { isKeyboardLockSupported, lockKeyboard, unlockKeyboard } from "../../lib/keyboardLock";
 import { useScreenSharingInput } from "./useScreenSharingInput";
 

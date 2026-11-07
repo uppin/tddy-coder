@@ -19,7 +19,7 @@ import { TerminalSessionService } from "tddy-client-web/gen/terminal_session_pb"
 import { capabilitiesForHint } from "tddy-client-web";
 import type { SessionAttachmentHint, SessionConnection } from "tddy-client-web/connections/session";
 import type { TerminalFeed, TerminalOptions } from "tddy-client-web/connections/terminal";
-import { openDaemonTerminalFeed, TerminalResumePoint } from "./terminalFeed";
+import { openDaemonTerminalFeed, TerminalResumePoint } from "tddy-terminal-web";
 import type { ConnectionStatus, HostConnection } from "tddy-client-web/connections/types";
 
 /**

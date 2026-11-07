@@ -1,6 +1,6 @@
 import React, { useCallback, useRef, useState } from "react";
 import { GripVertical } from "lucide-react";
-import { keySequenceToBytes, type ToolShortcutDef } from "../../lib/toolShortcuts";
+import { keySequenceToBytes, type ToolShortcutDef } from "../lib/toolShortcuts";
 
 export interface ShortcutDrawerProps {
   shortcuts: ToolShortcutDef[];
