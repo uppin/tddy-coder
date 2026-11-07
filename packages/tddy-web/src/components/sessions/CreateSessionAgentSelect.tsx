@@ -14,13 +14,13 @@
  */
 
 import { safeTestIdPart } from "../../lib/testId";
-import type { HostReadFailure } from "../../rpc/useHostFanOut";
 import { inputClass, labelClass } from "./createSessionFormStyles";
 import {
   selectableAgentText,
   selectableAgentValue,
   type SelectableAgent,
 } from "./selectableAgentOptions";
+import { type HostReadFailure } from "tddy-client-web";
 
 interface CreateSessionAgentSelectProps {
   /** The agents this form may offer, in the order they are listed. */

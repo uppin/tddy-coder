@@ -1,4 +1,3 @@
-import { useDaemonClient } from "../../rpc/selectedDaemon";
 import { ProjectService } from "tddy-client-web/gen/project_pb";
 import { SessionService } from "tddy-client-web/gen/session_pb";
 import { ActivityService } from "tddy-client-web/gen/activity_pb";
@@ -11,6 +10,7 @@ import { SessionFilesService } from "tddy-client-web/gen/session_files_pb";
 import { TerminalSessionService } from "tddy-client-web/gen/terminal_session_pb";
 import { TaskService } from "tddy-client-web/gen/tasks_pb";
 import { WorktreeService } from "tddy-client-web/gen/worktree_pb";
+import { useDaemonClient } from "tddy-client-web";
 
 /** The sessions drawer's per-service clients on the selected daemon, each `null` until one is reachable. */
 export function useSessionsDrawerClients() {

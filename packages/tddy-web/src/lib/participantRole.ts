@@ -8,20 +8,13 @@
 
 export type ParticipantRole = "browser" | "coder" | "daemon" | "unknown";
 
-/** A daemon host that can own projects and receive sessions, derived from a common-room participant. */
-export interface DaemonHost {
-  instanceId: string;
-  label: string;
-  /** The host's base clone location (`repos_base_path`), relative to each OS user's home, as
-   *  advertised in the common room. Optional: older daemons don't advertise it. */
-  reposBasePath?: string;
-  /** The largest single session attachment this host will serve (`max_attachment_bytes`), as
-   *  advertised in the common room. Optional: older daemons don't advertise it. */
-  maxAttachmentBytes?: number;
-  /** What this host's workspace jail confines, as advertised in the common room. Absent = the host
-   *  does not serve the sandboxed-codebase placement at all. */
-  sandboxedCodebase?: { confinesFilesystem: boolean };
-}
+/**
+ * A daemon host that can own projects and receive sessions, derived from a common-room participant.
+ * The shape is the one `tddy-client-web` lists hosts in.
+ */
+export type { DaemonHost } from "tddy-client-web";
+
+import type { DaemonHost } from "tddy-client-web";
 
 /**
  * How a daemon self-labels its own advertisement — `"{id} (this daemon)"`.

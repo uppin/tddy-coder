@@ -5,10 +5,10 @@ import {
   isInspectorTabName,
   type InspectorTabName,
 } from "../../routing/appRoutes";
-import { PARAM_FULL, PARAM_INSPECTOR } from "../../routing/appLocation";
 import { useAppLocation } from "../../routing/useAppLocation";
 import type { InspectorDrawerState } from "./SessionInspectorDrawer";
 import { nextInspectorState } from "./inspectorState";
+import { PARAM_FULL, PARAM_INSPECTOR } from "tddy-client-web";
 
 /**
  * The sessions drawer's URL-derived state: which session is selected, whether the screen is

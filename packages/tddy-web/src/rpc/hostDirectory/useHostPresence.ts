@@ -10,9 +10,9 @@
  */
 
 import type { Room } from "livekit-client";
-import { useHostConnection } from "../connections/registry";
 import { useHasCapability } from "../connections/useHasCapability";
 import { usePresenceRoom } from "./presenceRoom";
+import { useHostConnection } from "tddy-client-web";
 
 /**
  * The presence source for `hostId`, or `null` when that host's connection does not advertise

@@ -11,7 +11,6 @@ import { ScreenSharingService } from "tddy-client-web/gen/screen_sharing_pb";
 import { ScrollArea } from "tddy-ui-web";
 import { cn } from "tddy-ui-web";
 import { InspectorTabs, type InspectorTab } from "./InspectorTabs";
-import { PARAM_INSPECTOR } from "../../routing/appLocation";
 import {
   isDormantInspectorTabName,
   isInspectorTabName,
@@ -30,9 +29,9 @@ import { canResumeSession } from "./sessionBaseView";
 // (usage stream is owned by SessionUsageTab so it opens only while that tab is mounted)
 import { SessionVncTab } from "./SessionVncTab";
 import { SessionScreenSharingTab } from "./SessionScreenSharingTab";
-import { useHttpClient } from "../../rpc/transportProvider";
 import { SessionInspectorDetailsTab, type InspectorTraffic } from "./SessionInspectorDetailsTab";
 import { SessionInspectorHeader } from "./SessionInspectorHeader";
+import { PARAM_INSPECTOR, useHttpClient } from "tddy-client-web";
 
 // ---------------------------------------------------------------------------
 // Types

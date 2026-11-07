@@ -20,9 +20,9 @@ import { useConnectionStatus } from "../../rpc/connections/useConnectionStatus";
 import { useHasCapability } from "../../rpc/connections/useHasCapability";
 import { sessionReadsLocalPaths } from "../../lib/sessionReadsLocalPaths";
 import type { TauriHostWindow } from "../../rpc/daemonTransportFlavour";
-import { useSelectedDaemon } from "../../rpc/selectedDaemon";
 import { cn } from "tddy-ui-web";
 import { InlineError } from "tddy-ui-web";
+import { useSelectedDaemon } from "tddy-client-web";
 
 export type { SessionRuntimeProps } from "./sessionRuntimeProps";
 

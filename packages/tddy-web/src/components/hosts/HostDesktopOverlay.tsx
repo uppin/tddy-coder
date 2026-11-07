@@ -36,10 +36,10 @@ import { useCommonRoom } from "../../hooks/useCommonRoom";
 import { encryptForHost } from "../../lib/encryptForHost";
 import { presenceIdentityForUser } from "../../lib/presenceIdentity";
 import { screenSharingStartFailureText } from "../../lib/screenSharingStartFailure";
-import { useHostClient } from "../../rpc/connections/registry";
 import { useHostPrompts, type HostPromptEventLike } from "../../rpc/useHostPrompts";
 import { ScreenSharingOverlay } from "../sessions/ScreenSharingOverlay";
 import { HostDesktopSignInDialog } from "./HostDesktopSignInDialog";
+import { useHostClient } from "tddy-client-web";
 
 export interface HostDesktopOverlayProps {
   /** The daemon instance whose desktop this is — host scope's whole addressing change. */

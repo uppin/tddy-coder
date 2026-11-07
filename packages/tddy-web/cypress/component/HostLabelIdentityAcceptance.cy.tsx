@@ -12,9 +12,10 @@
 import React, { useRef, useState } from "react";
 import { Room } from "livekit-client";
 import type { DaemonHost } from "../../src/lib/participantRole";
-import { SelectedDaemonProvider, useHostLabel } from "../../src/rpc/selectedDaemon";
+import { SelectedDaemonProvider } from "../../src/rpc/selectedDaemon";
 import { AuthProvider } from "../../src/hooks/authProvider";
 import { byTestId } from "../support/testIds";
+import { useHostLabel } from "tddy-client-web";
 
 const HOST = "workstation-1";
 

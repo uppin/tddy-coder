@@ -11,11 +11,8 @@ import { AppShell } from "../components/shell/AppShell";
 import { useAuthContext } from "../hooks/authProvider";
 import { useRoomParticipants } from "../hooks/useRoomParticipants";
 import { presenceIdentityForUser } from "../lib/presenceIdentity";
-import { useSelectedDaemon } from "../rpc/selectedDaemon";
-import { useHostConnection } from "../rpc/connections/registry";
 import { useCapabilityAvailability } from "../hooks/useCapabilityAvailability";
 import { useHostPresence } from "../rpc/hostDirectory/useHostPresence";
-import { PARAM_PARTICIPANT } from "../routing/appLocation";
 import { useAppLocation } from "../routing/useAppLocation";
 import { buildRegistry, findMethod } from "./registry";
 import { invokeRpc, type InvokeResult } from "./invoke";
@@ -24,6 +21,7 @@ import {
   type ServiceInfo,
   type ServiceMethodKind,
 } from "./RpcPlaygroundScreen";
+import { PARAM_PARTICIPANT, useHostConnection, useSelectedDaemon } from "tddy-client-web";
 
 async function* once<T>(value: T): AsyncIterable<T> {
   yield value;

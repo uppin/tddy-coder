@@ -15,7 +15,7 @@
 import { createClient, type Client } from "@connectrpc/connect";
 import { CatalogService, type SubagentInfo } from "tddy-client-web/gen/catalog_pb";
 import { AgentKind } from "tddy-client-web/gen/types_pb";
-import { useHostFanOut, type HostReadFailure, type HostReader } from "../../rpc/useHostFanOut";
+import { type HostReadFailure, type HostReader, useHostFanOut } from "tddy-client-web";
 
 type CatalogClient = Client<typeof CatalogService>;
 

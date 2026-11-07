@@ -24,8 +24,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ConnectError, type Transport } from "@connectrpc/connect";
-import { useHostConnector } from "./connections/registry";
-import { useDaemons } from "./selectedDaemon";
+import { useDaemons, useHostConnector } from "./ports/clients";
 
 /** A host that could not be asked, or refused to answer. Rendered as one row, never swallowed. */
 export interface HostReadFailure {

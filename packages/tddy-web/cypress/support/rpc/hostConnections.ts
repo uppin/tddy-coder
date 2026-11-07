@@ -13,13 +13,13 @@
 
 import { createClient, type Client, type Transport } from "@connectrpc/connect";
 import type { DescService } from "@bufbuild/protobuf";
-import { ConnectionProviderRegistry } from "../../../src/rpc/connections/registry";
 import type { SessionConnection } from "tddy-client-web/connections/session";
 import type {
   ConnectionCapability,
   ConnectionStatus,
   HostConnection,
 } from "tddy-client-web/connections/types";
+import { ConnectionProviderRegistry } from "tddy-client-web";
 
 const A_PROVIDER = "in-memory";
 

@@ -9,7 +9,6 @@
  */
 
 import { useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
-import { useHttpClient, useHttpTransport } from "../../rpc/transportProvider";
 import { loadClientConfig } from "../../rpc/clientConfig";
 import { applyDebugMaskFromConfig } from "../../lib/debugMask";
 import { useAuthContext } from "../../hooks/authProvider";
@@ -23,6 +22,7 @@ import { useDirectRoomTerminal } from "../../rpc/connections/livekit/useDirectRo
 import { ConnectionTerminalChrome } from "./ConnectionTerminalChrome";
 import { BUILD_ID } from "../../buildId";
 import { formClassName, inputClassName, labelClassName } from "./standaloneFormStyles";
+import { useHttpClient, useHttpTransport } from "tddy-client-web";
 
 function getParamsFromUrl(): { url: string; identity: string; roomName: string; debugLogging: boolean } {
   const params = typeof window !== "undefined" ? new URLSearchParams(window.location.search) : null;
