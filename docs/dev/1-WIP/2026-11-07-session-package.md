@@ -119,11 +119,11 @@ skeleton, and replaces the red tests: `src/sessionSeams.test.ts` (3 seam rules) 
   (`useAuth`), not tddy-web's `useAuthContext`. Package-local `test-utils/{builders,matchers}.ts` (the prstack pattern).
 - tddy-web gains a `tddy-session-web` workspace dependency (manifest + lockfile entry, no registry URL).
 
-**Deviation / stop (boundary):** `shellQuote`, `toolShortcuts`, `uploadProgress` and `clipboard` were **not** moved.
-`origin/feature/web-split/terminal` already owns them in `tddy-terminal-web/src/{lib,rpc}` (its specs import them
-there), and `tddy-terminal-web` is upstream of this package, so they cannot live here. They stay in tddy-web until the
-terminal branch reaches this line; the boundary test's surface entries `shellQuotePath` and `keySequenceToBytes` stay
-red until then and should be re-pointed at `tddy-terminal-web` (or dropped).
+**Deviation (contract correction, orchestrator-approved):** `shellQuote`, `toolShortcuts`, `uploadProgress` and
+`clipboard` were **not** moved: `tddy-terminal-web` (#845) owns them and is upstream. The boundary test's surface
+list wrongly named `shellQuotePath` and `keySequenceToBytes`; both are removed. Session code keeps importing the
+tddy-web copies until the serial fixer rebases this line onto #845's green. Also fixed: `sessionProjectTable` imported
+`ProjectEntry` from `session_pb` (now `project_pb`).
 
 Earlier contract (commit 2):
 
@@ -157,7 +157,7 @@ Real dependency edges, as opposed to the branch line:
 - [ ] `tddy-session-web` skeleton + workflow
 - [ ] Modules moved; `tddy-web` (and sibling packages) import from `tddy-session-web`
 - [ ] Specs, page objects, drivers moved and green from the package config
-- [ ] Boundary rule
+- [x] Boundary rule
 - [ ] Code-issue records and package docs moved
 
 ## Technical Changes

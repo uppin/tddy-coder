@@ -25,8 +25,6 @@ describe("tddy-session-web package boundary", () => {
       expect.arrayContaining([
         "sessionIndicatorFor",
         "parseSessionParticipantMetadata",
-        "shellQuotePath",
-        "keySequenceToBytes",
         "requestSessionsRefresh",
         "TrafficMeterRegistry",
         "useSessionNotifications",
