@@ -2,17 +2,20 @@
  * Acceptance tests: the RPC Playground's service / method selection round-trips through the URL,
  * so "the call I am debugging" is a shareable link.
  *
- * The screen reads and writes the location through the shared hash store (`useAppLocation`), which
- * is a module singleton — so it needs no router ancestor and can be mounted bare here.
+ * The screen reads and writes the location through the navigation port (`useAppLocation` over
+ * `tddy-client-web`'s `NavigationPort`); these specs mount it with the shared navigation double
+ * (`../support/navigation`) as that port.
  *
  * PRD: docs/ft/web/1-WIP/PRD-2026-08-01-url-state-routing.md.
  * Changeset: docs/dev/1-WIP/2026-08-01-web-url-state-routing.md.
  */
 
 import React from "react";
+import { anInMemoryRpcBackend } from "tddy-connectrpc-testkit";
 import { RpcPlaygroundScreen } from "../../src/RpcPlaygroundScreen";
 import { rpcPlaygroundPage } from "../support/pages/rpcPlaygroundPage";
 import { appLocationPage } from "../support/pages/appLocationPage";
+import { playgroundNavigation } from "../support/navigation";
 
 // ---------------------------------------------------------------------------
 // Fixtures
@@ -44,13 +47,15 @@ const SERVICES = [
 ];
 
 function mountPlayground() {
-  cy.mount(
+  cy.mountWithClients(
     <RpcPlaygroundScreen
       services={SERVICES}
       onInvoke={() => Promise.resolve({ kind: "success" as const, json: "{}" })}
       presenceAvailable={A_CONNECTION_THAT_CARRIES_A_ROSTER}
       onNavigate={() => undefined}
     />,
+    anInMemoryRpcBackend(),
+    { navigation: playgroundNavigation },
   );
 }
 

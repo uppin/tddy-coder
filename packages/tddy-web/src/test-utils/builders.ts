@@ -7,16 +7,13 @@
  * For bun:test only — never import from Cypress tests.
  *
  * For ConnectRPC stubbing prefer `anInMemoryRpcBackend` (re-exported from
- * `tddy-connectrpc-testkit`) over the legacy `aFake*Transport` helpers below.
+ * `tddy-connectrpc-testkit`).
  */
 
 // Re-export the in-memory ConnectRPC backend as a primary test-utils export.
 export { anInMemoryRpcBackend } from "tddy-connectrpc-testkit";
 
 import { create } from "@bufbuild/protobuf";
-import type { Transport, UnaryResponse } from "@connectrpc/connect";
-import { ConnectError, type Code } from "@connectrpc/connect";
-import type { DescMethod } from "@bufbuild/protobuf";
 
 import { type AgentInfo } from "tddy-client-web/gen/catalog_pb";
 import { type BranchResolution } from "tddy-client-web/gen/pr_stack_pb";
@@ -270,78 +267,9 @@ export function aCodexOAuthMeta(fields: {
  * Requires registry.ts and the echoServiceDescriptor fixture to exist (Green phase).
  */
 export async function anEchoRegistry() {
-  const { buildRegistry } = await import("../rpc-playground/registry");
+  const { buildRegistry } = await import("tddy-rpc-playground-web");
   const { ECHO_SERVICE_DESCRIPTOR_FIXTURE } = await import(
-  // TODO(playground): tddy-web reaches into the playground package for this fixture until green moves its consumers.
     "../../../tddy-rpc-playground-web/src/test-fixtures/echoServiceDescriptor"
   );
   return buildRegistry(ECHO_SERVICE_DESCRIPTOR_FIXTURE);
-}
-
-// ---------------------------------------------------------------------------
-// RPC Playground: fake transports (legacy — prefer anInMemoryRpcBackend for new tests)
-// ---------------------------------------------------------------------------
-
-/**
- * @deprecated Use `anInMemoryRpcBackend().onUnary(method, handler)` instead.
- *
- * Fake unary Transport that returns a preset JSON response string decoded through the method's
- * output schema — matches the `makeFakeUnaryTransport` pattern in invoke.test.ts.
- */
-export function aFakeUnaryTransport(responseJson: string): Transport {
-  return {
-    async unary(method: DescMethod): Promise<UnaryResponse> {
-      const { fromJsonString } = await import("@bufbuild/protobuf");
-      const output = fromJsonString(method.output, responseJson);
-      return {
-        stream: false,
-        service: method.parent,
-        method,
-        header: new Headers(),
-        trailer: new Headers(),
-        message: output,
-      } as unknown as UnaryResponse;
-    },
-    stream() {
-      throw new Error("stream not expected in this transport");
-    },
-  } as unknown as Transport;
-}
-
-/** Fake Transport that rejects every call with a ConnectError of the given code. */
-export function aFakeErrorTransport(code: Code): Transport {
-  return {
-    async unary() {
-      throw new ConnectError("test error", code);
-    },
-    stream() {
-      throw new ConnectError("test error", code);
-    },
-  } as unknown as Transport;
-}
-
-/**
- * Fake server-streaming Transport that yields each string in `chunks` decoded through the
- * method's output schema — matches the inline streamingTransport in invoke.test.ts.
- */
-export function aFakeStreamingTransport(chunks: string[]): Transport {
-  return {
-    unary() {
-      throw new Error("unary not expected in this transport");
-    },
-    async stream(m: DescMethod) {
-      const { fromJsonString } = await import("@bufbuild/protobuf");
-      return {
-        stream: true,
-        method: m,
-        header: new Headers(),
-        trailer: new Headers(),
-        message: (async function* () {
-          for (const chunk of chunks) {
-            yield fromJsonString(m.output, chunk);
-          }
-        })(),
-      };
-    },
-  } as unknown as Transport;
 }

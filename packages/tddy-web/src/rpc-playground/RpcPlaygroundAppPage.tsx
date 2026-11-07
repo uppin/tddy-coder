@@ -14,13 +14,15 @@ import { presenceIdentityForUser } from "tddy-livekit-web";
 import { useCapabilityAvailability } from "tddy-client-web";
 import { useHostPresence } from "tddy-client-web";
 import { useAppLocation } from "../routing/useAppLocation";
-import { buildRegistry, findMethod } from "./registry";
-import { invokeRpc, type InvokeResult } from "./invoke";
 import {
+  buildRegistry,
+  findMethod,
+  invokeRpc,
   RpcPlaygroundScreen,
+  type InvokeResult,
   type ServiceInfo,
   type ServiceMethodKind,
-} from "./RpcPlaygroundScreen";
+} from "tddy-rpc-playground-web";
 import { PARAM_PARTICIPANT, useHostConnection, useSelectedDaemon } from "tddy-client-web";
 
 async function* once<T>(value: T): AsyncIterable<T> {
