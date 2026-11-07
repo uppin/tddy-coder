@@ -10,3 +10,4 @@ export type { HostLabelSource } from "./hostLabel";
 export type * from "./connections/types";
 export type * from "./connections/session";
 export type * from "./connections/terminal";
+export * from "./ports/media";
