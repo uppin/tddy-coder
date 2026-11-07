@@ -1,7 +1,7 @@
 //! A session host is constructed over the daemon's one coding-agent registry and launches from
 //! that very instance — never a registry of its own, never an empty one in its place.
 //!
-//! Product: `docs/ft/daemon/1-WIP/PRD-2026-11-06-one-host-coding-agent-registry.md`.
+//! Product: `docs/ft/daemon/session-agent-roster.md` § Coding agents.
 
 use std::path::PathBuf;
 use std::sync::Arc;

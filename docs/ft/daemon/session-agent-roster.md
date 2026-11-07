@@ -197,7 +197,13 @@ change what the running session's main agent is allowed to call; detaching and r
 ### Coding agents
 
 A host's coding agents are the specs of its coding-agent registry — the built-ins plus every
-`<tddyhome>/tools/<id>.yaml` that declares `coding_agent:` — so an agent that exists only as a YAML file is a
+`<tddyhome>/tools/<id>.yaml` that declares `coding_agent:` — loaded **once** at daemon start. A
+registry that does not load (an unparseable `tools/<id>.yaml`) stops the start with an error naming
+the file, whatever else is configured; no consumer ever falls back to an empty registry. That one
+instance serves the session host, Telegram, the reserved assistant ids and the model catalog: the
+`ListAgentModels` probe hands `tddy-tools list-models` the host's `<tddyhome>/tools`, so an
+operator's `models:` override in `tools/<id>.yaml` is the list the Create-session pane shows. An
+agent that exists only as a YAML file is a
 coding agent without a code change; what it may do is its spec's `coding_agent.capabilities`, not a
 session-type string. Its CLI session (`<id>-cli`) takes the generic spec launch, which serves every
 capability `claude.yaml` and `cursor.yaml` declare — a managed workflow with hooks for

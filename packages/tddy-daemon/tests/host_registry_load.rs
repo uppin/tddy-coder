@@ -2,7 +2,7 @@
 //! start: a registry that does not load stops the start, and Telegram and the session host share
 //! the one instance that did.
 //!
-//! Product: `docs/ft/daemon/1-WIP/PRD-2026-11-06-one-host-coding-agent-registry.md`.
+//! Product: `docs/ft/daemon/session-agent-roster.md` § Coding agents.
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;

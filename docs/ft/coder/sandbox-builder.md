@@ -70,7 +70,10 @@ needs" set lives in one reviewable recipe; and a non-leaking secret channel deli
 8. **Every agent jail is a tool plan.** No recipe knows a coding agent. A jailed agent's reads,
    copies, home, secrets, policy and egress are lowered from its tool definition, and its argv is
    rendered from its spec ([§ Jail sections](#jail-sections)). This holds for the daemon's sessions,
-   for `tddy-sandbox-app --agent <id>` and for split sessions. The plan states the jail's guidance
+   for `tddy-sandbox-app --agent <id>` and for split sessions. `tddy-sandbox-app` is a PTY sandbox,
+   so `--agent` offers only the coding agents whose spec's `run` is a PTY launch: an unknown id is
+   refused listing those, and an ACP-only agent (`claude-acp`, `codex-acp`) is refused as having no
+   PTY run, naming the agents it can run. The plan states the jail's guidance
    directory and transport itself (`SandboxPlan.context_dir`, `SandboxPlan.stdio`). No backend infers
    them from the runner's argv.
 9. **Action sandbox plans.** `tddy-daemon` `sandbox_plan_builder` maps `ActionSpec` + `SandboxRequest`

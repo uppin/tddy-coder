@@ -2,7 +2,7 @@
 //! built-in specs with that directory's overrides applied, so an operator's model list is the one
 //! the daemon's model probe reports.
 //!
-//! Product: `docs/ft/daemon/1-WIP/PRD-2026-11-06-one-host-coding-agent-registry.md`.
+//! Product: `docs/ft/daemon/session-agent-roster.md` § Coding agents.
 
 use std::path::Path;
 
