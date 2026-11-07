@@ -1,0 +1,178 @@
+/**
+ * Acceptance: the managed-codebase section gains a "Semantic index" checkbox
+ * (see docs/ft/coder/semantic-index.md). When on, the session's StartSession request carries
+ * `semantic_index = true`; the daemon then indexes the worktree before launch and exposes the
+ * SemanticSearch tool. The option lives inside the Managed codebase section for both the claude-cli
+ * and cursor-cli session types, defaults to off, and never leaks a value from a hidden control.
+ *
+ * Uses the in-memory ConnectRPC backend (not `cy.intercept`) so the test asserts on the typed
+ * StartSession request the component actually sent — mirrors CreateSessionManagedWorkflow.cy.tsx.
+ */
+import React from "react";
+import { servedAgentWire } from "../support/servedAgents";
+import { createClient } from "@connectrpc/connect";
+import { anInMemoryRpcBackend } from "tddy-connectrpc-testkit";
+import { CreateSessionPane } from "../../src/CreateSessionPane";
+import { SessionService } from "tddy-client-web/gen/session_pb";
+import { ProjectService } from "tddy-client-web/gen/project_pb";
+import { CatalogService } from "tddy-client-web/gen/catalog_pb";
+import { SessionFilesService } from "tddy-client-web/gen/session_files_pb";
+import { WorktreeService } from "tddy-client-web/gen/worktree_pb";
+import { TEST_IDS, byTestId } from "../support/testIds";
+
+/** A backend seeded with every RPC CreateSessionPane calls on mount, plus a StartSession stub. */
+function aCreateSessionBackend() {
+  return anInMemoryRpcBackend()
+    .onUnary(SessionService.method.listSessions, () => ({ sessions: [] }))
+    .onUnary(CatalogService.method.listAgentModels, () => ({
+      models: [{ id: "claude-opus-4-8", label: "Claude Opus 4.8" }],
+      defaultModel: "claude-opus-4-8",
+    }))
+    .onUnary(ProjectService.method.listProjects, () => ({
+      projects: [{ projectId: "proj-1", name: "Test Project", mainRepoPath: "/repo" }],
+    }))
+    .onUnary(CatalogService.method.listAgents, () => ({
+      agents: [
+        { id: "claude", label: "Claude", ...servedAgentWire("claude") },
+        { id: "cursor", label: "Cursor", ...servedAgentWire("cursor") },
+      ],
+    }))
+    .onUnary(CatalogService.method.listTools, () => ({ tools: [] }))
+    .onUnary(CatalogService.method.listSubagents, () => ({
+      // Qualified by its owning daemon, the way the picker lists and submits agents
+      // (docs/ft/daemon/session-agent-roster.md § Web UI).
+      subagents: [
+        {
+          name: "fastcontext",
+          label: "FastContext",
+          model: "microsoft/FastContext-1.0-4B-RL",
+          daemonInstanceId: "local",
+          agentId: "fastcontext@local",
+        },
+      ],
+    }))
+    .onUnary(SessionService.method.startSession, () => ({ sessionId: "semantic-1" }));
+}
+
+function mountCreatePane(backend: ReturnType<typeof aCreateSessionBackend>) {
+  const client = createClient(SessionService, backend.transport());
+  const projectClient = createClient(ProjectService, backend.transport());
+  const catalogClient = createClient(CatalogService, backend.transport());
+  // The same host over the same wire, under the service that now serves the worktree RPCs.
+  const sessionFilesClient = createClient(SessionFilesService, backend.transport());
+  const worktreeClient = createClient(WorktreeService, backend.transport());
+  cy.mount(
+    <CreateSessionPane
+      client={client}
+      projectClient={projectClient}
+      catalogClient={catalogClient}
+      sessionFilesClient={sessionFilesClient}
+      worktreeClient={worktreeClient}
+      sessionToken="tok"
+      onCancel={cy.stub()}
+      onCreated={cy.stub()}
+    />,
+  );
+}
+
+describe("CreateSession managed-codebase semantic index", () => {
+  beforeEach(() => {
+    cy.viewport(1280, 800);
+  });
+
+  it("offers the Semantic index option without waiting for Managed codebase", () => {
+    // Given — a claude-cli session with Managed codebase still disabled
+    mountCreatePane(aCreateSessionBackend());
+    byTestId(TEST_IDS.createSessionTypeClaudeCliBtn).click();
+
+    // Then — the Semantic index checkbox is shown. The index is built wherever the worktree is,
+    // on every placement, so the orchestration toggle is not what decides whether it is offered.
+    byTestId(TEST_IDS.createSessionSemanticIndexToggle).should("be.visible");
+
+    // When — enabling Managed codebase
+    byTestId(TEST_IDS.createSessionManagedCodebaseToggle).check();
+
+    // Then — the Semantic index checkbox appears, unchecked
+    byTestId(TEST_IDS.createSessionSemanticIndexToggle)
+      .should("be.visible")
+      .and("not.be.checked");
+  });
+
+  it("shows the Semantic index option under Managed codebase for cursor-cli sessions", () => {
+    // Given
+    mountCreatePane(aCreateSessionBackend());
+    byTestId(TEST_IDS.createSessionTypeCursorCliBtn).click();
+
+    // When — enabling Managed codebase for a cursor-cli session
+    byTestId(TEST_IDS.createSessionManagedCodebaseToggle).check();
+
+    // Then — the Semantic index checkbox is available here too
+    byTestId(TEST_IDS.createSessionSemanticIndexToggle)
+      .should("be.visible")
+      .and("not.be.checked");
+  });
+
+  it("defaults Semantic index to off — a managed session sends semanticIndex=false", () => {
+    // Given
+    const backend = aCreateSessionBackend();
+    mountCreatePane(backend);
+    byTestId(TEST_IDS.createSessionTypeClaudeCliBtn).click();
+    byTestId(TEST_IDS.createSessionProjectSelect).select("proj-1");
+    byTestId(TEST_IDS.createSessionManagedCodebaseToggle).check();
+
+    // When — submitting without touching the Semantic index checkbox
+    byTestId(TEST_IDS.createSessionSubmitBtn).should("not.be.disabled").click();
+
+    // Then — semanticIndex defaults to false
+    cy.wrap(null).should(() => {
+      const calls = backend.callsTo(SessionService.method.startSession);
+      expect(calls).to.have.length(1);
+      expect(calls[0].managedCodebase).to.eq(true);
+      expect(calls[0].semanticIndex).to.eq(false);
+    });
+  });
+
+  it("creating a managed session with Semantic index enabled sends semanticIndex=true", () => {
+    // Given
+    const backend = aCreateSessionBackend();
+    mountCreatePane(backend);
+    byTestId(TEST_IDS.createSessionTypeClaudeCliBtn).click();
+    byTestId(TEST_IDS.createSessionProjectSelect).select("proj-1");
+    byTestId(TEST_IDS.createSessionManagedCodebaseToggle).check();
+
+    // When — enabling Semantic index and submitting
+    byTestId(TEST_IDS.createSessionSemanticIndexToggle).check();
+    byTestId(TEST_IDS.createSessionSubmitBtn).should("not.be.disabled").click();
+
+    // Then — the typed StartSession request carried semanticIndex=true
+    cy.wrap(null).should(() => {
+      const calls = backend.callsTo(SessionService.method.startSession);
+      expect(calls).to.have.length(1);
+      expect(calls[0].sessionType).to.eq("claude-cli");
+      expect(calls[0].managedCodebase).to.eq(true);
+      expect(calls[0].semanticIndex).to.eq(true);
+    });
+  });
+
+  it("disabling Managed codebase clears Semantic index — the request sends semanticIndex=false", () => {
+    // Given — a managed session with Semantic index turned on
+    const backend = aCreateSessionBackend();
+    mountCreatePane(backend);
+    byTestId(TEST_IDS.createSessionTypeClaudeCliBtn).click();
+    byTestId(TEST_IDS.createSessionProjectSelect).select("proj-1");
+    byTestId(TEST_IDS.createSessionManagedCodebaseToggle).check();
+    byTestId(TEST_IDS.createSessionSemanticIndexToggle).check();
+
+    // When — turning Managed codebase back off, then submitting
+    byTestId(TEST_IDS.createSessionManagedCodebaseToggle).uncheck();
+    byTestId(TEST_IDS.createSessionSubmitBtn).should("not.be.disabled").click();
+
+    // Then — the hidden Semantic index value did not leak into the request
+    cy.wrap(null).should(() => {
+      const calls = backend.callsTo(SessionService.method.startSession);
+      expect(calls).to.have.length(1);
+      expect(calls[0].managedCodebase).to.eq(false);
+      expect(calls[0].semanticIndex).to.eq(false);
+    });
+  });
+});
