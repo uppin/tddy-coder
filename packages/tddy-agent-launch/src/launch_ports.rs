@@ -93,6 +93,9 @@ pub struct LaunchSessions {
     pub task_registry: TaskRegistry,
     /// The per-OS-user host-session sockets and the tool sessions they answer.
     pub host_session_sockets: Arc<HostSessionSockets>,
+    /// The agent-tool socket of each session's OS user (`#agent-tools` 26/28): what a session's
+    /// hooks, `tddy-tools notify` and tool calls are pointed at.
+    pub agent_tool_sockets: Arc<tddy_daemon_kernel::agent_tool_sockets::AgentToolSockets>,
     pub agent_activity_hub: Arc<tddy_daemon_kernel::AgentActivityHub>,
     /// The agent topic's handle: a jail start claims its seeded clones and resolves its agent defs
     /// through it.

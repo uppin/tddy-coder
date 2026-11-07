@@ -41,6 +41,10 @@ tonic = { version = "0.12", default-features = false, features = ["transport"] }
 libc = "0.2"
 
 [dev-dependencies]
+# `agent_tool_sockets` tests dial a user's socket as a co-located agent does. An internal crate
+# (`tddy-stdio` depends on `tddy-rpc` alone), so no cycle and nothing new in Cargo.lock; serving
+# the roster in `/green` moves it to `[dependencies]`.
+tddy-stdio = { path = "../tddy-stdio" }
 # `test-util`: `tokio::time::pause` drives the stream idle timeout without waiting it out.
 tokio = { version = "1", features = ["macros", "rt", "rt-multi-thread", "time", "test-util"] }
 rstest = { workspace = true }

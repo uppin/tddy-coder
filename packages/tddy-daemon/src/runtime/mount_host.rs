@@ -303,6 +303,9 @@ impl BuildContext {
         .with_approval_routes(approval_routes)
         // Read here, before the local socket server is spawned: adopting its own listener
         // clears the `LISTEN_*` variables the host sockets are announced in.
+        // TODO(agent-tool-socket-per-user): implement — adopt the `agent-tools.<user>` listeners
+        // the supervisor handed over (`tddy_daemon_kernel::agent_tool_sockets::agent_tool_fds`)
+        // here too, before the local socket clears the `LISTEN_*` variables.
         .with_inherited_host_session_sockets(
             tddy_session_lifecycle::connection_service::inherited_host_sockets::adopt_from_environment(),
         ))

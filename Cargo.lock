@@ -12793,6 +12793,7 @@ dependencies = [
  "tddy-rpc",
  "tddy-sandbox",
  "tddy-service",
+ "tddy-stdio",
  "tddy-task",
  "tempfile",
  "tokio",

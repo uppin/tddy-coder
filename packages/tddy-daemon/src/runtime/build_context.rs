@@ -158,6 +158,10 @@ impl BuildContext {
         // checkout, which can use neither the application's in-process bridge nor a port that only
         // answers the OAuth callback. Built from the finished roster, so a tool call over it reaches
         // the very handlers the UI does. See `crate::agent_tool_socket`.
+        // TODO(agent-tool-socket-per-user): implement — install this roster on the session host's
+        // `AgentToolSockets` (`install_roster`), so a server daemon serves each session's OS user
+        // on `<data dir>/run-agent-tools/<user>/agent.sock`; the embedded host keeps the one socket
+        // below, with the session host given `AgentToolSocketPlacement::Embedded`.
         if self.options.host == RuntimeHost::Embedded {
             self.tasks.agent_tool_socket = Some((
                 crate::agent_tool_socket::agent_tool_socket_path(&self.identity.keys.tddy_data_dir),

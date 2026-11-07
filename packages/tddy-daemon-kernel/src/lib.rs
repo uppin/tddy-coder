@@ -62,6 +62,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 pub mod agent_list_mapping;
 pub mod agent_notification_limits;
 pub mod agent_tool_socket;
+pub mod agent_tool_sockets;
 pub mod config;
 pub mod conversation_frames;
 pub mod daemon_hook_urls;

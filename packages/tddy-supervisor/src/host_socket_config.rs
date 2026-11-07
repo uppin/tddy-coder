@@ -32,6 +32,10 @@ pub(crate) fn validate(config: &SupervisorConfig) -> Result<(), ConfigError> {
             .map(|s| s.path.as_path()),
     );
 
+    // TODO(agent-tool-socket-per-user): implement — validate every service's
+    // `agent_tool_sockets` as its `host_sockets` (needs `socket`, plain allowed non-root user, one
+    // per user, a directory of its own shared with no other declared socket), and count both kinds
+    // against `MAX_HANDED_OVER_LISTENERS`.
     for service in &config.services {
         if service.host_sockets.is_empty() {
             continue;
@@ -114,4 +118,188 @@ fn is_one_safe_segment(name: &str) -> bool {
         && name
             .chars()
             .all(|c| c.is_ascii_alphanumeric() || matches!(c, '_' | '-' | '.'))
+}
+
+#[cfg(test)]
+mod tests {
+    //! `agent_tool_sockets:` (`#agent-tools` 26/28) is validated like `host_sockets:`, and both kinds
+    //! share the handed-over descriptor slots.
+
+    use crate::config::{HostSocket, SupervisorConfig};
+    use crate::socket::MAX_HANDED_OVER_LISTENERS;
+    use pretty_assertions::assert_eq;
+    use std::path::PathBuf;
+
+    /// A daemon service with its own socket, the given `host_sockets:` and `agent_tool_sockets:`
+    /// blocks, and `allowed` as the session users.
+    fn a_daemon_declaring(host_sockets: &str, agent_tool_sockets: &str, allowed: &str) -> String {
+        format!(
+            "\
+socket:
+  path: /run/tddy-supervisor.sock
+services:
+  - name: tddy-daemon
+    exec_start: /usr/local/bin/tddy-daemon
+    user: tddy
+    socket:
+      path: /run/tddy-daemon.sock
+    host_sockets:
+{host_sockets}
+    agent_tool_sockets:
+{agent_tool_sockets}
+spawn_policy:
+  allowed_session_users: [{allowed}]
+"
+        )
+    }
+
+    /// `      - {user: <user>, path: /run/tddy/<dir>/<file>}`
+    fn a_socket_entry(user: &str, dir: &str, file: &str) -> String {
+        format!("      - {{user: {user}, path: /run/tddy/{dir}/{file}}}")
+    }
+
+    /// Why `yaml` was rejected, or `None` when it was accepted.
+    fn rejection_of(yaml: &str) -> Option<String> {
+        SupervisorConfig::from_yaml(yaml).err().map(|e| e.message)
+    }
+
+    /// Whether `yaml` was rejected for a reason mentioning `reason`.
+    fn is_rejected_because(yaml: &str, reason: &str) -> Result<(), String> {
+        match rejection_of(yaml) {
+            Some(message) if message.contains(reason) => Ok(()),
+            Some(message) => Err(format!("rejected, but not for `{reason}`: {message}")),
+            None => Err(format!("accepted; expected a rejection for `{reason}`")),
+        }
+    }
+
+    #[test]
+    fn supervisor_config_rejects_a_shared_dir_and_too_many_listeners() {
+        // Given alice's agent-tool socket in her host socket's directory
+        let shared_dir = a_daemon_declaring(
+            &a_socket_entry("alice", "alice", "host.sock"),
+            &a_socket_entry("alice", "alice", "agent.sock"),
+            "alice",
+        );
+        // And as many host sockets as fit, plus one agent-tool socket more
+        let users: Vec<String> = (0..MAX_HANDED_OVER_LISTENERS - 1)
+            .map(|i| format!("user{i}"))
+            .collect();
+        let host_sockets: Vec<String> = users
+            .iter()
+            .map(|user| a_socket_entry(user, &format!("{user}-host"), "host.sock"))
+            .collect();
+        let too_many = a_daemon_declaring(
+            &host_sockets.join("\n"),
+            &a_socket_entry(&users[0], "user0-tools", "agent.sock"),
+            &users.join(", "),
+        );
+
+        // Then both are rejected, each for its own reason
+        assert_eq!(
+            (
+                is_rejected_because(&shared_dir, "shares a path or directory"),
+                is_rejected_because(&too_many, "fit"),
+            ),
+            (Ok(()), Ok(()))
+        );
+    }
+
+    #[test]
+    fn rejects_an_agent_tool_socket_for_a_user_the_policy_does_not_allow_sessions_as() {
+        // Given carol is not an allowed session user
+        let yaml = a_daemon_declaring(
+            &a_socket_entry("alice", "alice", "host.sock"),
+            &a_socket_entry("carol", "carol-tools", "agent.sock"),
+            "alice",
+        );
+
+        // Then
+        assert_eq!(is_rejected_because(&yaml, "allowed_session_users"), Ok(()));
+    }
+
+    #[test]
+    fn rejects_an_agent_tool_socket_for_root() {
+        // Given
+        let yaml = a_daemon_declaring(
+            &a_socket_entry("alice", "alice", "host.sock"),
+            &a_socket_entry("root", "root-tools", "agent.sock"),
+            "alice",
+        );
+
+        // Then — refused as an agent-tool socket, before any policy lookup
+        assert_eq!(
+            is_rejected_because(&yaml, "an agent-tool socket may not be given to `root`"),
+            Ok(())
+        );
+    }
+
+    #[test]
+    fn rejects_two_agent_tool_sockets_for_one_user() {
+        // Given
+        let yaml = a_daemon_declaring(
+            &a_socket_entry("alice", "alice", "host.sock"),
+            &[
+                a_socket_entry("alice", "alice-tools-1", "agent.sock"),
+                a_socket_entry("alice", "alice-tools-2", "agent.sock"),
+            ]
+            .join("\n"),
+            "alice",
+        );
+
+        // Then
+        assert_eq!(is_rejected_because(&yaml, "two agent-tool sockets"), Ok(()));
+    }
+
+    #[test]
+    fn rejects_agent_tool_sockets_on_a_service_that_has_no_socket_of_its_own() {
+        // Given descriptor 3 would then be an agent-tool socket the service takes for its own
+        let yaml = "\
+socket:
+  path: /run/tddy-supervisor.sock
+services:
+  - name: tddy-daemon
+    exec_start: /usr/local/bin/tddy-daemon
+    user: tddy
+    agent_tool_sockets:
+      - {user: alice, path: /run/tddy/alice-tools/agent.sock}
+spawn_policy:
+  allowed_session_users: [alice]
+";
+
+        // Then
+        assert_eq!(is_rejected_because(yaml, "no socket"), Ok(()));
+    }
+
+    #[test]
+    fn accepts_a_host_and_an_agent_tool_socket_for_one_user_in_directories_of_their_own() {
+        // Given — guard: the shape `supervisor.yaml` is meant to take
+        let yaml = a_daemon_declaring(
+            &a_socket_entry("alice", "run/alice", "host.sock"),
+            &a_socket_entry("alice", "run-agent-tools/alice", "agent.sock"),
+            "alice",
+        );
+
+        // Then
+        assert_eq!(
+            SupervisorConfig::from_yaml(&yaml)
+                .map(|config| config.services[0].agent_tool_sockets.clone())
+                .map_err(|e| e.message),
+            Ok(vec![HostSocket {
+                user: "alice".to_string(),
+                path: PathBuf::from("/run/tddy/run-agent-tools/alice/agent.sock"),
+            }])
+        );
+    }
+
+    #[test]
+    fn declares_no_agent_tool_sockets_by_default() {
+        // Given / When — guard: an existing supervisor.yaml keeps loading
+        let config = SupervisorConfig::from_yaml(
+            "socket:\n  path: /run/s.sock\nservices:\n  - {name: d, exec_start: /bin/d, user: tddy}\n",
+        )
+        .expect("parse config");
+
+        // Then
+        assert_eq!(config.services[0].agent_tool_sockets, Vec::new());
+    }
 }

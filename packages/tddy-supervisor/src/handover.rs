@@ -47,6 +47,18 @@ impl SocketHandover {
         self
     }
 
+    /// Also hand over `os_user`'s agent-tool socket (`#agent-tools` 26/28), at the next descriptor
+    /// and named `agent-tools.<os user>`.
+    pub fn with_agent_tool_socket(
+        self,
+        os_user: &str,
+        listener: Arc<UnixListener>,
+    ) -> SocketHandover {
+        // TODO(agent-tool-socket-per-user): implement — push `(agent_tools_fd_name(os_user), listener)`.
+        let _ = (os_user, listener);
+        self
+    }
+
     /// The descriptors to place at [`SD_LISTEN_FDS_START`] and after, in order. Borrowed, never
     /// owned: the listeners outlive every child that is handed them.
     pub(crate) fn raw_fds(&self) -> Vec<RawFd> {

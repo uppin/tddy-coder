@@ -142,6 +142,10 @@ pub struct DaemonSessionHost {
     /// The per-OS-user host-session sockets this daemon serves and the tool sessions they answer
     /// (`spawn_conversation`, `github_token`). Shared with every [`LaunchSessions`] built from it.
     host_session_sockets: Arc<host_session_socket::HostSessionSockets>,
+    /// The agent-tool socket of each session's OS user (`#agent-tools` 26/28): per OS user on a
+    /// server daemon, the runtime's one socket on an embedded one. Shared with every
+    /// [`LaunchSessions`] and `SplitSessions` built from it; the runtime installs its roster.
+    agent_tool_sockets: Arc<tddy_daemon_kernel::agent_tool_sockets::AgentToolSockets>,
     /// Live pub/sub hub for agent-activity records (StreamSessionActivity) plus the PreToolUse /
     /// PostToolUse pending-call pairing state. Shared with the sandbox tool handler so both the
     /// hook path and the in-jail tool path publish through the same channel.

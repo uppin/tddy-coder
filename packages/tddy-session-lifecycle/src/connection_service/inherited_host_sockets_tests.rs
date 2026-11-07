@@ -279,3 +279,35 @@ async fn does_not_rebind_an_inherited_socket_whose_file_was_removed() {
     assert!(refusal.contains("supervisor"), "{refusal}");
     assert!(!data.path().join("run").exists());
 }
+
+#[test]
+fn reads_the_same_agent_tool_descriptor_names_the_supervisor_writes() {
+    // Given the supervisor's own writer of the names: its socket, alice's host socket, then her
+    // agent-tool socket (`#agent-tools` 26/28)
+    let names = format!(
+        "{}:{}:{}",
+        tddy_supervisor::SERVICE_SOCKET_FD_NAME,
+        tddy_supervisor::host_session_fd_name("alice"),
+        tddy_supervisor::agent_tools_fd_name("alice")
+    );
+
+    // Then the daemon's agent-tool reader finds alice's at descriptor 5 — which it can only do by
+    // sharing the supervisor's prefix — and the host-session reader still finds hers at 4
+    assert_eq!(
+        (
+            tddy_supervisor::AGENT_TOOLS_FD_NAME_PREFIX,
+            tddy_daemon_kernel::agent_tool_sockets::agent_tool_fds(
+                7,
+                Some("7"),
+                Some("3"),
+                Some(&names)
+            ),
+            host_session_fds(7, Some("7"), Some("3"), Some(&names)),
+        ),
+        (
+            tddy_daemon_kernel::agent_tool_sockets::AGENT_TOOLS_FD_NAME_PREFIX,
+            vec![("alice".to_string(), 5)],
+            vec![("alice".to_string(), 4)],
+        )
+    );
+}
