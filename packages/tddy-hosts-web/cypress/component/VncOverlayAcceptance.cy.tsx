@@ -9,7 +9,7 @@
  */
 
 import React from "react";
-import { VncOverlay } from "../../src/components/sessions/VncOverlay";
+import { VncOverlay } from "../../src/VncOverlay";
 import { sessionsDrawerPage as page } from "../support/pages/sessionsDrawerPage";
 
 // ---------------------------------------------------------------------------
