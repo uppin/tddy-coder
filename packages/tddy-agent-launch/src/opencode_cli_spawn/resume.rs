@@ -215,6 +215,8 @@ async fn resume_cli_harness_session(
     slots.argv_extra.extend(route.args);
     write_slot_files_on_target(&mut slots, remote_host)?;
     let host = PointerHost::of(remote_host);
+    // TODO(split-remote-env): implement — a split session's pointer is `split.session_pointer`,
+    // rewritten in its context dir for the agent this resume launches.
     let pointer = place_session_pointer(wiring.session_pointer.as_ref(), &worktree_path, &host)?;
     let on_exit = removing_session_pointer_on_exit(on_exit, pointer, meta.tmux_session.is_some());
     let mut env = git_environment;

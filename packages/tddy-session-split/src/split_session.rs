@@ -54,8 +54,35 @@ pub struct SplitAgentWiring {
     /// `claude` flags: the `mcp__tddy-tools__*` allowlist, the native-tool disallowlist, the
     /// permission-prompt tool, and the MCP config registering `tddy-tools --mcp`.
     pub extra_args: Vec<String>,
-    /// `TDDY_REMOTE_*` pairs selecting the LiveKit transport in `tddy-tools`.
+    /// The agent process's own environment additions: never a `TDDY_*` variable. The
+    /// `TDDY_REMOTE_*` transport and the roster seed are registered on its `tddy-tools --mcp`
+    /// server, in `extra_args`' MCP config.
     pub env: Vec<(String, String)>,
+    /// The session pointer the agent's context dir holds while it runs ([`split_session_pointer`]):
+    /// the same transport, for a `tddy-tools` that finds its session by walking up from its cwd.
+    /// Placed by the spawn, removed when the agent exits ([`crate::split_ports::SplitSessionPointers`]).
+    pub session_pointer: Option<tddy_core::session_pointer::SessionPointer>,
+}
+
+/// The `.tddy/session.json` a split agent's context dir `context_dir` holds: `remote` — the
+/// transport to its codebase session (session, instance, room, identity, token) — by variable name,
+/// owned by this daemon on this host. It names no toolcall socket: a split session has no workflow
+/// listener on this host.
+pub fn split_session_pointer(
+    remote: &RemoteToolEnv,
+    context_dir: &Path,
+    session_dir: &Path,
+) -> tddy_core::session_pointer::SessionPointer {
+    // TODO(split-remote-env): implement — carry `remote`'s pairs and this daemon as the owner.
+    let _ = remote;
+    tddy_core::session_pointer::SessionPointer {
+        socket: None,
+        repo_dir: context_dir.to_path_buf(),
+        session_dir: Some(session_dir.to_path_buf()),
+        remote: Default::default(),
+        notify: Default::default(),
+        owner: None,
+    }
 }
 
 /// Identity prefix reserved for split sessions' agent participants.
@@ -108,6 +135,7 @@ pub fn split_context_dir(session_dir: &Path) -> PathBuf {
 /// [`crate::connection_service`]'s rule for `split_roster_from_codebase_host`, applied to the
 /// guidance for the same reason it applies to the roster.
 pub fn build_split_context_dir(
+    spec: &tddy_coding_agent_specs::CodingAgentSpec,
     session_dir: &Path,
     withdrawals: &[(String, Vec<String>)],
     globs: &[&str],
@@ -120,9 +148,7 @@ pub fn build_split_context_dir(
     let replacements = agent_argv::subagent_replacements(withdrawals, &borrowed);
 
     // The guidance files the preamble leads are the split agent's spec's `instructions.files`.
-    let guidance_files = crate::agent_argv::split_agent_spec()
-        .map(|spec| spec.agent.instructions.files)
-        .unwrap_or_default();
+    let guidance_files = spec.agent.instructions.files.clone();
     let preamble = tddy_sandbox::managed_codebase_preamble(&replacements, &guidance_files);
     let glob_strings: Vec<String> = globs.iter().map(ToString::to_string).collect();
     tddy_session_files::context_sync::ContextSyncer::populate(
@@ -335,8 +361,12 @@ pub struct SplitSpawnTarget<'a> {
 /// `globs` and `source` are the session backend's allow-list and the repository it is read from —
 /// the codebase daemon on a resume, reached through a fetch already completed by the caller. A fetch
 /// that failed has already failed this call, for the reason [`build_split_context_dir`] gives.
+/// `spec` is the split agent as the host's registry holds it ([`agent_argv::split_agent_spec`]);
+/// `roster_seed` is [`roster_seed_env_pairs`] of the roster `withdrawals` was read from, for the
+/// agent's `tddy-tools` alone.
 #[allow(clippy::too_many_arguments)]
 pub fn prepare_split_agent_wiring(
+    spec: &tddy_coding_agent_specs::CodingAgentSpec,
     split_rooms: &dyn tddy_daemon_extensions::SplitRoomHosting,
     config: &tddy_daemon_kernel::config::DaemonConfig,
     tokens: &SessionTokens,
@@ -344,15 +374,30 @@ pub fn prepare_split_agent_wiring(
     tddy_tools_path: &str,
     target: &SplitSpawnTarget<'_>,
     withdrawals: &[(String, Vec<String>)],
+    roster_seed: &[(String, String)],
     globs: &[&str],
     source: &dyn tddy_session_files::context_sync::ContextSource,
 ) -> Result<SplitAgentWiring, Status> {
     let room = SplitAgentRoom::issued_by(split_rooms, config, target.session_id)?;
     let remote = split_remote_tool_env(&room, tokens, target)?;
+    let tool_server_env: Vec<(String, String)> = remote
+        .env_pairs()
+        .into_iter()
+        .chain(roster_seed.iter().cloned())
+        .collect();
     Ok(SplitAgentWiring {
-        context_dir: build_split_context_dir(session_dir, withdrawals, globs, source)?,
-        extra_args: agent_argv::split_claude_extra_args(session_dir, tddy_tools_path, withdrawals)?,
-        env: remote.env_pairs(),
+        context_dir: build_split_context_dir(spec, session_dir, withdrawals, globs, source)?,
+        extra_args: agent_argv::split_claude_extra_args(
+            spec,
+            session_dir,
+            tddy_tools_path,
+            &tool_server_env,
+            withdrawals,
+        )?,
+        // TODO(split-remote-env): implement — the agent process is given no `TDDY_*` variable.
+        env: tool_server_env,
+        // TODO(split-remote-env): implement — `split_session_pointer` of `remote` for the context dir.
+        session_pointer: None,
     })
 }
 
@@ -813,8 +858,7 @@ mod tests {
     /// The native tools `claude.yaml`'s `host_agent` variant withdraws: what a split session
     /// hard-disables.
     fn native_filesystem_tools() -> Vec<String> {
-        tddy_coding_agent_specs::embedded_spec("claude")
-            .expect("claude's embedded spec")
+        the_builtin_split_agent()
             .agent
             .variants
             .remove(tddy_coding_agent_specs::HOST_AGENT_VARIANT)
@@ -959,8 +1003,14 @@ mod tests {
         let (_repo, source) = a_repo_with_no_guidance();
 
         // When
-        let context =
-            build_split_context_dir(tmp.path(), &[], CLAUDE_GLOBS, &source).expect("context dir");
+        let context = build_split_context_dir(
+            &the_builtin_split_agent(),
+            tmp.path(),
+            &[],
+            CLAUDE_GLOBS,
+            &source,
+        )
+        .expect("context dir");
 
         // Then — an agent that opened its cwd expecting a repository learns why it is empty
         let claude_md = std::fs::read_to_string(context.join("CLAUDE.md")).expect("CLAUDE.md");
@@ -1001,8 +1051,23 @@ mod tests {
 
     /// The flags a split session spawns with while nothing is attached to it.
     fn split_args_with_no_agents(session_dir: &Path) -> Vec<String> {
-        agent_argv::split_claude_extra_args(session_dir, "/usr/bin/tddy-tools", &[])
-            .expect("extra args")
+        agent_argv::split_claude_extra_args(
+            &the_builtin_split_agent(),
+            session_dir,
+            "/usr/bin/tddy-tools",
+            &[],
+            &[],
+        )
+        .expect("extra args")
+    }
+
+    /// The split agent as a host with no operator overrides holds it.
+    fn the_builtin_split_agent() -> tddy_coding_agent_specs::CodingAgentSpec {
+        agent_argv::split_agent_spec(
+            &tddy_coding_agent_specs::CodingAgentRegistry::builtin()
+                .expect("the built-in coding agents load"),
+        )
+        .expect("the built-in registry holds the split agent")
     }
 
     /// The flags a split session spawns with, given the roster its codebase daemon holds.
@@ -1011,8 +1076,10 @@ mod tests {
         agents: &[tddy_service::proto::session_agents_svc::SessionAgentEntry],
     ) -> Vec<String> {
         agent_argv::split_claude_extra_args(
+            &the_builtin_split_agent(),
             session_dir,
             "/usr/bin/tddy-tools",
+            &[],
             &agent_argv::wire_roster_withdrawals(agents),
         )
         .expect("extra args")
@@ -1142,6 +1209,7 @@ mod tests {
         // When
         let (_repo, source) = a_repo_with_no_guidance();
         let context = build_split_context_dir(
+            &the_builtin_split_agent(),
             tmp.path(),
             &agent_argv::wire_roster_withdrawals(&[an_agent_on_the_roster("explorer", &["Grep"])]),
             CLAUDE_GLOBS,
@@ -1275,7 +1343,7 @@ mod colocated_jail_tool_env_tests {
 /// PRD: docs/ft/daemon/amendments/PRD-2026-09-18-sandboxed-codebase-from-the-web.md
 #[cfg(test)]
 mod withdrawal_contract_tests {
-    use super::agent_argv::split_claude_extra_args;
+    use super::agent_argv::{split_agent_spec, split_claude_extra_args};
     use std::path::Path;
 
     /// Every native route to a filesystem or a shell. An unconfined agent that kept any one of
@@ -1295,7 +1363,12 @@ mod withdrawal_contract_tests {
     ];
 
     fn args_for_a_session_with_no_roster(session_dir: &Path) -> Vec<String> {
-        split_claude_extra_args(session_dir, "/usr/bin/tddy-tools", &[])
+        let spec = split_agent_spec(
+            &tddy_coding_agent_specs::CodingAgentRegistry::builtin()
+                .expect("the built-in coding agents load"),
+        )
+        .expect("the built-in registry holds the split agent");
+        split_claude_extra_args(&spec, session_dir, "/usr/bin/tddy-tools", &[], &[])
             .expect("building the withdrawal argv must not fail")
     }
 
@@ -1415,5 +1488,89 @@ mod roster_seed_tests {
     #[test]
     fn hands_over_nothing_for_a_roster_with_no_agent() {
         assert!(roster_seed_env_pairs(&a_roster_attaching(&[])).is_empty());
+    }
+}
+
+#[cfg(test)]
+mod split_session_pointer_tests {
+    use std::path::Path;
+
+    use pretty_assertions::assert_eq;
+    use tddy_core::backend::RemoteToolEnv;
+    use tddy_core::session_pointer::SessionPointerOwner;
+
+    use super::split_session_pointer;
+
+    fn a_split_transport() -> RemoteToolEnv {
+        RemoteToolEnv {
+            daemon_url: String::new(),
+            daemon_socket: None,
+            session_id: "the-codebase-session".to_string(),
+            session_token: "the-agent-token".to_string(),
+            daemon_instance_id: Some("workstation-b".to_string()),
+            livekit_url: Some("ws://livekit.test:7880".to_string()),
+            livekit_room: Some("session-the-agent-session".to_string()),
+            server_identity: Some("daemon-workstation-a".to_string()),
+            livekit_token: Some("a-scoped-join-jwt".to_string()),
+        }
+    }
+
+    #[test]
+    fn a_split_session_pointer_carries_its_transport_by_variable_name() {
+        // Given the transport a split agent reaches its codebase session with
+        let transport = a_split_transport();
+
+        // When its context dir's pointer is built
+        let pointer = split_session_pointer(
+            &transport,
+            Path::new("/sessions/s1/context"),
+            Path::new("/sessions/s1"),
+        );
+
+        // Then the pointer's remote map is that transport, variable for variable
+        assert_eq!(pointer.remote, transport.env_pairs().into_iter().collect());
+    }
+
+    #[test]
+    fn a_split_session_pointer_is_owned_by_this_daemon_on_this_host() {
+        // Given the transport a split agent reaches its codebase session with
+        let transport = a_split_transport();
+
+        // When its context dir's pointer is built
+        let pointer = split_session_pointer(
+            &transport,
+            Path::new("/sessions/s1/context"),
+            Path::new("/sessions/s1"),
+        );
+
+        // Then a tddy-tools on this host refuses it once this daemon is gone
+        assert_eq!(pointer.owner, Some(SessionPointerOwner::this_process()));
+    }
+
+    #[test]
+    fn a_split_session_pointer_names_its_context_dir_and_no_socket() {
+        // Given the transport a split agent reaches its codebase session with
+        let transport = a_split_transport();
+
+        // When its context dir's pointer is built
+        let pointer = split_session_pointer(
+            &transport,
+            Path::new("/sessions/s1/context"),
+            Path::new("/sessions/s1"),
+        );
+
+        // Then it stands in for the repo the agent does not have, and names no workflow listener
+        assert_eq!(
+            (
+                pointer.repo_dir.as_path(),
+                pointer.session_dir.as_deref(),
+                pointer.socket
+            ),
+            (
+                Path::new("/sessions/s1/context"),
+                Some(Path::new("/sessions/s1")),
+                None
+            )
+        );
     }
 }

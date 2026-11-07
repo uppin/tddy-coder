@@ -112,6 +112,14 @@ impl SplitSessions {
             .split_agent_roster(codebase_instance_id, codebase_session_id, req)
             .await?;
         let withdrawals = crate::split_session::wire_roster_withdrawals(&roster.agents);
+        let roster_seed = crate::split_session::roster_seed_env_pairs(&roster);
+        // What the agent's `tddy-tools --mcp` reaches the codebase session with: the transport and
+        // the roster seed, registered on that server alone.
+        let tool_server_env: Vec<(String, String)> = remote
+            .env_pairs()
+            .into_iter()
+            .chain(roster_seed.iter().cloned())
+            .collect();
         // The agent's working directory is populated **before** the agent process exists (AC23): a
         // split agent that starts, reads its cwd and finds only the notice has already missed the
         // project's rules for its first turn. A fetch that fails fails the start, and the caller
@@ -123,6 +131,7 @@ impl SplitSessions {
                 req,
                 &session_dir,
                 &tddy_tools_path,
+                &tool_server_env,
                 withdrawals,
             )
             .await?;
@@ -138,7 +147,7 @@ impl SplitSessions {
                 initial_prompt,
                 tddy_tools_path,
                 remote,
-                roster_seed: crate::split_session::roster_seed_env_pairs(&roster),
+                roster_seed,
                 context_dir,
                 extra_args,
                 session_dir: &session_dir,
@@ -271,7 +280,7 @@ impl SplitSessions {
             answer_wait_secs,
         };
         match tddy_coding_agent_specs::slots::render(
-            &crate::agent_argv::split_agent_spec()?,
+            &crate::agent_argv::split_agent_spec(&self.coding_agents)?,
             &tddy_coding_agent_specs::slots::SlotInputs {
                 workdir: context_dir.clone(),
                 scratch_dir: context_dir.clone(),
@@ -305,7 +314,7 @@ impl SplitSessions {
         // The launch argv is rendered from the split agent's spec — the same template a
         // spec-driven launch renders — with this start's model, session, permission mode and
         // prompt bound.
-        let spec = crate::agent_argv::split_agent_spec()?;
+        let spec = crate::agent_argv::split_agent_spec(&self.coding_agents)?;
         let argv = spec
             .render_run_argv(
                 std::path::Path::new(&(self.agent_binary)(&spec.id)?),
@@ -324,6 +333,8 @@ impl SplitSessions {
             )
             .map_err(|e| Status::internal(format!("rendering the split agent's argv: {e}")))?;
         let session_type = format!("{}-cli", spec.id);
+        // TODO(split-remote-env): implement — place `split_session_pointer(&remote, …)` in the
+        // context dir through `self.session_pointers` and spawn with the exit hook that removes it.
         let handle = self
             .cli_manager
             .start_with_options(
@@ -335,6 +346,8 @@ impl SplitSessions {
                 Some(initial_prompt.trim()).filter(|p| !p.is_empty()),
                 None,
                 extra_args,
+                // TODO(split-remote-env): implement — the agent process is given no `TDDY_*`
+                // variable; its `tddy-tools` server carries them (`split_claude_extra_args`).
                 remote.env_pairs().into_iter().chain(roster_seed).collect(),
                 Some(os_user),
             )
@@ -402,6 +415,7 @@ impl SplitSessions {
         .await
     }
 
+    #[allow(clippy::too_many_arguments)]
     async fn split_agent_context_and_args(
         &self,
         codebase_instance_id: &str,
@@ -409,9 +423,10 @@ impl SplitSessions {
         req: &StartSessionRequest,
         session_dir: &std::path::Path,
         tddy_tools_path: &std::path::Path,
+        tool_server_env: &[(String, String)],
         withdrawals: Vec<(String, Vec<String>)>,
     ) -> Result<(std::path::PathBuf, Vec<String>), Status> {
-        let agent_spec = crate::agent_argv::split_agent_spec()?;
+        let agent_spec = crate::agent_argv::split_agent_spec(&self.coding_agents)?;
         let agent = agent_spec.id.as_str();
         let glob_refs: Vec<&str> = agent_spec
             .agent
@@ -429,14 +444,17 @@ impl SplitSessions {
             )
             .await?;
         let context_dir = crate::split_session::build_split_context_dir(
+            &agent_spec,
             session_dir,
             &withdrawals,
             &glob_refs,
             &context,
         )?;
         let extra_args = crate::split_session::split_claude_extra_args(
+            &agent_spec,
             session_dir,
             &tddy_tools_path.to_string_lossy(),
+            tool_server_env,
             &withdrawals,
         )?;
         Ok((context_dir, extra_args))

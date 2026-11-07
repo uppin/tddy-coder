@@ -53,6 +53,7 @@ pub mod session_provider_route;
 pub mod session_worktree_observer;
 mod slot_file_over_ssh;
 pub mod spec_launch;
+pub mod split_session_pointers;
 pub mod stack_child_spawn;
 pub mod stack_parent;
 pub mod stack_seed_validation;

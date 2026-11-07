@@ -171,8 +171,17 @@ async fn a_main_launched_from_the_claude_spec_gets_its_tool_flags_and_mcp_file_f
 
     // And the MCP file the slot wrote is the one the hand-built launch writes, byte for byte
     let from_the_slot = std::fs::read(&mcp_config).expect("the slot wrote the MCP config");
-    tddy_session_split::agent_argv::tddy_tools_only_mcp_args(session_dir.path(), &tddy_tools)
-        .expect("the hand-built launch writes its MCP config");
+    let split_agent = tddy_session_split::agent_argv::split_agent_spec(
+        &tddy_coding_agent_specs::CodingAgentRegistry::builtin()
+            .expect("the built-in coding agents load"),
+    )
+    .expect("the built-in registry holds the split agent");
+    tddy_session_split::agent_argv::tddy_tools_only_mcp_args(
+        &split_agent,
+        session_dir.path(),
+        &tddy_tools,
+    )
+    .expect("the hand-built launch writes its MCP config");
     assert_eq!(
         String::from_utf8(from_the_slot).unwrap(),
         std::fs::read_to_string(&mcp_config).unwrap()

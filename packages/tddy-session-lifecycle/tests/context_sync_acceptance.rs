@@ -173,6 +173,15 @@ impl ContextSource for ACodebaseHost {
     }
 }
 
+/// The split agent as a host with no operator overrides holds it.
+fn the_split_agent() -> tddy_coding_agent_specs::CodingAgentSpec {
+    tddy_session_lifecycle::split_session::split_agent_spec(
+        &tddy_coding_agent_specs::CodingAgentRegistry::builtin()
+            .expect("the built-in coding agents load"),
+    )
+    .expect("the built-in registry holds the split agent")
+}
+
 fn a_session_dir() -> tempfile::TempDir {
     tempfile::tempdir().expect("tempdir")
 }
@@ -205,8 +214,14 @@ fn a_split_context_dir_is_populated_from_the_codebase_host_at_setup() {
         .holding(".mcp.json", "{\"mcpServers\":{}}\n");
 
     // When
-    let context_dir = build_split_context_dir(session_dir.path(), &[], CLAUDE_GLOBS, &host)
-        .expect("building the context dir must succeed");
+    let context_dir = build_split_context_dir(
+        &the_split_agent(),
+        session_dir.path(),
+        &[],
+        CLAUDE_GLOBS,
+        &host,
+    )
+    .expect("building the context dir must succeed");
 
     // Then
     assert!(
@@ -229,8 +244,14 @@ fn the_populated_claude_md_still_opens_with_the_managed_codebase_preamble() {
     let host = a_codebase_host().holding("CLAUDE.md", "# Project rules\n");
 
     // When
-    let context_dir = build_split_context_dir(session_dir.path(), &[], CLAUDE_GLOBS, &host)
-        .expect("build must succeed");
+    let context_dir = build_split_context_dir(
+        &the_split_agent(),
+        session_dir.path(),
+        &[],
+        CLAUDE_GLOBS,
+        &host,
+    )
+    .expect("build must succeed");
 
     // Then
     let claude_md = read(&context_dir, "CLAUDE.md");
@@ -262,7 +283,13 @@ fn a_setup_fetch_that_fails_fails_the_build_rather_than_yielding_a_partial_dir()
     host.unreachable("peer link dropped");
 
     // When
-    let refusal = build_split_context_dir(session_dir.path(), &[], CLAUDE_GLOBS, &host);
+    let refusal = build_split_context_dir(
+        &the_split_agent(),
+        session_dir.path(),
+        &[],
+        CLAUDE_GLOBS,
+        &host,
+    );
 
     // Then
     let refusal = refusal.expect_err("an unreachable codebase host must fail the build");
@@ -286,8 +313,14 @@ fn a_tick_with_nothing_changed_fetches_the_manifest_and_transfers_no_content() {
     let host = a_codebase_host()
         .holding("CLAUDE.md", "# rules\n")
         .holding(".claude/settings.json", "{}\n");
-    let context_dir = build_split_context_dir(session_dir.path(), &[], CLAUDE_GLOBS, &host)
-        .expect("build must succeed");
+    let context_dir = build_split_context_dir(
+        &the_split_agent(),
+        session_dir.path(),
+        &[],
+        CLAUDE_GLOBS,
+        &host,
+    )
+    .expect("build must succeed");
     let syncer = ContextSyncer::new(
         context_dir,
         CLAUDE_GLOBS.iter().map(ToString::to_string).collect(),
@@ -324,8 +357,14 @@ fn a_tick_after_an_edit_transfers_only_the_file_that_changed() {
     let host = a_codebase_host()
         .holding("CLAUDE.md", "# rules\n")
         .holding(".claude/settings.json", "{}\n");
-    let context_dir = build_split_context_dir(session_dir.path(), &[], CLAUDE_GLOBS, &host)
-        .expect("build must succeed");
+    let context_dir = build_split_context_dir(
+        &the_split_agent(),
+        session_dir.path(),
+        &[],
+        CLAUDE_GLOBS,
+        &host,
+    )
+    .expect("build must succeed");
     let syncer = ContextSyncer::new(
         context_dir.clone(),
         CLAUDE_GLOBS.iter().map(ToString::to_string).collect(),
@@ -361,8 +400,14 @@ fn a_tick_deletes_a_file_the_project_removed() {
     let host = a_codebase_host()
         .holding("CLAUDE.md", "# rules\n")
         .holding(".claude/skills/old/SKILL.md", "# retracted\n");
-    let context_dir = build_split_context_dir(session_dir.path(), &[], CLAUDE_GLOBS, &host)
-        .expect("build must succeed");
+    let context_dir = build_split_context_dir(
+        &the_split_agent(),
+        session_dir.path(),
+        &[],
+        CLAUDE_GLOBS,
+        &host,
+    )
+    .expect("build must succeed");
     let syncer = ContextSyncer::new(
         context_dir.clone(),
         CLAUDE_GLOBS.iter().map(ToString::to_string).collect(),
@@ -393,8 +438,14 @@ fn a_tick_never_deletes_the_preamble_file_the_agent_reads_its_orientation_from()
     // Given
     let session_dir = a_session_dir();
     let host = a_codebase_host().holding("CLAUDE.md", "# Project rules\n");
-    let context_dir = build_split_context_dir(session_dir.path(), &[], CLAUDE_GLOBS, &host)
-        .expect("build must succeed");
+    let context_dir = build_split_context_dir(
+        &the_split_agent(),
+        session_dir.path(),
+        &[],
+        CLAUDE_GLOBS,
+        &host,
+    )
+    .expect("build must succeed");
     let syncer = ContextSyncer::new(
         context_dir.clone(),
         CLAUDE_GLOBS.iter().map(ToString::to_string).collect(),
@@ -430,8 +481,14 @@ fn a_deletion_recorded_for_a_path_outside_the_context_dir_never_reaches_the_file
     // Given
     let session_dir = a_session_dir();
     let host = a_codebase_host().holding("CLAUDE.md", "# Project rules\n");
-    let context_dir = build_split_context_dir(session_dir.path(), &[], CLAUDE_GLOBS, &host)
-        .expect("build must succeed");
+    let context_dir = build_split_context_dir(
+        &the_split_agent(),
+        session_dir.path(),
+        &[],
+        CLAUDE_GLOBS,
+        &host,
+    )
+    .expect("build must succeed");
     let outside = session_dir.path().join("escape.md");
     std::fs::write(&outside, "not the sync's to delete\n").expect("write");
     let tampered_record = concat!(
@@ -472,8 +529,14 @@ fn a_corrupt_sync_record_re_syncs_in_full_instead_of_wedging_the_session() {
     // Given
     let session_dir = a_session_dir();
     let host = a_codebase_host().holding("CLAUDE.md", "# Project rules\n");
-    let context_dir = build_split_context_dir(session_dir.path(), &[], CLAUDE_GLOBS, &host)
-        .expect("build must succeed");
+    let context_dir = build_split_context_dir(
+        &the_split_agent(),
+        session_dir.path(),
+        &[],
+        CLAUDE_GLOBS,
+        &host,
+    )
+    .expect("build must succeed");
     std::fs::write(context_dir.join(SYNC_STATE_BASENAME), "{ not json at all").expect("write");
     let syncer = ContextSyncer::new(
         context_dir.clone(),
@@ -513,7 +576,13 @@ fn a_preamble_file_that_is_not_utf8_fails_the_sync_rather_than_being_written_bar
     let host = a_codebase_host().holding_bytes("CLAUDE.md", &[0xff, 0xfe, 0x00, 0x01]);
 
     // When
-    let refusal = build_split_context_dir(session_dir.path(), &[], CLAUDE_GLOBS, &host);
+    let refusal = build_split_context_dir(
+        &the_split_agent(),
+        session_dir.path(),
+        &[],
+        CLAUDE_GLOBS,
+        &host,
+    );
 
     // Then
     let refusal = refusal.expect_err("a non-UTF-8 CLAUDE.md must fail the sync");
@@ -535,8 +604,14 @@ fn a_failing_tick_keeps_the_session_and_marks_the_guidance_stale() {
     // Given
     let session_dir = a_session_dir();
     let host = a_codebase_host().holding("CLAUDE.md", "# Project rules\n");
-    let context_dir = build_split_context_dir(session_dir.path(), &[], CLAUDE_GLOBS, &host)
-        .expect("build must succeed");
+    let context_dir = build_split_context_dir(
+        &the_split_agent(),
+        session_dir.path(),
+        &[],
+        CLAUDE_GLOBS,
+        &host,
+    )
+    .expect("build must succeed");
     let syncer = ContextSyncer::new(
         context_dir.clone(),
         CLAUDE_GLOBS.iter().map(ToString::to_string).collect(),
@@ -573,8 +648,14 @@ fn a_tick_that_recovers_clears_the_staleness_warning() {
     // Given
     let session_dir = a_session_dir();
     let host = a_codebase_host().holding("CLAUDE.md", "# Project rules\n");
-    let context_dir = build_split_context_dir(session_dir.path(), &[], CLAUDE_GLOBS, &host)
-        .expect("build must succeed");
+    let context_dir = build_split_context_dir(
+        &the_split_agent(),
+        session_dir.path(),
+        &[],
+        CLAUDE_GLOBS,
+        &host,
+    )
+    .expect("build must succeed");
     let syncer = ContextSyncer::new(
         context_dir.clone(),
         CLAUDE_GLOBS.iter().map(ToString::to_string).collect(),
@@ -657,8 +738,14 @@ fn a_co_located_tick_picks_up_an_edit_to_the_worktree_beside_it() {
         A_GENEROUS_CAP,
     );
     let session_dir = a_session_dir();
-    let context_dir = build_split_context_dir(session_dir.path(), &[], CLAUDE_GLOBS, &source)
-        .expect("build must succeed");
+    let context_dir = build_split_context_dir(
+        &the_split_agent(),
+        session_dir.path(),
+        &[],
+        CLAUDE_GLOBS,
+        &source,
+    )
+    .expect("build must succeed");
     let syncer = ContextSyncer::new(
         context_dir.clone(),
         CLAUDE_GLOBS.iter().map(ToString::to_string).collect(),
@@ -707,13 +794,25 @@ fn a_rebuild_drops_a_path_the_project_retracted_while_the_session_was_stopped() 
             ".claude/skills/retracted/SKILL.md",
             "# withdrawn guidance\n",
         );
-    let context_dir = build_split_context_dir(session_dir.path(), &[], CLAUDE_GLOBS, &host)
-        .expect("the first build must succeed");
+    let context_dir = build_split_context_dir(
+        &the_split_agent(),
+        session_dir.path(),
+        &[],
+        CLAUDE_GLOBS,
+        &host,
+    )
+    .expect("the first build must succeed");
     host.remove(".claude/skills/retracted/SKILL.md");
 
     // When
-    build_split_context_dir(session_dir.path(), &[], CLAUDE_GLOBS, &host)
-        .expect("the rebuild must succeed");
+    build_split_context_dir(
+        &the_split_agent(),
+        session_dir.path(),
+        &[],
+        CLAUDE_GLOBS,
+        &host,
+    )
+    .expect("the rebuild must succeed");
 
     // Then
     assert!(
@@ -740,11 +839,23 @@ fn a_tick_after_a_rebuild_that_retracted_a_path_has_nothing_left_to_repair() {
             ".claude/skills/retracted/SKILL.md",
             "# withdrawn guidance\n",
         );
-    let context_dir = build_split_context_dir(session_dir.path(), &[], CLAUDE_GLOBS, &host)
-        .expect("the first build must succeed");
+    let context_dir = build_split_context_dir(
+        &the_split_agent(),
+        session_dir.path(),
+        &[],
+        CLAUDE_GLOBS,
+        &host,
+    )
+    .expect("the first build must succeed");
     host.remove(".claude/skills/retracted/SKILL.md");
-    build_split_context_dir(session_dir.path(), &[], CLAUDE_GLOBS, &host)
-        .expect("the rebuild must succeed");
+    build_split_context_dir(
+        &the_split_agent(),
+        session_dir.path(),
+        &[],
+        CLAUDE_GLOBS,
+        &host,
+    )
+    .expect("the rebuild must succeed");
     let reads_before = host.reads();
 
     // When
@@ -793,8 +904,14 @@ fn a_guidance_file_served_under_a_redundant_dot_slash_still_leads_with_the_pream
     let host = a_codebase_host().holding("./CLAUDE.md", "# Project rules\n");
 
     // When
-    let context_dir = build_split_context_dir(session_dir.path(), &[], CLAUDE_GLOBS, &host)
-        .expect("build must succeed");
+    let context_dir = build_split_context_dir(
+        &the_split_agent(),
+        session_dir.path(),
+        &[],
+        CLAUDE_GLOBS,
+        &host,
+    )
+    .expect("build must succeed");
 
     // Then
     let claude_md = read(&context_dir, "CLAUDE.md");
@@ -828,8 +945,14 @@ fn a_path_served_with_backslash_separators_lands_in_the_directory_the_agent_read
         .holding(".claude\\settings.json", "{}\n");
 
     // When
-    let context_dir = build_split_context_dir(session_dir.path(), &[], CLAUDE_GLOBS, &host)
-        .expect("build must succeed");
+    let context_dir = build_split_context_dir(
+        &the_split_agent(),
+        session_dir.path(),
+        &[],
+        CLAUDE_GLOBS,
+        &host,
+    )
+    .expect("build must succeed");
 
     // Then
     assert_eq!(read(&context_dir, ".claude/settings.json"), "{}\n");
@@ -852,8 +975,14 @@ fn a_link_the_codebase_host_serves_is_recreated_as_a_symlink() {
         .linking(".claude/skills", ".agents/skills");
 
     // When
-    let context_dir = build_split_context_dir(session_dir.path(), &[], CLAUDE_GLOBS, &host)
-        .expect("build must succeed");
+    let context_dir = build_split_context_dir(
+        &the_split_agent(),
+        session_dir.path(),
+        &[],
+        CLAUDE_GLOBS,
+        &host,
+    )
+    .expect("build must succeed");
 
     // Then
     assert_eq!(
@@ -874,8 +1003,14 @@ fn a_skill_reached_through_a_recreated_link_reads_back_its_bytes() {
         .linking(".claude/skills", ".agents/skills");
 
     // When
-    let context_dir = build_split_context_dir(session_dir.path(), &[], CLAUDE_GLOBS, &host)
-        .expect("build must succeed");
+    let context_dir = build_split_context_dir(
+        &the_split_agent(),
+        session_dir.path(),
+        &[],
+        CLAUDE_GLOBS,
+        &host,
+    )
+    .expect("build must succeed");
 
     // Then
     assert_eq!(
@@ -897,8 +1032,14 @@ fn a_link_to_a_target_no_glob_names_is_synced_together_with_its_target() {
         .linking(".claude/skills", "tools/agent-skills");
 
     // When
-    let context_dir = build_split_context_dir(session_dir.path(), &[], CLAUDE_GLOBS, &host)
-        .expect("a link's own target must be accepted alongside it");
+    let context_dir = build_split_context_dir(
+        &the_split_agent(),
+        session_dir.path(),
+        &[],
+        CLAUDE_GLOBS,
+        &host,
+    )
+    .expect("a link's own target must be accepted alongside it");
 
     // Then
     assert_eq!(
@@ -918,7 +1059,13 @@ fn a_served_path_no_glob_names_and_no_link_reaches_is_still_refused() {
         .holding("src/main.rs", "fn main() {}\n");
 
     // When
-    let refusal = build_split_context_dir(session_dir.path(), &[], CLAUDE_GLOBS, &host);
+    let refusal = build_split_context_dir(
+        &the_split_agent(),
+        session_dir.path(),
+        &[],
+        CLAUDE_GLOBS,
+        &host,
+    );
 
     // Then
     assert_eq!(
@@ -942,7 +1089,13 @@ fn a_served_link_pointing_out_of_the_context_dir_is_refused() {
         .linking(".claude/skills", "../../.ssh");
 
     // When
-    let refusal = build_split_context_dir(session_dir.path(), &[], CLAUDE_GLOBS, &host);
+    let refusal = build_split_context_dir(
+        &the_split_agent(),
+        session_dir.path(),
+        &[],
+        CLAUDE_GLOBS,
+        &host,
+    );
 
     // Then
     assert_eq!(
@@ -965,7 +1118,13 @@ fn a_served_link_to_a_secret_shaped_target_is_refused() {
         .linking(".claude/creds", ".env");
 
     // When
-    let refusal = build_split_context_dir(session_dir.path(), &[], CLAUDE_GLOBS, &host);
+    let refusal = build_split_context_dir(
+        &the_split_agent(),
+        session_dir.path(),
+        &[],
+        CLAUDE_GLOBS,
+        &host,
+    );
 
     // Then
     assert_eq!(
@@ -987,8 +1146,14 @@ fn a_tick_after_a_link_is_retargeted_repoints_the_symlink() {
         .holding(".agents/skills/tdd/SKILL.md", "# TDD skill\n")
         .holding(".agents/skills-next/tdd/SKILL.md", "# TDD skill, revised\n")
         .linking(".claude/skills", ".agents/skills");
-    let context_dir = build_split_context_dir(session_dir.path(), &[], CLAUDE_GLOBS, &host)
-        .expect("build must succeed");
+    let context_dir = build_split_context_dir(
+        &the_split_agent(),
+        session_dir.path(),
+        &[],
+        CLAUDE_GLOBS,
+        &host,
+    )
+    .expect("build must succeed");
     let syncer = ContextSyncer::new(
         context_dir.clone(),
         CLAUDE_GLOBS.iter().map(ToString::to_string).collect(),
@@ -1019,8 +1184,14 @@ fn a_tick_that_drops_a_link_removes_the_symlink_and_keeps_its_target() {
     let host = a_codebase_host()
         .holding(".agents/skills/tdd/SKILL.md", "# TDD skill\n")
         .linking(".claude/skills", ".agents/skills");
-    let context_dir = build_split_context_dir(session_dir.path(), &[], CLAUDE_GLOBS, &host)
-        .expect("build must succeed");
+    let context_dir = build_split_context_dir(
+        &the_split_agent(),
+        session_dir.path(),
+        &[],
+        CLAUDE_GLOBS,
+        &host,
+    )
+    .expect("build must succeed");
     let syncer = ContextSyncer::new(
         context_dir.clone(),
         CLAUDE_GLOBS.iter().map(ToString::to_string).collect(),
@@ -1058,8 +1229,14 @@ fn a_directory_root_link_is_recreated_so_its_files_read_through_it() {
         .linking(".claude", "shared/claude");
 
     // When
-    let context_dir = build_split_context_dir(session_dir.path(), &[], CLAUDE_GLOBS, &host)
-        .expect("a directory-root link must be accepted");
+    let context_dir = build_split_context_dir(
+        &the_split_agent(),
+        session_dir.path(),
+        &[],
+        CLAUDE_GLOBS,
+        &host,
+    )
+    .expect("a directory-root link must be accepted");
 
     // Then
     assert_eq!(
@@ -1081,7 +1258,13 @@ fn a_served_link_at_a_preamble_path_is_refused() {
         .linking("CLAUDE.md", ".agents/rules.md");
 
     // When
-    let refusal = build_split_context_dir(session_dir.path(), &[], CLAUDE_GLOBS, &host);
+    let refusal = build_split_context_dir(
+        &the_split_agent(),
+        session_dir.path(),
+        &[],
+        CLAUDE_GLOBS,
+        &host,
+    );
 
     // Then
     assert_eq!(
@@ -1106,7 +1289,13 @@ fn a_served_file_beneath_a_served_link_is_refused() {
         .linking(".claude/skills", ".agents/skills");
 
     // When
-    let refusal = build_split_context_dir(session_dir.path(), &[], CLAUDE_GLOBS, &host);
+    let refusal = build_split_context_dir(
+        &the_split_agent(),
+        session_dir.path(),
+        &[],
+        CLAUDE_GLOBS,
+        &host,
+    );
 
     // Then
     assert_eq!(
@@ -1131,7 +1320,13 @@ fn nested_served_links_cannot_write_outside_the_context_dir() {
         .holding(".claude/a/b/a/b/a/b/q/escaped.md", "# escaped\n");
 
     // When
-    let refusal = build_split_context_dir(session_dir.path(), &[], CLAUDE_GLOBS, &host);
+    let refusal = build_split_context_dir(
+        &the_split_agent(),
+        session_dir.path(),
+        &[],
+        CLAUDE_GLOBS,
+        &host,
+    );
 
     // Then
     assert_eq!(
