@@ -54,6 +54,15 @@ The boundary test's surface gains `SessionRuntime`, `SessionMainPane`, `SessionT
 `SessionRuntimeRegistry`, `SessionChildRuntime`. Red: the boundary test (moved specs still reach tddy-web; surface
 missing). LiveKit-importing specs among them switch to the port doubles at green.
 
+**Re-planned at green (orchestrator decision, 2026-11-07):** `SessionMainPane` (+ `sessionMainPaneProps`) does
+not move here: it composes the inspector, agent layers, code pane, picker and sidebar, which move with #861.
+It leaves the boundary test's surface list, and the six specs that mount it (`GhosttyTerminalShrink`,
+`PrStackPresenterRoomAcceptance`, `SessionInspectorMediaCapabilityAcceptance`, `SessionMainPaneRoomTerminal`,
+`SessionMainPaneTerminalControl`, `SessionMainPaneUnscopedSession`) go back to `packages/tddy-web/cypress/component/`
+byte-for-byte (import paths aside) for #861/#862. 15 specs stay. `useConversationHostAttachment` (runtime
+attachment state, imported by `SessionRuntime`/`DormantSessionRuntime`) moves into the package; the layer stays in
+tddy-web and imports it from there.
+
 Originally planned:
 
 First push (commit 2): the specs listed in `## Responsibility` `git mv`'d into `tddy-session-web` with

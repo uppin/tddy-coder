@@ -30,7 +30,6 @@ describe("tddy-session-web package boundary", () => {
         "useSessionNotifications",
         // session-runtime (#860)
         "SessionRuntime",
-        "SessionMainPane",
         "SessionTerminalTabs",
         "GrpcSessionTerminal",
         "SessionRuntimeRegistry",

@@ -12,8 +12,8 @@
 import React from "react";
 import { create, fromBinary, toBinary } from "@bufbuild/protobuf";
 import { GenerateTokenRequestSchema, GenerateTokenResponseSchema } from "tddy-client-web/gen/token_pb";
-import { SessionMainPane } from "../../src/SessionMainPane";
-import type { SessionAttachmentState } from "../../src/useSessionAttachment";
+import { SessionMainPane } from "../../src/components/sessions/SessionMainPane";
+import type { SessionAttachmentState } from "../../src/components/sessions/useSessionAttachment";
 import { aSessionConnection } from "../support/rpc/sessionConnections";
 import { decodeProtoRequestBody, toArrayBuffer } from "../support/rpc/protoRpc";
 import { withSessionTokenGate } from "../support/rpc/withSessionTokenGate";
