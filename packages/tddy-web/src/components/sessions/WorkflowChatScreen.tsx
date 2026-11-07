@@ -1,14 +1,14 @@
 import React from "react";
 import type { SessionEntry } from "tddy-client-web/gen/session_pb";
 import type { SessionAttachmentHint } from "tddy-client-web/connections/session";
-import { usePresenterLiveKitRoom } from "./usePresenterLiveKitRoom";
+import { useMediaPort } from "tddy-client-web";
 import { AgentChat } from "tddy-chat-web";
 
 export interface WorkflowChatScreenProps {
   session: SessionEntry;
   /**
    * How the attached session is reached. The chat derives its own independent presenter LiveKit
-   * room connection from this (see `usePresenterLiveKitRoom`) — the same room the terminal connects
+   * room connection from this (see `usePresenterRoom`) — the same room the terminal connects
    * to, with a distinct browser participant. `SessionMainPane`'s `room` prop is VNC-purpose and
    * unused here. `null` for a session that is not attached, or one served without a room.
    */
@@ -26,7 +26,7 @@ export function WorkflowChatScreen({
   session,
   attachmentHint = null,
 }: WorkflowChatScreenProps) {
-  const { room, status: roomStatus, error: roomError } = usePresenterLiveKitRoom(attachmentHint);
+  const { room, status: roomStatus, error: roomError } = useMediaPort().usePresenterRoom(attachmentHint);
   const livekitServerIdentity = attachmentHint?.serverIdentity;
 
   return (

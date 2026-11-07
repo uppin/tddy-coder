@@ -7,7 +7,7 @@
  * The ports carry hooks. Their identities must be stable for the app's lifetime (the app builds the
  * port once), so calling them obeys the rules of hooks like any imported hook.
  */
-import { createContext, createElement, useContext, type ComponentType, type ReactElement, type ReactNode, type RefObject } from "react";
+import { createContext, createElement, useContext, type ComponentType, type ReactElement, type ReactNode, type Ref, type RefObject } from "react";
 import type { Client } from "@connectrpc/connect";
 import type { DescService } from "@bufbuild/protobuf";
 import type { SessionAttachmentHint } from "../connections/session";
@@ -64,25 +64,57 @@ export interface RoomRpcPort {
   useRoomStatus(room: RoomHandle | null): RoomStatus;
 }
 
-/** Owned by `feature/web-split/media` (#855) from here on: its green settles the final shape. */
+/** What {@link MediaPort.useScreenSharingInput} forwards, and from where. */
 export interface ScreenSharingInputOptions {
+  /** The rendered picture. Pointer positions are read against this element's current box. */
   readonly picture: RefObject<HTMLElement | null>;
+  /** The room the bridge is in; `null` until it is connected. */
   readonly room: RoomHandle | null;
+  /** The participant the input stream is addressed at — this desktop's own bridge. */
   readonly bridgeIdentity: string;
+  /** The remote framebuffer's size, which is what the events are expressed in. */
   readonly framebufferWidth: number;
   readonly framebufferHeight: number;
+  /** Called when the operator presses the one chord the overlay keeps for itself. */
   readonly onCloseChord: () => void;
 }
 
+/** What {@link MediaPort.RemoteVideo} renders, and the handles a parent may hold on the picture. */
+export interface RemoteVideoProps {
+  readonly room: RoomHandle | null;
+  readonly identity: string;
+  readonly trackName: string;
+  readonly className?: string;
+  readonly testId?: string;
+  /** The `<video>` element, from the first render — what {@link ScreenSharingInputOptions.picture} points at. */
+  readonly videoRef?: Ref<HTMLVideoElement>;
+}
+
+/** What {@link MediaPort.VideoPreview} renders: one participant's camera, in a dialog. */
+export interface ParticipantVideoPreviewProps {
+  readonly room: RoomHandle | null;
+  readonly identity: string;
+  readonly open: boolean;
+  readonly onOpenChange: (open: boolean) => void;
+}
+
 export interface MediaPort {
-  /** Join the presenter room a session's attachment hint names. */
+  /** Join the presenter room a session's attachment hint names; no room when the hint names none. */
   usePresenterRoom(hint: SessionAttachmentHint | null): RoomState;
-  /** Forward pointer and keyboard input on `picture` to a screen-sharing bridge in `room`. */
+  /**
+   * Forward pointer and keyboard input on `picture` to a screen-sharing bridge in `room`.
+   *
+   * `inputUnavailable` is true once there is no input stream to send on — the desktop can be
+   * watched but not touched: the peer does not serve the input service at all, or a stream that was
+   * open ended on its own. It is not set for a desktop that silently drops injection.
+   */
   useScreenSharingInput(options: ScreenSharingInputOptions): { readonly inputUnavailable: boolean };
-  /** Whether `participant` has camera video worth offering a preview of. */
+  /** Whether `identity` has camera video worth offering a preview of in `room`. */
   useHasCameraVideo(room: RoomHandle | null, identity: string): boolean;
   /** Renders the video track `trackName` of `identity` in `room`. */
-  readonly RemoteVideo: ComponentType<{ room: RoomHandle | null; identity: string; trackName: string; className?: string }>;
+  readonly RemoteVideo: ComponentType<RemoteVideoProps>;
+  /** The camera preview a roster opens for one participant. */
+  readonly VideoPreview: ComponentType<ParticipantVideoPreviewProps>;
 }
 
 const PresencePortContext = createContext<PresencePort | null>(null);

@@ -32,7 +32,7 @@ import {
   type StartStreamResponse,
 } from "tddy-client-web/gen/screen_sharing_pb";
 import { useAuthContext } from "../../hooks/authProvider";
-import { useCommonRoom } from "tddy-livekit-web";
+import { useCommonRoomHandle } from "tddy-livekit-web";
 import { encryptForHost } from "../../lib/encryptForHost";
 import { presenceIdentityForUser } from "tddy-livekit-web";
 import { screenSharingStartFailureText } from "../../lib/screenSharingStartFailure";
@@ -317,7 +317,7 @@ export function HostDesktopOverlay({
     () => (user ? presenceIdentityForUser(user.login) : undefined),
     [user],
   );
-  const { room } = useCommonRoom(stream?.livekitUrl, stream?.livekitRoom, identity);
+  const { room } = useCommonRoomHandle(stream?.livekitUrl, stream?.livekitRoom, identity);
 
   // Read only while our own start is blocked: once there is a stream or a failure, this host has
   // nothing left to ask about this desktop, and a screenful of hosts nobody is opening a desktop on
