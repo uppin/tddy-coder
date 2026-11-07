@@ -13,7 +13,7 @@
 
 import React, { useState } from "react";
 import type { BranchConflict } from "../../gen/session_pb";
-import { Button } from "../ui/button";
+import { Button } from "tddy-ui-web";
 
 // ---------------------------------------------------------------------------
 // Props

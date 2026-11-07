@@ -1,5 +1,5 @@
 import React from "react";
-import { cn } from "@/lib/utils";
+import { cn } from "tddy-ui-web";
 import { useHostConnection } from "../../rpc/connections/registry";
 import { useHostDirectorySource } from "../../rpc/hostDirectory/useHostDirectory";
 import { LIVEKIT_SOURCE_ID } from "../../rpc/hostDirectory/liveKitSource";

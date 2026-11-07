@@ -1,4 +1,4 @@
-import { cn } from "@/lib/utils"
+import { cn } from "./cn"
 
 /**
  * A failure shown where it happened — beside the form, card or list whose action or load failed.

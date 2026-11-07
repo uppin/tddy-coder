@@ -25,7 +25,7 @@ import { EnqueuedInputOverlay } from "../connection/EnqueuedInputOverlay";
 import { createForwardHistoryFetcher } from "../../lib/terminalHistoryLoader";
 import { rpcFailureText } from "../../rpc/rpcFailure";
 import { InputRefusalTracker } from "../../rpc/connections/inputDelivery";
-import { InlineError } from "../ui/inline-error";
+import { InlineError } from "tddy-ui-web";
 
 const dGrpc = tddyDebug("tddy:term:grpc");
 const dResize = tddyDebug("tddy:term:resize");

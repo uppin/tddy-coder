@@ -1,6 +1,6 @@
 import React from "react";
 
-import { Button } from "@/components/ui/button";
+import { Button } from "tddy-ui-web";
 
 export type CodexOAuthDialogProps = {
   authorizeUrl: string | null;

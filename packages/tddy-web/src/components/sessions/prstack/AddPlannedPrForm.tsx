@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import { Button } from "../../ui/button";
+import { Button } from "tddy-ui-web";
 import { orderStackNodes } from "./orderStackNodes";
 import type { StackNode } from "./stackPlan";
 

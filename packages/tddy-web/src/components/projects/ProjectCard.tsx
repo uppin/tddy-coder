@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import type { DaemonHost } from "../../lib/participantRole";
 import { useActionFailure } from "../../hooks/useActionFailure";
-import { InlineError } from "../ui/inline-error";
+import { InlineError } from "tddy-ui-web";
 import { assignmentRowsFor, withAssignment } from "./ProjectAccountAssignment";
 import {
   githubHostnameOf,

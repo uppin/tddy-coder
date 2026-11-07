@@ -5,7 +5,7 @@ import { useHttpClient } from "../../rpc/transportProvider";
 import { AgentChatView } from "../chat/AgentChat";
 import type { ChatMessage } from "../chat/useAgentChat";
 import { useAcpReplay } from "../chat/useAcpReplay";
-import { Button } from "../ui/button";
+import { Button } from "tddy-ui-web";
 import { AgentActivityDetailDialog } from "./AgentActivityDetailDialog";
 
 interface AgentActivityOverlayProps {

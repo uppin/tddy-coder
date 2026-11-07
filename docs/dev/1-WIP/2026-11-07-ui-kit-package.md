@@ -87,12 +87,12 @@ support file, workflow), the moved specs pointing at `tddy-ui-web` imports, and 
 
 ## Scope
 
-- [ ] Package skeleton + Cypress/Vite config (compiler switch identical to `tddy-web`)
-- [ ] Primitives, `cn`, theme, shared hooks/helpers moved; `tddy-web` imports rewritten
-- [ ] Tailwind sources cover every package that renders tddy classes
-- [ ] Specs moved and green from the package config
-- [ ] Boundary rule test
-- [ ] `web-tddy-ui-web.yml`
+- [x] Package skeleton + Cypress/Vite config (compiler switch identical to `tddy-web`)
+- [x] Primitives, `cn`, theme, shared hooks/helpers moved; `tddy-web` imports rewritten
+- [x] Tailwind sources cover every package that renders tddy classes
+- [x] Specs moved and green from the package config
+- [x] Boundary rule test
+- [x] `web-tddy-ui-web.yml`
 
 ## Technical Changes
 
@@ -117,9 +117,9 @@ via the same alias pattern as the other workspace packages, and `react` deduped 
 
 ## Implementation Milestones
 
-- [ ] `tddy-ui-web` specs green from its own config
-- [ ] `tddy-web` builds; its specs that import primitives still pass (scoped: the moved-import specs)
-- [ ] Boundary rule green
+- [x] `tddy-ui-web` specs green from its own config
+- [x] `tddy-web` builds; its specs that import primitives still pass (scoped: the moved-import specs)
+- [x] Boundary rule green
 
 ## Testing Plan
 
@@ -161,6 +161,30 @@ Contract run: 2 + 5 `bun test` failures on `TODO(ui)`; the three moved Cypress s
 
 ### From @analyze-clean-code (Code Quality)
 
+## Green Progress (2026-11-07)
+
+- Moved with `git mv`: the seven primitives (flattened to `src/<name>.tsx`), `cn` (`src/cn.ts`),
+  `useIsMobile` (+ its `bun test`), `useVisualViewport`, theme to `src/theme.css` (with `@source`
+  for `./`, `../../tddy-web/src`, `../../tddy-*-web/src`). `tddy-web/src/index.css` is one import.
+- `tddy-web` imports rewritten to `tddy-ui-web`; dependency added (`bun.lock` one line);
+  `components.json` `css`/`ui`/`utils` point at the package.
+- `scripts/web-package-boundary.ts` implemented; workflow gets `concurrency`/`permissions`.
+- Verified: ui-web `bun test src` 8/8; scripts boundary+workflows 8/8; ui-web Cypress 8/8;
+  tddy-web `bun run build` ok; tddy-web `SessionDrawer.cy.tsx` 7/7.
+
+### Shared helper measurement
+
+No helper moved: no consuming package exists yet in this stack. Measured consumer areas in
+`tddy-web` today (>= 2 top-level areas): participantRole 6, debugMask 6, testId 4, toolShortcuts 3,
+terminalHistoryLoader 3, shellQuote 3, presenceIdentity 3, then 2 each (worktreeSize,
+randomId, clipboard, ...). They move with the first package that consumes them from outside
+`tddy-web` (deviation from "move in this node": a within-app count is not a cross-package count).
+
+### Deviations
+
+- Several files now carry two `from "tddy-ui-web"` imports (mechanical rewrite); merging them is a tidy-up.
+- `@/components/ui` alias dir no longer exists; `@/` stays for the rest.
+
 ## Validation Results
 
 ## TODO
@@ -173,8 +197,8 @@ Contract run: 2 + 5 `bun test` failures on `TODO(ui)`; the three moved Cypress s
 - [x] Run acceptance tests (verify they fail)
 - [x] USER REVIEW — acceptance tests (developer waived the per-node review for this stack, 2026-11-07: "finish the rest without stopping")
 - [x] TDD Red — write failing unit/integration tests
-- [ ] TDD Green — implement with quality code
-- [ ] Update documentation with progress
+- [x] TDD Green — implement with quality code
+- [x] Update documentation with progress
 - [ ] Repeat Red→Green→Update cycle until feature complete
 - [ ] Run the touched packages' tests (`tddy-ui-web` Cypress + boundary rule; `tddy-web` scoped specs) — verify 100% pass
 - [ ] Validate changes (/validate-changes)

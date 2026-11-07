@@ -1,4 +1,4 @@
-import { Button } from "@/components/ui/button";
+import { Button } from "tddy-ui-web";
 
 export interface VmRow {
   name: string;

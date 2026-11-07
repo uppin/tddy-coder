@@ -8,8 +8,8 @@ import type { SessionFilesService } from "../../gen/session_files_pb";
 import type { WorktreeService } from "../../gen/worktree_pb";
 import { VncService } from "../../gen/vnc_pb";
 import { ScreenSharingService } from "../../gen/screen_sharing_pb";
-import { ScrollArea } from "../ui/scroll-area";
-import { cn } from "../../lib/utils";
+import { ScrollArea } from "tddy-ui-web";
+import { cn } from "tddy-ui-web";
 import { InspectorTabs, type InspectorTab } from "./InspectorTabs";
 import { PARAM_INSPECTOR } from "../../routing/appLocation";
 import {

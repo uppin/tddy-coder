@@ -2,7 +2,7 @@ import { useMemo, useState } from "react";
 import type { ProjectEntry } from "../../gen/project_pb";
 import type { DaemonHost } from "../../lib/participantRole";
 import { useActionFailure } from "../../hooks/useActionFailure";
-import { InlineError } from "../ui/inline-error";
+import { InlineError } from "tddy-ui-web";
 import type { AssignableAccount } from "./ProjectAccountAssignment";
 import type { LoadHostGithubCli } from "./ProjectLocalGh";
 import { ProjectCard, type ProjectGroup } from "./ProjectCard";

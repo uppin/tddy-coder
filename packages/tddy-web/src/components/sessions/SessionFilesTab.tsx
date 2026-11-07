@@ -1,13 +1,13 @@
 import React, { useCallback, useEffect, useState } from "react";
 import type { Client } from "@connectrpc/connect";
 import type { SessionFilesService, SessionUploadEntry } from "../../gen/session_files_pb";
-import { Button } from "../ui/button";
+import { Button } from "tddy-ui-web";
 import { formatBytes } from "./formatTraffic";
 import { copyToClipboard } from "../../lib/clipboard";
 import { HOST_PATH_MIME } from "../../lib/hostPathDrag";
 import { hostNotConnected, rpcFailureText } from "../../rpc/rpcFailure";
 import { useKeyedActionFailure } from "../../hooks/useKeyedActionFailure";
-import { InlineError } from "../ui/inline-error";
+import { InlineError } from "tddy-ui-web";
 
 export interface SessionFilesTabProps {
   client: Client<typeof SessionFilesService> | null;

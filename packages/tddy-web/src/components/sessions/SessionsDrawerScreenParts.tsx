@@ -1,5 +1,5 @@
 import { PanelLeftOpen } from "lucide-react";
-import { Button } from "../ui/button";
+import { Button } from "tddy-ui-web";
 
 /** The mobile floating button that re-opens the session list once it has been closed. */
 export function SessionsDrawerOpenListButton({ onOpen }: { onOpen: () => void }) {

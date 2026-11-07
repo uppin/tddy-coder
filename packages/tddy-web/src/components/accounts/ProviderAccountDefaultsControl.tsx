@@ -5,7 +5,7 @@
  */
 
 import { useState } from "react";
-import { Button } from "../ui/button";
+import { Button } from "tddy-ui-web";
 
 /** One session type a provider account can be the default for, as the daemon served it. */
 export interface HarnessOption {

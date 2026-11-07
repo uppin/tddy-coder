@@ -15,7 +15,7 @@ import { Protocol } from "../../gen/screen_sharing_pb";
 import { screenSharingStartFailureText } from "../../lib/screenSharingStartFailure";
 import { rpcFailureText } from "../../rpc/rpcFailure";
 import { useKeyedActionFailure } from "../../hooks/useKeyedActionFailure";
-import { InlineError } from "../ui/inline-error";
+import { InlineError } from "tddy-ui-web";
 import { ScreenSharingOverlay } from "./ScreenSharingOverlay";
 import { applyScreenSharingTabAction, initialScreenSharingTabState } from "./screenSharingTabState";
 
