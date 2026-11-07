@@ -33,7 +33,7 @@ import {
   type ModelEntry,
   type ProviderEntry,
   type ProviderKind,
-} from "../../gen/models_pb";
+} from "tddy-client-web/gen/models_pb";
 import { useAuthContext } from "../../hooks/authProvider";
 import { useHostConnector } from "../../rpc/connections/registry";
 import { useSelectedDaemon } from "../../rpc/selectedDaemon";

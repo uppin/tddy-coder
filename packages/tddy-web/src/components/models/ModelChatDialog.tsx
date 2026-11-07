@@ -3,7 +3,7 @@ import { create } from "@bufbuild/protobuf";
 import {
   AcpService,
   ModelSessionTargetSchema,
-} from "../../gen/tddy/acp/v1/acp_pb";
+} from "tddy-client-web/gen/tddy/acp/v1/acp_pb";
 import { useAuthContext } from "../../hooks/authProvider";
 import { useHostConnection } from "../../rpc/connections/registry";
 import { useDaemonClientFor } from "../../rpc/selectedDaemon";

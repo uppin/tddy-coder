@@ -13,7 +13,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useSyncExternalStore } from "react";
 import type { Client } from "@connectrpc/connect";
-import { SessionService, type SessionEntry } from "../../gen/session_pb";
+import { SessionService, type SessionEntry } from "tddy-client-web/gen/session_pb";
 import type { SessionMetadata } from "../../lib/sessionParticipantMetadata";
 import { sortSessionsByCreation } from "../../utils/sessionSort";
 import {

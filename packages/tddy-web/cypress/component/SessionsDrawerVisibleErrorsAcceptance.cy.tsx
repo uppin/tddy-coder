@@ -19,14 +19,14 @@ import {
   ListSessionsResponseSchema,
   SessionService,
   SessionEntrySchema,
-} from "../../src/gen/session_pb";
+} from "tddy-client-web/gen/session_pb";
 import {
   ClaimTerminalControlResponseSchema,
   SessionTerminalOutputSchema,
   TerminalSessionService,
   type SessionTerminalInput,
   type SessionTerminalOutput,
-} from "../../src/gen/terminal_session_pb";
+} from "tddy-client-web/gen/terminal_session_pb";
 import { SessionsDrawerScreen } from "../../src/components/sessions/SessionsDrawerScreen";
 import { REFRESH_INTERVAL_MS } from "../../src/components/sessions/sessionManager";
 import { SessionRuntime } from "../../src/components/sessions/SessionRuntime";

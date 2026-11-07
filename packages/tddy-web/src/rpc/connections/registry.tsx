@@ -22,7 +22,7 @@ import {
 } from "react";
 import type { Client } from "@connectrpc/connect";
 import type { DescService } from "@bufbuild/protobuf";
-import type { ConnectionProvider, HostConnection } from "./types";
+import type { ConnectionProvider, HostConnection } from "tddy-client-web/connections/types";
 
 /**
  * The registered providers, in precedence order.

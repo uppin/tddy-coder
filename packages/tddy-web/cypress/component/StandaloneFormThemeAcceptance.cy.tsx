@@ -7,7 +7,7 @@
 
 import React from "react";
 import { anInMemoryRpcBackend } from "tddy-connectrpc-testkit";
-import { AuthService } from "../../src/gen/auth_pb";
+import { AuthService } from "tddy-client-web/gen/auth_pb";
 import { App } from "../../src/index";
 import { AuthProvider } from "../../src/hooks/authProvider";
 import { RpcTransportProvider } from "../../src/rpc/transportProvider";

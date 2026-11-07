@@ -15,8 +15,8 @@
 
 import { create, fromBinary, toBinary } from "@bufbuild/protobuf";
 
-import { type ProjectEntry } from "../../../src/gen/project_pb";
-import { ConnectSessionRequestSchema, ConnectSessionResponseSchema, DeleteSessionRequestSchema, ResumeSessionResponseSchema, StartSessionEventSchema, StartSessionResponseSchema, type SessionEntry } from "../../../src/gen/session_pb";
+import { type ProjectEntry } from "tddy-client-web/gen/project_pb";
+import { ConnectSessionRequestSchema, ConnectSessionResponseSchema, DeleteSessionRequestSchema, ResumeSessionResponseSchema, StartSessionEventSchema, StartSessionResponseSchema, type SessionEntry } from "tddy-client-web/gen/session_pb";
 import { toArrayBuffer, decodeProtoRequestBody, encodeConnectStreamFrames, connectEndOfStreamFrame } from "./protoRpc";
 import {
   anAuthStatusAuthenticated,

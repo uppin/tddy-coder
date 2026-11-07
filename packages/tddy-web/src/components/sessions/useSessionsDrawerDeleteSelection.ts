@@ -1,6 +1,6 @@
 import { useCallback, useState } from "react";
 import type { Client } from "@connectrpc/connect";
-import type { SessionEntry, SessionService } from "../../gen/session_pb";
+import type { SessionEntry, SessionService } from "tddy-client-web/gen/session_pb";
 import { requestSessionsRefresh } from "../../lib/sessionsRefreshBridge";
 import { hostNotConnected, rpcFailureText } from "../../rpc/rpcFailure";
 import { owningHostForSession } from "../../utils/crossHostSessions";

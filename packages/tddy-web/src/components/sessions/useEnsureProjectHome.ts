@@ -1,6 +1,6 @@
 import { useCallback } from "react";
 import { Code, ConnectError, type Client } from "@connectrpc/connect";
-import type { SessionService } from "../../gen/session_pb";
+import type { SessionService } from "tddy-client-web/gen/session_pb";
 import type { StartSessionRequestInit } from "../../hooks/useSessionAttachments";
 import { unservedService } from "../../rpc/rpcFailure";
 

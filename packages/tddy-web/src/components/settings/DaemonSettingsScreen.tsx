@@ -9,7 +9,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Code, ConnectError, type Client } from "@connectrpc/connect";
-import type { DaemonConfigService } from "../../gen/daemon_config_pb";
+import type { DaemonConfigService } from "tddy-client-web/gen/daemon_config_pb";
 import { integrationStatusText } from "./integrationStatusText";
 import { toFormState, toUpdateSettings, type DaemonSettingsFormState, type LivekitIceGathering } from "./settingsForm";
 

@@ -12,7 +12,7 @@
 
 import { create } from "@bufbuild/protobuf";
 import { Code, ConnectError } from "@connectrpc/connect";
-import { SessionNotificationEventSchema, SessionNotificationKind, SessionNotificationSource, type SessionNotificationEvent } from "../../../src/gen/activity_pb";
+import { SessionNotificationEventSchema, SessionNotificationKind, SessionNotificationSource, type SessionNotificationEvent } from "tddy-client-web/gen/activity_pb";
 
 /** One notification, as a spec states it. */
 export interface SessionNotificationFrame {

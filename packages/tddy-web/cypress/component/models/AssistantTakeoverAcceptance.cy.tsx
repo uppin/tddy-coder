@@ -12,7 +12,7 @@
  */
 
 import React from "react";
-import { ModelRegistryService } from "../../../src/gen/models_pb";
+import { ModelRegistryService } from "tddy-client-web/gen/models_pb";
 import { ModelsAppPage } from "../../../src/components/models/ModelsAppPage";
 import type { DaemonHost } from "../../../src/lib/participantRole";
 import { withSelectedDaemon } from "../../support/rpc/withSelectedDaemon";

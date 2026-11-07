@@ -23,7 +23,7 @@ import {
   ListSessionUploadsResponseSchema,
   SessionFilesService,
   SessionUploadEntrySchema,
-} from "../../../src/gen/session_files_pb";
+} from "tddy-client-web/gen/session_files_pb";
 
 /** One file already uploaded to a session, as `ListSessionUploads` reports it. */
 export interface SessionUploadInput {

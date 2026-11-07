@@ -17,7 +17,7 @@
  */
 
 import { useEffect, useState } from "react";
-import { HostService } from "../gen/host_pb";
+import { HostService } from "tddy-client-web/gen/host_pb";
 import { subscribeHostPrompts, type HostPromptEventLike } from "./hostPromptsSubscription";
 import { useHostClient } from "./connections/registry";
 import { useAuthContext } from "../hooks/authProvider";

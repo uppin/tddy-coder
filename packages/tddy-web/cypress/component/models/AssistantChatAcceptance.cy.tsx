@@ -15,12 +15,12 @@
 
 import React from "react";
 import { Code, ConnectError } from "@connectrpc/connect";
-import { ProjectService } from "../../../src/gen/project_pb";
+import { ProjectService } from "tddy-client-web/gen/project_pb";
 import {
   AcpService,
   type AcpAgentMessage,
   type AcpClientMessage,
-} from "../../../src/gen/tddy/acp/v1/acp_pb";
+} from "tddy-client-web/gen/tddy/acp/v1/acp_pb";
 import { ModelsAppPage } from "../../../src/components/models/ModelsAppPage";
 import { daemonRpcIdentity, type DaemonHost } from "../../../src/lib/participantRole";
 import { withSelectedDaemon } from "../../support/rpc/withSelectedDaemon";

@@ -21,7 +21,7 @@ import {
   CodeIndexProgressSchema,
   CodeNavigationService,
   type CodeIndexProgress,
-} from "../../../src/gen/code_navigation_pb";
+} from "tddy-client-web/gen/code_navigation_pb";
 import { EventQueue, type IndexProgressInit } from "./codeSessionBackend";
 
 export class SessionIndexWatchHost {

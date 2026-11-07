@@ -1,4 +1,4 @@
-import type { ConnectionStatus } from "../../rpc/connections/types";
+import type { ConnectionStatus } from "tddy-client-web/connections/types";
 
 export interface SessionConnectionOverlayProps {
   /** The session connection's own status — see `SessionConnection.status`. */

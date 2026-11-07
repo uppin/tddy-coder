@@ -4,7 +4,7 @@
  */
 
 import { Code } from "@connectrpc/connect";
-import { IntegrationState } from "../../src/gen/daemon_config_pb";
+import { IntegrationState } from "tddy-client-web/gen/daemon_config_pb";
 import {
   aDaemonFailingIntegrationStatus,
   aDaemonReportingAllOf,

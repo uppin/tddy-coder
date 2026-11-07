@@ -7,7 +7,7 @@ import React from "react";
 import { Code, ConnectError, createClient } from "@connectrpc/connect";
 import { anInMemoryRpcBackend } from "tddy-connectrpc-testkit";
 import { DaemonSettingsScreen } from "../../../src/components/settings/DaemonSettingsScreen";
-import { DaemonConfigService } from "../../../src/gen/daemon_config_pb";
+import { DaemonConfigService } from "tddy-client-web/gen/daemon_config_pb";
 import { TEST_IDS, byTestId } from "../testIds";
 
 export const SESSION_TOKEN = "tok";

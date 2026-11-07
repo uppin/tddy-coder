@@ -14,7 +14,7 @@
 import { describe, it, expect } from "bun:test";
 import { createClient, ConnectError, Code } from "@connectrpc/connect";
 import { anInMemoryRpcBackend } from "tddy-connectrpc-testkit";
-import { AuthService, VaultState } from "../gen/auth_pb";
+import { AuthService, VaultState } from "tddy-client-web/gen/auth_pb";
 
 import { createSessionTokenStore, type TokenStorage } from "./sessionTokenStore";
 

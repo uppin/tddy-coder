@@ -1,7 +1,7 @@
 import React, { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { Plus } from "lucide-react";
-import type { TmuxSessionInfo } from "../../gen/terminal_session_pb";
+import type { TmuxSessionInfo } from "tddy-client-web/gen/terminal_session_pb";
 import {
   BASH_KIND,
   TMUX_KIND,

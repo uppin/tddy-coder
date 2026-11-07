@@ -1,5 +1,5 @@
 import React from "react";
-import type { TaskInfo } from "../../gen/tasks_pb";
+import type { TaskInfo } from "tddy-client-web/gen/tasks_pb";
 import { ScrollArea } from "tddy-ui-web";
 import { TaskDrawerItem } from "./TaskDrawerItem";
 

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { Client } from "@connectrpc/connect";
-import { SessionFilesService } from "../../gen/session_files_pb";
+import { SessionFilesService } from "tddy-client-web/gen/session_files_pb";
 
 import { SessionFilesPanel, type WorkflowFileRow } from "./SessionFilesPanel";
 

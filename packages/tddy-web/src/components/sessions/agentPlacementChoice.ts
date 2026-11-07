@@ -1,4 +1,4 @@
-import { AgentPlacement } from "../../gen/session_agents_pb";
+import { AgentPlacement } from "tddy-client-web/gen/session_agents_pb";
 
 /**
  * Where a picked agent's conversations work: `shared` is the session's own worktree, `clone` a

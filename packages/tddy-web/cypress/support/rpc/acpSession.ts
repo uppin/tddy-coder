@@ -14,7 +14,7 @@ import {
   type AcpAgentMessage,
   type AcpClientMessage,
   type NewSessionRequest,
-} from "../../../src/gen/tddy/acp/v1/acp_pb";
+} from "tddy-client-web/gen/tddy/acp/v1/acp_pb";
 
 /** A streamed agent message chunk → renders as an "agent" bubble. */
 export function acpAgentChunk(text: string): AcpAgentMessage {

@@ -12,8 +12,8 @@
 
 import { useEffect, useRef, useState, type RefObject } from "react";
 import { measureTerminalGridFromRect } from "../../lib/terminalGridMeasure";
-import type { SessionConnection } from "../../rpc/connections/session";
-import type { TerminalFeed } from "../../rpc/connections/terminal";
+import type { SessionConnection } from "tddy-client-web/connections/session";
+import type { TerminalFeed } from "tddy-client-web/connections/terminal";
 
 export interface SessionTerminalFeedDeps {
   /** The session's connection, or `null` while there is none to open a terminal on. */

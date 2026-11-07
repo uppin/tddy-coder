@@ -1,8 +1,8 @@
 import React, { useEffect, useState, type CSSProperties } from "react";
 import type { Client } from "@connectrpc/connect";
-import { ActivityService } from "../../gen/activity_pb";
-import type { SessionEntry } from "../../gen/session_pb";
 import { useIsNarrowViewport, Button } from "tddy-ui-web";
+import { ActivityService } from "tddy-client-web/gen/activity_pb";
+import type { SessionEntry } from "tddy-client-web/gen/session_pb";
 import { useHttpClient } from "../../rpc/transportProvider";
 import { useAcpReplay } from "../chat/useAcpReplay";
 import type { ChatMessage } from "../chat/useAgentChat";

@@ -20,8 +20,8 @@
 
 import type { MessageInitShape } from "@bufbuild/protobuf";
 import { anInMemoryRpcBackend, type InMemoryRpcBackend } from "tddy-connectrpc-testkit";
-import { AuthService } from "../../../src/gen/auth_pb";
-import { SessionService, type SessionContextDocSchema, type SessionEntry } from "../../../src/gen/session_pb";
+import { AuthService } from "tddy-client-web/gen/auth_pb";
+import { SessionService, type SessionContextDocSchema, type SessionEntry } from "tddy-client-web/gen/session_pb";
 import { aGitHubUser } from "./responses";
 
 // ---------------------------------------------------------------------------

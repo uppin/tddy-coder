@@ -22,8 +22,8 @@
 import React from "react";
 import { SessionsDrawerScreen } from "../../src/components/sessions/SessionsDrawerScreen";
 import { withSelectedDaemon } from "../support/rpc/withSelectedDaemon";
-import { SessionService } from "../../src/gen/session_pb";
-import { PrStackService } from "../../src/gen/pr_stack_pb";
+import { SessionService } from "tddy-client-web/gen/session_pb";
+import { PrStackService } from "tddy-client-web/gen/pr_stack_pb";
 import { mountWithRpc } from "../support/rpc/inMemory";
 import { aSessionsDrawerBackend } from "../support/rpc/vncBackend";
 import { sessionsDrawerPage } from "../support/pages/sessionsDrawerPage";

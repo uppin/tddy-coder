@@ -20,16 +20,16 @@ import { SessionWorktreeTab } from "../../src/components/sessions/SessionWorktre
 import { SessionToolsTab } from "../../src/components/sessions/SessionToolsTab";
 import { SessionsDrawerScreen } from "../../src/components/sessions/SessionsDrawerScreen";
 import { SessionRuntime } from "../../src/components/sessions/SessionRuntime";
-import { Protocol } from "../../src/gen/screen_sharing_pb";
-import { SessionFilesService } from "../../src/gen/session_files_pb";
+import { Protocol } from "tddy-client-web/gen/screen_sharing_pb";
+import { SessionFilesService } from "tddy-client-web/gen/session_files_pb";
 import {
   CalculateWorktreeSizeResponseSchema,
   WorktreeRowSchema,
   WorktreeService,
   WorktreeSizeStatus,
   WorktreeStatsEventSchema,
-} from "../../src/gen/worktree_pb";
-import { TerminalSessionService } from "../../src/gen/terminal_session_pb";
+} from "tddy-client-web/gen/worktree_pb";
+import { TerminalSessionService } from "tddy-client-web/gen/terminal_session_pb";
 import { mountWithRpc } from "../support/rpc/inMemory";
 import { UploadProgressProvider } from "../../src/rpc/uploadProgress";
 import { withSelectedDaemon } from "../support/rpc/withSelectedDaemon";

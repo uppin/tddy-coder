@@ -11,7 +11,7 @@
 
 import { anInMemoryRpcBackend, type InMemoryRpcBackend } from "tddy-connectrpc-testkit";
 import { HostsAppPage } from "../../src/components/hosts/HostsAppPage";
-import { HostService, type KnownHostEntry } from "../../src/gen/host_pb";
+import { HostService, type KnownHostEntry } from "tddy-client-web/gen/host_pb";
 import { mountWithRpc } from "../support/rpc/inMemory";
 import { withSelectedDaemon } from "../support/rpc/withSelectedDaemon";
 import { appShellPage } from "../support/pages/appShellPage";

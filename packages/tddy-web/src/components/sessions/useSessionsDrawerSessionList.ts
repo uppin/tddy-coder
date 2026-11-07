@@ -1,7 +1,7 @@
 import { useMemo, type MutableRefObject } from "react";
 import type { Client } from "@connectrpc/connect";
 import type { Room } from "livekit-client";
-import { SessionService } from "../../gen/session_pb";
+import { SessionService } from "tddy-client-web/gen/session_pb";
 import { useHostConnection } from "../../rpc/connections/registry";
 import { useCapabilityAvailability } from "../../hooks/useCapabilityAvailability";
 import { useRoomParticipants } from "../../hooks/useRoomParticipants";

@@ -1,5 +1,5 @@
 import type { Client } from "@connectrpc/connect";
-import type { WorktreeService } from "../../gen/worktree_pb";
+import type { WorktreeService } from "tddy-client-web/gen/worktree_pb";
 
 /**
  * A single directory entry in the worktree tree. `sizeBytes` is the entry's on-disk size (`0` for a

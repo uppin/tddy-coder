@@ -11,19 +11,19 @@
 
 import { create, fromBinary } from "@bufbuild/protobuf";
 import { anInMemoryRpcBackend, type InMemoryRpcBackend } from "tddy-connectrpc-testkit";
-import { AuthService } from "../../src/gen/auth_pb";
+import { AuthService } from "tddy-client-web/gen/auth_pb";
 import {
   HostPromptKind,
   HostRemoteDesktopSchema,
   HostService,
   ProbeOutcome,
-} from "../../src/gen/host_pb";
+} from "tddy-client-web/gen/host_pb";
 import {
   DesktopAuthMethod,
   DesktopCredentialAnswerSchema,
   ScreenSharingService,
   type DesktopCredentialAnswer,
-} from "../../src/gen/screen_sharing_pb";
+} from "tddy-client-web/gen/screen_sharing_pb";
 import { HostRowRemoteDesktop } from "../../src/components/hosts/HostRowRemoteDesktop";
 import { HostRowTooling } from "../../src/components/hosts/HostRowTooling";
 import { mountWithRpc } from "../support/rpc/inMemory";

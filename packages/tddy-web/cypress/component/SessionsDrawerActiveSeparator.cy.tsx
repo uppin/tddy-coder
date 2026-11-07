@@ -9,7 +9,7 @@
 
 import React from "react";
 import { create } from "@bufbuild/protobuf";
-import { SessionEntrySchema, type SessionEntry } from "../../src/gen/session_pb";
+import { SessionEntrySchema, type SessionEntry } from "tddy-client-web/gen/session_pb";
 import { SessionDrawer } from "../../src/components/sessions/SessionDrawer";
 import { TooltipProvider } from "tddy-ui-web";
 import { byTestId, sessionsDrawerItem, sessionRowSelect, TEST_IDS } from "../support/testIds";

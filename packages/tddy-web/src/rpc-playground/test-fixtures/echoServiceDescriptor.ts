@@ -12,7 +12,7 @@ import {
   FileDescriptorSetSchema,
   type FileDescriptorProto,
 } from "@bufbuild/protobuf/wkt";
-import { file_test_echo_service } from "../../gen/test/echo_service_pb";
+import { file_test_echo_service } from "tddy-client-web/gen/test/echo_service_pb";
 
 function collectFiles(
   file: DescFile,

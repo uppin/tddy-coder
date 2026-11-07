@@ -1,6 +1,6 @@
 import React, { useState } from "react";
 import type { Client } from "@connectrpc/connect";
-import { SessionAgentService } from "../../gen/session_agents_pb";
+import { SessionAgentService } from "tddy-client-web/gen/session_agents_pb";
 import { useHttpClient } from "../../rpc/transportProvider";
 import { Button } from "tddy-ui-web";
 import { useAgentConversation } from "./useAgentConversation";
