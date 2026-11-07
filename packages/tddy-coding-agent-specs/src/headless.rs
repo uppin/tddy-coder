@@ -144,6 +144,8 @@ impl SpecHeadlessRenderer {
             program,
             argv,
             adapter,
+            // TODO(env-allow-list): implement — the registry's `AgentEnvBase::agent_env` for this spec.
+            env: Vec::new(),
         }))
     }
 

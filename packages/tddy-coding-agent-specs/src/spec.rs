@@ -146,7 +146,20 @@ fn parse_section(
     let agent: CodingAgentSection =
         serde_yaml::from_value(section.clone()).map_err(|e| invalid(e.to_string()))?;
     hooks::adapter(&agent.hooks.adapter).map_err(|e| invalid(e.to_string()))?;
+    validate_env_entries(&agent.pass_env)
+        .map_err(|e| format!("pass_env: {e}"))
+        .map_err(invalid)?;
     Ok(agent)
+}
+
+/// Agent-env entries (`coding_agent.pass_env`, an agent-env base set) refused when one would let an
+/// agent inherit a `TDDY_*` variable — `TDDY_X`, `TDDY_*`, or a prefix pattern every `TDDY_*` name
+/// matches (`TDDY*`, `T*`, `*`) — or is not a variable name nor a `PREFIX_*` pattern. The message
+/// names the entry.
+pub(crate) fn validate_env_entries(entries: &[String]) -> Result<(), String> {
+    // TODO(env-allow-list): implement
+    let _ = entries;
+    Ok(())
 }
 
 /// Why a tool is not a usable coding agent.
@@ -237,6 +250,12 @@ pub struct CodingAgentSection {
     /// than naming the agent.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub transcript_usage: bool,
+    /// The daemon's variables this agent's process is also started with, on top of the base set
+    /// ([`crate::AgentEnvBase`]) — its provider keys and the agent-specific
+    /// variables it reads (`#agent-tools 28/28`). Each entry is a name or a `PREFIX_*` pattern; one
+    /// matching `TDDY_*` is refused at load. Empty for an agent that reads none.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub pass_env: Vec<String>,
 }
 
 /// How long an orchestrated session's permission hook waits for its orchestrator's answer when the
@@ -282,6 +301,24 @@ impl CodingAgentSpec {
             (None, Some(_)) => ConversationSlot::ResumeToken,
             (None, None) => ConversationSlot::Worktree,
         }
+    }
+
+    /// `coding_agent.pass_env`: the names and `PREFIX_*` patterns of the daemon variables the
+    /// agent's process is also started with.
+    pub fn pass_env(&self) -> &[String] {
+        &self.agent.pass_env
+    }
+
+    /// The variables of `parent` (the daemon's environment) that [`Self::pass_env`] names, in
+    /// `parent`'s order — what every host launch of this agent adds to its environment. A variable
+    /// whose name or value is not UTF-8 is not passed.
+    pub fn passed_env(
+        &self,
+        parent: impl IntoIterator<Item = (std::ffi::OsString, std::ffi::OsString)>,
+    ) -> Vec<(String, String)> {
+        // TODO(env-allow-list): implement
+        let _ = parent.into_iter();
+        Vec::new()
     }
 
     /// `coding_agent.product`, or the agent id when the spec declares none.
@@ -525,6 +562,7 @@ impl CodingAgentSpec {
             .ok_or_else(|| AcpCommandError::EmptyCommand {
                 agent: self.id.clone(),
             })?;
+        // TODO(env-allow-list): implement — the launcher gives the agent `AgentEnvBase::agent_env` over `acp.env`.
         Ok(AcpAgentCommand {
             program: PathBuf::from(program),
             args: args.to_vec(),

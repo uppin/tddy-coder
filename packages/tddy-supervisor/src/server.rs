@@ -97,6 +97,8 @@ impl PrivilegedSurface {
         // `resolve_spawn_of`, not `resolve_spawn`: the relay allowlist has passed the program, and
         // resolving it against `allowed_tool_paths` as well would make a relayed harness need both
         // lists — and so grant it `SpawnSession` too.
+        // TODO(env-allow-list): implement — the env through `policy::resolve_relayed_env`, not
+        // `allowed_env_keys`, and the plan on `EnvironmentBase::Exactly`.
         let resolved = self.resolve_spawn_of(
             &request.os_user,
             program,

@@ -276,6 +276,7 @@ mod tests {
                 conversation: None,
                 permission_modes: Vec::new(),
                 transcript_usage: false,
+                pass_env: Vec::new(),
             },
         }
     }

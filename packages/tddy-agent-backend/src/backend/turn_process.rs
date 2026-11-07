@@ -57,6 +57,7 @@ pub(crate) fn spawn_turn_command(turn: &TurnCommand<'_>) -> std::process::Comman
     use std::os::unix::process::CommandExt as _;
     let mut command = std::process::Command::new(turn.program);
     command.args(turn.argv).current_dir(turn.cwd);
+    // TODO(env-allow-list): implement — `crate::agent_env::apply_agent_child_env`, not a deny-list.
     strip_tddy_env(&mut command);
     command.env("PATH", super::path_with_exe_dir());
     command.envs(turn.env.iter().map(|(name, value)| (name, value)));
