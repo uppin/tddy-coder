@@ -3,7 +3,7 @@
 **Location:** `packages/tddy-sandbox-runner/src/runner.rs`
 **Category:** oversized-file
 **Detected:** 2026-09-26 by `structural audit` — `/pr-wrap` step 3.5 file-length gate on PR #545
-**Metrics:** **2,240 production lines** (2026-11-03, after #799) (counted to the module-level `#[cfg(test)]`) · budget 500 · **4.5× over**
+**Metrics:** **2,235 production lines** (2026-11-07, after #832) (counted to the module-level `#[cfg(test)]`) · budget 500 · **4.5× over**
 **Thresholds breached:** length 2,742 > 500
 **Restructure:** required — `extract_module --to_file`, `/code-restructuring` territory
 **Status:** Open — unclaimed
@@ -21,6 +21,7 @@
 | 2026-11-02 | 2,847 | **worse** by 48 in PR #794 (`#agent-tools` 5/12): `--exec-plan` threads an `ExecPlan` through `run_sandbox_runner_inner` (245 → 261 lines), `ChildEnv` on the generic PTY thread, `notify_when_the_process_exits` (folds a duplicated block), and four helpers widened to `pub(crate)` for the new `exec_plan.rs`, where the mode's own logic lives. Not split: stack-shared, and deferred to the #agent-tools sweep node (developer, 2026-11-02) |
 | 2026-11-03 | 2,854 | **worse** by 7 in PR #796 (`#agent-tools` 7/12): the in-jail tool-IPC server relays `tddy_service::session_activity::IN_JAIL_RELAYABLE_HOOK_REPORTS` (`ReportSessionStatus`, `ReportAgentActivity`) to the host through `relays_to_the_host`, and the hand-built `spawn_runner_cursor` daemon path is gone. Not split: stack-shared, and deferred to the #agent-tools sweep node (developer, 2026-11-02) |
 | 2026-11-03 | 2,240 | **better** by 614 in PR #799 (`#agent-tools` 10/12): the agent modes are deleted (`spawn_claude_pty`, `spawn_cursor_pty`, the agent flags, the opencode/muse dispatch arm and `harness_pty.rs`); +10 back for `notify_when_the_process_exits` waiting on a detached thread instead of `spawn_blocking`. Still 4.5× over. Not split: deferred to the #agent-tools sweep node (developer) |
+| 2026-11-07 | 2,235 | **better** by 5 in PR #832 (`#agent-tools` 24/28): the vestigial `--model` argument is deleted from `SandboxRunnerArgs`. Still 4.5× over. Not split: this PR did not grow it |
 
 ## What the tool found
 

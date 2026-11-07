@@ -66,7 +66,6 @@ fn runner_args(tmp: &Path, stub_agent: &Path) -> (SandboxRunnerArgs, PathBuf, Pa
         session_id: SESSION_ID.to_string(),
         context_dir,
         cwd: None,
-        model: TEST_MODEL.to_string(),
         grpc_socket: Some(tmp.join("sandbox.grpc.sock")),
         tool_ipc_socket: tmp.join("tool_ipc.sock"),
         tddy_tools_path: Some(tddy_tools_path()),

@@ -289,11 +289,6 @@ pub struct SandboxRunnerArgs {
     /// Path to `tddy-tools` as the jail reaches it.
     #[arg(long)]
     pub tddy_tools_path: Option<PathBuf>,
-    /// Vestigial: no mode reads it. Kept so launchers that still pass it keep parsing.
-    // TODO(jail-agnostic): drop `--model` once the launchers stop passing it
-    // (docs/dev/todo/2026-11-03-runner-model-flag-is-vestigial.md).
-    #[arg(long, default_value = "")]
-    pub model: String,
     #[arg(long)]
     pub ready_marker: PathBuf,
     /// When set, bind sandbox gRPC on this loopback port (required inside Seatbelt).
@@ -2469,6 +2464,38 @@ mod tests {
         assert_eq!(request.conversation_id, "explore");
     }
 
+    /// The runner reads no model (`#agent-tools 24/28`): what the confined agent runs on is its
+    /// exec plan's argv, so a launcher still passing `--model` is refused rather than ignored.
+    #[test]
+    fn the_runner_refuses_a_model_flag() {
+        // Given
+        let argv = [
+            "tddy-sandbox-runner",
+            "--session-id",
+            "sess",
+            "--context-dir",
+            "/tmp/ctx",
+            "--tool-ipc-socket",
+            "/tmp/ipc.sock",
+            "--ready-marker",
+            "/tmp/ready",
+            "--stdio",
+            "--model",
+            "opus",
+        ];
+
+        // When
+        let parsed = SandboxRunnerArgs::try_parse_from(argv);
+
+        // Then
+        let refusal = parsed.expect_err("the runner has no --model flag");
+        assert_eq!(
+            refusal.kind(),
+            clap::error::ErrorKind::UnknownArgument,
+            "{refusal}"
+        );
+    }
+
     #[test]
     fn parses_repeated_pty_command_flags_including_hyphen_args() {
         let args = SandboxRunnerArgs::try_parse_from([
@@ -2481,8 +2508,6 @@ mod tests {
             "/tmp/grpc.sock",
             "--tool-ipc-socket",
             "/tmp/ipc.sock",
-            "--model",
-            "",
             "--ready-marker",
             "/tmp/ready",
             "--pty-command=/bin/sh",
@@ -2509,8 +2534,6 @@ mod tests {
             "/tmp/ctx",
             "--tool-ipc-socket",
             "/tmp/ipc.sock",
-            "--model",
-            "",
             "--ready-marker",
             "/tmp/ready",
             "--stdio",
@@ -2536,8 +2559,6 @@ mod tests {
             "/tmp/ctx",
             "--tool-ipc-socket",
             "/tmp/ipc.sock",
-            "--model",
-            "",
             "--ready-marker",
             "/tmp/ready",
             "--stdio",
@@ -2563,8 +2584,6 @@ mod tests {
             "/tmp/ctx",
             "--tool-ipc-socket",
             "/tmp/ipc.sock",
-            "--model",
-            "",
             "--ready-marker",
             "/tmp/ready",
             "--stdio",

@@ -61,7 +61,7 @@ async fn acp_backend_has_correct_name() {
     assert_eq!(backend.name(), "claude-acp");
 }
 
-/// ClaudeAcpBackend with stub agent path can be constructed.
+/// A `SpecAcpBackend` for the `claude-acp` id, with stub agent path, can be constructed.
 #[tokio::test]
 #[serial]
 async fn acp_backend_with_stub_path_constructs() {

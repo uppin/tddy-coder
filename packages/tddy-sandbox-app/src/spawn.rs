@@ -456,8 +456,6 @@ pub async fn spawn_claude_sandbox(params: SpawnParams) -> Result<SpawnedSandbox>
         tddy_tools_path,
         "--ready-marker".into(),
         ready_marker.to_string_lossy().to_string(),
-        "--model".into(),
-        params.model.clone(),
         "--grpc-listen-port".into(),
         grpc_listen_port.to_string(),
         "--egress-shim-port".into(),

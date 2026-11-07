@@ -34,7 +34,6 @@ pub mod jail_launch;
 pub mod jail_launch_steps;
 pub mod jail_relaunch;
 pub mod jail_session_files;
-pub mod jail_worktree;
 pub mod launch_ports;
 pub mod managed_launch;
 pub mod notify_env;
