@@ -1,0 +1,5 @@
+# `bun test` has no DOM of its own. The preload registers happy-dom's globals (document, window,
+# events) before any suite imports React, and sets Testing Library's async budget.
+[test]
+root = "src"
+preload = ["./test-utils/dom-preload.ts"]

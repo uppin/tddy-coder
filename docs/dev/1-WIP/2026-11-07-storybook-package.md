@@ -7,6 +7,8 @@
 
 **Stack**: `#web-split` 15/16 — branch `feature/web-split/storybook`, base `feature/web-split/session`
 
+**PR**: [#852](https://github.com/uppin/tddy-coder/pull/852)
+
 ## Initial Discovery
 
 [2026-11-07-storybook-package-initial-discovery.md](./2026-11-07-storybook-package-initial-discovery.md)
@@ -61,6 +63,14 @@ implementing one here collides with the PR that owns it.
 | `n2` react-commons (#839) | `testkit` (`stubPorts`, `AppContextStub`) | stories mount with it | — |
 
 ## Draft PR contract
+
+**As pushed (commit 2):** `packages/tddy-storybook` (manifest depending on every component package,
+Storybook 9 `.storybook/main.ts` globbing `src/**/*.stories.*`, `preview.tsx` with the theme and a
+`TODO(storybook)` for the port-double decorators), `web-tddy-storybook.yml`, and failing tests:
+`src/storyPlacement.test.ts` (stories outside this package: the 5 in `tddy-web`; packages without a story:
+all ten) and `src/storiesRender.test.tsx` (`composeStories` + Testing Library on happy-dom: no stories yet).
+
+Originally planned:
 
 First push (commit 2): the `tddy-storybook` skeleton (manifest exporting the surface in `## Responsibility`, Cypress/Vite config, workflow), the specs, page objects and drivers listed below `git mv`'d into the package with imports pointing at it, and the boundary rule — failing until the modules move.
 
@@ -141,10 +151,10 @@ Real dependency edges, as opposed to the branch line:
 - [x] Cross-check `packages/*/docs/code-issues/` and `docs/dev/todo/` for items this change touches (Step 2b)
 - [x] Create/update PRD documentation
 - [x] Create changeset (this document)
-- [ ] Create failing acceptance tests
-- [ ] Run acceptance tests (verify they fail)
-- [ ] USER REVIEW — acceptance tests
-- [ ] TDD Red — write failing unit/integration tests
+- [x] Create failing acceptance tests
+- [x] Run acceptance tests (verify they fail)
+- [x] USER REVIEW — acceptance tests (developer waived the per-node review for this stack, 2026-11-07: "finish the rest without stopping")
+- [x] TDD Red — write failing unit/integration tests
 - [ ] TDD Green — implement with quality code
 - [ ] Update documentation with progress
 - [ ] Repeat Red→Green→Update cycle until feature complete
