@@ -5,6 +5,7 @@
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use std::time::Duration;
 
 use async_trait::async_trait;
 use prost::Message;
@@ -22,10 +23,26 @@ use crate::request::{
 use crate::server::SERVICE_NAME;
 use crate::service::ServiceStatus;
 
+/// How long a unary call to the supervisor waits for its answer before it fails
+/// [`SupervisorError::Unavailable`], naming the method. Every unary call on the privileged surface
+/// is a bounded piece of work on the supervisor's side (a fork, a cgroup write, a status read), so a
+/// call that has not answered in this long is talking to a supervisor that will not answer.
+pub const SUPERVISOR_CALL_DEADLINE: Duration = Duration::from_secs(60);
+
+/// How long a supervised clone waits for its first event, and then for each next one, before it
+/// fails [`SupervisorError::Unavailable`]. git reports progress continuously while it transfers, so
+/// a stream this quiet is a supervisor (or a git) that has stopped, not a slow clone.
+pub const SUPERVISOR_CLONE_PROGRESS_DEADLINE: Duration = Duration::from_secs(300);
+
 /// A connection to a running supervisor's unix socket.
 pub struct SupervisorClient {
     socket_path: PathBuf,
     transport: Arc<StdioRpcClient>,
+    /// [`SUPERVISOR_CALL_DEADLINE`] unless a test shortened it ([`Self::with_call_deadline`]).
+    call_deadline: Duration,
+    /// [`SUPERVISOR_CLONE_PROGRESS_DEADLINE`] unless a test shortened it
+    /// ([`Self::with_clone_progress_deadline`]).
+    clone_progress_deadline: Duration,
     /// Drives the framed read/write loop for this connection. Shared with the stream of a call that
     /// outlives the client ([`SupervisorClient::clone_repository`]).
     connection: Arc<Connection>,
@@ -74,8 +91,23 @@ impl SupervisorClient {
         Ok(SupervisorClient {
             socket_path: socket_path.to_path_buf(),
             transport,
+            call_deadline: SUPERVISOR_CALL_DEADLINE,
+            clone_progress_deadline: SUPERVISOR_CLONE_PROGRESS_DEADLINE,
             connection: Arc::new(Connection(tokio::spawn(endpoint.run()))),
         })
+    }
+
+    /// This client with unary calls bounded by `deadline` instead of [`SUPERVISOR_CALL_DEADLINE`].
+    pub fn with_call_deadline(mut self, deadline: Duration) -> SupervisorClient {
+        self.call_deadline = deadline;
+        self
+    }
+
+    /// This client with a clone's first event, and each one after it, bounded by `deadline` instead
+    /// of [`SUPERVISOR_CLONE_PROGRESS_DEADLINE`].
+    pub fn with_clone_progress_deadline(mut self, deadline: Duration) -> SupervisorClient {
+        self.clone_progress_deadline = deadline;
+        self
     }
 
     /// Socket this client is connected to.
@@ -203,6 +235,10 @@ impl SupervisorClient {
         SupervisorError,
     > {
         const METHOD: &str = "CloneRepository";
+        // TODO(bounded-waits): implement — bound the stream's opening and every `frames.recv()`
+        // below by `self.clone_progress_deadline`, failing `Unavailable` naming CloneRepository and
+        // the deadline.
+        let _ = self.clone_progress_deadline;
         let mut frames = self
             .transport
             .call_server_stream(SERVICE_NAME, METHOD, request.encode_to_vec())
@@ -287,6 +323,9 @@ impl SupervisorClient {
         method: &str,
         request: Req,
     ) -> Result<Res, SupervisorError> {
+        // TODO(bounded-waits): implement — bound `call_unary` by `self.call_deadline`, failing
+        // `Unavailable` naming `method` and the deadline.
+        let _ = self.call_deadline;
         let bytes = self
             .transport
             .call_unary(SERVICE_NAME, method, request.encode_to_vec())

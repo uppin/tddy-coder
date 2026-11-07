@@ -140,6 +140,13 @@ impl DaemonConfig {
         Duration::from_secs(secs)
     }
 
+    /// How long a whole session start may take before it is cancelled and failed
+    /// `DeadlineExceeded` (see `session_start_timeout_secs`).
+    pub fn session_start_timeout(&self) -> Duration {
+        // TODO(bounded-waits): implement — clamp 0 to 1 s, as `spawn_worker_request_timeout` does.
+        Duration::from_secs(self.session_start_timeout_secs)
+    }
+
     /// How long a forward to a peer daemon waits for its answer (see `peer_forward_timeout_secs`).
     pub fn peer_forward_timeout(&self) -> Duration {
         Duration::from_secs(self.peer_forward_timeout_secs.max(1))
