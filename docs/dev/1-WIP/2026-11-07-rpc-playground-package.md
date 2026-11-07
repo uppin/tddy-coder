@@ -17,7 +17,7 @@
 
 - **tddy-rpc-playground-web** (new): `packages/tddy-rpc-playground-web/` — `RpcPlaygroundScreen`, `invoke`, `registry`, `protoMessageJson`, `test-fixtures/`, their `bun test` suites, specs, README, `docs/`.
 - **tddy-web**: keeps `RpcPlaygroundAppPage` (shell, sign-in, presence — wiring), importing the screen from the package.
-- **root** `workspaces`, `bun.lock`; `.github/workflows/web-tddy-rpc-playground-web.yml`.
+- **root** `workspaces`, `bun.lock`; `scripts/web-lint-exclusions.json` (the package joins `web.yml` by discovery — no caller workflow).
 
 ## Related Feature Documentation
 

@@ -5,12 +5,9 @@
  * ~/Code/meshstream/ots-meshcore-plugin/ui-src/src/dev/protoMessageJson.ts.
  * The canonical JSON string is always normalized through @bufbuild/protobuf so
  * round-trips between the builder view and raw JSON view are lossless.
- *
- * All imports will fail to resolve until protoMessageJson.ts is created (red phase).
  */
 
 import { describe, expect, it } from "bun:test";
-// These imports fail until protoMessageJson.ts is created.
 import {
   defaultRequestJson,
   parseRequestJson,
