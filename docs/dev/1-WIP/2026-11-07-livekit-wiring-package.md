@@ -7,6 +7,8 @@
 
 **Stack**: `#web-split` 6/16 — branch `feature/web-split/livekit`, base `feature/web-split/clients`
 
+**PR**: [#843](https://github.com/uppin/tddy-coder/pull/843)
+
 ## Initial Discovery
 
 [2026-11-07-livekit-wiring-package-initial-discovery.md](./2026-11-07-livekit-wiring-package-initial-discovery.md)
@@ -77,6 +79,22 @@ implementing one here collides with the PR that owns it.
 | `n5` clients (#842) | `ClientsPort`, `ConnectionProvider`, `ClientsProvider`, testkit | implements `ConnectionProvider`; adds presence/media ports and doubles to its package | change `ClientsPort` or the hook names |
 
 ## Draft PR contract
+
+**As pushed (commit 2):**
+
+- `tddy-client-web/src/ports/media.tsx` — `RoomHandle` (opaque), `RoomState`, `RoomParticipant`,
+  `PresencePort` (`useHostPresence`, `usePresenceRoom`, `useRoomParticipants`), `MediaPort`
+  (`usePresenterRoom`, `useScreenSharingInput`, `useHasCameraVideo`, `RemoteVideo`), their providers and
+  hooks — bodies `TODO(livekit)`. Ports carry hooks; the app builds each port once, so hook identity is stable.
+- `tddy-client-web/src/testkit/media.tsx` — `aPresenceDouble`, `aMediaDouble` (`TODO(livekit)`).
+- Failing: `src/ports/mediaPort.test.tsx` (4) and `scripts/livekit-import-boundary.test.ts`, which today
+  finds **72** files outside the LiveKit packages importing `livekit-client` — the 31 sources listed in
+  State A plus `tddy-web` Cypress specs and support. Specs move to `tddy-livekit-web` or switch to the
+  doubles.
+- **Not in the contract:** the `tddy-livekit-web` package skeleton — `packages/tddy-livekit-web` is still
+  the transport until #841 (rename) is green. Created at green.
+
+Originally planned:
 
 First push (commit 2): `PresencePort` and `MediaPort` types with their hooks' signatures (`// TODO(livekit): implement`), the `tddy-livekit-web` skeleton exporting `livekitPorts` and `LiveKitConnectionProvider` signatures, the moved LiveKit specs pointing at the new package, the port-double specs, and the workspace rule `scripts/livekit-import-boundary.test.ts` — failing while 31 `tddy-web` files still import `livekit-client`.
 
@@ -167,10 +185,10 @@ Real dependency edges, as opposed to the branch line:
 - [x] Cross-check `packages/*/docs/code-issues/` and `docs/dev/todo/` for items this change touches (Step 2b)
 - [x] Create/update PRD documentation
 - [x] Create changeset (this document)
-- [ ] Create failing acceptance tests
-- [ ] Run acceptance tests (verify they fail)
-- [ ] USER REVIEW — acceptance tests
-- [ ] TDD Red — write failing unit/integration tests
+- [x] Create failing acceptance tests
+- [x] Run acceptance tests (verify they fail)
+- [x] USER REVIEW — acceptance tests (developer waived the per-node review for this stack, 2026-11-07: "finish the rest without stopping")
+- [x] TDD Red — write failing unit/integration tests
 - [ ] TDD Green — implement with quality code
 - [ ] Update documentation with progress
 - [ ] Repeat Red→Green→Update cycle until feature complete
