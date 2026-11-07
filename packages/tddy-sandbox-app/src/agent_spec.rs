@@ -14,6 +14,7 @@ use std::path::{Path, PathBuf};
 
 use tddy_actions::tool::{
     render_argv, ProcessToolHost, ResolvedTool, TemplateParams, ToolDef, ToolError, ToolHost,
+    Transport,
 };
 use tddy_coding_agent_specs::claude_tools::{
     build_claude_allowlist, build_claude_disallowlist, PERMISSION_PROMPT_TOOL,
@@ -117,7 +118,8 @@ impl fmt::Display for AgentChoiceError {
 impl std::error::Error for AgentChoiceError {}
 
 /// Choose the agent `id` from the registry at `tddy_home` (`<tddyhome>/`[`TOOLS_SUBDIR`] overrides
-/// applied): refused for an id no coding agent has, naming every one the registry holds, for a
+/// applied): refused for an id no coding agent has and for an ACP-only one, naming every agent with a
+/// PTY run, for a
 /// spec that is not placed in a jail, and for one whose route is required in a jail.
 pub fn choose_agent(id: &str, tddy_home: &Path) -> Result<ChosenAgent, AgentChoiceError> {
     choose_agent_on(id, tddy_home, &ProcessToolHost)
@@ -159,20 +161,32 @@ pub fn choose_agent_on(
 ) -> Result<ChosenAgent, AgentChoiceError> {
     let registry =
         load_agent_registry(&tddy_home.join(TOOLS_SUBDIR)).map_err(AgentChoiceError::Registry)?;
-    // TODO(host-registry): implement — keep only specs whose `run` is a PTY launch, and refuse an
-    // ACP-only agent with `AgentChoiceError::NotPtyRunnable` naming them.
+    let is_coding_agent = |tool: &str| {
+        registry
+            .get(tool)
+            .is_some_and(|def| def.extensions.contains_key(CODING_AGENT_EXTENSION))
+    };
+    // The agents this app can run: coding agents whose spec's `run` is a PTY launch.
     let mut known: Vec<String> = registry
         .ids()
         .filter(|tool| {
-            registry
-                .get(tool)
-                .is_some_and(|def| def.extensions.contains_key(CODING_AGENT_EXTENSION))
+            is_coding_agent(tool)
+                && registry
+                    .get(tool)
+                    .and_then(|def| def.run.as_ref())
+                    .is_some_and(|run| run.transport == Transport::Pty)
         })
         .map(str::to_string)
         .collect();
     known.sort();
     let def = match registry.get(id) {
         Some(def) if known.iter().any(|agent| agent == id) => def,
+        Some(_) if is_coding_agent(id) => {
+            return Err(AgentChoiceError::NotPtyRunnable {
+                id: id.to_string(),
+                runnable: known,
+            })
+        }
         _ => {
             return Err(AgentChoiceError::Unknown {
                 id: id.to_string(),

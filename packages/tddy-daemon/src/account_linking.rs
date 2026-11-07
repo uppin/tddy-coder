@@ -263,7 +263,7 @@ pub fn accounts_service_over(
     vaults: &Arc<SessionVaults>,
     subject_of: SessionSubjectResolver,
     config: &DaemonConfig,
-    coding_agents: Option<Arc<tddy_coding_agent_specs::CodingAgentRegistry>>,
+    coding_agents: Arc<tddy_coding_agent_specs::CodingAgentRegistry>,
 ) -> AccountsServiceImpl<SessionVaultAccountStore> {
     let linking_provider = tddy_daemon_auth::github_account_linking_provider(config);
     let store = Arc::new(SessionVaultAccountStore::new(
@@ -277,7 +277,7 @@ pub fn accounts_service_over(
             Arc::new(HttpProviderModelProbe::new(reqwest::Client::new())),
         )
         .with_route_support(Arc::new(
-            crate::provider_route_support::HarnessRouteSupport::new(coding_agents),
+            crate::provider_route_support::HarnessRouteSupport::new(Some(coding_agents)),
         ));
     match linking_provider {
         Some(provider) => service.with_linking(

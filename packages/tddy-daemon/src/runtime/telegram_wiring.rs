@@ -83,34 +83,13 @@ pub fn split_room_hosting(
     }
 }
 
-/// The registry of coding agents Telegram offers: the host's own (built-ins and
-/// `<tddy_data_dir>/tools`). A registry that does not load leaves Telegram with none to offer, so
-/// its CLI starts are refused in the chat; the daemon's own start refuses for the same file
-/// (`build_session_host`), so this is a report, not a fallback.
-// TODO(host-registry): implement — load the registry once before Telegram is built and share it with
-// `build_session_host` and `open_shared`, which each load it again
-// (docs/dev/todo/2026-11-06-telegram-loads-the-coding-agent-registry-a-third-time.md).
-fn telegram_coding_agents(
-    tddy_data_dir: &Path,
-) -> Arc<tddy_coding_agent_specs::CodingAgentRegistry> {
-    match tddy_agent_launch::host_coding_agents::host_coding_agents(tddy_data_dir) {
-        Ok(agents) => agents.agents_shared(),
-        Err(e) => {
-            log::error!(
-                target: "tddy_daemon",
-                "telegram offers no coding agents: {e:#}"
-            );
-            Arc::new(tddy_coding_agent_specs::CodingAgentRegistry::empty())
-        }
-    }
-}
-
 pub(super) fn build_telegram(
     config: &DaemonConfig,
     tddy_data_dir: &Path,
     options: &RuntimeOptions,
     registries: &Registries,
     plugins: &Plugins,
+    coding_agents: Arc<tddy_coding_agent_specs::CodingAgentRegistry>,
 ) -> TelegramWiring {
     // No block, switched off, or no token: no bot. Which of the three it is was already reported
     // on the status board from the same block (`tddy_telegram::status::configured_state`).
@@ -190,7 +169,6 @@ pub(super) fn build_telegram(
             cli_manager: Arc::clone(&registries.shared_cli_manager),
         },
     ));
-    let coding_agents = telegram_coding_agents(tddy_data_dir);
     let harness = Arc::new(Mutex::new(
         tddy_telegram_control::telegram_session_control::TelegramSessionControlHarness::with_workflow_spawn_and_telegram_tracked(
             tg.chat_ids.clone(),

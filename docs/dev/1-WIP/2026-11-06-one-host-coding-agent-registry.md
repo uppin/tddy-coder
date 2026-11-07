@@ -172,7 +172,7 @@ Published (contract commit):
 - [x] Run acceptance tests (verify they fail)
 - [x] USER REVIEW — acceptance tests
 - [x] TDD Red — write failing unit/integration tests
-- [ ] TDD Green — implement with quality code
+- [x] TDD Green — implement with quality code
 - [ ] Update documentation with progress
 - [ ] Repeat Red→Green→Update cycle until feature complete
 - [ ] Run the touched packages' tests (`./test -p {package}` per package) — verify 100% pass
@@ -191,7 +191,15 @@ Published (contract commit):
 
 ## Technical Debt & Production Readiness
 
-_(populated during development)_
+- **A fourth registry load, for the sweep node.** `DaemonCodingAgentLauncher::for_daemon`
+  (`packages/tddy-session-lifecycle/src/coding_agent_launcher.rs:213`) still calls
+  `host_coding_agents(&tddy_data_dir)` itself and, on failure, records the error in
+  `coding_agents_error` rather than failing. It is outside this changeset's three loads (Telegram,
+  reserved ids, session host) and was not in the planned scope. Fix: `DaemonLauncherDeps` takes the
+  daemon's one `Arc<HostCodingAgents>` (`runtime::build` already holds it) and `coding_agents_error`
+  goes away.
+- `launch_coding_agents()` returns an owned `Arc` clone, not `&Arc` as the contract text said:
+  a reference forced a clone at three call sites for no gain.
 
 ## Refactoring Needed
 

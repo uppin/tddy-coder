@@ -26,6 +26,8 @@ fn cursor_probe_args_carry_the_resolved_cursor_binary_path() {
             "cursor".to_string(),
             "--binary-path".to_string(),
             "/home/dev/.local/bin/agent".to_string(),
+            "--tools-dir".to_string(),
+            "/var/lib/tddy/tools".to_string(),
         ]
     );
 }
@@ -50,6 +52,8 @@ fn a_non_cursor_probe_omits_the_cursor_cli_path_flag() {
             "claude".to_string(),
             "--binary-path".to_string(),
             "/home/dev/.local/bin/agent".to_string(),
+            "--tools-dir".to_string(),
+            "/var/lib/tddy/tools".to_string(),
         ]
     );
     assert!(!args.contains(&"--cursor-cli-path".to_string()), "{args:?}");
@@ -75,6 +79,8 @@ fn an_opencode_cli_probe_carries_the_resolved_opencode_binary_path() {
             "opencode-cli".to_string(),
             "--binary-path".to_string(),
             "/home/dev/.opencode/bin/opencode".to_string(),
+            "--tools-dir".to_string(),
+            "/var/lib/tddy/tools".to_string(),
         ]
     );
 }
@@ -124,6 +130,8 @@ fn an_opencode_cli_probe_without_a_resolved_path_omits_the_flag() {
             "list-models".to_string(),
             "--agent".to_string(),
             "opencode-cli".to_string(),
+            "--tools-dir".to_string(),
+            "/var/lib/tddy/tools".to_string(),
         ]
     );
 }
@@ -147,6 +155,8 @@ fn an_opencode_acp_probe_carries_the_resolved_opencode_binary_path() {
             "opencode".to_string(),
             "--binary-path".to_string(),
             "/home/dev/.opencode/bin/opencode".to_string(),
+            "--tools-dir".to_string(),
+            "/var/lib/tddy/tools".to_string(),
         ]
     );
 }

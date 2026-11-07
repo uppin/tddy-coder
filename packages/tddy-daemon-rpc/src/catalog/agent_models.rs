@@ -35,8 +35,6 @@ pub(super) fn list_models_probe_args(
     binary_path: Option<&std::path::Path>,
     tools_dir: &std::path::Path,
 ) -> Vec<String> {
-    // TODO(host-registry): implement — append `--tools-dir <tools_dir>`.
-    let _ = tools_dir;
     let mut args = vec![
         "list-models".to_string(),
         "--agent".to_string(),
@@ -46,6 +44,8 @@ pub(super) fn list_models_probe_args(
         args.push("--binary-path".to_string());
         args.push(path.to_string_lossy().into_owned());
     }
+    args.push("--tools-dir".to_string());
+    args.push(tools_dir.to_string_lossy().into_owned());
     args
 }
 

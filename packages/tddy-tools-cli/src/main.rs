@@ -225,7 +225,7 @@ async fn run(args: Args) -> Result<()> {
         Some(Subcommand::SessionHook(s)) => session_hook::run_session_hook(s).await,
         Some(Subcommand::Notify(s)) => notify_cli::run_notify(s).await?,
         Some(Subcommand::ListModels(s)) => {
-            tddy_tools::list_models::run_list_models(&s, &agent_models_catalog(&s)).await?
+            tddy_tools::list_models::run_list_models(&s, &agent_models_catalog(&s)?).await?
         }
         Some(Subcommand::Analyze(s)) => tddy_code_analysis::analyze_cli::run(s)?,
         Some(Subcommand::Restructure(s)) => {
@@ -293,14 +293,22 @@ async fn run_mcp_server() -> Result<()> {
 /// every other agent's catalogue is its spec's curated list.
 fn agent_models_catalog(
     args: &tddy_tools::list_models::ListModelsArgs,
-) -> Vec<tddy_tools::list_models::AgentModels> {
+) -> anyhow::Result<Vec<tddy_tools::list_models::AgentModels>> {
     use tddy_coding_agent_specs::CodingAgentRegistry;
     use tddy_tools::list_models::{AgentModels, AgentModelsSource};
 
-    // TODO(host-registry): implement — load from the built-ins plus `args.tools_dir`'s overrides
-    // when it is given, refusing a directory that does not load.
-    let registry = CodingAgentRegistry::builtin_cached();
-    registry
+    // With `--tools-dir`, the host's registry: the built-ins with that directory's overrides
+    // applied, refused when it does not load. Without it, the built-ins alone.
+    let loaded;
+    let registry = match &args.tools_dir {
+        Some(dir) => {
+            loaded = CodingAgentRegistry::load(dir)
+                .map_err(|err| anyhow::anyhow!("--tools-dir {}: {err}", dir.display()))?;
+            &loaded
+        }
+        None => CodingAgentRegistry::builtin_cached(),
+    };
+    Ok(registry
         .all()
         .into_iter()
         .map(|spec| {
@@ -333,5 +341,5 @@ fn agent_models_catalog(
             };
             AgentModels { names, source }
         })
-        .collect()
+        .collect())
 }

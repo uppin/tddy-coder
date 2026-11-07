@@ -235,9 +235,11 @@ pub struct DaemonSessionHost {
     /// Told of each started session's worktree — see [`SessionWorktreeObserver`]. `None` on a host
     /// whose embedder acts on nothing of the kind.
     worktree_observer: Option<Arc<dyn SessionWorktreeObserver>>,
-    /// The coding agents declared as tools, installed with [`Self::with_coding_agents`]. `None`
-    /// refuses every CLI agent's start, resume and child `FAILED_PRECONDITION` (`#agent-tools 17/19`).
-    coding_agents: Option<Arc<tddy_agent_launch::spec_launch::HostCodingAgents>>,
+    /// The daemon's one coding-agent registry, given at construction: every launch, gate and
+    /// listing on this host reads it. A host that has no agents is built over
+    /// `tddy_agent_launch::host_coding_agents::no_coding_agents`, whose every agent start is refused
+    /// `FAILED_PRECONDITION` (`#agent-tools 17/19`).
+    coding_agents: Arc<tddy_agent_launch::spec_launch::HostCodingAgents>,
     /// What extends a session's reach beyond this host when it is connected to — see
     /// [`tddy_daemon_extensions::SessionReach`]. [`tddy_daemon_extensions::NoSessionReach`] until
     /// the composition root installs an integration with [`Self::with_session_reach`].

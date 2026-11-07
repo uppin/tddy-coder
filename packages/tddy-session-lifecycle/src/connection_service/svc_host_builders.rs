@@ -128,9 +128,7 @@ impl DaemonSessionHost {
             // from this host (`with_rpc_families`).
             rpc_families: None,
             worktree_observer: None,
-            // TODO(host-registry): implement — the field becomes non-optional, and
-            // `with_coding_agents_if_none` and the readers' empty-registry fallbacks are deleted.
-            coding_agents: Some(coding_agents),
+            coding_agents,
             session_reach: Arc::new(tddy_daemon_extensions::NoSessionReach),
             terminal_exposure: Arc::new(tddy_daemon_extensions::NoTerminalExposure),
             split_rooms: Arc::new(tddy_daemon_extensions::NoSplitRooms),

@@ -59,9 +59,8 @@ impl BuildContext {
         // listed by `ListAgents` as a selectable `--agent`.
         // The coding agents this host's `--agent` answers to (built-ins and `<tddyhome>/tools`), so
         // an assistant cannot take the name of any of them.
-        let reserved_coding_agent_ids = tddy_coder::agent_registry_cli::reserved_agent_ids(
-            tddy_agent_launch::host_coding_agents::host_coding_agents(tddy_data_dir)?.agents(),
-        );
+        let reserved_coding_agent_ids =
+            tddy_coder::agent_registry_cli::reserved_agent_ids(self.coding_agents.agents());
         let model_registry = Arc::new(
             tddy_model_registry::ModelRegistryStore::open(
                 &tddy_data_dir.join("models.db"),
@@ -254,10 +253,8 @@ impl BuildContext {
         // One registry for the whole host: the launcher binds each headless conversation's approvals
         // into it, and the host answers those approvals through it.
         let approval_routes = Arc::default();
-        // TODO(host-registry): implement — the registry loaded once in `BuildContext::new`, shared
-        // with Telegram and the reserved-ids step, instead of this second load.
-        let coding_agents =
-            tddy_agent_launch::host_coding_agents::host_coding_agents(tddy_data_dir)?;
+        // The registry `runtime::build` loaded once, shared with Telegram and the reserved-ids step.
+        let coding_agents = Arc::clone(&self.coding_agents);
         let connection_impl = tddy_session_lifecycle::connection_service::DaemonSessionHost::new(
             config.clone(),
             sessions_base_resolver.clone(),
