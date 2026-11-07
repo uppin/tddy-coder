@@ -7,6 +7,8 @@
 
 **Stack**: `#web-split` 18/20 — branch `feature/web-split/session-drawer`, base `feature/web-split/session-inspector`
 
+**PR**: [#862](https://github.com/uppin/tddy-coder/pull/862)
+
 ## Initial Discovery
 
 [2026-11-07-session-drawer-package-initial-discovery.md](./2026-11-07-session-drawer-package-initial-discovery.md)
@@ -45,6 +47,17 @@ See the PRD (split of #851).
 | `session-runtime`, `session-inspector` | runtime, terminals, inspector, agents, code pane | the drawer composes them | move their code |
 
 ## Draft PR contract
+
+**As pushed (commit 2):** the 104 drawer-driven specs (every tddy-web component spec that mounts the drawer,
+project home, the new-terminal menu, status bar or traffic strip — including the PR-stack, create-session, host,
+activity/subagent and provider-defaults specs earlier nodes left behind) `git mv`'d into
+`tddy-session-web/cypress/component/`, imports re-pointed (`components/sessions/` → `src/`, `components/session/` →
+`src/code/`); the boundary test's surface gains `SessionsDrawerScreen`, `SessionDrawer`, `ProjectHomeEntry`,
+`StatusBar`, `SessionTrafficStrip`, `NewTerminalMenu`. `AgentPicker` is **not** here: `SessionMainPane` imports it, so
+it moves with #861 as one of that node's prerequisites. Red: the boundary test. LiveKit-importing specs switch to the
+port doubles at green.
+
+Originally planned:
 
 First push (commit 2): the specs listed in `## Responsibility` `git mv`'d into `tddy-session-web` with
 imports pointing at the package, and the package boundary test's surface list extended with this node's
@@ -97,10 +110,10 @@ boundary rule. CI: the stack's single `web.yml` (affected-package shards).
 - [x] Cross-check code issues and TODOs (inherited from #851's discovery)
 - [x] Create/update PRD documentation
 - [x] Create changeset (this document)
-- [ ] Create failing acceptance tests
-- [ ] Run acceptance tests (verify they fail)
-- [ ] USER REVIEW — acceptance tests
-- [ ] TDD Red — write failing unit/integration tests
+- [x] Create failing acceptance tests
+- [x] Run acceptance tests (verify they fail)
+- [x] USER REVIEW — acceptance tests (developer waived the per-node review for this stack, 2026-11-07: "finish the rest without stopping")
+- [x] TDD Red — write failing unit/integration tests
 - [ ] TDD Green — implement with quality code
 - [ ] Update documentation with progress
 - [ ] Run the touched packages' tests — verify 100% pass

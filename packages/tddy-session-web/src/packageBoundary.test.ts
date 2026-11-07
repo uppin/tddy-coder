@@ -43,6 +43,13 @@ describe("tddy-session-web package boundary", () => {
         "WorktreeCodePane",
         "SessionIndexingIndicator",
         "AgentPicker",
+        // session-drawer (#862)
+        "SessionsDrawerScreen",
+        "SessionDrawer",
+        "ProjectHomeEntry",
+        "StatusBar",
+        "SessionTrafficStrip",
+        "NewTerminalMenu",
       ]),
     );
   });
