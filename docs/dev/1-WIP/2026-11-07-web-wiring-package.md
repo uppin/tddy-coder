@@ -149,6 +149,11 @@ After `session`, `tddy-web` holds shell/routing/auth/app entry plus leftovers: r
 - Red test adjusted: `AppComposition.cy.tsx` intercepts `/api/config` (a daemon-mode page) and asserts `rpc-playground-home` — `rpc-playground-screen` is not a testid the screen has.
 - `tddy-web/package.json` gains the `tddy-react-commons` workspace dependency; `test:unit` is `bun test src`.
 
+## Inherited failures (fail identically on base `6beb388bf`, `feature/web-split/storybook`)
+
+- `cypress/component/CodeHoverCard.cy.tsx` > "a long hover stays within its bounds and keeps its actions visible": `card height: expected 2487 to be at most 320.5`.
+- `cypress/component/SessionsSshExecAcceptance.cy.tsx` > "lists Host A's aliases and an empty local choice": `expected [ '' ] to deeply equal [ '', 'buildbox' ]`; and the SSH host option test: `SSH host option "buildbox": expected [ '' ] to include 'buildbox'`.
+
 ## Decisions (green)
 
 - `clients`/`auth` optional on `AppPorts` is a source selection, not a default: absent means the in-tree providers build them (always, in the real app); supplying only one throws. A consumer reading a missing port still throws naming its provider (`useClientsPort`, `useAuth`).
