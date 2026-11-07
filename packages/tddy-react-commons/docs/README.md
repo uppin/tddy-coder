@@ -5,8 +5,9 @@
   own with `useAdaptedEventObserver`. Subscription happens before the first commit, so an event
   emitted during mount is observed.
 - **Stores** (`src/stores`): `createStore(initializer)` is an rxjs `Observable` + `Observer` with
-  `getState`/`setState`; `useStore(store, selector)` re-renders only when the selected value changes
-  structurally.
+  `getState`/`setState`; `store.useStore(selector?, equality?)` re-renders only when the selected
+  value changes. The default comparison is `Object.is`; pass `structurallyEqual` as `equality` for
+  structural comparison.
 - **Container** (`src/container`): an `AppHandler` has one member, `start()`, returning the context
   and a teardown. `ReactAppContainer.create` starts it on mount and tears it down on unmount.
 - **Ports** (`src/ports`): `withPorts(handler, ports)` binds a port map to a handler; `PortsOf<H>`
