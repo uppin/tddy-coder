@@ -46,3 +46,5 @@ export function withClients(element: ReactElement, backend: InMemoryRpcBackend, 
   void overrides;
   throw new Error("TODO(clients): implement");
 }
+
+export { aPresenceDouble, aMediaDouble, type PresenceDouble, type MediaDouble } from "./media";
