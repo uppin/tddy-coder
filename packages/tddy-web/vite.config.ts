@@ -26,7 +26,7 @@ export default defineConfig({
       "react-dom": path.resolve(__dirname, "node_modules/react-dom"),
       "@": path.resolve(__dirname, "./src"),
       // Cypress / dev server resolve workspace packages without requiring a prior build.
-      "tddy-livekit-web": path.resolve(__dirname, "../tddy-livekit-web/src/index.ts"),
+      "tddy-livekit-rpc-web": path.resolve(__dirname, "../tddy-livekit-rpc-web/src/index.ts"),
       "tddy-connectrpc-testkit": path.resolve(__dirname, "../tddy-connectrpc-testkit/src/index.ts"),
     },
   },

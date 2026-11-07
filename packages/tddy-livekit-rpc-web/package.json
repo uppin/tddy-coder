@@ -1,5 +1,5 @@
 {
-  "name": "tddy-livekit-web",
+  "name": "tddy-livekit-rpc-web",
   "version": "0.1.0",
   "private": true,
   "type": "module",
@@ -13,10 +13,10 @@
   },
   "scripts": {
     "build": "bun run generate && tsc",
-    "generate": "../../scripts/generated-code.sh write packages/tddy-livekit-web",
-    "test:ci": "bun test src --reporter=junit --reporter-outfile=../../reports/junit/livekit-web.xml",
+    "generate": "../../scripts/generated-code.sh write packages/tddy-livekit-rpc-web",
+    "test:ci": "bun test src --reporter=junit --reporter-outfile=../../reports/junit/livekit-rpc-web.xml",
     "cypress:component": "ELECTRON_EXTRA_LAUNCH_ARGS='--disable-gpu --no-sandbox' cypress run --component",
-    "cypress:component:ci": "bun run cypress:component -- --reporter junit --reporter-options 'mochaFile=../../reports/junit/livekit-web-component-[hash].xml'"
+    "cypress:component:ci": "bun run cypress:component -- --reporter junit --reporter-options 'mochaFile=../../reports/junit/livekit-rpc-web-component-[hash].xml'"
   },
   "dependencies": {
     "livekit-client": "^2.17.0",

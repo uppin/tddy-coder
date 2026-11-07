@@ -215,7 +215,7 @@ This section records how the shipped recipes map to the same product philosophy 
 
 - **Rust:** **`./test`** from the repo root is the primary gate (builds required binaries including **`tddy-acp-stub`**, then runs **`cargo test`** with **`--test-threads=1`**).
 - **Bugfix interview:** **`tddy-workflow-recipes`** integration targets **`bugfix_interview_acceptance`** and **`bugfix_interview_granular`** cover graph order, submit opt-out on **`interview`**, prompt and handoff contracts, and host-recovery gating; **`tddy-coder`** **`presenter_integration`** includes **`bugfix_workflow_emits_interview_before_reproduce`** for presenter **`GoalStarted`** ordering.
-- **Web:** Cypress component/e2e for **`tddy-web`** are **not** included in **`./test`**; run from the repo via **`bun run cypress:component`** / **`cypress:e2e`** under **`packages/tddy-web`** (or root scripts that filter **`tddy-web`**). Ensure workspace install so **`tddy-livekit-web`** resolves (Vite aliases **`tddy-livekit-web`** to package source for dev/Cypress).
+- **Web:** Cypress component/e2e for **`tddy-web`** are **not** included in **`./test`**; run from the repo via **`bun run cypress:component`** / **`cypress:e2e`** under **`packages/tddy-web`** (or root scripts that filter **`tddy-web`**). Ensure workspace install so **`tddy-livekit-rpc-web`** resolves (Vite aliases **`tddy-livekit-rpc-web`** to package source for dev/Cypress).
 
 ## Session context and conditional transitions
 

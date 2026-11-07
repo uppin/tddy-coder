@@ -27,7 +27,7 @@ tests — they belong to a different package:
 |--------|-----------|
 | `target/debug/tddy-sandbox-runner` | `tddy-daemon-sandbox` `sandbox_runner_stdio_acceptance` |
 | `target/debug/tddy-acp-stub` | `tddy-integration-tests` `acp_*`, `codex_acp_*` |
-| `target/debug/examples/echo_server` | `tddy-livekit-web` Cypress specs; the `web / tddy-livekit-web tests` check builds its own, so no Rust test job needs this one |
+| `target/debug/examples/echo_server` | `tddy-livekit-rpc-web` Cypress specs; the `web / tddy-livekit-rpc-web tests` check builds its own, so no Rust test job needs this one |
 | `target/debug/tddy-remote-git-repo` | `tddy-worktree-service` `remote_git_livekit_acceptance`, `tddy-session-lifecycle` `session_sync_livekit_acceptance` |
 | `target/debug/tddy-index-daemon` | `tddy-tools` `index_daemon_client_acceptance` |
 
@@ -245,7 +245,7 @@ root and therefore could not reproduce its own directory.
 |-----------|----------------|
 | `packages/tddy-web/src/gen` | `tddy-service/proto` |
 | `packages/tddy-rpc-web/src/gen` | `tddy-rpc/proto`, `tddy-livekit/proto/test` |
-| `packages/tddy-livekit-web/src/gen` | `tddy-livekit/proto`, `tddy-rpc/proto`, `tddy-service/proto/terminal.proto` |
+| `packages/tddy-livekit-rpc-web/src/gen` | `tddy-livekit/proto`, `tddy-rpc/proto`, `tddy-service/proto/terminal.proto` |
 | `packages/tddy-rust-typescript-tests/gen` | `tddy-service/proto` |
 
 **Only TypeScript is listed, because only TypeScript is committed.** The Rust
@@ -329,7 +329,7 @@ deliberately, and each exclusion is coverage you still have to get locally:
 | `sandbox_runner_stdio_acceptance::echoes_a_message_over_sandbox_service_served_over_stdio` | Fails unprivileged with "tool ipc server exited before bind" even with the runner binary staged; survived two retries. Only this one test is skipped — the other two in the binary pass. Tracked in `docs/dev/todo/`; the intended fix is a VM-backed job, not a permanent exclusion |
 | Cypress **e2e** specs | Storybook build plus a real ghostty WebGL context; not yet verified on a runner |
 | `tddy-desktop` tests | It has none that run without Tauri; its check only installs the workspace. Its front end is tddy-web's bundle, which its `package.json` does not depend on, so a tddy-web change does not run its check (`docs/dev/todo/2026-11-07-desktop-check-does-not-follow-the-tddy-web-bundle.md`) |
-| Web checks on a Rust-only change | `web / tddy-livekit-web tests` execs `echo_server` and `web / tddy-rust-typescript-tests tests` spawns `tddy-coder`, but the detector sees only JS workspace paths, so a change to those crates runs neither (`docs/dev/todo/2026-11-07-web-checks-ignore-the-rust-binaries-they-exec.md`) |
+| Web checks on a Rust-only change | `web / tddy-livekit-rpc-web tests` execs `echo_server` and `web / tddy-rust-typescript-tests tests` spawns `tddy-coder`, but the detector sees only JS workspace paths, so a change to those crates runs neither (`docs/dev/todo/2026-11-07-web-checks-ignore-the-rust-binaries-they-exec.md`) |
 
 The Rust exclusions live in `.config/nextest.toml` under `[profile.ci]`
 `default-filter`, each with its reason. Keep that list short — every entry is a
@@ -468,7 +468,7 @@ The image is pinned in one file, `.config/livekit-server.image`, read by the scr
 `./run-livekit-testkit-server` and (compiled in) the testkit. It is never `:master`. Changing it is
 a one-line edit.
 
-The `tddy-livekit-web` check starts no shared server: its Cypress specs start their own container
+The `tddy-livekit-rpc-web` check starts no shared server: its Cypress specs start their own container
 through `cypress/support/livekitDockerTestkit.ts`, which still names `livekit/livekit-server:master`
 rather than the pinned image. The check pulls that image in its own step (`Pull the LiveKit image`) before the component tests, because the `startEchoServer` task's 60s Cypress
 timeout would otherwise also cover the pull on a fresh runner, and a slow pull failed both specs'
@@ -599,7 +599,7 @@ gh api -X POST repos/uppin/tddy-coder/rulesets --input - <<'JSON'
           { "context": "Rust build" },
           { "context": "Rust tests" },
           { "context": "web / tddy-web tests" },
-          { "context": "web / tddy-livekit-web tests" },
+          { "context": "web / tddy-livekit-rpc-web tests" },
           { "context": "web / tddy-rpc-web tests" },
           { "context": "web / tddy-tauri-web tests" },
           { "context": "web / tddy-desktop tests" },

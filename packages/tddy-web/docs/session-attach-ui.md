@@ -40,7 +40,7 @@ the streaming stub throw. Always streaming would have changed the request path f
 create-session spec for no benefit.
 
 **3. Consume the stream with a `cancelled` flag, never `AbortController`.**
-`packages/tddy-livekit-web/src/transport.ts`'s `handleServerStreaming` accepts `_signal` and never
+`packages/tddy-livekit-rpc-web/src/transport.ts`'s `handleServerStreaming` accepts `_signal` and never
 reads it — no abort frame is published and the queue is not closed. The in-memory test router *does*
 honour the signal, so an `AbortController`-based implementation passes its spec while the real stream
 keeps running in production. `components/sessions/useSessionActivity.ts` is the reference idiom.
