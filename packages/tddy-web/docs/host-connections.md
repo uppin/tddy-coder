@@ -143,9 +143,13 @@ registration in one test leak into the next.
 
 ## The LiveKit provider
 
-`LiveKitConnectionProvider` (`connections/liveKit.tsx`) is the only provider, advertising
-`{rpc, media, presence}`. It is built over the same `liveKitFactory` the transport seam already
-exposes, so a connection carries the same auth gate and traffic meter a directly-built client would.
+`LiveKitConnectionProvider` (`tddy-livekit-web` `src/connections/liveKit.tsx`, since #843) is the only
+provider, advertising `{rpc, media, presence}`. It is built over the same `liveKitFactory` the
+transport seam already exposes (`LiveKitTransportProvider`, mounted by `RpcTransportProvider` with the
+auth-gated, metered factory), so a connection carries the same auth gate and traffic meter a
+directly-built client would. The opener for a session its host serves itself
+(`rpc/connections/hostServedSession.ts`) and the connection registry stay in `tddy-web` and are handed
+to `LiveKitConnections`.
 
 - **It claims no host without a room.** With the join in flight — or never attempted — there is no
   participant to name.

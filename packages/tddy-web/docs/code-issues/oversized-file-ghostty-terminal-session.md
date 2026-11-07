@@ -15,6 +15,7 @@
 | 2026-10-24 | 992 | +21 on `feature/claude-fullscreen/hide-history-for-tuis` (#714): `tuiOwnsNavigation`, `liveTuiOwnsNavigation` and the history-offer gate. Same deferral, same stack |
 | 2026-10-25 | 1006 | +14 on #765 (`fix-desktop-terminal-file-drop`), measured at its wrap against `origin/master` `a618ef29d`: the `readsLocalPaths` prop and its doc, and `pasteInput` (dropped paths delivered as a paste). Not split there — a hand split of this component remains its own behaviour-preserving PR |
 | 2026-11-02 | 1005 → 1005 | Unchanged by #809 (`#session-tabs` 6/7), measured against its base `feature/session-tabs/tab-plus` `0426e14e2` (1005): `HISTORY_THEME` and `HISTORY_FILTER` are exported for the stopped Agent tab, which lives in its own module (`DormantAgentTerminal.tsx`). No logic added here |
+| 2026-11-07 | 1004 → 1004 | Unchanged by #843 (`#web-split` 6/17), measured against its base `feature/web-split/clients`: its debug-mask and terminal-helper imports re-point to `tddy-client-web`. Not grown, alert-only |
 
 ## What would close it
 

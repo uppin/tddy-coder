@@ -71,7 +71,7 @@ Nested under their room, sorted by identity:
 | Field | Description |
 |-------|-------------|
 | Identity | The LiveKit participant identity |
-| Role | `browser` / `coder` / `daemon` / `unknown`, inferred by the **existing** `inferParticipantRole` grammar (`src/lib/participantRole.ts`) so both panels label a participant the same way |
+| Role | `browser` / `coder` / `daemon` / `unknown`, inferred by the **existing** `inferParticipantRole` grammar (`tddy-client-web/src/lib/participantRole.ts`) so both panels label a participant the same way |
 | Joined | When that participant joined the room |
 | State | The server's participant state, relayed verbatim — `JOINING`, `JOINED`, `ACTIVE` or `DISCONNECTED`. The panel renders whatever string the server sends rather than validating against a list, so a state LiveKit adds later shows up rather than disappearing |
 

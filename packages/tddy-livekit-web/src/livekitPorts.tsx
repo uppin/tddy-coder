@@ -5,7 +5,7 @@
  * {@link LiveKitPortsProvider} mounts them. Hooks on a port are called like any imported hook, so
  * their identities are fixed for the app's lifetime — which is why the app builds the ports once.
  */
-import { useEffect, useMemo, useState, type ReactElement, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useState, type ReactElement, type ReactNode } from "react";
 import { createClient, type Client } from "@connectrpc/connect";
 import type { DescService } from "@bufbuild/protobuf";
 import { ConnectionState, RoomEvent, type Room } from "livekit-client";
@@ -34,15 +34,9 @@ function isRemoteHere(room: Room, identity: string): boolean {
   return room.remoteParticipants?.has(identity) ?? false;
 }
 
+/** Joined, or still on the way there: a never-connected SDK room reports `Disconnected`, as `useCommonRoom` reads it too. */
 function statusOf(state: ConnectionState): RoomStatus {
-  switch (state) {
-    case ConnectionState.Connected:
-      return "connected";
-    case ConnectionState.Disconnected:
-      return "connecting";
-    default:
-      return "connecting";
-  }
+  return state === ConnectionState.Connected ? "connected" : "connecting";
 }
 
 const roomRpc: RoomRpcPort = {
@@ -81,6 +75,11 @@ const roomRpc: RoomRpcPort = {
       // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [room, identity]);
     return present;
+  },
+
+  useParticipantProbe(handle, identity) {
+    const room = asRoom(handle);
+    return useCallback(() => (room !== null && identity !== null ? isRemoteHere(room, identity) : false), [room, identity]);
   },
 
   useRoomStatus(handle) {
