@@ -385,6 +385,35 @@
         "vite": "^6.0.0",
       },
     },
+    "packages/tddy-workspace-web": {
+      "name": "tddy-workspace-web",
+      "version": "0.1.0",
+      "dependencies": {
+        "@bufbuild/protobuf": "^2.2.0",
+        "@connectrpc/connect": "^2.0.0",
+        "tddy-client-web": "workspace:*",
+        "tddy-react-commons": "workspace:*",
+        "tddy-ui-web": "workspace:*",
+      },
+      "devDependencies": {
+        "@tailwindcss/vite": "^4.2.2",
+        "@types/bun": "latest",
+        "@types/react": "^19.0.0",
+        "@types/react-dom": "^19.0.0",
+        "@vitejs/plugin-react": "^4.3.0",
+        "babel-plugin-react-compiler": "^1.0.0",
+        "cypress": "^14.0.0",
+        "react": "^19.0.0",
+        "react-dom": "^19.0.0",
+        "tddy-connectrpc-testkit": "workspace:*",
+        "typescript": "^5.6.0",
+        "vite": "^6.0.0",
+      },
+      "peerDependencies": {
+        "react": "^19.0.0",
+        "react-dom": "^19.0.0",
+      },
+    },
   },
   "packages": {
     "@adobe/css-tools": ["@adobe/css-tools@4.4.4", "", {}, "sha512-Elp+iwUx5rN5+Y8xLt5/GRoG20WGoDCQ/1Fb+1LiGtvwbDavuSk0jhD/eZdckHAuzcDzccnkv+rEjyWfRx18gg=="],
@@ -2350,6 +2379,8 @@
     "tddy-ui-web": ["tddy-ui-web@workspace:packages/tddy-ui-web"],
 
     "tddy-web": ["tddy-web@workspace:packages/tddy-web"],
+
+    "tddy-workspace-web": ["tddy-workspace-web@workspace:packages/tddy-workspace-web"],
 
     "teex": ["teex@1.0.1", "", { "dependencies": { "streamx": "^2.12.5" } }, "sha512-eYE6iEI62Ni1H8oIa7KlDU6uQBtqr4Eajni3wX7rpfXD8ysFx8z0+dri+KWEPWpBsxXfxu58x/0jvTVT1ekOSg=="],
 
