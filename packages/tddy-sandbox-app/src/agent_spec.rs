@@ -119,8 +119,7 @@ impl std::error::Error for AgentChoiceError {}
 
 /// Choose the agent `id` from the registry at `tddy_home` (`<tddyhome>/`[`TOOLS_SUBDIR`] overrides
 /// applied): refused for an id no coding agent has and for an ACP-only one, naming every agent with a
-/// PTY run, for a
-/// spec that is not placed in a jail, and for one whose route is required in a jail.
+/// PTY run; for a spec that is not placed in a jail; and for one whose route is required in a jail.
 pub fn choose_agent(id: &str, tddy_home: &Path) -> Result<ChosenAgent, AgentChoiceError> {
     choose_agent_on(id, tddy_home, &ProcessToolHost)
 }
@@ -161,27 +160,26 @@ pub fn choose_agent_on(
 ) -> Result<ChosenAgent, AgentChoiceError> {
     let registry =
         load_agent_registry(&tddy_home.join(TOOLS_SUBDIR)).map_err(AgentChoiceError::Registry)?;
-    let is_coding_agent = |tool: &str| {
-        registry
-            .get(tool)
-            .is_some_and(|def| def.extensions.contains_key(CODING_AGENT_EXTENSION))
+    let is_coding_agent = |def: &ToolDef| def.extensions.contains_key(CODING_AGENT_EXTENSION);
+    let runs_in_a_pty = |def: &ToolDef| {
+        def.run
+            .as_ref()
+            .is_some_and(|run| run.transport == Transport::Pty)
     };
     // The agents this app can run: coding agents whose spec's `run` is a PTY launch.
     let mut known: Vec<String> = registry
         .ids()
         .filter(|tool| {
-            is_coding_agent(tool)
-                && registry
-                    .get(tool)
-                    .and_then(|def| def.run.as_ref())
-                    .is_some_and(|run| run.transport == Transport::Pty)
+            registry
+                .get(tool)
+                .is_some_and(|def| is_coding_agent(def) && runs_in_a_pty(def))
         })
         .map(str::to_string)
         .collect();
     known.sort();
     let def = match registry.get(id) {
-        Some(def) if known.iter().any(|agent| agent == id) => def,
-        Some(_) if is_coding_agent(id) => {
+        Some(def) if is_coding_agent(def) && runs_in_a_pty(def) => def,
+        Some(def) if is_coding_agent(def) => {
             return Err(AgentChoiceError::NotPtyRunnable {
                 id: id.to_string(),
                 runnable: known,
