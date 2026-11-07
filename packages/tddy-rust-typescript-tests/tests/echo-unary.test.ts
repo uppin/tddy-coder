@@ -70,7 +70,8 @@ beforeAll(async () => {
   serverProcess.stdout?.on("data", () => {});
 
   await waitForServer(baseUrl);
-});
+  // Spawning tddy-coder and waiting for its web server outlasts bun's 5 s hook default on a cold runner.
+}, 60_000);
 
 afterAll(() => {
   if (serverProcess) {
