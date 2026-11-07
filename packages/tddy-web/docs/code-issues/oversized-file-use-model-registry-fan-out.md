@@ -19,3 +19,6 @@
 Hand TS split (the `code-restructuring` engine is Rust-only): the hook's three concerns — RPC
 client fan-out per host, the projected row models, and the create/update command payloads — are
 the cohesive groups. Green baseline before, mechanical moves only, same green after.
+
+## Verified by hand
+2026-11-07 — `wc -l` at the wrap of PR #842 (`#web-split` 5/16): 615 → 613. The PR only re-points hook imports to `tddy-client-web`; still open, not split (later `#web-split` nodes move this file).
