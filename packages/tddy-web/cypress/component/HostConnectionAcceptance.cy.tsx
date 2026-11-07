@@ -26,7 +26,7 @@ import { type ProjectEntry } from "tddy-client-web/gen/project_pb";
 import { ProjectService } from "tddy-client-web/gen/project_pb";
 import { SessionService, ListSessionsResponseSchema, SessionEntrySchema } from "tddy-client-web/gen/session_pb";
 import { ListProjectBranchesResponseSchema, ListProjectsResponseSchema, ProjectEntrySchema } from "tddy-client-web/gen/project_pb";
-import { ProjectsAppPage } from "../../src/projects/ProjectsAppPage";
+import { ProjectsAppPage } from "../../src/components/projects/ProjectsAppPage";
 import { AuthProvider } from "../../src/hooks/authProvider";
 import type { DaemonHost } from "tddy-client-web";
 import { ConnectionProviders } from "../../src/rpc/connections/registry";

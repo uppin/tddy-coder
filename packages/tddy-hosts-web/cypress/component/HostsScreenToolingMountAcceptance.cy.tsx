@@ -4,7 +4,7 @@
  *
  * Every other tooling spec mounts `HostRowTooling` or `HostRowRemoteDesktop` directly, handing them
  * readings — which is exactly why the feature was unreachable in the running app while every one of
- * them passed. These tests mount the **assembled screen** (`HostsAppPage`, fed by `ListKnownHosts`)
+ * them passed. These tests mount the **assembled screen** (`HostsContent`, fed by `ListKnownHosts`)
  * and let the row fetch its own `GetHostTooling`, so being on the row at all is what is under test.
  *
  * The wire is stated rather than implied: each reachable host is a `HostConnection` reached over
@@ -18,7 +18,7 @@
 import { create } from "@bufbuild/protobuf";
 import { Code } from "@connectrpc/connect";
 import { anInMemoryRpcBackend, type InMemoryRpcBackend } from "tddy-connectrpc-testkit";
-import { HostsAppPage } from "../../src/HostsAppPage";
+import { HostsContent } from "../../src/HostsContent";
 import {
   GetHostToolingResponseSchema,
   HostGitIdentitySchema,
@@ -28,10 +28,6 @@ import {
   ProbeOutcome,
   type KnownHostEntry,
 } from "tddy-client-web/gen/host_pb";
-import { AuthProvider } from "../../src/hooks/authProvider";
-import { ConnectionProviders } from "../../src/rpc/connections/registry";
-import { SelectedDaemonProvider } from "../../src/rpc/selectedDaemon";
-import { mountWithRpc } from "../support/rpc/inMemory";
 import { aHostConnection, aRegistryServing } from "../support/rpc/hostConnections";
 import { aHostServiceFake } from "../support/rpc/hostServiceBackend";
 import {
@@ -128,20 +124,11 @@ function openTheHostsScreen(backend: InMemoryRpcBackend, reachable: string[]) {
   const connections = reachable.map((instanceId) =>
     aHostConnection(instanceId).reachedOverLiveKit().servingOver(backend.transport()).build(),
   );
-  mountWithRpc(
-    <AuthProvider>
-      <ConnectionProviders registry={aRegistryServing(...connections)}>
-        <SelectedDaemonProvider
-          room={null}
-          daemons={reachable.map((instanceId) => ({ instanceId, label: instanceId }))}
-          servingInstanceId={reachable[0]}
-        >
-          <HostsAppPage onNavigate={() => {}} />
-        </SelectedDaemonProvider>
-      </ConnectionProviders>
-    </AuthProvider>,
-    backend,
-  );
+  cy.mountWithClients(<HostsContent />, backend, {
+    registry: aRegistryServing(...connections),
+    daemons: reachable.map((instanceId) => ({ instanceId, label: instanceId })),
+    selectedInstanceId: reachable[0],
+  });
 }
 
 const toolingCallsTo = (backend: InMemoryRpcBackend) =>

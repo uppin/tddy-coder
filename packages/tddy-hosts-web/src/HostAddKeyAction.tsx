@@ -40,7 +40,7 @@ import {
   type HostKeyCandidate,
   type HostSshAgent,
 } from "tddy-client-web/gen/host_pb";
-import { useAuthContext } from "../../hooks/authProvider";
+import { useAuth } from "tddy-client-web";
 import { HostPassphraseDialog } from "./HostPassphraseDialog";
 import { useHostPromptAnswer } from "./useHostPromptAnswer";
 import { useHostClient } from "tddy-client-web";
@@ -109,7 +109,7 @@ export function HostAddKeyAction({
   sshAgent,
 }: HostAddKeyActionProps): React.ReactElement | null {
   const client = useHostClient(HostService, instanceId);
-  const { sessionToken } = useAuthContext();
+  const { sessionToken } = useAuth();
   const [subject, setSubject] = useState("");
   const [adding, setAdding] = useState(false);
   // The in-flight `AddHostKey`, so cancelling the dialog can end it. The call blocks for the

@@ -14,7 +14,7 @@
 
 import { useEffect, useState } from "react";
 import { HostService, ProbeOutcome, type ListSshConfigHostsResponse } from "tddy-client-web/gen/host_pb";
-import { useAuthContext } from "../../hooks/authProvider";
+import { useAuth } from "tddy-client-web";
 import { useHostClient } from "tddy-client-web";
 
 export interface HostRowSshConfigProps {
@@ -76,7 +76,7 @@ function ListedAlias({ instanceId, alias }: { instanceId: string; alias: string 
 
 export function HostRowSshConfig({ instanceId }: HostRowSshConfigProps) {
   const client = useHostClient(HostService, instanceId);
-  const { sessionToken } = useAuthContext();
+  const { sessionToken } = useAuth();
   const [listing, setListing] = useState<ListSshConfigHostsResponse | undefined>(undefined);
 
   useEffect(() => {

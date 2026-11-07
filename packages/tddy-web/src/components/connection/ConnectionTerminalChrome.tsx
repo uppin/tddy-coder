@@ -3,7 +3,7 @@ import {
   exitDocumentFullscreen,
   isTargetInActiveFullscreen,
   requestElementFullscreen,
-} from "../../lib/browserFullscreen";
+} from "tddy-ui-web";
 import { tddyDevDebug } from "../../lib/tddyDevLog";
 import { confirmRemoteSessionTermination } from "../../lib/remoteTerminateConfirm";
 import { dataConnectionStatusValue } from "./connectionChromeStatus";

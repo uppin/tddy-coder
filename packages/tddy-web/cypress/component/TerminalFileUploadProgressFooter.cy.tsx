@@ -10,7 +10,7 @@
  */
 
 import React from "react";
-import { HostStatsFooter } from "../../src/components/sessions/HostStatsFooter";
+import { SessionHostStatsFooter } from "../../src/components/sessions/SessionHostStatsFooter";
 import { TerminalFileDropZone } from "../../src/components/connection/TerminalFileDropZone";
 import { UploadProgressProvider } from "../../src/rpc/uploadProgress";
 import { SessionFilesService } from "tddy-client-web/gen/session_files_pb";
@@ -41,7 +41,7 @@ function mountFooterWithDropZone(gate?: Promise<void>) {
         <TerminalFileDropZone sessionToken="tok" sessionId="s1" insertInput={cy.stub()}>
           <div data-testid="ghostty-terminal" style={{ width: 400, height: 300 }} />
         </TerminalFileDropZone>
-        <HostStatsFooter attachment={{ status: "idle" }} />
+        <SessionHostStatsFooter attachment={{ status: "idle" }} />
       </UploadProgressProvider>,
     ),
     backend,

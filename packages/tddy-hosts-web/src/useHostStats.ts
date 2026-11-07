@@ -27,7 +27,7 @@
 import { useEffect, useState } from "react";
 import { HostService } from "tddy-client-web/gen/host_pb";
 import { subscribeHostStats } from "./hostStatsSubscription";
-import { useAuthContext } from "../hooks/authProvider";
+import { useAuth } from "tddy-client-web";
 import { useDaemonClient, useHostClient } from "tddy-client-web";
 
 /** Free/total disk capacity for the selected daemon's default project directory. */
@@ -87,7 +87,7 @@ export function useHostStats(hostId?: string | null): UseHostStatsResult {
   // "that host and no other", so a null host client must not silently fall back to the selected
   // daemon and report another machine's CPU under this row.
   const client = hostId === undefined ? selectedClient : hostClient;
-  const { sessionToken } = useAuthContext();
+  const { sessionToken } = useAuth();
   const [perCorePercent, setPerCorePercent] = useState<number[]>([]);
   const [logicalCores, setLogicalCores] = useState<number | null>(null);
   const [disk, setDisk] = useState<HostDiskStats | null>(null);

@@ -29,8 +29,6 @@ import {
 } from "tddy-client-web/gen/host_pb";
 import { HostAddKeyAction } from "../../src/HostAddKeyAction";
 import { HostRowSshAgent } from "../../src/HostRowSshAgent";
-import { mountWithRpc } from "../support/rpc/inMemory";
-import { withSelectedDaemon } from "../support/rpc/withSelectedDaemon";
 import { aHostPromptFeed, type HostPromptFeed } from "../support/rpc/hostPromptFeed";
 import {
   hostAddKeyOutcome,
@@ -111,12 +109,9 @@ function aBackendAwaitingAnAnswer(feed: HostPromptFeed): InMemoryRpcBackend {
 }
 
 function mountAction(sshAgent: HostSshAgent, backend: InMemoryRpcBackend) {
-  mountWithRpc(
-    withSelectedDaemon(<HostAddKeyAction instanceId={HOST} sshAgent={sshAgent} />, [
+  cy.mountWithClients(<HostAddKeyAction instanceId={HOST} sshAgent={sshAgent} />, backend, { daemons: [
       { instanceId: HOST, label: HOST },
-    ]),
-    backend,
-  );
+    ] });
 }
 
 /**
@@ -127,12 +122,9 @@ function mountAction(sshAgent: HostSshAgent, backend: InMemoryRpcBackend) {
  * the test that uses this.
  */
 function mountRow(sshAgent: HostSshAgent, backend: InMemoryRpcBackend) {
-  mountWithRpc(
-    withSelectedDaemon(<HostRowSshAgent instanceId={HOST} sshAgent={sshAgent} />, [
+  cy.mountWithClients(<HostRowSshAgent instanceId={HOST} sshAgent={sshAgent} />, backend, { daemons: [
       { instanceId: HOST, label: HOST },
-    ]),
-    backend,
-  );
+    ] });
 }
 
 /**

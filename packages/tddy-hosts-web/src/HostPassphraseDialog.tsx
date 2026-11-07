@@ -24,8 +24,8 @@
  */
 
 import React, { useState } from "react";
-import { encryptForHost } from "../../lib/encryptForHost";
-import type { KeyPinVerdict } from "../../lib/hostKeyPinning";
+import { encryptForHost } from "./encryptForHost";
+import type { KeyPinVerdict } from "./hostKeyPinning";
 import { HostKeyContinuityNotices, keyContinuityBlocks } from "./HostKeyContinuityNotices";
 
 export interface HostPassphraseDialogProps {

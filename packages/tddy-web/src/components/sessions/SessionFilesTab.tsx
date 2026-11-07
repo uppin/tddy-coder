@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useState } from "react";
 import type { Client } from "@connectrpc/connect";
 import type { SessionFilesService, SessionUploadEntry } from "tddy-client-web/gen/session_files_pb";
 import { Button } from "tddy-ui-web";
-import { formatBytes } from "./formatTraffic";
+import { formatBytes } from "tddy-ui-web";
 import { copyToClipboard } from "../../lib/clipboard";
 import { HOST_PATH_MIME } from "../../lib/hostPathDrag";
 import { hostNotConnected, rpcFailureText } from "tddy-client-web";

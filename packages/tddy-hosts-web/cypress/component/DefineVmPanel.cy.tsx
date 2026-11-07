@@ -1,4 +1,4 @@
-import { DefineVmPanel } from "@/components/vms/DefineVmPanel";
+import { DefineVmPanel } from "../../src/DefineVmPanel";
 
 const noop = () => {};
 const idle = {

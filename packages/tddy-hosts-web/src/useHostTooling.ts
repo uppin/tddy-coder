@@ -5,7 +5,7 @@
 
 import { useEffect, useState } from "react";
 import { HostService, type GetHostToolingResponse } from "tddy-client-web/gen/host_pb";
-import { useAuthContext } from "../../hooks/authProvider";
+import { useAuth } from "tddy-client-web";
 import { useHostClient } from "tddy-client-web";
 
 /** What the one call has come to: not yet answered, answered, or failed. */
@@ -23,7 +23,7 @@ export function useHostTooling(instanceId: string, online: boolean): HostTooling
   // Hooks cannot be conditional, so "do not ask" is said by naming no host: an offline row resolves
   // no client and nothing is called.
   const client = useHostClient(HostService, online ? instanceId : null);
-  const { sessionToken } = useAuthContext();
+  const { sessionToken } = useAuth();
   const [reading, setReading] = useState<HostToolingReading>({ state: "loading" });
 
   useEffect(() => {

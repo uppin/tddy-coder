@@ -13,7 +13,7 @@ import { AppShell } from "../shell/AppShell";
 import { TooltipProvider } from "tddy-ui-web";
 import { SessionDrawer } from "./SessionDrawer";
 import { SessionMainPane } from "./SessionMainPane";
-import { HostStatsFooter } from "./HostStatsFooter";
+import { SessionHostStatsFooter } from "./SessionHostStatsFooter";
 import { useSessionAttachment } from "./useSessionAttachment";
 import { sessionsDrawerPathForSession, SESSIONS_DRAWER_ROUTE, SESSIONS_NEW_ROUTE } from "../../routing/appRoutes";
 import { detectIsMobile, useIsMobile } from "tddy-ui-web";
@@ -442,7 +442,7 @@ export function SessionsDrawerScreen({
             />
           )}
         </div>
-        <HostStatsFooter
+        <SessionHostStatsFooter
           attachment={attachment}
           runtimes={runtimes}
           runtimeRegistry={runtimeRegistry}

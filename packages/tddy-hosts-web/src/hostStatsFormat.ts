@@ -5,7 +5,7 @@
  * Changeset: `host-stats-footer`
  */
 
-import { formatBytes } from "./formatTraffic";
+import { formatBytes } from "tddy-ui-web";
 
 /**
  * Format available disk space as a human-readable free-space label, e.g. `"42.1 GB free"`.

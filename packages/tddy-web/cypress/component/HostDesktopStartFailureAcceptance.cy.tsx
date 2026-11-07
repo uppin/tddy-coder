@@ -15,7 +15,7 @@ import { Code, ConnectError } from "@connectrpc/connect";
 import { anInMemoryRpcBackend } from "tddy-connectrpc-testkit";
 import { HostRemoteDesktopSchema, ProbeOutcome } from "tddy-client-web/gen/host_pb";
 import { DesktopAuthMethod, Protocol, ScreenSharingService } from "tddy-client-web/gen/screen_sharing_pb";
-import { HostRowRemoteDesktop } from "../../src/components/hosts/HostRowRemoteDesktop";
+import { HostRowRemoteDesktop } from "tddy-hosts-web";
 import { SessionsDrawerScreen } from "../../src/components/sessions/SessionsDrawerScreen";
 import { mountWithRpc } from "../support/rpc/inMemory";
 import { mountWithRecordingLiveKitRpc } from "../support/rpc/recordingLiveKitRpc";

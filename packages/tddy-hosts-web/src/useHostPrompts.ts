@@ -19,7 +19,7 @@
 import { useEffect, useState } from "react";
 import { HostService } from "tddy-client-web/gen/host_pb";
 import { subscribeHostPrompts, type HostPromptEventLike } from "./hostPromptsSubscription";
-import { useAuthContext } from "../hooks/authProvider";
+import { useAuth } from "tddy-client-web";
 import { useHostClient } from "tddy-client-web";
 
 export type { HostPromptEventLike };
@@ -31,7 +31,7 @@ export type { HostPromptEventLike };
  * @returns the outstanding prompt, or `null` when the host is not asking anything.
  */
 export function useHostPrompts(hostId: string | null): HostPromptEventLike | null {
-  const { sessionToken } = useAuthContext();
+  const { sessionToken } = useAuth();
   return useHostPromptsFor(hostId, sessionToken ?? "");
 }
 

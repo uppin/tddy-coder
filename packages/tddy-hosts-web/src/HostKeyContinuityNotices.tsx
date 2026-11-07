@@ -8,7 +8,7 @@
  */
 
 import React, { useState } from "react";
-import type { KeyPinVerdict } from "../../lib/hostKeyPinning";
+import type { KeyPinVerdict } from "./hostKeyPinning";
 
 export interface HostKeyContinuityNoticesProps {
   hostId: string;

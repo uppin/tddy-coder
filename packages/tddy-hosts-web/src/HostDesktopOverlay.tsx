@@ -17,7 +17,7 @@
  * operator with an action that appeared to do nothing, and no place to put the error.
  */
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import type { Client } from "@connectrpc/connect";
 import { create, toBinary } from "@bufbuild/protobuf";
@@ -31,13 +31,11 @@ import {
   type ScreenSharingTarget,
   type StartStreamResponse,
 } from "tddy-client-web/gen/screen_sharing_pb";
-import { useAuthContext } from "../../hooks/authProvider";
-import { useCommonRoomHandle } from "tddy-livekit-web";
-import { encryptForHost } from "../../lib/encryptForHost";
-import { presenceIdentityForUser } from "tddy-livekit-web";
-import { screenSharingStartFailureText } from "../../lib/screenSharingStartFailure";
-import { useHostPrompts, type HostPromptEventLike } from "../../rpc/useHostPrompts";
-import { ScreenSharingOverlay } from "../sessions/ScreenSharingOverlay";
+import { useAuth, useMediaPort } from "tddy-client-web";
+import { encryptForHost } from "./encryptForHost";
+import { screenSharingStartFailureText } from "./screenSharingStartFailure";
+import { useHostPrompts, type HostPromptEventLike } from "./useHostPrompts";
+import { ScreenSharingOverlay } from "./ScreenSharingOverlay";
 import { HostDesktopSignInDialog } from "./HostDesktopSignInDialog";
 import { useHostClient } from "tddy-client-web";
 
@@ -230,7 +228,7 @@ export function HostDesktopOverlay({
 }: HostDesktopOverlayProps) {
   const client = useHostClient(ScreenSharingService, hostId);
   const hostService = useHostClient(HostService, hostId);
-  const { user, sessionToken } = useAuthContext();
+  const { sessionToken } = useAuth();
   const [stream, setStream] = useState<StartStreamResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
   // The sign-in methods the desktop advertised and tddy supports, once inspected.
@@ -311,13 +309,12 @@ export function HostDesktopOverlay({
   }, [client, hostId, port, protocol, x11Display]);
 
   // The bridge publishes into the room the start reply names, which is not this page's common room:
-  // joining it is the same mint-and-connect `useCommonRoom` already performs, with no coordinates
+  // joining it is the same mint-and-connect the media port's `usePresenterRoom` performs, with no coordinates
   // until there is a reply.
-  const identity = useMemo(
-    () => (user ? presenceIdentityForUser(user.login) : undefined),
-    [user],
+  const { usePresenterRoom } = useMediaPort();
+  const { room } = usePresenterRoom(
+    stream?.livekitRoom ? { sessionId: hostId, room: stream.livekitRoom, url: stream.livekitUrl } : null,
   );
-  const { room } = useCommonRoomHandle(stream?.livekitUrl, stream?.livekitRoom, identity);
 
   // Read only while our own start is blocked: once there is a stream or a failure, this host has
   // nothing left to ask about this desktop, and a screenful of hosts nobody is opening a desktop on

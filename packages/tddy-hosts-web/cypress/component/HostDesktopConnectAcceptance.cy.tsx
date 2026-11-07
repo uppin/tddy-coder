@@ -11,7 +11,6 @@
 
 import { create, fromBinary } from "@bufbuild/protobuf";
 import { anInMemoryRpcBackend, type InMemoryRpcBackend } from "tddy-connectrpc-testkit";
-import { AuthService } from "tddy-client-web/gen/auth_pb";
 import {
   HostPromptKind,
   HostRemoteDesktopSchema,
@@ -26,26 +25,16 @@ import {
 } from "tddy-client-web/gen/screen_sharing_pb";
 import { HostRowRemoteDesktop } from "../../src/HostRowRemoteDesktop";
 import { HostRowTooling } from "../../src/HostRowTooling";
-import { mountWithRpc } from "../support/rpc/inMemory";
-import { withSelectedDaemon } from "../support/rpc/withSelectedDaemon";
 import { aHostConnection, aRegistryServing } from "../support/rpc/hostConnections";
+import type { HostsMountOverrides } from "../support/mountWithHosts";
 import {
   aHostPromptFeed,
   type HostPromptFeed,
   type HostPromptFrame,
 } from "../support/rpc/hostPromptFeed";
-import {
-  ACCESS_TOKEN_KEY,
-  CURRENT_ACCESS_TOKEN,
-  REFRESH_TOKEN_KEY,
-  VALID_REFRESH_TOKEN,
-} from "../support/rpc/durableSessionBackend";
-import { aGitHubUser } from "../support/rpc/responses";
+import { anAuthDouble } from "tddy-client-web/testkit";
 import { anRsaOaepKeypair, type AHostPromptKeypair } from "../support/hostKeys";
-import { ConnectionProviders } from "../../src/rpc/connections/registry";
-import { SelectedDaemonProvider } from "../../src/rpc/selectedDaemon";
-import { AuthProvider } from "../../src/hooks/authProvider";
-import { useHostPrompts } from "../../src/rpc/useHostPrompts";
+import { useHostPrompts } from "../../src/useHostPrompts";
 import { hostDesktopPage, hostDesktopSignInPage } from "../support/pages/hostsScreenPage";
 
 const HOST = "workstation-1";
@@ -67,11 +56,9 @@ function aReachableVnc() {
 function mountWithMedia(
   readings = [aReachableVnc()],
   backend: InMemoryRpcBackend = anInMemoryRpcBackend(),
+  overrides: HostsMountOverrides = {},
 ) {
-  mountWithRpc(
-    withSelectedDaemon(<HostRowRemoteDesktop instanceId={HOST} readings={readings} />, HOST_LISTED),
-    backend,
-  );
+  cy.mountWithClients(<HostRowRemoteDesktop instanceId={HOST} readings={readings} />, backend, { daemons: HOST_LISTED, ...overrides });
 }
 
 /**
@@ -88,20 +75,11 @@ function mountOnWire(carriesMedia: boolean) {
   const host = carriesMedia
     ? aHostConnection(HOST).reachedOverLiveKit().servingOver(backend.transport()).build()
     : aHostConnection(HOST).servingOver(backend.transport()).build();
-  mountWithRpc(
-    <AuthProvider>
-      <ConnectionProviders registry={aRegistryServing(host)}>
-        <SelectedDaemonProvider
-          room={null}
-          daemons={[{ instanceId: HOST, label: HOST }]}
-          servingInstanceId={HOST}
-        >
-          <HostRowRemoteDesktop instanceId={HOST} readings={[aReachableVnc()]} />
-        </SelectedDaemonProvider>
-      </ConnectionProviders>
-    </AuthProvider>,
-    backend,
-  );
+  cy.mountWithClients(<HostRowRemoteDesktop instanceId={HOST} readings={[aReachableVnc()]} />, backend, {
+    registry: aRegistryServing(host),
+    daemons: [{ instanceId: HOST, label: HOST }],
+    selectedInstanceId: HOST,
+  });
 }
 
 describe("Host desktop connect", () => {
@@ -516,45 +494,26 @@ describe("Host desktop without a password", () => {
 /**
  * A daemon refuses any host-scoped call that arrives without the operator's session token.
  *
- * The browser's auth gate (`src/rpc/authGatedTransport.ts`, wrapped around every LiveKit-reached
- * host) rewrites `sessionToken` on the way out — but only on a request that **already carries the
- * field**, since it tests `"sessionToken" in message`. A call built without it is therefore not
- * repaired in transit: it arrives unauthenticated and is rejected. None of that shows up on the
- * local HTTP path, where the daemon serving the page answers anyway, which is how a desktop that
- * cannot open a single *remote* host passes a screenful of green row tests.
+ * The browser's auth gate (`authGatedTransport`, in `tddy-web`) rewrites `sessionToken` on the way
+ * out — but only on a request that **already carries the field**, since it tests
+ * `"sessionToken" in message`. A call built without it is therefore not repaired in transit: it
+ * arrives unauthenticated and is rejected. None of that shows up on the local HTTP path, where the
+ * daemon serving the page answers anyway, which is how a desktop that cannot open a single *remote*
+ * host passes a screenful of green row tests.
  *
- * So this is asserted on the wire, on the calls themselves, rather than on anything visible.
+ * So this is asserted on the wire, on the calls themselves, rather than on anything visible. The
+ * package reads the session from the auth port; the gate itself is `tddy-web`'s.
  */
-function alsoServingTheOperatorsSession(backend: InMemoryRpcBackend): InMemoryRpcBackend {
-  return backend.implement(AuthService, {
-    getAuthStatus: async (req) =>
-      req.sessionToken === CURRENT_ACCESS_TOKEN
-        ? { authenticated: true, user: aGitHubUser() }
-        : { authenticated: false, user: undefined },
-  });
-}
-
-/** A browser holding a live session, as a signed-in operator's browser holds one. */
-function aSignedInOperator() {
-  cy.window().then((win) => {
-    win.localStorage.setItem(ACCESS_TOKEN_KEY, CURRENT_ACCESS_TOKEN);
-    win.localStorage.setItem(REFRESH_TOKEN_KEY, VALID_REFRESH_TOKEN);
-  });
-}
+const CURRENT_ACCESS_TOKEN = "current-access";
 
 describe("Host desktop calls the daemon authenticates", () => {
   before(givenTheHostsPromptKey);
 
-  beforeEach(() => {
-    cy.clearLocalStorage();
-  });
-
   it("carries the operators session on every call it makes to the host", () => {
     // Given a signed-in operator and a connectable host
-    aSignedInOperator();
     const feed = aHostPromptFeed();
-    const backend = alsoServingTheOperatorsSession(aDaemonAwaitingADesktopPassword(feed));
-    mountWithMedia([aReachableVnc()], backend);
+    const backend = aDaemonAwaitingADesktopPassword(feed);
+    mountWithMedia([aReachableVnc()], backend, { auth: anAuthDouble({ sessionToken: CURRENT_ACCESS_TOKEN }) });
 
     // When they open that host's desktop
     hostDesktopPage.connect(HOST).click();
@@ -662,16 +621,10 @@ const aQuestionArrived = () => cy.get(`[data-testid="${A_QUESTION_ARRIVED}"]`);
 
 /** Open the host's desktop with a bystander watching the same feed. */
 function connectWithABystanderOn(feed: HostPromptFeed, backend: InMemoryRpcBackend) {
-  mountWithRpc(
-    withSelectedDaemon(
-      <>
+  cy.mountWithClients(<>
         <HostRowRemoteDesktop instanceId={HOST} readings={[aReachableVnc()]} />
         <AQuestionArrivedProbe hostId={HOST} />
-      </>,
-      HOST_LISTED,
-    ),
-    backend,
-  );
+      </>, backend, { daemons: HOST_LISTED });
   hostDesktopPage.connect(HOST).click();
   cy.wrap(feed).should((f: HostPromptFeed) =>
     expect(
@@ -774,18 +727,12 @@ describe("Host desktop password among the hosts other questions", () => {
 describe("Host desktop overlay placement", () => {
   it("renders the overlay outside the rows inline flow", () => {
     // Given the row's tooling section, with a connectable desktop in it
-    mountWithRpc(
-      withSelectedDaemon(
-        <HostRowTooling
+    cy.mountWithClients(<HostRowTooling
           instanceId={HOST}
           git={undefined}
           githubCli={undefined}
           remoteDesktop={[aReachableVnc()]}
-        />,
-        HOST_LISTED,
-      ),
-      anInMemoryRpcBackend(),
-    );
+        />, anInMemoryRpcBackend(), { daemons: HOST_LISTED });
 
     // When the operator opens the desktop
     hostDesktopPage.connect(HOST).click();

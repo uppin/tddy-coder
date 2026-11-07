@@ -22,8 +22,6 @@ import {
 } from "tddy-client-web/gen/host_pb";
 import { HostRowTooling } from "../../src/HostRowTooling";
 import { anInMemoryRpcBackend } from "tddy-connectrpc-testkit";
-import { mountWithRpc } from "../support/rpc/inMemory";
-import { withSelectedDaemon } from "../support/rpc/withSelectedDaemon";
 import { hostToolingPage } from "../support/pages/hostsScreenPage";
 
 const HOST = "workstation-1";
@@ -32,10 +30,7 @@ function mountTooling(
   git: ReturnType<typeof create<typeof HostGitIdentitySchema>> | undefined,
   gh: ReturnType<typeof create<typeof HostGithubCliSchema>> | undefined,
 ) {
-  mountWithRpc(
-    withSelectedDaemon(<HostRowTooling instanceId={HOST} git={git} githubCli={gh} />),
-    anInMemoryRpcBackend(),
-  );
+  cy.mountWithClients(<HostRowTooling instanceId={HOST} git={git} githubCli={gh} />, anInMemoryRpcBackend());
 }
 
 // The wire states, named so each test reads as the situation on a host rather than as proto

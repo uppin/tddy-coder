@@ -29,11 +29,11 @@
  * with no connection gets a said-so, never an empty answer dressed up as data.
  */
 
-import { useHostStats } from "../../rpc/useHostStats";
-import { CpuCoresIndicator } from "../sessions/CpuCoresIndicator";
-import { DiskSpaceIndicator } from "../sessions/DiskSpaceIndicator";
-import { MemoryIndicator } from "../sessions/MemoryIndicator";
-import { clampCorePercent } from "../sessions/hostStatsFormat";
+import { useHostStats } from "./useHostStats";
+import { CpuCoresIndicator } from "./CpuCoresIndicator";
+import { DiskSpaceIndicator } from "./DiskSpaceIndicator";
+import { MemoryIndicator } from "./MemoryIndicator";
+import { clampCorePercent } from "./hostStatsFormat";
 import { telemetryFeedFor } from "./hostTelemetryState";
 import { useDaemons, useHostConnection } from "tddy-client-web";
 

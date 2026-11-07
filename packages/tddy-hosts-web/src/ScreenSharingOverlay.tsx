@@ -13,8 +13,8 @@
 
 import React, { useEffect, useRef, useState } from "react";
 import { useMediaPort, type RoomHandle } from "tddy-client-web";
-import { exitDocumentFullscreen, isTargetInActiveFullscreen, useElementFullscreen } from "../../lib/browserFullscreen";
-import { isKeyboardLockSupported, lockKeyboard, unlockKeyboard } from "../../lib/keyboardLock";
+import { exitDocumentFullscreen, isTargetInActiveFullscreen, useElementFullscreen } from "tddy-ui-web";
+import { isKeyboardLockSupported, lockKeyboard, unlockKeyboard } from "./keyboardLock";
 
 export interface ScreenSharingOverlayProps {
   room: RoomHandle | null;

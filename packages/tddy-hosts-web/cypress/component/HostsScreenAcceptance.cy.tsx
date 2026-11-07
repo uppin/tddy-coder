@@ -10,13 +10,9 @@
  */
 
 import { anInMemoryRpcBackend, type InMemoryRpcBackend } from "tddy-connectrpc-testkit";
-import { HostsAppPage } from "../../src/HostsAppPage";
+import { HostsContent } from "../../src/HostsContent";
 import { HostService, type KnownHostEntry } from "tddy-client-web/gen/host_pb";
-import { mountWithRpc } from "../support/rpc/inMemory";
-import { withSelectedDaemon } from "../support/rpc/withSelectedDaemon";
-import { appShellPage } from "../support/pages/appShellPage";
 import { hostsScreenPage } from "../support/pages/hostsScreenPage";
-import { HOSTS_ROUTE } from "../../src/routing/appRoutes";
 
 const ONLINE_HOST = "workstation-1";
 const OFFLINE_HOST = "server-2";
@@ -25,7 +21,7 @@ const OFFLINE_HOST = "server-2";
  * The reference time the fixtures are anchored to.
  *
  * It has to be the real clock: the screen renders relative phrases against `Date.now()`, and these
- * tests mount `HostsAppPage`, which owns that call. A frozen instant here would be compared against
+ * tests mount `HostsContent`, which owns that call. A frozen instant here would be compared against
  * wall-clock time and the phrasing would drift with the calendar.
  */
 const NOW_MS = Date.now();
@@ -51,8 +47,8 @@ function aBackendListing(hosts: KnownHostEntry[]): InMemoryRpcBackend {
   });
 }
 
-function mountHosts(backend: InMemoryRpcBackend, onNavigate: (path: string) => void = () => {}) {
-  mountWithRpc(withSelectedDaemon(<HostsAppPage onNavigate={onNavigate} />), backend);
+function mountHosts(backend: InMemoryRpcBackend) {
+  cy.mountWithClients(<HostsContent />, backend);
 }
 
 describe("Hosts screen", () => {
@@ -111,19 +107,6 @@ describe("Hosts screen", () => {
     // The row first: without it the marker would be absent merely because nothing had rendered.
     hostsScreenPage.row(OFFLINE_HOST).should("exist");
     hostsScreenPage.localMarker(OFFLINE_HOST).should("not.exist");
-  });
-
-  // AC-1. The hash-route dispatch that turns `/hosts` into this screen is a pure string rule and is
-  // pinned in `src/routing/appRoutes.test.ts`; what only the mounted screen can prove is that its
-  // own `AppShell` offers the entry that asks for that path.
-  it("reaches the hosts screen from the navigation menu", () => {
-    mountHosts(aBackendListing([aKnownHost({})]), cy.stub().as("onNavigate"));
-    hostsScreenPage.row(ONLINE_HOST).should("exist");
-
-    appShellPage.openMenu();
-    hostsScreenPage.navEntry().click();
-
-    cy.get("@onNavigate").should("have.been.calledWith", HOSTS_ROUTE);
   });
 
   it("asks the daemon for its known hosts exactly once per visit", () => {

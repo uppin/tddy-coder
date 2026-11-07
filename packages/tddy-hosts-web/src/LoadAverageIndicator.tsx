@@ -6,7 +6,7 @@
  */
 
 import React from "react";
-import type { HostLoadStats } from "../../rpc/useHostStats";
+import type { HostLoadStats } from "./useHostStats";
 import { formatLoadAverage } from "./hostStatsFormat";
 
 export interface LoadAverageIndicatorProps {

@@ -13,8 +13,8 @@
 
 import React from "react";
 import { StartPassphraseProvider, type StartPassphrasePromptProps } from "tddy-session-create-web";
-import { HostPassphraseDialog } from "./HostPassphraseDialog";
-import { useHostPromptAnswer } from "./useHostPromptAnswer";
+import { HostPassphraseDialog } from "tddy-hosts-web";
+import { useHostPromptAnswer } from "tddy-hosts-web";
 
 /** The create-session package's prompt slot, filled with the Hosts screen's passphrase dialog. */
 export type HostStartPassphrasePromptProps = StartPassphrasePromptProps;

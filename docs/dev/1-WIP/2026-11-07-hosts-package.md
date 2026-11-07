@@ -5,7 +5,7 @@
 **Type**: Architecture Change
 **Complexity**: 4 — two packages (new package; sessions consumers), ~30 specs moved, a cycle cut (indicators, screen-sharing overlay), media port consumer
 
-**Stack**: `#web-split` 11/16 — branch `feature/web-split/hosts`, base `feature/web-split/chat`
+**Stack**: `#web-split` 12/17 — branch `feature/web-split/hosts`, base `feature/web-split/media`
 
 **PR**: [#848](https://github.com/uppin/tddy-coder/pull/848)
 
@@ -86,11 +86,11 @@ Real dependency edges, as opposed to the branch line:
 
 ## Scope
 
-- [ ] `tddy-hosts-web` skeleton + workflow
-- [ ] Modules moved; `tddy-web` (and sibling packages) import from `tddy-hosts-web`
-- [ ] Specs, page objects, drivers moved and green from the package config
-- [ ] Boundary rule
-- [ ] Code-issue records and package docs moved
+- [x] `tddy-hosts-web` skeleton + workflow (`web-tddy-hosts-web.yml` matches `web-tddy-react-commons.yml`, `has-cypress: true`)
+- [x] Modules moved; `tddy-web` imports from `tddy-hosts-web`
+- [x] Specs, page objects, drivers moved and green from the package config (17 specs; see Deviations)
+- [x] Boundary rule
+- [x] Code-issue records and package docs moved (no code-issue record names a moved file; package docs stay the README until wrap)
 
 ## Technical Changes
 
@@ -108,8 +108,8 @@ Real dependency edges, as opposed to the branch line:
 
 ## Implementation Milestones
 
-- [ ] `tddy-hosts-web` specs green
-- [ ] `tddy-web` builds; consumers' scoped specs green
+- [x] `tddy-hosts-web` specs green
+- [x] `tddy-web` builds; consumers' scoped specs green
 
 ## Testing Plan
 
@@ -124,6 +124,27 @@ Real dependency edges, as opposed to the branch line:
 - `src/packageBoundary.test.ts` — `tddy-hosts-web imports nothing from tddy-web or livekit-client`.
 
 ## Technical Debt & Production Readiness
+
+## Green Phase Notes (2026-11-07)
+
+Rebased onto `feature/web-split/media` (9654f9d7a); `MediaPort` consumed as published.
+
+### Deviations from the draft contract
+
+- **Specs that stay in `tddy-web`** (they exercise app wiring, not package code): `HostConnectionAcceptance`, `HostConnectionGateAcceptance`, `HostDirectoryAcceptance`, `HostLabelIdentityAcceptance`, `HostSelectionSurvivesReload` (selected-daemon provider, `DaemonSelector`, `ProjectsAppPage`), and `ScreenSharingInputForwardingAcceptance` / `ScreenSharingFullscreenAcceptance`, whose assertions are about the input stream the LiveKit-backed `MediaPort` opens to the bridge — a package that never imports LiveKit can only see a double. They now import the overlay from `tddy-hosts-web`. The package holds 17 specs (the 24 minus these 7).
+- **`HostsAppPage` split**: the data container (`ListKnownHosts`, error line) is `HostsContent` in the package; `HostsAppPage` stays in `tddy-web` as `AppShell` + `HostsContent`. The one `HostsScreenAcceptance` case that opens the shell menu moved, unchanged, to `tddy-web/cypress/component/HostsAppPageNavigation.cy.tsx`.
+- **`HostStatsFooter` takes `leading`/`trailing` slots** instead of `attachment`/`runtimes`/`runtimeRegistry`: the traffic `StatusBar` and `UploadProgressIndicator` are session code. `tddy-web`'s `SessionHostStatsFooter` composes them; `SessionsDrawerScreen` and `TerminalFileUploadProgressFooter` use it.
+- **`HostDesktopOverlay` joins the bridge's room through `useMediaPort().usePresenterRoom`** (hint `{ sessionId: hostId, room, url }`) instead of `useCommonRoomHandle` + `presenceIdentityForUser` from `tddy-livekit-web`; the participant identity is now the presenter-room's own.
+- **`HostStartPassphrasePrompt` stays in `tddy-web`** (sessions' create path mounts it and it depends on `tddy-session-create-web`); it consumes `HostPassphraseDialog`/`useHostPromptAnswer` from the package.
+- **Shared helpers moved to `tddy-ui-web`** rather than duplicated: `browserFullscreen` (+test), `tddyMarker`, `formatTraffic` (+test). Moved into the package with their only consumers: `useHostStats`, `useHostPrompts`, both subscriptions (+tests), `encryptForHost`, `subtleCrypto`, `keyboardLock`, `screenSharingStartFailure`, `hostKey*`. `useAuthContext` became `useAuth` from `tddy-client-web`.
+- **Spec support**: `cypress/support/mountWithHosts.tsx` (`cy.mountWithClients` + presence/media doubles; every listed host is reached over a LiveKit-shaped connection, as the shared common room made it) replaces `mountWithRpc` + `withSelectedDaemon`. The "calls carry the operator's session" case reads the token from `anAuthDouble`. Page objects and fixtures shared with remaining `tddy-web` specs are copied (`hostsScreenPage`, `screenSharingOverlayPage`, `hostPromptFeed`, `hostServiceBackend`, `hostConnections`, `hostKeys`); `testIds` carries only the ids the package uses. No stylesheet is loaded in the package's component support (as in `tddy-web`): a theme makes the connecting overlay and the sign-in dialog real layers at the same `z-50`, the former covering the latter.
+
+### Verification (scoped)
+
+- `tddy-hosts-web`: `bun test src` 63 pass; 17 Cypress specs one at a time, all green.
+- `tddy-ui-web`: `bun test src` 21 pass. `tddy-web`: `bun run build` ok, `bun run test:unit` 867 pass.
+- `scripts/livekit-import-boundary.test.ts`, `scripts/web-workflows.test.ts`: 4 pass.
+- `tddy-web` Cypress (10 specs, one at a time): `HostsAppPageNavigation` 1, `HostDirectoryAcceptance` 8, `ScreenSharingInputForwarding` 15, `ScreenSharingFullscreen` 6, `HostDesktopStartFailure` 3 (failed once on the first run after dependency re-optimisation with a duplicate-React `useContext` error; green twice on re-run), `ScreenSharingInputScopes` 2, `SessionInspectorScreenSharing` 9, `HostResources` 3, `TerminalFileUploadProgressFooter` 2, `HostStatsFooterAcceptance` 6.
 
 ## Decisions & Trade-offs
 
@@ -151,10 +172,10 @@ Real dependency edges, as opposed to the branch line:
 - [x] Run acceptance tests (verify they fail)
 - [x] USER REVIEW — acceptance tests (developer waived the per-node review for this stack, 2026-11-07: "finish the rest without stopping")
 - [x] TDD Red — write failing unit/integration tests
-- [ ] TDD Green — implement with quality code
-- [ ] Update documentation with progress
-- [ ] Repeat Red→Green→Update cycle until feature complete
-- [ ] Run the touched packages' tests (`tddy-hosts-web` Cypress + `bun test` + boundary rule; `tddy-web` build + consumers' scoped specs) — verify 100% pass
+- [x] TDD Green — implement with quality code
+- [x] Update documentation with progress
+- [x] Repeat Red→Green→Update cycle until feature complete
+- [x] Run the touched packages' tests (`tddy-hosts-web` Cypress + `bun test` + boundary rule; `tddy-web` build + consumers' scoped specs) — verify 100% pass
 - [ ] Validate changes (/validate-changes)
 - [ ] Refactor issues from change validation
 - [ ] USER REVIEW — development complete

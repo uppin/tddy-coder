@@ -1,4 +1,4 @@
-import { emitTddyMarker } from "./tddyMarker";
+import { emitTddyMarker } from "tddy-ui-web";
 
 function logInfo(...args: unknown[]): void {
   console.info("[tddy][remoteTerminateConfirm]", ...args);

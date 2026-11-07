@@ -1,4 +1,4 @@
-import { VmsScreen, VmRow } from "@/components/vms/VmsScreen";
+import { VmsScreen, VmRow } from "../../src/VmsScreen";
 
 const mockRows: VmRow[] = [
   {

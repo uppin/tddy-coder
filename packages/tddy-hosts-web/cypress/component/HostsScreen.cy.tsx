@@ -12,11 +12,9 @@
  */
 
 import { anInMemoryRpcBackend, type InMemoryRpcBackend } from "tddy-connectrpc-testkit";
-import { HostsAppPage } from "../../src/HostsAppPage";
+import { HostsContent } from "../../src/HostsContent";
 import { HostService, type KnownHostEntry } from "tddy-client-web/gen/host_pb";
 import { aHostServiceFake } from "../support/rpc/hostServiceBackend";
-import { mountWithRpc } from "../support/rpc/inMemory";
-import { withSelectedDaemon } from "../support/rpc/withSelectedDaemon";
 import { hostsScreenPage, hostTelemetryPage as telemetry } from "../support/pages/hostsScreenPage";
 
 const HOST = "workstation-1";
@@ -57,9 +55,9 @@ describe("Hosts screen over host.HostService", () => {
     const backend = aDaemonServingOnlyHostService([aKnownHost({})]);
 
     // When the Hosts screen is opened
-    mountWithRpc(withSelectedDaemon(<HostsAppPage onNavigate={() => {}} />, [
+    cy.mountWithClients(<HostsContent />, backend, { daemons: [
       { instanceId: HOST, label: HOST },
-    ]), backend);
+    ] });
 
     // Then the host is on screen, and the read that put it there was addressed to the new service
     hostsScreenPage.row(HOST).should("exist");
@@ -73,9 +71,9 @@ describe("Hosts screen over host.HostService", () => {
     const backend = aDaemonServingOnlyHostService([aKnownHost({ online: true })]);
 
     // When the Hosts screen is opened
-    mountWithRpc(withSelectedDaemon(<HostsAppPage onNavigate={() => {}} />, [
+    cy.mountWithClients(<HostsContent />, backend, { daemons: [
       { instanceId: HOST, label: HOST },
-    ]), backend);
+    ] });
 
     // Then the row carries the reading the host streamed — the telemetry feed moved with the
     // registry listing, so a screen that split them across two services would show one and not
