@@ -1,4 +1,4 @@
-# Capability gating (`src/rpc/connections/useHasCapability.ts`, `src/hooks/capabilityAvailability.ts`)
+# Capability gating (`tddy-client-web/src/connections/useHasCapability.ts`, `tddy-client-web/src/capability/capabilityAvailability.ts`)
 
 Most of what `tddy-web` shows a host is plain RPC, and a [host connection](host-connections.md)
 carries that over whatever wire it was opened on. Tracks and presence are the exception: a video
@@ -44,7 +44,7 @@ Both halves of that had a concrete symptom before the rule existed:
 - **Media** — the session inspector's tab strip rendered seven tabs on load and nine a second later,
   reflowing under the operator's cursor on every LiveKit page load.
 
-`capabilityAvailability(roomStatus, hasCapability)` (`src/hooks/capabilityAvailability.ts`) is the
+`capabilityAvailability(roomStatus, hasCapability)` (`tddy-client-web/src/capability/capabilityAvailability.ts`) is the
 resulting order, stated once:
 
 | Verdict | When | What the surface does |

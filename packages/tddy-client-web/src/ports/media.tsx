@@ -58,8 +58,15 @@ export interface PresencePort {
 export interface RoomRpcPort {
   /** A client for `service` addressed to `identity` in `room`; `null` until both are known and joined. Stable while they hold. */
   useRoomClient<S extends DescService>(room: RoomHandle | null, identity: string | null, service: S): Client<S> | null;
-  /** Whether `identity` is in `room` now; re-renders on join, leave and reconnect. */
+  /** Whether `identity` is in `room` now; re-renders on join, leave and reconnect. For rendering. */
   useParticipantPresent(room: RoomHandle | null, identity: string | null): boolean;
+  /**
+   * A function answering whether `identity` is in `room` at the moment it is called — for a check
+   * made inside an event handler (a send), which must not trust a value from the last render: a
+   * leave or join between that render and the call would be missed. Stable while `room` and
+   * `identity` hold; `false` while either is `null`.
+   */
+  useParticipantProbe(room: RoomHandle | null, identity: string | null): () => boolean;
   /** The room's connection state. */
   useRoomStatus(room: RoomHandle | null): RoomStatus;
 }
@@ -127,6 +134,10 @@ export function useRoomClient<S extends DescService>(room: RoomHandle | null, id
 
 export function useParticipantPresent(room: RoomHandle | null, identity: string | null): boolean {
   return useRoomRpcPort().useParticipantPresent(room, identity);
+}
+
+export function useParticipantProbe(room: RoomHandle | null, identity: string | null): () => boolean {
+  return useRoomRpcPort().useParticipantProbe(room, identity);
 }
 
 export function useRoomStatus(room: RoomHandle | null): RoomStatus {

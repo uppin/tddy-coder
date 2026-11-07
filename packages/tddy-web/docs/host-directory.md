@@ -13,7 +13,7 @@ The directory separates *which hosts exist* from *how you reach one*. Reaching o
 
 ## The model
 
-`src/rpc/hostDirectory/types.ts`:
+`tddy-client-web/src/hostDirectory/types.ts`:
 
 | Type | What it is |
 |---|---|

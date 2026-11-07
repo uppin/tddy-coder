@@ -3,7 +3,7 @@
  *
  * TODO(livekit-web): `tddy-web/cypress/support/testIds.ts` still carries the same participant-list ids
  * for the specs that stayed there (they drive the roster through the app's screens); the two lists
- * collapse when those screens' specs move.
+ * collapse when those screens' specs move — `docs/dev/todo/2026-11-07-participant-list-test-ids-defined-twice.md`.
  */
 
 /** Build a `cy.get` selector for `[data-testid='<id>']`. */
