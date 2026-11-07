@@ -29,7 +29,7 @@ on:
         default: false
       needs-tddy-coder:
         description: >-
-          Build tddy-coder and the tddy-tools it requires (target/debug/) before the tests. Its tests spawn tddy-coder.
+          Build the tddy-coder binary (target/debug/tddy-coder) before the tests. Its tests spawn it.
         type: boolean
         default: false
       needs-rust-fixture:
@@ -133,10 +133,9 @@ jobs:
           restore-prefixes-first-match: nix-${{ runner.os }}-
           save: false # one writer for the nix cache, not one per package check
 
-      # tddy-coder's daemon mode refuses to start unless tddy-tools sits beside it or is on PATH.
-      - name: Build tddy-coder and tddy-tools
+      - name: Build tddy-coder
         if: inputs.needs-tddy-coder
-        run: ./dev cargo build --locked -p tddy-coder-cli --bin tddy-coder -p tddy-tools-cli --bin tddy-tools
+        run: ./dev cargo build --locked -p tddy-coder-cli --bin tddy-coder
 
       - name: Build the echo_server fixture
         if: inputs.needs-rust-fixture

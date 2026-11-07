@@ -11,6 +11,7 @@ import { create } from "@bufbuild/protobuf";
 import { EchoService, EchoRequestSchema } from "../gen/test/echo_service_pb";
 import { spawn, type ChildProcess } from "child_process";
 import * as fs from "fs";
+import * as os from "os";
 import * as path from "path";
 import { fileURLToPath } from "url";
 
@@ -39,9 +40,23 @@ let serverProcess: ChildProcess | null = null;
 /** The server's output, quoted when it fails to come up so the cause is in the test failure. */
 let serverOutput = "";
 let serverExit: string | null = null;
+/** The daemon's data dir: `--daemon` redirects its stderr to `sessions/<id>/logs/daemon_stderr.log` under it. */
+const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), "tddy-echo-unary-"));
+
+function daemonLogs(): string {
+  const sessions = path.join(dataDir, "sessions");
+  if (!fs.existsSync(sessions)) return "";
+  return fs
+    .readdirSync(sessions)
+    .map((id) => path.join(sessions, id, "logs", "daemon_stderr.log"))
+    .filter((log) => fs.existsSync(log))
+    .map((log) => `\n--- ${log} ---\n${fs.readFileSync(log, "utf8").slice(-8000)}`)
+    .join("");
+}
 
 function serverDiagnostics(): string {
-  return serverOutput ? `\n--- tddy-coder output ---\n${serverOutput}` : "";
+  const output = serverOutput ? `\n--- tddy-coder output ---\n${serverOutput}` : "";
+  return output + daemonLogs();
 }
 
 async function waitForServer(url: string, timeoutMs = 10000): Promise<void> {
@@ -70,6 +85,9 @@ beforeAll(async () => {
     "--web-port", String(PORT),
     "--web-host", "127.0.0.1",
     "--web-bundle-path", webBundlePath,
+    "--tddy-data-dir", dataDir,
+    // EchoService needs no coding agent; the default (claude) would require claude and tddy-tools on PATH.
+    "--agent", "stub",
   ], {
     stdio: ["ignore", "pipe", "pipe"],
     cwd: repoRoot,
@@ -95,6 +113,7 @@ afterAll(() => {
     serverProcess.kill("SIGTERM");
     serverProcess = null;
   }
+  fs.rmSync(dataDir, { recursive: true, force: true });
 });
 
 const transport = createConnectTransport({
