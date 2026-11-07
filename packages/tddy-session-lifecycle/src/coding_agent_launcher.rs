@@ -44,8 +44,8 @@ use tddy_agent_launch::host_coding_agents::host_coding_agents;
 use tddy_agent_launch::spec_launch::HostCodingAgents;
 use tddy_coding_subagent::launcher::HEADLESS_DIR;
 use tddy_coding_subagent::{
-    AgentTransport, ApprovalRoutes, CodingAgentLaunch, CodingAgentLauncher, CONVERSATION_ID_ENV,
-    TDDY_TOOLS_MCP_ARG, TDDY_TOOLS_SERVER,
+    AgentTransport, ApprovalRoutes, CodingAgentLaunch, CodingAgentLauncher, LaunchedAgent,
+    CONVERSATION_ID_ENV, TDDY_TOOLS_MCP_ARG, TDDY_TOOLS_SERVER,
 };
 use tddy_core::provider_route::{HarnessRoute, RouteChoice, RouteSources};
 use tddy_core::{AcpAgentCommand, HeadlessCommand, McpServerSpec};
@@ -368,6 +368,26 @@ impl CodingAgentLauncher for DaemonCodingAgentLauncher {
             },
             Err(other) => Err(Self::refuse(launch, &other.to_string())),
         }
+    }
+
+    /// [`Self::launch_transport`] with the hooks of every adapter the agent's spec declares
+    /// (`coding_agent.acp.hooks_adapter`), prepared on the command before it is spawned or relayed:
+    /// `codex-acp-login` hands back its `codex login` retry-once hooks and their open bracket. An
+    /// agent that declares none gets [`tddy_coding_subagent::no_launch_hooks`]. The route stays
+    /// inline (`OPENCODE_CONFIG_CONTENT`); a route file the session user can read is a node of its
+    /// own (`docs/dev/todo/2026-11-04-opencode-acp-route-file-has-no-session-owner.md`).
+    async fn launch_agent(
+        &self,
+        launch: &CodingAgentLaunch,
+    ) -> Result<LaunchedAgent, SubagentError> {
+        // TODO(acp-subagent-leftovers): implement — prepare the declared hooks adapter and hand
+        // its hooks back with the transport.
+        self.launch_transport(launch)
+            .await
+            .map(|transport| LaunchedAgent {
+                transport,
+                hooks: tddy_coding_subagent::no_launch_hooks(),
+            })
     }
 
     async fn mcp_servers_for(

@@ -471,6 +471,7 @@ fn an_agent_roster_with_nothing_attached(
         session_admissions: Arc::new(NoRoomAdmission),
         model_registry: None,
         coding_agent_launcher: None,
+        coding_agents: Arc::new(tddy_coding_agent_specs::CodingAgentRegistry::empty()),
         host,
     }
 }

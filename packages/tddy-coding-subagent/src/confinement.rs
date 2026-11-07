@@ -115,6 +115,21 @@ pub fn refuse_unless_confinable(harness: &str, managed: bool) -> Result<(), Stri
     ))
 }
 
+/// [`refuse_unless_confinable`] read from `registry` (`#agent-tools 27/28`): an ACP agent is refused
+/// for a managed session when its spec cannot withdraw its native tools
+/// ([`refuse_unless_spec_confinable`], naming the registry's confinable ACP agents); a headless
+/// agent, and a harness the registry does not declare, are refused in a managed session. `Err` is
+/// the reason; the caller says which agent and which session it refused.
+pub fn refuse_unless_registry_confinable(
+    registry: &tddy_coding_agent_specs::CodingAgentRegistry,
+    harness: &str,
+    managed: bool,
+) -> Result<(), String> {
+    // TODO(acp-subagent-leftovers): implement — read the spec from `registry`, not the name table.
+    let _ = registry;
+    refuse_unless_confinable(harness, managed)
+}
+
 /// The native tools a confined coding agent loses: Claude's own file-system and shell tools. The
 /// same set a split session's main agent has withdrawn (`split_session::NATIVE_FILESYSTEM_TOOLS`,
 /// which this crate cannot depend on).

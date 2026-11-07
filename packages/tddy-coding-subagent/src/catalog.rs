@@ -57,6 +57,21 @@ pub fn coding_agent_defs(
     from_profiles.into_iter().chain(from_allowed).collect()
 }
 
+/// [`coding_agent_defs`] read from `registry` (`#agent-tools 27/28`): a profile is offered when the
+/// registry declares its harness an agent with a transport ([`crate::transport_of_spec`]); a bare
+/// `allowed_agents` id only when the registry declares it an ACP agent, on that spec's default
+/// model. A harness the registry does not declare is never offered.
+pub fn coding_agent_defs_from(
+    registry: &tddy_coding_agent_specs::CodingAgentRegistry,
+    profiles: &[HarnessProfile],
+    allowed_agent_ids: &[(String, Option<String>)],
+) -> Vec<CodingAgentDef> {
+    // TODO(acp-subagent-leftovers): implement — filter and default from `registry`, not from the
+    // harness names.
+    let _ = registry;
+    coding_agent_defs(profiles, allowed_agent_ids)
+}
+
 fn is_acp_harness(harness: &str) -> bool {
     ACP_HARNESSES.contains(&harness)
 }

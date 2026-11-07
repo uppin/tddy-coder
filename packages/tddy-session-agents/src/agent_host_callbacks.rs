@@ -114,6 +114,9 @@ pub struct AgentRoster {
     /// What starts a coding agent for a conversation. `None` on a daemon with no launcher wired —
     /// a coding-agent conversation is then refused naming that, never started some other way.
     pub coding_agent_launcher: Option<Arc<dyn tddy_coding_subagent::CodingAgentLauncher>>,
+    /// The coding agents this host declares (`#agent-tools 27/28`): what its catalog offers and what
+    /// a managed session's confinement reads, never the agents' names.
+    pub coding_agents: Arc<tddy_coding_agent_specs::CodingAgentRegistry>,
     /// The host's capabilities that are not fields.
     pub host: Arc<dyn AgentHostCallbacks>,
 }

@@ -159,6 +159,7 @@ impl DaemonSessionHost {
             session_admissions: Arc::clone(&self.session_admissions),
             model_registry: self.model_registry.clone(),
             coding_agent_launcher: self.coding_agent_launcher.clone(),
+            coding_agents: self.launch_coding_agents().agents_shared(),
             host: Arc::new(self.clone()),
         }
     }

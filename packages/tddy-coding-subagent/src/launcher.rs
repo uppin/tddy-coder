@@ -1,8 +1,10 @@
 //! The port the daemon implements to start a coding agent for one conversation.
 
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
-use tddy_agent_backend::{AcpAgentCommand, HeadlessCommand, McpServerSpec};
+use tddy_agent_backend::adapters::PreparedAcpHooks;
+use tddy_agent_backend::{AcpAgentCommand, HeadlessCommand, McpServerSpec, NoHooks};
 use tddy_discovery::subagent::SubagentError;
 
 use crate::catalog::CodingAgentDef;
@@ -154,6 +156,35 @@ pub enum AgentTransport {
     Stream(std::os::unix::net::UnixStream),
 }
 
+/// An ACP agent a launcher started (or planned) for one conversation, with the hooks its driver
+/// runs with and the bracket around each open they need (`PreparedAcpHooks`): what the agent's
+/// declared `coding_agent.acp.hooks_adapter` prepared — `codex-acp-login`'s one `codex login` retry
+/// on an auth-like `session/new` error. The session that opens over the agent holds them for exactly
+/// its lifetime ([`crate::CodingAgentSession::start`]).
+pub struct LaunchedAgent {
+    pub transport: AgentTransport,
+    pub hooks: PreparedAcpHooks,
+}
+
+impl std::fmt::Debug for LaunchedAgent {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("LaunchedAgent")
+            .field("transport", &self.transport)
+            .field("brackets_opens", &self.hooks.opens.is_some())
+            .finish_non_exhaustive()
+    }
+}
+
+/// The hooks of a launch whose agent declares no hooks adapter: they change nothing and bracket no
+/// open.
+#[must_use]
+pub fn no_launch_hooks() -> PreparedAcpHooks {
+    PreparedAcpHooks {
+        hooks: Arc::new(NoHooks),
+        opens: None,
+    }
+}
+
 /// Everything a launch needs to know about the conversation it serves.
 #[derive(Clone, PartialEq, Eq)]
 pub struct CodingAgentLaunch {
@@ -213,6 +244,23 @@ pub trait CodingAgentLauncher: Send + Sync {
         self.command_for(launch).await.map(AgentTransport::Command)
     }
 
+    /// [`Self::launch_transport`] with the hooks the agent's driver runs with: what the daemon opens
+    /// an ACP conversation through. By default the transport alone with [`no_launch_hooks`] — a
+    /// launcher that holds no agent specs has no hooks adapter to prepare. A launcher whose agents
+    /// declare one (`coding_agent.acp.hooks_adapter`) overrides it and prepares every declared
+    /// adapter on the command before it is spawned or relayed.
+    async fn launch_agent(
+        &self,
+        launch: &CodingAgentLaunch,
+    ) -> Result<LaunchedAgent, SubagentError> {
+        self.launch_transport(launch)
+            .await
+            .map(|transport| LaunchedAgent {
+                transport,
+                hooks: no_launch_hooks(),
+            })
+    }
+
     /// The MCP servers the ACP session is opened with — in a managed session, `tddy-tools --mcp`
     /// ([`TDDY_TOOLS_SERVER`], [`TDDY_TOOLS_MCP_ARG`]) with the binary resolved and the agent's own
     /// tool credential minted. Asked before [`Self::launch_transport`], so a refusal here never
@@ -227,8 +275,9 @@ pub trait CodingAgentLauncher: Send + Sync {
     /// default today's per-harness answer, [`crate::withdrawal_session_meta`]; a launcher holding
     /// the agent specs answers from them.
     ///
-    /// TODO(acp-agents): drop this default once every launcher holds the agent specs (the
-    /// `#agent-tools` sweep; `docs/dev/todo/2026-11-04-acp-hand-built-launch-path-for-agentless-launchers.md`).
+    /// TODO(acp-subagent-leftovers): implement — this default names agents
+    /// (`crate::withdrawal_session_meta`); it goes, so a launcher answers from its specs
+    /// (`docs/dev/todo/2026-11-04-acp-hand-built-launch-path-for-agentless-launchers.md`).
     async fn session_meta_for(
         &self,
         launch: &CodingAgentLaunch,

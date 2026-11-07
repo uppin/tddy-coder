@@ -23,9 +23,17 @@ use crate::agent_host_callbacks::AgentRoster;
 use crate::agent_roster::qualified_agent_id;
 use crate::seed_codebase::read_session_metadata;
 
-/// The coding agents this daemon offers: ACP harness profiles under `<tddyhome>/agents`, then its
-/// ACP `allowed_agents` ids.
-pub fn coding_agent_defs_for(tddy_data_dir: &Path, config: &DaemonConfig) -> Vec<CodingAgentDef> {
+/// The coding agents this daemon offers: harness profiles under `<tddyhome>/agents` on an agent
+/// `coding_agents` declares with a transport, then its `allowed_agents` ids `coding_agents` declares
+/// ACP agents (`tddy_coding_subagent::coding_agent_defs_from`).
+pub fn coding_agent_defs_for(
+    tddy_data_dir: &Path,
+    config: &DaemonConfig,
+    coding_agents: &tddy_coding_agent_specs::CodingAgentRegistry,
+) -> Vec<CodingAgentDef> {
+    // TODO(acp-subagent-leftovers): implement — read `coding_agents`
+    // (`tddy_coding_subagent::coding_agent_defs_from`), not the harness names.
+    let _ = coding_agents;
     let allowed: Vec<(String, Option<String>)> = config
         .allowed_agents()
         .iter()
@@ -80,12 +88,18 @@ pub fn agent_kind_from_wire(kind: i32) -> Result<AgentKindRecord, Status> {
 
 /// Refuse a coding agent whose harness cannot have its native tools withdrawn, for a managed
 /// session — whose main agent has none, so its subagent must not either. Never launched
-/// unconfined. `managed` is the session's `managed_codebase`, as its caller already read it.
+/// unconfined. `managed` is the session's `managed_codebase`, as its caller already read it; what
+/// the agent can withdraw is its spec's in `coding_agents`
+/// (`tddy_coding_subagent::refuse_unless_registry_confinable`).
 pub fn refuse_unconfinable_harness(
     session_id: &str,
     record: &SessionAgentRecord,
     managed: bool,
+    coding_agents: &tddy_coding_agent_specs::CodingAgentRegistry,
 ) -> Result<(), Status> {
+    // TODO(acp-subagent-leftovers): implement — refuse through
+    // `refuse_unless_registry_confinable(coding_agents, …)`, not the name table.
+    let _ = coding_agents;
     match record.kind {
         AgentKindRecord::CodingAgent => refuse_in_managed_session(
             session_id,
@@ -186,7 +200,10 @@ async fn start_acp_session(
     // takes them there; the others get theirs through the launcher's environment. Asked before the
     // transport, so a refusal here never leaves a process started.
     let meta = launcher.session_meta_for(launch).await.map_err(refused)?;
+    // TODO(acp-subagent-leftovers): implement — open through `launcher.launch_agent`, so the
+    // session runs with, and holds, the hooks the agent's declared adapter prepared.
     let transport = launcher.launch_transport(launch).await.map_err(refused)?;
+    let hooks = tddy_coding_subagent::no_launch_hooks();
     let open = OpenSession {
         cwd: launch.worktree.clone(),
         resume: None,
@@ -196,8 +213,12 @@ async fn start_acp_session(
     };
     let model = launch.def.model.clone();
     match transport {
-        AgentTransport::Command(command) => CodingAgentSession::start(command, open, model).await,
-        AgentTransport::Stream(stream) => CodingAgentSession::start_over(stream, open, model).await,
+        AgentTransport::Command(command) => {
+            CodingAgentSession::start(command, open, model, hooks).await
+        }
+        AgentTransport::Stream(stream) => {
+            CodingAgentSession::start_over(stream, open, model, hooks).await
+        }
     }
     .map_err(refused)
 }
@@ -225,7 +246,7 @@ impl AgentRoster {
 
     /// The coding agent this daemon offers under `name`, if any.
     pub(crate) fn coding_agent_def(&self, name: &str) -> Option<CodingAgentDef> {
-        coding_agent_defs_for(&self.tddy_data_dir, &self.config)
+        coding_agent_defs_for(&self.tddy_data_dir, &self.config, &self.coding_agents)
             .into_iter()
             .find(|def| def.name == name)
     }
