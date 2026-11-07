@@ -8,6 +8,8 @@
  * port once), so calling them obeys the rules of hooks like any imported hook.
  */
 import type { ComponentType, ReactElement, ReactNode, RefObject } from "react";
+import type { Client } from "@connectrpc/connect";
+import type { DescService } from "@bufbuild/protobuf";
 import type { SessionAttachmentHint } from "../connections/session";
 
 /** A joined room, opaque outside the implementation. */
@@ -46,6 +48,21 @@ export interface PresencePort {
   useRoomParticipants(room: RoomHandle | null): RoomParticipant[];
 }
 
+/**
+ * RPC addressed to a participant over a room's data channel, and that participant's liveness — what
+ * chat, session usage and screen-sharing input do today with `liveKitFactory(room, identity)`,
+ * `room.remoteParticipants.has(identity)` and `ConnectionStateChanged`.
+ */
+export interface RoomRpcPort {
+  /** A client for `service` addressed to `identity` in `room`; `null` until both are known and joined. Stable while they hold. */
+  useRoomClient<S extends DescService>(room: RoomHandle | null, identity: string | null, service: S): Client<S> | null;
+  /** Whether `identity` is in `room` now; re-renders on join, leave and reconnect. */
+  useParticipantPresent(room: RoomHandle | null, identity: string | null): boolean;
+  /** The room's connection state. */
+  useRoomStatus(room: RoomHandle | null): RoomStatus;
+}
+
+/** Owned by `feature/web-split/media` (#855) from here on: its green settles the final shape. */
 export interface ScreenSharingInputOptions {
   readonly picture: RefObject<HTMLElement | null>;
   readonly room: RoomHandle | null;
@@ -68,6 +85,24 @@ export interface MediaPort {
 
 export function PresencePortProvider(props: { port: PresencePort; children?: ReactNode }): ReactElement {
   void props;
+  throw new Error("TODO(livekit): implement");
+}
+
+export function RoomRpcPortProvider(props: { port: RoomRpcPort; children?: ReactNode }): ReactElement {
+  void props;
+  throw new Error("TODO(livekit): implement");
+}
+
+export function useRoomClient<S extends DescService>(room: RoomHandle | null, identity: string | null, service: S): Client<S> | null {
+  void room;
+  void identity;
+  void service;
+  throw new Error("TODO(livekit): implement");
+}
+
+export function useParticipantPresent(room: RoomHandle | null, identity: string | null): boolean {
+  void room;
+  void identity;
   throw new Error("TODO(livekit): implement");
 }
 

@@ -3,9 +3,9 @@
 **Date**: 2026-11-07
 **Status**: 🚧 In Progress
 **Type**: Architecture Change
-**Complexity**: 5 — several row-4 signals: three packages (new `tddy-livekit-web`, ports added to `tddy-client-web`, ~31 `tddy-web` files rewired), two new port contracts (presence, media), LiveKit adapter seam, room/track lifecycle ordering
+**Complexity**: 5 — still several row-4 signals after the 6a/6b split: three packages (new `tddy-livekit-web`, ports in `tddy-client-web`, ~25 `tddy-web` files rewired), two port contracts (presence, room RPC), LiveKit adapter seam, room/track lifecycle ordering
 
-**Stack**: `#web-split` 6/16 — branch `feature/web-split/livekit`, base `feature/web-split/clients`
+**Stack**: `#web-split` 6/17 — branch `feature/web-split/livekit`, base `feature/web-split/clients`
 
 **PR**: [#843](https://github.com/uppin/tddy-coder/pull/843)
 
@@ -79,6 +79,28 @@ implementing one here collides with the PR that owns it.
 | `n5` clients (#842) | `ClientsPort`, `ConnectionProvider`, `ClientsProvider`, testkit | implements `ConnectionProvider`; adds presence/media ports and doubles to its package | change `ClientsPort` or the hook names |
 
 ## Draft PR contract
+
+**Re-planned 2026-11-07 (commit 3) — split 6a/6b.** The first [G] stopped on this changeset's own boundary
+warning, before changing anything: `Room` is a prop of ~8 feature components; chat, session usage and
+screen-sharing input make **room-bound RPC** (`liveKitFactory(room, identity)`, `room.remoteParticipants.has`,
+`ConnectionStateChanged`) that no planned port covered; the media overlays own tracks (`RoomEvent`,
+`VideoTrack.attach`); ~35 specs inject Room fakes. The developer chose to split:
+
+- **This node (6a): connection, presence and room RPC.** `tddy-livekit-web` with the connection provider,
+  common room, session room connection, room terminal feed, presence (`PresencePort`), `ParticipantList`,
+  the rooms panel/screen, and a new **`RoomRpcPort`** (`useRoomClient(room, identity, service)`,
+  `useParticipantPresent`, `useRoomStatus`) + `aRoomRpcDouble`. Chat (`useAgentChat`, `useAcpSession`,
+  `AgentChat`), `useSessionUsage`/`SessionUsageTab`, `PrStackChat`, `selectedDaemon`, `transportProvider`,
+  `useSessionsDrawerSessionList`, `sessionMainPaneProps`, `SessionInspectorDrawer` switch to `RoomHandle` +
+  these ports. Their specs swap Room fakes for the doubles.
+- **`feature/web-split/media` (#855, 6b):** screen sharing, VNC, presenter room, camera/participant video
+  behind `MediaPort` (declared here; #855 owns its final shape).
+- `scripts/livekit-import-boundary.test.ts` now carries `MEDIA_NOT_YET_MOVED` — a `TODO(media)` allowlist
+  for the media files only. This node must make the rule green **with** that allowlist; #855 empties it.
+
+Contract after commit 3: 7 failing in `tddy-client-web` (4 presence/media + 3 room-RPC) and the narrowed rule.
+
+Earlier contract (commit 2):
 
 **As pushed (commit 2):**
 
