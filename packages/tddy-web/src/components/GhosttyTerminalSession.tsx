@@ -19,11 +19,11 @@
 
 import React, { useEffect, useRef, useState } from "react";
 import { DEFAULT_TERMINAL_FONT_MAX, DEFAULT_TERMINAL_FONT_MIN } from "../lib/terminalZoom";
-import { tddyDebug } from "../lib/debugMask";
+import { tddyDebug } from "tddy-client-web";
 import {
   shouldShowVisibleLiveKitStatusStrip,
   type LiveKitChromeStatus,
-} from "../lib/liveKitStatusPresentation";
+} from "tddy-livekit-web";
 import { GhosttyTerminal, type GhosttyTerminalHandle } from "./GhosttyTerminal";
 import { ConnectionTerminalChrome } from "./connection/ConnectionTerminalChrome";
 import { TerminalConnectionStatusBar } from "./connection/TerminalConnectionStatusBar";
@@ -34,7 +34,7 @@ import { ShortcutDrawer } from "./connection/ShortcutDrawer";
 import { useIsMobile } from "tddy-ui-web";
 import { useVisualViewport } from "tddy-ui-web";
 import type { ToolShortcutDef } from "../lib/toolShortcuts";
-import { TerminalHistoryForwardLoader } from "../lib/terminalHistoryLoader";
+import { TerminalHistoryForwardLoader } from "tddy-client-web";
 import { TerminalStreamOffset } from "../lib/terminalStreamOffset";
 import { feedSupportsHistory, type TerminalFeed } from "tddy-client-web/connections/terminal";
 import type { ByteDelta } from "./sessions/sessionRuntimeRegistry";

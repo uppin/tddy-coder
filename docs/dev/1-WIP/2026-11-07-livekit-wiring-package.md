@@ -135,12 +135,12 @@ Real dependency edges, as opposed to the branch line:
 
 ## Scope
 
-- [ ] Presence + media ports and doubles in `tddy-client-web`
-- [ ] `tddy-livekit-web` package: provider, common room, session room, room terminal feed, presence/media implementations, LiveKit screens
-- [ ] 31 `tddy-web` importers moved or switched to ports
-- [ ] LiveKit specs + support moved; feature specs use port doubles
-- [ ] Workspace rule: only the LiveKit packages import `livekit-client`
-- [ ] `web-tddy-livekit-web.yml`
+- [x] Presence + room-RPC ports and doubles in `tddy-client-web` (media port plumbing; media shape is #855's)
+- [x] `tddy-livekit-web` package: provider, common room, session room, room terminal feed, presence implementation, LiveKit screens (media implementation: #855)
+- [x] `tddy-web` importers moved or switched to ports (the media files stay, allowlisted)
+- [x] LiveKit specs + support moved where their subject is the package; feature specs use the package testkit (see Deviations)
+- [x] Workspace rule: only the LiveKit packages import `livekit-client` (media allowlist until #855)
+- [x] `web-tddy-livekit-web.yml`
 
 ## Technical Changes
 
@@ -158,9 +158,9 @@ Real dependency edges, as opposed to the branch line:
 
 ## Implementation Milestones
 
-- [ ] Rule test green
-- [ ] LiveKit specs green from `tddy-livekit-web`'s config
-- [ ] Feature specs in `tddy-web` that touched LiveKit green with doubles (scoped list in pass 2)
+- [x] Rule test green
+- [x] LiveKit specs green from `tddy-livekit-web`'s config
+- [x] Feature specs in `tddy-web` that touched LiveKit green (scoped list under Green Progress)
 
 ## Testing Plan
 
@@ -181,6 +181,80 @@ Real dependency edges, as opposed to the branch line:
 
 - Moved: `LiveKitRoomsPanelAcceptance`, `LiveKitScreenAcceptance`, `ParticipantList`, `ParticipantVideoCapabilityAcceptance`, `CommonRoomConnectionVisibilityAcceptance`, `PresenceCapabilityGatingAcceptance`, `useLiveKitTerminalToken`, `DaemonSelectionSurvivesRoomDisconnectAcceptance` (`.cy.tsx`, unchanged assertions).
 - `cypress/component/LiveKitPortsAcceptance.cy.tsx` — `livekitPorts registers a provider that reaches a host through the common room`; `presence from the room reaches usePresence`; `with LiveKit off, no provider claims a host`.
+
+## Green Progress (2026-11-07, 6a)
+
+Scope is the 6a re-plan: connection, presence and room RPC. Media is #855's.
+
+- **Ports** (`tddy-client-web/ports/media.tsx`): `PresencePort`, `RoomRpcPort`, `MediaPort` providers and hooks
+  (`useRoomClient`, `useParticipantPresent`, `useRoomStatus`, `useHostPresence`, `useRoomParticipants`,
+  `useMediaPort`); doubles `aPresenceDouble`, `aRoomRpcDouble`, and a minimal working `aMediaDouble` (TODO(media)).
+  `MediaPort` / `ScreenSharingInputOptions` declarations untouched.
+- **`tddy-livekit-web`** created (manifest, tsconfig, vite + Cypress config, `cy.mountWithClients`, README,
+  `packageBoundary.test.ts`, `web-tddy-livekit-web.yml`, root workspace, `bun.lock`). `livekitPorts()` +
+  `LiveKitPortsProvider` is the one registration call; `tddy-web`'s `AppClientsPorts` mounts it, so every
+  subtree under any app provider has presence and room RPC.
+- **Moved with `git mv`**: the connection provider, session room connection, room terminal feed,
+  `useDirectRoomTerminal`, `liveKitConnectionErrors`, `useCommonRoom`, `useRoomParticipants`, presence
+  (`presenceRoom`, `useHostPresence`, `liveKitSource`), `LiveKitRoomsPanel`, `ParticipantList`,
+  `useLiveKitRooms`, the LiveKit lib helpers (`codexOauthMetadata`, `liveKitMetadataCard`,
+  `liveKitRoomsState`, `liveKitStatusPresentation`), `presenceIdentity`, the transport test, and the
+  fakes (`fakeCommonRoom`, `commonRoomConnection`) as `tddy-livekit-web/testkit`.
+- **Lowered to `tddy-client-web`** (shared by the moved code and by `tddy-web`, so neither package can own
+  them): `participantRole`, `debugMask` (+ `debug.d.ts`, `debug` dependency), `testId`,
+  `terminalFrameContinuity`, `terminalHistoryLoader`, `sessionAttachment`, `useHasCapability`,
+  `capabilityAvailability`/`useCapabilityAvailability`, the host directory (`types`, `daemonHost`,
+  `useHostDirectory`), `LIVEKIT_SOURCE_ID`, `CommonRoomStatus`.
+- **Rewired in `tddy-web`**: `useAgentChat`, `useAcpSession`, `useSessionUsage` read a client through
+  `useRoomClient` and liveness through `useParticipantPresent`/`useRoomStatus`; `AgentChat`,
+  `SessionUsageTab`, `PrStackChat`, `useSessionsDrawerSessionList`, `sessionMainPaneProps`,
+  `SessionInspectorDrawer`, `selectedDaemon`, `index.tsx` hold `RoomHandle`. `LiveKitAppPage` is the
+  app shell around `LiveKitRoomsContent`. `RpcTransportProvider` mounts `LiveKitTransportProvider` with the
+  auth-gated, metered factory (so the spec seam `liveKitFactory` still routes everything to a backend).
+- **Specs**: the 35 `livekit-client` importers now use `tddy-livekit-web/testkit` (`aDisconnectedRoom`,
+  `aJoinedRoom`, `RoomConnectionState`). `ParticipantList` and `ParticipantVideoCapabilityAcceptance` moved
+  to the package; the two camera-dialog scenarios stayed in `tddy-web` as `ParticipantListVideoPreview.cy.tsx`.
+- **Rule**: `scripts/livekit-import-boundary.test.ts` green with the `MEDIA_NOT_YET_MOVED` allowlist; the 7 port
+  tests green.
+
+### Verified (scoped)
+
+- `tddy-client-web`: `bun test src` 128/128, typecheck clean, Cypress 1/1.
+- `tddy-livekit-web`: `bun test src` 106/106, typecheck clean, Cypress 13/13 (no LiveKit server needed).
+- `tddy-web`: `bun run build` ok; `bun test` over the `test:unit` directories 1141/1141; Cypress (one at a
+  time) `LiveKitRoomsPanelAcceptance` 26, `CommonRoomConnectionVisibilityAcceptance` 4,
+  `PresenceCapabilityGatingAcceptance` 16, `DaemonSelectionSurvivesRoomDisconnectAcceptance` 1,
+  `SessionConnectionAcceptance` 10, `useSessionAttachment` 2, `PrStackChatSilentFailureAcceptance` 5,
+  `PrStackChatAcceptance` 4, `AgentActivityClientIdentityAcceptance` 2, `DesktopIpcHostAcceptance` 18
+  (one run had 3 failures that did not reproduce in three reruns), `HostConnectionGateAcceptance` 5,
+  `CreateSessionStartProgress` 5, `SessionTerminalIdentity` 3, `SessionsDrawerAcceptance` 23,
+  `ParticipantListVideoPreview` 3.
+- scripts: boundary rule, package-name rule, web-workflows 8/8.
+
+### Deviations
+
+- **Shared helpers lowered to `tddy-client-web`**, not moved into `tddy-livekit-web`: both packages need
+  them, and the UI-kit node's rule (helpers move with the first package that consumes them from outside
+  `tddy-web`) puts them in the lowest shared package. `tddy-client-web` gains the existing `debug` dependency.
+- **Injection instead of moving app wiring**: `openHostServedSession` (the host-served terminal feed) and the
+  connection registry stay in `tddy-web` and are handed to `LiveKitConnections`; the transport wrapper is
+  lent through `LiveKitTransportProvider`. `HostServedSessionOpener` is a fourth constructor argument of
+  `LiveKitConnectionProvider`.
+- **Three provider-behaviour scenarios** (host-served session: same client as the host, rpc only) are now
+  asserted against the opener stub in `tddy-livekit-web`; the opener's own behaviour has no direct test yet.
+  TODO: a `hostServedSession.test.ts` in `tddy-web`.
+- **`ParticipantList`'s camera dialog is a slot** (`VideoPreview`) and its affordance rule a local copy,
+  because `ParticipantVideoPreviewDialog` and `participantCameraVideo` are media files (#855). TODO(media).
+- **Spec placement**: only the specs whose subject is entirely in the package moved. The rest drive
+  `tddy-web` screens (`SelectedDaemonProvider`, `SessionRuntime`, `LiveKitAppPage`) and stay, using the
+  package's testkit. `useLiveKitTerminalToken.cy.tsx` stays (its subject is a `tddy-web` hook). The Docker
+  testkit stays with `tddy-web`'s Cypress config; no spec in the package needs a LiveKit server, so the
+  workflow sets neither `needs-livekit-image` nor `needs-rust-fixture`.
+- **Test ids**: the participant-list ids exist in the package's `cypress/support/testIds.ts` and still in
+  `tddy-web`'s (specs there drive the roster through screens). TODO: collapse when those specs move.
+- **`tddy-web` still depends on `livekit-client`** for the media files. TODO(media).
+- **Room-bound hooks became event-driven**: `useParticipantPresent` re-renders on join/leave, where chat read
+  `room.remoteParticipants` at send time; a send closure now sees the last rendered value.
 
 ## Technical Debt & Production Readiness
 
@@ -211,10 +285,10 @@ Real dependency edges, as opposed to the branch line:
 - [x] Run acceptance tests (verify they fail)
 - [x] USER REVIEW — acceptance tests (developer waived the per-node review for this stack, 2026-11-07: "finish the rest without stopping")
 - [x] TDD Red — write failing unit/integration tests
-- [ ] TDD Green — implement with quality code
-- [ ] Update documentation with progress
+- [x] TDD Green — implement with quality code
+- [x] Update documentation with progress
 - [ ] Repeat Red→Green→Update cycle until feature complete
-- [ ] Run the touched packages' tests (`scripts/livekit-import-boundary.test.ts`; `tddy-livekit-web` Cypress; `tddy-client-web` port tests; `tddy-web` scoped specs) — verify 100% pass
+- [x] Run the touched packages' tests (`scripts/livekit-import-boundary.test.ts`; `tddy-livekit-web` Cypress; `tddy-client-web` port tests; `tddy-web` scoped specs) — verify 100% pass
 - [ ] Validate changes (/validate-changes)
 - [ ] Refactor issues from change validation
 - [ ] USER REVIEW — development complete

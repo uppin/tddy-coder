@@ -15,7 +15,7 @@ import React from "react";
 import { servedAgentWire } from "../support/servedAgents";
 import { CatalogService } from "tddy-client-web/gen/catalog_pb";
 import { ProjectService } from "tddy-client-web/gen/project_pb";
-import { Room } from "livekit-client";
+import { aDisconnectedRoom } from "tddy-livekit-web/testkit";
 import { createClient } from "@connectrpc/connect";
 import { create } from "@bufbuild/protobuf";
 import { anInMemoryRpcBackend, type InMemoryRpcBackend } from "tddy-connectrpc-testkit";
@@ -23,7 +23,7 @@ import { CreateSessionPane } from "../../src/components/sessions/CreateSessionPa
 import { SessionService, StartSessionEventSchema, type StartSessionRequest } from "tddy-client-web/gen/session_pb";
 import { SessionFilesService } from "tddy-client-web/gen/session_files_pb";
 import { WorktreeService } from "tddy-client-web/gen/worktree_pb";
-import type { DaemonHost } from "../../src/lib/participantRole";
+import type { DaemonHost } from "tddy-client-web";
 import { SelectedDaemonProvider } from "../../src/rpc/selectedDaemon";
 import { mountWithRecordingLiveKitRpc } from "../support/rpc/recordingLiveKitRpc";
 import { createSessionPage } from "../support/pages/createSessionPage";
@@ -186,7 +186,7 @@ function mountCreatePane(backend: InMemoryRpcBackend, onCreated = cy.stub().as("
   // (`ListAgents` has no routing field, so each host is asked for itself), and a host that cannot be
   // asked offers no agent for a session moved onto it.
   mountWithRecordingLiveKitRpc(
-    <SelectedDaemonProvider room={new Room()} daemons={DAEMON_HOSTS} servingInstanceId={LOCAL_HOST}>
+    <SelectedDaemonProvider room={aDisconnectedRoom()} daemons={DAEMON_HOSTS} servingInstanceId={LOCAL_HOST}>
       <CreateSessionPane
         client={client}
         projectClient={projectClient}

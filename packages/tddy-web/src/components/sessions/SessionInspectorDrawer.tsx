@@ -1,6 +1,6 @@
 import React, { useCallback, useState } from "react";
+import type { RoomHandle } from "tddy-client-web";
 import type { Client } from "@connectrpc/connect";
-import type { Room } from "livekit-client";
 import type { SessionService, SessionEntry } from "tddy-client-web/gen/session_pb";
 import type { ActivityService } from "tddy-client-web/gen/activity_pb";
 import type { ExecToolService } from "tddy-client-web/gen/exec_tools_pb";
@@ -16,7 +16,7 @@ import {
   isInspectorTabName,
   isMediaInspectorTabName,
 } from "../../routing/appRoutes";
-import { useCapabilityAvailability } from "../../hooks/useCapabilityAvailability";
+import { useCapabilityAvailability } from "tddy-client-web";
 import type { HostConnection } from "tddy-client-web/connections/types";
 import { useAppLocation } from "../../routing/useAppLocation";
 import { SessionAgentRosterPane } from "./SessionAgentRosterPane";
@@ -86,7 +86,7 @@ interface SessionInspectorDrawerProps {
    * perfectly good answer; it just has to be given.
    */
   hostConnection: HostConnection | null;
-  room?: Room | null;
+  room?: RoomHandle | null;
   /** LiveKit participant identity of the daemon/presenter side, for the token-usage stream.
    *  Selected together with `room`; falls back to `"server"` when not connected over LiveKit. */
   serverIdentity?: string;

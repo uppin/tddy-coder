@@ -11,7 +11,7 @@
  */
 
 import React from "react";
-import { Room } from "livekit-client";
+import { aDisconnectedRoom } from "tddy-livekit-web/testkit";
 import { create } from "@bufbuild/protobuf";
 import { anInMemoryRpcBackend, type InMemoryRpcBackend } from "tddy-connectrpc-testkit";
 import { ProjectsAppPage } from "../../src/components/projects/ProjectsAppPage";
@@ -27,7 +27,7 @@ import {
   ProbeOutcome,
   type HostGithubCli,
 } from "tddy-client-web/gen/host_pb";
-import type { DaemonHost } from "../../src/lib/participantRole";
+import type { DaemonHost } from "tddy-client-web";
 import { SelectedDaemonProvider } from "../../src/rpc/selectedDaemon";
 import { AuthProvider } from "../../src/hooks/authProvider";
 import { mountWithRpc } from "../support/rpc/inMemory";
@@ -159,7 +159,7 @@ function mountProjectsAppPage() {
   return (
     <AuthProvider>
       <SelectedDaemonProvider
-        room={new Room()}
+        room={aDisconnectedRoom()}
         daemons={DAEMON_HOSTS.slice(0, 1)}
         servingInstanceId={WORKSTATION}
       >

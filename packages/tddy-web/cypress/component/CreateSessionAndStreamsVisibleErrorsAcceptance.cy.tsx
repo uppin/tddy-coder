@@ -12,7 +12,7 @@
 
 import React from "react";
 import { servedAgentWire } from "../support/servedAgents";
-import { Room } from "livekit-client";
+import { aDisconnectedRoom } from "tddy-livekit-web/testkit";
 import { create } from "@bufbuild/protobuf";
 import { Code, ConnectError, createClient, type Client } from "@connectrpc/connect";
 import { anInMemoryRpcBackend, type InMemoryRpcBackend } from "tddy-connectrpc-testkit";
@@ -28,7 +28,7 @@ import { SessionFilesService } from "tddy-client-web/gen/session_files_pb";
 import { WorktreeService } from "tddy-client-web/gen/worktree_pb";
 import { ActivityService, AgentActivityRecordSchema } from "tddy-client-web/gen/activity_pb";
 import { TddyRemote, ServerMessageSchema } from "tddy-client-web/gen/tddy/v1/remote_pb";
-import type { DaemonHost } from "../../src/lib/participantRole";
+import type { DaemonHost } from "tddy-client-web";
 import { SelectedDaemonProvider } from "../../src/rpc/selectedDaemon";
 import { TEST_IDS } from "../support/testIds";
 import { createSessionPage } from "../support/pages/createSessionPage";
@@ -95,7 +95,7 @@ function aCreateSessionBackend(): InMemoryRpcBackend {
 function mountCreatePane(backend: InMemoryRpcBackend) {
   const transport = backend.transport();
   cy.mount(
-    <SelectedDaemonProvider room={new Room()} daemons={DAEMON_HOSTS} servingInstanceId={LOCAL_HOST}>
+    <SelectedDaemonProvider room={aDisconnectedRoom()} daemons={DAEMON_HOSTS} servingInstanceId={LOCAL_HOST}>
       <CreateSessionPane
         client={createClient(SessionService, transport)}
         projectClient={createClient(ProjectService, transport)}
@@ -386,7 +386,7 @@ describe("Session streams — a dropped stream is reported beside what it fed", 
     // Given — a room that has not connected yet, and no transport override
 
     // When
-    cy.mount(<SessionUsageTab room={new Room()} serverIdentity="presenter" />);
+    cy.mount(<SessionUsageTab room={aDisconnectedRoom()} serverIdentity="presenter" />);
 
     // Then — the tab waits in its empty state rather than claiming the stream failed
     sessionsDrawerPage.usageEmpty().should("be.visible");

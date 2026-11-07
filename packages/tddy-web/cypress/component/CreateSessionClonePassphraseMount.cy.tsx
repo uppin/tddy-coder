@@ -12,7 +12,7 @@
 
 import React from "react";
 import { servedAgentWire } from "../support/servedAgents";
-import { Room } from "livekit-client";
+import { aDisconnectedRoom } from "tddy-livekit-web/testkit";
 import { createClient } from "@connectrpc/connect";
 import { anInMemoryRpcBackend, type InMemoryRpcBackend } from "tddy-connectrpc-testkit";
 import { CreateSessionPane } from "../../src/components/sessions/CreateSessionPane";
@@ -22,7 +22,7 @@ import { CatalogService } from "tddy-client-web/gen/catalog_pb";
 import { SessionFilesService } from "tddy-client-web/gen/session_files_pb";
 import { WorktreeService } from "tddy-client-web/gen/worktree_pb";
 import { HostService } from "tddy-client-web/gen/host_pb";
-import type { DaemonHost } from "../../src/lib/participantRole";
+import type { DaemonHost } from "tddy-client-web";
 import { SelectedDaemonProvider } from "../../src/rpc/selectedDaemon";
 import { mountWithRpc } from "../support/rpc/inMemory";
 import { aHostPromptFeed, type HostPromptFeed } from "../support/rpc/hostPromptFeed";
@@ -80,7 +80,7 @@ function aBackendWhoseStartWaits(feed: HostPromptFeed): InMemoryRpcBackend {
 /** The pane as production mounts it: handed its token as a prop, with no auth context around it. */
 function mountCreatePane(backend: InMemoryRpcBackend) {
   mountWithRpc(
-    <SelectedDaemonProvider room={new Room()} daemons={DAEMON_HOSTS} servingInstanceId={AGENT_HOST}>
+    <SelectedDaemonProvider room={aDisconnectedRoom()} daemons={DAEMON_HOSTS} servingInstanceId={AGENT_HOST}>
       <CreateSessionPane
         client={createClient(SessionService, backend.transport())}
         projectClient={createClient(ProjectService, backend.transport())}

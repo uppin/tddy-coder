@@ -5,7 +5,7 @@ import { HISTORY_FILTER, HISTORY_THEME } from "../GhosttyTerminalSession";
 import {
   createForwardHistoryFetcher,
   TerminalHistoryForwardLoader,
-} from "../../lib/terminalHistoryLoader";
+} from "tddy-client-web";
 import { rpcFailureText } from "../../rpc/rpcFailure";
 import { useIsMobile } from "tddy-ui-web";
 import { Toast } from "tddy-ui-web";

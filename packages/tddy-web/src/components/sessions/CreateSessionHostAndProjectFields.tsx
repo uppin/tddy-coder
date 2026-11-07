@@ -1,4 +1,4 @@
-import type { DaemonHost } from "../../lib/participantRole";
+import type { DaemonHost } from "tddy-client-web";
 import type { ProjectEntry } from "tddy-client-web/gen/project_pb";
 import type { projectSelectOptions } from "../../lib/projectSelectOptions";
 import { inputClass, labelClass } from "./createSessionFormStyles";
