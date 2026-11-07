@@ -12,7 +12,7 @@ import React from "react";
 import { mount } from "cypress/react";
 import { GhosttyTerminalSession } from "../../../src/components/GhosttyTerminalSession";
 import type { TerminalStream } from "tddy-client-web/connections/terminal";
-import type { HistoryChunk } from "../../../src/lib/terminalHistoryLoader";
+import type { HistoryChunk } from "tddy-client-web";
 import { UploadProgressProvider } from "../../../src/rpc/uploadProgress";
 import { byTestId, TEST_IDS } from "../testIds";
 

@@ -16,15 +16,10 @@
  * PRD: `docs/ft/web/session-usage-inspector.md`
  */
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { create } from "@bufbuild/protobuf";
-import { createClient } from "@connectrpc/connect";
-import { ConnectionState, RoomEvent, type Room } from "livekit-client";
 import { AsyncQueue } from "tddy-livekit-rpc-web";
-import {
-  useLiveKitTransportFactory,
-  useLiveKitTransportFactoryIsOverridden,
-} from "../../rpc/transportProvider";
+import { useRoomClient, useRoomStatus, type RoomHandle } from "tddy-client-web";
 import {
   ClientMessageSchema,
   TddyRemote,
@@ -43,24 +38,6 @@ export interface SessionUsageStream {
   error: string | null;
 }
 
-/** Whether `room` has joined, kept current across its connection-state changes. */
-function useRoomConnected(room: Room | null): boolean {
-  const [connected, setConnected] = useState(() => room?.state === ConnectionState.Connected);
-  useEffect(() => {
-    if (!room) {
-      setConnected(false);
-      return;
-    }
-    const sync = () => setConnected(room.state === ConnectionState.Connected);
-    sync();
-    room.on(RoomEvent.ConnectionStateChanged, sync);
-    return () => {
-      room.off(RoomEvent.ConnectionStateChanged, sync);
-    };
-  }, [room]);
-  return connected;
-}
-
 /**
  * Subscribes to the session's token-usage stream and returns the latest snapshot, one entry per
  * conversation. `room` / `serverIdentity` select the LiveKit transport target exactly as they do
@@ -69,23 +46,15 @@ function useRoomConnected(room: Room | null): boolean {
  * `error` instead of looking like a session that reported nothing.
  */
 export function useSessionUsage(
-  room: Room | null,
+  room: RoomHandle | null,
   serverIdentity: string,
 ): SessionUsageStream {
-  const liveKitFactory = useLiveKitTransportFactory();
-  const factoryIsOverridden = useLiveKitTransportFactoryIsOverridden();
-  const roomConnected = useRoomConnected(room);
-  const canBuildClient = roomConnected || factoryIsOverridden;
+  const roomConnected = useRoomStatus(room) === "connected";
 
   // Stable client for the lifetime of this room/identity pair — a new room or identity tears
-  // down the old stream and opens a fresh one. `null` when there is no room yet and no test
-  // double to route through instead.
-  const client = useMemo(() => {
-    if (!canBuildClient) return null;
-    const transport = liveKitFactory(room as Room, serverIdentity);
-    return createClient(TddyRemote, transport);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [liveKitFactory, canBuildClient, room, serverIdentity]);
+  // down the old stream and opens a fresh one. `null` while the room has not joined, unless a test
+  // double stands in for the transport (the room-RPC port decides).
+  const client = useRoomClient(roomConnected ? room : null, serverIdentity, TddyRemote);
 
   const [usage, setUsage] = useState<ConversationUsage[]>(emptyUsage);
   const [error, setError] = useState<string | null>(null);

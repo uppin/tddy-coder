@@ -10,7 +10,7 @@
  * PRD: docs/ft/daemon/amendments/PRD-2026-09-18-sandboxed-codebase-from-the-web.md
  */
 
-import type { DaemonHost } from "../../lib/participantRole";
+import type { DaemonHost } from "tddy-client-web";
 
 /**
  * Which placement the form holds.

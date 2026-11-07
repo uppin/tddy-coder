@@ -1,4 +1,4 @@
-import type { DaemonHost } from "../../lib/participantRole";
+import type { DaemonHost } from "tddy-client-web";
 import { CreateSessionSshConfigSelect } from "./CreateSessionSshConfigSelect";
 import { inputClass, labelClass } from "./createSessionFormStyles";
 import { WORKFLOW_RECIPES } from "./createSessionRecipes";

@@ -35,8 +35,14 @@
 import { createContext, useContext, useMemo, useRef, type ReactNode } from "react";
 import { createClient, type Client, type Transport } from "@connectrpc/connect";
 import type { DescService } from "@bufbuild/protobuf";
-import { createLiveKitTransport } from "tddy-livekit-rpc-web";
-import type { Room } from "livekit-client";
+import type { RoomHandle } from "tddy-client-web";
+import {
+  createDefaultLiveKitTransport,
+  LiveKitTransportProvider,
+  useLiveKitTransportFactory,
+  useLiveKitTransportFactoryIsOverridden,
+  type RoomTransportOptions,
+} from "tddy-livekit-web";
 import { TrafficMeterRegistry } from "./trafficMeter";
 import { createDefaultDaemonTransport, type AuthTokenGate } from "./daemonTransport";
 import { wrapTransportWithAuthGate } from "./authGatedTransport";
@@ -55,46 +61,11 @@ export type { AuthTokenGate, DaemonHostEnvironment, DaemonHostWindow } from "./d
 // Defaults
 // ---------------------------------------------------------------------------
 
+// The LiveKit transport itself (`createDefaultLiveKitTransport`) and the factory seam live in
+// `tddy-livekit-web`; what wraps it here is this app's own — the traffic meter and the auth gate.
+export { createDefaultLiveKitTransport, useLiveKitTransportFactory, useLiveKitTransportFactoryIsOverridden };
 /** Options forwarded to the LiveKit transport factory. */
-export interface LiveKitTransportOptions {
-  /** Enable debug logging in the transport. */
-  debug?: boolean;
-}
-
-/** True when the active debug mask enables `tddy:rpc*` — turns on the LiveKit transport's per-RPC
- *  console logging (publish/unary/stream/response with service/method) so client↔server RPC routing
- *  is visible. The mask is stored under the `debug`-package key; set via `dev.daemon.yaml` `debug`
- *  (served at /api/config) or DevTools `localStorage.debug = 'tddy:rpc:*'`. */
-function rpcDebugActive(): boolean {
-  try {
-    return (window.localStorage.getItem("debug") ?? "").includes("tddy:rpc");
-  } catch {
-    return false;
-  }
-}
-
-/**
- * Factory for the production LiveKit transport. Exported so a test can drive the real transport the
- * app runs with — in particular its fault reporting, which has no other observable surface.
- */
-export function createDefaultLiveKitTransport(
-  room: Room,
-  targetIdentity: string,
-  options?: LiveKitTransportOptions,
-  registry?: TrafficMeterRegistry,
-): Transport {
-  return createLiveKitTransport({
-    room,
-    targetIdentity,
-    debug: options?.debug ?? rpcDebugActive(),
-    meter: registry?.get(room.name || "livekit"),
-    // An inbound frame the transport cannot turn into a response is a dropped RPC: the call never
-    // settles, and the app sees only a stalled or throwing refresh. Name the connection it arrived
-    // on so the console says which room and which daemon, not just that decoding failed.
-    onTransportError: (error, context) =>
-      console.error(`[tddy][rpc] room=${room.name} target=${targetIdentity}: ${context}`, error),
-  });
-}
+export type LiveKitTransportOptions = RoomTransportOptions;
 
 // ---------------------------------------------------------------------------
 // Context
@@ -103,15 +74,7 @@ export function createDefaultLiveKitTransport(
 interface RpcTransportContextValue {
   /** The transport to the daemon serving this page — HTTP or webview IPC, chosen at runtime. */
   readonly httpTransport: Transport;
-  readonly liveKitFactory: (room: Room, targetIdentity: string, options?: LiveKitTransportOptions) => Transport;
   readonly meterRegistry: TrafficMeterRegistry;
-  /**
-   * True when this provider was given an explicit `liveKitFactory` override (the test-double
-   * seam described on `RpcTransportProviderProps.liveKitFactory`). Callers that need a real
-   * connected `Room` to build a transport (the production default does) can use this to tell
-   * "no room yet, but a test double that doesn't care" apart from "no room yet, for real."
-   */
-  readonly liveKitFactoryIsOverridden: boolean;
   /**
    * The auth-token gate the serving-daemon transport's interceptor consults. `AuthProvider` sets its
    * `current` to the shared session store's `ensureFreshAccessToken`, so every RPC issued through
@@ -139,7 +102,7 @@ export interface RpcTransportProviderProps {
    * For tests, pass `() => backend.transport()` to route all LiveKit RPC through
    * the in-memory backend instead of a real LiveKit data channel.
    */
-  liveKitFactory?: (room: Room, targetIdentity: string, options?: LiveKitTransportOptions) => Transport;
+  liveKitFactory?: (room: RoomHandle, targetIdentity: string, options?: LiveKitTransportOptions) => Transport;
   children: ReactNode;
 }
 
@@ -181,21 +144,21 @@ export function RpcTransportProvider({
   const innerLkFactory =
     liveKitFactory ??
     ((room, targetIdentity, opts) =>
-      createDefaultLiveKitTransport(room, targetIdentity, opts, registry));
-  const lkFactory = (room: Room, targetIdentity: string, opts?: LiveKitTransportOptions) =>
+      createDefaultLiveKitTransport(room, targetIdentity, opts, (roomName) => registry.get(roomName)));
+  const lkFactory = (room: RoomHandle, targetIdentity: string, opts?: LiveKitTransportOptions) =>
     wrapTransportWithAuthGate(innerLkFactory(room, targetIdentity, opts), resolveFreshAccessToken);
 
   const value: RpcTransportContextValue = {
     httpTransport: httpRef.current,
-    liveKitFactory: lkFactory,
     meterRegistry: registry,
-    liveKitFactoryIsOverridden: liveKitFactory !== undefined,
     authTokenGate: authTokenGateRef.current,
   };
 
   return (
     <RpcTransportContext.Provider value={value}>
-      <AppClientsPorts>{children}</AppClientsPorts>
+      <LiveKitTransportProvider factory={lkFactory} overridden={liveKitFactory !== undefined}>
+        <AppClientsPorts>{children}</AppClientsPorts>
+      </LiveKitTransportProvider>
     </RpcTransportContext.Provider>
   );
 }
@@ -247,39 +210,6 @@ export function useServingHttpTransport(): Transport {
 }
 
 /**
- * Return the LiveKit transport factory for this component's context.
- *
- * Usage:
- * ```ts
- * const liveKitFactory = useLiveKitTransportFactory();
- * // ...after connecting to a room:
- * const transport = liveKitFactory(room, serverIdentity, { debug: true });
- * const client = createClient(TerminalService, transport);
- * ```
- */
-export function useLiveKitTransportFactory(): (room: Room, targetIdentity: string, options?: LiveKitTransportOptions) => Transport {
-  const ctx = useContext(RpcTransportContext);
-  // Fallback (no provider): no meter registry available, so no metering.
-  return ctx?.liveKitFactory ?? createDefaultLiveKitTransport;
-}
-
-/**
- * True when the LiveKit transport factory in scope is a test double (an explicit
- * `RpcTransportProvider liveKitFactory` override), false for the real production default.
- *
- * The production default (`createDefaultLiveKitTransport`) requires a genuinely connected
- * `Room` and crashes without one; a test double (e.g. one that routes to an in-memory RPC
- * backend) is free to ignore its `room`/`targetIdentity` arguments entirely. Callers that may
- * be invoked before a real `Room` exists (see `usePresenterChat`) use this to build a client
- * via the test double regardless, while still refusing to call the unsafe production default
- * without a room.
- */
-export function useLiveKitTransportFactoryIsOverridden(): boolean {
-  const ctx = useContext(RpcTransportContext);
-  return ctx?.liveKitFactoryIsOverridden ?? false;
-}
-
-/**
  * Build and memoize the LiveKit transport for the given room and participant. Returns `null`
  * when either `room` or `targetIdentity` is not yet available.
  *
@@ -288,7 +218,7 @@ export function useLiveKitTransportFactoryIsOverridden(): boolean {
  * {@link useLiveKitClient} instead.
  */
 export function useLiveKitTransport(
-  room: Room | null | undefined,
+  room: RoomHandle | null | undefined,
   targetIdentity: string | null | undefined,
   options?: LiveKitTransportOptions,
 ): Transport | null {
@@ -311,7 +241,7 @@ export function useLiveKitTransport(
  */
 export function useLiveKitClient<S extends DescService>(
   service: S,
-  room: Room | null | undefined,
+  room: RoomHandle | null | undefined,
   targetIdentity: string | null | undefined,
   options?: LiveKitTransportOptions,
 ): Client<S> | null {

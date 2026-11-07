@@ -25,6 +25,7 @@
     "@bufbuild/protobuf": "^2.2.0",
     "@connectrpc/connect": "^2.0.0",
     "@connectrpc/connect-web": "^2.0.0",
+    "debug": "^4.4.3",
     "tddy-react-commons": "workspace:*"
   },
   "peerDependencies": {

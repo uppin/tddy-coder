@@ -13,7 +13,7 @@
  * Feature: docs/ft/web/session-agent-catalog-fan-out.md
  */
 
-import { safeTestIdPart } from "../../lib/testId";
+import { safeTestIdPart } from "tddy-client-web";
 import { inputClass, labelClass } from "./createSessionFormStyles";
 import {
   selectableAgentText,

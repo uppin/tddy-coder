@@ -32,7 +32,7 @@ import {
 import { ModelsAppPage } from "../../../src/components/models/ModelsAppPage";
 import { useModelRegistryFanOut } from "../../../src/components/models/useModelRegistryFanOut";
 import { AuthProvider } from "../../../src/hooks/authProvider";
-import type { DaemonHost } from "../../../src/lib/participantRole";
+import type { DaemonHost } from "tddy-client-web";
 import { SelectedDaemonProvider } from "../../../src/rpc/selectedDaemon";
 import { providerRowKey, type ProviderRow } from "../../../src/utils/mergeRegistryEntries";
 import { mountWithRpc } from "../../support/rpc/inMemory";

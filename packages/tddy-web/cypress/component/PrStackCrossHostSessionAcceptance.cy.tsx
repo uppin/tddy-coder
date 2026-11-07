@@ -31,7 +31,7 @@ import {
   aFakeCommonRoomWithMetadata,
   withSelectedDaemonRoom,
 } from "../support/rpc/withSelectedDaemon";
-import type { DaemonHost } from "../../src/lib/participantRole";
+import type { DaemonHost } from "tddy-client-web";
 import { mountWithRecordingLiveKitRpc } from "../support/rpc/recordingLiveKitRpc";
 import { aSessionsDrawerBackend } from "../support/rpc/vncBackend";
 import { sessionsDrawerPage } from "../support/pages/sessionsDrawerPage";

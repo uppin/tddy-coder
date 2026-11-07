@@ -1,7 +1,7 @@
 import { useState } from "react";
 import type { ProviderKind } from "tddy-client-web/gen/models_pb";
 import { unrecognisedEnumText } from "../../lib/enumSkew";
-import { safeTestIdPart } from "../../lib/testId";
+import { safeTestIdPart } from "tddy-client-web";
 import {
   providerRowKey,
   registryEmptyStateText,

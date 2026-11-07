@@ -18,12 +18,12 @@
 
 import React from "react";
 import { LiveKitAppPage } from "../../src/components/livekit/LiveKitAppPage";
-import { LIVEKIT_SOURCE_ID } from "../../src/rpc/hostDirectory/liveKitSource";
-import { useHostDirectorySource } from "../../src/rpc/hostDirectory/useHostDirectory";
+import { LIVEKIT_SOURCE_ID } from "tddy-livekit-web";
+import { useHostDirectorySource } from "tddy-client-web";
 import {
   aCommonRoomThatFailsToConnect,
   aCommonRoomThatNeverFinishesConnecting,
-} from "../support/livekit/commonRoomConnection";
+} from "tddy-livekit-web/testkit";
 import { mountWithLiveCommonRoom } from "../support/rpc/withLiveCommonRoom";
 import { participantListPage } from "../support/pages/participantListPage";
 import { daemonSelectorPage } from "../support/pages/daemonSelectorPage";

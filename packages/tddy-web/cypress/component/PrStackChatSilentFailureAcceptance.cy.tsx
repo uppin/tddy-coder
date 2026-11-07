@@ -25,7 +25,7 @@
 
 import React from "react";
 import { ConnectError, Code } from "@connectrpc/connect";
-import { Room } from "livekit-client";
+import { aDisconnectedRoom } from "tddy-livekit-web/testkit";
 import { SessionMainPane } from "../../src/components/sessions/SessionMainPane";
 import { SessionsDrawerScreen } from "../../src/components/sessions/SessionsDrawerScreen";
 import { withSelectedDaemon } from "../support/rpc/withSelectedDaemon";
@@ -238,7 +238,7 @@ it("shows an error and preserves the draft when the presenter's own participant 
   mountWithRpc(
     <PrStackChat
       session={PR_STACK_SESSION as any}
-      room={new Room()}
+      room={aDisconnectedRoom()}
       livekitServerIdentity="daemon-dev-presenter-not-in-room"
     />,
     backend,

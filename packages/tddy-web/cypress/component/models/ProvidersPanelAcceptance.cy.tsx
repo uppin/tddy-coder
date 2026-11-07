@@ -15,7 +15,7 @@ import {
   ProviderKind,
 } from "tddy-client-web/gen/models_pb";
 import { ModelsAppPage } from "../../../src/components/models/ModelsAppPage";
-import type { DaemonHost } from "../../../src/lib/participantRole";
+import type { DaemonHost } from "tddy-client-web";
 import { withSelectedDaemon } from "../../support/rpc/withSelectedDaemon";
 import { mountWithRpc } from "../../support/rpc/inMemory";
 import {

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import type { DaemonHost } from "../../lib/participantRole";
+import type { DaemonHost } from "tddy-client-web";
 import { useActionFailure } from "../../hooks/useActionFailure";
 import { InlineError } from "tddy-ui-web";
 import { assignmentRowsFor, withAssignment } from "./ProjectAccountAssignment";

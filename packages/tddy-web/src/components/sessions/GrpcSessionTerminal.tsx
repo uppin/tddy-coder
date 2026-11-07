@@ -16,13 +16,13 @@ import type {
 } from "tddy-client-web/connections/terminal";
 import type { ConnectedSession } from "./useTerminalControl";
 import type { ToolShortcutDef } from "../../lib/toolShortcuts";
-import { tddyDebug } from "../../lib/debugMask";
+import { tddyDebug } from "tddy-client-web";
 import { measureTerminalGridFromRect } from "../../lib/terminalGridMeasure";
-import { TerminalFrameContinuity } from "../../lib/terminalFrameContinuity";
+import { TerminalFrameContinuity } from "tddy-client-web";
 import { isFrameForTerminal } from "../../lib/terminalFrameIdentity";
 import { useEnqueuedInput } from "./useEnqueuedInput";
 import { EnqueuedInputOverlay } from "../connection/EnqueuedInputOverlay";
-import { createForwardHistoryFetcher } from "../../lib/terminalHistoryLoader";
+import { createForwardHistoryFetcher } from "tddy-client-web";
 import { rpcFailureText } from "../../rpc/rpcFailure";
 import { InputRefusalTracker } from "../../rpc/connections/inputDelivery";
 import { InlineError } from "tddy-ui-web";

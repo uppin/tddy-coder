@@ -1,6 +1,6 @@
 import { useRef } from "react";
 import type { Room } from "livekit-client";
-import { useCommonRoom, type CommonRoomStatus } from "../../hooks/useCommonRoom";
+import { useCommonRoom, type CommonRoomStatus } from "tddy-livekit-web";
 import type { SessionAttachmentHint } from "tddy-client-web/connections/session";
 import { presenterRoomTargetFor } from "./presenterRoomTarget";
 
