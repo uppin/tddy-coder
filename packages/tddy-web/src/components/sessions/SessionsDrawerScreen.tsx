@@ -4,18 +4,18 @@ import type { Client } from "@connectrpc/connect";
 import { SessionService, SessionEntrySchema } from "tddy-client-web/gen/session_pb";
 import { useHostPresence } from "tddy-client-web";
 import { UploadProgressProvider } from "tddy-terminal-web";
-import { requestSessionsRefresh } from "../../lib/sessionsRefreshBridge";
-import { sessionNotificationRegistry } from "./sessionNotificationRegistry";
-import { useSessionNotifications } from "../../rpc/useSessionNotifications";
+import { requestSessionsRefresh } from "tddy-session-web";
+import { sessionNotificationRegistry } from "tddy-session-web";
+import { useSessionNotifications } from "tddy-session-web";
 import { useAuthContext } from "../../hooks/authProvider";
 import { hostNotConnected } from "tddy-client-web";
-import { AppShell } from "../shell/AppShell";
 import { TooltipProvider, detectIsMobile, useIsMobile } from "tddy-ui-web";
 import { SessionDrawer } from "./SessionDrawer";
 import { SessionMainPane } from "./SessionMainPane";
 import { SessionHostStatsFooter } from "./SessionHostStatsFooter";
 import { useSessionAttachment } from "./useSessionAttachment";
-import { sessionsDrawerPathForSession, SESSIONS_DRAWER_ROUTE, SESSIONS_NEW_ROUTE } from "../../routing/appRoutes";
+import { SessionShell } from "tddy-session-web";
+import { sessionsDrawerPathForSession, SESSIONS_DRAWER_ROUTE, SESSIONS_NEW_ROUTE } from "tddy-client-web";
 import { resolveShortcutsForSession } from "tddy-terminal-web";
 import { isCliSessionType } from "tddy-session-create-web";
 import { registerSessionTypeOptions, sessionTypeOptions } from "tddy-session-create-web";
@@ -341,7 +341,7 @@ export function SessionsDrawerScreen({
       )}
       {/* 100dvh (via AppShell fullbleed): on mobile 100vh includes the area behind the browser
           chrome, which would push the bottom keyboard bar off the visible screen. */}
-      <AppShell
+      <SessionShell
         variant="fullbleed"
         title="Sessions"
         onNavigate={onNavigate}
@@ -443,7 +443,7 @@ export function SessionsDrawerScreen({
           runtimes={runtimes}
           runtimeRegistry={runtimeRegistry}
         />
-      </AppShell>
+      </SessionShell>
     </TooltipProvider>
     </UploadProgressProvider>
   );

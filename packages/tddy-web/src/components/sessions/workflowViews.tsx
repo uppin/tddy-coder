@@ -8,10 +8,9 @@ import type { SessionFilesService } from "tddy-client-web/gen/session_files_pb";
 import type { WorktreeService } from "tddy-client-web/gen/worktree_pb";
 import type { TaskService } from "tddy-client-web/gen/tasks_pb";
 import type { SessionAttachmentHint } from "tddy-client-web/connections/session";
-import type { SessionMetadata } from "../../lib/sessionParticipantMetadata";
+import type { SessionMetadata } from "tddy-session-web";
 import { sessionPaneIsWorkflowView } from "./attachClaim";
 import { PrStackScreen, WorkflowChatScreen } from "tddy-prstack-web";
-import { HostStartPassphraseScope } from "../hosts/HostStartPassphrasePrompt";
 
 type ConnectionClient = Client<typeof SessionService>;
 type ProjectClient = Client<typeof ProjectService>;
@@ -106,7 +105,6 @@ export function resolveWorkflowView(
   if (!sessionPaneIsWorkflowView(session)) return null;
   if (session.recipe === "pr-stack") {
     return (
-      <HostStartPassphraseScope>
       <PrStackScreen
         key={session.sessionId}
         session={session}
@@ -126,7 +124,6 @@ export function resolveWorkflowView(
         onOpenSession={context.onOpenSession}
         sessionMetadataBySessionId={context.sessionMetadataBySessionId}
       />
-      </HostStartPassphraseScope>
     );
   }
   // Past the gate and not `pr-stack`: a tddy-coder workflow session, which the chat screen owns.

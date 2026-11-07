@@ -1,5 +1,5 @@
 import { describe, expect, it } from "bun:test";
-import { aProjectEntry, anActiveSession } from "../test-utils";
+import { aProjectEntry, anActiveSession } from "../../test-utils/builders";
 import { isSessionOrphan, sortedSessionsForProjectTable } from "./sessionProjectTable";
 
 describe("sessions listed under a project accordion", () => {

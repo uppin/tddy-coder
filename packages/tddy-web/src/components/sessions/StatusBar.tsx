@@ -2,7 +2,7 @@ import React from "react";
 import type { SessionAttachmentState } from "./useSessionAttachment";
 import { SessionTrafficStrip } from "./SessionTrafficStrip";
 import { liveKitRoomOf } from "tddy-livekit-web";
-import { useLiveKitPing } from "../../rpc/livekitPing";
+import { useLiveKitPing } from "tddy-session-web";
 import { useTrafficMeterRegistry } from "../../rpc/transportProvider";
 import { useMeterSnapshot } from "./useMeterSnapshot";
 import { useAttachedSessionTraffic } from "./useAttachedSessionTraffic";

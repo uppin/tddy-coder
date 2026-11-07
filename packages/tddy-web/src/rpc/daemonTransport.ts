@@ -20,11 +20,11 @@ import {
   thisPagesIpcHost,
   type WebviewIpcBridge,
 } from "tddy-tauri-web";
-import { daemonTransportFlavour, type TauriHostWindow } from "./daemonTransportFlavour";
+import { daemonTransportFlavour, type TauriHostWindow } from "tddy-session-web";
 import { transportWithInterceptors } from "./interceptedTransport";
 import { createTrafficInterceptor } from "./httpTrafficInterceptor";
 import { createAuthGateInterceptor } from "./authGateInterceptor";
-import type { TrafficMeterRegistry } from "./trafficMeter";
+import type { TrafficMeterRegistry } from "tddy-session-web";
 
 /**
  * Settable holder for the app's access-token resolver. The production transport's auth-gate

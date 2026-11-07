@@ -8,7 +8,7 @@
  */
 
 import { useEffect, useState } from "react";
-import type { TrafficMeter } from "../../rpc/trafficMeter";
+import type { TrafficMeter } from "tddy-session-web";
 
 export type MeterSnap = { bytesIn: number; bytesOut: number; inRate: number; outRate: number };
 

@@ -18,8 +18,8 @@ import type { ByteDelta } from "./sessionRuntimeRegistry";
 import type { SessionRuntimeProps, TerminalClient } from "./sessionRuntimeProps";
 import { useConnectionStatus } from "../../rpc/connections/useConnectionStatus";
 import { useHasCapability } from "tddy-client-web";
-import { sessionReadsLocalPaths } from "../../lib/sessionReadsLocalPaths";
-import type { TauriHostWindow } from "../../rpc/daemonTransportFlavour";
+import { sessionReadsLocalPaths } from "tddy-session-web";
+import type { TauriHostWindow } from "tddy-session-web";
 import { cn, InlineError } from "tddy-ui-web";
 import { useSelectedDaemon } from "tddy-client-web";
 

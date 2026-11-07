@@ -1,6 +1,6 @@
 import type React from "react";
 import { ChevronDown, ChevronRight } from "lucide-react";
-import type { ProjectSessionGroup } from "../../utils/sessionProjectGroups";
+import type { ProjectSessionGroup } from "tddy-session-web";
 
 /** The key a group is known by in test ids and the collapsed set: its project id, or `"other"`. */
 export function projectGroupKey(group: ProjectSessionGroup): string {

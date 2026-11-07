@@ -43,7 +43,7 @@ import {
   useLiveKitTransportFactoryIsOverridden,
   type RoomTransportOptions,
 } from "tddy-livekit-web";
-import { TrafficMeterRegistry } from "./trafficMeter";
+import { TrafficMeterRegistry } from "tddy-session-web";
 import { createDefaultDaemonTransport, type AuthTokenGate } from "./daemonTransport";
 import { wrapTransportWithAuthGate } from "./authGatedTransport";
 import { AppClientsPorts } from "./appClientsPorts";

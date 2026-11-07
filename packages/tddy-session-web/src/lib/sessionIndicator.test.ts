@@ -1,5 +1,5 @@
 import { describe, expect, it } from "bun:test";
-import { anActiveSession, anInactiveSession } from "../test-utils";
+import { anActiveSession, anInactiveSession } from "../../test-utils/builders";
 import {
   ACTIVITY_BLINK_WINDOW_MS,
   sessionIndicatorFor,

@@ -1,17 +1,18 @@
 import React, { useState } from "react";
 import type { SessionEntry } from "tddy-client-web/gen/session_pb";
-import type { SessionMetadata } from "../../lib/sessionParticipantMetadata";
+import type { SessionMetadata } from "tddy-session-web";
 import {
   partitionSessionsByActivity,
   type SessionStackGroupResult,
-} from "../../utils/sessionStackGroups";
-import type { ProjectSessionGroup } from "../../utils/sessionProjectGroups";
+} from "tddy-session-web";
+import type { ProjectSessionGroup } from "tddy-session-web";
 import { projectGroupKey } from "./SessionProjectGroup";
 import { Tooltip, TooltipTrigger, TooltipContent, cn } from "tddy-ui-web";
 import { SessionDrawerItem } from "./SessionDrawerItem";
 import { SessionIndicatorDot } from "./SessionIndicatorDot";
 import { SessionDrawerSeparator } from "./SessionDrawerSeparator";
-import { sessionDrawerLabel } from "../../utils/sessionDrawerLabel";
+import { sessionDrawerLabel } from "tddy-session-web";
+import { cn } from "tddy-ui-web";
 
 // The rows the session drawer renders — stack groups, activity partitions, a project group's body
 // and the collapsed strip's dots — split out of `SessionDrawer.tsx`, which keeps the drawer chrome

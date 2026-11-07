@@ -1,5 +1,5 @@
 import { describe, expect, it } from "bun:test";
-import { aProjectEntry, anActiveSession } from "../test-utils";
+import { aProjectEntry, anActiveSession } from "../../test-utils/builders";
 import { sortedSessionsForProjectHostTable } from "./sessionProjectTable";
 
 /** Shared project id registered on two daemons (multi-daemon collision scenario). */

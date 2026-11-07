@@ -101,6 +101,30 @@ Commit 3 moves the 156 specs commit 2 had moved **back** to tddy-web (byte-ident
 skeleton, and replaces the red tests: `src/sessionSeams.test.ts` (3 seam rules) and the boundary test's surface list
 (the helpers' real export names). Red: 4 failing.
 
+**Progress (15a green, 2026-11-07):**
+
+- [x] Seams: session code reads the location through `tddy-client-web`'s `useAppLocation`; the pure route
+  builders/parsers session code needs (`SESSIONS_NEW_ROUTE`, `isSessionsNewPath`, `parseSessionsProjectHomeSetup*`,
+  `isSessionsDrawerPath`, `parseSessionsDrawerSessionId`, the inspector tab names/guards) moved from tddy-web's
+  `routing/appRoutes` to `tddy-client-web` (tddy-web re-exports them, as it already does for #849's builders).
+  `AppShell` reaches session screens through `SessionShellProvider` / `SessionShell` (new, `tddy-session-web`);
+  the passphrase prompt through create-session's `StartPassphraseProvider`. Both are filled in tddy-web's
+  `AppClientsPorts`, so every mount (app and Cypress `mount`) has them; a missing provider throws naming itself.
+  `HostStartPassphraseScope` is deleted (its three session call sites no longer wrap).
+- [x] Helpers moved with their unit tests: `lib/{sessionIndicator, sessionParticipantMetadata, sessionsRefreshBridge,
+  sessionReadsLocalPaths, sessionNotificationRegistry}`, `utils/{crossHostSessions, projectHomeGroups,
+  sessionProjectGroups, sessionDrawerLabel, sessionSort, sessionDisplay, sessionSelection,
+  connectionStatusForSession, sessionStackGroups, sessionProjectTable}`, `rpc/{trafficMeter, daemonTransportFlavour,
+  livekitPing, useSessionNotifications}`. `useSessionNotifications` reads the token through the auth port
+  (`useAuth`), not tddy-web's `useAuthContext`. Package-local `test-utils/{builders,matchers}.ts` (the prstack pattern).
+- tddy-web gains a `tddy-session-web` workspace dependency (manifest + lockfile entry, no registry URL).
+
+**Deviation / stop (boundary):** `shellQuote`, `toolShortcuts`, `uploadProgress` and `clipboard` were **not** moved.
+`origin/feature/web-split/terminal` already owns them in `tddy-terminal-web/src/{lib,rpc}` (its specs import them
+there), and `tddy-terminal-web` is upstream of this package, so they cannot live here. They stay in tddy-web until the
+terminal branch reaches this line; the boundary test's surface entries `shellQuotePath` and `keySequenceToBytes` stay
+red until then and should be re-pointed at `tddy-terminal-web` (or dropped).
+
 Earlier contract (commit 2):
 
 **As pushed (commit 2):** skeleton, workflow, boundary rule; **156** specs `git mv`'d — every remaining

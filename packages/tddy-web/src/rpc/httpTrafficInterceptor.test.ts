@@ -14,7 +14,7 @@ import { anInMemoryRpcBackend } from "tddy-connectrpc-testkit";
 import { TokenService, GenerateTokenRequestSchema, GenerateTokenResponseSchema } from "tddy-client-web/gen/token_pb";
 
 import { createTrafficInterceptor } from "./httpTrafficInterceptor";
-import { TrafficMeter } from "./trafficMeter";
+import { TrafficMeter } from "tddy-session-web";
 
 // ---------------------------------------------------------------------------
 // Fixtures

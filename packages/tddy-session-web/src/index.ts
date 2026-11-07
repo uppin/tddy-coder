@@ -1,2 +1,20 @@
-// TODO(session): implement — The sessions drawer, runtime, main pane, terminal tabs, inspector, agent layers and code pane move here.
-export {};
+export * from "./sessionShell";
+export * from "./lib/sessionIndicator";
+export * from "./lib/sessionParticipantMetadata";
+export * from "./lib/sessionsRefreshBridge";
+export * from "./lib/sessionReadsLocalPaths";
+export * from "./lib/sessionNotificationRegistry";
+export * from "./utils/crossHostSessions";
+export * from "./utils/projectHomeGroups";
+export * from "./utils/sessionProjectGroups";
+export * from "./utils/sessionDrawerLabel";
+export * from "./utils/sessionSort";
+export * from "./utils/sessionDisplay";
+export * from "./utils/sessionSelection";
+export * from "./utils/connectionStatusForSession";
+export * from "./utils/sessionStackGroups";
+export * from "./utils/sessionProjectTable";
+export * from "./rpc/trafficMeter";
+export * from "./rpc/daemonTransportFlavour";
+export * from "./rpc/livekitPing";
+export * from "./rpc/useSessionNotifications";

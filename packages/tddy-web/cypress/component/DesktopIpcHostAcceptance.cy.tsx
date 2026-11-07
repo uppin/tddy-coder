@@ -28,7 +28,7 @@ import {
 import { App } from "../../src/index";
 import { AuthProvider } from "../../src/hooks/authProvider";
 import { RpcTransportProvider } from "../../src/rpc/transportProvider";
-import type { TauriHostWindow } from "../../src/rpc/daemonTransportFlavour";
+import type { TauriHostWindow } from "tddy-session-web";
 import {
   ACCESS_TOKEN_KEY,
   aDurableSessionBackend,

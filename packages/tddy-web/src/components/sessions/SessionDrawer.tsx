@@ -1,13 +1,13 @@
 import React, { useEffect, useState } from "react";
 import { ChevronLeft, ChevronRight } from "lucide-react";
 import type { SessionEntry } from "tddy-client-web/gen/session_pb";
-import type { SessionMetadata } from "../../lib/sessionParticipantMetadata";
-import { groupSessionsByProject } from "../../utils/sessionProjectGroups";
+import type { SessionMetadata } from "tddy-session-web";
+import { groupSessionsByProject } from "tddy-session-web";
 import {
   projectHomeSlot,
   withProjectHomeGroups,
   type ProjectHomeInfo,
-} from "../../utils/projectHomeGroups";
+} from "tddy-session-web";
 import { SessionProjectGroup, projectGroupKey } from "./SessionProjectGroup";
 import { ProjectHomeEntry } from "./ProjectHomeEntry";
 import { readCollapsedProjects, writeCollapsedProjects } from "./projectGroupCollapse";
@@ -82,7 +82,7 @@ interface SessionDrawerProps {
   onReplaceProjectHome?: (projectId: string) => void;
 }
 
-export type { ProjectHomeInfo } from "../../utils/projectHomeGroups";
+export type { ProjectHomeInfo } from "tddy-session-web";
 
 export function SessionDrawer({
   sessions,

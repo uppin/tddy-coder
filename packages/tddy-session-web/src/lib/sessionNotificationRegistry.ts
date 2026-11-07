@@ -17,7 +17,7 @@
  * PRD: docs/ft/daemon/session-notifications.md (FR4–FR6).
  */
 
-import type { SessionNotificationState } from "../../lib/sessionIndicator";
+import type { SessionNotificationState } from "./sessionIndicator";
 
 export type { SessionNotificationState };
 

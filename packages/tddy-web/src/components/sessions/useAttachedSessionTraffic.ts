@@ -13,7 +13,7 @@
  */
 
 import { useEffect, useRef } from "react";
-import { TrafficMeter } from "../../rpc/trafficMeter";
+import { TrafficMeter } from "tddy-session-web";
 import { useMeterSnapshot } from "./useMeterSnapshot";
 import type { SessionRuntimeRegistry, SessionRuntimeState } from "./sessionRuntimeRegistry";
 

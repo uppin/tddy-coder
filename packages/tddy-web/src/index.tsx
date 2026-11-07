@@ -8,7 +8,7 @@ import { AuthProvider, useAuthContext } from "./hooks/authProvider";
 import { HostStartPassphraseScope } from "./components/hosts/HostStartPassphrasePrompt";
 import { SelectedDaemonProvider } from "./rpc/selectedDaemon";
 import { ConnectionProviders } from "./rpc/connections/registry";
-import { daemonTransportFlavour, type TauriHostWindow } from "./rpc/daemonTransportFlavour";
+import { daemonTransportFlavour, type TauriHostWindow } from "tddy-session-web";
 import { thisWindowsNativeFileDrop } from "tddy-tauri-web";
 import { NativeFileDropProvider } from "tddy-terminal-web";
 import { localHostRegistrationFor } from "./rpc/connections/localHost";

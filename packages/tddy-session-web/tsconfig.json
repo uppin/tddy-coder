@@ -12,5 +12,5 @@
     "esModuleInterop": true,
     "types": ["bun", "cypress"]
   },
-  "include": ["src", "cypress"]
+  "include": ["src", "cypress", "test-utils"]
 }

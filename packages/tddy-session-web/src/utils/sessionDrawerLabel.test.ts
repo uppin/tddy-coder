@@ -1,5 +1,5 @@
 import { describe, expect, it } from "bun:test";
-import { anActiveSession, anInactiveSession } from "../test-utils";
+import { anActiveSession, anInactiveSession } from "../../test-utils/builders";
 import { sessionDrawerLabel } from "./sessionDrawerLabel";
 
 describe("sessionDrawerLabel — derived display label for drawer items", () => {
