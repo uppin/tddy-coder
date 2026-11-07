@@ -41,7 +41,7 @@ export interface UseLiveKitRoomsResult {
  * that never comes, the iterator stays parked forever and the call is never settled. Aborting ends
  * it at unmount; the resulting AbortError is swallowed the way `useHostStats` swallows its own.
  *
- * The reach of that abort is client-side only: `packages/tddy-livekit-web/src/transport.ts` cancels
+ * The reach of that abort is client-side only: `packages/tddy-livekit-rpc-web/src/transport.ts` cancels
  * locally without telling the peer (a TODO carried there), so this stops the browser's loop and
  * releases its pending-call entry, while ending the daemon's side is a separate server-side fix.
  *

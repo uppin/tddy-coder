@@ -29,7 +29,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type RefObject } fro
 import { create } from "@bufbuild/protobuf";
 import { createClient } from "@connectrpc/connect";
 import type { Room } from "livekit-client";
-import { AsyncQueue } from "tddy-livekit-web";
+import { AsyncQueue } from "tddy-livekit-rpc-web";
 import {
   useLiveKitTransportFactory,
   useLiveKitTransportFactoryIsOverridden,

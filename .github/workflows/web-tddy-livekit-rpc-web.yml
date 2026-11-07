@@ -1,4 +1,4 @@
-name: Web tddy-livekit-web
+name: Web tddy-livekit-rpc-web
 
 # Runs this package's tests when a PR touches it or a workspace package it depends on
 # (scripts/web-affected.ts); otherwise the check passes without running them. The work is in
@@ -13,7 +13,7 @@ on:
   workflow_dispatch:
 
 concurrency:
-  group: web-tddy-livekit-web-${{ github.head_ref || github.ref_name }}
+  group: web-tddy-livekit-rpc-web-${{ github.head_ref || github.ref_name }}
   cancel-in-progress: true
 
 permissions:
@@ -25,7 +25,7 @@ jobs:
   web:
     uses: ./.github/workflows/web-package.yml
     with:
-      package: tddy-livekit-web
+      package: tddy-livekit-rpc-web
       needs-rust-fixture: true
       needs-livekit-image: true
       has-cypress: true

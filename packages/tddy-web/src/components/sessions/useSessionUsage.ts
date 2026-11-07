@@ -20,7 +20,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { create } from "@bufbuild/protobuf";
 import { createClient } from "@connectrpc/connect";
 import { ConnectionState, RoomEvent, type Room } from "livekit-client";
-import { AsyncQueue } from "tddy-livekit-web";
+import { AsyncQueue } from "tddy-livekit-rpc-web";
 import {
   useLiveKitTransportFactory,
   useLiveKitTransportFactoryIsOverridden,
