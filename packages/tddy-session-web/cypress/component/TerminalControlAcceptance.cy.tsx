@@ -14,7 +14,7 @@
  */
 
 import React from "react";
-import { TerminalControlOverlay } from "../../src/components/sessions/TerminalControlOverlay";
+import { TerminalControlOverlay } from "../../src/TerminalControlOverlay";
 import { sessionsDrawerPage as page } from "../support/pages/sessionsDrawerPage";
 
 // ---------------------------------------------------------------------------

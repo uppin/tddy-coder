@@ -11,8 +11,8 @@
  */
 
 import React from "react";
-import { SessionMainPane } from "../../src/components/sessions/SessionMainPane";
-import type { SessionAttachmentState } from "../../src/components/sessions/useSessionAttachment";
+import { SessionMainPane } from "../../src/SessionMainPane";
+import type { SessionAttachmentState } from "../../src/useSessionAttachment";
 import { aSessionConnection } from "../support/rpc/sessionConnections";
 import type { SessionEntry, ProjectEntry } from "tddy-client-web/gen/session_pb";
 import { sessionsDrawerPage } from "../support/pages/sessionsDrawerPage";

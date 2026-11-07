@@ -28,7 +28,7 @@ import type { RoomHandle as Room } from "tddy-client-web";
 import { SessionService, ListSessionsResponseSchema, SessionEntrySchema } from "tddy-client-web/gen/session_pb";
 import { TokenService, GenerateTokenResponseSchema } from "tddy-client-web/gen/token_pb";
 import { daemonRpcIdentity } from "tddy-client-web";
-import { SessionRuntime } from "../../src/components/sessions/SessionRuntime";
+import { SessionRuntime } from "../../src/SessionRuntime";
 import { LiveKitConnectionProvider } from "tddy-livekit-web";
 import { attachmentHintFromReply } from "tddy-client-web";
 import type { SessionAttachmentHint, SessionConnection } from "tddy-client-web/connections/session";

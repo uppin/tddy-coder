@@ -26,9 +26,9 @@
 
 import React from "react";
 import { anInMemoryRpcBackend } from "tddy-connectrpc-testkit";
-import { SessionMainPane } from "../../src/components/sessions/SessionMainPane";
-import type { SessionAttachmentState } from "../../src/components/sessions/useSessionAttachment";
-import type { SessionRuntimeState } from "../../src/components/sessions/sessionRuntimeRegistry";
+import { SessionMainPane } from "../../src/SessionMainPane";
+import type { SessionAttachmentState } from "../../src/useSessionAttachment";
+import type { SessionRuntimeState } from "../../src/sessionRuntimeRegistry";
 import type { SessionEntry } from "tddy-client-web/gen/session_pb";
 import { ScreenSharingService } from "tddy-client-web/gen/screen_sharing_pb";
 import { VncService } from "tddy-client-web/gen/vnc_pb";

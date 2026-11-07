@@ -26,7 +26,7 @@ import {
   TerminalSessionService,
   type SessionTerminalInput,
 } from "tddy-client-web/gen/terminal_session_pb";
-import { GrpcSessionTerminal } from "../../src/components/sessions/GrpcSessionTerminal";
+import { GrpcSessionTerminal } from "../../src/GrpcSessionTerminal";
 import { UploadProgressProvider } from "tddy-terminal-web";
 
 type TerminalClient = Client<typeof TerminalSessionService>;

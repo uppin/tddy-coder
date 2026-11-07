@@ -20,7 +20,7 @@ import {
   type SessionTerminalInput,
   SessionTerminalOutputSchema,
 } from "tddy-client-web/gen/terminal_session_pb";
-import { GrpcSessionTerminal } from "../../src/components/sessions/GrpcSessionTerminal";
+import { GrpcSessionTerminal } from "../../src/GrpcSessionTerminal";
 import { UploadProgressProvider } from "tddy-terminal-web";
 import { aGhosttyTerminal } from "../../../tddy-terminal-web/cypress/support/drivers/ghosttyTerminalDriver";
 import { aGhosttyTerminalSession } from "../../../tddy-terminal-web/cypress/support/drivers/ghosttyTerminalSessionDriver";

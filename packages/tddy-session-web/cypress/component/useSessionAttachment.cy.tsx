@@ -20,7 +20,7 @@ import { RoomConnectionState as ConnectionState, aDisconnectedRoom } from "tddy-
 import type { RoomHandle as Room } from "tddy-client-web";
 import { ConnectSessionResponseSchema } from "tddy-client-web/gen/session_pb";
 import { TokenService, GenerateTokenResponseSchema } from "tddy-client-web/gen/token_pb";
-import { useSessionAttachment } from "../../src/components/sessions/useSessionAttachment";
+import { useSessionAttachment } from "../../src/useSessionAttachment";
 import { LiveKitConnectionProvider } from "tddy-livekit-web";
 import type { HostConnection } from "tddy-client-web/connections/types";
 import { toArrayBuffer } from "../support/rpc/protoRpc";

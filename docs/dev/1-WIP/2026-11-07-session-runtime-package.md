@@ -7,6 +7,8 @@
 
 **Stack**: `#web-split` 16/20 — branch `feature/web-split/session-runtime`, base `feature/web-split/session`
 
+**PR**: [#860](https://github.com/uppin/tddy-coder/pull/860)
+
 ## Initial Discovery
 
 [2026-11-07-session-runtime-package-initial-discovery.md](./2026-11-07-session-runtime-package-initial-discovery.md)
@@ -44,6 +46,15 @@ See the PRD (split of #851).
 | earlier package nodes | terminal, chat, hosts, workspace, prstack, create-session, LiveKit ports | composes them | move their code |
 
 ## Draft PR contract
+
+**As pushed (commit 2, on #851's green 8d4904b):** 21 runtime specs `git mv`'d from tddy-web into
+`tddy-session-web/cypress/component/` (classified by what they mount: runtime modules, no inspector or drawer);
+their `src/components/sessions/` imports re-pointed at the package `src/` (`components/session/` → `src/code/`).
+The boundary test's surface gains `SessionRuntime`, `SessionMainPane`, `SessionTerminalTabs`, `GrpcSessionTerminal`,
+`SessionRuntimeRegistry`, `SessionChildRuntime`. Red: the boundary test (moved specs still reach tddy-web; surface
+missing). LiveKit-importing specs among them switch to the port doubles at green.
+
+Originally planned:
 
 First push (commit 2): the specs listed in `## Responsibility` `git mv`'d into `tddy-session-web` with
 imports pointing at the package, and the package boundary test's surface list extended with this node's
@@ -96,10 +107,10 @@ boundary rule. CI: the stack's single `web.yml` (affected-package shards).
 - [x] Cross-check code issues and TODOs (inherited from #851's discovery)
 - [x] Create/update PRD documentation
 - [x] Create changeset (this document)
-- [ ] Create failing acceptance tests
-- [ ] Run acceptance tests (verify they fail)
-- [ ] USER REVIEW — acceptance tests
-- [ ] TDD Red — write failing unit/integration tests
+- [x] Create failing acceptance tests
+- [x] Run acceptance tests (verify they fail)
+- [x] USER REVIEW — acceptance tests (developer waived the per-node review for this stack, 2026-11-07: "finish the rest without stopping")
+- [x] TDD Red — write failing unit/integration tests
 - [ ] TDD Green — implement with quality code
 - [ ] Update documentation with progress
 - [ ] Run the touched packages' tests — verify 100% pass
