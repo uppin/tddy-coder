@@ -29,7 +29,7 @@ import {
   ProbeOutcome,
   type HostSshAgent,
 } from "tddy-client-web/gen/host_pb";
-import { HostAddKeyAction } from "../../src/components/hosts/HostAddKeyAction";
+import { HostAddKeyAction } from "../../src/HostAddKeyAction";
 import { mountWithRpc } from "../support/rpc/inMemory";
 import { withSelectedDaemon } from "../support/rpc/withSelectedDaemon";
 import { aHostPromptFeed } from "../support/rpc/hostPromptFeed";

@@ -8,6 +8,7 @@
     "packages/tddy-terminal-web",
     "packages/tddy-rpc-playground-web",
     "packages/tddy-chat-web",
+    "packages/tddy-hosts-web",
     "packages/tddy-web",
     "packages/tddy-livekit-web",
     "packages/tddy-rpc-web",

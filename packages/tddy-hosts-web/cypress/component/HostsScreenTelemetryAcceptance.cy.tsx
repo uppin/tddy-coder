@@ -28,9 +28,9 @@ import {
   type SessionServiceBackend,
   type SessionServiceScenario,
 } from "../support/rpc/daemonSessionHostBackend";
-import { HostsAppPage } from "../../src/components/hosts/HostsAppPage";
+import { HostsAppPage } from "../../src/HostsAppPage";
 import { HostService, type KnownHostEntry } from "tddy-client-web/gen/host_pb";
-import { HostRowTelemetry } from "../../src/components/hosts/HostRowTelemetry";
+import { HostRowTelemetry } from "../../src/HostRowTelemetry";
 import { mountWithRpc } from "../support/rpc/inMemory";
 import { withSelectedDaemon } from "../support/rpc/withSelectedDaemon";
 import {
