@@ -8,6 +8,7 @@
  * Changeset: docs/dev/1-WIP/2026-07-25-branch-query-and-remote-branch.md.
  */
 
+import { aClientsPortDouble } from "tddy-client-web/testkit";
 import React from "react";
 import { createClient } from "@connectrpc/connect";
 import { anInMemoryRpcBackend } from "tddy-connectrpc-testkit";
@@ -76,7 +77,8 @@ function mountPane(backend: ReturnType<typeof aCreateSessionBackend>) {
         onCreated={cy.stub()}
         initialValues={{ sessionType: "claude-cli", projectId: PROJECT_ID }}
       />,
-    anInMemoryRpcBackend(),
+    backend,
+    { clients: aClientsPortDouble(backend, { daemons: [{ instanceId: "local", label: "local (this daemon)" }] }) },
   );
 }
 

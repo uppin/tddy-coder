@@ -122,6 +122,8 @@ describe("Create session split SSH", () => {
       const calls = rpcBackend.callsTo(HostService.method.listSshConfigHosts);
       expect(calls.some((call) => call.daemonInstanceId === CODEBASE_HOST)).to.equal(true);
     });
+    // The option list is read as a snapshot below; wait for B's listing to be rendered first.
+    createSessionPage.sshConfigSelect().find("option").should("have.length", 2);
     createSessionPage.sshConfigOptionValues().should("deep.equal", [THIS_HOST, "jumpbox"]);
     createSessionPage.sshConfigOptionLabels().then((labels) => {
       expect(labels[0]).to.equal("This host");

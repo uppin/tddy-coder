@@ -20,6 +20,7 @@
  * PRD: docs/ft/coder/pr-stack-live-status.md § Cross-host planned PRs (D34, D36).
  */
 
+import { aClientsPortDouble } from "tddy-client-web/testkit";
 import React from "react";
 import { servedAgentWire } from "../support/servedAgents";
 import { createClient } from "@connectrpc/connect";
@@ -129,7 +130,8 @@ function mountPaneForPlannedNode(backend: ReturnType<typeof aCreateSessionBacken
           newBranchName: PLANNED_BRANCH,
         }}
       />,
-    anInMemoryRpcBackend(),
+    backend,
+    { clients: aClientsPortDouble(backend, { daemons: [{ instanceId: "local", label: "local (this daemon)" }] }) },
   );
 }
 
