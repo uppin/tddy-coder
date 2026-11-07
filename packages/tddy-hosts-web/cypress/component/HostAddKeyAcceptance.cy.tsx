@@ -18,8 +18,8 @@ import {
   ProbeOutcome,
   type HostSshAgent,
 } from "tddy-client-web/gen/host_pb";
-import { HostAddKeyAction } from "../../src/components/hosts/HostAddKeyAction";
-import { HostPassphraseDialog } from "../../src/components/hosts/HostPassphraseDialog";
+import { HostAddKeyAction } from "../../src/HostAddKeyAction";
+import { HostPassphraseDialog } from "../../src/HostPassphraseDialog";
 import type { KeyPinVerdict } from "../../src/lib/hostKeyPinning";
 import { mountWithRpc } from "../support/rpc/inMemory";
 import { withSelectedDaemon } from "../support/rpc/withSelectedDaemon";
