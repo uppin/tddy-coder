@@ -1,6 +1,5 @@
 import type { SessionEntry } from "../../gen/session_pb";
-import { Button } from "tddy-ui-web";
-import { ScrollArea } from "tddy-ui-web";
+import { Button, ScrollArea } from "tddy-ui-web";
 import { formatLastDataReceived } from "./lastDataReceivedFormat";
 import { formatBytes } from "./formatTraffic";
 

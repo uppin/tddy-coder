@@ -11,9 +11,8 @@ import {
 import { SessionProjectGroup, projectGroupKey } from "./SessionProjectGroup";
 import { ProjectHomeEntry } from "./ProjectHomeEntry";
 import { readCollapsedProjects, writeCollapsedProjects } from "./projectGroupCollapse";
-import { ScrollArea } from "tddy-ui-web";
+import { ScrollArea, cn } from "tddy-ui-web";
 import { SESSION_INDICATOR_DOT_STYLES } from "./sessionIndicatorDotStyles";
-import { cn } from "tddy-ui-web";
 import {
   CollapsedSessionDot,
   SessionGroupBody,

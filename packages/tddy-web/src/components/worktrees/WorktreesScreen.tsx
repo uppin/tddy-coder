@@ -2,9 +2,7 @@ import React from "react";
 import { Loader2, RefreshCw } from "lucide-react";
 import { formatDiskBytes } from "../sessions/worktreeStatsFormat";
 import { sizingProgress, type WorktreeListItem } from "../../lib/worktreeList";
-import { cn } from "tddy-ui-web";
-import { Button } from "tddy-ui-web";
-import { ScrollArea } from "tddy-ui-web";
+import { cn, Button, ScrollArea } from "tddy-ui-web";
 
 export interface WorktreesScreenProps {
   projects: ReadonlyArray<{ projectId: string; name: string }>;

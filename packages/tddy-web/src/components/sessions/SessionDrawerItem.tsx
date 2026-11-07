@@ -3,8 +3,7 @@ import type { SessionEntry } from "../../gen/session_pb";
 import { sessionDrawerLabel } from "../../utils/sessionDrawerLabel";
 import { SessionIndicatorDot } from "./SessionIndicatorDot";
 import type { SessionMetadata } from "../../lib/sessionParticipantMetadata";
-import { Tooltip, TooltipTrigger, TooltipContent } from "tddy-ui-web";
-import { cn } from "tddy-ui-web";
+import { Tooltip, TooltipTrigger, TooltipContent, cn } from "tddy-ui-web";
 
 interface SessionDrawerItemProps {
   session: SessionEntry;

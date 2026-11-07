@@ -8,3 +8,5 @@ stylesheet (`tddy-ui-web/theme.css`) and the small hooks and helpers several pac
 It imports nothing from `tddy-web`, generated RPC code, ConnectRPC or LiveKit.
 
 Tests: `bun test src` (helpers, boundary rule) and `bun run cypress:component` (primitives).
+
+Changes: [docs/changesets](docs/changesets/).
