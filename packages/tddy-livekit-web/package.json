@@ -14,6 +14,7 @@
   "scripts": {
     "build": "bun run generate && tsc",
     "generate": "../../scripts/generated-code.sh write packages/tddy-livekit-web",
+    "test:ci": "bun test src --reporter=junit --reporter-outfile=../../reports/junit/livekit-web.xml",
     "cypress:component": "ELECTRON_EXTRA_LAUNCH_ARGS='--disable-gpu --no-sandbox' cypress run --component",
     "cypress:component:ci": "bun run cypress:component -- --reporter junit --reporter-options 'mochaFile=../../reports/junit/livekit-web-component-[hash].xml'"
   },

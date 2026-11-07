@@ -15,10 +15,10 @@ tests that failed.
 | `Rust build` | `cargo build --workspace --bins --examples` | ~10 min |
 | `Rust tests` | `cargo nextest run --profile ci`, minus the e2e set, over the workspace as 3 shards (`Rust tests shard i/3`), each a sliding window of package batches (`scripts/nextest-windowed.ts --shard i/3`); one `Rust tests` check stands for them | |
 | `Rust e2e tests` | `cargo nextest run --archive-file … --profile ci`, restricted to the e2e set, run as 6 shards from an archive of just the e2e test targets — tests that need real infrastructure | |
-| `Generated code` | `bun install --frozen-lockfile`, then `scripts/generated-code.sh check` | ~3 min |
-| `Web tests` | `bun install --frozen-lockfile`, `bun run build`, `tddy-web` unit tests, `tddy-web` + `tddy-livekit-web` Cypress component tests | ~10 min |
+| `Generated code` | `bun install --frozen-lockfile`, the CI script tests, then `scripts/generated-code.sh check` | ~3 min |
+| `web / <package> tests` (seven checks, one per JS workspace package) | only that package's build and tests, and only when the PR touches the package or one it depends on; see [Web package checks](#web-package-checks) | ~10 min for `tddy-web` |
 
-`Rust lint` runs on its own. **`Rust build` runs first, and the test checks
+`Rust lint` runs on its own. **`Rust build` runs first, and the Rust test checks
 wait on it**, because a number of suites exec a workspace binary by path rather
 than linking it, and cargo never builds those as a side effect of running the
 tests — they belong to a different package:
@@ -27,7 +27,7 @@ tests — they belong to a different package:
 |--------|-----------|
 | `target/debug/tddy-sandbox-runner` | `tddy-daemon-sandbox` `sandbox_runner_stdio_acceptance` |
 | `target/debug/tddy-acp-stub` | `tddy-integration-tests` `acp_*`, `codex_acp_*` |
-| `target/debug/examples/echo_server` | `tddy-livekit-web` Cypress specs |
+| `target/debug/examples/echo_server` | `tddy-livekit-web` Cypress specs; the `web / tddy-livekit-web tests` check builds its own, so no Rust test job needs this one |
 | `target/debug/tddy-remote-git-repo` | `tddy-worktree-service` `remote_git_livekit_acceptance`, `tddy-session-lifecycle` `session_sync_livekit_acceptance` |
 | `target/debug/tddy-index-daemon` | `tddy-tools` `index_daemon_client_acceptance` |
 
@@ -162,8 +162,7 @@ binaries, add its binary to the filterset, and — for a LiveKit one — to the 
 [The shared LiveKit server](#the-shared-livekit-server)). The two lists carry the same LiveKit names on purpose; the
 override also covers `tddy-livekit`'s own suites. LiveKit tests run in parallel; none belongs in a
 serial test-group (any group with `max-threads = 1`). The script test
-`scripts/nextest-serial-groups.test.ts` checks it — run it with
-`./dev bun test ./scripts/nextest-serial-groups.test.ts`: it fails if a binary that starts the
+`scripts/nextest-serial-groups.test.ts` checks it, in the `Generated code` job: it fails if a binary that starts the
 LiveKit testkit is put in a serial group, or if a serial group's filter names a binary or package
 that does not exist.
 
@@ -213,6 +212,20 @@ made required, a red `Rust e2e tests` does not block a merge.
   stanzas only if the e2e leg would skip at least **25%** of its compile; the summary says `proceed`
   or `stop`. Filterset binaries missing from the report are named, so a renamed test binary shows up
   rather than silently counting as zero.
+
+## Web package checks
+
+Each JS workspace package in the root `package.json` `workspaces` has a PR check of its own. Its caller workflow, `.github/workflows/web-<package>.yml`, calls the shared `web-package.yml`. GitHub prefixes a called workflow's jobs with the calling job's id, as it does for `gate / Draft build gate`, so the check is **`web / <package> tests`**, and the ruleset names that form.
+
+The shared workflow has three jobs:
+
+- **`gate`** is `build-gate.yml`. A draft skips the work unless it carries `#forcebuild`, as with every other check.
+- **`changes`** runs `scripts/web-affected.ts --package <package> --base <PR base sha> --head <PR head sha>` and prints `affected=true` or `affected=false`. Pushes to `master` and manual dispatches run `--all`. A package is affected when a file under its directory changed; when a workspace package it depends on is affected, transitively (`workspace:*` in `dependencies` or `devDependencies`); when its own caller workflow changed; or when a global input changed. A global input affects every package: root `package.json`, `bun.lock`, `bunfig.toml`, `flake.nix`, `flake.lock`, `scripts/web-affected.ts`, `build-gate.yml` and `web-package.yml`.
+- **`<package> tests`** runs only when the gate builds and `changes` says affected. A skipped job reports success, so an unaffected package's check is present and green, and nothing waits on it. If `changes` itself fails, the check fails rather than skipping.
+
+The caller sets what the package's tests need, through boolean inputs documented in `web-package.yml`: `needs-web-bundle` (builds `packages/tddy-web/dist`), `needs-tddy-coder` (builds `target/debug/tddy-coder`), `needs-rust-fixture` (builds `target/debug/examples/echo_server`), `needs-livekit-image` (pulls the LiveKit image) and `has-cypress` (Cypress's libraries and binary cache, and `cypress:component:ci`). The package's `test:ci` runs when the package has one, and writes JUnit XML under `reports/junit/`, which the job publishes as a `<package> report` check. A package with no `test:ci` runs nothing: `tddy-desktop` and `tddy-connectrpc-testkit` have no tests in CI, so their checks only install the workspace.
+
+To add a package, add it to the root `workspaces`, copy an existing `web-<package>.yml` for its name and flags, and give it a `test:ci` if it has tests. `scripts/web-workflows.test.ts` fails until every workspace package has exactly one caller, and every caller names a workspace package.
 
 ## Generated code
 
@@ -296,7 +309,7 @@ gh api repos/{owner}/{repo}/check-runs/$ID/annotations  # one annotation per fai
 gh run view $RUN_ID --log-failed                 # raw log of failing steps only
 ```
 
-Raw JUnit XML is also uploaded as the `junit-rust-shard-i` (one per shard), `junit-rust-e2e-shard-i` and `junit-web` artifacts
+Raw JUnit XML is also uploaded as the `junit-rust-shard-i` (one per shard), `junit-rust-e2e-shard-i` and `junit-<package>` artifacts (one per web package check)
 (14-day retention) for anything the API does not cover:
 
 ```bash
@@ -315,7 +328,8 @@ deliberately, and each exclusion is coverage you still have to get locally:
 | One `tddy-sandbox-recipes` path test | Asserts a macOS-only path layout |
 | `sandbox_runner_stdio_acceptance::echoes_a_message_over_sandbox_service_served_over_stdio` | Fails unprivileged with "tool ipc server exited before bind" even with the runner binary staged; survived two retries. Only this one test is skipped — the other two in the binary pass. Tracked in `docs/dev/todo/`; the intended fix is a VM-backed job, not a permanent exclusion |
 | Cypress **e2e** specs | Storybook build plus a real ghostty WebGL context; not yet verified on a runner |
-| `tddy-desktop`, `tddy-rust-typescript-tests` | Need Electron and cross-language fixtures respectively. Their *tests* are excluded; `tddy-rust-typescript-tests`' committed `gen/` is covered by `Generated code` |
+| `tddy-desktop` tests | It has none that run without Tauri; its check only installs the workspace. Its front end is tddy-web's bundle, which its `package.json` does not depend on, so a tddy-web change does not run its check (`docs/dev/todo/2026-11-07-desktop-check-does-not-follow-the-tddy-web-bundle.md`) |
+| Web checks on a Rust-only change | `web / tddy-livekit-web tests` execs `echo_server` and `web / tddy-rust-typescript-tests tests` spawns `tddy-coder`, but the detector sees only JS workspace paths, so a change to those crates runs neither (`docs/dev/todo/2026-11-07-web-checks-ignore-the-rust-binaries-they-exec.md`) |
 
 The Rust exclusions live in `.config/nextest.toml` under `[profile.ci]`
 `default-filter`, each with its reason. Keep that list short — every entry is a
@@ -454,10 +468,9 @@ The image is pinned in one file, `.config/livekit-server.image`, read by the scr
 `./run-livekit-testkit-server` and (compiled in) the testkit. It is never `:master`. Changing it is
 a one-line edit.
 
-`Web tests` starts no shared server: `tddy-livekit-web`'s Cypress specs start their own container
+The `tddy-livekit-web` check starts no shared server: its Cypress specs start their own container
 through `cypress/support/livekitDockerTestkit.ts`, which still names `livekit/livekit-server:master`
-rather than the pinned image. The job pulls that image in its own step (`Pull the LiveKit image for
-tddy-livekit-web`) before the component tests, because the `startEchoServer` task's 60s Cypress
+rather than the pinned image. The check pulls that image in its own step (`Pull the LiveKit image`) before the component tests, because the `startEchoServer` task's 60s Cypress
 timeout would otherwise also cover the pull on a fresh runner, and a slow pull failed both specs'
 `before all` hooks.
 `./run-livekit-testkit-server --stop` removes the local reusable server.
@@ -540,12 +553,14 @@ dotnet/android/ghc toolchains first, and debuginfo is reduced to
 ## Making the checks required
 
 CI reports status but does not block merges until a ruleset says so. The
-`master` ruleset requires these four contexts:
+`master` ruleset requires these contexts:
 
 - `Rust lint`
 - `Rust tests`
 - `Rust build`
-- `Web tests`
+- `web / <package> tests`, for each of the seven JS workspace packages ([Web package checks](#web-package-checks))
+
+Until the per-package checks land, the ruleset requires `Web tests` in their place. It is edited when that change merges, not before: an earlier edit would block every open PR, none of which carries the new names yet.
 
 Do **not** add `VM boot control` or `Cloudinit VM boot` to that list yet — they
 are still being proven out, and a required check that flakes on QEMU would block
@@ -583,7 +598,13 @@ gh api -X POST repos/uppin/tddy-coder/rulesets --input - <<'JSON'
           { "context": "Rust lint" },
           { "context": "Rust build" },
           { "context": "Rust tests" },
-          { "context": "Web tests" }
+          { "context": "web / tddy-web tests" },
+          { "context": "web / tddy-livekit-web tests" },
+          { "context": "web / tddy-rpc-web tests" },
+          { "context": "web / tddy-tauri-web tests" },
+          { "context": "web / tddy-desktop tests" },
+          { "context": "web / tddy-rust-typescript-tests tests" },
+          { "context": "web / tddy-connectrpc-testkit tests" }
         ]
       }
     }

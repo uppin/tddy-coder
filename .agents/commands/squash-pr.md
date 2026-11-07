@@ -74,8 +74,8 @@ rather than after, and say in the report that the order was forced by the repo s
 
 ### The merge gate: `#automerge`
 
-`master` carries a ruleset requiring four checks (`Rust lint`, `Rust build`, `Rust tests`,
-`Web tests`), so a PR is not mergeable until they pass. The repo's own mechanism for landing one is
+`master` carries a ruleset requiring the Rust checks (`Rust lint`, `Rust build`, `Rust tests`) and the
+web checks (`web / <package> tests`, see `docs/dev/guides/ci.md` § Web package checks), so a PR is not mergeable until they pass. The repo's own mechanism for landing one is
 a **comment trigger**, handled by `.github/workflows/automerge.yml`
 ([`docs/dev/guides/ci.md` § Automerge](../../docs/dev/guides/ci.md#automerge)):
 
