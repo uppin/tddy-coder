@@ -11,6 +11,7 @@
  * Changeset: docs/dev/1-WIP/2026-09-18-sandboxed-codebase-mode-from-the-web.md
  */
 
+import { aClientsPortDouble } from "tddy-client-web/testkit";
 import React from "react";
 import { servedAgentWire } from "../support/servedAgents";
 import { createClient } from "@connectrpc/connect";
@@ -22,11 +23,6 @@ import { CatalogService } from "tddy-client-web/gen/catalog_pb";
 import { SessionFilesService } from "tddy-client-web/gen/session_files_pb";
 import { WorktreeService } from "tddy-client-web/gen/worktree_pb";
 import type { DaemonHost } from "tddy-client-web";
-import { daemonRpcIdentity } from "tddy-client-web";
-import { AuthProvider } from "../../src/hooks/authProvider";
-import { SelectedDaemonProvider } from "../../src/rpc/selectedDaemon";
-import { mountWithRpc } from "../support/rpc/inMemory";
-import { aJoinedCommonRoom } from "../support/rpc/withSelectedDaemon";
 import { createSessionPage } from "../support/pages/createSessionPage";
 import { anAvailableAgent } from "../support/rpc/sessionAgentRosterBackend";
 
@@ -102,14 +98,8 @@ function mountCreatePane(backend: InMemoryRpcBackend, host: DaemonHost) {
   const catalogClient = createClient(CatalogService, backend.transport());
   const sessionFilesClient = createClient(SessionFilesService, backend.transport());
   const worktreeClient = createClient(WorktreeService, backend.transport());
-  mountWithRpc(
-    <AuthProvider>
-      <SelectedDaemonProvider
-        room={aJoinedCommonRoom([daemonRpcIdentity(host.instanceId)])}
-        daemons={[host]}
-        servingInstanceId={host.instanceId}
-      >
-        <CreateSessionPane
+  cy.mountWithClients(
+    <CreateSessionPane
           client={client}
           projectClient={projectClient}
           catalogClient={catalogClient}
@@ -118,10 +108,8 @@ function mountCreatePane(backend: InMemoryRpcBackend, host: DaemonHost) {
           sessionToken="fake-token"
           onCancel={cy.stub()}
           onCreated={cy.stub()}
-        />
-      </SelectedDaemonProvider>
-    </AuthProvider>,
-    backend,
+        />,
+    backend, { clients: aClientsPortDouble(backend, { daemons: [host] }) },
   );
 }
 

@@ -22,7 +22,7 @@ import {
   sessionsProjectHomeSetupUnknown,
   sessionsProjectHomeSetupUnreachable,
 } from "../testIds";
-import type { SessionType } from "../../../src/components/sessions/createSessionRequest";
+import type { SessionType } from "tddy-session-create-web";
 import { SessionService } from "tddy-client-web/gen/session_pb";
 
 /** How long a lookup waits for something the screen renders after an RPC answers. */

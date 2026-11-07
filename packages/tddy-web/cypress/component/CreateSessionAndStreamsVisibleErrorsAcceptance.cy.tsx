@@ -16,7 +16,7 @@ import { aDisconnectedRoom } from "tddy-livekit-web/testkit";
 import { create } from "@bufbuild/protobuf";
 import { Code, ConnectError, createClient, type Client } from "@connectrpc/connect";
 import { anInMemoryRpcBackend, type InMemoryRpcBackend } from "tddy-connectrpc-testkit";
-import { CreateSessionPane } from "../../src/components/sessions/CreateSessionPane";
+import { CreateSessionPane } from "tddy-session-create-web";
 import { SessionsDrawerScreen } from "../../src/components/sessions/SessionsDrawerScreen";
 import { SessionUsageTab } from "../../src/components/sessions/SessionUsageTab";
 import { useSessionActivity } from "../../src/components/sessions/useSessionActivity";

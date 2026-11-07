@@ -6,6 +6,7 @@
  * PRD: docs/ft/web/1-WIP/PRD-2026-09-14-split-ssh.md
  */
 
+import { aClientsPortDouble } from "tddy-client-web/testkit";
 import React from "react";
 import { servedAgentWire } from "../support/servedAgents";
 import { create } from "@bufbuild/protobuf";
@@ -24,11 +25,6 @@ import {
   SshConfigHostSchema,
 } from "tddy-client-web/gen/host_pb";
 import type { DaemonHost } from "tddy-client-web";
-import { AuthProvider } from "../../src/hooks/authProvider";
-import { SelectedDaemonProvider } from "../../src/rpc/selectedDaemon";
-import { daemonRpcIdentity } from "tddy-client-web";
-import { mountWithRpc } from "../support/rpc/inMemory";
-import { aJoinedCommonRoom } from "../support/rpc/withSelectedDaemon";
 import { createSessionPage } from "../support/pages/createSessionPage";
 
 const AGENT_HOST = "laptop-a";
@@ -86,17 +82,8 @@ function mountCreatePane(backend: InMemoryRpcBackend) {
   const catalogClient = createClient(CatalogService, backend.transport());
   const sessionFilesClient = createClient(SessionFilesService, backend.transport());
   const worktreeClient = createClient(WorktreeService, backend.transport());
-  mountWithRpc(
-    <AuthProvider>
-      <SelectedDaemonProvider
-        room={aJoinedCommonRoom([
-          daemonRpcIdentity(AGENT_HOST),
-          daemonRpcIdentity(CODEBASE_HOST),
-        ])}
-        daemons={DAEMON_HOSTS}
-        servingInstanceId={AGENT_HOST}
-      >
-        <CreateSessionPane
+  cy.mountWithClients(
+    <CreateSessionPane
           client={client}
           projectClient={projectClient}
           catalogClient={catalogClient}
@@ -105,10 +92,8 @@ function mountCreatePane(backend: InMemoryRpcBackend) {
           sessionToken="fake-token"
           onCancel={cy.stub()}
           onCreated={cy.stub()}
-        />
-      </SelectedDaemonProvider>
-    </AuthProvider>,
-    backend,
+        />,
+    backend, { clients: aClientsPortDouble(backend, { daemons: DAEMON_HOSTS }) },
   );
 }
 

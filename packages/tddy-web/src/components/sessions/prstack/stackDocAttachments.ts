@@ -18,8 +18,8 @@
 
 import type { SessionEntry } from "tddy-client-web/gen/session_pb";
 import { HostDocumentScope } from "tddy-client-web/gen/types_pb";
-import { contextDocRelativePath } from "../attachments/contextDocPath";
-import type { InitialAttachment } from "../attachments/pendingAttachment";
+import { contextDocRelativePath } from "tddy-session-create-web";
+import type { InitialAttachment } from "tddy-session-create-web";
 
 /** Directory under the orchestrator's `artifacts/` holding one subdirectory per planned node. */
 const NODE_DOCS_SUBDIR = "prs";

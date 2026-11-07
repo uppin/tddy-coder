@@ -9,7 +9,7 @@ import {
 import { type SessionAgentActivity, type SessionAgentStatus } from "tddy-client-web/gen/types_pb";
 import { safeTestIdPart } from "tddy-client-web";
 import { Button } from "tddy-ui-web";
-import { agentPlacementChoiceOf } from "./agentPlacementChoice";
+import { agentPlacementChoiceOf } from "tddy-session-create-web";
 import {
   agentStatusName,
   agentStatusToken,
@@ -19,7 +19,7 @@ import {
 import type { SubagentSessionNode } from "./agentTree";
 import { rosterHalfOf, type RosterHalf } from "./sessionRosterHalf";
 import { useSessionAgentRoster } from "./useSessionAgentRoster";
-import { AgentKindBadge } from "./AgentKindBadge";
+import { AgentKindBadge } from "tddy-session-create-web";
 
 /**
  * The Agents tab as a **tree**: the session's own main agent at the root, and beneath it the two

@@ -182,11 +182,13 @@
       "dependencies": {
         "@bufbuild/protobuf": "^2.2.0",
         "@connectrpc/connect": "^2.0.0",
+        "lucide-react": "^1.7.0",
         "tddy-client-web": "workspace:*",
         "tddy-react-commons": "workspace:*",
         "tddy-ui-web": "workspace:*",
       },
       "devDependencies": {
+        "@connectrpc/connect-web": "^2.0.0",
         "@tailwindcss/vite": "^4.2.2",
         "@types/bun": "latest",
         "@types/react": "^19.0.0",
@@ -275,6 +277,7 @@
         "tailwindcss": "^4.2.2",
         "tddy-client-web": "workspace:*",
         "tddy-livekit-web": "workspace:*",
+        "tddy-session-create-web": "workspace:*",
         "tddy-tauri-web": "workspace:*",
         "tddy-ui-web": "workspace:*",
       },

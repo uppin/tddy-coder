@@ -23,3 +23,7 @@ export * from "./capability/useCapabilityAvailability";
 export * from "./hostDirectory/daemonHost";
 export * from "./hostDirectory/types";
 export * from "./hostDirectory/useHostDirectory";
+export * from "./rpcFailure";
+export { randomUuid } from "./randomId";
+export * from "./fileUploadChunks";
+export * from "./worktreeFilesApi";

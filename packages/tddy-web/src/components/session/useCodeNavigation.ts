@@ -12,7 +12,7 @@ import type {
   CodeQueryResult,
   CodeSession,
 } from "./useCodeSession";
-import type { WorktreeFilesApi } from "./worktreeFilesApi";
+import type { WorktreeFilesApi } from "tddy-client-web";
 
 export type SelectedFile = {
   relPath: string;

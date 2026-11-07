@@ -25,9 +25,10 @@ import { deriveStackBaseBranch } from "./deriveStackBaseBranch";
 import { baseBranchChoice } from "./baseBranchChoice";
 import { resolveRepointTarget, startBlockers } from "./startBlockers";
 import { stackDocAttachments } from "./stackDocAttachments";
-import { CreateSessionDialog } from "../CreateSessionDialog";
-import type { CreateSessionInitialValues } from "../CreateSessionPane";
-import { remoteTrackingName } from "../../../lib/branchNames";
+import { CreateSessionDialog } from "tddy-session-create-web";
+import { HostStartPassphraseScope } from "../../hosts/HostStartPassphrasePrompt";
+import type { CreateSessionInitialValues } from "tddy-session-create-web";
+import { remoteTrackingName } from "tddy-session-create-web";
 import type { SessionMetadata } from "../../../lib/sessionParticipantMetadata";
 
 type ConnectionClient = Client<typeof SessionService>;
@@ -685,6 +686,7 @@ export function PrStackScreen({
         onCancel={() => setDirtyWorktreePrompt(null)}
       />
       {client && projectClient && catalogClient && sessionFilesClient && worktreeClient && (
+        <HostStartPassphraseScope>
         <CreateSessionDialog
           open={startSessionNode !== null}
           client={client}
@@ -698,6 +700,7 @@ export function PrStackScreen({
           onClose={() => setStartSessionNode(null)}
           onCreated={handleChildSessionCreated}
         />
+        </HostStartPassphraseScope>
       )}
     </div>
   );

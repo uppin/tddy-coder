@@ -1,7 +1,7 @@
 import React from "react";
 import { Maximize2, Minimize2, X } from "lucide-react";
 import { AGENT_TERMINAL_ID, type SessionTerminal } from "./useSessionTerminals";
-import { TMUX_KIND, TMUX_NEW_KIND, terminalKindLabel } from "./cliHarnessOptions";
+import { TMUX_KIND, TMUX_NEW_KIND, terminalKindLabel } from "tddy-session-create-web";
 import { NewTerminalMenu } from "./NewTerminalMenu";
 import type { TmuxMenuState } from "./useTmuxSessions";
 import type { ChildSession } from "./useChildSessions";

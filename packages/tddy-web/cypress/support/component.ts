@@ -5,6 +5,7 @@ import { agentActivityRegistry } from "../../src/components/sessions/agentActivi
 import { sessionNotificationRegistry } from "../../src/components/sessions/sessionNotificationRegistry";
 import { UploadProgressProvider } from "../../src/rpc/uploadProgress";
 import { AppClientsPorts } from "../../src/rpc/appClientsPorts";
+import { HostStartPassphraseScope } from "../../src/components/hosts/HostStartPassphrasePrompt";
 import { create } from "@bufbuild/protobuf";
 import { registerServerStreamFallback } from "tddy-connectrpc-testkit";
 import { SessionService, StartSessionEventSchema } from "tddy-client-web/gen/session_pb";
@@ -38,9 +39,12 @@ beforeEach(() => {
  *  Also mounts `AppClientsPorts`, as the app root does (`RpcTransportProvider`): the hooks from
  *  `tddy-client-web` throw without a clients port, and a bare mount stands for a page whose
  *  directory lists no daemon. A spec that wants hosts or a backend mounts its own providers, which
- *  re-mount the ports from theirs. */
+ *  re-mount the ports from theirs.
+ *
+ *  And `HostStartPassphraseScope`, which supplies the create-session package with the Hosts screen's
+ *  passphrase dialog: a `CreateSessionPane` mounted bare, as production never does, needs it. */
 Cypress.Commands.add("mount", (jsx, options = {}) => {
-  const wrapped = React.createElement(AppClientsPorts, null, React.createElement(UploadProgressProvider, null, jsx));
+  const wrapped = React.createElement(AppClientsPorts, null, React.createElement(HostStartPassphraseScope, null, React.createElement(UploadProgressProvider, null, jsx)));
   return mount(wrapped, { strict: false, ...options });
 });
 

@@ -2,8 +2,8 @@ import { useCallback, useEffect, useState } from "react";
 import type { Client } from "@connectrpc/connect";
 import type { TerminalSessionService } from "tddy-client-web/gen/terminal_session_pb";
 import { tddyDebug } from "tddy-client-web";
-import { hostNotConnectedText, rpcFailureText } from "../../rpc/rpcFailure";
-import { BASH_KIND } from "./cliHarnessOptions";
+import { hostNotConnectedText, rpcFailureText } from "tddy-client-web";
+import { BASH_KIND } from "tddy-session-create-web";
 
 const dTerm = tddyDebug("tddy:term:tabs");
 

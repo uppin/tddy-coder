@@ -10,12 +10,10 @@
  */
 
 import { useCallback } from "react";
-import { chunkFile } from "../lib/fileUploadChunks";
-import { randomUuid } from "../lib/randomId";
 import { joinQuotedPaths } from "../lib/shellQuote";
 import { useUploadProgressController } from "../rpc/uploadProgress";
 import { SessionFilesService } from "tddy-client-web/gen/session_files_pb";
-import { useDaemonClient } from "tddy-client-web";
+import { chunkFile, randomUuid, UPLOAD_CHUNK_TIMEOUT_MS, useDaemonClient } from "tddy-client-web";
 
 /** One unary chunk upload; resolves to the file's absolute host path on the final chunk. */
 export type UploadChunkFn = (args: {
@@ -111,14 +109,6 @@ export function useSessionFileUpload({
 
   return { uploadFiles, uploadSources };
 }
-
-/**
- * Deadline for one chunk's upload RPC. Without a deadline a chunk whose request never reaches the
- * daemon (or whose response is lost) leaves the whole drop pending forever — no error, no progress,
- * no typed path. With one, the file is reported as failed and the remaining files still upload.
- * Generous enough that a slow-but-alive link finishes the chunk.
- */
-export const UPLOAD_CHUNK_TIMEOUT_MS = 20_000;
 
 /**
  * Builds an {@link UploadChunkFn} bound to the selected daemon's `SessionFilesService`, targeting a

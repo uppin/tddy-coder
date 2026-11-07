@@ -22,7 +22,6 @@ import { ProjectService } from "tddy-client-web/gen/project_pb";
 import { CatalogService } from "tddy-client-web/gen/catalog_pb";
 import { SessionFilesService } from "tddy-client-web/gen/session_files_pb";
 import { WorktreeService } from "tddy-client-web/gen/worktree_pb";
-import { withSelectedDaemon } from "../support/rpc/withSelectedDaemon";
 import { createSessionPage } from "../support/pages/createSessionPage";
 
 // ---------------------------------------------------------------------------
@@ -135,9 +134,8 @@ function mountPane(backend: ReturnType<typeof aCreateSessionBackend>) {
   // The same host over the same wire, under the service that now serves the worktree RPCs.
   const sessionFilesClient = createClient(SessionFilesService, backend.transport());
   const worktreeClient = createClient(WorktreeService, backend.transport());
-  cy.mount(
-    withSelectedDaemon(
-      <CreateSessionPane
+  cy.mountWithClients(
+    <CreateSessionPane
         client={client}
         projectClient={projectClient}
         catalogClient={catalogClient}
@@ -148,7 +146,7 @@ function mountPane(backend: ReturnType<typeof aCreateSessionBackend>) {
         onCreated={cy.stub()}
         initialValues={{ sessionType: "tool", projectId: PROJECT_ID, recipe: "pr-stack" }}
       />,
-    ),
+    anInMemoryRpcBackend(),
   );
 }
 
