@@ -104,8 +104,8 @@ Recorded where the red-phase contract met the code. Nothing here widens scope.
   `prioritiseBaseBranchOptions`), which are the PR-stack screen's; create-session only ever used its `BaseBranchOption`
   type. The package owns `BaseBranchOption` / `BaseBranchChoice` (`baseBranchOptions.ts`); `prstack/baseBranchChoice.ts`
   re-exports them and keeps the function.
-- **Moved to `tddy-ui-web`:** `safeTestIdPart` (`testId.ts`, with its test) and `WorktreeFileTree` (its own minimal
-  `WorktreeFilesApi { listDir }`). **Moved to `tddy-client-web`:** `rpcFailure` (+ test), `randomUuid` (+ test),
+- **Moved to `tddy-ui-web`:** `WorktreeFileTree` (its own minimal `WorktreeFilesApi { listDir }`). **Moved to
+  `tddy-client-web`:** `rpcFailure` (+ test), `randomUuid` (+ test),
   `fileUploadChunks` (+ `UPLOAD_CHUNK_TIMEOUT_MS`) and `worktreeFilesApi`. All were shared with code that stays in
   `tddy-web`; `tddy-web` imports them from the packages (no stubs).
 - **Also moved into the package** because only create-session used them: `useAgentModels`, `useProviderRoutes`,
@@ -120,6 +120,10 @@ Recorded where the red-phase contract met the code. Nothing here widens scope.
 - `cy.mountWithClients` + `mounts.tsx` (`mountWithHostBackends`: one backend per host, replacing `mountWithPerDaemonLiveKitRpc`) replace
   `SelectedDaemonProvider`/`mountWithRpc`; targets are host ids, not LiveKit identities.
 - `lucide-react` and `@connectrpc/connect-web` (dev) added to the package manifest — already workspace dependencies.
+- **Rebased onto #843's green.** #843 moved `safeTestIdPart` (`lib/testId`) to `tddy-client-web` itself, so this node's own
+  move of it to `tddy-ui-web` is dropped and every importer (package sources, `tddy-web`, the Cypress `testIds.ts` files)
+  reads it from `tddy-client-web`. Create-session specs keep their `cy.mountWithClients` mount (no `Room` is mounted, so
+  #843's `aDisconnectedRoom()` testkit swap has nothing to replace in them); `tddy-web`'s specs keep #843's testkit swaps.
 
 ## Green wave
 
