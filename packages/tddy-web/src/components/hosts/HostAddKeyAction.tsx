@@ -40,10 +40,10 @@ import {
   type HostKeyCandidate,
   type HostSshAgent,
 } from "tddy-client-web/gen/host_pb";
-import { useHostClient } from "../../rpc/connections/registry";
 import { useAuthContext } from "../../hooks/authProvider";
 import { HostPassphraseDialog } from "./HostPassphraseDialog";
 import { useHostPromptAnswer } from "./useHostPromptAnswer";
+import { useHostClient } from "tddy-client-web";
 
 export interface HostAddKeyActionProps {
   instanceId: string;

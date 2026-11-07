@@ -2,7 +2,7 @@ import "./index.css";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { createRoot } from "react-dom/client";
 import type { Room } from "livekit-client";
-import { RpcTransportProvider, useHttpTransport } from "./rpc/transportProvider";
+import { RpcTransportProvider } from "./rpc/transportProvider";
 import { loadClientConfig, type AuthFlowDeclaration } from "./rpc/clientConfig";
 import { AuthProvider, useAuthContext } from "./hooks/authProvider";
 import { SelectedDaemonProvider } from "./rpc/selectedDaemon";
@@ -75,6 +75,7 @@ import {
 } from "./routing/appRoutes";
 import { useAppLocation } from "./routing/useAppLocation";
 import { ConnectionForm } from "./components/connection/StandaloneConnectionScreen";
+import { useHttpTransport } from "tddy-client-web";
 
 /** What the page read about the daemon serving it. */
 interface ServingDaemonConfig {

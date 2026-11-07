@@ -17,7 +17,6 @@
 
 import React, { useState } from "react";
 import { AuthProvider, useAuthContext } from "../../src/hooks/authProvider";
-import { useDaemonClient } from "../../src/rpc/selectedDaemon";
 import { AuthService } from "tddy-client-web/gen/auth_pb";
 import { SessionService } from "tddy-client-web/gen/session_pb";
 import { mountWithRpc } from "../support/rpc/inMemory";
@@ -32,6 +31,7 @@ import {
   ACCESS_TOKEN_KEY,
   REFRESH_TOKEN_KEY,
 } from "../support/rpc/authRefreshBackend";
+import { useDaemonClient } from "tddy-client-web";
 
 // ---------------------------------------------------------------------------
 // Test harness probes

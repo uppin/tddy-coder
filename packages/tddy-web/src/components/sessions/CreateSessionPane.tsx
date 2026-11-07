@@ -13,7 +13,6 @@ import {
 import { projectSelectOptions } from "../../lib/projectSelectOptions";
 import type { BaseBranchOption } from "./prstack/baseBranchChoice";
 import type { BranchWorktreeIntent } from "../../lib/branchConflict";
-import { useDaemons, useSelectedDaemon } from "../../rpc/selectedDaemon";
 import { useSessionAttachments } from "../../hooks/useSessionAttachments";
 import { useAvailableAgents } from "./useAvailableAgents";
 import type { CreateSessionFormValues, SessionType } from "./createSessionRequest";
@@ -42,6 +41,7 @@ import type { CreateSessionPaneProps } from "./createSessionPaneProps";
 import { useCreateSessionAgentSelection } from "./useCreateSessionAgentSelection";
 import { BranchConflictDialog } from "./BranchConflictDialog";
 import { StartPassphrasePrompt } from "./StartPassphrasePrompt";
+import { useDaemons, useSelectedDaemon } from "tddy-client-web";
 
 type BranchIntent = BranchWorktreeIntent;
 

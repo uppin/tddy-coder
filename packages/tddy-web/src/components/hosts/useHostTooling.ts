@@ -6,7 +6,7 @@
 import { useEffect, useState } from "react";
 import { HostService, type GetHostToolingResponse } from "tddy-client-web/gen/host_pb";
 import { useAuthContext } from "../../hooks/authProvider";
-import { useHostClient } from "../../rpc/connections/registry";
+import { useHostClient } from "tddy-client-web";
 
 /** What the one call has come to: not yet answered, answered, or failed. */
 export type HostToolingReading =

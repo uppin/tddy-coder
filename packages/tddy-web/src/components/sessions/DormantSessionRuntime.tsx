@@ -1,7 +1,6 @@
 import React, { useCallback, useEffect, useRef } from "react";
 import type { SessionEntry } from "tddy-client-web/gen/session_pb";
 import type { TauriHostWindow } from "../../rpc/daemonTransportFlavour";
-import { useSelectedDaemon } from "../../rpc/selectedDaemon";
 import { sessionReadsLocalPaths } from "../../lib/sessionReadsLocalPaths";
 import type { ToolShortcutDef } from "../../lib/toolShortcuts";
 import { cn, InlineError } from "tddy-ui-web";
@@ -15,6 +14,7 @@ import { AGENT_TERMINAL_ID, useSessionTerminals } from "./useSessionTerminals";
 import { useTmuxSessions } from "./useTmuxSessions";
 import { useSessionPaneFullscreen } from "./useSessionPaneFullscreen";
 import { useTerminalControl, type Session } from "./useTerminalControl";
+import { useSelectedDaemon } from "tddy-client-web";
 
 /**
  * The tab strip of a session whose agent is not running.

@@ -23,7 +23,7 @@ import {
 } from "../../utils/crossHostSessions";
 import { subscribeSessionsRefresh } from "../../lib/sessionsRefreshBridge";
 import { hostNotConnectedText, rpcFailureText } from "../../rpc/rpcFailure";
-import { useHostLabel } from "../../rpc/selectedDaemon";
+import { useHostLabel } from "tddy-client-web";
 
 /** Pulls the selected host's sessions (typically `client.listSessions(...)`). */
 export type SessionFetcher = () => Promise<SessionEntry[]>;

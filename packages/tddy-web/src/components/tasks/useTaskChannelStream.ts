@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { TaskService } from "tddy-client-web/gen/tasks_pb";
-import { useDaemonClient } from "../../rpc/selectedDaemon";
+import { useDaemonClient } from "tddy-client-web";
 
 export function useTaskChannelStream(
   sessionToken: string,

@@ -14,13 +14,13 @@
 import { useEffect, useState } from "react";
 import { ConnectError } from "@connectrpc/connect";
 import { LiveKitService } from "tddy-client-web/gen/livekit_pb";
-import { useDaemonClient } from "./selectedDaemon";
 import { useAuthContext } from "../hooks/authProvider";
 import {
   applyRoomsChange,
   roomsFromSnapshot,
   type LiveKitRoom,
 } from "../lib/liveKitRoomsState";
+import { useDaemonClient } from "tddy-client-web";
 
 export interface UseLiveKitRoomsResult {
   /** Rooms as of the last message applied. Empty until the first snapshot arrives. */

@@ -1,7 +1,6 @@
 import type { Client } from "@connectrpc/connect";
 import type { CatalogService } from "tddy-client-web/gen/catalog_pb";
 import type { DaemonHost } from "../../lib/participantRole";
-import type { HostReadFailure } from "../../rpc/useHostFanOut";
 import { useSelectableAgents } from "./useSelectableAgents";
 import {
   agentForHost,
@@ -9,6 +8,7 @@ import {
   selectableAgentValue,
   type SelectableAgent,
 } from "./selectableAgentOptions";
+import { type HostReadFailure } from "tddy-client-web";
 
 export interface CreateSessionAgentSelectionInput {
   catalogClient: Client<typeof CatalogService>;

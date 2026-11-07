@@ -10,9 +10,8 @@ import { SessionService, type SessionEntry } from "tddy-client-web/gen/session_p
 import { TaskService } from "tddy-client-web/gen/tasks_pb";
 import { TerminalSessionService } from "tddy-client-web/gen/terminal_session_pb";
 import { WorktreeService } from "tddy-client-web/gen/worktree_pb";
-import { useHostConnection } from "../../rpc/connections/registry";
-import { useDaemonClientFor } from "../../rpc/selectedDaemon";
 import { owningHostForSession } from "../../utils/crossHostSessions";
+import { useDaemonClientFor, useHostConnection } from "tddy-client-web";
 
 /**
  * The daemon that owns the selected session — cross-host interaction (connect, resume, delete,

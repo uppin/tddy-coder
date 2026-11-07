@@ -25,10 +25,10 @@ import {
   RefreshTokenResponseSchema,
 } from "tddy-client-web/gen/token_pb";
 import { useLiveKitTerminalToken } from "../../src/components/sessions/useLiveKitTerminalToken";
-import { useHttpClient } from "../../src/rpc/transportProvider";
 import { decodeProtoRequestBody, toArrayBuffer } from "../support/rpc/protoRpc";
 import { withSessionTokenGate } from "../support/rpc/withSessionTokenGate";
 import { byTestId } from "../support/testIds";
+import { useHttpClient } from "tddy-client-web";
 
 // ---------------------------------------------------------------------------
 // Fixtures

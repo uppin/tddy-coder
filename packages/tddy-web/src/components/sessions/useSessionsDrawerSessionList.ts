@@ -2,11 +2,11 @@ import { useMemo, type MutableRefObject } from "react";
 import type { Client } from "@connectrpc/connect";
 import type { Room } from "livekit-client";
 import { SessionService } from "tddy-client-web/gen/session_pb";
-import { useHostConnection } from "../../rpc/connections/registry";
 import { useCapabilityAvailability } from "../../hooks/useCapabilityAvailability";
 import { useRoomParticipants } from "../../hooks/useRoomParticipants";
 import { useSessionManager } from "./sessionManager";
 import { withoutJailedCodebaseHalves } from "./jailedCodebaseHalf";
+import { useHostConnection } from "tddy-client-web";
 
 export interface UseSessionsDrawerSessionListArgs {
   client: Client<typeof SessionService> | null;

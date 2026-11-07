@@ -1,9 +1,10 @@
 import { afterEach, describe, expect, test } from "bun:test";
+import { create } from "@bufbuild/protobuf";
 import { cleanup, renderHook } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { anInMemoryRpcBackend } from "tddy-connectrpc-testkit";
-import { TokenService } from "../gen/token_pb";
-import { AuthService } from "../gen/auth_pb";
+import { GenerateTokenResponseSchema, TokenService } from "../gen/token_pb";
+import { AuthService, GetAuthStatusResponseSchema } from "../gen/auth_pb";
 import { aClientsPortDouble } from "../testkit";
 import {
   ClientsProvider,
@@ -22,10 +23,9 @@ function inPort(port: ClientsPort) {
 }
 
 function aTokenBackend() {
-  return anInMemoryRpcBackend().onUnary(TokenService.method.generateToken, (req) => ({
-    token: `token-for-${req.identity}`,
-    ttlSeconds: 60n,
-  }));
+  return anInMemoryRpcBackend().onUnary(TokenService.method.generateToken, (req) =>
+    create(GenerateTokenResponseSchema, { token: `token-for-${req.identity}`, ttlSeconds: 60n }),
+  );
 }
 
 describe("the clients port", () => {
@@ -74,10 +74,9 @@ describe("the clients port", () => {
 
   test("useHttpClient uses the port's HTTP transport", async () => {
     // Given
-    const backend = anInMemoryRpcBackend().onUnary(AuthService.method.getAuthStatus, () => ({
-      isAuthenticated: false,
-      sessionToken: "",
-    }));
+    const backend = anInMemoryRpcBackend().onUnary(AuthService.method.getAuthStatus, () =>
+      create(GetAuthStatusResponseSchema, { authenticated: false }),
+    );
     const port = aClientsPortDouble(backend);
 
     // When
@@ -85,7 +84,7 @@ describe("the clients port", () => {
     const status = await result.current.getAuthStatus({});
 
     // Then
-    expect(status.isAuthenticated).toBe(false);
+    expect(status.authenticated).toBe(false);
     expect(backend.callsTo(AuthService.method.getAuthStatus)).toHaveLength(1);
   });
 

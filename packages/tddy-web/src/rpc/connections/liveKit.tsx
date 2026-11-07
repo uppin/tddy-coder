@@ -18,11 +18,7 @@ import type { DescService } from "@bufbuild/protobuf";
 import { ConnectionState, Room } from "livekit-client";
 import { daemonRpcIdentity } from "../../lib/participantRole";
 import { TokenService } from "tddy-client-web/gen/token_pb";
-import {
-  useHttpClient,
-  useLiveKitTransportFactory,
-  type LiveKitTransportOptions,
-} from "../transportProvider";
+import { useLiveKitTransportFactory, type LiveKitTransportOptions } from "../transportProvider";
 import { openHostServedSession } from "./hostServedSession";
 import {
   openLiveKitSession,
@@ -37,6 +33,7 @@ import type {
   ConnectionStatus,
   HostConnection,
 } from "tddy-client-web/connections/types";
+import { useHttpClient } from "tddy-client-web";
 
 /** The id this provider registers under. Precedence is stated against it, so it is a constant. */
 export const LIVEKIT_PROVIDER_ID = "livekit";
