@@ -7,6 +7,8 @@
 
 **Stack**: `#web-split` 4/16 — branch `feature/web-split/livekit-rpc`, base `feature/web-split/ui` (#840)
 
+**PR**: [#841](https://github.com/uppin/tddy-coder/pull/841)
+
 ## Initial Discovery
 
 [2026-11-07-livekit-rpc-package-rename-initial-discovery.md](./2026-11-07-livekit-rpc-package-rename-initial-discovery.md)
@@ -72,9 +74,9 @@ See the PRD.
 
 ## Draft PR contract
 
-First push (commit 2): the rule test `scripts/livekit-rpc-package-name.test.ts` — failing while the old
-name is still in manifests, aliases, workflows and scripts — and the renamed workflow file pointing at
-the new package (its rule pairing fails until the package directory exists).
+First push (commit 2): the rule test `scripts/livekit-rpc-package-name.test.ts`, failing while the
+transport sits at the old path and name. The workflow rename happens at green, once #838's
+`web-tddy-livekit-web.yml` exists on the base.
 
 ## Green wave
 
@@ -125,10 +127,17 @@ Same package at `packages/tddy-livekit-rpc-web`, name `tddy-livekit-rpc-web`. No
 
 ### scripts (`./dev bun test ./scripts/livekit-rpc-package-name.test.ts`)
 
-- `no workspace manifest depends on tddy-livekit-web as the transport`
-- `no vite or tsconfig alias resolves tddy-livekit-web to the transport sources`
-- `no source file imports the transport as tddy-livekit-web`
-- `the transport package is named tddy-livekit-rpc-web and has a web workflow`
+- `the transport package is named tddy-livekit-rpc-web and has its own web workflow`
+- `no file reaches a transport export through tddy-livekit-web` — transport exports read from the
+  package entry point; every `import { … } from "tddy-livekit-web"` in `packages/*/{src,cypress}` checked
+- `whatever package is named tddy-livekit-web is not the transport` — no `transport.ts`,
+  `transport-factory.ts`, `chunking.ts` left at the old path
+- `the codegen manifest generates the transport's code at its new path`
+
+These pin the transport's identity rather than banning the old name, because `feature/web-split/livekit`
+gives `tddy-livekit-web` to the wiring package. Contract run: 4 failing (no package at the new path;
+10 `tddy-web` files import transport exports through the old name; transport sources at the old path;
+manifest rows at the old path).
 
 ### tddy-livekit-rpc-web
 
@@ -158,10 +167,10 @@ Same package at `packages/tddy-livekit-rpc-web`, name `tddy-livekit-rpc-web`. No
 - [x] Cross-check `packages/*/docs/code-issues/` and `docs/dev/todo/` for items this change touches (Step 2b)
 - [x] Create/update PRD documentation
 - [x] Create changeset (this document)
-- [ ] Create failing acceptance tests
-- [ ] Run acceptance tests (verify they fail)
-- [ ] USER REVIEW — acceptance tests
-- [ ] TDD Red — write failing unit/integration tests
+- [x] Create failing acceptance tests
+- [x] Run acceptance tests (verify they fail)
+- [x] USER REVIEW — acceptance tests (developer waived the per-node review for this stack, 2026-11-07: "finish the rest without stopping")
+- [x] TDD Red — write failing unit/integration tests
 - [ ] TDD Green — implement with quality code
 - [ ] Update documentation with progress
 - [ ] Repeat Red→Green→Update cycle until feature complete
