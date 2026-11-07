@@ -106,11 +106,11 @@ Real dependency edges, as opposed to the branch line:
 
 ## Scope
 
-- [ ] Detection script + unit tests
-- [ ] Reusable workflow + 7 caller workflows
-- [ ] Workspace ↔ workflow rule test
-- [ ] Delete `ci.yml` `web` job; run CI script tests in CI
-- [ ] CI guide updated
+- [x] Detection script + unit tests
+- [x] Reusable workflow + 7 caller workflows
+- [x] Workspace ↔ workflow rule test
+- [x] Delete `ci.yml` `web` job; run CI script tests in CI
+- [x] CI guide updated
 - [ ] Ruleset: `Web tests` replaced by the per-package checks (at merge)
 
 ## Technical Changes
@@ -128,7 +128,7 @@ JUnit check "Web tests". The ruleset requires it. `build-gate.yml` is reusable a
 `web-<package>.yml` per package → `web-package.yml`: `gate` (build-gate) → `changes`
 (`bun scripts/web-affected.ts --package <p> --base <pr base sha> --head <sha>`; pushes/dispatch →
 `affected=true`) → `<package> tests` (only if affected): nix, Cypress libs when the package has
-Cypress specs, `bun install --frozen-lockfile`, the package's `build` if it has one, its `test:ci`
+Cypress specs, `bun install --frozen-lockfile`, the web bundle when `needs-web-bundle`, its `test:ci`
 and `cypress:component:ci`, JUnit report check `<package> report`. `tddy-livekit-web`'s caller sets
 `needs-rust-fixture` (scoped `cargo build -p <crate> --example echo_server`) and
 `needs-livekit-image`. A package with no tests runs its build only (`tddy-desktop`: front-end build
@@ -143,9 +143,9 @@ only, no `tauri build`).
 
 ## Implementation Milestones
 
-- [ ] `affectedPackages` passes its unit tests
-- [ ] Rule test passes against the 7 callers
-- [ ] `web` job deleted; script tests step present
+- [x] `affectedPackages` passes its unit tests
+- [x] Rule test passes against the 7 callers
+- [x] `web` job deleted; script tests step present
 - [ ] A PR run shows 7 `<package> tests` checks, unaffected ones skipped-success
 
 ## Testing Plan
@@ -178,6 +178,32 @@ PR's own CI run (once ready) — a CI definition cannot be exercised locally.
 - **`tddy-livekit-web` builds its own fixture** — artifacts do not cross workflows; a scoped example
   build is the cost of not waiting on `rust-build`.
 - **Global inputs run everything** — a lockfile or toolchain change can break any package.
+- **Required-check name is `web / <package> tests`, not `<package> tests`.** GitHub shows a called
+  workflow's jobs as `<calling job id> / <job name>` (compare `gate / Draft build gate` on master). The
+  caller's job id is `web`, so the ruleset contexts are `web / <package> tests`. A context without the
+  prefix never reports, and a required check that never reports blocks the merge. Confirm the names on
+  the first CI run of a ready PR, before the ruleset edit.
+- **A failed `changes` job fails the check, it does not skip it.** A skipped job reports success, so
+  `if: needs.changes.outputs.affected == 'true'` alone would pass every package when the detector breaks.
+  The test job's `if` also runs when `changes` failed, and its first step fails.
+- **Inputs differ from the plan in two places.** `needs-web-bundle` replaces a generic "run the package's
+  build" input, because tddy-web is the only package whose tests need its own build. `needs-tddy-coder`
+  was not planned: `tddy-rust-typescript-tests`' only test spawns `target/debug/tddy-coder` and serves
+  `packages/tddy-web/dist`, so without both its `test:ci` fails in `beforeAll`. It is wired, not left out.
+- **A caller's own edit affects its package.** `.github/workflows/web-<package>.yml` counts toward that
+  package's affected set, so editing a caller re-runs the check it configures. Not in the planned rule list.
+- **`concurrency` is set in each caller**, group `web-<package>-<ref>`, not in `web-package.yml`, so a
+  package's runs cancel only their own predecessors. Unverified on GitHub until the first run.
+- **Packages with nothing to run.** `tddy-desktop` and `tddy-connectrpc-testkit` have no `test:ci` and no
+  build of their own, so their checks install the workspace and pass. `tddy-desktop`'s front end is
+  tddy-web's bundle (`frontendDist` in `src-tauri/tauri.conf.json`), which its `package.json` does not
+  depend on: a tddy-web change does not run the desktop check. Follow-up, not in this node.
+- **Cost.** No Rust cache in these jobs. `tddy-rust-typescript-tests` cold-builds `tddy-coder-cli`, and
+  `tddy-livekit-web` builds `echo_server`. Global inputs run every check, so a `package.json` or `bun.lock`
+  change builds tddy-coder in that check too. Locally, `tddy-coder-cli` took ~2 min with deps partly warm.
+- **Test additions, no test file changed.** `test:ci` added to tddy-web (alias of `test:unit:ci`),
+  tddy-livekit-web (its five bun test files, 44 tests that no script ran before) and
+  tddy-rust-typescript-tests.
 
 ## Refactoring Needed
 
@@ -191,6 +217,36 @@ PR's own CI run (once ready) — a CI definition cannot be exercised locally.
 
 ## Validation Results
 
+Scoped, run in this worktree (`/Users/mantasi/.superset/worktrees/tddy-coder/yolo-web-split-web-ci`):
+
+- `./dev bun test` on the five CI script tests (`web-affected`, `web-workflows`, `nextest-serial-groups`,
+  `ci-e2e-timing`, `livekit-ci-server`): 69 pass, 0 fail.
+- `./dev bun run --filter tddy-web test:ci`: 1336 pass. `--filter tddy-livekit-web test:ci`: 44 pass.
+  `--filter tddy-rust-typescript-tests test:ci`: 1 pass, after the binary and bundle below.
+- `./dev bun run --filter tddy-web build`: exit 0. `./dev cargo build --locked -p tddy-coder-cli --bin tddy-coder`
+  and `-p tddy-livekit --example echo_server`: exit 0.
+- All `.github/workflows/*.yml` parse as YAML. `actionlint` is not installed; the workflows are proven by
+  this PR's own CI run, as the testing plan says.
+- Not run: the Cypress component suites of tddy-web and tddy-livekit-web (about 50 min and Docker).
+
+Flakes seen, not fixed here (no test file changed in this node):
+
+- `nextest-serial-groups.test.ts` › `no_binary_that_starts_the_livekit_testkit_is_in_a_serial_test_group`
+  hit bun's 5 s default timeout once (5.0 s) on a cold run. It passes alone in 2.2 s and in the rerun.
+  It runs in CI now, so an explicit timeout in that test is the fix.
+- `echo-unary.test.ts` `beforeAll` hit bun's 5 s hook timeout on the first launch of a freshly built
+  `tddy-coder` (macOS). Three passes since, about 0.3 s each. Its own readiness wait is 10 s, longer than
+  the hook's limit.
+
+Left alone, not from this change:
+
+- `packages/tddy-workflow-recipes/build.rs` rewrites `generated/schema-manifest.json` on every build (key
+  order, drops `version`), so the committed copy is stale. Reverted, not committed.
+- `packages/tddy-web/src/buildId.ts` is rewritten by the prebuild step. Reverted, not committed.
+- `scripts/local-package-cache.test.ts`, `nextest-windowed.test.ts` and `nextest-e2e-archive.test.ts` are
+  not run in CI either, and no todo entry names them.
+- `rust-build` still stages `echo_server` into `rust-fixture-bins`, and no job reads it now.
+
 ## TODO
 
 - [x] Record initial discovery (`2026-11-07-per-package-web-checks-initial-discovery.md`)
@@ -201,10 +257,10 @@ PR's own CI run (once ready) — a CI definition cannot be exercised locally.
 - [x] Run acceptance tests (verify they fail)
 - [x] USER REVIEW — acceptance tests (developer waived the per-node review for this stack, 2026-11-07: "finish the rest without stopping")
 - [x] TDD Red — write failing unit/integration tests
-- [ ] TDD Green — implement with quality code
+- [x] TDD Green — implement with quality code
 - [ ] Update documentation with progress
 - [ ] Repeat Red→Green→Update cycle until feature complete
-- [ ] Run the touched tests (`./dev bun test ./scripts/web-affected.test.ts ./scripts/web-workflows.test.ts`) — verify 100% pass
+- [x] Run the touched tests (`./dev bun test ./scripts/web-affected.test.ts ./scripts/web-workflows.test.ts`) — verify 100% pass
 - [ ] Validate changes (/validate-changes)
 - [ ] Refactor issues from change validation
 - [ ] USER REVIEW — development complete
