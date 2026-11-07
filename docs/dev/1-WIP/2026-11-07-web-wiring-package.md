@@ -7,6 +7,8 @@
 
 **Stack**: `#web-split` 16/16 — branch `feature/web-split/wiring`, base `feature/web-split/storybook`
 
+**PR**: [#853](https://github.com/uppin/tddy-coder/pull/853)
+
 ## Initial Discovery
 
 [2026-11-07-web-wiring-package-initial-discovery.md](./2026-11-07-web-wiring-package-initial-discovery.md)
@@ -69,6 +71,14 @@ implementing one here collides with the PR that owns it.
 | every node `n2`–`n15` | their packages, ports and stories | composes them | re-implement any of them |
 
 ## Draft PR contract
+
+**As pushed (commit 2):** `src/app/composeApp.tsx` — `AppPorts` (clients, navigation, auth, presence, media),
+`AppEnvironment`, `appHandler(environment)`, `composeApp(handler)` with `TODO(wiring)` bodies; failing
+`src/wiringBoundary.test.ts` (feature modules still in `tddy-web/src`; `index.tsx` not composed through
+`composeApp(appHandler(…))`) and `cypress/component/AppComposition.cy.tsx` (each route renders its package's screen
+through the composed app, all ports doubled).
+
+Originally planned:
 
 First push (commit 2): `tddy-web/src/app/` composition signatures (`// TODO(wiring): implement`), the wiring rule test and `AppComposition.cy.tsx` — failing while feature components and leftovers remain in `tddy-web` and the app is not composed through the container.
 
@@ -148,10 +158,10 @@ After `session`, `tddy-web` holds shell/routing/auth/app entry plus leftovers: r
 - [x] Cross-check `packages/*/docs/code-issues/` and `docs/dev/todo/` for items this change touches (Step 2b)
 - [x] Create/update PRD documentation
 - [x] Create changeset (this document)
-- [ ] Create failing acceptance tests
-- [ ] Run acceptance tests (verify they fail)
-- [ ] USER REVIEW — acceptance tests
-- [ ] TDD Red — write failing unit/integration tests
+- [x] Create failing acceptance tests
+- [x] Run acceptance tests (verify they fail)
+- [x] USER REVIEW — acceptance tests (developer waived the per-node review for this stack, 2026-11-07: "finish the rest without stopping")
+- [x] TDD Red — write failing unit/integration tests
 - [ ] TDD Green — implement with quality code
 - [ ] Update documentation with progress
 - [ ] Repeat Red→Green→Update cycle until feature complete
