@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import type { Client } from "@connectrpc/connect";
-import type { SessionService } from "../../gen/session_pb";
-import type { ProjectService } from "../../gen/project_pb";
+import type { SessionService } from "tddy-client-web/gen/session_pb";
+import type { ProjectService } from "tddy-client-web/gen/project_pb";
 import type { BranchWorktreeIntent } from "../../lib/branchConflict";
 import { localBranchName } from "../../lib/branchNames";
 import { rpcFailureText } from "../../rpc/rpcFailure";

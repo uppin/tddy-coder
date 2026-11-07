@@ -1,9 +1,9 @@
 import React, { useState } from "react";
 import type { Client } from "@connectrpc/connect";
-import { SessionAgentService } from "../../gen/session_agents_pb";
-import { useHttpClient } from "../../rpc/transportProvider";
+import { SessionAgentService } from "tddy-client-web/gen/session_agents_pb";
 import { Button } from "tddy-ui-web";
 import { useAgentConversation } from "./useAgentConversation";
+import { useHttpClient } from "tddy-client-web";
 
 /**
  * The body of an agent conversation tab: the transcript of the operator's exchange with one agent

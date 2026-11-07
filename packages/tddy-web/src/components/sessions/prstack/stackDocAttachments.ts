@@ -16,8 +16,8 @@
  * Feature: docs/ft/coder/pr-stack-docs.md § Auto-attachment in the Start-session dialog
  */
 
-import type { SessionEntry } from "../../../gen/session_pb";
-import { HostDocumentScope } from "../../../gen/types_pb";
+import type { SessionEntry } from "tddy-client-web/gen/session_pb";
+import { HostDocumentScope } from "tddy-client-web/gen/types_pb";
 import { contextDocRelativePath } from "../attachments/contextDocPath";
 import type { InitialAttachment } from "../attachments/pendingAttachment";
 

@@ -1,12 +1,12 @@
 import { useEffect, useState, type CSSProperties } from "react";
 import type { Client } from "@connectrpc/connect";
-import { ActivityService } from "../../gen/activity_pb";
-import { useHttpClient } from "../../rpc/transportProvider";
+import { ActivityService } from "tddy-client-web/gen/activity_pb";
 import { AgentChatView } from "../chat/AgentChat";
 import type { ChatMessage } from "../chat/useAgentChat";
 import { useAcpReplay } from "../chat/useAcpReplay";
 import { Button } from "tddy-ui-web";
 import { AgentActivityDetailDialog } from "./AgentActivityDetailDialog";
+import { useHttpClient } from "tddy-client-web";
 
 interface AgentActivityOverlayProps {
   sessionId: string;

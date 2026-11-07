@@ -1,8 +1,8 @@
 import { useState, useEffect, useMemo, useCallback, useRef } from "react";
 import { Code, ConnectError, type Client } from "@connectrpc/connect";
-import { AuthService, VaultState } from "../gen/auth_pb";
-import type { GitHubUser } from "../gen/auth_pb";
-import { useHttpClient, useAuthTokenGate } from "../rpc/transportProvider";
+import { AuthService, VaultState } from "tddy-client-web/gen/auth_pb";
+import type { GitHubUser } from "tddy-client-web/gen/auth_pb";
+import { useAuthTokenGate } from "../rpc/transportProvider";
 import { createSessionTokenStore, type TokenStorage } from "../rpc/sessionTokenStore";
 import {
   checkWholeSession,
@@ -13,6 +13,7 @@ import {
   type DevicePollStep,
   type WholeSession,
 } from "./authSession";
+import { useHttpClient } from "tddy-client-web";
 
 export type { DeviceLogin } from "./authSession";
 

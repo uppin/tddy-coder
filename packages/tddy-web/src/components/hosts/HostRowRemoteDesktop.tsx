@@ -19,11 +19,11 @@
  */
 
 import { useState } from "react";
-import { DesktopChannelKind, ProbeOutcome, type HostRemoteDesktop } from "../../gen/host_pb";
-import { Protocol } from "../../gen/screen_sharing_pb";
-import { useHostConnection } from "../../rpc/connections/registry";
+import { DesktopChannelKind, ProbeOutcome, type HostRemoteDesktop } from "tddy-client-web/gen/host_pb";
+import { Protocol } from "tddy-client-web/gen/screen_sharing_pb";
 import { useHasCapability } from "../../rpc/connections/useHasCapability";
 import { HostDesktopOverlay } from "./HostDesktopOverlay";
+import { useHostConnection } from "tddy-client-web";
 
 export interface HostRowRemoteDesktopProps {
   instanceId: string;

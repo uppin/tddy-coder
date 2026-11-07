@@ -5,7 +5,7 @@
 
 import { describe, it, expect } from "bun:test";
 import { create } from "@bufbuild/protobuf";
-import { IntegrationState, IntegrationStatusSchema } from "../../gen/daemon_config_pb";
+import { IntegrationState, IntegrationStatusSchema } from "tddy-client-web/gen/daemon_config_pb";
 import { integrationStatusText } from "./integrationStatusText";
 
 const NOW = new Date("2026-10-16T20:00:00Z");

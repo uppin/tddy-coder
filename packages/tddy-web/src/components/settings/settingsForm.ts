@@ -14,7 +14,7 @@ import {
   IceGathering,
   type DaemonSettings,
   type GetConfigResponse,
-} from "../../gen/daemon_config_pb";
+} from "tddy-client-web/gen/daemon_config_pb";
 
 /** The ICE gathering policy as the select control holds it. */
 export type LivekitIceGathering = "gather_once" | "gather_continually";

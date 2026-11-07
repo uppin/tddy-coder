@@ -16,7 +16,7 @@ import {
   ListProjectsResponseSchema,
   ProjectEntrySchema,
   type ProjectEntry,
-} from "../../../src/gen/project_pb";
+} from "tddy-client-web/gen/project_pb";
 import {
   ConnectSessionResponseSchema,
   ListSessionsResponseSchema,
@@ -27,7 +27,7 @@ import {
   type ResumeSessionResponse,
   type SessionEntry,
   type StartSessionResponse,
-} from "../../../src/gen/session_pb";
+} from "tddy-client-web/gen/session_pb";
 import {
   AgentInfoSchema,
   ListAgentModelsResponseSchema,
@@ -36,19 +36,19 @@ import {
   ModelInfoSchema,
   ToolInfoSchema,
   type AgentInfo,
-} from "../../../src/gen/catalog_pb";
+} from "tddy-client-web/gen/catalog_pb";
 import {
   EligibleDaemonEntrySchema,
   ListEligibleDaemonsResponseSchema,
   type EligibleDaemonEntry,
-} from "../../../src/gen/host_pb";
-import { GetAuthStatusResponseSchema, GitHubUserSchema, type GitHubUser } from "../../../src/gen/auth_pb";
+} from "tddy-client-web/gen/host_pb";
+import { GetAuthStatusResponseSchema, GitHubUserSchema, type GitHubUser } from "tddy-client-web/gen/auth_pb";
 import {
   GenerateTokenResponseSchema,
   RefreshTokenResponseSchema,
   type GenerateTokenResponse,
   type RefreshTokenResponse,
-} from "../../../src/gen/token_pb";
+} from "tddy-client-web/gen/token_pb";
 
 import { toArrayBuffer } from "./protoRpc";
 

@@ -16,7 +16,7 @@ import React from "react";
 import type { Room } from "livekit-client";
 import { Code } from "@connectrpc/connect";
 import { type InMemoryRpcBackend } from "tddy-connectrpc-testkit";
-import { ModelRegistryService } from "../../../src/gen/models_pb";
+import { ModelRegistryService } from "tddy-client-web/gen/models_pb";
 import { ModelsAppPage } from "../../../src/components/models/ModelsAppPage";
 import { AuthProvider } from "../../../src/hooks/authProvider";
 import type { DaemonHost } from "../../../src/lib/participantRole";

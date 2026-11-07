@@ -26,10 +26,10 @@ import {
   StreamReplayMode,
   TerminalHistoryChunkSchema,
   type TerminalSessionService,
-} from "../../gen/terminal_session_pb";
+} from "tddy-client-web/gen/terminal_session_pb";
 import { MAIN_TERMINAL_ID } from "../../lib/terminalFrameIdentity";
 import type { HistoryChunk } from "../../lib/terminalHistoryLoader";
-import type { TerminalFeed, TerminalHistoryFetcher, TerminalOptions } from "./terminal";
+import type { TerminalFeed, TerminalHistoryFetcher, TerminalOptions } from "tddy-client-web/connections/terminal";
 import { openDaemonTerminalFeed, TerminalResumePoint } from "./terminalFeed";
 
 const A_SESSION = "session-0001";

@@ -30,18 +30,15 @@ import {
   useState,
   type ReactNode,
 } from "react";
-import type { Client } from "@connectrpc/connect";
-import type { DescService } from "@bufbuild/protobuf";
 import type { Room } from "livekit-client";
 import { useAuth } from "../hooks/useAuth";
-import type { DaemonHost } from "../lib/participantRole";
+import type { DaemonHost } from "tddy-client-web";
 import { presenceIdentityForUser } from "../lib/presenceIdentity";
 import {
   readStoredSelectedDaemon,
   resolveSelectedDaemonInstanceId,
   writeStoredSelectedDaemon,
 } from "../routing/selectedHost";
-import { PARAM_HOST, screenRootOf, withParams } from "../routing/appLocation";
 import {
   navigateAppLocation,
   readAppLocation,
@@ -49,8 +46,9 @@ import {
   useAppLocation,
 } from "../routing/useAppLocation";
 import { LiveKitConnections } from "./connections/liveKit";
-import { HostReadiness, useHostClient } from "./connections/registry";
-import type { ConnectionStatus } from "./connections/types";
+import { AppClientsPorts } from "./appClientsPorts";
+import { HostReadiness } from "./connections/registry";
+import type { ConnectionStatus } from "tddy-client-web/connections/types";
 import { daemonHostOf } from "./hostDirectory/daemonHost";
 import { useLiveKitHostDirectorySource } from "./hostDirectory/liveKitSource";
 import { HostPresenceRoom } from "./hostDirectory/presenceRoom";
@@ -58,7 +56,7 @@ import { useServingHostDirectorySource } from "./hostDirectory/servingSource";
 import { HostDirectorySources, useHostDirectory } from "./hostDirectory/useHostDirectory";
 import type { HostDirectorySource } from "./hostDirectory/types";
 import { useSelectedDaemonLabel } from "./useSelectedDaemonLabel";
-import { hostLabelOf } from "./hostLabel";
+import { PARAM_HOST, screenRootOf, withParams } from "tddy-client-web";
 
 // ---------------------------------------------------------------------------
 // Context
@@ -284,7 +282,17 @@ function useSelectedDaemonState(
  * sources, the presence room they were assembled over, and the connection provider that reaches
  * hosts over it.
  */
-export function SelectedDaemonProvider({
+export function SelectedDaemonProvider(props: SelectedDaemonProviderProps) {
+  // The directory's own sign-in read (`useDirectorySources`) goes through the clients port, so the
+  // ports are mounted above it; `SelectedDaemonScope` re-mounts them with the selection it builds.
+  return (
+    <AppClientsPorts>
+      <SelectedDaemonProviderBody {...props} />
+    </AppClientsPorts>
+  );
+}
+
+function SelectedDaemonProviderBody({
   livekitEnabled,
   livekitUrl,
   commonRoom,
@@ -399,11 +407,11 @@ function SelectedDaemonScope({
   );
 }
 
-// ---------------------------------------------------------------------------
-// Hooks
-// ---------------------------------------------------------------------------
-
-const NO_PROVIDER_DEFAULTS: SelectedDaemonContextValue = {
+/**
+ * What this app's directory reports when nothing in scope has built one: no daemons, none selected.
+ * The shape of "no host selected yet", which every daemon-scoped hook already answers with `null`.
+ */
+const NO_DIRECTORY: SelectedDaemonContextValue = {
   daemons: [],
   selectedInstanceId: null,
   selectedLabel: null,
@@ -413,71 +421,7 @@ const NO_PROVIDER_DEFAULTS: SelectedDaemonContextValue = {
   directoryError: null,
 };
 
-/**
- * Return the shared daemon-selection context. Mirrors `useHttpTransport`/`useLiveKitTransportFactory`
- * (`./transportProvider`): when no `SelectedDaemonProvider` wraps this component, sensible empty
- * defaults are returned rather than throwing.
- */
-export function useSelectedDaemon(): SelectedDaemonContextValue {
-  return useContext(SelectedDaemonContext) ?? NO_PROVIDER_DEFAULTS;
-}
-
-/** Convenience for `useSelectedDaemon().daemons`. */
-export function useDaemons(): DaemonHost[] {
-  return useSelectedDaemon().daemons;
-}
-
-/**
- * Name a host in text — an error, a badge, a gate title — by the one rule in `./hostLabel`.
- *
- * The callback changes identity exactly when a name it can give changes. The daemon list is rebuilt
- * on every participant event, and a callback that changed with each rebuild would re-run every effect
- * keyed on it (a poll, a stream). So it is keyed on the names themselves, never on the array. The key
- * is real data the callback reads, not a ref: the React Compiler memoises a render-time call on its
- * inputs, and a callback whose identity never changed would hand a compiled caller a stale label.
- */
-export function useHostLabel(): (instanceId: string) => string {
-  const { daemons, selectedInstanceId, selectedLabel } = useSelectedDaemon();
-  const names = JSON.stringify([
-    selectedInstanceId,
-    selectedLabel,
-    daemons.map((d) => [d.instanceId, d.label]),
-  ]);
-  return useMemo(() => {
-    const [id, label, listed] = JSON.parse(names) as [string | null, string | null, [string, string][]];
-    const source = {
-      selectedInstanceId: id,
-      selectedLabel: label,
-      daemons: listed.map(([instanceId, l]) => ({ instanceId, label: l })),
-    };
-    return (instanceId: string) => hostLabelOf(source, instanceId);
-  }, [names]);
-}
-
-/**
- * Build and memoize a ConnectRPC client for a daemon-level service, targeting a specific daemon over
- * whichever wire can reach it — the common room today, an in-process bridge in a host build that
- * registers one. Returns `null` until a provider can reach `instanceId` and `instanceId` is set —
- * callers must guard call sites. Use this to address a daemon other than the currently selected one
- * (e.g. adding a project to a chosen host); {@link useDaemonClient} is the selected-daemon
- * convenience over it.
- *
- * A thin name over {@link useHostClient}: a daemon *is* a host, and this hook is kept because the
- * screens read in that vocabulary.
- */
-export function useDaemonClientFor<S extends DescService>(
-  service: S,
-  instanceId: string | null,
-): Client<S> | null {
-  return useHostClient(service, instanceId);
-}
-
-/**
- * Build and memoize a ConnectRPC client for a daemon-level service, targeting the currently
- * selected daemon. Returns `null` until a daemon is selected and a provider can reach it — callers
- * must guard call sites.
- */
-export function useDaemonClient<S extends DescService>(service: S): Client<S> | null {
-  const { selectedInstanceId } = useSelectedDaemon();
-  return useDaemonClientFor(service, selectedInstanceId);
+/** The selection `AppClientsPorts` hands the clients port as `selectedDaemon`. */
+export function useSelectedDaemonSource(): SelectedDaemonContextValue {
+  return useContext(SelectedDaemonContext) ?? NO_DIRECTORY;
 }

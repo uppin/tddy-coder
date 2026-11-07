@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import type { Client } from "@connectrpc/connect";
-import type { ActivityService, AgentActivityRecord } from "../../gen/activity_pb";
-import { StreamMode } from "../../gen/activity_pb";
+import type { ActivityService, AgentActivityRecord } from "tddy-client-web/gen/activity_pb";
+import { StreamMode } from "tddy-client-web/gen/activity_pb";
 import { rpcFailureText } from "../../rpc/rpcFailure";
 
 export interface UseSessionActivityResult {

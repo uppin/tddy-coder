@@ -14,8 +14,8 @@ import { chunkFile } from "../lib/fileUploadChunks";
 import { randomUuid } from "../lib/randomId";
 import { joinQuotedPaths } from "../lib/shellQuote";
 import { useUploadProgressController } from "../rpc/uploadProgress";
-import { useDaemonClient } from "../rpc/selectedDaemon";
-import { SessionFilesService } from "../gen/session_files_pb";
+import { SessionFilesService } from "tddy-client-web/gen/session_files_pb";
+import { useDaemonClient } from "tddy-client-web";
 
 /** One unary chunk upload; resolves to the file's absolute host path on the final chunk. */
 export type UploadChunkFn = (args: {

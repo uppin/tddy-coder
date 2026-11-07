@@ -37,7 +37,7 @@
 import React from "react";
 import { Code, ConnectError, createClient, type Client } from "@connectrpc/connect";
 import { anInMemoryRpcBackend } from "tddy-connectrpc-testkit";
-import { TerminalSessionService, type SessionTerminalInput } from "../../src/gen/terminal_session_pb";
+import { TerminalSessionService, type SessionTerminalInput } from "tddy-client-web/gen/terminal_session_pb";
 import { GrpcSessionTerminal } from "../../src/components/sessions/GrpcSessionTerminal";
 import { UploadProgressProvider } from "../../src/rpc/uploadProgress";
 import type { ConnectedSession } from "../../src/components/sessions/useTerminalControl";

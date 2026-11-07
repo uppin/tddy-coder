@@ -1,12 +1,10 @@
 import { useCallback, useEffect, useState } from "react";
 import type { Client } from "@connectrpc/connect";
-import { type ProjectEntry } from "../../gen/project_pb";
-import { ProjectService } from "../../gen/project_pb";
-import { AccountsService } from "../../gen/accounts_pb";
-import { HostService } from "../../gen/host_pb";
+import { type ProjectEntry } from "tddy-client-web/gen/project_pb";
+import { ProjectService } from "tddy-client-web/gen/project_pb";
+import { AccountsService } from "tddy-client-web/gen/accounts_pb";
+import { HostService } from "tddy-client-web/gen/host_pb";
 import { useAuthContext } from "../../hooks/authProvider";
-import { useHostConnector } from "../../rpc/connections/registry";
-import { useDaemonClient, useDaemons, useHostLabel, useSelectedDaemon } from "../../rpc/selectedDaemon";
 import {
   hostNotConnected,
   hostNotConnectedText,
@@ -15,6 +13,7 @@ import {
 } from "../../rpc/rpcFailure";
 import { AppShell } from "../shell/AppShell";
 import { ProjectsScreen, type AssignableAccount } from "./ProjectsScreen";
+import { useDaemonClient, useDaemons, useHostConnector, useHostLabel, useSelectedDaemon } from "tddy-client-web";
 
 /** How often the Projects screen re-reads the registry. */
 export const POLL_INTERVAL_MS = 5000;

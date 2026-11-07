@@ -9,12 +9,11 @@
  */
 
 import { useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
-import { useHttpClient, useHttpTransport } from "../../rpc/transportProvider";
 import { loadClientConfig } from "../../rpc/clientConfig";
 import { applyDebugMaskFromConfig } from "../../lib/debugMask";
 import { useAuthContext } from "../../hooks/authProvider";
-import { TokenService } from "../../gen/token_pb";
 import { useVisualViewport, Button } from "tddy-ui-web";
+import { TokenService } from "tddy-client-web/gen/token_pb";
 import { GitHubLoginButton } from "../GitHubLoginButton";
 import { UserAvatar } from "../UserAvatar";
 import { GhosttyTerminalSession } from "../GhosttyTerminalSession";
@@ -22,6 +21,7 @@ import { useDirectRoomTerminal } from "../../rpc/connections/livekit/useDirectRo
 import { ConnectionTerminalChrome } from "./ConnectionTerminalChrome";
 import { BUILD_ID } from "../../buildId";
 import { formClassName, inputClassName, labelClassName } from "./standaloneFormStyles";
+import { useHttpClient, useHttpTransport } from "tddy-client-web";
 
 function getParamsFromUrl(): { url: string; identity: string; roomName: string; debugLogging: boolean } {
   const params = typeof window !== "undefined" ? new URLSearchParams(window.location.search) : null;

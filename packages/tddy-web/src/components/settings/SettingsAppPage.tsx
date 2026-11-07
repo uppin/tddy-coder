@@ -10,9 +10,9 @@
 
 import { AppShell } from "../shell/AppShell";
 import { useAuthContext } from "../../hooks/authProvider";
-import { useHttpClient } from "../../rpc/transportProvider";
-import { DaemonConfigService } from "../../gen/daemon_config_pb";
+import { DaemonConfigService } from "tddy-client-web/gen/daemon_config_pb";
 import { DaemonSettingsScreen } from "./DaemonSettingsScreen";
+import { useHttpClient } from "tddy-client-web";
 
 export function SettingsAppPage({ onNavigate }: { onNavigate: (path: string) => void }) {
   const { sessionToken } = useAuthContext();

@@ -17,7 +17,7 @@ import {
   type AcpAgentMessage,
   type ContentChunk,
   type ToolCall,
-} from "../../gen/tddy/acp/v1/acp_pb";
+} from "tddy-client-web/gen/tddy/acp/v1/acp_pb";
 import { createAgentChunkMerger } from "./acpAgentMerge";
 import { subagentStatusOf, toolStatusOf } from "./toolCallPresentation";
 import type { ChatMessage } from "./useAgentChat";

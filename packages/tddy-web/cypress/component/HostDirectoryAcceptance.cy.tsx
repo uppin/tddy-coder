@@ -23,11 +23,12 @@ import { HostDirectorySources } from "../../src/rpc/hostDirectory/useHostDirecto
 import { DaemonSelectorConnected } from "../../src/components/shell/DaemonSelector";
 import { SelectedDaemonProvider } from "../../src/rpc/selectedDaemon";
 import { daemonSelectorPage } from "../support/pages/daemonSelectorPage";
-import { ConnectionProviders, ConnectionProviderRegistry } from "../../src/rpc/connections/registry";
-import type { ConnectionCapability, HostConnection } from "../../src/rpc/connections/types";
+import { ConnectionProviders } from "../../src/rpc/connections/registry";
+import type { ConnectionCapability, HostConnection } from "tddy-client-web/connections/types";
 import { HostPresenceRoom } from "../../src/rpc/hostDirectory/presenceRoom";
 import { aFakeCommonRoom } from "../support/livekit/fakeCommonRoom";
 import { byTestId } from "../support/testIds";
+import { ConnectionProviderRegistry } from "tddy-client-web";
 
 // ---------------------------------------------------------------------------
 // Fixtures

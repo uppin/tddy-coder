@@ -22,14 +22,14 @@ import type {
   StartSessionRequestSchema,
   StartSessionResponse,
   StartTaskStarted,
-} from "../gen/session_pb";
+} from "tddy-client-web/gen/session_pb";
 import {
   NO_START_PROGRESS,
   startProgressAfter,
   startProgressFailed,
   type StartProgressState,
 } from "../components/sessions/startProgress";
-import type { SessionFilesService } from "../gen/session_files_pb";
+import type { SessionFilesService } from "tddy-client-web/gen/session_files_pb";
 import {
   duplicateBasenames,
   validateAttachmentBasename,
@@ -37,7 +37,6 @@ import {
 } from "../lib/attachmentBasenames";
 import { formatAttachmentBytes } from "../lib/attachmentBytes";
 import { randomUuid } from "../lib/randomId";
-import { useDaemons, useSelectedDaemon } from "../rpc/selectedDaemon";
 import type { HostDocumentPick } from "../components/sessions/attachments/HostDocumentPicker";
 import type {
   AttachmentProgress,
@@ -50,6 +49,7 @@ import {
   type StagedAttachmentFile,
   type StagedAttachmentProgress,
 } from "./useStagedAttachmentUpload";
+import { useDaemons, useSelectedDaemon } from "tddy-client-web";
 
 /** The `StartSession` request both entry points (unary and streamed) are built as. */
 export type StartSessionRequestInit = MessageInitShape<typeof StartSessionRequestSchema>;

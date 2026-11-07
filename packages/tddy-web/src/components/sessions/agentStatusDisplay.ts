@@ -1,4 +1,4 @@
-import { SessionAgentStatus } from "../../gen/types_pb";
+import { SessionAgentStatus } from "tddy-client-web/gen/types_pb";
 
 /**
  * The vocabulary every agent badge in the Agents tab draws from.

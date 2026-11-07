@@ -1,5 +1,5 @@
-import type { ProjectEntry } from "../gen/project_pb";
-import type { SessionEntry } from "../gen/session_pb";
+import type { ProjectEntry } from "tddy-client-web/gen/project_pb";
+import type { SessionEntry } from "tddy-client-web/gen/session_pb";
 import type { KnownProject, ProjectSessionGroup } from "./sessionProjectGroups";
 
 /** One project's pinned home entry, as the drawer renders it (`#project-home` 4/7). */

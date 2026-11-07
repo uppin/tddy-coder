@@ -26,7 +26,7 @@ import {
   TerminalSessionService,
   type SessionTerminalInput,
   type SessionTerminalOutput,
-} from "../../src/gen/terminal_session_pb";
+} from "tddy-client-web/gen/terminal_session_pb";
 import { GrpcSessionTerminal } from "../../src/components/sessions/GrpcSessionTerminal";
 import { useEnqueuedInput } from "../../src/components/sessions/useEnqueuedInput";
 import { EnqueuedInputOverlay } from "../../src/components/connection/EnqueuedInputOverlay";

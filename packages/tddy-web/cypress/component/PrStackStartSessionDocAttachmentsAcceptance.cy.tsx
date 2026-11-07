@@ -17,14 +17,14 @@
 
 import React from "react";
 import { servedAgentWire } from "../support/servedAgents";
-import { CatalogService } from "../../src/gen/catalog_pb";
-import { ProjectService } from "../../src/gen/project_pb";
+import { CatalogService } from "tddy-client-web/gen/catalog_pb";
+import { ProjectService } from "tddy-client-web/gen/project_pb";
 import { SessionsDrawerScreen } from "../../src/components/sessions/SessionsDrawerScreen";
 import { withSelectedDaemon } from "../support/rpc/withSelectedDaemon";
 import { create } from "@bufbuild/protobuf";
 import type { InMemoryRpcBackend } from "tddy-connectrpc-testkit";
-import { type ProjectEntry } from "../../src/gen/project_pb";
-import { SessionService, StartSessionEventSchema, type StartSessionRequest } from "../../src/gen/session_pb";
+import { type ProjectEntry } from "tddy-client-web/gen/project_pb";
+import { SessionService, StartSessionEventSchema, type StartSessionRequest } from "tddy-client-web/gen/session_pb";
 import { mountWithRpc } from "../support/rpc/inMemory";
 import { aSessionsDrawerBackend, type SessionEntryFixture } from "../support/rpc/vncBackend";
 import { sessionsDrawerPage } from "../support/pages/sessionsDrawerPage";

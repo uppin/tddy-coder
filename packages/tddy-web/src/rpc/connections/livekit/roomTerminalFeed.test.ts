@@ -25,8 +25,8 @@ import { RoomEvent, type Room } from "livekit-client";
 import {
   TerminalHistoryChunkSchema,
   type TerminalSessionService,
-} from "../../../gen/terminal_session_pb";
-import { TerminalOutputSchema, type TerminalService } from "../../../gen/terminal_pb";
+} from "tddy-client-web/gen/terminal_session_pb";
+import { TerminalOutputSchema, type TerminalService } from "tddy-client-web/gen/terminal_pb";
 import type { HistoryChunk } from "../../../lib/terminalHistoryLoader";
 import type { TerminalFeed, TerminalHistoryFetcher, TerminalOptions } from "../terminal";
 import { openRoomTerminalFeed } from "./roomTerminalFeed";

@@ -14,9 +14,9 @@
 import { describe, it, expect } from "bun:test";
 import type { Client, Transport } from "@connectrpc/connect";
 import type { DescService } from "@bufbuild/protobuf";
-import type { TerminalFeed } from "../../rpc/connections/terminal";
-import type { SessionConnection } from "../../rpc/connections/session";
-import type { ConnectionCapability } from "../../rpc/connections/types";
+import type { TerminalFeed } from "tddy-client-web/connections/terminal";
+import type { SessionConnection } from "tddy-client-web/connections/session";
+import type { ConnectionCapability } from "tddy-client-web/connections/types";
 import {
   SessionRuntimeRegistry,
   makeByteTap,

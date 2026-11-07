@@ -1,8 +1,7 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { ConnectError } from "@connectrpc/connect";
-import { type SessionEntry } from "../../gen/session_pb";
-import { SessionAgentService, type SessionAgentEntry } from "../../gen/session_agents_pb";
-import { useHttpClient } from "../../rpc/transportProvider";
+import { type SessionEntry } from "tddy-client-web/gen/session_pb";
+import { SessionAgentService, type SessionAgentEntry } from "tddy-client-web/gen/session_agents_pb";
 import { Button } from "tddy-ui-web";
 import { AgentPicker } from "./AgentPicker";
 import { agentPlacementWire, type AgentPlacementChoice } from "./agentPlacementChoice";
@@ -11,6 +10,7 @@ import { rosterHalfOf, type RosterHalf } from "./sessionRosterHalf";
 import { SessionAgentTree, type RosterDetachRequest } from "./SessionAgentTree";
 import { type AvailableAgent } from "./useAvailableAgents";
 import { useSessionAgentRoster } from "./useSessionAgentRoster";
+import { useHttpClient } from "tddy-client-web";
 
 /**
  * The **Agents tab** — a tree rooted at the session's own main agent, holding the specialized

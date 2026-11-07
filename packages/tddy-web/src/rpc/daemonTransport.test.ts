@@ -17,7 +17,7 @@ import {
   DaemonConfigService,
   GetConfigRequestSchema,
   GetConfigResponseSchema,
-} from "../gen/daemon_config_pb";
+} from "tddy-client-web/gen/daemon_config_pb";
 import { createDefaultDaemonTransport, thisPagesHost } from "./daemonTransport";
 import { TrafficMeterRegistry } from "./trafficMeter";
 import { aBrowserPageServedFrom, aTauriHostedPage } from "../test-utils/daemonHosts";

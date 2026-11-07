@@ -7,7 +7,7 @@
  */
 
 import { describe, expect, it } from "bun:test";
-import { ModelLoadState } from "../gen/models_pb";
+import { ModelLoadState } from "tddy-client-web/gen/models_pb";
 import type { AssistantRow, ModelRow } from "./mergeRegistryEntries";
 import { chatWithAssistant, chatWithModel, needsWorkspace } from "./registryChatTarget";
 

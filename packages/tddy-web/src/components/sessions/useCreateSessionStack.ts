@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import type { SessionEntry } from "../../gen/session_pb";
+import type { SessionEntry } from "tddy-client-web/gen/session_pb";
 import { prStackOrchestrators, stackBaseSessionCandidates } from "../../utils/stackParents";
 
 export interface UseCreateSessionStackArgs {

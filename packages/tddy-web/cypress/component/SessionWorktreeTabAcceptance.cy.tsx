@@ -1,6 +1,6 @@
 import React from "react";
 import { createClient } from "@connectrpc/connect";
-import { WorktreeService, WorktreeSizeStatus } from "../../src/gen/worktree_pb";
+import { WorktreeService, WorktreeSizeStatus } from "tddy-client-web/gen/worktree_pb";
 import { SessionWorktreeTab } from "../../src/components/sessions/SessionWorktreeTab";
 import {
   aSessionServiceBackend,

@@ -33,12 +33,9 @@ import {
   type ModelEntry,
   type ProviderEntry,
   type ProviderKind,
-} from "../../gen/models_pb";
+} from "tddy-client-web/gen/models_pb";
 import { useAuthContext } from "../../hooks/authProvider";
-import { useHostConnector } from "../../rpc/connections/registry";
-import { useSelectedDaemon } from "../../rpc/selectedDaemon";
 // The same wording every fleet-wide read reports an unreachable host with.
-import { noConnectionTo } from "../../rpc/useHostFanOut";
 import {
   assistantRowKey,
   describeReadFailures,
@@ -55,6 +52,7 @@ import {
   type RegistryListFailure,
   type RegistryReadStatus,
 } from "../../utils/mergeRegistryEntries";
+import { noConnectionTo, useHostConnector, useSelectedDaemon } from "tddy-client-web";
 
 type RegistryClient = Client<typeof ModelRegistryService>;
 

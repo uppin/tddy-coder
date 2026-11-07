@@ -9,8 +9,8 @@
 
 import { describe, expect, it } from "bun:test";
 import { create } from "@bufbuild/protobuf";
-import { ProjectEntrySchema } from "../gen/project_pb";
-import { SessionEntrySchema } from "../gen/session_pb";
+import { ProjectEntrySchema } from "tddy-client-web/gen/project_pb";
+import { SessionEntrySchema } from "tddy-client-web/gen/session_pb";
 import {
   projectHomeSlot,
   projectHomesOnHost,

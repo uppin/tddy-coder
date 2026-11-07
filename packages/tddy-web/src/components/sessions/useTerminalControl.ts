@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from "react";
 import type { Client } from "@connectrpc/connect";
-import { TerminalSessionService } from "../../gen/terminal_session_pb";
+import { TerminalSessionService } from "tddy-client-web/gen/terminal_session_pb";
 import { getScreenId } from "../../lib/screenId";
 import { hostNotConnected, rpcFailureText } from "../../rpc/rpcFailure";
 import {

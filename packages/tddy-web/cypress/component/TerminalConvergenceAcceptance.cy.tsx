@@ -17,7 +17,7 @@
  * Stack: `optional-livekit` node 5 of 7.
  */
 
-import type { TerminalHistoryChunk } from "../../src/rpc/connections/terminal";
+import type { TerminalHistoryChunk } from "tddy-client-web/connections/terminal";
 import { aGhosttyTerminalSession } from "../support/drivers/ghosttyTerminalSessionDriver";
 
 // ---------------------------------------------------------------------------
