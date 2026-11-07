@@ -3,7 +3,7 @@
 **Category:** Known failing test
 **Source:** ci-setup, 2026-08-15
 
-- `packages/tddy-livekit-web/cypress/component/reflection.cy.tsx` imported
+- `packages/tddy-livekit-rpc-web/cypress/component/reflection.cy.tsx` imported
   `./support/ReflectionTestHarness`, but the harness lives at `cypress/support/`, one level up —
   `transport.cy.tsx` beside it correctly uses `../support/TransportTestHarness`. Vite failed the
   import, Cypress reported it as an uncaught error outside any test, and the spec's real assertions

@@ -35,7 +35,7 @@
 import { createContext, useContext, useMemo, useRef, type ReactNode } from "react";
 import { createClient, type Client, type Transport } from "@connectrpc/connect";
 import type { DescService } from "@bufbuild/protobuf";
-import { createLiveKitTransport } from "tddy-livekit-web";
+import { createLiveKitTransport } from "tddy-livekit-rpc-web";
 import type { Room } from "livekit-client";
 import { TrafficMeterRegistry } from "./trafficMeter";
 import { createDefaultDaemonTransport, type AuthTokenGate } from "./daemonTransport";

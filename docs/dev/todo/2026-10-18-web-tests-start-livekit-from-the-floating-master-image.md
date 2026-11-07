@@ -4,9 +4,9 @@
 **Source:** investigating [the `startEchoServer` timeout](2026-10-18-livekit-web-start-echo-server-intermittently-exceeds-its-task-timeout.md)
 
 The e2e legs read their LiveKit image from `.config/livekit-server.image` (`livekit/livekit-server:v1.13.7`), the
-single place it is pinned, and [ci.md](../guides/ci.md) says it is "never `:master`". `tddy-livekit-web`'s Cypress
+single place it is pinned, and [ci.md](../guides/ci.md) says it is "never `:master`". `tddy-livekit-rpc-web`'s Cypress
 testkit does not: `LIVEKIT_IMAGE` in `cypress/support/livekitDockerTestkit.ts` and the `Pull the LiveKit image for
-tddy-livekit-web` step in `.github/workflows/ci.yml` both name `livekit/livekit-server:master`, kept in step by a
+tddy-livekit-rpc-web` step in `.github/workflows/ci.yml` both name `livekit/livekit-server:master`, kept in step by a
 comment. ci.md records this as known.
 
 A floating tag means the server under test can change between two runs of the same commit, so a LiveKit regression

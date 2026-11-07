@@ -41,7 +41,7 @@ tddy-web is normally served over plain http on a LAN address. See
 `UPLOAD_REQUEST_ENVELOPE_HEADROOM` (8 KiB) reserves room for the RPC envelope plus the request's
 `session_token` / `session_id` / `upload_id` / `file_name` (~460 bytes measured; the constant is a
 generous multiple). `fileUploadChunks.test.ts` pins `UPLOAD_CHUNK_SIZE + headroom <=
-MAX_CHUNK_FRAME_BYTES`, importing that bound from `tddy-livekit-web` so the two cannot drift apart
+MAX_CHUNK_FRAME_BYTES`, importing that bound from `tddy-livekit-rpc-web` so the two cannot drift apart
 silently.
 
 Why it matters: a larger request is split into chunk frames by the transport, and losing one frame
@@ -133,4 +133,4 @@ Units `randomId.test.ts` (6), `fileUploadChunks.test.ts` (5), `shellQuote`/`uplo
 `TerminalNativeFileDrop` (7: highlight, real paths, upload, folder refusal, routing to the terminal
 under the pointer, a drop outside every terminal), `GhosttyTerminalSession` (a dropped path pasted
 bracketed and plain); unit `sessionReadsLocalPaths.test.ts` (5).
-The transport deadline itself is pinned in `packages/tddy-livekit-web/src/transport.test.ts`.
+The transport deadline itself is pinned in `packages/tddy-livekit-rpc-web/src/transport.test.ts`.

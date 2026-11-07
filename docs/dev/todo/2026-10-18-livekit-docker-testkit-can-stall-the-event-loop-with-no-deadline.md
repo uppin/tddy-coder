@@ -4,7 +4,7 @@
 **Category:** Defect (test infrastructure)
 **Source:** investigating [the `startEchoServer` timeout](2026-10-18-livekit-web-start-echo-server-intermittently-exceeds-its-task-timeout.md)
 
-`packages/tddy-livekit-web/cypress/support/livekitDockerTestkit.ts` runs inside the Cypress plugin process, where a
+`packages/tddy-livekit-rpc-web/cypress/support/livekitDockerTestkit.ts` runs inside the Cypress plugin process, where a
 `cy.task` is abandoned after 60 s. It carries its own deadlines (15 s for `docker port`, 20 s for readiness), but two
 of its constructs can defeat them:
 
