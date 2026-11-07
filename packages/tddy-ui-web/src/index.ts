@@ -9,3 +9,4 @@ export { cn } from "./cn";
 export * from "./useIsMobile";
 export * from "./useVisualViewport";
 export * from "./WorktreeFileTree";
+export * from "./formatTraffic";

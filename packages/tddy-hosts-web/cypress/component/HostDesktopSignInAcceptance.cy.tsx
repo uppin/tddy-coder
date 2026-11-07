@@ -30,8 +30,6 @@ import {
   type DesktopCredentialAnswer,
 } from "tddy-client-web/gen/screen_sharing_pb";
 import { HostRowRemoteDesktop } from "../../src/HostRowRemoteDesktop";
-import { mountWithRpc } from "../support/rpc/inMemory";
-import { withSelectedDaemon } from "../support/rpc/withSelectedDaemon";
 import {
   aHostPromptFeed,
   type HostPromptFeed,
@@ -165,13 +163,7 @@ function theCredentialsQuestion(
 
 /** Open the host's desktop from its row. */
 function openTheDesktopOn(backend: InMemoryRpcBackend) {
-  mountWithRpc(
-    withSelectedDaemon(
-      <HostRowRemoteDesktop instanceId={HOST} readings={[aReachableVnc()]} />,
-      HOST_LISTED,
-    ),
-    backend,
-  );
+  cy.mountWithClients(<HostRowRemoteDesktop instanceId={HOST} readings={[aReachableVnc()]} />, backend, { daemons: HOST_LISTED });
   hostDesktopPage.connect(HOST).click();
 }
 

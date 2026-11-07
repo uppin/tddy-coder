@@ -1,2 +1,32 @@
-// TODO(hosts): implement — HostsScreen, the host rows and dialogs, the host stats indicators, the screen-sharing/VNC overlays and the VMs screen move here.
-export {};
+/** tddy-hosts-web — hosts and VMs: the hosts screen and rows, host key continuity, desktop and passphrase dialogs, host stats indicators, screen-sharing and VNC overlays. */
+export { HostsScreen, type HostRow, type HostsScreenProps } from "./HostsScreen";
+export { HostKeyContinuityNotices, keyContinuityBlocks } from "./HostKeyContinuityNotices";
+export { HostPassphraseDialog } from "./HostPassphraseDialog";
+export { HostDesktopSignInDialog } from "./HostDesktopSignInDialog";
+export { HostDesktopOverlay } from "./HostDesktopOverlay";
+export { HostAddKeyAction } from "./HostAddKeyAction";
+export { HostRowTelemetry } from "./HostRowTelemetry";
+export { HostRowTooling } from "./HostRowTooling";
+export { HostRowToolingCell } from "./HostRowToolingCell";
+export { HostRowSshAgent } from "./HostRowSshAgent";
+export { HostRowSshConfig } from "./HostRowSshConfig";
+export { HostRowRemoteDesktop } from "./HostRowRemoteDesktop";
+export { HostStatsFooter, type HostStatsFooterProps } from "./HostStatsFooter";
+export { CpuCoresIndicator } from "./CpuCoresIndicator";
+export { DiskSpaceIndicator } from "./DiskSpaceIndicator";
+export { MemoryIndicator } from "./MemoryIndicator";
+export { LoadAverageIndicator } from "./LoadAverageIndicator";
+export * from "./hostStatsFormat";
+export { ScreenSharingOverlay } from "./ScreenSharingOverlay";
+export { VncOverlay } from "./VncOverlay";
+export { VmsScreen, type VmRow, type VmsScreenProps } from "./VmsScreen";
+export { DefineVmPanel, type DefineVmPanelProps } from "./DefineVmPanel";
+export { DemoVmControls } from "./DemoVmControls";
+export { useHostTooling, type HostToolingReading } from "./useHostTooling";
+export { useHostPromptAnswer } from "./useHostPromptAnswer";
+export { useHostStats, type HostDiskStats, type HostMemoryStats, type HostLoadStats, type UseHostStatsResult } from "./useHostStats";
+export { useHostPrompts, useHostPromptsFor, type HostPromptEventLike } from "./useHostPrompts";
+export * from "./hostKeyPinning";
+export { deriveHostKeyFingerprint } from "./hostKeyFingerprint";
+export { screenSharingStartFailureText } from "./screenSharingStartFailure";
+export { HostsContent } from "./HostsContent";

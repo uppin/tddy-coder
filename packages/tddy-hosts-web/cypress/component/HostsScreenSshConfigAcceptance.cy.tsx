@@ -17,8 +17,6 @@ import {
   SshConfigHostSchema,
 } from "tddy-client-web/gen/host_pb";
 import { HostRowSshConfig } from "../../src/HostRowSshConfig";
-import { mountWithRpc } from "../support/rpc/inMemory";
-import { withSelectedDaemon } from "../support/rpc/withSelectedDaemon";
 import { hostSshConfigPage } from "../support/pages/hostsScreenPage";
 
 const HOST = "workstation-1";
@@ -33,7 +31,7 @@ function aListingOf(aliases: string[]) {
 }
 
 function mountConfig(backend = anInMemoryRpcBackend()) {
-  mountWithRpc(withSelectedDaemon(<HostRowSshConfig instanceId={HOST} />, HOST_LISTED), backend);
+  cy.mountWithClients(<HostRowSshConfig instanceId={HOST} />, backend, { daemons: HOST_LISTED });
 }
 
 describe("Hosts screen SSH config", () => {

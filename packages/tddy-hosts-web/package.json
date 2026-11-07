@@ -22,6 +22,7 @@
     "@connectrpc/connect": "^2.0.0",
     "tddy-client-web": "workspace:*",
     "tddy-react-commons": "workspace:*",
+    "tddy-terminal-web": "workspace:*",
     "tddy-ui-web": "workspace:*"
   },
   "peerDependencies": {

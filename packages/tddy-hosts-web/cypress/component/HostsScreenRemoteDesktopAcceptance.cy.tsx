@@ -13,8 +13,6 @@ import { create } from "@bufbuild/protobuf";
 import { anInMemoryRpcBackend } from "tddy-connectrpc-testkit";
 import { HostRemoteDesktopSchema, ProbeOutcome } from "tddy-client-web/gen/host_pb";
 import { HostRowRemoteDesktop } from "../../src/HostRowRemoteDesktop";
-import { mountWithRpc } from "../support/rpc/inMemory";
-import { withSelectedDaemon } from "../support/rpc/withSelectedDaemon";
 import { hostRemoteDesktopPage } from "../support/pages/hostsScreenPage";
 
 const HOST = "workstation-1";
@@ -33,10 +31,7 @@ function aReading(overrides: Record<string, unknown>) {
 }
 
 function mountReadings(readings: ReturnType<typeof aReading>[]) {
-  mountWithRpc(
-    withSelectedDaemon(<HostRowRemoteDesktop instanceId={HOST} readings={readings} />),
-    anInMemoryRpcBackend(),
-  );
+  cy.mountWithClients(<HostRowRemoteDesktop instanceId={HOST} readings={readings} />, anInMemoryRpcBackend());
 }
 
 describe("Hosts screen remote desktop", () => {

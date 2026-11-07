@@ -28,12 +28,12 @@
 
 import { useEffect, useState } from "react";
 import { HostService } from "tddy-client-web/gen/host_pb";
-import { useHostPromptsFor, type HostPromptEventLike } from "../../rpc/useHostPrompts";
+import { useHostPromptsFor, type HostPromptEventLike } from "./useHostPrompts";
 import {
   acceptChangedHostKey,
   verifyHostKey,
   type HostKeyCheck,
-} from "../../lib/hostKeyPinning";
+} from "./hostKeyPinning";
 import { useHostClient } from "tddy-client-web";
 
 /**

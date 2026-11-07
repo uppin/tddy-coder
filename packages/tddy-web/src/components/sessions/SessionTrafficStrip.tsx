@@ -7,7 +7,7 @@
  */
 
 import React from "react";
-import { formatBytes, formatRate, formatPing } from "./formatTraffic";
+import { formatBytes, formatRate, formatPing } from "tddy-ui-web";
 
 export interface SessionTrafficStripProps {
   bytesIn: number;

@@ -29,9 +29,9 @@ import {
   DesktopAuthMethod,
   DesktopCredentialAnswerSchema,
 } from "tddy-client-web/gen/screen_sharing_pb";
-import { encryptForHost } from "../../lib/encryptForHost";
-import { acceptChangedHostKey, checkHostKey, type KeyPinVerdict } from "../../lib/hostKeyPinning";
-import type { HostPromptEventLike } from "../../rpc/useHostPrompts";
+import { encryptForHost } from "./encryptForHost";
+import { acceptChangedHostKey, checkHostKey, type KeyPinVerdict } from "./hostKeyPinning";
+import type { HostPromptEventLike } from "./useHostPrompts";
 import { HostKeyContinuityNotices, keyContinuityBlocks } from "./HostKeyContinuityNotices";
 
 export interface HostDesktopSignInDialogProps {

@@ -12,7 +12,7 @@
 
 import React, { useState } from "react";
 import { anInMemoryRpcBackend } from "tddy-connectrpc-testkit";
-import { ScreenSharingOverlay } from "../../src/ScreenSharingOverlay";
+import { ScreenSharingOverlay } from "tddy-hosts-web";
 import { mountWithRpc } from "../support/rpc/inMemory";
 import { aBridgeRecordingInput } from "../support/rpc/screenSharingInputBridge";
 import { desktopPage } from "../support/pages/screenSharingOverlayPage";

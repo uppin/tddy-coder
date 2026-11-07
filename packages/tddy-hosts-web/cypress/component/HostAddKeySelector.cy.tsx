@@ -30,8 +30,6 @@ import {
   type HostSshAgent,
 } from "tddy-client-web/gen/host_pb";
 import { HostAddKeyAction } from "../../src/HostAddKeyAction";
-import { mountWithRpc } from "../support/rpc/inMemory";
-import { withSelectedDaemon } from "../support/rpc/withSelectedDaemon";
 import { aHostPromptFeed } from "../support/rpc/hostPromptFeed";
 import { hostAddKeyPage as addKey, hostAddKeyOutcome } from "../support/pages/hostsScreenPage";
 
@@ -85,12 +83,9 @@ function aBackendOffering(
 }
 
 function mountAction(backend: InMemoryRpcBackend, sshAgent: HostSshAgent = anEmptyAgent()) {
-  mountWithRpc(
-    withSelectedDaemon(<HostAddKeyAction instanceId={HOST} sshAgent={sshAgent} />, [
+  cy.mountWithClients(<HostAddKeyAction instanceId={HOST} sshAgent={sshAgent} />, backend, { daemons: [
       { instanceId: HOST, label: HOST },
-    ]),
-    backend,
-  );
+    ] });
 }
 
 describe("The keys a host offers to load", () => {

@@ -20,9 +20,7 @@ import {
 } from "tddy-client-web/gen/host_pb";
 import { HostAddKeyAction } from "../../src/HostAddKeyAction";
 import { HostPassphraseDialog } from "../../src/HostPassphraseDialog";
-import type { KeyPinVerdict } from "../../src/lib/hostKeyPinning";
-import { mountWithRpc } from "../support/rpc/inMemory";
-import { withSelectedDaemon } from "../support/rpc/withSelectedDaemon";
+import type { KeyPinVerdict } from "../../src/hostKeyPinning";
 import { aHostPromptFeed, type HostPromptFeed } from "../support/rpc/hostPromptFeed";
 import {
   anRsaOaepKeypair,
@@ -88,9 +86,7 @@ function mountDialog(
     (opts.keyChanged
       ? { kind: "changed", pinnedFingerprint: A_PINNED_FINGERPRINT }
       : { kind: "unchanged" });
-  mountWithRpc(
-    withSelectedDaemon(
-      <HostPassphraseDialog
+  cy.mountWithClients(<HostPassphraseDialog
         hostId={HOST}
         subject="id_ed25519"
         fingerprint={FINGERPRINT}
@@ -99,10 +95,7 @@ function mountDialog(
         onSubmit={opts.onSubmit ?? (() => {})}
         onAcceptChangedKey={() => {}}
         onCancel={() => {}}
-      />,
-    ),
-    anInMemoryRpcBackend(),
-  );
+      />, anInMemoryRpcBackend());
 }
 
 describe("Host add-key passphrase prompt", () => {
@@ -289,12 +282,9 @@ function aBackendReporting(
 }
 
 function mountAction(backend: InMemoryRpcBackend) {
-  mountWithRpc(
-    withSelectedDaemon(<HostAddKeyAction instanceId={HOST} sshAgent={anEmptyAgent()} />, [
+  cy.mountWithClients(<HostAddKeyAction instanceId={HOST} sshAgent={anEmptyAgent()} />, backend, { daemons: [
       { instanceId: HOST, label: HOST },
-    ]),
-    backend,
-  );
+    ] });
 }
 
 describe("Host add-key outcomes", () => {

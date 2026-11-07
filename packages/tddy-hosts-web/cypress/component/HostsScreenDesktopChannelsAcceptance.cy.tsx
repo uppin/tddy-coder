@@ -19,8 +19,6 @@ import {
 } from "tddy-client-web/gen/host_pb";
 import { DesktopAuthMethod, Protocol, ScreenSharingService } from "tddy-client-web/gen/screen_sharing_pb";
 import { HostRowRemoteDesktop } from "../../src/HostRowRemoteDesktop";
-import { mountWithRpc } from "../support/rpc/inMemory";
-import { withSelectedDaemon } from "../support/rpc/withSelectedDaemon";
 import { aHostPromptFeed } from "../support/rpc/hostPromptFeed";
 import { hostDesktopChannelsPage } from "../support/pages/hostsScreenPage";
 
@@ -78,26 +76,14 @@ function aHostAwaitingADesktopPassword(): InMemoryRpcBackend {
 }
 
 function mountAHostWithTwoChannels(backend: InMemoryRpcBackend = anInMemoryRpcBackend()) {
-  mountWithRpc(
-    withSelectedDaemon(
-      <HostRowRemoteDesktop
+  cy.mountWithClients(<HostRowRemoteDesktop
         instanceId={HOST}
         readings={[aVncServerOnItsDefaultPort(), x11DisplayOne()]}
-      />,
-      HOST_LISTED,
-    ),
-    backend,
-  );
+      />, backend, { daemons: HOST_LISTED });
 }
 
 function mountAHostWithOnlyAnUnbridgeableX11Display() {
-  mountWithRpc(
-    withSelectedDaemon(
-      <HostRowRemoteDesktop instanceId={HOST} readings={[x11DisplayOne({ canBridge: false })]} />,
-      HOST_LISTED,
-    ),
-    anInMemoryRpcBackend(),
-  );
+  cy.mountWithClients(<HostRowRemoteDesktop instanceId={HOST} readings={[x11DisplayOne({ canBridge: false })]} />, anInMemoryRpcBackend(), { daemons: HOST_LISTED });
 }
 
 describe("Hosts screen desktop channels", () => {

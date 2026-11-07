@@ -7,7 +7,7 @@
  */
 
 import React from "react";
-import type { HostMemoryStats } from "../../rpc/useHostStats";
+import type { HostMemoryStats } from "./useHostStats";
 import { formatBytesFree } from "./hostStatsFormat";
 
 export interface MemoryIndicatorProps {

@@ -17,8 +17,6 @@ import {
   SshAgentKeySchema,
 } from "tddy-client-web/gen/host_pb";
 import { HostRowSshAgent } from "../../src/HostRowSshAgent";
-import { mountWithRpc } from "../support/rpc/inMemory";
-import { withSelectedDaemon } from "../support/rpc/withSelectedDaemon";
 import { hostSshAgentPage } from "../support/pages/hostsScreenPage";
 
 const HOST = "workstation-1";
@@ -27,10 +25,7 @@ const FINGERPRINT = "SHA256:JfISx02kSjWJevGy/MjUdXCv76HaRM3YkYNvepTyHD8";
 function mountAgent(
   sshAgent: ReturnType<typeof create<typeof HostSshAgentSchema>> | undefined,
 ) {
-  mountWithRpc(
-    withSelectedDaemon(<HostRowSshAgent instanceId={HOST} sshAgent={sshAgent} />),
-    anInMemoryRpcBackend(),
-  );
+  cy.mountWithClients(<HostRowSshAgent instanceId={HOST} sshAgent={sshAgent} />, anInMemoryRpcBackend());
 }
 
 describe("Hosts screen ssh-agent", () => {

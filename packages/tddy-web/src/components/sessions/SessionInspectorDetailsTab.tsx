@@ -1,7 +1,7 @@
 import { Button, ScrollArea } from "tddy-ui-web";
 import type { SessionEntry } from "tddy-client-web/gen/session_pb";
 import { formatLastDataReceived } from "./lastDataReceivedFormat";
-import { formatBytes } from "./formatTraffic";
+import { formatBytes } from "tddy-ui-web";
 
 /** Inspector I/O traffic: byte counters and the last time data arrived. */
 export type InspectorTraffic = {

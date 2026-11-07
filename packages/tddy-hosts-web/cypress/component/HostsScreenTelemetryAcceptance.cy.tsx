@@ -24,15 +24,13 @@
 
 import { anInMemoryRpcBackend, type InMemoryRpcBackend } from "tddy-connectrpc-testkit";
 import {
-  aSessionServiceBackend,
-  type SessionServiceBackend,
-  type SessionServiceScenario,
-} from "../support/rpc/daemonSessionHostBackend";
-import { HostsAppPage } from "../../src/HostsAppPage";
+  aHostServiceBackend,
+  type HostServiceBackend,
+  type HostServiceScenario,
+} from "../support/rpc/hostServiceBackend";
+import { HostsContent } from "../../src/HostsContent";
 import { HostService, type KnownHostEntry } from "tddy-client-web/gen/host_pb";
 import { HostRowTelemetry } from "../../src/HostRowTelemetry";
-import { mountWithRpc } from "../support/rpc/inMemory";
-import { withSelectedDaemon } from "../support/rpc/withSelectedDaemon";
 import {
   hostsScreenPage,
   hostTelemetryPage as telemetry,
@@ -55,9 +53,9 @@ const CPU_PER_CORE = [12, 48];
 const CPU_AFTER_UPDATE = [90, 90];
 
 function aTelemetryBackend(
-  overrides: Partial<SessionServiceScenario> = {},
-): SessionServiceBackend {
-  return aSessionServiceBackend({ hostDisk: DISK, hostCpuPerCore: CPU_PER_CORE, ...overrides });
+  overrides: Partial<HostServiceScenario> = {},
+): HostServiceBackend {
+  return aHostServiceBackend({ hostDisk: DISK, hostCpuPerCore: CPU_PER_CORE, ...overrides });
 }
 
 type Row = { instanceId: string; online: boolean };
@@ -66,18 +64,12 @@ type Row = { instanceId: string; online: boolean };
  * Mount one telemetry cell per row. `reachable` names the hosts a wire can route to — by default
  * every mounted row, so a test opts into unreachability by naming a shorter list.
  */
-function mountCells(backend: SessionServiceBackend, rows: Row[], reachable: string[] = rows.map((r) => r.instanceId)) {
-  mountWithRpc(
-    withSelectedDaemon(
-      <div>
+function mountCells(backend: HostServiceBackend, rows: Row[], reachable: string[] = rows.map((r) => r.instanceId)) {
+  cy.mountWithClients(<div>
         {rows.map((row) => (
           <HostRowTelemetry key={row.instanceId} instanceId={row.instanceId} online={row.online} />
         ))}
-      </div>,
-      reachable.map((instanceId) => ({ instanceId, label: instanceId })),
-    ),
-    backend,
-  );
+      </div>, backend.backend, { daemons: reachable.map((instanceId) => ({ instanceId, label: instanceId })) });
 }
 
 function anOnlineRow(instanceId: string): Row {
@@ -242,7 +234,7 @@ describe("Hosts screen telemetry", () => {
     /**
      * A daemon that lists `hosts` and streams the telemetry fixture for any of them.
      *
-     * Composed here rather than taken from `aSessionServiceBackend`, which does not serve
+     * Composed here rather than taken from `aHostServiceBackend`, which does not serve
      * `ListKnownHosts` — that RPC belongs to `#hosts-screen 1/8`, and teaching the shared helper
      * about it from this node would collide with the PR that owns it.
      */
@@ -257,13 +249,7 @@ describe("Hosts screen telemetry", () => {
     }
 
     function mountScreen(backend: InMemoryRpcBackend, reachable: string[]) {
-      mountWithRpc(
-        withSelectedDaemon(
-          <HostsAppPage onNavigate={() => {}} />,
-          reachable.map((instanceId) => ({ instanceId, label: instanceId })),
-        ),
-        backend,
-      );
+      cy.mountWithClients(<HostsContent />, backend, { daemons: reachable.map((instanceId) => ({ instanceId, label: instanceId })) });
     }
 
     it("shows an online host's reading on its own row", () => {
