@@ -9,7 +9,7 @@ interface Progress {
   readonly step: number;
 }
 
-function TrainingProgress({ poller }: { readonly poller: Poller<Progress> }): JSX.Element {
+function TrainingProgress({ poller }: { readonly poller: Poller<Progress> }): ReactJSX.Element {
   const state = poller.latest.useStore();
   return <span>{state.status === 'ready' ? `Step ${state.value.step}` : state.status}</span>;
 }

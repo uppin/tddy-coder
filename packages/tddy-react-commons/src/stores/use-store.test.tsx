@@ -48,7 +48,7 @@ describe('useStore', () => {
   it('subscribes to the whole state when no selector is provided', () => {
     const store = createStore(() => ({ a: 1, b: 2 }));
 
-    let snapshot: { a: number; b: number } | null = null;
+    let snapshot = null as { a: number; b: number } | null;
     const Viewer = () => {
       snapshot = store.useStore();
       return null;
