@@ -7,7 +7,7 @@
 //! unable to connect to the first one's socket) needs root and a real account: that is pinned by
 //! the Linux-only privileged suites, not here.
 //!
-//! Changeset: docs/dev/1-WIP/2026-11-06-agent-tool-socket-per-os-user.md
+//! Changeset: docs/dev/changesets/2026-11-07-agent-tool-socket-per-os-user.md
 
 use super::*;
 use std::os::unix::fs::{FileTypeExt, MetadataExt, PermissionsExt};

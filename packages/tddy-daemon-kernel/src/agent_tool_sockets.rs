@@ -338,8 +338,9 @@ async fn serve(
             Err(e) => {
                 log::warn!(
                     target: "tddy_daemon_kernel::agent_tool_sockets",
-                    "agent-tool socket for {owner}: accept failed, it will be bound again by the \
-                     next session that needs it: {e}"
+                    "agent-tool socket for {owner}: accept failed and it is no longer served; one \
+                     this daemon bound is bound again by the next session that needs it, one \
+                     tddy-supervisor made only once tddy-supervisor restarts: {e}"
                 );
                 return;
             }

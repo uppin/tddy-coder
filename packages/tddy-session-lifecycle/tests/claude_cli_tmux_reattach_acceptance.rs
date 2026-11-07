@@ -352,6 +352,53 @@ async fn a_fresh_daemon_reattaches_the_main_terminal_on_first_stream_without_res
 
 #[tokio::test]
 #[serial_test::serial]
+async fn a_fresh_daemon_serves_the_reattached_agents_tool_socket_again() {
+    // Given a tmux-run session that outlived its daemon, whose agent reports over its user's
+    // agent-tool socket — which nothing serves once that daemon is gone
+    let daemon = a_daemon_with_a_private_tmux().await;
+    let (session_id, _agent_pid) = daemon.is_running_in_tmux().await;
+    daemon.host.shut_down_children().await;
+    let fresh = daemon.restarted();
+    let socket = tddy_daemon_kernel::agent_tool_sockets::agent_tool_socket_path_for_user(
+        &daemon.sessions_base,
+        &this_os_user(),
+    )
+    .expect("the user's socket path");
+    assert!(
+        std::os::unix::net::UnixStream::connect(&socket).is_err(),
+        "nothing serves {} before the re-attach",
+        socket.display()
+    );
+
+    // When a client first streams the session's main terminal from the fresh daemon
+    let streamed = fresh
+        .terminal_session_service()
+        .stream_terminal_output(Request::direct(StreamTerminalOutputRequest {
+            session_token: VALID_TOKEN.to_string(),
+            session_id: session_id.clone(),
+            terminal_id: MAIN_TERMINAL_ID.to_string(),
+            initial_cols: 0,
+            initial_rows: 0,
+            mode: StreamReplayMode::Tail as i32,
+            from_offset: 0,
+            control_token: String::new(),
+        }))
+        .await;
+
+    // Then the agent's reports reach the fresh daemon again
+    assert!(
+        streamed.is_ok(),
+        "the first stream re-attaches the main terminal"
+    );
+    assert!(
+        std::os::unix::net::UnixStream::connect(&socket).is_ok(),
+        "{} is served again after the re-attach",
+        socket.display()
+    );
+}
+
+#[tokio::test]
+#[serial_test::serial]
 async fn resume_of_a_live_tmux_run_session_reattaches_instead_of_relaunching() {
     // Given a tmux-run session that outlived its daemon
     let daemon = a_daemon_with_a_private_tmux().await;

@@ -11,7 +11,7 @@
 //! runs as the account running the test: serving a second OS user needs root, which only the Linux
 //! privileged suites have.
 //!
-//! Changeset: docs/dev/1-WIP/2026-11-06-agent-tool-socket-per-os-user.md
+//! Changeset: docs/dev/changesets/2026-11-07-agent-tool-socket-per-os-user.md
 
 mod agent_registry_support;
 mod support;

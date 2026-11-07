@@ -135,6 +135,39 @@ way spawns and clones through the supervisor; one started any other way (Tddy De
 forks its own spawn worker. `daemon.yaml` has no `supervisor:` key — see
 [systemd install](../daemon/systemd-install.md).
 
+### Per-user sockets handed to the daemon
+
+A session running as `alice` must reach the daemon over a socket only `alice` can open, and the
+unprivileged daemon cannot make one for her. So the supervisor creates them as root, from two lists on
+the daemon's service, and hands the listeners over after the daemon's own `socket:`:
+
+```yaml
+services:
+  - name: tddy-daemon
+    agent_tool_sockets:            # required for every session user: hooks, notify, tool calls
+      - {user: alice, path: /run/tddy-agent-tools/alice/agent.sock}
+    host_sockets:                  # optional: GitHub token and conversation spawning for tool sessions
+      - {user: alice, path: /run/tddy-host-sessions/alice/host.sock}
+    # …
+```
+
+| Setting | What a session of that user uses it for | A user with no entry |
+|---|---|---|
+| `agent_tool_sockets` | its agent's hook reports (activity status, permission answers), `tddy-tools notify` and the `tddy-tools --mcp` tool server — the daemon's whole RPC roster | **every session start is refused**, naming `agent_tool_sockets` in `supervisor.yaml` — never started with hooks whose reports would be lost silently |
+| `host_sockets` | `github_token` and `spawn_conversation` from a tool session | sessions start; those two calls are refused, naming `host_sockets` |
+
+Each socket is owned by its user, directory `0700` and socket `0600`, so only that user and root can
+connect. The config is refused at load unless each `user` is in `spawn_policy.allowed_session_users`,
+is not `root` and is a plain account name; a user appears once per list; every socket has a directory
+of its own that no other declared socket shares (so a user's two sockets live in two directories); the
+service declares its own `socket:`; and both lists **together** hold at most 15 entries — with both
+kinds for everyone, seven session users fit one daemon. `./install` writes the `agent_tool_sockets:`
+entries from `spawn_policy.allowed_session_users` until the operator writes the block themselves (see
+[systemd install](../daemon/systemd-install.md#behavior-notes)).
+
+A daemon that is not supervised (`./web-dev`, `--user`, Tddy Desktop) binds its own agent-tool socket
+and needs neither list.
+
 ## `--user` installs no supervisor
 
 `./install --systemd --user` installs a per-user `tddy-daemon` unit and **no supervisor**. Rootless, a
@@ -183,7 +216,10 @@ slow clone. Neither deadline is configurable.
 - [x] Stopping a supervised clone (`StopSession(pid)`) ends git and leaves no destination directory.
 - [x] A supervisor that accepts a call and never answers fails it `Unavailable` naming the method within the call deadline — every unary call, not only `SpawnRelayed`.
 - [x] A supervised clone with no first event, or one that goes quiet after starting, fails `Unavailable` within its progress deadline.
-- [ ] **Not yet proven on a real host:** a session for OS user `alice` running as `alice` while the daemon runs as `tddy`; enforced cgroup limits; `stop_session` against a live supervisor. These need root plus a second account, and are the subject of a planned VM-backed acceptance test — see [docs/dev/TODO.md](../../dev/TODO.md).
+- [x] A daemon service's `agent_tool_sockets:` are created at startup and handed over after the host sockets, named `agent-tools.<user>`.
+- [x] `agent_tool_sockets:` is refused for a user outside `allowed_session_users`, for `root`, twice for one user, in a directory another socket uses, on a service with no `socket:`, and beyond 15 sockets of both kinds together.
+- [x] Under the supervisor, a session for a user with no `agent_tool_sockets:` entry is refused at start, naming the setting.
+- [ ] **Not yet proven on a real host:** a session for OS user `alice` running as `alice` while the daemon runs as `tddy`; enforced cgroup limits; `stop_session` against a live supervisor; a second account refused a `connect` to another user's agent-tool socket. These need root plus a second account, and are the subject of a planned VM-backed acceptance test — see [docs/dev/TODO.md](../../dev/TODO.md).
 
 ## Related
 

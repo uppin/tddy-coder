@@ -83,12 +83,12 @@ Where the reports go:
 
 | Launch | `--daemon-socket` | Path to the daemon |
 |---|---|---|
-| Host | the daemon's agent-tool socket, `agent_tool_socket_path(<resolved data dir>)` | the socket itself |
+| Host | the agent-tool socket of the session's OS user: Tddy Desktop's one socket, or on a server daemon `<data dir>/run-agent-tools/<user>/agent.sock` (owner-only; handed over by `tddy-supervisor` when it runs the daemon) | the socket itself |
 | Jail | the in-jail tool-IPC socket | `tddy-sandbox-runner` relays the two reports (`IN_JAIL_RELAYABLE_HOOK_REPORTS`) to the facilitating daemon as host RPCs. The bridge serves them for the jail's own session only, and refuses any other session id |
 
 A hooks file is never rendered without a socket: the adapter refuses (`SlotError::NoDaemonSocket`) rather than falling back to `daemon_url`.
 
-**Known gap — server daemons.** Only a daemon embedded in an application (Tddy Desktop) binds the agent-tool socket. On a server (`tddy-daemon` binary) daemon, a **host** Cursor session's hook reports go to a socket nothing serves and are dropped fail-quiet, so its activity status does not update. Jailed sessions are unaffected. Binding it on server daemons needs one socket per OS user first (sessions under `tddy-supervisor` run as other users): [`docs/dev/todo/2026-11-03-server-daemon-agent-tool-socket-per-os-user.md`](../../dev/todo/2026-11-03-server-daemon-agent-tool-socket-per-os-user.md).
+**Server daemons** serve one agent-tool socket per OS user, so a host session's reports reach the daemon whichever user it runs as, and no other user can connect to it. Under `tddy-supervisor` a session user needs an `agent_tool_sockets:` entry in `supervisor.yaml`; without one the start is refused, naming that setting, rather than started with hooks that report nowhere — see [tddy-supervisor § Per-user sockets](../supervisor/tddy-supervisor.md#per-user-sockets-handed-to-the-daemon).
 
 | Cursor hook event | `activity_status` |
 |---|---|
@@ -191,7 +191,6 @@ A workflow turn is a `SpecHeadlessBackend` turn rendered from `cursor.yaml`'s `c
 
 - **Jail authentication:** a sandboxed `agent` cannot reach macOS Keychain — the host (`tddy-daemon` / `tddy-sandbox-app`) is an unsigned Rust binary with no `keychain-access-group` entitlement, so `securityd` rejects `SecItem*` calls with `errSecMissingEntitlement` (-34018) and the CLI hangs/times out ("Failed to store authentication tokens: Security command failed: Security process exited with code: 36"). `cursor.yaml`'s `files:` overlays set `CURSOR_SKIP_KEYCHAIN=1` + `CI=true` (Cursor's own CI convention) so the agent never probes Keychain. The caller must still supply `CURSOR_API_KEY` (User API key from the Cursor dashboard — admin keys are rejected) or pre-seed `~/.cursor/auth.json` (seeded once into the persistent home). True Keychain *access* from the jail would require codesigning the host with `keychain-access-group` and a TCC grant — recorded as a follow-up, not pursued; the current stance is fail-closed with `CURSOR_API_KEY`/seeded `auth.json`.
 - **Jailed resume:** a sandboxed cursor-cli resume relaunches on the host PTY; a jailed resume is not implemented.
-- **Server daemons:** host Cursor hook reports are dropped (see [Activity status hooks](#activity-status-hooks-cursorhooksjson)).
 
 ## Out of scope (v1)
 

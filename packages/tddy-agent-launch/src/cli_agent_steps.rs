@@ -336,11 +336,11 @@ impl LaunchSessions {
                 workflow = Some(launch.workflow);
             }
         }
-        let agent_tool_socket = self.agent_tool_socket_of(os_user).await?;
+        let tool_socket = self.agent_tool_socket_of(os_user).await?;
         if spec.has(Capability::OperatorNotify) {
             let notify = crate::notify_env::resumed_agent_notify_launch(
                 &self.config,
-                &agent_tool_socket,
+                &tool_socket,
                 os_user,
                 session_dir,
                 meta,
@@ -349,13 +349,7 @@ impl LaunchSessions {
             notify_env.extend(notify.env);
             system_prompt_file = notify.append_system_prompt_file.or(system_prompt_file);
         }
-        let role = self.resumed_role(
-            meta,
-            session_id,
-            session_dir,
-            session_token,
-            &agent_tool_socket,
-        )?;
+        let role = self.resumed_role(meta, session_id, session_dir, session_token, &tool_socket)?;
         route_tool_server_env(role.env, &mut process_env, &mut tool_server_env);
         let (extra_args, mut toolset) = spec_role_launch(role.main.as_ref());
         let session_pointer = session_pointer_of(&tool_server_env, notify_env, worktree);

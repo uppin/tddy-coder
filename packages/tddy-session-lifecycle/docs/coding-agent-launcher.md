@@ -57,8 +57,11 @@ set, is refused). A route that does not resolve refuses the launch.
 the withdrawal config (`opencode_withdrawal_config`) is merged into `OPENCODE_CONFIG_CONTENT`; for
 `claude-acp` it travels as `session/new` `_meta` (set by `tddy-session-agents`). `mcp_servers_for`
 returns `tddy-tools --mcp` with the environment `tddy_session_split::coding_agent_wiring`'s
-`CodingAgentToolHost::tool_server` builds: the colocated jail's `TDDY_REMOTE_*` variables and a session
-token minted for the agent. A daemon that signs no tokens refuses. An unmanaged launch has no MCP
+`CodingAgentToolHost::tool_server` builds: the colocated jail's `TDDY_REMOTE_*` variables, with
+`TDDY_REMOTE_DAEMON_SOCKET` naming the session OS user's agent-tool socket
+(`DaemonLauncherDeps.agent_tool_sockets`), and a session token minted for the agent. A user the daemon
+cannot give an agent-tool socket — under `tddy-supervisor`, one not listed under `agent_tool_sockets:`
+— is refused, naming the setting. A daemon that signs no tokens refuses. An unmanaged launch has no MCP
 servers.
 
 ## Becoming the session's user

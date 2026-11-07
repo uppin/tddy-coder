@@ -348,7 +348,7 @@ returning `EBUSY`, which a plain directory never does.
 
 ## Related
 
-- Per-OS-user host-session sockets the supervisor creates and hands to the daemon: [host-sockets.md](host-sockets.md)
+- Per-OS-user host-session and agent-tool sockets the supervisor creates and hands to the daemon: [host-sockets.md](host-sockets.md)
 - Product docs: [docs/ft/supervisor/tddy-supervisor.md](../../../docs/ft/supervisor/tddy-supervisor.md)
 - Install: [docs/ft/daemon/systemd-install.md](../../../docs/ft/daemon/systemd-install.md)
 - The no-supervisor deployment: [docs/dev/tddy-daemon.service.example](../../../docs/dev/tddy-daemon.service.example)

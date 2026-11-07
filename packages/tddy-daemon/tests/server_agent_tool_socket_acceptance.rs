@@ -17,7 +17,7 @@
 //! file-mode property checked here by mode and owner; connecting as that user needs root and a real
 //! account, which only the Linux privileged suites have.
 //!
-//! Changeset: docs/dev/1-WIP/2026-11-06-agent-tool-socket-per-os-user.md
+//! Changeset: docs/dev/changesets/2026-11-07-agent-tool-socket-per-os-user.md
 
 use std::os::unix::fs::{FileTypeExt, MetadataExt, PermissionsExt};
 use std::path::{Path, PathBuf};
@@ -245,7 +245,7 @@ async fn a_server_daemon_tells_a_session_its_users_own_agent_tool_socket() {
 }
 
 #[tokio::test]
-async fn a_session_running_as_x_is_served_on_xs_agent_tool_socket_and_nobody_else_can_reach_it() {
+async fn a_session_running_as_x_is_served_on_xs_owner_only_agent_tool_socket() {
     // Given a server daemon, and the socket of the user a session runs as
     let daemon = a_running_server_daemon().await;
     let socket = daemon
