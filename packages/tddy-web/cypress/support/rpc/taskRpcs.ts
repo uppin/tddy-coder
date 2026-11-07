@@ -9,7 +9,7 @@
 
 import { create } from "@bufbuild/protobuf";
 import { anInMemoryRpcBackend, type InMemoryRpcBackend } from "tddy-connectrpc-testkit";
-import { AuthService } from "../../../src/gen/auth_pb";
+import { AuthService } from "tddy-client-web/gen/auth_pb";
 import {
   CancelTaskResponseSchema,
   TaskChannelInfoSchema,
@@ -21,7 +21,7 @@ import {
   ChannelKindProto,
   type TaskInfo,
   type TaskListEvent,
-} from "../../../src/gen/tasks_pb";
+} from "tddy-client-web/gen/tasks_pb";
 import { aGitHubUser } from "./responses";
 
 // ---------------------------------------------------------------------------

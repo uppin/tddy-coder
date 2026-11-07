@@ -44,13 +44,13 @@ import {
   type CodeQuery,
   type CodeSessionEvent,
   type CodeSessionRequest,
-} from "../../../src/gen/code_navigation_pb";
+} from "tddy-client-web/gen/code_navigation_pb";
 import {
   ListWorktreeDirectoryResponseSchema,
   ReadWorktreeFileResponseSchema,
   WorktreeDirEntrySchema,
   WorktreeService,
-} from "../../../src/gen/worktree_pb";
+} from "tddy-client-web/gen/worktree_pb";
 import { requestFields } from "./recordedRequests";
 
 // ---------------------------------------------------------------------------

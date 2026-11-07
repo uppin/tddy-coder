@@ -16,7 +16,7 @@
 import React from "react";
 import { ParticipantList } from "../../src/components/ParticipantList";
 import type { RoomParticipant } from "../../src/hooks/useRoomParticipants";
-import type { ConnectionCapability } from "../../src/rpc/connections/types";
+import type { ConnectionCapability } from "tddy-client-web/connections/types";
 import type { CapabilityBearing } from "../../src/rpc/connections/useHasCapability";
 import { participantListPage as page } from "../support/pages/participantListPage";
 

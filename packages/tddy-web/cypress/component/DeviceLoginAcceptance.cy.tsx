@@ -24,7 +24,7 @@
 import React from "react";
 import { anInMemoryRpcBackend, type InMemoryRpcBackend } from "tddy-connectrpc-testkit";
 import { AuthProvider, useAuthContext } from "../../src/hooks/authProvider";
-import { AuthService } from "../../src/gen/auth_pb";
+import { AuthService } from "tddy-client-web/gen/auth_pb";
 import { DeviceLoginPanel } from "../../src/components/DeviceLoginPanel";
 import { DaemonLoginScreen } from "../../src/components/DaemonLoginScreen";
 import { loadClientConfig, type AuthFlowDeclaration } from "../../src/rpc/clientConfig";

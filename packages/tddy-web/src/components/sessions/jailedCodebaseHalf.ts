@@ -1,4 +1,4 @@
-import type { SessionEntry } from "../../gen/session_pb";
+import type { SessionEntry } from "tddy-client-web/gen/session_pb";
 
 /**
  * The sessions to show, with the codebase halves of sandboxed-codebase placements removed.

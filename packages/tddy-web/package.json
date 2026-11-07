@@ -4,7 +4,6 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "generate": "../../scripts/generated-code.sh write packages/tddy-web",
     "prebuild": "bun run --cwd ../tddy-livekit-rpc-web build && node scripts/gen-build-id.mjs",
     "build": "vite build",
     "dev": "vite --port ${VITE_PORT:-5173}",
@@ -44,12 +43,11 @@
     "react-syntax-highlighter": "^16.1.1",
     "tailwind-merge": "^3.5.0",
     "tailwindcss": "^4.2.2",
+    "tddy-client-web": "workspace:*",
     "tddy-tauri-web": "workspace:*",
     "tddy-ui-web": "workspace:*"
   },
   "devDependencies": {
-    "@bufbuild/buf": "^1.50.0",
-    "@bufbuild/protoc-gen-es": "^2.2.0",
     "@playwright/test": "^1.58.2",
     "@storybook/addon-docs": "^9.0.0",
     "@storybook/react": "^9.0.0",

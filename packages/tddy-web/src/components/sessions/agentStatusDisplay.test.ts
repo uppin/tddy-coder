@@ -1,5 +1,5 @@
 import { describe, expect, it } from "bun:test";
-import { SessionAgentStatus } from "../../gen/types_pb";
+import { SessionAgentStatus } from "tddy-client-web/gen/types_pb";
 import {
   agentStatusName,
   agentStatusToken,

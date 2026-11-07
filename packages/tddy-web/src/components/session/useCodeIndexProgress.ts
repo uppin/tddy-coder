@@ -5,7 +5,7 @@ import {
   type CodeIndexPhase,
   type CodeIndexProgress,
   type CodeNavigationService,
-} from "../../gen/code_navigation_pb";
+} from "tddy-client-web/gen/code_navigation_pb";
 import { StreamReopener, streamEndOf, type StreamEnd } from "./streamReopening";
 
 /**

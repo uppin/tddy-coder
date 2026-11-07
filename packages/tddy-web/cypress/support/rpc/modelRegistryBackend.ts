@@ -11,8 +11,8 @@
 import { create } from "@bufbuild/protobuf";
 import { Code, ConnectError } from "@connectrpc/connect";
 import { anInMemoryRpcBackend, type InMemoryRpcBackend } from "tddy-connectrpc-testkit";
-import { type ProjectEntry } from "../../../src/gen/project_pb";
-import { ListProjectsResponseSchema, ProjectEntrySchema } from "../../../src/gen/project_pb";
+import { type ProjectEntry } from "tddy-client-web/gen/project_pb";
+import { ListProjectsResponseSchema, ProjectEntrySchema } from "tddy-client-web/gen/project_pb";
 import {
   ModelLoadState,
   ModelRegistryService,
@@ -21,7 +21,7 @@ import {
   type AssistantEntry,
   type ModelEntry,
   type ProviderEntry,
-} from "../../../src/gen/models_pb";
+} from "tddy-client-web/gen/models_pb";
 
 /** The daemon a fixture belongs to unless a builder overrides it. */
 export const FIXTURE_DAEMON = "workstation-1";

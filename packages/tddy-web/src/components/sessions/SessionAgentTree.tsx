@@ -1,12 +1,12 @@
 import React, { useState } from "react";
 import type { Client } from "@connectrpc/connect";
-import { type SessionEntry } from "../../gen/session_pb";
+import { type SessionEntry } from "tddy-client-web/gen/session_pb";
 import {
   AgentCloneState,
   type SessionAgentEntry,
   type SessionAgentService,
-} from "../../gen/session_agents_pb";
-import { type SessionAgentActivity, type SessionAgentStatus } from "../../gen/types_pb";
+} from "tddy-client-web/gen/session_agents_pb";
+import { type SessionAgentActivity, type SessionAgentStatus } from "tddy-client-web/gen/types_pb";
 import { safeTestIdPart } from "../../lib/testId";
 import { Button } from "tddy-ui-web";
 import { agentPlacementChoiceOf } from "./agentPlacementChoice";

@@ -24,7 +24,7 @@ import {
   WorktreeSizeStatus,
   type WorktreeRow,
   type WorktreeStatsEvent,
-} from "../gen/worktree_pb";
+} from "tddy-client-web/gen/worktree_pb";
 import type { WorktreeSizeStatus as DomainSizeStatus } from "../lib/worktreeSize";
 import { hostNotConnectedText, rpcFailureText } from "./rpcFailure";
 

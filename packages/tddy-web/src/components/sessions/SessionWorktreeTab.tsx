@@ -1,6 +1,6 @@
 import React, { useState } from "react";
 import type { Client } from "@connectrpc/connect";
-import type { WorktreeService } from "../../gen/worktree_pb";
+import type { WorktreeService } from "tddy-client-web/gen/worktree_pb";
 import { useSessionWorktreeStats } from "../../rpc/useSessionWorktreeStats";
 import { hostNotConnected } from "../../rpc/rpcFailure";
 import { useActionFailure } from "../../hooks/useActionFailure";

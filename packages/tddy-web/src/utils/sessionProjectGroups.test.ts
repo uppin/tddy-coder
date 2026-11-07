@@ -6,7 +6,7 @@
 
 import { describe, it, expect } from "bun:test";
 import { create } from "@bufbuild/protobuf";
-import { SessionEntrySchema, type SessionEntry } from "../gen/session_pb";
+import { SessionEntrySchema, type SessionEntry } from "tddy-client-web/gen/session_pb";
 import { groupSessionsByProject, type ProjectSessionGroup } from "./sessionProjectGroups";
 
 function aSession(sessionId: string, projectId: string): SessionEntry {

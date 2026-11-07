@@ -25,13 +25,13 @@ import { create } from "@bufbuild/protobuf";
 import { ConnectError, Code } from "@connectrpc/connect";
 import { anInMemoryRpcBackend, type InMemoryRpcBackend } from "tddy-connectrpc-testkit";
 import { servedAgentWire } from "../servedAgents";
-import { AuthService } from "../../../src/gen/auth_pb";
-import { GenerateTokenResponseSchema, RefreshTokenResponseSchema, TokenService } from "../../../src/gen/token_pb";
+import { AuthService } from "tddy-client-web/gen/auth_pb";
+import { GenerateTokenResponseSchema, RefreshTokenResponseSchema, TokenService } from "tddy-client-web/gen/token_pb";
 import {
   ProjectService,
   ProjectEntrySchema,
   type ProjectEntry,
-} from "../../../src/gen/project_pb";
+} from "tddy-client-web/gen/project_pb";
 import {
   SessionService,
   ConnectSessionResponseSchema,
@@ -42,24 +42,24 @@ import {
   type ResumeSessionResponse,
   type SessionEntry,
   type StartSessionResponse,
-} from "../../../src/gen/session_pb";
+} from "tddy-client-web/gen/session_pb";
 import {
   AgentInfoSchema,
   CatalogService,
   ToolInfoSchema,
   type AgentInfo,
-} from "../../../src/gen/catalog_pb";
+} from "tddy-client-web/gen/catalog_pb";
 import {
   ExecToolService,
   ExecuteToolResponseSchema,
   ToolDefSchema,
-} from "../../../src/gen/exec_tools_pb";
-import { ActivityService } from "../../../src/gen/activity_pb";
-import { HostService } from "../../../src/gen/host_pb";
-import { SessionAgentService } from "../../../src/gen/session_agents_pb";
-import { SessionFilesService } from "../../../src/gen/session_files_pb";
-import { TerminalSessionService } from "../../../src/gen/terminal_session_pb";
-import { WorktreeService } from "../../../src/gen/worktree_pb";
+} from "tddy-client-web/gen/exec_tools_pb";
+import { ActivityService } from "tddy-client-web/gen/activity_pb";
+import { HostService } from "tddy-client-web/gen/host_pb";
+import { SessionAgentService } from "tddy-client-web/gen/session_agents_pb";
+import { SessionFilesService } from "tddy-client-web/gen/session_files_pb";
+import { TerminalSessionService } from "tddy-client-web/gen/terminal_session_pb";
+import { WorktreeService } from "tddy-client-web/gen/worktree_pb";
 import {
   aHostServiceFake,
   DAEMON_LOCAL,

@@ -30,13 +30,13 @@ import {
   PlanSnapshotSchema,
   type PlanSnapshot,
   type RunPlanRequest,
-} from "../../src/gen/code_navigation_pb";
+} from "tddy-client-web/gen/code_navigation_pb";
 import {
   ListWorktreeDirectoryResponseSchema,
   ReadWorktreeFileResponseSchema,
   WorktreeDirEntrySchema,
   WorktreeService,
-} from "../../src/gen/worktree_pb";
+} from "tddy-client-web/gen/worktree_pb";
 import { WorktreeCodePane } from "../../src/components/session/WorktreeCodePane";
 import { RestructurePlanDialog } from "../../src/components/session/RestructurePlanDialog";
 import { createRestructurePlanApi } from "../../src/components/session/restructurePlanApi";

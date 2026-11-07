@@ -1,6 +1,6 @@
 import { describe, it, expect } from "bun:test";
 import { presenterRoomTargetFor } from "./presenterRoomTarget";
-import type { SessionAttachmentHint } from "../../rpc/connections/session";
+import type { SessionAttachmentHint } from "tddy-client-web/connections/session";
 
 // Tests for the pure `presenterRoomTargetFor` derivation — the PR-Stack Chat Screen's own
 // dedicated LiveKit room connection is derived from the attached session's routing hint (the same

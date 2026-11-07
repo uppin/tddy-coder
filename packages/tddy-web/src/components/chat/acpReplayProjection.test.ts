@@ -17,7 +17,7 @@ import {
   ToolCallStatus,
   ToolKind,
   type AcpAgentMessage,
-} from "../../gen/tddy/acp/v1/acp_pb";
+} from "tddy-client-web/gen/tddy/acp/v1/acp_pb";
 import { createReplayProjector, projectReplayFrames } from "./acpReplayProjection";
 
 /** A recorded agent text chunk — projects to an "agent" bubble. */

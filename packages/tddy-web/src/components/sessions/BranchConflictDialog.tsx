@@ -12,7 +12,7 @@
  */
 
 import React, { useState } from "react";
-import type { BranchConflict } from "../../gen/session_pb";
+import type { BranchConflict } from "tddy-client-web/gen/session_pb";
 import { Button } from "tddy-ui-web";
 
 // ---------------------------------------------------------------------------

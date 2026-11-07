@@ -8,12 +8,12 @@
 import { describe, it, expect } from "bun:test";
 import { create } from "@bufbuild/protobuf";
 import type { Transport } from "@connectrpc/connect";
-import { SessionService, ListSessionsRequestSchema } from "../gen/session_pb";
+import { SessionService, ListSessionsRequestSchema } from "tddy-client-web/gen/session_pb";
 import {
   SessionTerminalInputSchema,
   StreamTerminalOutputRequestSchema,
   TerminalSessionService,
-} from "../gen/terminal_session_pb";
+} from "tddy-client-web/gen/terminal_session_pb";
 import { wrapTransportWithAuthGate } from "./authGatedTransport";
 
 function aRecordingTransport(): Transport & {

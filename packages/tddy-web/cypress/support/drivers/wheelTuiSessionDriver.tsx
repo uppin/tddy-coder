@@ -9,7 +9,7 @@
 import React from "react";
 import { mount } from "cypress/react";
 import { GhosttyTerminalSession } from "../../../src/components/GhosttyTerminalSession";
-import type { TerminalFeed, TerminalStream } from "../../../src/rpc/connections/terminal";
+import type { TerminalFeed, TerminalStream } from "tddy-client-web/connections/terminal";
 import { UploadProgressProvider } from "../../../src/rpc/uploadProgress";
 import { WheelTuiApp, type WheelTuiOptions } from "../../../scripts/wheel-tui/wheelTuiApp";
 import { byTestId, TEST_IDS } from "../testIds";

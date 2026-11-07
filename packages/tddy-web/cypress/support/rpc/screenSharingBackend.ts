@@ -18,7 +18,7 @@
  */
 
 import { anInMemoryRpcBackend, type InMemoryRpcBackend } from "tddy-connectrpc-testkit";
-import { SessionService, type SessionEntry } from "../../../src/gen/session_pb";
+import { SessionService, type SessionEntry } from "tddy-client-web/gen/session_pb";
 
 /**
  * Create an in-memory backend pre-seeded with all RPCs `SessionsDrawerScreen`

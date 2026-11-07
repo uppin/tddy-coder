@@ -20,8 +20,8 @@ import type {
   HostGithubCli,
   HostRemoteDesktop,
   HostSshAgent,
-} from "../../gen/host_pb";
-import { ProbeOutcome } from "../../gen/host_pb";
+} from "tddy-client-web/gen/host_pb";
+import { ProbeOutcome } from "tddy-client-web/gen/host_pb";
 import { HostRowRemoteDesktop } from "./HostRowRemoteDesktop";
 import { HostRowSshAgent } from "./HostRowSshAgent";
 import { HostRowSshConfig } from "./HostRowSshConfig";

@@ -1,6 +1,6 @@
 import type { Client } from "@connectrpc/connect";
-import type { ActivityService } from "../../gen/activity_pb";
-import type { SessionEntry } from "../../gen/session_pb";
+import type { ActivityService } from "tddy-client-web/gen/activity_pb";
+import type { SessionEntry } from "tddy-client-web/gen/session_pb";
 import { SessionActivitiesPane } from "./SessionActivitiesPane";
 import { rosterHalfOf } from "./sessionRosterHalf";
 

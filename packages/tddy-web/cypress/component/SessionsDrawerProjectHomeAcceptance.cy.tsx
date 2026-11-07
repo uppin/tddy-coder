@@ -19,7 +19,7 @@ import {
   SessionEntrySchema,
   SessionService,
   type SessionEntry,
-} from "../../src/gen/session_pb";
+} from "tddy-client-web/gen/session_pb";
 import { SessionDrawer, type ProjectHomeInfo } from "../../src/components/sessions/SessionDrawer";
 import { useEnsureProjectHome } from "../../src/components/sessions/useEnsureProjectHome";
 import { TooltipProvider } from "tddy-ui-web";

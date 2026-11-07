@@ -11,8 +11,8 @@
 import React from "react";
 import { create } from "@bufbuild/protobuf";
 import { Code, ConnectError } from "@connectrpc/connect";
-import type { ProjectEntry } from "../../src/gen/project_pb";
-import { SessionEntrySchema, SessionService } from "../../src/gen/session_pb";
+import type { ProjectEntry } from "tddy-client-web/gen/project_pb";
+import { SessionEntrySchema, SessionService } from "tddy-client-web/gen/session_pb";
 import { SessionsDrawerScreen } from "../../src/components/sessions/SessionsDrawerScreen";
 import { DEFAULT_TEST_DAEMON, withSelectedDaemon } from "../support/rpc/withSelectedDaemon";
 import { aSessionServiceBackend } from "../support/rpc/daemonSessionHostBackend";

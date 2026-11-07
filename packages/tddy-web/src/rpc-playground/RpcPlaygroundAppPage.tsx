@@ -5,7 +5,7 @@ import { useLiveKitTransport } from "../rpc/transportProvider";
 import {
   ServerReflection,
   ServerReflectionRequestSchema,
-} from "../gen/grpc/reflection/v1/reflection_pb";
+} from "tddy-client-web/gen/grpc/reflection/v1/reflection_pb";
 import { GitHubLoginButton } from "../components/GitHubLoginButton";
 import { AppShell } from "../components/shell/AppShell";
 import { useAuthContext } from "../hooks/authProvider";

@@ -20,7 +20,7 @@ import {
   ListModelsResponseSchema,
   ModelRegistryService,
   ProviderKind,
-} from "../../../src/gen/models_pb";
+} from "tddy-client-web/gen/models_pb";
 import { ModelsAppPage } from "../../../src/components/models/ModelsAppPage";
 import { AuthProvider } from "../../../src/hooks/authProvider";
 import type { DaemonHost } from "../../../src/lib/participantRole";

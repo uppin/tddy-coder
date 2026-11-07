@@ -1,4 +1,4 @@
-import { StartPhase_Step } from "../../gen/session_pb";
+import { StartPhase_Step } from "tddy-client-web/gen/session_pb";
 import { formatAttachmentBytes } from "../../lib/attachmentBytes";
 import type { StartProgressState } from "./startProgress";
 
