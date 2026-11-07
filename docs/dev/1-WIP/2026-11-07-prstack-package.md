@@ -77,6 +77,15 @@ implementing one here collides with the PR that owns it.
 create-session or the presenter room, plus the `prstack/*.test.ts` suites, `git mv`'d — failing until the
 modules move. Specs mounting the sessions drawer stay for `feature/web-split/session`.
 
+**Correction (commit 3):** the drawer filter left only `PrStackStartSessionDocAttachmentsAcceptance` here — **36** of the
+40 PR-stack specs drive PR-stack through `SessionsDrawerScreen`, so they are integration specs of the drawer
+and travel with `feature/web-split/session`. The three `WorkflowChat*` specs mount `WorkflowChatScreen`
+(moves with this package) and are moved now. So the package has a component suite of its own, green **adds
+direct-mount specs** (fluent style, `cy.mountWithClients` + port doubles) for `PrStackScreen` (planned-PR list
+renders and reorders), `PrStackChat` (streams a reply, shows an elicitation) and `PlannedPrList` (start-session
+opens `CreateSessionDialog`) — each asserting behaviour the drawer specs already cover, from the package's own
+entry points.
+
 Originally planned:
 
 First push (commit 2): the `tddy-prstack-web` skeleton (manifest exporting the surface in `## Responsibility`, Cypress/Vite config, workflow), the specs, page objects and drivers listed below `git mv`'d into the package with imports pointing at it, and the boundary rule — failing until the modules move.
