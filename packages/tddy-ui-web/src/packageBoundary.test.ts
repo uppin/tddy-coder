@@ -14,6 +14,7 @@ describe("tddy-ui-web package boundary", () => {
       "@connectrpc/connect",
       "@bufbuild/protobuf",
       "livekit-client",
+      "tddy-livekit-web",
       "tddy-livekit-rpc-web",
       "tddy-client-web",
     ];
