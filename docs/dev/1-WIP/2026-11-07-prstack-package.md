@@ -79,8 +79,8 @@ modules move. Specs mounting the sessions drawer stay for `feature/web-split/ses
 
 **Correction (commit 3):** the drawer filter left only `PrStackStartSessionDocAttachmentsAcceptance` here — **36** of the
 40 PR-stack specs drive PR-stack through `SessionsDrawerScreen`, so they are integration specs of the drawer
-and travel with `feature/web-split/session`. The three `WorkflowChat*` specs mount `WorkflowChatScreen`
-(moves with this package) and are moved now. So the package has a component suite of its own, green **adds
+and travel with `feature/web-split/session`. `WorkflowChatPresenterRoomAcceptance` and `WorkflowChatResumeAcceptance` mount `WorkflowChatScreen`
+(moves with this package) and are moved now; `WorkflowChatViewRoutingAcceptance` routes through the drawer and stays. So the package has a component suite of its own, green **adds
 direct-mount specs** (fluent style, `cy.mountWithClients` + port doubles) for `PrStackScreen` (planned-PR list
 renders and reorders), `PrStackChat` (streams a reply, shows an elicitation) and `PlannedPrList` (start-session
 opens `CreateSessionDialog`) — each asserting behaviour the drawer specs already cover, from the package's own

@@ -9,7 +9,7 @@
  */
 
 import React from "react";
-import { SessionsDrawerScreen } from "../../src/SessionsDrawerScreen";
+import { SessionsDrawerScreen } from "../../src/components/sessions/SessionsDrawerScreen";
 import { withSelectedDaemon } from "../support/rpc/withSelectedDaemon";
 import { mountWithRpc } from "../support/rpc/inMemory";
 import { aSessionsDrawerBackend } from "../support/rpc/vncBackend";
