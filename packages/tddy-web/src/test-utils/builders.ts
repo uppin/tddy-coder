@@ -272,7 +272,8 @@ export function aCodexOAuthMeta(fields: {
 export async function anEchoRegistry() {
   const { buildRegistry } = await import("../rpc-playground/registry");
   const { ECHO_SERVICE_DESCRIPTOR_FIXTURE } = await import(
-    "../rpc-playground/test-fixtures/echoServiceDescriptor"
+  // TODO(playground): tddy-web reaches into the playground package for this fixture until green moves its consumers.
+    "../../../tddy-rpc-playground-web/src/test-fixtures/echoServiceDescriptor"
   );
   return buildRegistry(ECHO_SERVICE_DESCRIPTOR_FIXTURE);
 }
