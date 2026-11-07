@@ -1,6 +1,6 @@
 import type { Client } from "@connectrpc/connect";
 import type { SessionAgentService } from "../../gen/session_agents_pb";
-import { Button } from "../ui/button";
+import { Button } from "tddy-ui-web";
 import type { RosterHalf } from "./sessionRosterHalf";
 import {
   OWNING_DAEMON_UNKNOWN_TEXT,

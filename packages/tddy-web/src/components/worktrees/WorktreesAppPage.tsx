@@ -4,7 +4,7 @@ import { WorktreeService } from "../../gen/worktree_pb";
 import { GitHubLoginButton } from "../GitHubLoginButton";
 import { AppShell } from "../shell/AppShell";
 import { SessionWorktreeTab } from "../sessions/SessionWorktreeTab";
-import { ScrollArea } from "../ui/scroll-area";
+import { ScrollArea } from "tddy-ui-web";
 import { useAuthContext } from "../../hooks/authProvider";
 import { useDaemonClient } from "../../rpc/selectedDaemon";
 import { WorktreesScreen } from "./WorktreesScreen";

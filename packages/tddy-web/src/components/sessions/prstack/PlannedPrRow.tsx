@@ -1,6 +1,6 @@
 import React from "react";
 import { ChevronDown, ChevronRight, TriangleAlert } from "lucide-react";
-import { Button } from "../../ui/button";
+import { Button } from "tddy-ui-web";
 import type { BranchResolution } from "../../../gen/pr_stack_pb";
 import { baseSyncView, canPullFromBase } from "./baseSyncStatus";
 import { isNodeOrphaned } from "./isNodeOrphaned";

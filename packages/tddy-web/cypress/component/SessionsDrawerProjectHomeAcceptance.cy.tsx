@@ -22,7 +22,7 @@ import {
 } from "../../src/gen/session_pb";
 import { SessionDrawer, type ProjectHomeInfo } from "../../src/components/sessions/SessionDrawer";
 import { useEnsureProjectHome } from "../../src/components/sessions/useEnsureProjectHome";
-import { TooltipProvider } from "../../src/components/ui/tooltip";
+import { TooltipProvider } from "tddy-ui-web";
 import { mountWithRpc } from "../support/rpc/inMemory";
 import { projectHomeSetupPage as drawer } from "../support/pages/projectHomeSetupPage";
 import {

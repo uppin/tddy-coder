@@ -17,11 +17,11 @@ import {
   TableHead,
   TableHeader,
   TableRow,
-} from "../ui/table";
+} from "tddy-ui-web";
 import { formatTokens } from "./formatTokens";
 import { usageTotals } from "./sessionUsage";
 import { useSessionUsage } from "./useSessionUsage";
-import { InlineError } from "../ui/inline-error";
+import { InlineError } from "tddy-ui-web";
 
 export interface SessionUsageTabProps {
   /** LiveKit room + daemon/presenter identity selecting the usage stream's transport target. */

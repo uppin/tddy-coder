@@ -1,7 +1,7 @@
 import React, { useCallback, useState } from "react";
 import { TaskService, TaskStatusProto, type TaskInfo } from "../../gen/tasks_pb";
 import { useDaemonClient } from "../../rpc/selectedDaemon";
-import { Button } from "../ui/button";
+import { Button } from "tddy-ui-web";
 
 function statusDotColor(status: TaskStatusProto): string {
   switch (status) {

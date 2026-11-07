@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import { Button } from "../../ui/button";
+import { Button } from "tddy-ui-web";
 
 /** The pull the operator asked for, held until they say what to do about the outstanding work. */
 export interface DirtyWorktreePrompt {

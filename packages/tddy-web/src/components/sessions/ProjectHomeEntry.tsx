@@ -1,7 +1,7 @@
 import React, { useState } from "react";
 import { Replace } from "lucide-react";
 import type { SessionEntry } from "../../gen/session_pb";
-import { cn } from "../../lib/utils";
+import { cn } from "tddy-ui-web";
 import { SessionIndicatorDot } from "./SessionIndicatorDot";
 import type { ProjectHomeInfo } from "../../utils/projectHomeGroups";
 

@@ -24,13 +24,40 @@ export function forbiddenImports(
   rules: readonly ImportRule[],
   srcDir = "src",
 ): ForbiddenImport[] {
-  void packageDir;
-  void rules;
-  void srcDir;
-  void readdirSync;
-  void readFileSync;
-  void statSync;
-  void join;
-  void relative;
-  throw new Error("TODO(ui): implement");
+  const root = join(packageDir, srcDir);
+  const found: ForbiddenImport[] = [];
+  for (const path of sourceFiles(root)) {
+    for (const specifier of importSpecifiers(readFileSync(path, "utf8"))) {
+      if (rules.some((rule) => matches(rule, specifier))) {
+        found.push({ file: relative(packageDir, path), specifier });
+      }
+    }
+  }
+  return found;
+}
+
+function matches(rule: ImportRule, specifier: string): boolean {
+  if (typeof rule === "string") return specifier === rule || specifier.startsWith(`${rule}/`);
+  return rule.test(specifier);
+}
+
+function sourceFiles(dir: string): string[] {
+  const out: string[] = [];
+  for (const entry of readdirSync(dir).sort()) {
+    const path = join(dir, entry);
+    if (statSync(path).isDirectory()) out.push(...sourceFiles(path));
+    else if (/\.(ts|tsx)$/.test(entry)) out.push(path);
+  }
+  return out;
+}
+
+/** `import`/`export ... from "x"`, side-effect `import "x"`, and `import("x")`. */
+const IMPORT_FORMS = [
+  /\b(?:import|export)\s[^"'`;]*?\bfrom\s*["']([^"']+)["']/g,
+  /\bimport\s*["']([^"']+)["']/g,
+  /\bimport\s*\(\s*["']([^"']+)["']\s*\)/g,
+];
+
+function importSpecifiers(source: string): string[] {
+  return IMPORT_FORMS.flatMap((form) => [...source.matchAll(form)].map((m) => m[1]));
 }

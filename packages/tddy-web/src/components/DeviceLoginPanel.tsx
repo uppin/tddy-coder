@@ -1,4 +1,4 @@
-import { Button } from "@/components/ui/button";
+import { Button } from "tddy-ui-web";
 import { useAuthContext } from "../hooks/authProvider";
 import { GITHUB_BUTTON_CLASS_NAME } from "./GitHubLoginButton";
 

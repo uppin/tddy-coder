@@ -1,4 +1,4 @@
-import { Button } from "../ui/button";
+import { Button } from "tddy-ui-web";
 
 /** What cancelling a start in progress needs from the form's submit. */
 export interface StartCancel {

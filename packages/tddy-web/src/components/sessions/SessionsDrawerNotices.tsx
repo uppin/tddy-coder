@@ -1,5 +1,5 @@
 import React from "react";
-import { InlineError } from "../ui/inline-error";
+import { InlineError } from "tddy-ui-web";
 import type { BulkDeleteFailure } from "./useSessionsDrawerDeleteSelection";
 
 /**

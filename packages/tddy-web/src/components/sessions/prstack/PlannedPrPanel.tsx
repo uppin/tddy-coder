@@ -1,6 +1,6 @@
 import React from "react";
-import { Button } from "../../ui/button";
-import { cn } from "../../../lib/utils";
+import { Button } from "tddy-ui-web";
+import { cn } from "tddy-ui-web";
 
 /** Visibility of the Planned-PRs panel. Mirrors `SessionInspectorDrawer`'s `data-state` contract. */
 export type PlannedPrPanelState = "closed" | "open";
