@@ -1,0 +1,152 @@
+/**
+ * Acceptance tests: the new-session form (CreateSessionPane) lets an operator choose which
+ * daemon/host runs the session. The chosen host is carried on StartSession (and drives branch
+ * listing) as `daemonInstanceId`, so a session can be created on a host other than the one the
+ * form's client is connected to.
+ *
+ * The selectable hosts are the daemon-role participants in the common LiveKit room, supplied here
+ * via a `SelectedDaemonProvider` fixture (mirrors `withSelectedDaemon`); the RPCs the form issues
+ * are exercised against the in-memory ConnectRPC backend so the tests assert on the typed requests
+ * the component actually sent.
+ *
+ * PRD: docs/ft/web/daemon-selector-livekit-rpc.md.
+ */
+
+import React from "react";
+import { servedAgentWire } from "../support/servedAgents";
+import { aDisconnectedRoom } from "tddy-livekit-web/testkit";
+import { createClient } from "@connectrpc/connect";
+import { anInMemoryRpcBackend, type InMemoryRpcBackend } from "tddy-connectrpc-testkit";
+import { CreateSessionPane } from "../../src/CreateSessionPane";
+import { SessionService } from "tddy-client-web/gen/session_pb";
+import { ProjectService } from "tddy-client-web/gen/project_pb";
+import { CatalogService } from "tddy-client-web/gen/catalog_pb";
+import { SessionFilesService } from "tddy-client-web/gen/session_files_pb";
+import { WorktreeService } from "tddy-client-web/gen/worktree_pb";
+import type { DaemonHost } from "tddy-client-web";
+import { SelectedDaemonProvider } from "../../src/rpc/selectedDaemon";
+import { mountWithRecordingLiveKitRpc } from "../support/rpc/recordingLiveKitRpc";
+import { createSessionPage } from "../support/pages/createSessionPage";
+
+// ---------------------------------------------------------------------------
+// Fixtures
+// ---------------------------------------------------------------------------
+
+const LOCAL_HOST = "workstation-1";
+const REMOTE_HOST = "server-2";
+
+const DAEMON_HOSTS: DaemonHost[] = [
+  { instanceId: LOCAL_HOST, label: "workstation-1 (this daemon)" },
+  { instanceId: REMOTE_HOST, label: "server-2 (this daemon)" },
+];
+
+/**
+ * The Agent select's option value. Qualified by the host that offers the agent while the common room
+ * advertises daemons — this fixture advertises two, so the bare id names no option.
+ */
+const CLAUDE_OPTION = `claude@${LOCAL_HOST}`;
+
+/** A backend seeded with every RPC CreateSessionPane issues, plus StartSession + branch listing. */
+function aCreateSessionBackend(): InMemoryRpcBackend {
+  return anInMemoryRpcBackend()
+    .onUnary(SessionService.method.listSessions, () => ({ sessions: [] }))
+    .onUnary(CatalogService.method.listAgentModels, () => ({
+      models: [{ id: "claude-opus-4-8", label: "Claude Opus 4.8" }],
+      defaultModel: "claude-opus-4-8",
+    }))
+    .onUnary(ProjectService.method.listProjects, () => ({
+      projects: [{ projectId: "proj-1", name: "Test Project", mainRepoPath: "/repo" }],
+    }))
+    .onUnary(CatalogService.method.listAgents, () => ({ agents: [{ id: "claude", label: "Claude", ...servedAgentWire("claude"), }] }))
+    .onUnary(CatalogService.method.listTools, () => ({
+      tools: [{ path: "/usr/bin/tddy-coder", label: "tddy-coder" }],
+    }))
+    .onUnary(CatalogService.method.listSubagents, () => ({ subagents: [] }))
+    .onUnary(ProjectService.method.listProjectBranches, () => ({ branches: ["origin/main"], defaultRemote: "origin" }))
+    .onUnary(SessionService.method.startSession, () => ({ sessionId: "host-sel-1" }));
+}
+
+function mountCreatePane(backend: InMemoryRpcBackend) {
+  const client = createClient(SessionService, backend.transport());
+  const projectClient = createClient(ProjectService, backend.transport());
+  const catalogClient = createClient(CatalogService, backend.transport());
+  // The same host over the same wire, under the service that now serves the worktree RPCs.
+  const sessionFilesClient = createClient(SessionFilesService, backend.transport());
+  const worktreeClient = createClient(WorktreeService, backend.transport());
+  // Both hosts answer over the same backend: the form reads every advertised host's agent catalog
+  // (`ListAgents` has no routing field, so each host is asked for itself), and a host that cannot be
+  // asked offers no agent for a session moved onto it.
+  mountWithRecordingLiveKitRpc(
+    <SelectedDaemonProvider room={aDisconnectedRoom()} daemons={DAEMON_HOSTS} servingInstanceId={LOCAL_HOST}>
+      <CreateSessionPane
+        client={client}
+        projectClient={projectClient}
+        catalogClient={catalogClient}
+        sessionFilesClient={sessionFilesClient}
+        worktreeClient={worktreeClient}
+        sessionToken="fake-token"
+        onCancel={cy.stub()}
+        onCreated={cy.stub()}
+      />
+    </SelectedDaemonProvider>,
+    backend,
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Setup
+// ---------------------------------------------------------------------------
+
+beforeEach(() => {
+  cy.viewport(1280, 800);
+  cy.clearAllSessionStorage();
+});
+
+// ---------------------------------------------------------------------------
+// Tests
+// ---------------------------------------------------------------------------
+
+it("lists every common-room daemon as a host option", () => {
+  // Given a new-session form with two daemons in the common room
+  mountCreatePane(aCreateSessionBackend());
+
+  // When / Then — both hosts are offered as targets, in room order
+  createSessionPage.hostOptionValues().should("deep.equal", [LOCAL_HOST, REMOTE_HOST]);
+});
+
+it("starts the session on the chosen host", () => {
+  // Given
+  const backend = aCreateSessionBackend();
+  mountCreatePane(backend);
+
+  // When — pick the remote host, fill the required fields, and create
+  createSessionPage.selectProject("proj-1");
+  createSessionPage.selectAgent(CLAUDE_OPTION);
+  createSessionPage.selectHost(REMOTE_HOST);
+  createSessionPage.submit();
+
+  // Then — StartSession is routed to the chosen host, not the connected/local one
+  cy.wrap(null).should(() => {
+    const calls = backend.callsTo(SessionService.method.startSession);
+    expect(calls).to.have.length(1);
+    expect(calls[0].daemonInstanceId).to.equal(REMOTE_HOST);
+  });
+});
+
+it("lists branches for the chosen host when working on an existing branch", () => {
+  // Given
+  const backend = aCreateSessionBackend();
+  mountCreatePane(backend);
+
+  // When — pick the remote host, then switch to working on an existing branch
+  createSessionPage.selectProject("proj-1");
+  createSessionPage.selectHost(REMOTE_HOST);
+  createSessionPage.switchToWorkOnExistingBranch();
+
+  // Then — branch listing is scoped to the chosen host
+  cy.wrap(null).should(() => {
+    const calls = backend.callsTo(ProjectService.method.listProjectBranches);
+    expect(calls).to.have.length.at.least(1);
+    expect(calls[calls.length - 1].daemonInstanceId).to.equal(REMOTE_HOST);
+  });
+});

@@ -1,0 +1,144 @@
+/**
+ * Acceptance tests: the shared Start-Session dialog offers an unchecked "Create Remote Branch"
+ * toggle in new-branch mode. Leaving it unchecked sends `createRemoteBranch = false` on StartSession;
+ * checking it sends `true` (the daemon pushes the new branch to origin at session start). A PR-stack
+ * node's dialog pre-checks it — see PrStackStartSessionModalAcceptance.
+ *
+ * PRD: docs/ft/coder/1-WIP/PRD-2026-07-25-branch-query-and-remote-branch.md.
+ * Changeset: docs/dev/1-WIP/2026-07-25-branch-query-and-remote-branch.md.
+ */
+
+import React from "react";
+import { createClient } from "@connectrpc/connect";
+import { anInMemoryRpcBackend } from "tddy-connectrpc-testkit";
+import { CreateSessionPane } from "../../src/CreateSessionPane";
+import { SessionService } from "tddy-client-web/gen/session_pb";
+import { ProjectService } from "tddy-client-web/gen/project_pb";
+import { CatalogService } from "tddy-client-web/gen/catalog_pb";
+import { SessionFilesService } from "tddy-client-web/gen/session_files_pb";
+import { WorktreeService } from "tddy-client-web/gen/worktree_pb";
+import { withSelectedDaemon } from "../support/rpc/withSelectedDaemon";
+import { byTestId, TEST_IDS } from "../support/testIds";
+
+// ---------------------------------------------------------------------------
+// Fixtures
+// ---------------------------------------------------------------------------
+
+const PROJECT_ID = "proj-remote-branch";
+
+/**
+ * A backend that stubs the model catalog (so Create is enabled) and captures StartSession. All
+ * other pane-load RPCs fall through to the testkit's empty defaults.
+ */
+function aCreateSessionBackend() {
+  return anInMemoryRpcBackend()
+    .onUnary(ProjectService.method.listProjects, () => ({
+      projects: [
+        {
+          projectId: PROJECT_ID,
+          name: "remote-branch-project",
+          gitUrl: "https://example.com/remote-branch.git",
+          mainRepoPath: "/home/dev/remote-branch-project",
+          mainBranchRef: "origin/master",
+          daemonInstanceId: "local",
+        },
+      ],
+    }))
+    .onUnary(CatalogService.method.listAgentModels, () => ({
+      models: [{ id: "claude-opus-4-8", label: "Claude Opus 4.8" }],
+      defaultModel: "claude-opus-4-8",
+    }))
+    .onUnary(SessionService.method.startSession, () => ({
+      sessionId: "child-remote-branch-1",
+      livekitRoom: "room-remote-branch-1",
+      livekitUrl: "ws://127.0.0.1:7880",
+      livekitServerIdentity: "daemon",
+    }));
+}
+
+function mountPane(backend: ReturnType<typeof aCreateSessionBackend>) {
+  // The pane takes a Connect client directly (not via a hook), so build one over the in-memory
+  // backend's transport — its `callsTo` still records every StartSession the pane issues.
+  const client = createClient(SessionService, backend.transport());
+  const projectClient = createClient(ProjectService, backend.transport());
+  const catalogClient = createClient(CatalogService, backend.transport());
+  // The same host over the same wire, under the service that now serves the worktree RPCs.
+  const sessionFilesClient = createClient(SessionFilesService, backend.transport());
+  const worktreeClient = createClient(WorktreeService, backend.transport());
+  cy.mount(
+    withSelectedDaemon(
+      <CreateSessionPane
+        client={client}
+        projectClient={projectClient}
+        catalogClient={catalogClient}
+        sessionFilesClient={sessionFilesClient}
+        worktreeClient={worktreeClient}
+        sessionToken="fake-token"
+        onCancel={cy.stub()}
+        onCreated={cy.stub()}
+        initialValues={{ sessionType: "claude-cli", projectId: PROJECT_ID }}
+      />,
+    ),
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Setup
+// ---------------------------------------------------------------------------
+
+beforeEach(() => {
+  cy.viewport(1280, 800);
+  cy.clearLocalStorage();
+  cy.clearAllSessionStorage();
+  window.localStorage.setItem("tddy_session_token", "fake-token");
+});
+
+// ---------------------------------------------------------------------------
+// Tests
+// ---------------------------------------------------------------------------
+
+it("shows the Create Remote Branch toggle unchecked in new-branch mode", () => {
+  // Given
+  const backend = aCreateSessionBackend();
+
+  // When
+  mountPane(backend);
+
+  // Then
+  byTestId(TEST_IDS.createSessionCreateRemoteBranchToggle).should("not.be.checked");
+});
+
+it("sends createRemoteBranch = true when the toggle is checked", () => {
+  // Given
+  const backend = aCreateSessionBackend();
+
+  // When
+  mountPane(backend);
+  byTestId(TEST_IDS.createSessionNewBranchNameInput).clear().type("feature/x/n1");
+  byTestId(TEST_IDS.createSessionCreateRemoteBranchToggle).check();
+  byTestId(TEST_IDS.createSessionSubmitBtn).click();
+
+  // Then
+  cy.wrap(backend).should((b) => {
+    const calls = b.callsTo(SessionService.method.startSession);
+    expect(calls).to.have.length(1);
+    expect(calls[0].createRemoteBranch).to.equal(true);
+  });
+});
+
+it("sends createRemoteBranch = false when the toggle is left unchecked", () => {
+  // Given
+  const backend = aCreateSessionBackend();
+
+  // When
+  mountPane(backend);
+  byTestId(TEST_IDS.createSessionNewBranchNameInput).clear().type("feature/x/n1");
+  byTestId(TEST_IDS.createSessionSubmitBtn).click();
+
+  // Then
+  cy.wrap(backend).should((b) => {
+    const calls = b.callsTo(SessionService.method.startSession);
+    expect(calls).to.have.length(1);
+    expect(calls[0].createRemoteBranch).to.equal(false);
+  });
+});
