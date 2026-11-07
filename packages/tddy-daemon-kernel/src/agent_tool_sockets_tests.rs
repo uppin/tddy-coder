@@ -186,6 +186,52 @@ async fn a_call_over_a_users_socket_reaches_the_daemons_roster() {
 }
 
 #[tokio::test]
+async fn a_daemon_that_stops_serving_leaves_no_socket_and_binds_afresh_when_asked_again() {
+    // Given a user's socket this daemon bound and serves
+    let data = a_data_dir();
+    let sockets = sockets_serving_a_roster();
+    let user = this_os_user();
+    let path = sockets
+        .ensure_bound(&user, data.path())
+        .await
+        .expect("the socket is bound");
+
+    // When the daemon stops serving
+    sockets.stop_serving();
+
+    // Then the file it bound is gone, so no session is pointed at a dead peer
+    assert!(!path.exists(), "{} is left behind", path.display());
+
+    // And a later session of that user is served again, on the same path
+    let again = sockets
+        .ensure_bound(&user, data.path())
+        .await
+        .expect("the socket is bound again");
+    assert_eq!(again, path);
+    assert_eq!(a_call_over(&again).await, Ok(ITS_ANSWER.to_string()));
+}
+
+#[tokio::test]
+async fn stopping_leaves_a_socket_the_supervisor_made_where_it_is() {
+    // Given a socket the supervisor made for this user, served by the daemon
+    let root = tempfile::tempdir().expect("a temp root");
+    let data = a_data_dir();
+    let sockets = sockets_serving_a_roster();
+    let user = this_os_user();
+    sockets.adopt_inherited(vec![a_supervisor_made_socket(root.path(), &user)]);
+    let path = sockets
+        .ensure_bound(&user, data.path())
+        .await
+        .expect("the inherited socket is served");
+
+    // When the daemon stops serving
+    sockets.stop_serving();
+
+    // Then the file is still there: it is the supervisor's to remove, not this daemon's
+    assert!(path.exists(), "{} was removed", path.display());
+}
+
+#[tokio::test]
 async fn two_sessions_of_one_user_share_one_socket() {
     // Given one user's socket, bound by a first session
     let data = a_data_dir();

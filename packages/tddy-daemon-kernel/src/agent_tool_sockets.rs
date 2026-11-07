@@ -146,6 +146,8 @@ struct BoundServer {
     path: PathBuf,
     /// `(dev, ino)` of the socket this server bound, to notice the file was replaced or removed.
     identity: (u64, u64),
+    /// Whether the file is this daemon's to remove — `false` for a socket the supervisor made.
+    bound_here: bool,
     task: JoinHandle<()>,
 }
 
@@ -203,17 +205,10 @@ impl AgentToolSockets {
 
     /// Stop serving: close every socket this daemon bound and remove its file, as a daemon that
     /// exits leaves none. A socket the supervisor created is not this daemon's to remove — the
-    /// supervisor keeps it, and its listener here is closed with the daemon. A later
-    /// [`Self::ensure_bound`] binds afresh.
+    /// supervisor keeps it, and its listener here is closed with the daemon; the daemon the
+    /// supervisor starts next is handed it again. A later [`Self::ensure_bound`] binds afresh a
+    /// socket this daemon bound.
     pub fn stop_serving(&self) {
-        let inherited: Vec<PathBuf> = self
-            .inherited
-            .lock()
-            .expect("inherited sockets lock")
-            .values()
-            .flatten()
-            .map(|socket| socket.path.clone())
-            .collect();
         let servers: Vec<BoundServer> = self
             .servers
             .lock()
@@ -223,9 +218,9 @@ impl AgentToolSockets {
             .collect();
         for server in servers {
             server.task.abort();
-            let ours = std::fs::symlink_metadata(&server.path)
+            let still_its_file = std::fs::symlink_metadata(&server.path)
                 .is_ok_and(|m| (m.dev(), m.ino()) == server.identity);
-            if ours && !inherited.contains(&server.path) {
+            if still_its_file && server.bound_here {
                 let _ = std::fs::remove_file(&server.path);
             }
         }
@@ -241,6 +236,12 @@ impl AgentToolSockets {
     /// [`Self::ensure_bound`] for a call site that is not `async` — a tool-server resolver, a
     /// synchronous plan. There is nothing to wait for: binding is a few filesystem calls, which is
     /// all `ensure_bound` does too. Must run inside a tokio runtime, which serves the socket.
+    ///
+    /// Safe on a runtime worker. The locks are `std` ones held for those calls alone — never across
+    /// an `.await`, and never while waiting on another task — so a worker can wait here only for a
+    /// bounded run of syscalls (`getpwnam`, `mkdir`, `bind`, `chown`, a `connect` to a socket file
+    /// with no listener, which is refused at once). Only the first session of a user pays that; later
+    /// ones `stat` the bound file. `HostSessionSockets` does the same work on a worker.
     pub fn ensure_bound_blocking(&self, os_user: &str, data_dir: &Path) -> anyhow::Result<PathBuf> {
         if self.placement == AgentToolSocketPlacement::Embedded {
             return embedded_socket(data_dir);
@@ -263,13 +264,13 @@ impl AgentToolSockets {
             let mut inherited = self.inherited.lock().expect("inherited sockets lock");
             inherited.get_mut(os_user).map(Option::take)
         };
-        let (path, listener) = match inherited {
+        let (path, listener, bound_here) = match inherited {
             Some(Some(socket)) => {
                 socket
                     .listener
                     .set_nonblocking(true)
                     .context("make the inherited socket non-blocking")?;
-                (socket.path, socket.listener)
+                (socket.path, socket.listener, false)
             }
             // The supervisor made this socket and only it can make another.
             Some(None) => bail!(
@@ -280,7 +281,7 @@ impl AgentToolSockets {
                 let path = agent_tool_socket_path_for_user(data_dir, os_user)?;
                 let listener =
                     owner_socket::bind_owner_only(&path, os_user, OwnerSocketKind::AGENT_TOOL)?;
-                (path, listener)
+                (path, listener, true)
             }
         };
         let meta = std::fs::symlink_metadata(&path).context("stat the bound socket")?;
@@ -296,6 +297,7 @@ impl AgentToolSockets {
             BoundServer {
                 path: path.clone(),
                 identity: (meta.dev(), meta.ino()),
+                bound_here,
                 task,
             },
         );

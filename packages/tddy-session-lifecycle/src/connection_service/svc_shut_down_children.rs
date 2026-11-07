@@ -20,11 +20,11 @@ impl DaemonSessionHost {
     /// daemon belongs to the runtime, which stops it beside this call. The crash-detector and
     /// restart-policy half of that entry stays open.
     ///
-    /// It also stops serving the agent-tool sockets this host bound, which a daemon that exits
-    /// leaves nobody listening on.
+    /// Then it stops serving the agent-tool sockets this host bound, which a daemon that exits
+    /// leaves nobody listening on — last, so an agent still reporting while its session or jail is
+    /// being stopped is still answered.
     pub async fn shut_down_children(&self) {
         self.cli_manager.kill_all().await;
-        self.agent_tool_sockets.stop_serving();
         let stopped = self.workspace_sandboxes.stop_all().await;
         if !stopped.is_empty() {
             log::info!(
@@ -32,5 +32,6 @@ impl DaemonSessionHost {
                 stopped.len()
             );
         }
+        self.agent_tool_sockets.stop_serving();
     }
 }
