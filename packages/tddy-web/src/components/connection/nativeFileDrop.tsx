@@ -24,7 +24,7 @@ import React, {
   type RefObject,
 } from "react";
 import type { DroppedFileInfo, NativeFileDropBridge, ViewportPoint } from "tddy-tauri-web";
-import { UPLOAD_CHUNK_SIZE } from "../../lib/fileUploadChunks";
+import { UPLOAD_CHUNK_SIZE } from "tddy-client-web";
 import type { UploadSource } from "../../hooks/useSessionFileUpload";
 
 /** What a terminal registers to receive native drops. */

@@ -26,7 +26,7 @@ import {
   type WorktreeStatsEvent,
 } from "tddy-client-web/gen/worktree_pb";
 import type { WorktreeSizeStatus as DomainSizeStatus } from "../lib/worktreeSize";
-import { hostNotConnectedText, rpcFailureText } from "./rpcFailure";
+import { hostNotConnectedText, rpcFailureText } from "tddy-client-web";
 
 export interface UseSessionWorktreeStatsResult {
   /** The session's own worktree row (matched by `repoPath`), or `null` when missing / not loaded. */

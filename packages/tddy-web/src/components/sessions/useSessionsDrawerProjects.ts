@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import type { Client } from "@connectrpc/connect";
 import { ProjectService, type ProjectEntry } from "tddy-client-web/gen/project_pb";
-import { hostNotConnectedText, rpcFailureText } from "../../rpc/rpcFailure";
+import { hostNotConnectedText, rpcFailureText } from "tddy-client-web";
 import { useHostLabel, useSelectedDaemon } from "tddy-client-web";
 
 /** The registry the drawer read, and why the last read failed (`null` while it has not). */

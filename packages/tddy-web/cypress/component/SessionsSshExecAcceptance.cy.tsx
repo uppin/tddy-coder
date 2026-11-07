@@ -11,7 +11,7 @@ import { servedAgentWire } from "../support/servedAgents";
 import { create } from "@bufbuild/protobuf";
 import { createClient } from "@connectrpc/connect";
 import { anInMemoryRpcBackend, type InMemoryRpcBackend } from "tddy-connectrpc-testkit";
-import { CreateSessionPane } from "../../src/components/sessions/CreateSessionPane";
+import { CreateSessionPane } from "tddy-session-create-web";
 import { SessionService } from "tddy-client-web/gen/session_pb";
 import { ProjectService } from "tddy-client-web/gen/project_pb";
 import { CatalogService } from "tddy-client-web/gen/catalog_pb";

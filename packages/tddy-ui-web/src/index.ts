@@ -8,3 +8,4 @@ export * from "./tooltip";
 export { cn } from "./cn";
 export * from "./useIsMobile";
 export * from "./useVisualViewport";
+export * from "./WorktreeFileTree";

@@ -10,7 +10,7 @@ import {
   hostNotConnectedText,
   rpcFailureText,
   unservedService,
-} from "../../rpc/rpcFailure";
+} from "tddy-client-web";
 import { AppShell } from "../shell/AppShell";
 import { ProjectsScreen, type AssignableAccount } from "./ProjectsScreen";
 import { useDaemonClient, useDaemons, useHostConnector, useHostLabel, useSelectedDaemon } from "tddy-client-web";

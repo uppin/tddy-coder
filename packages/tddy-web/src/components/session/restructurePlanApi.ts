@@ -5,7 +5,7 @@ import {
   type PlanOperation,
   type PlanRunEvent,
 } from "tddy-client-web/gen/code_navigation_pb";
-import type { WorktreeFilesApiConfig } from "./worktreeFilesApi";
+import type { WorktreeFilesApiConfig } from "tddy-client-web";
 
 /** Where an operation's journal says it is. */
 export type PlanOperationStatusName =

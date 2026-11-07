@@ -69,4 +69,4 @@ The host-side seam is `AttachmentProgressSink::begin_phase` / `end_phase` (and `
 the start code is described in
 [tddy-session-lifecycle's session-service.md](../../tddy-session-lifecycle/docs/session-service.md#start-phases).
 The web's rendering is in
-[tddy-web's session-start-and-indexing-progress.md](../../tddy-web/docs/session-start-and-indexing-progress.md).
+[tddy-session-create-web's start-progress.md](../../tddy-session-create-web/docs/start-progress.md).

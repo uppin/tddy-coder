@@ -14,7 +14,7 @@ import {
   HostService,
   type AnswerHostPromptRequest,
 } from "tddy-client-web/gen/host_pb";
-import { StartPassphrasePrompt } from "../../src/components/sessions/StartPassphrasePrompt";
+import { HostStartPassphrasePrompt as StartPassphrasePrompt } from "../../src/components/hosts/HostStartPassphrasePrompt";
 import { mountWithRpc } from "../support/rpc/inMemory";
 import { withSelectedDaemon } from "../support/rpc/withSelectedDaemon";
 import { aHostPromptFeed, type HostPromptFeed } from "../support/rpc/hostPromptFeed";

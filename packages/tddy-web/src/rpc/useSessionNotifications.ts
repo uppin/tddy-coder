@@ -21,7 +21,7 @@ import { useEffect, useState } from "react";
 import { ActivityService, SessionNotificationKind } from "tddy-client-web/gen/activity_pb";
 import { useAuthContext } from "../hooks/authProvider";
 import { sessionNotificationRegistry } from "../components/sessions/sessionNotificationRegistry";
-import { rpcFailureText } from "./rpcFailure";
+import { rpcFailureText } from "tddy-client-web";
 import { useDaemonClient } from "tddy-client-web";
 
 export interface SessionNotificationsFeed {

@@ -1,0 +1,96 @@
+/**
+ * Red: the Claude CLI new-session form exposes a "sandbox" toggle that sets
+ * `StartSessionRequest.sandbox = true`.
+ *
+ * Uses the in-memory ConnectRPC backend (not `cy.intercept`) so the test asserts on the typed
+ * `StartSession` request the component actually sent.
+ */
+import React from "react";
+import { servedAgentWire } from "../support/servedAgents";
+import { createClient } from "@connectrpc/connect";
+import { anInMemoryRpcBackend } from "tddy-connectrpc-testkit";
+import { CreateSessionPane } from "../../src/CreateSessionPane";
+import { SessionService } from "tddy-client-web/gen/session_pb";
+import { ProjectService } from "tddy-client-web/gen/project_pb";
+import { CatalogService } from "tddy-client-web/gen/catalog_pb";
+import { SessionFilesService } from "tddy-client-web/gen/session_files_pb";
+import { WorktreeService } from "tddy-client-web/gen/worktree_pb";
+import { TEST_IDS, byTestId } from "../support/testIds";
+
+/** A backend seeded with every RPC `CreateSessionPane` calls on mount + a StartSession stub. */
+function aCreateSessionBackend() {
+  return anInMemoryRpcBackend()
+    .onUnary(SessionService.method.listSessions, () => ({ sessions: [] }))
+    .onUnary(CatalogService.method.listAgentModels, () => ({
+      models: [{ id: "claude-opus-4-8", label: "Claude Opus 4.8" }],
+      defaultModel: "claude-opus-4-8",
+    }))
+    .onUnary(ProjectService.method.listProjects, () => ({
+      projects: [{ projectId: "proj-1", name: "Test Project", mainRepoPath: "/repo" }],
+    }))
+    .onUnary(CatalogService.method.listAgents, () => ({
+      agents: [
+        { id: "claude", label: "Claude", ...servedAgentWire("claude") },
+      ],
+    }))
+    .onUnary(CatalogService.method.listTools, () => ({ tools: [] }))
+    .onUnary(SessionService.method.startSession, () => ({ sessionId: "sandbox-new-1" }));
+}
+
+function mountCreatePane(backend: ReturnType<typeof aCreateSessionBackend>) {
+  const client = createClient(SessionService, backend.transport());
+  const projectClient = createClient(ProjectService, backend.transport());
+  const catalogClient = createClient(CatalogService, backend.transport());
+  // The same host over the same wire, under the service that now serves the worktree RPCs.
+  const sessionFilesClient = createClient(SessionFilesService, backend.transport());
+  const worktreeClient = createClient(WorktreeService, backend.transport());
+  cy.mount(
+    <CreateSessionPane
+      client={client}
+      projectClient={projectClient}
+      catalogClient={catalogClient}
+      sessionFilesClient={sessionFilesClient}
+      worktreeClient={worktreeClient}
+      sessionToken="tok"
+      onCancel={cy.stub()}
+      onCreated={cy.stub()}
+    />,
+  );
+}
+
+describe("CreateSession sandbox toggle", () => {
+  beforeEach(() => {
+    cy.viewport(1280, 800);
+  });
+
+  it("shows a sandbox toggle in the Claude CLI new-session form", () => {
+    // Given
+    mountCreatePane(aCreateSessionBackend());
+
+    // When
+    byTestId(TEST_IDS.createSessionTypeClaudeCliBtn).click();
+
+    // Then
+    byTestId(TEST_IDS.createSessionSandboxToggle).should("be.visible");
+  });
+
+  it("submitting with the sandbox toggle on sends StartSession with sandbox=true", () => {
+    // Given
+    const backend = aCreateSessionBackend();
+    mountCreatePane(backend);
+
+    // When
+    byTestId(TEST_IDS.createSessionTypeClaudeCliBtn).click();
+    byTestId(TEST_IDS.createSessionProjectSelect).select("proj-1");
+    byTestId(TEST_IDS.createSessionSandboxToggle).click();
+    byTestId(TEST_IDS.createSessionSubmitBtn).should("not.be.disabled").click();
+
+    // Then — the typed StartSession request carried the sandbox flag.
+    cy.wrap(null).should(() => {
+      const calls = backend.callsTo(SessionService.method.startSession);
+      expect(calls).to.have.length(1);
+      expect(calls[0].sessionType).to.eq("claude-cli");
+      expect(calls[0].sandbox).to.eq(true);
+    });
+  });
+});

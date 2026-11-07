@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import type { Client } from "@connectrpc/connect";
 import type { ActivityService, AgentActivityRecord } from "tddy-client-web/gen/activity_pb";
 import { StreamMode } from "tddy-client-web/gen/activity_pb";
-import { rpcFailureText } from "../../rpc/rpcFailure";
+import { rpcFailureText } from "tddy-client-web";
 
 export interface UseSessionActivityResult {
   /** All known tool-call records, coalesced by `callId`, in first-seen order. */

@@ -1,5 +1,5 @@
 import { useCallback, useState } from "react";
-import { rpcFailureText } from "../rpc/rpcFailure";
+import { rpcFailureText } from "tddy-client-web";
 
 export interface ActionFailure {
   /** Why the last action failed, ready to render; `null` while nothing has failed. */

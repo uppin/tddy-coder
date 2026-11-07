@@ -25,9 +25,7 @@ import { deriveStackBaseBranch } from "./deriveStackBaseBranch";
 import { baseBranchChoice } from "./baseBranchChoice";
 import { resolveRepointTarget, startBlockers } from "./startBlockers";
 import { stackDocAttachments } from "./stackDocAttachments";
-import { CreateSessionDialog } from "../CreateSessionDialog";
-import type { CreateSessionInitialValues } from "../CreateSessionPane";
-import { remoteTrackingName } from "../../../lib/branchNames";
+import { CreateSessionDialog, remoteTrackingName, type CreateSessionInitialValues } from "tddy-session-create-web";
 import type { SessionMetadata } from "../../../lib/sessionParticipantMetadata";
 
 type ConnectionClient = Client<typeof SessionService>;

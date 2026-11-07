@@ -1,5 +1,5 @@
 import { useCallback, useState } from "react";
-import { rpcFailureText } from "../rpc/rpcFailure";
+import { rpcFailureText } from "tddy-client-web";
 
 export interface KeyedActionFailure {
   /** Why each row's last action failed, keyed by row; a row with no entry has not failed. */

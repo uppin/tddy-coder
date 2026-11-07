@@ -1,0 +1,58 @@
+/**
+ * The passphrase question a host raises while a session start is cloning, shown over the
+ * create-session form.
+ *
+ * A start that must clone its project blocks on the host's ssh key passphrase, and the form is the
+ * only surface the operator is looking at. The question, its key-continuity check and its answer are
+ * the Hosts screen's (`useHostPromptAnswer`); this only decides when to listen — while a start is in
+ * flight, against the host that is cloning — and renders nothing the rest of the time, so a form
+ * nobody is submitting opens no stream.
+ *
+ * Feature: docs/ft/daemon/clone-ssh-passphrase.md
+ */
+
+import React from "react";
+import { StartPassphraseProvider, type StartPassphrasePromptProps } from "tddy-session-create-web";
+import { HostPassphraseDialog } from "./HostPassphraseDialog";
+import { useHostPromptAnswer } from "./useHostPromptAnswer";
+
+/** The create-session package's prompt slot, filled with the Hosts screen's passphrase dialog. */
+export type HostStartPassphrasePromptProps = StartPassphrasePromptProps;
+
+export function HostStartPassphrasePrompt({
+  instanceId,
+  active,
+  sessionToken,
+}: HostStartPassphrasePromptProps): React.ReactElement | null {
+  const { prompt, answering, acceptChangedKey, answer, cancel } = useHostPromptAnswer(
+    instanceId,
+    active,
+    sessionToken,
+  );
+  if (prompt === null) return null;
+  return (
+    <HostPassphraseDialog
+      hostId={instanceId}
+      subject={prompt.subject}
+      // Only what has been established about the key in hand: until its check lands there is nothing
+      // to say and nothing to send.
+      fingerprint={answering?.check.fingerprint ?? null}
+      spkiDer={prompt.hostPublicKey}
+      keyContinuity={answering?.check.verdict ?? { kind: "unchecked" }}
+      // A refusal has no form field to land in here: the start is still waiting on this very host and
+      // reports its own failure when the prompt expires unanswered.
+      onSubmit={(encryptedAnswer) => void answer(encryptedAnswer)}
+      onAcceptChangedKey={acceptChangedKey}
+      onCancel={cancel}
+    />
+  );
+}
+
+/**
+ * Mounted once at the app root (`index.tsx`), above every create-session surface
+ * (`CreateSessionPane`, `CreateSessionDialog`, `ProjectHomeSetupPane`): it is how the create-session
+ * package asks the Hosts screen's passphrase dialog to show while a start is cloning.
+ */
+export function HostStartPassphraseScope({ children }: { children?: React.ReactNode }): React.ReactElement {
+  return <StartPassphraseProvider prompt={HostStartPassphrasePrompt}>{children}</StartPassphraseProvider>;
+}
