@@ -34,7 +34,7 @@ Imported by subpath; the package root exports nothing.
 
 ## Acceptance
 
-- The package has the six module subpaths, each covered by `bun test` suites that run in its own PR
-  check (`web / tddy-react-commons tests`).
+- The package has the six module subpaths, each covered by `bun test` suites that run in the `Web tests`
+  shards whenever a change reaches the package.
 - It runs against React 19.
 - No other package's behaviour changes.

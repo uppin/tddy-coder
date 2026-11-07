@@ -54,8 +54,7 @@ pass a `RoomHandle`.
 
 `bun test src` (ports, connection provider, session connection, room terminal feed, rooms helpers,
 boundary rule) and `bun run cypress:component` (`ParticipantList`, camera capability gating). Neither
-needs a LiveKit server, so `web-tddy-livekit-web.yml` sets neither `needs-livekit-image` nor
-`needs-rust-fixture`.
+needs a LiveKit server, so its `package.json` declares no `tddyCi.needs`.
 
 ## Changesets
 

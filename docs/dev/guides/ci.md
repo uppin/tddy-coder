@@ -16,7 +16,10 @@ tests that failed.
 | `Rust tests` | `cargo nextest run --profile ci`, minus the e2e set, over the workspace as 3 shards (`Rust tests shard i/3`), each a sliding window of package batches (`scripts/nextest-windowed.ts --shard i/3`); one `Rust tests` check stands for them | |
 | `Rust e2e tests` | `cargo nextest run --archive-file … --profile ci`, restricted to the e2e set, run as 6 shards from an archive of just the e2e test targets — tests that need real infrastructure | |
 | `Generated code` | `bun install --frozen-lockfile`, the CI script tests, then `scripts/generated-code.sh check` | ~3 min |
-| `web / <package> tests` (seven checks, one per JS workspace package) | only that package's build and tests, and only when the PR touches the package or one it depends on; see [Web package checks](#web-package-checks) | ~10 min for `tddy-web` |
+| `Web build` | every web workspace package's `build:ci` (`web.yml`); see [Web checks](#web-checks) | |
+| `Web lint` | every web package's `typecheck`, minus `scripts/web-lint-exclusions.json`, and the web rule tests | |
+| `Web tests shard 1/3`…`3/3` | the affected web packages' `test:ci` and Cypress component specs, dealt across three shards | |
+| `Storybook build` | the static Storybook (`storybook.yml`), when a change reaches the package that owns it | |
 
 `Rust lint` runs on its own. **`Rust build` runs first, and the Rust test checks
 wait on it**, because a number of suites exec a workspace binary by path rather
@@ -27,7 +30,7 @@ tests — they belong to a different package:
 |--------|-----------|
 | `target/debug/tddy-sandbox-runner` | `tddy-daemon-sandbox` `sandbox_runner_stdio_acceptance` |
 | `target/debug/tddy-acp-stub` | `tddy-integration-tests` `acp_*`, `codex_acp_*` |
-| `target/debug/examples/echo_server` | `tddy-livekit-rpc-web` Cypress specs; the `web / tddy-livekit-rpc-web tests` check builds its own, so no Rust test job needs this one |
+| `target/debug/examples/echo_server` | `tddy-livekit-rpc-web` Cypress specs; a `Web tests` shard that runs those specs builds its own, so no Rust test job needs this one |
 | `target/debug/tddy-remote-git-repo` | `tddy-worktree-service` `remote_git_livekit_acceptance`, `tddy-session-lifecycle` `session_sync_livekit_acceptance` |
 | `target/debug/tddy-index-daemon` | `tddy-tools` `index_daemon_client_acceptance` |
 
@@ -213,19 +216,29 @@ made required, a red `Rust e2e tests` does not block a merge.
   or `stop`. Filterset binaries missing from the report are named, so a renamed test binary shows up
   rather than silently counting as zero.
 
-## Web package checks
+## Web checks
 
-Each JS workspace package in the root `package.json` `workspaces` has a PR check of its own. Its caller workflow, `.github/workflows/web-<package>.yml`, calls the shared `web-package.yml`. GitHub prefixes a called workflow's jobs with the calling job's id, as it does for `gate / Draft build gate`, so the check is **`web / <package> tests`**, and the ruleset names that form.
+Every JS workspace package in the root `package.json` `workspaces` is built, linted and tested by one
+workflow, `.github/workflows/web.yml`, and the Storybook by `.github/workflows/storybook.yml`. Neither
+names a package: `scripts/web-ci.ts` discovers them from `workspaces` and each package's own
+`package.json`, so adding a package needs no CI edit.
 
-The shared workflow has three jobs:
+| Check | What it runs |
+|-------|--------------|
+| `Web build` | `bun scripts/web-ci.ts build`: every package's `build:ci` script |
+| `Web lint` | `bun scripts/web-ci.ts lint`: every package's `typecheck` script; then the web rule tests (`web-ci`, `web-workflows`, `web-package-boundary`, `livekit-import-boundary`, `livekit-rpc-package-name`) |
+| `Web tests shard i/3` | this shard's share of the affected packages' suites |
+| `Storybook build` | `build-storybook` of the package named by `STORYBOOK_PACKAGE` in `storybook.yml`, when that package is affected |
 
-- **`gate`** is `build-gate.yml`. A draft skips the work unless it carries `#forcebuild`, as with every other check.
-- **`changes`** runs `scripts/web-affected.ts --package <package> --base <PR base sha> --head <PR head sha>` and prints `affected=true` or `affected=false`. Pushes to `master` and manual dispatches run `--all`. A package is affected when a file under its directory changed; when a workspace package it depends on is affected, transitively (`workspace:*` in `dependencies` or `devDependencies`); when its own caller workflow changed; or when a global input changed. A global input affects every package: root `package.json`, `bun.lock`, `bunfig.toml`, `flake.nix`, `flake.lock`, `scripts/web-affected.ts`, `build-gate.yml` and `web-package.yml`.
-- **`<package> tests`** runs only when the gate builds and `changes` says affected. A skipped job reports success, so an unaffected package's check is present and green, and nothing waits on it. If `changes` itself fails, the check fails rather than skipping.
+All four sit behind `build-gate.yml`, as every other check does: a draft skips them unless it carries `#forcebuild`.
 
-The caller sets what the package's tests need, through boolean inputs documented in `web-package.yml`: `needs-web-bundle` (builds `packages/tddy-web/dist`), `needs-tddy-coder` (builds `target/debug/tddy-coder`), `needs-rust-fixture` (builds `target/debug/examples/echo_server`), `needs-livekit-image` (pulls the LiveKit image) and `has-cypress` (Cypress's libraries and binary cache, and `cypress:component:ci`). The package's `test:ci` runs when the package has one, and writes JUnit XML under `reports/junit/`, which the job publishes as a `<package> report` check. A package with no `test:ci` runs nothing: `tddy-desktop` and `tddy-connectrpc-testkit` have no tests in CI, so their checks only install the workspace.
+**What a package declares.** `build:ci` (built by `Web build`; the shards that need the bundle run the same command), `typecheck` (a package without one, or whose typecheck fails today, is listed in `scripts/web-lint-exclusions.json` with its reason and the `docs/dev/todo/` record that removes it; a listed package is skipped. `lint` fails on a package that has no `typecheck` and is not listed, and on an entry naming a package that no longer exists), `test:ci` (its unit suites, writing JUnit XML under `reports/junit/`), `cypress:component:ci` (its specs under `cypress/component/` are discovered and dealt to the shards), and `tddyCi.needs` — what its tests need prepared: `web-bundle` (runs every `build:ci`), `tddy-coder` (builds `target/debug/tddy-coder`), `echo-server` (builds `target/debug/examples/echo_server`), `livekit-image` (pulls the LiveKit image).
 
-To add a package, add it to the root `workspaces`, copy an existing `web-<package>.yml` for its name and flags, and give it a `test:ci` if it has tests. `scripts/web-workflows.test.ts` fails until every workspace package has exactly one caller, and every caller names a workspace package.
+**Affected packages.** Each shard runs `scripts/web-ci.ts plan`, which asks `scripts/web-affected.ts` for the packages the PR's diff affects; pushes to `master` and dispatches take every package. A package is affected when a file under its directory changed; when a workspace package it depends on is affected, transitively (`workspace:*` in `dependencies` or `devDependencies`); or when a global input changed: root `package.json`, `bun.lock`, `bunfig.toml`, `flake.nix`, `flake.lock`, `web.yml`, `storybook.yml`, `build-gate.yml`, `scripts/web-affected.ts`, `scripts/web-ci.ts` or `scripts/web-package-boundary.ts`.
+
+**Sharding.** The affected packages are sorted by name; unit suites go whole to shard `index mod 3`, and every affected package's component specs are pooled, sorted and dealt one by one the same way. A shard installs Cypress, builds Rust fixtures or pulls the LiveKit image only when its own share needs them. A shard with nothing to run passes without running anything. Each shard publishes its JUnit XML as a `web shard i report` check (not the job's name) and uploads it as `junit-web-shard-i`.
+
+`scripts/web-workflows.test.ts` pins this shape: no `web-*.yml` per-package workflow, `web.yml` with the build, lint and three shard checks, `storybook.yml` with `Storybook build`.
 
 ## Generated code
 
@@ -329,7 +342,7 @@ deliberately, and each exclusion is coverage you still have to get locally:
 | `sandbox_runner_stdio_acceptance::echoes_a_message_over_sandbox_service_served_over_stdio` | Fails unprivileged with "tool ipc server exited before bind" even with the runner binary staged; survived two retries. Only this one test is skipped — the other two in the binary pass. Tracked in `docs/dev/todo/`; the intended fix is a VM-backed job, not a permanent exclusion |
 | Cypress **e2e** specs | Storybook build plus a real ghostty WebGL context; not yet verified on a runner |
 | `tddy-desktop` tests | It has none that run without Tauri; its check only installs the workspace. Its front end is tddy-web's bundle, which its `package.json` does not depend on, so a tddy-web change does not run its check (`docs/dev/todo/2026-11-07-desktop-check-does-not-follow-the-tddy-web-bundle.md`) |
-| Web checks on a Rust-only change | `web / tddy-livekit-rpc-web tests` execs `echo_server` and `web / tddy-rust-typescript-tests tests` spawns `tddy-coder`, but the detector sees only JS workspace paths, so a change to those crates runs neither (`docs/dev/todo/2026-11-07-web-checks-ignore-the-rust-binaries-they-exec.md`) |
+| Web checks on a Rust-only change | `tddy-livekit-rpc-web`'s Cypress specs exec `echo_server` and `tddy-rust-typescript-tests` spawns `tddy-coder`, but the detector sees only JS workspace paths, so a change to those crates runs neither (`docs/dev/todo/2026-11-07-web-checks-ignore-the-rust-binaries-they-exec.md`) |
 
 The Rust exclusions live in `.config/nextest.toml` under `[profile.ci]`
 `default-filter`, each with its reason. Keep that list short — every entry is a
@@ -572,9 +585,9 @@ CI reports status but does not block merges until a ruleset says so. The
 - `Rust lint`
 - `Rust tests`
 - `Rust build`
-- `web / <package> tests`, for each of the seven JS workspace packages ([Web package checks](#web-package-checks))
+- `Web build`, `Web lint`, `Web tests shard 1/3`, `Web tests shard 2/3`, `Web tests shard 3/3` ([Web checks](#web-checks))
 
-Until the per-package checks land, the ruleset requires `Web tests` in their place. It is edited when that change merges, not before: an earlier edit would block every open PR, none of which carries the new names yet.
+`Storybook build` is not required.
 
 Do **not** add `VM boot control` or `Cloudinit VM boot` to that list yet — they
 are still being proven out, and a required check that flakes on QEMU would block
@@ -612,13 +625,11 @@ gh api -X POST repos/uppin/tddy-coder/rulesets --input - <<'JSON'
           { "context": "Rust lint" },
           { "context": "Rust build" },
           { "context": "Rust tests" },
-          { "context": "web / tddy-web tests" },
-          { "context": "web / tddy-livekit-rpc-web tests" },
-          { "context": "web / tddy-rpc-web tests" },
-          { "context": "web / tddy-tauri-web tests" },
-          { "context": "web / tddy-desktop tests" },
-          { "context": "web / tddy-rust-typescript-tests tests" },
-          { "context": "web / tddy-connectrpc-testkit tests" }
+          { "context": "Web build" },
+          { "context": "Web lint" },
+          { "context": "Web tests shard 1/3" },
+          { "context": "Web tests shard 2/3" },
+          { "context": "Web tests shard 3/3" }
         ]
       }
     }

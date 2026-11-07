@@ -52,7 +52,7 @@ function importsOfTheOldName(): Array<[string, string[]]> {
 }
 
 describe("the LiveKit RPC transport package", () => {
-  test("is named tddy-livekit-rpc-web and has its own web workflow", () => {
+  test("is named tddy-livekit-rpc-web", () => {
     // Given
     const manifest = join(TRANSPORT_DIR, "package.json");
 
@@ -61,7 +61,6 @@ describe("the LiveKit RPC transport package", () => {
 
     // Then
     expect(name).toBe("tddy-livekit-rpc-web");
-    expect(existsSync(join(REPO_ROOT, ".github/workflows/web-tddy-livekit-rpc-web.yml"))).toBe(true);
   });
 
   test("no file reaches a transport export through tddy-livekit-web", () => {

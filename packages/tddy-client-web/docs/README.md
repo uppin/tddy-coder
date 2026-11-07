@@ -98,8 +98,8 @@ imports it):
 ## Boundary and checks
 
 `src/packageBoundary.test.ts` (via `scripts/web-package-boundary.ts`) forbids imports of `tddy-web` and
-`livekit-client`. CI: `.github/workflows/web-tddy-client-web.yml` (shared `web-package.yml`) runs
-`bun test src`, `tsc --noEmit` and `cypress/component/MountWithClients.cy.tsx`.
+`livekit-client`. CI: `.github/workflows/web.yml` runs `tsc --noEmit` (`Web lint`), `bun test src` and
+`cypress/component/MountWithClients.cy.tsx` (`Web tests` shards).
 
 ## Changesets
 
