@@ -3,7 +3,7 @@
 **Date**: 2026-11-07
 **Status**: 🚧 In Progress
 **Type**: Architecture Change
-**Complexity**: 5 — several row-4 signals: the largest move (~15k lines, ~90 specs), composes seven sibling packages, cuts the last upward reaches from `rpc`/`hooks`, an inherited oversized-file record; boundary may need a split (see Decisions)
+**Complexity**: 4 (re-scored after the split; was 5) — several row-4 signals: the largest move (~15k lines, ~90 specs), composes seven sibling packages, cuts the last upward reaches from `rpc`/`hooks`, an inherited oversized-file record; boundary may need a split (see Decisions)
 
 **Stack**: `#web-split` 14/16 — branch `feature/web-split/session`, base `feature/web-split/prstack`
 
@@ -76,6 +76,32 @@ implementing one here collides with the PR that owns it.
 | `n10` chat, `n11` hosts, `n12` workspace, `n13` prstack | their packages | the session layout composes them | move them |
 
 ## Draft PR contract
+
+**Re-planned 2026-11-07 (commit 3) — split into four nodes.** This node's first [G] stopped on its boundary
+warning before moving code: 150 files / 19,076 lines, 156 specs, ~40 reaches into tddy-web the plan never named
+(`routing/useAppLocation`, `routing/appRoutes`, `shell/AppShell`, `HostStartPassphrasePrompt`, 14 `lib/`, 7 `utils/`,
+8 `rpc/` modules, `hooks/authProvider`, `GhosttyTerminalSession`, `EnqueuedInputOverlay`, `test-utils`), and 10 specs
+importing LiveKit testkits. The developer chose to split by capability:
+
+- **This node (15a): session seams and helpers.**
+  - Seams: session code reads the app location through `tddy-client-web`'s `NavigationPort` (`useAppLocation`) and
+    `appRoutes` params through it; `AppShell` and `HostStartPassphrasePrompt` reach session code only through slots the
+    app fills (create-session already has `StartPassphraseProvider` — reuse it).
+  - Helpers into `tddy-session-web`: `lib/{sessionIndicator, sessionParticipantMetadata, shellQuote, toolShortcuts,
+    sessionsRefreshBridge, clipboard}`, `utils/{crossHostSessions, projectHomeGroups, sessionProjectGroups,
+    sessionDrawerLabel, sessionSort, sessionDisplay, sessionSelection, connectionStatusForSession, …}`,
+    `rpc/{trafficMeter, uploadProgress, daemonTransportFlavour, livekitPing, useSessionNotifications}` — final list by
+    consumers; a helper with a non-session consumer goes to the package that consumer can reach.
+  - No session component moves here.
+- `feature/web-split/session-runtime` (#860), `session-inspector` (#861), `session-drawer` (#862) move the components
+  and their specs.
+- LiveKit-importing session specs use the port doubles (developer's choice), in whichever node moves them.
+
+Commit 3 moves the 156 specs commit 2 had moved **back** to tddy-web (byte-identical to the base), keeps the package
+skeleton, and replaces the red tests: `src/sessionSeams.test.ts` (3 seam rules) and the boundary test's surface list
+(the helpers' real export names). Red: 4 failing.
+
+Earlier contract (commit 2):
 
 **As pushed (commit 2):** skeleton, workflow, boundary rule; **156** specs `git mv`'d — every remaining
 `tddy-web` component spec that mounts session code, **including** the specs earlier nodes left behind because

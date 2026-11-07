@@ -21,6 +21,16 @@ describe("tddy-session-web package boundary", () => {
     const exported = Object.keys(require("../src/index.ts"));
 
     // Then
-    expect(exported).toEqual(expect.arrayContaining(["SessionsDrawerScreen", "SessionDrawer", "SessionRuntime", "SessionMainPane", "SessionTerminalTabs", "GrpcSessionTerminal", "SessionInspectorDrawer", "SessionAgentRosterPane", "SessionAgentTree", "WorktreeCodePane", "sessionNotificationRegistry"]));
+    expect(exported).toEqual(
+      expect.arrayContaining([
+        "sessionIndicatorFor",
+        "parseSessionParticipantMetadata",
+        "shellQuotePath",
+        "keySequenceToBytes",
+        "requestSessionsRefresh",
+        "TrafficMeterRegistry",
+        "useSessionNotifications",
+      ]),
+    );
   });
 });
