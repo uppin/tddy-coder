@@ -2469,6 +2469,38 @@ mod tests {
         assert_eq!(request.conversation_id, "explore");
     }
 
+    /// The runner reads no model (`#agent-tools 24/28`): what the confined agent runs on is its
+    /// exec plan's argv, so a launcher still passing `--model` is refused rather than ignored.
+    #[test]
+    fn the_runner_refuses_a_model_flag() {
+        // Given
+        let argv = [
+            "tddy-sandbox-runner",
+            "--session-id",
+            "sess",
+            "--context-dir",
+            "/tmp/ctx",
+            "--tool-ipc-socket",
+            "/tmp/ipc.sock",
+            "--ready-marker",
+            "/tmp/ready",
+            "--stdio",
+            "--model",
+            "opus",
+        ];
+
+        // When
+        let parsed = SandboxRunnerArgs::try_parse_from(argv);
+
+        // Then
+        let refusal = parsed.expect_err("the runner has no --model flag");
+        assert_eq!(
+            refusal.kind(),
+            clap::error::ErrorKind::UnknownArgument,
+            "{refusal}"
+        );
+    }
+
     #[test]
     fn parses_repeated_pty_command_flags_including_hyphen_args() {
         let args = SandboxRunnerArgs::try_parse_from([

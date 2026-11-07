@@ -3,7 +3,8 @@
 **Date**: 2026-11-06
 **Status**: 🚧 In Progress
 **Type**: Refactor
-**Complexity**: 4 — more than one crate (agent-launch, sandbox-runner, daemon-sandbox, sandbox-app, agent-backend, coder, integration-tests); mechanical deletions, compile + clippy gated
+**Complexity**: 3 — re-scored from 4 at the contract: the bespoke ACP backends and the model-listing half were already gone, so the work is mechanical, compiler-enforced deletions across agent-launch, sandbox-runner, daemon-sandbox, sandbox-app and tddy-coder (three test-only ACP builders)
+**PR**: [#832](https://github.com/uppin/tddy-coder/pull/832)
 
 ## Initial Discovery
 
@@ -25,7 +26,9 @@ Deletions approved by the developer on 2026-11-06 ("Approve all").
 
 - **tddy-agent-launch** — delete callerless helpers and the `relaunch_jail_*` trio.
 - **tddy-sandbox-runner**, **tddy-daemon-sandbox**, **tddy-sandbox-app** — delete the runner `--model` field and its argv writers.
-- **tddy-agent-backend**, **tddy-coder**, **tddy-integration-tests**, **tddy-acp-stub** — delete `CodexAcpBackend` / `ClaudeAcpBackend` leftovers that are unreachable.
+- **tddy-coder** — delete `acp_from_spec`'s three test-only builders; move `tests/acp_backends_from_spec_acceptance.rs` onto `spec_backend_for`.
+- **tddy-integration-tests**, **tddy-acp-stub** — fix the two stale `ClaudeAcpBackend` doc comments.
+- **tddy-agent-backend** — nothing left to delete: `CodexAcpBackend`/`ClaudeAcpBackend` are gone and `backend/codex_acp.rs` + `codex_acp/oauth.rs` are live (the `CodexAcpLogin` adapter reads them).
 
 ## Related Feature Documentation
 
@@ -42,8 +45,10 @@ Delete the launch code `#agent-tools` left callerless, and close the stale recor
 - [ ] `claude_cli_spawn.rs` `create_routed_session_dir` (move `session_provider_route_tests.rs` onto a spec helper)
 - [ ] `chat.rs` `cursor_notify_env`, `resumed_cursor_notify_env`, `cursor_hook_daemon_url`
 - [ ] `relaunch_jail_steps.rs` trio + `RelaunchJailEnv`, `RelaunchedRunnerSpawn`, `RelaunchedJailBridge` (`relaunch_jail_dirs` stays — live)
-- [ ] runner `--model` field, `sandbox_plan_builder.rs:216` and `spawn.rs:459` writers, their tests
-- [ ] unreachable ACP backend leftovers (`codex_acp.rs` et al.) after a reachability check
+- [ ] runner `--model` field, `sandbox_plan_builder.rs:216` and `spawn.rs:459` writers, their tests (`params.model` at `spawn.rs:423` stays — the exec plan reads it)
+- [ ] the other runner argvs that pass `--model`: `tddy-daemon-sandbox/tests/sandbox_runner_spawn_smoke.rs:218,319` (macOS, needs built binaries) and the runner's own parse tests `runner.rs:2484,2512,2539,2566`
+- [ ] `tddy_coder::acp_from_spec` `claude_acp_backend_from_spec`, `codex_acp_backend_from_spec`, `opencode_acp_backend_from_spec` (only caller `tddy-coder/tests/acp_backends_from_spec_acceptance.rs:211-215`; move it onto `spec_backend_for`); stale `ClaudeAcpBackend` comments at `tddy-acp-stub/src/main.rs:1`, `tddy-integration-tests/tests/acp_backend_acceptance.rs:64`
+- [ ] add `use tddy_sandbox::SandboxHandle;` to `tddy-daemon-sandbox/tests/sandbox_stdio_seatbelt_acceptance.rs` (macOS-only compile error already on master)
 - [ ] stale records deleted or narrowed with measurements
 
 ## Technical Changes
@@ -72,6 +77,25 @@ against the pre-deletion baseline. One durable scan test pins that the names are
 |---|---|
 | `no_callerless_launch_helper_survives` (source scan over `tddy-agent-launch/src`) | `packages/tddy-agent-launch/tests/no_callerless_launch_helpers.rs` |
 | `the_sandbox_plan_argv_carries_no_model_flag` | `packages/tddy-daemon-sandbox/src/sandbox_plan_builder.rs` (`#[cfg(test)]`) |
+
+### Contract tests (pass 2)
+
+| Test | File:line | Status |
+|---|---|---|
+| `no_callerless_launch_helper_survives` | `packages/tddy-agent-launch/tests/no_callerless_launch_helpers.rs:184` | 🔴 red — lists the 16 surviving declarations (12 fns, 4 structs) |
+| `the_scan_finds_a_declaration_in_each_shape_and_skips_comments_calls_and_longer_names` | same file:119 | ✅ guard — passes |
+| `the_scan_reads_the_live_relaunch_steps_it_must_leave_in_place` | same file:159 | ✅ guard — passes (`relaunch_managed_workflow`, `relaunch_jail_dirs.rs` stay) |
+| `the_sandbox_plan_argv_carries_no_model_flag` | `packages/tddy-daemon-sandbox/src/sandbox_plan_builder.rs:308` | 🔴 red — argv carries `"--model", ""` |
+| `the_runner_refuses_a_model_flag` | `packages/tddy-sandbox-runner/src/runner.rs:2475` | 🔴 red — `--model opus` parses instead of `UnknownArgument` |
+
+**Recorded baseline (no test):** after the ACP builder deletion, `rg 'claude_acp_backend_from_spec|codex_acp_backend_from_spec|opencode_acp_backend_from_spec' packages/tddy-coder/src` is empty.
+
+### Baseline (pass 2, 2026-11-07, scoped)
+
+Tests run for tddy-agent-launch, tddy-sandbox-runner, tddy-daemon-sandbox, tddy-sandbox-app; `cargo check --all-targets` for tddy-agent-backend, tddy-coder, tddy-integration-tests, tddy-acp-stub. Pre-existing failures (not this node's):
+- parents' contract reds: n21 #829 — 4 agent-launch `cli_session_pointer_unit_tests`; n22 #830 — 2 sandbox-app `agent_from_spec_acceptance`; n23 #831 — 4 agent-launch `session_start_deadline`.
+- binaries not built (`./test` builds them): agent-launch `clone_askpass_acceptance` (9), sandbox-app `sandboxed_codebase_seatbelt_acceptance` (16), daemon-sandbox `action_sandbox_acceptance`, `sandbox_runner_spawn_smoke`, `sandbox_session_stdio_acceptance` (1 each).
+- macOS-only compile error on master: `tddy-daemon-sandbox/tests/sandbox_stdio_seatbelt_acceptance.rs:33,37,41` — `SandboxHandle` not imported; fixed in this node at green (Scope).
 
 ## Responsibility
 
@@ -103,6 +127,10 @@ The first push after this plan: the two acceptance tests above, failing.
 ## Decisions & Trade-offs
 
 - An ACP backend is deleted only after a reachability check from a binary; a reachable one moves to `feature/agent-tools/acp-subagent-leftovers`.
+- 2026-11-07 (user, at 6e): the three `acp_from_spec` builders count as approved unreachable leftovers — deleted, verified by the recorded baseline above, no new test.
+- 2026-11-07 (user, at 6e): green also edits the extra `--model` runner argvs; `params.model` stays.
+- 2026-11-07 (user, at 6e): the macOS-only `SandboxHandle` import fix lands in this node.
+- A third red, `the_runner_refuses_a_model_flag`, pins that the flag is gone from the runner itself, not only from one writer.
 
 ## TODO
 
@@ -110,10 +138,10 @@ The first push after this plan: the two acceptance tests above, failing.
 - [x] Cross-check `packages/*/docs/code-issues/` and `docs/dev/todo/` for items this change touches (Step 2b)
 - [x] Create/update PRD documentation
 - [x] Create changeset (this document)
-- [ ] Create failing acceptance tests
-- [ ] Run acceptance tests (verify they fail)
-- [ ] USER REVIEW — acceptance tests
-- [ ] TDD Red — write failing unit/integration tests
+- [x] Create failing acceptance tests
+- [x] Run acceptance tests (verify they fail)
+- [x] USER REVIEW — acceptance tests
+- [x] TDD Red — write failing unit/integration tests
 - [ ] TDD Green — implement with quality code
 - [ ] Update documentation with progress
 - [ ] Repeat Red→Green→Update cycle until feature complete
