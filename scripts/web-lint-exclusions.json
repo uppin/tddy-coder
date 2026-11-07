@@ -20,6 +20,11 @@
     "todo": "docs/dev/todo/2026-11-07-tauri-web-transport-log-is-dropped.md"
   },
   {
+    "package": "tddy-workspace-web",
+    "reason": "43 errors in the Cypress support and specs moved from tddy-web (plain-object fixtures where generated message types are expected, a Sinon agent typed as a callback)",
+    "todo": "docs/dev/todo/2026-11-07-workspace-web-specs-do-not-typecheck.md"
+  },
+  {
     "package": "tddy-rust-typescript-tests",
     "reason": "tsconfig names the 'bun-types' type definitions, which are not installed (TS2688)",
     "todo": "docs/dev/todo/2026-11-07-rust-typescript-tests-does-not-typecheck.md"
