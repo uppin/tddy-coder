@@ -1,7 +1,7 @@
 //! The session pointer's owner (`#agent-tools 21/28`): a backend does not overwrite a pointer that
 //! another live session holds, and still replaces one its owner left behind.
 //!
-//! Changeset: `docs/dev/1-WIP/2026-11-06-session-pointer-ownership.md`.
+//! Changeset: `docs/dev/changesets/2026-11-07-session-pointer-ownership.md`.
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};

@@ -94,7 +94,9 @@ remote `tddy-daemon`) so that my agent can plan, read, write, and test code in a
 
 ### tddy-tools dynamic MCP proxy
 
-15. With `TDDY_REMOTE_*` env vars set and a running relay daemon, `tddy-tools --mcp` reports a
+15. With `TDDY_REMOTE_*` set — in its environment, or adopted from the `remote` map of the session
+    pointer it finds at or above its cwd (a headless Codex conversation's, in the conversation
+    directory) — and a running relay daemon, `tddy-tools --mcp` reports a
     `tools/list` result that includes `approval_prompt`, `github_create_pull_request`, and
     `github_update_pull_request` (static) **plus** exactly the tools returned by `ListExecTools` —
     no extra tools, no hardcoded remote-tool names.

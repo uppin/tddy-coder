@@ -17,6 +17,7 @@
 | 2026-11-03 | 547 → 563 | #798 (`#agent-tools` 9/12): Cursor, Codex and Oz turns render from their specs; `headless_driver/argv.rs` stays |
 | 2026-11-05 | 563 → 477 | #821 (`#agent-tools` 15/19), green: `argv.rs`, the renderer-less turn, `HeadlessHarness` and the driver's own spawn code deleted (the spawn moved to `backend/turn_process.rs`). Under budget |
 | 2026-11-05 | 477 → 509 | **regressed** at `/validate-changes` on #821: a conversation turn's deadline (`HeadlessCommand::turn_deadline`, the overrun arms of both `select!` loops, `end_overrun`); `STDERR_GRACE` moved out to `turn_process` |
+| 2026-11-07 | 509 → 505 | better by 4 in #829 (`#agent-tools` 21/28): the `TODO(headless-driver)` on `HeadlessCommand::env` went with the tool-server env it described, `headless_server` passes `cwd`. Still over; not grown, so not split here |
 
 ## What would close it
 

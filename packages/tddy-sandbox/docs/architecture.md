@@ -223,7 +223,7 @@ Product behaviour is [sandboxed-codebase-mode.md](../../../docs/ft/coder/sandbox
 | `env` | Clean environment (`HOME`/`TMPDIR` redirected into scratch) |
 | `profile_path` | Rendered SBPL file path |
 | `loopback_allow_ports` | Loopback TCP ports allowed in SBPL (gRPC + egress shim) |
-| `ipc_socket` | Short out-of-tree AF_UNIX path for tool IPC |
+| `ipc_socket` | Short out-of-tree AF_UNIX path for tool IPC: `SandboxSpec::short_ipc_socket_path(session_id)` is `<canonical temp dir>/tddy-<FNV-1a 64 of the whole session id, 16 hex digits>-<daemon pid>.sock` — the whole id, since a UUIDv7's leading characters are its millisecond timestamp and two sessions started together share them; fixed-length, so any session id stays under macOS's 104-byte `sun_path` |
 
 ## Sandbox builder (explicit plan)
 

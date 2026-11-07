@@ -312,7 +312,7 @@ route** — none has a permission-prompt tool, so none asks:
 |---|---|
 | `cursor` | `<worktree>/.cursor/mcp.json` (`{"mcpServers": {...}}`, `0600`), listed in the repository's `info/exclude` before it is written so the credential is never offered to a commit. An existing `.cursor/mcp.json` in the worktree is refused by name, never overwritten; a worktree that is not a git checkout is refused |
 | `oz` | `--mcp <path>`, an owner-only file under `headless/<conversation>/` with the servers at the top level |
-| `codex` | `-c mcp_servers.tddy-tools.command=…`, `.args=[…]`, `.env_vars=[…]`: the variables' values are in the CLI's own environment and only their names are on the argv |
+| `codex` | `-c mcp_servers.tddy-tools.command=…`, `.args=[…]`, `.cwd="<conversation dir>"`, and no `env_vars`: the conversation id and its credential are in `headless/<conversation>/.tddy/session.json` (owner-only, removed with the directory), the session pointer the server finds from its `cwd`, so the CLI's environment carries no `TDDY_*` variable and no credential is on the argv |
 
 **What a headless conversation leaves on disk.** Each `headless/<conversation>/` directory is tagged
 with the creating daemon's durable instance id (`daemon-instance`; the configured
