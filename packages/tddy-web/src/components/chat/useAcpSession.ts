@@ -13,7 +13,7 @@ import {
   type AcpClientMessage,
   type ModelSessionTarget,
   type ToolCallUpdate,
-} from "../../gen/tddy/acp/v1/acp_pb";
+} from "tddy-client-web/gen/tddy/acp/v1/acp_pb";
 import { tddyDebug } from "../../lib/debugMask";
 import { toolEntryText, toolStatusOf } from "./toolCallPresentation";
 import type {

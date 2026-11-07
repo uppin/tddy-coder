@@ -24,7 +24,7 @@ import { DaemonSelectorConnected } from "../../src/components/shell/DaemonSelect
 import { SelectedDaemonProvider } from "../../src/rpc/selectedDaemon";
 import { daemonSelectorPage } from "../support/pages/daemonSelectorPage";
 import { ConnectionProviders, ConnectionProviderRegistry } from "../../src/rpc/connections/registry";
-import type { ConnectionCapability, HostConnection } from "../../src/rpc/connections/types";
+import type { ConnectionCapability, HostConnection } from "tddy-client-web/connections/types";
 import { HostPresenceRoom } from "../../src/rpc/hostDirectory/presenceRoom";
 import { aFakeCommonRoom } from "../support/livekit/fakeCommonRoom";
 import { byTestId } from "../support/testIds";

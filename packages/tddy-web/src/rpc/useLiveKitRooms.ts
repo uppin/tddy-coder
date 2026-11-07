@@ -13,7 +13,7 @@
 
 import { useEffect, useState } from "react";
 import { ConnectError } from "@connectrpc/connect";
-import { LiveKitService } from "../gen/livekit_pb";
+import { LiveKitService } from "tddy-client-web/gen/livekit_pb";
 import { useDaemonClient } from "./selectedDaemon";
 import { useAuthContext } from "../hooks/authProvider";
 import {

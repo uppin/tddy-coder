@@ -1,5 +1,5 @@
 import type { Client } from "@connectrpc/connect";
-import type { SessionAgentService } from "../../gen/session_agents_pb";
+import type { SessionAgentService } from "tddy-client-web/gen/session_agents_pb";
 import { Button } from "../ui/button";
 import type { RosterHalf } from "./sessionRosterHalf";
 import {

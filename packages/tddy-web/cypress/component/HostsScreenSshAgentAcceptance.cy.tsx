@@ -15,7 +15,7 @@ import {
   HostSshAgentSchema,
   ProbeOutcome,
   SshAgentKeySchema,
-} from "../../src/gen/host_pb";
+} from "tddy-client-web/gen/host_pb";
 import { HostRowSshAgent } from "../../src/components/hosts/HostRowSshAgent";
 import { mountWithRpc } from "../support/rpc/inMemory";
 import { withSelectedDaemon } from "../support/rpc/withSelectedDaemon";

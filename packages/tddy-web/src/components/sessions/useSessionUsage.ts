@@ -29,7 +29,7 @@ import {
   ClientMessageSchema,
   TddyRemote,
   type ClientMessage,
-} from "../../gen/tddy/v1/remote_pb";
+} from "tddy-client-web/gen/tddy/v1/remote_pb";
 import { emptyUsage, type ConversationUsage } from "./sessionUsage";
 import { rpcFailureText } from "../../rpc/rpcFailure";
 

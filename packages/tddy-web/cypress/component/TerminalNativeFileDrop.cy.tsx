@@ -16,7 +16,7 @@
 
 import React from "react";
 import { anInMemoryRpcBackend, type InMemoryRpcBackend } from "tddy-connectrpc-testkit";
-import { SessionFilesService } from "../../src/gen/session_files_pb";
+import { SessionFilesService } from "tddy-client-web/gen/session_files_pb";
 import { TerminalFileDropZone } from "../../src/components/connection/TerminalFileDropZone";
 import { NativeFileDropProvider } from "../../src/components/connection/nativeFileDrop";
 import { UploadProgressProvider } from "../../src/rpc/uploadProgress";

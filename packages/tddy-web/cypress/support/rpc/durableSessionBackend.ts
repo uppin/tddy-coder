@@ -13,9 +13,9 @@
 
 import { anInMemoryRpcBackend, type InMemoryRpcBackend } from "tddy-connectrpc-testkit";
 import { ConnectError, Code } from "@connectrpc/connect";
-import { AuthService } from "../../../src/gen/auth_pb";
-import { SessionService } from "../../../src/gen/session_pb";
-import { TerminalSessionService } from "../../../src/gen/terminal_session_pb";
+import { AuthService } from "tddy-client-web/gen/auth_pb";
+import { SessionService } from "tddy-client-web/gen/session_pb";
+import { TerminalSessionService } from "tddy-client-web/gen/terminal_session_pb";
 import { aGitHubUser } from "./responses";
 
 type TokenKind = "access" | "refresh";

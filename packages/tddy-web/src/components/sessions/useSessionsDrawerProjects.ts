@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import type { Client } from "@connectrpc/connect";
-import { ProjectService, type ProjectEntry } from "../../gen/project_pb";
+import { ProjectService, type ProjectEntry } from "tddy-client-web/gen/project_pb";
 import { useHostLabel, useSelectedDaemon } from "../../rpc/selectedDaemon";
 import { hostNotConnectedText, rpcFailureText } from "../../rpc/rpcFailure";
 

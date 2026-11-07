@@ -15,8 +15,8 @@
 
 import React from "react";
 import { servedAgentWire } from "../support/servedAgents";
-import { CatalogService } from "../../src/gen/catalog_pb";
-import { ProjectService } from "../../src/gen/project_pb";
+import { CatalogService } from "tddy-client-web/gen/catalog_pb";
+import { ProjectService } from "tddy-client-web/gen/project_pb";
 import { Room } from "livekit-client";
 import { createClient, ConnectError, Code } from "@connectrpc/connect";
 import { create } from "@bufbuild/protobuf";
@@ -28,9 +28,9 @@ import {
   StartPhase_Step,
   StartSessionEventSchema,
   type StartSessionRequest,
-} from "../../src/gen/session_pb";
-import { SessionFilesService } from "../../src/gen/session_files_pb";
-import { WorktreeService } from "../../src/gen/worktree_pb";
+} from "tddy-client-web/gen/session_pb";
+import { SessionFilesService } from "tddy-client-web/gen/session_files_pb";
+import { WorktreeService } from "tddy-client-web/gen/worktree_pb";
 import type { DaemonHost } from "../../src/lib/participantRole";
 import { SelectedDaemonProvider } from "../../src/rpc/selectedDaemon";
 import { createSessionPage } from "../support/pages/createSessionPage";

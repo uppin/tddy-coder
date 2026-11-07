@@ -1,4 +1,4 @@
-import type { SessionEntry } from "../../gen/session_pb";
+import type { SessionEntry } from "tddy-client-web/gen/session_pb";
 import { InlineError } from "../ui/inline-error";
 import { inputClass, labelClass } from "./createSessionFormStyles";
 

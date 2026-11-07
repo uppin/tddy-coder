@@ -1,5 +1,5 @@
 import React from "react";
-import type { ProjectEntry } from "../../gen/project_pb";
+import type { ProjectEntry } from "tddy-client-web/gen/project_pb";
 import type { StartSessionRequestInit } from "../../hooks/useSessionAttachments";
 import { useHostLabel } from "../../rpc/selectedDaemon";
 import { hostNotConnectedText } from "../../rpc/rpcFailure";

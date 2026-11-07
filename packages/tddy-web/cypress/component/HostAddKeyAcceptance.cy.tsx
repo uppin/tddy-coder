@@ -17,7 +17,7 @@ import {
   HostSshAgentSchema,
   ProbeOutcome,
   type HostSshAgent,
-} from "../../src/gen/host_pb";
+} from "tddy-client-web/gen/host_pb";
 import { HostAddKeyAction } from "../../src/components/hosts/HostAddKeyAction";
 import { HostPassphraseDialog } from "../../src/components/hosts/HostPassphraseDialog";
 import type { KeyPinVerdict } from "../../src/lib/hostKeyPinning";

@@ -1,4 +1,4 @@
-import { AgentKind } from "../../gen/types_pb";
+import { AgentKind } from "tddy-client-web/gen/types_pb";
 
 export interface AgentKindBadgeProps {
   /** What runs the agent's turns, as the catalog row or roster entry says. */

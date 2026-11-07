@@ -1,6 +1,6 @@
 import React, { useState } from "react";
-import { CatalogService } from "../../gen/catalog_pb";
-import { AgentKind } from "../../gen/types_pb";
+import { CatalogService } from "tddy-client-web/gen/catalog_pb";
+import { AgentKind } from "tddy-client-web/gen/types_pb";
 import { safeTestIdPart } from "../../lib/testId";
 import { useSelectedDaemon } from "../../rpc/selectedDaemon";
 import { useHttpClient } from "../../rpc/transportProvider";

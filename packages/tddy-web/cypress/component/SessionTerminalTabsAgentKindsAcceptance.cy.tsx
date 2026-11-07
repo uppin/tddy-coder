@@ -12,7 +12,7 @@
 import React from "react";
 import { Code } from "@connectrpc/connect";
 import { SessionsDrawerScreen } from "../../src/components/sessions/SessionsDrawerScreen";
-import { TerminalSessionService } from "../../src/gen/terminal_session_pb";
+import { TerminalSessionService } from "tddy-client-web/gen/terminal_session_pb";
 import { withSelectedDaemon } from "../support/rpc/withSelectedDaemon";
 import { mountWithRpc } from "../support/rpc/inMemory";
 import {

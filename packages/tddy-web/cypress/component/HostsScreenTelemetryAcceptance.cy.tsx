@@ -29,7 +29,7 @@ import {
   type SessionServiceScenario,
 } from "../support/rpc/daemonSessionHostBackend";
 import { HostsAppPage } from "../../src/components/hosts/HostsAppPage";
-import { HostService, type KnownHostEntry } from "../../src/gen/host_pb";
+import { HostService, type KnownHostEntry } from "tddy-client-web/gen/host_pb";
 import { HostRowTelemetry } from "../../src/components/hosts/HostRowTelemetry";
 import { mountWithRpc } from "../support/rpc/inMemory";
 import { withSelectedDaemon } from "../support/rpc/withSelectedDaemon";

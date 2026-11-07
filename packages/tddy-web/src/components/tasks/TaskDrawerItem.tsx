@@ -1,5 +1,5 @@
 import React, { useCallback, useState } from "react";
-import { TaskService, TaskStatusProto, type TaskInfo } from "../../gen/tasks_pb";
+import { TaskService, TaskStatusProto, type TaskInfo } from "tddy-client-web/gen/tasks_pb";
 import { useDaemonClient } from "../../rpc/selectedDaemon";
 import { Button } from "../ui/button";
 

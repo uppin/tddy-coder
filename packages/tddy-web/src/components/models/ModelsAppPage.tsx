@@ -1,5 +1,5 @@
 import { useCallback, useState } from "react";
-import { ModelLoadState } from "../../gen/models_pb";
+import { ModelLoadState } from "tddy-client-web/gen/models_pb";
 import { useSelectedDaemon } from "../../rpc/selectedDaemon";
 import type { AssistantRow, ModelRow } from "../../utils/mergeRegistryEntries";
 import { AppShell } from "../shell/AppShell";

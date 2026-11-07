@@ -6,7 +6,7 @@
  * state, so an operator who just saved a URL can tell a fresh failure from an old one.
  */
 
-import { IntegrationState, type IntegrationStatus } from "../../gen/daemon_config_pb";
+import { IntegrationState, type IntegrationStatus } from "tddy-client-web/gen/daemon_config_pb";
 
 /** Whole seconds under a minute, whole minutes under an hour, whole hours after that. */
 function sinceText(sinceUnixMs: bigint, now: Date): string {

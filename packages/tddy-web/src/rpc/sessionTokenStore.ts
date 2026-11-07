@@ -22,7 +22,7 @@
  */
 
 import { Code, ConnectError, type Client } from "@connectrpc/connect";
-import { AuthService, VaultState } from "../gen/auth_pb";
+import { AuthService, VaultState } from "tddy-client-web/gen/auth_pb";
 
 /** Persistence seam for the token pair (production backs this with `localStorage`). */
 export interface TokenStorage {

@@ -21,9 +21,9 @@
 import { createClient, type Client, type Transport } from "@connectrpc/connect";
 import type { DescService } from "@bufbuild/protobuf";
 import { ConnectionState, type Room } from "livekit-client";
-import { TerminalService } from "../../../gen/terminal_pb";
-import { TerminalSessionService } from "../../../gen/terminal_session_pb";
-import type { TokenService } from "../../../gen/token_pb";
+import { TerminalService } from "tddy-client-web/gen/terminal_pb";
+import { TerminalSessionService } from "tddy-client-web/gen/terminal_session_pb";
+import type { TokenService } from "tddy-client-web/gen/token_pb";
 import { capabilitiesForHint } from "../sessionAttachment";
 import type { SessionAttachmentHint, SessionConnection } from "../session";
 import type { TerminalFeed, TerminalOptions } from "../terminal";

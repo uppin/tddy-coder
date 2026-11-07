@@ -22,7 +22,7 @@ import { createPortal } from "react-dom";
 import type { Client } from "@connectrpc/connect";
 import { create, toBinary } from "@bufbuild/protobuf";
 import { Code, ConnectError } from "@connectrpc/connect";
-import { HostPromptKind, HostService } from "../../gen/host_pb";
+import { HostPromptKind, HostService } from "tddy-client-web/gen/host_pb";
 import {
   DesktopAuthMethod,
   DesktopCredentialAnswerSchema,
@@ -30,7 +30,7 @@ import {
   ScreenSharingService,
   type ScreenSharingTarget,
   type StartStreamResponse,
-} from "../../gen/screen_sharing_pb";
+} from "tddy-client-web/gen/screen_sharing_pb";
 import { useAuthContext } from "../../hooks/authProvider";
 import { useCommonRoom } from "../../hooks/useCommonRoom";
 import { encryptForHost } from "../../lib/encryptForHost";

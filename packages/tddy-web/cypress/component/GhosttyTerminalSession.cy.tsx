@@ -10,7 +10,7 @@
 
 import React from "react";
 import { GhosttyTerminalSession } from "../../src/components/GhosttyTerminalSession";
-import type { TerminalFrame } from "../../src/rpc/connections/terminal";
+import type { TerminalFrame } from "tddy-client-web/connections/terminal";
 import { UploadProgressProvider } from "../../src/rpc/uploadProgress";
 import { byTestId, TEST_IDS } from "../support/testIds";
 import { NativeFileDropProvider } from "../../src/components/connection/nativeFileDrop";

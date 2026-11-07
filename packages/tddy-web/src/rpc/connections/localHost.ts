@@ -35,18 +35,18 @@ import {
   type WebviewIpcBridge,
   type WebviewIpcHost,
 } from "tddy-tauri-web";
-import { TerminalSessionService } from "../../gen/terminal_session_pb";
+import { TerminalSessionService } from "tddy-client-web/gen/terminal_session_pb";
 import { tddyDebug } from "../../lib/debugMask";
 import { daemonTransportFlavour, type TauriHostWindow } from "../daemonTransportFlavour";
-import type { SessionAttachmentHint, SessionConnection } from "./session";
-import type { TerminalFeed, TerminalOptions } from "./terminal";
+import type { SessionAttachmentHint, SessionConnection } from "tddy-client-web/connections/session";
+import type { TerminalFeed, TerminalOptions } from "tddy-client-web/connections/terminal";
 import { openDaemonTerminalFeed, TerminalResumePoint } from "./terminalFeed";
 import type {
   ConnectionCapability,
   ConnectionProvider,
   ConnectionStatus,
   HostConnection,
-} from "./types";
+} from "tddy-client-web/connections/types";
 
 /** The id this provider registers under. Precedence is stated against it, so it is a constant. */
 export const IPC_PROVIDER_ID = "ipc";

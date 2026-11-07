@@ -21,7 +21,7 @@ import {
   TerminalSessionService,
   type SessionTerminalInput,
   type SessionTerminalOutput,
-} from "../../src/gen/terminal_session_pb";
+} from "tddy-client-web/gen/terminal_session_pb";
 import { GrpcSessionTerminal } from "../../src/components/sessions/GrpcSessionTerminal";
 import { UploadProgressProvider } from "../../src/rpc/uploadProgress";
 import { byTestId, TEST_IDS } from "../support/testIds";

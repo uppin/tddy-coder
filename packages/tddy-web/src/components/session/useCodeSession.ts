@@ -12,7 +12,7 @@ import {
   type CodeQueryKind,
   type CodeSessionEvent,
   type CodeSessionRequest,
-} from "../../gen/code_navigation_pb";
+} from "tddy-client-web/gen/code_navigation_pb";
 import type { CodePosition } from "./codeNavigationApi";
 import { codeIndexStatusOf, type CodeIndexStatus } from "./useCodeIndexProgress";
 import { StreamReopener, streamEndOf, type StreamEnd } from "./streamReopening";

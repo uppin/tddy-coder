@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import type { GitHubUser } from "../gen/auth_pb";
+import type { GitHubUser } from "tddy-client-web/gen/auth_pb";
 import { Button } from "@/components/ui/button";
 import { useAuthContext } from "../hooks/authProvider";
 

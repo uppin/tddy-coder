@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { TaskService, type TaskInfo } from "../../gen/tasks_pb";
+import { TaskService, type TaskInfo } from "tddy-client-web/gen/tasks_pb";
 import { useDaemonClient } from "../../rpc/selectedDaemon";
 
 /** Floor applied to every reconnect, including a clean stream end, so a stream that keeps ending

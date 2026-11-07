@@ -11,7 +11,7 @@ import { createClient } from "@connectrpc/connect";
 import { createConnectTransport } from "@connectrpc/connect-web";
 import { create, toBinary } from "@bufbuild/protobuf";
 import { anInMemoryRpcBackend } from "tddy-connectrpc-testkit";
-import { TokenService, GenerateTokenRequestSchema, GenerateTokenResponseSchema } from "../gen/token_pb";
+import { TokenService, GenerateTokenRequestSchema, GenerateTokenResponseSchema } from "tddy-client-web/gen/token_pb";
 
 import { createTrafficInterceptor } from "./httpTrafficInterceptor";
 import { TrafficMeter } from "./trafficMeter";

@@ -18,7 +18,7 @@ import {
   LinkState,
   type AccountsService,
   type PollLinkAccountResponse,
-} from "../../gen/accounts_pb";
+} from "tddy-client-web/gen/accounts_pb";
 import type { LinkAttempt } from "./AccountsScreen";
 import { reasonOf } from "./rpcReason";
 

@@ -18,7 +18,7 @@
  */
 
 import { useEffect, useState } from "react";
-import { ActivityService, SessionNotificationKind } from "../gen/activity_pb";
+import { ActivityService, SessionNotificationKind } from "tddy-client-web/gen/activity_pb";
 import { useDaemonClient } from "./selectedDaemon";
 import { useAuthContext } from "../hooks/authProvider";
 import { sessionNotificationRegistry } from "../components/sessions/sessionNotificationRegistry";

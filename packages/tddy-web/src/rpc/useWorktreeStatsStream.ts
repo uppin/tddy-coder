@@ -20,7 +20,7 @@ import {
   WorktreeService,
   WorktreeSizeStatus,
   type WorktreeRow,
-} from "../gen/worktree_pb";
+} from "tddy-client-web/gen/worktree_pb";
 import { useDaemonClient } from "./selectedDaemon";
 import { useAuthContext } from "../hooks/authProvider";
 import { formatDiskBytes } from "../components/sessions/worktreeStatsFormat";

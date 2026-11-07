@@ -36,7 +36,7 @@ import { useVisualViewport } from "../hooks/useVisualViewport";
 import type { ToolShortcutDef } from "../lib/toolShortcuts";
 import { TerminalHistoryForwardLoader } from "../lib/terminalHistoryLoader";
 import { TerminalStreamOffset } from "../lib/terminalStreamOffset";
-import { feedSupportsHistory, type TerminalFeed } from "../rpc/connections/terminal";
+import { feedSupportsHistory, type TerminalFeed } from "tddy-client-web/connections/terminal";
 import type { ByteDelta } from "./sessions/sessionRuntimeRegistry";
 
 // `[tddy]` diagnostics for the terminal byte stream (enabled by the DEBUG mask).

@@ -12,7 +12,7 @@
 
 import { describe, it, expect } from "bun:test";
 import { ConnectionProviderRegistry } from "./registry";
-import type { ConnectionCapability, ConnectionProvider, HostConnection } from "./types";
+import type { ConnectionCapability, ConnectionProvider, HostConnection } from "tddy-client-web/connections/types";
 
 /** A connection that reaches nothing — the tests here assert routing, never traffic. */
 function aConnectionTo(

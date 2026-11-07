@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useState } from "react";
 import type { Client } from "@connectrpc/connect";
-import type { SessionFilesService, SessionUploadEntry } from "../../gen/session_files_pb";
+import type { SessionFilesService, SessionUploadEntry } from "tddy-client-web/gen/session_files_pb";
 import { Button } from "../ui/button";
 import { formatBytes } from "./formatTraffic";
 import { copyToClipboard } from "../../lib/clipboard";

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { Client } from "@connectrpc/connect";
-import { PrStackService, type BranchResolution } from "../../../gen/pr_stack_pb";
+import { PrStackService, type BranchResolution } from "tddy-client-web/gen/pr_stack_pb";
 import type { BranchQuery } from "./branchQueries";
 
 type PrStackClient = Client<typeof PrStackService>;

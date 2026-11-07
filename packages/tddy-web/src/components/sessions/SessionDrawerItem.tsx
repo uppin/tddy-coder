@@ -1,5 +1,5 @@
 import React from "react";
-import type { SessionEntry } from "../../gen/session_pb";
+import type { SessionEntry } from "tddy-client-web/gen/session_pb";
 import { sessionDrawerLabel } from "../../utils/sessionDrawerLabel";
 import { SessionIndicatorDot } from "./SessionIndicatorDot";
 import type { SessionMetadata } from "../../lib/sessionParticipantMetadata";

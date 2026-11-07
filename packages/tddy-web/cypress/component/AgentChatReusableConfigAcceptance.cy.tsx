@@ -13,7 +13,7 @@
 import React from "react";
 import { anInMemoryRpcBackend } from "tddy-connectrpc-testkit";
 import { AgentChat } from "../../src/components/chat/AgentChat";
-import { TddyRemote, type ClientMessage } from "../../src/gen/tddy/v1/remote_pb";
+import { TddyRemote, type ClientMessage } from "tddy-client-web/gen/tddy/v1/remote_pb";
 import { mountWithRpc } from "../support/rpc/inMemory";
 import { agentChatPage } from "../support/pages/agentChatPage";
 
