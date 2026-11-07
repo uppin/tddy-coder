@@ -7,6 +7,8 @@
 
 **Stack**: `#web-split` 2/16 — branch `feature/web-split/react-commons`, base `feature/web-split/web-ci` (#838)
 
+**PR**: [#839](https://github.com/uppin/tddy-coder/pull/839)
+
 ## Initial Discovery
 
 [2026-11-07-react-commons-framework-initial-discovery.md](./2026-11-07-react-commons-framework-initial-discovery.md)
@@ -140,6 +142,14 @@ app-scope disposal, slice hooks, typed emitters, testkit doubles).
 - **React 19 peer**: the source targeted React 18; the APIs used (`useSyncExternalStore`, context,
   refs) are unchanged in 19. Any suite relying on React 18-only behaviour is adapted, not skipped.
 - **Testkit decoupled from Storybook** — keeps the package free of Storybook deps.
+- **Test port, recorded at the contract:** `vitest` imports → `bun:test` (its `vi.fn`, `vi.spyOn`,
+  `vi.restoreAllMocks`, `vi.useFakeTimers` work as-is); `vi.advanceTimersByTimeAsync(n)` → `vi.advanceTimersByTime(n)`
+  followed by a microtask flush (bun 1.3 has no async variant); the global `JSX.Element` → React 19's
+  `JSX` from `react`. The contract run: 149 failing on `TODO(react-commons)`, 5 type-level tests passing;
+  the same suites pass 176/176 against the intended implementation.
+- **Lockfile without a public registry:** `bun install --lockfile-only --registry <mirror>`, then the
+  mirror's tarball URLs stripped back to `""` (how `bun.lock` records the default registry) — integrity
+  hashes are the registry's own, so `--frozen-lockfile` on CI resolves the same packages.
 
 ## Refactoring Needed
 
@@ -159,10 +169,10 @@ app-scope disposal, slice hooks, typed emitters, testkit doubles).
 - [x] Cross-check `packages/*/docs/code-issues/` and `docs/dev/todo/` for items this change touches (Step 2b)
 - [x] Create/update PRD documentation
 - [x] Create changeset (this document)
-- [ ] Create failing acceptance tests
-- [ ] Run acceptance tests (verify they fail)
-- [ ] USER REVIEW — acceptance tests
-- [ ] TDD Red — write failing unit/integration tests
+- [x] Create failing acceptance tests
+- [x] Run acceptance tests (verify they fail)
+- [x] USER REVIEW — acceptance tests (developer waived the per-node review for this stack, 2026-11-07: "finish the rest without stopping")
+- [x] TDD Red — write failing unit/integration tests
 - [ ] TDD Green — implement with quality code
 - [ ] Update documentation with progress
 - [ ] Repeat Red→Green→Update cycle until feature complete
