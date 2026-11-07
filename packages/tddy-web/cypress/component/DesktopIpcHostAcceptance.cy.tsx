@@ -1,3 +1,4 @@
+import type { RoomHandle } from "tddy-client-web";
 /**
  * Acceptance spec: the desktop reaches its own host over IPC, and LiveKit stays optional.
  *
@@ -16,7 +17,7 @@
  */
 
 import React from "react";
-import { Room } from "livekit-client";
+import { aDisconnectedRoom } from "tddy-livekit-web/testkit";
 import { create } from "@bufbuild/protobuf";
 import { anInMemoryRpcBackend, type InMemoryRpcBackend } from "tddy-connectrpc-testkit";
 import { GenerateTokenResponseSchema, TokenService } from "tddy-client-web/gen/token_pb";
@@ -33,7 +34,7 @@ import {
   aDurableSessionBackend,
   CURRENT_ACCESS_TOKEN,
 } from "../support/rpc/durableSessionBackend";
-import { useLiveKitHostDirectorySource } from "../../src/rpc/hostDirectory/liveKitSource";
+import { useLiveKitHostDirectorySource } from "tddy-livekit-web";
 import { mountWithRpc } from "../support/rpc/inMemory";
 import {
   createIpcConnectionProvider,
@@ -42,13 +43,13 @@ import {
 import { LocalHostConnections } from "../../src/rpc/connections/localHostRegistration";
 import { ConnectionProviders, useConnectionProviders } from "../../src/rpc/connections/registry";
 import type { ConnectionProvider } from "tddy-client-web/connections/types";
-import { LIVEKIT_SOURCE_ID } from "../../src/rpc/hostDirectory/liveKitSource";
-import type { HostDirectorySource } from "../../src/rpc/hostDirectory/types";
+import { LIVEKIT_SOURCE_ID } from "tddy-livekit-web";
+import type { HostDirectorySource } from "tddy-client-web";
 import { useServingHostDirectorySource } from "../../src/rpc/hostDirectory/servingSource";
 import {
   HostDirectorySources,
   useHostDirectory,
-} from "../../src/rpc/hostDirectory/useHostDirectory";
+} from "tddy-client-web";
 import { byTestId } from "../support/testIds";
 import { useHostConnection } from "tddy-client-web";
 import { ConnectionProviderRegistry } from "tddy-client-web";
@@ -179,7 +180,7 @@ function LiveKitStartupProbe({
   roomFactory,
 }: {
   config: { livekitUrl?: string; commonRoom?: string; enabled?: boolean };
-  roomFactory: () => Room;
+  roomFactory: () => RoomHandle;
 }) {
   const { source } = useLiveKitHostDirectorySource({
     ...config,
@@ -195,7 +196,7 @@ function aRoomFactoryTripwire() {
   return {
     construct: () => {
       constructed += 1;
-      return new Room();
+      return aDisconnectedRoom();
     },
     constructed: () => constructed,
   };

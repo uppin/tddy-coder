@@ -15,7 +15,7 @@
  */
 
 import { useRef, type ReactNode } from "react";
-import { tddyDebug } from "../../lib/debugMask";
+import { tddyDebug } from "tddy-client-web";
 import { useAuthTokenGate, useTrafficMeterRegistry } from "../transportProvider";
 import { createDefaultWebviewIpcTransport } from "../daemonTransport";
 import { createIpcConnectionProvider, type LocalHostRegistration } from "./localHost";

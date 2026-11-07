@@ -21,7 +21,7 @@ import { SessionService, SessionEntrySchema } from "tddy-client-web/gen/session_
 import { CatalogService } from "tddy-client-web/gen/catalog_pb";
 import { AgentCloneState } from "tddy-client-web/gen/session_agents_pb";
 import { SessionAgentRosterPane } from "../../src/components/sessions/SessionAgentRosterPane";
-import { daemonRpcIdentity, type DaemonHost } from "../../src/lib/participantRole";
+import { daemonRpcIdentity, type DaemonHost } from "tddy-client-web";
 import {
   aDaemonOfferingAgents,
   aDaemonThatCannotBeReached,

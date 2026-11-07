@@ -1,7 +1,7 @@
 import type { Meta, StoryObj } from "@storybook/react";
 import { GhosttyTerminal } from "./GhosttyTerminal";
 import { GhosttyTerminalSession } from "./GhosttyTerminalSession";
-import { useDirectRoomTerminal } from "../rpc/connections/livekit/useDirectRoomTerminal";
+import { useDirectRoomTerminal } from "tddy-livekit-web";
 
 const meta: Meta<typeof GhosttyTerminal> = {
   component: GhosttyTerminal,

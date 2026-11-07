@@ -6,7 +6,7 @@ import { NewTerminalMenu } from "./NewTerminalMenu";
 import type { TmuxMenuState } from "./useTmuxSessions";
 import type { ChildSession } from "./useChildSessions";
 import { agentConversationLabel, type AgentConversation } from "./agentConversationTabs";
-import { safeTestIdPart } from "../../lib/testId";
+import { safeTestIdPart } from "tddy-client-web";
 import { cn } from "tddy-ui-web";
 
 interface SessionTerminalTabsProps {

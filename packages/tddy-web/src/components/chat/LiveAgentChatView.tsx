@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import type { CommonRoomStatus } from "../../hooks/useCommonRoom";
+import type { CommonRoomStatus } from "tddy-client-web";
 import { Button } from "tddy-ui-web";
 import { bubbleClass } from "./chatEntryPresentation";
 import { buildChatTranscript, downloadTextFile } from "./chatTranscript";

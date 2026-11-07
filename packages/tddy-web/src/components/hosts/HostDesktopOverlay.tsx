@@ -32,9 +32,9 @@ import {
   type StartStreamResponse,
 } from "tddy-client-web/gen/screen_sharing_pb";
 import { useAuthContext } from "../../hooks/authProvider";
-import { useCommonRoom } from "../../hooks/useCommonRoom";
+import { useCommonRoom } from "tddy-livekit-web";
 import { encryptForHost } from "../../lib/encryptForHost";
-import { presenceIdentityForUser } from "../../lib/presenceIdentity";
+import { presenceIdentityForUser } from "tddy-livekit-web";
 import { screenSharingStartFailureText } from "../../lib/screenSharingStartFailure";
 import { useHostPrompts, type HostPromptEventLike } from "../../rpc/useHostPrompts";
 import { ScreenSharingOverlay } from "../sessions/ScreenSharingOverlay";

@@ -10,8 +10,8 @@
  */
 
 import React, { useRef, useState } from "react";
-import { Room } from "livekit-client";
-import type { DaemonHost } from "../../src/lib/participantRole";
+import { aDisconnectedRoom } from "tddy-livekit-web/testkit";
+import type { DaemonHost } from "tddy-client-web";
 import { SelectedDaemonProvider } from "../../src/rpc/selectedDaemon";
 import { AuthProvider } from "../../src/hooks/authProvider";
 import { byTestId } from "../support/testIds";
@@ -44,7 +44,7 @@ function Harness() {
       >
         rename
       </button>
-      <SelectedDaemonProvider room={new Room()} daemons={daemons} servingInstanceId={HOST}>
+      <SelectedDaemonProvider room={aDisconnectedRoom()} daemons={daemons} servingInstanceId={HOST}>
         <LabelProbe />
       </SelectedDaemonProvider>
     </AuthProvider>

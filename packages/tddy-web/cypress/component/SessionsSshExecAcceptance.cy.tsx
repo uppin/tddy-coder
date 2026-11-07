@@ -23,7 +23,7 @@ import {
   ProbeOutcome,
   SshConfigHostSchema,
 } from "tddy-client-web/gen/host_pb";
-import type { DaemonHost } from "../../src/lib/participantRole";
+import type { DaemonHost } from "tddy-client-web";
 import { createSessionPage } from "../support/pages/createSessionPage";
 import { mountWithRpc } from "../support/rpc/inMemory";
 import { withSelectedDaemonServedBy } from "../support/rpc/withSelectedDaemon";

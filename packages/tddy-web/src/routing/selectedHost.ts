@@ -10,7 +10,7 @@
 
 import { create, fromJsonString, toJsonString } from "@bufbuild/protobuf";
 import { RememberedDaemonLabelsSchema } from "tddy-client-web/gen/web_state_pb";
-import type { DaemonHost } from "../lib/participantRole";
+import type { DaemonHost } from "tddy-client-web";
 
 /** `sessionStorage` key holding this tab's selected daemon. Exported so tests seed the real key. */
 export const SELECTED_DAEMON_STORAGE_KEY = "tddy_selected_daemon";

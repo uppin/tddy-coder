@@ -7,10 +7,11 @@
  * The ports carry hooks. Their identities must be stable for the app's lifetime (the app builds the
  * port once), so calling them obeys the rules of hooks like any imported hook.
  */
-import type { ComponentType, ReactElement, ReactNode, RefObject } from "react";
+import { createContext, createElement, useContext, type ComponentType, type ReactElement, type ReactNode, type RefObject } from "react";
 import type { Client } from "@connectrpc/connect";
 import type { DescService } from "@bufbuild/protobuf";
 import type { SessionAttachmentHint } from "../connections/session";
+import type { ParticipantRole } from "../lib/participantRole";
 
 /** A joined room, opaque outside the implementation. */
 export interface RoomHandle {
@@ -19,6 +20,9 @@ export interface RoomHandle {
 
 export type RoomStatus = "idle" | "connecting" | "connected" | "error";
 
+/** The common room's status: the same four states every room reports. */
+export type CommonRoomStatus = RoomStatus;
+
 /** A room the caller is joining or has joined, with how far it got. */
 export interface RoomState {
   readonly room: RoomHandle | null;
@@ -26,15 +30,13 @@ export interface RoomState {
   readonly error: string | null;
 }
 
-export type ParticipantRole = "browser" | "daemon" | "presenter" | "unknown" | (string & {});
-
 export interface RoomParticipant {
   identity: string;
-  role: ParticipantRole;
+  role: ParticipantRole | (string & {});
   joinedAt: number | null;
   metadata: string;
-  /** Structured Codex OAuth hint from metadata, when present. */
-  codexOAuth: { authorizeUrl: string; callbackPort: number } | null;
+  /** Structured Codex OAuth hint from metadata (`codex_oauth`), when present. */
+  codexOAuth: { pending: boolean; authorizeUrl?: string; callbackPort?: number; state?: string } | null;
   /** From `owned_project_count` in metadata. */
   ownedProjectCount?: number | null;
 }
@@ -83,50 +85,62 @@ export interface MediaPort {
   readonly RemoteVideo: ComponentType<{ room: RoomHandle | null; identity: string; trackName: string; className?: string }>;
 }
 
+const PresencePortContext = createContext<PresencePort | null>(null);
+const RoomRpcPortContext = createContext<RoomRpcPort | null>(null);
+const MediaPortContext = createContext<MediaPort | null>(null);
+
 export function PresencePortProvider(props: { port: PresencePort; children?: ReactNode }): ReactElement {
-  void props;
-  throw new Error("TODO(livekit): implement");
+  return createElement(PresencePortContext.Provider, { value: props.port }, props.children);
 }
 
 export function RoomRpcPortProvider(props: { port: RoomRpcPort; children?: ReactNode }): ReactElement {
-  void props;
-  throw new Error("TODO(livekit): implement");
-}
-
-export function useRoomClient<S extends DescService>(room: RoomHandle | null, identity: string | null, service: S): Client<S> | null {
-  void room;
-  void identity;
-  void service;
-  throw new Error("TODO(livekit): implement");
-}
-
-export function useParticipantPresent(room: RoomHandle | null, identity: string | null): boolean {
-  void room;
-  void identity;
-  throw new Error("TODO(livekit): implement");
+  return createElement(RoomRpcPortContext.Provider, { value: props.port }, props.children);
 }
 
 export function MediaPortProvider(props: { port: MediaPort; children?: ReactNode }): ReactElement {
-  void props;
-  throw new Error("TODO(livekit): implement");
+  return createElement(MediaPortContext.Provider, { value: props.port }, props.children);
+}
+
+function required<T>(port: T | null, name: string): T {
+  if (port === null) throw new Error(`${name} is not provided: wrap the caller in <${name}Provider> (the app registers it through its LiveKit ports)`);
+  return port;
 }
 
 /** The presence port in scope; throws naming the port when none wraps the caller. */
 export function usePresencePort(): PresencePort {
-  throw new Error("TODO(livekit): implement");
+  return required(useContext(PresencePortContext), "PresencePort");
+}
+
+/** The room-RPC port in scope; throws naming the port when none wraps the caller. */
+export function useRoomRpcPort(): RoomRpcPort {
+  return required(useContext(RoomRpcPortContext), "RoomRpcPort");
 }
 
 /** The media port in scope; throws naming the port when none wraps the caller. */
 export function useMediaPort(): MediaPort {
-  throw new Error("TODO(livekit): implement");
+  return required(useContext(MediaPortContext), "MediaPort");
+}
+
+export function useRoomClient<S extends DescService>(room: RoomHandle | null, identity: string | null, service: S): Client<S> | null {
+  return useRoomRpcPort().useRoomClient(room, identity, service);
+}
+
+export function useParticipantPresent(room: RoomHandle | null, identity: string | null): boolean {
+  return useRoomRpcPort().useParticipantPresent(room, identity);
+}
+
+export function useRoomStatus(room: RoomHandle | null): RoomStatus {
+  return useRoomRpcPort().useRoomStatus(room);
 }
 
 export function useHostPresence(hostId: string | null): RoomHandle | null {
-  void hostId;
-  throw new Error("TODO(livekit): implement");
+  return usePresencePort().useHostPresence(hostId);
+}
+
+export function usePresenceRoom(): RoomHandle | null {
+  return usePresencePort().usePresenceRoom();
 }
 
 export function useRoomParticipants(room: RoomHandle | null): RoomParticipant[] {
-  void room;
-  throw new Error("TODO(livekit): implement");
+  return usePresencePort().useRoomParticipants(room);
 }

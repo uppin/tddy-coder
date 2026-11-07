@@ -8,7 +8,7 @@ import {
   type RegistryReadStatus,
 } from "../../utils/mergeRegistryEntries";
 import { unrecognisedEnumText } from "../../lib/enumSkew";
-import { safeTestIdPart } from "../../lib/testId";
+import { safeTestIdPart } from "tddy-client-web";
 
 /**
  * The merged model catalog: every model every connected daemon's providers offer, one row each,

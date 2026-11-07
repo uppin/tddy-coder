@@ -22,7 +22,7 @@ import {
   aTerminalWithHistoryPaging,
   aReplayFrame,
 } from "../support/drivers/terminalHistoryPagingDriver";
-import type { HistoryChunk } from "../../src/lib/terminalHistoryLoader";
+import type { HistoryChunk } from "tddy-client-web";
 
 // ---------------------------------------------------------------------------
 // Fixtures

@@ -1,6 +1,6 @@
 import React, { useCallback, useLayoutEffect, useRef, type RefObject } from "react";
 import { createPortal } from "react-dom";
-import { safeTestIdPart } from "../../lib/testId";
+import { safeTestIdPart } from "tddy-client-web";
 import type { AgentConversation } from "./agentConversationTabs";
 import { SessionAgentConversationPane } from "./SessionAgentConversationPane";
 import type { SessionAgentClient } from "./sessionRuntimeProps";

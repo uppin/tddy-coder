@@ -11,15 +11,17 @@
  * Technical: `packages/tddy-web/docs/session-connections.md`.
  */
 
+import { openHostServedSession } from "../../src/rpc/connections/hostServedSession";
 import React, { useMemo } from "react";
 import { createClient } from "@connectrpc/connect";
 import { createConnectTransport } from "@connectrpc/connect-web";
 import { create, toBinary } from "@bufbuild/protobuf";
-import { ConnectionState, Room } from "livekit-client";
+import { RoomConnectionState as ConnectionState, aDisconnectedRoom } from "tddy-livekit-web/testkit";
+import type { RoomHandle as Room } from "tddy-client-web";
 import { ConnectSessionResponseSchema } from "tddy-client-web/gen/session_pb";
 import { TokenService, GenerateTokenResponseSchema } from "tddy-client-web/gen/token_pb";
 import { useSessionAttachment } from "../../src/components/sessions/useSessionAttachment";
-import { LiveKitConnectionProvider } from "../../src/rpc/connections/liveKit";
+import { LiveKitConnectionProvider } from "tddy-livekit-web";
 import type { HostConnection } from "tddy-client-web/connections/types";
 import { toArrayBuffer } from "../support/rpc/protoRpc";
 import { byTestId } from "../support/testIds";
@@ -107,10 +109,10 @@ function aHostConnection(): HostConnection {
     baseUrl: `${window.location.origin}/rpc`,
     useBinaryFormat: true,
   });
-  const provider = new LiveKitConnectionProvider(new Room(), () => transport, {
+  const provider = new LiveKitConnectionProvider(aDisconnectedRoom(), () => transport, {
     tokens: createClient(TokenService, transport),
     newRoom: aRoomThatJoinsAtOnce,
-  });
+  }, openHostServedSession);
   const host = provider.connectHost(A_HOST);
   if (!host) throw new Error("the LiveKit provider must claim a host once it has a room");
   return host;

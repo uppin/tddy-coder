@@ -1,4 +1,4 @@
-import { safeTestIdPart } from "../../lib/testId";
+import { safeTestIdPart } from "tddy-client-web";
 import {
   assistantRowKey,
   registryEmptyStateText,

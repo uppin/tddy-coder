@@ -10,7 +10,7 @@
  */
 
 import React from "react";
-import type { Room } from "livekit-client";
+import type { RoomHandle } from "tddy-client-web";
 import { AuthProvider } from "../../../src/hooks/authProvider";
 import { SelectedDaemonProvider } from "../../../src/rpc/selectedDaemon";
 import { TokenService } from "tddy-client-web/gen/token_pb";
@@ -51,7 +51,7 @@ export interface LiveCommonRoomMountOptions {
  */
 export function mountWithLiveCommonRoom(
   children: React.ReactNode,
-  room: Room,
+  room: RoomHandle,
   { servedByADaemon = true }: LiveCommonRoomMountOptions = {},
 ): Cypress.Chainable {
   window.localStorage.setItem(ACCESS_TOKEN_KEY, CURRENT_ACCESS_TOKEN);
