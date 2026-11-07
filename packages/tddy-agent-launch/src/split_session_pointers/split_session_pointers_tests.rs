@@ -93,7 +93,11 @@ fn a_split_agents_pointer_is_removed_when_its_spawn_fails() {
     // Given a placed split pointer whose agent never started
     let context_dir = tempfile::tempdir().expect("a context dir");
     HostSplitSessionPointers
-        .place(&a_split_pointer(context_dir.path()), context_dir.path(), None)
+        .place(
+            &a_split_pointer(context_dir.path()),
+            context_dir.path(),
+            None,
+        )
         .expect("the pointer is placed");
     let path = context_dir.path().join(SESSION_POINTER_FILE);
 

@@ -175,19 +175,11 @@ async fn resume_cli_harness_session(
         wiring,
         tddy_data_dir,
     } = session;
-    // A split session's pointer is the one its wiring was re-derived with; any other session's is
-    // the one its own wiring carries. Which one is decided by the session's kind, never by absence:
-    // a split session whose wiring carries no pointer is refused.
-    let (split_args, split_env, session_pointer) = match split {
-        Some(split) => (
-            split.extra_args,
-            split.env,
-            Some(split.session_pointer.ok_or_else(|| {
-                Status::internal("a split session's wiring carries no session pointer")
-            })?),
-        ),
-        None => (Vec::new(), Vec::new(), wiring.session_pointer.clone()),
-    };
+    let SplitLaunchParts {
+        args: split_args,
+        env: split_env,
+        pointer: session_pointer,
+    } = split_launch_parts(split, &wiring)?;
 
     let route = resume_cli_route(account_access, &agent.spec, session_dir)?;
     let (on_exit, token_arm) = resume_token_recorder(
@@ -280,4 +272,34 @@ async fn resume_cli_harness_session(
         livekit_url: String::new(),
         livekit_server_identity: String::new(),
     }))
+}
+
+/// What a split session adds to a resume's launch.
+struct SplitLaunchParts {
+    args: Vec<String>,
+    env: Vec<(String, String)>,
+    pointer: Option<tddy_core::session_pointer::SessionPointer>,
+}
+
+/// A split session's extra flags, its env and its pointer: the pointer is the one its wiring was
+/// re-derived with; any other session's is the one its own wiring carries. Which one is decided by
+/// the session's kind, never by absence: a split session whose wiring carries no pointer is refused.
+fn split_launch_parts(
+    split: Option<tddy_session_split::split_session::SplitAgentWiring>,
+    wiring: &ResumedWiring,
+) -> Result<SplitLaunchParts, Status> {
+    match split {
+        Some(split) => Ok(SplitLaunchParts {
+            args: split.extra_args,
+            env: split.env,
+            pointer: Some(split.session_pointer.ok_or_else(|| {
+                Status::internal("a split session's wiring carries no session pointer")
+            })?),
+        }),
+        None => Ok(SplitLaunchParts {
+            args: Vec::new(),
+            env: Vec::new(),
+            pointer: wiring.session_pointer.clone(),
+        }),
+    }
 }

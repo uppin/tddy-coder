@@ -7,8 +7,8 @@
 use std::path::Path;
 
 use crate::cli_session_pointer::{
-    place_session_pointer, remove_placed_pointer, removing_session_pointer_on_exit, PointerHost,
-    PlacedSessionPointer,
+    place_session_pointer, remove_placed_pointer, removing_session_pointer_on_exit,
+    PlacedSessionPointer, PointerHost,
 };
 use tddy_cli_sessions::cli_session_manager::ExitHook;
 use tddy_core::session_pointer::SessionPointer;
