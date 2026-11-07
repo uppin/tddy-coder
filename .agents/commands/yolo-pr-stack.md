@@ -335,7 +335,7 @@ a claimed code issue, a refused restructure, tests or clippy still red.
 `✅ done`** — every check green on its head, threads addressed — so a wrap never builds on a base that
 is still moving. For each node, in line order:
 
-1. **Rebase first, then check the lineage.** Free-up per the orchestrator, `git switch` to the node's
+1. **Rebase first, then check the lineage.** Once the orchestrator has freed its per-node worktree, `git switch` to the node's
    branch, and rebase it onto its parent's current head in single mode (`git rebase --onto
    origin/<parent> <old base tip>`). Then verify every link from the trunk up to this node is **linear**
    (each branch contains its parent's tip, `git merge-base --is-ancestor`) and **conflict-free**
