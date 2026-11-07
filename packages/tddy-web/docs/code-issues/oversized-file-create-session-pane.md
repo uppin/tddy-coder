@@ -23,3 +23,6 @@
 Hand TS split after the `#tmux-agent` stack lands (the `#start-progress` stack has): move the host resolution (`startingHostId`,
 `startingHostLabel`, the split-codebase choice) into a `useStartingHost` hook beside `useCreateSessionCatalogs`.
 Green baseline before (`CreateSessionPane.cy.tsx`, `CreateSessionStartProgress.cy.tsx`), mechanical move only.
+
+## Verified by hand
+2026-11-07 — `wc -l` at the wrap of PR #842 (`#web-split` 5/16): 581 → 581. The PR only re-points hook imports to `tddy-client-web`; still open, not split (later `#web-split` nodes move this file).

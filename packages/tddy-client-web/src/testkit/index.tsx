@@ -13,7 +13,7 @@ import { formatAppLocation, parseAppLocation } from "../appLocation";
 import { ClientsProvider, type ClientsPort, type DaemonHost } from "../ports/clients";
 import { NavigationProvider, type AppLocation, type NavigationPort } from "../ports/navigation";
 import { AuthPortProvider, type AuthPort } from "../ports/auth";
-import { aSpy } from "./spy";
+import { aSpy, type Spy } from "./spy";
 
 export interface ClientsPortDoubleOptions {
   /** Hosts the double's directory lists; the first is selected. Default: one host, `host-a`. */
@@ -100,8 +100,15 @@ export function aNavigationDouble(initial: string | AppLocation = "/"): Navigati
   };
 }
 
-/** A signed-in (or, with overrides, any) auth port whose actions resolve and record their calls. */
-export function anAuthDouble(overrides: Partial<AuthPort> = {}): AuthPort {
+type AuthAction = "login" | "handleCallback" | "logout" | "startDeviceLogin" | "unlockVault" | "resetVault";
+
+/** An auth port whose every action is a {@link Spy}: it resolves and records its calls. */
+export type AuthDouble = Omit<AuthPort, AuthAction> & {
+  readonly [K in AuthAction]: Spy<Parameters<AuthPort[K]>, ReturnType<AuthPort[K]>>;
+};
+
+/** A signed-in (or, with state overrides, any) auth port whose actions resolve and record their calls. */
+export function anAuthDouble(overrides: Partial<Omit<AuthPort, AuthAction>> = {}): AuthDouble {
   return {
     user: null,
     isAuthenticated: true,
@@ -111,12 +118,12 @@ export function anAuthDouble(overrides: Partial<AuthPort> = {}): AuthPort {
     isRefreshing: false,
     vaultState: VaultState.OPEN,
     deviceLogin: { phase: "idle" },
-    login: aSpy(async () => {}),
-    handleCallback: aSpy(async () => {}),
+    login: aSpy(async (_returnTo?: string) => {}),
+    handleCallback: aSpy(async (_code: string, _state: string) => {}),
     logout: aSpy(async () => {}),
     startDeviceLogin: aSpy(async () => {}),
-    unlockVault: aSpy(async () => {}),
-    resetVault: aSpy(async () => {}),
+    unlockVault: aSpy(async (_passphrase: string, _create: boolean) => {}),
+    resetVault: aSpy(async (_newPassphrase: string) => {}),
     ...overrides,
   };
 }

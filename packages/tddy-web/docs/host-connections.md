@@ -1,5 +1,10 @@
 # Host connections (`src/rpc/connections/`)
 
+The connection types, the `ConnectionProviderRegistry` class and the client hooks below live in
+`tddy-client-web` (`connections/*`, `ports/clients.tsx`) and are read through its clients port; this
+package keeps the source side (`ConnectionProviders`, `HostReadiness`) and the providers. See
+[tddy-client-web docs](../../tddy-client-web/docs/README.md).
+
 `tddy-web` reaches three kinds of thing: the daemon that served this page, some *other* daemon host,
 and a session running on one of those hosts. Only the first is expressed without naming a wire
 (`rpc/daemonTransport.ts` picks same-origin `/rpc` or the host application's IPC bridge).
@@ -86,7 +91,7 @@ catch this class, because they run uncompiled.
 | `useHostConnection(hostId)` | The connection, or `null` |
 | `useHostClient(service, hostId)` | A client for one service on that host, or `null` |
 | `useHostConnector()` | A resolver for callers that name hosts inside an effect or callback |
-| `useConnectionProviders()` | The registry in scope |
+| `useConnectionProviders()` | The registry in scope (`tddy-web`; component packages use `useConnectionRegistry()`) |
 
 `useHostConnector` exists because a fan-out reads a host list that changes and a form addresses the
 host an operator just picked; neither can spend a hook per host. Its identity changes exactly when
