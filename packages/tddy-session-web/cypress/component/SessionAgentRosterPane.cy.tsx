@@ -15,6 +15,7 @@
  */
 
 import React from "react";
+import { mountWithRpc } from "../support/rpc/inMemory";
 import { create } from "@bufbuild/protobuf";
 import type { InMemoryRpcBackend } from "tddy-connectrpc-testkit";
 import { SessionService, SessionEntrySchema } from "tddy-client-web/gen/session_pb";
@@ -82,7 +83,7 @@ function publish(roster: RosterBackend, agents: Parameters<typeof roster.pushRos
 }
 
 function mountPane(roster: RosterBackend, options: { connected?: boolean } = {}) {
-  cy.mountWithRpc(
+  mountWithRpc(
     <SessionAgentRosterPane
       session={SESSION}
       sessions={[SESSION]}

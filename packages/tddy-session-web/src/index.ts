@@ -63,3 +63,13 @@ export * from "./SessionVncTab";
 export * from "./AgentPicker";
 export * from "./code/WorktreeCodePane";
 export * from "./code/SessionIndexingIndicator";
+export * from "./rpc/sessionTraffic";
+// session-drawer (#862): the sessions drawer, project home and the status strip
+export * from "./SessionsDrawerScreen";
+export * from "./SessionDrawer";
+export * from "./ProjectHomeEntry";
+export * from "./StatusBar";
+export * from "./SessionTrafficStrip";
+export * from "./SessionHostStatsFooter";
+export * from "./UploadProgressIndicator";
+export * from "./useLiveKitTerminalToken";

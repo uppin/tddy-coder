@@ -4,7 +4,10 @@ import { anInMemoryRpcBackend, type InMemoryRpcBackend } from "tddy-connectrpc-t
 import { type MountWithClientsOverrides, withClients } from "tddy-client-web/testkit";
 import { agentActivityRegistry } from "tddy-chat-web";
 import { UploadProgressProvider } from "tddy-terminal-web";
+import { StartPassphraseProvider } from "tddy-session-create-web";
 import { sessionNotificationRegistry } from "../../src/lib/sessionNotificationRegistry";
+import { SessionShellProvider } from "../../src/sessionShell";
+import { SessionShellDouble } from "./sessionShellDouble";
 import "tddy-ui-web/theme.css";
 
 /** The Agent Activity and session-notification stores are app-lifetime module singletons; component
@@ -13,6 +16,13 @@ import "tddy-ui-web/theme.css";
 beforeEach(() => {
   agentActivityRegistry.reset();
   sessionNotificationRegistry.reset();
+});
+
+/** Screens derive their selection from the URL, and component tests share one window — so a hash left
+ *  behind by one spec would silently pre-select a session or inspector state in the next. Reset to the
+ *  neutral root before each test; specs that need a deep link set their own hash afterwards. */
+beforeEach(() => {
+  window.location.hash = "/";
 });
 
 declare global {
@@ -25,13 +35,23 @@ declare global {
   }
 }
 
+/** The host application's passphrase dialog is not this package's: a start under test asks for none. */
+function NoPassphraseDialog(): null {
+  return null;
+}
+
 /**
  * Stands the subtree where the app shell puts it: the terminal session always renders its upload
  * affordances, which need the `UploadProgressProvider` and read a daemon client through the clients
  * port even when a spec never drives an upload.
  */
 function inShell(jsx: ReactElement, backend: InMemoryRpcBackend, overrides?: MountWithClientsOverrides): ReactElement {
-  return withClients(createElement(UploadProgressProvider, null, jsx), backend, overrides);
+  const shelled = createElement(
+    SessionShellProvider,
+    { shell: SessionShellDouble },
+    createElement(StartPassphraseProvider, { prompt: NoPassphraseDialog }, jsx),
+  );
+  return withClients(createElement(UploadProgressProvider, null, shelled), backend, overrides);
 }
 
 /** `strict: false` as in tddy-web, so a dev double-mount does not discard imperative refs mid-test. */

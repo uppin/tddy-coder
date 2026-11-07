@@ -9,6 +9,7 @@
  */
 
 import React from "react";
+import { mountWithRpc } from "../support/rpc/inMemory";
 import { AgentPicker } from "../../src/AgentPicker";
 import type { DaemonHost } from "tddy-client-web";
 import { withSelectedDaemonServedBy } from "../support/rpc/withSelectedDaemon";
@@ -49,7 +50,7 @@ function theCodingAgentsOnOffer() {
 
 /** Mount the picker, served by {@link HOST}, whose catalog offers `agents`. */
 function mountThePicker(agents: ReturnType<typeof aCodingAgent>[]) {
-  cy.mountWithRpc(
+  mountWithRpc(
     withSelectedDaemonServedBy(
       <AgentPicker
         testIdPrefix="agent-roster-picker"

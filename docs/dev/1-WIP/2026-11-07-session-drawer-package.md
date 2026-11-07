@@ -69,6 +69,14 @@ exports — failing until the modules move.
 **Greenable independently:** after the inspector node is green
 **Blocks:** storybook, wiring
 
+## Progress (green, in flight)
+
+- Moved into `tddy-session-web/src` (flat, `git mv`): the whole of `tddy-web/src/components/sessions/` (drawer, project home, `StatusBar`, `SessionTrafficStrip`, session manager, hooks, `inspectorState`, `jailedCodebaseHalf`, `useMeterSnapshot`, `SessionDetailPane`, `SessionHostStatsFooter`, `UploadProgressIndicator`, `vncInput`, ...). `components/sessions/` and `components/session/` in tddy-web now hold nothing. `bun test src` 376 pass (boundary rule green); tddy-web `test:unit` 93 pass.
+- New seam: `SessionTrafficProvider` / `useSessionTraffic` (meter registry + `roomOf`) so `StatusBar` needs neither tddy-web nor LiveKit; `appClientsPorts.tsx` supplies it. The drawer reads auth through `tddy-client-web`'s `useAuth`.
+- Specs: support copied/rewritten on ports (`drawerWorld`, `withSelectedDaemon`, `inMemory`, `recordingLiveKitRpc`, `perDaemonLiveKitRpc`, `hashNavigation`, `sessionShellDouble`). Kept in tddy-web (wiring): `PresenceCapabilityGatingAcceptance`, `UnifiedLayoutAcceptance`, `DaemonChangeReloadsScreenAcceptance`, `SelectedHostUrlStateAcceptance`, `ProjectHomeSetupLinkAcceptance`, `useLiveKitTerminalToken`.
+- `dom-preload.ts` + `bunfig.toml` moved to the package (only `vncInput.test.ts` read it).
+- **Cypress state: NOT green.** 101 moved/changed specs run one at a time: ~70 pass; ~31 specs still have failures (~100 of 646 tests): create-session, PR-stack chat/start, screen-sharing/VNC target rows, LiveKit routing specs (`SessionParticipantRpcRouting`, `SessionStartResumeStillDaemonRouted`, `ScreenSharingInputScopes`, `HostDesktopStartFailure` — candidates to return to tddy-web), and inspector-open specs (inspector defaults to closed since #378; unverified whether they fail on master too).
+
 ## Scope
 
 - [ ] Modules moved

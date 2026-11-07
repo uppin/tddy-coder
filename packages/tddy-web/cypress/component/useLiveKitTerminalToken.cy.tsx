@@ -24,7 +24,7 @@ import {
   RefreshTokenRequestSchema,
   RefreshTokenResponseSchema,
 } from "tddy-client-web/gen/token_pb";
-import { useLiveKitTerminalToken } from "../../src/components/sessions/useLiveKitTerminalToken";
+import { useLiveKitTerminalToken } from "tddy-session-web";
 import { decodeProtoRequestBody, toArrayBuffer } from "../support/rpc/protoRpc";
 import { withSessionTokenGate } from "../support/rpc/withSessionTokenGate";
 import { byTestId } from "../support/testIds";

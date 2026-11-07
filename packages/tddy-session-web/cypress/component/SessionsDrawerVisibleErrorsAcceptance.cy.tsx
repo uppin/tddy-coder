@@ -33,8 +33,8 @@ import { SessionRuntime } from "../../src/SessionRuntime";
 import { GrpcSessionTerminal } from "../../src/GrpcSessionTerminal";
 import { TerminalControlOverlay } from "../../src/TerminalControlOverlay";
 import { useTerminalControl } from "tddy-terminal-web";
-import { SelectedDaemonProvider } from "../../src/rpc/selectedDaemon";
-import { AuthProvider } from "../../src/hooks/authProvider";
+import { ConnectionProviderRegistry } from "tddy-client-web/connections/registry";
+import { aClientsPortDouble } from "tddy-client-web/testkit";
 import { UploadProgressProvider } from "tddy-terminal-web";
 import { withSelectedDaemon } from "../support/rpc/withSelectedDaemon";
 import { aSessionServiceBackend, type SessionServiceBackend } from "../support/rpc/daemonSessionHostBackend";
@@ -161,13 +161,13 @@ describe("the session list", () => {
 
   it("says the host is not connected instead of showing an empty list", () => {
     // Given a selected host that no wire reaches
-    cy.mount(
-      <AuthProvider>
-        <SelectedDaemonProvider room={null} daemons={[{ instanceId: "local", label: "local (this daemon)" }]}>
-          <SessionsDrawerScreen />
-        </SelectedDaemonProvider>
-      </AuthProvider>,
-    );
+    const backend = anInMemoryRpcBackend();
+    cy.mountWithClients(<SessionsDrawerScreen />, backend, {
+      clients: {
+        ...aClientsPortDouble(backend, { daemons: [{ instanceId: "local", label: "local (this daemon)" }] }),
+        connections: new ConnectionProviderRegistry(),
+      },
+    });
 
     // Then
     errors.listLoadError().should("contain.text", "Not connected to local");

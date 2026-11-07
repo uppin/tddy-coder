@@ -11,8 +11,8 @@
  */
 
 import React from "react";
+import { aPresenceDouble } from "tddy-client-web/testkit";
 import { servedAgentWire } from "../support/servedAgents";
-import { aDisconnectedRoom } from "tddy-livekit-web/testkit";
 import { create } from "@bufbuild/protobuf";
 import { Code, ConnectError, createClient, type Client } from "@connectrpc/connect";
 import { anInMemoryRpcBackend, type InMemoryRpcBackend } from "tddy-connectrpc-testkit";
@@ -29,14 +29,13 @@ import { WorktreeService } from "tddy-client-web/gen/worktree_pb";
 import { ActivityService, AgentActivityRecordSchema } from "tddy-client-web/gen/activity_pb";
 import { TddyRemote, ServerMessageSchema } from "tddy-client-web/gen/tddy/v1/remote_pb";
 import type { DaemonHost } from "tddy-client-web";
-import { SelectedDaemonProvider } from "../../src/rpc/selectedDaemon";
 import { TEST_IDS } from "../support/testIds";
 import { createSessionPage } from "../support/pages/createSessionPage";
 import { sessionsDrawerPage } from "../support/pages/sessionsDrawerPage";
 import { loadAndStreamErrorsPage as errors } from "../support/pages/loadAndStreamErrorsPage";
 import { mountWithRpc } from "../support/rpc/inMemory";
 import { mountWithRecordingLiveKitRpc } from "../support/rpc/recordingLiveKitRpc";
-import { withSelectedDaemon } from "../support/rpc/withSelectedDaemon";
+import { withSelectedDaemon, withSelectedDaemonServedBy } from "../support/rpc/withSelectedDaemon";
 import { aSessionServiceBackend } from "../support/rpc/daemonSessionHostBackend";
 import { aConversationRecord } from "../support/rpc/usageBackend";
 import {
@@ -94,8 +93,8 @@ function aCreateSessionBackend(): InMemoryRpcBackend {
 
 function mountCreatePane(backend: InMemoryRpcBackend) {
   const transport = backend.transport();
-  cy.mount(
-    <SelectedDaemonProvider room={aDisconnectedRoom()} daemons={DAEMON_HOSTS} servingInstanceId={LOCAL_HOST}>
+  mountWithRpc(
+    withSelectedDaemonServedBy(
       <CreateSessionPane
         client={createClient(SessionService, transport)}
         projectClient={createClient(ProjectService, transport)}
@@ -105,8 +104,11 @@ function mountCreatePane(backend: InMemoryRpcBackend) {
         sessionToken="fake-token"
         onCancel={cy.stub()}
         onCreated={cy.stub()}
-      />
-    </SelectedDaemonProvider>,
+      />,
+      DAEMON_HOSTS,
+      LOCAL_HOST,
+    ),
+    backend,
   );
 }
 
@@ -386,7 +388,7 @@ describe("Session streams — a dropped stream is reported beside what it fed", 
     // Given — a room that has not connected yet, and no transport override
 
     // When
-    cy.mount(<SessionUsageTab room={aDisconnectedRoom()} serverIdentity="presenter" />);
+    cy.mount(<SessionUsageTab room={aPresenceDouble().room("usage-room")} serverIdentity="presenter" />);
 
     // Then — the tab waits in its empty state rather than claiming the stream failed
     sessionsDrawerPage.usageEmpty().should("be.visible");
