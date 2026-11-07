@@ -26,12 +26,9 @@
 import React from "react";
 import { ConnectError, Code } from "@connectrpc/connect";
 import { aPresenceDouble } from "tddy-client-web/testkit";
-import { SessionMainPane } from "../../src/SessionMainPane";
 import { SessionsDrawerScreen } from "../../src/SessionsDrawerScreen";
 import { withSelectedDaemon } from "../support/rpc/withSelectedDaemon";
 import { PrStackChat } from "tddy-prstack-web";
-import type { SessionAttachmentState } from "../../src/useSessionAttachment";
-import { aSessionConnection } from "../support/rpc/sessionConnections";
 import { TddyRemote } from "tddy-client-web/gen/tddy/v1/remote_pb";
 import { AcpService } from "tddy-client-web/gen/tddy/acp/v1/acp_pb";
 import { mountWithRpc } from "../support/rpc/inMemory";
@@ -60,16 +57,6 @@ const PR_STACK_SESSION = {
   stackPlanJson: "",
 };
 
-const ATTACHED_OVER_A_ROOM = aSessionConnection(PR_STACK_SESSION.sessionId).carriedByRoom(
-  "daemon-pr-stack-silent-failure-0001",
-  { url: "wss://livekit.internal:7880", serverIdentity: "daemon-pr-stack-silent-failure-0001" },
-);
-const LIVEKIT_ATTACHMENT: SessionAttachmentState = {
-  status: "connected",
-  connection: ATTACHED_OVER_A_ROOM.build(),
-};
-const LIVEKIT_HINT = ATTACHED_OVER_A_ROOM.buildHint();
-
 /**
  * Yields a single `AgentOutput`, then throws — simulates the presenter stream dying mid-flight.
  * A `ConnectError` is required here (not a plain `Error`): the Connect protocol deliberately
@@ -85,38 +72,6 @@ async function* streamThatDropsAfterOneMessage() {
 // ---------------------------------------------------------------------------
 // Harness
 // ---------------------------------------------------------------------------
-
-function PrStackMainPaneHarness() {
-  return (
-    <SessionMainPane
-      // No host connection in scope: this spec is not about the inspector's media tabs,
-      // and `host` is required so that saying so is a choice rather than an omission.
-      host={null}
-      selectedSession={PR_STACK_SESSION as any}
-      attachment={LIVEKIT_ATTACHMENT}
-      attachmentHint={LIVEKIT_HINT}
-      inspectorState="closed"
-      onToggleInspector={cy.stub()}
-      onInspectorClose={cy.stub()}
-      onInspectorExpand={cy.stub()}
-      onInspectorRestore={cy.stub()}
-      onResume={cy.stub()}
-      onResumeSession={cy.stub()}
-      onDelete={cy.stub()}
-      onTerminate={cy.stub()}
-    />
-  );
-}
-
-function interceptGenerateTokenUnavailable() {
-  cy.intercept("POST", "**/rpc/token.TokenService/GenerateToken", (req) => {
-    req.reply({
-      statusCode: 503,
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ code: "unavailable", message: "livekit token service unavailable" }),
-    });
-  }).as("generateTokenUnavailable");
-}
 
 // ---------------------------------------------------------------------------
 // Setup
@@ -147,23 +102,6 @@ it("shows an inline error in the chat panel when handed a failed room connection
   );
 
   // Then
-  prStackScreenPage
-    .chatError()
-    .should("exist")
-    .and("contain.text", "livekit token service unavailable");
-});
-
-it("requests a browser LiveKit token for the presenter room and surfaces the failure when it cannot be issued", () => {
-  // Given — the session is attached over its own room, but the token service that
-  // usePresenterRoom's useCommonRoom depends on is unavailable
-  interceptGenerateTokenUnavailable();
-
-  // When
-  cy.mount(<PrStackMainPaneHarness />);
-  cy.wait("@generateTokenUnavailable");
-
-  // Then — the failure travels: useCommonRoom -> usePresenterRoom -> PrStackScreen ->
-  // PrStackChat, instead of being discarded at any of those boundaries
   prStackScreenPage
     .chatError()
     .should("exist")

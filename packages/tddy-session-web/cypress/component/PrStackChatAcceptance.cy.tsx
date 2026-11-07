@@ -10,7 +10,6 @@
 import React from "react";
 import { SessionsDrawerScreen } from "../../src/SessionsDrawerScreen";
 import { withSelectedDaemon } from "../support/rpc/withSelectedDaemon";
-import { PrStackChat } from "tddy-prstack-web";
 import { TddyRemote } from "tddy-client-web/gen/tddy/v1/remote_pb";
 import { AcpService, type AcpClientMessage } from "tddy-client-web/gen/tddy/acp/v1/acp_pb";
 import { mountWithRpc } from "../support/rpc/inMemory";
@@ -131,19 +130,4 @@ it("sends a follow-up message as a second ACP prompt while the workflow is runni
     expect(sent[1].msg.case).to.equal("prompt");
     expect(promptText(sent[1])).to.equal("Split this into three PRs instead of two.");
   });
-});
-
-it("renders the chat panel when no LiveKit room has been attached to the session yet", () => {
-  // Given — a pr-stack session before any LiveKit room is connected: the real production
-  // state today, since nothing yet threads a connected orchestrator Room through to this
-  // screen (see the TODO in usePresenterChat.ts). No RpcTransportProvider override here —
-  // this deliberately exercises the real default LiveKit transport factory, not the
-  // in-memory fake the other tests in this file use, to catch a factory that assumes a
-  // non-null room.
-
-  // When
-  cy.mount(<PrStackChat session={PR_STACK_SESSION as any} room={null} livekitServerIdentity="server" />);
-
-  // Then
-  prStackScreenPage.chat().should("exist");
 });

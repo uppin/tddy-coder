@@ -17,6 +17,7 @@ import {
   type RoomHandle,
   type RoomParticipant,
 } from "tddy-client-web";
+import { ConnectionProviderRegistry } from "tddy-client-web/connections/registry";
 import { aPresenceDouble } from "tddy-client-web/testkit";
 
 /** Default single-daemon fixture — the "one local daemon" shape used across the specs. */
@@ -60,9 +61,19 @@ function SelectedDaemonWorld({
 }) {
   const outer = useClientsPort();
   const [selectedInstanceId, selectDaemon] = useState<string | null>(daemons[0]?.instanceId ?? null);
+  // Only the listed daemons are reachable: a host the directory does not list has no wire to it.
+  const connections = useMemo(() => {
+    const listed = new ConnectionProviderRegistry();
+    listed.register({
+      id: "listed-daemons",
+      connectHost: (hostId) => (daemons.some((d) => d.instanceId === hostId) ? outer.connections.connectHost(hostId) : null),
+    });
+    return listed;
+  }, [outer, daemons]);
   const clients = useMemo(
     () => ({
       ...outer,
+      connections,
       selectedDaemon: {
         ...outer.selectedDaemon,
         daemons,
@@ -72,7 +83,7 @@ function SelectedDaemonWorld({
         selectDaemon,
       },
     }),
-    [outer, daemons, selectedInstanceId, servingInstanceId],
+    [outer, connections, daemons, selectedInstanceId, servingInstanceId],
   );
   const presence = useMemo(() => {
     const double = aPresenceDouble();

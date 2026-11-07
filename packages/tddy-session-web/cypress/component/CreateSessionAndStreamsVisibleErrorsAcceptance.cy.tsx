@@ -11,7 +11,8 @@
  */
 
 import React from "react";
-import { aPresenceDouble } from "tddy-client-web/testkit";
+import { RoomRpcPortProvider } from "tddy-client-web";
+import { aPresenceDouble, aRoomRpcDouble } from "tddy-client-web/testkit";
 import { servedAgentWire } from "../support/servedAgents";
 import { create } from "@bufbuild/protobuf";
 import { Code, ConnectError, createClient, type Client } from "@connectrpc/connect";
@@ -388,7 +389,12 @@ describe("Session streams — a dropped stream is reported beside what it fed", 
     // Given — a room that has not connected yet, and no transport override
 
     // When
-    cy.mount(<SessionUsageTab room={aPresenceDouble().room("usage-room")} serverIdentity="presenter" />);
+    // (the room-RPC port builds no client for a room that has not joined: that is "still joining")
+    cy.mount(
+      <RoomRpcPortProvider port={{ ...aRoomRpcDouble(anInMemoryRpcBackend()), useRoomClient: () => null }}>
+        <SessionUsageTab room={aPresenceDouble().room("usage-room")} serverIdentity="presenter" />
+      </RoomRpcPortProvider>,
+    );
 
     // Then — the tab waits in its empty state rather than claiming the stream failed
     sessionsDrawerPage.usageEmpty().should("be.visible");

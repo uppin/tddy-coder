@@ -14,7 +14,7 @@
  */
 
 import React, { type ReactElement } from "react";
-import type { Transport } from "@connectrpc/connect";
+import { createClient, type Transport } from "@connectrpc/connect";
 import type { InMemoryRpcBackend } from "tddy-connectrpc-testkit";
 import {
   MediaPortProvider,
@@ -26,7 +26,9 @@ import {
   type RoomRpcPort,
 } from "tddy-client-web";
 import { ConnectionProviderRegistry } from "tddy-client-web/connections/registry";
-import { aClientsPortDouble, aMediaDouble, aPresenceDouble, aRoomRpcDouble } from "tddy-client-web/testkit";
+import { create } from "@bufbuild/protobuf";
+import { GitHubUserSchema } from "tddy-client-web/gen/auth_pb";
+import { aClientsPortDouble, aMediaDouble, anAuthDouble, aPresenceDouble, aRoomRpcDouble } from "tddy-client-web/testkit";
 import { aHostConnection } from "./hostConnections";
 import { hashNavigationPort } from "../hashNavigation";
 
@@ -110,15 +112,23 @@ function DrawerPorts({ backend, children }: { backend: InMemoryRpcBackend; child
       },
     }),
   );
+  /** The presenter rooms, and the common room the drawer reads: the daemon answers in all of them. */
+  const isServed = (room: RoomHandle | null) =>
+    room !== null && (presenterRooms.has(room) || (room as unknown as { name?: string }).name === "common-room");
+  const transport = backend.transport();
   const [roomRpc] = React.useState<RoomRpcPort>(() => ({
     ...rooms,
+    // As the app's port does under an overridden transport factory: a client is built for any
+    // identity, room or no room, and answers from the backend.
+    useRoomClient: (_room, identity, service) =>
+      React.useMemo(() => (identity !== null ? createClient(service, transport) : null), [identity, service]),
     useParticipantPresent: (room, identity) => {
       const listed = rooms.useParticipantPresent(room, identity);
-      return listed || (room !== null && presenterRooms.has(room));
+      return listed || isServed(room);
     },
     useParticipantProbe: (room, identity) => {
       const listed = rooms.useParticipantProbe(room, identity);
-      return React.useCallback(() => listed() || (room !== null && presenterRooms.has(room)), [listed, room]);
+      return React.useCallback(() => listed() || isServed(room), [listed, room]);
     },
   }));
   return (
@@ -136,6 +146,12 @@ export function mountRouted(component: ReactElement, routing: Routing): RoutedMo
   cy.mountWithClients(<DrawerPorts backend={routing.httpBackend}>{component}</DrawerPorts>, routing.httpBackend, {
     clients: routedClientsPort(routing, recorded),
     navigation: hashNavigationPort,
+    // The app mounts a session screen for a signed-in operator; closing an agent tab names who cancelled.
+    auth: anAuthDouble({
+      user: create(GitHubUserSchema, { login: "operator" }),
+      // The token the app's auth provider would have read back from storage, when a spec stored one.
+      sessionToken: window.localStorage.getItem("tddy_session_token") ?? "double-token",
+    }),
   });
   return recorded;
 }

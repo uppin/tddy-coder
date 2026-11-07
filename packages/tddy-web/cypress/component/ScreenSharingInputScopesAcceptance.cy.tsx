@@ -18,7 +18,7 @@ import { anInMemoryRpcBackend } from "tddy-connectrpc-testkit";
 import { HostRemoteDesktopSchema, ProbeOutcome } from "tddy-client-web/gen/host_pb";
 import { DesktopAuthMethod, Protocol, ScreenSharingService } from "tddy-client-web/gen/screen_sharing_pb";
 import { HostRowRemoteDesktop } from "tddy-hosts-web";
-import { SessionsDrawerScreen } from "../../src/SessionsDrawerScreen";
+import { SessionsDrawerScreen } from "tddy-session-web";
 import { mountWithRecordingLiveKitRpc, type RecordedRpcCall } from "../support/rpc/recordingLiveKitRpc";
 import { withSelectedDaemon } from "../support/rpc/withSelectedDaemon";
 import { aSessionsDrawerBackend } from "../support/rpc/screenSharingBackend";

@@ -2,4 +2,4 @@
 root = "packages"
 # Polyfill minimal DOM APIs (e.g. KeyboardEvent) for unit tests running in
 # Bun's Node-like environment.
-preload = ["./packages/tddy-web/src/test-utils/dom-preload.ts"]
+preload = ["./packages/tddy-session-web/src/test-utils/dom-preload.ts"]
