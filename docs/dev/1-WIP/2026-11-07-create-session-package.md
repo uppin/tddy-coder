@@ -7,6 +7,8 @@
 
 **Stack**: `#web-split` 7/16 — branch `feature/web-split/create-session`, base `feature/web-split/livekit`
 
+**PR**: [#844](https://github.com/uppin/tddy-coder/pull/844)
+
 ## Initial Discovery
 
 [2026-11-07-create-session-package-initial-discovery.md](./2026-11-07-create-session-package-initial-discovery.md)
@@ -67,6 +69,18 @@ implementing one here collides with the PR that owns it.
 | `n6` livekit (#843) | — (branch predecessor; create-session has no LiveKit reach) | nothing | — |
 
 ## Draft PR contract
+
+**As pushed (commit 2):** package skeleton (manifest, tsconfig, Vite/Cypress config, support with
+`cy.mountWithClients` from `tddy-client-web/testkit` and the `tddy-ui-web` theme), `web-tddy-session-create-web.yml`,
+the boundary rule (imports + exported surface), and **38** specs `git mv`'d with their `src/components/sessions/`
+imports re-pointed at the package's `src/`. Five specs that mount `SessionsDrawerScreen` (or the usage tab)
+to exercise create-session through the drawer stay in `tddy-web` and travel with `feature/web-split/session`:
+`CreateSessionAcceptance`, `CreateSessionAndStreamsVisibleErrorsAcceptance`, `CreateSessionAutoClosesDrawer`,
+`CreateSessionBranchConflictAcceptance`, `ProjectHomeSetupPaneAcceptance`. Moved specs still import
+`tddy-web` support (`lib/participantRole`, `rpc/selectedDaemon`, page objects, `testIds`) — green replaces
+those with `tddy-client-web` ports/testkit and package-local support.
+
+Originally planned:
 
 First push (commit 2): the package skeleton (manifest exporting the surface above, Cypress/Vite config, workflow), the ~44 specs `git mv`'d into `packages/tddy-session-create-web/cypress/component/` with imports pointing at the package, and its boundary rule test — failing until the modules move.
 
@@ -145,10 +159,10 @@ Create-session lives in `tddy-web/src/components/sessions/` (~30 `CreateSession*
 - [x] Cross-check `packages/*/docs/code-issues/` and `docs/dev/todo/` for items this change touches (Step 2b)
 - [x] Create/update PRD documentation
 - [x] Create changeset (this document)
-- [ ] Create failing acceptance tests
-- [ ] Run acceptance tests (verify they fail)
-- [ ] USER REVIEW — acceptance tests
-- [ ] TDD Red — write failing unit/integration tests
+- [x] Create failing acceptance tests
+- [x] Run acceptance tests (verify they fail)
+- [x] USER REVIEW — acceptance tests (developer waived the per-node review for this stack, 2026-11-07: "finish the rest without stopping")
+- [x] TDD Red — write failing unit/integration tests
 - [ ] TDD Green — implement with quality code
 - [ ] Update documentation with progress
 - [ ] Repeat Red→Green→Update cycle until feature complete
