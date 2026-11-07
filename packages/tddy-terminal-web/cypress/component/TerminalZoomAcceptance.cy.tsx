@@ -1,7 +1,7 @@
 import React, { createRef } from "react";
 import { flushSync } from "react-dom";
-import { GhosttyTerminal, type GhosttyTerminalHandle } from "../../src/components/GhosttyTerminal";
-import { GhosttyTerminalSession } from "../../src/components/GhosttyTerminalSession";
+import { GhosttyTerminal, type GhosttyTerminalHandle } from "../../src/GhosttyTerminal";
+import { GhosttyTerminalSession } from "../../src/GhosttyTerminalSession";
 import {
   DEFAULT_TERMINAL_FONT_MAX,
   DEFAULT_TERMINAL_FONT_MIN,

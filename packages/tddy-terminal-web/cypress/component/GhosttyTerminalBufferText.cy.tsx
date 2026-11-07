@@ -13,7 +13,7 @@ import { mount } from "cypress/react";
 import {
   GhosttyTerminal,
   type GhosttyTerminalHandle,
-} from "../../src/components/GhosttyTerminal";
+} from "../../src/GhosttyTerminal";
 
 const HISTORY_LINES = 20000;
 

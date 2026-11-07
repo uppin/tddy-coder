@@ -9,11 +9,11 @@
  */
 
 import React from "react";
-import { GhosttyTerminalSession } from "../../src/components/GhosttyTerminalSession";
+import { GhosttyTerminalSession } from "../../src/GhosttyTerminalSession";
 import type { TerminalFrame } from "tddy-client-web/connections/terminal";
 import { UploadProgressProvider } from "../../src/rpc/uploadProgress";
 import { byTestId, TEST_IDS } from "../support/testIds";
-import { NativeFileDropProvider } from "../../src/components/connection/nativeFileDrop";
+import { NativeFileDropProvider } from "../../src/connection/nativeFileDrop";
 import { aNativeFileDropDouble, centreOf } from "../support/util/nativeFileDrop";
 
 // ---------------------------------------------------------------------------
