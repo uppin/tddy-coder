@@ -10,7 +10,7 @@
  * cleanup **aborts the call** rather than flagging the loop: this feed is silent while nothing
  * changes, so a flag alone would be read only on the next event, which on an idle session never
  * comes — the iterator would stay parked forever and the call would never settle. The abort's reach
- * is client-side only (`packages/tddy-livekit-web/src/transport.ts` cancels locally without telling
+ * is client-side only (`packages/tddy-livekit-rpc-web/src/transport.ts` cancels locally without telling
  * the peer, a TODO carried there); ending the daemon's side is a separate server-side fix.
  *
  * Feature: docs/ft/daemon/session-agent-roster.md (AC50, AC53).

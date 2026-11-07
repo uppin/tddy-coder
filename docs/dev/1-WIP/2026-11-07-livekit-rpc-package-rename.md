@@ -1,7 +1,7 @@
 # Changeset: LiveKit RPC transport package rename (`tddy-livekit-rpc-web`)
 
 **Date**: 2026-11-07
-**Status**: 🚧 In Progress
+**Status**: 🚧 Green done (rename applied; Cypress left to CI)
 **Type**: Architecture Change
 **Complexity**: 4 — mechanical, but more than one package (the renamed package, `tddy-web`, `tddy-desktop` consumers, CI workflow, scripts)
 
@@ -89,9 +89,9 @@ transport sits at the old path and name. The workflow rename happens at green, o
 
 ## Scope
 
-- [ ] `git mv packages/tddy-livekit-web packages/tddy-livekit-rpc-web`; manifest + exports + scripts
-- [ ] `tddy-web`, `tddy-desktop`, root workspaces, aliases, imports updated
-- [ ] Workflow renamed; rule test green
+- [x] `git mv packages/tddy-livekit-web packages/tddy-livekit-rpc-web`; manifest + exports + scripts
+- [x] `tddy-web`, `tddy-desktop`, root workspaces, aliases, imports updated
+- [x] Workflow renamed; rule test green
 - [ ] Living docs updated (at wrap)
 
 ## Technical Changes
@@ -115,9 +115,9 @@ Same package at `packages/tddy-livekit-rpc-web`, name `tddy-livekit-rpc-web`. No
 
 ## Implementation Milestones
 
-- [ ] Rule test green
-- [ ] `tddy-livekit-rpc-web` Cypress specs green from its renamed config
-- [ ] `tddy-web` builds (`bun run build`)
+- [x] Rule test green
+- [ ] `tddy-livekit-rpc-web` Cypress specs green from its renamed config — NOT RUN in green (needs a Docker LiveKit and an `echo_server` build in a cold target/); left to CI; package unit tests (44) and `tsc` build pass
+- [x] `tddy-web` builds (`bun run build`)
 
 ## Testing Plan
 
@@ -171,7 +171,7 @@ manifest rows at the old path).
 - [x] Run acceptance tests (verify they fail)
 - [x] USER REVIEW — acceptance tests (developer waived the per-node review for this stack, 2026-11-07: "finish the rest without stopping")
 - [x] TDD Red — write failing unit/integration tests
-- [ ] TDD Green — implement with quality code
+- [x] TDD Green — implement with quality code
 - [ ] Update documentation with progress
 - [ ] Repeat Red→Green→Update cycle until feature complete
 - [ ] Run the touched packages' tests (rule test; `tddy-livekit-rpc-web` Cypress) — verify 100% pass

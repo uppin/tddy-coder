@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { create, type MessageInitShape } from "@bufbuild/protobuf";
 import type { Client } from "@connectrpc/connect";
-import { AsyncQueue } from "tddy-livekit-web";
+import { AsyncQueue } from "tddy-livekit-rpc-web";
 
 import {
   CodeQuerySchema,
