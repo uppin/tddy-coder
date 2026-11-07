@@ -1,0 +1,128 @@
+/**
+ * Acceptance test for auto-closing the sessions drawer after a new session is created.
+ *
+ * `SessionService` is daemon-level RPC (`useDaemonClient`), routed over the shared
+ * common-room LiveKit connection — see `aSessionServiceBackend` (in-memory fake) and
+ * `SelectedDaemonProvider` (via `withSelectedDaemon`). The test mounts SessionsDrawerScreen
+ * and drives the full create flow through the in-memory backend.
+ *
+ * Behaviour under test: once a session is successfully created, the left sessions drawer
+ * collapses so the new session's terminal is unobstructed in the main pane.
+ */
+import React from "react";
+import { servedAgentWire } from "../support/servedAgents";
+import { SessionsDrawerScreen } from "../../src/SessionsDrawerScreen";
+import { DEFAULT_TEST_DAEMON, withSelectedDaemon } from "../support/rpc/withSelectedDaemon";
+import { aSessionServiceBackend } from "../support/rpc/daemonSessionHostBackend";
+import { mountWithRecordingLiveKitRpc } from "../support/rpc/recordingLiveKitRpc";
+import { TEST_IDS, byTestId } from "../support/testIds";
+import { sessionsDrawerPage } from "../support/pages/sessionsDrawerPage";
+
+// ---------------------------------------------------------------------------
+// Fixtures
+// ---------------------------------------------------------------------------
+
+const NEW_SESSION_ID = "autoclose-session-bbbb-0000-0000-0000-000000000001";
+
+/**
+ * The Agent select's option value. Qualified by the host that offers the agent while the common room
+ * advertises daemons — this fixture advertises one, so the bare id names no option.
+ */
+const CLAUDE_OPTION = `claude@${DEFAULT_TEST_DAEMON.instanceId}`;
+
+/** Fixture returned by the second listSessions call after creation. */
+const NEW_SESSION_FIXTURE = {
+  sessionId: NEW_SESSION_ID,
+  createdAt: "2026-06-26T12:10:00Z",
+  status: "active",
+  repoPath: "/home/dev/new-feature",
+  pid: 20001,
+  isActive: true,
+  projectId: "proj-1",
+  daemonInstanceId: "",
+  workflowGoal: "New work",
+  pendingElicitation: false,
+};
+
+/** A session that already exists before the new one is created. */
+const EXISTING_SESSION_FIXTURE = {
+  sessionId: "existing-session-aaaa-0000-0000-0000-000000000001",
+  createdAt: "2026-06-26T12:00:00Z",
+  status: "exited",
+  repoPath: "/home/dev/old-feature",
+  pid: 0,
+  isActive: false,
+  projectId: "proj-1",
+  daemonInstanceId: "",
+  workflowGoal: "Old work",
+  pendingElicitation: false,
+};
+
+/**
+ * Backend that starts with `before` and returns `before` plus the new session after creation.
+ * Defaults to an empty starting list.
+ */
+function backendThatCreates(before: (typeof EXISTING_SESSION_FIXTURE)[] = []) {
+  let callCount = 0;
+  return aSessionServiceBackend({
+    projectsOverride: [{ projectId: "proj-1", name: "Test Project" }],
+    agents: [{ id: "claude", label: "Claude (opus)", ...servedAgentWire("claude"), }],
+    listSessionsFactory: () => {
+      callCount++;
+      return callCount > 1 ? [...before, NEW_SESSION_FIXTURE] : before;
+    },
+    startSession: {
+      sessionId: NEW_SESSION_ID,
+      livekitRoom: `room-${NEW_SESSION_ID}`,
+      livekitUrl: "ws://127.0.0.1:7880",
+      livekitServerIdentity: "server-new",
+    },
+    connectSession: { livekitRoom: `room-${NEW_SESSION_ID}` },
+  });
+}
+
+/** Fill the required create-form fields and submit. */
+function createSession() {
+  byTestId(TEST_IDS.sessionsDrawerNewBtn).click();
+  byTestId(TEST_IDS.createSessionProjectSelect).select("proj-1");
+  byTestId(TEST_IDS.createSessionAgentSelect).select(CLAUDE_OPTION);
+  byTestId(TEST_IDS.createSessionSubmitBtn).should("not.be.disabled").click();
+}
+
+// ---------------------------------------------------------------------------
+
+describe("CreateSession acceptance — drawer auto-close after creation", () => {
+  beforeEach(() => {
+    cy.viewport(1280, 800); // desktop: session list defaults open, so the close is observable
+    cy.clearLocalStorage();
+    cy.clearAllSessionStorage();
+    window.localStorage.setItem("tddy_session_token", "fake-token");
+  });
+
+  it("auto-closes the sessions drawer after a new session is created", () => {
+    // Given — desktop with the drawer open
+    const backend = backendThatCreates();
+    mountWithRecordingLiveKitRpc(withSelectedDaemon(<SessionsDrawerScreen />), backend);
+    sessionsDrawerPage.drawer().should("have.attr", "data-drawer-state", "open");
+
+    // When — a new session is created
+    createSession();
+
+    // Then — the drawer collapses so the new session's terminal is unobstructed
+    sessionsDrawerPage.drawer().should("have.attr", "data-drawer-state", "closed");
+  });
+
+  it("opens the new session when other sessions are already listed", () => {
+    // Given — the list already holds a session, so it is loaded before the new one appears in it
+    const backend = backendThatCreates([EXISTING_SESSION_FIXTURE]);
+    mountWithRecordingLiveKitRpc(withSelectedDaemon(<SessionsDrawerScreen />), backend);
+    byTestId(`sessions-drawer-item-${EXISTING_SESSION_FIXTURE.sessionId}`).should("exist");
+
+    // When — a new session is created
+    createSession();
+
+    // Then — the new session is opened, never the not-found state
+    byTestId("sessions-detail-pane").should("exist");
+    byTestId(TEST_IDS.terminalRouteUnknownSession).should("not.exist");
+  });
+});

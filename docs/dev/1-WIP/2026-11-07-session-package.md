@@ -7,6 +7,8 @@
 
 **Stack**: `#web-split` 14/16 — branch `feature/web-split/session`, base `feature/web-split/prstack`
 
+**PR**: [#851](https://github.com/uppin/tddy-coder/pull/851)
+
 ## Initial Discovery
 
 [2026-11-07-session-package-initial-discovery.md](./2026-11-07-session-package-initial-discovery.md)
@@ -50,7 +52,7 @@ records move with their files.
 ## Responsibility
 
 - `tddy-session-web` exports `SessionsDrawerScreen`, `SessionDrawer`, `SessionRuntime`, `SessionMainPane`, `SessionTerminalTabs`, `GrpcSessionTerminal`, `SessionInspectorDrawer` and tabs, `SessionAgentRosterPane`/`SessionAgentTree`/`SessionAgentConversationLayer`, `ProjectHomeEntry`, `StatusBar`, `SessionTrafficStrip`, `WorktreeCodePane` and `components/session/*`, the session runtime registry and notification registry, and their hooks/helpers (`utils/session*`, `lib/session*`).
-- Moved specs (~90: `Session*`, `Sessions*`, `Dormant*`, `Durable*`, `FastSession*`, `GrpcSession*`, `ConnectedSession*`, `UnifiedLayout*`, `UseTmux*`, `CodeHover*`, `CodeIndex*`, `RestructurePlan*`, `WorktreeCodePane*`) and their page objects/drivers.
+- Moved specs (156 — see `## Draft PR contract`; originally ~90: `Session*`, `Sessions*`, `Dormant*`, `Durable*`, `FastSession*`, `GrpcSession*`, `ConnectedSession*`, `UnifiedLayout*`, `UseTmux*`, `CodeHover*`, `CodeIndex*`, `RestructurePlan*`, `WorktreeCodePane*`) and their page objects/drivers.
 - Its boundary rule test `packages/tddy-session-web/src/packageBoundary.test.ts` and `web-tddy-session-web.yml`.
 
 ## Boundaries
@@ -74,6 +76,16 @@ implementing one here collides with the PR that owns it.
 | `n10` chat, `n11` hosts, `n12` workspace, `n13` prstack | their packages | the session layout composes them | move them |
 
 ## Draft PR contract
+
+**As pushed (commit 2):** skeleton, workflow, boundary rule; **156** specs `git mv`'d — every remaining
+`tddy-web` component spec that mounts session code, **including** the specs earlier nodes left behind because
+they drive their feature through the sessions drawer (5 create-session, 9 terminal, 7 subagent/activity,
+6 host, 36 PR-stack, 1 workflow-chat routing, 1 provider-defaults). Imports of `src/components/sessions/` →
+package `src/`, `src/components/session/` → `src/code/`. Left in `tddy-web` for `feature/web-split/wiring`:
+`App`, `AppShell`, `DaemonSelector*` (3), `DesktopIpcHostAcceptance`, `ServerStreamFallback`,
+`useConnectionStatus`, `worktreeToolParity`; LiveKit specs are `feature/web-split/livekit`'s.
+
+Originally planned:
 
 First push (commit 2): the `tddy-session-web` skeleton (manifest exporting the surface in `## Responsibility`, Cypress/Vite config, workflow), the specs, page objects and drivers listed below `git mv`'d into the package with imports pointing at it, and the boundary rule — failing until the modules move.
 
@@ -153,10 +165,10 @@ Real dependency edges, as opposed to the branch line:
 - [x] Cross-check `packages/*/docs/code-issues/` and `docs/dev/todo/` for items this change touches (Step 2b)
 - [x] Create/update PRD documentation
 - [x] Create changeset (this document)
-- [ ] Create failing acceptance tests
-- [ ] Run acceptance tests (verify they fail)
-- [ ] USER REVIEW — acceptance tests
-- [ ] TDD Red — write failing unit/integration tests
+- [x] Create failing acceptance tests
+- [x] Run acceptance tests (verify they fail)
+- [x] USER REVIEW — acceptance tests (developer waived the per-node review for this stack, 2026-11-07: "finish the rest without stopping")
+- [x] TDD Red — write failing unit/integration tests
 - [ ] TDD Green — implement with quality code
 - [ ] Update documentation with progress
 - [ ] Repeat Red→Green→Update cycle until feature complete
