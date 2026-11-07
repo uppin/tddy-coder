@@ -32,7 +32,7 @@ deferred AC-3 and its 1-WIP documents are wrapped away when the PR is readied.
 
 - ⚠ **Do not follow the `vnc_*` trail.** `packages/tddy-vnc`'s input methods,
   `packages/tddy-service/proto/vnc_input.proto` (`VncInputService`),
-  `packages/tddy-web/src/components/sessions/VncOverlay.tsx` and its `vncInput.ts` helpers are the
+  `packages/tddy-hosts-web/src/VncOverlay.tsx` and its `vncInput.ts` helpers are the
   **superseded generation**, kept but unused — nothing in production references them. `vncInput.ts`
   does contain sound, unit-tested coordinate-scaling and keysym-mapping helpers that the new client
   can lift or re-derive. `VncOverlay.tsx`'s docblock claims it "Captures pointer and keyboard

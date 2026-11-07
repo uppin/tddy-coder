@@ -2,7 +2,7 @@
 
 Every host tddy has a record of, reachable or not.
 
-The [host directory](host-directory.md) answers "who can this page talk to right now", and every
+The [host directory](../../tddy-web/docs/host-directory.md) answers "who can this page talk to right now", and every
 host-selection surface reads it. The Hosts screen answers a different question: which machines does
 the daemon *remember*. Its reason to exist is the **offline row** — a host that has left the common
 room disappears from every other surface in tddy, which is exactly the moment an operator wants to
@@ -16,8 +16,8 @@ host is listed with its last-seen time rather than omitted.
 
 | | |
 |---|---|
-| Route | `HOSTS_ROUTE = "/hosts"` and `isHostsPath` in `src/routing/appRoutes.ts` — an exact match, no sub-paths |
-| Dispatch | one branch in the `src/index.tsx` route chain |
+| Route | `HOSTS_ROUTE = "/hosts"` and `isHostsPath` in `tddy-web`'s `src/routing/appRoutes.ts` — an exact match, no sub-paths |
+| Dispatch | one branch in `tddy-web`'s `src/index.tsx` route chain |
 | Nav | `shell-menu-hosts` in `DaemonNavMenu`, between **Models & Agents** and **Accounts** — beside the other machine-level screen, and clear of the Projects→Models adjacency the menu order pins |
 
 ## Components
@@ -123,7 +123,7 @@ with no bridge binary is a spawn failure the operator would meet *after* asking)
 A fourth fact gates the button and the row cannot read it from a probe: whether this host is reached
 over a connection that **carries media**. `useHostConnection(instanceId)` plus
 `useHasCapability(connection, "media")` — the one predicate, never re-derived from a `Room`, a
-transport or a status string ([capability-gating.md](capability-gating.md)). Without it the button
+transport or a status string ([capability-gating.md](../../tddy-web/docs/capability-gating.md)). Without it the button
 is **absent, not disabled**: `IPC_CAPABILITIES` is `{"rpc"}`, so on a host reached that way a LiveKit
 track cannot arrive however reachable its desktop is, and a control that provably cannot work is
 worse than no control.
@@ -217,7 +217,7 @@ A connected desktop takes input. `ScreenSharingOverlay` opens a `ScreenSharingIn
 at the bridge participant for as long as it is mounted and forwards the operator's pointer and
 keyboard onto it — the same overlay, and so the same behaviour, on this scope and the session one.
 Escape goes to the desktop; `Ctrl+Alt+Esc` is the one chord the overlay keeps. See
-[`remote-desktop-input.md`](./remote-desktop-input.md).
+[`remote-desktop-input.md`](../../tddy-web/docs/remote-desktop-input.md).
 
 **`HostRowToolingCell`** mounts `HostRowTooling` on every online row. `HostRowTooling` renders a report it
 is handed and fetches nothing; the cell is what asks. `useHostTooling(instanceId, online)` owns the
@@ -361,7 +361,7 @@ LAN address, which is not a secure context, so **add-key works only on a secure 
 work over LAN needs TLS, which the daemon has nowhere today. Cypress cannot catch a regression here —
 component tests run on `localhost`, which *is* a secure context — so the refusal is covered by units
 that swap the `crypto` global. See
-[insecure-origin-constraints.md](insecure-origin-constraints.md).
+[insecure-origin-constraints.md](../../tddy-web/docs/insecure-origin-constraints.md).
 
 ## Picking a key instead of recalling one
 
@@ -441,10 +441,11 @@ as a plain `number`; millisecond stamps are far below 2^53, so widening loses no
 
 ## Testing
 
-`cypress/component/HostsScreenAcceptance.cy.tsx` mounts
-`mountWithRpc(withSelectedDaemon(<HostsAppPage />), backend)` against the in-memory backend, and
+`cypress/component/HostsScreenAcceptance.cy.tsx` mounts `<HostsContent />` with
+`cy.mountWithClients` (`cypress/support/mountWithHosts.tsx`) against the in-memory backend, and
 covers online, offline-with-last-seen, the sort, the local marker in both its positive and negative
-case, reaching the screen from the nav menu, and the one-RPC-per-visit boundary.
+case, and the one-RPC-per-visit boundary. Reaching the screen from the nav menu is the shell's, in
+`tddy-web`'s `cypress/component/HostsAppPageNavigation.cy.tsx`.
 
 `cypress/component/HostsScreenToolingMountAcceptance.cy.tsx` mounts the assembled screen (`HostsAppPage`) and lets each row fetch its own `GetHostTooling`: Connect on an online row, one call per online row per visit, **no call for an offline host even when its wire is reachable** (so only the `online` flag keeps it quiet), and the "could not be read" state when the host does not answer.
 
@@ -534,30 +535,30 @@ the action is offered and where it is not, the dialog the host's question raises
 block and its two-step accept, the accepted key becoming the next pin, the daemon's rejection reaching
 the operator, and cancel freeing the row.
 
-`src/rpc/hostPromptsSubscription.test.ts` pins the read loop directly: prompts delivered in order,
+`src/hostPromptsSubscription.test.ts` pins the read loop directly: prompts delivered in order,
 the call cancelled on unsubscribe, a feed cancelled having never raised a prompt (this feed's normal
 state), delivery stopping after unsubscribe, the self-inflicted `AbortError` swallowed — and, so that
 swallow is not vacuous, a feed the daemon drops while the caller is still subscribed being reported.
 
-`src/lib/hostKeyPinning.test.ts`, `hostKeyFingerprint.test.ts` and `encryptForHost.test.ts` cover the
+`src/hostKeyPinning.test.ts`, `hostKeyFingerprint.test.ts` and `encryptForHost.test.ts` cover the
 verdicts, the derivation and the insecure-origin refusal, the last by swapping the `crypto` global for
 one with no `subtle`. Cypress cannot reach that path: component tests run on `localhost`.
 
-`src/components/hosts/hostRowFormat.test.ts` pins the phrasing against a frozen clock;
-`src/routing/appRoutes.test.ts` pins `isHostsPath` (positive, root, a sibling route, a sub-path).
-`src/components/hosts` is listed in `package.json`'s `test:unit` directories, which is what makes
-those unit tests run in CI.
+`src/hostRowFormat.test.ts` pins the phrasing against a frozen clock;
+`tddy-web`'s `src/routing/appRoutes.test.ts` pins `isHostsPath` (positive, root, a sibling route, a sub-path).
+The package's `bun test src` (`test:ci`, run by a `Web tests` shard) is what makes those unit tests
+run in CI.
 
 ## See also
 
 - Daemon: [host-registry.md](../../tddy-host-service/docs/host-registry.md),
   [host-service.md](../../tddy-host-service/docs/host-service.md)
-- Web: [host-directory.md](host-directory.md), [host-connections.md](host-connections.md)
+- Web: [host-directory.md](../../tddy-web/docs/host-directory.md), [host-connections.md](../../tddy-web/docs/host-connections.md)
 - Daemon: [host-tooling-probe.md](../../tddy-host-service/docs/host-tooling-probe.md) — the probe behind
   `GetHostTooling`
 - Daemon: [host-add-key.md](../../tddy-host-service/docs/host-add-key.md) — the prompt registry, the host
   keypair and the per-user key read behind the add
-- Web: [insecure-origin-constraints.md](insecure-origin-constraints.md) — why `crypto.subtle` has no
+- Web: [insecure-origin-constraints.md](../../tddy-web/docs/insecure-origin-constraints.md) — why `crypto.subtle` has no
   fallback here
 - Feature: [docs/ft/web/hosts-screen-add-key.md](../../../docs/ft/web/hosts-screen-add-key.md)
 - Feature: [docs/ft/web/hosts-screen.md](../../../docs/ft/web/hosts-screen.md)

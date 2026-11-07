@@ -107,7 +107,7 @@ export function useHostStats(hostId?: string | null): UseHostStatsResult {
       (signal) => client.streamHostStats({ sessionToken: sessionToken ?? "" }, { signal }),
       (event) => {
         setPerCorePercent(event.cpu?.perCorePercent ?? []);
-        setLogicalCores(event.cpu ? event.cpu.logicalCores : null);
+        setLogicalCores(event.cpu?.logicalCores ?? null);
         if (event.disk) {
           setDisk({
             availableBytes: event.disk.availableBytes,

@@ -11,7 +11,7 @@ for an operator asking why the machine they used this morning is silent.
 stops being visible, and **never removes an entry**. What one sighting or one departure does to a
 stored row — `apply_sighting`, `apply_departure`, and the validation and bounding of the instance id, label and repos path they apply — is in
 `host_registry/sightings.rs`; `FileHostRegistry` in `host_registry.rs` reads, applies and writes. It backs the web's Hosts screen
-([hosts-screen.md](../../tddy-web/docs/hosts-screen.md), feature
+([hosts-screen.md](../../tddy-hosts-web/docs/hosts-screen.md), feature
 [docs/ft/web/hosts-screen.md](../../../docs/ft/web/hosts-screen.md)).
 
 Its directory is where the daemon keeps everything else scoped to a host rather than to a session —
@@ -289,7 +289,7 @@ for — a handful of machines; a deployment with hundreds would want a map.
 - Desktop reachability on the same row: [host-tooling-probe.md](host-tooling-probe.md#remote-desktop)
 - Feature: [docs/ft/web/screen-sharing-sessions.md](../../../docs/ft/web/screen-sharing-sessions.md)
   — both scopes of the remote-desktop feature
-- Web: [hosts-screen.md](../../tddy-web/docs/hosts-screen.md),
+- Web: [hosts-screen.md](../../tddy-hosts-web/docs/hosts-screen.md),
   [host-directory.md](../../tddy-web/docs/host-directory.md)
 - Feature: [docs/ft/web/hosts-screen.md](../../../docs/ft/web/hosts-screen.md)
 - [changesets/](./changesets/)

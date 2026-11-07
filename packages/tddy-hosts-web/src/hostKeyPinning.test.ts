@@ -82,9 +82,9 @@ function aStorageThatRefusesWrites(): FakeStorage {
 
 /** Installs `storage` as `window.localStorage` for the duration of `fn`, then restores the global. */
 function withBrowserStorage(storage: FakeStorage, fn: () => void): void {
-  const global = globalThis as typeof globalThis & { window?: Window };
+  const global = globalThis as unknown as { window?: Window };
   const previousWindow = global.window;
-  global.window = { ...previousWindow, localStorage: storage } as unknown as Window;
+  global.window = { ...previousWindow, localStorage: storage } as unknown as typeof global.window;
   try {
     fn();
   } finally {
@@ -98,9 +98,9 @@ async function withBrowserStorageAsync(
   storage: FakeStorage,
   fn: () => Promise<void>,
 ): Promise<void> {
-  const global = globalThis as typeof globalThis & { window?: Window };
+  const global = globalThis as unknown as { window?: Window };
   const previousWindow = global.window;
-  global.window = { ...previousWindow, localStorage: storage } as unknown as Window;
+  global.window = { ...previousWindow, localStorage: storage } as unknown as typeof global.window;
   try {
     await fn();
   } finally {

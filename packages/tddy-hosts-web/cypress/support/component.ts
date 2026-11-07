@@ -16,9 +16,9 @@ declare global {
   }
 }
 
-// No stylesheet is loaded on purpose, as in tddy-web's component support: these specs pin behaviour
-// of components that carry their own layout, and a global theme would turn their fixed-position
-// overlays into real, stacked layers that cover each other's controls.
+// No stylesheet is loaded here, as in tddy-web's component support: these specs pin behaviour, not
+// layout. A spec whose point is how the fixed-position overlays stack in the app imports
+// `tddy-ui-web/theme.css` itself (HostDesktopSignInAcceptance: the sign-in dialog above "Connecting…").
 
 /**
  * `strict: false` as in tddy-web, so a dev double-mount does not discard imperative refs mid-test.

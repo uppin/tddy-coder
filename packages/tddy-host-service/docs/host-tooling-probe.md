@@ -725,6 +725,6 @@ parse. Nothing branches on the text.
   [host-service.md § Host stats](./host-service.md#host-stats); this module copies its
   injectable-trait shape
 - Feature: [docs/ft/web/hosts-screen-tooling.md](../../../docs/ft/web/hosts-screen-tooling.md)
-- Web: [packages/tddy-web/docs/hosts-screen.md](../../tddy-web/docs/hosts-screen.md)
+- Web: [packages/tddy-hosts-web/docs/hosts-screen.md](../../tddy-hosts-web/docs/hosts-screen.md)
 - Feature: [docs/ft/web/screen-sharing-sessions.md](../../../docs/ft/web/screen-sharing-sessions.md)
   — the per-session bridging whose binaries the desktop block checks for

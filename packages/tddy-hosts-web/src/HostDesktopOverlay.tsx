@@ -403,18 +403,6 @@ export function HostDesktopOverlay({
   // was ever in flow — so the body is where they already behave as though they are.
   return createPortal(
     <div data-testid={`host-desktop-overlay-${hostId}`}>
-      {question !== null && offered !== null && !needsNoSignIn && (
-        <HostDesktopSignInDialog
-          question={question}
-          offered={offered}
-          error={signInError}
-          onSubmit={(encryptedAnswer) => void answerWithCredentials(question, encryptedAnswer)}
-          // Declining the question is declining the desktop: the start has nothing to proceed with,
-          // and closing releases it rather than leaving an overlay in front of a call that can only
-          // time out.
-          onCancel={onClose}
-        />
-      )}
       {stream ? (
         <ScreenSharingOverlay
           room={room}
@@ -438,6 +426,20 @@ export function HostDesktopOverlay({
             Close
           </button>
         </div>
+      )}
+      {/* After the layer below, not before it: both are `fixed inset-0 z-50`, so the later one
+          paints on top, and the dialog is what the operator has to reach. */}
+      {question !== null && offered !== null && !needsNoSignIn && (
+        <HostDesktopSignInDialog
+          question={question}
+          offered={offered}
+          error={signInError}
+          onSubmit={(encryptedAnswer) => void answerWithCredentials(question, encryptedAnswer)}
+          // Declining the question is declining the desktop: the start has nothing to proceed with,
+          // and closing releases it rather than leaving an overlay in front of a call that can only
+          // time out.
+          onCancel={onClose}
+        />
       )}
     </div>,
     document.body,

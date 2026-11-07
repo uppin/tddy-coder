@@ -217,5 +217,5 @@ need touching at all.
   feature's crypto is answering
 - Daemon: [`packages/tddy-host-service/docs/host-add-key.md`](../../../packages/tddy-host-service/docs/host-add-key.md),
   [`host-service.md`](../../../packages/tddy-host-service/docs/host-service.md#addhostkey-and-the-prompt-channel)
-- Web: [`packages/tddy-web/docs/hosts-screen.md`](../../../packages/tddy-web/docs/hosts-screen.md),
+- Web: [`packages/tddy-hosts-web/docs/hosts-screen.md`](../../../packages/tddy-hosts-web/docs/hosts-screen.md),
   [`insecure-origin-constraints.md`](../../../packages/tddy-web/docs/insecure-origin-constraints.md)

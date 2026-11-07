@@ -40,10 +40,12 @@ import {
   type HostKeyCandidate,
   type HostSshAgent,
 } from "tddy-client-web/gen/host_pb";
-import { useAuth } from "tddy-client-web";
+import { useAuth, tddyDebug } from "tddy-client-web";
 import { HostPassphraseDialog } from "./HostPassphraseDialog";
 import { useHostPromptAnswer } from "./useHostPromptAnswer";
 import { useHostClient } from "tddy-client-web";
+
+const dbg = tddyDebug("tddy:hosts");
 
 export interface HostAddKeyActionProps {
   instanceId: string;
@@ -141,7 +143,7 @@ export function HostAddKeyAction({
       .catch((error: unknown) => {
         // Not the operator's problem: a host that cannot say what keys it has — an older daemon, a
         // refusal — is not a host that cannot take one, and the field beside the picker still works.
-        console.debug("[HostAddKeyAction] host offered no key listing", instanceId, error);
+        dbg("HostAddKeyAction: host offered no key listing", instanceId, error);
       });
     return () => {
       current = false;

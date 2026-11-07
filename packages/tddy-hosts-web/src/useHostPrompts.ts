@@ -19,8 +19,9 @@
 import { useEffect, useState } from "react";
 import { HostService } from "tddy-client-web/gen/host_pb";
 import { subscribeHostPrompts, type HostPromptEventLike } from "./hostPromptsSubscription";
-import { useAuth } from "tddy-client-web";
-import { useHostClient } from "tddy-client-web";
+import { tddyDebug, useAuth, useHostClient } from "tddy-client-web";
+
+const dbg = tddyDebug("tddy:hosts");
 
 export type { HostPromptEventLike };
 
@@ -71,7 +72,7 @@ export function useHostPromptsFor(
         // Not the caller's to render: this hook reports what a host is asking, and a feed that died
         // is asking nothing. Said out loud all the same, because a dead feed and an idle one look
         // identical from here.
-        console.debug("[useHostPrompts] host prompt stream ended", hostId, error);
+        dbg("useHostPrompts: host prompt stream ended", hostId, error);
       },
     );
 

@@ -262,7 +262,7 @@ nothing itself.
 
 - Daemon: [`packages/tddy-host-service/docs/host-tooling-probe.md`](../../../packages/tddy-host-service/docs/host-tooling-probe.md),
   [`host-service.md`](../../../packages/tddy-host-service/docs/host-service.md)
-- Web: [`packages/tddy-web/docs/hosts-screen.md`](../../../packages/tddy-web/docs/hosts-screen.md)
+- Web: [`packages/tddy-hosts-web/docs/hosts-screen.md`](../../../packages/tddy-hosts-web/docs/hosts-screen.md)
 - Feature: [hosts-screen-add-key.md](./hosts-screen-add-key.md) — loading a key into the agent this
   section reports on
 - Related: [`screen-sharing-sessions.md`](./screen-sharing-sessions.md) — the per-session VNC/RDP

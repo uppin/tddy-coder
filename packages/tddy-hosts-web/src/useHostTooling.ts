@@ -5,8 +5,9 @@
 
 import { useEffect, useState } from "react";
 import { HostService, type GetHostToolingResponse } from "tddy-client-web/gen/host_pb";
-import { useAuth } from "tddy-client-web";
-import { useHostClient } from "tddy-client-web";
+import { tddyDebug, useAuth, useHostClient } from "tddy-client-web";
+
+const dbg = tddyDebug("tddy:hosts");
 
 /** What the one call has come to: not yet answered, answered, or failed. */
 export type HostToolingReading =
@@ -36,7 +37,7 @@ export function useHostTooling(instanceId: string, online: boolean): HostTooling
         if (current) setReading({ state: "answered", tooling });
       })
       .catch((error: unknown) => {
-        console.debug("[useHostTooling] host did not report its tooling", instanceId, error);
+        dbg("useHostTooling: host did not report its tooling", instanceId, error);
         if (current) setReading({ state: "failed" });
       });
     return () => {

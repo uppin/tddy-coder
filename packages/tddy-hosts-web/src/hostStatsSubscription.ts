@@ -13,13 +13,21 @@
  * PRD: `docs/ft/web/hosts-screen-telemetry.md` (AC-6)
  */
 
+import { tddyDebug } from "tddy-client-web";
+
+const dbg = tddyDebug("tddy:hosts");
+
 /**
  * The part of a `HostStatsEvent` this loop passes on — structurally satisfied by the generated
  * message, so the hook hands over the wire type unchanged and tests can hand over a literal.
  */
 export interface HostStatsEventLike {
-  cpu?: { perCorePercent: number[] };
+  /** `logicalCores` is absent from a fake that pins only the CPU percentages. */
+  cpu?: { perCorePercent: number[]; logicalCores?: number };
   disk?: { availableBytes: bigint; totalBytes: bigint; projectDir: string };
+  memory?: { availableBytes: bigint; totalBytes: bigint };
+  /** Absent on a platform with no load average. */
+  load?: { oneMinute: number; fiveMinutes: number; fifteenMinutes: number };
 }
 
 export interface HostStatsSubscription {
@@ -61,7 +69,7 @@ export function subscribeHostStats(
     // A stream aborted on unsubscribe rejects with an AbortError; that is this code's own doing and
     // is not worth reporting. Anything else ended a feed somebody was reading.
     if (unsubscribed) return;
-    console.debug("[hostStatsSubscription] host stats stream ended", error);
+    dbg("hostStatsSubscription: host stats stream ended", error);
   };
 
   void (async () => {

@@ -14,6 +14,9 @@
  * Feature: docs/ft/web/screen-sharing-sessions.md (AC-SS-15, AC-SS-19)
  */
 
+// The app's stylesheet, so the overlays stack as they do in the app: the sign-in dialog must be the
+// layer the operator reaches, above the "Connecting…" overlay it is opened over.
+import "tddy-ui-web/theme.css";
 import { create, fromBinary } from "@bufbuild/protobuf";
 import { Code, ConnectError } from "@connectrpc/connect";
 import { anInMemoryRpcBackend, type InMemoryRpcBackend } from "tddy-connectrpc-testkit";

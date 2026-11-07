@@ -1,4 +1,4 @@
-# Host stats streaming (`src/rpc/useHostStats.ts`, `src/rpc/hostStatsSubscription.ts`)
+# Host stats streaming (`src/useHostStats.ts`, `src/hostStatsSubscription.ts`)
 
 `ConnectionService.StreamHostStats` is a server-stream carrying a host's per-core CPU, its logical
 core count, total/available memory, its load average where the platform has one, and the free/total
@@ -56,17 +56,17 @@ Two details that are easy to lose in a refactor:
 - Only `open()` and `next()` sit inside `catch`. The caller's own handler does not, so a bug there
   surfaces instead of being mistaken for a dropped feed. A teardown's AbortError is not reported.
 
-Tests live in `src/rpc/hostStatsSubscription.test.ts`. One fake is deliberately shaped like the real
+Tests live in `src/hostStatsSubscription.test.ts`. One fake is deliberately shaped like the real
 client — `next` only, no `return` — because a fake offering `return()` lets a subscription that never
 cancels look correct.
 
 ## `telemetryFeedFor` — which host a row reads
 
-`src/components/hosts/hostTelemetryState.ts` answers, for one Hosts row, which host its cell should
+`src/hostTelemetryState.ts` answers, for one Hosts row, which host its cell should
 read: the row's own `instanceId` when it is online **and** routable, otherwise `null`.
 
 It is a pure function, and separate from the component, because it is the one property a component
-test cannot observe. Every host in `mountWithRpc` shares one in-memory transport and
+test cannot observe. Every host in the specs' in-memory backend shares one transport and
 `StreamHostStatsRequest` names no host, so a cell reading the selected daemon for every row renders
 identical DOM and opens an identical number of streams.
 

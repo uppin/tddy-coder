@@ -14,8 +14,10 @@
 
 import { useEffect, useState } from "react";
 import { HostService, ProbeOutcome, type ListSshConfigHostsResponse } from "tddy-client-web/gen/host_pb";
-import { useAuth } from "tddy-client-web";
+import { useAuth, tddyDebug } from "tddy-client-web";
 import { useHostClient } from "tddy-client-web";
+
+const dbg = tddyDebug("tddy:hosts");
 
 export interface HostRowSshConfigProps {
   instanceId: string;
@@ -88,7 +90,7 @@ export function HostRowSshConfig({ instanceId }: HostRowSshConfigProps) {
         if (current) setListing(response);
       })
       .catch((error: unknown) => {
-        console.debug("[HostRowSshConfig] host offered no SSH config listing", instanceId, error);
+        dbg("HostRowSshConfig: host offered no SSH config listing", instanceId, error);
       });
     return () => {
       current = false;
