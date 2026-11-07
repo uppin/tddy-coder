@@ -21,7 +21,7 @@
 import { useState } from "react";
 import { DesktopChannelKind, ProbeOutcome, type HostRemoteDesktop } from "tddy-client-web/gen/host_pb";
 import { Protocol } from "tddy-client-web/gen/screen_sharing_pb";
-import { useHasCapability } from "../../rpc/connections/useHasCapability";
+import { useHasCapability } from "tddy-client-web";
 import { HostDesktopOverlay } from "./HostDesktopOverlay";
 import { useHostConnection } from "tddy-client-web";
 

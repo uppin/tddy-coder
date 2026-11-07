@@ -12,9 +12,9 @@
  */
 
 import { useMemo } from "react";
-import { SELF_LABEL_SUFFIX } from "../../lib/participantRole";
-import { hostDescriptorOf } from "./daemonHost";
-import type { HostDirectorySource } from "./types";
+import { SELF_LABEL_SUFFIX } from "tddy-client-web";
+import { hostDescriptorOf } from "tddy-client-web";
+import type { HostDirectorySource } from "tddy-client-web";
 
 /** The id this source contributes under. Precedence is stated against it, so it is a constant. */
 export const SERVING_SOURCE_ID = "serving";

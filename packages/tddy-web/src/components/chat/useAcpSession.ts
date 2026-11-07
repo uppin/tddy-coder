@@ -1,12 +1,8 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { create } from "@bufbuild/protobuf";
-import { createClient, type Client } from "@connectrpc/connect";
-import type { Room } from "livekit-client";
+import type { Client } from "@connectrpc/connect";
 import { AsyncQueue } from "tddy-livekit-rpc-web";
-import {
-  useLiveKitTransportFactory,
-  useLiveKitTransportFactoryIsOverridden,
-} from "../../rpc/transportProvider";
+import { useParticipantPresent, useRoomClient, type RoomHandle } from "tddy-client-web";
 import {
   AcpClientMessageSchema,
   AcpService,
@@ -14,7 +10,7 @@ import {
   type ModelSessionTarget,
   type ToolCallUpdate,
 } from "tddy-client-web/gen/tddy/acp/v1/acp_pb";
-import { tddyDebug } from "../../lib/debugMask";
+import { tddyDebug } from "tddy-client-web";
 import { toolEntryText, toolStatusOf } from "./toolCallPresentation";
 import type {
   ChatMessage,
@@ -44,24 +40,16 @@ const dbg = tddyDebug("tddy:acp:session");
  * before continuing. Without it, the default `new_session` path starts a fresh session.
  */
 export function useAcpSession(
-  room: Room | null,
+  room: RoomHandle | null,
   serverIdentity: string,
   resumeSessionId?: string,
 ): UseAgentChatResult {
-  const liveKitFactory = useLiveKitTransportFactory();
-  const factoryIsOverridden = useLiveKitTransportFactoryIsOverridden();
-  const canBuildClient = room !== null || factoryIsOverridden;
-
-  const client = useMemo(() => {
-    if (!canBuildClient) {
-      dbg("no client: canBuildClient=false — stream will NOT open");
-      return null;
-    }
-    dbg("building AcpService client: room=%o serverIdentity=%o", room !== null, serverIdentity);
-    const transport = liveKitFactory(room as Room, serverIdentity);
-    return createClient(AcpService, transport);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [liveKitFactory, canBuildClient, room, serverIdentity]);
+  const client = useRoomClient(room, serverIdentity, AcpService);
+  // Read at the moment of a send, never captured: the peer's liveness changes without this hook
+  // re-running, and a caller refusing to send into a stream nobody reads has to see that then.
+  const presenterPresent = useParticipantPresent(room, serverIdentity);
+  const presenterPresentRef = useRef(presenterPresent);
+  presenterPresentRef.current = presenterPresent;
 
   return useAcpSessionOverClient(
     client,
@@ -78,7 +66,7 @@ export function useAcpSession(
       ? {
           name: serverIdentity,
           label: "the presenter",
-          isServing: () => room.remoteParticipants.has(serverIdentity),
+          isServing: () => presenterPresentRef.current,
         }
       : undefined,
   );

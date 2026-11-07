@@ -5,7 +5,7 @@
  */
 
 import { useEffect, useMemo } from "react";
-import type { DaemonHost } from "../lib/participantRole";
+import type { DaemonHost } from "tddy-client-web";
 import {
   findListedDaemon,
   readRememberedDaemonLabel,

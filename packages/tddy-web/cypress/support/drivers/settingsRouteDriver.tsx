@@ -7,7 +7,7 @@
 
 import React from "react";
 import { create } from "@bufbuild/protobuf";
-import { Room } from "livekit-client";
+import { aDisconnectedRoom } from "tddy-livekit-web/testkit";
 import { anInMemoryRpcBackend } from "tddy-connectrpc-testkit";
 import { App } from "../../../src/index";
 import { AuthProvider } from "../../../src/hooks/authProvider";
@@ -70,7 +70,7 @@ export function theApp(backend: Backend) {
       });
       mountWithRpc(
         <AuthProvider>
-          <App testDaemonRoom={new Room()} testDaemonHosts={[THE_SERVING_DAEMON]} />
+          <App testDaemonRoom={aDisconnectedRoom()} testDaemonHosts={[THE_SERVING_DAEMON]} />
         </AuthProvider>,
         backend,
       );

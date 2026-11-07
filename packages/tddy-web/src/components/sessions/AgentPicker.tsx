@@ -1,7 +1,7 @@
 import React, { useState } from "react";
 import { CatalogService } from "tddy-client-web/gen/catalog_pb";
 import { AgentKind } from "tddy-client-web/gen/types_pb";
-import { safeTestIdPart } from "../../lib/testId";
+import { safeTestIdPart } from "tddy-client-web";
 import { Button } from "tddy-ui-web";
 import { AgentKindBadge } from "./AgentKindBadge";
 import type { AgentPlacementChoice } from "./agentPlacementChoice";

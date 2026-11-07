@@ -15,8 +15,9 @@
  */
 
 import React from "react";
-import { ConnectionState, Room } from "livekit-client";
-import type { DaemonHost } from "../../../src/lib/participantRole";
+import { aDisconnectedRoom, aJoinedRoom } from "tddy-livekit-web/testkit";
+import type { RoomHandle as Room } from "tddy-client-web";
+import type { DaemonHost } from "tddy-client-web";
 import { SelectedDaemonProvider } from "../../../src/rpc/selectedDaemon";
 import { AuthProvider } from "../../../src/hooks/authProvider";
 
@@ -24,35 +25,26 @@ import { AuthProvider } from "../../../src/hooks/authProvider";
 export const DEFAULT_TEST_DAEMON: DaemonHost = { instanceId: "local", label: "local (this daemon)" };
 
 /**
- * A minimal stand-in for a connected common-room `Room` carrying a fixed set of remote participant
+ * A stand-in for a connected common-room `Room` carrying a fixed set of remote participant
  * identities — enough for `useRoomParticipants` (which reads `remoteParticipants`, `localParticipant`
  * and the join/leave event hooks). Cross-host tests seed the coder identities
  * (`daemon-<instanceId>-<sessionId>`) that make a session count as having a live participant.
  */
 export function aFakeCommonRoom(participantIdentities: string[]): Room {
-  const remoteParticipants = new Map(
-    participantIdentities.map((identity) => [identity, { identity, metadata: "", joinedAt: new Date() }]),
-  );
-  return {
-    localParticipant: undefined,
-    remoteParticipants,
-    state: ConnectionState.Connected,
-    on: () => {},
-    off: () => {},
-  } as unknown as Room;
+  return aJoinedRoom(participantIdentities);
 }
 
 /**
- * A `Room` double standing in for a common room this page has **joined**.
+ * A stand-in for a common room this page has **joined**.
  *
- * `new Room()` is not that, and the difference is visible to anything reading the published room
- * status: a freshly constructed SDK room reports `ConnectionState.Disconnected`, which
+ * `aDisconnectedRoom()` is not that, and the difference is visible to anything reading the published
+ * room status: a freshly constructed SDK room reports `ConnectionState.Disconnected`, which
  * `useCommonRoom` maps to `"connecting"`. A fixture built on one is therefore saying "still
  * joining" — the state a real page is in while its token is being minted — not "joined". Tests that
  * mean "connected, and here is the fleet" want this instead.
  */
 export function aJoinedCommonRoom(participantIdentities: string[] = []): Room {
-  return aFakeCommonRoom(participantIdentities);
+  return aJoinedRoom(participantIdentities);
 }
 
 /**
@@ -63,16 +55,7 @@ export function aJoinedCommonRoom(participantIdentities: string[] = []): Room {
 export function aFakeCommonRoomWithMetadata(
   participants: ReadonlyArray<{ identity: string; metadata: string }>,
 ): Room {
-  const remoteParticipants = new Map(
-    participants.map((p) => [p.identity, { identity: p.identity, metadata: p.metadata, joinedAt: new Date() }]),
-  );
-  return {
-    localParticipant: undefined,
-    remoteParticipants,
-    state: ConnectionState.Connected,
-    on: () => {},
-    off: () => {},
-  } as unknown as Room;
+  return aJoinedRoom(participants);
 }
 
 /**
@@ -89,7 +72,7 @@ export function withSelectedDaemon(
   participantIdentities?: string[],
 ): React.ReactElement {
   const room =
-    participantIdentities !== undefined ? aFakeCommonRoom(participantIdentities) : new Room();
+    participantIdentities !== undefined ? aFakeCommonRoom(participantIdentities) : aDisconnectedRoom();
   return (
     <AuthProvider>
       <SelectedDaemonProvider room={room} daemons={daemons}>
@@ -117,7 +100,7 @@ export function withSelectedDaemonServedBy(
   return (
     <AuthProvider>
       <SelectedDaemonProvider
-        room={new Room()}
+        room={aDisconnectedRoom()}
         daemons={daemons}
         servingInstanceId={servingInstanceId}
       >

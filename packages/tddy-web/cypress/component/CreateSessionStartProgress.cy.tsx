@@ -12,7 +12,7 @@
 
 import React from "react";
 import { servedAgentWire } from "../support/servedAgents";
-import { Room } from "livekit-client";
+import { aDisconnectedRoom } from "tddy-livekit-web/testkit";
 import { Code, ConnectError, createClient } from "@connectrpc/connect";
 import {
   create,
@@ -32,7 +32,7 @@ import {
 import { SessionFilesService } from "tddy-client-web/gen/session_files_pb";
 import { WorktreeService } from "tddy-client-web/gen/worktree_pb";
 import { CreateSessionPane } from "../../src/components/sessions/CreateSessionPane";
-import type { DaemonHost } from "../../src/lib/participantRole";
+import type { DaemonHost } from "tddy-client-web";
 import { SelectedDaemonProvider } from "../../src/rpc/selectedDaemon";
 import { mountWithRpc } from "../support/rpc/inMemory";
 import { createSessionPage } from "../support/pages/createSessionPage";
@@ -150,7 +150,7 @@ const MIB = 1024 * 1024;
 function mountTheCreatePane(backend: InMemoryRpcBackend) {
   const transport = backend.transport();
   mountWithRpc(
-    <SelectedDaemonProvider room={new Room()} daemons={DAEMON_HOSTS} servingInstanceId={LOCAL_HOST}>
+    <SelectedDaemonProvider room={aDisconnectedRoom()} daemons={DAEMON_HOSTS} servingInstanceId={LOCAL_HOST}>
       <CreateSessionPane
         client={createClient(SessionService, transport)}
         projectClient={createClient(ProjectService, transport)}

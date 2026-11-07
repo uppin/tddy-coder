@@ -1,7 +1,7 @@
 import React from "react";
 import { cn } from "tddy-ui-web";
-import { useHostDirectorySource } from "../../rpc/hostDirectory/useHostDirectory";
-import { LIVEKIT_SOURCE_ID } from "../../rpc/hostDirectory/liveKitSource";
+import { useHostDirectorySource } from "tddy-client-web";
+import { LIVEKIT_SOURCE_ID } from "tddy-livekit-web";
 import { hostGateOf } from "./hostGate";
 import { useHostConnection, useHostLabel, useSelectedDaemon } from "tddy-client-web";
 

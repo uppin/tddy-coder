@@ -13,7 +13,7 @@ import React from "react";
 import { ModelLoadState } from "tddy-client-web/gen/models_pb";
 import { AcpService } from "tddy-client-web/gen/tddy/acp/v1/acp_pb";
 import { ModelsAppPage } from "../../../src/components/models/ModelsAppPage";
-import { daemonRpcIdentity, type DaemonHost } from "../../../src/lib/participantRole";
+import { daemonRpcIdentity, type DaemonHost } from "tddy-client-web";
 import { withSelectedDaemon } from "../../support/rpc/withSelectedDaemon";
 import { mountWithRpc } from "../../support/rpc/inMemory";
 import { acpAgentChunk, acpPromptEnd, acpScriptedSession } from "../../support/rpc/acpSession";

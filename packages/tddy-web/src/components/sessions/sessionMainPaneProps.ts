@@ -4,7 +4,7 @@
  */
 
 import type { Client } from "@connectrpc/connect";
-import type { Room } from "livekit-client";
+import type { RoomHandle } from "tddy-client-web";
 import type { SessionService, SessionEntry } from "tddy-client-web/gen/session_pb";
 import type { ProjectService, ProjectEntry } from "tddy-client-web/gen/project_pb";
 import type { AccountsService } from "tddy-client-web/gen/accounts_pb";
@@ -124,7 +124,7 @@ export interface SessionMainPaneProps {
   onCancelCreate?: () => void;
   onSessionCreated?: (sessionId: string) => void;
   /** LiveKit room for the connected session — used by the VNC / screen-sharing overlay. */
-  room?: Room | null;
+  room?: RoomHandle | null;
   /** Shortcut presets for the connected session — shown as the mobile shortcut overlay. */
   mobileShortcuts?: ToolShortcutDef[];
   /** Fired when a custom workflow view (e.g. PrStackScreen) spawns a child session. */

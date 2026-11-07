@@ -8,10 +8,10 @@
  * PRDs: docs/ft/web/daemon-selector-livekit-rpc.md; docs/ft/web/url-state-routing.md § Host in the URL.
  */
 
-import { SELF_LABEL_SUFFIX, type DaemonHost } from "../../lib/participantRole";
+import { SELF_LABEL_SUFFIX, type DaemonHost } from "tddy-client-web";
 import { findListedDaemon } from "../../routing/selectedHost";
-import { useHostDirectorySource } from "../../rpc/hostDirectory/useHostDirectory";
-import { LIVEKIT_SOURCE_ID } from "../../rpc/hostDirectory/liveKitSource";
+import { useHostDirectorySource } from "tddy-client-web";
+import { LIVEKIT_SOURCE_ID } from "tddy-livekit-web";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "tddy-ui-web";
 import { useSelectedDaemon } from "tddy-client-web";
 

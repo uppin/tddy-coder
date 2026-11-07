@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import type { DaemonHost } from "../../lib/participantRole";
+import type { DaemonHost } from "tddy-client-web";
 import { inputClass, labelClass } from "./createSessionFormStyles";
 import type { CodebasePlacementChoice } from "./codebasePlacement";
 import { CreateSessionPermissionFields } from "./CreateSessionPermissionFields";
