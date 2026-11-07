@@ -1,9 +1,9 @@
 import { useEffect, useState } from "react";
 import type { Client } from "@connectrpc/connect";
 import { ActivityService } from "tddy-client-web/gen/activity_pb";
-import { AgentChatView, TRANSCRIPT_ROOT_STYLE } from "../chat/AgentChat";
-import type { ChatMessage } from "../chat/useAgentChat";
-import { useAcpReplay } from "../chat/useAcpReplay";
+import { AgentChatView, TRANSCRIPT_ROOT_STYLE } from "./AgentChat";
+import type { ChatMessage } from "./useAgentChat";
+import { useAcpReplay } from "./useAcpReplay";
 import { AgentActivityDetailDialog } from "./AgentActivityDetailDialog";
 import { SubagentConversationDialog } from "./SubagentConversationDialog";
 import type { RosterHalf } from "./sessionRosterHalf";

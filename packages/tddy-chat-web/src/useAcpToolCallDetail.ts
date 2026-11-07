@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { Code, ConnectError, type Client } from "@connectrpc/connect";
 import type { ActivityService } from "tddy-client-web/gen/activity_pb";
-import { agentActivityRegistry, replayKeyOf } from "../sessions/agentActivityRegistry";
+import { agentActivityRegistry, replayKeyOf } from "./agentActivityRegistry";
 
 /** Why a body lookup could not be answered. The hosts reserve `NOT_FOUND` for "no such
  *  `tool_call_id` in this session's transcript" and report everything else (host unreachable,

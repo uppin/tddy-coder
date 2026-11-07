@@ -12,9 +12,9 @@ import { AgentChat } from "../../src/AgentChat";
 import { buildChatTranscript } from "../../src/chatTranscript";
 import type { ChatMessage, ElicitationPoint } from "../../src/useAgentChat";
 import { AcpService } from "tddy-client-web/gen/tddy/acp/v1/acp_pb";
-import { mountWithRpc } from "../support/rpc/inMemory";
 import { acpAgentChunk, acpQuestion, acpScriptedSession } from "../support/rpc/acpSession";
 import { agentChatPage } from "../support/pages/agentChatPage";
+import { mountWithChatRoom } from "../support/mountWithChatRoom";
 
 beforeEach(() => {
   cy.viewport(1280, 800);
@@ -62,7 +62,7 @@ it("downloads a .txt transcript containing the streamed message and the clarific
     ),
   });
 
-  mountWithRpc(<AgentChat room={null} acp placeholder="Message the agent…" />, backend);
+  mountWithChatRoom((room) => <AgentChat room={room} acp placeholder="Message the agent…" />, backend);
 
   // Wait until the streamed line and the clarification have arrived.
   agentChatPage.chatMessage(0).should("contain.text", "Analyzing the feature into a PR stack.");

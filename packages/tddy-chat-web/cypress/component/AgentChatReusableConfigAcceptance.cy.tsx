@@ -14,8 +14,8 @@ import React from "react";
 import { anInMemoryRpcBackend } from "tddy-connectrpc-testkit";
 import { AgentChat } from "../../src/AgentChat";
 import { TddyRemote, type ClientMessage } from "tddy-client-web/gen/tddy/v1/remote_pb";
-import { mountWithRpc } from "../support/rpc/inMemory";
 import { agentChatPage } from "../support/pages/agentChatPage";
+import { mountWithChatRoom } from "../support/mountWithChatRoom";
 
 const PLACEHOLDER = "Ask the coding agent anything…";
 
@@ -46,7 +46,7 @@ beforeEach(() => {
 it("uses the provided placeholder for the chat input, with no SessionEntry dependency", () => {
   // Given / When — mounted with only a transport + a placeholder string (no session prop at all)
   const { backend } = aRecordingBackend();
-  mountWithRpc(<AgentChat room={null} placeholder={PLACEHOLDER} />, backend);
+  mountWithChatRoom((room) => <AgentChat room={room} placeholder={PLACEHOLDER} />, backend);
 
   // Then
   agentChatPage.chat().should("exist");
@@ -56,7 +56,7 @@ it("uses the provided placeholder for the chat input, with no SessionEntry depen
 it("sends the operator's first message as a SubmitFeatureInput intent on a fresh connection", () => {
   // Given
   const { backend, sentIntents } = aRecordingBackend();
-  mountWithRpc(<AgentChat room={null} placeholder={PLACEHOLDER} />, backend);
+  mountWithChatRoom((room) => <AgentChat room={room} placeholder={PLACEHOLDER} />, backend);
 
   // When
   agentChatPage.sendChatMessage("Add a health-check endpoint.");
@@ -72,7 +72,7 @@ it("sends the operator's first message as a SubmitFeatureInput intent on a fresh
 it("echoes the operator's sent message as a user chat bubble", () => {
   // Given
   const { backend } = aRecordingBackend();
-  mountWithRpc(<AgentChat room={null} placeholder={PLACEHOLDER} />, backend);
+  mountWithChatRoom((room) => <AgentChat room={room} placeholder={PLACEHOLDER} />, backend);
 
   // When
   agentChatPage.sendChatMessage("Add a health-check endpoint.");

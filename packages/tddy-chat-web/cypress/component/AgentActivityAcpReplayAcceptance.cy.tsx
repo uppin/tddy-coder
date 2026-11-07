@@ -13,7 +13,6 @@
 
 import React from "react";
 import { AgentActivityOverlay } from "../../src/AgentActivityOverlay";
-import { mountWithRpc } from "../support/rpc/inMemory";
 import { agentActivityPage } from "../support/pages/agentActivityPage";
 import { agentChatPage } from "../support/pages/agentChatPage";
 import {
@@ -25,7 +24,7 @@ import {
 } from "../support/rpc/acpReplay";
 
 function mountOverlay(backend: ReturnType<typeof backendReplaying>) {
-  mountWithRpc(<AgentActivityOverlay sessionId="s1" sessionToken="tok" sessionType="tool" />, backend);
+  cy.mountWithClients(<AgentActivityOverlay sessionId="s1" sessionToken="tok" sessionType="tool" />, backend);
 }
 
 beforeEach(() => {

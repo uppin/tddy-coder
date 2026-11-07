@@ -19,7 +19,6 @@
 import React from "react";
 import { SessionActivitiesPane } from "../../src/SessionActivitiesPane";
 import { AgentActivityOverlay } from "../../src/AgentActivityOverlay";
-import { mountWithRpc } from "../support/rpc/inMemory";
 import { agentChatPage } from "../support/pages/agentChatPage";
 import { agentActivityPage } from "../support/pages/agentActivityPage";
 import {
@@ -66,7 +65,7 @@ function inAFixedHeightPane(surface: React.ReactElement) {
 }
 
 function mountActivitiesView(replay: TailReplayBackend) {
-  mountWithRpc(
+  cy.mountWithClients(
     inAFixedHeightPane(<SessionActivitiesPane sessionId="s1" sessionToken="tok" rosterHalf={{ sessionId: "s1", daemonInstanceId: "daemon-a" }} />),
     replay.backend,
   );
@@ -108,7 +107,7 @@ function ASwitchableActivitiesView() {
 }
 
 function mountSwitchableActivitiesView(replay: TailReplayBackend) {
-  mountWithRpc(<ASwitchableActivitiesView />, replay.backend);
+  cy.mountWithClients(<ASwitchableActivitiesView />, replay.backend);
 }
 
 /** Select another session in the host above. Keeps the raw selector out of the test body. */
@@ -117,7 +116,7 @@ function selectSession(sessionId: "s1" | "s2") {
 }
 
 function mountActivityOverlay(replay: TailReplayBackend) {
-  mountWithRpc(
+  cy.mountWithClients(
     inAFixedHeightPane(
       <AgentActivityOverlay sessionId="s1" sessionToken="tok" sessionType="tool" />,
     ),

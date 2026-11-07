@@ -18,7 +18,7 @@
  * PRD: docs/ft/web/agent-activity-pane.md § Persisted, lazily-counted activity (§1 persistence).
  */
 
-import type { ChatMessage } from "../chat/useAgentChat";
+import type { ChatMessage } from "./useAgentChat";
 
 /** One tool call's bodies, as `SessionService.GetAcpToolCallDetail` resolved them. Either side may
  *  be absent: a still-running call has an input but no output yet. */

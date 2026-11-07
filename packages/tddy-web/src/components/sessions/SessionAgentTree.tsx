@@ -17,9 +17,9 @@ import {
   statusIsWorking,
 } from "./agentStatusDisplay";
 import type { SubagentSessionNode } from "./agentTree";
-import { rosterHalfOf, type RosterHalf } from "./sessionRosterHalf";
 import { useSessionAgentRoster } from "./useSessionAgentRoster";
 import { AgentKindBadge } from "tddy-session-create-web";
+import { rosterHalfOf, type RosterHalf } from "tddy-chat-web";
 
 /**
  * The Agents tab as a **tree**: the session's own main agent at the root, and beneath it the two

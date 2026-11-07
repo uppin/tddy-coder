@@ -19,8 +19,8 @@ import {
   AcpAgentMessageSchema,
   type AcpClientMessage,
 } from "tddy-client-web/gen/tddy/acp/v1/acp_pb";
-import { mountWithRpc } from "../support/rpc/inMemory";
 import { agentChatPage } from "../support/pages/agentChatPage";
+import { mountWithChatRoom } from "../support/mountWithChatRoom";
 
 const SENTENCE = 'The feature request is only "hi".';
 
@@ -65,7 +65,7 @@ it("merges streamed ACP AgentMessageChunks into a single chat bubble with no per
   });
 
   // When
-  mountWithRpc(<AgentChat room={null} acp placeholder="Message the agent…" />, backend);
+  mountWithChatRoom((room) => <AgentChat room={room} acp placeholder="Message the agent…" />, backend);
 
   // Then — exactly one agent bubble holding the full sentence (tokens accumulated, not one-per-line)
   agentChatPage.chatMessage(0).should("exist").and("have.text", SENTENCE);
@@ -105,7 +105,7 @@ it("renders an agent request_permission as a clarification and rounds the select
   const backend = anInMemoryRpcBackend().implement(AcpService, { session });
 
   // When
-  mountWithRpc(<AgentChat room={null} acp placeholder="Message the agent…" />, backend);
+  mountWithChatRoom((room) => <AgentChat room={room} acp placeholder="Message the agent…" />, backend);
 
   // Then — the clarification renders with one option per choice
   agentChatPage.chatQuestion().should("exist");

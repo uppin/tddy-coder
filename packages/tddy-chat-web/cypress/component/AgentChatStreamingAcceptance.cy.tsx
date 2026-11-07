@@ -18,8 +18,8 @@ import { create } from "@bufbuild/protobuf";
 import { anInMemoryRpcBackend } from "tddy-connectrpc-testkit";
 import { AgentChat } from "../../src/AgentChat";
 import { TddyRemote, ServerMessageSchema } from "tddy-client-web/gen/tddy/v1/remote_pb";
-import { mountWithRpc } from "../support/rpc/inMemory";
 import { agentChatPage } from "../support/pages/agentChatPage";
+import { mountWithChatRoom } from "../support/mountWithChatRoom";
 
 const SENTENCE = 'The feature request is only "hi".';
 
@@ -55,7 +55,7 @@ it("merges streamed agent tokens into a single chat bubble with no per-token lin
   });
 
   // When
-  mountWithRpc(<AgentChat room={null} placeholder="Message the agent…" />, backend);
+  mountWithChatRoom((room) => <AgentChat room={room} placeholder="Message the agent…" />, backend);
 
   // Then — exactly one agent bubble holding the full sentence (tokens accumulated, not one-per-line)
   agentChatPage.chatMessage(0).should("exist").and("have.text", SENTENCE);

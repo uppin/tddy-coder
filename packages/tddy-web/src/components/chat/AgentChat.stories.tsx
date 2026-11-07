@@ -1,6 +1,5 @@
 import type { Meta, StoryObj } from "@storybook/react";
-import { AgentChatView } from "./AgentChat";
-import type { ChatMessage, PendingQuestion, UseAgentChatResult } from "./useAgentChat";
+import { AgentChatView, type ChatMessage, type PendingQuestion, type UseAgentChatResult } from "tddy-chat-web";
 
 /**
  * Stories for the recipe-agnostic Agent Chat panel. They render the pure presentational

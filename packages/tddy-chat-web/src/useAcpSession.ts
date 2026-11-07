@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { create } from "@bufbuild/protobuf";
 import type { Client } from "@connectrpc/connect";
-import { AsyncQueue } from "tddy-livekit-rpc-web";
+import { AsyncQueue } from "tddy-rpc-web";
 import { useParticipantPresent, useRoomClient, type RoomHandle } from "tddy-client-web";
 import {
   AcpClientMessageSchema,

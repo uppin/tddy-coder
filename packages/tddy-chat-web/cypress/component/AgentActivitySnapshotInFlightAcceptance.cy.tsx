@@ -26,7 +26,6 @@ import React from "react";
 import { createClient, type Transport } from "@connectrpc/connect";
 import { ActivityService } from "tddy-client-web/gen/activity_pb";
 import { AgentActivityOverlay } from "../../src/AgentActivityOverlay";
-import { mountWithRpc } from "../support/rpc/inMemory";
 import { agentActivityPage } from "../support/pages/agentActivityPage";
 import { agentChatPage } from "../support/pages/agentChatPage";
 import { byTestId } from "../support/testIds";
@@ -91,7 +90,7 @@ it("renders the transcript when its host re-renders while the snapshot is still 
     counts: [1],
     snapshot: [replayAgentText("Analyzing the parser.", 1_000)],
   });
-  mountWithRpc(<RerenderingHost transport={backend.transport()} />, backend);
+  cy.mountWithClients(<RerenderingHost transport={backend.transport()} />, backend);
 
   // When — the operator opens the overlay (starting the held pull), the host re-renders with a
   // freshly-built client, and only then does the snapshot deliver its frames
@@ -110,7 +109,7 @@ it("renders the transcript after a remount cancelled the first in-flight snapsho
     counts: [1],
     snapshot: [replayAgentText("Building the workspace.", 2_000)],
   });
-  mountWithRpc(<RemountingHost />, backend);
+  cy.mountWithClients(<RemountingHost />, backend);
 
   // When — the overlay is opened (starting the held pull), then unmounted and mounted again for the
   // same session, and the snapshot is released only after the remount
