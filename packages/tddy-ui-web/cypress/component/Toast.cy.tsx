@@ -5,7 +5,7 @@
  */
 
 import React from "react";
-import { Toast } from "../../src/components/ui/toast";
+import { Toast } from "../../src/toast";
 import { byTestId } from "../support/testIds";
 
 const TOAST = "a-toast";
