@@ -11,16 +11,16 @@
  */
 
 import React from "react";
-import { Room } from "livekit-client";
+import { aDisconnectedRoom } from "tddy-livekit-web/testkit";
 import { anInMemoryRpcBackend, type InMemoryRpcBackend } from "tddy-connectrpc-testkit";
 import { ProjectsAppPage } from "../../src/components/projects/ProjectsAppPage";
 import { ProjectsScreen } from "../../src/components/projects/ProjectsScreen";
 import { type ProjectEntry } from "tddy-client-web/gen/project_pb";
 import { ProjectService } from "tddy-client-web/gen/project_pb";
-import type { DaemonHost } from "../../src/lib/participantRole";
+import type { DaemonHost } from "tddy-client-web";
 import { SelectedDaemonProvider } from "../../src/rpc/selectedDaemon";
 import { AuthProvider } from "../../src/hooks/authProvider";
-import { daemonRpcIdentity } from "../../src/lib/participantRole";
+import { daemonRpcIdentity } from "tddy-client-web";
 import { mountWithRpc } from "../support/rpc/inMemory";
 import { mountWithRecordingLiveKitRpc } from "../support/rpc/recordingLiveKitRpc";
 import { projectsScreenPage } from "../support/pages/projectsScreenPage";
@@ -96,7 +96,7 @@ function aProjectsBackend(
 function mountProjectsAppPage(onNavigate: (path: string) => void) {
   return (
     <AuthProvider>
-      <SelectedDaemonProvider room={new Room()} daemons={DAEMON_HOSTS} servingInstanceId={LOCAL_HOST}>
+      <SelectedDaemonProvider room={aDisconnectedRoom()} daemons={DAEMON_HOSTS} servingInstanceId={LOCAL_HOST}>
         <ProjectsAppPage onNavigate={onNavigate} />
       </SelectedDaemonProvider>
     </AuthProvider>

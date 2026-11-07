@@ -19,7 +19,7 @@ import React from "react";
 import { servedAgentWire } from "../support/servedAgents";
 import { CatalogService } from "tddy-client-web/gen/catalog_pb";
 import { ProjectService } from "tddy-client-web/gen/project_pb";
-import { Room } from "livekit-client";
+import { aDisconnectedRoom } from "tddy-livekit-web/testkit";
 import { createClient } from "@connectrpc/connect";
 import { create } from "@bufbuild/protobuf";
 import { anInMemoryRpcBackend, type InMemoryRpcBackend } from "tddy-connectrpc-testkit";
@@ -28,7 +28,7 @@ import { SessionService, SessionContextDocKind, StartSessionEventSchema, type St
 import { HostDocumentScope } from "tddy-client-web/gen/types_pb";
 import { SessionFilesService } from "tddy-client-web/gen/session_files_pb";
 import { WorktreeService } from "tddy-client-web/gen/worktree_pb";
-import type { DaemonHost } from "../../src/lib/participantRole";
+import type { DaemonHost } from "tddy-client-web";
 import { SelectedDaemonProvider } from "../../src/rpc/selectedDaemon";
 import { createSessionPage } from "../support/pages/createSessionPage";
 import { aSessionFilesServiceFake } from "../support/rpc/sessionFilesServiceBackend";
@@ -150,7 +150,7 @@ function mountCreatePane(backend: InMemoryRpcBackend) {
   const sessionFilesClient = createClient(SessionFilesService, transport);
   const worktreeClient = createClient(WorktreeService, transport);
   cy.mount(
-    <SelectedDaemonProvider room={new Room()} daemons={DAEMON_HOSTS} servingInstanceId={LOCAL_HOST}>
+    <SelectedDaemonProvider room={aDisconnectedRoom()} daemons={DAEMON_HOSTS} servingInstanceId={LOCAL_HOST}>
       <CreateSessionPane
         client={client}
         projectClient={projectClient}

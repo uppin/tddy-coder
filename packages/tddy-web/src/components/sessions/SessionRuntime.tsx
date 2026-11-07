@@ -17,7 +17,7 @@ import { useAgentTerminalFocus } from "./useAgentTerminalFocus";
 import type { ByteDelta } from "./sessionRuntimeRegistry";
 import type { SessionRuntimeProps, TerminalClient } from "./sessionRuntimeProps";
 import { useConnectionStatus } from "../../rpc/connections/useConnectionStatus";
-import { useHasCapability } from "../../rpc/connections/useHasCapability";
+import { useHasCapability } from "tddy-client-web";
 import { sessionReadsLocalPaths } from "../../lib/sessionReadsLocalPaths";
 import type { TauriHostWindow } from "../../rpc/daemonTransportFlavour";
 import { cn, InlineError } from "tddy-ui-web";

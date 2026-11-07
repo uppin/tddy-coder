@@ -5,13 +5,14 @@
 **Detected:** 2026-11-07 by `/pr-wrap` step 3.5 file-length gate on PR #842 (`#web-split` 5/16)
 **Metrics:** **536 lines** (non-test source, whole file) · budget 500 · **1.07× over**
 **Thresholds breached:** length 536 > 500
-**Status:** Open — unclaimed
+**Status:** Open — partially fixed (522 of 536; still 22 over)
 
 ## Measurement history
 
 | Run | Lines | Note |
 |---|---|---|
 | 2026-11-07 | 536 → 536 | PR #842 re-points its generated-code import to `tddy-client-web`; not grown, alert-only |
+| 2026-11-07 | 536 → 522 | PR #843 builds the ACP client through the room-RPC port (`useRoomClient`, `useParticipantProbe`); shrank, still over |
 
 ## What would close it
 

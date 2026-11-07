@@ -10,8 +10,8 @@
  */
 
 import React from "react";
-import { Room } from "livekit-client";
-import { daemonRpcIdentity } from "../../src/lib/participantRole";
+import { aDisconnectedRoom } from "tddy-livekit-web/testkit";
+import { daemonRpcIdentity } from "tddy-client-web";
 import { mountWithRpc } from "../support/rpc/inMemory";
 import { aJoinedCommonRoom } from "../support/rpc/withSelectedDaemon";
 import {
@@ -73,7 +73,7 @@ it("does not block when a connection reaches the host over a joined common room"
 it("does not block while a connection exists and its room is still settling", () => {
   // Given a connection over a room that has not finished joining — single calls report inline
   // When
-  mountWithRpc(projectsAppPage(new Room()), aProjectsBackend());
+  mountWithRpc(projectsAppPage(aDisconnectedRoom()), aProjectsBackend());
 
   // Then
   projectsScreenPage.screen().should("be.visible");

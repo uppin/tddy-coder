@@ -44,6 +44,7 @@
     "tailwind-merge": "^3.5.0",
     "tailwindcss": "^4.2.2",
     "tddy-client-web": "workspace:*",
+    "tddy-livekit-web": "workspace:*",
     "tddy-tauri-web": "workspace:*",
     "tddy-ui-web": "workspace:*"
   },

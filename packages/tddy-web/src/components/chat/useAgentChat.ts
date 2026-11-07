@@ -1,19 +1,14 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { create } from "@bufbuild/protobuf";
-import { createClient } from "@connectrpc/connect";
-import type { Room } from "livekit-client";
 import { AsyncQueue } from "tddy-livekit-rpc-web";
-import {
-  useLiveKitTransportFactory,
-  useLiveKitTransportFactoryIsOverridden,
-} from "../../rpc/transportProvider";
+import { useParticipantProbe, useRoomClient, type RoomHandle } from "tddy-client-web";
 import {
   ClientMessageSchema,
   TddyRemote,
   type AppModeProto,
   type ClientMessage,
 } from "tddy-client-web/gen/tddy/v1/remote_pb";
-import { tddyDebug } from "../../lib/debugMask";
+import { tddyDebug } from "tddy-client-web";
 import type { TranscriptStatus } from "./toolCallPresentation";
 
 /** Presenter-stream diagnostics. Enable in DevTools: `localStorage.debug = 'tddy:presenter:*'`
@@ -128,30 +123,16 @@ export interface UseAgentChatResult {
  * production.
  */
 export function useAgentChat(
-  room: Room | null,
+  room: RoomHandle | null,
   serverIdentity: string,
 ): UseAgentChatResult {
-  const liveKitFactory = useLiveKitTransportFactory();
-  const factoryIsOverridden = useLiveKitTransportFactoryIsOverridden();
-  const canBuildClient = room !== null || factoryIsOverridden;
-
-  // Stable client for the lifetime of this room/identity pair — a new room or identity
-  // (e.g. switching sessions) tears down the old stream and opens a fresh one. `null` when
-  // there is no room yet and no test double to route through instead.
-  const client = useMemo(() => {
-    if (!canBuildClient) {
-      dbg(
-        "no client: canBuildClient=false (room=%o, factoryOverridden=%o) — stream will NOT open",
-        room !== null,
-        factoryIsOverridden,
-      );
-      return null;
-    }
-    dbg("building client: room=%o serverIdentity=%o factoryOverridden=%o", room !== null, serverIdentity, factoryIsOverridden);
-    const transport = liveKitFactory(room as Room, serverIdentity);
-    return createClient(TddyRemote, transport);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [liveKitFactory, canBuildClient, room, serverIdentity]);
+  // Stable client for the lifetime of this room/identity pair — a new room or identity (e.g.
+  // switching sessions) tears down the old stream and opens a fresh one. `null` when there is no
+  // room yet and no test double to route through instead (the room-RPC port decides which).
+  const client = useRoomClient(room, serverIdentity, TddyRemote);
+  // Asked at the moment of a send, never read from the last render: a presenter that left (or
+  // joined) since then must be seen by the check that refuses a send nobody would read.
+  const presenterIsHere = useParticipantProbe(room, serverIdentity);
 
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [elicitations, setElicitations] = useState<ElicitationPoint[]>([]);
@@ -379,7 +360,7 @@ export function useAgentChat(
       setSendError("Message not sent — no connection to the presenter yet.");
       return false;
     }
-    if (room && !room.remoteParticipants.has(serverIdentity)) {
+    if (room && !presenterIsHere()) {
       dbg("sendPrompt refused: presenter %o not in room participants", serverIdentity);
       setSendError("Message not sent — the presenter is not connected.");
       return false;
@@ -405,7 +386,7 @@ export function useAgentChat(
       setSendError("Message not sent — no connection to the presenter yet.");
       return false;
     }
-    if (room && !room.remoteParticipants.has(serverIdentity)) {
+    if (room && !presenterIsHere()) {
       dbg("answer refused: presenter %o not in room participants", serverIdentity);
       setSendError("Message not sent — the presenter is not connected.");
       return false;

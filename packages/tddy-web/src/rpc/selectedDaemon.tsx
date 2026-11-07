@@ -30,10 +30,9 @@ import {
   useState,
   type ReactNode,
 } from "react";
-import type { Room } from "livekit-client";
 import { useAuth } from "../hooks/useAuth";
-import type { DaemonHost } from "tddy-client-web";
-import { presenceIdentityForUser } from "../lib/presenceIdentity";
+import type { DaemonHost, RoomHandle } from "tddy-client-web";
+import { presenceIdentityForUser } from "tddy-livekit-web";
 import {
   readStoredSelectedDaemon,
   resolveSelectedDaemonInstanceId,
@@ -45,16 +44,17 @@ import {
   setAppLocationParams,
   useAppLocation,
 } from "../routing/useAppLocation";
-import { LiveKitConnections } from "./connections/liveKit";
+import { LiveKitConnections } from "tddy-livekit-web";
 import { AppClientsPorts } from "./appClientsPorts";
-import { HostReadiness } from "./connections/registry";
+import { ConnectionProviders, HostReadiness, useConnectionProviders } from "./connections/registry";
+import { openHostServedSession } from "./connections/hostServedSession";
 import type { ConnectionStatus } from "tddy-client-web/connections/types";
-import { daemonHostOf } from "./hostDirectory/daemonHost";
-import { useLiveKitHostDirectorySource } from "./hostDirectory/liveKitSource";
-import { HostPresenceRoom } from "./hostDirectory/presenceRoom";
+import { daemonHostOf } from "tddy-client-web";
+import { useLiveKitHostDirectorySource } from "tddy-livekit-web";
+import { HostPresenceRoom } from "tddy-livekit-web";
 import { useServingHostDirectorySource } from "./hostDirectory/servingSource";
-import { HostDirectorySources, useHostDirectory } from "./hostDirectory/useHostDirectory";
-import type { HostDirectorySource } from "./hostDirectory/types";
+import { HostDirectorySources, useHostDirectory } from "tddy-client-web";
+import type { HostDirectorySource } from "tddy-client-web";
 import { useSelectedDaemonLabel } from "./useSelectedDaemonLabel";
 import { PARAM_HOST, screenRootOf, withParams } from "tddy-client-web";
 
@@ -124,7 +124,7 @@ export interface SelectedDaemonProviderProps {
    * Test-injection seam (mirrors `RpcTransportProviderProps.liveKitFactory`): when provided, used
    * directly instead of joining the common room via `useCommonRoom`. No production caller sets this.
    */
-  room?: Room | null;
+  room?: RoomHandle | null;
   /**
    * Test-injection seam (mirrors `RpcTransportProviderProps.liveKitFactory`): when provided, it is
    * the common room's contribution to the directory, used instead of deriving one from
@@ -139,7 +139,7 @@ export interface SelectedDaemonProviderProps {
    * LiveKit token, `connect()` — so a test can drive a join that fails or never settles. No
    * production caller sets this.
    */
-  roomFactory?: () => Room;
+  roomFactory?: () => RoomHandle;
   children: ReactNode;
 }
 
@@ -169,7 +169,7 @@ function useDirectorySources({
   roomFactory,
 }: Omit<SelectedDaemonProviderProps, "children">): {
   sources: readonly HostDirectorySource[];
-  room: Room | null;
+  room: RoomHandle | null;
 } {
   // TODO: migrate to `useAuthContext()` once every `withSelectedDaemon`-based test provides an
   // `AuthProvider` ancestor. Left on the standalone `useAuth()` hook deliberately for now: this
@@ -303,6 +303,7 @@ function SelectedDaemonProviderBody({
   roomFactory,
   children,
 }: SelectedDaemonProviderProps) {
+  const registry = useConnectionProviders();
   const { sources, room } = useDirectorySources({
     livekitEnabled,
     livekitUrl,
@@ -317,8 +318,10 @@ function SelectedDaemonProviderBody({
   return (
     <HostDirectorySources sources={sources}>
       <HostPresenceRoom room={room}>
-        <LiveKitConnections room={room}>
-          <SelectedDaemonScope servingInstanceId={servingInstanceId}>{children}</SelectedDaemonScope>
+        <LiveKitConnections room={room} registry={registry} openHostServedSession={openHostServedSession}>
+          <ConnectionProviders registry={registry}>
+            <SelectedDaemonScope servingInstanceId={servingInstanceId}>{children}</SelectedDaemonScope>
+          </ConnectionProviders>
         </LiveKitConnections>
       </HostPresenceRoom>
     </HostDirectorySources>

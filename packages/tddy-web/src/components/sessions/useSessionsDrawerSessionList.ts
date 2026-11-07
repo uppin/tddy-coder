@@ -1,9 +1,9 @@
 import { useMemo, type MutableRefObject } from "react";
+import type { RoomHandle } from "tddy-client-web";
 import type { Client } from "@connectrpc/connect";
-import type { Room } from "livekit-client";
 import { SessionService } from "tddy-client-web/gen/session_pb";
-import { useCapabilityAvailability } from "../../hooks/useCapabilityAvailability";
-import { useRoomParticipants } from "../../hooks/useRoomParticipants";
+import { useCapabilityAvailability } from "tddy-client-web";
+import { useRoomParticipants } from "tddy-client-web";
 import { useSessionManager } from "./sessionManager";
 import { withoutJailedCodebaseHalves } from "./jailedCodebaseHalf";
 import { useHostConnection } from "tddy-client-web";
@@ -11,7 +11,7 @@ import { useHostConnection } from "tddy-client-web";
 export interface UseSessionsDrawerSessionListArgs {
   client: Client<typeof SessionService> | null;
   sessionToken: string;
-  room: Room | null;
+  room: RoomHandle | null;
   selectedInstanceId: string | null;
   selectedSessionId: string | null;
   listGenerationRef: MutableRefObject<number>;

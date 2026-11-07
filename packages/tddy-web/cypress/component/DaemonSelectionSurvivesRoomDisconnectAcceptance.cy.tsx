@@ -13,9 +13,9 @@
  */
 
 import React, { useState } from "react";
-import { Room } from "livekit-client";
+import { aDisconnectedRoom } from "tddy-livekit-web/testkit";
 import { DaemonSelector } from "../../src/components/shell/DaemonSelector";
-import type { DaemonHost } from "../../src/lib/participantRole";
+import type { DaemonHost } from "tddy-client-web";
 import { SelectedDaemonProvider } from "../../src/rpc/selectedDaemon";
 import { daemonSelectorPage } from "../support/pages/daemonSelectorPage";
 import { byTestId } from "../support/testIds";
@@ -31,7 +31,7 @@ const DEV: DaemonHost = { instanceId: "dev", label: "dev (this daemon)" };
 function RoomDisconnectHarness() {
   const [daemons, setDaemons] = useState<DaemonHost[]>([DEV]);
   return (
-    <SelectedDaemonProvider room={new Room()} daemons={daemons} servingInstanceId="dev">
+    <SelectedDaemonProvider room={aDisconnectedRoom()} daemons={daemons} servingInstanceId="dev">
       <button data-testid="simulate-disconnect" onClick={() => setDaemons([])}>
         disconnect
       </button>

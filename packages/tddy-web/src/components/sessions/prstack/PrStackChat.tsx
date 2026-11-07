@@ -1,12 +1,11 @@
 import React from "react";
-import type { Room } from "livekit-client";
 import type { SessionEntry } from "tddy-client-web/gen/session_pb";
-import type { CommonRoomStatus } from "../../../hooks/useCommonRoom";
+import type { CommonRoomStatus, RoomHandle } from "tddy-client-web";
 import { AgentChat } from "../../chat/AgentChat";
 
 export interface PrStackChatProps {
   session: SessionEntry;
-  room: Room | null;
+  room: RoomHandle | null;
   livekitServerIdentity?: string;
   /** Status of the screen's own dedicated presenter LiveKit room connection (see `usePresenterLiveKitRoom`). */
   roomStatus?: CommonRoomStatus;

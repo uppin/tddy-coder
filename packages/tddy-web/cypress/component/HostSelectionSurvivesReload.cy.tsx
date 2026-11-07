@@ -13,9 +13,9 @@
  */
 
 import React, { useState } from "react";
-import { Room } from "livekit-client";
+import { aDisconnectedRoom } from "tddy-livekit-web/testkit";
 import { DaemonSelectorConnected } from "../../src/components/shell/DaemonSelector";
-import type { DaemonHost } from "../../src/lib/participantRole";
+import type { DaemonHost } from "tddy-client-web";
 import { SelectedDaemonProvider } from "../../src/rpc/selectedDaemon";
 import { appLocationPage } from "../support/pages/appLocationPage";
 import { daemonSelectorPage } from "../support/pages/daemonSelectorPage";
@@ -48,7 +48,7 @@ function Dashboard({
   roomListing: DaemonHost[];
   servingInstanceId?: string;
 }) {
-  const [room] = useState(() => new Room());
+  const [room] = useState(() => aDisconnectedRoom());
   const [daemons, setDaemons] = useState(roomListing);
   return (
     <>

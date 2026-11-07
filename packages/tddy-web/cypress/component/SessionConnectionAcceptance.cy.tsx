@@ -17,18 +17,20 @@
  * Stack: `optional-livekit` node 3 of 7.
  */
 
+import { openHostServedSession } from "../../src/rpc/connections/hostServedSession";
 import React from "react";
 import { createClient } from "@connectrpc/connect";
 import { createConnectTransport } from "@connectrpc/connect-web";
 import { create, toBinary } from "@bufbuild/protobuf";
 import { anInMemoryRpcBackend } from "tddy-connectrpc-testkit";
-import { ConnectionState, type Room } from "livekit-client";
+import { RoomConnectionState as ConnectionState } from "tddy-livekit-web/testkit";
+import type { RoomHandle as Room } from "tddy-client-web";
 import { SessionService, ListSessionsResponseSchema, SessionEntrySchema } from "tddy-client-web/gen/session_pb";
 import { TokenService, GenerateTokenResponseSchema } from "tddy-client-web/gen/token_pb";
-import { daemonRpcIdentity } from "../../src/lib/participantRole";
+import { daemonRpcIdentity } from "tddy-client-web";
 import { SessionRuntime } from "../../src/components/sessions/SessionRuntime";
-import { LiveKitConnectionProvider } from "../../src/rpc/connections/liveKit";
-import { attachmentHintFromReply } from "../../src/rpc/connections/sessionAttachment";
+import { LiveKitConnectionProvider } from "tddy-livekit-web";
+import { attachmentHintFromReply } from "tddy-client-web";
 import type { SessionAttachmentHint, SessionConnection } from "tddy-client-web/connections/session";
 import type { HostConnection } from "tddy-client-web/connections/types";
 import { useConnectionStatus } from "../../src/rpc/connections/useConnectionStatus";
@@ -106,7 +108,7 @@ function aHostOn(room: Room): HostConnection {
     baseUrl: `${window.location.origin}/rpc`,
     useBinaryFormat: true,
   });
-  const provider = new LiveKitConnectionProvider(room, () => transport, null);
+  const provider = new LiveKitConnectionProvider(room, () => transport, null, openHostServedSession);
   const host = provider.connectHost(THIS_HOST);
   if (!host) throw new Error("a provider holding a room must claim every host asked of it");
   return host;
@@ -249,7 +251,7 @@ function aHostServingRooms(commonRoom: Room, sessionRoom: Room): HostConnection 
   const provider = new LiveKitConnectionProvider(commonRoom, () => transport, {
     tokens: createClient(TokenService, transport),
     newRoom: () => sessionRoom,
-  });
+  }, openHostServedSession);
   const host = provider.connectHost(THIS_HOST);
   if (!host) throw new Error("a provider holding a room must claim every host asked of it");
   return host;

@@ -18,7 +18,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { Client } from "@connectrpc/connect";
 import { SessionService } from "tddy-client-web/gen/session_pb";
-import { attachmentHintFromReply } from "../../rpc/connections/sessionAttachment";
+import { attachmentHintFromReply } from "tddy-client-web";
 import type { SessionAttachmentHint, SessionAttachmentState } from "tddy-client-web/connections/session";
 import type { HostConnection } from "tddy-client-web/connections/types";
 import { rpcFailureText } from "../../rpc/rpcFailure";

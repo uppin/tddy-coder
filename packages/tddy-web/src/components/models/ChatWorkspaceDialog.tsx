@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { type ProjectEntry } from "tddy-client-web/gen/project_pb";
 import { ProjectService } from "tddy-client-web/gen/project_pb";
 import { useAuthContext } from "../../hooks/authProvider";
-import { safeTestIdPart } from "../../lib/testId";
+import { safeTestIdPart } from "tddy-client-web";
 import type { AssistantRow } from "../../utils/mergeRegistryEntries";
 import { ModelsDialogShell } from "./ModelsDialogShell";
 import { errorTextOf } from "./useModelRegistryFanOut";

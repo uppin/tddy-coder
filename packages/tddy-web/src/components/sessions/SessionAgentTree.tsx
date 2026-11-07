@@ -7,7 +7,7 @@ import {
   type SessionAgentService,
 } from "tddy-client-web/gen/session_agents_pb";
 import { type SessionAgentActivity, type SessionAgentStatus } from "tddy-client-web/gen/types_pb";
-import { safeTestIdPart } from "../../lib/testId";
+import { safeTestIdPart } from "tddy-client-web";
 import { Button } from "tddy-ui-web";
 import { agentPlacementChoiceOf } from "./agentPlacementChoice";
 import {

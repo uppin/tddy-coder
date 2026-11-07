@@ -8,7 +8,7 @@
  */
 
 import React from "react";
-import { Room } from "livekit-client";
+import { aDisconnectedRoom } from "tddy-livekit-web/testkit";
 import { Code, ConnectError } from "@connectrpc/connect";
 import { anInMemoryRpcBackend } from "tddy-connectrpc-testkit";
 import { POLL_INTERVAL_MS } from "../../src/components/projects/ProjectsAppPage";
@@ -126,7 +126,7 @@ const ROOM_NOT_CONNECTED_REASON = "could not send request to daemon-workstation-
 
 it("shows the transport's reason on the list when the common room never connected", () => {
   // Given / When
-  cy.mount(projectsAppPage(new Room()));
+  cy.mount(projectsAppPage(aDisconnectedRoom()));
 
   // Then
   projectsScreenPage.loadError().should("have.text", ROOM_NOT_CONNECTED_REASON);
@@ -134,7 +134,7 @@ it("shows the transport's reason on the list when the common room never connecte
 
 it("shows the transport's reason on the create form when the common room never connected", () => {
   // Given
-  cy.mount(projectsAppPage(new Room()));
+  cy.mount(projectsAppPage(aDisconnectedRoom()));
 
   // When
   projectsScreenPage.openCreateProjectForm();

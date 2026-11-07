@@ -10,7 +10,7 @@
 
 import React from "react";
 import { AgentPicker } from "../../src/components/sessions/AgentPicker";
-import type { DaemonHost } from "../../src/lib/participantRole";
+import type { DaemonHost } from "tddy-client-web";
 import { withSelectedDaemonServedBy } from "../support/rpc/withSelectedDaemon";
 import {
   aDaemonOfferingAgents,
