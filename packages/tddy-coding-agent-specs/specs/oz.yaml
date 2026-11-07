@@ -63,6 +63,9 @@ extensions:
         - { if: profile, then: [--profile, "{profile}"] }
       env: {}
       adapter: oz-ndjson
+      # Who answers a headless conversation's permission requests (`#agent-tools 27/28`): the run's
+      # agent profile, shown on its catalog row.
+      permission_policy: { fixed: "the agent profile decides; its default profile auto-approves commands and edits" }
       # --- The workflow turn's protocol (`#agent-tools 15/19`), read by `SpecHeadlessBackend`:
       # what a `tddy-coder` workflow turn needs beyond the argv, reproducing the bespoke backend.
       system_prompt: prepend

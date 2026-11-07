@@ -6,10 +6,10 @@ use std::sync::{Arc, Mutex, Weak};
 use std::time::Duration;
 
 use async_trait::async_trait;
+use tddy_agent_backend::adapters::PreparedAcpHooks;
 use tddy_agent_backend::{
     AcpAgentCommand, AcpConversation, AcpDriver, AcpStopReason, AcpToolStatus, AcpTurnEnd,
-    AcpUpdate, AcpUpdateSink, ConversationDriver, HeadlessCommand, HeadlessDriver, NoHooks,
-    OpenSession,
+    AcpUpdate, AcpUpdateSink, ConversationDriver, HeadlessCommand, HeadlessDriver, OpenSession,
 };
 use tddy_discovery::openai::TokenUsage;
 use tddy_discovery::subagent::{
@@ -50,6 +50,9 @@ pub struct CodingAgentSession {
     /// the agent process id. `None` for a headless session, whose CLI runs once per turn.
     acp: Option<Arc<AcpConversation>>,
     permissions: Arc<ParkedPermissions>,
+    /// The hooks the agent's launch prepared, held for exactly this session's lifetime: they own
+    /// whatever the launch wrote for the agent. `None` for a headless session.
+    _launch_hooks: Option<PreparedAcpHooks>,
     /// The prompt the agent is still answering, held across the turns a permission request pauses
     /// it for. `None` when no prompt is in flight.
     in_flight: Arc<InFlightSlot>,
@@ -90,16 +93,20 @@ enum Settled {
 }
 
 impl CodingAgentSession {
-    /// Spawn the agent from `command`, open (or resume) its ACP session, and hold both.
+    /// Spawn the agent from `command`, open (or resume) its ACP session, and hold both — and
+    /// `hooks`, the ones its launch prepared ([`crate::LaunchedAgent`]): the driver runs with
+    /// `hooks.hooks`, the open is bracketed by `hooks.opens` (a login that failed during it is the
+    /// error reported), and both are held for exactly the session's lifetime.
     pub async fn start(
         command: AcpAgentCommand,
         open: OpenSession,
         model: String,
+        hooks: PreparedAcpHooks,
     ) -> Result<Self, SubagentError> {
         let permissions = Arc::new(ParkedPermissions::default());
-        let driver = AcpDriver::spawn(command, permissions.clone(), Arc::new(NoHooks))
+        let driver = AcpDriver::spawn(command, permissions.clone(), hooks.hooks.clone())
             .map_err(|e| SubagentError::from(format!("could not start the coding agent: {e}")))?;
-        Self::opened(driver, permissions, open, model).await
+        Self::opened(driver, permissions, open, model, hooks).await
     }
 
     /// [`Self::start`] for an agent already running behind `stream` (started by the supervisor as
@@ -108,11 +115,12 @@ impl CodingAgentSession {
         stream: std::os::unix::net::UnixStream,
         open: OpenSession,
         model: String,
+        hooks: PreparedAcpHooks,
     ) -> Result<Self, SubagentError> {
         let permissions = Arc::new(ParkedPermissions::default());
-        let driver = AcpDriver::spawn_over(stream, permissions.clone(), Arc::new(NoHooks))
+        let driver = AcpDriver::spawn_over(stream, permissions.clone(), hooks.hooks.clone())
             .map_err(|e| SubagentError::from(format!("could not reach the coding agent: {e}")))?;
-        Self::opened(driver, permissions, open, model).await
+        Self::opened(driver, permissions, open, model, hooks).await
     }
 
     /// A headless conversation: `command` runs the harness's CLI once per turn, and every turn after
@@ -127,19 +135,35 @@ impl CodingAgentSession {
             None,
             Arc::new(ParkedPermissions::default()),
             model,
+            None,
         ))
     }
 
+    /// Open the session over `driver`, bracketed by `hooks.opens`: handed the session's directory —
+    /// the one the agent works in, which is where a `codex login` the hooks run writes its authorize
+    /// URL — before the open, and asked afterwards for a failure of their own, which is the error
+    /// reported in place of the session error it followed.
     async fn opened(
         driver: AcpDriver,
         permissions: Arc<ParkedPermissions>,
         open: OpenSession,
         model: String,
+        hooks: PreparedAcpHooks,
     ) -> Result<Self, SubagentError> {
-        let opened = driver
-            .open_session(open)
-            .await
-            .map_err(|e| SubagentError::from(format!("could not open the coding agent: {e}")))?;
+        let session_dir = open.cwd.clone();
+        if let Some(scope) = &hooks.opens {
+            scope.begin_open(Some(session_dir)).await;
+        }
+        let opened = driver.open_session(open).await;
+        let hook_failure = match &hooks.opens {
+            Some(scope) => scope.end_open().await,
+            None => None,
+        };
+        let opened = match (opened, hook_failure) {
+            (Err(_), Some(failure)) => Err(failure),
+            (opened, _) => opened,
+        }
+        .map_err(|e| SubagentError::from(format!("could not open the coding agent: {e}")))?;
         let acp = Arc::new(AcpConversation {
             driver,
             session_id: opened.session_id,
@@ -149,6 +173,7 @@ impl CodingAgentSession {
             Some(acp),
             permissions,
             model,
+            Some(hooks),
         ))
     }
 
@@ -157,11 +182,13 @@ impl CodingAgentSession {
         acp: Option<Arc<AcpConversation>>,
         permissions: Arc<ParkedPermissions>,
         model: String,
+        launch_hooks: Option<PreparedAcpHooks>,
     ) -> Self {
         Self {
             conversation,
             acp,
             permissions,
+            _launch_hooks: launch_hooks,
             in_flight: Arc::new(AsyncMutex::new(None)),
             model,
             next_ordinal: 1,

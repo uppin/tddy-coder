@@ -119,6 +119,7 @@ impl DaemonSessionHost {
                 crate::session_agent_roster::SessionAgentRosterStore::new(
                     Arc::clone(&session_agent_clones),
                     Arc::new(crate::session_agent_status::SessionAgentActivityStore::new()),
+                    tddy_agent_launch::host_coding_agents::no_coding_agents().agents_shared(),
                 ),
             ),
             session_agent_clones,

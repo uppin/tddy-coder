@@ -264,6 +264,7 @@ fn a_daemon_with_a_session() -> ADaemonWithASession {
     let rosters = Arc::new(SessionAgentRosterStore::new(
         Arc::clone(&clones),
         Arc::new(SessionAgentActivityStore::new()),
+        Arc::new(tddy_coding_agent_specs::CodingAgentRegistry::empty()),
     ));
     let admission = Arc::new(RecordingAdmission::default());
     let service = SessionAgentServiceImpl::new(SessionAgentPorts {

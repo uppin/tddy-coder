@@ -44,8 +44,8 @@ use tddy_agent_launch::host_coding_agents::host_coding_agents;
 use tddy_agent_launch::spec_launch::HostCodingAgents;
 use tddy_coding_subagent::launcher::HEADLESS_DIR;
 use tddy_coding_subagent::{
-    AgentTransport, ApprovalRoutes, CodingAgentLaunch, CodingAgentLauncher, CONVERSATION_ID_ENV,
-    TDDY_TOOLS_MCP_ARG, TDDY_TOOLS_SERVER,
+    AgentTransport, ApprovalRoutes, CodingAgentLaunch, CodingAgentLauncher, LaunchedAgent,
+    CONVERSATION_ID_ENV, TDDY_TOOLS_MCP_ARG, TDDY_TOOLS_SERVER,
 };
 use tddy_core::provider_route::{HarnessRoute, RouteChoice, RouteSources};
 use tddy_core::{AcpAgentCommand, HeadlessCommand, McpServerSpec};
@@ -340,6 +340,28 @@ fn merge_json(into: &mut serde_json::Value, from: serde_json::Value) {
     }
 }
 
+impl DaemonCodingAgentLauncher {
+    /// How the driver reaches the agent `command` runs: spawned as the session's OS user, or — for a
+    /// daemon that cannot switch to it itself — started by the supervisor and reached over a stream.
+    async fn transport_of_command(
+        &self,
+        launch: &CodingAgentLaunch,
+        command: AcpAgentCommand,
+    ) -> Result<AgentTransport, SubagentError> {
+        match run_as_session_user(command.clone(), &launch.session_os_user, &self.drop) {
+            Ok(command) => Ok(AgentTransport::Command(command)),
+            Err(AsUserRefusal::Unprivileged(reason)) => match &self.relay {
+                Some(relay) => start_relayed(relay, &launch.session_os_user, &command)
+                    .await
+                    .map(AgentTransport::Stream)
+                    .map_err(|e| Self::refuse(launch, &e.to_string())),
+                None => Err(Self::refuse(launch, &reason)),
+            },
+            Err(other) => Err(Self::refuse(launch, &other.to_string())),
+        }
+    }
+}
+
 #[async_trait::async_trait]
 impl CodingAgentLauncher for DaemonCodingAgentLauncher {
     /// Only the case where this daemon can become the session's user itself; a launch that needs
@@ -357,17 +379,24 @@ impl CodingAgentLauncher for DaemonCodingAgentLauncher {
         launch: &CodingAgentLaunch,
     ) -> Result<AgentTransport, SubagentError> {
         let command = self.command_before_user_switch(launch)?;
-        match run_as_session_user(command.clone(), &launch.session_os_user, &self.drop) {
-            Ok(command) => Ok(AgentTransport::Command(command)),
-            Err(AsUserRefusal::Unprivileged(reason)) => match &self.relay {
-                Some(relay) => start_relayed(relay, &launch.session_os_user, &command)
-                    .await
-                    .map(AgentTransport::Stream)
-                    .map_err(|e| Self::refuse(launch, &e.to_string())),
-                None => Err(Self::refuse(launch, &reason)),
-            },
-            Err(other) => Err(Self::refuse(launch, &other.to_string())),
-        }
+        self.transport_of_command(launch, command).await
+    }
+
+    /// [`Self::launch_transport`] with the hooks of every adapter the agent's spec declares
+    /// (`coding_agent.acp.hooks_adapter`), prepared on the command before it is spawned or relayed:
+    /// `codex-acp-login` hands back its `codex login` retry-once hooks and their open bracket. An
+    /// agent that declares none gets [`tddy_coding_subagent::no_launch_hooks`]. The route stays
+    /// inline (`OPENCODE_CONFIG_CONTENT`); a route file the session user can read is a node of its
+    /// own (`docs/dev/todo/2026-11-04-opencode-acp-route-file-has-no-session-owner.md`).
+    async fn launch_agent(
+        &self,
+        launch: &CodingAgentLaunch,
+    ) -> Result<LaunchedAgent, SubagentError> {
+        let agents = self.acp_agents_for(launch)?;
+        let mut command = self.acp_plan_from_spec(launch, agents)?;
+        let hooks = self.acp_hooks_from_spec(launch, agents, &mut command)?;
+        let transport = self.transport_of_command(launch, command).await?;
+        Ok(LaunchedAgent { transport, hooks })
     }
 
     async fn mcp_servers_for(
@@ -438,9 +467,12 @@ mod headless_tests;
 mod tests {
     use super::*;
     use std::path::Path;
-    use tddy_coding_subagent::{
-        CodingAgentDef, CLAUDE_ACP, CODEX_ACP, OPENCODE, OPENCODE_CONFIG_CONTENT,
-    };
+    use tddy_coding_subagent::{CodingAgentDef, OPENCODE_CONFIG_CONTENT};
+
+    /// The built-in ACP agents' ids, as a launch names them as its harness.
+    const CLAUDE_ACP: &str = "claude-acp";
+    const CODEX_ACP: &str = "codex-acp";
+    const OPENCODE: &str = "opencode";
     use tddy_core::provider_route::RouteSecret;
 
     /// The model every launch in these tests runs.

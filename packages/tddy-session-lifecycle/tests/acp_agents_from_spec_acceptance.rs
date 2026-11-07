@@ -20,10 +20,12 @@ use std::sync::Arc;
 use pretty_assertions::assert_eq;
 use tddy_actions::tool::ToolHost;
 use tddy_agent_launch::spec_launch::HostCodingAgents;
-use tddy_coding_agent_specs::{load_agent_registry, CODEX_SPEC_YAML};
+use tddy_coding_agent_specs::{load_agent_registry, CODEX_ACP_SPEC_YAML, CODEX_SPEC_YAML};
 use tddy_coding_subagent::{
-    CodingAgentDef, CodingAgentLaunch, CodingAgentLauncher, CodingAgentSession,
+    AgentTransport, CodingAgentDef, CodingAgentLaunch, CodingAgentLauncher, CodingAgentSession,
+    LaunchedAgent,
 };
+use tddy_core::provider_route::HarnessRoute;
 use tddy_core::OpenSession;
 use tddy_session_lifecycle::coding_agent_as_user::DropContext;
 use tddy_session_lifecycle::coding_agent_launcher::DaemonCodingAgentLauncher;
@@ -194,6 +196,15 @@ fn a_launcher_with_coding_agents(
     tools_dir: &Path,
     env: BTreeMap<String, String>,
 ) -> (DaemonCodingAgentLauncher, Arc<HostCodingAgents>) {
+    a_launcher_routed_to(tools_dir, env, None)
+}
+
+/// [`a_launcher_with_coding_agents`] whose every provider account resolves to `route`.
+fn a_launcher_routed_to(
+    tools_dir: &Path,
+    env: BTreeMap<String, String>,
+    route: Option<HarnessRoute>,
+) -> (DaemonCodingAgentLauncher, Arc<HostCodingAgents>) {
     let registry = load_agent_registry(tools_dir).expect("the agent registry loads");
     let agents = Arc::new(HostCodingAgents::new(
         registry,
@@ -201,7 +212,7 @@ fn a_launcher_with_coding_agents(
     ));
     let launcher = DaemonCodingAgentLauncher::with_identity(
         the_daemons_own_identity(),
-        Arc::new(|_| Ok(None)),
+        Arc::new(move |_| Ok(route.clone())),
         Arc::new(|_| {
             Ok((
                 PathBuf::from(TDDY_TOOLS_PATH),
@@ -283,9 +294,14 @@ async fn open(
         mcp_servers,
         meta,
     };
-    CodingAgentSession::start(command, open, STUB_MODEL.to_string())
-        .await
-        .unwrap_or_else(|e| panic!("{harness}'s session opens: {e}"))
+    CodingAgentSession::start(
+        command,
+        open,
+        STUB_MODEL.to_string(),
+        tddy_coding_subagent::no_launch_hooks(),
+    )
+    .await
+    .unwrap_or_else(|e| panic!("{harness}'s session opens: {e}"))
 }
 
 #[tokio::test]
@@ -423,5 +439,238 @@ async fn a_managed_session_still_refuses_codex_acp_because_its_spec_declares_too
             ),
             Ok(binaries.path("bin/claude-agent-acp")),
         )
+    );
+}
+
+// ── The launch prepares every declared hooks adapter; route args follow the spec (`#agent-tools 27/28`)
+//
+// `launch_agent` hands back the agent with the hooks of the adapter its spec declares
+// (`coding_agent.acp.hooks_adapter`): `codex-acp-login` runs `codex login` with the `codex` dep and
+// retries once on an auth-like `session/new` error. Which agent takes a route as `-c` overrides is
+// its spec's `route.shape: toml_args`, never its name.
+//
+// Changeset: `docs/dev/1-WIP/2026-11-06-acp-subagent-leftovers.md`.
+
+/// How long a `codex login` the hooks run may take.
+const LOGIN_DEADLINE: std::time::Duration = std::time::Duration::from_secs(10);
+
+/// `a_launch(harness, managed, worktree)` on a provider account.
+fn a_routed_launch(harness: &str, managed: bool, worktree: &Path) -> CodingAgentLaunch {
+    let mut launch = a_launch(harness, managed, worktree);
+    launch.def.provider_account = Some("acct-route".to_string());
+    launch
+}
+
+/// A provider route naming its model the way `codex` takes it (`-m <model>`).
+fn a_route_naming_a_model() -> HarnessRoute {
+    HarnessRoute {
+        args: vec!["-m".to_string(), "gpt-5.2".to_string()],
+        ..HarnessRoute::default()
+    }
+}
+
+/// The agent `launcher` launches for `launch`, which must be one this daemon spawns itself.
+async fn the_launched_agent(
+    launcher: &DaemonCodingAgentLauncher,
+    launch: &CodingAgentLaunch,
+) -> (
+    tddy_core::AcpAgentCommand,
+    tddy_core::adapters::PreparedAcpHooks,
+) {
+    let LaunchedAgent { transport, hooks } = launcher
+        .launch_agent(launch)
+        .await
+        .unwrap_or_else(|e| panic!("{} is launched: {e}", launch.def.harness));
+    match transport {
+        AgentTransport::Command(command) => (command, hooks),
+        AgentTransport::Stream(_) => panic!("the daemon's own user needs no relay"),
+    }
+}
+
+impl TheAgentBinaries {
+    /// Make `bin/codex` record each argv it is run with to `codex.argv` and succeed.
+    fn with_a_codex_that_records_its_runs(self) -> Self {
+        let record = self.dir.path().join("codex.argv");
+        self.write(
+            "bin/codex",
+            &format!(
+                "#!/bin/sh\nprintf '%s\\n' \"$*\" >> '{}'\n",
+                record.display()
+            ),
+        );
+        self
+    }
+
+    /// Every run of `bin/codex`, its arguments joined by spaces.
+    fn codex_runs(&self) -> Vec<String> {
+        std::fs::read_to_string(self.dir.path().join("codex.argv"))
+            .unwrap_or_default()
+            .lines()
+            .map(str::to_string)
+            .collect()
+    }
+}
+
+#[tokio::test]
+async fn a_codex_acp_launch_runs_codex_login_and_retries_once_on_an_auth_like_session_error() {
+    // Given — codex-acp declares `acp.hooks_adapter: codex-acp-login`
+    let data_dir = tempfile::tempdir().expect("data dir");
+    let worktree = tempfile::tempdir().expect("worktree");
+    let login_dir = tempfile::tempdir().expect("login dir");
+    let binaries = the_agent_binaries().with_a_codex_that_records_its_runs();
+    let (launcher, _) =
+        a_launcher_with_coding_agents(&data_dir.path().join("tools"), an_env_naming(&binaries));
+    let (_command, hooks) =
+        the_launched_agent(&launcher, &a_launch("codex-acp", false, worktree.path())).await;
+
+    // When — an open its hooks bracket fails as an agent that is not signed in does
+    let opens = hooks
+        .opens
+        .clone()
+        .expect("codex-acp-login brackets each open");
+    opens.begin_open(Some(login_dir.path().to_path_buf())).await;
+    let verdict = tokio::time::timeout(
+        LOGIN_DEADLINE,
+        hooks.hooks.on_session_error("authentication required"),
+    )
+    .await
+    .expect("codex login finished in time");
+    let login_failure = opens.end_open().await.map(|e| e.to_string());
+
+    // Then — `codex login` ran with the codex dep, and the open is retried once
+    assert_eq!(
+        (
+            matches!(verdict, tddy_core::SessionErrorVerdict::RetryOnce),
+            binaries.codex_runs(),
+            login_failure,
+        ),
+        (true, vec!["login".to_string()], None)
+    );
+}
+
+#[tokio::test]
+async fn a_route_reaches_an_acp_agent_as_overrides_only_when_its_spec_declares_toml_args() {
+    // Given — `<tddyhome>/tools/codex-acp.yaml` declares its route as environment, not `-c` args
+    let data_dir = tempfile::tempdir().expect("data dir");
+    let tools_dir = data_dir.path().join("tools");
+    std::fs::create_dir(&tools_dir).expect("tools dir");
+    std::fs::write(
+        tools_dir.join("codex-acp.yaml"),
+        CODEX_ACP_SPEC_YAML.replace("shape: toml_args", "shape: env"),
+    )
+    .expect("write the override");
+    let worktree = tempfile::tempdir().expect("worktree");
+    let binaries = the_agent_binaries();
+    let (launcher, _) = a_launcher_routed_to(
+        &tools_dir,
+        an_env_naming(&binaries),
+        Some(a_route_naming_a_model()),
+    );
+
+    // When
+    let (command, _hooks) = the_launched_agent(
+        &launcher,
+        &a_routed_launch("codex-acp", false, worktree.path()),
+    )
+    .await;
+
+    // Then — no `-c model=…`: the agent's name does not make its route `-c` overrides
+    assert_eq!(command.args, Vec::<String>::new());
+}
+
+#[tokio::test]
+async fn a_codex_acp_route_still_reaches_it_as_one_model_override_under_its_built_in_spec() {
+    // Given — the built-in `codex-acp.yaml`, `route.shape: toml_args`
+    let data_dir = tempfile::tempdir().expect("data dir");
+    let worktree = tempfile::tempdir().expect("worktree");
+    let binaries = the_agent_binaries();
+    let (launcher, _) = a_launcher_routed_to(
+        &data_dir.path().join("tools"),
+        an_env_naming(&binaries),
+        Some(a_route_naming_a_model()),
+    );
+
+    // When
+    let (command, _hooks) = the_launched_agent(
+        &launcher,
+        &a_routed_launch("codex-acp", false, worktree.path()),
+    )
+    .await;
+
+    // Then — exactly once, whether the launcher or the declared adapter adds it
+    assert_eq!(
+        command.args,
+        vec!["-c".to_string(), "model=\"gpt-5.2\"".to_string()]
+    );
+}
+
+#[tokio::test]
+async fn an_agent_whose_spec_declares_no_hooks_adapter_is_launched_with_the_command_it_plans() {
+    // Given — claude-acp declares no `acp.hooks_adapter`
+    let data_dir = tempfile::tempdir().expect("data dir");
+    let worktree = tempfile::tempdir().expect("worktree");
+    let binaries = the_agent_binaries();
+    let (launcher, _) =
+        a_launcher_with_coding_agents(&data_dir.path().join("tools"), an_env_naming(&binaries));
+    let launch = a_launch("claude-acp", true, worktree.path());
+
+    // When
+    let (launched, hooks) = the_launched_agent(&launcher, &launch).await;
+    let planned = launcher.command_for(&launch).await.expect("planned");
+
+    // Then — the planned command, and hooks that bracket no open
+    assert_eq!(
+        (
+            launched.program,
+            launched.args,
+            launched.env,
+            launched.cwd,
+            hooks.opens.is_none()
+        ),
+        (
+            planned.program,
+            planned.args,
+            planned.env,
+            planned.cwd,
+            true
+        )
+    );
+}
+
+#[tokio::test]
+async fn a_routed_opencode_launch_keeps_its_route_inline_and_names_no_route_file() {
+    // Given — opencode declares `acp.hooks_adapter: opencode-route-file`, and its route carries a file
+    let data_dir = tempfile::tempdir().expect("data dir");
+    let worktree = tempfile::tempdir().expect("worktree");
+    let binaries = the_agent_binaries();
+    let route = HarnessRoute {
+        files: vec![tddy_core::provider_route::RouteFile {
+            name: "opencode.json".to_string(),
+            contents: r#"{"provider":{"acct":{}}}"#.to_string(),
+        }],
+        ..HarnessRoute::default()
+    };
+    let (launcher, _) = a_launcher_routed_to(
+        &data_dir.path().join("tools"),
+        an_env_naming(&binaries),
+        Some(route),
+    );
+
+    // When
+    let (command, _hooks) = the_launched_agent(
+        &launcher,
+        &a_routed_launch("opencode", false, worktree.path()),
+    )
+    .await;
+
+    // Then — a daemon-written route file would be unreadable by the session's OS user: the route
+    // stays inline, and no variable names a file
+    let names: Vec<&str> = command.env.iter().map(|(name, _)| name.as_str()).collect();
+    assert_eq!(
+        (
+            names.contains(&"OPENCODE_CONFIG"),
+            names.contains(&"OPENCODE_CONFIG_CONTENT")
+        ),
+        (false, true)
     );
 }

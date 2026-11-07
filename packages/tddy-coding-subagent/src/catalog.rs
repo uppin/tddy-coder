@@ -2,17 +2,9 @@
 
 use tddy_discovery::harness_profile::HarnessProfile;
 
-use crate::transports::transport_of;
+use tddy_coding_agent_specs::CodingAgentRegistry;
 
-/// Claude Code over ACP (`claude-agent-acp`).
-pub const CLAUDE_ACP: &str = "claude-acp";
-/// Codex over ACP (`codex-acp`).
-pub const CODEX_ACP: &str = "codex-acp";
-/// OpenCode, which speaks ACP itself (`opencode acp`).
-pub const OPENCODE: &str = "opencode";
-
-/// The harnesses spoken to over ACP — the ones this crate can run as a subagent.
-pub const ACP_HARNESSES: &[&str] = &[CLAUDE_ACP, CODEX_ACP, OPENCODE];
+use crate::transports::{transport_of_spec, Transport};
 
 /// One coding agent a daemon offers as a subagent.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -29,36 +21,52 @@ pub struct CodingAgentDef {
     pub provider_account: Option<String>,
 }
 
+/// [`coding_agent_defs_from`] over the built-in agents' specs: for a caller with no host registry.
+pub fn coding_agent_defs(
+    profiles: &[HarnessProfile],
+    allowed_agent_ids: &[(String, Option<String>)],
+) -> Vec<CodingAgentDef> {
+    coding_agent_defs_from(
+        CodingAgentRegistry::builtin_cached(),
+        profiles,
+        allowed_agent_ids,
+    )
+}
+
 /// The coding agents offered from `profiles` and `allowed_agent_ids` (`(id, label)` pairs), profiles
-/// first.
-///
-/// A profile is offered when its harness has a transport this crate runs: an ACP harness or a
-/// headless one ([`transport_of`]). A PTY-only harness is never offered. A bare `allowed_agents` id
-/// is offered only when it is an ACP harness, so a headless harness is offered through a profile
-/// alone, which names the model it runs.
+/// first, read from `registry` (`#agent-tools 27/28`): a profile is offered when the registry
+/// declares its harness an agent with a transport ([`transport_of_spec`]); a bare `allowed_agents`
+/// id only when the registry declares it an ACP agent, on that spec's default model, so a headless
+/// harness is offered through a profile alone, which names the model it runs. A harness the
+/// registry does not declare is never offered.
 ///
 /// A name is offered once: an allowed id that a profile of the same name already took is skipped,
 /// since two defs under one name would attach as whichever resolved first.
-pub fn coding_agent_defs(
+pub fn coding_agent_defs_from(
+    registry: &CodingAgentRegistry,
     profiles: &[HarnessProfile],
     allowed_agent_ids: &[(String, Option<String>)],
 ) -> Vec<CodingAgentDef> {
     let from_profiles: Vec<CodingAgentDef> = profiles
         .iter()
-        .filter(|profile| transport_of(&profile.harness).is_some())
+        .filter(|profile| {
+            registry
+                .get(&profile.harness)
+                .and_then(transport_of_spec)
+                .is_some()
+        })
         .map(profile_def)
         .collect();
     let from_allowed: Vec<CodingAgentDef> = allowed_agent_ids
         .iter()
-        .filter(|(id, _)| is_acp_harness(id))
-        .filter(|(id, _)| !from_profiles.iter().any(|def| &def.name == id))
-        .map(|(id, label)| allowed_agent_def(id, label))
+        .filter_map(|(id, label)| {
+            let spec = registry.get(id)?;
+            (transport_of_spec(spec) == Some(Transport::Acp))
+                .then(|| allowed_agent_def(id, label, &spec.agent.models.default))
+        })
+        .filter(|def| !from_profiles.iter().any(|taken| taken.name == def.name))
         .collect();
     from_profiles.into_iter().chain(from_allowed).collect()
-}
-
-fn is_acp_harness(harness: &str) -> bool {
-    ACP_HARNESSES.contains(&harness)
 }
 
 fn profile_def(profile: &HarnessProfile) -> CodingAgentDef {
@@ -72,26 +80,24 @@ fn profile_def(profile: &HarnessProfile) -> CodingAgentDef {
     }
 }
 
-/// A bare `allowed_agents` id: the harness of that name, on its default model and its own login.
-fn allowed_agent_def(id: &str, label: &Option<String>) -> CodingAgentDef {
+/// A bare `allowed_agents` id: the harness of that name, on `default_model` and its own login.
+fn allowed_agent_def(id: &str, label: &Option<String>, default_model: &str) -> CodingAgentDef {
     CodingAgentDef {
         name: id.to_string(),
         label: label.clone(),
         harness: id.to_string(),
-        model: tddy_coding_agent_specs::CodingAgentRegistry::builtin_cached()
-            .get(id)
-            .map(|spec| spec.agent.models.default.clone())
-            .unwrap_or_default(),
+        model: default_model.to_string(),
         provider_account: None,
     }
 }
 
-/// [`coding_agent_defs`] over the harness profiles in `agents_dir` (`<tddyhome>/agents`) — what a
-/// daemon resolves a listing, an attach and an open against, so the three read one list.
+/// [`coding_agent_defs_from`] over the harness profiles in `agents_dir` (`<tddyhome>/agents`) — what
+/// a daemon resolves a listing, an attach and an open against, so the three read one list.
 pub fn coding_agent_defs_in(
+    registry: &CodingAgentRegistry,
     agents_dir: &std::path::Path,
     allowed_agent_ids: &[(String, Option<String>)],
 ) -> Vec<CodingAgentDef> {
     let profiles = tddy_discovery::harness_profile::load_harness_profiles(agents_dir);
-    coding_agent_defs(&profiles, allowed_agent_ids)
+    coding_agent_defs_from(registry, &profiles, allowed_agent_ids)
 }

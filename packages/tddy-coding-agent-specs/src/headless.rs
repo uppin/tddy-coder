@@ -301,6 +301,7 @@ mod tests {
             route_model: RouteModel::default(),
             fresh_session: FreshSession::default(),
             scratch: ScratchDir::default(),
+            permission_policy: None,
         }
     }
 
