@@ -27,23 +27,9 @@ impl LaunchSessions {
     /// `None` when the session cut none: its changeset did not resolve to `new_branch_from_base`, or
     /// it has no worktree of its own under the project's `.worktrees` (a client's checkout is never
     /// cut, so a branch named there is never ours to delete).
-    pub(crate) fn branch_a_start_cut(
-        &self,
-        session_token: &str,
-        session_id: &str,
-        project_id: &str,
-    ) -> Result<Option<CutBranch>, Status> {
-        let github_user = (self.user_resolver)(session_token)
-            .ok_or_else(|| Status::unauthenticated("invalid or expired session"))?;
-        let os_user = self
-            .config
-            .os_user_for_github(&github_user)
-            .ok_or_else(|| Status::permission_denied("user not mapped to OS user"))?;
-        self.branch_a_start_cut_as(&os_user, session_id, project_id)
-    }
-
-    /// [`Self::branch_a_start_cut`] for a session of `os_user`, whose start carried no session token
-    /// to resolve (an operator start).
+    ///
+    /// Keyed by `os_user` rather than a session token, so an operator start, which carries none, is
+    /// undone the same way as a caller's.
     pub(crate) fn branch_a_start_cut_as(
         &self,
         os_user: &str,

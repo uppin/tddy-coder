@@ -66,14 +66,18 @@ impl LaunchSessions {
             return Err(Status::invalid_argument("session_id is required"));
         }
         log::debug!("DeleteSession: requested session_id={}", session_id);
-        let github_user = (self.user_resolver)(&req.session_token)
-            .ok_or_else(|| Status::unauthenticated("invalid or expired session"))?;
-        let os_user = self
-            .config
-            .os_user_for_github(&github_user)
-            .ok_or_else(|| Status::permission_denied("user not mapped to OS user"))?;
+        let os_user = self.os_user_of_session_token(&req.session_token)?;
         self.delete_session_as(&os_user, session_id, &req.session_token)
             .await
+    }
+
+    /// The OS user a session token's caller is mapped to.
+    pub(crate) fn os_user_of_session_token(&self, session_token: &str) -> Result<String, Status> {
+        let github_user = (self.user_resolver)(session_token)
+            .ok_or_else(|| Status::unauthenticated("invalid or expired session"))?;
+        self.config
+            .os_user_for_github(&github_user)
+            .ok_or_else(|| Status::permission_denied("user not mapped to OS user"))
     }
 
     /// The teardown [`Self::delete_session_at_session_coordinate`] runs once the caller is resolved

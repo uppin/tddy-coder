@@ -14,11 +14,10 @@
 //! `docs/dev/todo/2026-10-24-cancelled-start-waits-out-an-in-flight-worktree-cut.md`.
 
 use async_trait::async_trait;
-use tddy_rpc::{Request, Status};
+use tddy_rpc::Status;
 use tddy_service::proto::session::start_session_event::Event as StartSessionEventKind;
 use tddy_service::proto::session::{
-    DeleteSessionRequest, StartSessionEvent, StartSessionRequest, StartSessionResponse,
-    StartTaskStarted,
+    StartSessionEvent, StartSessionRequest, StartSessionResponse, StartTaskStarted,
 };
 use tddy_session_files::attachment_progress::AttachmentProgressSink;
 use tddy_task::{TaskBody, TaskContext, TaskStatus};
@@ -114,64 +113,33 @@ async fn undo_a_cancelled_start(
     if created.session_id.is_empty() {
         return Status::cancelled(START_CANCELLED);
     }
-    // The branch is named by the session's changeset, which goes with the session: read it first.
-    let cut = match cut_project {
-        None => None,
-        Some(project_id) => {
-            match service.branch_a_start_cut(&session_token, &created.session_id, &project_id) {
-                Ok(cut) => cut,
-                Err(status) => {
-                    log::warn!(
-                        "StreamStartSession: the cancelled start's branch could not be read; its session {} is left in place: {status}",
-                        created.session_id
-                    );
-                    return Status::internal(format!(
-                        "start cancelled, but the branch it cut could not be read, so its session {} was left in place: {}",
-                        created.session_id, status.message
-                    ));
-                }
-            }
+    let os_user = match service.os_user_of_session_token(&session_token) {
+        Ok(os_user) => os_user,
+        Err(status) => {
+            log::warn!(
+                "StreamStartSession: the cancelled start's caller could not be resolved; its session {} is left in place: {status}",
+                created.session_id
+            );
+            return Status::internal(format!(
+                "start cancelled, but its caller could not be resolved, so its session {} was left in place: {}",
+                created.session_id, status.message
+            ));
         }
     };
-    let deleted = service
-        .delete_session_at_session_coordinate(Request::direct(DeleteSessionRequest {
-            session_id: created.session_id.clone(),
-            session_token,
-        }))
-        .await;
-    if let Err(status) = deleted {
-        log::warn!(
-            "StreamStartSession: the cancelled start's session {} could not be removed: {status}",
-            created.session_id
-        );
-        return Status::internal(format!(
-            "start cancelled, but its session {} could not be removed: {}",
-            created.session_id, status.message
-        ));
-    }
-    let Some(cut) = cut else {
-        return Status::cancelled(START_CANCELLED);
-    };
-    match cut.delete() {
+    match remove_what_a_start_created(service, &os_user, created, &session_token, cut_project).await
+    {
         Ok(()) => Status::cancelled(START_CANCELLED),
         Err(message) => {
-            log::warn!(
-                "StreamStartSession: the cancelled start's session {} was removed, but its branch {} could not be deleted: {message}",
-                created.session_id,
-                cut.branch
-            );
-            Status::internal(format!(
-                "start cancelled, and its session {} was removed, but the branch it cut ({}) could not be deleted: {message}",
-                created.session_id, cut.branch
-            ))
+            log::warn!("StreamStartSession: a cancelled start was not fully undone: {message}");
+            Status::internal(format!("start cancelled, but {message}"))
         }
     }
 }
 
 /// The undo of a start that overran its deadline and answered with a session: the session it created
 /// and the branch it cut, removed as `os_user`, which an operator or Telegram start is keyed by — it
-/// carries no session token to resolve them with. The teardown is the one
-/// [`undo_a_cancelled_start`] runs, reached through the same primitives.
+/// carries no session token to resolve them with. [`undo_a_cancelled_start`] runs the same
+/// teardown ([`remove_what_a_start_created`]) once it has resolved its caller's token.
 ///
 /// `session_token` is the start's own token, which the split codebase half and the agent clones are
 /// deleted with (see [`LaunchSessions::delete_session_as`]). An operator start has none, so a session
