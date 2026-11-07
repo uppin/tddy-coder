@@ -7,6 +7,8 @@
 
 **Stack**: `#web-split` 13/16 — branch `feature/web-split/prstack`, base `feature/web-split/workspace`
 
+**PR**: [#850](https://github.com/uppin/tddy-coder/pull/850)
+
 ## Initial Discovery
 
 [2026-11-07-prstack-package-initial-discovery.md](./2026-11-07-prstack-package-initial-discovery.md)
@@ -70,6 +72,12 @@ implementing one here collides with the PR that owns it.
 | `n11`, `n12` | — (branch predecessors only) | nothing | — |
 
 ## Draft PR contract
+
+**As pushed (commit 2):** skeleton, workflow, boundary rule; **1** specs whose session imports are prstack,
+create-session or the presenter room, plus the `prstack/*.test.ts` suites, `git mv`'d — failing until the
+modules move. Specs mounting the sessions drawer stay for `feature/web-split/session`.
+
+Originally planned:
 
 First push (commit 2): the `tddy-prstack-web` skeleton (manifest exporting the surface in `## Responsibility`, Cypress/Vite config, workflow), the specs, page objects and drivers listed below `git mv`'d into the package with imports pointing at it, and the boundary rule — failing until the modules move.
 
@@ -148,10 +156,10 @@ Real dependency edges, as opposed to the branch line:
 - [x] Cross-check `packages/*/docs/code-issues/` and `docs/dev/todo/` for items this change touches (Step 2b)
 - [x] Create/update PRD documentation
 - [x] Create changeset (this document)
-- [ ] Create failing acceptance tests
-- [ ] Run acceptance tests (verify they fail)
-- [ ] USER REVIEW — acceptance tests
-- [ ] TDD Red — write failing unit/integration tests
+- [x] Create failing acceptance tests
+- [x] Run acceptance tests (verify they fail)
+- [x] USER REVIEW — acceptance tests (developer waived the per-node review for this stack, 2026-11-07: "finish the rest without stopping")
+- [x] TDD Red — write failing unit/integration tests
 - [ ] TDD Green — implement with quality code
 - [ ] Update documentation with progress
 - [ ] Repeat Red→Green→Update cycle until feature complete
