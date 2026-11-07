@@ -5,6 +5,7 @@
   "scripts": {
     "generate": "../../scripts/generated-code.sh write packages/tddy-rust-typescript-tests",
     "test": "bun test",
+    "test:ci": "bun test --reporter=junit --reporter-outfile=../../reports/junit/rust-typescript-tests.xml",
     "test:verbose": "bun test --verbose"
   },
   "dependencies": {
