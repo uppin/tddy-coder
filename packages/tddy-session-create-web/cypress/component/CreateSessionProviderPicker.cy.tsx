@@ -9,6 +9,7 @@
  * Feature doc: docs/ft/daemon/session-agent-roster.md
  * Closes the tool-session provider picker's missing harness metadata (#801).
  */
+import { aClientsPortDouble } from "tddy-client-web/testkit";
 import { createClient } from "@connectrpc/connect";
 import { anInMemoryRpcBackend, type InMemoryRpcBackend } from "tddy-connectrpc-testkit";
 import { CreateSessionPane } from "../../src/CreateSessionPane";
@@ -78,6 +79,7 @@ function mountWith(backend: InMemoryRpcBackend) {
       onCreated={cy.stub()}
     />,
     backend,
+    { clients: aClientsPortDouble(backend, { daemons: [] }) },
   );
 }
 
