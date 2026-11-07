@@ -28,6 +28,7 @@
 
 import React from "react";
 import type { InMemoryRpcBackend } from "tddy-connectrpc-testkit";
+import { withClients } from "tddy-client-web/testkit";
 import { RpcTransportProvider } from "../../../src/rpc/transportProvider";
 
 /**
@@ -44,9 +45,15 @@ export function mountWithRpc(
   // LiveKit factory ignores room/identity and returns the same in-memory transport.
   const liveKitFactory = () => transport;
 
+  // `withClients` supplies the three ports (auth included) a bare component needs; the
+  // `RpcTransportProvider` inside it adds this app's own sources — its HTTP transport and the
+  // LiveKit factory — and re-mounts the clients port from them.
   return cy.mount(
-    <RpcTransportProvider httpTransport={transport} liveKitFactory={liveKitFactory}>
-      {component}
-    </RpcTransportProvider>,
+    withClients(
+      <RpcTransportProvider httpTransport={transport} liveKitFactory={liveKitFactory}>
+        {component}
+      </RpcTransportProvider>,
+      backend,
+    ),
   );
 }

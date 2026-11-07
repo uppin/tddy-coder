@@ -11,7 +11,6 @@
 
 import React, { useRef } from "react";
 import { AuthProvider, useAuthContext } from "../../src/hooks/authProvider";
-import { useDaemonClient } from "../../src/rpc/selectedDaemon";
 import { AuthService } from "tddy-client-web/gen/auth_pb";
 import { SessionService } from "tddy-client-web/gen/session_pb";
 import { TerminalSessionService } from "tddy-client-web/gen/terminal_session_pb";
@@ -28,6 +27,7 @@ import {
   EXPIRED_REFRESH_TOKEN,
   REFRESHED_ACCESS_TOKEN,
 } from "../support/rpc/durableSessionBackend";
+import { useDaemonClient } from "tddy-client-web";
 
 // ---------------------------------------------------------------------------
 // Harness probes

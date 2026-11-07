@@ -40,12 +40,7 @@ import {
   localHostRegistrationFor,
 } from "../../src/rpc/connections/localHost";
 import { LocalHostConnections } from "../../src/rpc/connections/localHostRegistration";
-import {
-  ConnectionProviderRegistry,
-  ConnectionProviders,
-  useConnectionProviders,
-  useHostConnection,
-} from "../../src/rpc/connections/registry";
+import { ConnectionProviders, useConnectionProviders } from "../../src/rpc/connections/registry";
 import type { ConnectionProvider } from "tddy-client-web/connections/types";
 import { LIVEKIT_SOURCE_ID } from "../../src/rpc/hostDirectory/liveKitSource";
 import type { HostDirectorySource } from "../../src/rpc/hostDirectory/types";
@@ -55,6 +50,8 @@ import {
   useHostDirectory,
 } from "../../src/rpc/hostDirectory/useHostDirectory";
 import { byTestId } from "../support/testIds";
+import { useHostConnection } from "tddy-client-web";
+import { ConnectionProviderRegistry } from "tddy-client-web";
 
 // ---------------------------------------------------------------------------
 // Fixtures

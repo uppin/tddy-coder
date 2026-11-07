@@ -19,10 +19,10 @@
 
 import { useEffect, useState } from "react";
 import { ActivityService, SessionNotificationKind } from "tddy-client-web/gen/activity_pb";
-import { useDaemonClient } from "./selectedDaemon";
 import { useAuthContext } from "../hooks/authProvider";
 import { sessionNotificationRegistry } from "../components/sessions/sessionNotificationRegistry";
 import { rpcFailureText } from "./rpcFailure";
+import { useDaemonClient } from "tddy-client-web";
 
 export interface SessionNotificationsFeed {
   /** Why the feed stopped, ready to render; `null` while it is live (or not yet open). */

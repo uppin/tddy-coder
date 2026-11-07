@@ -29,18 +29,15 @@ import { ListProjectBranchesResponseSchema, ListProjectsResponseSchema, ProjectE
 import { ProjectsAppPage } from "../../src/components/projects/ProjectsAppPage";
 import { AuthProvider } from "../../src/hooks/authProvider";
 import type { DaemonHost } from "../../src/lib/participantRole";
-import {
-  ConnectionProviders,
-  ConnectionProviderRegistry,
-  useHostClient,
-  useHostConnection,
-} from "../../src/rpc/connections/registry";
+import { ConnectionProviders } from "../../src/rpc/connections/registry";
 import { SelectedDaemonProvider } from "../../src/rpc/selectedDaemon";
 import type { ConnectionProvider, HostConnection } from "tddy-client-web/connections/types";
 import { mountWithRpc } from "../support/rpc/inMemory";
 import { hostConnectionProbePage as page } from "../support/pages/hostConnectionProbePage";
 import { projectsScreenPage } from "../support/pages/projectsScreenPage";
 import { TEST_IDS } from "../support/testIds";
+import { useHostClient, useHostConnection } from "tddy-client-web";
+import { ConnectionProviderRegistry } from "tddy-client-web";
 
 // ---------------------------------------------------------------------------
 // Fixtures

@@ -1,11 +1,11 @@
 import type { ReactNode } from "react";
 import type { SessionEntry } from "tddy-client-web/gen/session_pb";
-import type { HostReadFailure } from "../../rpc/useHostFanOut";
 import { InlineError } from "tddy-ui-web";
 import { CreateSessionAgentSelect } from "./CreateSessionAgentSelect";
 import { inputClass, labelClass } from "./createSessionFormStyles";
 import { WORKFLOW_RECIPES } from "./createSessionRecipes";
 import type { SelectableAgent } from "./selectableAgentOptions";
+import { type HostReadFailure } from "tddy-client-web";
 
 export interface CreateSessionToolFieldsProps {
   offeredAgents: readonly SelectableAgent[];

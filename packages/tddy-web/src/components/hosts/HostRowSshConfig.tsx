@@ -15,7 +15,7 @@
 import { useEffect, useState } from "react";
 import { HostService, ProbeOutcome, type ListSshConfigHostsResponse } from "tddy-client-web/gen/host_pb";
 import { useAuthContext } from "../../hooks/authProvider";
-import { useHostClient } from "../../rpc/connections/registry";
+import { useHostClient } from "tddy-client-web";
 
 export interface HostRowSshConfigProps {
   instanceId: string;

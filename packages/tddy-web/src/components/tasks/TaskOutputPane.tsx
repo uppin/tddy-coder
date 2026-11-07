@@ -1,8 +1,8 @@
 import React from "react";
 import type { TaskInfo } from "tddy-client-web/gen/tasks_pb";
 import { TaskChannelOutput } from "./TaskChannelOutput";
-import { PARAM_CHANNEL } from "../../routing/appLocation";
 import { useAppLocation } from "../../routing/useAppLocation";
+import { PARAM_CHANNEL } from "tddy-client-web";
 
 interface TaskOutputPaneProps {
   task: TaskInfo | null;

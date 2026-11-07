@@ -3,12 +3,12 @@ import type { SessionEntry } from "tddy-client-web/gen/session_pb";
 import type { HostConnection } from "tddy-client-web/connections/types";
 import type { ToolShortcutDef } from "../../lib/toolShortcuts";
 import { hostNotConnectedText } from "../../rpc/rpcFailure";
-import { useHostLabel } from "../../rpc/selectedDaemon";
 import { InlineError } from "tddy-ui-web";
 import { SessionRuntime } from "./SessionRuntime";
 import type { SessionAgentClient, TerminalClient } from "./sessionRuntimeProps";
 import type { ByteDelta, SessionRuntimeState } from "./sessionRuntimeRegistry";
 import { useSessionAttachment, type SessionAttachmentState } from "./useSessionAttachment";
+import { useHostLabel } from "tddy-client-web";
 
 export interface SessionChildRuntimeProps {
   /** The spawned child conversation's session id. */
