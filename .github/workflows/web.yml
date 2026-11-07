@@ -22,8 +22,9 @@ on:
     branches: [master]
   workflow_dispatch:
 
+# Keyed on the event too, so a manual dispatch never cancels the pull_request run of the same branch.
 concurrency:
-  group: web-${{ github.head_ref || github.ref_name }}
+  group: web-${{ github.event_name }}-${{ github.head_ref || github.ref_name }}
   cancel-in-progress: true
 
 permissions:
