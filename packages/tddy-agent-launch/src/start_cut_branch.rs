@@ -39,8 +39,19 @@ impl LaunchSessions {
             .config
             .os_user_for_github(&github_user)
             .ok_or_else(|| Status::permission_denied("user not mapped to OS user"))?;
+        self.branch_a_start_cut_as(&os_user, session_id, project_id)
+    }
+
+    /// [`Self::branch_a_start_cut`] for a session of `os_user`, whose start carried no session token
+    /// to resolve (an operator start).
+    pub(crate) fn branch_a_start_cut_as(
+        &self,
+        os_user: &str,
+        session_id: &str,
+        project_id: &str,
+    ) -> Result<Option<CutBranch>, Status> {
         let sessions_base = tddy_daemon_kernel::user_paths::sessions_base_for_user(
-            &os_user,
+            os_user,
             Some(&self.tddy_data_dir),
         )
         .ok_or_else(|| Status::internal("could not resolve sessions path"))?;
@@ -70,7 +81,7 @@ impl LaunchSessions {
             return Ok(None);
         };
         let (_, project) =
-            service_util::find_registered_project(&self.tddy_data_dir, &os_user, project_id)?;
+            service_util::find_registered_project(&self.tddy_data_dir, os_user, project_id)?;
         Ok(Some(CutBranch {
             repo_root: service_util::project_repo_root(&project)?,
             branch: branch.to_string(),

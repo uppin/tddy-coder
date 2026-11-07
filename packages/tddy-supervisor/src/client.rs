@@ -235,27 +235,31 @@ impl SupervisorClient {
         SupervisorError,
     > {
         const METHOD: &str = "CloneRepository";
-        // TODO(bounded-waits): implement — bound the stream's opening and every `frames.recv()`
-        // below by `self.clone_progress_deadline`, failing `Unavailable` naming CloneRepository and
-        // the deadline.
-        let _ = self.clone_progress_deadline;
-        let mut frames = self
-            .transport
-            .call_server_stream(SERVICE_NAME, METHOD, request.encode_to_vec())
-            .await
-            .map_err(protocol::error_from_status)?;
+        let deadline = self.clone_progress_deadline;
+        // Opening the stream and receiving its first event share one deadline: a clone that has not
+        // produced its first event within it is not going to.
+        let first_event_by = tokio::time::Instant::now() + deadline;
+        let mut frames = tokio::time::timeout_at(
+            first_event_by,
+            self.transport
+                .call_server_stream(SERVICE_NAME, METHOD, request.encode_to_vec()),
+        )
+        .await
+        .map_err(|_elapsed| went_silent(METHOD, deadline))?
+        .map_err(protocol::error_from_status)?;
         // A refusal is the stream's first and only item, so it is read here rather than handed to
         // the caller as an event it might forget to look at.
-        let first = match frames.recv().await {
-            Some(Ok(bytes)) => decode_event(&bytes)?,
-            Some(Err(status)) => return Err(protocol::error_from_status(status)),
-            None => {
+        let first = match tokio::time::timeout_at(first_event_by, frames.recv()).await {
+            Ok(Some(Ok(bytes))) => decode_event(&bytes)?,
+            Ok(Some(Err(status))) => return Err(protocol::error_from_status(status)),
+            Ok(None) => {
                 return Err(SupervisorError::Unavailable {
                     message:
                         "the supervisor closed the connection before answering CloneRepository"
                             .to_string(),
                 })
             }
+            Err(_elapsed) => return Err(went_silent(METHOD, deadline)),
         };
 
         let (events, receiver) = tokio::sync::mpsc::channel(64);
@@ -267,13 +271,23 @@ impl SupervisorClient {
             if events.send(Ok(first)).await.is_err() {
                 return;
             }
-            while let Some(frame) = frames.recv().await {
+            loop {
+                let frame = match tokio::time::timeout(deadline, frames.recv()).await {
+                    Ok(Some(frame)) => frame,
+                    Ok(None) => break,
+                    Err(_elapsed) => {
+                        // Silence ends the stream with the failure as its last item: nothing after
+                        // a gap this long can be trusted to be the rest of the clone.
+                        let _ = events.send(Err(went_silent(METHOD, deadline))).await;
+                        break;
+                    }
+                };
                 let event = match frame {
                     Ok(bytes) => decode_event(&bytes),
                     Err(status) => Err(protocol::error_from_status(status)),
                 };
                 if events.send(event).await.is_err() {
-                    return;
+                    break;
                 }
             }
         });
@@ -323,17 +337,26 @@ impl SupervisorClient {
         method: &str,
         request: Req,
     ) -> Result<Res, SupervisorError> {
-        // TODO(bounded-waits): implement — bound `call_unary` by `self.call_deadline`, failing
-        // `Unavailable` naming `method` and the deadline.
-        let _ = self.call_deadline;
-        let bytes = self
-            .transport
-            .call_unary(SERVICE_NAME, method, request.encode_to_vec())
-            .await
-            .map_err(protocol::error_from_status)?;
+        // Expiry drops the call, which leaves its pending entry in the transport's engine until a
+        // reply for that request id arrives or the connection closes.
+        let answered = tokio::time::timeout(
+            self.call_deadline,
+            self.transport
+                .call_unary(SERVICE_NAME, method, request.encode_to_vec()),
+        )
+        .await
+        .map_err(|_elapsed| went_silent(method, self.call_deadline))?;
+        let bytes = answered.map_err(protocol::error_from_status)?;
         Res::decode(&bytes[..]).map_err(|error| SupervisorError::OperationFailed {
             message: format!("could not decode the supervisor's reply to {method}: {error}"),
         })
+    }
+}
+
+/// The failure of a call or a clone event that the supervisor did not answer within `deadline`.
+fn went_silent(method: &str, deadline: Duration) -> SupervisorError {
+    SupervisorError::Unavailable {
+        message: format!("the supervisor sent nothing for {method} within {deadline:?}"),
     }
 }
 

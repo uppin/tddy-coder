@@ -35,6 +35,8 @@ use tddy_service::proto::session::start_phase::Step as StartStep;
 use tddy_daemon_kernel::trim_to_option;
 
 use crate::launch_ports::LaunchSessions;
+use crate::start_deadline::StartDeadline;
+use crate::start_task::{project_a_start_may_cut_in, undo_a_timed_out_start};
 pub use crate::tool_spawn_plan::*;
 
 /// What a CLI-agent start holds once its prelude has run: where the session lives, the id it was
@@ -140,8 +142,47 @@ impl LaunchSessions {
         Ok(started)
     }
 
-    /// Start `req` on this daemon, the route and the placement already decided.
+    /// Start `req` on this daemon, the route and the placement already decided, under the daemon's
+    /// session start deadline (`session_start_timeout_secs`).
+    ///
+    /// A start that overruns it is cancelled, the session it created is undone, and the caller gets
+    /// `DEADLINE_EXCEEDED` naming the step it was on. Every start on this daemon comes through here,
+    /// the caller-keyed ones and the operator-keyed ones alike.
     pub(crate) async fn start_here(
+        &self,
+        req: StartSessionRequest,
+        os_user: &str,
+        agent_def: Option<tddy_discovery::agent_def::SpecializedAgentDef>,
+        placement: CodebasePlacement,
+        progress: &AttachmentProgressSink,
+        cancel: &CancellationToken,
+    ) -> Result<Response<StartSessionResponse>, Status> {
+        let session_token = req.session_token.clone();
+        let cut_project = project_a_start_may_cut_in(&req);
+        StartDeadline::new(self.config.session_start_timeout())
+            .run(
+                progress,
+                cancel,
+                |sink| async move {
+                    self.start_here_body(req, os_user, agent_def, placement, &sink, cancel)
+                        .await
+                },
+                |started| async move {
+                    undo_a_timed_out_start(
+                        self,
+                        os_user,
+                        started.get_ref(),
+                        &session_token,
+                        cut_project,
+                    )
+                    .await
+                },
+            )
+            .await
+    }
+
+    /// The start itself, which [`Self::start_here`] runs under the session start deadline.
+    async fn start_here_body(
         &self,
         req: StartSessionRequest,
         os_user: &str,

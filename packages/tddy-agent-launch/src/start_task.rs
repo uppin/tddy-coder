@@ -96,7 +96,7 @@ fn task_status_of(ended: &Result<(), Status>) -> TaskStatus {
 
 /// The project a start cuts its branch in, when the request names one. A start on a client's own
 /// checkout (`repo_path`) cuts no worktree, so it has no branch of its own to remove.
-fn project_a_start_may_cut_in(req: &StartSessionRequest) -> Option<String> {
+pub(crate) fn project_a_start_may_cut_in(req: &StartSessionRequest) -> Option<String> {
     let project_id = req.project_id.trim();
     (req.repo_path.trim().is_empty() && !project_id.is_empty()).then(|| project_id.to_string())
 }
@@ -166,6 +166,80 @@ async fn undo_a_cancelled_start(
             ))
         }
     }
+}
+
+/// The undo of a start that overran its deadline and answered with a session: the session it created
+/// and the branch it cut, removed as `os_user`, which an operator or Telegram start is keyed by — it
+/// carries no session token to resolve them with. The teardown is the one
+/// [`undo_a_cancelled_start`] runs, reached through the same primitives.
+///
+/// `session_token` is the start's own token, which the split codebase half and the agent clones are
+/// deleted with (see [`LaunchSessions::delete_session_as`]). An operator start has none, so a session
+/// that has either is refused here and left in place, and that is logged.
+///
+/// TODO(operator-start-undo): an operator start's split codebase half and agent clones cannot be torn
+/// down by a token-free undo until the split host port and the peer delete protocol take an OS user
+/// rather than a session token. Planned as a follow-up stack node (user, 2026-11-07). Changeset
+/// `docs/dev/1-WIP/2026-11-06-bounded-session-waits.md`, Technical Debt.
+///
+/// A failure is logged, naming the session it left in place. The deadline's error is the only
+/// answer the caller gets, and it cannot carry this.
+pub(crate) async fn undo_a_timed_out_start(
+    service: &LaunchSessions,
+    os_user: &str,
+    created: &StartSessionResponse,
+    session_token: &str,
+    cut_project: Option<String>,
+) {
+    if created.session_id.is_empty() {
+        return;
+    }
+    if let Err(message) =
+        remove_what_a_start_created(service, os_user, created, session_token, cut_project).await
+    {
+        log::error!(
+            "StartSession: a start that overran its deadline was not fully undone: {message}"
+        );
+    }
+}
+
+async fn remove_what_a_start_created(
+    service: &LaunchSessions,
+    os_user: &str,
+    created: &StartSessionResponse,
+    session_token: &str,
+    cut_project: Option<String>,
+) -> Result<(), String> {
+    // The branch is named by the session's changeset, which goes with the session: read it first.
+    let cut = match cut_project {
+        None => None,
+        Some(project_id) => service
+            .branch_a_start_cut_as(os_user, &created.session_id, &project_id)
+            .map_err(|status| {
+                format!(
+                    "its session {} was left in place, as the branch it cut could not be read: {}",
+                    created.session_id, status.message
+                )
+            })?,
+    };
+    service
+        .delete_session_as(os_user, &created.session_id, session_token)
+        .await
+        .map_err(|status| {
+            format!(
+                "its session {} could not be removed: {}",
+                created.session_id, status.message
+            )
+        })?;
+    let Some(cut) = cut else {
+        return Ok(());
+    };
+    cut.delete().map_err(|message| {
+        format!(
+            "its session {} was removed, but the branch it cut ({}) could not be deleted: {message}",
+            created.session_id, cut.branch
+        )
+    })
 }
 
 /// Run the start, forwarding its progress into `tx`, and return what it answered — the caller
