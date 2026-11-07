@@ -8,7 +8,7 @@
  */
 
 import { describe, it, expect } from "bun:test";
-import { MAX_CHUNK_FRAME_BYTES } from "tddy-livekit-web";
+import { MAX_CHUNK_FRAME_BYTES } from "tddy-livekit-rpc-web";
 import {
   chunkFile,
   UPLOAD_CHUNK_SIZE,
