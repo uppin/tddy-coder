@@ -4,9 +4,7 @@ use tddy_coding_agent_specs::claude_tools::{
     build_claude_allowlist, build_claude_disallowlist, PERMISSION_PROMPT_TOOL,
 };
 use tddy_coding_agent_specs::slots::{self, McpServerCommand, SlotInputs};
-use tddy_coding_agent_specs::{
-    embedded_spec, CodingAgentRegistry, CodingAgentSpec, McpSlot, HOST_AGENT_VARIANT,
-};
+use tddy_coding_agent_specs::{CodingAgentRegistry, CodingAgentSpec, McpSlot, HOST_AGENT_VARIANT};
 
 use std::collections::BTreeMap;
 
@@ -132,8 +130,6 @@ pub fn split_claude_extra_args(
     tool_server_env: &[(String, String)],
     withdrawals: &[(String, Vec<String>)],
 ) -> Result<Vec<String>, Status> {
-    // TODO(split-remote-env): implement — register `tool_server_env` on the `tddy-tools` server.
-    let _ = tool_server_env;
     // The variant carries the flags that keep the checkout's own configuration off this host
     // (`--strict-mcp-config`, `--setting-sources user`) and withdraws every native filesystem and
     // shell tool, so the slots below add only what the session's roster changes.
@@ -171,7 +167,11 @@ pub fn split_claude_extra_args(
         &SlotInputs {
             workdir: session_dir.to_path_buf(),
             scratch_dir: session_dir.to_path_buf(),
-            mcp_server: Some(tddy_tools_server(session_dir, Path::new(tddy_tools_path))),
+            mcp_server: Some(tddy_tools_server(
+                session_dir,
+                Path::new(tddy_tools_path),
+                tool_server_env,
+            )),
             allowed_tools: build_claude_allowlist(subagent_tools_are_pre_approved, &withdrawn_refs),
             denied_tools,
             permission_prompt_tool: Some(PERMISSION_PROMPT_TOOL.to_string()),
@@ -194,10 +194,11 @@ pub const SPLIT_AGENT_ID: &str = "claude";
 /// host's own coding-agent registry — holds it, operator overrides included. Refused when the host
 /// has no such agent.
 pub fn split_agent_spec(registry: &CodingAgentRegistry) -> Result<CodingAgentSpec, Status> {
-    // TODO(split-remote-env): implement — read `registry`, not the embedded spec.
-    let _ = registry;
-    embedded_spec(SPLIT_AGENT_ID)
-        .map_err(|e| Status::internal(format!("the host agent's spec: {e}")))
+    registry.get(SPLIT_AGENT_ID).cloned().ok_or_else(|| {
+        Status::failed_precondition(format!(
+            "this host has no `{SPLIT_AGENT_ID}` coding agent, which a split session runs"
+        ))
+    })
 }
 
 /// `spec` without the MCP slot's strict flag, for a launch whose variant already passes it.
@@ -209,13 +210,21 @@ fn without_strict_mcp_flag(spec: &CodingAgentSpec) -> CodingAgentSpec {
     spec
 }
 
-/// `tddy-tools --mcp` as `session_dir`'s session registers it.
-fn tddy_tools_server(session_dir: &Path, tddy_tools_path: &Path) -> McpServerCommand {
+/// `tddy-tools --mcp` as `session_dir`'s session registers it, with `tool_server_env` — the
+/// session's transport and roster seed — beside its log settings.
+fn tddy_tools_server(
+    session_dir: &Path,
+    tddy_tools_path: &Path,
+    tool_server_env: &[(String, String)],
+) -> McpServerCommand {
     McpServerCommand {
         name: "tddy-tools".to_string(),
         command: tddy_tools_path.to_path_buf(),
         args: vec!["--mcp".to_string()],
-        env: tddy_tools_mcp_env(session_dir),
+        env: tddy_tools_mcp_env(session_dir)
+            .into_iter()
+            .chain(tool_server_env.iter().cloned())
+            .collect(),
         cwd: None,
     }
 }
@@ -250,31 +259,6 @@ pub fn tddy_tools_mcp_env(session_dir: &Path) -> BTreeMap<String, String> {
         ),
         ("RUST_LOG".to_string(), MCP_RUST_LOG.to_string()),
     ])
-}
-
-/// Write `session_dir`'s `claude-mcp-config.json`, registering `tddy_tools_path --mcp` as the one
-/// MCP server, and return the `claude` flags that load it and nothing else.
-///
-/// For an agent whose native filesystem and shell tools are withdrawn, `tddy-tools` is the only
-/// reach it has, so the config is the only one loaded: `--mcp-config` alone *adds* to the
-/// user-scoped MCP configuration, and any filesystem or shell MCP server the operator has
-/// configured would load beside `tddy-tools` — reachable under an `mcp__*` name no disallowlist
-/// covers. The restriction has to be impossible to route around, not merely the default.
-pub fn tddy_tools_only_mcp_args(
-    spec: &CodingAgentSpec,
-    session_dir: &Path,
-    tddy_tools_path: &Path,
-) -> Result<Vec<String>, Status> {
-    let (file, argv) = slots::mcp::render_mcp(
-        &spec.agent.mcp,
-        &tddy_tools_server(session_dir, tddy_tools_path),
-        session_dir,
-        session_dir,
-        None,
-    )
-    .map_err(|e| Status::internal(e.to_string()))?;
-    write_registrations(&mut file.into_iter().collect())?;
-    Ok(argv)
 }
 
 #[cfg(test)]

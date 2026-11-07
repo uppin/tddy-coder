@@ -270,7 +270,7 @@ impl SplitSessions {
             .chain(crate::split_session::roster_seed_env_pairs(&roster))
             .collect();
         let wiring = crate::split_session::SplitAgentWiring {
-            context_dir,
+            context_dir: context_dir.clone(),
             extra_args: crate::split_session::split_claude_extra_args(
                 &agent_spec,
                 session_dir,
@@ -278,10 +278,12 @@ impl SplitSessions {
                 &tool_server_env,
                 &withdrawals,
             )?,
-            // TODO(split-remote-env): implement — the agent process is given no `TDDY_*` variable.
-            env: tool_server_env,
-            // TODO(split-remote-env): implement — `split_session_pointer` of `remote`.
-            session_pointer: None,
+            env: Vec::new(),
+            session_pointer: Some(crate::split_session::split_session_pointer(
+                &remote,
+                &context_dir,
+                session_dir,
+            )),
         };
         log::info!(
             "ResumeSession: re-wired jailed-codebase session {session_id} to its checkout session {checkout_session_id} on this daemon"

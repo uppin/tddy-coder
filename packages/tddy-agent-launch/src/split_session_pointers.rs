@@ -6,6 +6,9 @@
 
 use std::path::Path;
 
+use crate::cli_session_pointer::{
+    place_session_pointer, removing_session_pointer_on_exit, PointerHost,
+};
 use tddy_cli_sessions::cli_session_manager::ExitHook;
 use tddy_core::session_pointer::SessionPointer;
 use tddy_rpc::Status;
@@ -22,10 +25,8 @@ impl SplitSessionPointers for HostSplitSessionPointers {
         context_dir: &Path,
         on_exit: Option<ExitHook>,
     ) -> Result<Option<ExitHook>, Status> {
-        // TODO(split-remote-env): implement — place `pointer` in `context_dir` on this host and
-        // precede `on_exit` with its removal.
-        let _ = (pointer, context_dir);
-        Ok(on_exit)
+        let placed = place_session_pointer(Some(pointer), context_dir, &PointerHost::Local)?;
+        Ok(removing_session_pointer_on_exit(on_exit, placed, false))
     }
 }
 

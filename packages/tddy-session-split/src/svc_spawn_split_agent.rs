@@ -29,9 +29,6 @@ struct SplitAgentProcess<'a> {
     initial_prompt: String,
     tddy_tools_path: std::path::PathBuf,
     remote: tddy_core::RemoteToolEnv,
-    /// The roster the spawn read from the codebase host, handed to the agent's `tddy-tools` so it
-    /// is in force before the first `tools/list` (see [`crate::split_session::roster_seed_env_pairs`]).
-    roster_seed: Vec<(String, String)>,
     context_dir: std::path::PathBuf,
     extra_args: Vec<String>,
     /// The session's directory, where the hook wait its launch wrote is recorded.
@@ -147,7 +144,6 @@ impl SplitSessions {
                 initial_prompt,
                 tddy_tools_path,
                 remote,
-                roster_seed,
                 context_dir,
                 extra_args,
                 session_dir: &session_dir,
@@ -251,7 +247,6 @@ impl SplitSessions {
             initial_prompt,
             tddy_tools_path,
             remote,
-            roster_seed,
             context_dir,
             extra_args,
             session_dir,
@@ -333,23 +328,29 @@ impl SplitSessions {
             )
             .map_err(|e| Status::internal(format!("rendering the split agent's argv: {e}")))?;
         let session_type = format!("{}-cli", spec.id);
-        // TODO(split-remote-env): implement — place `split_session_pointer(&remote, …)` in the
-        // context dir through `self.session_pointers` and spawn with the exit hook that removes it.
+        // The agent's `tddy-tools` finds its session through the pointer in the context dir (and
+        // through its own registration, `extra_args`): the agent process is given no `TDDY_*`
+        // variable. The pointer is removed when the agent exits.
+        let pointer =
+            crate::split_session::split_session_pointer(&remote, &context_dir, session_dir);
+        let on_exit = self.session_pointers.place(&pointer, &context_dir, None)?;
+        let argv = tddy_cli_sessions::cli_session_manager::CliSessionManager::with_launch_flags(
+            argv,
+            Some(initial_prompt.trim()),
+            None,
+            &extra_args,
+        );
         let handle = self
             .cli_manager
-            .start_with_options(
+            .spawn_rendered_main(
                 session_id,
+                &session_type,
                 context_dir,
                 req.model.trim(),
                 argv,
-                &session_type,
-                Some(initial_prompt.trim()).filter(|p| !p.is_empty()),
-                None,
-                extra_args,
-                // TODO(split-remote-env): implement — the agent process is given no `TDDY_*`
-                // variable; its `tddy-tools` server carries them (`split_claude_extra_args`).
-                remote.env_pairs().into_iter().chain(roster_seed).collect(),
+                Vec::new(),
                 Some(os_user),
+                on_exit,
             )
             .await
             .map_err(|e| Status::internal(format!("failed to spawn {session_type}: {e}")))?;

@@ -175,8 +175,8 @@ async fn resume_cli_harness_session(
         wiring,
         tddy_data_dir,
     } = session;
-    let (split_args, split_env) = split
-        .map(|split| (split.extra_args, split.env))
+    let (split_args, split_env, split_pointer) = split
+        .map(|split| (split.extra_args, split.env, split.session_pointer))
         .unwrap_or_default();
 
     let route = resume_cli_route(account_access, &agent.spec, session_dir)?;
@@ -215,9 +215,13 @@ async fn resume_cli_harness_session(
     slots.argv_extra.extend(route.args);
     write_slot_files_on_target(&mut slots, remote_host)?;
     let host = PointerHost::of(remote_host);
-    // TODO(split-remote-env): implement — a split session's pointer is `split.session_pointer`,
-    // rewritten in its context dir for the agent this resume launches.
-    let pointer = place_session_pointer(wiring.session_pointer.as_ref(), &worktree_path, &host)?;
+    // A split session's pointer is the one its wiring was re-derived with, rewritten in its context
+    // dir for the agent this resume launches.
+    let pointer = place_session_pointer(
+        split_pointer.as_ref().or(wiring.session_pointer.as_ref()),
+        &worktree_path,
+        &host,
+    )?;
     let on_exit = removing_session_pointer_on_exit(on_exit, pointer, meta.tmux_session.is_some());
     let mut env = git_environment;
     env.extend(split_env);

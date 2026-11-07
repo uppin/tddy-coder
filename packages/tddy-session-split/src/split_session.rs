@@ -73,15 +73,13 @@ pub fn split_session_pointer(
     context_dir: &Path,
     session_dir: &Path,
 ) -> tddy_core::session_pointer::SessionPointer {
-    // TODO(split-remote-env): implement — carry `remote`'s pairs and this daemon as the owner.
-    let _ = remote;
     tddy_core::session_pointer::SessionPointer {
         socket: None,
         repo_dir: context_dir.to_path_buf(),
         session_dir: Some(session_dir.to_path_buf()),
-        remote: Default::default(),
+        remote: remote.env_pairs().into_iter().collect(),
         notify: Default::default(),
-        owner: None,
+        owner: Some(tddy_core::session_pointer::SessionPointerOwner::this_process()),
     }
 }
 
@@ -385,8 +383,10 @@ pub fn prepare_split_agent_wiring(
         .into_iter()
         .chain(roster_seed.iter().cloned())
         .collect();
+    let context_dir = build_split_context_dir(spec, session_dir, withdrawals, globs, source)?;
+    let session_pointer = Some(split_session_pointer(&remote, &context_dir, session_dir));
     Ok(SplitAgentWiring {
-        context_dir: build_split_context_dir(spec, session_dir, withdrawals, globs, source)?,
+        context_dir,
         extra_args: agent_argv::split_claude_extra_args(
             spec,
             session_dir,
@@ -394,10 +394,8 @@ pub fn prepare_split_agent_wiring(
             &tool_server_env,
             withdrawals,
         )?,
-        // TODO(split-remote-env): implement — the agent process is given no `TDDY_*` variable.
-        env: tool_server_env,
-        // TODO(split-remote-env): implement — `split_session_pointer` of `remote` for the context dir.
-        session_pointer: None,
+        env: Vec::new(),
+        session_pointer,
     })
 }
 
