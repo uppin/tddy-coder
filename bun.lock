@@ -152,6 +152,35 @@
         "react-dom": "^19.0.0",
       },
     },
+    "packages/tddy-rpc-playground-web": {
+      "name": "tddy-rpc-playground-web",
+      "version": "0.1.0",
+      "dependencies": {
+        "@bufbuild/protobuf": "^2.2.0",
+        "@connectrpc/connect": "^2.0.0",
+        "tddy-client-web": "workspace:*",
+        "tddy-react-commons": "workspace:*",
+        "tddy-ui-web": "workspace:*",
+      },
+      "devDependencies": {
+        "@tailwindcss/vite": "^4.2.2",
+        "@types/bun": "latest",
+        "@types/react": "^19.0.0",
+        "@types/react-dom": "^19.0.0",
+        "@vitejs/plugin-react": "^4.3.0",
+        "babel-plugin-react-compiler": "^1.0.0",
+        "cypress": "^14.0.0",
+        "react": "^19.0.0",
+        "react-dom": "^19.0.0",
+        "tddy-connectrpc-testkit": "workspace:*",
+        "typescript": "^5.6.0",
+        "vite": "^6.0.0",
+      },
+      "peerDependencies": {
+        "react": "^19.0.0",
+        "react-dom": "^19.0.0",
+      },
+    },
     "packages/tddy-rpc-web": {
       "name": "tddy-rpc-web",
       "version": "0.1.0",
@@ -2288,6 +2317,8 @@
     "tddy-livekit-web": ["tddy-livekit-web@workspace:packages/tddy-livekit-web"],
 
     "tddy-react-commons": ["tddy-react-commons@workspace:packages/tddy-react-commons"],
+
+    "tddy-rpc-playground-web": ["tddy-rpc-playground-web@workspace:packages/tddy-rpc-playground-web"],
 
     "tddy-rpc-web": ["tddy-rpc-web@workspace:packages/tddy-rpc-web"],
 

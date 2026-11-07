@@ -7,6 +7,8 @@
 
 **Stack**: `#web-split` 9/16 — branch `feature/web-split/playground`, base `feature/web-split/terminal`
 
+**PR**: [#846](https://github.com/uppin/tddy-coder/pull/846)
+
 ## Initial Discovery
 
 [2026-11-07-rpc-playground-package-initial-discovery.md](./2026-11-07-rpc-playground-package-initial-discovery.md)
@@ -57,6 +59,14 @@ implementing one here collides with the PR that owns it.
 | `n6`–`n8` | — (branch predecessors only) | nothing | — |
 
 ## Draft PR contract
+
+**As pushed (commit 2):** skeleton, workflow, boundary rule; the two specs and the three `bun test` suites
+(`invoke`, `protoMessageJson`, `registry`) plus `test-fixtures/` `git mv`'d into the package — failing
+until the modules move. The suites still import `tddy-web`'s `src/test-utils` fake transports; green moves
+those (or their playground-only part) with the package. Exported names are `buildRegistry`/`findMethod`
+(not `buildServiceRegistry` as `## Responsibility` first said).
+
+Originally planned:
 
 First push (commit 2): package skeleton + workflow, the two specs and three `bun test` suites `git mv`'d with imports pointing at the package, boundary rule — failing until the modules move.
 
@@ -134,10 +144,10 @@ Screen and helpers in the package; the page in `tddy-web` renders it inside the 
 - [x] Cross-check `packages/*/docs/code-issues/` and `docs/dev/todo/` for items this change touches (Step 2b)
 - [x] Create/update PRD documentation
 - [x] Create changeset (this document)
-- [ ] Create failing acceptance tests
-- [ ] Run acceptance tests (verify they fail)
-- [ ] USER REVIEW — acceptance tests
-- [ ] TDD Red — write failing unit/integration tests
+- [x] Create failing acceptance tests
+- [x] Run acceptance tests (verify they fail)
+- [x] USER REVIEW — acceptance tests (developer waived the per-node review for this stack, 2026-11-07: "finish the rest without stopping")
+- [x] TDD Red — write failing unit/integration tests
 - [ ] TDD Green — implement with quality code
 - [ ] Update documentation with progress
 - [ ] Repeat Red→Green→Update cycle until feature complete
