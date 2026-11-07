@@ -1,13 +1,24 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import { cleanup, render } from "@testing-library/react";
-import { composeStories } from "@storybook/react";
+import { composeStories, setProjectAnnotations } from "@storybook/react";
+import * as previewAnnotations from "../.storybook/preview";
 import { Glob } from "bun";
 import { join } from "node:path";
+
+// The default world every story renders in: the port doubles `.storybook/preview.tsx` mounts.
+setProjectAnnotations(previewAnnotations);
 
 afterEach(cleanup);
 
 const SRC = import.meta.dir;
-const storyFiles = [...new Glob("**/*.stories.tsx").scanSync(SRC)];
+/**
+ * Stories that need a real browser: ghostty-web instantiates a WebAssembly module over `fetch` and
+ * draws to a canvas, neither of which happy-dom provides. They render in the static Storybook build,
+ * which the tddy-web e2e specs (`ghostty-terminal-stories.cy.ts`, ...) drive.
+ */
+const NEEDS_A_BROWSER = ["tddy-terminal-web/GhosttyTerminal.stories.tsx"];
+
+const storyFiles = [...new Glob("**/*.stories.tsx").scanSync(SRC)].filter((f) => !NEEDS_A_BROWSER.includes(f));
 
 describe("stories", () => {
   test("the Storybook has stories", () => {

@@ -1,7 +1,7 @@
 # Changeset: Storybook package (`tddy-storybook`)
 
 **Date**: 2026-11-07
-**Status**: 🚧 In Progress
+**Status**: 🚧 In Progress (green: stories moved and added, scripts retargeted)
 **Type**: Architecture Change
 **Complexity**: 4 — one new package depending on ten component packages; new stories per package; e2e consumers retargeted
 
@@ -129,6 +129,15 @@ Real dependency edges, as opposed to the branch line:
 
 ## Technical Debt & Production Readiness
 
+## Green notes (deviations)
+
+- **`App.stories.tsx` deleted, not moved.** It rendered `App` from `tddy-web`; a story importing `tddy-web` breaks this package's boundary (and `tddy-web` is what this stack empties). No e2e spec addressed `app--default`. The four other stories moved with explicit `title`s so ids are unchanged (`components-button--primary`, `components-ghosttyterminal--*`, ...). FIXME-worthy for review: say so if the App story should come back as a wiring-level story in `tddy-web`.
+- **New stories (one per remaining component package):** `HostsScreen`, `PlannedPrPanel`, `SessionConnectionOverlay`, `BranchConflictDialog`, `RpcPlaygroundScreen`, `ParticipantList`, under `src/<package>/`. `.storybook/preview.tsx` mounts every story in the clients/navigation/auth ports (`withClients`) plus the presence, room-RPC and media doubles.
+- **Render smoke test** applies the preview's decorators (`setProjectAnnotations`) and skips `GhosttyTerminal.stories.tsx`, which needs a real browser (WASM over `fetch`, canvas); the static build and the tddy-web e2e specs cover it.
+- **`vite-prebundle.ts`, `scripts/web-ci.ts`, `storybook.yml` do not exist at this base** (they sit on other nodes of the stack, not below this one), so `main.ts` carries the pre-bundle `optimizeDeps` inline and the `Storybook build` workflow was not retargeted; `web-tddy-storybook.yml` is kept because there is no `web.yml` at this base. Both fall to the node that introduces them.
+- `build` has a `prebuild` that builds `tddy-livekit-rpc-web` (its `dist` is what `tddy-livekit-web` resolves), as `tddy-web` does; `build-storybook` is an alias. `tddy-web` loses its Storybook devDependencies and scripts delegate to this package; `cypress:e2e*` and `run-cypress-serve.sh` serve `../tddy-storybook/storybook-static`.
+- `ghostty-terminal.cy.ts` needs a built `tddy-demo` binary and LiveKit; not run locally (its story id `components-ghosttyterminal--live-kit-connected` is present in the build).
+
 ## Decisions & Trade-offs
 
 - **Stories in one package** (developer's choice) — component packages stay free of Storybook deps.
@@ -155,8 +164,8 @@ Real dependency edges, as opposed to the branch line:
 - [x] Run acceptance tests (verify they fail)
 - [x] USER REVIEW — acceptance tests (developer waived the per-node review for this stack, 2026-11-07: "finish the rest without stopping")
 - [x] TDD Red — write failing unit/integration tests
-- [ ] TDD Green — implement with quality code
-- [ ] Update documentation with progress
+- [x] TDD Green — implement with quality code
+- [x] Update documentation with progress
 - [ ] Repeat Red→Green→Update cycle until feature complete
 - [ ] Run the touched packages' tests (`tddy-storybook` Cypress + `bun test` + boundary rule; `tddy-web` build + consumers' scoped specs) — verify 100% pass
 - [ ] Validate changes (/validate-changes)

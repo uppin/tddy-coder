@@ -18,10 +18,9 @@ const config: StorybookConfig = {
       root: projectRoot,
       plugins: [tailwindcss()],
       resolve: {
-        alias: {
-
-        },
+        dedupe: ["react", "react-dom"],
       },
+      // Pre-bundled up front so the dev server never re-optimises (and reloads the page) mid-run.
       optimizeDeps: {
         ...config.optimizeDeps,
         include: [
@@ -36,6 +35,7 @@ const config: StorybookConfig = {
       ...merged.server,
       host: "0.0.0.0",
       allowedHosts: true,
+      fs: { allow: [path.resolve(projectRoot, "../..")] },
     };
     return merged;
   },
