@@ -1,6 +1,6 @@
 import React, { useRef } from "react";
 import { mount } from "cypress/react";
-import { GhosttyTerminal, type GhosttyTerminalHandle } from "../../src/components/GhosttyTerminal";
+import { GhosttyTerminal, type GhosttyTerminalHandle } from "../../src/GhosttyTerminal";
 import { aGhosttyTerminal } from "../support/drivers/ghosttyTerminalDriver";
 
 /** Deterministic overflow content: row-001 .. row-<count>, each on its own line (CRLF). */

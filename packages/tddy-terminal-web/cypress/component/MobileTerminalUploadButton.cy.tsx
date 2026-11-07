@@ -8,7 +8,7 @@
  */
 
 import React from "react";
-import { GhosttyTerminalSession } from "../../src/components/GhosttyTerminalSession";
+import { GhosttyTerminalSession } from "../../src/GhosttyTerminalSession";
 import type { TerminalStream } from "tddy-client-web/connections/terminal";
 import { UploadProgressProvider } from "../../src/rpc/uploadProgress";
 import { SessionFilesService } from "tddy-client-web/gen/session_files_pb";

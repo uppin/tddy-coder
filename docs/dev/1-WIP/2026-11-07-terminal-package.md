@@ -7,6 +7,8 @@
 
 **Stack**: `#web-split` 8/16 — branch `feature/web-split/terminal`, base `feature/web-split/create-session`
 
+**PR**: [#845](https://github.com/uppin/tddy-coder/pull/845)
+
 ## Initial Discovery
 
 [2026-11-07-terminal-package-initial-discovery.md](./2026-11-07-terminal-package-initial-discovery.md)
@@ -72,6 +74,15 @@ implementing one here collides with the PR that owns it.
 | `n6`, `n7` (#843, create-session) | — (branch predecessors only) | nothing | — |
 
 ## Draft PR contract
+
+**As pushed (commit 2):** package skeleton (`ghostty-web` dependency), workflow, boundary rule, and **21**
+specs `git mv`'d (the `Ghostty*`/`Terminal*`/chrome specs that mount only terminal code). Nine terminal-named
+specs that mount session, chat or host components (session terminal tabs, room terminal, file drop into a
+session) stay in `tddy-web` and travel with `feature/web-split/session`. The terminal **types**
+(`TerminalFeed`, `TerminalOptions`, `TerminalFrame`, …) already moved to `tddy-client-web/connections/terminal`
+in #842's contract; this node owns the feed and input-delivery **implementations**.
+
+Originally planned:
 
 First push (commit 2): the package skeleton (manifest exporting the surface above, Cypress/Vite config with `ghostty-web`'s WASM handling as `tddy-web` has it, workflow), the ~35 specs and drivers `git mv`'d with imports pointing at the package, and the boundary rule — failing until the modules move.
 
@@ -151,10 +162,10 @@ Real dependency edges, as opposed to the branch line:
 - [x] Cross-check `packages/*/docs/code-issues/` and `docs/dev/todo/` for items this change touches (Step 2b)
 - [x] Create/update PRD documentation
 - [x] Create changeset (this document)
-- [ ] Create failing acceptance tests
-- [ ] Run acceptance tests (verify they fail)
-- [ ] USER REVIEW — acceptance tests
-- [ ] TDD Red — write failing unit/integration tests
+- [x] Create failing acceptance tests
+- [x] Run acceptance tests (verify they fail)
+- [x] USER REVIEW — acceptance tests (developer waived the per-node review for this stack, 2026-11-07: "finish the rest without stopping")
+- [x] TDD Red — write failing unit/integration tests
 - [ ] TDD Green — implement with quality code
 - [ ] Update documentation with progress
 - [ ] Repeat Red→Green→Update cycle until feature complete

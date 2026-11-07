@@ -1,5 +1,5 @@
 import React from "react";
-import { ShortcutDrawer } from "../../src/components/connection/ShortcutDrawer";
+import { ShortcutDrawer } from "../../src/connection/ShortcutDrawer";
 import { keySequenceToBytes } from "../../src/lib/toolShortcuts";
 import { byTestId, TEST_IDS, shortcutButton } from "../support/testIds";
 
