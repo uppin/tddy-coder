@@ -1,7 +1,7 @@
 # Changeset: LiveKit media behind the media port
 
 **Date**: 2026-11-07
-**Status**: 🚧 In Progress
+**Status**: 🟢 Green (media implemented, scoped gates passing; validate/wrap pending)
 **Type**: Architecture Change
 **Complexity**: 4 — three packages (`tddy-livekit-web` implementation, `tddy-client-web` port, `tddy-web` media tabs and overlays), a port contract, LiveKit track lifecycle
 
@@ -93,10 +93,10 @@ Real dependency edges, as opposed to the branch line:
 
 ## Scope
 
-- [ ] Final `MediaPort` + double
-- [ ] Media implementations in `tddy-livekit-web`; `tddy-web` media components switched to the port
-- [ ] Media specs on the double or moved
-- [ ] `scripts/livekit-import-boundary.test.ts` green
+- [x] Final `MediaPort` + double
+- [x] Media implementations in `tddy-livekit-web`; `tddy-web` media components switched to the port
+- [x] Media specs on the double or moved
+- [x] `scripts/livekit-import-boundary.test.ts` green
 
 ## Technical Changes
 
@@ -114,8 +114,8 @@ Those components take `RoomHandle`s and use `MediaPort`; LiveKit track code live
 
 ## Implementation Milestones
 
-- [ ] Import rule green
-- [ ] Media specs green (package and tddy-web, one at a time)
+- [x] Import rule green (no allowlist)
+- [x] Media specs green (package and tddy-web, one at a time)
 
 ## Testing Plan
 
@@ -139,6 +139,50 @@ Those components take `RoomHandle`s and use `MediaPort`; LiveKit track code live
 - **Split from #843 (developer, 2026-11-07)** after #843's [G] stopped on its own boundary warning: media owns tracks directly and reshapes feature components; connection + presence did not.
 - **Placed after `chat`, before `hosts`** so the waves never step back: it is wave 5 (needs #843, wave 4); `hosts` moves to wave 6.
 
+## Green progress (2026-11-07)
+
+**Final `MediaPort` shape** (`tddy-client-web/src/ports/media.tsx`): `usePresenterRoom`, `useScreenSharingInput`,
+`useHasCameraVideo`, `RemoteVideo` and — new — `VideoPreview`. `RemoteVideo` gained `testId` and `videoRef` so the
+overlays keep their layout and test ids and `picture` for input forwarding is the port's own `<video>`.
+`PresencePort` and `RoomRpcPort` are untouched.
+
+**Moved with `git mv` into `tddy-livekit-web/src/media/`**: `ParticipantVideoPreviewDialog`, `useScreenSharingInput`,
+`screenSharingInput` (+ test), `usePresenterLiveKitRoom` (now `usePresenterRoom`), `presenterRoomTarget` (+ test),
+`participantCameraVideo` (+ test). New: `RemoteVideo`, `useHasCameraVideo`, `ParticipantVideoPreview`, `livekitMedia`
+(registered through `livekitPorts().media`). `ParticipantListVideoPreview.cy.tsx` moved to `tddy-livekit-web/cypress`.
+
+**`tddy-web`**: `ScreenSharingOverlay`/`VncOverlay` render `RemoteVideo` and read `useMediaPort()`; the two session tabs
+take `RoomHandle`; `WorkflowChatScreen`/`PrStackScreen` call `useMediaPort().usePresenterRoom`; `HostDesktopOverlay`
+uses the new `useCommonRoomHandle`; `LiveKitAppPage` no longer lends a dialog.
+
+**#843's `TODO(media)` resolved**: `ParticipantList` lost `participantHasCameraVideo` and `VideoPreview` and its local
+affordance-rule copy; it takes `room` and asks the port per row. Its specs mount through `cypress/support/cameraRoster.tsx`
+(`aMediaDouble` + `setCameraVideo`).
+
+### Deviations
+
+- `aMediaDouble.usePresenterRoom` reads `hint.room` (the real `SessionAttachmentHint` field); the red test passed
+  `{ roomName }` cast `as never`, so that one line in `mediaPort.media.test.tsx` now passes `{ sessionId, room }`.
+- `shouldShowParticipantVideoAffordance` was deleted with its one unit assertion ("injected map marks identity as
+  having video"): the rule now is `MediaPort.useHasCameraVideo`, asserted by `ParticipantList.cy.tsx` (affordance
+  present for `with-cam-user`, absent for `no-cam-user`) and the port tests.
+- The roster's `VideoPreview` now receives `room` and attaches the participant's camera track (before, the app lent a
+  dialog with no track, so the preview always said "No camera track").
+- The input-forwarding, fullscreen, VNC and presenter-room specs stay in `tddy-web` unchanged: they mount through
+  `AppClientsPorts`, which now registers the LiveKit media port, and their in-memory LiveKit factory reaches it.
+- `RoomRpcPort.useParticipantProbe` (#843's wrap) is not on this branch yet; nothing here touches it.
+
+### Verification (scoped)
+
+`bun test ./scripts/livekit-import-boundary.test.ts ./scripts/web-workflows.test.ts` 4/4; `tddy-client-web` `bun test src` 143/143;
+`tddy-livekit-web` `bun test src` 136/136, typecheck clean of new errors; tddy-web `bun run test:unit` 941/941, `bun run build` ok,
+tsc 473 errors (474 before; none in code written here). Cypress, one spec at a time: tddy-livekit-web `ParticipantList` 10,
+`ParticipantVideoCapabilityAcceptance` 3, `ParticipantListVideoPreview` 3; tddy-web `ScreenSharingFullscreen` 6,
+`ScreenSharingInputForwarding` 15, `ScreenSharingInputScopes` 2, `VncOverlay` 4, `SessionScreenSharingTargetRows` 5,
+`SessionVncTargetRows` 5, `SessionInspectorScreenSharing` 9, `SessionInspectorVnc` 5, `PrStackPresenterRoom` 2,
+`WorkflowChatPresenterRoom` 1, `HostDesktopConnect` 12, `PresenceCapabilityGating` 16. `ScreenSharingInputScopes` failed once on its
+first run (0 passing in 87 ms, during bundling) and passed 2/2 on rerun.
+
 ## Refactoring Needed
 
 ### From @validate-changes (Change Validation)
@@ -161,10 +205,10 @@ Those components take `RoomHandle`s and use `MediaPort`; LiveKit track code live
 - [x] Run acceptance tests (verify they fail)
 - [x] USER REVIEW — acceptance tests (developer waived the per-node review for this stack, 2026-11-07: "finish the rest without stopping")
 - [x] TDD Red — write failing unit/integration tests
-- [ ] TDD Green — implement with quality code
-- [ ] Update documentation with progress
-- [ ] Repeat Red→Green→Update cycle until feature complete
-- [ ] Run the touched packages' tests (`scripts/livekit-import-boundary.test.ts`; `tddy-client-web` + `tddy-livekit-web` tests; media specs one at a time) — verify 100% pass
+- [x] TDD Green — implement with quality code
+- [x] Update documentation with progress
+- [x] Repeat Red→Green→Update cycle until feature complete
+- [x] Run the touched packages' tests (`scripts/livekit-import-boundary.test.ts`; `tddy-client-web` + `tddy-livekit-web` tests; media specs one at a time) — verify 100% pass
 - [ ] Validate changes (/validate-changes)
 - [ ] Refactor issues from change validation
 - [ ] USER REVIEW — development complete
