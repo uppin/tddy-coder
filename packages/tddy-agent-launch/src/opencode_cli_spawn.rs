@@ -305,11 +305,8 @@ pub(crate) async fn start_cli_harness_session(
     slots.argv_extra.extend(role_args);
     slots.argv_extra.extend(route.args);
     write_slot_files_on_target(&mut slots, remote_host)?;
-    let pointer = place_session_pointer(
-        wiring.session_pointer.as_ref(),
-        &worktree_path,
-        &PointerHost::of(remote_host),
-    )?;
+    let host = PointerHost::of(remote_host);
+    let pointer = place_session_pointer(wiring.session_pointer.as_ref(), &worktree_path, &host)?;
     let on_exit = removing_session_pointer_on_exit(on_exit, pointer, run_in_tmux);
     env.extend(std::mem::take(&mut wiring.env));
     env.extend(route.env);

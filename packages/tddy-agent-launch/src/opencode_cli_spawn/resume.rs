@@ -214,11 +214,8 @@ async fn resume_cli_harness_session(
     slots.argv_extra.extend(wiring.extra_args);
     slots.argv_extra.extend(route.args);
     write_slot_files_on_target(&mut slots, remote_host)?;
-    let pointer = place_session_pointer(
-        wiring.session_pointer.as_ref(),
-        &worktree_path,
-        &PointerHost::of(remote_host),
-    )?;
+    let host = PointerHost::of(remote_host);
+    let pointer = place_session_pointer(wiring.session_pointer.as_ref(), &worktree_path, &host)?;
     let on_exit = removing_session_pointer_on_exit(on_exit, pointer, meta.tmux_session.is_some());
     let mut env = git_environment;
     env.extend(split_env);

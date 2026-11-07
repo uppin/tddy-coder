@@ -27,6 +27,17 @@ use tddy_daemon_kernel::daemon_identity::local_base_instance_id_for_config;
 use tddy_discovery::subagent::SubagentError;
 use tddy_subagent_worktree::ConversationId;
 
+/// Whether `spec`'s headless MCP slot (its agent's own when the headless block names none) registers
+/// the tool server inline, on the argv.
+fn registers_mcp_inline(spec: &CodingAgentSpec) -> bool {
+    matches!(
+        spec.headless()
+            .and_then(|headless| headless.mcp.as_ref())
+            .unwrap_or(&spec.agent.mcp),
+        McpSlot::Inline { .. }
+    )
+}
+
 impl DaemonCodingAgentLauncher {
     /// The headless command of a conversation of any headless harness, from its declaration
     /// (`claude.yaml`, `cursor.yaml`, `codex.yaml`, `oz.yaml`): `agents.resolve`
@@ -62,14 +73,7 @@ impl DaemonCodingAgentLauncher {
             .spec
             .headless()
             .is_some_and(|headless| headless.approval_tool);
-        let registers_inline = matches!(
-            agent
-                .spec
-                .headless()
-                .and_then(|headless| headless.mcp.as_ref())
-                .unwrap_or(&agent.spec.agent.mcp),
-            McpSlot::Inline { .. }
-        );
+        let registers_inline = registers_mcp_inline(&agent.spec);
         let renderer = SpecHeadlessRenderer::new(
             agent.spec,
             agent.tool,

@@ -271,6 +271,24 @@ impl SpecHeadlessBackend {
     }
 }
 
+/// The session pointer a turn of `request` writes in `workdir`, owned by this process: `None` when
+/// the request names no session socket to point at.
+fn turn_pointer(request: &InvokeRequest, workdir: &Path) -> Option<SessionPointer> {
+    let socket = request.socket_path.clone()?;
+    Some(SessionPointer {
+        socket: Some(socket),
+        repo_dir: workdir.to_path_buf(),
+        session_dir: request.session_dir.clone(),
+        remote: request
+            .remote
+            .as_ref()
+            .map(|remote| remote.env_pairs().into_iter().collect::<BTreeMap<_, _>>())
+            .unwrap_or_default(),
+        notify: BTreeMap::new(),
+        owner: Some(SessionPointerOwner::this_process()),
+    })
+}
+
 /// What a turn's reader thread needs besides the child.
 struct TurnRead {
     request: InvokeRequest,
@@ -331,22 +349,8 @@ impl CodingBackend for SpecHeadlessBackend {
         let mut files: Vec<(PathBuf, Vec<u8>)> = temp_system_prompt.into_iter().collect();
         files.extend(invocation.files.iter().cloned());
         let mut turn_files = TurnFiles::write(&files, &workdir)?;
-        if let Some(socket) = &request.socket_path {
-            turn_files.write_session_pointer(
-                &workdir,
-                &SessionPointer {
-                    socket: Some(socket.clone()),
-                    repo_dir: workdir.clone(),
-                    session_dir: request.session_dir.clone(),
-                    remote: request
-                        .remote
-                        .as_ref()
-                        .map(|remote| remote.env_pairs().into_iter().collect::<BTreeMap<_, _>>())
-                        .unwrap_or_default(),
-                    notify: BTreeMap::new(),
-                    owner: Some(SessionPointerOwner::this_process()),
-                },
-            )?;
+        if let Some(pointer) = turn_pointer(&request, &workdir) {
+            turn_files.write_session_pointer(&workdir, &pointer)?;
         }
 
         log::debug!(
