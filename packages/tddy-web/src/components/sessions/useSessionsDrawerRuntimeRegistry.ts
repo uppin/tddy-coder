@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useSyncExternalStore } from "react";
 import type { Client } from "@connectrpc/connect";
 import { ActivityService } from "tddy-client-web/gen/activity_pb";
 import { ExecToolService } from "tddy-client-web/gen/exec_tools_pb";
-import { joinQuotedPaths } from "../../lib/shellQuote";
+import { joinQuotedPaths } from "tddy-terminal-web";
 import { SessionRuntimeRegistry, makeByteTap, type ByteDelta } from "./sessionRuntimeRegistry";
 
 /**

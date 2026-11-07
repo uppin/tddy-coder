@@ -1,5 +1,5 @@
 import React from "react";
-import type { OverlayModel } from "../../lib/terminalInputQueue";
+import type { OverlayModel } from "../lib/terminalInputQueue";
 
 /**
  * Single-line overlay of terminal input the server has not yet acknowledged.

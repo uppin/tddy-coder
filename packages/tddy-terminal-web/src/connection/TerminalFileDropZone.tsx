@@ -14,9 +14,9 @@
  */
 
 import React, { useEffect, useRef, useState } from "react";
-import { useSessionFileUpload, useDaemonUploadChunk } from "../../hooks/useSessionFileUpload";
-import { joinQuotedPaths } from "../../lib/shellQuote";
-import { HOST_PATH_MIME } from "../../lib/hostPathDrag";
+import { useSessionFileUpload, useDaemonUploadChunk } from "../hooks/useSessionFileUpload";
+import { joinQuotedPaths } from "../lib/shellQuote";
+import { HOST_PATH_MIME } from "../lib/hostPathDrag";
 import { droppedFileUploadSource, useNativeFileDropTarget } from "./nativeFileDrop";
 
 /** How long a refused drop's message stays up. */

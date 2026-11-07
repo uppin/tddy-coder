@@ -10,7 +10,7 @@ import { SelectedDaemonProvider } from "./rpc/selectedDaemon";
 import { ConnectionProviders } from "./rpc/connections/registry";
 import { daemonTransportFlavour, type TauriHostWindow } from "./rpc/daemonTransportFlavour";
 import { thisWindowsNativeFileDrop } from "tddy-tauri-web";
-import { NativeFileDropProvider } from "./components/connection/nativeFileDrop";
+import { NativeFileDropProvider } from "tddy-terminal-web";
 import { localHostRegistrationFor } from "./rpc/connections/localHost";
 import { LocalHostConnections } from "./rpc/connections/localHostRegistration";
 import type { DaemonHost } from "tddy-client-web";

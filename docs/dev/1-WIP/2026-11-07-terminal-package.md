@@ -101,11 +101,11 @@ Real dependency edges, as opposed to the branch line:
 
 ## Scope
 
-- [ ] Package skeleton + workflow (`ghostty-web` dependency)
-- [ ] Modules moved; consumers' imports rewritten
-- [ ] Specs and drivers moved and green from the package config
-- [ ] Boundary rule
-- [ ] Code-issue records moved
+- [x] Package skeleton + workflow (`ghostty-web` dependency)
+- [x] Modules moved; consumers' imports rewritten
+- [x] Specs and drivers moved and green from the package config
+- [x] Boundary rule
+- [x] Code-issue records moved
 
 ## Technical Changes
 
@@ -123,8 +123,8 @@ Real dependency edges, as opposed to the branch line:
 
 ## Implementation Milestones
 
-- [ ] Package specs green
-- [ ] `tddy-web` builds; session terminal tab specs still green
+- [x] Package specs green
+- [x] `tddy-web` builds; session terminal tab specs still green
 
 ## Testing Plan
 
@@ -166,8 +166,8 @@ Real dependency edges, as opposed to the branch line:
 - [x] Run acceptance tests (verify they fail)
 - [x] USER REVIEW — acceptance tests (developer waived the per-node review for this stack, 2026-11-07: "finish the rest without stopping")
 - [x] TDD Red — write failing unit/integration tests
-- [ ] TDD Green — implement with quality code
-- [ ] Update documentation with progress
+- [x] TDD Green — implement with quality code
+- [x] Update documentation with progress
 - [ ] Repeat Red→Green→Update cycle until feature complete
 - [ ] Run the touched packages' tests (`tddy-terminal-web` Cypress + `bun test` + boundary rule; `tddy-web` build + session terminal tab specs) — verify 100% pass
 - [ ] Validate changes (/validate-changes)
@@ -182,3 +182,9 @@ Real dependency edges, as opposed to the branch line:
 - [ ] Final validation (/validate-changes)
 - [ ] Linting and formatting
 - [ ] USER REVIEW — scope developed, every gap approved: ready to wrap
+
+## Green progress (2026-11-07)
+
+- Moved modules, drivers, 21 specs; package `testIds.ts` trimmed to the 35 ids the package uses; `cy.mount` (clients-wrapped) used by the wheel-TUI and history-paging drivers.
+- Verified (scoped): `tddy-terminal-web` `bun test src` 198 pass; 21 Cypress specs green one at a time; `tddy-web` `bun run build`, `test:unit` 849 pass, 10 terminal-rendering Cypress specs green.
+- Deviation: `tsc --noEmit` in `tddy-terminal-web` still reports ~18 errors, all in code moved verbatim (Sinon `.as`, RefObject nullability, proto literal shapes, `remoteTerminateConfirm.test.ts` window cast, `requestSnapshot` test typing) or in sibling packages (`debugMask`, `tauri transport`) — pre-existing, not a CI gate (tsc is not a gate for tddy-web either).

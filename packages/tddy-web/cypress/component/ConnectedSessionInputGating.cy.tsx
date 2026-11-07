@@ -23,7 +23,7 @@ import {
   type SessionTerminalInput,
 } from "tddy-client-web/gen/terminal_session_pb";
 import { GrpcSessionTerminal } from "../../src/components/sessions/GrpcSessionTerminal";
-import { useTerminalControl, type Session } from "../../src/components/sessions/useTerminalControl";
+import { useTerminalControl, type Session } from "tddy-terminal-web";
 
 // ---------------------------------------------------------------------------
 // Fixtures

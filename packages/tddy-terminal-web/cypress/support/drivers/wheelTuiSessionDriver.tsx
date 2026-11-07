@@ -7,8 +7,7 @@
  */
 
 import React from "react";
-import { mount } from "cypress/react";
-import { GhosttyTerminalSession } from "../../../src/components/GhosttyTerminalSession";
+import { GhosttyTerminalSession } from "../../../src/GhosttyTerminalSession";
 import type { TerminalFeed, TerminalStream } from "tddy-client-web/connections/terminal";
 import { UploadProgressProvider } from "../../../src/rpc/uploadProgress";
 import { AppClientsPorts } from "../../../src/rpc/appClientsPorts";
@@ -59,7 +58,7 @@ export function aWheelTuiSession(options: WheelTuiSessionOptions) {
 
   return {
     mount() {
-      mount(
+      cy.mount(
         <div style={{ height: 400, width: 800, position: "relative" }}>
           <AppClientsPorts>
             <UploadProgressProvider>

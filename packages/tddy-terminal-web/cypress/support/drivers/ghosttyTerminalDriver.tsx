@@ -12,8 +12,8 @@
 
 import React, { useRef } from "react";
 import { mount } from "cypress/react";
-import type { GhosttyTerminalProps, GhosttyTerminalHandle } from "../../../src/components/GhosttyTerminal";
-import { GhosttyTerminal } from "../../../src/components/GhosttyTerminal";
+import type { GhosttyTerminalProps, GhosttyTerminalHandle } from "../../../src/GhosttyTerminal";
+import { GhosttyTerminal } from "../../../src/GhosttyTerminal";
 import { byTestId, TEST_IDS } from "../testIds";
 
 // ---------------------------------------------------------------------------

@@ -21,9 +21,9 @@ import {
   SessionTerminalOutputSchema,
 } from "tddy-client-web/gen/terminal_session_pb";
 import { GrpcSessionTerminal } from "../../src/components/sessions/GrpcSessionTerminal";
-import { UploadProgressProvider } from "../../src/rpc/uploadProgress";
-import { aGhosttyTerminal } from "../support/drivers/ghosttyTerminalDriver";
-import { aGhosttyTerminalSession } from "../support/drivers/ghosttyTerminalSessionDriver";
+import { UploadProgressProvider } from "tddy-terminal-web";
+import { aGhosttyTerminal } from "../../../tddy-terminal-web/cypress/support/drivers/ghosttyTerminalDriver";
+import { aGhosttyTerminalSession } from "../../../tddy-terminal-web/cypress/support/drivers/ghosttyTerminalSessionDriver";
 import { byTestId, TEST_IDS } from "../support/testIds";
 
 const ESC = "\x1b";

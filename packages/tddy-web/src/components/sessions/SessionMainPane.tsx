@@ -20,7 +20,7 @@ import {
   SessionAgentConversationLayer,
   useConversationHosts,
 } from "./SessionAgentConversationLayer";
-import { joinQuotedPaths } from "../../lib/shellQuote";
+import { joinQuotedPaths } from "tddy-terminal-web";
 import { PARAM_CODE } from "tddy-client-web";
 
 export function SessionMainPane({

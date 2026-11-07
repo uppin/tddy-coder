@@ -3,7 +3,7 @@ import {
   exitDocumentFullscreen,
   isTargetInActiveFullscreen,
   requestElementFullscreen,
-} from "../../lib/browserFullscreen";
+} from "tddy-terminal-web";
 
 export interface SessionPaneFullscreen {
   /** The pane stack — the Fullscreen API target. */

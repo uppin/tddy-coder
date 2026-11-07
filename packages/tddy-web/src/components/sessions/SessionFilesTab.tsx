@@ -3,8 +3,8 @@ import type { Client } from "@connectrpc/connect";
 import { Button, InlineError } from "tddy-ui-web";
 import type { SessionFilesService, SessionUploadEntry } from "tddy-client-web/gen/session_files_pb";
 import { formatBytes } from "./formatTraffic";
-import { copyToClipboard } from "../../lib/clipboard";
-import { HOST_PATH_MIME } from "../../lib/hostPathDrag";
+import { copyToClipboard } from "tddy-terminal-web";
+import { HOST_PATH_MIME } from "tddy-terminal-web";
 import { hostNotConnected, rpcFailureText } from "tddy-client-web";
 import { useKeyedActionFailure } from "../../hooks/useKeyedActionFailure";
 

@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import {
   TerminalInputQueue,
   type OverlayModel,
-} from "../../lib/terminalInputQueue";
+} from "./lib/terminalInputQueue";
 
 /**
  * Owns a {@link TerminalInputQueue} and the "show after N ms without an ACK" visibility rule for

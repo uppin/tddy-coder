@@ -3,9 +3,9 @@ import {
   exitDocumentFullscreen,
   isTargetInActiveFullscreen,
   requestElementFullscreen,
-} from "../../lib/browserFullscreen";
-import { tddyDevDebug } from "../../lib/tddyDevLog";
-import { confirmRemoteSessionTermination } from "../../lib/remoteTerminateConfirm";
+} from "../lib/browserFullscreen";
+import { tddyDevDebug } from "../lib/tddyDevLog";
+import { confirmRemoteSessionTermination } from "../lib/remoteTerminateConfirm";
 import { dataConnectionStatusValue } from "./connectionChromeStatus";
 import { CONNECTION_TERMINAL_DOT_STYLES } from "./connectionTerminalChromeDotStyles";
 

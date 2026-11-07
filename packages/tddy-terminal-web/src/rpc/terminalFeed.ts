@@ -20,10 +20,10 @@ import {
 } from "tddy-client-web/gen/terminal_session_pb";
 import { tddyDebug } from "tddy-client-web";
 import { TerminalFrameContinuity } from "tddy-client-web";
-import { isFrameForTerminal } from "../../lib/terminalFrameIdentity";
+import { isFrameForTerminal } from "../lib/terminalFrameIdentity";
 import { createForwardHistoryFetcher } from "tddy-client-web";
 import { InputRefusalTracker } from "./inputDelivery";
-import { TerminalStreamOffset } from "../../lib/terminalStreamOffset";
+import { TerminalStreamOffset } from "../lib/terminalStreamOffset";
 import type { TerminalFeed, TerminalFrame, TerminalOptions, TerminalStream } from "tddy-client-web/connections/terminal";
 
 const dTerm = tddyDebug("tddy:term:feed");

@@ -7,24 +7,24 @@ import {
   StreamReplayMode,
   TerminalSessionService,
 } from "tddy-client-web/gen/terminal_session_pb";
-import { GhosttyTerminalSession } from "../GhosttyTerminalSession";
+import { GhosttyTerminalSession } from "tddy-terminal-web";
 import type {
   TerminalFeed,
   TerminalFrame,
   TerminalHistoryFetcher,
   TerminalStream,
 } from "tddy-client-web/connections/terminal";
-import type { ConnectedSession } from "./useTerminalControl";
-import type { ToolShortcutDef } from "../../lib/toolShortcuts";
+import type { ConnectedSession } from "tddy-terminal-web";
+import type { ToolShortcutDef } from "tddy-terminal-web";
 import { tddyDebug } from "tddy-client-web";
 import { measureTerminalGridFromRect } from "../../lib/terminalGridMeasure";
 import { TerminalFrameContinuity } from "tddy-client-web";
-import { isFrameForTerminal } from "../../lib/terminalFrameIdentity";
-import { useEnqueuedInput } from "./useEnqueuedInput";
-import { EnqueuedInputOverlay } from "../connection/EnqueuedInputOverlay";
+import { isFrameForTerminal } from "tddy-terminal-web";
+import { useEnqueuedInput } from "tddy-terminal-web";
+import { EnqueuedInputOverlay } from "tddy-terminal-web";
 import { createForwardHistoryFetcher } from "tddy-client-web";
 import { rpcFailureText } from "tddy-client-web";
-import { InputRefusalTracker } from "../../rpc/connections/inputDelivery";
+import { InputRefusalTracker } from "tddy-terminal-web";
 import { InlineError } from "tddy-ui-web";
 
 const dGrpc = tddyDebug("tddy:term:grpc");

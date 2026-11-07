@@ -18,12 +18,12 @@
  */
 
 import React, { useEffect, useRef, useState } from "react";
-import { DEFAULT_TERMINAL_FONT_MAX, DEFAULT_TERMINAL_FONT_MIN } from "../lib/terminalZoom";
+import { DEFAULT_TERMINAL_FONT_MAX, DEFAULT_TERMINAL_FONT_MIN } from "./lib/terminalZoom";
 import { tddyDebug } from "tddy-client-web";
 import {
-  shouldShowVisibleLiveKitStatusStrip,
-  type LiveKitChromeStatus,
-} from "tddy-livekit-web";
+  shouldShowVisibleTerminalStatusStrip,
+  type TerminalConnectionStatus,
+} from "./connection/terminalConnectionStatus";
 import { GhosttyTerminal, type GhosttyTerminalHandle } from "./GhosttyTerminal";
 import { ConnectionTerminalChrome } from "./connection/ConnectionTerminalChrome";
 import { TerminalConnectionStatusBar } from "./connection/TerminalConnectionStatusBar";
@@ -32,11 +32,11 @@ import { TerminalFileDropZone } from "./connection/TerminalFileDropZone";
 import { TerminalUploadButton } from "./connection/TerminalUploadButton";
 import { ShortcutDrawer } from "./connection/ShortcutDrawer";
 import { useIsMobile, useVisualViewport } from "tddy-ui-web";
-import type { ToolShortcutDef } from "../lib/toolShortcuts";
+import type { ToolShortcutDef } from "./lib/toolShortcuts";
 import { TerminalHistoryForwardLoader } from "tddy-client-web";
-import { TerminalStreamOffset } from "../lib/terminalStreamOffset";
+import { TerminalStreamOffset } from "./lib/terminalStreamOffset";
 import { feedSupportsHistory, type TerminalFeed } from "tddy-client-web/connections/terminal";
-import type { ByteDelta } from "./sessions/sessionRuntimeRegistry";
+import type { ByteDelta } from "./lib/byteDelta";
 
 // `[tddy]` diagnostics for the terminal byte stream (enabled by the DEBUG mask).
 // The 220-col garbling on reconnect lived here, so log incoming bytes / buffering / resize.
@@ -150,7 +150,7 @@ export interface GhosttyTerminalSessionProps {
    * panes with `SessionConnectionOverlay` — in which case this component claims nothing about it
    * and the readout stays out of the layout.
    */
-  connectionStatus?: LiveKitChromeStatus;
+  connectionStatus?: TerminalConnectionStatus;
 
   /** Why the connection failed, shown over the terminal while {@link connectionStatus} is `error`. */
   connectionError?: string;
@@ -650,10 +650,10 @@ export function GhosttyTerminalSession({
 
   // The status the chrome reports. A caller that states none is not making a claim about the
   // connection — the feed exists, so bytes can flow — and the raw readout stays out of the layout.
-  const status: LiveKitChromeStatus = connectionStatus ?? "connected";
+  const status: TerminalConnectionStatus = connectionStatus ?? "connected";
   const showStatusStrip =
     connectionStatus !== undefined &&
-    shouldShowVisibleLiveKitStatusStrip({
+    shouldShowVisibleTerminalStatusStrip({
       connectionOverlayEnabled: !!connectionOverlay,
       status,
     });

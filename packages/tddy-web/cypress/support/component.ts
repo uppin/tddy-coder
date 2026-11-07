@@ -3,7 +3,7 @@ import { mount } from "cypress/react";
 import { mountWithRpc } from "./rpc/inMemory.tsx";
 import { agentActivityRegistry } from "../../src/components/sessions/agentActivityRegistry";
 import { sessionNotificationRegistry } from "../../src/components/sessions/sessionNotificationRegistry";
-import { UploadProgressProvider } from "../../src/rpc/uploadProgress";
+import { UploadProgressProvider } from "tddy-terminal-web";
 import { AppClientsPorts } from "../../src/rpc/appClientsPorts";
 import { HostStartPassphraseScope } from "../../src/components/hosts/HostStartPassphrasePrompt";
 import { create } from "@bufbuild/protobuf";
