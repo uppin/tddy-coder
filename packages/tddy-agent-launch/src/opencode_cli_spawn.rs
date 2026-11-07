@@ -33,10 +33,13 @@ use tddy_service::proto::session::{
 use tddy_session_files::attachment_progress::AttachmentProgressSink;
 use tddy_worktree_service::branch_intent::BranchIntentRequest;
 
+use crate::cli_agent_steps::conversation::refuse_a_role_the_agent_cannot_hold;
+use crate::cli_agent_steps::conversation::resumed_or_adopted_conversation;
+use crate::cli_agent_steps::conversation::start_conversation;
+use crate::cli_agent_steps::conversation::ConversationStart;
 use crate::cli_agent_steps::{
-    refuse_a_role_the_agent_cannot_hold, render_host_launch_slots, resumed_or_adopted_conversation,
-    start_conversation, wire_session_agent, write_slot_files_on_target, ConversationStart,
-    HostLaunchSlots, ManagedWiring, ResumedWiring, SessionWiringInputs,
+    render_host_launch_slots, wire_session_agent, write_slot_files_on_target, HostLaunchSlots,
+    ManagedWiring, ResumedWiring, SessionWiringInputs,
 };
 use crate::cli_resume_token::{resume_token_recorder, settled_resume_token};
 use crate::cli_route_launch::{resume_cli_route, routed_launch_model, start_cli_route};
