@@ -788,15 +788,18 @@ jobs:
         run: ./dev bun test ./scripts/generated-code.test.ts
 
       # The CI scripts' own tests. Each guards something a CI job relies on, so each runs here rather
-      # than only when someone runs it locally (docs/dev/todo/2026-10-05-ci-script-tests-are-not-run-in-ci.md).
+      # than only when someone runs it locally.
       - name: CI script tests
         run: >-
-          ./dev bun test
+          ./dev bun test --timeout 30000
           ./scripts/web-affected.test.ts
           ./scripts/web-workflows.test.ts
           ./scripts/nextest-serial-groups.test.ts
           ./scripts/ci-e2e-timing.test.ts
           ./scripts/livekit-ci-server.test.ts
+          ./scripts/local-package-cache.test.ts
+          ./scripts/nextest-windowed.test.ts
+          ./scripts/nextest-e2e-archive.test.ts
 
       - name: Check committed generated code
         run: ./dev bash scripts/generated-code.sh check
