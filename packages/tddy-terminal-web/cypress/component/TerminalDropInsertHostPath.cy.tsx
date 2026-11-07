@@ -9,7 +9,7 @@
 import React from "react";
 import { anInMemoryRpcBackend, type InMemoryRpcBackend } from "tddy-connectrpc-testkit";
 import { SessionFilesService } from "tddy-client-web/gen/session_files_pb";
-import { TerminalFileDropZone } from "../../src/components/connection/TerminalFileDropZone";
+import { TerminalFileDropZone } from "../../src/connection/TerminalFileDropZone";
 import { UploadProgressProvider } from "../../src/rpc/uploadProgress";
 import { mountWithRpc } from "../support/rpc/inMemory";
 import { withSelectedDaemon } from "../support/rpc/withSelectedDaemon";
