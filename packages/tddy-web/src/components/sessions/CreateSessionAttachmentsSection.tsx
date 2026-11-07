@@ -1,8 +1,8 @@
 import type { Client } from "@connectrpc/connect";
-import type { SessionService } from "../../gen/session_pb";
-import type { ProjectEntry } from "../../gen/project_pb";
-import type { SessionFilesService } from "../../gen/session_files_pb";
-import type { WorktreeService } from "../../gen/worktree_pb";
+import type { SessionService } from "tddy-client-web/gen/session_pb";
+import type { ProjectEntry } from "tddy-client-web/gen/project_pb";
+import type { SessionFilesService } from "tddy-client-web/gen/session_files_pb";
+import type { WorktreeService } from "tddy-client-web/gen/worktree_pb";
 import type { SessionAttachments } from "../../hooks/useSessionAttachments";
 import { AttachmentDropZone } from "./attachments/AttachmentDropZone";
 import { HostDocumentPicker } from "./attachments/HostDocumentPicker";

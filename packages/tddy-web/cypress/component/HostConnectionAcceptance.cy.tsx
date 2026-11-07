@@ -22,10 +22,10 @@ import { createClient, type Client } from "@connectrpc/connect";
 import type { DescService } from "@bufbuild/protobuf";
 import { create } from "@bufbuild/protobuf";
 import { anInMemoryRpcBackend, type InMemoryRpcBackend } from "tddy-connectrpc-testkit";
-import { type ProjectEntry } from "../../src/gen/project_pb";
-import { ProjectService } from "../../src/gen/project_pb";
-import { SessionService, ListSessionsResponseSchema, SessionEntrySchema } from "../../src/gen/session_pb";
-import { ListProjectBranchesResponseSchema, ListProjectsResponseSchema, ProjectEntrySchema } from "../../src/gen/project_pb";
+import { type ProjectEntry } from "tddy-client-web/gen/project_pb";
+import { ProjectService } from "tddy-client-web/gen/project_pb";
+import { SessionService, ListSessionsResponseSchema, SessionEntrySchema } from "tddy-client-web/gen/session_pb";
+import { ListProjectBranchesResponseSchema, ListProjectsResponseSchema, ProjectEntrySchema } from "tddy-client-web/gen/project_pb";
 import { ProjectsAppPage } from "../../src/components/projects/ProjectsAppPage";
 import { AuthProvider } from "../../src/hooks/authProvider";
 import type { DaemonHost } from "../../src/lib/participantRole";
@@ -36,7 +36,7 @@ import {
   useHostConnection,
 } from "../../src/rpc/connections/registry";
 import { SelectedDaemonProvider } from "../../src/rpc/selectedDaemon";
-import type { ConnectionProvider, HostConnection } from "../../src/rpc/connections/types";
+import type { ConnectionProvider, HostConnection } from "tddy-client-web/connections/types";
 import { mountWithRpc } from "../support/rpc/inMemory";
 import { hostConnectionProbePage as page } from "../support/pages/hostConnectionProbePage";
 import { projectsScreenPage } from "../support/pages/projectsScreenPage";

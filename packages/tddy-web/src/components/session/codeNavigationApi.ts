@@ -1,4 +1,4 @@
-import type { CodeLocation } from "../../gen/code_navigation_pb";
+import type { CodeLocation } from "tddy-client-web/gen/code_navigation_pb";
 
 /** A one-based line and one-based byte column in a worktree file — the coordinates the daemon speaks. */
 export type CodePosition = { line: number; column: number };

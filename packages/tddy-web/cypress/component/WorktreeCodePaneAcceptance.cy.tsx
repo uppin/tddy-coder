@@ -11,14 +11,14 @@ import React from "react";
 import { create } from "@bufbuild/protobuf";
 import { Code, ConnectError } from "@connectrpc/connect";
 import { SessionsDrawerScreen } from "../../src/components/sessions/SessionsDrawerScreen";
-import { type ProjectEntry } from "../../src/gen/project_pb";
-import { ProjectService } from "../../src/gen/project_pb";
+import { type ProjectEntry } from "tddy-client-web/gen/project_pb";
+import { ProjectService } from "tddy-client-web/gen/project_pb";
 import {
   ListWorktreeDirectoryResponseSchema,
   ReadWorktreeFileResponseSchema,
   WorktreeDirEntrySchema,
   WorktreeService,
-} from "../../src/gen/worktree_pb";
+} from "tddy-client-web/gen/worktree_pb";
 import { withSelectedDaemon } from "../support/rpc/withSelectedDaemon";
 import { mountWithRpc } from "../support/rpc/inMemory";
 import { aSessionsDrawerBackend } from "../support/rpc/vncBackend";

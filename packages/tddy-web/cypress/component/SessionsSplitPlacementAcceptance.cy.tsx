@@ -17,7 +17,7 @@
 
 import React from "react";
 import { create } from "@bufbuild/protobuf";
-import { SessionEntrySchema } from "../../src/gen/session_pb";
+import { SessionEntrySchema } from "tddy-client-web/gen/session_pb";
 import { SessionDrawer } from "../../src/components/sessions/SessionDrawer";
 import { TooltipProvider } from "tddy-ui-web";
 import { sessionsDrawerPage } from "../support/pages/sessionsDrawerPage";

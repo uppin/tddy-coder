@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { ConnectError } from "@connectrpc/connect";
-import { type SessionEntry } from "../../gen/session_pb";
-import { SessionAgentService, type SessionAgentEntry } from "../../gen/session_agents_pb";
+import { type SessionEntry } from "tddy-client-web/gen/session_pb";
+import { SessionAgentService, type SessionAgentEntry } from "tddy-client-web/gen/session_agents_pb";
 import { useHttpClient } from "../../rpc/transportProvider";
 import { Button } from "tddy-ui-web";
 import { AgentPicker } from "./AgentPicker";

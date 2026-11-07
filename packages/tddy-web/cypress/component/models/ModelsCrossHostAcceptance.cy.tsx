@@ -12,7 +12,7 @@
 import React from "react";
 import { Code, ConnectError } from "@connectrpc/connect";
 import { anInMemoryRpcBackend } from "tddy-connectrpc-testkit";
-import { ModelLoadState, ModelRegistryService } from "../../../src/gen/models_pb";
+import { ModelLoadState, ModelRegistryService } from "tddy-client-web/gen/models_pb";
 import { ModelsAppPage } from "../../../src/components/models/ModelsAppPage";
 import { daemonRpcIdentity, type DaemonHost } from "../../../src/lib/participantRole";
 import { withSelectedDaemon } from "../../support/rpc/withSelectedDaemon";

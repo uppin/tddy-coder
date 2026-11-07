@@ -20,7 +20,7 @@ import { useAuthTokenGate, useHttpTransport, useTrafficMeterRegistry } from "../
 import { createDefaultWebviewIpcTransport } from "../daemonTransport";
 import { createIpcConnectionProvider, type LocalHostRegistration } from "./localHost";
 import { ConnectionProviders, useConnectionProviders } from "./registry";
-import type { ConnectionProvider } from "./types";
+import type { ConnectionProvider } from "tddy-client-web/connections/types";
 
 /** Shares `localHost.ts`'s namespace: one mask turns the whole local-host story on. */
 const dRegistration = tddyDebug("tddy:rpc:local-host");

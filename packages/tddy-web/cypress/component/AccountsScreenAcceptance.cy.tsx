@@ -16,7 +16,7 @@
 import { Code, ConnectError } from "@connectrpc/connect";
 import { anInMemoryRpcBackend, type InMemoryRpcBackend } from "tddy-connectrpc-testkit";
 import { AccountsAppPage } from "../../src/components/accounts/AccountsAppPage";
-import { AccountsService, SyncStatus, type AccountSummary } from "../../src/gen/accounts_pb";
+import { AccountsService, SyncStatus, type AccountSummary } from "tddy-client-web/gen/accounts_pb";
 import { mountWithRpc } from "../support/rpc/inMemory";
 import { withSelectedDaemon } from "../support/rpc/withSelectedDaemon";
 import { accountsScreenPage } from "../support/pages/accountsScreenPage";

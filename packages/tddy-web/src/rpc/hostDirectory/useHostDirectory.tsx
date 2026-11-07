@@ -7,7 +7,7 @@
  */
 
 import { createContext, useContext, useMemo, type ReactNode } from "react";
-import type { ConnectionStatus } from "../connections/types";
+import type { ConnectionStatus } from "tddy-client-web/connections/types";
 import type { HostDescriptor, HostDirectory, HostDirectorySource } from "./types";
 
 /**

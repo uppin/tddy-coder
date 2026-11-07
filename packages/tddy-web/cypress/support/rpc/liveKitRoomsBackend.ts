@@ -23,7 +23,7 @@ import {
   type LiveKitParticipantInfo,
   type LiveKitRoomInfo,
   type LiveKitRoomsChange,
-} from "../../../src/gen/livekit_pb";
+} from "tddy-client-web/gen/livekit_pb";
 
 // ---------------------------------------------------------------------------
 // Fixture builders

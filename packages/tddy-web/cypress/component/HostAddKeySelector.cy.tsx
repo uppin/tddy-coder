@@ -28,7 +28,7 @@ import {
   HostSshAgentSchema,
   ProbeOutcome,
   type HostSshAgent,
-} from "../../src/gen/host_pb";
+} from "tddy-client-web/gen/host_pb";
 import { HostAddKeyAction } from "../../src/components/hosts/HostAddKeyAction";
 import { mountWithRpc } from "../support/rpc/inMemory";
 import { withSelectedDaemon } from "../support/rpc/withSelectedDaemon";

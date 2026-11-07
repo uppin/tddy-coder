@@ -24,7 +24,7 @@ import {
   WorktreeSizeStatus,
   WorktreeStatsEventSchema,
   type WorktreeRow,
-} from "../../../src/gen/worktree_pb";
+} from "tddy-client-web/gen/worktree_pb";
 
 /** One worktree row as fed into a `StreamWorktreeStats` snapshot/update frame. */
 export interface WorktreeStatsRowInput {

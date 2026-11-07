@@ -6,7 +6,7 @@ import { sessionNotificationRegistry } from "../../src/components/sessions/sessi
 import { UploadProgressProvider } from "../../src/rpc/uploadProgress";
 import { create } from "@bufbuild/protobuf";
 import { registerServerStreamFallback } from "tddy-connectrpc-testkit";
-import { SessionService, StartSessionEventSchema } from "../../src/gen/session_pb";
+import { SessionService, StartSessionEventSchema } from "tddy-client-web/gen/session_pb";
 
 /** The Agent Activity and session-notification stores are app-lifetime module singletons; component
  *  tests share one JS context across cases, so clear their per-session state before each test to keep

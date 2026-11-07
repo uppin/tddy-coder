@@ -13,7 +13,7 @@
 import { describe, it, expect } from "bun:test";
 import { directoryStatusOf, hostsOf, mergeHostDirectory } from "./useHostDirectory";
 import type { HostDescriptor, HostDirectorySource } from "./types";
-import type { ConnectionStatus } from "../connections/types";
+import type { ConnectionStatus } from "tddy-client-web/connections/types";
 
 function aHostNamed(hostId: string, sourceId: string, label = hostId): HostDescriptor {
   return { hostId, label, sourceId };

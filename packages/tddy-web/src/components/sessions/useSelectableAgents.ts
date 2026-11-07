@@ -20,7 +20,7 @@
  */
 
 import { createClient, type Client } from "@connectrpc/connect";
-import { CatalogService } from "../../gen/catalog_pb";
+import { CatalogService } from "tddy-client-web/gen/catalog_pb";
 import { useHostFanOut, type HostReadFailure, type HostReader } from "../../rpc/useHostFanOut";
 import { selectableAgentValue, type SelectableAgent } from "./selectableAgentOptions";
 

@@ -9,9 +9,9 @@
 
 import React from "react";
 import { GhosttyTerminalSession } from "../../src/components/GhosttyTerminalSession";
-import type { TerminalStream } from "../../src/rpc/connections/terminal";
+import type { TerminalStream } from "tddy-client-web/connections/terminal";
 import { UploadProgressProvider } from "../../src/rpc/uploadProgress";
-import { SessionFilesService } from "../../src/gen/session_files_pb";
+import { SessionFilesService } from "tddy-client-web/gen/session_files_pb";
 import { anInMemoryRpcBackend, type InMemoryRpcBackend } from "tddy-connectrpc-testkit";
 import { mountWithRpc } from "../support/rpc/inMemory";
 import { withSelectedDaemon } from "../support/rpc/withSelectedDaemon";

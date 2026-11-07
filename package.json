@@ -3,6 +3,7 @@
   "workspaces": [
     "packages/tddy-react-commons",
     "packages/tddy-ui-web",
+    "packages/tddy-client-web",
     "packages/tddy-web",
     "packages/tddy-livekit-rpc-web",
     "packages/tddy-rpc-web",

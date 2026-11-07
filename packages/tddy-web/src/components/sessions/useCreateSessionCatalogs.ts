@@ -1,8 +1,8 @@
 import { useEffect, useState } from "react";
 import type { Client } from "@connectrpc/connect";
-import type { SessionService, SessionEntry } from "../../gen/session_pb";
-import type { ProjectService, ProjectEntry } from "../../gen/project_pb";
-import type { CatalogService, ToolInfo } from "../../gen/catalog_pb";
+import type { SessionService, SessionEntry } from "tddy-client-web/gen/session_pb";
+import type { ProjectService, ProjectEntry } from "tddy-client-web/gen/project_pb";
+import type { CatalogService, ToolInfo } from "tddy-client-web/gen/catalog_pb";
 import { projectSelectOptions } from "../../lib/projectSelectOptions";
 import { rpcFailureText } from "../../rpc/rpcFailure";
 

@@ -16,7 +16,7 @@
  */
 
 import type { Client } from "@connectrpc/connect";
-import type { TerminalSessionService } from "../gen/terminal_session_pb";
+import type { TerminalSessionService } from "tddy-client-web/gen/terminal_session_pb";
 
 export interface HistoryChunk {
   data: Uint8Array;

@@ -1,5 +1,5 @@
 import { useEffect } from "react";
-import type { SessionEntry } from "../gen/session_pb";
+import type { SessionEntry } from "tddy-client-web/gen/session_pb";
 import { TableCell } from "tddy-ui-web";
 
 function displayOrDash(value: string | undefined): string {

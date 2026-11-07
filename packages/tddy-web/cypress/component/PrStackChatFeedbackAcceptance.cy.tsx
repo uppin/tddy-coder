@@ -17,7 +17,7 @@ import React from "react";
 import { SessionsDrawerScreen } from "../../src/components/sessions/SessionsDrawerScreen";
 import { withSelectedDaemon } from "../support/rpc/withSelectedDaemon";
 import { PrStackChat } from "../../src/components/sessions/prstack/PrStackChat";
-import { TddyRemote, type ClientMessage } from "../../src/gen/tddy/v1/remote_pb";
+import { TddyRemote, type ClientMessage } from "tddy-client-web/gen/tddy/v1/remote_pb";
 import { mountWithRpc } from "../support/rpc/inMemory";
 import { aSessionsDrawerBackend } from "../support/rpc/vncBackend";
 import { sessionsDrawerPage } from "../support/pages/sessionsDrawerPage";

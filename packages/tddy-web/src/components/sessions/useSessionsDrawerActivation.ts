@@ -1,6 +1,6 @@
 import { useEffect } from "react";
-import type { SessionEntry } from "../../gen/session_pb";
-import type { HostConnection } from "../../rpc/connections/types";
+import type { SessionEntry } from "tddy-client-web/gen/session_pb";
+import type { HostConnection } from "tddy-client-web/connections/types";
 import { hostNotConnected } from "../../rpc/rpcFailure";
 import { PARAM_CODE, PARAM_FULL, PARAM_INSPECTOR, type AppLocation } from "../../routing/appLocation";
 import type { UseAppLocationResult } from "../../routing/useAppLocation";

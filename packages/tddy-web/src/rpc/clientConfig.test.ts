@@ -11,7 +11,7 @@
 import { afterEach, describe, expect, it, mock, spyOn } from "bun:test";
 import { create } from "@bufbuild/protobuf";
 import { anInMemoryRpcBackend, type InMemoryRpcBackend } from "tddy-connectrpc-testkit";
-import { DaemonConfigService, GetClientConfigResponseSchema } from "../gen/daemon_config_pb";
+import { DaemonConfigService, GetClientConfigResponseSchema } from "tddy-client-web/gen/daemon_config_pb";
 import { createDefaultDaemonTransport } from "./daemonTransport";
 import { loadClientConfig } from "./clientConfig";
 import { aBrowserPageServedFrom, aTauriHostedPage } from "../test-utils/daemonHosts";

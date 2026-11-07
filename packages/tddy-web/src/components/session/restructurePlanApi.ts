@@ -4,7 +4,7 @@ import {
   type CodeNavigationService,
   type PlanOperation,
   type PlanRunEvent,
-} from "../../gen/code_navigation_pb";
+} from "tddy-client-web/gen/code_navigation_pb";
 import type { WorktreeFilesApiConfig } from "./worktreeFilesApi";
 
 /** Where an operation's journal says it is. */

@@ -8,7 +8,7 @@
 
 import { describe, it, expect } from "bun:test";
 import { create } from "@bufbuild/protobuf";
-import { GetConfigResponseSchema, IceGathering } from "../../gen/daemon_config_pb";
+import { GetConfigResponseSchema, IceGathering } from "tddy-client-web/gen/daemon_config_pb";
 import {
   toFormState,
   toUpdateSettings,

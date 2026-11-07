@@ -6,7 +6,7 @@ import {
   LiveKitRoomsChangeSchema,
   type LiveKitParticipantInfo,
   type LiveKitRoomInfo,
-} from "../gen/livekit_pb";
+} from "tddy-client-web/gen/livekit_pb";
 import {
   applyRoomsChange,
   roomLabelFromMetadata,

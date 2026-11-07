@@ -50,7 +50,7 @@ import {
 } from "../routing/useAppLocation";
 import { LiveKitConnections } from "./connections/liveKit";
 import { HostReadiness, useHostClient } from "./connections/registry";
-import type { ConnectionStatus } from "./connections/types";
+import type { ConnectionStatus } from "tddy-client-web/connections/types";
 import { daemonHostOf } from "./hostDirectory/daemonHost";
 import { useLiveKitHostDirectorySource } from "./hostDirectory/liveKitSource";
 import { HostPresenceRoom } from "./hostDirectory/presenceRoom";

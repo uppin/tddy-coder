@@ -11,7 +11,7 @@
 
 import React, { useEffect, useReducer, useState } from "react";
 import type { Room } from "livekit-client";
-import { Protocol } from "../../gen/screen_sharing_pb";
+import { Protocol } from "tddy-client-web/gen/screen_sharing_pb";
 import { screenSharingStartFailureText } from "../../lib/screenSharingStartFailure";
 import { rpcFailureText } from "../../rpc/rpcFailure";
 import { useKeyedActionFailure } from "../../hooks/useKeyedActionFailure";

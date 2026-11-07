@@ -16,8 +16,8 @@ import {
   type AccountSummary,
   type ListAccountsResponse,
   type ProviderAccounts,
-} from "../../gen/accounts_pb";
-import { CatalogService } from "../../gen/catalog_pb";
+} from "tddy-client-web/gen/accounts_pb";
+import { CatalogService } from "tddy-client-web/gen/catalog_pb";
 import { useAuthContext } from "../../hooks/authProvider";
 import { useDaemonClient } from "../../rpc/selectedDaemon";
 import { reasonOf } from "./rpcReason";
