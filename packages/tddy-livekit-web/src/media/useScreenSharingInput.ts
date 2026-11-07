@@ -29,7 +29,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type RefObject } fro
 import { create } from "@bufbuild/protobuf";
 import { createClient } from "@connectrpc/connect";
 import { AsyncQueue } from "tddy-livekit-rpc-web";
-import type { RoomHandle, ScreenSharingInputOptions } from "tddy-client-web";
+import { tddyDebug, type RoomHandle, type ScreenSharingInputOptions } from "tddy-client-web";
 import { asRoom } from "../roomHandle";
 import {
   useLiveKitTransportFactory,
@@ -46,6 +46,8 @@ import {
   rfbButtonMaskFor,
   type Point,
 } from "./screenSharingInput";
+
+const dbg = tddyDebug("tddy:livekit:screen-input");
 
 /** What this hook can tell the overlay about the input stream. It carries no way to send anything. */
 /** Where a pointer landed on the remote framebuffer, and which buttons were down when it did. */
@@ -172,7 +174,7 @@ export function useScreenSharingInput({
         }
       } catch (streamError) {
         if (!cancelled) {
-          console.debug("[useScreenSharingInput] input stream unavailable", streamError);
+          dbg("input stream unavailable: %o", streamError);
           // `AsyncQueue` is unbounded and the transport's publish is fire-and-forget: without this
           // close, every later pointer move is still encoded and published, for ever, for a stream
           // that is not there.

@@ -72,7 +72,7 @@ session's server identity in its own LiveKit room, exactly as today:
 
 - The terminal (`terminal.TerminalService`, `openRoomTerminalFeed`) — targets
   `daemon-{instanceId}-{sessionId}`.
-- The PR-Stack Chat Screen presenter stream (`usePresenterLiveKitRoom`) — targets the session's
+- The PR-Stack Chat Screen presenter stream (the media port's `usePresenterRoom`) — targets the session's
   presenter identity.
 - Session inspector streams (VNC, screen sharing).
 

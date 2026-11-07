@@ -1,14 +1,19 @@
 import { useState } from "react";
 import { ExternalLink } from "lucide-react";
-import { useMediaPort, type CommonRoomStatus, type RoomHandle } from "tddy-client-web";
-import { useHasCapability, type CapabilityBearing } from "tddy-client-web";
-import { capabilityAvailability } from "tddy-client-web";
 import {
-  parseOwnedProjectCount,
-  type RoomParticipant,
-} from "../rooms/useRoomParticipants";
-import { safeTestIdPart } from "tddy-client-web";
+  capabilityAvailability,
+  safeTestIdPart,
+  tddyDebug,
+  useHasCapability,
+  useMediaPort,
+  type CapabilityBearing,
+  type CommonRoomStatus,
+  type RoomHandle,
+} from "tddy-client-web";
 import { Button } from "tddy-ui-web";
+import { parseOwnedProjectCount, type RoomParticipant } from "../rooms/useRoomParticipants";
+
+const dbg = tddyDebug("tddy:livekit:participant-video");
 
 /** Inline SVG (Lucide `video` paths) — avoids lucide-react context issues in Cypress CT. */
 function VideoCameraIcon({ className }: { className?: string }) {
@@ -213,7 +218,7 @@ export function ParticipantList({
     );
   }
 
-  console.debug("[tddy-web:participant-video] ParticipantList: rendering connected table", {
+  dbg("ParticipantList: rendering connected table", {
     participantCount: participants.length,
   });
 
@@ -302,7 +307,7 @@ export function ParticipantList({
                       identity={p.identity}
                       testIdPart={id}
                       onOpen={() => {
-                        console.info("[tddy-web:participant-video] ParticipantList: open video preview", {
+                        dbg("ParticipantList: open video preview", {
                           identity: p.identity,
                         });
                         setVideoPreviewIdentity(p.identity);
@@ -322,7 +327,7 @@ export function ParticipantList({
         open={canShowVideo && videoPreviewIdentity !== null}
         onOpenChange={(next) => {
           if (!next) {
-            console.info("[tddy-web:participant-video] ParticipantList: video preview closed");
+            dbg("ParticipantList: video preview closed");
             setVideoPreviewIdentity(null);
           }
         }}

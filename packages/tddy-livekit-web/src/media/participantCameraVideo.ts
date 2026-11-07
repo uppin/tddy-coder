@@ -9,6 +9,9 @@
  */
 
 import { Track } from "livekit-client";
+import { tddyDebug } from "tddy-client-web";
+
+const dbg = tddyDebug("tddy:livekit:participant-video");
 
 type MinimalPublication = {
   kind?: unknown;
@@ -32,19 +35,19 @@ type MinimalParticipant = {
  * participants a subscribed publication.
  */
 export function hasRenderableCameraVideo(participant: unknown): boolean {
-  console.debug("[tddy-web:participant-video] hasRenderableCameraVideo: evaluating participant", {
+  dbg("hasRenderableCameraVideo: evaluating participant", {
     isLocal: (participant as MinimalParticipant)?.isLocal,
   });
 
   if (participant === null || typeof participant !== "object") {
-    console.info("[tddy-web:participant-video] hasRenderableCameraVideo: non-object participant");
+    dbg("hasRenderableCameraVideo: non-object participant");
     return false;
   }
 
   const p = participant as MinimalParticipant;
   const getPubs = p.getTrackPublications;
   if (typeof getPubs !== "function") {
-    console.info("[tddy-web:participant-video] hasRenderableCameraVideo: missing getTrackPublications");
+    dbg("hasRenderableCameraVideo: missing getTrackPublications");
     return false;
   }
 
@@ -59,7 +62,7 @@ export function hasRenderableCameraVideo(participant: unknown): boolean {
     if (source !== Track.Source.Camera) continue;
 
     if (pub.videoTrack == null) {
-      console.debug("[tddy-web:participant-video] hasRenderableCameraVideo: camera pub without videoTrack", {
+      dbg("hasRenderableCameraVideo: camera pub without videoTrack", {
         source,
       });
       continue;
@@ -67,22 +70,22 @@ export function hasRenderableCameraVideo(participant: unknown): boolean {
 
     if (p.isLocal === true) {
       if (pub.isMuted === true) {
-        console.debug("[tddy-web:participant-video] hasRenderableCameraVideo: local camera muted");
+        dbg("hasRenderableCameraVideo: local camera muted");
         continue;
       }
-      console.info("[tddy-web:participant-video] hasRenderableCameraVideo: local camera renderable");
+      dbg("hasRenderableCameraVideo: local camera renderable");
       return true;
     }
 
     if (pub.isSubscribed !== true) {
-      console.debug("[tddy-web:participant-video] hasRenderableCameraVideo: remote camera not subscribed");
+      dbg("hasRenderableCameraVideo: remote camera not subscribed");
       continue;
     }
 
-    console.info("[tddy-web:participant-video] hasRenderableCameraVideo: remote camera renderable");
+    dbg("hasRenderableCameraVideo: remote camera renderable");
     return true;
   }
 
-  console.debug("[tddy-web:participant-video] hasRenderableCameraVideo: no renderable camera publication");
+  dbg("hasRenderableCameraVideo: no renderable camera publication");
   return false;
 }

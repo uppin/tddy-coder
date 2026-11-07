@@ -1,5 +1,8 @@
 import { useEffect, useRef } from "react";
 import type { VideoTrack } from "livekit-client";
+import { tddyDebug } from "tddy-client-web";
+
+const dbg = tddyDebug("tddy:livekit:participant-video");
 
 export interface ParticipantVideoPreviewDialogProps {
   /** LiveKit identity for labeling. */
@@ -27,7 +30,7 @@ export function ParticipantVideoPreviewDialog({
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
         e.preventDefault();
-        console.info("[tddy-web:participant-video] ParticipantVideoPreviewDialog: Escape dismiss", {
+        dbg("ParticipantVideoPreviewDialog: Escape dismiss", {
           identity,
         });
         onOpenChange(false);
@@ -42,12 +45,12 @@ export function ParticipantVideoPreviewDialog({
     if (!open || !videoTrack || !el) {
       return;
     }
-    console.debug("[tddy-web:participant-video] ParticipantVideoPreviewDialog: attach track", {
+    dbg("ParticipantVideoPreviewDialog: attach track", {
       identity,
     });
     videoTrack.attach(el);
     return () => {
-      console.debug("[tddy-web:participant-video] ParticipantVideoPreviewDialog: detach track", {
+      dbg("ParticipantVideoPreviewDialog: detach track", {
         identity,
       });
       videoTrack.detach(el);
@@ -56,7 +59,7 @@ export function ParticipantVideoPreviewDialog({
 
   useEffect(() => {
     if (open) {
-      console.info("[tddy-web:participant-video] ParticipantVideoPreviewDialog: opened", {
+      dbg("ParticipantVideoPreviewDialog: opened", {
         identity,
         hasTrack: videoTrack != null,
       });
@@ -74,7 +77,7 @@ export function ParticipantVideoPreviewDialog({
       data-testid="participant-video-dialog-overlay"
       onMouseDown={(e) => {
         if (e.target === e.currentTarget) {
-          console.info("[tddy-web:participant-video] ParticipantVideoPreviewDialog: overlay dismiss", {
+          dbg("ParticipantVideoPreviewDialog: overlay dismiss", {
             identity,
           });
           onOpenChange(false);
@@ -98,7 +101,7 @@ export function ParticipantVideoPreviewDialog({
             data-testid="participant-video-dialog-close"
             className="rounded-md px-2 py-1 text-sm text-muted-foreground hover:bg-muted"
             onClick={() => {
-              console.info("[tddy-web:participant-video] ParticipantVideoPreviewDialog: close control", {
+              dbg("ParticipantVideoPreviewDialog: close control", {
                 identity,
               });
               onOpenChange(false);
