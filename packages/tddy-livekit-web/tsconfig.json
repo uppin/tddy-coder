@@ -29,7 +29,6 @@
     "src",
     "cypress",
     "test-utils",
-    "../tddy-client-web/src/debug.d.ts",
     "../tddy-livekit-rpc-web/src/debug.d.ts"
   ]
 }

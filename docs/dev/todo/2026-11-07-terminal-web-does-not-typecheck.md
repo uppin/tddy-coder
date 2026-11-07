@@ -14,12 +14,12 @@
 - `cypress/support/drivers/ghosttyTerminalSessionDriver.tsx` (1): `.as` on a `SinonStub`.
 - `src/lib/remoteTerminateConfirm.test.ts` (3): a hand-built `window` and a `delete` of a required member.
 - `src/rpc/terminalFeed.test.ts` (2): `requestSnapshot` read from a feed options type that lacks it.
-- `../tddy-client-web/src/lib/debugMask.ts` (1, TS7016): no types for `debug` (shared with
-  tddy-session-create-web's record).
+- ~~`../tddy-client-web/src/lib/debugMask.ts` (1, TS7016): no types for `debug`~~ — fixed in #847
+  (`@types/debug` in `tddy-client-web`); 16 remain.
 - `../tddy-tauri-web/src/transport.ts` (1, TS2353): see `2026-11-07-tauri-web-transport-log-is-dropped.md`.
 
 **Why deferred:** test-support typing in moved code, not this node's move; the last two belong to
 other packages' records.
 
-**What closing it takes:** fix the 15 local errors, close the two shared records, then delete the
+**What closing it takes:** fix the 15 local errors, close the tauri-web record, then delete the
 `tddy-terminal-web` entry from `scripts/web-lint-exclusions.json`.

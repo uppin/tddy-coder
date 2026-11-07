@@ -7,14 +7,12 @@
 create-session specs and RPC support moved from `tddy-web`, which build responses as plain objects
 (`{ sessions: [] }`, `{ id, label }`) where the generated message types (`ListSessionsResponse`,
 `ModelInfo`, `ProjectEntry`, …) are expected — and one from `tddy-client-web/src/lib/debugMask.ts`
-(TS7016, no declaration file for `debug`). `src/` itself is clean. The specs never type-checked in
+(TS7016, no declaration file for `debug`; fixed in #847 — 234 remain). `src/` itself is clean. The specs never type-checked in
 `tddy-web` either (that package is excluded too); the per-package workflow this node had ran no
 `typecheck`, so the gap surfaced only when `Web lint` took the package in.
 
-**Why deferred:** fixing 233 fixture literals is a test-support rewrite, not this node's move; the
-`debug` typing is `tddy-client-web`'s.
+**Why deferred:** fixing the fixture literals is a test-support rewrite, not this node's move.
 
 **What closing it takes:** build the fixtures with `create(<Schema>, {...})` (or typed builders in the
-package's `cypress/support/rpc/`), add the `debug` types (`@types/debug`, a dependency — needs consent)
-or a local declaration, and delete the `tddy-session-create-web` entry from
+package's `cypress/support/rpc/`), and delete the `tddy-session-create-web` entry from
 `scripts/web-lint-exclusions.json`.

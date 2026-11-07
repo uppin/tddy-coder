@@ -26,5 +26,5 @@ reflection over the selected host's transport) — is wiring and stays in the ap
 `bun test src` (registry, invoke, JSON helpers, the boundary rule; fake transports in
 `src/test-utils/`) and `bun run cypress:component` — two component specs from the package's own
 `cypress.config.ts`, mounted with `cy.mountWithClients` over an in-memory backend and a navigation
-double. CI: `.github/workflows/web.yml` (the `Web tests` shards run its suites; `Web lint` excludes it
-until `tddy-client-web`'s `debug` import is typed — see `scripts/web-lint-exclusions.json`).
+double. CI: `.github/workflows/web.yml` (`Web lint` typechecks it; the `Web tests` shards run its
+suites).
