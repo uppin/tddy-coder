@@ -1,0 +1,14 @@
+name: tddy-storybook
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+  push:
+    branches: [master]
+  workflow_dispatch:
+
+jobs:
+  web:
+    uses: ./.github/workflows/web-package.yml
+    with:
+      package: tddy-storybook
