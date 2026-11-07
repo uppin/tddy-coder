@@ -32,7 +32,7 @@ describe("the media port", () => {
 
     // When
     const { result } = renderHook(
-      () => useMediaPort().usePresenterRoom({ roomName: "presenter-1" } as never),
+      () => useMediaPort().usePresenterRoom({ sessionId: "s-1", room: "presenter-1" }),
       { wrapper: inMedia(media) },
     );
 

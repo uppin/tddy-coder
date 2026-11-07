@@ -2,9 +2,9 @@
  * Acceptance tests: the PR-Stack Chat Screen must never fail silently. Four distinct failure
  * modes were previously invisible to the operator:
  *
- *   1. The screen's own dedicated LiveKit room (see `usePresenterLiveKitRoom`) fails to connect
+ *   1. The screen's own dedicated LiveKit room (see `usePresenterRoom`) fails to connect
  *      (e.g. the token service is unavailable) — `useCommonRoom`'s `error` was discarded at the
- *      `usePresenterLiveKitRoom` boundary and never reached the chat panel.
+ *      `usePresenterRoom` boundary and never reached the chat panel.
  *   2. The operator sends a message while there is no live client to send it over — `sendPrompt`
  *      was a silent no-op and `PrStackChat.handleSend` unconditionally cleared the draft anyway,
  *      identical to a successful send.
@@ -135,7 +135,7 @@ beforeEach(() => {
 
 it("shows an inline error in the chat panel when handed a failed room connection", () => {
   // Given — PrStackChat is told its presenter room connection failed, exactly as
-  // PrStackScreen would report it after usePresenterLiveKitRoom surfaces useCommonRoom's error
+  // PrStackScreen would report it after usePresenterRoom surfaces useCommonRoom's error
   cy.mount(
     <PrStackChat
       session={PR_STACK_SESSION as any}
@@ -155,14 +155,14 @@ it("shows an inline error in the chat panel when handed a failed room connection
 
 it("requests a browser LiveKit token for the presenter room and surfaces the failure when it cannot be issued", () => {
   // Given — the session is attached over its own room, but the token service that
-  // usePresenterLiveKitRoom's useCommonRoom depends on is unavailable
+  // usePresenterRoom's useCommonRoom depends on is unavailable
   interceptGenerateTokenUnavailable();
 
   // When
   cy.mount(<PrStackMainPaneHarness />);
   cy.wait("@generateTokenUnavailable");
 
-  // Then — the failure travels: useCommonRoom -> usePresenterLiveKitRoom -> PrStackScreen ->
+  // Then — the failure travels: useCommonRoom -> usePresenterRoom -> PrStackScreen ->
   // PrStackChat, instead of being discarded at any of those boundaries
   prStackScreenPage
     .chatError()

@@ -3,12 +3,13 @@ import { ParticipantList } from "../../src";
 import type { RoomParticipant } from "../../src";
 import { participantListPage } from "../support/pages/participantListPage";
 import { byTestId } from "../support/testIds";
+import { mountRosterWithCameras } from "../support/cameraRoster";
 
 /** Canonical LiveKit metadata key (see `OWNED_PROJECT_COUNT_METADATA_KEY` in tddy-livekit). */
 const OWNED_PROJECT_COUNT_KEY = "owned_project_count";
 
-function mountParticipantList(props: React.ComponentProps<typeof ParticipantList>) {
-  cy.mount(<ParticipantList {...props} />);
+function mountParticipantList(props: React.ComponentProps<typeof ParticipantList>, withCamera: readonly string[] = []) {
+  mountRosterWithCameras(props, withCamera);
 }
 
 /**
@@ -197,9 +198,8 @@ describe("ParticipantList", () => {
       participants: [withCam, noCam],
       roomStatus: "connected",
       connectionError: null,
-      participantHasCameraVideo: { "with-cam-user": true, "no-cam-user": false },
       connection: A_WIRE_THAT_CARRIES_TRACKS,
-    });
+    }, ["with-cam-user"]);
 
     // Then
     participantListPage.videoTrigger("with-cam-user").should("be.visible");
@@ -223,9 +223,8 @@ describe("ParticipantList", () => {
       participants,
       roomStatus: "connected",
       connectionError: null,
-      participantHasCameraVideo: { "camera-peer": true },
       connection: A_WIRE_THAT_CARRIES_TRACKS,
-    });
+    }, ["camera-peer"]);
 
     // Then
     participantListPage.videoTrigger("camera-peer").should("be.visible");

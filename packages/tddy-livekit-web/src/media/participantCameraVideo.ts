@@ -1,11 +1,11 @@
 /**
- * LiveKit participant camera track helpers (PRD: video affordance / preview).
+ * LiveKit participant camera track helper (PRD: video affordance / preview).
  *
- * Neither helper asks whether the connection can carry video: that is one question, asked once, by
+ * It does not ask whether the connection can carry video: that is one question, asked once, by
  * whoever renders the affordance (`ParticipantList`, through `useHasCapability`). Threading a
  * capability into a pure "does this publication have a camera track" predicate would give the
  * gating two homes, which is exactly the drift the single predicate exists to prevent — so on a
- * wire with no tracks these are simply not consulted.
+ * wire with no tracks this is simply not consulted.
  */
 
 import { Track } from "livekit-client";
@@ -85,23 +85,4 @@ export function hasRenderableCameraVideo(participant: unknown): boolean {
 
   console.debug("[tddy-web:participant-video] hasRenderableCameraVideo: no renderable camera publication");
   return false;
-}
-
-/**
- * Whether to show the per-row video affordance for this identity.
- * When `participantHasCameraVideo` is provided (tests or interim wiring), entries must be
- * explicitly `true` to show the control. Omitted map hides affordances until live track state
- * is merged in ConnectionScreen.
- */
-export function shouldShowParticipantVideoAffordance(
-  participantHasCameraVideo: Record<string, boolean> | undefined,
-  identity: string,
-): boolean {
-  console.debug("[tddy-web:participant-video] shouldShowParticipantVideoAffordance", {
-    identity,
-    hasMap: participantHasCameraVideo !== undefined,
-    value: participantHasCameraVideo?.[identity],
-  });
-  if (!participantHasCameraVideo) return false;
-  return participantHasCameraVideo[identity] === true;
 }

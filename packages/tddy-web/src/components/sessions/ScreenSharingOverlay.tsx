@@ -12,13 +12,12 @@
  */
 
 import React, { useEffect, useRef, useState } from "react";
-import { RoomEvent, type Room, type VideoTrack } from "livekit-client";
+import { useMediaPort, type RoomHandle } from "tddy-client-web";
 import { exitDocumentFullscreen, isTargetInActiveFullscreen, useElementFullscreen } from "tddy-terminal-web";
 import { isKeyboardLockSupported, lockKeyboard, unlockKeyboard } from "../../lib/keyboardLock";
-import { useScreenSharingInput } from "./useScreenSharingInput";
 
 export interface ScreenSharingOverlayProps {
-  room: Room | null;
+  room: RoomHandle | null;
   bridgeIdentity: string;
   trackName: string;
   width: number;
@@ -76,7 +75,7 @@ export function ScreenSharingOverlay({
 }: ScreenSharingOverlayProps): React.ReactElement {
   const overlayRef = useRef<HTMLDivElement>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
-  const [videoTrack, setVideoTrack] = useState<VideoTrack | null>(null);
+  const { RemoteVideo, useScreenSharingInput } = useMediaPort();
   const { isFullscreen, enter, exit } = useElementFullscreen(overlayRef);
 
   const keyboardLocked = useKeyboardLockWhileFullscreen(isFullscreen);
@@ -88,40 +87,6 @@ export function ScreenSharingOverlay({
       console.warn("[tddy][ScreenSharingOverlay] full screen change failed", e);
     });
   };
-
-  useEffect(() => {
-    if (!room) return;
-
-    const findTrack = () => {
-      const participant = room.remoteParticipants.get(bridgeIdentity);
-      if (!participant) return;
-      for (const pub of participant.trackPublications.values()) {
-        if (pub.trackName === trackName && pub.track?.kind === "video") {
-          setVideoTrack(pub.track as VideoTrack);
-          return;
-        }
-      }
-    };
-
-    findTrack();
-    room.on(RoomEvent.ParticipantConnected, findTrack);
-    room.on(RoomEvent.TrackSubscribed, findTrack);
-
-    return () => {
-      room.off(RoomEvent.ParticipantConnected, findTrack);
-      room.off(RoomEvent.TrackSubscribed, findTrack);
-      setVideoTrack(null);
-    };
-  }, [room, bridgeIdentity, trackName]);
-
-  useEffect(() => {
-    const el = videoRef.current;
-    if (!videoTrack || !el) return;
-    videoTrack.attach(el);
-    return () => {
-      videoTrack.detach(el);
-    };
-  }, [videoTrack]);
 
   const { inputUnavailable } = useScreenSharingInput({
     picture: videoRef,
@@ -183,12 +148,13 @@ export function ScreenSharingOverlay({
             Close
           </button>
         </div>
-        <video
-          data-testid="screen-sharing-overlay-video"
-          ref={videoRef}
+        <RemoteVideo
+          testId="screen-sharing-overlay-video"
+          videoRef={videoRef}
+          room={room}
+          identity={bridgeIdentity}
+          trackName={trackName}
           className="max-w-full max-h-full"
-          playsInline
-          muted
         />
         {inputUnavailable && (
           <div

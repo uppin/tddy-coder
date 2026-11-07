@@ -145,4 +145,4 @@ export function withClients(element: ReactElement, backend: InMemoryRpcBackend, 
   );
 }
 
-export { aPresenceDouble, aMediaDouble, aRoomRpcDouble, type PresenceDouble, type MediaDouble, type RoomRpcDouble } from "./media";
+export { aPresenceDouble, aMediaDouble, aRoomRpcDouble, type ForwardedInput, type PresenceDouble, type MediaDouble, type RoomRpcDouble } from "./media";

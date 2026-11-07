@@ -7,8 +7,19 @@ import { useHttpClient } from "tddy-client-web";
 const dbg = tddyDebug("tddy:presenter:room");
 const roomDbg = tddyDebug("tddy:rpc:livekit-room");
 
-import type { CommonRoomStatus } from "tddy-client-web";
+import type { CommonRoomStatus, RoomState } from "tddy-client-web";
+import { asHandle } from "../roomHandle";
 export type { CommonRoomStatus };
+
+/** {@link useCommonRoom}, with the room as the opaque handle the rest of the app holds. */
+export function useCommonRoomHandle(
+  url: string | undefined,
+  roomName: string | undefined,
+  identity: string | undefined,
+): RoomState {
+  const { room, status, error } = useCommonRoom(url, roomName, identity);
+  return { room: asHandle(room), status, error };
+}
 
 /**
  * Joins a shared LiveKit room (presence / participant list). Disconnects on unmount or when inputs change.

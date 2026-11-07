@@ -14,11 +14,11 @@
  */
 
 import React from "react";
-import { ParticipantList } from "../../src";
 import type { RoomParticipant } from "../../src";
 import type { ConnectionCapability } from "tddy-client-web/connections/types";
 import type { CapabilityBearing } from "tddy-client-web";
 import { participantListPage as page } from "../support/pages/participantListPage";
+import { mountRosterWithCameras } from "../support/cameraRoster";
 
 // ---------------------------------------------------------------------------
 // Fixtures
@@ -51,14 +51,14 @@ function aRosterWireWithoutTracks(): CapabilityBearing {
 }
 
 function mountRosterOver(connection: CapabilityBearing) {
-  cy.mount(
-    <ParticipantList
-      participants={aRosterOf(PEER_WITH_A_CAMERA)}
-      roomStatus="connected"
-      connectionError={null}
-      participantHasCameraVideo={{ [PEER_WITH_A_CAMERA]: true }}
-      connection={connection}
-    />,
+  mountRosterWithCameras(
+    {
+      participants: aRosterOf(PEER_WITH_A_CAMERA),
+      roomStatus: "connected",
+      connectionError: null,
+      connection,
+    },
+    [PEER_WITH_A_CAMERA],
   );
 }
 

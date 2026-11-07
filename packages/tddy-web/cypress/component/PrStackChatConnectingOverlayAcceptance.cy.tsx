@@ -1,6 +1,6 @@
 /**
  * Acceptance tests: while the PR-Stack Chat Screen's own dedicated presenter LiveKit room (see
- * `usePresenterLiveKitRoom`) is still connecting — the token request and LiveKit handshake take
+ * `usePresenterRoom`) is still connecting — the token request and LiveKit handshake take
  * a few seconds after a session is opened — the chat panel must show that plainly instead of
  * looking ready to use. Previously an operator who typed and sent a message during that window
  * got "Message not sent — no connection to the presenter yet.", which reads like a random
@@ -50,7 +50,7 @@ beforeEach(() => {
 
 it("shows a connecting overlay while the presenter room is still establishing its connection", () => {
   // Given — the presenter room's own connection lifecycle reports "connecting": the token
-  // request or LiveKit handshake is still in flight (see usePresenterLiveKitRoom / useCommonRoom)
+  // request or LiveKit handshake is still in flight (see usePresenterRoom / useCommonRoom)
   cy.mount(
     <PrStackChat
       session={PR_STACK_SESSION as any}

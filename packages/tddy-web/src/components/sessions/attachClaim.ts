@@ -101,7 +101,7 @@ export function attachActionForSnapshot({
  * Whether a terminal feed ending under `session` should reset the session attachment.
  *
  * The attachment is what a workflow surface talks over, not just what the terminal streams on:
- * `PrStackScreen` derives its LiveKit room from it through `usePresenterLiveKitRoom`, which drops
+ * `PrStackScreen` derives its LiveKit room from it through `usePresenterRoom`, which drops
  * the room the moment the attachment leaves a connected status and rejoins under a freshly minted
  * `browser-presenter-*` identity when it returns. So resetting on the hidden layer's feed ending
  * takes the chat's room down with it — either churning it once per re-attach, or, once the claim is

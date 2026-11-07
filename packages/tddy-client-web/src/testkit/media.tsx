@@ -1,9 +1,9 @@
 /** Doubles for the presence, room-RPC and media ports: rooms are plain tokens, participants a mutable list. */
-import { createElement, useCallback, useMemo, useSyncExternalStore } from "react";
+import { createElement, useCallback, useEffect, useMemo, useSyncExternalStore } from "react";
 import { createClient, type Client } from "@connectrpc/connect";
 import type { DescService } from "@bufbuild/protobuf";
 import type { InMemoryRpcBackend } from "tddy-connectrpc-testkit";
-import type { MediaPort, PresencePort, RoomHandle, RoomParticipant, RoomRpcPort } from "../ports/media";
+import type { MediaPort, PresencePort, RoomHandle, RoomParticipant, RoomRpcPort, RoomState, RoomStatus } from "../ports/media";
 
 /** A subscribable cell: what each double's readers re-render on. */
 function aStore() {
@@ -76,32 +76,88 @@ export function aPresenceDouble(): PresenceDouble {
   };
 }
 
+/** An input event the double's `useScreenSharingInput` saw on the picture, in the order it was seen. */
+export interface ForwardedInput {
+  readonly kind: "pointer" | "key";
+  readonly detail: unknown;
+}
+
 export interface MediaDouble extends MediaPort {
   /** Input forwarded by `useScreenSharingInput`, in order. */
-  readonly forwardedInput: ReadonlyArray<{ kind: "pointer" | "key"; detail: unknown }>;
+  readonly forwardedInput: ReadonlyArray<ForwardedInput>;
   /** Give (or take) `identity` camera video in `room`; `useHasCameraVideo` readers re-render. */
   setCameraVideo(room: RoomHandle, identity: string, hasVideo: boolean): void;
   /** The presenter room a hint naming `roomName` joins, as `usePresenterRoom` reports it. */
-  presentRoom(roomName: string, state: { room: RoomHandle | null; status: "idle" | "connecting" | "connected" | "error"; error?: string | null }): void;
+  presentRoom(roomName: string, state: { room: RoomHandle | null; status: RoomStatus; error?: string | null }): void;
 }
 
-// TODO(media): #855 settles the final MediaPort shape and what its double records; this is the
-// minimal working double the plumbing needs until then.
+const roomName = (room: RoomHandle | null) => (room === null ? "" : (room as unknown as { name: string }).name);
+
+/**
+ * A media port whose state the test sets: camera video per participant, the presenter room per
+ * room name. `useScreenSharingInput` listens for real pointer and keyboard events on the picture and
+ * records what it would have forwarded, so a spec asserts on what the operator's input became and
+ * not on a handler having run.
+ */
 export function aMediaDouble(overrides: Partial<MediaPort> = {}): MediaDouble {
-  return {
-    forwardedInput: [],
-    usePresenterRoom: () => ({ room: null, status: "idle", error: null }),
-    useScreenSharingInput: () => ({ inputUnavailable: false }),
-    useHasCameraVideo: () => false,
-    RemoteVideo: ({ identity, trackName }) => createElement("div", { "data-testid": `remote-video-${identity}-${trackName}` }),
-    setCameraVideo: () => {
-      throw new Error("TODO(media): implement");
+  const store = aStore();
+  const cameras = new Set<string>();
+  const presenterRooms = new Map<string, RoomState>();
+  const forwarded: ForwardedInput[] = [];
+  const NO_ROOM: RoomState = { room: null, status: "idle", error: null };
+  const cameraKey = (room: RoomHandle | null, identity: string) => `${roomName(room)}\u0000${identity}`;
+
+  const double: MediaDouble = {
+    get forwardedInput() {
+      return forwarded;
     },
-    presentRoom: () => {
-      throw new Error("TODO(media): implement");
+    setCameraVideo: (room, identity, hasVideo) => {
+      if (hasVideo) cameras.add(cameraKey(room, identity));
+      else cameras.delete(cameraKey(room, identity));
+      store.notify();
     },
-    ...overrides,
+    presentRoom: (name, state) => {
+      presenterRooms.set(name, { room: state.room, status: state.status, error: state.error ?? null });
+      store.notify();
+    },
+    usePresenterRoom: (hint) => {
+      useSyncExternalStore(store.subscribe, store.version);
+      return (hint?.room !== undefined ? presenterRooms.get(hint.room) : undefined) ?? NO_ROOM;
+    },
+    useScreenSharingInput: ({ picture, onCloseChord }) => {
+      useEffect(() => {
+        const element = picture.current;
+        if (!element) return;
+        const pointer = (e: Event) => forwarded.push({ kind: "pointer", detail: e.type });
+        const key = (e: KeyboardEvent) => {
+          if (e.key === "Escape" && e.ctrlKey && e.altKey) {
+            if (e.type === "keydown") onCloseChord();
+            return;
+          }
+          forwarded.push({ kind: "key", detail: e.key });
+        };
+        const pointerEvents = ["pointerdown", "pointermove", "pointerup"] as const;
+        for (const type of pointerEvents) element.addEventListener(type, pointer);
+        document.addEventListener("keydown", key);
+        document.addEventListener("keyup", key);
+        return () => {
+          for (const type of pointerEvents) element.removeEventListener(type, pointer);
+          document.removeEventListener("keydown", key);
+          document.removeEventListener("keyup", key);
+        };
+      }, [picture, onCloseChord]);
+      return { inputUnavailable: false };
+    },
+    useHasCameraVideo: (room, identity) => {
+      useSyncExternalStore(store.subscribe, store.version);
+      return cameras.has(cameraKey(room, identity));
+    },
+    RemoteVideo: ({ identity, trackName, className, testId, videoRef }) =>
+      createElement("video", { "data-testid": testId ?? `remote-video-${identity}-${trackName}`, className, ref: videoRef }),
+    VideoPreview: ({ identity, open }) =>
+      open ? createElement("div", { "data-testid": `video-preview-${identity}` }) : null,
   };
+  return Object.assign(double, overrides);
 }
 
 export interface RoomRpcDouble extends RoomRpcPort {

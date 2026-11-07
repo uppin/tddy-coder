@@ -7,7 +7,7 @@ export interface PrStackChatProps {
   session: SessionEntry;
   room: RoomHandle | null;
   livekitServerIdentity?: string;
-  /** Status of the screen's own dedicated presenter LiveKit room connection (see `usePresenterLiveKitRoom`). */
+  /** Status of the screen's own dedicated presenter LiveKit room connection (see `usePresenterRoom`). */
   roomStatus?: CommonRoomStatus;
   /** Error from the room connection attempt — only meaningful when `roomStatus === "error"`. */
   roomError?: string | null;

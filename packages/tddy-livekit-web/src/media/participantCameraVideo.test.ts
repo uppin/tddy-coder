@@ -1,9 +1,6 @@
 import { describe, expect, it } from "bun:test";
 import { Track } from "livekit-client";
-import {
-  hasRenderableCameraVideo,
-  shouldShowParticipantVideoAffordance,
-} from "./participantCameraVideo";
+import { hasRenderableCameraVideo } from "./participantCameraVideo";
 
 /**
  * Unit acceptance tests for camera/track visibility helpers (PRD Testing Plan).
@@ -39,15 +36,5 @@ describe("hasRenderableCameraVideo", () => {
 
     // When / Then
     expect(hasRenderableCameraVideo(participant as never)).toBe(true);
-  });
-});
-
-describe("shouldShowParticipantVideoAffordance", () => {
-  it("returns true when the injected map marks the identity as having camera video", () => {
-    // Given
-    const cameraMap = { "peer-a": true };
-
-    // When / Then
-    expect(shouldShowParticipantVideoAffordance(cameraMap, "peer-a")).toBe(true);
   });
 });

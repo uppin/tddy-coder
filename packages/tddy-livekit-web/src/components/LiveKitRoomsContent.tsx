@@ -8,7 +8,7 @@ import {
   useSelectedDaemon,
 } from "tddy-client-web";
 import { LiveKitRoomsPanel } from "./LiveKitRoomsPanel";
-import { ParticipantList, type ParticipantVideoPreview } from "./ParticipantList";
+import { ParticipantList } from "./ParticipantList";
 
 /**
  * The body of the LiveKit presence screen (`#/livekit`): the participants in the shared common room
@@ -25,7 +25,7 @@ import { ParticipantList, type ParticipantVideoPreview } from "./ParticipantList
  * LiveKit server holds and who is joined to each. So the content always renders, and each panel
  * answers for itself.
  */
-export function LiveKitRoomsContent({ VideoPreview }: { VideoPreview?: ParticipantVideoPreview }) {
+export function LiveKitRoomsContent() {
   // Take the connection state from the common room's own directory source, not from the room object
   // and not from the directory as a whole: a failed join leaves no room to observe, and reading
   // `null` as "idle" is what made this panel promise it was connecting to a room it had already
@@ -50,7 +50,7 @@ export function LiveKitRoomsContent({ VideoPreview }: { VideoPreview?: Participa
           roomStatus={roomStatus}
           connectionError={commonRoom?.error ?? null}
           connection={connection}
-          VideoPreview={VideoPreview}
+          room={room}
         />
       </div>
       <LiveKitRoomsPanel />

@@ -1,18 +1,22 @@
 import React from "react";
-import { ParticipantList, type RoomParticipant } from "tddy-livekit-web";
-import { ParticipantVideoPreviewDialog } from "../../src/components/ParticipantVideoPreviewDialog";
+import type { RoomParticipant } from "../../src";
+import { ParticipantVideoPreviewDialog } from "../../src/media/ParticipantVideoPreviewDialog";
 import { participantListPage } from "../support/pages/participantListPage";
+import { mountRosterWithCameras } from "../support/cameraRoster";
 
 /**
- * The camera preview the roster opens is a media surface, so the app lends the dialog
- * (`ParticipantList`'s `VideoPreview` slot). These two scenarios stay with the dialog until
- * `feature/web-split/media` moves it behind `MediaPort`; the rest of the roster is in
- * `tddy-livekit-web`'s own `ParticipantList.cy.tsx`.
+ * The camera preview the roster opens is the media port's dialog; these scenarios mount the LiveKit
+ * dialog itself behind the port's `VideoPreview`, with the double saying who has camera video. The
+ * rest of the roster is in `ParticipantList.cy.tsx`.
  */
 const A_WIRE_THAT_CARRIES_TRACKS = { capabilities: new Set(["rpc", "media", "presence"] as const) };
 
-function mountParticipantList(props: Omit<React.ComponentProps<typeof ParticipantList>, "VideoPreview">) {
-  cy.mount(<ParticipantList {...props} VideoPreview={ParticipantVideoPreviewDialog} />);
+function mountParticipantList(props: Parameters<typeof mountRosterWithCameras>[0], withCamera: readonly string[]) {
+  mountRosterWithCameras(props, withCamera, {
+    VideoPreview: ({ identity, open, onOpenChange }) => (
+      <ParticipantVideoPreviewDialog identity={identity} open={open} onOpenChange={onOpenChange} />
+    ),
+  });
 }
 
 describe("ParticipantList camera preview", () => {
@@ -31,9 +35,8 @@ describe("ParticipantList camera preview", () => {
       participants,
       roomStatus: "connected",
       connectionError: null,
-      participantHasCameraVideo: { "preview-peer": true },
       connection: A_WIRE_THAT_CARRIES_TRACKS,
-    });
+    }, ["preview-peer"]);
 
     // When
     participantListPage.videoTrigger("preview-peer").should("be.visible").click();
@@ -59,9 +62,8 @@ describe("ParticipantList camera preview", () => {
       participants,
       roomStatus: "connected",
       connectionError: null,
-      participantHasCameraVideo: { "cleanup-peer": true },
       connection: A_WIRE_THAT_CARRIES_TRACKS,
-    });
+    }, ["cleanup-peer"]);
     participantListPage.videoTrigger("cleanup-peer").should("be.visible").click();
     participantListPage.videoDialog().should("be.visible");
 
@@ -81,9 +83,8 @@ describe("ParticipantList camera preview", () => {
       participants: [{ identity: "camera-peer", role: "browser", joinedAt: 1_700_000_000_000, metadata: "", codexOAuth: null }],
       roomStatus: "connected",
       connectionError: null,
-      participantHasCameraVideo: { "camera-peer": true },
       connection: A_WIRE_THAT_CARRIES_TRACKS,
-    });
+    }, ["camera-peer"]);
 
     // When the operator activates the affordance
     participantListPage.videoTrigger("camera-peer").click();

@@ -20,3 +20,4 @@ export * from "./presence/liveKitSource";
 export * from "./components/LiveKitRoomsContent";
 export * from "./components/ParticipantList";
 export * from "./components/LiveKitRoomsPanel";
+export * from "./media/livekitMedia";
