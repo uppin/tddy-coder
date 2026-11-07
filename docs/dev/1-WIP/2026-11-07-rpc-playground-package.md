@@ -85,10 +85,10 @@ Real dependency edges, as opposed to the branch line:
 
 ## Scope
 
-- [ ] Package skeleton + workflow
-- [ ] Screen + helpers moved; the page imports the package
-- [ ] Specs and suites green from the package
-- [ ] Boundary rule
+- [x] Package skeleton + workflow
+- [x] Screen + helpers moved; the page imports the package
+- [x] Specs and suites green from the package
+- [x] Boundary rule
 
 ## Technical Changes
 
@@ -106,7 +106,7 @@ Screen and helpers in the package; the page in `tddy-web` renders it inside the 
 
 ## Implementation Milestones
 
-- [ ] Package suites + specs green
+- [x] Package suites + specs green
 
 ## Testing Plan
 
@@ -138,6 +138,22 @@ Screen and helpers in the package; the page in `tddy-web` renders it inside the 
 
 ## Validation Results
 
+Green (2026-11-07, scoped per AGENTS.md — no full-repo run locally):
+
+- `./dev bun test packages/tddy-rpc-playground-web/src` — 23 pass, 0 fail (invoke, protoMessageJson, registry, packageBoundary).
+- `cd packages/tddy-rpc-playground-web && ../../dev bun run cypress:component` — 9 pass, 0 fail (RpcPlaygroundScreen 6, RpcPlaygroundUrlStateAcceptance 3).
+- `./dev bun run --filter tddy-web build` — built in 15.31s.
+- `cd packages/tddy-web && ../../dev bunx cypress run --component --spec "cypress/component/PresenceCapabilityGatingAcceptance.cy.tsx,cypress/component/DaemonNavMenuRpcPlayground.cy.tsx"` — 18 pass, 0 fail.
+- `./dev bun test packages/tddy-web/src/routing/appRoutes.test.ts packages/tddy-web/src/test-utils` — 81 pass, 0 fail.
+
+Notes: the screen now reads URL state through `tddy-client-web`'s navigation port (was
+`tddy-web`'s hash singleton); the package specs mount with `mountWithClients` over an in-memory
+backend, the URL-state spec against a shared navigation double. The shell menu-entry tests stayed
+with `tddy-web` as `DaemonNavMenuRpcPlayground.cy.tsx`. Package `tsc --noEmit` still reports the
+stack's pre-existing errors (`tddy-client-web` `debug` types, `tddy-ui-web/theme.css` side-effect
+import — both also present on greened siblings — and one implicit-any in the moved `invoke.test.ts`);
+`tsc` is not a `web-package.yml` gate.
+
 ## TODO
 
 - [x] Record initial discovery (`2026-11-07-rpc-playground-package-initial-discovery.md`)
@@ -148,10 +164,10 @@ Screen and helpers in the package; the page in `tddy-web` renders it inside the 
 - [x] Run acceptance tests (verify they fail)
 - [x] USER REVIEW — acceptance tests (developer waived the per-node review for this stack, 2026-11-07: "finish the rest without stopping")
 - [x] TDD Red — write failing unit/integration tests
-- [ ] TDD Green — implement with quality code
-- [ ] Update documentation with progress
+- [x] TDD Green — implement with quality code
+- [x] Update documentation with progress
 - [ ] Repeat Red→Green→Update cycle until feature complete
-- [ ] Run the touched packages' tests (`bun test` + Cypress + boundary rule in `packages/tddy-rpc-playground-web`) — verify 100% pass
+- [x] Run the touched packages' tests (`bun test` + Cypress + boundary rule in `packages/tddy-rpc-playground-web`) — verify 100% pass
 - [ ] Validate changes (/validate-changes)
 - [ ] Refactor issues from change validation
 - [ ] USER REVIEW — development complete
