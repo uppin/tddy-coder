@@ -36,17 +36,27 @@ const baseUrl = process.env.CONNECTRPC_BASE_URL ?? `http://127.0.0.1:${PORT}/rpc
 const externalServer = !!process.env.CONNECTRPC_BASE_URL;
 
 let serverProcess: ChildProcess | null = null;
+/** The server's output, quoted when it fails to come up so the cause is in the test failure. */
+let serverOutput = "";
+let serverExit: string | null = null;
+
+function serverDiagnostics(): string {
+  return serverOutput ? `\n--- tddy-coder output ---\n${serverOutput}` : "";
+}
 
 async function waitForServer(url: string, timeoutMs = 10000): Promise<void> {
   const start = Date.now();
   while (Date.now() - start < timeoutMs) {
+    if (serverExit !== null) {
+      throw new Error(`tddy-coder exited (${serverExit}) before serving ${url}${serverDiagnostics()}`);
+    }
     try {
       const r = await fetch(url.replace("/rpc", "/"));
       if (r.ok) return;
     } catch {}
     await new Promise((r) => setTimeout(r, 200));
   }
-  throw new Error(`Server not ready at ${url} within ${timeoutMs}ms`);
+  throw new Error(`Server not ready at ${url} within ${timeoutMs}ms${serverDiagnostics()}`);
 }
 
 beforeAll(async () => {
@@ -66,8 +76,14 @@ beforeAll(async () => {
     env: { ...process.env, RUST_LOG: "warn" },
   });
 
-  serverProcess.stderr?.on("data", () => {});
-  serverProcess.stdout?.on("data", () => {});
+  const record = (chunk: Buffer) => {
+    serverOutput = (serverOutput + chunk.toString()).slice(-8000);
+  };
+  serverProcess.stderr?.on("data", record);
+  serverProcess.stdout?.on("data", record);
+  serverProcess.on("exit", (code, signal) => {
+    serverExit = signal ?? `code ${code}`;
+  });
 
   await waitForServer(baseUrl);
   // Spawning tddy-coder and waiting for its web server outlasts bun's 5 s hook default on a cold runner.

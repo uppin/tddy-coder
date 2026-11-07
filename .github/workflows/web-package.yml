@@ -160,9 +160,13 @@ jobs:
 
       - name: bun install
         # The Cypress binary is ~250 MB; only the packages that run Cypress need it.
+        # CYPRESS_INSTALL_BINARY=0 skips it; any other value is read as a version or URL to download,
+        # so a package that runs Cypress leaves it unset.
         env:
-          CYPRESS_INSTALL_BINARY: ${{ inputs.has-cypress && '1' || '0' }}
-        run: ./dev bun install --frozen-lockfile
+          HAS_CYPRESS: ${{ inputs.has-cypress }}
+        run: |
+          if [ "$HAS_CYPRESS" != true ]; then export CYPRESS_INSTALL_BINARY=0; fi
+          ./dev bun install --frozen-lockfile
 
       - name: Build web bundle
         if: inputs.needs-web-bundle
