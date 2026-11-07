@@ -1,7 +1,8 @@
-// TODO(react-commons): implement — contract surface; bodies land with the implementation.
-import { type AppScope } from '../async/index';
+import { createAppScope, type AppScope, type ScopedAppResources } from '../async/index';
 import type { AppHandler } from '../container/index';
+
 export type { AppScope } from '../async/index';
+
 /**
  * Driven adapters, keyed by the name the handler knows them by.
  *
@@ -10,6 +11,7 @@ export type { AppScope } from '../async/index';
  * ours would be a dependency pointing the wrong way through the hexagon.
  */
 export type PortMap = Record<string, unknown>;
+
 /**
  * Business logic that is *given* its adapters instead of constructing them.
  *
@@ -24,8 +26,9 @@ export type PortMap = Record<string, unknown>;
  * teardown closure nothing checks against the list above it.
  */
 export interface PortedAppHandler<P extends PortMap, Context> {
-    start(ports: P, scope: AppScope): PortedAppHandle<Context>;
+  start(ports: P, scope: AppScope): PortedAppHandle<Context>;
 }
+
 /**
  * What a ported handler returns.
  *
@@ -34,12 +37,30 @@ export interface PortedAppHandler<P extends PortMap, Context> {
  * `teardown` the container requires.
  */
 export interface PortedAppHandle<Context> {
-    context: Context;
+  context: Context;
 }
+
+/**
+ * The scope as a handler sees it — the four factories, and no `close`.
+ *
+ * A fresh object rather than the scope itself, so the restriction holds at runtime
+ * and not only in the type: `close` is simply not there to be reached for.
+ */
+function handedTo({ request, poller, errorChannel, subscribe }: ScopedAppResources): AppScope {
+  return { request, poller, errorChannel, subscribe };
+}
+
 /** The port map a `PortedAppHandler` requires. */
 export type PortsOf<H> = H extends PortedAppHandler<infer P, unknown> ? P : never;
+
 /** The context a `PortedAppHandler` provides. */
 export type ContextOf<H> = H extends PortedAppHandler<PortMap, infer Context> ? Context : never;
+
+const handlerCache = new WeakMap<
+  PortedAppHandler<PortMap, unknown>,
+  Map<PortMap, AppHandler<unknown>>
+>();
+
 /**
  * Bind adapters to a handler, giving the `AppHandler` the container accepts.
  *
@@ -49,6 +70,37 @@ export type ContextOf<H> = H extends PortedAppHandler<PortMap, infer Context> ? 
  * `start`, not beside it: this object outlives a mount, and a scope built out here
  * would be closed by the first unmount and reused, already dead, by the next.
  */
-export function withPorts<P extends PortMap, Context>(handler: PortedAppHandler<P, Context>, ports: P): AppHandler<Context> {
-    throw new Error("TODO(react-commons): implement");
+export function withPorts<P extends PortMap, Context>(
+  handler: PortedAppHandler<P, Context>,
+  ports: P,
+): AppHandler<Context> {
+  let portsByHandler = handlerCache.get(handler);
+  if (!portsByHandler) {
+    portsByHandler = new Map();
+    handlerCache.set(handler, portsByHandler);
+  }
+
+  let appHandler = portsByHandler.get(ports);
+  if (!appHandler) {
+    appHandler = {
+      start: () => {
+        const scope = createAppScope();
+        try {
+          const { context } = handler.start(ports, handedTo(scope));
+          return { context, teardown: () => scope.close() };
+        } catch (error) {
+          // The scope is reachable only through the handle a successful `start`
+          // returns, so a handler that registers a poller and then throws would
+          // leave it running with nothing left holding a reference to close it.
+          // The container never sees a handle for a failed start, and therefore
+          // never calls a teardown.
+          scope.close();
+          throw error;
+        }
+      },
+    };
+    portsByHandler.set(ports, appHandler);
+  }
+
+  return appHandler as AppHandler<Context>;
 }

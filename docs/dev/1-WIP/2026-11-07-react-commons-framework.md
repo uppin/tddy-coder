@@ -81,11 +81,11 @@ component package.
 
 ## Scope
 
-- [ ] Package skeleton, exports, tsconfig, happy-dom preload
-- [ ] events, stores, container, ports, async, testkit — implemented, React 19
-- [ ] Test suites ported to `bun test`
-- [ ] `web-tddy-react-commons.yml`
-- [ ] README + `docs/` per module
+- [x] Package skeleton, exports, tsconfig, happy-dom preload
+- [x] events, stores, container, ports, async, testkit — implemented, React 19
+- [x] Test suites ported to `bun test`
+- [x] `web-tddy-react-commons.yml`
+- [x] README + `docs/` per module
 
 ## Technical Changes
 
@@ -111,8 +111,8 @@ Consumers resolve it from source (like the other workspace packages), so `export
 ## Implementation Milestones
 
 - [ ] Skeleton resolves from another workspace package by subpath
-- [ ] Each module's suite green
-- [ ] Workflow present; rule test green
+- [x] Each module's suite green
+- [x] Workflow present; rule test green
 
 ## Testing Plan
 
@@ -150,6 +150,15 @@ app-scope disposal, slice hooks, typed emitters, testkit doubles).
 - **Lockfile without a public registry:** `bun install --lockfile-only --registry <mirror>`, then the
   mirror's tarball URLs stripped back to `""` (how `bun.lock` records the default registry) — integrity
   hashes are the registry's own, so `--frozen-lockfile` on CI resolves the same packages.
+- **Green-phase test port fixes** (type-only and import-only; no assertion changed): `beforeEach`
+  added to the `bun:test` import in `component-events.test.tsx` (vitest globals had hidden it, and the
+  missing import aborted that file's six tests); the global `JSX.Element` in `poller-rendering.test.tsx`
+  is `ReactJSX.Element`; `use-store.test.tsx` narrows its `snapshot` with `as` so TypeScript does not
+  type it `null` after a closure assignment; `subscription-timing.test.tsx` uses `Record<never, never>`
+  for the no-props component and a typed cast for the deliberate `{}` observer. `tsc --noEmit` is clean.
+- **Open, for `/validate-changes`:** the Responsibility row for `./stores` lists `useStore`, but the
+  module exports it only as the `Store.useStore` method (the contract stubs export no standalone
+  `useStore` either). The row is left as planned; the package docs describe the method form.
 
 ## Refactoring Needed
 
@@ -173,10 +182,10 @@ app-scope disposal, slice hooks, typed emitters, testkit doubles).
 - [x] Run acceptance tests (verify they fail)
 - [x] USER REVIEW — acceptance tests (developer waived the per-node review for this stack, 2026-11-07: "finish the rest without stopping")
 - [x] TDD Red — write failing unit/integration tests
-- [ ] TDD Green — implement with quality code
-- [ ] Update documentation with progress
+- [x] TDD Green — implement with quality code (182/182 scoped; typecheck clean; see Decisions)
+- [x] Update documentation with progress
 - [ ] Repeat Red→Green→Update cycle until feature complete
-- [ ] Run the package's tests (`bun test` in `packages/tddy-react-commons`) — verify 100% pass
+- [x] Run the package's tests (`bun test` in `packages/tddy-react-commons`) — verify 100% pass (182 pass, 0 fail)
 - [ ] Validate changes (/validate-changes)
 - [ ] Refactor issues from change validation
 - [ ] USER REVIEW — development complete

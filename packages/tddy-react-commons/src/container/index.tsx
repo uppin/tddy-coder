@@ -1,37 +1,90 @@
-// TODO(react-commons): implement — contract surface; bodies land with the implementation.
-import { type ReactElement, type ReactNode } from 'react';
-import { type SliceHandle, type Store, type StoreAction } from '../stores/index';
+import { useContext, useEffect, useState, type ReactElement, type ReactNode } from 'react';
+
+import { bindSlice, type SliceHandle, type Store, type StoreAction } from '../stores/index';
+
+import { AppContext, MISSING_CONTEXT } from './context';
+
 /**
  * Everything a started app exposes: the value handed to the React tree, and the
  * teardown that reverses `start()`. The container owns `teardown`; the view layer
  * only ever sees `context`.
  */
 export interface AppHandle<Context> {
-    context: Context;
-    teardown(): void;
+  context: Context;
+  teardown(): void;
 }
+
 /**
  * Contract for React-free business logic. `start()` is the only member: context
  * cannot exist before the app is running, so there is no unstarted state to read.
  */
 export interface AppHandler<Context> {
-    start(): AppHandle<Context>;
+  start(): AppHandle<Context>;
 }
+
 export function useAppContext<Context>(): Context {
-    throw new Error("TODO(react-commons): implement");
+  const value = useContext(AppContext);
+
+  if (value === MISSING_CONTEXT) {
+    throw new Error(
+      'useAppContext() was called outside an app tree. Render the element returned by ReactAppContainer.create(handler, appTree).',
+    );
+  }
+
+  return value as Context;
 }
-export const ReactAppContainer: {
-    create<Context>(handler: AppHandler<Context>, appTree: ReactNode): ReactElement;
-} = new Proxy({}, NOT_IMPLEMENTED) as unknown as {
-    create<Context>(handler: AppHandler<Context>, appTree: ReactNode): ReactElement;
+
+interface AppContainerProps<Context> {
+  handler: AppHandler<Context>;
+  children: ReactNode;
+}
+
+function AppContainer<Context>({
+  handler,
+  children,
+}: AppContainerProps<Context>): ReactElement | null {
+  const [handle, setHandle] = useState<AppHandle<Context> | null>(null);
+
+  useEffect(() => {
+    const started = handler.start();
+    setHandle(started);
+
+    return () => {
+      setHandle(current => (current === started ? null : current));
+      started.teardown();
+    };
+  }, [handler]);
+
+  // Gate the tree until the handle exists. Starting in an effect (rather than during
+  // render) is what keeps every start paired with a teardown under StrictMode; the
+  // cost is that the tree mounts one commit late.
+  if (!handle) {
+    return null;
+  }
+
+  return <AppContext.Provider value={handle.context}>{children}</AppContext.Provider>;
+}
+
+AppContainer.displayName = 'ReactAppContainer';
+
+export const ReactAppContainer = {
+  create<Context>(handler: AppHandler<Context>, appTree: ReactNode): ReactElement {
+    return <AppContainer handler={handler}>{appTree}</AppContainer>;
+  },
 };
+
 /**
  * Config for a slice hook: where the store lives in app context, and the slice's actions.
  */
-export interface SliceHookConfig<Context, State, Actions extends Record<string, StoreAction<State>>> {
-    select: (context: Context) => Store<State>;
-    actions: Actions;
+export interface SliceHookConfig<
+  Context,
+  State,
+  Actions extends Record<string, StoreAction<State>>,
+> {
+  select: (context: Context) => Store<State>;
+  actions: Actions;
 }
+
 /**
  * Builds a hook for one slice — the Redux-Toolkit shape, adapted to this container.
  *
@@ -61,12 +114,24 @@ export interface SliceHookConfig<Context, State, Actions extends Record<string, 
  *
  * Reads are opt-in: calling the hook subscribes to nothing until you call `use`.
  */
-export function createSliceHook<Context, State, Actions extends Record<string, StoreAction<State>>>({ select, actions, }: SliceHookConfig<Context, State, Actions>): () => SliceHandle<State, Actions> {
-    throw new Error("TODO(react-commons): implement");
-}
+export function createSliceHook<
+  Context,
+  State,
+  Actions extends Record<string, StoreAction<State>>,
+>({
+  select,
+  actions,
+}: SliceHookConfig<Context, State, Actions>): () => SliceHandle<State, Actions> {
+  const handles = new WeakMap<Store<State>, SliceHandle<State, Actions>>();
 
-const NOT_IMPLEMENTED: ProxyHandler<object> = {
-  get() {
-    throw new Error("TODO(react-commons): implement");
-  },
-};
+  return function useSlice(): SliceHandle<State, Actions> {
+    const store = select(useAppContext<Context>());
+
+    let handle = handles.get(store);
+    if (!handle) {
+      handle = bindSlice(store, actions);
+      handles.set(store, handle);
+    }
+    return handle;
+  };
+}

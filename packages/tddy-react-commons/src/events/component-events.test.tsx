@@ -1,6 +1,6 @@
 import { render, screen, fireEvent, act } from '@testing-library/react';
 import type { Observer } from 'rxjs';
-import { describe, expect, it } from 'bun:test';
+import { beforeEach, describe, expect, it } from 'bun:test';
 
 import { withEvents, useEventObserver, type RC, type Envelope } from './index';
 
