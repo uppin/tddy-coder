@@ -22,7 +22,7 @@ import {
   AcpAgentMessageSchema,
   type AcpClientMessage,
 } from "tddy-client-web/gen/tddy/acp/v1/acp_pb";
-import { WorkflowChatScreen } from "../../src/components/sessions/WorkflowChatScreen";
+import { WorkflowChatScreen } from "../../src/WorkflowChatScreen";
 import { mountWithRpc } from "../support/rpc/inMemory";
 import { agentChatPage } from "../support/pages/agentChatPage";
 
