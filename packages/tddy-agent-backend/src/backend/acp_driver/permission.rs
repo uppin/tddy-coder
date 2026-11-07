@@ -1,6 +1,5 @@
 //! The permission requests an ACP agent asks the driver, and the handler that answers them.
 
-
 /// One option the agent offers on a permission request.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PermissionOptionView {
