@@ -20,7 +20,7 @@ import { byTestId, TEST_IDS } from "../support/testIds";
 import { anAuthStatusAuthenticated, aGenerateTokenResponse } from "../support/rpc/responses";
 import { toArrayBuffer } from "../support/rpc/protoRpc";
 
-import { RpcPlaygroundScreen } from "../../src/rpc-playground/RpcPlaygroundScreen";
+import { RpcPlaygroundScreen } from "../../src/RpcPlaygroundScreen";
 import {
   RPC_PLAYGROUND_ROUTE,
   isRpcPlaygroundPath,
