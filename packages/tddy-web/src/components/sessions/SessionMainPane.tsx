@@ -7,7 +7,7 @@ import { DormantAgentTerminal } from "./DormantAgentTerminal";
 import { PARAM_CODE } from "../../routing/appLocation";
 import { useAppLocation } from "../../routing/useAppLocation";
 import { SessionWithActivitySidebar } from "./SessionWithActivitySidebar";
-import { Button } from "../ui/button";
+import { Button } from "tddy-ui-web";
 import { CreateSessionPane } from "./CreateSessionPane";
 import { AgentPicker } from "./AgentPicker";
 import { SessionRuntime } from "./SessionRuntime";

@@ -1,6 +1,6 @@
 import React from "react";
 import type { TaskInfo } from "../../gen/tasks_pb";
-import { ScrollArea } from "../ui/scroll-area";
+import { ScrollArea } from "tddy-ui-web";
 import { TaskDrawerItem } from "./TaskDrawerItem";
 
 interface TaskDrawerProps {

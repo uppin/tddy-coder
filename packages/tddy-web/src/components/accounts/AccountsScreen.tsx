@@ -12,7 +12,7 @@
  */
 
 import { useState } from "react";
-import { Button } from "../ui/button";
+import { Button } from "tddy-ui-web";
 import { ProviderAccountDefaultsControl } from "./ProviderAccountDefaultsControl";
 import { ProviderModels } from "./ProviderModels";
 import {

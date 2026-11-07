@@ -4,7 +4,7 @@ import { AgentKind } from "../../gen/types_pb";
 import { safeTestIdPart } from "../../lib/testId";
 import { useSelectedDaemon } from "../../rpc/selectedDaemon";
 import { useHttpClient } from "../../rpc/transportProvider";
-import { Button } from "../ui/button";
+import { Button } from "tddy-ui-web";
 import { AgentKindBadge } from "./AgentKindBadge";
 import type { AgentPlacementChoice } from "./agentPlacementChoice";
 import { useAvailableAgents, type AvailableAgent } from "./useAvailableAgents";

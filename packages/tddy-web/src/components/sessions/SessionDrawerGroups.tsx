@@ -7,12 +7,12 @@ import {
 } from "../../utils/sessionStackGroups";
 import type { ProjectSessionGroup } from "../../utils/sessionProjectGroups";
 import { projectGroupKey } from "./SessionProjectGroup";
-import { Tooltip, TooltipTrigger, TooltipContent } from "../ui/tooltip";
+import { Tooltip, TooltipTrigger, TooltipContent } from "tddy-ui-web";
 import { SessionDrawerItem } from "./SessionDrawerItem";
 import { SessionIndicatorDot } from "./SessionIndicatorDot";
 import { SessionDrawerSeparator } from "./SessionDrawerSeparator";
 import { sessionDrawerLabel } from "../../utils/sessionDrawerLabel";
-import { cn } from "../../lib/utils";
+import { cn } from "tddy-ui-web";
 
 // The rows the session drawer renders — stack groups, activity partitions, a project group's body
 // and the collapsed strip's dots — split out of `SessionDrawer.tsx`, which keeps the drawer chrome

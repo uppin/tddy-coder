@@ -13,7 +13,7 @@ import { VncOverlay } from "./VncOverlay";
 import { applyVncTabAction, initialVncTabState } from "./vncTabState";
 import { rpcFailureText } from "../../rpc/rpcFailure";
 import { useKeyedActionFailure } from "../../hooks/useKeyedActionFailure";
-import { InlineError } from "../ui/inline-error";
+import { InlineError } from "tddy-ui-web";
 
 // ---------------------------------------------------------------------------
 // Props

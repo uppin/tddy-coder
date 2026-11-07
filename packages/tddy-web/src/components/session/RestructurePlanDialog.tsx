@@ -10,7 +10,7 @@
  */
 
 import React, { useCallback, useEffect, useState } from "react";
-import { Button } from "../ui/button";
+import { Button } from "tddy-ui-web";
 import type {
   PlanOperationRow,
   PlanOperationStatusName,

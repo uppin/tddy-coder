@@ -4,10 +4,10 @@ import type { WorktreeService } from "../../gen/worktree_pb";
 import { useSessionWorktreeStats } from "../../rpc/useSessionWorktreeStats";
 import { hostNotConnected } from "../../rpc/rpcFailure";
 import { useActionFailure } from "../../hooks/useActionFailure";
-import { InlineError } from "../ui/inline-error";
+import { InlineError } from "tddy-ui-web";
 import { formatDiskBytes } from "./worktreeStatsFormat";
 import { formatLastCalculated } from "../../lib/worktreeSize";
-import { Button } from "../ui/button";
+import { Button } from "tddy-ui-web";
 
 export interface SessionWorktreeTabProps {
   client: Client<typeof WorktreeService> | null;

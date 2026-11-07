@@ -4,7 +4,7 @@
  */
 
 import { useState } from "react";
-import { Button } from "../ui/button";
+import { Button } from "tddy-ui-web";
 
 type ModelsState =
   | { kind: "closed" }
