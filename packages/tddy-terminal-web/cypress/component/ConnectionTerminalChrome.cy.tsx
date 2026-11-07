@@ -1,5 +1,5 @@
 import React from "react";
-import { ConnectionTerminalChrome } from "../../src/components/connection/ConnectionTerminalChrome";
+import { ConnectionTerminalChrome } from "../../src/connection/ConnectionTerminalChrome";
 import { byTestId, TEST_IDS } from "../support/testIds";
 
 describe("ConnectionTerminalChrome", () => {

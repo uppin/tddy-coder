@@ -13,7 +13,7 @@
 import React from "react";
 import {
   EnqueuedInputOverlay,
-} from "../../src/components/connection/EnqueuedInputOverlay";
+} from "../../src/connection/EnqueuedInputOverlay";
 import type {
   OverlayModel,
   OverlaySegment,

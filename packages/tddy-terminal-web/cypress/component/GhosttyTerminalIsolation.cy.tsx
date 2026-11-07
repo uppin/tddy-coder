@@ -8,7 +8,7 @@
 
 import React, { useImperativeHandle, useRef, useState, forwardRef } from "react";
 import { mount } from "cypress/react";
-import { GhosttyTerminal, type GhosttyTerminalHandle } from "../../src/components/GhosttyTerminal";
+import { GhosttyTerminal, type GhosttyTerminalHandle } from "../../src/GhosttyTerminal";
 
 const OLD_SESSION_OUTPUT = Array.from(
   { length: 60 },
