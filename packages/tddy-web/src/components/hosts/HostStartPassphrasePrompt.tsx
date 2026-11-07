@@ -49,9 +49,9 @@ export function HostStartPassphrasePrompt({
 }
 
 /**
- * Mount this around every create-session surface (`CreateSessionPane`, `CreateSessionDialog`,
- * `ProjectHomeSetupPane`): it is how the create-session package asks the Hosts screen's passphrase
- * dialog to show while a start is cloning.
+ * Mounted once at the app root (`index.tsx`), above every create-session surface
+ * (`CreateSessionPane`, `CreateSessionDialog`, `ProjectHomeSetupPane`): it is how the create-session
+ * package asks the Hosts screen's passphrase dialog to show while a start is cloning.
  */
 export function HostStartPassphraseScope({ children }: { children?: React.ReactNode }): React.ReactElement {
   return <StartPassphraseProvider prompt={HostStartPassphrasePrompt}>{children}</StartPassphraseProvider>;

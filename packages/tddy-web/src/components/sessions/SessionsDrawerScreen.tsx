@@ -25,7 +25,6 @@ import { useSessionsDrawerInspector } from "./useSessionsDrawerInspector";
 import { useSessionsDrawerClients } from "./useSessionsDrawerClients";
 import { useProjectHomeSetup } from "./useProjectHomeSetup";
 import { ProjectHomeSetupPane } from "tddy-session-create-web";
-import { HostStartPassphraseScope } from "../hosts/HostStartPassphrasePrompt";
 import { useSessionsDrawerAttachClaims } from "./useSessionsDrawerAttachClaims";
 import { useSessionsDrawerProjects } from "./useSessionsDrawerProjects";
 import { useSessionsDrawerProjectHomes } from "./useSessionsDrawerProjectHomes";
@@ -389,7 +388,6 @@ export function SessionsDrawerScreen({
           {/* A bad deep link surfaces "not found" in the detail pane only — the session list
               stays visible so the operator can pick a valid session. */}
           {setup !== null ? (
-            <HostStartPassphraseScope>
             <ProjectHomeSetupPane
               {...setup}
               project={projectOnHost(setup.projectId)}
@@ -398,7 +396,6 @@ export function SessionsDrawerScreen({
               onStart={(spec) => startProjectHome(setup.projectId, selectedInstanceId ?? "", spec)}
               onClose={projectHomeSetup.close}
             />
-            </HostStartPassphraseScope>
           ) : unknownSession ? (
             <SessionsDrawerUnknownSession onHome={handleUnknownHome} />
           ) : (
