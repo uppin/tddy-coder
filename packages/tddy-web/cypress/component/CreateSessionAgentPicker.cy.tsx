@@ -22,7 +22,7 @@ import { CatalogService } from "tddy-client-web/gen/catalog_pb";
 import { SessionFilesService } from "tddy-client-web/gen/session_files_pb";
 import { WorktreeService } from "tddy-client-web/gen/worktree_pb";
 import { CreateSessionPane } from "../../src/components/sessions/CreateSessionPane";
-import { daemonRpcIdentity, type DaemonHost } from "../../src/lib/participantRole";
+import { daemonRpcIdentity, type DaemonHost } from "tddy-client-web";
 import { mountWithPerDaemonLiveKitRpc } from "../support/rpc/perDaemonLiveKitRpc";
 import { withSelectedDaemon } from "../support/rpc/withSelectedDaemon";
 import {

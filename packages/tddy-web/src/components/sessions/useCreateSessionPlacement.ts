@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import type { DaemonHost } from "../../lib/participantRole";
+import type { DaemonHost } from "tddy-client-web";
 import { sshConfigListDaemonId } from "./CreateSessionSshConfigSelect";
 import type { SessionType } from "./createSessionRequest";
 import {

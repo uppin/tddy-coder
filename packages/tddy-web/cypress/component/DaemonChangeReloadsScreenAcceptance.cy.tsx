@@ -13,8 +13,8 @@
  */
 
 import React, { useEffect } from "react";
-import { Room } from "livekit-client";
-import type { DaemonHost } from "../../src/lib/participantRole";
+import { aDisconnectedRoom } from "tddy-livekit-web/testkit";
+import type { DaemonHost } from "tddy-client-web";
 import { SelectedDaemonProvider } from "../../src/rpc/selectedDaemon";
 import { DaemonSelectorConnected } from "../../src/components/shell/DaemonSelector";
 import { SessionsDrawerScreen } from "../../src/components/sessions/SessionsDrawerScreen";
@@ -43,7 +43,7 @@ it("remounts the active screen subtree when the selected daemon changes", () => 
   // Given — a daemon-mode screen mounted once for the initially selected daemon
   const onMount = cy.stub().as("screenMount");
   cy.mount(
-    <SelectedDaemonProvider room={new Room()} daemons={[DAEMON_A, DAEMON_B]} servingInstanceId="alpha">
+    <SelectedDaemonProvider room={aDisconnectedRoom()} daemons={[DAEMON_A, DAEMON_B]} servingInstanceId="alpha">
       <DaemonSelectorConnected />
       <ScreenMountProbe onMount={onMount} />
     </SelectedDaemonProvider>,

@@ -9,10 +9,10 @@ import {
 import { GitHubLoginButton } from "../components/GitHubLoginButton";
 import { AppShell } from "../components/shell/AppShell";
 import { useAuthContext } from "../hooks/authProvider";
-import { useRoomParticipants } from "../hooks/useRoomParticipants";
-import { presenceIdentityForUser } from "../lib/presenceIdentity";
-import { useCapabilityAvailability } from "../hooks/useCapabilityAvailability";
-import { useHostPresence } from "../rpc/hostDirectory/useHostPresence";
+import { useRoomParticipants } from "tddy-client-web";
+import { presenceIdentityForUser } from "tddy-livekit-web";
+import { useCapabilityAvailability } from "tddy-client-web";
+import { useHostPresence } from "tddy-client-web";
 import { useAppLocation } from "../routing/useAppLocation";
 import { buildRegistry, findMethod } from "./registry";
 import { invokeRpc, type InvokeResult } from "./invoke";

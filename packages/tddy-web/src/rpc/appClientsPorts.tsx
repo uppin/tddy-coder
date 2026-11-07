@@ -6,14 +6,21 @@
  * for any subtree are always built from the nearest source of each kind — a spec that mounts only
  * `RpcTransportProvider`, or only `ConnectionProviders`, still gets a coherent port. With no
  * `SelectedDaemonProvider` in scope the directory source honestly reports "no daemons".
+ *
+ * It also mounts the LiveKit ports (`tddy-livekit-web`'s `livekitPorts`): presence and room-addressed
+ * RPC, for every subtree that has a source of any kind above it.
  */
 
 import { useContext, useMemo, type ReactNode } from "react";
 import { ClientsProvider, NavigationProvider, type ClientsPort } from "tddy-client-web";
+import { LiveKitPortsProvider, livekitPorts } from "tddy-livekit-web";
 import { hashNavigationPort } from "../routing/useAppLocation";
 import { HostReadinessContext, useConnectionProviders } from "./connections/registry";
 import { useSelectedDaemonSource } from "./selectedDaemon";
 import { useServingHttpTransport } from "./transportProvider";
+
+/** The LiveKit presence and room-RPC ports, built once for the app's lifetime (their hooks must keep one identity). */
+const liveKit = livekitPorts();
 
 export function AppClientsPorts({ children }: { children: ReactNode }) {
   const httpTransport = useServingHttpTransport();
@@ -26,7 +33,9 @@ export function AppClientsPorts({ children }: { children: ReactNode }) {
   );
   return (
     <ClientsProvider port={port}>
-      <NavigationProvider port={hashNavigationPort}>{children}</NavigationProvider>
+      <NavigationProvider port={hashNavigationPort}>
+        <LiveKitPortsProvider ports={liveKit}>{children}</LiveKitPortsProvider>
+      </NavigationProvider>
     </ClientsProvider>
   );
 }

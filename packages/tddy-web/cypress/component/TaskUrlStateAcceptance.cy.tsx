@@ -9,10 +9,10 @@
  */
 
 import React from "react";
-import { Room } from "livekit-client";
+import { aDisconnectedRoom } from "tddy-livekit-web/testkit";
 import { TaskStatusProto } from "tddy-client-web/gen/tasks_pb";
 import { TasksDrawerScreen } from "../../src/components/tasks/TasksDrawerScreen";
-import type { DaemonHost } from "../../src/lib/participantRole";
+import type { DaemonHost } from "tddy-client-web";
 import { SelectedDaemonProvider } from "../../src/rpc/selectedDaemon";
 import { AuthProvider } from "../../src/hooks/authProvider";
 import { aTaskInfo, aTaskServiceBackend, snapshotTaskAdded } from "../support/rpc/taskRpcs";
@@ -51,7 +51,7 @@ function mountTasksDrawer() {
   });
   mountWithRecordingLiveKitRpc(
     <AuthProvider>
-      <SelectedDaemonProvider room={new Room()} daemons={[DAEMON]}>
+      <SelectedDaemonProvider room={aDisconnectedRoom()} daemons={[DAEMON]}>
         <TasksDrawerScreen />
       </SelectedDaemonProvider>
     </AuthProvider>,

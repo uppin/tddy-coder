@@ -1,5 +1,4 @@
-import type { Room } from "livekit-client";
-import type { CommonRoomStatus } from "../../hooks/useCommonRoom";
+import type { CommonRoomStatus, RoomHandle } from "tddy-client-web";
 import { AgentTranscriptView } from "./AgentTranscriptView";
 import { LiveAgentChatView } from "./LiveAgentChatView";
 import { useAgentChat, type ChatMessage, type UseAgentChatResult } from "./useAgentChat";
@@ -8,7 +7,7 @@ import { useAcpSession } from "./useAcpSession";
 export { TRANSCRIPT_ROOT_STYLE } from "./AgentTranscriptView";
 
 export interface AgentChatProps {
-  room: Room | null;
+  room: RoomHandle | null;
   livekitServerIdentity?: string;
   /** Live chat only: placeholder shown in the free-text input. Defaults to "Message the agent…".
    *  A read-only transcript has no input, so it ignores this. */

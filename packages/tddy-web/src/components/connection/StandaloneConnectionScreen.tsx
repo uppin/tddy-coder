@@ -10,14 +10,14 @@
 
 import { useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import { loadClientConfig } from "../../rpc/clientConfig";
-import { applyDebugMaskFromConfig } from "../../lib/debugMask";
+import { applyDebugMaskFromConfig } from "tddy-client-web";
 import { useAuthContext } from "../../hooks/authProvider";
 import { useVisualViewport, Button } from "tddy-ui-web";
 import { TokenService } from "tddy-client-web/gen/token_pb";
 import { GitHubLoginButton } from "../GitHubLoginButton";
 import { UserAvatar } from "../UserAvatar";
 import { GhosttyTerminalSession } from "../GhosttyTerminalSession";
-import { useDirectRoomTerminal } from "../../rpc/connections/livekit/useDirectRoomTerminal";
+import { useDirectRoomTerminal } from "tddy-livekit-web";
 import { ConnectionTerminalChrome } from "./ConnectionTerminalChrome";
 import { BUILD_ID } from "../../buildId";
 import { formClassName, inputClassName, labelClassName } from "./standaloneFormStyles";

@@ -1,6 +1,6 @@
 import type { Client } from "@connectrpc/connect";
 import type { CatalogService } from "tddy-client-web/gen/catalog_pb";
-import type { DaemonHost } from "../../lib/participantRole";
+import type { DaemonHost } from "tddy-client-web";
 import { useSelectableAgents } from "./useSelectableAgents";
 import {
   agentForHost,

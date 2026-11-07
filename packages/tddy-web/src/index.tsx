@@ -1,7 +1,7 @@
 import "./index.css";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { createRoot } from "react-dom/client";
-import type { Room } from "livekit-client";
+import type { RoomHandle } from "tddy-client-web";
 import { RpcTransportProvider } from "./rpc/transportProvider";
 import { loadClientConfig, type AuthFlowDeclaration } from "./rpc/clientConfig";
 import { AuthProvider, useAuthContext } from "./hooks/authProvider";
@@ -12,7 +12,7 @@ import { thisWindowsNativeFileDrop } from "tddy-tauri-web";
 import { NativeFileDropProvider } from "./components/connection/nativeFileDrop";
 import { localHostRegistrationFor } from "./rpc/connections/localHost";
 import { LocalHostConnections } from "./rpc/connections/localHostRegistration";
-import type { DaemonHost } from "./lib/participantRole";
+import type { DaemonHost } from "tddy-client-web";
 
 function HmrOverlay() {
   const [count, setCount] = useState(0);
@@ -44,7 +44,7 @@ function HmrOverlay() {
   );
 }
 
-import { applyDebugMaskFromConfig, applyDebugMaskFromUrl } from "./lib/debugMask";
+import { applyDebugMaskFromConfig, applyDebugMaskFromUrl } from "tddy-client-web";
 import { DaemonLoginScreen } from "./components/DaemonLoginScreen";
 import { CredentialVaultPrompt } from "./components/CredentialVaultPrompt";
 import { AuthCallback } from "./components/AuthCallback";
@@ -104,7 +104,7 @@ type AppConfigState =
  * to `undefined`, so real usage (which never sets them) is unaffected.
  */
 export interface AppProps {
-  testDaemonRoom?: Room | null;
+  testDaemonRoom?: RoomHandle | null;
   testDaemonHosts?: DaemonHost[];
 }
 
