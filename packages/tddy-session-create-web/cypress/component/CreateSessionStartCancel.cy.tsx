@@ -6,9 +6,9 @@
  * Feature docs: docs/ft/web/session-drawer.md (§ Cancel)
  */
 
+import { aClientsPortDouble } from "tddy-client-web/testkit";
 import React from "react";
 import { servedAgentWire } from "../support/servedAgents";
-import { aDisconnectedRoom } from "tddy-livekit-web/testkit";
 import { Code, ConnectError, createClient } from "@connectrpc/connect";
 import {
   create,
@@ -30,8 +30,6 @@ import { TaskService } from "tddy-client-web/gen/tasks_pb";
 import { WorktreeService } from "tddy-client-web/gen/worktree_pb";
 import { CreateSessionPane } from "../../src/CreateSessionPane";
 import type { DaemonHost } from "tddy-client-web";
-import { SelectedDaemonProvider } from "../../src/rpc/selectedDaemon";
-import { mountWithRpc } from "../support/rpc/inMemory";
 import { createSessionPage } from "../support/pages/createSessionPage";
 
 const LOCAL_HOST = "workstation-1";
@@ -143,9 +141,8 @@ describe("Create session — cancelling a start", () => {
         return create(TaskService.method.cancelTask.output, { ok: true });
       });
     const transport = backend.transport();
-    mountWithRpc(
-      <SelectedDaemonProvider room={aDisconnectedRoom()} daemons={DAEMON_HOSTS} servingInstanceId={LOCAL_HOST}>
-        <CreateSessionPane
+    cy.mountWithClients(
+      <CreateSessionPane
           client={createClient(SessionService, transport)}
           projectClient={createClient(ProjectService, transport)}
           catalogClient={createClient(CatalogService, transport)}
@@ -155,9 +152,8 @@ describe("Create session — cancelling a start", () => {
           sessionToken="fake-token"
           onCancel={cy.stub().as("onCancel")}
           onCreated={cy.stub().as("onCreated")}
-        />
-      </SelectedDaemonProvider>,
-      backend,
+        />,
+      backend, { clients: aClientsPortDouble(backend, { daemons: DAEMON_HOSTS }) },
     );
     createSessionPage.selectProject("proj-1");
     createSessionPage.selectAgent(CLAUDE_OPTION);

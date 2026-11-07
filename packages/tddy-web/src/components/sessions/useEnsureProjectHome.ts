@@ -1,8 +1,8 @@
 import { useCallback } from "react";
 import { Code, ConnectError, type Client } from "@connectrpc/connect";
 import type { SessionService } from "tddy-client-web/gen/session_pb";
-import type { StartSessionRequestInit } from "../../hooks/useSessionAttachments";
-import { unservedService } from "../../rpc/rpcFailure";
+import type { StartSessionRequestInit } from "tddy-session-create-web";
+import { unservedService } from "tddy-client-web";
 
 /** What the screen does with the outcomes of an ensure beyond selecting the session it returns. */
 export interface EnsureProjectHomeHandlers {

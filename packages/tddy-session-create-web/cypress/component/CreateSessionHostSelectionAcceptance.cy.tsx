@@ -12,9 +12,9 @@
  * PRD: docs/ft/web/daemon-selector-livekit-rpc.md.
  */
 
+import { aClientsPortDouble } from "tddy-client-web/testkit";
 import React from "react";
 import { servedAgentWire } from "../support/servedAgents";
-import { aDisconnectedRoom } from "tddy-livekit-web/testkit";
 import { createClient } from "@connectrpc/connect";
 import { anInMemoryRpcBackend, type InMemoryRpcBackend } from "tddy-connectrpc-testkit";
 import { CreateSessionPane } from "../../src/CreateSessionPane";
@@ -24,8 +24,6 @@ import { CatalogService } from "tddy-client-web/gen/catalog_pb";
 import { SessionFilesService } from "tddy-client-web/gen/session_files_pb";
 import { WorktreeService } from "tddy-client-web/gen/worktree_pb";
 import type { DaemonHost } from "tddy-client-web";
-import { SelectedDaemonProvider } from "../../src/rpc/selectedDaemon";
-import { mountWithRecordingLiveKitRpc } from "../support/rpc/recordingLiveKitRpc";
 import { createSessionPage } from "../support/pages/createSessionPage";
 
 // ---------------------------------------------------------------------------
@@ -76,9 +74,8 @@ function mountCreatePane(backend: InMemoryRpcBackend) {
   // Both hosts answer over the same backend: the form reads every advertised host's agent catalog
   // (`ListAgents` has no routing field, so each host is asked for itself), and a host that cannot be
   // asked offers no agent for a session moved onto it.
-  mountWithRecordingLiveKitRpc(
-    <SelectedDaemonProvider room={aDisconnectedRoom()} daemons={DAEMON_HOSTS} servingInstanceId={LOCAL_HOST}>
-      <CreateSessionPane
+  cy.mountWithClients(
+    <CreateSessionPane
         client={client}
         projectClient={projectClient}
         catalogClient={catalogClient}
@@ -87,9 +84,8 @@ function mountCreatePane(backend: InMemoryRpcBackend) {
         sessionToken="fake-token"
         onCancel={cy.stub()}
         onCreated={cy.stub()}
-      />
-    </SelectedDaemonProvider>,
-    backend,
+      />,
+    backend, { clients: aClientsPortDouble(backend, { daemons: DAEMON_HOSTS }) },
   );
 }
 

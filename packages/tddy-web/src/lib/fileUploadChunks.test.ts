@@ -13,7 +13,7 @@ import {
   chunkFile,
   UPLOAD_CHUNK_SIZE,
   UPLOAD_REQUEST_ENVELOPE_HEADROOM,
-} from "./fileUploadChunks";
+} from "tddy-client-web";
 
 async function concatText(chunks: Blob[]): Promise<string> {
   const parts = await Promise.all(chunks.map((c) => c.text()));

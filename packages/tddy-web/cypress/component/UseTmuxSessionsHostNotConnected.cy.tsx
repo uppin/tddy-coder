@@ -10,7 +10,7 @@
 
 import React, { useEffect } from "react";
 import { mount } from "cypress/react";
-import { hostNotConnectedText } from "../../src/rpc/rpcFailure";
+import { hostNotConnectedText } from "tddy-client-web";
 import { useTmuxSessions } from "../../src/components/sessions/useTmuxSessions";
 import type { TerminalClient } from "../../src/components/sessions/sessionRuntimeProps";
 

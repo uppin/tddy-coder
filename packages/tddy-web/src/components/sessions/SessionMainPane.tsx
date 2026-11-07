@@ -7,7 +7,8 @@ import { DormantAgentTerminal } from "./DormantAgentTerminal";
 import { useAppLocation } from "../../routing/useAppLocation";
 import { SessionWithActivitySidebar } from "./SessionWithActivitySidebar";
 import { Button } from "tddy-ui-web";
-import { CreateSessionPane } from "./CreateSessionPane";
+import { CreateSessionPane } from "tddy-session-create-web";
+import { HostStartPassphraseScope } from "../hosts/HostStartPassphrasePrompt";
 import { AgentPicker } from "./AgentPicker";
 import { SessionRuntime } from "./SessionRuntime";
 import { resolveWorkflowView } from "./workflowViews";
@@ -310,6 +311,7 @@ export function SessionMainPane({
       className="flex-1 min-w-0 flex flex-col h-full overflow-hidden relative"
     >
       {isCreating && client && projectClient && catalogClient && sessionFilesClient && worktreeClient && (
+        <HostStartPassphraseScope>
         <CreateSessionPane
           client={client}
           projectClient={projectClient}
@@ -322,6 +324,7 @@ export function SessionMainPane({
           onCancel={onCancelCreate ?? (() => undefined)}
           onCreated={onSessionCreated ?? (() => undefined)}
         />
+        </HostStartPassphraseScope>
       )}
 
       {!isCreating && (

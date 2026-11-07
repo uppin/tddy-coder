@@ -4,11 +4,11 @@ import { type SessionEntry } from "tddy-client-web/gen/session_pb";
 import { SessionAgentService, type SessionAgentEntry } from "tddy-client-web/gen/session_agents_pb";
 import { Button } from "tddy-ui-web";
 import { AgentPicker } from "./AgentPicker";
-import { agentPlacementWire, type AgentPlacementChoice } from "./agentPlacementChoice";
+import { agentPlacementWire, type AgentPlacementChoice } from "tddy-session-create-web";
 import { subagentSessionNodes } from "./agentTree";
 import { rosterHalfOf, type RosterHalf } from "./sessionRosterHalf";
 import { SessionAgentTree, type RosterDetachRequest } from "./SessionAgentTree";
-import { type AvailableAgent } from "./useAvailableAgents";
+import { type AvailableAgent } from "tddy-session-create-web";
 import { useSessionAgentRoster } from "./useSessionAgentRoster";
 import { useHttpClient } from "tddy-client-web";
 

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "bun:test";
 import { aSessionEntry } from "../test-utils";
-import { prStackOrchestrators } from "./stackParents";
+import { prStackOrchestrators } from "tddy-session-create-web";
 
 /**
  * Tests for `prStackOrchestrators` — the recipe-based filter that identifies which sessions

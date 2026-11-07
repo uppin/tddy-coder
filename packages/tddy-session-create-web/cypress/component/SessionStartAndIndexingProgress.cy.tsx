@@ -14,9 +14,9 @@
  * Feature docs: docs/ft/web/session-drawer.md (Start progress) and docs/ft/web/session-code-pane.md (Indexing indicator)
  */
 
+import { aClientsPortDouble } from "tddy-client-web/testkit";
 import React from "react";
 import { servedAgentWire } from "../support/servedAgents";
-import { aDisconnectedRoom } from "tddy-livekit-web/testkit";
 import { createClient } from "@connectrpc/connect";
 import {
   create,
@@ -26,7 +26,6 @@ import {
 } from "@bufbuild/protobuf";
 import { anInMemoryRpcBackend, type InMemoryRpcBackend } from "tddy-connectrpc-testkit";
 import { CatalogService } from "tddy-client-web/gen/catalog_pb";
-import { CodeIndexProgressSchema, CodeNavigationService } from "tddy-client-web/gen/code_navigation_pb";
 import { ProjectService } from "tddy-client-web/gen/project_pb";
 import {
   SessionService,
@@ -37,12 +36,8 @@ import {
 import { SessionFilesService } from "tddy-client-web/gen/session_files_pb";
 import { WorktreeService } from "tddy-client-web/gen/worktree_pb";
 import { CreateSessionPane } from "../../src/CreateSessionPane";
-import { SessionIndexingIndicator } from "../../src/components/session/SessionIndexingIndicator";
 import type { DaemonHost } from "tddy-client-web";
-import { SelectedDaemonProvider } from "../../src/rpc/selectedDaemon";
-import { mountWithRpc } from "../support/rpc/inMemory";
 import { createSessionPage } from "../support/pages/createSessionPage";
-import { sessionIndexingIndicatorPage } from "../support/pages/sessionIndexingIndicatorPage";
 
 const LOCAL_HOST = "workstation-1";
 const DAEMON_HOSTS: DaemonHost[] = [
@@ -50,7 +45,6 @@ const DAEMON_HOSTS: DaemonHost[] = [
 ];
 /** The Agent select's option value, qualified by the host that offers it. */
 const CLAUDE_OPTION = `claude@${LOCAL_HOST}`;
-const THE_SESSION = "session-indexing-1";
 
 /** A gate a stub generator awaits, so the UI's mid-stream state is settled when it is asserted. */
 interface Gate {
@@ -154,9 +148,8 @@ function aHostHoldingTheStartInItsWorktreeStep(gate: Gate): InMemoryRpcBackend {
 
 function mountTheCreatePane(backend: InMemoryRpcBackend) {
   const transport = backend.transport();
-  mountWithRpc(
-    <SelectedDaemonProvider room={aDisconnectedRoom()} daemons={DAEMON_HOSTS} servingInstanceId={LOCAL_HOST}>
-      <CreateSessionPane
+  cy.mountWithClients(
+    <CreateSessionPane
         client={createClient(SessionService, transport)}
         projectClient={createClient(ProjectService, transport)}
         catalogClient={createClient(CatalogService, transport)}
@@ -165,9 +158,8 @@ function mountTheCreatePane(backend: InMemoryRpcBackend) {
         sessionToken="fake-token"
         onCancel={cy.stub()}
         onCreated={cy.stub().as("onCreated")}
-      />
-    </SelectedDaemonProvider>,
-    backend,
+      />,
+    backend, { clients: aClientsPortDouble(backend, { daemons: DAEMON_HOSTS }) },
   );
 }
 
@@ -186,42 +178,6 @@ function createASessionWithOneAttachment() {
 
 // ---------------------------------------------------------------------------
 // The session header
-
-/**
- * A host whose warm of the session's code index reports 40% of its "Fetching" phase, holds until
- * `gate` is released, then reports the index ready and ends.
- */
-function aHostWarmingTheSessionsIndex(gate: Gate): InMemoryRpcBackend {
-  return anInMemoryRpcBackend().implement(CodeNavigationService, {
-    async *watchCodeIndex() {
-      yield create(CodeIndexProgressSchema, {
-        line: "Fetching 40%",
-        phase: "Fetching",
-        percentage: 40,
-        furthest: "40%",
-      });
-      await gate.held;
-      yield create(CodeIndexProgressSchema, {
-        line: "ready",
-        phase: "Fetching",
-        percentage: 100,
-        furthest: "100%",
-        ready: true,
-      });
-    },
-  });
-}
-
-function mountTheIndexingIndicator(backend: InMemoryRpcBackend) {
-  mountWithRpc(
-    <SessionIndexingIndicator
-      client={createClient(CodeNavigationService, backend.transport())}
-      sessionToken="fake-token"
-      sessionId={THE_SESSION}
-    />,
-    backend,
-  );
-}
 
 beforeEach(() => {
   cy.viewport(1280, 900);
@@ -247,19 +203,4 @@ it("the create pane shows the step the start is in", () => {
   // And the session is created once the host has started its agent and reported its result
   cy.then(() => gate.release());
   cy.get("@onCreated").should("have.been.calledWith", "phase-1");
-});
-
-it("the session header shows indexing until ready", () => {
-  // Given a host warming the session's code index, 40% through its "Fetching" phase
-  const gate = aGate();
-  mountTheIndexingIndicator(aHostWarmingTheSessionsIndex(gate));
-
-  // Then the header says the index is loading, with its phase and percentage
-  sessionIndexingIndicatorPage.indicator().should("have.text", "Indexing — Fetching 40%");
-
-  // When the index becomes ready
-  cy.then(() => gate.release());
-
-  // Then the indicator is gone
-  sessionIndexingIndicatorPage.indicator().should("not.exist");
 });

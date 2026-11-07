@@ -3,9 +3,9 @@ import { CatalogService } from "tddy-client-web/gen/catalog_pb";
 import { AgentKind } from "tddy-client-web/gen/types_pb";
 import { safeTestIdPart } from "tddy-client-web";
 import { Button } from "tddy-ui-web";
-import { AgentKindBadge } from "./AgentKindBadge";
-import type { AgentPlacementChoice } from "./agentPlacementChoice";
-import { useAvailableAgents, type AvailableAgent } from "./useAvailableAgents";
+import { AgentKindBadge } from "tddy-session-create-web";
+import type { AgentPlacementChoice } from "tddy-session-create-web";
+import { useAvailableAgents, type AvailableAgent } from "tddy-session-create-web";
 import { useHttpClient, useSelectedDaemon } from "tddy-client-web";
 
 /**

@@ -26,7 +26,7 @@ import {
   type ClientMessage,
 } from "tddy-client-web/gen/tddy/v1/remote_pb";
 import { emptyUsage, type ConversationUsage } from "./sessionUsage";
-import { rpcFailureText } from "../../rpc/rpcFailure";
+import { rpcFailureText } from "tddy-client-web";
 
 /** The latest snapshot, and why the stream is not delivering (`null` while it is). */
 export interface SessionUsageStream {

@@ -11,6 +11,7 @@
  * reached B — not proof of a fixture.
  */
 
+import { mountWithHostBackends } from "../support/mounts";
 import React from "react";
 import { servedAgentWire } from "../support/servedAgents";
 import { Code, ConnectError, createClient } from "@connectrpc/connect";
@@ -21,9 +22,7 @@ import { CatalogService } from "tddy-client-web/gen/catalog_pb";
 import { SessionFilesService } from "tddy-client-web/gen/session_files_pb";
 import { WorktreeService } from "tddy-client-web/gen/worktree_pb";
 import { CreateSessionPane } from "../../src/CreateSessionPane";
-import { daemonRpcIdentity, type DaemonHost } from "tddy-client-web";
-import { mountWithPerDaemonLiveKitRpc } from "../support/rpc/perDaemonLiveKitRpc";
-import { withSelectedDaemon } from "../support/rpc/withSelectedDaemon";
+import type { DaemonHost } from "tddy-client-web";
 import { createSessionPage as page } from "../support/pages/createSessionPage";
 import { recordedFields } from "../support/rpc/recordedRequests";
 
@@ -101,9 +100,8 @@ function mountForm(
   hosts: DaemonHost[] = [HOST_A, HOST_B],
 ): InMemoryRpcBackend {
   const hostA = aCreateSessionBackend(hostAAgents);
-  mountWithPerDaemonLiveKitRpc(
-    withSelectedDaemon(
-      <CreateSessionPane
+  mountWithHostBackends(
+    <CreateSessionPane
         client={createClient(SessionService, hostA.transport())}
         projectClient={createClient(ProjectService, hostA.transport())}
         catalogClient={createClient(CatalogService, hostA.transport())}
@@ -113,13 +111,11 @@ function mountForm(
         onCancel={cy.stub()}
         onCreated={cy.stub()}
       />,
-      hosts,
-    ),
     {
-      [daemonRpcIdentity(HOST_A.instanceId)]: hostA,
-      [daemonRpcIdentity(HOST_B.instanceId)]: hostB,
+      [HOST_A.instanceId]: hostA,
+      [HOST_B.instanceId]: hostB,
     },
-    { httpBackend: hostA },
+    { httpBackend: hostA, daemons: hosts },
   );
   return hostA;
 }
@@ -136,9 +132,8 @@ function mountFormForHost(
   hostB: InMemoryRpcBackend,
 ): InMemoryRpcBackend {
   const hostA = aCreateSessionBackend(hostAAgents);
-  mountWithPerDaemonLiveKitRpc(
-    withSelectedDaemon(
-      <CreateSessionPane
+  mountWithHostBackends(
+    <CreateSessionPane
         client={createClient(SessionService, hostA.transport())}
         projectClient={createClient(ProjectService, hostA.transport())}
         catalogClient={createClient(CatalogService, hostA.transport())}
@@ -153,13 +148,11 @@ function mountFormForHost(
           daemonInstanceId: sessionHost.instanceId,
         }}
       />,
-      [HOST_A, HOST_B],
-    ),
     {
-      [daemonRpcIdentity(HOST_A.instanceId)]: hostA,
-      [daemonRpcIdentity(HOST_B.instanceId)]: hostB,
+      [HOST_A.instanceId]: hostA,
+      [HOST_B.instanceId]: hostB,
     },
-    { httpBackend: hostA },
+    { httpBackend: hostA, daemons: [HOST_A, HOST_B] },
   );
   return hostA;
 }
