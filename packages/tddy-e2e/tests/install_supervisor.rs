@@ -330,6 +330,125 @@ fn installs_a_supervisor_config_that_documents_the_per_user_agent_tool_sockets()
     assert_contains(&config, "agent-tools.<user>", "the supervisor config");
 }
 
+/// The upgrade the 2026-11-07 decision is about: an operator's supervisor.yaml from before
+/// agent-tool sockets, whose policy lets sessions run as the `users` it names, and whose daemon
+/// service has its own listener (descriptor 3) and the whole restart policy, as every rendered
+/// template does — the file must be one the supervisor loads.
+fn a_supervisor_config_allowing_sessions_as(users: &str) -> String {
+    format!(
+        "{}spawn_policy:\n  allowed_session_users: {users}\n",
+        a_supervisor_config_declaring_the_daemon_as("tddy", Some("tddy"))
+            .replace(
+                "    restart:\n",
+                "    socket:\n      path: /run/tddy-daemon.sock\n      group: tddy-clients\n    restart:\n",
+            )
+            .replace(
+                "      max_retries: 5\n",
+                "      max_retries: 5\n      initial_backoff_ms: 500\n      max_backoff_ms: 30000\n      stability_threshold_ms: 10000\n",
+            )
+    )
+}
+
+/// `(user, path)` of every agent-tool socket the tddy-daemon service of `yaml` declares, read by
+/// the supervisor's own loader — which also validates them against the rest of the file.
+fn agent_tool_sockets_the_supervisor_reads(yaml: &str) -> Vec<(String, PathBuf)> {
+    let config =
+        tddy_supervisor::config::SupervisorConfig::from_yaml(yaml).unwrap_or_else(|error| {
+            panic!("the supervisor refuses the installed config: {error}\n{yaml}")
+        });
+    let daemon = config
+        .services
+        .iter()
+        .find(|service| service.name == "tddy-daemon")
+        .expect("the installed config declares tddy-daemon");
+    daemon
+        .agent_tool_sockets
+        .iter()
+        .map(|socket| (socket.user.clone(), socket.path.clone()))
+        .collect()
+}
+
+#[rstest::rstest]
+#[case::flow_list("[alice, bob]")]
+#[case::block_list("\n    - alice\n    - bob")]
+fn an_upgrade_declares_a_live_agent_tool_socket_for_every_user_the_policy_allows_sessions_as(
+    #[case] users: &str,
+) {
+    // Given a host upgraded from before agent-tool sockets: its policy allows sessions as alice and
+    // bob, and no socket is declared for either — whose every session start is now refused
+    let tree = an_install_tree();
+    tree.install();
+    tree.overwrite_installed_config(
+        "supervisor.yaml",
+        &a_supervisor_config_allowing_sessions_as(users),
+    );
+
+    // When
+    tree.install();
+
+    // Then each of them has a live entry the supervisor accepts, beside the policy it came from
+    let config = tree.installed_config("supervisor.yaml");
+    pretty_assertions::assert_eq!(
+        agent_tool_sockets_the_supervisor_reads(&config),
+        vec![
+            (
+                "alice".to_string(),
+                PathBuf::from("/run/tddy-agent-tools/alice/agent.sock")
+            ),
+            (
+                "bob".to_string(),
+                PathBuf::from("/run/tddy-agent-tools/bob/agent.sock")
+            ),
+        ]
+    );
+    assert_contains(&config, "allowed_session_users:", "the supervisor config");
+
+    // And installing again declares nothing twice
+    tree.install();
+    pretty_assertions::assert_eq!(tree.installed_config("supervisor.yaml"), config);
+}
+
+#[test]
+fn an_operators_agent_tool_sockets_block_is_kept_and_each_policy_user_it_leaves_out_is_named() {
+    // Given an operator who declared alice's socket but not bob's, whom the policy also allows
+    let tree = an_install_tree();
+    tree.install();
+    let operator_config = a_supervisor_config_allowing_sessions_as("[alice, bob]").replace(
+        "    restart:\n",
+        "    agent_tool_sockets:\n      - {user: alice, path: /srv/agent-tools/alice/agent.sock}\n    restart:\n",
+    );
+    tree.overwrite_installed_config("supervisor.yaml", &operator_config);
+
+    // When
+    let output = tree.attempt_install_with(&[]);
+
+    // Then the block stays as written, and the install says whose starts will be refused
+    assert!(
+        output.status.success(),
+        "install failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    pretty_assertions::assert_eq!(tree.installed_config("supervisor.yaml"), operator_config);
+    assert_contains(
+        &String::from_utf8_lossy(&output.stderr),
+        "declares agent_tool_sockets: for tddy-daemon but not for: bob",
+        "the install narration",
+    );
+}
+
+#[test]
+fn a_fresh_install_declares_no_agent_tool_socket_while_the_policy_allows_no_session_user() {
+    // Given
+    let tree = an_install_tree();
+
+    // When
+    tree.install();
+
+    // Then — the rendered policy is empty, so there is no one to give a socket to
+    let config = tree.installed_config("supervisor.yaml");
+    pretty_assertions::assert_eq!(agent_tool_sockets_the_supervisor_reads(&config), vec![]);
+}
+
 #[test]
 fn no_longer_installs_a_standalone_daemon_unit() {
     // Given
@@ -519,13 +638,16 @@ fn refuses_a_multi_line_socket_path_and_writes_no_config_at_all() {
 
 #[test]
 fn keeps_an_existing_supervisor_config_rather_than_overwriting_the_policy_in_it() {
-    // Given a host whose operator has declared a spawn policy — the config still declares the
-    // daemon service identity install must obey
+    // Given a host whose operator has declared a spawn policy and its user's agent-tool socket — the
+    // config still declares the daemon service identity install must obey
     let tree = an_install_tree();
     tree.install();
     let operator_policy = format!(
         "{}spawn_policy:\n  allowed_session_users: [alice]\n",
-        a_supervisor_config_declaring_the_daemon_as("tddy", Some("tddy"))
+        a_supervisor_config_declaring_the_daemon_as("tddy", Some("tddy")).replace(
+            "    restart:\n",
+            "    agent_tool_sockets:\n      - {user: alice, path: /srv/agent-tools/alice/agent.sock}\n    restart:\n",
+        )
     );
     tree.overwrite_installed_config("supervisor.yaml", &operator_policy);
 

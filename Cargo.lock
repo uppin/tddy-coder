@@ -13068,6 +13068,7 @@ dependencies = [
  "tddy-rpc",
  "tddy-service",
  "tddy-stdio",
+ "tddy-supervisor",
  "tddy-testing-commons",
  "tddy-tui",
  "tddy-tui-testkit",

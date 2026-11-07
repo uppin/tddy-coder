@@ -73,7 +73,11 @@ services:
     # here cannot start a session at all: the start is refused, naming this setting, rather than
     # pointing the agent at a path it cannot reach (whose every report would be swallowed). List the
     # same users as `host_sockets`, each in a directory of its own — never the host socket's — and
-    # note that both kinds together may hand over at most 15 descriptors.
+    # note that both kinds together may hand over at most 15 descriptors. While this service declares
+    # no `agent_tool_sockets:`, every ./install run writes one live entry per
+    # spawn_policy.allowed_session_users user, at /run/tddy-agent-tools/<user>/agent.sock, directly
+    # under `- name: tddy-daemon`; once the block exists it is yours, and install only warns about a
+    # policy user it leaves out.
     # agent_tool_sockets:
     #   - {user: alice, path: /run/tddy-agent-tools/alice/agent.sock}
     #   - {user: bob, path: /run/tddy-agent-tools/bob/agent.sock}
