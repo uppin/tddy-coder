@@ -30,8 +30,8 @@
  *
  * One function rather than the same three lines in six components, so they cannot drift into
  * disagreeing about what the operator is being told on the same page — in particular a navigation
- * entry and the screen it points at. It lives beside `participantCameraVideo.ts` for the same
- * reason that one does: a pure rule about a LiveKit-shaped surface, testable without React.
+ * entry and the screen it points at. It is a pure rule about a LiveKit-shaped surface, testable
+ * without React.
  *
  * **Call it through `useCapabilityAvailability` unless you are handed the status.** Centralising the
  * rule left every surface still assembling its two arguments by hand — resolve the connection, read
