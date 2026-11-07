@@ -100,10 +100,9 @@ pub fn builtin_specs() -> Vec<(&'static str, &'static str)> {
 /// The built-in spec of agent `id`, as embedded — without the `<tddyhome>/tools` overrides
 /// [`load_agent_registry`] applies, and without resolving its binary.
 ///
-/// For a caller that renders one agent's slots and has no tool registry to hand
-/// (`tddy-session-split`). A caller that launches the agent loads the registry instead.
-// TODO(jail-agnostic): hand split sessions the daemon's registry so an operator's override of the
-// agent's spec reaches them (docs/dev/todo/2026-11-03-split-sessions-render-the-embedded-agent-spec.md).
+/// For a caller that renders one agent's slots and has no tool registry to hand. No production
+/// code is such a caller: a split session reads the host's registry, and a caller that launches the
+/// agent loads the registry too. What still calls this is test fixtures.
 pub fn embedded_spec(id: &str) -> Result<CodingAgentSpec, SpecError> {
     let (path, yaml) = builtin_specs()
         .into_iter()

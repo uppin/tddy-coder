@@ -217,7 +217,7 @@ impl SplitSessions {
             .split_roster_from_codebase_host(session_token, checkout_session_id, &local_instance_id)
             .await?;
         let withdrawals = crate::split_session::wire_roster_withdrawals(&roster.agents);
-        let agent_spec = crate::agent_argv::split_agent_spec()?;
+        let agent_spec = crate::agent_argv::split_agent_spec(&self.coding_agents)?;
         let agent = agent_spec.id.as_str();
         let glob_refs: Vec<&str> = agent_spec
             .agent
@@ -243,6 +243,7 @@ impl SplitSessions {
         );
         let tddy_tools = self.resolve_tddy_tools_path()?;
         let context_dir = crate::split_session::build_split_context_dir(
+            &agent_spec,
             session_dir,
             &withdrawals,
             &glob_refs,
@@ -261,20 +262,28 @@ impl SplitSessions {
             context_dir.display(),
             withdrawals.len(),
         );
+        // The roster just read goes with the agent's `tddy-tools`, so its first `tools/list` is
+        // right before any stream frame has arrived.
+        let tool_server_env: Vec<(String, String)> = remote
+            .env_pairs()
+            .into_iter()
+            .chain(crate::split_session::roster_seed_env_pairs(&roster))
+            .collect();
         let wiring = crate::split_session::SplitAgentWiring {
-            context_dir,
+            context_dir: context_dir.clone(),
             extra_args: crate::split_session::split_claude_extra_args(
+                &agent_spec,
                 session_dir,
                 &tddy_tools.to_string_lossy(),
+                &tool_server_env,
                 &withdrawals,
             )?,
-            // The roster just read goes with the agent, so its first `tools/list` is right before
-            // any stream frame has arrived.
-            env: remote
-                .env_pairs()
-                .into_iter()
-                .chain(crate::split_session::roster_seed_env_pairs(&roster))
-                .collect(),
+            env: Vec::new(),
+            session_pointer: Some(crate::split_session::split_session_pointer(
+                &remote,
+                &context_dir,
+                session_dir,
+            )),
         };
         log::info!(
             "ResumeSession: re-wired jailed-codebase session {session_id} to its checkout session {checkout_session_id} on this daemon"

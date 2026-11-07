@@ -189,6 +189,10 @@ impl DaemonSessionHost {
                 })
             },
             session_tokens: self.session_tokens.clone(),
+            coding_agents: self.launch_coding_agents().agents_shared(),
+            session_pointers: Arc::new(
+                tddy_agent_launch::split_session_pointers::HostSplitSessionPointers,
+            ),
             agent_roster: self.agent_roster(),
             host: Arc::new(self.clone()),
         }

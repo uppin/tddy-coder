@@ -86,10 +86,24 @@ pub fn builtin_coding_agents() -> Arc<tddy_agent_launch::spec_launch::HostCoding
 pub fn coding_agents_with_binaries(
     binaries: &[(&str, &std::path::Path)],
 ) -> Arc<tddy_agent_launch::spec_launch::HostCodingAgents> {
-    let registry = tddy_coding_agent_specs::load_agent_registry(std::path::Path::new(
-        "/nonexistent-tddy-home/tools",
-    ))
-    .expect("the built-in coding agents load");
+    coding_agents_with_binaries_over(
+        std::path::Path::new("/nonexistent-tddy-home/tools"),
+        binaries,
+    )
+}
+
+/// [`coding_agents_with_binaries`] over the operator overrides in `overrides_dir` (a host's
+/// `<tddyhome>/tools`): what a fixture whose operator re-configured an agent installs.
+///
+/// # Panics
+/// As [`coding_agents_with_binaries`], and when an override does not load.
+#[must_use]
+pub fn coding_agents_with_binaries_over(
+    overrides_dir: &std::path::Path,
+    binaries: &[(&str, &std::path::Path)],
+) -> Arc<tddy_agent_launch::spec_launch::HostCodingAgents> {
+    let registry = tddy_coding_agent_specs::load_agent_registry(overrides_dir)
+        .expect("the coding agents and their overrides load");
     let env = binaries
         .iter()
         .map(|(id, binary)| {

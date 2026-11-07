@@ -330,6 +330,11 @@ fn a_facilitating_daemon_whose_codebase_host(codebase_host: ACodebaseHost) -> AF
         cli_manager: Arc::new(CliSessionManager::new()),
         agent_binary: Arc::new(|_| Ok("/bin/cat".to_string())),
         session_tokens: Some(tokens.clone()),
+        coding_agents: Arc::new(
+            tddy_coding_agent_specs::CodingAgentRegistry::builtin()
+                .expect("the built-in coding agents load"),
+        ),
+        session_pointers: Arc::new(NoSplitSessionPointers),
         agent_roster: an_agent_roster_with_nothing_attached(
             config,
             data_dir.path(),
@@ -732,6 +737,24 @@ impl PeerForwarder for ACodebaseHost {
 }
 
 // ─── the rest of the session host ───────────────────────────────────────────────
+
+/// A host that places no pointer: a split start here stops at the room, before the agent spawns.
+struct NoSplitSessionPointers;
+
+impl tddy_session_split::split_ports::SplitSessionPointers for NoSplitSessionPointers {
+    fn place(
+        &self,
+        _pointer: &tddy_core::session_pointer::SessionPointer,
+        _context_dir: &Path,
+        _on_exit: Option<tddy_cli_sessions::cli_session_manager::ExitHook>,
+    ) -> Result<Option<tddy_cli_sessions::cli_session_manager::ExitHook>, Status> {
+        not_reached_before_the_room("place a session pointer")
+    }
+
+    fn remove(&self, _context_dir: &Path) {
+        not_reached_before_the_room("remove a session pointer")
+    }
+}
 
 /// The session host's capabilities a split start does not reach before its room is hosted: each
 /// one fails the test naming what was reached.
