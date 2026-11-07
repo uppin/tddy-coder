@@ -12,8 +12,8 @@
  */
 
 import { useEffect, useState } from "react";
-import type { SessionConnection } from "./session";
-import type { ConnectionStatus } from "./types";
+import type { SessionConnection } from "tddy-client-web/connections/session";
+import type { ConnectionStatus } from "tddy-client-web/connections/types";
 
 /** How often a connection is re-read. Short enough that a handshake overlay clears promptly. */
 const SAMPLE_INTERVAL_MS = 200;

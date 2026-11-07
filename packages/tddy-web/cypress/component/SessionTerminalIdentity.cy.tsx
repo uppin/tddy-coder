@@ -23,12 +23,12 @@ import React from "react";
 import type { Client, Transport } from "@connectrpc/connect";
 import type { DescService } from "@bufbuild/protobuf";
 import { ConnectionState, type Room } from "livekit-client";
-import type { TokenService } from "../../src/gen/token_pb";
+import type { TokenService } from "tddy-client-web/gen/token_pb";
 import {
   openLiveKitSession,
   type LiveKitSessionSupport,
 } from "../../src/rpc/connections/livekit/sessionConnection";
-import type { SessionConnection } from "../../src/rpc/connections/session";
+import type { SessionConnection } from "tddy-client-web/connections/session";
 import { byTestId } from "../support/testIds";
 
 // ---------------------------------------------------------------------------

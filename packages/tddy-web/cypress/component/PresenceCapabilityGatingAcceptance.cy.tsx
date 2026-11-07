@@ -30,7 +30,7 @@ import { RpcPlaygroundAppPage } from "../../src/rpc-playground/RpcPlaygroundAppP
 import type { RoomParticipant } from "../../src/hooks/useRoomParticipants";
 import { AuthProvider } from "../../src/hooks/authProvider";
 import { ConnectionProviders } from "../../src/rpc/connections/registry";
-import type { HostConnection } from "../../src/rpc/connections/types";
+import type { HostConnection } from "tddy-client-web/connections/types";
 import type { CapabilityBearing } from "../../src/rpc/connections/useHasCapability";
 import { SelectedDaemonProvider } from "../../src/rpc/selectedDaemon";
 import { appLocationPage } from "../support/pages/appLocationPage";

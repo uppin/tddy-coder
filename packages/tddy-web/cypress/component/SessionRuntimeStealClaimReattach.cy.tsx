@@ -23,7 +23,7 @@ import {
   ClaimTerminalControlResponseSchema,
   TerminalControlEventSchema,
   TerminalSessionService,
-} from "../../src/gen/terminal_session_pb";
+} from "tddy-client-web/gen/terminal_session_pb";
 import { useTerminalControl, type Session } from "../../src/components/sessions/useTerminalControl";
 import { byTestId, TEST_IDS } from "../support/testIds";
 

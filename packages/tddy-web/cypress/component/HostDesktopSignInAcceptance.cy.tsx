@@ -22,13 +22,13 @@ import {
   HostRemoteDesktopSchema,
   HostService,
   ProbeOutcome,
-} from "../../src/gen/host_pb";
+} from "tddy-client-web/gen/host_pb";
 import {
   DesktopAuthMethod,
   DesktopCredentialAnswerSchema,
   ScreenSharingService,
   type DesktopCredentialAnswer,
-} from "../../src/gen/screen_sharing_pb";
+} from "tddy-client-web/gen/screen_sharing_pb";
 import { HostRowRemoteDesktop } from "../../src/components/hosts/HostRowRemoteDesktop";
 import { mountWithRpc } from "../support/rpc/inMemory";
 import { withSelectedDaemon } from "../support/rpc/withSelectedDaemon";

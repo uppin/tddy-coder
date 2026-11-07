@@ -13,7 +13,7 @@ import React from "react";
 import { HostStatsFooter } from "../../src/components/sessions/HostStatsFooter";
 import { TerminalFileDropZone } from "../../src/components/connection/TerminalFileDropZone";
 import { UploadProgressProvider } from "../../src/rpc/uploadProgress";
-import { SessionFilesService } from "../../src/gen/session_files_pb";
+import { SessionFilesService } from "tddy-client-web/gen/session_files_pb";
 import { aSessionServiceBackend } from "../support/rpc/daemonSessionHostBackend";
 import { mountWithRpc } from "../support/rpc/inMemory";
 import { withSelectedDaemon } from "../support/rpc/withSelectedDaemon";

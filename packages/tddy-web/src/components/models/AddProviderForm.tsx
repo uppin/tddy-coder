@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { ProviderKind } from "../../gen/models_pb";
+import { ProviderKind } from "tddy-client-web/gen/models_pb";
 
 /**
  * The add-provider form. Providers are configured explicitly — nothing is auto-detected — and the

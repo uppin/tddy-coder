@@ -18,7 +18,7 @@
  *     would claim a host has nothing when only one of its four answers was lost.
  */
 
-import type { ModelLoadState, ProviderKind } from "../gen/models_pb";
+import type { ModelLoadState, ProviderKind } from "tddy-client-web/gen/models_pb";
 
 // ---------------------------------------------------------------------------
 // View rows

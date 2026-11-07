@@ -10,8 +10,8 @@
  * holds the selection rules.
  */
 
-import type { SessionAttachmentHint } from "./session";
-import type { ConnectionCapability } from "./types";
+import type { SessionAttachmentHint } from "tddy-client-web/connections/session";
+import type { ConnectionCapability } from "tddy-client-web/connections/types";
 
 /** The fields of `ConnectSessionResponse` / `ResumeSessionResponse` this reads. */
 export interface AttachReply {

@@ -1,13 +1,13 @@
 import React, { useCallback, useState } from "react";
 import type { Client } from "@connectrpc/connect";
 import type { Room } from "livekit-client";
-import type { SessionService, SessionEntry } from "../../gen/session_pb";
-import type { ActivityService } from "../../gen/activity_pb";
-import type { ExecToolService } from "../../gen/exec_tools_pb";
-import type { SessionFilesService } from "../../gen/session_files_pb";
-import type { WorktreeService } from "../../gen/worktree_pb";
-import { VncService } from "../../gen/vnc_pb";
-import { ScreenSharingService } from "../../gen/screen_sharing_pb";
+import type { SessionService, SessionEntry } from "tddy-client-web/gen/session_pb";
+import type { ActivityService } from "tddy-client-web/gen/activity_pb";
+import type { ExecToolService } from "tddy-client-web/gen/exec_tools_pb";
+import type { SessionFilesService } from "tddy-client-web/gen/session_files_pb";
+import type { WorktreeService } from "tddy-client-web/gen/worktree_pb";
+import { VncService } from "tddy-client-web/gen/vnc_pb";
+import { ScreenSharingService } from "tddy-client-web/gen/screen_sharing_pb";
 import { ScrollArea } from "../ui/scroll-area";
 import { cn } from "../../lib/utils";
 import { InspectorTabs, type InspectorTab } from "./InspectorTabs";
@@ -18,7 +18,7 @@ import {
   isMediaInspectorTabName,
 } from "../../routing/appRoutes";
 import { useCapabilityAvailability } from "../../hooks/useCapabilityAvailability";
-import type { HostConnection } from "../../rpc/connections/types";
+import type { HostConnection } from "tddy-client-web/connections/types";
 import { useAppLocation } from "../../routing/useAppLocation";
 import { SessionAgentRosterPane } from "./SessionAgentRosterPane";
 import { SessionToolsTab } from "./SessionToolsTab";

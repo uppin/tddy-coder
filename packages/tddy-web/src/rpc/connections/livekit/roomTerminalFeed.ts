@@ -18,8 +18,8 @@
 import { create } from "@bufbuild/protobuf";
 import type { Client } from "@connectrpc/connect";
 import { RoomEvent, type Room } from "livekit-client";
-import type { TerminalSessionService } from "../../../gen/terminal_session_pb";
-import { TerminalInputSchema, type TerminalService } from "../../../gen/terminal_pb";
+import type { TerminalSessionService } from "tddy-client-web/gen/terminal_session_pb";
+import { TerminalInputSchema, type TerminalService } from "tddy-client-web/gen/terminal_pb";
 import { tddyDebug } from "../../../lib/debugMask";
 import { TerminalFrameContinuity } from "../../../lib/terminalFrameContinuity";
 import { createForwardHistoryFetcher } from "../../../lib/terminalHistoryLoader";

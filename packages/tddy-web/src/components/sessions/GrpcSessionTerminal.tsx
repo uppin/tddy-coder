@@ -6,14 +6,14 @@ import {
   SessionTerminalOutput,
   StreamReplayMode,
   TerminalSessionService,
-} from "../../gen/terminal_session_pb";
+} from "tddy-client-web/gen/terminal_session_pb";
 import { GhosttyTerminalSession } from "../GhosttyTerminalSession";
 import type {
   TerminalFeed,
   TerminalFrame,
   TerminalHistoryFetcher,
   TerminalStream,
-} from "../../rpc/connections/terminal";
+} from "tddy-client-web/connections/terminal";
 import type { ConnectedSession } from "./useTerminalControl";
 import type { ToolShortcutDef } from "../../lib/toolShortcuts";
 import { tddyDebug } from "../../lib/debugMask";

@@ -7,7 +7,7 @@
  */
 
 import { describe, it, expect } from "bun:test";
-import { ModelLoadState, ProviderKind } from "../gen/models_pb";
+import { ModelLoadState, ProviderKind } from "tddy-client-web/gen/models_pb";
 import {
   assistantRowKey,
   describeReadFailures,

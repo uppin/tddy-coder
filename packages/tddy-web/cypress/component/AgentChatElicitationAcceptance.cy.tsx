@@ -20,7 +20,7 @@ import {
   type ClientMessage,
   type ServerMessage,
   type ClarificationQuestionProto,
-} from "../../src/gen/tddy/v1/remote_pb";
+} from "tddy-client-web/gen/tddy/v1/remote_pb";
 import { mountWithRpc } from "../support/rpc/inMemory";
 import { agentChatPage } from "../support/pages/agentChatPage";
 

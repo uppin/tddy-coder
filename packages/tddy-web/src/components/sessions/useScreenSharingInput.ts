@@ -38,7 +38,7 @@ import {
   ScreenSharingInputEventSchema,
   ScreenSharingInputService,
   type ScreenSharingInputEvent,
-} from "../../gen/screen_sharing_input_pb";
+} from "tddy-client-web/gen/screen_sharing_input_pb";
 import {
   framebufferPointFor,
   keysymFor,

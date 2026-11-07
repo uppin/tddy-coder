@@ -14,7 +14,7 @@ import {
   HostService,
   ListSshConfigHostsRequestSchema,
   ProbeOutcome,
-} from "../../gen/host_pb";
+} from "tddy-client-web/gen/host_pb";
 import { useHostClient, useHostConnection } from "../../rpc/connections/registry";
 import { useLiveKitTransportFactoryIsOverridden } from "../../rpc/transportProvider";
 import { inputClass, labelClass } from "./createSessionFormStyles";

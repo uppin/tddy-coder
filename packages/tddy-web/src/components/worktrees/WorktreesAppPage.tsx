@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { type ProjectEntry, ProjectService } from "../../gen/project_pb";
-import { WorktreeService } from "../../gen/worktree_pb";
+import { type ProjectEntry, ProjectService } from "tddy-client-web/gen/project_pb";
+import { WorktreeService } from "tddy-client-web/gen/worktree_pb";
 import { GitHubLoginButton } from "../GitHubLoginButton";
 import { AppShell } from "../shell/AppShell";
 import { SessionWorktreeTab } from "../sessions/SessionWorktreeTab";

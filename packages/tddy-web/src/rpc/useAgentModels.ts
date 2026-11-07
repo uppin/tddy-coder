@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import type { Client } from "@connectrpc/connect";
-import { CatalogService, type ModelInfo } from "../gen/catalog_pb";
+import { CatalogService, type ModelInfo } from "tddy-client-web/gen/catalog_pb";
 
 type CatalogClient = Client<typeof CatalogService>;
 

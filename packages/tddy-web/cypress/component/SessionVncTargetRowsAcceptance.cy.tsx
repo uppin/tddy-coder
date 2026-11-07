@@ -10,7 +10,7 @@
 import React from "react";
 import { SessionsDrawerScreen } from "../../src/components/sessions/SessionsDrawerScreen";
 import { withSelectedDaemon } from "../support/rpc/withSelectedDaemon";
-import { VncService } from "../../src/gen/vnc_pb";
+import { VncService } from "tddy-client-web/gen/vnc_pb";
 import { mountWithRpc } from "../support/rpc/inMemory";
 import { aSessionsDrawerBackend } from "../support/rpc/vncBackend";
 import { sessionsDrawerPage as page } from "../support/pages/sessionsDrawerPage";

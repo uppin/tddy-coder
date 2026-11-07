@@ -22,7 +22,7 @@ import {
 // Import fails until the reflection plumbing is in place and re-export is set up.
 // EchoResponseSchema carries a `uint64 timestamp` field — a 64-bit scalar that protobuf-es
 // represents as a JS BigInt, used to pin BigInt-safe serialization.
-import { EchoRequestSchema, EchoResponseSchema } from "../gen/test/echo_service_pb";
+import { EchoRequestSchema, EchoResponseSchema } from "tddy-client-web/gen/test/echo_service_pb";
 
 // ---------------------------------------------------------------------------
 // defaultRequestJson

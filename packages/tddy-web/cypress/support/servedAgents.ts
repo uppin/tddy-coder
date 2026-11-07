@@ -10,7 +10,7 @@
  * carries.
  */
 
-import type { AgentInfo } from "../../src/gen/catalog_pb";
+import type { AgentInfo } from "tddy-client-web/gen/catalog_pb";
 
 /** The metadata fields of one served agent row, keyed by agent id. */
 const SERVED_AGENT_WIRE: Record<string, Partial<AgentInfo>> = {

@@ -24,7 +24,7 @@ import {
   type GitHubUser,
   type PollDeviceLoginResponse,
   type StartDeviceLoginResponse,
-} from "../../../src/gen/auth_pb";
+} from "tddy-client-web/gen/auth_pb";
 import { CURRENT_ACCESS_TOKEN, VALID_REFRESH_TOKEN } from "./durableSessionBackend";
 import { aGitHubUser } from "./responses";
 

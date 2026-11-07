@@ -1,6 +1,6 @@
 import type { Client } from "@connectrpc/connect";
-import type { ActivityService } from "../../gen/activity_pb";
-import type { SessionAgentService } from "../../gen/session_agents_pb";
+import type { ActivityService } from "tddy-client-web/gen/activity_pb";
+import type { SessionAgentService } from "tddy-client-web/gen/session_agents_pb";
 import type { ChatMessage } from "../chat/useAgentChat";
 import { useAcpToolCallDetail } from "../chat/useAcpToolCallDetail";
 import type { PendingPermission } from "./PermissionRequestEntry";

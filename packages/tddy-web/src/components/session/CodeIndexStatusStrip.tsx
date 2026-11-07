@@ -1,4 +1,4 @@
-import type { CodeIndexProgress } from "../../gen/code_navigation_pb";
+import type { CodeIndexProgress } from "tddy-client-web/gen/code_navigation_pb";
 import {
   currentPhaseHeadline,
   phaseHeadline,

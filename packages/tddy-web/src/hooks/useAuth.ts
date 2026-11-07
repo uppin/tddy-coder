@@ -1,7 +1,7 @@
 import { useState, useEffect, useMemo, useCallback, useRef } from "react";
 import { Code, ConnectError, type Client } from "@connectrpc/connect";
-import { AuthService, VaultState } from "../gen/auth_pb";
-import type { GitHubUser } from "../gen/auth_pb";
+import { AuthService, VaultState } from "tddy-client-web/gen/auth_pb";
+import type { GitHubUser } from "tddy-client-web/gen/auth_pb";
 import { useHttpClient, useAuthTokenGate } from "../rpc/transportProvider";
 import { createSessionTokenStore, type TokenStorage } from "../rpc/sessionTokenStore";
 import {

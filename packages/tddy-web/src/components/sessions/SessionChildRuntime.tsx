@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo } from "react";
-import type { SessionEntry } from "../../gen/session_pb";
-import type { HostConnection } from "../../rpc/connections/types";
+import type { SessionEntry } from "tddy-client-web/gen/session_pb";
+import type { HostConnection } from "tddy-client-web/connections/types";
 import type { ToolShortcutDef } from "../../lib/toolShortcuts";
 import { hostNotConnectedText } from "../../rpc/rpcFailure";
 import { useHostLabel } from "../../rpc/selectedDaemon";

@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { ConnectionState, Room, RoomEvent } from "livekit-client";
-import { TokenService } from "../gen/token_pb";
+import { TokenService } from "tddy-client-web/gen/token_pb";
 import { useHttpClient } from "../rpc/transportProvider";
 import { tddyDebug } from "../lib/debugMask";
 

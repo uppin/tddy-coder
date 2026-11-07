@@ -1,6 +1,6 @@
 import React from "react";
 import { ConnectError } from "@connectrpc/connect";
-import type { SessionEntry } from "../../gen/session_pb";
+import type { SessionEntry } from "tddy-client-web/gen/session_pb";
 import type { AvailableAgent } from "./useAvailableAgents";
 import { agentPlacementWire, type AgentPlacementChoice } from "./agentPlacementChoice";
 import {

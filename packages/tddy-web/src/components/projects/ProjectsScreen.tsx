@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import type { ProjectEntry } from "../../gen/project_pb";
+import type { ProjectEntry } from "tddy-client-web/gen/project_pb";
 import type { DaemonHost } from "../../lib/participantRole";
 import { useActionFailure } from "../../hooks/useActionFailure";
 import { InlineError } from "../ui/inline-error";
