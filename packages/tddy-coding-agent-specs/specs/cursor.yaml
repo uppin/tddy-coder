@@ -90,6 +90,9 @@ extensions:
         - { splice: slots }
       env: {}
       adapter: cursor-stream
+      # Who answers a headless conversation's permission requests (`#agent-tools 27/28`): the CLI
+      # cannot ask mid-turn, so it runs under this fixed policy, shown on its catalog row.
+      permission_policy: { fixed: "read-only; the CLI cannot ask mid-turn" }
       mcp: { kind: workdir, path: .cursor/mcp.json, format: cursor-mcp-json }
       # --- The workflow turn's protocol (`#agent-tools 15/19`), read by `SpecHeadlessBackend`:
       # what a `tddy-coder` workflow turn needs beyond the argv, reproducing the bespoke backend.

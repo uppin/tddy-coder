@@ -776,6 +776,56 @@ pub struct HeadlessSection {
     /// absent.
     #[serde(default)]
     pub scratch: ScratchDir,
+    /// Who answers a headless conversation's permission requests (`#agent-tools 27/28`):
+    /// `asks_caller`, or `{ fixed: <text> }` for a CLI that cannot ask mid-turn and runs under a
+    /// fixed policy, the text shown on its catalog row. `None` when the spec declares none.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub permission_policy: Option<HeadlessPermissionPolicy>,
+}
+
+/// `coding_agent.headless.permission_policy`: who answers a headless conversation's permission
+/// requests. Spelled `asks_caller` or `{ fixed: <text> }` (an untagged YAML shape, since YAML enums
+/// are otherwise tagged).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(from = "PermissionPolicyYaml", into = "PermissionPolicyYaml")]
+pub enum HeadlessPermissionPolicy {
+    /// The request yields to the caller (the main agent).
+    AsksCaller,
+    /// The CLI cannot ask mid-turn; it runs under this policy, described for the catalog row.
+    Fixed(String),
+}
+
+/// [`HeadlessPermissionPolicy`] as its YAML is written.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(untagged)]
+enum PermissionPolicyYaml {
+    Word(AsksCallerWord),
+    Fixed { fixed: String },
+}
+
+/// The one bare word `permission_policy` takes.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+enum AsksCallerWord {
+    AsksCaller,
+}
+
+impl From<PermissionPolicyYaml> for HeadlessPermissionPolicy {
+    fn from(yaml: PermissionPolicyYaml) -> Self {
+        match yaml {
+            PermissionPolicyYaml::Word(AsksCallerWord::AsksCaller) => Self::AsksCaller,
+            PermissionPolicyYaml::Fixed { fixed } => Self::Fixed(fixed),
+        }
+    }
+}
+
+impl From<HeadlessPermissionPolicy> for PermissionPolicyYaml {
+    fn from(policy: HeadlessPermissionPolicy) -> Self {
+        match policy {
+            HeadlessPermissionPolicy::AsksCaller => Self::Word(AsksCallerWord::AsksCaller),
+            HeadlessPermissionPolicy::Fixed(fixed) => Self::Fixed { fixed },
+        }
+    }
 }
 
 impl HeadlessSection {

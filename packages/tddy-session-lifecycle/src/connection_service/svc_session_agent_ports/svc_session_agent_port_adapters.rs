@@ -70,6 +70,7 @@ impl AgentAdmission for ClonesClaimedOnOwningPeers {
             session_id,
             record,
             metadata.managed_codebase,
+            &self.roster.coding_agents,
         )?;
         if record.daemon_instance_id == local_instance_id_for_config(&self.roster.config) {
             // A local agent works the session's real worktree: there is no clone to claim, and no

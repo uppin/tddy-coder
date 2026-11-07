@@ -2,6 +2,8 @@
 //!
 //! Feature: docs/ft/daemon/session-agent-roster.md § Coding agents
 
+use tddy_coding_agent_specs::CodingAgentSpec;
+
 use crate::catalog::ACP_HARNESSES;
 
 /// The headless harnesses, run one CLI invocation per turn.
@@ -80,6 +82,32 @@ pub fn permission_policy_of(harness: &str) -> Option<PermissionPolicy> {
 /// crate cannot run as a subagent. Every coding-agent catalog row calls this, so they cannot disagree.
 pub fn transport_and_policy_wire(harness: &str) -> (String, String) {
     match (transport_of(harness), permission_policy_of(harness)) {
+        (Some(transport), Some(policy)) => (transport.as_str().to_string(), policy.as_wire()),
+        _ => (String::new(), String::new()),
+    }
+}
+
+/// The transport `spec`'s turns take, from its declaration (`#agent-tools 27/28`): ACP for an agent
+/// with a `coding_agent.acp` section, headless for one with a `coding_agent.headless` section, `None`
+/// for one with neither (a PTY-only agent), which this crate cannot run as a subagent.
+pub fn transport_of_spec(spec: &CodingAgentSpec) -> Option<Transport> {
+    // TODO(acp-subagent-leftovers): implement — read the spec's `acp` and `headless` sections, not
+    // its id.
+    transport_of(&spec.id)
+}
+
+/// The permission policy `spec` runs under as a subagent, from its declaration: an ACP agent asks
+/// its caller; a headless one runs under its `coding_agent.headless.permission_policy`. `None`
+/// exactly where [`transport_of_spec`] is `None`, and for a headless agent that declares no policy.
+pub fn permission_policy_of_spec(spec: &CodingAgentSpec) -> Option<PermissionPolicy> {
+    // TODO(acp-subagent-leftovers): implement — read `headless.permission_policy`, not the id.
+    permission_policy_of(&spec.id)
+}
+
+/// The `(transport, permission_policy)` wire spellings of `spec`, both empty for an agent this crate
+/// cannot run as a subagent. What every coding-agent catalog row calls once it reads the registry.
+pub fn transport_and_policy_wire_of_spec(spec: &CodingAgentSpec) -> (String, String) {
+    match (transport_of_spec(spec), permission_policy_of_spec(spec)) {
         (Some(transport), Some(policy)) => (transport.as_str().to_string(), policy.as_wire()),
         _ => (String::new(), String::new()),
     }

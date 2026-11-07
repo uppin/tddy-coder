@@ -6,6 +6,7 @@ use std::sync::{Arc, Mutex, Weak};
 use std::time::Duration;
 
 use async_trait::async_trait;
+use tddy_agent_backend::adapters::PreparedAcpHooks;
 use tddy_agent_backend::{
     AcpAgentCommand, AcpConversation, AcpDriver, AcpStopReason, AcpToolStatus, AcpTurnEnd,
     AcpUpdate, AcpUpdateSink, ConversationDriver, HeadlessCommand, HeadlessDriver, NoHooks,
@@ -90,12 +91,19 @@ enum Settled {
 }
 
 impl CodingAgentSession {
-    /// Spawn the agent from `command`, open (or resume) its ACP session, and hold both.
+    /// Spawn the agent from `command`, open (or resume) its ACP session, and hold both — and
+    /// `hooks`, the ones its launch prepared ([`crate::LaunchedAgent`]): the driver runs with
+    /// `hooks.hooks`, the open is bracketed by `hooks.opens` (a login that failed during it is the
+    /// error reported), and both are held for exactly the session's lifetime.
     pub async fn start(
         command: AcpAgentCommand,
         open: OpenSession,
         model: String,
+        hooks: PreparedAcpHooks,
     ) -> Result<Self, SubagentError> {
+        // TODO(acp-subagent-leftovers): implement — the driver runs with `hooks.hooks`, the open
+        // is bracketed by `hooks.opens`, and the session holds them until it is dropped.
+        let _ = hooks;
         let permissions = Arc::new(ParkedPermissions::default());
         let driver = AcpDriver::spawn(command, permissions.clone(), Arc::new(NoHooks))
             .map_err(|e| SubagentError::from(format!("could not start the coding agent: {e}")))?;
@@ -108,7 +116,10 @@ impl CodingAgentSession {
         stream: std::os::unix::net::UnixStream,
         open: OpenSession,
         model: String,
+        hooks: PreparedAcpHooks,
     ) -> Result<Self, SubagentError> {
+        // TODO(acp-subagent-leftovers): implement — as [`Self::start`]: the driver runs with `hooks`.
+        let _ = hooks;
         let permissions = Arc::new(ParkedPermissions::default());
         let driver = AcpDriver::spawn_over(stream, permissions.clone(), Arc::new(NoHooks))
             .map_err(|e| SubagentError::from(format!("could not reach the coding agent: {e}")))?;
