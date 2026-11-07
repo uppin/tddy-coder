@@ -93,6 +93,10 @@ pub trait SplitSessionPointers: Send + Sync {
         context_dir: &std::path::Path,
         on_exit: Option<tddy_cli_sessions::cli_session_manager::ExitHook>,
     ) -> Result<Option<tddy_cli_sessions::cli_session_manager::ExitHook>, Status>;
+
+    /// Remove the pointer [`Self::place`] put in `context_dir`: for a spawn that failed after the
+    /// pointer was placed, when no agent exists whose exit would remove it.
+    fn remove(&self, context_dir: &std::path::Path);
 }
 
 /// How a split agent's binary is found: the host's coding agents resolve the named agent.

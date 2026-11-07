@@ -7,7 +7,8 @@
 use std::path::Path;
 
 use crate::cli_session_pointer::{
-    place_session_pointer, removing_session_pointer_on_exit, PointerHost,
+    place_session_pointer, remove_placed_pointer, removing_session_pointer_on_exit, PointerHost,
+    PlacedSessionPointer,
 };
 use tddy_cli_sessions::cli_session_manager::ExitHook;
 use tddy_core::session_pointer::SessionPointer;
@@ -27,6 +28,13 @@ impl SplitSessionPointers for HostSplitSessionPointers {
     ) -> Result<Option<ExitHook>, Status> {
         let placed = place_session_pointer(Some(pointer), context_dir, &PointerHost::Local)?;
         Ok(removing_session_pointer_on_exit(on_exit, placed, false))
+    }
+
+    fn remove(&self, context_dir: &Path) {
+        remove_placed_pointer(&PlacedSessionPointer {
+            path: crate::cli_session_pointer::session_pointer_path(context_dir),
+            host: PointerHost::Local,
+        });
     }
 }
 

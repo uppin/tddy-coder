@@ -175,9 +175,19 @@ async fn resume_cli_harness_session(
         wiring,
         tddy_data_dir,
     } = session;
-    let (split_args, split_env, split_pointer) = split
-        .map(|split| (split.extra_args, split.env, split.session_pointer))
-        .unwrap_or_default();
+    // A split session's pointer is the one its wiring was re-derived with; any other session's is
+    // the one its own wiring carries. Which one is decided by the session's kind, never by absence:
+    // a split session whose wiring carries no pointer is refused.
+    let (split_args, split_env, session_pointer) = match split {
+        Some(split) => (
+            split.extra_args,
+            split.env,
+            Some(split.session_pointer.ok_or_else(|| {
+                Status::internal("a split session's wiring carries no session pointer")
+            })?),
+        ),
+        None => (Vec::new(), Vec::new(), wiring.session_pointer.clone()),
+    };
 
     let route = resume_cli_route(account_access, &agent.spec, session_dir)?;
     let (on_exit, token_arm) = resume_token_recorder(
@@ -215,13 +225,7 @@ async fn resume_cli_harness_session(
     slots.argv_extra.extend(route.args);
     write_slot_files_on_target(&mut slots, remote_host)?;
     let host = PointerHost::of(remote_host);
-    // A split session's pointer is the one its wiring was re-derived with, rewritten in its context
-    // dir for the agent this resume launches.
-    let pointer = place_session_pointer(
-        split_pointer.as_ref().or(wiring.session_pointer.as_ref()),
-        &worktree_path,
-        &host,
-    )?;
+    let pointer = place_session_pointer(session_pointer.as_ref(), &worktree_path, &host)?;
     let on_exit = removing_session_pointer_on_exit(on_exit, pointer, meta.tmux_session.is_some());
     let mut env = git_environment;
     env.extend(split_env);

@@ -336,10 +336,11 @@ impl SplitSessions {
         let on_exit = self.session_pointers.place(&pointer, &context_dir, None)?;
         let argv = tddy_cli_sessions::cli_session_manager::CliSessionManager::with_launch_flags(
             argv,
-            Some(initial_prompt.trim()),
+            Some(initial_prompt.trim()).filter(|p| !p.is_empty()),
             None,
             &extra_args,
         );
+        let pointer_dir = context_dir.clone();
         let handle = self
             .cli_manager
             .spawn_rendered_main(
@@ -353,7 +354,11 @@ impl SplitSessions {
                 on_exit,
             )
             .await
-            .map_err(|e| Status::internal(format!("failed to spawn {session_type}: {e}")))?;
+            .map_err(|e| {
+                // No agent exists whose exit would remove the pointer just placed.
+                self.session_pointers.remove(&pointer_dir);
+                Status::internal(format!("failed to spawn {session_type}: {e}"))
+            })?;
         Ok((hook_token, handle))
     }
 

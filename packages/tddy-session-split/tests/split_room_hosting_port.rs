@@ -750,6 +750,10 @@ impl tddy_session_split::split_ports::SplitSessionPointers for NoSplitSessionPoi
     ) -> Result<Option<tddy_cli_sessions::cli_session_manager::ExitHook>, Status> {
         not_reached_before_the_room("place a session pointer")
     }
+
+    fn remove(&self, _context_dir: &Path) {
+        not_reached_before_the_room("remove a session pointer")
+    }
 }
 
 /// The session host's capabilities a split start does not reach before its room is hosted: each

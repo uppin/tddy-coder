@@ -87,3 +87,19 @@ async fn a_split_agents_pointer_is_removed_when_it_exits() {
     // Then the pointer is gone, and the spawn's own hook still ran
     assert_eq!((path.exists(), *ran.lock().unwrap()), (false, true));
 }
+
+#[test]
+fn a_split_agents_pointer_is_removed_when_its_spawn_fails() {
+    // Given a placed split pointer whose agent never started
+    let context_dir = tempfile::tempdir().expect("a context dir");
+    HostSplitSessionPointers
+        .place(&a_split_pointer(context_dir.path()), context_dir.path(), None)
+        .expect("the pointer is placed");
+    let path = context_dir.path().join(SESSION_POINTER_FILE);
+
+    // When the spawn's failure removes it
+    HostSplitSessionPointers.remove(context_dir.path());
+
+    // Then the context dir holds no pointer
+    assert_eq!(path.exists(), false);
+}
