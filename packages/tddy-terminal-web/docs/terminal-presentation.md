@@ -1,6 +1,6 @@
 # Terminal presentation (daemon mode)
 
-Technical reference for **`terminalPresentation`** helpers and **`ConnectionScreen`** presentation modes in **`packages/tddy-web/src/components/connection/terminalPresentation.ts`** and **`ConnectionScreen`**.
+Technical reference for **`terminalPresentation`** helpers and **`ConnectionScreen`** presentation modes in **`packages/tddy-terminal-web/src/connection/terminalPresentation.ts`** and **`ConnectionScreen`**.
 
 ## Model
 
@@ -29,4 +29,4 @@ Technical reference for **`terminalPresentation`** helpers and **`ConnectionScre
 - Bun: **`terminalPresentation.test.ts`**, **`multiSessionState.test.ts`**, **`appRoutes.test.ts`**, **`ConnectionScreen.test.tsx`** (import contract).
 - Cypress component: **`ConnectionScreen.cy.tsx`** (multi-session attach roots, partial disconnect, inactive prune); resume vs connect history behavior.
 
-See [web-terminal.md](../../../../docs/ft/web/web-terminal.md) for product-facing behavior.
+See [web-terminal.md](../../../docs/ft/web/web-terminal.md) for product-facing behavior.

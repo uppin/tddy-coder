@@ -1,6 +1,6 @@
 # Terminal font zoom (implementation)
 
-Technical reference for pitch-in / pitch-out / reset in **tddy-web**. Product behavior and UX live in [web-terminal.md](../../../docs/ft/web/web-terminal.md) (Connected Terminal UX — Font zoom).
+Technical reference for pitch-in / pitch-out / reset in **tddy-terminal-web**. Product behavior and UX live in [web-terminal.md](../../../docs/ft/web/web-terminal.md) (Connected Terminal UX — Font zoom).
 
 ## Module layout
 
@@ -8,9 +8,9 @@ Technical reference for pitch-in / pitch-out / reset in **tddy-web**. Product be
 |------|----------|
 | Bounds and stepping | `src/lib/terminalZoom.ts` (`clampTerminalFontSize`, `pitchInFontSize`, `pitchOutFontSize`, `canPitchIn`, `canPitchOut`, defaults **8–32** px, step **1**) |
 | Bridge and parsers | `src/lib/terminalZoomBridge.ts` (`TERMINAL_ZOOM_BRIDGE_EVENT`, `TERMINAL_FONT_SIZE_SYNC_EVENT`, `parseTerminalZoomBridgeDetail`, `parseTerminalFontSizeSyncDetail`, `dispatchTerminalZoomBridge`, `dispatchTerminalZoomBridgeOn`, `dispatchTerminalFontSizeSync`, `isTerminalZoomDebugEnabled`) |
-| Terminal integration | `src/components/GhosttyTerminal.tsx` (`minFontSize` / `maxFontSize`, bridge listener, **Ctrl/⌘ +/-/0**, two-finger **pinch**, **trackpad** `wheel`+`ctrlKey`, `applyFontSizePx`, `data-terminal-font-size`, imperative `setTerminalFontSize` on ref; `pinchZoomFont` prop) |
-| Connection chrome | `src/components/connection/ConnectionTerminalChrome.tsx` (no zoom UI; status dot / fullscreen only) |
-| Session terminal | `src/components/GhosttyTerminalSession.tsx` (`fontSize` prop → **`GhosttyTerminal`** baseline, `minFontSize` / `maxFontSize` bounds; see [terminal-session.md](terminal-session.md)) |
+| Terminal integration | `src/GhosttyTerminal.tsx` (`minFontSize` / `maxFontSize`, bridge listener, **Ctrl/⌘ +/-/0**, two-finger **pinch**, **trackpad** `wheel`+`ctrlKey`, `applyFontSizePx`, `data-terminal-font-size`, imperative `setTerminalFontSize` on ref; `pinchZoomFont` prop) |
+| Connection chrome | `src/connection/ConnectionTerminalChrome.tsx` (no zoom UI; status dot / fullscreen only) |
+| Session terminal | `src/GhosttyTerminalSession.tsx` (`fontSize` prop → **`GhosttyTerminal`** baseline, `minFontSize` / `maxFontSize` bounds; see [terminal-session.md](terminal-session.md)) |
 
 ## Event contract
 

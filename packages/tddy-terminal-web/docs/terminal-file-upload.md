@@ -35,7 +35,7 @@ pasted image path as an image.
 
 **1. The drop id must not require a secure context.** `randomUuid()`, not `crypto.randomUUID()` —
 tddy-web is normally served over plain http on a LAN address. See
-[insecure-origin-constraints.md](insecure-origin-constraints.md).
+[insecure-origin-constraints.md](../../tddy-web/docs/insecure-origin-constraints.md).
 
 **2. One chunk request must fit one LiveKit data packet.** `UPLOAD_CHUNK_SIZE` is **48 KiB** and
 `UPLOAD_REQUEST_ENVELOPE_HEADROOM` (8 KiB) reserves room for the RPC envelope plus the request's
@@ -120,7 +120,7 @@ this flow — `UploadStagedAttachmentChunk` is the same service's `UploadSession
 `UPLOAD_CHUNK_SIZE` and the per-file chunk loop are reused as-is and only the request builder
 differs. That reuse is why the 48 KiB ceiling above is load-bearing for two features, not one.
 
-The attach UI is implemented: see [session-attach-ui.md](session-attach-ui.md). Note that its
+The attach UI is implemented: see [session-attach-ui.md](../../tddy-web/docs/session-attach-ui.md). Note that its
 behaviour has since diverged in one respect worth knowing if you read the two side by side — a staged
 batch is **no longer** restricted to the host it was uploaded to; the session host fetches the bytes
 across hosts when they differ.

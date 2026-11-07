@@ -1,9 +1,9 @@
 # oversized-file: GhosttyTerminalSession.tsx
 
-**Location:** `packages/tddy-web/src/components/GhosttyTerminalSession.tsx`
+**Location:** `packages/tddy-terminal-web/src/GhosttyTerminalSession.tsx`
 **Category:** oversized-file
 **Detected:** 2026-10-24 by `/pr-wrap` on branch `claude-cli-fullscreen`
-**Metrics:** **1005 lines** (whole file, TS) · budget 500 — `wc -l packages/tddy-web/src/components/GhosttyTerminalSession.tsx`
+**Metrics:** **1005 lines** (whole file, TS) · budget 500 — `wc -l packages/tddy-terminal-web/src/GhosttyTerminalSession.tsx`
 **Thresholds breached:** length 1005 > 500
 **Status:** Open — unclaimed
 

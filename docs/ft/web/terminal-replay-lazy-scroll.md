@@ -35,7 +35,7 @@
 > `terminal.TerminalOutput` carries no offsets, that fill runs **unanchored**: it pages to the
 > capture tip and ends on the first chunk reporting `atEnd`, rather than filling toward an anchor
 > taken from an initial replay frame. See
-> [the session terminal](../../../packages/tddy-web/docs/terminal-session.md).
+> [the session terminal](../../../packages/tddy-terminal-web/docs/terminal-session.md).
 >
 > **Status history:** the earlier "terminal-native-scrolling" amendment raised the live terminal
 > to `scrollback > 0`; that was reverted (it reintroduced duplicate-pane accumulation and

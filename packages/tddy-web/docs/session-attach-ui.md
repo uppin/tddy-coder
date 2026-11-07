@@ -20,7 +20,7 @@ upload).
 | `lib/attachmentBytes.ts` | Binary-unit formatting (`8 MiB`), which the decimal `formatBytes` cannot produce |
 
 Reused rather than rebuilt: `lib/fileUploadChunks.ts` (`chunkFile`, `UPLOAD_CHUNK_SIZE`) and
-`lib/randomId.ts` from [terminal-file-upload.md](terminal-file-upload.md); `WorktreeFileTree` +
+`lib/randomId.ts` from [terminal-file-upload.md](../../tddy-terminal-web/docs/terminal-file-upload.md); `WorktreeFileTree` +
 `worktreeFilesApi` from `components/session/` for the two tree-browsing picker scopes.
 
 ## Invariants worth not breaking

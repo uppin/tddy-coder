@@ -130,7 +130,7 @@ See [capability gating](capability-gating.md).
 
 ## Opening a terminal
 
-`openTerminal(options)` returns the [terminal feed](terminal-session.md) for this session — a byte
+`openTerminal(options)` returns the [terminal feed](../../tddy-terminal-web/docs/terminal-session.md) for this session — a byte
 stream, and a history fetcher where the transport can serve one. The connection builds it, because
 the connection is the thing that knows how this session is reached; the component that renders it
 never learns which wire it is on, and asks `feedSupportsHistory(feed)` rather than which transport

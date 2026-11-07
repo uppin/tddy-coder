@@ -1,4 +1,4 @@
-# The session terminal (`src/components/GhosttyTerminalSession.tsx`, `rpc/connections/terminal.ts`)
+# The session terminal (`src/GhosttyTerminalSession.tsx`, `rpc/connections/terminal.ts`)
 
 One terminal component renders every session, on every wire. It takes a **terminal feed** — a byte
 stream, and a history fetcher where one can be served — and knows nothing else. It imports no
@@ -46,7 +46,7 @@ a membership test would offer a scrollback control that calls `undefined`.
 
 ## `SessionConnection.openTerminal(options)`
 
-A [session connection](session-connections.md) opens its own terminal. The connection already knows
+A [session connection](../../tddy-web/docs/session-connections.md) opens its own terminal. The connection already knows
 the host, the session and the wire; `TerminalOptions` carries the four things it provably cannot:
 
 | Option | Why the connection cannot know it |

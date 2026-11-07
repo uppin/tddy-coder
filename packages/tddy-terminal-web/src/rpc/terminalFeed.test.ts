@@ -15,7 +15,7 @@
  *     terminal; a token snapshotted at open goes stale and every later keystroke is refused
  *     silently, since input has no reply the terminal renders.
  *
- * Technical: `packages/tddy-web/src/rpc/connections/terminalFeed.ts`
+ * Technical: `packages/tddy-terminal-web/src/rpc/terminalFeed.ts`
  */
 
 import { describe, expect, it } from "bun:test";

@@ -20,6 +20,7 @@
  * Feature: `docs/ft/web/session-drawer.md#fast-session-change` (req 2, 3)
  */
 
+import type { ByteDelta } from "tddy-terminal-web";
 import type { SessionAttachmentHint, SessionConnection } from "tddy-client-web/connections/session";
 
 export interface SessionRuntimeState {
@@ -59,13 +60,8 @@ export interface ByteSample {
   at: number;
 }
 
-/** A single terminal I/O event, as fired by the terminal's `onBytes` sink. One direction per event:
- *  an output chunk carries `bytesIn`, a batched input yield carries `bytesOut`. Either field omitted
- *  ⇒ 0. */
-export interface ByteDelta {
-  bytesIn?: number;
-  bytesOut?: number;
-}
+/** The terminal's `onBytes` event, owned by `tddy-terminal-web`. */
+export type { ByteDelta };
 
 /**
  * Bind an `onBytes` sink to one session's runtime. Each call folds the delta into the registry's

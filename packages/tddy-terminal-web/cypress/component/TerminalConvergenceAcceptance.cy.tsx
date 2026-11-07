@@ -13,7 +13,7 @@
  * of what the canvas painted, the bytes it writes back, and the scrollback affordance. Delete the
  * component and every one of them fails.
  *
- * Docs: `packages/tddy-web/docs/terminal-session.md`.
+ * Docs: `packages/tddy-terminal-web/docs/terminal-session.md`.
  * Stack: `optional-livekit` node 5 of 7.
  */
 
