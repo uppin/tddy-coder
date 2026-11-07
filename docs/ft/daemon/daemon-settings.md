@@ -81,7 +81,7 @@ saves a URL sees whether the daemon reached it. A daemon that answers `Unimpleme
 gets no line and is not asked again; any other failed read shows **Status unavailable: <message>**
 on the LiveKit line, drops the Telegram block (whether the daemon has a Telegram entry is then
 unknown), and never lands in the save error. Implementation:
-[daemon-settings-screen.md](../../../packages/tddy-web/docs/daemon-settings-screen.md).
+[daemon-settings-screen.md](../../../packages/tddy-workspace-web/docs/daemon-settings-screen.md).
 
 ## What an update means
 

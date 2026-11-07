@@ -47,6 +47,7 @@ function theLoadedForm(
     livekitCommonRoom: "tddy-lobby",
     livekitApiSecretSet: true,
     livekitEnabled: true,
+    livekitIceGathering: "gather_once",
     webPort: "8899",
     webHost: "127.0.0.1",
     ...overrides,

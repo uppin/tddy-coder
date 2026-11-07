@@ -30,4 +30,4 @@ bunx cypress run --component --spec "cypress/component/CodexOAuth*.cy.tsx"
 
 ## Feature documentation
 
-**[Codex OAuth web relay](../../../../docs/ft/web/codex-oauth-web-relay.md)**
+**[Codex OAuth web relay](../../../docs/ft/web/codex-oauth-web-relay.md)**

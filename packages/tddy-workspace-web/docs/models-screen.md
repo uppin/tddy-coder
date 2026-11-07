@@ -1,5 +1,9 @@
 # Models & Agents screen (`#/models`)
 
+> **Package split (#web-split 13/17, PR #849):** this screen lives in `tddy-workspace-web`. The
+> container's data half described below as `ModelsAppPage` is the package's `ModelsContent`; `tddy-web`'s
+> `ModelsAppPage` is now only the `AppShell` around it.
+
 Lists the **providers**, **models** and **assistants** of every connected daemon in one place, with
 per-row load/unload, chat, and assistant composition.
 
@@ -7,7 +11,7 @@ Feature doc: [Models & Agents](../../../docs/ft/web/models-and-agents.md).
 
 ## Layout
 
-Container/presentational split, matching `components/projects/`:
+Container/presentational split, matching `src/projects/`:
 
 | File | Role |
 |---|---|
@@ -84,11 +88,13 @@ status plus result text. The mapping lives in `chat/toolCallPresentation.ts`, sh
 
 ## Tests
 
-`cypress/component/models/` — 84 specs across 14 files, driven by
-`cypress/support/rpc/modelRegistryBackend.ts` (a stateful in-memory fake, not stubs) and
-`mountWithPerDaemonLiveKitRpc` for the cross-host cases. Page object:
+`cypress/component/models/` — 15 files, driven by
+`cypress/support/rpc/modelRegistryBackend.ts` (a stateful in-memory fake, not stubs) and mounted
+through `cypress/support/mountModels.tsx` (`cy.mountWithClients` with per-daemon clients for the
+cross-host cases). Reaching the screen from the shell menu is `tddy-web`'s
+`cypress/component/models/ModelsNavAcceptance.cy.tsx`. Page object:
 `cypress/support/pages/modelsScreenPage.ts`; its attribute accessors throw on a missing `data-*`
 rather than substituting a default, so a component that stops emitting one fails loudly.
 
-Pure logic: `mergeRegistryEntries.test.ts`, `registryChatTarget.test.ts`,
-`chat/toolCallPresentation.test.ts` under `bun test`.
+Pure logic: `src/models/mergeRegistryEntries.test.ts`, `src/models/registryChatTarget.test.ts` under
+`bun test` (tool-call presentation is `tddy-chat-web`'s).

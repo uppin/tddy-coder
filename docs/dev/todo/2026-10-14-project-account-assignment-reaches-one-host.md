@@ -7,7 +7,7 @@
 
 `SetProjectAccounts` (and `SetProjectDefaultBranch`) route to exactly one host:
 - the handler serves `req.daemon_instance_id` (`tddy-daemon-rpc/src/project/coordinate_handlers.rs:487-528`);
-- the web sends it to `group.hosts[0]` (`tddy-web/src/components/projects/ProjectsScreen.tsx:269,301-306`).
+- the web sends it to `group.hosts[0]` (`tddy-workspace-web/src/projects/ProjectsScreen.tsx:269,301-306`).
 
 Every other host owning the same `project_id` keeps its own `projects.yaml` row without the
 assignment. A session started there resolves **not assigned**. The documentation says the opposite:

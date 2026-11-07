@@ -1,4 +1,8 @@
-# Accounts screen (`src/components/accounts/`)
+# Accounts screen (`src/accounts/`)
+
+> **Package split (#web-split 13/17, PR #849):** this screen lives in `tddy-workspace-web`. The
+> container's data half described below as `AccountsAppPage` is the package's `AccountsContent`; `tddy-web`'s
+> `AccountsAppPage` is now only the `AppShell` around it.
 
 Every credential the selected daemon holds for the signed-in person, grouped by provider, with
 **rename** and **remove**. Product view: [docs/ft/web/accounts-screen.md](../../../docs/ft/web/accounts-screen.md).
@@ -8,13 +12,13 @@ Service: [tddy-accounts](../../tddy-accounts/docs/accounts-service.md).
 
 | | |
 |---|---|
-| Route | `ACCOUNTS_ROUTE = "/accounts"` and `isAccountsPath` in `src/routing/appRoutes.ts` — an exact match: not `/accounts-archive`, not `/accounts/github` |
-| Dispatch | one branch in the `src/index.tsx` route chain, after Hosts |
+| Route | `ACCOUNTS_ROUTE = "/accounts"` and `isAccountsPath` in `tddy-web`'s `src/routing/appRoutes.ts` — an exact match: not `/accounts-archive`, not `/accounts/github` |
+| Dispatch | one branch in the `tddy-web`'s `src/index.tsx` route chain, after Hosts |
 | Nav | `shell-menu-accounts` in `DaemonNavMenu`, between **Hosts** and **VMs** |
 
 **Not capability-gated.** Accounts is plain RPC over whatever wire the host connection was opened on,
 so the screen reads no `capabilities` set and `useHasCapability` stays the single predicate
-([capability gating](capability-gating.md#the-one-predicate)).
+([capability gating](../../tddy-web/docs/capability-gating.md#the-one-predicate)).
 
 ## Components
 
@@ -41,7 +45,7 @@ still what the vault holds. The daemon's reason is shown without the transport's
 | `error` | a rejected `ListAccounts` | `accounts-error` — the daemon's reason, verbatim |
 
 The screen asks for no passphrase itself. The app-wide `CredentialVaultPrompt`
-([daemon sign-in](daemon-sign-in.md)) does; the uninitialized and locked notices point at it and say
+([daemon sign-in](../../tddy-web/docs/daemon-sign-in.md)) does; the uninitialized and locked notices point at it and say
 that reloading the page brings it back after "Not now".
 
 A row is addressed by `provider` **and** `accountId` (`accounts-row-<provider>-<accountId>`): an
@@ -92,9 +96,9 @@ it.
 | Spec | Pins |
 |---|---|
 | `cypress/component/AccountsScreenAcceptance.cy.tsx` (page object `cypress/support/pages/accountsScreenPage.ts`) | grouping by provider; the subject beside the label; empty, uninitialized, locked and errored as four distinct notices; rename through `SetAccountLabel` with the identity unchanged; a failed rename reported beside the list; removal only after confirmation; no sync badge for `UNSPECIFIED`, a `Refused` badge, a `Synced` badge |
-| `cypress/component/ProviderAccountDefaultsAcceptance.cy.tsx` | marking an account the Claude CLI default sends `SetProviderAccountDefaults`; a default taken by another account leaves the row that held it; the New-session form pre-selects the default |
+| `tddy-web`'s `cypress/component/ProviderAccountDefaultsAcceptance.cy.tsx` | marking an account the Claude CLI default sends `SetProviderAccountDefaults`; a default taken by another account leaves the row that held it; the New-session form pre-selects the default |
 | `cypress/component/ProviderAccountConnectAcceptance.cy.tsx` | connecting a Meta account adds it to its provider group with its preset; a rejected key shows the daemon's reason and adds nothing; the URL field appears only for presets whose endpoint the operator supplies; the key is never shown once sent |
-| `src/routing/appRoutes.test.ts` § accounts route | `/accounts` matches; `/accounts-archive` and `/accounts/github` do not |
+| `tddy-web`'s `src/routing/appRoutes.test.ts` § accounts route | `/accounts` matches; `/accounts-archive` and `/accounts/github` do not |
 | `ModelsNavAcceptance.cy.tsx`, `PresenceCapabilityGatingAcceptance.cy.tsx` | the menu's order, with **Accounts** after **Hosts** |
 
 All use `mountWithRpc` + `anInMemoryRpcBackend`; Storybook: `AccountsScreen.stories.tsx` (Listed,

@@ -1,4 +1,4 @@
-# Daemon sign-in (`src/components/DaemonLoginScreen.tsx`, `src/components/DeviceLoginPanel.tsx`, `src/hooks/useAuth.ts`, `src/components/CredentialVaultPrompt.tsx`)
+# Daemon sign-in (`tddy-workspace-web`'s `src/signin/DaemonLoginScreen.tsx`, `src/signin/DeviceLoginPanel.tsx`, `src/signin/CredentialVaultPrompt.tsx`; `tddy-web`'s `src/hooks/useAuth.ts`)
 
 A daemon-mode page that is signed out shows `DaemonLoginScreen`. What it offers is decided by the
 daemon, never guessed by the page: the daemon **declares** which GitHub sign-in flow it serves, and

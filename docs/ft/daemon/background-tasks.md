@@ -244,8 +244,8 @@ packages/tddy-vm
 ├── src/build.rs    — build_vm_image_from_spec refactored to TaskBody (cancellable)
 └── src/service.rs  — BuildVmImage spawns a vm_build Task + adapts channel output
 
-packages/tddy-web
-└── src/components/tasks/TasksAppPage.tsx  — /tasks page
+packages/tddy-workspace-web
+└── src/tasks/TasksScreen.tsx  — /tasks content (tddy-web's TasksDrawerScreen is the shell)
 ```
 
 ## Requirements

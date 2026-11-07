@@ -2,7 +2,7 @@
 
 Feature doc: [Daemon settings § On the settings screen](../../../docs/ft/daemon/daemon-settings.md#on-the-settings-screen).
 
-`components/settings/DaemonSettingsScreen.tsx` renders two status lines from
+`src/settings/DaemonSettingsScreen.tsx` renders two status lines from
 `DaemonConfigService.GetIntegrationStatus`: the LiveKit block's
 (`data-testid="daemon-settings-livekit-status"`, from the `livekit` entry) and a **Telegram** block
 (`data-testid="daemon-settings-telegram-status"`, from the `telegram` entry). The Telegram block has

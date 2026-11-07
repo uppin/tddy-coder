@@ -1,5 +1,9 @@
 # Projects screen (`/projects`)
 
+> **Package split (#web-split 13/17, PR #849):** this screen lives in `tddy-workspace-web`. The
+> container's data half described below as `ProjectsAppPage` is the package's `ProjectsContent`; `tddy-web`'s
+> `ProjectsAppPage` is now only the `AppShell` around it.
+
 Dedicated project-management screen in daemon mode, reachable from the `DaemonNavMenu`
 (hash route `/projects`, `PROJECTS_ROUTE`/`isProjectsPath` in `routing/appRoutes.ts`,
 dispatched in `index.tsx`). Product spec: [projects-screen-multi-host.md](../../../docs/ft/web/projects-screen-multi-host.md).
@@ -8,7 +12,7 @@ dispatched in `index.tsx`). Product spec: [projects-screen-multi-host.md](../../
 
 Container + presentational split, mirroring `VmsAppPage`/`WorktreesAppPage`:
 
-- **`components/projects/ProjectsAppPage.tsx`** — data container. `useDaemonClient(ConnectionService)`
+- **`src/projects/ProjectsContent.tsx`** — data container (`tddy-web`'s `ProjectsAppPage` wraps it in the shell). `useDaemonClient(ConnectionService)`
   (shared `SelectedDaemonProvider`) polls `listProjects` and wires `createProject`; the selectable
   **hosts** come from the same shared context (`useDaemons()`) — daemon-role participants in the
   common LiveKit room, classified by `daemonHostsFromParticipants` (`tddy-client-web` `lib/participantRole`), so
@@ -17,7 +21,7 @@ Container + presentational split, mirroring `VmsAppPage`/`WorktreesAppPage`:
   shared room + `useLiveKitTransportFactory` (rather than routing through the selected daemon and
   relying on a peer-forward hop), sending `userRelativePath` through to the RPC. List/create still
   use the selected-daemon client. Renders `DaemonNavMenu` + `ProjectsScreen`.
-- **`components/projects/ProjectsScreen.tsx`** — pure props + local UI state. Groups
+- **`src/projects/ProjectsScreen.tsx`** — pure props + local UI state. Groups
   `ProjectEntry[]` by logical `projectId` (a project may span hosts), rendering one card per
   project with a **row per hosting `daemonInstanceId`** (and its `mainRepoPath`). Provides:
   - the create-project form (relocated from `ConnectionScreen`), and
@@ -54,7 +58,7 @@ Test IDs: `project-account-row-<projectId>-<provider>`, `project-account-select-
 
 ## Local gh
 
-`components/projects/ProjectLocalGh.tsx` holds the card's **Local gh** controls:
+`src/projects/ProjectLocalGh.tsx` holds the card's **Local gh** controls:
 
 - **`LocalGhToggle`** — a checkbox on the card. Turning it on sends `SetProjectAccounts` with the
   project's assignments minus the GitHub one and `localGh: true`; turning it off sends `localGh:
@@ -76,7 +80,7 @@ page-object helpers `localGhToggle`, `turnLocalGhOn`, `hostGhState`. Acceptance:
 
 ## Main session link
 
-`components/projects/ProjectMainSessionLink.tsx` is the card's link to the project's **main**
+`src/projects/ProjectMainSessionLink.tsx` is the card's link to the project's **main**
 session. `ProjectsScreen` keeps each host's `ProjectEntry.homeSessionId` on its
 `ProjectGroup.hosts` entry (main is per host), and `ProjectCard` passes the first host's — the card's
 primary host — to the link: empty renders **Set up main** (`#` + `sessionsProjectHomeSetupPath(id)`,
@@ -86,9 +90,9 @@ The setup pane itself acts on the drawer's selected host, not on the card's prim
 
 Test ID: `project-main-session-link-<projectId>`; page-object helper
 `projectHomeSetupPage.projectCardLink`. Acceptance:
-`cypress/component/ProjectHomeSetupLinkAcceptance.cy.tsx` (Set up main / Open main from the card),
-`cypress/component/ProjectHomeSetupPaneAcceptance.cy.tsx` and
-`cypress/component/ProjectHomeReplaceAcceptance.cy.tsx` (the drawer's setup pane).
+`tddy-web`'s `cypress/component/ProjectHomeSetupLinkAcceptance.cy.tsx` (Set up main / Open main from the card),
+`tddy-web`'s `cypress/component/ProjectHomeSetupPaneAcceptance.cy.tsx` and
+`tddy-web`'s `cypress/component/ProjectHomeReplaceAcceptance.cy.tsx` (the drawer's setup pane).
 
 ## Role derivation
 
@@ -101,7 +105,7 @@ daemon's `eligible_daemon_from_participant_fields`, so client host selection and
 ## Failures
 
 Every RPC failure is shown in the daemon's words, where it happened (conventions:
-[operator-visible-failures.md](operator-visible-failures.md)). With no wire to the host at all, the
+[operator-visible-failures.md](../../tddy-web/docs/operator-visible-failures.md)). With no wire to the host at all, the
 layout's host connection gate covers the screen.
 
 - **Create project.** The reason appears under the form (`projects-create-project-error`), and what

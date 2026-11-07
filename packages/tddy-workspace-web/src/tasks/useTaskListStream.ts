@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState } from "react";
 import { TaskService, type TaskInfo } from "tddy-client-web/gen/tasks_pb";
-import { useDaemonClient } from "tddy-client-web";
+import { tddyDebug, useDaemonClient } from "tddy-client-web";
+
+const dbg = tddyDebug("tddy:workspace");
 
 /** Floor applied to every reconnect, including a clean stream end, so a stream that keeps ending
  * immediately (e.g. no live updates pending) can never spin the client or hammer the daemon. */
@@ -53,7 +55,7 @@ export function useTaskListStream(sessionToken: string) {
           retryDelay = MIN_RECONNECT_DELAY_MS;
         } catch (e) {
           if (e instanceof DOMException && e.name === "AbortError") break;
-          console.debug("[useTaskListStream] error, reconnecting:", e);
+          dbg("useTaskListStream: error, reconnecting: %o", e);
           retryDelay =
             retryDelay === 0 ? MIN_RECONNECT_DELAY_MS * 4 : Math.min(retryDelay * 2, 30000);
         }

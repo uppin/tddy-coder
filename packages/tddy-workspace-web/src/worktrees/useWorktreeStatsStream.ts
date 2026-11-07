@@ -28,7 +28,9 @@ import {
   type WorktreeStatsRow,
   type WorktreeStatsStreamEvent,
 } from "../lib/worktreeSize";
-import { useDaemonClient, useAuth } from "tddy-client-web";
+import { tddyDebug, useAuth, useDaemonClient } from "tddy-client-web";
+
+const dbg = tddyDebug("tddy:workspace");
 
 export interface UseWorktreeStatsStreamResult {
   /** Current worktree rows, folded from the stream. Empty until the first snapshot arrives. */
@@ -128,7 +130,7 @@ export function useWorktreeStatsStream(projectId: string): UseWorktreeStatsStrea
         // A stream aborted on unmount/re-subscribe surfaces as an AbortError; ignore it. Any other
         // error while still mounted leaves the last-known rows in place (no fallback fabrication).
         if (!cancelled) {
-          console.debug("[useWorktreeStatsStream] streamWorktreeStats error", err);
+          dbg("useWorktreeStatsStream: streamWorktreeStats error: %o", err);
         }
       }
     })();
@@ -152,7 +154,7 @@ export function useWorktreeStatsStream(projectId: string): UseWorktreeStatsStrea
       void client
         .calculateWorktreeSize({ sessionToken: token, projectId: trimmedProjectId, worktreePath: path })
         .catch((err) => {
-          console.debug("[useWorktreeStatsStream] calculateWorktreeSize error", err);
+          dbg("useWorktreeStatsStream: calculateWorktreeSize error: %o", err);
         });
     },
     [client, token, trimmedProjectId],

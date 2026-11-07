@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState } from "react";
 import { TaskService } from "tddy-client-web/gen/tasks_pb";
-import { useDaemonClient } from "tddy-client-web";
+import { tddyDebug, useDaemonClient } from "tddy-client-web";
+
+const dbg = tddyDebug("tddy:workspace");
 
 export function useTaskChannelStream(
   sessionToken: string,
@@ -36,7 +38,7 @@ export function useTaskChannelStream(
         }
       } catch (e) {
         if (!(e instanceof DOMException && e.name === "AbortError")) {
-          console.debug("[useTaskChannelStream] error:", e);
+          dbg("useTaskChannelStream: error: %o", e);
         }
       }
     })();

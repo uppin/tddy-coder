@@ -3,7 +3,7 @@
 `tddy-accounts` serves `accounts.AccountsService` — what a person can **see and curate** in the
 credential vault `tddy-credentials` seals ([credential store](../../tddy-credentials/docs/credential-store.md)).
 It is the surface the `/accounts` screen in `tddy-web` reads
-([accounts screen](../../tddy-web/docs/accounts-screen.md)); the product view is
+([accounts screen](../../tddy-workspace-web/docs/accounts-screen.md)); the product view is
 [docs/ft/web/accounts-screen.md](../../../docs/ft/web/accounts-screen.md).
 
 Three methods that read and curate, two that link ([Linking](#linking)) and four for
