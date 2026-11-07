@@ -462,3 +462,4 @@ impl DaemonSessionHost {
 }
 
 mod rpc_activity;
+mod svc_room_builders;

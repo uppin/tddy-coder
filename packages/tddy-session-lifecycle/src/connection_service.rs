@@ -550,6 +550,5 @@ pub use svc_list_exec_tools_wiring::start_choices;
 mod svc_coding_agents_wiring;
 mod svc_project_notification_log_wiring;
 mod svc_reachable_sessions;
-mod svc_room_builders;
 mod svc_session_identity_wiring;
 mod svc_worktree_observer_wiring;
