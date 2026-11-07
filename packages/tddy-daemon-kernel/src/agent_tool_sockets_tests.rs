@@ -341,3 +341,23 @@ async fn an_embedded_host_tells_every_session_the_runtimes_one_socket() {
     // Then — guard: the desktop keeps its single socket
     assert_eq!(path, Ok(runtime_socket));
 }
+
+#[tokio::test]
+async fn an_embedded_host_whose_socket_nobody_serves_is_refused_not_pointed_at_it() {
+    // Given the socket file an exited embedded daemon left behind: binding creates the file, and
+    // dropping the listener does not unlink it
+    let data = a_data_dir();
+    let runtime_socket = crate::agent_tool_socket_path(data.path());
+    drop(UnixListener::bind(&runtime_socket).expect("the runtime's socket binds"));
+    let sockets = AgentToolSockets::new(AgentToolSocketPlacement::Embedded);
+
+    // When a session asks for its socket
+    let refusal = sockets
+        .ensure_bound(&this_os_user(), data.path())
+        .await
+        .map_err(|e| format!("{e:#}"));
+    let _ = std::fs::remove_file(&runtime_socket);
+
+    // Then the dead socket is not chosen: every report sent to it would be lost
+    assert!(refusal.is_err(), "{refusal:?}");
+}

@@ -226,6 +226,8 @@ fn a_process_is_alive(pid: u32) -> bool {
 impl TmuxAgentDaemon {
     /// A daemon restarted over the same sessions directory: no terminals registered, same tmux.
     fn restarted(&self) -> Arc<DaemonSessionHost> {
+        // The daemon that restarts is gone: nothing of it still listens on its agent-tool sockets.
+        self.host.agent_tool_sockets().stop_serving();
         a_session_host(
             self.config.clone(),
             self.sessions_base.clone(),

@@ -395,14 +395,8 @@ fn write_jail_hooks(
         ))
     })?;
     let tddy_tools_path = tddy_tools.binary.to_string_lossy().into_owned();
-    let probe = crate::claude_cli_spawn_steps::claude_cli_hooks(
-        config,
-        Path::new("/"),
-        spec,
-        &tddy_tools_path,
-    );
     if !spec.has(tddy_coding_agent_specs::Capability::Hooks)
-        || !hooks_report_over_the_agent_tool_socket(spec, &probe)
+        || !hooks_report_over_the_agent_tool_socket(spec)
     {
         return Ok(None);
     }
@@ -416,9 +410,9 @@ fn write_jail_hooks(
         os_user,
         hook_token: &hook_token,
         daemon_socket: Some(&daemon_socket),
-        answer_wait_secs: probe.answer_wait_secs,
+        answer_wait_secs: spec.answer_wait_secs(),
     };
-    crate::claude_cli_spawn_steps::record_hook_answer_wait(session_dir, &probe)?;
+    crate::claude_cli_spawn_steps::record_answer_wait_secs(session_dir, spec.answer_wait_secs())?;
     let adapter = tddy_coding_agent_specs::slots::hooks::adapter(&spec.agent.hooks.adapter)
         .map_err(|e| Status::internal(e.to_string()))?;
     let (path, bytes) = adapter

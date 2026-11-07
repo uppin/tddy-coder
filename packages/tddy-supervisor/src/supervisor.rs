@@ -117,9 +117,14 @@ impl Supervisor {
                     Ok((host.user.clone(), Arc::new(listener)))
                 })
                 .collect::<anyhow::Result<Vec<_>>>()?;
-            // TODO(agent-tool-socket-per-user): implement — bind every `agent_tool_sockets` entry
-            // with `host_socket::bind_host_socket`, as the host sockets above.
-            let agent_tool_listeners = Vec::new();
+            let agent_tool_listeners = service
+                .agent_tool_sockets
+                .iter()
+                .map(|tools| {
+                    let listener = host_socket::bind_host_socket(&service.name, tools)?;
+                    Ok((tools.user.clone(), Arc::new(listener)))
+                })
+                .collect::<anyhow::Result<Vec<_>>>()?;
             slots.push(Slot {
                 runtime: ServiceRuntime::new(service),
                 service: service.clone(),

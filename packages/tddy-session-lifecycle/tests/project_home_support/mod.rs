@@ -191,7 +191,8 @@ pub fn git(cwd: &Path, args: &[&str]) -> String {
     String::from_utf8_lossy(&out.stdout).trim().to_string()
 }
 
-fn current_os_user() -> String {
+/// The OS user the test process runs as, which the sessions run as.
+pub fn current_os_user() -> String {
     let pw = unsafe { libc::getpwuid(libc::getuid()) };
     assert!(!pw.is_null(), "current uid must resolve to a passwd entry");
     unsafe { std::ffi::CStr::from_ptr((*pw).pw_name) }

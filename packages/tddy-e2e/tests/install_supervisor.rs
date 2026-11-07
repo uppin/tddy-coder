@@ -316,6 +316,21 @@ fn installs_a_supervisor_config_declaring_the_daemon_as_an_unprivileged_service(
 }
 
 #[test]
+fn installs_a_supervisor_config_that_documents_the_per_user_agent_tool_sockets() {
+    // Given
+    let tree = an_install_tree();
+
+    // When
+    tree.install();
+
+    // Then — an operator finds the setting an unlisted session user is refused for, beside the
+    // host-session one, with the descriptor name the daemon reads it by
+    let config = tree.installed_config("supervisor.yaml");
+    assert_contains(&config, "# agent_tool_sockets:", "the supervisor config");
+    assert_contains(&config, "agent-tools.<user>", "the supervisor config");
+}
+
+#[test]
 fn no_longer_installs_a_standalone_daemon_unit() {
     // Given
     let tree = an_install_tree();

@@ -71,7 +71,10 @@ async fn a_host_cursor_cli_start_and_resume_spawn_a_stub_agent_whose_argv_and_cw
 #[serial_test::serial]
 async fn on_an_embedded_daemon_a_host_cursor_sessions_hook_updates_its_activity_and_status() {
     // Given — a daemon serving its agent-tool socket, as Tddy Desktop's embedded daemon does
-    let daemon = a_cursor_daemon(ADaemonSpec::default());
+    let daemon = a_cursor_daemon(ADaemonSpec {
+        embedded: true,
+        ..ADaemonSpec::default()
+    });
     let _socket = AnAgentToolSocket::serving_the_activity_of(&daemon);
 
     // When — the stub runs its `beforeSubmitPrompt` hook as Cursor does
@@ -227,6 +230,7 @@ mod jailed {
             cursor_override: Some(cursor_yaml_declaring_hosts(std::slice::from_ref(
                 &declared_host,
             ))),
+            ..ADaemonSpec::default()
         });
 
         // When

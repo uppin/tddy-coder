@@ -286,6 +286,8 @@ impl HarnessTmuxDaemon {
 
     /// [`Self::restarted`], with the restarted daemon's terminal manager.
     fn restarted_with_its_manager(&self) -> (Arc<DaemonSessionHost>, Arc<CliSessionManager>) {
+        // The daemon that restarts is gone: nothing of it still listens on its agent-tool sockets.
+        self.host.agent_tool_sockets().stop_serving();
         let manager = Arc::new(CliSessionManager::new());
         let host = a_session_host(
             self.config.clone(),

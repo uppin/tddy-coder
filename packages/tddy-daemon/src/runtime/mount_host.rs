@@ -255,6 +255,10 @@ impl BuildContext {
         let approval_routes = Arc::default();
         // The registry `runtime::build` loaded once, shared with Telegram and the reserved-ids step.
         let coding_agents = Arc::clone(&self.coding_agents);
+        // The agent-tool sockets the supervisor handed over, read before the local socket server
+        // is spawned: adopting its own listener clears the `LISTEN_*` variables they are announced in.
+        self.agent_tool_sockets
+            .adopt_inherited(tddy_daemon_kernel::agent_tool_sockets::adopt_from_environment());
         let connection_impl = tddy_session_lifecycle::connection_service::DaemonSessionHost::new(
             config.clone(),
             sessions_base_resolver.clone(),
@@ -292,6 +296,7 @@ impl BuildContext {
                     vaults: self.identity.credential_vaults.clone(),
                     user_resolver,
                     tokens: Some(session_tokens.clone()),
+                    agent_tool_sockets: Arc::clone(&self.agent_tool_sockets),
                 },
             )
             .with_approval_routes(Arc::clone(&approval_routes)),
@@ -301,11 +306,9 @@ impl BuildContext {
         .with_session_tokens(session_tokens.clone())
         .with_askpass_endpoint(askpass_endpoint)
         .with_approval_routes(approval_routes)
+        .with_agent_tool_sockets(Arc::clone(&self.agent_tool_sockets))
         // Read here, before the local socket server is spawned: adopting its own listener
         // clears the `LISTEN_*` variables the host sockets are announced in.
-        // TODO(agent-tool-socket-per-user): implement — adopt the `agent-tools.<user>` listeners
-        // the supervisor handed over (`tddy_daemon_kernel::agent_tool_sockets::agent_tool_fds`)
-        // here too, before the local socket clears the `LISTEN_*` variables.
         .with_inherited_host_session_sockets(
             tddy_session_lifecycle::connection_service::inherited_host_sockets::adopt_from_environment(),
         ))

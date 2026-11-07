@@ -66,6 +66,17 @@ services:
     # host_sockets:
     #   - {user: alice, path: /run/tddy-host-sessions/alice/host.sock}
     #   - {user: bob, path: /run/tddy-host-sessions/bob/host.sock}
+    # One agent-tool socket per OS user, for that user's agents to report their hooks and make their
+    # tool calls over (`tddy-tools session-hook`, `tddy-tools notify`, the tool server). Made and
+    # handed over exactly like `host_sockets` — after them, announced as `agent-tools.<user>` — and
+    # served with the daemon's own RPC roster. Unlike a host-session socket, an OS user NOT listed
+    # here cannot start a session at all: the start is refused, naming this setting, rather than
+    # pointing the agent at a path it cannot reach (whose every report would be swallowed). List the
+    # same users as `host_sockets`, each in a directory of its own — never the host socket's — and
+    # note that both kinds together may hand over at most 15 descriptors.
+    # agent_tool_sockets:
+    #   - {user: alice, path: /run/tddy-agent-tools/alice/agent.sock}
+    #   - {user: bob, path: /run/tddy-agent-tools/bob/agent.sock}
     restart:
       max_retries: 5
       initial_backoff_ms: 500

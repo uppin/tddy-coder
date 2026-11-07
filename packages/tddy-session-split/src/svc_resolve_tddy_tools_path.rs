@@ -7,11 +7,16 @@ use tddy_rpc::Status;
 use crate::split_ports::SplitSessions;
 
 impl SplitSessions {
-    /// The agent-facing tool socket, when this daemon is embedded in an application and therefore
-    /// serves no HTTP listener for a co-located agent to POST to. See
-    /// [`tddy_daemon_kernel::embedded_host_agent_tool_socket`].
-    pub(crate) fn agent_tool_socket_for_embedded_host(&self) -> Option<String> {
-        tddy_daemon_kernel::embedded_host_agent_tool_socket(&self.tddy_data_dir)
+    /// `os_user`'s agent-tool socket, served by this daemon (bound first when it is not yet): where
+    /// a co-located agent of that user reports its hooks and makes its tool calls. A user this
+    /// daemon cannot give one — under the supervisor, one not listed under `agent_tool_sockets:` —
+    /// fails the start `FAILED_PRECONDITION`, naming the setting.
+    pub(crate) async fn agent_tool_socket_of(&self, os_user: &str) -> Result<String, Status> {
+        self.agent_tool_sockets
+            .ensure_bound(os_user, &self.tddy_data_dir)
+            .await
+            .map(|path| path.to_string_lossy().into_owned())
+            .map_err(|e| Status::failed_precondition(format!("{e:#}")))
     }
 
     /// Resolve the `tddy-tools` binary from this deployment's **toolchain** — the directory its

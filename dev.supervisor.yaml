@@ -45,6 +45,11 @@ services:
     # must be writable by you alone, so keep it under the checkout's tmp/.
     # host_sockets:
     #   - {user: CURRENT_USER, path: REPO_ROOT/tmp/host-sessions/CURRENT_USER/host.sock}
+    # The same for the agent-tool socket the user's agents report their hooks and tool calls over,
+    # handed after the host sockets as `agent-tools.CURRENT_USER`. A user not listed here cannot
+    # start a session under the supervisor, so uncomment it with host_sockets and the spawn_policy.
+    # agent_tool_sockets:
+    #   - {user: CURRENT_USER, path: REPO_ROOT/tmp/agent-tools/CURRENT_USER/agent.sock}
     restart:
       max_retries: 3
       initial_backoff_ms: 250

@@ -259,6 +259,9 @@ pub struct ADaemonSpec {
     pub probes: Vec<String>,
     /// Write this `cursor.yaml` override into `<tddyhome>/tools` before the registry loads.
     pub cursor_override: Option<serde_yaml::Value>,
+    /// An embedded daemon (Tddy Desktop): its sessions are told the runtime's one agent-tool
+    /// socket ([`AnAgentToolSocket`]) rather than a socket of their user's.
+    pub embedded: bool,
 }
 
 /// `specs/cursor.yaml`, parsed, for a test to edit into an override.
@@ -316,6 +319,15 @@ pub fn a_cursor_daemon(spec: ADaemonSpec) -> ACursorDaemon {
             }),
         ),
     ));
+    let host = if spec.embedded {
+        host.with_agent_tool_sockets(Arc::new(
+            tddy_daemon_kernel::agent_tool_sockets::AgentToolSockets::new(
+                tddy_daemon_kernel::agent_tool_sockets::AgentToolSocketPlacement::Embedded,
+            ),
+        ))
+    } else {
+        host
+    };
     let service = Arc::new(host);
     service.install_sandbox_rpc_bridge();
     ACursorDaemon {

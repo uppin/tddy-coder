@@ -38,15 +38,15 @@ like host-session sockets; consumers use the session user's socket and refuse a 
 
 ## Scope
 
-- [ ] Re-apply the held server binding and its 3 tests
-- [ ] Supervisor: `agent_tool_sockets: [{user, path}]`, validation (allowed user, distinct dir, `MAX_HANDED_OVER_LISTENERS`), `agent-tools.<user>` FD names, prefix pinned in both crates
-- [ ] Daemon: `AgentToolSockets` (twin of `HostSessionSockets`), `<data dir>/run-agent-tools/<user>/agent.sock`, `bind_owner_only` shared at `pub(crate)`, inherited-listener adoption
-- [ ] Consumers: `embedded_host_agent_tool_socket` replaced by `AgentToolSockets::ensure_bound(user, data_dir)`; unlisted user under the supervisor refused at start, naming the setting
-- [ ] Claude's and Cursor's host suites on a server daemon
-- [ ] Move `bind_owner_only`, its helpers (`ensure_dir`, `clear_stale_socket`, `chown`, `undo`) and the inherited-descriptor vetting (`adopt_descriptor`, `vet`, `require_listening`) from `tddy-agent-launch` to `tddy-daemon-kernel` as `pub`, with the refusal hint parameterised (`host_sockets:` / `agent_tool_sockets:`); `HostSessionSockets` calls the shared code
-- [ ] Remove `tddy_daemon_kernel::embedded_host_agent_tool_socket` and its 3 kernel unit tests once every consumer uses `ensure_bound`
-- [ ] Add `agent_tool_sockets:` entries to the install/e2e supervisor templates (`tddy-e2e/tests/install_supervisor.rs`, `./install`)
-- [ ] `tddy-stdio` from `[dev-dependencies]` to `[dependencies]` of `tddy-daemon-kernel` (serving the roster)
+- [x] The held server binding's 3 tests, per user (the held binding itself is NOT re-applied: design A replaces it)
+- [x] Supervisor: `agent_tool_sockets: [{user, path}]`, validation (allowed user, distinct dir, `MAX_HANDED_OVER_LISTENERS`), `agent-tools.<user>` FD names, prefix pinned in both crates
+- [x] Daemon: `AgentToolSockets` (twin of `HostSessionSockets`), `<data dir>/run-agent-tools/<user>/agent.sock`, `bind_owner_only` shared at `pub(crate)`, inherited-listener adoption
+- [x] Consumers: `embedded_host_agent_tool_socket` replaced by `AgentToolSockets::ensure_bound(user, data_dir)`; unlisted user under the supervisor refused at start, naming the setting
+- [x] Claude's and Cursor's host suites on a server daemon
+- [x] Move `bind_owner_only`, its helpers (`ensure_dir`, `clear_stale_socket`, `chown`, `undo`) and the inherited-descriptor vetting (`adopt_descriptor`, `vet`, `require_listening`) from `tddy-agent-launch` to `tddy-daemon-kernel` as `pub`, with the refusal hint parameterised (`host_sockets:` / `agent_tool_sockets:`); `HostSessionSockets` calls the shared code
+- [x] Remove `tddy_daemon_kernel::embedded_host_agent_tool_socket` and its 3 kernel unit tests once every consumer uses `ensure_bound`
+- [x] Add `agent_tool_sockets:` entries to the install/e2e supervisor templates (`tddy-e2e/tests/install_supervisor.rs`, `./install`)
+- [x] `tddy-stdio` from `[dev-dependencies]` to `[dependencies]` of `tddy-daemon-kernel` (serving the roster)
 
 ## Technical Changes
 
@@ -145,7 +145,7 @@ On a server daemon the hooks switch from HTTP to the user's socket, so `/green` 
 - [x] Run acceptance tests (verify they fail)
 - [x] USER REVIEW — acceptance tests
 - [x] TDD Red — write failing unit/integration tests
-- [ ] TDD Green — implement with quality code
+- [x] TDD Green — implement with quality code
 - [ ] Update documentation with progress
 - [ ] Repeat Red→Green→Update cycle until feature complete
 - [ ] Run the touched packages' tests (`./test -p {package}` per package) — verify 100% pass

@@ -673,7 +673,7 @@ warn_unless_file_declares() {
 # The service entry is the `- name: tddy-daemon` list item under `services:`. A service's own keys
 # sit exactly one indentation step (two spaces, as every rendered template and the supervisor's own
 # examples use) deeper than the `- name:` marker; anything deeper belongs to a nested block such as
-# `socket:` or `host_sockets:`, which carry their own `group:`/`user:` keys that must NOT be read as
+# `socket:`, `host_sockets:` or `agent_tool_sockets:`, which carry their own `group:`/`user:` keys that must NOT be read as
 # the service's identity. A config indented differently fails the extraction loudly rather than
 # matching the wrong line — a wrong identity here is a daemon crash-looping on its own log files.
 read_daemon_service_key() {
@@ -1259,6 +1259,8 @@ if "$want_supervisor"; then
       "__DAEMON_GROUP__=${DAEMON_GROUP}"
     echo "install:   spawn_policy and cgroup ceilings are left empty — no session may be spawned as another"
     echo "install:   user until an operator declares them (an empty policy grants no privilege)"
+    echo "install:   agent_tool_sockets is left empty too: list each session user there (see the example in"
+    echo "install:   ${SUPERVISOR_CONFIG_FILE}) or that user's session starts are refused"
   else
     echo "install: keeping existing supervisor config (not overwriting): ${SUPERVISOR_CONFIG_FILE}"
   fi

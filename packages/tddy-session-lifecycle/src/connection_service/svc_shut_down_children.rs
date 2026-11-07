@@ -19,8 +19,12 @@ impl DaemonSessionHost {
     /// Scoped to what this host *holds*: the CLI sessions and the workspace jails. The index
     /// daemon belongs to the runtime, which stops it beside this call. The crash-detector and
     /// restart-policy half of that entry stays open.
+    ///
+    /// It also stops serving the agent-tool sockets this host bound, which a daemon that exits
+    /// leaves nobody listening on.
     pub async fn shut_down_children(&self) {
         self.cli_manager.kill_all().await;
+        self.agent_tool_sockets.stop_serving();
         let stopped = self.workspace_sandboxes.stop_all().await;
         if !stopped.is_empty() {
             log::info!(

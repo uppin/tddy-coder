@@ -85,6 +85,9 @@ pub struct DaemonLauncherDeps {
     pub user_resolver: tddy_daemon_kernel::SessionUserResolver,
     /// What the agent's own tool credential is minted with; `None` for a daemon that signs none.
     pub tokens: Option<tddy_daemon_auth::SessionTokens>,
+    /// The agent-tool sockets the daemon serves, one per session OS user: the socket a managed
+    /// agent's `tddy-tools --mcp` server reaches the daemon over.
+    pub agent_tool_sockets: Arc<tddy_daemon_kernel::agent_tool_sockets::AgentToolSockets>,
 }
 
 /// What a headless conversation is launched with: the directory a conversation keeps the MCP config
@@ -168,6 +171,7 @@ impl DaemonCodingAgentLauncher {
             vaults,
             user_resolver,
             tokens,
+            agent_tool_sockets,
         } = deps;
         let relay_dir = tddy_data_dir.join(RELAY_SOCKET_DIR);
         let headless_dir = tddy_data_dir.join(HEADLESS_DIR);
@@ -192,11 +196,16 @@ impl DaemonCodingAgentLauncher {
         let tool_host = tddy_session_split::coding_agent_wiring::CodingAgentToolHost {
             config,
             tddy_data_dir,
+            agent_tool_sockets,
             tokens,
         };
         let tool_server: ToolServerResolver = Arc::new(move |launch| {
             tool_host
-                .tool_server(&launch.session_id, &launch.session_token)
+                .tool_server(
+                    &launch.session_id,
+                    &launch.session_os_user,
+                    &launch.session_token,
+                )
                 .map_err(|status| SubagentError::from(status.message().to_string()))
         });
         let mut launcher =

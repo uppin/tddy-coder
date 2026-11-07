@@ -1,4 +1,4 @@
-//! Validation of a service's `host_sockets:` against the rest of the supervisor configuration.
+//! Validation of a service's `host_sockets:` and `agent_tool_sockets:` against the rest of the supervisor configuration.
 //!
 //! Kept apart from [`crate::config`] because it needs the whole file at once: who may be given a
 //! host socket is `spawn_policy`'s decision, and what a socket's directory may not collide with is
@@ -11,10 +11,9 @@ use crate::config::{require_absolute, SupervisorConfig, ROOT_USER};
 use crate::error::ConfigError;
 use crate::socket::MAX_HANDED_OVER_LISTENERS;
 
-/// The checks on every service's `host_sockets`, which need the whole file: who may be given one
+/// The checks on every service's `host_sockets` and `agent_tool_sockets`, which need the whole file: who may be given one
 /// comes from `spawn_policy`, and what a path may not collide with is every other socket.
 pub(crate) fn validate(config: &SupervisorConfig) -> Result<(), ConfigError> {
-    let reject = |message: String| Err(ConfigError { message });
     // Every directory a declared socket lives in. A host socket's directory is handed to its
     // user wholesale, so another socket sharing it would be handed over with it.
     let mut directories: BTreeSet<&Path> = BTreeSet::new();
@@ -32,80 +31,133 @@ pub(crate) fn validate(config: &SupervisorConfig) -> Result<(), ConfigError> {
             .map(|s| s.path.as_path()),
     );
 
-    // TODO(agent-tool-socket-per-user): implement — validate every service's
-    // `agent_tool_sockets` as its `host_sockets` (needs `socket`, plain allowed non-root user, one
-    // per user, a directory of its own shared with no other declared socket), and count both kinds
-    // against `MAX_HANDED_OVER_LISTENERS`.
     for service in &config.services {
-        if service.host_sockets.is_empty() {
+        if service.host_sockets.is_empty() && service.agent_tool_sockets.is_empty() {
             continue;
         }
-        if service.socket.is_none() {
-            return reject(format!(
-                    "service `{}` declares host_sockets but no socket: descriptor 3 is always the service's own listener, and the host sockets follow it",
-                    service.name
-                ));
-        }
-        // Descriptor 3 plus one per host socket must fit the slots the supervisor reserves.
-        if 1 + service.host_sockets.len() > MAX_HANDED_OVER_LISTENERS {
-            return reject(format!(
-                "service `{}` declares {} host_sockets; at most {} fit",
+        let declared = service.host_sockets.len() + service.agent_tool_sockets.len();
+        // Descriptor 3 plus one per declared socket must fit the slots the supervisor reserves.
+        if 1 + declared > MAX_HANDED_OVER_LISTENERS {
+            return Err(ConfigError { message: format!(
+                "service `{}` declares {} host_sockets and {} agent_tool_sockets; at most {} fit together",
                 service.name,
                 service.host_sockets.len(),
+                service.agent_tool_sockets.len(),
                 MAX_HANDED_OVER_LISTENERS - 1
+            ) });
+        }
+        for (kind, sockets) in [
+            (SocketKind::HOST, &service.host_sockets),
+            (SocketKind::AGENT_TOOL, &service.agent_tool_sockets),
+        ] {
+            validate_kind(config, service, kind, sockets, &mut directories, &mut paths)?;
+        }
+    }
+    Ok(())
+}
+
+/// How a kind of per-OS-user socket is named in the file and in the refusals about it.
+#[derive(Clone, Copy)]
+struct SocketKind {
+    /// The `supervisor.yaml` key.
+    key: &'static str,
+    /// One socket of this kind, as a refusal names it.
+    noun: &'static str,
+}
+
+impl SocketKind {
+    /// The noun with its indefinite article.
+    fn with_article(self) -> String {
+        let article = if self.noun.starts_with(['a', 'e', 'i', 'o', 'u']) {
+            "an"
+        } else {
+            "a"
+        };
+        format!("{article} {}", self.noun)
+    }
+
+    const HOST: SocketKind = SocketKind {
+        key: "host_sockets",
+        noun: "host socket",
+    };
+    const AGENT_TOOL: SocketKind = SocketKind {
+        key: "agent_tool_sockets",
+        noun: "agent-tool socket",
+    };
+}
+
+/// One service's sockets of one kind: each needs the service's own listener at descriptor 3, an
+/// allowed non-root plain account, one per user, and a directory of its own.
+fn validate_kind<'a>(
+    config: &'a SupervisorConfig,
+    service: &'a crate::config::ManagedService,
+    kind: SocketKind,
+    sockets: &'a [crate::config::HostSocket],
+    directories: &mut BTreeSet<&'a Path>,
+    paths: &mut BTreeSet<&'a Path>,
+) -> Result<(), ConfigError> {
+    let reject = |message: String| Err(ConfigError { message });
+    if sockets.is_empty() {
+        return Ok(());
+    }
+    let SocketKind { key, noun } = kind;
+    if service.socket.is_none() {
+        return reject(format!(
+            "service `{}` declares {key} but no socket: descriptor 3 is always the service's own listener, and the {noun}s follow it",
+            service.name
+        ));
+    }
+    let mut users = BTreeSet::new();
+    for socket in sockets {
+        require_absolute(&format!("{noun} path"), &socket.path)?;
+        if socket.user == ROOT_USER {
+            return reject(format!(
+                "service `{}`: {} may not be given to `{ROOT_USER}`",
+                service.name,
+                kind.with_article()
             ));
         }
-        let mut users = BTreeSet::new();
-        for host in &service.host_sockets {
-            require_absolute("host socket path", &host.path)?;
-            if host.user == ROOT_USER {
-                return reject(format!(
-                    "service `{}`: a host socket may not be given to `{ROOT_USER}`",
-                    service.name
-                ));
-            }
-            if !is_one_safe_segment(&host.user) {
-                return reject(format!(
-                    "service `{}`: host socket user `{}` is not a plain account name",
-                    service.name, host.user
-                ));
-            }
-            if !config
-                .spawn_policy
-                .allowed_session_users
-                .contains(&host.user)
-            {
-                return reject(format!(
-                        "service `{}`: host socket user `{}` is not in spawn_policy.allowed_session_users; the supervisor would never run a session as them",
-                        service.name, host.user
-                    ));
-            }
-            if !users.insert(host.user.as_str()) {
-                return reject(format!(
-                    "service `{}` declares two host sockets for `{}`",
-                    service.name, host.user
-                ));
-            }
-            let directory = host.path.parent().filter(|d| d.parent().is_some());
-            let Some(directory) = directory else {
-                return reject(format!(
-                    "host socket path `{}` needs a directory of its own below the root",
-                    host.path.display()
-                ));
-            };
-            // Nothing declared may live *inside* the directory being handed over either: it
-            // would be locked behind the user's `0700`.
-            let encloses_another = paths.iter().any(|other| other.starts_with(directory));
-            if encloses_another
-                || !paths.insert(host.path.as_path())
-                || !directories.insert(directory)
-            {
-                return reject(format!(
-                        "host socket path `{}` shares a path or directory with another declared socket; its directory is handed to `{}`",
-                        host.path.display(),
-                        host.user
-                    ));
-            }
+        if !is_one_safe_segment(&socket.user) {
+            return reject(format!(
+                "service `{}`: {noun} user `{}` is not a plain account name",
+                service.name, socket.user
+            ));
+        }
+        if !config
+            .spawn_policy
+            .allowed_session_users
+            .contains(&socket.user)
+        {
+            return reject(format!(
+                "service `{}`: {noun} user `{}` is not in spawn_policy.allowed_session_users; the supervisor would never run a session as them",
+                service.name, socket.user
+            ));
+        }
+        if !users.insert(socket.user.as_str()) {
+            return reject(format!(
+                "service `{}` declares two {noun}s for `{}`",
+                service.name, socket.user
+            ));
+        }
+        let directory = socket.path.parent().filter(|d| d.parent().is_some());
+        let Some(directory) = directory else {
+            return reject(format!(
+                "{noun} path `{}` needs a directory of its own below the root",
+                socket.path.display()
+            ));
+        };
+        // Nothing declared may live *inside* the directory being handed over either: it
+        // would be locked behind the user's `0700`.
+        let encloses_another = paths.iter().any(|other| other.starts_with(directory));
+        if encloses_another
+            || !paths.insert(socket.path.as_path())
+            || !directories.insert(directory)
+        {
+            return reject(format!(
+                "{noun} path `{}` shares a path or directory with another declared socket; its directory is handed to `{}`",
+                socket.path.display(),
+                socket.user
+            ));
         }
     }
     Ok(())
