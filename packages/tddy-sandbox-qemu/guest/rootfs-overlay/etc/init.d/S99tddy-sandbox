@@ -58,7 +58,6 @@ jq -r '.env | to_entries[] | "export \(.key)=\(.value|@sh)"' "$PLAN_JSON" >/run/
          "--context-dir", $cwd,
          "--grpc-socket", "/run/tddy-sandbox-runner.sock",
          "--tool-ipc-socket", "/run/tddy-sandbox-runner-tools.sock",
-         "--model", "none",
          "--ready-marker", "/run/tddy-sandbox-runner.ready",
          "--grpc-listen-port", $port]
         + (.command | map("--pty-command=" + .))

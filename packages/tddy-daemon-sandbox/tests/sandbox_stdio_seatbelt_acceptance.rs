@@ -18,8 +18,8 @@ use tddy_daemon_sandbox::sandbox_session::{
     SandboxRunnerSpawn,
 };
 use tddy_rpc::{RpcClientTransport, RpcMessage, RpcResult, RpcService, Status};
-use tddy_service::proto::sandbox::{EchoRequest, EchoResponse};
 use tddy_sandbox::SandboxHandle;
+use tddy_service::proto::sandbox::{EchoRequest, EchoResponse};
 
 const CALL_TIMEOUT: Duration = Duration::from_secs(8);
 

@@ -55,7 +55,7 @@ Runs as the last BusyBox `sysvinit` script (`/etc/init.d/S99tddy-sandbox`, invok
    convention as `MountSpec` itself), read-only unless `writable` is `true`.
 3. Builds `tddy-sandbox-runner`'s full argv (`--session-id`, `--context-dir`, dummy
    `--grpc-socket`/`--tool-ipc-socket` paths under `/run` — required flags, but unused
-   in TCP mode; see [`runner.rs`](../../tddy-sandbox-runner/src/runner.rs) — `--model none`,
+   in TCP mode; see [`runner.rs`](../../tddy-sandbox-runner/src/runner.rs) —
    `--ready-marker`, `--grpc-listen-port <plan.json's control_port>`, and one
    `--pty-command=<token>` per `plan.json` `command` element) and execs it in the
    background, redirecting output to `/dev/console` (visible via the `-serial file:...` log

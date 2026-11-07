@@ -61,8 +61,8 @@ serves `--workspace-tools`, and refuses anything else (`nothing to run`). It has
 Code, Cursor, OpenCode and Muse included, is a tool plan its launcher renders from the agent's spec
 (`tddy-coding-agent-specs`). A provider route's secrets reach the child through the
 `TDDY_SECRET_<NAME>` files, and its files are written owner-only into the scratch
-(`tddy-sandbox-recipes`, `route_files.rs`). `--model` is still accepted and read by nothing
-(`docs/dev/todo/2026-11-03-runner-model-flag-is-vestigial.md`).
+(`tddy-sandbox-recipes`, `route_files.rs`). The runner has no `--model` flag: the
+parser refuses one, since what a confined agent runs on is its exec plan's argv.
 
 **Shutdown.** A jail that runs one process (an exec plan or a confined action) shuts its server down
 about 300 ms after that process exits. The exit wait runs on a detached thread, not on a

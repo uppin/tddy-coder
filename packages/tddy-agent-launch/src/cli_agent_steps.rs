@@ -420,7 +420,8 @@ impl SessionWiring {
 /// is registered `tddy-tools --mcp` with them — in a file of the session's directory, for a spec whose
 /// `mcp` slot names a file. A spec whose slot places its registration in the agent's home
 /// (`$HOME/.cursor/mcp.json`) or takes none registers nothing: that file is the operator's, and the
-/// pairs reach no one (docs/dev/todo/2026-11-05-cli-spec-features-leftovers.md).
+/// pairs reach no one through the registration; the agent's own shell reaches its controller through
+/// the worktree's `.tddy/session.json` pointer (`cli_session_pointer`).
 fn carry_on_the_tool_server(
     spec: &CodingAgentSpec,
     toolset: &mut AgentToolset,
