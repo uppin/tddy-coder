@@ -12,6 +12,7 @@
 | Run | Production lines | Note |
 |---|---|---|
 | 2026-11-06 | 501 → 531 | first detection — #825 replaced `daemon_config_from_fixture_file` and `builtin_coding_agents_for` with `coding_agents_with_binaries` and its fixture host `AHostOfBinaries` (the built-in agents on a host that maps each spec's `binary.env` to a stub, with an empty `PATH`). Not split: restructuring deferred to the `#agent-tools` sweep node (n20) by the developer |
+| 2026-11-07 | 531 → 531 | unchanged by #830 (`#agent-tools` 22/28), which touched it: `builtin_coding_agents()` is now passed to `DaemonSessionHost::new` instead of chained (`with_coding_agents_if_none` deleted), net zero lines |
 
 ## What would close it
 

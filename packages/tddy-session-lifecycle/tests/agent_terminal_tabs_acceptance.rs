@@ -368,8 +368,8 @@ fn session_host(
         tddy_session_lifecycle::peer_routing::PeerRouting::local_only(&config),
         Arc::new(tddy_daemon_kernel::operator_channel::NoOperatorChannel),
         manager,
+        agents,
     )
-    .with_coding_agents(agents)
 }
 
 /// Registers the session's main terminal — a stub that holds its PTY open — in `worktree`.

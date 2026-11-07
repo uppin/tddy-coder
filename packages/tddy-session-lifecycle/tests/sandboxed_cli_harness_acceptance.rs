@@ -379,8 +379,8 @@ fn session_host(
         tddy_session_lifecycle::peer_routing::PeerRouting::local_only(&config),
         Arc::new(tddy_daemon_kernel::operator_channel::NoOperatorChannel),
         Arc::new(CliSessionManager::new()),
+        agents,
     )
-    .with_coding_agents(agents)
 }
 
 /// The coding agents a daemon keeping its state in `tddy_home` launches from, as the daemon runtime

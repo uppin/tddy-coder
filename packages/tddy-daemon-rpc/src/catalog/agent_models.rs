@@ -27,10 +27,13 @@ pub(super) fn agent_models_cache() -> &'static std::sync::Mutex<
 /// Build the `tddy-tools list-models` argv for an agent probe. Always `["list-models", "--agent",
 /// <agent>]`; appends `["--binary-path", <path>]` when the caller resolved the binary the
 /// agent's spec lists its models with, so the impersonated child execs the fully-qualified
-/// binary instead of a PATH lookup.
+/// binary instead of a PATH lookup. `tools_dir` is the host's `<tddy home>/tools`, handed over as
+/// `["--tools-dir", <dir>]` so the listing is the host registry's — operator overrides applied —
+/// rather than the built-in specs'.
 pub(super) fn list_models_probe_args(
     agent: &str,
     binary_path: Option<&std::path::Path>,
+    tools_dir: &std::path::Path,
 ) -> Vec<String> {
     let mut args = vec![
         "list-models".to_string(),
@@ -41,6 +44,8 @@ pub(super) fn list_models_probe_args(
         args.push("--binary-path".to_string());
         args.push(path.to_string_lossy().into_owned());
     }
+    args.push("--tools-dir".to_string());
+    args.push(tools_dir.to_string_lossy().into_owned());
     args
 }
 

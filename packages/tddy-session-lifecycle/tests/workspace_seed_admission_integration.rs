@@ -231,8 +231,8 @@ fn a_codebase_host_in_a_common_room() -> ACodebaseHostInACommonRoom {
         peer_routing,
         Arc::new(NoOperatorChannel),
         Arc::new(CliSessionManager::new()),
+        tddy_session_lifecycle::test_util::builtin_coding_agents(),
     )
-    .with_coding_agents_if_none(tddy_session_lifecycle::test_util::builtin_coding_agents())
     .with_session_reach(Arc::new(ASessionRoomThatOpens));
 
     ACodebaseHostInACommonRoom {

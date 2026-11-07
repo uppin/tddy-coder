@@ -160,8 +160,8 @@ pub fn test_host(sessions_base: PathBuf) -> DaemonSessionHost {
         PeerRouting::local_only(&config),
         Arc::new(tddy_daemon_kernel::operator_channel::NoOperatorChannel),
         Arc::new(CliSessionManager::new()),
+        builtin_coding_agents(),
     )
-    .with_coding_agents(builtin_coding_agents())
 }
 
 /// The credentials a [`signing_test_host`] accepts for [`TEST_USER`], each minted with that host's
@@ -228,9 +228,9 @@ pub fn signing_test_host(sessions_base: PathBuf) -> (DaemonSessionHost, SignedTe
         PeerRouting::local_only(&config),
         Arc::new(tddy_daemon_kernel::operator_channel::NoOperatorChannel),
         Arc::new(CliSessionManager::new()),
+        builtin_coding_agents(),
     )
-    .with_session_tokens(tokens)
-    .with_coding_agents(builtin_coding_agents());
+    .with_session_tokens(tokens);
     (host, credentials)
 }
 

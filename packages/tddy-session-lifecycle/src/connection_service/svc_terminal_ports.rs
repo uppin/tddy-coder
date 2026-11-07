@@ -137,7 +137,7 @@ impl DaemonSessionHost {
 struct TmuxMainReattach {
     manager: Arc<CliSessionManager>,
     /// The coding agents this daemon installed: what a record is re-attached as.
-    coding_agents: Option<Arc<tddy_agent_launch::spec_launch::HostCodingAgents>>,
+    coding_agents: Arc<tddy_agent_launch::spec_launch::HostCodingAgents>,
     tddy_data_dir: PathBuf,
     in_flight: tokio::sync::Mutex<std::collections::HashMap<String, Arc<tokio::sync::Mutex<()>>>>,
 }
@@ -145,7 +145,7 @@ struct TmuxMainReattach {
 impl TmuxMainReattach {
     fn new(
         manager: Arc<CliSessionManager>,
-        coding_agents: Option<Arc<tddy_agent_launch::spec_launch::HostCodingAgents>>,
+        coding_agents: Arc<tddy_agent_launch::spec_launch::HostCodingAgents>,
         tddy_data_dir: PathBuf,
     ) -> Self {
         TmuxMainReattach {
@@ -172,7 +172,7 @@ impl MainReattach for TmuxMainReattach {
             self.manager.get(session_id).await.is_some()
                 || tddy_agent_launch::claude_cli_tmux::reattach_recorded_main(
                     &self.manager,
-                    self.coding_agents.as_deref(),
+                    Some(&*self.coding_agents),
                     &self.tddy_data_dir,
                     os_user,
                     session_id,

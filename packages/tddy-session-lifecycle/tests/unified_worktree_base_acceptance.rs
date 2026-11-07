@@ -92,6 +92,7 @@ fn minimal_service(
         tddy_session_lifecycle::peer_routing::PeerRouting::local_only(&config),
         Arc::new(tddy_daemon_kernel::operator_channel::NoOperatorChannel),
         Arc::new(CliSessionManager::new()),
+        tddy_agent_launch::host_coding_agents::no_coding_agents(),
     );
     match cursor_agents {
         Some(agents) => service.with_coding_agents(agents),

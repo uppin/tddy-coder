@@ -216,8 +216,6 @@ fn a_daemon(sessions_base: PathBuf, discovery: Option<LiveKitDiscoveryHandles>) 
             tddy_daemon_livekit::peer_routing::peer_routing_over(&test_config(), discovery),
             Arc::new(tddy_daemon_kernel::operator_channel::NoOperatorChannel),
             Arc::new(CliSessionManager::new()),
-        )
-        .with_coding_agents_if_none(
             tddy_session_lifecycle::test_util::coding_agents_with_binaries(&[(
                 "claude",
                 Path::new("/bin/cat"),

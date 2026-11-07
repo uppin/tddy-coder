@@ -130,20 +130,18 @@ fn a_session_host(
     let user = this_os_user();
     let user_resolver: UserResolver =
         Arc::new(move |token| (token == VALID_TOKEN).then(|| user.clone()));
-    let host = Arc::new(
-        DaemonSessionHost::new(
-            config.clone(),
-            sessions_base_resolver,
-            data_dir,
-            user_resolver,
-            None,
-            tddy_spawn::supervisor_client::SpawnBackendChoice::ForkedWorker,
-            tddy_session_lifecycle::peer_routing::PeerRouting::local_only(&config),
-            Arc::new(tddy_daemon_kernel::operator_channel::NoOperatorChannel),
-            manager,
-        )
-        .with_coding_agents_if_none(agents),
-    );
+    let host = Arc::new(DaemonSessionHost::new(
+        config.clone(),
+        sessions_base_resolver,
+        data_dir,
+        user_resolver,
+        None,
+        tddy_spawn::supervisor_client::SpawnBackendChoice::ForkedWorker,
+        tddy_session_lifecycle::peer_routing::PeerRouting::local_only(&config),
+        Arc::new(tddy_daemon_kernel::operator_channel::NoOperatorChannel),
+        manager,
+        agents,
+    ));
     host.install_sandbox_rpc_bridge();
     host
 }

@@ -197,9 +197,11 @@ agent — see [GitHub account in Telegram-started sessions](#github-account-in-t
 Telegram is built before the session host, so the daemon hands it a **`LateBoundSessionStarter`**
 (`Registries::session_starter`) and binds the host's `HostSessionStarter` into it once the host
 exists (`install_session_host`). Until then — and on a daemon that never binds one — a start is
-refused `FAILED_PRECONDITION`, never queued. Telegram's registry is the host's own
-(`host_coding_agents`); a registry that does not load leaves Telegram with none to offer, and the
-daemon's start refuses the same file.
+refused `FAILED_PRECONDITION`, never queued. Telegram's registry is the daemon's one coding-agent
+registry: `runtime::build` loads it once (`host_coding_agents`), before anything is assembled over
+it, and hands the same instance to Telegram, the reserved-ids step and the session host. A registry
+that does not load stops the daemon's start with the error, naming the file — Telegram is never
+built over an empty one.
 
 ### Attach
 

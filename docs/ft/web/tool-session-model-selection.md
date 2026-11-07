@@ -100,21 +100,26 @@ async fn list_models(&self) -> Result<BackendModels, BackendError>;
 ### tddy-tools subcommand
 
 ```
-tddy-tools list-models --agent <id> [--cursor-cli-path P] [--opencode-cli-path P] [--codex-acp-cli-path P] …
+tddy-tools list-models --agent <id> [--binary-path P] [--tools-dir D]
 ```
 
 Constructs the backend for `<agent>` (same binary-resolution rules as `tddy-coder`), calls
 `list_models()`, prints `{ "models": [{"id","label"}], "default_model": "<id>" }` JSON on stdout.
 A CLI session type is answered from its harness descriptor: `--agent claude-cli` and
 `--agent cursor-cli` return their curated catalogs, `--agent opencode-cli` runs `opencode models`
-(the binary `--opencode-cli-path` names, else `opencode`) and returns one model per printed line. The
+(the binary `--binary-path` names, else `opencode`) and returns one model per printed line. The
 daemon forwards the binary it resolved for the harness (the `binary.command` of a
 `<tddyhome>/tools/opencode.yaml` override, or the environment variable the spec's `binary.env`
 names) when that is an absolute path, as it does Cursor's.
 
+`--tools-dir D` makes the catalogue the host's coding-agent registry — the built-in specs with the
+overrides in `D` applied — so an operator's `tools/<agent>.yaml` model list is the one listed; a
+directory that does not load is refused (non-zero exit, naming the file). Absent, the built-in specs
+alone are listed.
+
 ### Daemon
 
-- `ListAgentModels` handler shells out to `tddy-tools list-models --agent <agent>` (via the
+- `ListAgentModels` handler shells out to `tddy-tools list-models --agent <agent> --tools-dir <tddyhome>/tools` (via the
   configured tool path / spawn worker), parses the JSON, returns `ListAgentModelsResponse`. Result
   is cached per (agent, daemon, **OS user**) with a short TTL to avoid re-probing on every agent
   toggle — the cache is keyed by OS user because cursor/ACP catalogs are account-specific, so a

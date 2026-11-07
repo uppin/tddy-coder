@@ -21,6 +21,9 @@ pub(super) struct BuildContext {
     pub(super) identity: Identity,
     pub(super) registries: Registries,
     pub(super) plugins: Plugins,
+    /// The daemon's one coding-agent registry, loaded by `runtime::build` before this context
+    /// exists: what Telegram, the reserved-ids step and the session host all read.
+    pub(super) coding_agents: Arc<tddy_agent_launch::spec_launch::HostCodingAgents>,
     pub(super) telegram_hooks: Option<Arc<TelegramDaemonHooks>>,
     pub(super) lifecycle_telegram: Option<(DaemonConfig, Arc<dyn TelegramSender + Send + Sync>)>,
     pub(super) idle_tracker: Option<Arc<tddy_session_lifecycle::relay_idle::IdleTimeoutTracker>>,
@@ -56,6 +59,7 @@ impl BuildContext {
         options: RuntimeOptions,
         identity: Identity,
         index_supports: Arc<tddy_daemon_rpc::code_navigation::SupportRegistry>,
+        coding_agents: Arc<tddy_agent_launch::spec_launch::HostCodingAgents>,
     ) -> Self {
         let registries = Registries::open(&config, identity.user_resolver.as_ref());
         let plugins = Plugins::open(
@@ -63,7 +67,14 @@ impl BuildContext {
             &registries.shared_session_rooms,
             &identity.keys.room_tokens,
         );
-        let telegram = Telegram::open(&config, &options, &identity.keys, &registries, &plugins);
+        let telegram = Telegram::open(
+            &config,
+            &options,
+            &identity.keys,
+            &registries,
+            &plugins,
+            coding_agents.agents_shared(),
+        );
         let relay = RelayIdle::open(&options);
         let tasks = RuntimeTasks {
             common_room: None,
@@ -84,6 +95,7 @@ impl BuildContext {
             identity,
             registries,
             plugins,
+            coding_agents,
             telegram_hooks: telegram.hooks,
             lifecycle_telegram: telegram.lifecycle,
             idle_tracker: relay.idle_tracker,

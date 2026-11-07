@@ -84,10 +84,7 @@ impl DaemonSessionHost {
             connection: self.clone(),
             local: ActivityServiceImpl::new(self.activity_ports())
                 .with_question_answers(self.answer_wait_ports())
-                .with_agents(self.coding_agents.as_deref().map_or_else(
-                    || std::sync::Arc::new(tddy_coding_agent_specs::CodingAgentRegistry::empty()),
-                    tddy_agent_launch::spec_launch::HostCodingAgents::agents_shared,
-                )),
+                .with_agents(self.coding_agents.agents_shared()),
         }
     }
 

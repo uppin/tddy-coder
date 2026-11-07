@@ -112,7 +112,11 @@ impl tddy_discovery::catalog_service::CatalogHandler for CatalogRpcHandler {
         // The binary is the agent spec's, resolved on this host (`#agent-tools 19/19`); an agent whose
         // spec cannot be resolved here is probed with no path flag.
         let listing_binary = self.listing_binary(&agent);
-        let probe_args = list_models_probe_args(&agent, listing_binary.as_deref());
+        let probe_args = list_models_probe_args(
+            &agent,
+            listing_binary.as_deref(),
+            &self.agents.tddy_data_dir.join("tools"),
+        );
         let probe = tokio::task::spawn_blocking(move || {
             spawner::run_capture_as_user(&os_user, &tools_path, &probe_args)
         })

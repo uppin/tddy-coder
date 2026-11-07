@@ -100,20 +100,18 @@ fn service_with_known_codebase_peer_and_config(
         }) as Arc<dyn EligibleDaemonSource>,
         common_room_livekit_room: Arc::new(tokio::sync::RwLock::new(None)),
     };
-    TestDaemon::from_host(
-        DaemonSessionHost::new(
-            config.clone(),
-            resolver,
-            sessions_base,
-            user_resolver_valid(),
-            None,
-            tddy_spawn::supervisor_client::SpawnBackendChoice::ForkedWorker,
-            tddy_daemon_livekit::peer_routing::peer_routing_over(&config, Some(discovery)),
-            Arc::new(tddy_daemon_kernel::operator_channel::NoOperatorChannel),
-            Arc::new(CliSessionManager::new()),
-        )
-        .with_coding_agents_if_none(tddy_session_lifecycle::test_util::builtin_coding_agents()),
-    )
+    TestDaemon::from_host(DaemonSessionHost::new(
+        config.clone(),
+        resolver,
+        sessions_base,
+        user_resolver_valid(),
+        None,
+        tddy_spawn::supervisor_client::SpawnBackendChoice::ForkedWorker,
+        tddy_daemon_livekit::peer_routing::peer_routing_over(&config, Some(discovery)),
+        Arc::new(tddy_daemon_kernel::operator_channel::NoOperatorChannel),
+        Arc::new(CliSessionManager::new()),
+        tddy_session_lifecycle::test_util::builtin_coding_agents(),
+    ))
 }
 
 /// The same service, but every token resolves to a GitHub user this daemon has no OS mapping for —
@@ -124,20 +122,18 @@ fn service_with_a_user_this_daemon_does_not_map(sessions_base: PathBuf) -> TestD
         Arc::new(move |_| Some(base.clone()))
     };
     let unmapped_user: UserResolver = Arc::new(|_| Some("someone-else".to_string()));
-    TestDaemon::from_host(
-        DaemonSessionHost::new(
-            test_config(),
-            resolver,
-            sessions_base,
-            unmapped_user,
-            None,
-            tddy_spawn::supervisor_client::SpawnBackendChoice::ForkedWorker,
-            tddy_session_lifecycle::peer_routing::PeerRouting::local_only(&test_config()),
-            Arc::new(tddy_daemon_kernel::operator_channel::NoOperatorChannel),
-            Arc::new(CliSessionManager::new()),
-        )
-        .with_coding_agents_if_none(tddy_session_lifecycle::test_util::builtin_coding_agents()),
-    )
+    TestDaemon::from_host(DaemonSessionHost::new(
+        test_config(),
+        resolver,
+        sessions_base,
+        unmapped_user,
+        None,
+        tddy_spawn::supervisor_client::SpawnBackendChoice::ForkedWorker,
+        tddy_session_lifecycle::peer_routing::PeerRouting::local_only(&test_config()),
+        Arc::new(tddy_daemon_kernel::operator_channel::NoOperatorChannel),
+        Arc::new(CliSessionManager::new()),
+        tddy_session_lifecycle::test_util::builtin_coding_agents(),
+    ))
 }
 
 fn an_exec_tool_request(session_token: &str) -> ExecuteToolRequest {

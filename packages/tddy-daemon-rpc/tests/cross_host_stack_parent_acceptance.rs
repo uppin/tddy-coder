@@ -207,15 +207,12 @@ livekit:
             ),
             Arc::new(tddy_daemon_kernel::operator_channel::NoOperatorChannel),
             Arc::new(CliSessionManager::new()),
-        )
-        // A claude-cli start resolves its agent before it asks for its stack parent: the stub keeps
-        // the host's own `claude` (or its absence, on CI) out of a test about the parent.
-        .with_coding_agents_if_none(
             tddy_session_lifecycle::test_util::coding_agents_with_binaries(&[(
                 "claude",
                 std::path::Path::new("/bin/cat"),
             )]),
-        ),
+        ), // A claude-cli start resolves its agent before it asks for its stack parent: the stub keeps
+           // the host's own `claude` (or its absence, on CI) out of a test about the parent.,
     );
 
     ADaemonInTheCommonRoom {

@@ -502,6 +502,7 @@ async fn an_acp_allowed_agent_is_listed_as_a_coding_agent_with_its_default_model
             tddy_session_lifecycle::peer_routing::PeerRouting::local_only(&config),
             Arc::new(tddy_daemon_kernel::operator_channel::NoOperatorChannel),
             Arc::new(tddy_session_lifecycle::claude_cli_session::CliSessionManager::new()),
+            tddy_agent_launch::host_coding_agents::no_coding_agents(),
         ),
     );
 

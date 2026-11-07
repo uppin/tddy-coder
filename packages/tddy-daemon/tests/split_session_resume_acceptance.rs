@@ -247,8 +247,6 @@ fn a_service(
         ),
         Arc::new(tddy_daemon_kernel::operator_channel::NoOperatorChannel),
         Arc::new(CliSessionManager::new()),
-    )
-    .with_coding_agents_if_none(
         tddy_session_lifecycle::test_util::coding_agents_with_binaries(&[(
             "claude",
             claude_binary,
@@ -847,8 +845,6 @@ async fn refuse_a_resume_that_cannot_read_the_roster(
         tddy_daemon_livekit::peer_routing::peer_routing_over(&config, discovery),
         Arc::new(tddy_daemon_kernel::operator_channel::NoOperatorChannel),
         Arc::new(CliSessionManager::new()),
-    )
-    .with_coding_agents_if_none(
         tddy_session_lifecycle::test_util::coding_agents_with_binaries(&[("claude", &claude_stub)]),
     )
     .with_session_tokens(SessionTokens::new(

@@ -174,20 +174,18 @@ fn a_session_host(
     for command in ["agent", "opencode", "muse", "warp"] {
         cursor_cli_support::install_an_agent_as(&data_dir, command, stub.to_str().unwrap());
     }
-    let host = Arc::new(
-        DaemonSessionHost::new(
-            config.clone(),
-            sessions_base_resolver,
-            data_dir,
-            user_resolver,
-            None,
-            tddy_spawn::supervisor_client::SpawnBackendChoice::ForkedWorker,
-            tddy_session_lifecycle::peer_routing::PeerRouting::local_only(&config),
-            Arc::new(tddy_daemon_kernel::operator_channel::NoOperatorChannel),
-            manager,
-        )
-        .with_coding_agents(coding_agents),
-    );
+    let host = Arc::new(DaemonSessionHost::new(
+        config.clone(),
+        sessions_base_resolver,
+        data_dir,
+        user_resolver,
+        None,
+        tddy_spawn::supervisor_client::SpawnBackendChoice::ForkedWorker,
+        tddy_session_lifecycle::peer_routing::PeerRouting::local_only(&config),
+        Arc::new(tddy_daemon_kernel::operator_channel::NoOperatorChannel),
+        manager,
+        coding_agents,
+    ));
     host.install_sandbox_rpc_bridge();
     host
 }

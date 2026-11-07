@@ -329,8 +329,8 @@ fn daemon_over_customised(
         routing,
         Arc::new(tddy_daemon_kernel::operator_channel::NoOperatorChannel),
         terminals,
-    )
-    .with_coding_agents_if_none(tddy_session_lifecycle::test_util::builtin_coding_agents());
+        tddy_session_lifecycle::test_util::builtin_coding_agents(),
+    );
     let daemon = TestDaemon::from_host(customise(host));
     daemon.as_arc().install_sandbox_rpc_bridge();
     daemon

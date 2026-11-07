@@ -82,20 +82,18 @@ fn service_with_known_remote_peer(config: DaemonConfig, sessions_base: PathBuf) 
         }) as Arc<dyn EligibleDaemonSource>,
         common_room_livekit_room: room_slot,
     };
-    TestDaemon::from_host(
-        DaemonSessionHost::new(
-            config.clone(),
-            sessions_resolver(sessions_base.clone()),
-            sessions_base,
-            user_resolver_valid(),
-            None,
-            tddy_spawn::supervisor_client::SpawnBackendChoice::ForkedWorker,
-            tddy_daemon_livekit::peer_routing::peer_routing_over(&config, Some(discovery)),
-            Arc::new(tddy_daemon_kernel::operator_channel::NoOperatorChannel),
-            Arc::new(CliSessionManager::new()),
-        )
-        .with_coding_agents_if_none(tddy_session_lifecycle::test_util::builtin_coding_agents()),
-    )
+    TestDaemon::from_host(DaemonSessionHost::new(
+        config.clone(),
+        sessions_resolver(sessions_base.clone()),
+        sessions_base,
+        user_resolver_valid(),
+        None,
+        tddy_spawn::supervisor_client::SpawnBackendChoice::ForkedWorker,
+        tddy_daemon_livekit::peer_routing::peer_routing_over(&config, Some(discovery)),
+        Arc::new(tddy_daemon_kernel::operator_channel::NoOperatorChannel),
+        Arc::new(CliSessionManager::new()),
+        tddy_session_lifecycle::test_util::builtin_coding_agents(),
+    ))
 }
 
 // ── classify_peer_route unit tests (new generic name — compile error until renamed) ──────────────
@@ -207,20 +205,18 @@ async fn execute_tool_with_known_remote_instance_id_returns_failed_precondition_
 async fn execute_tool_with_unknown_remote_instance_id_returns_invalid_argument() {
     // Given — service has no eligible daemon source (only local is reachable)
     let sessions_tmp = tempfile::tempdir().unwrap();
-    let service = TestDaemon::from_host(
-        DaemonSessionHost::new(
-            test_config(),
-            sessions_resolver(sessions_tmp.path().to_path_buf()),
-            sessions_tmp.path().to_path_buf(),
-            user_resolver_valid(),
-            None,
-            tddy_spawn::supervisor_client::SpawnBackendChoice::ForkedWorker,
-            tddy_session_lifecycle::peer_routing::PeerRouting::local_only(&test_config()), // no livekit discovery
-            Arc::new(tddy_daemon_kernel::operator_channel::NoOperatorChannel),
-            Arc::new(CliSessionManager::new()),
-        )
-        .with_coding_agents_if_none(tddy_session_lifecycle::test_util::builtin_coding_agents()),
-    );
+    let service = TestDaemon::from_host(DaemonSessionHost::new(
+        test_config(),
+        sessions_resolver(sessions_tmp.path().to_path_buf()),
+        sessions_tmp.path().to_path_buf(),
+        user_resolver_valid(),
+        None,
+        tddy_spawn::supervisor_client::SpawnBackendChoice::ForkedWorker,
+        tddy_session_lifecycle::peer_routing::PeerRouting::local_only(&test_config()), // no livekit discovery
+        Arc::new(tddy_daemon_kernel::operator_channel::NoOperatorChannel),
+        Arc::new(CliSessionManager::new()),
+        tddy_session_lifecycle::test_util::builtin_coding_agents(),
+    ));
 
     // When
     let status = service
@@ -288,20 +284,18 @@ async fn list_exec_tools_with_known_remote_instance_id_returns_failed_preconditi
 async fn list_exec_tools_with_unknown_instance_id_returns_invalid_argument() {
     // Given — service has no eligible daemon source
     let sessions_tmp = tempfile::tempdir().unwrap();
-    let service = TestDaemon::from_host(
-        DaemonSessionHost::new(
-            test_config(),
-            sessions_resolver(sessions_tmp.path().to_path_buf()),
-            sessions_tmp.path().to_path_buf(),
-            user_resolver_valid(),
-            None,
-            tddy_spawn::supervisor_client::SpawnBackendChoice::ForkedWorker,
-            tddy_session_lifecycle::peer_routing::PeerRouting::local_only(&test_config()), // no livekit discovery
-            Arc::new(tddy_daemon_kernel::operator_channel::NoOperatorChannel),
-            Arc::new(CliSessionManager::new()),
-        )
-        .with_coding_agents_if_none(tddy_session_lifecycle::test_util::builtin_coding_agents()),
-    );
+    let service = TestDaemon::from_host(DaemonSessionHost::new(
+        test_config(),
+        sessions_resolver(sessions_tmp.path().to_path_buf()),
+        sessions_tmp.path().to_path_buf(),
+        user_resolver_valid(),
+        None,
+        tddy_spawn::supervisor_client::SpawnBackendChoice::ForkedWorker,
+        tddy_session_lifecycle::peer_routing::PeerRouting::local_only(&test_config()), // no livekit discovery
+        Arc::new(tddy_daemon_kernel::operator_channel::NoOperatorChannel),
+        Arc::new(CliSessionManager::new()),
+        tddy_session_lifecycle::test_util::builtin_coding_agents(),
+    ));
 
     // When
     let status = service

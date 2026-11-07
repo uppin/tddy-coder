@@ -224,8 +224,8 @@ fn a_daemon_in_the_common_room(sessions: tempfile::TempDir) -> ADaemonInTheCommo
         ),
         Arc::new(tddy_daemon_kernel::operator_channel::NoOperatorChannel),
         Arc::new(CliSessionManager::new()),
-    )
-    .with_coding_agents_if_none(tddy_session_lifecycle::test_util::builtin_coding_agents());
+        tddy_session_lifecycle::test_util::builtin_coding_agents(),
+    );
 
     ADaemonInTheCommonRoom {
         service,

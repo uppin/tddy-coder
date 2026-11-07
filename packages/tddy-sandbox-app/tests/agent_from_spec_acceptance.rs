@@ -244,33 +244,75 @@ fn sandbox_app_agent_opencode_is_refused_without_a_route_as_today() {
     );
 }
 
+/// The agents a PTY sandbox can run: every coding agent whose spec's `run` is a PTY launch. The
+/// ACP-only agents (`claude-acp`, `codex-acp`) are in the registry but not among them.
+fn the_pty_runnable_agents() -> Vec<String> {
+    [
+        "claude", "codex", "cursor", "muse", "opencode", "oz", "warp",
+    ]
+    .map(str::to_string)
+    .to_vec()
+}
+
 #[test]
-fn an_unknown_agent_id_is_refused_naming_the_registry_ids() {
+fn the_pty_sandbox_offers_only_agents_with_a_pty_run() {
     // Given
     let host = a_host();
 
-    // When
+    // When an id no coding agent has is chosen
     let refused = host.choose("gemini");
 
-    // Then
+    // Then the refusal offers the agents this app can run, and no ACP-only one
     assert_eq!(
         refused,
         Err(AgentChoiceError::Unknown {
             id: "gemini".to_string(),
-            // `#agent-tools 11/12` adds `claude-acp` and `codex-acp` to the registry.
-            known: [
-                "claude",
-                "claude-acp",
-                "codex",
-                "codex-acp",
-                "cursor",
-                "muse",
-                "opencode",
-                "oz",
-                "warp",
-            ]
-            .map(str::to_string)
-            .to_vec(),
+            known: the_pty_runnable_agents(),
         })
+    );
+}
+
+#[test]
+fn choosing_an_acp_only_agent_in_the_pty_sandbox_is_refused_naming_the_runnable_ones() {
+    // Given
+    let host = a_host();
+
+    // When each ACP-only agent is chosen
+    let refusals: Vec<Result<ChosenAgent, AgentChoiceError>> = ["claude-acp", "codex-acp"]
+        .map(|id| host.choose(id))
+        .to_vec();
+
+    // Then each is refused for having no PTY run, naming the agents this app can run
+    assert_eq!(
+        refusals,
+        vec![
+            Err(AgentChoiceError::NotPtyRunnable {
+                id: "claude-acp".to_string(),
+                runnable: the_pty_runnable_agents(),
+            }),
+            Err(AgentChoiceError::NotPtyRunnable {
+                id: "codex-acp".to_string(),
+                runnable: the_pty_runnable_agents(),
+            }),
+        ]
+    );
+}
+
+#[test]
+fn the_acp_refusal_reads_as_the_agent_it_cannot_run_and_the_ones_it_can() {
+    // Given
+    let refusal = AgentChoiceError::NotPtyRunnable {
+        id: "claude-acp".to_string(),
+        runnable: vec!["claude".to_string(), "codex".to_string()],
+    };
+
+    // When
+    let message = refusal.to_string();
+
+    // Then
+    assert_eq!(
+        message,
+        "--agent claude-acp has no PTY run, so tddy-sandbox-app cannot start it; it runs claude, \
+         codex"
     );
 }

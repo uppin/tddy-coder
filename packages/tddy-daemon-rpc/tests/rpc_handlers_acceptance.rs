@@ -85,8 +85,8 @@ impl ADaemon {
             tddy_session_lifecycle::peer_routing::PeerRouting::local_only(&config),
             Arc::new(tddy_daemon_kernel::operator_channel::NoOperatorChannel),
             Arc::new(CliSessionManager::new()),
-        )
-        .with_coding_agents_if_none(tddy_session_lifecycle::test_util::builtin_coding_agents());
+            tddy_session_lifecycle::test_util::builtin_coding_agents(),
+        );
         let host = match self.idle_tracker {
             Some(tracker) => host.with_idle_tracker(tracker),
             None => host,
