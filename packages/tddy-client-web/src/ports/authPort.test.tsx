@@ -22,7 +22,7 @@ describe("the auth port", () => {
     // Then
     expect(result.current.isAuthenticated).toBe(true);
     expect(result.current.sessionToken).toBe("tok");
-    expect(port.logout).toHaveBeenCalledTimes(1);
+    expect(port.logout.mock.calls).toHaveLength(1);
   });
 
   test("useAuth outside a provider throws naming the port", () => {
