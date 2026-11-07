@@ -12,7 +12,7 @@
 //! These live in this crate rather than in `tddy-agent-launch` because the host that builds the
 //! `LaunchSessions` a start runs on is `DaemonSessionHost`, and this crate owns it.
 //!
-//! Feature docs: docs/ft/daemon/1-WIP/PRD-2026-11-06-bounded-session-waits.md
+//! Feature docs: docs/ft/daemon/session-agent-roster.md (A start has a deadline)
 
 #![cfg(unix)]
 

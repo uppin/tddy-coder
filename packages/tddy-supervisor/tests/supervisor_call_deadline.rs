@@ -8,7 +8,7 @@
 //! Every test is itself bounded by [`A_CALL_THAT_HANGS`]: a missing deadline fails the test, it does
 //! not hang it.
 //!
-//! Feature docs: docs/ft/daemon/1-WIP/PRD-2026-11-06-bounded-session-waits.md
+//! Feature docs: docs/ft/supervisor/tddy-supervisor.md
 
 use std::path::{Path, PathBuf};
 use std::time::Duration;

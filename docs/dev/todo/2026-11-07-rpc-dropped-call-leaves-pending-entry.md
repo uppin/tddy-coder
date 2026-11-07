@@ -1,7 +1,7 @@
 # 2026-11-07 — A dropped RPC call leaves its pending entry in the client engine
 
 **Category:** Deferred from `#agent-tools` 23/28 (`feature/agent-tools/bounded-waits`)
-**Source:** `packages/tddy-rpc/src/client_engine.rs:70`, `:105-123`; found while bounding the supervisor client's calls in `packages/tddy-supervisor/src/client.rs` (changeset `docs/dev/1-WIP/2026-11-06-bounded-session-waits.md`)
+**Source:** `packages/tddy-rpc/src/client_engine.rs:70`, `:105-123`; found while bounding the supervisor client's calls in `packages/tddy-supervisor/src/client.rs` (change history `docs/dev/changesets/2026-11-07-bounded-session-waits.md`)
 
 ## What is there
 

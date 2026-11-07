@@ -9,7 +9,7 @@
 //! dropped. Either way the caller gets `DEADLINE_EXCEEDED` naming the step ([`StartStep`]) the start
 //! had begun and not ended when the deadline expired, as its progress reported it.
 //!
-//! Feature docs: docs/ft/daemon/1-WIP/PRD-2026-11-06-bounded-session-waits.md
+//! Feature docs: docs/ft/daemon/session-agent-roster.md (A start has a deadline)
 
 use std::future::Future;
 use std::pin::Pin;

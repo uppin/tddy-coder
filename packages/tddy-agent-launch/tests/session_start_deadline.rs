@@ -5,7 +5,7 @@
 //! (`AttachmentProgressSink::begin_phase`) and then hangs, or finishes late. The clock is paused,
 //! so the deadlines cost no wall time; every test is itself bounded by [`A_START_THAT_HANGS`].
 //!
-//! Feature docs: docs/ft/daemon/1-WIP/PRD-2026-11-06-bounded-session-waits.md
+//! Feature docs: docs/ft/daemon/session-agent-roster.md (A start has a deadline)
 
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};

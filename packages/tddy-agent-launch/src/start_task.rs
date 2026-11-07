@@ -147,8 +147,8 @@ async fn undo_a_cancelled_start(
 ///
 /// TODO(operator-start-undo): an operator start's split codebase half and agent clones cannot be torn
 /// down by a token-free undo until the split host port and the peer delete protocol take an OS user
-/// rather than a session token. Planned as a follow-up stack node (user, 2026-11-07). Changeset
-/// `docs/dev/1-WIP/2026-11-06-bounded-session-waits.md`, Technical Debt.
+/// rather than a session token. Planned as a follow-up stack node (user, 2026-11-07):
+/// `docs/dev/todo/2026-11-07-operator-start-undo-of-peer-held-parts.md`.
 ///
 /// A failure is logged, naming the session it left in place. The deadline's error is the only
 /// answer the caller gets, and it cannot carry this.

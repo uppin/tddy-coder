@@ -293,6 +293,12 @@ every forward is a `FailedPrecondition` naming the call and the peer.
   stream opens is `PeerAnswered`; only silence is `PeerSilent`. The other stream callers keep a plain
   `Status` through the same loop.
 
+## `session_start_timeout_secs` — how long a whole session start may take
+
+`DaemonConfig.session_start_timeout_secs` (`u64`, default **600** — the bound Telegram used to apply
+on its own) and `session_start_timeout()` (clamped to at least one second, as
+`spawn_worker_request_timeout_secs`). `tddy-agent-launch`'s `start_here` runs every start under it.
+
 ## `peer_calls` — typed RPCs forwarded to a peer
 
 `peer_calls` holds the fourteen typed forwards over `CommonRoom`: each encodes its request, forwards it
