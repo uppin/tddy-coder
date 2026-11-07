@@ -191,7 +191,8 @@ fn ssh_status(error: &SpecLaunchError, host: &str, doing: &str) -> Status {
 /// Where an ssh launch's agent records its pid on the target, relative to its worktree, for
 /// [`record_remote_owner`] to read (and remove). The launch writes it as `$$` before it `exec`s the
 /// agent, so it is the agent's own pid.
-// `record_remote_owner` has no caller until an ssh agent launch exists.
+// `record_remote_owner` has no caller until an ssh agent launch exists:
+// docs/dev/todo/2026-11-07-ssh-agent-launch-remote-pointer-owner.md
 #[allow(dead_code)]
 pub(crate) const REMOTE_AGENT_PID_FILE: &str = ".tddy/agent.pid";
 
@@ -200,7 +201,8 @@ pub(crate) const REMOTE_AGENT_PID_FILE: &str = ".tddy/agent.pid";
 /// it removes), and rewrites the placed `pointer` owner-only with that owner, which it returns. A
 /// pointer on this host is refused: the daemon that placed it is its owner.
 // No caller until an ssh agent launch exists: today an ssh session's agent is not started on the
-// target, so there is no pid file to read.
+// target, so there is no pid file to read
+// (docs/dev/todo/2026-11-07-ssh-agent-launch-remote-pointer-owner.md).
 #[allow(dead_code)]
 pub(crate) fn record_remote_owner(
     placed: &PlacedSessionPointer,

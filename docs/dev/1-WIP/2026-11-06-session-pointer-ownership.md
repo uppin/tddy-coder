@@ -188,6 +188,7 @@ Real edges: `session-pointer → split-remote-env, acp-subagent-leftovers, env-a
 ## Technical Debt & Production Readiness
 
 - Pre-existing, not this node's: `claude_cli_from_spec_acceptance::an_unsandboxed_claude_cli_start_runs_the_spec_binary_with_the_argv_its_template_renders` fails on macOS (`/tmp` vs `/private/tmp` in `--append-system-prompt-file`).
+- Open deferral: `record_remote_owner` / `REMOTE_AGENT_PID_FILE` have no caller — no ssh agent launch exists to write `.tddy/agent.pid` and call it. Until one does, a remote pointer is owned by the daemon's `{pid, host}` (safe: `tddy-tools` on another host skips the owner check). [2026-11-07-ssh-agent-launch-remote-pointer-owner.md](../todo/2026-11-07-ssh-agent-launch-remote-pointer-owner.md)
 - A full `./test -p tddy-session-lifecycle` exceeds 10 minutes locally; its whole-package result is CI's. Locally this node runs `--test headless_subagents_from_spec_acceptance`.
 
 ## Refactoring Needed

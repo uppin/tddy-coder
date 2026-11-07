@@ -482,7 +482,8 @@ async fn a_headless_cursor_refuses_a_worktree_that_already_has_a_cursor_mcp_conf
 }
 
 #[tokio::test]
-async fn a_headless_codex_carries_tddy_tools_inline_with_its_environment_in_the_clis() {
+async fn a_headless_codex_carries_tddy_tools_inline_with_its_variables_in_the_conversations_pointer(
+) {
     // Given
     let data_dir = tempfile::tempdir().expect("data dir");
     let worktree = tempfile::tempdir().expect("worktree");
@@ -494,27 +495,39 @@ async fn a_headless_codex_carries_tddy_tools_inline_with_its_environment_in_the_
         .await
         .expect("the codex CLI is settled");
 
-    // Then the server reaches codex inline, and its variables reach the CLI's process
+    // Then the server reaches codex inline with no environment, started in the conversation's
+    // directory, where its pointer carries the variables instead
     let server = command
         .mcp_server
         .clone()
         .expect("codex is handed its MCP server inline");
-    assert_eq!(server.name, TDDY_TOOLS_SERVER);
-    assert_eq!(server.command, PathBuf::from(TDDY_TOOLS_PATH));
-    assert_eq!(server.args, vec![TDDY_TOOLS_MCP_ARG.to_string()]);
-    assert!(
-        command
-            .env
-            .contains(&(SESSION_TOKEN_ENV_NAME.to_string(), MINTED_TOKEN.to_string())),
-        "{:?}",
-        command.env
-    );
-    assert!(
-        command
-            .env
-            .contains(&(CONVERSATION_ID_ENV.to_string(), CONVERSATION.to_string())),
-        "{:?}",
-        command.env
+    let conversation_dir = data_dir.path().join(CONVERSATION);
+    let pointer = tddy_core::session_pointer::find_session_pointer(&conversation_dir)
+        .expect("the pointer is readable")
+        .map(|(_, pointer)| pointer.remote);
+    assert_eq!(
+        (
+            server.name,
+            server.command,
+            server.args,
+            server.env,
+            server.cwd,
+            command.env,
+            pointer,
+        ),
+        (
+            TDDY_TOOLS_SERVER.to_string(),
+            PathBuf::from(TDDY_TOOLS_PATH),
+            vec![TDDY_TOOLS_MCP_ARG.to_string()],
+            Vec::new(),
+            Some(conversation_dir),
+            Vec::new(),
+            Some(std::collections::BTreeMap::from([
+                ("TDDY_REMOTE_SESSION_ID".to_string(), SESSION_ID.to_string()),
+                (SESSION_TOKEN_ENV_NAME.to_string(), MINTED_TOKEN.to_string()),
+                (CONVERSATION_ID_ENV.to_string(), CONVERSATION.to_string()),
+            ])),
+        )
     );
 }
 
