@@ -36,4 +36,4 @@ Diagnostic traces use **`tddyDevDebug`** from **`tddyDevLog`** (dev-oriented log
 
 ## Related product doc
 
-- [Web terminal — Connected Terminal UX](../../../../docs/ft/web/web-terminal.md) (connection chrome, mobile UX, fullscreen).
+- [Web terminal — Connected Terminal UX](../../../docs/ft/web/web-terminal.md) (connection chrome, mobile UX, fullscreen).

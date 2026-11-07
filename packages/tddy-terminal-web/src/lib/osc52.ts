@@ -11,7 +11,7 @@
  * cannot read the viewer's clipboard. So is an invalid payload, and one that decodes to more than
  * `maxDecodedBytes`.
  *
- * Reference: packages/tddy-web/docs/terminal-osc52-clipboard.md (`#session-tabs 4/7`)
+ * Reference: packages/tddy-terminal-web/docs/terminal-osc52-clipboard.md (`#session-tabs 4/7`)
  */
 
 /** The largest decoded payload a recognizer copies: a bound on what a hostile stream can make us hold. */

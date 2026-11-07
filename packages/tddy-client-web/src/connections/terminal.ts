@@ -10,7 +10,7 @@
  * Promoting the interface here is most of what makes one terminal possible — and, because the
  * history path travels with it, is what gives a LiveKit-carried session scrollback it has never had.
  *
- * Docs: `packages/tddy-web/docs/terminal-session.md`.
+ * Docs: `packages/tddy-terminal-web/docs/terminal-session.md`.
  */
 
 /**

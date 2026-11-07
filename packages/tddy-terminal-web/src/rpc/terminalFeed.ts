@@ -8,7 +8,7 @@
  * to track — a re-open is a fresh VT that is shown the current screen at once, with no resize and
  * no wait for the application to repaint.
  *
- * Docs: `packages/tddy-web/docs/terminal-session.md`.
+ * Docs: `packages/tddy-terminal-web/docs/terminal-session.md`.
  */
 
 import type { MessageInitShape } from "@bufbuild/protobuf";

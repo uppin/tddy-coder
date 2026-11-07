@@ -13,7 +13,7 @@
  * handed is a feed: bytes to render, bytes to send, and — where the connection can serve it —
  * history to page back through. A LiveKit-carried session has that history for the first time.
  *
- * Docs: `packages/tddy-web/docs/terminal-session.md`.
+ * Docs: `packages/tddy-terminal-web/docs/terminal-session.md`.
  * Feature: `docs/ft/web/web-terminal.md`, `docs/ft/web/terminal-replay-lazy-scroll.md`.
  */
 
