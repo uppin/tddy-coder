@@ -50,6 +50,10 @@ pub(super) struct BuildContext {
     /// for a daemon built without authentication, which hosts no sessions to have children.
     pub(super) session_host:
         Option<Arc<tddy_session_lifecycle::connection_service::DaemonSessionHost>>,
+    /// The agent-tool sockets the session host tells every session about (`#agent-tools` 26/28),
+    /// placed as this host is: per OS user on the binary, the one runtime socket when embedded. The
+    /// finished roster is installed on it by [`Self::serve_common_room`].
+    pub(super) agent_tool_sockets: Arc<tddy_daemon_kernel::agent_tool_sockets::AgentToolSockets>,
     pub(super) tasks: RuntimeTasks,
 }
 
@@ -89,6 +93,16 @@ impl BuildContext {
             telegram_inbound: telegram.inbound,
             credential_sync_publish_watch: None,
         };
+        let agent_tool_sockets = Arc::new(
+            tddy_daemon_kernel::agent_tool_sockets::AgentToolSockets::new(match options.host {
+                RuntimeHost::Embedded => {
+                    tddy_daemon_kernel::agent_tool_sockets::AgentToolSocketPlacement::Embedded
+                }
+                RuntimeHost::Binary => {
+                    tddy_daemon_kernel::agent_tool_sockets::AgentToolSocketPlacement::PerOsUser
+                }
+            }),
+        );
         Self {
             config,
             options,
@@ -105,6 +119,7 @@ impl BuildContext {
             index_daemon_registry: None,
             index_supports,
             session_host: None,
+            agent_tool_sockets,
             tasks,
         }
     }
@@ -158,6 +173,12 @@ impl BuildContext {
         // checkout, which can use neither the application's in-process bridge nor a port that only
         // answers the OAuth callback. Built from the finished roster, so a tool call over it reaches
         // the very handlers the UI does. See `crate::agent_tool_socket`.
+        //
+        // A server daemon serves the same roster on each session OS user's own socket instead,
+        // bound when that user's first session starts: it is installed on the sockets the session
+        // host hands its sessions.
+        self.agent_tool_sockets
+            .install_roster(cloned_entries(&self.identity.rpc_entries));
         if self.options.host == RuntimeHost::Embedded {
             self.tasks.agent_tool_socket = Some((
                 crate::agent_tool_socket::agent_tool_socket_path(&self.identity.keys.tddy_data_dir),

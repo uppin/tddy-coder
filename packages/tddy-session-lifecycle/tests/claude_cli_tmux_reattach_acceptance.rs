@@ -226,6 +226,8 @@ fn a_process_is_alive(pid: u32) -> bool {
 impl TmuxAgentDaemon {
     /// A daemon restarted over the same sessions directory: no terminals registered, same tmux.
     fn restarted(&self) -> Arc<DaemonSessionHost> {
+        // The daemon that restarts is gone: nothing of it still listens on its agent-tool sockets.
+        self.host.agent_tool_sockets().stop_serving();
         a_session_host(
             self.config.clone(),
             self.sessions_base.clone(),
@@ -346,6 +348,53 @@ async fn a_fresh_daemon_reattaches_the_main_terminal_on_first_stream_without_res
     until_attached(&daemon.tmux, &name, 1).await;
     assert_eq!(daemon.launch_count(), 1, "claude was not relaunched");
     assert_eq!(daemon.metadata_of(&session_id).pid, Some(agent_pid));
+}
+
+#[tokio::test]
+#[serial_test::serial]
+async fn a_fresh_daemon_serves_the_reattached_agents_tool_socket_again() {
+    // Given a tmux-run session that outlived its daemon, whose agent reports over its user's
+    // agent-tool socket — which nothing serves once that daemon is gone
+    let daemon = a_daemon_with_a_private_tmux().await;
+    let (session_id, _agent_pid) = daemon.is_running_in_tmux().await;
+    daemon.host.shut_down_children().await;
+    let fresh = daemon.restarted();
+    let socket = tddy_daemon_kernel::agent_tool_sockets::agent_tool_socket_path_for_user(
+        &daemon.sessions_base,
+        &this_os_user(),
+    )
+    .expect("the user's socket path");
+    assert!(
+        std::os::unix::net::UnixStream::connect(&socket).is_err(),
+        "nothing serves {} before the re-attach",
+        socket.display()
+    );
+
+    // When a client first streams the session's main terminal from the fresh daemon
+    let streamed = fresh
+        .terminal_session_service()
+        .stream_terminal_output(Request::direct(StreamTerminalOutputRequest {
+            session_token: VALID_TOKEN.to_string(),
+            session_id: session_id.clone(),
+            terminal_id: MAIN_TERMINAL_ID.to_string(),
+            initial_cols: 0,
+            initial_rows: 0,
+            mode: StreamReplayMode::Tail as i32,
+            from_offset: 0,
+            control_token: String::new(),
+        }))
+        .await;
+
+    // Then the agent's reports reach the fresh daemon again
+    assert!(
+        streamed.is_ok(),
+        "the first stream re-attaches the main terminal"
+    );
+    assert!(
+        std::os::unix::net::UnixStream::connect(&socket).is_ok(),
+        "{} is served again after the re-attach",
+        socket.display()
+    );
 }
 
 #[tokio::test]

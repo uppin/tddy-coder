@@ -65,8 +65,8 @@ tddy-tools notify "Parallel run finished" --body "4 done, **1 blocked**" --level
   non-zero with the reason when the environment is missing, the daemon cannot be reached, or the
   daemon refuses.
 - **Credentials come from the session pointer.** The launch writes `TDDY_SESSION_ID`,
-  `TDDY_OS_USER`, `TDDY_HOOK_TOKEN` and exactly one of `TDDY_DAEMON_SOCKET` (an embedded daemon's
-  agent-tool socket) or `TDDY_DAEMON_URL` into the `notify` map of the owner-only
+  `TDDY_OS_USER`, `TDDY_HOOK_TOKEN` and exactly one of `TDDY_DAEMON_SOCKET` (the session OS user's
+  agent-tool socket, which a daemon-launched agent is always given) or `TDDY_DAEMON_URL` into the `notify` map of the owner-only
   `<worktree>/.tddy/session.json`, at start and again at resume; the agent process is given none of
   them as variables, and the command adopts them from the pointer it finds at or above its cwd.
   These are the credentials the session's hooks already hold, so they

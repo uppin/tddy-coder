@@ -46,6 +46,7 @@ impl crate::launch_ports::LaunchSessions {
             .split_sessions
             .resume_split_wiring(
                 &metadata,
+                os_user,
                 sessions_base,
                 session_dir,
                 &req.session_id,

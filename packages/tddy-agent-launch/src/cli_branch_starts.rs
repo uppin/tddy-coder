@@ -155,6 +155,7 @@ impl LaunchSessions {
         let clones = tddy_session_agents::agent_host_callbacks::DaemonSeedCloneClaimant {
             service: self.agent_roster.clone(),
         };
+        let agent_tool_socket = self.agent_tool_socket_of(os_user).await?;
         let account_access = self.host.session_account_access(&req.session_token);
         let route_sources =
             session_route_sources_with_default(req, session_agent.kind.name, &account_access)?;
@@ -180,6 +181,7 @@ impl LaunchSessions {
             &start.session_id,
             &start.sessions_base,
             &req.session_token,
+            &agent_tool_socket,
         )?;
         crate::opencode_cli_spawn::start_cli_harness_session(
             crate::opencode_cli_spawn::CliSessionStart {
@@ -187,6 +189,7 @@ impl LaunchSessions {
                 agent: &session_agent.agent,
                 config: &self.config,
                 tddy_data_dir: &self.tddy_data_dir,
+                agent_tool_socket: &agent_tool_socket,
                 cli_manager: &self.cli_manager,
                 os_user,
                 session_id: &start.session_id,
@@ -264,6 +267,7 @@ impl LaunchSessions {
         let clones = tddy_session_agents::agent_host_callbacks::DaemonSeedCloneClaimant {
             service: self.agent_roster.clone(),
         };
+        let agent_tool_socket = self.agent_tool_socket_of(child.os_user).await?;
         // A child runs on its vendor: the orchestrator's account is not inherited.
         let route_sources = tddy_core::provider_route::RouteSources::default();
         crate::opencode_cli_spawn::start_cli_harness_session(
@@ -272,6 +276,7 @@ impl LaunchSessions {
                 agent: &session_agent.agent,
                 config: &self.config,
                 tddy_data_dir: &self.tddy_data_dir,
+                agent_tool_socket: &agent_tool_socket,
                 cli_manager: &self.cli_manager,
                 os_user: child.os_user,
                 session_id: child.session_id,

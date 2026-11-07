@@ -133,6 +133,9 @@ pub struct SplitSessions {
     pub session_pointers: Arc<dyn SplitSessionPointers>,
     /// The agent topic's handle: the split start resolves the request's agent defs through it.
     pub agent_roster: AgentRoster,
+    /// The agent-tool socket of each session's OS user (`#agent-tools` 26/28): what a split or
+    /// jailed-codebase agent is told to report and call tools over.
+    pub agent_tool_sockets: Arc<tddy_daemon_kernel::agent_tool_sockets::AgentToolSockets>,
     /// The host's capabilities that are not fields.
     pub host: Arc<dyn SplitHost>,
 }

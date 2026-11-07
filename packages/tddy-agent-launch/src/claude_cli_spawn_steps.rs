@@ -42,9 +42,9 @@ impl ClaudeCliHooks {
 
 /// A claude-cli start's hooks, with a fresh per-session token.
 ///
-/// `tddy_data_dir` is the data dir the daemon *resolved* — `TDDY_DATA_DIR` included, which a
-/// configuration file need not agree with (`./desktop-dev` sets it absolute beside a relative
-/// `tmp/.tddy`) — because an embedded daemon's agent-tool socket path is digested from it.
+/// `agent_tool_socket` is the session's OS user's agent-tool socket, served by this daemon
+/// (`tddy_daemon_kernel::agent_tool_sockets::AgentToolSockets::ensure_bound`): the hooks report
+/// over it on every host.
 ///
 /// Nothing is read from a daemon.yaml agent section (`#agent-tools 19/19`): `tddy_tools_path` is the
 /// agent's resolved `tddy-tools` dependency, the url is the daemon's own (`listen.advertise_url`),
@@ -52,15 +52,14 @@ impl ClaudeCliHooks {
 /// records beside the session ([`record_hook_answer_wait`]) so the server's hold matches it.
 pub(super) fn claude_cli_hooks(
     config: &DaemonConfig,
-    tddy_data_dir: &Path,
+    agent_tool_socket: &Path,
     spec: &CodingAgentSpec,
     tddy_tools_path: &str,
 ) -> ClaudeCliHooks {
     ClaudeCliHooks {
         tddy_tools_path: tddy_tools_path.to_string(),
         daemon_url: daemon_hook_urls::advertise_daemon_url(config),
-        // An embedded daemon serves no HTTP RPC; its hooks report over this socket.
-        daemon_socket: tddy_daemon_kernel::embedded_host_agent_tool_socket(tddy_data_dir),
+        daemon_socket: Some(agent_tool_socket.to_string_lossy().into_owned()),
         hook_token: Uuid::new_v4().to_string(),
         answer_wait_secs: spec.answer_wait_secs(),
     }
@@ -72,9 +71,17 @@ pub(crate) fn record_hook_answer_wait(
     session_dir: &Path,
     hooks: &ClaudeCliHooks,
 ) -> Result<(), Status> {
+    record_answer_wait_secs(session_dir, hooks.answer_wait_secs)
+}
+
+/// Record a hook wait of `answer_wait_secs` beside the session in `session_dir`.
+pub(crate) fn record_answer_wait_secs(
+    session_dir: &Path,
+    answer_wait_secs: u64,
+) -> Result<(), Status> {
     tddy_session_activity::answer_wait::record_answer_wait(
         session_dir,
-        std::time::Duration::from_secs(hooks.answer_wait_secs),
+        std::time::Duration::from_secs(answer_wait_secs),
     )
     .map_err(|e| Status::internal(format!("failed to record the answer wait: {e}")))
 }

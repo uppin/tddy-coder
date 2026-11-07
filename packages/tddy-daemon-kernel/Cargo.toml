@@ -34,6 +34,10 @@ tddy-daemon-extensions = { path = "../tddy-daemon-extensions" }
 tddy-service = { path = "../tddy-service" }
 tokio = { version = "1", features = ["rt", "macros", "fs", "sync", "net", "time", "process", "io-util"] }
 tddy-task = { path = "../tddy-task" }
+# `AgentToolSockets` serves the daemon's roster over each user's socket, one endpoint per
+# connection. An internal crate (`tddy-stdio` depends on `tddy-rpc` alone): no cycle, nothing new in
+# Cargo.lock. Approved by the developer 2026-11-07 (`#agent-tools` 26/28).
+tddy-stdio = { path = "../tddy-stdio" }
 tddy-github = { path = "../tddy-github" }
 tonic = { version = "0.12", default-features = false, features = ["transport"] }
 

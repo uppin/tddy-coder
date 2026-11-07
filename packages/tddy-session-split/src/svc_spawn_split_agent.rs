@@ -78,13 +78,16 @@ impl SplitSessions {
         )
         .await?;
 
-        let (tddy_tools_path, remote) = self.split_agent_tool_wiring(
-            session_id,
-            codebase_instance_id,
-            codebase_session_id,
-            room,
-            req,
-        )?;
+        let (tddy_tools_path, remote) = self
+            .split_agent_tool_wiring(
+                os_user,
+                session_id,
+                codebase_instance_id,
+                codebase_session_id,
+                room,
+                req,
+            )
+            .await?;
         self.host_split_room(
             session_id,
             codebase_instance_id,
@@ -179,8 +182,9 @@ impl SplitSessions {
         }))
     }
 
-    fn split_agent_tool_wiring(
+    async fn split_agent_tool_wiring(
         &self,
+        os_user: &str,
         session_id: &str,
         codebase_instance_id: &str,
         codebase_session_id: &str,
@@ -207,7 +211,7 @@ impl SplitSessions {
                 &daemon_hook_urls::local_daemon_hook_url(&self.config),
                 codebase_session_id,
                 &self.agent_session_token_for(&req.session_token)?,
-                self.agent_tool_socket_for_embedded_host(),
+                Some(self.agent_tool_socket_of(os_user).await?),
             ),
         };
         // What this agent was actually wired to, on one line, on the path *every* placement takes.
@@ -263,15 +267,14 @@ impl SplitSessions {
         .map_err(|e| Status::internal(format!("failed to record the answer wait: {e}")))?;
         // The hooks file is the one the split agent's spec's hooks slot renders, written
         // under the context dir the agent runs in.
-        let agent_tool_socket = self.agent_tool_socket_for_embedded_host();
+        let agent_tool_socket = self.agent_tool_socket_of(os_user).await?;
         let hook_params = tddy_core::HookCommandParams {
             tddy_tools_path: &tddy_tools_path.to_string_lossy(),
             daemon_url: &tddy_daemon_kernel::daemon_hook_urls::advertise_daemon_url(&self.config),
             session_id,
             os_user,
             hook_token: &hook_token,
-            // An embedded daemon serves no HTTP RPC; its hooks report over this socket.
-            daemon_socket: agent_tool_socket.as_deref(),
+            daemon_socket: Some(&agent_tool_socket),
             answer_wait_secs,
         };
         match tddy_coding_agent_specs::slots::render(

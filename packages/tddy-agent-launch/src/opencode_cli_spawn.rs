@@ -65,6 +65,9 @@ pub(crate) struct CliSessionStart<'a> {
     pub agent: &'a HostAgent,
     pub config: &'a DaemonConfig,
     pub tddy_data_dir: &'a Path,
+    /// The session's OS user's agent-tool socket, resolved before anything is cut
+    /// ([`LaunchSessions::agent_tool_socket_of`]).
+    pub agent_tool_socket: &'a Path,
     pub cli_manager: &'a Arc<CliSessionManager>,
     pub os_user: &'a str,
     pub session_id: &'a str,
@@ -115,6 +118,7 @@ pub(crate) async fn start_cli_harness_session(
         agent,
         config,
         tddy_data_dir,
+        agent_tool_socket,
         cli_manager,
         os_user,
         session_id,
@@ -248,6 +252,7 @@ pub(crate) async fn start_cli_harness_session(
         tddy_tools_path: &crate::cli_harness_jail::agent_tddy_tools(agent)?,
         config,
         tddy_data_dir,
+        agent_tool_socket,
         os_user,
         session_id,
         session_dir: &session_dir,

@@ -8,13 +8,18 @@ use std::path::PathBuf;
 /// A claude-cli start's hooks, their `.claude/settings.local.json` written into the worktree.
 fn install_claude_cli_hooks(
     config: &DaemonConfig,
-    tddy_data_dir: &Path,
+    agent_tool_socket: &Path,
     os_user: &str,
     session_id: &str,
     worktree_path: &Path,
 ) {
     let claude = tddy_coding_agent_specs::embedded_spec("claude").expect("claude.yaml is built in");
-    let hooks = claude_cli_hooks(config, tddy_data_dir, &claude, "/usr/local/bin/tddy-tools");
+    let hooks = claude_cli_hooks(
+        config,
+        agent_tool_socket,
+        &claude,
+        "/usr/local/bin/tddy-tools",
+    );
     let rendered = tddy_coding_agent_specs::slots::render(
         &claude,
         &tddy_coding_agent_specs::slots::SlotInputs {
@@ -41,15 +46,14 @@ fn install_claude_cli_hooks(
 /// The loopback port a desktop daemon's GitHub sign-in returns on — and the only HTTP it answers.
 const SIGN_IN_CALLBACK_PORT: u16 = 8899;
 
-/// A daemon embedded in Tddy Desktop: it serves no HTTP RPC, and its agent-tool socket is bound.
-///
-/// The socket is bound for real and held, because "is this host embedded" is answered by whether
-/// something is listening on that socket.
+/// A daemon embedded in Tddy Desktop: it serves no HTTP RPC, and its one agent-tool socket is
+/// bound (and held, as the runtime holds it).
 struct AnEmbeddedHost {
     config: DaemonConfig,
     socket_path: PathBuf,
     _listener: std::os::unix::net::UnixListener,
-    data_dir: tempfile::TempDir,
+    /// Owns the data dir the socket's path is digested from.
+    _data_dir: tempfile::TempDir,
 }
 
 impl AnEmbeddedHost {
@@ -64,12 +68,12 @@ impl AnEmbeddedHost {
             config,
             socket_path,
             _listener: listener,
-            data_dir,
+            _data_dir: data_dir,
         }
     }
 
-    fn data_dir(&self) -> &Path {
-        self.data_dir.path()
+    fn socket_path(&self) -> PathBuf {
+        self.socket_path.clone()
     }
 
     fn agent_tool_socket(&self) -> String {
@@ -84,22 +88,32 @@ impl Drop for AnEmbeddedHost {
     }
 }
 
-/// A binary daemon (`tddy-daemon`): it serves HTTP RPC and never binds an agent-tool socket.
-struct ARegularHost {
+/// A binary daemon (`tddy-daemon`): it serves HTTP RPC, and serves each session's OS user an
+/// agent-tool socket of their own under its data dir.
+struct AServerHost {
     config: DaemonConfig,
     data_dir: tempfile::TempDir,
 }
 
-impl ARegularHost {
-    fn without_an_agent_tool_socket() -> Self {
+impl AServerHost {
+    fn serving_its_users_agent_tool_socket() -> Self {
         Self {
             config: DaemonConfig::default(),
             data_dir: tempfile::tempdir().expect("a temporary data dir"),
         }
     }
 
-    fn data_dir(&self) -> &Path {
-        self.data_dir.path()
+    /// Where `ada`, the user the sessions here run as, is served.
+    fn socket_path(&self) -> PathBuf {
+        tddy_daemon_kernel::agent_tool_sockets::agent_tool_socket_path_for_user(
+            self.data_dir.path(),
+            ITS_OS_USER,
+        )
+        .expect("the user has a socket path")
+    }
+
+    fn agent_tool_socket(&self) -> String {
+        self.socket_path().to_string_lossy().into_owned()
     }
 }
 
@@ -138,7 +152,7 @@ fn on_an_embedded_host_the_tool_use_hook_reports_over_the_agent_tool_socket() {
     // When a claude-cli session's hooks are installed into its worktree
     install_claude_cli_hooks(
         &host.config,
-        host.data_dir(),
+        &host.socket_path(),
         "ada",
         "01a14a71-f790-7083-8ad8-e4df3feed64e",
         worktree.path(),
@@ -153,29 +167,29 @@ fn on_an_embedded_host_the_tool_use_hook_reports_over_the_agent_tool_socket() {
     );
 }
 
-/// A regular `tddy-daemon` serves HTTP RPC on `daemon_url` and binds no agent-tool socket, so its
-/// hooks must not be told of one: a `--daemon-socket` there would send every report to a path
-/// nobody serves.
+/// A server `tddy-daemon` serves each session's OS user an agent-tool socket of their own
+/// (`#agent-tools` 26/28), so its hooks report over the user's socket, as a desktop's do over its one.
 #[test]
-fn on_a_regular_host_the_tool_use_hook_names_no_daemon_socket() {
-    // Given a binary daemon, whose agent-tool socket is not bound
-    let host = ARegularHost::without_an_agent_tool_socket();
+fn on_a_server_host_the_tool_use_hook_reports_over_its_users_agent_tool_socket() {
+    // Given a binary daemon, serving its user's agent-tool socket
+    let host = AServerHost::serving_its_users_agent_tool_socket();
     let worktree = tempfile::tempdir().expect("a temporary worktree");
 
     // When a claude-cli session's hooks are installed into its worktree
     install_claude_cli_hooks(
         &host.config,
-        host.data_dir(),
+        &host.socket_path(),
         "ada",
         "01a14a71-f790-7083-8ad8-e4df3feed64e",
         worktree.path(),
     );
 
-    // Then the tool-use hook reports over HTTP alone
+    // Then the tool-use hook reaches the daemon over that user's socket
     let command = the_installed_hook_command(worktree.path(), "PostToolUse");
+    let expected = the_daemon_socket_argument_for(&host.agent_tool_socket());
     assert!(
-        !command.contains("--daemon-socket"),
-        "a regular host's PostToolUse hook must name no daemon socket, got: {command}"
+        command.contains(&expected),
+        "a server host's PostToolUse hook must report over its user's socket ({expected:?}), got: {command}"
     );
 }
 
@@ -189,18 +203,18 @@ struct RoleLaunch {
     env: Vec<(String, String)>,
 }
 
-/// A main's launch on `config` / `data_dir`, written into a fresh session dir.
+/// A main's launch on `config` / `agent_tool_socket`, written into a fresh session dir.
 struct AMainLaunch {
     session_dir: tempfile::TempDir,
     launch: RoleLaunch,
 }
 
 impl AMainLaunch {
-    fn on(config: &DaemonConfig, data_dir: &Path) -> Self {
+    fn on(config: &DaemonConfig, agent_tool_socket: &Path) -> Self {
         let session_dir = tempfile::tempdir().expect("a temporary session dir");
         let wiring = project_home_wiring(ProjectHomeLaunch {
             config,
-            tddy_data_dir: data_dir,
+            agent_tool_socket,
             session_dir: session_dir.path(),
             session_id: A_MAIN,
             agent_session_token: A_MINTED_TOKEN,
@@ -279,7 +293,7 @@ fn on_an_embedded_host_a_main_reaches_the_daemon_over_its_agent_tool_socket() {
     let host = AnEmbeddedHost::with_its_agent_tool_socket_bound();
 
     // When a main's launch is built there
-    let main = AMainLaunch::on(&host.config, host.data_dir());
+    let main = AMainLaunch::on(&host.config, &host.socket_path());
 
     // Then its tools are pointed at that socket, which `tddy-tools` prefers over any URL
     assert_eq!(
@@ -289,28 +303,27 @@ fn on_an_embedded_host_a_main_reaches_the_daemon_over_its_agent_tool_socket() {
 }
 
 #[test]
-fn on_a_regular_host_a_main_reaches_the_daemon_over_its_http_url_and_no_socket() {
-    // Given a binary daemon, which serves HTTP and binds no agent-tool socket
-    let host = ARegularHost::without_an_agent_tool_socket();
+fn on_a_server_host_a_main_reaches_the_daemon_over_its_users_agent_tool_socket() {
+    // Given a binary daemon, serving its user's agent-tool socket
+    let host = AServerHost::serving_its_users_agent_tool_socket();
 
     // When a main's launch is built there
-    let main = AMainLaunch::on(&host.config, host.data_dir());
+    let main = AMainLaunch::on(&host.config, &host.socket_path());
 
-    // Then its tools reach this daemon's local URL, and name no socket nobody serves
+    // Then its tools are pointed at that user's socket
     assert_eq!(
-        main.env("TDDY_REMOTE_DAEMON_URL"),
-        Some(daemon_hook_urls::local_daemon_hook_url(&host.config).as_str())
+        main.env("TDDY_REMOTE_DAEMON_SOCKET"),
+        Some(host.agent_tool_socket().as_str())
     );
-    assert_eq!(main.env("TDDY_REMOTE_DAEMON_SOCKET"), None);
 }
 
 #[test]
 fn a_mains_tools_carry_its_own_session_id_and_the_minted_token() {
     // Given a binary daemon
-    let host = ARegularHost::without_an_agent_tool_socket();
+    let host = AServerHost::serving_its_users_agent_tool_socket();
 
     // When a main's launch is built there
-    let main = AMainLaunch::on(&host.config, host.data_dir());
+    let main = AMainLaunch::on(&host.config, &host.socket_path());
 
     // Then every tool call names the main itself, under the credential minted for it
     assert_eq!(main.env("TDDY_REMOTE_SESSION_ID"), Some(A_MAIN));
@@ -320,10 +333,10 @@ fn a_mains_tools_carry_its_own_session_id_and_the_minted_token() {
 #[test]
 fn a_main_loads_only_the_tddy_tools_mcp_server_from_its_session_dir() {
     // Given a binary daemon
-    let host = ARegularHost::without_an_agent_tool_socket();
+    let host = AServerHost::serving_its_users_agent_tool_socket();
 
     // When a main's launch is built there
-    let main = AMainLaunch::on(&host.config, host.data_dir());
+    let main = AMainLaunch::on(&host.config, &host.socket_path());
 
     // Then the one MCP config it loads is in its session dir, and no other config is loaded
     let config_path = main.session_dir.path().join("claude-mcp-config.json");
@@ -349,10 +362,10 @@ fn a_main_loads_only_the_tddy_tools_mcp_server_from_its_session_dir() {
 #[test]
 fn a_main_is_pre_approved_its_tool_set_and_denied_every_native_filesystem_tool() {
     // Given a binary daemon
-    let host = ARegularHost::without_an_agent_tool_socket();
+    let host = AServerHost::serving_its_users_agent_tool_socket();
 
     // When a main's launch is built there
-    let main = AMainLaunch::on(&host.config, host.data_dir());
+    let main = AMainLaunch::on(&host.config, &host.socket_path());
 
     // Then it is pre-approved exactly the project-home tool set
     assert_eq!(
@@ -372,10 +385,10 @@ fn a_main_is_pre_approved_its_tool_set_and_denied_every_native_filesystem_tool()
 #[test]
 fn a_mains_role_prompt_is_written_to_its_session_dir_and_appended() {
     // Given a binary daemon
-    let host = ARegularHost::without_an_agent_tool_socket();
+    let host = AServerHost::serving_its_users_agent_tool_socket();
 
     // When a main's launch is built there
-    let main = AMainLaunch::on(&host.config, host.data_dir());
+    let main = AMainLaunch::on(&host.config, &host.socket_path());
 
     // Then one prompt file, inside its session dir, is appended to its system prompt
     let prompt_files = main.values_of("--append-system-prompt-file");
@@ -475,13 +488,13 @@ impl TheNotifyWiring {
     }
 }
 
-/// The notify environment a session on a host that serves HTTP RPC at `daemon_url` is given.
-fn the_environment_reaching_the_url(daemon_url: &str) -> BTreeMap<&'static str, String> {
+/// The notify environment a session whose host serves it the agent-tool socket `socket` is given.
+fn the_environment_reaching_the_socket(socket: &str) -> BTreeMap<&'static str, String> {
     BTreeMap::from([
         (notify_env::SESSION_ID, A_NOTIFYING_SESSION.to_string()),
         (notify_env::OS_USER, ITS_OS_USER.to_string()),
         (notify_env::HOOK_TOKEN, ITS_HOOK_TOKEN.to_string()),
-        (notify_env::DAEMON_URL, daemon_url.to_string()),
+        (notify_env::DAEMON_SOCKET, socket.to_string()),
     ])
 }
 
@@ -489,16 +502,16 @@ fn as_borrowed<'a>(expected: &'a BTreeMap<&'static str, String>) -> BTreeMap<&'a
     expected.iter().map(|(k, v)| (*k, v.as_str())).collect()
 }
 
-/// A plain claude-cli start's notify wiring on `config` / `data_dir`, with no managed recipe.
+/// A plain claude-cli start's notify wiring on `config` / `agent_tool_socket`, with no managed recipe.
 fn a_started_sessions_notify_wiring(
     config: &DaemonConfig,
-    data_dir: &Path,
+    agent_tool_socket: &Path,
     session_dir: &Path,
 ) -> TheNotifyWiring {
     TheNotifyWiring(
         agent_notify_launch(AgentNotifyLaunch {
             config,
-            tddy_data_dir: data_dir,
+            agent_tool_socket,
             os_user: ITS_OS_USER,
             session_id: A_NOTIFYING_SESSION,
             hook_token: ITS_HOOK_TOKEN,
@@ -511,18 +524,17 @@ fn a_started_sessions_notify_wiring(
 
 #[test]
 fn a_claude_cli_session_is_launched_with_the_notify_environment_and_the_guidance_fragment() {
-    // Given a binary daemon, which serves HTTP RPC
-    let host = ARegularHost::without_an_agent_tool_socket();
+    // Given a binary daemon, serving its user's agent-tool socket
+    let host = AServerHost::serving_its_users_agent_tool_socket();
     let session_dir = tempfile::tempdir().expect("a temporary session dir");
 
     // When a claude-cli session is started there
     let wiring =
-        a_started_sessions_notify_wiring(&host.config, host.data_dir(), session_dir.path());
+        a_started_sessions_notify_wiring(&host.config, &host.socket_path(), session_dir.path());
 
-    // Then its agent's environment names its session, its owner, its hook token and the daemon's
-    // URL — exactly what `tddy-tools notify` reads
-    let expected =
-        the_environment_reaching_the_url(&daemon_hook_urls::advertise_daemon_url(&host.config));
+    // Then its agent's environment names its session, its owner, its hook token and the user's
+    // agent-tool socket — exactly what `tddy-tools notify` reads
+    let expected = the_environment_reaching_the_socket(&host.agent_tool_socket());
     assert_eq!(wiring.environment(), as_borrowed(&expected));
     // And its system prompt is appended the paragraph telling it when to notify
     assert!(
@@ -537,7 +549,7 @@ fn a_claude_cli_session_is_launched_with_the_notify_environment_and_the_guidance
 #[test]
 fn a_resumed_claude_cli_session_carries_the_notify_environment_again() {
     // Given a binary daemon, and a stopped claude-cli session whose record holds its hook token
-    let host = ARegularHost::without_an_agent_tool_socket();
+    let host = AServerHost::serving_its_users_agent_tool_socket();
     let session_dir = tempfile::tempdir().expect("a temporary session dir");
     let recorded = tddy_core::SessionMetadata {
         hook_token: Some(ITS_HOOK_TOKEN.to_string()),
@@ -548,7 +560,7 @@ fn a_resumed_claude_cli_session_carries_the_notify_environment_again() {
     let wiring = TheNotifyWiring(
         resumed_agent_notify_launch(
             &host.config,
-            host.data_dir(),
+            &host.socket_path(),
             ITS_OS_USER,
             session_dir.path(),
             &recorded,
@@ -558,8 +570,7 @@ fn a_resumed_claude_cli_session_carries_the_notify_environment_again() {
     );
 
     // Then its new process is given the same notify environment its first one was
-    let expected =
-        the_environment_reaching_the_url(&daemon_hook_urls::advertise_daemon_url(&host.config));
+    let expected = the_environment_reaching_the_socket(&host.agent_tool_socket());
     assert_eq!(wiring.environment(), as_borrowed(&expected));
 }
 
@@ -571,7 +582,7 @@ fn an_embedded_host_exports_the_daemon_socket_not_the_url() {
 
     // When a claude-cli session is started there
     let wiring =
-        a_started_sessions_notify_wiring(&host.config, host.data_dir(), session_dir.path());
+        a_started_sessions_notify_wiring(&host.config, &host.socket_path(), session_dir.path());
 
     // Then its agent reaches the daemon over that socket, and is told of no URL that answers nothing
     let socket = host.agent_tool_socket();
@@ -589,7 +600,7 @@ fn an_embedded_host_exports_the_daemon_socket_not_the_url() {
 #[test]
 fn a_managed_sessions_recipe_prompt_follows_the_notify_guidance_in_the_one_appended_file() {
     // Given a binary daemon, and a managed recipe whose orchestration prompt is already written
-    let host = ARegularHost::without_an_agent_tool_socket();
+    let host = AServerHost::serving_its_users_agent_tool_socket();
     let session_dir = tempfile::tempdir().expect("a temporary session dir");
     let recipe_prompt = session_dir.path().join("recipe-prompt.md");
     std::fs::write(&recipe_prompt, "You are driving the tdd recipe.").expect("the recipe prompt");
@@ -598,7 +609,7 @@ fn a_managed_sessions_recipe_prompt_follows_the_notify_guidance_in_the_one_appen
     let wiring = TheNotifyWiring(
         agent_notify_launch(AgentNotifyLaunch {
             config: &host.config,
-            tddy_data_dir: host.data_dir(),
+            agent_tool_socket: &host.socket_path(),
             os_user: ITS_OS_USER,
             session_id: A_NOTIFYING_SESSION,
             hook_token: ITS_HOOK_TOKEN,

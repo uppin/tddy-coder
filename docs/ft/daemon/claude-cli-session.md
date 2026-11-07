@@ -736,19 +736,20 @@ The `tddy-tools` binary is `binary.command` of `tools/tddy-tools.yaml` (default:
 
 ### Which transport a hook reports over
 
-| Host | Hook command carries | Reports go over |
-|---|---|---|
-| Binary daemon (`tddy-daemon`) | `--daemon <daemon_url>` | HTTP: `{daemon_url}/rpc/activity.ActivityService/<method>` |
-| Tddy Desktop (embedded daemon) | `--daemon <daemon_url> --daemon-socket '<path>'` | The daemon's **agent-tool socket** — the Unix socket an embedded daemon binds for co-located processes, serving its full RPC roster |
+Every hook command a host launch writes carries `--daemon <daemon_url> --daemon-socket '<path>'`, and
+`session-hook` reports over the socket alone (a jailed launch points it at the in-jail tool-IPC socket
+instead, which the runner relays). The path is the **agent-tool socket of the session's OS
+user** — a Unix socket the daemon serves its full RPC roster on for co-located processes:
 
-An embedded daemon serves no HTTP RPC: its `listen.web_port` is only where a GitHub sign-in returns,
-and answers `/rpc` with 404. The socket is passed exactly when one is **listening** at
-`agent_tool_socket_path(<resolved data dir>)` at session start (`embedded_host_agent_tool_socket`) —
-a live connect, not the file existing, because the embedded daemon does not unlink the socket on
-exit and a binary daemon later started on the same data dir must keep using HTTP. The data dir is the
-one the daemon resolved (`TDDY_DATA_DIR` wins over `tddy_data_dir` in the config), the same one it
-bound the socket under. When `--daemon-socket` is given, `session-hook` uses only the socket. Hooks
-are written at session start, so a session keeps the transport it started with until it restarts.
+| Host | `--daemon-socket` |
+|---|---|
+| Tddy Desktop (embedded daemon) | the daemon's one socket, `agent_tool_socket_path(<resolved data dir>)`. An embedded daemon serves no HTTP RPC (its `listen.web_port` only answers a GitHub sign-in and returns 404 for `/rpc`), and a session started before the runtime serves the socket is refused rather than pointed at it |
+| Server daemon (`tddy-daemon` binary) | `<data dir>/run-agent-tools/<os user>/agent.sock`: a directory `0700` and a socket `0600`, both owned by that user, so only that user (and root) can connect. Bound when the user's first session starts; the data dir is the one the daemon resolved (`TDDY_DATA_DIR` wins over `tddy_data_dir`) |
+| Server daemon under `tddy-supervisor` | the socket the supervisor created for that user from `agent_tool_sockets:` in `supervisor.yaml` (the unprivileged daemon cannot `chown` one to another user). A user with no entry has the start **refused** (`FAILED_PRECONDITION`, naming `agent_tool_sockets`) — never started with hooks that report nowhere. See [tddy-supervisor § Per-user sockets](../supervisor/tddy-supervisor.md#per-user-sockets-handed-to-the-daemon) |
+
+The socket path is resolved before anything of the start is created. Hooks are written at session
+start, so a session keeps the socket it started with until it restarts. A server daemon that stops
+removes the sockets it bound itself and leaves the supervisor's in place for the next daemon.
 
 Split agents' hooks are written the same way. Cursor-cli hooks report over the agent-tool socket on
 the host and over the tool-IPC bridge in a jail — see
@@ -784,11 +785,11 @@ The launch gives it two things, at start and again at resume:
   | `TDDY_SESSION_ID` | the session id |
   | `TDDY_OS_USER` | the OS user that owns the session |
   | `TDDY_HOOK_TOKEN` | the session's `hook_token` — the same credential its hooks present |
-  | `TDDY_DAEMON_SOCKET` | the embedded daemon's agent-tool socket, when one is listening (the same rule as the hooks' `--daemon-socket`) |
-  | `TDDY_DAEMON_URL` | otherwise, the hooks' daemon URL |
+  | `TDDY_DAEMON_SOCKET` | the session OS user's agent-tool socket — the hooks' `--daemon-socket` |
+  | `TDDY_DAEMON_URL` | the hooks' daemon URL, when no socket is given (never for a daemon-launched agent) |
 
-  Exactly one of the last two is given: an embedded daemon serves no HTTP RPC, so a URL there would
-  reach nothing.
+  Exactly one of the last two is given: a daemon-launched agent always gets the socket, which is how
+  an embedded daemon, which serves no HTTP RPC, is reached at all.
 - **One guidance paragraph** in its system prompt (`agent_notify_guidance.md`): the command exists,
   use it when long work finishes or something blocks while the operator is likely away, never for
   routine progress. `claude` takes a single `--append-system-prompt-file`, so the daemon writes
@@ -826,8 +827,8 @@ message StartSessionRequest {
 
 `activity.proto` — the activity-status hooks, on `activity.ActivityService` (served by
 `tddy-session-activity`; `#unbundle` node 7 moved them off `connection.ConnectionService`, so the
-hook calls `activity.ActivityService/ReportSessionStatus` — over HTTP at `{daemon_url}/rpc/…`, or over
-the agent-tool socket on Tddy Desktop):
+hook calls `activity.ActivityService/ReportSessionStatus` — over the session OS user's agent-tool socket; `{daemon_url}/rpc/…`
+over HTTP for a hook command given no socket):
 
 ```proto
 rpc ReportSessionStatus(ReportSessionStatusRequest) returns (ReportSessionStatusResponse);

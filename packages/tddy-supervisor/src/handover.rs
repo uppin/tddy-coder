@@ -11,7 +11,8 @@ use std::os::unix::net::UnixListener;
 use std::sync::Arc;
 
 use crate::socket::{
-    host_session_fd_name, MAX_HANDED_OVER_LISTENERS, SD_LISTEN_FDS_START, SERVICE_SOCKET_FD_NAME,
+    agent_tools_fd_name, host_session_fd_name, MAX_HANDED_OVER_LISTENERS, SD_LISTEN_FDS_START,
+    SERVICE_SOCKET_FD_NAME,
 };
 
 /// The listening sockets the supervisor created for a managed service, ready to be handed over:
@@ -44,6 +45,18 @@ impl SocketHandover {
     ) -> SocketHandover {
         self.listeners
             .push((host_session_fd_name(os_user), listener));
+        self
+    }
+
+    /// Also hand over `os_user`'s agent-tool socket (`#agent-tools` 26/28), at the next descriptor
+    /// and named `agent-tools.<os user>`.
+    pub fn with_agent_tool_socket(
+        mut self,
+        os_user: &str,
+        listener: Arc<UnixListener>,
+    ) -> SocketHandover {
+        self.listeners
+            .push((agent_tools_fd_name(os_user), listener));
         self
     }
 

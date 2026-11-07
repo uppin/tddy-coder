@@ -91,6 +91,13 @@ impl DaemonSessionHost {
             roster_keepalive_interval: ROSTER_KEEPALIVE_INTERVAL,
             demo_vm_state,
             host_session_sockets,
+            // A server daemon's placement; `runtime::build` replaces it on an embedded host
+            // (`with_agent_tool_sockets`).
+            agent_tool_sockets: Arc::new(
+                tddy_daemon_kernel::agent_tool_sockets::AgentToolSockets::new(
+                    tddy_daemon_kernel::agent_tool_sockets::AgentToolSocketPlacement::PerOsUser,
+                ),
+            ),
             agent_activity_hub: Arc::new(tddy_daemon_kernel::AgentActivityHub::default()),
             agent_conversation_frames: Arc::new(
                 tddy_daemon_kernel::conversation_frames::ConversationFrames::default(),
@@ -319,6 +326,26 @@ impl DaemonSessionHost {
     ) -> Self {
         self.host_session_sockets.adopt_inherited(sockets);
         self
+    }
+
+    /// Tell this host's sessions about these agent-tool sockets (builder) — the runtime's, whose
+    /// placement matches its host and whose roster it installs once assembled. Call it before any
+    /// session starts.
+    #[must_use]
+    pub fn with_agent_tool_sockets(
+        mut self,
+        sockets: Arc<tddy_daemon_kernel::agent_tool_sockets::AgentToolSockets>,
+    ) -> Self {
+        self.agent_tool_sockets = sockets;
+        self
+    }
+
+    /// The agent-tool sockets this host's sessions are told about, shared rather than copied.
+    #[must_use]
+    pub fn agent_tool_sockets(
+        &self,
+    ) -> Arc<tddy_daemon_kernel::agent_tool_sockets::AgentToolSockets> {
+        Arc::clone(&self.agent_tool_sockets)
     }
 
     /// Sign agents' credentials with this daemon's key and verify callers' through its key

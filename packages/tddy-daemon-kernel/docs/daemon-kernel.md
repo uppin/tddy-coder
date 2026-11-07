@@ -428,6 +428,60 @@ Tests: `tests/privilege_change_acceptance.rs` (plan and refusal, account resolut
 test-owned pipe, record encoding). `tddy-spawn/tests/pre_exec_safety.rs` scans the spawn paths for
 `set_var` / `initgroups`.
 
+## Per-OS-user sockets (`owner_socket`, `agent_tool_sockets`)
+
+Two per-OS-user sockets exist — the **host-session** socket (`tddy-agent-launch`'s `HostSessionSockets`)
+and the **agent-tool** socket (`AgentToolSockets`, here). Both are bound owner-only for one user, or
+adopted from `tddy-supervisor`, by the same code. It lives in this crate because the agent-tool
+socket's consumers (`tddy-agent-launch`, `tddy-session-split`) sit below `tddy-daemon` and cannot name
+anything in it, and `tddy-session-split` is itself a dependency of `tddy-agent-launch`. The supervisor
+side is [tddy-supervisor's host-sockets.md](../../tddy-supervisor/docs/host-sockets.md).
+
+### `owner_socket` — bind owner-only, adopt what the supervisor made
+
+| Item | What it does |
+|---|---|
+| `OwnerSocketKind { setting, noun }` | which kind a refusal is about: `HOST_SESSION` (`host_sockets`, "host-session socket") or `AGENT_TOOL` (`agent_tool_sockets`, "agent-tool socket") |
+| `bind_owner_only(path, os_user, kind)` | `<data dir>/<run dir>/<user>/<file>`: the run dir `0711`, the user's dir narrowed to `0700` **before** the socket exists in it, the socket `0600`, then `chown` of socket and directory to the user. A daemon not privileged to `chown` to another uid **refuses** — naming `kind.setting` in `supervisor.yaml` — and `undo` removes what it created; nothing is ever served wider than the user's own access |
+| `ensure_dir`, `clear_stale_socket`, `chown`, `undo` | its steps. A stale file is replaced only if it is a socket owned by the daemon or the user and nothing listens on it |
+| `descriptors_named(prefix, pid, LISTEN_PID, LISTEN_FDS, LISTEN_FDNAMES)` | `(user, fd)` for each descriptor named `<prefix><user>`, from fd 3; nothing unless `LISTEN_PID` is this process and the names count exactly `LISTEN_FDS` (at most 16) |
+| `adopt_descriptor(user, fd, kind)`, `vet`, `require_listening` | adopt an inherited descriptor only if it is an open, listening (Linux) unix socket bound to a path whose file is a socket owned by that user with no group or other bits; anything else is closed |
+
+### `agent_tool_sockets` — where a session's hooks, notifications and tool calls go
+
+`AgentToolSockets::new(AgentToolSocketPlacement)`:
+
+- **`Embedded`** (Tddy Desktop) — one socket for the daemon, at `agent_tool_socket_path(data_dir)`
+  (`agent_tool_socket.rs`), bound and served by the runtime. `ensure_bound` returns it after a live
+  `connect`; a session started before the runtime serves it is refused rather than pointed at nothing.
+- **`PerOsUser`** (the `tddy-daemon` binary) — `<data dir>/run-agent-tools/<user>/agent.sock`
+  (`agent_tool_socket_path_for_user`; its own directory because the supervisor hands `run/<user>/` to
+  the host-session socket alone). The user name must be one plain path segment and the path at most
+  **103 bytes** (macOS `sun_path` is 104 including the NUL, Linux's 108; a macOS temporary directory
+  alone spends ~65), else a refusal. A socket the supervisor handed over (`adopt_inherited`, filled from
+  `adopt_from_environment` → `agent_tool_fds`, prefix `AGENT_TOOLS_FD_NAME_PREFIX` = `agent-tools.`) is
+  served where it is. Otherwise the socket is bound lazily, on the user's first session, through
+  `bind_owner_only(…, AGENT_TOOL)` — so under the supervisor, where the daemon cannot `chown`, an
+  unlisted user's start is refused naming `agent_tool_sockets`.
+
+| Method | What it does |
+|---|---|
+| `install_roster(entries)` | the daemon's finished RPC roster, read at every `accept`: a socket bound before the roster exists serves it once it does. Each connection gets its own `StdioEndpoint` (`RequestTransport::UnixSocket`) over a `MultiRpcService` |
+| `ensure_bound(user, data_dir)` / `ensure_bound_blocking` | the socket path, binding or adopting and serving it first. A server whose file was removed or replaced (`(dev, ino)` changed) is dropped and the socket bound again; an inherited one that is gone is refused — only restarting the supervisor recreates it |
+| `stop_serving()` | stops every server and removes the files **this daemon bound** (still the same `(dev, ino)`); a socket the supervisor made is left for the supervisor, which hands it to the next daemon. Called last in `DaemonSessionHost::shut_down_children`, after the CLI sessions and workspace jails stop, so an agent still reporting while they stop is answered |
+
+`ensure_bound_blocking` is safe on a runtime worker: its locks are `std` ones, held only across a
+bounded run of syscalls (`getpwnam`, `mkdir`, `bind`, `chown`, a `connect` refused at once), never
+across an `.await`. Only a user's first session pays for it; later ones `stat` the bound file. It must
+run inside a tokio runtime, which serves the socket — hence `tddy-stdio` as a normal dependency of this
+crate.
+
+Tests: `src/agent_tool_sockets_tests.rs` (owner-only path and modes, the roster served, one socket per
+user, inherited adoption, descriptor parsing, path refusals, both placements,
+`an_unlisted_user_under_the_supervisor_is_refused_naming_the_setting`,
+`stopping_leaves_a_socket_the_supervisor_made_where_it_is`). The supervisor's prefix is pinned against
+this one by `tddy-session-lifecycle`'s `reads_the_same_agent_tool_descriptor_names_the_supervisor_writes`.
+
 ## See also
 
 - [`packages/tddy-daemon/docs/connection-service.md`](../../tddy-daemon/docs/connection-service.md)

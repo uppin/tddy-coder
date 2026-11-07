@@ -25,6 +25,7 @@ impl SplitSessions {
     pub async fn resume_split_wiring(
         &self,
         meta: &tddy_core::SessionMetadata,
+        os_user: &str,
         sessions_base: &Path,
         session_dir: &Path,
         session_id: &str,
@@ -45,6 +46,7 @@ impl SplitSessions {
         {
             return self
                 .resume_colocated_jail_wiring(
+                    os_user,
                     sessions_base,
                     session_dir,
                     session_id,

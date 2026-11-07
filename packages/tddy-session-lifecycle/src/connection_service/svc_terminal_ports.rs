@@ -122,6 +122,7 @@ impl DaemonSessionHost {
                 Arc::clone(&self.cli_manager),
                 self.coding_agents.clone(),
                 self.tddy_data_dir.clone(),
+                Arc::clone(&self.agent_tool_sockets),
             )),
             tmux,
             initial_frame_bytes: tddy_terminal_rpc::bridge::DEFAULT_INITIAL_FRAME_BYTES,
@@ -139,6 +140,10 @@ struct TmuxMainReattach {
     /// The coding agents this daemon installed: what a record is re-attached as.
     coding_agents: Arc<tddy_agent_launch::spec_launch::HostCodingAgents>,
     tddy_data_dir: PathBuf,
+    /// Served again for the session's OS user before its main is re-attached: the agent that
+    /// outlived its daemon reports its hooks and makes its tool calls over that user's socket, and
+    /// a fresh daemon serves a user's socket only once something asks for it.
+    agent_tool_sockets: Arc<tddy_daemon_kernel::agent_tool_sockets::AgentToolSockets>,
     in_flight: tokio::sync::Mutex<std::collections::HashMap<String, Arc<tokio::sync::Mutex<()>>>>,
 }
 
@@ -147,12 +152,31 @@ impl TmuxMainReattach {
         manager: Arc<CliSessionManager>,
         coding_agents: Arc<tddy_agent_launch::spec_launch::HostCodingAgents>,
         tddy_data_dir: PathBuf,
+        agent_tool_sockets: Arc<tddy_daemon_kernel::agent_tool_sockets::AgentToolSockets>,
     ) -> Self {
         TmuxMainReattach {
             manager,
             coding_agents,
             tddy_data_dir,
+            agent_tool_sockets,
             in_flight: tokio::sync::Mutex::default(),
+        }
+    }
+
+    /// Serve `os_user`'s agent-tool socket, which the outliving agent's hooks, `notify` and tool
+    /// server were pointed at when it started. A user this daemon can no longer serve (under the
+    /// supervisor, one dropped from `agent_tool_sockets:`) still gets the terminal back: the refusal
+    /// is logged, naming the setting, and that agent's reports are not answered.
+    async fn serve_agent_tool_socket_of(&self, os_user: &str, session_id: &str) {
+        if let Err(e) = self
+            .agent_tool_sockets
+            .ensure_bound(os_user, &self.tddy_data_dir)
+            .await
+        {
+            log::warn!(
+                "re-attaching session {session_id}: its agent's reports go unanswered, {os_user}'s \
+                 agent-tool socket cannot be served: {e:#}"
+            );
         }
     }
 }
@@ -169,8 +193,11 @@ impl MainReattach for TmuxMainReattach {
         );
         let attached = {
             let _one_at_a_time = gate.lock().await;
-            self.manager.get(session_id).await.is_some()
-                || tddy_agent_launch::claude_cli_tmux::reattach_recorded_main(
+            if self.manager.get(session_id).await.is_some() {
+                true
+            } else {
+                self.serve_agent_tool_socket_of(os_user, session_id).await;
+                tddy_agent_launch::claude_cli_tmux::reattach_recorded_main(
                     &self.manager,
                     Some(&*self.coding_agents),
                     &self.tddy_data_dir,
@@ -178,6 +205,7 @@ impl MainReattach for TmuxMainReattach {
                     session_id,
                 )
                 .await
+            }
         };
         // The last access out forgets the session's gate (every clone is taken under this lock, so
         // a count of two — the map's and this one — means nobody else holds or waits on it).
