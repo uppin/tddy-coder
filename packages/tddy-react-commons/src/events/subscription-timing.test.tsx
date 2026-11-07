@@ -1,8 +1,9 @@
 import { render } from '@testing-library/react';
+import type { PartialObserver } from 'rxjs';
 import { useLayoutEffect } from 'react';
 import { describe, expect, it } from 'bun:test';
 
-import { withEvents, type RC } from './index';
+import { withEvents, type Envelope, type RC } from './index';
 
 /**
  * The window between commit and passive-effect flush.
@@ -27,7 +28,7 @@ interface ProbeEvents {
   withPayload: { value: number };
 }
 
-const EmitOnLayoutImpl: RC<Record<string, never>, ProbeEvents> = ({ events }) => {
+const EmitOnLayoutImpl: RC<Record<never, never>, ProbeEvents> = ({ events }) => {
   useLayoutEffect(() => {
     events.fired();
   }, [events]);
@@ -59,7 +60,7 @@ describe('withEvents subscription timing', () => {
     const first: unknown[] = [];
     const second: unknown[] = [];
     let emit: (() => void) | undefined;
-    const Capture: RC<Record<string, never>, ProbeEvents> = ({ events }) => {
+    const Capture: RC<Record<never, never>, ProbeEvents> = ({ events }) => {
       emit = () => events.fired();
       return null;
     };
@@ -91,6 +92,7 @@ describe('withEvents subscription timing', () => {
   });
 
   it('tolerates an observer that implements no next', () => {
-    expect(() => render(<EmitOnLayout eventObserver={{}} />)).not.toThrow();
+    const observer = {} as PartialObserver<Envelope<ProbeEvents>>;
+    expect(() => render(<EmitOnLayout eventObserver={observer} />)).not.toThrow();
   });
 });

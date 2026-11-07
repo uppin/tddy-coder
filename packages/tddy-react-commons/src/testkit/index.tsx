@@ -1,10 +1,24 @@
-// TODO(react-commons): implement — contract surface; bodies land with the implementation.
 import { type ReactElement, type ReactNode } from 'react';
-import type { PartialObserver } from 'rxjs';
-import { type AppScope } from '../async/index';
-import { type ChildEvents, type Envelope, type EventMapKeys } from '../events/index';
+import type { Observable, PartialObserver, Subscription } from 'rxjs';
+
+import {
+  createAppScope,
+  type AppScope,
+  type CommandErrorChannel,
+  type Request,
+  type RequestOptions,
+} from '../async/index';
+import type { Poller, PollOptions } from '../async/poller';
+import { AppContext } from '../container/context';
+import {
+  createChildEvents,
+  type ChildEvents,
+  type Envelope,
+  type EventMapKeys,
+} from '../events/index';
 import type { PortMap } from '../ports/index';
-import { type Store } from '../stores/index';
+import { createStore, type Store } from '../stores/index';
+
 /**
  * Test doubles for the library's own abstractions: a stub context in place of a real handler, a
  * recording `Store`, and the same typed event surface production code uses.
@@ -16,6 +30,7 @@ import { type Store } from '../stores/index';
  * Deliberately renderer-agnostic — nothing here imports a testing library, so it works under
  * `@testing-library/react`, Cypress component tests, or anything else.
  */
+
 /**
  * Provides a stub context to the tree under test, standing in for
  * `ReactAppContainer.create(handler, …)`. No handler is started and nothing is torn down.
@@ -28,25 +43,31 @@ import { type Store } from '../stores/index';
  * );
  * ```
  */
-export function AppContextStub<Context>({ value, children, }: {
-    value: Context;
-    children: ReactNode;
+export function AppContextStub<Context>({
+  value,
+  children,
+}: {
+  value: Context;
+  children: ReactNode;
 }): ReactElement {
-    throw new Error("TODO(react-commons): implement");
+  return <AppContext.Provider value={value}>{children}</AppContext.Provider>;
 }
+
 export interface StubStore<T> extends Store<T> {
-    /** Every patch passed to `setState`, oldest first. */
-    readonly writes: ReadonlyArray<Partial<T>>;
-    /** Every whole-state replacement passed to `next`, oldest first. */
-    readonly replacements: ReadonlyArray<T>;
-    resetWrites(): void;
+  /** Every patch passed to `setState`, oldest first. */
+  readonly writes: ReadonlyArray<Partial<T>>;
+  /** Every whole-state replacement passed to `next`, oldest first. */
+  readonly replacements: ReadonlyArray<T>;
+  resetWrites(): void;
 }
+
 export interface StubStoreOptions<T> {
-    /** Called with each `setState` patch (updater results already applied). */
-    onSetState?: (patch: Partial<T>) => void;
-    /** Called with each whole-state replacement passed to `next`. */
-    onNext?: (state: T) => void;
+  /** Called with each `setState` patch (updater results already applied). */
+  onSetState?: (patch: Partial<T>) => void;
+  /** Called with each whole-state replacement passed to `next`. */
+  onNext?: (state: T) => void;
 }
+
 /**
  * A real store that additionally records what was written to it, for asserting that an event
  * reached a sink without standing up a handler.
@@ -54,23 +75,51 @@ export interface StubStoreOptions<T> {
  * The callbacks are the seam for Storybook: pass `onSetState: action('uiStore.setState')` and
  * every sink write shows up in the actions panel.
  */
-export function stubStore<T>(initialState: T, options?: StubStoreOptions<T>): StubStore<T> {
-    throw new Error("TODO(react-commons): implement");
+export function stubStore<T>(initialState: T, options: StubStoreOptions<T> = {}): StubStore<T> {
+  const store = createStore<T>(() => initialState);
+  const writes: Array<Partial<T>> = [];
+  const replacements: T[] = [];
+
+  const { setState, next } = store;
+
+  return Object.assign(store, {
+    setState: (partial: Partial<T> | ((state: T) => Partial<T>)) => {
+      const patch = typeof partial === 'function' ? partial(store.getState()) : partial;
+      writes.push(patch);
+      options.onSetState?.(patch);
+      setState.call(store, patch);
+    },
+    next: (state: T) => {
+      replacements.push(state);
+      options.onNext?.(state);
+      next.call(store, state);
+    },
+    get writes() {
+      return writes;
+    },
+    get replacements() {
+      return replacements;
+    },
+    resetWrites: () => {
+      writes.length = 0;
+      replacements.length = 0;
+    },
+  }) as StubStore<T>;
 }
-export interface EventRecorder<E extends {
-    [K in EventMapKeys<E>]: unknown;
-}> {
-    /** Pass as a component's `eventObserver`. */
-    readonly observer: PartialObserver<Envelope<E>>;
-    /** Every envelope received, oldest first. */
-    readonly emitted: ReadonlyArray<Envelope<E>>;
-    /** Event names in emission order — handy for asserting sequence. */
-    readonly types: ReadonlyArray<keyof E>;
-    payloadsOf<K extends keyof E>(type: K): Array<E[K]>;
-    lastOf<K extends keyof E>(type: K): E[K] | undefined;
-    countOf(type: keyof E): number;
-    reset(): void;
+
+export interface EventRecorder<E extends { [K in EventMapKeys<E>]: unknown }> {
+  /** Pass as a component's `eventObserver`. */
+  readonly observer: PartialObserver<Envelope<E>>;
+  /** Every envelope received, oldest first. */
+  readonly emitted: ReadonlyArray<Envelope<E>>;
+  /** Event names in emission order — handy for asserting sequence. */
+  readonly types: ReadonlyArray<keyof E>;
+  payloadsOf<K extends keyof E>(type: K): Array<E[K]>;
+  lastOf<K extends keyof E>(type: K): E[K] | undefined;
+  countOf(type: keyof E): number;
+  reset(): void;
 }
+
 /**
  * Captures what a component emits, with payloads typed per event name.
  *
@@ -80,11 +129,36 @@ export interface EventRecorder<E extends {
  * expect(events.lastOf('pageRequested')).toEqual({ page: 3 });
  * ```
  */
-export function eventRecorder<E extends {
-    [K in EventMapKeys<E>]: unknown;
-}>(): EventRecorder<E> {
-    throw new Error("TODO(react-commons): implement");
+export function eventRecorder<E extends { [K in EventMapKeys<E>]: unknown }>(): EventRecorder<E> {
+  const emitted: Array<Envelope<E>> = [];
+
+  return {
+    observer: {
+      next: envelope => {
+        emitted.push(envelope);
+      },
+    },
+    get emitted() {
+      return emitted;
+    },
+    get types() {
+      return emitted.map(envelope => envelope.type);
+    },
+    payloadsOf: type =>
+      emitted.filter(envelope => envelope.type === type).map(envelope => envelope.payload) as Array<
+        E[typeof type]
+      >,
+    lastOf: type => {
+      const matching = emitted.filter(envelope => envelope.type === type);
+      return matching[matching.length - 1]?.payload as E[typeof type] | undefined;
+    },
+    countOf: type => emitted.filter(envelope => envelope.type === type).length,
+    reset: () => {
+      emitted.length = 0;
+    },
+  };
 }
+
 /**
  * The same typed emitter surface a real child RC receives, pointed at an observer of your
  * choosing — so a test can drive a component's handlers directly:
@@ -98,27 +172,32 @@ export function eventRecorder<E extends {
  * This is the production `createChildEvents`, not a lookalike, so null-payload normalisation
  * and emitter identity behave identically to a mounted child.
  */
-export function emittersFor<E extends {
-    [K in EventMapKeys<E>]: unknown;
-}>(observer: PartialObserver<Envelope<E>>): ChildEvents<E> {
-    throw new Error("TODO(react-commons): implement");
+export function emittersFor<E extends { [K in EventMapKeys<E>]: unknown }>(
+  observer: PartialObserver<Envelope<E>>,
+): ChildEvents<E> {
+  return createChildEvents<E>(envelope => observer.next?.(envelope));
 }
+
 /**
  * A recorder plus emitters over it, for testing a sink or handler map with no component at
  * all: emit through `events`, assert on `recorder` or on a `stubStore`.
  */
-export function eventDriver<E extends {
-    [K in EventMapKeys<E>]: unknown;
-}>(target?: PartialObserver<Envelope<E>>): {
-    events: ChildEvents<E>;
-    recorder: EventRecorder<E>;
-} {
-    throw new Error("TODO(react-commons): implement");
+export function eventDriver<E extends { [K in EventMapKeys<E>]: unknown }>(
+  target?: PartialObserver<Envelope<E>>,
+): { events: ChildEvents<E>; recorder: EventRecorder<E> } {
+  const recorder = eventRecorder<E>();
+  const events = createChildEvents<E>(envelope => {
+    recorder.observer.next?.(envelope);
+    target?.next?.(envelope);
+  });
+  return { events, recorder };
 }
+
 /**
  * Storybook's `action(name)` — accepted as a parameter so the testkit never imports Storybook.
  */
 export type ActionFactory = (name: string) => (...args: unknown[]) => void;
+
 /**
  * Relays every envelope a component emits into a Storybook action, one action per event name:
  *
@@ -130,13 +209,22 @@ export type ActionFactory = (name: string) => (...args: unknown[]) => void;
  *
  * Event names come from the envelope at runtime, so there is nothing to declare per event.
  */
-export function actionObserver<E extends {
-    [K in EventMapKeys<E>]: unknown;
-}>(action: ActionFactory, options?: {
-    prefix?: string;
-}): PartialObserver<Envelope<E>> {
-    throw new Error("TODO(react-commons): implement");
+export function actionObserver<E extends { [K in EventMapKeys<E>]: unknown }>(
+  action: ActionFactory,
+  options: { prefix?: string } = {},
+): PartialObserver<Envelope<E>> {
+  const prefix = options.prefix ?? '';
+  return {
+    next: envelope => {
+      action(`${prefix}${String(envelope.type)}`)(envelope.payload);
+    },
+  };
 }
+
+// ---------------------------------------------------------------------------
+// Doubles for the ports and async primitives.
+// ---------------------------------------------------------------------------
+
 /**
  * A port map where only what a test cares about is defined.
  *
@@ -146,14 +234,23 @@ export function actionObserver<E extends {
  * the double that was never told what to do.
  */
 export function stubPorts<P extends PortMap>(overrides: Partial<P>): P {
-    throw new Error("TODO(react-commons): implement");
+  return new Proxy(overrides as P, {
+    get(target, prop, receiver) {
+      if (typeof prop === 'string' && !(prop in target)) {
+        throw new Error(`stubPorts: unstubbed port "${prop}"`);
+      }
+      return Reflect.get(target, prop, receiver);
+    },
+  });
 }
+
 /** A promise the test settles, so a pending request can be observed *while* pending. */
 export interface Deferred<T> {
-    readonly promise: Promise<T>;
-    resolve(value: T): void;
-    reject(error: unknown): void;
+  readonly promise: Promise<T>;
+  resolve(value: T): void;
+  reject(error: unknown): void;
 }
+
 /**
  * A promise with its settlement handed back.
  *
@@ -161,16 +258,27 @@ export interface Deferred<T> {
  * that returns an already-resolved promise can never see it.
  */
 export function deferred<T>(): Deferred<T> {
-    throw new Error("TODO(react-commons): implement");
+  let resolve!: (value: T) => void;
+  let reject!: (error: unknown) => void;
+  const promise = new Promise<T>((res, rej) => {
+    resolve = res;
+    reject = rej;
+  });
+  return { promise, resolve, reject };
 }
+
+// ---------------------------------------------------------------------------
+
 /** The kinds of resource an `AppScope` builds, as `stubScope` tallies them. */
 export type ScopeRegistrationKind = 'request' | 'poller' | 'errorChannel' | 'subscription';
+
 export interface StubScope extends AppScope {
-    /** How many of each kind the code under test put in the scope's care. */
-    readonly registrations: Readonly<Record<ScopeRegistrationKind, number>>;
-    readonly closed: boolean;
-    close(): void;
+  /** How many of each kind the code under test put in the scope's care. */
+  readonly registrations: Readonly<Record<ScopeRegistrationKind, number>>;
+  readonly closed: boolean;
+  close(): void;
 }
+
 /**
  * A scope that also says what was put in it.
  *
@@ -182,5 +290,49 @@ export interface StubScope extends AppScope {
  * resources let a handler test pass against a handler that never invokes anything.
  */
 export function stubScope(): StubScope {
-    throw new Error("TODO(react-commons): implement");
+  const scope = createAppScope();
+  const registrations: Record<ScopeRegistrationKind, number> = {
+    request: 0,
+    poller: 0,
+    errorChannel: 0,
+    subscription: 0,
+  };
+  let closed = false;
+
+  function tally<T>(kind: ScopeRegistrationKind, resource: T): T {
+    registrations[kind] += 1;
+    return resource;
+  }
+
+  return {
+    registrations,
+
+    get closed(): boolean {
+      return closed;
+    },
+
+    request<Args extends readonly unknown[], T>(
+      call: (...args: Args) => Promise<T>,
+      options?: RequestOptions,
+    ): Request<Args, T> {
+      return tally('request', scope.request(call, options));
+    },
+
+    poller<T>(call: () => Promise<T>, options: PollOptions<T>): Poller<T> {
+      return tally('poller', scope.poller(call, options));
+    },
+
+    errorChannel(): CommandErrorChannel {
+      return tally('errorChannel', scope.errorChannel());
+    },
+
+    subscribe<T>(source: Observable<T>, observer: (value: T) => void): Subscription {
+      return tally('subscription', scope.subscribe(source, observer));
+    },
+
+    close(): void {
+      closed = true;
+      scope.close();
+    },
+  };
 }
