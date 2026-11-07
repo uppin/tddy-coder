@@ -24,7 +24,7 @@
 
 ## Summary
 
-Move the session runtime and its terminal surfaces into `tddy-session-web`: `SessionRuntime`, `sessionRuntimeRegistry`, `sessionNotificationRegistry`, `GrpcSessionTerminal`, `SessionTerminalTabs`, `SessionMainPane`, `SessionChildRuntime`, `Dormant*`, `useSession*`, `useTerminal*`, `useTmuxSessions`, `attachClaim`.
+Move the session runtime and its terminal surfaces into `tddy-session-web`: `SessionRuntime`, `sessionRuntimeRegistry`, `sessionNotificationRegistry`, `GrpcSessionTerminal`, `SessionTerminalTabs`, `SessionChildRuntime`, `Dormant*`, `useSession*`, `useTerminal*`, `useTmuxSessions`, `attachClaim`.
 
 ## Background
 
@@ -77,9 +77,9 @@ exports — failing until the modules move.
 
 ## Scope
 
-- [ ] Modules moved
-- [ ] Specs moved, on port doubles
-- [ ] Boundary rule green
+- [x] Modules moved
+- [x] Specs moved, on port doubles
+- [x] Boundary rule green
 
 ## Technical Changes
 
@@ -106,6 +106,26 @@ boundary rule. CI: the stack's single `web.yml` (affected-package shards).
 
 - Split from #851 (developer, 2026-11-07); see the PRD background.
 
+## Deviations (green)
+
+- Moved with the runtime, as helpers only it uses: `sessionRuntimeProps`, `useSessionTerminals`,
+  `useSessionTerminalFeed`, `useSessionAttachment`, `useChildSessions`, `useAgentTerminalFocus`,
+  `useSessionPaneFullscreen`, `agentConversationTabs`, `SessionPaneChrome`, `TerminalControlOverlay`,
+  `SessionConnectionOverlay`, `NewTerminalMenu`, `tmuxSessionName`, `rpc/connections/hostServedSession`,
+  `rpc/connections/useConnectionStatus`, `lib/terminalGridMeasure`, and the new
+  `useConversationHostAttachment` (cut out of `SessionAgentConversationLayer`, which stays in tddy-web).
+- `sessionRuntimeRegistryMetadataMerge.test.ts` stays in tddy-web: it builds a `SessionManager`, which
+  moves with the drawer.
+- `SessionConnectionAcceptance` and `useSessionAttachment` specs no longer build a
+  `LiveKitConnectionProvider`; they run on a host-connection double whose `openSession` is the production
+  `openHostServedSession`. The one assertion that was about the provider's token mint
+  (`cy.wait("@generateToken")`) is dropped here; the mint is covered by `tddy-livekit-web`.
+- `tddy-session-web` gains `tddy-terminal-web`, `tddy-session-create-web` (workspace) and `lucide-react`
+  (already in the repo) as dependencies; `bun.lock`'s workspace entry edited by hand (the local-registry
+  install restores the committed lock).
+- Package Cypress support (`testIds` subset, `protoRpc`, `sessionConnections`, `hostConnections`,
+  `terminalControlPage`) is copied; tddy-web keeps its own.
+
 ## Refactoring Needed
 
 ## Validation Results
@@ -120,9 +140,9 @@ boundary rule. CI: the stack's single `web.yml` (affected-package shards).
 - [x] Run acceptance tests (verify they fail)
 - [x] USER REVIEW — acceptance tests (developer waived the per-node review for this stack, 2026-11-07: "finish the rest without stopping")
 - [x] TDD Red — write failing unit/integration tests
-- [ ] TDD Green — implement with quality code
+- [x] TDD Green — implement with quality code
 - [ ] Update documentation with progress
-- [ ] Run the touched packages' tests — verify 100% pass
+- [x] Run the touched packages' tests — verify 100% pass
 - [ ] Validate changes (/validate-changes)
 - [ ] Refactor issues from change validation
 - [ ] Validate tests (/validate-tests)

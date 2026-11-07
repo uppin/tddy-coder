@@ -7,11 +7,12 @@
  * handshake overlay at all — the overlay was gated on `connected-livekit`. So the case that works
  * read to the operator as the case that never connected.
  *
- * Everything here runs through the **production** path: `LiveKitConnectionProvider.openSession`
- * decides room-or-no-room and hands back a real `openHostServedSession` connection, and
- * `SessionRuntime` is the component actually mounted. A spec that built its own connection object
- * would be asserting the behaviour of its own fixture — which is what the overlay claim, the one
- * thing here that is about a rendered surface, most needs not to be.
+ * Everything here runs through the **production** path: a host-connection double hands back a real
+ * `openHostServedSession` connection (the provider that decides room-or-no-room is LiveKit's own
+ * package, so its token mint is not asserted here), and `SessionRuntime` is the component actually
+ * mounted. A spec that built its own connection object would be asserting the behaviour of its own
+ * fixture — which is what the overlay claim, the one thing here that is about a rendered surface,
+ * most needs not to be.
  *
  * Technical: `packages/tddy-web/docs/session-connections.md`
  * Stack: `optional-livekit` node 3 of 7.
@@ -252,7 +253,8 @@ describe("the handshake overlay over an attached session's panes", () => {
         url: "ws://127.0.0.1:9999",
         serverIdentity: `daemon-${THIS_HOST}-${A_SESSION}`,
       })
-      .servingOver(anInMemoryRpcBackend().transport());
+      .servingOver(anInMemoryRpcBackend().transport())
+      .servingTerminal();
     const connection = attached.build();
     const hint = attached.buildHint();
 
