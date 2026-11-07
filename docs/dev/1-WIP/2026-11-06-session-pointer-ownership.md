@@ -30,6 +30,8 @@ No `Claimed by:` record in any touched package.
 - **tddy-agent-launch** — `cli_session_pointer` over ssh: bounded exclude + `0600` write + removal; `svc_signal_delete_session` removes it.
 - **tddy-session-lifecycle** — `coding_agent_launcher` drops `forwards_server_env`.
 - **tddy-sandbox** — jail tool-IPC socket path from the whole session id.
+- 🆕 **tddy-coding-agent-specs** — `McpServerCommand.cwd`; an inline MCP slot renders a `cwd` override and leaves `env_vars` out when the server has no env.
+- 🆕 **tddy-sandbox-app**, **tddy-session-split** — `cwd: None` at their MCP server literals (the new field).
 
 ## Related Feature Documentation
 
@@ -44,11 +46,11 @@ tool-IPC sockets.
 
 ## Scope
 
-- [ ] Jail tool-IPC socket path unique per session id, within `SUN_LEN`
-- [ ] Pointer `owner {pid, host}`; pointer-source resolution refuses a dead owner / missing socket (never `--socket`); old pointer without owner still resolves
-- [ ] A held pointer for another session is not overwritten
-- [ ] SSH: one bounded exclude + `0600` write; bounded removal on agent exit and on delete
-- [ ] Headless conversation pointer; inline MCP slot names no env; `forwards_server_env` deleted
+- [x] Jail tool-IPC socket path unique per session id, within `SUN_LEN`
+- [x] Pointer `owner {pid, host}`; pointer-source resolution refuses a dead owner / missing socket (never `--socket`); old pointer without owner still resolves
+- [x] A held pointer for another session is not overwritten
+- [x] SSH: one bounded exclude + `0600` write; bounded removal on agent exit and on delete (the remote agent's own pid as owner is deferred: no ssh agent launch exists — see Technical Debt)
+- [x] Headless conversation pointer; inline MCP slot names no env; `forwards_server_env` deleted
 
 ## Technical Changes
 
@@ -169,11 +171,11 @@ Real edges: `session-pointer → split-remote-env, acp-subagent-leftovers, env-a
 - [x] USER REVIEW — acceptance tests
 - [x] TDD Red — write failing unit/integration tests
 - [x] TDD Green — implement with quality code
-- [ ] Update documentation with progress
-- [ ] Repeat Red→Green→Update cycle until feature complete
-- [ ] Run the touched packages' tests (`./test -p {package}` per package) — verify 100% pass
-- [ ] Validate changes (/validate-changes)
-- [ ] Refactor issues from change validation
+- [x] Update documentation with progress
+- [x] Repeat Red→Green→Update cycle until feature complete
+- [x] Run the touched packages' tests (`./test -p {package}` per package) — verify 100% pass
+- [x] Validate changes (/validate-changes)
+- [x] Refactor issues from change validation
 - [ ] USER REVIEW — development complete
 - [ ] Validate tests (/validate-tests)
 - [ ] Refactor test issues
@@ -194,6 +196,13 @@ Real edges: `session-pointer → split-remote-env, acp-subagent-leftovers, env-a
 ## Refactoring Needed
 
 ### From /validate-changes
+
+- ✅ `this_host` returned `""` when `gethostname` failed — a silent fallback that would make every failing host agree with every other. It now asserts: with a 256-byte buffer (above every `HOST_NAME_MAX`) a failure is a broken invariant.
+- ✅ `run_over_ssh` dropped a stdout read error; it is now the command's error.
+- ✅ `write_over_ssh` had been widened to `pub(crate)` with no caller outside its module; private again.
+- ✅ `write_conversation_pointer` hand-rolled a truncating `0600` write; it uses `tddy_core::atomic_file::write_atomic_with_mode`, as every other pointer write does.
+- ⚠️ `#[allow(dead_code)]` on `record_remote_owner` / `REMOTE_AGENT_PID_FILE` stays with the developer-approved deferral (no ssh agent launch to call it; `docs/dev/todo/2026-11-07-ssh-agent-launch-remote-pointer-owner.md`). `#[expect]` cannot replace it: the unit tests use both, so a test build would fail the expectation.
+
 ### From /validate-tests
 ### From /validate-prod-ready
 ### From /analyze-clean-code
@@ -201,6 +210,12 @@ Real edges: `session-pointer → split-remote-env, acp-subagent-leftovers, env-a
 ## Validation Results
 
 ### /validate-changes
+
+- Stack gate: base `master`; branch already on `origin/master`'s tip (`git merge-base --is-ancestor` ✅); `origin/master..HEAD` = this PR's 4 commits only.
+- Stack boundary: every Scope item implemented or deferred with approval; no `## Dependencies` symbol implemented; nothing from `## Boundaries` (no `TDDY_REMOTE_*` move, no other env construction, no Codex OAuth env, resolution order and `--socket` unchanged); no deletions.
+- Build: `cargo check --all-targets -p tddy-agent-backend -p tddy-agent-launch -p tddy-session-lifecycle` ✅ after the fixes above.
+- Risk: no secrets; two `unsafe` blocks (`kill(pid, 0)`, `gethostname`) carry SAFETY comments; the ssh commands single-quote every interpolated path; the owner lookup validates pid and host before writing JSON.
+
 ### /validate-tests
 ### /validate-prod-ready
 ### /analyze-clean-code

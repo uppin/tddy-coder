@@ -90,13 +90,22 @@ impl SessionPointerOwner {
 }
 
 /// The name this host gives itself (`gethostname`, as `hostname` prints it).
+///
+/// # Panics
+///
+/// When `gethostname` fails. Its only failures are a bad buffer address and a buffer shorter than
+/// the host name; this one is 256 bytes, above every platform's `HOST_NAME_MAX` (64 on Linux, 255 on
+/// macOS), so a failure is a broken invariant, not a host without a name to fall back from.
 pub fn this_host() -> String {
     let mut buf = [0u8; 256];
     // SAFETY: `buf` is valid for `buf.len()` bytes; `gethostname` NUL-terminates within it or fails.
     let status = unsafe { libc::gethostname(buf.as_mut_ptr().cast(), buf.len()) };
-    if status != 0 {
-        return String::new();
-    }
+    assert_eq!(
+        status,
+        0,
+        "gethostname failed with a buffer above HOST_NAME_MAX: {}",
+        std::io::Error::last_os_error()
+    );
     let len = buf.iter().position(|&b| b == 0).unwrap_or(buf.len());
     String::from_utf8_lossy(&buf[..len]).into_owned()
 }

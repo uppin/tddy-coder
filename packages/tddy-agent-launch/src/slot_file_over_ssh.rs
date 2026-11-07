@@ -43,7 +43,7 @@ pub(crate) fn write_slot_file_over_ssh(
 }
 
 /// [`write_slot_file_over_ssh`] through the ssh client `ssh`, bounded by `deadline`.
-pub(crate) fn write_over_ssh(
+fn write_over_ssh(
     ssh: &Path,
     alias: &str,
     path: &Path,
@@ -102,8 +102,7 @@ pub(crate) fn run_over_ssh(
         .ok_or_else(|| failed("no stdout".to_string()))?;
     let printed = std::thread::spawn(move || {
         let mut text = String::new();
-        let _ = stdout_pipe.read_to_string(&mut text);
-        text
+        stdout_pipe.read_to_string(&mut text).map(|_| text)
     });
     let mut stderr = child
         .stderr
@@ -134,13 +133,15 @@ pub(crate) fn run_over_ssh(
     let written = writer
         .join()
         .unwrap_or_else(|_| Err(std::io::Error::other("the stdin writer panicked")));
-    let stdout = printed.join().unwrap_or_default();
+    let printed = printed
+        .join()
+        .unwrap_or_else(|_| Err(std::io::Error::other("the stdout reader panicked")));
     let stderr = reader.join().unwrap_or_default();
     if !status.success() {
         return Err(failed(stderr.trim().to_string()));
     }
     written.map_err(|e| failed(e.to_string()))?;
-    Ok(stdout)
+    printed.map_err(|e| failed(format!("what it printed cannot be read: {e}")))
 }
 
 /// The ssh options every slot file write runs with: no prompt, and a connection that cannot hang.

@@ -362,8 +362,6 @@ impl DaemonCodingAgentLauncher {
         scratch_dir: &Path,
         server_env: Vec<(String, String)>,
     ) -> Result<(), SubagentError> {
-        use std::io::Write as _;
-        use std::os::unix::fs::OpenOptionsExt as _;
         use tddy_core::session_pointer::{
             SessionPointer, SessionPointerOwner, SESSION_POINTER_FILE,
         };
@@ -377,28 +375,21 @@ impl DaemonCodingAgentLauncher {
             owner: Some(SessionPointerOwner::this_process()),
         };
         let path = scratch_dir.join(SESSION_POINTER_FILE);
-        let written = serde_json::to_vec_pretty(&pointer)
+        serde_json::to_vec_pretty(&pointer)
             .map_err(|e| e.to_string())
             .and_then(|contents| {
-                std::fs::create_dir_all(scratch_dir.join(".tddy")).map_err(|e| e.to_string())?;
-                std::fs::OpenOptions::new()
-                    .write(true)
-                    .create(true)
-                    .truncate(true)
-                    .mode(0o600)
-                    .open(&path)
-                    .and_then(|mut file| file.write_all(&contents))
+                tddy_core::atomic_file::write_atomic_with_mode(&path, contents, 0o600)
                     .map_err(|e| e.to_string())
-            });
-        written.map_err(|reason| {
-            Self::refuse(
-                launch,
-                &format!(
-                    "its conversation's session pointer could not be written at {}: {reason}",
-                    path.display()
-                ),
-            )
-        })
+            })
+            .map_err(|reason| {
+                Self::refuse(
+                    launch,
+                    &format!(
+                        "its conversation's session pointer could not be written at {}: {reason}",
+                        path.display()
+                    ),
+                )
+            })
     }
 
     /// The environment a headless CLI takes from the session's provider route, when it runs on one.
