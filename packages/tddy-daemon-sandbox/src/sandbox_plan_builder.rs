@@ -213,8 +213,6 @@ pub fn build_action_runner_plan(
         grpc_port.to_string(),
         "--egress-shim-port".into(),
         shim_port.to_string(),
-        "--model".into(),
-        String::new(),
     ];
     for arg in &spec.command {
         runner_argv.push(format!("--pty-command={arg}"));

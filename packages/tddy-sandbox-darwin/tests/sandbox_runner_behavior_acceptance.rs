@@ -15,7 +15,6 @@ use tokio::io::AsyncWriteExt;
 use tokio::net::TcpListener;
 
 const SESSION_ID: &str = "sandbox-runner-behavior-session";
-const TEST_MODEL: &str = "claude-opus-4-8";
 const TEST_TIMEOUT: Duration = Duration::from_secs(45);
 
 /// Serializes tests that mutate the process-global `TDDY_EGRESS_PROBE_*` env so they don't clobber
@@ -70,7 +69,6 @@ fn runner_args(tmp: &Path, agent_binary: &Path) -> (SandboxRunnerArgs, PathBuf, 
         session_id: SESSION_ID.to_string(),
         context_dir,
         cwd: None,
-        model: TEST_MODEL.to_string(),
         grpc_socket: Some(tmp.join("sandbox.grpc.sock")),
         tool_ipc_socket: tmp.join("tool_ipc.sock"),
         tddy_tools_path: Some(tddy_tools_path()),

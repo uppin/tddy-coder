@@ -289,11 +289,6 @@ pub struct SandboxRunnerArgs {
     /// Path to `tddy-tools` as the jail reaches it.
     #[arg(long)]
     pub tddy_tools_path: Option<PathBuf>,
-    /// Vestigial: no mode reads it. Kept so launchers that still pass it keep parsing.
-    // TODO(jail-agnostic): drop `--model` once the launchers stop passing it
-    // (docs/dev/todo/2026-11-03-runner-model-flag-is-vestigial.md).
-    #[arg(long, default_value = "")]
-    pub model: String,
     #[arg(long)]
     pub ready_marker: PathBuf,
     /// When set, bind sandbox gRPC on this loopback port (required inside Seatbelt).
@@ -2513,8 +2508,6 @@ mod tests {
             "/tmp/grpc.sock",
             "--tool-ipc-socket",
             "/tmp/ipc.sock",
-            "--model",
-            "",
             "--ready-marker",
             "/tmp/ready",
             "--pty-command=/bin/sh",
@@ -2541,8 +2534,6 @@ mod tests {
             "/tmp/ctx",
             "--tool-ipc-socket",
             "/tmp/ipc.sock",
-            "--model",
-            "",
             "--ready-marker",
             "/tmp/ready",
             "--stdio",
@@ -2568,8 +2559,6 @@ mod tests {
             "/tmp/ctx",
             "--tool-ipc-socket",
             "/tmp/ipc.sock",
-            "--model",
-            "",
             "--ready-marker",
             "/tmp/ready",
             "--stdio",
@@ -2595,8 +2584,6 @@ mod tests {
             "/tmp/ctx",
             "--tool-ipc-socket",
             "/tmp/ipc.sock",
-            "--model",
-            "",
             "--ready-marker",
             "/tmp/ready",
             "--stdio",

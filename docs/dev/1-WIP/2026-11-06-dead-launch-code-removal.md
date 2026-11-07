@@ -126,6 +126,9 @@ The first push after this plan: the two acceptance tests above, failing.
 
 ## Decisions & Trade-offs
 
+- **2026-11-07 (user, via the orchestrator's AskUserQuestion):** delete the now-empty `tddy-agent-launch/src/jail_worktree.rs` with its `mod` line and its re-export from `svc_start_sandboxed_claude_cli_session`; remove `AcpLaunch.agent` (`tddy-coder/src/acp_from_spec.rs`), whose only readers were the three deleted builders. `packages/tddy-agent-launch/docs/module-layout.md:148` still lists the module and is updated at wrap.
+- **2026-11-07 (user):** the macOS seatbelt stdio pair was investigated once: it fails identically on the parent commit (`bind egress shim: Operation not permitted`; the test's runner argv lacks `--egress-shim-port`). Both are `#[ignore]`d pointing at `docs/dev/todo/2026-11-07-seatbelt-stdio-acceptance-fails-on-macos.md`.
+
 - An ACP backend is deleted only after a reachability check from a binary; a reachable one moves to `feature/agent-tools/acp-subagent-leftovers`.
 - 2026-11-07 (user, at 6e): the three `acp_from_spec` builders count as approved unreachable leftovers — deleted, verified by the recorded baseline above, no new test.
 - 2026-11-07 (user, at 6e): green also edits the extra `--model` runner argvs; `params.model` stays.
