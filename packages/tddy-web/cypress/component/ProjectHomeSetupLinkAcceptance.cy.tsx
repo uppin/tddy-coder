@@ -16,7 +16,7 @@
 import React from "react";
 import { create } from "@bufbuild/protobuf";
 import { SessionEntrySchema, type SessionEntry } from "tddy-client-web/gen/session_pb";
-import { SessionDrawer, type ProjectHomeInfo } from "../../src/SessionDrawer";
+import { SessionDrawer, type ProjectHomeInfo } from "tddy-session-web";
 import { ProjectService, type ProjectEntry } from "tddy-client-web/gen/project_pb";
 import { TooltipProvider } from "tddy-ui-web";
 import { mountWithRpc } from "../support/rpc/inMemory";

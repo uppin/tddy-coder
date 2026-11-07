@@ -69,19 +69,25 @@ exports — failing until the modules move.
 **Greenable independently:** after the inspector node is green
 **Blocks:** storybook, wiring
 
-## Progress (green, in flight)
+## Progress (green)
 
-- Moved into `tddy-session-web/src` (flat, `git mv`): the whole of `tddy-web/src/components/sessions/` (drawer, project home, `StatusBar`, `SessionTrafficStrip`, session manager, hooks, `inspectorState`, `jailedCodebaseHalf`, `useMeterSnapshot`, `SessionDetailPane`, `SessionHostStatsFooter`, `UploadProgressIndicator`, `vncInput`, ...). `components/sessions/` and `components/session/` in tddy-web now hold nothing. `bun test src` 376 pass (boundary rule green); tddy-web `test:unit` 93 pass.
-- New seam: `SessionTrafficProvider` / `useSessionTraffic` (meter registry + `roomOf`) so `StatusBar` needs neither tddy-web nor LiveKit; `appClientsPorts.tsx` supplies it. The drawer reads auth through `tddy-client-web`'s `useAuth`.
-- Specs: support copied/rewritten on ports (`drawerWorld`, `withSelectedDaemon`, `inMemory`, `recordingLiveKitRpc`, `perDaemonLiveKitRpc`, `hashNavigation`, `sessionShellDouble`). Kept in tddy-web (wiring): `PresenceCapabilityGatingAcceptance`, `UnifiedLayoutAcceptance`, `DaemonChangeReloadsScreenAcceptance`, `SelectedHostUrlStateAcceptance`, `ProjectHomeSetupLinkAcceptance`, `useLiveKitTerminalToken`.
-- `dom-preload.ts` + `bunfig.toml` moved to the package (only `vncInput.test.ts` read it).
-- **Cypress state: NOT green.** 101 moved/changed specs run one at a time: ~70 pass; ~31 specs still have failures (~100 of 646 tests): create-session, PR-stack chat/start, screen-sharing/VNC target rows, LiveKit routing specs (`SessionParticipantRpcRouting`, `SessionStartResumeStillDaemonRouted`, `ScreenSharingInputScopes`, `HostDesktopStartFailure` — candidates to return to tddy-web), and inspector-open specs (inspector defaults to closed since #378; unverified whether they fail on master too).
+- Moved into `tddy-session-web/src` (flat, `git mv`): the whole of `tddy-web/src/components/sessions/` (drawer, project home, `StatusBar`, `SessionTrafficStrip`, session manager, hooks, `inspectorState`, `jailedCodebaseHalf`, `useMeterSnapshot`, `SessionDetailPane`, `SessionHostStatsFooter`, `UploadProgressIndicator`, `vncInput`, ...). `components/sessions/` and `components/session/` in tddy-web now hold nothing; nothing is left for a later node.
+- New seam: `SessionTrafficProvider` / `useSessionTraffic` (meter registry + `roomOf`), supplied by `appClientsPorts.tsx`; the drawer reads auth through `useAuth`.
+- Specs: support rewritten on ports (`drawerWorld`, `withSelectedDaemon`, `inMemory`, `recordingLiveKitRpc`, `perDaemonLiveKitRpc`, `hashNavigation`, `sessionShellDouble`); `component.ts` mounts the shell, passphrase slot, LiveKit doubles and the `StreamStartSession` fallback.
+- `dom-preload.ts` + `bunfig.toml` moved to the package (root `bunfig.toml` repointed); unused tddy-web support originals pruned (readers verified by import-graph walk).
+- Verified: `bun test src` 376 pass; all 136 package Cypress specs green run one at a time (one cold-start browser-connect failure on `PrStackOrphanedNode`, green on rerun); tddy-web build, `test:unit`, `livekit-import-boundary` and `web-workflows` pass.
+
+## Deviations
+
+- Specs run **without a stylesheet**, as they did in tddy-web (there a closed drawer is not `display:none`, and several assertions rely on that). `GhosttyTerminalShrink` and `SessionTerminalTabsPlusPlacement` measure layout and import `theme.css` themselves.
+- Back in tddy-web (wiring: real LiveKit routing/identities, input forwarded to a bridge participant, real token HTTP, app shell/selector/URL store): `SessionParticipantRpcRouting`, `SessionStartResumeStillDaemonRouted`, `ScreenSharingInputScopes`, `HostDesktopStartFailure`, `PresenceCapabilityGating`, `UnifiedLayout`, `DaemonChangeReloadsScreen`, `SelectedHostUrlState`, `ProjectHomeSetupLink` (needs `ProjectsAppPage`), `useLiveKitTerminalToken` (real HTTP + auth gate). Two tests were split out of package specs into `PrStackChatNoRoomAcceptance` (real default LiveKit factory) and `PrStackChatTokenFailureAcceptance` (real token request).
+- Kept pre-existing tddy-web support orphans not touched by this node: `livekitDockerTestkit`, `nativeFileDrop`, `codexOAuthDialogPage`, `projectServiceBackend`, `connectionRpcs`, `vncRpcs`, `sessionServiceBackend`, `sessionFilesPanelPage`.
 
 ## Scope
 
-- [ ] Modules moved
-- [ ] Drawer-driven specs moved, on port doubles
-- [ ] Boundary rule green
+- [x] Modules moved
+- [x] Drawer-driven specs moved, on port doubles
+- [x] Boundary rule green
 
 ## Technical Changes
 
@@ -122,9 +128,9 @@ boundary rule. CI: the stack's single `web.yml` (affected-package shards).
 - [x] Run acceptance tests (verify they fail)
 - [x] USER REVIEW — acceptance tests (developer waived the per-node review for this stack, 2026-11-07: "finish the rest without stopping")
 - [x] TDD Red — write failing unit/integration tests
-- [ ] TDD Green — implement with quality code
-- [ ] Update documentation with progress
-- [ ] Run the touched packages' tests — verify 100% pass
+- [x] TDD Green — implement with quality code
+- [x] Update documentation with progress
+- [x] Run the touched packages' tests — verify 100% pass
 - [ ] Validate changes (/validate-changes)
 - [ ] Refactor issues from change validation
 - [ ] Validate tests (/validate-tests)
