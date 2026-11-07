@@ -10,7 +10,7 @@
  */
 
 import React from "react";
-import { PrStackChat } from "../../src/components/sessions/prstack/PrStackChat";
+import { PrStackChat } from "../../src/PrStackChat";
 import { prStackScreenPage } from "../support/pages/prStackScreenPage";
 
 // ---------------------------------------------------------------------------

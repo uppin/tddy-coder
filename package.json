@@ -10,6 +10,7 @@
     "packages/tddy-chat-web",
     "packages/tddy-hosts-web",
     "packages/tddy-workspace-web",
+    "packages/tddy-prstack-web",
     "packages/tddy-web",
     "packages/tddy-livekit-web",
     "packages/tddy-rpc-web",
