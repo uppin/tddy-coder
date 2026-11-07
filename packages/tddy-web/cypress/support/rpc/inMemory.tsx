@@ -29,7 +29,7 @@
 import React from "react";
 import type { InMemoryRpcBackend } from "tddy-connectrpc-testkit";
 import { withClients } from "tddy-client-web/testkit";
-import { RpcTransportProvider } from "../../../src/rpc/transportProvider";
+import { RpcTransportProvider } from "../../../src/app/rpc/transportProvider";
 
 /**
  * Mount `component` inside an `RpcTransportProvider` backed by `backend`.

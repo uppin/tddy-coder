@@ -6,7 +6,7 @@
  * doing (`status`). These builders state one of those in the terms a spec cares about: a session
  * carried over its own room, or one its host serves itself.
  *
- * Model: `src/rpc/connections/session.ts`.
+ * Model: `src/app/rpc/connections/session.ts`.
  */
 
 import { createClient, type Client, type Transport } from "@connectrpc/connect";

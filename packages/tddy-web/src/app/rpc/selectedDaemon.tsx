@@ -30,20 +30,20 @@ import {
   useState,
   type ReactNode,
 } from "react";
-import { useAuth } from "../hooks/useAuth";
+import { useAuth } from "../auth/useAuth";
 import type { DaemonHost, RoomHandle } from "tddy-client-web";
 import { presenceIdentityForUser } from "tddy-livekit-web";
 import {
   readStoredSelectedDaemon,
   resolveSelectedDaemonInstanceId,
   writeStoredSelectedDaemon,
-} from "../routing/selectedHost";
+} from "../../routing/selectedHost";
 import {
   navigateAppLocation,
   readAppLocation,
   setAppLocationParams,
   useAppLocation,
-} from "../routing/useAppLocation";
+} from "../../routing/useAppLocation";
 import { LiveKitConnections } from "tddy-livekit-web";
 import { AppClientsPorts } from "./appClientsPorts";
 import { ConnectionProviders, HostReadiness, useConnectionProviders } from "./connections/registry";

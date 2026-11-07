@@ -14,7 +14,7 @@ import { anInMemoryRpcBackend, type InMemoryRpcBackend } from "tddy-connectrpc-t
 import { DaemonConfigService, GetClientConfigResponseSchema } from "tddy-client-web/gen/daemon_config_pb";
 import { createDefaultDaemonTransport } from "./daemonTransport";
 import { loadClientConfig } from "./clientConfig";
-import { aBrowserPageServedFrom, aTauriHostedPage } from "../test-utils/daemonHosts";
+import { aBrowserPageServedFrom, aTauriHostedPage } from "../../test-utils/daemonHosts";
 
 /** A daemon in daemon mode, with a LiveKit block and one allowed agent. */
 function aDaemonServingItsClientConfig(): InMemoryRpcBackend {

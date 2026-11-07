@@ -9,9 +9,9 @@
  */
 
 import { useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
-import { loadClientConfig } from "../../rpc/clientConfig";
+import { loadClientConfig } from "../../app/rpc/clientConfig";
 import { applyDebugMaskFromConfig } from "tddy-client-web";
-import { useAuthContext } from "../../hooks/authProvider";
+import { useAuthContext } from "../../app/auth/authProvider";
 import { useVisualViewport, Button } from "tddy-ui-web";
 import { TokenService } from "tddy-client-web/gen/token_pb";
 import { GitHubLoginButton, UserAvatar } from "tddy-workspace-web";

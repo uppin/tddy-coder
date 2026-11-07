@@ -2,7 +2,7 @@
  * In-memory `session.SessionService` (+ `auth.AuthService`) backend for ConnectionScreen /
  * SessionsDrawerScreen acceptance tests.
  *
- * `SessionService` is daemon-level RPC (`useDaemonClient`, see `../../../src/rpc/selectedDaemon`),
+ * `SessionService` is daemon-level RPC (`useDaemonClient`, see `../../../src/app/rpc/selectedDaemon`),
  * routed over the shared common-room LiveKit connection — `mountWithRecordingLiveKitRpc` routes
  * both the HTTP and LiveKit transports to the *same* in-memory backend, so `AuthService`
  * (HTTP, unaffected by daemon selection), `TokenService` (HTTP, per-session/presence LiveKit token

@@ -4,7 +4,7 @@ import { mountWithRpc } from "./rpc/inMemory.tsx";
 import { agentActivityRegistry } from "tddy-chat-web";
 import { sessionNotificationRegistry } from "tddy-session-web";
 import { UploadProgressProvider } from "tddy-terminal-web";
-import { AppClientsPorts } from "../../src/rpc/appClientsPorts";
+import { AppClientsPorts } from "../../src/app/rpc/appClientsPorts";
 import { create } from "@bufbuild/protobuf";
 import { registerServerStreamFallback } from "tddy-connectrpc-testkit";
 import { SessionService, StartSessionEventSchema } from "tddy-client-web/gen/session_pb";

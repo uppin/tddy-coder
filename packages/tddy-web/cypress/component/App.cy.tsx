@@ -1,6 +1,6 @@
 import React from "react";
-import { App } from "../../src/index";
-import { AuthProvider } from "../../src/hooks/authProvider";
+import { App } from "../../src/app/App";
+import { AuthProvider } from "../../src/app/auth/authProvider";
 import {
   anAuthStatusAuthenticated,
   anAuthStatusUnauthenticated,

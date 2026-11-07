@@ -12,8 +12,8 @@
 import React, { useRef, useState } from "react";
 import { aDisconnectedRoom } from "tddy-livekit-web/testkit";
 import type { DaemonHost } from "tddy-client-web";
-import { SelectedDaemonProvider } from "../../src/rpc/selectedDaemon";
-import { AuthProvider } from "../../src/hooks/authProvider";
+import { SelectedDaemonProvider } from "../../src/app/rpc/selectedDaemon";
+import { AuthProvider } from "../../src/app/auth/authProvider";
 import { byTestId } from "../support/testIds";
 import { useHostLabel } from "tddy-client-web";
 

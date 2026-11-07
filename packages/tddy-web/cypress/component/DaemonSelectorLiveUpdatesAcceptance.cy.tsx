@@ -19,7 +19,7 @@
 import React from "react";
 import { DaemonSelector } from "../../src/components/shell/DaemonSelector";
 import type { DaemonHost } from "tddy-client-web";
-import { SelectedDaemonProvider } from "../../src/rpc/selectedDaemon";
+import { SelectedDaemonProvider } from "../../src/app/rpc/selectedDaemon";
 import { daemonSelectorPage } from "../support/pages/daemonSelectorPage";
 import { byTestId } from "../support/testIds";
 import { aFakeCommonRoom } from "tddy-livekit-web/testkit";

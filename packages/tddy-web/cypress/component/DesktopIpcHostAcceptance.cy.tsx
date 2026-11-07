@@ -25,9 +25,9 @@ import {
   DaemonConfigService,
   GetClientConfigResponseSchema,
 } from "tddy-client-web/gen/daemon_config_pb";
-import { App } from "../../src/index";
-import { AuthProvider } from "../../src/hooks/authProvider";
-import { RpcTransportProvider } from "../../src/rpc/transportProvider";
+import { App } from "../../src/app/App";
+import { AuthProvider } from "../../src/app/auth/authProvider";
+import { RpcTransportProvider } from "../../src/app/rpc/transportProvider";
 import type { TauriHostWindow } from "tddy-session-web";
 import {
   ACCESS_TOKEN_KEY,
@@ -39,13 +39,13 @@ import { mountWithRpc } from "../support/rpc/inMemory";
 import {
   createIpcConnectionProvider,
   localHostRegistrationFor,
-} from "../../src/rpc/connections/localHost";
-import { LocalHostConnections } from "../../src/rpc/connections/localHostRegistration";
-import { ConnectionProviders, useConnectionProviders } from "../../src/rpc/connections/registry";
+} from "../../src/app/rpc/connections/localHost";
+import { LocalHostConnections } from "../../src/app/rpc/connections/localHostRegistration";
+import { ConnectionProviders, useConnectionProviders } from "../../src/app/rpc/connections/registry";
 import type { ConnectionProvider } from "tddy-client-web/connections/types";
 import { LIVEKIT_SOURCE_ID } from "tddy-livekit-web";
 import type { HostDirectorySource } from "tddy-client-web";
-import { useServingHostDirectorySource } from "../../src/rpc/hostDirectory/servingSource";
+import { useServingHostDirectorySource } from "../../src/app/rpc/hostDirectory/servingSource";
 import {
   HostDirectorySources,
   useHostDirectory,

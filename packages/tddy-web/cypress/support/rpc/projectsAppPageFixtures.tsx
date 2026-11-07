@@ -12,8 +12,8 @@ import { ProjectsAppPage } from "../../../src/components/projects/ProjectsAppPag
 import { ProjectService, type ProjectEntry } from "tddy-client-web/gen/project_pb";
 import { AccountsService } from "tddy-client-web/gen/accounts_pb";
 import type { DaemonHost } from "tddy-client-web";
-import { SelectedDaemonProvider } from "../../../src/rpc/selectedDaemon";
-import { AuthProvider } from "../../../src/hooks/authProvider";
+import { SelectedDaemonProvider } from "../../../src/app/rpc/selectedDaemon";
+import { AuthProvider } from "../../../src/app/auth/authProvider";
 
 /** The host that served the page, and the one selected. */
 export const PROJECTS_LOCAL_HOST = "workstation-1";

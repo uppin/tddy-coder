@@ -73,3 +73,4 @@ export * from "./SessionTrafficStrip";
 export * from "./SessionHostStatsFooter";
 export * from "./UploadProgressIndicator";
 export * from "./useLiveKitTerminalToken";
+export * from "./SessionWorkflowStatusCells";

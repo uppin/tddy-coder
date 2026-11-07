@@ -25,6 +25,8 @@ describe("the composed app", () => {
     it(`routes ${path} to the package that owns it`, () => {
       // Given
       const { handler } = aDoubledApp(path);
+      // The serving daemon's config: a daemon-mode page, whose sign-in the doubled auth port has done.
+      cy.intercept("GET", "/api/config", { daemon_mode: true, auth_flow: "redirect" });
 
       // When
       cy.mount(composeApp(handler));
