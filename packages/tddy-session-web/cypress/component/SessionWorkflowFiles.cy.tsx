@@ -1,6 +1,6 @@
 import React from "react";
-import { SessionFilesPanel } from "../../src/components/session/SessionFilesPanel";
-import { SessionMoreActionsMenu } from "../../src/components/session/SessionMoreActionsMenu";
+import { SessionFilesPanel } from "../../src/code/SessionFilesPanel";
+import { SessionMoreActionsMenu } from "../../src/code/SessionMoreActionsMenu";
 import { byTestId, TEST_IDS } from "../support/testIds";
 
 const MD_FIXTURE = `# Unique Acceptance Heading

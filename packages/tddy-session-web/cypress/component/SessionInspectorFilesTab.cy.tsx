@@ -11,7 +11,7 @@ import { createClient } from "@connectrpc/connect";
 import { type InMemoryRpcBackend } from "tddy-connectrpc-testkit";
 import { type SessionEntry } from "tddy-client-web/gen/session_pb";
 import { SessionFilesService } from "tddy-client-web/gen/session_files_pb";
-import { SessionInspectorDrawer } from "../../src/components/sessions/SessionInspectorDrawer";
+import { SessionInspectorDrawer } from "../../src/SessionInspectorDrawer";
 import { mountWithRpc } from "../support/rpc/inMemory";
 import { aSessionFilesServiceBackend } from "../support/rpc/sessionFilesServiceBackend";
 import { sessionFilesTabPage as page } from "../support/pages/sessionFilesTabPage";

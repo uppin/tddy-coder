@@ -12,12 +12,12 @@
 
 import "../../src/index.css";
 import React from "react";
-import { SessionTerminalTabs } from "tddy-session-web";
-import type { AgentConversation } from "tddy-session-web";
+import { SessionTerminalTabs } from "../../src/SessionTerminalTabs";
+import type { AgentConversation } from "../../src/agentConversationTabs";
 import {
   AGENT_TERMINAL_ID,
   type SessionTerminal,
-} from "tddy-session-web";
+} from "../../src/useSessionTerminals";
 import { sessionTerminalTabsPage as tabs } from "../support/pages/sessionTerminalTabsPage";
 
 // ---------------------------------------------------------------------------

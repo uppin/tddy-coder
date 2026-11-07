@@ -12,7 +12,7 @@ import { createClient } from "@connectrpc/connect";
 import { ActivityService } from "tddy-client-web/gen/activity_pb";
 import { SessionAgentService } from "tddy-client-web/gen/session_agents_pb";
 import { SessionEntrySchema } from "tddy-client-web/gen/session_pb";
-import { SessionWithActivitySidebar } from "../../src/components/sessions/SessionWithActivitySidebar";
+import { SessionWithActivitySidebar } from "../../src/SessionWithActivitySidebar";
 import { mountWithRpc } from "../support/rpc/inMemory";
 import { recordedFields } from "../support/rpc/recordedRequests";
 import { byTestId } from "../support/testIds";

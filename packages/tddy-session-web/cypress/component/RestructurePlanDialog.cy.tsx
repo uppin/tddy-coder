@@ -37,9 +37,9 @@ import {
   WorktreeDirEntrySchema,
   WorktreeService,
 } from "tddy-client-web/gen/worktree_pb";
-import { WorktreeCodePane } from "../../src/components/session/WorktreeCodePane";
-import { RestructurePlanDialog } from "../../src/components/session/RestructurePlanDialog";
-import { createRestructurePlanApi } from "../../src/components/session/restructurePlanApi";
+import { WorktreeCodePane } from "../../src/code/WorktreeCodePane";
+import { RestructurePlanDialog } from "../../src/code/RestructurePlanDialog";
+import { createRestructurePlanApi } from "../../src/code/restructurePlanApi";
 import { mountWithRpc } from "../support/rpc/inMemory";
 import { requestFields } from "../support/rpc/recordedRequests";
 import { restructurePlanDialogPage } from "../support/pages/restructurePlanDialogPage";

@@ -13,7 +13,7 @@
 
 import { createClient } from "@connectrpc/connect";
 import { CodeNavigationService } from "tddy-client-web/gen/code_navigation_pb";
-import { SessionIndexingIndicator } from "../../src/components/session/SessionIndexingIndicator";
+import { SessionIndexingIndicator } from "../../src/code/SessionIndexingIndicator";
 import { mountWithRpc } from "../support/rpc/inMemory";
 import { anIndexLoading } from "../support/rpc/codeSessionBackend";
 import {

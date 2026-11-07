@@ -19,7 +19,7 @@ import React from "react";
 import { byTestId, TEST_IDS } from "../support/testIds";
 
 // These imports fail until the components are created and the proto is regenerated.
-import { SessionToolsTab } from "../../src/components/sessions/SessionToolsTab";
+import { SessionToolsTab } from "../../src/SessionToolsTab";
 import type { ToolDef } from "tddy-client-web/gen/exec_tools_pb";
 
 // ---------------------------------------------------------------------------

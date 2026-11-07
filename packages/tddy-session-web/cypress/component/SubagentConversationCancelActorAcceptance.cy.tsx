@@ -14,7 +14,7 @@
 import React, { useState } from "react";
 import {
   SessionAgentConversationPane,
-} from "../../src/components/sessions/SessionAgentConversationPane";
+} from "../../src/SessionAgentConversationPane";
 import { SessionAgentService } from "tddy-client-web/gen/session_agents_pb";
 import { mountWithRpc } from "../support/rpc/inMemory";
 import { recordedFields } from "../support/rpc/recordedRequests";

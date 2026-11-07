@@ -11,7 +11,7 @@ import { create } from "@bufbuild/protobuf";
 import { createClient } from "@connectrpc/connect";
 import { ActivityService } from "tddy-client-web/gen/activity_pb";
 import { SessionEntrySchema } from "tddy-client-web/gen/session_pb";
-import { SessionWithActivitySidebar } from "../../src/components/sessions/SessionWithActivitySidebar";
+import { SessionWithActivitySidebar } from "../../src/SessionWithActivitySidebar";
 import { mountWithRpc } from "../support/rpc/inMemory";
 import { agentActivityPage } from "../support/pages/agentActivityPage";
 import { byTestId } from "../support/testIds";

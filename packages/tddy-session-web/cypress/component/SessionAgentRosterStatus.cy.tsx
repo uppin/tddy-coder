@@ -22,7 +22,7 @@ import React from "react";
 import { create } from "@bufbuild/protobuf";
 import { SessionEntrySchema } from "tddy-client-web/gen/session_pb";
 import { AgentKind, SessionAgentStatus } from "tddy-client-web/gen/types_pb";
-import { SessionAgentRosterPane } from "../../src/components/sessions/SessionAgentRosterPane";
+import { SessionAgentRosterPane } from "../../src/SessionAgentRosterPane";
 import type { DaemonHost } from "tddy-client-web";
 import {
   aRemoteAttachedAgent,

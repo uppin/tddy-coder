@@ -16,7 +16,7 @@
  */
 
 import React from "react";
-import { SessionAgentConversationPane } from "../../src/components/sessions/SessionAgentConversationPane";
+import { SessionAgentConversationPane } from "../../src/SessionAgentConversationPane";
 import { mountWithRpc } from "../support/rpc/inMemory";
 import {
   anAgentConversationBackend,

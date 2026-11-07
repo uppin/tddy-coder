@@ -26,7 +26,7 @@ import React from "react";
 import { create } from "@bufbuild/protobuf";
 import type { InMemoryRpcBackend } from "tddy-connectrpc-testkit";
 import { SessionEntrySchema } from "tddy-client-web/gen/session_pb";
-import { SessionAgentRosterPane } from "../../src/components/sessions/SessionAgentRosterPane";
+import { SessionAgentRosterPane } from "../../src/SessionAgentRosterPane";
 import { daemonRpcIdentity, type DaemonHost } from "tddy-client-web";
 import {
   aDaemonOfferingAgents,

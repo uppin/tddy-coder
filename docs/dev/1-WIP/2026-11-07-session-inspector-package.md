@@ -7,6 +7,8 @@
 
 **Stack**: `#web-split` 17/20 — branch `feature/web-split/session-inspector`, base `feature/web-split/session-runtime`
 
+**PR**: [#861](https://github.com/uppin/tddy-coder/pull/861)
+
 ## Initial Discovery
 
 [2026-11-07-session-inspector-package-initial-discovery.md](./2026-11-07-session-inspector-package-initial-discovery.md)
@@ -45,6 +47,21 @@ See the PRD (split of #851).
 | `session-runtime` | runtime + terminal modules in the package | the inspector reads runtime state | move runtime code |
 
 ## Draft PR contract
+
+**As pushed (commit 2):** 19 inspector/agent/code-pane specs `git mv`'d into `tddy-session-web/cypress/component/`
+(imports re-pointed), and the boundary test's surface gains `SessionMainPane`, `SessionInspectorDrawer`,
+`SessionAgentRosterPane`, `SessionAgentTree`, `SessionWithActivitySidebar`, `WorktreeCodePane`,
+`SessionIndexingIndicator`, `AgentPicker`.
+
+**Scope widened (orchestrator, approved plan change):** `SessionMainPane` (+ `sessionMainPaneProps`, 504 lines, recorded
+oversized — must not grow) moves **here**, not in #860, because it composes this node's pieces. Its prerequisites move
+with it: `SessionInspectorDrawer`, `SessionWithActivitySidebar`, `SessionAgentConversationLayer` (minus
+`useConversationHostAttachment`, which #860 moves), `WorktreeCodePane`, `SessionIndexingIndicator` and `AgentPicker`
+(listed for the drawer in the PRD — it moves here because `SessionMainPane` imports it). The specs that mount
+`SessionMainPane` are returned to tddy-web by #860's green; this node moves them into the package (they are red until
+`SessionMainPane` moves). Red: the boundary test.
+
+Originally planned:
 
 First push (commit 2): the specs listed in `## Responsibility` `git mv`'d into `tddy-session-web` with
 imports pointing at the package, and the package boundary test's surface list extended with this node's
@@ -97,10 +114,10 @@ boundary rule. CI: the stack's single `web.yml` (affected-package shards).
 - [x] Cross-check code issues and TODOs (inherited from #851's discovery)
 - [x] Create/update PRD documentation
 - [x] Create changeset (this document)
-- [ ] Create failing acceptance tests
-- [ ] Run acceptance tests (verify they fail)
-- [ ] USER REVIEW — acceptance tests
-- [ ] TDD Red — write failing unit/integration tests
+- [x] Create failing acceptance tests
+- [x] Run acceptance tests (verify they fail)
+- [x] USER REVIEW — acceptance tests (developer waived the per-node review for this stack, 2026-11-07: "finish the rest without stopping")
+- [x] TDD Red — write failing unit/integration tests
 - [ ] TDD Green — implement with quality code
 - [ ] Update documentation with progress
 - [ ] Run the touched packages' tests — verify 100% pass
