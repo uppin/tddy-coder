@@ -107,7 +107,12 @@ impl HostCodingAgents {
                 (self.overridden_tool(def, binary)?, deps)
             }
         };
-        Ok(HostAgent { spec, tool, deps })
+        Ok(HostAgent {
+            spec,
+            tool,
+            deps,
+            env_base: self.agents.agent_env_base().clone(),
+        })
     }
 
     /// `def` as the tool at `binary`, which must be an executable file on this host.
@@ -147,6 +152,9 @@ pub struct HostAgent {
     pub tool: ResolvedTool,
     /// Its deps, resolved (`tddy-tools`), deps first.
     pub deps: Vec<ResolvedTool>,
+    /// The base set the agent's environment keeps from the daemon's: its host registry's
+    /// (`#agent-tools 28/28`).
+    pub env_base: tddy_coding_agent_specs::AgentEnvBase,
 }
 
 impl HostAgent {
@@ -301,6 +309,9 @@ async fn spawn_host_pty(
 ) -> Result<Arc<PtyHandle>, SpecLaunchError> {
     let HostPtyPlan { argv, env } = plan_host_pty(agent, params, slots)?;
     let env: Vec<(String, String)> = env.into_iter().chain(session.env).collect();
+    // TODO(env-allow-list): implement — the PTY child starts from
+    // `agent.env_base.agent_env(&agent.spec, std::env::vars_os(), &env)`, not the daemon's
+    // environment minus `TDDY_*` (`env -u` names, never values, on its argv).
     let argv = if without_inherited_tddy {
         without_inherited_tddy_variables(argv, &env)
     } else {
@@ -377,6 +388,20 @@ pub(crate) fn in_a_pane_without_inherited_tddy(
     .collect()
 }
 
+/// `argv` for a tmux pane, run with only the agent's environment (`#agent-tools 28/28`): `env` is
+/// that whole environment, computed by the daemon (`CodingAgentSpec::agent_env`) and sourced from
+/// the pane file. Of what the pane holds — the tmux server's environment plus that file — only the
+/// names `env` sets are kept, every other variable is unset, then the argv is `exec`ed. Names only
+/// reach the pane's argv, never values. Replaces [`in_a_pane_without_inherited_tddy`].
+#[allow(dead_code)] // TODO(env-allow-list): the tmux harness launch calls this in place of the deny-list.
+pub(crate) fn in_a_pane_with_only_the_agent_env(
+    argv: Vec<String>,
+    env: &[(String, String)],
+) -> Vec<String> {
+    // TODO(env-allow-list): implement — today's deny-list, kept so the build stands.
+    in_a_pane_without_inherited_tddy(argv, env)
+}
+
 fn write_slot_file(path: &Path, bytes: &[u8]) -> Result<(), SpecLaunchError> {
     let slot_file = |message: String| SpecLaunchError::SlotFile {
         path: path.to_path_buf(),
@@ -404,6 +429,9 @@ pub struct McpRegistration {
     pub server: McpServerCommand,
     pub dir: PathBuf,
 }
+
+#[cfg(test)]
+mod pane_with_only_the_agent_env_tests;
 
 #[cfg(test)]
 mod pane_without_inherited_tddy_tests {

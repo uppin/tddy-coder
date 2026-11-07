@@ -331,6 +331,7 @@ fn a_host_launch_of_an_agent_declaring_hooks_renders_its_hooks_file_and_appended
         spec: the_builtin("claude"),
         tool: resolved("claude"),
         deps: Vec::new(),
+        env_base: tddy_coding_agent_specs::AgentEnvBase::builtin(),
     };
     let hooks = HookCommandParams {
         tddy_tools_path: "/usr/local/bin/tddy-tools",

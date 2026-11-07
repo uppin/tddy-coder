@@ -22,13 +22,32 @@ pub const CLI_SESSION_TYPE_SUFFIX: &str = "-cli";
 pub struct CodingAgentRegistry {
     tools: ToolRegistry,
     agents: std::collections::BTreeMap<String, CodingAgentSpec>,
+    /// The base set every agent's environment keeps from the daemon's (`#agent-tools 28/28`).
+    agent_env_base: crate::AgentEnvBase,
 }
 
 impl CodingAgentRegistry {
     /// The registry of a host: [`crate::load_agent_registry`] over `overrides_dir`
     /// (`<tddyhome>/tools`), then [`Self::from_tools`].
     pub fn load(overrides_dir: &Path) -> Result<Self, RegistryError> {
-        Self::from_tools(crate::load_agent_registry(overrides_dir)?)
+        Ok(
+            Self::from_tools(crate::load_agent_registry(overrides_dir)?)?
+                .with_agent_env_base(crate::AgentEnvBase::load(overrides_dir)?),
+        )
+    }
+
+    /// The base set every agent's environment keeps from the daemon's: `<tddyhome>/tools`'
+    /// [`crate::AGENT_ENV_BASE_OVERRIDE`] for a registry [`Self::load`]ed from one, else the
+    /// built-in [`crate::AGENT_ENV_BASE_YAML`].
+    pub fn agent_env_base(&self) -> &crate::AgentEnvBase {
+        &self.agent_env_base
+    }
+
+    /// This registry with `base` as its agents' base set.
+    #[must_use]
+    pub fn with_agent_env_base(mut self, base: crate::AgentEnvBase) -> Self {
+        self.agent_env_base = base;
+        self
     }
 
     /// A registry of no agents: every lookup is `None`, every gate refuses. What a service holds
@@ -37,6 +56,7 @@ impl CodingAgentRegistry {
         Self {
             tools: ToolRegistry::default(),
             agents: std::collections::BTreeMap::new(),
+            agent_env_base: crate::AgentEnvBase::builtin(),
         }
     }
 
@@ -76,7 +96,11 @@ impl CodingAgentRegistry {
             }
             agents.insert(id.to_string(), CodingAgentSpec::of(def)?);
         }
-        Ok(Self { tools, agents })
+        Ok(Self {
+            tools,
+            agents,
+            agent_env_base: crate::AgentEnvBase::builtin(),
+        })
     }
 
     /// The tool registry the agents were read from — what a launcher resolves their binaries and
@@ -116,4 +140,7 @@ pub enum RegistryError {
     /// A tool with a `coding_agent` extension is not a usable agent.
     #[error(transparent)]
     Spec(#[from] SpecError),
+    /// The agent-env base set did not load (`#agent-tools 28/28`).
+    #[error(transparent)]
+    AgentEnvBase(#[from] crate::AgentEnvBaseError),
 }

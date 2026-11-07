@@ -52,6 +52,8 @@ pub struct PtySpawnSpec {
     pub kind: String,
     /// Extra environment variables set on the spawned process (in addition to the inherited env).
     pub env: Vec<(String, String)>,
+    /// What the child starts from before `env` is applied — see [`tddy_pty::PtyEnvBase`].
+    pub env_base: tddy_pty::PtyEnvBase,
     /// Target OS user to impersonate for this spawn. When `Some`, the child receives that user's
     /// `HOME`/`PATH` (see [`pty_user_env_overrides`]). Callers with no user context (e.g. Bash
     /// terminals) pass `None`, leaving the child under the daemon's own identity.
@@ -93,6 +95,7 @@ impl PtyRuntime {
                     terminal_id: spec.terminal_id,
                     kind: spec.kind,
                     env,
+                    env_base: spec.env_base,
                 };
                 tddy_pty::PtyRuntime::spawn_with_exit_hook(
                     registry,
@@ -307,6 +310,7 @@ mod tests {
             terminal_id: "main".to_string(),
             kind: "claude-cli".to_string(),
             env: Vec::new(),
+            env_base: tddy_pty::PtyEnvBase::Inherited,
             os_user: Some("tddy".to_string()),
         };
 
@@ -325,6 +329,7 @@ mod tests {
             terminal_id: "main".to_string(),
             kind: "claude-cli".to_string(),
             env: Vec::new(),
+            env_base: tddy_pty::PtyEnvBase::Inherited,
             os_user: Some(os_user.to_string()),
         }
     }

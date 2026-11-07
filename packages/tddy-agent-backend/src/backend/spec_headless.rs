@@ -418,6 +418,7 @@ impl CodingBackend for SpecHeadlessBackend {
             .env("PATH", super::path_with_exe_dir())
             .stdin(std::process::Stdio::null())
             .kill_on_drop(true);
+        // TODO(env-allow-list): implement — `apply_agent_child_env` with `listing.env`.
         strip_tddy_env(command.as_std_mut());
         let output = tokio::time::timeout(MODEL_LISTING_DEADLINE, command.output())
             .await
