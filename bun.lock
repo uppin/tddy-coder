@@ -337,8 +337,11 @@
       "dependencies": {
         "@bufbuild/protobuf": "^2.2.0",
         "@connectrpc/connect": "^2.0.0",
+        "lucide-react": "^1.7.0",
         "tddy-client-web": "workspace:*",
         "tddy-react-commons": "workspace:*",
+        "tddy-session-create-web": "workspace:*",
+        "tddy-terminal-web": "workspace:*",
         "tddy-ui-web": "workspace:*",
       },
       "devDependencies": {

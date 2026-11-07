@@ -19,7 +19,7 @@ import { SessionFilesTab } from "../../src/components/sessions/SessionFilesTab";
 import { SessionWorktreeTab } from "tddy-workspace-web";
 import { SessionToolsTab } from "../../src/components/sessions/SessionToolsTab";
 import { SessionsDrawerScreen } from "../../src/components/sessions/SessionsDrawerScreen";
-import { SessionRuntime } from "../../src/components/sessions/SessionRuntime";
+import { SessionRuntime } from "tddy-session-web";
 import { Protocol } from "tddy-client-web/gen/screen_sharing_pb";
 import { SessionFilesService } from "tddy-client-web/gen/session_files_pb";
 import {

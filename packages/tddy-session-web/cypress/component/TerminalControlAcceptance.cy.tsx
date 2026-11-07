@@ -15,7 +15,7 @@
 
 import React from "react";
 import { TerminalControlOverlay } from "../../src/TerminalControlOverlay";
-import { sessionsDrawerPage as page } from "../support/pages/sessionsDrawerPage";
+import { terminalControlPage as page } from "../support/pages/terminalControlPage";
 
 // ---------------------------------------------------------------------------
 // AC1: When this screen is not the controller, the "Claim terminal" toast is visible.

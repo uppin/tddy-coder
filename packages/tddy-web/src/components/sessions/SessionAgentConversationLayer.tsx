@@ -1,9 +1,9 @@
-import React, { useCallback, useLayoutEffect, useRef, type RefObject } from "react";
+import React, { useCallback, useRef } from "react";
 import { createPortal } from "react-dom";
 import { safeTestIdPart } from "tddy-client-web";
-import type { AgentConversation } from "./agentConversationTabs";
+import type { AgentConversation } from "tddy-session-web";
 import { SessionAgentConversationPane } from "./SessionAgentConversationPane";
-import type { SessionAgentClient } from "./sessionRuntimeProps";
+import type { SessionAgentClient } from "tddy-session-web";
 
 /**
  * Where the bodies of agent conversations live.
@@ -42,26 +42,6 @@ export function useConversationHosts(): (sessionId: string) => HTMLDivElement {
     }
     return host;
   }, []);
-}
-
-/**
- * Put `host` inside the pane stack while `hosts` holds. A strip that is not the one showing its
- * session passes `hosts = false` and never takes the element; one that unmounts only removes it
- * when it is still the parent, so a successor that already adopted it is not undone.
- */
-export function useConversationHostAttachment(
-  paneStackRef: RefObject<HTMLElement | null>,
-  host: HTMLElement | undefined,
-  hosts: boolean,
-): void {
-  useLayoutEffect(() => {
-    const stack = paneStackRef.current;
-    if (!hosts || host === undefined || stack === null) return;
-    stack.appendChild(host);
-    return () => {
-      if (host.parentNode === stack) stack.removeChild(host);
-    };
-  }, [paneStackRef, host, hosts]);
 }
 
 export interface SessionAgentConversationLayerProps {

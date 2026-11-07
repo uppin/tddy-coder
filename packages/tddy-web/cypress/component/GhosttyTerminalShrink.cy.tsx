@@ -15,7 +15,7 @@ import { anInMemoryRpcBackend } from "tddy-connectrpc-testkit";
 // without the app stylesheet they are inert and the test pins a floor that production does not have.
 import "../../src/index.css";
 import { SessionMainPane } from "../../src/components/sessions/SessionMainPane";
-import type { SessionAttachmentState } from "../../src/components/sessions/useSessionAttachment";
+import type { SessionAttachmentState } from "tddy-session-web";
 import { aSessionConnection } from "../support/rpc/sessionConnections";
 import { byTestId, TEST_IDS } from "../support/testIds";
 

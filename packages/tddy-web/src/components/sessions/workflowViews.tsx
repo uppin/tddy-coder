@@ -9,7 +9,7 @@ import type { WorktreeService } from "tddy-client-web/gen/worktree_pb";
 import type { TaskService } from "tddy-client-web/gen/tasks_pb";
 import type { SessionAttachmentHint } from "tddy-client-web/connections/session";
 import type { SessionMetadata } from "tddy-session-web";
-import { sessionPaneIsWorkflowView } from "./attachClaim";
+import { sessionPaneIsWorkflowView } from "tddy-session-web";
 import { PrStackScreen, WorkflowChatScreen } from "tddy-prstack-web";
 
 type ConnectionClient = Client<typeof SessionService>;

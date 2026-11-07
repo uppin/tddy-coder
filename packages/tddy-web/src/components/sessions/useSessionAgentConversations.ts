@@ -7,7 +7,7 @@ import {
   conversationForAgent,
   withAgentConversation,
   type AgentConversation,
-} from "./agentConversationTabs";
+} from "tddy-session-web";
 import { randomUuid } from "tddy-client-web";
 import type { SessionAgentClient } from "./sessionMainPaneProps";
 

@@ -13,7 +13,7 @@ import { TooltipProvider, detectIsMobile, useIsMobile } from "tddy-ui-web";
 import { SessionDrawer } from "./SessionDrawer";
 import { SessionMainPane } from "./SessionMainPane";
 import { SessionHostStatsFooter } from "./SessionHostStatsFooter";
-import { useSessionAttachment } from "./useSessionAttachment";
+import { useSessionAttachment } from "tddy-session-web";
 import { SessionShell } from "tddy-session-web";
 import { sessionsDrawerPathForSession, SESSIONS_DRAWER_ROUTE, SESSIONS_NEW_ROUTE } from "tddy-client-web";
 import { resolveShortcutsForSession } from "tddy-terminal-web";

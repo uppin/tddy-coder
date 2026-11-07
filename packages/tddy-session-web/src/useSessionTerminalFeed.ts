@@ -11,7 +11,7 @@
  */
 
 import { useEffect, useRef, useState, type RefObject } from "react";
-import { measureTerminalGridFromRect } from "../../lib/terminalGridMeasure";
+import { measureTerminalGridFromRect } from "./lib/terminalGridMeasure";
 import type { SessionConnection } from "tddy-client-web/connections/session";
 import type { TerminalFeed } from "tddy-client-web/connections/terminal";
 

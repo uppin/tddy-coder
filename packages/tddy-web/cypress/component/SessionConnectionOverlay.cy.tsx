@@ -15,7 +15,7 @@
  */
 
 import React from "react";
-import { SessionConnectionOverlay } from "../../src/components/sessions/SessionConnectionOverlay";
+import { SessionConnectionOverlay } from "tddy-session-web";
 import { sessionConnectionOverlayPage } from "../support/pages/sessionConnectionOverlayPage";
 
 // ---------------------------------------------------------------------------

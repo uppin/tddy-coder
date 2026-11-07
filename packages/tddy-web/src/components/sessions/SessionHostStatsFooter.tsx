@@ -7,10 +7,10 @@
 
 import React from "react";
 import { HostStatsFooter } from "tddy-hosts-web";
-import type { SessionAttachmentState } from "./useSessionAttachment";
+import type { SessionAttachmentState } from "tddy-session-web";
 import { StatusBar } from "./StatusBar";
 import { UploadProgressIndicator } from "./UploadProgressIndicator";
-import type { SessionRuntimeRegistry, SessionRuntimeState } from "./sessionRuntimeRegistry";
+import type { SessionRuntimeRegistry, SessionRuntimeState } from "tddy-session-web";
 
 export interface SessionHostStatsFooterProps {
   /** The current session attachment — drives the relocated traffic readout (`StatusBar`). */

@@ -1,11 +1,11 @@
 import { useCallback, useEffect, useMemo, type MutableRefObject } from "react";
 import type { SessionEntry } from "tddy-client-web/gen/session_pb";
-import { claimAfterFeedEnd, shouldResetAttachmentOnFeedEnd, type AttachClaim } from "./attachClaim";
+import { claimAfterFeedEnd, shouldResetAttachmentOnFeedEnd, type AttachClaim } from "tddy-session-web";
 import type {
   SessionRuntimeConnection,
   SessionRuntimeRegistry,
-} from "./sessionRuntimeRegistry";
-import type { UseSessionAttachmentResult } from "./useSessionAttachment";
+} from "tddy-session-web";
+import type { UseSessionAttachmentResult } from "tddy-session-web";
 
 export interface UseSessionsDrawerRuntimeAttachmentArgs {
   attachment: UseSessionAttachmentResult["state"];

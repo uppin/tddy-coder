@@ -17,24 +17,16 @@
  * Stack: `optional-livekit` node 3 of 7.
  */
 
-import { openHostServedSession } from "../../src/rpc/connections/hostServedSession";
 import React from "react";
-import { createClient } from "@connectrpc/connect";
-import { createConnectTransport } from "@connectrpc/connect-web";
-import { create, toBinary } from "@bufbuild/protobuf";
+import { create } from "@bufbuild/protobuf";
 import { anInMemoryRpcBackend } from "tddy-connectrpc-testkit";
-import { RoomConnectionState as ConnectionState } from "tddy-livekit-web/testkit";
-import type { RoomHandle as Room } from "tddy-client-web";
 import { SessionService, ListSessionsResponseSchema, SessionEntrySchema } from "tddy-client-web/gen/session_pb";
-import { TokenService, GenerateTokenResponseSchema } from "tddy-client-web/gen/token_pb";
-import { daemonRpcIdentity } from "tddy-client-web";
 import { SessionRuntime } from "../../src/SessionRuntime";
-import { LiveKitConnectionProvider } from "tddy-livekit-web";
 import { attachmentHintFromReply } from "tddy-client-web";
 import type { SessionAttachmentHint, SessionConnection } from "tddy-client-web/connections/session";
 import type { HostConnection } from "tddy-client-web/connections/types";
 import { useConnectionStatus } from "../../src/rpc/connections/useConnectionStatus";
-import { toArrayBuffer } from "../support/rpc/protoRpc";
+import { aHostConnection, type HostConnectionBuilder } from "../support/rpc/hostConnections";
 import { aSessionConnection } from "../support/rpc/sessionConnections";
 import { byTestId, TEST_IDS } from "../support/testIds";
 
@@ -50,68 +42,22 @@ const A_SESSION_TOKEN = "an-operator-access-token";
 /** What the daemon replies for a session it serves itself — no room, no participant. */
 const A_HOST_SERVED_REPLY = { livekitRoom: "", livekitUrl: "", livekitServerIdentity: "" };
 
-/** What it replies for a session published into a room of its own. Nothing answers the url. */
-const A_ROOM_BACKED_REPLY = {
-  livekitRoom: "daemon-session-0001",
-  livekitUrl: "ws://127.0.0.1:9999",
-  livekitServerIdentity: `daemon-${THIS_HOST}-${A_SESSION}`,
-};
-
-const GENERATE_TOKEN_OK = toArrayBuffer(
-  toBinary(
-    GenerateTokenResponseSchema,
-    create(GenerateTokenResponseSchema, { token: "lk-browser-token", ttlSeconds: BigInt(600) }),
-  ),
-);
-
-const LIST_SESSIONS_OK = toArrayBuffer(
-  toBinary(
-    ListSessionsResponseSchema,
-    create(ListSessionsResponseSchema, {
-      sessions: [create(SessionEntrySchema, { sessionId: A_SESSION })],
-    }),
-  ),
-);
+const LIST_SESSIONS_OK = create(ListSessionsResponseSchema, {
+  sessions: [create(SessionEntrySchema, { sessionId: A_SESSION })],
+});
 
 /**
- * The common room the provider is bound to, holding exactly what a host connection reads off one.
+ * The daemon serving THIS_HOST, reachable or not yet.
  *
  * A host-served session's status is the *host's*, read through — a session cannot be more reachable
- * than the daemon serving it — so moving this room is how a spec moves the session's handshake.
+ * than the daemon serving it — so `admit()` is how a spec moves the session's handshake. The wire is
+ * an in-memory backend answering the one session-scoped call these specs make.
  */
-function aCommonRoom(state: ConnectionState, hostsOnIt: string[]) {
-  const room = {
-    state,
-    remoteParticipants: new Map(
-      hostsOnIt.map((id) => [daemonRpcIdentity(id), { identity: daemonRpcIdentity(id) }]),
-    ),
-  };
-  return {
-    asRoom: room as unknown as Room,
-    /** The daemon comes up on the room — what the operator is waiting for behind the overlay. */
-    admit(hostId: string) {
-      room.state = ConnectionState.Connected;
-      room.remoteParticipants.set(daemonRpcIdentity(hostId), { identity: daemonRpcIdentity(hostId) });
-    },
-  };
-}
-
-/**
- * A host reached over `room`, through the real provider.
- *
- * Its transport is this page's own `/rpc`, so a call issued on a session connection reaches a
- * `cy.intercept` rather than a stand-in — the provider is registered with no session resources
- * because nothing here names a room, which is itself the case under test.
- */
-function aHostOn(room: Room): HostConnection {
-  const transport = createConnectTransport({
-    baseUrl: `${window.location.origin}/rpc`,
-    useBinaryFormat: true,
-  });
-  const provider = new LiveKitConnectionProvider(room, () => transport, null, openHostServedSession);
-  const host = provider.connectHost(THIS_HOST);
-  if (!host) throw new Error("a provider holding a room must claim every host asked of it");
-  return host;
+function aDaemon(reachable: boolean): { host: HostConnection; admit(): void } {
+  const backend = anInMemoryRpcBackend().onUnary(SessionService.method.listSessions, () => LIST_SESSIONS_OK);
+  const builder: HostConnectionBuilder = aHostConnection(THIS_HOST).servingOver(backend.transport());
+  if (!reachable) builder.notReachableYet();
+  return { host: builder.build(), admit: () => builder.admit() };
 }
 
 /** `sessionId` opened on `host` from a reply naming no room — the production `openSession` path. */
@@ -217,56 +163,6 @@ function AttachedSessionRuntime({
   );
 }
 
-/**
- * A session room that joins without a media server.
- *
- * The connection's own join is not what these specs are about — they are about what the overlay
- * does once it has landed — so the room settles immediately instead of reaching anything. It carries
- * the roster listeners as well: the terminal a runtime opens on such a session watches the room for
- * the participant serving its PTY, and a double that answered no `on`/`off` would fail the mount
- * rather than the assertion.
- */
-function aRoomThatJoinsAtOnce(): Room {
-  const room = {
-    state: ConnectionState.Disconnected,
-    remoteParticipants: new Map<string, { identity: string }>(),
-    on: () => room,
-    off: () => room,
-    connect: async () => {
-      room.state = ConnectionState.Connected;
-    },
-    disconnect: async () => {
-      room.state = ConnectionState.Disconnected;
-    },
-  };
-  return room as unknown as Room;
-}
-
-/** A host that can also open room-backed sessions, joining `sessionRoom` for each. */
-function aHostServingRooms(commonRoom: Room, sessionRoom: Room): HostConnection {
-  const transport = createConnectTransport({
-    baseUrl: `${window.location.origin}/rpc`,
-    useBinaryFormat: true,
-  });
-  const provider = new LiveKitConnectionProvider(commonRoom, () => transport, {
-    tokens: createClient(TokenService, transport),
-    newRoom: () => sessionRoom,
-  }, openHostServedSession);
-  const host = provider.connectHost(THIS_HOST);
-  if (!host) throw new Error("a provider holding a room must claim every host asked of it");
-  return host;
-}
-
-function interceptGenerateToken() {
-  cy.intercept("POST", "**/rpc/token.TokenService/GenerateToken", (req) => {
-    req.reply({
-      statusCode: 200,
-      headers: { "Content-Type": "application/proto" },
-      body: GENERATE_TOKEN_OK,
-    });
-  }).as("generateToken");
-}
-
 // ---------------------------------------------------------------------------
 // Specs
 // ---------------------------------------------------------------------------
@@ -275,7 +171,7 @@ describe("a session connection on a host that serves its own session RPC", () =>
   it("reaches a connected status, which the gRPC path never showed at all", () => {
     // Given a host whose sessions are plain RPC — the desktop app over IPC, and yesterday's
     // `connected-grpc` case
-    const host = aHostOn(aCommonRoom(ConnectionState.Connected, [THIS_HOST]).asRoom);
+    const host = aDaemon(true).host;
 
     cy.mount(<SessionProbe connections={[aHostServedSessionOn(host, A_SESSION)]} />);
 
@@ -284,7 +180,7 @@ describe("a session connection on a host that serves its own session RPC", () =>
   });
 
   it("advertises rpc only, so the media surfaces do not apply to it", () => {
-    const host = aHostOn(aCommonRoom(ConnectionState.Connected, [THIS_HOST]).asRoom);
+    const host = aDaemon(true).host;
 
     cy.mount(<SessionProbe connections={[aHostServedSessionOn(host, A_SESSION)]} />);
 
@@ -293,21 +189,13 @@ describe("a session connection on a host that serves its own session RPC", () =>
   });
 
   it("serves the session's own RPC through the connection", () => {
-    // Given the daemon answering a session-scoped call
-    cy.intercept("POST", "**/rpc/session.SessionService/ListSessions", (req) => {
-      req.reply({
-        statusCode: 200,
-        headers: { "Content-Type": "application/proto" },
-        body: LIST_SESSIONS_OK,
-      });
-    }).as("listSessions");
-    const host = aHostOn(aCommonRoom(ConnectionState.Connected, [THIS_HOST]).asRoom);
+    // Given the daemon answering a session-scoped call (see `aDaemon`)
+    const host = aDaemon(true).host;
 
     cy.mount(<SessionCallProbe connection={aHostServedSessionOn(host, A_SESSION)} />);
 
     // Then the call travelled over the host's own wire — no second one was opened for a session
     // that never named a room
-    cy.wait("@listSessions");
     byTestId(CALL_EL).should("have.text", "sessions: 1");
   });
 });
@@ -315,8 +203,8 @@ describe("a session connection on a host that serves its own session RPC", () =>
 describe("the handshake overlay over an attached session's panes", () => {
   it("covers the panes of a session whose host is not reachable yet", () => {
     // Given a session on a daemon that has not come up on the common room
-    const common = aCommonRoom(ConnectionState.Disconnected, []);
-    const connection = aHostServedSessionOn(aHostOn(common.asRoom), A_SESSION);
+    const daemon = aDaemon(false);
+    const connection = aHostServedSessionOn(daemon.host, A_SESSION);
 
     cy.mount(<AttachedSessionRuntime connection={connection} />);
 
@@ -327,13 +215,13 @@ describe("the handshake overlay over an attached session's panes", () => {
 
   it("clears once the connection is up, so the panes become interactive", () => {
     // Given a session waiting behind the overlay
-    const common = aCommonRoom(ConnectionState.Disconnected, []);
-    const connection = aHostServedSessionOn(aHostOn(common.asRoom), A_SESSION);
+    const daemon = aDaemon(false);
+    const connection = aHostServedSessionOn(daemon.host, A_SESSION);
     cy.mount(<AttachedSessionRuntime connection={connection} />);
     byTestId(TEST_IDS.sessionConnectionOverlay).should("exist");
 
     // When the daemon comes up
-    cy.then(() => common.admit(THIS_HOST));
+    cy.then(() => daemon.admit());
 
     // Then the overlay goes. It is `absolute inset-0 pointer-events-auto`, so an overlay that could
     // not clear would leave a working terminal under a sheet swallowing every click, with nothing
@@ -344,8 +232,7 @@ describe("the handshake overlay over an attached session's panes", () => {
   it("does not lift because a session's own process is missing from the room", () => {
     // Given a reachable daemon that is not itself the session's process — no roster anywhere names
     // the participant this connection addresses
-    const common = aCommonRoom(ConnectionState.Connected, [THIS_HOST]);
-    const connection = aHostServedSessionOn(aHostOn(common.asRoom), A_SESSION);
+    const connection = aHostServedSessionOn(aDaemon(true).host, A_SESSION);
 
     cy.mount(<AttachedSessionRuntime connection={connection} />);
 
@@ -360,31 +247,16 @@ describe("the handshake overlay over an attached session's panes", () => {
     // Given a room-backed session whose connection has joined its room. The terminal used to make a
     // *second*, independent join of that same room, so the pane stayed covered until both had
     // landed; it now reads its bytes off this connection, and there is one handshake to wait for
-    interceptGenerateToken();
-    const transport = createConnectTransport({
-      baseUrl: `${window.location.origin}/rpc`,
-      useBinaryFormat: true,
-    });
-    const host = aHostServingRooms(
-      aCommonRoom(ConnectionState.Connected, [THIS_HOST]).asRoom,
-      aRoomThatJoinsAtOnce(),
-    );
-    const hint = attachmentHintFromReply(A_SESSION, A_ROOM_BACKED_REPLY);
+    const attached = aSessionConnection(A_SESSION)
+      .carriedByRoom("daemon-session-0001", {
+        url: "ws://127.0.0.1:9999",
+        serverIdentity: `daemon-${THIS_HOST}-${A_SESSION}`,
+      })
+      .servingOver(anInMemoryRpcBackend().transport());
+    const connection = attached.build();
+    const hint = attached.buildHint();
 
-    // Opened inside `cy.then` so it runs *after* the queued `cy.intercept` above is installed.
-    // `openSession` mints the room's browser token synchronously over a real transport aimed at
-    // `/rpc`; called straight from the test body it races the intercept it depends on, and the loser
-    // is a genuine failed mint — the connection reports `error`, not `connecting`, so the overlay
-    // never lifts. That resolved in this spec's favour locally and against it on a loaded CI runner.
-    cy.then(() => {
-      const connection = host.openSession(A_SESSION, hint);
-      cy.mount(<AttachedSessionRuntime connection={connection} hint={hint} />);
-    });
-
-    // The mint went through the stub rather than out to a `/rpc` nobody is serving. Asserted, not
-    // assumed: the alias existed with nothing waiting on it, so a request that escaped the intercept
-    // showed up only as a connection that mysteriously errored.
-    cy.wait("@generateToken");
+    cy.mount(<AttachedSessionRuntime connection={connection} hint={hint} />);
 
     // Then the connection is connected and the pane is interactive. Keeping the overlay up here
     // would now be waiting on a handshake nobody is performing
@@ -412,7 +284,7 @@ describe("the handshake overlay over an attached session's panes", () => {
 describe("several sessions attached at once", () => {
   it("holds one connection per session, each routed on its own", () => {
     // Given two sessions attached together — several open terminals in the drawer
-    const host = aHostOn(aCommonRoom(ConnectionState.Connected, [THIS_HOST]).asRoom);
+    const host = aDaemon(true).host;
     const connections = [
       aHostServedSessionOn(host, A_SESSION),
       aHostServedSessionOn(host, ANOTHER_SESSION),
@@ -431,7 +303,7 @@ describe("several sessions attached at once", () => {
 
   it("releases only the detached session, leaving the others serving", () => {
     // Given two attached sessions
-    const host = aHostOn(aCommonRoom(ConnectionState.Connected, [THIS_HOST]).asRoom);
+    const host = aDaemon(true).host;
     const connections = [
       aHostServedSessionOn(host, A_SESSION),
       aHostServedSessionOn(host, ANOTHER_SESSION),
