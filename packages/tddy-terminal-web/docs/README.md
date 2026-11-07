@@ -20,5 +20,5 @@ tool shortcuts, stream offsets). It imports nothing from `tddy-web` or `livekit-
 ## Tests
 
 `bun test src` (helpers, feed, input delivery, the boundary rule) and `bun run cypress:component` —
-21 component specs from the package's own `cypress.config.ts`. Its PR check is
-`.github/workflows/web-tddy-terminal-web.yml`.
+21 component specs from the package's own `cypress.config.ts`. CI: `.github/workflows/web.yml`
+(`Web lint` typechecks it; the `Web tests` shards run its suites).

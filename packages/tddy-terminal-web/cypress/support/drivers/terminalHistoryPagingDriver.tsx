@@ -13,7 +13,6 @@ import { GhosttyTerminalSession } from "../../../src/GhosttyTerminalSession";
 import type { TerminalStream } from "tddy-client-web/connections/terminal";
 import type { HistoryChunk } from "tddy-client-web";
 import { UploadProgressProvider } from "../../../src/rpc/uploadProgress";
-import { AppClientsPorts } from "../../../src/rpc/appClientsPorts";
 import { byTestId, TEST_IDS } from "../testIds";
 
 /** UTF-8 encode a string into a Uint8Array (driver-local; the spec has its own `enc`). */
@@ -151,15 +150,13 @@ export function aTerminalWithHistoryPaging() {
     mount() {
       cy.mount(
         <div style={{ height: 400, width: 800, position: "relative" }}>
-          <AppClientsPorts>
-            <UploadProgressProvider>
-              <GhosttyTerminalSession
-                feed={{ stream, history: fetcher.fetch }}
-                sessionToken="lazy-history-token"
-                sessionId="lazy-history-session"
-              />
-            </UploadProgressProvider>
-          </AppClientsPorts>
+          <UploadProgressProvider>
+            <GhosttyTerminalSession
+              feed={{ stream, history: fetcher.fetch }}
+              sessionToken="lazy-history-token"
+              sessionId="lazy-history-session"
+            />
+          </UploadProgressProvider>
         </div>,
       );
       return this;

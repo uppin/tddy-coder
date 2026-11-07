@@ -10,7 +10,6 @@ import React from "react";
 import { GhosttyTerminalSession } from "../../../src/GhosttyTerminalSession";
 import type { TerminalFeed, TerminalStream } from "tddy-client-web/connections/terminal";
 import { UploadProgressProvider } from "../../../src/rpc/uploadProgress";
-import { AppClientsPorts } from "../../../src/rpc/appClientsPorts";
 import { WheelTuiApp, type WheelTuiOptions } from "../../../scripts/wheel-tui/wheelTuiApp";
 import { byTestId, TEST_IDS } from "../testIds";
 
@@ -60,11 +59,9 @@ export function aWheelTuiSession(options: WheelTuiSessionOptions) {
     mount() {
       cy.mount(
         <div style={{ height: 400, width: 800, position: "relative" }}>
-          <AppClientsPorts>
-            <UploadProgressProvider>
-              <GhosttyTerminalSession feed={feed} sessionToken="wheel-tui-token" sessionId="wheel-tui-session" />
-            </UploadProgressProvider>
-          </AppClientsPorts>
+          <UploadProgressProvider>
+            <GhosttyTerminalSession feed={feed} sessionToken="wheel-tui-token" sessionId="wheel-tui-session" />
+          </UploadProgressProvider>
         </div>,
       );
       byTestId(TEST_IDS.ghosttyTerminal, { timeout: 10000 }).should("exist");
