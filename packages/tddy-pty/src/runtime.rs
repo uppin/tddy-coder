@@ -53,6 +53,20 @@ pub struct PtySpawnSpec {
     pub kind: String,
     /// Extra environment variables set on the spawned process (in addition to the inherited env).
     pub env: Vec<(String, String)>,
+    /// What the child starts from before `env` is applied (`#agent-tools 28/28`).
+    pub env_base: PtyEnvBase,
+}
+
+/// What a PTY child's environment starts from before its spec's `env` is applied.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum PtyEnvBase {
+    /// The spawning process's environment, minus the GitHub token variables: a user's terminal.
+    #[default]
+    Inherited,
+    /// Nothing: the child sees only the terminal's own `TERM`/`COLORTERM` and the spec's `env` —
+    /// an agent, whose whole environment the caller built from the allow-list
+    /// (`tddy_agent_backend::agent_env`).
+    Cleared,
 }
 
 /// Work to finish when a process has exited and its output is complete, run with the task's id
@@ -319,6 +333,8 @@ fn open_pty_and_pump(
         cmd.arg(arg);
     }
     cmd.cwd(&spec.worktree_path);
+    // TODO(env-allow-list): implement — `PtyEnvBase::Cleared` calls `cmd.env_clear()` here.
+    let _ = spec.env_base;
     cmd.env("TERM", "xterm-256color");
     cmd.env("COLORTERM", "truecolor");
     // The environment is never a credential: a daemon that has one of these exported must not hand
@@ -438,6 +454,7 @@ mod tests {
             terminal_id: "term-1".to_string(),
             kind: "bash".to_string(),
             env: Vec::new(),
+            env_base: PtyEnvBase::Inherited,
         };
         let (ready_tx, ready_rx) = oneshot::channel();
 
@@ -488,6 +505,7 @@ mod tests {
             terminal_id: "fd-leak-term".to_string(),
             kind: "sh".to_string(),
             env: Vec::new(),
+            env_base: PtyEnvBase::Inherited,
         }
     }
 

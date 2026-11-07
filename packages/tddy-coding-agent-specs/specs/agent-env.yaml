@@ -1,0 +1,30 @@
+# The base set of every coding agent's process environment (`#agent-tools 28/28`): the variables a
+# host agent keeps from the daemon's environment. On top of it come the spec's own
+# `coding_agent.pass_env` and what the launch sets on purpose; nothing else the daemon holds
+# reaches an agent.
+#
+# Override whole with `<tddyhome>/tools/agent-env/base.yaml` (same shape). Each entry is a
+# variable name or a `PREFIX_*` pattern; an entry that would admit a `TDDY_*` variable is refused at
+# load, naming the file.
+#
+# Approved by the developer, 2026-11-06. Proxy variables are listed in both cases, as both are read.
+schema_version: 1
+base:
+  - PATH
+  - HOME
+  - USER
+  - LOGNAME
+  - SHELL
+  - TERM
+  - LANG
+  - LC_*
+  - TMPDIR
+  - TZ
+  - SSH_AUTH_SOCK
+  - HTTP_PROXY
+  - HTTPS_PROXY
+  - NO_PROXY
+  - http_proxy
+  - https_proxy
+  - no_proxy
+  - XDG_*

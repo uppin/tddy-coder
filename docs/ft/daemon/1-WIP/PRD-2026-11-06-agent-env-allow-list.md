@@ -25,7 +25,8 @@ Discovery for this stack found these host construction sites inheriting the daem
 
 - deny-list: `turn_process`, `spec_headless` model listing, `spec_launch` (`env -u`, tmux unset),
   `jail_launch`;
-- inherit-all: the ACP worker, `conversation_id` mint, `tddy-spawn`'s spawner.
+- inherit-all: the ACP worker, the `conversation_id` mint, the PTY runtime (every agent main, the split agent).
+- the supervisor's relayed spawn: every key gated on `allowed_env_keys`, plus its own `PATH`/locale.
 
 The sandbox runner and sandbox-cgroups already use `env_clear` with an allow-list.
 
@@ -33,16 +34,17 @@ The sandbox runner and sandbox-cgroups already use `env_clear` with an allow-lis
 
 ### What's Changing
 
-- One shared constructor builds every agent child env: an `env_clear`, then:
-  - **base:** `PATH`, `HOME`, `USER`, `LOGNAME`, `SHELL`, `TERM`, `LANG`, `LC_*`, `TMPDIR`, `TZ`,
+- The daemon computes every agent child's whole env in one place, and the child starts from exactly that, with an `env_clear`:
+  - **base (YAML):** the built-in `agent-env.yaml`, which an operator overrides whole with `<tddyhome>/tools/agent-env/base.yaml`. Default: `PATH`, `HOME`, `USER`, `LOGNAME`, `SHELL`, `TERM`, `LANG`, `LC_*`, `TMPDIR`, `TZ`,
     `SSH_AUTH_SOCK`, `HTTP(S)_PROXY`/`NO_PROXY` (both cases), `XDG_*`;
   - **spec-declared:** a new `pass_env:` list on the tool spec (names or `PREFIX_*`), for provider
     keys and agent-specific variables such as `ANTHROPIC_API_KEY`, `OPENAI_API_KEY` and
     `CURSOR_API_KEY`;
   - **set on purpose:** spec `env`, route keys and the launch's own variables, as today.
 - Every host path above uses it: headless turns, model listing, PTY/tmux launch, ACP worker, the
-  conversation-id mint and the spawner's agent spawns.
-- `TDDY_*` can never pass. A `pass_env` entry matching `TDDY_*` is a spec load error.
+  conversation-id mint, the split agent's PTY, and the supervisor's relayed spawn.
+- An inherited `TDDY_*` can never pass. A `pass_env` or base-set entry matching `TDDY_*` is a load error. One `TDDY_*` the launch sets on purpose, Codex's `TDDY_CODEX_OAUTH_OUT`, is a documented exception until the Codex OAuth stack.
+- The supervisor applies no coding-agent env rules to a relayed agent. It passes the daemon-computed env through, keeping only its own concerns: the OS user's `HOME`/`USER`/`LOGNAME`, cgroups, and refusing loader variables.
 
 ### What's Staying the Same
 
@@ -55,7 +57,7 @@ The sandbox runner and sandbox-cgroups already use `env_clear` with an allow-lis
 ### Technical Impact
 
 `tddy-coding-agent-specs` (`pass_env` schema and each built-in spec), `tddy-agent-backend`,
-`tddy-agent-launch`, `tddy-spawn`. A variable an agent needed but nobody declared stops reaching
+`tddy-agent-launch`, `tddy-pty`, `tddy-cli-sessions`, `tddy-session-split`, `tddy-supervisor`. A variable an agent needed but nobody declared stops reaching
 it, so each built-in spec's `pass_env` must be filled in from what the agent reads.
 
 ### User Impact
@@ -72,10 +74,13 @@ tokens. An operator whose agent needs an extra variable adds it to `pass_env` in
 
 ## Acceptance Criteria
 
-- [ ] A variable set in the daemon's env and not allow-listed (e.g. `CLAUDE_CODE_CHILD_SESSION`) reaches no agent child on any host launch path: headless turn, PTY, tmux, ACP, model listing.
+- [ ] A variable set in the daemon's env and not allow-listed (e.g. `CLAUDE_CODE_CHILD_SESSION`) reaches no agent child on any host launch path: headless turn, PTY, tmux, ACP, model listing, conversation-id mint, split agent, supervisor relay.
 - [ ] A variable named in the spec's `pass_env` does reach it.
 - [ ] Base variables reach it.
 - [ ] A `pass_env` entry matching `TDDY_*` fails spec loading, naming the spec.
+- [ ] An operator override of the base set is honoured; a `TDDY_*` entry in it fails loading, naming the file.
+- [ ] A relayed agent receives exactly the daemon-computed env; no supervisor key list is involved.
+- [ ] A user's Bash terminal still inherits the daemon's environment.
 - [ ] Every built-in spec declares the provider-key variables its agent reads.
 
 ## References

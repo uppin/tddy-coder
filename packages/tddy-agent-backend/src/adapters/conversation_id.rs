@@ -91,6 +91,7 @@ impl ConversationIdAdapter for CursorCreateChat {
     async fn mint(&self, mint: ConversationMint<'_>) -> Result<String, ConversationMintError> {
         let command = format!("`{} create-chat`", mint.binary.display());
         let mut child = tokio::process::Command::new(mint.binary);
+        // TODO(env-allow-list): implement — `crate::agent_env::apply_agent_child_env`.
         child
             .arg("create-chat")
             .current_dir(mint.workdir)

@@ -137,6 +137,14 @@ pub enum EnvironmentBase {
     /// For a session, which runs as somebody else on a caller's behalf and has no claim on anything
     /// the supervisor was started with.
     Minimal,
+    /// The request's own variables, as the daemon computed them, and the account's
+    /// `HOME`/`USER`/`LOGNAME`. No supervisor `PATH`, no forwarded locale, nothing the supervisor
+    /// was started with (`#agent-tools 28/28`).
+    ///
+    /// For a relayed coding agent: what an agent sees is coding-agent configuration, owned by the
+    /// daemon and its YAML (`coding_agent.pass_env`, the agent-env base set); the supervisor knows
+    /// only the OS user.
+    Exactly,
 }
 
 /// `PATH` for a session, whose caller does not get to choose one.
@@ -1776,6 +1784,35 @@ mod tests {
         // override.
         assert_eq!(environment.get("USER"), Some(&"alice".to_string()));
         assert_eq!(environment.get("HOME"), Some(&"/home/alice".to_string()));
+    }
+
+    #[test]
+    fn a_relayed_agent_starts_from_exactly_the_env_the_daemon_computed() {
+        // Given — a supervisor started with a locale of its own, and an agent env the daemon built
+        std::env::set_var("LANG", "supervisor-locale");
+        let mut plan = a_spawn_plan()
+            .with_requested_env("PATH", "/opt/agent/bin:/usr/bin:/bin")
+            .with_requested_env("LARK_API_KEY", "sk-lark")
+            .with_requested_env("ROUTE_BASE_URL", "https://route.example")
+            .build();
+        plan.environment = EnvironmentBase::Exactly;
+
+        // When
+        let environment = environment_of(&plan);
+
+        // Then — the daemon's variables and the account's identity; nothing the supervisor holds
+        let expected: BTreeMap<String, String> = [
+            ("HOME", "/home/alice"),
+            ("LARK_API_KEY", "sk-lark"),
+            ("LOGNAME", "alice"),
+            ("PATH", "/opt/agent/bin:/usr/bin:/bin"),
+            ("ROUTE_BASE_URL", "https://route.example"),
+            ("USER", "alice"),
+        ]
+        .into_iter()
+        .map(|(key, value)| (key.to_string(), value.to_string()))
+        .collect();
+        assert_eq!(environment, expected);
     }
 
     #[test]
