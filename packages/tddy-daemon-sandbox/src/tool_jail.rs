@@ -177,6 +177,8 @@ fn with_route_hosts(declared: EgressPolicy, route: Option<&HarnessRoute>) -> Egr
 /// named, and in its files — OpenCode's configuration names its provider's base URL there, not in the
 /// environment. The port is the scheme's own when the URL names none.
 pub fn route_hosts(route: &HarnessRoute) -> Vec<HostPattern> {
+    // TODO(opencode-route-inline): implement — an `inline_config` route carries its configuration
+    // as a variable's value, so the URLs inside each value are read, not only a value that is one.
     let env_urls = route.env.iter().filter_map(|(_, value)| url_host(value));
     let file_urls = route
         .files
@@ -286,6 +288,23 @@ mod tests {
             }],
             ..HarnessRoute::default()
         };
+
+        // When
+        let hosts = route_hosts(&route);
+
+        // Then
+        assert_eq!(hosts, vec![HostPattern::new("127.0.0.1", 9000)]);
+    }
+
+    #[test]
+    fn a_base_url_an_inline_config_variable_carries_is_admitted_too() {
+        // Given — an `inline_config` route (`#agent-tools 29/32`): OpenCode's configuration is the
+        // value of `OPENCODE_CONFIG_CONTENT`, so its base URL is inside a JSON value, not the whole
+        // value of a variable
+        let route = a_route(&[(
+            "OPENCODE_CONFIG_CONTENT",
+            r#"{"provider":{"route":{"options":{"baseURL":"http://127.0.0.1:9000/v1","apiKey":"{env:KEY}"}}}}"#,
+        )]);
 
         // When
         let hosts = route_hosts(&route);

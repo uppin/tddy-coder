@@ -1,3 +1,6 @@
+//! TODO(opencode-route-inline): implement — delete this adapter (user-approved 2026-11-07): no spec
+//! names it once `opencode.yaml` routes `inline_config`.
+//!
 //! `opencode-route-file`: a provider route's OpenCode configuration written owner-only and named in
 //! `OPENCODE_CONFIG`, held for the agent's lifetime, as an ACP hooks adapter (`#agent-tools 11/12`).
 //!

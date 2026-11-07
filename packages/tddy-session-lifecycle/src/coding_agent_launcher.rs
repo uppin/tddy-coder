@@ -537,14 +537,20 @@ mod tests {
         }
     }
 
+    /// A route as its body renders it: OpenCode's configuration inline in the plain environment
+    /// (`route.shape: inline_config`, `#agent-tools 29/32`), never as a file — an ACP launch hands
+    /// no route file over.
     fn a_route() -> HarnessRoute {
         HarnessRoute {
-            env: vec![("BASE_URL".to_string(), BASE_URL.to_string())],
+            env: vec![
+                ("BASE_URL".to_string(), BASE_URL.to_string()),
+                (
+                    OPENCODE_CONFIG_CONTENT.to_string(),
+                    r#"{"provider":{"internal-llm":{}}}"#.to_string(),
+                ),
+            ],
             secret_env: vec![("API_KEY".to_string(), RouteSecret::new(API_KEY))],
-            files: vec![tddy_core::provider_route::RouteFile {
-                name: "opencode.json".to_string(),
-                contents: r#"{"provider":{"internal-llm":{}}}"#.to_string(),
-            }],
+            files: Vec::new(),
             args: vec!["-m".to_string(), MODEL.to_string()],
         }
     }
@@ -817,7 +823,9 @@ mod tests {
         launch.def.provider_account = Some("internal-llm".to_string());
         let launcher = a_launcher_routed_by(Arc::new(|_| {
             let mut route = a_route();
-            route.files.clear();
+            route
+                .env
+                .retain(|(name, _)| name != OPENCODE_CONFIG_CONTENT);
             route.env.push((
                 OPENCODE_CONFIG_CONTENT.to_string(),
                 "provider = internal-llm".to_string(),

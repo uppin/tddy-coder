@@ -65,6 +65,10 @@ impl DaemonCodingAgentLauncher {
         command.cwd = Some(launch.worktree.clone());
         if let Some(route) = &route {
             command.env.extend(harness_route_env(route));
+            // TODO(opencode-route-inline): implement — the route's env already carries an
+            // `inline_config` route; this branch, `opencode_route_config` and the
+            // `OPENCODE_CONFIG_CONTENT` import go, and a route carrying files is refused naming
+            // its shape (no ACP launch can hand a route file over).
             if shape == RouteShape::JsonConfigFile {
                 if let Some(config) = Self::opencode_route_config(launch, route)? {
                     merge_inline_config(&mut command, OPENCODE_CONFIG_CONTENT, config)

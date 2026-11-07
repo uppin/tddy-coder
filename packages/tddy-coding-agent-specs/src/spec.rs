@@ -149,7 +149,22 @@ fn parse_section(
     validate_env_entries(&agent.pass_env)
         .map_err(|e| format!("pass_env: {e}"))
         .map_err(invalid)?;
+    if let Some(route) = &agent.route {
+        route_slot_errors(route)
+            .map_err(|e| format!("route: {e}"))
+            .map_err(invalid)?;
+    }
     Ok(agent)
+}
+
+/// A `coding_agent.route` slot refused at load because its shape cannot be rendered as declared:
+/// `shape: inline_config` without a `config_env` to carry the configuration in, with a
+/// `config_env` matching `TDDY_*` (an agent never sees a daemon variable), or with a `files_dir`
+/// (an inline route writes no file). The message names the field.
+pub(crate) fn route_slot_errors(route: &RouteSlot) -> Result<(), String> {
+    // TODO(opencode-route-inline): implement
+    let _ = route;
+    Ok(())
 }
 
 /// Agent-env entries (`coding_agent.pass_env`, an agent-env base set) refused when one would let an
@@ -494,7 +509,7 @@ impl CodingAgentSpec {
 }
 
 /// What a route body knows of `spec` (`#agent-tools 13/19`): its id, its product, its route
-/// support and its `route.key_env`. A spec without a `route` section gives an agent with no
+/// support, its `route.key_env` and its `route.config_env`. A spec without a `route` section gives an agent with no
 /// providers, which every route body refuses.
 pub fn routed_agent(spec: &CodingAgentSpec) -> RoutedAgent {
     RoutedAgent {
@@ -506,6 +521,11 @@ pub fn routed_agent(spec: &CodingAgentSpec) -> RoutedAgent {
             .route
             .as_ref()
             .and_then(|route| route.key_env.clone()),
+        config_env: spec
+            .agent
+            .route
+            .as_ref()
+            .and_then(|route| route.config_env.clone()),
     }
 }
 
@@ -724,8 +744,10 @@ pub struct RouteSlot {
     /// agent's own (OpenCode, Muse).
     #[serde(default)]
     pub required_in_jail: bool,
-    /// The variable the route's first file is named in (`OPENCODE_CONFIG`); `None` for a route that
-    /// is environment only.
+    /// The variable the route's configuration reaches the agent in: for `shape: inline_config` the
+    /// configuration itself (`OPENCODE_CONFIG_CONTENT`), for `shape: json_config_file` the path of
+    /// the route's first file. `None` for a route that is environment only. An `inline_config` route
+    /// needs one, never a `TDDY_*` one, and takes no `files_dir` ([`route_slot_errors`]).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub config_env: Option<String>,
     /// The directory under the jail's scratch the route's files are written to owner-only

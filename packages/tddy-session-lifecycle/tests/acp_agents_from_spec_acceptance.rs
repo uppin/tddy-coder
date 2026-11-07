@@ -20,15 +20,21 @@ use std::sync::Arc;
 use pretty_assertions::assert_eq;
 use tddy_actions::tool::ToolHost;
 use tddy_agent_launch::spec_launch::HostCodingAgents;
-use tddy_coding_agent_specs::{load_agent_registry, CODEX_ACP_SPEC_YAML, CODEX_SPEC_YAML};
+use tddy_coding_agent_specs::{
+    load_agent_registry, routed_agent, CodingAgentSpec, CODEX_ACP_SPEC_YAML, CODEX_SPEC_YAML,
+    OPENCODE_SPEC_YAML,
+};
 use tddy_coding_subagent::{
     AgentTransport, CodingAgentDef, CodingAgentLaunch, CodingAgentLauncher, CodingAgentSession,
     LaunchedAgent,
 };
-use tddy_core::provider_route::HarnessRoute;
+use tddy_core::provider_route::{
+    opencode_config_for, resolve_route, HarnessRoute, RouteEndpoints, RouteSecret, RouteTarget,
+};
 use tddy_core::OpenSession;
+use tddy_discovery::subagent::SubagentError;
 use tddy_session_lifecycle::coding_agent_as_user::DropContext;
-use tddy_session_lifecycle::coding_agent_launcher::DaemonCodingAgentLauncher;
+use tddy_session_lifecycle::coding_agent_launcher::{DaemonCodingAgentLauncher, RouteResolver};
 
 const SESSION_ID: &str = "1780828020298-coding";
 /// The model `tddy-acp-stub` advertises.
@@ -205,6 +211,15 @@ fn a_launcher_routed_to(
     env: BTreeMap<String, String>,
     route: Option<HarnessRoute>,
 ) -> (DaemonCodingAgentLauncher, Arc<HostCodingAgents>) {
+    a_launcher_resolving_routes_by(tools_dir, env, Arc::new(move |_| Ok(route.clone())))
+}
+
+/// [`a_launcher_with_coding_agents`] whose provider accounts `route` resolves.
+fn a_launcher_resolving_routes_by(
+    tools_dir: &Path,
+    env: BTreeMap<String, String>,
+    route: RouteResolver,
+) -> (DaemonCodingAgentLauncher, Arc<HostCodingAgents>) {
     let registry = load_agent_registry(tools_dir).expect("the agent registry loads");
     let agents = Arc::new(HostCodingAgents::new(
         registry,
@@ -212,7 +227,7 @@ fn a_launcher_routed_to(
     ));
     let launcher = DaemonCodingAgentLauncher::with_identity(
         the_daemons_own_identity(),
-        Arc::new(move |_| Ok(route.clone())),
+        route,
         Arc::new(|_| {
             Ok((
                 PathBuf::from(TDDY_TOOLS_PATH),
@@ -637,40 +652,236 @@ async fn an_agent_whose_spec_declares_no_hooks_adapter_is_launched_with_the_comm
     );
 }
 
+// ── Every OpenCode launch carries its route inline, by the spec's shape (`#agent-tools 29/32`)
+//
+// `opencode.yaml` declares `route.shape: inline_config` and `route.config_env:
+// OPENCODE_CONFIG_CONTENT`: the route body puts the generated configuration in that variable, and the
+// launcher applies the route's environment as it applies any route's — no branch names the agent
+// or the variable, and no route file is written. Every route here is resolved from the launched
+// agent's spec, as `route_from_vault` resolves it.
+//
+// Changeset: `docs/dev/1-WIP/2026-11-07-opencode-route-inline-from-spec.md`.
+
+/// The key every account below holds.
+const ROUTE_KEY: &str = "a-route-key";
+/// The model every routed launch below asks for.
+const ROUTE_MODEL: &str = "kimi-k2";
+
+/// An OpenAI-compatible account serving Chat Completions, on [`ROUTE_MODEL`].
+fn an_openai_compatible_account() -> RouteTarget {
+    RouteTarget {
+        preset: "openai-compatible".to_string(),
+        endpoints: RouteEndpoints {
+            openai_chat: Some("https://chat.example/v1".to_string()),
+            ..RouteEndpoints::default()
+        },
+        api_key: RouteSecret::new(ROUTE_KEY),
+        model: ROUTE_MODEL.to_string(),
+    }
+}
+
+/// [`a_launcher_with_coding_agents`] whose every provider account resolves to `target`, the route
+/// built from the launched agent's own spec (`routed_agent` → `resolve_route`).
+fn a_launcher_routed_on(
+    tools_dir: &Path,
+    env: BTreeMap<String, String>,
+    target: RouteTarget,
+) -> DaemonCodingAgentLauncher {
+    let tools = tools_dir.to_path_buf();
+    let (launcher, _) = a_launcher_resolving_routes_by(
+        tools_dir,
+        env,
+        Arc::new(move |launch: &CodingAgentLaunch| {
+            let registry = load_agent_registry(&tools).expect("the agent registry loads");
+            let spec = CodingAgentSpec::of(registry.get(&launch.def.harness).expect("declared"))
+                .expect("a coding agent");
+            resolve_route(&routed_agent(&spec), &target)
+                .map(Some)
+                .map_err(|refusal| SubagentError::from(refusal.to_string()))
+        }),
+    );
+    launcher
+}
+
+/// The generated configuration a route to `target` carries, as JSON.
+fn the_generated_config_for(target: &RouteTarget) -> serde_json::Value {
+    let file = opencode_config_for(target, "OPENCODE_PROVIDER_KEY").expect("an OpenAI account");
+    serde_json::from_str(&file.contents).expect("the configuration is JSON")
+}
+
+fn env_value<'a>(command: &'a tddy_core::AcpAgentCommand, name: &str) -> Option<&'a str> {
+    command
+        .env
+        .iter()
+        .find(|(key, _)| key == name)
+        .map(|(_, value)| value.as_str())
+}
+
+fn json_in(command: &tddy_core::AcpAgentCommand, name: &str) -> serde_json::Value {
+    serde_json::from_str(
+        env_value(command, name).unwrap_or_else(|| panic!("{name} is set on the agent")),
+    )
+    .unwrap_or_else(|e| panic!("{name} holds JSON: {e}"))
+}
+
+/// A `<tddyhome>/tools` holding `<id>.yaml`: OpenCode's built-in spec under another id, its route
+/// carried in `config_env`.
+fn a_tools_dir_with_a_drop_in_inline_agent(id: &str, config_env: &str) -> tempfile::TempDir {
+    let data_dir = tempfile::tempdir().expect("data dir");
+    let tools_dir = data_dir.path().join("tools");
+    std::fs::create_dir(&tools_dir).expect("tools dir");
+    let spec = OPENCODE_SPEC_YAML
+        .replace("\nid: opencode\n", &format!("\nid: {id}\n"))
+        .replace(
+            "      config_env: OPENCODE_CONFIG_CONTENT\n",
+            &format!("      config_env: {config_env}\n"),
+        );
+    std::fs::write(tools_dir.join(format!("{id}.yaml")), spec).expect("write the drop-in");
+    data_dir
+}
+
 #[tokio::test]
-async fn a_routed_opencode_launch_keeps_its_route_inline_and_names_no_route_file() {
-    // Given — opencode declares `acp.hooks_adapter: opencode-route-file`, and its route carries a file
+async fn a_routed_daemon_opencode_acp_launch_carries_its_route_inline_and_no_route_file() {
+    // Given — the built-in `opencode.yaml`: `route.shape: inline_config` in OPENCODE_CONFIG_CONTENT
     let data_dir = tempfile::tempdir().expect("data dir");
     let worktree = tempfile::tempdir().expect("worktree");
     let binaries = the_agent_binaries();
-    let route = HarnessRoute {
-        files: vec![tddy_core::provider_route::RouteFile {
-            name: "opencode.json".to_string(),
-            contents: r#"{"provider":{"acct":{}}}"#.to_string(),
-        }],
-        ..HarnessRoute::default()
-    };
-    let (launcher, _) = a_launcher_routed_to(
+    let launcher = a_launcher_routed_on(
         &data_dir.path().join("tools"),
         an_env_naming(&binaries),
-        Some(route),
+        an_openai_compatible_account(),
     );
 
     // When
-    let (command, _hooks) = the_launched_agent(
+    let (command, hooks) = the_launched_agent(
         &launcher,
         &a_routed_launch("opencode", false, worktree.path()),
     )
     .await;
 
-    // Then — a daemon-written route file would be unreadable by the session's OS user: the route
-    // stays inline, and no variable names a file
-    let names: Vec<&str> = command.env.iter().map(|(name, _)| name.as_str()).collect();
+    // Then — the configuration inline, the key a variable of its own, no variable naming a file
+    // and no hooks holding one
     assert_eq!(
         (
-            names.contains(&"OPENCODE_CONFIG"),
-            names.contains(&"OPENCODE_CONFIG_CONTENT")
+            json_in(&command, "OPENCODE_CONFIG_CONTENT"),
+            env_value(&command, "OPENCODE_PROVIDER_KEY"),
+            env_value(&command, "OPENCODE_CONFIG"),
+            hooks.opens.is_none(),
         ),
-        (false, true)
+        (
+            the_generated_config_for(&an_openai_compatible_account()),
+            Some(ROUTE_KEY),
+            None,
+            true,
+        )
+    );
+}
+
+#[tokio::test]
+async fn a_drop_in_acp_agent_whose_spec_names_another_variable_gets_its_route_inline_there() {
+    // Given — `<tddyhome>/tools/lark.yaml`: OpenCode's spec under the id `lark`, carrying its route
+    // in LARK_CONFIG_CONTENT
+    let data_dir = a_tools_dir_with_a_drop_in_inline_agent("lark", "LARK_CONFIG_CONTENT");
+    let worktree = tempfile::tempdir().expect("worktree");
+    let binaries = the_agent_binaries();
+    let launcher = a_launcher_routed_on(
+        &data_dir.path().join("tools"),
+        an_env_naming(&binaries),
+        an_openai_compatible_account(),
+    );
+
+    // When
+    let (command, _hooks) =
+        the_launched_agent(&launcher, &a_routed_launch("lark", false, worktree.path())).await;
+
+    // Then — the variable the spec names carries it; OpenCode's own variables are not set
+    assert_eq!(
+        (
+            json_in(&command, "LARK_CONFIG_CONTENT"),
+            env_value(&command, "OPENCODE_CONFIG_CONTENT"),
+            env_value(&command, "OPENCODE_CONFIG"),
+        ),
+        (
+            the_generated_config_for(&an_openai_compatible_account()),
+            None,
+            None,
+        )
+    );
+}
+
+#[tokio::test]
+async fn a_managed_launchs_withdrawal_still_merges_over_the_inline_route() {
+    // Given — a managed opencode launch: its withdrawal goes in OPENCODE_CONFIG_CONTENT too
+    let data_dir = tempfile::tempdir().expect("data dir");
+    let worktree = tempfile::tempdir().expect("worktree");
+    let binaries = the_agent_binaries();
+    let launcher = a_launcher_routed_on(
+        &data_dir.path().join("tools"),
+        an_env_naming(&binaries),
+        an_openai_compatible_account(),
+    );
+
+    // When
+    let (command, _hooks) = the_launched_agent(
+        &launcher,
+        &a_routed_launch("opencode", true, worktree.path()),
+    )
+    .await;
+
+    // Then — one JSON value: the route's provider and model, and every native tool switched off
+    let config = json_in(&command, "OPENCODE_CONFIG_CONTENT");
+    let route = the_generated_config_for(&an_openai_compatible_account());
+    assert_eq!(
+        (
+            config["provider"].clone(),
+            config["model"].clone(),
+            config["tools"].clone()
+        ),
+        (
+            route["provider"].clone(),
+            route["model"].clone(),
+            serde_json::json!({
+                "bash": false, "read": false, "write": false, "edit": false,
+                "patch": false, "glob": false, "grep": false, "list": false,
+            }),
+        )
+    );
+}
+
+#[tokio::test]
+async fn an_acp_launch_whose_route_carries_a_file_is_refused_naming_the_shape() {
+    // Given — `<tddyhome>/tools/opencode.yaml` routes through a JSON configuration file, which no
+    // ACP launch can hand to an agent started as the session's OS user
+    let data_dir = tempfile::tempdir().expect("data dir");
+    let tools_dir = data_dir.path().join("tools");
+    std::fs::create_dir(&tools_dir).expect("tools dir");
+    std::fs::write(
+        tools_dir.join("opencode.yaml"),
+        OPENCODE_SPEC_YAML.replace(
+            "      shape: inline_config\n      config_env: OPENCODE_CONFIG_CONTENT\n",
+            "      shape: json_config_file\n      config_env: OPENCODE_CONFIG\n      files_dir: provider-route\n",
+        ),
+    )
+    .expect("write the override");
+    let worktree = tempfile::tempdir().expect("worktree");
+    let binaries = the_agent_binaries();
+    let launcher = a_launcher_routed_on(
+        &tools_dir,
+        an_env_naming(&binaries),
+        an_openai_compatible_account(),
+    );
+
+    // When
+    let launched = launcher
+        .launch_agent(&a_routed_launch("opencode", false, worktree.path()))
+        .await;
+
+    // Then — refused, naming the shape, rather than inlined into a variable no spec named
+    let Err(refusal) = launched else {
+        panic!("a route carrying a file was launched");
+    };
+    assert!(
+        refusal.to_string().contains("json_config_file"),
+        "{refusal}"
     );
 }

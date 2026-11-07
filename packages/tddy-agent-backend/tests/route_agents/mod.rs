@@ -21,6 +21,7 @@ pub fn an_agent(
             shape,
         },
         key_env: key_env.map(str::to_string),
+        config_env: None,
     }
 }
 
@@ -50,14 +51,19 @@ pub fn codex_named(id: &str) -> RoutedAgent {
     )
 }
 
+/// OpenCode under `id`: its configuration inline in `OPENCODE_CONFIG_CONTENT`
+/// (`route.shape: inline_config`, `#agent-tools 29/32`).
 pub fn opencode_named(id: &str) -> RoutedAgent {
-    an_agent(
-        id,
-        "OpenCode",
-        RouteShape::JsonConfigFile,
-        &[ProviderKind::OpenaiResponses, ProviderKind::OpenaiChat],
-        Some("OPENCODE_PROVIDER_KEY"),
-    )
+    RoutedAgent {
+        config_env: Some("OPENCODE_CONFIG_CONTENT".to_string()),
+        ..an_agent(
+            id,
+            "OpenCode",
+            RouteShape::InlineConfig,
+            &[ProviderKind::OpenaiResponses, ProviderKind::OpenaiChat],
+            Some("OPENCODE_PROVIDER_KEY"),
+        )
+    }
 }
 
 pub fn muse_named(id: &str) -> RoutedAgent {

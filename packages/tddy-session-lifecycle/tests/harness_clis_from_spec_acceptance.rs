@@ -1,6 +1,6 @@
 //! Acceptance: `opencode-cli`, `muse-cli` and `warp-cli` sessions launch from their tool
 //! definitions (`tddy-coding-agent-specs/specs/{opencode,muse,warp}.yaml`) through the shared
-//! launchers: a host start and resume renders the spec's argv, a jailed start lowers its route files
+//! launchers: a host start and resume renders the spec's argv, a jailed start lowers its route
 //! and config env from the spec's `route` section, Warp's resume token is read through the
 //! `warp-resume-token` adapter, and Warp's jail refusal is its spec's `placements: [host]`.
 //!
@@ -126,17 +126,19 @@ async fn a_harness_profile_naming_opencode_starts_from_the_spec() {
         .expect("a start through the profile succeeds");
     let report = daemon.stub_report(&session_id).await;
 
-    // Then — opencode.yaml's argv on the route's model, its config file named in OPENCODE_CONFIG
-    // and its key in OPENCODE_PROVIDER_KEY, as the spec's `route` section declares
+    // Then — opencode.yaml's argv on the route's model, its configuration inline in
+    // OPENCODE_CONFIG_CONTENT (no file named in OPENCODE_CONFIG) and its key in
+    // OPENCODE_PROVIDER_KEY, as the spec's `route` section declares (`#agent-tools 29/32`)
     let config = report
-        .route_config()
-        .expect("the routed launch names its configuration file");
+        .inline_route_config()
+        .expect("the routed launch carries its configuration inline");
     assert_eq!(
         (
             daemon.metadata_of(&session_id).session_type,
             report.argv(),
             config["model"].clone(),
             report.env("OPENCODE_PROVIDER_KEY"),
+            report.env("OPENCODE_CONFIG"),
         ),
         (
             Some("opencode-cli".to_string()),
@@ -147,14 +149,15 @@ async fn a_harness_profile_naming_opencode_starts_from_the_spec() {
             ],
             serde_json::json!(format!("tddy-route/{TEST_MODEL}")),
             META_KEY.to_string(),
+            "UNSET".to_string(),
         )
     );
 }
 
 #[tokio::test]
 #[serial_test::serial]
-async fn a_routed_opencode_start_writes_the_same_route_file_with_its_key_in_opencode_provider_key()
-{
+async fn a_routed_opencode_start_carries_the_same_route_config_inline_with_its_key_in_opencode_provider_key(
+) {
     // Given — opencode-cli on the host, on the Meta account (which serves OpenAI Responses)
     let daemon = a_harness_daemon(ADaemonSpec::of(AHarness::OpenCode));
 
@@ -165,8 +168,9 @@ async fn a_routed_opencode_start_writes_the_same_route_file_with_its_key_in_open
         .expect("a host opencode-cli start on the Meta account succeeds");
     let report = daemon.stub_report(&session_id).await;
 
-    // Then — the route file is byte for byte the one OpenCode was always given, but for the
-    // variable its key is read from: the agent sees no `TDDY_*` route variable
+    // Then — the configuration is byte for byte the one OpenCode was always given, but for the
+    // variable its key is read from, now inline in OPENCODE_CONFIG_CONTENT rather than a file
+    // (`#agent-tools 29/32`): the agent sees no `TDDY_*` route variable and no OPENCODE_CONFIG
     let the_route_file_reading_its_key_from = |key_env: &str| {
         serde_json::to_string_pretty(&serde_json::json!({
             "model": format!("tddy-route/{TEST_MODEL}"),
@@ -188,13 +192,15 @@ async fn a_routed_opencode_start_writes_the_same_route_file_with_its_key_in_open
     };
     assert_eq!(
         (
-            report.route_config_text().to_string(),
+            report.inline_route_config_text().to_string(),
             report.env("OPENCODE_PROVIDER_KEY"),
             report.env("TDDY_OPENCODE_PROVIDER_KEY"),
+            report.env("OPENCODE_CONFIG"),
         ),
         (
             the_route_file_reading_its_key_from("OPENCODE_PROVIDER_KEY"),
             META_KEY.to_string(),
+            "UNSET".to_string(),
             "UNSET".to_string(),
         )
     );
@@ -321,7 +327,7 @@ mod jailed {
     use super::{META_ACCOUNT, META_KEY, TEST_MODEL};
 
     #[tokio::test]
-    async fn host_and_jailed_opencode_cli_starts_and_resumes_spawn_stubs_whose_argv_env_and_route_files_match_the_spec(
+    async fn host_and_jailed_opencode_cli_starts_and_resumes_spawn_stubs_whose_argv_env_and_inline_route_match_the_spec(
     ) {
         // Given
         let daemon = a_harness_daemon(ADaemonSpec::of(AHarness::OpenCode));
@@ -335,24 +341,24 @@ mod jailed {
         let _resumed_jail = daemon.resume(&session_id).await;
         let resumed = daemon.stub_report(&session_id).await;
 
-        // Then — the route's model on the argv; OPENCODE_CONFIG names the route's file, written
-        // owner-only under the spec's `route.files_dir`; the key in the spec's `route.key_env`
-        let config_path = started.env("OPENCODE_CONFIG");
+        // Then — the route's model on the argv; the configuration inline in the spec's
+        // `route.config_env` (OPENCODE_CONFIG_CONTENT), no OPENCODE_CONFIG and no route file
+        // written into the scratch (`#agent-tools 29/32`); the key in the spec's `route.key_env`
         assert_eq!(
             (
                 started.argv()[1..].to_vec(),
-                std::path::Path::new(&config_path)
-                    .parent()
-                    .map(|dir| dir.to_path_buf()),
-                started.route_config_mode(),
-                started.route_config().map(|config| config["model"].clone()),
+                started.env("OPENCODE_CONFIG"),
+                daemon.route_files_dir_of(&session_id).exists(),
+                started
+                    .inline_route_config()
+                    .map(|config| config["model"].clone()),
                 started.env("OPENCODE_PROVIDER_KEY"),
                 resumed.argv()[1..].to_vec(),
             ),
             (
                 vec!["--model".to_string(), format!("tddy-route/{TEST_MODEL}")],
-                Some(daemon.route_files_dir_of(&session_id)),
-                "600".to_string(),
+                "UNSET".to_string(),
+                false,
                 Some(serde_json::json!(format!("tddy-route/{TEST_MODEL}"))),
                 META_KEY.to_string(),
                 vec!["--continue".to_string()],

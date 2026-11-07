@@ -23,7 +23,6 @@ use crate::session_provider_route::{
     sandboxed_start_route, session_route_sources, start_route, RouteAgent, StartRoute,
 };
 use crate::spec_launch::HostCodingAgents;
-use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use tddy_coding_agent_specs::{load_agent_registry, routed_agent, CodingAgentSpec};
 use tddy_core::{
@@ -576,7 +575,7 @@ fn a_claude_cli_start_on_its_vendor_creates_its_session_dir_with_no_record() {
 // ---------------------------------------------------------------------------
 
 #[test]
-fn an_opencode_start_on_a_meta_account_writes_its_config_and_launches_with_it() {
+fn an_opencode_cli_start_on_an_account_carries_its_route_inline_and_writes_no_file() {
     // Given Ada holds her Meta account, and OpenCode's session directory is empty
     let (_dir, access) = a_daemon_where_ada_holds(&[adas_meta_account()], true);
     let session_dir = tempfile::tempdir().expect("a session directory");
@@ -593,26 +592,26 @@ fn an_opencode_start_on_a_meta_account_writes_its_config_and_launches_with_it() 
     .expect("the route resolves")
     .expect("a route, not the vendor");
 
-    // Then opencode.json is in the session directory, owner-only, and OPENCODE_CONFIG names it
-    let config = session_dir.path().join("opencode.json");
-    let mode = std::fs::metadata(&config)
-        .expect("written")
-        .permissions()
-        .mode()
-        & 0o777;
-    assert_eq!(mode, 0o600);
+    // Then the generated configuration is inline in OPENCODE_CONFIG_CONTENT (`route.shape:
+    // inline_config`, `#agent-tools 29/32`), no opencode.json is written and OPENCODE_CONFIG is unset
+    let inline: serde_json::Value = serde_json::from_str(
+        value_of(&launch.env, "OPENCODE_CONFIG_CONTENT").expect("OPENCODE_CONFIG_CONTENT is set"),
+    )
+    .expect("the inline configuration is JSON");
     assert_eq!(
-        value_of(&launch.env, "OPENCODE_CONFIG"),
-        Some(config.to_str().expect("utf-8"))
+        (
+            inline["model"].clone(),
+            value_of(&launch.env, "OPENCODE_CONFIG"),
+            session_dir.path().join("opencode.json").exists(),
+        ),
+        (serde_json::json!("tddy-route/muse-wonder-1.0"), None, false)
     );
-    // And the key is in the child's environment and nowhere on disk
+    // And the key is in the child's environment, never in the configuration
     assert_eq!(
         value_of(&launch.env, "OPENCODE_PROVIDER_KEY"),
         Some(META_KEY)
     );
-    assert!(!std::fs::read_to_string(&config)
-        .expect("readable")
-        .contains(META_KEY));
+    assert!(!inline.to_string().contains(META_KEY));
     // And the model is selected on the generated provider
     assert_eq!(launch.args, vec!["--model", "tddy-route/muse-wonder-1.0"]);
 }
@@ -708,7 +707,7 @@ fn an_opencode_start_on_an_account_that_serves_neither_openai_protocol_is_refuse
 }
 
 #[test]
-fn a_resumed_opencode_session_regenerates_its_config_from_the_vault_as_it_stands() {
+fn a_resumed_opencode_session_regenerates_its_inline_config_from_the_vault_as_it_stands() {
     // Given a session recorded on the Meta account
     let (_dir, access) = a_daemon_where_ada_holds(&[adas_meta_account()], true);
     let session_dir = tempfile::tempdir().expect("a session directory");
@@ -725,8 +724,10 @@ fn a_resumed_opencode_session_regenerates_its_config_from_the_vault_as_it_stands
     // When it resumes
     let launch = resume_cli_route(&access, &opencode, session_dir.path()).expect("re-resolved");
 
-    // Then the config is written again and the key comes from the vault
-    assert!(session_dir.path().join("opencode.json").is_file());
+    // Then the configuration is generated again, inline (`#agent-tools 29/32`) with nothing
+    // written, and the key comes from the vault
+    assert!(value_of(&launch.env, "OPENCODE_CONFIG_CONTENT").is_some());
+    assert!(!session_dir.path().join("opencode.json").exists());
     assert_eq!(
         value_of(&launch.env, "OPENCODE_PROVIDER_KEY"),
         Some(META_KEY)
@@ -763,7 +764,7 @@ fn a_cli_session_type_carries_the_route_support_its_spec_declares() {
     let cursor = crate::harness_from_spec::cli_session_type(&agents, "cursor-cli")
         .expect("cursor-cli is built in");
 
-    // Then — OpenCode's spec routes a JSON file; Cursor's declares no route at all
+    // Then — OpenCode's spec routes inline JSON configuration; Cursor's declares no route at all
     assert_eq!(
         (
             opencode.route.id.as_str(),
@@ -776,7 +777,7 @@ fn a_cli_session_type_carries_the_route_support_its_spec_declares() {
         (
             "opencode",
             "OpenCode",
-            tddy_core::provider_route::RouteShape::JsonConfigFile,
+            tddy_core::provider_route::RouteShape::InlineConfig,
             vec![
                 tddy_core::provider_route::ProviderKind::OpenaiResponses,
                 tddy_core::provider_route::ProviderKind::OpenaiChat,

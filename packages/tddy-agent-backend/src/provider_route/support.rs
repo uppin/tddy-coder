@@ -9,7 +9,9 @@
 //! A route body is chosen by the spec's (shape, provider served), never by the agent's name:
 //! `(env, anthropic)` is Anthropic Messages in the environment, `(env, meta)` the key alone in the
 //! spec's `route.key_env`, `(toml_args, openai_responses)` `-c key=value` TOML overrides, and
-//! `(json_config_file, openai_responses | openai_chat)` a JSON configuration file. An agent that
+//! `(json_config_file, openai_responses | openai_chat)` a JSON configuration file, and
+//! `(inline_config, openai_responses | openai_chat)` that configuration inline in the variable the
+//! spec's `route.config_env` names. An agent that
 //! declares no provider cannot be routed at all.
 
 use serde::{Deserialize, Serialize};
@@ -63,6 +65,10 @@ pub enum RouteShape {
     TomlArgs,
     /// A JSON configuration file named in the environment (was `config_file`).
     JsonConfigFile,
+    /// The JSON configuration carried inline in the variable the spec's `route.config_env` names
+    /// (OpenCode's `OPENCODE_CONFIG_CONTENT`): no file is written, and the route's plain
+    /// environment holds it, so every launch path renders it as it renders any route variable.
+    InlineConfig,
 }
 
 impl<'de> Deserialize<'de> for RouteShape {
@@ -72,6 +78,7 @@ impl<'de> Deserialize<'de> for RouteShape {
             "env" => Ok(RouteShape::Env),
             "toml_args" => Ok(RouteShape::TomlArgs),
             "json_config_file" => Ok(RouteShape::JsonConfigFile),
+            "inline_config" => Ok(RouteShape::InlineConfig),
             "args" => Err(serde::de::Error::custom(
                 "route.shape `args` was renamed to `toml_args`",
             )),
@@ -79,7 +86,7 @@ impl<'de> Deserialize<'de> for RouteShape {
                 "route.shape `config_file` was renamed to `json_config_file`",
             )),
             other => Err(serde::de::Error::custom(format!(
-                "unknown route.shape `{other}`; expected `env`, `toml_args` or `json_config_file`"
+                "unknown route.shape `{other}`; expected `env`, `toml_args`, `json_config_file` or `inline_config`"
             ))),
         }
     }
@@ -113,6 +120,10 @@ pub struct RoutedAgent {
     /// `coding_agent.route.key_env`: the variable every body but the Anthropic-env one hands the
     /// key in. A body that needs it refuses an agent without one (`NotYetRoutable`).
     pub key_env: Option<String>,
+    /// `coding_agent.route.config_env`: the variable an `inline_config` body carries the route's
+    /// configuration in (and a `json_config_file` launch names its file in). An `inline_config`
+    /// body refuses an agent without one (`NotYetRoutable`).
+    pub config_env: Option<String>,
 }
 
 /// The providers a route body exists for in `shape` — what the drift test pins every built-in
@@ -121,6 +132,8 @@ pub fn bodies_accept(shape: RouteShape) -> &'static [ProviderKind] {
     match shape {
         RouteShape::Env => &[ProviderKind::Anthropic, ProviderKind::Meta],
         RouteShape::TomlArgs => &[ProviderKind::OpenaiResponses],
-        RouteShape::JsonConfigFile => &[ProviderKind::OpenaiResponses, ProviderKind::OpenaiChat],
+        RouteShape::JsonConfigFile | RouteShape::InlineConfig => {
+            &[ProviderKind::OpenaiResponses, ProviderKind::OpenaiChat]
+        }
     }
 }

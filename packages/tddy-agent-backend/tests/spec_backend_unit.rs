@@ -53,6 +53,7 @@ fn an_acp_backend_for(agent: &str) -> SpecBackend {
             product: "Acme Code".to_string(),
             support: RouteSupport::default(),
             key_env: None,
+            config_env: None,
         },
         AcpAgentCommand {
             program: PathBuf::from("/nonexistent/acme-acp"),

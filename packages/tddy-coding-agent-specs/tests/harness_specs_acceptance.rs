@@ -28,7 +28,7 @@ fn the_spec(registry: &ToolRegistry, id: &str) -> CodingAgentSpec {
 }
 
 #[test]
-fn opencode_yaml_requires_a_route_in_a_jail_names_its_config_file_and_key_and_lists_its_models_through_opencode_models(
+fn opencode_yaml_requires_a_route_in_a_jail_carries_its_config_inline_names_its_key_and_lists_its_models_through_opencode_models(
 ) {
     // Given
     let (_home, registry) = the_builtin_registry();
@@ -48,11 +48,11 @@ fn opencode_yaml_requires_a_route_in_a_jail_names_its_config_file_and_key_and_li
         (
             Some(RouteSlot {
                 required_in_jail: true,
-                config_env: Some("OPENCODE_CONFIG".to_string()),
-                files_dir: Some("provider-route".to_string()),
+                config_env: Some("OPENCODE_CONFIG_CONTENT".to_string()),
+                files_dir: None,
                 key_env: Some("OPENCODE_PROVIDER_KEY".to_string()),
                 providers: vec![ProviderKind::OpenaiResponses, ProviderKind::OpenaiChat],
-                shape: RouteShape::JsonConfigFile,
+                shape: RouteShape::InlineConfig,
             }),
             ModelsSection {
                 default: String::new(),

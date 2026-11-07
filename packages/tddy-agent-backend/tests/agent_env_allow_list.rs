@@ -245,6 +245,7 @@ async fn model_listing_sees_no_unlisted_daemon_variable() {
             product: "Lark Code".to_string(),
             support: RouteSupport::default(),
             key_env: None,
+            config_env: None,
         },
     )
     .with_model_listing(HeadlessModelListing {

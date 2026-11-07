@@ -109,7 +109,8 @@ pub fn current_os_user() -> String {
 }
 
 /// A stub harness: touches `marker`, then reports its argv, cwd, the environment it was given, the
-/// configuration file `OPENCODE_CONFIG` names (its content and mode), and — for each `host:port` it
+/// configuration file `OPENCODE_CONFIG` names (its content and mode), the inline configuration in
+/// `OPENCODE_CONFIG_CONTENT` (`#agent-tools 29/32`), and — for each `host:port` it
 /// was told to probe — the status of a `CONNECT` through `$HTTPS_PROXY`. Every external command is
 /// named by its absolute path, so the report does not depend on `PATH`.
 pub fn a_stub_harness_script(harness: AHarness, marker: &Path, probes: &[String]) -> String {
@@ -141,6 +142,11 @@ if [ -n "$OPENCODE_CONFIG" ]; then
   printf 'STUB config-mode=%s\n' "$(/usr/bin/stat -f %Lp "$OPENCODE_CONFIG" 2>/dev/null || /usr/bin/stat -c %a "$OPENCODE_CONFIG")"
 else
   printf 'STUB config=NONE\n'
+fi
+if [ -n "$OPENCODE_CONFIG_CONTENT" ]; then
+  printf 'STUB inline-config=%s\n' "$(printf '%s' "$OPENCODE_CONFIG_CONTENT" | /usr/bin/tr -d '\n')"
+else
+  printf 'STUB inline-config=NONE\n'
 fi
 {probe_lines}printf 'STUB-END\n'
 {ending}"#,
@@ -195,6 +201,21 @@ impl AStubReport {
                     .unwrap_or_else(|e| panic!("the route configuration is JSON ({e}): {json}")),
             ),
         }
+    }
+
+    /// The configuration inline in `OPENCODE_CONFIG_CONTENT`, parsed; `None` when it was unset.
+    pub fn inline_route_config(&self) -> Option<serde_json::Value> {
+        match self.line("inline-config") {
+            "NONE" => None,
+            json => Some(serde_json::from_str(json).unwrap_or_else(|e| {
+                panic!("the inline route configuration is JSON ({e}): {json}")
+            })),
+        }
+    }
+
+    /// The inline configuration in `OPENCODE_CONFIG_CONTENT`, its newlines removed.
+    pub fn inline_route_config_text(&self) -> &str {
+        self.line("inline-config")
     }
 
     /// The bytes of the file `OPENCODE_CONFIG` names, its newlines removed.

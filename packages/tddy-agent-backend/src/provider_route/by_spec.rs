@@ -183,6 +183,8 @@ fn body_has_its_inputs(agent: &RoutedAgent, provider: ProviderKind) -> bool {
         (RouteShape::Env, ProviderKind::Meta)
         | (RouteShape::TomlArgs, _)
         | (RouteShape::JsonConfigFile, _) => agent.key_env.is_some(),
+        // TODO(opencode-route-inline): implement — an inline body also needs `config_env`.
+        (RouteShape::InlineConfig, _) => agent.key_env.is_some(),
         _ => true,
     }
 }
@@ -219,6 +221,7 @@ pub fn resolve_route(
         (RouteShape::Env, ProviderKind::Meta) => key_env_route(agent, target),
         (RouteShape::TomlArgs, _) => toml_args_route(agent, target),
         (RouteShape::JsonConfigFile, _) => json_config_file_route(agent, target),
+        (RouteShape::InlineConfig, _) => inline_config_route(agent, target),
         _ => Err(not_yet_routable(agent)),
     }
 }
@@ -317,4 +320,22 @@ fn json_config_file_route(
             format!("{OPENCODE_ROUTE_PROVIDER_ID}/{}", target.model),
         ],
     })
+}
+
+/// An agent that reads its provider from JSON configuration carried inline in the variable its
+/// spec's `route.config_env` names (OpenCode's `OPENCODE_CONFIG_CONTENT`): the configuration
+/// [`json_config_file_route`] would write as a file is the value of that variable in the route's
+/// plain environment, and **no file** is written. The configuration reads the key from the spec's
+/// `route.key_env`, so the key travels as a secret variable and is never in the configuration. The
+/// model is selected on the provider the configuration declares, by the `--model` argument.
+///
+/// Inline configuration outranks a worktree's own config file, where a file named in the
+/// environment ranks below it — so a repository cannot redirect the route's endpoint.
+pub(super) fn inline_config_route(
+    agent: &RoutedAgent,
+    target: &RouteTarget,
+) -> Result<HarnessRoute, RouteRefusal> {
+    // TODO(opencode-route-inline): implement
+    let _ = target;
+    Err(not_yet_routable(agent))
 }
