@@ -1,3 +1,6 @@
+//! An ACP launch planned from the agent's spec: its command, MCP servers, session meta, route and
+//! confinement.
+
 use crate::coding_agent_launcher::harness_route_env;
 use crate::coding_agent_launcher::merge_inline_config;
 use crate::coding_agent_launcher::DaemonCodingAgentLauncher;
@@ -224,5 +227,30 @@ impl DaemonCodingAgentLauncher {
             ));
         }
         Ok(&self.coding_agents)
+    }
+
+    /// The route's OpenCode config file as JSON; `None` for a route that carries none.
+    fn opencode_route_config(
+        launch: &CodingAgentLaunch,
+        route: &HarnessRoute,
+    ) -> Result<Option<serde_json::Value>, SubagentError> {
+        let Some(file) = route.files.first() else {
+            return Ok(None);
+        };
+        serde_json::from_str(&file.contents).map(Some).map_err(|e| {
+            Self::refuse(
+                launch,
+                &format!("the route's OpenCode config is not JSON: {e}"),
+            )
+        })
+    }
+
+    /// The command for `launch` as the harness runs it, before it is made to run as another user.
+    pub(crate) fn command_before_user_switch(
+        &self,
+        launch: &CodingAgentLaunch,
+    ) -> Result<AcpAgentCommand, SubagentError> {
+        let agents = self.acp_agents_for(launch)?;
+        self.acp_plan_from_spec(launch, agents)
     }
 }

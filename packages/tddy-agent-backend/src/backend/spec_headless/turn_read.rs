@@ -1,7 +1,6 @@
 //! Reading one spawned headless turn to its end: stdout through the adapter, stderr kept, the
 //! conversation log appended.
 
-
 use crate::adapters::StreamSinks;
 use crate::backend::spec_headless::TurnRead;
 use crate::backend::turn_process::STDERR_GRACE;

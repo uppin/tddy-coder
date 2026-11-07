@@ -7,9 +7,11 @@
 
 use std::collections::BTreeMap;
 use std::os::unix::fs::PermissionsExt;
+use std::path::Path;
 use std::sync::OnceLock;
 
 use super::*;
+use crate::coding_agent_launcher::headless::sweep_headless_files_left_by_this_daemon;
 use tddy_actions::tool::ToolHost;
 use tddy_coding_agent_specs::load_agent_registry;
 use tddy_coding_subagent::CodingAgentDef;

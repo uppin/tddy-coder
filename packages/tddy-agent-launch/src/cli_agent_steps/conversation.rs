@@ -1,7 +1,6 @@
 //! The conversation a CLI agent launch is bound to: minted, resumed or adopted, and the refusals
 //! around it.
 
-
 use crate::harness_from_spec::HarnessLaunch;
 use std::path::Path;
 use tddy_coding_agent_specs::slots::conversation::ConversationSlot;
