@@ -175,6 +175,41 @@ Open for green (found writing the tests):
 - `headless.permission_policy` is optional; a headless agent declaring none has no policy and is not
   offered — not a default.
 
+Resolved at green (2026-11-07):
+
+1. **One `-c` override.** `acp_plan_from_spec` renders the route's `-c` args when the spec's
+   `route.shape` is `toml_args` (not on `CODEX_ACP`) and OpenCode's inline config when it is
+   `json_config_file`. `launch_agent` hands the declared adapter **no route** (`route: None`): the
+   plan already rendered it, so `codex-acp-login`'s own `codex_acp_route_args` append (and
+   `opencode-route-file`'s file write, which D1 forbids here) never run. The adapter itself
+   (`tddy-agent-backend`, out of this node's packages) is unchanged; it stays correct for the
+   `tddy-coder` path, which hands it the route and no plan-rendered args.
+2. **Session directory.** `CodingAgentSession` hands `begin_open` the open's `cwd` — the worktree
+   the agent works in (for a clone placement, the conversation's own). The ACP session has no
+   directory of its own and a headless conversation directory exists only for headless; the cost is
+   that a `codex login` writes its authorize-URL file into that worktree (finding, not fixed here).
+3. **Headless `claude` stays refused.** `refuse_unless_registry_confinable` goes through
+   `confinement_of_spec`, which needs an `acp` section; a headless spec's `--disallowedTools` flag
+   is not an ACP withdrawal. Pinned by `a_managed_session_still_refuses_a_headless_agent_…`.
+4. **Snapshot wire.** `SessionAgentRosterStore::new` takes the host's coding-agent registry
+   (`SnapshotSources::coding_agents`), and `DaemonSessionHost::with_coding_agents` rebuilds the store
+   over it; the roster entry's `transport` / `permission_policy` are read from the spec.
+5. **D1 over D4 (orchestrator).** `specs/opencode.yaml` declares `acp.hooks_adapter:
+   opencode-route-file`; preparing it with the route would point `OPENCODE_CONFIG` at a 0600 file in
+   the daemon's temp dir, unreadable by an agent running as another OS user. The launcher names no
+   agent: it prepares every declared adapter but hands each **no route** (point 1), so
+   `opencode-route-file` writes nothing and sets no variable, and the route stays inline. A
+   capability flag on the adapter was not added (`tddy-agent-backend` is outside this node). Guard:
+   `a_routed_opencode_launch_keeps_its_route_inline_and_names_no_route_file`. The follow-up
+   route-file node hands the adapter the route.
+6. **Name-keyed wrappers kept.** `transport_of`, `permission_policy_of`, `transport_and_policy_wire`,
+   `coding_agent_defs` answer from the built-in registry for a caller with no host; no production
+   code calls them (deleting them was not in the approved list).
+7. **Signature changes forced by the above:** `coding_agent_defs_in(registry, dir, allowed)`,
+   `start_coding_agent_session(launcher, launch, coding_agents)`; one contract test call site
+   (`headless_coding_agent_opens_as_a_headless_conversation.rs`) and the `catalog_acceptance.rs`
+   `confinement_for` tests (re-pointed at `refuse_unless_registry_confinable`) were edited.
+
 - The planning-time line said this node waits on bounded-waits for a shared launcher file; discovery shows the shared file is `coding_agent_launcher.rs`, which session-pointer edits — the real edges are session-pointer and dead-launch-code.
 
 ## TODO
@@ -187,7 +222,7 @@ Open for green (found writing the tests):
 - [x] Run acceptance tests (verify they fail)
 - [x] USER REVIEW — acceptance tests (user, 2026-11-07, via orchestrator: D1–D4)
 - [x] TDD Red — write failing unit/integration tests
-- [ ] TDD Green — implement with quality code
+- [x] TDD Green — implement with quality code
 - [ ] Update documentation with progress
 - [ ] Repeat Red→Green→Update cycle until feature complete
 - [ ] Run the touched packages' tests (`./test -p {package}` per package) — verify 100% pass

@@ -8,31 +8,33 @@ use tddy_agent_launch::spec_launch::HostCodingAgents;
 use tddy_coding_agent_specs::package_runner;
 use tddy_coding_agent_specs::slots::acp::{acp_mcp_servers, acp_withdrawal, AcpWithdrawal};
 use tddy_coding_agent_specs::slots::McpServerCommand;
-use tddy_coding_agent_specs::CodingAgentSpec;
+use tddy_coding_agent_specs::{CodingAgentSpec, RouteShape};
 use tddy_coding_subagent::{
-    confinement_of_spec, refuse_unless_spec_confinable, transport_of, CodingAgentLaunch,
-    Confinement, Transport, CODEX_ACP, OPENCODE, OPENCODE_CONFIG_CONTENT,
+    confinable_acp_agents, no_launch_hooks, refuse_unless_spec_confinable, transport_of_spec,
+    CodingAgentLaunch, Transport, OPENCODE_CONFIG_CONTENT,
 };
+use tddy_core::adapters::{AcpHooksAdapters, AcpHooksLaunch, PreparedAcpHooks};
 use tddy_core::provider_route::HarnessRoute;
 use tddy_core::{AcpAgentCommand, McpServerSpec};
 use tddy_discovery::subagent::SubagentError;
 
 impl DaemonCodingAgentLauncher {
     /// The ACP command of `launch` from its declaration (`#agent-tools 11/12`), before the user
-    /// switch: the agent spec named by the harness (`claude-acp`, `codex-acp`, `opencode`) resolved
-    /// by `agents` — `codex-acp` beside its `codex` dep — refused in a managed session when its
+    /// switch: the agent spec named by the harness resolved by `agents` — `codex-acp` beside its
+    /// `codex` dep — refused in a managed session when its
     /// spec cannot withdraw native tools ([`Self::confine`]), `coding_agent.acp.command` rendered
     /// with `{binary}`, `package_runner` (set when the binary was not named by `binary.env`) and
-    /// `route_args` (the route's, as `codex_acp_route_args` maps them for `codex-acp` until
-    /// `#agent-tools 12/12`), the process's working directory, the route's environment and secret
+    /// `route_args` (the route's, as `codex_acp_route_args` maps them when the spec's
+    /// `route.shape` is `toml_args`), the process's working directory, the route's environment and secret
     /// environment, and on a managed launch a `config_env` withdrawal
     /// (`tddy_coding_agent_specs::slots::acp::acp_withdrawal`) merged into that variable's inline
     /// config. An `acp_meta` withdrawal travels in `session/new` `_meta` instead
     /// ([`Self::acp_session_meta_from_spec`]).
     ///
-    /// TODO(acp-agents): the route's file for `opencode` stays inline here (`OPENCODE_CONFIG_CONTENT`):
-    /// the `opencode-route-file` hooks adapter writes it, but the daemon's session owns no hooks to
-    /// hold it for the agent's lifetime (`CodingAgentSession::start` runs with `NoHooks`).
+    /// A route whose spec declares `route.shape: json_config_file` (OpenCode) stays inline here
+    /// (`OPENCODE_CONFIG_CONTENT`), never as a route file: a file the daemon writes cannot be read by
+    /// an agent started as the session's OS user, so the route file is a follow-up node's, with the
+    /// session user as its owner (`docs/dev/todo/2026-11-04-opencode-acp-route-file-has-no-session-owner.md`).
     pub(super) fn acp_plan_from_spec(
         &self,
         launch: &CodingAgentLaunch,
@@ -44,8 +46,9 @@ impl DaemonCodingAgentLauncher {
             .map_err(|reason| Self::refuse(launch, &reason.to_string()))?;
         Self::confine(launch, agents, &agent.spec)?;
         let route = self.acp_route(launch)?;
+        let shape = agent.spec.route_support().shape;
         let route_args = match &route {
-            Some(route) if harness == CODEX_ACP => tddy_core::codex_acp_route_args(route),
+            Some(route) if shape == RouteShape::TomlArgs => tddy_core::codex_acp_route_args(route),
             _ => Vec::new(),
         };
         let def = agents
@@ -59,7 +62,7 @@ impl DaemonCodingAgentLauncher {
         command.cwd = Some(launch.worktree.clone());
         if let Some(route) = &route {
             command.env.extend(harness_route_env(route));
-            if harness == OPENCODE {
+            if shape == RouteShape::JsonConfigFile {
                 if let Some(config) = Self::opencode_route_config(launch, route)? {
                     merge_inline_config(&mut command, OPENCODE_CONFIG_CONTENT, config)
                         .map_err(|reason| Self::refuse(launch, &reason))?;
@@ -135,25 +138,10 @@ impl DaemonCodingAgentLauncher {
         agents: &HostCodingAgents,
         spec: &CodingAgentSpec,
     ) -> Result<(), SubagentError> {
-        let confinable = Self::confinable_acp_agents(agents);
+        let confinable = confinable_acp_agents(agents.agents());
         let confinable: Vec<&str> = confinable.iter().map(String::as_str).collect();
         refuse_unless_spec_confinable(spec, launch.managed, &confinable)
             .map_err(|reason| Self::refuse(launch, &reason))
-    }
-
-    /// The ACP agents of `agents`' registry whose spec can withdraw its native tools
-    /// ([`confinement_of_spec`]), in registry order. A tool that is not a coding agent is not one.
-    fn confinable_acp_agents(agents: &HostCodingAgents) -> Vec<String> {
-        agents
-            .registry()
-            .ids()
-            .filter_map(|id| {
-                let spec = CodingAgentSpec::of(agents.registry().get(id)?).ok()?;
-                (spec.acp().is_some()
-                    && confinement_of_spec(&spec) == Confinement::WithdrawsNativeTools)
-                    .then(|| id.to_string())
-            })
-            .collect()
     }
 
     /// The native tools `spec` withdraws on `launch`: its declared `acp.withdraw_native` on a managed
@@ -217,7 +205,12 @@ impl DaemonCodingAgentLauncher {
         if let Some(reason) = &self.coding_agents_error {
             return Err(Self::refuse(launch, reason));
         }
-        if transport_of(&launch.def.harness) != Some(Transport::Acp) {
+        let transport = self
+            .coding_agents
+            .agents()
+            .get(&launch.def.harness)
+            .and_then(transport_of_spec);
+        if transport != Some(Transport::Acp) {
             return Err(Self::refuse(
                 launch,
                 &format!(
@@ -243,6 +236,53 @@ impl DaemonCodingAgentLauncher {
                 &format!("the route's OpenCode config is not JSON: {e}"),
             )
         })
+    }
+
+    /// The hooks the adapter `launch`'s spec declares (`coding_agent.acp.hooks_adapter`) prepares on
+    /// `command`, before it is spawned or relayed; [`no_launch_hooks`] for a spec that declares none.
+    /// A name this build has no adapter for is refused, never run without it.
+    ///
+    /// The adapter is handed **no route**: [`Self::acp_plan_from_spec`] has already rendered the
+    /// route into the command (`-c` overrides by the spec's `route.shape`, OpenCode's config
+    /// inline), so an adapter that also applied it would apply it twice (`codex-acp-login`'s `-c`
+    /// overrides) or write the route file the session user cannot read (`opencode-route-file`, a
+    /// follow-up node's).
+    pub(crate) fn acp_hooks_from_spec(
+        &self,
+        launch: &CodingAgentLaunch,
+        agents: &HostCodingAgents,
+        command: &mut AcpAgentCommand,
+    ) -> Result<PreparedAcpHooks, SubagentError> {
+        let agent = agents
+            .resolve(&launch.def.harness, None)
+            .map_err(|reason| Self::refuse(launch, &reason.to_string()))?;
+        let Some(name) = agent
+            .spec
+            .acp()
+            .and_then(|acp| acp.hooks_adapter.as_deref())
+        else {
+            return Ok(no_launch_hooks());
+        };
+        let adapter = AcpHooksAdapters::builtin().get(name).ok_or_else(|| {
+            Self::refuse(
+                launch,
+                &format!(
+                    "its spec names the hooks adapter '{name}', which this build does not have"
+                ),
+            )
+        })?;
+        let deps = agent
+            .deps
+            .iter()
+            .map(|dep| (dep.id.clone(), dep.binary.clone()))
+            .collect();
+        adapter
+            .prepare(AcpHooksLaunch {
+                command,
+                route: None,
+                deps: &deps,
+            })
+            .map_err(|e| Self::refuse(launch, &e.to_string()))
     }
 
     /// The command for `launch` as the harness runs it, before it is made to run as another user.

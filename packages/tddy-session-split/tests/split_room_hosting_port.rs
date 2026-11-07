@@ -464,6 +464,7 @@ fn an_agent_roster_with_nothing_attached(
         session_agent_rosters: Arc::new(SessionAgentRosterStore::new(
             Arc::clone(&clones),
             Arc::new(SessionAgentActivityStore::new()),
+            Arc::new(tddy_coding_agent_specs::CodingAgentRegistry::empty()),
         )),
         session_agent_clones: clones,
         hosted_agent_clones: Arc::new(HostedAgentClones::new()),

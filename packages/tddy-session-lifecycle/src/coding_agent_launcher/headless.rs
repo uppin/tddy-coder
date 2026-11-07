@@ -15,7 +15,7 @@ use tddy_coding_agent_specs::slots::headless_mcp::mcp_written_paths;
 use tddy_coding_agent_specs::CodingAgentSpec;
 use tddy_coding_agent_specs::McpSlot;
 use tddy_coding_subagent::launcher::{record_written_files, SESSION_TOKEN_ENV};
-use tddy_coding_subagent::refuse_unless_confinable;
+use tddy_coding_subagent::refuse_unless_registry_confinable;
 use tddy_coding_subagent::CodingAgentLaunch;
 use tddy_core::adapters::AdapterRegistry;
 use tddy_core::provider_route::HarnessRoute;
@@ -172,8 +172,12 @@ impl DaemonCodingAgentLauncher {
         let wiring = self.headless.as_ref().ok_or_else(|| {
             Self::refuse(launch, "this daemon has no headless coding-agent wiring")
         })?;
-        refuse_unless_confinable(&launch.def.harness, launch.managed)
-            .map_err(|reason| Self::refuse(launch, &reason))?;
+        refuse_unless_registry_confinable(
+            self.coding_agents.agents(),
+            &launch.def.harness,
+            launch.managed,
+        )
+        .map_err(|reason| Self::refuse(launch, &reason))?;
         // A conversation's tool calls are named by its id, so a headless one without an id has
         // nothing to name them by, and no id is guessed.
         let conversation = launch.conversation_id.as_deref().ok_or_else(|| {

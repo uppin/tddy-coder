@@ -11,6 +11,15 @@ impl DaemonSessionHost {
         agents: std::sync::Arc<tddy_agent_launch::spec_launch::HostCodingAgents>,
     ) -> Self {
         self.debug_assert_rpc_families_not_installed("with_coding_agents");
+        // The roster reads each coding agent's transport and permission policy off its spec, so it
+        // is rebuilt over these agents: over the same clone and activity stores, and empty, as it
+        // is before any session is served.
+        self.session_agent_rosters =
+            std::sync::Arc::new(crate::session_agent_roster::SessionAgentRosterStore::new(
+                std::sync::Arc::clone(&self.session_agent_clones),
+                std::sync::Arc::clone(self.session_agent_rosters.activity()),
+                agents.agents_shared(),
+            ));
         self.coding_agents = agents;
         self
     }
