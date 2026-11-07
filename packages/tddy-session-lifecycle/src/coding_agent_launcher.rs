@@ -43,20 +43,19 @@ use std::sync::Arc;
 
 use tddy_agent_launch::host_coding_agents::host_coding_agents;
 use tddy_agent_launch::spec_launch::HostCodingAgents;
-use tddy_coding_agent_specs::headless::SpecHeadlessRenderer;
-use tddy_coding_agent_specs::package_runner;
-use tddy_coding_agent_specs::slots::acp::{acp_mcp_servers, acp_withdrawal, AcpWithdrawal};
 use tddy_coding_agent_specs::slots::headless_mcp::mcp_written_paths;
-use tddy_coding_agent_specs::slots::McpServerCommand;
-use tddy_coding_agent_specs::{CodingAgentSpec, McpSlot};
+use tddy_coding_agent_specs::CodingAgentSpec;
 use tddy_coding_subagent::launcher::{record_written_files, HEADLESS_DIR, SESSION_TOKEN_ENV};
+#[cfg(test)]
+use tddy_coding_subagent::CODEX_ACP;
+#[cfg(test)]
+use tddy_coding_subagent::OPENCODE;
+#[cfg(test)]
+use tddy_coding_subagent::OPENCODE_CONFIG_CONTENT;
 use tddy_coding_subagent::{
-    confinement_of_spec, refuse_unless_confinable, refuse_unless_spec_confinable, transport_of,
-    AgentTransport, ApprovalRoutes, CodingAgentLaunch, CodingAgentLauncher, Confinement, Transport,
-    CODEX_ACP, CONVERSATION_ID_ENV, OPENCODE, OPENCODE_CONFIG_CONTENT, TDDY_TOOLS_MCP_ARG,
-    TDDY_TOOLS_SERVER,
+    refuse_unless_confinable, AgentTransport, ApprovalRoutes, CodingAgentLaunch,
+    CodingAgentLauncher, CONVERSATION_ID_ENV, TDDY_TOOLS_MCP_ARG, TDDY_TOOLS_SERVER,
 };
-use tddy_core::adapters::AdapterRegistry;
 use tddy_core::provider_route::{HarnessRoute, RouteChoice, RouteSources};
 use tddy_core::{AcpAgentCommand, HeadlessCommand, McpServerSpec};
 use tddy_daemon_kernel::config::DaemonConfig;
@@ -280,348 +279,6 @@ impl DaemonCodingAgentLauncher {
         self
     }
 
-    /// The headless command of a conversation of any headless harness, from its declaration
-    /// (`claude.yaml`, `cursor.yaml`, `codex.yaml`, `oz.yaml`): `agents.resolve`
-    /// names the binary (refused when the session runs as another OS user, as by hand), the
-    /// conversation directory is claimed as by hand and becomes the command's `scratch_dir`, the
-    /// tool server and the approval tool become its `mcp_server` and `permission_prompt_tool`, the
-    /// route's env its `env`, and a `SpecHeadlessRenderer` its `renderer`. Approvals are bound once
-    /// the plan has written everything, as by hand. What the MCP slot will write is recorded in the
-    /// claimed directory first ([`Self::record_written_files`]).
-    fn headless_plan_from_spec(
-        &self,
-        launch: &CodingAgentLaunch,
-        wiring: &HeadlessWiring,
-        conversation: &str,
-        agents: &HostCodingAgents,
-    ) -> Result<HeadlessCommand, SubagentError> {
-        let harness = launch.def.harness.as_str();
-        let agent = agents
-            .resolve(harness, None)
-            .map_err(|reason| Self::refuse(launch, &reason.to_string()))?;
-        let program = agent.tool.binary.clone();
-        self.refuse_unless_daemon_user(launch, &program.to_string_lossy())?;
-        let env = self.headless_provider_env(launch)?;
-        let mut server = self.tool_server_spec(launch)?;
-        let files = self.claim_conversation_files(launch, wiring, conversation)?;
-        let scratch_dir = files.dir.clone();
-        self.record_written_files(launch, &agent.spec, &scratch_dir)?;
-        // What the spec declares, not which agent it is: an agent that routes its permission prompts
-        // to the tool server says so (`headless.approval_tool`), and one whose MCP slot is inline
-        // registers the server on its argv, where a credential must not be: the server's variables
-        // go into the conversation's session pointer instead, which the server finds from its cwd.
-        let routes_approvals = agent
-            .spec
-            .headless()
-            .is_some_and(|headless| headless.approval_tool);
-        let registers_inline = matches!(
-            agent
-                .spec
-                .headless()
-                .and_then(|headless| headless.mcp.as_ref())
-                .unwrap_or(&agent.spec.agent.mcp),
-            McpSlot::Inline { .. }
-        );
-        let renderer = SpecHeadlessRenderer::new(
-            agent.spec,
-            agent.tool,
-            &agent.deps,
-            AdapterRegistry::builtin(),
-        )
-        .map_err(|reason| Self::refuse(launch, &reason.to_string()))?;
-        if routes_approvals {
-            self.bind_approvals(launch, conversation, &server)?;
-        }
-        if registers_inline {
-            self.write_conversation_pointer(launch, &scratch_dir, std::mem::take(&mut server.env))?;
-            server.cwd = Some(scratch_dir.clone());
-        }
-        files.keep();
-        Ok(HeadlessCommand {
-            env,
-            cwd: Some(launch.worktree.clone()),
-            model: Some(launch.def.model.clone()),
-            permission_prompt_tool: routes_approvals.then(|| APPROVAL_PROMPT_TOOL.to_string()),
-            disallowed_tools: Vec::new(),
-            profile: None,
-            mcp_server: Some(server),
-            renderer: Some(Arc::new(renderer)),
-            scratch_dir: Some(scratch_dir),
-            // The driver's own deadline: no conversation turn waits unbounded.
-            turn_deadline: None,
-        })
-    }
-
-    /// Writes the conversation's session pointer, `<scratch_dir>/.tddy/session.json` (owner-only),
-    /// carrying `server_env` — the conversation id and the minted credential — in its `remote`
-    /// map. It lives with the conversation directory, and is removed with it when the conversation
-    /// closes. The pointer's owner is this daemon.
-    fn write_conversation_pointer(
-        &self,
-        launch: &CodingAgentLaunch,
-        scratch_dir: &Path,
-        server_env: Vec<(String, String)>,
-    ) -> Result<(), SubagentError> {
-        use tddy_core::session_pointer::{
-            SessionPointer, SessionPointerOwner, SESSION_POINTER_FILE,
-        };
-
-        let pointer = SessionPointer {
-            socket: None,
-            repo_dir: launch.worktree.clone(),
-            session_dir: None,
-            remote: server_env.into_iter().collect(),
-            notify: std::collections::BTreeMap::new(),
-            owner: Some(SessionPointerOwner::this_process()),
-        };
-        let path = scratch_dir.join(SESSION_POINTER_FILE);
-        serde_json::to_vec_pretty(&pointer)
-            .map_err(|e| e.to_string())
-            .and_then(|contents| {
-                tddy_core::atomic_file::write_atomic_with_mode(&path, contents, 0o600)
-                    .map_err(|e| e.to_string())
-            })
-            .map_err(|reason| {
-                Self::refuse(
-                    launch,
-                    &format!(
-                        "its conversation's session pointer could not be written at {}: {reason}",
-                        path.display()
-                    ),
-                )
-            })
-    }
-
-    /// The environment a headless CLI takes from the session's provider route, when it runs on one.
-    fn headless_provider_env(
-        &self,
-        launch: &CodingAgentLaunch,
-    ) -> Result<Vec<(String, String)>, SubagentError> {
-        match launch.def.provider_account.as_deref() {
-            Some(account) => {
-                let route = (self.route)(launch)?.ok_or_else(|| {
-                    Self::refuse(
-                        launch,
-                        &format!("provider account '{account}' resolved to no route"),
-                    )
-                })?;
-                headless_route_env(launch, &route)
-            }
-            None => Ok(Vec::new()),
-        }
-    }
-
-    /// The ACP command of `launch` from its declaration (`#agent-tools 11/12`), before the user
-    /// switch: the agent spec named by the harness (`claude-acp`, `codex-acp`, `opencode`) resolved
-    /// by `agents` — `codex-acp` beside its `codex` dep — refused in a managed session when its
-    /// spec cannot withdraw native tools ([`Self::confine`]), `coding_agent.acp.command` rendered
-    /// with `{binary}`, `package_runner` (set when the binary was not named by `binary.env`) and
-    /// `route_args` (the route's, as `codex_acp_route_args` maps them for `codex-acp` until
-    /// `#agent-tools 12/12`), the process's working directory, the route's environment and secret
-    /// environment, and on a managed launch a `config_env` withdrawal
-    /// (`tddy_coding_agent_specs::slots::acp::acp_withdrawal`) merged into that variable's inline
-    /// config. An `acp_meta` withdrawal travels in `session/new` `_meta` instead
-    /// ([`Self::acp_session_meta_from_spec`]).
-    ///
-    /// TODO(acp-agents): the route's file for `opencode` stays inline here (`OPENCODE_CONFIG_CONTENT`):
-    /// the `opencode-route-file` hooks adapter writes it, but the daemon's session owns no hooks to
-    /// hold it for the agent's lifetime (`CodingAgentSession::start` runs with `NoHooks`).
-    fn acp_plan_from_spec(
-        &self,
-        launch: &CodingAgentLaunch,
-        agents: &HostCodingAgents,
-    ) -> Result<AcpAgentCommand, SubagentError> {
-        let harness = launch.def.harness.as_str();
-        let agent = agents
-            .resolve(harness, None)
-            .map_err(|reason| Self::refuse(launch, &reason.to_string()))?;
-        Self::confine(launch, agents, &agent.spec)?;
-        let route = self.acp_route(launch)?;
-        let route_args = match &route {
-            Some(route) if harness == CODEX_ACP => tddy_core::codex_acp_route_args(route),
-            _ => Vec::new(),
-        };
-        let def = agents
-            .registry()
-            .get(harness)
-            .ok_or_else(|| Self::refuse(launch, "no tool of that id is declared"))?;
-        let mut command = agent
-            .spec
-            .acp_command(&agent.tool, package_runner(def, agents.host()), route_args)
-            .map_err(|e| Self::refuse(launch, &e.to_string()))?;
-        command.cwd = Some(launch.worktree.clone());
-        if let Some(route) = &route {
-            command.env.extend(harness_route_env(route));
-            if harness == OPENCODE {
-                if let Some(config) = Self::opencode_route_config(launch, route)? {
-                    merge_inline_config(&mut command, OPENCODE_CONFIG_CONTENT, config)
-                        .map_err(|reason| Self::refuse(launch, &reason))?;
-                }
-            }
-        }
-        let withdrawn = Self::withdrawn_tools(launch, &agent.spec)?;
-        if let Some(AcpWithdrawal::ConfigEnv { env, config }) =
-            acp_withdrawal(&agent.spec, &withdrawn)
-                .map_err(|e| Self::refuse(launch, &e.to_string()))?
-        {
-            merge_inline_config(&mut command, &env, config)
-                .map_err(|reason| Self::refuse(launch, &reason))?;
-        }
-        Ok(command)
-    }
-
-    /// The `session/new` `mcp_servers` of `launch` from its declaration: on a managed launch, the
-    /// tool server through the spec's ACP MCP slot
-    /// (`tddy_coding_agent_specs::slots::acp::acp_mcp_servers`); nothing otherwise.
-    fn acp_mcp_servers_from_spec(
-        &self,
-        launch: &CodingAgentLaunch,
-        agents: &HostCodingAgents,
-    ) -> Result<Vec<McpServerSpec>, SubagentError> {
-        let spec = Self::acp_spec_for(launch, agents)?;
-        let server = if launch.managed {
-            Some(self.tool_server_command(launch)?)
-        } else {
-            None
-        };
-        acp_mcp_servers(&spec, server.as_ref()).map_err(|e| Self::refuse(launch, &e.to_string()))
-    }
-
-    /// The `session/new` `_meta` of `launch` from its declaration: on a managed launch, an
-    /// `acp_meta` withdrawal of the spec's `acp.withdraw_native`
-    /// (`tddy_coding_agent_specs::slots::acp::acp_withdrawal`); `None` otherwise. A `config_env`
-    /// withdrawal is the command's ([`Self::acp_plan_from_spec`]), not the session's.
-    fn acp_session_meta_from_spec(
-        &self,
-        launch: &CodingAgentLaunch,
-        agents: &HostCodingAgents,
-    ) -> Result<Option<serde_json::Map<String, serde_json::Value>>, SubagentError> {
-        let spec = Self::acp_spec_for(launch, agents)?;
-        let withdrawn = Self::withdrawn_tools(launch, &spec)?;
-        match acp_withdrawal(&spec, &withdrawn).map_err(|e| Self::refuse(launch, &e.to_string()))? {
-            Some(AcpWithdrawal::Meta(meta)) => Ok(Some(meta)),
-            Some(AcpWithdrawal::ConfigEnv { .. }) | None => Ok(None),
-        }
-    }
-
-    /// The spec `launch`'s harness is planned from, parsed from the registry and refused unless
-    /// [`Self::confine`] admits it: what the MCP and `_meta` answers need, without resolving the
-    /// binary.
-    fn acp_spec_for(
-        launch: &CodingAgentLaunch,
-        agents: &HostCodingAgents,
-    ) -> Result<CodingAgentSpec, SubagentError> {
-        let def = agents
-            .registry()
-            .get(&launch.def.harness)
-            .ok_or_else(|| Self::refuse(launch, "no tool of that id is declared"))?;
-        let spec = CodingAgentSpec::of(def).map_err(|e| Self::refuse(launch, &e.to_string()))?;
-        Self::confine(launch, agents, &spec)?;
-        Ok(spec)
-    }
-
-    /// Refuses `spec` for `launch` when it is a managed launch and the agent cannot withdraw its
-    /// native tools ([`refuse_unless_spec_confinable`]), naming the registry's ACP agents that can
-    /// ([`Self::confinable_acp_agents`]).
-    fn confine(
-        launch: &CodingAgentLaunch,
-        agents: &HostCodingAgents,
-        spec: &CodingAgentSpec,
-    ) -> Result<(), SubagentError> {
-        let confinable = Self::confinable_acp_agents(agents);
-        let confinable: Vec<&str> = confinable.iter().map(String::as_str).collect();
-        refuse_unless_spec_confinable(spec, launch.managed, &confinable)
-            .map_err(|reason| Self::refuse(launch, &reason))
-    }
-
-    /// The ACP agents of `agents`' registry whose spec can withdraw its native tools
-    /// ([`confinement_of_spec`]), in registry order. A tool that is not a coding agent is not one.
-    fn confinable_acp_agents(agents: &HostCodingAgents) -> Vec<String> {
-        agents
-            .registry()
-            .ids()
-            .filter_map(|id| {
-                let spec = CodingAgentSpec::of(agents.registry().get(id)?).ok()?;
-                (spec.acp().is_some()
-                    && confinement_of_spec(&spec) == Confinement::WithdrawsNativeTools)
-                    .then(|| id.to_string())
-            })
-            .collect()
-    }
-
-    /// The native tools `spec` withdraws on `launch`: its declared `acp.withdraw_native` on a managed
-    /// launch, none otherwise.
-    fn withdrawn_tools(
-        launch: &CodingAgentLaunch,
-        spec: &CodingAgentSpec,
-    ) -> Result<Vec<String>, SubagentError> {
-        if !launch.managed {
-            return Ok(Vec::new());
-        }
-        spec.acp()
-            .map(|acp| acp.withdraw_native.clone())
-            .ok_or_else(|| {
-                Self::refuse(
-                    launch,
-                    &format!("the '{}' spec declares no acp section", spec.id),
-                )
-            })
-    }
-
-    /// The provider route `launch` runs on: `None` for the harness's own login.
-    fn acp_route(&self, launch: &CodingAgentLaunch) -> Result<Option<HarnessRoute>, SubagentError> {
-        match launch.def.provider_account.as_deref() {
-            Some(account) => {
-                let route = (self.route)(launch)?.ok_or_else(|| {
-                    Self::refuse(
-                        launch,
-                        &format!("provider account '{account}' resolved to no route"),
-                    )
-                })?;
-                Ok(Some(route))
-            }
-            None => Ok(None),
-        }
-    }
-
-    /// The tool server a managed launch registers, as the ACP MCP slot renders it.
-    fn tool_server_command(
-        &self,
-        launch: &CodingAgentLaunch,
-    ) -> Result<McpServerCommand, SubagentError> {
-        let server = self.tool_server_spec(launch)?;
-        Ok(McpServerCommand {
-            name: server.name,
-            command: server.command,
-            args: server.args,
-            env: server.env.into_iter().collect(),
-            cwd: None,
-        })
-    }
-
-    /// The agents a launch of `launch`'s harness over ACP is planned from: this daemon's coding
-    /// agents. Refused when they did not load — a tool file that does not load must not start the
-    /// agent some other way — and for a harness that is not an ACP one, which nothing here plans by
-    /// hand (`#agent-tools 19/19`).
-    fn acp_agents_for(
-        &self,
-        launch: &CodingAgentLaunch,
-    ) -> Result<&HostCodingAgents, SubagentError> {
-        if let Some(reason) = &self.coding_agents_error {
-            return Err(Self::refuse(launch, reason));
-        }
-        if transport_of(&launch.def.harness) != Some(Transport::Acp) {
-            return Err(Self::refuse(
-                launch,
-                &format!(
-                    "this daemon has no ACP command for the '{}' harness",
-                    launch.def.harness
-                ),
-            ));
-        }
-        Ok(&self.coding_agents)
-    }
-
     fn refuse(launch: &CodingAgentLaunch, reason: &str) -> SubagentError {
         SubagentError::from(format!(
             "coding agent '{}' ({}) cannot be launched: {reason}",
@@ -646,7 +303,7 @@ impl DaemonCodingAgentLauncher {
     }
 
     /// The command for `launch` as the harness runs it, before it is made to run as another user.
-    fn command_before_user_switch(
+    pub(super) fn command_before_user_switch(
         &self,
         launch: &CodingAgentLaunch,
     ) -> Result<AcpAgentCommand, SubagentError> {
@@ -680,7 +337,10 @@ impl DaemonCodingAgentLauncher {
 
     /// The command a headless conversation of `launch` runs its CLI with. Refused rather than started
     /// some weaker way: a launch the daemon cannot honour exactly is named, not run.
-    fn headless_plan(&self, launch: &CodingAgentLaunch) -> Result<HeadlessCommand, SubagentError> {
+    pub(super) fn headless_plan(
+        &self,
+        launch: &CodingAgentLaunch,
+    ) -> Result<HeadlessCommand, SubagentError> {
         let wiring = self.headless.as_ref().ok_or_else(|| {
             Self::refuse(launch, "this daemon has no headless coding-agent wiring")
         })?;
@@ -1031,6 +691,8 @@ pub fn route_from_vault(
     })
 }
 
+mod acp;
+mod headless;
 #[cfg(all(test, unix))]
 mod headless_tests;
 
