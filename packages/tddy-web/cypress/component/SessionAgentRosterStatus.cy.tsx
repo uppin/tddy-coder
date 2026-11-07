@@ -20,8 +20,8 @@
 
 import React from "react";
 import { create } from "@bufbuild/protobuf";
-import { SessionEntrySchema } from "../../src/gen/session_pb";
-import { AgentKind, SessionAgentStatus } from "../../src/gen/types_pb";
+import { SessionEntrySchema } from "tddy-client-web/gen/session_pb";
+import { AgentKind, SessionAgentStatus } from "tddy-client-web/gen/types_pb";
 import { SessionAgentRosterPane } from "../../src/components/sessions/SessionAgentRosterPane";
 import type { DaemonHost } from "../../src/lib/participantRole";
 import {

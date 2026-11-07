@@ -12,7 +12,7 @@ import {
   TddyRemote,
   type AppModeProto,
   type ClientMessage,
-} from "../../gen/tddy/v1/remote_pb";
+} from "tddy-client-web/gen/tddy/v1/remote_pb";
 import { tddyDebug } from "../../lib/debugMask";
 import type { TranscriptStatus } from "./toolCallPresentation";
 

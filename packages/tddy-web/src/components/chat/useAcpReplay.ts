@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { fromBinary } from "@bufbuild/protobuf";
 import { Code, ConnectError, type Client } from "@connectrpc/connect";
-import { type ActivityService, StreamMode } from "../../gen/activity_pb";
-import { AcpAgentMessageSchema } from "../../gen/tddy/acp/v1/acp_pb";
+import { type ActivityService, StreamMode } from "tddy-client-web/gen/activity_pb";
+import { AcpAgentMessageSchema } from "tddy-client-web/gen/tddy/acp/v1/acp_pb";
 import { agentActivityRegistry, replayKeyOf } from "../sessions/agentActivityRegistry";
 import { createReplayProjector, projectReplayFrames } from "./acpReplayProjection";
 import type { UseAgentChatResult } from "./useAgentChat";

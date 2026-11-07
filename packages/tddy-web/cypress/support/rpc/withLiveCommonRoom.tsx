@@ -13,7 +13,7 @@ import React from "react";
 import type { Room } from "livekit-client";
 import { AuthProvider } from "../../../src/hooks/authProvider";
 import { SelectedDaemonProvider } from "../../../src/rpc/selectedDaemon";
-import { TokenService } from "../../../src/gen/token_pb";
+import { TokenService } from "tddy-client-web/gen/token_pb";
 import { mountWithRpc } from "./inMemory";
 import {
   anAuthRefreshBackend,

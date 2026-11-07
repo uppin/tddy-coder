@@ -1,5 +1,5 @@
 import type { Client } from "@connectrpc/connect";
-import type { CatalogService } from "../../gen/catalog_pb";
+import type { CatalogService } from "tddy-client-web/gen/catalog_pb";
 import type { DaemonHost } from "../../lib/participantRole";
 import type { HostReadFailure } from "../../rpc/useHostFanOut";
 import { useSelectableAgents } from "./useSelectableAgents";

@@ -22,14 +22,14 @@ import type {
   StartSessionRequestSchema,
   StartSessionResponse,
   StartTaskStarted,
-} from "../gen/session_pb";
+} from "tddy-client-web/gen/session_pb";
 import {
   NO_START_PROGRESS,
   startProgressAfter,
   startProgressFailed,
   type StartProgressState,
 } from "../components/sessions/startProgress";
-import type { SessionFilesService } from "../gen/session_files_pb";
+import type { SessionFilesService } from "tddy-client-web/gen/session_files_pb";
 import {
   duplicateBasenames,
   validateAttachmentBasename,

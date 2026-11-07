@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useRef } from "react";
-import type { SessionEntry } from "../../gen/session_pb";
+import type { SessionEntry } from "tddy-client-web/gen/session_pb";
 import type { TauriHostWindow } from "../../rpc/daemonTransportFlavour";
 import { useSelectedDaemon } from "../../rpc/selectedDaemon";
 import { sessionReadsLocalPaths } from "../../lib/sessionReadsLocalPaths";

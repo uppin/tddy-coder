@@ -10,11 +10,11 @@ import { servedAgentWire } from "../support/servedAgents";
 import { create, fromBinary } from "@bufbuild/protobuf";
 import { createClient } from "@connectrpc/connect";
 import { createConnectTransport } from "@connectrpc/connect-web";
-import { SessionService, StartSessionRequestSchema, StartSessionResponseSchema } from "../../src/gen/session_pb";
-import { ProjectService } from "../../src/gen/project_pb";
-import { CatalogService } from "../../src/gen/catalog_pb";
-import { SessionFilesService } from "../../src/gen/session_files_pb";
-import { WorktreeService } from "../../src/gen/worktree_pb";
+import { SessionService, StartSessionRequestSchema, StartSessionResponseSchema } from "tddy-client-web/gen/session_pb";
+import { ProjectService } from "tddy-client-web/gen/project_pb";
+import { CatalogService } from "tddy-client-web/gen/catalog_pb";
+import { SessionFilesService } from "tddy-client-web/gen/session_files_pb";
+import { WorktreeService } from "tddy-client-web/gen/worktree_pb";
 import { CreateSessionPane } from "../../src/components/sessions/CreateSessionPane";
 import {
   START_SESSION_STREAM_ROUTE,
@@ -654,4 +654,4 @@ describe("CreateSessionPane — stack parent picker", () => {
 // ---------------------------------------------------------------------------
 // Type alias to avoid import gymnastics above
 // ---------------------------------------------------------------------------
-type StartSessionRequest = import("../../src/gen/session_pb").StartSessionRequest;
+type StartSessionRequest = import("tddy-client-web/gen/session_pb").StartSessionRequest;

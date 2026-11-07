@@ -13,7 +13,7 @@
  * Technical: `packages/tddy-web/docs/host-directory.md`.
  */
 
-import type { ConnectionStatus } from "../connections/types";
+import type { ConnectionStatus } from "tddy-client-web/connections/types";
 
 /**
  * A host this page could select, as some source described it.

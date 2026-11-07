@@ -1,7 +1,7 @@
 import { useCallback, useEffect, type MutableRefObject } from "react";
 import type { Client } from "@connectrpc/connect";
-import { Signal, type SessionEntry, type SessionService } from "../../gen/session_pb";
-import type { HostConnection } from "../../rpc/connections/types";
+import { Signal, type SessionEntry, type SessionService } from "tddy-client-web/gen/session_pb";
+import type { HostConnection } from "tddy-client-web/connections/types";
 import { useActionFailure } from "../../hooks/useActionFailure";
 import { requestSessionsRefresh } from "../../lib/sessionsRefreshBridge";
 import { actionFailed, hostNotConnected } from "../../rpc/rpcFailure";

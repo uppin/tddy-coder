@@ -1,8 +1,8 @@
 import { useEffect, useState } from "react";
 import { create } from "@bufbuild/protobuf";
 import type { Client } from "@connectrpc/connect";
-import type { AccountsService } from "../gen/accounts_pb";
-import { ModelInfoSchema } from "../gen/catalog_pb";
+import type { AccountsService } from "tddy-client-web/gen/accounts_pb";
+import { ModelInfoSchema } from "tddy-client-web/gen/catalog_pb";
 import type { ProviderRouteChoice } from "../components/sessions/CreateSessionProviderField";
 import type { AgentModelsState } from "./useAgentModels";
 

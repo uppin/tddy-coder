@@ -19,7 +19,7 @@ import {
   TerminalSessionService,
   type SessionTerminalInput,
   SessionTerminalOutputSchema,
-} from "../../src/gen/terminal_session_pb";
+} from "tddy-client-web/gen/terminal_session_pb";
 import { GrpcSessionTerminal } from "../../src/components/sessions/GrpcSessionTerminal";
 import { UploadProgressProvider } from "../../src/rpc/uploadProgress";
 import { aGhosttyTerminal } from "../support/drivers/ghosttyTerminalDriver";

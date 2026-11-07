@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from "react";
 import { ChevronLeft, ChevronRight } from "lucide-react";
-import type { SessionEntry } from "../../gen/session_pb";
+import type { SessionEntry } from "tddy-client-web/gen/session_pb";
 import type { SessionMetadata } from "../../lib/sessionParticipantMetadata";
 import { groupSessionsByProject } from "../../utils/sessionProjectGroups";
 import {

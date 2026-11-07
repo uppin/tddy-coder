@@ -11,7 +11,7 @@ import { anInMemoryRpcBackend } from "tddy-connectrpc-testkit";
 import { AgentChat } from "../../src/components/chat/AgentChat";
 import { buildChatTranscript } from "../../src/components/chat/chatTranscript";
 import type { ChatMessage, ElicitationPoint } from "../../src/components/chat/useAgentChat";
-import { AcpService } from "../../src/gen/tddy/acp/v1/acp_pb";
+import { AcpService } from "tddy-client-web/gen/tddy/acp/v1/acp_pb";
 import { mountWithRpc } from "../support/rpc/inMemory";
 import { acpAgentChunk, acpQuestion, acpScriptedSession } from "../support/rpc/acpSession";
 import { agentChatPage } from "../support/pages/agentChatPage";

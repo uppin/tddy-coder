@@ -1,6 +1,6 @@
 import { useCallback } from "react";
 
-import { CodeIndexState, CodeQueryKind } from "../../gen/code_navigation_pb";
+import { CodeIndexState, CodeQueryKind } from "tddy-client-web/gen/code_navigation_pb";
 import { toLocationRef, type CodeLocationRef, type CodePosition } from "./codeNavigationApi";
 import type { ProbeStore } from "./codeProbes";
 import type { LatestQuery, NavigationUi, Notice } from "./useCodeNavigation";

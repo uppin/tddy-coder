@@ -7,7 +7,7 @@
  */
 
 import { useEffect, useState } from "react";
-import { HostService, type KnownHostEntry } from "../../gen/host_pb";
+import { HostService, type KnownHostEntry } from "tddy-client-web/gen/host_pb";
 import { useAuthContext } from "../../hooks/authProvider";
 import { useDaemonClient } from "../../rpc/selectedDaemon";
 import { AppShell } from "../shell/AppShell";

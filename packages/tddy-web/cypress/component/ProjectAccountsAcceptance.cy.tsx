@@ -20,9 +20,9 @@ import {
   ProjectsScreen,
   type AssignableAccount,
 } from "../../src/components/projects/ProjectsScreen";
-import { type ProjectEntry } from "../../src/gen/project_pb";
-import { AccountsService } from "../../src/gen/accounts_pb";
-import { ProjectService } from "../../src/gen/project_pb";
+import { type ProjectEntry } from "tddy-client-web/gen/project_pb";
+import { AccountsService } from "tddy-client-web/gen/accounts_pb";
+import { ProjectService } from "tddy-client-web/gen/project_pb";
 import type { DaemonHost } from "../../src/lib/participantRole";
 import { SelectedDaemonProvider } from "../../src/rpc/selectedDaemon";
 import { AuthProvider } from "../../src/hooks/authProvider";

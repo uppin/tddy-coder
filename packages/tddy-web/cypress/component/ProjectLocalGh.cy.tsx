@@ -19,14 +19,14 @@ import {
   ProjectsScreen,
   type AssignableAccount,
 } from "../../src/components/projects/ProjectsScreen";
-import { type ProjectEntry, ProjectService } from "../../src/gen/project_pb";
-import { AccountsService } from "../../src/gen/accounts_pb";
+import { type ProjectEntry, ProjectService } from "tddy-client-web/gen/project_pb";
+import { AccountsService } from "tddy-client-web/gen/accounts_pb";
 import {
   HostGithubCliSchema,
   HostService,
   ProbeOutcome,
   type HostGithubCli,
-} from "../../src/gen/host_pb";
+} from "tddy-client-web/gen/host_pb";
 import type { DaemonHost } from "../../src/lib/participantRole";
 import { SelectedDaemonProvider } from "../../src/rpc/selectedDaemon";
 import { AuthProvider } from "../../src/hooks/authProvider";

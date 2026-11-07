@@ -13,7 +13,7 @@ import { useHttpClient, useHttpTransport } from "../../rpc/transportProvider";
 import { loadClientConfig } from "../../rpc/clientConfig";
 import { applyDebugMaskFromConfig } from "../../lib/debugMask";
 import { useAuthContext } from "../../hooks/authProvider";
-import { TokenService } from "../../gen/token_pb";
+import { TokenService } from "tddy-client-web/gen/token_pb";
 import { useVisualViewport } from "tddy-ui-web";
 import { GitHubLoginButton } from "../GitHubLoginButton";
 import { UserAvatar } from "../UserAvatar";

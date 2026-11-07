@@ -6,7 +6,7 @@
  * status marker and text belongs in one place rather than in each surface's own switch.
  */
 
-import { ToolCallStatus } from "../../gen/tddy/acp/v1/acp_pb";
+import { ToolCallStatus } from "tddy-client-web/gen/tddy/acp/v1/acp_pb";
 
 /** The coarse status a transcript entry's marker shows. `awaiting_user` is a subagent bubble's alone:
  *  its turn is paused on a permission request the main agent handed to the user. */

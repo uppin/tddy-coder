@@ -25,12 +25,12 @@
  */
 
 import React from "react";
-import { PrStackService } from "../../src/gen/pr_stack_pb";
-import { ProjectService } from "../../src/gen/project_pb";
+import { PrStackService } from "tddy-client-web/gen/pr_stack_pb";
+import { ProjectService } from "tddy-client-web/gen/project_pb";
 import { Code, ConnectError } from "@connectrpc/connect";
 import { SessionsDrawerScreen } from "../../src/components/sessions/SessionsDrawerScreen";
-import { type ProjectEntry } from "../../src/gen/project_pb";
-import { SessionService, type SessionEntry } from "../../src/gen/session_pb";
+import { type ProjectEntry } from "tddy-client-web/gen/project_pb";
+import { SessionService, type SessionEntry } from "tddy-client-web/gen/session_pb";
 import { withSelectedDaemon } from "../support/rpc/withSelectedDaemon";
 import { mountWithRpc } from "../support/rpc/inMemory";
 import { aSessionsDrawerBackend } from "../support/rpc/vncBackend";

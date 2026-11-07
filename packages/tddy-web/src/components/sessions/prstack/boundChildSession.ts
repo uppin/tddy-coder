@@ -1,5 +1,5 @@
-import type { SessionEntry } from "../../../gen/session_pb";
-import type { BranchResolution } from "../../../gen/pr_stack_pb";
+import type { SessionEntry } from "tddy-client-web/gen/session_pb";
+import type { BranchResolution } from "tddy-client-web/gen/pr_stack_pb";
 import type { StackNode } from "./stackPlan";
 
 /**

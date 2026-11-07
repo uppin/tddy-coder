@@ -2,8 +2,8 @@
  * The shape of a session the daemon mints, and what one device-flow poll's answer calls for — the
  * pure half of `useAuth`, with no React and no storage.
  */
-import { DeviceLoginState, type VaultState } from "../gen/auth_pb";
-import type { GitHubUser, PollDeviceLoginResponse } from "../gen/auth_pb";
+import { DeviceLoginState, type VaultState } from "tddy-client-web/gen/auth_pb";
+import type { GitHubUser, PollDeviceLoginResponse } from "tddy-client-web/gen/auth_pb";
 
 /**
  * Where a device-flow sign-in (`StartDeviceLogin` / `PollDeviceLogin`) stands.

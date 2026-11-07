@@ -13,7 +13,7 @@
  */
 
 import { useEffect, useState } from "react";
-import { HostService, ProbeOutcome, type ListSshConfigHostsResponse } from "../../gen/host_pb";
+import { HostService, ProbeOutcome, type ListSshConfigHostsResponse } from "tddy-client-web/gen/host_pb";
 import { useAuthContext } from "../../hooks/authProvider";
 import { useHostClient } from "../../rpc/connections/registry";
 

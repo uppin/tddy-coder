@@ -13,7 +13,7 @@ import { ConnectError, Code } from "@connectrpc/connect";
 import { TerminalFileDropZone } from "../../src/components/connection/TerminalFileDropZone";
 import { UploadProgressProvider } from "../../src/rpc/uploadProgress";
 import { UploadProgressIndicator } from "../../src/components/sessions/UploadProgressIndicator";
-import { SessionFilesService } from "../../src/gen/session_files_pb";
+import { SessionFilesService } from "tddy-client-web/gen/session_files_pb";
 import { anInMemoryRpcBackend, type InMemoryRpcBackend } from "tddy-connectrpc-testkit";
 import { mountWithRpc } from "../support/rpc/inMemory";
 import { withSelectedDaemon } from "../support/rpc/withSelectedDaemon";

@@ -18,7 +18,7 @@ import {
   SyncStatus,
   type AccountSummary,
   type ConnectProviderAccountRequest,
-} from "../../src/gen/accounts_pb";
+} from "tddy-client-web/gen/accounts_pb";
 import { mountWithRpc } from "../support/rpc/inMemory";
 import { withSelectedDaemon } from "../support/rpc/withSelectedDaemon";
 import { recordedFields } from "../support/rpc/recordedRequests";

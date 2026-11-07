@@ -23,7 +23,7 @@ import {
   HostService,
   HostStatsEventSchema,
   type EligibleDaemonEntry,
-} from "../../../src/gen/host_pb";
+} from "tddy-client-web/gen/host_pb";
 
 /** One entry of the `ListEligibleDaemons` roster. */
 export interface DaemonEntry {

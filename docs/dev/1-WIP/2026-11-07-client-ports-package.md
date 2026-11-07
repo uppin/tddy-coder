@@ -7,6 +7,8 @@
 
 **Stack**: `#web-split` 5/16 — branch `feature/web-split/clients`, base `feature/web-split/livekit-rpc`
 
+**PR**: [#842](https://github.com/uppin/tddy-coder/pull/842)
+
 ## Initial Discovery
 
 [2026-11-07-client-ports-package-initial-discovery.md](./2026-11-07-client-ports-package-initial-discovery.md)
@@ -69,9 +71,25 @@ implementing one here collides with the PR that owns it.
 |---|---|---|---|
 | `n1` web-ci (#838) | `web-package.yml`, workflow rule | adds `web-tddy-client-web.yml` | change them |
 | `n2` react-commons (#839) | `tddy-react-commons/ports` (`withPorts`, `PortMap`), `/testkit` (`stubPorts`) | declares the three ports and builds the double on them | add port machinery of its own |
-| `n3` ui, `n4` livekit-rpc (#840, #841) | — (branch predecessors only) | nothing | — |
+| `n3` ui (#840) | `scripts/web-package-boundary.ts` (`forbiddenImports`) | this package's boundary rule calls it — **red until #840 is green** | implement or copy it |
+| `n4` livekit-rpc (#841) | — (branch predecessor only) | nothing | — |
 
 ## Draft PR contract
+
+**As pushed (commit 2)** — the contract went further than planned on two mechanical moves, because
+every later node's contract compiles against them:
+
+- `src/gen/**` (+ `buf.gen.yaml`, `buf.yaml`) **moved** to `packages/tddy-client-web` with `git mv`;
+  929 imports in 477 `tddy-web` files rewritten to `tddy-client-web/gen/<file>_pb`; the codegen
+  manifest's two `packages/tddy-web` rows now name `packages/tddy-client-web`. `tddy-web` builds
+  (`bun run build`) and its `src/lib` + `src/rpc` unit suites pass (626/626).
+- `rpc/connections/{types,session,terminal}.ts` (pure connection-contract types) **moved** to
+  `tddy-client-web/connections/*`; 78 imports rewritten.
+- Port surface with `TODO(clients)` bodies: `src/ports/{clients,navigation,auth}.tsx`, `src/testkit`.
+- Failing: 14 `bun test` cases (13 on `TODO(clients)`; the boundary rule on #840's
+  `forbiddenImports`, still `TODO(ui)`), and `cypress/component/MountWithClients.cy.tsx`.
+
+Originally planned:
 
 First push (commit 2): `packages/tddy-client-web` skeleton (manifest with `.`, `./gen/*`, `./ports`, `./testkit` exports; tsconfig; Cypress + Vite config; workflow), the port and hook **signatures** with `// TODO(clients): implement` bodies, and failing tests: the boundary rule, the hook suites below, and the Cypress spec that mounts a component through `mountWithClients` with no `tddy-web` provider. Generated code is not yet moved (the gate still targets `tddy-web`).
 
@@ -159,10 +177,10 @@ Real dependency edges, as opposed to the branch line:
 - [x] Cross-check `packages/*/docs/code-issues/` and `docs/dev/todo/` for items this change touches (Step 2b)
 - [x] Create/update PRD documentation
 - [x] Create changeset (this document)
-- [ ] Create failing acceptance tests
-- [ ] Run acceptance tests (verify they fail)
-- [ ] USER REVIEW — acceptance tests
-- [ ] TDD Red — write failing unit/integration tests
+- [x] Create failing acceptance tests
+- [x] Run acceptance tests (verify they fail)
+- [x] USER REVIEW — acceptance tests (developer waived the per-node review for this stack, 2026-11-07: "finish the rest without stopping")
+- [x] TDD Red — write failing unit/integration tests
 - [ ] TDD Green — implement with quality code
 - [ ] Update documentation with progress
 - [ ] Repeat Red→Green→Update cycle until feature complete

@@ -1,4 +1,4 @@
-import { CodeQueryKind, Definability } from "../../gen/code_navigation_pb";
+import { CodeQueryKind, Definability } from "tddy-client-web/gen/code_navigation_pb";
 import { toLocationRef, type CodeLocationRef, type CodePosition } from "./codeNavigationApi";
 import type { CodeSession } from "./useCodeSession";
 

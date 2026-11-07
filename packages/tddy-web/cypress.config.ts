@@ -27,11 +27,11 @@ import {
   ExchangeCodeResponseSchema,
   GetAuthUrlRequestSchema,
   GetAuthUrlResponseSchema,
-} from "./src/gen/auth_pb.js";
+} from "tddy-client-web/gen/auth_pb";
 import {
   StartSessionRequestSchema,
   StartSessionResponseSchema,
-} from "./src/gen/session_pb.js";
+} from "tddy-client-web/gen/session_pb";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 

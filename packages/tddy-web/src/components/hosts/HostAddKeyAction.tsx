@@ -39,7 +39,7 @@ import {
   type AddHostKeyResponse,
   type HostKeyCandidate,
   type HostSshAgent,
-} from "../../gen/host_pb";
+} from "tddy-client-web/gen/host_pb";
 import { useHostClient } from "../../rpc/connections/registry";
 import { useAuthContext } from "../../hooks/authProvider";
 import { HostPassphraseDialog } from "./HostPassphraseDialog";

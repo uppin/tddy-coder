@@ -10,7 +10,7 @@
 
 import React from "react";
 import { Code } from "@connectrpc/connect";
-import { ModelLoadState, ModelRegistryService } from "../../../src/gen/models_pb";
+import { ModelLoadState, ModelRegistryService } from "tddy-client-web/gen/models_pb";
 import { ModelsAppPage } from "../../../src/components/models/ModelsAppPage";
 import type { DaemonHost } from "../../../src/lib/participantRole";
 import { withSelectedDaemon } from "../../support/rpc/withSelectedDaemon";

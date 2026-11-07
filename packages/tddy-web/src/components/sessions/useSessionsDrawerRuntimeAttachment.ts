@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, type MutableRefObject } from "react";
-import type { SessionEntry } from "../../gen/session_pb";
+import type { SessionEntry } from "tddy-client-web/gen/session_pb";
 import { claimAfterFeedEnd, shouldResetAttachmentOnFeedEnd, type AttachClaim } from "./attachClaim";
 import type {
   SessionRuntimeConnection,

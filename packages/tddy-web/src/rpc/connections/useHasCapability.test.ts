@@ -10,7 +10,7 @@
 
 import { describe, it, expect } from "bun:test";
 import { hasCapability } from "./useHasCapability";
-import type { ConnectionCapability } from "./types";
+import type { ConnectionCapability } from "tddy-client-web/connections/types";
 
 function aConnectionThatCan(...capabilities: ConnectionCapability[]) {
   return { capabilities: new Set(capabilities) };

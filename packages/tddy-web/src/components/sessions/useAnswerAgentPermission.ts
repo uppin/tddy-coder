@@ -1,6 +1,6 @@
 import { useCallback, useState } from "react";
 import { ConnectError, type Client } from "@connectrpc/connect";
-import type { SessionAgentService } from "../../gen/session_agents_pb";
+import type { SessionAgentService } from "tddy-client-web/gen/session_agents_pb";
 import type { RosterHalf } from "./sessionRosterHalf";
 
 /**

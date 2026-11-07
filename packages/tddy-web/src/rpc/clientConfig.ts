@@ -11,7 +11,7 @@
  */
 
 import { createClient, type Transport } from "@connectrpc/connect";
-import { DaemonConfigService } from "../gen/daemon_config_pb";
+import { DaemonConfigService } from "tddy-client-web/gen/daemon_config_pb";
 import { daemonTransportFlavour } from "./daemonTransportFlavour";
 import { thisPagesHost, type DaemonHostEnvironment } from "./daemonTransport";
 

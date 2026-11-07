@@ -11,9 +11,9 @@
 import React from "react";
 import { Code, ConnectError } from "@connectrpc/connect";
 import { SessionsDrawerScreen } from "../../src/components/sessions/SessionsDrawerScreen";
-import { SessionService, type SessionEntry } from "../../src/gen/session_pb";
-import { PrStackService } from "../../src/gen/pr_stack_pb";
-import { CatalogService } from "../../src/gen/catalog_pb";
+import { SessionService, type SessionEntry } from "tddy-client-web/gen/session_pb";
+import { PrStackService } from "tddy-client-web/gen/pr_stack_pb";
+import { CatalogService } from "tddy-client-web/gen/catalog_pb";
 import { withSelectedDaemon } from "../support/rpc/withSelectedDaemon";
 import { mountWithRpc } from "../support/rpc/inMemory";
 import { aSessionsDrawerBackend } from "../support/rpc/vncBackend";

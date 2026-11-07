@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import type { SessionEntry } from "../../gen/session_pb";
+import type { SessionEntry } from "tddy-client-web/gen/session_pb";
 import type { HostReadFailure } from "../../rpc/useHostFanOut";
 import { InlineError } from "tddy-ui-web";
 import { CreateSessionAgentSelect } from "./CreateSessionAgentSelect";

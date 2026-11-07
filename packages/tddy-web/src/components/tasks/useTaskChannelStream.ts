@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { TaskService } from "../../gen/tasks_pb";
+import { TaskService } from "tddy-client-web/gen/tasks_pb";
 import { useDaemonClient } from "../../rpc/selectedDaemon";
 
 export function useTaskChannelStream(

@@ -5,7 +5,7 @@
  */
 
 import React from "react";
-import { SessionService } from "../../src/gen/session_pb";
+import { SessionService } from "tddy-client-web/gen/session_pb";
 import { SessionsDrawerScreen } from "../../src/components/sessions/SessionsDrawerScreen";
 import { withSelectedDaemon } from "../support/rpc/withSelectedDaemon";
 import { aSessionServiceBackend } from "../support/rpc/daemonSessionHostBackend";

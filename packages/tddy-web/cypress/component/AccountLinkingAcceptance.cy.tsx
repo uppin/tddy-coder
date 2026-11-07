@@ -22,7 +22,7 @@ import {
   MAX_CONSECUTIVE_POLL_FAILURES,
   MIN_POLL_INTERVAL_SECONDS,
 } from "../../src/components/accounts/useLinkFlow";
-import { AccountsService, LinkState } from "../../src/gen/accounts_pb";
+import { AccountsService, LinkState } from "tddy-client-web/gen/accounts_pb";
 import { mountWithRpc } from "../support/rpc/inMemory";
 import { withSelectedDaemon } from "../support/rpc/withSelectedDaemon";
 import {

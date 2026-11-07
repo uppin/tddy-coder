@@ -1,5 +1,5 @@
 import { useState } from "react";
-import type { ProviderKind } from "../../gen/models_pb";
+import type { ProviderKind } from "tddy-client-web/gen/models_pb";
 import { unrecognisedEnumText } from "../../lib/enumSkew";
 import { safeTestIdPart } from "../../lib/testId";
 import {
