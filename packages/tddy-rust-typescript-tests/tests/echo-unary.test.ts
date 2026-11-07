@@ -81,7 +81,8 @@ beforeAll(async () => {
   };
   serverProcess.stderr?.on("data", record);
   serverProcess.stdout?.on("data", record);
-  serverProcess.on("exit", (code, signal) => {
+  // `close`, not `exit`: it fires after stdout and stderr end, so the output is complete when quoted.
+  serverProcess.on("close", (code, signal) => {
     serverExit = signal ?? `code ${code}`;
   });
 
