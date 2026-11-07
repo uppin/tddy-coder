@@ -245,6 +245,15 @@ impl AgentRoster {
         Ok(())
     }
 
+    /// Refuses, as [`Self::tear_down_every_agent_clone`] would, the delete of a session with a
+    /// recorded clone while this daemon has no common room configured or joined — read-only, so
+    /// `DeleteSession` can refuse before it tears anything down (`#agent-tools 30/32`).
+    pub async fn refuse_an_unreachable_clone_host(&self, session_id: &str) -> Result<(), Status> {
+        // TODO(operator-start-refusal): implement
+        let _ = session_id;
+        Ok(())
+    }
+
     /// Delete every clone a session created, on every host that built one.
     ///
     /// Called by `DeleteSession`. One failure fails the deletion naming the orphan, for the same
@@ -389,3 +398,7 @@ use crate::agent_clone_worktree;
 
 use crate::agent_clone_lookup;
 use tddy_daemon_kernel::daemon_hook_urls;
+
+#[cfg(test)]
+#[path = "svc_provision_agent_clone/clone_host_precheck_tests.rs"]
+mod clone_host_precheck_tests;

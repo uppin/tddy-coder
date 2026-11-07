@@ -69,6 +69,21 @@ impl SplitSessions {
             }
     }
 
+    /// Refuses, as [`Self::delete_paired_codebase_session`] would, the delete of a session paired
+    /// with a codebase half on **another** daemon while this daemon has no common room configured or
+    /// joined — read-only, so `DeleteSession` can refuse before it tears anything down. A
+    /// co-located session, or a jailed codebase on this daemon, needs no room and is never refused
+    /// here (`#agent-tools 30/32`).
+    pub async fn refuse_an_unreachable_paired_codebase(
+        &self,
+        sessions_base: &Path,
+        session_id: &str,
+    ) -> Result<(), Status> {
+        // TODO(operator-start-refusal): implement
+        let _ = (sessions_base, session_id);
+        Ok(())
+    }
+
     /// Delete the `workspace` session paired with a split session, on the daemon that holds its
     /// worktree. A no-op for a co-located session, which records no pairing.
     ///
