@@ -7,6 +7,8 @@
 
 **Stack**: `#web-split` 11/17 — branch `feature/web-split/media`, base `feature/web-split/chat`
 
+**PR**: [#855](https://github.com/uppin/tddy-coder/pull/855)
+
 ## Initial Discovery
 
 [2026-11-07-livekit-media-package-initial-discovery.md](./2026-11-07-livekit-media-package-initial-discovery.md)
@@ -61,6 +63,16 @@ implementing one here collides with the PR that owns it.
 | `n7`–`n10` | — (branch predecessors only) | nothing | — |
 
 ## Draft PR contract
+
+**As pushed (commit 2, after #843's green f7a3da1):** `aMediaDouble` gains `setCameraVideo` and `presentRoom`
+(`TODO(media)`); `src/ports/mediaPort.media.test.tsx` — camera video follows the double, the presenter room the hint
+names, pointer input forwarded through the port (3 failing; `RemoteVideo` already renders); the `TODO(media)` allowlist
+is deleted from `scripts/livekit-import-boundary.test.ts`, which now lists exactly the 9 media files still importing
+`livekit-client`: `ParticipantVideoPreviewDialog`, `ScreenSharingOverlay`, `SessionScreenSharingTab`, `SessionVncTab`,
+`VncOverlay`, `usePresenterLiveKitRoom`, `useScreenSharingInput`, `hooks/participantCameraVideo` (+ its test).
+`MediaPort`'s interface is unchanged from #843; this node may refine it.
+
+Originally planned:
 
 First push (commit 2): `MediaPort` redrafted against what #843's green settles (`RoomHandle`, room-RPC port), media double signatures, and the media specs re-pointed at the double — failing until the implementation moves; `scripts/livekit-import-boundary.test.ts` (from #843) is the acceptance gate.
 
@@ -145,10 +157,10 @@ Those components take `RoomHandle`s and use `MediaPort`; LiveKit track code live
 - [x] Cross-check `packages/*/docs/code-issues/` and `docs/dev/todo/` for items this change touches (Step 2b)
 - [x] Create/update PRD documentation
 - [x] Create changeset (this document)
-- [ ] Create failing acceptance tests
-- [ ] Run acceptance tests (verify they fail)
-- [ ] USER REVIEW — acceptance tests
-- [ ] TDD Red — write failing unit/integration tests
+- [x] Create failing acceptance tests
+- [x] Run acceptance tests (verify they fail)
+- [x] USER REVIEW — acceptance tests (developer waived the per-node review for this stack, 2026-11-07: "finish the rest without stopping")
+- [x] TDD Red — write failing unit/integration tests
 - [ ] TDD Green — implement with quality code
 - [ ] Update documentation with progress
 - [ ] Repeat Red→Green→Update cycle until feature complete

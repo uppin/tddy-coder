@@ -79,6 +79,10 @@ export function aPresenceDouble(): PresenceDouble {
 export interface MediaDouble extends MediaPort {
   /** Input forwarded by `useScreenSharingInput`, in order. */
   readonly forwardedInput: ReadonlyArray<{ kind: "pointer" | "key"; detail: unknown }>;
+  /** Give (or take) `identity` camera video in `room`; `useHasCameraVideo` readers re-render. */
+  setCameraVideo(room: RoomHandle, identity: string, hasVideo: boolean): void;
+  /** The presenter room a hint naming `roomName` joins, as `usePresenterRoom` reports it. */
+  presentRoom(roomName: string, state: { room: RoomHandle | null; status: "idle" | "connecting" | "connected" | "error"; error?: string | null }): void;
 }
 
 // TODO(media): #855 settles the final MediaPort shape and what its double records; this is the
@@ -90,6 +94,12 @@ export function aMediaDouble(overrides: Partial<MediaPort> = {}): MediaDouble {
     useScreenSharingInput: () => ({ inputUnavailable: false }),
     useHasCameraVideo: () => false,
     RemoteVideo: ({ identity, trackName }) => createElement("div", { "data-testid": `remote-video-${identity}-${trackName}` }),
+    setCameraVideo: () => {
+      throw new Error("TODO(media): implement");
+    },
+    presentRoom: () => {
+      throw new Error("TODO(media): implement");
+    },
     ...overrides,
   };
 }
