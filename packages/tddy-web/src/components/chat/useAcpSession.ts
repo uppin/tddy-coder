@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { create } from "@bufbuild/protobuf";
 import type { Client } from "@connectrpc/connect";
 import { AsyncQueue } from "tddy-livekit-rpc-web";
-import { useParticipantPresent, useRoomClient, type RoomHandle } from "tddy-client-web";
+import { useParticipantProbe, useRoomClient, type RoomHandle } from "tddy-client-web";
 import {
   AcpClientMessageSchema,
   AcpService,
@@ -45,11 +45,9 @@ export function useAcpSession(
   resumeSessionId?: string,
 ): UseAgentChatResult {
   const client = useRoomClient(room, serverIdentity, AcpService);
-  // Read at the moment of a send, never captured: the peer's liveness changes without this hook
+  // Asked at the moment of a send, never captured: the peer's liveness changes without this hook
   // re-running, and a caller refusing to send into a stream nobody reads has to see that then.
-  const presenterPresent = useParticipantPresent(room, serverIdentity);
-  const presenterPresentRef = useRef(presenterPresent);
-  presenterPresentRef.current = presenterPresent;
+  const presenterIsHere = useParticipantProbe(room, serverIdentity);
 
   return useAcpSessionOverClient(
     client,
@@ -66,7 +64,7 @@ export function useAcpSession(
       ? {
           name: serverIdentity,
           label: "the presenter",
-          isServing: () => presenterPresentRef.current,
+          isServing: presenterIsHere,
         }
       : undefined,
   );

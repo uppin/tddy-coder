@@ -1,5 +1,5 @@
 /** Doubles for the presence, room-RPC and media ports: rooms are plain tokens, participants a mutable list. */
-import { createElement, useMemo, useSyncExternalStore } from "react";
+import { createElement, useCallback, useMemo, useSyncExternalStore } from "react";
 import { createClient, type Client } from "@connectrpc/connect";
 import type { DescService } from "@bufbuild/protobuf";
 import type { InMemoryRpcBackend } from "tddy-connectrpc-testkit";
@@ -95,7 +95,7 @@ export function aMediaDouble(overrides: Partial<MediaPort> = {}): MediaDouble {
 }
 
 export interface RoomRpcDouble extends RoomRpcPort {
-  /** Put `identity` in or out of `room`, re-rendering `useParticipantPresent` readers. */
+  /** Put `identity` in or out of `room`, re-rendering `useParticipantPresent` readers; probes see it at once. */
   setPresent(room: RoomHandle, identity: string, present: boolean): void;
 }
 
@@ -118,6 +118,9 @@ export function aRoomRpcDouble(backend: InMemoryRpcBackend): RoomRpcDouble {
       useSyncExternalStore(store.subscribe, store.version);
       return room !== null && identity !== null && present.has(key(room, identity));
     },
+    useParticipantProbe: (room, identity) =>
+      // eslint-disable-next-line react-hooks/rules-of-hooks
+      useCallback(() => room !== null && identity !== null && present.has(key(room, identity)), [room, identity]),
     useRoomStatus: (room) => (room === null ? "idle" : "connected"),
   };
 }

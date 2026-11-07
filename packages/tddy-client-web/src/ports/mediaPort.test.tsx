@@ -13,6 +13,7 @@ import {
   useHostPresence,
   useMediaPort,
   useParticipantPresent,
+  useParticipantProbe,
   useRoomClient,
   useRoomParticipants,
 } from "./media";
@@ -113,5 +114,28 @@ describe("the room-RPC port", () => {
 
     // Then
     expect(result.current).toBe(true);
+  });
+
+  test("useParticipantProbe answers at call time, before any re-render", () => {
+    // Given
+    const port = aRoomRpcDouble(anInMemoryRpcBackend());
+    const room = aPresenceDouble().room("session-room");
+    let renders = 0;
+    const { result } = renderHook(
+      () => {
+        renders += 1;
+        return useParticipantProbe(room, "daemon-host-a");
+      },
+      { wrapper: inRoomRpc(port) },
+    );
+    const probe = result.current;
+    const rendersBefore = renders;
+
+    // When
+    port.setPresent(room, "daemon-host-a", true);
+
+    // Then
+    expect(renders).toBe(rendersBefore);
+    expect(probe()).toBe(true);
   });
 });
