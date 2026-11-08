@@ -145,6 +145,9 @@ jobs:
           restore-prefixes-first-match: nix-${{ runner.os }}-
           save: false # ci.yml's rust-build is the sole writer
 
+      # LiveKit's prebuilt libwebrtc from the Actions cache (webrtc-sys reads LK_CUSTOM_WEBRTC).
+      - uses: ./.github/actions/webrtc-prebuilt
+
       # Both legs compile the same crate, so they share one cache to restore
       # from — but only one may write it, or they race to save the same key.
       - uses: Swatinem/rust-cache@v2

@@ -80,6 +80,9 @@ jobs:
           restore-prefixes-first-match: nix-${{ runner.os }}-
           save: false # rust-build is the sole writer; see the comment there
 
+      # LiveKit's prebuilt libwebrtc from the Actions cache (webrtc-sys reads LK_CUSTOM_WEBRTC).
+      - uses: ./.github/actions/webrtc-prebuilt
+
       # Only master writes the Rust cache. PRs read master's copy, which keeps
       # the repo under GitHub's 10 GB cache budget instead of every branch
       # evicting every other branch.
@@ -140,6 +143,9 @@ jobs:
           primary-key: nix-${{ runner.os }}-${{ hashFiles('flake.nix', 'flake.lock') }}
           restore-prefixes-first-match: nix-${{ runner.os }}-
           save: false # rust-build is the sole writer; see the comment there
+
+      # LiveKit's prebuilt libwebrtc from the Actions cache (webrtc-sys reads LK_CUSTOM_WEBRTC).
+      - uses: ./.github/actions/webrtc-prebuilt
 
       # Reads the cache `Rust tests shard 1` writes (`test-shard-1`): the third-party dependency
       # graph, common to every shard. It never saves — each shard is the one writer of its own key,
@@ -237,6 +243,9 @@ jobs:
           primary-key: nix-${{ runner.os }}-${{ hashFiles('flake.nix', 'flake.lock') }}
           restore-prefixes-first-match: nix-${{ runner.os }}-
           save: false # rust-build is the sole writer; see the comment there
+
+      # LiveKit's prebuilt libwebrtc from the Actions cache (webrtc-sys reads LK_CUSTOM_WEBRTC).
+      - uses: ./.github/actions/webrtc-prebuilt
 
       - uses: Swatinem/rust-cache@v2
         with:
@@ -556,6 +565,9 @@ jobs:
           restore-prefixes-first-match: nix-${{ runner.os }}-
           save: false
 
+      # LiveKit's prebuilt libwebrtc from the Actions cache (webrtc-sys reads LK_CUSTOM_WEBRTC).
+      - uses: ./.github/actions/webrtc-prebuilt
+
       # A cold build is the point: a restored `target/` would hide the compile time being measured.
       - name: Build every test target with timings
         run: ./dev cargo test --no-run --workspace --locked --timings
@@ -610,6 +622,9 @@ jobs:
           restore-prefixes-first-match: nix-${{ runner.os }}-
           gc-max-store-size-linux: 5G
           save: ${{ github.ref == 'refs/heads/master' }}
+
+      # LiveKit's prebuilt libwebrtc from the Actions cache (webrtc-sys reads LK_CUSTOM_WEBRTC).
+      - uses: ./.github/actions/webrtc-prebuilt
 
       - uses: Swatinem/rust-cache@v2
         with:
@@ -744,6 +759,9 @@ jobs:
           gc-max-store-size-linux: 5G
           save: ${{ github.ref == 'refs/heads/master' }}
 
+      # LiveKit's prebuilt libwebrtc from the Actions cache (webrtc-sys reads LK_CUSTOM_WEBRTC).
+      - uses: ./.github/actions/webrtc-prebuilt
+
       - uses: Swatinem/rust-cache@v2
         with:
           shared-key: build-arm64
@@ -794,6 +812,7 @@ jobs:
           ./dev bun test --timeout 30000
           ./scripts/web-affected.test.ts
           ./scripts/web-workflows.test.ts
+          ./scripts/webrtc-prebuilt.test.ts
           ./scripts/nextest-serial-groups.test.ts
           ./scripts/ci-e2e-timing.test.ts
           ./scripts/livekit-ci-server.test.ts

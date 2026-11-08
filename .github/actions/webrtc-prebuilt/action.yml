@@ -1,0 +1,79 @@
+name: Prebuilt libwebrtc
+description: >-
+  Restore LiveKit's prebuilt libwebrtc from the Actions cache, downloading it (with retries) only on
+  a miss, and point webrtc-sys at it through LK_CUSTOM_WEBRTC. Without this every cold build fetches
+  ~150 MB from LiveKit's GitHub release, and a 504 there fails the build.
+
+# The tag is the one webrtc-sys-build hard-codes (WEBRTC_TAG). scripts/webrtc-prebuilt.test.ts fails
+# when Cargo.lock locks a different webrtc-sys-build than WEBRTC_SYS_BUILD_VERSION, so a bump has to
+# revisit both values here.
+#   WEBRTC_SYS_BUILD_VERSION: 0.3.18
+#   WEBRTC_TAG: webrtc-51ef663
+
+runs:
+  using: composite
+  steps:
+    - name: Name the libwebrtc archive
+      id: archive
+      shell: bash
+      env:
+        RUNNER_ARCH_NAME: ${{ runner.arch }}
+      run: |
+        set -euo pipefail
+        tag=webrtc-51ef663
+        case "$RUNNER_ARCH_NAME" in
+          X64) arch=x64 ;;
+          ARM64) arch=arm64 ;;
+          *) echo "::error::No prebuilt libwebrtc for runner arch $RUNNER_ARCH_NAME"; exit 1 ;;
+        esac
+        triple="linux-$arch-release"
+        dir="$HOME/.cache/livekit-webrtc/$tag"
+        {
+          echo "tag=$tag"
+          echo "triple=$triple"
+          echo "dir=$dir"
+        } >> "$GITHUB_OUTPUT"
+
+    - name: Restore libwebrtc
+      id: cache
+      uses: actions/cache@v6
+      with:
+        path: ${{ steps.archive.outputs.dir }}/${{ steps.archive.outputs.triple }}
+        key: webrtc-${{ steps.archive.outputs.tag }}-${{ steps.archive.outputs.triple }}
+
+    - name: Download libwebrtc
+      if: steps.cache.outputs.cache-hit != 'true'
+      shell: bash
+      env:
+        TAG: ${{ steps.archive.outputs.tag }}
+        TRIPLE: ${{ steps.archive.outputs.triple }}
+        DIR: ${{ steps.archive.outputs.dir }}
+      run: |
+        set -euo pipefail
+        url="https://github.com/livekit/rust-sdks/releases/download/$TAG/webrtc-$TRIPLE.zip"
+        zip="$RUNNER_TEMP/webrtc-$TRIPLE.zip"
+        # curl retries transient errors itself; the loop adds spaced attempts for a host that keeps
+        # answering 5xx (LiveKit's release host has returned 504 for minutes at a time).
+        for attempt in 1 2 3 4 5; do
+          if curl --fail --location --silent --show-error --retry 3 --retry-delay 5 \
+              --retry-all-errors --connect-timeout 30 --max-time 300 -o "$zip" "$url"; then
+            break
+          fi
+          if [ "$attempt" = 5 ]; then
+            echo "::error::Could not download prebuilt libwebrtc from $url after 5 attempts; LiveKit's release host is failing. Re-run once it answers."
+            exit 1
+          fi
+          sleep $((attempt * 30))
+        done
+        mkdir -p "$DIR"
+        rm -rf "${DIR:?}/$TRIPLE"
+        unzip -q "$zip" -d "$DIR"
+        test -f "$DIR/$TRIPLE/webrtc.ninja" || { echo "::error::$url did not unpack to $TRIPLE/"; exit 1; }
+        rm -f "$zip"
+
+    - name: Point webrtc-sys at it
+      shell: bash
+      env:
+        DIR: ${{ steps.archive.outputs.dir }}
+        TRIPLE: ${{ steps.archive.outputs.triple }}
+      run: echo "LK_CUSTOM_WEBRTC=$DIR/$TRIPLE" >> "$GITHUB_ENV"

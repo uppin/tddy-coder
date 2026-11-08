@@ -133,6 +133,10 @@ jobs:
           restore-prefixes-first-match: nix-${{ runner.os }}-
           save: false # one writer for the nix cache, not one per package check
 
+      # LiveKit's prebuilt libwebrtc from the Actions cache (webrtc-sys reads LK_CUSTOM_WEBRTC).
+      - uses: ./.github/actions/webrtc-prebuilt
+        if: inputs.needs-tddy-coder || inputs.needs-rust-fixture
+
       - name: Build tddy-coder
         if: inputs.needs-tddy-coder
         run: ./dev cargo build --locked -p tddy-coder-cli --bin tddy-coder
