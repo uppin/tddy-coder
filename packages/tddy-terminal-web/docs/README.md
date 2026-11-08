@@ -15,7 +15,23 @@ tool shortcuts, stream offsets). It imports nothing from `tddy-web` or `livekit-
 - **OSC 52 clipboard writes**: [terminal-osc52-clipboard.md](terminal-osc52-clipboard.md)
 - **File upload (drop / mobile Attach)**: [terminal-file-upload.md](terminal-file-upload.md)
 - **Changeset history**: [changesets/](changesets/)
-- **Open code issues**: [code-issues/](code-issues/)
+
+## Source layout
+
+`GhosttyTerminal.tsx` and `GhosttyTerminalSession.tsx` are compositions of hooks; every production
+file stays within 500 lines (`src/componentSize.test.ts`).
+
+- `src/terminal/` — what the emulator component is made of: `types`, `terminalLoggers`,
+  `terminalGeometry`, `terminalRefs`, `useTerminalLifecycle` (open, fit, write, dispose),
+  `useTerminalFontSize` (font size, fit and the zoom bridge), `useTerminalPinchZoom`,
+  `useTerminalTouchScroll` (touch drag scroll routes and SGR wheel), `useTerminalMouseForwarding`,
+  `useTerminalTouchFocus` (focus on tap, tap as click, textarea attributes),
+  `useTerminalKeyForwarding` (desktop keys and IME escape) and `useTerminalHandle` (the imperative
+  handle).
+- `src/session/` — what the session component is made of: `types`, `sessionDiagnostics`,
+  `useFeedStream` (feed and session end), `useHistoryDoubleBuffer`, `useTerminalMirrors`
+  (buffer text and viewport), `useLivePaneGates` (live wheel gate and test window hooks),
+  `TerminalProbes`, `PaneOverlays` and `paneStyles`.
 
 ## Tests
 
