@@ -47,6 +47,7 @@ class GhosttyEngine implements TerminalEngine {
   private readonly titles = new Listeners<string>();
   private readonly scrolls = new Listeners<number>();
   private readonly bufferChanges = new Listeners<boolean>();
+  private readonly writesParsed = new Listeners<void>();
 
   constructor(private readonly options: TerminalEngineOptions) {}
 
@@ -115,7 +116,7 @@ class GhosttyEngine implements TerminalEngine {
     const term = this.term;
     this.term = null;
     term?.dispose();
-    for (const listeners of [this.data, this.resizes, this.bells, this.titles, this.scrolls, this.bufferChanges]) {
+    for (const listeners of [this.data, this.resizes, this.bells, this.titles, this.scrolls, this.bufferChanges, this.writesParsed]) {
       listeners.clear();
     }
   }
@@ -132,6 +133,8 @@ class GhosttyEngine implements TerminalEngine {
   write(data: string | Uint8Array): void {
     this.term?.write(data);
     this.announceBufferSwitch();
+    // ghostty parses a write synchronously, so its data is in the buffer as soon as it returns.
+    this.writesParsed.emit(undefined);
   }
 
   paste(text: string): void {
@@ -271,6 +274,10 @@ class GhosttyEngine implements TerminalEngine {
 
   onBufferChange(listener: (alternate: boolean) => void): EngineDisposable {
     return this.bufferChanges.add(listener);
+  }
+
+  onWriteParsed(listener: () => void): EngineDisposable {
+    return this.writesParsed.add(() => listener());
   }
 
   /** ghostty-web declares a buffer-change event but never fires it, so a switch is detected here:

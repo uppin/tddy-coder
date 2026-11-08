@@ -97,6 +97,8 @@ export interface TerminalEngine {
   onScroll(listener: (viewportTop: number) => void): EngineDisposable;
   /** Fires when the active buffer switches between the normal and the alternate screen. */
   onBufferChange(listener: (alternate: boolean) => void): EngineDisposable;
+  /** Fires after each `write`'s data has been parsed into the buffer, so `readLines` shows it. */
+  onWriteParsed(listener: () => void): EngineDisposable;
 }
 
 /** Creates an engine; nothing is rendered until `open`. */

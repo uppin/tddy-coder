@@ -39,10 +39,17 @@ substrings or regexes within a line, or strips whitespace first; none reads per-
 holding a wide character therefore carries one extra space of padding compared with a cell count;
 no consumer can observe it.
 
+## Write parsing
+
+`onWriteParsed()` fires after each `write`'s data has been parsed into the buffer, so a listener
+that reads `readLines()` sees what was written. ghostty-web parses synchronously, so `ghosttyEngine`
+fires it right after the write returns; an engine that parses asynchronously fires it from its parse
+callback.
+
 ## Contract suite
 
 `describeTerminalEngine(name, factory)` (`src/engine/terminalEngineContract.ts`) is the behaviour any
-engine must meet: output read-back and inverse cells, input/bell/title events, geometry and fit
+engine must meet: output read-back, write-parsed events and inverse cells, input/bell/title events, geometry and fit
 proposals, top-based scrolling, alternate-screen and mouse-tracking modes, and disposal. It needs a
 browser (WASM, canvas), so it runs as a Cypress component spec:
 `cypress/component/TerminalEngineContract.cy.tsx`.

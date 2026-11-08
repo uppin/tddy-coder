@@ -135,6 +135,24 @@ export function describeTerminalEngine(name: string, makeEngine: TerminalEngineF
         });
       });
 
+      it("announces through onWriteParsed once a write's data is in the buffer", () => {
+        // Given
+        opened().then((open) => {
+          const seen: string[][] = [];
+          const subscription = open.engine.onWriteParsed(() => seen.push(open.lineTexts()));
+
+          // When
+          cy.then(() => open.engine.write("parsed marker\r\n"));
+
+          // Then
+          cy.wrap(seen, { log: false }).should((calls) => {
+            expect(calls.length, "onWriteParsed calls").to.be.greaterThan(0);
+            expect(calls[0].join("\n")).to.contain("parsed marker");
+          });
+          cy.then(() => subscription.dispose());
+        });
+      });
+
       it("clear removes earlier output from the buffer", () => {
         // Given
         opened().then((open) => {
