@@ -27,7 +27,7 @@ For **local daemon + Vite** development (backend RPC and HMR frontend together),
 - Dashboard for dev progress tracking (initial scaffold)
 
 ### Storybook 9
-- Storybook 9 configured for the workspace
+- Storybook 9 configured for the workspace (since #852 in its own package, `tddy-storybook`, which owns every story)
 - React/Vite framework integration
 - Single example: a Button component with a story
 

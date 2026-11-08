@@ -5,3 +5,5 @@ grouped by package under `src/<package>/`, and renders each against the port dou
 `tddy-client-web/testkit`. `bun run storybook` serves it; `bun run build` writes `storybook-static/`,
 which `tddy-web`'s e2e terminal specs run against. `bun test src` checks story placement and renders
 every story.
+
+Documentation: [docs/README.md](docs/README.md).
