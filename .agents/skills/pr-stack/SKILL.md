@@ -1061,8 +1061,9 @@ reports merged:
 
    `#forcemerge` is held to the same `write` bar as `#automerge` and leaves a durable trace: after
    the merge succeeds, the workflow comments naming who asked, linking their comment, and quoting the
-   check state read just before it; a failed force merge posts a ❌ comment with the error instead
-   (usually: the Actions app is not a bypass actor on the ruleset — see `docs/dev/guides/ci.md`). Use it for a known-irrelevant red check, never to outrun a failure you have not read.
+   check state read just before it; before merging it completes each required check that has not passed with a
+   run titled *Forced by @actor* (no bypass actor needed — see `docs/dev/guides/ci.md` § Automerge);
+   a failed force merge posts a ❌ comment with the error instead. Use it for a known-irrelevant red check, never to outrun a failure you have not read.
 4. **Repoint every dependent** — `/repoint` per dependent PR. Then verify: each
    dependent should now report the new base, be mergeable, and show **only its own file count**
    (`gh pr view <N> --json changedFiles,baseRefName,mergeable`). If it does not, repair it (below).
@@ -1367,7 +1368,7 @@ scripts/ci-status.sh --watch <N>
 Two things to know about arming it again:
 
 - `#automerge` asks the **checks API** (`gh pr checks --required`), not `mergeStateStatus`, because
-  that field answers "is this blocked *for you*" and the Actions app is a bypass actor. So re-arming
+  that field answers "is this blocked *for you*", not what the ruleset requires. So re-arming
   it after a force-push is safe: it will queue rather than merge while checks are re-running.
 - It is still a merge **into this PR's base**. On a non-bottom stacked PR, that base is a parent's
   branch. Re-read golden rule 2 before arming anything.
