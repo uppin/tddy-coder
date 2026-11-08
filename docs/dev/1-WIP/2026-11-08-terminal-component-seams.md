@@ -70,12 +70,12 @@ Real dependency edges: `n1 → n2 → n3 → n4`. Pass 2 waits until `#web-split
 
 ## Scope
 
-- [ ] Baseline: run the package's component specs and unit tests green before moving code
-- [ ] Extract hooks from `GhosttyTerminal.tsx`
-- [ ] Extract hooks from `GhosttyTerminalSession.tsx`
-- [ ] Size rule test passes
-- [ ] Same specs green after
-- [ ] Close both oversized-file code issues and the todo
+- [x] Baseline: run the package's component specs and unit tests green before moving code
+- [x] Extract hooks from `GhosttyTerminal.tsx`
+- [x] Extract hooks from `GhosttyTerminalSession.tsx`
+- [x] Size rule test passes
+- [x] Same specs green after
+- [x] Close both oversized-file code issues and the todo
 
 ## Technical Changes
 
@@ -107,6 +107,16 @@ Cypress component specs one at a time locally, `bun test src`, scoped to the tou
 
 ## Validation Results
 
+Final measurement (2026-11-08, `/green`), `wc -l` of the production files, closing the two code issues and the backlog entry:
+
+| File | Before | After |
+|---|---|---|
+| `src/GhosttyTerminal.tsx` | 1491 | 199 |
+| `src/GhosttyTerminalSession.tsx` | 1004 | 486 |
+| largest new file (`src/terminal/useTerminalLifecycle.ts`) | — | 277 |
+
+New modules: `src/terminal/` (types, loggers, geometry, refs, lifecycle, font size/fit/zoom, pinch zoom, touch scroll routes, mouse forwarding, touch focus and tap-as-click, key and IME forwarding, imperative handle) and `src/session/` (props, diagnostics, feed stream and session-ended, history double buffer, buffer-text and viewport mirrors, live wheel gate and test window hooks, probes, pane overlays and styles). Mechanical moves only; exports of `src/index.ts`, props, test ids and specs unchanged. `tsc --noEmit` stays at the 14 recorded errors.
+
 ## TODO
 
 - [x] Record initial discovery
@@ -117,7 +127,7 @@ Cypress component specs one at a time locally, `bun test src`, scoped to the tou
 - [x] Run acceptance tests (verify they fail)
 - [x] USER REVIEW — acceptance tests
 - [x] TDD Red — write failing unit/integration tests
-- [ ] TDD Green — implement with quality code
+- [x] TDD Green — implement with quality code
 - [ ] Update documentation with progress
 - [ ] Run the touched packages' tests — verify 100% pass
 - [ ] Validate changes (/validate-changes)
