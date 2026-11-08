@@ -6,7 +6,7 @@
  * twice. These specs drive the terminal component the way a browser does — events on xterm's
  * screen element — and assert on the SGR reports the terminal sent as input.
  *
- * PRD: docs/ft/web/1-WIP/PRD-2026-11-08-xterm-terminal-engine.md (acceptance criterion 3)
+ * Docs: packages/tddy-terminal-web/docs/xterm-engine.md
  */
 
 import React from "react";

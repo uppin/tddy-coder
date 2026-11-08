@@ -11,7 +11,7 @@
  * OSC 52 is not handled here: the components tap the output stream for it (`lib/osc52.ts`), which
  * also answers no clipboard reads.
  *
- * PRD: docs/ft/web/1-WIP/PRD-2026-11-08-xterm-terminal-engine.md
+ * Docs: packages/tddy-terminal-web/docs/xterm-engine.md
  */
 
 import "@xterm/xterm/css/xterm.css";

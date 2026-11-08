@@ -54,7 +54,7 @@
 When a user opens (or reconnects to) a terminal session, the daemon sends the **current last
 frame first** and then tails live output. Older output is **not** replayed eagerly. The user
 reaches earlier output by **scrolling up**: the Ghostty shared terminal component **overlays a
-second, read-only older-history ghostty-web terminal behind the live one** and **progressively
+second, read-only older-history terminal behind the live one** and **progressively
 fills it forward** from offset `0` toward the **current live tip** via `GetTerminalHistory`,
 appending one chunk at a time until the tip is reached. (The fill is bounded by the *current* tip,
 not the stale anchor captured at open time, so a capture ring that has since evicted the original
@@ -65,8 +65,8 @@ the two terminals **switch places** — the older-history terminal becomes the f
 receiving the stream.
 
 This is a **progressive, append-only** fill — no resets, no prepend. The overlay is split
-across two ghostty-web instances only because ghostty-web has no "insert at top of scrollback"
-API (a single terminal cannot lazily prepend older history above already-written content). The
+across two terminal instances only because the emulator (xterm.js) has no "insert at top of
+scrollback" API (a single terminal cannot lazily prepend older history above already-written content). The
 **live terminal is the active screen**: it carries `scrollback: 0` (the default) and is always
 pinned to the live tip — there is no native live scrollback, so the duplicate-pane bug (periodic
 full-screen status-bar re-renders accumulating as duplicate panes) cannot occur in the live
@@ -79,8 +79,9 @@ source of truth for its viewport position. "Back to live" swaps back to the live
 Because the live terminal has `scrollback: 0`, its viewport can never be scrolled up away from
 the live tip, so the native scroll-to-bottom policy (`scroll-to-bottom.keystroke` /
 `scroll-to-bottom.output`) is a no-op on the live terminal — there is nowhere to scroll back
-from. When the TUI has enabled **mouse tracking** (DEC 1006), the wheel is reported to the TUI
-(SGR button 64/65) — matching native ghostty's `isMouseReporting` gate.
+from. When the TUI has enabled **mouse tracking** (DEC 1006), xterm.js reports the wheel to the
+TUI itself (SGR button 64/65, one report per wheel step) — matching native ghostty's
+`isMouseReporting` gate.
 
 The `GrpcSessionTerminal → onRegisterLoadOlderHistory` indirection is removed; the Ghostty shared
 component owns the scroll-up flow end-to-end, including the double-buffer paging.
@@ -98,10 +99,10 @@ the manual history toggle loads the older-history page terminal. There is no "sc
 retains nothing, so neither primary-screen nor alternate-screen (DEC 1049) repaints can
 accumulate as duplicate panes. This is stricter than native ghostty (whose primary screen has
 scrollback), but it is the chosen permanent mitigation for the duplicate-pane bug under
-ghostty-web's no-prepend constraint.
+the emulator's no-prepend constraint.
 
-ghostty-web exposes a native `scrollback` option plus viewport APIs (`getViewportY`,
-`scrollLines`, `scrollToTop`, `scrollToBottom`, `scrollToLine`, `getScrollbackLength`,
+The emulator exposes a native `scrollback` option plus viewport APIs (`buffer.active.viewportY`
+and `baseY`, `scrollLines`, `scrollToTop`, `scrollToBottom`, `scrollToLine`,
 `buffer.active.length`), but it has **no "insert at top of scrollback" / prepend API** —
 `write()` only appends and `reset()` clears the whole buffer. A reset+replay of the *live*
 terminal would also reintroduce the duplicate-pane bug if the replayed range includes primary-
@@ -120,7 +121,7 @@ user sees a single seamless terminal surface rather than a split pane.
 
 - `GhosttyTerminal` gains a `scrollback` prop (default `0`) and imperative handle methods
   `scrollToTop()`, `scrollToBottom()`, and `isPinnedToBottom()` so the gRPC wrapper can detect the
-  scroll-up-on-live / scroll-down-on-page gestures without reaching into ghostty-web internals.
+  scroll-up-on-live / scroll-down-on-page gestures without reaching into emulator internals.
   A `testId` prop lets the two overlaid instances be targeted separately in tests. The handle also
   exposes `scrollToLine(line)`, `scrollLines(amount)`, `getScrollbackLength()`, and a native
   `getScrollbar()` returning `{ total, offset, len }` (the single source of truth for viewport
@@ -128,7 +129,7 @@ user sees a single seamless terminal surface rather than a split pane.
   `offset` = the viewport's first line counted from the top (`getViewportTop()`, clamped to
   `[0, getScrollbackLength()]`), `len = rows`.
 - `GhosttyTerminalSession` (the one terminal component) **owns the scroll-up history flow**: it renders
-  **two overlaid ghostty-web terminals** sharing one rect — a live terminal (`scrollback: 0`,
+  **two overlaid terminals** sharing one rect — a live terminal (`scrollback: 0`,
   the active screen, always pinned to the live tip) and an older-history "page" terminal
   (`scrollback > 0`, read-only). It captures the absolute `endOffset` anchor from the
   snapshot frame that opens the stream (its `atOldest` flag gates the affordance), detects the
@@ -151,12 +152,14 @@ user sees a single seamless terminal surface rather than a split pane.
 - **No wheel-driven pane switch:** the wheel never swaps panes. A wheel-up on the live pane does
   not start the fill or swap to the page pane, and a wheel-down at the bottom of the page pane does
   not swap back — the affordances below are the only toggle.
-- **Mouse-tracking gating:** when the TUI has enabled mouse tracking (DEC 1006), the wheel is
-  reported to the TUI (SGR button 64/65) — matching native ghostty's `isMouseReporting` gate.
+- **Mouse-tracking gating:** when the TUI has enabled mouse tracking (DEC 1006), xterm.js reports
+  the wheel to the TUI itself (SGR button 64/65) — matching native ghostty's `isMouseReporting`
+  gate. Without tracking, the alternate screen gets Up/Down arrow keys and the normal screen
+  scrolls the pane's own scrollback.
 - **Touch (mobile) is gated the same three ways.** A one-finger drag decides at `touchstart`, per
   line of finger travel: a **mouse-tracking** TUI is sent an SGR wheel report (button 64/65) at the
-  touch point; the **alternate screen** (DEC 1049) without tracking is sent the arrow key
-  ghostty-web emulates the wheel with; only the **normal screen** scrolls the pane's own
+  touch point; the **alternate screen** (DEC 1049) without tracking is sent the arrow key xterm.js
+  sends for a wheel step there; only the **normal screen** scrolls the pane's own
   scrollback. Neither TUI route reaches the forward-fill, so a full-screen TUI such as the Claude
   CLI scrolls its own content on mobile exactly as it does on desktop, rather than the drag being
   spent on the live pane's (empty) scrollback.
@@ -194,7 +197,7 @@ user sees a single seamless terminal surface rather than a split pane.
 - Persisting scroll position across session reconnects.
 - A unified single-terminal surface (concatenating older + live into one scrollback) — would
   require either a prepend API or resetting the live terminal. The overlay double-buffer is the
-  chosen permanent solution under ghostty-web's no-prepend constraint; a daemon-side PageList
+  chosen permanent solution under the emulator's no-prepend constraint; a daemon-side PageList
   emulator is a future option if a prepend API never lands.
 - Paged forward-fill: today the page terminal is filled with the entire retained capture
   (`0 → anchor`), which transfers all bytes even though the terminal retains only the last
@@ -286,8 +289,8 @@ Consumed from the unification changeset (forward-chunk shape):
   rows`, `offset` = the top-based `getViewportTop()` clamped to `[0, scrollbackLength]`, `len = rows`). The gRPC wrapper
   uses these to detect the scroll-up-on-live / scroll-down-on-page gestures, land the page
   terminal at its bottom after a swap, and expose the viewport position to tests/scrollbar UI.
-- **Mouse-tracking gating:** the wheel handler checks `hasMouseTracking()`; when the TUI has
-  tracking on, the wheel is reported to the TUI (SGR button 64/65) and does not trigger the
+- **Mouse-tracking gating:** xterm.js's own wheel handling reads the TUI's mouse-tracking mode;
+  when tracking is on, the wheel is reported to the TUI (SGR button 64/65) and never triggers the
   forward-fill. (The native scroll-to-bottom policy is a no-op on the live terminal because
   `scrollback: 0` means the viewport can never be scrolled up away from the tip.)
 
@@ -333,7 +336,8 @@ Consumed from the unification changeset (forward-chunk shape):
 - **TUI owns navigation:** after every live chunk that switches a DEC private mode or hard-resets
   the terminal (`ESC c`) — including chunks buffered until the terminal is ready —
   `GhosttyTerminalSession` re-reads `isAlternateScreen() || hasMouseTracking()` from the live
-  terminal. ghostty-web holds that state and reports no changes, so the chunk is the only signal.
+  terminal, once the terminal has parsed the chunk (`onWriteParsed`). The engine reports no mode
+  changes, so the chunk is the only signal.
 - The page pane carries `data-color-scheme="history"` and a `grayscale` filter; the page terminal
   is constructed with a grey theme.
 - **Page terminal Scrollbar mirror:** the page terminal's `getScrollbar()` is mirrored to a hidden
@@ -407,16 +411,16 @@ Consumed from the unification changeset (forward-chunk shape):
   mitigation: with no live scrollback, neither primary-screen nor alternate-screen (DEC 1049)
   repaints can accumulate, so a TUI can never leave duplicate panes behind in the live terminal.
   This is stricter than native ghostty (whose primary screen has scrollback), but it is the
-  chosen permanent mitigation under ghostty-web's no-prepend constraint. The cost is that the
+  chosen permanent mitigation under the emulator's no-prepend constraint. The cost is that the
   live terminal retains no post-connect history of its own — but the older-history page terminal
   (forward-filled from offset `0` toward the anchor) covers all pre-connect history, one toggle
   away.
 - **Two overlaid, interchangeable terminals over a split pane or a single rebuilt terminal** —
-  chosen because ghostty-web has no prepend API and resetting the *live* terminal would reintroduce
+  chosen because the emulator has no prepend API and resetting the *live* terminal would reintroduce
   the duplicate-pane bug. The two terminals share one rect and switch foreground/background, so the
   user sees a single seamless surface (no split-pane seam). The overlay is split across two
   instances (live = active screen at `scrollback: 0`, page = older PageList history view at
-  `scrollback > 0`) — a single-terminal surface is infeasible under ghostty-web's no-prepend
+  `scrollback > 0`) — a single-terminal surface is infeasible under the emulator's no-prepend
   constraint. Cost: a brief loading indicator while the background page terminal is populated
   before the swap. Benefit: the live terminal stays duplicate-free, older bytes are appended
   forward (no reset flash), the two streams are fully independent, and swapping back to live is
@@ -434,9 +438,9 @@ Consumed from the unification changeset (forward-chunk shape):
   scrolled up away from the tip.)
 - **A history-fetcher callback over `Client` injection** — keeps `GhosttyTerminalSession` decoupled
   from `TerminalSessionService` and unit-testable with a plain function double.
-- **Capture-phase wheel listener** — ghostty-web's own wheel handler may stop propagation; a
-  bubble-phase React `onWheel` would never see the event. The capture-phase listener fires first
-  and routes the wheel to a mouse-tracking TUI.
+- **The emulator owns wheel routing** — xterm.js reports the wheel to a mouse-tracking TUI, sends
+  arrow keys on the alternate screen and scrolls the normal screen itself. No component listener
+  routes the wheel, so each wheel step reaches the TUI once.
 - **Manual history toggle over wheel-driven switching** (2026-10-09) — scrolling inside a TUI
   kept dropping the user out of the live view; an explicit toggle plus a greyed-out history pane
   makes which view you are in unmistakable.
@@ -449,7 +453,7 @@ Consumed from the unification changeset (forward-chunk shape):
   anchored and its reconnect shown the current screen the way the host path is (`#term-snapshot` 4/4,
   [#763](https://github.com/uppin/tddy-coder/pull/763)). Scrollback itself already works there, unanchored.
 - Persisted scroll position across reconnects.
-- A unified single-terminal surface if a future ghostty-web release adds a prepend/insert-at-top
+- A unified single-terminal surface if a future emulator release adds a prepend/insert-at-top
   API that does not require a live-terminal reset, or a daemon-side PageList emulator that holds
   the terminal state and renders the visible window over RPC.
 - Paged forward-fill: today the page terminal is filled with the entire retained capture

@@ -2,7 +2,7 @@
  * The web terminal renders with WebGL where the browser offers it and with the DOM renderer
  * otherwise, and says which on the terminal element (`data-terminal-renderer`).
  *
- * PRD: docs/ft/web/1-WIP/PRD-2026-11-08-xterm-terminal-engine.md (acceptance criterion 5)
+ * Docs: packages/tddy-terminal-web/docs/xterm-engine.md
  */
 
 import React from "react";

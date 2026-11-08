@@ -1,8 +1,7 @@
 /**
  * The `TerminalEngine` contract suite run against every engine.
  *
- * PRD: packages/tddy-terminal-web/docs/terminal-engine.md,
- * docs/ft/web/1-WIP/PRD-2026-11-08-xterm-terminal-engine.md (acceptance criterion 2)
+ * Docs: packages/tddy-terminal-web/docs/terminal-engine.md
  */
 
 import { ghosttyEngine } from "../../src/engine/ghosttyEngine";

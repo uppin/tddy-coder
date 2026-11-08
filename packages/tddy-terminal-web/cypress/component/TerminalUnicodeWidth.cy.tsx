@@ -7,7 +7,7 @@
  * (1-based), and writes a marker: with a two-cell glyph the marker lands right after it, with a
  * one-cell glyph a blank cell separates them.
  *
- * PRD: docs/ft/web/1-WIP/PRD-2026-11-08-xterm-terminal-engine.md (acceptance criterion 4)
+ * Docs: packages/tddy-terminal-web/docs/xterm-engine.md
  */
 
 import { xtermEngine } from "../../src/engine/xtermEngine";
