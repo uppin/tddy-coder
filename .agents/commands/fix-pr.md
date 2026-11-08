@@ -134,7 +134,7 @@ Do **not** `gh pr ready` to get a build — a PR is marked ready only after its 
 | `Rust lint` | `cargo fmt --all --check`, then `cargo clippy --workspace --all-targets --locked -- -D warnings` |
 | `Rust build` | `cargo build --workspace --bins --examples --locked` |
 | `Rust tests` | `cargo nextest run --workspace --profile ci --locked` |
-| `Web tests` | `bun install --frozen-lockfile`, `bun run build`, `tddy-web` unit tests, `tddy-web` + `tddy-livekit-web` Cypress component tests |
+| `web / <package> tests` (seven, one per JS workspace package; each runs only when the PR affects its package) | that package's `bun install --frozen-lockfile`, its build, and its `test:ci` and `cypress:component:ci` |
 
 `VM boot control` (`.github/workflows/vm-tests.yml`) also runs on PRs but is **not required** — treat
 a red one as a report, not a merge blocker, and say so.
@@ -158,14 +158,14 @@ scripts/ci-status.sh <N> --watch      # block until the run finishes, then repor
 
 **Diagnosing a failed check.** The counts and failing test names come from check runs published by
 `mikepenz/action-junit-report`, so they are available over the API with no artifact download; the
-underlying `gh` calls, and the raw `junit-rust-shard-i` / `junit-web` artifacts, are listed in
+underlying `gh` calls, and the raw `junit-rust-shard-i` and `junit-<package>` artifacts, are listed in
 `docs/dev/guides/ci.md` § Reading results. Classify each failure:
 
 | Class | Action |
 |---|---|
 | **Change-caused** (this PR broke it) | Fix queue — treat like an agreed review comment |
 | **Lint / format** (`Rust lint`) | Fix queue. `cargo fmt` is mechanical; a clippy lint is a real finding — fix the code, do not `#[allow]` it without saying why in the PR |
-| **Missing fixture binary** | `Rust tests` / `Web tests` exec a few workspace binaries by path (`tddy-sandbox-runner`, `tddy-acp-stub`, `examples/echo_server`) that arrive from `Rust build`'s `rust-fixture-bins` artifact. A test that shells out to a **new** workspace binary passes locally and fails in CI with "not built" — add it to the staging list in `.github/workflows/ci.yml` |
+| **Missing fixture binary** | `Rust tests` exec a few workspace binaries by path (`tddy-sandbox-runner`, `tddy-acp-stub`) that arrive from `Rust build`'s `rust-fixture-bins` artifact. A web check builds the binaries it needs itself (`needs-tddy-coder`, `needs-rust-fixture` in its caller). A test that shells out to a **new** workspace binary passes locally and fails in CI with "not built" — add it to the staging list in `.github/workflows/ci.yml` |
 | **Stale lockfile** | Every CI cargo invocation is `--locked`. A dependency change that was not committed as `Cargo.lock` fails all three Rust checks at once |
 | **Flaky / infra** | Reported as **flaky**, not silently passed — the `ci` nextest profile retries twice with backoff. The known one is the LiveKit testkit's port TOCTOU (`packages/tddy-livekit-testkit/src/livekit_testkit.rs:26`). Report with evidence; **ask** before re-running a workflow — never re-run, cancel, or force a check unprompted |
 
