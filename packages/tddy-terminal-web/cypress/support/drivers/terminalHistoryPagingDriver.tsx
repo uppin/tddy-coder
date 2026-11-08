@@ -18,6 +18,13 @@ import { byTestId, TEST_IDS } from "../testIds";
 /** UTF-8 encode a string into a Uint8Array (driver-local; the spec has its own `enc`). */
 const enc = (s: string): Uint8Array => new TextEncoder().encode(s);
 
+/** Lines the viewport sits above the live tip, from a scrollbar mirror's `total,offset,len` (offset
+ *  counts from the top); NaN until the mirror has been populated. */
+function linesAboveTip(scrollbarMirror: string): number {
+  const [total, offset, len] = scrollbarMirror.split(",").map(Number);
+  return total - len - offset;
+}
+
 // ---------------------------------------------------------------------------
 // Frame shape carried by TerminalStream.onMessage (the full SessionTerminalOutput frame)
 // ---------------------------------------------------------------------------
@@ -300,13 +307,11 @@ export function aTerminalWithHistoryPaging() {
       return this;
     },
 
-    /** Assert the LIVE terminal's mirrored viewportY equals the given value. */
+    /** Assert the LIVE terminal's viewport sits `expected` lines above the live tip (0 = pinned),
+     *  read from its scrollbar mirror, whose offset counts from the top. */
     expectLiveViewportY(expected: number) {
-      byTestId(TEST_IDS.terminalLiveViewportY).should(($el) => {
-        expect(
-          Number($el[0].textContent ?? "NaN"),
-          "live terminal viewportY",
-        ).to.equal(expected);
+      byTestId(TEST_IDS.terminalLiveScrollbar).should(($el) => {
+        expect(linesAboveTip($el[0].textContent ?? ""), "live terminal lines above the tip").to.equal(expected);
       });
       return this;
     },
@@ -371,13 +376,11 @@ export function aTerminalWithHistoryPaging() {
       return this;
     },
 
-    /** Assert the page terminal's mirrored viewportY equals the given value. */
+    /** Assert the page terminal's viewport sits `expected` lines above the live tip (0 = pinned),
+     *  read from its scrollbar mirror, whose offset counts from the top. */
     expectPageViewportY(expected: number) {
-      byTestId(TEST_IDS.terminalPageViewportY).should(($el) => {
-        expect(
-          Number($el[0].textContent ?? "NaN"),
-          "page terminal viewportY",
-        ).to.equal(expected);
+      byTestId(TEST_IDS.terminalPageScrollbar).should(($el) => {
+        expect(linesAboveTip($el[0].textContent ?? ""), "page terminal lines above the tip").to.equal(expected);
       });
       return this;
     },

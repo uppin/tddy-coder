@@ -1,9 +1,9 @@
 import { useImperativeHandle, useRef, type ForwardedRef, type MutableRefObject } from "react";
-import type { Terminal } from "ghostty-web";
+import type { TerminalEngine } from "../engine/TerminalEngine";
 import { computeScrollbar } from "../lib/terminalScrollbar";
 import { dWrite, type TerminalLoggers } from "./terminalLoggers";
 import type { OnDataRef, TerminalRef } from "./terminalRefs";
-import type { BufferLineInfo, GhosttyTerminalHandle } from "./types";
+import type { GhosttyTerminalHandle } from "./types";
 
 export interface TerminalHandleInput {
   ref: ForwardedRef<GhosttyTerminalHandle>;
@@ -43,7 +43,7 @@ export function useTerminalHandle({
   // Serializing a 50 000-line scrollback cell by cell on every poll pinned the WebView at a full
   // core even with no output arriving, so `getBufferText` memoizes on the content revision.
   const bufferTextCacheRef = useRef<{
-    term: Terminal;
+    term: TerminalEngine;
     revision: number;
     cols: number;
     rows: number;
@@ -56,83 +56,53 @@ export function useTerminalHandle({
   useImperativeHandle(
     ref,
     () => ({
-      getViewportScrollOffset() {
-        // Number of lines the viewport is scrolled up from the bottom of the
-        // scrollback (0 = pinned to the latest output). Lets callers/tests
-        // observe whether a scroll gesture actually moved the viewport.
-        const t = termRef.current as unknown as { getViewportY?: () => number } | null;
-        return t?.getViewportY?.() ?? 0;
+      getViewportTop() {
+        // The buffer line on the viewport's first row, counted from the top (0 = oldest line;
+        // `getScrollbackLength()` = pinned to the latest output). Lets callers/tests observe
+        // whether a scroll gesture actually moved the viewport.
+        return termRef.current?.viewportTop() ?? 0;
       },
       scrollToTop() {
         // Scroll the viewport to the top of the scrollback so the user lands on the oldest
         // forward-filled history. No-op when scrollback is 0 (nothing to scroll through).
-        const t = termRef.current as unknown as { scrollToTop?: () => void } | null;
-        t?.scrollToTop?.();
+        termRef.current?.scrollToTop();
       },
       scrollToBottom() {
         // Scroll the viewport to the bottom (latest output). Used after a page swap so the user
         // lands on the newest line of the just-populated older page (seamless continuation).
-        const t = termRef.current as unknown as {
-          getViewportY?: () => number;
-          scrollLines?: (n: number) => void;
-          scrollToBottom?: () => void;
-        } | null;
-        if (!t) return;
-        if (t.scrollToBottom) {
-          t.scrollToBottom();
-          return;
-        }
-        // Fallback: scroll back to the bottom by negating the current viewport offset.
-        const vy = t.getViewportY?.() ?? 0;
-        if (vy !== 0 && t.scrollLines) {
-          t.scrollLines(-vy);
-        }
+        termRef.current?.scrollToBottom();
       },
       scrollToLine(line: number) {
-        // Native scrollToLine uses Scrollbar offset space (0 = top of scrollback).
-        // ghostty-web's scrollToLine sets viewportY directly (0 = bottom), so translate:
-        // viewportY = scrollbackLength - line.
-        const t = termRef.current as unknown as {
-          scrollToLine?: (n: number) => void;
-          getScrollbackLength?: () => number;
-        } | null;
-        if (!t?.scrollToLine) return;
-        const scrollbackLength = t.getScrollbackLength?.() ?? 0;
-        const viewportY = Math.max(0, Math.min(scrollbackLength, scrollbackLength - line));
-        t.scrollToLine(viewportY);
+        // `line` counts from the top of the buffer (0 = top of scrollback).
+        termRef.current?.scrollToLine(line);
       },
       scrollLines(amount: number) {
         // Relative scroll: positive = down toward latest, negative = up into scrollback.
-        const t = termRef.current as unknown as { scrollLines?: (n: number) => void } | null;
-        t?.scrollLines?.(amount);
+        termRef.current?.scrollLines(amount);
       },
       getScrollbackLength() {
-        // History lines excluding the active screen — used to compute absolute line from viewportY.
-        const t = termRef.current as unknown as { getScrollbackLength?: () => number } | null;
-        return t?.getScrollbackLength?.() ?? 0;
+        // History lines excluding the active screen.
+        return termRef.current?.scrollbackLength() ?? 0;
       },
       isPinnedToBottom() {
         // True when the viewport is at the latest output (not scrolled up into scrollback).
-        const t = termRef.current as unknown as { getViewportY?: () => number } | null;
-        return (t?.getViewportY?.() ?? 0) === 0;
+        const t = termRef.current;
+        return !t || t.viewportTop() === t.scrollbackLength();
       },
       getScrollbar() {
         const t = termRef.current;
         if (!t) return { total: rows, offset: 0, len: rows };
-        const scrollbackLength = (t as unknown as { getScrollbackLength?: () => number })
-          .getScrollbackLength?.() ?? 0;
-        const viewportY = (t as unknown as { getViewportY?: () => number }).getViewportY?.() ?? 0;
-        return computeScrollbar({ scrollbackLength, viewportTop: viewportY, rows: t.rows });
+        return computeScrollbar({
+          scrollbackLength: t.scrollbackLength(),
+          viewportTop: t.viewportTop(),
+          rows: t.rows,
+        });
       },
       hasMouseTracking() {
-        const t = termRef.current as unknown as { hasMouseTracking?: () => boolean } | null;
-        return t?.hasMouseTracking?.() ?? false;
+        return termRef.current?.mouseTracking() ?? false;
       },
       isAlternateScreen() {
-        const t = termRef.current as unknown as {
-          wasmTerm?: { isAlternateScreen?: () => boolean };
-        } | null;
-        return t?.wasmTerm?.isAlternateScreen?.() ?? false;
+        return termRef.current?.alternateScreen() ?? false;
       },
       sendWheelSgr(e: WheelEvent) {
         if (e.ctrlKey) return;
@@ -150,21 +120,7 @@ export function useTerminalHandle({
         termRef.current?.paste(text);
       },
       sendKeystroke(data: string) {
-        const t = termRef.current as unknown as {
-          scrollToBottom?: () => void;
-          getViewportY?: () => number;
-          scrollLines?: (n: number) => void;
-        } | null;
-        if (t) {
-          if (t.scrollToBottom) {
-            t.scrollToBottom();
-          } else {
-            const vy = t.getViewportY?.() ?? 0;
-            if (vy !== 0 && t.scrollLines) {
-              t.scrollLines(-vy);
-            }
-          }
-        }
+        termRef.current?.scrollToBottom();
         onDataRef.current?.(data);
       },
       setTerminalFontSize(px: number) {
@@ -191,24 +147,11 @@ export function useTerminalHandle({
       termRef.current?.clear();
     },
     focus() {
-      const term = termRef.current;
-      if (!term) return;
-      const textarea = term.textarea;
-      if (textarea) {
-        // ghostty-web routes keyboard input through this off-screen textarea — clicking the
-        // terminal focuses it (see the library's canvas mousedown handler), and keydown bubbles
-        // from it to the contenteditable host that owns the key listener. Focusing it directly is
-        // what makes the terminal keyboard-ready. `term.focus()` instead focuses the host wrapper
-        // and re-asserts that focus on a timer, so it can't be used to land focus on the input.
-        textarea.removeAttribute("readonly");
-        textarea.focus();
-        return;
-      }
-      term.focus();
+      termRef.current?.focus();
     },
     getBufferText() {
       const term = termRef.current;
-      if (!term || !term.buffer?.active) return "";
+      if (!term) return "";
       const revision = contentRevisionRef.current;
       const cached = bufferTextCacheRef.current;
       if (
@@ -220,44 +163,17 @@ export function useTerminalHandle({
       ) {
         return cached.text;
       }
-      try {
-        const buffer = term.buffer.active;
-        const lines: string[] = [];
-        for (let y = 0; y < buffer.length; y++) {
-          const line = buffer.getLine(y);
-          if (line) lines.push(line.translateToString());
-        }
-        const text = lines.join("");
-        bufferTextCacheRef.current = { term, revision, cols: term.cols, rows: term.rows, text };
-        return text;
-      } catch {
-        return "";
-      }
+      // Each line at its full grid width, as the emulator holds it: the engine hands lines back
+      // trimmed, and consumers match across the padding.
+      const text = term
+        .readLines()
+        .map((line) => line.text.padEnd(term.cols))
+        .join("");
+      bufferTextCacheRef.current = { term, revision, cols: term.cols, rows: term.rows, text };
+      return text;
     },
     getBufferLines() {
-      const term = termRef.current;
-      if (!term || !term.buffer?.active) return [];
-      try {
-        const buffer = term.buffer.active;
-        const lines: BufferLineInfo[] = [];
-        for (let y = 0; y < buffer.length; y++) {
-          const line = buffer.getLine(y);
-          if (!line) continue;
-          const text = line.translateToString(true); // trimRight
-          let hasInverse = false;
-          for (let x = 0; x < line.length; x++) {
-            const cell = line.getCell(x);
-            if (cell && cell.isInverse()) {
-              hasInverse = true;
-              break;
-            }
-          }
-          lines.push({ text, hasInverse });
-        }
-        return lines;
-      } catch {
-        return [];
-      }
+      return termRef.current?.readLines() ?? [];
     },
     }),
     [applyFontSizePx, minFontSize, maxFontSize, zoomVerbose, sendWheelSgrAt]

@@ -69,7 +69,7 @@ export function useImeEscapeForwarding({
 
     const onEscapeDuringIme = (e: KeyboardEvent) => {
       if (e.key !== "Escape") return;
-      const ta = termRef.current?.textarea;
+      const ta = termRef.current?.inputElement;
       if (!ta || e.target !== ta) return;
       if (!e.isComposing && e.keyCode !== 229) return;
       const send = onDataRef.current;

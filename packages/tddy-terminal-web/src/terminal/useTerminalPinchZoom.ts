@@ -70,7 +70,7 @@ export function useTerminalPinchZoom({
       const delta = span - anchorSpan;
       const term = termRef.current;
       if (!term) return;
-      const current = term.options.fontSize;
+      const current = term.fontSize();
       const opts = stepOpts();
       if (delta > PINCH_FONT_STEP_SPAN_PX && canPitchIn(current, opts)) {
         applyFontSizePx(pitchInFontSize(current, opts), opts);
@@ -96,7 +96,7 @@ export function useTerminalPinchZoom({
       const t = termRef.current;
       if (!t) return;
       const opts = { min: minFontSize, max: maxFontSize };
-      const cur = t.options.fontSize;
+      const cur = t.fontSize();
       const { accum, fontSize } = reduceTrackpadPinchAccum(
         wheelPinchAccumRef.current,
         e.deltaY,

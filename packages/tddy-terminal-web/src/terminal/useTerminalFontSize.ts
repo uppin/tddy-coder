@@ -1,5 +1,4 @@
 import { useCallback, useEffect, useState } from "react";
-import type { FitAddon } from "ghostty-web";
 import {
   canPitchIn,
   canPitchOut,
@@ -14,13 +13,12 @@ import {
   TERMINAL_ZOOM_BRIDGE_EVENT,
 } from "../lib/terminalZoomBridge";
 import { TERMINAL_OVERLAY_FIXED_GRID_CHAR_WIDTH_EM } from "../connection/config";
-import { measureTerminalCanvasCssWidth, shouldHandleTerminalZoomKeys } from "./terminalGeometry";
+import { fitTerminalToContainer, measureTerminalCanvasCssWidth, shouldHandleTerminalZoomKeys } from "./terminalGeometry";
 import type { ContainerRef, TerminalRef } from "./terminalRefs";
 
 export interface TerminalFontSizeInput {
   containerRef: ContainerRef;
   termRef: TerminalRef;
-  fitAddonRef: { readonly current: FitAddon | null };
   ready: boolean;
   sessionActive: boolean;
   fontSize: number;
@@ -37,7 +35,6 @@ export interface TerminalFontSizeInput {
 export function useTerminalFontSize({
   containerRef,
   termRef,
-  fitAddonRef,
   ready,
   sessionActive,
   fontSize,
@@ -58,7 +55,6 @@ export function useTerminalFontSize({
       const max = bounds?.max ?? maxFontSize;
       const clamped = clampTerminalFontSize(px, min, max);
       const term = termRef.current;
-      const fit = fitAddonRef.current;
       if (zoomVerbose) {
         console.info("[tddy][GhosttyTerminal] applyFontSizePx", {
           requested: px,
@@ -69,17 +65,17 @@ export function useTerminalFontSize({
         });
       }
       if (term) {
-        term.options.fontSize = clamped;
+        term.setFontSize(clamped);
         if (fixedViewportGrid) {
           term.resize(fixedViewportGrid.cols, fixedViewportGrid.rows);
         } else {
-          fit?.fit();
+          fitTerminalToContainer(term);
         }
         if (zoomVerbose) {
           console.debug("[tddy][GhosttyTerminal] after font/geometry", {
             cols: term.cols,
             rows: term.rows,
-            fontSize: term.options.fontSize,
+            fontSize: term.fontSize(),
             fixedGrid: !!fixedViewportGrid,
           });
         }
@@ -107,22 +103,22 @@ export function useTerminalFontSize({
       if (w < 4 || h < 4) return;
 
       /**
-       * `term.element` is typically width:100% of the pane, so its offsetWidth does not change with
+       * the terminal root is typically width:100% of the pane, so its offsetWidth does not change with
        * fontSize — binary search on that always picked maxFontSize and ignored resize. Size from pane
        * width (X) and refine against the canvas grid width.
        */
       const em = TERMINAL_OVERLAY_FIXED_GRID_CHAR_WIDTH_EM;
       let chosen = clampTerminalFontSize(w / (gc * em), minFontSize, maxFontSize);
-      term.options.fontSize = chosen;
+      term.setFontSize(chosen);
       term.resize(gc, gr);
 
       for (let i = 0; i < 8; i++) {
-        void term.element?.offsetWidth;
+        void term.screenElement?.offsetWidth;
         const innerW = measureTerminalCanvasCssWidth(term);
         if (innerW <= 0) break;
         if (Math.abs(innerW - w) <= 1.5) break;
         chosen = clampTerminalFontSize(chosen * (w / innerW), minFontSize, maxFontSize);
-        term.options.fontSize = chosen;
+        term.setFontSize(chosen);
         term.resize(gc, gr);
       }
 
@@ -161,7 +157,7 @@ export function useTerminalFontSize({
         }
         return;
       }
-      const current = term.options.fontSize;
+      const current = term.fontSize();
       if (d.action === "reset") {
         applyFontSizePx(d.baselineFontSize, merged);
         return;
@@ -186,7 +182,7 @@ export function useTerminalFontSize({
       if (!shouldHandleTerminalZoomKeys()) return;
       const term = termRef.current;
       if (!term) return;
-      const live = term.options.fontSize;
+      const live = term.fontSize();
       const stepOpts = { min: minFontSize, max: maxFontSize };
       const key = e.key;
       if (key === "+" || key === "=") {

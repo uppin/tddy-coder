@@ -19,8 +19,8 @@ export function useTerminalTextareaAttrs({
   preventFocusOnTap: boolean;
 }): void {
   useEffect(() => {
-    if (!ready || !termRef.current?.textarea) return;
-    const ta = termRef.current.textarea;
+    if (!ready || !termRef.current?.inputElement) return;
+    const ta = termRef.current.inputElement;
     if (sessionActive) {
       ta.removeAttribute("aria-disabled");
     } else {
@@ -32,7 +32,7 @@ export function useTerminalTextareaAttrs({
   // Set textarea readonly when preventFocusOnTap — prevents mobile keyboard from opening on tap
   useEffect(() => {
     if (!ready || !termRef.current) return;
-    const textarea = termRef.current.textarea;
+    const textarea = termRef.current.inputElement;
     if (!textarea) return;
     if (preventFocusOnTap) {
       textarea.setAttribute("readonly", "");
@@ -122,7 +122,7 @@ export function useTapAsClick({
       tap = {
         clientX: touch.clientX,
         clientY: touch.clientY,
-        trackedByTui: termRef.current?.hasMouseTracking?.() ?? false,
+        trackedByTui: termRef.current?.mouseTracking() ?? false,
       };
     };
 

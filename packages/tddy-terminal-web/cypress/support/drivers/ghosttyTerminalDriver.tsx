@@ -431,8 +431,8 @@ export function aGhosttyTerminal(options: GhosttyTerminalDriverOptions = {}) {
     expectRevealsEarlierOutput() {
       cy.wrap(handleRef).should((ref) => {
         const handle = (ref as unknown as React.RefObject<GhosttyTerminalHandle>).current;
-        const offset = handle?.getViewportScrollOffset?.() ?? 0;
-        expect(offset, "terminal viewport should reveal earlier output after the drag").to.be.greaterThan(0);
+        const linesAboveTip = (handle?.getScrollbackLength?.() ?? 0) - (handle?.getViewportTop?.() ?? 0);
+        expect(linesAboveTip, "terminal viewport should reveal earlier output after the drag").to.be.greaterThan(0);
       });
       return this;
     },

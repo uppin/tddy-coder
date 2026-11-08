@@ -20,9 +20,6 @@ export function computeScrollbar(args: {
 }): Scrollbar {
   const { scrollbackLength, viewportTop, rows } = args;
   const total = scrollbackLength + rows;
-  // TODO(terminal-engine): implement — still reads `viewportTop` as ghostty's bottom-based
-  // viewportY (0 = live tip); flip to top-based when the engine translates positions.
-  const rawOffset = scrollbackLength - viewportTop;
-  const offset = Math.max(0, Math.min(scrollbackLength, rawOffset));
+  const offset = Math.max(0, Math.min(scrollbackLength, viewportTop));
   return { total, offset, len: rows };
 }
