@@ -6,6 +6,7 @@
 **Complexity**: 4 — rename across tddy-terminal-web, tddy-session-web, tddy-storybook, tddy-web and docs; dependency and CSP removal
 
 **Stack**: `#xterm` 4/4 — branch `feature/xterm/drop-ghostty`, base `feature/xterm/xterm-engine`
+**PR**: [#869](https://github.com/uppin/tddy-coder/pull/869)
 
 ## Initial Discovery
 
@@ -45,6 +46,12 @@ implementing one here collides with the PR that owns it.
 | Parent node | What it delivers | How this PR consumes it | This PR does NOT |
 |---|---|---|---|
 | n3 `feature/xterm/xterm-engine` | every terminal on `xtermEngine` | removes the now-unused ghostty path | re-open engine behaviour |
+
+**Sequencing (developer, 2026-11-08, pass 2 review):**
+
+- The storybook render test without the terminal-story exclusion fails today on ghostty-web's WASM fetch under happy-dom. **n3's green removes that cause** (components construct `xtermEngine`); **n4's green confirms the result** and fixes any xterm/happy-dom issue the story then hits.
+- **n4's green rewrites n2's `src/engine/engineBoundary.test.ts`**, which names `ghosttyEngine` / `ghostty-web` and is listed by `scripts/no-ghostty.test.ts`.
+- `scripts/no-ghostty.test.ts` runs in CI through `.github/workflows/web.yml` "Web rule tests" (wiring approved by the developer).
 
 ## Draft PR contract
 
@@ -101,10 +108,10 @@ Cypress component specs one at a time locally, `bun test src`, scoped to the tou
 - [x] Cross-check code issues and TODOs
 - [x] Create/update PRD documentation
 - [x] Create changeset (this document)
-- [ ] Create failing acceptance tests
-- [ ] Run acceptance tests (verify they fail)
-- [ ] USER REVIEW — acceptance tests
-- [ ] TDD Red — write failing unit/integration tests
+- [x] Create failing acceptance tests
+- [x] Run acceptance tests (verify they fail)
+- [x] USER REVIEW — acceptance tests
+- [x] TDD Red — write failing unit/integration tests
 - [ ] TDD Green — implement with quality code
 - [ ] Update documentation with progress
 - [ ] Run the touched packages' tests — verify 100% pass

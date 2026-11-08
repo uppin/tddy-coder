@@ -12,14 +12,7 @@ setProjectAnnotations(previewAnnotations);
 afterEach(cleanup);
 
 const SRC = import.meta.dir;
-/**
- * Stories that need a real browser: ghostty-web instantiates a WebAssembly module over `fetch` and
- * draws to a canvas, neither of which happy-dom provides. They render in the static Storybook build,
- * which the tddy-web e2e specs (`ghostty-terminal-stories.cy.ts`, ...) drive.
- */
-const NEEDS_A_BROWSER = ["tddy-terminal-web/GhosttyTerminal.stories.tsx"];
-
-const storyFiles = [...new Glob("**/*.stories.tsx").scanSync(SRC)].filter((f) => !NEEDS_A_BROWSER.includes(f));
+const storyFiles = [...new Glob("**/*.stories.tsx").scanSync(SRC)];
 
 describe("stories", () => {
   test("the Storybook has stories", () => {
