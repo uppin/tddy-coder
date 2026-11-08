@@ -77,8 +77,8 @@ the mapping says.
 `SpawnRelayed` starts an allowlisted harness binary (`opencode`, `codex-acp`, `claude-agent-acp`) as a mapped session
 user with its stdin/stdout relayed over a unix socket the **daemon** listens on — the one request that gives
 a child stdio, because the ACP driver talks to its agent over stdio and an unprivileged daemon cannot become
-another user itself. It passes every gate `SpawnSession` does (peer authorization, an OS user `users.yaml` maps,
-`allowed_env_keys`) **and** its own: `allowed_relay_tool_paths`, **empty by default**, so enabling session
+another user itself. It passes the gates `SpawnSession` does (peer authorization, an OS user `users.yaml` maps; its
+environment is the daemon's, passed whole but for loader variables) **and** its own: `allowed_relay_tool_paths`, **empty by default**, so enabling session
 tools never enables it. The supervisor connects to the daemon's socket only if the path is absolute, is a
 socket (not a symlink to one) owned by the calling uid, and the listener's `SO_PEERCRED` uid is that uid; any
 failure is the opaque denial and nothing is forked. The child's exit status and a stop travel over
@@ -96,9 +96,9 @@ failure is the opaque denial and nothing is forked. The child's exit status and 
   (`codex-acp` in the install's bin directory, `opencode`, and for `claude-acp` the `claude-agent-acp`
   binary the daemon's `TDDY_CLAUDE_AGENT_ACP_CLI` names). Without that variable `claude-acp` runs as
   `bunx claude-agent-acp`; arguments are not allowlisted, so listing `bunx` admits any package `bunx`
-  can fetch, run as the session user. A relayed coding agent's environment is the one the daemon
-  computed, whole, so its provider-route variables are not gated by `allowed_env_keys`. The
-  daemon turns the supervisor's opaque denial into an error naming these three lists.
+  can fetch, run as the session user. A relayed agent's environment is the one the daemon computed,
+  passed whole rather than checked against `allowed_env_keys`; a loader variable is still refused. The
+  daemon turns the supervisor's opaque denial into an error naming the lists that still gate it.
 - **`allowed_env_keys` is a deny, not a filter.** A request naming an unlisted key is refused outright.
   An ordinary session spawn sends no environment, so the shipped empty policy works — but a user whose
   `~/.tddy/config.yaml` sets `spawn_path_extra` makes the daemon send `PATH`, which must then be listed.

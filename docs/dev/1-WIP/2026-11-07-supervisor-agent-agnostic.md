@@ -3,7 +3,8 @@
 **Date**: 2026-11-07
 **Status**: 🚧 In Progress
 **Type**: Architecture Change
-**Complexity**: 5. It spans three crates (supervisor, spawn, session-lifecycle), plus tests in daemon-rpc and e2e and the install script. It changes the proto contract (`CloneRepository` → `SpawnStreamed`, plus scopes on relayed and streamed spawns), migrates config data, and changes a security gate (exec roots, fd exec). Several defaults are still unconfirmed.
+**PR**: [#865](https://github.com/uppin/tddy-coder/pull/865) — `#agent-tools` 32/32, base `feature/agent-tools/user-mapping-in-supervisor`
+**Complexity**: 5. It spans three crates (supervisor, spawn, session-lifecycle), plus e2e tests and the install script. It changes the proto contract (`CloneRepository` → `SpawnStreamed`, plus scopes on relayed and streamed spawns), migrates config data, and changes a security gate (exec roots, fd exec). Pass 2 confirmed the defaults, and found that every existing spawning test fixture must move off `/tmp` once the gate is wired.
 
 ## Initial Discovery
 
@@ -49,14 +50,20 @@ issues for the touched files.
   - `docs/architecture.md`.
   - `tests/supervisor_call_deadline.rs:119`: the `/usr/bin/claude` fixture is renamed.
 - **tddy-spawn**:
-  - `clone_env.rs` (:1-37): `ALLOWED_ENV_KEYS` and the module doc go.
+  - `clone_env.rs` (:1-37): `ALLOWED_ENV_KEYS` and the module doc go (and its test
+    `tests/clone_env.rs:94`).
+  - `supervisor_spawn.rs`: `plan_supervised_clone` (pass 2 surface) — the one `SpawnStreamed`
+    request of a clone: `tddy-git-clone` as the session user.
+- **tddy-git-clone** (new crate, binary `tddy-git-clone`): the clone helper. Its body is a TODO.
+- **Scripts**: `./release`, `./install`, `scripts/dev-runtime-binaries.sh`, `./publish.sh` ship it.
   - `supervisor_spawn.rs`:
     - the module doc;
     - `clone_repo_via_supervisor_with_progress` (:250-262 and on) is rewritten over `SpawnStreamed`, with progress parsed by `git_progress.rs`;
     - the rename is done as the session user.
   - `supervisor_client.rs`: the client for the new RPC.
 - **tddy-session-lifecycle**: `coding_agent_relay.rs`, whose refusal text (:9-11, :101-111) and tests (:322, :340) name the removed keys. #859 owns the `allowed_session_users` → `users.yaml` wording at :331.
-- **tddy-daemon-rpc**: `tests/supervisor_clone_delegation.rs` is re-pointed at `SpawnStreamed`.
+- **tddy-daemon-rpc**: no test change at pass 2 (`tests/supervisor_clone_delegation.rs` keeps its
+  unreachable-supervisor test; see Acceptance Tests).
 - **tddy-e2e**: `tests/install_supervisor.rs` and `tests/install_script.rs` cover the migration and the templates.
 - **Non-Rust**:
   - `supervisor.yaml.production` (:98-140): no agent names; `exec_roots`; no env key lists.
@@ -90,7 +97,7 @@ works.
   - strip `LISTEN_*` and `TDDY_SUPERVISOR_SOCKET`.
 
   Base is `Minimal` for session/sandbox/streamed and `Exactly` for relay. `allowed_env_keys` and `CloneSshEnv::ALLOWED_ENV_KEYS` are deleted.
-- [ ] `SpawnStreamed` replaces `CloneRepository` (proto). The daemon composes `git clone`, parses progress and renames as the session user.
+- [ ] `SpawnStreamed` replaces `CloneRepository` (proto). A clone is one streamed spawn of the `tddy-git-clone` helper as the session user; the daemon parses its progress.
 - [ ] cgroup scope for relayed and streamed spawns
 - [ ] Old keys are load errors naming the replacement. `./install` migrates them once (extends #859's migration).
 - [ ] Templates, proto, relay and architecture docs name no coding agent. Guard `the_supervisor_names_no_coding_agent`.
@@ -147,28 +154,50 @@ See the PRD's "What's Changing".
 
 ## Acceptance Tests
 
+Written at pass 2 (2026-11-08). 🔴 = fails on this node's own `TODO(supervisor-agent-agnostic)`;
+guard = passes on the stub and must keep passing. **Linux** = `#[cfg(target_os = "linux")]`, confirmed by
+CI only. **#859** = also needs #859's session-user mapping green (see Dependencies).
+
 | Test | File | Kind |
 |---|---|---|
-| `a_binary_under_an_exec_root_owned_by_root_is_run` | `packages/tddy-supervisor/src/policy.rs` (`#[cfg(test)]`) | 🔴 red |
-| `a_binary_outside_every_exec_root_is_refused` | same | 🔴 red |
-| `a_binary_whose_file_or_any_parent_is_group_or_world_writable_is_refused` | same | 🔴 red |
-| `a_binary_owned_by_another_user_is_refused` | same | 🔴 red |
-| `a_symlink_is_judged_by_its_target_which_must_lie_under_a_root` (default to confirm) | same | 🔴 red |
-| `the_spawn_env_rule` — `#[rstest]` over `session`, `sandbox`, `streamed`, `relay`: passes the daemon env whole; refuses `LD_PRELOAD`; forces `HOME`/`USER`/`LOGNAME`; strips `LISTEN_*` and `TDDY_SUPERVISOR_SOCKET`; base `Minimal` or `Exactly` | `packages/tddy-supervisor/src/policy.rs` / `spawn_broker.rs` (`#[cfg(test)]`) | 🔴 red |
-| `an_old_spawn_policy_key_fails_loading_naming_its_replacement` — `#[rstest]` over `allowed_tool_paths`, `allowed_relay_tool_paths`, `allowed_env_keys` | `packages/tddy-supervisor/src/config.rs` (`#[cfg(test)]`) | 🔴 red |
-| `an_exec_root_that_is_not_absolute_fails_loading` | same | 🔴 red |
-| `a_file_swapped_after_the_check_is_not_what_is_execd` (Linux only) | `packages/tddy-supervisor/tests/` | 🔴 red |
-| `a_relayed_spawn_runs_in_a_cgroup_scope` (Linux only) | `packages/tddy-supervisor/tests/supervisor_relay.rs` | 🔴 red |
-| `a_streamed_spawn_reports_started_each_stderr_line_and_its_exit_with_the_tail` | `packages/tddy-supervisor/tests/` | 🔴 red |
-| `a_streamed_spawn_runs_in_a_cgroup_scope` (Linux only) | same | 🔴 red |
-| `the_supervisor_names_no_coding_agent` (scans `src/`, `proto/`, `supervisor.yaml.production`, `dev.supervisor.yaml`) | `packages/tddy-supervisor/tests/` | 🔴 red |
-| `a_supervised_clone_reports_progress_parsed_by_the_daemon` | `packages/tddy-daemon-rpc/tests/supervisor_clone_delegation.rs` | 🔴 red |
-| `a_supervised_clone_is_moved_into_place_by_the_session_user` | same (Linux only for a real other user) | 🔴 red |
-| `a_failed_supervised_clone_leaves_no_partial_directory` | same | guard (re-pointed) |
-| `an_ssh_clone_needs_no_supervisor_env_configuration` | `packages/tddy-spawn/` (`supervisor_spawn` tests) | 🔴 red |
-| `the_supervisors_opaque_refusal_names_the_exec_roots` (replaces :322) and `…_names_the_env_rule` (replaces :340) | `packages/tddy-session-lifecycle/src/coding_agent_relay.rs` (`#[cfg(test)]`) | 🔴 red |
-| `install_migrates_the_old_spawn_policy_keys_once` | `packages/tddy-e2e/tests/install_supervisor.rs` | 🔴 red |
-| `the_installed_supervisor_config_names_no_coding_agent` | same | 🔴 red |
+| `a_binary_under_an_exec_root_directory_owned_by_the_supervisor_is_run` | `packages/tddy-supervisor/src/policy.rs:1345` | 🔴 |
+| `a_binary_an_exec_root_names_as_a_file_is_run_and_its_sibling_is_not` | `policy.rs:1359` | guard |
+| `a_binary_outside_every_exec_root_is_refused` | `policy.rs:1378` | guard |
+| `a_binary_whose_file_or_any_parent_is_writable_by_others_is_refused` — `#[rstest]` group/world-writable file, group/world-writable parent, sticky world-writable parent | `policy.rs:1398` | 🔴 ×5 |
+| `a_binary_owned_by_another_user_is_refused` (the trust predicate; no root to chown with) | `policy.rs:1415` | 🔴 |
+| `a_symlink_under_a_root_to_a_file_outside_every_root_is_refused` | `policy.rs:1435` | guard |
+| `a_symlink_outside_every_root_to_a_file_a_root_names_runs_that_file` | `policy.rs:1452` | 🔴 |
+| `a_file_swapped_after_the_check_is_not_what_is_execd` | `policy.rs:1470` | 🔴 Linux |
+| `on_macos_the_exec_gate_is_path_only_and_execs_the_checked_path` | `policy.rs:1489` | 🔴 macOS |
+| `the_spawn_env_rule_passes_the_daemons_env_whole_and_forces_the_account` — `#[rstest]` session, sandbox, streamed (`Minimal`), relayed (`Exactly`) | `packages/tddy-supervisor/src/spawn_broker.rs:2027` | 🔴 ×4 |
+| `a_loader_variable_is_refused_for_every_spawn_kind` — `#[rstest]` ×4 | `spawn_broker.rs:2068` | guard |
+| `an_old_spawn_policy_key_fails_loading_naming_its_replacement` — `#[rstest]` ×3 | `packages/tddy-supervisor/src/config.rs:851` | 🔴 ×3 |
+| `an_exec_root_that_is_not_absolute_fails_loading` | `config.rs:863` | 🔴 |
+| `reads_exec_roots_naming_directories_single_files_and_trusted_prefixes` | `config.rs` | guard (surface) |
+| `a_streamed_spawn_of_a_binary_outside_every_exec_root_is_refused` | `packages/tddy-supervisor/tests/supervisor_streamed_spawn.rs:25` | guard |
+| `a_streamed_spawn_reports_started_each_stderr_line_and_its_exit_with_the_tail` | `supervisor_streamed_spawn.rs:89` | 🔴 Linux, #859 |
+| `a_streamed_spawn_runs_in_a_cgroup_scope` | `supervisor_streamed_spawn.rs:125` | 🔴 Linux, #859 |
+| `a_relayed_spawn_runs_in_a_cgroup_scope` | `packages/tddy-supervisor/tests/supervisor_relay.rs:212` | 🔴 Linux, #859 |
+| `the_supervisor_names_no_coding_agent` (names from the coding-agent spec files; non-test `src/`, `proto/`, both templates) | `packages/tddy-supervisor/tests/supervisor_names_no_coding_agent.rs:88` | 🔴 |
+| `a_supervised_clone_is_one_streamed_spawn_of_the_clone_helper_as_the_session_user` | `packages/tddy-spawn/tests/supervised_clone_plan.rs` | 🔴 |
+| `a_clone_goes_into_a_partial_sibling_and_is_renamed_into_place` | `packages/tddy-git-clone/tests/clone_helper.rs` | 🔴 |
+| `a_failed_clone_removes_its_partial_directory_and_carries_gits_words` | `clone_helper.rs` | 🔴 |
+| `a_destination_that_already_exists_is_refused_and_left_alone` | `clone_helper.rs` | 🔴 |
+| `install_ships_the_clone_helper_beside_the_daemon`, `release_builds_the_clone_helper`, `publish_packages_the_clone_helper_into_the_deb`, `a_dev_run_built_with_the_build_flag_has_the_clone_helper` | `packages/tddy-e2e/tests/clone_helper_shipping.rs` | 🔴 ×4 |
+| `a_binary_under_a_trusted_prefix_root_whose_own_directory_is_group_writable_and_sticky_runs` | `packages/tddy-supervisor/src/policy.rs` | 🔴 |
+| `the_same_store_root_without_the_trusted_prefix_mark_is_refused` | `policy.rs` | guard |
+| `a_group_writable_directory_below_a_trusted_prefix_is_still_refused` | `policy.rs` | guard |
+| `an_ssh_clone_needs_no_supervisor_env_configuration` | `supervised_clone_plan.rs` | 🔴 |
+| `the_supervisors_opaque_refusal_names_the_exec_roots` (replaces `…_names_the_relay_tool_allowlist`) | `packages/tddy-session-lifecycle/src/coding_agent_relay.rs:319` | 🔴 |
+| `the_supervisors_opaque_refusal_names_the_env_rule` (replaces `…_names_the_environment_allowlist`) | `coding_agent_relay.rs:340` | 🔴 |
+| `install_migrates_the_old_spawn_policy_keys_once` | `packages/tddy-e2e/tests/install_supervisor.rs:1215` | 🔴 |
+| `the_installed_supervisor_config_names_no_coding_agent` | `install_supervisor.rs:1280` | 🔴 |
+| `a_fresh_install_renders_exec_roots_naming_the_bin_dir_and_the_resolved_git` (plus `/nix/store` as a trusted prefix when git lives there) | `install_supervisor.rs` | 🔴 |
+
+Line numbers are as written at pass 2 and move with green. Changed from pass 1: the daemon-side clone is pinned by **a pure plan test** in `tddy-spawn`, not by
+end-to-end tests in `tddy-daemon-rpc/tests/supervisor_clone_delegation.rs`. A daemon-side test
+against a real supervisor needs the `tddy-supervisor` binary from another crate, which no cheap seam
+provides. The end-to-end streamed behaviour is pinned at the RPC level in `tddy-supervisor/tests/`.
 
 ## Responsibility
 
@@ -200,15 +229,37 @@ implementing one here collides with the PR that owns it.
 
 There is no edge with #857 (29) or #858 (30), which are line order only.
 
+Found at pass 2 (2026-11-08):
+- **The env-rule tests do not depend on #836's body.** They drive this node's own
+  `policy::resolve_spawn_env`, and their child-environment assertions (the daemon's keys arrive,
+  `HOME`/`USER`/`LOGNAME` forced, `LISTEN_*` and `TDDY_SUPERVISOR_SOCKET` stripped) hold on #836's
+  stubbed `EnvironmentBase::Exactly` too. What #836 alone pins — no supervisor `PATH` or locale under
+  `Exactly` — stays in #836's `a_relayed_agent_starts_from_exactly_the_env_the_daemon_computed`.
+- **Three Linux integration tests could not be separated from #859**:
+  `a_streamed_spawn_reports_started_each_stderr_line_and_its_exit_with_the_tail`,
+  `a_streamed_spawn_runs_in_a_cgroup_scope` and `a_relayed_spawn_runs_in_a_cgroup_scope`. Each
+  spawns as the current user via the shared fixture's `allowing_the_current_user()`, which writes
+  `allowed_session_users`; #859's green makes that key a load error and must move the shared fixture
+  to `users.yaml`. They fail on this node's stubs today, but go green only after both.
+- **Green must move the integration fixtures off `/tmp`.** On Linux every `ToolFixture` lives in a
+  `/tmp` tempdir, and a sticky world-writable directory is not trusted, so every existing spawning
+  test is refused once the exec gate is wired. `support::a_trusted_tool` (under
+  `CARGO_TARGET_TMPDIR`) is the pattern; the old `allowing_tool`/`allowing_relay_tool` fixture keys
+  become `with_exec_root`.
+
 ## Draft PR contract
 
-The first push after this plan, with bodies marked `TODO(supervisor-agent-agnostic)`:
-- `SpawnPolicy.exec_roots` and the old-key errors;
-- `policy::resolve_exec`;
-- the single env-rule function;
-- the `SpawnStreamed` proto messages and RPC (generated code included);
-- `SpawnRelayedRequest.scope`;
-- the daemon-side clone signature over `SpawnStreamed`;
+Pushed at pass 2 (2026-11-08), with bodies marked `TODO(supervisor-agent-agnostic)`:
+- `SpawnPolicy.exec_roots: Vec<ExecRoot>` (a path, or `{ path, trusted_prefix }`); the old-key load
+  errors are a TODO in `config.rs` validation;
+- `policy::resolve_exec` → `CheckedExecutable` (`path()`, `exec_path()`), and
+  `policy::is_trusted_exec_path_entry`;
+- the one env rule: `policy::resolve_spawn_env(SpawnKind, env) -> SpawnEnvironment`;
+- `rpc SpawnStreamed` with `SpawnStreamedRequest` / `StreamedEvent` (`Started`, `Line`, `Exited`),
+  `PrivilegedSurface::spawn_streamed` (stub: denied) and a real `SupervisorClient::spawn_streamed`;
+- `SpawnRelayedRequest.scope` (wire field 7 and the Rust request);
+- `tddy_spawn::supervisor_spawn::plan_supervised_clone` — one `SpawnStreamed` of `tddy-git-clone`;
+- the `tddy-git-clone` crate (binary, TODO body);
 - the failing tests above.
 
 ## Green wave
@@ -242,33 +293,55 @@ Decided by the user, 2026-11-07, via orchestrator AskUserQuestion:
   - The daemon composes `git clone`, parses progress (`git_progress.rs`) and renames as the session user, which removes the root rename in a user-writable directory.
 - **cgroups: "Include in 32 (Recommended)".**
 
-Proposed defaults, **not yet confirmed by the user. Confirm at pass 2:**
+Decided by the user at pass 2, 2026-11-08 (these replace pass 1's proposed defaults and settle what
+pass 1 found):
 
-1. The default exec root is only the install bin dir.
-2. A symlink is judged by its target, which must itself lie under a root.
-3. macOS dev does a path-only check; fd exec is Linux-only, and the tests say so.
-4. The old keys are load errors naming the replacement, and `./install` migrates them once (extending #859's migration).
-5. The guard scans `src/`, `proto/` and the templates. The `/usr/bin/claude` fixture (`tests/supervisor_call_deadline.rs:119`) is renamed.
+1. **`exec_roots` entries may name individual trusted files** (`/usr/bin/git`) as well as
+   directories. Each entry, file or directory, gets the owner and mode check. `./install` renders
+   the bin dir plus the exact files git and the configured harnesses resolve to. The dev template
+   documents the same, with the resolved target of each `node_modules/.bin` harness link. Tddy
+   Desktop runs no supervisor, so there is nothing to render there. This settles "git is not under
+   the install bin dir" as option (c), narrowed to single files.
+2. **A symlink is judged by its target.**
+3. **macOS does a path-only check.** There is no exec through a descriptor there.
+4. **The old keys are load errors, and `./install` migrates them once** (extending #859's
+   migration): listed tool and relay paths become `exec_roots` file entries; `allowed_env_keys` is
+   dropped.
+5. **A guard scan keeps coding-agent names out of `tddy-supervisor`'s non-test code** (and `proto/`
+   and the two templates). The `/usr/bin/claude` fixture (`tests/supervisor_call_deadline.rs:119`) is
+   renamed.
+6. **A world-writable directory is refused even when sticky** (e.g. `/tmp`). The exec gate does not
+   keep `require_trustworthy_config_directory`'s sticky exception.
 
-Found while planning (pass 2 must ask):
+Decided by the user at the 6e review, 2026-11-08:
 
-- **git is not under the install bin dir.** Today `CloneRepository` runs git from the supervisor's
-  `PATH` (`clone.rs:57-71`), and git must be in `allowed_tool_paths`. With default 1, a streamed
-  `git clone` at `/usr/bin/git` is refused. The same holds for harnesses outside the bin dir:
-  `opencode` and `claude-agent-acp` are documented at `/usr/local/bin/…`, and dev's `codex-acp` is
-  in `node_modules/.bin`. The choices are:
-  - (a) list `/usr/bin` as a root (see risk 2);
-  - (b) have `./install` place or link a git under the bin dir (a symlink is judged by its target,
-    so a link alone fails default 2);
-  - (c) a second, narrow root.
-- **"The env gate already admits PATH" is not quite right.** It is admitted only when an operator
-  lists it: `spawn_broker.rs:150-155` says `PATH` is granted through `allowed_env_keys`, and the
-  shipped lists do not include it. `GIT_SSH_COMMAND` *is* admitted on any host configured for SSH
-  clones (`clone_env.rs:29-37`). The conclusion holds: the binary list is defence in depth.
-- **A directory check with a sticky exception.** `require_trustworthy_config_directory`
-  (`config.rs:417-447`) accepts a sticky world-writable directory. For an exec root, that would
-  accept `/tmp/…` parents. The file-owner check still refuses a file another user dropped there,
-  but pass 2 decides whether the exec gate keeps the sticky exception.
+7. **The acceptance tests and every green deletion listed at pass 2 are approved.**
+8. **`./install` renders a live `spawn_policy`.** Session users come from `users.yaml` (#859), so
+   nothing in it needs an operator before it can be live.
+9. **`./install` renders the bin dir plus git only.** Harness files outside the bin dir are operator
+   entries; rendering the configured harnesses is recorded in
+   [`../todo/2026-11-08-install-renders-configured-harness-exec-roots.md`](../todo/2026-11-08-install-renders-configured-harness-exec-roots.md).
+10. **The `tddy-spawn` plan test is the daemon-side seam** (no real-supervisor test in `tddy-daemon-rpc`).
+11. **The guard bans spec-stem tokens**, not the phrase "coding agent".
+12. **One node, complexity 5.**
+13. **Trusted prefixes.** An `exec_roots` entry may be operator-marked `{ path: /nix/store,
+    trusted_prefix: true }`: its own directory's owner and mode are not checked, everything below it
+    still is. Only the operator opts in, per entry. `./install` renders `/nix/store` as a trusted
+    prefix only when git resolves into it. (`/nix/store` is `drwxrwxr-t root:nixbld`, so without the
+    mark every nix-store binary is refused.)
+14. **The clone is ONE `SpawnStreamed` of a clone helper binary, `tddy-git-clone`** ("a special binary
+    that runs on the OS user"). It lives in the bin dir beside the daemon and is spawned as the session
+    user with `--git <git> -- <url> <destination>`. In one process it clones into a partial sibling,
+    renames it into place, removes it on failure and refuses an existing destination, writing git's
+    progress on stderr. No `mv`/`rm` spawns or `exec_roots` entries; the supervisor still knows nothing
+    about clones. It is a new workspace crate with no external dependencies, and is shipped by
+    `./release`, `./install` (`INSTALLED_BINARIES`), `scripts/dev-runtime-binaries.sh` and
+    `./publish.sh`. It is not part of `./install --desktop`, since Desktop runs no supervisor. Green
+    must add it to every install fixture's fake release binaries.
+
+Also fixed in this node's contract commit: the stale `allowed_env_keys` notes that #836 left in
+`supervisor.yaml.production` and `docs/ft/supervisor/tddy-supervisor.md` (a relayed agent's env
+passes whole).
 
 Risks:
 
@@ -296,9 +369,9 @@ It is one node at the user's direction.
 - [x] Cross-check `packages/*/docs/code-issues/` and `docs/dev/todo/` for items this change touches (Step 2b)
 - [x] Create/update PRD documentation
 - [x] Create changeset (this document)
-- [ ] Create failing acceptance tests
-- [ ] Run acceptance tests (verify they fail)
-- [ ] USER REVIEW — acceptance tests
+- [x] Create failing acceptance tests
+- [x] Run acceptance tests (verify they fail)
+- [x] USER REVIEW — acceptance tests (approved 2026-11-08)
 - [ ] TDD Red — write failing unit/integration tests
 - [ ] TDD Green — implement with quality code
 - [ ] Update documentation with progress

@@ -25,6 +25,7 @@ use crate::config::{CgroupPolicy, ROOT_USER};
 use crate::error::SupervisorError;
 use crate::request::{AppliedLimits, RequestedLimits};
 use crate::spawn_broker;
+use crate::spawn_broker::EnvironmentBase;
 use crate::users_file::UsersFile;
 
 /// The kernel's `cpu.max` pair: `"<quota_us> <period_us>"`.
@@ -184,6 +185,112 @@ pub fn resolve_relayed_env(
         }
     }
     Ok(requested.clone())
+}
+
+/// A binary the exec gate passed, and what to exec so that it is that binary that runs.
+///
+/// On Linux the gate keeps an `O_PATH` descriptor of the file it checked, and the child execs
+/// `/proc/self/fd/<n>`: a file swapped in at the same path between the check and the exec is not
+/// what runs. macOS has no exec through a descriptor, so there the check is path-only and
+/// [`Self::exec_path`] is the resolved path.
+#[derive(Debug, Clone)]
+pub struct CheckedExecutable {
+    /// The file the requested path resolved to — a symlink is judged by its target.
+    path: PathBuf,
+    /// The checked file, held open (Linux only).
+    descriptor: Option<std::sync::Arc<OwnedFd>>,
+}
+
+impl CheckedExecutable {
+    /// The file the gate checked: the requested path's target, never a symlink.
+    pub fn path(&self) -> &Path {
+        &self.path
+    }
+
+    /// What the child execs: the checked descriptor on Linux, the checked path elsewhere.
+    pub fn exec_path(&self) -> PathBuf {
+        match &self.descriptor {
+            Some(descriptor) => PathBuf::from(format!("/proc/self/fd/{}", descriptor.as_raw_fd())),
+            None => self.path.clone(),
+        }
+    }
+}
+
+/// Resolve the binary any spawn — session, sandbox, streamed or relayed — may exec.
+///
+/// The requested path is plain and absolute, and is judged by the file it resolves to: that file
+/// must be named by an `exec_roots` file entry or lie under a directory entry, and the file, every
+/// directory above it and the matching entry must each pass [`is_trusted_exec_path_entry`] — a sticky
+/// world-writable directory such as `/tmp` included — except that an entry the operator marked
+/// `trusted_prefix` is not itself checked (directories above and below it still are). The reason
+/// for a refusal is logged; the caller
+/// gets the opaque [`SupervisorError::Denied`].
+pub fn resolve_exec(
+    policy: &SpawnPolicy,
+    requested: &Path,
+) -> Result<CheckedExecutable, SupervisorError> {
+    // TODO(supervisor-agent-agnostic): implement — resolve the target, root containment, the
+    // owner/mode trust of the file, every parent and the entry, and the Linux O_PATH descriptor.
+    // Until then: a verbatim match against the entries, as `allowed_tool_paths` was.
+    let requested = plain_absolute_path(requested)?;
+    if policy
+        .exec_roots
+        .iter()
+        .any(|entry| entry.path == requested)
+    {
+        Ok(CheckedExecutable {
+            path: requested.to_path_buf(),
+            descriptor: None,
+        })
+    } else {
+        Err(SupervisorError::Denied)
+    }
+}
+
+/// Whether one file or directory on the way to a binary is one only root, or the supervisor's own
+/// `enforcing_uid`, could have written: owned by one of them, and writable by neither its group nor
+/// everyone. Unlike the policy file's parents, a sticky world-writable directory is **not** trusted.
+pub fn is_trusted_exec_path_entry(owner_uid: u32, mode: u32, enforcing_uid: u32) -> bool {
+    // TODO(supervisor-agent-agnostic): implement — not consulted by any gate yet.
+    let _ = (owner_uid, mode, enforcing_uid);
+    true
+}
+
+/// Which kind of spawn an environment is resolved for.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SpawnKind {
+    Session,
+    Sandbox,
+    Streamed,
+    Relayed,
+}
+
+/// The environment a spawn is started with: the daemon's variables, and what they are laid over.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SpawnEnvironment {
+    pub variables: BTreeMap<String, String>,
+    pub base: EnvironmentBase,
+}
+
+/// The one environment rule, for every spawn kind.
+///
+/// The env the daemon computed passes whole: the supervisor holds no list of keys, because what a
+/// child needs is the daemon's configuration. A loader variable ([`is_loader_env_key`]) is refused,
+/// because it chooses what code runs. `HOME`/`USER`/`LOGNAME` are forced to the target account, and
+/// `LISTEN_*` and `TDDY_SUPERVISOR_SOCKET` stripped, when the child's environment is built. The base
+/// is [`EnvironmentBase::Minimal`] for sessions, sandboxes and streamed spawns, and
+/// [`EnvironmentBase::Exactly`] for a relayed spawn.
+pub fn resolve_spawn_env(
+    kind: SpawnKind,
+    requested: &BTreeMap<String, String>,
+) -> Result<SpawnEnvironment, SupervisorError> {
+    // TODO(supervisor-agent-agnostic): implement — replaces `resolve_env` and
+    // `resolve_relayed_env`. Until then every key must be in an (empty) `allowed_env_keys`.
+    let _ = kind;
+    Ok(SpawnEnvironment {
+        variables: resolve_env(&SpawnPolicy::default(), requested)?,
+        base: EnvironmentBase::Minimal,
+    })
 }
 
 /// Resolve a bind-mount source for a sandbox. Must sit under one of the permitted roots, and must
@@ -360,6 +467,7 @@ pub fn scope_dir(base: &Path, name: &str) -> Result<PathBuf, SupervisorError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::config::spawn_policy::ExecRoot;
     use crate::test_util::{
         a_cgroup_policy, a_spawn_policy, requesting_cpu, requesting_memory, requesting_pids,
         unlimited, MIB,
@@ -1162,5 +1270,289 @@ mod tests {
 
         // Then
         assert_eq!(dir, Err(SupervisorError::Denied));
+    }
+
+    // -----------------------------------------------------------------------------------------
+    // Exec roots (`#agent-tools` 32/32)
+    //
+    // The account running the tests stands in for root, as `config.rs`'s trust tests do: the gate
+    // trusts uid 0 or the supervisor's own euid. The tree lives under the build's `target/tmp`,
+    // never `/tmp` — a sticky world-writable directory is not trusted, so a binary there is refused.
+    // -----------------------------------------------------------------------------------------
+
+    /// A directory tree only the account running the tests can write, all the way up.
+    struct AnExecTree {
+        _workspace: tempfile::TempDir,
+        top: PathBuf,
+    }
+
+    fn an_exec_tree() -> AnExecTree {
+        use std::os::unix::fs::PermissionsExt;
+        let base = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../target/tmp/exec-roots");
+        std::fs::create_dir_all(&base).expect("create the exec-roots test base");
+        let workspace = tempfile::tempdir_in(&base).expect("create an exec tree");
+        // Resolved, because the gate judges a path by what it resolves to: no `..`, no `/var` link.
+        let top = workspace
+            .path()
+            .canonicalize()
+            .expect("resolve the exec tree");
+        std::fs::set_permissions(&top, std::fs::Permissions::from_mode(0o755))
+            .expect("make the exec tree readable");
+        AnExecTree {
+            _workspace: workspace,
+            top,
+        }
+    }
+
+    impl AnExecTree {
+        /// A directory under the tree with `mode`.
+        fn directory(&self, name: &str, mode: u32) -> PathBuf {
+            use std::os::unix::fs::PermissionsExt;
+            let path = self.top.join(name);
+            std::fs::create_dir_all(&path).expect("create a directory in the exec tree");
+            std::fs::set_permissions(&path, std::fs::Permissions::from_mode(mode))
+                .expect("set the directory's mode");
+            path
+        }
+
+        /// An executable script at `relative` saying `words`, with `mode`.
+        fn tool(&self, relative: &str, words: &str, mode: u32) -> PathBuf {
+            use std::os::unix::fs::PermissionsExt;
+            let path = self.top.join(relative);
+            std::fs::write(&path, format!("#!/bin/sh\necho {words}\n")).expect("write a tool");
+            std::fs::set_permissions(&path, std::fs::Permissions::from_mode(mode))
+                .expect("set the tool's mode");
+            path
+        }
+    }
+
+    fn a_policy_with_exec_roots(entries: &[&Path]) -> SpawnPolicy {
+        SpawnPolicy {
+            exec_roots: entries.iter().map(|entry| ExecRoot::at(*entry)).collect(),
+            ..SpawnPolicy::default()
+        }
+    }
+
+    fn a_policy_trusting_the_prefix(prefix: &Path) -> SpawnPolicy {
+        SpawnPolicy {
+            exec_roots: vec![ExecRoot::trusted_prefix(prefix)],
+            ..SpawnPolicy::default()
+        }
+    }
+
+    /// A store laid out like `/nix/store`: the store directory group-writable and sticky, each
+    /// package below it a plain directory.
+    fn a_store_like_nix_in(tree: &AnExecTree, package_mode: u32) -> (PathBuf, PathBuf) {
+        let store = tree.directory("store", 0o1775);
+        tree.directory("store/pkg-git", package_mode);
+        let git = tree.tool("store/pkg-git/git", "git", 0o755);
+        (store, git)
+    }
+
+    #[test]
+    fn a_binary_under_a_trusted_prefix_root_whose_own_directory_is_group_writable_and_sticky_runs()
+    {
+        // Given an operator-marked trusted prefix, group-writable and sticky like /nix/store
+        let tree = an_exec_tree();
+        let (store, git) = a_store_like_nix_in(&tree, 0o755);
+
+        // When
+        let checked = the_checked_path(&a_policy_trusting_the_prefix(&store), &git);
+
+        // Then — its own mode is the operator's call; everything below it passed
+        assert_eq!(checked, Ok(git));
+    }
+
+    #[test]
+    fn the_same_store_root_without_the_trusted_prefix_mark_is_refused() {
+        // Given the same store, listed as a plain root
+        let tree = an_exec_tree();
+        let (store, git) = a_store_like_nix_in(&tree, 0o755);
+
+        // Then — only the operator can vouch for a writable directory, per entry
+        assert_eq!(
+            the_checked_path(&a_policy_with_exec_roots(&[&store]), &git),
+            Err(SupervisorError::Denied)
+        );
+    }
+
+    #[test]
+    fn a_group_writable_directory_below_a_trusted_prefix_is_still_refused() {
+        // Given a trusted prefix with a group-writable package directory below it
+        let tree = an_exec_tree();
+        let (store, git) = a_store_like_nix_in(&tree, 0o775);
+
+        // Then — the mark covers the prefix itself, nothing beneath it
+        assert_eq!(
+            the_checked_path(&a_policy_trusting_the_prefix(&store), &git),
+            Err(SupervisorError::Denied)
+        );
+    }
+
+    fn the_checked_path(
+        policy: &SpawnPolicy,
+        requested: &Path,
+    ) -> Result<PathBuf, SupervisorError> {
+        resolve_exec(policy, requested).map(|checked| checked.path().to_path_buf())
+    }
+
+    #[test]
+    fn a_binary_under_an_exec_root_directory_owned_by_the_supervisor_is_run() {
+        // Given an exec root directory, and a tool in it nobody else can write
+        let tree = an_exec_tree();
+        let bin = tree.directory("bin", 0o755);
+        let tool = tree.tool("bin/tool", "ran", 0o755);
+
+        // When
+        let checked = the_checked_path(&a_policy_with_exec_roots(&[&bin]), &tool);
+
+        // Then
+        assert_eq!(checked, Ok(tool));
+    }
+
+    #[test]
+    fn a_binary_an_exec_root_names_as_a_file_is_run_and_its_sibling_is_not() {
+        // Given an exec root naming one trusted file, as `/usr/bin/git` would be
+        let tree = an_exec_tree();
+        tree.directory("usr-bin", 0o755);
+        let git = tree.tool("usr-bin/git", "git", 0o755);
+        let sibling = tree.tool("usr-bin/sh-lookalike", "other", 0o755);
+        let policy = a_policy_with_exec_roots(&[&git]);
+
+        // When
+        let answers = (
+            the_checked_path(&policy, &git),
+            the_checked_path(&policy, &sibling),
+        );
+
+        // Then
+        assert_eq!(answers, (Ok(git), Err(SupervisorError::Denied)));
+    }
+
+    #[test]
+    fn a_binary_outside_every_exec_root_is_refused() {
+        // Given
+        let tree = an_exec_tree();
+        let bin = tree.directory("bin", 0o755);
+        tree.directory("elsewhere", 0o755);
+        let tool = tree.tool("elsewhere/tool", "ran", 0o755);
+
+        // Then
+        assert_eq!(
+            the_checked_path(&a_policy_with_exec_roots(&[&bin]), &tool),
+            Err(SupervisorError::Denied)
+        );
+    }
+
+    #[rstest::rstest]
+    #[case::group_writable_file(0o775, 0o755)]
+    #[case::world_writable_file(0o757, 0o755)]
+    #[case::group_writable_parent(0o755, 0o775)]
+    #[case::world_writable_parent(0o755, 0o777)]
+    #[case::sticky_world_writable_parent_like_tmp(0o755, 0o1777)]
+    fn a_binary_whose_file_or_any_parent_is_writable_by_others_is_refused(
+        #[case] file_mode: u32,
+        #[case] parent_mode: u32,
+    ) {
+        // Given an exec root naming the file itself
+        let tree = an_exec_tree();
+        tree.directory("bin", parent_mode);
+        let tool = tree.tool("bin/tool", "ran", file_mode);
+
+        // When
+        let checked = the_checked_path(&a_policy_with_exec_roots(&[&tool]), &tool);
+
+        // Then — anyone who can write the file, or rename it out of the way, chooses what runs
+        assert_eq!(checked, Err(SupervisorError::Denied));
+    }
+
+    #[test]
+    fn a_binary_owned_by_another_user_is_refused() {
+        // Given the supervisor's own euid, and an account that is neither it nor root
+        // SAFETY: reads this process's own effective uid and nothing else.
+        let euid = unsafe { libc::geteuid() };
+        let somebody_else = if euid == 4242 { 4343 } else { 4242 };
+
+        // When
+        let trusted = (
+            is_trusted_exec_path_entry(0, 0o100755, euid),
+            is_trusted_exec_path_entry(euid, 0o100755, euid),
+            is_trusted_exec_path_entry(somebody_else, 0o100755, euid),
+            is_trusted_exec_path_entry(0, 0o41777, euid),
+        );
+
+        // Then — root's and the supervisor's own are trusted; another account's file is not, and
+        // neither is a sticky world-writable directory such as /tmp
+        assert_eq!(trusted, (true, true, false, false));
+    }
+
+    #[test]
+    fn a_symlink_under_a_root_to_a_file_outside_every_root_is_refused() {
+        // Given a link inside the exec root directory pointing out of it
+        let tree = an_exec_tree();
+        let bin = tree.directory("bin", 0o755);
+        tree.directory("outside", 0o755);
+        let target = tree.tool("outside/tool", "escaped", 0o755);
+        let link = bin.join("tool");
+        std::os::unix::fs::symlink(&target, &link).expect("link out of the root");
+
+        // Then — a symlink is judged by its target
+        assert_eq!(
+            the_checked_path(&a_policy_with_exec_roots(&[&bin]), &link),
+            Err(SupervisorError::Denied)
+        );
+    }
+
+    #[test]
+    fn a_symlink_outside_every_root_to_a_file_a_root_names_runs_that_file() {
+        // Given a link outside the roots, as `node_modules/.bin/<harness>` is, to a file under one
+        let tree = an_exec_tree();
+        let bin = tree.directory("bin", 0o755);
+        let target = tree.tool("bin/harness", "ran", 0o755);
+        let links = tree.directory("links", 0o755);
+        let link = links.join("harness");
+        std::os::unix::fs::symlink(&target, &link).expect("link into the root");
+
+        // When
+        let checked = the_checked_path(&a_policy_with_exec_roots(&[&bin]), &link);
+
+        // Then — the file checked, and run, is the target
+        assert_eq!(checked, Ok(target));
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn a_file_swapped_after_the_check_is_not_what_is_execd() {
+        // Given a checked tool
+        let tree = an_exec_tree();
+        let bin = tree.directory("bin", 0o755);
+        let tool = tree.tool("bin/tool", "checked", 0o755);
+        let checked = resolve_exec(&a_policy_with_exec_roots(&[&bin]), &tool)
+            .expect("the tool passes the exec gate");
+
+        // When another file is renamed over it before the exec
+        let impostor = tree.tool("bin/impostor", "swapped-in", 0o755);
+        std::fs::rename(&impostor, &tool).expect("swap the file");
+
+        // Then what the child would exec is still the file that was checked
+        let execd = std::fs::read_to_string(checked.exec_path()).expect("read what is exec'd");
+        assert_eq!(execd, "#!/bin/sh\necho checked\n");
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn on_macos_the_exec_gate_is_path_only_and_execs_the_checked_path() {
+        // Given — macOS has no exec through a descriptor, so a swap between check and exec is not
+        // closed there; the check is on the path alone
+        let tree = an_exec_tree();
+        let bin = tree.directory("bin", 0o755);
+        let tool = tree.tool("bin/tool", "ran", 0o755);
+
+        // When
+        let execd = resolve_exec(&a_policy_with_exec_roots(&[&bin]), &tool)
+            .map(|checked| checked.exec_path());
+
+        // Then
+        assert_eq!(execd, Ok(tool));
     }
 }

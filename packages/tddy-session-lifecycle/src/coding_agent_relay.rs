@@ -78,6 +78,8 @@ pub async fn start_relayed(
         env: command.env.iter().cloned().collect::<BTreeMap<_, _>>(),
         working_dir: command.cwd.clone(),
         relay_socket: socket.path.clone(),
+        // TODO(supervisor-agent-agnostic): implement — the session's cgroup scope.
+        scope: None,
     };
     endpoint
         .spawner
@@ -314,12 +316,15 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn the_supervisors_opaque_refusal_names_the_relay_tool_allowlist() {
+    async fn the_supervisors_opaque_refusal_names_the_exec_roots() {
         // When
         let refusal = denied_by_the_supervisor().await;
 
-        // Then
-        assert!(refusal.contains("allowed_relay_tool_paths"), "{refusal}");
+        // Then — the one exec gate (`#agent-tools` 32/32), not the removed relay list
+        assert!(
+            refusal.contains("exec_roots") && !refusal.contains("allowed_relay_tool_paths"),
+            "{refusal}"
+        );
     }
 
     #[tokio::test]
@@ -332,12 +337,15 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn the_supervisors_opaque_refusal_names_the_environment_allowlist() {
+    async fn the_supervisors_opaque_refusal_names_the_env_rule() {
         // When
         let refusal = denied_by_the_supervisor().await;
 
-        // Then
-        assert!(refusal.contains("allowed_env_keys"), "{refusal}");
+        // Then — the env passes whole but for loader variables; there is no key list to name
+        assert!(
+            refusal.contains("loader variable") && !refusal.contains("allowed_env_keys"),
+            "{refusal}"
+        );
     }
 
     #[tokio::test]

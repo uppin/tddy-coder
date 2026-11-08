@@ -142,6 +142,7 @@ pub struct SupervisorFixture {
     allowed_tool_paths: Vec<PathBuf>,
     allowed_relay_tool_paths: Vec<PathBuf>,
     allowed_mount_roots: Vec<PathBuf>,
+    exec_roots: Vec<PathBuf>,
     memory_max_ceiling: Option<u64>,
     cpu_max_ceiling: Option<String>,
     pids_max_ceiling: Option<u64>,
@@ -159,6 +160,7 @@ pub fn a_supervisor() -> SupervisorFixture {
         allowed_tool_paths: Vec::new(),
         allowed_relay_tool_paths: Vec::new(),
         allowed_mount_roots: Vec::new(),
+        exec_roots: Vec::new(),
         memory_max_ceiling: None,
         cpu_max_ceiling: None,
         pids_max_ceiling: None,
@@ -199,6 +201,12 @@ impl SupervisorFixture {
     /// Allow `tool_path` as a harness binary a relayed spawn may exec (off unless this is called).
     pub fn allowing_relay_tool(mut self, tool_path: &Path) -> Self {
         self.allowed_relay_tool_paths.push(tool_path.to_path_buf());
+        self
+    }
+
+    /// Name `path` — a directory or one file — under `spawn_policy.exec_roots` (`#agent-tools` 32).
+    pub fn with_exec_root(mut self, path: &Path) -> Self {
+        self.exec_roots.push(path.to_path_buf());
         self
     }
 
@@ -326,6 +334,7 @@ impl SupervisorFixture {
                 "  allowed_tool_paths: [{tools}]\n",
                 "  allowed_relay_tool_paths: [{relay_tools}]\n",
                 "  allowed_mount_roots: [{mount_roots}]\n",
+                "  exec_roots: [{exec_roots}]\n",
                 "cgroup:\n",
                 "  base_override: {base}\n",
                 "  mount_root: {base}\n",
@@ -358,6 +367,13 @@ impl SupervisorFixture {
             mount_roots = yaml_list(
                 &self
                     .allowed_mount_roots
+                    .iter()
+                    .map(|p| p.display().to_string())
+                    .collect::<Vec<_>>()
+            ),
+            exec_roots = yaml_list(
+                &self
+                    .exec_roots
                     .iter()
                     .map(|p| p.display().to_string())
                     .collect::<Vec<_>>()
@@ -757,9 +773,36 @@ pub fn a_tool_that_records_its_parent() -> ToolFixture {
     }
 }
 
+/// A tool the exec gate can trust: in a directory only the account running the tests can write,
+/// all the way up — under the build's `target/tmp`, never `/tmp`, which is sticky but
+/// world-writable and so refused (`#agent-tools` 32/32). `body` follows the `#!/bin/sh` line.
+pub fn a_trusted_tool(name: &str, body: &str) -> ToolFixture {
+    let workspace =
+        TempDir::new_in(env!("CARGO_TARGET_TMPDIR")).expect("create a trusted tool workspace");
+    fs::set_permissions(workspace.path(), fs::Permissions::from_mode(0o755))
+        .expect("make the tool workspace readable");
+    let path = workspace
+        .path()
+        .canonicalize()
+        .expect("resolve the tool workspace")
+        .join(name);
+    let parent_pid_log = workspace.path().join("parent.pid");
+    write_script(&path, body);
+    ToolFixture {
+        path,
+        parent_pid_log,
+        _workspace: workspace,
+    }
+}
+
 impl ToolFixture {
     pub fn path(&self) -> &Path {
         &self.path
+    }
+
+    /// The directory the tool lives in — what an `exec_roots` directory entry would name.
+    pub fn directory(&self) -> &Path {
+        self.path.parent().expect("a tool lives in a directory")
     }
 
     /// Block until the tool has recorded its own process group id.

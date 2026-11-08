@@ -45,6 +45,10 @@ pub struct SpawnRelayedRequest {
     pub working_dir: Option<PathBuf>,
     /// The caller's listening socket: absolute, owned by the caller's uid.
     pub relay_socket: PathBuf,
+    /// Name of an existing scope to place the child in before `exec`.
+    // TODO(supervisor-agent-agnostic): implement — carried on the wire, not yet joined.
+    #[serde(default)]
+    pub scope: Option<String>,
 }
 
 /// A process the supervisor spawned on the caller's behalf.

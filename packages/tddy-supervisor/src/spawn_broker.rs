@@ -1999,4 +1999,81 @@ mod tests {
         assert_eq!(environment.get("LISTEN_FDNAMES"), None);
         assert_eq!(environment.get("LISTEN_FDS"), None);
     }
+
+    // -----------------------------------------------------------------------------------------
+    // One environment rule for every spawn kind (`#agent-tools` 32/32)
+    // -----------------------------------------------------------------------------------------
+
+    /// An environment as the daemon computed it, including what a caller must never decide.
+    fn a_daemon_computed_env() -> BTreeMap<String, String> {
+        [
+            ("GIT_SSH_COMMAND", "ssh -o BatchMode=yes"),
+            ("ROUTE_BASE_URL", "https://route.example"),
+            ("HOME", "/root"),
+            ("USER", "root"),
+            ("LISTEN_FDS", "3"),
+            ("TDDY_SUPERVISOR_SOCKET", "/run/tddy-supervisor.sock"),
+        ]
+        .into_iter()
+        .map(|(key, value)| (key.to_string(), value.to_string()))
+        .collect()
+    }
+
+    #[rstest::rstest]
+    #[case::session(crate::policy::SpawnKind::Session, EnvironmentBase::Minimal)]
+    #[case::sandbox(crate::policy::SpawnKind::Sandbox, EnvironmentBase::Minimal)]
+    #[case::streamed(crate::policy::SpawnKind::Streamed, EnvironmentBase::Minimal)]
+    #[case::relayed(crate::policy::SpawnKind::Relayed, EnvironmentBase::Exactly)]
+    fn the_spawn_env_rule_passes_the_daemons_env_whole_and_forces_the_account(
+        #[case] kind: crate::policy::SpawnKind,
+        #[case] expected_base: EnvironmentBase,
+    ) {
+        // Given an env the daemon computed, which no supervisor key list names
+        let requested = a_daemon_computed_env();
+
+        // When the one rule resolves it, and the child's environment is built on it
+        let resolved = crate::policy::resolve_spawn_env(kind, &requested)
+            .expect("the daemon's env passes whole");
+        let mut plan = a_spawn_plan().build();
+        plan.env = resolved.variables.clone();
+        plan.environment = resolved.base.clone();
+        let environment = environment_of(&plan);
+
+        // Then the daemon's variables arrive, the account is the target's, and neither a socket
+        // activation nor the supervisor's socket leaks in
+        let value = |key: &str| environment.get(key).map(String::as_str);
+        assert_eq!(
+            (
+                resolved.base,
+                value("GIT_SSH_COMMAND"),
+                value("ROUTE_BASE_URL"),
+                (value("HOME"), value("USER"), value("LOGNAME")),
+                (value("LISTEN_FDS"), value("TDDY_SUPERVISOR_SOCKET")),
+            ),
+            (
+                expected_base,
+                Some("ssh -o BatchMode=yes"),
+                Some("https://route.example"),
+                (Some("/home/alice"), Some("alice"), Some("alice")),
+                (None, None),
+            )
+        );
+    }
+
+    #[rstest::rstest]
+    #[case::session(crate::policy::SpawnKind::Session)]
+    #[case::sandbox(crate::policy::SpawnKind::Sandbox)]
+    #[case::streamed(crate::policy::SpawnKind::Streamed)]
+    #[case::relayed(crate::policy::SpawnKind::Relayed)]
+    fn a_loader_variable_is_refused_for_every_spawn_kind(#[case] kind: crate::policy::SpawnKind) {
+        // Given
+        let mut requested = a_daemon_computed_env();
+        requested.insert("LD_PRELOAD".to_string(), "/tmp/evil.so".to_string());
+
+        // Then — it chooses what code runs, which is the supervisor's own concern
+        assert_eq!(
+            crate::policy::resolve_spawn_env(kind, &requested),
+            Err(crate::error::SupervisorError::Denied)
+        );
+    }
 }

@@ -398,6 +398,9 @@ impl SupervisorConfig {
         for root in &self.spawn_policy.allowed_mount_roots {
             require_absolute("allowed_mount_roots entry", root)?;
         }
+        // TODO(supervisor-agent-agnostic): implement — every `exec_roots` entry is absolute, and
+        // `allowed_tool_paths`, `allowed_relay_tool_paths` and `allowed_env_keys` fail loading,
+        // naming `exec_roots` (or, for the env list, that it was removed).
         for key in &self.spawn_policy.allowed_env_keys {
             if is_loader_env_key(key) {
                 return Err(ConfigError {
@@ -848,6 +851,59 @@ services:
 
         // When / Then it is refused, pointing the operator at the one file users now live in
         assert_rejected_because(SupervisorConfig::from_yaml(yaml), "users.yaml");
+    }
+
+    #[rstest::rstest]
+    #[case::allowed_tool_paths("allowed_tool_paths: [/opt/tddy/bin/tddy-coder]", "exec_roots")]
+    #[case::allowed_relay_tool_paths(
+        "allowed_relay_tool_paths: [/opt/tddy/bin/relayed]",
+        "exec_roots"
+    )]
+    #[case::allowed_env_keys("allowed_env_keys: [RUST_LOG]", "removed")]
+    fn an_old_spawn_policy_key_fails_loading_naming_its_replacement(
+        #[case] old_key: &str,
+        #[case] replacement: &str,
+    ) {
+        // Given a supervisor.yaml from before `#agent-tools` 32/32
+        let yaml = format!("{}spawn_policy:\n  {old_key}\n", a_minimal_config());
+
+        // When / Then it is refused, telling the operator what took the key's place
+        assert_rejected_because(SupervisorConfig::from_yaml(&yaml), replacement);
+    }
+
+    #[test]
+    fn an_exec_root_that_is_not_absolute_fails_loading() {
+        // Given
+        let yaml = format!(
+            "{}spawn_policy:\n  exec_roots: [opt/tddy/bin]\n",
+            a_minimal_config()
+        );
+
+        // When / Then — relative to wherever systemd started the supervisor, it would be a dead grant
+        assert_rejected_because(SupervisorConfig::from_yaml(&yaml), "exec_roots entry");
+    }
+
+    #[test]
+    fn reads_exec_roots_naming_directories_single_files_and_trusted_prefixes() {
+        // Given
+        let yaml = format!(
+            "{}spawn_policy:\n  exec_roots:\n    - /opt/tddy/bin\n    - /usr/bin/git\n    - {{path: /nix/store, trusted_prefix: true}}\n",
+            a_minimal_config()
+        );
+
+        // When
+        let config = SupervisorConfig::from_yaml(&yaml).expect("exec_roots loads");
+
+        // Then
+        use crate::config::spawn_policy::ExecRoot;
+        assert_eq!(
+            config.spawn_policy.exec_roots,
+            vec![
+                ExecRoot::at("/opt/tddy/bin"),
+                ExecRoot::at("/usr/bin/git"),
+                ExecRoot::trusted_prefix("/nix/store"),
+            ]
+        );
     }
 
     #[test]

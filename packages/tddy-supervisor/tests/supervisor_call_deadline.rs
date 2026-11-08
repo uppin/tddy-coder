@@ -116,11 +116,12 @@ async fn a_client_of(socket: &Path) -> SupervisorClient {
 fn a_relayed_spawn() -> SpawnRelayedRequest {
     SpawnRelayedRequest {
         os_user: "ada".to_string(),
-        tool_path: PathBuf::from("/usr/bin/claude"),
+        tool_path: PathBuf::from("/usr/bin/a-relayed-tool"),
         args: Vec::new(),
         env: Default::default(),
         working_dir: None,
         relay_socket: PathBuf::from("/tmp/relay.sock"),
+        scope: None,
     }
 }
 

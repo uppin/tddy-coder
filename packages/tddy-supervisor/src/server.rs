@@ -33,6 +33,7 @@ use crate::server::rpc::SupervisorServiceImpl;
 use crate::spawn_broker::accounts;
 use crate::spawn_broker::accounts::TargetUser;
 use crate::spawn_broker::{ChildOutput, EnvironmentBase, JailMount, SandboxJail, SpawnPlan};
+use crate::streamed::StreamedEvents;
 use crate::supervisor::Supervisor;
 
 /// Name this service answers to on the wire, taken from the generated server so a client and a
@@ -308,6 +309,21 @@ impl PrivilegedSurface {
             destination: destination.to_path_buf(),
             stop_grace: Duration::from_secs(self.config.shutdown_grace_secs),
         }))
+    }
+
+    /// Run a binary as an OS user the mapping names, streaming its stderr — see [`crate::streamed`].
+    ///
+    /// Everything a caller can ask is checked before anything is forked, in the order
+    /// `SpawnSession` checks it: user, exec root, environment, scope. A refusal is therefore an error
+    /// on the call, not an event on the stream.
+    async fn spawn_streamed(
+        &self,
+        request: wire::SpawnStreamedRequest,
+    ) -> Result<StreamedEvents, SupervisorError> {
+        // TODO(supervisor-agent-agnostic): implement — gate the request, spawn it capturing stderr
+        // in its scope, and report on it as `clone` reports on a clone.
+        let _ = request;
+        Err(SupervisorError::Denied)
     }
 
     /// Hand a resolved plan to the supervisor.

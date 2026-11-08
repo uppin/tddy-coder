@@ -46,6 +46,12 @@ service SupervisorService {
   // `destination` renamed into place on success. The first event names the clone's pid (StopSession
   // stops it); the last says how git exited. The one server-streaming RPC on this surface.
   rpc CloneRepository(CloneRepositoryRequest) returns (stream CloneEvent);
+  // Spawn a binary as another OS user and stream its stderr: the first event names its pid
+  // (StopSession stops it), then one Line per line it writes to stderr (split on `\r` as well as
+  // `\n`), then Exited with its exit and the last lines of stderr. The same user, exec and
+  // environment gates as SpawnSession; the supervisor knows nothing about what the binary is.
+  // TODO(supervisor-agent-agnostic): implement — replaces CloneRepository, which then goes.
+  rpc SpawnStreamed(SpawnStreamedRequest) returns (stream StreamedEvent);
 
   // cgroup v2 scope lifecycle inside the subtree the supervisor owns.
   rpc CreateScope(CreateScopeRequest) returns (ScopeHandle);
@@ -107,6 +113,8 @@ message SpawnRelayedRequest {
   // Absolute path of a unix socket the caller is listening on, owned by the caller's uid. A path
   // crosses a process boundary, a file descriptor does not.
   string relay_socket = 6;
+  // Name of an existing scope the child joins before it drops privilege and execs.
+  optional string scope = 7;
 }
 
 message SpawnedProcess {
@@ -177,6 +185,43 @@ message CloneExited {
   // records an exit code and not the signal. Read `code` being unset as "ended by a signal".
   optional int32 signal = 2;
   // The last lines git wrote to stderr: its own explanation of a failure.
+  string stderr_tail = 3;
+}
+
+message SpawnStreamedRequest {
+  string os_user = 1;
+  // Resolved against the policy's exec_roots.
+  string tool_path = 2;
+  repeated string args = 3;
+  map<string, string> env = 4;
+  optional string working_dir = 5;
+  // Name of an existing scope the child joins before it drops privilege and execs.
+  optional string scope = 6;
+}
+
+message StreamedEvent {
+  oneof event {
+    StreamedStarted started = 1;
+    StreamedLine line = 2;
+    StreamedExited exited = 3;
+  }
+}
+
+message StreamedStarted {
+  uint32 pid = 1;
+}
+
+// One line of the child's stderr, as it wrote it.
+message StreamedLine {
+  string line = 1;
+}
+
+message StreamedExited {
+  // The child's exit code. Unset when it was ended by a signal.
+  optional int32 code = 1;
+  // Reserved for the signal that ended the child; read `code` being unset as "ended by a signal".
+  optional int32 signal = 2;
+  // The last lines the child wrote to stderr.
   string stderr_tail = 3;
 }
 

@@ -234,7 +234,38 @@ impl SupervisorClient {
         tokio::sync::mpsc::Receiver<Result<wire::CloneEvent, SupervisorError>>,
         SupervisorError,
     > {
-        const METHOD: &str = "CloneRepository";
+        self.open_event_stream("CloneRepository", request.encode_to_vec())
+            .await
+    }
+
+    /// Spawn a binary as an OS user and stream its stderr — see `SpawnStreamed` in
+    /// `supervisor.proto`.
+    ///
+    /// The first event is `Started{pid}`, then one `Line` per line the child wrote to stderr, and
+    /// the stream ends after `Exited`. A request the supervisor refuses fails *this call*, before any
+    /// event. The stream keeps the connection open: it outlives this client, and dropping the
+    /// receiver closes the connection, which stops the child.
+    pub async fn spawn_streamed(
+        &self,
+        request: wire::SpawnStreamedRequest,
+    ) -> Result<
+        tokio::sync::mpsc::Receiver<Result<wire::StreamedEvent, SupervisorError>>,
+        SupervisorError,
+    > {
+        self.open_event_stream("SpawnStreamed", request.encode_to_vec())
+            .await
+    }
+
+    /// Open a server stream and hand back its events, bounded by the progress deadline: opening it
+    /// and its first event share one deadline, and every later gap gets one of its own.
+    async fn open_event_stream<E>(
+        &self,
+        method: &'static str,
+        payload: Vec<u8>,
+    ) -> Result<tokio::sync::mpsc::Receiver<Result<E, SupervisorError>>, SupervisorError>
+    where
+        E: Message + Default + Send + 'static,
+    {
         let deadline = self.clone_progress_deadline;
         // Opening the stream and receiving its first event share one deadline: a clone that has not
         // produced its first event within it is not going to.
@@ -242,24 +273,24 @@ impl SupervisorClient {
         let mut frames = tokio::time::timeout_at(
             first_event_by,
             self.transport
-                .call_server_stream(SERVICE_NAME, METHOD, request.encode_to_vec()),
+                .call_server_stream(SERVICE_NAME, method, payload),
         )
         .await
-        .map_err(|_elapsed| went_silent(METHOD, deadline))?
+        .map_err(|_elapsed| went_silent(method, deadline))?
         .map_err(protocol::error_from_status)?;
         // A refusal is the stream's first and only item, so it is read here rather than handed to
         // the caller as an event it might forget to look at.
         let first = match tokio::time::timeout_at(first_event_by, frames.recv()).await {
-            Ok(Some(Ok(bytes))) => decode_event(&bytes)?,
+            Ok(Some(Ok(bytes))) => decode_event::<E>(method, &bytes)?,
             Ok(Some(Err(status))) => return Err(protocol::error_from_status(status)),
             Ok(None) => {
                 return Err(SupervisorError::Unavailable {
-                    message:
-                        "the supervisor closed the connection before answering CloneRepository"
-                            .to_string(),
+                    message: format!(
+                        "the supervisor closed the connection before answering {method}"
+                    ),
                 })
             }
-            Err(_elapsed) => return Err(went_silent(METHOD, deadline)),
+            Err(_elapsed) => return Err(went_silent(method, deadline)),
         };
 
         let (events, receiver) = tokio::sync::mpsc::channel(64);
@@ -278,12 +309,12 @@ impl SupervisorClient {
                     Err(_elapsed) => {
                         // Silence ends the stream with the failure as its last item: nothing after
                         // a gap this long can be trusted to be the rest of the clone.
-                        let _ = events.send(Err(went_silent(METHOD, deadline))).await;
+                        let _ = events.send(Err(went_silent(method, deadline))).await;
                         break;
                     }
                 };
                 let event = match frame {
-                    Ok(bytes) => decode_event(&bytes),
+                    Ok(bytes) => decode_event::<E>(method, &bytes),
                     Err(status) => Err(protocol::error_from_status(status)),
                 };
                 if events.send(event).await.is_err() {
@@ -360,9 +391,9 @@ fn went_silent(method: &str, deadline: Duration) -> SupervisorError {
     }
 }
 
-fn decode_event(bytes: &[u8]) -> Result<wire::CloneEvent, SupervisorError> {
-    wire::CloneEvent::decode(bytes).map_err(|error| SupervisorError::OperationFailed {
-        message: format!("could not decode the supervisor's CloneRepository event: {error}"),
+fn decode_event<E: Message + Default>(method: &str, bytes: &[u8]) -> Result<E, SupervisorError> {
+    E::decode(bytes).map_err(|error| SupervisorError::OperationFailed {
+        message: format!("could not decode the supervisor's {method} event: {error}"),
     })
 }
 

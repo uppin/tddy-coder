@@ -28,7 +28,9 @@ use std::collections::BTreeMap;
 use std::path::Path;
 
 use tddy_supervisor::proto::supervisor::clone_event::Event;
-use tddy_supervisor::proto::supervisor::{CloneExited, CloneRepositoryRequest};
+use tddy_supervisor::proto::supervisor::{
+    CloneExited, CloneRepositoryRequest, SpawnStreamedRequest,
+};
 use tddy_supervisor::request::{SessionState, SpawnSessionRequest};
 use tddy_supervisor::SupervisorClient;
 
@@ -312,6 +314,27 @@ pub async fn clone_repo_via_supervisor_with_progress(
         "tddy-supervisor ended the clone's stream without saying how git exited (dest={})",
         destination.display()
     )
+}
+
+/// The one `SpawnStreamed` request of a supervised clone (`#agent-tools` 32/32): the clone helper
+/// (`tddy-git-clone`, beside the daemon) run as the session user, which clones with `git` into a
+/// partial sibling of `destination`, renames it into place, and removes it on failure — all in its
+/// own process, as that user. It writes git's progress lines on stderr, which the daemon parses. The
+/// supervisor knows nothing about clones: it runs one binary and streams its stderr.
+///
+/// `env` (the clone's SSH settings, for one) is passed whole.
+pub fn plan_supervised_clone(
+    os_user: &str,
+    clone_helper: &Path,
+    git: &Path,
+    git_url: &str,
+    destination: &Path,
+    env: BTreeMap<String, String>,
+) -> anyhow::Result<SpawnStreamedRequest> {
+    // TODO(supervisor-agent-agnostic): implement — and clone over it instead of `CloneRepository`,
+    // with progress parsed by `git_progress`.
+    let _ = (os_user, clone_helper, git, git_url, destination, env);
+    anyhow::bail!("a supervised clone over SpawnStreamed is not implemented yet")
 }
 
 /// How git's exit reads as a result: success, or git's own words about why not.
