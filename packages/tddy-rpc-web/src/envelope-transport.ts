@@ -65,6 +65,8 @@ export interface EnvelopeTransportOptions {
   clientEpoch?: number;
   /** Names the peer in error messages. */
   label?: string;
+  /** Receives a line per call event. Omitted, calls are not logged. */
+  log?: (message: string) => void;
 }
 
 /** What an {@link EnvelopeTransport} needs besides the envelope rules themselves. */
@@ -585,6 +587,7 @@ export function createEnvelopeTransport(options: EnvelopeTransportOptions): Tran
   return new EnvelopeTransport({
     calls,
     label,
+    log: options.log,
     sendFrame(frame, requestId) {
       try {
         pipe.send(frame);

@@ -45,6 +45,28 @@ describe("envelope transport", () => {
     await Promise.all([first, second]);
   });
 
+  it("logs each call through the log option it was built with", async () => {
+    // Given a transport built with a log sink
+    const pipe = aFramePipe();
+    const lines: string[] = [];
+    const client = createClient(EchoService, createEnvelopeTransport({ pipe, log: (line) => lines.push(line) }));
+
+    // When a unary call is issued and answered
+    const call = client.echo({ message: "logged" });
+    const [request] = pipe.sentRequests();
+    pipe.respond({
+      requestId: request.requestId,
+      clientEpoch: request.clientEpoch,
+      callMetadata: { service: ECHO_SERVICE, method: "Echo" },
+      responseMessage: anEchoResponseBody("answered"),
+      endOfStream: true,
+    });
+    await call;
+
+    // Then the sink saw the call go out
+    expect(lines).toContain(`unary request_id=${request.requestId} ${ECHO_SERVICE}/Echo`);
+  });
+
   it("settles a call only with the response frame that names its own method", async () => {
     // Given a unary call in flight
     const pipe = aFramePipe();
