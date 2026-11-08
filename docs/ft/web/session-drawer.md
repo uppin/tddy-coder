@@ -884,7 +884,7 @@ of its sub-agents stays visible only as the roster row's status badge and last-a
 tree** in every base-view case — shown, hidden behind a workflow view or a dormant session's
 transcript, or absent only because nothing is attached. React unmounts a subtree that moves, and
 unmounting a conversation's body cancels its conversation. See
-[session-agent-conversation.md](../../../packages/tddy-web/docs/session-agent-conversation.md) for
+[session-agent-conversation.md](../../../packages/tddy-session-web/docs/session-agent-conversation.md) for
 the invariant a refactor here has to preserve.
 
 #### Known limitations
@@ -949,7 +949,7 @@ const customView = resolveWorkflowView(selectedSession);
 if (customView) return customView;
 ```
 
-`resolveWorkflowView(session)` (`src/components/sessions/workflowViews.tsx`) is a small
+`resolveWorkflowView(session)` (`packages/tddy-session-web/src/workflowViews.tsx`) is a small
 registry keyed by `session.recipe` and `session.sessionType`:
 
 ```typescript

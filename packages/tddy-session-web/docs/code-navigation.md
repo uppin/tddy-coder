@@ -7,7 +7,7 @@ Go-to-definition, hover and references for Rust files previewed in the worktree
 
 ## Where the code lives
 
-All under `src/components/session/`:
+All under `src/code/`:
 
 | File | Responsibility |
 |---|---|
@@ -136,7 +136,7 @@ hold queries until it reports ready, fail the load (`failLoading`), drop or refu
 bad input (a query without a position ends the session `INVALID_ARGUMENT`; an undeclared file is
 `NOT_FOUND`). Fluent host assertions live in `codeSessionAssertions.ts` (`expectTheHost(host)…`); the
 shared geometry worktree fixture in `cypress/support/fixtures/geometryWorktree.ts`. The specs import
-`src/index.css` so Tailwind utilities (underline, cursor) apply.
+`tddy-web`'s `src/index.css` so Tailwind utilities (underline, cursor) apply.
 
 | Spec | Pins |
 |---|---|

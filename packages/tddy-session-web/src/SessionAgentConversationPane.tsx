@@ -13,7 +13,7 @@ import { useHttpClient } from "tddy-client-web";
  * *session's* recorded ACP transcript. A roster agent has no such transcript, so this is a live
  * conversation and never a replay (PRD § What is deliberately not being built).
  *
- * Feature: docs/ft/web/session-drawer.md § Add agent; invariants: packages/tddy-web/docs/session-agent-conversation.md.
+ * Feature: docs/ft/web/session-drawer.md § Add agent; invariants: packages/tddy-session-web/docs/session-agent-conversation.md.
  */
 
 export interface SessionAgentConversationPaneProps {

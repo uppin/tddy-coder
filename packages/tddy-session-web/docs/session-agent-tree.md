@@ -1,6 +1,6 @@
 # The Agents tab's tree
 
-How `tddy-web` renders one session's main agent, the roster agents attached to it, and the subagent
+How `tddy-session-web` renders one session's main agent, the roster agents attached to it, and the subagent
 sessions it spawned, as a single hierarchy.
 
 Feature: [session-agent-roster.md § The Agents tab](../../../docs/ft/daemon/session-agent-roster.md),

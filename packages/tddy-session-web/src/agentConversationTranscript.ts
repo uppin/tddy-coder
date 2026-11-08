@@ -10,7 +10,7 @@
  * Pure, and returning new arrays: the turns are React state, and folding a chunk into the array in
  * place would update the transcript without ever re-rendering the tab.
  *
- * Feature: docs/ft/web/session-drawer.md § Add agent; invariants: packages/tddy-web/docs/session-agent-conversation.md.
+ * Feature: docs/ft/web/session-drawer.md § Add agent; invariants: packages/tddy-session-web/docs/session-agent-conversation.md.
  */
 
 /** One side of one exchange. An operator turn is complete the moment it is sent. */

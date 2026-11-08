@@ -4,7 +4,7 @@
  * instead of the session's lifecycle string, and with the Switch that focuses them.
  *
  * Feature: docs/ft/daemon/session-agent-roster.md § The Agents tab (AC53a, AC53d).
- * Module notes: packages/tddy-web/docs/session-agent-tree.md.
+ * Module notes: packages/tddy-session-web/docs/session-agent-tree.md.
  *
  * Driven through `SessionsDrawerScreen` rather than through the pane, because the two properties
  * under test span three collaborators a narrower mount lets disagree in silence: the session list is

@@ -6,7 +6,7 @@ and the Code pane's strip. The feature is described in
 The start progress list under the create form is `tddy-session-create-web`'s
 ([start-progress.md](../../tddy-session-create-web/docs/start-progress.md)).
 
-`useCodeIndexProgress.ts` (`src/components/session/`) classifies one `CodeIndexProgress` message into a
+`useCodeIndexProgress.ts` (`src/code/`) classifies one `CodeIndexProgress` message into a
 `CodeIndexStatus` (`codeIndexStatusOf`) for both the header and the Code pane's strip:
 
 | Status | From |

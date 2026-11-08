@@ -15,7 +15,7 @@ import {
  * a roster agent has no session directory and no transcript to replay (see the PRD, § What is
  * deliberately not being built).
  *
- * Feature: docs/ft/web/session-drawer.md § Add agent; invariants: packages/tddy-web/docs/session-agent-conversation.md.
+ * Feature: docs/ft/web/session-drawer.md § Add agent; invariants: packages/tddy-session-web/docs/session-agent-conversation.md.
  */
 
 type SessionAgentClient = Client<typeof SessionAgentService>;

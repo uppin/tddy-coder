@@ -34,7 +34,7 @@ import { rosterHalfOf, type RosterHalf } from "tddy-chat-web";
  * actions.
  *
  * Feature: docs/ft/daemon/session-agent-roster.md § The Agents tab.
- * Module notes: packages/tddy-web/docs/session-agent-tree.md.
+ * Module notes: packages/tddy-session-web/docs/session-agent-tree.md.
  */
 
 // ---------------------------------------------------------------------------
