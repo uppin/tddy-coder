@@ -2,7 +2,11 @@
   "compilerOptions": {
     "target": "ES2022", "lib": ["ES2022", "DOM", "DOM.Iterable"], "module": "ESNext", "moduleResolution": "bundler",
     "jsx": "react-jsx", "strict": true, "skipLibCheck": true, "noEmit": true, "isolatedModules": true, "esModuleInterop": true,
-    "types": ["bun"]
+    "types": ["bun"],
+    "baseUrl": ".",
+    "paths": {
+      "tddy-livekit-rpc-web": ["../tddy-livekit-rpc-web/src/index.ts"]
+    }
   },
-  "include": ["src", ".storybook", "test-utils"]
+  "include": ["src", ".storybook", "test-utils", "../tddy-livekit-rpc-web/src/debug.d.ts"]
 }
