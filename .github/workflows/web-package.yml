@@ -35,7 +35,7 @@ on:
       needs-rust-fixture:
         description: >-
           Build the echo_server example (target/debug/examples/echo_server) before the tests.
-          tddy-livekit-web's Cypress specs exec it.
+          tddy-livekit-rpc-web's Cypress specs exec it.
         type: boolean
         default: false
       needs-livekit-image:
@@ -176,7 +176,7 @@ jobs:
         if: inputs.needs-web-bundle
         run: ./dev bun run --filter tddy-web build
 
-      # tddy-livekit-web's livekitDockerTestkit.ts starts this image inside a
+      # tddy-livekit-rpc-web's livekitDockerTestkit.ts starts this image inside a
       # Cypress task whose 60s timeout also covered pulling it on a fresh
       # runner, and a slow pull failed both specs' `before all` hooks. Pulled
       # here, the task only starts the container. Keep the tag in step with
@@ -207,7 +207,7 @@ jobs:
           # task timeout (seen on master at b73c97e0 and on other branches, same image digest). This
           # prints each phase of the testkit start so a failing run names the stalled one. Remove once
           # the hang is understood and fixed.
-          DEBUG: ${{ inputs.package == 'tddy-livekit-web' && 'tddy:livekit-web:*' || '' }}
+          DEBUG: ${{ inputs.package == 'tddy-livekit-rpc-web' && 'tddy:livekit-web:*' || '' }}
         run: ./dev bun run --filter "$PACKAGE" cypress:component:ci
 
       - name: Publish test report

@@ -14,11 +14,11 @@
     "baseUrl": ".",
     "paths": {
       "@/*": ["./src/*"],
-      // Mirror the bundler alias in vite.config.ts: this app builds `tddy-livekit-web` from source,
+      // Mirror the bundler alias in vite.config.ts: this app builds `tddy-livekit-rpc-web` from source,
       // so `tsc` and `bun test` must read the same source. Its package entry points at `dist/`,
       // which is gitignored and only built for `tddy-desktop` — resolving there silently typechecks
       // and tests a stale copy of the transport.
-      "tddy-livekit-web": ["../tddy-livekit-web/src/index.ts"]
+      "tddy-livekit-rpc-web": ["../tddy-livekit-rpc-web/src/index.ts"]
     }
   },
   "include": ["src", "cypress", "cypress.d.ts"]

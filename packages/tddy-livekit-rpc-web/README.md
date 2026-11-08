@@ -1,4 +1,4 @@
-# tddy-livekit-web
+# tddy-livekit-rpc-web
 
 ConnectRPC Transport over LiveKit data channels for browser-based TypeScript clients.
 
@@ -17,7 +17,7 @@ Implements the ConnectRPC `Transport` interface over LiveKit data channels using
 ```typescript
 import { Room } from "livekit-client";
 import { createClient } from "@connectrpc/connect";
-import { createLiveKitTransport } from "tddy-livekit-web";
+import { createLiveKitTransport } from "tddy-livekit-rpc-web";
 import { EchoService } from "./gen/echo_pb.js";
 
 const room = new Room();
@@ -44,5 +44,5 @@ Cypress component tests run against a real Rust echo server. Requires `LIVEKIT_T
 
 ```bash
 eval $(./run-livekit-testkit-server | grep '^export ')
-cd packages/tddy-livekit-web && bun run cypress:component
+cd packages/tddy-livekit-rpc-web && bun run cypress:component
 ```

@@ -3,7 +3,7 @@
 **Category:** Known failing test
 **Source:** ci-setup, 2026-08-15
 
-- `packages/tddy-livekit-web/cypress/component/transport.cy.tsx:141` looks for a captured log line
+- `packages/tddy-livekit-rpc-web/cypress/component/transport.cy.tsx:141` looks for a captured log line
   containing **`[LiveKitTransport]`** and `cancelled`, and fails `expected undefined to exist`.
   Grepping `packages/` for the literal `[LiveKitTransport]` finds it in exactly two places — this
   assertion and the capture filter in `cypress/support/component.ts:13`. **No production code emits
