@@ -38,11 +38,11 @@ export const sessionsVisibleErrorsPage = {
 
   /** The real terminal canvas, once it is ready to take keystrokes. */
   readyTerminal: () =>
-    byTestId(TEST_IDS.ghosttyTerminal, { timeout: 10000 }).should("have.attr", "data-terminal-ready", "true"),
+    byTestId(TEST_IDS.terminal, { timeout: 10000 }).should("have.attr", "data-terminal-ready", "true"),
 
-  /** Type into the real terminal (clicking it first focuses ghostty-web's canvas). */
+  /** Type into the real terminal (clicking it first focuses xterm.js's canvas). */
   typeIntoTerminal(text: string) {
-    byTestId(TEST_IDS.ghosttyTerminal).click().type(text);
+    byTestId(TEST_IDS.terminal).click().type(text);
   },
 
   /** Turn on selection mode, tick `sessionIds`, and delete them. */

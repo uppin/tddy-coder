@@ -86,7 +86,7 @@ export const TEST_IDS = {
   connectionError: "connection-error",
 
   // Terminal
-  ghosttyTerminal: "ghostty-terminal",
+  terminal: "terminal",
   terminalFullscreenButton: "terminal-fullscreen-button",
   terminalConnectionStatusBar: "terminal-connection-status-bar",
   mobileKeyboardButton: "mobile-keyboard-button",

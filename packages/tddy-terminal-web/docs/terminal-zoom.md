@@ -8,15 +8,15 @@ Technical reference for pitch-in / pitch-out / reset in **tddy-terminal-web**. P
 |------|----------|
 | Bounds and stepping | `src/lib/terminalZoom.ts` (`clampTerminalFontSize`, `pitchInFontSize`, `pitchOutFontSize`, `canPitchIn`, `canPitchOut`, defaults **8–32** px, step **1**) |
 | Bridge and parsers | `src/lib/terminalZoomBridge.ts` (`TERMINAL_ZOOM_BRIDGE_EVENT`, `TERMINAL_FONT_SIZE_SYNC_EVENT`, `parseTerminalZoomBridgeDetail`, `parseTerminalFontSizeSyncDetail`, `dispatchTerminalZoomBridge`, `dispatchTerminalZoomBridgeOn`, `dispatchTerminalFontSizeSync`, `isTerminalZoomDebugEnabled`) |
-| Terminal integration | `src/GhosttyTerminal.tsx` (`minFontSize` / `maxFontSize`, bridge listener, **Ctrl/⌘ +/-/0**, two-finger **pinch**, **trackpad** `wheel`+`ctrlKey`, `applyFontSizePx`, `data-terminal-font-size`, imperative `setTerminalFontSize` on ref; `pinchZoomFont` prop) |
+| Terminal integration | `src/TerminalView.tsx` (`minFontSize` / `maxFontSize`, bridge listener, **Ctrl/⌘ +/-/0**, two-finger **pinch**, **trackpad** `wheel`+`ctrlKey`, `applyFontSizePx`, `data-terminal-font-size`, imperative `setTerminalFontSize` on ref; `pinchZoomFont` prop) |
 | Connection chrome | `src/connection/ConnectionTerminalChrome.tsx` (no zoom UI; status dot / fullscreen only) |
-| Session terminal | `src/GhosttyTerminalSession.tsx` (`fontSize` prop → **`GhosttyTerminal`** baseline, `minFontSize` / `maxFontSize` bounds; see [terminal-session.md](terminal-session.md)) |
+| Session terminal | `src/TerminalSession.tsx` (`fontSize` prop → **`TerminalView`** baseline, `minFontSize` / `maxFontSize` bounds; see [terminal-session.md](terminal-session.md)) |
 
 ## Event contract
 
 Bridge actions use `window.dispatchEvent` with **`tddy-terminal-zoom`**. Payloads are validated before handling. Font-size sync uses **`tddy-terminal-font-size-sync`** (emitted when the applied size changes).
 
-Verbose logging is opt-in: **`VITE_TERMINAL_ZOOM_DEBUG=true`** at build time, or **`debugLogging`** on **`GhosttyTerminal`**.
+Verbose logging is opt-in: **`VITE_TERMINAL_ZOOM_DEBUG=true`** at build time, or **`debugLogging`** on **`TerminalView`**.
 
 ## Pinch (touch)
 

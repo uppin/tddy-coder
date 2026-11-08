@@ -84,10 +84,10 @@ export const sessionTerminalTabsPage = {
   pane: (terminalId: string, options?: Parameters<typeof cy.get>[1]) =>
     byTestId(sessionsTerminalPane(terminalId), { timeout: 10000, ...options }),
 
-  /** The ghostty terminal canvas inside a terminal pane — the focus/typing target. */
+  /** The terminal canvas inside a terminal pane — the focus/typing target. */
   paneTerminal: (terminalId: string, options?: Parameters<typeof cy.get>[1]) =>
     byTestId(sessionsTerminalPane(terminalId), { timeout: 10000, ...options }).find(
-      `[data-testid='${TEST_IDS.ghosttyTerminal}']`,
+      `[data-testid='${TEST_IDS.terminal}']`,
     ),
 
   /** The mobile shortcut drawer inside one terminal's pane. */

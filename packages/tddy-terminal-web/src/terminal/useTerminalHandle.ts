@@ -3,10 +3,10 @@ import type { TerminalEngine } from "../engine/TerminalEngine";
 import { computeScrollbar } from "../lib/terminalScrollbar";
 import { dWrite, type TerminalLoggers } from "./terminalLoggers";
 import type { OnDataRef, TerminalRef } from "./terminalRefs";
-import type { GhosttyTerminalHandle } from "./types";
+import type { TerminalViewHandle } from "./types";
 
 export interface TerminalHandleInput {
-  ref: ForwardedRef<GhosttyTerminalHandle>;
+  ref: ForwardedRef<TerminalViewHandle>;
   termRef: TerminalRef;
   onDataRef: OnDataRef;
   /** Bumped on every write and clear: the buffer's content changes only through those (and a
@@ -115,7 +115,7 @@ export function useTerminalHandle({
       setTerminalFontSize(px: number) {
         if (!Number.isFinite(px)) return;
         if (zoomVerbose) {
-          console.info("[tddy][GhosttyTerminal] setTerminalFontSize (imperative)", { px });
+          console.info("[tddy][TerminalView] setTerminalFontSize (imperative)", { px });
         }
         applyFontSizePx(px, { min: minFontSize, max: maxFontSize });
       },

@@ -1,6 +1,6 @@
 # tddy-terminal-web documentation
 
-The browser terminal: `GhosttyTerminal`, `GhosttyTerminalSession`, the terminal chrome in
+The browser terminal: `TerminalView`, `TerminalSession`, the terminal chrome in
 `src/connection/` (status bar, shortcut drawer, mobile keyboard, file drop and upload button,
 enqueued-input overlay), the transport-agnostic terminal feed and input delivery (`src/rpc/`,
 `useTerminalControl`, `useEnqueuedInput`) and the terminal helpers in `src/lib/` (zoom, OSC 52,
@@ -20,10 +20,10 @@ tool shortcuts, stream offsets). It imports nothing from `tddy-web` or `livekit-
 
 ## Source layout
 
-`GhosttyTerminal.tsx` and `GhosttyTerminalSession.tsx` are compositions of hooks; every production
+`TerminalView.tsx` and `TerminalSession.tsx` are compositions of hooks; every production
 file stays within 500 lines (`src/componentSize.test.ts`).
 
-- `src/engine/` — the `TerminalEngine` interface, `ghosttyEngine` (the only ghostty-web importer)
+- `src/engine/` — the `TerminalEngine` interface, `xtermEngine` (the only xterm.js importer)
   and the reusable engine contract suite.
 - `src/terminal/` — what the emulator component is made of: `types`, `terminalLoggers`,
   `terminalGeometry`, `terminalRefs`, `useTerminalLifecycle` (open, fit, write, dispose),

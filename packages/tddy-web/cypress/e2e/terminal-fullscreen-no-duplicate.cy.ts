@@ -9,9 +9,9 @@
  */
 import type { TerminalSessionResult } from "../support/commands";
 
-const STORY_ID = "components-ghosttyterminal--live-kit-connected";
+const STORY_ID = "components-terminal--live-kit-connected";
 
-describe("Ghostty Fullscreen No Duplicate", () => {
+describe("Terminal Fullscreen No Duplicate", () => {
   let session: TerminalSessionResult = {} as TerminalSessionResult;
 
   before(function () {
@@ -26,7 +26,7 @@ describe("Ghostty Fullscreen No Duplicate", () => {
 
   it("shows the status bar exactly once when multiple frames have been streamed", () => {
     // Given
-    cy.visitGhosttyStory({ storyId: STORY_ID, url: session.url, token: session.clientToken, roomName: session.roomName });
+    cy.visitTerminalStory({ storyId: STORY_ID, url: session.url, token: session.clientToken, roomName: session.roomName });
     cy.connectAndWaitForTerminal();
     cy.waitForBufferText("Email/password");
 

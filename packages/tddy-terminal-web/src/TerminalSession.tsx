@@ -2,7 +2,7 @@
  * One terminal, fed by a session's connection.
  *
  * This is the LiveKit terminal and the gRPC terminal merged. They rendered the same chrome
- * — `GhosttyTerminal`, `ConnectionTerminalChrome`, `TerminalConnectionStatusBar`, `ShortcutDrawer`,
+ * — `TerminalView`, `ConnectionTerminalChrome`, `TerminalConnectionStatusBar`, `ShortcutDrawer`,
  * `MobileTerminalKeyboard`, `TerminalFileDropZone`, `TerminalUploadButton` — and differed in two
  * things: how bytes arrived, and what each could do. Node 3 of the `optional-livekit` stack moved
  * the room, the identity and the token onto the `SessionConnection`, which left the first
@@ -24,8 +24,8 @@ import {
   shouldShowVisibleTerminalStatusStrip,
   type TerminalConnectionStatus,
 } from "./connection/terminalConnectionStatus";
-import { GhosttyTerminal } from "./GhosttyTerminal";
-import type { GhosttyTerminalHandle } from "./terminal/types";
+import { TerminalView } from "./TerminalView";
+import type { TerminalViewHandle } from "./terminal/types";
 import { ConnectionTerminalChrome } from "./connection/ConnectionTerminalChrome";
 import { TerminalConnectionStatusBar } from "./connection/TerminalConnectionStatusBar";
 import { MobileTerminalKeyboard } from "./connection/MobileTerminalKeyboard";
@@ -38,14 +38,14 @@ import { dChrome, dResize, dTerm, describeKey } from "./session/sessionDiagnosti
 import { affordanceBtnStyle, paneCoverStyle } from "./session/paneStyles";
 import { PaneOverlays } from "./session/PaneOverlays";
 import { TerminalProbes } from "./session/TerminalProbes";
-import type { GhosttyTerminalSessionProps } from "./session/types";
+import type { TerminalSessionProps } from "./session/types";
 import { useFeedStream, useSessionEnded } from "./session/useFeedStream";
 import { useHistoryDoubleBuffer } from "./session/useHistoryDoubleBuffer";
 import { useTestWindowHooks } from "./session/useLivePaneGates";
 import { useTerminalMirrors } from "./session/useTerminalMirrors";
 
 export { describeKey } from "./session/sessionDiagnostics";
-export type { GhosttyTerminalSessionProps } from "./session/types";
+export type { TerminalSessionProps } from "./session/types";
 
 /**
  * The history view's greyish color scheme (also a stopped session's Agent tab), so it never reads as
@@ -58,7 +58,7 @@ export const HISTORY_FILTER = "grayscale(1) brightness(0.9)";
 /** Scrollback lines retained by the older-history page terminal (large enough to hold a full session). */
 const PAGE_SCROLLBACK = 50000;
 
-export function GhosttyTerminalSession({
+export function TerminalSession({
   feed,
   sessionToken,
   sessionId,
@@ -85,13 +85,13 @@ export function GhosttyTerminalSession({
   showBufferTextForTest = false,
   debugMode = false,
   debugLogging = false,
-}: GhosttyTerminalSessionProps) {
+}: TerminalSessionProps) {
   const log = debugLogging
-    ? (...args: unknown[]) => console.log("[GhosttyTerminalSession]", ...args)
+    ? (...args: unknown[]) => console.log("[TerminalSession]", ...args)
     : () => {};
 
-  const termRef = useRef<GhosttyTerminalHandle>(null);
-  const olderTermRef = useRef<GhosttyTerminalHandle>(null);
+  const termRef = useRef<TerminalViewHandle>(null);
+  const olderTermRef = useRef<TerminalViewHandle>(null);
   const liveContainerRef = useRef<HTMLDivElement>(null);
   const pageContainerRef = useRef<HTMLDivElement>(null);
   const internalFullscreenTargetRef = useRef<HTMLDivElement>(null);
@@ -168,7 +168,7 @@ export function GhosttyTerminalSession({
   });
 
   /**
-   * The one path to the feed's input side — Ghostty's `onData`, the resize OSC and every affordance.
+   * The one path to the feed's input side — xterm.js's `onData`, the resize OSC and every affordance.
    *
    * `metered` is false for the terminal's own chatter. The resize OSC is not the operator's traffic:
    * the PTY bridge parses it out of the input stream and the shell never sees it, and a terminal
@@ -191,7 +191,7 @@ export function GhosttyTerminalSession({
   /** Send what the operator produced — keystrokes, shortcuts. */
   const sendInput = (data: string | Uint8Array) => writeToFeed(data, true);
 
-  /** Deliver dropped paths the way a native terminal does: as a paste, which ghostty wraps in
+  /** Deliver dropped paths the way a native terminal does: as a paste, which xterm.js wraps in
    *  bracketed-paste markers when the program enabled them (Claude Code does, and attaches a pasted
    *  image path as an image) and which reaches {@link sendInput} through `onData`. */
   const pasteInput = (text: string) => termRef.current?.paste?.(text);
@@ -248,7 +248,7 @@ export function GhosttyTerminalSession({
   });
 
   const terminal = (
-    <GhosttyTerminal
+    <TerminalView
       ref={termRef}
       fontSize={fontSize}
       minFontSize={minFontSize}
@@ -291,14 +291,14 @@ export function GhosttyTerminalSession({
   );
 
   const olderTerminal = (
-    <GhosttyTerminal
+    <TerminalView
       ref={olderTermRef}
       fontSize={fontSize}
       minFontSize={minFontSize}
       maxFontSize={maxFontSize}
       scrollback={PAGE_SCROLLBACK}
       theme={HISTORY_THEME}
-      testId="ghostty-terminal-older"
+      testId="terminal-older"
       preventFocusOnTap
       onReady={() => {
         olderReadyRef.current = true;

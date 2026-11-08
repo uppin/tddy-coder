@@ -25,8 +25,8 @@ read off this machine through Tddy Desktop's window (`droppedFileUploadSource`).
 `uploadSources` over `fileUploadSource`. A source always has at least one chunk, so an empty file still
 sends a final chunk and gets its path back.
 
-**Paths reach the PTY as a paste.** `GhosttyTerminalSession` hands the drop zone `pasteInput`, which
-calls the terminal handle's `paste` (ghostty-web's `Terminal.paste`): wrapped in `ESC [ 200 ~` …
+**Paths reach the PTY as a paste.** `TerminalSession` hands the drop zone `pasteInput`, which
+calls the terminal handle's `paste` (xterm.js's `Terminal.paste`): wrapped in `ESC [ 200 ~` …
 `ESC [ 201 ~` when the program enabled bracketed paste (DEC 2004), plain otherwise, and forwarded
 through `onData` to the feed like any keystroke. Claude Code enables bracketed paste and attaches a
 pasted image path as an image.
@@ -131,6 +131,6 @@ Units `randomId.test.ts` (6), `fileUploadChunks.test.ts` (5), `shellQuote`/`uplo
 `TerminalFileDropUpload` (4), `TerminalFileUploadFailure` (2), `MobileTerminalUploadButton` (2),
 `TerminalFileUploadProgressFooter` (2), `TerminalDropInsertHostPath` (2, internal host-path drag),
 `TerminalNativeFileDrop` (7: highlight, real paths, upload, folder refusal, routing to the terminal
-under the pointer, a drop outside every terminal), `GhosttyTerminalSession` (a dropped path pasted
+under the pointer, a drop outside every terminal), `TerminalSession` (a dropped path pasted
 bracketed and plain); unit `sessionReadsLocalPaths.test.ts` (5).
 The transport deadline itself is pinned in `packages/tddy-livekit-rpc-web/src/transport.test.ts`.

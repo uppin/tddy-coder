@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type MutableRefObject, type RefObject } from "react";
 import { TerminalHistoryForwardLoader } from "tddy-client-web";
 import { feedSupportsHistory, type TerminalFeed } from "tddy-client-web/connections/terminal";
-import type { GhosttyTerminalHandle } from "../terminal/types";
+import type { TerminalViewHandle } from "../terminal/types";
 import { dHistory, decModeChanges, traceModes, tuiOwnsNavigation } from "./sessionDiagnostics";
 
 /**
@@ -17,14 +17,14 @@ export function useHistoryDoubleBuffer({
   refreshMirrors,
 }: {
   feed: TerminalFeed;
-  olderTermRef: RefObject<GhosttyTerminalHandle | null>;
+  olderTermRef: RefObject<TerminalViewHandle | null>;
   olderReadyRef: MutableRefObject<boolean>;
   olderBufferRef: MutableRefObject<Uint8Array[]>;
   /** Cumulative output offset received so far; bounds the forward fill. */
   currentOffsetRef: MutableRefObject<bigint>;
   refreshMirrors: () => void;
 }) {
-  // Overlay double-buffer paging state. Two ghostty-web terminals share the same rect; `view`
+  // Overlay double-buffer paging state. Two xterm.js terminals share the same rect; `view`
   // decides which is foreground (visible, interactive). The live terminal (scrollback 0, always
   // pinned to the live tip) always stays mounted and keeps receiving the stream, so swapping back
   // to "live" is instant. `loading` shows the loading indicator while the background page terminal
@@ -42,8 +42,8 @@ export function useHistoryDoubleBuffer({
   const [liveTuiOwnsNavigation, setLiveTuiOwnsNavigation] = useState(false);
   // The terminal parses written data after `write` returns, so the modes a chunk switches are read
   // when the parse lands: a listener per terminal re-reads them after every parse.
-  const modeWatchRef = useRef<{ term: GhosttyTerminalHandle; subscription: { dispose(): void } } | null>(null);
-  const noteLiveModeSwitches = (term: GhosttyTerminalHandle, data: Uint8Array) => {
+  const modeWatchRef = useRef<{ term: TerminalViewHandle; subscription: { dispose(): void } } | null>(null);
+  const noteLiveModeSwitches = (term: TerminalViewHandle, data: Uint8Array) => {
     const modes = decModeChanges(data);
     if (modes.length === 0) return;
     if (modeWatchRef.current?.term !== term) {

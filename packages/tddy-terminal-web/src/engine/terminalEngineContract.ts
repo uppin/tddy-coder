@@ -1,8 +1,8 @@
 /**
  * The behaviour every `TerminalEngine` must show, as a reusable Cypress suite.
  *
- * Run it once per engine from a component spec (`describeTerminalEngine("ghosttyEngine",
- * ghosttyEngine)`): engines render into a real DOM and some load WASM, so the suite needs a browser.
+ * Run it once per engine from a component spec (`describeTerminalEngine("xtermEngine",
+ * xtermEngine)`): engines render into a real DOM and so the suite needs a browser.
  * Every scroll position asserted here counts from the top of the buffer.
  */
 

@@ -20,10 +20,10 @@
  * desktop keydown handler forwards the combinations to the PTY input channel.
  */
 
-import { aGhosttyTerminal } from "../support/drivers/ghosttyTerminalDriver";
-import { aGhosttyTerminalSession } from "../support/drivers/ghosttyTerminalSessionDriver";
+import { aTerminalView } from "../support/drivers/terminalViewDriver";
+import { aTerminalSession } from "../support/drivers/terminalSessionDriver";
 
-// GhosttyTerminal's `onData` is the PTY input channel: `GhosttyTerminalSession`
+// TerminalView's `onData` is the PTY input channel: `TerminalSession`
 // wires `onData` straight into its feed's `send`, which is drained to the remote
 // terminal. Asserting on `onData` therefore asserts "sent to the PTY".
 const REVERSE_TAB_SEQUENCE = "\x1b[Z"; // Shift+Tab → CSI Z
@@ -42,7 +42,7 @@ describe("Desktop browser terminal shortcuts", () => {
 
   it("shows the sticky shortcut overlay on the desktop browser when the session has shortcuts", () => {
     // Given — a desktop session (mobile keyboard not shown) that exposes shortcuts
-    aGhosttyTerminalSession({
+    aTerminalSession({
       showMobileKeyboard: false,
       mobileShortcuts: CLAUDE_CLI_SHORTCUTS,
     })
@@ -53,7 +53,7 @@ describe("Desktop browser terminal shortcuts", () => {
 
   it("sends the reverse-tab sequence to the PTY when Shift+Tab is pressed on the focused terminal", () => {
     // Given — a focused desktop terminal
-    const driver = aGhosttyTerminal({ onData: cy.stub().as("onData") }).mount();
+    const driver = aTerminalView({ onData: cy.stub().as("onData") }).mount();
     driver.expectExists().click();
 
     // When — the user presses Shift+Tab on the physical keyboard
@@ -65,7 +65,7 @@ describe("Desktop browser terminal shortcuts", () => {
 
   it("sends the meta sequence to the PTY when Alt+M is pressed on the focused terminal", () => {
     // Given — a focused desktop terminal
-    const driver = aGhosttyTerminal({ onData: cy.stub().as("onData") }).mount();
+    const driver = aTerminalView({ onData: cy.stub().as("onData") }).mount();
     driver.expectExists().click();
 
     // When — the user presses Alt+M on the physical keyboard

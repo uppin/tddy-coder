@@ -23,5 +23,5 @@ export function fitTerminalToContainer(term: TerminalEngine): void {
 export function shouldHandleTerminalZoomKeys(): boolean {
   const el = document.activeElement;
   if (!el || el === document.body) return true;
-  return el.closest("[data-testid='ghostty-terminal']") !== null;
+  return el.closest("[data-testid='terminal']") !== null;
 }

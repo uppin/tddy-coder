@@ -15,9 +15,9 @@ const GROW_BY_ROWS = 10;
 const SHRINK_PX = ROWS_PX * SHRINK_BY_ROWS;
 const GROW_PX = ROWS_PX * GROW_BY_ROWS;
 
-const STORY_ID = "components-ghosttyterminal--live-kit-connected";
+const STORY_ID = "components-terminal--live-kit-connected";
 
-describe("Ghostty Resize No Duplicate", () => {
+describe("Terminal Resize No Duplicate", () => {
   let session: TerminalSessionResult = {} as TerminalSessionResult;
 
   before(function () {
@@ -32,13 +32,13 @@ describe("Ghostty Resize No Duplicate", () => {
 
   it("shows PgUp/PgDn scroll exactly once after a shrink-then-grow resize cycle", () => {
     // Given
-    cy.visitGhosttyStory({ storyId: STORY_ID, url: session.url, token: session.clientToken, roomName: session.roomName });
+    cy.visitTerminalStory({ storyId: STORY_ID, url: session.url, token: session.clientToken, roomName: session.roomName });
     cy.connectAndWaitForTerminal();
     cy.waitForBufferText("PgUp/PgDn scroll");
 
     // When — simulate a resize cycle
     cy.viewport(1280, 720);
-    // Brief settle after each viewport change to let Ghostty propagate the resize
+    // Brief settle after each viewport change to let xterm.js propagate the resize
     // eslint-disable-next-line cypress/no-unnecessary-waiting
     cy.wait(500); // justified: resize event + TUI re-render takes ~200-400ms
     cy.viewport(1280, 720 - SHRINK_PX);

@@ -2,7 +2,7 @@ import { useEffect, useRef, useState, type MutableRefObject, type RefObject } fr
 import type { TerminalFeed } from "tddy-client-web/connections/terminal";
 import { TerminalStreamOffset } from "../lib/terminalStreamOffset";
 import type { ByteDelta } from "../lib/byteDelta";
-import type { GhosttyTerminalHandle } from "../terminal/types";
+import type { TerminalViewHandle } from "../terminal/types";
 import { dHistory, dTerm, hexPreview } from "./sessionDiagnostics";
 
 export interface FeedStreamInput {
@@ -12,7 +12,7 @@ export interface FeedStreamInput {
   showBufferTextForTest: boolean;
   onOffsetUpdate: ((offset: bigint) => void) | undefined;
   onBytesRef: MutableRefObject<((delta: ByteDelta) => void) | undefined>;
-  termRef: RefObject<GhosttyTerminalHandle | null>;
+  termRef: RefObject<TerminalViewHandle | null>;
   termReadyRef: MutableRefObject<boolean>;
   outputBufferRef: MutableRefObject<Uint8Array[]>;
   streamedTextRef: MutableRefObject<string>;
@@ -21,7 +21,7 @@ export interface FeedStreamInput {
   currentOffsetRef: MutableRefObject<bigint>;
   anchorRef: MutableRefObject<{ endOffset: bigint; atOldest: boolean } | null>;
   setAnchor: (anchor: { endOffset: bigint; atOldest: boolean }) => void;
-  noteLiveModeSwitches: (term: GhosttyTerminalHandle, data: Uint8Array) => void;
+  noteLiveModeSwitches: (term: TerminalViewHandle, data: Uint8Array) => void;
 }
 
 /**
@@ -99,7 +99,7 @@ export function useFeedStream({
         termRef.current.write(data);
         noteLiveModeSwitches(termRef.current, data);
       } else {
-        // The reconnect byte-buffering fix: bytes that arrive before ghostty-web is ready are held
+        // The reconnect byte-buffering fix: bytes that arrive before xterm.js is ready are held
         // and flushed in order on `onReady`, instead of being written into a terminal that is not
         // there (which is what garbled a 220-column replay).
         outputBufferRef.current.push(data);

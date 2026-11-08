@@ -1,5 +1,5 @@
 /**
- * Fluent component driver: a real `GhosttyTerminalSession` wired to the wheel-reporting test TUI.
+ * Fluent component driver: a real `TerminalSession` wired to the wheel-reporting test TUI.
  *
  * The TUI's own output (mode setup included) arrives through the terminal feed exactly as a PTY's
  * would, and whatever the terminal sends back is handed to the TUI as its stdin — so the specs
@@ -7,7 +7,7 @@
  */
 
 import React from "react";
-import { GhosttyTerminalSession } from "../../../src/GhosttyTerminalSession";
+import { TerminalSession } from "../../../src/TerminalSession";
 import type { TerminalFeed, TerminalStream } from "tddy-client-web/connections/terminal";
 import { UploadProgressProvider } from "../../../src/rpc/uploadProgress";
 import { WheelTuiApp, type WheelTuiOptions } from "../../../scripts/wheel-tui/wheelTuiApp";
@@ -60,11 +60,11 @@ export function aWheelTuiSession(options: WheelTuiSessionOptions) {
       cy.mount(
         <div style={{ height: 400, width: 800, position: "relative" }}>
           <UploadProgressProvider>
-            <GhosttyTerminalSession feed={feed} sessionToken="wheel-tui-token" sessionId="wheel-tui-session" />
+            <TerminalSession feed={feed} sessionToken="wheel-tui-token" sessionId="wheel-tui-session" />
           </UploadProgressProvider>
         </div>,
       );
-      byTestId(TEST_IDS.ghosttyTerminal, { timeout: 10000 }).should("exist");
+      byTestId(TEST_IDS.terminal, { timeout: 10000 }).should("exist");
       return this;
     },
 

@@ -9,7 +9,7 @@
  */
 
 import React from "react";
-import { GhosttyTerminalSession } from "../../../src/GhosttyTerminalSession";
+import { TerminalSession } from "../../../src/TerminalSession";
 import type { TerminalStream } from "tddy-client-web/connections/terminal";
 import type { HistoryChunk } from "tddy-client-web";
 import { UploadProgressProvider } from "../../../src/rpc/uploadProgress";
@@ -142,7 +142,7 @@ export function aTerminalWithHistoryPaging() {
   };
 
   const waitForTerminal = () =>
-    byTestId(TEST_IDS.ghosttyTerminal, { timeout: 10000 }).should(
+    byTestId(TEST_IDS.terminal, { timeout: 10000 }).should(
       "have.attr",
       "data-terminal-ready",
       "true",
@@ -158,7 +158,7 @@ export function aTerminalWithHistoryPaging() {
       cy.mount(
         <div style={{ height: 400, width: 800, position: "relative" }}>
           <UploadProgressProvider>
-            <GhosttyTerminalSession
+            <TerminalSession
               feed={{ stream, history: fetcher.fetch }}
               sessionToken="lazy-history-token"
               sessionId="lazy-history-session"
@@ -225,7 +225,7 @@ export function aTerminalWithHistoryPaging() {
     },
 
     /** Enter the alternate screen (DEC 1049) on the live terminal by writing the real escape sequence.
-     *  ghostty-web processes it and reports isAlternateScreen() === true — no test-only hook required. */
+     *  xterm.js processes it and reports isAlternateScreen() === true — no test-only hook required. */
     enterLiveAltScreen() {
       this.pushOutput(enc("\x1b[?1049h"));
       return this;
@@ -267,7 +267,7 @@ export function aTerminalWithHistoryPaging() {
 
     /**
      * Drive the page terminal's viewport up by `lines` via its imperative scrollLines handle
-     * (negative = up into scrollback). Real wheel events don't reach ghostty-web reliably under
+     * (negative = up into scrollback). Real wheel events don't reach xterm.js reliably under
      * Cypress, so component tests exercise the "full control of what position is in the viewport"
      * API through this hook deterministically.
      */

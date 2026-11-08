@@ -2,7 +2,7 @@
  * Chrome behaviours of the one terminal component, driven through its feed.
  *
  * These were the LiveKit terminal's specs; the component they exercise is now the single
- * `GhosttyTerminalSession`, and nothing here connects a room — the driver hands it a feed.
+ * `TerminalSession`, and nothing here connects a room — the driver hands it a feed.
  */
 
 import React from "react";
@@ -11,7 +11,7 @@ import {
   statusBarBottomMeetsOrAboveTerminalTop,
   type ViewRect,
 } from "../../src/lib/terminalStatusBarLayout";
-import { aGhosttyTerminalSession } from "../support/drivers/ghosttyTerminalSessionDriver";
+import { aTerminalSession } from "../support/drivers/terminalSessionDriver";
 
 // ---------------------------------------------------------------------------
 // Geometry helpers — kept file-local because they involve complex layout logic
@@ -22,7 +22,7 @@ function domRectToViewRect(r: DOMRect): ViewRect {
 }
 
 function assertControlCentersNotInsideTerminalCanvas() {
-  cy.get("[data-testid='ghostty-terminal']").then(($term) => {
+  cy.get("[data-testid='terminal']").then(($term) => {
     const termRect = domRectToViewRect($term[0].getBoundingClientRect());
     const doc = $term[0].ownerDocument;
     const selectors = [
@@ -41,7 +41,7 @@ function assertControlCentersNotInsideTerminalCanvas() {
     }
     expect(
       plannedChromeCentersClearTerminalCanvas(termRect, controlRects),
-      "control centers must not lie inside ghostty-terminal rect (shared layout helper)",
+      "control centers must not lie inside terminal rect (shared layout helper)",
     ).to.be.true;
   });
 }
@@ -50,10 +50,10 @@ function assertControlCentersNotInsideTerminalCanvas() {
 // Main describe block
 // ---------------------------------------------------------------------------
 
-describe("GhosttyTerminalSession — chrome", () => {
+describe("TerminalSession — chrome", () => {
   it("shows mobile keyboard overlay when showMobileKeyboard is true regardless of preventFocusOnTap", () => {
     // Given / When
-    const driver = aGhosttyTerminalSession({ showMobileKeyboard: true, preventFocusOnTap: false }).mount();
+    const driver = aTerminalSession({ showMobileKeyboard: true, preventFocusOnTap: false }).mount();
 
     // Then
     driver.mobileKeyboardButton().should("exist").and("contain.text", "Keyboard");
@@ -61,7 +61,7 @@ describe("GhosttyTerminalSession — chrome", () => {
 
   it("mobile keyboard overlay input forwards typed characters when focused", () => {
     // Given
-    const driver = aGhosttyTerminalSession({ showMobileKeyboard: true, preventFocusOnTap: false }).mount();
+    const driver = aTerminalSession({ showMobileKeyboard: true, preventFocusOnTap: false }).mount();
     driver.mobileKeyboardButton().should("exist");
 
     // When
@@ -82,7 +82,7 @@ describe("GhosttyTerminalSession — chrome", () => {
 
   it("does not show mobile keyboard overlay when showMobileKeyboard is false", () => {
     // Given / When
-    const driver = aGhosttyTerminalSession({ showMobileKeyboard: false }).mount();
+    const driver = aTerminalSession({ showMobileKeyboard: false }).mount();
 
     // Then
     driver.expectMobileKeyboardNotExists();
@@ -90,7 +90,7 @@ describe("GhosttyTerminalSession — chrome", () => {
 
   it("renders status dot and build id when connection overlay is enabled", () => {
     // Given / When
-    const driver = aGhosttyTerminalSession({
+    const driver = aTerminalSession({
       connectionOverlay: { onDisconnect: cy.stub().as("onDisconnect"), buildId: "test-build" },
     }).mount();
 
@@ -105,7 +105,7 @@ describe("GhosttyTerminalSession — chrome", () => {
     // Use withDisconnect() so the driver's internal stub is both wired to the component
     // and accessible via cy.get("@onDisconnect") — passing a separate stub via options
     // causes an alias conflict (the driver also creates cy.stub().as("onDisconnect")).
-    const driver = aGhosttyTerminalSession().withDisconnect().mount();
+    const driver = aTerminalSession().withDisconnect().mount();
 
     // When
     driver.openStatusMenu();
@@ -124,7 +124,7 @@ describe("GhosttyTerminalSession — chrome", () => {
 
   it("hides visible livekit status text when connection overlay is enabled", () => {
     // Given / When
-    const driver = aGhosttyTerminalSession({
+    const driver = aTerminalSession({
       connectionOverlay: { onDisconnect: cy.stub(), buildId: "acceptance-build" },
     }).mount();
 
@@ -136,7 +136,7 @@ describe("GhosttyTerminalSession — chrome", () => {
 
   it("fullscreen toggle invokes requestFullscreen when stubbed (enter path)", () => {
     // Given
-    const driver = aGhosttyTerminalSession({
+    const driver = aTerminalSession({
       connectionOverlay: { onDisconnect: cy.stub() },
     }).mount();
 
@@ -153,7 +153,7 @@ describe("GhosttyTerminalSession — chrome", () => {
 
   it("Terminate does not call onTerminate when confirmation is cancelled", () => {
     // Given
-    const driver = aGhosttyTerminalSession();
+    const driver = aTerminalSession();
     driver.stubConfirm(false);
     driver.withTerminate().mount();
 
@@ -167,7 +167,7 @@ describe("GhosttyTerminalSession — chrome", () => {
 
   it("Terminate calls onTerminate once after user confirms", () => {
     // Given
-    const driver = aGhosttyTerminalSession();
+    const driver = aTerminalSession();
     driver.stubConfirm(true);
     driver.withTerminate().mount();
 
@@ -196,11 +196,11 @@ describe("GhosttyTerminalSession — chrome", () => {
 // The connection carrying the feed
 // ---------------------------------------------------------------------------
 
-describe("GhosttyTerminalSession — the connection carrying the feed", () => {
+describe("TerminalSession — the connection carrying the feed", () => {
   it("states the connection status its caller gave it, where no chrome carries one", () => {
     // Given a caller that says the connection is still coming up, and no connection chrome to
     // show it — the status dot only exists with an overlay
-    const driver = aGhosttyTerminalSession({ connectionStatus: "connecting" }).mount();
+    const driver = aTerminalSession({ connectionStatus: "connecting" }).mount();
 
     // Then the raw readout states it, in the layout
     driver.expectStatusReadout("connecting");
@@ -208,7 +208,7 @@ describe("GhosttyTerminalSession — the connection carrying the feed", () => {
 
   it("stops writing input to a feed whose far end has ended, and says the coder is gone", () => {
     // Given a mounted terminal whose keystrokes reach the session
-    const driver = aGhosttyTerminalSession({
+    const driver = aTerminalSession({
       showMobileKeyboard: true,
       preventFocusOnTap: false,
     })
@@ -232,10 +232,10 @@ describe("GhosttyTerminalSession — the connection carrying the feed", () => {
 // ShortcutDrawer integration
 // ---------------------------------------------------------------------------
 
-describe("GhosttyTerminalSession — ShortcutDrawer integration", () => {
+describe("TerminalSession — ShortcutDrawer integration", () => {
   it("renders the shortcut drawer when mobileShortcuts are provided and showMobileKeyboard is true", () => {
     // Given
-    const driver = aGhosttyTerminalSession({
+    const driver = aTerminalSession({
       showMobileKeyboard: true,
       mobileShortcuts: [
         { label: "Shift+Tab", keys: ["Shift", "Tab"] },
@@ -249,7 +249,7 @@ describe("GhosttyTerminalSession — ShortcutDrawer integration", () => {
 
   it("does not render the shortcut drawer when mobileShortcuts is empty", () => {
     // Given
-    const driver = aGhosttyTerminalSession({
+    const driver = aTerminalSession({
       showMobileKeyboard: true,
       mobileShortcuts: [],
     }).mount();
@@ -260,7 +260,7 @@ describe("GhosttyTerminalSession — ShortcutDrawer integration", () => {
 
   it("renders the shortcut drawer when shortcuts are provided even if the mobile keyboard is hidden", () => {
     // Given
-    const driver = aGhosttyTerminalSession({
+    const driver = aTerminalSession({
       showMobileKeyboard: false,
       mobileShortcuts: [{ label: "Shift+Tab", keys: ["Shift", "Tab"] }],
     }).mount();
@@ -275,14 +275,14 @@ describe("GhosttyTerminalSession — ShortcutDrawer integration", () => {
 // ---------------------------------------------------------------------------
 
 /**
- * PRD Testing Plan — terminal status bar (chrome not over Ghostty canvas).
+ * PRD Testing Plan — terminal status bar (chrome not over xterm.js canvas).
  * These tests expect `data-testid="terminal-connection-status-bar"` and layout where the bar
- * precedes `[data-testid="ghostty-terminal"]` with no control centers intersecting the terminal rect.
+ * precedes `[data-testid="terminal"]` with no control centers intersecting the terminal rect.
  */
 describe("Terminal status bar acceptance (PRD)", () => {
   it("keeps the connection chrome in the status bar, never over the terminal canvas", () => {
     // Given
-    const driver = aGhosttyTerminalSession({
+    const driver = aTerminalSession({
       connectionOverlay: { onDisconnect: cy.stub(), buildId: "acceptance-build" },
       showMobileKeyboard: true,
       containerHeight: 420,
@@ -306,7 +306,7 @@ describe("Terminal status bar acceptance (PRD)", () => {
         const term = $term[0];
         expect(
           bar.compareDocumentPosition(term) & Node.DOCUMENT_POSITION_FOLLOWING,
-          "status bar must precede ghostty-terminal in document order",
+          "status bar must precede terminal in document order",
         ).to.be.ok;
         expect(
           statusBarBottomMeetsOrAboveTerminalTop(
@@ -325,7 +325,7 @@ describe("Terminal status bar acceptance (PRD)", () => {
   it("still opens the connection menu and goes fullscreen from the status bar", () => {
     // Given
     // Use withDisconnect() so the driver's internal onDisconnect stub is wired to the component.
-    const driver = aGhosttyTerminalSession({
+    const driver = aTerminalSession({
       containerHeight: 420,
       containerWidth: 640,
     }).withDisconnect("menu-build").mount();
@@ -349,7 +349,7 @@ describe("Terminal status bar acceptance (PRD)", () => {
 
   it("puts the mobile keyboard affordance in the status bar, above the canvas", () => {
     // Given / When
-    const driver = aGhosttyTerminalSession({
+    const driver = aTerminalSession({
       connectionOverlay: { onDisconnect: cy.stub() },
       showMobileKeyboard: true,
       preventFocusOnTap: false,

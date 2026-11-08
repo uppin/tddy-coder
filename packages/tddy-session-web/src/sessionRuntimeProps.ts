@@ -40,7 +40,7 @@ export interface SessionRuntimeProps {
   onSessionRegisterInsert?: (sessionId: string, insertInput: (text: string) => void) => void;
   /** Evict this runtime's terminal (e.g. remote session ended). */
   onSessionDisconnect?: (sessionId: string) => void;
-  /** Account this session's terminal I/O bytes (see `GhosttyTerminalSession.onBytes`) so the
+  /** Account this session's terminal I/O bytes (see `TerminalSession.onBytes`) so the
    *  screen can fold them into the session's inspector counters. */
   onSessionBytes?: (sessionId: string, delta: ByteDelta) => void;
   /** The drawer's full session list — used to discover this session's spawned child conversations

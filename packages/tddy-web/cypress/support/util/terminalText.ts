@@ -1,6 +1,6 @@
 /**
  * Shared terminal text utilities for e2e specs.
- * Extracted from ghostty-terminal.cy.ts and ghostty-large-segmented-echo.cy.ts.
+ * Extracted from terminal.cy.ts and terminal-large-segmented-echo.cy.ts.
  */
 
 /**

@@ -56,7 +56,7 @@ export function useTerminalFontSize({
       const clamped = clampTerminalFontSize(px, min, max);
       const term = termRef.current;
       if (zoomVerbose) {
-        console.info("[tddy][GhosttyTerminal] applyFontSizePx", {
+        console.info("[tddy][TerminalView] applyFontSizePx", {
           requested: px,
           clamped,
           hasTerm: !!term,
@@ -72,7 +72,7 @@ export function useTerminalFontSize({
           fitTerminalToContainer(term);
         }
         if (zoomVerbose) {
-          console.debug("[tddy][GhosttyTerminal] after font/geometry", {
+          console.debug("[tddy][TerminalView] after font/geometry", {
             cols: term.cols,
             rows: term.rows,
             fontSize: term.fontSize(),
@@ -145,7 +145,7 @@ export function useTerminalFontSize({
       };
       const term = termRef.current;
       if (zoomVerbose) {
-        console.debug("[tddy][GhosttyTerminal] terminal zoom bridge", {
+        console.debug("[tddy][TerminalView] terminal zoom bridge", {
           action: d.action,
           merged,
           hasTerm: !!term,
@@ -153,7 +153,7 @@ export function useTerminalFontSize({
       }
       if (!term) {
         if (zoomVerbose) {
-          console.info("[tddy][GhosttyTerminal] zoom bridge ignored — terminal not ready");
+          console.info("[tddy][TerminalView] zoom bridge ignored — terminal not ready");
         }
         return;
       }

@@ -8,8 +8,8 @@ package for its main screen or component.
 |---|---|
 | `.storybook/main.ts` | Storybook 9 on `@storybook/react-vite`; Tailwind; the shared pre-bundle list (`scripts/vite-prebundle.ts`) so the dev server never re-optimises mid-run |
 | `.storybook/preview.tsx` | every story mounted in the clients, navigation and auth ports (`withClients`) plus the presence, room-RPC and media doubles from `tddy-client-web/testkit` |
-| `src/<package>/*.stories.tsx` | the stories; the moved ones keep explicit `title`s, so their ids are unchanged (`components-button--primary`, `components-ghosttyterminal--*`) |
-| `src/storiesRender.test.tsx` | renders every story with the preview's decorators (`setProjectAnnotations`); `GhosttyTerminal` needs a browser and is covered by the static build and `tddy-web`'s e2e specs |
+| `src/<package>/*.stories.tsx` | the stories; the moved ones keep explicit `title`s, so their ids are unchanged (`components-button--primary`, `components-terminal--*`) |
+| `src/storiesRender.test.tsx` | renders every story with the preview's decorators (`setProjectAnnotations`); `TerminalView` needs a browser and is covered by the static build and `tddy-web`'s e2e specs |
 
 `bun run storybook` serves it; `bun run build` (alias `build-storybook`, after a `prebuild` of
 `tddy-livekit-rpc-web`) writes `storybook-static/`, which `tddy-web`'s e2e scripts

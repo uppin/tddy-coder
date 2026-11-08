@@ -1,7 +1,7 @@
 import React, { createRef } from "react";
 import { flushSync } from "react-dom";
-import { GhosttyTerminal, type GhosttyTerminalHandle } from "../../src/GhosttyTerminal";
-import { GhosttyTerminalSession } from "../../src/GhosttyTerminalSession";
+import { TerminalView, type TerminalViewHandle } from "../../src/TerminalView";
+import { TerminalSession } from "../../src/TerminalSession";
 import {
   DEFAULT_TERMINAL_FONT_MAX,
   DEFAULT_TERMINAL_FONT_MIN,
@@ -9,14 +9,14 @@ import {
   pitchOutFontSize,
 } from "../../src/lib/terminalZoom";
 import { dispatchTerminalZoomBridgeOn } from "../../src/lib/terminalZoomBridge";
-import { aControllableFeed } from "../support/drivers/ghosttyTerminalSessionDriver";
+import { aControllableFeed } from "../support/drivers/terminalSessionDriver";
 import { byTestId, TEST_IDS } from "../support/testIds";
 
 /**
  * Acceptance contract (embedded terminal zoom / pitch):
  * - Font steps use the same `terminalZoom` helpers as keyboard / bridge paths (`setTerminalFontSize` on the imperative handle).
- * - The session-terminal case uses `dispatchTerminalZoomBridgeOn` from the terminal textarea's `ownerDocument.defaultView` (same `window` as `GhosttyTerminal` listeners).
- * - `ghostty-terminal` exposes data-terminal-font-size (integer string) for assertions
+ * - The session-terminal case uses `dispatchTerminalZoomBridgeOn` from the terminal textarea's `ownerDocument.defaultView` (same `window` as `TerminalView` listeners).
+ * - `terminal` exposes data-terminal-font-size (integer string) for assertions
  * - Pitch tests wait briefly after the terminal textarea exists so the `ready` + prop-sync effect has run before imperative `setTerminalFontSize` (avoids a race on warm init).
  */
 
@@ -30,7 +30,7 @@ const ZOOM_OPTS = { min: DEFAULT_TERMINAL_FONT_MIN, max: DEFAULT_TERMINAL_FONT_M
 
 /** Cypress + async React scheduling: flush so `data-terminal-font-size` updates before chained assertions. */
 function flushSetTerminalFontSize(
-  ref: React.RefObject<GhosttyTerminalHandle | null>,
+  ref: React.RefObject<TerminalViewHandle | null>,
   px: number
 ) {
   flushSync(() => {
@@ -40,7 +40,7 @@ function flushSetTerminalFontSize(
 
 /** Let React run `ready` + `applyFontSizePx(fontSize)` from props before imperative zoom (see pitch tests). */
 function waitForPropSyncAfterReady() {
-  byTestId(TEST_IDS.ghosttyTerminal).find("textarea").should("exist");
+  byTestId(TEST_IDS.terminal).find("textarea").should("exist");
   cy.wrap(null).then(
     () =>
       new Promise<void>((resolve) => {
@@ -80,15 +80,15 @@ function countResizeOscCalls(
 describe("Terminal zoom acceptance (PRD Testing Plan)", () => {
   it("terminal_pitch_in_increases_font_and_fires_resize_with_larger_dimensions_when_viewport_fixed", () => {
     // Given
-    const termRef = createRef<GhosttyTerminalHandle>();
+    const termRef = createRef<TerminalViewHandle>();
     cy.mount(
       <div style={VIEWPORT_STYLE}>
-        <GhosttyTerminal ref={termRef} fontSize={14} />
+        <TerminalView ref={termRef} fontSize={14} />
       </div>
     );
-    byTestId(TEST_IDS.ghosttyTerminal, { timeout: 10000 }).should("exist");
+    byTestId(TEST_IDS.terminal, { timeout: 10000 }).should("exist");
     waitForPropSyncAfterReady();
-    byTestId(TEST_IDS.ghosttyTerminal).should("have.attr", "data-terminal-font-size", "14");
+    byTestId(TEST_IDS.terminal).should("have.attr", "data-terminal-font-size", "14");
     cy.wrap(termRef).should((r) => {
       expect(r.current?.setTerminalFontSize).to.be.a("function");
     });
@@ -99,7 +99,7 @@ describe("Terminal zoom acceptance (PRD Testing Plan)", () => {
     });
 
     // Then — font size increased
-    byTestId(TEST_IDS.ghosttyTerminal).should(($el) => {
+    byTestId(TEST_IDS.terminal).should(($el) => {
       const fs = Number($el.attr("data-terminal-font-size"));
       expect(fs, "font size after pitch-in").to.be.greaterThan(14);
     });
@@ -107,15 +107,15 @@ describe("Terminal zoom acceptance (PRD Testing Plan)", () => {
 
   it("terminal_pitch_out_decreases_font_and_fires_resize_with_smaller_dimensions_when_viewport_fixed", () => {
     // Given
-    const termRef = createRef<GhosttyTerminalHandle>();
+    const termRef = createRef<TerminalViewHandle>();
     cy.mount(
       <div style={VIEWPORT_STYLE}>
-        <GhosttyTerminal ref={termRef} fontSize={14} />
+        <TerminalView ref={termRef} fontSize={14} />
       </div>
     );
-    byTestId(TEST_IDS.ghosttyTerminal, { timeout: 10000 }).should("exist");
+    byTestId(TEST_IDS.terminal, { timeout: 10000 }).should("exist");
     waitForPropSyncAfterReady();
-    byTestId(TEST_IDS.ghosttyTerminal).should("have.attr", "data-terminal-font-size", "14");
+    byTestId(TEST_IDS.terminal).should("have.attr", "data-terminal-font-size", "14");
     cy.wrap(termRef).should((r) => {
       expect(r.current?.setTerminalFontSize).to.be.a("function");
     });
@@ -126,7 +126,7 @@ describe("Terminal zoom acceptance (PRD Testing Plan)", () => {
     });
 
     // Then — font size decreased
-    byTestId(TEST_IDS.ghosttyTerminal).should(($el) => {
+    byTestId(TEST_IDS.terminal).should(($el) => {
       const fs = Number($el.attr("data-terminal-font-size"));
       expect(fs, "font size after pitch-out").to.be.lessThan(14);
     });
@@ -134,14 +134,14 @@ describe("Terminal zoom acceptance (PRD Testing Plan)", () => {
 
   it("terminal_zoom_reset_restores_baseline_font_and_matching_resize", () => {
     // Given
-    const termRef = createRef<GhosttyTerminalHandle>();
+    const termRef = createRef<TerminalViewHandle>();
     const onResize = cy.stub().as("onResize");
     cy.mount(
       <div style={VIEWPORT_STYLE}>
-        <GhosttyTerminal ref={termRef} fontSize={14} onResize={onResize} />
+        <TerminalView ref={termRef} fontSize={14} onResize={onResize} />
       </div>
     );
-    byTestId(TEST_IDS.ghosttyTerminal, { timeout: 10000 }).should("exist");
+    byTestId(TEST_IDS.terminal, { timeout: 10000 }).should("exist");
     cy.get("@onResize", { timeout: 8000 }).should("have.been.called");
 
     // Capture baseline dimensions
@@ -151,7 +151,7 @@ describe("Terminal zoom acceptance (PRD Testing Plan)", () => {
       cy.wrap(first.cols).as("baselineCols");
       cy.wrap(first.rows).as("baselineRows");
     });
-    byTestId(TEST_IDS.ghosttyTerminal).should("have.attr", "data-terminal-font-size", "14");
+    byTestId(TEST_IDS.terminal).should("have.attr", "data-terminal-font-size", "14");
     cy.wrap(termRef).should((r) => {
       expect(r.current?.setTerminalFontSize).to.be.a("function");
     });
@@ -164,7 +164,7 @@ describe("Terminal zoom acceptance (PRD Testing Plan)", () => {
       cur = pitchInFontSize(cur, ZOOM_OPTS);
       flushSetTerminalFontSize(termRef, cur);
     });
-    byTestId(TEST_IDS.ghosttyTerminal).then(($el) => {
+    byTestId(TEST_IDS.terminal).then(($el) => {
       const fs = Number($el.attr("data-terminal-font-size"));
       expect(fs, "font must change before reset").to.be.greaterThan(14);
     });
@@ -175,7 +175,7 @@ describe("Terminal zoom acceptance (PRD Testing Plan)", () => {
     });
 
     // Then — font restored and resize matches baseline
-    byTestId(TEST_IDS.ghosttyTerminal).should("have.attr", "data-terminal-font-size", "14");
+    byTestId(TEST_IDS.terminal).should("have.attr", "data-terminal-font-size", "14");
     cy.get("@baselineCols").then((bc) => {
       cy.get("@baselineRows").then((br) => {
         cy.get("@onResize").should((stub) => {
@@ -193,13 +193,13 @@ describe("Terminal zoom acceptance (PRD Testing Plan)", () => {
 
   it("terminal_zoom_respects_configured_min_max_bounds", () => {
     // Given
-    const termRef = createRef<GhosttyTerminalHandle>();
+    const termRef = createRef<TerminalViewHandle>();
     cy.mount(
       <div style={VIEWPORT_STYLE}>
-        <GhosttyTerminal ref={termRef} fontSize={14} />
+        <TerminalView ref={termRef} fontSize={14} />
       </div>
     );
-    byTestId(TEST_IDS.ghosttyTerminal, { timeout: 10000 }).should("exist");
+    byTestId(TEST_IDS.terminal, { timeout: 10000 }).should("exist");
     cy.wrap(termRef).should((r) => {
       expect(r.current?.setTerminalFontSize).to.be.a("function");
     });
@@ -214,7 +214,7 @@ describe("Terminal zoom acceptance (PRD Testing Plan)", () => {
     });
 
     // Then — clamped at max
-    byTestId(TEST_IDS.ghosttyTerminal).should("have.attr", "data-terminal-font-size", "32");
+    byTestId(TEST_IDS.terminal).should("have.attr", "data-terminal-font-size", "32");
 
     // When — pitch out to min
     cy.wrap(null).then(() => {
@@ -226,20 +226,20 @@ describe("Terminal zoom acceptance (PRD Testing Plan)", () => {
     });
 
     // Then — clamped at min
-    byTestId(TEST_IDS.ghosttyTerminal).should("have.attr", "data-terminal-font-size", "8");
+    byTestId(TEST_IDS.terminal).should("have.attr", "data-terminal-font-size", "8");
   });
 
   it("session_terminal_resize_osc_sent_when_dimensions_change_after_zoom", () => {
     // Given
     cy.mount(
       <div style={{ height: 400, position: "relative" }}>
-        <GhosttyTerminalSession feed={aControllableFeed().feed} debugLogging />
+        <TerminalSession feed={aControllableFeed().feed} debugLogging />
       </div>
     );
-    byTestId(TEST_IDS.ghosttyTerminal, { timeout: 10000 }).should("exist");
+    byTestId(TEST_IDS.terminal, { timeout: 10000 }).should("exist");
 
     // Stub console.log to capture OSC resize messages
-    byTestId(TEST_IDS.ghosttyTerminal).find("textarea").first().then((ta) => {
+    byTestId(TEST_IDS.terminal).find("textarea").first().then((ta) => {
       const win = ta[0].ownerDocument.defaultView;
       if (!win) {
         throw new Error("terminal textarea has no defaultView");
@@ -254,7 +254,7 @@ describe("Terminal zoom acceptance (PRD Testing Plan)", () => {
     cy.wait(500); // justified: terminal must settle before capturing baseline OSC count
 
     // Capture baseline OSC resize count
-    byTestId(TEST_IDS.ghosttyTerminal).find("textarea").first().then((ta) => {
+    byTestId(TEST_IDS.terminal).find("textarea").first().then((ta) => {
       const win = ta[0].ownerDocument.defaultView;
       if (!win) {
         throw new Error("terminal textarea has no defaultView");
@@ -266,7 +266,7 @@ describe("Terminal zoom acceptance (PRD Testing Plan)", () => {
     });
 
     // When — dispatch pitch-in via zoom bridge
-    byTestId(TEST_IDS.ghosttyTerminal).find("textarea").first().then((ta) => {
+    byTestId(TEST_IDS.terminal).find("textarea").first().then((ta) => {
       const win = ta[0].ownerDocument.defaultView;
       if (!win) {
         throw new Error("terminal textarea has no defaultView");
@@ -279,7 +279,7 @@ describe("Terminal zoom acceptance (PRD Testing Plan)", () => {
     });
 
     // Then — font size increases
-    byTestId(TEST_IDS.ghosttyTerminal).should(($el) => {
+    byTestId(TEST_IDS.terminal).should(($el) => {
       const fs = Number($el.attr("data-terminal-font-size"));
       expect(fs, "session terminal: font must increase after pitch-in").to.be.greaterThan(14);
     });
@@ -288,7 +288,7 @@ describe("Terminal zoom acceptance (PRD Testing Plan)", () => {
     cy.wait(300); // justified: OSC resize logging is async after font size change
 
     // Then — OSC resize count increased
-    byTestId(TEST_IDS.ghosttyTerminal).find("textarea").first().then((ta) => {
+    byTestId(TEST_IDS.terminal).find("textarea").first().then((ta) => {
       const win = ta[0].ownerDocument.defaultView;
       if (!win) {
         throw new Error("terminal textarea has no defaultView");
@@ -305,7 +305,7 @@ describe("Terminal zoom acceptance (PRD Testing Plan)", () => {
     });
 
     // Then — resize OSC substring appears in logs
-    byTestId(TEST_IDS.ghosttyTerminal).find("textarea").first().then((ta) => {
+    byTestId(TEST_IDS.terminal).find("textarea").first().then((ta) => {
       const win = ta[0].ownerDocument.defaultView;
       if (!win) {
         throw new Error("terminal textarea has no defaultView");

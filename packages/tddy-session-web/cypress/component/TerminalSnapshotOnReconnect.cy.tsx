@@ -8,7 +8,7 @@
  * in-memory `TerminalSessionService` whose bidi `streamSessionTerminalIO` records every message of
  * every open and lets the test push the frames the daemon would send. Three ways a terminal
  * (re)connects are covered: the first mount, a remount after the runtime was evicted (a brand-new
- * ghostty instance that saw nothing), and a transport blip that the terminal survives.
+ * xterm.js instance that saw nothing), and a transport blip that the terminal survives.
  */
 
 import React, { useState } from "react";
@@ -162,7 +162,7 @@ function aSessionTerminal() {
     mount() {
       cy.viewport(1280, 800);
       cy.mount(<Harness />);
-      byTestId(TEST_IDS.ghosttyTerminal, { timeout: 10000 }).should(
+      byTestId(TEST_IDS.terminal, { timeout: 10000 }).should(
         "have.attr",
         "data-terminal-ready",
         "true",
@@ -190,7 +190,7 @@ function aSessionTerminal() {
     },
     /** The terminal is still mounted and has not reported the session gone. */
     expectTerminalSurvived() {
-      byTestId(TEST_IDS.ghosttyTerminal).should("exist");
+      byTestId(TEST_IDS.terminal).should("exist");
       cy.get("@onDisconnect").should("not.have.been.called");
       return driver;
     },
@@ -209,7 +209,7 @@ function aSessionTerminal() {
     },
     evictAndRemount() {
       byTestId(REMOUNT_BTN).click();
-      byTestId(TEST_IDS.ghosttyTerminal, { timeout: 10000 }).should(
+      byTestId(TEST_IDS.terminal, { timeout: 10000 }).should(
         "have.attr",
         "data-terminal-ready",
         "true",
@@ -225,7 +225,7 @@ function aSessionTerminal() {
       return driver;
     },
     type(text: string) {
-      byTestId(TEST_IDS.ghosttyTerminal).click().type(text);
+      byTestId(TEST_IDS.terminal).click().type(text);
       return driver;
     },
     /** Every keystroke travelled on open `n` itself, each message carrying the running byte total. */

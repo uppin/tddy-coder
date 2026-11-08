@@ -91,7 +91,7 @@ into the dashboard before sign-in must not be able to run.
 | Directive | Value | Why |
 |---|---|---|
 | `default-src` | `'self'` | |
-| `script-src` | `'self' 'wasm-unsafe-eval'` | no `unsafe-eval`, no inline script; `'wasm-unsafe-eval'` is for ghostty-web's inlined WASM |
+| `script-src` | `'self'` | no `unsafe-eval`, no inline script, no WASM |
 | `style-src` | `'self'` | also governs `style-src-attr`, so a `style="…"` attribute is blocked. `tddy-web` writes none; React's `style` prop goes through CSSOM and is unaffected |
 | `style-src-elem` | `'self' 'unsafe-inline'` | runtime `<style>` elements: the `ConnectionTerminalChrome` / `SessionDrawer` dot styles, react-remove-scroll-bar, react-resizable-panels |
 | `img-src` | `'self' https://avatars.githubusercontent.com` | the signed-in user's avatar |

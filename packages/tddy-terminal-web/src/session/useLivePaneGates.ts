@@ -1,10 +1,10 @@
 import { useEffect, type RefObject } from "react";
-import type { GhosttyTerminalHandle } from "../terminal/types";
+import type { TerminalViewHandle } from "../terminal/types";
 
 /** Drives the history and mouse-tracking paths from component tests. */
 export function useTestWindowHooks(
-  termRef: RefObject<GhosttyTerminalHandle | null>,
-  olderTermRef: RefObject<GhosttyTerminalHandle | null>,
+  termRef: RefObject<TerminalViewHandle | null>,
+  olderTermRef: RefObject<TerminalViewHandle | null>,
 ): void {
   // FIXME: test-only hooks; remove if real wheel/keystroke drivers become available in Cypress.
   useEffect(() => {

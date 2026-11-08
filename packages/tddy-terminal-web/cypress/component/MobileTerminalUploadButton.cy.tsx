@@ -8,7 +8,7 @@
  */
 
 import React from "react";
-import { GhosttyTerminalSession } from "../../src/GhosttyTerminalSession";
+import { TerminalSession } from "../../src/TerminalSession";
 import type { TerminalStream } from "tddy-client-web/connections/terminal";
 import { UploadProgressProvider } from "../../src/rpc/uploadProgress";
 import { SessionFilesService } from "tddy-client-web/gen/session_files_pb";
@@ -40,7 +40,7 @@ function mountMobileTerminal(stream: TerminalStream, backend: InMemoryRpcBackend
     withSelectedDaemon(
       <UploadProgressProvider>
         <div style={{ width: 375, height: 500, position: "relative" }}>
-          <GhosttyTerminalSession
+          <TerminalSession
             feed={{ stream }}
             sessionToken="tok"
             sessionId="s1"

@@ -1,7 +1,7 @@
 /**
  * A terminal on a room this page was handed the coordinates for.
  *
- * The standalone connect screen (`src/index.tsx`, and the Storybook stories the `ghostty-*` E2E
+ * The standalone connect screen (`src/index.tsx`, and the Storybook stories the `terminal-*` E2E
  * suite drives) is not a session on a host: an operator types a LiveKit url, a room and an identity,
  * or a harness passes a pre-minted token in the query string, and the terminal on the other end is
  * whatever process is publishing into that room. There is no `SessionConnection` to open, because

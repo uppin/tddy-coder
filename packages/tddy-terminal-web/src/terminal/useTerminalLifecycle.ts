@@ -1,13 +1,13 @@
 import { useEffect, useRef, useState, type MutableRefObject } from "react";
 import { xtermEngine } from "../engine/xtermEngine";
 import type { EngineDisposable } from "../engine/TerminalEngine";
-import type { GhosttyTerminalProps } from "./types";
+import type { TerminalViewProps } from "./types";
 import type { TerminalLoggers } from "./terminalLoggers";
 import { fitTerminalToContainer } from "./terminalGeometry";
 import type { ContainerRef, TerminalRef } from "./terminalRefs";
 
 type LifecycleProps = Pick<
-  GhosttyTerminalProps,
+  TerminalViewProps,
   | "initialContent"
   | "onData"
   | "onResize"

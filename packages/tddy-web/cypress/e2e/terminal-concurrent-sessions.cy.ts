@@ -9,9 +9,9 @@
  */
 import type { TerminalSessionResult } from "../support/commands";
 
-const STORY_ID = "components-ghosttyterminal--live-kit-connected";
+const STORY_ID = "components-terminal--live-kit-connected";
 
-describe("Ghostty Concurrent Sessions — Two Browser Windows", () => {
+describe("Terminal Concurrent Sessions — Two Browser Windows", () => {
   let session: TerminalSessionResult = {} as TerminalSessionResult;
 
   before(function () {

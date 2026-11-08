@@ -7,7 +7,7 @@ import {
   StreamReplayMode,
   TerminalSessionService,
 } from "tddy-client-web/gen/terminal_session_pb";
-import { GhosttyTerminalSession } from "tddy-terminal-web";
+import { TerminalSession } from "tddy-terminal-web";
 import type {
   TerminalFeed,
   TerminalFrame,
@@ -30,7 +30,7 @@ import { InlineError } from "tddy-ui-web";
 const dGrpc = tddyDebug("tddy:term:grpc");
 const dResize = tddyDebug("tddy:term:resize");
 
-/** `ESC ] resize;` — the prefix of the grid report `GhosttyTerminalSession` writes into the feed. */
+/** `ESC ] resize;` — the prefix of the grid report `TerminalSession` writes into the feed. */
 const RESIZE_OSC_PREFIX = new TextEncoder().encode("\x1b]resize;");
 
 function isResizeOsc(data: Uint8Array): boolean {
@@ -55,7 +55,7 @@ interface GrpcSessionTerminalProps {
   sessionId: string;
   sessionToken: string;
   /** The daemon `TerminalSessionService` client. `null` while the transport is in a transient blip — the
-   *  terminal stays mounted (its scrollback and the ghostty instance survive) and re-opens with a
+   *  terminal stays mounted (its scrollback and the xterm.js instance survive) and re-opens with a
    *  screen snapshot when a non-null client returns. Only a stream-end with a *valid* client (real
    *  `pty_done`) evicts the runtime. */
   client: TerminalClient | null;
@@ -70,10 +70,10 @@ interface GrpcSessionTerminalProps {
   terminalId?: string;
   onDisconnect?: () => void;
   mobileShortcuts?: ToolShortcutDef[];
-  /** Called with this terminal's text-insert function (see `GhosttyTerminalSession.onRegisterInsertInput`),
+  /** Called with this terminal's text-insert function (see `TerminalSession.onRegisterInsertInput`),
    *  so the runtime can expose it to the inspector's Files-tab click/tap route. */
   onRegisterInsertInput?: (insertInput: (text: string) => void) => void;
-  /** See `GhosttyTerminalSession.readsLocalPaths`. */
+  /** See `TerminalSession.readsLocalPaths`. */
   readsLocalPaths?: boolean;
 }
 
@@ -168,7 +168,7 @@ export function GrpcSessionTerminal({
   sendInputRequestRef.current = sendInputRequest;
 
   useEffect(() => {
-    // No client during a transient transport blip — keep the previous stream (and the ghostty
+    // No client during a transient transport blip — keep the previous stream (and the xterm.js
     // terminal instance) mounted; re-open with a snapshot when a non-null client returns.
     if (client === null) {
       dGrpc("streamSessionTerminalIO skip open — null client (transport blip), terminal stays mounted");
@@ -181,7 +181,7 @@ export function GrpcSessionTerminal({
     // Frames that arrived before anything subscribed.
     //
     // This effect publishes the stream with `setStream` and starts consuming in the same pass, but
-    // the subscriber — `GhosttyTerminalSession`'s own effect — cannot run until React has
+    // the subscriber — `TerminalSession`'s own effect — cannot run until React has
     // re-rendered with a non-null `feed`. A frame delivered in that window used to reach an empty
     // listener list and be dropped silently: no screen in the terminal, and no offset recorded.
     //
@@ -422,7 +422,7 @@ export function GrpcSessionTerminal({
   return (
     <div ref={containerRef} style={{ width: "100%", height: "100%", position: "relative" }}>
       {feed && (
-        <GhosttyTerminalSession
+        <TerminalSession
           feed={feed}
           sessionToken={sessionToken}
           sessionId={sessionId}

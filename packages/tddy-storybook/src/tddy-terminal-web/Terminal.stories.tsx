@@ -1,16 +1,16 @@
 import type { Meta, StoryObj } from "@storybook/react";
-import { GhosttyTerminal } from "tddy-terminal-web";
-import { GhosttyTerminalSession } from "tddy-terminal-web";
+import { TerminalView } from "tddy-terminal-web";
+import { TerminalSession } from "tddy-terminal-web";
 import { useDirectRoomTerminal } from "tddy-livekit-web";
 
-const meta: Meta<typeof GhosttyTerminal> = {
-  title: "components/GhosttyTerminal",
-  component: GhosttyTerminal,
+const meta: Meta<typeof TerminalView> = {
+  title: "components/Terminal",
+  component: TerminalView,
 };
 
 export default meta;
 
-type Story = StoryObj<typeof GhosttyTerminal>;
+type Story = StoryObj<typeof TerminalView>;
 
 export const Default: Story = {
   args: {
@@ -53,8 +53,8 @@ export const ColorPalette: Story = {
  * The terminal on a room the story was handed the coordinates for.
  *
  * The join is the story's, not the terminal's: `useDirectRoomTerminal` connects the room and opens
- * the feed, and `GhosttyTerminalSession` renders whatever arrives on it. This is the entry point
- * the `ghostty-*` E2E suite drives, with `url`/`token` passed in the iframe's query string.
+ * the feed, and `TerminalSession` renders whatever arrives on it. This is the entry point
+ * the `terminal-*` E2E suite drives, with `url`/`token` passed in the iframe's query string.
  */
 function LiveKitConnectedStory(args: {
   url?: string;
@@ -86,7 +86,7 @@ function LiveKitConnectedStory(args: {
   }
 
   return (
-    <GhosttyTerminalSession
+    <TerminalSession
       feed={terminal.feed}
       connectionStatus={terminal.status}
       connectionError={terminal.error ?? undefined}
@@ -140,7 +140,7 @@ export const LiveKitEcho: StoryObj<typeof LiveKitConnectedStory> = {
 };
 
 /**
- * Same LiveKit + echo_terminal path as LiveKitEcho, with a fixed viewport so Ghostty FitAddon
+ * Same LiveKit + echo_terminal path as LiveKitEcho, with a fixed viewport so xterm.js FitAddon
  * sizes the terminal predictably, and hidden `terminal-buffer-text` for E2E assertions (matches
  * Rust `grpc_terminal_rpc` large segmented echo scenario: line-based echo after Enter).
  */

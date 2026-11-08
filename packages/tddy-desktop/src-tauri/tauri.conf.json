@@ -12,7 +12,7 @@
     "security": {
       "csp": {
         "default-src": "'self'",
-        "script-src": "'self' 'wasm-unsafe-eval'",
+        "script-src": "'self'",
         "style-src": "'self'",
         "style-src-elem": "'self' 'unsafe-inline'",
         "img-src": "'self' https://avatars.githubusercontent.com",

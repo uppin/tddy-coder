@@ -25,4 +25,4 @@ point elsewhere are kept so an old link still lands.
 - **Operator-visible failures (RPC errors shown where they happen)**: [operator-visible-failures.md](operator-visible-failures.md)
 - **LiveKit presence — owned project count**: [livekit-participant-owned-projects.md](../../../docs/ft/web/livekit-participant-owned-projects.md)
 - **Product (Web area)**: `docs/ft/web/` (e.g. [web-terminal.md](../../../docs/ft/web/web-terminal.md))
-- **Browser terminal (`GhosttyTerminal`, `GhosttyTerminalSession`, chrome, feed, zoom, OSC 52, uploads)**: [tddy-terminal-web docs](../../tddy-terminal-web/docs/README.md)
+- **Browser terminal (`TerminalView`, `TerminalSession`, chrome, feed, zoom, OSC 52, uploads)**: [tddy-terminal-web docs](../../tddy-terminal-web/docs/README.md)

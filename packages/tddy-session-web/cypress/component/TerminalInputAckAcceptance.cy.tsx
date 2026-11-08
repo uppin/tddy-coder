@@ -100,17 +100,17 @@ describe("Terminal input offset — wire contract", () => {
         </div>
       </UploadProgressProvider>,
     );
-    byTestId(TEST_IDS.ghosttyTerminal, { timeout: 10000 }).should(
+    byTestId(TEST_IDS.terminal, { timeout: 10000 }).should(
       "have.attr",
       "data-terminal-ready",
       "true",
     );
 
     // When — the user types into the real terminal. Clicking the terminal focuses it via
-    // ghostty-web's canvas mousedown handler (the container only becomes focusable once
-    // ghostty-web has set contenteditable/tabindex on ready, which `cy.click()`'s actionability
+    // xterm.js's canvas mousedown handler (the container only becomes focusable once
+    // xterm.js has set contenteditable/tabindex on ready, which `cy.click()`'s actionability
     // waits for; `cy.focus()` would reject it as non-focusable before that attribute lands).
-    byTestId(TEST_IDS.ghosttyTerminal).click().type("abc");
+    byTestId(TEST_IDS.terminal).click().type("abc");
 
     // Then — offsets are the running byte total of everything sent (keystrokes + any resize OSC)
     cy.wrap(recording)

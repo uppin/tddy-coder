@@ -1,4 +1,4 @@
-import { aGhosttyTerminal } from "../support/drivers/ghosttyTerminalDriver";
+import { aTerminalView } from "../support/drivers/terminalViewDriver";
 
 /**
  * A one-finger drag on a mobile terminal must reach whoever owns the scrolling, exactly as the
@@ -28,7 +28,7 @@ describe("Terminal touch scroll routing (mobile)", () => {
   it("reports a one-finger drag to a full-screen TUI that tracks the mouse as an SGR wheel event", () => {
     // Given — the alternate screen (DEC 1049) with mouse tracking on (DEC 1002 + 1006): the Claude
     // CLI's TUI, which scrolls its own transcript in response to the wheel.
-    const driver = aGhosttyTerminal({
+    const driver = aTerminalView({
       preventFocusOnTap: true,
       initialContent: `\x1b[?1049h${numberedLines(60)}\x1b[?1002h\x1b[?1006h`,
       withHandleCapture: true,
@@ -53,8 +53,8 @@ describe("Terminal touch scroll routing (mobile)", () => {
 
   it("hands a one-finger drag in the alternate screen to the terminal when the TUI tracks no mouse", () => {
     // Given — the alternate screen without mouse tracking: a pager such as `less`, which scrolls on
-    // the arrow keys ghostty-web emulates for the wheel.
-    const driver = aGhosttyTerminal({
+    // the arrow keys xterm.js emulates for the wheel.
+    const driver = aTerminalView({
       preventFocusOnTap: true,
       initialContent: `\x1b[?1049h${numberedLines(60)}`,
       withHandleCapture: true,
@@ -72,7 +72,7 @@ describe("Terminal touch scroll routing (mobile)", () => {
   it("scrolls the terminal's own scrollback on a one-finger drag in the normal screen", () => {
     // Given — the normal screen with more output than fits: the emulator's scrollback is the thing
     // being scrolled, and nothing about the gesture belongs to the application.
-    const driver = aGhosttyTerminal({
+    const driver = aTerminalView({
       preventFocusOnTap: true,
       initialContent: numberedLines(200),
       scrollback: 1000, // the prop's default is none, which xterm.js honours

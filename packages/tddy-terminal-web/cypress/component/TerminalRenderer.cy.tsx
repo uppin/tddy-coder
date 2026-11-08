@@ -6,7 +6,7 @@
  */
 
 import React from "react";
-import { GhosttyTerminal } from "../../src/GhosttyTerminal";
+import { TerminalView } from "../../src/TerminalView";
 import { createXtermEngine, type WebglRendererAddon } from "../../src/engine/xtermEngine";
 import type { TerminalEngine } from "../../src/engine/TerminalEngine";
 import { byTestId, TEST_IDS } from "../support/testIds";
@@ -14,14 +14,14 @@ import { byTestId, TEST_IDS } from "../support/testIds";
 function mountTerminal() {
   cy.mount(
     <div style={{ width: 800, height: 400 }}>
-      <GhosttyTerminal />
+      <TerminalView />
     </div>,
   );
-  byTestId(TEST_IDS.ghosttyTerminal, { timeout: 10000 }).should("have.attr", "data-terminal-ready", "true");
+  byTestId(TEST_IDS.terminal, { timeout: 10000 }).should("have.attr", "data-terminal-ready", "true");
 }
 
 function rendererAttribute() {
-  return byTestId(TEST_IDS.ghosttyTerminal).find("[data-terminal-renderer]");
+  return byTestId(TEST_IDS.terminal).find("[data-terminal-renderer]");
 }
 
 /** Makes every WebGL context request in the page fail, as on a browser without WebGL. */

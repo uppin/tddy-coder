@@ -1,5 +1,5 @@
 /**
- * E2E: Ghostty terminal interaction with the echo_terminal app.
+ * E2E: terminal interaction with the echo_terminal app.
  *
  * Reproduces: "after 1st key press everything breaks and random garbage chars".
  *
@@ -15,11 +15,11 @@
  */
 import type { TerminalSessionResult } from "../support/commands";
 
-const SCREENSHOT_SPEC_DIR = "cypress/screenshots/ghostty-echo-interaction.cy.ts";
-const STORY_ID = "components-ghosttyterminal--live-kit-echo";
+const SCREENSHOT_SPEC_DIR = "cypress/screenshots/terminal-echo-interaction.cy.ts";
+const STORY_ID = "components-terminal--live-kit-echo";
 const TYPED_LINE = "cypress-test-line";
 
-describe("Ghostty Echo Interaction", () => {
+describe("Terminal Echo Interaction", () => {
   let session: TerminalSessionResult = {} as TerminalSessionResult;
 
   before(function () {
@@ -38,7 +38,7 @@ describe("Ghostty Echo Interaction", () => {
   it("shows greeting then echoes the typed line without garbage characters", () => {
     // Given — visit the echo story with debug logging enabled
     const debugLogs: string[] = [];
-    cy.visitGhosttyStory({ storyId: STORY_ID, url: session.url, token: session.clientToken, roomName: session.roomName, extra: { debugLogging: "1" } });
+    cy.visitTerminalStory({ storyId: STORY_ID, url: session.url, token: session.clientToken, roomName: session.roomName, extra: { debugLogging: "1" } });
     cy.window().then((win) => {
       const orig = win.console.log;
       win.console.log = (...args: unknown[]) => {
@@ -60,19 +60,19 @@ describe("Ghostty Echo Interaction", () => {
     // Then — greeting is visible via OCR (brief settle wait before screenshot — OCR needs stable canvas)
     // eslint-disable-next-line cypress/no-unnecessary-waiting
     cy.wait(500); // justified: OCR reads a screenshot; terminal must be visually settled first
-    cy.get("[data-testid='ghostty-terminal']").screenshot("greeting");
+    cy.get("[data-testid='terminal']").screenshot("greeting");
     cy.task("ocrScreenshot", `${SCREENSHOT_SPEC_DIR}/greeting.png`).then((ocrText: unknown) => {
       expect(String(ocrText ?? "")).to.include("Hello", "greeting should be visible after load");
     });
 
     // When — type a test line and submit
-    cy.get("[data-testid='ghostty-terminal']").click();
-    cy.get("[data-testid='ghostty-terminal']").type(`${TYPED_LINE}{enter}`);
+    cy.get("[data-testid='terminal']").click();
+    cy.get("[data-testid='terminal']").type(`${TYPED_LINE}{enter}`);
 
     // Brief settle before OCR screenshot (echo round-trip takes time across LiveKit)
     // eslint-disable-next-line cypress/no-unnecessary-waiting
     cy.wait(1000); // justified: echo_terminal echoes the full line after Enter; round-trip latency
-    cy.get("[data-testid='ghostty-terminal']").screenshot("echoed");
+    cy.get("[data-testid='terminal']").screenshot("echoed");
 
     // Then — typed line echoed back without garbage
     cy.task("ocrScreenshot", `${SCREENSHOT_SPEC_DIR}/echoed.png`).then((ocrText: unknown) => {

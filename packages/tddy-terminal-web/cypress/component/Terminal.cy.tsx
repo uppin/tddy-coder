@@ -1,7 +1,7 @@
 import React, { useRef } from "react";
 import { mount } from "cypress/react";
-import { GhosttyTerminal, type GhosttyTerminalHandle } from "../../src/GhosttyTerminal";
-import { aGhosttyTerminal } from "../support/drivers/ghosttyTerminalDriver";
+import { TerminalView, type TerminalViewHandle } from "../../src/TerminalView";
+import { aTerminalView } from "../support/drivers/terminalViewDriver";
 
 /** Deterministic overflow content: row-001 .. row-<count>, each on its own line (CRLF). */
 function numberedLines(count: number): string {
@@ -11,18 +11,18 @@ function numberedLines(count: number): string {
   ).join("\r\n");
 }
 
-describe("GhosttyTerminal", () => {
+describe("TerminalView", () => {
   it("renders ANSI content passed via initialContent prop", () => {
     // Given
     const ansiContent = "\x1b[1;32m$ ls -la\x1b[0m\nfile1.txt  file2.txt";
 
     // When / Then
-    aGhosttyTerminal({ initialContent: ansiContent }).mount().expectExists().expectScreenExists();
+    aTerminalView({ initialContent: ansiContent }).mount().expectExists().expectScreenExists();
   });
 
   it("renders its initial content once, not once per effect that writes it", () => {
     // Given initial content carrying a marker line
-    const driver = aGhosttyTerminal({
+    const driver = aTerminalView({
       initialContent: "initial-content-marker\r\n",
       withHandleCapture: true,
     });
@@ -36,7 +36,7 @@ describe("GhosttyTerminal", () => {
 
   it("holds its initial content by the time it reports ready", () => {
     // Given initial content carrying a marker line, and a ready callback that reads the buffer
-    const handleRef = React.createRef<GhosttyTerminalHandle>();
+    const handleRef = React.createRef<TerminalViewHandle>();
     const atReady: { text: string | null } = { text: null };
     const onReady = () => {
       atReady.text = handleRef.current?.getBufferText?.() ?? "";
@@ -44,7 +44,7 @@ describe("GhosttyTerminal", () => {
 
     // When the terminal is mounted and reports ready
     mount(
-      <GhosttyTerminal
+      <TerminalView
         ref={handleRef}
         initialContent={"ready-content-marker\r\n"}
         onReady={onReady}
@@ -65,7 +65,7 @@ describe("GhosttyTerminal", () => {
     // leaving earlier output unreachable.
 
     // Given — more output than fits in the viewport, sitting pinned at the bottom
-    const driver = aGhosttyTerminal({
+    const driver = aTerminalView({
       initialContent: numberedLines(200),
       scrollback: 1000, // the prop's default is none, which xterm.js honours
       withHandleCapture: true,
@@ -83,7 +83,7 @@ describe("GhosttyTerminal", () => {
 
   it("fires onData when keyboard input is sent", () => {
     // Given
-    const driver = aGhosttyTerminal({ onData: cy.stub().as("onData") }).mount().expectExists();
+    const driver = aTerminalView({ onData: cy.stub().as("onData") }).mount().expectExists();
 
     // When
     driver.click();
@@ -93,9 +93,9 @@ describe("GhosttyTerminal", () => {
     driver.expectOnDataCalled();
   });
 
-  it("forwards Escape to onData during IME composition (ghostty-web would otherwise drop it)", () => {
+  it("forwards Escape to onData during IME composition (xterm.js would otherwise drop it)", () => {
     // Given
-    const driver = aGhosttyTerminal({ onData: cy.stub().as("onData"), sessionActive: true }).mount();
+    const driver = aTerminalView({ onData: cy.stub().as("onData"), sessionActive: true }).mount();
     driver.expectExists();
     driver.el().find("textarea").should("exist");
 
@@ -122,7 +122,7 @@ describe("GhosttyTerminal", () => {
 
   it("fires onResize when terminal dimensions change (FitAddon)", () => {
     // Given / When
-    const driver = aGhosttyTerminal({ onResize: cy.stub().as("onResize") }).mount();
+    const driver = aTerminalView({ onResize: cy.stub().as("onResize") }).mount();
     driver.expectExists();
 
     // Then — FitAddon triggers resize on mount
@@ -131,7 +131,7 @@ describe("GhosttyTerminal", () => {
 
   it("forwards SGR mouse sequence via onData when mouse tracking is enabled and the user touches the terminal", () => {
     // Given
-    const driver = aGhosttyTerminal({
+    const driver = aTerminalView({
       onData: cy.stub().as("onData"),
       initialContent: "\x1b[?1000h\x1b[?1006h",
       // A tap on mobile: the tap-as-click route re-synthesises the mouse events xterm reports.
@@ -155,7 +155,7 @@ describe("GhosttyTerminal", () => {
 
   it("does not receive focus when clicked with preventFocusOnTap true", () => {
     // Given / When
-    const driver = aGhosttyTerminal({ preventFocusOnTap: true }).mount();
+    const driver = aTerminalView({ preventFocusOnTap: true }).mount();
     driver.expectExists().expectScreenExists();
     driver.click("center");
 
@@ -165,7 +165,7 @@ describe("GhosttyTerminal", () => {
 
   it("does not receive focus when touched with preventFocusOnTap true (mobile tap)", () => {
     // Given
-    const driver = aGhosttyTerminal({ preventFocusOnTap: true }).mount();
+    const driver = aTerminalView({ preventFocusOnTap: true }).mount();
     driver.expectExists().expectScreenExists();
 
     // When
@@ -179,7 +179,7 @@ describe("GhosttyTerminal", () => {
 
   it("does not receive focus when a click event fires (mobile keyboard-opens-on-tap flow)", () => {
     // Given
-    const driver = aGhosttyTerminal({ preventFocusOnTap: true }).mount();
+    const driver = aTerminalView({ preventFocusOnTap: true }).mount();
     driver.expectExists();
 
     // When
@@ -205,7 +205,7 @@ describe("GhosttyTerminal", () => {
 
   it("receives keyboard input after focus() when preventFocusOnTap (mobile keyboard flow)", () => {
     // Given
-    const driver = aGhosttyTerminal({
+    const driver = aTerminalView({
       withMobileKeyboardWrapper: true,
       onData: cy.stub().as("onData"),
     }).mount();
@@ -223,7 +223,7 @@ describe("GhosttyTerminal", () => {
 
   it("forwards SGR mouse sequence via onData when mouse tracking is enabled and the user clicks", () => {
     // Given
-    const driver = aGhosttyTerminal({
+    const driver = aTerminalView({
       onData: cy.stub().as("onData"),
       initialContent: "\x1b[?1000h\x1b[?1006h",
     }).mount();
@@ -231,7 +231,7 @@ describe("GhosttyTerminal", () => {
 
     // Brief settle — see note above about SGR enable sequences
     // eslint-disable-next-line cypress/no-unnecessary-waiting
-    cy.wait(500); // justified: ghostty-web must process SGR enable sequences before mouse events work
+    cy.wait(500); // justified: xterm.js must process SGR enable sequences before mouse events work
 
     // When
     driver.click("center");

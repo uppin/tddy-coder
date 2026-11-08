@@ -94,7 +94,7 @@ describe("Mouse wheel over a TUI that tracks the mouse", () => {
     // When
     session.wheelUp();
 
-    // Then — still an SGR report, not the arrow key ghostty-web emulates in the alternate screen
+    // Then — still an SGR report, not the arrow key xterm.js emulates in the alternate screen
     session.expectTuiReceivedWheel({ up: 1, down: 0 });
   });
 });
