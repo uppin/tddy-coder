@@ -1,7 +1,7 @@
 /**
  * Map a viewport point to 1-based terminal cell coordinates for SGR mouse reporting.
- * Uses the **canvas** grid (not the outer container): ghostty-web renders the cell grid on the
- * canvas; click targets use canvas-relative geometry while the wrapper may be wider/taller.
+ * Uses the **screen** grid (`.xterm-screen`, not the outer container): the cell grid is exactly
+ * that element while the wrapper may be wider/taller.
  */
 
 export type TerminalGridRect = {

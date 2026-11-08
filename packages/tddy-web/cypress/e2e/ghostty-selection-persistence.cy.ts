@@ -51,7 +51,10 @@ describe("Ghostty Selection Persistence", () => {
     // eslint-disable-next-line cypress/no-unnecessary-waiting
     cy.wait(2000); // justified: regression only manifests after 1-2 render cycles (~200ms each)
 
-    cy.get("[data-testid='ghostty-terminal']").screenshot("oauth-selected");
+    // The terminal's buffer still holds the full option list after the re-renders: the selection
+    // is asserted on what the terminal holds, not on a picture of it.
+    cy.waitForBufferText("OAuth");
+    cy.waitForBufferText("Email/password");
 
     // Then — highlight moved to "OAuth" and stayed there
     cy.get("[data-testid='terminal-highlighted-line']").should(($el) => {

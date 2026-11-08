@@ -1,9 +1,11 @@
 /**
  * Each terminal owns its emulator: a pane opened after another one closed starts on a blank screen.
  *
- * Regression: on ghostty-web's process-wide WASM instance, a terminal created after another was
- * freed was handed the freed one's memory unzeroed — a new session's pane opened on the deleted
- * session's screen, its own output drawn over it.
+ * Regression, from the ghostty-web era: on its process-wide WASM instance, a terminal created after
+ * another was freed was handed the freed one's memory unzeroed — a new session's pane opened on the
+ * deleted session's screen, its own output drawn over it. xterm.js keeps its state in the `Terminal`
+ * object, so there is no shared instance to leak; this spec stays as the behavioural guarantee that
+ * a session switch never shows the previous session's output, whatever the engine.
  */
 
 import React, { useImperativeHandle, useRef, useState, forwardRef } from "react";

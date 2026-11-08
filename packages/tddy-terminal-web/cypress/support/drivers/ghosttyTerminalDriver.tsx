@@ -111,9 +111,9 @@ export function aGhosttyTerminal(options: GhosttyTerminalDriverOptions = {}) {
       return this;
     },
 
-    /** Assert the terminal contains a canvas element. */
-    expectCanvasExists() {
-      terminal().within(() => cy.get("canvas").should("exist"));
+    /** Assert the terminal rendered its cell grid (xterm's screen element). */
+    expectScreenExists() {
+      terminal().within(() => cy.get(".xterm-screen").should("exist"));
       return this;
     },
 
@@ -299,7 +299,7 @@ export function aGhosttyTerminal(options: GhosttyTerminalDriverOptions = {}) {
 
     /**
      * Start recording mouse events that reach the terminal. Listens in the capture phase on the
-     * container, so events dispatched at the inner canvas are observed whether or not they bubble.
+     * container, so events dispatched at the inner screen element are observed whether or not they bubble.
      * Call before the gesture under test.
      */
     recordMouseEvents() {

@@ -89,10 +89,13 @@ export function useTerminalPinchZoom({
       }
     };
 
-    // Trackpad pinch (macOS / Windows): `wheel` + `ctrlKey` — must not depend on `onData`
-    // (the mouse/SGR effect is skipped when `onData` is unset).
+    // Trackpad pinch (macOS / Windows): `wheel` + `ctrlKey`.
     const onWheelTrackpad = (e: WheelEvent) => {
-      if (!e.ctrlKey) return;
+      if (!e.ctrlKey) {
+        // An ordinary wheel step ends a pinch: the next one starts accumulating afresh.
+        wheelPinchAccumRef.current = 0;
+        return;
+      }
       const t = termRef.current;
       if (!t) return;
       const opts = { min: minFontSize, max: maxFontSize };
@@ -110,13 +113,15 @@ export function useTerminalPinchZoom({
         applyFontSizePx(fontSize, opts);
       }
       e.preventDefault();
+      // xterm.js would otherwise scroll, or report a wheel step, for the same gesture.
+      e.stopPropagation();
     };
 
     container.addEventListener("touchstart", onTouchStart, { passive: true });
     container.addEventListener("touchmove", onTouchMove, { passive: false, capture: true });
     container.addEventListener("touchend", endPinch, { passive: true });
     container.addEventListener("touchcancel", endPinch, { passive: true });
-    // Capture: run before xterm/ghostty wheel handlers so trackpad pinch adjusts font instead of scroll.
+    // Capture: run before the terminal's own wheel handler so trackpad pinch adjusts font instead of scroll.
     container.addEventListener("wheel", onWheelTrackpad, { capture: true, passive: false });
 
     return () => {

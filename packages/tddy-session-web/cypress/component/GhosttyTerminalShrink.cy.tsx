@@ -2,8 +2,8 @@
  * Acceptance: the session terminal re-fits when the window collapses around it.
  *
  * **The load-bearing behavior is the re-fit on collapse, not the initial fit.** After a display
- * disconnect pulls the window onto a smaller screen, the pane can end up narrower than the canvas'
- * fitted width — a stuck flex chain (an item whose automatic minimum size is the canvas' width)
+ * disconnect pulls the window onto a smaller screen, the pane can end up narrower than the screen's
+ * fitted width — a stuck flex chain (an item whose automatic minimum size is the screen's width)
  * never resizes, the FitAddon's ResizeObserver sees no change, and the grid goes stale, clipping
  * text at the old edge. The real pane chain, from the host this mounts, must let the pane shrink
  * and re-fit the grid.
@@ -107,7 +107,7 @@ function ShrinkableHost() {
 }
 
 describe("GhosttyTerminal shrink — the real pane chain", () => {
-  it("re-fits the grid when the pane collapses below the canvas' fitted width", () => {
+  it("re-fits the grid when the pane collapses below the screen's fitted width", () => {
     // Given — a wide pane with the real terminal chain mounted
     cy.mount(<ShrinkableHost />);
     byTestId(TEST_IDS.ghosttyTerminal, { timeout: 10000 }).should(
@@ -116,9 +116,9 @@ describe("GhosttyTerminal shrink — the real pane chain", () => {
       "true",
     );
     byTestId(TEST_IDS.ghosttyTerminal)
-      .find("canvas")
-      .then(($canvas) => {
-        const fittedWidth = parseFloat($canvas[0].style.width);
+      .find(".xterm-screen")
+      .then(($screen) => {
+        const fittedWidth = $screen[0].getBoundingClientRect().width;
         expect(fittedWidth).to.be.greaterThan(
           600,
           "terminal should have fitted to the wide pane",
@@ -128,19 +128,19 @@ describe("GhosttyTerminal shrink — the real pane chain", () => {
         cy.get("[data-testid='shrink-host']").click();
 
         // Then — the grid re-fits to the shrunken pane (the FitAddon's resize observer is
-        // debounced at 100ms; on a loaded CI runner the wasm render loop can lag behind, so
+        // debounced at 100ms; on a loaded CI runner the render loop can lag behind, so
         // give the re-fit a generous window — the timeout flows from .find into .should)
         byTestId(TEST_IDS.ghosttyTerminal)
-          .find("canvas", { timeout: 15000 })
+          .find(".xterm-screen", { timeout: 15000 })
           .should(($c) => {
-            const width = parseFloat($c[0].style.width);
+            const width = $c[0].getBoundingClientRect().width;
             if (width < 300) return;
 
-            // Diagnostic: CI has failed this twice with the canvas frozen at the fitted
+            // Diagnostic: CI has failed this twice with the screen frozen at the fitted
             // width while the identical tree passed elsewhere. Distinguish the two
             // candidate mechanisms in the failure message itself (no artifacts are
             // uploaded): a container still ~fitted wide means the flex chain is stuck at
-            // min-content; a shrunken container under an unfitted canvas means the
+            // min-content; a shrunken container under an unfitted screen means the
             // observer/fit path never ran.
             const chain: string[] = [];
             let node: HTMLElement | null = $c[0] as HTMLElement;
@@ -158,8 +158,8 @@ describe("GhosttyTerminal shrink — the real pane chain", () => {
               node = node.parentElement;
             }
             throw new Error(
-              `canvas did not re-fit (fitted ${fittedWidth}px, still ${width}px after 15s). ` +
-                `Chain canvas→root:\n${chain.join("\n")}`,
+              `screen did not re-fit (fitted ${fittedWidth}px, still ${width}px after 15s). ` +
+                `Chain screen→root:\n${chain.join("\n")}`,
             );
           });
       });

@@ -17,7 +17,7 @@ describe("GhosttyTerminal", () => {
     const ansiContent = "\x1b[1;32m$ ls -la\x1b[0m\nfile1.txt  file2.txt";
 
     // When / Then
-    aGhosttyTerminal({ initialContent: ansiContent }).mount().expectExists().expectCanvasExists();
+    aGhosttyTerminal({ initialContent: ansiContent }).mount().expectExists().expectScreenExists();
   });
 
   it("renders its initial content once, not once per effect that writes it", () => {
@@ -71,7 +71,7 @@ describe("GhosttyTerminal", () => {
     }).mount();
     // The content is written by an effect after the terminal reports ready: a drag dispatched before
     // it lands finds no scrollback to move through, so wait for the last row first.
-    driver.expectExists().expectCanvasExists().expectBufferHoldsTimes("row-200", 1);
+    driver.expectExists().expectScreenExists().expectBufferHoldsTimes("row-200", 1);
 
     // When — the user drags one finger down to pull earlier output back into view
     driver.dragDownOneFinger();
@@ -156,7 +156,7 @@ describe("GhosttyTerminal", () => {
   it("does not receive focus when clicked with preventFocusOnTap true", () => {
     // Given / When
     const driver = aGhosttyTerminal({ preventFocusOnTap: true }).mount();
-    driver.expectExists().expectCanvasExists();
+    driver.expectExists().expectScreenExists();
     driver.click("center");
 
     // Then
@@ -166,7 +166,7 @@ describe("GhosttyTerminal", () => {
   it("does not receive focus when touched with preventFocusOnTap true (mobile tap)", () => {
     // Given
     const driver = aGhosttyTerminal({ preventFocusOnTap: true }).mount();
-    driver.expectExists().expectCanvasExists();
+    driver.expectExists().expectScreenExists();
 
     // When
     driver.simulateTouchTap();

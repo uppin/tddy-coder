@@ -35,7 +35,7 @@ describe("Terminal touch scroll routing (mobile)", () => {
     }).mount();
     driver
       .expectExists()
-      .expectCanvasExists()
+      .expectScreenExists()
       .expectInAlternateScreen()
       .expectReportingMouseToTui();
 
@@ -55,7 +55,7 @@ describe("Terminal touch scroll routing (mobile)", () => {
       initialContent: `\x1b[?1049h${numberedLines(60)}`,
       withHandleCapture: true,
     }).mount();
-    driver.expectExists().expectCanvasExists().expectInAlternateScreen();
+    driver.expectExists().expectScreenExists().expectInAlternateScreen();
 
     // When — the user drags one finger down to pull earlier output into view
     driver.dragDownOneFinger();
@@ -77,7 +77,7 @@ describe("Terminal touch scroll routing (mobile)", () => {
     // it lands finds no scrollback to move through, so wait for the last row first.
     driver
       .expectExists()
-      .expectCanvasExists()
+      .expectScreenExists()
       .expectBufferHoldsTimes("row-200", 1);
 
     // When — the user drags one finger down to pull earlier output into view

@@ -43,7 +43,7 @@ export function useDesktopKeyForwarding({
   }, [sessionActive]);
 }
 
-/** Forwards Escape pressed during IME composition, which the library drops. */
+/** Forwards Escape pressed during IME composition, which xterm.js drops. */
 export function useImeEscapeForwarding({
   containerRef,
   termRef,
@@ -58,7 +58,8 @@ export function useImeEscapeForwarding({
   sessionActive: boolean;
 }): void {
   /**
-   * ghostty-web ignores keydown while IME/composition is active (`isComposing`, `keyCode === 229`).
+   * xterm.js ignores keydown while IME/composition is active (`isComposing`, `keyCode === 229` —
+   * its CompositionHelper returns before the key reaches the encoder).
    * Typing `/` can start composition in some locales; Escape then cancels IME but never reaches the
    * terminal. Capture Escape on the hidden textarea and forward `\x1b` when the library would drop it.
    */

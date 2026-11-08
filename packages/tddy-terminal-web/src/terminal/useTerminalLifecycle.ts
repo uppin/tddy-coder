@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type MutableRefObject } from "react";
-import { ghosttyEngine } from "../engine/ghosttyEngine";
+import { xtermEngine } from "../engine/xtermEngine";
 import type { EngineDisposable } from "../engine/TerminalEngine";
 import type { GhosttyTerminalProps } from "./types";
 import type { TerminalLoggers } from "./terminalLoggers";
@@ -81,7 +81,7 @@ export function useTerminalLifecycle({
       if (!mountPoint) return;
       logLife("creating Terminal");
 
-      const term = ghosttyEngine({
+      const term = xtermEngine({
         cols,
         rows,
         fontSize,
@@ -145,7 +145,7 @@ export function useTerminalLifecycle({
         const refit = (): boolean => {
           const engine = termRef.current;
           if (!engine) return true;
-          // The engine can transiently fail to measure (it measures the live canvas) — report
+          // The engine can transiently fail to measure (it measures the live screen) — report
           // false so the frame retry picks it up; the RO only fires while the size actually
           // changes, so a skipped proposal would otherwise be dropped for good.
           if (!engine.proposeDimensions()) return false;

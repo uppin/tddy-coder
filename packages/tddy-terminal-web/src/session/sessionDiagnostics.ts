@@ -6,7 +6,6 @@ import type { GhosttyTerminalHandle } from "../terminal/types";
 export const dTerm = tddyDebug("tddy:term:session");
 export const dResize = tddyDebug("tddy:term:resize");
 export const dHistory = tddyDebug("tddy:term:history");
-export const dMouse = tddyDebug("tddy:term:mouse");
 export const dModes = tddyDebug("tddy:term:modes");
 export const dChrome = tddyDebug("tddy:term:chrome");
 

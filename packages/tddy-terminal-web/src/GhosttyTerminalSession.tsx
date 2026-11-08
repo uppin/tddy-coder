@@ -41,7 +41,7 @@ import { TerminalProbes } from "./session/TerminalProbes";
 import type { GhosttyTerminalSessionProps } from "./session/types";
 import { useFeedStream, useSessionEnded } from "./session/useFeedStream";
 import { useHistoryDoubleBuffer } from "./session/useHistoryDoubleBuffer";
-import { useLiveWheelGate, useTestWindowHooks } from "./session/useLivePaneGates";
+import { useTestWindowHooks } from "./session/useLivePaneGates";
 import { useTerminalMirrors } from "./session/useTerminalMirrors";
 
 export { describeKey } from "./session/sessionDiagnostics";
@@ -211,8 +211,6 @@ export function GhosttyTerminalSession({
 
   // FIXME: test-only hooks; remove if real wheel/keystroke drivers become available in Cypress.
   useTestWindowHooks(termRef, olderTermRef);
-
-  useLiveWheelGate(liveContainerRef, termRef);
 
   // The status the chrome reports. A caller that states none is not making a claim about the
   // connection — the feed exists, so bytes can flow — and the raw readout stays out of the layout.

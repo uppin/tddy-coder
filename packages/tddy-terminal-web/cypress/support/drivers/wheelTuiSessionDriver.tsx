@@ -76,17 +76,17 @@ export function aWheelTuiSession(options: WheelTuiSessionOptions) {
       return this;
     },
 
-    /** One wheel notch over the live pane, as the browser reports it (on the canvas). */
+    /** One wheel notch over the live pane, as the browser reports it (on xterm's screen element). */
     wheelUp() {
       byTestId(TEST_IDS.terminalLivePane)
-        .find("canvas")
+        .find(".xterm-screen")
         .trigger("wheel", { deltaY: -120, clientX: 100, clientY: 50 });
       return this;
     },
 
     wheelDown() {
       byTestId(TEST_IDS.terminalLivePane)
-        .find("canvas")
+        .find(".xterm-screen")
         .trigger("wheel", { deltaY: 120, clientX: 100, clientY: 50 });
       return this;
     },
