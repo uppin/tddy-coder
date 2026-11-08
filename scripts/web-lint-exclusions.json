@@ -11,7 +11,7 @@
   },
   {
     "package": "tddy-terminal-web",
-    "reason": "16 errors in code moved from tddy-web: spec fixtures as plain objects / nullable refs / sinon typings, two unit tests' window and feed-option types, plus tddy-tauri-web's 'log' option it compiles through",
+    "reason": "15 errors in code moved from tddy-web: spec fixtures as plain objects / nullable refs, two unit tests' window and feed-option types, plus tddy-tauri-web's 'log' option it compiles through",
     "todo": "docs/dev/todo/2026-11-07-terminal-web-does-not-typecheck.md"
   },
   {
@@ -23,6 +23,11 @@
     "package": "tddy-workspace-web",
     "reason": "43 errors in the Cypress support and specs moved from tddy-web (plain-object fixtures where generated message types are expected, a Sinon agent typed as a callback)",
     "todo": "docs/dev/todo/2026-11-07-workspace-web-specs-do-not-typecheck.md"
+  },
+  {
+    "package": "tddy-session-web",
+    "reason": "1 error, not in the package: tddy-tauri-web's transport.ts passes `log` to createEnvelopeTransport (TS2353), which the package compiles through tddy-terminal-web",
+    "todo": "docs/dev/todo/2026-11-07-tauri-web-transport-log-is-dropped.md"
   },
   {
     "package": "tddy-rust-typescript-tests",

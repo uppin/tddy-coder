@@ -47,7 +47,8 @@ function aRecordingBackend() {
   const backend = anInMemoryRpcBackend().implement(TerminalSessionService, {
     async *streamSessionTerminalIO(requests: AsyncIterable<SessionTerminalInput>) {
       const acks: SessionTerminalOutput[] = [];
-      let wake: (() => void) | null = null;
+      // Widened by hand: assigned only inside the stream's closure, so TS would narrow it to `null`.
+      let wake = null as (() => void) | null;
       void (async () => {
         for await (const message of requests) {
           messages.push(message);
