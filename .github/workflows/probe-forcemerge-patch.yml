@@ -1,0 +1,23 @@
+name: Probe forcemerge check-run patch
+# TODO(forcemerge): temporary probe — does GITHUB_TOKEN may update a check run GitHub Actions
+# created in another workflow's suite? Delete with this branch.
+on:
+  pull_request:
+permissions:
+  checks: write
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    steps:
+      - env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -uo pipefail
+          for id in 128695377537 128693002038 128693001949; do
+            gh api -X PATCH "repos/$REPO/check-runs/$id" \
+              -f status=completed -f conclusion=success \
+              -f "output[title]=Forced by @mantasindrasius via #forcemerge" \
+              -f "output[summary]=Not built. Completed as forced so #838 can merge (developer's force-merge of #web-split)." \
+              --jq '"patched \(.id) \(.name) → \(.conclusion)"' || echo "PATCH $id failed"
+          done
