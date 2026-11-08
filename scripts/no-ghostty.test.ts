@@ -10,7 +10,7 @@ import { readFileSync } from "node:fs";
  * Scope: every tracked file of every JS workspace package (Markdown docs excepted — the change
  * history may name what was removed), plus the root `package.json` and `bun.lock`.
  *
- * PRD: docs/ft/web/1-WIP/PRD-2026-11-08-drop-ghostty.md
+ * History: docs/dev/changesets/2026-11-08-drop-ghostty.md
  */
 
 const REPO_ROOT = `${import.meta.dir}/..`;
