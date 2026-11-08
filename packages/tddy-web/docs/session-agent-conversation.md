@@ -24,12 +24,12 @@ to read.
 | Piece | File | Owns |
 |---|---|---|
 | Tab list + attach | `src/components/sessions/SessionMainPane.tsx` | which conversations exist, per session, and which is focused |
-| Tab strip + pane stack | `src/components/sessions/SessionRuntime.tsx` (live), `DormantSessionRuntime.tsx` (stopped), `SessionTerminalTabs.tsx` | rendering a tab per conversation, and adopting the session's conversation host |
+| Tab strip + pane stack | `tddy-session-web`'s `src/SessionRuntime.tsx` (live), `DormantSessionRuntime.tsx` (stopped), `SessionTerminalTabs.tsx`, `agentConversationTabs.ts` | rendering a tab per conversation, and adopting the session's conversation host |
 | Bodies | `src/components/sessions/SessionAgentConversationLayer.tsx` | rendering a body per conversation, portalled into its session's host element |
 | The conversation | `src/components/sessions/useAgentConversation.ts`, `SessionAgentConversationPane.tsx` | `Open` / `Prompt` / `Cancel` on `session_agents.SessionAgentService`, for exactly one conversation |
 
 Two pure modules carry the logic worth testing without a DOM:
-`agentConversationTranscript.ts` (chunks → turns) and `agentConversationTabs.ts` (the tab list).
+`agentConversationTranscript.ts` (chunks → turns) and `tddy-session-web`'s `agentConversationTabs.ts` (the tab list).
 
 ## Invariants
 

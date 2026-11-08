@@ -1,6 +1,6 @@
 # Inactive session activities (main-pane base view)
 
-Technical reference for the base-view rule in **`packages/tddy-web/src/components/sessions/sessionBaseView.ts`**, the stopped Agent tab in **`DormantAgentTerminal.tsx`**, the transcript pane in **`SessionActivitiesPane.tsx`** (the inspector's Activity tab; in `tddy-chat-web` since #847), and the attach bookkeeping and resume hint in **`SessionsDrawerScreen.tsx`** that let a resumed session return to its terminal.
+Technical reference for the base-view rule in **`packages/tddy-web/src/components/sessions/sessionBaseView.ts`**, the stopped Agent tab in **`DormantAgentTerminal.tsx`** (`tddy-session-web`), the transcript pane in **`SessionActivitiesPane.tsx`** (the inspector's Activity tab; in `tddy-chat-web` since #847), and the attach bookkeeping and resume hint in **`SessionsDrawerScreen.tsx`** that let a resumed session return to its terminal.
 
 Product reference: [docs/ft/web/inactive-session-activities.md](../../../docs/ft/web/inactive-session-activities.md).
 
@@ -18,7 +18,7 @@ Product reference: [docs/ft/web/inactive-session-activities.md](../../../docs/ft
 
 ### The stopped session's strip
 
-`DormantSessionRuntime.tsx` is the tab strip of a session with no live connection. It reuses `SessionTerminalTabs`, `useSessionTerminals` and `GrpcSessionTerminal` against the owning daemon's `TerminalSessionService` client — none of which needs the agent's connection — and claims the session's control lease on attach (`useTerminalControl`) as a live strip does. `SessionMainPane` keys it by session id, so one session's terminal list and lease never carry into another's.
+`DormantSessionRuntime.tsx` (in `tddy-session-web` since #860) is the tab strip of a session with no live connection. It reuses `SessionTerminalTabs`, `useSessionTerminals` and `GrpcSessionTerminal` against the owning daemon's `TerminalSessionService` client — none of which needs the agent's connection — and claims the session's control lease on attach (`useTerminalControl`) as a live strip does. `SessionMainPane` keys it by session id, so one session's terminal list and lease never carry into another's.
 
 - **The Agent tab is a render slot** (`agentTab: React.ReactNode`); `SessionMainPane` fills it with `DormantAgentTerminal`. The strip never decides what a stopped Agent tab shows.
 - **What a keystroke would reach** (`focusedTerminalId`) is a bash or harness tab with no conversation over it — never the Agent tab, which is read-only. Only that tab gets the mobile shortcut drawer, the claim toast and grey-out (`TerminalControlLayer`, rendered only while another screen holds the lease), and the Files-tab Insert.
