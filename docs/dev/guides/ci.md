@@ -679,8 +679,11 @@ than confirming to a stranger that the trigger exists.
 `#forcemerge` is held to the same `write` bar rather than a higher one on
 purpose. The repo is owned by a different account than the people working in it,
 so an admin-only force merge would be usable by nobody. It leaves a trace that
-outlives the run log: before merging, the workflow comments on the PR naming who
-asked, linking their comment, and quoting the full check state at that moment.
+outlives the run log: once the merge has gone through, the workflow comments on the PR
+naming who asked, linking their comment, and quoting the full check state read just
+before the merge. A force merge that fails — most often a rule violation because the
+Actions app is not yet a bypass actor (below) — posts a ❌ comment with the API's error
+instead, so an open PR never carries a "Force-merged" claim.
 
 ### What it depends on
 

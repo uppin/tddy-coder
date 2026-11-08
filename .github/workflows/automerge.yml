@@ -95,8 +95,28 @@ jobs:
             force)
               # Merging past a gate is worth a trace that outlives the run log,
               # so record who asked and what the checks actually said, on the PR
-              # itself, before doing it.
+              # itself. The check state is read before the merge, and the trace
+              # is posted only once the merge went through — a failed attempt
+              # must not leave a "Force-merged" claim on an open PR.
               checks=$(gh pr checks "$PR" --repo "$REPO" 2>&1 || true)
+              # --admin merges through the merge API instead of asking to queue.
+              # It succeeds only because the Actions app is a bypass actor on the
+              # ruleset; without that it fails here rather than merging quietly.
+              if ! merge_out=$(gh pr merge "$PR" --repo "$REPO" --squash --admin 2>&1); then
+                echo "$merge_out"
+                gh pr comment "$PR" --repo "$REPO" --body "$(cat <<EOF
+          ❌ [\`#forcemerge\`]($COMMENT_URL) by @$ACTOR did **not** merge this PR.
+
+          \`\`\`
+          $merge_out
+          \`\`\`
+
+          A rule violation here usually means the GitHub Actions app is not a bypass actor on the
+          \`master\` ruleset — a repo admin grants it once; see \`docs/dev/guides/ci.md\` § Automerge.
+          EOF
+          )"
+                exit 1
+              fi
               gh pr comment "$PR" --repo "$REPO" --body "$(cat <<EOF
           ⚠️ **Force-merged** by @$ACTOR via [\`#forcemerge\`]($COMMENT_URL), bypassing the required checks.
 
@@ -107,10 +127,6 @@ jobs:
           \`\`\`
           EOF
           )"
-              # --admin merges through the merge API instead of asking to queue.
-              # It succeeds only because the Actions app is a bypass actor on the
-              # ruleset; without that it fails here rather than merging quietly.
-              gh pr merge "$PR" --repo "$REPO" --squash --admin
               echo "reaction=hooray" >> "$GITHUB_OUTPUT"
               echo "Force-merged #$PR"
               ;;
