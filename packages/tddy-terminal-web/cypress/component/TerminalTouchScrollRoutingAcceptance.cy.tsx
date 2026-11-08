@@ -71,6 +71,7 @@ describe("Terminal touch scroll routing (mobile)", () => {
     const driver = aGhosttyTerminal({
       preventFocusOnTap: true,
       initialContent: numberedLines(200),
+      scrollback: 1000, // the prop's default is none, which xterm.js honours
       withHandleCapture: true,
     }).mount();
     // The content is written by an effect after the terminal reports ready: a drag dispatched before

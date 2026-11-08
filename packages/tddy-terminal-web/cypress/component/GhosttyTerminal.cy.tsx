@@ -67,6 +67,7 @@ describe("GhosttyTerminal", () => {
     // Given — more output than fits in the viewport, sitting pinned at the bottom
     const driver = aGhosttyTerminal({
       initialContent: numberedLines(200),
+      scrollback: 1000, // the prop's default is none, which xterm.js honours
       withHandleCapture: true,
     }).mount();
     // The content is written by an effect after the terminal reports ready: a drag dispatched before
@@ -133,12 +134,11 @@ describe("GhosttyTerminal", () => {
     const driver = aGhosttyTerminal({
       onData: cy.stub().as("onData"),
       initialContent: "\x1b[?1000h\x1b[?1006h",
+      // A tap on mobile: the tap-as-click route re-synthesises the mouse events xterm reports.
+      preventFocusOnTap: true,
+      withHandleCapture: true,
     }).mount();
-    driver.expectExists();
-
-    // Brief settle — mouse-tracking escape sequences need a render cycle before events work
-    // eslint-disable-next-line cypress/no-unnecessary-waiting
-    cy.wait(500); // justified: ghostty-web must process the SGR enable sequences before we send touch events
+    driver.expectExists().expectReportingMouseToTui();
 
     // When
     driver.simulateTouchTap();

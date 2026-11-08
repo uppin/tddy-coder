@@ -126,7 +126,9 @@ export function aGhosttyTerminal(options: GhosttyTerminalDriverOptions = {}) {
 
     /** Type into the terminal. */
     type(text: string) {
-      terminal().type(text);
+      // Keystrokes go to xterm's hidden input; force skips the actionability check on a
+      // zero-size element.
+      terminal().find(".xterm-helper-textarea").type(text, { force: true });
       return this;
     },
 
@@ -203,10 +205,9 @@ export function aGhosttyTerminal(options: GhosttyTerminalDriverOptions = {}) {
      *  `preventFocusOnTap` blocks click-focus by design — so the click-to-focus leaves
      *  `document.activeElement` unchanged and `cy.type` rejects the element as "disabled". `force`
      *  skips that click-to-focus actionability check (focus is already established imperatively)
-     *  and dispatches the keystroke on the terminal host, which is where ghostty-web's key listener
-     *  lives. */
+     *  and dispatches the keystroke on xterm's input textarea, where its key listener lives. */
     typeAfterImperativeFocus(text: string) {
-      terminal().type(text, { force: true });
+      terminal().find(".xterm-helper-textarea").type(text, { force: true });
       return this;
     },
 
@@ -221,12 +222,15 @@ export function aGhosttyTerminal(options: GhosttyTerminalDriverOptions = {}) {
      * `expectMouseDownAtTapPoint()` can check the click landed where the finger did.
      */
     simulateTouchTapAt(xRatio: number, yRatio: number) {
-      terminal().then(($el) => {
+      // The finger lands on xterm's screen element, as a real tap does; the tap events bubble to
+      // the container the component listens on.
+      terminal().find(".xterm-screen").then(($el) => {
         const el = $el[0];
         const rect = el.getBoundingClientRect();
+        // Whole pixels: that is the precision a mouse event reports.
         const point: TapPoint = {
-          clientX: rect.left + rect.width * xRatio,
-          clientY: rect.top + rect.height * yRatio,
+          clientX: Math.round(rect.left + rect.width * xRatio),
+          clientY: Math.round(rect.top + rect.height * yRatio),
         };
         lastTapPoint = point;
         const touch = new Touch({
@@ -245,6 +249,7 @@ export function aGhosttyTerminal(options: GhosttyTerminalDriverOptions = {}) {
             targetTouches: [touch],
             changedTouches: [touch],
             cancelable: true,
+            bubbles: true,
           }),
         );
         el.dispatchEvent(
@@ -253,6 +258,7 @@ export function aGhosttyTerminal(options: GhosttyTerminalDriverOptions = {}) {
             targetTouches: [],
             changedTouches: [touch],
             cancelable: true,
+            bubbles: true,
           }),
         );
       });

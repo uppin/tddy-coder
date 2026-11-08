@@ -309,7 +309,7 @@ export function aGhosttyTerminalSession(opts: GhosttyTerminalSessionDriverOption
 
     /** Type at the terminal, as an operator at a keyboard would. */
     type(text: string) {
-      driver.terminal().should("exist").focus().type(text);
+      driver.terminal().find(".xterm-helper-textarea").type(text, { force: true });
       return driver;
     },
 

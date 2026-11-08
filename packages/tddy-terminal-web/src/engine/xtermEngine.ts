@@ -249,6 +249,10 @@ class XtermEngine implements TerminalEngine {
     return this.listen((term) => term.buffer.onBufferChange((buffer) => listener(buffer.type === "alternate")));
   }
 
+  onWriteParsed(listener: () => void): EngineDisposable {
+    return this.listen((term) => term.onWriteParsed(listener));
+  }
+
   /** Registers on the terminal now when it exists, otherwise as soon as `open` creates it. */
   private listen(register: (term: Terminal) => EngineDisposable): EngineDisposable {
     if (this.term) {

@@ -23,7 +23,7 @@
 
 ## Summary
 
-Replace ghostty-web with xterm.js as the web terminal's engine: `xtermEngine` implements `TerminalEngine` with `@xterm/xterm`, `@xterm/addon-fit`, `@xterm/addon-unicode11`, `@xterm/addon-clipboard` and `@xterm/addon-webgl` (WebGL renderer, the DOM renderer when WebGL is unavailable). The ghostty-only workarounds are deleted, and the canvas-geometry specs are rewritten.
+Replace ghostty-web with xterm.js as the web terminal's engine: `xtermEngine` implements `TerminalEngine` with `@xterm/xterm`, `@xterm/addon-fit`, `@xterm/addon-unicode11` and `@xterm/addon-webgl` (WebGL renderer, the DOM renderer when WebGL is unavailable). The ghostty-only workarounds are deleted, and the canvas-geometry specs are rewritten.
 
 ## Background
 
@@ -68,13 +68,13 @@ Real dependency edges: `n1 → n2 → n3 → n4`. Pass 2 waits until `#web-split
 
 ## Scope
 
-- [ ] Add the five `@xterm/*` deps (mirror lockfile)
-- [ ] `xtermEngine` + renderer selection
-- [ ] Components construct `xtermEngine`
-- [ ] Delete the ghostty-only workarounds
-- [ ] Port OSC 52
-- [ ] Rewrite canvas specs
-- [ ] Contract suite + new specs green
+- [x] Add the four `@xterm/*` deps (mirror lockfile)
+- [x] `xtermEngine` + renderer selection
+- [x] Components construct `xtermEngine`
+- [x] Delete the ghostty-only workarounds
+- [x] Port OSC 52
+- [x] Rewrite canvas specs
+- [x] Contract suite + new specs green
 
 ## Technical Changes
 
@@ -104,6 +104,9 @@ Cypress component specs one at a time locally, `bun test src`, scoped to the tou
 - Developer, 2026-11-08 (pass 2 review): `xtermEngine` names its renderer on its container (`data-terminal-renderer`), so `TerminalEngine` is unchanged; the unicode-width spec drives the engine directly, the mouse and renderer specs the component; the mouse spec also pins one wheel-up report per **pixel-mode** wheel notch (`deltaY: -100`), not only per line-mode step.
 - Developer, 2026-11-08: WebGL renderer with DOM fallback; deps `@xterm/xterm`, `@xterm/addon-fit`, `@xterm/addon-unicode11`, `@xterm/addon-webgl`, `@xterm/addon-clipboard`; rename inside the last node; stack registered as an extension of `#web-split`.
 
+- Developer, 2026-11-08 (green): `@xterm/addon-clipboard` is **not** added; OSC 52 stays on the `lib/osc52.ts` write tap, which answers no clipboard reads, caps payload size and falls back where `navigator.clipboard` is absent. The addon would double-copy and answer reads. The IME Escape forward stays (xterm's `CompositionHelper` also drops `keyCode` 229). `terminalDprWatch` stays until n4 (ghosttyEngine uses it). Write buffering in `useFeedStream` stays: it covers data arriving before the engine is attached, not only parse delay.
+- Developer, 2026-11-08 (green): xterm parses writes asynchronously, so `TerminalEngine` gained `onWriteParsed` (n2, #867). The buffer-text revision moves on parse; `onReady` waits for `initialContent` to be parsed; the live pane re-reads its DEC modes on parse. `data-terminal-renderer` is set on xterm's root element inside the container (the renderer spec finds it among the container's descendants). The two touch-SGR specs drive the tap-as-click route: xterm reports the synthesised mouse events. Specs that need scrollback pass `scrollback` explicitly (xterm honours `0`).
+
 ## Refactoring Needed
 
 ## Validation Results
@@ -118,7 +121,7 @@ Cypress component specs one at a time locally, `bun test src`, scoped to the tou
 - [x] Run acceptance tests (verify they fail)
 - [x] USER REVIEW — acceptance tests
 - [x] TDD Red — write failing unit/integration tests
-- [ ] TDD Green — implement with quality code
+- [x] TDD Green — implement with quality code
 - [ ] Update documentation with progress
 - [ ] Run the touched packages' tests — verify 100% pass
 - [ ] Validate changes (/validate-changes)

@@ -112,7 +112,7 @@ describe("GhosttyTerminalSession", () => {
     );
 
     // When
-    byTestId(TEST_IDS.ghosttyTerminal).focus().type("ls");
+    byTestId(TEST_IDS.ghosttyTerminal).find(".xterm-helper-textarea").type("ls", { force: true });
 
     // Then — each keystroke arrives as its own chunk. Asserted chunk by chunk rather than over the
     // concatenation, which also holds the resize OSC (`\x1b]resize;80;24\x07`) and so contains an

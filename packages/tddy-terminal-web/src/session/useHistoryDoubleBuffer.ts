@@ -40,9 +40,17 @@ export function useHistoryDoubleBuffer({
   // Whether the live terminal's program owns navigation (see `tuiOwnsNavigation`) — re-read after
   // every chunk that switches a mode, since ghostty-web holds the state and does not report changes.
   const [liveTuiOwnsNavigation, setLiveTuiOwnsNavigation] = useState(false);
+  // The terminal parses written data after `write` returns, so the modes a chunk switches are read
+  // when the parse lands: a listener per terminal re-reads them after every parse.
+  const modeWatchRef = useRef<{ term: GhosttyTerminalHandle; subscription: { dispose(): void } } | null>(null);
   const noteLiveModeSwitches = (term: GhosttyTerminalHandle, data: Uint8Array) => {
     const modes = decModeChanges(data);
     if (modes.length === 0) return;
+    if (modeWatchRef.current?.term !== term) {
+      modeWatchRef.current?.subscription.dispose();
+      const subscription = term.onWriteParsed?.(() => setLiveTuiOwnsNavigation(tuiOwnsNavigation(term)));
+      modeWatchRef.current = subscription ? { term, subscription } : null;
+    }
     traceModes(term, modes);
     setLiveTuiOwnsNavigation(tuiOwnsNavigation(term));
   };

@@ -102,6 +102,9 @@ export function useTerminalHandle({
       isAlternateScreen() {
         return termRef.current?.alternateScreen() ?? false;
       },
+      onWriteParsed(listener: () => void) {
+        return termRef.current?.onWriteParsed(listener) ?? { dispose() {} };
+      },
       paste(text: string) {
         termRef.current?.paste(text);
       },

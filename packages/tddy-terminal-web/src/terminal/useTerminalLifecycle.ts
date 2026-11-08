@@ -124,6 +124,9 @@ export function useTerminalLifecycle({
           onScrollRef.current?.(top);
         })
       );
+      // The buffer changes when a write is parsed, which can be after `write` returns: the
+      // revision `getBufferText` memoizes on moves then, so a read in between is not cached.
+      disposables.push(term.onWriteParsed(() => void contentRevisionRef.current++));
       disposablesRef.current = disposables;
 
       await term.open(mountPoint);
@@ -187,9 +190,18 @@ export function useTerminalLifecycle({
       const openContent = initialContentRef.current;
       if (openContent) {
         contentRevisionRef.current++;
+        const parsed = new Promise<void>((resolve) => {
+          const subscription = term.onWriteParsed(() => {
+            subscription.dispose();
+            resolve();
+          });
+        });
         term.write(openContent);
         osc52Tap(openContent);
         writtenInitialContentRef.current = openContent;
+        // Ready means "showing what it was given": wait until the engine has parsed it.
+        await parsed;
+        if (!isMounted) return;
       }
       setReady(true);
       onReady?.();
