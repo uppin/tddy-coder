@@ -6,7 +6,7 @@
 /* Scan every package that renders tddy classes (paths are relative to this file). One line per
    package: Tailwind does not expand a wildcard in a directory name here, so `tddy-*-web/src` matched
    nothing and every class only a component package uses was missing from the app's stylesheet (#861
-   carried an interim `tddy-*-web/src/**/*.{ts,tsx}` glob). A new component package adds its line —
+   carried an interim file-pattern glob). A new component package adds its line —
    `src/themeSources.test.ts` fails until it does. */
 @source "./";
 @source "../../tddy-web/src";
