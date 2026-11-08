@@ -4,6 +4,7 @@ import { composeStories, setProjectAnnotations } from "@storybook/react";
 import * as previewAnnotations from "../.storybook/preview";
 import { Glob } from "bun";
 import { join } from "node:path";
+import type { ComponentType } from "react";
 
 // The default world every story renders in: the port doubles `.storybook/preview.tsx` mounts.
 setProjectAnnotations(previewAnnotations);
@@ -32,7 +33,7 @@ describe("stories", () => {
       const stories = composeStories(await import(join(SRC, file)));
 
       // When / Then
-      for (const [name, Story] of Object.entries(stories)) {
+      for (const [name, Story] of Object.entries(stories) as [string, ComponentType][]) {
         expect(() => render(<Story />), name).not.toThrow();
         cleanup();
       }

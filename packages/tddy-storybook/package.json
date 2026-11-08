@@ -9,6 +9,7 @@
     "prebuild": "bun run --cwd ../tddy-livekit-rpc-web build",
     "build": "storybook build",
     "build-storybook": "bun run build",
+    "typecheck": "tsc --noEmit",
     "test": "bun test src",
     "test:ci": "bun test src --reporter=junit --reporter-outfile=../../reports/junit/storybook.xml"
   },

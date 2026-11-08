@@ -22,7 +22,7 @@ permissions:
 
 env:
   # The workspace package whose `build-storybook` script builds the Storybook.
-  STORYBOOK_PACKAGE: tddy-web
+  STORYBOOK_PACKAGE: tddy-storybook
 
 jobs:
   gate:

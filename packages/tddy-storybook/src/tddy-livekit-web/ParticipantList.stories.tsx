@@ -1,5 +1,5 @@
 import type { Meta, StoryObj } from "@storybook/react";
-import type { RoomParticipant } from "tddy-client-web";
+import type { ConnectionCapability, RoomParticipant } from "tddy-client-web";
 import { ParticipantList } from "tddy-livekit-web";
 
 const JOINED = 1_726_700_000_000;
@@ -9,7 +9,7 @@ function aParticipant(identity: string, role: RoomParticipant["role"]): RoomPart
 }
 
 // Every capability the list reads comes off the connection: a presence-bearing one has a roster.
-const connection = { capabilities: new Set(["presence", "media"]) };
+const connection = { capabilities: new Set<ConnectionCapability>(["presence", "media"]) };
 
 const meta: Meta<typeof ParticipantList> = {
   title: "tddy-livekit-web/ParticipantList",
