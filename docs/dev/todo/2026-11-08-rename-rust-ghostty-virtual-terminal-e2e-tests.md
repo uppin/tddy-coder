@@ -13,3 +13,5 @@ in a Rust-side change, so a rename of a test id does not hide inside a web PR.
 
 Other Rust mentions (`tddy-discovery`, `tddy-session-lifecycle`, `tddy-task`, `tddy-terminal-rpc`,
 `tddy-tui-testkit`) are outside the JS workspaces and were not touched.
+
+**Deferred:** by the developer 2026-11-08 at the `#xterm` stack TODO gate — a Rust test-id rename, left for a Rust-side change.
