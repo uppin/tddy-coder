@@ -300,7 +300,7 @@ describe("Terminal history paging — overlay double-buffer", () => {
   it("positions the page terminal viewport via scrollLines (full control of the viewport position)", () => {
     // Given — the page terminal has been forward-filled with a 30-line older-history chunk
     // (scrollback > rows), so scrollLines has real history to scroll through. The page pane is
-    // foreground and pinned to the bottom (viewportY 0) at the seam.
+    // foreground and pinned to the bottom (0 lines above the live tip) at the seam.
     const terminal = aTerminalWithHistoryPaging()
       .mount()
       .expectReady()
@@ -313,19 +313,19 @@ describe("Terminal history paging — overlay double-buffer", () => {
       .expectPageForeground();
 
     // Sanity — landed at the bottom (the seam) after the fill.
-    terminal.expectPageViewportY(0);
+    terminal.expectPageLinesAboveTip(0);
 
     // When — scroll the page viewport up by 5 lines via the imperative scrollLines handle.
     terminal.scrollPageUp(5);
 
     // Then — the viewport is positioned exactly 5 lines up from the bottom (full control).
-    terminal.expectPageViewportY(5);
+    terminal.expectPageLinesAboveTip(5);
 
     // When — scroll back down by 5 lines (positive = down toward the bottom).
     terminal.scrollPageUp(-5);
 
-    // Then — the viewport is pinned back to the bottom (viewportY 0).
-    terminal.expectPageViewportY(0);
+    // Then — the viewport is pinned back to the bottom (0 lines above the live tip).
+    terminal.expectPageLinesAboveTip(0);
   });
 
   // -------------------------------------------------------------------------
@@ -346,8 +346,8 @@ describe("Terminal history paging — overlay double-buffer", () => {
     terminal.pushOutput(enc(lines));
 
     // Then — the live terminal accumulated NO native scrollback (scrollback 0 ⇒ always pinned to
-    // the tip) and the viewport stayed at the bottom (viewportY 0).
-    terminal.expectLiveScrollbackLength(0).expectLiveViewportY(0);
+    // the tip) and the viewport stayed at the bottom (0 lines above the live tip).
+    terminal.expectLiveScrollbackLength(0).expectLiveLinesAboveTip(0);
 
     // When — the user activates the load-earlier toggle
     terminal.activateLoadEarlier();
@@ -511,7 +511,7 @@ describe("Terminal history paging — overlay double-buffer", () => {
       .pushFrame(REPLAY_FRAME);
     const lines = Array.from({ length: 40 }, (_, i) => `live-line-${i}\n`).join("");
     terminal.pushOutput(enc(lines));
-    terminal.expectLiveViewportY(0); // scrollback 0 ⇒ always pinned to the bottom
+    terminal.expectLiveLinesAboveTip(0); // scrollback 0 ⇒ always pinned to the bottom
     terminal.enableLiveMouseTracking(true);
 
     // When — wheel up on the live pane while mouse tracking is on.
@@ -519,7 +519,7 @@ describe("Terminal history paging — overlay double-buffer", () => {
 
     // Then — the live viewport is still 0 (scrollback 0, pinned) and NO forward-fill fired: the
     // wheel was routed to the TUI, so the lazy-history gesture is suppressed.
-    terminal.expectLiveViewportY(0).expectNoFurtherHistoryFetch();
+    terminal.expectLiveLinesAboveTip(0).expectNoFurtherHistoryFetch();
   });
 
   // -------------------------------------------------------------------------

@@ -5,7 +5,7 @@ import { dirname, relative } from "node:path";
 // The engine boundary: ghostty-web is reached only from the ghostty engine (and the WASM instance
 // loader it uses). Nothing else imports the library or casts a terminal to reach its members.
 //
-// PRD: docs/ft/web/1-WIP/PRD-2026-11-08-terminal-engine-interface.md (acceptance criterion 1)
+// PRD: packages/tddy-terminal-web/docs/terminal-engine.md (acceptance criterion 1)
 
 const PACKAGE_SOURCE_DIR = dirname(import.meta.dir);
 const ENGINE_FILES = ["engine/ghosttyEngine.ts", "lib/ghosttyInstance.ts"];

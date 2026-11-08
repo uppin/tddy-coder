@@ -2,7 +2,7 @@
  * Unit tests — `computeScrollbar` (native Scrollbar coordinate mapping, top-based).
  *
  * docs/ft/web/terminal-replay-lazy-scroll.md (amended — terminal-native-scrolling)
- * docs/ft/web/1-WIP/PRD-2026-11-08-terminal-engine-interface.md (top-based scrolling)
+ * packages/tddy-terminal-web/docs/terminal-engine.md (top-based scrolling)
  *
  * The viewport position comes in counted from the top of the buffer (`viewportTop`: 0 = oldest
  * line, `scrollbackLength` = live tip) and maps onto `PageList.Scrollbar {total, offset, len}`:

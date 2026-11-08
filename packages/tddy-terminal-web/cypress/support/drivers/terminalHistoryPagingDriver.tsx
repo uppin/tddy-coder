@@ -309,7 +309,7 @@ export function aTerminalWithHistoryPaging() {
 
     /** Assert the LIVE terminal's viewport sits `expected` lines above the live tip (0 = pinned),
      *  read from its scrollbar mirror, whose offset counts from the top. */
-    expectLiveViewportY(expected: number) {
+    expectLiveLinesAboveTip(expected: number) {
       byTestId(TEST_IDS.terminalLiveScrollbar).should(($el) => {
         expect(linesAboveTip($el[0].textContent ?? ""), "live terminal lines above the tip").to.equal(expected);
       });
@@ -378,7 +378,7 @@ export function aTerminalWithHistoryPaging() {
 
     /** Assert the page terminal's viewport sits `expected` lines above the live tip (0 = pinned),
      *  read from its scrollbar mirror, whose offset counts from the top. */
-    expectPageViewportY(expected: number) {
+    expectPageLinesAboveTip(expected: number) {
       byTestId(TEST_IDS.terminalPageScrollbar).should(($el) => {
         expect(linesAboveTip($el[0].textContent ?? ""), "page terminal lines above the tip").to.equal(expected);
       });

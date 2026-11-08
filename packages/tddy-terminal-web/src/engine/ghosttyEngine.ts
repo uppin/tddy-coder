@@ -110,13 +110,11 @@ class GhosttyEngine implements TerminalEngine {
     for (const cleanup of this.cleanups.splice(0)) cleanup();
     this.fitAddon?.dispose();
     this.fitAddon = null;
+    // ghostty-web's dispose removes the canvas and textarea it appended. Its `element` is the
+    // container it was opened on, which the caller owns, so it stays in the document.
     const term = this.term;
     this.term = null;
-    if (term) {
-      const screen = term.element;
-      term.dispose();
-      screen?.remove();
-    }
+    term?.dispose();
     for (const listeners of [this.data, this.resizes, this.bells, this.titles, this.scrolls, this.bufferChanges]) {
       listeners.clear();
     }

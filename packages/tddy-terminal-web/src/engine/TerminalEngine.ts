@@ -6,7 +6,7 @@
  * buffer: line 0 is the oldest retained scrollback line, and the viewport is at the live tip when
  * `viewportTop() === scrollbackLength()`.
  *
- * PRD: docs/ft/web/1-WIP/PRD-2026-11-08-terminal-engine-interface.md
+ * PRD: packages/tddy-terminal-web/docs/terminal-engine.md
  */
 
 /** Releases a listener registered on an engine. */

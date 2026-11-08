@@ -67,11 +67,11 @@ Real dependency edges: `n1 → n2 → n3 → n4`. Pass 2 waits until `#web-split
 
 ## Scope
 
-- [ ] `TerminalEngine` + `ghosttyEngine`
-- [ ] Components and hooks use the engine only
-- [ ] Top-based scroll in handle, scrollbar, history mirrors, paging driver
-- [ ] Canvas-reading specs/drivers read through the engine or buffer text
-- [ ] Engine contract suite green on ghostty
+- [x] `TerminalEngine` + `ghosttyEngine`
+- [x] Components and hooks use the engine only
+- [x] Top-based scroll in handle, scrollbar, history mirrors, paging driver
+- [x] Canvas-reading specs/drivers read through the engine or buffer text
+- [x] Engine contract suite green on ghostty
 
 ## Technical Changes
 
@@ -99,6 +99,9 @@ Cypress component specs one at a time locally, `bun test src`, scoped to the tou
 
 - Developer, 2026-11-08 (pass 2 review): the contract renames `computeScrollbar`'s input to `viewportTop` and updates its one caller in `GhosttyTerminal.tsx` (behaviour unchanged, body still bottom-based until green) — accepted with the trivial rebase conflict against n1's split. The engine contract suite lives in `src/engine/terminalEngineContract.ts` (counted by n1's size rule) and the boundary test scans `tddy-terminal-web/src` production files only.
 - Developer, 2026-11-08: WebGL renderer with DOM fallback; deps `@xterm/xterm`, `@xterm/addon-fit`, `@xterm/addon-unicode11`, `@xterm/addon-webgl`, `@xterm/addon-clipboard`; rename inside the last node; stack registered as an extension of `#web-split`.
+- `[W]`, 2026-11-08 — **`getBufferText` pads each trimmed engine line to `cols`** (kept). ghostty-web's `translateToString()` concatenated `getChars()` per cell, and a blank or wide-spacer cell (codepoint 0) yields `""`, so the old text was not a fixed-width grid either; the padded form keeps line boundaries from fusing (`W=80` followed by a line starting `1` no longer reads `W=801`). A line with a wide character is padded by UTF-16 units, so it carries one more space than its cell count. Evidence that no consumer observes it: every reader of the `terminal-buffer-text` / `terminal-older-buffer-text` mirrors and of `getBufferText` (`DormantAgentTerminal`, `useTerminalMirrors`, the session-web specs `DormantAgentTabAcceptance`, `GhosttyTerminalOsc52Acceptance`, `GrpcSessionTerminalLazyHistory`, `SessionMainPaneRoomTerminal`, `TerminalResyncOnGap`, `TerminalSnapshotOnReconnect`, the terminal-web specs and drivers, and the tddy-web e2e specs `ghostty-*`, `terminal-rendering`, `waitForBufferText`) uses `contain`/`include`/`indexOf`/`split` on in-line substrings, a regex within a line, or `compactNoWs`; none reads a per-line offset or length. All of those component specs pass locally.
+- `[W]`, 2026-11-08 — **No FitAddon `fit()`/`observeResize()`** (kept). ghostty-web's `open(container)` sets `term.element = container`, and `observeResize()` observed `term.element` — the same element the lifecycle's own ResizeObserver already watched, and which already did `proposeDimensions` + `resize` (n1). So a container resize without a window resize still re-fits; the addon's path only added a timer debounce and the `_isResizing` latch behind the GhosttyTerminalShrink failure. Font changes call `fitTerminalToContainer` where they called `fit()`, which had the same "propose, resize if different" body minus the latch. Evidence: `GhosttyTerminalShrink` (container shrink), `TerminalZoomAcceptance` and `GhosttyTerminal` pass locally.
+- `[W]`, 2026-11-08 — **Fixed: `ghosttyEngine.dispose()` removed the caller's container.** ghostty-web's `element` is the container passed to `open`, and `[G]` called `element.remove()` after `term.dispose()`; React owns that node (StrictMode re-runs the effect on the same node). ghostty-web's own dispose already removes its canvas and textarea, so the extra `remove()` is gone, and the contract's lifecycle case now asserts the container stays connected.
 
 ## Refactoring Needed
 
@@ -115,12 +118,12 @@ Cypress component specs one at a time locally, `bun test src`, scoped to the tou
 - [x] USER REVIEW — acceptance tests
 - [x] TDD Red — write failing unit/integration tests
 - [x] TDD Green — implement with quality code
-- [ ] Update documentation with progress
-- [ ] Run the touched packages' tests — verify 100% pass
-- [ ] Validate changes (/validate-changes)
-- [ ] Refactor issues from change validation
-- [ ] Validate tests (/validate-tests)
-- [ ] Validate production readiness (/validate-prod-ready)
-- [ ] Analyze code quality (/analyze-clean-code)
-- [ ] Final validation (/validate-changes)
-- [ ] USER REVIEW — scope developed, every gap approved: ready to wrap
+- [x] Update documentation with progress
+- [x] Run the touched packages' tests — verify 100% pass
+- [x] Validate changes (/validate-changes)
+- [x] Refactor issues from change validation
+- [x] Validate tests (/validate-tests)
+- [x] Validate production readiness (/validate-prod-ready)
+- [x] Analyze code quality (/analyze-clean-code)
+- [x] Final validation (/validate-changes)
+- [x] USER REVIEW — scope developed, every gap approved: ready to wrap

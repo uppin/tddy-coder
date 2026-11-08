@@ -3,7 +3,7 @@
  * coordinate space (same space as `scrollToLine`: 0 = top of the scrollback).
  *
  * PRD: docs/ft/web/terminal-replay-lazy-scroll.md (amended — terminal-native-scrolling),
- * docs/ft/web/1-WIP/PRD-2026-11-08-terminal-engine-interface.md (top-based scrolling)
+ * packages/tddy-terminal-web/docs/terminal-engine.md (top-based scrolling)
  */
 
 export interface Scrollbar {

@@ -399,7 +399,7 @@ export function describeTerminalEngine(name: string, makeEngine: TerminalEngineF
     });
 
     describe("lifecycle", () => {
-      it("dispose detaches the engine's screen from the document", () => {
+      it("dispose detaches the engine's screen and leaves its container in place", () => {
         // Given
         opened().then((open) => {
           const screen = open.engine.screenElement;
@@ -413,6 +413,7 @@ export function describeTerminalEngine(name: string, makeEngine: TerminalEngineF
           // Then
           cy.then(() => {
             expect(screen?.isConnected ?? false, "screen still attached").to.equal(false);
+            expect(open.container.isConnected, "the caller's container stays in the document").to.equal(true);
             open.container.remove();
           });
         });
