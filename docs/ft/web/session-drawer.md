@@ -1,7 +1,7 @@
 # Session Drawer Screen
 
 **Route:** `#/sessions` — also the **default** route (`#/` resolves here)
-**Component:** `SessionsDrawerScreen` (`packages/tddy-web/src/components/sessions/`)
+**Component:** `SessionsDrawerScreen` (`packages/tddy-session-web/src/`)
 
 ## Overview
 
@@ -71,7 +71,7 @@ The collapsed 12px strip, bulk selection and delete, cross-host badges and deep 
 by grouping.
 
 Implementation: `groupSessionsByProject` (`packages/tddy-session-web/src/utils/sessionProjectGroups.ts`),
-`SessionProjectGroup` and `projectGroupCollapse.ts` (`src/components/sessions/`).
+`SessionProjectGroup` and `projectGroupCollapse.ts` (`packages/tddy-session-web/src/`).
 
 ### Pinned main entry
 
@@ -113,7 +113,7 @@ the entry acts on that host.
 
 Implementation: `ProjectHomeEntry`, `ProjectHomeSetupPane`, `useProjectHomeSetup`,
 `useProjectHomeStartSubmit`, `useEnsureProjectHome`, `useSessionsDrawerProjectHomes`
-(`src/components/sessions/`), `projectHomesOnHost`, `projectHomeSlot` and `withProjectHomeGroups`
+(`packages/tddy-session-web/src/`), `projectHomesOnHost`, `projectHomeSlot` and `withProjectHomeGroups`
 (`packages/tddy-session-web/src/utils/projectHomeGroups.ts`), `sessionsProjectHomeSetupPath` and
 `parseSessionsProjectHomeSetup` (`src/routing/appRoutes.ts`).
 
@@ -177,7 +177,7 @@ existing selection (insertion) order.
 Utility: `partitionSessionsByActivity(sessions)` in `utils/sessionStackGroups.ts` returns
 `{ active, remaining, activeCount, remainingCount }` where `active`/`remaining` are each a
 `SessionStackGroupResult` (`groups` + `flat`). Components: `SessionDrawerSeparator`
-(`components/sessions/SessionDrawerSeparator.tsx`) renders one collapsible header + its partition body.
+(`packages/tddy-session-web/src/SessionDrawerSeparator.tsx`) renders one collapsible header + its partition body.
 
 ## Cross-Host Active Sessions
 
@@ -222,7 +222,7 @@ during every page load. See
 ### `SessionManager`
 
 The merged list, its refresh, and its change events live in one place: `SessionManager`
-(`components/sessions/sessionManager.ts`), a plain observable store (no React/RPC dependency of its
+(`packages/tddy-session-web/src/sessionManager.ts`), a plain observable store (no React/RPC dependency of its
 own — those are injected). It unions the selected host's fetched sessions with the live participants,
 de-dupes by `sessionId` (a metadata-carrying fetched row wins over a synthesized one), and sorts
 newest-first. `useSessionManager` binds the RPC client, common-room participants, and selected host
@@ -694,7 +694,7 @@ creating a `<branch>-1` suffixed branch. See
 
 ### Component
 
-`CreateSessionPane` (`packages/tddy-web/src/components/sessions/CreateSessionPane.tsx`) — props:
+`CreateSessionPane` (`packages/tddy-session-create-web/src/CreateSessionPane.tsx`) — props:
 
 ```typescript
 interface CreateSessionPaneProps {

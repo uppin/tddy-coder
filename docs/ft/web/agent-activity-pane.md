@@ -1,6 +1,6 @@
 # Agent Activity Pane — Real-time view of the agent's tool calls
 
-**Component:** `SessionWithActivitySidebar` + `SessionActivitySidebar` in `packages/tddy-web/src/components/sessions/`, wrapping the `SessionMainPane` body (the transcript is a right sidebar since 2026-10-23 — see [§ Right sidebar](#right-sidebar-open-by-default-for-managed-sessions); `AgentActivityOverlay` has no production mount)
+**Component:** `SessionWithActivitySidebar` + `SessionActivitySidebar` in `packages/tddy-session-web/src/`, wrapping the `SessionMainPane` body (the transcript is a right sidebar since 2026-10-23 — see [§ Right sidebar](#right-sidebar-open-by-default-for-managed-sessions); `AgentActivityOverlay` has no production mount)
 **Updated:** 2026-10-23
 **Status:** Implemented (single-host; cross-host stream peer-forward is a tracked follow-up — see below). **Evolving** — the overlay body is being replaced by a read-only ACP transcript (see [§ Read-only ACP transcript](#read-only-acp-transcript-evolution)).
 

@@ -1,6 +1,6 @@
 # Session Worktree — Disk stats + lifecycle actions in the Inspector
 
-**Component:** `SessionInspectorDrawer` → new **Worktree** tab (`packages/tddy-web/src/components/sessions/`)
+**Component:** `SessionInspectorDrawer` → new **Worktree** tab (`packages/tddy-session-web/src/`)
 **Updated:** 2026-07-23
 **Status:** Implemented
 

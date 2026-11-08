@@ -151,7 +151,7 @@ free: RFB expresses it as buttons 4 and 5, which `button_mask` already carries.
 
 ## Superseded neighbours
 
-`src/components/sessions/vncInput.ts` holds the same scaling and keysym logic for the retired
+`tddy-session-web`'s `src/vncInput.ts` holds the same scaling and keysym logic for the retired
 `VncOverlay` generation. It is imported only by its own test. The logic here was lifted from it
 deliberately rather than shared, because that generation is being retired and a shared module would
 tie the surviving surface to it. Deleting `vncInput.ts`, its test and `VncOverlay.tsx` is worth

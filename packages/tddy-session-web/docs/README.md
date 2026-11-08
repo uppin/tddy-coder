@@ -1,7 +1,8 @@
 # tddy-session-web documentation
 
 The session package, filled in four `#web-split` nodes: the seams and helpers (#851), the session
-runtime and terminals (#860), the inspector (#861) and the drawer (#862).
+runtime and terminals (#860), the inspector, agents and code pane (#861), and the drawer (#862).
+`tddy-web` holds no session component any more.
 
 ## Seams
 
@@ -45,12 +46,27 @@ browser observer identity").
 | Area | Source | Reference |
 |---|---|---|
 | Main pane | `src/SessionMainPane.tsx`, `src/sessionMainPaneProps.ts`, `src/sessionBaseView.ts`, `src/workflowViews.tsx` | over the 500-line budget: [code-issues/](code-issues/) |
-| Inspector | `src/SessionInspectorDrawer.tsx`, `src/SessionInspectorHeader.tsx`, `src/InspectorTabs.tsx`, the tabs (`SessionInspectorDetailsTab`, `SessionInspectorActivityTab`, `SessionFilesTab`, `SessionToolsTab`, `SessionUsageTab`, `SessionScreenSharingTab`, `SessionVncTab` + `VncPassphraseDialog`) and their state helpers | [inactive-session-activities.md](../../tddy-web/docs/inactive-session-activities.md) |
+| Inspector | `src/SessionInspectorDrawer.tsx`, `src/SessionInspectorHeader.tsx`, `src/InspectorTabs.tsx`, the tabs (`SessionInspectorDetailsTab`, `SessionInspectorActivityTab`, `SessionFilesTab`, `SessionToolsTab`, `SessionUsageTab`, `SessionScreenSharingTab`, `SessionVncTab` + `VncPassphraseDialog`) and their state helpers | [inactive-session-activities.md](inactive-session-activities.md) |
 | Agents | `src/SessionAgentRosterPane.tsx`, `src/SessionAgentTree.tsx` (`agentTree`), `src/AgentPicker.tsx`, `src/SessionAgentConversationLayer.tsx`, `src/SessionAgentConversationPane.tsx`, `src/useAgentConversation.ts`, `src/SessionActivitySidebar.tsx`, `src/SessionWithActivitySidebar.tsx` | [session-agent-tree.md](session-agent-tree.md), [session-agent-conversation.md](session-agent-conversation.md) |
 | Code pane | `src/code/` (`WorktreeCodePane`, code navigation, indexing indicator, restructure plan dialog, workflow files) | [code-navigation.md](code-navigation.md), [indexing-indicator.md](indexing-indicator.md) |
 
 `PrStackPresenterRoomAcceptance` stays in `tddy-web`: its assertions are about the app's HTTP
 transport minting the presenter-room token through the auth gate.
+
+## Drawer and project home (#862)
+
+| Path | Contents |
+|---|---|
+| `src/SessionsDrawerScreen.tsx`, `src/SessionsDrawerScreenParts.tsx`, `src/SessionsDrawerNotices.tsx`, `src/useSessionsDrawer*.ts` | the `#/sessions` screen and the hooks it is cut into (activation, attach claims, delete selection, inspector, owning host, pane actions, project homes, runtime attachment and registry, clients, projects, session list) |
+| `src/SessionDrawer.tsx`, `src/SessionDrawerGroups.tsx`, `src/SessionDrawerItem.tsx`, `src/SessionDrawerSeparator.tsx`, `src/SessionProjectGroup.tsx`, `src/projectGroupCollapse.ts`, `src/SessionIndicatorDot.tsx`, `src/sessionIndicatorDotStyles.ts` | the drawer list |
+| `src/ProjectHomeEntry.tsx`, `src/useEnsureProjectHome.ts`, `src/useProjectHomeSetup.ts` | project home |
+| `src/sessionManager.ts`, `src/resumedSessions.ts`, `src/useResumedSessionLiveness.ts`, `src/inspectorState.ts`, `src/jailedCodebaseHalf.ts`, `src/SessionDetailPane.tsx` | the session list store and drawer state |
+| `src/StatusBar.tsx`, `src/SessionTrafficStrip.tsx`, `src/SessionHostStatsFooter.tsx`, `src/UploadProgressIndicator.tsx`, `src/useAttachedSessionTraffic.ts`, `src/useMeterSnapshot.ts`, `src/rpc/sessionTraffic.tsx` | the status strip; traffic through the `SessionTrafficProvider` seam (`tddy-web`'s `AppClientsPorts` supplies the meter registry and the LiveKit room lookup) |
+
+`bunfig.toml` and `src/test-utils/dom-preload.ts` live here now; the root `bunfig.toml` preloads it.
+The drawer specs run without a stylesheet, as they did in `tddy-web` (two layout specs import
+`theme.css` themselves). Specs whose subject is app wiring — real LiveKit routing, real token HTTP,
+the app shell and URL store — stay in `tddy-web`.
 
 Product behaviour: [docs/ft/web/session-drawer.md](../../../docs/ft/web/session-drawer.md).
 
@@ -60,5 +76,5 @@ Product behaviour: [docs/ft/web/session-drawer.md](../../../docs/ft/web/session-
 
 `bun test src` — the helpers' suites, the seam rules and the boundary rule (builders and the
 `toContainSessionIdsInOrder` matcher in `test-utils/`) and `bun run cypress:component` — the runtime and
-terminal specs (#860) and the inspector, agent and code-pane specs (#861). CI: `.github/workflows/web.yml` (`Web tests` shards run its suites; `Web lint`
-excludes it for the one `tddy-tauri-web` error it compiles through `tddy-terminal-web`).
+terminal specs (#860), the inspector, agent and code-pane specs (#861) and the drawer-driven specs (#862). CI: `.github/workflows/web.yml` (`Web tests` shards run its suites; `Web lint`
+excludes it until its moved drawer specs typecheck — `docs/dev/todo/2026-11-07-session-web-specs-do-not-typecheck.md`).

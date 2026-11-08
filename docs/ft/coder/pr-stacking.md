@@ -359,7 +359,7 @@ The session's **context documents** are surfaced to the web via `SessionEntry` p
 
 ### New-session screen: recipe dropdown and parent picker
 
-`CreateSessionPane` (`packages/tddy-web/src/components/sessions/`) gains two changes for tool sessions:
+`CreateSessionPane` (`packages/tddy-session-web/src/`) gains two changes for tool sessions:
 
 - **Recipe dropdown** — the free-text recipe input is replaced with a `<select>` listing the canonical recipe set, including the unified **`pr-stack`** (the legacy `plan-pr-stack` / `orchestrate-pr-stack` entries are no longer offered in the dropdown — new sessions always start as `pr-stack` — though both CLI names still resolve if typed directly). `pr-stack` is included in the `--recipe` `value_parser` in `packages/tddy-coder/src/run.rs` alongside the two legacy aliases.
 - **Parent stack picker** — a new optional "Parent orchestrator" `<select>` (tool type only) that lists existing sessions identified as PR-stack orchestrators (sessions whose `recipe` is `pr-stack` — or a legacy alias — and that are not themselves children of another orchestrator; see `prStackOrchestrators()` in `packages/tddy-web/src/utils/stackParents.ts`). Selecting a parent passes `stack_parent` (proto `StartSessionRequest` field 15) to the daemon, which threads it through `SpawnOptions` → `--stack-parent <id>` CLI arg.
@@ -393,7 +393,7 @@ The "+ New planned PR" form carries two submits — **"Add planned PR"** (`pr-st
 
 ### Session drawer: children collapsed under the main stack session
 
-`SessionDrawer` (`packages/tddy-web/src/components/sessions/SessionDrawer.tsx`) renders PR-stack sessions in a collapsible group rather than a flat list.
+`SessionDrawer` (`packages/tddy-session-web/src/SessionDrawer.tsx`) renders PR-stack sessions in a collapsible group rather than a flat list.
 
 Grouping logic lives in `packages/tddy-session-web/src/utils/sessionStackGroups.ts`:
 

@@ -12,10 +12,10 @@ upload).
 |--------|------|
 | `hooks/useSessionAttachments.ts` | Owns the attachment state, the cap, rename/remove, `stageAttachments()` and the streamed-start consumer |
 | `hooks/useStagedAttachmentUpload.ts` | Per-file chunk loop against `SessionFilesService.UploadStagedAttachmentChunk`, one `staging_id` per submit |
-| `components/sessions/attachments/AttachmentDropZone.tsx` | Drop target + drag-over overlay + the two pick affordances |
-| `components/sessions/attachments/SessionAttachmentList.tsx` | One row per attachment: source, editable basename, size, progress, remove |
-| `components/sessions/attachments/HostDocumentPicker.tsx` | Browses a host by `HostDocumentScope`, yields a `HostDocumentRef` |
-| `components/sessions/attachments/pendingAttachment.ts` | The row model shared by the above |
+| `tddy-session-create-web`'s `src/attachments/AttachmentDropZone.tsx` | Drop target + drag-over overlay + the two pick affordances |
+| `tddy-session-create-web`'s `src/attachments/SessionAttachmentList.tsx` | One row per attachment: source, editable basename, size, progress, remove |
+| `tddy-session-create-web`'s `src/attachments/HostDocumentPicker.tsx` | Browses a host by `HostDocumentScope`, yields a `HostDocumentRef` |
+| `tddy-session-create-web`'s `src/attachments/pendingAttachment.ts` | The row model shared by the above |
 | `lib/attachmentBasenames.ts` | Basename validation + collision detection, mirroring the host's rules |
 | `lib/attachmentBytes.ts` | Binary-unit formatting (`8 MiB`), which the decimal `formatBytes` cannot produce |
 

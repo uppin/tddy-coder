@@ -1,6 +1,6 @@
 # Inactive session activities (main-pane base view)
 
-Technical reference for the base-view rule in **`packages/tddy-session-web/src/sessionBaseView.ts`**, the stopped Agent tab in **`DormantAgentTerminal.tsx`** (`tddy-session-web`), the transcript pane in **`SessionActivitiesPane.tsx`** (the inspector's Activity tab; in `tddy-chat-web` since #847), and the attach bookkeeping and resume hint in **`SessionsDrawerScreen.tsx`** that let a resumed session return to its terminal.
+Technical reference for the base-view rule in **`src/sessionBaseView.ts`**, the stopped Agent tab in **`DormantAgentTerminal.tsx`**, the transcript pane in **`SessionActivitiesPane.tsx`** (the inspector's Activity tab; in `tddy-chat-web` since #847), and the attach bookkeeping and resume hint in **`SessionsDrawerScreen.tsx`** that let a resumed session return to its terminal.
 
 Product reference: [docs/ft/web/inactive-session-activities.md](../../../docs/ft/web/inactive-session-activities.md).
 
@@ -18,13 +18,13 @@ Product reference: [docs/ft/web/inactive-session-activities.md](../../../docs/ft
 
 ### The stopped session's strip
 
-`DormantSessionRuntime.tsx` (in `tddy-session-web` since #860) is the tab strip of a session with no live connection. It reuses `SessionTerminalTabs`, `useSessionTerminals` and `GrpcSessionTerminal` against the owning daemon's `TerminalSessionService` client — none of which needs the agent's connection — and claims the session's control lease on attach (`useTerminalControl`) as a live strip does. `SessionMainPane` keys it by session id, so one session's terminal list and lease never carry into another's.
+`DormantSessionRuntime.tsx` is the tab strip of a session with no live connection. It reuses `SessionTerminalTabs`, `useSessionTerminals` and `GrpcSessionTerminal` against the owning daemon's `TerminalSessionService` client — none of which needs the agent's connection — and claims the session's control lease on attach (`useTerminalControl`) as a live strip does. `SessionMainPane` keys it by session id, so one session's terminal list and lease never carry into another's.
 
 - **The Agent tab is a render slot** (`agentTab: React.ReactNode`); `SessionMainPane` fills it with `DormantAgentTerminal`. The strip never decides what a stopped Agent tab shows.
 - **What a keystroke would reach** (`focusedTerminalId`) is a bash or harness tab with no conversation over it — never the Agent tab, which is read-only. Only that tab gets the mobile shortcut drawer, the claim toast and grey-out (`TerminalControlLayer`, rendered only while another screen holds the lease), and the Files-tab Insert.
 - **Insert** reaches a live runtime through the session runtime registry. A stopped session has none, so the strip hands `SessionMainPane` a function (`onRegisterInsert`) that types into its focused bash tab, and `SessionMainPane` routes the inspector's `onInsertPathIntoTerminal` to it while the stopped strip shows.
 - **Full screen** uses the same `useSessionPaneFullscreen` and `PaneFullscreenExit` as the live strip. The shared pane chrome — `PaneFullscreenExit`, `TerminalControlLayer` — lives in `SessionPaneChrome.tsx`, so the two strips cannot drift.
-- **Agent-conversation bodies are not rendered by the strip** — see [session-agent-conversation.md](../../tddy-session-web/docs/session-agent-conversation.md#1-conversation-bodies-are-owned-by-neither-strip).
+- **Agent-conversation bodies are not rendered by the strip** — see [session-agent-conversation.md](session-agent-conversation.md#1-conversation-bodies-are-owned-by-neither-strip).
 
 ### The stopped Agent tab
 
@@ -33,7 +33,7 @@ Product reference: [docs/ft/web/inactive-session-activities.md](../../../docs/ft
 - **`useRecordedOutput`** waits for the emulator's `onReady` (writes before open are lost), then drives a `TerminalHistoryForwardLoader(null)` over `createForwardHistoryFetcher` for `AGENT_TERMINAL_ID` until `done`. With no live stream to anchor on, the fill runs to the daemon's `atEnd`. `NOT_FOUND`, or a recording that wrote nothing, sets *no recording* ("No recorded output"); any other failure is shown through `rpcFailureText`. A missing terminal client is its own message, not an empty recording.
 - **`terminal-buffer-text`** mirrors the buffer the way `GhosttyTerminalSession` does, so the terminal specs read it the same way.
 - **`preventFocusOnTap={isMobile}`**: on a touch device a tap does not focus the read-only terminal, so the keyboard stays down; a pointer device keeps the default focus.
-- **The toast** is `Toast` (`src/components/ui/toast.tsx`): `{ message, action?: { label, onClick, busy? }, error?, testId }`, `role="status"`, its error `role="alert"` through `InlineError`, absolutely positioned like `TerminalControlOverlay`. There is no toast queue; the caller owns placement. `useResumeAction` keeps the action busy while `onResume` runs and shows its rejection's text.
+- **The toast** is `Toast` (`tddy-ui-web`'s `toast`): `{ message, action?: { label, onClick, busy? }, error?, testId }`, `role="status"`, its error `role="alert"` through `InlineError`, absolutely positioned like `TerminalControlOverlay`. There is no toast queue; the caller owns placement. `useResumeAction` keeps the action busy while `onResume` runs and shows its rejection's text.
 
 ## Resume
 
