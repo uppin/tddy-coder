@@ -8,7 +8,7 @@
  * cancel as, so the cancel is refused and not sent.
  *
  * Feature: docs/ft/web/session-drawer.md § Add agent
- * Invariants: packages/tddy-web/docs/session-agent-conversation.md
+ * Invariants: packages/tddy-session-web/docs/session-agent-conversation.md
  */
 
 import React, { useState } from "react";

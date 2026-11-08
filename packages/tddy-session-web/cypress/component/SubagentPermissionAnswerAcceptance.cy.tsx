@@ -71,7 +71,9 @@ function mountASessionWhoseSubagentAsks(deferredToUser: boolean) {
       },
     },
   });
-  backend.onUnary(SessionAgentService.method.answerAgentPermission, () => ({ answeredBy: "alice" }));
+  backend.onUnary(SessionAgentService.method.answerAgentPermission, () =>
+    create(SessionAgentService.method.answerAgentPermission.output, { answeredBy: "alice" }),
+  );
   cy.mountWithClients(
     <div style={{ display: "flex", flexDirection: "column", height: 700, width: 1200 }}>
       <SessionWithActivitySidebar

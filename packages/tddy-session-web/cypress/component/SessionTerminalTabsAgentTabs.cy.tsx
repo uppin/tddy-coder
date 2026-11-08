@@ -3,7 +3,7 @@
  * the session, alongside the fixed Agent tab, the bash tabs and the spawned child-conversation tabs.
  *
  * Feature: docs/ft/web/session-drawer.md § Add agent
- * Invariants: packages/tddy-web/docs/session-agent-conversation.md
+ * Invariants: packages/tddy-session-web/docs/session-agent-conversation.md
  *
  * The strip is mounted on its own, without RPC: what it does with the conversations it is handed is
  * a rendering question, and driving it through a whole attached session would only make a failure

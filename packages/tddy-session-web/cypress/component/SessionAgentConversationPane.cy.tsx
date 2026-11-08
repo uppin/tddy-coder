@@ -3,7 +3,7 @@
  * the session, and the agent's answer streaming back into the transcript.
  *
  * Feature: docs/ft/web/session-drawer.md § Add agent
- * Invariants: packages/tddy-web/docs/session-agent-conversation.md
+ * Invariants: packages/tddy-session-web/docs/session-agent-conversation.md
  *
  * The answer is served by the in-memory backend as a *sequence* of `AgentConversationChunk` frames
  * rather than one stubbed value, because the property under test is what the pane does with a
@@ -37,6 +37,7 @@ function mountPane(conversation: AgentConversationBackend) {
       daemonInstanceId={HOST}
       agentId={EXPLORER}
       conversationId={CONVERSATION_ID}
+      callerLogin={null}
     />,
     conversation.backend,
   );

@@ -25,6 +25,7 @@
  */
 
 import React from "react";
+import { create } from "@bufbuild/protobuf";
 import { anInMemoryRpcBackend } from "tddy-connectrpc-testkit";
 import { SessionMainPane } from "tddy-session-web";
 import type { SessionAttachmentState } from "tddy-session-web";
@@ -127,8 +128,10 @@ function noRuntime(): SessionRuntimeState[] {
 /** The two listings a media panel fires on mount, so one that does render has somewhere to read. */
 function aBackendServingBothMediaTabs() {
   return anInMemoryRpcBackend()
-    .onUnary(VncService.method.listVncTargets, () => ({ targets: [] }))
-    .onUnary(ScreenSharingService.method.listTargets, () => ({ targets: [] }));
+    .onUnary(VncService.method.listVncTargets, () => create(VncService.method.listVncTargets.output, { targets: [] }))
+    .onUnary(ScreenSharingService.method.listTargets, () =>
+      create(ScreenSharingService.method.listTargets.output, { targets: [] }),
+    );
 }
 
 function mountInspectorOn(

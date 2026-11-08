@@ -50,7 +50,6 @@ const MOCK_TOOLS: Partial<ToolDef>[] = [
 ];
 
 const SESSION_ID = "tools-tab-test-aaaa-0000-0000-0000-000000000001";
-const SESSION_TOKEN = "fake-token";
 
 /** A minimal ToolCallInfo-shaped object (not the generated type until proto is regenerated). */
 interface MockToolCallInfo {
@@ -111,7 +110,6 @@ describe("SessionToolsTab — component (Cypress)", () => {
     cy.mount(
       <SessionToolsTab
         sessionId={SESSION_ID}
-        sessionToken={SESSION_TOKEN}
         onListExecTools={onListExecTools}
         onListSessionToolCalls={onListSessionToolCalls}
         onExecuteTool={onExecuteTool}
@@ -142,7 +140,6 @@ describe("SessionToolsTab — component (Cypress)", () => {
     cy.mount(
       <SessionToolsTab
         sessionId={SESSION_ID}
-        sessionToken={SESSION_TOKEN}
         onListExecTools={onListExecTools}
         onListSessionToolCalls={onListSessionToolCalls}
         onExecuteTool={onExecuteTool}
@@ -155,8 +152,8 @@ describe("SessionToolsTab — component (Cypress)", () => {
     // Then — args contain "command" key with empty string value
     byTestId(TEST_IDS.sessionsToolInvokeArgs)
       .invoke("val")
-      .then((val: string) => {
-        const parsed = JSON.parse(val) as Record<string, unknown>;
+      .then((val) => {
+        const parsed = JSON.parse(String(val)) as Record<string, unknown>;
         expect(parsed["command"]).to.equal("");
         expect("timeout" in parsed).to.be.false;
       });
@@ -181,7 +178,6 @@ describe("SessionToolsTab — component (Cypress)", () => {
     cy.mount(
       <SessionToolsTab
         sessionId={SESSION_ID}
-        sessionToken={SESSION_TOKEN}
         onListExecTools={onListExecTools}
         onListSessionToolCalls={onListSessionToolCalls}
         onExecuteTool={onExecuteTool}
@@ -228,7 +224,6 @@ describe("SessionToolsTab — component (Cypress)", () => {
     cy.mount(
       <SessionToolsTab
         sessionId={SESSION_ID}
-        sessionToken={SESSION_TOKEN}
         onListExecTools={onListExecTools}
         onListSessionToolCalls={onListSessionToolCalls}
         onExecuteTool={onExecuteTool}
@@ -263,7 +258,6 @@ describe("SessionToolsTab — component (Cypress)", () => {
     cy.mount(
       <SessionToolsTab
         sessionId={SESSION_ID}
-        sessionToken={SESSION_TOKEN}
         onListExecTools={onListExecTools}
         onListSessionToolCalls={onListSessionToolCalls}
         onExecuteTool={onExecuteTool}
@@ -295,7 +289,6 @@ describe("SessionToolsTab — component (Cypress)", () => {
     cy.mount(
       <SessionToolsTab
         sessionId={SESSION_ID}
-        sessionToken={SESSION_TOKEN}
         onListExecTools={onListExecTools}
         onListSessionToolCalls={onListSessionToolCalls}
         onExecuteTool={onExecuteTool}
@@ -334,7 +327,6 @@ describe("SessionToolsTab — component (Cypress)", () => {
     cy.mount(
       <SessionToolsTab
         sessionId={SESSION_ID}
-        sessionToken={SESSION_TOKEN}
         onListExecTools={onListExecTools}
         onListSessionToolCalls={onListSessionToolCalls}
         onExecuteTool={onExecuteTool}
@@ -366,7 +358,6 @@ describe("SessionToolsTab — component (Cypress)", () => {
     cy.mount(
       <SessionToolsTab
         sessionId={SESSION_ID}
-        sessionToken={SESSION_TOKEN}
         onListExecTools={onListExecTools}
         onListSessionToolCalls={onListSessionToolCalls}
         onExecuteTool={onExecuteTool}

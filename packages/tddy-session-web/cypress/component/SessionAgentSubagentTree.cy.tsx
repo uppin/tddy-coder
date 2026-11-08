@@ -4,7 +4,7 @@
  * and subagents beneath that.
  *
  * Feature: docs/ft/daemon/session-agent-roster.md § The Agents tab (AC50-AC53f).
- * Module notes: packages/tddy-web/docs/session-agent-tree.md.
+ * Module notes: packages/tddy-session-web/docs/session-agent-tree.md.
  *
  * Two populations meet here, and the point of the tree is that they are shown as one hierarchy
  * rather than as two lists in two places:
@@ -26,7 +26,7 @@
  */
 
 import React from "react";
-import { create } from "@bufbuild/protobuf";
+import { create, type MessageInitShape } from "@bufbuild/protobuf";
 import { SessionEntrySchema, type SessionEntry } from "tddy-client-web/gen/session_pb";
 import { SessionAgentStatus } from "tddy-client-web/gen/types_pb";
 import { SessionAgentRosterPane } from "../../src/SessionAgentRosterPane";
@@ -60,7 +60,7 @@ const REVIEWER = "reviewer@workstation-1";
 /** A fixed "now", so an age in the rendered text is a fact about the fixture, not about the clock. */
 const NOW_MS = 1_780_828_020_298;
 
-function aSession(overrides: Partial<SessionEntry> = {}): SessionEntry {
+function aSession(overrides: Omit<MessageInitShape<typeof SessionEntrySchema>, "$typeName"> = {}): SessionEntry {
   return create(SessionEntrySchema, {
     sessionId: MAIN_SESSION_ID,
     createdAt: "2026-08-30T09:00:00Z",

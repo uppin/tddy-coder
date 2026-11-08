@@ -343,9 +343,9 @@ function aRosterTail() {
 export function aDaemonOfferingAgents(
   agents: ReturnType<typeof anAvailableAgent>[],
 ): InMemoryRpcBackend {
-  return anInMemoryRpcBackend().onUnary(CatalogService.method.listSubagents, () => ({
-    subagents: agents,
-  }));
+  return anInMemoryRpcBackend().onUnary(CatalogService.method.listSubagents, () =>
+    create(ListSubagentsResponseSchema, { subagents: agents }),
+  );
 }
 
 /** A coding agent a host offers: launched by the daemon, spoken to over ACP. */
