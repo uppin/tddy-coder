@@ -1,8 +1,9 @@
 /**
- * Maps ghostty-web viewport coordinates into the native `PageList.Scrollbar {total, offset, len}`
- * coordinate space (same space as `scrollToLine`).
+ * Maps a top-based viewport position into the native `PageList.Scrollbar {total, offset, len}`
+ * coordinate space (same space as `scrollToLine`: 0 = top of the scrollback).
  *
- * PRD: docs/ft/web/terminal-replay-lazy-scroll.md (amended — terminal-native-scrolling)
+ * PRD: docs/ft/web/terminal-replay-lazy-scroll.md (amended — terminal-native-scrolling),
+ * docs/ft/web/1-WIP/PRD-2026-11-08-terminal-engine-interface.md (top-based scrolling)
  */
 
 export interface Scrollbar {
@@ -13,12 +14,15 @@ export interface Scrollbar {
 
 export function computeScrollbar(args: {
   scrollbackLength: number;
-  viewportY: number;
+  /** The buffer line on the viewport's first row, counted from the top (0 = oldest line). */
+  viewportTop: number;
   rows: number;
 }): Scrollbar {
-  const { scrollbackLength, viewportY, rows } = args;
+  const { scrollbackLength, viewportTop, rows } = args;
   const total = scrollbackLength + rows;
-  const rawOffset = scrollbackLength - viewportY;
+  // TODO(terminal-engine): implement — still reads `viewportTop` as ghostty's bottom-based
+  // viewportY (0 = live tip); flip to top-based when the engine translates positions.
+  const rawOffset = scrollbackLength - viewportTop;
   const offset = Math.max(0, Math.min(scrollbackLength, rawOffset));
   return { total, offset, len: rows };
 }

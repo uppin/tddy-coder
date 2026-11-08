@@ -122,7 +122,7 @@ export function useTerminalHandle({
         const scrollbackLength = (t as unknown as { getScrollbackLength?: () => number })
           .getScrollbackLength?.() ?? 0;
         const viewportY = (t as unknown as { getViewportY?: () => number }).getViewportY?.() ?? 0;
-        return computeScrollbar({ scrollbackLength, viewportY, rows: t.rows });
+        return computeScrollbar({ scrollbackLength, viewportTop: viewportY, rows: t.rows });
       },
       hasMouseTracking() {
         const t = termRef.current as unknown as { hasMouseTracking?: () => boolean } | null;

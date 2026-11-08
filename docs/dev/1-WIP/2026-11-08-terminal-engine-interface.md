@@ -6,6 +6,7 @@
 **Complexity**: 4 — scroll-coordinate contract change across tddy-terminal-web, tddy-session-web and tddy-web specs
 
 **Stack**: `#xterm` 2/4 — branch `feature/xterm/terminal-engine`, base `feature/xterm/terminal-seams`
+**PR**: [#867](https://github.com/uppin/tddy-coder/pull/867)
 
 ## Initial Discovery
 
@@ -96,6 +97,7 @@ Cypress component specs one at a time locally, `bun test src`, scoped to the tou
 
 ## Decisions & Trade-offs
 
+- Developer, 2026-11-08 (pass 2 review): the contract renames `computeScrollbar`'s input to `viewportTop` and updates its one caller in `GhosttyTerminal.tsx` (behaviour unchanged, body still bottom-based until green) — accepted with the trivial rebase conflict against n1's split. The engine contract suite lives in `src/engine/terminalEngineContract.ts` (counted by n1's size rule) and the boundary test scans `tddy-terminal-web/src` production files only.
 - Developer, 2026-11-08: WebGL renderer with DOM fallback; deps `@xterm/xterm`, `@xterm/addon-fit`, `@xterm/addon-unicode11`, `@xterm/addon-webgl`, `@xterm/addon-clipboard`; rename inside the last node; stack registered as an extension of `#web-split`.
 
 ## Refactoring Needed
@@ -108,10 +110,10 @@ Cypress component specs one at a time locally, `bun test src`, scoped to the tou
 - [x] Cross-check code issues and TODOs
 - [x] Create/update PRD documentation
 - [x] Create changeset (this document)
-- [ ] Create failing acceptance tests
-- [ ] Run acceptance tests (verify they fail)
-- [ ] USER REVIEW — acceptance tests
-- [ ] TDD Red — write failing unit/integration tests
+- [x] Create failing acceptance tests
+- [x] Run acceptance tests (verify they fail)
+- [x] USER REVIEW — acceptance tests
+- [x] TDD Red — write failing unit/integration tests
 - [ ] TDD Green — implement with quality code
 - [ ] Update documentation with progress
 - [ ] Run the touched packages' tests — verify 100% pass
