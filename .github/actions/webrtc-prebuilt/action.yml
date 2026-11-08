@@ -45,30 +45,41 @@ runs:
       if: steps.cache.outputs.cache-hit != 'true'
       shell: bash
       env:
+        GH_TOKEN: ${{ github.token }}
         TAG: ${{ steps.archive.outputs.tag }}
         TRIPLE: ${{ steps.archive.outputs.triple }}
         DIR: ${{ steps.archive.outputs.dir }}
       run: |
         set -euo pipefail
-        url="https://github.com/livekit/rust-sdks/releases/download/$TAG/webrtc-$TRIPLE.zip"
-        zip="$RUNNER_TEMP/webrtc-$TRIPLE.zip"
-        # curl retries transient errors itself; the loop adds spaced attempts for a host that keeps
-        # answering 5xx (LiveKit's release host has returned 504 for minutes at a time).
+        name="webrtc-$TRIPLE.zip"
+        zip="$RUNNER_TEMP/$name"
+        # Through the release-asset API, not the github.com/…/releases/download URL: that redirect
+        # has answered 504 for hours while the API served the same asset. The release metadata
+        # carries the asset's sha256, which the download is checked against.
+        read -r asset_id digest < <(gh api "repos/livekit/rust-sdks/releases/tags/$TAG" \
+          --jq ".assets[] | select(.name == \"$name\") | \"\\(.id) \\(.digest // \"\")\"")
+        if [ -z "${asset_id:-}" ]; then
+          echo "::error::livekit/rust-sdks release $TAG has no asset $name"; exit 1
+        fi
         for attempt in 1 2 3 4 5; do
-          if curl --fail --location --silent --show-error --retry 3 --retry-delay 5 \
-              --retry-all-errors --connect-timeout 30 --max-time 300 -o "$zip" "$url"; then
+          if gh api -H "Accept: application/octet-stream" \
+              "repos/livekit/rust-sdks/releases/assets/$asset_id" > "$zip"; then
             break
           fi
           if [ "$attempt" = 5 ]; then
-            echo "::error::Could not download prebuilt libwebrtc from $url after 5 attempts; LiveKit's release host is failing. Re-run once it answers."
+            echo "::error::Could not download $name (asset $asset_id) from livekit/rust-sdks $TAG after 5 attempts."
             exit 1
           fi
           sleep $((attempt * 30))
         done
+        if [ -n "${digest:-}" ]; then
+          echo "${digest#sha256:}  $zip" | sha256sum --check --status \
+            || { echo "::error::$name does not match the release's $digest"; exit 1; }
+        fi
         mkdir -p "$DIR"
         rm -rf "${DIR:?}/$TRIPLE"
-        unzip -q "$zip" -d "$DIR"
-        test -f "$DIR/$TRIPLE/webrtc.ninja" || { echo "::error::$url did not unpack to $TRIPLE/"; exit 1; }
+        unzip -o -q "$zip" -d "$DIR"
+        test -f "$DIR/$TRIPLE/webrtc.ninja" || { echo "::error::$name did not unpack to $TRIPLE/"; exit 1; }
         rm -f "$zip"
 
     - name: Point webrtc-sys at it

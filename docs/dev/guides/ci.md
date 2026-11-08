@@ -556,8 +556,10 @@ dotnet/android/ghc toolchains first, and debuginfo is reduced to
 downloads from LiveKit's GitHub release on every cold build — and that host answers 504 for minutes
 at a time. Every job that compiles the workspace first runs `.github/actions/webrtc-prebuilt`: it
 restores `~/.cache/livekit-webrtc/<tag>/<triple>` from the Actions cache (key
-`webrtc-<tag>-<triple>`, `linux-x64-release` or `linux-arm64-release`), downloads and unpacks it with
-bounded retries only on a miss, and exports `LK_CUSTOM_WEBRTC` so the build script uses that directory
+`webrtc-<tag>-<triple>`, `linux-x64-release` or `linux-arm64-release`), and only on a miss downloads
+it through the **release-asset API** (`gh api …/releases/assets/<id>`, with the job's token) — not the
+`github.com/…/releases/download` URL, whose redirect has answered 504 for hours while the API served
+the same file — checks it against the sha256 the release publishes, and unpacks it, with bounded retries, and exports `LK_CUSTOM_WEBRTC` so the build script uses that directory
 instead of downloading. A download that still fails after the retries fails the job by name; there is
 no other source. The tag is the one `webrtc-sys-build` hard-codes; `scripts/webrtc-prebuilt.test.ts`
 fails when `Cargo.lock` locks a different `webrtc-sys-build` than the action pins.
