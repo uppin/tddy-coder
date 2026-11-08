@@ -3,10 +3,11 @@
 @import "shadcn/tailwind.css";
 @import "@fontsource-variable/geist";
 
-/* Scan every package that renders tddy classes (paths are relative to this file). */
+/* Scan every package that renders tddy classes (paths are relative to this file). A wildcard in a
+   directory segment only matches with a file pattern after it: `tddy-*-web/src` alone scans nothing. */
 @source "./";
 @source "../../tddy-web/src";
-@source "../../tddy-*-web/src";
+@source "../../tddy-*-web/src/**/*.{ts,tsx}";
 
 @custom-variant dark (&:is(.dark *));
 
