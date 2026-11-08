@@ -5,7 +5,8 @@
 **Detected:** 2026-10-24 by `/pr-wrap` on branch `claude-cli-fullscreen`
 **Metrics:** **1005 lines** (whole file, TS) · budget 500 — `wc -l packages/tddy-terminal-web/src/GhosttyTerminalSession.tsx`
 **Thresholds breached:** length 1005 > 500
-**Status:** Open — unclaimed
+**Status:** Open — claimed
+**Claimed by:** #866 — `#xterm 1/4`
 
 ## Measurement history
 

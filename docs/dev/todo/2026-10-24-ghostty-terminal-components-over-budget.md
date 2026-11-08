@@ -3,6 +3,7 @@
 **Category:** Deferred from Claude fullscreen renderer (`claude-cli-fullscreen`)
 **Source:** `packages/tddy-terminal-web/src/GhosttyTerminal.tsx` (1,354 lines),
 `packages/tddy-terminal-web/src/GhosttyTerminalSession.tsx` (971 lines)
+**Claimed by:** #866 — `#xterm 1/4`
 
 ## What happens
 

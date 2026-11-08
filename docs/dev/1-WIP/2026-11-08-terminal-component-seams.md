@@ -6,6 +6,7 @@
 **Complexity**: 3 — one package, Cypress component integration tests, behaviour-preserving hand split of two components
 
 **Stack**: `#xterm` 1/4 — branch `feature/xterm/terminal-seams`, base `feature/web-split/wiring`
+**PR**: [#866](https://github.com/uppin/tddy-coder/pull/866)
 
 ## Initial Discovery
 
@@ -99,6 +100,7 @@ Cypress component specs one at a time locally, `bun test src`, scoped to the tou
 
 ## Decisions & Trade-offs
 
+- Developer, 2026-11-08 (pass 2 review): the size rule covers **production files only** — `*.test.ts(x)` are excluded, so `src/rpc/terminalFeed.test.ts` (609 lines) is outside this node's scope. The code issues measure production files.
 - Developer, 2026-11-08: WebGL renderer with DOM fallback; deps `@xterm/xterm`, `@xterm/addon-fit`, `@xterm/addon-unicode11`, `@xterm/addon-webgl`, `@xterm/addon-clipboard`; rename inside the last node; stack registered as an extension of `#web-split`.
 
 ## Refactoring Needed
@@ -111,10 +113,10 @@ Cypress component specs one at a time locally, `bun test src`, scoped to the tou
 - [x] Cross-check code issues and TODOs
 - [x] Create/update PRD documentation
 - [x] Create changeset (this document)
-- [ ] Create failing acceptance tests
-- [ ] Run acceptance tests (verify they fail)
-- [ ] USER REVIEW — acceptance tests
-- [ ] TDD Red — write failing unit/integration tests
+- [x] Create failing acceptance tests
+- [x] Run acceptance tests (verify they fail)
+- [x] USER REVIEW — acceptance tests
+- [x] TDD Red — write failing unit/integration tests
 - [ ] TDD Green — implement with quality code
 - [ ] Update documentation with progress
 - [ ] Run the touched packages' tests — verify 100% pass
