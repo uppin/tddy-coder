@@ -1,7 +1,7 @@
 import React from "react";
 import { anInMemoryRpcBackend } from "tddy-connectrpc-testkit";
 import type { AppHandler } from "tddy-react-commons/container";
-import { aClientsPortDouble, aMediaDouble, aNavigationDouble, anAuthDouble, aPresenceDouble } from "tddy-client-web/testkit";
+import { aClientsPortDouble, aMediaDouble, aNavigationDouble, aRoomRpcDouble, anAuthDouble, aPresenceDouble } from "tddy-client-web/testkit";
 import { composeApp, type AppPorts } from "../../src/app/composeApp";
 
 function aDoubledApp(path: string): { handler: AppHandler<AppPorts>; ports: AppPorts } {
@@ -11,6 +11,7 @@ function aDoubledApp(path: string): { handler: AppHandler<AppPorts>; ports: AppP
     auth: anAuthDouble({ isAuthenticated: true }),
     presence: aPresenceDouble(),
     media: aMediaDouble(),
+    roomRpc: aRoomRpcDouble(anInMemoryRpcBackend()),
   };
   return { ports, handler: { start: () => ({ context: ports, teardown: () => {} }) } };
 }

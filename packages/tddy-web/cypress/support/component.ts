@@ -5,6 +5,9 @@ import { agentActivityRegistry } from "tddy-chat-web";
 import { sessionNotificationRegistry } from "tddy-session-web";
 import { UploadProgressProvider } from "tddy-terminal-web";
 import { AppClientsPorts } from "../../src/app/rpc/appClientsPorts";
+import { AppPortsScope, type AppPorts } from "../../src/app/ports";
+import { hashNavigationPort } from "../../src/routing/useAppLocation";
+import { livekitPorts } from "tddy-livekit-web";
 import { create } from "@bufbuild/protobuf";
 import { registerServerStreamFallback } from "tddy-connectrpc-testkit";
 import { SessionService, StartSessionEventSchema } from "tddy-client-web/gen/session_pb";
@@ -42,8 +45,23 @@ beforeEach(() => {
  *
  *  `AppClientsPorts` also fills the slots component packages ask the app for: the Hosts screen's
  *  passphrase dialog (create-session) and the screen shell (session screens). */
+/** The ports a mount hands the app's providers, supplied explicitly as the app container does: the page's
+ *  hash navigation and the real LiveKit ports (their transport factory is what specs override). Built
+ *  once — the LiveKit hooks must keep one identity. */
+const liveKit = livekitPorts();
+const mountedPorts: AppPorts = {
+  navigation: hashNavigationPort,
+  presence: liveKit.presence,
+  media: liveKit.media,
+  roomRpc: liveKit.roomRpc,
+};
+
 Cypress.Commands.add("mount", (jsx, options = {}) => {
-  const wrapped = React.createElement(AppClientsPorts, null, React.createElement(UploadProgressProvider, null, jsx));
+  const wrapped = React.createElement(
+    AppPortsScope.Provider,
+    { value: mountedPorts },
+    React.createElement(AppClientsPorts, null, React.createElement(UploadProgressProvider, null, jsx)),
+  );
   return mount(wrapped, { strict: false, ...options });
 });
 

@@ -20,8 +20,8 @@ export interface AppPorts {
   readonly navigation: NavigationPort;
   readonly presence: PresencePort;
   readonly media: MediaPort;
-  /** Room-addressed RPC; the LiveKit implementation when absent. */
-  readonly roomRpc?: LiveKitPorts["roomRpc"];
+  /** Room-addressed RPC. */
+  readonly roomRpc: LiveKitPorts["roomRpc"];
   /** The application window's drag-drop surface, `null` in a browser. */
   readonly nativeFileDrop?: NativeFileDropBridge | null;
 }

@@ -157,7 +157,7 @@ After `session`, `tddy-web` holds shell/routing/auth/app entry plus leftovers: r
 ## Decisions (green)
 
 - `clients`/`auth` optional on `AppPorts` is a source selection, not a default: absent means the in-tree providers build them (always, in the real app); supplying only one throws. A consumer reading a missing port still throws naming its provider (`useClientsPort`, `useAuth`).
-- Two pre-existing defaults remain, flagged for consent: `AppClientsPorts` falls back to `hashNavigationPort`/the module LiveKit ports when mounted outside a composed app (specs mounting one provider alone), and `roomRpc` absent on the handler's ports uses LiveKit's. Neither is reachable from `composeApp(appHandler(...))`, whose handler supplies navigation and roomRpc.
+- **developer, 2026-11-08: fallbacks removed.** `AppClientsPorts` outside a composed app throws naming the navigation and LiveKit ports and `AppPortsScope` (`app/portsInScope.ts`, `portsInScope.test.ts`); `roomRpc` is required on `AppPorts` and an absent one throws naming it. No hash-navigation or module-LiveKit default remains in `src/`. The Cypress `mount` (support/component.ts) supplies the ports explicitly: the page's hash navigation and the real LiveKit ports, not doubles, because the specs relying on them exercise LiveKit's transport-factory override; `AppComposition.cy.tsx` supplies `aRoomRpcDouble`.
 
 ## Refactoring Needed
 
