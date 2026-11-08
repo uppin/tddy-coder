@@ -358,6 +358,40 @@ ladder to size against, so the complexity rubric does not choose a model or effo
 announce each start, with the complexity score and `effort n/a`. Binding to the worktree, the stage
 order, the consent and the stops are identical on both harnesses.
 
+### Muse mode (`#muse`)
+
+When the user asks for it — `#muse`, or in words ("let Muse do it", "offload to Muse Code") — every
+implementation stage is done by **Muse Code run headless through its programmatic CLI**
+(`muse exec --json`, one session per stage name continued with `--session-id`), driven by a
+Claude Code subagent, through the **`muse-subagent` skill** (`.agents/skills/muse-subagent/SKILL.md`).
+Read it first. **Only `[G]`, `[W]` and `[F]` are offloaded.** Planning stays with the orchestrator's
+own model: the interview, the decomposition question, pass 1, all of pass 2 (changesets, PRDs, the
+contract commits with their failing tests, 6e), the sweep node's planning and the TODO gate. The
+dispatch rules, the ledger, the consent and the stops are unchanged. What changes:
+
+| | Default | `#muse` |
+|---|---|---|
+| Step 0 worktree | `git worktree add` beside the planning worktree, warm builds | the same |
+| Who edits code | the stage subagent | Muse Code, in the node's worktree |
+| Stage subagent | does the stage, model by the rubric | a **driver**: Sonnet · low (effort passed explicitly), briefed with `muse-subagent` `references/driver-brief.md` and the stage's prompt from it |
+| Model doing the work | the G/W rubric | `MUSE_MODEL` from `muse-agent.sh ensure local` (or the one the user named), every stage, every node. No retry one row up — a `[G]` that stops is a stop |
+| Effort | the G/W rubric | from the changeset's complexity score: **1** `low` · **2–3** `medium` · **4** `high` · **5** `xhigh`; `[W]` takes its raised score (*Sizing every subagent*); `[F]` inherits `[W]`'s. Passed as `--effort`, announced and recorded |
+| `[F]` continues `[W]` | `SendMessage` to `[W]`'s agent | `SendMessage` to `[W]`'s **driver**, which resumes `[W]`'s **Muse session** (`--resume <SESSION_ID>`, same name `yolo-<slug>-n<k>-W`). `[G]` is its own session, `yolo-<slug>-n<k>-G` |
+| Stream | the subagent's transcript | `~/.muse-runs/<name>/stream.jsonl`; after a context reset `muse-agent.sh summary local <name>` |
+
+**The orchestrator readies the host before the first dispatch**: `muse-agent.sh ensure local`,
+guiding the user through a missing CLI or login (`muse-subagent` § *Make the host ready*), and names
+`MUSE_MODEL` in the decomposition question next to the concurrency cap. The cap still applies: the
+Rust builds are the bottleneck whoever types. Announce each start as usual:
+
+```
+▶ n3 #702 [G] /green → Muse Code (<MUSE_MODEL> · high) via muse exec, driven by sonnet · low — complexity 4/5; #muse
+```
+
+Record per row in the ledger: the run name, the Muse `SESSION_ID`, `MUSE_MODEL` and the effort. A
+driver's `RUN_EXIT=16` (machine stop or reboot) is resumed by the driver itself and never counts
+against the round cap. A `🔴 stopped` node keeps its worktree.
+
 ### 3 — Green: remove the worktree
 
 The node is done when stage F ends with the green condition above. Then, from the **orchestrator**:
@@ -541,7 +575,8 @@ with the user's answer per row. A node that is not ✅ is stated plainly — no 
   report, never in parallel with it. The orchestrator chains them; subagents do not spawn the next.
 - **Model and effort by the changeset's complexity score, always both.** On Claude Code `[G]` runs
   Haiku (low → xhigh) up to Sonnet · medium, `[W]` Sonnet · low up to Opus · medium, `[F]` inherits
-  `[W]`'s agent; on Cursor every stage uses its default model. **Announce one line to the user at
+  `[W]`'s agent; on Cursor every stage uses its default model; under `#muse` every stage is done by
+  Muse Code, driven by a Sonnet · low subagent (§ *Muse mode*). **Announce one line to the user at
   each subagent start** (node, stage, model · effort, why) and record it in the ledger.
 - **Resume reads evidence, not memory.** A stack that is partly done restarts each node at its first
   unfinished stage; nothing done is redone, nothing unseen is trusted, and the status table shows the
@@ -567,6 +602,7 @@ with the user's answer per row. A node that is not ✅ is stated plainly — no 
 `Complexity`), `/green`, `/validate-changes`, `/pr-wrap`, `/fix-pr`, `/green-yolo` (the single-branch
 version whose consent table this reuses), `/pr-stack-rebase`, `/add-to-pr-stack`, `/repoint`,
 `/merge-pr-stack`
-**Skills**: `code-restructuring`, `analyze-code-issues`, `deferred-work` (record formats, the bar for
+**Skills**: `code-restructuring`, `analyze-code-issues`, `muse-subagent` (Muse mode), `behaviour-modifiers`
+(`#muse`), `deferred-work` (record formats, the bar for
 deferring), `pr-stack` (`.agents/skills/pr-stack/SKILL.md`) — § *`## Green wave`*, § *The backlog delta a
 stack leaves*
