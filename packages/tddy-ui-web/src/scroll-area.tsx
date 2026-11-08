@@ -1,7 +1,7 @@
 import * as React from "react"
 import { ScrollArea } from "radix-ui"
 
-import { cn } from "@/lib/utils"
+import { cn } from "./cn"
 
 function ScrollAreaRoot({
   className,

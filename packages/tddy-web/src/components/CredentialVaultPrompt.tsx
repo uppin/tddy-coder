@@ -1,5 +1,5 @@
 import { useEffect, useState, type FormEvent } from "react";
-import { Button } from "@/components/ui/button";
+import { Button } from "tddy-ui-web";
 import { VaultState } from "../gen/auth_pb";
 import { useAuthContext } from "../hooks/authProvider";
 import { isAcceptableNewPassphrase, MIN_PASSPHRASE_CHARS } from "../lib/vaultPassphrase";

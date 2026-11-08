@@ -1,7 +1,7 @@
 import type { ReactNode } from "react";
 import type { SessionEntry } from "../../gen/session_pb";
 import type { HostReadFailure } from "../../rpc/useHostFanOut";
-import { InlineError } from "../ui/inline-error";
+import { InlineError } from "tddy-ui-web";
 import { CreateSessionAgentSelect } from "./CreateSessionAgentSelect";
 import { inputClass, labelClass } from "./createSessionFormStyles";
 import { WORKFLOW_RECIPES } from "./createSessionRecipes";

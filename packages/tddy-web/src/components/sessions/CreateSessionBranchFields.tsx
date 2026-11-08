@@ -1,7 +1,7 @@
 import type { BranchWorktreeIntent } from "../../lib/branchConflict";
 import { daemonCutsTheWorktree, type SessionType } from "./createSessionRequest";
 import { inputClass, labelClass } from "./createSessionFormStyles";
-import { InlineError } from "../ui/inline-error";
+import { InlineError } from "tddy-ui-web";
 import type { BaseBranchOption } from "./prstack/baseBranchChoice";
 
 type BranchIntent = BranchWorktreeIntent;

@@ -1,7 +1,7 @@
 import React from "react";
 import type { SessionEntry } from "../../gen/session_pb";
 import type { SessionAttachmentState } from "./useSessionAttachment";
-import { Button } from "../ui/button";
+import { Button } from "tddy-ui-web";
 
 interface SessionDetailPaneProps {
   selectedSession: SessionEntry | null;

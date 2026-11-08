@@ -1,5 +1,5 @@
 import React from "react";
-import { useVisualViewport } from "../../src/hooks/useVisualViewport";
+import { useVisualViewport } from "../../src/useVisualViewport";
 import { byTestId, TEST_IDS } from "../support/testIds";
 
 function TestViewportConsumer() {

@@ -1,4 +1,4 @@
-import { Button } from "@/components/ui/button";
+import { Button } from "tddy-ui-web";
 
 /** GitHub's own dark button colours, shared by every "Sign in with GitHub" button. */
 export const GITHUB_BUTTON_CLASS_NAME =

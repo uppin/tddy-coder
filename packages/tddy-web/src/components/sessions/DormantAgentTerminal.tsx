@@ -7,9 +7,7 @@ import {
   TerminalHistoryForwardLoader,
 } from "../../lib/terminalHistoryLoader";
 import { rpcFailureText } from "../../rpc/rpcFailure";
-import { useIsMobile } from "../../hooks/useIsMobile";
-import { Toast } from "../ui/toast";
-import { InlineError } from "../ui/inline-error";
+import { useIsMobile, Toast, InlineError } from "tddy-ui-web";
 import type { TerminalClient } from "./sessionRuntimeProps";
 import { AGENT_TERMINAL_ID } from "./useSessionTerminals";
 

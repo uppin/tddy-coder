@@ -3,7 +3,7 @@ import type { ProjectEntry } from "../../gen/project_pb";
 import type { StartSessionRequestInit } from "../../hooks/useSessionAttachments";
 import { useHostLabel } from "../../rpc/selectedDaemon";
 import { hostNotConnectedText } from "../../rpc/rpcFailure";
-import { Button } from "../ui/button";
+import { Button } from "tddy-ui-web";
 import { CreateSessionPane } from "./CreateSessionPane";
 import { useSessionsDrawerClients } from "./useSessionsDrawerClients";
 

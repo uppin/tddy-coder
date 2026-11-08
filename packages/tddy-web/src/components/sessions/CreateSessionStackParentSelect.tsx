@@ -1,5 +1,5 @@
 import type { SessionEntry } from "../../gen/session_pb";
-import { InlineError } from "../ui/inline-error";
+import { InlineError } from "tddy-ui-web";
 import { inputClass, labelClass } from "./createSessionFormStyles";
 
 export interface CreateSessionStackParentSelectProps {

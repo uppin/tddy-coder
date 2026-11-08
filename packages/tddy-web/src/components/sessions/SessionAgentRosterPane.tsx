@@ -3,7 +3,7 @@ import { ConnectError } from "@connectrpc/connect";
 import { type SessionEntry } from "../../gen/session_pb";
 import { SessionAgentService, type SessionAgentEntry } from "../../gen/session_agents_pb";
 import { useHttpClient } from "../../rpc/transportProvider";
-import { Button } from "../ui/button";
+import { Button } from "tddy-ui-web";
 import { AgentPicker } from "./AgentPicker";
 import { agentPlacementWire, type AgentPlacementChoice } from "./agentPlacementChoice";
 import { subagentSessionNodes } from "./agentTree";

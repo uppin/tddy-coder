@@ -1,5 +1,4 @@
-import { Button } from "../ui/button";
-import { InlineError } from "../ui/inline-error";
+import { Button, InlineError } from "tddy-ui-web";
 
 export interface TerminalControlOverlayProps {
   /** Whether THIS screen currently holds the terminal control lease for the session. */

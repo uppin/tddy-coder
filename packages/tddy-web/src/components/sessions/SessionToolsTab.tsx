@@ -2,7 +2,7 @@ import React, { useEffect, useState } from "react";
 import type { ToolDef } from "../../gen/exec_tools_pb";
 import { defaultArgsFromSchema } from "./toolSchema";
 import { rpcFailureText } from "../../rpc/rpcFailure";
-import { InlineError } from "../ui/inline-error";
+import { InlineError } from "tddy-ui-web";
 
 interface ToolCallInfo {
   taskId: string;

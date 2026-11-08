@@ -7,7 +7,7 @@ import type { TmuxMenuState } from "./useTmuxSessions";
 import type { ChildSession } from "./useChildSessions";
 import { agentConversationLabel, type AgentConversation } from "./agentConversationTabs";
 import { safeTestIdPart } from "../../lib/testId";
-import { cn } from "../../lib/utils";
+import { cn } from "tddy-ui-web";
 
 interface SessionTerminalTabsProps {
   /** Open terminals, in tab order (the Agent tab is fixed and rendered first). */

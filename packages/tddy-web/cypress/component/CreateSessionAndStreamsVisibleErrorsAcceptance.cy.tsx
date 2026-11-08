@@ -20,7 +20,7 @@ import { CreateSessionPane } from "../../src/components/sessions/CreateSessionPa
 import { SessionsDrawerScreen } from "../../src/components/sessions/SessionsDrawerScreen";
 import { SessionUsageTab } from "../../src/components/sessions/SessionUsageTab";
 import { useSessionActivity } from "../../src/components/sessions/useSessionActivity";
-import { InlineError } from "../../src/components/ui/inline-error";
+import { InlineError } from "tddy-ui-web";
 import { SessionService } from "../../src/gen/session_pb";
 import { ProjectService } from "../../src/gen/project_pb";
 import { CatalogService } from "../../src/gen/catalog_pb";

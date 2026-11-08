@@ -44,7 +44,8 @@
     "react-syntax-highlighter": "^16.1.1",
     "tailwind-merge": "^3.5.0",
     "tailwindcss": "^4.2.2",
-    "tddy-tauri-web": "workspace:*"
+    "tddy-tauri-web": "workspace:*",
+    "tddy-ui-web": "workspace:*"
   },
   "devDependencies": {
     "@bufbuild/buf": "^1.50.0",

@@ -18,7 +18,7 @@ import { create } from "@bufbuild/protobuf";
 import { SessionEntrySchema, type SessionEntry } from "../../src/gen/session_pb";
 import { SessionDrawer, type ProjectHomeInfo } from "../../src/components/sessions/SessionDrawer";
 import { ProjectService, type ProjectEntry } from "../../src/gen/project_pb";
-import { TooltipProvider } from "../../src/components/ui/tooltip";
+import { TooltipProvider } from "tddy-ui-web";
 import { mountWithRpc } from "../support/rpc/inMemory";
 import {
   PROJECTS_LOCAL_HOST,

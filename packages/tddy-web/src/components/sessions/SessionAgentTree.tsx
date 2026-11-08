@@ -8,7 +8,7 @@ import {
 } from "../../gen/session_agents_pb";
 import { type SessionAgentActivity, type SessionAgentStatus } from "../../gen/types_pb";
 import { safeTestIdPart } from "../../lib/testId";
-import { Button } from "../ui/button";
+import { Button } from "tddy-ui-web";
 import { agentPlacementChoiceOf } from "./agentPlacementChoice";
 import {
   agentStatusName,

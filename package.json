@@ -2,6 +2,7 @@
   "private": true,
   "workspaces": [
     "packages/tddy-react-commons",
+    "packages/tddy-ui-web",
     "packages/tddy-web",
     "packages/tddy-livekit-web",
     "packages/tddy-rpc-web",

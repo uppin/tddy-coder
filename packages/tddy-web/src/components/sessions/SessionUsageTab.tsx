@@ -9,19 +9,10 @@
 
 import React from "react";
 import type { Room } from "livekit-client";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableFooter,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "../ui/table";
+import { Table, TableBody, TableCell, TableFooter, TableHead, TableHeader, TableRow, InlineError } from "tddy-ui-web";
 import { formatTokens } from "./formatTokens";
 import { usageTotals } from "./sessionUsage";
 import { useSessionUsage } from "./useSessionUsage";
-import { InlineError } from "../ui/inline-error";
 
 export interface SessionUsageTabProps {
   /** LiveKit room + daemon/presenter identity selecting the usage stream's transport target. */
