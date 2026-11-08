@@ -36,7 +36,7 @@ open PRs touch both:
 
 The sixth file the gate flagged, `packages/tddy-github/src/auth_service.rs`, was split in #510
 itself (621 → 379 production lines, `auth_service/vault.rs` 290) with the developer's approval; so
-was `packages/tddy-web/src/hooks/useAuth.ts` (520 → 413 lines, `authSession.ts` 124).
+was `packages/tddy-web/src/app/auth/useAuth.ts` (520 → 413 lines, `authSession.ts` 124).
 
 ## What would close it
 

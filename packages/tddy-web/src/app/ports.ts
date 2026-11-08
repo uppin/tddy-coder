@@ -12,7 +12,8 @@ export interface AppPorts {
    * The clients port. A handler that supplies it (the specs' doubles) replaces the in-tree sources
    * that build it today — the HTTP/Tauri transport, connection registry and selected-daemon directory,
    * which are React state and cannot be built outside the tree yet. Absent in production.
-   * TODO(wiring): build it in `appHandler` once those sources are React-free.
+   * TODO(wiring): build it in `appHandler` once those sources are React-free —
+   * docs/dev/todo/2026-11-08-app-handler-builds-no-clients-or-auth-port.md.
    */
   readonly clients?: ClientsPort;
   /** The auth port; same story as {@link AppPorts.clients} (`useAuth` is a hook today). */
@@ -28,6 +29,7 @@ export interface AppPorts {
 
 /**
  * The ports in scope for the stateful providers (`AppClientsPorts`). `null` outside a composed app —
- * a spec mounting one provider alone — where each falls back to the app's own default.
+ * a spec mounting one provider alone — where `AppClientsPorts` throws naming what it needs
+ * (`portsInScope`); there is no default.
  */
 export const AppPortsScope = createContext<AppPorts | null>(null);

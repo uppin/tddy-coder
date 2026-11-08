@@ -1,4 +1,4 @@
-# Cross-daemon fan-out (`src/rpc/useHostFanOut.ts`)
+# Cross-daemon fan-out (`tddy-client-web`'s `src/hostFanOut.ts`)
 
 A daemon answers a list RPC for **itself**. The requests carry no routing field and a daemon never
 forwards one to a peer, so any surface that has to show the whole fleet asks every daemon itself.

@@ -22,10 +22,13 @@ The wiring package of the tddy web app. It holds no feature: it composes the com
 **Not yet through the container:** the `clients` and `auth` ports. They are built by the providers in the
 tree (`RpcTransportProvider`, `ConnectionProviders`, `AuthProvider`, `SelectedDaemonProvider`) because the
 transport, connection wires, selected-daemon directory and `useAuth` are hooks over React state. A handler
-that supplies `clients` and `auth` (the specs' port doubles) takes those providers' place.
+that supplies `clients` and `auth` (the specs' port doubles) takes those providers' place. Recorded in
+`docs/dev/todo/2026-11-08-app-handler-builds-no-clients-or-auth-port.md`.
 
 ```bash
 ./dev bun test src                      # unit + wiring rule
 ./dev bun run build                     # vite bundle (tddy-daemon serves dist/)
 ./dev bun run cypress:component         # component specs
 ```
+
+Documentation: [docs/README.md](docs/README.md).
