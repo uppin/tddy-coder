@@ -26,8 +26,8 @@
   },
   {
     "package": "tddy-session-web",
-    "reason": "1 error, not in the package: tddy-tauri-web's transport.ts passes `log` to createEnvelopeTransport (TS2353), which the package compiles through tddy-terminal-web",
-    "todo": "docs/dev/todo/2026-11-07-tauri-web-transport-log-is-dropped.md"
+    "reason": "181 errors in the drawer-driven Cypress specs and support moved from tddy-web (plain-object RPC fixtures where generated message types are expected, stale props), plus tddy-tauri-web's `log` option (TS2353) it compiles through tddy-terminal-web",
+    "todo": "docs/dev/todo/2026-11-07-session-web-specs-do-not-typecheck.md"
   },
   {
     "package": "tddy-rust-typescript-tests",

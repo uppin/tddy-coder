@@ -10,7 +10,7 @@
  */
 
 import { describe, it, expect } from "bun:test";
-import { create } from "@bufbuild/protobuf";
+import { create, type MessageInitShape } from "@bufbuild/protobuf";
 import { SessionEntrySchema, type SessionEntry } from "tddy-client-web/gen/session_pb";
 
 import { withoutJailedCodebaseHalves } from "./jailedCodebaseHalf";
@@ -18,7 +18,7 @@ import { withoutJailedCodebaseHalves } from "./jailedCodebaseHalf";
 const AGENT = "01a0bafe-cc07-7e83-8a9a-411854a29caa";
 const CODEBASE = "01a0bafe-cc08-7e33-9fb3-d99bc95d75ae";
 
-function aSession(overrides: Partial<SessionEntry>): SessionEntry {
+function aSession(overrides: Omit<MessageInitShape<typeof SessionEntrySchema>, "$typeName">): SessionEntry {
   return create(SessionEntrySchema, { sessionId: "sess", daemonInstanceId: "", ...overrides });
 }
 

@@ -42,7 +42,7 @@ export class SessionManager {
   private cachedLoadError: string | null = null;
   private readonly listeners = new Set<() => void>();
   private unsubscribeBridge: (() => void) | null = null;
-  private refreshIntervalId: ReturnType<typeof window.setInterval> | null = null;
+  private refreshIntervalId: number | null = null;
 
   /** Start listening for window-bound refresh requests and periodic polling. Returns a disposer. */
   start(): () => void {
