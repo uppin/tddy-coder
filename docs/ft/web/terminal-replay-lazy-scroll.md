@@ -125,7 +125,8 @@ user sees a single seamless terminal surface rather than a split pane.
   exposes `scrollToLine(line)`, `scrollLines(amount)`, `getScrollbackLength()`, and a native
   `getScrollbar()` returning `{ total, offset, len }` (the single source of truth for viewport
   position, same coordinate space as `scrollToLine`): `total = getScrollbackLength() + rows`,
-  `offset = max(0, getScrollbackLength() - getViewportY())`, `len = rows`.
+  `offset` = the viewport's first line counted from the top (`getViewportTop()`, clamped to
+  `[0, getScrollbackLength()]`), `len = rows`.
 - `GhosttyTerminalSession` (the one terminal component) **owns the scroll-up history flow**: it renders
   **two overlaid ghostty-web terminals** sharing one rect — a live terminal (`scrollback: 0`,
   the active screen, always pinned to the live tip) and an older-history "page" terminal
@@ -282,7 +283,7 @@ Consumed from the unification changeset (forward-chunk shape):
   at the bottom), `scrollToLine(line)`, `scrollLines(amount)`, `getScrollbackLength()`, and a
   native `getScrollbar()` returning `{ total, offset, len }` — the single source of truth for
   viewport position, in the same coordinate space as `scrollToLine` (`total = scrollbackLength +
-  rows`, `offset = max(0, scrollbackLength - getViewportY())`, `len = rows`). The gRPC wrapper
+  rows`, `offset` = the top-based `getViewportTop()` clamped to `[0, scrollbackLength]`, `len = rows`). The gRPC wrapper
   uses these to detect the scroll-up-on-live / scroll-down-on-page gestures, land the page
   terminal at its bottom after a swap, and expose the viewport position to tests/scrollbar UI.
 - **Mouse-tracking gating:** the wheel handler checks `hasMouseTracking()`; when the TUI has
