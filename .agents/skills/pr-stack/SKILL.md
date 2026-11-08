@@ -1059,9 +1059,10 @@ reports merged:
    > node **only** once its base is `master` (i.e. it is a root, or it has already been repointed
    > after its parents merged).
 
-   `#forcemerge` is held to the same `write` bar as `#automerge` and leaves a durable trace: before
-   merging, the workflow comments naming who asked, linking their comment, and quoting the full check
-   state. Use it for a known-irrelevant red check, never to outrun a failure you have not read.
+   `#forcemerge` is held to the same `write` bar as `#automerge` and leaves a durable trace: after
+   the merge succeeds, the workflow comments naming who asked, linking their comment, and quoting the
+   check state read just before it; a failed force merge posts a ❌ comment with the error instead
+   (usually: the Actions app is not a bypass actor on the ruleset — see `docs/dev/guides/ci.md`). Use it for a known-irrelevant red check, never to outrun a failure you have not read.
 4. **Repoint every dependent** — `/repoint` per dependent PR. Then verify: each
    dependent should now report the new base, be mergeable, and show **only its own file count**
    (`gh pr view <N> --json changedFiles,baseRefName,mergeable`). If it does not, repair it (below).
