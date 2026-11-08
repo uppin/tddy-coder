@@ -7,7 +7,7 @@
  */
 import { createClient, Code, ConnectError } from "@connectrpc/connect";
 import { anInMemoryRpcBackend, type InMemoryRpcBackend } from "tddy-connectrpc-testkit";
-import { SessionService } from "../../src/gen/session_pb";
+import { SessionService } from "tddy-client-web/gen/session_pb";
 
 const STUB_SESSION_ID = "stub-session-1";
 const REQUESTED_PROJECT_ID = "proj-1";

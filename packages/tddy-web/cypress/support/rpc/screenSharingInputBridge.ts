@@ -18,7 +18,7 @@ import type { InMemoryRpcBackend } from "tddy-connectrpc-testkit";
 import {
   ScreenSharingInputService,
   type ScreenSharingInputEvent,
-} from "../../../src/gen/screen_sharing_input_pb";
+} from "tddy-client-web/gen/screen_sharing_input_pb";
 
 // ---------------------------------------------------------------------------
 // What a spec talks about

@@ -17,7 +17,7 @@ import {
   ReadWorktreeFileResponseSchema,
   WorktreeDirEntrySchema,
   WorktreeService,
-} from "../../src/gen/worktree_pb";
+} from "tddy-client-web/gen/worktree_pb";
 import { withSelectedDaemon } from "../support/rpc/withSelectedDaemon";
 import { mountWithRpc } from "../support/rpc/inMemory";
 import { aSessionsDrawerBackend } from "../support/rpc/vncBackend";

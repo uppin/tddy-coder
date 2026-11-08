@@ -4,7 +4,6 @@ import { SessionInspectorDrawer } from "./SessionInspectorDrawer";
 import { canResumeSession, sessionBaseViewMode } from "./sessionBaseView";
 import { DormantSessionRuntime } from "./DormantSessionRuntime";
 import { DormantAgentTerminal } from "./DormantAgentTerminal";
-import { PARAM_CODE } from "../../routing/appLocation";
 import { useAppLocation } from "../../routing/useAppLocation";
 import { SessionWithActivitySidebar } from "./SessionWithActivitySidebar";
 import { Button } from "tddy-ui-web";
@@ -22,6 +21,7 @@ import {
   useConversationHosts,
 } from "./SessionAgentConversationLayer";
 import { joinQuotedPaths } from "../../lib/shellQuote";
+import { PARAM_CODE } from "tddy-client-web";
 
 export function SessionMainPane({
   selectedSession,

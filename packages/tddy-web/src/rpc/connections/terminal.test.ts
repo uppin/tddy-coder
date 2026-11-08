@@ -10,7 +10,7 @@
  */
 
 import { describe, it, expect } from "bun:test";
-import { feedSupportsHistory, type TerminalFeed, type TerminalStream } from "./terminal";
+import { feedSupportsHistory, type TerminalFeed, type TerminalStream } from "tddy-client-web/connections/terminal";
 
 /**
  * An inert stream: it satisfies the shape a feed needs, and does nothing.

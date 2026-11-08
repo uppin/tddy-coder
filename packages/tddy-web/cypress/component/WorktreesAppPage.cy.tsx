@@ -14,16 +14,16 @@
 import { create } from "@bufbuild/protobuf";
 import { anInMemoryRpcBackend, type InMemoryRpcBackend } from "tddy-connectrpc-testkit";
 import { WorktreesAppPage } from "../../src/components/worktrees/WorktreesAppPage";
-import { AuthService } from "../../src/gen/auth_pb";
-import { ProjectService } from "../../src/gen/project_pb";
-import { ProjectEntrySchema } from "../../src/gen/project_pb";
+import { AuthService } from "tddy-client-web/gen/auth_pb";
+import { ProjectService } from "tddy-client-web/gen/project_pb";
+import { ProjectEntrySchema } from "tddy-client-web/gen/project_pb";
 import {
   GenerateTokenResponseSchema,
   RefreshTokenResponseSchema,
   TokenService,
-} from "../../src/gen/token_pb";
-import { HostService } from "../../src/gen/host_pb";
-import { WorktreeService, WorktreeSizeStatus } from "../../src/gen/worktree_pb";
+} from "tddy-client-web/gen/token_pb";
+import { HostService } from "tddy-client-web/gen/host_pb";
+import { WorktreeService, WorktreeSizeStatus } from "tddy-client-web/gen/worktree_pb";
 import {
   aHostServiceFake,
   DAEMON_LOCAL,

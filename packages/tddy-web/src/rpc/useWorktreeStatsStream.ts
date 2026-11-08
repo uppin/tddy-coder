@@ -20,8 +20,7 @@ import {
   WorktreeService,
   WorktreeSizeStatus,
   type WorktreeRow,
-} from "../gen/worktree_pb";
-import { useDaemonClient } from "./selectedDaemon";
+} from "tddy-client-web/gen/worktree_pb";
 import { useAuthContext } from "../hooks/authProvider";
 import { formatDiskBytes } from "../components/sessions/worktreeStatsFormat";
 import {
@@ -30,6 +29,7 @@ import {
   type WorktreeStatsRow,
   type WorktreeStatsStreamEvent,
 } from "../lib/worktreeSize";
+import { useDaemonClient } from "tddy-client-web";
 
 export interface UseWorktreeStatsStreamResult {
   /** Current worktree rows, folded from the stream. Empty until the first snapshot arrives. */

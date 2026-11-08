@@ -1,8 +1,7 @@
 import { useEffect, useState } from "react";
 import type { Client } from "@connectrpc/connect";
-import type { ActivityService } from "../../gen/activity_pb";
-import { SessionAgentService } from "../../gen/session_agents_pb";
-import { useHttpClient } from "../../rpc/transportProvider";
+import type { ActivityService } from "tddy-client-web/gen/activity_pb";
+import { SessionAgentService } from "tddy-client-web/gen/session_agents_pb";
 import { AgentChatView } from "../chat/AgentChat";
 import { useAcpReplay } from "../chat/useAcpReplay";
 import type { ChatMessage } from "../chat/useAgentChat";
@@ -10,6 +9,7 @@ import { AgentActivityDetailDialog } from "./AgentActivityDetailDialog";
 import { permissionRequestIdOf } from "./pendingPermission";
 import type { RosterHalf } from "./sessionRosterHalf";
 import { TranscriptPermissionRequest } from "./TranscriptPermissionRequest";
+import { useHttpClient } from "tddy-client-web";
 
 export interface SubagentConversationDialogProps {
   /** The session the conversation's transcript is read under. */

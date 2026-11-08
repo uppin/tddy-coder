@@ -1,13 +1,12 @@
 import { useEffect, useState } from "react";
-import { type ProjectEntry } from "../../gen/project_pb";
-import { ProjectService } from "../../gen/project_pb";
+import { type ProjectEntry } from "tddy-client-web/gen/project_pb";
+import { ProjectService } from "tddy-client-web/gen/project_pb";
 import { useAuthContext } from "../../hooks/authProvider";
 import { safeTestIdPart } from "../../lib/testId";
-import { useDaemonClientFor } from "../../rpc/selectedDaemon";
 import type { AssistantRow } from "../../utils/mergeRegistryEntries";
 import { ModelsDialogShell } from "./ModelsDialogShell";
-import { noConnectionTo } from "../../rpc/useHostFanOut";
 import { errorTextOf } from "./useModelRegistryFanOut";
+import { noConnectionTo, useDaemonClientFor } from "tddy-client-web";
 
 /**
  * Where a tool-bearing assistant's tools may run, chosen before its chat opens.

@@ -20,7 +20,7 @@
  * Feature: `docs/ft/web/session-drawer.md#fast-session-change` (req 2, 3)
  */
 
-import type { SessionAttachmentHint, SessionConnection } from "../../rpc/connections/session";
+import type { SessionAttachmentHint, SessionConnection } from "tddy-client-web/connections/session";
 
 export interface SessionRuntimeState {
   readonly sessionId: string;

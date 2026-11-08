@@ -1,4 +1,4 @@
-import type { SessionEntry } from "../gen/session_pb";
+import type { SessionEntry } from "tddy-client-web/gen/session_pb";
 
 /** One project's slice of the drawer: its header label and the sessions under it. */
 export interface ProjectSessionGroup {

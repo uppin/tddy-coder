@@ -10,7 +10,7 @@
 import React from "react";
 import { createClient } from "@connectrpc/connect";
 import { type InMemoryRpcBackend } from "tddy-connectrpc-testkit";
-import { SessionFilesService } from "../../src/gen/session_files_pb";
+import { SessionFilesService } from "tddy-client-web/gen/session_files_pb";
 import { SessionFilesTab } from "../../src/components/sessions/SessionFilesTab";
 import { mountWithRpc } from "../support/rpc/inMemory";
 import { aSessionFilesServiceBackend } from "../support/rpc/sessionFilesServiceBackend";

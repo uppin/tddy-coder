@@ -11,9 +11,9 @@
 
 import { describe, it, expect } from "bun:test";
 import { create } from "@bufbuild/protobuf";
-import { SessionService, ListSessionsRequestSchema } from "../gen/session_pb";
-import { AuthService, GetAuthUrlRequestSchema } from "../gen/auth_pb";
-import { ActivityService, StreamAcpReplayRequestSchema } from "../gen/activity_pb";
+import { SessionService, ListSessionsRequestSchema } from "tddy-client-web/gen/session_pb";
+import { AuthService, GetAuthUrlRequestSchema } from "tddy-client-web/gen/auth_pb";
+import { ActivityService, StreamAcpReplayRequestSchema } from "tddy-client-web/gen/activity_pb";
 
 import { createAuthGateInterceptor } from "./authGateInterceptor";
 

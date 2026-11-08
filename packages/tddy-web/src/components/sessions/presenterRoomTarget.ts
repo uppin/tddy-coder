@@ -1,4 +1,4 @@
-import type { SessionAttachmentHint } from "../../rpc/connections/session";
+import type { SessionAttachmentHint } from "tddy-client-web/connections/session";
 
 export interface PresenterRoomTarget {
   url: string;

@@ -20,7 +20,7 @@
 import { createClient } from "@connectrpc/connect";
 import { DisconnectReason, Room, RoomEvent } from "livekit-client";
 import { useEffect, useRef, useState } from "react";
-import { TerminalService } from "../../../gen/terminal_pb";
+import { TerminalService } from "tddy-client-web/gen/terminal_pb";
 import { tddyDebug } from "../../../lib/debugMask";
 import { isCancelledLiveKitConnectionError } from "../../../lib/liveKitConnectionErrors";
 import type { LiveKitChromeStatus } from "../../../lib/liveKitStatusPresentation";

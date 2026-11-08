@@ -1,4 +1,4 @@
-import { ModelLoadState } from "../../gen/models_pb";
+import { ModelLoadState } from "tddy-client-web/gen/models_pb";
 import {
   modelRowKey,
   providerRowKey,

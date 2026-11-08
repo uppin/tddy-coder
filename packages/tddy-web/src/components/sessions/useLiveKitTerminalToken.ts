@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { Client } from "@connectrpc/connect";
-import type { TokenService } from "../../gen/token_pb";
+import type { TokenService } from "tddy-client-web/gen/token_pb";
 
 type TokenClient = Client<typeof TokenService>;
 

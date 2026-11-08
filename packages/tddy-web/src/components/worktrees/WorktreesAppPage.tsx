@@ -1,12 +1,11 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { type ProjectEntry, ProjectService } from "../../gen/project_pb";
-import { WorktreeService } from "../../gen/worktree_pb";
+import { type ProjectEntry, ProjectService } from "tddy-client-web/gen/project_pb";
+import { WorktreeService } from "tddy-client-web/gen/worktree_pb";
 import { GitHubLoginButton } from "../GitHubLoginButton";
 import { AppShell } from "../shell/AppShell";
 import { SessionWorktreeTab } from "../sessions/SessionWorktreeTab";
 import { ScrollArea } from "tddy-ui-web";
 import { useAuthContext } from "../../hooks/authProvider";
-import { useDaemonClient } from "../../rpc/selectedDaemon";
 import { WorktreesScreen } from "./WorktreesScreen";
 import { useWorktreeStatsStream } from "../../rpc/useWorktreeStatsStream";
 import {
@@ -15,8 +14,8 @@ import {
   sortWorktreesBySize,
   writeRememberedWorktrees,
 } from "../../lib/worktreeList";
-import { PARAM_PROJECT } from "../../routing/appLocation";
 import { useAppLocation } from "../../routing/useAppLocation";
+import { PARAM_PROJECT, useDaemonClient } from "tddy-client-web";
 
 /**
  * Full-page Worktrees view, laid out like the Sessions screen: a side panel of the selected

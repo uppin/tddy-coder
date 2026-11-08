@@ -1,5 +1,5 @@
 import React, { useCallback, useMemo, useRef, useState } from "react";
-import { TerminalSessionService } from "../../gen/terminal_session_pb";
+import { TerminalSessionService } from "tddy-client-web/gen/terminal_session_pb";
 import { GhosttyTerminalSession } from "../GhosttyTerminalSession";
 import { GrpcSessionTerminal } from "./GrpcSessionTerminal";
 import { useSessionTerminalFeed } from "./useSessionTerminalFeed";
@@ -20,8 +20,8 @@ import { useConnectionStatus } from "../../rpc/connections/useConnectionStatus";
 import { useHasCapability } from "../../rpc/connections/useHasCapability";
 import { sessionReadsLocalPaths } from "../../lib/sessionReadsLocalPaths";
 import type { TauriHostWindow } from "../../rpc/daemonTransportFlavour";
-import { useSelectedDaemon } from "../../rpc/selectedDaemon";
 import { cn, InlineError } from "tddy-ui-web";
+import { useSelectedDaemon } from "tddy-client-web";
 
 export type { SessionRuntimeProps } from "./sessionRuntimeProps";
 

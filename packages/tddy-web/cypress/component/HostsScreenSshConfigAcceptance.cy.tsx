@@ -15,7 +15,7 @@ import {
   ListSshConfigHostsResponseSchema,
   ProbeOutcome,
   SshConfigHostSchema,
-} from "../../src/gen/host_pb";
+} from "tddy-client-web/gen/host_pb";
 import { HostRowSshConfig } from "../../src/components/hosts/HostRowSshConfig";
 import { mountWithRpc } from "../support/rpc/inMemory";
 import { withSelectedDaemon } from "../support/rpc/withSelectedDaemon";

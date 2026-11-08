@@ -13,8 +13,8 @@ import { Code, ConnectError } from "@connectrpc/connect";
 import { anInMemoryRpcBackend } from "tddy-connectrpc-testkit";
 import { POLL_INTERVAL_MS } from "../../src/components/projects/ProjectsAppPage";
 import { ProjectsScreen } from "../../src/components/projects/ProjectsScreen";
-import { ProjectService } from "../../src/gen/project_pb";
-import { AccountsService } from "../../src/gen/accounts_pb";
+import { ProjectService } from "tddy-client-web/gen/project_pb";
+import { AccountsService } from "tddy-client-web/gen/accounts_pb";
 import { mountWithRpc } from "../support/rpc/inMemory";
 import {
   aProject,

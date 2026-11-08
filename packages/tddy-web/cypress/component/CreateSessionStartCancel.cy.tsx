@@ -17,17 +17,17 @@ import {
   type MessageShape,
 } from "@bufbuild/protobuf";
 import { anInMemoryRpcBackend, type InMemoryRpcBackend } from "tddy-connectrpc-testkit";
-import { CatalogService } from "../../src/gen/catalog_pb";
-import { ProjectService } from "../../src/gen/project_pb";
+import { CatalogService } from "tddy-client-web/gen/catalog_pb";
+import { ProjectService } from "tddy-client-web/gen/project_pb";
 import {
   SessionService,
   StartPhase_Boundary,
   StartPhase_Step,
   StartSessionEventSchema,
-} from "../../src/gen/session_pb";
-import { SessionFilesService } from "../../src/gen/session_files_pb";
-import { TaskService } from "../../src/gen/tasks_pb";
-import { WorktreeService } from "../../src/gen/worktree_pb";
+} from "tddy-client-web/gen/session_pb";
+import { SessionFilesService } from "tddy-client-web/gen/session_files_pb";
+import { TaskService } from "tddy-client-web/gen/tasks_pb";
+import { WorktreeService } from "tddy-client-web/gen/worktree_pb";
 import { CreateSessionPane } from "../../src/components/sessions/CreateSessionPane";
 import type { DaemonHost } from "../../src/lib/participantRole";
 import { SelectedDaemonProvider } from "../../src/rpc/selectedDaemon";

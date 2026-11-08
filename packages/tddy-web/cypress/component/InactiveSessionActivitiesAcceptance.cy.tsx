@@ -19,14 +19,14 @@ import React from "react";
 import { create } from "@bufbuild/protobuf";
 import { createClient, type Transport } from "@connectrpc/connect";
 import { anInMemoryRpcBackend } from "tddy-connectrpc-testkit";
-import { ActivityService } from "../../src/gen/activity_pb";
-import { SessionService } from "../../src/gen/session_pb";
+import { ActivityService } from "tddy-client-web/gen/activity_pb";
+import { SessionService } from "tddy-client-web/gen/session_pb";
 import {
   ClaimTerminalControlResponseSchema,
   TerminalControlEventSchema,
   TerminalSessionService,
-} from "../../src/gen/terminal_session_pb";
-import type { SessionEntry } from "../../src/gen/session_pb";
+} from "tddy-client-web/gen/terminal_session_pb";
+import type { SessionEntry } from "tddy-client-web/gen/session_pb";
 import type { SessionRuntimeState } from "../../src/components/sessions/sessionRuntimeRegistry";
 import type { SessionAttachmentState } from "../../src/components/sessions/useSessionAttachment";
 import { aSessionConnection } from "../support/rpc/sessionConnections";

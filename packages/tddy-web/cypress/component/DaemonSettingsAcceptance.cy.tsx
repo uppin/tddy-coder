@@ -8,7 +8,7 @@
  */
 
 import { Code } from "@connectrpc/connect";
-import { DaemonConfigService } from "../../src/gen/daemon_config_pb";
+import { DaemonConfigService } from "tddy-client-web/gen/daemon_config_pb";
 import {
   aDaemonConfigBackend,
   aDaemonConfigBackendWithLiveKitSwitchedOff,

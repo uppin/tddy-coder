@@ -21,3 +21,6 @@ Hand split (TypeScript): move the Start-session flow (`startSessionNode`, `start
 mount) into a `usePrStackStartSession` hook plus a `PrStackStartSessionDialog` component, leaving
 the screen as layout. Green baseline first (`PrStackForceStartAcceptance.cy.tsx` and the other
 `PrStack*.cy.tsx` specs), mechanical move only.
+
+## Verified by hand
+2026-11-07 — `wc -l` at the wrap of PR #842 (`#web-split` 5/16): 705 → 705. The PR only re-points hook imports to `tddy-client-web`; still open, not split (later `#web-split` nodes move this file).

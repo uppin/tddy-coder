@@ -15,7 +15,7 @@
 
 import React from "react";
 import { createClient } from "@connectrpc/connect";
-import { SessionService, type SessionEntry } from "../../src/gen/session_pb";
+import { SessionService, type SessionEntry } from "tddy-client-web/gen/session_pb";
 import { SessionInspectorDrawer } from "../../src/components/sessions/SessionInspectorDrawer";
 import { mountWithRpc } from "../support/rpc/inMemory";
 import {

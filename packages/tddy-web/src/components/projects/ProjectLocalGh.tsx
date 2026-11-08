@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { ProbeOutcome, type HostGithubCli } from "../../gen/host_pb";
+import { ProbeOutcome, type HostGithubCli } from "tddy-client-web/gen/host_pb";
 
 /** Asks one host's `gh` about the project's GitHub host (`GetHostTooling` with `githubHostname`). */
 export type LoadHostGithubCli = (input: {

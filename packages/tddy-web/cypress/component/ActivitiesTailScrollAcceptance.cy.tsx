@@ -32,7 +32,7 @@ import {
   TAIL_THEN_LIVE,
   type TailReplayBackend,
 } from "../support/rpc/acpReplay";
-import type { AcpAgentMessage } from "../../src/gen/tddy/acp/v1/acp_pb";
+import type { AcpAgentMessage } from "tddy-client-web/gen/tddy/acp/v1/acp_pb";
 
 /** Entries in a transcript long enough that its newest page is not its whole history. */
 const A_LONG_TRANSCRIPT = 250;

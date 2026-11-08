@@ -11,9 +11,10 @@
 import React from "react";
 import { mount } from "cypress/react";
 import { GhosttyTerminalSession } from "../../../src/components/GhosttyTerminalSession";
-import type { TerminalStream } from "../../../src/rpc/connections/terminal";
+import type { TerminalStream } from "tddy-client-web/connections/terminal";
 import type { HistoryChunk } from "../../../src/lib/terminalHistoryLoader";
 import { UploadProgressProvider } from "../../../src/rpc/uploadProgress";
+import { AppClientsPorts } from "../../../src/rpc/appClientsPorts";
 import { byTestId, TEST_IDS } from "../testIds";
 
 /** UTF-8 encode a string into a Uint8Array (driver-local; the spec has its own `enc`). */
@@ -151,13 +152,15 @@ export function aTerminalWithHistoryPaging() {
     mount() {
       mount(
         <div style={{ height: 400, width: 800, position: "relative" }}>
-          <UploadProgressProvider>
-            <GhosttyTerminalSession
-              feed={{ stream, history: fetcher.fetch }}
-              sessionToken="lazy-history-token"
-              sessionId="lazy-history-session"
-            />
-          </UploadProgressProvider>
+          <AppClientsPorts>
+            <UploadProgressProvider>
+              <GhosttyTerminalSession
+                feed={{ stream, history: fetcher.fetch }}
+                sessionToken="lazy-history-token"
+                sessionId="lazy-history-session"
+              />
+            </UploadProgressProvider>
+          </AppClientsPorts>
         </div>,
       );
       return this;

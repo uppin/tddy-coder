@@ -1,4 +1,4 @@
-import type { SessionEntry } from "../gen/session_pb";
+import type { SessionEntry } from "tddy-client-web/gen/session_pb";
 
 /** Display status token for a session. */
 export type ConnectionStatus = "connected" | "disconnected" | "needs-input";

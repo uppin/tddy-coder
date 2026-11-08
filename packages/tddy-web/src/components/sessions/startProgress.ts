@@ -3,7 +3,7 @@ import {
   type CloneProgress,
   StartPhase_Step,
   type StartSessionEvent,
-} from "../../gen/session_pb";
+} from "tddy-client-web/gen/session_pb";
 
 /** One step of a start as the create pane lists it. */
 export interface StartProgressStep {

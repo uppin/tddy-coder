@@ -15,14 +15,14 @@
 import { Code, ConnectError, type ServiceImpl } from "@connectrpc/connect";
 import { create } from "@bufbuild/protobuf";
 import { anInMemoryRpcBackend, type InMemoryRpcBackend } from "tddy-connectrpc-testkit";
-import { CatalogService, ListSubagentsResponseSchema } from "../../../src/gen/catalog_pb";
-import { SessionAgentService } from "../../../src/gen/session_agents_pb";
-import { AgentCloneState, SessionAgentRosterSchema, type SessionAgentEntry } from "../../../src/gen/session_agents_pb";
+import { CatalogService, ListSubagentsResponseSchema } from "tddy-client-web/gen/catalog_pb";
+import { SessionAgentService } from "tddy-client-web/gen/session_agents_pb";
+import { AgentCloneState, SessionAgentRosterSchema, type SessionAgentEntry } from "tddy-client-web/gen/session_agents_pb";
 import {
   AgentKind,
   SessionAgentStatus,
   type SessionAgentActivity,
-} from "../../../src/gen/types_pb";
+} from "tddy-client-web/gen/types_pb";
 
 /** A roster entry with sensible defaults; tests override only what the scenario is about. */
 export function anAttachedAgent(

@@ -1,4 +1,4 @@
-import type { SessionEntry } from "../../gen/session_pb";
+import type { SessionEntry } from "tddy-client-web/gen/session_pb";
 
 /**
  * Whether the Agent Activity sidebar starts open when `session` is selected (`#project-home` 3/7):

@@ -1,14 +1,13 @@
 import React from "react";
-import { useSelectedDaemon } from "../../rpc/selectedDaemon";
 import { LIVEKIT_SOURCE_ID } from "../../rpc/hostDirectory/liveKitSource";
 import { useHostDirectorySource } from "../../rpc/hostDirectory/useHostDirectory";
 import { useHostPresence } from "../../rpc/hostDirectory/useHostPresence";
-import { useHostConnection } from "../../rpc/connections/registry";
 import { useRoomParticipants } from "../../hooks/useRoomParticipants";
 import { ParticipantList } from "../ParticipantList";
 import { AppShell } from "../shell/AppShell";
 import { TooltipProvider } from "tddy-ui-web";
 import { LiveKitRoomsPanel } from "./LiveKitRoomsPanel";
+import { useHostConnection, useSelectedDaemon } from "tddy-client-web";
 
 /**
  * The LiveKit presence screen (`#/livekit`). Lists the participants in the shared common room

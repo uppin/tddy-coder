@@ -1,16 +1,16 @@
-import { useDaemonClient } from "../../rpc/selectedDaemon";
-import { ProjectService } from "../../gen/project_pb";
-import { SessionService } from "../../gen/session_pb";
-import { ActivityService } from "../../gen/activity_pb";
-import { AccountsService } from "../../gen/accounts_pb";
-import { CatalogService } from "../../gen/catalog_pb";
-import { ExecToolService } from "../../gen/exec_tools_pb";
-import { PrStackService } from "../../gen/pr_stack_pb";
-import { SessionAgentService } from "../../gen/session_agents_pb";
-import { SessionFilesService } from "../../gen/session_files_pb";
-import { TerminalSessionService } from "../../gen/terminal_session_pb";
-import { TaskService } from "../../gen/tasks_pb";
-import { WorktreeService } from "../../gen/worktree_pb";
+import { ProjectService } from "tddy-client-web/gen/project_pb";
+import { SessionService } from "tddy-client-web/gen/session_pb";
+import { ActivityService } from "tddy-client-web/gen/activity_pb";
+import { AccountsService } from "tddy-client-web/gen/accounts_pb";
+import { CatalogService } from "tddy-client-web/gen/catalog_pb";
+import { ExecToolService } from "tddy-client-web/gen/exec_tools_pb";
+import { PrStackService } from "tddy-client-web/gen/pr_stack_pb";
+import { SessionAgentService } from "tddy-client-web/gen/session_agents_pb";
+import { SessionFilesService } from "tddy-client-web/gen/session_files_pb";
+import { TerminalSessionService } from "tddy-client-web/gen/terminal_session_pb";
+import { TaskService } from "tddy-client-web/gen/tasks_pb";
+import { WorktreeService } from "tddy-client-web/gen/worktree_pb";
+import { useDaemonClient } from "tddy-client-web";
 
 /** The sessions drawer's per-service clients on the selected daemon, each `null` until one is reachable. */
 export function useSessionsDrawerClients() {

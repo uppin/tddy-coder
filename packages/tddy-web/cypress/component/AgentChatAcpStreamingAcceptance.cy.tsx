@@ -18,7 +18,7 @@ import {
   AcpService,
   AcpAgentMessageSchema,
   type AcpClientMessage,
-} from "../../src/gen/tddy/acp/v1/acp_pb";
+} from "tddy-client-web/gen/tddy/acp/v1/acp_pb";
 import { mountWithRpc } from "../support/rpc/inMemory";
 import { agentChatPage } from "../support/pages/agentChatPage";
 

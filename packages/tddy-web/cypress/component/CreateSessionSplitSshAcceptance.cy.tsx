@@ -12,17 +12,17 @@ import { create } from "@bufbuild/protobuf";
 import { createClient } from "@connectrpc/connect";
 import { anInMemoryRpcBackend, type InMemoryRpcBackend } from "tddy-connectrpc-testkit";
 import { CreateSessionPane } from "../../src/components/sessions/CreateSessionPane";
-import { SessionService } from "../../src/gen/session_pb";
-import { ProjectService } from "../../src/gen/project_pb";
-import { CatalogService } from "../../src/gen/catalog_pb";
-import { SessionFilesService } from "../../src/gen/session_files_pb";
-import { WorktreeService } from "../../src/gen/worktree_pb";
+import { SessionService } from "tddy-client-web/gen/session_pb";
+import { ProjectService } from "tddy-client-web/gen/project_pb";
+import { CatalogService } from "tddy-client-web/gen/catalog_pb";
+import { SessionFilesService } from "tddy-client-web/gen/session_files_pb";
+import { WorktreeService } from "tddy-client-web/gen/worktree_pb";
 import {
   HostService,
   ListSshConfigHostsResponseSchema,
   ProbeOutcome,
   SshConfigHostSchema,
-} from "../../src/gen/host_pb";
+} from "tddy-client-web/gen/host_pb";
 import type { DaemonHost } from "../../src/lib/participantRole";
 import { AuthProvider } from "../../src/hooks/authProvider";
 import { SelectedDaemonProvider } from "../../src/rpc/selectedDaemon";

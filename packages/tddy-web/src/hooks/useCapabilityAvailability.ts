@@ -28,7 +28,7 @@ import { LIVEKIT_SOURCE_ID } from "../rpc/hostDirectory/liveKitSource";
 import { useHostDirectorySource } from "../rpc/hostDirectory/useHostDirectory";
 import { useHasCapability, type CapabilityBearing } from "../rpc/connections/useHasCapability";
 import { capabilityAvailability, type CapabilityAvailability } from "./capabilityAvailability";
-import type { ConnectionCapability } from "../rpc/connections/types";
+import type { ConnectionCapability } from "tddy-client-web/connections/types";
 
 /**
  * What `connection` can offer of `capability` right now, read in the one fixed order.

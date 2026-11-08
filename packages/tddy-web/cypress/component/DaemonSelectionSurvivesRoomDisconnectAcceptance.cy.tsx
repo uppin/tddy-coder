@@ -16,9 +16,10 @@ import React, { useState } from "react";
 import { Room } from "livekit-client";
 import { DaemonSelector } from "../../src/components/shell/DaemonSelector";
 import type { DaemonHost } from "../../src/lib/participantRole";
-import { SelectedDaemonProvider, useSelectedDaemon } from "../../src/rpc/selectedDaemon";
+import { SelectedDaemonProvider } from "../../src/rpc/selectedDaemon";
 import { daemonSelectorPage } from "../support/pages/daemonSelectorPage";
 import { byTestId } from "../support/testIds";
+import { useSelectedDaemon } from "tddy-client-web";
 
 const DEV: DaemonHost = { instanceId: "dev", label: "dev (this daemon)" };
 

@@ -1,6 +1,6 @@
 import { useCallback } from "react";
 
-import { CodeQueryKind } from "../../gen/code_navigation_pb";
+import { CodeQueryKind } from "tddy-client-web/gen/code_navigation_pb";
 import type { CodePosition } from "./codeNavigationApi";
 import { useShowError, type NavigationContext } from "./navigationLookup";
 

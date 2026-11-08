@@ -13,7 +13,7 @@
 import React from "react";
 import { SessionsDrawerScreen } from "../../src/components/sessions/SessionsDrawerScreen";
 import { DEFAULT_TEST_DAEMON, withSelectedDaemon } from "../support/rpc/withSelectedDaemon";
-import { SessionService, type SessionEntry } from "../../src/gen/session_pb";
+import { SessionService, type SessionEntry } from "tddy-client-web/gen/session_pb";
 import { mountWithRecordingLiveKitRpc } from "../support/rpc/recordingLiveKitRpc";
 import { aSessionServiceBackend } from "../support/rpc/daemonSessionHostBackend";
 import { sessionsDrawerPage } from "../support/pages/sessionsDrawerPage";

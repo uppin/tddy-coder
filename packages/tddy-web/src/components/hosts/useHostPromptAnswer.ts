@@ -27,14 +27,14 @@
  */
 
 import { useEffect, useState } from "react";
-import { HostService } from "../../gen/host_pb";
-import { useHostClient } from "../../rpc/connections/registry";
+import { HostService } from "tddy-client-web/gen/host_pb";
 import { useHostPromptsFor, type HostPromptEventLike } from "../../rpc/useHostPrompts";
 import {
   acceptChangedHostKey,
   verifyHostKey,
   type HostKeyCheck,
 } from "../../lib/hostKeyPinning";
+import { useHostClient } from "tddy-client-web";
 
 /**
  * A verified host key, kept with the prompt it arrived on.

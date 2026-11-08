@@ -27,7 +27,7 @@ import {
   HostService,
   ProbeOutcome,
   type KnownHostEntry,
-} from "../../src/gen/host_pb";
+} from "tddy-client-web/gen/host_pb";
 import { AuthProvider } from "../../src/hooks/authProvider";
 import { ConnectionProviders } from "../../src/rpc/connections/registry";
 import { SelectedDaemonProvider } from "../../src/rpc/selectedDaemon";

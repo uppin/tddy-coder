@@ -1,6 +1,5 @@
 import { useCallback, useState } from "react";
-import { ModelLoadState } from "../../gen/models_pb";
-import { useSelectedDaemon } from "../../rpc/selectedDaemon";
+import { ModelLoadState } from "tddy-client-web/gen/models_pb";
 import type { AssistantRow, ModelRow } from "../../utils/mergeRegistryEntries";
 import { AppShell } from "../shell/AppShell";
 import { ChatWorkspaceDialog } from "./ChatWorkspaceDialog";
@@ -13,6 +12,7 @@ import {
   type RegistryChatTarget,
 } from "../../utils/registryChatTarget";
 import { useModelRegistryFanOut } from "./useModelRegistryFanOut";
+import { useSelectedDaemon } from "tddy-client-web";
 
 /**
  * Why a provider cannot be created while no daemon is selected. A provider belongs to exactly one

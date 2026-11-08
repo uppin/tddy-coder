@@ -9,7 +9,7 @@
  * Technical: `packages/tddy-web/docs/capability-gating.md`.
  */
 
-import type { ConnectionCapability } from "./types";
+import type { ConnectionCapability } from "tddy-client-web/connections/types";
 
 /** The part of a connection this predicate reads — host or session, they answer the same way. */
 export interface CapabilityBearing {
