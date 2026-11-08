@@ -7,7 +7,7 @@
  */
 
 import { describe, it, expect } from "bun:test";
-import { create } from "@bufbuild/protobuf";
+import { create, type MessageInitShape } from "@bufbuild/protobuf";
 import { SessionEntrySchema, type SessionEntry } from "tddy-client-web/gen/session_pb";
 import type { SessionMetadata } from "../lib/sessionParticipantMetadata";
 import {
@@ -24,7 +24,7 @@ const SID_B = "bbbbbbbb-0000-4000-8000-000000000002";
 const SELECTED = "workstation-1";
 const OTHER = "server-2";
 
-function aSession(overrides: Partial<SessionEntry>): SessionEntry {
+function aSession(overrides: Omit<MessageInitShape<typeof SessionEntrySchema>, "$typeName">): SessionEntry {
   return create(SessionEntrySchema, { sessionId: "sess-default", daemonInstanceId: "", ...overrides });
 }
 

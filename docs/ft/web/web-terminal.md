@@ -250,7 +250,7 @@ Each project’s session table and the **Other sessions** table list rows in thi
 2. Within the active group and within the inactive group, rows follow **`createdAt`** descending (newer timestamps first), using ISO-8601 strings parsed with the browser **`Date`** implementation.
 3. When two rows share the same comparable time, or when **`createdAt`** does not parse to a finite time, order follows **`sessionId`** lexicographically (deterministic tie-break).
 
-The client applies **`sortSessionsForDisplay`** (`packages/tddy-web/src/utils/sessionSort.ts`) to the session array already held in React state after **`ListSessions`**—no additional RPC for ordering.
+The client applies **`sortSessionsForDisplay`** (`packages/tddy-session-web/src/utils/sessionSort.ts`) to the session array already held in React state after **`ListSessions`**—no additional RPC for ordering.
 
 ### Session workflow status (TUI parity)
 
@@ -305,7 +305,7 @@ Both RPCs belong to `session_files.SessionFilesService` (see
 - If a **`DeleteSession`** call fails after earlier calls in the same bulk operation have succeeded, the shared connection error area shows the error, **`ListSessions`** runs again, and the table’s selection retains only ids that appear in the refreshed list.
 - Dismissing the confirmation dialog does not invoke **`DeleteSession`**.
 
-Pure selection helpers live in **`packages/tddy-web/src/utils/sessionSelection.ts`** (Bun **`sessionSelection.test.ts`**). **`ConnectionScreen`** bulk-path logging is limited to Vite development builds (**`import.meta.env.DEV`**); the **`sessionSelection`** helpers do not emit **`console`** calls in production bundles.
+Pure selection helpers live in **`packages/tddy-session-web/src/utils/sessionSelection.ts`** (Bun **`sessionSelection.test.ts`**). **`ConnectionScreen`** bulk-path logging is limited to Vite development builds (**`import.meta.env.DEV`**); the **`sessionSelection`** helpers do not emit **`console`** calls in production bundles.
 
 The daemon **`DeleteSession`** uses the same GitHub user → OS user → **`sessions_base`** resolution as **`ListSessions`**, terminates a live **`metadata.pid`** when needed, then removes **`{sessions_base}/sessions/{session_id}/`**. See [daemon changelog](../daemon/changelog/) and [connection-service.md](../../../packages/tddy-daemon/docs/connection-service.md).
 

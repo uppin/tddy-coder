@@ -13,7 +13,7 @@ holds a **slot**, not the dialog.
 | `StartPassphraseProvider({ prompt })` | this package | supplies the component that listens for, and answers, a host's passphrase question |
 | `StartPassphrasePrompt({ instanceId, active, sessionToken })` | this package | mounts the provided component; **throws** without a provider, since a clone asking for a passphrase nobody can answer would hang the start with nothing on screen |
 | `HostStartPassphrasePrompt` | `tddy-web` `components/hosts/` | the filled slot: `useHostPromptAnswer(instanceId, active, sessionToken)` rendered as `HostPassphraseDialog` while a prompt is outstanding, nothing otherwise |
-| `HostStartPassphraseScope` | `tddy-web` `components/hosts/` | `StartPassphraseProvider` with `HostStartPassphrasePrompt`; mounted once at the app root (`index.tsx`) and in `tddy-web`'s Cypress `mount` |
+| the provider | `tddy-web` `rpc/appClientsPorts.tsx` | `StartPassphraseProvider` with `HostStartPassphrasePrompt`, mounted once with the app's ports (`AppClientsPorts`, under `AuthProvider`), so the app and `tddy-web`'s Cypress `mount` both have it |
 
 The hook takes the **session token as an argument**. `CreateSessionPane` is handed its token as a prop and is
 mounted without the auth context in many specs, so a hook that read the context would throw there.

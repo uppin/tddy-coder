@@ -1,0 +1,25 @@
+# Session package (`tddy-session-web`)
+
+**Package:** `packages/tddy-session-web`
+**Applies to:** the sessions drawer, session runtime, main pane, inspector and agent layers
+**Added:** 2026-11-07 (#web-split 15/17, PR #851) — seams and helpers; runtime (#860), inspector
+(#861) and drawer (#862) follow
+
+## Overview
+
+Session code becomes one package that does not depend on the web app. It reaches what the app owns —
+the location, the screen shell, the passphrase prompt a cloning start raises — only through slots the
+app fills, and holds the session helpers every session surface uses.
+
+## Behaviour
+
+- Sessions behave as before ([session-drawer.md](session-drawer.md)); the passphrase prompt is
+  provided once for the whole app.
+
+## Acceptance criteria
+
+- [x] Session helpers live in `tddy-session-web`, which imports nothing from `tddy-web` or LiveKit (rule test).
+- [x] Session code reaches the location, the shell and the passphrase prompt only through slots (seam rules).
+- [x] The app's session screens render as before (`tddy-web`'s session specs pass).
+
+Technical reference: [packages/tddy-session-web/docs/README.md](../../../packages/tddy-session-web/docs/README.md).

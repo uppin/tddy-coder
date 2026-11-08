@@ -19,7 +19,7 @@ expect.extend({
 });
 
 declare module "bun:test" {
-  interface Matchers<R> {
-    toContainSessionIdsInOrder(expected: string[]): R;
+  interface Matchers<T = unknown> {
+    toContainSessionIdsInOrder(expected: string[]): void;
   }
 }

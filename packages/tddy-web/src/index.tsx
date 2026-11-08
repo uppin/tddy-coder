@@ -5,7 +5,6 @@ import type { RoomHandle } from "tddy-client-web";
 import { RpcTransportProvider } from "./rpc/transportProvider";
 import { loadClientConfig, type AuthFlowDeclaration } from "./rpc/clientConfig";
 import { AuthProvider, useAuthContext } from "./hooks/authProvider";
-import { HostStartPassphraseScope } from "./components/hosts/HostStartPassphrasePrompt";
 import { SelectedDaemonProvider } from "./rpc/selectedDaemon";
 import { ConnectionProviders } from "./rpc/connections/registry";
 import { daemonTransportFlavour, type TauriHostWindow } from "tddy-session-web";
@@ -264,11 +263,10 @@ if (root) {
     // every host to `null`, which is the "not connected" state each screen already renders.
     <RpcTransportProvider>
       <ConnectionProviders>
+        {/* AuthProvider mounts `AppClientsPorts`, which also supplies the session shell and the Hosts
+            screen's passphrase dialog to every create-session surface. */}
         <AuthProvider>
-          {/* Every create-session surface asks the Hosts screen's passphrase dialog through this. */}
-          <HostStartPassphraseScope>
-            <App />
-          </HostStartPassphraseScope>
+          <App />
         </AuthProvider>
       </ConnectionProviders>
     </RpcTransportProvider>,
