@@ -9,9 +9,9 @@
  * explicitly, leaves nothing to discover.
  */
 
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { createRequire } from "node:module";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 
 /** Large or deeply imported dependencies; each is pre-bundled where the package can resolve it. */
 export const PREBUNDLED = [
@@ -43,22 +43,59 @@ export const PREBUNDLED = [
 
 /** `optimizeDeps` for the package rooted at `packageDir`. */
 export function prebundledDeps(packageDir: string): { entries: string[]; include: string[] } {
-  const require = createRequire(join(packageDir, "package.json"));
-  const resolvable = (name: string) => {
+  const resolvesFrom = (dir: string, name: string) => {
     try {
-      require.resolve(name);
+      createRequire(join(dir, "package.json")).resolve(name);
       return true;
     } catch {
       return false;
     }
   };
+  // A workspace package this one depends on is served from source, so its own dependencies are
+  // met only when a spec imports it — tddy-web reaches tddy-react-commons' rxjs and dequal, and
+  // tddy-session-web's highlighter, that way. Its sources join the scan (below), and Vite's
+  // nested form (`tddy-react-commons > rxjs`) pre-bundles the named heavy ones through it.
+  const workspaceDirs = workspaceDependencies(packageDir)
+    .map((name) => join(dirname(packageDir), name))
+    .filter((dir) => existsSync(join(dir, "package.json")));
+  const include = PREBUNDLED.flatMap((name) => {
+    if (resolvesFrom(packageDir, name)) return [name];
+    const via = workspaceDirs.find((dir) => resolvesFrom(dir, name));
+    return via ? [`${packageName(via)} > ${name}`] : [];
+  });
   return {
     entries: [
       ...(existsSync(join(packageDir, "index.html")) ? ["index.html"] : []),
       "src/**/*.{ts,tsx}",
       "cypress/component/**/*.cy.{ts,tsx}",
       "cypress/support/**/*.{ts,tsx}",
+      // The sources of the workspace packages this one imports, so their dependencies are found
+      // by the up-front scan rather than mid-spec.
+      ...workspaceDirs.map((dir) => join(dir, "src/**/*.{ts,tsx}")),
+      // bun tests import `bun:test`, which Vite cannot resolve; one such file aborts the whole scan,
+      // and then every dependency is discovered mid-spec — the reload this helper exists to stop.
+      "!**/*.test.{ts,tsx}",
     ],
-    include: PREBUNDLED.filter(resolvable),
+    include,
   };
+}
+
+function readPackageJson(dir: string): {
+  name?: string;
+  dependencies?: Record<string, string>;
+  devDependencies?: Record<string, string>;
+} {
+  return JSON.parse(readFileSync(join(dir, "package.json"), "utf8"));
+}
+
+function packageName(dir: string): string {
+  return readPackageJson(dir).name ?? dir;
+}
+
+/** Names of the `workspace:` dependencies (runtime and dev) of the package at `dir`. */
+export function workspaceDependencies(dir: string): string[] {
+  const pkg = readPackageJson(dir);
+  return Object.entries({ ...pkg.dependencies, ...pkg.devDependencies })
+    .filter(([, version]) => version.startsWith("workspace:"))
+    .map(([name]) => name);
 }
