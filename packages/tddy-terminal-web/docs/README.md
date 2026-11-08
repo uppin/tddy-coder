@@ -39,5 +39,5 @@ file stays within 500 lines (`src/componentSize.test.ts`).
 ## Tests
 
 `bun test src` (helpers, feed, input delivery, the boundary rule) and `bun run cypress:component` —
-21 component specs from the package's own `cypress.config.ts`. CI: `.github/workflows/web.yml`
+22 component specs from the package's own `cypress.config.ts`. CI: `.github/workflows/web.yml`
 (`Web lint` typechecks it; the `Web tests` shards run its suites).
