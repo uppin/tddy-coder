@@ -6,6 +6,7 @@
 **Complexity**: 5 — new engine and 5 dependencies, input-routing semantics (mouse/wheel ownership), renderer choice with fallback, specs across 3 packages
 
 **Stack**: `#xterm` 3/4 — branch `feature/xterm/xterm-engine`, base `feature/xterm/terminal-engine`
+**PR**: [#868](https://github.com/uppin/tddy-coder/pull/868)
 
 ## Initial Discovery
 
@@ -100,6 +101,7 @@ Cypress component specs one at a time locally, `bun test src`, scoped to the tou
 
 ## Decisions & Trade-offs
 
+- Developer, 2026-11-08 (pass 2 review): `xtermEngine` names its renderer on its container (`data-terminal-renderer`), so `TerminalEngine` is unchanged; the unicode-width spec drives the engine directly, the mouse and renderer specs the component; the mouse spec also pins one wheel-up report per **pixel-mode** wheel notch (`deltaY: -100`), not only per line-mode step.
 - Developer, 2026-11-08: WebGL renderer with DOM fallback; deps `@xterm/xterm`, `@xterm/addon-fit`, `@xterm/addon-unicode11`, `@xterm/addon-webgl`, `@xterm/addon-clipboard`; rename inside the last node; stack registered as an extension of `#web-split`.
 
 ## Refactoring Needed
@@ -112,10 +114,10 @@ Cypress component specs one at a time locally, `bun test src`, scoped to the tou
 - [x] Cross-check code issues and TODOs
 - [x] Create/update PRD documentation
 - [x] Create changeset (this document)
-- [ ] Create failing acceptance tests
-- [ ] Run acceptance tests (verify they fail)
-- [ ] USER REVIEW — acceptance tests
-- [ ] TDD Red — write failing unit/integration tests
+- [x] Create failing acceptance tests
+- [x] Run acceptance tests (verify they fail)
+- [x] USER REVIEW — acceptance tests
+- [x] TDD Red — write failing unit/integration tests
 - [ ] TDD Green — implement with quality code
 - [ ] Update documentation with progress
 - [ ] Run the touched packages' tests — verify 100% pass
