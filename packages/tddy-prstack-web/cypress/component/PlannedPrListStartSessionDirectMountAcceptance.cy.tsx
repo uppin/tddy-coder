@@ -43,15 +43,17 @@ const ORCHESTRATOR = create(SessionEntrySchema, {
 /** The backend answers what the dialog loads on mount; a StartSession is recorded, never expected here. */
 function aDaemon() {
   return anInMemoryRpcBackend()
-    .onUnary(ProjectService.method.listProjects, () => ({
+    .onUnary(ProjectService.method.listProjects, () => create(ProjectService.method.listProjects.output, {
       projects: [{ projectId: "proj-pr-stack", name: "pr-stack-project", mainRepoPath: "/home/dev/pr-stack-project", daemonInstanceId: "local" }],
     }))
-    .onUnary(CatalogService.method.listAgents, () => ({ agents: [{ id: "claude", label: "Claude" }] }))
-    .onUnary(CatalogService.method.listAgentModels, () => ({ models: [{ id: "claude-opus-4-8", label: "Claude Opus 4.8" }], defaultModel: "claude-opus-4-8" }))
-    .onUnary(CatalogService.method.listTools, () => ({ tools: [{ path: "/usr/bin/tddy-coder", label: "tddy-coder" }] }))
-    .onUnary(CatalogService.method.listSubagents, () => ({ subagents: [] }))
-    .onUnary(ProjectService.method.listProjectBranches, () => ({ branches: [], defaultRemote: "origin" }))
-    .onUnary(SessionService.method.startSession, () => ({ sessionId: "child-session", livekitRoom: "", livekitUrl: "", livekitServerIdentity: "" }));
+    .onUnary(CatalogService.method.listAgents, () => create(CatalogService.method.listAgents.output, { agents: [{ id: "claude", label: "Claude" }] }))
+    .onUnary(CatalogService.method.listAgentModels, () => create(CatalogService.method.listAgentModels.output, { models: [{ id: "claude-opus-4-8", label: "Claude Opus 4.8" }], defaultModel: "claude-opus-4-8" }))
+    .onUnary(CatalogService.method.listTools, () => create(CatalogService.method.listTools.output, { tools: [{ path: "/usr/bin/tddy-coder", label: "tddy-coder" }] }))
+    .onUnary(CatalogService.method.listSubagents, () => create(CatalogService.method.listSubagents.output, { subagents: [] }))
+    .onUnary(ProjectService.method.listProjectBranches, () => create(ProjectService.method.listProjectBranches.output, { branches: [], defaultRemote: "origin" }))
+    .onUnary(SessionService.method.startSession, () =>
+      create(SessionService.method.startSession.output, { sessionId: "child-session", livekitRoom: "", livekitUrl: "", livekitServerIdentity: "" }),
+    );
 }
 
 function mountScreenOver(backend: ReturnType<typeof aDaemon>) {

@@ -42,9 +42,11 @@ function anOrchestratorSession(order: string[]) {
 
 /** Mount the screen over a daemon that answers a reorder with the plan in `reorderedTo` order. */
 function mountScreen(order: string[], reorderedTo: string[]): InMemoryRpcBackend {
-  const backend = anInMemoryRpcBackend().onUnary(PrStackService.method.reorderPlannedPr, () => ({
-    stackPlanJson: aStackPlanJson(1, anOrderedStack(reorderedTo)),
-  }));
+  const backend = anInMemoryRpcBackend().onUnary(PrStackService.method.reorderPlannedPr, () =>
+    create(PrStackService.method.reorderPlannedPr.output, {
+      stackPlanJson: aStackPlanJson(1, anOrderedStack(reorderedTo)),
+    }),
+  );
   mountWithPresenterRoom(
     <PrStackScreen
       session={anOrchestratorSession(order)}

@@ -983,7 +983,7 @@ window** backed by a remote Presenter, plus a **Planned PRs panel** docked to it
 operator review a freshly-written stack plan, keep refining it by chatting with the agent, and start
 child sessions for each planned PR — all without leaving the orchestrator session.
 
-**Component:** `PrStackScreen` (`src/components/sessions/prstack/PrStackScreen.tsx`), with
+**Component:** `PrStackScreen` (`packages/tddy-prstack-web/src/PrStackScreen.tsx`), with
 `PlannedPrPanel` / `PlannedPrList` / `PlannedPrRow` subcomponents.
 
 > **Rewritten 2026-07-26** — the screen was a fixed 50/50 split (`w-1/2` columns, no toggle, no
@@ -1194,7 +1194,7 @@ The custom screen for every non-`pr-stack` tddy-coder `tool` workflow session (`
 full-screen chat window — no second pane. The operator drives the workflow entirely by prompting and
 answering clarifications, exactly as with pr-stack, minus the planned-PR list.
 
-**Component:** `WorkflowChatScreen` (`src/components/sessions/WorkflowChatScreen.tsx`) — a thin
+**Component:** `WorkflowChatScreen` (`packages/tddy-prstack-web/src/WorkflowChatScreen.tsx`) — a thin
 single-pane wrapper that derives its own presenter LiveKit room from the session's attachment
 (the media port's `usePresenterRoom`, shared with `PrStackScreen`) and mounts the reusable [`AgentChat`](#agent-chat)
 over the **ACP mirror** (`acp`), matching pr-stack's chat and tddy-coder's ACP-agent direction. Root

@@ -4,14 +4,14 @@
  * For bun:test only — never import from Cypress tests.
  */
 
-import { create } from "@bufbuild/protobuf";
+import { create, type MessageInitShape } from "@bufbuild/protobuf";
 import { BranchResolutionSchema, type BranchResolution } from "tddy-client-web/gen/pr_stack_pb";
 import { SessionEntrySchema, type SessionEntry } from "tddy-client-web/gen/session_pb";
 import type { StackChildSession } from "../src/stackChildSessions";
 import type { StackNode } from "../src/stackPlan";
 
 /** Default active session; override only the fields that matter for your test. */
-export function aSessionEntry(overrides: Partial<SessionEntry> = {}): SessionEntry {
+export function aSessionEntry(overrides: MessageInitShape<typeof SessionEntrySchema> = {}): SessionEntry {
   return create(SessionEntrySchema, {
     sessionId: "session-default-1111-2222-3333-4444444444",
     createdAt: "2026-03-21T10:00:00Z",
@@ -35,14 +35,18 @@ export function aSessionEntry(overrides: Partial<SessionEntry> = {}): SessionEnt
  * different conditions in the PR-Stack view — the `remote` leg most of all, since a *missing*
  * resolution leaves a node startable while `remote.exists === false` blocks it.
  */
-export function aBranchResolution(overrides: Partial<BranchResolution> = {}): BranchResolution {
+export function aBranchResolution(
+  overrides: MessageInitShape<typeof BranchResolutionSchema> = {},
+): BranchResolution {
   return create(BranchResolutionSchema, {
     branch: "feature/x/n1",
     session: { exists: false, sessionId: "", isActive: false, status: "" },
     worktree: { exists: false, path: "" },
     pr: { exists: false, number: 0n, url: "", state: "" },
     remote: { exists: false, sha: "" },
-    ...overrides,
+    // A built message among the overrides carries `$typeName`, which narrows the spread to a type
+    // `create` will not take; every field it carries is still a valid init.
+    ...(overrides as Omit<typeof overrides, "$typeName">),
   });
 }
 

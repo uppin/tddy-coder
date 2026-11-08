@@ -1,5 +1,5 @@
 import { describe, expect, it } from "bun:test";
-import { create } from "@bufbuild/protobuf";
+import { create, type MessageInitShape } from "@bufbuild/protobuf";
 import { BranchBaseSyncSchema } from "tddy-client-web/gen/pr_stack_pb";
 import { aBranchResolution } from "../test-utils/builders";
 import { baseSyncView, canPullFromBase } from "./baseSyncStatus";
@@ -26,7 +26,7 @@ const BASE = "origin/master";
 
 /** A resolution carrying a base comparison with only the fields a scenario cares about. */
 function aResolutionWithBaseSync(
-  baseSync: Partial<Parameters<typeof create<typeof BranchBaseSyncSchema>>[1]>,
+  baseSync: MessageInitShape<typeof BranchBaseSyncSchema>,
 ) {
   return aBranchResolution({
     baseSync: create(BranchBaseSyncSchema, {

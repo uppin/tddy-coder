@@ -3,8 +3,8 @@
 **Location:** `packages/tddy-prstack-web/src/PrStackScreen.tsx`
 **Category:** oversized-file
 **Detected:** 2026-10-24 by `/pr-wrap` step 3.5 file-length gate on PR #741 (`#start-progress` 8/8)
-**Metrics:** **704 lines** (non-test source, whole file) · budget 500 · **1.41× over**
-**Thresholds breached:** length 704 > 500
+**Metrics:** **701 lines** (non-test source, whole file) · budget 500 · **1.40× over**
+**Thresholds breached:** length 701 > 500
 **Status:** Open — unclaimed
 
 ## Measurement history
@@ -26,3 +26,4 @@ the screen as layout. Green baseline first (`PrStackForceStartAcceptance.cy.tsx`
 2026-11-07 — `wc -l` at the wrap of PR #842 (`#web-split` 5/16): 705 → 705. The PR only re-points hook imports to `tddy-client-web`; still open, not split (later `#web-split` nodes move this file).
 2026-11-07 — `wc -l` at the wrap of PR #844 (`#web-split` 7/17): 704 → 702 against its base `feature/web-split/livekit` `bede09610`. The PR re-points the create-session imports to `tddy-session-create-web` (one import line); the passphrase scope is mounted at the app root, not around the dialog. Still open, not split.
 2026-11-07 — `wc -l` in the green of `#web-split` 13/16 (`tddy-prstack-web`): 702 → 701 after the cascade onto #844 (705 → 704 before it). The file moved with `git mv` (history follows); the `HostStartPassphraseScope` wrapper left it (the host application provides that scope), so it is two lines shorter on the screen and one longer for an import. Still open, not split.
+2026-11-07 — `wc -l` at the wrap of PR #850 (`#web-split` 14/17): 702 → 701 against `feature/web-split/workspace` `abc0b8000`, in `tddy-prstack-web`. Not grown; still open, not split.
