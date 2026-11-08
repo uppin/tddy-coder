@@ -103,6 +103,21 @@ function requiredAttribute(value: string | undefined, attribute: string, what: s
   return value;
 }
 
+/**
+ * A status attribute read through a retryable query, so a following `.should("equal", …)` retries
+ * until the value settles — a `.then` here would freeze the first value rendered (`loading` whenever
+ * the RPC is slower than the first paint). A missing attribute still fails, by name.
+ */
+function statusAttribute(testId: string, attribute: string, what: string): Cypress.Chainable<string> {
+  return byTestId(testId, { timeout: 5000 })
+    .should(($element) => {
+      if ($element.attr(attribute) === undefined) {
+        throw new Error(`${what} is missing its '${attribute}' attribute`);
+      }
+    })
+    .invoke("attr", attribute) as Cypress.Chainable<string>;
+}
+
 /** A comma-separated attribute as a list; an empty attribute is an empty list. */
 function attributeList(value: string): string[] {
   return value.split(",").filter((entry) => entry.length > 0);
@@ -122,11 +137,7 @@ export const modelsScreenPage = {
    * `no-daemons`, `loading` or `ready`. Absent whenever the table has rows to show.
    */
   emptyStateStatus: (): Cypress.Chainable<string> =>
-    byTestId(TEST_IDS.modelsTableEmpty, { timeout: 5000 })
-      .invoke("attr", "data-registry-status")
-      .then((value) =>
-        requiredAttribute(value, "data-registry-status", "the models table's empty state"),
-      ),
+    statusAttribute(TEST_IDS.modelsTableEmpty, "data-registry-status", "the models table's empty state"),
 
   /** The row the table shows in place of models. */
   emptyState: (options?: Parameters<typeof cy.get>[1]) =>
@@ -297,11 +308,7 @@ export const modelsScreenPage = {
 
   /** Why the providers panel has no rows, read from `data-registry-status`. */
   providersEmptyStatus: (): Cypress.Chainable<string> =>
-    byTestId(TEST_IDS.modelsProvidersEmpty, { timeout: 5000 })
-      .invoke("attr", "data-registry-status")
-      .then((value) =>
-        requiredAttribute(value, "data-registry-status", "the providers panel's empty state"),
-      ),
+    statusAttribute(TEST_IDS.modelsProvidersEmpty, "data-registry-status", "the providers panel's empty state"),
 
   /** The row the providers panel shows in place of providers. */
   providersEmptyState: (options?: Parameters<typeof cy.get>[1]) =>
@@ -384,11 +391,7 @@ export const modelsScreenPage = {
 
   /** Why the assistants panel has no rows, read from `data-registry-status`. */
   assistantsEmptyStatus: (): Cypress.Chainable<string> =>
-    byTestId(TEST_IDS.modelsAssistantsEmpty, { timeout: 5000 })
-      .invoke("attr", "data-registry-status")
-      .then((value) =>
-        requiredAttribute(value, "data-registry-status", "the assistants panel's empty state"),
-      ),
+    statusAttribute(TEST_IDS.modelsAssistantsEmpty, "data-registry-status", "the assistants panel's empty state"),
 
   /** The row the assistants panel shows in place of assistants. */
   assistantsEmptyState: (options?: Parameters<typeof cy.get>[1]) =>
@@ -616,11 +619,7 @@ export const modelsScreenPage = {
 
   /** Why no workspace can be offered, read from `data-workspace-status`. */
   workspaceEmptyStatus: (): Cypress.Chainable<string> =>
-    byTestId(TEST_IDS.modelsChatWorkspaceEmpty, { timeout: 5000 })
-      .invoke("attr", "data-workspace-status")
-      .then((value) =>
-        requiredAttribute(value, "data-workspace-status", "the workspace picker's empty state"),
-      ),
+    statusAttribute(TEST_IDS.modelsChatWorkspaceEmpty, "data-workspace-status", "the workspace picker's empty state"),
 
   /** The row the workspace picker shows in place of workspaces. */
   workspaceEmptyState: (options?: Parameters<typeof cy.get>[1]) =>

@@ -14,3 +14,7 @@ At wrap:
   instead of `console.debug`.
 - The 43 typecheck errors left are all in the moved Cypress fixtures:
   `docs/dev/todo/2026-11-07-workspace-web-specs-do-not-typecheck.md`.
+- `modelsScreenPage.ts`'s four status helpers read through a retryable query (`statusAttribute`), so a
+  status that is `loading` at first paint is waited out instead of frozen. `TODO(web-split sweep)`: ~12
+  similar `invoke("attr").then(...)` helpers elsewhere —
+  `docs/dev/todo/2026-11-08-cypress-attr-helpers-freeze-the-first-value.md`.
