@@ -604,8 +604,8 @@ change has to arrive through a PR. That is the intended state.
 Resist adding a bypass actor for the **admin role** as an escape hatch. Beyond
 reopening the hole, it can break `#automerge` outright: if the PR author's own
 role may bypass the required checks, GitHub can consider that PR already clean
-and refuse to arm auto-merge on it. The one bypass actor the repo does grant is
-the GitHub Actions app, which is not a PR author — see the next section.
+and refuse to arm auto-merge on it. The ruleset has **no** bypass actors;
+`#forcemerge` works without one — see the next section.
 
 ## Draft PRs
 
@@ -681,9 +681,19 @@ purpose. The repo is owned by a different account than the people working in it,
 so an admin-only force merge would be usable by nobody. It leaves a trace that
 outlives the run log: once the merge has gone through, the workflow comments on the PR
 naming who asked, linking their comment, and quoting the full check state read just
-before the merge. A force merge that fails — most often a rule violation because the
-Actions app is not yet a bypass actor (below) — posts a ❌ comment with the API's error
+before the merge. A force merge that fails posts a ❌ comment with the API's error
 instead, so an open PR never carries a "Force-merged" claim.
+
+**How `#forcemerge` gets past the required checks without a bypass actor.** The
+ruleset requires each check *from the GitHub Actions app* (`integration_id: 15368`),
+and `GITHUB_TOKEN` acts as that app. So, with `checks: write`, the force path reads
+the base branch's required checks (`gh api repos/<repo>/rules/branches/<base>`), and
+for each one whose latest run on the head is not `success` it posts a completed run
+of the same name titled *"Forced by @actor via #forcemerge"*, whose summary links the
+comment and names the conclusion it replaces. That run is the latest of its name,
+which is what the ruleset reads, and the merge is then an ordinary squash. Nothing is
+built for those checks — the run says so — and the PR comment lists which checks were
+completed as forced.
 
 ### What it depends on
 
@@ -694,21 +704,13 @@ instead, so an open PR never carries a "Force-merged" claim.
   is mergeable the moment it opens and the API rejects the request with
   *"Pull request is in clean status"*. The ruleset is the mechanism, not
   decoration.
-- **The GitHub Actions app as a bypass actor**, for `#forcemerge` only.
-  `GITHUB_TOKEN` cannot skip a required check by default — a force merge fails
-  at `gh pr merge --admin` rather than merging quietly. Granting it:
+- **`checks: write` for the workflow token**, for `#forcemerge` only — to post the
+  forced check runs described above. No ruleset change and no admin step: the
+  ruleset's `bypass_actors` stays empty.
 
-  ```bash
-  gh api -X PUT repos/uppin/tddy-coder/rulesets/21793758 --input - <<'JSON'
-  { "bypass_actors": [
-      { "actor_id": 15368, "actor_type": "Integration", "bypass_mode": "always" }
-  ] }
-  JSON
-  ```
-
-  The cost is real and worth stating: *every* workflow in the repo then holds a
-  token that can bypass required checks on `master`, `ci.yml` included. What
-  makes that acceptable is that a workflow can only be changed through a PR.
+  The cost is worth stating: any workflow with `checks: write` could complete a
+  required check the same way. What makes that acceptable is that a workflow can
+  only be changed through a PR, and a forced run is labelled as one on the PR.
 
 ### Two traps in the implementation
 
@@ -723,9 +725,9 @@ has to be merged by hand.
 between merging now and queueing, because queueing a PR with nothing left to
 wait for is an error rather than a no-op. The obvious source for that decision is
 `mergeStateStatus` — and it is the wrong one, because that field answers "is this
-blocked *for you*". Once the Actions app is a bypass actor, the answer for
-`GITHUB_TOKEN` stops being the answer for the ruleset, and `#automerge` would
-quietly become `#forcemerge`. So the workflow runs `gh pr checks --required`,
+blocked *for you*", and if the token's answer ever stopped being the ruleset's
+(a bypass actor, for instance), `#automerge` would quietly become `#forcemerge`.
+So the workflow runs `gh pr checks --required`,
 which reports the checks themselves: exit 0 when every required one has passed,
 non-zero while any is pending or failing. It correctly reads requirements from
 the ruleset and excludes the VM checks.
