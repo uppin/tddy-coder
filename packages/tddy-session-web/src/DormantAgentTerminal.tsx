@@ -72,6 +72,8 @@ function useRecordedOutput(
       terminalId: AGENT_TERMINAL_ID,
     });
     const loader = new TerminalHistoryForwardLoader(null);
+    // The read waiting on the latest write's parse; one is enough, since it reads the whole buffer.
+    let parseWatch: { dispose(): void } | null = null;
     void (async () => {
       let wrote = false;
       try {
@@ -84,10 +86,13 @@ function useRecordedOutput(
             terminal?.write(chunk.data);
             wrote = true;
             // The terminal parses a write after it returns: read the text once it has.
-            const parsed = terminal?.onWriteParsed?.(() => {
-              parsed?.dispose();
-              if (!stale) setBufferText(terminal.getBufferText?.() ?? "");
-            });
+            parseWatch?.dispose();
+            parseWatch =
+              terminal?.onWriteParsed?.(() => {
+                parseWatch?.dispose();
+                parseWatch = null;
+                if (!stale) setBufferText(terminal.getBufferText?.() ?? "");
+              }) ?? null;
           }
         }
         if (!wrote) setNoRecording(true);
@@ -101,6 +106,7 @@ function useRecordedOutput(
     })();
     return () => {
       stale = true;
+      parseWatch?.dispose();
     };
   }, [terminalRef, opened, terminalClient, sessionId, sessionToken]);
 

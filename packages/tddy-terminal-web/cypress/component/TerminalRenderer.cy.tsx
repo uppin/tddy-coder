@@ -7,6 +7,8 @@
 
 import React from "react";
 import { GhosttyTerminal } from "../../src/GhosttyTerminal";
+import { createXtermEngine, type WebglRendererAddon } from "../../src/engine/xtermEngine";
+import type { TerminalEngine } from "../../src/engine/TerminalEngine";
 import { byTestId, TEST_IDS } from "../support/testIds";
 
 function mountTerminal() {
@@ -58,4 +60,66 @@ describe("Terminal renderer", () => {
     // Then
     rendererAttribute().should("have.attr", "data-terminal-renderer", "dom");
   });
+
+  describe("when the WebGL context is lost", () => {
+    let opened: TerminalEngine | null = null;
+    afterEach(() => {
+      opened?.dispose();
+      opened = null;
+    });
+
+    it("switches to the DOM renderer and releases the WebGL one", () => {
+      // Given — an engine rendering with a WebGL renderer (a stand-in: headless browsers have no GPU)
+      const gpu = aWebglRendererThatCanLoseItsContext();
+      anOpenXtermEngineRenderingWith(gpu).then((engine) => {
+        opened = engine;
+        expectEngineRenderer(engine, "webgl");
+
+        // When
+        cy.then(() => gpu.loseContext());
+
+        // Then
+        expectEngineRenderer(engine, "dom");
+        cy.wrap(gpu).its("disposed").should("equal", true);
+      });
+    });
+  });
 });
+
+type LosableWebglRenderer = WebglRendererAddon & { disposed: boolean; loseContext(): void };
+
+function aWebglRendererThatCanLoseItsContext(): LosableWebglRenderer {
+  const listeners: Array<() => void> = [];
+  return {
+    disposed: false,
+    activate() {},
+    dispose() {
+      this.disposed = true;
+    },
+    onContextLoss(listener) {
+      listeners.push(listener);
+      return { dispose: () => void listeners.splice(listeners.indexOf(listener), 1) };
+    },
+    loseContext() {
+      for (const listener of [...listeners]) listener();
+    },
+  };
+}
+
+function anOpenXtermEngineRenderingWith(renderer: WebglRendererAddon): Cypress.Chainable<TerminalEngine> {
+  return cy.document().then((doc) => {
+    const container = doc.createElement("div");
+    container.style.width = "800px";
+    container.style.height = "240px";
+    doc.body.appendChild(container);
+    const engine = createXtermEngine({ cols: 80, rows: 10, fontSize: 14 }, () => renderer);
+    return cy.wrap(engine.open(container), { log: false }).then(() => engine);
+  });
+}
+
+function expectEngineRenderer(engine: TerminalEngine, renderer: "webgl" | "dom"): void {
+  cy.wrap(engine, { log: false }).should((e) => {
+    const named = e.screenElement?.closest("[data-terminal-renderer]");
+    expect(named?.getAttribute("data-terminal-renderer"), "data-terminal-renderer").to.equal(renderer);
+  });
+}

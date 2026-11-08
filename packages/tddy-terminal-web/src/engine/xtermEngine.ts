@@ -18,7 +18,7 @@ import "@xterm/xterm/css/xterm.css";
 import { FitAddon } from "@xterm/addon-fit";
 import { Unicode11Addon } from "@xterm/addon-unicode11";
 import { WebglAddon } from "@xterm/addon-webgl";
-import { Terminal } from "@xterm/xterm";
+import { Terminal, type IDisposable, type ITerminalAddon } from "@xterm/xterm";
 import type {
   EngineBufferLine,
   EngineDisposable,
@@ -30,11 +30,26 @@ import type {
 
 type Renderer = "webgl" | "dom";
 
+/** What the engine needs of the WebGL renderer addon: `@xterm/addon-webgl`'s `WebglAddon`. */
+export interface WebglRendererAddon extends ITerminalAddon {
+  /** Fires when the WebGL context is lost for good (the addon waits for a restore first). */
+  onContextLoss(listener: () => void): IDisposable;
+}
+
+/** Builds the WebGL renderer addon; throws when it cannot (the addon throws on load without WebGL). */
+export type WebglRendererFactory = () => WebglRendererAddon;
+
+const createWebglAddon: WebglRendererFactory = () => new WebglAddon();
+
 /** Loads the WebGL renderer; null when the browser gives no WebGL context. */
-function tryLoadWebgl(term: Terminal, onContextLoss: () => void): WebglAddon | null {
-  let addon: WebglAddon | null = null;
+function tryLoadWebgl(
+  term: Terminal,
+  createWebgl: WebglRendererFactory,
+  onContextLoss: () => void,
+): WebglRendererAddon | null {
+  let addon: WebglRendererAddon | null = null;
   try {
-    addon = new WebglAddon();
+    addon = createWebgl();
     addon.onContextLoss(onContextLoss);
     term.loadAddon(addon);
     return addon;
@@ -52,24 +67,30 @@ function tryLoadWebgl(term: Terminal, onContextLoss: () => void): WebglAddon | n
 class XtermEngine implements TerminalEngine {
   private term: Terminal | null = null;
   private fitAddon: FitAddon | null = null;
-  private webgl: WebglAddon | null = null;
+  private webgl: WebglRendererAddon | null = null;
   private disposed = false;
   private readonly subscriptions: EngineDisposable[] = [];
 
   /** Listeners registered before `open` are attached to the terminal as soon as it exists. */
   private readonly registrations: Array<(term: Terminal) => EngineDisposable> = [];
 
-  constructor(private readonly options: TerminalEngineOptions) {}
+  constructor(
+    private readonly options: TerminalEngineOptions,
+    private readonly createWebgl: WebglRendererFactory,
+  ) {}
 
   async open(container: HTMLElement): Promise<void> {
     if (this.disposed) return;
+    const { cols, rows, fontSize, fontFamily, theme, scrollback } = this.options;
     const term = new Terminal({
-      cols: this.options.cols,
-      rows: this.options.rows,
-      fontSize: this.options.fontSize,
-      fontFamily: this.options.fontFamily,
-      theme: this.options.theme,
-      scrollback: this.options.scrollback,
+      cols,
+      rows,
+      fontSize,
+      // An option left out keeps xterm's default; passed as `undefined` it overrides it (an
+      // undefined `scrollback` throws while the buffer is allocated).
+      ...(fontFamily !== undefined && { fontFamily }),
+      ...(theme !== undefined && { theme }),
+      ...(scrollback !== undefined && { scrollback }),
       // The Unicode 11 width provider is a proposed API.
       allowProposedApi: true,
     });
@@ -86,7 +107,7 @@ class XtermEngine implements TerminalEngine {
 
     term.open(container);
 
-    this.webgl = tryLoadWebgl(term, () => this.fallBackToDom());
+    this.webgl = tryLoadWebgl(term, this.createWebgl, () => this.fallBackToDom());
     this.nameRenderer(this.webgl ? "webgl" : "dom");
   }
 
@@ -276,5 +297,16 @@ class XtermEngine implements TerminalEngine {
   }
 }
 
+/**
+ * An xterm.js engine whose WebGL renderer comes from `createWebgl` — the seam that lets a spec
+ * stand in for the GPU (headless browsers give no WebGL context) and lose the context on demand.
+ */
+export function createXtermEngine(
+  options: TerminalEngineOptions,
+  createWebgl: WebglRendererFactory = createWebglAddon,
+): TerminalEngine {
+  return new XtermEngine(options, createWebgl);
+}
+
 export const xtermEngine: TerminalEngineFactory = (options: TerminalEngineOptions): TerminalEngine =>
-  new XtermEngine(options);
+  createXtermEngine(options);
