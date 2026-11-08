@@ -80,9 +80,14 @@ function useRecordedOutput(
           if (stale) return;
           if (chunk === null) break;
           if (chunk.data.length > 0) {
-            terminalRef.current?.write(chunk.data);
+            const terminal = terminalRef.current;
+            terminal?.write(chunk.data);
             wrote = true;
-            setBufferText(terminalRef.current?.getBufferText?.() ?? "");
+            // The terminal parses a write after it returns: read the text once it has.
+            const parsed = terminal?.onWriteParsed?.(() => {
+              parsed?.dispose();
+              if (!stale) setBufferText(terminal.getBufferText?.() ?? "");
+            });
           }
         }
         if (!wrote) setNoRecording(true);
