@@ -902,6 +902,36 @@ mod startup_and_warmup_timing_tests {
     }
 
     #[test]
+    fn the_running_mapping_is_never_written_into_daemon_yaml() {
+        // Given a running config that maps a login — read from users.yaml or enrolled
+        let mut config = DaemonConfig::default();
+        config.users = LiveUsers::new(vec![crate::config::access::UserMapping {
+            github_user: "operator".to_string(),
+            os_user: "ops".to_string(),
+        }]);
+
+        // When it is serialised, as UpdateConfig writes daemon.yaml
+        let written = serde_yaml::to_string(&config).expect("the config serialises");
+
+        // Then no `users:` key is written — the next start would refuse it
+        assert!(!written.contains("users:"), "got {written}");
+    }
+
+    #[test]
+    fn a_users_key_in_daemon_yaml_fails_loading_naming_users_yaml() {
+        // Given a daemon.yaml from before `#agent-tools` 31/32, still mapping a login itself
+        let refused = a_daemon_loaded_from("users:\n  - github_user: operator\n    os_user: ops\n")
+            .expect_err("a users: key must not load");
+
+        // Then the refusal points at the one file the mapping lives in now
+        let message = format!("{refused:#}");
+        assert!(
+            message.contains("`users:`") && message.contains("users.yaml"),
+            "the refusal must name the key and users.yaml; got {message}"
+        );
+    }
+
+    #[test]
     fn a_daemon_yaml_with_a_supervisor_block_is_refused_as_obsolete() {
         // Given a daemon.yaml written before tddy-supervisor told the daemon its socket
         let refused =

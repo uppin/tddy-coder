@@ -924,6 +924,13 @@ unsafe fn bring_loopback_up() -> std::io::Result<()> {
 /// sandbox. Its presence is how `tddy-daemon` knows it was started by a supervisor.
 pub const SUPERVISOR_SOCKET_ENV: &str = "TDDY_SUPERVISOR_SOCKET";
 
+/// The variable a managed service that declares `serves_users: true` is told the path of
+/// `users.yaml` in (`#agent-tools` 31/32): the supervisor→daemon handover of the mapping, beside
+/// `LISTEN_FDNAMES`. Set after the service's `env:` overlay, like [`SUPERVISOR_SOCKET_ENV`], so
+/// `supervisor.yaml` can neither set nor forge it. The daemon spells it again
+/// (`tddy_daemon_kernel::users_file::USERS_FILE_ENV`); a test pins the two.
+pub const USERS_FILE_ENV: &str = "TDDY_USERS_FILE";
+
 /// Write our own pid into an `cgroup.procs`, allocation-free.
 ///
 /// `O_CREAT` is not an accommodation: on cgroupfs the file always exists and the flag is inert,

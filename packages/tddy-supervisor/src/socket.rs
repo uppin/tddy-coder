@@ -38,6 +38,19 @@ pub fn agent_tools_fd_name(os_user: &str) -> String {
     format!("{AGENT_TOOLS_FD_NAME_PREFIX}{os_user}")
 }
 
+/// Prefix of the `LISTEN_FDNAMES` entry of a mapped OS user's one daemon socket (`#agent-tools`
+/// 31/32): `user.<os user>`. It replaces [`HOST_SESSION_FD_NAME_PREFIX`] and
+/// [`AGENT_TOOLS_FD_NAME_PREFIX`]; the daemon spells it again
+/// (`tddy_daemon_kernel::agent_tool_sockets::USER_SOCKET_FD_NAME_PREFIX`) and a test pins the two.
+pub const USER_SOCKET_FD_NAME_PREFIX: &str = "user.";
+
+/// The `LISTEN_FDNAMES` entry of `os_user`'s daemon socket.
+pub fn user_socket_fd_name(os_user: &str) -> String {
+    // TODO(user-mapping-in-supervisor): implement
+    let _ = os_user;
+    String::new()
+}
+
 /// The per-OS-user host sockets a service was handed, as `(os user, descriptor)`.
 ///
 /// Read from the same `LISTEN_PID` / `LISTEN_FDS` / `LISTEN_FDNAMES` the service's own listener is
@@ -139,6 +152,14 @@ mod tests {
 
         // Then
         assert_eq!(source, SocketSource::SelfBind(the_configured_path()));
+    }
+
+    #[test]
+    fn names_a_users_one_daemon_socket_by_the_generic_prefix() {
+        assert_eq!(
+            (USER_SOCKET_FD_NAME_PREFIX, user_socket_fd_name("alice")),
+            ("user.", "user.alice".to_string())
+        );
     }
 
     #[test]

@@ -49,6 +49,14 @@ impl LiveUsers {
         }
     }
 
+    /// A holder over rows `tddy-supervisor` owns (`#agent-tools` 31/32): lookups as usual, but
+    /// [`Self::enrol_first_login`] is refused [`EnrolmentRefusal::OwnedBySupervisor`] — a supervised
+    /// daemon never writes the mapping.
+    pub fn owned_by_supervisor(rows: Vec<UserMapping>) -> Self {
+        // TODO(user-mapping-in-supervisor): implement
+        Self::new(rows)
+    }
+
     fn rows(&self) -> RwLockReadGuard<'_, Vec<UserMapping>> {
         self.inner.rows.read().expect("live users lock poisoned")
     }
@@ -192,6 +200,23 @@ mod tests {
             (enrolled, users.snapshot().len(), persisted),
             (1, 1, 1),
             "two racing first logins must not both enrol; outcomes {outcomes:?}"
+        );
+    }
+
+    #[test]
+    fn a_supervised_daemon_refuses_to_enrol() {
+        // Given a daemon handed its mapping by the supervisor, which maps nobody yet, and a file
+        // it could write
+        let (_, path, _dir) = an_unenrolled_deployment();
+        let users = LiveUsers::owned_by_supervisor(Vec::new());
+
+        // When a first login tries to enrol
+        let refusal = users.enrol_first_login(&path, THE_OPERATOR, THE_OS_USER);
+
+        // Then it is refused as the supervisor's to map, and nobody is mapped
+        assert_eq!(
+            (refusal, users.os_user_for_github(THE_OPERATOR)),
+            (Err(EnrolmentRefusal::OwnedBySupervisor), None)
         );
     }
 

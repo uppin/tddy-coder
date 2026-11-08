@@ -50,6 +50,9 @@ pub mod signals;
 pub mod socket;
 pub mod spawn_broker;
 pub mod supervisor;
+pub mod user_sockets;
+pub mod users_file;
+pub mod users_watch;
 
 #[cfg(test)]
 mod test_util;
@@ -60,6 +63,7 @@ pub use cgroup_broker::CgroupBroker;
 pub use client::SupervisorClient;
 pub use config::{
     CgroupPolicy, HostSocket, ManagedService, RestartPolicy, SocketConfig, SupervisorConfig,
+    UsersConfig,
 };
 pub use error::{ConfigError, SupervisorError};
 pub use request::{
@@ -70,9 +74,10 @@ pub use restart::{BackoffState, RestartDecision};
 pub use service::{ServiceState, ServiceStatus};
 pub use services::{ExitOutcome, ServiceRuntime};
 pub use socket::{
-    agent_tools_fd_name, host_session_fd_name, resolve_host_session_fds, SocketSource,
-    AGENT_TOOLS_FD_NAME_PREFIX, HOST_SESSION_FD_NAME_PREFIX, MAX_HANDED_OVER_LISTENERS,
-    SD_LISTEN_FDS_START, SERVICE_SOCKET_FD_NAME,
+    agent_tools_fd_name, host_session_fd_name, resolve_host_session_fds, user_socket_fd_name,
+    SocketSource, AGENT_TOOLS_FD_NAME_PREFIX, HOST_SESSION_FD_NAME_PREFIX,
+    MAX_HANDED_OVER_LISTENERS, SD_LISTEN_FDS_START, SERVICE_SOCKET_FD_NAME,
+    USER_SOCKET_FD_NAME_PREFIX,
 };
 pub use supervisor::Supervisor;
 

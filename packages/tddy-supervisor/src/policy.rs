@@ -25,6 +25,7 @@ use crate::config::{CgroupPolicy, ROOT_USER};
 use crate::error::SupervisorError;
 use crate::request::{AppliedLimits, RequestedLimits};
 use crate::spawn_broker;
+use crate::users_file::UsersFile;
 
 /// The kernel's `cpu.max` pair: `"<quota_us> <period_us>"`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -87,6 +88,18 @@ pub fn resolve_session_user(
     } else {
         Err(SupervisorError::Denied)
     }
+}
+
+/// Resolve the OS user a session may run as from the mapping in force (`#agent-tools` 31/32): one
+/// `users.yaml` names, never `root`. Replaces [`resolve_session_user`] and its hand-kept
+/// `allowed_session_users`.
+pub fn resolve_mapped_session_user(
+    users: &UsersFile,
+    requested: &str,
+) -> Result<String, SupervisorError> {
+    // TODO(user-mapping-in-supervisor): implement
+    let _ = (users, requested);
+    Err(SupervisorError::Denied)
 }
 
 /// Resolve the binary a session may exec.
@@ -370,6 +383,45 @@ mod tests {
     // -----------------------------------------------------------------------------------------
     // Session users
     // -----------------------------------------------------------------------------------------
+
+    fn a_mapping_of(os_users: &[&str]) -> UsersFile {
+        let yaml: String = os_users
+            .iter()
+            .enumerate()
+            .map(|(n, os_user)| format!("- {{github_user: login{n}, os_user: {os_user}}}\n"))
+            .collect();
+        UsersFile::from_yaml(&yaml).expect("a valid mapping")
+    }
+
+    #[test]
+    fn a_session_may_run_only_as_an_os_user_the_mapping_names() {
+        // Given users.yaml maps alice and bob
+        let users = a_mapping_of(&["alice", "bob"]);
+
+        // When the daemon asks for a session as each of them, and as somebody unmapped
+        let answers = (
+            resolve_mapped_session_user(&users, "bob"),
+            resolve_mapped_session_user(&users, "mallory"),
+        );
+
+        // Then only the mapped user is granted
+        assert_eq!(
+            answers,
+            (Ok("bob".to_string()), Err(SupervisorError::Denied))
+        );
+    }
+
+    #[test]
+    fn a_session_as_root_is_refused_whatever_the_mapping_says() {
+        // Given an empty mapping — a mapping naming root does not load at all
+        let users = UsersFile::default();
+
+        // Then
+        assert_eq!(
+            resolve_mapped_session_user(&users, "root"),
+            Err(SupervisorError::Denied)
+        );
+    }
 
     #[test]
     fn accepts_a_session_user_that_the_policy_lists() {

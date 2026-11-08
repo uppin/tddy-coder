@@ -151,6 +151,18 @@ impl HostSessionSockets {
         });
     }
 
+    /// Serve the host-session service on `user_sockets`' one socket per OS user instead of binding
+    /// sockets of its own (`#agent-tools` 31/32): registers itself there as a
+    /// [`UserScopedService`](tddy_daemon_kernel::agent_tool_sockets::UserScopedService), and from
+    /// then on [`Self::ensure_bound`] answers that socket's path.
+    pub fn serve_on(
+        &self,
+        user_sockets: Arc<tddy_daemon_kernel::agent_tool_sockets::AgentToolSockets>,
+    ) {
+        // TODO(user-mapping-in-supervisor): implement
+        let _ = user_sockets;
+    }
+
     /// Serve these supervisor-created sockets for their users from now on (served on first use).
     pub fn adopt_inherited(&self, sockets: Vec<InheritedHostSocket>) {
         let mut inherited = self.inherited.lock().expect("inherited sockets lock");

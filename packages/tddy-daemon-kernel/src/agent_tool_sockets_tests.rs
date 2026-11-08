@@ -407,3 +407,64 @@ async fn an_embedded_host_whose_socket_nobody_serves_is_refused_not_pointed_at_i
     // Then the dead socket is not chosen: every report sent to it would be lost
     assert!(refusal.is_err(), "{refusal:?}");
 }
+
+// ---------------------------------------------------------------------------------------------
+// One daemon socket per mapped OS user (`#agent-tools` 31/32)
+// ---------------------------------------------------------------------------------------------
+
+#[test]
+fn an_unsupervised_daemon_derives_one_socket_per_user_under_its_run_dir() {
+    // Given
+    let data = a_data_dir();
+
+    // When
+    let path = user_socket_path_for_user(data.path(), "alice").expect("alice can have a socket");
+
+    // Then one generic socket, replacing both run/<user>/host.sock and run-agent-tools/<user>/
+    assert_eq!(
+        path,
+        data.path().join("run").join("alice").join(USER_SOCKET_FILE)
+    );
+}
+
+#[test]
+fn reads_each_user_socket_among_the_handed_over_ones() {
+    // Given the service's own socket at 3, then alice's and bob's one socket each
+    let names = "connection:user.alice:user.bob";
+
+    // When
+    let descriptors = user_socket_fds(7, Some("7"), Some("3"), Some(names));
+
+    // Then
+    assert_eq!(
+        descriptors,
+        vec![("alice".to_string(), 4), ("bob".to_string(), 5)]
+    );
+}
+
+#[tokio::test]
+async fn a_supervised_daemon_derives_no_socket_path_of_its_own() {
+    // Given a supervised daemon handed no socket for this account — which it could bind for itself
+    let data = a_data_dir();
+    let sockets = AgentToolSockets::new(AgentToolSocketPlacement::Supervised);
+    sockets.install_roster(Vec::new());
+
+    // When a session of this account asks for its socket
+    let refusal = sockets
+        .ensure_bound(&this_os_user(), data.path())
+        .await
+        .map(|path| path.display().to_string())
+        .map_err(|e| format!("{e:#}"));
+
+    // Then it is refused, naming the file the user must be mapped in, and nothing is bound
+    let names_users_yaml = refusal.as_ref().err().map(|why| why.contains("users.yaml"));
+    assert_eq!(
+        (
+            names_users_yaml,
+            data.path().join("run").exists(),
+            data.path().join(AGENT_TOOL_SOCKETS_RUN_DIR).exists()
+        ),
+        (Some(true), false, false),
+        "{refusal:?}"
+    );
+}

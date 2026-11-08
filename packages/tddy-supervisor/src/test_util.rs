@@ -82,6 +82,7 @@ pub fn a_managed_service() -> ManagedServiceBuilder {
             restart: a_restart_policy().build(),
             host_sockets: Vec::new(),
             agent_tool_sockets: Vec::new(),
+            serves_users: false,
             socket: None,
         },
     }

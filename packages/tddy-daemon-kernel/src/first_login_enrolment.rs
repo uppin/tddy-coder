@@ -35,6 +35,9 @@ pub enum EnrolmentRefusal {
     /// another account, or on a path that no longer exists. Reported rather than skipped: a login
     /// that appeared to work and vanished on restart is worse than one that refused.
     ConfigNotWritable { reason: String },
+    /// The mapping belongs to `tddy-supervisor` (`#agent-tools` 31/32): this daemon was handed
+    /// `users.yaml` read-only, and a login is mapped by its operator editing that file.
+    OwnedBySupervisor,
 }
 
 impl std::fmt::Display for EnrolmentRefusal {
@@ -48,17 +51,23 @@ impl std::fmt::Display for EnrolmentRefusal {
             Self::ConfigNotWritable { reason } => {
                 write!(f, "the daemon config cannot be rewritten: {reason}")
             }
+            Self::OwnedBySupervisor => write!(
+                f,
+                "this deployment's users.yaml belongs to tddy-supervisor; map a login by editing it"
+            ),
         }
     }
 }
 
 impl std::error::Error for EnrolmentRefusal {}
 
-/// Write the first `users:` row into the config file at `config_path`, mapping `github_user` to
-/// `os_user`, and return the row that was written.
+/// Write the first row into `users.yaml` at `config_path`, mapping `github_user` to `os_user`, and
+/// return the row that was written (`#agent-tools` 31/32: the mapping no longer lives in
+/// `daemon.yaml`, which enrolment leaves untouched).
 ///
-/// The file is rewritten in place, preserving everything else it holds, and the write is atomic —
-/// a half-written config is a daemon that will not start.
+/// The write is atomic — a half-written mapping is a daemon that will not start.
+// TODO(user-mapping-in-supervisor): implement — `config_path` is now the users.yaml path; the body
+// below still edits a daemon.yaml `users:` key.
 pub fn enrol_first_login(
     config_path: &Path,
     github_user: &str,

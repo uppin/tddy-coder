@@ -76,6 +76,45 @@ pub fn agent_tool_socket_path_for_user(data_dir: &Path, os_user: &str) -> anyhow
     Ok(path)
 }
 
+/// Prefix of the `LISTEN_FDNAMES` entry of a mapped OS user's **one** daemon socket
+/// (`#agent-tools` 31/32): `user.<os user>`. It replaces [`AGENT_TOOLS_FD_NAME_PREFIX`] and the
+/// host-session socket's `host-session.`; the supervisor's own spelling is
+/// `tddy_supervisor::USER_SOCKET_FD_NAME_PREFIX`, and a test pins the two.
+pub const USER_SOCKET_FD_NAME_PREFIX: &str = "user.";
+
+/// File name of a user's daemon socket inside their directory (`#agent-tools` 31/32).
+pub const USER_SOCKET_FILE: &str = "daemon.sock";
+
+/// `<data dir>/run/<os user>/daemon.sock` — where an **unsupervised** daemon binds `os_user`'s one
+/// socket, serving both the host-session services and the agent-tool roster (`#agent-tools`
+/// 31/32). A supervised daemon derives no path: it serves what it was handed. Refuses a user name
+/// that is not one plain path segment, or a path too long for `AF_UNIX`.
+pub fn user_socket_path_for_user(data_dir: &Path, os_user: &str) -> anyhow::Result<PathBuf> {
+    // TODO(user-mapping-in-supervisor): implement
+    agent_tool_socket_path_for_user(data_dir, os_user)
+}
+
+/// `(os user, descriptor)` for each `user.<os user>` socket the `LISTEN_*` variables announce
+/// (`#agent-tools` 31/32) — the one reader replacing [`agent_tool_fds`] and the host-session one.
+pub fn user_socket_fds(
+    my_pid: u32,
+    listen_pid: Option<&str>,
+    listen_fds: Option<&str>,
+    listen_fdnames: Option<&str>,
+) -> Vec<(String, RawFd)> {
+    // TODO(user-mapping-in-supervisor): implement
+    let _ = (my_pid, listen_pid, listen_fds, listen_fdnames);
+    Vec::new()
+}
+
+/// A service served on each user's one daemon socket **for that user** (`#agent-tools` 31/32): the
+/// host-session service, which answers only sessions registered for the socket's OS user. The
+/// roster is the same on every socket; these entries are made per socket.
+pub trait UserScopedService: Send + Sync {
+    /// The entry to serve on `os_user`'s socket.
+    fn entry_for(&self, os_user: &str) -> ServiceEntry;
+}
+
 /// `(os user, descriptor)` for each agent-tool socket the `LISTEN_*` variables announce — nothing
 /// unless they were set for this process (`LISTEN_PID`) and the names account for exactly
 /// `LISTEN_FDS` descriptors. The same reading `tddy_supervisor`'s host-session resolver makes.
@@ -140,6 +179,11 @@ pub enum AgentToolSocketPlacement {
     Embedded,
     /// One socket per OS user, bound here or inherited from `tddy-supervisor` — a server daemon.
     PerOsUser,
+    /// One socket per OS user, **only** as handed over by `tddy-supervisor` (`#agent-tools`
+    /// 31/32): a supervised daemon derives and binds no socket path of its own, and a user it was
+    /// handed none for is refused, naming `users.yaml`.
+    // TODO(user-mapping-in-supervisor): implement — today this behaves as `PerOsUser`.
+    Supervised,
 }
 
 struct BoundServer {
@@ -192,6 +236,14 @@ impl AgentToolSockets {
     /// `runtime::build`, after the roster exists.
     pub fn install_roster(&self, entries: Vec<ServiceEntry>) {
         *self.roster.lock().expect("agent-tool roster lock") = entries;
+    }
+
+    /// Also serve `service`'s per-user entry on every user's socket, beside the roster, from now on
+    /// (`#agent-tools` 31/32): how the host-session service and the agent-tool roster share one
+    /// socket per user.
+    pub fn install_user_scoped_service(&self, service: Arc<dyn UserScopedService>) {
+        // TODO(user-mapping-in-supervisor): implement
+        let _ = service;
     }
 
     /// Serve these supervisor-created sockets for their users from now on (served on first use);

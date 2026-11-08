@@ -6,7 +6,7 @@
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use tddy_daemon::config::{DaemonConfig, LiveKitConfig};
+use tddy_daemon::config::{DaemonConfig, LiveKitConfig, LiveUsers, UserMapping};
 use tddy_daemon::daemon_config_service::{CommonRoomSupervisor, DaemonConfigServiceImpl};
 use tddy_daemon::server::serving_sandboxed_codebase_support;
 use tddy_daemon_extensions::{IntegrationState, IntegrationStatusBoard};
@@ -69,10 +69,20 @@ fn a_daemon_config_service_with_github(github: &str) -> ADaemonConfigService {
 }
 
 fn a_daemon_config_service_started_with(config_file: &str) -> ADaemonConfigService {
+    a_daemon_config_service_mapping(config_file, Vec::new())
+}
+
+/// The fixture service, whose running config maps `users` — as a daemon that read them from
+/// `users.yaml` (`#agent-tools` 31/32) or enrolled them does.
+fn a_daemon_config_service_mapping(
+    config_file: &str,
+    users: Vec<UserMapping>,
+) -> ADaemonConfigService {
     let dir = tempfile::tempdir().expect("no temp dir");
     let config_path = dir.path().join("daemon.yaml");
     std::fs::write(&config_path, config_file).expect("the config file was not written");
-    let config = DaemonConfig::load(&config_path).expect("the config fixture did not load");
+    let mut config = DaemonConfig::load(&config_path).expect("the config fixture did not load");
+    config.users = LiveUsers::new(users);
     let common_room = Arc::new(RecordingCommonRoom::default());
 
     ADaemonConfigService {
@@ -281,6 +291,42 @@ async fn writes_an_edited_livekit_url_back_to_the_yaml_file_the_daemon_was_loade
         Some("ws://10.0.0.5:7880")
     );
     assert_eq!(response.restart_required, Vec::<String>::new());
+}
+
+#[tokio::test]
+async fn update_config_writes_no_users_key_into_daemon_yaml() {
+    // Given a desktop whose operator is mapped — the mapping lives in users.yaml now
+    let daemon = a_daemon_config_service_mapping(
+        &a_daemon_config_file(),
+        vec![UserMapping {
+            github_user: "operator".to_string(),
+            os_user: "ops".to_string(),
+        }],
+    );
+
+    // When an unrelated setting is saved
+    daemon
+        .service
+        .update_config(an_update_of(
+            the_current_settings()
+                .with_livekit_url("ws://10.0.0.5:7880")
+                .build(),
+        ))
+        .await
+        .expect("the update was refused");
+
+    // Then daemon.yaml carries the setting and no `users:` key — a file the next start would refuse
+    let written: serde_yaml::Value = serde_yaml::from_str(
+        &std::fs::read_to_string(&daemon.config_path).expect("read the rewritten daemon.yaml"),
+    )
+    .expect("the rewritten daemon.yaml parses");
+    assert_eq!(
+        (
+            written.get("users").is_some(),
+            written["livekit"]["url"].as_str()
+        ),
+        (false, Some("ws://10.0.0.5:7880"))
+    );
 }
 
 #[tokio::test]

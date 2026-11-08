@@ -1,6 +1,6 @@
 //! A desktop deployment learns who its operator is by them signing in once.
 //!
-//! `users:` is what maps a GitHub login to the OS user its sessions run as, and a login that is
+//! `users.yaml` (`#agent-tools` 31/32; `daemon.yaml` `users:` before it) is what maps a GitHub login to the OS user its sessions run as, and a login that is
 //! not in it is refused `permission_denied` with no default arm — the check that stops an
 //! arbitrary GitHub account driving somebody else's machine. A server operator writes that map
 //! when they install the daemon.
@@ -10,41 +10,112 @@
 //! Enrolment closes that gap **without** loosening the check: the first login on a deployment that
 //! has never had one is written down, and every login after that meets the unchanged lookup.
 
-use tddy_daemon_kernel::config::DaemonConfig;
 use tddy_daemon_kernel::first_login_enrolment::{enrol_first_login, EnrolmentRefusal};
+use tddy_daemon_kernel::live_users::LiveUsers;
+use tddy_daemon_kernel::users_file::{load_users_file, UsersFileSource, USERS_FILE_NAME};
 
 const THE_OPERATOR: &str = "operator";
 const THE_OS_USER: &str = "operator-os";
 const SOMEBODY_ELSE: &str = "a-stranger";
 
+/// What the daemon.yaml of every deployment here says, besides any mapping.
+const THE_DAEMON_YAML: &str =
+    "repos_base_path: \"/tmp/repos\"\ngithub:\n  client_id: \"Iv1.0123456789abcdef\"\n";
+
+/// A desktop deployment on disk (`#agent-tools` 31/32): its daemon.yaml, and a `users.yaml` beside
+/// it mapping exactly the given GitHub users.
+struct ADesktop {
+    dir: tempfile::TempDir,
+}
+
+fn a_desktop_enrolling(users: &[(&str, &str)]) -> ADesktop {
+    let dir = tempfile::tempdir().expect("a temporary directory");
+    std::fs::write(dir.path().join("daemon.yaml"), THE_DAEMON_YAML).expect("write daemon.yaml");
+    let rows: String = users
+        .iter()
+        .map(|(github_user, os_user)| {
+            format!("- github_user: \"{github_user}\"\n  os_user: \"{os_user}\"\n")
+        })
+        .collect();
+    let rows = if rows.is_empty() {
+        "[]\n".to_string()
+    } else {
+        rows
+    };
+    std::fs::write(dir.path().join(USERS_FILE_NAME), rows).expect("write users.yaml");
+    ADesktop { dir }
+}
+
+impl ADesktop {
+    fn users_yaml(&self) -> std::path::PathBuf {
+        self.dir.path().join(USERS_FILE_NAME)
+    }
+
+    fn daemon_yaml(&self) -> String {
+        std::fs::read_to_string(self.dir.path().join("daemon.yaml")).expect("read daemon.yaml")
+    }
+
+    /// The mapping as the daemon reads it on its next start.
+    fn mapping_on_restart(&self) -> LiveUsers {
+        load_users_file(&UsersFileSource::BesideConfig(self.users_yaml()))
+            .expect("users.yaml loads")
+    }
+}
+
 #[test]
 fn the_first_login_on_an_unenrolled_deployment_is_written_down() {
     // Given a freshly installed desktop deployment, which maps nobody
-    let (path, _dir) = a_config_enrolling(&[]);
+    let desktop = a_desktop_enrolling(&[]);
 
     // When its operator signs in for the first time
-    enrol_first_login(&path, THE_OPERATOR, THE_OS_USER).expect("a first login is enrolled");
+    enrol_first_login(&desktop.users_yaml(), THE_OPERATOR, THE_OS_USER)
+        .expect("a first login is enrolled");
 
-    // Then the daemon resolves them to the account it runs as, from that moment on
-    let reloaded = DaemonConfig::load(&path).expect("the rewritten config loads");
+    // Then the daemon resolves them to the account it runs as, from its next start on
     assert_eq!(
-        reloaded.os_user_for_github(THE_OPERATOR).as_deref(),
+        desktop
+            .mapping_on_restart()
+            .os_user_for_github(THE_OPERATOR)
+            .as_deref(),
         Some(THE_OS_USER)
+    );
+}
+
+#[test]
+fn first_login_enrolment_on_desktop_writes_users_yaml_and_no_daemon_yaml_users_key() {
+    // Given an unenrolled desktop
+    let desktop = a_desktop_enrolling(&[]);
+
+    // When its first login is enrolled
+    enrol_first_login(&desktop.users_yaml(), THE_OPERATOR, THE_OS_USER)
+        .expect("a first login is enrolled");
+
+    // Then the row is in users.yaml, and daemon.yaml is exactly as it was
+    assert_eq!(
+        (
+            desktop.mapping_on_restart().first_github_user(),
+            desktop.daemon_yaml()
+        ),
+        (Some(THE_OPERATOR.to_string()), THE_DAEMON_YAML.to_string())
     );
 }
 
 #[test]
 fn an_enrolled_deployment_refuses_to_enrol_a_second_account() {
     // Given a deployment already enrolled to its operator
-    let (path, _dir) = a_config_enrolling(&[(THE_OPERATOR, THE_OS_USER)]);
+    let desktop = a_desktop_enrolling(&[(THE_OPERATOR, THE_OS_USER)]);
 
     // When a different GitHub account signs in
-    let refusal = enrol_first_login(&path, SOMEBODY_ELSE, THE_OS_USER);
+    let refusal = enrol_first_login(&desktop.users_yaml(), SOMEBODY_ELSE, THE_OS_USER);
 
     // Then it is refused, and the deployment still maps only the operator
-    let reloaded = DaemonConfig::load(&path).expect("the untouched config loads");
     assert_eq!(
-        (refusal, reloaded.os_user_for_github(SOMEBODY_ELSE)),
+        (
+            refusal,
+            desktop
+                .mapping_on_restart()
+                .os_user_for_github(SOMEBODY_ELSE)
+        ),
         (
             Err(EnrolmentRefusal::AlreadyEnrolled {
                 github_user: THE_OPERATOR.to_string(),
@@ -55,59 +126,20 @@ fn an_enrolled_deployment_refuses_to_enrol_a_second_account() {
     );
 }
 
-#[test]
-fn enrolment_keeps_everything_else_the_config_says() {
-    // Given an unenrolled deployment that is configured in other ways
-    let (path, _dir) = a_config_enrolling(&[]);
-    let before = DaemonConfig::load(&path).expect("the config loads");
-
-    // When its first login is enrolled
-    enrol_first_login(&path, THE_OPERATOR, THE_OS_USER).expect("a first login is enrolled");
-
-    // Then only `users:` changed — enrolment rewrites the file it was read from
-    let after = DaemonConfig::load(&path).expect("the rewritten config loads");
-    assert_eq!(
-        (
-            after.github.as_ref().and_then(|g| g.client_id.clone()),
-            after.repos_base_path.clone(),
-        ),
-        (
-            before.github.as_ref().and_then(|g| g.client_id.clone()),
-            before.repos_base_path.clone(),
-        ),
-        "enrolment must not lose the rest of the configuration"
-    );
-}
-
-/// A daemon config file mapping exactly the given GitHub users, and configured besides.
-fn a_config_enrolling(users: &[(&str, &str)]) -> (std::path::PathBuf, tempfile::TempDir) {
-    let dir = tempfile::tempdir().expect("a temporary directory");
-    let mapped: String = users
-        .iter()
-        .map(|(github_user, os_user)| {
-            format!("  - github_user: \"{github_user}\"\n    os_user: \"{os_user}\"\n")
-        })
-        .collect();
-    let yaml = format!(
-        "repos_base_path: \"/tmp/repos\"\nusers:\n{mapped}\
-         github:\n  client_id: \"Iv1.0123456789abcdef\"\n"
-    );
-    let path = dir.path().join("config.yaml");
-    std::fs::write(&path, yaml).expect("the config is written");
-    (path, dir)
-}
-
-/// The check enrolment exists to work *with* rather than around. Green on arrival, and deliberately
-/// so: it is the guard that catches enrolment being turned into the default arm it must never be.
+/// The check enrolment exists to work *with* rather than around. Green on arrival in its old
+/// form; red now only because the mapping is read from users.yaml.
 #[test]
 fn an_unmapped_login_still_resolves_to_nobody() {
     // Given an enrolled deployment
-    let (path, _dir) = a_config_enrolling(&[(THE_OPERATOR, THE_OS_USER)]);
-    let config = DaemonConfig::load(&path).expect("the config loads");
+    let desktop = a_desktop_enrolling(&[(THE_OPERATOR, THE_OS_USER)]);
+    let users = desktop.mapping_on_restart();
 
-    // When some other GitHub account is looked up
-    let resolved = config.os_user_for_github(SOMEBODY_ELSE);
+    // When the operator and some other GitHub account are looked up
+    let resolved = (
+        users.os_user_for_github(THE_OPERATOR),
+        users.os_user_for_github(SOMEBODY_ELSE),
+    );
 
-    // Then it maps to nobody — there is no default account a stranger lands on
-    assert_eq!(resolved, None);
+    // Then only the operator maps — there is no default account a stranger lands on
+    assert_eq!(resolved, (Some(THE_OS_USER.to_string()), None));
 }

@@ -73,6 +73,17 @@ impl FirstLoginEnrolment {
                 );
                 Ok(())
             }
+            // A supervised daemon never writes the mapping (`#agent-tools` 31/32): the login stays
+            // unmapped, exactly as on a server, until the operator edits users.yaml.
+            // TODO(user-mapping-in-supervisor): implement — confirm a supervised daemon reaches
+            // enrolment at all (it has no desktop window transport) and keep or drop this arm.
+            Err(refusal @ EnrolmentRefusal::OwnedBySupervisor) => {
+                log::warn!(
+                    target: crate::AUTH_LOG_TARGET,
+                    "GitHub user {github_login} is not mapped: {refusal}"
+                );
+                Ok(())
+            }
             // Refused rather than admitted unrecorded: a login that appeared to work and was
             // unknown after the next restart is worse than one that says why it failed. The file
             // is named because on a desktop the person reading this is the one who can fix it.

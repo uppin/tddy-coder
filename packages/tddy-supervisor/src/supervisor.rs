@@ -8,6 +8,7 @@
 mod service_restart;
 mod service_slot;
 mod session_table;
+mod users_change;
 
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
@@ -669,6 +670,7 @@ mod tests {
             spawn_policy: SpawnPolicy::default(),
             cgroup: crate::config::CgroupPolicy::default(),
             shutdown_grace_secs: 1,
+            users: None,
         };
         let forks = Arc::new(
             crate::spawn_broker::fork_broker::ForkBroker::start().expect("start the fork thread"),
@@ -830,6 +832,7 @@ mod tests {
             spawn_policy: SpawnPolicy::default(),
             cgroup: crate::config::CgroupPolicy::default(),
             shutdown_grace_secs: 20,
+            users: None,
         };
         let forks = Arc::new(
             crate::spawn_broker::fork_broker::ForkBroker::start().expect("start the fork thread"),
@@ -891,6 +894,7 @@ mod tests {
             spawn_policy: SpawnPolicy::default(),
             cgroup: crate::config::CgroupPolicy::default(),
             shutdown_grace_secs: 1,
+            users: None,
         }
     }
 

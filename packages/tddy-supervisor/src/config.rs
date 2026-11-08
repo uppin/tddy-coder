@@ -39,6 +39,28 @@ pub struct SupervisorConfig {
     /// How long managed services get to exit after `SIGTERM` before they are `SIGKILL`ed.
     #[serde(default = "default_shutdown_grace_secs")]
     pub shutdown_grace_secs: u64,
+    /// Where the GitHub → OS-user mapping lives and where its per-user daemon sockets go
+    /// (`#agent-tools` 31/32). Required once a service declares
+    /// [`serves_users`](ManagedService::serves_users).
+    #[serde(default)]
+    pub users: Option<UsersConfig>,
+}
+
+/// `users:` in `supervisor.yaml`: the mapping file and the directory its sockets are derived under.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct UsersConfig {
+    /// Absolute path of `users.yaml` (`/etc/tddy/users.yaml`). Watched; a change restarts the
+    /// services that serve users.
+    pub file: PathBuf,
+    /// Absolute directory holding one `<os user>/daemon.sock` per mapped OS user. Every directory
+    /// above it must be writable by root alone.
+    #[serde(default = "default_user_sockets_dir")]
+    pub sockets_dir: PathBuf,
+}
+
+fn default_user_sockets_dir() -> PathBuf {
+    PathBuf::from("/run/tddy-users")
 }
 
 fn default_shutdown_grace_secs() -> u64 {
@@ -103,6 +125,12 @@ pub struct ManagedService {
     /// [`crate::socket::MAX_HANDED_OVER_LISTENERS`].
     #[serde(default)]
     pub agent_tool_sockets: Vec<HostSocket>,
+    /// Whether this service is handed one daemon socket per OS user `users.yaml` maps
+    /// (`user.<os user>`, after its own listener) and told the file's path in
+    /// [`USERS_FILE_ENV`](crate::spawn_broker::USERS_FILE_ENV) (`#agent-tools` 31/32). Needs
+    /// `socket` and the top-level `users:`.
+    #[serde(default)]
+    pub serves_users: bool,
 }
 
 /// A socket for one OS user, created by the supervisor and handed to a managed service.
@@ -791,6 +819,59 @@ services:
         // When / Then — two services cannot both own one listener; whichever bound second would
         // silently take over the first's clients.
         assert_rejected_because(SupervisorConfig::from_yaml(yaml), "/run/tddy-shared.sock");
+    }
+
+    #[rstest::rstest]
+    #[case::allowed_session_users(
+        "socket:\n  path: /run/s.sock\nspawn_policy:\n  allowed_session_users: [alice]\n"
+    )]
+    #[case::host_sockets(
+        "socket:\n  path: /run/s.sock\nservices:\n  - name: tddy-daemon\n    exec_start: /bin/d\n    user: tddy\n    socket:\n      path: /run/d.sock\n    host_sockets:\n      - {user: alice, path: /run/h/alice/host.sock}\n"
+    )]
+    #[case::agent_tool_sockets(
+        "socket:\n  path: /run/s.sock\nservices:\n  - name: tddy-daemon\n    exec_start: /bin/d\n    user: tddy\n    socket:\n      path: /run/d.sock\n    agent_tool_sockets:\n      - {user: alice, path: /run/a/alice/agent.sock}\n"
+    )]
+    fn an_old_user_list_key_in_supervisor_yaml_fails_loading_naming_users_yaml(#[case] yaml: &str) {
+        // Given a supervisor.yaml from before `#agent-tools` 31/32, naming users by hand
+
+        // When / Then it is refused, pointing the operator at the one file users now live in
+        assert_rejected_because(SupervisorConfig::from_yaml(yaml), "users.yaml");
+    }
+
+    #[test]
+    fn reads_where_the_user_mapping_and_its_sockets_live() {
+        // Given
+        let yaml = "socket:\n  path: /run/s.sock\nusers:\n  file: /etc/tddy/users.yaml\n";
+
+        // When
+        let config = SupervisorConfig::from_yaml(yaml).expect("parse config");
+
+        // Then the socket directory defaults to a root-only one under /run
+        assert_eq!(
+            config.users,
+            Some(UsersConfig {
+                file: PathBuf::from("/etc/tddy/users.yaml"),
+                sockets_dir: PathBuf::from("/run/tddy-users"),
+            })
+        );
+    }
+
+    #[test]
+    fn rejects_a_relative_users_file() {
+        // Given
+        let yaml = "socket:\n  path: /run/s.sock\nusers:\n  file: users.yaml\n";
+
+        // When / Then — it would resolve against whatever directory systemd started us in
+        assert_rejected_because(SupervisorConfig::from_yaml(yaml), "must be absolute");
+    }
+
+    #[test]
+    fn a_service_that_serves_users_needs_the_users_block() {
+        // Given a daemon that asks for user sockets in a config that maps nobody
+        let yaml = "socket:\n  path: /run/s.sock\nservices:\n  - name: tddy-daemon\n    exec_start: /bin/d\n    user: tddy\n    socket:\n      path: /run/d.sock\n    serves_users: true\n";
+
+        // When / Then
+        assert_rejected_because(SupervisorConfig::from_yaml(yaml), "users");
     }
 
     #[test]
