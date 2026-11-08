@@ -9,9 +9,9 @@ into it, which `src/engine/engineBoundary.test.ts` enforces.
 
 Every scroll position above the engine counts **from the top** of the buffer: line 0 is the oldest
 retained scrollback line, and the viewport is at the live tip when
-`viewportTop() === scrollbackLength()`. xterm.js counts from the bottom (`viewportY`, 0 = live
-tip); `xtermEngine` translates (`viewportTop = scrollbackLength - viewportY`), including in its
-`onScroll` events and `scrollToLine`.
+`viewportTop() === scrollbackLength()`. xterm.js already counts from the top (`viewportY`,
+`baseY`), so `xtermEngine` maps these positions straight through, including in its `onScroll`
+events and `scrollToLine`.
 
 The imperative handle follows the engine: `getViewportTop()`, `scrollToLine(line)` (top-based),
 and `getScrollbar()` → `{ total, offset, len }` from `computeScrollbar` (`lib/terminalScrollbar.ts`),
@@ -23,12 +23,12 @@ The components size the engine themselves. `fitTerminalToContainer` (`src/termin
 resizes to `proposeDimensions()` when it differs from the current grid. It runs at open, from the
 lifecycle's ResizeObserver on the container (retried for up to 30 frames while the engine cannot
 measure), and after every font-size change. xterm.js's `FitAddon` is used only inside the engine
-to propose a grid: its own `fit()` and `observeResize()` debounce through timers and a `_isResizing`
-latch that a throttled, occluded window never clears.
+to propose a grid; the components own the resize, so a throttled, occluded window cannot stall it
+behind an addon timer.
 
-xterm.js opens on the container it is given (its `element` *is* that container), so the
-ResizeObserver watches the same element the addon's observer did. `dispose()` removes only what the
-engine appended (canvas, textarea); the container belongs to the caller.
+xterm.js opens a root element of its own inside the container it is given; the ResizeObserver
+watches the container. `dispose()` disposes the terminal (and its addons) and removes that root
+element; the container belongs to the caller.
 
 ## Buffer text
 
@@ -42,9 +42,8 @@ no consumer can observe it.
 ## Write parsing
 
 `onWriteParsed()` fires after each `write`'s data has been parsed into the buffer, so a listener
-that reads `readLines()` sees what was written. xterm.js parses synchronously, so `xtermEngine`
-fires it right after the write returns; an engine that parses asynchronously fires it from its parse
-callback.
+that reads `readLines()` sees what was written. xterm.js parses asynchronously, so `xtermEngine`
+forwards xterm's own `onWriteParsed` event rather than firing after `write` returns.
 
 ## Contract suite
 

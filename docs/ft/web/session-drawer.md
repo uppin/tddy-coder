@@ -283,7 +283,7 @@ terminal resize.
 
 Background attachments persist until **explicit disconnect** — there is no cap. Disconnect
 removes only that session's runtime. Memory therefore grows with the number of concurrently
-attached sessions (one connection + one Ghostty terminal each); this is intentional for the
+attached sessions (one connection + one terminal each); this is intentional for the
 fast-switching workflow.
 
 The registry **owns** each runtime's connection: evicting a runtime, replacing its connection on
@@ -336,7 +336,7 @@ The inspector **Details** tab shows bytes in, bytes out (both via `formatBytes`,
 and a "last data received: Ns ago" relative timestamp that advances while the inspector is open.
 The source is dual:
 
-- **Attached LiveKit session** — the session's `GhosttyTerminalSession` fires an `onBytes` event
+- **Attached LiveKit session** — the session's `TerminalSession` fires an `onBytes` event
   per terminal I/O unit: `bytesIn = output.data.length` per received output chunk, and
   `bytesOut = data.length` per batched input yield sent to the coder. These thread up through
   `SessionRuntime` (`onSessionBytes(sessionId, delta)`) → the screen,

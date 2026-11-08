@@ -21,6 +21,6 @@ packages' component specs use, so a story needs no daemon.
 - [x] No component package contains a story (rule test).
 - [x] Every story renders without an error (render test; the terminal story in the static build).
 - [x] `tddy-web`'s Storybook e2e specs pass against the package's build (`storybook.cy.ts`,
-  `ghostty-terminal-stories.cy.ts`).
+  `terminal-stories.cy.ts`).
 
 Technical reference: [packages/tddy-storybook/docs/README.md](../../../packages/tddy-storybook/docs/README.md).

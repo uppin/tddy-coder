@@ -7,7 +7,7 @@
  * terminals sharing one rect. The LIVE terminal carries native scrollback > 0 (native primary-screen
  * behavior) and accumulates post-connect output; xterm.js's alternate buffer (DEC 1049) has no
  * scrollback, so a proper TUI that switches to the alternate screen never accumulates duplicate panes
- * — exactly as native xterm.js does. The PAGE terminal (scrollback > 0) holds the forward-filled older
+ * — the same as a native terminal. The PAGE terminal (scrollback > 0) holds the forward-filled older
  * history and exposes a native Scrollbar {total, offset, len} as the single source of truth for
  * viewport position (same coordinate space as scrollToLine). On the "Load earlier output"
  * affordance the page terminal is forward-filled from offset 0 toward
@@ -524,15 +524,15 @@ describe("Terminal history paging — overlay double-buffer", () => {
 
   // -------------------------------------------------------------------------
   // Three-way wheel gate: mouse tracking × alternate screen × normal screen
-  // (restores the native xterm.js gate that xterm.js's handleWheel drops —
-  // it checks isAlternateScreen() but NOT hasMouseTracking(), so a mouse-tracked
-  // TUI like Claude CLI gets Up/Down arrows instead of SGR mouse events.)
+  // (a native terminal's gate: a wheel handler that checks isAlternateScreen() but NOT
+  // hasMouseTracking() would give a mouse-tracked TUI like Claude CLI Up/Down arrows
+  // instead of SGR mouse events.)
   // -------------------------------------------------------------------------
 
   it("mouse tracking on + alternate screen routes wheel-up to the TUI as an SGR mouse event, not an Up-arrow key (no prompt-history recall)", () => {
     // Given — the live terminal is in the alternate screen (DEC 1049, like Claude CLI's TUI) and the
-    // TUI has enabled mouse tracking (DEC 1006). xterm.js's handleWheel unconditionally emits
-    // Up/Down arrows in the alternate screen — but when the TUI opted into mouse tracking, the wheel
+    // TUI has enabled mouse tracking (DEC 1006). The alternate screen alone would turn the wheel into
+    // Up/Down arrows — but when the TUI opted into mouse tracking, the wheel
     // must be reported as an SGR mouse event (button 64 = wheel up), never as an arrow key.
     const terminal = aTerminalWithHistoryPaging()
       .mount()

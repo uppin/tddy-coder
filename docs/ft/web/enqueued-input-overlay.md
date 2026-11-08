@@ -34,7 +34,7 @@ instead of staring at a frozen terminal.
 
 Today (see [web-terminal.md](web-terminal.md)) all browser terminal input — keyboard, SGR mouse
 sequences, and the synthetic `\x1b]resize;{cols};{rows}\x07` OSC — funnels through
-`GhosttyTerminal.onData` → `sendInput` → `GrpcSessionTerminal.sendTerminalInput` (a **unary**
+`TerminalView.onData` → `sendInput` → `GrpcSessionTerminal.sendTerminalInput` (a **unary**
 `terminal_session.TerminalSessionService.SendTerminalInput`). Output arrives on that service's
 separate server-streaming `StreamTerminalOutput`. Neither message carries any sequence number, byte
 offset, or acknowledgement:
@@ -134,7 +134,7 @@ Server ACKs offset **3** (`HEL` applied) → overlay collapses to `LO WORLD`. Se
 ### Input offset (web)
 - [x] Consecutive input messages on the bidi stream carry `input_offset` equal to the running byte total:
   for every pair, `offset[i] == offset[i-1] + data[i].length`, and `offset[0] == data[0].length`.
-  (`TerminalInputAckAcceptance.cy.tsx` Part A — a real-ghostty integration test; runs on a
+  (`TerminalInputAckAcceptance.cy.tsx` Part A — a real-xterm.js integration test; runs on a
   WebGL-capable CI runner. The cumulative-offset logic itself is unit-covered in
   `terminalInputQueue.test.ts`.)
 

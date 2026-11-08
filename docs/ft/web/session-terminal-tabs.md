@@ -35,7 +35,7 @@ styled like the inspector tab strip (`InspectorTabs`).
 
 - **Agent tab** (`data-testid="sessions-terminal-tab-agent"`): always present, first, selected by
   default, **no close control**. Renders the session's coding-agent terminal — one
-  `GhosttyTerminalSession` either way. What is chosen from the session connection's capabilities is
+  `TerminalSession` either way. What is chosen from the session connection's capabilities is
   the **feed** behind it: `GrpcSessionTerminal`'s own `TerminalSessionService` stream with
   `terminal_id="main"` for a host-served session, the connection's room feed for a media-capable
   one. See [terminal-session.md](../../../packages/tddy-terminal-web/docs/terminal-session.md).

@@ -79,7 +79,7 @@ export interface TerminalViewHandle {
   scrollToBottom?(): void;
   /**
    * Scroll to an absolute line in the combined buffer (0 = top of scrollback,
-   * scrollbackLength = bottom). xterm.js's primary "full control" viewport API.
+   * scrollbackLength = bottom). The primary "full control" viewport API.
    */
   scrollToLine?(line: number): void;
   /** Relative scroll by `amount` lines (positive = down, negative = up). */
