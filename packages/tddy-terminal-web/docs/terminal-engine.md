@@ -3,7 +3,8 @@
 `TerminalView` and its hooks drive the emulator only through `TerminalEngine`
 (`src/engine/TerminalEngine.ts`). `xtermEngine` (`src/engine/xtermEngine.ts`) implements it on
 xterm.js; it is the only module that imports xterm.js or casts
-into it, which `src/engine/engineBoundary.test.ts` enforces.
+into it, which `src/engine/engineBoundary.test.ts` enforces. What xterm.js itself owns (renderer,
+mouse and wheel reporting, device pixel ratio) and what stays around it: [xterm-engine.md](xterm-engine.md).
 
 ## Coordinates
 
