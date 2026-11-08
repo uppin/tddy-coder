@@ -15,9 +15,16 @@ from the app root in #851, and its export deleted) is gone, so the prompt has on
 follow `src/rpc/` and `src/hooks/` into `src/app/`.
 Fixed at wrap: `tddy-ui-web/theme.css` scanned the component packages through a wildcard Tailwind does
 not expand, so since #840 every class only a component package uses was missing from the app's
-stylesheet (and the Storybook's). One `@source` per package now, pinned by `themeSources.test.ts`. The
-two component specs the green recorded as failing on the base were symptoms of the same gap and of the
-base's state: `CodeHoverCard` (its card had no `max-h-80`) and `SessionsSshExecAcceptance` both pass.
+stylesheet (and the Storybook's). One `@source` per package now, pinned by `themeSources.test.ts`.
+
+**Decisions & trade-offs (developer, 2026-11-08):**
+- The `@source` bug dates from #840 (`@source "../../tddy-*-web/src"` dropped every package-only
+  Tailwind class). A glob fix (`@source "../../tddy-*-web/src/**/*.{ts,tsx}"`) landed on #861, which
+  its CI needed, and reaches #862 and #852 as they rebase; this node replaces it with the explicit
+  per-package list and the rule test when it is rebased onto them.
+- #840–#860 must not merge alone: the stack merges together, so the styling gap never reaches `master`.
+- The "inherited failures" the green recorded on base `6beb388bf` were this bug, not the base:
+  `CodeHoverCard` (its card had no `max-h-80`) and `SessionsSshExecAcceptance` both pass with the fix.
 Package detail: [tddy-web](../../packages/tddy-web/docs/changesets/2026-11-08-web-wiring-package.md),
 [tddy-ui-web](../../packages/tddy-ui-web/docs/changesets/2026-11-08-web-wiring-package.md).
 Product description: [web-wiring-package.md](../ft/web/web-wiring-package.md).

@@ -7,3 +7,5 @@ the host-desktop overlay's `bg-black/90`, the code hover card's `max-h-80` among
 grows from 37 kB to 57 kB with the fix. The theme now names each package with its own `@source` line,
 and `src/themeSources.test.ts` pins that: no wildcard, and every package that renders Tailwind classes
 is listed.
+#861 carried an interim glob fix (`@source "../../tddy-*-web/src/**/*.{ts,tsx}"`) for its CI; this
+explicit list replaces it when #853 is rebased onto the fixed chain.
