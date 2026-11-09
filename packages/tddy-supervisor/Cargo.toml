@@ -17,6 +17,7 @@ anyhow = "1"
 async-trait = "0.1"
 clap = { version = "4", features = ["derive", "env"] }
 log = "0.4"
+notify = "7"
 prost = "0.13"
 serde = { version = "1", features = ["derive"] }
 serde_yaml = "0.9"

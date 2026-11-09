@@ -87,11 +87,11 @@ impl ServiceFixture {
         self
     }
 
-    /// Also declares a host socket for the account running the tests, at descriptor 4. The
-    /// supervisor's `allowed_session_users` must list that account (`allowing_the_current_user`).
-    pub fn with_a_host_socket_for_the_current_user(mut self) -> Self {
-        self.declares_host_socket = true;
-        self
+    /// Also declares a host socket for the account running the tests, at descriptor 4.
+    /// Superseded by `serving_users` with a mapping (`#agent-tools` 31/32): the merged per-user
+    /// socket is derived from `users.yaml`, never declared.
+    pub fn with_a_host_socket_for_the_current_user(self) -> Self {
+        self.serving_users()
     }
 
     /// Declares `serves_users: true`: the service is handed one `user.<os user>` socket per user
@@ -293,16 +293,26 @@ impl SupervisorFixture {
             ));
         }
 
-        let users_yaml = match &self.current_user_logins {
-            Some(logins) => {
-                write_users_file(&root, logins);
-                format!(
-                    "users:\n  file: {}\n  sockets_dir: {}\n",
-                    users_file_path(&root).display(),
-                    user_sockets_dir(&root).display()
-                )
+        let mut user_rows: Vec<(String, String)> = Vec::new();
+        if let Some(logins) = &self.current_user_logins {
+            for login in logins {
+                user_rows.push((login.clone(), user.clone()));
             }
-            None => String::new(),
+        }
+        for (index, allowed) in self.allowed_session_users.iter().enumerate() {
+            if !user_rows.iter().any(|(_, os_user)| os_user == allowed) {
+                user_rows.push((format!("session-user-{index}"), allowed.clone()));
+            }
+        }
+        let users_yaml = if !user_rows.is_empty() || self.current_user_logins.is_some() {
+            write_users_rows(&root, &user_rows);
+            format!(
+                "users:\n  file: {}\n  sockets_dir: {}\n",
+                users_file_path(&root).display(),
+                user_sockets_dir(&root).display()
+            )
+        } else {
+            String::new()
         };
 
         let config_yaml = format!(
@@ -313,7 +323,6 @@ impl SupervisorFixture {
                 "shutdown_grace_secs: {grace}\n",
                 "services:\n{services}",
                 "spawn_policy:\n",
-                "  allowed_session_users: [{users}]\n",
                 "  allowed_tool_paths: [{tools}]\n",
                 "  allowed_relay_tool_paths: [{relay_tools}]\n",
                 "  allowed_mount_roots: [{mount_roots}]\n",
@@ -332,7 +341,6 @@ impl SupervisorFixture {
             } else {
                 service_yaml
             },
-            users = yaml_list(&self.allowed_session_users),
             tools = yaml_list(
                 &self
                     .allowed_tool_paths
@@ -1013,6 +1021,18 @@ fn users_file_path(root: &Path) -> PathBuf {
 
 fn user_sockets_dir(root: &Path) -> PathBuf {
     root.join("user-sockets")
+}
+
+/// Write `users.yaml` rows atomically (rename), as an editor saving it would.
+fn write_users_rows(root: &Path, rows: &[(String, String)]) {
+    let body: String = rows
+        .iter()
+        .map(|(login, os_user)| format!("- {{github_user: {login}, os_user: {os_user}}}\n"))
+        .collect();
+    let staged = root.join("users.yaml.saving");
+    fs::write(&staged, body).expect("write users.yaml");
+    fs::set_permissions(&staged, fs::Permissions::from_mode(0o644)).expect("narrow users.yaml");
+    fs::rename(&staged, users_file_path(root)).expect("save users.yaml");
 }
 
 /// Write `users.yaml` atomically (rename), as an editor saving it would, owner-only writable.

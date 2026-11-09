@@ -46,9 +46,7 @@ pub const USER_SOCKET_FD_NAME_PREFIX: &str = "user.";
 
 /// The `LISTEN_FDNAMES` entry of `os_user`'s daemon socket.
 pub fn user_socket_fd_name(os_user: &str) -> String {
-    // TODO(user-mapping-in-supervisor): implement
-    let _ = os_user;
-    String::new()
+    format!("{USER_SOCKET_FD_NAME_PREFIX}{os_user}")
 }
 
 /// The per-OS-user host sockets a service was handed, as `(os user, descriptor)`.

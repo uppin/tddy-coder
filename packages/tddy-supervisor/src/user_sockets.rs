@@ -26,9 +26,7 @@ pub const USER_SOCKET_FILE: &str = "daemon.sock";
 
 /// `<sockets_dir>/<os user>/daemon.sock`: where `os_user`'s daemon socket is bound.
 pub fn user_socket_path(sockets_dir: &Path, os_user: &str) -> PathBuf {
-    // TODO(user-mapping-in-supervisor): implement
-    let _ = os_user;
-    sockets_dir.to_path_buf()
+    sockets_dir.join(os_user).join(USER_SOCKET_FILE)
 }
 
 /// The listening daemon sockets for every OS user of a mapping, keyed by OS user.
@@ -44,9 +42,18 @@ impl UserListeners {
         sockets_dir: &Path,
         users: &UsersFile,
     ) -> anyhow::Result<UserListeners> {
-        // TODO(user-mapping-in-supervisor): implement
-        let _ = (service, sockets_dir, users);
-        Ok(UserListeners::default())
+        let mut by_user = BTreeMap::new();
+        for os_user in users.os_users() {
+            let listener = crate::host_socket::bind_host_socket(
+                service,
+                &crate::config::HostSocket {
+                    user: os_user.clone(),
+                    path: user_socket_path(sockets_dir, &os_user),
+                },
+            )?;
+            by_user.insert(os_user, Arc::new(listener));
+        }
+        Ok(UserListeners { by_user })
     }
 
     /// The set for `next`: an OS user both mappings name keeps this set's listener (the same
@@ -57,9 +64,22 @@ impl UserListeners {
         sockets_dir: &Path,
         next: &UsersFile,
     ) -> anyhow::Result<UserListeners> {
-        // TODO(user-mapping-in-supervisor): implement
-        let _ = (service, sockets_dir, next);
-        Ok(UserListeners::default())
+        let mut by_user = BTreeMap::new();
+        for os_user in next.os_users() {
+            if let Some(existing) = self.by_user.get(&os_user) {
+                by_user.insert(os_user, Arc::clone(existing));
+            } else {
+                let listener = crate::host_socket::bind_host_socket(
+                    service,
+                    &crate::config::HostSocket {
+                        user: os_user.clone(),
+                        path: user_socket_path(sockets_dir, &os_user),
+                    },
+                )?;
+                by_user.insert(os_user, Arc::new(listener));
+            }
+        }
+        Ok(UserListeners { by_user })
     }
 
     /// `os_user`'s listener, if the mapping names them.

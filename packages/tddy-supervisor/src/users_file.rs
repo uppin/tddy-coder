@@ -38,6 +38,15 @@ pub struct MappedUser {
     pub os_user: String,
 }
 
+/// Whether `name` can ride in a descriptor name and a path segment unchanged.
+fn is_one_safe_segment(name: &str) -> bool {
+    !name.is_empty()
+        && !name.starts_with('.')
+        && name
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '_' | '-' | '.'))
+}
+
 /// A validated `users.yaml`.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct UsersFile {
@@ -49,17 +58,100 @@ impl UsersFile {
     /// anybody but the supervisor's own identity could write — the check
     /// [`crate::config::SupervisorConfig::load`] makes.
     pub fn load(path: &Path) -> Result<UsersFile, ConfigError> {
-        // TODO(user-mapping-in-supervisor): implement
-        let _ = path;
-        Ok(UsersFile::default())
+        let file = std::fs::File::open(path).map_err(|error| ConfigError {
+            message: format!("could not read {}: {error}", path.display()),
+        })?;
+        let metadata = file.metadata().map_err(|error| ConfigError {
+            message: format!("could not inspect {}: {error}", path.display()),
+        })?;
+        crate::config::require_trustworthy_config_file(path, &metadata)?;
+        let resolved = std::fs::canonicalize(path).map_err(|error| ConfigError {
+            message: format!("could not resolve {}: {error}", path.display()),
+        })?;
+        let mut ancestor = resolved.parent();
+        while let Some(directory) = ancestor {
+            let metadata = std::fs::metadata(directory).map_err(|error| ConfigError {
+                message: format!("could not inspect {}: {error}", directory.display()),
+            })?;
+            crate::config::require_trustworthy_config_directory(directory, &metadata)?;
+            ancestor = directory.parent();
+        }
+        let mut yaml = String::new();
+        {
+            use std::io::Read;
+            let mut file = file;
+            file.read_to_string(&mut yaml)
+                .map_err(|error| ConfigError {
+                    message: format!("could not read {}: {error}", path.display()),
+                })?;
+        }
+        UsersFile::from_yaml(&yaml)
     }
 
     /// Parse and validate `users.yaml` text: a YAML list of [`MappedUser`] rows, no `root`, at most
     /// [`MAX_MAPPED_OS_USERS`] distinct OS users, each OS user one plain path and fd-name segment.
     pub fn from_yaml(yaml: &str) -> Result<UsersFile, ConfigError> {
-        // TODO(user-mapping-in-supervisor): implement
-        let _ = yaml;
-        Ok(UsersFile::default())
+        let rows: Vec<MappedUser> = if yaml.trim().is_empty() {
+            Vec::new()
+        } else {
+            serde_yaml::from_str(yaml).map_err(|error| ConfigError {
+                message: format!("users.yaml: {error}"),
+            })?
+        };
+        let mut by_login: std::collections::BTreeMap<&str, &str> =
+            std::collections::BTreeMap::new();
+        for row in &rows {
+            if row.github_user.is_empty() {
+                return Err(ConfigError {
+                    message: "users.yaml: a row names no github_user".to_string(),
+                });
+            }
+            if row.os_user == "root" {
+                return Err(ConfigError {
+                    message: "users.yaml: a mapping to `root` is refused; the supervisor never \
+                              runs a session as root"
+                        .to_string(),
+                });
+            }
+            if !is_one_safe_segment(&row.os_user) {
+                return Err(ConfigError {
+                    message: format!(
+                        "users.yaml: os_user `{}` cannot name a socket: it is not one plain \
+                         path and descriptor-name segment",
+                        row.os_user
+                    ),
+                });
+            }
+            match by_login.entry(row.github_user.as_str()) {
+                std::collections::btree_map::Entry::Vacant(entry) => {
+                    entry.insert(row.os_user.as_str());
+                }
+                std::collections::btree_map::Entry::Occupied(entry) => {
+                    if *entry.get() != row.os_user {
+                        return Err(ConfigError {
+                            message: format!(
+                                "users.yaml: github_user `{}` is mapped to two OS users \
+                                 (`{}` and `{}`); which one its sessions run as is ambiguous",
+                                row.github_user,
+                                entry.get(),
+                                row.os_user
+                            ),
+                        });
+                    }
+                }
+            }
+        }
+        let users = UsersFile { rows };
+        let distinct = users.os_users().len();
+        if distinct > MAX_MAPPED_OS_USERS {
+            return Err(ConfigError {
+                message: format!(
+                    "users.yaml names {distinct} distinct OS users; at most \
+                     {MAX_MAPPED_OS_USERS} fit the handed-over descriptors"
+                ),
+            });
+        }
+        Ok(users)
     }
 
     /// Every row, in file order.

@@ -17,7 +17,7 @@ mod support;
 
 use std::os::unix::fs::{FileTypeExt, MetadataExt, PermissionsExt};
 
-use support::{a_service, a_supervisor};
+use support::{a_service, a_supervisor, current_username};
 use tddy_supervisor::ServiceState;
 
 #[tokio::test]
@@ -156,14 +156,14 @@ async fn rebinds_the_declared_socket_when_the_service_is_restarted() {
 }
 
 #[tokio::test]
-async fn creates_a_declared_host_socket_owned_by_its_user_and_closed_to_everybody_else() {
-    // Given a service declaring a host socket for the account running the supervisor
+async fn creates_a_mapped_users_daemon_socket_owned_by_its_user_and_closed_to_everybody_else() {
+    // Given a service serving users, mapping the account running the supervisor
     let supervisor = a_supervisor()
-        .allowing_the_current_user()
+        .mapping_the_current_user_as(&["work"])
         .managing(
             a_service("tddy-daemon")
                 .with_a_listening_socket()
-                .with_a_host_socket_for_the_current_user(),
+                .serving_users(),
         )
         .start()
         .await;
@@ -172,7 +172,7 @@ async fn creates_a_declared_host_socket_owned_by_its_user_and_closed_to_everybod
         .await;
 
     // When
-    let socket = supervisor.declared_host_socket_path("tddy-daemon");
+    let socket = supervisor.derived_user_socket_path();
     let file = std::fs::symlink_metadata(&socket)
         .unwrap_or_else(|error| panic!("stat {}: {error}", socket.display()));
     let directory = std::fs::metadata(socket.parent().expect("a directory")).expect("stat it");
@@ -185,14 +185,14 @@ async fn creates_a_declared_host_socket_owned_by_its_user_and_closed_to_everybod
 }
 
 #[tokio::test]
-async fn passes_each_host_socket_to_the_service_after_its_own_listener_and_names_it() {
+async fn passes_each_user_socket_to_the_service_after_its_own_listener_and_names_it() {
     // Given
     let supervisor = a_supervisor()
-        .allowing_the_current_user()
+        .mapping_the_current_user_as(&["work"])
         .managing(
             a_service("tddy-daemon")
                 .with_a_listening_socket()
-                .with_a_host_socket_for_the_current_user(),
+                .serving_users(),
         )
         .start()
         .await;
@@ -204,15 +204,14 @@ async fn passes_each_host_socket_to_the_service_after_its_own_listener_and_names
     assert_eq!(report.get("fd3").map(String::as_str), Some("socket"));
     assert_eq!(report.get("fd4").map(String::as_str), Some("socket"));
     assert_eq!(report.get("listen_fds").map(String::as_str), Some("2"));
-    let user = report.get("listen_fdnames").expect("fd names reported");
-    assert!(
-        user.starts_with("connection:host-session."),
-        "unexpected descriptor names {user}"
+    assert_eq!(
+        report.get("listen_fdnames").cloned(),
+        Some(format!("connection:user.{}", current_username()))
     );
 }
 
 #[tokio::test]
-async fn hands_a_service_with_no_host_socket_only_its_own_listener() {
+async fn hands_a_service_that_serves_no_users_only_its_own_listener() {
     // Given
     let supervisor = a_supervisor()
         .managing(a_service("tddy-daemon").with_a_listening_socket())

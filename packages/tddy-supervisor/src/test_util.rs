@@ -80,8 +80,6 @@ pub fn a_managed_service() -> ManagedServiceBuilder {
             working_dir: None,
             env: BTreeMap::new(),
             restart: a_restart_policy().build(),
-            host_sockets: Vec::new(),
-            agent_tool_sockets: Vec::new(),
             serves_users: false,
             socket: None,
         },
@@ -125,11 +123,6 @@ pub fn a_spawn_policy() -> SpawnPolicyBuilder {
 }
 
 impl SpawnPolicyBuilder {
-    pub fn allowing_session_user(mut self, user: &str) -> Self {
-        self.policy.allowed_session_users.push(user.to_string());
-        self
-    }
-
     pub fn allowing_tool(mut self, path: &str) -> Self {
         self.policy.allowed_tool_paths.push(PathBuf::from(path));
         self

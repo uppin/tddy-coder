@@ -12,8 +12,8 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use crate::socket::{
-    agent_tools_fd_name, host_session_fd_name, MAX_HANDED_OVER_LISTENERS, SD_LISTEN_FDS_START,
-    SERVICE_SOCKET_FD_NAME,
+    agent_tools_fd_name, host_session_fd_name, user_socket_fd_name, MAX_HANDED_OVER_LISTENERS,
+    SD_LISTEN_FDS_START, SERVICE_SOCKET_FD_NAME,
 };
 
 /// The listening sockets the supervisor created for a managed service, ready to be handed over:
@@ -30,8 +30,6 @@ pub struct SocketHandover {
     listeners: Vec<(String, Arc<UnixListener>)>,
     /// The `users.yaml` the service is told about in
     /// [`USERS_FILE_ENV`](crate::spawn_broker::USERS_FILE_ENV), for a service that serves users.
-    // TODO(user-mapping-in-supervisor): implement — `ChildEnvironment::build` reads it.
-    #[allow(dead_code)]
     users_file: Option<PathBuf>,
 }
 
@@ -47,22 +45,23 @@ impl SocketHandover {
     /// Also hand over `os_user`'s one daemon socket (`#agent-tools` 31/32), at the next descriptor
     /// and named `user.<os user>`. Replaces [`Self::with_host_session_socket`] and
     /// [`Self::with_agent_tool_socket`].
-    pub fn with_user_socket(self, os_user: &str, listener: Arc<UnixListener>) -> SocketHandover {
-        // TODO(user-mapping-in-supervisor): implement
-        let _ = (os_user, listener);
+    pub fn with_user_socket(
+        mut self,
+        os_user: &str,
+        listener: Arc<UnixListener>,
+    ) -> SocketHandover {
+        self.listeners
+            .push((user_socket_fd_name(os_user), listener));
         self
     }
 
     /// Also tell the service where `users.yaml` is (`#agent-tools` 31/32).
-    pub fn with_users_file(self, path: &Path) -> SocketHandover {
-        // TODO(user-mapping-in-supervisor): implement
-        let _ = path;
+    pub fn with_users_file(mut self, path: &Path) -> SocketHandover {
+        self.users_file = Some(path.to_path_buf());
         self
     }
 
     /// The `users.yaml` path the service is told, if it serves users.
-    // TODO(user-mapping-in-supervisor): implement — `ChildEnvironment::build` reads it.
-    #[allow(dead_code)]
     pub(crate) fn users_file(&self) -> Option<&Path> {
         self.users_file.as_deref()
     }
