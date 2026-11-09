@@ -224,7 +224,6 @@ async fn a_runner_with_its_shim_enforcing(
         grpc_socket: None,
         tool_ipc_socket: dir.join("tool_ipc.sock"),
         tddy_tools_path: None,
-        model: String::new(),
         ready_marker: ready_marker.clone(),
         grpc_listen_port: None,
         egress_shim_port: Some(shim_port),

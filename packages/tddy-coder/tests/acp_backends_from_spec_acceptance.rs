@@ -18,10 +18,10 @@ use std::sync::Arc;
 
 use pretty_assertions::assert_eq;
 use tddy_actions::tool::ToolHost;
-use tddy_coder::acp_from_spec::{
-    claude_acp_backend_from_spec, codex_acp_backend_from_spec, opencode_acp_backend_from_spec,
+use tddy_coder::spec_backend_build::spec_backend_for;
+use tddy_core::{
+    CodingBackend, GoalHints, GoalId, InvokeRequest, PermissionHint, SessionMode, SpecTransport,
 };
-use tddy_core::{CodingBackend, GoalHints, GoalId, InvokeRequest, PermissionHint, SessionMode};
 
 const PROMPT: &str = "Plan the feature";
 const ANSWER: &str = "The plan is ready.";
@@ -208,12 +208,27 @@ async fn one_turn(backend: &dyn CodingBackend, request: InvokeRequest) -> String
 async fn tddy_coder_agent_claude_acp_codex_acp_and_opencode_launch_from_specs() {
     // Given
     let workspace = a_workspace();
-    let claude_acp = claude_acp_backend_from_spec(&workspace.tools_dir(), workspace.host())
-        .expect("the claude-acp backend renders from its spec");
-    let codex_acp = codex_acp_backend_from_spec(&workspace.tools_dir(), workspace.host())
-        .expect("the codex-acp backend renders from its spec");
-    let opencode = opencode_acp_backend_from_spec(&workspace.tools_dir(), workspace.host())
-        .expect("the opencode backend renders from its spec");
+    let claude_acp = spec_backend_for(
+        &workspace.tools_dir(),
+        "claude-acp",
+        workspace.host(),
+        Some(SpecTransport::Acp),
+    )
+    .expect("the claude-acp backend renders from its spec");
+    let codex_acp = spec_backend_for(
+        &workspace.tools_dir(),
+        "codex-acp",
+        workspace.host(),
+        Some(SpecTransport::Acp),
+    )
+    .expect("the codex-acp backend renders from its spec");
+    let opencode = spec_backend_for(
+        &workspace.tools_dir(),
+        "opencode",
+        workspace.host(),
+        Some(SpecTransport::Acp),
+    )
+    .expect("the opencode backend renders from its spec");
 
     // When
     let answers = (

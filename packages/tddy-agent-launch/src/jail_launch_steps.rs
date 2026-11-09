@@ -1,5 +1,3 @@
-use tddy_session_split::service_util;
-
 use crate::launch_ports::LaunchSessions;
 
 use std::path::PathBuf;
@@ -71,44 +69,6 @@ impl LaunchSessions {
         ))
     }
 
-    // TODO(cli-dispatch-collapse): callerless since the bespoke jailed claude start went; an
-    // unplanned deletion, left for approval (docs/dev/todo/2026-11-05-callerless-bespoke-launch-helpers.md).
-    #[allow(dead_code)]
-    pub(super) async fn warm_up_jail_agents(
-        &self,
-        specialized_agents: &[String],
-        clone_placed_agents: &[String],
-    ) -> Result<
-        (
-            Vec<tddy_core::SessionAgentRecord>,
-            Vec<tddy_discovery::agent_def::SpecializedAgentDef>,
-        ),
-        Status,
-    > {
-        let started_agents = self
-            .agent_roster
-            .seeded_roster_records_placed(specialized_agents, clone_placed_agents)
-            .await?;
-        // The defs behind those records, which the jail env can only carry for agents this host
-        // holds — the records above are what carries the rest.
-        let specialized_defs = self
-            .agent_roster
-            .resolve_specialized_agent_defs(specialized_agents)
-            .await?;
-
-        // Readiness gate: wake every specialized agent's endpoint and wait until each answers
-        // before spawning the jail, so a cold/unreachable model fails session start here rather
-        // than stalling the main agent's first subagent call. No fallback — the jail is never
-        // spawned if warm-up fails. Resume gates separately, in `relaunch_sandboxed_runner`.
-        tddy_discovery::warmup::warm_up_agents(
-            &specialized_defs,
-            &self.config.agent_warmup_options(),
-        )
-        .await
-        .map_err(|e| Status::failed_precondition(e.to_string()))?;
-        Ok((started_agents, specialized_defs))
-    }
-
     pub(super) fn managed_jail_env(
         &self,
         jail: &JailSession<'_>,
@@ -160,32 +120,5 @@ impl LaunchSessions {
             managed = Some(launch.workflow);
         }
         Ok((managed, append_system_prompt_file, session_env))
-    }
-
-    // TODO(cli-dispatch-collapse): callerless since the bespoke jailed claude start went; an
-    // unplanned deletion, left for approval (docs/dev/todo/2026-11-05-callerless-bespoke-launch-helpers.md).
-    #[allow(dead_code)]
-    pub(super) async fn jail_semantic_index_env(
-        &self,
-        session_id: &str,
-        semantic_index: bool,
-        session_dir: &Path,
-        worktree_path: &Path,
-    ) -> Result<Option<(String, String)>, Status> {
-        let mut semantic_index_env_pair: Option<(String, String)> = None;
-        if semantic_index {
-            service_util::index_session_worktree(
-                &self.tddy_data_dir,
-                &self.task_registry,
-                session_id,
-                worktree_path,
-                session_dir,
-            )
-            .await?;
-            semantic_index_env_pair = Some(
-                tddy_semantic_index::semantic_index::semantic_index_env(session_dir),
-            );
-        }
-        Ok(semantic_index_env_pair)
     }
 }

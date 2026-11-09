@@ -28,7 +28,6 @@ use tokio::net::TcpListener;
 use tokio::sync::mpsc;
 
 const SESSION_ID: &str = "sandbox-egress-relay-tls-session";
-const TEST_MODEL: &str = "claude-opus-4-8";
 const TLS_ECHO: &str = "TLS_ECHO";
 const TEST_TIMEOUT: Duration = Duration::from_secs(45);
 
@@ -190,7 +189,6 @@ async fn routes_https_egress_from_jail_through_the_host_relay_to_a_tls_server() 
             grpc_socket: Some(uds_path.clone()),
             tool_ipc_socket: tmp.path().join("tool_ipc.sock"),
             tddy_tools_path: Some(tddy_tools_path()),
-            model: TEST_MODEL.to_string(),
             ready_marker: ready_marker.clone(),
             grpc_listen_port: None,
             egress_shim_port: None,

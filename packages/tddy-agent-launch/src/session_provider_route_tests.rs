@@ -10,19 +10,21 @@
 use std::sync::Arc;
 
 use tddy_accounts::{endpoints_for, preset, ProviderAccount};
+use tddy_core::output::SESSIONS_SUBDIR;
 use tddy_core::provider_route::{RouteChoice, RouteSources, RoutedAgent};
 use tddy_credentials::{AccountId, CredentialStore, SecretString, SessionVaults};
-use tddy_rpc::Code;
+use tddy_rpc::{Code, Status};
 use tddy_service::proto::session::StartSessionRequest;
 
 use crate::cli_route_launch::{resume_cli_route, start_cli_route};
 use crate::session_acting_identity::SessionAccountAccess;
 use crate::session_provider_route::{
     pty_route_env, resolve_session_route, resume_route, resume_route_env, route_sources_on_resume,
-    sandboxed_start_route, session_route_sources, start_route, RouteAgent,
+    sandboxed_start_route, session_route_sources, start_route, RouteAgent, StartRoute,
 };
 use crate::spec_launch::HostCodingAgents;
 use std::os::unix::fs::PermissionsExt;
+use std::path::{Path, PathBuf};
 use tddy_coding_agent_specs::{load_agent_registry, routed_agent, CodingAgentSpec};
 use tddy_core::{
     read_session_provider_account, write_session_provider_account, SessionProviderAccount,
@@ -467,6 +469,27 @@ fn on_the_claude_agent(agents: Option<&HostCodingAgents>) -> RouteAgent<'_> {
     }
 }
 
+/// A claude-cli start's session directory under `sessions_base/sessions/<id>/`, with the route's
+/// account recorded there. The route is resolved **before** the directory is created, so a refused
+/// route leaves nothing on disk.
+fn start_a_claude_cli_session_dir(
+    sessions_base: &Path,
+    session_id: &str,
+    access: &SessionAccountAccess,
+    sources: &RouteSources,
+    model: &str,
+    agent: RouteAgent<'_>,
+) -> Result<(PathBuf, Option<StartRoute>), Status> {
+    let route = start_route(access, agent, sources, model)?;
+    let session_dir = sessions_base.join(SESSIONS_SUBDIR).join(session_id);
+    std::fs::create_dir_all(&session_dir)
+        .map_err(|e| Status::internal(format!("failed to create session dir: {e}")))?;
+    if let Some(route) = &route {
+        route.record_in(&session_dir)?;
+    }
+    Ok((session_dir, route))
+}
+
 #[test]
 fn a_routed_claude_cli_start_records_its_account_in_the_session_dir_it_creates() {
     // Given Ada holds her Meta account in an unlocked vault
@@ -474,7 +497,7 @@ fn a_routed_claude_cli_start_records_its_account_in_the_session_dir_it_creates()
     let sessions_base = tempfile::tempdir().expect("a sessions base");
 
     // When a claude-cli start on it creates its session directory
-    let (session_dir, route) = crate::claude_cli_spawn::create_routed_session_dir(
+    let (session_dir, route) = start_a_claude_cli_session_dir(
         sessions_base.path(),
         "sess-1",
         &access,
@@ -502,7 +525,7 @@ fn a_refused_claude_cli_start_creates_no_session_dir() {
     let sessions_base = tempfile::tempdir().expect("a sessions base");
 
     // When a claude-cli start chooses her account
-    let refusal = crate::claude_cli_spawn::create_routed_session_dir(
+    let refusal = start_a_claude_cli_session_dir(
         sessions_base.path(),
         "sess-1",
         &access,
@@ -529,7 +552,7 @@ fn a_claude_cli_start_on_its_vendor_creates_its_session_dir_with_no_record() {
     let sessions_base = tempfile::tempdir().expect("a sessions base");
 
     // When
-    let (session_dir, route) = crate::claude_cli_spawn::create_routed_session_dir(
+    let (session_dir, route) = start_a_claude_cli_session_dir(
         sessions_base.path(),
         "sess-1",
         &access,
