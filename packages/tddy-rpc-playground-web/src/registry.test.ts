@@ -5,12 +5,9 @@
  * FileDescriptorSet (obtained from the server via gRPC ServerReflection) into a
  * `@bufbuild/protobuf` Registry, then look up DescMethod objects that LiveKitTransport can
  * invoke directly without a compiled ConnectES client.
- *
- * All imports will fail to resolve until registry.ts is created (red phase).
  */
 
 import { beforeEach, describe, expect, it } from "bun:test";
-// These imports fail until registry.ts is created.
 import { buildRegistry, findMethod } from "./registry";
 
 // Fixture: a binary FileDescriptorSet covering test.EchoService.

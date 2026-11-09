@@ -1,31 +1,20 @@
 /**
- * RPC Playground — screen acceptance tests (presentational, intercept-driven).
+ * RPC Playground — screen acceptance tests (presentational).
  *
  * Tests the RpcPlaygroundScreen component: participant picker, service/method tree,
  * request editor (builder ⇄ raw toggle), Invoke button, response view, error display.
  *
- * Uses cy.intercept to mock RPC calls over HTTP (token, auth, reflection) so these
- * tests do not require a live LiveKit server.
- *
- * All imports will FAIL until:
- *   1. RpcPlaygroundScreen.tsx is created in packages/tddy-web/src/rpc-playground/
- *   2. The routing helpers (isRpcPlaygroundPath, RPC_PLAYGROUND_ROUTE) are added to appRoutes.ts
- *   3. DaemonNavMenu includes the rpc-playground menu item
- *
- * ⚠️ RED PHASE — these tests are intentionally failing.
+ * The screen is presentational: services and invocation arrive as props, so the specs mount it
+ * with `mountWithClients` over an in-memory backend and need no live server. The shell's
+ * RPC Playground menu entry is `tddy-web`'s and is covered there.
  */
 
 import React from "react";
+import { anInMemoryRpcBackend } from "tddy-connectrpc-testkit";
+import { rpcPlaygroundPage } from "../support/pages/rpcPlaygroundPage";
 import { byTestId, TEST_IDS } from "../support/testIds";
-import { anAuthStatusAuthenticated, aGenerateTokenResponse } from "../support/rpc/responses";
-import { toArrayBuffer } from "../support/rpc/protoRpc";
 
-import { RpcPlaygroundScreen } from "../../src/rpc-playground/RpcPlaygroundScreen";
-import {
-  RPC_PLAYGROUND_ROUTE,
-  isRpcPlaygroundPath,
-} from "../../src/routing/appRoutes";
-import { DaemonNavMenu } from "../../src/components/shell/DaemonNavMenu";
+import { RpcPlaygroundScreen } from "../../src/RpcPlaygroundScreen";
 
 // ---------------------------------------------------------------------------
 // Test fixtures
@@ -40,9 +29,11 @@ import { DaemonNavMenu } from "../../src/components/shell/DaemonNavMenu";
 const A_CONNECTION_THAT_CARRIES_A_ROSTER = true;
 
 // Mock reflection response: a fake service tree with EchoService.
+const ECHO_SERVICE = "test.EchoService";
+
 const MOCK_SERVICES = [
   {
-    name: "test.EchoService",
+    name: ECHO_SERVICE,
     methods: [
       { name: "Echo", kind: "unary" as const },
       { name: "EchoServerStream", kind: "server_streaming" as const },
@@ -57,28 +48,16 @@ const MOCK_SERVICES = [
 // ---------------------------------------------------------------------------
 
 describe("RpcPlaygroundScreen — component (Cypress)", () => {
-  beforeEach(() => {
-    cy.intercept("POST", "**/auth.AuthService/GetAuthStatus", {
-      statusCode: 200,
-      body: toArrayBuffer(anAuthStatusAuthenticated()),
-      headers: { "content-type": "application/proto" },
-    });
-    cy.intercept("POST", "**/token.TokenService/GenerateToken", {
-      statusCode: 200,
-      body: toArrayBuffer(aGenerateTokenResponse()),
-      headers: { "content-type": "application/proto" },
-    });
-  });
-
   it("renders participant picker and service/method tree from mocked reflection", () => {
     // Given / When
-    cy.mount(
+    cy.mountWithClients(
       <RpcPlaygroundScreen
         services={MOCK_SERVICES}
         onInvoke={() => Promise.resolve({ kind: "success" as const, json: "{}" })}
         presenceAvailable={A_CONNECTION_THAT_CARRIES_A_ROSTER}
         onNavigate={() => {}}
-      />
+      />,
+      anInMemoryRpcBackend(),
     );
 
     // Then
@@ -89,17 +68,18 @@ describe("RpcPlaygroundScreen — component (Cypress)", () => {
 
   it("expanding a service shows its methods with kind badges", () => {
     // Given
-    cy.mount(
+    cy.mountWithClients(
       <RpcPlaygroundScreen
         services={MOCK_SERVICES}
         onInvoke={() => Promise.resolve({ kind: "success" as const, json: "{}" })}
         presenceAvailable={A_CONNECTION_THAT_CARRIES_A_ROSTER}
         onNavigate={() => {}}
-      />
+      />,
+      anInMemoryRpcBackend(),
     );
 
     // When
-    cy.contains("test.EchoService").click();
+    rpcPlaygroundPage.expandService(ECHO_SERVICE);
 
     // Then
     cy.contains("Echo").should("be.visible");
@@ -111,18 +91,19 @@ describe("RpcPlaygroundScreen — component (Cypress)", () => {
 
   it("selecting a method seeds the request editor with default JSON", () => {
     // Given
-    cy.mount(
+    cy.mountWithClients(
       <RpcPlaygroundScreen
         services={MOCK_SERVICES}
         onInvoke={() => Promise.resolve({ kind: "success" as const, json: "{}" })}
         presenceAvailable={A_CONNECTION_THAT_CARRIES_A_ROSTER}
         onNavigate={() => {}}
-      />
+      />,
+      anInMemoryRpcBackend(),
     );
 
     // When
-    cy.contains("test.EchoService").click();
-    cy.get("[data-testid='rpc-method-test.EchoService-Echo']").click();
+    rpcPlaygroundPage.expandService(ECHO_SERVICE);
+    rpcPlaygroundPage.chooseMethod(ECHO_SERVICE, "Echo");
 
     // Then — default JSON for a method with no schema is the empty object
     byTestId(TEST_IDS.rpcRequestEditor).should("exist");
@@ -131,16 +112,17 @@ describe("RpcPlaygroundScreen — component (Cypress)", () => {
 
   it("toggling builder view and raw view retains the request value", () => {
     // Given
-    cy.mount(
+    cy.mountWithClients(
       <RpcPlaygroundScreen
         services={MOCK_SERVICES}
         onInvoke={() => Promise.resolve({ kind: "success" as const, json: "{}" })}
         presenceAvailable={A_CONNECTION_THAT_CARRIES_A_ROSTER}
         onNavigate={() => {}}
-      />
+      />,
+      anInMemoryRpcBackend(),
     );
-    cy.contains("test.EchoService").click();
-    cy.get("[data-testid='rpc-method-test.EchoService-Echo']").click();
+    rpcPlaygroundPage.expandService(ECHO_SERVICE);
+    rpcPlaygroundPage.chooseMethod(ECHO_SERVICE, "Echo");
 
     // When — switch to raw JSON, type a value, toggle back and forth
     byTestId(TEST_IDS.rpcEditorToggleRaw).click();
@@ -156,16 +138,17 @@ describe("RpcPlaygroundScreen — component (Cypress)", () => {
   it("clicking Invoke shows decoded response JSON", () => {
     // Given
     const responseJson = '{"message":"playground-echo","timestamp":"0"}';
-    cy.mount(
+    cy.mountWithClients(
       <RpcPlaygroundScreen
         services={MOCK_SERVICES}
         onInvoke={() => Promise.resolve({ kind: "success" as const, json: responseJson })}
         presenceAvailable={A_CONNECTION_THAT_CARRIES_A_ROSTER}
         onNavigate={() => {}}
-      />
+      />,
+      anInMemoryRpcBackend(),
     );
-    cy.contains("test.EchoService").click();
-    cy.get("[data-testid='rpc-method-test.EchoService-Echo']").click();
+    rpcPlaygroundPage.expandService(ECHO_SERVICE);
+    rpcPlaygroundPage.chooseMethod(ECHO_SERVICE, "Echo");
 
     // When
     byTestId(TEST_IDS.rpcInvokeButton).click();
@@ -176,7 +159,7 @@ describe("RpcPlaygroundScreen — component (Cypress)", () => {
 
   it("shows error code and message when invocation fails", () => {
     // Given
-    cy.mount(
+    cy.mountWithClients(
       <RpcPlaygroundScreen
         services={MOCK_SERVICES}
         onInvoke={() =>
@@ -184,10 +167,11 @@ describe("RpcPlaygroundScreen — component (Cypress)", () => {
         }
         presenceAvailable={A_CONNECTION_THAT_CARRIES_A_ROSTER}
         onNavigate={() => {}}
-      />
+      />,
+      anInMemoryRpcBackend(),
     );
-    cy.contains("test.EchoService").click();
-    cy.get("[data-testid='rpc-method-test.EchoService-Echo']").click();
+    rpcPlaygroundPage.expandService(ECHO_SERVICE);
+    rpcPlaygroundPage.chooseMethod(ECHO_SERVICE, "Echo");
 
     // When
     byTestId(TEST_IDS.rpcInvokeButton).click();
@@ -195,30 +179,5 @@ describe("RpcPlaygroundScreen — component (Cypress)", () => {
     // Then
     byTestId(TEST_IDS.rpcError).should("contain", "not_found");
     byTestId(TEST_IDS.rpcError).should("contain", "Unknown method");
-  });
-});
-
-describe("DaemonNavMenu — RPC Playground entry", () => {
-  it("renders shell-menu-rpc-playground menu item", () => {
-    // Given
-    cy.mount(<DaemonNavMenu onNavigate={cy.stub().as("onNavigate")} />);
-
-    // When
-    byTestId(TEST_IDS.shellMenuButton).click();
-
-    // Then
-    byTestId(TEST_IDS.shellMenuRpcPlayground).should("be.visible");
-  });
-
-  it("clicking shell-menu-rpc-playground navigates to /rpc-playground", () => {
-    // Given
-    cy.mount(<DaemonNavMenu onNavigate={cy.stub().as("onNavigate")} />);
-    byTestId(TEST_IDS.shellMenuButton).click();
-
-    // When
-    byTestId(TEST_IDS.shellMenuRpcPlayground).click();
-
-    // Then
-    cy.get("@onNavigate").should("have.been.calledWith", "/rpc-playground");
   });
 });

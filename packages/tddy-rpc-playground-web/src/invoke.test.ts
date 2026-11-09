@@ -7,21 +7,17 @@
  *   - the transport receives the correct service typeName and method name
  *   - ConnectError is mapped to { code, message }
  *   - server-streaming collects multiple decoded JSON chunks
- *
- * All imports fail until invoke.ts is created (red phase).
  */
 
 import { beforeEach, describe, expect, it } from "bun:test";
 import type { Transport, UnaryResponse } from "@connectrpc/connect";
-import type { DescMethod } from "@bufbuild/protobuf";
+import type { DescMethod, DescMethodUnary } from "@bufbuild/protobuf";
 import { Code } from "@connectrpc/connect";
-import { aFakeErrorTransport, aFakeStreamingTransport, aFakeUnaryTransport } from "../test-utils";
+import { aFakeErrorTransport, aFakeStreamingTransport, aFakeUnaryTransport } from "./test-utils/fakeTransports";
 
-// These imports fail until invoke.ts is created.
 import { invokeRpc, type InvokeResult } from "./invoke";
 
-// Import needed for building a fake DescMethod from the real echo service descriptor.
-// Fails until reflection / registry machinery is in place.
+// Builds a DescMethod from the real echo service descriptor.
 import { buildRegistry, findMethod } from "./registry";
 import { ECHO_SERVICE_DESCRIPTOR_FIXTURE } from "./test-fixtures/echoServiceDescriptor";
 
@@ -82,7 +78,7 @@ describe("invokeRpc — unary", () => {
 
     let capturedMethod: DescMethod | undefined;
     const capturingTransport: Transport = {
-      async unary(m) {
+      async unary(m: DescMethodUnary) {
         capturedMethod = m;
         const { fromJsonString } = await import("@bufbuild/protobuf");
         const output = fromJsonString(m.output, '{"message":"","timestamp":"0"}');

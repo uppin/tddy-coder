@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { Button } from "tddy-ui-web";
 import { PARAM_METHOD, PARAM_SERVICE } from "tddy-client-web";
-import { useAppLocation } from "@/routing/useAppLocation";
+import { useAppLocation } from "tddy-client-web";
 
 export type ServiceMethodKind =
   | "unary"
