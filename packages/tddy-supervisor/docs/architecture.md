@@ -274,6 +274,20 @@ with the stream, so the event receiver outlives the `SupervisorClient` that made
 The partial directory sits in a user-writable parent and is renamed/removed by root; its name is random
 and `remove_dir_all` does not follow symlinks.
 
+### Deadlines on the client
+
+`SupervisorClient` (`src/client.rs`) bounds every unary call with `SUPERVISOR_CALL_DEADLINE` (60 s) and
+the clone stream with `SUPERVISOR_CLONE_PROGRESS_DEADLINE` (300 s). Opening the stream and its first
+event share one instant (`timeout_at`); each later event gets the full deadline, and a gap that long
+ends the event channel with `Unavailable` as its last item. Both failures come from `went_silent`,
+which names the method and the deadline. `with_call_deadline` / `with_clone_progress_deadline` exist
+so tests can shorten them (`tests/supervisor_call_deadline.rs`, a silent `UnixListener` peer — it
+runs on every platform, unlike the Linux-only `supervisor_clone_progress.rs`).
+
+Expiry drops the call future. `tddy-rpc`'s `ClientEngine` keeps its pending entry until a reply for
+that id arrives or the connection closes, and the supervisor may already have acted on the request —
+recorded in `docs/dev/todo/2026-11-07-rpc-dropped-call-leaves-pending-entry.md`.
+
 ## Restart policy
 
 `restart.rs` is pure, so the timing policy is testable without waiting for it. `record_exit` resets the

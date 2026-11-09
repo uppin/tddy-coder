@@ -32,7 +32,7 @@ registry reads and callback codecs of the CLI starts, glob-re-exported from `mod
 | `workflow_spawn.rs` | 456 | `TelegramWorkflowSpawn`: the chain integration-base merge, the spawn configuration and inputs, and the branch-name helpers the start paths share |
 | `elicitation.rs` | 456 | presenter input from Telegram: feature submission, document review, elicitation answers, the changeset writes and recipe keyboard around them |
 | `agent_choices.rs` | 245 | what Telegram offers to start, read from the host's coding-agent registry: the CLI agents (`TelegramAgentChoices`), each agent's spec models (`telegram_model_choices`), the spec-driven new-branch name (`branch_name_required`), the `tsa:` / `tcm:` callbacks by index and `TelegramPickRefusal`. Names no agent |
-| `cli_spawns.rs` | 174 | the model-pick callback of a CLI start and the start it ends in: an `OperatorSessionStart` through the session-starter port (600 s), then the started session replacing the pending one, or the branch-conflict keyboard |
+| `cli_spawns.rs` | 162 | the model-pick callback of a CLI start and the start it ends in: an `OperatorSessionStart` through the session-starter port (no deadline of its own: the daemon's `session_start_timeout_secs` bounds it, and its `DEADLINE_EXCEEDED` is relayed like any refusal), then the started session replacing the pending one, or the branch-conflict keyboard |
 | `mod.rs` | 429 | the harness (with its coding-agent registry and session starter) and the shared helpers |
 | `session_start.rs` | 299 | `/start-workflow`, `/start-agent`, `/start-claude`, `/start-cursor`: the pending session up to the agent or project keyboard |
 | `types.rs` | 168 | the harness's DTOs |

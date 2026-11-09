@@ -18,6 +18,10 @@ fn default_spawn_worker_request_timeout_secs() -> u64 {
     300
 }
 
+fn default_session_start_timeout_secs() -> u64 {
+    600
+}
+
 fn default_peer_forward_timeout_secs() -> u64 {
     crate::peer_forwarding::PEER_FORWARD_TIMEOUT.as_secs()
 }
@@ -113,6 +117,11 @@ pub struct DaemonConfig {
     /// `clone_as_user`). Minimum effective value is 1.
     #[serde(default = "default_spawn_worker_request_timeout_secs")]
     pub spawn_worker_request_timeout_secs: u64,
+    /// Max seconds a whole session start may take — provisioning, the worktree cut, the agent
+    /// launch — before it is cancelled, cleaned up and failed with `DeadlineExceeded` naming the
+    /// step it was on. Minimum effective value is 1.
+    #[serde(default = "default_session_start_timeout_secs")]
+    pub session_start_timeout_secs: u64,
     /// Max seconds a forwarded unary RPC to a peer daemon, or the opening of a forwarded server
     /// stream, may wait for the peer to answer before failing with `DeadlineExceeded`. Minimum
     /// effective value is 1. The per-frame idle timeout of a forwarded stream is not configurable.
@@ -224,6 +233,7 @@ impl Default for DaemonConfig {
             repos_base_path: None,
             spawn_mouse: true,
             spawn_worker_request_timeout_secs: default_spawn_worker_request_timeout_secs(),
+            session_start_timeout_secs: default_session_start_timeout_secs(),
             peer_forward_timeout_secs: default_peer_forward_timeout_secs(),
             spawn_startup_grace_period_ms: default_spawn_startup_grace_period_ms(),
             spawn_startup_poll_interval_ms: default_spawn_startup_poll_interval_ms(),
@@ -544,6 +554,28 @@ mod spawn_timeout_tests {
             ..Default::default()
         };
         assert_eq!(c.spawn_worker_request_timeout().as_secs(), 1);
+    }
+
+    #[test]
+    fn the_session_start_timeout_defaults_to_ten_minutes() {
+        let c = DaemonConfig::default();
+        assert_eq!(c.session_start_timeout_secs, 600);
+        assert_eq!(c.session_start_timeout(), Duration::from_secs(600));
+    }
+
+    #[test]
+    fn a_daemon_yaml_without_a_session_start_timeout_gets_the_default() {
+        let c: DaemonConfig = serde_yaml::from_str("{}").expect("an empty config parses");
+        assert_eq!(c.session_start_timeout(), Duration::from_secs(600));
+    }
+
+    #[test]
+    fn a_zero_session_start_timeout_is_clamped() {
+        let c = DaemonConfig {
+            session_start_timeout_secs: 0,
+            ..Default::default()
+        };
+        assert_eq!(c.session_start_timeout(), Duration::from_secs(1));
     }
 
     #[test]

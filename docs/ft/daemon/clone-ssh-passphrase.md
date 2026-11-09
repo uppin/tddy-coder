@@ -121,6 +121,11 @@ No ssh-agent is ever started by the daemon.
 - A supervisor refusal for an unlisted key is reported as the supervisor's own refusal, not as a missing
   `allowed_env_keys` entry.
 
+- A host-key confirmation prompt is refused by `tddy-askpass`, which answers only a key passphrase
+  request, so ssh fails "Host key verification failed" at once. A hang reported against the real sshd
+  fixture did not reproduce (2026-11-07: macOS, nix OpenSSH 10.2p1, the acceptance test 10/10 in
+  2.4–3.1 s). Linux and older OpenSSH were not checked.
+
 ## Out of scope
 
 Starting or owning an ssh-agent. Answering host-key confirmations. Prompting for HTTPS credentials.

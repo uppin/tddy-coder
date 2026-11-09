@@ -140,6 +140,13 @@ impl DaemonConfig {
         Duration::from_secs(secs)
     }
 
+    /// How long a whole session start may take before it is cancelled and failed
+    /// `DeadlineExceeded` (see `session_start_timeout_secs`).
+    pub fn session_start_timeout(&self) -> Duration {
+        let secs = self.session_start_timeout_secs.max(1);
+        Duration::from_secs(secs)
+    }
+
     /// How long a forward to a peer daemon waits for its answer (see `peer_forward_timeout_secs`).
     pub fn peer_forward_timeout(&self) -> Duration {
         Duration::from_secs(self.peer_forward_timeout_secs.max(1))

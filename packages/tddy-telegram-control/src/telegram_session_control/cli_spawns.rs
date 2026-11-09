@@ -1,15 +1,8 @@
 //! The model-pick callback of a CLI start, and the generic start it ends in.
 
-use std::time::Duration;
-
 use tddy_daemon_extensions::{OperatorBranchChoice, OperatorSessionStart, OperatorStartOutcome};
 
 use crate::telegram_session_control::*;
-
-/// How long Telegram waits for the daemon's generic start: a clone, a worktree, the spec's launch
-/// and a cursor chat's mint all run inside it, each under its own deadline, so this one only bounds
-/// a start that never answers.
-const START_DEADLINE: Duration = Duration::from_secs(600);
 
 impl<S: TelegramSender + Send + Sync> TelegramSessionControlHarness<S> {
     /// Handle the model pick of a pending CLI start (`tcm:<model_idx>|p:<proj_idx>|s:<session_id>`)
@@ -89,18 +82,13 @@ impl<S: TelegramSender + Send + Sync> TelegramSessionControlHarness<S> {
             branch,
         };
 
-        let outcome = tokio::time::timeout(
-            START_DEADLINE,
-            self.session_starter.start_for_operator(start),
-        )
-        .await
-        .map_err(|_| {
-            anyhow::anyhow!(
-                "the daemon did not answer the session start within {}s",
-                START_DEADLINE.as_secs()
-            )
-        })?
-        .map_err(|refused| anyhow::anyhow!("{}", refused.message))?;
+        // The daemon bounds the start itself (`session_start_timeout_secs`): an overrun comes back
+        // as its DEADLINE_EXCEEDED refusal, relayed here like any other.
+        let outcome = self
+            .session_starter
+            .start_for_operator(start)
+            .await
+            .map_err(|refused| anyhow::anyhow!("{}", refused.message))?;
 
         match outcome {
             OperatorStartOutcome::BranchConflict(conflict) => {
