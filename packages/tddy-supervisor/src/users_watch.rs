@@ -42,8 +42,11 @@ impl UsersWatch {
         use notify::Watcher;
 
         let current = Arc::new(Mutex::new(initial));
-        // Canonical, so the paths events carry (which the OS resolves) compare equal to it.
-        let watched_path = std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
+        // Canonical, so the paths events carry (which the OS resolves) compare equal to it. The
+        // file was just loaded, so failing to resolve it is an error, not a path to guess at.
+        let watched_path = std::fs::canonicalize(path).map_err(|error| {
+            anyhow::anyhow!("cannot resolve users.yaml at {}: {error}", path.display())
+        })?;
         let callback_path = watched_path.clone();
         let callback_current = Arc::clone(&current);
         let mut watcher =

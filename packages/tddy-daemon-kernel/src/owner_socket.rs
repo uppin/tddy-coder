@@ -44,11 +44,6 @@ impl OwnerSocketKind {
         setting: "host_sockets",
         noun: "host-session socket",
     };
-    /// The agent-tool socket (`agent_tool_sockets:`).
-    pub const AGENT_TOOL: OwnerSocketKind = OwnerSocketKind {
-        setting: "agent_tool_sockets",
-        noun: "agent-tool socket",
-    };
     /// A mapped user's one daemon socket (`users.yaml`, `#agent-tools` 31/32).
     pub const USER_DAEMON: OwnerSocketKind = OwnerSocketKind {
         setting: "users.yaml",
@@ -64,8 +59,8 @@ const MAX_LISTEN_FDS: usize = 16;
 
 /// `(os user, descriptor)` for each descriptor named `<prefix><os user>` — nothing at all unless the
 /// variables were set for this process (`LISTEN_PID`) and the names account for exactly
-/// `LISTEN_FDS` descriptors. The same reading `tddy_supervisor::resolve_host_session_fds` makes, on
-/// purpose.
+/// `LISTEN_FDS` descriptors: a descriptor adopted for the wrong user would serve one user's sessions
+/// on another's socket, so a mismatch has to mean "none".
 pub fn descriptors_named(
     prefix: &str,
     my_pid: u32,

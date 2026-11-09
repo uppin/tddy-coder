@@ -135,28 +135,20 @@ impl LiveUsers {
             });
         }
         // `config_path` is the daemon's config file; the mapping it enrols into is the
-        // `users.yaml` beside it (a caller that already named that file enrols into it directly).
-        // A config file with no parent directory names no directory to enrol beside, which is a
-        // refusal — never a guess at one relative to the working directory.
-        let users_path = if config_path
-            .file_name()
-            .is_some_and(|name| name == "users.yaml")
-        {
-            config_path.to_path_buf()
-        } else {
-            match config_path.parent() {
-                Some(directory) if !directory.as_os_str().is_empty() => {
-                    directory.join("users.yaml")
-                }
-                _ => {
-                    return Err(EnrolmentRefusal::ConfigNotWritable {
-                        reason: format!(
-                            "the daemon config {} has no parent directory, so there is no \
-                             users.yaml beside it to enrol into",
-                            config_path.display()
-                        ),
-                    })
-                }
+        // `users.yaml` beside it. A config file with no parent directory names no directory to
+        // enrol beside, which is a refusal — never a guess relative to the working directory.
+        let users_path = match config_path.parent() {
+            Some(directory) if !directory.as_os_str().is_empty() => {
+                directory.join(crate::users_file::USERS_FILE_NAME)
+            }
+            _ => {
+                return Err(EnrolmentRefusal::ConfigNotWritable {
+                    reason: format!(
+                        "the daemon config {} has no parent directory, so there is no \
+                         users.yaml beside it to enrol into",
+                        config_path.display()
+                    ),
+                })
             }
         };
         let mapping = enrol_first_login(&users_path, github_user, os_user)?;
@@ -299,11 +291,35 @@ mod tests {
         );
     }
 
-    /// A deployment with no `users:` row, as held in memory and as written in its config file.
+    #[test]
+    fn a_first_login_beside_a_missing_users_yaml_is_refused_and_writes_none() {
+        // Given an unenrolled deployment whose users.yaml has gone since the daemon started
+        let (users, path, dir) = an_unenrolled_deployment();
+        let users_yaml = dir.path().join(crate::users_file::USERS_FILE_NAME);
+        std::fs::remove_file(&users_yaml).expect("remove users.yaml");
+
+        // When a first login tries to enrol
+        let refusal = users.enrol_first_login(&path, THE_OPERATOR, THE_OS_USER);
+
+        // Then it is refused — a missing mapping is never read as an empty one — and no file is
+        // resurrected
+        assert_eq!(
+            (
+                matches!(refusal, Err(EnrolmentRefusal::ConfigNotWritable { .. })),
+                users_yaml.exists(),
+            ),
+            (true, false),
+            "got {refusal:?}"
+        );
+    }
+
+    /// A deployment with no mapped login, as held in memory and as written in its `users.yaml`.
     fn an_unenrolled_deployment() -> (LiveUsers, std::path::PathBuf, tempfile::TempDir) {
         let dir = tempfile::tempdir().expect("a temporary directory");
         let path = dir.path().join("config.yaml");
         std::fs::write(&path, "repos_base_path: \"/tmp/repos\"\n").expect("the config is written");
+        std::fs::write(dir.path().join(crate::users_file::USERS_FILE_NAME), "[]\n")
+            .expect("the empty users.yaml an installer renders is written");
         (LiveUsers::default(), path, dir)
     }
 }

@@ -60,29 +60,30 @@ impl std::fmt::Display for EnrolmentRefusal {
 
 impl std::error::Error for EnrolmentRefusal {}
 
-/// Write the first row into `users.yaml` at `config_path`, mapping `github_user` to `os_user`, and
+/// Write the first row into `users.yaml` at `users_path`, mapping `github_user` to `os_user`, and
 /// return the row that was written (`#agent-tools` 31/32: the mapping no longer lives in
 /// `daemon.yaml`, which enrolment leaves untouched).
 ///
 /// The write is atomic — a half-written mapping is a daemon that will not start.
 pub fn enrol_first_login(
-    config_path: &Path,
+    users_path: &Path,
     github_user: &str,
     os_user: &str,
 ) -> Result<UserMapping, EnrolmentRefusal> {
     let not_writable = |reason: String| EnrolmentRefusal::ConfigNotWritable { reason };
 
-    // `config_path` is the `users.yaml` to write (its caller derives it beside the daemon's
+    // `users_path` is the `users.yaml` to write (its caller derives it beside the daemon's
     // config). Re-read rather than trust a snapshot: the file on disk decides whether this
-    // deployment has already enrolled somebody, including through a concurrent login. A file
-    // that does not exist yet maps nobody — the installers render one, and enrolment is the
-    // write that fills it.
-    let existing: Vec<UserMapping> = match std::fs::read_to_string(config_path) {
-        Ok(contents) if contents.trim().is_empty() => Vec::new(),
-        Ok(contents) => serde_yaml::from_str(&contents)
-            .map_err(|e| not_writable(format!("{}: {e}", config_path.display())))?,
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Vec::new(),
-        Err(error) => return Err(not_writable(format!("{}: {error}", config_path.display()))),
+    // deployment has already enrolled somebody, including through a concurrent login. A missing
+    // file is a refusal, never an empty mapping: the daemon loaded it at start, and the
+    // installers render one, so a file that has gone is not one to resurrect.
+    let contents = std::fs::read_to_string(users_path)
+        .map_err(|e| not_writable(format!("{}: {e}", users_path.display())))?;
+    let existing: Vec<UserMapping> = if contents.trim().is_empty() {
+        Vec::new()
+    } else {
+        serde_yaml::from_str(&contents)
+            .map_err(|e| not_writable(format!("{}: {e}", users_path.display())))?
     };
     if let Some(enrolled) = existing.first() {
         return Err(EnrolmentRefusal::AlreadyEnrolled {
@@ -90,23 +91,12 @@ pub fn enrol_first_login(
         });
     }
 
-    // The atomic write creates missing directories; enrolment must not resurrect a deployment
-    // whose directory has gone — that deployment is not there to enrol anybody into.
-    if let Some(directory) = config_path.parent() {
-        if !directory.as_os_str().is_empty() && !directory.is_dir() {
-            return Err(not_writable(format!(
-                "{}: its directory {} is gone",
-                config_path.display(),
-                directory.display()
-            )));
-        }
-    }
     let mapping = UserMapping {
         github_user: github_user.to_string(),
         os_user: os_user.to_string(),
     };
     let rewritten = serde_yaml::to_string(std::slice::from_ref(&mapping))
         .map_err(|e| not_writable(format!("failed to serialise the users row: {e}")))?;
-    tddy_core::atomic_file::write_atomic_labelled(config_path, rewritten).map_err(not_writable)?;
+    tddy_core::atomic_file::write_atomic_labelled(users_path, rewritten).map_err(not_writable)?;
     Ok(mapping)
 }

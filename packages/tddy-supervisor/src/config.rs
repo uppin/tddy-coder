@@ -290,8 +290,7 @@ impl SupervisorConfig {
     /// "the root-owned policy file" is the premise of the whole design — and until now that was an
     /// assumption about how the file got there rather than something the supervisor checked. It is
     /// worth checking independently: `install` creating `/etc/tddy` with an inherited `umask` of `000`
-    /// is enough for a local user to rewrite `allowed_session_users` and have the root broker enforce
-    /// it.
+    /// is enough for a local user to rewrite `spawn_policy` and have the root broker enforce it.
     pub fn load(path: &Path) -> Result<SupervisorConfig, ConfigError> {
         // Opened once and read through the same handle the ownership check `fstat`s, so the file that
         // is parsed is the file that was checked and not one swapped in between the two.

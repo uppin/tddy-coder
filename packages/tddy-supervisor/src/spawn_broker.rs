@@ -1962,11 +1962,11 @@ mod tests {
 
     #[test]
     fn announces_every_handed_over_listener_and_names_each_one() {
-        // Given a service socket and two host sockets
+        // Given a service socket and two mapped users' daemon sockets
         let directory = tempfile::TempDir::new().expect("create a directory");
         let handover = SocketHandover::new(a_listener_at(directory.path(), "svc.sock"))
-            .with_host_session_socket("alice", a_listener_at(directory.path(), "a.sock"))
-            .with_host_session_socket("bob", a_listener_at(directory.path(), "b.sock"));
+            .with_user_socket("alice", a_listener_at(directory.path(), "a.sock"))
+            .with_user_socket("bob", a_listener_at(directory.path(), "b.sock"));
 
         // When
         let environment = ChildEnvironment::build(&a_spawn_plan().build(), Some(&handover))
@@ -1980,7 +1980,7 @@ mod tests {
         // Then — the count covers every descriptor and the names say whose each one is
         assert!(variables.contains(&"LISTEN_FDS=3"), "{variables:?}");
         assert!(
-            variables.contains(&"LISTEN_FDNAMES=connection:host-session.alice:host-session.bob"),
+            variables.contains(&"LISTEN_FDNAMES=connection:user.alice:user.bob"),
             "{variables:?}"
         );
     }

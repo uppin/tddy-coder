@@ -170,6 +170,8 @@ mod tests {
         let dir = tempfile::tempdir().expect("a temporary directory");
         let config_path = dir.path().join("desktop.yaml");
         std::fs::write(&config_path, AN_UNENROLLED_CONFIG).expect("the config is written");
+        // The empty mapping `./install --desktop` renders beside it, which enrolment fills.
+        std::fs::write(dir.path().join("users.yaml"), "[]\n").expect("users.yaml is written");
         AnUnenrolledDesktop {
             users: LiveUsers::default(),
             config_path,

@@ -1,22 +1,25 @@
-//! The agent-tool socket **per OS user** (`#agent-tools` 26/28): where a session running as user X
-//! reaches this daemon's tool roster — its hooks, `tddy-tools notify` and its tool calls.
+//! The daemon socket **per OS user** (`#agent-tools` 26/28, merged in 31/32): where a session
+//! running as user X reaches this daemon — its hooks, `tddy-tools notify`, its tool calls, and the
+//! host-session services (GitHub token, conversation spawning).
 //!
-//! **Where.** `<data dir>/run-agent-tools/<os user>/agent.sock`: a directory of its own, because
-//! `tddy-supervisor` hands `run/<os user>/` to the host-session socket alone. Directory `0700`,
-//! socket `0600`, both owned by that user, so only that user (and root) can connect.
+//! **Where.** `<data dir>/run/<os user>/daemon.sock` ([`user_socket_path_for_user`]) when the daemon
+//! binds it itself. Directory `0700`, socket `0600`, both owned by that user, so only that user (and
+//! root) can connect.
 //!
 //! **Under `tddy-supervisor`** the daemon is an unprivileged child and cannot `chown` a socket to
-//! somebody else. A user listed under `agent_tool_sockets:` in `supervisor.yaml` has their socket
-//! created by the root supervisor and handed over, announced in `LISTEN_FDNAMES` as
-//! `agent-tools.<os user>` ([`AGENT_TOOLS_FD_NAME_PREFIX`]); the daemon serves it where it is. A
-//! user who is not listed is **refused** — the start fails naming the setting — rather than given a
-//! path that user cannot reach, whose every report the hooks' fail-quiet contract would swallow.
+//! somebody else. Every OS user `users.yaml` maps has their socket created by the root supervisor
+//! and handed over, announced in `LISTEN_FDNAMES` as `user.<os user>`
+//! ([`USER_SOCKET_FD_NAME_PREFIX`]); the daemon serves it where it is and derives no path of its own
+//! ([`AgentToolSocketPlacement::Supervised`]). A user it was handed none for is **refused** — the
+//! start fails naming `users.yaml` — rather than given a path that user cannot reach, whose every
+//! report the hooks' fail-quiet contract would swallow.
 //!
 //! **An embedded host** (Tddy Desktop) is single-user and keeps its one socket at
 //! [`crate::agent_tool_socket_path`], served by the runtime ([`AgentToolSocketPlacement::Embedded`]).
 //!
 //! **What is served.** The daemon's finished RPC roster, installed once `runtime::build` has
-//! assembled it ([`AgentToolSockets::install_roster`]) — the very handlers the UI reaches.
+//! assembled it ([`AgentToolSockets::install_roster`]) — the very handlers the UI reaches — plus
+//! each [`UserScopedService`] for the socket's user.
 //!
 //! Lives here, not in `tddy-daemon`, because its consumers (`tddy-agent-launch`,
 //! `tddy-session-split`) are below the daemon and cannot name it.
@@ -34,51 +37,14 @@ use tokio::task::JoinHandle;
 
 use crate::owner_socket::{self, OwnerSocketKind};
 
-/// Prefix of the `LISTEN_FDNAMES` entry of a per-OS-user agent-tool socket the supervisor hands
-/// over: `agent-tools.<os user>`. The supervisor's contract, spelled again here because the daemon
-/// does not link the supervisor; a test pins the two together.
-pub const AGENT_TOOLS_FD_NAME_PREFIX: &str = "agent-tools.";
-
-/// Directory under the data dir holding one subdirectory per OS user.
-pub const AGENT_TOOL_SOCKETS_RUN_DIR: &str = "run-agent-tools";
-
-/// File name of a user's agent-tool socket inside their directory.
-pub const AGENT_TOOL_SOCKET_FILE: &str = "agent.sock";
-
 /// Longest socket path accepted: `sun_path` is 104 bytes on macOS (the smaller of the two; Linux's is
 /// 108), NUL included. A macOS temporary directory alone spends ~65 of them, so this takes every
 /// byte the platform allows rather than keeping a margin.
 const MAX_SOCKET_PATH_BYTES: usize = 103;
 
-/// `<data dir>/run-agent-tools/<os user>/agent.sock`, or why there can be none: a user name that is
-/// not one plain path segment, or a path too long for `AF_UNIX`.
-pub fn agent_tool_socket_path_for_user(data_dir: &Path, os_user: &str) -> anyhow::Result<PathBuf> {
-    let name_is_one_safe_segment = !os_user.is_empty()
-        && !os_user.starts_with('.')
-        && os_user
-            .chars()
-            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '_' | '-' | '.'));
-    if !name_is_one_safe_segment {
-        bail!("OS user name {os_user:?} cannot name a socket directory");
-    }
-    let path = data_dir
-        .join(AGENT_TOOL_SOCKETS_RUN_DIR)
-        .join(os_user)
-        .join(AGENT_TOOL_SOCKET_FILE);
-    if path.as_os_str().len() > MAX_SOCKET_PATH_BYTES {
-        bail!(
-            "agent-tool socket path {} is too long for a unix socket ({} > {MAX_SOCKET_PATH_BYTES} \
-             bytes); use a shorter data dir",
-            path.display(),
-            path.as_os_str().len()
-        );
-    }
-    Ok(path)
-}
-
 /// Prefix of the `LISTEN_FDNAMES` entry of a mapped OS user's **one** daemon socket
-/// (`#agent-tools` 31/32): `user.<os user>`. It replaces [`AGENT_TOOLS_FD_NAME_PREFIX`] and the
-/// host-session socket's `host-session.`; the supervisor's own spelling is
+/// (`#agent-tools` 31/32): `user.<os user>`, the only per-user name the supervisor hands over. The
+/// supervisor's own spelling is
 /// `tddy_supervisor::USER_SOCKET_FD_NAME_PREFIX`, and a test pins the two.
 pub const USER_SOCKET_FD_NAME_PREFIX: &str = "user.";
 
@@ -111,7 +77,8 @@ pub fn user_socket_path_for_user(data_dir: &Path, os_user: &str) -> anyhow::Resu
 }
 
 /// `(os user, descriptor)` for each `user.<os user>` socket the `LISTEN_*` variables announce
-/// (`#agent-tools` 31/32) — the one reader replacing [`agent_tool_fds`] and the host-session one.
+/// (`#agent-tools` 31/32) — nothing unless they were set for this process (`LISTEN_PID`) and the
+/// names account for exactly `LISTEN_FDS` descriptors.
 pub fn user_socket_fds(
     my_pid: u32,
     listen_pid: Option<&str>,
@@ -135,24 +102,6 @@ pub trait UserScopedService: Send + Sync {
     fn entry_for(&self, os_user: &str) -> ServiceEntry;
 }
 
-/// `(os user, descriptor)` for each agent-tool socket the `LISTEN_*` variables announce — nothing
-/// unless they were set for this process (`LISTEN_PID`) and the names account for exactly
-/// `LISTEN_FDS` descriptors. The same reading `tddy_supervisor`'s host-session resolver makes.
-pub fn agent_tool_fds(
-    my_pid: u32,
-    listen_pid: Option<&str>,
-    listen_fds: Option<&str>,
-    listen_fdnames: Option<&str>,
-) -> Vec<(String, RawFd)> {
-    owner_socket::descriptors_named(
-        AGENT_TOOLS_FD_NAME_PREFIX,
-        my_pid,
-        listen_pid,
-        listen_fds,
-        listen_fdnames,
-    )
-}
-
 /// A listener the supervisor created for one OS user, vetted (owner and mode) and ready to serve.
 #[derive(Debug)]
 pub struct InheritedAgentToolSocket {
@@ -161,38 +110,11 @@ pub struct InheritedAgentToolSocket {
     pub path: PathBuf,
 }
 
-/// The agent-tool sockets this process was handed, according to its own environment.
+/// The merged per-user daemon sockets this process was handed, according to its own environment
+/// (`user.<os user>`, `#agent-tools` 31/32).
 ///
 /// Call it once, before anything else reads or clears the `LISTEN_*` variables — the daemon's own
 /// listener adoption removes them.
-pub fn adopt_from_environment() -> Vec<InheritedAgentToolSocket> {
-    let variable = |name: &str| std::env::var(name).ok();
-    adopt_descriptors(agent_tool_fds(
-        std::process::id(),
-        variable("LISTEN_PID").as_deref(),
-        variable("LISTEN_FDS").as_deref(),
-        variable("LISTEN_FDNAMES").as_deref(),
-    ))
-}
-
-/// Adopt each `(os user, descriptor)` that is that user's agent-tool socket; close the rest.
-pub fn adopt_descriptors(descriptors: Vec<(String, RawFd)>) -> Vec<InheritedAgentToolSocket> {
-    descriptors
-        .into_iter()
-        .filter_map(|(os_user, fd)| {
-            let (listener, path) =
-                owner_socket::adopt_descriptor(&os_user, fd, OwnerSocketKind::AGENT_TOOL)?;
-            Some(InheritedAgentToolSocket {
-                os_user,
-                listener,
-                path,
-            })
-        })
-        .collect()
-}
-
-/// The merged per-user daemon sockets this process was handed, according to its own environment
-/// (`user.<os user>`, `#agent-tools` 31/32).
 pub fn adopt_user_sockets_from_environment() -> Vec<InheritedAgentToolSocket> {
     let variable = |name: &str| std::env::var(name).ok();
     adopt_user_descriptors(user_socket_fds(

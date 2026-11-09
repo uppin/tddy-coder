@@ -16,11 +16,11 @@
 //! socket is created inside it, so whatever mode the socket is born with, nobody else can reach it;
 //! ownership moves last, directory after socket.
 //!
-//! **Under `tddy-supervisor`** the daemon is unprivileged and cannot make that `chown`. A user listed
-//! under `host_sockets:` in `supervisor.yaml` instead has their socket created by the root supervisor
-//! and handed to the daemon as an inherited listener (see [`super::inherited_host_sockets`]): the
-//! daemon serves it where it is, and never binds, replaces or removes it. A user who is not listed
-//! gets the refusal below, which names the setting to add.
+//! **Under `tddy-supervisor`** the daemon is unprivileged and cannot make that `chown`. Every OS
+//! user `users.yaml` maps gets one daemon socket created by the root supervisor and handed over;
+//! this registry is served on it ([`HostSessionSockets::serve_on`], `#agent-tools` 31/32), so the
+//! daemon binds no host socket of its own there. A user it was handed none for is refused, naming
+//! `users.yaml`.
 //!
 //! **Lifetime.** Bound lazily by the first session that needs it, kept for the daemon's lifetime and
 //! bound again by the next session after a restart. A stale file a dead daemon left is replaced only

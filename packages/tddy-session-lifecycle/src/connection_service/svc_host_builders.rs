@@ -317,38 +317,16 @@ impl DaemonSessionHost {
         self
     }
 
-    /// Serve the per-OS-user host-session sockets `tddy-supervisor` created and handed this daemon
-    /// (builder), instead of binding them here: an unprivileged daemon cannot give a socket to
-    /// another OS user. Call it after [`Self::with_host_session_stop_watch_interval`], which
-    /// replaces the sockets.
-    pub fn with_inherited_host_session_sockets(
-        self,
-        sockets: Vec<super::inherited_host_sockets::InheritedHostSocket>,
-    ) -> Self {
-        self.host_session_sockets.adopt_inherited(sockets);
-        self
-    }
-
-    /// Serve the host-session service on this host's merged per-user daemon sockets
-    /// (`#agent-tools` 31/32), instead of binding host sockets of its own. Call after
-    /// [`Self::with_agent_tool_sockets`], whose set this registers on.
-    pub fn with_host_sessions_on_user_sockets(self) -> Self {
-        self.host_session_sockets
-            .serve_on(Arc::clone(&self.agent_tool_sockets));
-        self
-    }
-
-    /// [`Self::with_host_sessions_on_user_sockets`] for a binary host; an embedded host keeps
-    /// the inherited host sockets its runtime handed it, as it serves its one socket itself.
-    /// Reading the environment here clears the `LISTEN_*` variables, as the caller requires.
+    /// Serve the host-session service on this host's per-user daemon sockets (`#agent-tools`
+    /// 31/32) when `merged` — a binary host — instead of binding host sockets of its own. An
+    /// embedded host serves its one socket itself, so it keeps binding its own host sockets. Call
+    /// after [`Self::with_agent_tool_sockets`], whose set this registers on.
     pub fn with_host_sessions_merged(self, merged: bool) -> Self {
         if merged {
-            self.with_host_sessions_on_user_sockets()
-        } else {
-            self.with_inherited_host_session_sockets(
-                super::inherited_host_sockets::adopt_from_environment(),
-            )
+            self.host_session_sockets
+                .serve_on(Arc::clone(&self.agent_tool_sockets));
         }
+        self
     }
 
     /// Tell this host's sessions about these agent-tool sockets (builder) — the runtime's, whose

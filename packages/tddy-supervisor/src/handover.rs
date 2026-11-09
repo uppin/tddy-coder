@@ -1,7 +1,7 @@
 //! Handing the supervisor's listening sockets to a managed service it starts.
 //!
-//! A service's own listener goes to descriptor 3 and each per-OS-user host socket (see
-//! [`crate::host_socket`]) to the descriptor after it, announced in `LISTEN_FDS` and
+//! A service's own listener goes to descriptor 3 and each mapped OS user's daemon socket (see
+//! [`crate::user_sockets`]) to the descriptors after it, announced in `LISTEN_FDS` and
 //! `LISTEN_FDNAMES` (see [`crate::socket`]). The listeners are gathered before the fork; the
 //! descriptor placement runs between `fork` and `exec`, where only async-signal-safe calls are
 //! allowed.
@@ -12,12 +12,11 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use crate::socket::{
-    agent_tools_fd_name, host_session_fd_name, user_socket_fd_name, MAX_HANDED_OVER_LISTENERS,
-    SD_LISTEN_FDS_START, SERVICE_SOCKET_FD_NAME,
+    user_socket_fd_name, MAX_HANDED_OVER_LISTENERS, SD_LISTEN_FDS_START, SERVICE_SOCKET_FD_NAME,
 };
 
 /// The listening sockets the supervisor created for a managed service, ready to be handed over:
-/// the service's own at descriptor 3, then one per OS user it was declared a host socket for.
+/// the service's own at descriptor 3, then one per OS user `users.yaml` maps.
 ///
 /// The supervisor keeps the listeners for as long as it runs, so a restarted service is handed the
 /// same ones. Rebinding per start would unlink and recreate the socket node, and a client that
@@ -43,8 +42,8 @@ impl SocketHandover {
     }
 
     /// Also hand over `os_user`'s one daemon socket (`#agent-tools` 31/32), at the next descriptor
-    /// and named `user.<os user>`. Replaces [`Self::with_host_session_socket`] and
-    /// [`Self::with_agent_tool_socket`].
+    /// and named `user.<os user>` — the one per-user socket, serving both the host-session
+    /// services and the agent-tool roster.
     pub fn with_user_socket(
         mut self,
         os_user: &str,
@@ -64,29 +63,6 @@ impl SocketHandover {
     /// The `users.yaml` path the service is told, if it serves users.
     pub(crate) fn users_file(&self) -> Option<&Path> {
         self.users_file.as_deref()
-    }
-
-    /// Also hand over `os_user`'s host socket, at the next descriptor and under its own name.
-    pub fn with_host_session_socket(
-        mut self,
-        os_user: &str,
-        listener: Arc<UnixListener>,
-    ) -> SocketHandover {
-        self.listeners
-            .push((host_session_fd_name(os_user), listener));
-        self
-    }
-
-    /// Also hand over `os_user`'s agent-tool socket (`#agent-tools` 26/28), at the next descriptor
-    /// and named `agent-tools.<os user>`.
-    pub fn with_agent_tool_socket(
-        mut self,
-        os_user: &str,
-        listener: Arc<UnixListener>,
-    ) -> SocketHandover {
-        self.listeners
-            .push((agent_tools_fd_name(os_user), listener));
-        self
     }
 
     /// The descriptors to place at [`SD_LISTEN_FDS_START`] and after, in order. Borrowed, never

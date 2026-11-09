@@ -12,11 +12,11 @@
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use crate::signals::{signal_process, TERMINATE};
+use crate::signals::{signal_process, KILL, TERMINATE};
 use crate::supervisor::Supervisor;
 use crate::users_file::UsersFile;
 
-/// How long a service that serves users gets to exit before its restart is given up on.
+/// How long a service that serves users gets to exit after each signal (SIGTERM, then SIGKILL).
 const RESTART_STOP_TIMEOUT: Duration = Duration::from_secs(10);
 const RESTART_POLL_INTERVAL: Duration = Duration::from_millis(25);
 
@@ -59,24 +59,35 @@ impl Supervisor {
                 let mut slots = self.lock();
                 slots[index].runtime.record_stop_requested();
             }
-            signal_process(pid, TERMINATE);
-            let deadline = Instant::now() + RESTART_STOP_TIMEOUT;
-            loop {
-                self.reap().await;
-                let still_running = self.lock()[index].runtime.status().pid == Some(pid);
-                if !still_running {
-                    break;
-                }
-                if Instant::now() >= deadline {
-                    anyhow::bail!(
-                        "service `{name}` did not exit within {RESTART_STOP_TIMEOUT:?} of a \
-                         users.yaml change; it keeps the old mapping until it is restarted"
-                    );
-                }
-                tokio::time::sleep(RESTART_POLL_INTERVAL).await;
+            if !self.stop_within(index, pid, TERMINATE).await
+                && !self.stop_within(index, pid, KILL).await
+            {
+                // Stop was requested, so a later exit would read as "stopped on request" and
+                // never be restarted: say so rather than leave a silent hole.
+                anyhow::bail!(
+                    "service `{name}` (pid {pid}) survived SIGTERM and SIGKILL for \
+                     {RESTART_STOP_TIMEOUT:?} each after a users.yaml change; it is not restarted"
+                );
             }
             self.start(index).await;
         }
         Ok(())
+    }
+
+    /// Send `signal` to the service at `index` (running as `pid`) and reap until it is gone,
+    /// for at most [`RESTART_STOP_TIMEOUT`]. True once it has exited.
+    async fn stop_within(self: &Arc<Self>, index: usize, pid: u32, signal: i32) -> bool {
+        signal_process(pid, signal);
+        let deadline = Instant::now() + RESTART_STOP_TIMEOUT;
+        loop {
+            self.reap().await;
+            if self.lock()[index].runtime.status().pid != Some(pid) {
+                return true;
+            }
+            if Instant::now() >= deadline {
+                return false;
+            }
+            tokio::time::sleep(RESTART_POLL_INTERVAL).await;
+        }
     }
 }

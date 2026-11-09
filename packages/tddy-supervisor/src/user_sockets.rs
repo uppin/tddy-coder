@@ -42,18 +42,7 @@ impl UserListeners {
         sockets_dir: &Path,
         users: &UsersFile,
     ) -> anyhow::Result<UserListeners> {
-        let mut by_user = BTreeMap::new();
-        for os_user in users.os_users() {
-            let listener = crate::host_socket::bind_host_socket(
-                service,
-                &crate::config::HostSocket {
-                    user: os_user.clone(),
-                    path: user_socket_path(sockets_dir, &os_user),
-                },
-            )?;
-            by_user.insert(os_user, Arc::new(listener));
-        }
-        Ok(UserListeners { by_user })
+        UserListeners::default().rebuild(service, sockets_dir, users)
     }
 
     /// The set for `next`: an OS user both mappings name keeps this set's listener (the same
@@ -66,18 +55,17 @@ impl UserListeners {
     ) -> anyhow::Result<UserListeners> {
         let mut by_user = BTreeMap::new();
         for os_user in next.os_users() {
-            if let Some(existing) = self.by_user.get(&os_user) {
-                by_user.insert(os_user, Arc::clone(existing));
-            } else {
-                let listener = crate::host_socket::bind_host_socket(
+            let listener = match self.by_user.get(&os_user) {
+                Some(existing) => Arc::clone(existing),
+                None => Arc::new(crate::host_socket::bind_host_socket(
                     service,
                     &crate::config::HostSocket {
                         user: os_user.clone(),
                         path: user_socket_path(sockets_dir, &os_user),
                     },
-                )?;
-                by_user.insert(os_user, Arc::new(listener));
-            }
+                )?),
+            };
+            by_user.insert(os_user, listener);
         }
         Ok(UserListeners { by_user })
     }

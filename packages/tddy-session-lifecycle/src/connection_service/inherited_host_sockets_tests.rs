@@ -8,9 +8,7 @@
 //! Changeset: docs/dev/1-WIP/2026-09-19-keyring-github-identity.md (host socket under the supervisor)
 
 use super::host_session_socket::*;
-use super::inherited_host_sockets::{
-    adopt_descriptors, adopt_from_variables, host_session_fds, InheritedHostSocket,
-};
+use super::inherited_host_sockets::{adopt_descriptors, adopt_from_variables, InheritedHostSocket};
 use std::os::fd::AsRawFd;
 use std::os::unix::fs::{DirBuilderExt, PermissionsExt};
 use std::os::unix::net::UnixListener;
@@ -183,27 +181,6 @@ fn ignores_variables_that_were_set_for_another_process() {
     assert!(adopted.is_empty());
 }
 
-#[test]
-fn reads_the_same_descriptor_names_the_supervisor_writes() {
-    // Given the supervisor's own writer and reader of the names
-    let names = format!(
-        "{}:{}",
-        tddy_supervisor::SERVICE_SOCKET_FD_NAME,
-        tddy_supervisor::host_session_fd_name("alice")
-    );
-
-    // Then the supervisor reads them as host socket `alice` at descriptor 4 — and this daemon's
-    // reader agrees, which it can only do by sharing the prefix
-    assert_eq!(
-        tddy_supervisor::resolve_host_session_fds(7, Some("7"), Some("2"), Some(&names)),
-        vec![("alice".to_string(), 4)]
-    );
-    assert_eq!(
-        host_session_fds(7, Some("7"), Some("2"), Some(&names)),
-        vec![("alice".to_string(), 4)]
-    );
-}
-
 #[tokio::test]
 async fn serves_an_inherited_socket_at_its_own_path_instead_of_binding_one() {
     // Given a daemon handed this user's socket by the supervisor, and a session registered for them
@@ -278,38 +255,6 @@ async fn does_not_rebind_an_inherited_socket_whose_file_was_removed() {
     let refusal = format!("{refusal:#}");
     assert!(refusal.contains("supervisor"), "{refusal}");
     assert!(!data.path().join("run").exists());
-}
-
-#[test]
-fn reads_the_same_agent_tool_descriptor_names_the_supervisor_writes() {
-    // Given the supervisor's own writer of the names: its socket, alice's host socket, then her
-    // agent-tool socket (`#agent-tools` 26/28)
-    let names = format!(
-        "{}:{}:{}",
-        tddy_supervisor::SERVICE_SOCKET_FD_NAME,
-        tddy_supervisor::host_session_fd_name("alice"),
-        tddy_supervisor::agent_tools_fd_name("alice")
-    );
-
-    // Then the daemon's agent-tool reader finds alice's at descriptor 5 — which it can only do by
-    // sharing the supervisor's prefix — and the host-session reader still finds hers at 4
-    assert_eq!(
-        (
-            tddy_supervisor::AGENT_TOOLS_FD_NAME_PREFIX,
-            tddy_daemon_kernel::agent_tool_sockets::agent_tool_fds(
-                7,
-                Some("7"),
-                Some("3"),
-                Some(&names)
-            ),
-            host_session_fds(7, Some("7"), Some("3"), Some(&names)),
-        ),
-        (
-            tddy_daemon_kernel::agent_tool_sockets::AGENT_TOOLS_FD_NAME_PREFIX,
-            vec![("alice".to_string(), 5)],
-            vec![("alice".to_string(), 4)],
-        )
-    );
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -387,9 +332,12 @@ async fn a_supervised_daemon_serves_host_session_and_agent_tool_calls_on_one_use
         name: A_ROSTER_SERVICE,
         service: Arc::new(ARoster),
     }]);
-    user_sockets.adopt_inherited(tddy_daemon_kernel::agent_tool_sockets::adopt_descriptors(
-        vec![(user.clone(), handed_over(&listener))],
-    ));
+    user_sockets.adopt_inherited(
+        tddy_daemon_kernel::agent_tool_sockets::adopt_user_descriptors(vec![(
+            user.clone(),
+            handed_over(&listener),
+        )]),
+    );
     let host_sessions = HostSessionSockets::default();
     host_sessions.registry().register(
         "s1",

@@ -255,12 +255,9 @@ impl BuildContext {
         let approval_routes = Arc::default();
         // The registry `runtime::build` loaded once, shared with Telegram and the reserved-ids step.
         let coding_agents = Arc::clone(&self.coding_agents);
-        // The agent-tool sockets the supervisor handed over, read before the local socket server
-        // is spawned: adopting its own listener clears the `LISTEN_*` variables they are announced in.
-        self.agent_tool_sockets
-            .adopt_inherited(tddy_daemon_kernel::agent_tool_sockets::adopt_from_environment());
-        // The merged socket the supervisor hands over now (`user.<os user>`), which wins over an
-        // agent-tool socket for the same user from before the merge.
+        // The per-user daemon sockets the supervisor handed over (`user.<os user>`), read before
+        // the local socket server is spawned: adopting its own listener clears the `LISTEN_*`
+        // variables they are announced in.
         self.agent_tool_sockets.adopt_inherited(
             tddy_daemon_kernel::agent_tool_sockets::adopt_user_sockets_from_environment(),
         );

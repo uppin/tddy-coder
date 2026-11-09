@@ -997,17 +997,4 @@ mod tests {
             (format!("connection:user.{account}"), true)
         );
     }
-
-    #[test]
-    fn the_user_fd_name_prefix_is_not_the_old_host_session_one() {
-        // Then — guard: the daemon tells the merged socket from the service's own by this prefix
-        assert_eq!(
-            (
-                crate::socket::user_socket_fd_name("alice"),
-                crate::socket::host_session_fd_name("alice")
-                    == crate::socket::user_socket_fd_name("alice"),
-            ),
-            ("user.alice".to_string(), false)
-        );
-    }
 }

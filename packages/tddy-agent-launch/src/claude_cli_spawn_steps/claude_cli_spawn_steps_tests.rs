@@ -105,7 +105,7 @@ impl AServerHost {
 
     /// Where `ada`, the user the sessions here run as, is served.
     fn socket_path(&self) -> PathBuf {
-        tddy_daemon_kernel::agent_tool_sockets::agent_tool_socket_path_for_user(
+        tddy_daemon_kernel::agent_tool_sockets::user_socket_path_for_user(
             self.data_dir.path(),
             ITS_OS_USER,
         )

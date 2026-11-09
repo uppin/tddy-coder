@@ -74,10 +74,8 @@ pub use restart::{BackoffState, RestartDecision};
 pub use service::{ServiceState, ServiceStatus};
 pub use services::{ExitOutcome, ServiceRuntime};
 pub use socket::{
-    agent_tools_fd_name, host_session_fd_name, resolve_host_session_fds, user_socket_fd_name,
-    SocketSource, AGENT_TOOLS_FD_NAME_PREFIX, HOST_SESSION_FD_NAME_PREFIX,
-    MAX_HANDED_OVER_LISTENERS, SD_LISTEN_FDS_START, SERVICE_SOCKET_FD_NAME,
-    USER_SOCKET_FD_NAME_PREFIX,
+    user_socket_fd_name, SocketSource, MAX_HANDED_OVER_LISTENERS, SD_LISTEN_FDS_START,
+    SERVICE_SOCKET_FD_NAME, USER_SOCKET_FD_NAME_PREFIX,
 };
 pub use supervisor::Supervisor;
 
@@ -135,12 +133,17 @@ pub async fn run(config_path: &Path) -> anyhow::Result<()> {
     struct SupervisorUsersSink {
         supervisor: Arc<Supervisor>,
         handle: tokio::runtime::Handle,
+        // One change applied at a time, in the order they were saved: two overlapping applies
+        // would each stop and start the same service.
+        applying: Arc<tokio::sync::Mutex<()>>,
     }
     impl crate::users_watch::UsersWatchSink for SupervisorUsersSink {
         fn changed(&self, next: &crate::users_file::UsersFile) {
             let supervisor = Arc::clone(&self.supervisor);
+            let applying = Arc::clone(&self.applying);
             let next = next.clone();
             self.handle.spawn(async move {
+                let _one_at_a_time = applying.lock().await;
                 if let Err(error) = supervisor.apply_users_change(&next).await {
                     log::error!(
                         target: "tddy_supervisor",
@@ -163,6 +166,7 @@ pub async fn run(config_path: &Path) -> anyhow::Result<()> {
             Arc::new(SupervisorUsersSink {
                 supervisor: Arc::clone(&supervisor),
                 handle: tokio::runtime::Handle::current(),
+                applying: Arc::new(tokio::sync::Mutex::new(())),
             }),
         )?),
         None => None,
