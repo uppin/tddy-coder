@@ -51,6 +51,8 @@ fn a_daemon_config(livekit_block: &str) -> (tempfile::TempDir, DaemonConfig) {
         format!("daemon_instance_id: {INSTANCE_ID}\n{livekit_block}"),
     )
     .expect("write daemon.yaml");
+    // Every load needs a users.yaml beside the config; this daemon maps nobody.
+    std::fs::write(dir.path().join("users.yaml"), "[]\n").expect("write users.yaml");
     let config = DaemonConfig::load(&path).expect("daemon.yaml must load");
     (dir, config)
 }

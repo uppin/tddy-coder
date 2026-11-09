@@ -167,10 +167,17 @@ fn desktop_devs_config_opens_its_vaults_without_a_passphrase() {
 
 /// Whether the checkout's `file` keeps vaults, and whether they open without a passphrase — as
 /// checked when auth is wired.
+///
+/// The config is loaded from a copy: the mapping lives in a `users.yaml` beside it, which the dev
+/// launchers render per run and the checkout does not carry, so the copy gets an empty one.
 fn the_dev_vault_posture_of(file: &str) -> (bool, bool) {
-    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+    let checked_in = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("../..")
         .join(file);
+    let dir = tempfile::tempdir().expect("tempdir");
+    let path = dir.path().join(file);
+    std::fs::copy(&checked_in, &path).expect("the dev config is copied");
+    std::fs::write(dir.path().join("users.yaml"), "[]\n").expect("the users file is written");
     let config = DaemonConfig::load(&path).expect("the dev config loads");
     let github = config.github.as_ref().expect("a dev config signs in");
     let without_passphrase = tddy_daemon_auth::dev_vault::vaults_without_passphrase(github)
