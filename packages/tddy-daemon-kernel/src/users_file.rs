@@ -45,11 +45,10 @@ impl UsersFileSource {
                 return UsersFileSource::HandedBySupervisor(PathBuf::from(handed));
             }
         }
-        let beside = config_path
-            .parent()
-            .map(|directory| directory.join(USERS_FILE_NAME))
-            .unwrap_or_else(|| PathBuf::from(USERS_FILE_NAME));
-        UsersFileSource::BesideConfig(beside)
+        // Beside the config file itself, by name: `with_file_name` keeps whatever directory the
+        // config path carries (and for a bare file name, that name's own directory) instead of
+        // guessing one relative to the working directory.
+        UsersFileSource::BesideConfig(config_path.with_file_name(USERS_FILE_NAME))
     }
 
     /// [`Self::resolve`] over this process's own environment.

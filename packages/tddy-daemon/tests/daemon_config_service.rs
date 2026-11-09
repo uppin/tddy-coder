@@ -327,6 +327,15 @@ async fn update_config_writes_no_users_key_into_daemon_yaml() {
         ),
         (false, Some("ws://10.0.0.5:7880"))
     );
+    // And it wrote no `users.yaml`: an update carries no mapping, so enrolment stays that
+    // file's one writer (`#agent-tools` 31/32, user decision on the pass-2 report)
+    assert_eq!(
+        daemon
+            .config_path
+            .parent()
+            .map(|directory| directory.join("users.yaml").exists()),
+        Some(false)
+    );
 }
 
 #[tokio::test]

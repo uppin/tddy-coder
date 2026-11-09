@@ -136,16 +136,28 @@ impl LiveUsers {
         }
         // `config_path` is the daemon's config file; the mapping it enrols into is the
         // `users.yaml` beside it (a caller that already named that file enrols into it directly).
+        // A config file with no parent directory names no directory to enrol beside, which is a
+        // refusal — never a guess at one relative to the working directory.
         let users_path = if config_path
             .file_name()
             .is_some_and(|name| name == "users.yaml")
         {
             config_path.to_path_buf()
         } else {
-            config_path
-                .parent()
-                .map(|directory| directory.join("users.yaml"))
-                .unwrap_or_else(|| std::path::PathBuf::from("users.yaml"))
+            match config_path.parent() {
+                Some(directory) if !directory.as_os_str().is_empty() => {
+                    directory.join("users.yaml")
+                }
+                _ => {
+                    return Err(EnrolmentRefusal::ConfigNotWritable {
+                        reason: format!(
+                            "the daemon config {} has no parent directory, so there is no \
+                             users.yaml beside it to enrol into",
+                            config_path.display()
+                        ),
+                    })
+                }
+            }
         };
         let mapping = enrol_first_login(&users_path, github_user, os_user)?;
         self.inner

@@ -42,7 +42,7 @@
   - The cross-crate prefix pin test (`connection_service/inherited_host_sockets_tests.rs:285-313`) becomes one prefix.
 - **tddy-daemon**:
   - The adoption in `runtime/mount_host.rs:261,313` becomes one.
-  - `UpdateConfig` (`daemon_config_service.rs:195-228`) stops re-serialising `users:` into `daemon.yaml` (:210-216). It writes `users.yaml` on desktop and never when supervised.
+  - `UpdateConfig` (`daemon_config_service.rs:195-228`) stops re-serialising `users:` into `daemon.yaml` (:210-216). It writes no `users.yaml` (user decision on the pass-2 report: its wire message carries no mapping; first-login enrolment is the one writer of `users.yaml`).
 - **tddy-desktop**: desktop enrolment writes `~/.tddy/users.yaml`. Only touched if its config path code names `users:`.
 - **tddy-daemon-auth**: `first_login_admission.rs` handles the new `EnrolmentRefusal::OwnedBySupervisor`; its tests that load `users:` from a file move to `users.yaml`.
 - **Fixture churn (user decision, 2026-11-07)**: about 25 test files load a `users:` key from a file through `DaemonConfig::load`, and that key is now a load error. They are in `tddy-daemon-livekit` (4 repro/acceptance suites), `tddy-host-service` (`test_util.rs` and 5 handler unit-test files), `tddy-daemon-auth` (7 acceptance suites and `support/mod.rs`), `tddy-model-registry` (`model_registry_service_acceptance.rs`) and `tddy-daemon` (multi-host, staging-forwarding, session-agent-remote, removed-agent-config, first-login and more). Each one either writes `users.yaml` beside the config or sets `config.users` in memory after loading.
@@ -73,7 +73,7 @@ are gone.
 - [ ] Spawn policy session users come from the mapping. `allowed_session_users` is removed.
 - [ ] Watch `users.yaml`: rebuild listeners (unchanged users keep their descriptors), restart `tddy-daemon`; an invalid edit is refused and the running mapping kept
 - [ ] Old keys are load errors naming `users.yaml`: `daemon.yaml` `users:`; `supervisor.yaml` `allowed_session_users`, `host_sockets`, `agent_tool_sockets`
-- [ ] Desktop: `UpdateConfig` and first-login enrolment write `users.yaml`. A supervised daemon never writes the mapping.
+- [ ] Desktop: `UpdateConfig` writes no `users.yaml` (its wire message carries no mapping); first-login enrolment is the one writer of `users.yaml`. A supervised daemon never writes the mapping.
 - [ ] `./install`: one-time migration (`daemon.yaml` `users:` → `users.yaml`, old keys dropped, idempotent); `survey_agent_tool_sockets` and `declare_agent_tool_sockets` deleted
 - [ ] Templates and dev scripts: `*.yaml.production`, `dev.*.yaml`, `./web-dev`, `./desktop-dev`. A missing `users.yaml` is an error, so `./install` (`--systemd`, `--user`, `--desktop`), `./web-dev` and `./desktop-dev` each render one. `./web-dev` renders the daemon config into a `mktemp` file, so it needs a `mktemp -d` directory to put `users.yaml` beside it.
 - [ ] Test fixture churn across `tddy-daemon-livekit`, `tddy-host-service`, `tddy-daemon-auth`, `tddy-model-registry` and `tddy-daemon` (see Affected Packages)
@@ -282,7 +282,7 @@ All of the following were decided by the user on 2026-11-07:
 - On a change, the supervisor re-reads the file and restarts the daemon.
 - The three supervisor lists and the install survey are removed.
 - `./install` migrates once; after that, an old key is an error.
-- On desktop, `UpdateConfig` and enrolment write `users.yaml`.
+- On desktop, enrolment alone writes `users.yaml`; `UpdateConfig` writes none.
 - The supervisor rule (verbatim): "supervisor shouldn't be aware of any env or coding agent
   specifics. It's job is to manage tddy-daemon on the correct OS user, manage cgroups etc. It
   shouldn't inherit config that normally should belong to tddy-daemon. Also, any coding specific
