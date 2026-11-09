@@ -6,7 +6,7 @@
 //! that changes what a built-in agent declares is what tells "read from the spec" from "known by
 //! name": the name stays, the declaration moves.
 //!
-//! Changeset: `docs/dev/1-WIP/2026-11-06-acp-subagent-leftovers.md`.
+//! Changeset: `docs/dev/changesets/2026-11-09-agent-tools-acp-subagent-leftovers.md`.
 
 use pretty_assertions::assert_eq;
 use tddy_coding_agent_specs::{

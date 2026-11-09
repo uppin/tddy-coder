@@ -5,7 +5,7 @@
 //! Drives a real `tddy-acp-stub` child through the ACP driver. Needs `target/debug/tddy-acp-stub`
 //! (`cargo build -p tddy-acp-stub`).
 //!
-//! Changeset: `docs/dev/1-WIP/2026-11-06-acp-subagent-leftovers.md`.
+//! Changeset: `docs/dev/changesets/2026-11-09-agent-tools-acp-subagent-leftovers.md`.
 
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Weak};

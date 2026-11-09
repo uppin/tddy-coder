@@ -1,5 +1,5 @@
 //! Source scan: `tddy-coding-subagent` names no coding agent in its production code
-//! (`#agent-tools 27/28`, `docs/dev/1-WIP/2026-11-06-acp-subagent-leftovers.md` § State B).
+//! (`#agent-tools 27/28`, `docs/dev/changesets/2026-11-09-agent-tools-acp-subagent-leftovers.md`).
 //!
 //! Which agent withdraws which native tools, how it is spoken to and which ones are ACP agents is
 //! the agents' specs' to declare (`coding_agent.acp.tool_deny`, `acp.withdraw_native`, the `acp` and

@@ -449,7 +449,7 @@ async fn a_managed_session_still_refuses_codex_acp_because_its_spec_declares_too
 // retries once on an auth-like `session/new` error. Which agent takes a route as `-c` overrides is
 // its spec's `route.shape: toml_args`, never its name.
 //
-// Changeset: `docs/dev/1-WIP/2026-11-06-acp-subagent-leftovers.md`.
+// Changeset: `docs/dev/changesets/2026-11-09-agent-tools-acp-subagent-leftovers.md`.
 
 /// How long a `codex login` the hooks run may take.
 const LOGIN_DEADLINE: std::time::Duration = std::time::Duration::from_secs(10);

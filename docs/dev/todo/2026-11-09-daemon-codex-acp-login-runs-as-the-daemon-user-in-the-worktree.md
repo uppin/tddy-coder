@@ -2,7 +2,7 @@
 
 **Category:** Found by `acp-subagent-leftovers` (#835, `#agent-tools 27/32`) at `/validate-changes`
 
-**Source:** `docs/dev/changesets/2026-11-09-agent-tools-acp-subagent-leftovers.md`, § Deferred
+**Source:** `docs/dev/changesets/2026-11-09-agent-tools-acp-subagent-leftovers.md`, § Backlog
 
 ## What remains
 
