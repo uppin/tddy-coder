@@ -11,6 +11,16 @@ use serial_test::serial;
 use tddy_core::provider_route::{HarnessRoute, RouteFile, RouteSecret};
 use tddy_core::CodingBackend;
 
+/// What this test set for the stub (its scenario and record paths), handed to the agent on
+/// purpose: an ACP agent starts from exactly its command's environment, never this process's
+/// (`#agent-tools 28/28`). Read when the backend is built, so set the variables first.
+fn the_stub_env() -> Vec<(String, String)> {
+    ["TDDY_ACP_SCENARIO", "TDDY_ACP_STUB_RECORD"]
+        .into_iter()
+        .filter_map(|name| Some((name.to_string(), std::env::var(name).ok()?)))
+        .collect()
+}
+
 /// A spec backend for the stub agent, as the agent's spec builds it: its routed agent (from
 /// `opencode.yaml`, so a provider route is accepted), a command that spawns the stub, and the
 /// hooks adapter its spec names, which materialises a route's config file for the agent.
@@ -29,7 +39,7 @@ fn a_spec_backend(path: std::path::PathBuf) -> tddy_core::SpecAcpBackend {
             program: path,
             // The spec's `acp.command`: the binary run as `opencode acp`.
             args: vec!["acp".to_string()],
-            env: Vec::new(),
+            env: the_stub_env(),
             cwd: None,
         },
     )

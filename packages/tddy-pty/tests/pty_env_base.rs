@@ -81,6 +81,24 @@ async fn a_child_on_a_cleared_base_sees_only_its_spec_env_and_the_terminal_varia
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_child_on_a_cleared_base_is_told_the_terminal_it_runs_in_whatever_its_env_says() {
+    // Given — an agent env carrying the daemon's own terminal description
+    let env = vec![
+        ("PATH".to_string(), "/usr/bin:/bin".to_string()),
+        ("TERM".to_string(), "xterm-ghostty".to_string()),
+        ("COLORTERM".to_string(), "24bit".to_string()),
+    ];
+
+    // When
+    let printed = environment_printed_by_a_child_on(PtyEnvBase::Cleared, env).await;
+
+    // Then — the PTY's own terminal stands
+    assert!(printed.contains("TERM=xterm-256color"), "{printed}");
+    assert!(printed.contains("COLORTERM=truecolor"), "{printed}");
+    assert!(!printed.contains("xterm-ghostty"), "{printed}");
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_child_on_an_inherited_base_still_sees_the_daemons_variables() {
     // Given
     a_daemon_holding_a_variable_of_its_own();

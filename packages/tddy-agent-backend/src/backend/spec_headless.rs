@@ -244,8 +244,9 @@ impl SpecHeadlessBackend {
         }
     }
 
-    /// The environment the child is started from: the route's, then the spec's own
-    /// `headless.env` rendered.
+    /// The environment the child is started from: the invocation's whole environment rendered
+    /// (the base set, the spec's `pass_env` values and its `headless.env`), then the route's, which
+    /// stands over a daemon variable of the same name — as an ACP launch's route does.
     fn child_env(
         &self,
         invocation: &HeadlessInvocation,
@@ -254,19 +255,17 @@ impl SpecHeadlessBackend {
         let self_exe = std::env::current_exe().map_err(|e| {
             BackendError::InvocationFailed(format!("this executable cannot be named: {e}"))
         })?;
-        let mut env: Vec<(String, String)> = self
-            .provider_route
-            .iter()
-            .flat_map(route_child_env)
-            .map(|(name, value)| (name.to_string(), value.to_string()))
-            .collect();
-        env.extend(render_env(
+        let mut env = render_env(
             &invocation.env,
             &EnvTemplate {
                 session_dir: request.session_dir.clone(),
                 self_exe,
             },
-        )?);
+        )?;
+        for (name, value) in self.provider_route.iter().flat_map(route_child_env) {
+            env.retain(|(kept, _)| kept != name);
+            env.push((name.to_string(), value.to_string()));
+        }
         Ok(env)
     }
 }

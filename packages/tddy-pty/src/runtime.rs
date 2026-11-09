@@ -51,7 +51,7 @@ pub struct PtySpawnSpec {
     pub session_id: String,
     pub terminal_id: String,
     pub kind: String,
-    /// Extra environment variables set on the spawned process (in addition to the inherited env).
+    /// Environment variables set on the spawned process, on top of what `env_base` starts it from.
     pub env: Vec<(String, String)>,
     /// What the child starts from before `env` is applied (`#agent-tools 28/28`).
     pub env_base: PtyEnvBase,
@@ -63,10 +63,16 @@ pub enum PtyEnvBase {
     /// The spawning process's environment, minus the GitHub token variables: a user's terminal.
     #[default]
     Inherited,
-    /// Nothing: the child sees only the terminal's own `TERM`/`COLORTERM` and the spec's `env` —
-    /// an agent, whose whole environment the caller built from the allow-list
-    /// (`tddy_agent_backend::agent_env`).
+    /// Nothing: the child sees only the spec's `env` and the terminal's own `TERM`/`COLORTERM`,
+    /// which stand over any the `env` names — an agent, whose whole environment the caller built
+    /// from the allow-list (`tddy_agent_backend::agent_env`).
     Cleared,
+}
+
+/// The variables naming the terminal a PTY child runs in.
+fn set_terminal_variables(cmd: &mut CommandBuilder) {
+    cmd.env("TERM", "xterm-256color");
+    cmd.env("COLORTERM", "truecolor");
 }
 
 /// Work to finish when a process has exited and its output is complete, run with the task's id
@@ -333,11 +339,12 @@ fn open_pty_and_pump(
         cmd.arg(arg);
     }
     cmd.cwd(&spec.worktree_path);
-    if spec.env_base == PtyEnvBase::Cleared {
+    let cleared = spec.env_base == PtyEnvBase::Cleared;
+    if cleared {
         cmd.env_clear();
+    } else {
+        set_terminal_variables(&mut cmd);
     }
-    cmd.env("TERM", "xterm-256color");
-    cmd.env("COLORTERM", "truecolor");
     // The environment is never a credential: a daemon that has one of these exported must not hand
     // it to the agent by inheritance, or `gh` would act as whoever exported it.
     for token_variable in GITHUB_TOKEN_VARIABLES {
@@ -346,6 +353,11 @@ fn open_pty_and_pump(
 
     for (key, value) in &spec.env {
         cmd.env(key, value);
+    }
+    if cleared {
+        // An agent's env is the daemon's base set, whose `TERM` names the daemon's terminal: this
+        // PTY's own description stands over it.
+        set_terminal_variables(&mut cmd);
     }
 
     let child = match pair.slave.spawn_command(cmd) {

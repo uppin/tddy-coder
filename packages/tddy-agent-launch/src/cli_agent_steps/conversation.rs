@@ -4,7 +4,7 @@
 use crate::harness_from_spec::HarnessLaunch;
 use std::path::Path;
 use tddy_coding_agent_specs::slots::conversation::ConversationSlot;
-use tddy_coding_agent_specs::{Capability, CodingAgentSpec};
+use tddy_coding_agent_specs::{AgentEnvBase, Capability, CodingAgentSpec};
 use tddy_core::adapters::{ConversationMint, ConversationMintError, LaunchAdapters};
 use tddy_core::session_metadata::PROJECT_HOME_ROLE;
 use tddy_core::SessionMetadata;
@@ -58,7 +58,11 @@ pub(crate) struct ConversationStart<'a> {
     /// The agent's resolved binary, which a `minted` adapter runs.
     pub binary: &'a Path,
     pub worktree: &'a Path,
-    /// The environment the mint runs with on top of the daemon's (the session's git identity).
+    /// The base set the mint's environment keeps from the daemon's: the agent's host registry's
+    /// (`#agent-tools 28/28`).
+    pub env_base: &'a AgentEnvBase,
+    /// What the mint's launch sets on purpose (the session's git identity). The mint starts from
+    /// `env_base`'s agent environment with these on top, never from the daemon's whole environment.
     pub env: &'a [(String, String)],
     pub session_id: &'a str,
 }
@@ -71,6 +75,7 @@ pub(crate) async fn start_conversation(
     let ConversationStart {
         spec,
         binary,
+        env_base,
         worktree,
         env,
         session_id,
@@ -98,7 +103,7 @@ pub(crate) async fn start_conversation(
                 .mint(ConversationMint {
                     binary,
                     workdir: worktree,
-                    env,
+                    env: &env_base.agent_env(spec, std::env::vars_os(), env),
                     deadline,
                 })
                 .await

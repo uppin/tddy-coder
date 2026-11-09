@@ -320,11 +320,26 @@ async fn spawn_host_pty(
 /// The names are read with a pattern that admits only shell names, so `unset` never fails.
 const PANE_WITH_ONLY_THE_AGENT_ENV: &str = r#"keep=" $1 "; shift; for name in $(/usr/bin/env | /usr/bin/sed -n 's/^\([A-Za-z_][A-Za-z0-9_]*\)=.*/\1/p'); do case "$keep" in *" $name "*) ;; *) unset "$name" ;; esac; done; exec "$@""#;
 
+/// The variables a tmux pane sets itself, naming the terminal the agent runs in. The pane keeps
+/// its own whatever the agent's environment says, and the pane file never sets them: a daemon's
+/// `TERM` names the terminal the daemon was started from, not the pane.
+pub(crate) const PANE_TERMINAL_VARIABLES: [&str; 4] = ["TERM", "COLORTERM", "TMUX", "TMUX_PANE"];
+
+/// `env`, the agent's whole environment, as a tmux pane is given it: without
+/// [`PANE_TERMINAL_VARIABLES`], which the pane sets itself.
+pub(crate) fn without_the_panes_terminal_variables(
+    env: Vec<(String, String)>,
+) -> Vec<(String, String)> {
+    env.into_iter()
+        .filter(|(name, _)| !PANE_TERMINAL_VARIABLES.contains(&name.as_str()))
+        .collect()
+}
+
 /// `argv` for a tmux pane, run with only the agent's environment (`#agent-tools 28/28`): `env` is
 /// that whole environment, computed by the daemon (`AgentEnvBase::agent_env`) and sourced from
 /// the pane file. Of what the pane holds — the tmux server's environment plus that file — only the
-/// names `env` sets are kept, every other variable is unset, then the argv is `exec`ed. Names only
-/// reach the pane's argv, never values.
+/// names `env` sets and the pane's own [`PANE_TERMINAL_VARIABLES`] are kept, every other variable
+/// is unset, then the argv is `exec`ed. Names only reach the pane's argv, never values.
 pub(crate) fn in_a_pane_with_only_the_agent_env(
     argv: Vec<String>,
     env: &[(String, String)],
@@ -332,6 +347,7 @@ pub(crate) fn in_a_pane_with_only_the_agent_env(
     let kept = env
         .iter()
         .map(|(name, _)| name.as_str())
+        .chain(PANE_TERMINAL_VARIABLES)
         .collect::<Vec<_>>()
         .join(" ");
     [

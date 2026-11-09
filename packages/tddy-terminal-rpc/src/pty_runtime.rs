@@ -50,7 +50,7 @@ pub struct PtySpawnSpec {
     pub session_id: String,
     pub terminal_id: String,
     pub kind: String,
-    /// Extra environment variables set on the spawned process (in addition to the inherited env).
+    /// Environment variables set on the spawned process, on top of what `env_base` starts it from.
     pub env: Vec<(String, String)>,
     /// What the child starts from before `env` is applied — see [`tddy_pty::PtyEnvBase`].
     pub env_base: tddy_pty::PtyEnvBase,

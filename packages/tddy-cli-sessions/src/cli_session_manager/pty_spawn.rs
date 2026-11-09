@@ -60,7 +60,8 @@ impl CliSessionManager {
             worktree_path,
             model,
             argv,
-            (env, tddy_pty::PtyEnvBase::Inherited),
+            env,
+            tddy_pty::PtyEnvBase::Inherited,
             os_user,
             on_exit,
             tmux_session,
@@ -68,7 +69,7 @@ impl CliSessionManager {
         .await
     }
 
-    /// [`Self::spawn_tool`] whose child starts from `env.1` before `env.0` is applied: an agent
+    /// [`Self::spawn_tool`] whose child starts from `env_base` before `env` is applied: an agent
     /// main starts from [`tddy_pty::PtyEnvBase::Cleared`] (`#agent-tools 28/28`).
     #[allow(clippy::too_many_arguments)]
     pub(crate) async fn spawn_tool_on(
@@ -79,7 +80,8 @@ impl CliSessionManager {
         worktree_path: PathBuf,
         model: &str,
         argv: Vec<String>,
-        (env, env_base): (Vec<(String, String)>, tddy_pty::PtyEnvBase),
+        env: Vec<(String, String)>,
+        env_base: tddy_pty::PtyEnvBase,
         os_user: Option<&str>,
         on_exit: Option<ExitHook>,
         tmux_session: Option<&str>,

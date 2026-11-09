@@ -9,7 +9,8 @@ use tddy_coding_agent_specs::slots::RenderedSlots;
 use tddy_rpc::Status;
 
 use crate::spec_launch::{
-    in_a_pane_with_only_the_agent_env, launch_host_pty, plan_host_pty, HostAgent, HostPtySession,
+    in_a_pane_with_only_the_agent_env, launch_host_pty, plan_host_pty,
+    without_the_panes_terminal_variables, HostAgent, HostPtySession,
 };
 
 /// How a harness is run: as the PTY child, or inside tmux — and whether the launch starts the
@@ -112,9 +113,11 @@ pub(super) async fn launch(
     if run.in_tmux {
         let plan = plan_host_pty(agent, params, slots).map_err(failed)?;
         let env: Vec<(String, String)> = plan.env.into_iter().chain(env).collect();
-        let env = agent
-            .env_base
-            .agent_env(&agent.spec, std::env::vars_os(), &env);
+        let env = without_the_panes_terminal_variables(agent.env_base.agent_env(
+            &agent.spec,
+            std::env::vars_os(),
+            &env,
+        ));
         let tmux_launch = crate::cli_harness_tmux::HarnessTmuxLaunch {
             os_user,
             session_id,

@@ -3,10 +3,10 @@
 **Location:** `packages/tddy-supervisor/src/spawn_broker.rs`
 **Category:** oversized-file
 **Detected:** 2026-10-24 — `/pr-wrap` step 3.5 file-length gate on #736 (`#start-progress` 3/8), and again on `#coagents` 2/8 (#721), production lines counted to the first `#[cfg(test)]`
-**Metrics:** **968 production lines** · budget 500
-**Thresholds breached:** length 968 > 500
+**Metrics:** **977 production lines** (2026-11-09) · budget 500
+**Thresholds breached:** length 977 > 500
 **Restructure:** blocked — the remaining code is the pre-exec syscall layer, about 630 lines, most of it defined twice (one item per `#[cfg(target_os)]` branch)
-**Status:** Open — partially fixed 2026-10-24 (1,595 → 968 by #721's split, measured after #721 was rebased onto #start-progress); unclaimed
+**Status:** Open — regressed 2026-11-09 (969 → 977, #836); partially fixed 2026-10-24 (1,595 → 968 by #721's split); unclaimed
 **Verified:** the engine refusals below were reproduced by hand on 2026-10-24; the 968 is a machine-measured line count after the rebase
 
 ## Measurement history
@@ -17,6 +17,7 @@
 | 2026-10-24 | 1,549 → 1,595 | grown by #739: `ChildOutput` replacing `inherit_output`, the stderr pipe for `CaptureStderr` — split deferred with the developer's consent, #start-progress 6/8 |
 | 2026-10-24 | 1,526 → 1,594 → 944 | #721, measured on its pre-#start-progress base: grew it by 68 (`StdioMode`, `ChildStdio`, the piped spawn) and then split it with engine `move_item`s into `spawn_broker/fork_broker.rs` (329), `child_environment.rs` (185) and `accounts.rs` (180). The rest could not move: see below |
 | 2026-10-25 | 968 | #721 rebased onto master's #start-progress: the split kept, #736/#739's additions carried into the moved files (`fork_broker.rs` 372, `child_environment.rs` 196); `SUPERVISOR_SOCKET_ENV` stays here as the public path |
+| 2026-11-09 | 969 → 977 | **regressed** by #836 (`#agent-tools` 28/32), measured against `origin/feature/agent-tools/acp-subagent-leftovers` at #836's wrap: the `EnvironmentBase::Exactly` variant and its docs. Not split: stack-shared — #859 and #865 above it modify this file (`/pr-wrap` step 3.5's stack-branch rule); left for the `#agent-tools` sweep node. The engine limit below still stands |
 
 ## Why the engine stops here
 

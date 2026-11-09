@@ -39,10 +39,12 @@ pub struct AgentEnvBase {
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct AgentEnvBaseFile {
-    #[allow(dead_code)] // read so a file without it is refused; one schema so far
     schema_version: u32,
     base: Vec<String>,
 }
+
+/// The one `schema_version` an agent-env base file is read in.
+const AGENT_ENV_BASE_SCHEMA_VERSION: u32 = 1;
 
 /// Why a base-set file did not load. Names the file.
 #[derive(Debug, Clone, PartialEq, Eq, Error)]
@@ -89,6 +91,12 @@ impl AgentEnvBase {
         };
         let parsed: AgentEnvBaseFile =
             serde_yaml::from_str(yaml).map_err(|e| invalid(e.to_string()))?;
+        if parsed.schema_version != AGENT_ENV_BASE_SCHEMA_VERSION {
+            return Err(invalid(format!(
+                "schema_version {} is not one this build reads ({AGENT_ENV_BASE_SCHEMA_VERSION})",
+                parsed.schema_version
+            )));
+        }
         crate::spec::validate_env_entries(&parsed.base).map_err(invalid)?;
         Ok(Self {
             file: file.to_path_buf(),

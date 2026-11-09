@@ -4,7 +4,7 @@
 //! launch writes is sourced on top of it. The pane command must therefore drop, inside the pane,
 //! everything but the base set and what the launch set.
 
-use super::in_a_pane_with_only_the_agent_env;
+use super::{in_a_pane_with_only_the_agent_env, without_the_panes_terminal_variables};
 
 /// The names a pane command prints from its own environment, given `pane_env` as what the pane
 /// holds before it runs (the server's environment plus the sourced pane file).
@@ -86,4 +86,48 @@ fn a_pane_puts_no_launch_value_on_its_argv() {
         argv.iter().all(|arg| !arg.contains("sk-secret-value")),
         "{argv:?}"
     );
+}
+
+#[test]
+fn a_pane_keeps_its_own_terminal_variables_the_agent_env_does_not_name() {
+    // Given — an agent env with no terminal variable, and a pane tmux described itself
+    let argv = in_a_pane_with_only_the_agent_env(
+        vec!["/usr/bin/env".to_string()],
+        &launch_env(&[("PATH", "/usr/bin:/bin")]),
+    );
+
+    // When
+    let seen = names_seen_in_a_pane_holding(
+        &argv,
+        &[
+            ("PATH", "/usr/bin:/bin"),
+            ("TERM", "tmux-256color"),
+            ("TMUX", "/tmp/tmux-501/default,1,0"),
+            ("TMUX_PANE", "%0"),
+        ],
+    );
+
+    // Then
+    for kept in ["TERM", "TMUX", "TMUX_PANE"] {
+        assert!(
+            seen.iter().any(|name| name == kept),
+            "{kept} kept: {seen:?}"
+        );
+    }
+}
+
+#[test]
+fn the_pane_file_never_sets_the_panes_terminal_variables() {
+    // Given — an agent env holding the daemon's own terminal description
+    let env = launch_env(&[
+        ("PATH", "/usr/bin:/bin"),
+        ("TERM", "xterm-ghostty"),
+        ("COLORTERM", "truecolor"),
+    ]);
+
+    // When
+    let given = without_the_panes_terminal_variables(env);
+
+    // Then
+    assert_eq!(given, launch_env(&[("PATH", "/usr/bin:/bin")]));
 }

@@ -32,8 +32,8 @@ fn running_groups() -> std::sync::MutexGuard<'static, BTreeSet<u32>> {
 pub(crate) struct TurnCommand<'a> {
     pub(crate) program: &'a Path,
     pub(crate) argv: &'a [String],
-    /// The child's whole environment, as the daemon computed it (`crate::agent_env`), in order
-    /// after `PATH`.
+    /// The child's whole environment, as the daemon computed it (`crate::agent_env`), in order;
+    /// its `PATH` is then replaced by this executable's directory ahead of the daemon's `PATH`.
     pub(crate) env: &'a [(String, String)],
     pub(crate) cwd: &'a Path,
     pub(crate) inherit_stdin: bool,

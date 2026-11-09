@@ -7,7 +7,7 @@ use std::path::{Path, PathBuf};
 use pretty_assertions::assert_eq;
 use tddy_actions::tool::{ResolvedTool, RunSection};
 use tddy_coding_agent_specs::slots::RenderedSlots;
-use tddy_coding_agent_specs::{builtin_specs, CodingAgentSection, CodingAgentSpec};
+use tddy_coding_agent_specs::{builtin_specs, AgentEnvBase, CodingAgentSection, CodingAgentSpec};
 use tddy_core::adapters::ConversationMintError;
 use tddy_core::{HookCommandParams, SessionMetadata};
 use tddy_rpc::Code;
@@ -96,6 +96,7 @@ async fn a_daemon_session_id_conversation_starts_as_the_session_id() {
     let conversation = start_conversation(ConversationStart {
         spec: &the_builtin("claude"),
         binary: Path::new("/usr/local/bin/claude"),
+        env_base: &AgentEnvBase::builtin(),
         worktree: worktree.path(),
         env: &[],
         session_id: "0190-claude",
@@ -120,6 +121,7 @@ async fn a_minted_conversation_starts_as_the_id_its_adapter_mints() {
     let conversation = start_conversation(ConversationStart {
         spec: &the_builtin("cursor"),
         binary: &agent,
+        env_base: &AgentEnvBase::builtin(),
         worktree: bin.path(),
         env: &[],
         session_id: "0190-cursor",
@@ -135,6 +137,35 @@ async fn a_minted_conversation_starts_as_the_id_its_adapter_mints() {
 }
 
 #[tokio::test]
+async fn a_mint_starts_from_the_base_set_of_the_daemons_environment_plus_its_launch_env() {
+    // Given — a `create-chat` that names, in its chat id, whether it sees `HOME` (a base-set
+    // variable this process holds) and the variable its launch set
+    let bin = tempfile::tempdir().unwrap();
+    let agent = a_stub_agent(
+        bin.path(),
+        r#"printf 'chat-%s-%s\n' "${HOME:+home}" "${GIT_AUTHOR_NAME:-none}""#,
+    );
+
+    // When
+    let conversation = start_conversation(ConversationStart {
+        spec: &the_builtin("cursor"),
+        binary: &agent,
+        env_base: &AgentEnvBase::builtin(),
+        worktree: bin.path(),
+        env: &[("GIT_AUTHOR_NAME".to_string(), "dev".to_string())],
+        session_id: "0190-cursor",
+    })
+    .await
+    .map_err(|status| status.message);
+
+    // Then
+    assert_eq!(
+        conversation,
+        Ok(LaunchConversation::Minted("chat-home-dev".to_string()))
+    );
+}
+
+#[tokio::test]
 async fn a_worktree_conversation_starts_with_nothing_to_bind() {
     // Given
     let worktree = tempfile::tempdir().unwrap();
@@ -143,6 +174,7 @@ async fn a_worktree_conversation_starts_with_nothing_to_bind() {
     let conversation = start_conversation(ConversationStart {
         spec: &the_builtin("opencode"),
         binary: Path::new("/usr/local/bin/opencode"),
+        env_base: &AgentEnvBase::builtin(),
         worktree: worktree.path(),
         env: &[],
         session_id: "0190-opencode",
@@ -165,6 +197,7 @@ async fn a_mint_past_its_deadline_refuses_the_start_naming_the_agent_the_adapter
     let refused = start_conversation(ConversationStart {
         spec: &cursor_minting_within(1),
         binary: &agent,
+        env_base: &AgentEnvBase::builtin(),
         worktree: bin.path(),
         env: &[],
         session_id: "0190-cursor",

@@ -152,6 +152,24 @@ fn a_tddy_entry_in_the_base_set_fails_loading_naming_the_file() {
 }
 
 #[test]
+fn a_base_set_of_a_schema_version_this_build_does_not_read_fails_loading_naming_the_file() {
+    // Given
+    let file = std::path::Path::new("/etc/tddy/tools/agent-env/base.yaml");
+
+    // When
+    let refused = AgentEnvBase::parse(file, "schema_version: 2\nbase: [PATH]\n").unwrap_err();
+
+    // Then
+    assert_eq!(
+        refused,
+        AgentEnvBaseError::Invalid {
+            file: file.to_path_buf(),
+            message: "schema_version 2 is not one this build reads (1)".to_string(),
+        }
+    );
+}
+
+#[test]
 fn a_registry_whose_base_set_is_refused_does_not_load() {
     // Given
     let tools = a_tools_dir().overriding_the_base_set_with("[PATH, TDDY_SOCKET]");

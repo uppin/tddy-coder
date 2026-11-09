@@ -174,21 +174,20 @@ pub(crate) fn validate_env_entries(entries: &[String]) -> Result<(), String> {
 
 /// Whether `entry` (a name or a pattern) could name a `TDDY_*` variable.
 fn admits_a_tddy_variable(entry: &str) -> bool {
-    if let Some(prefix) = entry.split('*').next().filter(|_| entry.contains('*')) {
+    const TDDY: &str = tddy_agent_backend::agent_env::TDDY_ENV_PREFIX;
+    match entry.split_once('*') {
         // A prefix pattern admits every name starting with its prefix.
-        return "TDDY_".starts_with(prefix) || prefix.starts_with("TDDY_") || prefix.is_empty();
+        Some((prefix, _)) => TDDY.starts_with(prefix) || prefix.starts_with(TDDY),
+        None => entry == TDDY.trim_end_matches('_') || entry.starts_with(TDDY),
     }
-    entry == "TDDY" || entry.starts_with("TDDY_")
 }
 
 /// Whether `entry` is a variable name (`PATH`) or a `PREFIX_*` pattern (`LC_*`).
 fn is_an_env_entry(entry: &str) -> bool {
     let is_name = |text: &str| {
-        !text.is_empty()
-            && text
-                .chars()
-                .next()
-                .is_some_and(|c| c.is_ascii_alphabetic() || c == '_')
+        text.chars()
+            .next()
+            .is_some_and(|c| c.is_ascii_alphabetic() || c == '_')
             && text.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
     };
     match entry.strip_suffix("_*") {

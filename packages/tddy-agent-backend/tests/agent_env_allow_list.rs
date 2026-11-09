@@ -20,10 +20,12 @@ use tddy_agent_backend::adapters::{
     HeadlessMcpServer, HeadlessModelListing, HeadlessProtocol, HeadlessRenderer, HeadlessTurn,
     LaunchAdapters, CLAUDE_STREAM_JSON, CURSOR_MODELS,
 };
-use tddy_agent_backend::provider_route::{RouteSupport, RoutedAgent};
+use tddy_agent_backend::provider_route::{
+    HarnessRoute, ProviderKind, RouteShape, RouteSupport, RoutedAgent,
+};
 use tddy_agent_backend::{
     AcpAgentCommand, AcpDriver, AllowOnce, CodingBackend, ConversationDriver, HeadlessCommand,
-    HeadlessDriver, NoHooks, SpecHeadlessBackend,
+    HeadlessDriver, InvokeRequest, NoHooks, SpecHeadlessBackend,
 };
 use tddy_session_store::error::BackendError;
 
@@ -46,7 +48,7 @@ fn a_daemon_with_a_session_marker_and_tddy_config() {
     });
 }
 
-/// The agent's whole environment, as the daemon computed it (`CodingAgentSpec::agent_env`): the base
+/// The agent's whole environment, as the daemon computed it (`AgentEnvBase::agent_env`): the base
 /// variables it holds and what the launch sets on purpose.
 fn the_daemon_computed_agent_env() -> Vec<(String, String)> {
     vec![
@@ -140,6 +142,8 @@ impl AnAgentEnvironment for BTreeMap<String, String> {
 #[derive(Debug)]
 struct ARenderer {
     program: PathBuf,
+    /// The invocation's whole environment, as the renderer computed it.
+    env: Vec<(String, String)>,
 }
 
 impl HeadlessRenderer for ARenderer {
@@ -155,7 +159,7 @@ impl HeadlessRenderer for ARenderer {
         Ok(HeadlessInvocation {
             program: self.program.clone(),
             argv: Vec::new(),
-            env: Vec::new(),
+            env: self.env.clone(),
             files: Vec::new(),
             adapter: AdapterRegistry::builtin()
                 .get(CLAUDE_STREAM_JSON)
@@ -179,6 +183,7 @@ async fn a_headless_turn_sees_no_unlisted_daemon_variable() {
         scratch_dir: Some(agent.dir().join("conversation")),
         renderer: Some(Arc::new(ARenderer {
             program: agent.program(),
+            env: Vec::new(),
         })),
         ..HeadlessCommand::default()
     });
@@ -232,6 +237,7 @@ async fn model_listing_sees_no_unlisted_daemon_variable() {
     let backend = SpecHeadlessBackend::new(
         Arc::new(ARenderer {
             program: agent.program(),
+            env: Vec::new(),
         }),
         HeadlessProtocol::default(),
         RoutedAgent {
@@ -283,4 +289,57 @@ async fn a_conversation_id_mint_sees_no_unlisted_daemon_variable() {
     let seen = agent.environment().await;
     seen.holds_no_unlisted_daemon_variable();
     seen.holds_the_env_the_daemon_computed();
+}
+
+#[tokio::test]
+async fn a_routed_turns_route_variable_stands_over_a_daemon_variable_of_the_same_name() {
+    // Given — a turn whose computed env holds the daemon's value of a variable its route also sets
+    a_daemon_with_a_session_marker_and_tddy_config();
+    let agent = AnEnvRecordingAgent::then(A_CLAUDE_RESULT);
+    let backend = SpecHeadlessBackend::new(
+        Arc::new(ARenderer {
+            program: agent.program(),
+            env: vec![
+                ("PATH".to_string(), "/usr/bin:/bin".to_string()),
+                (LAUNCH_SET.to_string(), "https://daemon.example".to_string()),
+            ],
+        }),
+        HeadlessProtocol::default(),
+        RoutedAgent {
+            id: "lark".to_string(),
+            product: "Lark Code".to_string(),
+            support: RouteSupport {
+                providers: vec![ProviderKind::Anthropic],
+                shape: RouteShape::Env,
+            },
+            key_env: None,
+        },
+    )
+    .with_provider_route(HarnessRoute {
+        env: vec![(LAUNCH_SET.to_string(), "https://route.example".to_string())],
+        ..HarnessRoute::default()
+    })
+    .expect("lark is routable");
+
+    // When
+    tokio::time::timeout(
+        ENV_FILE_DEADLINE,
+        backend.invoke(InvokeRequest {
+            prompt: "Fix it".to_string(),
+            working_dir: Some(agent.dir().to_path_buf()),
+            session_dir: Some(agent.dir().join("session")),
+            ..InvokeRequest::default()
+        }),
+    )
+    .await
+    .expect("the turn ended in time")
+    .expect("the turn succeeds");
+
+    // Then
+    let env = agent.environment().await;
+    env.holds_no_unlisted_daemon_variable();
+    assert_eq!(
+        env.get(LAUNCH_SET).map(String::as_str),
+        Some("https://route.example")
+    );
 }

@@ -192,6 +192,7 @@ async fn resume_cli_harness_session(
         ConversationStart {
             spec,
             binary: &agent.tool.binary,
+            env_base: &agent.env_base,
             worktree: &worktree_path,
             env: &git_environment,
             session_id,
