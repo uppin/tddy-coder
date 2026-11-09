@@ -763,7 +763,7 @@ Both handlers carry the standard prologue ending in `require_pr_stack_orchestrat
 **non-erroring like every other `QueryBranch` leg** — an absent base, an unknown repo root, a probe failure
 or a `spawn_blocking` timeout all degrade that leg alone and the RPC still succeeds.
 
-Web (`tddy-web`), all under `src/components/sessions/prstack/`:
+Web (`tddy-prstack-web` since #850; was `tddy-web`'s `src/components/sessions/prstack/`), all under `packages/tddy-prstack-web/src/`:
 
 - `orderStackNodes` — persisted order when every node has one, else `topoSortStackNodes` wholesale (D25).
   `topoSortStackNodes` is unchanged and remains the legacy fallback.

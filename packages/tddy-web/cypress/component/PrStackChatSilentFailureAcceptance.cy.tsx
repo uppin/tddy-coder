@@ -29,7 +29,7 @@ import { aDisconnectedRoom } from "tddy-livekit-web/testkit";
 import { SessionMainPane } from "../../src/components/sessions/SessionMainPane";
 import { SessionsDrawerScreen } from "../../src/components/sessions/SessionsDrawerScreen";
 import { withSelectedDaemon } from "../support/rpc/withSelectedDaemon";
-import { PrStackChat } from "../../src/components/sessions/prstack/PrStackChat";
+import { PrStackChat } from "tddy-prstack-web";
 import type { SessionAttachmentState } from "../../src/components/sessions/useSessionAttachment";
 import { aSessionConnection } from "../support/rpc/sessionConnections";
 import { TddyRemote } from "tddy-client-web/gen/tddy/v1/remote_pb";

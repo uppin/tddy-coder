@@ -10,7 +10,7 @@
 import React from "react";
 import { SessionsDrawerScreen } from "../../src/components/sessions/SessionsDrawerScreen";
 import { withSelectedDaemon } from "../support/rpc/withSelectedDaemon";
-import { PrStackChat } from "../../src/components/sessions/prstack/PrStackChat";
+import { PrStackChat } from "tddy-prstack-web";
 import { TddyRemote } from "tddy-client-web/gen/tddy/v1/remote_pb";
 import { AcpService, type AcpClientMessage } from "tddy-client-web/gen/tddy/acp/v1/acp_pb";
 import { mountWithRpc } from "../support/rpc/inMemory";
