@@ -238,6 +238,11 @@ transport.
 **Transport and permission policy.** Every coding-agent row says how its turns run and who answers
 its permission prompts: `SubagentInfo.transport` (10) / `.permission_policy` (11), snapshotted at
 attach into `SessionAgentEntry.transport` (16) / `.permission_policy` (17); both empty on a model row.
+Both are read from the agent's spec in the host's coding-agent registry, never from its name: an
+agent with a `coding_agent.acp` section is `acp` and asks its caller, one with a `coding_agent.headless`
+section is `headless` under its `headless.permission_policy` (`asks_caller` or `{ fixed: <text> }`). A
+headless agent whose spec declares no policy, and an id the registry does not declare, is not offered.
+The built-in specs declare:
 
 | Harness | `transport` | `permission_policy` |
 |---|---|---|
