@@ -3,14 +3,10 @@ import type { Client } from "@connectrpc/connect";
 import { useIsNarrowViewport, Button } from "tddy-ui-web";
 import { ActivityService } from "tddy-client-web/gen/activity_pb";
 import type { SessionEntry } from "tddy-client-web/gen/session_pb";
-import { useAcpReplay } from "../chat/useAcpReplay";
-import type { ChatMessage } from "../chat/useAgentChat";
-import { AgentActivityDetailDialog } from "./AgentActivityDetailDialog";
 import { SessionActivitySidebar } from "./SessionActivitySidebar";
-import { SubagentConversationDialog } from "./SubagentConversationDialog";
 import { defaultActivitySidebarOpen } from "./activitySidebarState";
-import { rosterHalfOf } from "./sessionRosterHalf";
 import { useHttpClient } from "tddy-client-web";
+import { AgentActivityDetailDialog, SubagentConversationDialog, rosterHalfOf, useAcpReplay, type ChatMessage } from "tddy-chat-web";
 
 /** Inline layout (PRD § Inline layout contract): the docked column and the content beside it are
  *  measured against each other, so their flex structure is not left to a stylesheet. */

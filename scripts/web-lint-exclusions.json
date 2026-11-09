@@ -6,18 +6,13 @@
   },
   {
     "package": "tddy-session-create-web",
-    "reason": "235 errors in the Cypress specs moved from tddy-web (plain-object fixtures where generated message types are expected) and one in tddy-client-web's debugMask.ts (no types for 'debug')",
+    "reason": "234 errors in the Cypress specs moved from tddy-web (plain-object fixtures where generated message types are expected)",
     "todo": "docs/dev/todo/2026-11-07-session-create-web-specs-do-not-typecheck.md"
   },
   {
     "package": "tddy-terminal-web",
-    "reason": "17 errors in code moved from tddy-web: spec fixtures as plain objects / nullable refs / sinon typings, two unit tests' window and feed-option types, plus tddy-client-web's untyped 'debug' and tddy-tauri-web's 'log' option it compiles through",
+    "reason": "16 errors in code moved from tddy-web: spec fixtures as plain objects / nullable refs / sinon typings, two unit tests' window and feed-option types, plus tddy-tauri-web's 'log' option it compiles through",
     "todo": "docs/dev/todo/2026-11-07-terminal-web-does-not-typecheck.md"
-  },
-  {
-    "package": "tddy-rpc-playground-web",
-    "reason": "1 error, not in the package: tddy-client-web's debugMask.ts has no types for 'debug' (TS7016)",
-    "todo": "docs/dev/todo/2026-11-07-rpc-playground-web-does-not-typecheck.md"
   },
   {
     "package": "tddy-rust-typescript-tests",

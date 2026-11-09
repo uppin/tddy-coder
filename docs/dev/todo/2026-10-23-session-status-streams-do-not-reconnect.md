@@ -1,7 +1,7 @@
 # 2026-10-23 — Session status streams (activity, usage, notifications) do not reconnect after a failure
 
 **Category:** Deferred from `web-dev` LiveKit and visible errors (#706)
-**Source:** `packages/tddy-web/src/components/sessions/useSessionActivity.ts`, `useSessionUsage.ts`,
+**Source:** `packages/tddy-chat-web/src/useSessionActivity.ts`, `packages/tddy-web/src/components/sessions/useSessionUsage.ts`,
 `packages/tddy-web/src/rpc/useSessionNotifications.ts`
 
 ## What happens

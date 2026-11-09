@@ -12,7 +12,7 @@ Three of them are not about the outside world:
 |---|---|---|
 | `src/lib/testId.ts` (`safeTestIdPart`) | `tddy-ui-web` | a rendering concern: how components and Cypress agree on `data-testid` |
 | `src/lib/terminalFrameContinuity.ts` | the terminal package (`#web-split` terminal node) | terminal rendering state, not a wire |
-| `src/lib/debugMask.ts` (+ `src/debug.d.ts`, `debug` dependency) | `tddy-react-commons`, or a small shared lib | process-wide diagnostics, no client or port in it |
+| `src/lib/debugMask.ts` (`debug` dependency, `@types/debug`) | `tddy-react-commons`, or a small shared lib | process-wide diagnostics, no client or port in it |
 
 `participantRole`, `terminalHistoryLoader`, `sessionAttachment`, the capability hooks and the host
 directory **do** belong: each reads or describes a connection, a roster or an RPC.

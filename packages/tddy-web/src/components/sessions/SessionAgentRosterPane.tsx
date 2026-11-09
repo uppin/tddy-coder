@@ -6,11 +6,11 @@ import { Button } from "tddy-ui-web";
 import { AgentPicker } from "./AgentPicker";
 import { agentPlacementWire, type AgentPlacementChoice } from "tddy-session-create-web";
 import { subagentSessionNodes } from "./agentTree";
-import { rosterHalfOf, type RosterHalf } from "./sessionRosterHalf";
 import { SessionAgentTree, type RosterDetachRequest } from "./SessionAgentTree";
 import { type AvailableAgent } from "tddy-session-create-web";
 import { useSessionAgentRoster } from "./useSessionAgentRoster";
 import { useHttpClient } from "tddy-client-web";
+import { rosterHalfOf, type RosterHalf } from "tddy-chat-web";
 
 /**
  * The **Agents tab** — a tree rooted at the session's own main agent, holding the specialized

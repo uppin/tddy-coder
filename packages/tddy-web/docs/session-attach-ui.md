@@ -43,7 +43,7 @@ create-session spec for no benefit.
 `packages/tddy-livekit-rpc-web/src/transport.ts`'s `handleServerStreaming` accepts `_signal` and never
 reads it — no abort frame is published and the queue is not closed. The in-memory test router *does*
 honour the signal, so an `AbortController`-based implementation passes its spec while the real stream
-keeps running in production. `components/sessions/useSessionActivity.ts` is the reference idiom.
+keeps running in production. `tddy-chat-web`'s `src/useSessionActivity.ts` is the reference idiom.
 
 **4. A stream error is a failed creation, not an interrupted progress bar.** The terminal `result`
 event is what calls `onCreated`; an error terminates the stream and must surface in the form's error

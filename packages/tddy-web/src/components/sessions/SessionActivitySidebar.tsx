@@ -1,8 +1,6 @@
 import type { CSSProperties } from "react";
-import { AgentChatView } from "../chat/AgentChat";
-import type { UseAcpReplayResult } from "../chat/useAcpReplay";
-import type { ChatMessage } from "../chat/useAgentChat";
 import { Button } from "tddy-ui-web";
+import { AgentChatView, type ChatMessage, type UseAcpReplayResult } from "tddy-chat-web";
 
 /** Inline layout, not classes: the transcript inside only scrolls if every element above it
  *  bounds its height (PRD § Inline layout contract), and the dock's width is measured. */

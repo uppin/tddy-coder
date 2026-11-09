@@ -19,7 +19,7 @@ import { anInMemoryRpcBackend, type InMemoryRpcBackend } from "tddy-connectrpc-t
 import { CreateSessionPane } from "tddy-session-create-web";
 import { SessionsDrawerScreen } from "../../src/components/sessions/SessionsDrawerScreen";
 import { SessionUsageTab } from "../../src/components/sessions/SessionUsageTab";
-import { useSessionActivity } from "../../src/components/sessions/useSessionActivity";
+import { useSessionActivity } from "tddy-chat-web";
 import { InlineError } from "tddy-ui-web";
 import { SessionService } from "tddy-client-web/gen/session_pb";
 import { ProjectService } from "tddy-client-web/gen/project_pb";

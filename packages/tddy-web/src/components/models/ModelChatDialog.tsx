@@ -5,11 +5,10 @@ import {
   ModelSessionTargetSchema,
 } from "tddy-client-web/gen/tddy/acp/v1/acp_pb";
 import { useAuthContext } from "../../hooks/authProvider";
-import { toolStatusClass } from "../chat/chatEntryPresentation";
-import { useAcpSessionOverClient } from "../chat/useAcpSession";
 import { ModelsDialogShell } from "./ModelsDialogShell";
 import type { RegistryChatTarget } from "../../utils/registryChatTarget";
 import { useDaemonClientFor, useHostConnection } from "tddy-client-web";
+import { toolStatusClass, useAcpSessionOverClient } from "tddy-chat-web";
 
 /**
  * Chat with one model or assistant over the **existing** ACP stream (`AcpService.Session`) the

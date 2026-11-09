@@ -1,0 +1,278 @@
+import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
+import { fromBinary } from "@bufbuild/protobuf";
+import { Code, ConnectError, type Client } from "@connectrpc/connect";
+import { type ActivityService, StreamMode } from "tddy-client-web/gen/activity_pb";
+import { AcpAgentMessageSchema } from "tddy-client-web/gen/tddy/acp/v1/acp_pb";
+import { agentActivityRegistry, replayKeyOf } from "./agentActivityRegistry";
+import { createReplayProjector, projectReplayFrames } from "./acpReplayProjection";
+import { tddyDebug } from "tddy-client-web";
+import type { UseAgentChatResult } from "./useAgentChat";
+
+/** Replay diagnostics. Enable in DevTools: `localStorage.debug = 'tddy:acp:*'`. */
+const dbg = tddyDebug("tddy:acp:replay");
+
+/** Frames per transcript page — the tail the feed opens on, and the size of every page paged in
+ *  behind it. Mirrors `tddy_service::acp_replay::DEFAULT_REPLAY_PAGE_SIZE`; stated explicitly rather
+ *  than left at 0 so the request says what it wants instead of inheriting whatever the host defaults
+ *  to. */
+export const REPLAY_PAGE_SIZE = 100;
+
+/** The read-only transcript surface the Agent Activity overlay renders. Extends the shared
+ *  {@link UseAgentChatResult} (so `AgentChatView` can render it interchangeably) with the overlay's
+ *  icon/badge signals and the lazy-snapshot controls. Send/answer methods are inert — a replay is
+ *  not interactive. */
+export interface UseAcpReplayResult extends UseAgentChatResult {
+  /** True once the count feed reports at least one persisted activity frame. */
+  hasActivity: boolean;
+  /** True once the count feed has answered at all, whatever it said. Distinguishes "this session
+   *  recorded nothing" from "the count has not arrived yet" — a surface that renders that difference
+   *  must wait for this before claiming the former. */
+  countLoaded: boolean;
+  /** Activity frames counted since the overlay was last opened (drives the unread badge). */
+  unreadCount: number;
+  /** Mark the current count as seen (clears the unread badge). */
+  markSeen: () => void;
+  /** Open the heavy transcript snapshot for this session — call on first overlay open. Reuses the
+   *  cached transcript on a later open (or a switch-back), so the snapshot stream opens at most once
+   *  per delivered transcript. */
+  loadSnapshot: () => void;
+  /** True once the snapshot pull has delivered this session's transcript. */
+  snapshotLoaded: boolean;
+  /** True once the loaded range reaches the transcript head — nothing older is left to page in. */
+  atOldest: boolean;
+  /** True while a page of older history is in flight. */
+  loadingOlder: boolean;
+  /** Page in the history immediately before the loaded range and prepend it. A no-op while
+   *  {@link atOldest}, while a fetch is already in flight, or before the transcript feed has
+   *  delivered a cursor to page back from. */
+  loadOlder: () => void;
+  /** True once the replay answered `NOT_FOUND` for a subagent conversation: it recorded nothing (an
+   *  in-jail loop, or an id this session never ran). Always false for the session's own transcript. */
+  notRecorded: boolean;
+}
+
+const NOOP_SEND = () => false;
+
+/** Whether a stream or unary failure is the host's `NOT_FOUND` — for a conversation, "nothing was
+ *  recorded for it". Any other failure is not a statement about the transcript and is not recorded. */
+function isNotFound(err: unknown): boolean {
+  return ConnectError.from(err).code === Code.NotFound;
+}
+
+/**
+ * Subscribes to `ActivityService.StreamAcpReplay` for one session in two phases, backed by the
+ * module-level {@link agentActivityRegistry} so state survives a session switch:
+ *
+ * - a **count** feed (`COUNT_THEN_LIVE`), opened while the session is focused, whose frames carry
+ *   `activity_count` (no transcript payload). This drives `hasActivity` and `unreadCount` cheaply,
+ *   without pulling the full transcript.
+ * - a **transcript** feed (`TAIL_THEN_LIVE`, {@link REPLAY_PAGE_SIZE} frames), opened lazily by
+ *   {@link UseAcpReplayResult.loadSnapshot} — on the first overlay open, or straight away for the
+ *   Activities view, which IS the transcript. It replays only the **newest** page of the recorded
+ *   transcript, then tails live, so a session with a multi-megabyte history costs one page to show
+ *   the end of it. Its ACP `session_update` frames are projected into the read-only chat transcript
+ *   and cached in the registry, so a switch away and back reuses it rather than re-pulling. A pull
+ *   only counts as done once its frames actually land, so one that is cancelled mid-flight (a
+ *   remount, a session switch) is retried instead of caching an empty transcript.
+ *
+ * Older history is reached by paging **backwards**: the feed's first frame carries the absolute
+ * position its page starts at, and {@link UseAcpReplayResult.loadOlder} fetches the page before that
+ * cursor through the unary `GetAcpReplayPage`, prepending it above the loaded range. A failed fetch
+ * changes nothing except clearing the in-flight flag, so a later scroll retries it.
+ *
+ * Frame projection lives in {@link createReplayProjector} and mirrors the live ACP path — see there
+ * for how each `session_update` variant becomes an entry. Each entry's timestamp is the frame's
+ * `SessionNotification.timestamp_unix_ms`, so elapsed badges reflect the recorded timeline.
+ */
+export function useAcpReplay(args: {
+  sessionId: string;
+  sessionToken: string;
+  client: Client<typeof ActivityService>;
+  /** A subagent conversation of the session: replay its own transcript instead of the session's.
+   *  Unset ⇒ the session's. */
+  conversationId?: string;
+}): UseAcpReplayResult {
+  const { sessionId, sessionToken, client } = args;
+  // The conversation this replay reads, or "" for the session's own transcript. Every request carries
+  // it, and the registry holds the replay under the (session, conversation) key it names.
+  const conversationId = args.conversationId ?? "";
+  const key = replayKeyOf(sessionId, conversationId);
+
+  const state = useSyncExternalStore(
+    (listener) => agentActivityRegistry.subscribe(listener),
+    () => agentActivityRegistry.get(key),
+  );
+
+  const count = state?.count ?? 0;
+  const countLoaded = state?.countLoaded ?? false;
+  const seenCount = state?.seenCount ?? 0;
+  const messages = state?.messages ?? [];
+  const snapshotLoaded = state?.snapshotLoaded ?? false;
+  const atOldest = state?.atOldest ?? false;
+  const loadingOlder = state?.loadingOlder ?? false;
+  const notRecorded = state?.notRecorded ?? false;
+
+  // Both stream effects key on `client`, so a genuine routing change (daemon-direct → session-scoped
+  // once the session's room connects) re-subscribes over the new transport. That is only safe because
+  // the client's *identity* is stable at the source: hosts build it inline while rendering
+  // (`buildSessionClient?.() ?? client` in `SessionMainPane`) but resolve the build through
+  // `SessionClientCache`, so an unchanged route hands back the same client and a mere re-render
+  // cannot tear a subscription down mid-flight.
+
+  // The count feed runs while the session is focused: cheap frames carrying only `activity_count`.
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        for await (const frame of client.streamAcpReplay({
+          sessionToken,
+          sessionId,
+          daemonInstanceId: "",
+          mode: StreamMode.COUNT_THEN_LIVE,
+          conversationId,
+        })) {
+          if (cancelled) break;
+          agentActivityRegistry.setCount(key, Number(frame.activityCount));
+        }
+      } catch (err) {
+        if (cancelled) return;
+        if (isNotFound(err)) agentActivityRegistry.markNotRecorded(key);
+        // A stream aborted on unmount surfaces as an AbortError; ignore it (no fallback fabrication).
+        dbg("count stream error: %o", err);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [client, conversationId, key, sessionId, sessionToken]);
+
+  // Which session's transcript has been requested via `loadSnapshot`. Held per-hook (not per-session)
+  // so switching away to an unvisited session does NOT eagerly open its transcript.
+  const [snapshotSession, setSnapshotSession] = useState<string | null>(null);
+  const loadSnapshot = useCallback(() => setSnapshotSession(key), [key]);
+
+  // The transcript feed: opened lazily once `loadSnapshot` targets the current replay, and only when
+  // the registry has not already loaded it (a switch-back reuses the cached range and its cursor).
+  useEffect(() => {
+    if (snapshotSession !== key) return;
+    if (agentActivityRegistry.get(key)?.snapshotLoaded) return;
+
+    let cancelled = false;
+    // Opened on the first frame, which is what states the page's absolute start — the projector needs
+    // it to scope its entry keys, since a page paged in later shares one rendered list with this one.
+    let projector: ReturnType<typeof createReplayProjector> | null = null;
+
+    (async () => {
+      try {
+        for await (const frame of client.streamAcpReplay({
+          sessionToken,
+          sessionId,
+          daemonInstanceId: "",
+          mode: StreamMode.TAIL_THEN_LIVE,
+          pageSize: REPLAY_PAGE_SIZE,
+          conversationId,
+        })) {
+          if (cancelled) break;
+          // The pull counts as done from its first delivered frame onwards — marking it earlier (at
+          // subscribe time) would leave a pull cancelled before any frame landed cached as an empty
+          // transcript that no later open would refill.
+          agentActivityRegistry.markSnapshotLoaded(key);
+          if (!projector) {
+            // The first frame's absolute position IS the reverse cursor: 0 means the page already
+            // reaches the transcript head, so there is nothing older to page in.
+            const firstSeq = Number(frame.seq);
+            projector = createReplayProjector(firstSeq);
+            agentActivityRegistry.setOldestSeq(key, firstSeq, firstSeq === 0);
+          }
+          const entries = projector.append(
+            fromBinary(AcpAgentMessageSchema, frame.acpAgentMessage),
+          );
+          if (!cancelled) agentActivityRegistry.setMessages(key, entries);
+        }
+      } catch (err) {
+        if (cancelled) return;
+        if (isNotFound(err)) agentActivityRegistry.markNotRecorded(key);
+        // A stream aborted on unmount surfaces as an AbortError; ignore it. Any other error while
+        // still mounted leaves the transcript showing what it has (no fallback fabrication).
+        dbg("transcript stream error: %o", err);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [client, conversationId, key, sessionId, sessionToken, snapshotSession]);
+
+  // Exactly one page fetch is in flight at a time. Held in a ref rather than read off the registry
+  // because a second scroll can cross the threshold before a `loadingOlder` write has re-rendered,
+  // and two requests for the same cursor would page the same frames in twice.
+  const olderPageInFlight = useRef(false);
+
+  const loadOlder = useCallback(() => {
+    const loaded = agentActivityRegistry.get(key);
+    const cursor = loaded?.oldestSeq ?? null;
+    // Nothing to page back from: the feed has not stated where the range starts, or the range
+    // already reaches the transcript head.
+    if (cursor === null || cursor <= 0 || loaded?.atOldest) return;
+    if (olderPageInFlight.current) return;
+
+    olderPageInFlight.current = true;
+    agentActivityRegistry.setLoadingOlder(key, true);
+    (async () => {
+      try {
+        const page = await client.getAcpReplayPage({
+          sessionToken,
+          sessionId,
+          daemonInstanceId: "",
+          beforeSeq: BigInt(cursor),
+          pageSize: REPLAY_PAGE_SIZE,
+          conversationId,
+        });
+        const firstSeq = Number(page.firstSeq);
+        const entries = projectReplayFrames(
+          page.frames.map((bytes) => fromBinary(AcpAgentMessageSchema, bytes)),
+          firstSeq,
+        );
+        // Keyed by the replay this fetch was issued for, so a page that resolves after a session or
+        // conversation switch lands under its own replay rather than the one now on screen.
+        agentActivityRegistry.prependMessages(key, entries, firstSeq, page.atOldest);
+      } catch (err) {
+        // The loaded range is left exactly as it was: no fabricated page, no partial one, and the
+        // range is NOT closed — clearing the in-flight flag below is what makes a later scroll retry.
+        dbg("older page fetch failed: %o", err);
+      } finally {
+        olderPageInFlight.current = false;
+        agentActivityRegistry.setLoadingOlder(key, false);
+      }
+    })();
+  }, [client, conversationId, key, sessionId, sessionToken]);
+
+  const markSeen = useCallback(() => {
+    agentActivityRegistry.markSeen(key);
+  }, [key]);
+
+  const unreadCount = Math.max(0, count - seenCount);
+
+  return {
+    messages,
+    elicitations: [],
+    sendPrompt: NOOP_SEND,
+    pendingQuestion: null,
+    answerSelect: NOOP_SEND,
+    answerOther: NOOP_SEND,
+    answerMultiSelect: NOOP_SEND,
+    streamError: null,
+    sendError: null,
+    workflowError: null,
+    hasActivity: count > 0,
+    countLoaded,
+    unreadCount,
+    markSeen,
+    loadSnapshot,
+    snapshotLoaded,
+    atOldest,
+    loadingOlder,
+    loadOlder,
+    notRecorded,
+  };
+}

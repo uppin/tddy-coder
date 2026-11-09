@@ -1,6 +1,6 @@
 # Inactive session activities (main-pane base view)
 
-Technical reference for the base-view rule in **`packages/tddy-web/src/components/sessions/sessionBaseView.ts`**, the stopped Agent tab in **`DormantAgentTerminal.tsx`**, the transcript pane in **`SessionActivitiesPane.tsx`** (the inspector's Activity tab), and the attach bookkeeping and resume hint in **`SessionsDrawerScreen.tsx`** that let a resumed session return to its terminal.
+Technical reference for the base-view rule in **`packages/tddy-web/src/components/sessions/sessionBaseView.ts`**, the stopped Agent tab in **`DormantAgentTerminal.tsx`**, the transcript pane in **`SessionActivitiesPane.tsx`** (the inspector's Activity tab; in `tddy-chat-web` since #847), and the attach bookkeeping and resume hint in **`SessionsDrawerScreen.tsx`** that let a resumed session return to its terminal.
 
 Product reference: [docs/ft/web/inactive-session-activities.md](../../../docs/ft/web/inactive-session-activities.md).
 
