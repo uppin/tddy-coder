@@ -31,11 +31,8 @@ pub const TEST_TOKEN: &str = "valid-token";
 /// OS user returned for [`TEST_TOKEN`] by [`test_service`].
 pub const TEST_USER: &str = "testuser";
 
-const CONFIG_YAML: &str = r#"
-users:
-  - github_user: "testuser"
-    os_user: "testdev"
-"#;
+const CONFIG_YAML: &str = "";
+const USERS_YAML: &str = "- github_user: \"testuser\"\n  os_user: \"testdev\"\n";
 
 /// Build a minimal [`DaemonConfig`] suitable for unit/acceptance tests.
 pub fn test_config() -> DaemonConfig {
@@ -46,6 +43,7 @@ fn config_from(yaml: &str) -> DaemonConfig {
     let dir = tempfile::tempdir().expect("create temp dir for test config");
     let path = dir.path().join("config.yaml");
     std::fs::write(&path, yaml).expect("write test config");
+    std::fs::write(dir.path().join("users.yaml"), USERS_YAML).expect("write test users");
     DaemonConfig::load(&path).expect("load test config")
 }
 
@@ -250,9 +248,6 @@ pub fn signing_test_host(sessions_base: PathBuf) -> (DaemonSessionHost, SignedTe
 
 /// [`CONFIG_YAML`] with a (stub) GitHub provider, which is what gives a daemon its token wiring.
 const SIGNING_CONFIG_YAML: &str = r#"
-users:
-  - github_user: "testuser"
-    os_user: "testdev"
 github:
   stub: true
 "#;

@@ -52,9 +52,6 @@ impl TheLobby {
         let path: PathBuf = dir.path().join("desktop.yaml");
         let yaml = format!(
             r#"
-users:
-  - github_user: "testuser"
-    os_user: "testdev"
 allowed_tools:
   - path: /bin/true
     label: t

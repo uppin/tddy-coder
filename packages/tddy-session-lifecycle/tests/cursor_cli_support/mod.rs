@@ -581,9 +581,6 @@ fn a_daemon_config() -> (tempfile::TempDir, DaemonConfig) {
     let user = current_os_user();
     let yaml = format!(
         r#"
-users:
-  - github_user: "{user}"
-    os_user: "{user}"
 allowed_tools:
   - path: /bin/true
     label: true
@@ -591,6 +588,7 @@ allowed_tools:
     );
     let config_path = dir.path().join("daemon.yaml");
     std::fs::write(&config_path, yaml).unwrap();
+    std::fs::write(dir.path().join("users.yaml"), format!("- github_user: \"{user}\"\n  os_user: \"{user}\"\n")).unwrap();
     let config = DaemonConfig::load(&config_path).expect("config must parse");
     (dir, config)
 }

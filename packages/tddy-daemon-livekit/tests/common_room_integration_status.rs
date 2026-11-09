@@ -23,9 +23,6 @@ const LIVEKIT_API_SECRET: &str = "secret";
 fn a_daemon_config_joining(ws_url: &str, room: &str) -> DaemonConfig {
     let yaml = format!(
         r#"
-users:
-  - github_user: "testuser"
-    os_user: "testdev"
 allowed_tools:
   - path: /bin/true
     label: t

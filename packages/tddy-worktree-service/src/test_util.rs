@@ -24,10 +24,10 @@ pub const TEST_USER: &str = "testuser";
 /// running them: a worktree is a directory the daemon reads as *that* user, so a fixed name would
 /// make every filesystem assertion a test of the CI account's existence.
 pub fn test_config_for_os_user(os_user: &str) -> DaemonConfig {
-    let yaml = format!("users:\n  - github_user: \"{TEST_USER}\"\n    os_user: \"{os_user}\"\n");
     let dir = tempfile::tempdir().expect("create temp dir for test config");
     let path = dir.path().join("config.yaml");
-    std::fs::write(&path, yaml).expect("write test config");
+    std::fs::write(&path, "").expect("write test config");
+    std::fs::write(dir.path().join("users.yaml"), format!("- github_user: \"{TEST_USER}\"\n  os_user: \"{os_user}\"\n")).expect("write test users");
     DaemonConfig::load(&path).expect("load test config")
 }
 

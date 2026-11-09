@@ -36,11 +36,13 @@ fn write_livekit_config(ws_url: &str) -> (tempfile::TempDir, PathBuf) {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("daemon.yaml");
     let room = common_room();
+    std::fs::write(
+        dir.path().join("users.yaml"),
+        "- github_user: \"testuser\"\n  os_user: \"testdev\"\n",
+    )
+    .unwrap();
     let yaml = format!(
         r#"
-users:
-  - github_user: "testuser"
-    os_user: "testdev"
 allowed_tools:
   - path: /bin/true
     label: t

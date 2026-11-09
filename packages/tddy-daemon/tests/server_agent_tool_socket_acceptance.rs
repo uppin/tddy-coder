@@ -233,14 +233,11 @@ async fn a_server_daemon_tells_a_session_its_users_own_agent_tool_socket() {
     // When a session running as this user asks where its hooks and tools should reach it
     let socket = daemon.agent_tool_socket_of(&user).await;
 
-    // Then it is told its user's socket under the data dir, not one shared by every user
+    // Then it is told its user's one daemon socket under the data dir, not one shared by
+    // every user — the merged socket host sessions also ride (#agent-tools 31/32)
     assert_eq!(
         socket,
-        Ok(daemon
-            .data_dir
-            .join("run-agent-tools")
-            .join(&user)
-            .join("agent.sock"))
+        Ok(daemon.data_dir.join("run").join(&user).join("daemon.sock"))
     );
 }
 

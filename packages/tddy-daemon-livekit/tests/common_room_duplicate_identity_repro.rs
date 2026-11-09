@@ -29,9 +29,6 @@ fn write_livekit_config(ws_url: &str) -> (tempfile::TempDir, PathBuf) {
     let room = common_room();
     let yaml = format!(
         r#"
-users:
-  - github_user: "testuser"
-    os_user: "testdev"
 allowed_tools:
   - path: /bin/true
     label: t
@@ -45,6 +42,7 @@ livekit:
 "#
     );
     std::fs::write(&path, yaml).unwrap();
+    std::fs::write(dir.path().join("users.yaml"), "- github_user: \"testuser\"\n  os_user: \"testdev\"\n").unwrap();
     (dir, path)
 }
 
