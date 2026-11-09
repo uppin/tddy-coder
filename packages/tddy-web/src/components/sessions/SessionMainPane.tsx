@@ -1,10 +1,10 @@
 import React from "react";
-import { projectForUnscopedSession } from "../../utils/sessionProjectTable";
+import { projectForUnscopedSession } from "tddy-session-web";
 import { SessionInspectorDrawer } from "./SessionInspectorDrawer";
 import { canResumeSession, sessionBaseViewMode } from "./sessionBaseView";
 import { DormantSessionRuntime } from "./DormantSessionRuntime";
 import { DormantAgentTerminal } from "./DormantAgentTerminal";
-import { useAppLocation } from "../../routing/useAppLocation";
+import { useAppLocation } from "tddy-client-web";
 import { SessionWithActivitySidebar } from "./SessionWithActivitySidebar";
 import { Button } from "tddy-ui-web";
 import { CreateSessionPane } from "tddy-session-create-web";

@@ -1,6 +1,6 @@
 import { useMemo } from "react";
 import type { ProjectEntry } from "tddy-client-web/gen/project_pb";
-import { projectHomesOnHost, type ProjectHomeInfo } from "../../utils/projectHomeGroups";
+import { projectHomesOnHost, type ProjectHomeInfo } from "tddy-session-web";
 
 /** What the drawer's pinned **main** entries stand for, and the registry row setup reads. */
 export interface SessionsDrawerProjectHomes {

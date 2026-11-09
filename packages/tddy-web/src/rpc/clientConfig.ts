@@ -13,7 +13,7 @@
 import { createClient, type Transport } from "@connectrpc/connect";
 import type { AuthFlowDeclaration } from "tddy-client-web";
 import { DaemonConfigService } from "tddy-client-web/gen/daemon_config_pb";
-import { daemonTransportFlavour } from "./daemonTransportFlavour";
+import { daemonTransportFlavour } from "tddy-session-web";
 import { thisPagesHost, type DaemonHostEnvironment } from "./daemonTransport";
 
 /** An agent the daemon's configuration allows sessions to be started with. */

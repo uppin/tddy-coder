@@ -1,5 +1,5 @@
 import { describe, expect, it } from "bun:test";
-import { anActiveSession, anInactiveSession } from "../test-utils";
+import { anActiveSession, anInactiveSession } from "../../test-utils/builders";
 import { connectionStatusForSession } from "./connectionStatusForSession";
 
 describe("connectionStatusForSession — maps session proto fields to a display status token", () => {

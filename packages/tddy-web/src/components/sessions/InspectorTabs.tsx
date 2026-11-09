@@ -1,5 +1,5 @@
 import React from "react";
-import type { InspectorTabName } from "../../routing/appRoutes";
+import type { InspectorTabName } from "tddy-client-web";
 
 /**
  * The tab names are declared in `routing/appRoutes` (a pure module) so the `?inspector=` param can

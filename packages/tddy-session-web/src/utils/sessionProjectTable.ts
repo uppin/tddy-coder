@@ -1,4 +1,5 @@
-import type { ProjectEntry, SessionEntry } from "tddy-client-web/gen/session_pb";
+import type { ProjectEntry } from "tddy-client-web/gen/project_pb";
+import type { SessionEntry } from "tddy-client-web/gen/session_pb";
 import { sortSessionsForDisplay } from "./sessionSort";
 
 function normalizeRepoPath(path: string): string {

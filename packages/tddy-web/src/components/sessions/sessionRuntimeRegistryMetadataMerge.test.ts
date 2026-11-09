@@ -13,8 +13,8 @@ import { describe, it, expect } from "bun:test";
 import { create } from "@bufbuild/protobuf";
 import { SessionEntrySchema, type SessionEntry } from "tddy-client-web/gen/session_pb";
 import { SessionManager } from "./sessionManager";
-import type { SessionParticipant } from "../../utils/crossHostSessions";
-import type { SessionMetadata } from "../../lib/sessionParticipantMetadata";
+import type { SessionParticipant } from "tddy-session-web";
+import type { SessionMetadata } from "tddy-session-web";
 
 const SELECTED = "workstation-1";
 const OTHER = "server-2";

@@ -19,7 +19,7 @@ import {
   GetConfigResponseSchema,
 } from "tddy-client-web/gen/daemon_config_pb";
 import { createDefaultDaemonTransport, thisPagesHost } from "./daemonTransport";
-import { TrafficMeterRegistry } from "./trafficMeter";
+import { TrafficMeterRegistry } from "tddy-session-web";
 import { aBrowserPageServedFrom, aTauriHostedPage } from "../test-utils/daemonHosts";
 
 /** The configuration the daemon under test is running with, as `GetConfig` answers it. */

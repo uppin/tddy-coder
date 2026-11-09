@@ -70,7 +70,7 @@ project's name and the number of sessions in it, followed by the group's body.
 The collapsed 12px strip, bulk selection and delete, cross-host badges and deep links are unchanged
 by grouping.
 
-Implementation: `groupSessionsByProject` (`src/utils/sessionProjectGroups.ts`),
+Implementation: `groupSessionsByProject` (`packages/tddy-session-web/src/utils/sessionProjectGroups.ts`),
 `SessionProjectGroup` and `projectGroupCollapse.ts` (`src/components/sessions/`).
 
 ### Pinned main entry
@@ -114,14 +114,14 @@ the entry acts on that host.
 Implementation: `ProjectHomeEntry`, `ProjectHomeSetupPane`, `useProjectHomeSetup`,
 `useProjectHomeStartSubmit`, `useEnsureProjectHome`, `useSessionsDrawerProjectHomes`
 (`src/components/sessions/`), `projectHomesOnHost`, `projectHomeSlot` and `withProjectHomeGroups`
-(`src/utils/projectHomeGroups.ts`), `sessionsProjectHomeSetupPath` and
+(`packages/tddy-session-web/src/utils/projectHomeGroups.ts`), `sessionsProjectHomeSetupPath` and
 `parseSessionsProjectHomeSetup` (`src/routing/appRoutes.ts`).
 
 ## Indicator Token
 
 The row's dot (`SessionIndicatorDot`, shared by the expanded list and the collapsed strip) shows one
 of **four** states, derived by `sessionIndicatorFor(entry, notificationState, nowMs)`
-(`src/lib/sessionIndicator.ts`) from the session's proto fields plus its live notification feed:
+(`packages/tddy-session-web/src/lib/sessionIndicator.ts`) from the session's proto fields plus its live notification feed:
 
 - `"disconnected"` — grey, steady. `isActive: false`, whatever else is recorded.
 - `"needs-input"` — yellow, steady. `pendingElicitation: true`, **or** an `ATTENTION_REQUIRED`
@@ -730,7 +730,7 @@ non-child sessions.
 
 ### Grouping Logic
 
-`groupSessionsByStack(sessions)` (in `src/utils/sessionStackGroups.ts`) partitions the
+`groupSessionsByStack(sessions)` (in `packages/tddy-session-web/src/utils/sessionStackGroups.ts`) partitions the
 session list:
 
 - **Group** — an orchestrator session paired with one or more children that reference it.

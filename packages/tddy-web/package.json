@@ -50,6 +50,7 @@
     "tddy-livekit-web": "workspace:*",
     "tddy-rpc-playground-web": "workspace:*",
     "tddy-session-create-web": "workspace:*",
+    "tddy-session-web": "workspace:*",
     "tddy-tauri-web": "workspace:*",
     "tddy-ui-web": "workspace:*",
     "tddy-terminal-web": "workspace:*",

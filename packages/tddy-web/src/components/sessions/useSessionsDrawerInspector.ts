@@ -4,8 +4,8 @@ import {
   isSessionsNewPath,
   isInspectorTabName,
   type InspectorTabName,
-} from "../../routing/appRoutes";
-import { useAppLocation } from "../../routing/useAppLocation";
+} from "tddy-client-web";
+import { useAppLocation } from "tddy-client-web";
 import type { InspectorDrawerState } from "./SessionInspectorDrawer";
 import { nextInspectorState } from "./inspectorState";
 import { PARAM_FULL, PARAM_INSPECTOR } from "tddy-client-web";

@@ -4,8 +4,8 @@ import {
   sessionsProjectHomeSetupPath,
   SESSIONS_DRAWER_ROUTE,
   type SessionsProjectHomeSetupRoute,
-} from "../../routing/appRoutes";
-import { useAppLocation } from "../../routing/useAppLocation";
+} from "tddy-client-web";
+import { useAppLocation } from "tddy-client-web";
 
 /**
  * The sessions drawer's main setup pane: which project it is open for and whether it replaces a

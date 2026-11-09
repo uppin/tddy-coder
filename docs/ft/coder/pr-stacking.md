@@ -395,7 +395,7 @@ The "+ New planned PR" form carries two submits — **"Add planned PR"** (`pr-st
 
 `SessionDrawer` (`packages/tddy-web/src/components/sessions/SessionDrawer.tsx`) renders PR-stack sessions in a collapsible group rather than a flat list.
 
-Grouping logic lives in `packages/tddy-web/src/utils/sessionStackGroups.ts`:
+Grouping logic lives in `packages/tddy-session-web/src/utils/sessionStackGroups.ts`:
 
 ```
 groupSessionsByStack(sessions) → { groups: { parent: SessionEntry, children: SessionEntry[] }[], flat: SessionEntry[] }

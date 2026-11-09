@@ -21,7 +21,7 @@ import type { TaskService } from "tddy-client-web/gen/tasks_pb";
 import type { SessionAttachmentState } from "./useSessionAttachment";
 import type { SessionAttachmentHint } from "tddy-client-web/connections/session";
 import type { HostConnection } from "tddy-client-web/connections/types";
-import type { SessionMetadata } from "../../lib/sessionParticipantMetadata";
+import type { SessionMetadata } from "tddy-session-web";
 import type { InspectorDrawerState } from "./SessionInspectorDrawer";
 import type { ToolShortcutDef } from "tddy-terminal-web";
 import type { ByteDelta, SessionRuntimeState } from "./sessionRuntimeRegistry";

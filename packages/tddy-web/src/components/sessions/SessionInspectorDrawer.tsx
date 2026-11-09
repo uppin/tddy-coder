@@ -14,10 +14,10 @@ import {
   isDormantInspectorTabName,
   isInspectorTabName,
   isMediaInspectorTabName,
-} from "../../routing/appRoutes";
+} from "tddy-client-web";
 import { useCapabilityAvailability } from "tddy-client-web";
 import type { HostConnection } from "tddy-client-web/connections/types";
-import { useAppLocation } from "../../routing/useAppLocation";
+import { useAppLocation } from "tddy-client-web";
 import { SessionAgentRosterPane } from "./SessionAgentRosterPane";
 import { SessionToolsTab } from "./SessionToolsTab";
 import { SessionUsageTab } from "./SessionUsageTab";

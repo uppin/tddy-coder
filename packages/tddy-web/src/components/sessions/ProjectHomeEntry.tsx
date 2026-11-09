@@ -3,7 +3,7 @@ import { Replace } from "lucide-react";
 import type { SessionEntry } from "tddy-client-web/gen/session_pb";
 import { cn } from "tddy-ui-web";
 import { SessionIndicatorDot } from "./SessionIndicatorDot";
-import type { ProjectHomeInfo } from "../../utils/projectHomeGroups";
+import type { ProjectHomeInfo } from "tddy-session-web";
 
 /**
  * The pinned **main** entry first in a project group (`#project-home` 4/7): label `main`, the

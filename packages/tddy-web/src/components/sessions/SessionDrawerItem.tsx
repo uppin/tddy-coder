@@ -1,8 +1,8 @@
 import React from "react";
 import type { SessionEntry } from "tddy-client-web/gen/session_pb";
-import { sessionDrawerLabel } from "../../utils/sessionDrawerLabel";
+import { sessionDrawerLabel } from "tddy-session-web";
 import { SessionIndicatorDot } from "./SessionIndicatorDot";
-import type { SessionMetadata } from "../../lib/sessionParticipantMetadata";
+import type { SessionMetadata } from "tddy-session-web";
 import { Tooltip, TooltipTrigger, TooltipContent, cn } from "tddy-ui-web";
 
 interface SessionDrawerItemProps {

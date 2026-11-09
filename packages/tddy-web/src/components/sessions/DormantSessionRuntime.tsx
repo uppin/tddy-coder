@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useRef } from "react";
 import type { SessionEntry } from "tddy-client-web/gen/session_pb";
-import type { TauriHostWindow } from "../../rpc/daemonTransportFlavour";
-import { sessionReadsLocalPaths } from "../../lib/sessionReadsLocalPaths";
+import type { TauriHostWindow } from "tddy-session-web";
+import { sessionReadsLocalPaths } from "tddy-session-web";
 import type { ToolShortcutDef } from "tddy-terminal-web";
 import { cn, InlineError } from "tddy-ui-web";
 import type { AgentConversation } from "./agentConversationTabs";

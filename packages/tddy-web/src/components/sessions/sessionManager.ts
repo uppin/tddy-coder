@@ -14,14 +14,14 @@
 import { useCallback, useEffect, useMemo, useRef, useSyncExternalStore } from "react";
 import type { Client } from "@connectrpc/connect";
 import { SessionService, type SessionEntry } from "tddy-client-web/gen/session_pb";
-import type { SessionMetadata } from "../../lib/sessionParticipantMetadata";
-import { sortSessionsByCreation } from "../../utils/sessionSort";
+import type { SessionMetadata } from "tddy-session-web";
+import { sortSessionsByCreation } from "tddy-session-web";
 import {
   mergeActiveAndFetchedSessions,
   sessionParticipantsFromParticipants,
   type SessionParticipant,
-} from "../../utils/crossHostSessions";
-import { subscribeSessionsRefresh } from "../../lib/sessionsRefreshBridge";
+} from "tddy-session-web";
+import { subscribeSessionsRefresh } from "tddy-session-web";
 import { hostNotConnectedText, rpcFailureText } from "tddy-client-web";
 import { useHostLabel } from "tddy-client-web";
 

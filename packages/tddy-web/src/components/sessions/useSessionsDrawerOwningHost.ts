@@ -10,7 +10,7 @@ import { SessionService, type SessionEntry } from "tddy-client-web/gen/session_p
 import { TaskService } from "tddy-client-web/gen/tasks_pb";
 import { TerminalSessionService } from "tddy-client-web/gen/terminal_session_pb";
 import { WorktreeService } from "tddy-client-web/gen/worktree_pb";
-import { owningHostForSession } from "../../utils/crossHostSessions";
+import { owningHostForSession } from "tddy-session-web";
 import { useDaemonClientFor, useHostConnection } from "tddy-client-web";
 
 /**

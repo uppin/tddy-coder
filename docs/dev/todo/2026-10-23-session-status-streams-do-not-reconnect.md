@@ -2,7 +2,7 @@
 
 **Category:** Deferred from `web-dev` LiveKit and visible errors (#706)
 **Source:** `packages/tddy-chat-web/src/useSessionActivity.ts`, `packages/tddy-web/src/components/sessions/useSessionUsage.ts`,
-`packages/tddy-web/src/rpc/useSessionNotifications.ts`
+`packages/tddy-session-web/src/rpc/useSessionNotifications.ts`
 
 ## What happens
 
