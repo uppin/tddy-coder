@@ -12,7 +12,7 @@
  * no token and joins no room — the connection did both when the session was attached, which is why
  * there is one handshake here now instead of two.
  *
- * Docs: `packages/tddy-web/docs/terminal-session.md`.
+ * Docs: `packages/tddy-terminal-web/docs/terminal-session.md`.
  */
 
 import React from "react";

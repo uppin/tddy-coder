@@ -28,9 +28,9 @@ import {
   type SessionTerminalOutput,
 } from "tddy-client-web/gen/terminal_session_pb";
 import { GrpcSessionTerminal } from "../../src/components/sessions/GrpcSessionTerminal";
-import { useEnqueuedInput } from "../../src/components/sessions/useEnqueuedInput";
-import { EnqueuedInputOverlay } from "../../src/components/connection/EnqueuedInputOverlay";
-import { UploadProgressProvider } from "../../src/rpc/uploadProgress";
+import { useEnqueuedInput } from "tddy-terminal-web";
+import { EnqueuedInputOverlay } from "tddy-terminal-web";
+import { UploadProgressProvider } from "tddy-terminal-web";
 import { byTestId, TEST_IDS } from "../support/testIds";
 
 // ---------------------------------------------------------------------------

@@ -5,7 +5,7 @@
 resume (`TAIL` then `FROM_OFFSET`) the web used to track has no reader left.
 **Consent:** the developer deferred it at the `#term-snapshot` completion gate, 2026-10-25 — "Defer it" (no sweep node; pick up after the stack lands)
 
-Four leftovers in `packages/tddy-web`, none a defect:
+Four leftovers, none a defect. Since `#web-split` 8/17 (PR #845) the feed, input delivery and `GhosttyTerminalSession` live in `packages/tddy-terminal-web` (`src/rpc/terminalFeed.ts`, `src/rpc/inputDelivery.ts`, `src/GhosttyTerminalSession.tsx`); `GrpcSessionTerminal`, `hostServedSession.ts` and `localHost.ts` stay in `packages/tddy-web`:
 
 | Leftover | Where | State after #760 |
 |---|---|---|

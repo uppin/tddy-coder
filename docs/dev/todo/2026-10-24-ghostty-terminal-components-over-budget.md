@@ -1,8 +1,8 @@
 # 2026-10-24 — `GhosttyTerminal.tsx` and `GhosttyTerminalSession.tsx` are over the 500-line budget
 
 **Category:** Deferred from Claude fullscreen renderer (`claude-cli-fullscreen`)
-**Source:** `packages/tddy-web/src/components/GhosttyTerminal.tsx` (1,354 lines),
-`packages/tddy-web/src/components/GhosttyTerminalSession.tsx` (971 lines)
+**Source:** `packages/tddy-terminal-web/src/GhosttyTerminal.tsx` (1,354 lines),
+`packages/tddy-terminal-web/src/GhosttyTerminalSession.tsx` (971 lines)
 
 ## What happens
 

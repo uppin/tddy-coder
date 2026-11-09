@@ -32,10 +32,10 @@ import { REFRESH_INTERVAL_MS } from "../../src/components/sessions/sessionManage
 import { SessionRuntime } from "../../src/components/sessions/SessionRuntime";
 import { GrpcSessionTerminal } from "../../src/components/sessions/GrpcSessionTerminal";
 import { TerminalControlOverlay } from "../../src/components/sessions/TerminalControlOverlay";
-import { useTerminalControl } from "../../src/components/sessions/useTerminalControl";
+import { useTerminalControl } from "tddy-terminal-web";
 import { SelectedDaemonProvider } from "../../src/rpc/selectedDaemon";
 import { AuthProvider } from "../../src/hooks/authProvider";
-import { UploadProgressProvider } from "../../src/rpc/uploadProgress";
+import { UploadProgressProvider } from "tddy-terminal-web";
 import { withSelectedDaemon } from "../support/rpc/withSelectedDaemon";
 import { aSessionServiceBackend, type SessionServiceBackend } from "../support/rpc/daemonSessionHostBackend";
 import { mountWithRpc } from "../support/rpc/inMemory";

@@ -7,7 +7,7 @@
  * lets one terminal component render a session carried over a room and a session its host serves
  * itself without knowing which it is looking at.
  *
- * Docs: `packages/tddy-web/docs/terminal-session.md`.
+ * Docs: `packages/tddy-terminal-web/docs/terminal-session.md`.
  */
 
 import { useEffect, useRef, useState, type RefObject } from "react";

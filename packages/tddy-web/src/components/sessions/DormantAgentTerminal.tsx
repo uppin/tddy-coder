@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState } from "react";
 import { Code, ConnectError } from "@connectrpc/connect";
-import { GhosttyTerminal, type GhosttyTerminalHandle } from "../GhosttyTerminal";
-import { HISTORY_FILTER, HISTORY_THEME } from "../GhosttyTerminalSession";
+import { GhosttyTerminal, type GhosttyTerminalHandle } from "tddy-terminal-web";
+import { HISTORY_FILTER, HISTORY_THEME } from "tddy-terminal-web";
 import {
   createForwardHistoryFetcher,
   TerminalHistoryForwardLoader,

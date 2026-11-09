@@ -6,7 +6,7 @@
  * and never answered. Both feed paths are covered: the agent terminal (`GhosttyTerminalSession` on
  * a feed) and a bash tab (`GrpcSessionTerminal` over the terminal RPC stream).
  *
- * Reference: packages/tddy-web/docs/terminal-osc52-clipboard.md (`#session-tabs 4/7`)
+ * Reference: packages/tddy-terminal-web/docs/terminal-osc52-clipboard.md (`#session-tabs 4/7`)
  *
  * `navigator.clipboard.writeText` is stubbed: the stub is the viewer's clipboard.
  */
@@ -21,9 +21,9 @@ import {
   SessionTerminalOutputSchema,
 } from "tddy-client-web/gen/terminal_session_pb";
 import { GrpcSessionTerminal } from "../../src/components/sessions/GrpcSessionTerminal";
-import { UploadProgressProvider } from "../../src/rpc/uploadProgress";
-import { aGhosttyTerminal } from "../support/drivers/ghosttyTerminalDriver";
-import { aGhosttyTerminalSession } from "../support/drivers/ghosttyTerminalSessionDriver";
+import { UploadProgressProvider } from "tddy-terminal-web";
+import { aGhosttyTerminal } from "../../../tddy-terminal-web/cypress/support/drivers/ghosttyTerminalDriver";
+import { aGhosttyTerminalSession } from "../../../tddy-terminal-web/cypress/support/drivers/ghosttyTerminalSessionDriver";
 import { byTestId, TEST_IDS } from "../support/testIds";
 
 const ESC = "\x1b";

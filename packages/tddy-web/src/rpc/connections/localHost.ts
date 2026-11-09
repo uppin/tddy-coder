@@ -40,7 +40,7 @@ import { tddyDebug } from "tddy-client-web";
 import { daemonTransportFlavour, type TauriHostWindow } from "../daemonTransportFlavour";
 import type { SessionAttachmentHint, SessionConnection } from "tddy-client-web/connections/session";
 import type { TerminalFeed, TerminalOptions } from "tddy-client-web/connections/terminal";
-import { openDaemonTerminalFeed, TerminalResumePoint } from "./terminalFeed";
+import { openDaemonTerminalFeed, TerminalResumePoint } from "tddy-terminal-web";
 import type {
   ConnectionCapability,
   ConnectionProvider,

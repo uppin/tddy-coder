@@ -10,6 +10,11 @@
     "todo": "docs/dev/todo/2026-11-07-session-create-web-specs-do-not-typecheck.md"
   },
   {
+    "package": "tddy-terminal-web",
+    "reason": "17 errors in code moved from tddy-web: spec fixtures as plain objects / nullable refs / sinon typings, two unit tests' window and feed-option types, plus tddy-client-web's untyped 'debug' and tddy-tauri-web's 'log' option it compiles through",
+    "todo": "docs/dev/todo/2026-11-07-terminal-web-does-not-typecheck.md"
+  },
+  {
     "package": "tddy-rust-typescript-tests",
     "reason": "tsconfig names the 'bun-types' type definitions, which are not installed (TS2688)",
     "todo": "docs/dev/todo/2026-11-07-rust-typescript-tests-does-not-typecheck.md"

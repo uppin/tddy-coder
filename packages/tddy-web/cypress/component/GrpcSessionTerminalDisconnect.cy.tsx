@@ -18,7 +18,7 @@ import React, { useMemo, useState } from "react";
 import { createClient } from "@connectrpc/connect";
 import { TerminalSessionService } from "tddy-client-web/gen/terminal_session_pb";
 import { GrpcSessionTerminal } from "../../src/components/sessions/GrpcSessionTerminal";
-import { UploadProgressProvider } from "../../src/rpc/uploadProgress";
+import { UploadProgressProvider } from "tddy-terminal-web";
 import { aTerminalSessionServiceBackend } from "../support/rpc/terminalSessionServiceBackend";
 import { byTestId, TEST_IDS } from "../support/testIds";
 

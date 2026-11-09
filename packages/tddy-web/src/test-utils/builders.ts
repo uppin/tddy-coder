@@ -28,8 +28,8 @@ import { AgentInfoSchema } from "tddy-client-web/gen/catalog_pb";
 import { EligibleDaemonEntrySchema, type EligibleDaemonEntry } from "tddy-client-web/gen/host_pb";
 import type { StackChildSession } from "../components/sessions/prstack/stackChildSessions";
 import type { StackNode } from "../components/sessions/prstack/stackPlan";
-import type { ViewRect } from "../lib/terminalStatusBarLayout";
-import type { TransitionCounters } from "../components/connection/terminalPresentation";
+import type { ViewRect } from "tddy-terminal-web";
+import type { TransitionCounters } from "tddy-terminal-web";
 import type { RoomParticipant } from "tddy-livekit-web";
 
 // ---------------------------------------------------------------------------

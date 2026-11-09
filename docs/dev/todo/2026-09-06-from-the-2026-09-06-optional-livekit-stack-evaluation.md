@@ -42,7 +42,7 @@ these are the design costs it *exposed*, not defects it introduced.
   `svc_start_session_core.rs`, `svc_resume_session.rs` and `claude_cli_spawn_steps.rs`, and the
   session host's `terminal_bridge_impl.rs` does too, beside the plugin's own credentials check and
   the web readers (#631).
-- **`packages/tddy-web/src/components/GhosttyTerminalSession.tsx` lands at 960 lines.** The terminal
+- **`packages/tddy-terminal-web/src/GhosttyTerminalSession.tsx` lands at 960 lines.** The terminal
   convergence removed a duplicate path (`GhosttyTerminalLiveKit` 736 + `GhosttyTerminalGrpc` 631) but
   produced one file above any comfortable review size. The cheapest extraction is the history/offset
   engine — the `terminalHistoryLoader` + `TerminalStreamOffset` orchestration — into a hook, leaving a

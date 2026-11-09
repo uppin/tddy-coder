@@ -8,7 +8,7 @@
  */
 
 import React from "react";
-import { useUploadProgressSnapshot } from "../../rpc/uploadProgress";
+import { useUploadProgressSnapshot } from "tddy-terminal-web";
 
 export function UploadProgressIndicator() {
   const { active, fileCount, percent, error } = useUploadProgressSnapshot();

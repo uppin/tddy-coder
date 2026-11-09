@@ -21,8 +21,8 @@ import {
   type SessionTerminalInput,
 } from "tddy-client-web/gen/terminal_session_pb";
 import { GrpcSessionTerminal } from "../../src/components/sessions/GrpcSessionTerminal";
-import type { ConnectedSession } from "../../src/components/sessions/useTerminalControl";
-import { UploadProgressProvider } from "../../src/rpc/uploadProgress";
+import type { ConnectedSession } from "tddy-terminal-web";
+import { UploadProgressProvider } from "tddy-terminal-web";
 
 const SESSION_ID = "handover-session-aaaa-0000-0000-0000-000000000001";
 const SESSION_TOKEN = "handover-session-token";

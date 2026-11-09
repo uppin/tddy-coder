@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo } from "react";
 import type { SessionEntry } from "tddy-client-web/gen/session_pb";
 import type { HostConnection } from "tddy-client-web/connections/types";
-import type { ToolShortcutDef } from "../../lib/toolShortcuts";
+import type { ToolShortcutDef } from "tddy-terminal-web";
 import { hostNotConnectedText } from "tddy-client-web";
 import { InlineError } from "tddy-ui-web";
 import { SessionRuntime } from "./SessionRuntime";

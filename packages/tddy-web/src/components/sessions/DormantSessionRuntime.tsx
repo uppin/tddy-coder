@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useRef } from "react";
 import type { SessionEntry } from "tddy-client-web/gen/session_pb";
 import type { TauriHostWindow } from "../../rpc/daemonTransportFlavour";
 import { sessionReadsLocalPaths } from "../../lib/sessionReadsLocalPaths";
-import type { ToolShortcutDef } from "../../lib/toolShortcuts";
+import type { ToolShortcutDef } from "tddy-terminal-web";
 import { cn, InlineError } from "tddy-ui-web";
 import type { AgentConversation } from "./agentConversationTabs";
 import { GrpcSessionTerminal } from "./GrpcSessionTerminal";
@@ -13,7 +13,7 @@ import type { TerminalClient } from "./sessionRuntimeProps";
 import { AGENT_TERMINAL_ID, useSessionTerminals } from "./useSessionTerminals";
 import { useTmuxSessions } from "./useTmuxSessions";
 import { useSessionPaneFullscreen } from "./useSessionPaneFullscreen";
-import { useTerminalControl, type Session } from "./useTerminalControl";
+import { useTerminalControl, type Session } from "tddy-terminal-web";
 import { useSelectedDaemon } from "tddy-client-web";
 
 /**

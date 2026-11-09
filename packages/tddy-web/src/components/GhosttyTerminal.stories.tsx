@@ -1,6 +1,6 @@
 import type { Meta, StoryObj } from "@storybook/react";
-import { GhosttyTerminal } from "./GhosttyTerminal";
-import { GhosttyTerminalSession } from "./GhosttyTerminalSession";
+import { GhosttyTerminal } from "tddy-terminal-web";
+import { GhosttyTerminalSession } from "tddy-terminal-web";
 import { useDirectRoomTerminal } from "tddy-livekit-web";
 
 const meta: Meta<typeof GhosttyTerminal> = {
