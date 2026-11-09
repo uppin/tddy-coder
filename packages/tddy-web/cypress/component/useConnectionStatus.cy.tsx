@@ -24,7 +24,7 @@ import type { ConnectionCapability, ConnectionStatus } from "tddy-client-web/con
 import {
   useConnectionStatus,
   type ObservedConnectionStatus,
-} from "../../src/rpc/connections/useConnectionStatus";
+} from "tddy-session-web";
 import { byTestId } from "../support/testIds";
 
 // ---------------------------------------------------------------------------

@@ -1,12 +1,12 @@
 import React from "react";
-import type { SessionAttachmentState } from "./useSessionAttachment";
+import type { SessionAttachmentState } from "tddy-session-web";
 import { SessionTrafficStrip } from "./SessionTrafficStrip";
 import { liveKitRoomOf } from "tddy-livekit-web";
 import { useLiveKitPing } from "tddy-session-web";
 import { useTrafficMeterRegistry } from "../../rpc/transportProvider";
 import { useMeterSnapshot } from "./useMeterSnapshot";
 import { useAttachedSessionTraffic } from "./useAttachedSessionTraffic";
-import type { SessionRuntimeRegistry, SessionRuntimeState } from "./sessionRuntimeRegistry";
+import type { SessionRuntimeRegistry, SessionRuntimeState } from "tddy-session-web";
 
 interface StatusBarProps {
   attachment: SessionAttachmentState;

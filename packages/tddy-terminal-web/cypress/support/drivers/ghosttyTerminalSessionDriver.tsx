@@ -211,7 +211,7 @@ export function aGhosttyTerminalSession(opts: GhosttyTerminalSessionDriverOption
      */
     stubConfirm(returns: boolean) {
       cy.window().then((win) => {
-        cy.stub(win, "confirm").returns(returns).as("confirmStub");
+        cy.stub(win, "confirm").as("confirmStub").returns(returns);
       });
       return driver;
     },

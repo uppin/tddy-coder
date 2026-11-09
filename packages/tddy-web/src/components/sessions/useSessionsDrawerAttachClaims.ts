@@ -1,5 +1,5 @@
 import { useRef, useState } from "react";
-import type { AttachClaim } from "./attachClaim";
+import type { AttachClaim } from "tddy-session-web";
 
 /**
  * The bookkeeping the sessions drawer's activation, liveness and resume paths share: the attach

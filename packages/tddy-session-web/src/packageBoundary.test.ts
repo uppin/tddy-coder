@@ -28,6 +28,12 @@ describe("tddy-session-web package boundary", () => {
         "requestSessionsRefresh",
         "TrafficMeterRegistry",
         "useSessionNotifications",
+        // session-runtime (#860)
+        "SessionRuntime",
+        "SessionTerminalTabs",
+        "GrpcSessionTerminal",
+        "SessionRuntimeRegistry",
+        "SessionChildRuntime",
       ]),
     );
   });

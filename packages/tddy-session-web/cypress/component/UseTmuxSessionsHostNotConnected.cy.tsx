@@ -11,8 +11,8 @@
 import React, { useEffect } from "react";
 import { mount } from "cypress/react";
 import { hostNotConnectedText } from "tddy-client-web";
-import { useTmuxSessions } from "../../src/components/sessions/useTmuxSessions";
-import type { TerminalClient } from "../../src/components/sessions/sessionRuntimeProps";
+import { useTmuxSessions } from "../../src/useTmuxSessions";
+import type { TerminalClient } from "../../src/sessionRuntimeProps";
 
 /** Renders the hook's state as text, and asks for a listing once on mount like the opening "+" menu. */
 function TmuxMenuProbe({ client }: { client: TerminalClient | null }) {

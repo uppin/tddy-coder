@@ -1,6 +1,6 @@
 import React from "react";
 import type { SessionEntry } from "tddy-client-web/gen/session_pb";
-import type { SessionAttachmentState } from "./useSessionAttachment";
+import type { SessionAttachmentState } from "tddy-session-web";
 import { Button } from "tddy-ui-web";
 
 interface SessionDetailPaneProps {

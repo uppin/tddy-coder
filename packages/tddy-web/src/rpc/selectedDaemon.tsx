@@ -47,7 +47,7 @@ import {
 import { LiveKitConnections } from "tddy-livekit-web";
 import { AppClientsPorts } from "./appClientsPorts";
 import { ConnectionProviders, HostReadiness, useConnectionProviders } from "./connections/registry";
-import { openHostServedSession } from "./connections/hostServedSession";
+import { openHostServedSession } from "tddy-session-web";
 import type { ConnectionStatus } from "tddy-client-web/connections/types";
 import { daemonHostOf } from "tddy-client-web";
 import { useLiveKitHostDirectorySource } from "tddy-livekit-web";

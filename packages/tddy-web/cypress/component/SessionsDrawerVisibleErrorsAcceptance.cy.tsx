@@ -29,9 +29,9 @@ import {
 } from "tddy-client-web/gen/terminal_session_pb";
 import { SessionsDrawerScreen } from "../../src/components/sessions/SessionsDrawerScreen";
 import { REFRESH_INTERVAL_MS } from "../../src/components/sessions/sessionManager";
-import { SessionRuntime } from "../../src/components/sessions/SessionRuntime";
-import { GrpcSessionTerminal } from "../../src/components/sessions/GrpcSessionTerminal";
-import { TerminalControlOverlay } from "../../src/components/sessions/TerminalControlOverlay";
+import { SessionRuntime } from "tddy-session-web";
+import { GrpcSessionTerminal } from "tddy-session-web";
+import { TerminalControlOverlay } from "tddy-session-web";
 import { useTerminalControl } from "tddy-terminal-web";
 import { SelectedDaemonProvider } from "../../src/rpc/selectedDaemon";
 import { AuthProvider } from "../../src/hooks/authProvider";

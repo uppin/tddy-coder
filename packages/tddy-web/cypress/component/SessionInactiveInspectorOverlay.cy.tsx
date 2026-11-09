@@ -34,8 +34,8 @@ import {
   TerminalControlEventSchema,
   TerminalSessionService,
 } from "tddy-client-web/gen/terminal_session_pb";
-import type { SessionRuntimeState } from "../../src/components/sessions/sessionRuntimeRegistry";
-import type { SessionAttachmentState } from "../../src/components/sessions/useSessionAttachment";
+import type { SessionRuntimeState } from "tddy-session-web";
+import type { SessionAttachmentState } from "tddy-session-web";
 import { aSessionConnection } from "../support/rpc/sessionConnections";
 import { SessionsDrawerScreen } from "../../src/components/sessions/SessionsDrawerScreen";
 import { SessionMainPane } from "../../src/components/sessions/SessionMainPane";

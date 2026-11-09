@@ -17,7 +17,7 @@ import type {
 import type { ConnectedSession } from "tddy-terminal-web";
 import type { ToolShortcutDef } from "tddy-terminal-web";
 import { tddyDebug } from "tddy-client-web";
-import { measureTerminalGridFromRect } from "../../lib/terminalGridMeasure";
+import { measureTerminalGridFromRect } from "./lib/terminalGridMeasure";
 import { TerminalFrameContinuity } from "tddy-client-web";
 import { isFrameForTerminal } from "tddy-terminal-web";
 import { useEnqueuedInput } from "tddy-terminal-web";

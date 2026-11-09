@@ -15,7 +15,7 @@
 import { useEffect, useRef } from "react";
 import { TrafficMeter } from "tddy-session-web";
 import { useMeterSnapshot } from "./useMeterSnapshot";
-import type { SessionRuntimeRegistry, SessionRuntimeState } from "./sessionRuntimeRegistry";
+import type { SessionRuntimeRegistry, SessionRuntimeState } from "tddy-session-web";
 
 export interface AttachedSessionTraffic {
   bytesIn: number;

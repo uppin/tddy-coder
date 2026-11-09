@@ -26,8 +26,8 @@ import {
   SessionRuntimeRegistry,
   makeByteTap,
   type ByteDelta,
-} from "../../../src/components/sessions/sessionRuntimeRegistry";
-import type { SessionAttachmentState } from "../../../src/components/sessions/useSessionAttachment";
+} from "tddy-session-web";
+import type { SessionAttachmentState } from "tddy-session-web";
 import { aSessionConnection } from "../rpc/sessionConnections";
 import { byTestId, TEST_IDS } from "../testIds";
 

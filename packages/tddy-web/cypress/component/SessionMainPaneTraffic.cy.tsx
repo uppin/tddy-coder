@@ -12,7 +12,7 @@
 import React from "react";
 import { byTestId, TEST_IDS } from "../support/testIds";
 import { SessionMainPane } from "../../src/components/sessions/SessionMainPane";
-import type { SessionAttachmentState } from "../../src/components/sessions/useSessionAttachment";
+import type { SessionAttachmentState } from "tddy-session-web";
 import { anInMemoryRpcBackend } from "tddy-connectrpc-testkit";
 import { aSessionConnection } from "../support/rpc/sessionConnections";
 import { SessionsDrawerScreen } from "../../src/components/sessions/SessionsDrawerScreen";

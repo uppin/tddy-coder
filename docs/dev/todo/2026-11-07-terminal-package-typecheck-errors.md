@@ -5,7 +5,7 @@
 **Detected:** `cd packages/tddy-terminal-web && ../../dev bunx tsc --noEmit -p .` — 17 `error TS` lines
 at `feature/web-split/terminal`, 2026-11-07: 8 in `cypress/` (RefObject nullability in
 `GhosttyTerminalBufferText.cy.tsx`, upload-response literals without `$typeName`, Sinon `.as` in
-`ghosttyTerminalSessionDriver.tsx`), 5 in `src/**/*.test.ts` (`remoteTerminateConfirm.test.ts` window
+`ghosttyTerminalSessionDriver.tsx` — fixed in #860), 5 in `src/**/*.test.ts` (`remoteTerminateConfirm.test.ts` window
 cast, `requestSnapshot` in `terminalFeed.test.ts`), 1 in `tddy-client-web/src/lib/debugMask.ts` (no
 declaration for `debug` — fixed in #847 by `@types/debug`, so 16 remain), 1 in `tddy-tauri-web/src/transport.ts` (`log` not in
 `EnvelopeTransportOptions`). Production `src/` is clean.

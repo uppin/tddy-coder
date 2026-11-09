@@ -6,8 +6,8 @@ import { useActionFailure } from "tddy-client-web";
 import { requestSessionsRefresh } from "tddy-session-web";
 import { actionFailed, hostNotConnected } from "tddy-client-web";
 import { owningHostForSession } from "tddy-session-web";
-import type { AttachClaim } from "./attachClaim";
-import type { UseSessionAttachmentResult } from "./useSessionAttachment";
+import type { AttachClaim } from "tddy-session-web";
+import type { UseSessionAttachmentResult } from "tddy-session-web";
 import { useHostLabel } from "tddy-client-web";
 
 export interface SessionsDrawerPaneActionsOptions {

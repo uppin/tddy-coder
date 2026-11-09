@@ -15,9 +15,9 @@
  */
 
 import React from "react";
-import { SessionTerminalTabs } from "../../src/components/sessions/SessionTerminalTabs";
-import type { AgentConversation } from "../../src/components/sessions/agentConversationTabs";
-import { AGENT_TERMINAL_ID } from "../../src/components/sessions/useSessionTerminals";
+import { SessionTerminalTabs } from "tddy-session-web";
+import type { AgentConversation } from "tddy-session-web";
+import { AGENT_TERMINAL_ID } from "tddy-session-web";
 import { sessionTerminalTabsPage as tabs } from "../support/pages/sessionTerminalTabsPage";
 
 // ---------------------------------------------------------------------------

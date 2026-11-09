@@ -18,13 +18,13 @@ import type { TerminalSessionService } from "tddy-client-web/gen/terminal_sessio
 import type { CodeNavigationService } from "tddy-client-web/gen/code_navigation_pb";
 import type { WorktreeService } from "tddy-client-web/gen/worktree_pb";
 import type { TaskService } from "tddy-client-web/gen/tasks_pb";
-import type { SessionAttachmentState } from "./useSessionAttachment";
+import type { SessionAttachmentState } from "tddy-session-web";
 import type { SessionAttachmentHint } from "tddy-client-web/connections/session";
 import type { HostConnection } from "tddy-client-web/connections/types";
 import type { SessionMetadata } from "tddy-session-web";
 import type { InspectorDrawerState } from "./SessionInspectorDrawer";
 import type { ToolShortcutDef } from "tddy-terminal-web";
-import type { ByteDelta, SessionRuntimeState } from "./sessionRuntimeRegistry";
+import type { ByteDelta, SessionRuntimeState } from "tddy-session-web";
 
 type ConnectionClient = Client<typeof SessionService>;
 type ProjectClient = Client<typeof ProjectService>;

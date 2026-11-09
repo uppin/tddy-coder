@@ -187,7 +187,7 @@ Panes state their stacking inline, bottom-up: terminal panes `2`, the terminal-c
 be painted over by the terminal canvas, leaving a session another screen controls looking interactive
 while swallowing every key.
 
-## The tab strip (`components/sessions/SessionTerminalTabs.tsx`)
+## The tab strip (`tddy-session-web`'s `src/SessionTerminalTabs.tsx`)
 
 A session's extra terminals are tabs beside the Agent tab. `useSessionTerminals` holds them as
 `{ terminalId, kind }[]`, seeded from `ListTerminalSessions` on attach, and `open(kind)` calls
