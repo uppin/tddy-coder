@@ -314,6 +314,7 @@ async fn a_routed_turns_route_variable_stands_over_a_daemon_variable_of_the_same
                 shape: RouteShape::Env,
             },
             key_env: None,
+            config_env: None,
         },
     )
     .with_provider_route(HarnessRoute {
