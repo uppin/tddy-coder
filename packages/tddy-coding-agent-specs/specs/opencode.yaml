@@ -34,6 +34,7 @@ run:
   env: {}
 extensions:
   coding_agent:
+    pass_env: [ANTHROPIC_API_KEY, OPENAI_API_KEY]
     product: OpenCode
     mcp: { kind: unsupported }
     tool_allow: unsupported

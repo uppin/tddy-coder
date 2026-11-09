@@ -55,8 +55,7 @@ impl ChildEnvironment {
         let mut values: BTreeMap<OsString, OsString> = match &plan.environment {
             EnvironmentBase::Inherited { .. } => std::env::vars_os().collect(),
             EnvironmentBase::Minimal => minimal_environment(),
-            // TODO(env-allow-list): implement — nothing; the request's variables are the base.
-            EnvironmentBase::Exactly => minimal_environment(),
+            EnvironmentBase::Exactly => BTreeMap::new(),
         };
         for (key, value) in &plan.env {
             values.insert(OsString::from(key), OsString::from(value));

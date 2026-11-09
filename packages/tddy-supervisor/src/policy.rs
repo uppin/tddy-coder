@@ -175,8 +175,17 @@ pub fn resolve_env(
 pub fn resolve_relayed_env(
     requested: &BTreeMap<String, String>,
 ) -> Result<BTreeMap<String, String>, SupervisorError> {
-    // TODO(env-allow-list): implement — today every key must be in an (empty) `allowed_env_keys`.
-    resolve_env(&SpawnPolicy::default(), requested)
+    for key in requested.keys() {
+        if is_loader_env_key(key) {
+            log::warn!(
+                target: "tddy_supervisor::policy",
+                "relayed spawn refused: `{key}` chooses what code the session loads and is \
+                 never a caller's to set"
+            );
+            return Err(SupervisorError::Denied);
+        }
+    }
+    Ok(requested.clone())
 }
 
 /// Resolve a bind-mount source for a sandbox. Must sit under one of the permitted roots, and must

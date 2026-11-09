@@ -25,9 +25,14 @@ pub const TDDY_ENV_PREFIX: &str = "TDDY_";
 /// Whether `name` is the variable `pattern` names: an exact name, or every name starting with
 /// `PREFIX_` for a pattern `PREFIX_*`. A `*` anywhere but the end matches nothing.
 pub fn matches_env_pattern(pattern: &str, name: &OsStr) -> bool {
-    // TODO(env-allow-list): implement
-    let _ = (pattern, name);
-    false
+    let Some(name) = name.to_str() else {
+        return false;
+    };
+    match pattern.strip_suffix('*') {
+        Some(prefix) if !prefix.contains('*') => name.starts_with(prefix),
+        Some(_) => false,
+        None => pattern == name,
+    }
 }
 
 /// Whether `name` is one of the `base` set's variables (names and `PREFIX_*` patterns).
@@ -44,11 +49,11 @@ pub fn agent_child_env(
     parent: impl IntoIterator<Item = (OsString, OsString)>,
     launch: &[(String, String)],
 ) -> Vec<(OsString, OsString)> {
-    // TODO(env-allow-list): implement — today's deny-list behaviour, kept so the build stands.
-    let _ = base;
     let mut env: Vec<(OsString, OsString)> = parent
         .into_iter()
-        .filter(|(name, _)| !name.to_string_lossy().starts_with(TDDY_ENV_PREFIX))
+        .filter(|(name, _)| {
+            !name.to_string_lossy().starts_with(TDDY_ENV_PREFIX) && is_base_variable(base, name)
+        })
         .collect();
     for (name, value) in launch {
         env.retain(|(kept, _)| kept.as_os_str() != OsStr::new(name));
@@ -60,12 +65,7 @@ pub fn agent_child_env(
 /// `command` made to start from exactly `env` — the agent's whole environment, as the daemon
 /// computed it ([`agent_child_env`]): its inherited environment cleared first.
 pub fn apply_agent_child_env(command: &mut std::process::Command, env: &[(String, String)]) {
-    // TODO(env-allow-list): implement — `env_clear` first; today only `TDDY_*` is removed.
-    for (name, _) in std::env::vars_os() {
-        if name.to_string_lossy().starts_with(TDDY_ENV_PREFIX) {
-            command.env_remove(&name);
-        }
-    }
+    command.env_clear();
     command.envs(env.iter().map(|(name, value)| (name, value)));
 }
 

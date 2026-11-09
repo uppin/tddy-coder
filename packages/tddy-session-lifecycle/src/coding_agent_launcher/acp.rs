@@ -59,6 +59,9 @@ impl DaemonCodingAgentLauncher {
             .spec
             .acp_command(&agent.tool, package_runner(def, agents.host()), route_args)
             .map_err(|e| Self::refuse(launch, &e.to_string()))?;
+        command.env = agent
+            .env_base
+            .agent_env(&agent.spec, std::env::vars_os(), &command.env);
         command.cwd = Some(launch.worktree.clone());
         if let Some(route) = &route {
             command.env.extend(harness_route_env(route));

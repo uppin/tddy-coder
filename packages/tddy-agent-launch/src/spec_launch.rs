@@ -282,20 +282,7 @@ pub async fn launch_host_pty(
     session: HostPtySession<'_>,
     on_exit: Option<ExitHook>,
 ) -> Result<Arc<PtyHandle>, SpecLaunchError> {
-    spawn_host_pty(agent, params, slots, worktree, session, on_exit, false).await
-}
-
-/// [`launch_host_pty`] for the generic CLI launch: the agent runs without the `TDDY_*` variables
-/// the daemon's own environment holds (stack rule) — it sees only what `session.env` names.
-pub(crate) async fn launch_host_pty_without_inherited_tddy(
-    agent: &HostAgent,
-    params: &TemplateParams,
-    slots: &RenderedSlots,
-    worktree: &Path,
-    session: HostPtySession<'_>,
-    on_exit: Option<ExitHook>,
-) -> Result<Arc<PtyHandle>, SpecLaunchError> {
-    spawn_host_pty(agent, params, slots, worktree, session, on_exit, true).await
+    spawn_host_pty(agent, params, slots, worktree, session, on_exit).await
 }
 
 async fn spawn_host_pty(
@@ -305,18 +292,13 @@ async fn spawn_host_pty(
     worktree: &Path,
     session: HostPtySession<'_>,
     on_exit: Option<ExitHook>,
-    without_inherited_tddy: bool,
 ) -> Result<Arc<PtyHandle>, SpecLaunchError> {
     let HostPtyPlan { argv, env } = plan_host_pty(agent, params, slots)?;
     let env: Vec<(String, String)> = env.into_iter().chain(session.env).collect();
-    // TODO(env-allow-list): implement — the PTY child starts from
-    // `agent.env_base.agent_env(&agent.spec, std::env::vars_os(), &env)`, not the daemon's
-    // environment minus `TDDY_*` (`env -u` names, never values, on its argv).
-    let argv = if without_inherited_tddy {
-        without_inherited_tddy_variables(argv, &env)
-    } else {
-        argv
-    };
+    // The PTY child starts from exactly the env the daemon computes (`#agent-tools 28/28`).
+    let env = agent
+        .env_base
+        .agent_env(&agent.spec, std::env::vars_os(), &env);
     session
         .manager
         .spawn_rendered_main(
@@ -333,73 +315,35 @@ async fn spawn_host_pty(
         .map_err(|e| SpecLaunchError::Spawn(e.to_string()))
 }
 
-/// `argv` run under `env -u NAME` for each `TDDY_*` variable the daemon's own environment holds and
-/// `env` does not set: the agent process sees no `TDDY_*` variable the launch did not name
-/// (`#agent-tools` stack rule). A PTY child inherits the daemon's environment, which a daemon
-/// started from a dev shell or a test fills with its own `TDDY_*` configuration.
-fn without_inherited_tddy_variables(argv: Vec<String>, env: &[(String, String)]) -> Vec<String> {
-    let mut inherited: Vec<String> = std::env::vars_os()
-        .filter_map(|(name, _)| name.into_string().ok())
-        .filter(|name| name.starts_with("TDDY_") && !env.iter().any(|(set, _)| set == name))
-        .collect();
-    if inherited.is_empty() {
-        return argv;
-    }
-    inherited.sort();
-    ["/usr/bin/env".to_string()]
-        .into_iter()
-        .chain(
-            inherited
-                .into_iter()
-                .flat_map(|name| ["-u".to_string(), name]),
-        )
-        .chain(argv)
-        .collect()
-}
-
 /// What a tmux pane runs before the agent, as `sh -c SCRIPT sh "<kept names>" <argv…>`: unset every
-/// `TDDY_*` variable the pane holds except the space-separated names in `$1`, then `exec` the argv.
+/// variable the pane holds except the space-separated names in `$1`, then `exec` the argv.
 /// The names are read with a pattern that admits only shell names, so `unset` never fails.
-const PANE_WITHOUT_INHERITED_TDDY: &str = r#"keep=" $1 "; shift; for name in $(/usr/bin/env | /usr/bin/sed -n 's/^\(TDDY_[A-Za-z0-9_]*\)=.*/\1/p'); do case "$keep" in *" $name "*) ;; *) unset "$name" ;; esac; done; exec "$@""#;
+const PANE_WITH_ONLY_THE_AGENT_ENV: &str = r#"keep=" $1 "; shift; for name in $(/usr/bin/env | /usr/bin/sed -n 's/^\([A-Za-z_][A-Za-z0-9_]*\)=.*/\1/p'); do case "$keep" in *" $name "*) ;; *) unset "$name" ;; esac; done; exec "$@""#;
 
-/// `argv` for a tmux pane, run without any `TDDY_*` variable but those `env` sets (`#agent-tools`
-/// stack rule). A pane inherits the tmux *server's* environment — taken from whichever process
-/// started that server, a daemon from a dev shell or a test among them — which the daemon cannot
-/// read, so unlike [`without_inherited_tddy_variables`] the names are found in the pane itself.
-pub(crate) fn in_a_pane_without_inherited_tddy(
+/// `argv` for a tmux pane, run with only the agent's environment (`#agent-tools 28/28`): `env` is
+/// that whole environment, computed by the daemon (`AgentEnvBase::agent_env`) and sourced from
+/// the pane file. Of what the pane holds — the tmux server's environment plus that file — only the
+/// names `env` sets are kept, every other variable is unset, then the argv is `exec`ed. Names only
+/// reach the pane's argv, never values.
+pub(crate) fn in_a_pane_with_only_the_agent_env(
     argv: Vec<String>,
     env: &[(String, String)],
 ) -> Vec<String> {
     let kept = env
         .iter()
         .map(|(name, _)| name.as_str())
-        .filter(|name| name.starts_with("TDDY_"))
         .collect::<Vec<_>>()
         .join(" ");
     [
         "/bin/sh".to_string(),
         "-c".to_string(),
-        PANE_WITHOUT_INHERITED_TDDY.to_string(),
+        PANE_WITH_ONLY_THE_AGENT_ENV.to_string(),
         "sh".to_string(),
         kept,
     ]
     .into_iter()
     .chain(argv)
     .collect()
-}
-
-/// `argv` for a tmux pane, run with only the agent's environment (`#agent-tools 28/28`): `env` is
-/// that whole environment, computed by the daemon (`CodingAgentSpec::agent_env`) and sourced from
-/// the pane file. Of what the pane holds — the tmux server's environment plus that file — only the
-/// names `env` sets are kept, every other variable is unset, then the argv is `exec`ed. Names only
-/// reach the pane's argv, never values. Replaces [`in_a_pane_without_inherited_tddy`].
-#[allow(dead_code)] // TODO(env-allow-list): the tmux harness launch calls this in place of the deny-list.
-pub(crate) fn in_a_pane_with_only_the_agent_env(
-    argv: Vec<String>,
-    env: &[(String, String)],
-) -> Vec<String> {
-    // TODO(env-allow-list): implement — today's deny-list, kept so the build stands.
-    in_a_pane_without_inherited_tddy(argv, env)
 }
 
 fn write_slot_file(path: &Path, bytes: &[u8]) -> Result<(), SpecLaunchError> {
@@ -432,50 +376,3 @@ pub struct McpRegistration {
 
 #[cfg(test)]
 mod pane_with_only_the_agent_env_tests;
-
-#[cfg(test)]
-mod pane_without_inherited_tddy_tests {
-    use super::in_a_pane_without_inherited_tddy;
-
-    /// The `TDDY_*` names a command prints from its own environment.
-    fn tddy_names_seen_by(argv: &[String], inherited: &[(&str, &str)]) -> Vec<String> {
-        let output = std::process::Command::new(&argv[0])
-            .args(&argv[1..])
-            .env_clear()
-            .envs(inherited.iter().copied())
-            .output()
-            .expect("the pane command runs");
-        let mut names: Vec<String> = String::from_utf8_lossy(&output.stdout)
-            .lines()
-            .filter_map(|line| line.split_once('=').map(|(name, _)| name.to_string()))
-            .filter(|name| name.starts_with("TDDY_"))
-            .collect();
-        names.sort();
-        names
-    }
-
-    #[test]
-    fn a_pane_drops_every_inherited_tddy_variable_and_keeps_the_ones_the_launch_sets() {
-        // Given — a pane environment holding an inherited TDDY_ variable and one the launch set
-        let argv = in_a_pane_without_inherited_tddy(
-            vec!["/usr/bin/env".to_string()],
-            &[
-                ("TDDY_DAEMON_URL".to_string(), "http://daemon".to_string()),
-                ("PATH".to_string(), "/usr/bin:/bin".to_string()),
-            ],
-        );
-
-        // When
-        let seen = tddy_names_seen_by(
-            &argv,
-            &[
-                ("TDDY_LEAK_PROBE", "1"),
-                ("TDDY_DAEMON_URL", "http://daemon"),
-                ("PATH", "/usr/bin:/bin"),
-            ],
-        );
-
-        // Then
-        assert_eq!(seen, vec!["TDDY_DAEMON_URL".to_string()]);
-    }
-}

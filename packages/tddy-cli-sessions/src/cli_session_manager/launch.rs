@@ -45,7 +45,6 @@ impl CliSessionManager {
         os_user: Option<&str>,
         on_exit: Option<ExitHook>,
     ) -> anyhow::Result<Arc<pty_handle::PtyHandle>> {
-        // TODO(env-allow-list): implement — spawned on `PtyEnvBase::Cleared`.
         self.spawn_tool_on(
             session_id,
             MAIN_TERMINAL_ID,
@@ -53,7 +52,7 @@ impl CliSessionManager {
             worktree_path,
             model,
             argv,
-            (env, tddy_pty::PtyEnvBase::Inherited),
+            (env, tddy_pty::PtyEnvBase::Cleared),
             os_user,
             on_exit,
             None,

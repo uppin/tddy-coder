@@ -70,9 +70,15 @@ impl AgentEnvBase {
     /// [`AGENT_ENV_BASE_OVERRIDE`] when present, else [`Self::builtin`]. Refused, naming the file,
     /// when the override does not parse or an entry would admit a `TDDY_*` variable.
     pub fn load(overrides_dir: &Path) -> Result<Self, AgentEnvBaseError> {
-        // TODO(env-allow-list): implement — read `overrides_dir.join(AGENT_ENV_BASE_OVERRIDE)`.
-        let _ = overrides_dir;
-        Ok(Self::builtin())
+        let file = overrides_dir.join(AGENT_ENV_BASE_OVERRIDE);
+        match std::fs::read_to_string(&file) {
+            Ok(yaml) => Self::parse(&file, &yaml),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(Self::builtin()),
+            Err(error) => Err(AgentEnvBaseError::Invalid {
+                file,
+                message: error.to_string(),
+            }),
+        }
     }
 
     /// `yaml` read as a base-set file reported as `file`, its entries validated.
@@ -109,9 +115,10 @@ impl AgentEnvBase {
         parent: impl IntoIterator<Item = (OsString, OsString)>,
         launch: &[(String, String)],
     ) -> Vec<(String, String)> {
-        // TODO(env-allow-list): implement — `agent_child_env(self.entries(), parent, passed ++ launch)`.
-        let _ = spec;
-        tddy_agent_backend::agent_env::agent_child_env(&self.entries, parent, launch)
+        let parent: Vec<(OsString, OsString)> = parent.into_iter().collect();
+        let mut launch_env = spec.passed_env(parent.iter().cloned());
+        launch_env.extend(launch.iter().cloned());
+        tddy_agent_backend::agent_env::agent_child_env(&self.entries, parent, &launch_env)
             .into_iter()
             .filter_map(|(name, value)| Some((name.into_string().ok()?, value.into_string().ok()?)))
             .collect()

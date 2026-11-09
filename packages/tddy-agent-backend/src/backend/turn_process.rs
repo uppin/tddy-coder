@@ -15,10 +15,6 @@ use std::time::Duration;
 
 use crate::error::BackendError;
 
-/// The prefix of the variables a headless agent never sees: its session is found through the
-/// session pointer, never through the environment.
-pub(crate) const TDDY_ENV_PREFIX: &str = "TDDY_";
-
 /// How long a finished turn waits for its stderr to close before it keeps what it has read: a
 /// grandchild that inherited the pipe can hold it open. One grace for workflow and conversation turns.
 pub(crate) const STDERR_GRACE: std::time::Duration = std::time::Duration::from_secs(2);
@@ -32,35 +28,25 @@ fn running_groups() -> std::sync::MutexGuard<'static, BTreeSet<u32>> {
         .unwrap_or_else(PoisonError::into_inner)
 }
 
-/// Removes every `TDDY_*` variable this process carries from what `command` will inherit.
-pub(crate) fn strip_tddy_env(command: &mut std::process::Command) {
-    for (name, _) in std::env::vars_os() {
-        if name.to_string_lossy().starts_with(TDDY_ENV_PREFIX) {
-            command.env_remove(&name);
-        }
-    }
-}
-
 /// How one turn's child is started.
 pub(crate) struct TurnCommand<'a> {
     pub(crate) program: &'a Path,
     pub(crate) argv: &'a [String],
-    /// Set on top of the inherited environment, in order, after `PATH`.
+    /// The child's whole environment, as the daemon computed it (`crate::agent_env`), in order
+    /// after `PATH`.
     pub(crate) env: &'a [(String, String)],
     pub(crate) cwd: &'a Path,
     pub(crate) inherit_stdin: bool,
 }
 
 /// The command one turn's child is started with: `turn.program` as the leader of a new process
-/// group, `TDDY_*` variables stripped from what it inherits, stdout and stderr piped.
+/// group, started from exactly `turn.env`, stdout and stderr piped.
 pub(crate) fn spawn_turn_command(turn: &TurnCommand<'_>) -> std::process::Command {
     use std::os::unix::process::CommandExt as _;
     let mut command = std::process::Command::new(turn.program);
     command.args(turn.argv).current_dir(turn.cwd);
-    // TODO(env-allow-list): implement — `crate::agent_env::apply_agent_child_env`, not a deny-list.
-    strip_tddy_env(&mut command);
+    crate::agent_env::apply_agent_child_env(&mut command, turn.env);
     command.env("PATH", super::path_with_exe_dir());
-    command.envs(turn.env.iter().map(|(name, value)| (name, value)));
     command
         .stdin(if turn.inherit_stdin {
             std::process::Stdio::inherit()

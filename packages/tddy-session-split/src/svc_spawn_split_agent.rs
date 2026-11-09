@@ -514,8 +514,6 @@ pub(crate) async fn spawn_split_agent_pty(
     base: &tddy_coding_agent_specs::AgentEnvBase,
     pty: SplitAgentPty<'_>,
 ) -> anyhow::Result<Arc<tddy_cli_sessions::cli_session_manager::pty_handle::PtyHandle>> {
-    // TODO(env-allow-list): implement — `base.agent_env(spec, std::env::vars_os(), &[])` is the env.
-    let _ = (spec, base);
     cli_manager
         .spawn_rendered_main(
             pty.session_id,
@@ -523,7 +521,7 @@ pub(crate) async fn spawn_split_agent_pty(
             pty.context_dir,
             pty.model,
             pty.argv,
-            Vec::new(),
+            base.agent_env(spec, std::env::vars_os(), &[]),
             pty.os_user,
             pty.on_exit,
         )

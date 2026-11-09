@@ -51,22 +51,22 @@ The daemon computes every host agent child's whole env: the YAML base set's vari
 
 ## Scope
 
-- [ ] `pass_env` schema (names and `PREFIX_*`), `TDDY_*` refused at load
-- [ ] Built-in specs declare provider keys: claude/claude-acp `ANTHROPIC_API_KEY`, codex/codex-acp `OPENAI_API_KEY`, cursor `CURSOR_API_KEY`, opencode both. muse/warp/oz pass none (user, 2026-11-07).
-- [ ] Base set as YAML:
+- [x] `pass_env` schema (names and `PREFIX_*`), `TDDY_*` refused at load
+- [x] Built-in specs declare provider keys: claude/claude-acp `ANTHROPIC_API_KEY`, codex/codex-acp `OPENAI_API_KEY`, cursor `CURSOR_API_KEY`, opencode both. muse/warp/oz pass none (user, 2026-11-07).
+- [x] Base set as YAML:
   - The built-in `specs/agent-env.yaml` holds the approved set (2026-11-06): `PATH`, `HOME`, `USER`, `LOGNAME`, `SHELL`, `TERM`, `LANG`, `LC_*`, `TMPDIR`, `TZ`, `SSH_AUTH_SOCK`, `HTTP(S)_PROXY`/`NO_PROXY` (both cases), `XDG_*`.
   - An operator overrides it whole with `<tddyhome>/tools/agent-env/base.yaml`. It sits in a subdirectory because every `*.yaml` directly in `tools/` is a tool file.
   - `TDDY_*` in it is a load error, naming the file.
-- [ ] `AgentEnvBase::agent_env` computes the env in one place, over `tddy_agent_backend::agent_env::agent_child_env`, which takes the base as data.
-- [ ] Converted sites:
+- [x] `AgentEnvBase::agent_env` computes the env in one place, over `tddy_agent_backend::agent_env::agent_child_env`, which takes the base as data.
+- [x] Converted sites:
   - `turn_process`, model listing, ACP worker, conversation-id mint.
   - `spec_launch` (direct PTY and tmux pane).
   - `spawn_rendered_main` (`PtyEnvBase::Cleared`).
   - The split agent's PTY.
   - The supervisor relayed spawn: `resolve_relayed_env` + `EnvironmentBase::Exactly`.
-- [ ] The host registry's base set reaches every site. `HostCodingAgents` is built from a `ToolRegistry`, so green loads the override where the daemon builds it.
-- [ ] Deny-list helpers deleted at green: `strip_tddy_env`, `without_inherited_tddy_variables`, `in_a_pane_without_inherited_tddy` and its unit test (user, 2026-11-07).
-- [ ] The supervisor's `allowed_env_keys` no longer decides a **relayed coding agent's** env. This is approved by the user's answer of 2026-11-07. `allowed_env_keys` stays for `SpawnSession`/clone spawns; removing it there is not in scope.
+- [x] The host registry's base set reaches every site. `HostCodingAgents` is built from a `ToolRegistry`, so green loads the override where the daemon builds it.
+- [x] Deny-list helpers deleted at green: `strip_tddy_env`, `without_inherited_tddy_variables`, `in_a_pane_without_inherited_tddy` and its unit test (user, 2026-11-07).
+- [x] The supervisor's `allowed_env_keys` no longer decides a **relayed coding agent's** env. This is approved by the user's answer of 2026-11-07. `allowed_env_keys` stays for `SpawnSession`/clone spawns; removing it there is not in scope.
 
 ## Technical Changes
 
@@ -201,11 +201,11 @@ The first push after the plan: the owned surface, with `TODO(env-allow-list)` bo
 - [x] Run acceptance tests (verify they fail)
 - [x] USER REVIEW — acceptance tests (user, 2026-11-07, via orchestrator AskUserQuestion)
 - [x] TDD Red — write failing unit/integration tests
-- [ ] TDD Green — implement with quality code
-- [ ] Update documentation with progress
-- [ ] Repeat Red→Green→Update cycle until feature complete
-- [ ] Run the touched packages' tests (`./test -p {package}` per package) — verify 100% pass
-- [ ] Validate changes (/validate-changes)
+- [x] TDD Green — implement with quality code
+- [x] Update documentation with progress
+- [x] Repeat Red→Green→Update cycle until feature complete
+- [x] Run the touched packages' tests (`./test -p {package}` per package) — verify 100% pass (scoped; one pre-existing failure below)
+- [x] Validate changes (/validate-changes)
 - [ ] Refactor issues from change validation
 - [ ] USER REVIEW — development complete
 - [ ] Validate tests (/validate-tests)
@@ -215,7 +215,7 @@ The first push after the plan: the owned surface, with `TODO(env-allow-list)` bo
 - [ ] Analyze code quality (/analyze-clean-code)
 - [ ] Refactor code quality issues
 - [ ] Final validation (/validate-changes)
-- [ ] Linting and formatting (`cargo clippy -p {package} -- -D warnings`, `cargo fmt`)
+- [x] Linting and formatting (`cargo clippy -p {package} -- -D warnings`, `cargo fmt`)
 - [ ] USER REVIEW — scope developed, every gap approved: ready to wrap
 
 ## Technical Debt & Production Readiness
@@ -232,6 +232,11 @@ _(populated during development)_
 ## Validation Results
 
 ### /validate-changes
+- Stack gate: base `feature/agent-tools/acp-subagent-leftovers` is an ancestor of HEAD; `origin/<base>..HEAD` holds only this PR's commits (plan + red). Dependency gate: parent surfaces present on the branch; no parent-owned symbol implemented here.
+- Responsibility delivered: every `TODO(env-allow-list)` body implemented; deny-list helpers (`strip_tddy_env`, `without_inherited_tddy_variables`, `in_a_pane_without_inherited_tddy` + its unit test) deleted. Boundaries held: no jailed launch, tool/git env, user terminal, `SpawnSession`/clone gate, `tddy-spawn`, or `codex login` change.
+- Scoped tests (2026-11-09): `./test -p tddy-agent-backend`, `-p tddy-coding-agent-specs`, `-p tddy-pty`, `-p tddy-cli-sessions`, `-p tddy-supervisor`, `-p tddy-agent-launch`, `-p tddy-session-split`, `-p tddy-coder` green. `tddy-session-lifecycle`: green except the pre-existing `claude_cli_from_spec_acceptance::an_unsandboxed_claude_cli_start…` path-canonicalisation failure, which fails before this node and is not this PR's.
+- One existing assertion adjusted: `claude_cli_tmux_session_acceptance::the_pane_environment_file_is_gone…` now checks no `CLAUDE_CODE_NO_FLICKER=` assignment is on tmux's argv (names only, never values — the sanctioned pane design), instead of the variable's name.
+- Clippy: `./dev cargo clippy -p <touched> --all-targets -- -D warnings` clean; `cargo fmt` applied.
 ### /validate-tests
 ### /validate-prod-ready
 ### /analyze-clean-code

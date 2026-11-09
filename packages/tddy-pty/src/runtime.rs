@@ -333,8 +333,9 @@ fn open_pty_and_pump(
         cmd.arg(arg);
     }
     cmd.cwd(&spec.worktree_path);
-    // TODO(env-allow-list): implement — `PtyEnvBase::Cleared` calls `cmd.env_clear()` here.
-    let _ = spec.env_base;
+    if spec.env_base == PtyEnvBase::Cleared {
+        cmd.env_clear();
+    }
     cmd.env("TERM", "xterm-256color");
     cmd.env("COLORTERM", "truecolor");
     // The environment is never a credential: a daemon that has one of these exported must not hand

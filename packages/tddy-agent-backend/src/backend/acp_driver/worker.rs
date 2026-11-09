@@ -276,10 +276,8 @@ async fn supervise(
 /// Start the agent with its stdio piped. Its stderr is discarded, as the backends always had it.
 fn spawn_agent(command: &AcpAgentCommand) -> Result<tokio::process::Child, BackendError> {
     let mut process = tokio::process::Command::new(&command.program);
-    // TODO(env-allow-list): implement — `crate::agent_env::apply_agent_child_env`; today inherits all.
-    process
-        .args(&command.args)
-        .envs(command.env.iter().map(|(name, value)| (name, value)));
+    process.args(&command.args);
+    crate::agent_env::apply_agent_child_env(process.as_std_mut(), &command.env);
     if let Some(cwd) = &command.cwd {
         process.current_dir(cwd);
     }

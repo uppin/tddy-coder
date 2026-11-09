@@ -157,9 +157,44 @@ fn parse_section(
 /// matches (`TDDY*`, `T*`, `*`) — or is not a variable name nor a `PREFIX_*` pattern. The message
 /// names the entry.
 pub(crate) fn validate_env_entries(entries: &[String]) -> Result<(), String> {
-    // TODO(env-allow-list): implement
-    let _ = entries;
+    for entry in entries {
+        if admits_a_tddy_variable(entry) {
+            return Err(format!(
+                "env entry '{entry}' would admit a TDDY_* variable, which no agent inherits"
+            ));
+        }
+        if !is_an_env_entry(entry) {
+            return Err(format!(
+                "env entry '{entry}' is neither a variable name nor a PREFIX_* pattern"
+            ));
+        }
+    }
     Ok(())
+}
+
+/// Whether `entry` (a name or a pattern) could name a `TDDY_*` variable.
+fn admits_a_tddy_variable(entry: &str) -> bool {
+    if let Some(prefix) = entry.split('*').next().filter(|_| entry.contains('*')) {
+        // A prefix pattern admits every name starting with its prefix.
+        return "TDDY_".starts_with(prefix) || prefix.starts_with("TDDY_") || prefix.is_empty();
+    }
+    entry == "TDDY" || entry.starts_with("TDDY_")
+}
+
+/// Whether `entry` is a variable name (`PATH`) or a `PREFIX_*` pattern (`LC_*`).
+fn is_an_env_entry(entry: &str) -> bool {
+    let is_name = |text: &str| {
+        !text.is_empty()
+            && text
+                .chars()
+                .next()
+                .is_some_and(|c| c.is_ascii_alphabetic() || c == '_')
+            && text.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
+    };
+    match entry.strip_suffix("_*") {
+        Some(prefix) => is_name(&format!("{prefix}_")),
+        None => is_name(entry),
+    }
 }
 
 /// Why a tool is not a usable coding agent.
@@ -316,9 +351,15 @@ impl CodingAgentSpec {
         &self,
         parent: impl IntoIterator<Item = (std::ffi::OsString, std::ffi::OsString)>,
     ) -> Vec<(String, String)> {
-        // TODO(env-allow-list): implement
-        let _ = parent.into_iter();
-        Vec::new()
+        parent
+            .into_iter()
+            .filter(|(name, _)| {
+                self.agent.pass_env.iter().any(|pattern| {
+                    tddy_agent_backend::agent_env::matches_env_pattern(pattern, name)
+                })
+            })
+            .filter_map(|(name, value)| Some((name.into_string().ok()?, value.into_string().ok()?)))
+            .collect()
     }
 
     /// `coding_agent.product`, or the agent id when the spec declares none.
@@ -562,7 +603,8 @@ impl CodingAgentSpec {
             .ok_or_else(|| AcpCommandError::EmptyCommand {
                 agent: self.id.clone(),
             })?;
-        // TODO(env-allow-list): implement — the launcher gives the agent `AgentEnvBase::agent_env` over `acp.env`.
+        // `env` is the launch env (`acp.env`): the launcher computes the agent's whole
+        // environment from it with `AgentEnvBase::agent_env` (`#agent-tools 28/28`).
         Ok(AcpAgentCommand {
             program: PathBuf::from(program),
             args: args.to_vec(),
