@@ -85,10 +85,17 @@ The undo is `start_task::undo_a_timed_out_start`, keyed by OS user because an op
 no token: `remove_what_a_start_created` reads the cut branch (`branch_a_start_cut_as`), deletes the
 session (`delete_session_as`, the body of `DeleteSession` after `os_user_of_session_token`), then the
 branch. `undo_a_cancelled_start` (the streamed start's cancel) resolves its token with
-`os_user_of_session_token` and runs the same teardown. An operator start's peer-held parts (split
-codebase half, agent clones) are deleted with its empty token and so refused, leaving the session in
-place — `TODO(operator-start-undo)` in `start_task.rs`,
-`docs/dev/todo/2026-11-07-operator-start-undo-of-peer-held-parts.md`.
+`os_user_of_session_token` and runs the same teardown. An operator start has no peer-held part to
+undo: `start_session_for_os_user` (`operator_start.rs`) refuses `INVALID_ARGUMENT`, naming the field,
+a request that sets `codebase_daemon_instance_id`, `sandboxed_codebase`, `specialized_agents` or
+`clone_placed_agents` (`refuse_peer_held_parts`), before anything is created.
+
+`delete_session_as` first runs `refuse_a_delete_a_peer_would_refuse`, before the tmux kill and the
+pointer removal: a codebase half on another daemon
+(`SplitSessions::refuse_an_unreachable_paired_codebase`) or a recorded agent clone
+(`AgentRoster::refuse_an_unreachable_clone_host`) while no common room is configured or joined is
+refused `FAILED_PRECONDITION` with the session and its agent still running. A peer that is reachable
+at the check but fails at its delete still fails after the local teardown began.
 
 The wiring tests are in `tddy-session-lifecycle/tests/session_start_deadline_acceptance.rs` (the
 `DaemonSessionHost` harness cannot be a dependency of this crate); their stuck step is an SSH clone to
