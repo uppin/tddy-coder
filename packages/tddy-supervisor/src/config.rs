@@ -249,10 +249,7 @@ impl ServiceSocket {
 ///
 /// Checked on the untyped document, before typed deserialization, so a leftover key is told it is
 /// obsolete rather than getting serde's bare `unknown field`.
-fn refuse_old_user_list_keys(yaml: &str) -> Result<(), ConfigError> {
-    let document: serde_yaml::Value = serde_yaml::from_str(yaml).map_err(|error| ConfigError {
-        message: error.to_string(),
-    })?;
+fn refuse_old_user_list_keys(document: &serde_yaml::Value) -> Result<(), ConfigError> {
     let Some(top) = document.as_mapping() else {
         return Ok(());
     };
@@ -278,39 +275,6 @@ fn refuse_old_user_list_keys(yaml: &str) -> Result<(), ConfigError> {
                 }
             }
         }
-    }
-    Ok(())
-}
-
-/// Refuse the spawn-policy keys `exec_roots` and the one env rule replaced (`#agent-tools` 32/32).
-fn refuse_old_spawn_policy_keys(yaml: &str) -> Result<(), ConfigError> {
-    let document: serde_yaml::Value = serde_yaml::from_str(yaml).map_err(|error| ConfigError {
-        message: error.to_string(),
-    })?;
-    let Some(top) = document.as_mapping() else {
-        return Ok(());
-    };
-    let Some(policy) = top.get("spawn_policy").and_then(|v| v.as_mapping()) else {
-        return Ok(());
-    };
-    for key in ["allowed_tool_paths", "allowed_relay_tool_paths"] {
-        if policy.contains_key(key) {
-            return Err(ConfigError {
-                message: format!(
-                    "`{key}:` in supervisor.yaml is obsolete — it was replaced by \
-                     `spawn_policy.exec_roots`; delete the `{key}:` key and name the same files \
-                     or directories under `exec_roots`"
-                ),
-            });
-        }
-    }
-    if policy.contains_key("allowed_env_keys") {
-        return Err(ConfigError {
-            message: "`allowed_env_keys:` in supervisor.yaml is obsolete — it was removed; the \
-                      daemon's environment now passes whole under the one env rule, so delete \
-                      the `allowed_env_keys:` key"
-                .to_string(),
-        });
     }
     Ok(())
 }
@@ -368,8 +332,13 @@ impl SupervisorConfig {
     /// Validation is part of parsing on purpose: a config that would let the daemon escalate is
     /// a startup failure, not a runtime surprise.
     pub fn from_yaml(yaml: &str) -> Result<SupervisorConfig, ConfigError> {
-        refuse_old_user_list_keys(yaml)?;
-        refuse_old_spawn_policy_keys(yaml)?;
+        // The untyped document, read once for the obsolete-key checks.
+        let document: serde_yaml::Value =
+            serde_yaml::from_str(yaml).map_err(|error| ConfigError {
+                message: error.to_string(),
+            })?;
+        refuse_old_user_list_keys(&document)?;
+        spawn_policy::refuse_old_spawn_policy_keys(&document)?;
         let config: SupervisorConfig = serde_yaml::from_str(yaml).map_err(|error| ConfigError {
             message: error.to_string(),
         })?;
@@ -642,21 +611,6 @@ mod tests {
             config.spawn_policy.allowed_mount_roots,
             Vec::<PathBuf>::new()
         );
-    }
-
-    #[test]
-    fn rejects_a_spawn_policy_that_lets_a_caller_preload_a_library_into_a_session() {
-        // Given
-        let yaml = "\
-socket:
-  path: /run/tddy-supervisor.sock
-spawn_policy:
-  allowed_env_keys: [RUST_LOG, LD_PRELOAD]
-";
-
-        // When / Then — `LD_PRELOAD` makes any allowlisted tool load code the caller chose, so
-        // granting it would hand over everything `allowed_tool_paths` exists to withhold.
-        assert_rejected_because(SupervisorConfig::from_yaml(yaml), "removed");
     }
 
     #[test]

@@ -20,7 +20,7 @@ use std::path::{Component, Path, PathBuf};
 use std::str::FromStr;
 
 use crate::config::spawn_policy::is_loader_env_key;
-use crate::config::spawn_policy::SpawnPolicy;
+use crate::config::spawn_policy::{ExecRoot, SpawnPolicy};
 use crate::config::{CgroupPolicy, ROOT_USER};
 use crate::error::SupervisorError;
 use crate::request::{AppliedLimits, RequestedLimits};
@@ -132,70 +132,80 @@ pub fn resolve_exec(
 ) -> Result<CheckedExecutable, SupervisorError> {
     let requested = plain_absolute_path(requested)?;
     // A symlink is judged by its target: the kernel resolves the whole path.
-    let target = std::fs::canonicalize(requested).map_err(|_| SupervisorError::Denied)?;
+    let target = std::fs::canonicalize(requested)
+        .map_err(|error| refused_exec(requested, &format!("it does not resolve ({error})")))?;
     // SAFETY: reads this process's own effective uid and nothing else.
     let enforcing_uid = unsafe { libc::geteuid() };
-    for entry in &policy.exec_roots {
-        let Ok(entry_target) = std::fs::canonicalize(&entry.path) else {
-            continue;
-        };
-        let contained = if entry_target.is_file() {
-            target == entry_target
-        } else {
-            target.starts_with(&entry_target)
-        };
-        if !contained {
-            continue;
-        }
-        // The file, every directory above it and the entry itself must be trusted; an
-        // operator-marked trusted prefix is the one entry not itself checked.
-        let mut trusted = true;
-        let mut current = Some(target.as_path());
-        while let Some(path) = current {
-            if !(entry.trusted_prefix && path == entry_target) {
-                match std::fs::metadata(path) {
-                    Ok(metadata) => {
-                        use std::os::unix::fs::MetadataExt;
-                        if !is_trusted_exec_path_entry(
-                            metadata.uid(),
-                            metadata.mode(),
-                            enforcing_uid,
-                        ) {
-                            trusted = false;
-                            break;
-                        }
-                    }
-                    Err(_) => {
-                        trusted = false;
-                        break;
-                    }
-                }
-            }
-            current = path.parent();
-        }
-        if !trusted {
-            continue;
-        }
-        #[cfg(target_os = "linux")]
-        let descriptor = {
-            let c_path =
-                spawn_broker::path_to_c_string(&target).map_err(|_| SupervisorError::Denied)?;
-            let fd = spawn_broker::open_resolved(
-                libc::AT_FDCWD,
-                &c_path,
-                spawn_broker::RESOLVE_NO_SYMLINKS,
-            )
-            .map_err(|_| SupervisorError::Denied)?;
-            Some(std::sync::Arc::new(fd))
-        };
-        #[cfg(not(target_os = "linux"))]
-        let descriptor = None;
-        return Ok(CheckedExecutable {
-            path: target,
-            descriptor,
-        });
+    if !policy
+        .exec_roots
+        .iter()
+        .any(|entry| exec_root_admits(entry, &target, enforcing_uid))
+    {
+        return Err(refused_exec(
+            requested,
+            &format!(
+                "{} is under no exec_roots entry it and every directory above it are trusted by",
+                target.display()
+            ),
+        ));
     }
-    Err(SupervisorError::Denied)
+    Ok(CheckedExecutable {
+        descriptor: checked_descriptor(&target)?,
+        path: target,
+    })
+}
+
+/// Whether `entry` names `target` (a file entry) or a directory above it, and the file, every
+/// directory above it and the entry itself are trusted — but for an operator-marked trusted
+/// prefix, the one entry not itself checked.
+fn exec_root_admits(entry: &ExecRoot, target: &Path, enforcing_uid: u32) -> bool {
+    let Ok(entry_target) = std::fs::canonicalize(&entry.path) else {
+        return false;
+    };
+    let contained = if entry_target.is_file() {
+        target == entry_target
+    } else {
+        target.starts_with(&entry_target)
+    };
+    contained
+        && target.ancestors().all(|path| {
+            (entry.trusted_prefix && path == entry_target)
+                || is_trusted_on_disk(path, enforcing_uid)
+        })
+}
+
+/// [`is_trusted_exec_path_entry`] for what is on disk at `path`; a path that cannot be read is not.
+fn is_trusted_on_disk(path: &Path, enforcing_uid: u32) -> bool {
+    use std::os::unix::fs::MetadataExt;
+    std::fs::metadata(path).is_ok_and(|metadata| {
+        is_trusted_exec_path_entry(metadata.uid(), metadata.mode(), enforcing_uid)
+    })
+}
+
+/// The checked file held open, so that what the child execs is what was checked (Linux).
+#[cfg(target_os = "linux")]
+fn checked_descriptor(target: &Path) -> Result<Option<std::sync::Arc<OwnedFd>>, SupervisorError> {
+    let c_path = spawn_broker::path_to_c_string(target).map_err(|_| SupervisorError::Denied)?;
+    let fd =
+        spawn_broker::open_resolved(libc::AT_FDCWD, &c_path, spawn_broker::RESOLVE_NO_SYMLINKS)
+            .map_err(|error| refused_exec(target, &format!("it could not be opened ({error})")))?;
+    Ok(Some(std::sync::Arc::new(fd)))
+}
+
+/// macOS has no exec through a descriptor: the check is path-only.
+#[cfg(not(target_os = "linux"))]
+fn checked_descriptor(_target: &Path) -> Result<Option<std::sync::Arc<OwnedFd>>, SupervisorError> {
+    Ok(None)
+}
+
+/// Log why the exec gate refused `requested`, and return the opaque refusal the caller gets.
+fn refused_exec(requested: &Path, why: &str) -> SupervisorError {
+    log::warn!(
+        target: "tddy_supervisor::policy",
+        "spawn refused: {} is not an executable the exec gate passes: {why}",
+        requested.display()
+    );
+    SupervisorError::Denied
 }
 
 /// Whether one file or directory on the way to a binary is one only root, or the supervisor's own
@@ -274,8 +284,8 @@ pub fn resolve_mount_source(
 
 /// Refuse a source that is only *textually* beneath its root.
 ///
-/// Component-wise containment plus a ban on `..` is exactly right for [`resolve_tool_path`], whose
-/// allowlist is equality against paths only root can write. It does not carry over to a mount root,
+/// Component-wise containment plus a ban on `..` is exactly right for an allowlist of paths only
+/// root can write. It does not carry over to a mount root,
 /// which is a prefix over a whole tree the session user owns: `alice` can create
 /// `/srv/tddy/repos/alice/esc -> /`, name it as a source, pass a component-wise check with it, and
 /// have `mount(2)` follow the link and bind `/` into her jail.

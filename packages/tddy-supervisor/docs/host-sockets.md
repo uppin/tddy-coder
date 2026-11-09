@@ -56,11 +56,9 @@ Validated at load (`host_socket_config.rs`, `validate`): a service that serves u
 refused before typed parsing (`refuse_old_user_list_keys` in `config.rs`), with an error naming
 `users.yaml` and the key to delete.
 
-`spawn_policy.allowed_env_keys` is a deny, not a filter: a request naming a key it does not list is
-refused. A project that resolves to an account sends the four `GIT_AUTHOR_*` / `GIT_COMMITTER_*` keys,
-so `supervisor.yaml.production`, `dev.supervisor.yaml` and `daemon.yaml.production` list them, and a
-supervised host must list them or every tool-session spawn for such a project is refused. That fails
-loudly rather than starting the session under the machine's identity.
+A project that resolves to an account sends the four `GIT_AUTHOR_*` / `GIT_COMMITTER_*` keys with a
+tool-session spawn. They pass whole under the supervisor's one env rule (only loader variables are
+refused), so a supervised host configures nothing for them.
 
 ## Creation (`user_sockets.rs`, `host_socket.rs`)
 

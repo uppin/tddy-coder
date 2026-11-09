@@ -15,11 +15,11 @@ service SupervisorService {
   rpc StartService(ServiceRef) returns (ServiceStatus);
   rpc StopService(ServiceRef) returns (ServiceStatus);
 
-  // Spawn a tool as another OS user. Both the user and the tool path must appear in root-owned
-  // allowlists.
+  // Spawn a binary as another OS user. The user must be mapped in users.yaml, and the binary must
+  // resolve under the root-owned spawn_policy.exec_roots.
   rpc SpawnSession(SpawnSessionRequest) returns (SpawnedProcess);
 
-  // Spawn a tool as another OS user, jailed. Same allowlists as SpawnSession, plus every mount
+  // Spawn a binary as another OS user, jailed. Same gates as SpawnSession, plus every mount
   // source must sit under a root-owned allowed_mount_roots entry: the mount list is the one part of
   // a sandbox request that names host paths, so it is the part a compromised caller reaches for.
   rpc SpawnSandbox(SpawnSandboxRequest) returns (SpawnedProcess);
@@ -85,7 +85,7 @@ message ServiceStatus {
 }
 
 message SpawnSessionRequest {
-  // Must appear in the policy's allowed_session_users; `root` never resolves.
+  // Must be mapped in users.yaml; `root` never resolves.
   string os_user = 1;
   // Must appear verbatim in the policy's allowed_tool_paths.
   string tool_path = 2;
@@ -97,7 +97,7 @@ message SpawnSessionRequest {
 }
 
 message SpawnRelayedRequest {
-  // Must appear in the policy's allowed_session_users; `root` never resolves.
+  // Must be mapped in users.yaml; `root` never resolves.
   string os_user = 1;
   // Must appear verbatim in the policy's allowed_relay_tool_paths — not allowed_tool_paths.
   string tool_path = 2;
@@ -122,7 +122,7 @@ message SpawnedProcess {
 // path in `args` and dials it once the child is up, following the precedent set by
 // SpawnRequest::host_session_socket: a path crosses a process boundary, a file descriptor does not.
 message SpawnSandboxRequest {
-  // Must appear in the policy's allowed_session_users; `root` never resolves.
+  // Must be mapped in users.yaml; `root` never resolves.
   string os_user = 1;
   // Must appear verbatim in the policy's allowed_tool_paths.
   string tool_path = 2;

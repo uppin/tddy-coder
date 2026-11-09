@@ -47,7 +47,7 @@ async fn makes_each_spawned_session_the_leader_of_its_own_process_group() {
     let supervisor = a_supervisor()
         .managing(a_service("tddy-daemon").that_stays_alive())
         .allowing_the_current_user()
-        .allowing_tool(tool.path())
+        .with_exec_root(tool.path())
         .start()
         .await;
 
@@ -77,7 +77,7 @@ async fn keeps_a_spawned_session_out_of_the_supervisors_process_group() {
     let supervisor = a_supervisor()
         .managing(a_service("tddy-daemon").that_stays_alive())
         .allowing_the_current_user()
-        .allowing_tool(tool.path())
+        .with_exec_root(tool.path())
         .start()
         .await;
 
@@ -111,7 +111,7 @@ async fn reports_the_pid_that_the_session_itself_observes() {
     let supervisor = a_supervisor()
         .managing(a_service("tddy-daemon").that_stays_alive())
         .allowing_the_current_user()
-        .allowing_tool(tool.path())
+        .with_exec_root(tool.path())
         .start()
         .await;
 
@@ -138,7 +138,7 @@ async fn reports_a_session_as_running_while_it_is_alive() {
     let supervisor = a_supervisor()
         .managing(a_service("tddy-daemon").that_stays_alive())
         .allowing_the_current_user()
-        .allowing_tool(tool.path())
+        .with_exec_root(tool.path())
         .start()
         .await;
     let client = supervisor.client().await;
@@ -169,7 +169,7 @@ async fn reports_the_exit_code_of_a_session_that_has_exited() {
     let supervisor = a_supervisor()
         .managing(a_service("tddy-daemon").that_stays_alive())
         .allowing_the_current_user()
-        .allowing_tool(tool.path())
+        .with_exec_root(tool.path())
         .start()
         .await;
     let client = supervisor.client().await;
@@ -197,7 +197,7 @@ async fn keeps_a_sessions_exit_code_available_for_a_caller_that_asks_after_the_r
     let supervisor = a_supervisor()
         .managing(a_service("tddy-daemon").that_stays_alive())
         .allowing_the_current_user()
-        .allowing_tool(tool.path())
+        .with_exec_root(tool.path())
         .start()
         .await;
     let client = supervisor.client().await;
@@ -249,7 +249,7 @@ async fn stops_a_session_on_request_and_reports_that_it_exited() {
     let supervisor = a_supervisor()
         .managing(a_service("tddy-daemon").that_stays_alive())
         .allowing_the_current_user()
-        .allowing_tool(tool.path())
+        .with_exec_root(tool.path())
         .start()
         .await;
     let client = supervisor.client().await;

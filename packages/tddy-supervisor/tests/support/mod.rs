@@ -139,15 +139,12 @@ impl ServiceFixture {
 pub struct SupervisorFixture {
     services: Vec<ServiceFixture>,
     allowed_session_users: Vec<String>,
-    allowed_tool_paths: Vec<PathBuf>,
-    allowed_relay_tool_paths: Vec<PathBuf>,
     allowed_mount_roots: Vec<PathBuf>,
     exec_roots: Vec<PathBuf>,
     memory_max_ceiling: Option<u64>,
     cpu_max_ceiling: Option<String>,
     pids_max_ceiling: Option<u64>,
     shutdown_grace_secs: u64,
-    path_prefix: Option<PathBuf>,
     /// GitHub logins `users.yaml` maps to the account running the tests; `None` writes no file.
     current_user_logins: Option<Vec<String>>,
 }
@@ -157,15 +154,12 @@ pub fn a_supervisor() -> SupervisorFixture {
     SupervisorFixture {
         services: Vec::new(),
         allowed_session_users: Vec::new(),
-        allowed_tool_paths: Vec::new(),
-        allowed_relay_tool_paths: Vec::new(),
         allowed_mount_roots: Vec::new(),
         exec_roots: Vec::new(),
         memory_max_ceiling: None,
         cpu_max_ceiling: None,
         pids_max_ceiling: None,
         shutdown_grace_secs: 2,
-        path_prefix: None,
         current_user_logins: None,
     }
 }
@@ -184,23 +178,6 @@ impl SupervisorFixture {
     /// Allow sessions to run as whoever is running the tests.
     pub fn allowing_the_current_user(mut self) -> Self {
         self.allowed_session_users.push(current_username());
-        self
-    }
-
-    pub fn allowing_tool(mut self, tool_path: &Path) -> Self {
-        self.exec_roots.push(tool_path.to_path_buf());
-        self
-    }
-
-    /// Puts `dir` first on the supervisor's own `PATH`, which is where it looks for `git`.
-    pub fn with_first_on_path(mut self, dir: &Path) -> Self {
-        self.path_prefix = Some(dir.to_path_buf());
-        self
-    }
-
-    /// Allow `tool_path` as a harness binary a relayed spawn may exec (off unless this is called).
-    pub fn allowing_relay_tool(mut self, tool_path: &Path) -> Self {
-        self.exec_roots.push(tool_path.to_path_buf());
         self
     }
 
@@ -370,16 +347,7 @@ impl SupervisorFixture {
         let config_path = root.join("supervisor.yaml");
         fs::write(&config_path, &config_yaml).expect("write supervisor config");
 
-        let mut command = Command::new(env!("CARGO_BIN_EXE_tddy-supervisor"));
-        if let Some(prefix) = &self.path_prefix {
-            let inherited = std::env::var_os("PATH").unwrap_or_default();
-            let path = std::env::join_paths(
-                std::iter::once(prefix.clone()).chain(std::env::split_paths(&inherited)),
-            )
-            .expect("a PATH with the prefix on it");
-            command.env("PATH", path);
-        }
-        let process = command
+        let process = Command::new(env!("CARGO_BIN_EXE_tddy-supervisor"))
             .arg("--config")
             .arg(&config_path)
             .stdout(Stdio::piped())

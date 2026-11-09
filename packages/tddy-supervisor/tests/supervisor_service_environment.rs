@@ -64,7 +64,7 @@ async fn a_session_spawn_is_not_told_the_supervisor_socket() {
     let supervisor = a_supervisor()
         .managing(a_service("tddy-daemon").that_stays_alive())
         .allowing_the_current_user()
-        .allowing_tool(tool.path())
+        .with_exec_root(tool.path())
         .start()
         .await;
 

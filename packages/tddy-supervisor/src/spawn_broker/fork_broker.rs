@@ -125,6 +125,10 @@ fn spawn_now(
     stdio: StdioMode,
 ) -> std::io::Result<SpawnedChild> {
     let mut command = Command::new(&plan.program);
+    // `argv[0]` names the checked file, not the `/proc/self/fd/<n>` it may be exec'd through.
+    if let Some(checked) = &plan.checked {
+        command.arg0(checked.path());
+    }
     command.args(&plan.args);
     configure_stdio(&mut command, stdio, plan.output);
     // Deliberately no `Command::env` anywhere above: `Command` installs its own environment *after*

@@ -101,7 +101,7 @@ async fn a_relayed_spawn_for_a_user_outside_the_allowlist_is_denied() {
     let supervisor = a_supervisor()
         .managing(a_service("tddy-daemon").that_stays_alive())
         .allowing_session_user("someone-else")
-        .allowing_relay_tool(tool.path())
+        .with_exec_root(tool.path())
         .start()
         .await;
     let (_dir, socket, _listener) = a_listening_socket();
@@ -123,7 +123,7 @@ async fn a_relayed_spawn_from_a_peer_that_owns_no_declared_service_is_denied() {
     let tool = a_tool_that_echoes_its_stdin();
     let supervisor = a_supervisor()
         .allowing_the_current_user()
-        .allowing_relay_tool(tool.path())
+        .with_exec_root(tool.path())
         .start()
         .await;
     let (_dir, socket, _listener) = a_listening_socket();
@@ -146,7 +146,7 @@ async fn a_relay_path_that_is_not_the_callers_listening_socket_is_denied() {
     let supervisor = a_supervisor()
         .managing(a_service("tddy-daemon").that_stays_alive())
         .allowing_the_current_user()
-        .allowing_relay_tool(tool.path())
+        .with_exec_root(tool.path())
         .start()
         .await;
     let dir = tempfile::tempdir().expect("tempdir");
@@ -175,7 +175,7 @@ async fn an_allowlisted_harness_has_its_stdio_relayed_and_its_exit_reported() {
     let supervisor = a_supervisor()
         .managing(a_service("tddy-daemon").that_stays_alive())
         .allowing_the_current_user()
-        .allowing_relay_tool(tool.path())
+        .with_exec_root(tool.path())
         .start()
         .await;
     let client = supervisor.client().await;

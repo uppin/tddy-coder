@@ -69,6 +69,7 @@ impl PrivilegedSurface {
         request: SpawnSessionRequest,
     ) -> Result<SpawnedProcess, SupervisorError> {
         let resolved = self.resolve_spawn(
+            policy::SpawnKind::Session,
             &request.os_user,
             &request.tool_path,
             request.working_dir.as_deref(),
@@ -81,24 +82,23 @@ impl PrivilegedSurface {
         self.spawn(plan, "session", &os_user).await
     }
 
-    /// Spawn a coding-agent harness as an allowlisted user with its stdio relayed to the caller.
+    /// Spawn a binary as a mapped user with its stdio relayed to the caller.
     ///
-    /// The same user, environment and working-directory gates as [`Self::spawn_session`], plus the
-    /// relay's own allowlist. The caller's socket is connected to **before** the fork, so a socket
+    /// The same user, exec, environment, working-directory and scope gates as
+    /// [`Self::spawn_session`], on the relayed env base. The caller's socket is connected to **before** the fork, so a socket
     /// that is not the caller's costs nothing and spawns nothing.
     async fn spawn_relayed(
         &self,
         request: SpawnRelayedRequest,
         caller_uid: u32,
     ) -> Result<SpawnedProcess, SupervisorError> {
-        let program = policy::resolve_exec(&self.config.spawn_policy, &request.tool_path)?;
-        let resolved = self.resolve_spawn_kind(
+        let resolved = self.resolve_spawn(
+            policy::SpawnKind::Relayed,
             &request.os_user,
-            program,
+            &request.tool_path,
             request.working_dir.as_deref(),
             request.scope.as_deref(),
             &request.env,
-            policy::SpawnKind::Relayed,
         )?;
         let stream =
             crate::relay::connect_to_callers_socket(&request.relay_socket, caller_uid).await?;
@@ -134,6 +134,7 @@ impl PrivilegedSurface {
     ) -> Result<SpawnedProcess, SupervisorError> {
         let policy = &self.config.spawn_policy;
         let resolved = self.resolve_spawn(
+            policy::SpawnKind::Sandbox,
             &request.os_user,
             &request.tool_path,
             request.working_dir.as_deref(),
@@ -164,73 +165,29 @@ impl PrivilegedSurface {
         self.spawn(plan, "sandbox", &os_user).await
     }
 
-    /// The policy gate both spawn methods pass, in one place so the two cannot drift into checking
-    /// different things.
+    /// The policy gate every spawn kind passes, in one place so they cannot drift into checking
+    /// different things: the exec gate, the one env rule, the mapped user, the scope and the
+    /// account.
     fn resolve_spawn(
         &self,
+        kind: policy::SpawnKind,
         os_user: &str,
         tool_path: &Path,
         working_dir: Option<&Path>,
         scope: Option<&str>,
         env: &BTreeMap<String, String>,
     ) -> Result<ResolvedSpawn, SupervisorError> {
-        self.resolve_spawn_kind(
-            os_user,
-            policy::resolve_exec(&self.config.spawn_policy, tool_path)?,
-            working_dir,
-            scope,
-            env,
-            policy::SpawnKind::Session,
-        )
-    }
-
-    fn resolve_spawn_kind(
-        &self,
-        os_user: &str,
-        program: policy::CheckedExecutable,
-        working_dir: Option<&Path>,
-        scope: Option<&str>,
-        env: &BTreeMap<String, String>,
-        kind: policy::SpawnKind,
-    ) -> Result<ResolvedSpawn, SupervisorError> {
-        let resolved_env = policy::resolve_spawn_env(kind, env)?;
-        self.resolve_spawn_resolved(
-            os_user,
-            program,
-            working_dir,
-            scope,
-            resolved_env.variables,
-            resolved_env.base,
-        )
-    }
-
-    /// [`Self::resolve_spawn_kind`] with its environment already resolved and its plan base.
-    fn resolve_spawn_resolved(
-        &self,
-        os_user: &str,
-        program: policy::CheckedExecutable,
-        working_dir: Option<&Path>,
-        scope: Option<&str>,
-        env: BTreeMap<String, String>,
-        environment: EnvironmentBase,
-    ) -> Result<ResolvedSpawn, SupervisorError> {
+        let program = policy::resolve_exec(&self.config.spawn_policy, tool_path)?;
+        let policy::SpawnEnvironment {
+            variables: env,
+            base: environment,
+        } = policy::resolve_spawn_env(kind, env)?;
         let os_user =
             policy::resolve_mapped_session_user(&self.supervisor.current_users(), os_user)?;
-        let scope_procs = match scope {
-            Some(scope) => Some(self.cgroups.scope_procs_path(scope)?),
-            None => None,
-        };
-
-        // An allowlisted account that does not exist on this host is refused exactly like one the
-        // policy never listed. Distinguishing the two would tell the caller which names are
-        // allowlisted, which is the oracle this boundary exists to close.
-        let target = accounts::resolve_target_user(&os_user).map_err(|error| {
-            log::warn!(
-                target: "tddy_supervisor::server",
-                "spawn refused: {error}"
-            );
-            SupervisorError::Denied
-        })?;
+        let scope_procs = scope
+            .map(|scope| self.cgroups.scope_procs_path(scope))
+            .transpose()?;
+        let target = resolve_account(&os_user)?;
 
         Ok(ResolvedSpawn {
             os_user,
@@ -255,13 +212,13 @@ impl PrivilegedSurface {
         request: wire::SpawnStreamedRequest,
     ) -> Result<StreamedEvents, SupervisorError> {
         let env: BTreeMap<String, String> = request.env.into_iter().collect();
-        let resolved = self.resolve_spawn_kind(
+        let resolved = self.resolve_spawn(
+            policy::SpawnKind::Streamed,
             &request.os_user,
-            policy::resolve_exec(&self.config.spawn_policy, Path::new(&request.tool_path))?,
+            Path::new(&request.tool_path),
             request.working_dir.as_deref().map(Path::new),
             request.scope.as_deref(),
             &env,
-            policy::SpawnKind::Streamed,
         )?;
         let os_user = resolved.os_user.clone();
         let mut plan = resolved.plan(request.args, None);
@@ -355,6 +312,21 @@ fn spawn_outcome<T>(
         pid_of(&spawned)
     );
     Ok(spawned)
+}
+
+/// The account `os_user` names on this host.
+///
+/// A mapped account that does not exist on this host is refused exactly like one the mapping never
+/// named. Distinguishing the two would tell the caller which names are mapped, which is the oracle
+/// this boundary exists to close.
+fn resolve_account(os_user: &str) -> Result<TargetUser, SupervisorError> {
+    accounts::resolve_target_user(os_user).map_err(|error| {
+        log::warn!(
+            target: "tddy_supervisor::server",
+            "spawn refused: {error}"
+        );
+        SupervisorError::Denied
+    })
 }
 
 /// A spawn request with every policy decision already made: the account, the binary, the directory

@@ -1,4 +1,6 @@
 use serde::{Deserialize, Serialize};
+
+use crate::error::ConfigError;
 use std::path::PathBuf;
 
 /// What the daemon is allowed to ask the supervisor to spawn, and on whose behalf.
@@ -22,6 +24,7 @@ pub struct SpawnPolicy {
     #[serde(default)]
     pub allowed_mount_roots: Vec<PathBuf>,
 }
+
 /// One `spawn_policy.exec_roots` entry: a bare absolute path, or a map that can also mark it a
 /// trusted prefix.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -94,6 +97,38 @@ impl From<ExecRoot> for ExecRootEntry {
             ExecRootEntry::Path(root.path)
         }
     }
+}
+
+/// Refuse the spawn-policy keys `exec_roots` and the one env rule replaced (`#agent-tools` 32/32).
+pub(super) fn refuse_old_spawn_policy_keys(
+    document: &serde_yaml::Value,
+) -> Result<(), ConfigError> {
+    let Some(top) = document.as_mapping() else {
+        return Ok(());
+    };
+    let Some(policy) = top.get("spawn_policy").and_then(|v| v.as_mapping()) else {
+        return Ok(());
+    };
+    for key in ["allowed_tool_paths", "allowed_relay_tool_paths"] {
+        if policy.contains_key(key) {
+            return Err(ConfigError {
+                message: format!(
+                    "`{key}:` in supervisor.yaml is obsolete — it was replaced by \
+                     `spawn_policy.exec_roots`; delete the `{key}:` key and name the same files \
+                     or directories under `exec_roots`"
+                ),
+            });
+        }
+    }
+    if policy.contains_key("allowed_env_keys") {
+        return Err(ConfigError {
+            message: "`allowed_env_keys:` in supervisor.yaml is obsolete — it was removed; the \
+                      daemon's environment now passes whole under the one env rule, so delete \
+                      the `allowed_env_keys:` key"
+                .to_string(),
+        });
+    }
+    Ok(())
 }
 
 /// Environment variables that decide what code a process loads, whatever binary it was told to
