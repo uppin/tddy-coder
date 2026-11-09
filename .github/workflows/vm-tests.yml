@@ -197,18 +197,42 @@ jobs:
           # head commit with the draft's gated `pull_request` run, whose
           # `Rust build` was skipped — `--limit 1` must not land on that one.
           # A cancelled twin of the same trigger (a draft-gate race) never
-          # builds either, so cancelled runs are not candidates.
+          # builds either, so cancelled runs are not candidates. Nor is a run
+          # whose `Rust build` was skipped, or that finished without one: a PR
+          # readied after its push gets a `ready_for_review` run that is newer
+          # than the push's and skips every Rust job, and taking it as the
+          # newest candidate waited out the deadline on every re-run. The
+          # candidates are tried newest-first, and the first that builds (or may
+          # still) is the one waited on.
           EVENT: ${{ github.event_name }}
         run: |
           set -euo pipefail
           deadline=$((SECONDS + 3600))
           while :; do
-            run_id=$(gh run list --commit "$HEAD_SHA" --workflow CI --event "$EVENT" --limit 10 \
-                       --json databaseId,conclusion \
-                       --jq '[.[] | select(.conclusion != "cancelled")][0].databaseId // empty')
+            run_id=""
+            build=""
+            candidates=$(gh run list --commit "$HEAD_SHA" --workflow CI --event "$EVENT" --limit 10 \
+                           --json databaseId,conclusion \
+                           --jq '.[] | select(.conclusion != "cancelled") | .databaseId')
+            for candidate in $candidates; do
+              # `absent`: the run finished and never had a `Rust build` job; empty: it
+              # is still running and has not reached it yet, so it may still build.
+              state=$(gh run view "$candidate" --json status,jobs --jq '
+                [.jobs[] | select(.name=="Rust build")][0] as $job
+                | if $job == null then (if .status == "completed" then "absent" else "" end)
+                  else "\($job.status)/\($job.conclusion // "-")" end')
+              case "$state" in
+                completed/skipped|absent)
+                  echo "CI run $candidate skipped its Rust build; not a candidate."
+                  ;;
+                *)
+                  run_id=$candidate
+                  build=$state
+                  break
+                  ;;
+              esac
+            done
             if [ -n "$run_id" ]; then
-              build=$(gh run view "$run_id" --json jobs \
-                        --jq '.jobs[] | select(.name=="Rust build") | "\(.status)/\(.conclusion // "-")"')
               case "$build" in
                 completed/success)
                   gh run download "$run_id" --name tddy-dist --dir dist
@@ -228,7 +252,7 @@ jobs:
               esac
               echo "Rust build is ${build:-not started yet}; waiting…"
             else
-              echo "no CI run for $HEAD_SHA yet; waiting…"
+              echo "no CI run for $HEAD_SHA that builds yet; waiting…"
             fi
             if [ "$SECONDS" -ge "$deadline" ]; then
               echo "::error::CI's Rust build for $HEAD_SHA did not finish within an hour."

@@ -93,3 +93,11 @@ operation"); the last two were re-anchored and applied as a second plan. `restru
 - `tddy-coding-agent-specs` `oversized-file-spec.md` — **regressed** 981 → 1031
   (`HeadlessPermissionPolicy`). Not split: #836 and #857 above this PR modify `spec.rs`; left for the
   `#agent-tools` sweep node.
+
+## CI
+
+`vm-tests.yml` "Wait for the deployable binaries from CI" no longer takes the newest non-cancelled CI
+run for the commit: a run whose `Rust build` was skipped, or that finished without one (the
+`ready_for_review` run of a PR readied after its push), is not a candidate. The candidates are tried
+newest-first. Found on this PR, whose chain leg waited out its hour on the ready run on every re-run.
+See [ci.md § VM tests](../guides/ci.md#vm-tests-separate-workflow).
