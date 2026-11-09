@@ -40,23 +40,35 @@ elsewhere `stop` returns an error. Cancelling a start (`#start-progress` 8/8) is
 
 Under `tddy-supervisor` the daemon cannot fork git as another user, so
 `supervisor_spawn::clone_repo_via_supervisor_with_progress(socket, os_user, git_url, dest, env,
-on_started, on_progress)` makes one server-streaming `CloneRepository` call. The supervisor does steps
-3–5 above itself, as root dropping to `os_user`: `git clone --progress -- <url> <dest>.partial-<random>`,
-stderr piped, rename on success, removal on failure. The stream is `Started{pid}`, one `Progress{line}`
-per line git wrote, then `Exited{code, stderr_tail}`, sent only once the filesystem is final.
+on_started, on_progress)` makes **one** server-streaming `SpawnStreamed` call, built by
+`plan_supervised_clone(os_user, clone_helper, git, git_url, destination, env)`: the clone helper
+**`tddy-git-clone`** run as `os_user` with `--git <git> -- <url> <destination>`, `env` passed whole,
+no scope. The supervisor knows nothing about clones; it runs one binary and streams its stderr.
+
+- **The helper** is found through `TddyToolchain`, beside the daemon (the install contract `./install`,
+  `./release`, `./publish.sh` and `scripts/dev-runtime-binaries.sh` keep); missing is a "failed
+  precondition" refusal. It must sit under the supervisor's `exec_roots`.
+- **git** is the absolute `git` on the spawn-child `PATH` (`git_for_supervised_clone`); none is a
+  "failed precondition" refusal naming that `PATH`, never a bare `git` the session user's `PATH` would
+  resolve. The plan refuses a relative helper, git or destination.
+- **The helper does steps 3–5 above, as `os_user`**: `git clone --progress -- <url>
+  <destination>.partial-<random>`, rename into place on success, removal of the partial directory on
+  failure, refusal of an existing destination, and exit with git's code. Git's stderr passes through.
+
+The stream is `Started{pid}`, one `Line{line}` per stderr line, then `Exited{code, signal, stderr_tail}`.
 
 - `Started` → `on_started(CloneHandle::through_supervisor(socket, pid))`. That handle's `stop()` calls
   `StopSession(pid)` on a helper thread with its own runtime (it may be called from inside the daemon's
-  runtime); the supervisor then removes the partial directory.
-- `Progress` lines go through the same `git_progress::parse` and `ProgressThrottle` as a local clone.
+  runtime); the helper then removes the partial directory.
+- `Line` events go through the same `git_progress::parse` and `ProgressThrottle` as a local clone; a
+  line that is not progress is ignored.
 - `Exited` with `code: Some(0)` is success; anything else fails with `git clone failed: <how> (dest=…):
   <stderr_tail>`. `code: None` means git was ended by a signal (`signal` is never set).
-- A refusal (user, tool or environment policy) fails the call before any event. Dropping the receiver
-  closes the connection, and the supervisor stops a clone nobody is listening to.
+- A refusal (user, exec root, environment or scope) fails the call before any event. Dropping the
+  receiver closes the connection, and the supervisor stops a child nobody is listening to.
 
-The daemon no longer resolves git: the supervisor finds it on **its own** `PATH` and that path must be in
-`spawn_policy.allowed_tool_paths`. `clone_repo_via_supervisor` is the no-callback wrapper, used by
-`CreateProject` / `AddProjectToHost`, which report no progress.
+`clone_repo_via_supervisor` is the no-callback wrapper, used by `CreateProject` / `AddProjectToHost`,
+which report no progress.
 
 ## `git_progress`
 
@@ -90,3 +102,7 @@ the worker pipe nor a relayed start stream carries git's per-tick redraws.
   message; a clone stopped through its handle (a fake `git` on the child's `PATH`) ends promptly, its
   process is gone and nothing is left.
 - `tests/worker_concurrency_acceptance.rs` — `the_worker_relays_clone_progress_before_the_clone_result`.
+- `tests/supervised_clone_plan.rs` — a supervised clone is one `SpawnStreamed` of the clone helper as the
+  session user, and an SSH clone's env needs no supervisor configuration.
+- `packages/tddy-git-clone/tests/clone_helper.rs` — the helper's partial-sibling rename, its cleanup on
+  failure, and its refusal of an existing destination.

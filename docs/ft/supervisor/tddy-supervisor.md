@@ -54,11 +54,12 @@ services:
     serves_users: true             # handed TDDY_USERS_FILE and one `user.<os user>` socket per mapped user
     restart: { max_retries: 5, initial_backoff_ms: 500, max_backoff_ms: 30000, stability_threshold_ms: 10000 }
 
-spawn_policy:                      # absent = no privilege granted at all
-  allowed_tool_paths: [/usr/local/bin/tddy-coder, /usr/bin/git]
-  allowed_relay_tool_paths: []      # harness binaries a coding agent may run as, with relayed stdio; empty = off
+spawn_policy:                      # absent = no privilege granted at all (session users: users.yaml)
+  exec_roots:                      # where a binary the daemon asks to run may live, every spawn kind
+    - /usr/local/bin                 # a directory: any file beneath it
+    - /usr/bin/git                   # one trusted file: exactly that file
+    - { path: /nix/store, trusted_prefix: true }   # only when git resolves under /nix/store
   allowed_mount_roots: [/srv/tddy/repos]
-  allowed_env_keys: [RUST_LOG]
 
 cgroup:                            # absent = nothing is clamped
   memory_max_ceiling: 2147483648
@@ -72,39 +73,97 @@ The OS users a session may run as are not in `supervisor.yaml` at all: they are 
 **`users.yaml`** maps (see [The user mapping](#the-user-mapping-usersyaml)). `root` is refused whatever
 the mapping says.
 
-### Relayed spawns (coding agents)
+The supervisor knows **where** a binary lives and **who** it runs as, and puts every child in a
+cgroup scope. It does not know what the binary is, which environment variables it needs, or how git
+works: no coding agent, harness or git detail is named in its code, its proto or its templates (a
+guard test, `the_supervisor_names_no_coding_agent`, scans them for the coding-agent spec names).
 
-`SpawnRelayed` starts an allowlisted harness binary (`opencode`, `codex-acp`, `claude-agent-acp`) as a mapped session
-user with its stdin/stdout relayed over a unix socket the **daemon** listens on — the one request that gives
-a child stdio, because the ACP driver talks to its agent over stdio and an unprivileged daemon cannot become
-another user itself. It passes the gates `SpawnSession` does (peer authorization, an OS user `users.yaml` maps; its
-environment is the daemon's, passed whole but for loader variables) **and** its own: `allowed_relay_tool_paths`, **empty by default**, so enabling session
-tools never enables it. The supervisor connects to the daemon's socket only if the path is absolute, is a
-socket (not a symlink to one) owned by the calling uid, and the listener's `SO_PEERCRED` uid is that uid; any
-failure is the opaque denial and nothing is forked. The child's exit status and a stop travel over
-`SessionStatus` / `StopSession`; a daemon that closes the connection stops the child.
+### Exec roots
+
+`spawn_policy.exec_roots` gates the binary of **every** spawn kind — session, sandbox, streamed and
+relayed alike. Each entry is an absolute path naming either a **directory** (any file beneath it may
+be run) or **one trusted file** (exactly that file, e.g. `/usr/bin/git`). A requested binary is run
+only when:
+
+- the path is plain and absolute, and **a symlink is judged by its target**: the file it resolves to
+  must equal a file entry or lie under a directory entry — a link under a root to a file outside every
+  root is refused, and a link outside every root to a file a root names runs that file;
+- that file, every directory above it and the entry itself are owned by root (or the supervisor's
+  euid) and are not group- or world-writable. **A world-writable directory is refused even when it is
+  sticky** — `/tmp` is never trusted, unlike the policy file's own parents.
+
+An entry written as `{ path: /nix/store, trusted_prefix: true }` is a **trusted prefix**: the operator
+vouches for that directory itself, so its own owner and mode are not checked (`/nix/store` is
+`drwxrwxr-t root:nixbld` by design), while every directory and file below it still is. Only the
+operator opts in, per entry.
+
+On Linux the descriptor that was checked is what is exec'd (`/proc/self/fd/<n>`, with `argv[0]` the
+checked path), so a file swapped in after the check is not what runs. **macOS checks the path only**:
+it has no exec through a descriptor, so a swap between check and exec is not closed there.
+
+A refusal is the opaque denial to the caller; the reason is logged under the `tddy_supervisor::policy`
+target. Granting a binary means installing it under a root, or adding its resolved file as an entry.
+
+### One environment rule
+
+There is no env key list. The environment the daemon sends passes **whole** to every spawn kind,
+except:
+
+- **loader variables are refused** — `LD_*`, `MALLOC_*`, `GCONV_PATH`, `NLSPATH`, `LOCPATH`,
+  `HOSTALIASES`, `RESOLV_HOST_CONF`: `LD_PRELOAD` on a binary under a root is code execution as the
+  session user, which would make `exec_roots` meaningless;
+- `HOME`, `USER` and `LOGNAME` are **forced** from the target account;
+- `LISTEN_*` and `TDDY_SUPERVISOR_SOCKET` are **stripped**.
+
+Sessions, sandboxes and streamed spawns start from a minimal base (a fixed `PATH`, plus `LANG`/`TZ`
+from the supervisor); a relayed spawn starts from exactly the env the daemon computed. A clone's SSH
+settings and a session's commit identity therefore need no supervisor configuration.
+
+### Relayed spawns
+
+`SpawnRelayed` starts a binary as a mapped session user with its stdin/stdout relayed over a unix
+socket the **daemon** listens on — the one request that gives a child stdio, because the ACP driver
+talks to its agent over stdio and an unprivileged daemon cannot become another user itself. Relaying
+is a stdio mode, not a trust class: it passes exactly the gates `SpawnSession` does (peer
+authorization, the session user, `exec_roots`, the env rule). The supervisor connects to the daemon's
+socket only if the path is absolute, is a socket (not a symlink to one) owned by the calling uid, and
+the listener's `SO_PEERCRED` uid is that uid; any failure is the opaque denial and nothing is forked.
+The child's exit status and a stop travel over `SessionStatus` / `StopSession`; a daemon that closes
+the connection stops the child. The request may name a cgroup scope to join.
+
+### Streamed spawns and clones
+
+`SpawnStreamed` runs a binary as a session user and streams its stderr: `Started{pid}`, one
+`Line{line}` per line (split on `\r` as well as `\n`), then `Exited{code, signal, stderr_tail}`. It
+passes the same gates as `SpawnSession`, may name a cgroup scope, and is stopped by `StopSession(pid)`
+or by the caller hanging up.
+
+A supervised clone is **one** streamed spawn of the clone helper **`tddy-git-clone`**, which lives
+in the bin dir beside the daemon, run as the session user:
+`tddy-git-clone --git <git> -- <url> <destination>`. As that user it runs `git clone --progress`
+into a `<destination>.partial-<random>` sibling, renames it into place on success, removes it on
+failure, refuses a destination that already exists, and exits with git's code. The daemon passes the
+absolute git found on the spawn-child `PATH` (none is a "failed precondition" refusal, never a bare
+`git`), finds the helper beside itself (missing is a refusal), and parses git's progress from the
+streamed lines. The supervisor never runs git and never touches the clone's files itself.
 
 ### The prerequisites that bite
 
-- **`allowed_tool_paths` must include git's absolute path** or repo cloning is denied, because cloning
-  goes through the supervisor too. The supervisor finds git as the first executable `git` on **its own**
-  `PATH` (the unit's environment, never the caller's), so the value is `which git` in the supervisor's
-  environment; matching is verbatim, with no symlink resolution.
-- **A coding agent runs as the session user only if its harness is in `allowed_relay_tool_paths`.** The
-  list is empty in the shipped template, so a supervised install starts no coding-agent subagent as
-  another user until the operator lists each harness binary by the absolute path the daemon resolves
-  (`codex-acp` in the install's bin directory, `opencode`, and for `claude-acp` the `claude-agent-acp`
-  binary the daemon's `TDDY_CLAUDE_AGENT_ACP_CLI` names). Without that variable `claude-acp` runs as
-  `bunx claude-agent-acp`; arguments are not allowlisted, so listing `bunx` admits any package `bunx`
-  can fetch, run as the session user. A relayed agent's environment is the one the daemon computed,
-  passed whole rather than checked against `allowed_env_keys`; a loader variable is still refused. The
-  daemon turns the supervisor's opaque denial into an error naming the lists that still gate it.
-- **`allowed_env_keys` is a deny, not a filter.** A request naming an unlisted key is refused outright.
-  An ordinary session spawn sends no environment, so the shipped empty policy works — but a user whose
-  `~/.tddy/config.yaml` sets `spawn_path_extra` makes the daemon send `PATH`, which must then be listed.
-- **Loader keys can never be listed.** `LD_*`, `MALLOC_*`, `GCONV_PATH`, `NLSPATH`, `LOCPATH`,
-  `HOSTALIASES` and `RESOLV_HOST_CONF` are rejected at config load: `LD_PRELOAD` on an allowlisted tool
-  is code execution as the session user, which would make the tool allowlist meaningless.
+- **Every binary the daemon runs must resolve under an `exec_roots` entry.** `./install` renders the
+  bin dir (everything it installed, `tddy-git-clone` included) plus the one file git resolves to on
+  the install host — never the whole directory git lives in — and `/nix/store` as a trusted prefix
+  only when git resolves into it; no git on `PATH` fails the render. A coding-agent harness outside
+  the bin dir (`opencode`, the `claude-agent-acp` binary `TDDY_CLAUDE_AGENT_ACP_CLI` names) is an
+  operator entry: add its resolved file. Arguments are not checked, so naming `bunx` admits any
+  package `bunx` can fetch, run as the session user. The daemon turns the supervisor's opaque denial
+  of a relayed agent into an error naming `exec_roots`, the session user and the loader-variable rule.
+- **The old keys fail loading.** `allowed_tool_paths` and `allowed_relay_tool_paths` name
+  `exec_roots` as their replacement, and `allowed_env_keys` says it was removed. `./install` migrates
+  an existing `supervisor.yaml` once: the listed tool and relay files become `exec_roots` file
+  entries, and `allowed_env_keys` is dropped. A host upgraded without `./install` loses its
+  supervisor until the file is migrated.
+- **A daemon and a supervisor from different builds cannot clone**: the clone is a `SpawnStreamed`
+  of `tddy-git-clone`, which an older supervisor does not serve.
 - **The config must be root-owned.** The supervisor stats what it parsed, including ancestors, and
   refuses a file or directory that is not owned by uid 0 or is group/world-writable without being
   sticky. `mkdir -p /etc/tddy` under a permissive umask would otherwise let any local user rewrite the
@@ -123,10 +182,11 @@ owning declared services:
 | Operation | Notes |
 |---|---|
 | `ListServices` / `StartService` / `StopService` | by name from the root-owned config; a caller can never name a binary |
-| `SpawnSession` | an allowlisted tool as an allowlisted OS user |
+| `SpawnSession` | a binary under `exec_roots` as an allowed OS user, optionally in a cgroup scope |
 | `SpawnSandbox` | the same, jailed: user/mount/net namespaces, bind mounts, private root |
+| `SpawnRelayed` | the same, with stdin/stdout relayed over the daemon's unix socket |
+| `SpawnStreamed` | the same, its stderr **streamed**: `Started{pid}`, one `Line` per stderr line, `Exited{code, signal, stderr_tail}`; a refusal fails the call. `StopSession(pid)` stops it, as does the caller hanging up |
 | `SessionStatus` / `StopSession` | the supervisor reaps its own children, so it is the only process that can answer |
-| `CloneRepository` | `git clone --progress` as an allowlisted OS user, **streamed**: `Started{pid}`, git's progress lines, `Exited{code, stderr_tail}`. Same user, tool (git on the supervisor's `PATH`, allowlisted) and environment checks as `SpawnSession`; a refusal fails the call. Clones into a random `.partial-*` sibling renamed into place on success, removed otherwise. `StopSession(pid)` stops it, as does the caller hanging up |
 | `CreateScope` / `AttachPid` / `DestroyScope` | cgroup v2 scopes inside the subtree it owns |
 
 Requested resource limits are **clamped down to policy ceilings, not rejected** — a session that asks
@@ -254,7 +314,7 @@ slow clone. Neither deadline is configurable.
 - [x] A host installed with `./install --systemd` runs one root tddy unit with `tddy-daemon` as its unprivileged child.
 - [x] Killing the daemon has the supervisor restart it; killing it repeatedly stops at the retry ceiling rather than spinning.
 - [x] A request from a process owning no declared service is rejected, and the rejection reveals nothing about what exists.
-- [x] A request naming an OS user, tool path, mount root or env key outside the root-owned allowlists is rejected.
+- [x] A request naming an OS user or mount root outside the root-owned policy, a binary outside every `exec_roots` entry, or a loader variable is rejected.
 - [x] Limits above a policy ceiling are clamped down, neither honoured nor rejected.
 - [x] A session spawned by the supervisor is a child of the supervisor and leads its own process group.
 - [x] The daemon's client socket is created by the supervisor as root and handed over, so the daemon never binds in `/run`.
@@ -264,7 +324,7 @@ slow clone. Neither deadline is configurable.
 - [x] A managed service is told the supervisor socket; a service's `env:` cannot override it; a session spawn is not told it.
 - [x] A daemon started by the supervisor spawns and clones through it with no `supervisor:` block; one started otherwise forks its own worker; neither passes the variable on to children it spawns itself.
 - [x] A supervised clone streams git's progress, then succeeds; a failed one's error carries git's own message.
-- [x] A supervised clone asking for an env key outside `allowed_env_keys` is refused, as `SpawnSession` is.
+- [x] A supervised clone asking for a loader variable is refused, as `SpawnSession` is.
 - [x] Stopping a supervised clone (`StopSession(pid)`) ends git and leaves no destination directory.
 - [x] A supervisor that accepts a call and never answers fails it `Unavailable` naming the method within the call deadline — every unary call, not only `SpawnRelayed`.
 - [x] A supervised clone with no first event, or one that goes quiet after starting, fails `Unavailable` within its progress deadline.
@@ -276,6 +336,19 @@ slow clone. Neither deadline is configurable.
 - [x] A `users.yaml` that a non-root user could write is refused, by the supervisor and by a supervised daemon.
 - [x] `allowed_session_users`, `host_sockets` and `agent_tool_sockets` in `supervisor.yaml` fail loading with an error naming `users.yaml`.
 - [x] Under the supervisor, a session for a user it handed the daemon no socket for is refused at start, naming `users.yaml`.
+- [x] A binary under an exec root directory, or named by an exec root file, root-owned and not group- or world-writable all the way up, is run. One outside every root, or with a writable file or parent (a sticky world-writable one included), is refused, and the log names the reason.
+- [x] A symlink is judged by its target: a link under a root to a file outside every root is refused, and a link outside every root to a file a root names is run.
+- [x] On Linux, swapping the file after the check does not change what is exec'd. On macOS the check is path-only, and the tests say so.
+- [x] Session, sandbox, streamed and relayed spawns all pass the daemon's env whole, refuse a loader variable, force `HOME`/`USER`/`LOGNAME`, and strip `LISTEN_*` and `TDDY_SUPERVISOR_SOCKET`.
+- [x] An SSH clone needs no supervisor env configuration.
+- [x] A clone through the supervisor is one streamed spawn of `tddy-git-clone` as the session user. It reports git's progress, parsed by the daemon. The clone ends up at its destination, renamed by the helper running as that user. A failed clone leaves no partial directory, and an existing destination is refused and left alone.
+- [x] An exec root the operator marks `trusted_prefix` admits a binary below it although its own directory is group-writable and sticky; unmarked it does not, and a writable directory below the prefix is still refused.
+- [x] `tddy-git-clone` is built by `./release` and shipped beside the daemon by `./install`, `./publish.sh` and the dev runtime list.
+- [x] Relayed and streamed spawns can run in a cgroup scope: `SpawnRelayed` and `SpawnStreamed` take a `scope`, and a child that names one joins it. The daemon names none yet for either — see [docs/dev/todo/2026-11-09-daemon-creates-no-cgroup-scope-for-supervised-spawns.md](../../dev/todo/2026-11-09-daemon-creates-no-cgroup-scope-for-supervised-spawns.md).
+- [x] `allowed_tool_paths`, `allowed_relay_tool_paths` or `allowed_env_keys` in `supervisor.yaml` fails loading, naming the replacement. `./install` migrates them once.
+- [x] No coding-agent name appears in `tddy-supervisor`'s non-test `src/`, `proto/`, or the supervisor templates (a guard scan).
+- [x] A fresh install renders `exec_roots` naming the bin dir and the resolved git file.
+- [x] The daemon's relay refusal names `exec_roots` and the env rule, not the removed keys.
 - [ ] **Not yet proven on a real host:** a session for OS user `alice` running as `alice` while the daemon runs as `tddy`; enforced cgroup limits; `stop_session` against a live supervisor; a second account refused a `connect` to another user's daemon socket. These need root plus a second account, and are the subject of a planned VM-backed acceptance test — see [docs/dev/TODO.md](../../dev/TODO.md).
 
 ## Related

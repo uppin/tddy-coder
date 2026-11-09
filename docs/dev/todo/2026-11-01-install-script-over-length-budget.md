@@ -27,3 +27,13 @@ derivation block, the useradd/usermod/chown branch — the part PR #803 grew), s
 file the way the script already sources nothing today; (2) the desktop install section, which is
 already documented as self-contained ("shares this script's helpers"). A bash split needs a
 sourcing convention plus the `install_contract` static checks updated to follow the files.
+
+## Measurement history
+
+| Date | PR | `wc -l install` | What grew it |
+|---|---|---|---|
+| 2026-11-09 | [#865](https://github.com/uppin/tddy-coder/pull/865) (`#agent-tools` 32/32) | 1,600 → 1,811 | `migrate_spawn_policy_keys` (the one-time move of `allowed_tool_paths` / `allowed_relay_tool_paths` to `exec_roots`), `resolved_git_path` and the live `exec_roots` render, `tddy-git-clone` in `INSTALLED_BINARIES`. Measured with `wc -l` (all lines, comments included), so not directly comparable with the production-line figures above |
+
+**Status:** Open — still over budget (500); the seams above are unchanged, and the spawn-policy
+migration is a third self-contained region a split could take out with the user-mapping migration
+it extends.

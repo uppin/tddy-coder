@@ -89,14 +89,16 @@ The login runs as the daemon's user and writes its authorize URL into the worktr
    narrowed to `0700`, a symlink or a foreign owner is refused), sends `SpawnRelayed` with the
    harness resolved to an absolute path, waits up to 15 s for the supervisor to connect, and returns
    the stream (`AgentTransport::Stream`), which the ACP driver serves with `AcpDriver::spawn_over`.
-   The socket file is removed once connected. The supervisor's opaque denial becomes an error naming
-   the three things an operator can change: `allowed_relay_tool_paths`, the user in `users.yaml`,
-   `allowed_env_keys`. Closing the stream stops the agent.
+   The socket file is removed once connected. No cgroup scope is named (`scope: None`; see
+   [the backlog entry](../../../docs/dev/todo/2026-11-09-daemon-creates-no-cgroup-scope-for-supervised-spawns.md)).
+   The supervisor's opaque denial becomes an error naming the three things an operator can change: the
+   harness under `exec_roots`, the user's mapping in `users.yaml`, and the launch's environment,
+   which passes whole but for a loader variable. Closing the stream stops the agent.
 4. **Anything else** — refused, naming the user.
 
-On a supervised host the program sent is what `allowed_relay_tool_paths` must list. Its arguments are
-not allowlisted, so allowlisting `bunx` lets the daemon run any npm package as the session user; set
-`TDDY_CLAUDE_AGENT_ACP_CLI` and allowlist that binary instead.
+On a supervised host the program sent must resolve under the supervisor's `exec_roots`. Its arguments
+are not checked, so admitting `bunx` lets the daemon run any npm package as the session user; set
+`TDDY_CLAUDE_AGENT_ACP_CLI` and name that binary's resolved file instead.
 
 ## A headless conversation
 

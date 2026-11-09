@@ -276,8 +276,8 @@ definition for it). Opening one starts the agent process for that conversation:
 
 How the process becomes the session's user depends on the host: the daemon's own user needs
 nothing; a privileged daemon runs it behind `setpriv`; a daemon under `tddy-supervisor` asks for a
-**relayed spawn** ([tddy-supervisor § Relayed spawns](../supervisor/tddy-supervisor.md#relayed-spawns-coding-agents)),
-which works only for harness binaries the operator listed in `allowed_relay_tool_paths`. Any other
+**relayed spawn** ([tddy-supervisor § Relayed spawns](../supervisor/tddy-supervisor.md#relayed-spawns)),
+which works only for a harness binary that resolves under the supervisor's `exec_roots`. Any other
 case is refused with the reason; a coding agent is never started as the daemon's user in place of
 the session's.
 
