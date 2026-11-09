@@ -259,6 +259,11 @@ impl BuildContext {
         // is spawned: adopting its own listener clears the `LISTEN_*` variables they are announced in.
         self.agent_tool_sockets
             .adopt_inherited(tddy_daemon_kernel::agent_tool_sockets::adopt_from_environment());
+        // The merged socket the supervisor hands over now (`user.<os user>`), which wins over an
+        // agent-tool socket for the same user from before the merge.
+        self.agent_tool_sockets.adopt_inherited(
+            tddy_daemon_kernel::agent_tool_sockets::adopt_user_sockets_from_environment(),
+        );
         let connection_impl = tddy_session_lifecycle::connection_service::DaemonSessionHost::new(
             config.clone(),
             sessions_base_resolver.clone(),
@@ -307,11 +312,10 @@ impl BuildContext {
         .with_askpass_endpoint(askpass_endpoint)
         .with_approval_routes(approval_routes)
         .with_agent_tool_sockets(Arc::clone(&self.agent_tool_sockets))
-        // Read here, before the local socket server is spawned: adopting its own listener
-        // clears the `LISTEN_*` variables the host sockets are announced in.
-        .with_inherited_host_session_sockets(
-            tddy_session_lifecycle::connection_service::inherited_host_sockets::adopt_from_environment(),
-        ))
+        // The host-session service rides the merged per-user daemon socket (#agent-tools
+        // 31/32): an embedded host keeps binding its own host sockets, as its runtime serves
+        // its one socket itself.
+        .with_host_sessions_merged(options.host != RuntimeHost::Embedded))
     }
 
     pub(super) fn install_session_host(

@@ -207,13 +207,28 @@ impl DaemonConfigServiceTrait for DaemonConfigServiceImpl {
         let mut config = self.config.lock().await;
         // Validated before the file is touched, so a refused update leaves it untouched.
         let update = apply_update(&config, &settings)?;
-        // The file carries `users:` too, re-serialised from the live rows every service authorizes
-        // by — so a row a first login enrolled is written back rather than erased. Serialised
-        // against enrolment, which rewrites the same file, so neither write loses the other's.
-        update
-            .config
-            .users
-            .while_rewriting_config_file(|| write_config(path, &update.config))?;
+        // The mapping carries into `users.yaml` beside the config, re-serialised from the live
+        // rows every service authorizes by — so a row a first login enrolled is written back
+        // rather than erased, and the daemon's own file never carries a `users:` key. Serialised
+        // against enrolment, which rewrites the same file, so neither write loses the other's. A
+        // supervised daemon writes neither mapping: the supervisor owns that file.
+        let users_path = path
+            .parent()
+            .map(|directory| directory.join("users.yaml"))
+            .unwrap_or_else(|| std::path::PathBuf::from("users.yaml"));
+        update.config.users.while_rewriting_config_file(|| {
+            write_config(path, &update.config)?;
+            if update.config.users.is_owned_by_supervisor() {
+                return Ok(());
+            }
+            let rows = update.config.users.snapshot();
+            let yaml = serde_yaml::to_string(&rows).map_err(|e| {
+                Status::internal(format!("failed to serialize the users mapping: {e}"))
+            })?;
+            tddy_core::atomic_file::write_atomic_labelled(&users_path, yaml).map_err(|e| {
+                Status::internal(format!("failed to write the users mapping: {e}"))
+            })
+        })?;
         let livekit = update.config.livekit.clone();
         *config = update.config;
         drop(config);

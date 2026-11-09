@@ -329,6 +329,28 @@ impl DaemonSessionHost {
         self
     }
 
+    /// Serve the host-session service on this host's merged per-user daemon sockets
+    /// (`#agent-tools` 31/32), instead of binding host sockets of its own. Call after
+    /// [`Self::with_agent_tool_sockets`], whose set this registers on.
+    pub fn with_host_sessions_on_user_sockets(self) -> Self {
+        self.host_session_sockets
+            .serve_on(Arc::clone(&self.agent_tool_sockets));
+        self
+    }
+
+    /// [`Self::with_host_sessions_on_user_sockets`] for a binary host; an embedded host keeps
+    /// the inherited host sockets its runtime handed it, as it serves its one socket itself.
+    /// Reading the environment here clears the `LISTEN_*` variables, as the caller requires.
+    pub fn with_host_sessions_merged(self, merged: bool) -> Self {
+        if merged {
+            self.with_host_sessions_on_user_sockets()
+        } else {
+            self.with_inherited_host_session_sockets(
+                super::inherited_host_sockets::adopt_from_environment(),
+            )
+        }
+    }
+
     /// Tell this host's sessions about these agent-tool sockets (builder) — the runtime's, whose
     /// placement matches its host and whose roster it installs once assembled. Call it before any
     /// session starts.

@@ -98,6 +98,10 @@ pub struct HostSessionSockets {
     /// key stays so a user the supervisor serves is never bound by this daemon itself.
     inherited: std::sync::Mutex<HashMap<String, Option<InheritedHostSocket>>>,
     stop_watch_interval: std::time::Duration,
+    /// The merged per-user daemon sockets to serve on instead, once [`Self::serve_on`] is called.
+    user_sockets: std::sync::Mutex<Option<Arc<tddy_daemon_kernel::agent_tool_sockets::AgentToolSockets>>>,
+    /// The probe each user's service answers with, set when that user's socket is bound.
+    probes: Arc<std::sync::Mutex<HashMap<String, SessionProbe>>>,
 }
 
 impl Default for HostSessionSockets {
@@ -114,6 +118,8 @@ impl HostSessionSockets {
             servers: tokio::sync::Mutex::default(),
             inherited: std::sync::Mutex::default(),
             stop_watch_interval,
+            user_sockets: std::sync::Mutex::new(None),
+            probes: Arc::new(std::sync::Mutex::new(HashMap::new())),
         }
     }
 
@@ -159,8 +165,11 @@ impl HostSessionSockets {
         &self,
         user_sockets: Arc<tddy_daemon_kernel::agent_tool_sockets::AgentToolSockets>,
     ) {
-        // TODO(user-mapping-in-supervisor): implement
-        let _ = user_sockets;
+        user_sockets.install_user_scoped_service(Arc::new(HostSessionUserService {
+            registry: Arc::clone(&self.registry),
+            probes: Arc::clone(&self.probes),
+        }));
+        *self.user_sockets.lock().expect("user sockets lock") = Some(user_sockets);
     }
 
     /// Serve these supervisor-created sockets for their users from now on (served on first use).
@@ -179,6 +188,16 @@ impl HostSessionSockets {
 
     /// The path of `os_user`'s socket, binding and serving it first if this daemon is not already.
     pub async fn ensure_bound(&self, os_user: &str, data_dir: &Path) -> anyhow::Result<PathBuf> {
+        // On the merged socket there is nothing of our own to bind: the user's one daemon socket
+        // is bound there, and this registry is served on it as its user-scoped service.
+        let merged = self.user_sockets.lock().expect("user sockets lock").clone();
+        if let Some(user_sockets) = merged {
+            self.probes
+                .lock()
+                .expect("session probes lock")
+                .insert(os_user.to_string(), session_probe(data_dir));
+            return user_sockets.ensure_bound(os_user, data_dir).await;
+        }
         let mut servers = self.servers.lock().await;
         if let Some(server) = servers.get(os_user) {
             let intact = !server.task.is_finished()
@@ -242,6 +261,31 @@ impl HostSessionSockets {
             path.display()
         );
         Ok(path)
+    }
+}
+
+/// This registry as a service on a user's one daemon socket: a [`HostSessionService`] for that
+/// user, answering with the probe recorded when their socket was bound.
+struct HostSessionUserService {
+    registry: Arc<HostSessionRegistry>,
+    probes: Arc<std::sync::Mutex<HashMap<String, SessionProbe>>>,
+}
+
+impl tddy_daemon_kernel::agent_tool_sockets::UserScopedService for HostSessionUserService {
+    fn entry_for(&self, os_user: &str) -> tddy_rpc::ServiceEntry {
+        let mut service = HostSessionService::new(os_user, Arc::clone(&self.registry));
+        if let Some(probe) = self
+            .probes
+            .lock()
+            .expect("session probes lock")
+            .get(os_user)
+        {
+            service = service.with_session_probe(Arc::clone(probe));
+        }
+        tddy_rpc::ServiceEntry {
+            name: tddy_host_service::host_session_service::HOST_SESSION_SERVICE,
+            service: Arc::new(service),
+        }
     }
 }
 
