@@ -133,12 +133,14 @@ fn a_daemon(
     let config_path = sessions_base.join("config.yaml");
     std::fs::write(
         &config_path,
-        format!(
-            "daemon_instance_id: \"{instance_id}\"\nusers:\n  - github_user: \"testuser\"\n    \
-             os_user: \"testdev\"\n"
-        ),
+        format!("daemon_instance_id: \"{instance_id}\"\n"),
     )
     .expect("write daemon config");
+    std::fs::write(
+        sessions_base.join("users.yaml"),
+        "- github_user: \"testuser\"\n  os_user: \"testdev\"\n",
+    )
+    .expect("write users.yaml");
     let config = DaemonConfig::load(&config_path).expect("config must parse");
     let routing = peers(&config);
     let base = sessions_base.to_path_buf();

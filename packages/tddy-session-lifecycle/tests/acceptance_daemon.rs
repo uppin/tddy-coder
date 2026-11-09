@@ -6,6 +6,22 @@
 use tddy_daemon_kernel::config::DaemonConfig;
 use tddy_session_lifecycle::session_reader;
 
+/// No mapped users: an empty `users.yaml`, which a daemon still requires beside its config.
+const NO_USERS: &str = "[]\n";
+
+/// Writes `daemon_yaml` and `users_yaml` side by side into a temp dir of this test's own, so no
+/// test reads a `users.yaml` another one left in a shared directory.
+fn config_in_its_own_dir(
+    daemon_yaml: &str,
+    users_yaml: &str,
+) -> (tempfile::TempDir, std::path::PathBuf) {
+    let dir = tempfile::tempdir().expect("a temp dir for the config");
+    let path = dir.path().join("daemon.yaml");
+    std::fs::write(&path, daemon_yaml).expect("write daemon.yaml");
+    std::fs::write(dir.path().join("users.yaml"), users_yaml).expect("write users.yaml");
+    (dir, path)
+}
+
 /// Acceptance: Daemon loads YAML config with users and allowed_tools.
 #[test]
 fn acceptance_config_loads_users_and_tools() {
@@ -20,11 +36,15 @@ allowed_tools:
   - path: "target/release/tddy-coder"
     label: "tddy-coder (release)"
 "#;
-    let path = std::env::temp_dir().join("tddy-daemon-acceptance-config.yaml");
-    std::fs::write(&path, yaml).unwrap();
+    let users = r#"
+- github_user: "octocat"
+  os_user: "dev1"
+- github_user: "torvalds"
+  os_user: "dev2"
+"#;
+    let (_dir, path) = config_in_its_own_dir(yaml, users);
 
     // When
-    std::fs::write(std::path::Path::new(&(path)).parent().expect("a config directory").join("users.yaml"), "- github_user: \"octocat\"\n  os_user: \"dev1\"\n- github_user: \"torvalds\"\n  os_user: \"dev2\"\n").unwrap();
     let config = DaemonConfig::load(&path).expect("config should load");
 
     // Then
@@ -53,8 +73,7 @@ livekit:
   url: ws://127.0.0.1:7880
   common_room: tddy-lobby
 "#;
-    let path = std::env::temp_dir().join("tddy-daemon-acceptance-common-room.yaml");
-    std::fs::write(&path, yaml).unwrap();
+    let (_dir, path) = config_in_its_own_dir(yaml, NO_USERS);
 
     // When
     let config = DaemonConfig::load(&path).expect("config should load");
@@ -73,8 +92,7 @@ fn acceptance_config_codex_oauth_loopback_proxy_eligible_false() {
     let yaml = r#"
 codex_oauth_loopback_proxy_eligible: false
 "#;
-    let path = std::env::temp_dir().join("tddy-daemon-acceptance-oauth-proxy.yaml");
-    std::fs::write(&path, yaml).unwrap();
+    let (_dir, path) = config_in_its_own_dir(yaml, NO_USERS);
 
     // When
     let config = DaemonConfig::load(&path).expect("config should load");
@@ -90,8 +108,7 @@ fn acceptance_config_spawn_mouse_false() {
     let yaml = r#"
 spawn_mouse: false
 "#;
-    let path = std::env::temp_dir().join("tddy-daemon-acceptance-mouse.yaml");
-    std::fs::write(&path, yaml).unwrap();
+    let (_dir, path) = config_in_its_own_dir(yaml, NO_USERS);
 
     // When
     let config = DaemonConfig::load(&path).expect("config should load");
@@ -104,10 +121,11 @@ spawn_mouse: false
 #[test]
 fn acceptance_user_mapping_github_to_os() {
     // Given
-    let yaml = r#"
+    let users = r#"
+- github_user: "octocat"
+  os_user: "dev1"
 "#;
-    let path = std::env::temp_dir().join("tddy-daemon-acceptance-mapping.yaml");
-    std::fs::write(&path, yaml).unwrap();
+    let (_dir, path) = config_in_its_own_dir("{}\n", users);
     let config = DaemonConfig::load(&path).unwrap();
 
     // When / Then
@@ -188,8 +206,7 @@ fn acceptance_config_loads_repos_base_path() {
     let yaml = r#"
 repos_base_path: "repos"
 "#;
-    let path = std::env::temp_dir().join("tddy-daemon-acceptance-repos.yaml");
-    std::fs::write(&path, yaml).unwrap();
+    let (_dir, path) = config_in_its_own_dir(yaml, NO_USERS);
 
     // When
     let config = DaemonConfig::load(&path).expect("config should load");
@@ -223,6 +240,7 @@ fn acceptance_daemon_starts_and_serves_config() {
     }
 
     let temp = tempfile::tempdir().unwrap();
+    std::fs::write(temp.path().join("users.yaml"), NO_USERS).unwrap();
     let config_path = temp.path().join("daemon.yaml");
     let config = format!(
         r#"

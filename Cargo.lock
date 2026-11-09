@@ -13099,6 +13099,7 @@ dependencies = [
  "tddy-session-lifecycle",
  "tddy-spawn",
  "tddy-tauri-rpc",
+ "tempfile",
  "tokio",
 ]
 

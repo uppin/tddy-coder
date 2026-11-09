@@ -70,10 +70,7 @@ fn write_daemon_yaml(ws_url: &str, instance_id: Option<&str>) -> (tempfile::Temp
     let room = relay_room();
     let yaml = format!(
         r#"
-{id_block}users:
-  - github_user: "testuser"
-    os_user: "testuser"
-livekit:
+{id_block}livekit:
   enabled: true
   url: {ws_url}
   api_key: {LK_API_KEY}
@@ -82,6 +79,11 @@ livekit:
 "#
     );
     std::fs::write(&path, yaml).unwrap();
+    std::fs::write(
+        dir.path().join("users.yaml"),
+        "- github_user: \"testuser\"\n  os_user: \"testuser\"\n",
+    )
+    .unwrap();
     (dir, path)
 }
 

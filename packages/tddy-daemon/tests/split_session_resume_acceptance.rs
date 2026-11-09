@@ -175,9 +175,6 @@ fn a_daemon_config(ws_url: &str, instance_id: &str) -> (tempfile::TempDir, Daemo
     let yaml = format!(
         r#"
 daemon_instance_id: "{instance_id}"
-users:
-  - github_user: "{user}"
-    os_user: "{user}"
 allowed_tools:
   - path: /bin/true
     label: true
@@ -191,6 +188,11 @@ livekit:
     );
     let config_path = dir.path().join("daemon.yaml");
     std::fs::write(&config_path, yaml).unwrap();
+    std::fs::write(
+        dir.path().join("users.yaml"),
+        format!("- github_user: \"{user}\"\n  os_user: \"{user}\"\n"),
+    )
+    .unwrap();
     let config =
         tddy_daemon_kernel::config::DaemonConfig::load(&config_path).expect("config must parse");
     (dir, config)

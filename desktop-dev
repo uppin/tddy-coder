@@ -119,14 +119,14 @@ export TDDY_WORKSPACE_ROOT="${TDDY_WORKSPACE_ROOT:-$PROJECT_ROOT}"
 export TDDY_DATA_DIR="${TDDY_DATA_DIR:-$PROJECT_ROOT/tmp/.tddy}"
 mkdir -p "$TDDY_DATA_DIR"
 
-# Daemon config for the in-process tddy-daemon (dev.desktop.yaml at the repo root).
+# Daemon config for the in-process tddy-daemon (dev.desktop.yaml at the repo root). The mapping
+# lives in users.yaml beside that config, never in it (#agent-tools 31/32): rendered here for the
+# checkout's own dev config only — a config passed in TDDY_DAEMON_CONFIG brings its own users.yaml,
+# which this never overwrites.
 if [[ -z "${TDDY_DAEMON_CONFIG:-}" ]] && [[ -f "$PROJECT_ROOT/dev.desktop.yaml" ]]; then
   export TDDY_DAEMON_CONFIG="$PROJECT_ROOT/dev.desktop.yaml"
+  printf -- '- github_user: "testuser"\n  os_user: "%s"\n' "${USER}" > "$PROJECT_ROOT/users.yaml"
 fi
-
-# The mapping lives in users.yaml beside that config, never in it (#agent-tools 31/32).
-printf -- '- github_user: "testuser"\n  os_user: "%s"\n' "${USER}" \
-  > "$(dirname "${TDDY_DAEMON_CONFIG:-$PROJECT_ROOT/dev.desktop.yaml}")/users.yaml"
 
 VITE_PID=""
 CLEANED_UP=0
