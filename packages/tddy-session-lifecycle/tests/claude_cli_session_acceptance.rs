@@ -174,8 +174,8 @@ fn minimal_service_with_manager(
         tddy_session_lifecycle::peer_routing::PeerRouting::local_only(&config),
         Arc::new(tddy_daemon_kernel::operator_channel::NoOperatorChannel),
         manager,
+        agents,
     )
-    .with_coding_agents_if_none(agents)
 }
 
 /// Create a git repo with an origin remote pointing at itself so that
@@ -736,6 +736,7 @@ fn a_host_without_coding_agents(config: DaemonConfig, sessions_base: PathBuf) ->
         tddy_session_lifecycle::peer_routing::PeerRouting::local_only(&config),
         Arc::new(tddy_daemon_kernel::operator_channel::NoOperatorChannel),
         Arc::new(CliSessionManager::new()),
+        tddy_agent_launch::host_coding_agents::no_coding_agents(),
     )
 }
 

@@ -141,6 +141,7 @@ fn an_orchestrator_of(session_type: &str, recipe: &str, agents: HostAgents) -> A
         crate::peer_routing::PeerRouting::local_only(&config),
         Arc::new(tddy_daemon_kernel::operator_channel::NoOperatorChannel),
         Arc::new(CliSessionManager::new()),
+        tddy_agent_launch::host_coding_agents::no_coding_agents(),
     );
     let service = match agents {
         HostAgents::TheBuiltins => {

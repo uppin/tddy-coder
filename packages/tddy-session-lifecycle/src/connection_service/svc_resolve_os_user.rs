@@ -72,12 +72,7 @@ impl DaemonSessionHost {
             log::warn!("{rpc_name}: session {session_id} has no readable .session.yaml: {e}");
             Status::failed_precondition("session not found or .session.yaml missing")
         })?;
-        let registry = self
-            .coding_agents()
-            .map(|agents| agents.agents_shared())
-            .unwrap_or_else(|| {
-                std::sync::Arc::new(tddy_coding_agent_specs::CodingAgentRegistry::empty())
-            });
+        let registry = self.coding_agents().agents_shared();
         // The agent whose spec row this session is served: its own type's agent, or — for the
         // workspace half of a split placement — the split agent this daemon's registry offers
         // (the one declaring `split_host`), never the caller's `requested_agent`.

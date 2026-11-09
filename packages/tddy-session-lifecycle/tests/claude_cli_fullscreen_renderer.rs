@@ -200,6 +200,7 @@ fn a_session_host_serving(
         tddy_session_lifecycle::peer_routing::PeerRouting::local_only(&config),
         Arc::new(tddy_daemon_kernel::operator_channel::NoOperatorChannel),
         manager,
+        tddy_agent_launch::host_coding_agents::no_coding_agents(),
     );
     if coding_agents {
         let tools_dir = sessions_base_dir.join("stub-bin");

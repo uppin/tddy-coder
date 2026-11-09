@@ -325,7 +325,12 @@ pub async fn build(
     let identity = Identity::assemble(&config, &options)?;
     // The index daemon's own registry: the session level serves what it serves (R7).
     let index_supports = tddy_daemon_rpc::code_navigation::host_supports()?;
-    let mut context = BuildContext::new(config, options, identity, index_supports);
+    // The daemon's one coding-agent registry (built-ins and `<tddy home>/tools`), loaded once, before
+    // anything is assembled over it: a registry that does not load stops the start, whatever is
+    // mounted. Telegram, the reserved-ids step and the session host share this instance.
+    let coding_agents =
+        tddy_agent_launch::host_coding_agents::host_coding_agents(&identity.keys.tddy_data_dir)?;
+    let mut context = BuildContext::new(config, options, identity, index_supports, coding_agents);
     context.mount_session_services().await?;
     context.mount_daemon_settings();
     context.serve_common_room();

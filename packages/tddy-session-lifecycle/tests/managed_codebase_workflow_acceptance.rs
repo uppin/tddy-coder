@@ -97,8 +97,8 @@ fn minimal_service_with_manager(
         tddy_session_lifecycle::peer_routing::PeerRouting::local_only(&config),
         Arc::new(tddy_daemon_kernel::operator_channel::NoOperatorChannel),
         manager,
+        agents,
     )
-    .with_coding_agents_if_none(agents)
 }
 
 /// Create a git repo with an origin remote pointing at itself so worktree setup succeeds.

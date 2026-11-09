@@ -64,10 +64,7 @@ impl BuildContext {
                 accounts_user_resolver,
                 &self.identity.keys.auth_config,
                 // The registry the session host loaded: one load, never one per RPC.
-                m.hosted
-                    .connection_arc
-                    .coding_agents()
-                    .map(|agents| agents.agents_shared()),
+                m.hosted.connection_arc.coding_agents().agents_shared(),
             );
             accounts_service = self.wire_credential_sync(&vaults, accounts_service);
             // One instance, served over the RPC and read by `DescribeSessionStartOptions` (`#start-parity`

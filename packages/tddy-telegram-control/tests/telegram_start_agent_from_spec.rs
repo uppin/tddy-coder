@@ -355,6 +355,7 @@ impl AWorldBuilder {
             tddy_session_lifecycle::peer_routing::PeerRouting::local_only(&config),
             Arc::new(tddy_daemon_kernel::operator_channel::NoOperatorChannel),
             Arc::clone(&manager),
+            tddy_agent_launch::host_coding_agents::no_coding_agents(),
         );
         let host = Arc::new(match &coding_agents {
             Some(agents) => host.with_coding_agents(Arc::clone(agents)),

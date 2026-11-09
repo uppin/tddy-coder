@@ -83,8 +83,8 @@ fn minimal_service_with_manager(
         tddy_session_lifecycle::peer_routing::PeerRouting::local_only(&config),
         Arc::new(tddy_daemon_kernel::operator_channel::NoOperatorChannel),
         manager,
+        agents,
     )
-    .with_coding_agents_if_none(agents)
 }
 
 fn create_test_repo_with_origin(dir: &std::path::Path) {

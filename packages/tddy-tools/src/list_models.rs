@@ -24,6 +24,12 @@ pub struct ListModelsArgs {
     /// Absent: the binary name the injected catalogue carries, searched on `PATH` by the OS.
     #[arg(long)]
     pub binary_path: Option<PathBuf>,
+
+    /// The host's `<tddy home>/tools` directory: the catalogue is the coding-agent registry loaded
+    /// from the built-in specs with that directory's overrides applied, so an operator's
+    /// `tools/<agent>.yaml` model list is the one listed. Absent: the built-in specs alone.
+    #[arg(long)]
+    pub tools_dir: Option<PathBuf>,
 }
 
 /// How one agent's models are known, injected by the binary from the agent's spec.

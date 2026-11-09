@@ -32,8 +32,8 @@ fn a_daemon_with_no_peers(tddy_data_dir: std::path::PathBuf) -> DaemonSessionHos
         crate::peer_routing::PeerRouting::local_only(&config),
         Arc::new(tddy_daemon_kernel::operator_channel::NoOperatorChannel),
         Arc::new(CliSessionManager::new()),
+        crate::test_util::builtin_coding_agents(),
     )
-    .with_coding_agents_if_none(crate::test_util::builtin_coding_agents())
 }
 
 /// An agent def under `<tddyhome>/agents` that takes `Grep` away from the main agent.

@@ -88,10 +88,8 @@ fn a_pr_stack_orchestrator() -> Orchestrator {
         crate::peer_routing::PeerRouting::local_only(&config),
         Arc::new(tddy_daemon_kernel::operator_channel::NoOperatorChannel),
         Arc::new(CliSessionManager::new()),
-    )
-    .with_coding_agents_if_none(crate::test_util::coding_agents_with_binaries(&[(
-        "claude", &stub,
-    )]));
+        crate::test_util::coding_agents_with_binaries(&[("claude", &stub)]),
+    );
 
     let orchestrator = Orchestrator {
         service,

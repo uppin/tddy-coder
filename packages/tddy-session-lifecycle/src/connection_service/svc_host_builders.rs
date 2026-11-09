@@ -11,10 +11,9 @@ use crate::{
     CliSessionManager,
 };
 use tddy_daemon_extensions::{
-    NoRoomAdmission, NoRoomBroadcast, NoRoomDirectory, NoRoomTokens, NoSessionRooms, RoomAdmission,
-    RoomBroadcast, RoomDirectory, RoomTokenMinter, SessionRooms,
+    NoRoomAdmission, NoRoomBroadcast, NoRoomDirectory, NoRoomTokens, NoSessionRooms, SessionRooms,
 };
-use tddy_session_agents::agent_host_callbacks::{NoRoomTransport, RoomConnector};
+use tddy_session_agents::agent_host_callbacks::NoRoomTransport;
 
 use std::sync::Arc;
 
@@ -25,6 +24,11 @@ use std::path::PathBuf;
 use crate::config::DaemonConfig;
 
 impl DaemonSessionHost {
+    /// A session host over `coding_agents`: the daemon's one coding-agent registry, loaded once at
+    /// start and shared with every other consumer (Telegram, the reserved-ids step, the model
+    /// probe). A host that legitimately has none is given an empty one
+    /// (`tddy_agent_launch::host_coding_agents::no_coding_agents`), whose every agent start is
+    /// refused `FAILED_PRECONDITION`.
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         config: DaemonConfig,
@@ -36,6 +40,7 @@ impl DaemonSessionHost {
         peer_routing: PeerRouting,
         operator_channel: SharedOperatorChannel,
         cli_manager: Arc<CliSessionManager>,
+        coding_agents: Arc<tddy_agent_launch::spec_launch::HostCodingAgents>,
     ) -> Self {
         let spawn_client = spawn_client.map(|(c, _pid)| Arc::new(c));
         // Declared tools resolve from `<tddyhome>/tools` at each jail start (`#agent-tools 1/12`).
@@ -122,7 +127,7 @@ impl DaemonSessionHost {
             // from this host (`with_rpc_families`).
             rpc_families: None,
             worktree_observer: None,
-            coding_agents: None,
+            coding_agents,
             session_reach: Arc::new(tddy_daemon_extensions::NoSessionReach),
             terminal_exposure: Arc::new(tddy_daemon_extensions::NoTerminalExposure),
             split_rooms: Arc::new(tddy_daemon_extensions::NoSplitRooms),
@@ -239,51 +244,6 @@ impl DaemonSessionHost {
     #[must_use]
     pub fn approval_routes(&self) -> Option<Arc<tddy_coding_subagent::ApprovalRoutes>> {
         self.approval_routes.clone()
-    }
-
-    /// Install which owning daemons are admitted to the rooms this daemon hosts (builder). Without
-    /// it no admission is ever recorded.
-    #[must_use]
-    pub fn with_room_admission(mut self, admission: Arc<dyn RoomAdmission>) -> Self {
-        self.debug_assert_rpc_families_not_installed("with_room_admission");
-        self.session_admissions = admission;
-        self
-    }
-
-    /// Install the reader of who is in a room (builder). Without it, reading a room's participants
-    /// is a failed precondition.
-    #[must_use]
-    pub fn with_room_directory(mut self, directory: Arc<dyn RoomDirectory>) -> Self {
-        self.debug_assert_rpc_families_not_installed("with_room_directory");
-        self.room_directory = directory;
-        self
-    }
-
-    /// Install what publishes to everyone in a session's room (builder). Without it a broadcast
-    /// reaches nobody.
-    #[must_use]
-    pub fn with_room_broadcast(mut self, broadcast: Arc<dyn RoomBroadcast>) -> Self {
-        self.debug_assert_rpc_families_not_installed("with_room_broadcast");
-        self.room_broadcast = broadcast;
-        self
-    }
-
-    /// Install what mints a room access token (builder). Without it every mint is a failed
-    /// precondition.
-    #[must_use]
-    pub fn with_room_tokens(mut self, tokens: Arc<dyn RoomTokenMinter>) -> Self {
-        self.debug_assert_rpc_families_not_installed("with_room_tokens");
-        self.room_tokens = tokens;
-        self
-    }
-
-    /// Install how this daemon joins a room as a client (builder). Without it every join is
-    /// refused.
-    #[must_use]
-    pub fn with_room_connector(mut self, connector: Arc<dyn RoomConnector>) -> Self {
-        self.debug_assert_rpc_families_not_installed("with_room_connector");
-        self.room_connector = connector;
-        self
     }
 
     /// Install the delta rings of the session rooms this daemon hosts (builder). Without it every
@@ -502,3 +462,4 @@ impl DaemonSessionHost {
 }
 
 mod rpc_activity;
+mod svc_room_builders;

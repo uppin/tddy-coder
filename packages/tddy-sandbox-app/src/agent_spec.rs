@@ -14,6 +14,7 @@ use std::path::{Path, PathBuf};
 
 use tddy_actions::tool::{
     render_argv, ProcessToolHost, ResolvedTool, TemplateParams, ToolDef, ToolError, ToolHost,
+    Transport,
 };
 use tddy_coding_agent_specs::claude_tools::{
     build_claude_allowlist, build_claude_disallowlist, PERMISSION_PROMPT_TOOL,
@@ -69,8 +70,12 @@ pub struct AgentJail {
 /// Why `--agent` cannot start a jail.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum AgentChoiceError {
-    /// The registry holds no coding agent with this id.
+    /// The registry holds no coding agent with this id. `known` is every agent this app can run:
+    /// those whose spec's `run` is a PTY launch.
     Unknown { id: String, known: Vec<String> },
+    /// The agent's spec has no PTY `run` (an ACP-only agent), which a PTY sandbox cannot launch.
+    /// `runnable` names the agents it can.
+    NotPtyRunnable { id: String, runnable: Vec<String> },
     /// The spec's route is `required_in_jail` and this app passes none — what `--agent-kind
     /// opencode|muse` was refused with.
     RouteRequired { id: String },
@@ -92,6 +97,11 @@ impl fmt::Display for AgentChoiceError {
                 "--agent {id:?} is not a coding agent in the registry; it holds {}",
                 known.join(", ")
             ),
+            Self::NotPtyRunnable { id, runnable } => write!(
+                f,
+                "--agent {id} has no PTY run, so tddy-sandbox-app cannot start it; it runs {}",
+                runnable.join(", ")
+            ),
             Self::RouteRequired { id } => write!(
                 f,
                 "--agent {id} is not started by tddy-sandbox-app yet: a jailed {id} session runs on \
@@ -108,8 +118,8 @@ impl fmt::Display for AgentChoiceError {
 impl std::error::Error for AgentChoiceError {}
 
 /// Choose the agent `id` from the registry at `tddy_home` (`<tddyhome>/`[`TOOLS_SUBDIR`] overrides
-/// applied): refused for an id no coding agent has, naming every one the registry holds, for a
-/// spec that is not placed in a jail, and for one whose route is required in a jail.
+/// applied): refused for an id no coding agent has and for an ACP-only one, naming every agent with a
+/// PTY run; for a spec that is not placed in a jail; and for one whose route is required in a jail.
 pub fn choose_agent(id: &str, tddy_home: &Path) -> Result<ChosenAgent, AgentChoiceError> {
     choose_agent_on(id, tddy_home, &ProcessToolHost)
 }
@@ -150,18 +160,31 @@ pub fn choose_agent_on(
 ) -> Result<ChosenAgent, AgentChoiceError> {
     let registry =
         load_agent_registry(&tddy_home.join(TOOLS_SUBDIR)).map_err(AgentChoiceError::Registry)?;
+    let is_coding_agent = |def: &ToolDef| def.extensions.contains_key(CODING_AGENT_EXTENSION);
+    let runs_in_a_pty = |def: &ToolDef| {
+        def.run
+            .as_ref()
+            .is_some_and(|run| run.transport == Transport::Pty)
+    };
+    // The agents this app can run: coding agents whose spec's `run` is a PTY launch.
     let mut known: Vec<String> = registry
         .ids()
         .filter(|tool| {
             registry
                 .get(tool)
-                .is_some_and(|def| def.extensions.contains_key(CODING_AGENT_EXTENSION))
+                .is_some_and(|def| is_coding_agent(def) && runs_in_a_pty(def))
         })
         .map(str::to_string)
         .collect();
     known.sort();
     let def = match registry.get(id) {
-        Some(def) if known.iter().any(|agent| agent == id) => def,
+        Some(def) if is_coding_agent(def) && runs_in_a_pty(def) => def,
+        Some(def) if is_coding_agent(def) => {
+            return Err(AgentChoiceError::NotPtyRunnable {
+                id: id.to_string(),
+                runnable: known,
+            })
+        }
         _ => {
             return Err(AgentChoiceError::Unknown {
                 id: id.to_string(),

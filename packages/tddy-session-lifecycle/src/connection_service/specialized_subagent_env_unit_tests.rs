@@ -42,8 +42,8 @@ fn make_unit_service(tddy_data_dir: std::path::PathBuf) -> DaemonSessionHost {
         crate::peer_routing::PeerRouting::local_only(&config),
         Arc::new(tddy_daemon_kernel::operator_channel::NoOperatorChannel),
         Arc::new(CliSessionManager::new()),
+        crate::test_util::builtin_coding_agents(),
     )
-    .with_coding_agents_if_none(crate::test_util::builtin_coding_agents())
 }
 
 /// A def under `<tddyhome>/agents`, which is where every YAML-defined agent comes from.

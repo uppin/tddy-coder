@@ -104,8 +104,8 @@ fn minimal_service(config: DaemonConfig, stub: &str, sessions_base: PathBuf) -> 
         tddy_session_lifecycle::peer_routing::PeerRouting::local_only(&config),
         Arc::new(tddy_daemon_kernel::operator_channel::NoOperatorChannel),
         Arc::new(CliSessionManager::new()),
+        agents,
     )
-    .with_coding_agents(agents)
 }
 
 fn create_test_repo_with_origin(dir: &std::path::Path) {
