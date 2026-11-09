@@ -162,8 +162,28 @@ fn parse_section(
 /// `config_env` matching `TDDY_*` (an agent never sees a daemon variable), or with a `files_dir`
 /// (an inline route writes no file). The message names the field.
 pub(crate) fn route_slot_errors(route: &RouteSlot) -> Result<(), String> {
-    // TODO(opencode-route-inline): implement
-    let _ = route;
+    if route.shape != RouteShape::InlineConfig {
+        return Ok(());
+    }
+    let Some(config_env) = route.config_env.as_deref() else {
+        return Err(
+            "shape `inline_config` needs a `config_env` naming the variable that carries the \
+             route's configuration inline"
+                .to_string(),
+        );
+    };
+    if admits_a_tddy_variable(config_env) {
+        return Err(format!(
+            "config_env '{config_env}' would hand the route's configuration over in a TDDY_* \
+             variable, which no agent sees"
+        ));
+    }
+    if route.files_dir.is_some() {
+        return Err(
+            "shape `inline_config` takes no `files_dir`: an inline route writes no file"
+                .to_string(),
+        );
+    }
     Ok(())
 }
 
@@ -544,8 +564,8 @@ pub struct AcpSection {
     #[serde(default)]
     pub env: BTreeMap<String, String>,
     /// The hooks adapter (`tddy_agent_backend::adapters::AcpHooksAdapters`) the driver runs with —
-    /// `codex-acp-login`, `opencode-route-file`; `None` runs it with no hooks. A name the registry
-    /// does not hold is refused at load.
+    /// `codex-acp-login`; `None` runs it with no hooks. A name the registry does not hold is
+    /// refused at load.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub hooks_adapter: Option<String>,
     /// Where an ACP launch registers its MCP server, when that differs from `coding_agent.mcp`

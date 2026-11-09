@@ -8,9 +8,6 @@
 
 use tddy_coding_agent_specs::{CodingAgentRegistry, CodingAgentSpec, ToolSlot};
 
-/// The variable OpenCode reads inline JSON configuration from, merged over its other config.
-pub const OPENCODE_CONFIG_CONTENT: &str = "OPENCODE_CONFIG_CONTENT";
-
 /// What a harness can do about its native tools.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Confinement {

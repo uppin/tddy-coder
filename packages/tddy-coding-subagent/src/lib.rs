@@ -20,7 +20,7 @@ pub use catalog::{
 };
 pub use confinement::{
     confinable_acp_agents, confinement_of_spec, refuse_unless_registry_confinable,
-    refuse_unless_spec_confinable, Confinement, OPENCODE_CONFIG_CONTENT,
+    refuse_unless_spec_confinable, Confinement,
 };
 pub use launcher::{
     no_launch_hooks, AgentTransport, CodingAgentLaunch, CodingAgentLauncher, LaunchedAgent,

@@ -4,8 +4,8 @@
 //! PRD: `docs/ft/coder/changelog/2026-11-04-acp-agents-from-specs.md`.
 //!
 //! A spec's `coding_agent.acp` section declares *how the agent is launched*. What the driver does
-//! around a session — run `codex login` and retry once on an auth-like error, hold a route's
-//! owner-only config file for the agent's lifetime — is runtime behaviour that cannot be YAML, so
+//! around a session — run `codex login` and retry once on an auth-like error — is runtime
+//! behaviour that cannot be YAML, so
 //! the section only **names** an adapter (`hooks_adapter: codex-acp-login`). Neither
 //! [`super::AdapterRegistry`] (stream parsers) nor [`super::LaunchAdapters`] (PTY output readers)
 //! has this shape: an ACP hooks adapter acts on the command before it is spawned and hands the
@@ -21,7 +21,6 @@ use crate::error::BackendError;
 use crate::provider_route::HarnessRoute;
 
 pub use super::codex_acp_login::{CodexAcpLogin, CODEX_ACP_LOGIN, CODEX_DEP};
-pub use super::opencode_route_file::{OpenCodeRouteFile, OPENCODE_ROUTE_FILE};
 
 /// What one ACP launch hands its hooks adapter, before the agent is spawned.
 pub struct AcpHooksLaunch<'a> {
@@ -76,11 +75,9 @@ impl fmt::Debug for AcpHooksAdapters {
 }
 
 impl AcpHooksAdapters {
-    /// Every ACP hooks adapter this build registers: [`CODEX_ACP_LOGIN`] ([`CodexAcpLogin`]) and
-    /// [`OPENCODE_ROUTE_FILE`] ([`OpenCodeRouteFile`]).
+    /// Every ACP hooks adapter this build registers: [`CODEX_ACP_LOGIN`] ([`CodexAcpLogin`]).
     pub fn builtin() -> Self {
-        let builtin: [Arc<dyn AcpHooksAdapter>; 2] =
-            [Arc::new(CodexAcpLogin), Arc::new(OpenCodeRouteFile)];
+        let builtin: [Arc<dyn AcpHooksAdapter>; 1] = [Arc::new(CodexAcpLogin)];
         Self {
             adapters: builtin
                 .into_iter()
@@ -112,7 +109,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn the_builtin_acp_hooks_adapters_are_codex_acp_login_and_opencode_route_file() {
+    fn the_builtin_acp_hooks_adapters_are_codex_acp_login() {
         // Given
         let adapters = AcpHooksAdapters::builtin();
 
@@ -120,7 +117,7 @@ mod tests {
         let names: Vec<&str> = adapters.names().collect();
 
         // Then
-        assert_eq!(names, vec![CODEX_ACP_LOGIN, OPENCODE_ROUTE_FILE]);
+        assert_eq!(names, vec![CODEX_ACP_LOGIN]);
     }
 
     #[test]
@@ -133,20 +130,10 @@ mod tests {
             adapters
                 .get(CODEX_ACP_LOGIN)
                 .map(|adapter| adapter.name().to_string()),
-            adapters
-                .get(OPENCODE_ROUTE_FILE)
-                .map(|adapter| adapter.name().to_string()),
             adapters.contains("claude-acp-login"),
         );
 
         // Then
-        assert_eq!(
-            found,
-            (
-                Some(CODEX_ACP_LOGIN.to_string()),
-                Some(OPENCODE_ROUTE_FILE.to_string()),
-                false,
-            )
-        );
+        assert_eq!(found, (Some(CODEX_ACP_LOGIN.to_string()), false));
     }
 }

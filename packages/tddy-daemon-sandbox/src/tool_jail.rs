@@ -177,9 +177,11 @@ fn with_route_hosts(declared: EgressPolicy, route: Option<&HarnessRoute>) -> Egr
 /// named, and in its files — OpenCode's configuration names its provider's base URL there, not in the
 /// environment. The port is the scheme's own when the URL names none.
 pub fn route_hosts(route: &HarnessRoute) -> Vec<HostPattern> {
-    // TODO(opencode-route-inline): implement — an `inline_config` route carries its configuration
-    // as a variable's value, so the URLs inside each value are read, not only a value that is one.
-    let env_urls = route.env.iter().filter_map(|(_, value)| url_host(value));
+    let env_urls = route
+        .env
+        .iter()
+        .flat_map(|(_, value)| urls_in(value))
+        .filter_map(url_host);
     let file_urls = route
         .files
         .iter()

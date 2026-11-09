@@ -10,8 +10,8 @@
 //! - **A provider account's route** — resolved from the session owner's vault through
 //!   [`tddy_agent_launch::session_provider_route::resolve_session_route`], exactly as a tool session
 //!   resolves it, and applied per harness: environment and secret environment for all of them,
-//!   `-c` overrides for `codex-acp`, the route's config file as inline `OPENCODE_CONFIG_CONTENT` for
-//!   `opencode`.
+//!   `-c` overrides for a `toml_args` route, and the route's environment as its body renders it
+//!   for the rest (an `inline_config` route carries its configuration there).
 //! - **A managed session** — the harness's native tools are withdrawn
 //!   (the spec's `acp.withdraw_native`: inline config for `opencode`, `_meta` at `session/new` for
 //!   `claude-acp`) and
@@ -385,9 +385,9 @@ impl CodingAgentLauncher for DaemonCodingAgentLauncher {
     /// [`Self::launch_transport`] with the hooks of every adapter the agent's spec declares
     /// (`coding_agent.acp.hooks_adapter`), prepared on the command before it is spawned or relayed:
     /// `codex-acp-login` hands back its `codex login` retry-once hooks and their open bracket. An
-    /// agent that declares none gets [`tddy_coding_subagent::no_launch_hooks`]. The route stays
-    /// inline (`OPENCODE_CONFIG_CONTENT`); a route file the session user can read is a node of its
-    /// own (`docs/dev/todo/2026-11-04-opencode-acp-route-file-has-no-session-owner.md`).
+    /// agent that declares none gets [`tddy_coding_subagent::no_launch_hooks`]. The route is
+    /// already rendered into the command by [`Self::acp_plan_from_spec`]; a route carrying files
+    /// is refused there, naming its shape.
     async fn launch_agent(
         &self,
         launch: &CodingAgentLaunch,
@@ -466,8 +466,11 @@ mod headless_tests;
 mod tests {
     use super::*;
     use std::path::Path;
-    use tddy_coding_subagent::{CodingAgentDef, OPENCODE_CONFIG_CONTENT};
+    use tddy_coding_subagent::CodingAgentDef;
     use tddy_core::provider_route::RouteSecret;
+
+    /// The variable a routed launch carries its inline configuration in, as its spec names it.
+    const OPENCODE_CONFIG_CONTENT: &str = "OPENCODE_CONFIG_CONTENT";
 
     /// The built-in ACP agents' ids, as a launch names them as its harness.
     const CLAUDE_ACP: &str = "claude-acp";

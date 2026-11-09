@@ -218,16 +218,6 @@ impl AStubReport {
         self.line("inline-config")
     }
 
-    /// The bytes of the file `OPENCODE_CONFIG` names, its newlines removed.
-    pub fn route_config_text(&self) -> &str {
-        self.line("config")
-    }
-
-    /// The octal mode of the file `OPENCODE_CONFIG` names (`600`).
-    pub fn route_config_mode(&self) -> String {
-        self.line("config-mode").to_string()
-    }
-
     /// The `CONNECT` status a probe of `target` got through the proxy (`200`, `403`, `000`).
     pub fn connect_status(&self, target: &str) -> String {
         self.line(&format!("connect:{target}")).to_string()

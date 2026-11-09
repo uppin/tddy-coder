@@ -51,14 +51,14 @@ is written.
 
 ## Scope
 
-- [ ] `RouteShape::InlineConfig` and `RoutedAgent.config_env`
-- [ ] `inline_config_route`; `body_has_its_inputs` needs `config_env`
-- [ ] `route_slot_errors` load validation
-- [ ] `opencode.yaml` at State B
-- [ ] The daemon ACP planner has no shape- or agent-specific route branch, and refuses a route carrying files
-- [ ] `opencode-route-file` adapter deleted
-- [ ] `toml_args` and `env` routes unchanged (guards)
-- [ ] `supervisor.yaml.production:115-116` and `tddy-supervisor.md:92` corrected (still stale at #836's tip `7dba6fdde`)
+- [x] `RouteShape::InlineConfig` and `RoutedAgent.config_env`
+- [x] `inline_config_route`; `body_has_its_inputs` needs `config_env`
+- [x] `route_slot_errors` load validation
+- [x] `opencode.yaml` at State B
+- [x] The daemon ACP planner has no shape- or agent-specific route branch, and refuses a route carrying files
+- [x] `opencode-route-file` adapter deleted
+- [x] `toml_args` and `env` routes unchanged (guards)
+- [x] `supervisor.yaml.production:115-116` and `tddy-supervisor.md:92` corrected (still stale at #836's tip `7dba6fdde`)
 - [ ] Feature docs: `opencode-cli-session.md:172`, `opencode-acp-backend.md` § Running on a provider account, `provider-accounts.md`, `session-agent-roster.md:264`, `tddy-coding-agent-specs/docs/coding-agent-specs.md`, `tddy-agent-backend/docs/architecture.md`
 - [ ] Wrap: delete `docs/dev/todo/2026-11-04-opencode-acp-route-file-has-no-session-owner.md`, recording "file not needed" and its three reasons in the change-history entry
 
@@ -244,8 +244,8 @@ PR: [#857](https://github.com/uppin/tddy-coder/pull/857) (`#agent-tools` 29/32).
 - [x] Run acceptance tests (verify they fail)
 - [x] USER REVIEW — acceptance tests
 - [x] TDD Red — write failing unit/integration tests
-- [ ] TDD Green — implement with quality code
-- [ ] Update documentation with progress
+- [x] TDD Green — implement with quality code
+- [x] Update documentation with progress
 - [ ] Repeat Red→Green→Update cycle until feature complete
 - [ ] Run the touched packages' tests (`./test -p {package}` per package) — verify 100% pass
 - [ ] Validate changes (/validate-changes)

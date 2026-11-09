@@ -183,8 +183,7 @@ fn body_has_its_inputs(agent: &RoutedAgent, provider: ProviderKind) -> bool {
         (RouteShape::Env, ProviderKind::Meta)
         | (RouteShape::TomlArgs, _)
         | (RouteShape::JsonConfigFile, _) => agent.key_env.is_some(),
-        // TODO(opencode-route-inline): implement — an inline body also needs `config_env`.
-        (RouteShape::InlineConfig, _) => agent.key_env.is_some(),
+        (RouteShape::InlineConfig, _) => agent.key_env.is_some() && agent.config_env.is_some(),
         _ => true,
     }
 }
@@ -335,7 +334,27 @@ pub(super) fn inline_config_route(
     agent: &RoutedAgent,
     target: &RouteTarget,
 ) -> Result<HarnessRoute, RouteRefusal> {
-    // TODO(opencode-route-inline): implement
-    let _ = target;
-    Err(not_yet_routable(agent))
+    let Some(key_env) = agent.key_env.as_ref() else {
+        return Err(not_yet_routable(agent));
+    };
+    let Some(config_env) = agent.config_env.as_ref() else {
+        return Err(not_yet_routable(agent));
+    };
+    let Some(wire) = openai_wire(&target.endpoints) else {
+        return Err(RouteRefusal::ProtocolNotServed {
+            agent: agent.id.clone(),
+            product: agent.product.clone(),
+            needs: "OpenAI Responses or OpenAI Chat Completions",
+        });
+    };
+    let config = opencode_config(&target.model, wire, key_env);
+    Ok(HarnessRoute {
+        env: vec![(config_env.clone(), config.contents)],
+        secret_env: vec![(key_env.clone(), target.api_key.clone())],
+        files: Vec::new(),
+        args: vec![
+            "--model".to_string(),
+            format!("{OPENCODE_ROUTE_PROVIDER_ID}/{}", target.model),
+        ],
+    })
 }

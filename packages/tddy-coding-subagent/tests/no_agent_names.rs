@@ -29,8 +29,7 @@ const AGENT_ID_LITERALS: &[&str] = &[
 ];
 
 /// The constants and tables that held per-agent data, matched as whole identifiers (so
-/// `OPENCODE_CONFIG_CONTENT` is not `OPENCODE`). `OPENCODE_CONFIG_CONTENT` itself stays: the route
-/// is still handed inline until the route-file node lands (user, 2026-11-07).
+/// `OPENCODE_CONFIG_CONTENT` is not `OPENCODE`).
 const AGENT_TABLES: &[&str] = &[
     "CLAUDE_ACP",
     "CODEX_ACP",

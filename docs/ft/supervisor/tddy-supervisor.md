@@ -88,8 +88,8 @@ failure is the opaque denial and nothing is forked. The child's exit status and 
   (`codex-acp` in the install's bin directory, `opencode`, and for `claude-acp` the `claude-agent-acp`
   binary the daemon's `TDDY_CLAUDE_AGENT_ACP_CLI` names). Without that variable `claude-acp` runs as
   `bunx claude-agent-acp`; arguments are not allowlisted, so listing `bunx` admits any package `bunx`
-  can fetch, run as the session user. The
-  launch's provider-route variables and `OPENCODE_CONFIG_CONTENT` must be in `allowed_env_keys` too. The
+  can fetch, run as the session user. A relayed coding agent's environment is the one the daemon
+  computed, whole, so its provider-route variables are not gated by `allowed_env_keys`. The
   daemon turns the supervisor's opaque denial into an error naming these three lists.
 - **`allowed_env_keys` is a deny, not a filter.** A request naming an unlisted key is refused outright.
   An ordinary session spawn sends no environment, so the shipped empty policy works — but a user whose
