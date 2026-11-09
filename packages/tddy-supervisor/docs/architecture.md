@@ -169,6 +169,11 @@ cannot set or override it and a session spawn never receives it. The value trave
 there is no `supervisor:` key in `daemon.yaml`. Pinned by `tests/supervisor_service_environment.rs`
 (Linux only).
 
+**A service that declares `serves_users: true`** is also handed one listener per OS user `users.yaml`
+maps, after fd 3 and named `user.<os user>`, and told the mapping's path in `TDDY_USERS_FILE`, set the
+same way after its `env:` overlay. A saved edit to `users.yaml` rebuilds those listeners (unchanged
+users keep theirs) and restarts the service. See [host-sockets.md](host-sockets.md).
+
 `ForkBroker` reserves fd 3 at startup, because `Command::spawn` reports exec failures over a
 `SOCK_SEQPACKET` pair opened just before the fork: had that landed on fd 3, a *failed* exec would have
 looked successful. (In both real deployments fd 3 is already occupied — by tokio's epoll fd when
@@ -317,6 +322,11 @@ config file or directory that is not root-owned, or that is group/world-writable
 (the kernel's own rule: `/tmp` at `1777` is safe, `/etc/tddy` at `0777` is not). Every doc comment in
 the crate rests on "root-owned policy file"; this is what makes that true rather than assumed.
 
+`users.yaml` is a second policy input — it decides which OS users a session may run as — and is
+loaded with the same ownership and mode checks (`users_file.rs`); the hand-kept lists it replaces
+(`spawn_policy.allowed_session_users`, `services[].host_sockets`, `services[].agent_tool_sockets`) are
+refused at load, naming it.
+
 `root` is refused as a service or session user by name at load, and the *resolved* uid/gid is checked
 too — a passwd entry aliased to uid 0 under another name would otherwise pass validation and then skip
 the privilege drop entirely.
@@ -355,7 +365,7 @@ returning `EBUSY`, which a plain directory never does.
 
 ## Related
 
-- Per-OS-user host-session and agent-tool sockets the supervisor creates and hands to the daemon: [host-sockets.md](host-sockets.md)
+- The `users.yaml` mapping, and the one per-OS-user daemon socket the supervisor creates from it and hands to the daemon: [host-sockets.md](host-sockets.md)
 - Product docs: [docs/ft/supervisor/tddy-supervisor.md](../../../docs/ft/supervisor/tddy-supervisor.md)
 - Install: [docs/ft/daemon/systemd-install.md](../../../docs/ft/daemon/systemd-install.md)
 - The no-supervisor deployment: [docs/dev/tddy-daemon.service.example](../../../docs/dev/tddy-daemon.service.example)

@@ -38,6 +38,10 @@ socket:
   group: tddy-clients
   mode: "0660"
 
+users:                             # the GitHub → OS-user mapping and its per-user sockets
+  file: /etc/tddy/users.yaml
+  sockets_dir: /run/tddy-users     # default; <sockets_dir>/<os user>/daemon.sock
+
 services:
   - name: tddy-daemon
     exec_start: /usr/local/bin/tddy-daemon
@@ -47,10 +51,10 @@ services:
       path: /run/tddy-daemon.sock
       group: tddy-clients
       mode: "0660"
+    serves_users: true             # handed TDDY_USERS_FILE and one `user.<os user>` socket per mapped user
     restart: { max_retries: 5, initial_backoff_ms: 500, max_backoff_ms: 30000, stability_threshold_ms: 10000 }
 
 spawn_policy:                      # absent = no privilege granted at all
-  allowed_session_users: [alice, bob]
   allowed_tool_paths: [/usr/local/bin/tddy-coder, /usr/bin/git]
   allowed_relay_tool_paths: []      # harness binaries a coding agent may run as, with relayed stdio; empty = off
   allowed_mount_roots: [/srv/tddy/repos]
@@ -64,12 +68,16 @@ cgroup:                            # absent = nothing is clamped
 Nothing is granted by default. An operator who writes no `spawn_policy` has a supervisor that supervises
 the daemon and refuses every spawn request — which is the correct reading of an absent policy.
 
+The OS users a session may run as are not in `supervisor.yaml` at all: they are the OS users
+**`users.yaml`** maps (see [The user mapping](#the-user-mapping-usersyaml)). `root` is refused whatever
+the mapping says.
+
 ### Relayed spawns (coding agents)
 
-`SpawnRelayed` starts an allowlisted harness binary (`opencode`, `codex-acp`, `claude-agent-acp`) as an allowed session
+`SpawnRelayed` starts an allowlisted harness binary (`opencode`, `codex-acp`, `claude-agent-acp`) as a mapped session
 user with its stdin/stdout relayed over a unix socket the **daemon** listens on — the one request that gives
 a child stdio, because the ACP driver talks to its agent over stdio and an unprivileged daemon cannot become
-another user itself. It passes every gate `SpawnSession` does (peer authorization, `allowed_session_users`,
+another user itself. It passes every gate `SpawnSession` does (peer authorization, an OS user `users.yaml` maps,
 `allowed_env_keys`) **and** its own: `allowed_relay_tool_paths`, **empty by default**, so enabling session
 tools never enables it. The supervisor connects to the daemon's socket only if the path is absolute, is a
 socket (not a symlink to one) owned by the calling uid, and the listener's `SO_PEERCRED` uid is that uid; any
@@ -135,38 +143,82 @@ way spawns and clones through the supervisor; one started any other way (Tddy De
 forks its own spawn worker. `daemon.yaml` has no `supervisor:` key — see
 [systemd install](../daemon/systemd-install.md).
 
-### Per-user sockets handed to the daemon
+### The user mapping (`users.yaml`)
 
-A session running as `alice` must reach the daemon over a socket only `alice` can open, and the
-unprivileged daemon cannot make one for her. So the supervisor creates them as root, from two lists on
-the daemon's service, and hands the listeners over after the daemon's own `socket:`:
+`users.yaml` is the one place a GitHub login is mapped to the OS user its sessions run as:
 
 ```yaml
-services:
-  - name: tddy-daemon
-    agent_tool_sockets:            # required for every session user: hooks, notify, tool calls
-      - {user: alice, path: /run/tddy-agent-tools/alice/agent.sock}
-    host_sockets:                  # optional: GitHub token and conversation spawning for tool sessions
-      - {user: alice, path: /run/tddy-host-sessions/alice/host.sock}
-    # …
+- github_user: "octocat"
+  os_user: "alice"
+- github_user: "hubot"
+  os_user: "bob"
 ```
 
-| Setting | What a session of that user uses it for | A user with no entry |
-|---|---|---|
-| `agent_tool_sockets` | its agent's hook reports (activity status, permission answers), `tddy-tools notify` and the `tddy-tools --mcp` tool server — the daemon's whole RPC roster | **every session start is refused**, naming `agent_tool_sockets` in `supervisor.yaml` — never started with hooks whose reports would be lost silently |
-| `host_sockets` | `github_token` and `spawn_conversation` from a tool session | sessions start; those two calls are refused, naming `host_sockets` |
+On a supervised host the root supervisor reads it, from the path in `supervisor.yaml`'s top-level
+`users: {file, sockets_dir}` block (`./install` writes `file: /etc/tddy/users.yaml`; `sockets_dir`
+defaults to `/run/tddy-users`). It is identity and authorization, not anything specific to a coding
+agent, so it is the supervisor's to own. The supervisor uses only the `os_user` column; the daemon reads
+the GitHub logins.
 
-Each socket is owned by its user, directory `0700` and socket `0600`, so only that user and root can
-connect. The config is refused at load unless each `user` is in `spawn_policy.allowed_session_users`,
-is not `root` and is a plain account name; a user appears once per list; every socket has a directory
-of its own that no other declared socket shares (so a user's two sockets live in two directories); the
-service declares its own `socket:`; and both lists **together** hold at most 15 entries — with both
-kinds for everyone, seven session users fit one daemon. `./install` writes the `agent_tool_sockets:`
-entries from `spawn_policy.allowed_session_users` until the operator writes the block themselves (see
+- **Trust.** The file is checked exactly like `supervisor.yaml`: owned by root, writable by nobody
+  else, in directories nobody else can write. A file another user could write is refused — by the
+  supervisor, and by a supervised daemon reading it.
+- **Shape.** A login mapped to two OS users, a mapping to `root`, and an OS user that is not one plain
+  account name (it must ride in a path segment and a `LISTEN_FDNAMES` entry) are refused.
+- **Cap.** At most **15** distinct OS users: each costs one handed-over descriptor, and descriptor 3 is
+  the daemon's own listener out of 16. A sixteenth fails loading, naming `users.yaml` and the limit.
+- **Required.** A missing `users.yaml` is an error naming it, never an empty mapping. `./install`
+  renders an empty one (`[]`, `0644`).
+
+**Session users come from the mapping.** `SpawnSession`, `SpawnRelayed`, `SpawnSandbox` and
+`CloneRepository` run only as an OS user `users.yaml` names; any other, or `root`, is the opaque denial.
+
+### One socket per user, handed to the daemon
+
+A session running as `alice` must reach the daemon over a socket only `alice` can open, and the
+unprivileged daemon cannot make one for her. So for every OS user `users.yaml` maps, the supervisor
+creates **one** daemon socket as root at `<sockets_dir>/<os user>/daemon.sock` — directory `0700` and
+socket `0600`, both owned by that user, every directory above it writable by root alone — and hands the
+listeners to the service that declares **`serves_users: true`**, after its own `socket:` (fd 3). They are
+announced in `LISTEN_FDNAMES` as `user.<os user>` (`connection:user.alice:user.bob`), and the service is
+told the mapping's path in **`TDDY_USERS_FILE`**, set after its `env:` overlay so `supervisor.yaml`
+cannot forge it. No path is handed separately: the daemon reads each socket's path from its listener.
+`serves_users` needs the service's own `socket:` and the top-level `users:` block.
+
+The daemon serves everything a session of that user needs on that one socket: its agent's hook reports
+(activity status, permission answers), `tddy-tools notify`, the `tddy-tools --mcp` tool server (the
+daemon's whole RPC roster), and the host-session services (`github_token`, `spawn_conversation`). A
+supervised daemon derives and binds no socket path of its own; a session for an OS user it was handed
+no socket for is **refused at start**, naming `users.yaml` — never started with hooks whose reports
+would be lost silently.
+
+A daemon that is not supervised (`./web-dev`, `--user`, Tddy Desktop) reads `users.yaml` beside its own
+config and binds each user's socket itself, at `<data dir>/run/<os user>/daemon.sock`.
+
+### A saved edit restarts the daemon
+
+The supervisor watches `users.yaml` (on its directory, so an editor's write-then-rename is seen). Each
+change is re-read with the same trust and shape checks as at start-up:
+
+- **Valid:** the per-user listeners are rebuilt — a user both mappings name keeps the very descriptor
+  they had, a user no longer mapped loses theirs, a new user gets one — and then every `serves_users`
+  service is restarted with the rebuilt handover. A client blocked in `connect` on an unchanged user's
+  socket queues in the kernel across the restart and is served afterwards.
+- **Invalid:** the edit is refused and logged, and the running daemon keeps the mapping in force. A
+  typo never takes every user's socket away.
+
+Changes are applied one at a time, in the order they were saved. A restart stops the service with
+`SIGTERM`, then `SIGKILL`, waiting at most 10 s after each; a service that survives both is reported as
+not restarted rather than left silently on the old mapping. **A restart drops every live relayed agent
+and the daemon's in-memory state** (open vaults, room connections, inference subscriptions); sessions
+survive on disk and resume. The watch refuses to start if the path of `users.yaml` cannot be resolved.
+
+### Old keys are load errors
+
+`spawn_policy.allowed_session_users`, `services[].host_sockets` and `services[].agent_tool_sockets` are
+refused when `supervisor.yaml` loads, with an error naming `users.yaml` and the key to delete — as is a
+`users:` key in `daemon.yaml`. `./install` migrates an existing install once (see
 [systemd install](../daemon/systemd-install.md#behavior-notes)).
-
-A daemon that is not supervised (`./web-dev`, `--user`, Tddy Desktop) binds its own agent-tool socket
-and needs neither list.
 
 ## `--user` installs no supervisor
 
@@ -216,10 +268,15 @@ slow clone. Neither deadline is configurable.
 - [x] Stopping a supervised clone (`StopSession(pid)`) ends git and leaves no destination directory.
 - [x] A supervisor that accepts a call and never answers fails it `Unavailable` naming the method within the call deadline — every unary call, not only `SpawnRelayed`.
 - [x] A supervised clone with no first event, or one that goes quiet after starting, fails `Unavailable` within its progress deadline.
-- [x] A daemon service's `agent_tool_sockets:` are created at startup and handed over after the host sockets, named `agent-tools.<user>`.
-- [x] `agent_tool_sockets:` is refused for a user outside `allowed_session_users`, for `root`, twice for one user, in a directory another socket uses, on a service with no `socket:`, and beyond 15 sockets of both kinds together.
-- [x] Under the supervisor, a session for a user with no `agent_tool_sockets:` entry is refused at start, naming the setting.
-- [ ] **Not yet proven on a real host:** a session for OS user `alice` running as `alice` while the daemon runs as `tddy`; enforced cgroup limits; `stop_session` against a live supervisor; a second account refused a `connect` to another user's agent-tool socket. These need root plus a second account, and are the subject of a planned VM-backed acceptance test — see [docs/dev/TODO.md](../../dev/TODO.md).
+- [x] A `serves_users` service is handed one socket per OS user `users.yaml` maps, at `<sockets_dir>/<user>/daemon.sock`, named `user.<user>`, plus the mapping's path in `TDDY_USERS_FILE`; one socket serves both the host-session services and the agent-tool roster.
+- [x] The daemon learns the `users.yaml` path and every socket from the supervisor (each socket's path from its listener) and derives none itself.
+- [x] A session can run as a mapped OS user; an unmapped one, or `root`, is refused.
+- [x] Fifteen mapped OS users fit; a sixteenth fails loading, naming `users.yaml` and the limit.
+- [x] A saved edit to `users.yaml` rebuilds the sockets — an unchanged user keeps their descriptor — and restarts the daemon; an invalid edit is refused and the running mapping kept.
+- [x] A `users.yaml` that a non-root user could write is refused, by the supervisor and by a supervised daemon.
+- [x] `allowed_session_users`, `host_sockets` and `agent_tool_sockets` in `supervisor.yaml` fail loading with an error naming `users.yaml`.
+- [x] Under the supervisor, a session for a user it handed the daemon no socket for is refused at start, naming `users.yaml`.
+- [ ] **Not yet proven on a real host:** a session for OS user `alice` running as `alice` while the daemon runs as `tddy`; enforced cgroup limits; `stop_session` against a live supervisor; a second account refused a `connect` to another user's daemon socket. These need root plus a second account, and are the subject of a planned VM-backed acceptance test — see [docs/dev/TODO.md](../../dev/TODO.md).
 
 ## Related
 

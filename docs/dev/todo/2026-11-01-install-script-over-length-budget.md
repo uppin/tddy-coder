@@ -11,6 +11,16 @@ honest measurement, not the gate's output.
 hand-splitting a root bash script mid-PR would delay review of an otherwise-small change. Recorded
 per the file-length gate's deferral contract.
 
+**Measurement history:**
+
+| Date | PR | Lines (`wc -l`) | Non-blank, non-comment | Note |
+|---|---|---|---|---|
+| 2026-11-01 | #803 | — | 1,408 → 1,503 (production lines) | detection |
+| 2026-11-09 | #859 (`#agent-tools` 31/32) | 1,700 → 1,600 | 1,053 → 977 | `survey_agent_tool_sockets` and `declare_agent_tool_sockets` (~190 lines) deleted; the one-time `migrate_user_mapping` and the desktop `users.yaml` render added. Still ~2× over budget; the account/identity split below is untouched |
+
+**Status:** Open — narrowed by #859 (the agent-tool-socket survey is gone); the account/identity
+handling and the desktop section are still in the one script.
+
 **What would close it:** `install` under 500 production lines. The natural seams, both already
 self-contained regions: (1) the account/identity handling (`read_daemon_service_key`, the
 derivation block, the useradd/usermod/chown branch — the part PR #803 grew), sourced as a helper

@@ -60,10 +60,10 @@ value (a non-JSON inline config is refused). A route carrying files is refused, 
 (`claude-acp`) travels as `session/new` `_meta` (`session_meta_for`, set by `tddy-session-agents`). `mcp_servers_for`
 returns `tddy-tools --mcp` with the environment `tddy_session_split::coding_agent_wiring`'s
 `CodingAgentToolHost::tool_server` builds: the colocated jail's `TDDY_REMOTE_*` variables, with
-`TDDY_REMOTE_DAEMON_SOCKET` naming the session OS user's agent-tool socket
+`TDDY_REMOTE_DAEMON_SOCKET` naming the session OS user's daemon socket
 (`DaemonLauncherDeps.agent_tool_sockets`), and a session token minted for the agent. A user the daemon
-cannot give an agent-tool socket — under `tddy-supervisor`, one not listed under `agent_tool_sockets:`
-— is refused, naming the setting. A daemon that signs no tokens refuses. An unmanaged launch has no MCP
+cannot give a socket — under `tddy-supervisor`, one `users.yaml` does not map — is refused, naming
+`users.yaml`. A daemon that signs no tokens refuses. An unmanaged launch has no MCP
 servers.
 
 ## Becoming the session's user
@@ -90,7 +90,7 @@ The login runs as the daemon's user and writes its authorize URL into the worktr
    harness resolved to an absolute path, waits up to 15 s for the supervisor to connect, and returns
    the stream (`AgentTransport::Stream`), which the ACP driver serves with `AcpDriver::spawn_over`.
    The socket file is removed once connected. The supervisor's opaque denial becomes an error naming
-   the three settings an operator can change: `allowed_relay_tool_paths`, `allowed_session_users`,
+   the three things an operator can change: `allowed_relay_tool_paths`, the user in `users.yaml`,
    `allowed_env_keys`. Closing the stream stops the agent.
 4. **Anything else** — refused, naming the user.
 

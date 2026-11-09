@@ -83,12 +83,12 @@ Where the reports go:
 
 | Launch | `--daemon-socket` | Path to the daemon |
 |---|---|---|
-| Host | the agent-tool socket of the session's OS user: Tddy Desktop's one socket, or on a server daemon `<data dir>/run-agent-tools/<user>/agent.sock` (owner-only; handed over by `tddy-supervisor` when it runs the daemon) | the socket itself |
+| Host | the agent-tool socket of the session's OS user: Tddy Desktop's one socket, or on a server daemon `<data dir>/run/<user>/daemon.sock` (owner-only; under `tddy-supervisor` the one it handed over, `/run/tddy-users/<user>/daemon.sock`) | the socket itself |
 | Jail | the in-jail tool-IPC socket | `tddy-sandbox-runner` relays the two reports (`IN_JAIL_RELAYABLE_HOOK_REPORTS`) to the facilitating daemon as host RPCs. The bridge serves them for the jail's own session only, and refuses any other session id |
 
 A hooks file is never rendered without a socket: the adapter refuses (`SlotError::NoDaemonSocket`) rather than falling back to `daemon_url`.
 
-**Server daemons** serve one agent-tool socket per OS user, so a host session's reports reach the daemon whichever user it runs as, and no other user can connect to it. Under `tddy-supervisor` a session user needs an `agent_tool_sockets:` entry in `supervisor.yaml`; without one the start is refused, naming that setting, rather than started with hooks that report nowhere — see [tddy-supervisor § Per-user sockets](../supervisor/tddy-supervisor.md#per-user-sockets-handed-to-the-daemon).
+**Server daemons** serve one daemon socket per OS user, so a host session's reports reach the daemon whichever user it runs as, and no other user can connect to it. Under `tddy-supervisor` a session user must be mapped in `users.yaml`; an unmapped one has the start refused, naming `users.yaml`, rather than started with hooks that report nowhere — see [tddy-supervisor § One socket per user](../supervisor/tddy-supervisor.md#one-socket-per-user-handed-to-the-daemon).
 
 | Cursor hook event | `activity_status` |
 |---|---|

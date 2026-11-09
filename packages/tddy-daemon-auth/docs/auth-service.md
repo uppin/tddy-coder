@@ -187,10 +187,11 @@ not start; both checkout dev configs keep vaults and pass the check.
 
 ## First-login enrolment
 
-A server's `users:` is written by whoever installs it. A login GitHub vouches for is minted a
+The GitHub → OS-user mapping is `users.yaml`. A server's is written by whoever installs it — under
+`tddy-supervisor`, by its operator, and never by the daemon. A login GitHub vouches for is minted a
 session whether or not it is mapped, and each token-gated RPC refuses an unmapped caller
-`permission_denied: user not mapped to OS user`. A desktop install has nobody to write `users:`, so
-its **first** login from its own window is written down as it completes.
+`permission_denied: user not mapped to OS user`. A desktop install has nobody to write `users.yaml`,
+so its **first** login from its own window is written down as it completes.
 
 `FirstLoginEnrolment::new(users, config_path, os_user)` implements `tddy_github::LoginAdmission`,
 which `AuthServiceImpl` asks before it retains or mints anything:
@@ -208,9 +209,10 @@ order:
 |---|---|
 | `github_login` is already mapped | admitted |
 | unmapped, and `transport` is anything but `InProcess` | admitted **unmapped**, nothing written; logged. Its RPCs are refused `permission_denied` |
-| unmapped, `InProcess`, and `users:` is empty | **enrolled**: the row `github_login → os_user` is persisted to `config_path`, then applied to the shared `LiveUsers`, then the session is minted |
-| unmapped, `InProcess`, and `users:` already names somebody (`EnrolmentRefusal::AlreadyEnrolled`) | admitted **unmapped**, nothing written; logged. A second account is not added by signing in |
-| the config file cannot be rewritten (`EnrolmentRefusal::ConfigNotWritable`) | refused `failed_precondition`, naming the reason. Nobody is mapped, so the login does not appear to work and then vanish on restart |
+| unmapped, `InProcess`, and the mapping is empty | **enrolled**: the row `github_login → os_user` is persisted to the `users.yaml` beside `config_path` (`daemon.yaml` is left unchanged), then applied to the shared `LiveUsers`, then the session is minted |
+| unmapped, `InProcess`, and `users.yaml` already names somebody (`EnrolmentRefusal::AlreadyEnrolled`) | admitted **unmapped**, nothing written; logged. A second account is not added by signing in |
+| `users.yaml` cannot be read or rewritten, including one that has gone (`EnrolmentRefusal::ConfigNotWritable`) | refused `failed_precondition`, naming the reason. Nobody is mapped, so the login does not appear to work and then vanish on restart |
+| the mapping is `tddy-supervisor`'s (`EnrolmentRefusal::OwnedBySupervisor`) | refused `failed_precondition`, saying to map the user in `users.yaml` and restart the daemon; logged. A supervised daemon is never built with an admission, so this is a guard, not a path |
 
 **Only `InProcess` enrols.** `is_this_desktops_window` is an **exhaustive** match with no wildcard
 arm: `InProcess => true`, and `LiveKit`, `UnixSocket`, `Pipe`, `Http`, `Grpc` and `Direct` all
@@ -226,8 +228,8 @@ mapped to the OS user the process runs as — see
 [daemon-endpoint.md](../../tddy-daemon/docs/daemon-endpoint.md#first-login-admission). A server
 never has an admission, and `build_auth_entries_with` is `build_auth_entries_admitting(.., None)`.
 
-The persistence — the file write, the in-memory row every service sees, and the lock that serialises
-it against `UpdateConfig` — is `tddy-daemon-kernel`'s
+The persistence — the `users.yaml` write, the in-memory row every service sees, and the lock that
+serialises it against `UpdateConfig`'s rewrite of `daemon.yaml` — is `tddy-daemon-kernel`'s
 ([daemon-kernel.md](../../tddy-daemon-kernel/docs/daemon-kernel.md#users-the-live-holder-and-first-login-enrolment)).
 `os_user_for_github` is unchanged by all of it: an unmapped login is still `None`, with no default
 arm.
@@ -375,7 +377,7 @@ cargo test -p tddy-daemon-auth
 |---|---|
 | `tests/auth_service_acceptance.rs` | `GetAuthUrl`, `ExchangeCode`, `GetAuthStatus`, `RefreshSession` and `Logout` answering from this crate, plus a refusal of a token signed by a key this daemon does not know |
 | `tests/device_login_acceptance.rs` | a daemon holding only a public `client_id` registering `auth.AuthService`, refusing `GetAuthUrl` `failed_precondition` and declaring the `device` flow; a stub daemon declaring `redirect`; a started device login handing out the stub's code, verification URI, expiry and interval; an approved login yielding the session `ExchangeCode` would have, whose token then authenticates `GetAuthStatus` |
-| `first_login_admission.rs` (inline) | every non-`InProcess` transport admitting an unmapped first login and leaving the file byte-identical; `InProcess` enrolling, in memory and on reload; a config file that has gone refused `failed_precondition` with nobody mapped |
+| `first_login_admission.rs` (inline) | every non-`InProcess` transport admitting an unmapped first login and leaving `users.yaml` byte-identical; `InProcess` enrolling into `users.yaml`, in memory and on reload; a deployment whose files have gone refused `failed_precondition` with nobody mapped |
 | `tests/token_service_acceptance.rs` | `MintLiveKitToken` and `token.TokenService` minting room JWTs against `config.livekit.api_secret` (its only job), each verified with `livekit_api::access_token::TokenVerifier` — and a server holding a *different* secret refusing the same JWT, without which the positive cases assert nothing |
 | `tests/cross_crate_session_token_acceptance.rs` | a token signed here authenticating a call to a service in another crate. The far side is `tddy-service` deliberately: this crate cannot reach the daemon's own services, which is exactly the property below |
 | `tests/per_daemon_signing_identity_acceptance.rs` | daemon A's token verifying on daemon B once B's directory holds A's key — B's directory is asked for exactly A's key id — and an unseen key id refused with no fallback |

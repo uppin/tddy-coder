@@ -136,24 +136,46 @@ Telegram's own and the daemon's wiring names a Telegram crate — is the ratchet
 
 ## Users, the live holder and first-login enrolment
 
-### `LiveUsers` — `users:` held once per running daemon
+### `users_file` — where the mapping is read from
+
+The GitHub → OS-user mapping lives in **`users.yaml`**, never in `daemon.yaml`
+(`src/users_file.rs`). `DaemonConfig::load` refuses a `users:` key on disk before typed parsing
+(`refuse_users_key` in `config/daemon_methods.rs`), with an error naming `users.yaml`, the way it
+refuses `supervisor:`; then it fills `DaemonConfig.users` from the file:
+
+| `UsersFileSource` | When | The file | Enrolment |
+|---|---|---|---|
+| `HandedBySupervisor(path)` | `TDDY_USERS_FILE` (`USERS_FILE_ENV`) is set — `tddy-supervisor` names it at exec | that path; refused unless root-owned and closed to group and others | refused (`LiveUsers::owned_by_supervisor`) |
+| `BesideConfig(path)` | otherwise (desktop, `--user`, dev) | `users.yaml` (`USERS_FILE_NAME`) beside the daemon's config | the first login writes it |
+
+`UsersFileSource::resolve(config_path, handed)` decides; `from_environment` reads this process's
+environment; `load_users_file(source)` reads the rows — an empty file maps nobody, a mapping to `root`
+and a login mapped to two OS users are refused. **A missing file is an error naming it, never an empty
+mapping**: every installer and dev script renders one, so a daemon that finds none was not set up the
+way this system renders it. `USERS_FILE_ENV`'s spelling is pinned against the supervisor's
+(`tddy_supervisor::spawn_broker::USERS_FILE_ENV`) by `tddy-session-lifecycle`'s
+`the_supervisor_and_the_daemon_share_one_user_socket_prefix`.
+
+### `LiveUsers` — the rows held once per running daemon
 
 `DaemonConfig.users` is a `LiveUsers` (`src/live_users.rs`), not a `Vec<UserMapping>`. It is a
-cheap-to-clone handle on one `Arc`'d set of rows, so **cloning a `DaemonConfig` shares `users:`
-rather than copying it**. The daemon hands each of its services a clone of one loaded config, and
+cheap-to-clone handle on one `Arc`'d set of rows, so **cloning a `DaemonConfig` shares the rows
+rather than copying them**. The daemon hands each of its services a clone of one loaded config, and
 every one of them therefore reads the same rows: a row enrolled through any of them is seen by all of
 them at once, with no restart.
 
-It serialises and deserialises as the plain list it always was (`users:` in YAML, omitted when
-empty), so no config file changes shape.
+The field stays deserializable, so an in-memory config built from a YAML literal in a test can still
+carry `users:`; it is **never serialised** (`skip_serializing`), so no rewrite of `daemon.yaml` ever
+writes the mapping into it. Only `DaemonConfig::load` refuses the key on disk.
 
 | Method | What it does |
 |---|---|
 | `os_user_for_github(login) -> Option<String>` | the mapped OS user, or `None`. **No default arm** |
 | `mapping_for_os_user(os_user)` | the row for the local peer-trust path that starts from a uid |
 | `first_github_user()`, `is_empty()` | whether, and to whom, the deployment is enrolled |
-| `enrol_first_login(config_path, github_user, os_user)` | the one mutation — below |
-| `while_rewriting_config_file(rewrite)` | runs another rewrite of the config file under the same lock as enrolment |
+| `owned_by_supervisor(rows)`, `is_owned_by_supervisor()` | a holder over rows `tddy-supervisor` owns: lookups as usual, enrolment refused `OwnedBySupervisor` |
+| `enrol_first_login(config_path, github_user, os_user)` | the one mutation, into the `users.yaml` beside `config_path` — below |
+| `while_rewriting_config_file(rewrite)` | runs a rewrite of the daemon's config file under the same lock as enrolment |
 
 `DaemonConfig::os_user_for_github` delegates to it. Its **behaviour is unchanged** — a linear
 search, `None` for an unmapped login, no default arm — and it returns `Option<String>` because a
@@ -161,38 +183,42 @@ borrow cannot escape the rows' lock.
 
 ⚠ **A sharp edge, documented rather than removed.** Because clones share the rows, code that clones
 a `DaemonConfig` to build a *different* configuration — a test fixture, a variant for a second
-daemon — shares `users:` with the original, and an enrolment through either is seen by both. Build
+daemon — shares the rows with the original, and an enrolment through either is seen by both. Build
 an independent holder (`LiveUsers::new(rows)`) where independence is meant.
 
 Two locks, deliberately separate: `rows` (an `RwLock`) for lookups, and `file_writes` (a `Mutex`)
-held across every rewrite of the config file. A lookup never waits on file I/O. The two writers of
-that file — enrolment and `DaemonConfigService`'s `UpdateConfig`, which re-serialises the whole
-config, `users:` included — both take `file_writes`, so an update that read the rows before an
-enrolment and wrote after it cannot persist the file without the enrolled row.
+held across every write. A lookup never waits on file I/O. `DaemonConfigService`'s `UpdateConfig`
+rewrites `daemon.yaml` under `file_writes` and enrolment writes `users.yaml` under it, so the two
+writers never interleave. `UpdateConfig` writes no `users.yaml`: its wire message carries no mapping,
+so enrolment is that file's one writer.
 
 ### `enrol_first_login` — the one-time write
 
-A desktop install has nobody to write `users:`. Its first login, from its own window, is written
+A desktop install has nobody to write `users.yaml`. Its first login, from its own window, is written
 down instead (`tddy-daemon-auth`'s `FirstLoginEnrolment` decides *when* —
 [auth-service.md](../../tddy-daemon-auth/docs/auth-service.md#first-login-enrolment)). The kernel
 owns *how*:
 
-- **`LiveUsers::enrol_first_login`** takes `file_writes`, re-checks that no row exists inside it,
-  writes the file, and only then pushes the row into memory. Of two first logins racing, exactly one
-  is enrolled and the other is refused `AlreadyEnrolled`. When the write fails nothing is applied,
-  so a daemon never admits a login it could not record.
-- **`first_login_enrolment::enrol_first_login`** is the file half. It re-reads the config from disk
-  (the file, not the caller's snapshot, decides whether somebody is already enrolled), then edits the
-  document as a `serde_yaml::Value`, inserting only `users:` so every other key stays as the operator
-  wrote it, and writes it back atomically (`write_atomic_labelled`) — a half-written config is a
-  daemon that will not start.
+- **`LiveUsers::enrol_first_login`** refuses `OwnedBySupervisor` on a supervised holder, derives the
+  `users.yaml` beside the daemon's config (a config path with no parent directory is a
+  `ConfigNotWritable` refusal, never a guess relative to the working directory), takes `file_writes`,
+  re-checks that no row exists inside it, writes the file, and only then pushes the row into memory.
+  Of two first logins racing, exactly one is enrolled and the other is refused `AlreadyEnrolled`.
+  When the write fails nothing is applied, so a daemon never admits a login it could not record.
+- **`first_login_enrolment::enrol_first_login(users_path, …)`** is the file half. It re-reads
+  `users.yaml` from disk (the file, not the caller's snapshot, decides whether somebody is already
+  enrolled) and writes the one row back atomically (`write_atomic_labelled`) — a half-written mapping is
+  a daemon that will not start. **A missing `users.yaml` is refused `ConfigNotWritable`**, never read
+  as an empty mapping: the daemon loaded it at start, so a file that has gone is not one to resurrect.
+  `daemon.yaml` is left byte-for-byte unchanged.
 
 `EnrolmentRefusal`:
 
 | Variant | When |
 |---|---|
-| `AlreadyEnrolled { github_user }` | `users:` already names somebody. Enrolment is once per deployment; a second account is added deliberately, never by signing in |
-| `ConfigNotWritable { reason }` | the file cannot be read, parsed as a mapping, or rewritten — read-only, owned by another account, or gone |
+| `AlreadyEnrolled { github_user }` | `users.yaml` already names somebody. Enrolment is once per deployment; a second account is added deliberately, never by signing in |
+| `ConfigNotWritable { reason }` | `users.yaml` cannot be read (including missing), parsed, or rewritten — read-only, owned by another account, or gone |
+| `OwnedBySupervisor` | the mapping is `tddy-supervisor`'s; a login is mapped by its operator editing `users.yaml` |
 
 **Enrolment is not a fallback for the lookup, and must not become one.** A default arm in
 `os_user_for_github` would answer "no mapping" every time, for every GitHub account on earth.
@@ -202,17 +228,19 @@ second account deliberately is `#keyring` 8/9 ([#515](https://github.com/uppin/t
 
 **Known limits.**
 
-- **Comments are lost.** Serialising the `Value` back strips every YAML comment, so on a desktop's
-  first sign-in the explanatory header `./install --desktop` rendered is gone from
-  `~/.tddy/desktop.yaml`. `UpdateConfig` has the same loss. Both need one comment-aware YAML editor,
-  tracked in the backlog (`docs/dev/todo/2026-09-05-from-2026-09-05-tauri-desktop-single-process-daemon.md`),
-  with a `TODO` at the write.
+- **`UpdateConfig` loses comments.** It re-serialises `daemon.yaml`, so an operator's YAML comments
+  do not survive a save; it needs a comment-aware YAML editor, tracked in the backlog
+  (`docs/dev/todo/2026-09-05-from-2026-09-05-tauri-desktop-single-process-daemon.md`). Enrolment
+  rewrites only `users.yaml`, whose one row it writes whole.
 - The free function `first_login_enrolment::enrol_first_login` is public and does **not** take
   `LiveUsers`' file lock. Its only production caller is `LiveUsers::enrol_first_login`; call that.
 - The file write is synchronous, on whatever task calls it. It happens once per deployment.
 
-`tests/first_login_enrolment_acceptance.rs` pins the first login written down, a second account
-refused, the rest of the config kept, and an unmapped login still resolving to nobody.
+`tests/first_login_enrolment_acceptance.rs` pins the first login written to `users.yaml` with
+`daemon.yaml` byte-identical, a second account refused, and an unmapped login still resolving to
+nobody; `src/users_file.rs` pins both sources, the root-owned check and the missing file;
+`src/config.rs` pins a `users:` key refused and the mapping never serialised; `src/live_users.rs` pins
+a supervised holder refusing to enrol and a missing `users.yaml` refused with nothing written.
 
 ## `pending_login_ttl`, `open_vault_idle_ttl` — two settings read here and meant elsewhere
 
@@ -430,43 +458,49 @@ test-owned pipe, record encoding). `tddy-spawn/tests/pre_exec_safety.rs` scans t
 
 ## Per-OS-user sockets (`owner_socket`, `agent_tool_sockets`)
 
-Two per-OS-user sockets exist — the **host-session** socket (`tddy-agent-launch`'s `HostSessionSockets`)
-and the **agent-tool** socket (`AgentToolSockets`, here). Both are bound owner-only for one user, or
-adopted from `tddy-supervisor`, by the same code. It lives in this crate because the agent-tool
-socket's consumers (`tddy-agent-launch`, `tddy-session-split`) sit below `tddy-daemon` and cannot name
-anything in it, and `tddy-session-split` is itself a dependency of `tddy-agent-launch`. The supervisor
-side is [tddy-supervisor's host-sockets.md](../../tddy-supervisor/docs/host-sockets.md).
+A server daemon serves **one** socket per OS user — the **user daemon socket** — on which a session of
+that user reaches the daemon's whole RPC roster and the host-session service (`tddy-agent-launch`'s
+`HostSessionSockets` registers itself there as a `UserScopedService`). It is bound owner-only for one
+user, or adopted from `tddy-supervisor`. It lives in this crate because its consumers
+(`tddy-agent-launch`, `tddy-session-split`) sit below `tddy-daemon` and cannot name anything in it, and
+`tddy-session-split` is itself a dependency of `tddy-agent-launch`. The supervisor side is
+[tddy-supervisor's host-sockets.md](../../tddy-supervisor/docs/host-sockets.md).
 
 ### `owner_socket` — bind owner-only, adopt what the supervisor made
 
 | Item | What it does |
 |---|---|
-| `OwnerSocketKind { setting, noun }` | which kind a refusal is about: `HOST_SESSION` (`host_sockets`, "host-session socket") or `AGENT_TOOL` (`agent_tool_sockets`, "agent-tool socket") |
-| `bind_owner_only(path, os_user, kind)` | `<data dir>/<run dir>/<user>/<file>`: the run dir `0711`, the user's dir narrowed to `0700` **before** the socket exists in it, the socket `0600`, then `chown` of socket and directory to the user. A daemon not privileged to `chown` to another uid **refuses** — naming `kind.setting` in `supervisor.yaml` — and `undo` removes what it created; nothing is ever served wider than the user's own access |
+| `OwnerSocketKind { setting, noun }` | which kind a refusal is about: `USER_DAEMON` (`users.yaml`, the user's daemon socket) or `HOST_SESSION` (`host_sockets`, the embedded host's host-session socket) |
+| `bind_owner_only(path, os_user, kind)` | `<data dir>/run/<user>/<file>`: the run dir `0711`, the user's dir narrowed to `0700` **before** the socket exists in it, the socket `0600`, then `chown` of socket and directory to the user. A daemon not privileged to `chown` to another uid **refuses** — naming `kind.setting` — and `undo` removes what it created; nothing is ever served wider than the user's own access |
 | `ensure_dir`, `clear_stale_socket`, `chown`, `undo` | its steps. A stale file is replaced only if it is a socket owned by the daemon or the user and nothing listens on it |
-| `descriptors_named(prefix, pid, LISTEN_PID, LISTEN_FDS, LISTEN_FDNAMES)` | `(user, fd)` for each descriptor named `<prefix><user>`, from fd 3; nothing unless `LISTEN_PID` is this process and the names count exactly `LISTEN_FDS` (at most 16) |
+| `descriptors_named(prefix, pid, LISTEN_PID, LISTEN_FDS, LISTEN_FDNAMES)` | `(user, fd)` for each descriptor named `<prefix><user>`, from fd 3; nothing unless `LISTEN_PID` is this process and the names count exactly `LISTEN_FDS` (at most 16) — a descriptor adopted for the wrong user would serve one user's sessions on another's socket |
 | `adopt_descriptor(user, fd, kind)`, `vet`, `require_listening` | adopt an inherited descriptor only if it is an open, listening (Linux) unix socket bound to a path whose file is a socket owned by that user with no group or other bits; anything else is closed |
 
-### `agent_tool_sockets` — where a session's hooks, notifications and tool calls go
+### `agent_tool_sockets` — the user daemon socket
 
 `AgentToolSockets::new(AgentToolSocketPlacement)`:
 
 - **`Embedded`** (Tddy Desktop) — one socket for the daemon, at `agent_tool_socket_path(data_dir)`
   (`agent_tool_socket.rs`), bound and served by the runtime. `ensure_bound` returns it after a live
   `connect`; a session started before the runtime serves it is refused rather than pointed at nothing.
-- **`PerOsUser`** (the `tddy-daemon` binary) — `<data dir>/run-agent-tools/<user>/agent.sock`
-  (`agent_tool_socket_path_for_user`; its own directory because the supervisor hands `run/<user>/` to
-  the host-session socket alone). The user name must be one plain path segment and the path at most
+- **`PerOsUser`** (the `tddy-daemon` binary, unsupervised) — `<data dir>/run/<user>/daemon.sock`
+  (`user_socket_path_for_user`), bound lazily on the user's first session through
+  `bind_owner_only(…, USER_DAEMON)`. The user name must be one plain path segment and the path at most
   **103 bytes** (macOS `sun_path` is 104 including the NUL, Linux's 108; a macOS temporary directory
-  alone spends ~65), else a refusal. A socket the supervisor handed over (`adopt_inherited`, filled from
-  `adopt_from_environment` → `agent_tool_fds`, prefix `AGENT_TOOLS_FD_NAME_PREFIX` = `agent-tools.`) is
-  served where it is. Otherwise the socket is bound lazily, on the user's first session, through
-  `bind_owner_only(…, AGENT_TOOL)` — so under the supervisor, where the daemon cannot `chown`, an
-  unlisted user's start is refused naming `agent_tool_sockets`.
+  alone spends ~65), else a refusal.
+- **`Supervised`** (the binary with `TDDY_USERS_FILE` set, chosen in `runtime/build_context.rs`) — only
+  the sockets `tddy-supervisor` handed over. The daemon derives and binds no path of its own; a user it
+  was handed none for is refused, naming `users.yaml`, and one whose handed socket is gone is refused
+  saying to map the user and restart the supervisor.
+
+The handed-over sockets are read by `adopt_user_sockets_from_environment` → `user_socket_fds`
+(prefix `USER_SOCKET_FD_NAME_PREFIX` = `user.`) → `adopt_user_descriptors`, before the daemon's own
+listener adoption clears `LISTEN_*`, and passed to `adopt_inherited`; each is served where it is.
 
 | Method | What it does |
 |---|---|
 | `install_roster(entries)` | the daemon's finished RPC roster, read at every `accept`: a socket bound before the roster exists serves it once it does. Each connection gets its own `StdioEndpoint` (`RequestTransport::UnixSocket`) over a `MultiRpcService` |
+| `install_user_scoped_service(service)` | a `UserScopedService` served beside the roster on every user's socket, made per socket for that user (`entry_for(os_user)`) — the host-session service |
 | `ensure_bound(user, data_dir)` / `ensure_bound_blocking` | the socket path, binding or adopting and serving it first. A server whose file was removed or replaced (`(dev, ino)` changed) is dropped and the socket bound again; an inherited one that is gone is refused — only restarting the supervisor recreates it |
 | `stop_serving()` | stops every server and removes the files **this daemon bound** (still the same `(dev, ino)`); a socket the supervisor made is left for the supervisor, which hands it to the next daemon. Called last in `DaemonSessionHost::shut_down_children`, after the CLI sessions and workspace jails stop, so an agent still reporting while they stop is answered |
 
@@ -477,10 +511,12 @@ run inside a tokio runtime, which serves the socket — hence `tddy-stdio` as a 
 crate.
 
 Tests: `src/agent_tool_sockets_tests.rs` (owner-only path and modes, the roster served, one socket per
-user, inherited adoption, descriptor parsing, path refusals, both placements,
-`an_unlisted_user_under_the_supervisor_is_refused_naming_the_setting`,
+user, inherited adoption, descriptor parsing, path refusals, every placement,
+`an_unsupervised_daemon_derives_one_socket_per_user_under_its_run_dir`,
+`reads_each_user_socket_among_the_handed_over_ones`,
+`a_supervised_daemon_derives_no_socket_path_of_its_own`,
 `stopping_leaves_a_socket_the_supervisor_made_where_it_is`). The supervisor's prefix is pinned against
-this one by `tddy-session-lifecycle`'s `reads_the_same_agent_tool_descriptor_names_the_supervisor_writes`.
+this one by `tddy-session-lifecycle`'s `the_supervisor_and_the_daemon_share_one_user_socket_prefix`.
 
 ## See also
 
