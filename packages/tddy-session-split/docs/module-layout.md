@@ -58,3 +58,11 @@ differently. The "trim, and treat empty as unset" conversion is `tddy_daemon_ker
 `tddy-session-activity`, `tddy-daemon-kernel`, `tddy-daemon-livekit` and `tddy-daemon-sandbox` among the
 receivers. It does not depend on `tddy-agent-launch` (that crate depends on it) or on
 `tddy-session-lifecycle`.
+
+## The split agent's environment
+
+`svc_spawn_split_agent::split_agent_pty` holds `spawn_split_agent_pty` and `SplitAgentPty`: the split
+agent's PTY starts from the registry's computed agent env (`AgentEnvBase::agent_env` over the spec's
+`pass_env`), spawned on `PtyEnvBase::Cleared`, so no daemon variable outside the base set, the spec's
+`pass_env` and what the launch sets reaches the agent. Test:
+`split_agent_pty_tests.rs::the_split_agents_pty_sees_no_unlisted_daemon_variable`.

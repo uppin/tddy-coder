@@ -63,7 +63,9 @@ never the jail's environment map or argv. The binary is resolved to an absolute 
 
 A non-blank first prompt is delivered through the spec's argv, and a blank model is not refused (the
 Meta account is required by `muse.yaml`'s `route.required_in_jail`). The agent process sees no
-`TDDY_*` variable; the daemon's additions go only to the `tddy-tools --mcp` server's environment. A
+`TDDY_*` variable; the daemon's additions go only to the `tddy-tools --mcp` server's environment.
+It starts from an allow-listed environment and its spec passes no provider key through
+([Harness profiles § The agent's environment](harness-profiles.md#the-agents-environment)). A
 resume relaunches the jail with `--resume` (`muse --continue`) on
 the account the start recorded, re-resolved from the owner's vault. It never resumes on the host's
 PTY.

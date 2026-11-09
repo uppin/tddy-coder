@@ -521,10 +521,19 @@ environment the `claude-cli` launch produces:
 - **ssh checkout.** On an ssh checkout the slot files are written on the target over ssh (bounded by
   the 60 s slot-write deadline; a target that never answers refuses the start `DEADLINE_EXCEEDED`
   naming the host), never at that path on this host.
-- **No `TDDY_*` variable.** The agent process sees no `TDDY_*` variable: a host PTY runs under
-  `env -u` for each the daemon holds, and a tmux pane unsets every one it inherited from the tmux
-  server before it execs the agent. A managed workflow's or a main's `TDDY_*` pair is carried by the
-  agent's tool-server registration (`mcp` env), never the process.
+- **An allow-listed environment.** The agent process starts from an environment the daemon
+  computes, not from the daemon's own: the base set (`PATH`, `HOME`, `USER`, `LOGNAME`, `SHELL`,
+  `TERM`, `LANG`, `LC_*`, `TMPDIR`, `TZ`, `SSH_AUTH_SOCK`, proxy variables, `XDG_*`) read from the
+  daemon, the variables the spec's `pass_env` names, and what the launch sets on purpose. No other
+  daemon variable reaches it, so a `CLAUDE_CODE_*` marker or a CI token the daemon was started with
+  stays behind. A host PTY, a tmux pane (which keeps only its own `TERM`, `COLORTERM`, `TMUX` and
+  `TMUX_PANE` besides), a headless turn, an ACP agent, the conversation-id mint and a relayed
+  (supervisor-spawned) agent all start from it. An operator adds a variable in `pass_env` of
+  `tools/<agent>.yaml`, or replaces the base set with `tools/agent-env/base.yaml`
+  ([Harness profiles § The agent's environment](harness-profiles.md#the-agents-environment)).
+- **No `TDDY_*` variable.** The agent process sees no `TDDY_*` variable. A managed workflow's or a
+  main's `TDDY_*` pair is carried by the agent's tool-server registration (`mcp` env), never the
+  process.
 - **Session pointer.** So a `tddy-tools submit`, `transition`, `ask` or `notify` the agent runs from
   its own shell still reaches the session, the launch writes `<worktree>/.tddy/session.json` at every
   start and resume ([tddy-tools session resolution](../../../packages/tddy-tools/docs/session-resolution.md)):

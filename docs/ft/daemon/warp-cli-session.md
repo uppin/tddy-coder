@@ -56,6 +56,9 @@ its own GUI and the headless `oz` CLI, neither of which the session can use. Ins
 - Warp's own installer, `curl -fsSL https://app.warp.dev/download/agent-cli | bash` — self-updating;
   if it lands the binary outside the daemon's `PATH`, point the daemon at it explicitly below.
 
+The CLI starts from an allow-listed environment and its spec passes no provider key through
+([Harness profiles § The agent's environment](harness-profiles.md#the-agents-environment)).
+
 The CLI carries its own sign-in — a browser/device-code login on first run, separate from the Warp
 desktop app's — so a first session's terminal may open on the login flow before any conversation.
 

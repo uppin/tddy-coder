@@ -68,7 +68,9 @@ On the account:
   route's files (`opencode.json`), so a routed jail reaches its own provider.
 
 The agent process sees no `TDDY_*` variable: the daemon's `TDDY_*` additions go only to the
-`tddy-tools --mcp` server's environment.
+`tddy-tools --mcp` server's environment. It starts from an allow-listed environment
+([Harness profiles § The agent's environment](harness-profiles.md#the-agents-environment)); the
+spec's `pass_env` names `ANTHROPIC_API_KEY` and `OPENAI_API_KEY`.
 
 The binary is resolved to an absolute path on the daemon's `PATH` before the jail is built, because
 the sandbox profile grants reads to it by path. A binary that is not there is refused with
