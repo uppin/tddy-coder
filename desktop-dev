@@ -124,6 +124,10 @@ if [[ -z "${TDDY_DAEMON_CONFIG:-}" ]] && [[ -f "$PROJECT_ROOT/dev.desktop.yaml" 
   export TDDY_DAEMON_CONFIG="$PROJECT_ROOT/dev.desktop.yaml"
 fi
 
+# The mapping lives in users.yaml beside that config, never in it (#agent-tools 31/32).
+printf -- '- github_user: "testuser"\n  os_user: "%s"\n' "${USER}" \
+  > "$(dirname "${TDDY_DAEMON_CONFIG:-$PROJECT_ROOT/dev.desktop.yaml}")/users.yaml"
+
 VITE_PID=""
 CLEANED_UP=0
 

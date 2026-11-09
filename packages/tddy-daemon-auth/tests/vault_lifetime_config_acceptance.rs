@@ -175,11 +175,12 @@ fn a_config_file(dir: &Path, github_lines: &str, keeps_vaults: bool) -> std::pat
         format!("tddy_data_dir: \"{}\"\n", dir.join("data").display())
     };
     let yaml = format!(
-        "users:\n  - github_user: \"u\"\n    os_user: \"u\"\ngithub:\n  stub: true\n{github_lines}\
+        "github:\n  stub: true\n{github_lines}\
          {where_state_lives}"
     );
     let path = dir.join("config.yaml");
     std::fs::write(&path, yaml).expect("the config is written");
+    std::fs::write(path.parent().expect("a config directory").join("users.yaml"), "- github_user: \"u\"\n  os_user: \"u\"\n").expect("the users file is written");
     path
 }
 

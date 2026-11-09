@@ -180,6 +180,10 @@ if [ -f "$CONFIG" ]; then
   sed -e "s|CURRENT_USER|${USER}|g" \
     -e "s|^\([[:space:]]*web_port:\).*|\1 ${DAEMON_PORT}|" \
     "$CONFIG" > "$TMP_CONFIG"
+  # The mapping lives in users.yaml beside the config the daemon launches with — the temp
+  # copy's directory — never in the daemon config itself (#agent-tools 31/32).
+  printf -- '- github_user: "testuser"\n  os_user: "%s"\n- github_user: "uppin"\n  os_user: "mantasi"\n' "${USER}" \
+    > "$(dirname "$TMP_CONFIG")/users.yaml"
   daemon_args+=("-c" "$TMP_CONFIG")
 else
   echo "tddy-daemon requires -c CONFIG. ${CONFIG} not found." >&2

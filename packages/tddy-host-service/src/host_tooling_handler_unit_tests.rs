@@ -175,12 +175,11 @@ fn a_config_named(
     github_user: &str,
     os_user: &str,
 ) -> tddy_daemon_kernel::config::DaemonConfig {
-    let yaml = format!(
-        "daemon_instance_id: \"{instance_id}\"\nusers:\n  - github_user: \"{github_user}\"\n    os_user: \"{os_user}\"\n"
-    );
+    let yaml = format!("daemon_instance_id: \"{instance_id}\"\n");
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("config.yaml");
     std::fs::write(&path, yaml).unwrap();
+    std::fs::write(dir.path().join("users.yaml"), format!("- github_user: \"{github_user}\"\n  os_user: \"{os_user}\"\n")).unwrap();
     tddy_daemon_kernel::config::DaemonConfig::load(&path).unwrap()
 }
 

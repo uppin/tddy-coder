@@ -156,10 +156,10 @@ local:
 #   # stalling) has that tick abandoned, so the room's freshness degrades and nothing else does.
 #   git_timeout_ms: 5000
 
-users: []
-# - github_user: "octocat"
-#   os_user: "dev1"
-#
+# The GitHub → OS-user mapping lives in users.yaml beside this file (rendered empty by
+# ./install; the daemon refuses a `users:` key here):
+#   - github_user: "octocat"
+#     os_user: "dev1"
 # Per–OS-user PATH for spawned tddy-coder (e.g. Cursor `agent` CLI): create on the *target* user:
 #   ~/.tddy/config.yaml
 # with e.g.:

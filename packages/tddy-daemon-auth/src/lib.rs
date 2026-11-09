@@ -110,7 +110,8 @@ mod tests {
     ) -> (tddy_daemon_kernel::config::DaemonConfig, tempfile::TempDir) {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("config.yaml");
-        std::fs::write(&path, "users: []\n").unwrap();
+        std::fs::write(&path, "{}\n").unwrap();
+        std::fs::write(dir.path().join("users.yaml"), "[]\n").unwrap();
         (
             tddy_daemon_kernel::config::DaemonConfig::load(&path).unwrap(),
             dir,

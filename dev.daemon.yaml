@@ -92,11 +92,8 @@ github:
   # absent = 604800 (seven days, the refresh-token lifetime), which is also the maximum.
   open_vault_idle_ttl_seconds: 604800
 
-users:
-  - github_user: "testuser"
-    os_user: "CURRENT_USER"  # Replaced by web-dev with $USER
-  - github_user: "uppin"
-    os_user: "mantasi"
+# The GitHub → OS-user mapping lives in users.yaml beside this file: web-dev renders one
+# mapping "testuser" to $USER (and "uppin" to mantasi) beside the temp config it launches.
 
 # When true (default), pass --mouse to spawned tddy-* (browser / touch terminals).
 spawn_mouse: true

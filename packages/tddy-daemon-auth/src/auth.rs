@@ -588,12 +588,13 @@ mod tests {
     fn a_config() -> (DaemonConfig, tempfile::TempDir) {
         let dir = tempfile::tempdir().unwrap();
         let yaml = format!(
-            "users:\n  - github_user: \"u\"\n    os_user: \"u\"\ngithub:\n  stub: true\n\
+            "github:\n  stub: true\n\
              auth_storage: \"{}\"\n",
             dir.path().join("auth").display()
         );
         let path = dir.path().join("config.yaml");
         std::fs::write(&path, yaml).unwrap();
+        std::fs::write(dir.path().join("users.yaml"), "- github_user: \"u\"\n  os_user: \"u\"\n").unwrap();
         (DaemonConfig::load(&path).unwrap(), dir)
     }
 
@@ -623,11 +624,12 @@ mod tests {
     ) -> (DaemonConfig, tempfile::TempDir) {
         let dir = tempfile::tempdir().unwrap();
         let yaml = format!(
-            "users:\n  - github_user: \"u\"\n    os_user: \"u\"\ngithub:\n  stub: true\nauth_storage: \"{}\"\n",
+            "github:\n  stub: true\nauth_storage: \"{}\"\n",
             auth_storage.display()
         );
         let path = dir.path().join("config.yaml");
         std::fs::write(&path, yaml).unwrap();
+        std::fs::write(dir.path().join("users.yaml"), "- github_user: \"u\"\n  os_user: \"u\"\n").unwrap();
         (DaemonConfig::load(&path).unwrap(), dir)
     }
 
@@ -855,12 +857,12 @@ mod tests {
     fn a_daemon(livekit_yaml: &str) -> (DaemonConfig, tempfile::TempDir) {
         let dir = tempfile::tempdir().unwrap();
         let yaml = format!(
-            "users:\n  - github_user: \"operator\"\n    os_user: \"operator-os\"\n\
-             github:\n  stub: true\nauth_storage: \"{}\"\n{livekit_yaml}",
+            "github:\n  stub: true\nauth_storage: \"{}\"\n{livekit_yaml}",
             dir.path().join("auth").display()
         );
         let path = dir.path().join("config.yaml");
         std::fs::write(&path, yaml).unwrap();
+        std::fs::write(dir.path().join("users.yaml"), "- github_user: \"operator\"\n  os_user: \"operator-os\"\n").unwrap();
         (DaemonConfig::load(&path).unwrap(), dir)
     }
 
