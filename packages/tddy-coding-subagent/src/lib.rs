@@ -13,6 +13,7 @@ pub mod session;
 pub mod transports;
 pub mod user_permission_answers;
 
+pub use crate::session::cancel::CancelHandle;
 pub use approval_routes::ApprovalRoutes;
 pub use catalog::{
     coding_agent_defs, coding_agent_defs_from, coding_agent_defs_in, CodingAgentDef,
@@ -27,7 +28,7 @@ pub use launcher::{
 };
 pub use parked_permissions::ParkedPermissions;
 pub use permissions::DenyAndRecord;
-pub use session::{CancelHandle, CodingAgentSession};
+pub use session::CodingAgentSession;
 pub use transports::{
     permission_policy_of, permission_policy_of_spec, transport_and_policy_wire,
     transport_and_policy_wire_of_spec, transport_of, transport_of_spec, PermissionPolicy,
