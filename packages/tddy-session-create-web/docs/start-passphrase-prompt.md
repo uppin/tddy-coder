@@ -3,7 +3,7 @@
 A start whose clone needs an SSH key passphrase asks for it on the create-session form. Behaviour:
 [cloning over SSH](../../../docs/ft/daemon/clone-ssh-passphrase.md). The dialog, its encryption and its
 key-continuity check are the Hosts screen's, which stays in `tddy-web`
-([the passphrase dialog](../../tddy-web/docs/hosts-screen.md#the-passphrase-dialog)) — so this package
+([the passphrase dialog](../../tddy-hosts-web/docs/hosts-screen.md#the-passphrase-dialog)) — so this package
 holds a **slot**, not the dialog.
 
 ## The pieces

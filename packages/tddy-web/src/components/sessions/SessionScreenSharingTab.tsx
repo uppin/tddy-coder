@@ -12,11 +12,11 @@
 import React, { useEffect, useReducer, useState } from "react";
 import type { RoomHandle } from "tddy-client-web";
 import { Protocol } from "tddy-client-web/gen/screen_sharing_pb";
-import { screenSharingStartFailureText } from "../../lib/screenSharingStartFailure";
+import { screenSharingStartFailureText } from "tddy-hosts-web";
 import { rpcFailureText } from "tddy-client-web";
 import { useKeyedActionFailure } from "../../hooks/useKeyedActionFailure";
 import { InlineError } from "tddy-ui-web";
-import { ScreenSharingOverlay } from "./ScreenSharingOverlay";
+import { ScreenSharingOverlay } from "tddy-hosts-web";
 import { applyScreenSharingTabAction, initialScreenSharingTabState } from "./screenSharingTabState";
 
 // ---------------------------------------------------------------------------

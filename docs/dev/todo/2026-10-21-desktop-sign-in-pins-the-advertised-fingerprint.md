@@ -3,7 +3,7 @@
 **Category:** Deferred from `#host-desktops` 8/8 (#660)
 **Source:** `#host-desktops` 8/8 ([#660](https://github.com/uppin/tddy-coder/pull/660)), `/validate-prod-ready`
 
-- `packages/tddy-web/src/components/hosts/HostDesktopSignInDialog.tsx` checks key continuity with
+- `packages/tddy-hosts-web/src/HostDesktopSignInDialog.tsx` checks key continuity with
   `checkHostKey(hostId, question.hostPublicKeyFingerprint)`: it pins and shows the fingerprint
   **string the prompt advertises**, not one derived from `question.hostPublicKey`. A peer that
   substitutes the key can advertise the pinned string beside it, so the pin does not bind the key

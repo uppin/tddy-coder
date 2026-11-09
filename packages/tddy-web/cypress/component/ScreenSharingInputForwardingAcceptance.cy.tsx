@@ -15,7 +15,7 @@
 
 import React, { useState } from "react";
 import { anInMemoryRpcBackend } from "tddy-connectrpc-testkit";
-import { ScreenSharingOverlay } from "../../src/components/sessions/ScreenSharingOverlay";
+import { ScreenSharingOverlay } from "tddy-hosts-web";
 import { mountWithRpc } from "../support/rpc/inMemory";
 import {
   aBridgeRecordingInput,

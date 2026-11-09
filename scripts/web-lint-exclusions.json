@@ -15,6 +15,11 @@
     "todo": "docs/dev/todo/2026-11-07-terminal-web-does-not-typecheck.md"
   },
   {
+    "package": "tddy-hosts-web",
+    "reason": "1 error, not in the package: tddy-tauri-web's transport.ts passes `log` to createEnvelopeTransport (TS2353), which the package compiles through tddy-terminal-web",
+    "todo": "docs/dev/todo/2026-11-07-tauri-web-transport-log-is-dropped.md"
+  },
+  {
     "package": "tddy-rust-typescript-tests",
     "reason": "tsconfig names the 'bun-types' type definitions, which are not installed (TS2688)",
     "todo": "docs/dev/todo/2026-11-07-rust-typescript-tests-does-not-typecheck.md"

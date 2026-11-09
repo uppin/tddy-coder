@@ -3,7 +3,7 @@
 **Category:** Future enhancement
 **Source:** `#host-desktops` 7/8 (`feature/host-desktops/x11-channels`, PR #659)
 
-- `packages/tddy-web/src/components/hosts/HostDesktopOverlay.tsx` `targetForChannel`: an X11
+- `packages/tddy-hosts-web/src/HostDesktopOverlay.tsx` `targetForChannel`: an X11
   channel finds its target by `(protocol, x11Display)` with no host or port. An **endpoint**
   channel (`vnc:5900`, `rdp:3389`) still matches `target.host === PROBED_HOST ("127.0.0.1") &&
   target.port === port && target.protocol === protocol`, and adds one with `host: PROBED_HOST`.

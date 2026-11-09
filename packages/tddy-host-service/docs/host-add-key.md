@@ -79,8 +79,8 @@ without argument. An AEAD envelope would be more code for no benefit at this siz
 not, by itself, defeat an *active* peer, because the client learns the public key over the same
 unauthenticated channel: a participant advertising itself as `daemon-<instance_id>` can publish its
 own key. That is bounded on the client, by key continuity plus a fingerprint an operator can verify
-out of band — see [`packages/tddy-web/docs/hosts-screen.md` § Host key
-trust](../../tddy-web/docs/hosts-screen.md#host-key-trust). It is the most arguable decision in this
+out of band — see [`packages/tddy-hosts-web/docs/hosts-screen.md` § Host key
+trust](../../tddy-hosts-web/docs/hosts-screen.md#host-key-trust). It is the most arguable decision in this
 flow, and it is a bound rather than a fix.
 
 **Generation is deferred to the first prompt**, not done at startup: a host nobody adds a key on
@@ -288,6 +288,6 @@ address: it has no TLS at all. See
   routing and their auth
 - [host-tooling-probe.md § The ssh-agent](host-tooling-probe.md#the-ssh-agent) — the read side, and
   socket resolution
-- [`packages/tddy-web/docs/hosts-screen.md`](../../tddy-web/docs/hosts-screen.md) — the dialog, the
+- [`packages/tddy-hosts-web/docs/hosts-screen.md`](../../tddy-hosts-web/docs/hosts-screen.md) — the dialog, the
   pin and the picker
 - [`docs/ft/web/hosts-screen-add-key.md`](../../../docs/ft/web/hosts-screen-add-key.md) — the feature

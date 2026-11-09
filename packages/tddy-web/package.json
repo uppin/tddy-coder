@@ -45,6 +45,7 @@
     "tailwindcss": "^4.2.2",
     "tddy-chat-web": "workspace:*",
     "tddy-client-web": "workspace:*",
+    "tddy-hosts-web": "workspace:*",
     "tddy-livekit-web": "workspace:*",
     "tddy-rpc-playground-web": "workspace:*",
     "tddy-session-create-web": "workspace:*",

@@ -9,7 +9,7 @@
 import React, { useEffect, useReducer, useState } from "react";
 import type { RoomHandle } from "tddy-client-web";
 import { VncPassphraseDialog } from "./VncPassphraseDialog";
-import { VncOverlay } from "./VncOverlay";
+import { VncOverlay } from "tddy-hosts-web";
 import { applyVncTabAction, initialVncTabState } from "./vncTabState";
 import { rpcFailureText } from "tddy-client-web";
 import { useKeyedActionFailure } from "../../hooks/useKeyedActionFailure";

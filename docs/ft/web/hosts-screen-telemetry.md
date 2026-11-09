@@ -56,4 +56,4 @@ selected host. See [`host-stats-footer.md`](./host-stats-footer.md).
 
 ## Technical reference
 
-[`packages/tddy-web/docs/host-stats-streaming.md`](../../../packages/tddy-web/docs/host-stats-streaming.md)
+[`packages/tddy-hosts-web/docs/host-stats-streaming.md`](../../../packages/tddy-hosts-web/docs/host-stats-streaming.md)

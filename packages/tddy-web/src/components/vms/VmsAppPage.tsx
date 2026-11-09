@@ -2,8 +2,8 @@ import { useCallback, useEffect, useState } from "react";
 import { VmService, type VmInfo, type VmImageInfo } from "tddy-client-web/gen/vm_pb";
 import { useAuthContext } from "../../hooks/authProvider";
 import { AppShell } from "../shell/AppShell";
-import { VmsScreen, type VmRow } from "./VmsScreen";
-import { DefineVmPanel } from "./DefineVmPanel";
+import { VmsScreen, type VmRow } from "tddy-hosts-web";
+import { DefineVmPanel } from "tddy-hosts-web";
 import { useDaemonClient } from "tddy-client-web";
 
 function vmStateLabel(state: number): string {

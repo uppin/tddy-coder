@@ -106,7 +106,10 @@ tddy-demo-runner (refactored)
 
 tddy-web
 └── src/components/vms/
-    ├── VmsAppPage.tsx   — container: RPC wiring, state (building, availableImages)
+    └── VmsAppPage.tsx   — container: RPC wiring, state (building, availableImages)
+
+tddy-hosts-web
+└── src/
     ├── DefineVmPanel.tsx — presentational: spec textarea + image dropdown + Create form
     └── VmsScreen.tsx    — presentational: VM table with Start/Stop/Remove
 ```
