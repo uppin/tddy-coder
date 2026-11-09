@@ -11,13 +11,8 @@
   },
   {
     "package": "tddy-terminal-web",
-    "reason": "15 errors in code moved from tddy-web: spec fixtures as plain objects / nullable refs, two unit tests' window and feed-option types, plus tddy-tauri-web's 'log' option it compiles through",
+    "reason": "14 errors in code moved from tddy-web: spec fixtures as plain objects / nullable refs, two unit tests' window and feed-option types",
     "todo": "docs/dev/todo/2026-11-07-terminal-web-does-not-typecheck.md"
-  },
-  {
-    "package": "tddy-hosts-web",
-    "reason": "1 error, not in the package: tddy-tauri-web's transport.ts passes `log` to createEnvelopeTransport (TS2353), which the package compiles through tddy-terminal-web",
-    "todo": "docs/dev/todo/2026-11-07-tauri-web-transport-log-is-dropped.md"
   },
   {
     "package": "tddy-workspace-web",
@@ -26,18 +21,13 @@
   },
   {
     "package": "tddy-session-web",
-    "reason": "181 errors in the drawer-driven Cypress specs and support moved from tddy-web (plain-object RPC fixtures where generated message types are expected, stale props), plus tddy-tauri-web's `log` option (TS2353) it compiles through tddy-terminal-web",
+    "reason": "181 errors in the drawer-driven Cypress specs and support moved from tddy-web (plain-object RPC fixtures where generated message types are expected, stale props)",
     "todo": "docs/dev/todo/2026-11-07-session-web-specs-do-not-typecheck.md"
   },
   {
     "package": "tddy-rust-typescript-tests",
     "reason": "tsconfig names the 'bun-types' type definitions, which are not installed (TS2688)",
     "todo": "docs/dev/todo/2026-11-07-rust-typescript-tests-does-not-typecheck.md"
-  },
-  {
-    "package": "tddy-tauri-web",
-    "reason": "src/transport.ts passes `log` to createEnvelopeTransport, whose options have no `log` (TS2353)",
-    "todo": "docs/dev/todo/2026-11-07-tauri-web-transport-log-is-dropped.md"
   },
   {
     "package": "tddy-desktop",

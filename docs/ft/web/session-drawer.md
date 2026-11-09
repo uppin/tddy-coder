@@ -1222,7 +1222,7 @@ behavior parity with the Presenter path.
   agent did and when, including where it paused for input. Works on both transports.
 - **Test ids:** `agent-chat-*` (e.g. `agent-chat-messages`, `agent-chat-message-<i>`,
   `agent-chat-input`, `agent-chat-option-<i>`, `agent-chat-export-btn`), centralized in
-  `cypress/support/testIds.ts`. Storybook: `AgentChat.stories.tsx` (empty / streaming / select /
+  `cypress/support/testIds.ts`. Storybook: `tddy-storybook`'s `src/tddy-chat-web/AgentChat.stories.tsx` (empty / streaming / select /
   multiSelect / error / connecting).
 
 **Hooks:** `useAgentChat(room, serverIdentity)` owns the `TddyRemote.Stream` bidi RPC;

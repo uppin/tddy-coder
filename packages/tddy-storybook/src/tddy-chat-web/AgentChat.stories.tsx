@@ -58,6 +58,7 @@ const multiSelectQuestion: PendingQuestion = {
 };
 
 const meta: Meta<typeof AgentChatView> = {
+  title: "components/chat/AgentChat",
   component: AgentChatView,
   // Give the flex-1 panel a bounded, chat-sized frame so it lays out like the session drawer.
   decorators: [

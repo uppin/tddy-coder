@@ -34,6 +34,5 @@ stylesheet to pin that.
 routing, stats/prompt subscriptions, keyboard lock, the boundary rule) and `bun run cypress:component`
 — 17 component specs from the package's own `cypress.config.ts`, mounted with `cy.mountWithClients`
 through `cypress/support/mountWithHosts.tsx` (presence and media doubles). The specs whose point is app
-wiring or the LiveKit input stream stay in `tddy-web`. CI: `.github/workflows/web.yml`; `Web lint`
-excludes the package for the one `tddy-tauri-web` error it compiles through (see
-`scripts/web-lint-exclusions.json`).
+wiring or the LiveKit input stream stay in `tddy-web`. CI: `.github/workflows/web.yml` (`Web lint`
+typechecks it; the `Web tests` shards run its suites).

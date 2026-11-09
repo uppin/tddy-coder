@@ -4,6 +4,7 @@ import { GhosttyTerminalSession } from "tddy-terminal-web";
 import { useDirectRoomTerminal } from "tddy-livekit-web";
 
 const meta: Meta<typeof GhosttyTerminal> = {
+  title: "components/GhosttyTerminal",
   component: GhosttyTerminal,
 };
 

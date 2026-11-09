@@ -2,6 +2,7 @@ import type { Meta, StoryObj } from "@storybook/react";
 import { AccountsScreen, type AccountRow } from "tddy-workspace-web";
 
 const meta: Meta<typeof AccountsScreen> = {
+  title: "components/accounts/AccountsScreen",
   component: AccountsScreen,
   args: {
     onRename: () => {},

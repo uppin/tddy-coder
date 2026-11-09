@@ -3,8 +3,8 @@
 **Category:** Lint gate gap (test support)
 **Source:** `#web-split` 18/20 (PR #862), wrap
 **Detected:** `cd packages/tddy-session-web && ../../dev bun run typecheck` — **182** `error TS` lines at
-`feature/web-split/session-drawer`, 2026-11-07: 181 under `cypress/` and one in `tddy-tauri-web`
-(`2026-11-07-tauri-web-transport-log-is-dropped.md`). `src/` is clean.
+`feature/web-split/session-drawer`, 2026-11-07: 181 under `cypress/` and one in `tddy-tauri-web` (fixed in
+#852). `src/` is clean.
 
 The `cypress/` errors are in the 111 drawer-driven specs and their support moved from `tddy-web` (which
 never type-checked): RPC handlers and fixtures returning plain objects where generated response
@@ -18,5 +18,5 @@ move; the earlier package nodes deferred the same debt (`2026-11-07-session-crea
 `2026-11-07-workspace-web-specs-do-not-typecheck.md`).
 
 **What closing it takes:** build responses with `create(<method>.output, {...})` in the specs and the
-support backends, fix the stale props, then — once the tauri-web record is closed too — delete the
+support backends, fix the stale props, then delete the
 `tddy-session-web` entry from `scripts/web-lint-exclusions.json`.

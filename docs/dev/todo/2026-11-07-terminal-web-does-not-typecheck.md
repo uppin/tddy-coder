@@ -17,10 +17,10 @@
 - `src/rpc/terminalFeed.test.ts` (2): `requestSnapshot` read from a feed options type that lacks it.
 - ~~`../tddy-client-web/src/lib/debugMask.ts` (1, TS7016): no types for `debug`~~ — fixed in #847
   (`@types/debug` in `tddy-client-web`); 16 remained, 15 after #860.
-- `../tddy-tauri-web/src/transport.ts` (1, TS2353): see `2026-11-07-tauri-web-transport-log-is-dropped.md`.
+- ~~`../tddy-tauri-web/src/transport.ts` (1, TS2353)~~ — fixed in #852 (`EnvelopeTransportOptions.log`); 14 remain.
 
 **Why deferred:** test-support typing in moved code, not this node's move; the last two belong to
 other packages' records.
 
-**What closing it takes:** fix the 14 local errors, close the tauri-web record, then delete the
+**What closing it takes:** fix the 14 local errors, then delete the
 `tddy-terminal-web` entry from `scripts/web-lint-exclusions.json`.
