@@ -211,12 +211,12 @@ async fn a_relayed_agent_starts_from_exactly_the_env_the_daemon_computed() {
     use support::a_tool_that_prints_its_environment;
     use tokio::io::AsyncReadExt;
 
-    // Given — an agent env the daemon computed, naming a key no `allowed_env_keys` lists
+    // Given — an agent env the daemon computed, naming a key no supervisor configuration lists
     let tool = a_tool_that_prints_its_environment();
     let supervisor = a_supervisor()
         .managing(a_service("tddy-daemon").that_stays_alive())
         .allowing_the_current_user()
-        .allowing_relay_tool(tool.path())
+        .with_exec_root(tool.path())
         .start()
         .await;
     let client = supervisor.client().await;

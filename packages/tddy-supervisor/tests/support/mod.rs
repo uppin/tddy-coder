@@ -693,7 +693,7 @@ pub fn a_tool_that_echoes_its_stdin() -> ToolFixture {
 
 /// A tool that prints the environment it was started with, one `NAME=value` per line, and exits.
 pub fn a_tool_that_prints_its_environment() -> ToolFixture {
-    let workspace = TempDir::new().expect("create tool workspace");
+    let workspace = a_trusted_workspace();
     let path = workspace.path().join("environment-printing-tool");
     let parent_pid_log = workspace.path().join("parent.pid");
     write_script(&path, "exec /usr/bin/env");
