@@ -3,7 +3,7 @@
  * is already looking at, and opens a conversation tab with it.
  *
  * Feature: docs/ft/web/session-drawer.md § Add agent
- * Invariants: packages/tddy-web/docs/session-agent-conversation.md
+ * Invariants: packages/tddy-session-web/docs/session-agent-conversation.md
  *
  * Driven through `SessionsDrawerScreen` rather than through `SessionMainPane` alone, because the
  * property under test spans three collaborators that a narrower mount would let disagree silently:

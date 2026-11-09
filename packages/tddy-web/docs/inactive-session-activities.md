@@ -1,6 +1,6 @@
 # Inactive session activities (main-pane base view)
 
-Technical reference for the base-view rule in **`packages/tddy-web/src/components/sessions/sessionBaseView.ts`**, the stopped Agent tab in **`DormantAgentTerminal.tsx`** (`tddy-session-web`), the transcript pane in **`SessionActivitiesPane.tsx`** (the inspector's Activity tab; in `tddy-chat-web` since #847), and the attach bookkeeping and resume hint in **`SessionsDrawerScreen.tsx`** that let a resumed session return to its terminal.
+Technical reference for the base-view rule in **`packages/tddy-session-web/src/sessionBaseView.ts`**, the stopped Agent tab in **`DormantAgentTerminal.tsx`** (`tddy-session-web`), the transcript pane in **`SessionActivitiesPane.tsx`** (the inspector's Activity tab; in `tddy-chat-web` since #847), and the attach bookkeeping and resume hint in **`SessionsDrawerScreen.tsx`** that let a resumed session return to its terminal.
 
 Product reference: [docs/ft/web/inactive-session-activities.md](../../../docs/ft/web/inactive-session-activities.md).
 
@@ -24,7 +24,7 @@ Product reference: [docs/ft/web/inactive-session-activities.md](../../../docs/ft
 - **What a keystroke would reach** (`focusedTerminalId`) is a bash or harness tab with no conversation over it — never the Agent tab, which is read-only. Only that tab gets the mobile shortcut drawer, the claim toast and grey-out (`TerminalControlLayer`, rendered only while another screen holds the lease), and the Files-tab Insert.
 - **Insert** reaches a live runtime through the session runtime registry. A stopped session has none, so the strip hands `SessionMainPane` a function (`onRegisterInsert`) that types into its focused bash tab, and `SessionMainPane` routes the inspector's `onInsertPathIntoTerminal` to it while the stopped strip shows.
 - **Full screen** uses the same `useSessionPaneFullscreen` and `PaneFullscreenExit` as the live strip. The shared pane chrome — `PaneFullscreenExit`, `TerminalControlLayer` — lives in `SessionPaneChrome.tsx`, so the two strips cannot drift.
-- **Agent-conversation bodies are not rendered by the strip** — see [session-agent-conversation.md](session-agent-conversation.md#1-conversation-bodies-are-owned-by-neither-strip).
+- **Agent-conversation bodies are not rendered by the strip** — see [session-agent-conversation.md](../../tddy-session-web/docs/session-agent-conversation.md#1-conversation-bodies-are-owned-by-neither-strip).
 
 ### The stopped Agent tab
 

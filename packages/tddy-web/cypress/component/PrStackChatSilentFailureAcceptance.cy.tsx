@@ -26,7 +26,7 @@
 import React from "react";
 import { ConnectError, Code } from "@connectrpc/connect";
 import { aDisconnectedRoom } from "tddy-livekit-web/testkit";
-import { SessionMainPane } from "../../src/components/sessions/SessionMainPane";
+import { SessionMainPane } from "tddy-session-web";
 import { SessionsDrawerScreen } from "../../src/components/sessions/SessionsDrawerScreen";
 import { withSelectedDaemon } from "../support/rpc/withSelectedDaemon";
 import { PrStackChat } from "tddy-prstack-web";

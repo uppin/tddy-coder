@@ -20,7 +20,7 @@ import type { InMemoryRpcBackend } from "tddy-connectrpc-testkit";
 import { SessionService, SessionEntrySchema } from "tddy-client-web/gen/session_pb";
 import { CatalogService } from "tddy-client-web/gen/catalog_pb";
 import { AgentCloneState } from "tddy-client-web/gen/session_agents_pb";
-import { SessionAgentRosterPane } from "../../src/components/sessions/SessionAgentRosterPane";
+import { SessionAgentRosterPane } from "tddy-session-web";
 import { daemonRpcIdentity, type DaemonHost } from "tddy-client-web";
 import {
   aDaemonOfferingAgents,

@@ -3,7 +3,7 @@
 What the create-session form shows while a session starts: the **start progress** list under the form,
 cancelling a start, and the stream's keep-alive events. The feature is described in
 [Session Drawer § Start progress](../../../docs/ft/web/session-drawer.md#start-progress). The session
-header's indexing indicator is `tddy-web`'s ([indexing-indicator.md](../../tddy-web/docs/indexing-indicator.md)).
+header's indexing indicator is `tddy-web`'s ([indexing-indicator.md](../../tddy-session-web/docs/indexing-indicator.md)).
 
 ## Start progress
 
@@ -83,4 +83,4 @@ ignores them: a `keepAlive` is not mistaken for the result and changes no step.
 
 Component specs here start over the stream through `registerServerStreamFallback`
 (`tddy-connectrpc-testkit`), registered in `cypress/support/component.ts` as `tddy-web` does — see
-[indexing-indicator.md § Testing](../../tddy-web/docs/indexing-indicator.md#testing).
+[indexing-indicator.md § Testing](../../tddy-session-web/docs/indexing-indicator.md#testing).

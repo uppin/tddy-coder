@@ -18,7 +18,7 @@ import { Code, ConnectError, createClient, type Client } from "@connectrpc/conne
 import { anInMemoryRpcBackend, type InMemoryRpcBackend } from "tddy-connectrpc-testkit";
 import { CreateSessionPane } from "tddy-session-create-web";
 import { SessionsDrawerScreen } from "../../src/components/sessions/SessionsDrawerScreen";
-import { SessionUsageTab } from "../../src/components/sessions/SessionUsageTab";
+import { SessionUsageTab } from "tddy-session-web";
 import { useSessionActivity } from "tddy-chat-web";
 import { InlineError } from "tddy-ui-web";
 import { SessionService } from "tddy-client-web/gen/session_pb";

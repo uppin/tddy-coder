@@ -11,7 +11,7 @@ import { useAuthContext } from "../../hooks/authProvider";
 import { hostNotConnected } from "tddy-client-web";
 import { TooltipProvider, detectIsMobile, useIsMobile } from "tddy-ui-web";
 import { SessionDrawer } from "./SessionDrawer";
-import { SessionMainPane } from "./SessionMainPane";
+import { SessionMainPane } from "tddy-session-web";
 import { SessionHostStatsFooter } from "./SessionHostStatsFooter";
 import { useSessionAttachment } from "tddy-session-web";
 import { SessionShell } from "tddy-session-web";

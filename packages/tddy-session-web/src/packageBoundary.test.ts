@@ -34,6 +34,15 @@ describe("tddy-session-web package boundary", () => {
         "GrpcSessionTerminal",
         "SessionRuntimeRegistry",
         "SessionChildRuntime",
+        // session-inspector (#861) — incl. SessionMainPane and its prerequisites
+        "SessionMainPane",
+        "SessionInspectorDrawer",
+        "SessionAgentRosterPane",
+        "SessionAgentTree",
+        "SessionWithActivitySidebar",
+        "WorktreeCodePane",
+        "SessionIndexingIndicator",
+        "AgentPicker",
       ]),
     );
   });

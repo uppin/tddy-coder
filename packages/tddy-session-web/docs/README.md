@@ -40,6 +40,18 @@ whose `openSession` is the production `openHostServedSession`. Token minting for
 is `tddy-livekit-web`'s (`sessionConnection.test.ts` — "joins the named room with a token minted for a
 browser observer identity").
 
+## Inspector, agents and code pane (#861)
+
+| Area | Source | Reference |
+|---|---|---|
+| Main pane | `src/SessionMainPane.tsx`, `src/sessionMainPaneProps.ts`, `src/sessionBaseView.ts`, `src/workflowViews.tsx` | over the 500-line budget: [code-issues/](code-issues/) |
+| Inspector | `src/SessionInspectorDrawer.tsx`, `src/SessionInspectorHeader.tsx`, `src/InspectorTabs.tsx`, the tabs (`SessionInspectorDetailsTab`, `SessionInspectorActivityTab`, `SessionFilesTab`, `SessionToolsTab`, `SessionUsageTab`, `SessionScreenSharingTab`, `SessionVncTab` + `VncPassphraseDialog`) and their state helpers | [inactive-session-activities.md](../../tddy-web/docs/inactive-session-activities.md) |
+| Agents | `src/SessionAgentRosterPane.tsx`, `src/SessionAgentTree.tsx` (`agentTree`), `src/AgentPicker.tsx`, `src/SessionAgentConversationLayer.tsx`, `src/SessionAgentConversationPane.tsx`, `src/useAgentConversation.ts`, `src/SessionActivitySidebar.tsx`, `src/SessionWithActivitySidebar.tsx` | [session-agent-tree.md](session-agent-tree.md), [session-agent-conversation.md](session-agent-conversation.md) |
+| Code pane | `src/code/` (`WorktreeCodePane`, code navigation, indexing indicator, restructure plan dialog, workflow files) | [code-navigation.md](code-navigation.md), [indexing-indicator.md](indexing-indicator.md) |
+
+`PrStackPresenterRoomAcceptance` stays in `tddy-web`: its assertions are about the app's HTTP
+transport minting the presenter-room token through the auth gate.
+
 Product behaviour: [docs/ft/web/session-drawer.md](../../../docs/ft/web/session-drawer.md).
 
 - **Changeset history**: [changesets/](changesets/)
@@ -48,5 +60,5 @@ Product behaviour: [docs/ft/web/session-drawer.md](../../../docs/ft/web/session-
 
 `bun test src` — the helpers' suites, the seam rules and the boundary rule (builders and the
 `toContainSessionIdsInOrder` matcher in `test-utils/`) and `bun run cypress:component` — the runtime and
-terminal specs (#860). CI: `.github/workflows/web.yml` (`Web tests` shards run its suites; `Web lint`
+terminal specs (#860) and the inspector, agent and code-pane specs (#861). CI: `.github/workflows/web.yml` (`Web tests` shards run its suites; `Web lint`
 excludes it for the one `tddy-tauri-web` error it compiles through `tddy-terminal-web`).

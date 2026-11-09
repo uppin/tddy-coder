@@ -5,7 +5,7 @@
  * `conversationId` for identity, which is the distinction the tabs live on — an agent can be
  * attached with no conversation open, and closing a tab cancels a conversation, not an attachment.
  *
- * Feature: docs/ft/web/session-drawer.md § Add agent; invariants: packages/tddy-web/docs/session-agent-conversation.md.
+ * Feature: docs/ft/web/session-drawer.md § Add agent; invariants: packages/tddy-session-web/docs/session-agent-conversation.md.
  */
 
 /** One open conversation with an agent attached to the session. */

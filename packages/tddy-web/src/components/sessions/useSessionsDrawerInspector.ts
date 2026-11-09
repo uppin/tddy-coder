@@ -6,7 +6,7 @@ import {
   type InspectorTabName,
 } from "tddy-client-web";
 import { useAppLocation } from "tddy-client-web";
-import type { InspectorDrawerState } from "./SessionInspectorDrawer";
+import type { InspectorDrawerState } from "tddy-session-web";
 import { nextInspectorState } from "./inspectorState";
 import { PARAM_FULL, PARAM_INSPECTOR } from "tddy-client-web";
 

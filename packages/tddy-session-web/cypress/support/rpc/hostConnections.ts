@@ -38,6 +38,12 @@ export class HostConnectionBuilder {
     return this;
   }
 
+  /** Reached over a common room — tracks and a participant roster come with that wire. */
+  reachedOverLiveKit(): HostConnectionBuilder {
+    this.capabilities = new Set<ConnectionCapability>(["rpc", "media", "presence"]);
+    return this;
+  }
+
   /** The host is not reachable yet; {@link admit} brings it up. */
   notReachableYet(): HostConnectionBuilder {
     this.status = "connecting";

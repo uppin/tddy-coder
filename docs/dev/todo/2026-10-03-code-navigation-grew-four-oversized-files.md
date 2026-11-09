@@ -13,7 +13,7 @@ lines each):
 |---|---|
 | `packages/tddy-daemon/src/runtime.rs` | 1,620 → 1,631 — see its `oversized-file-runtime` code-issue record |
 | `packages/tddy-service/build.rs` | 695 → 709 — see its `oversized-file-build` code-issue record |
-| `packages/tddy-web/src/components/sessions/SessionMainPane.tsx` | 657 → 666 |
+| `packages/tddy-session-web/src/SessionMainPane.tsx` | 657 → 666 |
 | `packages/tddy-web/src/components/sessions/SessionsDrawerScreen.tsx` | 966 → 969 |
 
 ## Why it was left
