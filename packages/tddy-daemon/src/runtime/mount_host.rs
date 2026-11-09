@@ -278,11 +278,11 @@ impl BuildContext {
         );
 
         Ok(crate::livekit_host_ports::with_livekit_room_ports(
-        connection_impl,
-        Arc::clone(shared_session_rooms),
-        Arc::clone(shared_session_admissions),
-        Arc::clone(room_tokens),
-    )
+            connection_impl,
+            Arc::clone(shared_session_rooms),
+            Arc::clone(shared_session_admissions),
+            Arc::clone(room_tokens),
+        )
         .with_session_reach(
             Arc::clone(livekit_reach) as Arc<dyn tddy_daemon_extensions::SessionReach>
         )

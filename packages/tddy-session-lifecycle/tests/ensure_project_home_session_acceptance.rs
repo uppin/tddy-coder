@@ -561,7 +561,7 @@ async fn an_ensured_mains_tools_reach_this_daemon_as_the_main() {
         this_daemons_local_url()
     );
     // And over its user's agent-tool socket, which a socket in the user's own directory serves
-    let users_socket = tddy_daemon_kernel::agent_tool_sockets::agent_tool_socket_path_for_user(
+    let users_socket = tddy_daemon_kernel::agent_tool_sockets::user_socket_path_for_user(
         world.home.data.path(),
         &project_home_support::current_os_user(),
     )

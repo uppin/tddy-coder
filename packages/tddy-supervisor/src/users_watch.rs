@@ -46,63 +46,66 @@ impl UsersWatch {
         let watched_path = std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
         let callback_path = watched_path.clone();
         let callback_current = Arc::clone(&current);
-        let mut watcher = notify::recommended_watcher(move |event: notify::Result<notify::Event>| {
-            let event = match event {
-                Ok(event) => event,
-                Err(error) => {
-                    log::warn!(
-                        target: "tddy_supervisor::users_watch",
-                        "watching {} failed: {error}",
-                        callback_path.display()
-                    );
+        let mut watcher =
+            notify::recommended_watcher(move |event: notify::Result<notify::Event>| {
+                let event = match event {
+                    Ok(event) => event,
+                    Err(error) => {
+                        log::warn!(
+                            target: "tddy_supervisor::users_watch",
+                            "watching {} failed: {error}",
+                            callback_path.display()
+                        );
+                        return;
+                    }
+                };
+                let touches_the_file = event.paths.is_empty()
+                    || event
+                        .paths
+                        .iter()
+                        .any(|candidate| candidate == &callback_path);
+                if !touches_the_file {
                     return;
                 }
-            };
-            let touches_the_file = event.paths.is_empty()
-                || event
-                    .paths
-                    .iter()
-                    .any(|candidate| candidate == &callback_path);
-            if !touches_the_file {
-                return;
-            }
-            // A save may be observed mid-write; retry briefly (bounded) before refusing it.
-            let mut loaded = UsersFile::load(&callback_path);
-            for _ in 0..5 {
-                if loaded.is_ok() {
-                    break;
+                // A save may be observed mid-write; retry briefly (bounded) before refusing it.
+                let mut loaded = UsersFile::load(&callback_path);
+                for _ in 0..5 {
+                    if loaded.is_ok() {
+                        break;
+                    }
+                    std::thread::sleep(std::time::Duration::from_millis(20));
+                    loaded = UsersFile::load(&callback_path);
                 }
-                std::thread::sleep(std::time::Duration::from_millis(20));
-                loaded = UsersFile::load(&callback_path);
-            }
-            match loaded {
-                Ok(next) => {
-                    let changed = {
-                        let mut current = callback_current
-                            .lock()
-                            .expect("users watch lock poisoned");
-                        if *current == next {
-                            false
-                        } else {
-                            *current = next.clone();
-                            true
+                match loaded {
+                    Ok(next) => {
+                        let changed = {
+                            let mut current =
+                                callback_current.lock().expect("users watch lock poisoned");
+                            if *current == next {
+                                false
+                            } else {
+                                *current = next.clone();
+                                true
+                            }
+                        };
+                        if changed {
+                            sink.changed(&next);
                         }
-                    };
-                    if changed {
-                        sink.changed(&next);
+                    }
+                    Err(why) => {
+                        log::warn!(
+                            target: "tddy_supervisor::users_watch",
+                            "refusing a users.yaml edit, keeping the running mapping: {why}"
+                        );
+                        sink.refused(&why);
                     }
                 }
-                Err(why) => {
-                    log::warn!(
-                        target: "tddy_supervisor::users_watch",
-                        "refusing a users.yaml edit, keeping the running mapping: {why}"
-                    );
-                    sink.refused(&why);
-                }
-            }
-        })?;
+            })?;
         let directory = watched_path.parent().ok_or_else(|| {
-            anyhow::anyhow!("users.yaml path {} has no directory to watch", path.display())
+            anyhow::anyhow!(
+                "users.yaml path {} has no directory to watch",
+                path.display()
+            )
         })?;
         watcher.watch(directory, notify::RecursiveMode::NonRecursive)?;
         Ok(UsersWatch {

@@ -4,7 +4,7 @@
       {
         "hooks": [
           {
-            "command": "'<STUBS>/tddy-tools' session-hook --session <SESSION_ID> --daemon http://127.0.0.1:8899 --daemon-socket '<SESSIONS>/run-agent-tools/<OS_USER>/agent.sock' --os-user <OS_USER> --hook-token <HOOK_TOKEN> --event Notification",
+            "command": "'<STUBS>/tddy-tools' session-hook --session <SESSION_ID> --daemon http://127.0.0.1:8899 --daemon-socket '<SESSIONS>/run/<OS_USER>/daemon.sock' --os-user <OS_USER> --hook-token <HOOK_TOKEN> --event Notification",
             "type": "command"
           }
         ],
@@ -15,7 +15,7 @@
       {
         "hooks": [
           {
-            "command": "'<STUBS>/tddy-tools' session-hook --session <SESSION_ID> --daemon http://127.0.0.1:8899 --daemon-socket '<SESSIONS>/run-agent-tools/<OS_USER>/agent.sock' --os-user <OS_USER> --hook-token <HOOK_TOKEN> --event PermissionRequest --await-answer --await-timeout-secs 125",
+            "command": "'<STUBS>/tddy-tools' session-hook --session <SESSION_ID> --daemon http://127.0.0.1:8899 --daemon-socket '<SESSIONS>/run/<OS_USER>/daemon.sock' --os-user <OS_USER> --hook-token <HOOK_TOKEN> --event PermissionRequest --await-answer --await-timeout-secs 125",
             "timeout": 130,
             "type": "command"
           }
@@ -27,7 +27,7 @@
       {
         "hooks": [
           {
-            "command": "'<STUBS>/tddy-tools' session-hook --session <SESSION_ID> --daemon http://127.0.0.1:8899 --daemon-socket '<SESSIONS>/run-agent-tools/<OS_USER>/agent.sock' --os-user <OS_USER> --hook-token <HOOK_TOKEN> --event PostToolUse",
+            "command": "'<STUBS>/tddy-tools' session-hook --session <SESSION_ID> --daemon http://127.0.0.1:8899 --daemon-socket '<SESSIONS>/run/<OS_USER>/daemon.sock' --os-user <OS_USER> --hook-token <HOOK_TOKEN> --event PostToolUse",
             "type": "command"
           }
         ],
@@ -38,7 +38,7 @@
       {
         "hooks": [
           {
-            "command": "'<STUBS>/tddy-tools' session-hook --session <SESSION_ID> --daemon http://127.0.0.1:8899 --daemon-socket '<SESSIONS>/run-agent-tools/<OS_USER>/agent.sock' --os-user <OS_USER> --hook-token <HOOK_TOKEN> --event PreToolUse --await-answer --await-timeout-secs 125",
+            "command": "'<STUBS>/tddy-tools' session-hook --session <SESSION_ID> --daemon http://127.0.0.1:8899 --daemon-socket '<SESSIONS>/run/<OS_USER>/daemon.sock' --os-user <OS_USER> --hook-token <HOOK_TOKEN> --event PreToolUse --await-answer --await-timeout-secs 125",
             "timeout": 130,
             "type": "command"
           }
@@ -50,7 +50,7 @@
       {
         "hooks": [
           {
-            "command": "'<STUBS>/tddy-tools' session-hook --session <SESSION_ID> --daemon http://127.0.0.1:8899 --daemon-socket '<SESSIONS>/run-agent-tools/<OS_USER>/agent.sock' --os-user <OS_USER> --hook-token <HOOK_TOKEN> --event SessionEnd",
+            "command": "'<STUBS>/tddy-tools' session-hook --session <SESSION_ID> --daemon http://127.0.0.1:8899 --daemon-socket '<SESSIONS>/run/<OS_USER>/daemon.sock' --os-user <OS_USER> --hook-token <HOOK_TOKEN> --event SessionEnd",
             "type": "command"
           }
         ],
@@ -61,7 +61,7 @@
       {
         "hooks": [
           {
-            "command": "'<STUBS>/tddy-tools' session-hook --session <SESSION_ID> --daemon http://127.0.0.1:8899 --daemon-socket '<SESSIONS>/run-agent-tools/<OS_USER>/agent.sock' --os-user <OS_USER> --hook-token <HOOK_TOKEN> --event SessionStart",
+            "command": "'<STUBS>/tddy-tools' session-hook --session <SESSION_ID> --daemon http://127.0.0.1:8899 --daemon-socket '<SESSIONS>/run/<OS_USER>/daemon.sock' --os-user <OS_USER> --hook-token <HOOK_TOKEN> --event SessionStart",
             "type": "command"
           }
         ],
@@ -72,7 +72,7 @@
       {
         "hooks": [
           {
-            "command": "'<STUBS>/tddy-tools' session-hook --session <SESSION_ID> --daemon http://127.0.0.1:8899 --daemon-socket '<SESSIONS>/run-agent-tools/<OS_USER>/agent.sock' --os-user <OS_USER> --hook-token <HOOK_TOKEN> --event Stop",
+            "command": "'<STUBS>/tddy-tools' session-hook --session <SESSION_ID> --daemon http://127.0.0.1:8899 --daemon-socket '<SESSIONS>/run/<OS_USER>/daemon.sock' --os-user <OS_USER> --hook-token <HOOK_TOKEN> --event Stop",
             "type": "command"
           }
         ],
@@ -83,7 +83,7 @@
       {
         "hooks": [
           {
-            "command": "'<STUBS>/tddy-tools' session-hook --session <SESSION_ID> --daemon http://127.0.0.1:8899 --daemon-socket '<SESSIONS>/run-agent-tools/<OS_USER>/agent.sock' --os-user <OS_USER> --hook-token <HOOK_TOKEN> --event UserPromptSubmit",
+            "command": "'<STUBS>/tddy-tools' session-hook --session <SESSION_ID> --daemon http://127.0.0.1:8899 --daemon-socket '<SESSIONS>/run/<OS_USER>/daemon.sock' --os-user <OS_USER> --hook-token <HOOK_TOKEN> --event UserPromptSubmit",
             "type": "command"
           }
         ],

@@ -118,7 +118,8 @@ struct HostWithAnEncryptedKey {
 fn a_service_serving_two_operators(storage: &Path) -> HostServiceImpl {
     let config_path = storage.join("two-operator-config.yaml");
     std::fs::write(&config_path, TWO_OPERATOR_CONFIG).expect("a config for this host");
-    std::fs::write(storage.join("users.yaml"), TWO_OPERATOR_USERS).expect("a users file for this host");
+    std::fs::write(storage.join("users.yaml"), TWO_OPERATOR_USERS)
+        .expect("a users file for this host");
     let config = DaemonConfig::load(&config_path).expect("a loadable config");
     let user_resolver: SessionUserResolver = Arc::new(|token| match token {
         TEST_TOKEN => Some(TEST_USER.to_string()),

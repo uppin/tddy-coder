@@ -47,15 +47,18 @@ const STAGING_ID_B: &str = "bbbbbbbb-bbbb-7bbb-8bbb-bbbbbbbbbbbb";
 fn write_config() -> (tempfile::TempDir, DaemonConfig) {
     let os_user = std::env::var("USER").expect("USER must be set");
     let dir = tempfile::tempdir().unwrap();
-    let yaml = format!(
-        r#"
-users:
-  - github_user: "testuser"
-    os_user: "{os_user}"
-"#
-    );
+    let yaml = r#"
+"#;
     let config_path = dir.path().join("daemon.yaml");
     std::fs::write(&config_path, yaml).unwrap();
+    std::fs::write(
+        std::path::Path::new(&(config_path))
+            .parent()
+            .expect("a config directory")
+            .join("users.yaml"),
+        format!("- github_user: \"testuser\"\n  os_user: \"{os_user}\"\n"),
+    )
+    .unwrap();
     let config = DaemonConfig::load(&config_path).expect("config must parse");
     (dir, config)
 }

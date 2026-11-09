@@ -19,11 +19,18 @@ const TEST_HOOK_TOKEN: &str = "cursor-hook-token-abc";
 const TEST_OS_USER: &str = "testuser";
 
 fn minimal_service(sessions_base: PathBuf) -> DaemonSessionHost {
-    let yaml =
-        format!("users:\n  - github_user: \"{TEST_OS_USER}\"\n    os_user: \"{TEST_OS_USER}\"\n");
+    let yaml = "";
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("config.yaml");
     std::fs::write(&path, yaml).unwrap();
+    std::fs::write(
+        std::path::Path::new(&(path))
+            .parent()
+            .expect("a config directory")
+            .join("users.yaml"),
+        format!("- github_user: \"{TEST_OS_USER}\"\n  os_user: \"{TEST_OS_USER}\"\n"),
+    )
+    .unwrap();
     let config = DaemonConfig::load(&path).unwrap();
 
     let base = sessions_base.clone();

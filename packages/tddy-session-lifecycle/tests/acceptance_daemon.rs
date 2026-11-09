@@ -14,11 +14,6 @@ fn acceptance_config_loads_users_and_tools() {
 listen:
   web_port: 8899
   web_host: "0.0.0.0"
-users:
-  - github_user: "octocat"
-    os_user: "dev1"
-  - github_user: "torvalds"
-    os_user: "dev2"
 allowed_tools:
   - path: "target/debug/tddy-coder"
     label: "tddy-coder (debug)"
@@ -29,6 +24,7 @@ allowed_tools:
     std::fs::write(&path, yaml).unwrap();
 
     // When
+    std::fs::write(std::path::Path::new(&(path)).parent().expect("a config directory").join("users.yaml"), "- github_user: \"octocat\"\n  os_user: \"dev1\"\n- github_user: \"torvalds\"\n  os_user: \"dev2\"\n").unwrap();
     let config = DaemonConfig::load(&path).expect("config should load");
 
     // Then
@@ -56,9 +52,6 @@ livekit:
   enabled: true
   url: ws://127.0.0.1:7880
   common_room: tddy-lobby
-users:
-  - github_user: "a"
-    os_user: "b"
 "#;
     let path = std::env::temp_dir().join("tddy-daemon-acceptance-common-room.yaml");
     std::fs::write(&path, yaml).unwrap();
@@ -78,9 +71,6 @@ users:
 fn acceptance_config_codex_oauth_loopback_proxy_eligible_false() {
     // Given
     let yaml = r#"
-users:
-  - github_user: "a"
-    os_user: "b"
 codex_oauth_loopback_proxy_eligible: false
 "#;
     let path = std::env::temp_dir().join("tddy-daemon-acceptance-oauth-proxy.yaml");
@@ -98,9 +88,6 @@ codex_oauth_loopback_proxy_eligible: false
 fn acceptance_config_spawn_mouse_false() {
     // Given
     let yaml = r#"
-users:
-  - github_user: "a"
-    os_user: "b"
 spawn_mouse: false
 "#;
     let path = std::env::temp_dir().join("tddy-daemon-acceptance-mouse.yaml");
@@ -118,9 +105,6 @@ spawn_mouse: false
 fn acceptance_user_mapping_github_to_os() {
     // Given
     let yaml = r#"
-users:
-  - github_user: "octocat"
-    os_user: "dev1"
 "#;
     let path = std::env::temp_dir().join("tddy-daemon-acceptance-mapping.yaml");
     std::fs::write(&path, yaml).unwrap();
@@ -203,9 +187,6 @@ fn acceptance_config_loads_repos_base_path() {
     // Given
     let yaml = r#"
 repos_base_path: "repos"
-users:
-  - github_user: "a"
-    os_user: "b"
 "#;
     let path = std::env::temp_dir().join("tddy-daemon-acceptance-repos.yaml");
     std::fs::write(&path, yaml).unwrap();

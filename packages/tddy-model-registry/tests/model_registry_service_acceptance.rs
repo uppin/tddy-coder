@@ -626,8 +626,11 @@ fn a_config_allowing(ids: &[&str]) -> tddy_daemon::config::DaemonConfig {
     let dir = tempfile::tempdir().expect("a tempdir for the daemon config");
     let path: PathBuf = dir.path().join("daemon.yaml");
     std::fs::write(&path, yaml).expect("write the daemon config");
-    std::fs::write(dir.path().join("users.yaml"), "- github_user: \"gh1\"\n  os_user: \"testuser\"\n")
-        .expect("write the users file");
+    std::fs::write(
+        dir.path().join("users.yaml"),
+        "- github_user: \"gh1\"\n  os_user: \"testuser\"\n",
+    )
+    .expect("write the users file");
     let config = tddy_daemon::config::DaemonConfig::load(&path).expect("load the daemon config");
     // The tempdir has done its job once the YAML is parsed.
     drop(dir);

@@ -46,7 +46,11 @@ livekit:
 "#
     );
     std::fs::write(&path, yaml).unwrap();
-    std::fs::write(dir.path().join("users.yaml"), "- github_user: \"testuser\"\n  os_user: \"testdev\"\n").unwrap();
+    std::fs::write(
+        dir.path().join("users.yaml"),
+        "- github_user: \"testuser\"\n  os_user: \"testdev\"\n",
+    )
+    .unwrap();
     (dir, path)
 }
 

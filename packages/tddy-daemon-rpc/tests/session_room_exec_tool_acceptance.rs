@@ -161,9 +161,6 @@ fn write_daemon_yaml(ws_url: &str, os_user: &str) -> (tempfile::TempDir, PathBuf
     let yaml = format!(
         r#"
 daemon_instance_id: {INSTANCE_ID}
-users:
-  - github_user: "testuser"
-    os_user: "{os_user}"
 allowed_tools:
   - path: {true_path}
     label: t
@@ -172,6 +169,11 @@ session_room:
 {livekit}"#
     );
     std::fs::write(&path, yaml).unwrap();
+    std::fs::write(
+        dir.path().join("users.yaml"),
+        format!("- github_user: \"testuser\"\n  os_user: \"{os_user}\"\n"),
+    )
+    .unwrap();
     (dir, path)
 }
 
@@ -223,6 +225,14 @@ impl FacilitatingDaemon {
             .build();
 
         let (config_dir, config_path) = write_daemon_yaml(&ws_url, &os_user);
+        std::fs::write(
+            std::path::Path::new(&(config_path))
+                .parent()
+                .expect("a config directory")
+                .join("users.yaml"),
+            format!("- github_user: \"testuser\"\n  os_user: \"{os_user}\"\n"),
+        )
+        .unwrap();
         let config = tddy_daemon_kernel::config::DaemonConfig::load(&config_path)
             .expect("daemon.yaml must load");
 

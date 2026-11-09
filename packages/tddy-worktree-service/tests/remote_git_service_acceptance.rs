@@ -33,11 +33,15 @@ const PROJECT_NAME: &str = "my-app";
 fn a_daemon_config() -> (tempfile::TempDir, DaemonConfig) {
     let dir = tempfile::tempdir().expect("tempdir");
     let path = dir.path().join("daemon.yaml");
+    std::fs::write(&path, "").expect("write daemon.yaml");
     std::fs::write(
-        &path,
-        format!("users:\n  - github_user: \"{GITHUB_USER}\"\n    os_user: \"{OS_USER}\"\n"),
+        std::path::Path::new(&(path))
+            .parent()
+            .expect("a config directory")
+            .join("users.yaml"),
+        format!("- github_user: \"{GITHUB_USER}\"\n  os_user: \"{OS_USER}\"\n"),
     )
-    .expect("write daemon.yaml");
+    .unwrap();
     let config = DaemonConfig::load(&path).expect("config must parse");
     (dir, config)
 }

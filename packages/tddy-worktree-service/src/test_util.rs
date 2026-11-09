@@ -27,7 +27,11 @@ pub fn test_config_for_os_user(os_user: &str) -> DaemonConfig {
     let dir = tempfile::tempdir().expect("create temp dir for test config");
     let path = dir.path().join("config.yaml");
     std::fs::write(&path, "").expect("write test config");
-    std::fs::write(dir.path().join("users.yaml"), format!("- github_user: \"{TEST_USER}\"\n  os_user: \"{os_user}\"\n")).expect("write test users");
+    std::fs::write(
+        dir.path().join("users.yaml"),
+        format!("- github_user: \"{TEST_USER}\"\n  os_user: \"{os_user}\"\n"),
+    )
+    .expect("write test users");
     DaemonConfig::load(&path).expect("load test config")
 }
 

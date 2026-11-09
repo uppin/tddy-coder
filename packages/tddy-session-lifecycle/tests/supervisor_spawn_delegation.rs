@@ -349,9 +349,6 @@ livekit:
   url: "ws://127.0.0.1:7880"
   api_key: "test-key"
   api_secret: "test-secret"
-users:
-  - github_user: "testuser"
-    os_user: "{os_user}"
 "#,
         repos = repos_base.display(),
     );
@@ -360,6 +357,14 @@ users:
     std::fs::write(&path, yaml).unwrap();
     // The config tempdir is only read by `load`; leaking it keeps the test binary simple.
     std::mem::forget(dir);
+    std::fs::write(
+        std::path::Path::new(&(path))
+            .parent()
+            .expect("a config directory")
+            .join("users.yaml"),
+        format!("- github_user: \"testuser\"\n  os_user: \"{os_user}\"\n"),
+    )
+    .unwrap();
     DaemonConfig::load(&path).expect("config must parse")
 }
 

@@ -594,7 +594,11 @@ mod tests {
         );
         let path = dir.path().join("config.yaml");
         std::fs::write(&path, yaml).unwrap();
-        std::fs::write(dir.path().join("users.yaml"), "- github_user: \"u\"\n  os_user: \"u\"\n").unwrap();
+        std::fs::write(
+            dir.path().join("users.yaml"),
+            "- github_user: \"u\"\n  os_user: \"u\"\n",
+        )
+        .unwrap();
         (DaemonConfig::load(&path).unwrap(), dir)
     }
 
@@ -629,7 +633,11 @@ mod tests {
         );
         let path = dir.path().join("config.yaml");
         std::fs::write(&path, yaml).unwrap();
-        std::fs::write(dir.path().join("users.yaml"), "- github_user: \"u\"\n  os_user: \"u\"\n").unwrap();
+        std::fs::write(
+            dir.path().join("users.yaml"),
+            "- github_user: \"u\"\n  os_user: \"u\"\n",
+        )
+        .unwrap();
         (DaemonConfig::load(&path).unwrap(), dir)
     }
 
@@ -862,7 +870,11 @@ mod tests {
         );
         let path = dir.path().join("config.yaml");
         std::fs::write(&path, yaml).unwrap();
-        std::fs::write(dir.path().join("users.yaml"), "- github_user: \"operator\"\n  os_user: \"operator-os\"\n").unwrap();
+        std::fs::write(
+            dir.path().join("users.yaml"),
+            "- github_user: \"operator\"\n  os_user: \"operator-os\"\n",
+        )
+        .unwrap();
         (DaemonConfig::load(&path).unwrap(), dir)
     }
 

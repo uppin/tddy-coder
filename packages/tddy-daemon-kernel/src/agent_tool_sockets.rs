@@ -204,9 +204,7 @@ pub fn adopt_user_sockets_from_environment() -> Vec<InheritedAgentToolSocket> {
 }
 
 /// Adopt each `(os user, descriptor)` that is that user's one daemon socket; close the rest.
-pub fn adopt_user_descriptors(
-    descriptors: Vec<(String, RawFd)>,
-) -> Vec<InheritedAgentToolSocket> {
+pub fn adopt_user_descriptors(descriptors: Vec<(String, RawFd)>) -> Vec<InheritedAgentToolSocket> {
     descriptors
         .into_iter()
         .filter_map(|(os_user, fd)| {
@@ -232,7 +230,6 @@ pub enum AgentToolSocketPlacement {
     /// One socket per OS user, **only** as handed over by `tddy-supervisor` (`#agent-tools`
     /// 31/32): a supervised daemon derives and binds no socket path of its own, and a user it was
     /// handed none for is refused, naming `users.yaml`.
-    // TODO(user-mapping-in-supervisor): implement — today this behaves as `PerOsUser`.
     Supervised,
 }
 
@@ -397,11 +394,8 @@ impl AgentToolSockets {
             ),
             None => {
                 let path = user_socket_path_for_user(data_dir, os_user)?;
-                let listener = owner_socket::bind_owner_only(
-                    &path,
-                    os_user,
-                    OwnerSocketKind::USER_DAEMON,
-                )?;
+                let listener =
+                    owner_socket::bind_owner_only(&path, os_user, OwnerSocketKind::USER_DAEMON)?;
                 (path, listener, true)
             }
         };

@@ -29,9 +29,17 @@ const MAIN_SESSION: &str = "main-0000-0000-0000-000000000000";
 /// A daemon config mapping `testuser` to `os_user`, written under `dir` (the test's data dir, so it
 /// is removed with it).
 fn a_daemon_config(dir: &Path, os_user: &str) -> DaemonConfig {
-    let yaml = format!("users:\n  - github_user: \"testuser\"\n    os_user: \"{os_user}\"\n");
+    let yaml = "";
     let path = dir.join("config.yaml");
     std::fs::write(&path, yaml).unwrap();
+    std::fs::write(
+        std::path::Path::new(&(path))
+            .parent()
+            .expect("a config directory")
+            .join("users.yaml"),
+        format!("- github_user: \"testuser\"\n  os_user: \"{os_user}\"\n"),
+    )
+    .unwrap();
     DaemonConfig::load(&path).unwrap()
 }
 

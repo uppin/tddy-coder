@@ -281,7 +281,11 @@ fn config_mapping_test_user_to(os_user: &str) -> tddy_daemon_kernel::config::Dae
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("daemon.yaml");
     std::fs::write(&path, "").unwrap();
-    std::fs::write(dir.path().join("users.yaml"), format!("- github_user: \"{TEST_USER}\"\n  os_user: \"{os_user}\"\n")).unwrap();
+    std::fs::write(
+        dir.path().join("users.yaml"),
+        format!("- github_user: \"{TEST_USER}\"\n  os_user: \"{os_user}\"\n"),
+    )
+    .unwrap();
     tddy_daemon_kernel::config::DaemonConfig::load(&path).expect("config must parse")
 }
 

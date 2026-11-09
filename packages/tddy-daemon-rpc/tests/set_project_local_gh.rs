@@ -130,9 +130,13 @@ fn a_daemon_with_a_project_row(
 fn a_daemon(os_user: &str, tddy_data_dir: PathBuf) -> TestDaemon {
     let config_dir = tempfile::tempdir().unwrap();
     let config_path = config_dir.path().join("config.yaml");
+    std::fs::write(&config_path, "").unwrap();
     std::fs::write(
-        &config_path,
-        format!("users:\n  - github_user: \"testuser\"\n    os_user: \"{os_user}\"\n"),
+        std::path::Path::new(&(config_path))
+            .parent()
+            .expect("a config directory")
+            .join("users.yaml"),
+        format!("- github_user: \"testuser\"\n  os_user: \"{os_user}\"\n"),
     )
     .unwrap();
     let config = DaemonConfig::load(&config_path).unwrap();

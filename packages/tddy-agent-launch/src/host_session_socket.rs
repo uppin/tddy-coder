@@ -99,7 +99,8 @@ pub struct HostSessionSockets {
     inherited: std::sync::Mutex<HashMap<String, Option<InheritedHostSocket>>>,
     stop_watch_interval: std::time::Duration,
     /// The merged per-user daemon sockets to serve on instead, once [`Self::serve_on`] is called.
-    user_sockets: std::sync::Mutex<Option<Arc<tddy_daemon_kernel::agent_tool_sockets::AgentToolSockets>>>,
+    user_sockets:
+        std::sync::Mutex<Option<Arc<tddy_daemon_kernel::agent_tool_sockets::AgentToolSockets>>>,
     /// The probe each user's service answers with, set when that user's socket is bound.
     probes: Arc<std::sync::Mutex<HashMap<String, SessionProbe>>>,
 }

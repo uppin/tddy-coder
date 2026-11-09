@@ -83,9 +83,8 @@ impl Supervisor {
         forks: Arc<ForkBroker>,
     ) -> anyhow::Result<Arc<Supervisor>> {
         let initial_users = match &config.users {
-            Some(users) => crate::users_file::UsersFile::load(&users.file).map_err(|error| {
-                anyhow::anyhow!("users.yaml {}: {error}", users.file.display())
-            })?,
+            Some(users) => crate::users_file::UsersFile::load(&users.file)
+                .map_err(|error| anyhow::anyhow!("users.yaml {}: {error}", users.file.display()))?,
             None => crate::users_file::UsersFile::default(),
         };
         let mut slots = Vec::with_capacity(config.services.len());

@@ -107,9 +107,13 @@ fn a_worktree_for_the_branch(repo: &Path) -> PathBuf {
 fn a_config() -> (tddy_daemon_kernel::config::DaemonConfig, tempfile::TempDir) {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("config.yaml");
+    std::fs::write(&path, "").unwrap();
     std::fs::write(
-        &path,
-        "users:\n  - github_user: \"u\"\n    os_user: \"u\"\n",
+        std::path::Path::new(&(path))
+            .parent()
+            .expect("a config directory")
+            .join("users.yaml"),
+        "- github_user: \"u\"\n  os_user: \"u\"\n",
     )
     .unwrap();
     (

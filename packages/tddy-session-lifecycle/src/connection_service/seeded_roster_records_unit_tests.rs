@@ -14,10 +14,18 @@ use tddy_daemon_kernel::{SessionUserResolver, SessionsBaseResolver};
 /// A daemon with no peers: the whole common room is this host, so a reference naming any other
 /// daemon is one nothing here can resolve.
 fn a_daemon_with_no_peers(tddy_data_dir: std::path::PathBuf) -> DaemonSessionHost {
-    let yaml = "users:\n  - github_user: \"u\"\n    os_user: \"u\"\n";
+    let yaml = "";
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("config.yaml");
     std::fs::write(&path, yaml).unwrap();
+    std::fs::write(
+        std::path::Path::new(&(path))
+            .parent()
+            .expect("a config directory")
+            .join("users.yaml"),
+        "- github_user: \"u\"\n  os_user: \"u\"\n",
+    )
+    .unwrap();
     let config = crate::config::DaemonConfig::load(&path).unwrap();
     let base = tddy_data_dir.clone();
     let sessions_base_resolver: SessionsBaseResolver = Arc::new(move |_| Some(base.clone()));

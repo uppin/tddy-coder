@@ -136,7 +136,10 @@ impl LiveUsers {
         }
         // `config_path` is the daemon's config file; the mapping it enrols into is the
         // `users.yaml` beside it (a caller that already named that file enrols into it directly).
-        let users_path = if config_path.file_name().is_some_and(|name| name == "users.yaml") {
+        let users_path = if config_path
+            .file_name()
+            .is_some_and(|name| name == "users.yaml")
+        {
             config_path.to_path_buf()
         } else {
             config_path

@@ -82,12 +82,7 @@ pub fn enrol_first_login(
         Ok(contents) => serde_yaml::from_str(&contents)
             .map_err(|e| not_writable(format!("{}: {e}", config_path.display())))?,
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => Vec::new(),
-        Err(error) => {
-            return Err(not_writable(format!(
-                "{}: {error}",
-                config_path.display()
-            )))
-        }
+        Err(error) => return Err(not_writable(format!("{}: {error}", config_path.display()))),
     };
     if let Some(enrolled) = existing.first() {
         return Err(EnrolmentRefusal::AlreadyEnrolled {

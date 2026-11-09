@@ -1012,12 +1012,14 @@ impl AHeldHook {
 fn a_daemon_config_without_agent_sections() -> (tempfile::TempDir, DaemonConfig) {
     let dir = tempfile::tempdir().unwrap();
     let user = current_os_user();
-    let yaml = format!(
-        "allowed_tools:\n  - path: /bin/true\n    label: true\n"
-    );
+    let yaml = "allowed_tools:\n  - path: /bin/true\n    label: true\n";
     let config_path = dir.path().join("daemon.yaml");
     std::fs::write(&config_path, yaml).unwrap();
-    std::fs::write(dir.path().join("users.yaml"), format!("- github_user: \"{user}\"\n  os_user: \"{user}\"\n")).unwrap();
+    std::fs::write(
+        dir.path().join("users.yaml"),
+        format!("- github_user: \"{user}\"\n  os_user: \"{user}\"\n"),
+    )
+    .unwrap();
     let config = DaemonConfig::load(&config_path).expect("config must parse");
     (dir, config)
 }

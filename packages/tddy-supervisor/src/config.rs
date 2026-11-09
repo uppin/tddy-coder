@@ -251,10 +251,9 @@ impl ServiceSocket {
 /// Checked on the untyped document, before typed deserialization, so a leftover key is told it is
 /// obsolete rather than getting serde's bare `unknown field`.
 fn refuse_old_user_list_keys(yaml: &str) -> Result<(), ConfigError> {
-    let document: serde_yaml::Value =
-        serde_yaml::from_str(yaml).map_err(|error| ConfigError {
-            message: error.to_string(),
-        })?;
+    let document: serde_yaml::Value = serde_yaml::from_str(yaml).map_err(|error| ConfigError {
+        message: error.to_string(),
+    })?;
     let Some(top) = document.as_mapping() else {
         return Ok(());
     };

@@ -42,9 +42,13 @@ const BRANCH: &str = "feature/attach-docs/attach-store";
 fn a_service(sessions_base: PathBuf) -> TestDaemon {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("config.yaml");
+    std::fs::write(&path, "").unwrap();
     std::fs::write(
-        &path,
-        "users:\n  - github_user: \"u\"\n    os_user: \"u\"\n",
+        std::path::Path::new(&(path))
+            .parent()
+            .expect("a config directory")
+            .join("users.yaml"),
+        "- github_user: \"u\"\n  os_user: \"u\"\n",
     )
     .unwrap();
     let config = tddy_daemon_kernel::config::DaemonConfig::load(&path).unwrap();

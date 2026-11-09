@@ -225,9 +225,8 @@ impl DaemonConfigServiceTrait for DaemonConfigServiceImpl {
             let yaml = serde_yaml::to_string(&rows).map_err(|e| {
                 Status::internal(format!("failed to serialize the users mapping: {e}"))
             })?;
-            tddy_core::atomic_file::write_atomic_labelled(&users_path, yaml).map_err(|e| {
-                Status::internal(format!("failed to write the users mapping: {e}"))
-            })
+            tddy_core::atomic_file::write_atomic_labelled(&users_path, yaml)
+                .map_err(|e| Status::internal(format!("failed to write the users mapping: {e}")))
         })?;
         let livekit = update.config.livekit.clone();
         *config = update.config;

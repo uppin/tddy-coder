@@ -35,9 +35,6 @@ fn service_with_livekit_configured(sessions_base: PathBuf) -> DaemonSessionHost 
     std::fs::write(
         &config_path,
         r#"
-users:
-  - github_user: "testuser"
-    os_user: "testuser"
 allowed_tools:
   - path: target/debug/tddy-coder
     label: debug
@@ -46,6 +43,14 @@ livekit:
   api_key: dummy-key
   api_secret: dummy-secret
 "#,
+    )
+    .unwrap();
+    std::fs::write(
+        std::path::Path::new(&(config_path))
+            .parent()
+            .expect("a config directory")
+            .join("users.yaml"),
+        "- github_user: \"testuser\"\n  os_user: \"testuser\"\n",
     )
     .unwrap();
     let config = DaemonConfig::load(&config_path).expect("config must parse");

@@ -97,7 +97,10 @@ pub fn load_users_file(source: &UsersFileSource) -> anyhow::Result<LiveUsers> {
     let mut by_login: std::collections::BTreeMap<&str, &str> = std::collections::BTreeMap::new();
     for row in &rows {
         if row.os_user == "root" {
-            anyhow::bail!("users.yaml at {} maps a login to `root`, which is refused", path.display());
+            anyhow::bail!(
+                "users.yaml at {} maps a login to `root`, which is refused",
+                path.display()
+            );
         }
         match by_login.entry(row.github_user.as_str()) {
             std::collections::btree_map::Entry::Vacant(entry) => {
@@ -115,6 +118,12 @@ pub fn load_users_file(source: &UsersFileSource) -> anyhow::Result<LiveUsers> {
             }
         }
     }
+    // An identical row repeated is one mapping, as the in-memory deserialization always read it.
+    let mut seen: std::collections::BTreeSet<(String, String)> = std::collections::BTreeSet::new();
+    let rows: Vec<crate::config::access::UserMapping> = rows
+        .into_iter()
+        .filter(|row| seen.insert((row.github_user.clone(), row.os_user.clone())))
+        .collect();
     Ok(match source {
         UsersFileSource::HandedBySupervisor(_) => LiveUsers::owned_by_supervisor(rows),
         UsersFileSource::BesideConfig(_) => LiveUsers::new(rows),

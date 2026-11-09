@@ -78,7 +78,11 @@ fn a_config_mapping_ada() -> tddy_daemon_kernel::config::DaemonConfig {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("config.yaml");
     std::fs::write(&path, yaml).unwrap();
-    std::fs::write(dir.path().join("users.yaml"), format!("- github_user: \"{GITHUB_USER}\"\n  os_user: \"{OS_USER}\"\n")).unwrap();
+    std::fs::write(
+        dir.path().join("users.yaml"),
+        format!("- github_user: \"{GITHUB_USER}\"\n  os_user: \"{OS_USER}\"\n"),
+    )
+    .unwrap();
     tddy_daemon_kernel::config::DaemonConfig::load(&path).unwrap()
 }
 

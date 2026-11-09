@@ -106,11 +106,17 @@ fn a_config(home: &Path, tools: &[String]) -> DaemonConfig {
         .iter()
         .map(|path| format!("  - path: \"{path}\"\n"))
         .collect();
-    let yaml = format!(
-        "users:\n  - github_user: \"{GITHUB_USER}\"\n    os_user: \"{OS_USER}\"\nallowed_tools:\n{allowed_tools}"
-    );
+    let yaml = format!("allowed_tools:\n{allowed_tools}");
     let path = home.join("daemon.yaml");
     std::fs::write(&path, yaml).expect("write the daemon config");
+    std::fs::write(
+        std::path::Path::new(&(path))
+            .parent()
+            .expect("a config directory")
+            .join("users.yaml"),
+        format!("- github_user: \"{GITHUB_USER}\"\n  os_user: \"{OS_USER}\"\n"),
+    )
+    .unwrap();
     DaemonConfig::load(&path).expect("the daemon config did not load")
 }
 

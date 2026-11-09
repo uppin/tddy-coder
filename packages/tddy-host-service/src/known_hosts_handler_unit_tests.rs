@@ -63,7 +63,11 @@ fn a_config_naming_this_daemon(
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("config.yaml");
     std::fs::write(&path, yaml).unwrap();
-    std::fs::write(dir.path().join("users.yaml"), "- github_user: \"u\"\n  os_user: \"u\"\n").unwrap();
+    std::fs::write(
+        dir.path().join("users.yaml"),
+        "- github_user: \"u\"\n  os_user: \"u\"\n",
+    )
+    .unwrap();
     tddy_daemon_kernel::config::DaemonConfig::load(&path).unwrap()
 }
 

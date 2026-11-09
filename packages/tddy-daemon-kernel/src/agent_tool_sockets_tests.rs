@@ -268,10 +268,7 @@ async fn an_unlisted_user_under_the_supervisor_is_refused_naming_the_setting() {
         .map_err(|e| format!("{e:#}"));
 
     // Then it is refused, naming the file to map the user in, and nothing is left behind
-    let names_the_setting = refusal
-        .as_ref()
-        .err()
-        .map(|why| why.contains("users.yaml"));
+    let names_the_setting = refusal.as_ref().err().map(|why| why.contains("users.yaml"));
     assert_eq!(
         (
             names_the_setting,

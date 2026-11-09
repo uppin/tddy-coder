@@ -418,16 +418,18 @@ impl AJailedClaudeDaemon {
 
 fn a_daemon_config() -> (tempfile::TempDir, DaemonConfig) {
     let dir = tempfile::tempdir().unwrap();
-    let yaml = format!(
-        r#"
+    let yaml = r#"
 allowed_tools:
   - path: /bin/true
     label: true
-"#
-    );
+"#;
     let config_path = dir.path().join("daemon.yaml");
     std::fs::write(&config_path, yaml).unwrap();
-    std::fs::write(dir.path().join("users.yaml"), "- github_user: \"{OWNER}\"\n  os_user: \"{OWNER}\"\n").unwrap();
+    std::fs::write(
+        dir.path().join("users.yaml"),
+        format!("- github_user: \"{OWNER}\"\n  os_user: \"{OWNER}\"\n"),
+    )
+    .unwrap();
     let config = DaemonConfig::load(&config_path).expect("config must parse");
     (dir, config)
 }

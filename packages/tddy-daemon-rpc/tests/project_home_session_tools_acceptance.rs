@@ -229,15 +229,18 @@ fn current_os_user() -> String {
 fn a_config_with_a_stub_claude() -> DaemonConfig {
     let dir = tempfile::tempdir().unwrap();
     let user = current_os_user();
-    let yaml = format!(
-        r#"
-users:
-  - github_user: "{user}"
-    os_user: "{user}"
-"#
-    );
+    let yaml = r#"
+"#;
     let config_path = dir.path().join("daemon.yaml");
     std::fs::write(&config_path, yaml).unwrap();
+    std::fs::write(
+        std::path::Path::new(&(config_path))
+            .parent()
+            .expect("a config directory")
+            .join("users.yaml"),
+        format!("- github_user: \"{user}\"\n  os_user: \"{user}\"\n"),
+    )
+    .unwrap();
     DaemonConfig::load(&config_path).expect("config must parse")
 }
 

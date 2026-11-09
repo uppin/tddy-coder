@@ -24,9 +24,10 @@ fn a_daemon_allowing(ids: &[&str]) -> (tempfile::TempDir, TestDaemon) {
     std::fs::create_dir_all(home.path().join("tools")).unwrap();
     let allowed: String = ids.iter().map(|id| format!("  - id: {id}\n")).collect();
     let config_path = home.path().join("daemon.yaml");
+    std::fs::write(&config_path, format!("allowed_agents:\n{allowed}")).unwrap();
     std::fs::write(
-        &config_path,
-        format!("users:\n  - github_user: u\n    os_user: u\nallowed_agents:\n{allowed}"),
+        home.path().join("users.yaml"),
+        "- github_user: u\n  os_user: u\n",
     )
     .unwrap();
     let config = DaemonConfig::load(&config_path).expect("the config loads");

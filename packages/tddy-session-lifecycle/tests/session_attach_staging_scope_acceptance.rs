@@ -64,13 +64,18 @@ fn write_config(max_attachment_bytes: u64) -> (tempfile::TempDir, DaemonConfig) 
     let yaml = format!(
         r#"
 max_attachment_bytes: {max_attachment_bytes}
-users:
-  - github_user: "testuser"
-    os_user: "{os_user}"
 "#
     );
     let config_path = dir.path().join("daemon.yaml");
     std::fs::write(&config_path, yaml).unwrap();
+    std::fs::write(
+        std::path::Path::new(&(config_path))
+            .parent()
+            .expect("a config directory")
+            .join("users.yaml"),
+        format!("- github_user: \"testuser\"\n  os_user: \"{os_user}\"\n"),
+    )
+    .unwrap();
     let config = DaemonConfig::load(&config_path).expect("config must parse");
     (dir, config)
 }
