@@ -204,3 +204,64 @@ async fn an_allowlisted_harness_has_its_stdio_relayed_and_its_exit_reported() {
     let status = supervisor.await_session_exit(&client, spawned.pid).await;
     assert_eq!(status.pid, spawned.pid);
 }
+
+/// Makes the supervisor spawn for real, so it is Linux-only — see this file's header.
+#[cfg(target_os = "linux")]
+#[tokio::test]
+async fn a_relayed_agent_starts_from_exactly_the_env_the_daemon_computed() {
+    use support::a_tool_that_prints_its_environment;
+    use tokio::io::AsyncReadExt;
+
+    // Given — an agent env the daemon computed, naming a key no `allowed_env_keys` lists
+    let tool = a_tool_that_prints_its_environment();
+    let supervisor = a_supervisor()
+        .managing(a_service("tddy-daemon").that_stays_alive())
+        .allowing_the_current_user()
+        .allowing_relay_tool(tool.path())
+        .start()
+        .await;
+    let client = supervisor.client().await;
+    let (_dir, socket, listener) = a_listening_socket();
+    let mut request = a_relayed_spawn(tool.path(), &socket);
+    request.env = [("PATH", "/usr/bin:/bin"), ("LARK_API_KEY", "sk-lark")]
+        .into_iter()
+        .map(|(name, value)| (name.to_string(), value.to_string()))
+        .collect();
+
+    // When
+    client.spawn_relayed(request).await.expect("spawn relayed");
+    let (mut agent, _) = tokio::time::timeout(RELAY_DEADLINE, listener.accept())
+        .await
+        .expect("the supervisor connects within the deadline")
+        .expect("accept the supervisor's connection");
+    let mut printed = String::new();
+    tokio::time::timeout(RELAY_DEADLINE, agent.read_to_string(&mut printed))
+        .await
+        .expect("the environment arrives within the deadline")
+        .expect("read the environment");
+
+    // Then — the daemon's variables whole, the account's identity, nothing the supervisor holds
+    // (`PWD`, `SHLVL`, `_`, `OLDPWD` are the tool's own shell's, set after exec).
+    const THE_TOOLS_SHELL: [&str; 4] = ["PWD", "SHLVL", "_", "OLDPWD"];
+    let names: Vec<&str> = printed
+        .lines()
+        .filter_map(|line| line.split_once('=').map(|(name, _)| name))
+        .filter(|name| !THE_TOOLS_SHELL.contains(name))
+        .collect();
+    for expected in ["HOME", "LOGNAME", "USER"] {
+        assert!(names.contains(&expected), "{expected}: {printed}");
+    }
+    assert!(
+        printed.lines().any(|line| line == "LARK_API_KEY=sk-lark"),
+        "{printed}"
+    );
+    assert!(
+        printed.lines().any(|line| line == "PATH=/usr/bin:/bin"),
+        "{printed}"
+    );
+    assert_eq!(
+        names.len(),
+        5,
+        "nothing beyond the daemon's env and the account's: {printed}"
+    );
+}
