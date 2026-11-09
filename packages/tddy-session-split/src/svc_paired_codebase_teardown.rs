@@ -79,8 +79,27 @@ impl SplitSessions {
         sessions_base: &Path,
         session_id: &str,
     ) -> Result<(), Status> {
-        // TODO(operator-start-refusal): implement
-        let _ = (sessions_base, session_id);
+        let session_dir = unified_session_dir_path(sessions_base, session_id);
+        let Ok(meta) = read_session_metadata(&session_dir) else {
+            return Ok(());
+        };
+        let Some((codebase_daemon, codebase_session)) =
+            tddy_session_agents::peer_session_answer::split_pairing(&meta)
+        else {
+            return Ok(());
+        };
+        if codebase_daemon == local_instance_id_for_config(&self.config) {
+            return Ok(());
+        }
+        let slot = self.peer_routing.common_room_slot("DeleteSession")?;
+        if !slot.is_connected().await {
+            return Err(Status::failed_precondition(format!(
+                "cannot reach the common room to delete the paired workspace session \
+                 {codebase_session} on daemon {codebase_daemon}, so its worktree's fate is unknown; \
+                 this session was left in place — retry once the daemons can see each other, or \
+                 delete that session on {codebase_daemon} directly and retry"
+            )));
+        }
         Ok(())
     }
 

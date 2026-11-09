@@ -249,8 +249,21 @@ impl AgentRoster {
     /// recorded clone while this daemon has no common room configured or joined — read-only, so
     /// `DeleteSession` can refuse before it tears anything down (`#agent-tools 30/32`).
     pub async fn refuse_an_unreachable_clone_host(&self, session_id: &str) -> Result<(), Status> {
-        // TODO(operator-start-refusal): implement
-        let _ = session_id;
+        for (daemon_instance_id, clone) in self.session_agent_clones.for_session(session_id) {
+            let unreachable = match self.peer_routing.common_room_slot("DeleteSession") {
+                Ok(slot) => !slot.is_connected().await,
+                Err(_) => true,
+            };
+            if unreachable {
+                return Err(Status::failed_precondition(format!(
+                    "cannot reach the common room to delete session {session_id}'s clone \
+                     {} on daemon {daemon_instance_id}, so its checkout is still \
+                     there; delete workspace session {} on {daemon_instance_id} once \
+                     the daemons can see each other",
+                    clone.codebase_session_id, clone.codebase_session_id
+                )));
+            }
+        }
         Ok(())
     }
 

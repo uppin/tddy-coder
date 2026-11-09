@@ -193,8 +193,12 @@ impl LaunchSessions {
         sessions_base: &Path,
         session_id: &str,
     ) -> Result<(), Status> {
-        // TODO(operator-start-refusal): implement
-        let _ = (sessions_base, session_id);
+        self.split_sessions
+            .refuse_an_unreachable_paired_codebase(sessions_base, session_id)
+            .await?;
+        self.agent_roster
+            .refuse_an_unreachable_clone_host(session_id)
+            .await?;
         Ok(())
     }
 }

@@ -66,7 +66,25 @@ impl LaunchSessions {
 /// and a peer authenticates a delete by a session token the operator start does not carry, so it
 /// may not create what it could not remove (`#agent-tools 30/32`).
 pub(crate) fn refuse_peer_held_parts(req: &StartSessionRequest) -> Result<(), Status> {
-    // TODO(operator-start-refusal): implement
-    let _ = req;
+    if !req.codebase_daemon_instance_id.trim().is_empty() {
+        return Err(Status::invalid_argument(
+            "an operator start may not set codebase_daemon_instance_id: its codebase half would be held by a peer",
+        ));
+    }
+    if req.sandboxed_codebase {
+        return Err(Status::invalid_argument(
+            "an operator start may not set sandboxed_codebase: its jailed checkout would be held as a session of its own",
+        ));
+    }
+    if !req.specialized_agents.is_empty() {
+        return Err(Status::invalid_argument(
+            "an operator start may not set specialized_agents: its seeded roster would be held by a peer",
+        ));
+    }
+    if !req.clone_placed_agents.is_empty() {
+        return Err(Status::invalid_argument(
+            "an operator start may not set clone_placed_agents: its agents would be placed on clones held by a peer",
+        ));
+    }
     Ok(())
 }

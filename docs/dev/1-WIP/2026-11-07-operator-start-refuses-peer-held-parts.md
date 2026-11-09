@@ -51,9 +51,9 @@ agent or pointer.
 
 ## Scope
 
-- [ ] `start_session_for_os_user` refuses the four peer-held fields with `INVALID_ARGUMENT`, naming the field, before anything is created
-- [ ] `TODO(operator-start-undo)` removed (`start_task.rs:148-151`), and the `undo_a_timed_out_start` doc says an operator start has no peer-held part to undo
-- [ ] `delete_session_as` checks every part can go before the tmux kill and the pointer removal: a cross-host paired half or a recorded clone with no common room configured or joined is refused with the session intact
+- [x] `start_session_for_os_user` refuses the four peer-held fields with `INVALID_ARGUMENT`, naming the field, before anything is created
+- [x] `TODO(operator-start-undo)` removed (`start_task.rs:148-151`), and the `undo_a_timed_out_start` doc says an operator start has no peer-held part to undo
+- [x] `delete_session_as` checks every part can go before the tmux kill and the pointer removal: a cross-host paired half or a recorded clone with no common room configured or joined is refused with the session intact
 - [ ] Wrap: delete `docs/dev/todo/2026-11-07-operator-start-undo-of-peer-held-parts.md`, recording "closed as unreachable" in the change-history entry
 
 ## Technical Changes
@@ -222,10 +222,10 @@ waves along the line never step back, so it is lifted to wave 3 (user, 2026-11-0
 - [x] Run acceptance tests (verify they fail)
 - [x] USER REVIEW — acceptance tests (user, 2026-11-07)
 - [x] TDD Red — write failing unit/integration tests
-- [ ] TDD Green — implement with quality code
-- [ ] Update documentation with progress
+- [x] TDD Green — implement with quality code
+- [x] Update documentation with progress
 - [ ] Repeat Red→Green→Update cycle until feature complete
-- [ ] Run the touched packages' tests (`./test -p {package}` per package) — verify 100% pass
+- [x] Run the touched packages' tests (`./test -p {package}` per package) — verify 100% pass
 - [ ] Validate changes (/validate-changes)
 - [ ] Refactor issues from change validation
 - [ ] USER REVIEW — development complete
