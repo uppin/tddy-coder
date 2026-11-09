@@ -1,7 +1,8 @@
 import { useRef } from "react";
-import type { Room } from "livekit-client";
-import { useCommonRoom, type CommonRoomStatus } from "tddy-livekit-web";
+import type { RoomState } from "tddy-client-web";
 import type { SessionAttachmentHint } from "tddy-client-web/connections/session";
+import { useCommonRoom } from "../rooms/useCommonRoom";
+import { asHandle } from "../roomHandle";
 import { presenterRoomTargetFor } from "./presenterRoomTarget";
 
 const IDENTITY_UNUSED = () => "";
@@ -12,9 +13,7 @@ const IDENTITY_UNUSED = () => "";
  * terminal's own connection. A session whose hint names no room has nothing to join, and the hook
  * yields no room rather than a failed one.
  */
-export function usePresenterLiveKitRoom(
-  hint: SessionAttachmentHint | null,
-): { room: Room | null; status: CommonRoomStatus; error: string | null } {
+export function usePresenterRoom(hint: SessionAttachmentHint | null): RoomState {
   // presenterRoomTargetFor's own identity field is discarded here — it isn't stable across
   // renders on its own; this hook manages a stable identity ref instead (below), only
   // regenerated when the room name actually changes.
@@ -30,5 +29,5 @@ export function usePresenterLiveKitRoom(
   }
 
   const { room, status, error } = useCommonRoom(target?.url, target?.roomName, identityRef.current);
-  return { room, status, error };
+  return { room: asHandle(room), status, error };
 }

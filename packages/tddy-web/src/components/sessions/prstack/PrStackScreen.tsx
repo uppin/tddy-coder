@@ -8,8 +8,8 @@ import type { SessionFilesService } from "tddy-client-web/gen/session_files_pb";
 import type { WorktreeService } from "tddy-client-web/gen/worktree_pb";
 import type { TaskService } from "tddy-client-web/gen/tasks_pb";
 import type { SessionAttachmentHint } from "tddy-client-web/connections/session";
+import { useMediaPort } from "tddy-client-web";
 import { Button, detectIsMobile, useIsMobile } from "tddy-ui-web";
-import { usePresenterLiveKitRoom } from "../usePresenterLiveKitRoom";
 import { PlannedPrList } from "./PlannedPrList";
 import { PlannedPrPanel, PLANNED_PR_PANEL_WIDTH_PX } from "./PlannedPrPanel";
 import { AddPlannedPrForm, type AddPlannedPrFormSubmission } from "./AddPlannedPrForm";
@@ -109,7 +109,7 @@ export interface PrStackScreenProps {
   sessions?: SessionEntry[];
   /**
    * How the attached session is reached. The chat panel derives its own independent LiveKit room
-   * connection from this (see `usePresenterLiveKitRoom`) rather than being handed a room from
+   * connection from this (see `usePresenterRoom`) rather than being handed a room from
    * above — `SessionMainPane`'s `room` prop is VNC-purpose and unrelated. `null` for a session that
    * is not attached, or one whose host serves it without a room.
    */
@@ -183,7 +183,7 @@ export function PrStackScreen({
   onOpenSession,
   sessionMetadataBySessionId = NO_SESSION_METADATA,
 }: PrStackScreenProps) {
-  const { room, status: roomStatus, error: roomError } = usePresenterLiveKitRoom(attachmentHint);
+  const { room, status: roomStatus, error: roomError } = useMediaPort().usePresenterRoom(attachmentHint);
   const livekitServerIdentity = attachmentHint?.serverIdentity;
   // Overrides `session.stackPlanJson` immediately after a successful `AddPlannedPr`, since the
   // `session` prop itself only refreshes once the caller separately refetches the session list.

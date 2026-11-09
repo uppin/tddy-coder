@@ -38,7 +38,7 @@ implementation** — the app (or a spec's double) supplies every port.
 | `NavigationPort` | `{ location(); navigate(to, options?); subscribe(listener) }` | `useNavigationPort`, `useAppLocation` → `{ location, navigate(path), setParams(patch) }` |
 | `PresencePort` | `{ useHostPresence(hostId); usePresenceRoom(); useRoomParticipants(room) }` | `useHostPresence`, `usePresenceRoom`, `useRoomParticipants`, `usePresencePort` |
 | `RoomRpcPort` | `{ useRoomClient(room, identity, service); useParticipantPresent(room, identity); useParticipantProbe(room, identity); useRoomStatus(room) }` | same names, plus `useRoomRpcPort` |
-| `MediaPort` | declared here; its shape is settled by `feature/web-split/media` (#855) | `useMediaPort` |
+| `MediaPort` | `{ usePresenterRoom(hint); useScreenSharingInput(options); useHasCameraVideo(room, identity); RemoteVideo; VideoPreview }` | `useMediaPort` |
 | `AuthPort` | the `useAuth` state (`user`, `isAuthenticated`, `sessionToken`, `vaultState`, `deviceLogin`, …) and actions (`login`, `logout`, `startDeviceLogin`, `unlockVault`, …) | `useAuth` |
 
 **Ports that carry hooks.** `PresencePort` and `RoomRpcPort` members are hooks, so the app builds each
@@ -92,7 +92,9 @@ imports it):
 - `aPresenceDouble()` — rooms are plain tokens (`room(name)`), `presentHost`, `setParticipants`.
 - `aRoomRpcDouble(backend)` — every room client is the backend's; `setPresent(room, identity, here)`
   drives both `useParticipantPresent` and probes.
-- `aMediaDouble(overrides?)` — minimal, until #855 settles `MediaPort`.
+- `aMediaDouble(overrides?)` → `MediaDouble`: `setCameraVideo(room, identity, has)`, `presentRoom(name, state)`;
+  `useScreenSharingInput` listens on the real picture and records `forwardedInput` (pointer types, keys),
+  calling `onCloseChord` on Ctrl+Alt+Escape; `RemoteVideo` is a bare `<video>`.
 - `withClients(element, backend, overrides?)` — wraps in all three ports; `cy.mountWithClients` and
   `tddy-web`'s `mountWithRpc` use it.
 

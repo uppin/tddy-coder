@@ -45,6 +45,8 @@ export const GLOBAL_INPUTS: readonly string[] = [
   ".github/workflows/build-gate.yml",
   "scripts/web-affected.ts",
   "scripts/web-ci.ts",
+  // Every package's vite.config.ts pre-bundles through it.
+  "scripts/vite-prebundle.ts",
   // Every package's boundary rule test runs it.
   "scripts/web-package-boundary.ts",
 ];

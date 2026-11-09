@@ -7,7 +7,7 @@
  */
 
 import React, { useEffect, useReducer, useState } from "react";
-import type { Room } from "livekit-client";
+import type { RoomHandle } from "tddy-client-web";
 import { VncPassphraseDialog } from "./VncPassphraseDialog";
 import { VncOverlay } from "./VncOverlay";
 import { applyVncTabAction, initialVncTabState } from "./vncTabState";
@@ -22,7 +22,7 @@ import { InlineError } from "tddy-ui-web";
 export interface SessionVncTabProps {
   sessionId: string;
   sessionToken: string;
-  room: Room | null;
+  room: RoomHandle | null;
   onListVncTargets: () => Promise<VncTargetInfo[]>;
   onAddVncTarget: (req: AddVncTargetReq) => Promise<VncTargetInfo>;
   onRemoveVncTarget: (targetId: string) => Promise<void>;

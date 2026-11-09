@@ -8,7 +8,7 @@
  * `connected` state carrying a {@link SessionConnection}, so no consumer branches on the wire.
  *
  * The hint is published alongside the state because a room-backed session still has one surface that
- * joins its room for itself: the chat presenter (`usePresenterLiveKitRoom`). The terminal no longer
+ * joins its room for itself: the chat presenter (`usePresenterRoom`). The terminal no longer
  * does — it reads its bytes off the connection — so what is left reads the routing from here rather
  * than re-deriving it from a reply nobody kept.
  *

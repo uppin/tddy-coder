@@ -1196,7 +1196,7 @@ answering clarifications, exactly as with pr-stack, minus the planned-PR list.
 
 **Component:** `WorkflowChatScreen` (`src/components/sessions/WorkflowChatScreen.tsx`) — a thin
 single-pane wrapper that derives its own presenter LiveKit room from the session's attachment
-(`usePresenterLiveKitRoom`, shared with `PrStackScreen`) and mounts the reusable [`AgentChat`](#agent-chat)
+(the media port's `usePresenterRoom`, shared with `PrStackScreen`) and mounts the reusable [`AgentChat`](#agent-chat)
 over the **ACP mirror** (`acp`), matching pr-stack's chat and tddy-coder's ACP-agent direction. Root
 marker: `data-testid="workflow-chat-screen"`.
 

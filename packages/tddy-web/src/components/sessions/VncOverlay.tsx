@@ -8,8 +8,8 @@
  * Dismiss via close button, Escape key, or clicking the backdrop.
  */
 
-import React, { useEffect, useRef, useState } from "react";
-import { RoomEvent, type Room, type VideoTrack } from "livekit-client";
+import React, { useEffect } from "react";
+import { useMediaPort, type RoomHandle } from "tddy-client-web";
 
 // ---------------------------------------------------------------------------
 // Props
@@ -17,7 +17,7 @@ import { RoomEvent, type Room, type VideoTrack } from "livekit-client";
 
 export interface VncOverlayProps {
   /** Session's LiveKit room (for subscribing to the bridge's video track). */
-  room: Room | null;
+  room: RoomHandle | null;
   /** LiveKit identity of the bridge participant. */
   bridgeIdentity: string;
   /** Name of the video track to subscribe to (e.g. `vnc:<target_id>`). */
@@ -39,44 +39,7 @@ export function VncOverlay({
   trackName,
   onClose,
 }: VncOverlayProps): React.ReactElement {
-  const videoRef = useRef<HTMLVideoElement>(null);
-  const [videoTrack, setVideoTrack] = useState<VideoTrack | null>(null);
-
-  // Subscribe to the bridge participant's video track from the LiveKit room.
-  useEffect(() => {
-    if (!room) return;
-
-    const findTrack = () => {
-      const participant = room.remoteParticipants.get(bridgeIdentity);
-      if (!participant) return;
-      for (const pub of participant.trackPublications.values()) {
-        if (pub.trackName === trackName && pub.track?.kind === "video") {
-          setVideoTrack(pub.track as VideoTrack);
-          return;
-        }
-      }
-    };
-
-    findTrack();
-    room.on(RoomEvent.ParticipantConnected, findTrack);
-    room.on(RoomEvent.TrackSubscribed, findTrack);
-
-    return () => {
-      room.off(RoomEvent.ParticipantConnected, findTrack);
-      room.off(RoomEvent.TrackSubscribed, findTrack);
-      setVideoTrack(null);
-    };
-  }, [room, bridgeIdentity, trackName]);
-
-  // Attach/detach the video track to the <video> element.
-  useEffect(() => {
-    const el = videoRef.current;
-    if (!videoTrack || !el) return;
-    videoTrack.attach(el);
-    return () => {
-      videoTrack.detach(el);
-    };
-  }, [videoTrack]);
+  const { RemoteVideo } = useMediaPort();
 
   // Escape key dismisses the overlay.
   useEffect(() => {
@@ -110,12 +73,12 @@ export function VncOverlay({
         >
           Close
         </button>
-        <video
-          data-testid="vnc-overlay-video"
-          ref={videoRef}
+        <RemoteVideo
+          testId="vnc-overlay-video"
+          room={room}
+          identity={bridgeIdentity}
+          trackName={trackName}
           className="max-w-full max-h-full"
-          playsInline
-          muted
         />
       </div>
     </div>

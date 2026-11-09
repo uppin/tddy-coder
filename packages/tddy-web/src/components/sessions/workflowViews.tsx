@@ -46,7 +46,7 @@ export interface WorkflowViewContext {
   /**
    * How the attached session is reached. Custom views that need a LiveKit room (e.g. the PR-Stack
    * Chat Screen) derive their own independent connection from this rather than being handed a
-   * room from above — see `usePresenterLiveKitRoom`.
+   * room from above — see `usePresenterRoom`.
    */
   attachmentHint?: SessionAttachmentHint | null;
   /** The full session list — the PR-Stack view resolves each node's in-progress child by branch. */

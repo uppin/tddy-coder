@@ -28,12 +28,13 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type RefObject } from "react";
 import { create } from "@bufbuild/protobuf";
 import { createClient } from "@connectrpc/connect";
-import type { Room } from "livekit-client";
 import { AsyncQueue } from "tddy-livekit-rpc-web";
+import { tddyDebug, type RoomHandle, type ScreenSharingInputOptions } from "tddy-client-web";
+import { asRoom } from "../roomHandle";
 import {
   useLiveKitTransportFactory,
   useLiveKitTransportFactoryIsOverridden,
-} from "../../rpc/transportProvider";
+} from "../transport/liveKitTransport";
 import {
   ScreenSharingInputEventSchema,
   ScreenSharingInputService,
@@ -46,38 +47,9 @@ import {
   type Point,
 } from "./screenSharingInput";
 
-export interface ScreenSharingInputOptions {
-  /** The rendered picture. Pointer positions are read against this element's current box. */
-  readonly picture: RefObject<HTMLElement | null>;
-  /** The room the bridge is in; `null` until it is connected. */
-  readonly room: Room | null;
-  /** The LiveKit participant the input stream is addressed at — this desktop's own bridge. */
-  readonly bridgeIdentity: string;
-  /** The remote framebuffer's size, which is what the events are expressed in. */
-  readonly framebufferWidth: number;
-  readonly framebufferHeight: number;
-  /** Called when the operator presses the one chord the overlay keeps for itself. */
-  readonly onCloseChord: () => void;
-}
+const dbg = tddyDebug("tddy:livekit:screen-input");
 
 /** What this hook can tell the overlay about the input stream. It carries no way to send anything. */
-export interface ScreenSharingInputStatus {
-  /**
-   * True once there is no input stream to send on — this desktop can be watched but not touched.
-   * The picture is unaffected; only the operator's expectations need correcting.
-   *
-   * What actually gets here: the peer does not serve `ScreenSharingInputService` at all (nothing is
-   * listening on that participant, so opening the stream fails), or a stream that *was* open ended
-   * on its own — the bridge restarted, or its remote desktop went away.
-   *
-   * What does **not** get here, contrary to what an earlier version of this comment claimed: a
-   * desktop that cannot actually accept injection. `stream_input` always answers `Ok`
-   * (`packages/tddy-screenshare/src/bridge.rs`), and a bridge that cannot inject drops the commands
-   * without telling anyone. A view-only server is silently ignored, not reported.
-   */
-  readonly inputUnavailable: boolean;
-}
-
 /** Where a pointer landed on the remote framebuffer, and which buttons were down when it did. */
 interface PointerLanding {
   readonly x: number;
@@ -97,16 +69,16 @@ export function useScreenSharingInput({
   framebufferWidth,
   framebufferHeight,
   onCloseChord,
-}: ScreenSharingInputOptions): ScreenSharingInputStatus {
+}: ScreenSharingInputOptions): { readonly inputUnavailable: boolean } {
   const liveKitFactory = useLiveKitTransportFactory();
   const factoryIsOverridden = useLiveKitTransportFactoryIsOverridden();
-  const canBuildClient = room !== null || factoryIsOverridden;
+  const canBuildClient = asRoom(room) !== null || factoryIsOverridden;
 
   // One client per bridge — a re-render is not a reconnect, and a different bridge is a different
   // desktop. `null` when there is no room yet and no configured factory to route through instead.
   const client = useMemo(() => {
     if (!canBuildClient) return null;
-    return createClient(ScreenSharingInputService, liveKitFactory(room as Room, bridgeIdentity));
+    return createClient(ScreenSharingInputService, liveKitFactory(room as RoomHandle, bridgeIdentity));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [liveKitFactory, canBuildClient, room, bridgeIdentity]);
 
@@ -202,7 +174,7 @@ export function useScreenSharingInput({
         }
       } catch (streamError) {
         if (!cancelled) {
-          console.debug("[useScreenSharingInput] input stream unavailable", streamError);
+          dbg("input stream unavailable: %o", streamError);
           // `AsyncQueue` is unbounded and the transport's publish is fire-and-forget: without this
           // close, every later pointer move is still encoded and published, for ever, for a stream
           // that is not there.

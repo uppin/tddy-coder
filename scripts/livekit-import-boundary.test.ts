@@ -9,17 +9,6 @@ import { execFileSync } from "node:child_process";
 
 const ALLOWED = ["packages/tddy-livekit-web/", "packages/tddy-livekit-rpc-web/"];
 
-/**
- * TODO(media): the media layer — screen sharing, VNC, the presenter room, camera video — still owns
- * LiveKit tracks until `feature/web-split/media` (#855) moves it behind `MediaPort`. That node empties
- * this list; nothing may be added to it.
- */
-const MEDIA_NOT_YET_MOVED = [
-  /ScreenSharing/,
-  /Vnc/,
-  /PresenterLiveKitRoom|PresenterRoom/,
-  /participantCameraVideo|ParticipantVideo/,
-];
 
 function importersOfLiveKit(): string[] {
   try {
@@ -39,8 +28,7 @@ describe("the LiveKit import boundary", () => {
   test("only tddy-livekit-web and tddy-livekit-rpc-web import livekit-client", () => {
     // When
     const outside = importersOfLiveKit()
-      .filter((f) => !ALLOWED.some((dir) => f.startsWith(dir)))
-      .filter((f) => !MEDIA_NOT_YET_MOVED.some((rule) => rule.test(f)));
+      .filter((f) => !ALLOWED.some((dir) => f.startsWith(dir)));
 
     // Then
     expect(outside).toEqual([]);

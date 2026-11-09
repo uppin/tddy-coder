@@ -1,7 +1,7 @@
 /**
  * The one registration call `tddy-web` makes for LiveKit.
  *
- * `livekitPorts()` builds the LiveKit implementations of the presence and room-RPC ports once, and
+ * `livekitPorts()` builds the LiveKit implementations of the presence, room-RPC and media ports once, and
  * {@link LiveKitPortsProvider} mounts them. Hooks on a port are called like any imported hook, so
  * their identities are fixed for the app's lifetime — which is why the app builds the ports once.
  */
@@ -10,14 +10,17 @@ import { createClient, type Client } from "@connectrpc/connect";
 import type { DescService } from "@bufbuild/protobuf";
 import { ConnectionState, RoomEvent, type Room } from "livekit-client";
 import {
+  MediaPortProvider,
   PresencePortProvider,
   RoomRpcPortProvider,
+  type MediaPort,
   type PresencePort,
   type RoomHandle,
   type RoomRpcPort,
   type RoomStatus,
 } from "tddy-client-web";
 import { asRoom } from "./roomHandle";
+import { livekitMedia } from "./media/livekitMedia";
 import { useHostPresence } from "./presence/useHostPresence";
 import { usePresenceRoom } from "./presence/presenceRoom";
 import { useRoomParticipants } from "./rooms/useRoomParticipants";
@@ -26,7 +29,7 @@ import { useLiveKitTransportFactory, useLiveKitTransportFactoryIsOverridden } fr
 export interface LiveKitPorts {
   readonly presence: PresencePort;
   readonly roomRpc: RoomRpcPort;
-  // TODO(media): `feature/web-split/media` (#855) adds `media: MediaPort` here.
+  readonly media: MediaPort;
 }
 
 /** Whether `identity` is in `room` right now, per the SDK's own roster. A fake room with no roster is nobody's host. */
@@ -104,16 +107,18 @@ const presence: PresencePort = {
   useRoomParticipants: (handle) => useRoomParticipants(asRoom(handle)),
 };
 
-/** Build the LiveKit implementations of the presence and room-RPC ports. */
+/** Build the LiveKit implementations of the presence, room-RPC and media ports. */
 export function livekitPorts(): LiveKitPorts {
-  return { presence, roomRpc };
+  return { presence, roomRpc, media: livekitMedia };
 }
 
 /** Mount the ports {@link livekitPorts} built. */
 export function LiveKitPortsProvider({ ports, children }: { ports: LiveKitPorts; children?: ReactNode }): ReactElement {
   return (
     <PresencePortProvider port={ports.presence}>
-      <RoomRpcPortProvider port={ports.roomRpc}>{children}</RoomRpcPortProvider>
+      <RoomRpcPortProvider port={ports.roomRpc}>
+        <MediaPortProvider port={ports.media}>{children}</MediaPortProvider>
+      </RoomRpcPortProvider>
     </PresencePortProvider>
   );
 }

@@ -14,7 +14,7 @@ const defaultMakeIdentity = () => `browser-presenter-${Math.random().toString(36
  * to. Returns `null` for a session that names no room: one the host serves itself has nothing for a
  * second participant to join, and neither has a session that is not attached at all.
  *
- * `makeIdentity` is injectable so callers (see `usePresenterLiveKitRoom`) can supply a stable,
+ * `makeIdentity` is injectable so callers (see `usePresenterRoom`) can supply a stable,
  * per-room identity instead of a fresh one on every call — a distinct participant from the
  * terminal's own browser identity and from the observer identity the session connection joins under.
  */

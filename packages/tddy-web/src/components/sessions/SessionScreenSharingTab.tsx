@@ -10,7 +10,7 @@
  */
 
 import React, { useEffect, useReducer, useState } from "react";
-import type { Room } from "livekit-client";
+import type { RoomHandle } from "tddy-client-web";
 import { Protocol } from "tddy-client-web/gen/screen_sharing_pb";
 import { screenSharingStartFailureText } from "../../lib/screenSharingStartFailure";
 import { rpcFailureText } from "tddy-client-web";
@@ -26,7 +26,7 @@ import { applyScreenSharingTabAction, initialScreenSharingTabState } from "./scr
 export interface SessionScreenSharingTabProps {
   sessionId: string;
   sessionToken: string;
-  room: Room | null;
+  room: RoomHandle | null;
   onListTargets: () => Promise<ScreenSharingTargetListing>;
   onAddTarget: (req: AddScreenSharingTargetReq) => Promise<ScreenSharingTargetInfo>;
   onRemoveTarget: (targetId: string) => Promise<void>;
