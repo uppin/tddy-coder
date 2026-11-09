@@ -833,26 +833,17 @@ migrate_spawn_policy_keys() {
   [[ -f "$supervisor" ]] || return 0
   grep -Eq '^[[:space:]]*(allowed_tool_paths|allowed_relay_tool_paths|allowed_env_keys):' "$supervisor" || return 0
 
-  local paths_tmp existing_tmp final_tmp tmp has_roots=0
-  paths_tmp="$(mktemp "${supervisor}.paths.XXXXXX")" || {
-    echo "install: cannot create a temporary file next to ${supervisor}" >&2
+  # One scratch directory beside the file, so the final rename stays on its filesystem.
+  local work paths_tmp existing_tmp final_tmp tmp has_roots=0
+  work="$(mktemp -d "${supervisor}.migrate.XXXXXX")" || {
+    echo "install: cannot create a temporary directory next to ${supervisor}" >&2
     exit 1
   }
-  existing_tmp="$(mktemp "${supervisor}.roots.XXXXXX")" || {
-    rm -f "$paths_tmp"
-    echo "install: cannot create a temporary file next to ${supervisor}" >&2
-    exit 1
-  }
-  final_tmp="$(mktemp "${supervisor}.final.XXXXXX")" || {
-    rm -f "$paths_tmp" "$existing_tmp"
-    echo "install: cannot create a temporary file next to ${supervisor}" >&2
-    exit 1
-  }
-  tmp="$(mktemp "${supervisor}.XXXXXX")" || {
-    rm -f "$paths_tmp" "$existing_tmp" "$final_tmp"
-    echo "install: cannot create a temporary file next to ${supervisor}" >&2
-    exit 1
-  }
+  paths_tmp="${work}/paths"
+  existing_tmp="${work}/roots"
+  final_tmp="${work}/final"
+  tmp="${work}/supervisor.yaml"
+  : > "$final_tmp"
 
   # The listed tool and relay files, in the order written (flow `[...]` and block `- item`
   # forms both).
@@ -903,7 +894,7 @@ migrate_spawn_policy_keys() {
       }
     }
   ' "$supervisor" > "$paths_tmp" || {
-    rm -f "$paths_tmp" "$existing_tmp" "$final_tmp" "$tmp"
+    rm -rf "$work"
     echo "install: failed reading the old spawn policy keys in ${supervisor}; it is left unchanged" >&2
     exit 1
   }
@@ -987,12 +978,12 @@ migrate_spawn_policy_keys() {
       }
     }
   ' "$supervisor" > "$tmp"; then
-    rm -f "$paths_tmp" "$existing_tmp" "$final_tmp" "$tmp"
+    rm -rf "$work"
     echo "install: failed migrating the old spawn policy keys in ${supervisor}; it is left unchanged" >&2
     exit 1
   fi
-  rm -f "$paths_tmp" "$existing_tmp" "$final_tmp"
   mv -f "$tmp" "$supervisor"
+  rm -rf "$work"
   echo "install:   migrated the old spawn policy keys in ${supervisor}: the listed tool and relay files are spawn_policy.exec_roots now, and allowed_env_keys is dropped (the daemon's env passes whole)"
 }
 
