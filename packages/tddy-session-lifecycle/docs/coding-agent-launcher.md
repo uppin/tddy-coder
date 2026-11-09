@@ -35,12 +35,11 @@ override; `config_env` merged into `OPENCODE_CONFIG_CONTENT`). The specs give:
 | `codex-acp` | `codex-acp` beside the resolved `codex` dep (`sibling_of`), or `TDDY_CODEX_ACP_CLI` — never `PATH` |
 | `opencode` | `opencode acp` |
 
-The working directory is the session's worktree. Any other harness is refused. A launcher built
-without coding agents (`new`, `with_identity` — tests only) still plans the same three by hand
-(`harness_command`, `apply_route`); the `#agent-tools` sweep deletes that path
-([todo](../../../docs/dev/todo/2026-11-04-acp-hand-built-launch-path-for-agentless-launchers.md)).
-The OpenCode route config stays inline in `OPENCODE_CONFIG_CONTENT`, since a session has no owner for
-a route file ([todo](../../../docs/dev/todo/2026-11-04-opencode-acp-route-file-has-no-session-owner.md)).
+The working directory is the session's worktree. Any harness the host's registry does not declare an
+ACP agent is refused; nothing is planned by hand, and no launcher names an agent
+(`CodingAgentLauncher::session_meta_for` has no default). The OpenCode route config stays inline in
+`OPENCODE_CONFIG_CONTENT`, since a route file the daemon writes cannot be read by an agent running as
+the session's OS user ([todo](../../../docs/dev/todo/2026-11-04-opencode-acp-route-file-has-no-session-owner.md)).
 
 ## The provider route
 

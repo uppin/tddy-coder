@@ -392,9 +392,8 @@ impl CodingAgentLauncher for DaemonCodingAgentLauncher {
         &self,
         launch: &CodingAgentLaunch,
     ) -> Result<LaunchedAgent, SubagentError> {
-        let agents = self.acp_agents_for(launch)?;
-        let mut command = self.acp_plan_from_spec(launch, agents)?;
-        let hooks = self.acp_hooks_from_spec(launch, agents, &mut command)?;
+        let mut command = self.command_before_user_switch(launch)?;
+        let hooks = self.acp_hooks_from_spec(launch, &self.coding_agents, &mut command)?;
         let transport = self.transport_of_command(launch, command).await?;
         Ok(LaunchedAgent { transport, hooks })
     }
@@ -468,12 +467,12 @@ mod tests {
     use super::*;
     use std::path::Path;
     use tddy_coding_subagent::{CodingAgentDef, OPENCODE_CONFIG_CONTENT};
+    use tddy_core::provider_route::RouteSecret;
 
     /// The built-in ACP agents' ids, as a launch names them as its harness.
     const CLAUDE_ACP: &str = "claude-acp";
     const CODEX_ACP: &str = "codex-acp";
     const OPENCODE: &str = "opencode";
-    use tddy_core::provider_route::RouteSecret;
 
     /// The model every launch in these tests runs.
     const MODEL: &str = "gpt-5.2";

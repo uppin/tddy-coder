@@ -1,6 +1,6 @@
 //! A `CodingAgentSession` owns the hooks its launch hands it for exactly its lifetime
-//! (`#agent-tools 27/28`): they own what the launch wrote for the agent — an OpenCode route file —
-//! so they must outlive every turn and go with the session.
+//! (`#agent-tools 27/28`): they own whatever the launch prepared for the agent — `codex-acp-login`'s
+//! retry-once login, and its open bracket — so they must outlive every turn and go with the session.
 //!
 //! Drives a real `tddy-acp-stub` child through the ACP driver. Needs `target/debug/tddy-acp-stub`
 //! (`cargo build -p tddy-acp-stub`).
@@ -112,19 +112,22 @@ async fn a_dropped_session_lets_its_launch_hooks_go() {
     wait_until_released(&watch).await;
 }
 
-/// An open bracket that records each open it was asked to bracket.
+/// An open bracket that records each open it was asked to bracket: the session directory each
+/// began with, and how many it was asked to end.
 #[derive(Default)]
 struct RecordingOpenScope {
-    begun: std::sync::Mutex<u32>,
+    begun_with: std::sync::Mutex<Vec<Option<PathBuf>>>,
+    ended: std::sync::Mutex<u32>,
 }
 
 #[async_trait::async_trait]
 impl tddy_agent_backend::adapters::AcpOpenScope for RecordingOpenScope {
-    async fn begin_open(&self, _session_dir: Option<PathBuf>) {
-        *self.begun.lock().expect("lock") += 1;
+    async fn begin_open(&self, session_dir: Option<PathBuf>) {
+        self.begun_with.lock().expect("lock").push(session_dir);
     }
 
     async fn end_open(&self) -> Option<tddy_agent_backend::adapters::AdapterError> {
+        *self.ended.lock().expect("lock") += 1;
         None
     }
 }
@@ -143,7 +146,11 @@ async fn a_session_brackets_its_open_with_its_launch_hooks_open_scope() {
     // When
     let session = a_session_started_with(hooks, &dir).await;
 
-    // Then — its one `session/new` was bracketed once
-    assert_eq!(*scope.begun.lock().expect("lock"), 1);
+    // Then — its one `session/new` was bracketed once, begun in the directory the agent works in
+    assert_eq!(
+        *scope.begun_with.lock().expect("lock"),
+        vec![Some(dir.path().to_path_buf())]
+    );
+    assert_eq!(*scope.ended.lock().expect("lock"), 1);
     drop(session);
 }
