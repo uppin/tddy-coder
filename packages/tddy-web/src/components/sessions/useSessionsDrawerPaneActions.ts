@@ -4,7 +4,7 @@ import { Signal, type SessionEntry, type SessionService } from "tddy-client-web/
 import type { HostConnection } from "tddy-client-web/connections/types";
 import { useActionFailure } from "../../hooks/useActionFailure";
 import { requestSessionsRefresh } from "../../lib/sessionsRefreshBridge";
-import { actionFailed, hostNotConnected } from "../../rpc/rpcFailure";
+import { actionFailed, hostNotConnected } from "tddy-client-web";
 import { owningHostForSession } from "../../utils/crossHostSessions";
 import type { AttachClaim } from "./attachClaim";
 import type { UseSessionAttachmentResult } from "./useSessionAttachment";

@@ -1,90 +1,90 @@
 {
-  "version": 1,
   "goals": [
     {
       "name": "analyze",
-      "schema": "analyze.schema.json",
-      "proto": "analyze.proto"
+      "proto": "analyze.proto",
+      "schema": "analyze.schema.json"
     },
     {
       "name": "plan",
-      "schema": "plan.schema.json",
-      "proto": "plan.proto"
+      "proto": "plan.proto",
+      "schema": "plan.schema.json"
     },
     {
       "name": "acceptance-tests",
-      "schema": "acceptance-tests.schema.json",
-      "proto": "acceptance_tests.proto"
+      "proto": "acceptance_tests.proto",
+      "schema": "acceptance-tests.schema.json"
     },
     {
       "name": "red",
-      "schema": "red.schema.json",
-      "proto": "red.proto"
+      "proto": "red.proto",
+      "schema": "red.schema.json"
     },
     {
       "name": "green",
-      "schema": "green.schema.json",
-      "proto": "green.proto"
+      "proto": "green.proto",
+      "schema": "green.schema.json"
     },
     {
       "name": "post-green-review",
-      "schema": "post-green-review.schema.json",
-      "proto": "post_green_review.proto"
+      "proto": "post_green_review.proto",
+      "schema": "post-green-review.schema.json"
     },
     {
       "name": "branch-review",
-      "schema": "branch-review.schema.json",
-      "proto": "branch_review.proto"
+      "proto": "branch_review.proto",
+      "schema": "branch-review.schema.json"
     },
     {
       "name": "evaluate-changes",
-      "schema": "evaluate.schema.json",
-      "proto": "evaluate_changes.proto"
+      "proto": "evaluate_changes.proto",
+      "schema": "evaluate.schema.json"
     },
     {
       "name": "validate",
-      "schema": "validate-subagents.schema.json",
-      "proto": "validate_subagents.proto"
+      "proto": "validate_subagents.proto",
+      "schema": "validate-subagents.schema.json"
     },
     {
       "name": "refactor",
-      "schema": "refactor.schema.json",
-      "proto": "refactor.proto"
+      "proto": "refactor.proto",
+      "schema": "refactor.schema.json"
     },
     {
       "name": "update-docs",
-      "schema": "update-docs.schema.json",
-      "proto": "update_docs.proto"
+      "proto": "update_docs.proto",
+      "schema": "update-docs.schema.json"
     },
     {
       "name": "demo",
-      "schema": "demo.schema.json",
-      "proto": "demo.proto"
+      "proto": "demo.proto",
+      "schema": "demo.schema.json"
     },
     {
       "name": "changeset-workflow",
-      "schema": "changeset-workflow.schema.json",
-      "proto": "changeset_workflow.proto"
+      "proto": "changeset_workflow.proto",
+      "schema": "changeset-workflow.schema.json"
     },
     {
       "name": "merge-pr-report",
-      "schema": "merge-pr-report.schema.json",
-      "proto": "merge_pr_report.proto"
+      "proto": "merge_pr_report.proto",
+      "schema": "merge-pr-report.schema.json"
     },
     {
       "name": "merge-pr-analyze",
-      "schema": "merge-pr-analyze.schema.json",
-      "proto": "merge_pr_analyze.proto"
+      "proto": "merge_pr_analyze.proto",
+      "schema": "merge-pr-analyze.schema.json"
     },
     {
       "name": "write-stack-plan",
-      "schema": "write-stack-plan.schema.json",
-      "proto": "write_stack_plan.proto"
+      "proto": "write_stack_plan.proto",
+      "schema": "write-stack-plan.schema.json"
     },
     {
       "name": "write-stack-docs",
-      "schema": "write-stack-docs.schema.json",
-      "proto": "write_stack_docs.proto"
+      "proto": "write_stack_docs.proto",
+      "schema": "write-stack-docs.schema.json"
     }
-  ]
+  ],
+  "version": 1
 }

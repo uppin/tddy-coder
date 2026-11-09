@@ -11,7 +11,7 @@ import type { Room } from "livekit-client";
 import { VncPassphraseDialog } from "./VncPassphraseDialog";
 import { VncOverlay } from "./VncOverlay";
 import { applyVncTabAction, initialVncTabState } from "./vncTabState";
-import { rpcFailureText } from "../../rpc/rpcFailure";
+import { rpcFailureText } from "tddy-client-web";
 import { useKeyedActionFailure } from "../../hooks/useKeyedActionFailure";
 import { InlineError } from "tddy-ui-web";
 

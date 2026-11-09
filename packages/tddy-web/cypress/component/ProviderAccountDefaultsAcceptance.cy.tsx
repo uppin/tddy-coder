@@ -8,7 +8,7 @@ import { createClient } from "@connectrpc/connect";
 import { servedAgentWire } from "../support/servedAgents";
 import { anInMemoryRpcBackend } from "tddy-connectrpc-testkit";
 import { AccountsAppPage } from "../../src/components/accounts/AccountsAppPage";
-import { CreateSessionPane } from "../../src/components/sessions/CreateSessionPane";
+import { CreateSessionPane } from "tddy-session-create-web";
 import { AccountsService, SyncStatus, type AccountSummary } from "tddy-client-web/gen/accounts_pb";
 import { SessionService } from "tddy-client-web/gen/session_pb";
 import { ProjectService } from "tddy-client-web/gen/project_pb";

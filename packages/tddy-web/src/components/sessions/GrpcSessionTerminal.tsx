@@ -23,7 +23,7 @@ import { isFrameForTerminal } from "../../lib/terminalFrameIdentity";
 import { useEnqueuedInput } from "./useEnqueuedInput";
 import { EnqueuedInputOverlay } from "../connection/EnqueuedInputOverlay";
 import { createForwardHistoryFetcher } from "tddy-client-web";
-import { rpcFailureText } from "../../rpc/rpcFailure";
+import { rpcFailureText } from "tddy-client-web";
 import { InputRefusalTracker } from "../../rpc/connections/inputDelivery";
 import { InlineError } from "tddy-ui-web";
 

@@ -96,11 +96,12 @@ export function withSelectedDaemonServedBy(
   children: React.ReactNode,
   daemons: DaemonHost[],
   servingInstanceId: string,
+  room: Room = aDisconnectedRoom(),
 ): React.ReactElement {
   return (
     <AuthProvider>
       <SelectedDaemonProvider
-        room={aDisconnectedRoom()}
+        room={room}
         daemons={daemons}
         servingInstanceId={servingInstanceId}
       >

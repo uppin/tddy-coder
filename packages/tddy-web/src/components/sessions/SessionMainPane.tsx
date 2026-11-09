@@ -7,7 +7,7 @@ import { DormantAgentTerminal } from "./DormantAgentTerminal";
 import { useAppLocation } from "../../routing/useAppLocation";
 import { SessionWithActivitySidebar } from "./SessionWithActivitySidebar";
 import { Button } from "tddy-ui-web";
-import { CreateSessionPane } from "./CreateSessionPane";
+import { CreateSessionPane } from "tddy-session-create-web";
 import { AgentPicker } from "./AgentPicker";
 import { SessionRuntime } from "./SessionRuntime";
 import { resolveWorkflowView } from "./workflowViews";

@@ -1,7 +1,7 @@
 import { useEffect } from "react";
 import type { SessionEntry } from "tddy-client-web/gen/session_pb";
 import type { HostConnection } from "tddy-client-web/connections/types";
-import { hostNotConnected } from "../../rpc/rpcFailure";
+import { hostNotConnected } from "tddy-client-web";
 import type { UseAppLocationResult } from "../../routing/useAppLocation";
 import { owningHostForSession } from "../../utils/crossHostSessions";
 import { attachActionForSnapshot } from "./attachClaim";

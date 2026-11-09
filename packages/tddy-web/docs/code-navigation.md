@@ -21,14 +21,14 @@ All under `src/components/session/`:
 | `renderSimpleMarkdown.tsx` | The hover card's and markdown preview's renderer: headings (`#`–`######`), fenced code (an unclosed fence runs to the end), lists and paragraphs, one reader per block kind |
 | `codeNavigationApi.ts` | `CodePosition`, `CodeLocationRef` and `toLocationRef` |
 | `WorktreeCodePane.tsx` | Composes the file tree, the preview, the overlays, the code-index status strip along the bottom, and for a plan file the "Open as plan" entry and the plan dialog |
-| `CodeIndexStatusStrip.tsx`, `useCodeIndexProgress.ts` | The strip showing where the worktree's code index stands, and the status classification it shares with the header's indicator ([indexing indicator](session-start-and-indexing-progress.md#indexing-indicator)) |
+| `CodeIndexStatusStrip.tsx`, `useCodeIndexProgress.ts` | The strip showing where the worktree's code index stands, and the status classification it shares with the header's indicator ([indexing indicator](indexing-indicator.md)) |
 | `restructurePlanApi.ts` | `createRestructurePlanApi` (the three plan calls with the session token, project id and worktree path bound once) and `isRestructurePlanFile` |
 | `RestructurePlanDialog.tsx` | The plan dialog: operation table, stale notice, Run |
 
 `SessionsDrawerScreen` resolves a `CodeNavigationService` client for the host that owns the selected
 session (`useDaemonClientFor`) and passes it through `SessionMainPane` as `codeNavigationClient`. Absent,
 the pane is the read-only preview and offers no navigation and no strip. The same client feeds the
-header's [indexing indicator](session-start-and-indexing-progress.md#indexing-indicator).
+header's [indexing indicator](indexing-indicator.md).
 
 ## The code session
 
@@ -143,7 +143,7 @@ shared geometry worktree fixture in `cypress/support/fixtures/geometryWorktree.t
 | `WorktreeCodePaneCodeSession.cy.tsx` | opening the pane opens a session and shows live progress until ready; every running phase; held hover and definition; "No definition found" only from a loaded index; underline and plain click; closing ends the session; cancels on card close and on moving off; a held definition reporting the failure; probe caching, `UNKNOWN` re-probing, `forget` cancelling probes in flight; a plain click on a plain identifier asks nothing |
 | `WorktreeCodePaneReconnect.cy.tsx` (7, `cy.clock`) | reopening after 1 s with *Reconnecting…*; doubling to 30 s; back to 1 s after a stable 10 s; a host that accepts and drops at once is backed off; a held hover asked again on the reopened session; closing stops reopening; a refused session is not reopened |
 | `CodeHoverCard.cy.tsx` | the card opens beside its identifier; a long hover stays within its bounds with its actions visible; markdown headings; a fenced rust block; an unclosed fence |
-| `CodeIndexStatusStrip.cy.tsx` | the strip's own states (see [indexing indicator](session-start-and-indexing-progress.md#code-pane-strip)) |
+| `CodeIndexStatusStrip.cy.tsx` | the strip's own states (see [indexing indicator](indexing-indicator.md#code-pane-strip)) |
 | `WorktreeCodePaneNavigation.cy.tsx` | mounted through `SessionsDrawerScreen` with `mountWithRpc`, the drawer serving its sessions and the `CodeSession` from one backend: ctrl-click opens the definition's file at its line (the recorded frames carry token, project, worktree, `rel_path` and the clicked position), hover shows the type, and the references list navigates |
 
 Test ids live in `cypress/support/testIds.ts`; the page object is

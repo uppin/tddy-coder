@@ -4,7 +4,7 @@
 //!
 //! The field list is read from the proto descriptor compiled into `tddy-service`, not written here.
 //! The web half of the parity — what the New-session form's request builder sends — is
-//! `packages/tddy-web/cypress/component/createSessionRequestParity.cy.ts`, against the fixture
+//! `packages/tddy-session-create-web/cypress/component/createSessionRequestParity.cy.ts`, against the fixture
 //! [`the_web_fixture_lists_exactly_the_offered_and_context_filled_fields`] keeps current.
 
 use std::collections::BTreeSet;
@@ -117,7 +117,7 @@ fn the_context_and_withheld_tables_name_only_real_fields_and_never_an_offered_on
 
 fn web_fixture_path() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("../tddy-web/cypress/support/fixtures/start-session-tool-fields.json")
+        .join("../tddy-session-create-web/cypress/support/fixtures/start-session-tool-fields.json")
 }
 
 #[test]

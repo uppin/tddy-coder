@@ -11,7 +11,7 @@ import { servedAgentWire } from "../support/servedAgents";
 import { create } from "@bufbuild/protobuf";
 import { createClient } from "@connectrpc/connect";
 import { anInMemoryRpcBackend, type InMemoryRpcBackend } from "tddy-connectrpc-testkit";
-import { CreateSessionPane } from "../../src/components/sessions/CreateSessionPane";
+import { CreateSessionPane } from "tddy-session-create-web";
 import { SessionService } from "tddy-client-web/gen/session_pb";
 import { ProjectService } from "tddy-client-web/gen/project_pb";
 import { CatalogService } from "tddy-client-web/gen/catalog_pb";
@@ -23,10 +23,10 @@ import {
   ProbeOutcome,
   SshConfigHostSchema,
 } from "tddy-client-web/gen/host_pb";
-import type { DaemonHost } from "tddy-client-web";
+import { daemonRpcIdentity, type DaemonHost } from "tddy-client-web";
 import { createSessionPage } from "../support/pages/createSessionPage";
 import { mountWithRpc } from "../support/rpc/inMemory";
-import { withSelectedDaemonServedBy } from "../support/rpc/withSelectedDaemon";
+import { aJoinedCommonRoom, withSelectedDaemonServedBy } from "../support/rpc/withSelectedDaemon";
 
 const SESSION_HOST = "laptop-a";
 
@@ -93,6 +93,9 @@ function mountCreatePane(backend: InMemoryRpcBackend) {
       />,
       DAEMON_HOSTS,
       SESSION_HOST,
+      // The alias list is read only from a connected host: the common room is joined and Host A's
+      // daemon is on it.
+      aJoinedCommonRoom([daemonRpcIdentity(SESSION_HOST)]),
     ),
     backend,
   );

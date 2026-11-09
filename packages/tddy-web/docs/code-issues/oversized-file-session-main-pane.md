@@ -37,3 +37,4 @@ only.
 2026-11-02 — `wc -l` at the tip of PR #804 (503) and at `origin/master` `e9d036e0c` (468); at the wrap of PR #809 (504) against its base `feature/session-tabs/tab-plus` `0426e14e2` (503).
 2026-11-03 — `wc -l` at `origin/master` `162a66978` (504) and at the wrap of #813 (504): **unchanged**, the sweep does not touch the file. Still open, deferred by the developer.
 2026-11-07 — `wc -l` at the wrap of PR #842 (`#web-split` 5/16): 504 → 504. The PR only re-points hook imports to `tddy-client-web`; still open, not split (later `#web-split` nodes move this file).
+2026-11-07 — `wc -l` at the wrap of PR #844 (`#web-split` 7/17): 504 → 504 against `bede09610`. The PR re-points `CreateSessionPane` to `tddy-session-create-web` (net 0). Still open, not split.

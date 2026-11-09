@@ -5,6 +5,11 @@
     "todo": "docs/dev/todo/2026-11-07-tddy-web-does-not-typecheck.md"
   },
   {
+    "package": "tddy-session-create-web",
+    "reason": "235 errors in the Cypress specs moved from tddy-web (plain-object fixtures where generated message types are expected) and one in tddy-client-web's debugMask.ts (no types for 'debug')",
+    "todo": "docs/dev/todo/2026-11-07-session-create-web-specs-do-not-typecheck.md"
+  },
+  {
     "package": "tddy-rust-typescript-tests",
     "reason": "tsconfig names the 'bun-types' type definitions, which are not installed (TS2688)",
     "todo": "docs/dev/todo/2026-11-07-rust-typescript-tests-does-not-typecheck.md"
