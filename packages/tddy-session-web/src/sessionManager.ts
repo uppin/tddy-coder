@@ -1,0 +1,238 @@
+/**
+ * `SessionManager` — the single place that owns the sessions drawer's list, its refresh, and the
+ * change events, so the screen component doesn't scatter that logic across effects.
+ *
+ * It merges two sources into one sorted, de-duplicated list:
+ * - the **selected host's** sessions, pulled via an injected `fetcher` (RPC), refreshed on demand and
+ *   whenever the window-bound `sessionsRefreshBridge` fires (`requestSessionsRefresh()` from anywhere);
+ * - the **live cross-host** sessions, observed as LiveKit coder participants in the common room.
+ *
+ * It is a plain observable store (subscribe/notify, snapshot cached for `useSyncExternalStore`) with
+ * no React or RPC dependency of its own — those are fed in — so it is unit-testable in isolation.
+ */
+
+import { useCallback, useEffect, useMemo, useRef, useSyncExternalStore } from "react";
+import type { Client } from "@connectrpc/connect";
+import { SessionService, type SessionEntry } from "tddy-client-web/gen/session_pb";
+import type { SessionMetadata } from "./lib/sessionParticipantMetadata";
+import { sortSessionsByCreation } from "./utils/sessionSort";
+import { mergeActiveAndFetchedSessions, sessionParticipantsFromParticipants, type SessionParticipant } from "./utils/crossHostSessions";
+import { subscribeSessionsRefresh } from "./lib/sessionsRefreshBridge";
+import { hostNotConnectedText, rpcFailureText } from "tddy-client-web";
+import { useHostLabel } from "tddy-client-web";
+
+/** Pulls the selected host's sessions (typically `client.listSessions(...)`). */
+export type SessionFetcher = () => Promise<SessionEntry[]>;
+
+/**
+ * How often the manager re-pulls the selected host's sessions so externally-observed liveness
+ * changes (a session's PID dying, or a session ended from another client) surface without a reload.
+ * Short enough to feel real-time for a status indicator, cheap enough for a background poll.
+ */
+export const REFRESH_INTERVAL_MS = 2000;
+
+export class SessionManager {
+  private selectedHostSessions: SessionEntry[] = [];
+  private optimistic: SessionEntry[] = [];
+  private activeParticipants: SessionParticipant[] = [];
+  private selectedInstanceId = "";
+  private fetcher: SessionFetcher | null = null;
+  private cached: SessionEntry[] = [];
+  private cachedSessionMetadata: ReadonlyMap<string, SessionMetadata> = new Map();
+  private cachedLoadError: string | null = null;
+  private readonly listeners = new Set<() => void>();
+  private unsubscribeBridge: (() => void) | null = null;
+  private refreshIntervalId: number | null = null;
+
+  /** Start listening for window-bound refresh requests and periodic polling. Returns a disposer. */
+  start(): () => void {
+    this.unsubscribeBridge ??= subscribeSessionsRefresh(() => this.refresh());
+    this.refreshIntervalId ??= window.setInterval(() => this.refresh(), REFRESH_INTERVAL_MS);
+    return () => this.stop();
+  }
+
+  stop(): void {
+    this.unsubscribeBridge?.();
+    this.unsubscribeBridge = null;
+    if (this.refreshIntervalId !== null) {
+      window.clearInterval(this.refreshIntervalId);
+      this.refreshIntervalId = null;
+    }
+  }
+
+  /**
+   * Set the selected host's session source; triggers an immediate refresh.
+   *
+   * `null` means no wire reaches the host, and `unavailableReason` says so: it becomes the
+   * {@link loadError} instead of leaving the list looking like a host with no sessions.
+   */
+  setFetcher(fetcher: SessionFetcher | null, unavailableReason: string | null = null): void {
+    this.fetcher = fetcher;
+    if (!fetcher) this.setLoadError(unavailableReason);
+    void this.refresh();
+  }
+
+  setActiveParticipants(participants: SessionParticipant[]): void {
+    this.activeParticipants = participants;
+    this.recompute();
+  }
+
+  setSelectedInstanceId(instanceId: string): void {
+    if (instanceId === this.selectedInstanceId) return;
+    this.selectedInstanceId = instanceId;
+    this.recompute();
+  }
+
+  /** Optimistically add a session (e.g. a background pr-stack start) until the next refresh. */
+  addOptimisticSession(entry: SessionEntry): void {
+    if (this.optimistic.some((s) => s.sessionId === entry.sessionId)) return;
+    this.optimistic = [...this.optimistic, entry];
+    this.recompute();
+  }
+
+  /**
+   * Re-pull the selected host's sessions. No-op until a fetcher is set.
+   *
+   * A failed pull keeps the last good list and records why in {@link loadError}; the next pull that
+   * succeeds clears it. Resolves once this pull has settled into the store; never rejects.
+   */
+  refresh(): Promise<void> {
+    const fetcher = this.fetcher;
+    if (!fetcher) return Promise.resolve();
+    return fetcher()
+      .then((sessions) => {
+        if (this.fetcher !== fetcher) return;
+        this.selectedHostSessions = sessions;
+        this.cachedLoadError = null;
+        this.recompute();
+      })
+      .catch((err: unknown) => {
+        if (this.fetcher !== fetcher) return;
+        this.setLoadError(rpcFailureText(err));
+      });
+  }
+
+  /** Why the selected host's sessions could not be pulled; `null` while the last pull succeeded. */
+  get loadError(): string | null {
+    return this.cachedLoadError;
+  }
+
+  private setLoadError(error: string | null): void {
+    if (error === this.cachedLoadError) return;
+    this.cachedLoadError = error;
+    for (const listener of this.listeners) listener();
+  }
+
+  /** The current merged, sorted list. Stable reference until the next change (safe for snapshots). */
+  get sessions(): SessionEntry[] {
+    return this.cached;
+  }
+
+  /**
+   * Per-session `session` metadata parsed from live participants, keyed by `sessionId`. Updated on
+   * every recompute. The screen overlays these onto drawer rows + the inspector for active
+   * sessions whose metadata is richer than the daemon's `ListSessions` enrichment.
+   */
+  get sessionMetadataBySessionId(): ReadonlyMap<string, SessionMetadata> {
+    return this.cachedSessionMetadata;
+  }
+
+  subscribe(listener: () => void): () => void {
+    this.listeners.add(listener);
+    return () => {
+      this.listeners.delete(listener);
+    };
+  }
+
+  private recompute(): void {
+    const byId = new Map<string, SessionEntry>();
+    for (const s of this.selectedHostSessions) byId.set(s.sessionId, s);
+    for (const s of this.optimistic) if (!byId.has(s.sessionId)) byId.set(s.sessionId, s);
+    this.cached = sortSessionsByCreation(
+      mergeActiveAndFetchedSessions(
+        Array.from(byId.values()),
+        this.activeParticipants,
+        this.selectedInstanceId,
+      ),
+    );
+    const meta = new Map<string, SessionMetadata>();
+    for (const p of this.activeParticipants) {
+      if (p.sessionMetadata) meta.set(p.sessionId, p.sessionMetadata);
+    }
+    this.cachedSessionMetadata = meta;
+    for (const listener of this.listeners) listener();
+  }
+}
+
+/**
+ * React binding for a per-screen {@link SessionManager}: wires the RPC client, common-room
+ * participants, and selected host into the manager, and returns its reactive merged list plus a way
+ * to add optimistic entries.
+ */
+export function useSessionManager(
+  client: Client<typeof SessionService> | null,
+  sessionToken: string,
+  participants: ReadonlyArray<{ identity: string; metadata?: string }>,
+  selectedInstanceId: string,
+): {
+  sessions: SessionEntry[];
+  addOptimisticSession: (entry: SessionEntry) => void;
+  sessionMetadataBySessionId: ReadonlyMap<string, SessionMetadata>;
+  /** Why the selected host's list could not be loaded; the last good list stays in `sessions`. */
+  loadError: string | null;
+} {
+  const managerRef = useRef<SessionManager | null>(null);
+  managerRef.current ??= new SessionManager();
+  const manager = managerRef.current;
+
+  useEffect(() => manager.start(), [manager]);
+
+  // No client is no wire to the selected host — said as such, naming it, rather than an empty list.
+  const hostLabel = useHostLabel();
+  const unavailableReason = hostNotConnectedText(hostLabel(selectedInstanceId));
+  useEffect(() => {
+    manager.setFetcher(
+      client
+        ? () => client.listSessions({ sessionToken }).then((resp) => resp.sessions as SessionEntry[])
+        : null,
+      unavailableReason,
+    );
+  }, [manager, client, sessionToken, unavailableReason]);
+
+  const activeParticipants = useMemo(
+    () => sessionParticipantsFromParticipants(participants),
+    [participants],
+  );
+  useEffect(() => {
+    manager.setActiveParticipants(activeParticipants);
+  }, [manager, activeParticipants]);
+
+  useEffect(() => {
+    manager.setSelectedInstanceId(selectedInstanceId);
+  }, [manager, selectedInstanceId]);
+
+  const sessions = useSyncExternalStore(
+    (listener) => manager.subscribe(listener),
+    () => manager.sessions,
+    () => manager.sessions,
+  );
+
+  const sessionMetadataBySessionId = useSyncExternalStore(
+    (listener) => manager.subscribe(listener),
+    () => manager.sessionMetadataBySessionId,
+    () => manager.sessionMetadataBySessionId,
+  );
+
+  const loadError = useSyncExternalStore(
+    (listener) => manager.subscribe(listener),
+    () => manager.loadError,
+    () => manager.loadError,
+  );
+
+  const addOptimisticSession = useCallback(
+    (entry: SessionEntry) => manager.addOptimisticSession(entry),
+    [manager],
+  );
+
+  return { sessions, addOptimisticSession, sessionMetadataBySessionId, loadError };
+}

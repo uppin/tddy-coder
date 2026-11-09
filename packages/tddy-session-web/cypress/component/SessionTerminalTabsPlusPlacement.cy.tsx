@@ -10,6 +10,7 @@
  * docs/dev/todo/2026-08-01-tddy-web-inactive-session-activities-follow-ups.md).
  */
 
+import "tddy-ui-web/theme.css"; // measures real layout, so it needs the stylesheet the others run without
 import React from "react";
 import { SessionTerminalTabs } from "../../src/SessionTerminalTabs";
 import type { AgentConversation } from "../../src/agentConversationTabs";

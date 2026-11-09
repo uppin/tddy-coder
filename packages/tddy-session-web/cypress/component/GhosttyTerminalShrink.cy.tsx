@@ -9,6 +9,7 @@
  * and re-fit the grid.
  */
 
+import "tddy-ui-web/theme.css"; // this spec measures real layout: it needs the stylesheet the others run without
 import React, { useState } from "react";
 import { anInMemoryRpcBackend } from "tddy-connectrpc-testkit";
 // The real chain's shrink behavior lives in Tailwind utility classes (min-w-0, overflow-hidden) —

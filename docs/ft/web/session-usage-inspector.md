@@ -1,6 +1,6 @@
 # Session Usage — Real-time Token Usage in the Inspector
 
-**Component:** `SessionInspectorDrawer` → new **Usage** tab (`packages/tddy-web/src/components/sessions/`)
+**Component:** `SessionInspectorDrawer` → new **Usage** tab (`packages/tddy-session-web/src/`)
 **Updated:** 2026-07-12
 **Status:** Planned
 

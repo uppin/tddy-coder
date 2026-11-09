@@ -17,7 +17,7 @@ import { aDisconnectedRoom } from "tddy-livekit-web/testkit";
 import type { DaemonHost } from "tddy-client-web";
 import { SelectedDaemonProvider } from "../../src/rpc/selectedDaemon";
 import { DaemonSelectorConnected } from "../../src/components/shell/DaemonSelector";
-import { SessionsDrawerScreen } from "../../src/components/sessions/SessionsDrawerScreen";
+import { SessionsDrawerScreen } from "tddy-session-web";
 import { withSelectedDaemon } from "../support/rpc/withSelectedDaemon";
 import { aSessionServiceBackend } from "../support/rpc/daemonSessionHostBackend";
 import { mountWithRecordingLiveKitRpc } from "../support/rpc/recordingLiveKitRpc";

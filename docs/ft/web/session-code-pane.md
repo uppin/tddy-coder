@@ -2,7 +2,7 @@
 
 **Route:** `#/sessions` (within `SessionsDrawerScreen`)
 **Components:** `WorktreeCodePane`, `WorktreeFileTree`, `CodeBlock`, `CodeNavigationOverlays`, `RestructurePlanDialog` (`packages/tddy-web/src/components/session/`)
-**Mount point:** `SessionMainPane` (`packages/tddy-web/src/components/sessions/`)
+**Mount point:** `SessionMainPane` (`packages/tddy-session-web/src/`)
 
 ## Overview
 

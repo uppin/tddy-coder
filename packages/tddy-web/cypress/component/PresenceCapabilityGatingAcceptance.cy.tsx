@@ -24,7 +24,7 @@ import React from "react";
 import type { InMemoryRpcBackend } from "tddy-connectrpc-testkit";
 import { LiveKitAppPage } from "../../src/components/livekit/LiveKitAppPage";
 import { ParticipantList } from "tddy-livekit-web";
-import { SessionsDrawerScreen } from "../../src/components/sessions/SessionsDrawerScreen";
+import { SessionsDrawerScreen } from "tddy-session-web";
 import { DaemonNavMenu } from "../../src/components/shell/DaemonNavMenu";
 import { RpcPlaygroundAppPage } from "../../src/rpc-playground/RpcPlaygroundAppPage";
 import type { RoomParticipant } from "tddy-livekit-web";

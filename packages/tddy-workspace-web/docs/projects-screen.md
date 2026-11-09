@@ -86,7 +86,7 @@ session. `ProjectsScreen` keeps each host's `ProjectEntry.homeSessionId` on its
 primary host — to the link: empty renders **Set up main** (`#` + `sessionsProjectHomeSetupPath(id)`,
 the sessions drawer's setup pane), otherwise **Open main** (`#` + `sessionsDrawerPathForSession(id)`).
 The setup pane itself acts on the drawer's selected host, not on the card's primary host; it is
-`ProjectHomeSetupPane` in `components/sessions/`, which renders the New-session form's main variant.
+`ProjectHomeSetupPane` in `tddy-session-create-web`, which renders the New-session form's main variant.
 
 Test ID: `project-main-session-link-<projectId>`; page-object helper
 `projectHomeSetupPage.projectCardLink`. Acceptance:

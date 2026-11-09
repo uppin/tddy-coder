@@ -12,7 +12,7 @@
 - **Host directory (which hosts exist, merged from sources)**: [host-directory.md](host-directory.md)
 - **Hosts screen (every host the daemon has a record of)**: [tddy-hosts-web/docs/hosts-screen.md](../../tddy-hosts-web/docs/hosts-screen.md) (the page shell, `HostsAppPage`, stays here)
 - **Daemon settings screen (LiveKit integration status line)**: [daemon-settings-screen.md](../../tddy-workspace-web/docs/daemon-settings-screen.md)
-- **Inactive session activities (main-pane base view)**: [inactive-session-activities.md](inactive-session-activities.md)
+- **Inactive session activities (main-pane base view)**: [inactive-session-activities.md](../../tddy-session-web/docs/inactive-session-activities.md)
 - **Agent conversation tabs (attach a roster agent, talk to it)**: [session-agent-conversation.md](../../tddy-session-web/docs/session-agent-conversation.md)
 - **Insecure-origin constraints (plain-http LAN serving)**: [insecure-origin-constraints.md](insecure-origin-constraints.md)
 - **The local host over IPC (the desktop build's own wire)**: [local-host-ipc.md](local-host-ipc.md)

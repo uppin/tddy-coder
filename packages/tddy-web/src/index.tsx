@@ -56,7 +56,7 @@ import { AccountsAppPage } from "./components/accounts/AccountsAppPage";
 import { ModelsAppPage } from "./components/models/ModelsAppPage";
 import { TasksDrawerScreen } from "./components/tasks/TasksDrawerScreen";
 import { RpcPlaygroundAppPage } from "./rpc-playground/RpcPlaygroundAppPage";
-import { SessionsDrawerScreen } from "./components/sessions/SessionsDrawerScreen";
+import { SessionsDrawerScreen } from "tddy-session-web";
 import { SettingsAppPage } from "./components/settings/SettingsAppPage";
 import {
   isRpcPlaygroundPath,
