@@ -31,7 +31,7 @@ import { WorktreeService } from "tddy-client-web/gen/worktree_pb";
 import { AuthProvider } from "../../src/hooks/authProvider";
 import { SelectedDaemonProvider } from "../../src/rpc/selectedDaemon";
 import { useServingHostDirectorySource } from "../../src/rpc/hostDirectory/servingSource";
-import { daemonHostOf } from "../../src/rpc/hostDirectory/daemonHost";
+import { daemonHostOf } from "tddy-client-web";
 import { sandboxedCodebaseUnavailability } from "../../src/components/sessions/codebasePlacement";
 import { mountWithRpc } from "../support/rpc/inMemory";
 import { createSessionPage } from "../support/pages/createSessionPage";

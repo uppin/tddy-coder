@@ -16,17 +16,17 @@
  */
 
 import React from "react";
-import { useHostDirectory } from "../../src/rpc/hostDirectory/useHostDirectory";
-import { useHostPresence } from "../../src/rpc/hostDirectory/useHostPresence";
-import type { HostDirectorySource } from "../../src/rpc/hostDirectory/types";
-import { HostDirectorySources } from "../../src/rpc/hostDirectory/useHostDirectory";
+import { useHostDirectory } from "tddy-client-web";
+import { useHostPresence } from "tddy-client-web";
+import type { HostDirectorySource } from "tddy-client-web";
+import { HostDirectorySources } from "tddy-client-web";
 import { DaemonSelectorConnected } from "../../src/components/shell/DaemonSelector";
 import { SelectedDaemonProvider } from "../../src/rpc/selectedDaemon";
 import { daemonSelectorPage } from "../support/pages/daemonSelectorPage";
 import { ConnectionProviders } from "../../src/rpc/connections/registry";
 import type { ConnectionCapability, HostConnection } from "tddy-client-web/connections/types";
-import { HostPresenceRoom } from "../../src/rpc/hostDirectory/presenceRoom";
-import { aFakeCommonRoom } from "../support/livekit/fakeCommonRoom";
+import { HostPresenceRoom } from "tddy-livekit-web";
+import { aFakeCommonRoom } from "tddy-livekit-web/testkit";
 import { byTestId } from "../support/testIds";
 import { ConnectionProviderRegistry } from "tddy-client-web";
 

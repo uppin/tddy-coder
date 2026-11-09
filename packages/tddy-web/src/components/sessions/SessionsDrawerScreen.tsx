@@ -2,7 +2,7 @@ import React, { useCallback, useMemo, useState } from "react";
 import { create } from "@bufbuild/protobuf";
 import type { Client } from "@connectrpc/connect";
 import { SessionService, SessionEntrySchema } from "tddy-client-web/gen/session_pb";
-import { useHostPresence } from "../../rpc/hostDirectory/useHostPresence";
+import { useHostPresence } from "tddy-client-web";
 import { UploadProgressProvider } from "../../rpc/uploadProgress";
 import { requestSessionsRefresh } from "../../lib/sessionsRefreshBridge";
 import { sessionNotificationRegistry } from "./sessionNotificationRegistry";

@@ -1026,9 +1026,9 @@ reports merged:
    scripts/ci-status.sh --failures <PR#>    # failing test names, files, assertions, log tails
    ```
 
-   The required checks are `Rust lint`, `Rust build`, `Rust tests`, and the web checks, one
-   `web / <package> tests` per JS workspace package (`docs/dev/guides/ci.md` § Web package checks). **Do not treat
-   *skipped* as green** — that is what a never-built draft reports. A web check skipped on a *ready* PR is an unaffected package and is green. **Do not treat
+   The required checks are `Rust lint`, `Rust build`, `Rust tests`, and the web checks
+   `Web build`, `Web lint` and `Web tests shard 1/3`…`3/3` (`docs/dev/guides/ci.md` § Web checks). **Do not treat
+   *skipped* as green** — that is what a never-built draft reports. A web test shard that ran nothing on a *ready* PR had no affected package in its share and is green. **Do not treat
    "zero pending checks" as green** — a check is registered on the rollup a moment *after* a push, so
    "no checks pending" is true before CI has even started. That false positive is worst right after a
    force-push, which is exactly when a stack is being repaired. `--watch` exists so you do not have

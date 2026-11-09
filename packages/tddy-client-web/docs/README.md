@@ -1,7 +1,8 @@
 # tddy-client-web — technical reference
 
 What a web component package may know about the outside world: generated RPC code, the
-provider-agnostic connection model, and three ports (clients, navigation, auth) read through hooks.
+provider-agnostic connection model, and the ports read through hooks: clients, navigation, auth, and
+(since #843) presence, room RPC and media.
 Product description: [client-ports-package.md](../../../docs/ft/web/client-ports-package.md).
 
 ## Layout
@@ -15,6 +16,11 @@ Product description: [client-ports-package.md](../../../docs/ft/web/client-ports
 | `src/ports/auth.tsx` | `AuthPort`, `AuthPortProvider`, `useAuth` |
 | `src/appLocation.ts` | the pure `AppLocation` model (parse/format, `withPath`, `withParams`) |
 | `src/hostFanOut.ts`, `src/hostLabel.ts` | `useHostFanOut`, `hostLabelOf` |
+| `src/ports/media.tsx` | `RoomHandle` (opaque), `RoomStatus`, `RoomParticipant`; `PresencePort`, `RoomRpcPort`, `MediaPort`, their providers and hooks (#843) |
+| `src/hostDirectory/` | `DaemonHost` and host-directory types, `daemonHost`, `useHostDirectory` (lowered from `tddy-web` in #843) |
+| `src/capability/`, `src/connections/useHasCapability.ts` | `capabilityAvailability` / `useCapabilityAvailability`, `useHasCapability` (#843) |
+| `src/connections/sessionAttachment.ts` | `attachmentHintFromReply`, `capabilitiesForHint` (#843) |
+| `src/lib/` | `participantRole`, `debugMask` (+ `src/debug.d.ts`; the `debug` dependency), `testId`, `terminalFrameContinuity`, `terminalHistoryLoader` — shared by `tddy-livekit-web` and `tddy-web` (#843; `testId`, `terminalFrameContinuity` and `debugMask` are slated to move, see `docs/dev/todo/2026-11-07-tddy-client-web-holds-ui-and-terminal-helpers.md`) |
 | `src/testkit/` | port doubles and `withClients` (`./testkit` export) |
 
 Exports: `.`, `./gen/*`, `./connections/*`, `./testkit`.
@@ -29,7 +35,19 @@ implementation** — the app (or a spec's double) supplies every port.
 |---|---|---|
 | `ClientsPort` | `{ httpTransport: Transport; connections: ConnectionProviderRegistry; isHostReady?(hostId); selectedDaemon: SelectedDaemonState }` | `useClientsPort`, `useHttpTransport`, `useHttpClient`, `useConnectionRegistry`, `useHostConnector`, `useHostConnection`, `useHostClient`, `useSelectedDaemon`, `useDaemons`, `useHostLabel`, `useDaemonClient`, `useDaemonClientFor` |
 | `NavigationPort` | `{ location(); navigate(to, options?); subscribe(listener) }` | `useNavigationPort`, `useAppLocation` → `{ location, navigate(path), setParams(patch) }` |
+| `PresencePort` | `{ useHostPresence(hostId); usePresenceRoom(); useRoomParticipants(room) }` | `useHostPresence`, `usePresenceRoom`, `useRoomParticipants`, `usePresencePort` |
+| `RoomRpcPort` | `{ useRoomClient(room, identity, service); useParticipantPresent(room, identity); useParticipantProbe(room, identity); useRoomStatus(room) }` | same names, plus `useRoomRpcPort` |
+| `MediaPort` | declared here; its shape is settled by `feature/web-split/media` (#855) | `useMediaPort` |
 | `AuthPort` | the `useAuth` state (`user`, `isAuthenticated`, `sessionToken`, `vaultState`, `deviceLogin`, …) and actions (`login`, `logout`, `startDeviceLogin`, `unlockVault`, …) | `useAuth` |
+
+**Ports that carry hooks.** `PresencePort` and `RoomRpcPort` members are hooks, so the app builds each
+port once (`tddy-livekit-web`'s `livekitPorts()`) and their identities hold for the app's lifetime.
+Rooms are opaque `RoomHandle`s; no LiveKit type crosses the port.
+
+**Rendered presence versus a send-time check.** `useParticipantPresent` re-renders on join, leave and
+reconnect — for rendering. A check made inside an event handler (chat refusing a send nobody would
+read) uses `useParticipantProbe`, a stable function that asks the room *when called*: a value from the
+last render would miss a leave or join since then.
 
 The hook names are the ones `tddy-web` used before the split, so a moved component changes only its
 import path. `useHostConnector` is `"use no memo"`: its memo is keyed on the registry `revision`, which
@@ -70,14 +88,18 @@ imports it):
 - `anAuthDouble(stateOverrides?)` → `AuthDouble`: signed in by default; every action is a `Spy` that
   resolves and records `.mock.calls`. The spy is one plain recording function in both `bun test` and
   the Cypress bundle (no runner-specific branch).
+- `aPresenceDouble()` — rooms are plain tokens (`room(name)`), `presentHost`, `setParticipants`.
+- `aRoomRpcDouble(backend)` — every room client is the backend's; `setPresent(room, identity, here)`
+  drives both `useParticipantPresent` and probes.
+- `aMediaDouble(overrides?)` — minimal, until #855 settles `MediaPort`.
 - `withClients(element, backend, overrides?)` — wraps in all three ports; `cy.mountWithClients` and
   `tddy-web`'s `mountWithRpc` use it.
 
 ## Boundary and checks
 
 `src/packageBoundary.test.ts` (via `scripts/web-package-boundary.ts`) forbids imports of `tddy-web` and
-`livekit-client`. CI: `.github/workflows/web-tddy-client-web.yml` (shared `web-package.yml`) runs
-`bun test src`, `tsc --noEmit` and `cypress/component/MountWithClients.cy.tsx`.
+`livekit-client`. CI: `.github/workflows/web.yml` runs `tsc --noEmit` (`Web lint`), `bun test src` and
+`cypress/component/MountWithClients.cy.tsx` (`Web tests` shards).
 
 ## Changesets
 

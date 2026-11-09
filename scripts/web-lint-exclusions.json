@@ -1,0 +1,22 @@
+[
+  {
+    "package": "tddy-web",
+    "reason": "tsc --noEmit reports ~1300 pre-existing errors",
+    "todo": "docs/dev/todo/2026-11-07-tddy-web-does-not-typecheck.md"
+  },
+  {
+    "package": "tddy-rust-typescript-tests",
+    "reason": "tsconfig names the 'bun-types' type definitions, which are not installed (TS2688)",
+    "todo": "docs/dev/todo/2026-11-07-rust-typescript-tests-does-not-typecheck.md"
+  },
+  {
+    "package": "tddy-tauri-web",
+    "reason": "src/transport.ts passes `log` to createEnvelopeTransport, whose options have no `log` (TS2353)",
+    "todo": "docs/dev/todo/2026-11-07-tauri-web-transport-log-is-dropped.md"
+  },
+  {
+    "package": "tddy-desktop",
+    "reason": "no TypeScript sources: the package wraps the Tauri application",
+    "todo": null
+  }
+]

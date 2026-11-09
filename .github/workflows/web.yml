@@ -1,0 +1,258 @@
+name: Web
+
+# Every JS workspace package's build, lint and tests in one workflow, discovered from the root
+# `workspaces` list by scripts/web-ci.ts — a package added later needs no edit here. See
+# docs/dev/guides/ci.md § Web checks.
+#
+#   gate                 → build-gate.yml: a draft skips the work, as every other check does
+#   Web build            → every package's `build:ci`
+#   Web lint             → every package's `typecheck` (minus scripts/web-lint-exclusions.json) and the
+#                          web rule tests
+#   Web tests shard i/3  → the affected packages (scripts/web-affected.ts; all of them on push and
+#                          dispatch): unit suites dealt whole by package, Cypress component specs dealt
+#                          one by one. A shard with nothing to run passes without running anything.
+#
+# A package declares what its tests need in its package.json `tddyCi.needs`; a shard prepares only
+# what its own share needs.
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+  push:
+    branches: [master]
+  workflow_dispatch:
+
+# Keyed on the event too, so a manual dispatch never cancels the pull_request run of the same branch.
+concurrency:
+  group: web-${{ github.event_name }}-${{ github.head_ref || github.ref_name }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  checks: write # action-junit-report publishes the test check runs
+  pull-requests: read # the build gate reads a draft's comments for #forcebuild
+
+env:
+  # Incremental state and full debuginfo are per-crate scratch a one-shot CI build never reuses; see ci.yml.
+  CARGO_INCREMENTAL: 0
+  CARGO_PROFILE_DEV_DEBUG: line-tables-only
+
+jobs:
+  gate:
+    uses: ./.github/workflows/build-gate.yml
+
+  build:
+    name: Web build
+    needs: gate
+    if: needs.gate.outputs.build == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: cachix/install-nix-action@v31
+        with:
+          extra_nix_config: |
+            accept-flake-config = true
+
+      - uses: nix-community/cache-nix-action@v7
+        with:
+          primary-key: nix-${{ runner.os }}-${{ hashFiles('flake.nix', 'flake.lock') }}
+          restore-prefixes-first-match: nix-${{ runner.os }}-
+          save: false # ci.yml's rust-build is the sole writer
+
+      - name: bun install
+        env:
+          CYPRESS_INSTALL_BINARY: "0" # nothing here launches a browser
+        run: ./dev bun install --frozen-lockfile
+
+      - name: Build every package
+        run: ./dev bun scripts/web-ci.ts build
+
+  lint:
+    name: Web lint
+    needs: gate
+    if: needs.gate.outputs.build == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: cachix/install-nix-action@v31
+        with:
+          extra_nix_config: |
+            accept-flake-config = true
+
+      - uses: nix-community/cache-nix-action@v7
+        with:
+          primary-key: nix-${{ runner.os }}-${{ hashFiles('flake.nix', 'flake.lock') }}
+          restore-prefixes-first-match: nix-${{ runner.os }}-
+          save: false
+
+      - name: bun install
+        env:
+          CYPRESS_INSTALL_BINARY: "0"
+        run: ./dev bun install --frozen-lockfile
+
+      - name: Typecheck every package
+        id: typecheck
+        continue-on-error: true
+        run: ./dev bun scripts/web-ci.ts lint
+
+      - name: Web rule tests
+        id: rules
+        continue-on-error: true
+        run: >-
+          ./dev bun test
+          ./scripts/web-ci.test.ts
+          ./scripts/web-workflows.test.ts
+          ./scripts/web-package-boundary.test.ts
+          ./scripts/livekit-import-boundary.test.ts
+          ./scripts/livekit-rpc-package-name.test.ts
+
+      - name: Fail when a lint step failed
+        if: always() && (steps.typecheck.outcome == 'failure' || steps.rules.outcome == 'failure')
+        run: |
+          echo "::error::A lint step failed; see the steps above."
+          exit 1
+
+  tests:
+    name: Web tests shard ${{ matrix.shard }}/3
+    needs: gate
+    if: needs.gate.outputs.build == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3]
+    steps:
+      # The diff needs history: the base commit of a pull request is not on the shallow clone.
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - uses: cachix/install-nix-action@v31
+        with:
+          extra_nix_config: |
+            accept-flake-config = true
+
+      - uses: nix-community/cache-nix-action@v7
+        with:
+          primary-key: nix-${{ runner.os }}-${{ hashFiles('flake.nix', 'flake.lock') }}
+          restore-prefixes-first-match: nix-${{ runner.os }}-
+          save: false
+
+      - name: Plan this shard
+        id: plan
+        env:
+          SHARD: ${{ matrix.shard }}
+          EVENT: ${{ github.event_name }}
+          BASE: ${{ github.event.pull_request.base.sha }}
+          HEAD: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          if [ "$EVENT" = pull_request ]; then
+            range=(--base "$BASE" --head "$HEAD")
+          else
+            range=(--all)
+          fi
+          # The dev shell prints a banner on stdout, so only the output lines are kept.
+          ./dev bun scripts/web-ci.ts plan --shard "$SHARD" --of 3 "${range[@]}" --out web-shard-plan.json \
+            | grep -E '^(affected|cypress|needs-[a-z-]+)=' >> "$GITHUB_OUTPUT"
+          cat web-shard-plan.json
+
+      # LiveKit's prebuilt libwebrtc from the Actions cache (webrtc-sys reads LK_CUSTOM_WEBRTC).
+      - uses: ./.github/actions/webrtc-prebuilt
+        if: steps.plan.outputs.needs-tddy-coder == 'true' || steps.plan.outputs.needs-echo-server == 'true'
+
+      - name: Build tddy-coder
+        if: steps.plan.outputs.needs-tddy-coder == 'true'
+        run: ./dev cargo build --locked -p tddy-coder-cli --bin tddy-coder
+
+      - name: Build the echo_server fixture
+        if: steps.plan.outputs.needs-echo-server == 'true'
+        run: ./dev cargo build --locked -p tddy-livekit --example echo_server
+
+      # Cypress drives a bundled Electron, which needs these at runtime. Bun and node come from nix.
+      - name: Install Cypress runtime libraries
+        if: steps.plan.outputs.cypress == 'true'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libgtk-3-0 libgbm1 libnotify4 libnss3 libxss1 libasound2t64 libxtst6 xauth xvfb
+
+      - name: Cache Cypress binary
+        if: steps.plan.outputs.cypress == 'true'
+        uses: actions/cache@v6
+        with:
+          path: ~/.cache/Cypress
+          key: cypress-${{ runner.os }}-${{ hashFiles('bun.lock') }}
+          restore-keys: cypress-${{ runner.os }}-
+
+      - name: bun install
+        if: steps.plan.outputs.affected == 'true'
+        # The Cypress binary is ~250 MB; CYPRESS_INSTALL_BINARY=0 skips it. Any other value is read as
+        # a version or URL to download, so a shard that runs Cypress leaves it unset.
+        env:
+          CYPRESS: ${{ steps.plan.outputs.cypress }}
+        run: |
+          if [ "$CYPRESS" != true ]; then export CYPRESS_INSTALL_BINARY=0; fi
+          ./dev bun install --frozen-lockfile
+
+      - name: Build the packages the tests run against
+        if: steps.plan.outputs.needs-web-bundle == 'true'
+        run: ./dev bun scripts/web-ci.ts build
+
+      # tddy-livekit-rpc-web's livekitDockerTestkit.ts starts this image inside a Cypress task whose 60s
+      # timeout would otherwise also cover pulling it. Keep the tag in step with LIVEKIT_IMAGE there.
+      - name: Pull the LiveKit image
+        if: steps.plan.outputs.needs-livekit-image == 'true'
+        run: docker pull livekit/livekit-server:master
+
+      - name: Run this shard's suites
+        id: suites
+        if: steps.plan.outputs.affected == 'true'
+        continue-on-error: true
+        env:
+          # FIXME(livekit-web-echo-server-hang): `startEchoServer` intermittently exceeds its 60 s task
+          # timeout. This prints each phase of the testkit start so a failing run names the stalled one.
+          # Remove once the hang is understood and fixed.
+          DEBUG: ${{ steps.plan.outputs.needs-echo-server == 'true' && 'tddy:livekit-web:*' || '' }}
+        run: |
+          mkdir -p reports/junit
+          ./dev bun scripts/web-ci.ts run --plan web-shard-plan.json
+
+      - name: Publish test report
+        if: always() && hashFiles('reports/junit/*.xml') != ''
+        uses: mikepenz/action-junit-report@v6
+        with:
+          report_paths: reports/junit/*.xml
+          check_name: web shard ${{ matrix.shard }} report
+          detailed_summary: true
+          fail_on_failure: true
+          require_tests: true
+
+      - name: Fail when a suite failed
+        if: always() && steps.suites.outcome == 'failure'
+        run: |
+          echo "::error::A test suite failed; see the steps above."
+          exit 1
+
+      - name: Upload JUnit XML
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: junit-web-shard-${{ matrix.shard }}
+          path: reports/junit
+          if-no-files-found: ignore
+          retention-days: 14
+
+      - name: Upload Cypress screenshots
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: cypress-screenshots-web-shard-${{ matrix.shard }}
+          path: packages/*/cypress/screenshots
+          if-no-files-found: ignore
+          retention-days: 7

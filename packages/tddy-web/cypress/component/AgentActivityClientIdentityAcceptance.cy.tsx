@@ -17,12 +17,13 @@
  * PRD: docs/ft/web/agent-activity-pane.md § Persisted, lazily-counted activity.
  */
 
+import { openHostServedSession } from "../../src/rpc/connections/hostServedSession";
 import React from "react";
 import { createClient, type Transport } from "@connectrpc/connect";
-import { Room } from "livekit-client";
+import { aDisconnectedRoom } from "tddy-livekit-web/testkit";
 import { ActivityService } from "tddy-client-web/gen/activity_pb";
 import { AgentActivityOverlay } from "../../src/components/sessions/AgentActivityOverlay";
-import { LiveKitConnectionProvider } from "../../src/rpc/connections/liveKit";
+import { LiveKitConnectionProvider } from "tddy-livekit-web";
 import { mountWithRpc } from "../support/rpc/inMemory";
 import { agentActivityPage } from "../support/pages/agentActivityPage";
 import { agentChatPage } from "../support/pages/agentChatPage";
@@ -45,7 +46,7 @@ const hostPage = {
 function CachedClientHost({ transport }: { transport: Transport }) {
   const [renders, setRenders] = React.useState(0);
   const session = React.useMemo(() => {
-    const provider = new LiveKitConnectionProvider(new Room(), () => transport);
+    const provider = new LiveKitConnectionProvider(aDisconnectedRoom(), () => transport, null, openHostServedSession);
     const host = provider.connectHost("i1");
     if (!host) throw new Error("the provider must claim the host its own room reaches");
     return host.openSession("cached-session", { sessionId: "cached-session" });

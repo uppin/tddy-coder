@@ -30,7 +30,7 @@ import type { StackChildSession } from "../components/sessions/prstack/stackChil
 import type { StackNode } from "../components/sessions/prstack/stackPlan";
 import type { ViewRect } from "../lib/terminalStatusBarLayout";
 import type { TransitionCounters } from "../components/connection/terminalPresentation";
-import type { RoomParticipant } from "../hooks/useRoomParticipants";
+import type { RoomParticipant } from "tddy-livekit-web";
 
 // ---------------------------------------------------------------------------
 // Proto: SessionEntry

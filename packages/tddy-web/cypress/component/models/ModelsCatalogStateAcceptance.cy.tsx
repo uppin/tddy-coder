@@ -13,7 +13,7 @@
  */
 
 import React from "react";
-import type { Room } from "livekit-client";
+import type { RoomHandle } from "tddy-client-web";
 import { create } from "@bufbuild/protobuf";
 import { type InMemoryRpcBackend } from "tddy-connectrpc-testkit";
 import {
@@ -23,7 +23,7 @@ import {
 } from "tddy-client-web/gen/models_pb";
 import { ModelsAppPage } from "../../../src/components/models/ModelsAppPage";
 import { AuthProvider } from "../../../src/hooks/authProvider";
-import type { DaemonHost } from "../../../src/lib/participantRole";
+import type { DaemonHost } from "tddy-client-web";
 import { SelectedDaemonProvider } from "../../../src/rpc/selectedDaemon";
 import { mountWithRpc } from "../../support/rpc/inMemory";
 import { aJoinedCommonRoom } from "../../support/rpc/withSelectedDaemon";
@@ -56,7 +56,7 @@ const QWEN: ModelRef = {
  */
 function mountWithRoom(
   backend: InMemoryRpcBackend,
-  options: { room: Room | null; daemons: DaemonHost[] },
+  options: { room: RoomHandle | null; daemons: DaemonHost[] },
 ) {
   return mountWithRpc(
     <AuthProvider>

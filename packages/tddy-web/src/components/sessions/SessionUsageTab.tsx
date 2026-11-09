@@ -8,7 +8,7 @@
  */
 
 import React from "react";
-import type { Room } from "livekit-client";
+import type { RoomHandle } from "tddy-client-web";
 import { Table, TableBody, TableCell, TableFooter, TableHead, TableHeader, TableRow, InlineError } from "tddy-ui-web";
 import { formatTokens } from "./formatTokens";
 import { usageTotals } from "./sessionUsage";
@@ -16,7 +16,7 @@ import { useSessionUsage } from "./useSessionUsage";
 
 export interface SessionUsageTabProps {
   /** LiveKit room + daemon/presenter identity selecting the usage stream's transport target. */
-  room: Room | null;
+  room: RoomHandle | null;
   serverIdentity: string;
 }
 

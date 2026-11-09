@@ -8,7 +8,7 @@
  * constant is a prefix or a helper function — see the examples below.
  */
 
-import { safeTestIdPart } from "../../src/lib/testId";
+import { safeTestIdPart } from "tddy-client-web";
 
 // ---------------------------------------------------------------------------
 // Helper

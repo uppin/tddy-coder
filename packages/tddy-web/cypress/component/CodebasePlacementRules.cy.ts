@@ -19,7 +19,7 @@ import {
   sandboxedCodebaseUnavailability,
   type CodebasePlacementChoice,
 } from "../../src/components/sessions/codebasePlacement";
-import type { DaemonHost } from "../../src/lib/participantRole";
+import type { DaemonHost } from "tddy-client-web";
 
 const NONE: CodebasePlacementChoice = "none";
 const AGENT_SANDBOX: CodebasePlacementChoice = "sandbox";

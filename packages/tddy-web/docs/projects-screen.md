@@ -11,7 +11,7 @@ Container + presentational split, mirroring `VmsAppPage`/`WorktreesAppPage`:
 - **`components/projects/ProjectsAppPage.tsx`** — data container. `useDaemonClient(ConnectionService)`
   (shared `SelectedDaemonProvider`) polls `listProjects` and wires `createProject`; the selectable
   **hosts** come from the same shared context (`useDaemons()`) — daemon-role participants in the
-  common LiveKit room, classified by `daemonHostsFromParticipants` (`lib/participantRole`), so
+  common LiveKit room, classified by `daemonHostsFromParticipants` (`tddy-client-web` `lib/participantRole`), so
   coder/session and browser participants are never offered as hosts. **`addProjectToHost` addresses
   the chosen target host directly**: it builds a client for `daemon-{targetInstanceId}` from the
   shared room + `useLiveKitTransportFactory` (rather than routing through the selected daemon and
@@ -93,7 +93,7 @@ Test ID: `project-main-session-link-<projectId>`; page-object helper
 ## Role derivation
 
 Both this screen's host list and the presence table's Role column classify a common-room participant
-with the shared `lib/participantRole.ts` (`inferParticipantRole`, `metadataLooksLikeDaemonAdvertisement`,
+with the shared `tddy-client-web/src/lib/participantRole.ts` (`inferParticipantRole`, `metadataLooksLikeDaemonAdvertisement`,
 `parseDaemonAdvertisement`, `daemonHostsFromParticipants`). This is the client-side mirror of the
 daemon's `eligible_daemon_from_participant_fields`, so client host selection and the server's
 `AddProjectToHost` routing agree on what counts as a daemon.

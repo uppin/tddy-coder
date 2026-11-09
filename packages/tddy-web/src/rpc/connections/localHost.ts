@@ -36,7 +36,7 @@ import {
   type WebviewIpcHost,
 } from "tddy-tauri-web";
 import { TerminalSessionService } from "tddy-client-web/gen/terminal_session_pb";
-import { tddyDebug } from "../../lib/debugMask";
+import { tddyDebug } from "tddy-client-web";
 import { daemonTransportFlavour, type TauriHostWindow } from "../daemonTransportFlavour";
 import type { SessionAttachmentHint, SessionConnection } from "tddy-client-web/connections/session";
 import type { TerminalFeed, TerminalOptions } from "tddy-client-web/connections/terminal";

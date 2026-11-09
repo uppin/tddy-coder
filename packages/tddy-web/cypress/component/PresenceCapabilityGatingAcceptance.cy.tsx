@@ -23,15 +23,15 @@
 import React from "react";
 import type { InMemoryRpcBackend } from "tddy-connectrpc-testkit";
 import { LiveKitAppPage } from "../../src/components/livekit/LiveKitAppPage";
-import { ParticipantList } from "../../src/components/ParticipantList";
+import { ParticipantList } from "tddy-livekit-web";
 import { SessionsDrawerScreen } from "../../src/components/sessions/SessionsDrawerScreen";
 import { DaemonNavMenu } from "../../src/components/shell/DaemonNavMenu";
 import { RpcPlaygroundAppPage } from "../../src/rpc-playground/RpcPlaygroundAppPage";
-import type { RoomParticipant } from "../../src/hooks/useRoomParticipants";
+import type { RoomParticipant } from "tddy-livekit-web";
 import { AuthProvider } from "../../src/hooks/authProvider";
 import { ConnectionProviders } from "../../src/rpc/connections/registry";
 import type { HostConnection } from "tddy-client-web/connections/types";
-import type { CapabilityBearing } from "../../src/rpc/connections/useHasCapability";
+import type { CapabilityBearing } from "tddy-client-web";
 import { SelectedDaemonProvider } from "../../src/rpc/selectedDaemon";
 import { appLocationPage } from "../support/pages/appLocationPage";
 import { appShellPage as shell } from "../support/pages/appShellPage";
@@ -40,7 +40,7 @@ import { liveKitScreenPage as liveKitScreen } from "../support/pages/liveKitScre
 import { participantListPage as roster } from "../support/pages/participantListPage";
 import { rpcPlaygroundPage as playground } from "../support/pages/rpcPlaygroundPage";
 import { sessionsDrawerPage as drawer } from "../support/pages/sessionsDrawerPage";
-import { aCommonRoomThatNeverFinishesConnecting } from "../support/livekit/commonRoomConnection";
+import { aCommonRoomThatNeverFinishesConnecting } from "tddy-livekit-web/testkit";
 import { aSessionServiceBackend } from "../support/rpc/daemonSessionHostBackend";
 import { aHostConnection, aRegistryServing } from "../support/rpc/hostConnections";
 import { mountWithRpc } from "../support/rpc/inMemory";

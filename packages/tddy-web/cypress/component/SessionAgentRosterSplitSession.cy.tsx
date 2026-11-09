@@ -27,7 +27,7 @@ import { create } from "@bufbuild/protobuf";
 import type { InMemoryRpcBackend } from "tddy-connectrpc-testkit";
 import { SessionEntrySchema } from "tddy-client-web/gen/session_pb";
 import { SessionAgentRosterPane } from "../../src/components/sessions/SessionAgentRosterPane";
-import { daemonRpcIdentity, type DaemonHost } from "../../src/lib/participantRole";
+import { daemonRpcIdentity, type DaemonHost } from "tddy-client-web";
 import {
   aDaemonOfferingAgents,
   aDaemonThatCannotBeReached,

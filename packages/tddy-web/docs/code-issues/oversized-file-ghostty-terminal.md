@@ -17,6 +17,7 @@
 | 2026-11-02 | 1479 | +12 on #807 (`osc52-clipboard`), measured at its wrap against its base (1467): the OSC 52 recognizer import, one `useMemo`, and a tap beside each of the three writes. The recognizer itself is `src/lib/osc52.ts`. Split not done in this node (a stack node among several touching terminal code); the `initialContent` double write was recorded in the backlog (closed by #813) |
 | 2026-11-03 | 1475 | −4 on #813 (`#session-tabs` sweep), measured against `origin/master` `162a66978` (1479): the setup effect's duplicate `initialContent` write + tap removed (that backlog entry is closed). Still over budget; split deferred by the developer |
 | 2026-11-03 | 1491 | +16 on #818 (`#tmux-agent` 4/4), measured against its base #816 (1475): the open path writes `initialContent` before ready (`initialContentRef`, `writtenInitialContentRef`, the dedup in the effect). Split deferred by the developer |
+| 2026-11-07 | 1491 → 1491 | Unchanged by #843 (`#web-split` 6/17), measured against its base `feature/web-split/clients`: its `debugMask`/terminal-helper imports re-point to `tddy-client-web`. Not grown, alert-only |
 
 ## What would close it
 

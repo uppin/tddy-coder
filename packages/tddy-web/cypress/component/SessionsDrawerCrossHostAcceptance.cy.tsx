@@ -11,7 +11,7 @@
 
 import React from "react";
 import { SessionService, Signal } from "tddy-client-web/gen/session_pb";
-import { daemonRpcIdentity, type DaemonHost } from "../../src/lib/participantRole";
+import { daemonRpcIdentity, type DaemonHost } from "tddy-client-web";
 import { SessionsDrawerScreen } from "../../src/components/sessions/SessionsDrawerScreen";
 import { withSelectedDaemon } from "../support/rpc/withSelectedDaemon";
 import {

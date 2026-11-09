@@ -32,7 +32,7 @@ import {
 } from "../lib/terminalZoomBridge";
 import { TERMINAL_OVERLAY_FIXED_GRID_CHAR_WIDTH_EM } from "./connection/config";
 import { clientPointToTerminalCell } from "../lib/terminalMouseCellCoords";
-import { tddyDebug } from "../lib/debugMask";
+import { tddyDebug } from "tddy-client-web";
 import { computeScrollbar } from "../lib/terminalScrollbar";
 
 // Namespaced `[tddy]` diagnostics enabled by the DEBUG mask (daemon `debug:` / localStorage.debug).

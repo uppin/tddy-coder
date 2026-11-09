@@ -8,8 +8,8 @@
  */
 
 import React from "react";
-import type { DaemonHost } from "../../src/lib/participantRole";
-import { daemonRpcIdentity } from "../../src/lib/participantRole";
+import type { DaemonHost } from "tddy-client-web";
+import { daemonRpcIdentity } from "tddy-client-web";
 import { SessionsDrawerScreen } from "../../src/components/sessions/SessionsDrawerScreen";
 import { appLocationPage } from "../support/pages/appLocationPage";
 import { sessionsDrawerPage } from "../support/pages/sessionsDrawerPage";

@@ -14,7 +14,7 @@ import { Code, ConnectError } from "@connectrpc/connect";
 import { anInMemoryRpcBackend } from "tddy-connectrpc-testkit";
 import { ModelLoadState, ModelRegistryService } from "tddy-client-web/gen/models_pb";
 import { ModelsAppPage } from "../../../src/components/models/ModelsAppPage";
-import { daemonRpcIdentity, type DaemonHost } from "../../../src/lib/participantRole";
+import { daemonRpcIdentity, type DaemonHost } from "tddy-client-web";
 import { withSelectedDaemon } from "../../support/rpc/withSelectedDaemon";
 import { mountWithPerDaemonLiveKitRpc } from "../../support/rpc/perDaemonLiveKitRpc";
 import {

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import type { TmuxSessionInfo } from "tddy-client-web/gen/terminal_session_pb";
-import { tddyDebug } from "../../lib/debugMask";
+import { tddyDebug } from "tddy-client-web";
 import { hostNotConnectedText, rpcFailureText } from "../../rpc/rpcFailure";
 import type { TerminalClient } from "./sessionRuntimeProps";
 

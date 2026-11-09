@@ -1,12 +1,13 @@
 /**
- * Which JS workspace packages a change affects — the decision behind each `web-<package>.yml` PR check.
+ * Which JS workspace packages a change affects — the decision behind the `Web tests` shards and the
+ * `Storybook build` check.
  *
  * A package is affected when a file under its directory changed, when a workspace package it depends
- * on (`workspace:*` in `dependencies` or `devDependencies`, transitively) is affected, when its own
- * caller workflow changed, or when a global input changed — the lockfile, the root manifest, the
+ * on (`workspace:*` in `dependencies` or `devDependencies`, transitively) is affected, or when a
+ * global input changed — the lockfile, the root manifest, the
  * toolchain, or the CI machinery itself.
  *
- * CLI (used by `.github/workflows/web-package.yml`):
+ * CLI (`.github/workflows/storybook.yml`; the shards plan through `scripts/web-ci.ts`):
  *
  *   bun scripts/web-affected.ts --package <name> --base <sha> --head <sha>
  *   bun scripts/web-affected.ts --package <name> --all
@@ -39,9 +40,13 @@ export const GLOBAL_INPUTS: readonly string[] = [
   "bunfig.toml",
   "flake.nix",
   "flake.lock",
-  ".github/workflows/web-package.yml",
+  ".github/workflows/web.yml",
+  ".github/workflows/storybook.yml",
   ".github/workflows/build-gate.yml",
   "scripts/web-affected.ts",
+  "scripts/web-ci.ts",
+  // Every package's boundary rule test runs it.
+  "scripts/web-package-boundary.ts",
 ];
 
 /** The subset of a `package.json` this script reads. */
@@ -73,9 +78,7 @@ export function affectedPackages(
 
   const affected = new Set<string>();
   for (const pkg of workspace.packages) {
-    const touched = changedFiles.some(
-      (file) => file.startsWith(`${pkg.dir}/`) || file === callerWorkflow(pkg.name),
-    );
+    const touched = changedFiles.some((file) => file.startsWith(`${pkg.dir}/`));
     if (touched) affected.add(pkg.name);
   }
 
@@ -165,11 +168,6 @@ function workspaceDependencies(manifest: PackageManifest): string[] {
     .filter(([, spec]) => spec.startsWith("workspace:"))
     .map(([name]) => name);
   return [...new Set(names)];
-}
-
-/** The workflow that calls the shared workflow for `name`; editing it re-tests that package. */
-function callerWorkflow(name: string): string {
-  return `.github/workflows/web-${name}.yml`;
 }
 
 function readManifest(path: string): PackageManifest {

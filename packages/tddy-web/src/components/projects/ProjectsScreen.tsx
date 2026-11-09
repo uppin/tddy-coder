@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 import type { ProjectEntry } from "tddy-client-web/gen/project_pb";
-import type { DaemonHost } from "../../lib/participantRole";
+import type { DaemonHost } from "tddy-client-web";
 import { useActionFailure } from "../../hooks/useActionFailure";
 import { InlineError } from "tddy-ui-web";
 import type { AssignableAccount } from "./ProjectAccountAssignment";
