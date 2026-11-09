@@ -106,16 +106,16 @@ function ShrinkableHost() {
   );
 }
 
-describe("GhosttyTerminal shrink — the real pane chain", () => {
+describe("TerminalView shrink — the real pane chain", () => {
   it("re-fits the grid when the pane collapses below the screen's fitted width", () => {
     // Given — a wide pane with the real terminal chain mounted
     cy.mount(<ShrinkableHost />);
-    byTestId(TEST_IDS.ghosttyTerminal, { timeout: 10000 }).should(
+    byTestId(TEST_IDS.terminal, { timeout: 10000 }).should(
       "have.attr",
       "data-terminal-ready",
       "true",
     );
-    byTestId(TEST_IDS.ghosttyTerminal)
+    byTestId(TEST_IDS.terminal)
       .find(".xterm-screen")
       .then(($screen) => {
         const fittedWidth = $screen[0].getBoundingClientRect().width;
@@ -130,7 +130,7 @@ describe("GhosttyTerminal shrink — the real pane chain", () => {
         // Then — the grid re-fits to the shrunken pane (the FitAddon's resize observer is
         // debounced at 100ms; on a loaded CI runner the render loop can lag behind, so
         // give the re-fit a generous window — the timeout flows from .find into .should)
-        byTestId(TEST_IDS.ghosttyTerminal)
+        byTestId(TEST_IDS.terminal)
           .find(".xterm-screen", { timeout: 15000 })
           .should(($c) => {
             const width = $c[0].getBoundingClientRect().width;

@@ -3,7 +3,7 @@
  *
  * Any program in a session terminal that prints an OSC 52 clipboard write — tmux copy-mode, Neovim,
  * Claude Code — puts its text on the clipboard of the machine the viewer is on. Reads are refused
- * and never answered. Both feed paths are covered: the agent terminal (`GhosttyTerminalSession` on
+ * and never answered. Both feed paths are covered: the agent terminal (`TerminalSession` on
  * a feed) and a bash tab (`GrpcSessionTerminal` over the terminal RPC stream).
  *
  * Reference: packages/tddy-terminal-web/docs/terminal-osc52-clipboard.md (`#session-tabs 4/7`)
@@ -22,8 +22,8 @@ import {
 } from "tddy-client-web/gen/terminal_session_pb";
 import { GrpcSessionTerminal } from "../../src/GrpcSessionTerminal";
 import { UploadProgressProvider } from "tddy-terminal-web";
-import { aGhosttyTerminal } from "../../../tddy-terminal-web/cypress/support/drivers/ghosttyTerminalDriver";
-import { aGhosttyTerminalSession } from "../../../tddy-terminal-web/cypress/support/drivers/ghosttyTerminalSessionDriver";
+import { aTerminalView } from "../../../tddy-terminal-web/cypress/support/drivers/terminalViewDriver";
+import { aTerminalSession } from "../../../tddy-terminal-web/cypress/support/drivers/terminalSessionDriver";
 import { byTestId, TEST_IDS } from "../support/testIds";
 
 const ESC = "\x1b";
@@ -104,7 +104,7 @@ describe("A terminal's OSC 52 copy reaches the viewer's clipboard", () => {
 
   it("an OSC 52 write on the agent terminal copies its text to the clipboard", () => {
     // Given the agent terminal
-    const terminal = aGhosttyTerminalSession().mount();
+    const terminal = aTerminalSession().mount();
 
     // When its program prints a clipboard write
     terminal.deliver(`copying${osc52Write("from-the-agent")}done\r\n`);
@@ -126,7 +126,7 @@ describe("A terminal's OSC 52 copy reaches the viewer's clipboard", () => {
 
   it("an OSC 52 read writes nothing and sends no input", () => {
     // Given the agent terminal
-    const terminal = aGhosttyTerminalSession().mount();
+    const terminal = aTerminalSession().mount();
 
     // When its program asks to read the clipboard, then prints a marker
     terminal.deliver(`${OSC52_READ}after-the-read\r\n`);
@@ -142,7 +142,7 @@ describe("A terminal's OSC 52 copy reaches the viewer's clipboard", () => {
 
   it("the output around an OSC 52 sequence still renders", () => {
     // Given the agent terminal
-    const terminal = aGhosttyTerminalSession().mount();
+    const terminal = aTerminalSession().mount();
 
     // When a clipboard write arrives between two words
     terminal.deliver(`before-the-copy${osc52Write("x")}after-the-copy\r\n`);
@@ -156,7 +156,7 @@ describe("A terminal's OSC 52 copy reaches the viewer's clipboard", () => {
 
   it("an OSC 52 write inside the initial content copies exactly once", () => {
     // Given initial content that carries a clipboard write
-    const terminal = aGhosttyTerminal({
+    const terminal = aTerminalView({
       initialContent: `before${osc52Write("from-initial-content")}after-initial-copy\r\n`,
       withHandleCapture: true,
     });

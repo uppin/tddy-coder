@@ -109,6 +109,7 @@ jobs:
           ./scripts/web-package-boundary.test.ts
           ./scripts/livekit-import-boundary.test.ts
           ./scripts/livekit-rpc-package-name.test.ts
+          ./scripts/no-ghostty.test.ts
 
       - name: Fail when a lint step failed
         if: always() && (steps.typecheck.outcome == 'failure' || steps.rules.outcome == 'failure')

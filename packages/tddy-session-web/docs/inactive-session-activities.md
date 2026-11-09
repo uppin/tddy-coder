@@ -28,10 +28,10 @@ Product reference: [docs/ft/web/inactive-session-activities.md](../../../docs/ft
 
 ### The stopped Agent tab
 
-`DormantAgentTerminal({ sessionId, sessionToken, terminalClient, onResume })` is a `GhosttyTerminal` with no `onData` sink, so a keystroke reaches nothing. It uses `HISTORY_THEME` and `HISTORY_FILTER`, exported from `GhosttyTerminalSession.tsx` rather than copied, so the stopped tab and "View history" cannot drift apart.
+`DormantAgentTerminal({ sessionId, sessionToken, terminalClient, onResume })` is a `TerminalView` with no `onData` sink, so a keystroke reaches nothing. It uses `HISTORY_THEME` and `HISTORY_FILTER`, exported from `TerminalSession.tsx` rather than copied, so the stopped tab and "View history" cannot drift apart.
 
 - **`useRecordedOutput`** waits for the emulator's `onReady` (writes before open are lost), then drives a `TerminalHistoryForwardLoader(null)` over `createForwardHistoryFetcher` for `AGENT_TERMINAL_ID` until `done`. With no live stream to anchor on, the fill runs to the daemon's `atEnd`. `NOT_FOUND`, or a recording that wrote nothing, sets *no recording* ("No recorded output"); any other failure is shown through `rpcFailureText`. A missing terminal client is its own message, not an empty recording.
-- **`terminal-buffer-text`** mirrors the buffer the way `GhosttyTerminalSession` does, so the terminal specs read it the same way.
+- **`terminal-buffer-text`** mirrors the buffer the way `TerminalSession` does, so the terminal specs read it the same way.
 - **`preventFocusOnTap={isMobile}`**: on a touch device a tap does not focus the read-only terminal, so the keyboard stays down; a pointer device keeps the default focus.
 - **The toast** is `Toast` (`tddy-ui-web`'s `toast`): `{ message, action?: { label, onClick, busy? }, error?, testId }`, `role="status"`, its error `role="alert"` through `InlineError`, absolutely positioned like `TerminalControlOverlay`. There is no toast queue; the caller owns placement. `useResumeAction` keeps the action busy while `onResume` runs and shows its rejection's text.
 

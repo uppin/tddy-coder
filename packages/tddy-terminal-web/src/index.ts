@@ -1,5 +1,5 @@
-export * from "./GhosttyTerminal";
-export * from "./GhosttyTerminalSession";
+export * from "./TerminalView";
+export * from "./TerminalSession";
 export * from "./connection/ConnectionTerminalChrome";
 export * from "./connection/TerminalConnectionStatusBar";
 export * from "./connection/ShortcutDrawer";

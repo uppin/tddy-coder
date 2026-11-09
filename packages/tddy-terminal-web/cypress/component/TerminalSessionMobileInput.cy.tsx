@@ -2,13 +2,13 @@
  * Behaviour spec: the Sessions-screen terminal must accept text typed on a mobile soft keyboard and
  * forward it to the PTY stream.
  *
- * Soft keyboards fire DOM `input` events (not `keydown` with a `key`), so ghostty-web's `onData`
+ * Soft keyboards fire DOM `input` events (not `keydown` with a `key`), so xterm.js's `onData`
  * never sees them. The terminal therefore needs a hidden-input mobile keyboard affordance of its
  * own — one of the two behaviours that used to exist on only one of the two terminals.
  */
 
 import React from "react";
-import { GhosttyTerminalSession } from "../../src/GhosttyTerminalSession";
+import { TerminalSession } from "../../src/TerminalSession";
 import type { TerminalStream } from "tddy-client-web/connections/terminal";
 import { UploadProgressProvider } from "../../src/rpc/uploadProgress";
 import { byTestId, TEST_IDS, shortcutButton } from "../support/testIds";
@@ -35,7 +35,7 @@ function mountSessionsTerminalOnMobile(
   cy.mount(
     <div style={{ width: 375, height: 500, position: "relative" }}>
       <UploadProgressProvider>
-        <GhosttyTerminalSession
+        <TerminalSession
           feed={{ stream }}
           sessionToken="test-token"
           sessionId="test-session"

@@ -1,6 +1,6 @@
 # tddy-terminal-web
 
-The browser terminal: `GhosttyTerminal`, `GhosttyTerminalSession`, the terminal chrome (status bar,
+The browser terminal: `TerminalView`, `TerminalSession`, the terminal chrome (status bar,
 shortcut drawer, mobile keyboard, file drop and upload, enqueued-input overlay), the transport-agnostic
 terminal feed and input delivery, and the terminal helpers (`lib/terminal*`, OSC 52, zoom).
 

@@ -11,18 +11,18 @@
 import React from "react";
 import { mount } from "cypress/react";
 import {
-  GhosttyTerminal,
-  type GhosttyTerminalHandle,
-} from "../../src/GhosttyTerminal";
+  TerminalView,
+  type TerminalViewHandle,
+} from "../../src/TerminalView";
 
 const HISTORY_LINES = 20000;
 
 const mountTerminal = (props: { scrollback?: number } = {}) => {
-  const terminal = React.createRef<GhosttyTerminalHandle>();
+  const terminal = React.createRef<TerminalViewHandle>();
   const onReady = cy.stub().as("ready");
   mount(
     <div style={{ width: 640, height: 320 }}>
-      <GhosttyTerminal
+      <TerminalView
         ref={terminal}
         scrollback={props.scrollback}
         onReady={onReady}
@@ -33,7 +33,7 @@ const mountTerminal = (props: { scrollback?: number } = {}) => {
   return terminal;
 };
 
-const bufferTextOf = (terminal: React.RefObject<GhosttyTerminalHandle>) =>
+const bufferTextOf = (terminal: React.RefObject<TerminalViewHandle>) =>
   terminal.current?.getBufferText?.() ?? "";
 
 it("shows output written after a previous read", () => {

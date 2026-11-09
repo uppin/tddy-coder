@@ -30,7 +30,6 @@ export const PREBUNDLED = [
   "rxjs",
   "dequal",
   "debug",
-  "ghostty-web",
   "@xterm/xterm",
   "@xterm/addon-fit",
   "@xterm/addon-unicode11",

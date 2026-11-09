@@ -48,7 +48,7 @@ export function useAgentTerminalFocus({
   }, [focused, agentPaneActive]);
 
   // Focus guard: a backgrounded session keeps its terminal mounted, and a terminal that opens (or
-  // is re-selected) while still transiently visible auto-focuses itself — ghostty-web focuses on
+  // is re-selected) while still transiently visible auto-focuses itself — xterm.js focuses on
   // open and re-asserts it on a deferred timer. That lets a background session's terminal steal
   // keyboard focus from the foreground one a beat after selection. While this runtime is the
   // foreground one with its Agent pane active, reclaim focus whenever it lands in a *different*

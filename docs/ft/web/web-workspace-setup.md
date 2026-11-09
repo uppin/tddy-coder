@@ -8,7 +8,7 @@ Set up a Bun-based monorepo workspace (yarn-style `workspaces` field) at the rep
 
 The tddy-coder project is currently a pure Rust workspace. A web frontend is needed for a dev progress tracking dashboard (`tddy-web`). The workspace structure must support adding more web packages in the future alongside the existing Rust packages.
 
-A web terminal feature already exists (see [web-terminal.md](web-terminal.md)) using ghostty-web; `tddy-web` is a separate dashboard application.
+A web terminal feature already exists (see [web-terminal.md](web-terminal.md)) using xterm.js; `tddy-web` is a separate dashboard application.
 
 For **local daemon + Vite** development (backend RPC and HMR frontend together), see [local-web-dev.md](local-web-dev.md).
 

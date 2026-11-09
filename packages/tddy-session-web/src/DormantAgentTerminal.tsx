@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from "react";
 import { Code, ConnectError } from "@connectrpc/connect";
-import { GhosttyTerminal, type GhosttyTerminalHandle } from "tddy-terminal-web";
+import { TerminalView, type TerminalViewHandle } from "tddy-terminal-web";
 import { HISTORY_FILTER, HISTORY_THEME } from "tddy-terminal-web";
 import {
   createForwardHistoryFetcher,
@@ -53,7 +53,7 @@ interface RecordedOutput {
  * anchor on, so the fill runs to the recording's end.
  */
 function useRecordedOutput(
-  terminalRef: React.RefObject<GhosttyTerminalHandle | null>,
+  terminalRef: React.RefObject<TerminalViewHandle | null>,
   opened: boolean,
   terminalClient: TerminalClient | null,
   sessionId: string,
@@ -139,7 +139,7 @@ export function DormantAgentTerminal({
   terminalClient = null,
   onResume,
 }: DormantAgentTerminalProps): React.ReactElement {
-  const terminalRef = useRef<GhosttyTerminalHandle>(null);
+  const terminalRef = useRef<TerminalViewHandle>(null);
   // A touch device keeps the keyboard down over a view that takes no input, as the live terminal
   // does while its keyboard is closed. A pointer device may focus it, so a click lands in it.
   const isMobile = useIsMobile();
@@ -161,17 +161,17 @@ export function DormantAgentTerminal({
       className="relative flex-1 min-h-0 w-full overflow-hidden"
     >
       <div className="absolute inset-0" style={{ filter: HISTORY_FILTER }}>
-        <GhosttyTerminal
+        <TerminalView
           ref={terminalRef}
           theme={HISTORY_THEME}
           scrollback={RECORDING_SCROLLBACK}
-          testId="ghostty-terminal-dormant"
+          testId="terminal-dormant"
           containerMinHeightPx={0}
           preventFocusOnTap={isMobile}
           onReady={() => setOpened(true)}
         />
       </div>
-      {/* The text the terminal holds, read by the terminal specs as `GhosttyTerminalSession` exposes its own. */}
+      {/* The text the terminal holds, read by the terminal specs as `TerminalSession` exposes its own. */}
       <div data-testid="terminal-buffer-text" style={{ display: "none" }} aria-hidden>
         {bufferText}
       </div>

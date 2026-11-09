@@ -4,7 +4,7 @@ import type { TerminalConnectionStatus } from "../connection/terminalConnectionS
 import type { ToolShortcutDef } from "../lib/toolShortcuts";
 import type { ByteDelta } from "../lib/byteDelta";
 
-export interface GhosttyTerminalSessionProps {
+export interface TerminalSessionProps {
   /**
    * The session's terminal: its byte stream, its scrollback where the connection can serve one, and
    * the end of it. Opened by the caller off a `SessionConnection` (`openTerminal`), never built
@@ -66,7 +66,7 @@ export interface GhosttyTerminalSessionProps {
 
   /** Fixed logical grid; font scales with the container (floating overlay). */
   fixedViewportGrid?: { cols: number; rows: number };
-  /** Passed to `GhosttyTerminal` — use `0` for fixed-height overlay panes (default 200px min is too tall). */
+  /** Passed to `TerminalView` — use `0` for fixed-height overlay panes (default 200px min is too tall). */
   terminalContainerMinHeightPx?: number;
   /** When set, fullscreen targets this node (e.g. a fixed `connected-terminal-container`); otherwise the terminal flex root inside this component. */
   fullscreenTargetRef?: React.RefObject<HTMLElement | null>;
@@ -109,9 +109,9 @@ export interface GhosttyTerminalSessionProps {
    *  no longer resume by offset. */
   onOffsetUpdate?: (offset: bigint) => void;
 
-  /** Expose the raw streamed text and byte count for E2E assertions (the `ghostty-*` suite). */
+  /** Expose the raw streamed text and byte count for E2E assertions (the `terminal-*` suite). */
   showBufferTextForTest?: boolean;
-  /** Skip Ghostty rendering and surface the received-chunk count/sample instead (E2E RPC probe). */
+  /** Skip xterm.js rendering and surface the received-chunk count/sample instead (E2E RPC probe). */
   debugMode?: boolean;
   /** Log data flow and lifecycle events to the console. */
   debugLogging?: boolean;

@@ -1,5 +1,5 @@
 /**
- * Behaviour spec: `SessionMainPane` renders the real Ghostty terminal for a session whose
+ * Behaviour spec: `SessionMainPane` renders the real terminal for a session whose
  * connection carries tracks, fed by that connection.
  *
  * Such a session used to render only a static placeholder ("Terminal connected to {room}") — this
@@ -106,18 +106,18 @@ function mountMainPaneFor(attached: ReturnType<typeof aRoomCarriedSession>) {
 // ---------------------------------------------------------------------------
 
 describe("SessionMainPane — a room-carried session renders a real terminal", () => {
-  it("renders the Ghostty terminal for a room-carried session", () => {
+  it("renders the terminal for a room-carried session", () => {
     // Given / When
     mountMainPaneFor(aRoomCarriedSession());
 
     // Then
-    byTestId(TEST_IDS.ghosttyTerminal, { timeout: 10000 }).should("exist");
+    byTestId(TEST_IDS.terminal, { timeout: 10000 }).should("exist");
   });
 
   it("does not render the static 'Terminal connected to' placeholder once a terminal is wired", () => {
     // Given / When
     mountMainPaneFor(aRoomCarriedSession());
-    byTestId(TEST_IDS.ghosttyTerminal, { timeout: 10000 }).should("exist");
+    byTestId(TEST_IDS.terminal, { timeout: 10000 }).should("exist");
 
     // Then
     byTestId(TEST_IDS.sessionsDetailPane).should("not.contain.text", "Terminal connected to");
@@ -129,7 +129,7 @@ describe("SessionMainPane — a room-carried session renders a real terminal", (
 
     // When the pane mounts
     mountMainPaneFor(attached);
-    byTestId(TEST_IDS.ghosttyTerminal, { timeout: 10000 }).should("exist");
+    byTestId(TEST_IDS.terminal, { timeout: 10000 }).should("exist");
 
     // Then it asked the connection for one terminal — the reserved Agent one, named by the empty
     // id — rather than joining a room or minting a token of its own
@@ -145,7 +145,7 @@ describe("SessionMainPane — a room-carried session renders a real terminal", (
 
     // When the pane mounts
     mountMainPaneFor(attached);
-    byTestId(TEST_IDS.ghosttyTerminal, { timeout: 10000 }).should("exist");
+    byTestId(TEST_IDS.terminal, { timeout: 10000 }).should("exist");
 
     // Then the operator's token went with the open. Both terminal RPCs are server-streaming, and
     // the transport's auth gate is unary-only — a terminal that left this to the gate would open a
@@ -159,7 +159,7 @@ describe("SessionMainPane — a room-carried session renders a real terminal", (
     // Given a mounted terminal
     const attached = aRoomCarriedSession();
     mountMainPaneFor(attached);
-    byTestId(TEST_IDS.ghosttyTerminal, { timeout: 10000 }).should("exist");
+    byTestId(TEST_IDS.terminal, { timeout: 10000 }).should("exist");
 
     // When the session's process writes
     cy.wrap(null).then(() => attached.deliverToTerminal("recipe session ready"));
@@ -174,7 +174,7 @@ describe("SessionMainPane — a room-carried session renders a real terminal", (
   it("does not show a visible 'connecting'/'connected' status strip above the terminal", () => {
     // Given / When
     mountMainPaneFor(aRoomCarriedSession());
-    byTestId(TEST_IDS.ghosttyTerminal, { timeout: 10000 }).should("exist");
+    byTestId(TEST_IDS.terminal, { timeout: 10000 }).should("exist");
 
     // Then — the raw status strip stays in the DOM (for tooling) but must not be visible to the
     // user: the drawer shows the session's connection state on its own overlay

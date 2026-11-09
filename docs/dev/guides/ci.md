@@ -342,7 +342,7 @@ deliberately, and each exclusion is coverage you still have to get locally:
 | cgroups sandbox tests | Need root and a writable cgroup root; the backend reports itself available on any Linux, then EPERMs at spawn |
 | One `tddy-sandbox-recipes` path test | Asserts a macOS-only path layout |
 | `sandbox_runner_stdio_acceptance::echoes_a_message_over_sandbox_service_served_over_stdio` | Fails unprivileged with "tool ipc server exited before bind" even with the runner binary staged; survived two retries. Only this one test is skipped — the other two in the binary pass. Tracked in `docs/dev/todo/`; the intended fix is a VM-backed job, not a permanent exclusion |
-| Cypress **e2e** specs | Storybook build plus a real ghostty WebGL context; not yet verified on a runner |
+| Cypress **e2e** specs | Storybook build plus a real xterm.js WebGL context; not yet verified on a runner |
 | `tddy-desktop` tests | It has none that run without Tauri; its check only installs the workspace. Its front end is tddy-web's bundle, which its `package.json` does not depend on, so a tddy-web change does not run its check (`docs/dev/todo/2026-11-07-desktop-check-does-not-follow-the-tddy-web-bundle.md`) |
 | Web checks on a Rust-only change | `tddy-livekit-rpc-web`'s Cypress specs exec `echo_server` and `tddy-rust-typescript-tests` spawns `tddy-coder`, but the detector sees only JS workspace paths, so a change to those crates runs neither (`docs/dev/todo/2026-11-07-web-checks-ignore-the-rust-binaries-they-exec.md`) |
 

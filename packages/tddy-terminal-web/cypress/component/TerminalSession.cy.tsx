@@ -1,7 +1,7 @@
 /**
- * Cypress component tests for `GhosttyTerminalSession`.
+ * Cypress component tests for `TerminalSession`.
  *
- * The one terminal wraps `GhosttyTerminal` and renders whatever arrives on the feed its caller
+ * The one terminal wraps `TerminalView` and renders whatever arrives on the feed its caller
  * opened — a daemon's `StreamTerminalOutput`, a room's `StreamTerminalIO`, or a double.
  *
  * PRD: docs/ft/daemon/claude-cli-session.md
@@ -9,7 +9,7 @@
  */
 
 import React from "react";
-import { GhosttyTerminalSession } from "../../src/GhosttyTerminalSession";
+import { TerminalSession } from "../../src/TerminalSession";
 import type { TerminalFrame } from "tddy-client-web/connections/terminal";
 import { UploadProgressProvider } from "../../src/rpc/uploadProgress";
 import { byTestId, TEST_IDS } from "../support/testIds";
@@ -57,14 +57,14 @@ function aTerminalFeedDouble() {
 // Tests
 // ---------------------------------------------------------------------------
 
-describe("GhosttyTerminalSession", () => {
-  it("renders the ghostty terminal container", () => {
+describe("TerminalSession", () => {
+  it("renders the terminal container", () => {
     // Given
     const fake = aTerminalFeedDouble();
 
     // When
     mountTerminal(
-      <GhosttyTerminalSession
+      <TerminalSession
         sessionToken="fake-token"
         sessionId="01900000-0000-7000-8000-000000000001"
         feed={{ stream: fake.stream }}
@@ -72,26 +72,26 @@ describe("GhosttyTerminalSession", () => {
     );
 
     // Then
-    byTestId(TEST_IDS.ghosttyTerminal, { timeout: 10000 }).should("exist");
+    byTestId(TEST_IDS.terminal, { timeout: 10000 }).should("exist");
   });
 
   it("paints the output bytes that arrive on the feed", () => {
     // Given a mounted terminal
     const fake = aTerminalFeedDouble();
     mountTerminal(
-      <GhosttyTerminalSession
+      <TerminalSession
         sessionToken="fake-token"
         sessionId="01900000-0000-7000-8000-000000000001"
         feed={{ stream: fake.stream }}
       />,
     );
-    byTestId(TEST_IDS.ghosttyTerminal, { timeout: 10000 }).should("exist");
+    byTestId(TEST_IDS.terminal, { timeout: 10000 }).should("exist");
 
     // When the far end writes
     cy.then(() => fake.pushOutput(new TextEncoder().encode("Hello world\r\n")));
 
     // Then the bytes reached the emulator's buffer. The canvas is WebGL, so the assertion reads
-    // the hidden mirror of what ghostty painted — a terminal that drops every byte fails here.
+    // the hidden mirror of what xterm.js painted — a terminal that drops every byte fails here.
     byTestId(TEST_IDS.terminalBufferText, { timeout: 10000 }).should("contain.text", "Hello world");
   });
 
@@ -99,20 +99,20 @@ describe("GhosttyTerminalSession", () => {
     // Given
     const fake = aTerminalFeedDouble();
     mountTerminal(
-      <GhosttyTerminalSession
+      <TerminalSession
         sessionToken="fake-token"
         sessionId="01900000-0000-7000-8000-000000000001"
         feed={{ stream: fake.stream }}
       />,
     );
-    byTestId(TEST_IDS.ghosttyTerminal, { timeout: 10000 }).should(
+    byTestId(TEST_IDS.terminal, { timeout: 10000 }).should(
       "have.attr",
       "data-terminal-ready",
       "true",
     );
 
     // When
-    byTestId(TEST_IDS.ghosttyTerminal).find(".xterm-helper-textarea").type("ls", { force: true });
+    byTestId(TEST_IDS.terminal).find(".xterm-helper-textarea").type("ls", { force: true });
 
     // Then — each keystroke arrives as its own chunk. Asserted chunk by chunk rather than over the
     // concatenation, which also holds the resize OSC (`\x1b]resize;80;24\x07`) and so contains an
@@ -133,7 +133,7 @@ describe("GhosttyTerminalSession", () => {
         style={{ height: 400, width: 800, position: "relative" }}
       >
         <UploadProgressProvider>
-          <GhosttyTerminalSession
+          <TerminalSession
             sessionToken="fake-token"
             sessionId="01900000-0000-7000-8000-000000000002"
             feed={{ stream: fake.stream }}
@@ -141,7 +141,7 @@ describe("GhosttyTerminalSession", () => {
         </UploadProgressProvider>
       </div>
     );
-    byTestId(TEST_IDS.ghosttyTerminal, { timeout: 10000 }).should("exist");
+    byTestId(TEST_IDS.terminal, { timeout: 10000 }).should("exist");
 
     // When
     cy.get("#resize-wrapper").invoke("css", "width", "600px").invoke("css", "height", "300px");
@@ -160,7 +160,7 @@ describe("GhosttyTerminalSession", () => {
     // Given / When
     const fake = aTerminalFeedDouble();
     mountTerminal(
-      <GhosttyTerminalSession
+      <TerminalSession
         sessionToken="fake-token"
         sessionId="01900000-0000-7000-8000-000000000003"
         feed={{ stream: fake.stream }}
@@ -177,7 +177,7 @@ describe("GhosttyTerminalSession", () => {
     const fake = aTerminalFeedDouble();
     const onDisconnect = cy.stub().as("onDisconnect");
     mountTerminal(
-      <GhosttyTerminalSession
+      <TerminalSession
         sessionToken="fake-token"
         sessionId="01900000-0000-7000-8000-000000000004"
         feed={{ stream: fake.stream }}
@@ -199,14 +199,14 @@ describe("GhosttyTerminalSession", () => {
     const offsets: bigint[] = [];
     const onOffsetUpdate = cy.stub().callsFake((offset: bigint) => { offsets.push(offset); }).as("onOffsetUpdate");
     mountTerminal(
-      <GhosttyTerminalSession
+      <TerminalSession
         sessionToken="fake-token"
         sessionId="01900000-0000-7000-8000-000000000005"
         feed={{ stream: fake.stream }}
         onOffsetUpdate={onOffsetUpdate}
       />,
     );
-    byTestId(TEST_IDS.ghosttyTerminal, { timeout: 10000 }).should("exist");
+    byTestId(TEST_IDS.terminal, { timeout: 10000 }).should("exist");
 
     // When — a replay frame arrives tagged with endOffset = 10
     cy.then(() => {
@@ -234,7 +234,7 @@ describe("GhosttyTerminalSession", () => {
 // it: as a paste. A program that turned bracketed paste on (`ESC [ ? 2004 h` — Claude Code does)
 // receives the paths between `ESC [ 200 ~` and `ESC [ 201 ~`, which is how it tells a dropped image
 // path from typed text and attaches the image. PRD: docs/ft/web/web-terminal.md § File drop upload.
-describe("GhosttyTerminalSession — a file dropped from the OS (Tddy Desktop)", () => {
+describe("TerminalSession — a file dropped from the OS (Tddy Desktop)", () => {
   const A_SCREENSHOT = "/Users/me/Desktop/Screen Shot.png";
   const textOf = (chunks: Uint8Array[]) => chunks.map((c) => new TextDecoder().decode(c)).join("");
 
@@ -243,7 +243,7 @@ describe("GhosttyTerminalSession — a file dropped from the OS (Tddy Desktop)",
     const drop = aNativeFileDropDouble({ [A_SCREENSHOT]: new Uint8Array([1]) });
     mountTerminal(
       <NativeFileDropProvider bridge={drop.bridge}>
-        <GhosttyTerminalSession
+        <TerminalSession
           sessionToken="fake-token"
           sessionId="01900000-0000-7000-8000-000000000002"
           readsLocalPaths
@@ -251,12 +251,12 @@ describe("GhosttyTerminalSession — a file dropped from the OS (Tddy Desktop)",
         />
       </NativeFileDropProvider>,
     );
-    byTestId(TEST_IDS.ghosttyTerminal, { timeout: 10000 }).should("exist");
+    byTestId(TEST_IDS.terminal, { timeout: 10000 }).should("exist");
     return { fake, drop };
   }
 
   function dropTheScreenshot(drop: ReturnType<typeof aNativeFileDropDouble>) {
-    centreOf(`[data-testid='${TEST_IDS.ghosttyTerminal}']`).then((point) => {
+    centreOf(`[data-testid='${TEST_IDS.terminal}']`).then((point) => {
       drop.emit({ type: "enter", paths: [A_SCREENSHOT], point });
       drop.emit({ type: "drop", paths: [A_SCREENSHOT], point });
     });

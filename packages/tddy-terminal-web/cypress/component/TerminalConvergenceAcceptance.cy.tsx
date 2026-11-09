@@ -8,7 +8,7 @@
  * see past what was live, because that component had no `HistoryFetcher`, no offset tracking and no
  * page terminal.
  *
- * These specs mount the real `GhosttyTerminalSession` — through `aGhosttyTerminalSession`, which
+ * These specs mount the real `TerminalSession` — through `aTerminalSession`, which
  * hands it a feed and nothing else — and assert through its rendered surface: the readable mirror
  * of what the canvas painted, the bytes it writes back, and the scrollback affordance. Delete the
  * component and every one of them fails.
@@ -18,7 +18,7 @@
  */
 
 import type { TerminalHistoryChunk } from "tddy-client-web/connections/terminal";
-import { aGhosttyTerminalSession } from "../support/drivers/ghosttyTerminalSessionDriver";
+import { aTerminalSession } from "../support/drivers/terminalSessionDriver";
 
 // ---------------------------------------------------------------------------
 // Fixtures
@@ -47,7 +47,7 @@ function replaying(text: string) {
 describe("a terminal fed by a session connection", () => {
   it("renders output arriving on the feed, whatever carries it", () => {
     // Given the one terminal on a feed — it never learns which wire this is
-    const terminal = aGhosttyTerminalSession().mount().expectReady();
+    const terminal = aTerminalSession().mount().expectReady();
 
     // When output arrives
     terminal.deliver("hello from the session");
@@ -58,7 +58,7 @@ describe("a terminal fed by a session connection", () => {
 
   it("writes typed input back to the feed", () => {
     // Given a mounted terminal
-    const terminal = aGhosttyTerminalSession().mount().expectReady();
+    const terminal = aTerminalSession().mount().expectReady();
 
     // When the operator types
     terminal.type("ls");
@@ -70,7 +70,7 @@ describe("a terminal fed by a session connection", () => {
   it("offers scrollback on a LiveKit-carried session, which it has never had", () => {
     // Given a session whose connection can replay older output. Before this node a LiveKit session
     // could not: the LiveKit terminal had no history fetcher at all.
-    const terminal = aGhosttyTerminalSession({ history: replaying("output from earlier") })
+    const terminal = aTerminalSession({ history: replaying("output from earlier") })
       .mount()
       .expectReady();
     terminal.deliver("live output");
@@ -84,7 +84,7 @@ describe("a terminal fed by a session connection", () => {
 
   it("hides the scrollback control when the connection cannot replay", () => {
     // Given a live-tail-only feed
-    const terminal = aGhosttyTerminalSession().mount().expectReady();
+    const terminal = aTerminalSession().mount().expectReady();
 
     // When output arrives
     terminal.deliver("live output");

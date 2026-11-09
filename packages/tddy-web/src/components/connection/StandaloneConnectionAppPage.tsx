@@ -16,7 +16,7 @@ import { useVisualViewport, Button } from "tddy-ui-web";
 import { TokenService } from "tddy-client-web/gen/token_pb";
 import { GitHubLoginButton, UserAvatar } from "tddy-workspace-web";
 import { formClassName, inputClassName, labelClassName } from "tddy-ui-web";
-import { GhosttyTerminalSession } from "tddy-terminal-web";
+import { TerminalSession } from "tddy-terminal-web";
 import { useDirectRoomTerminal } from "tddy-livekit-web";
 import { ConnectionTerminalChrome } from "tddy-terminal-web";
 import { BUILD_ID } from "../../buildId";
@@ -151,7 +151,7 @@ function ConnectedTerminal({
   return (
     <div ref={fullscreenTargetRef} data-testid="connected-terminal-container" style={fullscreenContainerStyle}>
       {terminal.feed ? (
-        <GhosttyTerminalSession
+        <TerminalSession
           feed={terminal.feed}
           connectionStatus={terminal.status}
           connectionError={terminal.error ?? undefined}

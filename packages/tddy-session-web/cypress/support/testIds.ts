@@ -31,7 +31,7 @@ export const TEST_IDS = {
   controlTokenDisplay: "control-token-display",
   enqueuedInputOverlay: "enqueued-input-overlay",
   enqueuedInputText: "enqueued-input-text",
-  ghosttyTerminal: "ghostty-terminal",
+  terminal: "terminal",
   loadEarlierHistory: "load-earlier-history",
   sessionConnectionError: "session-connection-error",
   sessionConnectionOverlay: "session-connection-overlay",

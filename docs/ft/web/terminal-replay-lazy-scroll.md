@@ -3,7 +3,7 @@
 > **Status:** Amendment — adds the viewport integration that consumes the
 > `GetTerminalHistory` RPC shipped in the *Terminal Replay & PTY-over-RPC Unification*
 > changeset. The backend, proto, and client primitive (`TerminalHistoryForwardLoader`) already
-> exist; this doc defines the user-facing scroll-up behavior and the Ghostty shared
+> exist; this doc defines the user-facing scroll-up behavior and the shared terminal
 > component ownership model.
 >
 > **Live terminal scrollback policy:** the live terminal stays at `scrollback: 0` (the default).
@@ -43,7 +43,7 @@
 > native `Scrollbar` and mouse-tracking gating from that amendment are retained.
 >
 > **Related docs:**
-> - [web-terminal.md](web-terminal.md) — the Ghostty terminal surface this builds on.
+> - [web-terminal.md](web-terminal.md) — the terminal surface this builds on.
 > - [enqueued-input-overlay.md](enqueued-input-overlay.md) — the other consumer of the terminal
 >   stream's frames (ACK frames).
 > - [terminal-sessions.md (daemon)](../daemon/terminal-sessions.md#lazy-replay--scroll-up-history-added-2026-07-28)
@@ -53,7 +53,7 @@
 
 When a user opens (or reconnects to) a terminal session, the daemon sends the **current last
 frame first** and then tails live output. Older output is **not** replayed eagerly. The user
-reaches earlier output by **scrolling up**: the Ghostty shared terminal component **overlays a
+reaches earlier output by **scrolling up**: the shared terminal component **overlays a
 second, read-only older-history terminal behind the live one** and **progressively
 fills it forward** from offset `0` toward the **current live tip** via `GetTerminalHistory`,
 appending one chunk at a time until the tip is reached. (The fill is bounded by the *current* tip,
@@ -83,12 +83,12 @@ from. When the TUI has enabled **mouse tracking** (DEC 1006), xterm.js reports t
 TUI itself (SGR button 64/65, one report per wheel step) — matching native ghostty's
 `isMouseReporting` gate.
 
-The `GrpcSessionTerminal → onRegisterLoadOlderHistory` indirection is removed; the Ghostty shared
+The `GrpcSessionTerminal → onRegisterLoadOlderHistory` indirection is removed; the shared terminal
 component owns the scroll-up flow end-to-end, including the double-buffer paging.
 
 ## Background
 
-`GhosttyTerminal` (the shared renderer) is constructed with `scrollback: 0` today, so there is
+`TerminalView` (the shared renderer) is constructed with `scrollback: 0` today, so there is
 no native scrollback to scroll through. This is deliberate: a non-zero scrollback reintroduces a
 duplicate-pane bug — periodic full-screen status-bar re-renders accumulate as duplicate panes in
 the scrollback. The lazy-replay changeset added the `GetTerminalHistory` RPC and a client
@@ -119,7 +119,7 @@ user sees a single seamless terminal surface rather than a split pane.
 
 ### In scope
 
-- `GhosttyTerminal` gains a `scrollback` prop (default `0`) and imperative handle methods
+- `TerminalView` gains a `scrollback` prop (default `0`) and imperative handle methods
   `scrollToTop()`, `scrollToBottom()`, and `isPinnedToBottom()` so the gRPC wrapper can detect the
   scroll-up-on-live / scroll-down-on-page gestures without reaching into emulator internals.
   A `testId` prop lets the two overlaid instances be targeted separately in tests. The handle also
@@ -128,7 +128,7 @@ user sees a single seamless terminal surface rather than a split pane.
   position, same coordinate space as `scrollToLine`): `total = getScrollbackLength() + rows`,
   `offset` = the viewport's first line counted from the top (`getViewportTop()`, clamped to
   `[0, getScrollbackLength()]`), `len = rows`.
-- `GhosttyTerminalSession` (the one terminal component) **owns the scroll-up history flow**: it renders
+- `TerminalSession` (the one terminal component) **owns the scroll-up history flow**: it renders
   **two overlaid terminals** sharing one rect — a live terminal (`scrollback: 0`,
   the active screen, always pinned to the live tip) and an older-history "page" terminal
   (`scrollback > 0`, read-only). It captures the absolute `endOffset` anchor from the
@@ -188,7 +188,7 @@ user sees a single seamless terminal surface rather than a split pane.
   the live terminal as-is; every later frame carries `startOffset` / `endOffset`, the first starting
   at the snapshot's `endOffset`. There is no byte resume: a re-open is shown the current screen.
   `GrpcSessionTerminal.client` is `TerminalClient | null`: a **null client** (a transient transport
-  blip) **pauses** the terminal — it stays mounted (its scrollback and the ghostty instance survive),
+  blip) **pauses** the terminal — it stays mounted (its scrollback and the terminal engine instance survive),
   input is queued — and re-opens with a snapshot when a non-null client returns. Only a stream-end with a **valid**
   client (a real `pty_done`) evicts the runtime.
 
@@ -247,7 +247,7 @@ the page terminal instantly, with no new fetch.
 
 **Given** I am viewing a live terminal running a full-screen TUI,
 **when** the transport blips (the daemon client goes `null`) and then returns,
-**then** the terminal stays mounted throughout (its scrollback and the ghostty instance survive;
+**then** the terminal stays mounted throughout (its scrollback and the terminal engine instance survive;
 input is queued and flushed once the stream re-opens),
 **and** the reconnect opens the stream with `mode = SNAPSHOT`,
 **and** the host sends one snapshot of the screen as it is now, then only output written after it,
@@ -274,14 +274,14 @@ Consumed from the unification changeset (forward-chunk shape):
 
 ## Component contract
 
-### `GhosttyTerminal`
+### `TerminalView`
 
 - New `scrollback` prop (default `0`). The live terminal passes the default `0` — always pinned
   to the live tip, no native scrollback, so neither primary-screen nor alternate-screen (DEC 1049)
   repaints accumulate as duplicate panes. The older-history page terminal passes a large value
   (e.g. `50000`) so the full retained capture fits.
-- New `testId` prop (default `"ghostty-terminal"`); the page terminal passes
-  `"ghostty-terminal-older"` so tests can target each instance.
+- New `testId` prop (default `"terminal"`); the page terminal passes
+  `"terminal-older"` so tests can target each instance.
 - Imperative handle gains `scrollToTop()`, `scrollToBottom()`, `isPinnedToBottom()` (viewport
   at the bottom), `scrollToLine(line)`, `scrollLines(amount)`, `getScrollbackLength()`, and a
   native `getScrollbar()` returning `{ total, offset, len }` — the single source of truth for
@@ -294,7 +294,7 @@ Consumed from the unification changeset (forward-chunk shape):
   forward-fill. (The native scroll-to-bottom policy is a no-op on the live terminal because
   `scrollback: 0` means the viewport can never be scrolled up away from the tip.)
 
-### `GhosttyTerminalSession`
+### `TerminalSession`
 
 - New prop: `historyFetcher?: (fromOffset: bigint, untilOffset: bigint) =>
   Promise<HistoryChunk | null>` — built by `GrpcSessionTerminal` from
@@ -310,7 +310,7 @@ Consumed from the unification changeset (forward-chunk shape):
   `TerminalHistoryForwardLoader` is constructed lazily on the first fill, bounded by the current
   cumulative output offset (the live tip) at that moment.
 - Renders a second, **hidden** older-history page terminal (`scrollback > 0`, `testId =
-  "ghostty-terminal-older"`, `preventFocusOnTap`) **overlaid behind** the live one in the same
+  "terminal-older"`, `preventFocusOnTap`) **overlaid behind** the live one in the same
   rect. Both terminals are always mounted (so the page terminal can be written to while hidden and
   the live terminal stays current while hidden). Foreground/background is driven by a `view` state
   (`"live" | "page"`) controlling `visibility`/`z-index`/`pointer-events`; each pane exposes
@@ -335,7 +335,7 @@ Consumed from the unification changeset (forward-chunk shape):
   renders on the page pane.
 - **TUI owns navigation:** after every live chunk that switches a DEC private mode or hard-resets
   the terminal (`ESC c`) — including chunks buffered until the terminal is ready —
-  `GhosttyTerminalSession` re-reads `isAlternateScreen() || hasMouseTracking()` from the live
+  `TerminalSession` re-reads `isAlternateScreen() || hasMouseTracking()` from the live
   terminal, once the terminal has parsed the chunk (`onWriteParsed`). The engine reports no mode
   changes, so the chunk is the only signal.
 - The page pane carries `data-color-scheme="history"` and a `grayscale` filter; the page terminal
@@ -353,13 +353,13 @@ Consumed from the unification changeset (forward-chunk shape):
   up the same stream with cumulative input offsets; refusal frames feed `InputRefusalTracker`
   ("Input not delivered").
 - Removes the `onRegisterLoadOlderHistory` prop and the `historyLoaderRef` ownership (now lives
-  in `GhosttyTerminalSession`). ACK handling (`ackedInputOffset`) stays in `GrpcSessionTerminal`, which
+  in `TerminalSession`). ACK handling (`ackedInputOffset`) stays in `GrpcSessionTerminal`, which
   is why that call site still builds its own stream rather than opening one on the connection: a
   `TerminalFrame` has nowhere to carry a daemon's input acknowledgement.
 
 ## Acceptance criteria
 
-1. **Affordance appears when older history exists.** Mount `GhosttyTerminalSession` with a feed whose
+1. **Affordance appears when older history exists.** Mount `TerminalSession` with a feed whose
    `history` is set and whose first frame carries `endOffset > 0` and `atOldest = false`:
    the `load-earlier-history` affordance becomes visible and the live pane is foreground.
 2. **Affordance absent when no older history.** First frame with `atOldest = true` (or
@@ -436,7 +436,7 @@ Consumed from the unification changeset (forward-chunk shape):
   not the viewport, matching ghostty's `isMouseReporting` gate. (The native scroll-to-bottom
   policy is a no-op on the live terminal because `scrollback: 0` means the viewport can never be
   scrolled up away from the tip.)
-- **A history-fetcher callback over `Client` injection** — keeps `GhosttyTerminalSession` decoupled
+- **A history-fetcher callback over `Client` injection** — keeps `TerminalSession` decoupled
   from `TerminalSessionService` and unit-testable with a plain function double.
 - **The emulator owns wheel routing** — xterm.js reports the wheel to a mouse-tracking TUI, sends
   arrow keys on the alternate screen and scrolls the normal screen itself. No component listener

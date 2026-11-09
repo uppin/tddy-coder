@@ -38,7 +38,7 @@ function mountDropZoneWithIndicator(insertInput: Cypress.Agent<sinon.SinonStub>)
     withSelectedDaemon(
       <UploadProgressProvider>
         <TerminalFileDropZone sessionToken="tok" sessionId="s1" insertInput={insertInput}>
-          <div data-testid="ghostty-terminal" style={{ width: 400, height: 300 }} />
+          <div data-testid="terminal" style={{ width: 400, height: 300 }} />
         </TerminalFileDropZone>
         <UploadProgressIndicator />
       </UploadProgressProvider>,

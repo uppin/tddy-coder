@@ -8,7 +8,7 @@
  * The daemon's `StreamTerminalOutput` sends the current last frame first, tagged with its absolute
  * `endOffset` (the anchor). Older history is then filled FORWARD from offset 0 toward the anchor:
  * each `GetTerminalHistory(fromOffset, untilOffset)` call returns one forward chunk starting at
- * `fromOffset`, the client appends it to a second (older-history) ghostty-web terminal, advances
+ * `fromOffset`, the client appends it to a second (older-history) xterm.js terminal, advances
  * `fromOffset` to the chunk's `endOffset`, and calls again until a chunk arrives with `atEnd = true`
  * (reached the anchor). This is a progressive, append-only fill — no resets, no prepend — so the
  * live terminal can stay at `scrollback: 0` (preserving the no-duplicate fix) while the older

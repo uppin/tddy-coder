@@ -1,11 +1,11 @@
 /**
- * E2E: Ghostty + LiveKit + echo_terminal — large segmented payload assertion.
+ * E2E: xterm.js + LiveKit + echo_terminal — large segmented payload assertion.
  *
  * Mirrors the contiguous-prefix check in tddy-e2e/tests/grpc_terminal_rpc.rs.
  *
  * echo_terminal echoes a full line after Enter (not char-by-char), so the
  * payload is typed and submitted with Enter. Assertions use the hidden
- * `terminal-buffer-text` element (Ghostty buffer text).
+ * `terminal-buffer-text` element (xterm.js buffer text).
  *
  * Requires: LIVEKIT_TESTKIT_WS_URL, cargo build -p tddy-livekit --example echo_terminal,
  * Storybook static bundle (bun run build-storybook).
@@ -22,9 +22,9 @@ const LARGE_ECHO_CHAR_CAP = 1000;
 const LARGE_ECHO_SEGMENTS = 10;
 const LARGE_ECHO_E2E_ROOM = "large-echo-e2e";
 
-const STORY_ID = "components-ghosttyterminal--live-kit-echo-large-segmented";
+const STORY_ID = "components-terminal--live-kit-echo-large-segmented";
 
-describe("Ghostty large segmented echo (LiveKit + echo_terminal)", () => {
+describe("Terminal large segmented echo (LiveKit + echo_terminal)", () => {
   let session: TerminalSessionResult = {} as TerminalSessionResult;
 
   before(function () {
@@ -46,13 +46,13 @@ describe("Ghostty large segmented echo (LiveKit + echo_terminal)", () => {
     );
     const expectedNoWs = compactNoWs(expected);
 
-    cy.visitGhosttyStory({ storyId: STORY_ID, url: session.url, token: session.clientToken, roomName: session.roomName });
+    cy.visitTerminalStory({ storyId: STORY_ID, url: session.url, token: session.clientToken, roomName: session.roomName });
 
     // When — wait for connection and first output
     cy.connectAndWaitForTerminal();
-    cy.get("[data-testid='ghostty-terminal']").click();
-    cy.get("[data-testid='ghostty-terminal']").type(expected, { delay: 0 });
-    cy.get("[data-testid='ghostty-terminal']").type("{enter}");
+    cy.get("[data-testid='terminal']").click();
+    cy.get("[data-testid='terminal']").type(expected, { delay: 0 });
+    cy.get("[data-testid='terminal']").type("{enter}");
 
     // Then — full segmented payload echoed contiguously
     cy.get("[data-testid='terminal-buffer-text']", { timeout: 120000 }).should(($el) => {

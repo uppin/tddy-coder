@@ -8,7 +8,7 @@ export interface TerminalConnectionStatusBarProps {
 }
 
 /**
- * Dedicated top row above the Ghostty viewport (connection chrome, LiveKit consolidation).
+ * Dedicated top row above the xterm.js viewport (connection chrome, LiveKit consolidation).
  */
 export function TerminalConnectionStatusBar({
   children,

@@ -39,7 +39,7 @@ function mountFooterWithDropZone(gate?: Promise<void>) {
     withSelectedDaemon(
       <UploadProgressProvider>
         <TerminalFileDropZone sessionToken="tok" sessionId="s1" insertInput={cy.stub()}>
-          <div data-testid="ghostty-terminal" style={{ width: 400, height: 300 }} />
+          <div data-testid="terminal" style={{ width: 400, height: 300 }} />
         </TerminalFileDropZone>
         <SessionHostStatsFooter attachment={{ status: "idle" }} />
       </UploadProgressProvider>,

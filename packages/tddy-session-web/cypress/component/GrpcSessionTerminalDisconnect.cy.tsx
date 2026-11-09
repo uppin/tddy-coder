@@ -87,7 +87,7 @@ function aSessionsScreenTerminal() {
       return driver;
     },
     expectTerminalVisible() {
-      byTestId(TEST_IDS.ghosttyTerminal, { timeout: 10000 }).should("exist");
+      byTestId(TEST_IDS.terminal, { timeout: 10000 }).should("exist");
       return driver;
     },
     expectNoDisconnectTopBar() {
@@ -104,7 +104,7 @@ function aSessionsScreenTerminal() {
       return driver;
     },
     expectTerminalGone() {
-      byTestId(TEST_IDS.ghosttyTerminal).should("not.exist");
+      byTestId(TEST_IDS.terminal).should("not.exist");
       return driver;
     },
     expectDisconnectedAutomatically() {

@@ -5,7 +5,7 @@ import { DEFAULT_TERMINAL_FONT_MAX, DEFAULT_TERMINAL_FONT_MIN } from "./lib/term
 import { isTerminalZoomDebugEnabled } from "./lib/terminalZoomBridge";
 import { createTerminalLoggers } from "./terminal/terminalLoggers";
 import type { TerminalRef } from "./terminal/terminalRefs";
-import type { GhosttyTerminalHandle, GhosttyTerminalProps } from "./terminal/types";
+import type { TerminalViewHandle, TerminalViewProps } from "./terminal/types";
 import { useTerminalHandle } from "./terminal/useTerminalHandle";
 import { useTerminalFontSize } from "./terminal/useTerminalFontSize";
 import { useTerminalLifecycle } from "./terminal/useTerminalLifecycle";
@@ -20,13 +20,13 @@ import { useSendWheelSgrAt, useTouchScrollRoutes } from "./terminal/useTerminalT
 
 export type {
   BufferLineInfo,
-  GhosttyTerminalHandle,
-  GhosttyTerminalProps,
-  GhosttyTerminalTheme,
+  TerminalViewHandle,
+  TerminalViewProps,
+  TerminalViewTheme,
 } from "./terminal/types";
 
-export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminalProps>(
-  function GhosttyTerminal(
+export const TerminalView = forwardRef<TerminalViewHandle, TerminalViewProps>(
+  function TerminalView(
     {
       initialContent,
       cols = 80,
@@ -49,7 +49,7 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
       containerMinHeightPx,
       fixedViewportGrid,
       scrollback = 0,
-      testId = "ghostty-terminal",
+      testId = "terminal",
     },
     ref
   ) {

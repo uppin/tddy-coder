@@ -1,6 +1,6 @@
 import React, { useCallback, useMemo, useRef, useState } from "react";
 import { TerminalSessionService } from "tddy-client-web/gen/terminal_session_pb";
-import { GhosttyTerminalSession } from "tddy-terminal-web";
+import { TerminalSession } from "tddy-terminal-web";
 import { GrpcSessionTerminal } from "./GrpcSessionTerminal";
 import { useSessionTerminalFeed } from "./useSessionTerminalFeed";
 import { SessionTerminalTabs } from "./SessionTerminalTabs";
@@ -303,7 +303,7 @@ export function SessionRuntime({
           className={paneClass(AGENT_TERMINAL_ID)}
         >
           {carriesMedia && agentTerminalFeed && (
-            <GhosttyTerminalSession
+            <TerminalSession
               feed={agentTerminalFeed}
               sessionToken={sessionToken}
               sessionId={runtime.sessionId}

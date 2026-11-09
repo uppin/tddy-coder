@@ -1,7 +1,7 @@
 /**
  * Each terminal owns its emulator: a pane opened after another one closed starts on a blank screen.
  *
- * Regression, from the ghostty-web era: on its process-wide WASM instance, a terminal created after
+ * Regression, from the previous engine era: on its process-wide WASM instance, a terminal created after
  * another was freed was handed the freed one's memory unzeroed — a new session's pane opened on the
  * deleted session's screen, its own output drawn over it. xterm.js keeps its state in the `Terminal`
  * object, so there is no shared instance to leak; this spec stays as the behavioural guarantee that
@@ -10,7 +10,7 @@
 
 import React, { useImperativeHandle, useRef, useState, forwardRef } from "react";
 import { mount } from "cypress/react";
-import { GhosttyTerminal, type GhosttyTerminalHandle } from "../../src/GhosttyTerminal";
+import { TerminalView, type TerminalViewHandle } from "../../src/TerminalView";
 
 const OLD_SESSION_OUTPUT = Array.from(
   { length: 60 },
@@ -25,14 +25,14 @@ type SwitcherHandle = {
 /** Renders one session's pane at a time, keyed by session — as `SessionMainPane` does. */
 const SessionPaneSwitcher = forwardRef<SwitcherHandle>(function SessionPaneSwitcher(_, ref) {
   const [session, setSession] = useState<"old" | "new">("old");
-  const terminal = useRef<GhosttyTerminalHandle>(null);
+  const terminal = useRef<TerminalViewHandle>(null);
   useImperativeHandle(ref, () => ({
     showNewSession: () => setSession("new"),
     bufferText: () => terminal.current?.getBufferText?.(),
   }));
   return (
     <div style={{ width: 640, height: 320 }}>
-      <GhosttyTerminal
+      <TerminalView
         key={session}
         ref={terminal}
         initialContent={session === "old" ? OLD_SESSION_OUTPUT : "NEW SESSION banner"}

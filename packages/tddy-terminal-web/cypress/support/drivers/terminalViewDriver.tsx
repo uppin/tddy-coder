@@ -1,19 +1,19 @@
 /**
- * Fluent component driver for GhosttyTerminal.
+ * Fluent component driver for TerminalView.
  *
  * Wraps mount → interact → assert into a chainable API so test bodies stay
  * free of raw selectors and React mounting boilerplate.
  *
  * Usage:
  *
- *   aGhosttyTerminal({ onData }).mount().click().expectExists();
- *   aGhosttyTerminal({ preventFocusOnTap: true }).mount().expectNoFocus();
+ *   aTerminalView({ onData }).mount().click().expectExists();
+ *   aTerminalView({ preventFocusOnTap: true }).mount().expectNoFocus();
  */
 
 import React, { useRef } from "react";
 import { mount } from "cypress/react";
-import type { GhosttyTerminalProps, GhosttyTerminalHandle } from "../../../src/GhosttyTerminal";
-import { GhosttyTerminal } from "../../../src/GhosttyTerminal";
+import type { TerminalViewProps, TerminalViewHandle } from "../../../src/TerminalView";
+import { TerminalView } from "../../../src/TerminalView";
 import { byTestId, TEST_IDS } from "../testIds";
 
 // ---------------------------------------------------------------------------
@@ -25,12 +25,12 @@ function MobileKeyboardWrapper({
   terminalProps,
 }: {
   onData: (data: string) => void;
-  terminalProps: Partial<GhosttyTerminalProps>;
+  terminalProps: Partial<TerminalViewProps>;
 }) {
-  const ref = useRef<GhosttyTerminalHandle>(null);
+  const ref = useRef<TerminalViewHandle>(null);
   return (
     <>
-      <GhosttyTerminal ref={ref} onData={onData} preventFocusOnTap {...terminalProps} />
+      <TerminalView ref={ref} onData={onData} preventFocusOnTap {...terminalProps} />
       <button
         data-testid="keyboard-btn"
         type="button"
@@ -46,7 +46,7 @@ function MobileKeyboardWrapper({
 // Driver
 // ---------------------------------------------------------------------------
 
-export interface GhosttyTerminalDriverOptions extends Partial<GhosttyTerminalProps> {
+export interface TerminalViewDriverOptions extends Partial<TerminalViewProps> {
   /** When true, mounts via MobileKeyboardWrapper so ref.current.focus() can be tested. */
   withMobileKeyboardWrapper?: boolean;
   /** When true, mounts with a captured imperative handle so the live buffer (viewport + scrollback) can be inspected. */
@@ -66,9 +66,9 @@ interface TapPoint {
   clientY: number;
 }
 
-export function aGhosttyTerminal(options: GhosttyTerminalDriverOptions = {}) {
+export function aTerminalView(options: TerminalViewDriverOptions = {}) {
   const { withMobileKeyboardWrapper, withHandleCapture, ...terminalProps } = options;
-  const handleRef = React.createRef<GhosttyTerminalHandle>();
+  const handleRef = React.createRef<TerminalViewHandle>();
   /** Mouse events seen since `recordMouseEvents()` — mutated in place so `.should()` retries observe growth. */
   const recordedMouseEvents: RecordedMouseEvent[] = [];
   /** Where the last synthesised tap landed, for coordinate-fidelity assertions. */
@@ -76,13 +76,13 @@ export function aGhosttyTerminal(options: GhosttyTerminalDriverOptions = {}) {
   const onDataStub = terminalProps.onData ?? cy.stub().as("onData");
   const onResizeStub = terminalProps.onResize ?? undefined;
 
-  const mergedProps: Partial<GhosttyTerminalProps> = {
+  const mergedProps: Partial<TerminalViewProps> = {
     ...terminalProps,
     onData: typeof onDataStub === "function" ? onDataStub : undefined,
     onResize: onResizeStub,
   };
 
-  const terminal = () => byTestId(TEST_IDS.ghosttyTerminal, { timeout: 10000 });
+  const terminal = () => byTestId(TEST_IDS.terminal, { timeout: 10000 });
 
   return {
     /** Mount the component (with optional wrapper for mobile-keyboard tests). */
@@ -95,9 +95,9 @@ export function aGhosttyTerminal(options: GhosttyTerminalDriverOptions = {}) {
           />,
         );
       } else if (withHandleCapture) {
-        mount(<GhosttyTerminal ref={handleRef} {...(mergedProps as GhosttyTerminalProps)} />);
+        mount(<TerminalView ref={handleRef} {...(mergedProps as TerminalViewProps)} />);
       } else {
-        mount(<GhosttyTerminal {...(mergedProps as GhosttyTerminalProps)} />);
+        mount(<TerminalView {...(mergedProps as TerminalViewProps)} />);
       }
       return this;
     },
@@ -137,7 +137,7 @@ export function aGhosttyTerminal(options: GhosttyTerminalDriverOptions = {}) {
      * while the terminal window is the active context — e.g. a desktop user
      * pressing Shift+Tab or Alt+M with the terminal focused. Dispatched on
      * `document` (not the inner textarea) so it exercises an app-level shortcut
-     * handler rather than ghostty-web's own textarea key mapping.
+     * handler rather than xterm.js's own textarea key mapping.
      */
     pressPhysicalKey(init: {
       key: string;
@@ -436,7 +436,7 @@ export function aGhosttyTerminal(options: GhosttyTerminalDriverOptions = {}) {
      */
     expectRevealsEarlierOutput() {
       cy.wrap(handleRef).should((ref) => {
-        const handle = (ref as unknown as React.RefObject<GhosttyTerminalHandle>).current;
+        const handle = (ref as unknown as React.RefObject<TerminalViewHandle>).current;
         const linesAboveTip = (handle?.getScrollbackLength?.() ?? 0) - (handle?.getViewportTop?.() ?? 0);
         expect(linesAboveTip, "terminal viewport should reveal earlier output after the drag").to.be.greaterThan(0);
       });
@@ -479,7 +479,7 @@ export function aGhosttyTerminal(options: GhosttyTerminalDriverOptions = {}) {
      */
     expectReportingMouseToTui() {
       cy.wrap(handleRef).should((ref) => {
-        const handle = (ref as unknown as React.RefObject<GhosttyTerminalHandle>).current;
+        const handle = (ref as unknown as React.RefObject<TerminalViewHandle>).current;
         expect(
           handle?.hasMouseTracking?.() ?? false,
           "terminal should have mouse tracking enabled by the TUI",
@@ -525,7 +525,7 @@ export function aGhosttyTerminal(options: GhosttyTerminalDriverOptions = {}) {
      */
     expectInAlternateScreen() {
       cy.wrap(handleRef).should((ref) => {
-        const handle = (ref as unknown as React.RefObject<GhosttyTerminalHandle>).current;
+        const handle = (ref as unknown as React.RefObject<TerminalViewHandle>).current;
         expect(
           handle?.isAlternateScreen?.() ?? false,
           "terminal should be in the alternate screen (DEC 1049)",

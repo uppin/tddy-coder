@@ -2,16 +2,16 @@ import { describe, it, expect } from "bun:test";
 import { readFileSync } from "node:fs";
 import { dirname, relative } from "node:path";
 
-// The engine boundary: ghostty-web is reached only from the ghostty engine (and the WASM instance
-// loader it uses). Nothing else imports the library or casts a terminal to reach its members.
+// The engine boundary: the `@xterm/*` packages are reached only from the xterm engine. Nothing else
+// imports the library or casts a terminal to reach its members.
 //
 // PRD: packages/tddy-terminal-web/docs/terminal-engine.md (acceptance criterion 1)
 
 const PACKAGE_SOURCE_DIR = dirname(import.meta.dir);
-const ENGINE_FILES = ["engine/ghosttyEngine.ts", "lib/ghosttyInstance.ts"];
+const ENGINE_FILES = ["engine/xtermEngine.ts"];
 
-/** Members only ghostty-web's `Terminal` has, reached today through `as unknown as` casts. */
-const GHOSTTY_MEMBERS = ["wasmTerm", "getViewportY", "getScrollbackLength", "hasMouseTracking", "devicePixelRatio"];
+/** Members of xterm.js's `Terminal` that only the engine may reach through an `as unknown as` cast. */
+const XTERM_MEMBERS = ["_core", "_renderService", "buffer", "parser", "modes", "unicode"];
 
 type SourceFile = { path: string; text: string };
 
@@ -23,17 +23,17 @@ function productionSourcesOutsideTheEngine(): SourceFile[] {
     .map(({ absolute, path }) => ({ path, text: readFileSync(absolute, "utf8") }));
 }
 
-function importingGhosttyWeb(files: SourceFile[]): string[] {
-  const ghosttyImport = /\bfrom\s+["']ghostty-web(\/[^"']*)?["']|\bimport\(\s*["']ghostty-web/;
-  return files.filter((file) => ghosttyImport.test(file.text)).map((file) => file.path).sort();
+function importingXterm(files: SourceFile[]): string[] {
+  const xtermImport = /\bfrom\s+["']@xterm\/[^"']*["']|\bimport\(\s*["']@xterm\//;
+  return files.filter((file) => xtermImport.test(file.text)).map((file) => file.path).sort();
 }
 
-function castingToGhosttyMembers(files: SourceFile[]): string[] {
+function castingToXtermMembers(files: SourceFile[]): string[] {
   const castBlock = /as\s+unknown\s+as\s*\{[^}]*\}/g;
   return files
     .filter((file) =>
       [...file.text.matchAll(castBlock)].some(([cast]) =>
-        GHOSTTY_MEMBERS.some((member) => new RegExp(`\\b${member}\\b`).test(cast)),
+        XTERM_MEMBERS.some((member) => new RegExp(`\\b${member}\\b`).test(cast)),
       ),
     )
     .map((file) => file.path)
@@ -41,24 +41,24 @@ function castingToGhosttyMembers(files: SourceFile[]): string[] {
 }
 
 describe("terminal engine boundary", () => {
-  it("lets only the ghostty engine import ghostty-web", () => {
+  it("lets only the xterm engine import @xterm packages", () => {
     // Given
     const files = productionSourcesOutsideTheEngine();
 
     // When
-    const importers = importingGhosttyWeb(files);
+    const importers = importingXterm(files);
 
     // Then
     expect(files.length).toBeGreaterThan(0);
     expect(importers).toEqual([]);
   });
 
-  it("leaves no cast that reaches a ghostty-web member outside the engine", () => {
+  it("leaves no cast that reaches an xterm.js member outside the engine", () => {
     // Given
     const files = productionSourcesOutsideTheEngine();
 
     // When
-    const casters = castingToGhosttyMembers(files);
+    const casters = castingToXtermMembers(files);
 
     // Then
     expect(casters).toEqual([]);

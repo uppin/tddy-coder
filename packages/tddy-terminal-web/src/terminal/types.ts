@@ -1,11 +1,11 @@
-/** Public prop and handle types of `GhosttyTerminal` (re-exported from it). */
+/** Public prop and handle types of `TerminalView` (re-exported from it). */
 
-export interface GhosttyTerminalTheme {
+export interface TerminalViewTheme {
   background?: string;
   foreground?: string;
 }
 
-export interface GhosttyTerminalProps {
+export interface TerminalViewProps {
   initialContent?: string;
   cols?: number;
   rows?: number;
@@ -13,7 +13,7 @@ export interface GhosttyTerminalProps {
   minFontSize?: number;
   maxFontSize?: number;
   fontFamily?: string;
-  theme?: GhosttyTerminalTheme;
+  theme?: TerminalViewTheme;
   onData?: (data: string) => void;
   onResize?: (size: { cols: number; rows: number }) => void;
   onBell?: () => void;
@@ -22,7 +22,7 @@ export interface GhosttyTerminalProps {
   /**
    * Fires with the new viewport top (the buffer line on its first row, counted from the top;
    * equal to the scrollback length when pinned to latest) whenever the viewport moves — wheel, touch, keyboard, or programmatic scroll. Used by
-   * GhosttyTerminalSession to mirror scroll position across the two overlay terminals.
+   * TerminalSession to mirror scroll position across the two overlay terminals.
    */
   onScroll?: (viewportTop: number) => void;
   /** When true, log write/onData and lifecycle to console. */
@@ -50,8 +50,8 @@ export interface GhosttyTerminalProps {
    * (post-connect history) and the older-history page terminal (forward-filled pre-connect history).
    */
   scrollback?: number;
-  /** `data-testid` for the terminal container. Defaults to `ghostty-terminal`; the older-history
-   *  terminal passes `ghostty-terminal-older` so tests can target each instance separately. */
+  /** `data-testid` for the terminal container. Defaults to `terminal`; the older-history
+   *  terminal passes `terminal-older` so tests can target each instance separately. */
   testId?: string;
 }
 
@@ -62,7 +62,7 @@ export interface BufferLineInfo {
   hasInverse: boolean;
 }
 
-export interface GhosttyTerminalHandle {
+export interface TerminalViewHandle {
   write(data: string | Uint8Array): void;
   clear(): void;
   focus(): void;
@@ -79,7 +79,7 @@ export interface GhosttyTerminalHandle {
   scrollToBottom?(): void;
   /**
    * Scroll to an absolute line in the combined buffer (0 = top of scrollback,
-   * scrollbackLength = bottom). Ghostty-web's primary "full control" viewport API.
+   * scrollbackLength = bottom). The primary "full control" viewport API.
    */
   scrollToLine?(line: number): void;
   /** Relative scroll by `amount` lines (positive = down, negative = up). */

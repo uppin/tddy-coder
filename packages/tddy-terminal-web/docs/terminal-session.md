@@ -1,4 +1,4 @@
-# The session terminal (`src/GhosttyTerminalSession.tsx`, `rpc/connections/terminal.ts`)
+# The session terminal (`src/TerminalSession.tsx`, `rpc/connections/terminal.ts`)
 
 One terminal component renders every session, on every wire. It takes a **terminal feed** — a byte
 stream, and a history fetcher where one can be served — and knows nothing else. It imports no
@@ -224,7 +224,7 @@ terminal with its requested kind; `sessionTerminalTabsPage.ts` offers `newTabMen
   accounts un-acknowledged input, and a `TerminalFrame` has nowhere to carry a daemon's input
   acknowledgement; routing that path through the feed would silently drop the enqueued-input overlay.
   The two keep identical request queues (open message, then one message per send). Leftover
-  resume-by-offset plumbing — `TerminalResumePoint`, `GhosttyTerminalSession.onOffsetUpdate` — is
+  resume-by-offset plumbing — `TerminalResumePoint`, `TerminalSession.onOffsetUpdate` — is
   written but no longer read in production (backlog:
   `2026-10-25-web-host-terminal-feed-leftovers-after-snapshot`).
 - **The continuity guard is wired twice.** Because of the two paths above, the gap handling

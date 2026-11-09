@@ -33,7 +33,7 @@ export const TEST_IDS = {
   connectionStatusDot: "connection-status-dot",
   connectionMenuDisconnect: "connection-menu-disconnect",
   connectionMenuTerminate: "connection-menu-terminate",
-  ghosttyTerminal: "ghostty-terminal",
+  terminal: "terminal",
   terminalFullscreenButton: "terminal-fullscreen-button",
   terminalConnectionStatusBar: "terminal-connection-status-bar",
   mobileKeyboardButton: "mobile-keyboard-button",

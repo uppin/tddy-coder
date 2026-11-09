@@ -1,5 +1,5 @@
 /**
- * Fluent component driver for `GhosttyTerminalSession`'s chrome.
+ * Fluent component driver for `TerminalSession`'s chrome.
  *
  * Centralises:
  *  - the feed the terminal is mounted on (a stand-in a spec can push bytes into and read sends from)
@@ -17,7 +17,7 @@
  *
  * Usage:
  *
- *   aGhosttyTerminalSession()
+ *   aTerminalSession()
  *     .withTerminate()
  *     .stubRequestFullscreen()
  *     .mount()
@@ -28,8 +28,8 @@
 
 import React from "react";
 import { mount } from "cypress/react";
-import type { GhosttyTerminalSessionProps } from "../../../src/GhosttyTerminalSession";
-import { GhosttyTerminalSession } from "../../../src/GhosttyTerminalSession";
+import type { TerminalSessionProps } from "../../../src/TerminalSession";
+import { TerminalSession } from "../../../src/TerminalSession";
 import type { TerminalFeed, TerminalFrame, TerminalStream } from "tddy-client-web/connections/terminal";
 import type { ToolShortcutDef } from "../../../src/lib/toolShortcuts";
 import { byTestId, TEST_IDS } from "../testIds";
@@ -92,7 +92,7 @@ export function aControllableFeed(
 // Driver
 // ---------------------------------------------------------------------------
 
-export interface GhosttyTerminalSessionDriverOptions {
+export interface TerminalSessionDriverOptions {
   /**
    * The feed to mount on. Defaults to a fresh controllable one with no history.
    *
@@ -106,13 +106,13 @@ export interface GhosttyTerminalSessionDriverOptions {
    */
   history?: TerminalFeed["history"];
   /** What the caller says about the connection carrying the feed. Omitted by default. */
-  connectionStatus?: GhosttyTerminalSessionProps["connectionStatus"];
+  connectionStatus?: TerminalSessionProps["connectionStatus"];
   /** Whether to show the mobile keyboard affordance. */
   showMobileKeyboard?: boolean;
   /** Whether to prevent focus on tap. */
   preventFocusOnTap?: boolean;
   /** Connection overlay options (enables chrome). If omitted, no overlay. */
-  connectionOverlay?: GhosttyTerminalSessionProps["connectionOverlay"];
+  connectionOverlay?: TerminalSessionProps["connectionOverlay"];
   /** Container height (default 400). */
   containerHeight?: number;
   /** Container width (default unset). */
@@ -121,7 +121,7 @@ export interface GhosttyTerminalSessionDriverOptions {
   mobileShortcuts?: ToolShortcutDef[];
 }
 
-export function aGhosttyTerminalSession(opts: GhosttyTerminalSessionDriverOptions = {}) {
+export function aTerminalSession(opts: TerminalSessionDriverOptions = {}) {
   const onDisconnect = cy.stub().as("onDisconnect");
   const onTerminate = cy.stub().as("onTerminate");
 
@@ -144,7 +144,7 @@ export function aGhosttyTerminalSession(opts: GhosttyTerminalSessionDriverOption
     }
   };
 
-  let connectionOverlay: GhosttyTerminalSessionProps["connectionOverlay"] = opts.connectionOverlay;
+  let connectionOverlay: TerminalSessionProps["connectionOverlay"] = opts.connectionOverlay;
 
   const driver = {
     /** The bytes the terminal has written back to the driver's own feed. */
@@ -228,7 +228,7 @@ export function aGhosttyTerminalSession(opts: GhosttyTerminalSessionDriverOption
 
       mount(
         <div style={style}>
-          <GhosttyTerminalSession
+          <TerminalSession
             feed={feed}
             connectionStatus={opts.connectionStatus}
             showMobileKeyboard={opts.showMobileKeyboard}
@@ -266,7 +266,7 @@ export function aGhosttyTerminalSession(opts: GhosttyTerminalSessionDriverOption
 
     /** The terminal container. */
     terminal: (options?: Parameters<typeof cy.get>[1]) =>
-      byTestId(TEST_IDS.ghosttyTerminal, { timeout: 20000, ...options }),
+      byTestId(TEST_IDS.terminal, { timeout: 20000, ...options }),
 
     /** The readable mirror of what the live terminal has painted (the screen itself may be WebGL). */
     bufferText: (options?: Parameters<typeof cy.get>[1]) =>

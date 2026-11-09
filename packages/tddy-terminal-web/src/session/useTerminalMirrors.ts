@@ -1,5 +1,5 @@
 import { useEffect, useState, type MutableRefObject, type RefObject } from "react";
-import type { GhosttyTerminalHandle } from "../terminal/types";
+import type { TerminalViewHandle } from "../terminal/types";
 
 /** What the hidden probe elements show — see `TerminalProbes`. */
 export interface TerminalMirrorValues {
@@ -22,8 +22,8 @@ export function useTerminalMirrors({
   streamedTextRef,
   showBufferTextForTest,
 }: {
-  termRef: RefObject<GhosttyTerminalHandle | null>;
-  olderTermRef: RefObject<GhosttyTerminalHandle | null>;
+  termRef: RefObject<TerminalViewHandle | null>;
+  olderTermRef: RefObject<TerminalViewHandle | null>;
   streamedTextRef: MutableRefObject<string>;
   showBufferTextForTest: boolean;
 }): { mirrors: TerminalMirrorValues; refreshMirrors: () => void } {
@@ -47,7 +47,7 @@ export function useTerminalMirrors({
 
   useEffect(() => {
     const interval = setInterval(() => {
-      // Ghostty's parsed buffer is the clean text; the raw streamed ANSI is the fallback for the
+      // xterm.js's parsed buffer is the clean text; the raw streamed ANSI is the fallback for the
       // E2E probe, whose assertion is "bytes arrived" and which runs before a frame is painted.
       const fromBuffer = termRef.current?.getBufferText?.() ?? "";
       setBufferText(showBufferTextForTest ? fromBuffer || streamedTextRef.current : fromBuffer);

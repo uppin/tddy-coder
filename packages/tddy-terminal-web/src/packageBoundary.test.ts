@@ -21,6 +21,6 @@ describe("tddy-terminal-web package boundary", () => {
     const exported = Object.keys(require("../src/index.ts"));
 
     // Then
-    expect(exported).toEqual(expect.arrayContaining(["GhosttyTerminal", "GhosttyTerminalSession", "ConnectionTerminalChrome", "TerminalConnectionStatusBar", "ShortcutDrawer", "MobileTerminalKeyboard", "TerminalFileDropZone", "TerminalUploadButton", "EnqueuedInputOverlay", "useTerminalControl", "useEnqueuedInput"]));
+    expect(exported).toEqual(expect.arrayContaining(["TerminalView", "TerminalSession", "ConnectionTerminalChrome", "TerminalConnectionStatusBar", "ShortcutDrawer", "MobileTerminalKeyboard", "TerminalFileDropZone", "TerminalUploadButton", "EnqueuedInputOverlay", "useTerminalControl", "useEnqueuedInput"]));
   });
 });

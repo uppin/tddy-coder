@@ -1,5 +1,5 @@
 /**
- * E2E acceptance: Ghostty terminal content from tddy-demo over LiveKit.
+ * E2E acceptance: terminal content from tddy-demo over LiveKit.
  *
  * Requires: LIVEKIT_TESTKIT_WS_URL, tddy-demo built (cargo build -p tddy-demo).
  *
@@ -7,9 +7,9 @@
  */
 import type { TerminalSessionResult } from "../support/commands";
 
-const STORY_ID = "components-ghosttyterminal--live-kit-connected";
+const STORY_ID = "components-terminal--live-kit-connected";
 
-describe("Ghostty Terminal E2E", () => {
+describe("Terminal Terminal E2E", () => {
   let session: TerminalSessionResult = {} as TerminalSessionResult;
 
   before(function () {
@@ -25,9 +25,9 @@ describe("Ghostty Terminal E2E", () => {
     cy.task("stopTerminalServer");
   });
 
-  it("displays tddy-demo terminal output in Ghostty through LiveKit", () => {
+  it("displays tddy-demo terminal output in xterm.js through LiveKit", () => {
     // Given
-    cy.visitGhosttyStory({ storyId: STORY_ID, url: session.url, token: session.clientToken, roomName: session.roomName });
+    cy.visitTerminalStory({ storyId: STORY_ID, url: session.url, token: session.clientToken, roomName: session.roomName });
 
     // When — wait for full LiveKit connection
     cy.connectAndWaitForTerminal();
@@ -45,7 +45,7 @@ describe("Ghostty Terminal E2E", () => {
 
   it("shows the coder-unavailable banner and disables input when the server participant leaves", () => {
     // Given
-    cy.visitGhosttyStory({ storyId: STORY_ID, url: session.url, token: session.clientToken, roomName: session.roomName });
+    cy.visitTerminalStory({ storyId: STORY_ID, url: session.url, token: session.clientToken, roomName: session.roomName });
     cy.connectAndWaitForTerminal();
 
     // When — kill the server
@@ -59,6 +59,6 @@ describe("Ghostty Terminal E2E", () => {
       });
 
     // Then — terminal marks session inactive
-    cy.get("[data-testid='ghostty-terminal']").should("have.attr", "data-session-active", "false");
+    cy.get("[data-testid='terminal']").should("have.attr", "data-session-active", "false");
   });
 });

@@ -70,7 +70,6 @@ Each of these covers something the library does not (developer decisions, 2026-1
 - **IME Escape forward** (`useImeEscapeForwarding`): xterm's `CompositionHelper` also drops a
   keydown with `keyCode` 229, so Escape pressed during composition never reaches the program
   otherwise.
-- **`lib/terminalDprWatch.ts`:** stays while `ghosttyEngine` uses it.
 - **Write buffering in `useFeedStream`:** covers data that arrives before the engine is attached, not
   only parse delay.
 

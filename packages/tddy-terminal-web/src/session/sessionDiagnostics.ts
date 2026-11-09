@@ -1,5 +1,5 @@
 import { tddyDebug } from "tddy-client-web";
-import type { GhosttyTerminalHandle } from "../terminal/types";
+import type { TerminalViewHandle } from "../terminal/types";
 
 // `[tddy]` diagnostics for the terminal byte stream (enabled by the DEBUG mask).
 // The 220-col garbling on reconnect lived here, so log incoming bytes / buffering / resize.
@@ -28,13 +28,13 @@ export function decModeChanges(data: Uint8Array): string[] {
 /** Whether the live terminal's program scrolls its own output: it is on the alternate screen, or it
  *  tracks the mouse. Mouse tracking counts on its own because a reattach learns it from the daemon's
  *  replayed mode prologue, which does not carry the alternate screen. */
-export function tuiOwnsNavigation(term: GhosttyTerminalHandle): boolean {
+export function tuiOwnsNavigation(term: TerminalViewHandle): boolean {
   return (term.isAlternateScreen?.() ?? false) || (term.hasMouseTracking?.() ?? false);
 }
 
 /** `tddy:term:modes`: after a chunk is written, log the DEC modes it switched and the resulting
  *  mouse-tracking / alternate-screen state. */
-export function traceModes(term: GhosttyTerminalHandle, modes: string[]): void {
+export function traceModes(term: TerminalViewHandle, modes: string[]): void {
   if (!dModes.enabled) return;
   dModes(
     "%s → tracking=%o altScreen=%o",

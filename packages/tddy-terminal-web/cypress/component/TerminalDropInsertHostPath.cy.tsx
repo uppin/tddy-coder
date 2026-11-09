@@ -37,7 +37,7 @@ function mountDropZone(backend: InMemoryRpcBackend, insertInput: Cypress.Agent<s
           sessionId={SESSION_ID}
           insertInput={insertInput}
         >
-          <div data-testid="ghostty-terminal" style={{ width: 400, height: 300 }} />
+          <div data-testid="terminal" style={{ width: 400, height: 300 }} />
         </TerminalFileDropZone>
       </UploadProgressProvider>,
     ),

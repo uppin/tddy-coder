@@ -12,9 +12,9 @@
  */
 import type { TerminalSessionResult } from "../support/commands";
 
-const STORY_ID = "components-ghosttyterminal--live-kit-connected";
+const STORY_ID = "components-terminal--live-kit-connected";
 
-describe("Ghostty Selection Persistence", () => {
+describe("Terminal Selection Persistence", () => {
   let session: TerminalSessionResult = {} as TerminalSessionResult;
 
   before(function () {
@@ -32,7 +32,7 @@ describe("Ghostty Selection Persistence", () => {
 
   it("Down arrow selection persists through periodic re-renders", () => {
     // Given — connect and wait for the Select question to appear
-    cy.visitGhosttyStory({ storyId: STORY_ID, url: session.url, token: session.clientToken, roomName: session.roomName });
+    cy.visitTerminalStory({ storyId: STORY_ID, url: session.url, token: session.clientToken, roomName: session.roomName });
     cy.connectAndWaitForTerminal();
 
     cy.waitForBufferText("Email/password");
@@ -43,8 +43,8 @@ describe("Ghostty Selection Persistence", () => {
     });
 
     // When — send Down arrow to move to next option
-    cy.get("[data-testid='ghostty-terminal']").click();
-    cy.get("[data-testid='ghostty-terminal']").type("{downarrow}");
+    cy.get("[data-testid='terminal']").click();
+    cy.get("[data-testid='terminal']").type("{downarrow}");
 
     // Wait for periodic render ticks (200ms each) to verify the selection held.
     // This is the nature of the regression being tested — selection resets after renders.

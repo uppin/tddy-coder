@@ -9,7 +9,7 @@ import { byTestId, TEST_IDS } from "../testIds";
 
 export const terminalFileUploadPage = {
   /** The drop-zone wrapper around the terminal viewport. */
-  dropZoneSelector: `[data-testid='${TEST_IDS.ghosttyTerminal}']`,
+  dropZoneSelector: `[data-testid='${TEST_IDS.terminal}']`,
 
   /** The overlay shown while a file is dragged over the terminal. */
   dropOverlay: (options?: Parameters<typeof cy.get>[1]) =>

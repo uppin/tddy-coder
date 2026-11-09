@@ -2,7 +2,7 @@
  * A program that tracks the mouse receives exactly one report per click and per wheel step.
  *
  * xterm.js reports mouse and wheel input to a tracking program itself. The web terminal used to do
- * that by hand for ghostty-web; if both paths run, every click and wheel step reaches the program
+ * that by hand for xterm.js; if both paths run, every click and wheel step reaches the program
  * twice. These specs drive the terminal component the way a browser does — events on xterm's
  * screen element — and assert on the SGR reports the terminal sent as input.
  *
@@ -10,7 +10,7 @@
  */
 
 import React from "react";
-import { GhosttyTerminal, type GhosttyTerminalHandle } from "../../src/GhosttyTerminal";
+import { TerminalView, type TerminalViewHandle } from "../../src/TerminalView";
 import { byTestId, TEST_IDS } from "../support/testIds";
 
 const ENABLE_CLICK_TRACKING_SGR = "\x1b[?1000h\x1b[?1006h";
@@ -26,18 +26,18 @@ function sgrReportsIn(input: string[]): SgrReport[] {
 }
 
 function aTerminalRunningAMouseTrackingProgram() {
-  const terminal = React.createRef<GhosttyTerminalHandle>();
+  const terminal = React.createRef<TerminalViewHandle>();
   const input: string[] = [];
   cy.mount(
     <div style={{ width: 800, height: 400 }}>
-      <GhosttyTerminal ref={terminal} onData={(data) => input.push(data)} />
+      <TerminalView ref={terminal} onData={(data) => input.push(data)} />
     </div>,
   );
-  byTestId(TEST_IDS.ghosttyTerminal, { timeout: 10000 }).should("have.attr", "data-terminal-ready", "true");
+  byTestId(TEST_IDS.terminal, { timeout: 10000 }).should("have.attr", "data-terminal-ready", "true");
   cy.then(() => terminal.current?.write(ENABLE_CLICK_TRACKING_SGR));
   cy.wrap(terminal).should((t) => expect(t.current?.hasMouseTracking?.(), "mouse tracking on").to.equal(true));
 
-  const screen = () => byTestId(TEST_IDS.ghosttyTerminal).find(".xterm-screen");
+  const screen = () => byTestId(TEST_IDS.terminal).find(".xterm-screen");
   return {
     click() {
       screen().trigger("mousedown", 40, 20, { button: 0, buttons: 1 });
