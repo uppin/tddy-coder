@@ -26,7 +26,7 @@ export function useSendWheelSgrAt({
     const t = termRef.current;
     const send = onDataRef.current;
     if (!t || !send) return false;
-    const canvas = t.element?.querySelector("canvas");
+    const canvas = t.screenElement;
     if (!canvas) return false;
     const r = canvas.getBoundingClientRect();
     const grid = { left: r.left, top: r.top, width: r.width, height: r.height };
@@ -128,12 +128,8 @@ export function useTouchScrollRoutes({
       startY = e.touches[0].clientY;
       lastY = startY;
       const term = termRef.current;
-      const tracking = term?.hasMouseTracking?.() ?? false;
-      // Alternate-screen state lives on the wasm terminal, not on the JS `Terminal` — same
-      // read as the `isAlternateScreen()` handle method.
-      const alternateScreen =
-        (term as unknown as { wasmTerm?: { isAlternateScreen?: () => boolean } } | null)?.wasmTerm
-          ?.isAlternateScreen?.() ?? false;
+      const tracking = term?.mouseTracking() ?? false;
+      const alternateScreen = term?.alternateScreen() ?? false;
       route = tracking ? "tui-mouse" : alternateScreen ? "tui-keys" : "viewport";
       logScroll(
         "touchstart startY=%d cellPx=%.2f rows=%o route=%s tracking=%o altScreen=%o",
@@ -191,30 +187,29 @@ export function useTouchScrollRoutes({
       pixelAccum += y - lastY;
       lastY = y;
       const lines = Math.trunc(pixelAccum / cell);
-      const vyBefore = term.getViewportY?.();
+      const topBefore = term.viewportTop();
       if (lines !== 0) {
         pixelAccum -= lines * cell;
         if (route !== "viewport") {
           // A full-screen application owns its own scrolling — give it the gesture.
           scrollTheTui(touch, lines);
         } else {
-          // Finger down (positive delta) reveals older output. `scrollLines` moves the
-          // viewport by `viewportY - amount`, so a negative amount increases getViewportY
-          // (scrolls back toward earlier output) — a natural, content-following drag.
+          // Finger down (positive delta) reveals older output: a negative `scrollLines` amount
+          // moves the viewport into the scrollback — a natural, content-following drag.
           term.scrollLines(-lines);
-          logMouse("touch-scroll lines=%d viewportY=%d", -lines, term.getViewportY?.());
+          logMouse("touch-scroll lines=%d viewportTop=%d", -lines, term.viewportTop());
         }
       }
       logScroll(
-        "touchmove#%d y=%d fromStart=%.1f cellPx=%.2f accum=%.1f lines=%d vy=%o->%o cancelable=%o",
+        "touchmove#%d y=%d fromStart=%.1f cellPx=%.2f accum=%.1f lines=%d top=%o->%o cancelable=%o",
         moveCount,
         y,
         fromStart,
         cell,
         pixelAccum,
         lines,
-        vyBefore,
-        term.getViewportY?.(),
+        topBefore,
+        term.viewportTop(),
         e.cancelable,
       );
       // Non-passive listener: stop the page from scrolling while dragging the terminal.

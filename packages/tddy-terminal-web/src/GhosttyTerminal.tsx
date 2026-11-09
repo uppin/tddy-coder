@@ -73,7 +73,7 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
     const onDataRef = useRef(onData);
     onDataRef.current = onData;
 
-    const { ready, fitAddonRef } = useTerminalLifecycle({
+    const { ready } = useTerminalLifecycle({
       containerRef,
       termRef,
       contentRevisionRef,
@@ -98,7 +98,6 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
     const { applyFontSizePx, displayFontSize } = useTerminalFontSize({
       containerRef,
       termRef,
-      fitAddonRef,
       ready,
       sessionActive,
       fontSize,

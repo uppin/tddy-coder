@@ -6,8 +6,6 @@ export interface TerminalMirrorValues {
   bufferText: string;
   olderBufferText: string;
   highlightedLine: string;
-  pageViewportY: number;
-  liveViewportY: number;
   liveScrollbackLength: number;
   pageScrollbar: string;
   liveScrollbar: string;
@@ -32,17 +30,14 @@ export function useTerminalMirrors({
   const [bufferText, setBufferText] = useState("");
   const [olderBufferText, setOlderBufferText] = useState("");
   const [highlightedLine, setHighlightedLine] = useState("");
-  // Viewport position mirrors for the two panes (lines up from the bottom). Surfaced through hidden
-  // elements so component tests can assert scrollToLine gives full control of the viewport.
-  const [pageViewportY, setPageViewportY] = useState(0);
-  const [liveViewportY, setLiveViewportY] = useState(0);
+  // Viewport position mirrors for the two panes: the scrollbar `total,offset,len` (offset counts
+  // from the top). Surfaced through hidden elements so component tests can assert scrollToLine
+  // gives full control of the viewport.
   const [liveScrollbackLength, setLiveScrollbackLength] = useState(0);
   const [pageScrollbar, setPageScrollbar] = useState("");
   const [liveScrollbar, setLiveScrollbar] = useState("");
 
   const refreshMirrors = () => {
-    setPageViewportY(olderTermRef.current?.getViewportScrollOffset?.() ?? 0);
-    setLiveViewportY(termRef.current?.getViewportScrollOffset?.() ?? 0);
     setLiveScrollbackLength(termRef.current?.getScrollbackLength?.() ?? 0);
     const pageSb = olderTermRef.current?.getScrollbar?.();
     setPageScrollbar(pageSb ? `${pageSb.total},${pageSb.offset},${pageSb.len}` : "");
@@ -72,8 +67,6 @@ export function useTerminalMirrors({
       bufferText,
       olderBufferText,
       highlightedLine,
-      pageViewportY,
-      liveViewportY,
       liveScrollbackLength,
       pageScrollbar,
       liveScrollbar,

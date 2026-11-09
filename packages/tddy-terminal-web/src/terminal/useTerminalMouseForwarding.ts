@@ -33,7 +33,7 @@ export function useTerminalMouseForwarding({
     logMouse("mouse listeners attached ready=%o", ready);
 
     const canvasGridRect = () => {
-      const canvas = term.element?.querySelector("canvas");
+      const canvas = term.screenElement;
       if (!canvas) return null;
       const r = canvas.getBoundingClientRect();
       return { left: r.left, top: r.top, width: r.width, height: r.height };
@@ -52,7 +52,7 @@ export function useTerminalMouseForwarding({
 
     const onMouseDown = (e: MouseEvent) => {
       const coords = toCellCoords(e.clientX, e.clientY);
-      const tracking = term.hasMouseTracking?.() ?? false;
+      const tracking = term.mouseTracking();
       logMouse("mousedown col=%o row=%o tracking=%o", coords?.col, coords?.row, tracking);
       if (!tracking) return;
       if (coords) {
@@ -61,7 +61,7 @@ export function useTerminalMouseForwarding({
     };
     const onMouseUp = (e: MouseEvent) => {
       const coords = toCellCoords(e.clientX, e.clientY);
-      const tracking = term.hasMouseTracking?.() ?? false;
+      const tracking = term.mouseTracking();
       logMouse("mouseup col=%o row=%o tracking=%o", coords?.col, coords?.row, tracking);
       if (!tracking) return;
       if (coords) {
@@ -76,7 +76,7 @@ export function useTerminalMouseForwarding({
       wheelPinchAccumRef.current = 0;
 
       const coords = toCellCoords(e.clientX, e.clientY);
-      const tracking = term.hasMouseTracking?.() ?? false;
+      const tracking = term.mouseTracking();
       logMouse("wheel col=%o row=%o deltaY=%d tracking=%o", coords?.col, coords?.row, e.deltaY, tracking);
       if (!tracking) return;
       if (coords) {
@@ -92,7 +92,7 @@ export function useTerminalMouseForwarding({
       if (e.changedTouches.length === 0) return;
       const t = e.changedTouches[0];
       const coords = toCellCoords(t.clientX, t.clientY);
-      const tracking = term.hasMouseTracking?.() ?? false;
+      const tracking = term.mouseTracking();
       if (tracking && coords) {
         sendSgr(0, coords.col, coords.row, false);
       }
@@ -103,7 +103,7 @@ export function useTerminalMouseForwarding({
       if (e.touches.length > 0) return;
       const t = e.changedTouches[0];
       const coords = toCellCoords(t.clientX, t.clientY);
-      const tracking = term.hasMouseTracking?.() ?? false;
+      const tracking = term.mouseTracking();
       if (tracking && coords) {
         sendSgr(0, coords.col, coords.row, true);
       }

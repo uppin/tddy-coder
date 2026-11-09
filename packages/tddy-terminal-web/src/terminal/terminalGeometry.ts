@@ -1,21 +1,22 @@
-import type { Terminal } from "ghostty-web";
+import type { TerminalEngine } from "../engine/TerminalEngine";
 
 /** Canvas/CSS width of the rendered grid (not the full-width xterm root). Used for X-axis font fit. */
-export function measureTerminalCanvasCssWidth(term: Terminal): number {
-  const root = term.element;
-  if (!root) return 0;
-  const canvas = root.querySelector("canvas");
-  if (!canvas) return 0;
-  return canvas.getBoundingClientRect().width;
+export function measureTerminalCanvasCssWidth(term: TerminalEngine): number {
+  return term.screenElement?.getBoundingClientRect().width ?? 0;
 }
 
 /** Canvas/CSS height of the rendered grid. Used to convert drag pixels into scroll lines. */
-export function measureTerminalCanvasCssHeight(term: Terminal): number {
-  const root = term.element;
-  if (!root) return 0;
-  const canvas = root.querySelector("canvas");
-  if (!canvas) return 0;
-  return canvas.getBoundingClientRect().height;
+export function measureTerminalCanvasCssHeight(term: TerminalEngine): number {
+  return term.screenElement?.getBoundingClientRect().height ?? 0;
+}
+
+/** Resizes the engine to the grid that fits its container, when it can measure one and it differs. */
+export function fitTerminalToContainer(term: TerminalEngine): void {
+  const proposed = term.proposeDimensions();
+  if (!proposed) return;
+  if (proposed.cols !== term.cols || proposed.rows !== term.rows) {
+    term.resize(proposed.cols, proposed.rows);
+  }
 }
 
 /** Limit Ctrl/Cmd +/-/0 so we do not steal shortcuts from other page inputs (e.g. browser address bar). */

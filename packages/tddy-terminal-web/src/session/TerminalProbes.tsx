@@ -15,8 +15,6 @@ export function TerminalProbes({
   const {
     bufferText,
     olderBufferText,
-    pageViewportY,
-    liveViewportY,
     liveScrollbackLength,
     pageScrollbar,
     liveScrollbar,
@@ -32,12 +30,6 @@ export function TerminalProbes({
         </div>
         <div data-testid="terminal-older-buffer-text" style={{ display: "none" }} aria-hidden>
           {olderBufferText}
-        </div>
-        <div data-testid="terminal-page-viewport-y" style={{ display: "none" }} aria-hidden>
-          {pageViewportY}
-        </div>
-        <div data-testid="terminal-live-viewport-y" style={{ display: "none" }} aria-hidden>
-          {liveViewportY}
         </div>
         <div data-testid="terminal-live-scrollback-length" style={{ display: "none" }} aria-hidden>
           {liveScrollbackLength}

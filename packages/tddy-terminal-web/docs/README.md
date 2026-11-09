@@ -8,6 +8,7 @@ tool shortcuts, stream offsets). It imports nothing from `tddy-web` or `livekit-
 (`src/packageBoundary.test.ts`); the session runtime it reports bytes to is reached through the
 `onBytes(ByteDelta)` prop, and the connection status it shows is passed in as text.
 
+- **Terminal engine (interface, top-based scrolling, fitting, buffer text)**: [terminal-engine.md](terminal-engine.md)
 - **Session terminal (feed, resync, history paging, input ack)**: [terminal-session.md](terminal-session.md)
 - **Connection chrome (status bar, layouts)**: [terminal-connection-chrome.md](terminal-connection-chrome.md)
 - **Presentation modes (reconnect overlay)**: [terminal-presentation.md](terminal-presentation.md)
@@ -21,6 +22,8 @@ tool shortcuts, stream offsets). It imports nothing from `tddy-web` or `livekit-
 `GhosttyTerminal.tsx` and `GhosttyTerminalSession.tsx` are compositions of hooks; every production
 file stays within 500 lines (`src/componentSize.test.ts`).
 
+- `src/engine/` — the `TerminalEngine` interface, `ghosttyEngine` (the only ghostty-web importer)
+  and the reusable engine contract suite.
 - `src/terminal/` — what the emulator component is made of: `types`, `terminalLoggers`,
   `terminalGeometry`, `terminalRefs`, `useTerminalLifecycle` (open, fit, write, dispose),
   `useTerminalFontSize` (font size, fit and the zoom bridge), `useTerminalPinchZoom`,
@@ -36,5 +39,5 @@ file stays within 500 lines (`src/componentSize.test.ts`).
 ## Tests
 
 `bun test src` (helpers, feed, input delivery, the boundary rule) and `bun run cypress:component` —
-21 component specs from the package's own `cypress.config.ts`. CI: `.github/workflows/web.yml`
+22 component specs from the package's own `cypress.config.ts`. CI: `.github/workflows/web.yml`
 (`Web lint` typechecks it; the `Web tests` shards run its suites).

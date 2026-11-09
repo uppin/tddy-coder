@@ -1,9 +1,9 @@
 import { useEffect, useRef, useState, type MutableRefObject } from "react";
-import { Terminal, FitAddon } from "ghostty-web";
-import { newGhosttyInstance } from "../lib/ghosttyInstance";
-import { watchDevicePixelRatio } from "../lib/terminalDprWatch";
+import { ghosttyEngine } from "../engine/ghosttyEngine";
+import type { EngineDisposable } from "../engine/TerminalEngine";
 import type { GhosttyTerminalProps } from "./types";
 import type { TerminalLoggers } from "./terminalLoggers";
+import { fitTerminalToContainer } from "./terminalGeometry";
 import type { ContainerRef, TerminalRef } from "./terminalRefs";
 
 type LifecycleProps = Pick<
@@ -54,7 +54,7 @@ export function useTerminalLifecycle({
   onTitleChange,
   onReady,
   onScroll,
-}: TerminalLifecycleInput): { ready: boolean; fitAddonRef: MutableRefObject<FitAddon | null> } {
+}: TerminalLifecycleInput): { ready: boolean } {
   const { logLife, logData, logResize } = loggers;
   // The latest `initialContent`, read by the open path (the setup effect has `[]` deps).
   const initialContentRef = useRef(initialContent);
@@ -62,14 +62,13 @@ export function useTerminalLifecycle({
   // The `initialContent` last written into the emulator, so the open path and the effect never
   // write the same value twice.
   const writtenInitialContentRef = useRef<string | undefined>(undefined);
-  const fitAddonRef = useRef<FitAddon | null>(null);
   const resizeObserverRef = useRef<ResizeObserver | null>(null);
   // Frame handle of the re-fit retry loop — at component scope because the effect's cleanup
   // must be able to cancel a loop armed inside `setup()` (which runs asynchronously, so the
   // cleanup can fire before setup's own locals exist).
   const refitRafRef = useRef(0);
   const [ready, setReady] = useState(false);
-  const disposablesRef = useRef<{ dispose: () => void }[]>([]);
+  const disposablesRef = useRef<EngineDisposable[]>([]);
   const onScrollRef = useRef(onScroll);
   onScrollRef.current = onScroll;
 
@@ -78,14 +77,11 @@ export function useTerminalLifecycle({
 
     async function setup() {
       logLife("init cols=%d rows=%d fontSize=%d", cols, rows, fontSize);
-      // Each terminal gets its own WASM instance rather than ghostty-web's process-wide one —
-      // see `newGhosttyInstance` for why.
-      const ghostty = await newGhosttyInstance();
-      if (!isMounted || !containerRef.current) return;
+      const mountPoint = containerRef.current;
+      if (!mountPoint) return;
       logLife("creating Terminal");
 
-      const term = new Terminal({
-        ghostty,
+      const term = ghosttyEngine({
         cols,
         rows,
         fontSize,
@@ -97,28 +93,14 @@ export function useTerminalLifecycle({
         scrollback,
       });
 
-      termRef.current = term;
-
-      const disposables: { dispose: () => void }[] = [];
+      const disposables: EngineDisposable[] = [];
       if (onData) {
         logLife("keyboard listener attached (onData)");
         disposables.push(
           term.onData((data) => {
             logData("onData %d chars %s", data.length, JSON.stringify(data.slice(0, 30)));
             // Native scroll-to-bottom.keystroke=true: any keystroke scrolls to the bottom first.
-            const t = term as unknown as {
-              scrollToBottom?: () => void;
-              getViewportY?: () => number;
-              scrollLines?: (n: number) => void;
-            };
-            if (t.scrollToBottom) {
-              t.scrollToBottom();
-            } else {
-              const vy = t.getViewportY?.() ?? 0;
-              if (vy !== 0 && t.scrollLines) {
-                t.scrollLines(-vy);
-              }
-            }
+            term.scrollToBottom();
             onData(data);
           })
         );
@@ -138,68 +120,36 @@ export function useTerminalLifecycle({
         disposables.push(term.onTitleChange(onTitleChange));
       }
       disposables.push(
-        term.onScroll((vy) => {
-          onScrollRef.current?.(vy);
+        term.onScroll((top) => {
+          onScrollRef.current?.(top);
         })
       );
       disposablesRef.current = disposables;
 
-      term.open(containerRef.current);
+      await term.open(mountPoint);
+      if (!isMounted || !containerRef.current) {
+        term.dispose();
+        return;
+      }
+      termRef.current = term;
 
-      // ghostty-web 0.4.0 reads devicePixelRatio once, at renderer
-      // construction, and never again — a terminal mounted on one display
-      // keeps that display's scale factor forever, so dragging the window
-      // onto a screen with a different one leaves the canvas rendering at
-      // the old scale, upscaled soft by the compositor. Sync the renderer
-      // to the live value and watch for changes: render() detects the
-      // backing-store mismatch a DPR change leaves and fully repaints at
-      // the new scale. (devicePixelRatio is private in ghostty-web's types,
-      // so the field is reached through a cast, as the library gives no API.)
-      const syncRendererDpr = () => {
-        const renderer = term.renderer;
-        if (!renderer || !term.wasmTerm) return;
-        const dpr = window.devicePixelRatio;
-        const mutable = renderer as unknown as { devicePixelRatio: number };
-        if (mutable.devicePixelRatio === dpr) return;
-        mutable.devicePixelRatio = dpr;
-        renderer.render(term.wasmTerm, true, term.viewportY, term);
-      };
-      syncRendererDpr();
-      disposables.push({
-        dispose: watchDevicePixelRatio(window, syncRendererDpr),
-      });
-
-      const fitAddon = new FitAddon();
-      term.loadAddon(fitAddon);
-      fitAddonRef.current = fitAddon;
       if (fixedViewportGrid) {
         term.resize(fixedViewportGrid.cols, fixedViewportGrid.rows);
       } else {
-        fitAddon.fit();
-        fitAddon.observeResize();
-        // Belt-and-braces re-fit, watched on the container we render — and deliberately NOT
-        // going through `fit()`: the addon's own observer debounces its fit through
-        // `setTimeout`, and `fit()` itself clears its private `_isResizing` latch through
-        // another one. A page the window manager treats as hidden (headless CI runs the AUT
-        // in an occluded Electron window) throttles those timers indefinitely, so the latch
-        // set by the mount-time fit never clears and every later fit() returns immediately —
-        // the GhosttyTerminalShrink CI failure: container shrank to 300px, canvas frozen at
-        // its fitted width, every fit() a no-op. Proposing the dimensions and resizing
-        // through the public API sidesteps the latch; both self-guard on unchanged dims.
-        // ResizeObserver callbacks run in the rendering steps, not on timers, so this fires
-        // where the addon's timer-based path does not.
+        fitTerminalToContainer(term);
+        // Belt-and-braces re-fit, watched on the container we render. A page the window manager
+        // treats as hidden (headless CI runs the AUT in an occluded Electron window) throttles
+        // timers indefinitely, so the re-fit is driven by a ResizeObserver, whose callbacks run in
+        // the rendering steps, not on timers. Proposing the dimensions and resizing through the
+        // engine self-guards on unchanged dims.
         const refit = (): boolean => {
-          const addon = fitAddonRef.current;
-          const term = termRef.current;
-          if (!addon || !term) return true;
-          const proposed = addon.proposeDimensions();
-          // `getMetrics()` can transiently return nothing (it measures the live canvas) —
-          // report false so the frame retry picks it up; the RO only fires while the size
-          // actually changes, so a skipped proposal would otherwise be dropped for good.
-          if (!proposed) return false;
-          if (proposed.cols !== term.cols || proposed.rows !== term.rows) {
-            term.resize(proposed.cols, proposed.rows);
-          }
+          const engine = termRef.current;
+          if (!engine) return true;
+          // The engine can transiently fail to measure (it measures the live canvas) — report
+          // false so the frame retry picks it up; the RO only fires while the size actually
+          // changes, so a skipped proposal would otherwise be dropped for good.
+          if (!engine.proposeDimensions()) return false;
+          fitTerminalToContainer(engine);
           return true;
         };
         let refitFrames = 0;
@@ -252,8 +202,6 @@ export function useTerminalLifecycle({
       cancelAnimationFrame(refitRafRef.current);
       resizeObserverRef.current?.disconnect();
       resizeObserverRef.current = null;
-      fitAddonRef.current?.dispose();
-      fitAddonRef.current = null;
       disposablesRef.current.forEach((d) => d.dispose());
       disposablesRef.current = [];
       if (termRef.current) {
@@ -273,5 +221,5 @@ export function useTerminalLifecycle({
     osc52Tap(initialContent);
   }, [initialContent, ready]);
 
-  return { ready, fitAddonRef };
+  return { ready };
 }

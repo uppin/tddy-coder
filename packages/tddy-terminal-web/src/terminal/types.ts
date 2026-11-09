@@ -20,11 +20,11 @@ export interface GhosttyTerminalProps {
   onTitleChange?: (title: string) => void;
   onReady?: () => void;
   /**
-   * Fires with the new viewportY (lines scrolled up from the bottom; 0 = pinned to latest)
-   * whenever the viewport moves — wheel, touch, keyboard, or programmatic scroll. Used by
+   * Fires with the new viewport top (the buffer line on its first row, counted from the top;
+   * equal to the scrollback length when pinned to latest) whenever the viewport moves — wheel, touch, keyboard, or programmatic scroll. Used by
    * GhosttyTerminalSession to mirror scroll position across the two overlay terminals.
    */
-  onScroll?: (viewportY: number) => void;
+  onScroll?: (viewportTop: number) => void;
   /** When true, log write/onData and lifecycle to console. */
   debugLogging?: boolean;
   /** When true, prevent terminal from receiving focus on pointer/touch events (e.g. mobile when keyboard closed). */
@@ -71,8 +71,8 @@ export interface GhosttyTerminalHandle {
   getBufferLines?(): BufferLineInfo[];
   /** Apply font size to the live terminal and refit (Green phase). */
   setTerminalFontSize?(px: number): void;
-  /** Lines the viewport is scrolled up from the bottom (0 = pinned to latest output). */
-  getViewportScrollOffset?(): number;
+  /** The buffer line on the viewport's first row, counted from the top (0 = oldest line). */
+  getViewportTop?(): number;
   /** Scroll the viewport to the top of the scrollback (no-op when scrollback is 0). */
   scrollToTop?(): void;
   /** Scroll the viewport to the bottom (latest output) — used after a page swap to land seamlessly. */

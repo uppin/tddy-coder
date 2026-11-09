@@ -59,10 +59,6 @@ export const TEST_IDS = {
   terminalBufferText: "terminal-buffer-text",
   /** Cover shown over the pane once the far end has ended the session. */
   terminalCoderUnavailable: "terminal-coder-unavailable",
-  /** Hidden mirror of the page terminal's viewportY (lines scrolled up from the bottom). */
-  terminalPageViewportY: "terminal-page-viewport-y",
-  /** Hidden mirror of the LIVE terminal's viewportY (lines scrolled up from the bottom). */
-  terminalLiveViewportY: "terminal-live-viewport-y",
   /** Hidden mirror of the LIVE terminal's scrollback length (history lines, excluding active screen). */
   terminalLiveScrollbackLength: "terminal-live-scrollback-length",
   /** Hidden mirror of the page terminal's native Scrollbar {total,offset,len} — "total,offset,len". */
