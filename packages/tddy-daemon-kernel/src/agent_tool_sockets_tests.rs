@@ -139,13 +139,9 @@ async fn a_users_socket_is_owner_only_inside_an_owner_only_directory_of_its_own(
         .await
         .map_err(|e| format!("{e:#}"));
 
-    // Then it is `<data>/run-agent-tools/<user>/agent.sock`: a 0600 socket in a 0700 directory,
+    // Then it is `<data>/run/<user>/daemon.sock`: a 0600 socket in a 0700 directory,
     // both the user's
-    let expected = data
-        .path()
-        .join(AGENT_TOOL_SOCKETS_RUN_DIR)
-        .join(&user)
-        .join(AGENT_TOOL_SOCKET_FILE);
+    let expected = data.path().join("run").join(&user).join(USER_SOCKET_FILE);
     let shape = path.as_ref().ok().map(|path| {
         let socket = std::fs::symlink_metadata(path).expect("stat the socket");
         let directory = path.parent().expect("a directory");
@@ -271,11 +267,11 @@ async fn an_unlisted_user_under_the_supervisor_is_refused_naming_the_setting() {
         .map(|path| path.display().to_string())
         .map_err(|e| format!("{e:#}"));
 
-    // Then it is refused, naming what to add to supervisor.yaml, and nothing is left behind
+    // Then it is refused, naming the file to map the user in, and nothing is left behind
     let names_the_setting = refusal
         .as_ref()
         .err()
-        .map(|why| why.contains("agent_tool_sockets") && why.contains("supervisor.yaml"));
+        .map(|why| why.contains("users.yaml"));
     assert_eq!(
         (
             names_the_setting,

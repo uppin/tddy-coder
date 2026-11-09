@@ -90,8 +90,24 @@ pub const USER_SOCKET_FILE: &str = "daemon.sock";
 /// 31/32). A supervised daemon derives no path: it serves what it was handed. Refuses a user name
 /// that is not one plain path segment, or a path too long for `AF_UNIX`.
 pub fn user_socket_path_for_user(data_dir: &Path, os_user: &str) -> anyhow::Result<PathBuf> {
-    // TODO(user-mapping-in-supervisor): implement
-    agent_tool_socket_path_for_user(data_dir, os_user)
+    let name_is_one_safe_segment = !os_user.is_empty()
+        && !os_user.starts_with('.')
+        && os_user
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '_' | '-' | '.'));
+    if !name_is_one_safe_segment {
+        bail!("OS user name {os_user:?} cannot name a socket directory");
+    }
+    let path = data_dir.join("run").join(os_user).join(USER_SOCKET_FILE);
+    if path.as_os_str().len() > MAX_SOCKET_PATH_BYTES {
+        bail!(
+            "daemon socket path {} is too long for a unix socket ({} > {MAX_SOCKET_PATH_BYTES} \
+             bytes); use a shorter data dir",
+            path.display(),
+            path.as_os_str().len()
+        );
+    }
+    Ok(path)
 }
 
 /// `(os user, descriptor)` for each `user.<os user>` socket the `LISTEN_*` variables announce
@@ -102,9 +118,13 @@ pub fn user_socket_fds(
     listen_fds: Option<&str>,
     listen_fdnames: Option<&str>,
 ) -> Vec<(String, RawFd)> {
-    // TODO(user-mapping-in-supervisor): implement
-    let _ = (my_pid, listen_pid, listen_fds, listen_fdnames);
-    Vec::new()
+    owner_socket::descriptors_named(
+        USER_SOCKET_FD_NAME_PREFIX,
+        my_pid,
+        listen_pid,
+        listen_fds,
+        listen_fdnames,
+    )
 }
 
 /// A service served on each user's one daemon socket **for that user** (`#agent-tools` 31/32): the
@@ -171,6 +191,36 @@ pub fn adopt_descriptors(descriptors: Vec<(String, RawFd)>) -> Vec<InheritedAgen
         .collect()
 }
 
+/// The merged per-user daemon sockets this process was handed, according to its own environment
+/// (`user.<os user>`, `#agent-tools` 31/32).
+pub fn adopt_user_sockets_from_environment() -> Vec<InheritedAgentToolSocket> {
+    let variable = |name: &str| std::env::var(name).ok();
+    adopt_user_descriptors(user_socket_fds(
+        std::process::id(),
+        variable("LISTEN_PID").as_deref(),
+        variable("LISTEN_FDS").as_deref(),
+        variable("LISTEN_FDNAMES").as_deref(),
+    ))
+}
+
+/// Adopt each `(os user, descriptor)` that is that user's one daemon socket; close the rest.
+pub fn adopt_user_descriptors(
+    descriptors: Vec<(String, RawFd)>,
+) -> Vec<InheritedAgentToolSocket> {
+    descriptors
+        .into_iter()
+        .filter_map(|(os_user, fd)| {
+            let (listener, path) =
+                owner_socket::adopt_descriptor(&os_user, fd, OwnerSocketKind::USER_DAEMON)?;
+            Some(InheritedAgentToolSocket {
+                os_user,
+                listener,
+                path,
+            })
+        })
+        .collect()
+}
+
 /// Which agent-tool socket a session is told about.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AgentToolSocketPlacement {
@@ -214,6 +264,9 @@ pub struct AgentToolSockets {
     /// Sockets the supervisor created, by OS user: `Some` until first served, `None` after — the
     /// key stays so a user the supervisor serves is never bound by this daemon itself.
     inherited: std::sync::Mutex<HashMap<String, Option<InheritedAgentToolSocket>>>,
+    /// Services served per user beside the roster, on that user's one socket (the host-session
+    /// service, `#agent-tools` 31/32).
+    user_scoped: Arc<std::sync::Mutex<Vec<Arc<dyn UserScopedService>>>>,
 }
 
 impl AgentToolSockets {
@@ -224,6 +277,7 @@ impl AgentToolSockets {
             roster: Arc::default(),
             servers: std::sync::Mutex::default(),
             inherited: std::sync::Mutex::default(),
+            user_scoped: Arc::default(),
         }
     }
 
@@ -242,8 +296,10 @@ impl AgentToolSockets {
     /// (`#agent-tools` 31/32): how the host-session service and the agent-tool roster share one
     /// socket per user.
     pub fn install_user_scoped_service(&self, service: Arc<dyn UserScopedService>) {
-        // TODO(user-mapping-in-supervisor): implement
-        let _ = service;
+        self.user_scoped
+            .lock()
+            .expect("user-scoped services lock")
+            .push(service);
     }
 
     /// Serve these supervisor-created sockets for their users from now on (served on first use);
@@ -316,6 +372,7 @@ impl AgentToolSockets {
             let mut inherited = self.inherited.lock().expect("inherited sockets lock");
             inherited.get_mut(os_user).map(Option::take)
         };
+        let supervised = self.placement == AgentToolSocketPlacement::Supervised;
         let (path, listener, bound_here) = match inherited {
             Some(Some(socket)) => {
                 socket
@@ -325,14 +382,26 @@ impl AgentToolSockets {
                 (socket.path, socket.listener, false)
             }
             // The supervisor made this socket and only it can make another.
+            Some(None) if supervised => bail!(
+                "the daemon socket tddy-supervisor created for {os_user} is gone or no longer \
+                 accepting; map the user in users.yaml and restart tddy-supervisor to recreate it"
+            ),
             Some(None) => bail!(
                 "the agent-tool socket tddy-supervisor created for {os_user} is gone or no longer \
                  accepting; it can only be recreated by restarting tddy-supervisor"
             ),
+            None if supervised => bail!(
+                "no daemon socket was handed over for {os_user}: a supervised daemon derives no \
+                 socket path of its own — map the user in users.yaml, and the supervisor will \
+                 create their socket and hand it over on the next start"
+            ),
             None => {
-                let path = agent_tool_socket_path_for_user(data_dir, os_user)?;
-                let listener =
-                    owner_socket::bind_owner_only(&path, os_user, OwnerSocketKind::AGENT_TOOL)?;
+                let path = user_socket_path_for_user(data_dir, os_user)?;
+                let listener = owner_socket::bind_owner_only(
+                    &path,
+                    os_user,
+                    OwnerSocketKind::USER_DAEMON,
+                )?;
                 (path, listener, true)
             }
         };
@@ -343,6 +412,7 @@ impl AgentToolSockets {
             listener,
             os_user.to_string(),
             Arc::clone(&self.roster),
+            Arc::clone(&self.user_scoped),
         ));
         servers.insert(
             os_user.to_string(),
@@ -383,6 +453,7 @@ async fn serve(
     listener: tokio::net::UnixListener,
     owner: String,
     roster: Arc<std::sync::Mutex<Vec<ServiceEntry>>>,
+    user_scoped: Arc<std::sync::Mutex<Vec<Arc<dyn UserScopedService>>>>,
 ) {
     loop {
         let stream = match listener.accept().await {
@@ -397,7 +468,7 @@ async fn serve(
                 return;
             }
         };
-        let entries: Vec<ServiceEntry> = roster
+        let mut entries: Vec<ServiceEntry> = roster
             .lock()
             .expect("agent-tool roster lock")
             .iter()
@@ -406,6 +477,13 @@ async fn serve(
                 service: Arc::clone(&e.service),
             })
             .collect();
+        entries.extend(
+            user_scoped
+                .lock()
+                .expect("user-scoped services lock")
+                .iter()
+                .map(|service| service.entry_for(&owner)),
+        );
         let (reader, writer) = tokio::io::split(stream);
         let (_client, endpoint) = tddy_stdio::StdioEndpoint::from_duplex(
             reader,

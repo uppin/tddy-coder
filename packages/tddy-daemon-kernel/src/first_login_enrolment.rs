@@ -23,7 +23,6 @@
 use std::path::Path;
 
 use crate::config::access::UserMapping;
-use crate::config::DaemonConfig;
 
 /// Why a deployment cannot enrol a first login.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -66,8 +65,6 @@ impl std::error::Error for EnrolmentRefusal {}
 /// `daemon.yaml`, which enrolment leaves untouched).
 ///
 /// The write is atomic — a half-written mapping is a daemon that will not start.
-// TODO(user-mapping-in-supervisor): implement — `config_path` is now the users.yaml path; the body
-// below still edits a daemon.yaml `users:` key.
 pub fn enrol_first_login(
     config_path: &Path,
     github_user: &str,
@@ -75,44 +72,46 @@ pub fn enrol_first_login(
 ) -> Result<UserMapping, EnrolmentRefusal> {
     let not_writable = |reason: String| EnrolmentRefusal::ConfigNotWritable { reason };
 
-    // Re-read rather than trust the caller's snapshot: the file on disk is what decides whether
-    // this deployment has already enrolled somebody, including through a concurrent login.
-    let config = DaemonConfig::load(config_path).map_err(|e| not_writable(e.to_string()))?;
-    if let Some(enrolled) = config.users.first_github_user() {
+    // `config_path` is the `users.yaml` to write (its caller derives it beside the daemon's
+    // config). Re-read rather than trust a snapshot: the file on disk decides whether this
+    // deployment has already enrolled somebody, including through a concurrent login. A file
+    // that does not exist yet maps nobody — the installers render one, and enrolment is the
+    // write that fills it.
+    let existing: Vec<UserMapping> = match std::fs::read_to_string(config_path) {
+        Ok(contents) if contents.trim().is_empty() => Vec::new(),
+        Ok(contents) => serde_yaml::from_str(&contents)
+            .map_err(|e| not_writable(format!("{}: {e}", config_path.display())))?,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Vec::new(),
+        Err(error) => {
+            return Err(not_writable(format!(
+                "{}: {error}",
+                config_path.display()
+            )))
+        }
+    };
+    if let Some(enrolled) = existing.first() {
         return Err(EnrolmentRefusal::AlreadyEnrolled {
-            github_user: enrolled,
+            github_user: enrolled.github_user.clone(),
         });
     }
 
+    // The atomic write creates missing directories; enrolment must not resurrect a deployment
+    // whose directory has gone — that deployment is not there to enrol anybody into.
+    if let Some(directory) = config_path.parent() {
+        if !directory.as_os_str().is_empty() && !directory.is_dir() {
+            return Err(not_writable(format!(
+                "{}: its directory {} is gone",
+                config_path.display(),
+                directory.display()
+            )));
+        }
+    }
     let mapping = UserMapping {
         github_user: github_user.to_string(),
         os_user: os_user.to_string(),
     };
-
-    // Edit the document rather than re-serialise the typed config, so every key the operator
-    // wrote stays exactly as they wrote it and only `users:` changes.
-    // TODO(docs/dev/todo/2026-09-05-from-2026-09-05-tauri-desktop-single-process-daemon.md):
-    // comments in the file are still lost — preserving them needs a comment-aware YAML editor,
-    // the same open question `DaemonConfigService`'s `write_config` records.
-    let contents = std::fs::read_to_string(config_path)
-        .map_err(|e| not_writable(format!("{}: {e}", config_path.display())))?;
-    let mut document: serde_yaml::Value = serde_yaml::from_str(&contents)
-        .map_err(|e| not_writable(format!("{}: {e}", config_path.display())))?;
-    let users = serde_yaml::to_value(std::slice::from_ref(&mapping))
+    let rewritten = serde_yaml::to_string(std::slice::from_ref(&mapping))
         .map_err(|e| not_writable(format!("failed to serialise the users row: {e}")))?;
-    match &mut document {
-        serde_yaml::Value::Mapping(root) => {
-            root.insert(serde_yaml::Value::String("users".to_string()), users);
-        }
-        _ => {
-            return Err(not_writable(format!(
-                "{} is not a YAML mapping",
-                config_path.display()
-            )))
-        }
-    }
-    let rewritten = serde_yaml::to_string(&document)
-        .map_err(|e| not_writable(format!("failed to serialise the config: {e}")))?;
     tddy_core::atomic_file::write_atomic_labelled(config_path, rewritten).map_err(not_writable)?;
     Ok(mapping)
 }

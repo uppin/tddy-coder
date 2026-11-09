@@ -89,7 +89,7 @@ pub struct DaemonConfig {
     /// The GitHub-login → OS-user map every token-gated RPC authorizes by. A shared holder rather
     /// than a `Vec`: cloning this config shares these rows, so a row enrolled at run time is seen
     /// by every service built from it — see [`LiveUsers`].
-    #[serde(default, skip_serializing_if = "LiveUsers::is_empty")]
+    #[serde(default, skip_serializing)]
     pub users: LiveUsers,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub allowed_tools: Vec<AllowedTool>,

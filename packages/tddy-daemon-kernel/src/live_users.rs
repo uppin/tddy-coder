@@ -28,6 +28,8 @@ pub struct LiveUsers {
 #[derive(Default)]
 struct Inner {
     rows: RwLock<Vec<UserMapping>>,
+    /// Whether `tddy-supervisor` owns the mapping: enrolment is refused, never written here.
+    owned_by_supervisor: bool,
     /// Held across every rewrite of the config file these rows are persisted in.
     ///
     /// Two writers rewrite that file: enrolment, and `daemon_config.DaemonConfigService`'s
@@ -44,6 +46,7 @@ impl LiveUsers {
         Self {
             inner: Arc::new(Inner {
                 rows: RwLock::new(rows),
+                owned_by_supervisor: false,
                 file_writes: Mutex::new(()),
             }),
         }
@@ -53,8 +56,18 @@ impl LiveUsers {
     /// [`Self::enrol_first_login`] is refused [`EnrolmentRefusal::OwnedBySupervisor`] — a supervised
     /// daemon never writes the mapping.
     pub fn owned_by_supervisor(rows: Vec<UserMapping>) -> Self {
-        // TODO(user-mapping-in-supervisor): implement
-        Self::new(rows)
+        Self {
+            inner: Arc::new(Inner {
+                rows: RwLock::new(rows),
+                owned_by_supervisor: true,
+                file_writes: Mutex::new(()),
+            }),
+        }
+    }
+
+    /// Whether this mapping is the supervisor's to write, not this daemon's.
+    pub fn is_owned_by_supervisor(&self) -> bool {
+        self.inner.owned_by_supervisor
     }
 
     fn rows(&self) -> RwLockReadGuard<'_, Vec<UserMapping>> {
@@ -113,12 +126,25 @@ impl LiveUsers {
         os_user: &str,
     ) -> Result<UserMapping, EnrolmentRefusal> {
         let _file = self.lock_file_writes();
+        if self.inner.owned_by_supervisor {
+            return Err(EnrolmentRefusal::OwnedBySupervisor);
+        }
         if let Some(enrolled) = self.first_github_user() {
             return Err(EnrolmentRefusal::AlreadyEnrolled {
                 github_user: enrolled,
             });
         }
-        let mapping = enrol_first_login(config_path, github_user, os_user)?;
+        // `config_path` is the daemon's config file; the mapping it enrols into is the
+        // `users.yaml` beside it (a caller that already named that file enrols into it directly).
+        let users_path = if config_path.file_name().is_some_and(|name| name == "users.yaml") {
+            config_path.to_path_buf()
+        } else {
+            config_path
+                .parent()
+                .map(|directory| directory.join("users.yaml"))
+                .unwrap_or_else(|| std::path::PathBuf::from("users.yaml"))
+        };
+        let mapping = enrol_first_login(&users_path, github_user, os_user)?;
         self.inner
             .rows
             .write()

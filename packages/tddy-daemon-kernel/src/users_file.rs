@@ -40,9 +40,16 @@ impl UsersFileSource {
     /// The source for a daemon started from `config_path`, given the value of [`USERS_FILE_ENV`]
     /// it inherited (`None` when it was not supervised).
     pub fn resolve(config_path: &Path, handed: Option<&OsStr>) -> UsersFileSource {
-        // TODO(user-mapping-in-supervisor): implement
-        let _ = handed;
-        UsersFileSource::BesideConfig(config_path.to_path_buf())
+        if let Some(handed) = handed {
+            if !handed.is_empty() {
+                return UsersFileSource::HandedBySupervisor(PathBuf::from(handed));
+            }
+        }
+        let beside = config_path
+            .parent()
+            .map(|directory| directory.join(USERS_FILE_NAME))
+            .unwrap_or_else(|| PathBuf::from(USERS_FILE_NAME));
+        UsersFileSource::BesideConfig(beside)
     }
 
     /// [`Self::resolve`] over this process's own environment.
@@ -62,9 +69,56 @@ impl UsersFileSource {
 /// and others, and yields a holder that refuses enrolment
 /// ([`LiveUsers::owned_by_supervisor`]).
 pub fn load_users_file(source: &UsersFileSource) -> anyhow::Result<LiveUsers> {
-    // TODO(user-mapping-in-supervisor): implement
-    let _ = source;
-    Ok(LiveUsers::default())
+    use std::os::unix::fs::MetadataExt;
+
+    let path = source.path();
+    let contents = std::fs::read_to_string(path).map_err(|error| {
+        anyhow::anyhow!("could not read users.yaml at {}: {error}", path.display())
+    })?;
+    if let UsersFileSource::HandedBySupervisor(_) = source {
+        let metadata = std::fs::metadata(path)
+            .map_err(|error| anyhow::anyhow!("users.yaml at {}: {error}", path.display()))?;
+        if metadata.uid() != 0 || metadata.mode() & 0o022 != 0 {
+            anyhow::bail!(
+                "users.yaml at {} is not root-owned and closed to group and others \
+                 (owner uid {}, mode {:o}); a supervised daemon trusts only a mapping root wrote",
+                path.display(),
+                metadata.uid(),
+                metadata.mode() & 0o7777
+            );
+        }
+    }
+    let rows: Vec<crate::config::access::UserMapping> = if contents.trim().is_empty() {
+        Vec::new()
+    } else {
+        serde_yaml::from_str(&contents)
+            .map_err(|error| anyhow::anyhow!("users.yaml at {}: {error}", path.display()))?
+    };
+    let mut by_login: std::collections::BTreeMap<&str, &str> = std::collections::BTreeMap::new();
+    for row in &rows {
+        if row.os_user == "root" {
+            anyhow::bail!("users.yaml at {} maps a login to `root`, which is refused", path.display());
+        }
+        match by_login.entry(row.github_user.as_str()) {
+            std::collections::btree_map::Entry::Vacant(entry) => {
+                entry.insert(row.os_user.as_str());
+            }
+            std::collections::btree_map::Entry::Occupied(entry) => {
+                if *entry.get() != row.os_user {
+                    anyhow::bail!(
+                        "users.yaml at {} maps github_user `{}` to two OS users; which one its \
+                         sessions run as is ambiguous",
+                        path.display(),
+                        row.github_user
+                    );
+                }
+            }
+        }
+    }
+    Ok(match source {
+        UsersFileSource::HandedBySupervisor(_) => LiveUsers::owned_by_supervisor(rows),
+        UsersFileSource::BesideConfig(_) => LiveUsers::new(rows),
+    })
 }
 
 #[cfg(test)]

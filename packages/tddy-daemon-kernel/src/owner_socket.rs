@@ -49,6 +49,11 @@ impl OwnerSocketKind {
         setting: "agent_tool_sockets",
         noun: "agent-tool socket",
     };
+    /// A mapped user's one daemon socket (`users.yaml`, `#agent-tools` 31/32).
+    pub const USER_DAEMON: OwnerSocketKind = OwnerSocketKind {
+        setting: "users.yaml",
+        noun: "daemon socket",
+    };
 }
 
 /// First descriptor of a socket activation; the supervisor places the service's own listener there.
@@ -127,13 +132,22 @@ pub fn bind_owner_only(
             .context("restrict the socket to its owner")?;
         if needs_chown {
             let not_privileged = || {
+                if kind == OwnerSocketKind::USER_DAEMON {
+                    return format!(
+                        "this daemon (uid {euid}) is not privileged to hand the socket to \
+                         {os_user} (uid {}) — as when it runs as tddy-supervisor's unprivileged \
+                         child, which cannot chown. Under the supervisor, map {os_user} in \
+                         users.yaml: the supervisor then creates their daemon socket and hands \
+                         it over. Until then a session of that user gets no {}",
+                        target.uid, kind.noun
+                    );
+                }
                 format!(
                     "this daemon (uid {euid}) is not privileged to hand the socket to {os_user} \
                      (uid {}) — as when it runs as tddy-supervisor's unprivileged child, which \
                      cannot chown. Under the supervisor, list {os_user} under `{}:` for \
-                     this daemon's service in supervisor.yaml (and in \
-                     spawn_policy.allowed_session_users): the supervisor then creates their socket \
-                     and hands it over. Until then a session of that user gets no {}",
+                     this daemon's service in supervisor.yaml: the supervisor then creates their \
+                     socket and hands it over. Until then a session of that user gets no {}",
                     target.uid, kind.setting, kind.noun
                 )
             };
