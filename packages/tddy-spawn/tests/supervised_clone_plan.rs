@@ -9,7 +9,7 @@ use std::collections::BTreeMap;
 use std::path::Path;
 
 use tddy_spawn::clone_env::CloneSshEnv;
-use tddy_spawn::supervisor_spawn::plan_supervised_clone;
+use tddy_spawn::supervisor_spawn::{git_for_supervised_clone, plan_supervised_clone};
 use tddy_supervisor::policy::{resolve_spawn_env, SpawnKind};
 
 const DESTINATION: &str = "/srv/repos/alice/project";
@@ -79,4 +79,56 @@ fn an_ssh_clone_needs_no_supervisor_env_configuration() {
 
     // Then it passes whole
     assert_eq!(resolved.map(|resolved| resolved.variables), Ok(env));
+}
+
+#[test]
+fn a_supervised_clone_with_no_git_on_the_spawn_child_path_is_refused_naming_git() {
+    // When no git was found where the clone helper would be told to look
+    let refusal = git_for_supervised_clone(None)
+        .expect_err("no bare `git` stands in")
+        .to_string();
+
+    // Then it is a refusal naming what is missing, not a bare name handed on
+    assert!(
+        refusal.contains("failed precondition") && refusal.contains("`git`"),
+        "{refusal}"
+    );
+}
+
+#[test]
+fn the_git_found_on_the_spawn_child_path_is_the_one_the_helper_runs() {
+    // When
+    let git = git_for_supervised_clone(Some(GIT.into())).expect("a git was found");
+
+    // Then
+    assert_eq!(git, Path::new(GIT));
+}
+
+#[test]
+fn a_supervised_clone_naming_a_relative_path_is_refused() {
+    // Given a relative clone helper, git or destination, each in turn
+    let cases = [
+        ("tddy-git-clone", GIT, DESTINATION),
+        (CLONE_HELPER, "git", DESTINATION),
+        (CLONE_HELPER, GIT, "project"),
+    ];
+
+    // When
+    let refusals: Vec<bool> = cases
+        .iter()
+        .map(|(clone_helper, git, destination)| {
+            plan_supervised_clone(
+                "alice",
+                Path::new(clone_helper),
+                Path::new(git),
+                URL,
+                Path::new(destination),
+                BTreeMap::new(),
+            )
+            .is_err_and(|refusal| refusal.to_string().contains("absolute path"))
+        })
+        .collect();
+
+    // Then — a relative path would be resolved by whoever runs it, so every one is refused
+    assert_eq!(refusals, vec![true, true, true]);
 }
