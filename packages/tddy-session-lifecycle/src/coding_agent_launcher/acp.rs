@@ -65,17 +65,12 @@ impl DaemonCodingAgentLauncher {
         command.cwd = Some(launch.worktree.clone());
         if let Some(route) = &route {
             if !route.files.is_empty() {
-                let shape_word = match shape {
-                    RouteShape::Env => "env",
-                    RouteShape::TomlArgs => "toml_args",
-                    RouteShape::JsonConfigFile => "json_config_file",
-                    RouteShape::InlineConfig => "inline_config",
-                };
                 return Err(Self::refuse(
                     launch,
                     &format!(
-                        "its route (shape `{shape_word}`) carries a file, which no ACP launch \
-                         can hand to an agent started as the session's OS user"
+                        "its route (shape `{}`) carries a file, which no ACP launch \
+                         can hand to an agent started as the session's OS user",
+                        shape.word()
                     ),
                 ));
             }

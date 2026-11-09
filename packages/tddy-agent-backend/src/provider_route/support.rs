@@ -71,6 +71,18 @@ pub enum RouteShape {
     InlineConfig,
 }
 
+impl RouteShape {
+    /// The YAML word the spec writes for this shape (`route.shape`), as refusals name it.
+    pub fn word(self) -> &'static str {
+        match self {
+            RouteShape::Env => "env",
+            RouteShape::TomlArgs => "toml_args",
+            RouteShape::JsonConfigFile => "json_config_file",
+            RouteShape::InlineConfig => "inline_config",
+        }
+    }
+}
+
 impl<'de> Deserialize<'de> for RouteShape {
     fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
         let word = String::deserialize(deserializer)?;
