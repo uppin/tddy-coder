@@ -160,19 +160,22 @@ The pane's environment carries the session's own (the provider route's key inclu
 ## Running on a provider account
 
 An opencode-cli session can run on any provider account whose endpoint serves OpenAI Responses or
-OpenAI Chat Completions. The start resolves the account first, then writes, owner-only (`0600`), into
-the session directory an `opencode.json` that declares the account as provider `tddy-route` and
-selects the model on it:
+OpenAI Chat Completions. The start resolves the account first, then generates an OpenCode
+configuration that declares the account as provider `tddy-route` and selects the model on it. The
+configuration is carried **inline**, in `OPENCODE_CONFIG_CONTENT` (`opencode.yaml`'s `route.shape:
+inline_config`, `route.config_env`); no file is written:
 
 | Account serves | Provider package | Model entry |
 |---|---|---|
 | OpenAI Responses (preferred) | `@ai-sdk/openai`, `baseURL` = the Responses root | `options.include = ["reasoning.encrypted_content"]`, so reasoning is carried across turns |
 | only OpenAI Chat Completions | `@ai-sdk/openai-compatible`, `baseURL` = the Chat root | — |
 
-The key is referenced in the file as `{env:OPENCODE_PROVIDER_KEY}` (`opencode.yaml`'s
+The key is referenced in the configuration as `{env:OPENCODE_PROVIDER_KEY}` (`opencode.yaml`'s
 `route.key_env`) and never written into it. The child is launched with
-`OPENCODE_CONFIG=<session dir>/opencode.json`, `OPENCODE_PROVIDER_KEY=<key>` and
-`--model tddy-route/<model>`; it sees no `TDDY_*` route variable. A jailed start hands the key into
+`OPENCODE_CONFIG_CONTENT=<configuration>`, `OPENCODE_PROVIDER_KEY=<key>` and
+`--model tddy-route/<model>`; `OPENCODE_CONFIG` is not set, and it sees no `TDDY_*` route variable.
+Inline configuration outranks a worktree's own `opencode.json`, so a repository cannot redirect the
+route's endpoint. A jailed start hands the key into
 the jail the same way. The account id and model are recorded beside the session (never the
 key), so a resume re-applies them. A start that chooses no account writes no configuration and runs on
 the person's own OpenCode setup.

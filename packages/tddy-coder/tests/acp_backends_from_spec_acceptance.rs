@@ -264,7 +264,7 @@ async fn tddy_coder_agent_claude_acp_codex_acp_and_opencode_launch_from_specs() 
 // adapter: the route's environment carries the configuration, and no file is written for
 // `OPENCODE_CONFIG` to name — a file named there would rank below a repository's own `opencode.json`.
 //
-// Changeset: `docs/dev/1-WIP/2026-11-07-opencode-route-inline-from-spec.md`.
+// Changeset: `docs/dev/changesets/2026-11-09-opencode-route-inline.md`.
 
 /// The key the account below holds.
 const ROUTE_KEY: &str = "a-route-key";

@@ -2,7 +2,7 @@
 //! inline_config`, naming the variable in `route.config_env`; OpenCode declares it, and a slot that
 //! cannot be rendered as declared fails loading, naming the spec (`#agent-tools 29/32`).
 //!
-//! PRD: `docs/ft/daemon/1-WIP/PRD-2026-11-07-opencode-route-inline-from-spec.md`.
+//! Changelog: `docs/ft/daemon/changelog/2026-11-09-opencode-route-inline.md`.
 
 use std::path::{Path, PathBuf};
 

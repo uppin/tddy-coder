@@ -3,7 +3,7 @@
 //! puts an `inline_config` route in the variable `route.config_env` names, and the launcher applies a
 //! route's environment as it applies any (`#agent-tools 29/32`).
 //!
-//! Changeset: `docs/dev/1-WIP/2026-11-07-opencode-route-inline-from-spec.md`.
+//! Changeset: `docs/dev/changesets/2026-11-09-opencode-route-inline.md`.
 
 use std::path::{Path, PathBuf};
 

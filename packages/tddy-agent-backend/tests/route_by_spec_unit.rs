@@ -423,7 +423,7 @@ fn a_json_config_file_route_reads_its_key_from_the_specs_key_env() {
 //
 // The route body carries the configuration a `json_config_file` body writes as a file inline, in
 // the plain environment under the variable the spec names, so every launcher renders it as any
-// route variable. Changeset: `docs/dev/1-WIP/2026-11-07-opencode-route-inline-from-spec.md`.
+// route variable. Changeset: `docs/dev/changesets/2026-11-09-opencode-route-inline.md`.
 
 #[test]
 fn an_inline_config_route_lands_in_whatever_variable_the_spec_names() {

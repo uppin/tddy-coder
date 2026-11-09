@@ -37,19 +37,20 @@ override; `config_env` merged into `OPENCODE_CONFIG_CONTENT`). The specs give:
 
 The working directory is the session's worktree. Any harness the host's registry does not declare an
 ACP agent is refused; nothing is planned by hand, and no launcher names an agent
-(`CodingAgentLauncher::session_meta_for` has no default). The OpenCode route config stays inline in
-`OPENCODE_CONFIG_CONTENT`, since a route file the daemon writes cannot be read by an agent running as
-the session's OS user ([todo](../../../docs/dev/todo/2026-11-04-opencode-acp-route-file-has-no-session-owner.md)).
+(`CodingAgentLauncher::session_meta_for` has no default). A route that carries a file is refused, naming its
+`route.shape`: a file the daemon writes cannot be read by an agent running as the session's OS user,
+so a routed ACP agent's spec declares `inline_config` (OpenCode) or `toml_args` (Codex).
 
 ## The provider route
 
 When the definition names a provider account, `route_from_vault` resolves it in the session owner's
 vault with `tddy_agent_launch::session_provider_route::resolve_session_route` — the call tool sessions
 use — and `apply_route` applies it: `env` and `secret_env` for every harness, `codex_acp_route_args`
-(`-c` overrides) for an agent whose spec's `route.shape` is `toml_args` (`codex-acp`), and the route's
-config file merged into inline `OPENCODE_CONFIG_CONTENT` for one whose shape is `json_config_file`
-(`opencode`) — keyed on the spec, never the harness name (a non-JSON config, the route's or an inline one already
-set, is refused). A route that does not resolve refuses the launch.
+(`-c` overrides) for an agent whose spec's `route.shape` is `toml_args` (`codex-acp`) — keyed on the
+spec, never the harness name. An `inline_config` route (`opencode`) already carries its
+configuration in its plain environment (`OPENCODE_CONFIG_CONTENT`, the spec's `route.config_env`), so
+the planner has no code of its own for it; a managed launch's `config_env` withdrawal merges over that
+value (a non-JSON inline config is refused). A route carrying files is refused, naming its shape. A route that does not resolve refuses the launch.
 
 ## A managed session
 
@@ -73,9 +74,7 @@ relayed — `codex-acp-login` hands back its one `codex login` retry on an auth-
 error, an agent declaring none gets `no_launch_hooks()`, and a name this build has no adapter for is
 refused. The adapter is handed **no route**: the plan already rendered it (`-c` overrides when the
 spec's `route.shape` is `toml_args`, the inline `OPENCODE_CONFIG_CONTENT` when it is
-`json_config_file`), so `codex-acp-login` never appends a second override and `opencode-route-file`
-writes no route file a session user could not read
-([`docs/dev/todo/2026-11-04-opencode-acp-route-file-has-no-session-owner.md`](../../../docs/dev/todo/2026-11-04-opencode-acp-route-file-has-no-session-owner.md)).
+`inline_config`), so `codex-acp-login` never appends a second override.
 The login runs as the daemon's user and writes its authorize URL into the worktree
 ([`docs/dev/todo/2026-11-09-daemon-codex-acp-login-runs-as-the-daemon-user-in-the-worktree.md`](../../../docs/dev/todo/2026-11-09-daemon-codex-acp-login-runs-as-the-daemon-user-in-the-worktree.md)).
 `command_for` covers only the case where the driver spawns the agent itself.

@@ -660,7 +660,7 @@ async fn an_agent_whose_spec_declares_no_hooks_adapter_is_launched_with_the_comm
 // or the variable, and no route file is written. Every route here is resolved from the launched
 // agent's spec, as `route_from_vault` resolves it.
 //
-// Changeset: `docs/dev/1-WIP/2026-11-07-opencode-route-inline-from-spec.md`.
+// Changeset: `docs/dev/changesets/2026-11-09-opencode-route-inline.md`.
 
 /// The key every account below holds.
 const ROUTE_KEY: &str = "a-route-key";
