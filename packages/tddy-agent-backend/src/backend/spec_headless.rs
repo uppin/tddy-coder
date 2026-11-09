@@ -20,28 +20,28 @@
 //! `tddy-tools` it runs — over MCP or from its shell — finds the session through the
 //! [`crate::session_pointer`] file the turn writes in its working directory.
 
+mod turn_read;
+
 use std::collections::BTreeMap;
-use std::io::{BufReader, Write as _};
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use crate::adapters::headless::{
     render_env, EnvTemplate, HeadlessModelListing, HeadlessProtocol, SystemPromptDelivery,
 };
-use crate::adapters::{HeadlessInvocation, HeadlessRenderer, HeadlessTurn, StreamSinks};
+use crate::adapters::{HeadlessInvocation, HeadlessRenderer, HeadlessTurn};
 use crate::error::BackendError;
 use crate::provider_route::{agent_routable, HarnessRoute, RouteRefusal, RoutedAgent};
-use crate::session_pointer::SessionPointer;
-use crate::stream::{self, ProgressEvent};
+use crate::session_pointer::{SessionPointer, SessionPointerOwner};
+use crate::stream::ProgressEvent;
 use crate::turn_files::TurnFiles;
 
 use super::routed::route_child_env;
-use super::turn_process::{
-    describe_deadline, spawn_turn, strip_tddy_env, TurnCommand, TurnGroup, STDERR_GRACE,
-};
+use super::turn_process::{describe_deadline, spawn_turn, strip_tddy_env, TurnCommand, TurnGroup};
 use super::{BackendModels, CodingBackend, InvokeRequest, InvokeResponse, SessionMode};
+use crate::backend::spec_headless::turn_read::open_conversation_log;
+use crate::backend::spec_headless::turn_read::read_turn;
 
 /// The tool the agent asks before anything not pre-approved.
 const APPROVAL_PROMPT_TOOL: &str = "mcp__tddy-tools__approval_prompt";
@@ -271,6 +271,24 @@ impl SpecHeadlessBackend {
     }
 }
 
+/// The session pointer a turn of `request` writes in `workdir`, owned by this process: `None` when
+/// the request names no session socket to point at.
+fn turn_pointer(request: &InvokeRequest, workdir: &Path) -> Option<SessionPointer> {
+    let socket = request.socket_path.clone()?;
+    Some(SessionPointer {
+        socket: Some(socket),
+        repo_dir: workdir.to_path_buf(),
+        session_dir: request.session_dir.clone(),
+        remote: request
+            .remote
+            .as_ref()
+            .map(|remote| remote.env_pairs().into_iter().collect::<BTreeMap<_, _>>())
+            .unwrap_or_default(),
+        notify: BTreeMap::new(),
+        owner: Some(SessionPointerOwner::this_process()),
+    })
+}
+
 /// What a turn's reader thread needs besides the child.
 struct TurnRead {
     request: InvokeRequest,
@@ -331,21 +349,8 @@ impl CodingBackend for SpecHeadlessBackend {
         let mut files: Vec<(PathBuf, Vec<u8>)> = temp_system_prompt.into_iter().collect();
         files.extend(invocation.files.iter().cloned());
         let mut turn_files = TurnFiles::write(&files, &workdir)?;
-        if let Some(socket) = &request.socket_path {
-            turn_files.write_session_pointer(
-                &workdir,
-                &SessionPointer {
-                    socket: Some(socket.clone()),
-                    repo_dir: workdir.clone(),
-                    session_dir: request.session_dir.clone(),
-                    remote: request
-                        .remote
-                        .as_ref()
-                        .map(|remote| remote.env_pairs().into_iter().collect::<BTreeMap<_, _>>())
-                        .unwrap_or_default(),
-                    notify: BTreeMap::new(),
-                },
-            )?;
+        if let Some(pointer) = turn_pointer(&request, &workdir) {
+            turn_files.write_session_pointer(&workdir, &pointer)?;
         }
 
         log::debug!(
@@ -445,209 +450,5 @@ impl CodingBackend for SpecHeadlessBackend {
             )));
         }
         Ok(models)
-    }
-}
-
-/// Reads one spawned turn to its end on a blocking thread: stdout through the adapter, the exit
-/// through the adapter's judgement, stderr kept, the conversation log appended.
-fn read_turn(
-    read: TurnRead,
-    mut child: std::process::Child,
-    stdout: Option<std::process::ChildStdout>,
-    stderr: Option<std::process::ChildStderr>,
-    reaped: &AtomicBool,
-) -> Result<InvokeResponse, BackendError> {
-    let TurnRead {
-        request,
-        invocation,
-        agent_id,
-        system_text,
-        progress_callback,
-        mut conversation,
-    } = read;
-    let Some(stdout) = stdout else {
-        // Never the case for a piped stdout; the child is still reaped, so none is left behind.
-        let _ = child.kill();
-        let _ = child.wait();
-        reaped.store(true, Ordering::SeqCst);
-        return Err(BackendError::InvocationFailed(
-            "failed to capture stdout".to_string(),
-        ));
-    };
-    let stderr_reader = stderr.map(read_stderr);
-
-    let emit_progress = {
-        let progress_sink = request.progress_sink.clone();
-        move |event: &ProgressEvent| {
-            if let Some(sink) = &progress_sink {
-                sink.emit(event);
-            } else if let Some(callback) = &progress_callback {
-                if let Ok(mut callback) = callback.lock() {
-                    callback(event);
-                }
-            }
-        }
-    };
-    let mut on_progress = emit_progress.clone();
-    let agent_output = request.agent_output;
-    let agent_output_sink = request.agent_output_sink.clone();
-    let mut on_raw_output = move |text: &str| {
-        if agent_output {
-            if let Some(sink) = &agent_output_sink {
-                sink.emit(text);
-            } else if std::env::var("TDDY_QUIET").is_err() {
-                eprint!("{text}");
-            }
-        }
-    };
-    let debug = request.debug;
-    let mut on_debug_line = |line: &str| {
-        if debug {
-            log::debug!("[tddy-coder debug] {line}");
-        }
-    };
-    if let Some(file) = conversation.as_mut() {
-        let (session_id, is_resume) = request
-            .session
-            .as_ref()
-            .map(|s| (s.session_id().to_string(), s.is_resume()))
-            .unwrap_or_default();
-        let entry = serde_json::json!({
-            "type": "tddy-request",
-            "goal": request.hints.display_name,
-            "prompt": request.prompt,
-            "system_prompt": system_text,
-            "model": request.model,
-            "session_id": session_id,
-            "is_resume": is_resume,
-        });
-        let _ = writeln!(file, "{entry}");
-        let _ = file.flush();
-    }
-    let mut on_conversation_line = |line: &str| {
-        if let Some(file) = conversation.as_mut() {
-            let _ = writeln!(file, "{line}");
-            let _ = file.flush();
-        }
-    };
-    let has_conversation = request.conversation_output_path.is_some();
-
-    let stream_result = invocation.adapter.read_stream(
-        &mut BufReader::new(stdout),
-        StreamSinks {
-            on_progress: &mut on_progress,
-            on_raw_output: &mut on_raw_output,
-            on_debug_line: if debug {
-                Some(&mut on_debug_line)
-            } else {
-                None
-            },
-            on_conversation_line: if has_conversation {
-                Some(&mut on_conversation_line)
-            } else {
-                None
-            },
-        },
-    );
-    let status = child
-        .wait()
-        .map_err(|e| BackendError::InvocationFailed(e.to_string()));
-    reaped.store(true, Ordering::SeqCst);
-    let stream_result = stream_result?;
-    let status = status?;
-    let stderr = stderr_reader.map(StderrReader::finish).unwrap_or_default();
-    let exit_code = status.code().unwrap_or(-1);
-    log::debug!(
-        "[headless] {agent_id} exited with code {exit_code} (goal: {:?})",
-        request.goal_id
-    );
-
-    if !invocation
-        .adapter
-        .exit_ok(exit_code, &stream_result, invocation.exit_ok_if_structured)
-    {
-        let detail = invocation.adapter.failure_detail(&stream_result, &stderr);
-        return Err(BackendError::InvocationFailed(if detail.is_empty() {
-            format!("{agent_id} exited with code {exit_code}")
-        } else {
-            format!("{agent_id} exited with code {exit_code}: {detail}")
-        }));
-    }
-
-    emit_progress(&stream::ProgressEvent::AgentExited {
-        exit_code,
-        goal: request.submit_key.to_string(),
-    });
-    Ok(InvokeResponse {
-        output: stream_result.result_text,
-        exit_code,
-        session_id: Some(stream_result.session_id).filter(|id| !id.is_empty()),
-        questions: stream_result.questions,
-        raw_stream: if stream_result.raw_lines.is_empty() {
-            None
-        } else {
-            Some(stream_result.raw_lines.join("\n"))
-        },
-        stderr: Some(stderr).filter(|stderr| !stderr.trim().is_empty()),
-    })
-}
-
-/// The request's conversation log, opened for appending, when it names one.
-fn open_conversation_log(request: &InvokeRequest) -> Result<Option<std::fs::File>, BackendError> {
-    request
-        .conversation_output_path
-        .as_ref()
-        .map(|path| {
-            std::fs::OpenOptions::new()
-                .create(true)
-                .append(true)
-                .open(path)
-                .map_err(|e| {
-                    BackendError::InvocationFailed(format!(
-                        "failed to open conversation output {}: {e}",
-                        path.display()
-                    ))
-                })
-        })
-        .transpose()
-}
-
-/// A child's stderr, read to its end on a thread of its own.
-struct StderrReader {
-    collected: Arc<Mutex<Vec<u8>>>,
-    done: std::sync::mpsc::Receiver<()>,
-}
-
-fn read_stderr(mut stderr: std::process::ChildStderr) -> StderrReader {
-    let collected: Arc<Mutex<Vec<u8>>> = Arc::default();
-    let (sender, done) = std::sync::mpsc::channel();
-    let sink = Arc::clone(&collected);
-    std::thread::spawn(move || {
-        let mut chunk = [0u8; 4096];
-        loop {
-            match std::io::Read::read(&mut stderr, &mut chunk) {
-                Ok(0) | Err(_) => break,
-                Ok(read) => sink
-                    .lock()
-                    .unwrap_or_else(std::sync::PoisonError::into_inner)
-                    .extend_from_slice(&chunk[..read]),
-            }
-        }
-        let _ = sender.send(());
-    });
-    StderrReader { collected, done }
-}
-
-impl StderrReader {
-    /// What the child wrote to stderr, once it has closed it — or, after a bounded grace (a
-    /// grandchild can hold the pipe open), what had been read by then.
-    fn finish(self) -> String {
-        let _ = self.done.recv_timeout(STDERR_GRACE);
-        let bytes = self
-            .collected
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .clone();
-        String::from_utf8_lossy(&bytes).into_owned()
     }
 }

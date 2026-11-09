@@ -11,6 +11,12 @@ what gives the launcher its relay — and hands it to the host with
 `DaemonSessionHost::with_coding_agent_launcher`; `tddy-session-agents` reaches it through
 `AgentRoster.coding_agent_launcher`.
 
+The launcher's plans live beside it: `coding_agent_launcher/headless.rs` (the headless plan from the
+agent's spec, its conversation files and session pointer, its approvals, and
+`sweep_headless_files_left_by_this_daemon`, re-exported from `coding_agent_launcher`) and
+`coding_agent_launcher/acp.rs` (the ACP plan from the spec: command, MCP servers, session meta,
+route and confinement).
+
 A coding agent can write, so a launch the daemon cannot honour **exactly** is refused with the reason
 — never started some weaker way.
 
@@ -105,8 +111,17 @@ rather than starting anything weaker:
     spec's `TDDY_REMOTE_SESSION_TOKEN`) in `ApprovalRoutes` (`with_approval_routes`) — **last**, once
     the plan is complete, so a plan that fails part-way leaves no route; a spec with no token is
     refused;
-  - an agent whose MCP slot is `inline` (`codex`) has the server's `env` added to the command's own,
-    since Codex forwards the variables to its server by name — only their names are on the argv;
+  - an agent whose MCP slot is `inline` (`codex`) registers the server on its argv, where no
+    credential may be: `write_conversation_pointer` moves the server's `env` (the conversation id and
+    the minted `TDDY_REMOTE_SESSION_TOKEN`) into the conversation's own session pointer,
+    `<conversation dir>/.tddy/session.json` — owner-only, written atomically, no socket, the
+    variables in its `remote` map, owned by this daemon (`SessionPointerOwner::this_process()`) and
+    removed with the directory — and sets the server's `cwd` to the conversation directory, which the
+    inline slot renders as `-c mcp_servers.tddy-tools.cwd="<dir>"`. The server's `env` is then empty,
+    so the slot renders no `env_vars` and the command's `env` carries no `TDDY_*` variable; the
+    `tddy-tools` Codex starts in that directory finds its session through the pointer
+    ([tddy-tools session resolution](../../tddy-tools/docs/session-resolution.md)). A pointer that
+    cannot be written refuses the launch, naming its path;
   - a slot that writes into the worktree (`cursor`'s `.cursor/mcp.json`) is recorded first
     (`record_written_files`): an existing file there is refused by name, the path is added to the
     repository's `info/exclude` (`tddy_agent_backend::turn_files::exclude_from_git`) before anything

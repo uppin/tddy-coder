@@ -528,13 +528,19 @@ environment the `claude-cli` launch produces:
 - **Session pointer.** So a `tddy-tools submit`, `transition`, `ask` or `notify` the agent runs from
   its own shell still reaches the session, the launch writes `<worktree>/.tddy/session.json` at every
   start and resume ([tddy-tools session resolution](../../../packages/tddy-tools/docs/session-resolution.md)):
-  the managed workflow's socket, session and repo directories, and the operator-notify session. It is
-  owner-only (`0600`), added to the repository's `info/exclude` when the worktree is in a git
-  checkout, replaced on resume, and removed when the agent exits (in tmux only when the launch has an
-  exit hook, which keeps the pane) and when the session is deleted. On an ssh checkout it is written
-  on the target through the bounded slot write, and is neither excluded nor removed there
-  ([todo](../../dev/todo/2026-11-06-ssh-session-pointer-exclude-and-removal.md)). A jailed session
-  writes none: its shell relay carries the session.
+  the managed workflow's socket, session and repo directories, the operator-notify session, and its
+  owner — the daemon's pid and host. It is owner-only (`0600`), added to the repository's
+  `info/exclude` when the worktree is in a git checkout, replaced on resume, and removed when the
+  agent exits (in tmux only when the launch has an exit hook, which keeps the pane; without one it is
+  replaced at the next resume and removed at the delete) and when the session is deleted. On an ssh
+  checkout the same holds on the target: one ssh command, bounded like the slot write, adds the
+  pointer to the target checkout's `info/exclude` and writes it owner-only, and the removals are a
+  bounded ssh command each. A `tddy-tools` on the daemon's host refuses a pointer whose owner has
+  exited or whose socket is gone, naming the pointer; one on the ssh target does not check an owner on
+  another host. The remote agent is not yet recorded as an ssh pointer's owner
+  ([todo](../../dev/todo/2026-11-07-ssh-agent-launch-remote-pointer-owner.md)). A jailed session
+  writes none: its shell relay carries the session, and a pointer copied into the jail would name a
+  host socket the jail cannot reach.
 - **Jail.** The generic jailed start and resume bind the same conversation, permission mode and
   session id, and carry a managed workflow for a spec declaring `managed_workflow`.
 - **Branch intent.** A `new_branch_from_base` start naming no branch is refused exactly when the

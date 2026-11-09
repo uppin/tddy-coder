@@ -42,7 +42,103 @@ pub struct SessionPointer {
     /// (`#agent-tools 17/19`).
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub notify: BTreeMap<String, String>,
+    /// The process that owns the pointer's session, and the host it runs on (`#agent-tools 21/28`):
+    /// a `tddy-tools` on that host refuses the pointer once the process is gone, and a backend does
+    /// not overwrite a pointer a live owner holds for another session. `None` for a pointer written
+    /// before owners were recorded, which is read as it always was.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub owner: Option<SessionPointerOwner>,
 }
+
+/// The process a pointer's session is served by: the daemon for a pointer on its own host, the
+/// agent on an ssh target for a pointer there (`#agent-tools 21/28`).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SessionPointerOwner {
+    /// Its pid, on [`Self::host`].
+    pub pid: u32,
+    /// The host the pid lives on, as that host names itself ([`this_host`]).
+    pub host: String,
+}
+
+impl SessionPointerOwner {
+    /// This process, on this host.
+    pub fn this_process() -> Self {
+        Self {
+            pid: std::process::id(),
+            host: this_host(),
+        }
+    }
+
+    /// Whether the owner's pid lives on the host this process runs on — only then can its liveness,
+    /// or the pointer's socket path, be checked here.
+    pub fn is_on_this_host(&self) -> bool {
+        self.host == this_host()
+    }
+
+    /// Whether the owner's process is still running. Only meaningful when
+    /// [`Self::is_on_this_host`]: a pid says nothing on another host.
+    pub fn is_running(&self) -> bool {
+        let Ok(pid) = libc::pid_t::try_from(self.pid) else {
+            return false;
+        };
+        // SAFETY: signal 0 only checks that the process exists and may be signalled.
+        let status = unsafe { libc::kill(pid, 0) };
+        // `EPERM`: it exists, and belongs to another user.
+        status == 0 || std::io::Error::last_os_error().raw_os_error() == Some(libc::EPERM)
+    }
+}
+
+/// The name this host gives itself (`gethostname`, as `hostname` prints it).
+///
+/// # Panics
+///
+/// When `gethostname` fails. Its only failures are a bad buffer address and a buffer shorter than
+/// the host name; this one is 256 bytes, above every platform's `HOST_NAME_MAX` (64 on Linux, 255 on
+/// macOS), so a failure is a broken invariant, not a host without a name to fall back from.
+pub fn this_host() -> String {
+    let mut buf = [0u8; 256];
+    // SAFETY: `buf` is valid for `buf.len()` bytes; `gethostname` NUL-terminates within it or fails.
+    let status = unsafe { libc::gethostname(buf.as_mut_ptr().cast(), buf.len()) };
+    assert_eq!(
+        status,
+        0,
+        "gethostname failed with a buffer above HOST_NAME_MAX: {}",
+        std::io::Error::last_os_error()
+    );
+    let len = buf.iter().position(|&b| b == 0).unwrap_or(buf.len());
+    String::from_utf8_lossy(&buf[..len]).into_owned()
+}
+
+/// A pointer for another session is in the way: its owner is alive, so it is not overwritten
+/// (`#agent-tools 21/28`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SessionPointerHeld {
+    /// The pointer file.
+    pub path: PathBuf,
+    /// The socket the held pointer names.
+    pub socket: Option<PathBuf>,
+    /// Its live owner.
+    pub owner: SessionPointerOwner,
+}
+
+impl std::fmt::Display for SessionPointerHeld {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let socket = self
+            .socket
+            .as_deref()
+            .map_or_else(|| "no socket".to_string(), |s| s.display().to_string());
+        write!(
+            f,
+            "the session pointer {} is held by another live session (pid {} on {}, {socket}), and is not overwritten",
+            self.path.display(),
+            self.owner.pid,
+            self.owner.host
+        )
+    }
+}
+
+impl std::error::Error for SessionPointerHeld {}
 
 /// Why a pointer file that exists could not be read.
 #[derive(Debug, Clone, PartialEq, Eq)]

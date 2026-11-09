@@ -16,8 +16,8 @@
 > written into the worktree's `.tddy/session.json` pointer (`tddy-agent-launch::cli_session_pointer`),
 > so a managed agent whose spec registers no MCP server (or `placed`s it in the agent's home) reaches
 > its controller through `tddy-tools` on its shell. Its MCP server still gets them only through a
-> file-placed registration. The pointer's ssh gaps are
-> [2026-11-06-ssh-session-pointer-exclude-and-removal](2026-11-06-ssh-session-pointer-exclude-and-removal.md).
+> file-placed registration. The pointer's ssh gaps are closed by `#agent-tools 21/28`
+> ([changeset](../changesets/2026-11-07-session-pointer-ownership.md)).
 
 - **Bespoke tmux start and resume** (`claude_cli_spawn_steps::spawn_claude_cli_process`, `svc_resume_claude_cli_session`) still build the hand-built argv; their two `TODO(agent-tools-cascade)` markers stay until n17 deletes both paths. The generic tmux start and resume render through `plan_host_pty` for every agent.
 - **Managed and role environment.** A `TDDY_*` pair a managed workflow (`TDDY_SOCKET`, `TDDY_SESSION_DIR`, `TDDY_REPO_DIR`) or a project-home role produces is carried on the agent's tool-server registration (`mcp` env), never on the agent process (stack rule). A managed agent whose spec declares no `mcp` slot therefore has no way to reach its controller; the bespoke path put them on the process.

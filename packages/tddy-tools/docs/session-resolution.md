@@ -18,17 +18,29 @@ names a session (`resolve_current_session(socket)` applies it to this process's 
    (`tddy_agent_backend::session_pointer::SessionPointer`, see
    [tddy-agent-backend architecture § Backend](../../tddy-agent-backend/docs/architecture.md#backend-backend), *Session pointer and turn files*).
    It holds the socket (optional: a session with no workflow listener has none), the repository, the
-   session directory, the remote tool environment and a `notify` map — the operator-notify session
+   session directory, the remote tool environment, a `notify` map — the operator-notify session
    (`TDDY_SESSION_ID`, `TDDY_OS_USER`, `TDDY_HOOK_TOKEN`, and `TDDY_DAEMON_URL` or
-   `TDDY_DAEMON_SOCKET`). Two writers:
+   `TDDY_DAEMON_SOCKET`) — and its `owner`, the `{pid, host}` of the process serving the session.
+   Three writers:
    - the headless workflow backend, in the agent's working directory before each turn, removed when
-     the turn ends;
+     the turn ends; it does not overwrite a pointer a live owner holds for another session;
    - the daemon's generic CLI launch, in the session's worktree at every start and resume
      (`tddy-agent-launch`'s `cli_session_pointer`, see
      [module layout](../../tddy-agent-launch/docs/module-layout.md#the-cli-spawns)): the managed
      workflow's socket, session directory and repository, and the notify session. Owner-only, kept out
      of git through the checkout's `info/exclude`, replaced on resume, removed when the agent exits
-     and when the session is deleted. A jailed session writes none.
+     and when the session is deleted — on this host, and on an ssh target through one bounded ssh
+     command each. A jailed session writes none;
+   - the daemon's coding-agent launcher, in a headless conversation's directory when the agent's MCP
+     slot is inline (Codex): no socket, the conversation id and the minted credential in its `remote`
+     map. The conversation's tool server is started in that directory (the registration's `cwd`), so
+     it finds the pointer there.
+
+   A pointer whose owner runs on **this** host is checked before it is used: an owner that is no
+   longer running, or a socket path that does not exist, makes it an `UnreadablePointer` naming that
+   cause. An owner on another host (an ssh target) is not checked — its pid and socket path are that
+   host's — and a pointer without an owner (written before owners were recorded) is used as it is.
+   `--socket` is never checked this way: it is the caller's explicit choice.
 3. **`TDDY_SOCKET`** (with `TDDY_SESSION_DIR`) — for the daemon's own callers and tests; nothing an
    agent inherits.
 
@@ -39,8 +51,11 @@ Errors are `SessionNotFound`:
 - **`Nowhere { cwd }`** — none of the three names a session. Its message names all three: pass
   `--socket <path>`, run from a directory at or below a `.tddy/session.json` (searched upward from
   the cwd), or set `TDDY_SOCKET`.
-- **`UnreadablePointer { path, reason }`** — a pointer file exists but does not parse. It is an
-  error, never skipped for a pointer further up or for `TDDY_SOCKET`.
+- **`UnreadablePointer { path, cause }`** — a pointer file exists but names no session to report
+  to. `UnreadablePointerCause` is `Invalid(reason)` (it cannot be read, or does not parse),
+  `OwnerGone { owner }` (`the session that wrote it (pid <pid> on <host>) is no longer running`) or
+  `SocketMissing { socket }` (`the socket it names, <socket>, does not exist`). It is an error,
+  never skipped for a pointer further up or for `TDDY_SOCKET`.
 
 ## Commands with no session
 
@@ -72,7 +87,11 @@ such a command runs finds the session through the pointer, as the agent's own do
 `tests/session_source_unit.rs` (`--socket` beats the pointer and the environment, the pointer beats
 the environment, the environment last, nothing anywhere names all three sources, an unparsable
 pointer is an error;
-`a_pointers_notify_map_sets_only_the_names_tddy_tools_notify_reads`); `tddy-tools-cli/tests/session_pointer_submit.rs` (a shell-run
+`a_pointers_notify_map_sets_only_the_names_tddy_tools_notify_reads`;
+`a_pointer_whose_owner_is_gone_is_an_error_naming_the_pointer`,
+`a_pointer_naming_a_missing_socket_is_an_error_but_an_explicit_socket_is_not_prechecked`,
+`a_pointer_without_an_owner_still_resolves`,
+`a_pointer_owned_on_another_host_is_resolved_without_checking_its_pid_or_socket`); `tddy-tools-cli/tests/session_pointer_submit.rs` (a shell-run
 `tddy-tools submit` with no `TDDY_*` variable reaches its session through the pointer);
 `tddy-tools-cli/tests/notify_cli_acceptance.rs` (`notify_reads_its_session_from_the_pointer_when_its_environment_names_none`);
 `tddy-tools-cli/tests/cli_integration.rs` (`ask_and_submit_with_no_session_anywhere_fail_naming_all_three_sources`)

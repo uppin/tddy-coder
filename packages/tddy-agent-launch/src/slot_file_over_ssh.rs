@@ -6,7 +6,7 @@
 //! started with a connect timeout and keep-alives, and the whole child is bounded by a wall-clock
 //! deadline after which it is killed and the launch refused, naming the host.
 
-use std::io::{Read as _, Write as _};
+use std::io::{Read, Write as _};
 use std::path::Path;
 use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
@@ -50,10 +50,6 @@ fn write_over_ssh(
     bytes: &[u8],
     deadline: Duration,
 ) -> Result<(), SpecLaunchError> {
-    let failed = |message: String| SpecLaunchError::SlotFile {
-        path: path.to_path_buf(),
-        message: format!("over ssh to {alias}: {message}"),
-    };
     let dir = path
         .parent()
         .map(|p| p.to_string_lossy())
@@ -63,59 +59,107 @@ fn write_over_ssh(
         shell_single_quote(&dir),
         shell_single_quote(&path.to_string_lossy())
     );
-    let mut child = Command::new(ssh)
-        .args(ssh_options())
-        .arg("--")
-        .arg(alias)
-        .arg(&remote)
-        .stdin(Stdio::piped())
-        .stdout(Stdio::null())
-        .stderr(Stdio::piped())
-        .spawn()
-        .map_err(|e| failed(e.to_string()))?;
+    run_over_ssh(ssh, alias, path, &remote, bytes, deadline).map(|_| ())
+}
 
-    // Both pipes are served off this thread, so a target that reads nothing or writes a lot cannot
+/// Runs the shell command `remote` on the ssh target `alias` through the ssh client `ssh`, with
+/// `stdin` on its standard input, and returns what it printed. `path` is the file the command is
+/// about, named by the errors. The ssh is bounded as every slot file write is: killed at `deadline`.
+pub(crate) fn run_over_ssh(
+    ssh: &Path,
+    alias: &str,
+    path: &Path,
+    remote: &str,
+    stdin: &[u8],
+    deadline: Duration,
+) -> Result<String, SpecLaunchError> {
+    let failed = |message: String| SpecLaunchError::SlotFile {
+        path: path.to_path_buf(),
+        message: format!("over ssh to {alias}: {message}"),
+    };
+    let mut child = spawn_ssh(ssh, alias, remote).map_err(|e| failed(e.to_string()))?;
+
+    // Every pipe is served off this thread, so a target that reads nothing or writes a lot cannot
     // hold the deadline loop below.
-    let mut stdin = child
+    let mut stdin_pipe = child
         .stdin
         .take()
         .ok_or_else(|| failed("no stdin".to_string()))?;
-    let payload = bytes.to_vec();
-    let writer = std::thread::spawn(move || stdin.write_all(&payload));
-    let mut stderr = child
+    let payload = stdin.to_vec();
+    let writer = std::thread::spawn(move || stdin_pipe.write_all(&payload));
+    let stdout_pipe = child
+        .stdout
+        .take()
+        .ok_or_else(|| failed("no stdout".to_string()))?;
+    let printed = read_to_end_off_thread(stdout_pipe);
+    let stderr = child
         .stderr
         .take()
         .ok_or_else(|| failed("no stderr".to_string()))?;
-    let reader = std::thread::spawn(move || {
-        let mut text = String::new();
-        let _ = stderr.read_to_string(&mut text);
-        text
-    });
+    let reader = read_to_end_off_thread(stderr);
 
-    let started = Instant::now();
-    let status = loop {
-        if let Some(status) = child.try_wait().map_err(|e| failed(e.to_string()))? {
-            break status;
-        }
-        if started.elapsed() >= deadline {
-            let _ = child.kill();
-            let _ = child.wait();
-            return Err(SpecLaunchError::SlotFileOverSshTimedOut {
-                host: alias.to_string(),
-                path: path.to_path_buf(),
-                after: deadline,
-            });
-        }
-        std::thread::sleep(POLL_INTERVAL);
+    let Some(status) = wait_within(&mut child, deadline).map_err(|e| failed(e.to_string()))? else {
+        return Err(SpecLaunchError::SlotFileOverSshTimedOut {
+            host: alias.to_string(),
+            path: path.to_path_buf(),
+            after: deadline,
+        });
     };
     let written = writer
         .join()
         .unwrap_or_else(|_| Err(std::io::Error::other("the stdin writer panicked")));
-    let stderr = reader.join().unwrap_or_default();
+    let printed = printed
+        .join()
+        .unwrap_or_else(|_| Err(std::io::Error::other("the stdout reader panicked")));
+    // What ssh said is the error's text only: a stderr that cannot be read leaves it empty.
+    let stderr = reader.join().ok().and_then(Result::ok).unwrap_or_default();
     if !status.success() {
         return Err(failed(stderr.trim().to_string()));
     }
-    written.map_err(|e| failed(e.to_string()))
+    written.map_err(|e| failed(e.to_string()))?;
+    printed.map_err(|e| failed(format!("what it printed cannot be read: {e}")))
+}
+
+/// `remote` started on `alias` through the ssh client `ssh`, every pipe of it piped.
+fn spawn_ssh(ssh: &Path, alias: &str, remote: &str) -> std::io::Result<std::process::Child> {
+    Command::new(ssh)
+        .args(ssh_options())
+        .arg("--")
+        .arg(alias)
+        .arg(remote)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+}
+
+/// Everything `pipe` yields, read on a thread of its own.
+fn read_to_end_off_thread(
+    mut pipe: impl Read + Send + 'static,
+) -> std::thread::JoinHandle<std::io::Result<String>> {
+    std::thread::spawn(move || {
+        let mut text = String::new();
+        pipe.read_to_string(&mut text).map(|_| text)
+    })
+}
+
+/// `child`'s exit status once it exits, or `None` after it ran past `deadline` and was killed.
+fn wait_within(
+    child: &mut std::process::Child,
+    deadline: Duration,
+) -> std::io::Result<Option<std::process::ExitStatus>> {
+    let started = Instant::now();
+    loop {
+        if let Some(status) = child.try_wait()? {
+            return Ok(Some(status));
+        }
+        if started.elapsed() >= deadline {
+            let _ = child.kill();
+            let _ = child.wait();
+            return Ok(None);
+        }
+        std::thread::sleep(POLL_INTERVAL);
+    }
 }
 
 /// The ssh options every slot file write runs with: no prompt, and a connection that cannot hang.
