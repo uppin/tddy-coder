@@ -123,18 +123,8 @@ pub fn a_spawn_policy() -> SpawnPolicyBuilder {
 }
 
 impl SpawnPolicyBuilder {
-    pub fn allowing_tool(mut self, path: &str) -> Self {
-        self.policy.allowed_tool_paths.push(PathBuf::from(path));
-        self
-    }
-
     pub fn allowing_mount_root(mut self, path: &str) -> Self {
         self.policy.allowed_mount_roots.push(PathBuf::from(path));
-        self
-    }
-
-    pub fn allowing_env_key(mut self, key: &str) -> Self {
-        self.policy.allowed_env_keys.push(key.to_string());
         self
     }
 

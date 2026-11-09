@@ -25,12 +25,10 @@
 //! everything the session logs still lands where it always did.
 
 use std::collections::BTreeMap;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
-use tddy_supervisor::proto::supervisor::clone_event::Event;
-use tddy_supervisor::proto::supervisor::{
-    CloneExited, CloneRepositoryRequest, SpawnStreamedRequest,
-};
+use tddy_supervisor::proto::supervisor::streamed_event::Event;
+use tddy_supervisor::proto::supervisor::{SpawnStreamedRequest, StreamedExited};
 use tddy_supervisor::request::{SessionState, SpawnSessionRequest};
 use tddy_supervisor::SupervisorClient;
 
@@ -45,12 +43,11 @@ use crate::supervisor_client::connect_supervisor;
 
 /// The `SpawnSession` request that starts a planned session child.
 ///
-/// `env` is empty unless the target user's `~/.tddy/config.yaml` declares a `spawn_path_extra`:
-/// `SpawnPolicy::allowed_env_keys` **denies** a request naming a key it does not list rather than
-/// dropping the key, and the shipped policy lists none. So an ordinary session asks for nothing and
+/// `env` is empty unless the target user's `~/.tddy/config.yaml` declares a `spawn_path_extra`.
+/// The supervisor's one env rule passes the daemon's env whole (loader variables refused,
+/// `HOME`/`USER`/`LOGNAME` forced from the account), so an ordinary session asks for nothing and
 /// is spawned with the environment root chose for it, while a user who asked for a `PATH` prefix
-/// either gets it or has their spawn refused — never silently loses it. An operator granting
-/// `spawn_path_extra` must therefore list `PATH` in the supervisor's `spawn_policy.allowed_env_keys`.
+/// either gets it or has their spawn refused — never silently loses it.
 pub fn spawn_session_request(
     os_user: &str,
     program: &Path,
@@ -78,12 +75,12 @@ pub fn spawn_session_request(
 /// `request` with the commit identity a session is spawned under ([`SpawnOptions::git_environment`])
 /// added to its `env`.
 ///
-/// Like `PATH`, every one of these keys (the commit identity and `TDDY_GITHUB_SOURCE`) must be listed in the supervisor's
-/// `spawn_policy.allowed_env_keys` or the spawn is refused outright — which is the point: a session
-/// that silently started under the machine's identity instead of its project's account is the
-/// failure this exists to prevent. A project that resolves to no account adds no key, so the shipped
-/// empty policy still permits its spawn. Only [`spawner::SESSION_GIT_ENVIRONMENT_KEYS`] ever get
-/// here ([`spawner::plan_session_child`] refuses the rest), so no token can ride this wire.
+/// These keys (the commit identity and `TDDY_GITHUB_SOURCE`) pass whole under the supervisor's
+/// one env rule; none is a loader variable, so none is refused on that account. A session that
+/// silently started under the machine's identity instead of its project's account is the failure
+/// the identity exists to prevent. A project that resolves to no account adds no key. Only
+/// [`spawner::SESSION_GIT_ENVIRONMENT_KEYS`] ever get here ([`spawner::plan_session_child`]
+/// refuses the rest), so no token can ride this wire.
 pub fn with_commit_identity(
     mut request: SpawnSessionRequest,
     git_environment: &[(String, String)],
@@ -239,17 +236,41 @@ pub async fn clone_repo_via_supervisor(
     .await
 }
 
+/// The clone helper beside this process (`tddy-git-clone`), or its bare name when no sibling is
+/// installed — the same rule [`crate::clone_env`] helpers follow for `tddy-askpass`.
+fn clone_helper_path() -> std::path::PathBuf {
+    const NAME: &str = "tddy-git-clone";
+    if let Ok(exe) = std::env::current_exe() {
+        if let Some(mut bin_dir) = exe.parent().map(Path::to_path_buf) {
+            if bin_dir.file_name().and_then(|n| n.to_str()) == Some("deps") {
+                bin_dir.pop();
+            }
+            let candidate = bin_dir.join(NAME);
+            if candidate.is_file() {
+                return candidate;
+            }
+        }
+    }
+    PathBuf::from(NAME)
+}
+
+/// The `git` the clone helper runs: resolved on the spawn-child `PATH`, else the bare name (the
+/// helper's own `PATH` lookup then decides, as a forked clone's does).
+fn git_path() -> PathBuf {
+    tddy_daemon_kernel::spawn_as_user::find_program_on_spawn_child_path("git")
+        .unwrap_or_else(|| PathBuf::from("git"))
+}
+
 /// Clone `git_url` into `destination` as `os_user` through the supervisor at `socket_path`, with
-/// `env` on the git child: `on_started` once git runs (its handle stops it via `StopSession`),
+/// `env` on the clone child: `on_started` once it runs (its handle stops it via `StopSession`),
 /// `on_progress` for each throttled progress line. Fails with git's own stderr tail.
 ///
-/// One server-streaming `CloneRepository` call: the supervisor runs `git clone --progress` as the
-/// user, into a temporary sibling of `destination` that it renames into place only on success.
-/// `env` is checked against the supervisor's `spawn_policy.allowed_env_keys`, which **denies** a key
-/// it does not list: an operator must list the keys a clone needs — `GIT_SSH_COMMAND`,
-/// `TDDY_DAEMON_URL`, `TDDY_SESSION_TOKEN` for a facilitator-provisioned clone, and
-/// `crate::clone_env::CloneSshEnv::ALLOWED_ENV_KEYS` for passphrase prompts. Git's own absolute path
-/// must be in `allowed_tool_paths`, as it always was; the daemon cannot widen the policy.
+/// One server-streaming `SpawnStreamed` call ([`plan_supervised_clone`]): the supervisor runs the
+/// clone helper as the user and streams its stderr; the helper clones into a partial sibling of
+/// `destination`, renames it into place only on success and removes it on failure. `env` passes
+/// whole under the supervisor's one env rule (loader variables refused), so a clone's SSH settings
+/// need no supervisor configuration. The helper must sit under an `exec_roots` entry; the daemon
+/// cannot widen the policy.
 ///
 /// Unbounded on purpose: how long a clone may take is the caller's deadline, not this function's to
 /// guess. An existing destination is left alone without asking the supervisor for anything.
@@ -277,13 +298,16 @@ pub async fn clone_repo_via_supervisor_with_progress(
         os_user,
         destination.display(),
     );
+    let request = plan_supervised_clone(
+        os_user,
+        &clone_helper_path(),
+        &git_path(),
+        git_url,
+        destination,
+        env,
+    )?;
     let mut events = client
-        .clone_repository(CloneRepositoryRequest {
-            os_user: os_user.to_string(),
-            git_url: git_url.to_string(),
-            destination: destination.display().to_string(),
-            env: env.into_iter().collect(),
-        })
+        .spawn_streamed(request)
         .await
         .map_err(|e| anyhow::anyhow!("tddy-supervisor refused to clone the repository: {e}"))?;
 
@@ -299,8 +323,8 @@ pub async fn clone_repo_via_supervisor_with_progress(
                     on_started(CloneHandle::through_supervisor(socket_path, started.pid));
                 }
             }
-            Some(Event::Progress(progress)) => {
-                if let Some(progress) = parse(&progress.line) {
+            Some(Event::Line(line)) => {
+                if let Some(progress) = parse(&line.line) {
                     if throttle.admit(&progress, std::time::Instant::now()) {
                         on_progress(progress);
                     }
@@ -331,14 +355,24 @@ pub fn plan_supervised_clone(
     destination: &Path,
     env: BTreeMap<String, String>,
 ) -> anyhow::Result<SpawnStreamedRequest> {
-    // TODO(supervisor-agent-agnostic): implement — and clone over it instead of `CloneRepository`,
-    // with progress parsed by `git_progress`.
-    let _ = (os_user, clone_helper, git, git_url, destination, env);
-    anyhow::bail!("a supervised clone over SpawnStreamed is not implemented yet")
+    Ok(SpawnStreamedRequest {
+        os_user: os_user.to_string(),
+        tool_path: clone_helper.display().to_string(),
+        args: vec![
+            "--git".to_string(),
+            git.display().to_string(),
+            "--".to_string(),
+            git_url.to_string(),
+            destination.display().to_string(),
+        ],
+        env: env.into_iter().collect(),
+        working_dir: None,
+        scope: None,
+    })
 }
 
 /// How git's exit reads as a result: success, or git's own words about why not.
-fn clone_outcome(exited: &CloneExited, destination: &Path) -> anyhow::Result<()> {
+fn clone_outcome(exited: &StreamedExited, destination: &Path) -> anyhow::Result<()> {
     if exited.code == Some(0) {
         return Ok(());
     }

@@ -98,6 +98,8 @@ pub struct SpawnPlan {
     pub environment: EnvironmentBase,
     /// Jail to build around the child. `None` spawns a plain process in the host's namespaces.
     pub sandbox: Option<SandboxJail>,
+    /// The checked executable, held so its descriptor stays open until the exec.
+    pub checked: Option<crate::policy::CheckedExecutable>,
 }
 
 /// Where a child's stdout and stderr go.
@@ -141,18 +143,16 @@ pub enum EnvironmentBase {
     /// `HOME`/`USER`/`LOGNAME`. No supervisor `PATH`, no forwarded locale, nothing the supervisor
     /// was started with (`#agent-tools 28/28`).
     ///
-    /// For a relayed coding agent: what an agent sees is coding-agent configuration, owned by the
-    /// daemon and its YAML (`coding_agent.pass_env`, the agent-env base set); the supervisor knows
-    /// only the OS user.
+    /// For a relayed spawn: what the child sees is the caller's configuration, owned by the
+    /// daemon and its YAML; the supervisor knows only the OS user.
     Exactly,
 }
 
 /// `PATH` for a session, whose caller does not get to choose one.
 ///
 /// Fixed rather than taken from the supervisor's own environment, so what a session resolves a
-/// command to does not depend on how the unit happened to be started. A host whose binaries live
-/// somewhere else grants `PATH` through `SpawnPolicy::allowed_env_keys`, which puts the decision in
-/// the root-owned policy file where the rest of them are.
+/// command to does not depend on how the unit happened to be started. The daemon's env passes
+/// whole under the one env rule, and this is the base it is laid over for a session.
 const SESSION_PATH: &str = "/usr/local/bin:/usr/bin:/bin";
 
 /// Variables a minimal environment still takes from the supervisor: they decide how text is rendered
@@ -1019,6 +1019,7 @@ mod tests {
                 output: ChildOutput::Discard,
                 environment: EnvironmentBase::Minimal,
                 sandbox: None,
+                checked: None,
             },
         }
     }

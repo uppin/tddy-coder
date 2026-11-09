@@ -20,7 +20,6 @@ use std::time::Duration;
 
 use crate::authz::Authorizer;
 use crate::cgroup_broker::CgroupBroker;
-use crate::clone::{self, CloneEvents, RunningClone};
 use crate::config::SupervisorConfig;
 use crate::error::SupervisorError;
 use crate::policy;
@@ -92,21 +91,14 @@ impl PrivilegedSurface {
         request: SpawnRelayedRequest,
         caller_uid: u32,
     ) -> Result<SpawnedProcess, SupervisorError> {
-        let policy = &self.config.spawn_policy;
-        // The relay allowlist first: with it empty (the default) nothing below runs at all.
-        let program = policy::resolve_relay_tool_path(policy, &request.tool_path)?;
-        // `resolve_spawn_of`, not `resolve_spawn`: the relay allowlist has passed the program, and
-        // resolving it against `allowed_tool_paths` as well would make a relayed harness need both
-        // lists — and so grant it `SpawnSession` too. A relayed agent's env is the daemon's, whole:
-        // `resolve_relayed_env`, not `allowed_env_keys`, on an `Exactly` base.
-        let env = policy::resolve_relayed_env(&request.env)?;
-        let resolved = self.resolve_spawn_resolved(
+        let program = policy::resolve_exec(&self.config.spawn_policy, &request.tool_path)?;
+        let resolved = self.resolve_spawn_kind(
             &request.os_user,
             program,
             request.working_dir.as_deref(),
-            None,
-            env,
-            EnvironmentBase::Exactly,
+            request.scope.as_deref(),
+            &request.env,
+            policy::SpawnKind::Relayed,
         )?;
         let stream =
             crate::relay::connect_to_callers_socket(&request.relay_socket, caller_uid).await?;
@@ -182,41 +174,41 @@ impl PrivilegedSurface {
         scope: Option<&str>,
         env: &BTreeMap<String, String>,
     ) -> Result<ResolvedSpawn, SupervisorError> {
-        let program = policy::resolve_tool_path(&self.config.spawn_policy, tool_path)?;
-        self.resolve_spawn_of(os_user, program, working_dir, scope, env)
+        self.resolve_spawn_kind(
+            os_user,
+            policy::resolve_exec(&self.config.spawn_policy, tool_path)?,
+            working_dir,
+            scope,
+            env,
+            policy::SpawnKind::Session,
+        )
     }
 
-    /// The rest of [`Self::resolve_spawn`], for a `program` an allowlist has already passed —
-    /// `allowed_tool_paths` for a session, sandbox or clone, `allowed_relay_tool_paths` for a
-    /// relayed spawn.
-    fn resolve_spawn_of(
+    fn resolve_spawn_kind(
         &self,
         os_user: &str,
-        program: PathBuf,
+        program: policy::CheckedExecutable,
         working_dir: Option<&Path>,
         scope: Option<&str>,
         env: &BTreeMap<String, String>,
+        kind: policy::SpawnKind,
     ) -> Result<ResolvedSpawn, SupervisorError> {
-        // Here rather than in any caller: the environment is as much a way to choose what runs as
-        // the tool path is, and a gate that only some of the spawn methods passed through would be a
-        // gate the others are missing.
-        let env = policy::resolve_env(&self.config.spawn_policy, env)?;
+        let resolved_env = policy::resolve_spawn_env(kind, env)?;
         self.resolve_spawn_resolved(
             os_user,
             program,
             working_dir,
             scope,
-            env,
-            EnvironmentBase::Minimal,
+            resolved_env.variables,
+            resolved_env.base,
         )
     }
 
-    /// [`Self::resolve_spawn_of`] with its environment already resolved by the caller's own gate
-    /// (`resolve_env`, or `resolve_relayed_env` for a relayed agent) and its plan base.
+    /// [`Self::resolve_spawn_kind`] with its environment already resolved and its plan base.
     fn resolve_spawn_resolved(
         &self,
         os_user: &str,
-        program: PathBuf,
+        program: policy::CheckedExecutable,
         working_dir: Option<&Path>,
         scope: Option<&str>,
         env: BTreeMap<String, String>,
@@ -253,64 +245,6 @@ impl PrivilegedSurface {
         })
     }
 
-    /// Clone a repository as an allowlisted OS user and report on it as it runs.
-    ///
-    /// Everything a caller can ask is checked before git exists, in the order `SpawnSession` checks
-    /// it: user, tool (git, found on the supervisor's own `PATH`, still has to be allowlisted),
-    /// environment. A refusal is therefore an error on the call, not an event on the stream.
-    async fn clone_repository(
-        &self,
-        request: wire::CloneRepositoryRequest,
-    ) -> Result<CloneEvents, SupervisorError> {
-        let destination = policy::plain_absolute_path(Path::new(&request.destination))?;
-        let git = clone::git_on_supervisor_path()?;
-        let env: BTreeMap<String, String> = request.env.into_iter().collect();
-        let resolved = self.resolve_spawn_of(
-            &request.os_user,
-            policy::resolve_tool_path(&self.config.spawn_policy, &git)?,
-            None,
-            None,
-            &env,
-        )?;
-        // The tree is already present: nothing to clone, and nothing to fork a git for.
-        if destination.exists() {
-            return Ok(clone::already_present());
-        }
-        let partial = clone::partial_sibling(destination)?;
-        let os_user = resolved.os_user.clone();
-        let mut plan = resolved.plan(
-            vec![
-                "clone".to_string(),
-                "--progress".to_string(),
-                // Whatever follows is a URL, even one that starts with a dash.
-                "--".to_string(),
-                request.git_url,
-                partial.display().to_string(),
-            ],
-            None,
-        );
-        plan.output = ChildOutput::CaptureStderr;
-        let (pid, stderr) = self
-            .supervisor
-            .spawn_session_capturing_stderr(plan)
-            .await
-            .map_err(|error| SupervisorError::OperationFailed {
-                message: format!("spawn clone: {error}"),
-            })?;
-        log::info!(
-            target: "tddy_supervisor::server",
-            "spawned clone pid {pid} as `{os_user}`"
-        );
-        Ok(clone::report_on(RunningClone {
-            supervisor: Arc::clone(&self.supervisor),
-            pid,
-            stderr,
-            partial,
-            destination: destination.to_path_buf(),
-            stop_grace: Duration::from_secs(self.config.shutdown_grace_secs),
-        }))
-    }
-
     /// Run a binary as an OS user the mapping names, streaming its stderr — see [`crate::streamed`].
     ///
     /// Everything a caller can ask is checked before anything is forked, in the order
@@ -320,10 +254,35 @@ impl PrivilegedSurface {
         &self,
         request: wire::SpawnStreamedRequest,
     ) -> Result<StreamedEvents, SupervisorError> {
-        // TODO(supervisor-agent-agnostic): implement — gate the request, spawn it capturing stderr
-        // in its scope, and report on it as `clone` reports on a clone.
-        let _ = request;
-        Err(SupervisorError::Denied)
+        let env: BTreeMap<String, String> = request.env.into_iter().collect();
+        let resolved = self.resolve_spawn_kind(
+            &request.os_user,
+            policy::resolve_exec(&self.config.spawn_policy, Path::new(&request.tool_path))?,
+            request.working_dir.as_deref().map(Path::new),
+            request.scope.as_deref(),
+            &env,
+            policy::SpawnKind::Streamed,
+        )?;
+        let os_user = resolved.os_user.clone();
+        let mut plan = resolved.plan(request.args, None);
+        plan.output = ChildOutput::CaptureStderr;
+        let (pid, stderr) = self
+            .supervisor
+            .spawn_session_capturing_stderr(plan)
+            .await
+            .map_err(|error| SupervisorError::OperationFailed {
+                message: format!("spawn streamed: {error}"),
+            })?;
+        log::info!(
+            target: "tddy_supervisor::server",
+            "spawned streamed pid {pid} as `{os_user}`"
+        );
+        Ok(crate::streamed::report_on(
+            Arc::clone(&self.supervisor),
+            pid,
+            stderr,
+            Duration::from_secs(self.config.shutdown_grace_secs),
+        ))
     }
 
     /// Hand a resolved plan to the supervisor.
@@ -402,7 +361,7 @@ fn spawn_outcome<T>(
 /// and the scope are all resolved values, and nothing the caller asserted is carried forward.
 struct ResolvedSpawn {
     os_user: String,
-    program: PathBuf,
+    program: policy::CheckedExecutable,
     /// The caller's environment, with every variable checked against policy.
     env: BTreeMap<String, String>,
     working_dir: PathBuf,
@@ -415,7 +374,8 @@ struct ResolvedSpawn {
 impl ResolvedSpawn {
     fn plan(self, args: Vec<String>, sandbox: Option<SandboxJail>) -> SpawnPlan {
         SpawnPlan {
-            program: self.program,
+            program: self.program.exec_path(),
+            checked: Some(self.program),
             args,
             env: self.env,
             working_dir: self.working_dir,

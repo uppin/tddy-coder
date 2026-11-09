@@ -5,24 +5,12 @@ use std::path::PathBuf;
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct SpawnPolicy {
-    /// Absolute paths of tools a session may exec.
-    #[serde(default)]
-    pub allowed_tool_paths: Vec<PathBuf>,
-    /// Absolute paths of coding-agent harness binaries that may be run with their stdio relayed over
-    /// a caller-owned socket (`SpawnRelayed`). **Empty by default: relayed spawning is off.** It is a
-    /// list of its own, not `allowed_tool_paths`, so granting a session tool never grants a relay.
-    #[serde(default)]
-    pub allowed_relay_tool_paths: Vec<PathBuf>,
     /// Where a binary the daemon asks to run may live, for every spawn kind (session, sandbox,
     /// streamed, relayed). Each entry is absolute and names a **directory** (any file beneath it) or
     /// **one trusted file** (exactly that file). A requested path is judged by the file it resolves
     /// to, and that file, every directory above it and the entry itself must be owned by root (or
     /// the supervisor's euid) and writable by nobody else — a sticky world-writable directory
     /// included. See [`crate::policy::resolve_exec`].
-    ///
-    /// Replaces `allowed_tool_paths` and `allowed_relay_tool_paths`.
-    // TODO(supervisor-agent-agnostic): implement — the two old lists and `allowed_env_keys` go, and
-    // naming any of them fails loading with the replacement.
     ///
     /// An entry written as a map may set `trusted_prefix: true` (`{ path: /nix/store,
     /// trusted_prefix: true }`): the operator vouches for that directory itself, so its own mode is
@@ -33,14 +21,6 @@ pub struct SpawnPolicy {
     /// Roots under which a sandbox bind-mount source must fall.
     #[serde(default)]
     pub allowed_mount_roots: Vec<PathBuf>,
-    /// Environment variables a caller may set on a session it asks for.
-    ///
-    /// Empty by default, so a caller's `env` is refused rather than passed on. The caller is the
-    /// daemon; a variable it can put into the environment of a process running as *another* OS user
-    /// is a grant, and grants belong in this file. Loader variables ([`is_loader_env_key`]) are
-    /// rejected here at load time — listing one would hand over the tool allowlist with it.
-    #[serde(default)]
-    pub allowed_env_keys: Vec<String>,
 }
 /// One `spawn_policy.exec_roots` entry: a bare absolute path, or a map that can also mark it a
 /// trusted prefix.

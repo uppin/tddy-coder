@@ -24,11 +24,11 @@ service SupervisorService {
   // a sandbox request that names host paths, so it is the part a compromised caller reaches for.
   rpc SpawnSandbox(SpawnSandboxRequest) returns (SpawnedProcess);
 
-  // Spawn an allowlisted coding-agent harness as another OS user with its stdin, stdout and stderr
+  // Spawn a binary as another OS user with its stdin, stdout and stderr
   // relayed over a unix socket the caller owns. The caller binds a listening socket at
   // `relay_socket` first; the supervisor connects to it, verifies the listener is the caller, and
-  // relays bytes until the child exits. Gated by its own allowlist (allowed_relay_tool_paths, empty
-  // by default) beside the session-user and environment gates SpawnSession passes. The child's exit
+  // relays bytes until the child exits. Gated by the exec roots beside the session-user and
+  // environment gates SpawnSession passes. The child's exit
   // status and its stop travel over SessionStatus / StopSession, keyed by the returned pid.
   rpc SpawnRelayed(SpawnRelayedRequest) returns (SpawnedProcess);
 
@@ -41,16 +41,10 @@ service SupervisorService {
   // resolve to the method of that name declared just above rather than to the message.
   rpc SessionStatus(SessionRef) returns (.supervisor.SessionStatus);
   rpc StopSession(SessionRef) returns (.supervisor.SessionStatus);
-  // Clone a repository as an allowlisted OS user, streaming git's progress: `git clone --progress`
-  // under the same user and environment policy as SpawnSession, into a temporary sibling of
-  // `destination` renamed into place on success. The first event names the clone's pid (StopSession
-  // stops it); the last says how git exited. The one server-streaming RPC on this surface.
-  rpc CloneRepository(CloneRepositoryRequest) returns (stream CloneEvent);
   // Spawn a binary as another OS user and stream its stderr: the first event names its pid
   // (StopSession stops it), then one Line per line it writes to stderr (split on `\r` as well as
   // `\n`), then Exited with its exit and the last lines of stderr. The same user, exec and
   // environment gates as SpawnSession; the supervisor knows nothing about what the binary is.
-  // TODO(supervisor-agent-agnostic): implement — replaces CloneRepository, which then goes.
   rpc SpawnStreamed(SpawnStreamedRequest) returns (stream StreamedEvent);
 
   // cgroup v2 scope lifecycle inside the subtree the supervisor owns.
@@ -149,43 +143,6 @@ message SandboxMount {
   string source = 1;
   string target = 2;
   bool readonly = 3;
-}
-
-message CloneRepositoryRequest {
-  // Must appear in the policy's allowed_session_users; `root` never resolves.
-  string os_user = 1;
-  string git_url = 2;
-  // Absolute; created by the clone. An existing destination is left alone (the clone is skipped).
-  string destination = 3;
-  // Keys must appear in the policy's allowed_env_keys.
-  map<string, string> env = 4;
-}
-
-message CloneEvent {
-  oneof event {
-    CloneStarted started = 1;
-    CloneProgressLine progress = 2;
-    CloneExited exited = 3;
-  }
-}
-
-message CloneStarted {
-  uint32 pid = 1;
-}
-
-// One line of git's stderr progress, as git wrote it.
-message CloneProgressLine {
-  string line = 1;
-}
-
-message CloneExited {
-  // Git's exit code. Unset when git was ended by a signal (a stopped clone).
-  optional int32 code = 1;
-  // Reserved for the signal that ended git; never set today, because the supervisor's session table
-  // records an exit code and not the signal. Read `code` being unset as "ended by a signal".
-  optional int32 signal = 2;
-  // The last lines git wrote to stderr: its own explanation of a failure.
-  string stderr_tail = 3;
 }
 
 message SpawnStreamedRequest {

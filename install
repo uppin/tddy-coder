@@ -320,7 +320,7 @@ LEGACY_DAEMON_UNITS=(tddy-daemon.socket tddy-daemon.service)
 # The unprivileged OS user/group the daemon runs as (declared in supervisor.yaml, not in a unit).
 # Configurable so nothing is hardcoded. `root` is rejected: the supervisor refuses a root-run managed
 # service at config load, and multi-user session spawning is now the supervisor's job, not the
-# daemon's (list the target accounts under spawn_policy.allowed_session_users in supervisor.yaml).
+# daemon's (map the target accounts in users.yaml beside supervisor.yaml).
 # Unused under --user, which runs the daemon as the invoking user.
 DAEMON_USER="${INSTALL_DAEMON_USER:-tddy}"
 DAEMON_GROUP="${INSTALL_DAEMON_GROUP:-$DAEMON_USER}"
@@ -792,6 +792,210 @@ migrate_user_mapping() {
   fi
 }
 
+# resolved_git_path — the file `git` on PATH resolves to, symlinks followed, or nothing when no
+# git is on PATH. A fresh supervisor.yaml names this one file as an exec root (never the whole
+# directory git lives in), because a streamed clone spawn runs the host's git through the
+# supervisor's exec gate.
+resolved_git_path() {
+  local dir candidate resolved target dirpart
+  local -a dirs=()
+  IFS=: read -r -a dirs <<< "${PATH:-}"
+  for dir in "${dirs[@]}"; do
+    candidate="${dir:-.}/git"
+    [[ -f "$candidate" ]] || continue
+    resolved="$candidate"
+    while [[ -L "$resolved" ]]; do
+      target="$(readlink "$resolved")" || break
+      case "$target" in
+        /*) resolved="$target" ;;
+        *) resolved="$(dirname "$resolved")/$target" ;;
+      esac
+    done
+    dirpart="$(cd "$(dirname "$resolved")" 2>/dev/null && pwd -P)" || return 1
+    printf '%s/%s\n' "$dirpart" "$(basename "$resolved")"
+    return 0
+  done
+  return 1
+}
+
+# migrate_spawn_policy_keys CONFIG_DIR
+#
+# Moves a pre-`#agent-tools`-32/32 spawn policy onto exec roots, once, extending
+# migrate_user_mapping: the files `allowed_tool_paths` and `allowed_relay_tool_paths` listed
+# become `exec_roots` file entries, and `allowed_env_keys` is dropped (the daemon's env now
+# passes whole under the one env rule). The supervisor refuses the old keys at load, so a host
+# upgraded without this migration loses its supervisor. `allowed_mount_roots` and everything
+# else the operator wrote is kept, and a file naming none of the old keys is left untouched —
+# which is also what makes a second run a no-op.
+migrate_spawn_policy_keys() {
+  local dir="$1"
+  local supervisor="${dir}/supervisor.yaml"
+  [[ -f "$supervisor" ]] || return 0
+  grep -Eq '^[[:space:]]*(allowed_tool_paths|allowed_relay_tool_paths|allowed_env_keys):' "$supervisor" || return 0
+
+  local paths_tmp existing_tmp final_tmp tmp has_roots=0
+  paths_tmp="$(mktemp "${supervisor}.paths.XXXXXX")" || {
+    echo "install: cannot create a temporary file next to ${supervisor}" >&2
+    exit 1
+  }
+  existing_tmp="$(mktemp "${supervisor}.roots.XXXXXX")" || {
+    rm -f "$paths_tmp"
+    echo "install: cannot create a temporary file next to ${supervisor}" >&2
+    exit 1
+  }
+  final_tmp="$(mktemp "${supervisor}.final.XXXXXX")" || {
+    rm -f "$paths_tmp" "$existing_tmp"
+    echo "install: cannot create a temporary file next to ${supervisor}" >&2
+    exit 1
+  }
+  tmp="$(mktemp "${supervisor}.XXXXXX")" || {
+    rm -f "$paths_tmp" "$existing_tmp" "$final_tmp"
+    echo "install: cannot create a temporary file next to ${supervisor}" >&2
+    exit 1
+  }
+
+  # The listed tool and relay files, in the order written (flow `[...]` and block `- item`
+  # forms both).
+  awk '
+    function clean(v, q) {
+      sub(/^[[:space:]]+/, "", v); sub(/[[:space:]]+$/, "", v)
+      sub(/[[:space:]]+#.*$/, "", v)
+      sub(/^[[:space:]]+/, "", v); sub(/[[:space:]]+$/, "", v)
+      q = substr(v, 1, 1)
+      if (length(v) >= 2 && (q == "\"" || q == sprintf("%c", 39)) && substr(v, length(v), 1) == q) v = substr(v, 2, length(v) - 2)
+      return v
+    }
+    BEGIN { inlist = 0 }
+    {
+      line = $0
+      if (line ~ /^[[:space:]]*#/) next
+      ind = match(line, /[^[:space:]]/) - 1
+      if (ind < 0) ind = length(line)
+      if (inlist) {
+        if (line ~ /^[[:space:]]*-[[:space:]]+/) {
+          item = line
+          sub(/^[[:space:]]*-[[:space:]]+/, "", item)
+          item = clean(item)
+          if (item != "") print item
+          next
+        }
+        if (line == "" || ind > list_ind) next
+        inlist = 0
+      }
+      if (line ~ /^[[:space:]]*(allowed_tool_paths|allowed_relay_tool_paths)[[:space:]]*:/) {
+        rest = line
+        sub(/^[^:]*:[[:space:]]*/, "", rest)
+        if (rest ~ /^\[/) {
+          sub(/^\[/, "", rest)
+          sub(/\].*$/, "", rest)
+          count = split(rest, parts, ",")
+          for (i = 1; i <= count; i++) {
+            value = clean(parts[i])
+            if (value != "") print value
+          }
+        } else if (rest != "") {
+          value = clean(rest)
+          if (value != "") print value
+        } else {
+          inlist = 1
+          list_ind = ind
+        }
+      }
+    }
+  ' "$supervisor" > "$paths_tmp" || {
+    rm -f "$paths_tmp" "$existing_tmp" "$final_tmp" "$tmp"
+    echo "install: failed reading the old spawn policy keys in ${supervisor}; it is left unchanged" >&2
+    exit 1
+  }
+
+  # Files an existing `exec_roots` already names, so a half-migrated file gains no duplicates.
+  awk '
+    BEGIN { inlist = 0 }
+    {
+      line = $0
+      if (line ~ /^[[:space:]]*#/) next
+      ind = match(line, /[^[:space:]]/) - 1
+      if (ind < 0) ind = length(line)
+      if (inlist) {
+        if (line ~ /^[[:space:]]*-[[:space:]]+/) {
+          item = line
+          sub(/^[[:space:]]*-[[:space:]]+/, "", item)
+          if (item ~ /^\{/) {
+            sub(/^.*path:[[:space:]]*/, "", item)
+            sub(/[,}].*$/, "", item)
+          }
+          sub(/^[[:space:]]+/, "", item); sub(/[[:space:]]+$/, "", item)
+          if (item != "") print item
+          next
+        }
+        if (line == "" || ind > list_ind) next
+        inlist = 0
+      }
+      if (line ~ /^[[:space:]]*exec_roots[[:space:]]*:/) {
+        rest = line
+        sub(/^[^:]*:[[:space:]]*/, "", rest)
+        if (rest == "") { inlist = 1; list_ind = ind }
+      }
+    }
+  ' "$supervisor" > "$existing_tmp"
+
+  # What remains: the listed files an existing exec_roots does not already name, once each.
+  local listed
+  while IFS= read -r listed; do
+    [[ -n "$listed" ]] || continue
+    grep -Fxq "$listed" "$existing_tmp" && continue
+    grep -Fxq "$listed" "$final_tmp" && continue
+    printf '%s\n' "$listed" >> "$final_tmp"
+  done < "$paths_tmp"
+  if grep -Eq '^[[:space:]]*exec_roots:' "$supervisor"; then
+    has_roots=1
+  fi
+
+  if ! cp -p "$supervisor" "$tmp" || ! awk -v paths_file="$final_tmp" -v has_roots="$has_roots" '
+    function pad(count, s, i) { s = ""; for (i = 0; i < count; i++) s = s " "; return s }
+    function emit(indent, i) { for (i = 1; i <= n; i++) printf "%s  - %s\n", pad(indent), paths[i] }
+    BEGIN {
+      n = 0
+      while ((getline p < paths_file) > 0) { n++; paths[n] = p }
+      inserted = 0; skipping = 0
+    }
+    {
+      line = $0
+      if (line ~ /^[[:space:]]*#/) { if (!skipping) print; next }
+      ind = match(line, /[^[:space:]]/) - 1
+      if (ind < 0) ind = length(line)
+      if (skipping) {
+        if (line == "" || ind > skip_ind || (line ~ /^[[:space:]]*-/ && ind >= skip_ind)) next
+        skipping = 0
+      }
+      if (line ~ /^[[:space:]]*(allowed_tool_paths|allowed_relay_tool_paths|allowed_env_keys):/) {
+        rest = line
+        sub(/^[^:]*:/, "", rest)
+        if (!inserted && has_roots != 1 && n > 0) {
+          print pad(ind) "exec_roots:"
+          emit(ind)
+          inserted = 1
+        }
+        if (rest ~ /^[[:space:]]*$/) { skipping = 1; skip_ind = ind }
+        next
+      }
+      print
+      if (!inserted && has_roots == 1 && n > 0 && line ~ /^[[:space:]]*exec_roots:/) {
+        rest = line
+        sub(/^[^:]*:/, "", rest)
+        if (rest ~ /^[[:space:]]*$/) { emit(ind); inserted = 1 }
+      }
+    }
+  ' "$supervisor" > "$tmp"; then
+    rm -f "$paths_tmp" "$existing_tmp" "$final_tmp" "$tmp"
+    echo "install: failed migrating the old spawn policy keys in ${supervisor}; it is left unchanged" >&2
+    exit 1
+  fi
+  rm -f "$paths_tmp" "$existing_tmp" "$final_tmp"
+  mv -f "$tmp" "$supervisor"
+  echo "install:   migrated the old spawn policy keys in ${supervisor}: the listed tool and relay files are spawn_policy.exec_roots now, and allowed_env_keys is dropped (the daemon's env passes whole)"
+}
+
 # --- desktop install ------------------------------------------------------------------------------
 #
 # Self-contained: it shares this script's helpers (atomically_write, render_template,
@@ -1105,8 +1309,8 @@ if "$want_supervisor" && [[ "$DAEMON_USER" == "root" ]]; then
     echo "install: INSTALL_DAEMON_USER=root is not supported: tddy-supervisor rejects a root-run managed" >&2
     echo "install: service at config load." >&2
   fi
-  echo "install: Multi-user session spawning is the supervisor's job now — list" >&2
-  echo "install: the target accounts under spawn_policy.allowed_session_users in ${SUPERVISOR_CONFIG_FILE}." >&2
+  echo "install: Multi-user session spawning is the supervisor's job now — map the target" >&2
+  echo "install: accounts in ${CONFIG_DIR}/users.yaml (the GitHub -> OS-user mapping)." >&2
   exit 1
 fi
 
@@ -1151,7 +1355,7 @@ fi
 # same reason: the daemon resolves it as a sibling of its own executable, with a bare name on PATH
 # as the only remaining fallback. Required in both modes, --user included, or the first restructure
 # a session asks for fails at spawn rather than at install time.
-INSTALLED_BINARIES=(tddy-daemon tddy-coder tddy-tools tddy-remote-git-repo tddy-askpass tddy-session-sync tddy-sandbox-runner tddy-index-daemon)
+INSTALLED_BINARIES=(tddy-daemon tddy-coder tddy-tools tddy-remote-git-repo tddy-askpass tddy-session-sync tddy-sandbox-runner tddy-index-daemon tddy-git-clone)
 if "$want_supervisor"; then
   INSTALLED_BINARIES=(tddy-supervisor "${INSTALLED_BINARIES[@]}")
 fi
@@ -1339,9 +1543,24 @@ if "$want_supervisor"; then
       echo "install: missing ${ROOT_DIR}/supervisor.yaml.production" >&2
       exit 1
     fi
+    resolved_git="$(resolved_git_path)" || {
+      echo "install: cannot render ${SUPERVISOR_CONFIG_FILE}: no git found on PATH. The supervisor's" >&2
+      echo "install: spawn policy names the resolved git file as an exec root, so install git and re-run." >&2
+      exit 1
+    }
+    case "$resolved_git" in
+      /nix/store|/nix/store/*)
+        nix_store_exec_root="    - { path: /nix/store, trusted_prefix: true }"
+        ;;
+      *)
+        nix_store_exec_root="    # (no trusted-prefix entry: git on this host does not resolve under /nix/store)"
+        ;;
+    esac
     echo "install: creating ${SUPERVISOR_CONFIG_FILE} from supervisor.yaml.production (declares tddy-daemon as user ${DAEMON_USER})"
     render_template "${ROOT_DIR}/supervisor.yaml.production" "$SUPERVISOR_CONFIG_FILE" \
       "__INSTALL_BIN_DIR__=${BIN_DIR}" \
+      "__RESOLVED_GIT_PATH__=${resolved_git}" \
+      "__NIX_STORE_EXEC_ROOT__=${nix_store_exec_root}" \
       "__DAEMON_CONFIG_PATH__=${CONFIG_FILE}" \
       "__SUPERVISOR_SOCKET_PATH__=${SUPERVISOR_SOCKET_PATH}" \
       "__SOCKET_GROUP__=${SOCKET_GROUP}" \
@@ -1349,8 +1568,8 @@ if "$want_supervisor"; then
       "__DAEMON_USER__=${DAEMON_USER}" \
       "__USERS_FILE_PATH__=${CONFIG_DIR}/users.yaml" \
       "__DAEMON_GROUP__=${DAEMON_GROUP}"
-    echo "install:   spawn_policy and cgroup ceilings are left empty — no session may be spawned until"
-    echo "install:   an operator fills them in (an empty policy grants no privilege)"
+    echo "install:   spawn_policy exec_roots name ${BIN_DIR} and the resolved git file (${resolved_git});"
+    echo "install:   cgroup ceilings are left empty — no session resource use is clamped until an operator sets them"
     echo "install:   the GitHub -> OS-user mapping lives in ${CONFIG_DIR}/users.yaml: map a login there and"
     echo "install:   the supervisor creates that user's daemon socket at its next start (a saved edit restarts it)"
   else
@@ -1360,6 +1579,7 @@ fi
 
 # The mapping every mode reads lives beside the configs, whichever of them this run wrote.
 migrate_user_mapping "$CONFIG_DIR"
+migrate_spawn_policy_keys "$CONFIG_DIR"
 
 # supervisor.yaml is the whole policy the root broker enforces, and daemon.yaml decides what the
 # daemon serves — neither may be writable by anyone but its owner, whichever run created them.

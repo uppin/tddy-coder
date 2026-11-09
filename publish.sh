@@ -61,7 +61,7 @@ if "$WANT_BUILD"; then
 fi
 
 # Verify build artifacts
-for f in target/release/tddy-daemon target/release/tddy-coder target/release/tddy-tools target/release/tddy-index-daemon target/release/tddy-remote-git-repo target/release/tddy-askpass target/release/tddy-session-sync target/release/tddy-sandbox-runner; do
+for f in target/release/tddy-daemon target/release/tddy-coder target/release/tddy-tools target/release/tddy-index-daemon target/release/tddy-remote-git-repo target/release/tddy-askpass target/release/tddy-session-sync target/release/tddy-sandbox-runner target/release/tddy-git-clone; do
   [[ -f "$f" ]] || { echo "publish: missing $f (run ./release or pass --build)" >&2; exit 1; }
 done
 [[ -f packages/tddy-web/dist/index.html ]] || {
@@ -125,6 +125,7 @@ install -m 0755 target/release/tddy-remote-git-repo "${STAGE}/usr/bin/tddy-remot
 install -m 0755 target/release/tddy-askpass        "${STAGE}/usr/bin/tddy-askpass"
 install -m 0755 target/release/tddy-session-sync   "${STAGE}/usr/bin/tddy-session-sync"
 install -m 0755 target/release/tddy-sandbox-runner  "${STAGE}/usr/bin/tddy-sandbox-runner"
+install -m 0755 target/release/tddy-git-clone      "${STAGE}/usr/bin/tddy-git-clone"
 install -m 0755 "$CODEX_ACP_NATIVE"                 "${STAGE}/usr/bin/codex-acp"
 
 # Web bundle

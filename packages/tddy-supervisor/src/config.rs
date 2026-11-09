@@ -10,7 +10,6 @@ use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
-use crate::config::spawn_policy::is_loader_env_key;
 use crate::config::spawn_policy::SpawnPolicy;
 use crate::error::ConfigError;
 
@@ -283,6 +282,39 @@ fn refuse_old_user_list_keys(yaml: &str) -> Result<(), ConfigError> {
     Ok(())
 }
 
+/// Refuse the spawn-policy keys `exec_roots` and the one env rule replaced (`#agent-tools` 32/32).
+fn refuse_old_spawn_policy_keys(yaml: &str) -> Result<(), ConfigError> {
+    let document: serde_yaml::Value = serde_yaml::from_str(yaml).map_err(|error| ConfigError {
+        message: error.to_string(),
+    })?;
+    let Some(top) = document.as_mapping() else {
+        return Ok(());
+    };
+    let Some(policy) = top.get("spawn_policy").and_then(|v| v.as_mapping()) else {
+        return Ok(());
+    };
+    for key in ["allowed_tool_paths", "allowed_relay_tool_paths"] {
+        if policy.contains_key(key) {
+            return Err(ConfigError {
+                message: format!(
+                    "`{key}:` in supervisor.yaml is obsolete — it was replaced by \
+                     `spawn_policy.exec_roots`; delete the `{key}:` key and name the same files \
+                     or directories under `exec_roots`"
+                ),
+            });
+        }
+    }
+    if policy.contains_key("allowed_env_keys") {
+        return Err(ConfigError {
+            message: "`allowed_env_keys:` in supervisor.yaml is obsolete — it was removed; the \
+                      daemon's environment now passes whole under the one env rule, so delete \
+                      the `allowed_env_keys:` key"
+                .to_string(),
+        });
+    }
+    Ok(())
+}
+
 impl SupervisorConfig {
     /// Read and validate the configuration at `path`, refusing one anybody else could have written.
     ///
@@ -337,6 +369,7 @@ impl SupervisorConfig {
     /// a startup failure, not a runtime surprise.
     pub fn from_yaml(yaml: &str) -> Result<SupervisorConfig, ConfigError> {
         refuse_old_user_list_keys(yaml)?;
+        refuse_old_spawn_policy_keys(yaml)?;
         let config: SupervisorConfig = serde_yaml::from_str(yaml).map_err(|error| ConfigError {
             message: error.to_string(),
         })?;
@@ -389,24 +422,15 @@ impl SupervisorConfig {
             require_absolute("users file", &users.file)?;
             require_absolute("users sockets_dir", &users.sockets_dir)?;
         }
-        for tool in &self.spawn_policy.allowed_tool_paths {
-            require_absolute("allowed_tool_paths entry", tool)?;
-        }
-        for tool in &self.spawn_policy.allowed_relay_tool_paths {
-            require_absolute("allowed_relay_tool_paths entry", tool)?;
-        }
         for root in &self.spawn_policy.allowed_mount_roots {
             require_absolute("allowed_mount_roots entry", root)?;
         }
-        // TODO(supervisor-agent-agnostic): implement — every `exec_roots` entry is absolute, and
-        // `allowed_tool_paths`, `allowed_relay_tool_paths` and `allowed_env_keys` fail loading,
-        // naming `exec_roots` (or, for the env list, that it was removed).
-        for key in &self.spawn_policy.allowed_env_keys {
-            if is_loader_env_key(key) {
+        for root in &self.spawn_policy.exec_roots {
+            if !root.path.is_absolute() {
                 return Err(ConfigError {
                     message: format!(
-                        "allowed_env_keys may not contain `{key}`: it chooses what code a session \
-                         loads, which would hand a caller everything allowed_tool_paths withholds"
+                        "exec_roots entry `{}` must be absolute",
+                        root.path.display()
                     ),
                 });
             }
@@ -611,50 +635,13 @@ mod tests {
         // default on both sides of the comparison.
         assert_eq!(config.users, None);
         assert_eq!(
-            config.spawn_policy.allowed_tool_paths,
-            Vec::<PathBuf>::new()
+            config.spawn_policy.exec_roots,
+            Vec::<crate::config::spawn_policy::ExecRoot>::new()
         );
         assert_eq!(
             config.spawn_policy.allowed_mount_roots,
             Vec::<PathBuf>::new()
         );
-    }
-
-    #[test]
-    fn defaults_to_relaying_no_harness() {
-        // Given / When
-        let config = SupervisorConfig::from_yaml(a_minimal_config()).expect("parse config");
-
-        // Then
-        assert_eq!(
-            config.spawn_policy.allowed_relay_tool_paths,
-            Vec::<PathBuf>::new()
-        );
-    }
-
-    #[test]
-    fn refuses_a_relay_tool_path_that_is_not_absolute() {
-        // Given
-        let yaml = format!(
-            "{}\nspawn_policy:\n  allowed_relay_tool_paths: [\"bin/opencode\"]\n",
-            a_minimal_config()
-        );
-
-        // When
-        let result = SupervisorConfig::from_yaml(&yaml);
-
-        // Then
-        assert_rejected_because(result, "allowed_relay_tool_paths entry");
-    }
-
-    #[test]
-    fn defaults_to_passing_on_no_environment_variable_a_caller_asks_for() {
-        // Given / When
-        let config = SupervisorConfig::from_yaml(a_minimal_config()).expect("parse config");
-
-        // Then — a variable the caller can set on a process running as another user is a grant, so
-        // an operator who wrote none has granted none.
-        assert_eq!(config.spawn_policy.allowed_env_keys, Vec::<String>::new());
     }
 
     #[test]
@@ -669,7 +656,7 @@ spawn_policy:
 
         // When / Then — `LD_PRELOAD` makes any allowlisted tool load code the caller chose, so
         // granting it would hand over everything `allowed_tool_paths` exists to withhold.
-        assert_rejected_because(SupervisorConfig::from_yaml(yaml), "LD_PRELOAD");
+        assert_rejected_because(SupervisorConfig::from_yaml(yaml), "removed");
     }
 
     #[test]
@@ -1042,7 +1029,7 @@ services:
 socket:
   path: /run/tddy-supervisor.sock
 spawn_policy:
-  allowed_tool_paths: [\"bin/tddy-coder\"]
+  exec_roots: [\"bin/tddy-coder\"]
 ";
 
         // When / Then — a relative entry could never match a resolved request anyway, so it is a

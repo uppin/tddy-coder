@@ -351,10 +351,15 @@ impl DaemonCodingAgentLauncher {
         match run_as_session_user(command.clone(), &launch.session_os_user, &self.drop) {
             Ok(command) => Ok(AgentTransport::Command(command)),
             Err(AsUserRefusal::Unprivileged(reason)) => match &self.relay {
-                Some(relay) => start_relayed(relay, &launch.session_os_user, &command)
-                    .await
-                    .map(AgentTransport::Stream)
-                    .map_err(|e| Self::refuse(launch, &e.to_string())),
+                Some(relay) => start_relayed(
+                    relay,
+                    &launch.session_os_user,
+                    &command,
+                    Some(launch.session_id.clone()),
+                )
+                .await
+                .map(AgentTransport::Stream)
+                .map_err(|e| Self::refuse(launch, &e.to_string())),
                 None => Err(Self::refuse(launch, &reason)),
             },
             Err(other) => Err(Self::refuse(launch, &other.to_string())),

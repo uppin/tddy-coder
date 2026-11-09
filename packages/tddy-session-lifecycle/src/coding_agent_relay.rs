@@ -7,8 +7,8 @@
 //! connected stream, which the ACP driver serves in place of a child process.
 //!
 //! The supervisor's refusal is opaque by design, so the typed error names the three things an
-//! operator can change: the harness in `allowed_relay_tool_paths`, the user in `users.yaml`,
-//! every environment variable in `allowed_env_keys`.
+//! operator can change: the harness under `exec_roots`, the user in `users.yaml`, and the
+//! launch's environment, which passes whole but for a loader variable.
 
 use std::collections::BTreeMap;
 use std::os::unix::fs::DirBuilderExt;
@@ -65,10 +65,14 @@ pub struct RelayEndpoint {
 }
 
 /// Start `command` as `os_user` through the supervisor and return the stream its stdio is relayed on.
+///
+/// `scope` is the session's cgroup scope, when the session runs in one: the relayed child joins
+/// it before it execs, as a session child does. `None` leaves it unscoped.
 pub async fn start_relayed(
     endpoint: &RelayEndpoint,
     os_user: &str,
     command: &AcpAgentCommand,
+    scope: Option<String>,
 ) -> Result<std::os::unix::net::UnixStream, SubagentError> {
     let socket = bind_private_socket(&endpoint.socket_dir)?;
     let request = SpawnRelayedRequest {
@@ -78,8 +82,7 @@ pub async fn start_relayed(
         env: command.env.iter().cloned().collect::<BTreeMap<_, _>>(),
         working_dir: command.cwd.clone(),
         relay_socket: socket.path.clone(),
-        // TODO(supervisor-agent-agnostic): implement — the session's cgroup scope.
-        scope: None,
+        scope,
     };
     endpoint
         .spawner
@@ -104,9 +107,9 @@ fn relay_refusal_error(os_user: &str, program: &Path, error: SupervisorError) ->
     SubagentError::from(match error {
         SupervisorError::Denied => format!(
             "tddy-supervisor refused to run {} as '{os_user}' (its refusals are opaque): its \
-             spawn_policy must list the harness binary in allowed_relay_tool_paths, '{os_user}' must be \
-             mapped in users.yaml, and every environment variable the launch sets in \
-             allowed_env_keys",
+             spawn_policy must cover the harness binary under exec_roots, '{os_user}' must be \
+             mapped in users.yaml, and the launch's environment must name no loader variable \
+             (the environment otherwise passes whole)",
             program.display()
         ),
         other => format!("tddy-supervisor could not start the coding agent: {other}"),
@@ -235,19 +238,29 @@ mod tests {
     /// The one request the supervisor saw for a relayed start of [`a_command`] as `dev`.
     async fn the_request_for_dev() -> (SpawnRelayedRequest, RelayEndpoint, tempfile::TempDir) {
         let (endpoint, supervisor, dir) = an_endpoint(Ok(()));
-        let _stream = start_relayed(&endpoint, "dev", &a_command())
-            .await
-            .expect("relayed");
+        let _stream = start_relayed(
+            &endpoint,
+            "dev",
+            &a_command(),
+            Some("dev-session".to_string()),
+        )
+        .await
+        .expect("relayed");
         let seen = supervisor.seen.lock().expect("seen")[0].clone();
         (seen, endpoint, dir)
     }
 
     async fn denied_by_the_supervisor() -> String {
         let (endpoint, _supervisor, _dir) = an_endpoint(Err(SupervisorError::Denied));
-        start_relayed(&endpoint, "dev", &a_command())
-            .await
-            .expect_err("refused")
-            .to_string()
+        start_relayed(
+            &endpoint,
+            "dev",
+            &a_command(),
+            Some("dev-session".to_string()),
+        )
+        .await
+        .expect_err("refused")
+        .to_string()
     }
 
     #[tokio::test]
@@ -282,6 +295,15 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn asks_the_supervisor_for_the_session_scope() {
+        // When
+        let (seen, _endpoint, _dir) = the_request_for_dev().await;
+
+        // Then — the relayed child joins the session's cgroup scope
+        assert_eq!(seen.scope, Some("dev-session".to_string()));
+    }
+
+    #[tokio::test]
     async fn asks_the_supervisor_to_connect_to_a_socket_in_the_daemons_own_directory() {
         // When
         let (seen, endpoint, _dir) = the_request_for_dev().await;
@@ -296,9 +318,14 @@ mod tests {
         let (endpoint, _supervisor, _dir) = an_endpoint(Ok(()));
 
         // When
-        let mut stream = start_relayed(&endpoint, "dev", &a_command())
-            .await
-            .expect("relayed");
+        let mut stream = start_relayed(
+            &endpoint,
+            "dev",
+            &a_command(),
+            Some("dev-session".to_string()),
+        )
+        .await
+        .expect("relayed");
 
         // Then
         let mut received = [0u8; 14];
@@ -358,9 +385,14 @@ mod tests {
             .expect("open it up");
 
         // When
-        let _stream = start_relayed(&endpoint, "dev", &a_command())
-            .await
-            .expect("relayed");
+        let _stream = start_relayed(
+            &endpoint,
+            "dev",
+            &a_command(),
+            Some("dev-session".to_string()),
+        )
+        .await
+        .expect("relayed");
 
         // Then
         let mode = std::fs::metadata(&endpoint.socket_dir)
@@ -379,7 +411,13 @@ mod tests {
         std::os::unix::fs::symlink(&elsewhere, &endpoint.socket_dir).expect("symlink");
 
         // When
-        let refusal = start_relayed(&endpoint, "dev", &a_command()).await;
+        let refusal = start_relayed(
+            &endpoint,
+            "dev",
+            &a_command(),
+            Some("dev-session".to_string()),
+        )
+        .await;
 
         // Then
         assert!(refusal.is_err());
@@ -393,10 +431,15 @@ mod tests {
         endpoint.socket_dir = dir.path().join("x".repeat(120));
 
         // When
-        let refusal = start_relayed(&endpoint, "dev", &a_command())
-            .await
-            .expect_err("refused")
-            .to_string();
+        let refusal = start_relayed(
+            &endpoint,
+            "dev",
+            &a_command(),
+            Some("dev-session".to_string()),
+        )
+        .await
+        .expect_err("refused")
+        .to_string();
 
         // Then
         assert!(

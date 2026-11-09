@@ -1,5 +1,4 @@
 use crate::authz::PeerIdentity;
-use crate::clone::CloneEvents;
 use crate::proto::supervisor::{self as wire, SupervisorService};
 use crate::protocol;
 use crate::server::PrivilegedSurface;
@@ -136,21 +135,6 @@ impl SupervisorService for SupervisorServiceImpl {
             .session_status(request.into_inner().pid)
             .map_err(protocol::status_from_error)?;
         Ok(Response::new(protocol::session_status_to_wire(status)))
-    }
-
-    type CloneRepositoryStream = CloneEvents;
-
-    async fn clone_repository(
-        &self,
-        request: Request<wire::CloneRepositoryRequest>,
-    ) -> Result<Response<Self::CloneRepositoryStream>, Status> {
-        self.authorize_peer()?;
-        let events = self
-            .surface
-            .clone_repository(request.into_inner())
-            .await
-            .map_err(protocol::status_from_error)?;
-        Ok(Response::new(events))
     }
 
     type SpawnStreamedStream = StreamedEvents;

@@ -90,20 +90,6 @@ fn no_agent_socket_leaves_ssh_auth_sock_unset_rather_than_empty() {
 }
 
 #[test]
-fn every_variable_a_clone_sets_is_one_a_supervisor_can_be_told_to_allow() {
-    // The supervisor refuses any env key not on its allowlist, so the allowlist an operator is
-    // handed must be exactly what a clone can set — no more to over-grant, none missing to refuse.
-    let set: Vec<String> = env_of(a_clone_env()).into_keys().collect();
-    let mut allowed: Vec<String> = CloneSshEnv::ALLOWED_ENV_KEYS
-        .iter()
-        .map(|k| k.to_string())
-        .collect();
-    allowed.sort();
-
-    assert_eq!(set, allowed);
-}
-
-#[test]
 fn an_ssh_argument_containing_a_space_stays_one_word_for_the_shell_git_runs_it_through() {
     let command = env_of(a_clone_env().ssh_args(["-i", "/home/ada/my keys/id_rsa"]))
         ["GIT_SSH_COMMAND"]

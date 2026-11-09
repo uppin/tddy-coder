@@ -53,6 +53,9 @@ fn an_install_tree() -> InstallTree {
         // Spawned by the daemon as a sibling of its own executable, so `install` requires it for
         // the same reason and with the same preflight.
         "tddy-index-daemon",
+        // The clone helper a supervised daemon runs as the session user; `install` requires it
+        // beside the daemon for the same sibling-resolution reason.
+        "tddy-git-clone",
     ] {
         write_executable(&release.join(binary), "fake-binary\n");
     }
@@ -528,7 +531,7 @@ fn keeps_an_existing_supervisor_config_rather_than_overwriting_the_policy_in_it(
     let tree = an_install_tree();
     tree.install();
     let operator_policy = format!(
-        "{}spawn_policy:\n  allowed_tool_paths: [/usr/local/bin/tddy-coder]\n",
+        "{}spawn_policy:\n  exec_roots:\n    - /usr/local/bin/tddy-coder\n",
         a_supervisor_config_declaring_the_daemon_as("tddy", Some("tddy"))
     );
     tree.overwrite_installed_config("supervisor.yaml", &operator_policy);

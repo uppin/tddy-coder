@@ -49,6 +49,7 @@ impl Slot {
             },
             // A managed service is a host service, not a sandboxed session.
             sandbox: None,
+            checked: None,
         }
     }
 

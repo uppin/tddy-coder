@@ -14,7 +14,7 @@ use serde::{Deserialize, Serialize};
 pub struct SpawnSessionRequest {
     /// Must be mapped in `users.yaml`.
     pub os_user: String,
-    /// Must appear in `SpawnPolicy::allowed_tool_paths`.
+    /// Must resolve under `SpawnPolicy::exec_roots`.
     pub tool_path: PathBuf,
     #[serde(default)]
     pub args: Vec<String>,
@@ -27,15 +27,14 @@ pub struct SpawnSessionRequest {
     pub scope: Option<String>,
 }
 
-/// Spawn a coding-agent harness as another OS user, its stdio relayed over a socket the caller owns.
+/// Spawn a binary as another OS user, its stdio relayed over a socket the caller owns.
 ///
-/// Gated like [`SpawnSessionRequest`] and by one more allowlist of its own
-/// (`SpawnPolicy::allowed_relay_tool_paths`), so enabling sessions never enables relayed stdio.
+/// Gated like [`SpawnSessionRequest`], under the same exec roots.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SpawnRelayedRequest {
     /// Must be mapped in `users.yaml`.
     pub os_user: String,
-    /// Must appear in `SpawnPolicy::allowed_relay_tool_paths`.
+    /// Must resolve under `SpawnPolicy::exec_roots`.
     pub tool_path: PathBuf,
     #[serde(default)]
     pub args: Vec<String>,
@@ -46,7 +45,6 @@ pub struct SpawnRelayedRequest {
     /// The caller's listening socket: absolute, owned by the caller's uid.
     pub relay_socket: PathBuf,
     /// Name of an existing scope to place the child in before `exec`.
-    // TODO(supervisor-agent-agnostic): implement — carried on the wire, not yet joined.
     #[serde(default)]
     pub scope: Option<String>,
 }
@@ -108,7 +106,7 @@ pub struct AppliedLimits {
 pub struct SpawnSandboxRequest {
     /// Must be mapped in `users.yaml`.
     pub os_user: String,
-    /// Must appear in `SpawnPolicy::allowed_tool_paths`.
+    /// Must resolve under `SpawnPolicy::exec_roots`.
     pub tool_path: PathBuf,
     #[serde(default)]
     pub args: Vec<String>,

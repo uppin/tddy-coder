@@ -188,7 +188,7 @@ impl SupervisorFixture {
     }
 
     pub fn allowing_tool(mut self, tool_path: &Path) -> Self {
-        self.allowed_tool_paths.push(tool_path.to_path_buf());
+        self.exec_roots.push(tool_path.to_path_buf());
         self
     }
 
@@ -200,7 +200,7 @@ impl SupervisorFixture {
 
     /// Allow `tool_path` as a harness binary a relayed spawn may exec (off unless this is called).
     pub fn allowing_relay_tool(mut self, tool_path: &Path) -> Self {
-        self.allowed_relay_tool_paths.push(tool_path.to_path_buf());
+        self.exec_roots.push(tool_path.to_path_buf());
         self
     }
 
@@ -331,8 +331,6 @@ impl SupervisorFixture {
                 "shutdown_grace_secs: {grace}\n",
                 "services:\n{services}",
                 "spawn_policy:\n",
-                "  allowed_tool_paths: [{tools}]\n",
-                "  allowed_relay_tool_paths: [{relay_tools}]\n",
                 "  allowed_mount_roots: [{mount_roots}]\n",
                 "  exec_roots: [{exec_roots}]\n",
                 "cgroup:\n",
@@ -350,20 +348,6 @@ impl SupervisorFixture {
             } else {
                 service_yaml
             },
-            tools = yaml_list(
-                &self
-                    .allowed_tool_paths
-                    .iter()
-                    .map(|p| p.display().to_string())
-                    .collect::<Vec<_>>()
-            ),
-            relay_tools = yaml_list(
-                &self
-                    .allowed_relay_tool_paths
-                    .iter()
-                    .map(|p| p.display().to_string())
-                    .collect::<Vec<_>>()
-            ),
             mount_roots = yaml_list(
                 &self
                     .allowed_mount_roots
@@ -699,6 +683,13 @@ impl Drop for RunningSupervisor {
 // Session tool fixtures
 // ---------------------------------------------------------------------------------------------
 
+fn a_trusted_workspace() -> TempDir {
+    let workspace = TempDir::new_in(env!("CARGO_TARGET_TMPDIR")).expect("create tool workspace");
+    fs::set_permissions(workspace.path(), fs::Permissions::from_mode(0o755))
+        .expect("make the tool workspace readable");
+    workspace
+}
+
 /// A script that records the pid of whichever process exec'd it, then stays alive.
 pub struct ToolFixture {
     path: PathBuf,
@@ -708,7 +699,7 @@ pub struct ToolFixture {
 
 /// A tool that exits immediately with `code`, for asserting on reported exit statuses.
 pub fn a_tool_that_exits_with(code: i32) -> ToolFixture {
-    let workspace = TempDir::new().expect("create tool workspace");
+    let workspace = a_trusted_workspace();
     let path = workspace.path().join("exiting-tool");
     let parent_pid_log = workspace.path().join("parent.pid");
     write_script(&path, &format!("exit {code}"));
@@ -721,7 +712,7 @@ pub fn a_tool_that_exits_with(code: i32) -> ToolFixture {
 
 /// A harness stand-in that echoes its stdin to its stdout, for asserting on a relayed spawn.
 pub fn a_tool_that_echoes_its_stdin() -> ToolFixture {
-    let workspace = TempDir::new().expect("create tool workspace");
+    let workspace = a_trusted_workspace();
     let path = workspace.path().join("echoing-tool");
     let parent_pid_log = workspace.path().join("parent.pid");
     write_script(&path, "exec cat");
@@ -746,7 +737,7 @@ pub fn a_tool_that_prints_its_environment() -> ToolFixture {
 }
 
 pub fn a_tool_that_records_its_parent() -> ToolFixture {
-    let workspace = TempDir::new().expect("create tool workspace");
+    let workspace = a_trusted_workspace();
     let path = workspace.path().join("recording-tool");
     let parent_pid_log = workspace.path().join("parent.pid");
     write_script(

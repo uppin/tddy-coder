@@ -2,7 +2,7 @@
 //! it never leaves a session start waiting on it forever.
 //!
 //! The peer here is not a supervisor: it is a unix socket that accepts the connection and then says
-//! nothing (or, for the clone stream, says one thing and then nothing). No process is forked, so the
+//! nothing (or, for the streamed stream, says one thing and then nothing). No process is forked, so the
 //! file runs on every platform.
 //!
 //! Every test is itself bounded by [`A_CALL_THAT_HANGS`]: a missing deadline fails the test, it does
@@ -17,8 +17,8 @@ use async_trait::async_trait;
 use prost::Message;
 use tddy_rpc::{RpcMessage, RpcResult, RpcService};
 use tddy_stdio::StdioEndpoint;
-use tddy_supervisor::proto::supervisor::clone_event::Event;
-use tddy_supervisor::proto::supervisor::{CloneEvent, CloneRepositoryRequest, CloneStarted};
+use tddy_supervisor::proto::supervisor::streamed_event::Event;
+use tddy_supervisor::proto::supervisor::{SpawnStreamedRequest, StreamedEvent, StreamedStarted};
 use tddy_supervisor::{SpawnRelayedRequest, SupervisorClient, SupervisorError};
 use tokio::net::UnixListener;
 
@@ -52,7 +52,7 @@ fn a_supervisor_that_never_answers() -> SilentPeer {
     }
 }
 
-/// A supervisor whose `CloneRepository` reports that git started, then goes quiet with the stream
+/// A supervisor whose `SpawnStreamed` reports that git started, then goes quiet with the stream
 /// still open.
 struct QuietAfterStartPeer {
     _dir: tempfile::TempDir,
@@ -89,8 +89,8 @@ struct StartsThenGoesQuiet;
 impl RpcService for StartsThenGoesQuiet {
     async fn handle_rpc(&self, _service: &str, _method: &str, _message: &RpcMessage) -> RpcResult {
         let (frames, receiver) = tokio::sync::mpsc::channel(4);
-        let started = CloneEvent {
-            event: Some(Event::Started(CloneStarted { pid: 4242 })),
+        let started = StreamedEvent {
+            event: Some(Event::Started(StreamedStarted { pid: 4242 })),
         };
         frames
             .send(Ok(started.encode_to_vec()))
@@ -125,11 +125,11 @@ fn a_relayed_spawn() -> SpawnRelayedRequest {
     }
 }
 
-fn a_clone() -> CloneRepositoryRequest {
-    CloneRepositoryRequest {
+fn a_clone() -> SpawnStreamedRequest {
+    SpawnStreamedRequest {
         os_user: "ada".to_string(),
-        git_url: "file:///nowhere".to_string(),
-        destination: "/tmp/nowhere".to_string(),
+        tool_path: "/usr/bin/a-streamed-tool".to_string(),
+        args: vec!["file:///nowhere".to_string(), "/tmp/nowhere".to_string()],
         ..Default::default()
     }
 }
@@ -177,50 +177,52 @@ async fn every_unary_call_is_bounded_not_only_spawn_relayed() {
 }
 
 #[tokio::test]
-async fn a_supervisor_clone_with_no_first_frame_fails_within_its_deadline() {
+async fn a_supervisor_streamed_spawn_with_no_first_frame_fails_within_its_deadline() {
     // Given a supervisor that accepts the connection and never answers
     let peer = a_supervisor_that_never_answers();
     let client = a_client_of(&peer.socket).await;
 
-    // When a clone is asked of it
-    let answered = tokio::time::timeout(A_CALL_THAT_HANGS, client.clone_repository(a_clone()))
+    // When a streamed spawn is asked of it
+    let answered = tokio::time::timeout(A_CALL_THAT_HANGS, client.spawn_streamed(a_clone()))
         .await
         .expect(
-            "CloneRepository waited for a first event that never comes with no deadline of its own",
+            "SpawnStreamed waited for a first event that never comes with no deadline of its own",
         );
 
-    // Then the clone failed Unavailable, naming the method
-    let message = unavailable_message(answered.expect_err("no first event is not a started clone"));
-    assert!(message.contains("CloneRepository"), "{message}");
+    // Then the streamed spawn failed Unavailable, naming the method
+    let message =
+        unavailable_message(answered.expect_err("no first event is not a started streamed spawn"));
+    assert!(message.contains("SpawnStreamed"), "{message}");
 }
 
 #[tokio::test]
-async fn a_supervisor_clone_that_goes_quiet_after_starting_ends_its_stream_with_unavailable() {
-    // Given a clone the supervisor started and then stopped reporting on, its stream left open
+async fn a_supervisor_streamed_spawn_that_goes_quiet_after_starting_ends_its_stream_with_unavailable(
+) {
+    // Given a streamed spawn the supervisor started and then stopped reporting on, its stream left open
     let peer = a_supervisor_whose_clone_goes_quiet_after_starting();
     let client = a_client_of(&peer.socket).await;
-    let mut events = tokio::time::timeout(A_CALL_THAT_HANGS, client.clone_repository(a_clone()))
+    let mut events = tokio::time::timeout(A_CALL_THAT_HANGS, client.spawn_streamed(a_clone()))
         .await
-        .expect("the clone opens")
-        .expect("the clone starts");
+        .expect("the streamed spawn opens")
+        .expect("the streamed spawn starts");
     let first = events
         .recv()
         .await
         .expect("the stream is open")
-        .expect("a clone event");
+        .expect("a streamed event");
     assert!(matches!(first.event, Some(Event::Started(_))), "{first:?}");
 
     // When the caller waits for its next event
     let next = tokio::time::timeout(A_CALL_THAT_HANGS, events.recv())
         .await
-        .expect("the clone stream stayed silent with no deadline between events");
+        .expect("the streamed stream stayed silent with no deadline between events");
 
-    // Then the stream ended its silence with Unavailable naming the clone
+    // Then the stream ended its silence with Unavailable naming the streamed spawn
     let message = unavailable_message(
         next.expect("an item, not a closed stream")
             .expect_err("silence is not an event"),
     );
-    assert!(message.contains("CloneRepository"), "{message}");
+    assert!(message.contains("SpawnStreamed"), "{message}");
 }
 
 #[test]

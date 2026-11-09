@@ -44,7 +44,7 @@ pub struct SupervisorClient {
     /// ([`Self::with_clone_progress_deadline`]).
     clone_progress_deadline: Duration,
     /// Drives the framed read/write loop for this connection. Shared with the stream of a call that
-    /// outlives the client ([`SupervisorClient::clone_repository`]).
+    /// outlives the client ([`SupervisorClient::spawn_streamed`]).
     connection: Arc<Connection>,
 }
 
@@ -219,23 +219,6 @@ impl SupervisorClient {
         let status: wire::SessionStatus =
             self.call("StopSession", wire::SessionRef { pid }).await?;
         protocol::session_status_from_wire(status).map_err(protocol::error_from_status)
-    }
-
-    /// Clone a repository as an allowlisted OS user, receiving git's progress as it is written.
-    ///
-    /// The first event is `Started{pid}`, then one `Progress{line}` per line git wrote, and the
-    /// stream ends after `Exited`. A request the supervisor refuses fails *this call*, before any
-    /// event. The stream keeps the connection open: it outlives this client, and dropping the
-    /// receiver closes the connection, which stops the clone.
-    pub async fn clone_repository(
-        &self,
-        request: wire::CloneRepositoryRequest,
-    ) -> Result<
-        tokio::sync::mpsc::Receiver<Result<wire::CloneEvent, SupervisorError>>,
-        SupervisorError,
-    > {
-        self.open_event_stream("CloneRepository", request.encode_to_vec())
-            .await
     }
 
     /// Spawn a binary as an OS user and stream its stderr — see `SpawnStreamed` in

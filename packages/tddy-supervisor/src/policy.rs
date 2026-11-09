@@ -88,105 +88,6 @@ pub fn resolve_mapped_session_user(
     }
 }
 
-/// Resolve the binary a session may exec.
-///
-/// The path must be absolute, free of `..`, and listed verbatim in the policy. Nothing is
-/// canonicalized against the filesystem: a policy decision must not depend on what happens to be
-/// on disk at the moment it is made, or a symlink swapped in between check and exec would change
-/// the answer.
-pub fn resolve_tool_path(
-    policy: &SpawnPolicy,
-    requested: &Path,
-) -> Result<PathBuf, SupervisorError> {
-    let requested = plain_absolute_path(requested)?;
-    if policy
-        .allowed_tool_paths
-        .iter()
-        .any(|allowed| allowed == requested)
-    {
-        Ok(requested.to_path_buf())
-    } else {
-        Err(SupervisorError::Denied)
-    }
-}
-
-/// Resolve the harness binary a relayed spawn may exec: absolute, free of `..`, and listed verbatim
-/// in `allowed_relay_tool_paths` — which is empty unless the operator turned relaying on, and is
-/// not `allowed_tool_paths`.
-pub fn resolve_relay_tool_path(
-    policy: &SpawnPolicy,
-    requested: &Path,
-) -> Result<PathBuf, SupervisorError> {
-    let requested = plain_absolute_path(requested)?;
-    if policy
-        .allowed_relay_tool_paths
-        .iter()
-        .any(|allowed| allowed == requested)
-    {
-        Ok(requested.to_path_buf())
-    } else {
-        Err(SupervisorError::Denied)
-    }
-}
-
-/// Resolve the environment a caller may put on a session it asks for.
-///
-/// Allowlisted, not denylisted. The tool allowlist is the supervisor's whole control over *what* runs
-/// as another OS user, and a caller that can set environment variables on that process has several
-/// ways to make it run something else — `LD_PRELOAD` most directly, but also everything else the
-/// loader and libc read paths out of. A denylist would have to be complete to be worth anything;
-/// an allowlist only has to be short.
-///
-/// A variable the policy does not list is a refusal rather than a silent omission: a session that
-/// started without the environment its caller asked for would behave differently for reasons nobody
-/// could see, and quietly doing less than you were asked is how a security control becomes a bug
-/// report about something else.
-pub fn resolve_env(
-    policy: &SpawnPolicy,
-    requested: &BTreeMap<String, String>,
-) -> Result<BTreeMap<String, String>, SupervisorError> {
-    for key in requested.keys() {
-        // Checked before the allowlist, so that a policy which lists one by mistake — the loader
-        // never gets to matter — is still refused here.
-        if is_loader_env_key(key) {
-            log::warn!(
-                target: "tddy_supervisor::policy",
-                "spawn refused: `{key}` chooses what code the session loads and is never a \
-                 caller's to set"
-            );
-            return Err(SupervisorError::Denied);
-        }
-        if !policy.allowed_env_keys.iter().any(|allowed| allowed == key) {
-            log::warn!(
-                target: "tddy_supervisor::policy",
-                "spawn refused: `{key}` is not in allowed_env_keys"
-            );
-            return Err(SupervisorError::Denied);
-        }
-    }
-    Ok(requested.clone())
-}
-
-/// The environment a relayed coding agent is started with (`#agent-tools 28/28`): `requested`, as
-/// the daemon computed it, whole. No `allowed_env_keys` list decides it — what an agent sees is
-/// coding-agent configuration, and the supervisor holds none. A loader variable (`LD_PRELOAD`, …)
-/// is still refused: it chooses what code runs, which is the supervisor's own concern.
-pub fn resolve_relayed_env(
-    requested: &BTreeMap<String, String>,
-) -> Result<BTreeMap<String, String>, SupervisorError> {
-    for key in requested.keys() {
-        if is_loader_env_key(key) {
-            log::warn!(
-                target: "tddy_supervisor::policy",
-                "relayed spawn refused: `{key}` chooses what code the session loads and is \
-                 never a caller's to set"
-            );
-            return Err(SupervisorError::Denied);
-        }
-    }
-    Ok(requested.clone())
-}
-
 /// A binary the exec gate passed, and what to exec so that it is that binary that runs.
 ///
 /// On Linux the gate keeps an `O_PATH` descriptor of the file it checked, and the child execs
@@ -229,31 +130,79 @@ pub fn resolve_exec(
     policy: &SpawnPolicy,
     requested: &Path,
 ) -> Result<CheckedExecutable, SupervisorError> {
-    // TODO(supervisor-agent-agnostic): implement — resolve the target, root containment, the
-    // owner/mode trust of the file, every parent and the entry, and the Linux O_PATH descriptor.
-    // Until then: a verbatim match against the entries, as `allowed_tool_paths` was.
     let requested = plain_absolute_path(requested)?;
-    if policy
-        .exec_roots
-        .iter()
-        .any(|entry| entry.path == requested)
-    {
-        Ok(CheckedExecutable {
-            path: requested.to_path_buf(),
-            descriptor: None,
-        })
-    } else {
-        Err(SupervisorError::Denied)
+    // A symlink is judged by its target: the kernel resolves the whole path.
+    let target = std::fs::canonicalize(requested).map_err(|_| SupervisorError::Denied)?;
+    // SAFETY: reads this process's own effective uid and nothing else.
+    let enforcing_uid = unsafe { libc::geteuid() };
+    for entry in &policy.exec_roots {
+        let Ok(entry_target) = std::fs::canonicalize(&entry.path) else {
+            continue;
+        };
+        let contained = if entry_target.is_file() {
+            target == entry_target
+        } else {
+            target.starts_with(&entry_target)
+        };
+        if !contained {
+            continue;
+        }
+        // The file, every directory above it and the entry itself must be trusted; an
+        // operator-marked trusted prefix is the one entry not itself checked.
+        let mut trusted = true;
+        let mut current = Some(target.as_path());
+        while let Some(path) = current {
+            if !(entry.trusted_prefix && path == entry_target) {
+                match std::fs::metadata(path) {
+                    Ok(metadata) => {
+                        use std::os::unix::fs::MetadataExt;
+                        if !is_trusted_exec_path_entry(
+                            metadata.uid(),
+                            metadata.mode(),
+                            enforcing_uid,
+                        ) {
+                            trusted = false;
+                            break;
+                        }
+                    }
+                    Err(_) => {
+                        trusted = false;
+                        break;
+                    }
+                }
+            }
+            current = path.parent();
+        }
+        if !trusted {
+            continue;
+        }
+        #[cfg(target_os = "linux")]
+        let descriptor = {
+            let c_path =
+                spawn_broker::path_to_c_string(&target).map_err(|_| SupervisorError::Denied)?;
+            let fd = spawn_broker::open_resolved(
+                libc::AT_FDCWD,
+                &c_path,
+                spawn_broker::RESOLVE_NO_SYMLINKS,
+            )
+            .map_err(|_| SupervisorError::Denied)?;
+            Some(std::sync::Arc::new(fd))
+        };
+        #[cfg(not(target_os = "linux"))]
+        let descriptor = None;
+        return Ok(CheckedExecutable {
+            path: target,
+            descriptor,
+        });
     }
+    Err(SupervisorError::Denied)
 }
 
 /// Whether one file or directory on the way to a binary is one only root, or the supervisor's own
 /// `enforcing_uid`, could have written: owned by one of them, and writable by neither its group nor
 /// everyone. Unlike the policy file's parents, a sticky world-writable directory is **not** trusted.
 pub fn is_trusted_exec_path_entry(owner_uid: u32, mode: u32, enforcing_uid: u32) -> bool {
-    // TODO(supervisor-agent-agnostic): implement — not consulted by any gate yet.
-    let _ = (owner_uid, mode, enforcing_uid);
-    true
+    (owner_uid == 0 || owner_uid == enforcing_uid) && mode & 0o022 == 0
 }
 
 /// Which kind of spawn an environment is resolved for.
@@ -284,12 +233,24 @@ pub fn resolve_spawn_env(
     kind: SpawnKind,
     requested: &BTreeMap<String, String>,
 ) -> Result<SpawnEnvironment, SupervisorError> {
-    // TODO(supervisor-agent-agnostic): implement — replaces `resolve_env` and
-    // `resolve_relayed_env`. Until then every key must be in an (empty) `allowed_env_keys`.
-    let _ = kind;
+    for key in requested.keys() {
+        if is_loader_env_key(key) {
+            log::warn!(
+                target: "tddy_supervisor::policy",
+                "spawn refused: `{key}` chooses what code the session loads and is never a \
+                 caller's to set"
+            );
+            return Err(SupervisorError::Denied);
+        }
+    }
     Ok(SpawnEnvironment {
-        variables: resolve_env(&SpawnPolicy::default(), requested)?,
-        base: EnvironmentBase::Minimal,
+        variables: requested.clone(),
+        base: match kind {
+            SpawnKind::Relayed => EnvironmentBase::Exactly,
+            SpawnKind::Session | SpawnKind::Sandbox | SpawnKind::Streamed => {
+                EnvironmentBase::Minimal
+            }
+        },
     })
 }
 
@@ -566,201 +527,6 @@ mod tests {
     }
 
     // -----------------------------------------------------------------------------------------
-    // Tool paths
-    // -----------------------------------------------------------------------------------------
-
-    #[test]
-    fn accepts_a_tool_path_that_the_policy_lists() {
-        // Given
-        let policy = a_spawn_policy()
-            .allowing_tool("/usr/local/bin/tddy-coder")
-            .build();
-
-        // When
-        let resolved = resolve_tool_path(&policy, Path::new("/usr/local/bin/tddy-coder"));
-
-        // Then
-        assert_eq!(resolved, Ok(PathBuf::from("/usr/local/bin/tddy-coder")));
-    }
-
-    #[test]
-    fn denies_a_tool_path_the_policy_does_not_list() {
-        // Given
-        let policy = a_spawn_policy()
-            .allowing_tool("/usr/local/bin/tddy-coder")
-            .build();
-
-        // When
-        let resolved = resolve_tool_path(&policy, Path::new("/usr/local/bin/tddy-tools"));
-
-        // Then
-        assert_eq!(resolved, Err(SupervisorError::Denied));
-    }
-
-    #[test]
-    fn denies_a_relative_tool_path() {
-        // Given
-        let policy = a_spawn_policy()
-            .allowing_tool("/usr/local/bin/tddy-coder")
-            .build();
-
-        // When
-        let resolved = resolve_tool_path(&policy, Path::new("tddy-coder"));
-
-        // Then — a relative path would resolve against the supervisor's cwd, which the caller does
-        // not know and must not be able to exploit.
-        assert_eq!(resolved, Err(SupervisorError::Denied));
-    }
-
-    #[test]
-    fn denies_a_tool_path_that_reaches_an_allowlisted_path_through_a_traversal() {
-        // Given
-        let policy = a_spawn_policy()
-            .allowing_tool("/usr/local/bin/tddy-coder")
-            .build();
-
-        // When
-        let resolved = resolve_tool_path(&policy, Path::new("/usr/local/bin/../bin/tddy-coder"));
-
-        // Then — comparison is textual, so a `..` must be refused outright rather than normalized
-        // and matched. Normalizing would make the allowlist depend on filesystem state.
-        assert_eq!(resolved, Err(SupervisorError::Denied));
-    }
-
-    // -----------------------------------------------------------------------------------------
-    // Environment
-    // -----------------------------------------------------------------------------------------
-
-    fn requesting_env(pairs: &[(&str, &str)]) -> BTreeMap<String, String> {
-        pairs
-            .iter()
-            .map(|(key, value)| (key.to_string(), value.to_string()))
-            .collect()
-    }
-
-    #[test]
-    fn accepts_an_environment_variable_the_policy_lists() {
-        // Given
-        let policy = a_spawn_policy().allowing_env_key("RUST_LOG").build();
-
-        // When
-        let resolved = resolve_env(&policy, &requesting_env(&[("RUST_LOG", "debug")]));
-
-        // Then
-        assert_eq!(resolved, Ok(requesting_env(&[("RUST_LOG", "debug")])));
-    }
-
-    /// What a daemon computes for a relayed coding agent: the base set it read from its YAML, a
-    /// provider key the agent's spec passes, and a route variable (`#agent-tools 28/28`).
-    fn a_daemon_computed_agent_env() -> BTreeMap<String, String> {
-        requesting_env(&[
-            ("PATH", "/opt/agent/bin:/usr/bin:/bin"),
-            ("LANG", "en_US.UTF-8"),
-            ("LARK_API_KEY", "sk-lark"),
-            ("ROUTE_BASE_URL", "https://route.example"),
-        ])
-    }
-
-    #[test]
-    fn a_relayed_agent_env_passes_whole_with_no_supervisor_key_list() {
-        // When — no `allowed_env_keys` exists to consult
-        let resolved = resolve_relayed_env(&a_daemon_computed_agent_env());
-
-        // Then
-        assert_eq!(resolved, Ok(a_daemon_computed_agent_env()));
-    }
-
-    #[test]
-    fn a_relayed_agent_env_naming_a_loader_variable_is_still_refused() {
-        // Given
-        let mut requested = a_daemon_computed_agent_env();
-        requested.insert("LD_PRELOAD".to_string(), "/tmp/evil.so".to_string());
-
-        // When
-        let resolved = resolve_relayed_env(&requested);
-
-        // Then — guard: choosing what code runs is the supervisor's own concern
-        assert_eq!(resolved, Err(SupervisorError::Denied));
-    }
-
-    #[test]
-    fn accepts_a_request_that_asks_for_no_environment_at_all() {
-        // Given
-        let policy = a_spawn_policy().build();
-
-        // When
-        let resolved = resolve_env(&policy, &BTreeMap::new());
-
-        // Then
-        assert_eq!(resolved, Ok(BTreeMap::new()));
-    }
-
-    #[test]
-    fn denies_an_environment_variable_the_policy_does_not_list() {
-        // Given
-        let policy = a_spawn_policy().allowing_env_key("RUST_LOG").build();
-
-        // When
-        let resolved = resolve_env(&policy, &requesting_env(&[("SSH_AUTH_SOCK", "/tmp/agent")]));
-
-        // Then
-        assert_eq!(resolved, Err(SupervisorError::Denied));
-    }
-
-    #[test]
-    fn denies_every_environment_variable_when_the_policy_lists_none() {
-        // Given
-        let policy = a_spawn_policy().build();
-
-        // When
-        let resolved = resolve_env(&policy, &requesting_env(&[("RUST_LOG", "debug")]));
-
-        // Then
-        assert_eq!(resolved, Err(SupervisorError::Denied));
-    }
-
-    #[test]
-    fn denies_a_preloaded_library_even_when_the_policy_somehow_lists_it() {
-        // Given a misconfiguration the loader should have caught.
-        let policy = a_spawn_policy().allowing_env_key("LD_PRELOAD").build();
-
-        // When
-        let resolved = resolve_env(&policy, &requesting_env(&[("LD_PRELOAD", "/tmp/evil.so")]));
-
-        // Then — this one variable is the tool allowlist bypassed without being touched: the child
-        // execs after `setuid` to an ordinary account, so the loader honors it.
-        assert_eq!(resolved, Err(SupervisorError::Denied));
-    }
-
-    #[test]
-    fn denies_a_library_search_path_alongside_an_allowed_variable() {
-        // Given a request that hides one dangerous variable behind a permitted one.
-        let policy = a_spawn_policy().allowing_env_key("RUST_LOG").build();
-
-        // When
-        let resolved = resolve_env(
-            &policy,
-            &requesting_env(&[("RUST_LOG", "debug"), ("LD_LIBRARY_PATH", "/tmp/lib")]),
-        );
-
-        // Then — every variable is checked, not just the first.
-        assert_eq!(resolved, Err(SupervisorError::Denied));
-    }
-
-    #[test]
-    fn denies_a_character_set_conversion_path_that_libc_would_load_code_from() {
-        // Given
-        let policy = a_spawn_policy().allowing_env_key("GCONV_PATH").build();
-
-        // When
-        let resolved = resolve_env(&policy, &requesting_env(&[("GCONV_PATH", "/tmp/gconv")]));
-
-        // Then — the same class of variable as `LD_PRELOAD` without the `LD_` prefix to recognise it
-        // by, which is why the rule is a list and not just a prefix.
-        assert_eq!(resolved, Err(SupervisorError::Denied));
-    }
-
-    // -----------------------------------------------------------------------------------------
     // Mount sources
     // -----------------------------------------------------------------------------------------
 
@@ -808,60 +574,6 @@ mod tests {
 
         // When
         let resolved = resolve_mount_source(&policy, Path::new("/etc/shadow"));
-
-        // Then
-        assert_eq!(resolved, Err(SupervisorError::Denied));
-    }
-
-    #[test]
-    fn a_tool_allowed_for_sessions_is_not_thereby_allowed_for_relaying() {
-        // Given
-        let policy = a_spawn_policy().allowing_tool("/usr/bin/opencode").build();
-
-        // When
-        let resolved = resolve_relay_tool_path(&policy, Path::new("/usr/bin/opencode"));
-
-        // Then
-        assert_eq!(resolved, Err(SupervisorError::Denied));
-    }
-
-    fn a_policy_relaying_opencode() -> SpawnPolicy {
-        let mut policy = a_spawn_policy().build();
-        policy.allowed_relay_tool_paths = vec![PathBuf::from("/usr/bin/opencode")];
-        policy
-    }
-
-    #[test]
-    fn resolves_a_relay_tool_path_listed_verbatim() {
-        // Given
-        let policy = a_policy_relaying_opencode();
-
-        // When
-        let resolved = resolve_relay_tool_path(&policy, Path::new("/usr/bin/opencode"));
-
-        // Then
-        assert_eq!(resolved, Ok(PathBuf::from("/usr/bin/opencode")));
-    }
-
-    #[test]
-    fn denies_a_relay_tool_path_that_reaches_a_listed_one_through_parent_components() {
-        // Given
-        let policy = a_policy_relaying_opencode();
-
-        // When
-        let resolved = resolve_relay_tool_path(&policy, Path::new("/usr/bin/../bin/opencode"));
-
-        // Then
-        assert_eq!(resolved, Err(SupervisorError::Denied));
-    }
-
-    #[test]
-    fn denies_a_relative_relay_tool_path() {
-        // Given
-        let policy = a_policy_relaying_opencode();
-
-        // When
-        let resolved = resolve_relay_tool_path(&policy, Path::new("opencode"));
 
         // Then
         assert_eq!(resolved, Err(SupervisorError::Denied));

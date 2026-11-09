@@ -67,7 +67,8 @@ in_shell cargo build --release \
   -p tddy-remote-git-repo-cli \
   -p tddy-askpass \
   -p tddy-session-sync-cli \
-  -p tddy-index-daemon
+  -p tddy-index-daemon \
+  -p tddy-git-clone
 
 if [[ "$want_installers" == true && "$want_desktop" != true ]]; then
   # Refused rather than implied: --installers alone reads as "build the installers", and quietly

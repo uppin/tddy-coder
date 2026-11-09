@@ -52,13 +52,12 @@ fn a_listening_socket() -> (tempfile::TempDir, std::path::PathBuf, UnixListener)
 }
 
 #[tokio::test]
-async fn relaying_is_off_unless_the_operator_allowlisted_the_harness_for_it() {
-    // Given a tool that SpawnSession may run, and no relay allowlist at all
+async fn relaying_is_refused_for_a_binary_outside_every_exec_root() {
+    // Given a tool no exec root names
     let tool = a_tool_that_echoes_its_stdin();
     let supervisor = a_supervisor()
         .managing(a_service("tddy-daemon").that_stays_alive())
         .allowing_the_current_user()
-        .allowing_tool(tool.path())
         .start()
         .await;
     let (_dir, socket, _listener) = a_listening_socket();
@@ -75,13 +74,12 @@ async fn relaying_is_off_unless_the_operator_allowlisted_the_harness_for_it() {
 }
 
 #[tokio::test]
-async fn a_harness_allowlisted_only_for_relaying_cannot_be_spawned_as_a_session() {
-    // Given a harness on the relay allowlist and on no session allowlist
+async fn a_binary_outside_every_exec_root_cannot_be_spawned_as_a_session() {
+    // Given a tool no exec root names
     let tool = a_tool_that_echoes_its_stdin();
     let supervisor = a_supervisor()
         .managing(a_service("tddy-daemon").that_stays_alive())
         .allowing_the_current_user()
-        .allowing_relay_tool(tool.path())
         .start()
         .await;
 

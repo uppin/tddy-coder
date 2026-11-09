@@ -31,7 +31,6 @@ pub mod proto {
 pub mod authz;
 pub mod cgroup_broker;
 pub mod client;
-mod clone;
 pub mod config;
 pub mod error;
 mod handover;
