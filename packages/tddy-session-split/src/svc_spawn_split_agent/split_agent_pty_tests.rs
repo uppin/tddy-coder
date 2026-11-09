@@ -10,7 +10,8 @@ use std::time::{Duration, Instant};
 
 use tddy_cli_sessions::cli_session_manager::CliSessionManager;
 
-use super::{spawn_split_agent_pty, SplitAgentPty};
+use crate::svc_spawn_split_agent::split_agent_pty::spawn_split_agent_pty;
+use crate::svc_spawn_split_agent::split_agent_pty::SplitAgentPty;
 
 /// How long the agent has to write its environment file.
 const ENV_FILE_DEADLINE: Duration = Duration::from_secs(15);
