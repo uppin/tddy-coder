@@ -65,7 +65,7 @@ impl SplitSessions {
         // process left behind: the repository moved on while the session was stopped, and a resumed
         // agent reading a snapshot from before the stop is reading rules that may have been
         // retracted.
-        let agent_spec = crate::agent_argv::split_agent_spec()?;
+        let agent_spec = crate::agent_argv::split_agent_spec(&self.coding_agents)?;
         let agent = agent_spec.id.as_str();
         let glob_refs: Vec<&str> = agent_spec
             .agent
@@ -83,7 +83,11 @@ impl SplitSessions {
             )
             .await?;
 
+        // The roster just read goes with the agent's `tddy-tools`, so its first `tools/list` is
+        // right before any stream frame has arrived.
+        let roster_seed = crate::split_session::roster_seed_env_pairs(&roster);
         let wiring = crate::split_session::prepare_split_agent_wiring(
+            &agent_spec,
             self.split_rooms.as_ref(),
             &self.config,
             self.session_tokens()?,
@@ -96,15 +100,10 @@ impl SplitSessions {
                 session_token,
             },
             &withdrawals,
+            &roster_seed,
             &glob_refs,
             &context,
         )?;
-        // The roster just read goes with the agent too, so its first `tools/list` is right before
-        // any stream frame has arrived.
-        let mut wiring = wiring;
-        wiring
-            .env
-            .extend(crate::split_session::roster_seed_env_pairs(&roster));
         log::info!(
             "ResumeSession: re-wired split session {session_id} to workspace session {codebase_session} on daemon {codebase_daemon}"
         );

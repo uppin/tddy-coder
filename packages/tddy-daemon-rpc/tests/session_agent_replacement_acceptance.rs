@@ -29,7 +29,9 @@ use tddy_service::proto::session_agents_svc::{
     SessionAgentService as _,
 };
 use tddy_session_lifecycle::connection_service::roster_replacement_pairs;
-use tddy_session_lifecycle::split_session::{split_claude_extra_args, wire_roster_withdrawals};
+use tddy_session_lifecycle::split_session::{
+    split_agent_spec, split_claude_extra_args, wire_roster_withdrawals,
+};
 use tddy_session_lifecycle::test_util::TEST_TOKEN;
 
 /// The session-action tools a `Shell`-replacing def used to be granted automatically.
@@ -668,9 +670,16 @@ async fn launches_a_split_session_without_the_tools_its_roster_replaced() {
 
     // When — the split spawn path is handed that roster, exactly as a resume hands it the one it
     // read back from this host
+    let split_agent = split_agent_spec(
+        &tddy_coding_agent_specs::CodingAgentRegistry::builtin()
+            .expect("the built-in coding agents load"),
+    )
+    .expect("the built-in registry holds the split agent");
     let args = split_claude_extra_args(
+        &split_agent,
         &session.session_dir(),
         "/usr/bin/tddy-tools",
+        &[],
         &wire_roster_withdrawals(&roster.agents),
     )
     .expect("split spawn flags");

@@ -288,7 +288,7 @@ pub(crate) fn remove_session_pointer(worktree: &Path, host: &PointerHost) {
 }
 
 /// Remove `placed`, on the host it is on.
-fn remove_placed_pointer(placed: &PlacedSessionPointer) {
+pub(crate) fn remove_placed_pointer(placed: &PlacedSessionPointer) {
     match &placed.host {
         PointerHost::Local => remove_pointer_file(&placed.path),
         PointerHost::Ssh { ssh, alias } => {
