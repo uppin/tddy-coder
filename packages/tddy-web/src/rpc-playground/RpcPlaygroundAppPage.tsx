@@ -6,7 +6,7 @@ import {
   ServerReflection,
   ServerReflectionRequestSchema,
 } from "tddy-client-web/gen/grpc/reflection/v1/reflection_pb";
-import { GitHubLoginButton } from "../components/GitHubLoginButton";
+import { GitHubLoginButton } from "tddy-workspace-web";
 import { AppShell } from "../components/shell/AppShell";
 import { useAuthContext } from "../hooks/authProvider";
 import { presenceIdentityForUser } from "tddy-livekit-web";

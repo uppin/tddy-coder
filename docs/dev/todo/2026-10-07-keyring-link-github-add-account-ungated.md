@@ -1,7 +1,7 @@
 # 2026-10-07 — Add account is shown on daemons that cannot link
 
 **Category:** Deferred scope from `#keyring` 8/9 `link-github` (PR #515)
-**Source:** `AccountsScreen` (`packages/tddy-web/src/components/accounts/AccountsScreen.tsx`) and
+**Source:** `AccountsScreen` (`packages/tddy-workspace-web/src/accounts/AccountsScreen.tsx`) and
 `AccountsServiceImpl::require_linking` (`packages/tddy-accounts/src/service.rs`)
 
 The Accounts screen offers **Add account** on every provider group, including on a daemon that wired

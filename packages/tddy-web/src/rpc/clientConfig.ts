@@ -11,6 +11,7 @@
  */
 
 import { createClient, type Transport } from "@connectrpc/connect";
+import type { AuthFlowDeclaration } from "tddy-client-web";
 import { DaemonConfigService } from "tddy-client-web/gen/daemon_config_pb";
 import { daemonTransportFlavour } from "./daemonTransportFlavour";
 import { thisPagesHost, type DaemonHostEnvironment } from "./daemonTransport";
@@ -53,20 +54,6 @@ export interface ClientConfig {
    */
   authFlow: AuthFlowDeclaration;
 }
-
-/** The GitHub sign-in flows a daemon can serve. */
-export type AuthFlow = "redirect" | "device";
-
-/**
- * What a daemon declared about its GitHub sign-in.
- *
- * - `"redirect"` — `GetAuthUrl` / `ExchangeCode`, a deployment holding a client secret.
- * - `"device"` — `StartDeviceLogin` / `PollDeviceLogin`, a public client id and no secret.
- * - `"none"` — no `auth_flow` at all: the daemon serves no GitHub sign-in. Never read as a flow.
- * - `{ unrecognised }` — a value this page does not know, kept so the screen can name it rather
- *   than guess a flow the daemon may not serve.
- */
-export type AuthFlowDeclaration = AuthFlow | "none" | { unrecognised: string };
 
 /** What a payload's `auth_flow` declares, with absence and unknown values each stated as such. */
 function authFlowOf(declared: string | undefined): AuthFlowDeclaration {

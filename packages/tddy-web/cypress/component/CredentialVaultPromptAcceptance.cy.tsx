@@ -24,7 +24,7 @@ import { ConnectError, Code } from "@connectrpc/connect";
 import { anInMemoryRpcBackend, type InMemoryRpcBackend } from "tddy-connectrpc-testkit";
 import { AuthProvider, useAuthContext } from "../../src/hooks/authProvider";
 import { AuthService, VaultState } from "tddy-client-web/gen/auth_pb";
-import { CredentialVaultPrompt } from "../../src/components/CredentialVaultPrompt";
+import { CredentialVaultPrompt } from "tddy-workspace-web";
 import { mountWithRpc } from "../support/rpc/inMemory";
 import { aGitHubUser } from "../support/rpc/responses";
 import {

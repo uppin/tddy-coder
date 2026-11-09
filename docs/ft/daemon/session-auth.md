@@ -191,5 +191,5 @@ file can be deleted by hand. The steps below are from the change that introduced
 - [docs/ft/web/daemon-selector-livekit-rpc.md](../web/daemon-selector-livekit-rpc.md) — daemon switching in the web UI (the surface where the original cross-daemon bug appeared).
 - [docs/ft/daemon/livekit-peer-discovery.md](livekit-peer-discovery.md) — peer fan-out that forwards `session_token` between daemons.
 - `packages/tddy-github/src/session_token_v2.rs` — the token format, signer and verifier (`KeyId`, `TokenKind`, `mint_access`/`mint_refresh`, `REFRESH_TOKEN_TTL`); `packages/tddy-daemon-auth/src/signing_key.rs` — the daemon's keypair and the `KeyDirectory` port.
-- `packages/tddy-web/src/rpc/sessionTokenStore.ts`, `packages/tddy-web/src/rpc/authGateInterceptor.ts` — client-side durable-session implementation; `packages/tddy-web/src/components/CredentialVaultPrompt.tsx` — the passphrase prompt.
+- `packages/tddy-web/src/rpc/sessionTokenStore.ts`, `packages/tddy-web/src/rpc/authGateInterceptor.ts` — client-side durable-session implementation; `packages/tddy-workspace-web/src/signin/CredentialVaultPrompt.tsx` — the passphrase prompt.
 - [`packages/tddy-credentials/docs/credential-store.md`](../../../packages/tddy-credentials/docs/credential-store.md) — the credential vault: records, sealed format, key derivation, the registry of open vaults, known limitations.

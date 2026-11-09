@@ -14,13 +14,12 @@ import { applyDebugMaskFromConfig } from "tddy-client-web";
 import { useAuthContext } from "../../hooks/authProvider";
 import { useVisualViewport, Button } from "tddy-ui-web";
 import { TokenService } from "tddy-client-web/gen/token_pb";
-import { GitHubLoginButton } from "../GitHubLoginButton";
-import { UserAvatar } from "../UserAvatar";
+import { GitHubLoginButton, UserAvatar } from "tddy-workspace-web";
+import { formClassName, inputClassName, labelClassName } from "tddy-ui-web";
 import { GhosttyTerminalSession } from "tddy-terminal-web";
 import { useDirectRoomTerminal } from "tddy-livekit-web";
 import { ConnectionTerminalChrome } from "tddy-terminal-web";
 import { BUILD_ID } from "../../buildId";
-import { formClassName, inputClassName, labelClassName } from "./standaloneFormStyles";
 import { useHttpClient, useHttpTransport } from "tddy-client-web";
 
 function getParamsFromUrl(): { url: string; identity: string; roomName: string; debugLogging: boolean } {

@@ -32,7 +32,7 @@ participant event, and a compiled caller still recomputes a label that changed
 
 - **`components/ui/inline-error.tsx` — `<InlineError testId message />`.** Renders nothing without a
   message. Otherwise it renders `role="alert"` and `text-destructive`.
-- **`hooks/useActionFailure.ts` — one surface's failure slot: `{ error, pending, run, report, clear }`.**
+- **`tddy-client-web`'s `src/useActionFailure.ts` — one surface's failure slot: `{ error, pending, run, report, clear }`.**
   - `run(action)` clears the previous failure, records this one, and never rejects, so a caller has
     nothing left to swallow.
   - `pending` disables a button while its action is in flight ("Creating…", "Adding…").
@@ -56,7 +56,7 @@ Rules the screens follow:
 
 ## Where it applies
 
-- **Projects:** see [projects-screen.md § Failures](projects-screen.md#failures).
+- **Projects:** see [projects-screen.md § Failures](../../tddy-workspace-web/docs/projects-screen.md#failures).
 - **Session inspector tabs** (VNC, screen sharing, files, worktree, tools, terminals): the list
   error, and per-row errors for add, start, remove and delete.
 - **Sessions drawer and runtime:**

@@ -3,7 +3,7 @@
 **Category:** Bug risk (low) — design choice for the developer
 **Source:** 2026-10-24-project-home-from-new-session-form
 
-- `ProjectMainSessionLink` (`packages/tddy-web/src/components/projects/ProjectMainSessionLink.tsx`)
+- `ProjectMainSessionLink` (`packages/tddy-workspace-web/src/projects/ProjectMainSessionLink.tsx`)
   reads **Set up main** or **Open main** from the card's **primary host** (`group.hosts[0]`'s
   `homeSessionId`, passed by `ProjectCard.tsx`). Main is recorded per host.
 - The link's target, `#/sessions/project-home/<id>`, names only the project. The setup pane

@@ -22,6 +22,7 @@ Product description: [client-ports-package.md](../../../docs/ft/web/client-ports
 | `src/connections/sessionAttachment.ts` | `attachmentHintFromReply`, `capabilitiesForHint` (#843) |
 | `src/lib/` | `participantRole`, `debugMask` (the `debug` dependency, typed by `@types/debug`), `testId`, `terminalFrameContinuity`, `terminalHistoryLoader` — shared by `tddy-livekit-web` and `tddy-web` (#843; `testId`, `terminalFrameContinuity` and `debugMask` are slated to move, see `docs/dev/todo/2026-11-07-tddy-client-web-holds-ui-and-terminal-helpers.md`) |
 | `src/rpcFailure.ts`, `src/randomId.ts`, `src/fileUploadChunks.ts`, `src/worktreeFilesApi.ts` | `rpcFailureText` / `hostNotConnected`, `randomUuid`, chunked upload (`UPLOAD_CHUNK_TIMEOUT_MS`), the worktree file-listing API — lowered from `tddy-web` in #844, shared by `tddy-session-create-web` and `tddy-web` |
+| `src/appRoutes.ts`, `src/authFlow.ts`, `src/useActionFailure.ts` | the session route builders (`sessionsDrawerPathForSession`, `sessionsProjectHomeSetupPath`, `singleSegmentAfter`, `decodeSegment`), `AuthFlow` / `AuthFlowDeclaration`, and the one-surface failure slot `useActionFailure` — lowered from `tddy-web` in #849, shared by `tddy-workspace-web` and `tddy-web` |
 | `src/testkit/` | port doubles and `withClients` (`./testkit` export) |
 
 Exports: `.`, `./gen/*`, `./connections/*`, `./testkit`.

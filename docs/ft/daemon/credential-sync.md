@@ -108,4 +108,4 @@ misconfiguration into steady traffic.
 - [Credential store](../../../packages/tddy-credentials/docs/credential-store.md) — the format this
   feature extends
 - [Accounts service](../../../packages/tddy-accounts/docs/accounts-service.md),
-  [Accounts screen](../../../packages/tddy-web/docs/accounts-screen.md) — where the journal surfaces
+  [Accounts screen](../../../packages/tddy-workspace-web/docs/accounts-screen.md) — where the journal surfaces
