@@ -4,10 +4,10 @@ import { aGhosttyTerminal } from "../support/drivers/ghosttyTerminalDriver";
  * A one-finger drag on a mobile terminal must reach whoever owns the scrolling, exactly as the
  * wheel does on desktop.
  *
- * Desktop already gates the wheel three ways (`GhosttyTerminalSession` + ghostty-web's own handler):
- * a mouse-tracking TUI gets an SGR wheel report, a pager in the alternate screen gets ghostty-web's
- * Up/Down emulation, and only the normal screen scrolls the emulator's scrollback (the live pane of
- * the history double buffer, at `scrollback: 0`, turning that into the lazy-history fill).
+ * Desktop routes the wheel three ways (xterm.js's own wheel handling): a mouse-tracking TUI gets an
+ * SGR wheel report, a pager in the alternate screen gets Up/Down arrow keys, and only the normal
+ * screen scrolls the emulator's scrollback (the live pane of the history double buffer, at
+ * `scrollback: 0`, turning that into the lazy-history fill).
  *
  * Touch had no such gate: every drag drove `scrollLines` on the pane. In a full-screen TUI — the
  * Claude CLI, which runs in the alternate screen with mouse tracking on — that scrolls a pane whose
@@ -35,7 +35,7 @@ describe("Terminal touch scroll routing (mobile)", () => {
     }).mount();
     driver
       .expectExists()
-      .expectCanvasExists()
+      .expectScreenExists()
       .expectInAlternateScreen()
       .expectReportingMouseToTui();
 
@@ -43,8 +43,12 @@ describe("Terminal touch scroll routing (mobile)", () => {
     driver.dragDownOneFinger();
 
     // Then — the TUI received wheel-up mouse reports (SGR button 64), not an Up-arrow key: the
-    // gesture belongs to the application, the same way the desktop wheel gate routes it.
-    driver.expectSentToApp("\x1b[<64;").expectDidNotSendToApp("\x1b[A");
+    // gesture belongs to the application, the same way the desktop wheel is routed. A drag is no
+    // tap, so no button press (SGR button 0) reaches the TUI either.
+    driver
+      .expectSentToApp("\x1b[<64;")
+      .expectDidNotSendToApp("\x1b[A")
+      .expectDidNotSendToApp("\x1b[<0;");
   });
 
   it("hands a one-finger drag in the alternate screen to the terminal when the TUI tracks no mouse", () => {
@@ -55,7 +59,7 @@ describe("Terminal touch scroll routing (mobile)", () => {
       initialContent: `\x1b[?1049h${numberedLines(60)}`,
       withHandleCapture: true,
     }).mount();
-    driver.expectExists().expectCanvasExists().expectInAlternateScreen();
+    driver.expectExists().expectScreenExists().expectInAlternateScreen();
 
     // When — the user drags one finger down to pull earlier output into view
     driver.dragDownOneFinger();
@@ -71,13 +75,14 @@ describe("Terminal touch scroll routing (mobile)", () => {
     const driver = aGhosttyTerminal({
       preventFocusOnTap: true,
       initialContent: numberedLines(200),
+      scrollback: 1000, // the prop's default is none, which xterm.js honours
       withHandleCapture: true,
     }).mount();
     // The content is written by an effect after the terminal reports ready: a drag dispatched before
     // it lands finds no scrollback to move through, so wait for the last row first.
     driver
       .expectExists()
-      .expectCanvasExists()
+      .expectScreenExists()
       .expectBufferHoldsTimes("row-200", 1);
 
     // When — the user drags one finger down to pull earlier output into view

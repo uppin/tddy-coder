@@ -264,11 +264,11 @@ export function aGhosttyTerminalSession(opts: GhosttyTerminalSessionDriverOption
     statusBar: (options?: Parameters<typeof cy.get>[1]) =>
       byTestId(TEST_IDS.terminalConnectionStatusBar, { timeout: 20000, ...options }),
 
-    /** The Ghostty terminal canvas container. */
+    /** The terminal container. */
     terminal: (options?: Parameters<typeof cy.get>[1]) =>
       byTestId(TEST_IDS.ghosttyTerminal, { timeout: 20000, ...options }),
 
-    /** The readable mirror of what the live terminal has painted (the canvas itself is WebGL). */
+    /** The readable mirror of what the live terminal has painted (the screen itself may be WebGL). */
     bufferText: (options?: Parameters<typeof cy.get>[1]) =>
       byTestId(TEST_IDS.terminalBufferText, { timeout: 20000, ...options }),
 
@@ -299,7 +299,7 @@ export function aGhosttyTerminalSession(opts: GhosttyTerminalSessionDriverOption
     // Interactions
     // ---------------------------------------------------------------------------
 
-    /** Settle once the terminal canvas is mounted and ready to be driven. */
+    /** Settle once the terminal is mounted and ready to be driven. */
     expectReady() {
       // The emulator open in its element, not just the element mounted: before then the terminal
       // takes no focus and no input.
@@ -309,7 +309,7 @@ export function aGhosttyTerminalSession(opts: GhosttyTerminalSessionDriverOption
 
     /** Type at the terminal, as an operator at a keyboard would. */
     type(text: string) {
-      driver.terminal().should("exist").focus().type(text);
+      driver.terminal().find(".xterm-helper-textarea").type(text, { force: true });
       return driver;
     },
 
@@ -341,7 +341,7 @@ export function aGhosttyTerminalSession(opts: GhosttyTerminalSessionDriverOption
 
     /** Click "Disconnect" in the open connection menu. */
     clickDisconnect() {
-      // force:true bypasses coordinate-based mousedown interception from the canvas
+      // force:true bypasses coordinate-based mousedown interception from the screen
       driver.disconnectMenuItem().should("be.visible").click({ force: true });
       return driver;
     },

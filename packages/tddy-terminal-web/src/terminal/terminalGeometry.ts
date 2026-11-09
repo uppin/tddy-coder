@@ -1,12 +1,12 @@
 import type { TerminalEngine } from "../engine/TerminalEngine";
 
-/** Canvas/CSS width of the rendered grid (not the full-width xterm root). Used for X-axis font fit. */
-export function measureTerminalCanvasCssWidth(term: TerminalEngine): number {
+/** CSS width of the rendered grid (`.xterm-screen`, not the full-width xterm root). Used for X-axis font fit. */
+export function measureTerminalScreenCssWidth(term: TerminalEngine): number {
   return term.screenElement?.getBoundingClientRect().width ?? 0;
 }
 
-/** Canvas/CSS height of the rendered grid. Used to convert drag pixels into scroll lines. */
-export function measureTerminalCanvasCssHeight(term: TerminalEngine): number {
+/** CSS height of the rendered grid. Used to convert drag pixels into scroll lines. */
+export function measureTerminalScreenCssHeight(term: TerminalEngine): number {
   return term.screenElement?.getBoundingClientRect().height ?? 0;
 }
 

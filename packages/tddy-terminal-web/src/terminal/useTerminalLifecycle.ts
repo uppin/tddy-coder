@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type MutableRefObject } from "react";
-import { ghosttyEngine } from "../engine/ghosttyEngine";
+import { xtermEngine } from "../engine/xtermEngine";
 import type { EngineDisposable } from "../engine/TerminalEngine";
 import type { GhosttyTerminalProps } from "./types";
 import type { TerminalLoggers } from "./terminalLoggers";
@@ -81,7 +81,7 @@ export function useTerminalLifecycle({
       if (!mountPoint) return;
       logLife("creating Terminal");
 
-      const term = ghosttyEngine({
+      const term = xtermEngine({
         cols,
         rows,
         fontSize,
@@ -124,6 +124,9 @@ export function useTerminalLifecycle({
           onScrollRef.current?.(top);
         })
       );
+      // The buffer changes when a write is parsed, which can be after `write` returns: the
+      // revision `getBufferText` memoizes on moves then, so a read in between is not cached.
+      disposables.push(term.onWriteParsed(() => void contentRevisionRef.current++));
       disposablesRef.current = disposables;
 
       await term.open(mountPoint);
@@ -145,7 +148,7 @@ export function useTerminalLifecycle({
         const refit = (): boolean => {
           const engine = termRef.current;
           if (!engine) return true;
-          // The engine can transiently fail to measure (it measures the live canvas) — report
+          // The engine can transiently fail to measure (it measures the live screen) — report
           // false so the frame retry picks it up; the RO only fires while the size actually
           // changes, so a skipped proposal would otherwise be dropped for good.
           if (!engine.proposeDimensions()) return false;
@@ -187,9 +190,18 @@ export function useTerminalLifecycle({
       const openContent = initialContentRef.current;
       if (openContent) {
         contentRevisionRef.current++;
+        const parsed = new Promise<void>((resolve) => {
+          const subscription = term.onWriteParsed(() => {
+            subscription.dispose();
+            resolve();
+          });
+        });
         term.write(openContent);
         osc52Tap(openContent);
         writtenInitialContentRef.current = openContent;
+        // Ready means "showing what it was given": wait until the engine has parsed it.
+        await parsed;
+        if (!isMounted) return;
       }
       setReady(true);
       onReady?.();

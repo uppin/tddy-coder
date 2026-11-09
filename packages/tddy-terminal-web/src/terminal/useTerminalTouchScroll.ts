@@ -1,6 +1,6 @@
 import { useCallback, useEffect } from "react";
 import { clientPointToTerminalCell } from "../lib/terminalMouseCellCoords";
-import { measureTerminalCanvasCssHeight } from "./terminalGeometry";
+import { measureTerminalScreenCssHeight } from "./terminalGeometry";
 import type { TerminalLoggers } from "./terminalLoggers";
 import type { ContainerRef, OnDataRef, TerminalRef } from "./terminalRefs";
 
@@ -12,9 +12,8 @@ export const TOUCH_SCROLL_START_THRESHOLD_PX = 8;
 const TOUCH_SCROLL_MAX_NOTCHES_PER_MOVE = 8;
 
 /** Report one wheel notch at a viewport point to the TUI as an SGR mouse event (button 64 up /
- *  65 down). False when the point is off the grid or nothing can receive it. Shared by the
- *  `sendWheelSgr` handle method (desktop wheel) and the touch drag route below, so both report
- *  a scroll the same way. */
+ *  65 down). False when the point is off the grid or nothing can receive it. Used by the touch
+ *  drag route below: a finger has no wheel for xterm.js to report. */
 export function useSendWheelSgrAt({
   termRef,
   onDataRef,
@@ -26,9 +25,9 @@ export function useSendWheelSgrAt({
     const t = termRef.current;
     const send = onDataRef.current;
     if (!t || !send) return false;
-    const canvas = t.screenElement;
-    if (!canvas) return false;
-    const r = canvas.getBoundingClientRect();
+    const screen = t.screenElement;
+    if (!screen) return false;
+    const r = screen.getBoundingClientRect();
     const grid = { left: r.left, top: r.top, width: r.width, height: r.height };
     const coords = clientPointToTerminalCell(clientX, clientY, grid, t.cols, t.rows);
     if (!coords) return false;
@@ -62,27 +61,26 @@ export function useTouchScrollRoutes({
   // only scroll gesture there. Natural, content-following direction: dragging the finger
   // down pulls older output into view.
   //
-  // Who owns the gesture depends on what is on screen, the same three ways the wheel is gated on
-  // desktop (`GhosttyTerminalSession`'s capture-phase listener plus ghostty-web's own wheel
-  // handling). Each line of finger travel is one notch of that gesture:
+  // Who owns the gesture depends on what is on screen, the same three ways xterm.js routes the
+  // wheel on desktop. Each line of finger travel is one notch of that gesture:
   //
   // - **`tui-mouse`** — the TUI tracks the mouse (the Claude CLI does): report the notch as an
   //   SGR wheel event (button 64 up / 65 down), what the desktop wheel sends it.
   // - **`tui-keys`** — the alternate screen (DEC 1049) without mouse tracking, a pager like
-  //   `less`: send the arrow key ghostty-web emulates the wheel with there.
+  //   `less`: send the arrow key xterm.js emulates the wheel with there.
   // - **`viewport`** — the normal screen: the emulator's own scrollback is the thing being
   //   scrolled, so move the viewport directly.
   //
   // The two `tui` routes are sent straight to the application rather than replayed as a synthetic
-  // `wheel` for the desktop handlers to pick up: dispatching an event and hoping it lands in
-  // ghostty-web's canvas listener is plumbing no test can pin, and it silently reached nobody.
+  // `wheel` for xterm.js to pick up: dispatching an event and hoping it lands in the right
+  // listener is plumbing no test can pin, and it silently reached nobody.
   // In a full-screen TUI the pane's own scrollback is the wrong target anyway — repaints fight
   // it, and on the live pane of the history double buffer (`scrollback: 0`) there is none.
   //
   // The route is sampled once, at `touchstart`, so one gesture is never split between routes.
   //
   // Listeners attach as soon as the container exists (not gated on `ready`) so a
-  // drag arriving right after the canvas mounts is not missed; `termRef` is read
+  // drag arriving right after the terminal mounts is not missed; `termRef` is read
   // lazily at event time and the handlers no-op until the terminal is available.
   useEffect(() => {
     if (!sessionActive || fixedViewportGrid) {
@@ -111,7 +109,7 @@ export function useTouchScrollRoutes({
     const cellHeightPx = (): number => {
       const term = termRef.current;
       if (!term || term.rows <= 0) return 0;
-      const h = measureTerminalCanvasCssHeight(term);
+      const h = measureTerminalScreenCssHeight(term);
       return h > 0 ? h / term.rows : 0;
     };
 
@@ -181,7 +179,7 @@ export function useTouchScrollRoutes({
       engaged = true;
       const cell = cellHeightPx();
       if (cell <= 0) {
-        logScroll("touchmove#%d bailed: cellPx=%.2f (canvas not measured)", moveCount, cell);
+        logScroll("touchmove#%d bailed: cellPx=%.2f (screen not measured)", moveCount, cell);
         return;
       }
       pixelAccum += y - lastY;

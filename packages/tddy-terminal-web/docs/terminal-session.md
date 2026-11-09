@@ -170,8 +170,7 @@ normally reports it while the fill continues, so ending on it would truncate eve
 The feed decides what can be done; the component does it. It keeps the live terminal pinned at
 scrollback `0` — so native scrollback can never duplicate what the page terminal shows — and swaps
 the two panes on a scroll-up-at-top gesture or the explicit affordance. It buffers incoming bytes
-until ghostty-web is ready, which is the fix behind the 220-column reconnect garbling; routes the
-wheel three ways depending on mouse tracking and alternate screen; and renders the status strip,
+until the terminal is ready, which is the fix behind the 220-column reconnect garbling; and renders the status strip,
 zoom bounds, mobile keyboard, shortcut drawer, file drop and upload that both of its predecessors
 rendered identically.
 

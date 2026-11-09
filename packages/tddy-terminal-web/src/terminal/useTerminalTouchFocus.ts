@@ -53,13 +53,12 @@ export function usePreventFocusOnTap({
   preventFocusOnTap: boolean;
 }): void {
   // Prevent focus on pointer/touch/click when preventFocusOnTap (e.g. mobile, keyboard closed).
-  // Touch events still propagate to SGR forwarding (bubble phase) — preventDefault does not stop propagation.
   useEffect(() => {
     const container = containerRef.current;
     if (!container || !preventFocusOnTap) return;
     const preventFocus = (e: Event) => {
       e.preventDefault();
-      // Blur after all handlers run — library may call focus() in its mousedown handler
+      // Blur after all handlers run — xterm.js focuses its textarea in its mousedown handler
       queueMicrotask(() => {
         const active = document.activeElement;
         if (active && container.contains(active)) {
@@ -83,12 +82,10 @@ export function usePreventFocusOnTap({
 /** Re-synthesises the compatibility mouse events a cancelled `touchstart` withheld from a tap. */
 export function useTapAsClick({
   containerRef,
-  termRef,
   preventFocusOnTap,
   loggers,
 }: {
   containerRef: ContainerRef;
-  termRef: TerminalRef;
   preventFocusOnTap: boolean;
   loggers: TerminalLoggers;
 }): void {
@@ -96,21 +93,17 @@ export function useTapAsClick({
   // A tap must still reach the terminal as a mouse click. The effect above cancels `touchstart`
   // to keep focus (and the mobile keyboard) away, and a cancelled `touchstart` also suppresses
   // the browser's compatibility mouse events — so without this a tap produces no `mousedown`,
-  // `mouseup` or `click` at all, and neither ghostty-web's own click handling nor a TUI that
-  // never enables mouse reporting (the Claude CLI emits no DECSET 1000/1002/1003/1006) sees the
+  // `mouseup` or `click` at all, and neither xterm.js's own click handling nor a TUI that never
+  // enables mouse reporting (the Claude CLI emits no DECSET 1000/1002/1003/1006) sees the
   // gesture. Re-synthesise the compatibility events the browser withheld, at the touch point.
-  //
-  // Only for gestures the TUI is not already tracking: with mouse tracking on, the capture-phase
-  // touch handlers in the mouse effect above report the tap as SGR press/release, and a
-  // synthesised `mousedown` would re-enter `onMouseDown` and report the same tap a second time.
-  // Tracking is sampled once, at `touchstart`, so exactly one of the two paths owns a gesture
-  // even if the TUI toggles tracking while the finger is down.
+  // Those events are the tap's only route to a TUI that does track the mouse as well: xterm.js
+  // reports them as SGR press and release itself.
   useEffect(() => {
     const container = containerRef.current;
     if (!container || !preventFocusOnTap) return;
 
     /** The in-flight gesture while it still looks like a tap; cleared once it drags or gains a finger. */
-    let tap: { clientX: number; clientY: number; trackedByTui: boolean } | null = null;
+    let tap: { clientX: number; clientY: number } | null = null;
 
     const onTouchStart = (e: TouchEvent) => {
       // A second finger (pinch) means the gesture is no longer a tap.
@@ -119,11 +112,7 @@ export function useTapAsClick({
         return;
       }
       const touch = e.changedTouches[0];
-      tap = {
-        clientX: touch.clientX,
-        clientY: touch.clientY,
-        trackedByTui: termRef.current?.mouseTracking() ?? false,
-      };
+      tap = { clientX: touch.clientX, clientY: touch.clientY };
     };
 
     const onTouchMove = (e: TouchEvent) => {
@@ -137,7 +126,7 @@ export function useTapAsClick({
     const onTouchEnd = (e: TouchEvent) => {
       const candidate = tap;
       tap = null;
-      if (!candidate || candidate.trackedByTui) return;
+      if (!candidate) return;
       // Fingers still down, or several lifting at once — the tail of a multi-touch gesture.
       if (e.touches.length > 0 || e.changedTouches.length !== 1) return;
       const touch = e.changedTouches[0];
@@ -152,7 +141,7 @@ export function useTapAsClick({
       };
       logMouse("tap synthesised as click at (%o,%o)", touch.clientX, touch.clientY);
       // Dispatch at the element the finger landed on (what a real compatibility event targets),
-      // so ghostty-web's canvas handlers see the click, not just the container.
+      // so xterm.js's screen handlers see the click, not just the container.
       touch.target.dispatchEvent(new MouseEvent("mousedown", { ...init, buttons: 1 }));
       touch.target.dispatchEvent(new MouseEvent("mouseup", init));
       touch.target.dispatchEvent(new MouseEvent("click", init));

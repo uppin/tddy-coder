@@ -1,4 +1,4 @@
-import { useRef, useState, type MutableRefObject, type RefObject } from "react";
+import { useEffect, useRef, useState, type MutableRefObject, type RefObject } from "react";
 import { TerminalHistoryForwardLoader } from "tddy-client-web";
 import { feedSupportsHistory, type TerminalFeed } from "tddy-client-web/connections/terminal";
 import type { GhosttyTerminalHandle } from "../terminal/types";
@@ -38,14 +38,29 @@ export function useHistoryDoubleBuffer({
   const [loading, setLoading] = useState(false);
   const [filled, setFilled] = useState(false);
   // Whether the live terminal's program owns navigation (see `tuiOwnsNavigation`) — re-read after
-  // every chunk that switches a mode, since ghostty-web holds the state and does not report changes.
+  // every chunk that switches a mode, since the engine holds the state and does not report changes.
   const [liveTuiOwnsNavigation, setLiveTuiOwnsNavigation] = useState(false);
+  // The terminal parses written data after `write` returns, so the modes a chunk switches are read
+  // when the parse lands: a listener per terminal re-reads them after every parse.
+  const modeWatchRef = useRef<{ term: GhosttyTerminalHandle; subscription: { dispose(): void } } | null>(null);
   const noteLiveModeSwitches = (term: GhosttyTerminalHandle, data: Uint8Array) => {
     const modes = decModeChanges(data);
     if (modes.length === 0) return;
+    if (modeWatchRef.current?.term !== term) {
+      modeWatchRef.current?.subscription.dispose();
+      const subscription = term.onWriteParsed?.(() => setLiveTuiOwnsNavigation(tuiOwnsNavigation(term)));
+      modeWatchRef.current = subscription ? { term, subscription } : null;
+    }
     traceModes(term, modes);
     setLiveTuiOwnsNavigation(tuiOwnsNavigation(term));
   };
+  useEffect(
+    () => () => {
+      modeWatchRef.current?.subscription.dispose();
+      modeWatchRef.current = null;
+    },
+    [],
+  );
 
   // Whether this terminal can page back at all — the feed's answer, not the transport's. This is
   // the whole of what gives a LiveKit-carried session scrollback: the same question, asked of the

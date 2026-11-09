@@ -7,7 +7,7 @@ PR-stack chat terminal, the standalone connection screen
 
 ## Overview
 
-The browser terminal is one package: rendering (`ghostty-web`), the session terminal with its chrome,
+The browser terminal is one package: rendering (xterm.js), the session terminal with its chrome,
 the terminal feed and input delivery over the terminal RPC, and the helpers for zoom, OSC 52 and
 uploads. It reaches daemons only through `tddy-client-web` and renders with `tddy-ui-web`; it does not
 depend on the web app or on LiveKit.

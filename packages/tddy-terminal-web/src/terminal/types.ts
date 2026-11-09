@@ -97,8 +97,8 @@ export interface GhosttyTerminalHandle {
   hasMouseTracking?(): boolean;
   /** True when the terminal is in the alternate screen buffer (DEC 1049). */
   isAlternateScreen?(): boolean;
-  /** Send an SGR wheel mouse report (buttons 64/65) for the given wheel event via onData. */
-  sendWheelSgr?(e: WheelEvent): void;
+  /** Fires after written data has been parsed: terminal state (modes, buffers) reads current then. */
+  onWriteParsed?(listener: () => void): { dispose(): void };
   /**
    * Simulate a keystroke: scroll to bottom first (native scroll-to-bottom.keystroke=true),
    * then forward via onData.

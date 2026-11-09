@@ -20,7 +20,6 @@ export interface TerminalHandleInput {
   maxFontSize: number;
   zoomVerbose: boolean;
   applyFontSizePx: (px: number, bounds?: { min: number; max: number }) => void;
-  sendWheelSgrAt: (clientX: number, clientY: number, up: boolean) => boolean;
 }
 
 /** The imperative handle: scroll, buffer reads, input and write/clear/focus. */
@@ -37,9 +36,8 @@ export function useTerminalHandle({
   maxFontSize,
   zoomVerbose,
   applyFontSizePx,
-  sendWheelSgrAt,
 }: TerminalHandleInput): void {
-  const { logMouse, logWrite } = loggers;
+  const { logWrite } = loggers;
   // Serializing a 50 000-line scrollback cell by cell on every poll pinned the WebView at a full
   // core even with no output arriving, so `getBufferText` memoizes on the content revision.
   const bufferTextCacheRef = useRef<{
@@ -104,17 +102,8 @@ export function useTerminalHandle({
       isAlternateScreen() {
         return termRef.current?.alternateScreen() ?? false;
       },
-      sendWheelSgr(e: WheelEvent) {
-        if (e.ctrlKey) return;
-        const sent = sendWheelSgrAt(e.clientX, e.clientY, e.deltaY < 0);
-        logMouse(
-          "wheel gate reported to TUI sent=%o deltaY=%d deltaMode=%d client=(%d,%d)",
-          sent,
-          e.deltaY,
-          e.deltaMode,
-          e.clientX,
-          e.clientY,
-        );
+      onWriteParsed(listener: () => void) {
+        return termRef.current?.onWriteParsed(listener) ?? { dispose() {} };
       },
       paste(text: string) {
         termRef.current?.paste(text);
@@ -176,6 +165,6 @@ export function useTerminalHandle({
       return termRef.current?.readLines() ?? [];
     },
     }),
-    [applyFontSizePx, minFontSize, maxFontSize, zoomVerbose, sendWheelSgrAt]
+    [applyFontSizePx, minFontSize, maxFontSize, zoomVerbose]
   );
 }

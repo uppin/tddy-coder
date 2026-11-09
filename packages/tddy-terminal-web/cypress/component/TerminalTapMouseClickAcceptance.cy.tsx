@@ -18,7 +18,7 @@ describe("Terminal tap as mouse click (mobile)", () => {
   it("delivers a mousedown followed by a mouseup when the user taps the terminal", () => {
     // Given — a mobile terminal (focus prevention on) whose TUI enabled no mouse tracking
     const driver = aGhosttyTerminal({ preventFocusOnTap: true }).mount();
-    driver.expectExists().expectCanvasExists();
+    driver.expectExists().expectScreenExists();
     driver.recordMouseEvents();
 
     // When — the user taps the pane
@@ -31,7 +31,7 @@ describe("Terminal tap as mouse click (mobile)", () => {
   it("delivers a click event when the user taps the terminal", () => {
     // Given — a mobile terminal (focus prevention on) whose TUI enabled no mouse tracking
     const driver = aGhosttyTerminal({ preventFocusOnTap: true }).mount();
-    driver.expectExists().expectCanvasExists();
+    driver.expectExists().expectScreenExists();
     driver.recordMouseEvents();
 
     // When — the user taps the pane
@@ -44,7 +44,7 @@ describe("Terminal tap as mouse click (mobile)", () => {
   it("delivers the click at the coordinates the finger touched, not the pane centre", () => {
     // Given — a mobile terminal (focus prevention on) whose TUI enabled no mouse tracking
     const driver = aGhosttyTerminal({ preventFocusOnTap: true }).mount();
-    driver.expectExists().expectCanvasExists();
+    driver.expectExists().expectScreenExists();
     driver.recordMouseEvents();
 
     // When — the user taps left of centre, low in the pane
@@ -57,7 +57,7 @@ describe("Terminal tap as mouse click (mobile)", () => {
   it("delivers no click when the user drags one finger to scroll", () => {
     // Given — a mobile terminal (focus prevention on) whose TUI enabled no mouse tracking
     const driver = aGhosttyTerminal({ preventFocusOnTap: true }).mount();
-    driver.expectExists().expectCanvasExists();
+    driver.expectExists().expectScreenExists();
     driver.recordMouseEvents();
 
     // When — the user drags a finger down the pane to pull earlier output into view
@@ -70,7 +70,7 @@ describe("Terminal tap as mouse click (mobile)", () => {
   it("delivers no click when the user touches the terminal with two fingers", () => {
     // Given — a mobile terminal (focus prevention on) whose TUI enabled no mouse tracking
     const driver = aGhosttyTerminal({ preventFocusOnTap: true }).mount();
-    driver.expectExists().expectCanvasExists();
+    driver.expectExists().expectScreenExists();
     driver.recordMouseEvents();
 
     // When — a second finger joins before both lift (pinch / two-finger tap)
@@ -87,7 +87,7 @@ describe("Terminal tap as mouse click (mobile)", () => {
       initialContent: "\x1b[?1000h\x1b[?1006h",
       withHandleCapture: true,
     }).mount();
-    driver.expectExists().expectCanvasExists().expectReportingMouseToTui();
+    driver.expectExists().expectScreenExists().expectReportingMouseToTui();
 
     // When — the user taps the pane
     driver.simulateTouchTap();

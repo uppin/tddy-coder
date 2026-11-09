@@ -9,6 +9,7 @@ tool shortcuts, stream offsets). It imports nothing from `tddy-web` or `livekit-
 `onBytes(ByteDelta)` prop, and the connection status it shows is passed in as text.
 
 - **Terminal engine (interface, top-based scrolling, fitting, buffer text)**: [terminal-engine.md](terminal-engine.md)
+- **xterm.js engine (renderer, what xterm.js owns, what stays around it)**: [xterm-engine.md](xterm-engine.md)
 - **Session terminal (feed, resync, history paging, input ack)**: [terminal-session.md](terminal-session.md)
 - **Connection chrome (status bar, layouts)**: [terminal-connection-chrome.md](terminal-connection-chrome.md)
 - **Presentation modes (reconnect overlay)**: [terminal-presentation.md](terminal-presentation.md)
@@ -27,13 +28,13 @@ file stays within 500 lines (`src/componentSize.test.ts`).
 - `src/terminal/` — what the emulator component is made of: `types`, `terminalLoggers`,
   `terminalGeometry`, `terminalRefs`, `useTerminalLifecycle` (open, fit, write, dispose),
   `useTerminalFontSize` (font size, fit and the zoom bridge), `useTerminalPinchZoom`,
-  `useTerminalTouchScroll` (touch drag scroll routes and SGR wheel), `useTerminalMouseForwarding`,
+  `useTerminalTouchScroll` (touch drag scroll routes and SGR wheel),
   `useTerminalTouchFocus` (focus on tap, tap as click, textarea attributes),
   `useTerminalKeyForwarding` (desktop keys and IME escape) and `useTerminalHandle` (the imperative
   handle).
 - `src/session/` — what the session component is made of: `types`, `sessionDiagnostics`,
   `useFeedStream` (feed and session end), `useHistoryDoubleBuffer`, `useTerminalMirrors`
-  (buffer text and viewport), `useLivePaneGates` (live wheel gate and test window hooks),
+  (buffer text and viewport), `useLivePaneGates` (test window hooks),
   `TerminalProbes`, `PaneOverlays` and `paneStyles`.
 
 ## Tests

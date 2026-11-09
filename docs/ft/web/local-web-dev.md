@@ -108,7 +108,7 @@ is still alive. See `scripts/dev-process.sh`. Works on macOS's `/bin/bash` 3.2.
 | `tddy:term:grpc` | gRPC terminal byte stream: recv length, ready/buffered state, hex preview, resize sequence |
 | `tddy:term:session` | The one session terminal's feed, whatever carries it: recv length, ready/buffered state, hex preview |
 | `tddy:term:life` | Terminal lifecycle (init, open, initial `cols`/`rows`) |
-| `tddy:term:mouse` | Mouse / SGR forwarding |
+| `tddy:term:mouse` | Touch input routed to the TUI: taps re-synthesised as clicks, touch-scroll notches |
 | `tddy:term:modes` | DEC private mode switches (`ESC[?…h/l`) in received output, and the mouse-tracking / alternate-screen state after the write — silent for chunks that switch nothing |
 | `tddy:term:chrome` | The session terminal's connection chrome on each render |
 

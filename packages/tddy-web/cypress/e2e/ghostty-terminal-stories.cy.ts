@@ -6,7 +6,7 @@
 import { byTestId, TEST_IDS } from "../support/testIds";
 
 describe("GhosttyTerminal Stories", () => {
-  it("renders Default story with an empty terminal canvas", () => {
+  it("renders Default story with an empty terminal screen", () => {
     // Given / When
     cy.visit("/iframe.html?id=components-ghosttyterminal--default&viewMode=story");
 
