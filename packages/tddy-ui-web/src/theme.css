@@ -3,11 +3,24 @@
 @import "shadcn/tailwind.css";
 @import "@fontsource-variable/geist";
 
-/* Scan every package that renders tddy classes (paths are relative to this file). A wildcard in a
-   directory segment only matches with a file pattern after it: `tddy-*-web/src` alone scans nothing. */
+/* Scan every package that renders tddy classes (paths are relative to this file). One line per
+   package: Tailwind does not expand a wildcard in a directory name here, so `tddy-*-web/src` matched
+   nothing and every class only a component package uses was missing from the app's stylesheet (#861
+   carried an interim file-pattern glob). A new component package adds its line —
+   `src/themeSources.test.ts` fails until it does. */
 @source "./";
 @source "../../tddy-web/src";
-@source "../../tddy-*-web/src/**/*.{ts,tsx}";
+@source "../../tddy-chat-web/src";
+@source "../../tddy-client-web/src";
+@source "../../tddy-hosts-web/src";
+@source "../../tddy-livekit-web/src";
+@source "../../tddy-prstack-web/src";
+@source "../../tddy-rpc-playground-web/src";
+@source "../../tddy-session-create-web/src";
+@source "../../tddy-session-web/src";
+@source "../../tddy-terminal-web/src";
+@source "../../tddy-workspace-web/src";
+@source "../../tddy-storybook/src";
 
 @custom-variant dark (&:is(.dark *));
 

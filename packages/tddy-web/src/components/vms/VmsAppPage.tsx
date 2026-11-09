@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { VmService, type VmInfo, type VmImageInfo } from "tddy-client-web/gen/vm_pb";
-import { useAuthContext } from "../../hooks/authProvider";
+import { useAuthContext } from "../../app/auth/authProvider";
 import { AppShell } from "../shell/AppShell";
 import { VmsScreen, type VmRow } from "tddy-hosts-web";
 import { DefineVmPanel } from "tddy-hosts-web";

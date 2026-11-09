@@ -1,4 +1,4 @@
-# Session connections (`src/rpc/connections/session.ts`, `livekit/`)
+# Session connections (`packages/tddy-client-web/src/connections/session.ts`, `livekit/`)
 
 A [host connection](host-connections.md) reaches a daemon. A **session connection** reaches one
 session running on one of those daemons, and it is what `HostConnection.openSession(sessionId, hint)`

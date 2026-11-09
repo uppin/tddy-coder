@@ -11,8 +11,8 @@
 
 import React from "react";
 import type { RoomHandle } from "tddy-client-web";
-import { AuthProvider } from "../../../src/hooks/authProvider";
-import { SelectedDaemonProvider } from "../../../src/rpc/selectedDaemon";
+import { AuthProvider } from "../../../src/app/auth/authProvider";
+import { SelectedDaemonProvider } from "../../../src/app/rpc/selectedDaemon";
 import { TokenService } from "tddy-client-web/gen/token_pb";
 import { mountWithRpc } from "./inMemory";
 import {

@@ -64,7 +64,7 @@ a handler that does nothing but forward its ports.
 
 ## How tddy-web supplies the ports
 
-`tddy-web/src/rpc/appClientsPorts.tsx` (`AppClientsPorts`) builds `ClientsPort` from the app's
+`tddy-web/src/app/rpc/appClientsPorts.tsx` (`AppClientsPorts`) builds `ClientsPort` from the app's
 sources — the serving-daemon transport, the connection registry (`ConnectionProviders`), host readiness,
 the selected-daemon directory — and mounts `hashNavigationPort` as `NavigationPort`. Each source
 provider (`RpcTransportProvider`, `ConnectionProviders`, `HostReadiness`, `SelectedDaemonProvider`)

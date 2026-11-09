@@ -23,7 +23,7 @@ import { SessionFilesService } from "tddy-client-web/gen/session_files_pb";
 import { WorktreeService } from "tddy-client-web/gen/worktree_pb";
 import { HostService } from "tddy-client-web/gen/host_pb";
 import type { DaemonHost } from "tddy-client-web";
-import { SelectedDaemonProvider } from "../../src/rpc/selectedDaemon";
+import { SelectedDaemonProvider } from "../../src/app/rpc/selectedDaemon";
 import { mountWithRpc } from "../support/rpc/inMemory";
 import { aHostPromptFeed, type HostPromptFeed } from "../support/rpc/hostPromptFeed";
 import { anRsaOaepKeypair, fingerprintOf } from "../support/hostKeys";

@@ -11,7 +11,7 @@ these are the design costs it *exposed*, not defects it introduced.
 
 - **"Is LiveKit configured?" is decided in at least six independent places** — `daemon_settings.rs`,
   `common_room_supervisor.rs`, `session_room.rs`, `config.rs`, the web `clientConfig`, and
-  `liveKitIsConfigured` in `packages/tddy-web/src/rpc/connections/localHost.ts`. **PR #449 exists
+  `liveKitIsConfigured` in `packages/tddy-web/src/app/rpc/connections/localHost.ts`. **PR #449 exists
   entirely to reconcile them**: 20 production files, 1,590 changed lines, to honour one switch.
   Resolving availability **once** at daemon startup and serving it through the existing
   `ClientConfig` would have made #449 ≈4 files / ≈300 lines, and #451 (a session start that waited on

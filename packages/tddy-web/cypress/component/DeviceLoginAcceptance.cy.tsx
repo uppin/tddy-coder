@@ -23,10 +23,10 @@
 
 import React from "react";
 import { anInMemoryRpcBackend, type InMemoryRpcBackend } from "tddy-connectrpc-testkit";
-import { AuthProvider, useAuthContext } from "../../src/hooks/authProvider";
+import { AuthProvider, useAuthContext } from "../../src/app/auth/authProvider";
 import { AuthService } from "tddy-client-web/gen/auth_pb";
 import { DeviceLoginPanel, DaemonLoginScreen } from "tddy-workspace-web";
-import { loadClientConfig } from "../../src/rpc/clientConfig";
+import { loadClientConfig } from "../../src/app/rpc/clientConfig";
 import type { AuthFlowDeclaration } from "tddy-client-web";
 import { mountWithRpc } from "../support/rpc/inMemory";
 import { TEST_IDS } from "../support/testIds";

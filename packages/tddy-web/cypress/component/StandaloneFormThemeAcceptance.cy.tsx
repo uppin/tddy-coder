@@ -8,9 +8,9 @@
 import React from "react";
 import { anInMemoryRpcBackend } from "tddy-connectrpc-testkit";
 import { AuthService } from "tddy-client-web/gen/auth_pb";
-import { App } from "../../src/index";
-import { AuthProvider } from "../../src/hooks/authProvider";
-import { RpcTransportProvider } from "../../src/rpc/transportProvider";
+import { App } from "../../src/app/App";
+import { AuthProvider } from "../../src/app/auth/authProvider";
+import { RpcTransportProvider } from "../../src/app/rpc/transportProvider";
 import { byTestId, TEST_IDS } from "../support/testIds";
 
 const SIGN_IN_HELP = "Sign in with GitHub to access the terminal.";

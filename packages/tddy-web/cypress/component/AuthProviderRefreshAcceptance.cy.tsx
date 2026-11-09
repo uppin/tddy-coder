@@ -16,7 +16,7 @@
  */
 
 import React, { useState } from "react";
-import { AuthProvider, useAuthContext } from "../../src/hooks/authProvider";
+import { AuthProvider, useAuthContext } from "../../src/app/auth/authProvider";
 import { AuthService } from "tddy-client-web/gen/auth_pb";
 import { SessionService } from "tddy-client-web/gen/session_pb";
 import { mountWithRpc } from "../support/rpc/inMemory";

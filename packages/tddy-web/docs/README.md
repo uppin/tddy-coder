@@ -1,5 +1,9 @@
 # tddy-web documentation
 
+`tddy-web` is the wiring package: the app container, the port implementations, routing, the shell and
+the `*AppPage`s ([README](../README.md)). Feature docs live with their packages; the entries below that
+point elsewhere are kept so an old link still lands.
+
 - **Accounts screen (the credential vault's accounts, rename and remove)**: [accounts-screen.md](../../tddy-workspace-web/docs/accounts-screen.md)
 - **Capability gating (media and presence surfaces)**: [capability-gating.md](capability-gating.md)
 - **Changeset history**: [changesets/](changesets/)

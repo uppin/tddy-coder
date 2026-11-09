@@ -8,7 +8,7 @@
  *
  * The sibling of `./sessionConnections.ts`, and deliberately the same shape.
  *
- * Model: `src/rpc/connections/types.ts`.
+ * Model: `src/app/rpc/connections/types.ts`.
  */
 
 import { createClient, type Client, type Transport } from "@connectrpc/connect";

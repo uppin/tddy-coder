@@ -15,7 +15,7 @@
 import React, { useEffect } from "react";
 import { aDisconnectedRoom } from "tddy-livekit-web/testkit";
 import type { DaemonHost } from "tddy-client-web";
-import { SelectedDaemonProvider } from "../../src/rpc/selectedDaemon";
+import { SelectedDaemonProvider } from "../../src/app/rpc/selectedDaemon";
 import { DaemonSelectorConnected } from "../../src/components/shell/DaemonSelector";
 import { SessionsDrawerScreen } from "tddy-session-web";
 import { withSelectedDaemon } from "../support/rpc/withSelectedDaemon";

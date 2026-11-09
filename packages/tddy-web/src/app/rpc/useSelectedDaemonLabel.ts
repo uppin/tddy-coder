@@ -10,7 +10,7 @@ import {
   findListedDaemon,
   readRememberedDaemonLabel,
   rememberDaemonLabels,
-} from "../routing/selectedHost";
+} from "../../routing/selectedHost";
 
 /**
  * Remember every label `daemons` lists, and name `selectedInstanceId` by it.

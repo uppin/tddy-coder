@@ -78,7 +78,7 @@ read the common room out of the host directory, apply `useHasCapability`, defaul
 `idle`. Six copies of an argument list are six chances to pass the wrong capability, read a different
 source, or default the missing status the other way.
 
-`useCapabilityAvailability(connection, capability)` (`src/hooks/useCapabilityAvailability.ts`) is now
+`useCapabilityAvailability(connection, capability)` (`packages/tddy-client-web/src/capability/useCapabilityAvailability.ts`) is now
 the only place any of that happens, `?? "idle"` included. An absent LiveKit source is "no common room
 was ever asked for" — the desktop build, and every component test that mounts no directory sources —
 and reading it as anything else would invent either a join in flight or a failure. A call site states

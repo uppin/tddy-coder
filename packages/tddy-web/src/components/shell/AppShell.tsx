@@ -1,5 +1,5 @@
 import React from "react";
-import { useAuthContext } from "../../hooks/authProvider";
+import { useAuthContext } from "../../app/auth/authProvider";
 import { DaemonNavMenu } from "./DaemonNavMenu";
 import { DaemonSelectorConnected } from "./DaemonSelector";
 import { HostConnectionGate } from "./HostConnectionGate";

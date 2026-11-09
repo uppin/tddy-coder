@@ -1,4 +1,4 @@
-# The local host over IPC (`src/rpc/connections/localHost.ts`)
+# The local host over IPC (`src/app/rpc/connections/localHost.ts`)
 
 Inside the Tauri desktop app the daemon runs in the *same process* as the webview host. Until this
 existed, `tddy-web` could not talk to it as a **host**: the only registered

@@ -1,4 +1,4 @@
-# Daemon sign-in (`tddy-workspace-web`'s `src/signin/DaemonLoginScreen.tsx`, `src/signin/DeviceLoginPanel.tsx`, `src/signin/CredentialVaultPrompt.tsx`; `tddy-web`'s `src/hooks/useAuth.ts`)
+# Daemon sign-in (`tddy-workspace-web`'s `src/signin/DaemonLoginScreen.tsx`, `src/signin/DeviceLoginPanel.tsx`, `src/signin/CredentialVaultPrompt.tsx`; `tddy-web`'s `src/app/auth/useAuth.ts`)
 
 A daemon-mode page that is signed out shows `DaemonLoginScreen`. What it offers is decided by the
 daemon, never guessed by the page: the daemon **declares** which GitHub sign-in flow it serves, and
@@ -11,7 +11,7 @@ Feature docs: [Cross-daemon session authentication](../../../docs/ft/daemon/sess
 
 Both client-config paths carry it — `GET /api/config` in a browser (`auth_flow`), and
 `DaemonConfigService.GetClientConfig` where there is no HTTP origin (`GetClientConfigResponse.auth_flow`).
-`src/rpc/clientConfig.ts` reads either into `ClientConfig.authFlow`, an `AuthFlowDeclaration`
+`src/app/rpc/clientConfig.ts` reads either into `ClientConfig.authFlow`, an `AuthFlowDeclaration`
 (`authFlowOf`):
 
 | Declared | `authFlow` | The screen offers |
@@ -46,7 +46,7 @@ daemon at all and gets the standalone connection form (`daemonMode: false`). On 
 
 `startDeviceLogin` calls `StartDeviceLogin`, then polls `PollDeviceLogin` no faster than the
 interval it was granted. Each answer becomes one `DevicePollStep` (`devicePollStep`, a pure function
-in `src/hooks/authSession.ts`, beside the session shape and `intervalMsOf`):
+in `src/app/auth/authSession.ts`, beside the session shape and `intervalMsOf`):
 
 | Answer | Step |
 |---|---|
@@ -122,9 +122,9 @@ anything needs it.
 | `cypress/component/RedirectLoginAcceptance.cy.tsx` | `ExchangeCode` without a user, session token or refresh token each ending sign-in with the exact error, storing nothing, and leaving the operator signed out |
 | `cypress/component/CredentialVaultPromptAcceptance.cy.tsx` | the prompt for `LOCKED` and `UNINITIALIZED`, and none for an open vault or a login with no vault; unlocking and keeping the key it is handed; a wrong passphrase shown, the prompt staying; the reset warning and a reset under a passphrase typed twice; create refused until both fields match; "Not now" hiding the prompt and leaving the page usable; no passphrase ever in the browser's storage |
 | `src/lib/vaultPassphrase.test.ts` | the length rule, counted in code points |
-| `src/rpc/sessionTokenStore.test.ts` | the unlock key presented on refresh and replaced with the rotated one, kept when a refresh hands the presented one back, sent on logout and cleared with the tokens; the page-load refresh, and none without a key; the vault state becoming open on an unlock or a reset, with the returned key kept |
+| `src/app/rpc/sessionTokenStore.test.ts` | the unlock key presented on refresh and replaced with the rotated one, kept when a refresh hands the presented one back, sent on logout and cleared with the tokens; the page-load refresh, and none without a key; the vault state becoming open on an unlock or a reset, with the returned key kept |
 | `cypress/component/AuthProviderRefreshAcceptance.cy.tsx`, `DurableSessionAcceptance.cy.tsx` | the durable session through the auth provider, with the unlock key alongside |
-| `src/rpc/clientConfig.test.ts` | `auth_flow` read over HTTP and over RPC: each flow, absence as `"none"`, an unknown value kept as unrecognised |
+| `src/app/rpc/clientConfig.test.ts` | `auth_flow` read over HTTP and over RPC: each flow, absence as `"none"`, an unknown value kept as unrecognised |
 
 Run a spec alone; never the full `cypress:e2e`.
 

@@ -11,7 +11,7 @@ screen are kept apart:
 The layout handles the second case wholesale for host-scoped screens: see
 [host-connections.md § The host connection gate](host-connections.md#the-host-connection-gate).
 
-## Vocabulary — `src/rpc/rpcFailure.ts`
+## Vocabulary — `packages/tddy-client-web/src/rpcFailure.ts`
 
 | Export | Use |
 |---|---|
@@ -20,8 +20,8 @@ The layout handles the second case wholesale for host-scoped screens: see
 | `hostNotConnectedText(host)` | The same, already as text, for a surface that holds a string |
 | `actionFailed(action, error)` | `Delete failed: <reason>`, converted once |
 
-Hosts are named by `useHostLabel()` (`src/rpc/selectedDaemon.tsx`, over the pure `hostLabelOf` in
-`src/rpc/hostLabel.ts`). It is one rule everywhere a host appears in text: the listed label, with the
+Hosts are named by `useHostLabel()` (`src/app/rpc/selectedDaemon.tsx`, over the pure `hostLabelOf` in
+`packages/tddy-client-web/src/hostLabel.ts`). It is one rule everywhere a host appears in text: the listed label, with the
 self-advertised ` (this daemon)` suffix dropped (`SELF_ADVERTISED_LABEL_SUFFIX`), else the instance
 id. The callback changes identity exactly when a name it can give changes, and not when the daemon
 list is merely rebuilt with the same names. A poll keyed on it is therefore not restarted by every

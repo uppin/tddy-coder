@@ -18,8 +18,8 @@ import React from "react";
 import { aDisconnectedRoom, aJoinedRoom } from "tddy-livekit-web/testkit";
 import type { RoomHandle as Room } from "tddy-client-web";
 import type { DaemonHost } from "tddy-client-web";
-import { SelectedDaemonProvider } from "../../../src/rpc/selectedDaemon";
-import { AuthProvider } from "../../../src/hooks/authProvider";
+import { SelectedDaemonProvider } from "../../../src/app/rpc/selectedDaemon";
+import { AuthProvider } from "../../../src/app/auth/authProvider";
 
 /** Default single-daemon fixture — matches the "one local daemon" shape used across other tests. */
 export const DEFAULT_TEST_DAEMON: DaemonHost = { instanceId: "local", label: "local (this daemon)" };

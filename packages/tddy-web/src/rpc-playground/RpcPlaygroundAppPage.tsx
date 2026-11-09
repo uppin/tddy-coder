@@ -1,16 +1,15 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { createClient } from "@connectrpc/connect";
 import { create, type Registry } from "@bufbuild/protobuf";
-import { useLiveKitTransport } from "../rpc/transportProvider";
+import { useLiveKitTransport } from "../app/rpc/transportProvider";
 import {
   ServerReflection,
   ServerReflectionRequestSchema,
 } from "tddy-client-web/gen/grpc/reflection/v1/reflection_pb";
 import { GitHubLoginButton } from "tddy-workspace-web";
 import { AppShell } from "../components/shell/AppShell";
-import { useAuthContext } from "../hooks/authProvider";
+import { useAuthContext } from "../app/auth/authProvider";
 import { presenceIdentityForUser } from "tddy-livekit-web";
-import { useAppLocation } from "../routing/useAppLocation";
 import {
   buildRegistry,
   findMethod,
@@ -22,6 +21,7 @@ import {
 } from "tddy-rpc-playground-web";
 import {
   PARAM_PARTICIPANT,
+  useAppLocation,
   useCapabilityAvailability,
   useHostConnection,
   useHostPresence,

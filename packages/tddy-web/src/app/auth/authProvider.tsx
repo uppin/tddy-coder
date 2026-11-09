@@ -38,6 +38,15 @@ function AuthProviderBody({ children }: { children: ReactNode }) {
   );
 }
 
+/** Serves an auth port built outside the tree (the container's handler) as this app's auth state. */
+export function AuthFromPort({ port, children }: { port: AuthContextValue; children: ReactNode }) {
+  return (
+    <AuthContext.Provider value={port}>
+      <AuthPortProvider port={port}>{children}</AuthPortProvider>
+    </AuthContext.Provider>
+  );
+}
+
 /** Read the shared session/auth state. Throws when rendered outside an `AuthProvider`. */
 export function useAuthContext(): AuthContextValue {
   const ctx = useContext(AuthContext);
