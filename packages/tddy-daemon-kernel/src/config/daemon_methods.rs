@@ -80,18 +80,13 @@ impl DaemonConfig {
             .validate()
             .map_err(|e| anyhow::anyhow!("{}: {e}", path.display()))?;
         // The mapping lives in users.yaml, filled here from the source this deployment reads:
-        // the file the supervisor handed over (which must read — a supervised daemon has no
-        // other mapping), or the one beside this config when it exists. A deployment with no
-        // users.yaml beside its config yet (a test fixture, a first desktop enrolment) maps
-        // nobody in memory; the installers and dev scripts render the file in production.
+        // the file the supervisor handed over, or the one beside this config. A missing
+        // users.yaml is an error, never an empty mapping (user decision, 2026-11-07): every
+        // installer and dev script renders one, so a daemon that finds none was not installed
+        // or launched the way this system renders it, and mapping nobody silently would refuse
+        // every login without saying why.
         let source = crate::users_file::UsersFileSource::from_environment(path);
-        let must_read = matches!(
-            source,
-            crate::users_file::UsersFileSource::HandedBySupervisor(_)
-        ) || source.path().exists();
-        if must_read {
-            config.users = crate::users_file::load_users_file(&source)?;
-        }
+        config.users = crate::users_file::load_users_file(&source)?;
         Ok(config)
     }
 

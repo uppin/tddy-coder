@@ -165,7 +165,13 @@ impl DaemonConfigSource {
                 self.config_path.display()
             )
         })?;
-        let substituted = SubstitutedConfig::write(&text.replace(CURRENT_USER_PLACEHOLDER, &user))?;
+        // The mapping beside the original config travels with the copy, substituted the same
+        // way; a config with none fails its load by name, as any other daemon's would.
+        let users_text = std::fs::read_to_string(self.config_path.with_file_name("users.yaml"))
+            .ok()
+            .map(|users| users.replace(CURRENT_USER_PLACEHOLDER, &user));
+        let substituted =
+            SubstitutedConfig::write(&text.replace(CURRENT_USER_PLACEHOLDER, &user), users_text)?;
         DaemonConfig::load(&substituted.path)
     }
 }
@@ -180,7 +186,7 @@ struct SubstitutedConfig {
 }
 
 impl SubstitutedConfig {
-    fn write(contents: &str) -> anyhow::Result<Self> {
+    fn write(contents: &str, users: Option<String>) -> anyhow::Result<Self> {
         let directory =
             std::env::temp_dir().join(format!("tddy-desktop-daemon-{}", std::process::id()));
         std::fs::create_dir_all(&directory).map_err(|error| {
@@ -189,6 +195,12 @@ impl SubstitutedConfig {
         let path = directory.join("config.yaml");
         std::fs::write(&path, contents)
             .map_err(|error| anyhow::anyhow!("could not write {}: {error}", path.display()))?;
+        if let Some(users) = users {
+            let users_path = directory.join("users.yaml");
+            std::fs::write(&users_path, users).map_err(|error| {
+                anyhow::anyhow!("could not write {}: {error}", users_path.display())
+            })?;
+        }
         Ok(Self { directory, path })
     }
 }
@@ -343,8 +355,13 @@ mod tests {
     /// dev data directory, the way an installed app keeps it under `~/.tddy`.
     #[test]
     fn the_checkouts_desktop_dev_config_keeps_a_credential_vault() {
-        // Given the dev config `./desktop-dev` runs with
+        // Given the dev config `./desktop-dev` runs with — which renders a `users.yaml` beside
+        // it before launching, as this does when a run of it has not left one there
         let workspace_root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../..");
+        let users_yaml = workspace_root.join("users.yaml");
+        if !users_yaml.exists() {
+            std::fs::write(&users_yaml, "[]\n").expect("render the dev users.yaml");
+        }
         let source = DaemonConfigSource {
             config_path: workspace_root.join(DESKTOP_DEV_CONFIG_FILENAME),
             workspace_root,

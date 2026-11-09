@@ -81,6 +81,8 @@ fn a_daemon_config_service_mapping(
     let dir = tempfile::tempdir().expect("no temp dir");
     let config_path = dir.path().join("daemon.yaml");
     std::fs::write(&config_path, config_file).expect("the config file was not written");
+    // Every load needs a users.yaml beside the config; the running mapping is set in memory below
+    std::fs::write(dir.path().join("users.yaml"), "[]\n").expect("the users file was not written");
     let mut config = DaemonConfig::load(&config_path).expect("the config fixture did not load");
     config.users = LiveUsers::new(users);
     let common_room = Arc::new(RecordingCommonRoom::default());
@@ -327,14 +329,13 @@ async fn update_config_writes_no_users_key_into_daemon_yaml() {
         ),
         (false, Some("ws://10.0.0.5:7880"))
     );
-    // And it wrote no `users.yaml`: an update carries no mapping, so enrolment stays that
-    // file's one writer (`#agent-tools` 31/32, user decision on the pass-2 report)
+    // And it left `users.yaml` as it found it: an update carries no mapping, so enrolment
+    // stays that file's one writer (`#agent-tools` 31/32, user decision on the pass-2 report)
     assert_eq!(
-        daemon
-            .config_path
-            .parent()
-            .map(|directory| directory.join("users.yaml").exists()),
-        Some(false)
+        daemon.config_path.parent().map(|directory| {
+            std::fs::read_to_string(directory.join("users.yaml")).expect("the users file reads")
+        }),
+        Some("[]\n".to_string())
     );
 }
 

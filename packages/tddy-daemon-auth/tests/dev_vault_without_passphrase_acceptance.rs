@@ -216,6 +216,8 @@ fn a_daemon_from(yaml: &str) -> DaemonConfig {
     let dir = tempfile::tempdir().expect("a temporary directory");
     let path = dir.path().join("config.yaml");
     std::fs::write(&path, yaml).expect("the config is written");
+    // Every load needs a users.yaml beside the config; this daemon maps nobody
+    std::fs::write(dir.path().join("users.yaml"), "[]\n").expect("the users file is written");
     DaemonConfig::load(&path).expect("the config loads")
 }
 

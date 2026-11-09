@@ -842,10 +842,12 @@ mod startup_and_warmup_timing_tests {
     }
 
     /// Writes `yaml` to a file and loads it the way the daemon does, so the load-time checks run.
+    /// Every load needs a `users.yaml` beside the config; this fixture's daemon maps nobody.
     fn a_daemon_loaded_from(yaml: &str) -> anyhow::Result<DaemonConfig> {
         let dir = tempfile::tempdir().expect("tempdir");
         let path = dir.path().join("daemon.yaml");
         std::fs::write(&path, yaml).expect("write daemon.yaml");
+        std::fs::write(dir.path().join("users.yaml"), "[]\n").expect("write users.yaml");
         DaemonConfig::load(&path)
     }
 
@@ -928,6 +930,24 @@ mod startup_and_warmup_timing_tests {
         assert!(
             message.contains("`users:`") && message.contains("users.yaml"),
             "the refusal must name the key and users.yaml; got {message}"
+        );
+    }
+
+    #[test]
+    fn a_missing_users_yaml_fails_loading_naming_it() {
+        // Given a daemon.yaml with no users.yaml beside it — a deployment no installer rendered
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("daemon.yaml");
+        std::fs::write(&path, "listen:\n  web_port: 8899\n").expect("write daemon.yaml");
+
+        // When it is loaded the way the daemon loads it
+        let refused = DaemonConfig::load(&path).expect_err("a missing users.yaml must not load");
+
+        // Then the failure names the missing file, never an empty mapping
+        let message = format!("{refused:#}");
+        assert!(
+            message.contains("users.yaml"),
+            "the refusal must name users.yaml; got {message}"
         );
     }
 

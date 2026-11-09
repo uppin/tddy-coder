@@ -570,6 +570,8 @@ async fn a_config_mapping_nobody(dir: &TempDir) -> DaemonConfig {
         data_dir = the_data_dir_in(dir).display(),
     );
     std::fs::write(&config_path, yaml).expect("the config is written");
+    // The empty mapping file `./install --desktop` renders beside the config it enrols into
+    std::fs::write(dir.path().join("users.yaml"), "[]\n").expect("the users file is written");
     DaemonConfig::load(&config_path).expect("the config loads")
 }
 
