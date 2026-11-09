@@ -117,6 +117,14 @@ impl Supervisor {
                     Ok((host.user.clone(), Arc::new(listener)))
                 })
                 .collect::<anyhow::Result<Vec<_>>>()?;
+            let agent_tool_listeners = service
+                .agent_tool_sockets
+                .iter()
+                .map(|tools| {
+                    let listener = host_socket::bind_host_socket(&service.name, tools)?;
+                    Ok((tools.user.clone(), Arc::new(listener)))
+                })
+                .collect::<anyhow::Result<Vec<_>>>()?;
             slots.push(Slot {
                 runtime: ServiceRuntime::new(service),
                 service: service.clone(),
@@ -124,6 +132,7 @@ impl Supervisor {
                 started_at: None,
                 listener,
                 host_listeners,
+                agent_tool_listeners,
             });
         }
         Ok(Arc::new(Supervisor {
@@ -955,6 +964,82 @@ mod tests {
         assert_eq!(
             handover.fd_names(),
             format!("connection:host-session.{account}")
+        );
+    }
+
+    // -----------------------------------------------------------------------------------------
+    // Per-OS-user agent-tool sockets (`#agent-tools` 26/28)
+    // -----------------------------------------------------------------------------------------
+
+    /// [`a_config_declaring_host_sockets`] with this account's host socket and agent-tool socket,
+    /// each in a directory of its own.
+    fn a_config_declaring_both_sockets_for_this_account(directory: &Path) -> SupervisorConfig {
+        let account = this_account();
+        let mut config = a_config_declaring_host_sockets(
+            directory,
+            vec![crate::config::HostSocket {
+                user: account.clone(),
+                path: directory.join("run/user/host.sock"),
+            }],
+        );
+        config.services[0].agent_tool_sockets = vec![crate::config::HostSocket {
+            user: account,
+            path: directory.join("run-agent-tools/user/agent.sock"),
+        }];
+        config
+    }
+
+    #[test]
+    fn creates_every_declared_agent_tool_socket_when_it_is_built() {
+        // Given a service declaring an agent-tool socket for the account running the test
+        let directory = tempfile::TempDir::new().expect("create a workspace");
+        let config = a_config_declaring_both_sockets_for_this_account(directory.path());
+        let forks = Arc::new(
+            crate::spawn_broker::fork_broker::ForkBroker::start().expect("start the fork thread"),
+        );
+
+        // When the supervisor is built
+        let _supervisor = Supervisor::new(&config, forks).expect("build the supervisor");
+
+        // Then the socket exists, before anything has been started
+        let path = directory.path().join("run-agent-tools/user/agent.sock");
+        assert!(path.exists(), "{} was not created", path.display());
+    }
+
+    #[test]
+    fn agent_tool_listeners_are_announced_as_agent_tools_user() {
+        // Given a built supervisor declaring this account's host and agent-tool sockets
+        let directory = tempfile::TempDir::new().expect("create a workspace");
+        let account = this_account();
+        let config = a_config_declaring_both_sockets_for_this_account(directory.path());
+        let forks = Arc::new(
+            crate::spawn_broker::fork_broker::ForkBroker::start().expect("start the fork thread"),
+        );
+        let supervisor = Supervisor::new(&config, forks).expect("build the supervisor");
+
+        // When the handover for the service's next start is taken
+        let handover = supervisor.lock()[0].socket_handover().expect("a handover");
+
+        // Then the agent-tool socket follows the host sockets, under its own name
+        assert_eq!(
+            (handover.count(), handover.fd_names()),
+            (
+                3,
+                format!("connection:host-session.{account}:agent-tools.{account}")
+            )
+        );
+    }
+
+    #[test]
+    fn the_agent_tool_fd_name_prefix_is_not_the_host_session_one() {
+        // Then — guard: the daemon tells the two kinds apart by this prefix alone
+        assert_eq!(
+            (
+                crate::socket::agent_tools_fd_name("alice"),
+                crate::socket::host_session_fd_name("alice")
+                    == crate::socket::agent_tools_fd_name("alice"),
+            ),
+            ("agent-tools.alice".to_string(), false)
         );
     }
 }

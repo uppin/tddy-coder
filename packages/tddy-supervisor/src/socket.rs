@@ -28,6 +28,16 @@ pub fn host_session_fd_name(os_user: &str) -> String {
     format!("{HOST_SESSION_FD_NAME_PREFIX}{os_user}")
 }
 
+/// Prefix of the `LISTEN_FDNAMES` entry of a per-OS-user agent-tool socket:
+/// `agent-tools.<os user>` (`#agent-tools` 26/28). The daemon spells it again
+/// (`tddy_daemon_kernel::agent_tool_sockets::AGENT_TOOLS_FD_NAME_PREFIX`); a test pins the two.
+pub const AGENT_TOOLS_FD_NAME_PREFIX: &str = "agent-tools.";
+
+/// The `LISTEN_FDNAMES` entry of `os_user`'s agent-tool socket.
+pub fn agent_tools_fd_name(os_user: &str) -> String {
+    format!("{AGENT_TOOLS_FD_NAME_PREFIX}{os_user}")
+}
+
 /// The per-OS-user host sockets a service was handed, as `(os user, descriptor)`.
 ///
 /// Read from the same `LISTEN_PID` / `LISTEN_FDS` / `LISTEN_FDNAMES` the service's own listener is

@@ -341,6 +341,11 @@ fn a_facilitating_daemon_whose_codebase_host(codebase_host: ACodebaseHost) -> AF
             peer_routing,
             Arc::clone(&rest_of_the_host) as Arc<dyn AgentHostCallbacks>,
         ),
+        agent_tool_sockets: Arc::new(
+            tddy_daemon_kernel::agent_tool_sockets::AgentToolSockets::new(
+                tddy_daemon_kernel::agent_tool_sockets::AgentToolSocketPlacement::PerOsUser,
+            ),
+        ),
         host: rest_of_the_host,
     };
 

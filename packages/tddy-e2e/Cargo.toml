@@ -48,6 +48,10 @@ tempfile = "3"
 rstest = { workspace = true }
 pretty_assertions = { workspace = true }
 tddy-testing-commons = { path = "../tddy-testing-commons" }
+# install_supervisor.rs loads the supervisor.yaml an install leaves with the supervisor's own parser
+# and validator, so a rendered block is proved to be one the supervisor accepts. A leaf for this
+# crate: tddy-supervisor depends on nothing tddy-e2e builds.
+tddy-supervisor = { path = "../tddy-supervisor" }
 # The VM-backed cgroups production tests. `tddy-vm-testkit` depends on neither the daemon
 # nor the supervisor, so this creates no cycle — which is exactly why these tests live here
 # and not in `packages/tddy-supervisor/tests/`, where the client side would need

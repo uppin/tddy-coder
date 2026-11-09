@@ -96,6 +96,13 @@ pub struct ManagedService {
     /// [`HostSocket`].
     #[serde(default)]
     pub host_sockets: Vec<HostSocket>,
+    /// Per-OS-user **agent-tool** sockets (`#agent-tools` 26/28), created and handed over exactly
+    /// like [`host_sockets`](Self::host_sockets) and announced as `agent-tools.<os user>`: the
+    /// socket a session of that user reports its hooks and makes its tool calls over. Each needs a
+    /// directory of its own — never the user's host socket's — and both kinds together must fit
+    /// [`crate::socket::MAX_HANDED_OVER_LISTENERS`].
+    #[serde(default)]
+    pub agent_tool_sockets: Vec<HostSocket>,
 }
 
 /// A socket for one OS user, created by the supervisor and handed to a managed service.

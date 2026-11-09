@@ -20,6 +20,9 @@ pub(super) struct Slot {
     /// The per-OS-user host sockets this service declared, as `(os user, listener)`, created once
     /// and handed to every start like [`Self::listener`].
     pub(super) host_listeners: Vec<(String, Arc<UnixListener>)>,
+    /// The per-OS-user agent-tool sockets this service declared, as `(os user, listener)`, handed
+    /// after the host sockets (`#agent-tools` 26/28).
+    pub(super) agent_tool_listeners: Vec<(String, Arc<UnixListener>)>,
 }
 impl Slot {
     pub(super) fn spawn_plan(&self, supervisor_socket: &Path) -> SpawnPlan {
@@ -54,6 +57,9 @@ impl Slot {
         let mut handover = SocketHandover::new(self.listener.clone()?);
         for (user, listener) in &self.host_listeners {
             handover = handover.with_host_session_socket(user, Arc::clone(listener));
+        }
+        for (user, listener) in &self.agent_tool_listeners {
+            handover = handover.with_agent_tool_socket(user, Arc::clone(listener));
         }
         Some(handover)
     }

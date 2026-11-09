@@ -203,6 +203,7 @@ impl SplitSessions {
     /// makes the relaunch honour a withdrawal.
     pub(crate) async fn resume_colocated_jail_wiring(
         &self,
+        os_user: &str,
         sessions_base: &std::path::Path,
         session_dir: &std::path::Path,
         session_id: &str,
@@ -239,7 +240,7 @@ impl SplitSessions {
             &tddy_daemon_kernel::daemon_hook_urls::local_daemon_hook_url(&self.config),
             checkout_session_id,
             &self.agent_session_token_for(session_token)?,
-            self.agent_tool_socket_for_embedded_host(),
+            Some(self.agent_tool_socket_of(os_user).await?),
         );
         let tddy_tools = self.resolve_tddy_tools_path()?;
         let context_dir = crate::split_session::build_split_context_dir(

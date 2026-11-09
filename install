@@ -673,7 +673,7 @@ warn_unless_file_declares() {
 # The service entry is the `- name: tddy-daemon` list item under `services:`. A service's own keys
 # sit exactly one indentation step (two spaces, as every rendered template and the supervisor's own
 # examples use) deeper than the `- name:` marker; anything deeper belongs to a nested block such as
-# `socket:` or `host_sockets:`, which carry their own `group:`/`user:` keys that must NOT be read as
+# `socket:`, `host_sockets:` or `agent_tool_sockets:`, which carry their own `group:`/`user:` keys that must NOT be read as
 # the service's identity. A config indented differently fails the extraction loudly rather than
 # matching the wrong line — a wrong identity here is a daemon crash-looping on its own log files.
 read_daemon_service_key() {
@@ -705,6 +705,200 @@ read_daemon_service_key() {
       inblock = 0
     }
   ' "$file"
+}
+
+# Where each session user's agent-tool socket is declared when install writes the entry itself:
+# `${AGENT_TOOL_SOCKETS_DIR}/<user>/agent.sock`. Under /run because every directory above a socket the
+# supervisor hands to a user must be writable by root alone, and never the host-session sockets'
+# directory, which is handed to that user wholesale.
+AGENT_TOOL_SOCKETS_DIR=/run/tddy-agent-tools
+
+# survey_agent_tool_sockets FILE
+#
+# Reads what declare_agent_tool_sockets needs from a supervisor config, one fact per line:
+#   daemon LINE INDENT     the `- name: tddy-daemon` service entry: its line number and indentation
+#   policy USER            a spawn_policy.allowed_session_users entry
+#   socket                 the tddy-daemon service declares its own `socket:` (descriptor 3)
+#   block                  the tddy-daemon service declares `agent_tool_sockets:` (live, not commented)
+#   listed USER            a user that block already gives a socket
+#   host                   one `host_sockets:` entry of that service
+#   unreadable WHAT        a shape this reader does not understand — the caller refuses the file
+#
+# Indentation follows read_daemon_service_key: a service's own keys sit one step (two spaces) deeper
+# than its `- name:` marker. A block-sequence item may sit at its key's own indentation, as YAML allows.
+survey_agent_tool_sockets() {
+  awk '
+    function users_in(text,    rest) {
+      rest = text
+      while (match(rest, /user:[[:space:]]*[^,}[:space:]]+/)) {
+        u = substr(rest, RSTART, RLENGTH)
+        sub(/^user:[[:space:]]*/, "", u)
+        gsub(/["'\'']/, "", u)
+        found[++found_count] = u
+        rest = substr(rest, RSTART + RLENGTH)
+      }
+    }
+    /^[[:space:]]*(#.*)?$/ { next }
+    {
+      ind = match($0, /[^[:space:]]/) - 1
+      line = $0
+      sub(/[[:space:]]+#.*$/, "", line)
+      body = substr(line, ind + 1)
+    }
+    ind == 0 {
+      in_policy = (body ~ /^spawn_policy:/)
+      in_users = 0
+    }
+    in_users && (ind < users_indent || (ind == users_indent && body !~ /^-/)) { in_users = 0 }
+    in_users {
+      u = body
+      sub(/^-[[:space:]]*/, "", u)
+      gsub(/["'\'']/, "", u)
+      print "policy " u
+      next
+    }
+    in_policy && ind > 0 && body ~ /^allowed_session_users:/ {
+      users_indent = ind
+      rest = body
+      sub(/^allowed_session_users:[[:space:]]*/, "", rest)
+      if (rest == "") { in_users = 1; next }
+      if (rest !~ /^\[.*\]$/) { print "unreadable spawn_policy.allowed_session_users"; next }
+      gsub(/[\[\]"'\'']/, "", rest)
+      n = split(rest, parts, ",")
+      for (i = 1; i <= n; i++) {
+        u = parts[i]
+        gsub(/[[:space:]]/, "", u)
+        if (u != "") print "policy " u
+      }
+      next
+    }
+    /^[[:space:]]*-[[:space:]]*name:/ {
+      if (in_daemon && ind <= daemon_indent) in_daemon = 0
+      if (!in_daemon && body ~ /^-[[:space:]]*name:[[:space:]]*tddy-daemon([[:space:]]|$)/) {
+        in_daemon = 1
+        daemon_indent = ind
+        section = ""
+        print "daemon " NR " " ind
+        next
+      }
+    }
+    in_daemon && ind <= daemon_indent { in_daemon = 0 }
+    in_daemon && ind == daemon_indent + 2 && body !~ /^-/ {
+      section = ""
+      if (body ~ /^agent_tool_sockets:/) { section = "listed"; print "block" }
+      if (body ~ /^host_sockets:/) section = "host"
+      if (body ~ /^socket:/) print "socket"
+      rest = body
+      sub(/^[a-z_]+:[[:space:]]*/, "", rest)
+      if (section == "" || rest == "") next
+    }
+    in_daemon && section != "" {
+      found_count = 0
+      users_in(body)
+      for (i = 1; i <= found_count; i++) print section " " found[i]
+    }
+  ' "$1"
+}
+
+# declare_agent_tool_sockets FILE
+#
+# Gives every OS user spawn_policy.allowed_session_users names a live `agent_tool_sockets:` entry in the
+# tddy-daemon service of the supervisor config FILE. Under the supervisor a session user with no such
+# entry has every session start refused (the unprivileged daemon cannot make that user an owner-only
+# socket itself), so an upgrade that kept an operator's policy but declared no sockets would stop every
+# session of those users. Decided 2026-11-07: install writes the entries rather than only documenting
+# the setting.
+#
+# The block is inserted directly under the service's `- name: tddy-daemon` line, at the service's key
+# indentation; every other line is kept as it was, and FILE keeps its mode and owner (cp -p). A service
+# that already declares `agent_tool_sockets:` is the operator's: it is left untouched, and every policy
+# user it leaves out is named in a warning. A policy that names no user needs no socket — nothing is
+# written. A file this reader cannot follow, or one that would hand over more descriptors than the
+# supervisor reserves, is refused with the file unchanged rather than half rewritten.
+declare_agent_tool_sockets() {
+  local file="$1" survey kind value extra
+  local daemon_line="" daemon_indent="" has_block=false has_socket=false host_count=0
+  local policy=" " listed=" " missing="" user
+
+  survey="$(survey_agent_tool_sockets "$file")" || {
+    echo "install: cannot read ${file} to declare the agent-tool sockets; it is left unchanged" >&2
+    exit 1
+  }
+  while read -r kind value extra; do
+    case "$kind" in
+      daemon) daemon_line="$value"; daemon_indent="$extra" ;;
+      policy) policy+="${value} " ;;
+      socket) has_socket=true ;;
+      block) has_block=true ;;
+      listed) listed+="${value} " ;;
+      host) host_count=$((host_count + 1)) ;;
+      unreadable)
+        echo "install: cannot read ${value} in ${file}: write it as a [a, b] list or one \`- user\` per line." >&2
+        echo "install: ${file} is left unchanged." >&2
+        exit 1
+        ;;
+    esac
+  done <<<"$survey"
+
+  for user in $policy; do
+    if [[ ! "$user" =~ ^[A-Za-z0-9_][A-Za-z0-9_.-]*$ ]]; then
+      echo "install: spawn_policy.allowed_session_users in ${file} names \`${user}\`, which cannot name a" >&2
+      echo "install: socket directory; ${file} is left unchanged." >&2
+      exit 1
+    fi
+    [[ "$listed" == *" ${user} "* ]] || missing+="${user} "
+  done
+  if [[ -z "$missing" ]]; then
+    return 0
+  fi
+  if "$has_block"; then
+    echo "install:   WARNING: ${file} declares agent_tool_sockets: for tddy-daemon but not for: ${missing% }." >&2
+    echo "install:   Those users' session starts are refused until each is given an entry there (left as" >&2
+    echo "install:   the operator wrote it)." >&2
+    return 0
+  fi
+  if [[ -z "$daemon_line" ]]; then
+    echo "install: ${file} declares no \`- name: tddy-daemon\` service to give agent-tool sockets to;" >&2
+    echo "install: it is left unchanged." >&2
+    exit 1
+  fi
+  if ! "$has_socket"; then
+    echo "install: the tddy-daemon service in ${file} declares no socket:, and the agent-tool sockets its" >&2
+    echo "install: session users (${missing% }) need are handed over after that listener; ${file} is left unchanged." >&2
+    exit 1
+  fi
+  local count=0
+  for user in $missing; do count=$((count + 1)); done
+  # The supervisor reserves MAX_HANDED_OVER_LISTENERS (16) descriptors: the daemon's own listener,
+  # then every host-session and agent-tool socket together.
+  if (( 1 + host_count + count > 16 )); then
+    echo "install: ${file} would hand tddy-daemon ${host_count} host sockets and ${count} agent-tool sockets;" >&2
+    echo "install: at most 15 fit together. Declare agent_tool_sockets: by hand; ${file} is left unchanged." >&2
+    exit 1
+  fi
+
+  local pad tmp
+  pad="$(printf '%*s' "$((daemon_indent + 2))" '')"
+  tmp="$(mktemp "${file}.XXXXXX")" || {
+    echo "install: cannot create a temporary file next to ${file}" >&2
+    exit 1
+  }
+  if ! cp -p "$file" "$tmp" || ! {
+    head -n "$daemon_line" "$file"
+    echo "${pad}# Written by ./install: one agent-tool socket per spawn_policy.allowed_session_users entry."
+    echo "${pad}# A session user with none here has every session start refused."
+    echo "${pad}agent_tool_sockets:"
+    for user in $missing; do
+      echo "${pad}  - {user: ${user}, path: ${AGENT_TOOL_SOCKETS_DIR}/${user}/agent.sock}"
+    done
+    tail -n "+$((daemon_line + 1))" "$file"
+  } >"$tmp"; then
+    rm -f "$tmp"
+    echo "install: failed declaring the agent-tool sockets in ${file}; it is left unchanged" >&2
+    exit 1
+  fi
+  mv -f "$tmp" "$file"
+  echo "install:   declared an agent-tool socket for ${missing% } under ${AGENT_TOOL_SOCKETS_DIR} in ${file}"
 }
 
 # --- desktop install ------------------------------------------------------------------------------
@@ -1259,9 +1453,12 @@ if "$want_supervisor"; then
       "__DAEMON_GROUP__=${DAEMON_GROUP}"
     echo "install:   spawn_policy and cgroup ceilings are left empty — no session may be spawned as another"
     echo "install:   user until an operator declares them (an empty policy grants no privilege)"
+    echo "install:   agent_tool_sockets follows the policy: once spawn_policy names session users, re-run"
+    echo "install:   install and it declares each one's agent-tool socket, without which their starts are refused"
   else
     echo "install: keeping existing supervisor config (not overwriting): ${SUPERVISOR_CONFIG_FILE}"
   fi
+  declare_agent_tool_sockets "$SUPERVISOR_CONFIG_FILE"
 fi
 
 # supervisor.yaml is the whole policy the root broker enforces, and daemon.yaml decides what the

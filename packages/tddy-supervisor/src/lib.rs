@@ -70,8 +70,9 @@ pub use restart::{BackoffState, RestartDecision};
 pub use service::{ServiceState, ServiceStatus};
 pub use services::{ExitOutcome, ServiceRuntime};
 pub use socket::{
-    host_session_fd_name, resolve_host_session_fds, SocketSource, HOST_SESSION_FD_NAME_PREFIX,
-    MAX_HANDED_OVER_LISTENERS, SD_LISTEN_FDS_START, SERVICE_SOCKET_FD_NAME,
+    agent_tools_fd_name, host_session_fd_name, resolve_host_session_fds, SocketSource,
+    AGENT_TOOLS_FD_NAME_PREFIX, HOST_SESSION_FD_NAME_PREFIX, MAX_HANDED_OVER_LISTENERS,
+    SD_LISTEN_FDS_START, SERVICE_SOCKET_FD_NAME,
 };
 pub use supervisor::Supervisor;
 
