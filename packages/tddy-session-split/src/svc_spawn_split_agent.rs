@@ -312,24 +312,7 @@ impl SplitSessions {
         // The launch argv is rendered from the split agent's spec — the same template a
         // spec-driven launch renders — with this start's model, session, permission mode and
         // prompt bound.
-        let spec = crate::agent_argv::split_agent_spec(&self.coding_agents)?;
-        let argv = spec
-            .render_run_argv(
-                std::path::Path::new(&(self.agent_binary)(&spec.id)?),
-                &[
-                    ("session_id", session_id),
-                    ("chat_id", session_id),
-                    ("model", req.model.trim()),
-                    ("permission_mode", req.permission_mode.trim()),
-                    ("prompt", initial_prompt.trim()),
-                ],
-                if req.dangerously_skip_permissions {
-                    &["dangerously_skip_permissions"][..]
-                } else {
-                    &[][..]
-                },
-            )
-            .map_err(|e| Status::internal(format!("rendering the split agent's argv: {e}")))?;
+        let (spec, argv) = self.render_split_argv(session_id, req, &initial_prompt)?;
         let session_type = format!("{}-cli", spec.id);
         // The agent's `tddy-tools` finds its session through the pointer in the context dir (and
         // through its own registration, `extra_args`): the agent process is given no `TDDY_*`
@@ -365,6 +348,33 @@ impl SplitSessions {
             Status::internal(format!("failed to spawn {session_type}: {e}"))
         })?;
         Ok((hook_token, handle))
+    }
+
+    fn render_split_argv(
+        &self,
+        session_id: &str,
+        req: &StartSessionRequest,
+        initial_prompt: &str,
+    ) -> Result<(tddy_coding_agent_specs::CodingAgentSpec, Vec<String>), Status> {
+        let spec = crate::agent_argv::split_agent_spec(&self.coding_agents)?;
+        let argv = spec
+            .render_run_argv(
+                std::path::Path::new(&(self.agent_binary)(&spec.id)?),
+                &[
+                    ("session_id", session_id),
+                    ("chat_id", session_id),
+                    ("model", req.model.trim()),
+                    ("permission_mode", req.permission_mode.trim()),
+                    ("prompt", initial_prompt.trim()),
+                ],
+                if req.dangerously_skip_permissions {
+                    &["dangerously_skip_permissions"][..]
+                } else {
+                    &[][..]
+                },
+            )
+            .map_err(|e| Status::internal(format!("rendering the split agent's argv: {e}")))?;
+        Ok((spec, argv))
     }
 
     /// Host this split session's room over its checkout on `codebase_instance_id`.
