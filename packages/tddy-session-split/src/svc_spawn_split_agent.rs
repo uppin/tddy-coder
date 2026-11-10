@@ -259,12 +259,7 @@ impl SplitSessions {
         // The agent's hook is told to wait this long, so the daemon holds it for as long: recorded
         // beside `.session.yaml`, where `AwaitQuestionAnswer` reads it. A split agent has no tool
         // file of its own to read the wait from, so it is the specs' default.
-        let answer_wait_secs = tddy_coding_agent_specs::DEFAULT_ANSWER_WAIT_SECS;
-        tddy_session_activity::answer_wait::record_answer_wait(
-            session_dir,
-            std::time::Duration::from_secs(answer_wait_secs),
-        )
-        .map_err(|e| Status::internal(format!("failed to record the answer wait: {e}")))?;
+        let answer_wait_secs = record_split_answer_wait(session_dir)?;
         // The hooks file is the one the split agent's spec's hooks slot renders, written
         // under the context dir the agent runs in.
         let agent_tool_socket = self.agent_tool_socket_of(os_user).await?;
@@ -507,6 +502,16 @@ impl SplitSessions {
     pub fn agent_session_token_for(&self, caller_token: &str) -> Result<String, Status> {
         crate::split_session::mint_agent_session_token(self.session_tokens()?, caller_token)
     }
+}
+
+fn record_split_answer_wait(session_dir: &Path) -> Result<u64, Status> {
+    let answer_wait_secs = tddy_coding_agent_specs::DEFAULT_ANSWER_WAIT_SECS;
+    tddy_session_activity::answer_wait::record_answer_wait(
+        session_dir,
+        std::time::Duration::from_secs(answer_wait_secs),
+    )
+    .map_err(|e| Status::internal(format!("failed to record the answer wait: {e}")))?;
+    Ok(answer_wait_secs)
 }
 
 fn split_argv_with_flags(
