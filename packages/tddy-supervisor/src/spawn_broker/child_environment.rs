@@ -113,12 +113,7 @@ impl ChildEnvironment {
         }
         let listen_pid = hands_over_listener.then(listen_pid_entry);
 
-        let mut pointers: Vec<*const libc::c_char> =
-            variables.iter().map(|entry| entry.as_ptr()).collect();
-        if let Some(entry) = &listen_pid {
-            pointers.push(entry.as_ptr().cast());
-        }
-        pointers.push(std::ptr::null());
+        let pointers = environment_pointers(&variables, &listen_pid);
 
         Ok(ChildEnvironment {
             variables,
@@ -139,6 +134,16 @@ impl ChildEnvironment {
         }
         environ = self.pointers.as_ptr();
     }
+}
+
+fn environment_pointers(variables: &[CString], listen_pid: &Option<Box<[u8]>>) -> Vec<*const i8> {
+    let mut pointers: Vec<*const libc::c_char> =
+        variables.iter().map(|entry| entry.as_ptr()).collect();
+    if let Some(entry) = listen_pid {
+        pointers.push(entry.as_ptr().cast());
+    }
+    pointers.push(std::ptr::null());
+    pointers
 }
 
 /// The base environment of a session: a `PATH` it did not choose, plus the locale.
