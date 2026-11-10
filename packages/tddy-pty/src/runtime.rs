@@ -355,16 +355,20 @@ fn open_pty_and_pump(
         // the capture holds everything the child wrote before it exited, by the time the terminal
         // status is reported. A process the child left behind can hold the slave open for as long
         // as it runs, so the wait is bounded: past it, the exit is reported without that output.
-        if let Err(RecvTimeoutError::Timeout) = reader_done_rx.recv_timeout(READER_DRAIN_GRACE) {
-            log::info!(
-                target: "tddy_pty::runtime",
-                "PTY child {pid} exited while another process still holds its terminal open"
-            );
-        }
+        wait_for_reader_drain(reader_done_rx, pid);
         let _ = exit_tx.send(status);
     });
 
     Ok(())
+}
+
+fn wait_for_reader_drain(reader_done_rx: std::sync::mpsc::Receiver<()>, pid: u32) {
+    if let Err(RecvTimeoutError::Timeout) = reader_done_rx.recv_timeout(READER_DRAIN_GRACE) {
+        log::info!(
+            target: "tddy_pty::runtime",
+            "PTY child {pid} exited while another process still holds its terminal open"
+        );
+    }
 }
 
 fn build_pty_command(spec: PtySpawnSpec) -> CommandBuilder {

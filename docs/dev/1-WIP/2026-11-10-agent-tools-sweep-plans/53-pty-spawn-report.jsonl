@@ -1,0 +1,2 @@
+{"v":2,"files":{"packages/tddy-pty/src/runtime.rs":{"sha256":"sha256:30f1ff85cca65c06c92e984e22af28a4b9eeac2bbb09d78646307ea4a677dffa"}}}
+{"id": "op-1", "op": "extract_method", "anchor": {"kind": "item", "item": "tddy_pty::runtime::open_pty_and_pump", "file": "packages/tddy-pty/src/runtime.rs", "start": {"line": 98, "col": 9}, "end": {"line": 103, "col": 11}, "fingerprint": "sha256:1a3597d4b2cab7bb88b01264f3ce90f6b44310200e9664e9df026859b996f469", "hint": {"line": 358, "col": 9}}, "name": "wait_for_reader_drain"}
