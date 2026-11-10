@@ -60,16 +60,33 @@ export function emptyUsage(): ConversationUsage[] {
  * siblings in snapshot order. A child whose parent is not in the snapshot is a top-level row.
  */
 export function buildUsageTree(records: ConversationUsage[]): UsageRow[] {
-  // TODO(daemon-stream): implement
-  void records;
-  return [];
+  const ids = new Set(records.map((r) => r.id));
+  const childrenOf = new Map<string, ConversationUsage[]>();
+  const roots: ConversationUsage[] = [];
+  for (const r of records) {
+    if (r.parentId !== undefined && r.parentId !== "" && ids.has(r.parentId) && r.parentId !== r.id) {
+      const siblings = childrenOf.get(r.parentId) ?? [];
+      siblings.push(r);
+      childrenOf.set(r.parentId, siblings);
+    } else {
+      roots.push(r);
+    }
+  }
+  const rows: UsageRow[] = [];
+  const visited = new Set<string>();
+  const place = (r: ConversationUsage, depth: number) => {
+    if (visited.has(r.id)) return;
+    visited.add(r.id);
+    rows.push({ ...r, depth });
+    for (const child of childrenOf.get(r.id) ?? []) place(child, depth + 1);
+  };
+  for (const r of roots) place(r, 0);
+  return rows;
 }
 
 /** Sum every counter across the snapshot, and the cost of the rows that reported one. */
 export function usageTotals(records: ConversationUsage[]): UsageTotals {
-  // TODO(daemon-stream): implement
-  void records;
-  return {
+  const totals: UsageTotals = {
     inputTokens: 0n,
     cacheReadTokens: 0n,
     cacheWriteTokens: 0n,
@@ -79,4 +96,19 @@ export function usageTotals(records: ConversationUsage[]): UsageTotals {
     costUsd: null,
     costPartial: false,
   };
+  let withCost = 0;
+  for (const r of records) {
+    totals.inputTokens += r.inputTokens;
+    totals.cacheReadTokens += r.cacheReadTokens;
+    totals.cacheWriteTokens += r.cacheWriteTokens;
+    totals.outputTokens += r.outputTokens;
+    totals.reasoningTokens += r.reasoningTokens;
+    totals.totalTokens += r.totalTokens;
+    if (r.costUsd !== undefined) {
+      totals.costUsd = (totals.costUsd ?? 0) + r.costUsd;
+      withCost += 1;
+    }
+  }
+  totals.costPartial = withCost > 0 && withCost < records.length;
+  return totals;
 }

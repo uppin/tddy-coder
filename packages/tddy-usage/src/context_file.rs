@@ -6,7 +6,7 @@ use std::path::{Path, PathBuf};
 use serde::{Deserialize, Serialize};
 
 use crate::token_accounting::ConversationRecord;
-use crate::UsageSection;
+use crate::{gather_session_usage, UsageContext, UsageSection};
 
 /// The file a launch writes next to the session's `.session.yaml`.
 pub const USAGE_CONTEXT_FILE: &str = "usage-context.json";
@@ -32,19 +32,28 @@ pub struct UsageContextFile {
 }
 
 /// Write `context` to `<session_dir>/usage-context.json`, replacing any earlier one (a resume or
-/// relaunch records the context it recomputed).
+/// relaunch records the context it recomputed). The file is written to a sibling and renamed, so a
+/// reader never sees a half-written one.
 pub fn write_usage_context(session_dir: &Path, context: &UsageContextFile) -> std::io::Result<()> {
-    // TODO(daemon-stream): implement
-    let _ = (session_dir, context);
-    Ok(())
+    let json = serde_json::to_vec_pretty(context)?;
+    let path = session_dir.join(USAGE_CONTEXT_FILE);
+    let tmp = session_dir.join(format!("{USAGE_CONTEXT_FILE}.tmp"));
+    std::fs::write(&tmp, json)?;
+    std::fs::rename(&tmp, &path)
 }
 
 /// The context `<session_dir>/usage-context.json` records, or `None` when the session has none
 /// (it predates the file, or its launch never got that far) or it does not parse.
 pub fn read_usage_context(session_dir: &Path) -> Option<UsageContextFile> {
-    // TODO(daemon-stream): implement
-    let _ = session_dir;
-    None
+    let path = session_dir.join(USAGE_CONTEXT_FILE);
+    let text = std::fs::read_to_string(&path).ok()?;
+    match serde_json::from_str(&text) {
+        Ok(context) => Some(context),
+        Err(e) => {
+            log::warn!("usage: cannot parse {}: {e}", path.display());
+            None
+        }
+    }
 }
 
 /// The session's usage snapshot from its recorded context: the binding `binding_for` returns for
@@ -54,7 +63,65 @@ pub fn gather_session_usage_for(
     session_dir: &Path,
     binding_for: &dyn Fn(&str) -> Option<UsageSection>,
 ) -> Vec<ConversationRecord> {
-    // TODO(daemon-stream): implement
-    let _ = (session_dir, binding_for);
-    Vec::new()
+    let Some(file) = read_usage_context(session_dir) else {
+        let ctx = UsageContext {
+            agent_home: None,
+            session_dir: session_dir.to_path_buf(),
+            conversation_id: None,
+            worktree: None,
+            agent_label: String::new(),
+            fallback_model: String::new(),
+        };
+        return gather_session_usage(None, &ctx);
+    };
+    let section = binding_for(&file.spec_id);
+    let ctx = UsageContext {
+        agent_home: file.agent_home,
+        session_dir: session_dir.to_path_buf(),
+        conversation_id: file.conversation_id,
+        worktree: file.worktree,
+        agent_label: file.spec_id,
+        fallback_model: file.model.unwrap_or_default(),
+    };
+    gather_session_usage(section.as_ref(), &ctx)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn context() -> UsageContextFile {
+        UsageContextFile {
+            spec_id: "some-agent".into(),
+            agent_home: Some(PathBuf::from("/home/u")),
+            conversation_id: Some("c1".into()),
+            worktree: None,
+            model: Some("m".into()),
+        }
+    }
+
+    #[test]
+    fn a_written_context_reads_back() {
+        let dir = tempfile::tempdir().unwrap();
+        write_usage_context(dir.path(), &context()).unwrap();
+        assert_eq!(read_usage_context(dir.path()), Some(context()));
+    }
+
+    #[test]
+    fn a_later_write_replaces_the_earlier_context() {
+        let dir = tempfile::tempdir().unwrap();
+        write_usage_context(dir.path(), &context()).unwrap();
+        let mut later = context();
+        later.agent_home = Some(PathBuf::from("/jail/home"));
+        write_usage_context(dir.path(), &later).unwrap();
+        assert_eq!(read_usage_context(dir.path()), Some(later));
+    }
+
+    #[test]
+    fn a_missing_or_unparseable_context_reads_as_none() {
+        let dir = tempfile::tempdir().unwrap();
+        assert_eq!(read_usage_context(dir.path()), None);
+        std::fs::write(dir.path().join(USAGE_CONTEXT_FILE), "{not json").unwrap();
+        assert_eq!(read_usage_context(dir.path()), None);
+    }
 }

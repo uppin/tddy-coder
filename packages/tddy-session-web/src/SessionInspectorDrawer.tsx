@@ -86,9 +86,6 @@ interface SessionInspectorDrawerProps {
    */
   hostConnection: HostConnection | null;
   room?: RoomHandle | null;
-  /** TODO(daemon-stream): remove — the Usage tab reaches the daemon through `activityClient` now,
-   *  and nothing else in the drawer reads this. */
-  serverIdentity?: string;
   /** Inspector I/O traffic (req 5): byte counters + last-received. Live runtime for active
    *  sessions; daemon-sourced `SessionEntry` fields for inactive / non-LiveKit sessions. */
   traffic?: InspectorTraffic | null;

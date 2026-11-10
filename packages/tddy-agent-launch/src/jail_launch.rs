@@ -41,6 +41,7 @@ use crate::cli_harness_jail::canonical_exec_path;
 use crate::launch_ports::LaunchSessions;
 use crate::spec_launch::HostAgent;
 use crate::svc_start_sandboxed_claude_cli_session::{JailDirs, JailSession};
+use crate::usage_context::{record_usage_context, UsageSubject};
 
 /// The runner's plan, written under the session's sandbox root (`<session>/sandbox/exec-plan.json`).
 pub const EXEC_PLAN_FILE: &str = "exec-plan.json";
@@ -81,6 +82,9 @@ pub struct JailedSession<'a> {
     /// The provider route the agent runs on; `None` for its own vendor. A route's base-URL host
     /// joins the jail's egress policy, and `when: unrouted` items are dropped.
     pub route: Option<HarnessRoute>,
+    /// The main conversation and model, recorded with the jail's home as the session's usage
+    /// context once the jail is up.
+    pub usage: UsageSubject,
 }
 
 /// The AF_UNIX socket the session's in-jail `tddy-tools` dials. It must fit `SUN_LEN`, so it is a
@@ -174,6 +178,16 @@ impl LaunchSessions {
             host: spec.host,
             route: session.route.as_ref(),
         })?;
+
+        // The jail's home is where the agent writes its files; recorded before the agent exists so
+        // the daemon never evaluates the session against the wrong HOME.
+        record_usage_context(
+            session_dir,
+            &spec.agent.spec.id,
+            Some(grants.home.clone()),
+            &session.usage,
+            worktree_path,
+        )?;
 
         let shim_port = match grants.egress {
             EgressPolicy::None => None,

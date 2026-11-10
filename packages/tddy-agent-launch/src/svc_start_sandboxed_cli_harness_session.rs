@@ -45,6 +45,7 @@ use crate::spec_launch::HostAgent;
 use crate::stack_parent::SpawnStackParent;
 use crate::svc_start_sandboxed_claude_cli_session::JailSession;
 use crate::svc_start_session_core::CliStart;
+use crate::usage_context::UsageSubject;
 use crate::worktree_source::sandbox_claude_passthrough_args;
 use std::path::Path;
 use tddy_daemon_kernel::config::DaemonConfig;
@@ -339,6 +340,7 @@ impl LaunchSessions {
                     passthrough_args,
                     role: session_role,
                 },
+                usage: UsageSubject::new(conversation.usage_id(), req.model.trim()),
             })
             .await?;
         progress.end_phase(StartStep::Agent);

@@ -49,9 +49,6 @@ pub enum PresenterEvent {
     /// Presenter requested the view loop to exit (e.g. successful Continue with agent).
     /// Distinct from [`IntentReceived`](PresenterEvent::IntentReceived): sent after session resolution.
     ShouldQuit,
-    /// Current cumulative per-conversation token usage snapshot for the running session.
-    /// Carries the full snapshot (not a delta) so a newly-connected view sees current totals.
-    TokenUsageUpdated(Vec<crate::token_accounting::ConversationRecord>),
     /// One state of an agent tool call (a `running` row or its terminal row), for the web
     /// Agent Activity pane's live stream. Persisted to `agent-activity.jsonl` in parallel; this
     /// event accelerates live delivery to the coder participant's `StreamSessionActivity`.

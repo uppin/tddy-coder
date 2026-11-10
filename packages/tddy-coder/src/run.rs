@@ -12,7 +12,6 @@ use std::io::{self, IsTerminal, Read, Write};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
-use tddy_core::usage_watcher::{spawn_session_usage_watcher, SessionUsageWatchConfig};
 use tddy_core::workflow::graph::ExecutionStatus;
 use tddy_core::{
     get_session_for_tag, output::SESSIONS_SUBDIR, read_changeset, read_session_metadata,
@@ -1600,20 +1599,6 @@ fn livekit_daemon_workflow_paths(
     )
 }
 
-/// How often the per-session usage watcher re-reads the on-disk token sources.
-const SESSION_USAGE_POLL_INTERVAL: std::time::Duration = std::time::Duration::from_secs(2);
-
-/// Resolve the child agent's HOME directory (where Claude Code writes `.claude/`), used by the
-/// session usage watcher to locate the main-agent transcript. When the environment provides no
-/// home, returns an empty path so gathering yields a harmless zero main-agent row instead of
-/// panicking.
-fn resolve_agent_home_dir() -> PathBuf {
-    std::env::var_os("HOME")
-        .or_else(|| std::env::var_os("USERPROFILE"))
-        .map(PathBuf::from)
-        .unwrap_or_default()
-}
-
 /// Run as headless gRPC daemon. Serves GetSession and ListSessions; blocks until shutdown.
 /// When LiveKit args are present, also joins the room as a participant serving RPC over the data channel.
 /// Serve the workflow engine as a standard ACP agent over stdio (`--acp`).
@@ -1830,7 +1815,7 @@ fn run_daemon(args: &Args, shutdown: Arc<AtomicBool>, host: ParticipantHost) -> 
     // non-engine Inspector tool invocations over this socket.
     let mut toolcall_socket_path_for_exec: Option<std::path::PathBuf> = None;
     #[allow(clippy::type_complexity)]
-    let (view_factory, presenter_observer, presenter_intent_tx, usage_event_tx): (
+    let (view_factory, presenter_observer, presenter_intent_tx, presenter_event_tx): (
         Option<Arc<dyn Fn() -> Option<tddy_core::ViewConnection> + Send + Sync>>,
         Option<tddy_service::PresenterObserverService>,
         Option<std::sync::mpsc::Sender<tddy_core::UserIntent>>,
@@ -1840,7 +1825,7 @@ fn run_daemon(args: &Args, shutdown: Arc<AtomicBool>, host: ParticipantHost) -> 
         let presenter_observer = tddy_service::PresenterObserverService::new(event_tx.clone());
         // Feed the session's live token usage onto the same presenter channel the web Inspector
         // reads (via `PresenterObserver`); the watcher is spawned once the tokio runtime is up.
-        let usage_event_tx = event_tx.clone();
+        let presenter_event_tx = event_tx.clone();
         let (intent_tx, intent_rx) = std::sync::mpsc::channel();
         let presenter_intent_tx = intent_tx.clone();
         let mut presenter = Presenter::new(
@@ -1992,7 +1977,7 @@ fn run_daemon(args: &Args, shutdown: Arc<AtomicBool>, host: ParticipantHost) -> 
             Some(factory),
             Some(presenter_observer),
             Some(presenter_intent_tx),
-            Some(usage_event_tx),
+            Some(presenter_event_tx),
         )
     } else {
         (None, None, None, None)
@@ -2121,43 +2106,6 @@ fn run_daemon(args: &Args, shutdown: Arc<AtomicBool>, host: ParticipantHost) -> 
                 args.resume_from.as_deref(),
                 args.session_id.as_deref(),
             );
-            // Poll the session's on-disk token usage and broadcast each snapshot onto the presenter
-            // channel, so a connected web Inspector sees live totals rather than only the
-            // end-of-session summary.
-            if let Some(usage_tx) = usage_event_tx.clone() {
-                // The agent's usage binding is spec data; this call site never interprets it.
-                let usage = tddy_coding_agent_specs::CodingAgentRegistry::builtin_cached()
-                    .get(agent_str)
-                    .and_then(|spec| spec.agent.usage.clone());
-                let usage_watcher_handle = spawn_session_usage_watcher(
-                    SessionUsageWatchConfig {
-                        usage,
-                        context: tddy_usage::UsageContext {
-                            agent_home: Some(resolve_agent_home_dir()),
-                            session_dir: session_artifact_dir.clone(),
-                            conversation_id: args.session_id.clone(),
-                            worktree: Some(agent_working_dir.clone()),
-                            agent_label: agent_str.to_string(),
-                            fallback_model: args
-                                .model
-                                .as_deref()
-                                .unwrap_or_else(|| {
-                                    crate::agent_registry_cli::default_model_for_agent(agent_str)
-                                })
-                                .to_string(),
-                        },
-                        poll_interval: SESSION_USAGE_POLL_INTERVAL,
-                    },
-                    usage_tx,
-                );
-                let shutdown_for_usage = shutdown.clone();
-                tokio::spawn(async move {
-                    while !shutdown_for_usage.load(Ordering::Relaxed) {
-                        tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
-                    }
-                    usage_watcher_handle.abort();
-                });
-            }
             let codex_oauth_watch =
                 Some(session_artifact_dir.join(tddy_core::CODEX_OAUTH_AUTHORIZE_URL_FILENAME));
             let shutdown_clone = shutdown.clone();
@@ -2215,7 +2163,7 @@ fn run_daemon(args: &Args, shutdown: Arc<AtomicBool>, host: ParticipantHost) -> 
                     }
                 },
             };
-            if let Some(event_tx) = usage_event_tx.clone() {
+            if let Some(event_tx) = presenter_event_tx.clone() {
                 let _metadata_tap_handle = crate::session_participant::spawn_session_metadata_tap(
                     event_tx.subscribe(),
                     metadata_tx,
@@ -2254,7 +2202,7 @@ fn run_daemon(args: &Args, shutdown: Arc<AtomicBool>, host: ParticipantHost) -> 
                     crate::session_participant::terminal_manager::TerminalManager::new(),
                 ),
                 agent_activity_dir: session_artifact_dir.clone(),
-                presenter_events: usage_event_tx.clone(),
+                presenter_events: presenter_event_tx.clone(),
             };
             // Transport-specific base services; the Presenter view-adapters (`TddyRemote` **and** the
             // ACP mirror `AcpService`) + reflection are mounted by `session_view_adapter_surface` so

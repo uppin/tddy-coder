@@ -17,8 +17,6 @@ tddy-changeset = { path = "../tddy-changeset" }
 tddy-session-worktree = { path = "../tddy-session-worktree" }
 tddy-toolcall = { path = "../tddy-toolcall" }
 tddy-agent-backend = { path = "../tddy-agent-backend" }
-# The usage binding model and its agent-agnostic evaluation (`#usage-binding`).
-tddy-usage = { path = "../tddy-usage" }
 tddy-workflow-engine = { path = "../tddy-workflow-engine" }
 
 [dev-dependencies]

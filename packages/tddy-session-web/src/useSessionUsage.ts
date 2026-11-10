@@ -11,9 +11,10 @@
  * PRD: `docs/ft/web/session-usage-inspector.md`
  */
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import type { Client } from "@connectrpc/connect";
 import type { ActivityService } from "tddy-client-web/gen/activity_pb";
+import { rpcFailureText } from "tddy-client-web";
 import { emptyUsage, type ConversationUsage } from "./sessionUsage";
 
 /** The latest snapshot, and why the stream is not delivering (`null` while it is). */
@@ -37,12 +38,46 @@ export function useSessionUsage(
   sessionToken: string,
   sessionId: string,
 ): SessionUsageStream {
-  // TODO(daemon-stream): implement — `client.streamSessionUsage({ sessionToken, sessionId,
-  // daemonInstanceId: "" })`, each snapshot mapped to `ConversationUsage` and replacing the last.
-  void client;
-  void sessionToken;
-  void sessionId;
-  const [usage] = useState<ConversationUsage[]>(emptyUsage);
-  const [error] = useState<string | null>(null);
+  const [usage, setUsage] = useState<ConversationUsage[]>(emptyUsage);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    setUsage(emptyUsage());
+    setError(null);
+    if (!client) return;
+    const abort = new AbortController();
+    (async () => {
+      try {
+        for await (const snapshot of client.streamSessionUsage(
+          { sessionToken, sessionId, daemonInstanceId: "" },
+          { signal: abort.signal },
+        )) {
+          if (abort.signal.aborted) break;
+          setError(null);
+          setUsage(
+            snapshot.conversations.map((c) => ({
+              agent: c.agent,
+              id: c.id,
+              model: c.model,
+              inputTokens: c.inputTokens,
+              cacheReadTokens: c.cacheReadTokens,
+              cacheWriteTokens: c.cacheWriteTokens,
+              outputTokens: c.outputTokens,
+              reasoningTokens: c.reasoningTokens,
+              totalTokens: c.totalTokens,
+              turns: c.turns,
+              costUsd: c.costUsd,
+              parentId: c.parentId === undefined || c.parentId === "" ? undefined : c.parentId,
+            })),
+          );
+        }
+      } catch (err) {
+        // An abort on unmount is not a failure; anything else keeps the last snapshot and is shown.
+        if (!abort.signal.aborted) setError(rpcFailureText(err));
+      }
+    })();
+    return () => abort.abort();
+  }, [client, sessionToken, sessionId]);
+
   return { usage, error };
 }

@@ -11,8 +11,6 @@
  */
 
 import React from "react";
-import { RoomRpcPortProvider } from "tddy-client-web";
-import { aPresenceDouble, aRoomRpcDouble } from "tddy-client-web/testkit";
 import { servedAgentWire, withDeclaredSessionTypes } from "../support/servedAgents";
 import { create } from "@bufbuild/protobuf";
 import { Code, ConnectError, createClient, type Client } from "@connectrpc/connect";
@@ -27,8 +25,11 @@ import { ProjectService } from "tddy-client-web/gen/project_pb";
 import { CatalogService } from "tddy-client-web/gen/catalog_pb";
 import { SessionFilesService } from "tddy-client-web/gen/session_files_pb";
 import { WorktreeService } from "tddy-client-web/gen/worktree_pb";
-import { ActivityService, AgentActivityRecordSchema } from "tddy-client-web/gen/activity_pb";
-import { TddyRemote, ServerMessageSchema } from "tddy-client-web/gen/tddy/v1/remote_pb";
+import {
+  ActivityService,
+  AgentActivityRecordSchema,
+  SessionUsageSnapshotSchema,
+} from "tddy-client-web/gen/activity_pb";
 import type { DaemonHost } from "tddy-client-web";
 import { TEST_IDS } from "../support/testIds";
 import { createSessionPage } from "../support/pages/createSessionPage";
@@ -118,16 +119,20 @@ function aUsageStreamThatDrops(
   snapshots: ReturnType<typeof aConversationRecord>[][],
   message: string,
 ): InMemoryRpcBackend {
-  return anInMemoryRpcBackend().implement(TddyRemote, {
-    stream: async function* () {
+  return anInMemoryRpcBackend().implement(ActivityService, {
+    streamSessionUsage: async function* () {
       for (const conversations of snapshots) {
-        yield create(ServerMessageSchema, {
-          event: { case: "tokenUsageUpdated", value: { conversations } },
-        });
+        yield create(SessionUsageSnapshotSchema, { conversations });
       }
       throw new ConnectError(message, Code.Unavailable);
     },
   });
+}
+
+/** `SessionUsageTab` reading `backend` through the daemon's ActivityService, as the drawer does. */
+function aUsageTabOver(backend: InMemoryRpcBackend) {
+  const client = createClient(ActivityService, backend.transport());
+  return <SessionUsageTab client={client} sessionToken="fake-token" sessionId="usage-session" />;
 }
 
 /**
@@ -352,7 +357,7 @@ describe("Session streams — a dropped stream is reported beside what it fed", 
     const backend = aUsageStreamThatDrops([[claude]], "presenter went away");
 
     // When
-    mountWithRpc(<SessionUsageTab room={null} serverIdentity="presenter" />, backend);
+    cy.mount(aUsageTabOver(backend));
 
     // Then — the table stays and the failure is explained beside it
     sessionsDrawerPage.usageRow("claude-main").should("be.visible");
@@ -367,36 +372,20 @@ describe("Session streams — a dropped stream is reported beside what it fed", 
     const backend = aUsageStreamThatDrops([], "presenter went away");
 
     // When
-    mountWithRpc(<SessionUsageTab room={null} serverIdentity="presenter" />, backend);
+    cy.mount(aUsageTabOver(backend));
 
     // Then — the empty state is replaced by the reason
     errors.usageStreamError().should("have.text", "Usage unavailable: presenter went away");
     sessionsDrawerPage.usageEmpty().should("not.exist");
   });
 
-  it("reports no failure for a session with no room, where no usage stream is possible", () => {
-    // Given — a host reached without LiveKit: no room and no transport override
+  it("reports no failure while the session's daemon client is not ready, where no usage stream is possible", () => {
+    // Given — no daemon client for the session's host yet
 
     // When
-    cy.mount(<SessionUsageTab room={null} serverIdentity="presenter" />);
+    cy.mount(<SessionUsageTab client={undefined} sessionToken="fake-token" sessionId="usage-session" />);
 
     // Then — the tab shows its empty state; nothing failed
-    sessionsDrawerPage.usageEmpty().should("be.visible");
-    errors.usageStreamError().should("not.exist");
-  });
-
-  it("reports no failure while the session's room is still joining", () => {
-    // Given — a room that has not connected yet, and no transport override
-
-    // When
-    // (the room-RPC port builds no client for a room that has not joined: that is "still joining")
-    cy.mount(
-      <RoomRpcPortProvider port={{ ...aRoomRpcDouble(anInMemoryRpcBackend()), useRoomClient: () => null }}>
-        <SessionUsageTab room={aPresenceDouble().room("usage-room")} serverIdentity="presenter" />
-      </RoomRpcPortProvider>,
-    );
-
-    // Then — the tab waits in its empty state rather than claiming the stream failed
     sessionsDrawerPage.usageEmpty().should("be.visible");
     errors.usageStreamError().should("not.exist");
   });

@@ -28,6 +28,7 @@ use crate::relaunch_jail_dirs::{prepare_relaunch_dirs, refresh_relaunch_context_
 use crate::session_acting_identity::SessionIdentity;
 use crate::session_provider_route::resume_route;
 use crate::svc_start_sandboxed_claude_cli_session::{JailDirs, JailSession};
+use crate::usage_context::UsageSubject;
 
 /// What relaunching a sandboxed CLI session's jail is built from: the session, and the route and
 /// identity its resume re-resolved.
@@ -278,6 +279,10 @@ impl LaunchSessions {
                     passthrough_args: Vec::new(),
                     role: "",
                 },
+                usage: UsageSubject::new(
+                    conversation.usage_id(),
+                    metadata.model.as_deref().unwrap_or_default(),
+                ),
             })
             .await?;
         Ok((pid, conversation.recorded_chat_id().map(str::to_string)))

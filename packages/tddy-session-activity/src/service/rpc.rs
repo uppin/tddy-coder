@@ -118,10 +118,33 @@ impl tddy_service::proto::activity::ActivityService for ActivityServiceImpl {
         &self,
         request: Request<StreamSessionUsageRequest>,
     ) -> Result<Response<Self::StreamSessionUsageStream>, Status> {
-        // TODO(daemon-stream): implement — authorise, peer-route on `daemon_instance_id`, join or
-        // start the session's poller, send its last snapshot at once.
-        let _ = request;
-        let (_tx, rx) = tokio::sync::mpsc::unbounded_channel::<SessionUsageSnapshot>();
+        let req = request.into_inner();
+        // Authorised as `stream_session_activity` is. A request addressed at a peer never reaches
+        // here: the daemon's `PeerRoutedActivity` refuses it, as it does for the activity stream.
+        let session_dir = self.session_dir(&req.session_token, &req.session_id)?;
+        let mut snapshots = self
+            .usage_pollers
+            .join(&session_dir, &self.ports.usage_bindings);
+
+        let (tx, rx) = tokio::sync::mpsc::unbounded_channel::<SessionUsageSnapshot>();
+        tokio::spawn(async move {
+            // The poller's first evaluation, or its latest when this subscriber joined a running
+            // one, then each change after it.
+            let Ok(first) = snapshots
+                .wait_for(Option::is_some)
+                .await
+                .map(|latest| latest.clone())
+            else {
+                return;
+            };
+            let mut next = first;
+            while let Some(snapshot) = next {
+                if tx.send(snapshot).is_err() || snapshots.changed().await.is_err() {
+                    return;
+                }
+                next = snapshots.borrow_and_update().clone();
+            }
+        });
         Ok(relayed(rx))
     }
 

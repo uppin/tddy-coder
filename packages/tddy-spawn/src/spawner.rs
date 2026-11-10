@@ -942,6 +942,37 @@ pub fn plan_session_child(
         );
     }
 
+    // Where the session's agent keeps its files, for the daemon's usage stream: the OS user's home,
+    // which the child runs with. A session with no `--agent` has no spec to record.
+    if let Some(spec_id) = opts.agent.map(str::trim).filter(|a| !a.is_empty()) {
+        let session_dir = tddy_core::session_lifecycle::unified_session_dir_path(
+            &resolved_tddy_data_dir,
+            &session_id,
+        );
+        std::fs::create_dir_all(&session_dir).map_err(|e| {
+            anyhow::anyhow!(
+                "failed to create session dir {}: {}",
+                session_dir.display(),
+                e
+            )
+        })?;
+        tddy_usage::write_usage_context(
+            &session_dir,
+            &tddy_usage::UsageContextFile {
+                spec_id: spec_id.to_string(),
+                agent_home: Some(home.to_path_buf()),
+                conversation_id: None,
+                worktree: Some(repo_path.to_path_buf()),
+                model: opts
+                    .model
+                    .map(str::trim)
+                    .filter(|m| !m.is_empty())
+                    .map(str::to_string),
+            },
+        )
+        .map_err(|e| anyhow::anyhow!("failed to write the session's usage context: {}", e))?;
+    }
+
     if opts.mouse {
         args.push("--mouse".to_string());
     }

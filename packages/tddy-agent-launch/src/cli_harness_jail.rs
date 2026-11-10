@@ -27,6 +27,7 @@ use crate::jail_launch::{jail_home, mcp_server_env, JailSpec, JailedSession};
 use crate::launch_ports::LaunchSessions;
 use crate::spec_launch::HostAgent;
 use crate::svc_start_sandboxed_claude_cli_session::{JailDirs, JailSession};
+use crate::usage_context::UsageSubject;
 
 /// The dep of an agent's tool that serves its MCP tools in a jail (`tddy-tools --mcp`).
 pub(crate) const TDDY_TOOLS_ID: &str = "tddy-tools";
@@ -63,6 +64,9 @@ pub(crate) struct CliJail<'a> {
     pub(crate) route: Option<HarnessRoute>,
     /// What a managed session adds, and the session's roster and role.
     pub(crate) wiring: JailWiring<'a>,
+    /// The main conversation and model, which the jail records beside its home as the session's
+    /// usage context.
+    pub(crate) usage: UsageSubject,
 }
 
 /// What a sandboxed launch's slots are filled with beyond the spec's own: the session's roster (which
@@ -302,6 +306,7 @@ impl LaunchSessions {
             env,
             route,
             wiring,
+            usage,
             ..
         } = launch;
         self.launch_jailed(
@@ -321,6 +326,7 @@ impl LaunchSessions {
                 managed: wiring.managed,
                 managed_codebase: wiring.managed_codebase,
                 route,
+                usage,
             },
             wiring.role,
         )

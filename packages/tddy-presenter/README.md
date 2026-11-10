@@ -25,7 +25,6 @@ production lines.
 |---|---|
 | `presenter` | `Presenter`, `PresenterView`, `UserIntent`, `PresenterState`, `workflow_runner`, the `presenter_impl/` partitions |
 | `post_workflow` | post-run PR and worktree-removal elicitation policy |
-| `usage_watcher` | live per-session token usage |
 
 ## Relationship to `tddy-core`
 
