@@ -96,13 +96,16 @@ impl PrivilegedSurface {
         let program = policy::resolve_relay_tool_path(policy, &request.tool_path)?;
         // `resolve_spawn_of`, not `resolve_spawn`: the relay allowlist has passed the program, and
         // resolving it against `allowed_tool_paths` as well would make a relayed harness need both
-        // lists — and so grant it `SpawnSession` too.
-        let resolved = self.resolve_spawn_of(
+        // lists — and so grant it `SpawnSession` too. A relayed agent's env is the daemon's, whole:
+        // `resolve_relayed_env`, not `allowed_env_keys`, on an `Exactly` base.
+        let env = policy::resolve_relayed_env(&request.env)?;
+        let resolved = self.resolve_spawn_resolved(
             &request.os_user,
             program,
             request.working_dir.as_deref(),
             None,
-            &request.env,
+            env,
+            EnvironmentBase::Exactly,
         )?;
         let stream =
             crate::relay::connect_to_callers_socket(&request.relay_socket, caller_uid).await?;
@@ -193,12 +196,33 @@ impl PrivilegedSurface {
         scope: Option<&str>,
         env: &BTreeMap<String, String>,
     ) -> Result<ResolvedSpawn, SupervisorError> {
-        let policy = &self.config.spawn_policy;
-        let os_user = policy::resolve_session_user(policy, os_user)?;
         // Here rather than in any caller: the environment is as much a way to choose what runs as
         // the tool path is, and a gate that only some of the spawn methods passed through would be a
         // gate the others are missing.
-        let env = policy::resolve_env(policy, env)?;
+        let env = policy::resolve_env(&self.config.spawn_policy, env)?;
+        self.resolve_spawn_resolved(
+            os_user,
+            program,
+            working_dir,
+            scope,
+            env,
+            EnvironmentBase::Minimal,
+        )
+    }
+
+    /// [`Self::resolve_spawn_of`] with its environment already resolved by the caller's own gate
+    /// (`resolve_env`, or `resolve_relayed_env` for a relayed agent) and its plan base.
+    fn resolve_spawn_resolved(
+        &self,
+        os_user: &str,
+        program: PathBuf,
+        working_dir: Option<&Path>,
+        scope: Option<&str>,
+        env: BTreeMap<String, String>,
+        environment: EnvironmentBase,
+    ) -> Result<ResolvedSpawn, SupervisorError> {
+        let policy = &self.config.spawn_policy;
+        let os_user = policy::resolve_session_user(policy, os_user)?;
         let scope_procs = match scope {
             Some(scope) => Some(self.cgroups.scope_procs_path(scope)?),
             None => None,
@@ -224,6 +248,7 @@ impl PrivilegedSurface {
                 .unwrap_or_else(|| target.home.clone()),
             target,
             scope_procs,
+            environment,
         })
     }
 
@@ -367,6 +392,8 @@ struct ResolvedSpawn {
     working_dir: PathBuf,
     target: TargetUser,
     scope_procs: Option<PathBuf>,
+    /// What the plan's environment is built on: `Minimal`, or `Exactly` for a relayed agent.
+    environment: EnvironmentBase,
 }
 
 impl ResolvedSpawn {
@@ -382,7 +409,7 @@ impl ResolvedSpawn {
             output: ChildOutput::Discard,
             // A session is spawned for somebody else and has no claim on the environment the
             // supervisor was started with — see [`EnvironmentBase`].
-            environment: EnvironmentBase::Minimal,
+            environment: self.environment,
             sandbox,
         }
     }

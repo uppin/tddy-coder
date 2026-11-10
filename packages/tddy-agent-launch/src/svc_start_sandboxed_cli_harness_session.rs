@@ -293,6 +293,7 @@ impl LaunchSessions {
         let conversation = start_conversation(ConversationStart {
             spec: &session_agent.agent.spec,
             binary: &session_agent.agent.tool.binary,
+            env_base: &session_agent.agent.env_base,
             worktree: &worktree_path,
             env: &[],
             session_id,

@@ -344,24 +344,26 @@ impl SplitSessions {
             &extra_args,
         );
         let pointer_dir = context_dir.clone();
-        let handle = self
-            .cli_manager
-            .spawn_rendered_main(
+        let handle = spawn_split_agent_pty(
+            &self.cli_manager,
+            &spec,
+            self.coding_agents.agent_env_base(),
+            SplitAgentPty {
                 session_id,
-                &session_type,
+                session_type: &session_type,
                 context_dir,
-                req.model.trim(),
+                model: req.model.trim(),
                 argv,
-                Vec::new(),
-                Some(os_user),
+                os_user: Some(os_user),
                 on_exit,
-            )
-            .await
-            .map_err(|e| {
-                // No agent exists whose exit would remove the pointer just placed.
-                self.session_pointers.remove(&pointer_dir);
-                Status::internal(format!("failed to spawn {session_type}: {e}"))
-            })?;
+            },
+        )
+        .await
+        .map_err(|e| {
+            // No agent exists whose exit would remove the pointer just placed.
+            self.session_pointers.remove(&pointer_dir);
+            Status::internal(format!("failed to spawn {session_type}: {e}"))
+        })?;
         Ok((hook_token, handle))
     }
 
@@ -492,5 +494,11 @@ impl SplitSessions {
     }
 }
 
+mod split_agent_pty;
+#[cfg(test)]
+mod split_agent_pty_tests;
+
 pub use crate::svc_paired_codebase_teardown;
+use crate::svc_spawn_split_agent::split_agent_pty::spawn_split_agent_pty;
+use crate::svc_spawn_split_agent::split_agent_pty::SplitAgentPty;
 use crate::svc_split_agent_metadata::write_split_agent_metadata;

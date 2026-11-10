@@ -396,7 +396,8 @@ async fn the_pane_environment_file_is_gone_once_the_agent_runs_and_no_value_was_
             .ok_or_else(|| format!("still there: {left:?}"))
     })
     .await;
-    // and the pane's command names a file, never a value
+    // and the pane's command names a file and the variables it keeps, never a value
+    // (`#agent-tools 28/28`: names only reach the pane's argv, never values)
     let start_command = daemon.tmux.tmux(&[
         "display-message",
         "-p",
@@ -406,7 +407,7 @@ async fn the_pane_environment_file_is_gone_once_the_agent_runs_and_no_value_was_
     ]);
     let start_command = String::from_utf8_lossy(&start_command.stdout);
     assert!(
-        !start_command.contains("CLAUDE_CODE_NO_FLICKER"),
+        !start_command.contains("CLAUDE_CODE_NO_FLICKER="),
         "{start_command}"
     );
 }

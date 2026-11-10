@@ -70,6 +70,27 @@ account id, never the profile name:
 - The profile's model is used only when the request names none.
 - Refusals name the profile and the account.
 
+## The agent's environment
+
+An agent process starts from an allow-listed environment, never the daemon's own. The daemon
+computes it in one place from three parts:
+
+- **The base set**, read from the daemon's environment: `PATH`, `HOME`, `USER`, `LOGNAME`, `SHELL`,
+  `TERM`, `LANG`, `LC_*`, `TMPDIR`, `TZ`, `SSH_AUTH_SOCK`, `HTTP(S)_PROXY` / `NO_PROXY` (both cases)
+  and `XDG_*`. It is built in; an operator replaces it whole with
+  `<tddyhome>/tools/agent-env/base.yaml` (a subdirectory, because every `*.yaml` directly in `tools/`
+  is a tool file).
+- **The spec's `pass_env`**: names, or `PREFIX_*` patterns, of further daemon variables the agent
+  needs. The built-in specs name their provider keys: `ANTHROPIC_API_KEY` (claude, claude-acp),
+  `OPENAI_API_KEY` (codex, codex-acp), `CURSOR_API_KEY` (cursor), both of the first two (opencode);
+  muse, warp and oz name none.
+- **What the launch sets on purpose**: the spec's `env`, the provider route's variables, the
+  session's own variables.
+
+No other daemon variable reaches the agent. An entry matching `TDDY_*`, in `pass_env` or the base
+set, is refused when the file loads, naming it. A user's Bash terminal is not an agent: it still
+inherits the daemon's environment.
+
 ## Related
 
 - [Provider accounts](provider-accounts.md)

@@ -37,6 +37,7 @@ run:
   env: {}
 extensions:
   coding_agent:
+    pass_env: [ANTHROPIC_API_KEY]
     product: Claude Code
     mcp: { kind: acp-session }
     tool_allow: unsupported

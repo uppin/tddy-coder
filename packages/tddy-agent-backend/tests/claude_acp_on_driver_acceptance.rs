@@ -1,8 +1,8 @@
 //! `claude-acp` on the shared ACP driver: the requested model takes effect, and a session id from
 //! one backend resumes on another by `session/load`.
 //!
-//! The backend spawns its agent with the inherited environment, so the stub's scenario and record
-//! paths are set process-wide — hence `#[serial]`.
+//! The stub's scenario and record paths are set process-wide and handed to the agent through its
+//! command's environment when the backend is built — hence `#[serial]`.
 //!
 //! PRD: docs/ft/coder/1-WIP/PRD-2026-10-24-coagents-acp-driver.md
 
@@ -10,6 +10,16 @@ use std::path::{Path, PathBuf};
 
 use serial_test::serial;
 use tddy_agent_backend::{CodingBackend, InvokeRequest, SessionMode};
+
+/// What this test set for the stub (its scenario and record paths), handed to the agent on
+/// purpose: an ACP agent starts from exactly its command's environment, never this process's
+/// (`#agent-tools 28/28`). Read when the backend is built, so set the variables first.
+fn the_stub_env() -> Vec<(String, String)> {
+    ["TDDY_ACP_SCENARIO", "TDDY_ACP_STUB_RECORD"]
+        .into_iter()
+        .filter_map(|name| Some((name.to_string(), std::env::var(name).ok()?)))
+        .collect()
+}
 
 /// A spec backend for the stub agent, as the agent's spec builds it: its routed agent and a
 /// command that spawns the stub.
@@ -24,7 +34,7 @@ fn a_spec_backend(path: std::path::PathBuf) -> tddy_agent_backend::SpecAcpBacken
         tddy_agent_backend::AcpAgentCommand {
             program: path,
             args: Vec::new(),
-            env: Vec::new(),
+            env: the_stub_env(),
             cwd: None,
         },
     )

@@ -38,7 +38,7 @@ use crate::stream::ProgressEvent;
 use crate::turn_files::TurnFiles;
 
 use super::routed::route_child_env;
-use super::turn_process::{describe_deadline, spawn_turn, strip_tddy_env, TurnCommand, TurnGroup};
+use super::turn_process::{describe_deadline, spawn_turn, TurnCommand, TurnGroup};
 use super::{BackendModels, CodingBackend, InvokeRequest, InvokeResponse, SessionMode};
 use crate::backend::spec_headless::turn_read::open_conversation_log;
 use crate::backend::spec_headless::turn_read::read_turn;
@@ -244,8 +244,9 @@ impl SpecHeadlessBackend {
         }
     }
 
-    /// The environment the child is given on top of the inherited one (minus its `TDDY_*`
-    /// variables): the route's, then the spec's own `headless.env` rendered.
+    /// The environment the child is started from: the invocation's whole environment rendered
+    /// (the base set, the spec's `pass_env` values and its `headless.env`), then the route's, which
+    /// stands over a daemon variable of the same name — as an ACP launch's route does.
     fn child_env(
         &self,
         invocation: &HeadlessInvocation,
@@ -254,19 +255,17 @@ impl SpecHeadlessBackend {
         let self_exe = std::env::current_exe().map_err(|e| {
             BackendError::InvocationFailed(format!("this executable cannot be named: {e}"))
         })?;
-        let mut env: Vec<(String, String)> = self
-            .provider_route
-            .iter()
-            .flat_map(route_child_env)
-            .map(|(name, value)| (name.to_string(), value.to_string()))
-            .collect();
-        env.extend(render_env(
+        let mut env = render_env(
             &invocation.env,
             &EnvTemplate {
                 session_dir: request.session_dir.clone(),
                 self_exe,
             },
-        )?);
+        )?;
+        for (name, value) in self.provider_route.iter().flat_map(route_child_env) {
+            env.retain(|(kept, _)| kept != name);
+            env.push((name.to_string(), value.to_string()));
+        }
         Ok(env)
     }
 }
@@ -415,10 +414,10 @@ impl CodingBackend for SpecHeadlessBackend {
         let mut command = tokio::process::Command::new(&listing.program);
         command
             .args(&listing.argv)
-            .env("PATH", super::path_with_exe_dir())
             .stdin(std::process::Stdio::null())
             .kill_on_drop(true);
-        strip_tddy_env(command.as_std_mut());
+        crate::agent_env::apply_agent_child_env(command.as_std_mut(), &listing.env);
+        command.env("PATH", super::path_with_exe_dir());
         let output = tokio::time::timeout(MODEL_LISTING_DEADLINE, command.output())
             .await
             .map_err(|_| {

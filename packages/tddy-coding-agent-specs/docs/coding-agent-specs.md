@@ -120,9 +120,32 @@ any of them is refused at load, naming the file and the word.
 | `scratch` | where the turn's registration files go: `session_dir` or `workdir` | `session_dir` |
 
 `headless.env` values may name `{session_dir}` (the request's session directory; a turn without one
-is refused) and `{self_exe}` (the running executable). The backend strips every inherited `TDDY_*`
-variable before it adds them. A YAML file under `<tddyhome>/tools` that declares a
+is refused) and `{self_exe}` (the running executable). The backend never inherits an environment: the child starts from the computed agent env
+([The agent environment](#the-agent-environment)), and these values are added to it. A YAML file under `<tddyhome>/tools` that declares a
 `coding_agent.headless` section naming a registered adapter runs a workflow turn with no Rust change.
+
+## The agent environment
+
+A host agent child starts from an environment computed in one place, never inherited. It is the base
+set's variables of the parent process, then the variables the spec's `pass_env` names, then what the
+launch sets on purpose.
+
+- **`coding_agent.pass_env`**: a list of variable names or `PREFIX_*` patterns. An entry that admits
+  a `TDDY_*` variable is a load error naming the spec. The built-in specs declare their provider
+  keys: claude and claude-acp `ANTHROPIC_API_KEY`, codex and codex-acp `OPENAI_API_KEY`, cursor
+  `CURSOR_API_KEY`, opencode both; muse, warp and oz declare none.
+- **The base set** is YAML: the built-in `specs/agent-env.yaml` (`PATH`, `HOME`, `USER`, `LOGNAME`,
+  `SHELL`, `TERM`, `LANG`, `LC_*`, `TMPDIR`, `TZ`, `SSH_AUTH_SOCK`, `HTTP(S)_PROXY` / `NO_PROXY` in
+  both cases, `XDG_*`). `<tddyhome>/tools/agent-env/base.yaml` replaces it whole; it sits in a
+  subdirectory because every `*.yaml` directly in `tools/` is a tool file. `schema_version` must be
+  `1` (any other is a load error naming the file: `schema_version N is not one this build reads
+  (1)`), and a `TDDY_*` entry is a load error naming the file.
+- **`AgentEnvBase`**: `builtin()`, `load(path)`, `parse(text)` and
+  `agent_env(spec, parent, launch) -> Vec<(OsString, OsString)>`, over
+  `tddy_agent_backend::agent_env::agent_child_env`, which takes the base set as data.
+  `CodingAgentRegistry::agent_env_base()` returns the one the registry loaded (the override, else the
+  built-in). A launch-set `TDDY_*` variable passes (today only Codex's `TDDY_CODEX_OAUTH_OUT`); an
+  inherited one never does.
 
 ## Rules
 

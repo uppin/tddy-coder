@@ -168,6 +168,26 @@ pub fn resolve_env(
     Ok(requested.clone())
 }
 
+/// The environment a relayed coding agent is started with (`#agent-tools 28/28`): `requested`, as
+/// the daemon computed it, whole. No `allowed_env_keys` list decides it — what an agent sees is
+/// coding-agent configuration, and the supervisor holds none. A loader variable (`LD_PRELOAD`, …)
+/// is still refused: it chooses what code runs, which is the supervisor's own concern.
+pub fn resolve_relayed_env(
+    requested: &BTreeMap<String, String>,
+) -> Result<BTreeMap<String, String>, SupervisorError> {
+    for key in requested.keys() {
+        if is_loader_env_key(key) {
+            log::warn!(
+                target: "tddy_supervisor::policy",
+                "relayed spawn refused: `{key}` chooses what code the session loads and is \
+                 never a caller's to set"
+            );
+            return Err(SupervisorError::Denied);
+        }
+    }
+    Ok(requested.clone())
+}
+
 /// Resolve a bind-mount source for a sandbox. Must sit under one of the permitted roots, and must
 /// still be under it once the kernel has resolved it.
 pub fn resolve_mount_source(
@@ -485,6 +505,39 @@ mod tests {
 
         // Then
         assert_eq!(resolved, Ok(requesting_env(&[("RUST_LOG", "debug")])));
+    }
+
+    /// What a daemon computes for a relayed coding agent: the base set it read from its YAML, a
+    /// provider key the agent's spec passes, and a route variable (`#agent-tools 28/28`).
+    fn a_daemon_computed_agent_env() -> BTreeMap<String, String> {
+        requesting_env(&[
+            ("PATH", "/opt/agent/bin:/usr/bin:/bin"),
+            ("LANG", "en_US.UTF-8"),
+            ("LARK_API_KEY", "sk-lark"),
+            ("ROUTE_BASE_URL", "https://route.example"),
+        ])
+    }
+
+    #[test]
+    fn a_relayed_agent_env_passes_whole_with_no_supervisor_key_list() {
+        // When — no `allowed_env_keys` exists to consult
+        let resolved = resolve_relayed_env(&a_daemon_computed_agent_env());
+
+        // Then
+        assert_eq!(resolved, Ok(a_daemon_computed_agent_env()));
+    }
+
+    #[test]
+    fn a_relayed_agent_env_naming_a_loader_variable_is_still_refused() {
+        // Given
+        let mut requested = a_daemon_computed_agent_env();
+        requested.insert("LD_PRELOAD".to_string(), "/tmp/evil.so".to_string());
+
+        // When
+        let resolved = resolve_relayed_env(&requested);
+
+        // Then — guard: choosing what code runs is the supervisor's own concern
+        assert_eq!(resolved, Err(SupervisorError::Denied));
     }
 
     #[test]

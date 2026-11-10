@@ -32,6 +32,7 @@ run:
   env: { CLAUDE_CODE_NO_FLICKER: "1" }
 extensions:
   coding_agent:
+    pass_env: [ANTHROPIC_API_KEY]
     product: Claude Code
     mcp: { kind: file, flag: --mcp-config, format: claude-mcp-json, strict_flag: --strict-mcp-config }
     tool_allow: { flag: --allowedTools }

@@ -25,9 +25,14 @@ use std::path::PathBuf;
 
 impl CliSessionManager {
     /// Spawn `argv` — already rendered, by a launcher that owns the agent's argument template — as
-    /// `session_id`'s main terminal, registered under `session_type`. `env` is applied on top of the
-    /// daemon's; `os_user` is the session owner, or `None` to run as the daemon. `on_exit` runs once
-    /// the process has exited, before its terminal is deregistered (see [`HarnessLaunchExtras`]).
+    /// `session_id`'s main terminal, registered under `session_type`. `os_user` is the session
+    /// owner, or `None` to run as the daemon. `on_exit` runs once the process has exited, before its
+    /// terminal is deregistered (see [`HarnessLaunchExtras`]).
+    ///
+    /// An agent main starts from exactly `env` (`#agent-tools 28/28`): its whole environment, which
+    /// the caller computed from the allow-list (`AgentEnvBase::agent_env`: the base set, the
+    /// spec's `pass_env` values, the launch's own variables). Nothing else the daemon holds reaches
+    /// it. A user's terminal ([`Self::start_terminal`]) still inherits the daemon's environment.
     #[allow(clippy::too_many_arguments)]
     pub async fn spawn_rendered_main(
         &self,
@@ -40,7 +45,7 @@ impl CliSessionManager {
         os_user: Option<&str>,
         on_exit: Option<ExitHook>,
     ) -> anyhow::Result<Arc<pty_handle::PtyHandle>> {
-        self.spawn_tool(
+        self.spawn_tool_on(
             session_id,
             MAIN_TERMINAL_ID,
             session_type,
@@ -48,6 +53,7 @@ impl CliSessionManager {
             model,
             argv,
             env,
+            tddy_pty::PtyEnvBase::Cleared,
             os_user,
             on_exit,
             None,

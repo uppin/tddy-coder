@@ -240,6 +240,13 @@ stdout. End of input from the caller is a stop: the session is stopped with the 
 Exit status and explicit stops travel over the existing `SessionStatus` / `StopSession`, keyed by the
 returned pid. A relayed spawn takes no cgroup scope, as no caller's `SpawnSession` does today.
 
+**A relayed agent's environment is the daemon's, whole.** The supervisor knows no coding-agent
+specifics: the daemon computes the agent's env (its base set, the spec's `pass_env`, what the launch
+sets) and a relayed spawn carries it as it is. `policy::resolve_relayed_env` applies no
+`allowed_env_keys` to it; the loader keys (`LD_*`, `MALLOC_*`, …) are still refused. The child is
+built on `EnvironmentBase::Exactly`: the request's env plus the account's `HOME`/`USER`/`LOGNAME`, and
+no supervisor `PATH` or locale. `allowed_env_keys` still gates `SpawnSession` and clone spawns.
+
 The daemon side is `tddy-session-lifecycle`'s
 [coding-agent launcher](../../tddy-session-lifecycle/docs/coding-agent-launcher.md).
 

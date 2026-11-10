@@ -526,6 +526,7 @@ mod tests {
             },
             spec,
             deps: Vec::new(),
+            env_base: tddy_coding_agent_specs::AgentEnvBase::builtin(),
         }
     }
 

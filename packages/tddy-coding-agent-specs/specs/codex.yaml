@@ -39,6 +39,7 @@ run:
   env: {}
 extensions:
   coding_agent:
+    pass_env: [OPENAI_API_KEY]
     product: Codex
     mcp: { kind: inline, flag: -c, key_prefix: mcp_servers }
     tool_allow: unsupported

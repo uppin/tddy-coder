@@ -57,6 +57,7 @@ async fn a_spec_whose_transport_is_not_pty_is_refused_by_the_host_pty_launcher()
         spec,
         tool: resolved("claude-headless"),
         deps: Vec::new(),
+        env_base: tddy_coding_agent_specs::AgentEnvBase::builtin(),
     };
     let worktree = tempfile::tempdir().unwrap();
     let manager = Arc::new(CliSessionManager::new());

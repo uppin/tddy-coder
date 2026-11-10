@@ -75,12 +75,13 @@ impl DaemonCodingAgentLauncher {
             .is_some_and(|headless| headless.approval_tool);
         let registers_inline = registers_mcp_inline(&agent.spec);
         let renderer = SpecHeadlessRenderer::new(
-            agent.spec,
-            agent.tool,
+            agent.spec.clone(),
+            agent.tool.clone(),
             &agent.deps,
             AdapterRegistry::builtin(),
         )
-        .map_err(|reason| Self::refuse(launch, &reason.to_string()))?;
+        .map_err(|reason| Self::refuse(launch, &reason.to_string()))?
+        .with_env_base(agent.env_base.clone());
         if routes_approvals {
             self.bind_approvals(launch, conversation, &server)?;
         }

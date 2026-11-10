@@ -11,7 +11,7 @@ use std::sync::Arc;
 
 use anyhow::{anyhow, Context};
 use tddy_actions::tool::ToolHost;
-use tddy_coding_agent_specs::{load_agent_registry, package_runner, CodingAgentSpec};
+use tddy_coding_agent_specs::{load_agent_registry, package_runner, AgentEnvBase, CodingAgentSpec};
 use tddy_core::adapters::{AcpHooksAdapter, AcpHooksAdapters};
 use tddy_core::AcpAgentCommand;
 
@@ -50,7 +50,9 @@ pub(crate) fn acp_launch(
     let tool = closure
         .pop()
         .ok_or_else(|| anyhow!("`{id}` resolved to no tool"))?;
-    let command = spec.acp_command(&tool, package_runner(def, host), Vec::new())?;
+    let mut command = spec.acp_command(&tool, package_runner(def, host), Vec::new())?;
+    command.env =
+        AgentEnvBase::load(tools_dir)?.agent_env(&spec, std::env::vars_os(), &command.env);
     let hooks = match spec.acp().and_then(|acp| acp.hooks_adapter.as_deref()) {
         Some(name) => Some(AcpHooksAdapters::builtin().get(name).ok_or_else(|| {
             anyhow!("`{id}` names the hooks adapter `{name}`, which this build does not have")

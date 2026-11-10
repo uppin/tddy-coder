@@ -283,6 +283,7 @@ pub(crate) async fn start_cli_harness_session(
     let conversation = start_conversation(ConversationStart {
         spec,
         binary: &agent.tool.binary,
+        env_base: &agent.env_base,
         worktree: &worktree_path,
         env: &env,
         session_id,
