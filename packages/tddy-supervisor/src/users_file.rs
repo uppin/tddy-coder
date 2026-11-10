@@ -47,7 +47,7 @@ impl UsersFile {
         let metadata = file.metadata().map_err(|error| ConfigError {
             message: format!("could not inspect {}: {error}", path.display()),
         })?;
-        crate::config::require_trustworthy_config_file(path, &metadata)?;
+        crate::config::trust::require_trustworthy_config_file(path, &metadata)?;
         let resolved = std::fs::canonicalize(path).map_err(|error| ConfigError {
             message: format!("could not resolve {}: {error}", path.display()),
         })?;
@@ -56,7 +56,7 @@ impl UsersFile {
             let metadata = std::fs::metadata(directory).map_err(|error| ConfigError {
                 message: format!("could not inspect {}: {error}", directory.display()),
             })?;
-            crate::config::require_trustworthy_config_directory(directory, &metadata)?;
+            crate::config::trust::require_trustworthy_config_directory(directory, &metadata)?;
             ancestor = directory.parent();
         }
         let mut yaml = String::new();
