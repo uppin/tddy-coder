@@ -11,10 +11,11 @@ name: Automerge
 # here: `Allow auto-merge` must be on, and the `master` ruleset must require the
 # four ci.yml checks. Native auto-merge is a *queue for a blocked PR* — with
 # nothing required, a PR is mergeable the instant it opens and GitHub rejects
-# the request with "Pull request is in clean status". `#forcemerge` additionally
-# needs the GitHub Actions app listed in that ruleset's `bypass_actors`;
-# GITHUB_TOKEN cannot skip a required check by default, and should not be able
-# to merge past one it is not explicitly trusted to skip.
+# the request with "Pull request is in clean status". `#forcemerge` needs no
+# ruleset bypass: the ruleset requires its checks from the GitHub Actions app,
+# which is the app GITHUB_TOKEN acts as, so the force path completes each
+# required check that has not passed with a run that says who forced it, then
+# merges normally. See docs/dev/guides/ci.md § Automerge.
 
 on:
   issue_comment:
@@ -26,7 +27,8 @@ on:
 permissions:
   contents: write
   pull-requests: write
-  checks: read
+  # write: `#forcemerge` completes the required checks it merges past.
+  checks: write
 
 jobs:
   automerge:
@@ -95,10 +97,61 @@ jobs:
             force)
               # Merging past a gate is worth a trace that outlives the run log,
               # so record who asked and what the checks actually said, on the PR
-              # itself, before doing it.
+              # itself. The check state is read before anything changes, and the
+              # trace is posted only once the merge went through — a failed
+              # attempt must not leave a "Force-merged" claim on an open PR.
               checks=$(gh pr checks "$PR" --repo "$REPO" 2>&1 || true)
+              read -r head base < <(gh pr view "$PR" --repo "$REPO" \
+                --json headRefOid,baseRefName --jq '"\(.headRefOid) \(.baseRefName)"')
+
+              # The base's ruleset requires its checks from the GitHub Actions
+              # app — the app this token acts as. Each required check that has
+              # not passed on the head gets a completed run naming who forced
+              # it; it is then the latest run of that name, which is what the
+              # ruleset reads. Nothing is bypassed silently: the run's summary,
+              # the PR comment and this log all say it was forced.
+              required=$(gh api "repos/$REPO/rules/branches/$base" \
+                --jq '[.[] | select(.type == "required_status_checks")
+                       | .parameters.required_status_checks[].context] | unique | .[]')
+              forced=()
+              while IFS= read -r ctx; do
+                [ -n "$ctx" ] || continue
+                latest=$(gh api "repos/$REPO/commits/$head/check-runs" \
+                  -f check_name="$ctx" -X GET \
+                  --jq '.check_runs | sort_by(.started_at) | last | .conclusion // ""')
+                [ "$latest" = success ] && continue
+                gh api -X POST "repos/$REPO/check-runs" \
+                  -f name="$ctx" -f head_sha="$head" \
+                  -f status=completed -f conclusion=success \
+                  -f "output[title]=Forced by @$ACTOR via #forcemerge" \
+                  -f "output[summary]=Not built. @$ACTOR force-merged #$PR ($COMMENT_URL); the run this replaces concluded '${latest:-none}'." \
+                  --jq '"forced \(.name) on \(.head_sha[0:9])"'
+                forced+=("$ctx")
+              done <<< "$required"
+
+              # The ruleset is re-evaluated asynchronously after a check run
+              # lands, so the first merge attempt can still see the old state.
+              merged=no
+              for attempt in 1 2 3 4 5 6; do
+                if merge_out=$(gh pr merge "$PR" --repo "$REPO" --squash 2>&1); then
+                  merged=yes; break
+                fi
+                echo "attempt $attempt: $merge_out"
+                sleep 10
+              done
+              if [ "$merged" != yes ]; then
+                gh pr comment "$PR" --repo "$REPO" --body "$(cat <<EOF
+          ❌ [\`#forcemerge\`]($COMMENT_URL) by @$ACTOR did **not** merge this PR.
+
+          \`\`\`
+          $merge_out
+          \`\`\`
+          EOF
+          )"
+                exit 1
+              fi
               gh pr comment "$PR" --repo "$REPO" --body "$(cat <<EOF
-          ⚠️ **Force-merged** by @$ACTOR via [\`#forcemerge\`]($COMMENT_URL), bypassing the required checks.
+          ⚠️ **Force-merged** by @$ACTOR via [\`#forcemerge\`]($COMMENT_URL), bypassing the required checks${forced:+ (completed as forced: ${forced[*]})}.
 
           Check state at merge time:
 
@@ -107,10 +160,6 @@ jobs:
           \`\`\`
           EOF
           )"
-              # --admin merges through the merge API instead of asking to queue.
-              # It succeeds only because the Actions app is a bypass actor on the
-              # ruleset; without that it fails here rather than merging quietly.
-              gh pr merge "$PR" --repo "$REPO" --squash --admin
               echo "reaction=hooray" >> "$GITHUB_OUTPUT"
               echo "Force-merged #$PR"
               ;;

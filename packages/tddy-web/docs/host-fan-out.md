@@ -1,4 +1,4 @@
-# Cross-daemon fan-out (`src/rpc/useHostFanOut.ts`)
+# Cross-daemon fan-out (`tddy-client-web`'s `src/hostFanOut.ts`)
 
 A daemon answers a list RPC for **itself**. The requests carry no routing field and a daemon never
 forwards one to a peer, so any surface that has to show the whole fleet asks every daemon itself.
@@ -34,7 +34,7 @@ genuinely different one takes effect on the next read, which is why it belongs a
 | `sessions/useSelectableAgents.ts` | `ListAgents` | `id@daemonInstanceId` | **client-side** — `AgentInfo` has no host field, so each row is stamped with the identity the read was addressed to |
 | `sessions/useAvailableAgents.ts` | `ListSubagents` | the daemon-minted `agent_id` | **on the wire** — the serving daemon stamps `daemon_instance_id` |
 
-`components/models/useModelRegistryFanOut.ts` fans out the same way but is **not** a reader: it reads
+`tddy-workspace-web`'s `src/models/useModelRegistryFanOut.ts` fans out the same way but is **not** a reader: it reads
 several RPCs per host into one composite snapshot, merges by provider identity rather than by row key,
 and issues writes back to the owning host. It shares the shape, not the contract. Both share
 `noConnectionTo`, so an unreachable host reads the same everywhere.

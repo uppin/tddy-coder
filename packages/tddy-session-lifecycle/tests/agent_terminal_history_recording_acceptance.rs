@@ -348,9 +348,13 @@ async fn a_session_that_never_recorded_answers_not_found() {
 fn a_config() -> (tempfile::TempDir, DaemonConfig) {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("daemon.yaml");
+    std::fs::write(&path, "").unwrap();
     std::fs::write(
-        &path,
-        "users:\n  - github_user: \"testuser\"\n    os_user: \"testuser\"\n",
+        std::path::Path::new(&(path))
+            .parent()
+            .expect("a config directory")
+            .join("users.yaml"),
+        "- github_user: \"testuser\"\n  os_user: \"testuser\"\n",
     )
     .unwrap();
     let config = DaemonConfig::load(&path).expect("config must parse");
@@ -377,6 +381,6 @@ fn session_host(
         tddy_session_lifecycle::peer_routing::PeerRouting::local_only(&config),
         Arc::new(tddy_daemon_kernel::operator_channel::NoOperatorChannel),
         manager,
+        tddy_session_lifecycle::test_util::builtin_coding_agents(),
     )
-    .with_coding_agents_if_none(tddy_session_lifecycle::test_util::builtin_coding_agents())
 }

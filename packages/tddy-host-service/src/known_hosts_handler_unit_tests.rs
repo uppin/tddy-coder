@@ -53,7 +53,7 @@ fn a_sighting_of(instance_id: &str) -> HostSighting {
 fn a_config_naming_this_daemon(
     daemon_instance_id: Option<&str>,
 ) -> tddy_daemon_kernel::config::DaemonConfig {
-    let mut yaml = "users:\n  - github_user: \"u\"\n    os_user: \"u\"\n".to_string();
+    let mut yaml = String::new();
     if let Some(id) = daemon_instance_id {
         // The desktop ships this pair, and it is what made one machine show up twice.
         yaml.push_str(&format!(
@@ -63,6 +63,11 @@ fn a_config_naming_this_daemon(
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("config.yaml");
     std::fs::write(&path, yaml).unwrap();
+    std::fs::write(
+        dir.path().join("users.yaml"),
+        "- github_user: \"u\"\n  os_user: \"u\"\n",
+    )
+    .unwrap();
     tddy_daemon_kernel::config::DaemonConfig::load(&path).unwrap()
 }
 

@@ -58,9 +58,6 @@ fn write_daemon_config(extra_sections: &str) -> (tempfile::TempDir, DaemonConfig
     let dir = tempfile::tempdir().unwrap();
     let yaml = format!(
         r#"
-users:
-  - github_user: "testuser"
-    os_user: "testuser"
 allowed_tools:
   - path: /bin/true
     label: true
@@ -68,6 +65,14 @@ allowed_tools:
     );
     let config_path = dir.path().join("daemon.yaml");
     std::fs::write(&config_path, yaml).unwrap();
+    std::fs::write(
+        std::path::Path::new(&(config_path))
+            .parent()
+            .expect("a config directory")
+            .join("users.yaml"),
+        "- github_user: \"testuser\"\n  os_user: \"testuser\"\n",
+    )
+    .unwrap();
     let config = DaemonConfig::load(&config_path).expect("config must parse");
     (dir, config)
 }
@@ -170,8 +175,8 @@ fn minimal_service(
         tddy_session_lifecycle::peer_routing::PeerRouting::local_only(&config),
         Arc::new(tddy_daemon_kernel::operator_channel::NoOperatorChannel),
         Arc::new(CliSessionManager::new()),
-    )
-    .with_coding_agents(agents);
+        agents,
+    );
     let service = Arc::new(service);
     service.install_sandbox_rpc_bridge();
     service

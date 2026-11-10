@@ -547,21 +547,29 @@ async fn an_ensured_main_loads_tddy_tools_as_its_only_mcp_server() {
 
 #[tokio::test]
 async fn an_ensured_mains_tools_reach_this_daemon_as_the_main() {
-    // Given a main the ensure has started on a daemon that serves HTTP
+    // Given a main the ensure has started on a server daemon
     let world = a_daemon_with_a_project();
     let main = world.a_running_main().await;
 
     // When its launch is read
     let launch = world.launch_of(&main.session_id).await;
 
-    // Then its tools address this daemon over its local URL, as the main itself
+    // Then its tools address this daemon as the main itself, over its local URL
     assert_eq!(launch.env("TDDY_REMOTE_SESSION_ID"), main.session_id);
     assert_eq!(
         launch.env("TDDY_REMOTE_DAEMON_URL"),
         this_daemons_local_url()
     );
-    // And no agent-tool socket, which only an embedded daemon serves
-    assert_eq!(launch.env("TDDY_REMOTE_DAEMON_SOCKET"), "");
+    // And over its user's agent-tool socket, which a socket in the user's own directory serves
+    let users_socket = tddy_daemon_kernel::agent_tool_sockets::user_socket_path_for_user(
+        world.home.data.path(),
+        &project_home_support::current_os_user(),
+    )
+    .expect("the user has a socket path");
+    assert_eq!(
+        launch.env("TDDY_REMOTE_DAEMON_SOCKET"),
+        users_socket.to_string_lossy()
+    );
 }
 
 #[tokio::test]

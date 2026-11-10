@@ -19,11 +19,18 @@ const TEST_HOOK_TOKEN: &str = "cursor-hook-token-abc";
 const TEST_OS_USER: &str = "testuser";
 
 fn minimal_service(sessions_base: PathBuf) -> DaemonSessionHost {
-    let yaml =
-        format!("users:\n  - github_user: \"{TEST_OS_USER}\"\n    os_user: \"{TEST_OS_USER}\"\n");
+    let yaml = "";
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("config.yaml");
     std::fs::write(&path, yaml).unwrap();
+    std::fs::write(
+        std::path::Path::new(&(path))
+            .parent()
+            .expect("a config directory")
+            .join("users.yaml"),
+        format!("- github_user: \"{TEST_OS_USER}\"\n  os_user: \"{TEST_OS_USER}\"\n"),
+    )
+    .unwrap();
     let config = DaemonConfig::load(&path).unwrap();
 
     let base = sessions_base.clone();
@@ -46,8 +53,8 @@ fn minimal_service(sessions_base: PathBuf) -> DaemonSessionHost {
         tddy_session_lifecycle::peer_routing::PeerRouting::local_only(&config),
         Arc::new(tddy_daemon_kernel::operator_channel::NoOperatorChannel),
         Arc::new(CliSessionManager::new()),
+        tddy_session_lifecycle::test_util::builtin_coding_agents(),
     )
-    .with_coding_agents_if_none(tddy_session_lifecycle::test_util::builtin_coding_agents())
 }
 
 fn write_cursor_cli_session(session_dir: &std::path::Path, hook_token: &str) {

@@ -24,28 +24,27 @@ fn a_daemon_allowing(ids: &[&str]) -> (tempfile::TempDir, TestDaemon) {
     std::fs::create_dir_all(home.path().join("tools")).unwrap();
     let allowed: String = ids.iter().map(|id| format!("  - id: {id}\n")).collect();
     let config_path = home.path().join("daemon.yaml");
+    std::fs::write(&config_path, format!("allowed_agents:\n{allowed}")).unwrap();
     std::fs::write(
-        &config_path,
-        format!("users:\n  - github_user: u\n    os_user: u\nallowed_agents:\n{allowed}"),
+        home.path().join("users.yaml"),
+        "- github_user: u\n  os_user: u\n",
     )
     .unwrap();
     let config = DaemonConfig::load(&config_path).expect("the config loads");
     let tddy_home: PathBuf = home.path().to_path_buf();
     let sessions_base = tddy_home.clone();
-    let daemon = TestDaemon::from_host(
-        DaemonSessionHost::new(
-            config.clone(),
-            Arc::new(move |_| Some(sessions_base.clone())),
-            tddy_home,
-            Arc::new(|token| (token == "valid-token").then(|| "u".to_string())),
-            None,
-            tddy_spawn::supervisor_client::SpawnBackendChoice::ForkedWorker,
-            tddy_session_lifecycle::peer_routing::PeerRouting::local_only(&config),
-            Arc::new(tddy_daemon_kernel::operator_channel::NoOperatorChannel),
-            Arc::new(tddy_session_lifecycle::claude_cli_session::CliSessionManager::new()),
-        )
-        .with_coding_agents_if_none(tddy_session_lifecycle::test_util::builtin_coding_agents()),
-    );
+    let daemon = TestDaemon::from_host(DaemonSessionHost::new(
+        config.clone(),
+        Arc::new(move |_| Some(sessions_base.clone())),
+        tddy_home,
+        Arc::new(|token| (token == "valid-token").then(|| "u".to_string())),
+        None,
+        tddy_spawn::supervisor_client::SpawnBackendChoice::ForkedWorker,
+        tddy_session_lifecycle::peer_routing::PeerRouting::local_only(&config),
+        Arc::new(tddy_daemon_kernel::operator_channel::NoOperatorChannel),
+        Arc::new(tddy_session_lifecycle::claude_cli_session::CliSessionManager::new()),
+        tddy_session_lifecycle::test_util::builtin_coding_agents(),
+    ));
     (home, daemon)
 }
 

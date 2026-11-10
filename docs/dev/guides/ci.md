@@ -15,10 +15,13 @@ tests that failed.
 | `Rust build` | `cargo build --workspace --bins --examples` | ~10 min |
 | `Rust tests` | `cargo nextest run --profile ci`, minus the e2e set, over the workspace as 3 shards (`Rust tests shard i/3`), each a sliding window of package batches (`scripts/nextest-windowed.ts --shard i/3`); one `Rust tests` check stands for them | |
 | `Rust e2e tests` | `cargo nextest run --archive-file … --profile ci`, restricted to the e2e set, run as 6 shards from an archive of just the e2e test targets — tests that need real infrastructure | |
-| `Generated code` | `bun install --frozen-lockfile`, then `scripts/generated-code.sh check` | ~3 min |
-| `Web tests` | `bun install --frozen-lockfile`, `bun run build`, `tddy-web` unit tests, `tddy-web` + `tddy-livekit-web` Cypress component tests | ~10 min |
+| `Generated code` | `bun install --frozen-lockfile`, the CI script tests, then `scripts/generated-code.sh check` | ~3 min |
+| `Web build` | every web workspace package's `build:ci` (`web.yml`); see [Web checks](#web-checks) | |
+| `Web lint` | every web package's `typecheck`, minus `scripts/web-lint-exclusions.json`, and the web rule tests | |
+| `Web tests shard 1/3`…`3/3` | the affected web packages' `test:ci` and Cypress component specs, dealt across three shards | |
+| `Storybook build` | the static Storybook (`storybook.yml`), when a change reaches the package that owns it | |
 
-`Rust lint` runs on its own. **`Rust build` runs first, and the test checks
+`Rust lint` runs on its own. **`Rust build` runs first, and the Rust test checks
 wait on it**, because a number of suites exec a workspace binary by path rather
 than linking it, and cargo never builds those as a side effect of running the
 tests — they belong to a different package:
@@ -27,7 +30,7 @@ tests — they belong to a different package:
 |--------|-----------|
 | `target/debug/tddy-sandbox-runner` | `tddy-daemon-sandbox` `sandbox_runner_stdio_acceptance` |
 | `target/debug/tddy-acp-stub` | `tddy-integration-tests` `acp_*`, `codex_acp_*` |
-| `target/debug/examples/echo_server` | `tddy-livekit-web` Cypress specs |
+| `target/debug/examples/echo_server` | `tddy-livekit-rpc-web` Cypress specs; a `Web tests` shard that runs those specs builds its own, so no Rust test job needs this one |
 | `target/debug/tddy-remote-git-repo` | `tddy-worktree-service` `remote_git_livekit_acceptance`, `tddy-session-lifecycle` `session_sync_livekit_acceptance` |
 | `target/debug/tddy-index-daemon` | `tddy-tools` `index_daemon_client_acceptance` |
 
@@ -162,8 +165,7 @@ binaries, add its binary to the filterset, and — for a LiveKit one — to the 
 [The shared LiveKit server](#the-shared-livekit-server)). The two lists carry the same LiveKit names on purpose; the
 override also covers `tddy-livekit`'s own suites. LiveKit tests run in parallel; none belongs in a
 serial test-group (any group with `max-threads = 1`). The script test
-`scripts/nextest-serial-groups.test.ts` checks it — run it with
-`./dev bun test ./scripts/nextest-serial-groups.test.ts`: it fails if a binary that starts the
+`scripts/nextest-serial-groups.test.ts` checks it, in the `Generated code` job: it fails if a binary that starts the
 LiveKit testkit is put in a serial group, or if a serial group's filter names a binary or package
 that does not exist.
 
@@ -214,6 +216,32 @@ made required, a red `Rust e2e tests` does not block a merge.
   or `stop`. Filterset binaries missing from the report are named, so a renamed test binary shows up
   rather than silently counting as zero.
 
+## Web checks
+
+Every JS workspace package in the root `package.json` `workspaces` is built, linted and tested by one
+workflow, `.github/workflows/web.yml`, and the Storybook by `.github/workflows/storybook.yml`. Neither
+names a package: `scripts/web-ci.ts` discovers them from `workspaces` and each package's own
+`package.json`, so adding a package needs no CI edit.
+
+| Check | What it runs |
+|-------|--------------|
+| `Web build` | `bun scripts/web-ci.ts build`: every package's `build:ci` script |
+| `Web lint` | `bun scripts/web-ci.ts lint`: every package's `typecheck` script; then the web rule tests (`web-ci`, `web-workflows`, `web-package-boundary`, `livekit-import-boundary`, `livekit-rpc-package-name`) |
+| `Web tests shard i/3` | this shard's share of the affected packages' suites |
+| `Storybook build` | `build-storybook` of the package named by `STORYBOOK_PACKAGE` in `storybook.yml`, when that package is affected |
+
+All four sit behind `build-gate.yml`, as every other check does: a draft skips them unless it carries `#forcebuild`.
+
+**What a package declares.** `build:ci` (built by `Web build`; the shards that need the bundle run the same command), `typecheck` (a package without one, or whose typecheck fails today, is listed in `scripts/web-lint-exclusions.json` with its reason and the `docs/dev/todo/` record that removes it; a listed package is skipped. `lint` fails on a package that has no `typecheck` and is not listed, and on an entry naming a package that no longer exists), `test:ci` (its unit suites, writing JUnit XML under `reports/junit/`), `cypress:component:ci` (its specs under `cypress/component/` are discovered and dealt to the shards), and `tddyCi.needs` — what its tests need prepared: `web-bundle` (runs every `build:ci`), `tddy-coder` (builds `target/debug/tddy-coder`), `echo-server` (builds `target/debug/examples/echo_server`), `livekit-image` (pulls the LiveKit image).
+
+**Affected packages.** Each shard runs `scripts/web-ci.ts plan`, which asks `scripts/web-affected.ts` for the packages the PR's diff affects; pushes to `master` and dispatches take every package. A package is affected when a file under its directory changed; when a workspace package it depends on is affected, transitively (`workspace:*` in `dependencies` or `devDependencies`); or when a global input changed: root `package.json`, `bun.lock`, `bunfig.toml`, `flake.nix`, `flake.lock`, `web.yml`, `storybook.yml`, `build-gate.yml`, `scripts/web-affected.ts`, `scripts/web-ci.ts`, `scripts/web-package-boundary.ts` or `scripts/vite-prebundle.ts`.
+
+**Pre-bundled dependencies.** Every package's `vite.config.ts` takes its `optimizeDeps` from `scripts/vite-prebundle.ts`: the specs, support files and sources as scan entries, and the heavy dependencies the package can resolve as `include`. Without it, Vite under Cypress could meet a dependency mid-run, re-optimise and reload, and the spec in flight failed with "Failed to fetch dynamically imported module …/cypress/support/component.ts".
+
+**Sharding.** The affected packages are sorted by name; unit suites go whole to shard `index mod 3`, and every affected package's component specs are pooled, sorted and dealt one by one the same way. A shard installs Cypress, builds Rust fixtures or pulls the LiveKit image only when its own share needs them. A shard with nothing to run passes without running anything. Each shard publishes its JUnit XML as a `web shard i report` check (not the job's name) and uploads it as `junit-web-shard-i`.
+
+`scripts/web-workflows.test.ts` pins this shape: no `web-*.yml` per-package workflow, `web.yml` with the build, lint and three shard checks, `storybook.yml` with `Storybook build`.
+
 ## Generated code
 
 `Generated code` regenerates every committed `*_pb.ts` and fails if the result
@@ -232,7 +260,7 @@ root and therefore could not reproduce its own directory.
 |-----------|----------------|
 | `packages/tddy-web/src/gen` | `tddy-service/proto` |
 | `packages/tddy-rpc-web/src/gen` | `tddy-rpc/proto`, `tddy-livekit/proto/test` |
-| `packages/tddy-livekit-web/src/gen` | `tddy-livekit/proto`, `tddy-rpc/proto`, `tddy-service/proto/terminal.proto` |
+| `packages/tddy-livekit-rpc-web/src/gen` | `tddy-livekit/proto`, `tddy-rpc/proto`, `tddy-service/proto/terminal.proto` |
 | `packages/tddy-rust-typescript-tests/gen` | `tddy-service/proto` |
 
 **Only TypeScript is listed, because only TypeScript is committed.** The Rust
@@ -296,7 +324,7 @@ gh api repos/{owner}/{repo}/check-runs/$ID/annotations  # one annotation per fai
 gh run view $RUN_ID --log-failed                 # raw log of failing steps only
 ```
 
-Raw JUnit XML is also uploaded as the `junit-rust-shard-i` (one per shard), `junit-rust-e2e-shard-i` and `junit-web` artifacts
+Raw JUnit XML is also uploaded as the `junit-rust-shard-i` (one per shard), `junit-rust-e2e-shard-i` and `junit-<package>` artifacts (one per web package check)
 (14-day retention) for anything the API does not cover:
 
 ```bash
@@ -314,8 +342,9 @@ deliberately, and each exclusion is coverage you still have to get locally:
 | cgroups sandbox tests | Need root and a writable cgroup root; the backend reports itself available on any Linux, then EPERMs at spawn |
 | One `tddy-sandbox-recipes` path test | Asserts a macOS-only path layout |
 | `sandbox_runner_stdio_acceptance::echoes_a_message_over_sandbox_service_served_over_stdio` | Fails unprivileged with "tool ipc server exited before bind" even with the runner binary staged; survived two retries. Only this one test is skipped — the other two in the binary pass. Tracked in `docs/dev/todo/`; the intended fix is a VM-backed job, not a permanent exclusion |
-| Cypress **e2e** specs | Storybook build plus a real ghostty WebGL context; not yet verified on a runner |
-| `tddy-desktop`, `tddy-rust-typescript-tests` | Need Electron and cross-language fixtures respectively. Their *tests* are excluded; `tddy-rust-typescript-tests`' committed `gen/` is covered by `Generated code` |
+| Cypress **e2e** specs | Storybook build plus a real xterm.js WebGL context; not yet verified on a runner |
+| `tddy-desktop` tests | It has none that run without Tauri; its check only installs the workspace. Its front end is tddy-web's bundle, which its `package.json` does not depend on, so a tddy-web change does not run its check (`docs/dev/todo/2026-11-07-desktop-check-does-not-follow-the-tddy-web-bundle.md`) |
+| Web checks on a Rust-only change | `tddy-livekit-rpc-web`'s Cypress specs exec `echo_server` and `tddy-rust-typescript-tests` spawns `tddy-coder`, but the detector sees only JS workspace paths, so a change to those crates runs neither (`docs/dev/todo/2026-11-07-web-checks-ignore-the-rust-binaries-they-exec.md`) |
 
 The Rust exclusions live in `.config/nextest.toml` under `[profile.ci]`
 `default-filter`, each with its reason. Keep that list short — every entry is a
@@ -333,7 +362,10 @@ Only the chain leg needs anything from CI, and only that leg waits for it — it
 polls for the `tddy-dist` artifact `Rust build` publishes for the same commit,
 failing if that build failed or never finished. Cancelled CI runs of the same
 trigger and commit — the stale twin a draft-gate race leaves behind — are
-ignored when it picks the run, since their `Rust build` never completes. The two cheap legs start
+ignored when it picks the run, since their `Rust build` never completes. So is a run whose `Rust
+build` was skipped or that finished without one — the `ready_for_review` run of a PR readied after
+its push, which is newer than the push's run and skips every Rust job: the candidates are tried
+newest-first, and the first that builds, or is still running and may, is the one waited on. The two cheap legs start
 immediately. The alternative is `workflow_run`, which would give a real
 dependency edge instead of a poll, but GitHub always takes a `workflow_run`
 workflow from the **default branch**: the file could not be changed and tested
@@ -454,10 +486,9 @@ The image is pinned in one file, `.config/livekit-server.image`, read by the scr
 `./run-livekit-testkit-server` and (compiled in) the testkit. It is never `:master`. Changing it is
 a one-line edit.
 
-`Web tests` starts no shared server: `tddy-livekit-web`'s Cypress specs start their own container
+The `tddy-livekit-rpc-web` check starts no shared server: its Cypress specs start their own container
 through `cypress/support/livekitDockerTestkit.ts`, which still names `livekit/livekit-server:master`
-rather than the pinned image. The job pulls that image in its own step (`Pull the LiveKit image for
-tddy-livekit-web`) before the component tests, because the `startEchoServer` task's 60s Cypress
+rather than the pinned image. The check pulls that image in its own step (`Pull the LiveKit image`) before the component tests, because the `startEchoServer` task's 60s Cypress
 timeout would otherwise also cover the pull on a fresh runner, and a slow pull failed both specs'
 `before all` hooks.
 `./run-livekit-testkit-server --stop` removes the local reusable server.
@@ -537,15 +568,31 @@ Runners guarantee only ~14 GB of disk, so each Rust job deletes the preinstalled
 dotnet/android/ghc toolchains first, and debuginfo is reduced to
 `line-tables-only` — enough for `file:line` in backtraces, a fraction of the size.
 
+### Prebuilt libwebrtc
+
+`webrtc-sys` links LiveKit's prebuilt libwebrtc (~150 MB per architecture), which its build script
+downloads from LiveKit's GitHub release on every cold build — and that host answers 504 for minutes
+at a time. Every job that compiles the workspace first runs `.github/actions/webrtc-prebuilt`: it
+restores `~/.cache/livekit-webrtc/<tag>/<triple>` from the Actions cache (key
+`webrtc-<tag>-<triple>`, `linux-x64-release` or `linux-arm64-release`), and only on a miss downloads
+it through the **release-asset API** (`gh api …/releases/assets/<id>`, with the job's token) — not the
+`github.com/…/releases/download` URL, whose redirect has answered 504 for hours while the API served
+the same file — checks it against the sha256 the release publishes, and unpacks it, with bounded retries, and exports `LK_CUSTOM_WEBRTC` so the build script uses that directory
+instead of downloading. A download that still fails after the retries fails the job by name; there is
+no other source. The tag is the one `webrtc-sys-build` hard-codes; `scripts/webrtc-prebuilt.test.ts`
+fails when `Cargo.lock` locks a different `webrtc-sys-build` than the action pins.
+
 ## Making the checks required
 
 CI reports status but does not block merges until a ruleset says so. The
-`master` ruleset requires these four contexts:
+`master` ruleset requires these contexts:
 
 - `Rust lint`
 - `Rust tests`
 - `Rust build`
-- `Web tests`
+- `Web build`, `Web lint`, `Web tests shard 1/3`, `Web tests shard 2/3`, `Web tests shard 3/3` ([Web checks](#web-checks))
+
+`Storybook build` is not required.
 
 Do **not** add `VM boot control` or `Cloudinit VM boot` to that list yet — they
 are still being proven out, and a required check that flakes on QEMU would block
@@ -583,7 +630,11 @@ gh api -X POST repos/uppin/tddy-coder/rulesets --input - <<'JSON'
           { "context": "Rust lint" },
           { "context": "Rust build" },
           { "context": "Rust tests" },
-          { "context": "Web tests" }
+          { "context": "Web build" },
+          { "context": "Web lint" },
+          { "context": "Web tests shard 1/3" },
+          { "context": "Web tests shard 2/3" },
+          { "context": "Web tests shard 3/3" }
         ]
       }
     }
@@ -604,8 +655,8 @@ change has to arrive through a PR. That is the intended state.
 Resist adding a bypass actor for the **admin role** as an escape hatch. Beyond
 reopening the hole, it can break `#automerge` outright: if the PR author's own
 role may bypass the required checks, GitHub can consider that PR already clean
-and refuse to arm auto-merge on it. The one bypass actor the repo does grant is
-the GitHub Actions app, which is not a PR author — see the next section.
+and refuse to arm auto-merge on it. The ruleset has **no** bypass actors;
+`#forcemerge` works without one — see the next section.
 
 ## Draft PRs
 
@@ -679,8 +730,21 @@ than confirming to a stranger that the trigger exists.
 `#forcemerge` is held to the same `write` bar rather than a higher one on
 purpose. The repo is owned by a different account than the people working in it,
 so an admin-only force merge would be usable by nobody. It leaves a trace that
-outlives the run log: before merging, the workflow comments on the PR naming who
-asked, linking their comment, and quoting the full check state at that moment.
+outlives the run log: once the merge has gone through, the workflow comments on the PR
+naming who asked, linking their comment, and quoting the full check state read just
+before the merge. A force merge that fails posts a ❌ comment with the API's error
+instead, so an open PR never carries a "Force-merged" claim.
+
+**How `#forcemerge` gets past the required checks without a bypass actor.** The
+ruleset requires each check *from the GitHub Actions app* (`integration_id: 15368`),
+and `GITHUB_TOKEN` acts as that app. So, with `checks: write`, the force path reads
+the base branch's required checks (`gh api repos/<repo>/rules/branches/<base>`), and
+for each one whose latest run on the head is not `success` it posts a completed run
+of the same name titled *"Forced by @actor via #forcemerge"*, whose summary links the
+comment and names the conclusion it replaces. That run is the latest of its name,
+which is what the ruleset reads, and the merge is then an ordinary squash. Nothing is
+built for those checks — the run says so — and the PR comment lists which checks were
+completed as forced.
 
 ### What it depends on
 
@@ -691,21 +755,13 @@ asked, linking their comment, and quoting the full check state at that moment.
   is mergeable the moment it opens and the API rejects the request with
   *"Pull request is in clean status"*. The ruleset is the mechanism, not
   decoration.
-- **The GitHub Actions app as a bypass actor**, for `#forcemerge` only.
-  `GITHUB_TOKEN` cannot skip a required check by default — a force merge fails
-  at `gh pr merge --admin` rather than merging quietly. Granting it:
+- **`checks: write` for the workflow token**, for `#forcemerge` only — to post the
+  forced check runs described above. No ruleset change and no admin step: the
+  ruleset's `bypass_actors` stays empty.
 
-  ```bash
-  gh api -X PUT repos/uppin/tddy-coder/rulesets/21793758 --input - <<'JSON'
-  { "bypass_actors": [
-      { "actor_id": 15368, "actor_type": "Integration", "bypass_mode": "always" }
-  ] }
-  JSON
-  ```
-
-  The cost is real and worth stating: *every* workflow in the repo then holds a
-  token that can bypass required checks on `master`, `ci.yml` included. What
-  makes that acceptable is that a workflow can only be changed through a PR.
+  The cost is worth stating: any workflow with `checks: write` could complete a
+  required check the same way. What makes that acceptable is that a workflow can
+  only be changed through a PR, and a forced run is labelled as one on the PR.
 
 ### Two traps in the implementation
 
@@ -720,9 +776,9 @@ has to be merged by hand.
 between merging now and queueing, because queueing a PR with nothing left to
 wait for is an error rather than a no-op. The obvious source for that decision is
 `mergeStateStatus` — and it is the wrong one, because that field answers "is this
-blocked *for you*". Once the Actions app is a bypass actor, the answer for
-`GITHUB_TOKEN` stops being the answer for the ruleset, and `#automerge` would
-quietly become `#forcemerge`. So the workflow runs `gh pr checks --required`,
+blocked *for you*", and if the token's answer ever stopped being the ruleset's
+(a bypass actor, for instance), `#automerge` would quietly become `#forcemerge`.
+So the workflow runs `gh pr checks --required`,
 which reports the checks themselves: exit 0 when every required one has passed,
 non-zero while any is pending or failing. It correctly reads requirements from
 the ruleset and excludes the VM checks.

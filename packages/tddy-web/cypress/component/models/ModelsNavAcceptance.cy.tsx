@@ -15,10 +15,7 @@ import { withSelectedDaemon } from "../../support/rpc/withSelectedDaemon";
 import { aSessionServiceBackend } from "../../support/rpc/daemonSessionHostBackend";
 import { mountWithRpc } from "../../support/rpc/inMemory";
 import { mountWithRecordingLiveKitRpc } from "../../support/rpc/recordingLiveKitRpc";
-import {
-  aModelRegistryBackend,
-  anOllamaProvider,
-} from "../../support/rpc/modelRegistryBackend";
+import { anInMemoryRpcBackend } from "tddy-connectrpc-testkit";
 import { appShellPage as shell } from "../../support/pages/appShellPage";
 
 describe("ModelsNavAcceptance — Models & Agents in the navigation menu", () => {
@@ -88,7 +85,7 @@ describe("ModelsNavAcceptance — Models & Agents in the navigation menu", () =>
     const onNavigate = cy.stub().as("onNavigate");
     mountWithRpc(
       withSelectedDaemon(<ModelsAppPage onNavigate={onNavigate} />),
-      aModelRegistryBackend({ providers: [anOllamaProvider()], models: [] }),
+      anInMemoryRpcBackend(),
     );
 
     // When

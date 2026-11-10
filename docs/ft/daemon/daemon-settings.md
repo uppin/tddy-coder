@@ -81,7 +81,7 @@ saves a URL sees whether the daemon reached it. A daemon that answers `Unimpleme
 gets no line and is not asked again; any other failed read shows **Status unavailable: <message>**
 on the LiveKit line, drops the Telegram block (whether the daemon has a Telegram entry is then
 unknown), and never lands in the save error. Implementation:
-[daemon-settings-screen.md](../../../packages/tddy-web/docs/daemon-settings-screen.md).
+[daemon-settings-screen.md](../../../packages/tddy-workspace-web/docs/daemon-settings-screen.md).
 
 ## What an update means
 
@@ -96,6 +96,11 @@ request to clear the fields it omits. From that:
   permissions — so a failed write can never truncate an operator's config.
 - **What cannot be applied live is named**, not dropped: `restart_required` lists field paths such as
   `listen.web_port`. The UI shows them.
+- **The user mapping is not part of it.** The written file never carries a `users:` key — the
+  GitHub → OS-user mapping lives in `users.yaml` beside it, and a `users:` key there fails the
+  daemon's load. `UpdateConfig` writes no `users.yaml` either: its message carries no mapping. On an
+  unsupervised daemon (desktop, dev) first-login enrolment is that file's one writer; under
+  `tddy-supervisor` nothing in the daemon writes it.
 
 ## The common-room switch
 
@@ -137,9 +142,9 @@ LiveKit off has not misconfigured anything, and the two must not read alike.
 
 - **Comments are lost.** Writing re-serializes the config, so an operator's YAML comments do not
   survive a save. Field values do — verified by round-tripping `dev.daemon.yaml`, `dev.desktop.yaml`
-  and `config.example.yaml`. Preserving comments needs a comment-aware YAML editor. The desktop's
-  first-login enrolment writes the same file and has the same loss; a save and an enrolment are
-  serialised against each other, so neither drops the other's `users:` row.
+  and `config.example.yaml`. Preserving comments needs a comment-aware YAML editor. A save and a
+  desktop first-login enrolment (which writes `users.yaml`, not this file) are serialised against each
+  other, so their writes never interleave.
 - **Peer discovery does not follow a runtime reconnect.** A daemon that *gains* a common room at
   runtime serves its roster there but does not discover the other daemons in it until restarted.
 - **The UI edits the LiveKit block only.** Everything else is read-only and reported as

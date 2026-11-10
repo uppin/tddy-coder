@@ -1,0 +1,153 @@
+import React from "react";
+import type { InspectorTabName } from "tddy-client-web";
+
+/**
+ * The tab names are declared in `routing/appRoutes` (a pure module) so the `?inspector=` param can
+ * be validated without importing this component — see `isInspectorTabName`.
+ */
+export type InspectorTab = InspectorTabName;
+
+interface InspectorTabsProps {
+  value: InspectorTab;
+  onChange: (tab: InspectorTab) => void;
+  /**
+   * Whether the host serving this session can carry video tracks — the answer
+   * `SessionInspectorDrawer` gets from `useHasCapability(hostConnection, "media")`.
+   *
+   * The VNC and Screen Sharing tabs are *removed* from the strip when it is `false`, not disabled:
+   * a tab the operator cannot use invites a support question with no good answer, while an absent
+   * one matches what is actually true of the wire.
+   */
+  mediaAvailable: boolean;
+  /**
+   * Whether the session is stopped, so the recorded transcript (the Activity tab) is offered. A live
+   * session's transcript is the Agent Activity sidebar's, so its strip has no Activity tab.
+   */
+  activityAvailable: boolean;
+}
+
+export function InspectorTabs({
+  value,
+  onChange,
+  mediaAvailable,
+  activityAvailable,
+}: InspectorTabsProps) {
+  return (
+    <div className="flex border-b border-border flex-shrink-0">
+      <button
+        data-testid="sessions-inspector-tab-details"
+        aria-selected={value === "details"}
+        onClick={() => onChange("details")}
+        className={`px-3 py-1.5 text-xs font-medium border-b-2 transition-colors ${
+          value === "details"
+            ? "border-foreground text-foreground"
+            : "border-transparent text-muted-foreground hover:text-foreground"
+        }`}
+      >
+        Details
+      </button>
+      {activityAvailable && (
+        <button
+          data-testid="sessions-inspector-tab-activity"
+          aria-selected={value === "activity"}
+          onClick={() => onChange("activity")}
+          className={`px-3 py-1.5 text-xs font-medium border-b-2 transition-colors ${
+            value === "activity"
+              ? "border-foreground text-foreground"
+              : "border-transparent text-muted-foreground hover:text-foreground"
+          }`}
+        >
+          Activity
+        </button>
+      )}
+      <button
+        data-testid="sessions-inspector-tab-tools"
+        aria-selected={value === "tools"}
+        onClick={() => onChange("tools")}
+        className={`px-3 py-1.5 text-xs font-medium border-b-2 transition-colors ${
+          value === "tools"
+            ? "border-foreground text-foreground"
+            : "border-transparent text-muted-foreground hover:text-foreground"
+        }`}
+      >
+        Tools
+      </button>
+      <button
+        data-testid="sessions-inspector-tab-agents"
+        aria-selected={value === "agents"}
+        onClick={() => onChange("agents")}
+        className={`px-3 py-1.5 text-xs font-medium border-b-2 transition-colors ${
+          value === "agents"
+            ? "border-foreground text-foreground"
+            : "border-transparent text-muted-foreground hover:text-foreground"
+        }`}
+      >
+        Agents
+      </button>
+      <button
+        data-testid="sessions-inspector-tab-usage"
+        aria-selected={value === "usage"}
+        onClick={() => onChange("usage")}
+        className={`px-3 py-1.5 text-xs font-medium border-b-2 transition-colors ${
+          value === "usage"
+            ? "border-foreground text-foreground"
+            : "border-transparent text-muted-foreground hover:text-foreground"
+        }`}
+      >
+        Usage
+      </button>
+      <button
+        data-testid="sessions-inspector-tab-worktree"
+        aria-selected={value === "worktree"}
+        onClick={() => onChange("worktree")}
+        className={`px-3 py-1.5 text-xs font-medium border-b-2 transition-colors ${
+          value === "worktree"
+            ? "border-foreground text-foreground"
+            : "border-transparent text-muted-foreground hover:text-foreground"
+        }`}
+      >
+        Worktree
+      </button>
+      <button
+        data-testid="sessions-inspector-tab-files"
+        aria-selected={value === "files"}
+        onClick={() => onChange("files")}
+        className={`px-3 py-1.5 text-xs font-medium border-b-2 transition-colors ${
+          value === "files"
+            ? "border-foreground text-foreground"
+            : "border-transparent text-muted-foreground hover:text-foreground"
+        }`}
+      >
+        Files
+      </button>
+      {mediaAvailable && (
+        <button
+          data-testid="sessions-inspector-tab-vnc"
+          aria-selected={value === "vnc"}
+          onClick={() => onChange("vnc")}
+          className={`px-3 py-1.5 text-xs font-medium border-b-2 transition-colors ${
+            value === "vnc"
+              ? "border-foreground text-foreground"
+              : "border-transparent text-muted-foreground hover:text-foreground"
+          }`}
+        >
+          VNC
+        </button>
+      )}
+      {mediaAvailable && (
+        <button
+          data-testid="sessions-inspector-tab-screen-sharing"
+          aria-selected={value === "screen-sharing"}
+          onClick={() => onChange("screen-sharing")}
+          className={`px-3 py-1.5 text-xs font-medium border-b-2 transition-colors ${
+            value === "screen-sharing"
+              ? "border-foreground text-foreground"
+              : "border-transparent text-muted-foreground hover:text-foreground"
+          }`}
+        >
+          Screen Sharing
+        </button>
+      )}
+    </div>
+  );
+}

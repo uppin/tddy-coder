@@ -57,15 +57,20 @@ pub struct SessionAgentRosterStore {
     /// one: a status restored from disk would claim a turn is in flight in a process that never
     /// started one, and the main agent would wait for an answer nothing is producing.
     activity: Arc<SessionAgentActivityStore>,
+    /// The coding agents this host declares: what a coding agent's `transport` and
+    /// `permission_policy` on the wire are read from (`#agent-tools 27/28`).
+    coding_agents: Arc<tddy_coding_agent_specs::CodingAgentRegistry>,
 }
 
 /// The two live stores a snapshot reads an entry's state from, taken together so neither can be
 /// consulted without the other — an entry carrying a fresh `clone_state` and a stale `status` is
-/// two different accounts of one agent.
+/// two different accounts of one agent — and the host's coding-agent specs its `transport` and
+/// `permission_policy` are read from.
 #[derive(Clone, Copy)]
 pub struct SnapshotSources<'a> {
     pub clones: &'a SessionAgentCloneStore,
     pub activity: &'a SessionAgentActivityStore,
+    pub coding_agents: &'a tddy_coding_agent_specs::CodingAgentRegistry,
 }
 
 /// One session's roster, its revision, and the channel every subscriber reads it from.
@@ -97,11 +102,13 @@ impl SessionAgentRosterStore {
     pub fn new(
         clones: Arc<SessionAgentCloneStore>,
         activity: Arc<SessionAgentActivityStore>,
+        coding_agents: Arc<tddy_coding_agent_specs::CodingAgentRegistry>,
     ) -> Self {
         Self {
             sessions: Mutex::new(HashMap::new()),
             clones,
             activity,
+            coding_agents,
         }
     }
 
@@ -272,6 +279,7 @@ impl SessionAgentRosterStore {
             SnapshotSources {
                 clones: &self.clones,
                 activity: &self.activity,
+                coding_agents: &self.coding_agents,
             },
         )
     }
@@ -380,8 +388,12 @@ fn roster_entry(
     // Both live signals, read together: the checkout decides whether the agent can serve a prompt
     // at all, and only once it can does what the conversation is doing mean anything.
     let activity = sources.activity.get(session_id, &record.agent_id);
-    let (transport, permission_policy) =
-        tddy_coding_subagent::transport_and_policy_wire(record.harness.as_deref().unwrap_or(""));
+    let (transport, permission_policy) = record
+        .harness
+        .as_deref()
+        .and_then(|harness| sources.coding_agents.get(harness))
+        .map(tddy_coding_subagent::transport_and_policy_wire_of_spec)
+        .unwrap_or_default();
     SessionAgentEntry {
         agent_id: record.agent_id.clone(),
         name: record.name.clone(),
@@ -463,7 +475,11 @@ mod tests {
         clones: &'a SessionAgentCloneStore,
         activity: &'a SessionAgentActivityStore,
     ) -> SnapshotSources<'a> {
-        SnapshotSources { clones, activity }
+        SnapshotSources {
+            clones,
+            activity,
+            coding_agents: tddy_coding_agent_specs::CodingAgentRegistry::builtin_cached(),
+        }
     }
 
     /// A remote agent's record: it names the checkout serving it, which is what makes its
@@ -661,6 +677,7 @@ mod tests {
         let store = SessionAgentRosterStore::new(
             Arc::new(SessionAgentCloneStore::new()),
             Arc::new(SessionAgentActivityStore::new()),
+            Arc::new(tddy_coding_agent_specs::CodingAgentRegistry::empty()),
         );
         store
             .attach(&session_id, &session_dir, a_record("explorer@ws-01"))
@@ -670,6 +687,7 @@ mod tests {
         let restarted = SessionAgentRosterStore::new(
             Arc::new(SessionAgentCloneStore::new()),
             Arc::new(SessionAgentActivityStore::new()),
+            Arc::new(tddy_coding_agent_specs::CodingAgentRegistry::empty()),
         );
         let roster = restarted
             .snapshot(&session_id, &session_dir)

@@ -3,10 +3,18 @@ use tddy_daemon_kernel::{SessionUserResolver, SessionsBaseResolver};
 use tddy_service::proto::session::DeleteSessionRequest;
 
 fn make_unit_config() -> crate::config::DaemonConfig {
-    let yaml = "users:\n  - github_user: \"u\"\n    os_user: \"u\"\n";
+    let yaml = "";
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("config.yaml");
     std::fs::write(&path, yaml).unwrap();
+    std::fs::write(
+        std::path::Path::new(&(path))
+            .parent()
+            .expect("a config directory")
+            .join("users.yaml"),
+        "- github_user: \"u\"\n  os_user: \"u\"\n",
+    )
+    .unwrap();
     crate::config::DaemonConfig::load(&path).unwrap()
 }
 
@@ -31,8 +39,8 @@ fn make_unit_service(sessions_base: std::path::PathBuf) -> DaemonSessionHost {
         crate::peer_routing::PeerRouting::local_only(&config),
         Arc::new(tddy_daemon_kernel::operator_channel::NoOperatorChannel),
         Arc::new(CliSessionManager::new()),
+        crate::test_util::builtin_coding_agents(),
     )
-    .with_coding_agents_if_none(crate::test_util::builtin_coding_agents())
 }
 
 /// Unit: delete_session rejects an invalid session token before touching the filesystem.

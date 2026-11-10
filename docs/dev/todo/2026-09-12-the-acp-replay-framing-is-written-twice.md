@@ -50,6 +50,6 @@ the same files:
 
 ## 4. `SessionMainPaneProps` takes 42 props
 
-`packages/tddy-web/src/components/sessions/SessionMainPane.tsx`. Node 7 re-pointed several of them at
+`packages/tddy-session-web/src/SessionMainPane.tsx`. Node 7 re-pointed several of them at
 the new coordinates and added none, but a 42-prop interface is where a coordinate change becomes a
 42-line diff. Splitting it is a web restructure with its own Cypress cost and is not a move node's.

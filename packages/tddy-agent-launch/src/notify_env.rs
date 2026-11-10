@@ -61,9 +61,8 @@ pub fn notify_env_pairs(
 /// What a claude-cli agent is given so it can notify its operator (`#home-inbox` 1/8).
 pub struct AgentNotifyLaunch<'a> {
     pub config: &'a DaemonConfig,
-    /// The data dir the daemon resolved — an embedded daemon's agent-tool socket is digested from
-    /// it, as the claude-cli hooks installer reads it.
-    pub tddy_data_dir: &'a Path,
+    /// The session's OS user's agent-tool socket, which the agent notifies over as its hooks report.
+    pub agent_tool_socket: &'a Path,
     pub os_user: &'a str,
     pub session_id: &'a str,
     /// The token the claude-cli hooks installer minted for this session.
@@ -89,7 +88,7 @@ pub struct AgentNotifyWiring {
 pub fn agent_notify_launch(launch: AgentNotifyLaunch<'_>) -> Result<AgentNotifyWiring, Status> {
     let AgentNotifyLaunch {
         config,
-        tddy_data_dir,
+        agent_tool_socket,
         os_user,
         session_id,
         hook_token,
@@ -97,14 +96,12 @@ pub fn agent_notify_launch(launch: AgentNotifyLaunch<'_>) -> Result<AgentNotifyW
         managed_prompt_file,
     } = launch;
     let daemon_url = daemon_hook_urls::advertise_daemon_url(config);
-    // An embedded daemon serves no HTTP RPC; its agents notify over this socket, as its hooks report.
-    let daemon_socket = tddy_daemon_kernel::embedded_host_agent_tool_socket(tddy_data_dir);
     let env = notify_env_pairs(
         session_id,
         os_user,
         hook_token,
         &daemon_url,
-        daemon_socket.as_deref().map(Path::new),
+        Some(agent_tool_socket),
     );
     let prompt_file = session_dir.join(NOTIFY_SYSTEM_PROMPT_FILE);
     std::fs::write(&prompt_file, composed_system_prompt(managed_prompt_file)?).map_err(|e| {
@@ -155,7 +152,7 @@ pub fn agent_notify_unless_role(
 /// hooks — and a session with a standing role are given nothing.
 pub fn resumed_agent_notify_launch(
     config: &DaemonConfig,
-    tddy_data_dir: &Path,
+    agent_tool_socket: &Path,
     os_user: &str,
     session_dir: &Path,
     meta: &tddy_core::SessionMetadata,
@@ -169,7 +166,7 @@ pub fn resumed_agent_notify_launch(
     };
     agent_notify_launch(AgentNotifyLaunch {
         config,
-        tddy_data_dir,
+        agent_tool_socket,
         os_user,
         session_id: &meta.session_id,
         hook_token,

@@ -24,6 +24,8 @@ pub struct HeadlessMcpServer {
     pub args: Vec<String>,
     /// The server's `env` block; omitted from the registration when empty.
     pub env: BTreeMap<String, String>,
+    /// The directory an inline registration starts the server in (`cwd`); none when `None`.
+    pub cwd: Option<PathBuf>,
 }
 
 /// What one headless turn is launched with: the template's parameters and the slots' inputs.
@@ -303,6 +305,9 @@ pub struct HeadlessModelListing {
     pub program: PathBuf,
     pub argv: Vec<String>,
     pub adapter: Arc<dyn super::ModelsAdapter>,
+    /// What the listing is started with on top of the base set (`crate::agent_env`): the values
+    /// the spec's `coding_agent.pass_env` names (`#agent-tools 28/28`).
+    pub env: Vec<(String, String)>,
 }
 
 impl fmt::Debug for HeadlessModelListing {
@@ -311,6 +316,10 @@ impl fmt::Debug for HeadlessModelListing {
             .field("program", &self.program)
             .field("argv", &self.argv)
             .field("adapter", &self.adapter.name())
+            .field(
+                "env",
+                &self.env.iter().map(|(name, _)| name).collect::<Vec<_>>(),
+            )
             .finish()
     }
 }

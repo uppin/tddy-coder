@@ -12,7 +12,7 @@
  */
 
 import { describe, expect, it } from "bun:test";
-import type { DaemonHost } from "../lib/participantRole";
+import type { DaemonHost } from "tddy-client-web";
 import { withMockedSessionStorage } from "../test-utils/sessionStorage";
 import {
   readStoredSelectedDaemon,

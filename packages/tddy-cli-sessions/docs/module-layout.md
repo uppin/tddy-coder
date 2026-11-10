@@ -86,3 +86,13 @@ Tests: `tests/capture_recorder.rs` (a real PTY, a 50 ms interval) —
 
 `tddy_session_lifecycle` re-exports both modules (`cli_session_manager`, `session_toolcall`) and keeps
 `claude_cli_session` as a historical alias of `cli_session_manager`.
+
+## Agent and user process environments
+
+`tddy_pty::PtySpawnSpec.env_base` is `PtyEnvBase::{Inherited, Cleared}`. `spawn_rendered_main` — every
+agent main — spawns on `Cleared`: the child sees exactly the spec's env (the daemon-computed agent env)
+plus the PTY's own `TERM=xterm-256color` and `COLORTERM=truecolor`, which stand over any the spec names.
+`spawn_tool` and the user's terminals (Bash, tmux clients) stay `Inherited`: a user's terminal is not an
+agent, and still sees the daemon's environment. `spawn_tool_on(env_base, …)` is the shared spawn both
+reach. Tests: `tests/agent_env_allow_list.rs` (`an_agent_main_spawned_through_spawn_rendered_main_sees_no_unlisted_daemon_variable`,
+and the guard `a_user_terminal_still_inherits_the_daemon_environment`).

@@ -42,15 +42,18 @@ fn write_config_with_claude_cli_binary(
 ) -> (tempfile::TempDir, AConfigAndItsAgents) {
     let dir = tempfile::tempdir().unwrap();
     let user = current_os_user();
-    let yaml = format!(
-        r#"
-users:
-  - github_user: "{user}"
-    os_user: "{user}"
-"#
-    );
+    let yaml = r#"
+"#;
     let config_path = dir.path().join("daemon.yaml");
     std::fs::write(&config_path, yaml).unwrap();
+    std::fs::write(
+        std::path::Path::new(&(config_path))
+            .parent()
+            .expect("a config directory")
+            .join("users.yaml"),
+        format!("- github_user: \"{user}\"\n  os_user: \"{user}\"\n"),
+    )
+    .unwrap();
     let config = DaemonConfig::load(&config_path).expect("config must parse");
     let agents = tddy_session_lifecycle::test_util::coding_agents_with_binaries(&[(
         "claude",
@@ -85,8 +88,8 @@ fn minimal_service_with_manager(
         tddy_session_lifecycle::peer_routing::PeerRouting::local_only(&config),
         Arc::new(tddy_daemon_kernel::operator_channel::NoOperatorChannel),
         manager,
+        agents,
     )
-    .with_coding_agents_if_none(agents)
 }
 
 /// Create a git repo with an origin remote pointing at itself so worktree setup succeeds.

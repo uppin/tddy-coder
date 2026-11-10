@@ -8,18 +8,19 @@
 //! overflow `agent_tool_socket_path` was digested to avoid — so the per-user directory is the
 //! deepest this can safely go, and a path that still does not fit is refused with that reason.
 //!
-//! **Who can reach it.** The directory is `0o700` and the socket `0o600`, both owned by the OS user
+//! **Who can reach it.** (Bound by `tddy_daemon_kernel::owner_socket::bind_owner_only`, which the
+//! agent-tool socket shares.) The directory is `0o700` and the socket `0o600`, both owned by the OS user
 //! the sessions run as — a `chown` this process is not privileged to make **refuses the bind**
 //! rather than widening anything (the rule `write_agent_def_file` follows for the agent def). There
 //! is never a window with wider permissions: the directory is narrowed to `0o700` *before* the
 //! socket is created inside it, so whatever mode the socket is born with, nobody else can reach it;
 //! ownership moves last, directory after socket.
 //!
-//! **Under `tddy-supervisor`** the daemon is unprivileged and cannot make that `chown`. A user listed
-//! under `host_sockets:` in `supervisor.yaml` instead has their socket created by the root supervisor
-//! and handed to the daemon as an inherited listener (see [`super::inherited_host_sockets`]): the
-//! daemon serves it where it is, and never binds, replaces or removes it. A user who is not listed
-//! gets the refusal below, which names the setting to add.
+//! **Under `tddy-supervisor`** the daemon is unprivileged and cannot make that `chown`. Every OS
+//! user `users.yaml` maps gets one daemon socket created by the root supervisor and handed over;
+//! this registry is served on it ([`HostSessionSockets::serve_on`], `#agent-tools` 31/32), so the
+//! daemon binds no host socket of its own there. A user it was handed none for is refused, naming
+//! `users.yaml`.
 //!
 //! **Lifetime.** Bound lazily by the first session that needs it, kept for the daemon's lifetime and
 //! bound again by the next session after a restart. A stale file a dead daemon left is replaced only
@@ -30,7 +31,7 @@
 //! [`HostSessionService`] refuses an unknown session or one registered for a different OS user.
 
 use std::collections::HashMap;
-use std::os::unix::fs::{DirBuilderExt, FileTypeExt, MetadataExt, PermissionsExt};
+use std::os::unix::fs::MetadataExt;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
@@ -97,6 +98,11 @@ pub struct HostSessionSockets {
     /// key stays so a user the supervisor serves is never bound by this daemon itself.
     inherited: std::sync::Mutex<HashMap<String, Option<InheritedHostSocket>>>,
     stop_watch_interval: std::time::Duration,
+    /// The merged per-user daemon sockets to serve on instead, once [`Self::serve_on`] is called.
+    user_sockets:
+        std::sync::Mutex<Option<Arc<tddy_daemon_kernel::agent_tool_sockets::AgentToolSockets>>>,
+    /// The probe each user's service answers with, set when that user's socket is bound.
+    probes: Arc<std::sync::Mutex<HashMap<String, SessionProbe>>>,
 }
 
 impl Default for HostSessionSockets {
@@ -113,6 +119,8 @@ impl HostSessionSockets {
             servers: tokio::sync::Mutex::default(),
             inherited: std::sync::Mutex::default(),
             stop_watch_interval,
+            user_sockets: std::sync::Mutex::new(None),
+            probes: Arc::new(std::sync::Mutex::new(HashMap::new())),
         }
     }
 
@@ -150,6 +158,21 @@ impl HostSessionSockets {
         });
     }
 
+    /// Serve the host-session service on `user_sockets`' one socket per OS user instead of binding
+    /// sockets of its own (`#agent-tools` 31/32): registers itself there as a
+    /// [`UserScopedService`](tddy_daemon_kernel::agent_tool_sockets::UserScopedService), and from
+    /// then on [`Self::ensure_bound`] answers that socket's path.
+    pub fn serve_on(
+        &self,
+        user_sockets: Arc<tddy_daemon_kernel::agent_tool_sockets::AgentToolSockets>,
+    ) {
+        user_sockets.install_user_scoped_service(Arc::new(HostSessionUserService {
+            registry: Arc::clone(&self.registry),
+            probes: Arc::clone(&self.probes),
+        }));
+        *self.user_sockets.lock().expect("user sockets lock") = Some(user_sockets);
+    }
+
     /// Serve these supervisor-created sockets for their users from now on (served on first use).
     pub fn adopt_inherited(&self, sockets: Vec<InheritedHostSocket>) {
         let mut inherited = self.inherited.lock().expect("inherited sockets lock");
@@ -166,6 +189,16 @@ impl HostSessionSockets {
 
     /// The path of `os_user`'s socket, binding and serving it first if this daemon is not already.
     pub async fn ensure_bound(&self, os_user: &str, data_dir: &Path) -> anyhow::Result<PathBuf> {
+        // On the merged socket there is nothing of our own to bind: the user's one daemon socket
+        // is bound there, and this registry is served on it as its user-scoped service.
+        let merged = self.user_sockets.lock().expect("user sockets lock").clone();
+        if let Some(user_sockets) = merged {
+            self.probes
+                .lock()
+                .expect("session probes lock")
+                .insert(os_user.to_string(), session_probe(data_dir));
+            return user_sockets.ensure_bound(os_user, data_dir).await;
+        }
         let mut servers = self.servers.lock().await;
         if let Some(server) = servers.get(os_user) {
             let intact = !server.task.is_finished()
@@ -200,7 +233,11 @@ impl HostSessionSockets {
             ),
             None => {
                 let path = host_session_socket_path(data_dir, os_user)?;
-                let listener = bind_owner_only(&path, os_user)?;
+                let listener = tddy_daemon_kernel::owner_socket::bind_owner_only(
+                    &path,
+                    os_user,
+                    tddy_daemon_kernel::owner_socket::OwnerSocketKind::HOST_SESSION,
+                )?;
                 (path, listener)
             }
         };
@@ -225,6 +262,31 @@ impl HostSessionSockets {
             path.display()
         );
         Ok(path)
+    }
+}
+
+/// This registry as a service on a user's one daemon socket: a [`HostSessionService`] for that
+/// user, answering with the probe recorded when their socket was bound.
+struct HostSessionUserService {
+    registry: Arc<HostSessionRegistry>,
+    probes: Arc<std::sync::Mutex<HashMap<String, SessionProbe>>>,
+}
+
+impl tddy_daemon_kernel::agent_tool_sockets::UserScopedService for HostSessionUserService {
+    fn entry_for(&self, os_user: &str) -> tddy_rpc::ServiceEntry {
+        let mut service = HostSessionService::new(os_user, Arc::clone(&self.registry));
+        if let Some(probe) = self
+            .probes
+            .lock()
+            .expect("session probes lock")
+            .get(os_user)
+        {
+            service = service.with_session_probe(Arc::clone(probe));
+        }
+        tddy_rpc::ServiceEntry {
+            name: tddy_host_service::host_session_service::HOST_SESSION_SERVICE,
+            service: Arc::new(service),
+        }
     }
 }
 
@@ -286,177 +348,4 @@ fn session_probe(data_dir: &Path) -> SessionProbe {
         ))
         .is_ok()
     })
-}
-
-/// Bind `path` for `os_user` with no window in which anyone else can reach it. See the module docs.
-fn bind_owner_only(path: &Path, os_user: &str) -> anyhow::Result<std::os::unix::net::UnixListener> {
-    let target = tddy_daemon_kernel::privilege_drop::resolve_pty_os_user(os_user)
-        .map_err(anyhow::Error::msg)?;
-    let euid = unsafe { libc::geteuid() };
-    let needs_chown = target.uid != euid;
-    let user_dir = path.parent().context("socket path has no directory")?;
-    let run_dir = user_dir
-        .parent()
-        .context("socket path has no run directory")?;
-    let data_dir = run_dir
-        .parent()
-        .context("socket path has no data directory")?;
-    if !data_dir.is_dir() {
-        bail!("data dir {} does not exist", data_dir.display());
-    }
-
-    // Traversable but not listable by others: the user reaches its own subdirectory through it.
-    let created_run = ensure_dir(run_dir, 0o711, &[euid, target.uid], false)?;
-    let created_user = ensure_dir(user_dir, 0o700, &[euid, target.uid], true)?;
-    // Only now, with the directory closed to everyone else, may anything exist inside it.
-    if let Err(e) = clear_stale_socket(path, &[euid, target.uid]) {
-        undo(path, user_dir, run_dir, created_user, created_run, false);
-        return Err(e);
-    }
-    let listener = match std::os::unix::net::UnixListener::bind(path) {
-        Ok(l) => l,
-        Err(e) => {
-            undo(path, user_dir, run_dir, created_user, created_run, false);
-            return Err(anyhow::Error::new(e).context(format!("bind {}", path.display())));
-        }
-    };
-    let finish = || -> anyhow::Result<()> {
-        std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600))
-            .context("restrict the socket to its owner")?;
-        if needs_chown {
-            let not_privileged = || {
-                format!(
-                    "this daemon (uid {euid}) is not privileged to hand the socket to {os_user} \
-                     (uid {}) — as when it runs as tddy-supervisor's unprivileged child, which \
-                     cannot chown. Under the supervisor, list {os_user} under `host_sockets:` for \
-                     this daemon's service in supervisor.yaml (and in \
-                     spawn_policy.allowed_session_users): the supervisor then creates their socket \
-                     and hands it over. Until then a session of that user gets no host-session \
-                     socket",
-                    target.uid
-                )
-            };
-            chown(path, target.uid, target.gid).with_context(not_privileged)?;
-            chown(user_dir, target.uid, target.gid).with_context(not_privileged)?;
-        }
-        listener
-            .set_nonblocking(true)
-            .context("make the socket non-blocking")
-    };
-    if let Err(e) = finish() {
-        undo(path, user_dir, run_dir, created_user, created_run, true);
-        return Err(e.context(format!(
-            "refusing to serve {os_user}'s host-session socket with wider access than theirs"
-        )));
-    }
-    Ok(listener)
-}
-
-/// Remove what a failed bind created, so a refusal leaves nothing a later start could trust.
-fn undo(
-    path: &Path,
-    user_dir: &Path,
-    run_dir: &Path,
-    created_user: bool,
-    created_run: bool,
-    bound: bool,
-) {
-    if bound {
-        let _ = std::fs::remove_file(path);
-    }
-    if created_user {
-        let _ = std::fs::remove_dir(user_dir);
-    }
-    if created_run {
-        let _ = std::fs::remove_dir(run_dir);
-    }
-}
-
-/// Make `dir` exist as a real directory with exactly `mode`, narrowing an existing one **before**
-/// the caller puts anything in it. `Ok(true)` when this call created it.
-fn ensure_dir(
-    dir: &Path,
-    mode: u32,
-    allowed_owners: &[u32],
-    must_narrow: bool,
-) -> anyhow::Result<bool> {
-    let created = match std::fs::symlink_metadata(dir) {
-        Ok(meta) => {
-            if !meta.is_dir() {
-                bail!("{} exists and is not a directory", dir.display());
-            }
-            if !allowed_owners.contains(&meta.uid()) {
-                bail!(
-                    "{} is owned by uid {}, which is neither this daemon nor the session's user",
-                    dir.display(),
-                    meta.uid()
-                );
-            }
-            false
-        }
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
-            // Born with at most `mode` (the umask can only remove bits), never wider.
-            std::fs::DirBuilder::new()
-                .mode(mode)
-                .create(dir)
-                .with_context(|| format!("create {}", dir.display()))?;
-            true
-        }
-        Err(e) => return Err(anyhow::Error::new(e).context(format!("stat {}", dir.display()))),
-    };
-    // The umask may have removed bits the user needs (`x` on the run dir); an old directory may
-    // carry more than it should. Both are set explicitly rather than trusted.
-    let current = std::fs::metadata(dir)?.permissions().mode() & 0o7777;
-    if current != mode || must_narrow {
-        std::fs::set_permissions(dir, std::fs::Permissions::from_mode(mode))
-            .with_context(|| format!("set {} to {mode:o}", dir.display()))?;
-    }
-    Ok(created)
-}
-
-/// Remove a socket file a dead daemon left — and only that: it must be a socket, owned by us or the
-/// target user, with nothing listening on it.
-fn clear_stale_socket(path: &Path, allowed_owners: &[u32]) -> anyhow::Result<()> {
-    let meta = match std::fs::symlink_metadata(path) {
-        Ok(meta) => meta,
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(()),
-        Err(e) => return Err(anyhow::Error::new(e).context(format!("stat {}", path.display()))),
-    };
-    if !meta.file_type().is_socket() {
-        bail!(
-            "{} exists and is not a socket; not removing it",
-            path.display()
-        );
-    }
-    if !allowed_owners.contains(&meta.uid()) {
-        bail!(
-            "{} is a socket owned by uid {}; not removing it",
-            path.display(),
-            meta.uid()
-        );
-    }
-    match std::os::unix::net::UnixStream::connect(path) {
-        Ok(_) => bail!(
-            "something is already listening on {}; not taking it over",
-            path.display()
-        ),
-        Err(e) if e.kind() == std::io::ErrorKind::ConnectionRefused => {
-            std::fs::remove_file(path).with_context(|| format!("remove stale {}", path.display()))
-        }
-        Err(e) => Err(anyhow::Error::new(e).context(format!(
-            "cannot tell whether {} is live; not removing it",
-            path.display()
-        ))),
-    }
-}
-
-fn chown(path: &Path, uid: u32, gid: u32) -> anyhow::Result<()> {
-    let c_path = std::ffi::CString::new(path.as_os_str().as_encoded_bytes())
-        .context("path is not a C string")?;
-    // SAFETY: `c_path` outlives the call.
-    if unsafe { libc::chown(c_path.as_ptr(), uid, gid) } != 0 {
-        return Err(anyhow::Error::new(std::io::Error::last_os_error())
-            .context(format!("give {} to uid {uid}", path.display())));
-    }
-    Ok(())
 }

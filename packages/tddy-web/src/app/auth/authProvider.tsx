@@ -1,0 +1,57 @@
+import { createContext, useContext, type ReactNode } from "react";
+import { AuthPortProvider } from "tddy-client-web";
+import { AppClientsPorts } from "../rpc/appClientsPorts";
+import { useAuth } from "./useAuth";
+
+type AuthContextValue = ReturnType<typeof useAuth>;
+
+const AuthContext = createContext<AuthContextValue | null>(null);
+
+/**
+ * Owns the *only* `useAuth()` instance for the app — its access + refresh token pair, the single
+ * session-token store that mints fresh access tokens on demand, and its login/logout actions — and
+ * provides it to every descendant via context.
+ *
+ * Mount once near the app root (inside `RpcTransportProvider`, above everything else). Unlike
+ * `useHttpTransport`/`useSelectedDaemon` (which fall back to inert per-instance defaults when
+ * unwrapped), `useAuthContext` throws without a provider: `useAuth()` is stateful — it resolves the
+ * session and installs the transport's auth-token gate — so silently falling back to an independent
+ * instance per consumer would recreate exactly the bug this provider exists to fix (every screen
+ * mounting its own uncoordinated `useAuth()`, each with its own store and gate registration). A
+ * required provider is the correct contract here.
+ */
+export function AuthProvider({ children }: { children: ReactNode }) {
+  // `useAuth` reads the clients port, so the ports are mounted above the hook, not beside it.
+  return (
+    <AppClientsPorts>
+      <AuthProviderBody>{children}</AuthProviderBody>
+    </AppClientsPorts>
+  );
+}
+
+function AuthProviderBody({ children }: { children: ReactNode }) {
+  const auth = useAuth();
+  return (
+    <AuthContext.Provider value={auth}>
+      <AuthPortProvider port={auth}>{children}</AuthPortProvider>
+    </AuthContext.Provider>
+  );
+}
+
+/** Serves an auth port built outside the tree (the container's handler) as this app's auth state. */
+export function AuthFromPort({ port, children }: { port: AuthContextValue; children: ReactNode }) {
+  return (
+    <AuthContext.Provider value={port}>
+      <AuthPortProvider port={port}>{children}</AuthPortProvider>
+    </AuthContext.Provider>
+  );
+}
+
+/** Read the shared session/auth state. Throws when rendered outside an `AuthProvider`. */
+export function useAuthContext(): AuthContextValue {
+  const ctx = useContext(AuthContext);
+  if (!ctx) {
+    throw new Error("useAuthContext must be used within an AuthProvider");
+  }
+  return ctx;
+}

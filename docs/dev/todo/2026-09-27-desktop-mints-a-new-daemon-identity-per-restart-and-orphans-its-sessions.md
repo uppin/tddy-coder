@@ -152,7 +152,7 @@ Two separate things, and only the second is a reporting gap.
    return a real status: `classify_addressed_daemon_route` maps it to `Status::invalid_argument`
    (`packages/tddy-daemon-livekit/src/peer_routing.rs:110-113`), and the streaming roster hook does
    render it verbatim
-   (`packages/tddy-web/src/components/sessions/useSessionAgentRoster.ts:74-80`). But it arrives as a
+   (`packages/tddy-session-web/src/useSessionAgentRoster.ts:74-80`). But it arrives as a
    roster-pane error about an unknown daemon, attributed to nothing the operator did, rather than as
    "Resume failed: this session's codebase host is gone."
 

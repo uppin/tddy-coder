@@ -33,6 +33,7 @@ async fn a_pty_agent_inherits_none_of_the_daemons_github_tokens() {
         terminal_id: "github-token-term".to_string(),
         kind: "sh".to_string(),
         env: Vec::new(),
+        env_base: tddy_pty::PtyEnvBase::Inherited,
     };
     let (ready_tx, ready_rx) = oneshot::channel();
 

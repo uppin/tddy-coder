@@ -4,7 +4,7 @@ use tddy_coding_agent_specs::claude_tools::{
     build_claude_allowlist, build_claude_disallowlist, PERMISSION_PROMPT_TOOL,
 };
 use tddy_coding_agent_specs::slots::{self, McpServerCommand, SlotInputs};
-use tddy_coding_agent_specs::{embedded_spec, CodingAgentSpec, McpSlot, HOST_AGENT_VARIANT};
+use tddy_coding_agent_specs::{CodingAgentRegistry, CodingAgentSpec, McpSlot, HOST_AGENT_VARIANT};
 
 use std::collections::BTreeMap;
 
@@ -118,12 +118,18 @@ pub fn split_mcp_log_path(session_dir: &Path) -> PathBuf {
 /// is `tddy-tools`, which stops advertising a withdrawn tool and refuses a call to one. Both are
 /// needed. Without this layer the withdrawn tool stays *pre-approved*, so the main agent is invited
 /// to reach for it and meets the second layer's refusal mid-turn, every turn.
+///
+/// `spec` is the split agent as this host's registry holds it ([`split_agent_spec`]), operator
+/// overrides included. `tool_server_env` is what the agent's `tddy-tools --mcp` needs to reach its
+/// session — the `TDDY_REMOTE_*` transport and the roster seed — registered on that server alone:
+/// the agent process itself is given no `TDDY_*` variable.
 pub fn split_claude_extra_args(
+    spec: &CodingAgentSpec,
     session_dir: &Path,
     tddy_tools_path: &str,
+    tool_server_env: &[(String, String)],
     withdrawals: &[(String, Vec<String>)],
 ) -> Result<Vec<String>, Status> {
-    let spec = split_agent_spec()?;
     // The variant carries the flags that keep the checkout's own configuration off this host
     // (`--strict-mcp-config`, `--setting-sources user`) and withdraws every native filesystem and
     // shell tool, so the slots below add only what the session's roster changes.
@@ -157,11 +163,15 @@ pub fn split_claude_extra_args(
         .filter(|tool| !natives.contains(tool))
         .collect();
     let mut rendered = slots::render(
-        &without_strict_mcp_flag(&spec),
+        &without_strict_mcp_flag(spec),
         &SlotInputs {
             workdir: session_dir.to_path_buf(),
             scratch_dir: session_dir.to_path_buf(),
-            mcp_server: Some(tddy_tools_server(session_dir, Path::new(tddy_tools_path))),
+            mcp_server: Some(tddy_tools_server(
+                session_dir,
+                Path::new(tddy_tools_path),
+                tool_server_env,
+            )),
             allowed_tools: build_claude_allowlist(subagent_tools_are_pre_approved, &withdrawn_refs),
             denied_tools,
             permission_prompt_tool: Some(PERMISSION_PROMPT_TOOL.to_string()),
@@ -177,9 +187,18 @@ pub fn split_claude_extra_args(
     Ok(args)
 }
 
-/// The agent a split session runs on this host: `claude.yaml`, as embedded.
-pub(crate) fn split_agent_spec() -> Result<CodingAgentSpec, Status> {
-    embedded_spec("claude").map_err(|e| Status::internal(format!("the host agent's spec: {e}")))
+/// The coding agent a split session runs (split placement is `claude-cli` only).
+pub const SPLIT_AGENT_ID: &str = "claude";
+
+/// The agent a split session runs on this host: [`SPLIT_AGENT_ID`]'s spec as `registry` — the
+/// host's own coding-agent registry — holds it, operator overrides included. Refused when the host
+/// has no such agent.
+pub fn split_agent_spec(registry: &CodingAgentRegistry) -> Result<CodingAgentSpec, Status> {
+    registry.get(SPLIT_AGENT_ID).cloned().ok_or_else(|| {
+        Status::failed_precondition(format!(
+            "this host has no `{SPLIT_AGENT_ID}` coding agent, which a split session runs"
+        ))
+    })
 }
 
 /// `spec` without the MCP slot's strict flag, for a launch whose variant already passes it.
@@ -191,13 +210,22 @@ fn without_strict_mcp_flag(spec: &CodingAgentSpec) -> CodingAgentSpec {
     spec
 }
 
-/// `tddy-tools --mcp` as `session_dir`'s session registers it.
-fn tddy_tools_server(session_dir: &Path, tddy_tools_path: &Path) -> McpServerCommand {
+/// `tddy-tools --mcp` as `session_dir`'s session registers it, with `tool_server_env` — the
+/// session's transport and roster seed — beside its log settings.
+fn tddy_tools_server(
+    session_dir: &Path,
+    tddy_tools_path: &Path,
+    tool_server_env: &[(String, String)],
+) -> McpServerCommand {
     McpServerCommand {
         name: "tddy-tools".to_string(),
         command: tddy_tools_path.to_path_buf(),
         args: vec!["--mcp".to_string()],
-        env: tddy_tools_mcp_env(session_dir),
+        env: tddy_tools_mcp_env(session_dir)
+            .into_iter()
+            .chain(tool_server_env.iter().cloned())
+            .collect(),
+        cwd: None,
     }
 }
 
@@ -233,27 +261,221 @@ pub fn tddy_tools_mcp_env(session_dir: &Path) -> BTreeMap<String, String> {
     ])
 }
 
-/// Write `session_dir`'s `claude-mcp-config.json`, registering `tddy_tools_path --mcp` as the one
-/// MCP server, and return the `claude` flags that load it and nothing else.
-///
-/// For an agent whose native filesystem and shell tools are withdrawn, `tddy-tools` is the only
-/// reach it has, so the config is the only one loaded: `--mcp-config` alone *adds* to the
-/// user-scoped MCP configuration, and any filesystem or shell MCP server the operator has
-/// configured would load beside `tddy-tools` — reachable under an `mcp__*` name no disallowlist
-/// covers. The restriction has to be impossible to route around, not merely the default.
-pub fn tddy_tools_only_mcp_args(
-    session_dir: &Path,
-    tddy_tools_path: &Path,
-) -> Result<Vec<String>, Status> {
-    let spec = split_agent_spec()?;
-    let (file, argv) = slots::mcp::render_mcp(
-        &spec.agent.mcp,
-        &tddy_tools_server(session_dir, tddy_tools_path),
-        session_dir,
-        session_dir,
-        None,
-    )
-    .map_err(|e| Status::internal(e.to_string()))?;
-    write_registrations(&mut file.into_iter().collect())?;
-    Ok(argv)
+#[cfg(test)]
+mod host_spec_tests {
+    //! The split agent is the host's: its spec comes from this host's coding-agent registry,
+    //! operator overrides included, and its `tddy-tools` server is the one place the session's
+    //! `TDDY_*` transport is handed over (`#agent-tools 25/28`).
+
+    use std::collections::BTreeMap;
+    use std::path::{Path, PathBuf};
+
+    use pretty_assertions::assert_eq;
+    use tddy_coding_agent_specs::CodingAgentRegistry;
+    use tddy_rpc::Code;
+
+    use super::{split_agent_spec, split_claude_extra_args, SPLIT_AGENT_ID};
+
+    const AN_OPERATOR_FLAG: &str = "--an-operator-flag";
+    const TDDY_TOOLS: &str = "/usr/bin/tddy-tools";
+
+    /// A host whose `<tddyhome>/tools` holds one override of the split agent's spec: its
+    /// `host_agent` variant passes one flag more than the built-in one.
+    struct AHostWithAnOverriddenSplitAgent {
+        _home: tempfile::TempDir,
+        registry: CodingAgentRegistry,
+    }
+
+    impl AHostWithAnOverriddenSplitAgent {
+        fn adding_to_the_host_agent_variant(flag: &str) -> Self {
+            let builtin_args = "args: [--strict-mcp-config, --setting-sources, user]";
+            let overridden = the_builtin_split_agent_yaml().replace(
+                builtin_args,
+                &format!("args: [--strict-mcp-config, --setting-sources, user, {flag}]"),
+            );
+            assert_ne!(
+                overridden,
+                the_builtin_split_agent_yaml(),
+                "the override must change the host_agent variant's args"
+            );
+            let home = tempfile::tempdir().expect("a tddy home");
+            let tools = home.path().join("tools");
+            std::fs::create_dir_all(&tools).expect("the tools dir");
+            std::fs::write(tools.join(format!("{SPLIT_AGENT_ID}.yaml")), overridden)
+                .expect("the override is written");
+            let registry = CodingAgentRegistry::load(&tools).expect("the override loads");
+            Self {
+                _home: home,
+                registry,
+            }
+        }
+    }
+
+    fn the_builtin_split_agent_yaml() -> &'static str {
+        let file_name = format!("/{SPLIT_AGENT_ID}.yaml");
+        tddy_coding_agent_specs::builtin_specs()
+            .into_iter()
+            .find(|(path, _)| path.ends_with(&file_name))
+            .map(|(_, yaml)| yaml)
+            .expect("the split agent's spec is built in")
+    }
+
+    fn a_registry_of_the_builtin_agents() -> CodingAgentRegistry {
+        CodingAgentRegistry::builtin().expect("the built-in coding agents load")
+    }
+
+    /// The flags a split session spawns with on `registry`'s host, its tool server handed
+    /// `tool_server_env`.
+    fn split_args_on(
+        registry: &CodingAgentRegistry,
+        session_dir: &Path,
+        tool_server_env: &[(String, String)],
+    ) -> Vec<String> {
+        let spec = split_agent_spec(registry).expect("the host holds the split agent");
+        split_claude_extra_args(&spec, session_dir, TDDY_TOOLS, tool_server_env, &[])
+            .expect("the split flags render")
+    }
+
+    /// The `env` block the flags' MCP config registers `tddy-tools` with.
+    fn tool_server_env_registered_by(args: &[String]) -> BTreeMap<String, String> {
+        let config_path: PathBuf = args
+            .windows(2)
+            .find(|pair| pair[0] == "--mcp-config")
+            .map(|pair| PathBuf::from(&pair[1]))
+            .expect("the flags name an --mcp-config");
+        let config: serde_json::Value = serde_json::from_str(
+            &std::fs::read_to_string(&config_path).expect("the MCP config is written"),
+        )
+        .expect("the MCP config is JSON");
+        serde_json::from_value(config["mcpServers"]["tddy-tools"]["env"].clone())
+            .expect("tddy-tools is registered with a string env")
+    }
+
+    fn a_split_transport() -> Vec<(String, String)> {
+        vec![
+            (
+                "TDDY_REMOTE_SESSION_ID".to_string(),
+                "the-codebase-session".to_string(),
+            ),
+            (
+                "TDDY_REMOTE_LIVEKIT_TOKEN".to_string(),
+                "a-scoped-join-jwt".to_string(),
+            ),
+        ]
+    }
+
+    #[test]
+    fn a_split_session_renders_the_hosts_overridden_agent_spec() {
+        // Given a host whose operator overrode the split agent's host_agent variant
+        let host =
+            AHostWithAnOverriddenSplitAgent::adding_to_the_host_agent_variant(AN_OPERATOR_FLAG);
+        let session_dir = tempfile::tempdir().expect("a session dir");
+
+        // When a split session's flags are rendered on that host
+        let args = split_args_on(&host.registry, session_dir.path(), &[]);
+
+        // Then the agent is launched as the operator configured it, not as the binary embeds it
+        assert!(
+            args.iter().any(|arg| arg == AN_OPERATOR_FLAG),
+            "the split agent must carry the host's override {AN_OPERATOR_FLAG}; its flags were {args:?}"
+        );
+    }
+
+    #[test]
+    fn a_host_without_the_split_agent_refuses_a_split_session() {
+        // Given a host whose registry holds no coding agent at all
+        let registry = CodingAgentRegistry::empty();
+
+        // When the split agent's spec is asked for
+        let refused = split_agent_spec(&registry).expect_err("no split agent on this host");
+
+        // Then it is refused as a precondition, naming the agent it looked for
+        assert_eq!(
+            (refused.code, refused.message.contains(SPLIT_AGENT_ID)),
+            (Code::FailedPrecondition, true),
+            "the refusal must be FAILED_PRECONDITION naming {SPLIT_AGENT_ID}: {refused:?}"
+        );
+    }
+
+    #[test]
+    fn a_split_agents_tool_server_is_registered_with_the_sessions_transport() {
+        // Given the transport a split session's tools reach its codebase with
+        let transport = a_split_transport();
+        let session_dir = tempfile::tempdir().expect("a session dir");
+
+        // When the split flags are rendered with it
+        let args = split_args_on(
+            &a_registry_of_the_builtin_agents(),
+            session_dir.path(),
+            &transport,
+        );
+
+        // Then the tddy-tools server carries every variable of it: the agent process carries none
+        let registered = tool_server_env_registered_by(&args);
+        assert_eq!(
+            transport
+                .iter()
+                .map(|(name, _)| (name.clone(), registered.get(name).cloned()))
+                .collect::<Vec<_>>(),
+            transport
+                .iter()
+                .map(|(name, value)| (name.clone(), Some(value.clone())))
+                .collect::<Vec<_>>(),
+        );
+    }
+
+    #[test]
+    fn a_split_agents_tool_server_keeps_its_log_settings_beside_the_transport() {
+        // Given the transport a split session's tools reach its codebase with
+        let session_dir = tempfile::tempdir().expect("a session dir");
+
+        // When the split flags are rendered with it
+        let args = split_args_on(
+            &a_registry_of_the_builtin_agents(),
+            session_dir.path(),
+            &a_split_transport(),
+        );
+
+        // Then the server still logs where a session's dispatch failures are read from
+        let registered = tool_server_env_registered_by(&args);
+        assert_eq!(
+            (
+                registered.get("TDDY_TOOLS_LOG_FILE").cloned(),
+                registered.get("RUST_LOG").cloned()
+            ),
+            (
+                Some(
+                    super::split_mcp_log_path(session_dir.path())
+                        .to_string_lossy()
+                        .into_owned()
+                ),
+                Some(super::MCP_RUST_LOG.to_string())
+            )
+        );
+    }
+
+    #[test]
+    fn a_host_with_no_overrides_renders_the_builtin_host_variant() {
+        // Given a host with no operator override of the split agent
+        let session_dir = tempfile::tempdir().expect("a session dir");
+
+        // When a split session's flags are rendered there
+        let args = split_args_on(&a_registry_of_the_builtin_agents(), session_dir.path(), &[]);
+
+        // Then they open with the built-in host_agent variant, and carry no override
+        assert_eq!(
+            (
+                args.iter().take(3).cloned().collect::<Vec<_>>(),
+                args.iter().any(|arg| arg == AN_OPERATOR_FLAG)
+            ),
+            (
+                vec![
+                    "--strict-mcp-config".to_string(),
+                    "--setting-sources".to_string(),
+                    "user".to_string()
+                ],
+                false
+            )
+        );
+    }
 }

@@ -22,6 +22,7 @@
 | 2026-10-20 | 619 → 616 | #632 (`#satellite` 10/13), −3: the token TTL stops naming `tddy_livekit::DEFAULT_LIVEKIT_JWT_TTL_SECS`; the six-hour constant lives in `token_provider.rs` as `ROOM_TOKEN_TTL`, so the call collapses to one line. Improved, not clean; split remains deferred |
 | 2026-10-22 | 616 → 569 | `#satellite` 16/16 (the sweep), −47: `build_auth_entries_admitting` went from 111 lines and 6 parameters to 58 and 5 (three `extract_method`s, then by hand with the developer's consent a `let … else`, `provider_auth_entry`, and `web_host`/`web_port` folded into one tuple), and the four helpers it calls (`provider_auth_entry`, `probed_credential_vaults`, `session_user_resolver`, `livekit_token_service_entry`, 105 lines) moved to `auth/entry_parts.rs` by `move_item`. Improved, not clean; the next seam is the `mint_live_kit_token` / `build_token_service_entry` group |
 | 2026-10-25 | 569 → 579 | #765, +10, measured at its wrap against `origin/master` `a618ef29d`: the `dev_vault::vaults_without_passphrase` check beside `VaultLifetimes::of`, and `auth_service_entry`'s `vaults_without_passphrase` parameter and doc. The check itself lives in its own module, `dev_vault.rs`. Not split there; the next seam is still the `mint_live_kit_token` / `build_token_service_entry` group |
+| 2026-11-09 | 579 → 579 | unchanged by #859 (`#agent-tools` 31/32), which touched only this file's tests (fixtures write `users.yaml`) |
 
 ## Why it grew, and why it is not split in #510
 

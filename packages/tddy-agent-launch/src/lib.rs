@@ -34,7 +34,6 @@ pub mod jail_launch;
 pub mod jail_launch_steps;
 pub mod jail_relaunch;
 pub mod jail_session_files;
-pub mod jail_worktree;
 pub mod launch_ports;
 pub mod managed_launch;
 pub mod notify_env;
@@ -54,10 +53,12 @@ pub mod session_provider_route;
 pub mod session_worktree_observer;
 mod slot_file_over_ssh;
 pub mod spec_launch;
+pub mod split_session_pointers;
 pub mod stack_child_spawn;
 pub mod stack_parent;
 pub mod stack_seed_validation;
 mod start_cut_branch;
+pub mod start_deadline;
 pub mod start_keepalive;
 pub mod start_request_checks;
 mod start_task;
@@ -96,6 +97,8 @@ mod harness_profile_start_tests;
 mod host_session_socket_tests;
 #[cfg(test)]
 mod notify_env_unit_tests;
+#[cfg(test)]
+mod operator_start_unit_tests;
 #[cfg(test)]
 mod provider_account_lookup_tests;
 #[cfg(test)]

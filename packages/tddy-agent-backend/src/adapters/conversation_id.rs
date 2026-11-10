@@ -33,8 +33,8 @@ pub fn parse_created_chat_id(stdout: &str) -> Result<String, String> {
     Ok(chat_id.to_string())
 }
 
-/// One mint: the agent's resolved binary, the directory it runs in, the environment set on it on
-/// top of the daemon's, and how long it may take.
+/// One mint: the agent's resolved binary, the directory it runs in, the whole environment it
+/// is started from, and how long it may take.
 #[derive(Debug, Clone, Copy)]
 pub struct ConversationMint<'a> {
     pub binary: &'a Path,
@@ -94,9 +94,9 @@ impl ConversationIdAdapter for CursorCreateChat {
         child
             .arg("create-chat")
             .current_dir(mint.workdir)
-            .envs(mint.env.iter().map(|(k, v)| (k, v)))
             .stdin(std::process::Stdio::null())
             .kill_on_drop(true);
+        crate::agent_env::apply_agent_child_env(child.as_std_mut(), mint.env);
         // `output()` owns the child; dropping its future at the deadline kills it (`kill_on_drop`).
         let output = match tokio::time::timeout(mint.deadline, child.output()).await {
             Err(_) => {

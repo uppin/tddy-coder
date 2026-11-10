@@ -55,7 +55,7 @@ session-list enrichment that serves `ListSessions`. This crate receives the reso
 
 `tddy_core::session_label::session_display_label(repo_path, workflow_goal, session_id)` is the one
 rule: the basename of `repo_path`, else `workflow_goal`, else the first eight characters of the id.
-It mirrors `packages/tddy-web/src/utils/sessionDrawerLabel.ts` case for case, and the em-dash
+It mirrors `packages/tddy-session-web/src/utils/sessionDrawerLabel.ts` case for case, and the em-dash
 display placeholder counts as absent on both sides.
 
 `resolve_session_label(sessions_base, session_id)` performs the lookup from **the same three values

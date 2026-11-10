@@ -112,7 +112,11 @@ impl tddy_discovery::catalog_service::CatalogHandler for CatalogRpcHandler {
         // The binary is the agent spec's, resolved on this host (`#agent-tools 19/19`); an agent whose
         // spec cannot be resolved here is probed with no path flag.
         let listing_binary = self.listing_binary(&agent);
-        let probe_args = list_models_probe_args(&agent, listing_binary.as_deref());
+        let probe_args = list_models_probe_args(
+            &agent,
+            listing_binary.as_deref(),
+            &self.agents.tddy_data_dir.join("tools"),
+        );
         let probe = tokio::task::spawn_blocking(move || {
             spawner::run_capture_as_user(&os_user, &tools_path, &probe_args)
         })
@@ -172,6 +176,7 @@ impl tddy_discovery::catalog_service::CatalogHandler for CatalogRpcHandler {
             &self.config,
             &daemon_instance_id,
             &subagents,
+            &self.agents.coding_agents.agents_shared(),
         ));
         // An empty answer has three very different causes — this daemon has no defs, its registry
         // was never wired in, or a def was dropped on the way out — and "returning 0" told them

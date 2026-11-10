@@ -33,6 +33,26 @@ fn refuse_obsolete_supervisor_block(contents: &str, path: &std::path::Path) -> a
 /// Refuse the `claude_cli:`, `cursor_cli:` and `cli_harnesses:` sections (`#agent-tools 12/12`),
 /// naming the tool file each moved to. Checked on the untyped document, like the `supervisor:`
 /// block, so a leftover section never looks like a setting that still does something.
+/// Refuse a `users:` key, which `users.yaml` replaces (`#agent-tools` 31/32). Checked on the
+/// untyped document, like the `supervisor:` block, so the operator is told where the mapping
+/// lives now rather than getting serde's bare error.
+fn refuse_users_key(contents: &str, path: &std::path::Path) -> anyhow::Result<()> {
+    let document: serde_yaml::Value = serde_yaml::from_str(contents)
+        .map_err(|e| anyhow::anyhow!("failed to parse config {}: {}", path.display(), e))?;
+    let declares_users = document
+        .as_mapping()
+        .is_some_and(|top_level| top_level.contains_key("users"));
+    if declares_users {
+        anyhow::bail!(
+            "{}: the `users:` key is obsolete — the GitHub → OS-user mapping lives in \
+             users.yaml beside this file (or the one tddy-supervisor hands over); move the rows \
+             there and delete the `users:` key.",
+            path.display()
+        );
+    }
+    Ok(())
+}
+
 fn refuse_removed_agent_sections(contents: &str, path: &std::path::Path) -> anyhow::Result<()> {
     let document: serde_yaml::Value = serde_yaml::from_str(contents)
         .map_err(|e| anyhow::anyhow!("failed to parse config {}: {}", path.display(), e))?;
@@ -52,12 +72,21 @@ impl DaemonConfig {
             .map_err(|e| anyhow::anyhow!("failed to read config {}: {}", path.display(), e))?;
         refuse_obsolete_supervisor_block(&contents, path)?;
         refuse_removed_agent_sections(&contents, path)?;
-        let config: Self = serde_yaml::from_str(&contents)
+        refuse_users_key(&contents, path)?;
+        let mut config: Self = serde_yaml::from_str(&contents)
             .map_err(|e| anyhow::anyhow!("failed to parse config {}: {}", path.display(), e))?;
         config
             .session_room
             .validate()
             .map_err(|e| anyhow::anyhow!("{}: {e}", path.display()))?;
+        // The mapping lives in users.yaml, filled here from the source this deployment reads:
+        // the file the supervisor handed over, or the one beside this config. A missing
+        // users.yaml is an error, never an empty mapping (user decision, 2026-11-07): every
+        // installer and dev script renders one, so a daemon that finds none was not installed
+        // or launched the way this system renders it, and mapping nobody silently would refuse
+        // every login without saying why.
+        let source = crate::users_file::UsersFileSource::from_environment(path);
+        config.users = crate::users_file::load_users_file(&source)?;
         Ok(config)
     }
 
@@ -137,6 +166,13 @@ impl DaemonConfig {
     /// Wall-clock limit for blocking clone/spawn operations (spawn worker or in-process).
     pub fn spawn_worker_request_timeout(&self) -> Duration {
         let secs = self.spawn_worker_request_timeout_secs.max(1);
+        Duration::from_secs(secs)
+    }
+
+    /// How long a whole session start may take before it is cancelled and failed
+    /// `DeadlineExceeded` (see `session_start_timeout_secs`).
+    pub fn session_start_timeout(&self) -> Duration {
+        let secs = self.session_start_timeout_secs.max(1);
         Duration::from_secs(secs)
     }
 

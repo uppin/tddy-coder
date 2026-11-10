@@ -35,16 +35,19 @@ type UserResolver = Arc<dyn Fn(&str) -> Option<String> + Send + Sync>;
 const PEER_MARKER_PROJECT_ID: &str = "bbbbbbbb-cccc-4ddd-8eee-ffffffffffff";
 
 fn test_config_for_os_user(os_user: &str) -> DaemonConfig {
-    let yaml = format!(
-        r#"
-users:
-  - github_user: "testuser"
-    os_user: "{os_user}"
-"#
-    );
+    let yaml = r#"
+"#;
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("config.yaml");
     std::fs::write(&path, yaml).unwrap();
+    std::fs::write(
+        std::path::Path::new(&(path))
+            .parent()
+            .expect("a config directory")
+            .join("users.yaml"),
+        format!("- github_user: \"testuser\"\n  os_user: \"{os_user}\"\n"),
+    )
+    .unwrap();
     DaemonConfig::load(&path).unwrap()
 }
 
@@ -64,26 +67,24 @@ fn test_service(
             None
         }
     });
-    TestDaemon::from_host(
-        DaemonSessionHost::new(
-            config.clone(),
-            sessions_base_resolver,
-            tddy_data_dir,
-            user_resolver,
-            None,
-            tddy_spawn::supervisor_client::SpawnBackendChoice::ForkedWorker,
-            tddy_daemon_livekit::peer_routing::peer_routing_over(
-                &config,
-                Some(LiveKitDiscoveryHandles {
-                    eligible_daemon_source: eligible,
-                    common_room_livekit_room: Arc::new(tokio::sync::RwLock::new(None)),
-                }),
-            ),
-            Arc::new(tddy_daemon_kernel::operator_channel::NoOperatorChannel),
-            Arc::new(tddy_session_lifecycle::claude_cli_session::CliSessionManager::new()),
-        )
-        .with_coding_agents_if_none(tddy_session_lifecycle::test_util::builtin_coding_agents()),
-    )
+    TestDaemon::from_host(DaemonSessionHost::new(
+        config.clone(),
+        sessions_base_resolver,
+        tddy_data_dir,
+        user_resolver,
+        None,
+        tddy_spawn::supervisor_client::SpawnBackendChoice::ForkedWorker,
+        tddy_daemon_livekit::peer_routing::peer_routing_over(
+            &config,
+            Some(LiveKitDiscoveryHandles {
+                eligible_daemon_source: eligible,
+                common_room_livekit_room: Arc::new(tokio::sync::RwLock::new(None)),
+            }),
+        ),
+        Arc::new(tddy_daemon_kernel::operator_channel::NoOperatorChannel),
+        Arc::new(tddy_session_lifecycle::claude_cli_session::CliSessionManager::new()),
+        tddy_session_lifecycle::test_util::builtin_coding_agents(),
+    ))
 }
 
 /// A peer source whose `peer_project_entries` is genuinely asynchronous: it yields to the

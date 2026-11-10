@@ -192,6 +192,7 @@ pub fn build_host_agent_argv(args: HostAgentArgs) -> Result<Vec<String>> {
                 command: tddy_tools_path,
                 args: vec!["--mcp".to_string()],
                 env: mcp_env,
+                cwd: None,
             }),
             // The conversation tools are advertised exactly when there is someone to converse with
             // — the same condition the roster's own server applies, expressed here because the argv

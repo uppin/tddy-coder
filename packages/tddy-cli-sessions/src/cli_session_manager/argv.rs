@@ -12,7 +12,7 @@ impl super::CliSessionManager {
     /// `append_system_prompt_file` is given, then `extra_args` (a split session's tool
     /// allowlist, `--mcp-config <path>`), each inserted before a trailing positional prompt
     /// when the argv carries one (`initial_prompt`), so the flags precede the prompt.
-    pub(crate) fn with_launch_flags(
+    pub fn with_launch_flags(
         argv: Vec<String>,
         initial_prompt: Option<&str>,
         append_system_prompt_file: Option<&Path>,

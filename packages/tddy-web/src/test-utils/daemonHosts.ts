@@ -9,7 +9,7 @@
 
 import type { DescService } from "@bufbuild/protobuf";
 import type { Transport } from "@connectrpc/connect";
-import type { DaemonHostEnvironment } from "../rpc/daemonTransport";
+import type { DaemonHostEnvironment } from "../app/rpc/daemonTransport";
 import { aWebviewIpcHostServing } from "./webviewIpcHost";
 
 /** A page the Tauri desktop application loaded, hosting `service` out of `transport` in-process. */

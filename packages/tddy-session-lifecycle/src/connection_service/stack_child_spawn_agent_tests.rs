@@ -119,11 +119,15 @@ fn an_orchestrator_of(session_type: &str, recipe: &str, agents: HostAgents) -> A
     // parent's would run it and be seen.
     let config_dir = tempfile::tempdir().expect("config dir");
     let config_path = config_dir.path().join("daemon.yaml");
+    std::fs::write(&config_path, "").expect("write daemon config");
     std::fs::write(
-        &config_path,
-        format!("users:\n  - github_user: \"{os_user}\"\n    os_user: \"{os_user}\"\n"),
+        std::path::Path::new(&(config_path))
+            .parent()
+            .expect("a config directory")
+            .join("users.yaml"),
+        format!("- github_user: \"{os_user}\"\n  os_user: \"{os_user}\"\n"),
     )
-    .expect("write daemon config");
+    .unwrap();
     let config = crate::config::DaemonConfig::load(&config_path).expect("daemon config parses");
 
     let sessions_base = sessions.path().to_path_buf();
@@ -141,6 +145,7 @@ fn an_orchestrator_of(session_type: &str, recipe: &str, agents: HostAgents) -> A
         crate::peer_routing::PeerRouting::local_only(&config),
         Arc::new(tddy_daemon_kernel::operator_channel::NoOperatorChannel),
         Arc::new(CliSessionManager::new()),
+        tddy_agent_launch::host_coding_agents::no_coding_agents(),
     );
     let service = match agents {
         HostAgents::TheBuiltins => {

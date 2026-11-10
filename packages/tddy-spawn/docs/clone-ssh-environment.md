@@ -24,13 +24,12 @@ alone when made only of characters a shell never splits, single-quoted otherwise
 quote stays one word. The method has no production caller; the real-process acceptance suite uses it to
 aim ssh at a fixture server.
 
-## The allowlist
+## Under the supervisor
 
-`CloneSshEnv::ALLOWED_ENV_KEYS` is every key `into_env` can set, sorted, and a test holds it equal to what
-a clone sets. Under `tddy-supervisor`, `spawn_policy.allowed_env_keys` must list them: the supervisor
-refuses a request naming an unlisted key
-([host sockets](../../tddy-supervisor/docs/host-sockets.md#configuration)). The configuration templates
-(`supervisor.yaml.production`, `dev.supervisor.yaml`, `daemon.yaml.production`) document the list.
+There is no key list to keep in step. Under `tddy-supervisor` the environment a clone sets passes whole
+under the supervisor's one env rule, which refuses only loader variables
+([architecture](../../tddy-supervisor/docs/architecture.md#the-childs-environment-one-rule)), so an SSH
+clone needs no supervisor configuration.
 
 ## Carriers
 
@@ -38,7 +37,7 @@ refuses a request naming an unlisted key
 |---|---|
 | in-process | `clone_run::clone_with_progress` (and its thin wrapper `spawner::clone_as_user_with_env`) sets it on the `git` child |
 | forked worker | `CloneRequest.env`, a `BTreeMap<String, String>` marked `#[serde(default)]`; the worker runs `CloneRequest::run`, which calls `clone_with_progress` |
-| supervisor | `supervisor_spawn::clone_repo_via_supervisor_with_progress` puts it in the `CloneRepository` request's `env` |
+| supervisor | `supervisor_spawn::plan_supervised_clone` puts it in the `SpawnStreamed` request's `env`, for the `tddy-git-clone` helper and the `git` it runs |
 
 A request from a daemon that predates the field decodes with an empty environment.
 

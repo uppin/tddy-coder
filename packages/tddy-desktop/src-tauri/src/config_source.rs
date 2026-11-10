@@ -23,6 +23,7 @@
 use std::path::{Path, PathBuf};
 
 use tddy_daemon::config::DaemonConfig;
+use tddy_daemon_kernel::users_file::USERS_FILE_NAME;
 
 /// Repo-root filename used when `TDDY_DAEMON_CONFIG` is unset (desktop dev).
 const DESKTOP_DEV_CONFIG_FILENAME: &str = "dev.desktop.yaml";
@@ -165,7 +166,22 @@ impl DaemonConfigSource {
                 self.config_path.display()
             )
         })?;
-        let substituted = SubstitutedConfig::write(&text.replace(CURRENT_USER_PLACEHOLDER, &user))?;
+        // The mapping beside the original config travels with the copy, substituted the same
+        // way. Only a missing one is left behind — the copy's load then fails naming it, as any
+        // other daemon's would; any other read error is this load's error.
+        let users_path = self.config_path.with_file_name(USERS_FILE_NAME);
+        let users_text = match std::fs::read_to_string(&users_path) {
+            Ok(users) => Some(users.replace(CURRENT_USER_PLACEHOLDER, &user)),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
+            Err(error) => {
+                return Err(anyhow::anyhow!(
+                    "failed to read {}: {error}",
+                    users_path.display()
+                ))
+            }
+        };
+        let substituted =
+            SubstitutedConfig::write(&text.replace(CURRENT_USER_PLACEHOLDER, &user), users_text)?;
         DaemonConfig::load(&substituted.path)
     }
 }
@@ -180,7 +196,7 @@ struct SubstitutedConfig {
 }
 
 impl SubstitutedConfig {
-    fn write(contents: &str) -> anyhow::Result<Self> {
+    fn write(contents: &str, users: Option<String>) -> anyhow::Result<Self> {
         let directory =
             std::env::temp_dir().join(format!("tddy-desktop-daemon-{}", std::process::id()));
         std::fs::create_dir_all(&directory).map_err(|error| {
@@ -189,6 +205,12 @@ impl SubstitutedConfig {
         let path = directory.join("config.yaml");
         std::fs::write(&path, contents)
             .map_err(|error| anyhow::anyhow!("could not write {}: {error}", path.display()))?;
+        if let Some(users) = users {
+            let users_path = directory.join(USERS_FILE_NAME);
+            std::fs::write(&users_path, users).map_err(|error| {
+                anyhow::anyhow!("could not write {}: {error}", users_path.display())
+            })?;
+        }
         Ok(Self { directory, path })
     }
 }
@@ -343,10 +365,23 @@ mod tests {
     /// dev data directory, the way an installed app keeps it under `~/.tddy`.
     #[test]
     fn the_checkouts_desktop_dev_config_keeps_a_credential_vault() {
-        // Given the dev config `./desktop-dev` runs with
+        // Given the dev config `./desktop-dev` runs with, copied into a directory of this test's
+        // own beside the `users.yaml` `./desktop-dev` renders — so the checkout is never written
         let workspace_root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../..");
+        let dir = tempfile::tempdir().expect("a temp dir for the dev config");
+        let config_path = dir.path().join(DESKTOP_DEV_CONFIG_FILENAME);
+        std::fs::copy(
+            workspace_root.join(DESKTOP_DEV_CONFIG_FILENAME),
+            &config_path,
+        )
+        .expect("copy dev.desktop.yaml");
+        std::fs::write(
+            dir.path().join(USERS_FILE_NAME),
+            "- github_user: \"testuser\"\n  os_user: \"CURRENT_USER\"\n",
+        )
+        .expect("render the dev users.yaml");
         let source = DaemonConfigSource {
-            config_path: workspace_root.join(DESKTOP_DEV_CONFIG_FILENAME),
+            config_path,
             workspace_root,
         };
 

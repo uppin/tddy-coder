@@ -54,6 +54,7 @@ async fn every_update_of_a_turn_reaches_the_recorder_in_order() {
             ..OpenSession::default()
         },
         "stub-model".to_string(),
+        tddy_coding_subagent::no_launch_hooks(),
     )
     .await
     .expect("the coding agent starts");

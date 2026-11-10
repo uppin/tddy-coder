@@ -10,7 +10,6 @@ use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
-use crate::config::spawn_policy::is_loader_env_key;
 use crate::config::spawn_policy::SpawnPolicy;
 use crate::error::ConfigError;
 
@@ -39,6 +38,28 @@ pub struct SupervisorConfig {
     /// How long managed services get to exit after `SIGTERM` before they are `SIGKILL`ed.
     #[serde(default = "default_shutdown_grace_secs")]
     pub shutdown_grace_secs: u64,
+    /// Where the GitHub → OS-user mapping lives and where its per-user daemon sockets go
+    /// (`#agent-tools` 31/32). Required once a service declares
+    /// [`serves_users`](ManagedService::serves_users).
+    #[serde(default)]
+    pub users: Option<UsersConfig>,
+}
+
+/// `users:` in `supervisor.yaml`: the mapping file and the directory its sockets are derived under.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct UsersConfig {
+    /// Absolute path of `users.yaml` (`/etc/tddy/users.yaml`). Watched; a change restarts the
+    /// services that serve users.
+    pub file: PathBuf,
+    /// Absolute directory holding one `<os user>/daemon.sock` per mapped OS user. Every directory
+    /// above it must be writable by root alone.
+    #[serde(default = "default_user_sockets_dir")]
+    pub sockets_dir: PathBuf,
+}
+
+fn default_user_sockets_dir() -> PathBuf {
+    PathBuf::from("/run/tddy-users")
 }
 
 fn default_shutdown_grace_secs() -> u64 {
@@ -87,15 +108,12 @@ pub struct ManagedService {
     /// already implements the receiving half (`SocketSource::Activated`).
     #[serde(default)]
     pub socket: Option<ServiceSocket>,
-    /// Per-OS-user sockets the supervisor creates as root, owned by that user, and hands to the
-    /// service next to its [`socket`](Self::socket). Needs `socket`: descriptor 3 stays the
-    /// service's main listener, and these follow it.
-    ///
-    /// This is how an *unprivileged* service serves a socket only one OS user can reach: it cannot
-    /// `chown` a socket to somebody else, but it can hold a listener root already gave them. See
-    /// [`HostSocket`].
+    /// Whether this service is handed one daemon socket per OS user `users.yaml` maps
+    /// (`user.<os user>`, after its own listener) and told the file's path in
+    /// [`USERS_FILE_ENV`](crate::spawn_broker::USERS_FILE_ENV) (`#agent-tools` 31/32). Needs
+    /// `socket` and the top-level `users:`.
     #[serde(default)]
-    pub host_sockets: Vec<HostSocket>,
+    pub serves_users: bool,
 }
 
 /// A socket for one OS user, created by the supervisor and handed to a managed service.
@@ -107,9 +125,9 @@ pub struct ManagedService {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct HostSocket {
-    /// The OS user that owns the socket and is the only one who can connect. Must also be listed
-    /// in `spawn_policy.allowed_session_users`: a user the supervisor would not run a session as
-    /// has no session to give a socket to.
+    /// The OS user that owns the socket and is the only one who can connect. Must be mapped in
+    /// `users.yaml`: a user the supervisor would not run a session as has no session to give a
+    /// socket to.
     pub user: String,
     /// Absolute path to bind. Its directory is created for, and handed to, `user`, so it must be
     /// used by this socket alone.
@@ -227,6 +245,40 @@ impl ServiceSocket {
     }
 }
 
+/// Refuse the hand-kept user lists `users.yaml` replaces, naming that file (`#agent-tools` 31/32).
+///
+/// Checked on the untyped document, before typed deserialization, so a leftover key is told it is
+/// obsolete rather than getting serde's bare `unknown field`.
+fn refuse_old_user_list_keys(document: &serde_yaml::Value) -> Result<(), ConfigError> {
+    let Some(top) = document.as_mapping() else {
+        return Ok(());
+    };
+    let old_key = |key: &str| ConfigError {
+        message: format!(
+            "`{key}:` in supervisor.yaml is obsolete — the GitHub → OS-user mapping lives in \
+             users.yaml now (see the top-level `users:` block); delete the `{key}:` key"
+        ),
+    };
+    if let Some(policy) = top.get("spawn_policy").and_then(|v| v.as_mapping()) {
+        if policy.contains_key("allowed_session_users") {
+            return Err(old_key("allowed_session_users"));
+        }
+    }
+    if let Some(services) = top.get("services").and_then(|v| v.as_sequence()) {
+        for service in services {
+            let Some(service) = service.as_mapping() else {
+                continue;
+            };
+            for key in ["host_sockets", "agent_tool_sockets"] {
+                if service.contains_key(key) {
+                    return Err(old_key(key));
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
 impl SupervisorConfig {
     /// Read and validate the configuration at `path`, refusing one anybody else could have written.
     ///
@@ -234,8 +286,7 @@ impl SupervisorConfig {
     /// "the root-owned policy file" is the premise of the whole design — and until now that was an
     /// assumption about how the file got there rather than something the supervisor checked. It is
     /// worth checking independently: `install` creating `/etc/tddy` with an inherited `umask` of `000`
-    /// is enough for a local user to rewrite `allowed_session_users` and have the root broker enforce
-    /// it.
+    /// is enough for a local user to rewrite `spawn_policy` and have the root broker enforce it.
     pub fn load(path: &Path) -> Result<SupervisorConfig, ConfigError> {
         // Opened once and read through the same handle the ownership check `fstat`s, so the file that
         // is parsed is the file that was checked and not one swapped in between the two.
@@ -281,6 +332,13 @@ impl SupervisorConfig {
     /// Validation is part of parsing on purpose: a config that would let the daemon escalate is
     /// a startup failure, not a runtime surprise.
     pub fn from_yaml(yaml: &str) -> Result<SupervisorConfig, ConfigError> {
+        // The untyped document, read once for the obsolete-key checks.
+        let document: serde_yaml::Value =
+            serde_yaml::from_str(yaml).map_err(|error| ConfigError {
+                message: error.to_string(),
+            })?;
+        refuse_old_user_list_keys(&document)?;
+        spawn_policy::refuse_old_spawn_policy_keys(&document)?;
         let config: SupervisorConfig = serde_yaml::from_str(yaml).map_err(|error| ConfigError {
             message: error.to_string(),
         })?;
@@ -329,31 +387,19 @@ impl SupervisorConfig {
 
         crate::host_socket_config::validate(self)?;
 
-        if self
-            .spawn_policy
-            .allowed_session_users
-            .iter()
-            .any(|user| user == ROOT_USER)
-        {
-            return Err(ConfigError {
-                message: format!("allowed_session_users may not contain `{ROOT_USER}`"),
-            });
-        }
-        for tool in &self.spawn_policy.allowed_tool_paths {
-            require_absolute("allowed_tool_paths entry", tool)?;
-        }
-        for tool in &self.spawn_policy.allowed_relay_tool_paths {
-            require_absolute("allowed_relay_tool_paths entry", tool)?;
+        if let Some(users) = &self.users {
+            require_absolute("users file", &users.file)?;
+            require_absolute("users sockets_dir", &users.sockets_dir)?;
         }
         for root in &self.spawn_policy.allowed_mount_roots {
             require_absolute("allowed_mount_roots entry", root)?;
         }
-        for key in &self.spawn_policy.allowed_env_keys {
-            if is_loader_env_key(key) {
+        for root in &self.spawn_policy.exec_roots {
+            if !root.path.is_absolute() {
                 return Err(ConfigError {
                     message: format!(
-                        "allowed_env_keys may not contain `{key}`: it chooses what code a session \
-                         loads, which would hand a caller everything allowed_tool_paths withholds"
+                        "exec_roots entry `{}` must be absolute",
+                        root.path.display()
                     ),
                 });
             }
@@ -370,7 +416,7 @@ impl SupervisorConfig {
 /// unprivileged — a developer, or the acceptance suite driving the real binary — it reads "owned by
 /// whoever is enforcing it", which is the same statement about the same trust relationship. What it
 /// never permits is a policy file authored by a *third* party, which is the only case that matters.
-fn require_trustworthy_config_file(
+pub(crate) fn require_trustworthy_config_file(
     path: &Path,
     metadata: &std::fs::Metadata,
 ) -> Result<(), ConfigError> {
@@ -407,7 +453,7 @@ fn require_trustworthy_config_file(
 /// kernel's own rule rather than a loophole: in a sticky directory only the owner of an entry may
 /// rename or unlink it, so `/tmp` being `1777` does not let anybody replace somebody else's file.
 /// A `/etc/tddy` left at `0777` has no such protection, and that is precisely the case being caught.
-fn require_trustworthy_config_directory(
+pub(crate) fn require_trustworthy_config_directory(
     path: &Path,
     metadata: &std::fs::Metadata,
 ) -> Result<(), ConfigError> {
@@ -556,70 +602,15 @@ mod tests {
         // Then — an operator who writes no policy grants no privilege. Asserted against literal
         // empties rather than `SpawnPolicy::default()`, which would be satisfied by a permissive
         // default on both sides of the comparison.
+        assert_eq!(config.users, None);
         assert_eq!(
-            config.spawn_policy.allowed_session_users,
-            Vec::<String>::new()
-        );
-        assert_eq!(
-            config.spawn_policy.allowed_tool_paths,
-            Vec::<PathBuf>::new()
+            config.spawn_policy.exec_roots,
+            Vec::<crate::config::spawn_policy::ExecRoot>::new()
         );
         assert_eq!(
             config.spawn_policy.allowed_mount_roots,
             Vec::<PathBuf>::new()
         );
-    }
-
-    #[test]
-    fn defaults_to_relaying_no_harness() {
-        // Given / When
-        let config = SupervisorConfig::from_yaml(a_minimal_config()).expect("parse config");
-
-        // Then
-        assert_eq!(
-            config.spawn_policy.allowed_relay_tool_paths,
-            Vec::<PathBuf>::new()
-        );
-    }
-
-    #[test]
-    fn refuses_a_relay_tool_path_that_is_not_absolute() {
-        // Given
-        let yaml = format!(
-            "{}\nspawn_policy:\n  allowed_relay_tool_paths: [\"bin/opencode\"]\n",
-            a_minimal_config()
-        );
-
-        // When
-        let result = SupervisorConfig::from_yaml(&yaml);
-
-        // Then
-        assert_rejected_because(result, "allowed_relay_tool_paths entry");
-    }
-
-    #[test]
-    fn defaults_to_passing_on_no_environment_variable_a_caller_asks_for() {
-        // Given / When
-        let config = SupervisorConfig::from_yaml(a_minimal_config()).expect("parse config");
-
-        // Then — a variable the caller can set on a process running as another user is a grant, so
-        // an operator who wrote none has granted none.
-        assert_eq!(config.spawn_policy.allowed_env_keys, Vec::<String>::new());
-    }
-
-    #[test]
-    fn rejects_a_spawn_policy_that_lets_a_caller_preload_a_library_into_a_session() {
-        // Given
-        let yaml = "\
-socket:
-  path: /run/tddy-supervisor.sock
-spawn_policy:
-  allowed_env_keys: [RUST_LOG, LD_PRELOAD]
-";
-
-        // When / Then — `LD_PRELOAD` makes any allowlisted tool load code the caller chose, so
-        // granting it would hand over everything `allowed_tool_paths` exists to withhold.
-        assert_rejected_because(SupervisorConfig::from_yaml(yaml), "LD_PRELOAD");
     }
 
     #[test]
@@ -786,6 +777,112 @@ services:
         assert_rejected_because(SupervisorConfig::from_yaml(yaml), "/run/tddy-shared.sock");
     }
 
+    #[rstest::rstest]
+    #[case::allowed_session_users(
+        "socket:\n  path: /run/s.sock\nspawn_policy:\n  allowed_session_users: [alice]\n"
+    )]
+    #[case::host_sockets(
+        "socket:\n  path: /run/s.sock\nservices:\n  - name: tddy-daemon\n    exec_start: /bin/d\n    user: tddy\n    socket:\n      path: /run/d.sock\n    host_sockets:\n      - {user: alice, path: /run/h/alice/host.sock}\n"
+    )]
+    #[case::agent_tool_sockets(
+        "socket:\n  path: /run/s.sock\nservices:\n  - name: tddy-daemon\n    exec_start: /bin/d\n    user: tddy\n    socket:\n      path: /run/d.sock\n    agent_tool_sockets:\n      - {user: alice, path: /run/a/alice/agent.sock}\n"
+    )]
+    fn an_old_user_list_key_in_supervisor_yaml_fails_loading_naming_users_yaml(#[case] yaml: &str) {
+        // Given a supervisor.yaml from before `#agent-tools` 31/32, naming users by hand
+
+        // When / Then it is refused, pointing the operator at the one file users now live in
+        assert_rejected_because(SupervisorConfig::from_yaml(yaml), "users.yaml");
+    }
+
+    #[rstest::rstest]
+    #[case::allowed_tool_paths("allowed_tool_paths: [/opt/tddy/bin/tddy-coder]", "exec_roots")]
+    #[case::allowed_relay_tool_paths(
+        "allowed_relay_tool_paths: [/opt/tddy/bin/relayed]",
+        "exec_roots"
+    )]
+    #[case::allowed_env_keys("allowed_env_keys: [RUST_LOG]", "removed")]
+    fn an_old_spawn_policy_key_fails_loading_naming_its_replacement(
+        #[case] old_key: &str,
+        #[case] replacement: &str,
+    ) {
+        // Given a supervisor.yaml from before `#agent-tools` 32/32
+        let yaml = format!("{}spawn_policy:\n  {old_key}\n", a_minimal_config());
+
+        // When / Then it is refused, telling the operator what took the key's place
+        assert_rejected_because(SupervisorConfig::from_yaml(&yaml), replacement);
+    }
+
+    #[test]
+    fn an_exec_root_that_is_not_absolute_fails_loading() {
+        // Given
+        let yaml = format!(
+            "{}spawn_policy:\n  exec_roots: [opt/tddy/bin]\n",
+            a_minimal_config()
+        );
+
+        // When / Then — relative to wherever systemd started the supervisor, it would be a dead grant
+        assert_rejected_because(SupervisorConfig::from_yaml(&yaml), "exec_roots entry");
+    }
+
+    #[test]
+    fn reads_exec_roots_naming_directories_single_files_and_trusted_prefixes() {
+        // Given
+        let yaml = format!(
+            "{}spawn_policy:\n  exec_roots:\n    - /opt/tddy/bin\n    - /usr/bin/git\n    - {{path: /nix/store, trusted_prefix: true}}\n",
+            a_minimal_config()
+        );
+
+        // When
+        let config = SupervisorConfig::from_yaml(&yaml).expect("exec_roots loads");
+
+        // Then
+        use crate::config::spawn_policy::ExecRoot;
+        assert_eq!(
+            config.spawn_policy.exec_roots,
+            vec![
+                ExecRoot::at("/opt/tddy/bin"),
+                ExecRoot::at("/usr/bin/git"),
+                ExecRoot::trusted_prefix("/nix/store"),
+            ]
+        );
+    }
+
+    #[test]
+    fn reads_where_the_user_mapping_and_its_sockets_live() {
+        // Given
+        let yaml = "socket:\n  path: /run/s.sock\nusers:\n  file: /etc/tddy/users.yaml\n";
+
+        // When
+        let config = SupervisorConfig::from_yaml(yaml).expect("parse config");
+
+        // Then the socket directory defaults to a root-only one under /run
+        assert_eq!(
+            config.users,
+            Some(UsersConfig {
+                file: PathBuf::from("/etc/tddy/users.yaml"),
+                sockets_dir: PathBuf::from("/run/tddy-users"),
+            })
+        );
+    }
+
+    #[test]
+    fn rejects_a_relative_users_file() {
+        // Given
+        let yaml = "socket:\n  path: /run/s.sock\nusers:\n  file: users.yaml\n";
+
+        // When / Then — it would resolve against whatever directory systemd started us in
+        assert_rejected_because(SupervisorConfig::from_yaml(yaml), "must be absolute");
+    }
+
+    #[test]
+    fn a_service_that_serves_users_needs_the_users_block() {
+        // Given a daemon that asks for user sockets in a config that maps nobody
+        let yaml = "socket:\n  path: /run/s.sock\nservices:\n  - name: tddy-daemon\n    exec_start: /bin/d\n    user: tddy\n    socket:\n      path: /run/d.sock\n    serves_users: true\n";
+
+        // When / Then
+        assert_rejected_because(SupervisorConfig::from_yaml(yaml), "users");
+    }
+
     #[test]
     fn rejects_an_unknown_top_level_key() {
         // Given
@@ -830,7 +927,7 @@ services:
 
     #[test]
     fn rejects_a_spawn_policy_that_allows_sessions_to_run_as_root() {
-        // Given
+        // Given a supervisor.yaml from before `#agent-tools` 31/32, listing session users by hand
         let yaml = "\
 socket:
   path: /run/tddy-supervisor.sock
@@ -838,8 +935,8 @@ spawn_policy:
   allowed_session_users: [alice, root]
 ";
 
-        // When / Then
-        assert_rejected_because(SupervisorConfig::from_yaml(yaml), "root");
+        // When / Then — the list is obsolete; users live in users.yaml, which refuses root itself
+        assert_rejected_because(SupervisorConfig::from_yaml(yaml), "users.yaml");
     }
 
     #[test]
@@ -886,7 +983,7 @@ services:
 socket:
   path: /run/tddy-supervisor.sock
 spawn_policy:
-  allowed_tool_paths: [\"bin/tddy-coder\"]
+  exec_roots: [\"bin/tddy-coder\"]
 ";
 
         // When / Then — a relative entry could never match a resolved request anyway, so it is a
@@ -1004,13 +1101,70 @@ spawn_policy:
     }
 
     // -----------------------------------------------------------------------------------------
-    // Per-OS-user host sockets
+    // Per-OS-user daemon sockets (`#agent-tools` 31/32)
     // -----------------------------------------------------------------------------------------
 
-    /// A daemon service with a socket, `host_sockets` as given, and alice and bob allowed.
-    fn a_config_with_host_sockets(host_sockets: &str) -> String {
+    /// A daemon service with a socket and `serves_users`, with the given `users:` block.
+    fn a_config_serving_users(users_block: &str) -> String {
         format!(
             "\
+socket:
+  path: /run/tddy-supervisor.sock
+{users_block}services:
+  - name: tddy-daemon
+    exec_start: /usr/local/bin/tddy-daemon
+    user: tddy
+    socket:
+      path: /run/tddy-daemon.sock
+    serves_users: true
+"
+        )
+    }
+
+    #[test]
+    fn parses_a_service_that_serves_users() {
+        // Given
+        let yaml = a_config_serving_users("users:\n  file: /etc/tddy/users.yaml\n");
+
+        // When
+        let config = SupervisorConfig::from_yaml(&yaml).expect("parse config");
+
+        // Then
+        assert_eq!(
+            (config.services[0].serves_users, config.users),
+            (
+                true,
+                Some(UsersConfig {
+                    file: PathBuf::from("/etc/tddy/users.yaml"),
+                    sockets_dir: PathBuf::from("/run/tddy-users"),
+                })
+            )
+        );
+    }
+
+    #[test]
+    fn declares_no_user_serving_by_default() {
+        // Given / When
+        let config = SupervisorConfig::from_yaml(
+            "socket:\n  path: /run/s.sock\nservices:\n  - {name: d, exec_start: /bin/d, user: tddy}\n",
+        )
+        .expect("parse config");
+
+        // Then
+        assert!(!config.services[0].serves_users);
+    }
+
+    #[test]
+    fn rejects_a_host_socket_declaration_naming_users_yaml() {
+        // Given a supervisor.yaml from before the merge, declaring a host socket by hand
+        let yaml = a_config_with_old_host_sockets();
+
+        // When / Then
+        assert_rejected_because(SupervisorConfig::from_yaml(&yaml), "users.yaml");
+    }
+
+    fn a_config_with_old_host_sockets() -> String {
+        "\
 socket:
   path: /run/tddy-supervisor.sock
 services:
@@ -1020,155 +1174,8 @@ services:
     socket:
       path: /run/tddy-daemon.sock
     host_sockets:
-{host_sockets}
-spawn_policy:
-  allowed_session_users: [alice, bob]
-"
-        )
-    }
-
-    #[test]
-    fn parses_the_host_sockets_a_service_declares() {
-        // Given
-        let yaml = a_config_with_host_sockets(
-            "      - {user: alice, path: /run/tddy/alice/host.sock}\n      - {user: bob, path: /run/tddy/bob/host.sock}",
-        );
-
-        // When
-        let config = SupervisorConfig::from_yaml(&yaml).expect("parse config");
-
-        // Then
-        assert_eq!(
-            config.services[0].host_sockets,
-            vec![
-                HostSocket {
-                    user: "alice".to_string(),
-                    path: PathBuf::from("/run/tddy/alice/host.sock")
-                },
-                HostSocket {
-                    user: "bob".to_string(),
-                    path: PathBuf::from("/run/tddy/bob/host.sock")
-                },
-            ]
-        );
-    }
-
-    #[test]
-    fn declares_no_host_sockets_by_default() {
-        // Given / When
-        let config = SupervisorConfig::from_yaml(
-            "socket:\n  path: /run/s.sock\nservices:\n  - {name: d, exec_start: /bin/d, user: tddy}\n",
-        )
-        .expect("parse config");
-
-        // Then
-        assert_eq!(config.services[0].host_sockets, Vec::new());
-    }
-
-    #[test]
-    fn rejects_a_host_socket_for_a_user_the_policy_does_not_allow_sessions_as() {
-        // Given carol is not in allowed_session_users
-        let yaml =
-            a_config_with_host_sockets("      - {user: carol, path: /run/tddy/carol/host.sock}");
-
-        // When / Then
-        assert_rejected_because(SupervisorConfig::from_yaml(&yaml), "allowed_session_users");
-    }
-
-    #[test]
-    fn rejects_a_host_socket_for_root() {
-        // Given
-        let yaml =
-            a_config_with_host_sockets("      - {user: root, path: /run/tddy/root/host.sock}");
-
-        // When / Then
-        assert_rejected_because(SupervisorConfig::from_yaml(&yaml), "root");
-    }
-
-    #[test]
-    fn rejects_host_sockets_on_a_service_that_has_no_socket_of_its_own() {
-        // Given descriptor 3 would then be a host socket the service takes for its own listener
-        let yaml = "\
-socket:
-  path: /run/tddy-supervisor.sock
-services:
-  - name: tddy-daemon
-    exec_start: /usr/local/bin/tddy-daemon
-    user: tddy
-    host_sockets:
       - {user: alice, path: /run/tddy/alice/host.sock}
-spawn_policy:
-  allowed_session_users: [alice]
-";
-
-        // When / Then
-        assert_rejected_because(SupervisorConfig::from_yaml(yaml), "no socket");
-    }
-
-    #[test]
-    fn rejects_a_relative_host_socket_path() {
-        // Given
-        let yaml = a_config_with_host_sockets("      - {user: alice, path: alice/host.sock}");
-
-        // When / Then
-        assert_rejected_because(SupervisorConfig::from_yaml(&yaml), "absolute");
-    }
-
-    #[test]
-    fn rejects_two_host_sockets_for_one_user() {
-        // Given
-        let yaml = a_config_with_host_sockets(
-            "      - {user: alice, path: /run/tddy/a1/host.sock}\n      - {user: alice, path: /run/tddy/a2/host.sock}",
-        );
-
-        // When / Then
-        assert_rejected_because(SupervisorConfig::from_yaml(&yaml), "two host sockets");
-    }
-
-    #[test]
-    fn rejects_two_users_sharing_a_socket_directory() {
-        // Given a directory that would be handed to alice and to bob
-        let yaml = a_config_with_host_sockets(
-            "      - {user: alice, path: /run/tddy/shared/alice.sock}\n      - {user: bob, path: /run/tddy/shared/bob.sock}",
-        );
-
-        // When / Then
-        assert_rejected_because(
-            SupervisorConfig::from_yaml(&yaml),
-            "shares a path or directory",
-        );
-    }
-
-    #[test]
-    fn rejects_a_host_socket_directory_that_holds_another_declared_socket() {
-        // Given the daemon's own socket would end up behind alice's 0700 directory
-        let yaml = a_config_with_host_sockets("      - {user: alice, path: /run/host.sock}");
-
-        // When / Then
-        assert_rejected_because(
-            SupervisorConfig::from_yaml(&yaml),
-            "shares a path or directory",
-        );
-    }
-
-    #[test]
-    fn rejects_a_host_socket_user_that_is_not_a_plain_account_name() {
-        // Given a name that would split the colon-separated descriptor names
-        let yaml = "\
-socket:
-  path: /run/tddy-supervisor.sock
-services:
-  - name: tddy-daemon
-    exec_start: /usr/local/bin/tddy-daemon
-    user: tddy
-    socket: {path: /run/tddy-daemon.sock}
-    host_sockets:
-      - {user: \"a:b\", path: /run/tddy/ab/host.sock}
-spawn_policy:
-  allowed_session_users: [\"a:b\"]
-";
-
-        // When / Then
-        assert_rejected_because(SupervisorConfig::from_yaml(yaml), "plain account name");
+"
+        .to_string()
     }
 }

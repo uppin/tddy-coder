@@ -145,8 +145,16 @@ impl Telegram {
         keys: &Keys,
         registries: &Registries,
         plugins: &Plugins,
+        coding_agents: Arc<tddy_coding_agent_specs::CodingAgentRegistry>,
     ) -> Self {
-        let telegram = build_telegram(config, &keys.tddy_data_dir, options, registries, plugins);
+        let telegram = build_telegram(
+            config,
+            &keys.tddy_data_dir,
+            options,
+            registries,
+            plugins,
+            coding_agents,
+        );
         let telegram_hooks = telegram.hooks;
         let lifecycle_telegram = telegram_hooks.as_ref().map(|h| {
             (

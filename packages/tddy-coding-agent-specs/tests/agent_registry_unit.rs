@@ -241,7 +241,7 @@ fn route_support_reads_the_providers_and_shape_of_the_route_section() {
         support,
         RouteSupport {
             providers: vec![ProviderKind::OpenaiResponses, ProviderKind::OpenaiChat],
-            shape: RouteShape::JsonConfigFile,
+            shape: RouteShape::InlineConfig,
         }
     );
 }

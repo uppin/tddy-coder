@@ -15,9 +15,9 @@ import { ConnectError, createClient, Code } from "@connectrpc/connect";
 
 import { anInMemoryRpcBackend } from "tddy-connectrpc-testkit";
 
-import { AuthService } from "../gen/auth_pb";
-import { TokenService } from "../gen/token_pb";
-import { SessionService } from "../gen/session_pb";
+import { AuthService } from "tddy-client-web/gen/auth_pb";
+import { TokenService } from "tddy-client-web/gen/token_pb";
+import { SessionService } from "tddy-client-web/gen/session_pb";
 
 // ---------------------------------------------------------------------------
 // .onUnary — single-method stub

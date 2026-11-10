@@ -1012,11 +1012,14 @@ impl AHeldHook {
 fn a_daemon_config_without_agent_sections() -> (tempfile::TempDir, DaemonConfig) {
     let dir = tempfile::tempdir().unwrap();
     let user = current_os_user();
-    let yaml = format!(
-        "users:\n  - github_user: \"{user}\"\n    os_user: \"{user}\"\nallowed_tools:\n  - path: /bin/true\n    label: true\n"
-    );
+    let yaml = "allowed_tools:\n  - path: /bin/true\n    label: true\n";
     let config_path = dir.path().join("daemon.yaml");
     std::fs::write(&config_path, yaml).unwrap();
+    std::fs::write(
+        dir.path().join("users.yaml"),
+        format!("- github_user: \"{user}\"\n  os_user: \"{user}\"\n"),
+    )
+    .unwrap();
     let config = DaemonConfig::load(&config_path).expect("config must parse");
     (dir, config)
 }
@@ -1071,6 +1074,7 @@ fn a_session_host(config: DaemonConfig, tddy_home: PathBuf) -> DaemonSessionHost
         tddy_session_lifecycle::peer_routing::PeerRouting::local_only(&config),
         Arc::new(tddy_daemon_kernel::operator_channel::NoOperatorChannel),
         Arc::new(CliSessionManager::new()),
+        tddy_agent_launch::host_coding_agents::no_coding_agents(),
     )
     .with_session_tokens(this_daemons_session_tokens().clone())
 }

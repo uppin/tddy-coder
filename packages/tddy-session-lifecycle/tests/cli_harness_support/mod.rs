@@ -41,18 +41,18 @@ pub fn current_os_user() -> String {
 pub fn a_daemon_config() -> DaemonConfig {
     let dir = tempfile::tempdir().unwrap();
     let user = current_os_user();
-    let yaml = format!(
-        r#"
-users:
-  - github_user: "{user}"
-    os_user: "{user}"
+    let yaml = r#"
 allowed_tools:
   - path: /bin/true
     label: true
-"#
-    );
+"#;
     let config_path = dir.path().join("daemon.yaml");
     std::fs::write(&config_path, yaml).unwrap();
+    std::fs::write(
+        dir.path().join("users.yaml"),
+        format!("- github_user: \"{user}\"\n  os_user: \"{user}\"\n"),
+    )
+    .unwrap();
     DaemonConfig::load(&config_path).expect("config must parse")
 }
 
@@ -87,8 +87,8 @@ pub fn session_host(
         tddy_session_lifecycle::peer_routing::PeerRouting::local_only(&config),
         Arc::new(tddy_daemon_kernel::operator_channel::NoOperatorChannel),
         manager,
+        agents,
     )
-    .with_coding_agents(agents)
 }
 
 /// The coding agents a daemon keeping its state in `tddy_home` launches from, as the daemon runtime

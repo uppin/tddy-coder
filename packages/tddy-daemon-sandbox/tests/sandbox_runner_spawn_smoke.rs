@@ -215,8 +215,6 @@ async fn generic_pty_runner_writes_ready_marker_inside_seatbelt() {
         grpc_port.to_string(),
         "--egress-shim-port".into(),
         shim_port.to_string(),
-        "--model".into(),
-        String::new(),
         "--pty-command=/bin/sleep".into(),
         "--pty-command=30".into(),
     ];
@@ -316,8 +314,6 @@ async fn generic_pty_host_relay_streams_command_output() {
         grpc_port.to_string(),
         "--egress-shim-port".into(),
         shim_port.to_string(),
-        "--model".into(),
-        String::new(),
         "--pty-command=/bin/sh".into(),
         "--pty-command=-c".into(),
         "--pty-command=printf pty_ok".into(),

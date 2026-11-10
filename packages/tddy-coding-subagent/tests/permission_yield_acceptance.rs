@@ -72,9 +72,14 @@ async fn an_agent_asking_for(titles: &[&str], answer: &str) -> (AskingAgent, Cod
         cwd: agent.dir.path().to_path_buf(),
         ..OpenSession::default()
     };
-    let session = CodingAgentSession::start(command, open, "stub-model".to_string())
-        .await
-        .expect("the coding agent starts");
+    let session = CodingAgentSession::start(
+        command,
+        open,
+        "stub-model".to_string(),
+        tddy_coding_subagent::no_launch_hooks(),
+    )
+    .await
+    .expect("the coding agent starts");
     (agent, session)
 }
 

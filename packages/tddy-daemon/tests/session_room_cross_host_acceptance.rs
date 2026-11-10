@@ -41,7 +41,7 @@ use tddy_service::proto::session::{SessionService as SessionServiceTrait, StartS
 use tddy_service::proto::worktree_activity::{WorktreeActivityEvent, WorktreeActivityKind};
 use tddy_session_lifecycle::connection_service::DaemonSessionHost;
 use tddy_session_lifecycle::test_util::wait_until_peer_discovered;
-use tddy_testing_commons::stub_scripts::{a_stub_agent_script, read_recorded_env};
+use tddy_testing_commons::stub_scripts::a_stub_agent_script;
 use tddy_testing_commons::wait::eventually_awaiting;
 
 type SessionsBaseResolver = Arc<dyn Fn(&str) -> Option<PathBuf> + Send + Sync>;
@@ -125,12 +125,21 @@ const SEEDED_CONTENTS: &str = "one\ntwo\n";
 /// The environment variables that tell the agent where its codebase is reachable: which room to
 /// join, which participant in it answers tool calls, and which daemon that participant forwards to.
 /// Recorded by the stub agent so a test can assert on the wiring the daemon actually handed it.
-const AGENT_WIRING_ENV: [&str; 4] = [
-    "TDDY_REMOTE_LIVEKIT_ROOM",
-    "TDDY_REMOTE_SERVER_IDENTITY",
-    "TDDY_REMOTE_DAEMON_INSTANCE_ID",
-    "TDDY_REMOTE_SESSION_ID",
-];
+///
+/// The agent process carries no `TDDY_*` variable: the transport is registered on its
+/// `tddy-tools --mcp` server and, by variable name, in the `.tddy/session.json` its context dir
+/// holds while it runs. The stub copies that pointer out of its working directory.
+const AGENT_POINTER_RELATIVE_PATH: &str = ".tddy/session.json";
+
+/// The `remote` map of the pointer copy at `path`, as a probe: a copy that has not landed yet, or
+/// that is not a pointer, is an `Err` naming what was found.
+fn read_pointer_remote(path: &Path) -> Result<HashMap<String, String>, String> {
+    let text = std::fs::read_to_string(path)
+        .map_err(|e| format!("no pointer copy at {}: {e}", path.display()))?;
+    let pointer: tddy_core::session_pointer::SessionPointer =
+        serde_json::from_str(&text).map_err(|e| format!("not a session pointer ({e}): {text}"))?;
+    Ok(pointer.remote.into_iter().collect())
+}
 
 /// The identity the agent is told to call in its room.
 const SERVER_IDENTITY_ENV: &str = "TDDY_REMOTE_SERVER_IDENTITY";
@@ -238,9 +247,6 @@ fn write_daemon_yaml(
     let yaml = format!(
         r#"
 daemon_instance_id: {instance_id}
-users:
-  - github_user: "testuser"
-    os_user: "{os_user}"
 allowed_tools:
   - path: {true_path}
     label: t
@@ -255,6 +261,11 @@ livekit:
 "#
     );
     std::fs::write(&path, yaml).unwrap();
+    std::fs::write(
+        dir.path().join("users.yaml"),
+        format!("- github_user: \"testuser\"\n  os_user: \"{os_user}\"\n"),
+    )
+    .unwrap();
     (dir, path)
 }
 
@@ -317,8 +328,6 @@ async fn a_daemon(
         ),
         Arc::new(tddy_daemon_kernel::operator_channel::NoOperatorChannel),
         Arc::new(tddy_session_lifecycle::claude_cli_session::CliSessionManager::new()),
-    )
-    .with_coding_agents_if_none(
         tddy_session_lifecycle::test_util::coding_agents_with_binaries(&[(
             "claude",
             Path::new(claude_binary),
@@ -409,7 +418,10 @@ impl SplitSession {
         let stub_dir = tempfile::tempdir().unwrap();
         let agent_env_file = stub_dir.path().join("agent-env");
         let claude_stub = a_stub_agent_script(stub_dir.path(), "stub-claude.sh")
-            .recording_env_to(&agent_env_file, &AGENT_WIRING_ENV)
+            .with_prelude(&format!(
+                "cp \"{AGENT_POINTER_RELATIVE_PATH}\" \"{target}.tmp.$$\" && mv -f \"{target}.tmp.$$\" \"{target}\"",
+                target = agent_env_file.display()
+            ))
             .then_reading_stdin()
             .build();
         let claude_stub = claude_stub.to_str().expect("stub path is valid UTF-8");
@@ -507,16 +519,17 @@ impl SplitSession {
         session_room_name(&self.session_id)
     }
 
-    /// The wiring the agent process was actually launched with.
+    /// The wiring the agent was actually launched with: the `remote` transport of the session
+    /// pointer found in the spawned agent's working directory.
     ///
     /// Read off the spawned agent rather than by calling the wiring helper: the start path builds
-    /// this environment itself, so a test that re-derived it would pin a contract the running agent
-    /// does not necessarily get.
+    /// this itself, so a test that re-derived it would pin a contract the running agent does not
+    /// necessarily get.
     async fn agent_wiring(&self) -> HashMap<String, String> {
         eventually_awaiting(
             "the split agent to record the environment it was launched with",
             AGENT_SPAWN_TIMEOUT,
-            || async { read_recorded_env(&self.agent_env_file) },
+            || async { read_pointer_remote(&self.agent_env_file) },
         )
         .await
     }

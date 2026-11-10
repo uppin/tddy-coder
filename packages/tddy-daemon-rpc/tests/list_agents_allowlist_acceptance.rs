@@ -19,6 +19,11 @@ fn write_config(yaml: &str) -> (tempfile::TempDir, PathBuf) {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("daemon.yaml");
     std::fs::write(&path, yaml).unwrap();
+    std::fs::write(
+        dir.path().join("users.yaml"),
+        "- github_user: \"gh1\"\n  os_user: \"os1\"\n- github_user: \"u\"\n  os_user: \"u\"\n- github_user: \"testuser\"\n  os_user: \"testdev\"\n",
+    )
+    .unwrap();
     (dir, path)
 }
 
@@ -33,20 +38,18 @@ fn service_with_config(config: DaemonConfig, sessions_base: PathBuf) -> TestDaem
             None
         }
     });
-    TestDaemon::from_host(
-        DaemonSessionHost::new(
-            config.clone(),
-            sessions_base_resolver,
-            tddy_data_dir,
-            user_resolver,
-            None,
-            tddy_spawn::supervisor_client::SpawnBackendChoice::ForkedWorker,
-            tddy_session_lifecycle::peer_routing::PeerRouting::local_only(&config),
-            Arc::new(tddy_daemon_kernel::operator_channel::NoOperatorChannel),
-            Arc::new(tddy_session_lifecycle::claude_cli_session::CliSessionManager::new()),
-        )
-        .with_coding_agents_if_none(tddy_session_lifecycle::test_util::builtin_coding_agents()),
-    )
+    TestDaemon::from_host(DaemonSessionHost::new(
+        config.clone(),
+        sessions_base_resolver,
+        tddy_data_dir,
+        user_resolver,
+        None,
+        tddy_spawn::supervisor_client::SpawnBackendChoice::ForkedWorker,
+        tddy_session_lifecycle::peer_routing::PeerRouting::local_only(&config),
+        Arc::new(tddy_daemon_kernel::operator_channel::NoOperatorChannel),
+        Arc::new(tddy_session_lifecycle::claude_cli_session::CliSessionManager::new()),
+        tddy_session_lifecycle::test_util::builtin_coding_agents(),
+    ))
 }
 
 /// **daemon_config_allowed_agents_deserializes**: YAML `allowed_agents` yields expected ids/labels;
@@ -55,9 +58,6 @@ fn service_with_config(config: DaemonConfig, sessions_base: PathBuf) -> TestDaem
 fn daemon_config_allowed_agents_deserializes() {
     // Given
     let yaml = r#"
-users:
-  - github_user: "gh1"
-    os_user: "os1"
 allowed_tools:
   - path: /bin/true
     label: "true"
@@ -79,9 +79,6 @@ allowed_agents:
     assert_eq!(config.allowed_agents[1].label.as_deref(), None);
 
     let bad_yaml = r#"
-users:
-  - github_user: "gh1"
-    os_user: "os1"
 allowed_agents:
   - id: x
     typo_not_allowed: "y"
@@ -99,9 +96,6 @@ allowed_agents:
 async fn connection_service_list_agents_returns_config() {
     // Given
     let yaml = r#"
-users:
-  - github_user: "u"
-    os_user: "u"
 allowed_agents:
   - id: zebra-backend
     label: Zebra
@@ -141,9 +135,6 @@ allowed_tools:
 async fn list_agents_lists_harness_profiles() {
     // Given
     let yaml = r#"
-users:
-  - github_user: "u"
-    os_user: "u"
 allowed_agents:
   - id: claude
     label: Claude
@@ -194,9 +185,6 @@ allowed_agents:
 async fn list_tools_unchanged_with_new_config_field() {
     // Given
     let yaml = r#"
-users:
-  - github_user: "u"
-    os_user: "u"
 allowed_tools:
   - path: /first/tool
     label: First
@@ -232,9 +220,6 @@ allowed_agents:
 async fn start_session_unknown_agent_rejected() {
     // Given
     let yaml = r#"
-users:
-  - github_user: "testuser"
-    os_user: "testdev"
 allowed_agents:
   - id: permitted-agent
     label: Permitted
@@ -289,9 +274,6 @@ allowed_agents:
 async fn start_session_as_a_harness_profile_resolves_its_account() {
     // Given
     let yaml = r#"
-users:
-  - github_user: "testuser"
-    os_user: "testdev"
 allowed_agents:
   - id: permitted-agent
 "#;

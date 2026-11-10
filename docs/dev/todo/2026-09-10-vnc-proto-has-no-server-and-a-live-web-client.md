@@ -20,7 +20,7 @@ removing a schema is a judgement about whether anyone intends to revive it, and 
 | `packages/tddy-service/proto/vnc.proto` | 6 rpcs, compiled by `build.rs:276` and `:434` |
 | `packages/tddy-service/src/lib.rs:137` `pub mod vnc` | generated Rust types, no implementor |
 | `packages/tddy-web/src/gen/vnc_pb.ts`, `packages/tddy-rust-typescript-tests/gen/vnc_pb.ts` | generated TS clients, committed |
-| `packages/tddy-web/src/components/sessions/SessionInspectorDrawer.tsx:6,165` | **a live client** — `useHttpClient(VncService)` |
+| `packages/tddy-session-web/src/SessionInspectorDrawer.tsx:6,165` | **a live client** — `useHttpClient(VncService)` |
 | `SessionVncTab.tsx`, `VncOverlay.tsx`, `InspectorTabs.tsx:102` | a **user-reachable "vnc" tab** in the session inspector |
 | 4 Cypress component specs + `cypress/support/rpc/{vncRpcs,vncBackend}.ts` | exercise that tab against fakes |
 

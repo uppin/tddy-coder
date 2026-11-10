@@ -10,7 +10,7 @@ use std::sync::Arc;
 use anyhow::{anyhow, Context};
 use tddy_actions::tool::{ResolvedTool, ToolHost};
 use tddy_coding_agent_specs::headless::SpecHeadlessRenderer;
-use tddy_coding_agent_specs::{load_agent_registry, routed_agent, CodingAgentSpec};
+use tddy_coding_agent_specs::{load_agent_registry, routed_agent, AgentEnvBase, CodingAgentSpec};
 use tddy_core::adapters::AdapterRegistry;
 use tddy_core::SpecHeadlessBackend;
 
@@ -87,7 +87,8 @@ fn renderer_and_spec_for(
         .pop()
         .ok_or_else(|| anyhow!("`{agent}` resolved to no tool"))?;
     let renderer =
-        SpecHeadlessRenderer::new(spec.clone(), tool, &closure, AdapterRegistry::builtin())?;
+        SpecHeadlessRenderer::new(spec.clone(), tool, &closure, AdapterRegistry::builtin())?
+            .with_env_base(AgentEnvBase::load(tools_dir)?);
     Ok((spec, renderer))
 }
 

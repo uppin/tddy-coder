@@ -22,11 +22,8 @@
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use tddy_coding_agent_specs::slots::conversation::ConversationSlot;
 use tddy_coding_agent_specs::slots::{self, RenderedSlots, SlotInputs};
 use tddy_coding_agent_specs::{Capability, CodingAgentSpec};
-use tddy_core::adapters::{ConversationMint, ConversationMintError, LaunchAdapters};
-use tddy_core::session_metadata::PROJECT_HOME_ROLE;
 use tddy_core::{HookCommandParams, SessionMetadata};
 use tddy_rpc::Status;
 
@@ -37,7 +34,6 @@ use tddy_core::session_pointer::SessionPointer;
 
 use crate::claude_cli_spawn_steps::{claude_cli_hooks, record_hook_answer_wait, ClaudeCliHooks};
 use crate::cli_session_pointer::session_pointer_of;
-use crate::harness_from_spec::HarnessLaunch;
 use crate::launch_ports::LaunchSessions;
 use crate::managed_launch;
 use crate::project_home_launch::{spec_role_launch, RoleWiring, StartRole};
@@ -121,186 +117,6 @@ pub(crate) fn write_slot_files_on_target(
     Ok(())
 }
 
-/// The conversation a launch binds, from the spec's `coding_agent.conversation`.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) enum LaunchConversation {
-    /// The daemon's session id (`session_id`).
-    SessionId(String),
-    /// A minted id (`chat_id`), recorded on the session (`cursor_chat_id`).
-    Minted(String),
-    /// The worktree's own (`--continue`); nothing to bind.
-    Worktree,
-    /// The token the spec's resume adapter read off the last run, when one was recorded.
-    ResumeToken(Option<String>),
-}
-
-impl LaunchConversation {
-    /// `launch` with this conversation's template parameter set.
-    pub(crate) fn bound<'a>(&'a self, launch: HarnessLaunch<'a>) -> HarnessLaunch<'a> {
-        match self {
-            Self::SessionId(id) => HarnessLaunch {
-                session_id: Some(id),
-                ..launch
-            },
-            Self::Minted(id) => HarnessLaunch {
-                chat_id: Some(id),
-                ..launch
-            },
-            Self::ResumeToken(token) => HarnessLaunch {
-                resume_token: token.as_deref(),
-                ..launch
-            },
-            Self::Worktree => launch,
-        }
-    }
-
-    /// The id to record on the session's `.session.yaml` (`cursor_chat_id`): the minted one only.
-    pub(crate) fn recorded_chat_id(&self) -> Option<&str> {
-        match self {
-            Self::Minted(id) => Some(id),
-            _ => None,
-        }
-    }
-}
-
-/// What a first start's conversation is settled from.
-pub(crate) struct ConversationStart<'a> {
-    pub spec: &'a CodingAgentSpec,
-    /// The agent's resolved binary, which a `minted` adapter runs.
-    pub binary: &'a Path,
-    pub worktree: &'a Path,
-    /// The environment the mint runs with on top of the daemon's (the session's git identity).
-    pub env: &'a [(String, String)],
-    pub session_id: &'a str,
-}
-
-/// The conversation a first start binds: the session id, a freshly minted id (bounded by the
-/// slot's mint deadline, refused through [`conversation_mint_refused`]), or nothing to bind.
-pub(crate) async fn start_conversation(
-    start: ConversationStart<'_>,
-) -> Result<LaunchConversation, Status> {
-    let ConversationStart {
-        spec,
-        binary,
-        worktree,
-        env,
-        session_id,
-    } = start;
-    let conversation = spec.conversation();
-    match &conversation {
-        ConversationSlot::DaemonSessionId => {
-            Ok(LaunchConversation::SessionId(session_id.to_string()))
-        }
-        ConversationSlot::Worktree => Ok(LaunchConversation::Worktree),
-        ConversationSlot::ResumeToken => Ok(LaunchConversation::ResumeToken(None)),
-        ConversationSlot::Minted { adapter, .. } => {
-            let minter = LaunchAdapters::builtin()
-                .conversation_id(adapter)
-                .ok_or_else(|| {
-                    Status::failed_precondition(format!(
-                        "{} names conversation adapter {adapter}, which this build does not have",
-                        spec.id
-                    ))
-                })?;
-            let deadline = conversation
-                .mint_deadline()
-                .expect("a minted conversation has a mint deadline");
-            minter
-                .mint(ConversationMint {
-                    binary,
-                    workdir: worktree,
-                    env,
-                    deadline,
-                })
-                .await
-                .map(LaunchConversation::Minted)
-                .map_err(|error| conversation_mint_refused(&spec.id, adapter, &error))
-        }
-    }
-}
-
-/// The conversation a resume of `meta` binds: the session id, the recorded minted id, the worktree,
-/// or the recorded resume token. A minted conversation the session never recorded is refused here;
-/// [`resumed_or_adopted_conversation`] adopts one instead.
-pub(crate) fn resumed_conversation(
-    spec: &CodingAgentSpec,
-    meta: &SessionMetadata,
-) -> Result<LaunchConversation, Status> {
-    Ok(match spec.conversation() {
-        ConversationSlot::DaemonSessionId => LaunchConversation::SessionId(meta.session_id.clone()),
-        ConversationSlot::Minted { adapter, .. } => match meta.cursor_chat_id.as_deref() {
-            Some(chat) if !chat.trim().is_empty() => LaunchConversation::Minted(chat.to_string()),
-            _ => {
-                return Err(Status::failed_precondition(format!(
-                    "{} recorded no conversation minted by {adapter}: it cannot be resumed",
-                    spec.id
-                )))
-            }
-        },
-        ConversationSlot::Worktree => LaunchConversation::Worktree,
-        ConversationSlot::ResumeToken => {
-            LaunchConversation::ResumeToken(meta.harness_resume_token.clone())
-        }
-    })
-}
-
-/// [`resumed_conversation`], but a session recorded without the conversation its spec mints — one
-/// started before the conversation was minted at start — adopts a fresh one now, which the resume
-/// records: every later resume then continues it instead of starting over again.
-pub(crate) async fn resumed_or_adopted_conversation(
-    start: ConversationStart<'_>,
-    meta: &SessionMetadata,
-) -> Result<LaunchConversation, Status> {
-    let recorded_nothing = match start.spec.conversation() {
-        ConversationSlot::Minted { .. } => meta
-            .cursor_chat_id
-            .as_deref()
-            .is_none_or(|chat| chat.trim().is_empty()),
-        _ => false,
-    };
-    if !recorded_nothing {
-        return resumed_conversation(start.spec, meta);
-    }
-    let session_id = start.session_id.to_string();
-    let adopted = start_conversation(start).await?;
-    log::info!(
-        target: "tddy_daemon::cursor_cli_spawn",
-        "resume of {session_id}: no conversation on record; adopted a minted one for this and every later resume"
-    );
-    Ok(adopted)
-}
-
-/// The refusal of a start whose conversation `adapter` did not mint an id for `agent_id`:
-/// `DEADLINE_EXCEEDED` for a mint past its deadline, `FAILED_PRECONDITION` otherwise, naming the
-/// agent and the adapter.
-pub(crate) fn conversation_mint_refused(
-    agent_id: &str,
-    adapter: &str,
-    error: &ConversationMintError,
-) -> Status {
-    let message = format!("{agent_id} could not mint its conversation with {adapter}: {error}");
-    match error {
-        ConversationMintError::TimedOut { .. } => Status::deadline_exceeded(message),
-        ConversationMintError::Failed(_) => Status::failed_precondition(message),
-    }
-}
-
-/// A starting session's standing role, refused for an agent that cannot hold it: a project-home
-/// main (`PROJECT_HOME_ROLE`) of a spec that does not declare `project_home_main` is refused
-/// `FAILED_PRECONDITION` naming the agent. An ordinary session (an empty role) is admitted.
-pub(crate) fn refuse_a_role_the_agent_cannot_hold(
-    spec: &CodingAgentSpec,
-    session_role: &str,
-) -> Result<(), Status> {
-    if session_role == PROJECT_HOME_ROLE && !spec.has(Capability::ProjectHomeMain) {
-        return Err(Status::failed_precondition(format!(
-            "{} cannot run a project's main: its spec declares no project_home_main",
-            spec.id
-        )));
-    }
-    Ok(())
-}
-
 /// What a generic launch's session wiring is built from.
 pub(crate) struct SessionWiringInputs<'a> {
     pub spec: &'a CodingAgentSpec,
@@ -309,6 +125,9 @@ pub(crate) struct SessionWiringInputs<'a> {
     pub tddy_tools_path: &'a str,
     pub config: &'a DaemonConfig,
     pub tddy_data_dir: &'a Path,
+    /// The session's OS user's agent-tool socket, served by this daemon: its hooks report and its
+    /// notifications go over it.
+    pub agent_tool_socket: &'a Path,
     pub os_user: &'a str,
     pub session_id: &'a str,
     pub session_dir: &'a Path,
@@ -333,9 +152,6 @@ pub(crate) struct ManagedWiring {
 pub(crate) struct SessionWiring {
     /// The session's hooks (a spec declaring `hooks` or `operator_notify`), with their token.
     pub hooks: Option<ClaudeCliHooks>,
-    /// The agent-tool socket an adapter that reports over it is given when the daemon is not
-    /// embedded (the daemon always owns one), `None` when the hooks need none.
-    pub hook_socket: Option<String>,
     /// The managed workflow to attach to the session once its agent is spawned.
     pub workflow: Option<ManagedWorkflow>,
     /// Passed with the spec's `append_system_prompt` flag: a managed recipe's prompt, composed with
@@ -365,6 +181,7 @@ pub(crate) fn wire_session_agent(inputs: SessionWiringInputs<'_>) -> Result<Sess
         tddy_tools_path,
         config,
         tddy_data_dir,
+        agent_tool_socket,
         os_user,
         session_id,
         session_dir,
@@ -374,7 +191,7 @@ pub(crate) fn wire_session_agent(inputs: SessionWiringInputs<'_>) -> Result<Sess
         github_credential_handler,
     } = inputs;
     let hooks = (spec.has(Capability::Hooks) || spec.has(Capability::OperatorNotify))
-        .then(|| claude_cli_hooks(config, tddy_data_dir, spec, tddy_tools_path));
+        .then(|| claude_cli_hooks(config, agent_tool_socket, spec, tddy_tools_path));
     if let Some(hooks) = &hooks {
         record_hook_answer_wait(session_dir, hooks)?;
     }
@@ -411,7 +228,7 @@ pub(crate) fn wire_session_agent(inputs: SessionWiringInputs<'_>) -> Result<Sess
             role.name,
             crate::notify_env::AgentNotifyLaunch {
                 config,
-                tddy_data_dir,
+                agent_tool_socket,
                 os_user,
                 session_id,
                 hook_token: &hooks.hook_token,
@@ -432,12 +249,8 @@ pub(crate) fn wire_session_agent(inputs: SessionWiringInputs<'_>) -> Result<Sess
         tddy_tools_path,
         session_dir,
     );
-    let hook_socket = hooks
-        .as_ref()
-        .and_then(|hooks| socket_for_hooks(spec, hooks, tddy_data_dir));
     Ok(SessionWiring {
         hooks,
-        hook_socket,
         workflow,
         system_prompt_file,
         env: process_env,
@@ -463,6 +276,17 @@ pub(crate) struct ResumedWiring {
 }
 
 impl LaunchSessions {
+    /// `os_user`'s agent-tool socket, served by this daemon (bound first when it is not yet): where
+    /// that user's sessions report their hooks and make their tool calls. A user this daemon cannot
+    /// give one — under the supervisor, one not listed under `agent_tool_sockets:` — fails the
+    /// start `FAILED_PRECONDITION`, naming the setting, before anything is cut.
+    pub(crate) async fn agent_tool_socket_of(&self, os_user: &str) -> Result<PathBuf, Status> {
+        self.agent_tool_sockets
+            .ensure_bound(os_user, &self.tddy_data_dir)
+            .await
+            .map_err(|e| Status::failed_precondition(format!("{e:#}")))
+    }
+
     /// The wiring a resume of `meta` gives `spec`'s agent again — none of it is in a persisted argv.
     #[allow(clippy::too_many_arguments)]
     pub(crate) async fn resumed_session_wiring(
@@ -512,10 +336,11 @@ impl LaunchSessions {
                 workflow = Some(launch.workflow);
             }
         }
+        let tool_socket = self.agent_tool_socket_of(os_user).await?;
         if spec.has(Capability::OperatorNotify) {
             let notify = crate::notify_env::resumed_agent_notify_launch(
                 &self.config,
-                &self.tddy_data_dir,
+                &tool_socket,
                 os_user,
                 session_dir,
                 meta,
@@ -524,7 +349,7 @@ impl LaunchSessions {
             notify_env.extend(notify.env);
             system_prompt_file = notify.append_system_prompt_file.or(system_prompt_file);
         }
-        let role = self.resumed_role(meta, session_id, session_dir, session_token)?;
+        let role = self.resumed_role(meta, session_id, session_dir, session_token, &tool_socket)?;
         route_tool_server_env(role.env, &mut process_env, &mut tool_server_env);
         let (extra_args, mut toolset) = spec_role_launch(role.main.as_ref());
         let session_pointer = session_pointer_of(&tool_server_env, notify_env, worktree);
@@ -549,34 +374,21 @@ impl LaunchSessions {
 /// Whether `spec`'s hooks adapter reports over the daemon's agent-tool socket: it refuses params
 /// that carry none (`SlotError::NoDaemonSocket`), where the hooks of an adapter that reports over
 /// HTTP render with none.
-pub(crate) fn hooks_report_over_the_agent_tool_socket(
-    spec: &CodingAgentSpec,
-    hooks: &ClaudeCliHooks,
-) -> bool {
+pub(crate) fn hooks_report_over_the_agent_tool_socket(spec: &CodingAgentSpec) -> bool {
     let Ok(adapter) = tddy_coding_agent_specs::slots::hooks::adapter(&spec.agent.hooks.adapter)
     else {
         return false;
     };
     let probe = HookCommandParams {
+        tddy_tools_path: "probe",
+        daemon_url: "probe",
+        session_id: "probe",
+        os_user: "probe",
+        hook_token: "probe",
         daemon_socket: None,
-        ..hooks.params("probe", "probe")
+        answer_wait_secs: spec.answer_wait_secs(),
     };
     adapter.try_render(Path::new("/"), &probe).is_err()
-}
-
-/// The daemon's agent-tool socket, for a spec whose hooks adapter reports over it and `hooks` carry
-/// none: that adapter refuses params without one, so it is given the path the bespoke Cursor launch
-/// always passed.
-fn socket_for_hooks(
-    spec: &CodingAgentSpec,
-    hooks: &ClaudeCliHooks,
-    tddy_data_dir: &Path,
-) -> Option<String> {
-    hooks_report_over_the_agent_tool_socket(spec, hooks).then(|| {
-        tddy_daemon_kernel::agent_tool_socket_path(tddy_data_dir)
-            .to_string_lossy()
-            .into_owned()
-    })
 }
 
 impl SessionWiring {
@@ -591,11 +403,7 @@ impl SessionWiring {
             .hooks
             .as_ref()
             .filter(|_| spec.has(Capability::Hooks))?;
-        let params = hooks.params(session_id, os_user);
-        Some(HookCommandParams {
-            daemon_socket: params.daemon_socket.or(self.hook_socket.as_deref()),
-            ..params
-        })
+        Some(hooks.params(session_id, os_user))
     }
 }
 
@@ -604,7 +412,8 @@ impl SessionWiring {
 /// is registered `tddy-tools --mcp` with them — in a file of the session's directory, for a spec whose
 /// `mcp` slot names a file. A spec whose slot places its registration in the agent's home
 /// (`$HOME/.cursor/mcp.json`) or takes none registers nothing: that file is the operator's, and the
-/// pairs reach no one (docs/dev/todo/2026-11-05-cli-spec-features-leftovers.md).
+/// pairs reach no one through the registration; the agent's own shell reaches its controller through
+/// the worktree's `.tddy/session.json` pointer (`cli_session_pointer`).
 fn carry_on_the_tool_server(
     spec: &CodingAgentSpec,
     toolset: &mut AgentToolset,
@@ -629,6 +438,7 @@ fn carry_on_the_tool_server(
             command: PathBuf::from(tddy_tools_path),
             args: vec!["--mcp".to_string()],
             env: tool_server_env.into_iter().collect(),
+            cwd: None,
         },
         dir: session_dir.to_path_buf(),
     });
@@ -651,3 +461,4 @@ fn route_tool_server_env(
 
 #[cfg(test)]
 mod cli_agent_steps_tests;
+pub(crate) mod conversation;

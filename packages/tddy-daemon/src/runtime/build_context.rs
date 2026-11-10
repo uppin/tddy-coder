@@ -21,6 +21,9 @@ pub(super) struct BuildContext {
     pub(super) identity: Identity,
     pub(super) registries: Registries,
     pub(super) plugins: Plugins,
+    /// The daemon's one coding-agent registry, loaded by `runtime::build` before this context
+    /// exists: what Telegram, the reserved-ids step and the session host all read.
+    pub(super) coding_agents: Arc<tddy_agent_launch::spec_launch::HostCodingAgents>,
     pub(super) telegram_hooks: Option<Arc<TelegramDaemonHooks>>,
     pub(super) lifecycle_telegram: Option<(DaemonConfig, Arc<dyn TelegramSender + Send + Sync>)>,
     pub(super) idle_tracker: Option<Arc<tddy_session_lifecycle::relay_idle::IdleTimeoutTracker>>,
@@ -47,6 +50,10 @@ pub(super) struct BuildContext {
     /// for a daemon built without authentication, which hosts no sessions to have children.
     pub(super) session_host:
         Option<Arc<tddy_session_lifecycle::connection_service::DaemonSessionHost>>,
+    /// The agent-tool sockets the session host tells every session about (`#agent-tools` 26/28),
+    /// placed as this host is: per OS user on the binary, the one runtime socket when embedded. The
+    /// finished roster is installed on it by [`Self::serve_common_room`].
+    pub(super) agent_tool_sockets: Arc<tddy_daemon_kernel::agent_tool_sockets::AgentToolSockets>,
     pub(super) tasks: RuntimeTasks,
 }
 
@@ -56,6 +63,7 @@ impl BuildContext {
         options: RuntimeOptions,
         identity: Identity,
         index_supports: Arc<tddy_daemon_rpc::code_navigation::SupportRegistry>,
+        coding_agents: Arc<tddy_agent_launch::spec_launch::HostCodingAgents>,
     ) -> Self {
         let registries = Registries::open(&config, identity.user_resolver.as_ref());
         let plugins = Plugins::open(
@@ -63,7 +71,14 @@ impl BuildContext {
             &registries.shared_session_rooms,
             &identity.keys.room_tokens,
         );
-        let telegram = Telegram::open(&config, &options, &identity.keys, &registries, &plugins);
+        let telegram = Telegram::open(
+            &config,
+            &options,
+            &identity.keys,
+            &registries,
+            &plugins,
+            coding_agents.agents_shared(),
+        );
         let relay = RelayIdle::open(&options);
         let tasks = RuntimeTasks {
             common_room: None,
@@ -78,12 +93,29 @@ impl BuildContext {
             telegram_inbound: telegram.inbound,
             credential_sync_publish_watch: None,
         };
+        let agent_tool_sockets = Arc::new(
+            tddy_daemon_kernel::agent_tool_sockets::AgentToolSockets::new(match options.host {
+                RuntimeHost::Embedded => {
+                    tddy_daemon_kernel::agent_tool_sockets::AgentToolSocketPlacement::Embedded
+                }
+                RuntimeHost::Binary
+                    if std::env::var_os(tddy_daemon_kernel::users_file::USERS_FILE_ENV)
+                        .is_some() =>
+                {
+                    tddy_daemon_kernel::agent_tool_sockets::AgentToolSocketPlacement::Supervised
+                }
+                RuntimeHost::Binary => {
+                    tddy_daemon_kernel::agent_tool_sockets::AgentToolSocketPlacement::PerOsUser
+                }
+            }),
+        );
         Self {
             config,
             options,
             identity,
             registries,
             plugins,
+            coding_agents,
             telegram_hooks: telegram.hooks,
             lifecycle_telegram: telegram.lifecycle,
             idle_tracker: relay.idle_tracker,
@@ -93,6 +125,7 @@ impl BuildContext {
             index_daemon_registry: None,
             index_supports,
             session_host: None,
+            agent_tool_sockets,
             tasks,
         }
     }
@@ -146,6 +179,12 @@ impl BuildContext {
         // checkout, which can use neither the application's in-process bridge nor a port that only
         // answers the OAuth callback. Built from the finished roster, so a tool call over it reaches
         // the very handlers the UI does. See `crate::agent_tool_socket`.
+        //
+        // A server daemon serves the same roster on each session OS user's own socket instead,
+        // bound when that user's first session starts: it is installed on the sockets the session
+        // host hands its sessions.
+        self.agent_tool_sockets
+            .install_roster(cloned_entries(&self.identity.rpc_entries));
         if self.options.host == RuntimeHost::Embedded {
             self.tasks.agent_tool_socket = Some((
                 crate::agent_tool_socket::agent_tool_socket_path(&self.identity.keys.tddy_data_dir),

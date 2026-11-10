@@ -39,6 +39,7 @@ run:
   env: {}
 extensions:
   coding_agent:
+    pass_env: [OPENAI_API_KEY]
     product: Codex
     mcp: { kind: inline, flag: -c, key_prefix: mcp_servers }
     tool_allow: unsupported
@@ -86,6 +87,9 @@ extensions:
         BROWSER: "{self_exe}"
         TDDY_CODEX_OAUTH_OUT: "{session_dir}/codex_oauth_authorize.url"
       adapter: codex-jsonl
+      # Who answers a headless conversation's permission requests (`#agent-tools 27/28`): the CLI
+      # cannot ask mid-turn, so it runs under this fixed policy, shown on its catalog row.
+      permission_policy: { fixed: "workspace-write sandbox; the CLI cannot ask mid-turn" }
       # A non-zero exit with a non-empty parsed result counts as success, as the backend tolerates
       # it for a planning goal today.
       exit_ok_if_structured: true

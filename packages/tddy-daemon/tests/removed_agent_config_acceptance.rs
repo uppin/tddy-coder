@@ -20,9 +20,10 @@ use tddy_daemon::config::DaemonConfig;
 fn a_daemon_yaml(body: &str) -> (tempfile::TempDir, PathBuf) {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("daemon.yaml");
+    std::fs::write(&path, body).unwrap();
     std::fs::write(
-        &path,
-        format!("users:\n  - github_user: dev\n    os_user: dev\n{body}"),
+        dir.path().join("users.yaml"),
+        "- github_user: dev\n  os_user: dev\n",
     )
     .unwrap();
     (dir, path)

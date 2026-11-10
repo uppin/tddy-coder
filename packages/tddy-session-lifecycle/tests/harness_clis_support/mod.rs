@@ -109,7 +109,8 @@ pub fn current_os_user() -> String {
 }
 
 /// A stub harness: touches `marker`, then reports its argv, cwd, the environment it was given, the
-/// configuration file `OPENCODE_CONFIG` names (its content and mode), and — for each `host:port` it
+/// configuration file `OPENCODE_CONFIG` names (its content and mode), the inline configuration in
+/// `OPENCODE_CONFIG_CONTENT` (`#agent-tools 29/32`), and — for each `host:port` it
 /// was told to probe — the status of a `CONNECT` through `$HTTPS_PROXY`. Every external command is
 /// named by its absolute path, so the report does not depend on `PATH`.
 pub fn a_stub_harness_script(harness: AHarness, marker: &Path, probes: &[String]) -> String {
@@ -141,6 +142,11 @@ if [ -n "$OPENCODE_CONFIG" ]; then
   printf 'STUB config-mode=%s\n' "$(/usr/bin/stat -f %Lp "$OPENCODE_CONFIG" 2>/dev/null || /usr/bin/stat -c %a "$OPENCODE_CONFIG")"
 else
   printf 'STUB config=NONE\n'
+fi
+if [ -n "$OPENCODE_CONFIG_CONTENT" ]; then
+  printf 'STUB inline-config=%s\n' "$(printf '%s' "$OPENCODE_CONFIG_CONTENT" | /usr/bin/tr -d '\n')"
+else
+  printf 'STUB inline-config=NONE\n'
 fi
 {probe_lines}printf 'STUB-END\n'
 {ending}"#,
@@ -197,14 +203,19 @@ impl AStubReport {
         }
     }
 
-    /// The bytes of the file `OPENCODE_CONFIG` names, its newlines removed.
-    pub fn route_config_text(&self) -> &str {
-        self.line("config")
+    /// The configuration inline in `OPENCODE_CONFIG_CONTENT`, parsed; `None` when it was unset.
+    pub fn inline_route_config(&self) -> Option<serde_json::Value> {
+        match self.line("inline-config") {
+            "NONE" => None,
+            json => Some(serde_json::from_str(json).unwrap_or_else(|e| {
+                panic!("the inline route configuration is JSON ({e}): {json}")
+            })),
+        }
     }
 
-    /// The octal mode of the file `OPENCODE_CONFIG` names (`600`).
-    pub fn route_config_mode(&self) -> String {
-        self.line("config-mode").to_string()
+    /// The inline configuration in `OPENCODE_CONFIG_CONTENT`, its newlines removed.
+    pub fn inline_route_config_text(&self) -> &str {
+        self.line("inline-config")
     }
 
     /// The `CONNECT` status a probe of `target` got through the proxy (`200`, `403`, `000`).
@@ -581,18 +592,18 @@ fn vaults_holding_the_accounts(
 fn a_daemon_config() -> (tempfile::TempDir, DaemonConfig) {
     let dir = tempfile::tempdir().unwrap();
     let user = current_os_user();
-    let yaml = format!(
-        r#"
-users:
-  - github_user: "{user}"
-    os_user: "{user}"
+    let yaml = r#"
 allowed_tools:
   - path: /bin/true
     label: true
-"#
-    );
+"#;
     let config_path = dir.path().join("daemon.yaml");
     std::fs::write(&config_path, yaml).unwrap();
+    std::fs::write(
+        dir.path().join("users.yaml"),
+        format!("- github_user: \"{user}\"\n  os_user: \"{user}\"\n"),
+    )
+    .unwrap();
     let config = DaemonConfig::load(&config_path).expect("config must parse");
     (dir, config)
 }
@@ -610,6 +621,7 @@ fn a_session_host(config: DaemonConfig, tddy_home: PathBuf) -> DaemonSessionHost
         tddy_session_lifecycle::peer_routing::PeerRouting::local_only(&config),
         Arc::new(tddy_daemon_kernel::operator_channel::NoOperatorChannel),
         Arc::new(CliSessionManager::new()),
+        tddy_agent_launch::host_coding_agents::no_coding_agents(),
     )
 }
 

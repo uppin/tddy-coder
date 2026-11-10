@@ -13,8 +13,8 @@ import { anInMemoryRpcBackend, type InMemoryRpcBackend } from "tddy-connectrpc-t
 import {
   HostService,
   type AnswerHostPromptRequest,
-} from "../../src/gen/host_pb";
-import { StartPassphrasePrompt } from "../../src/components/sessions/StartPassphrasePrompt";
+} from "tddy-client-web/gen/host_pb";
+import { HostStartPassphrasePrompt as StartPassphrasePrompt } from "../../src/app/HostStartPassphrasePrompt";
 import { mountWithRpc } from "../support/rpc/inMemory";
 import { withSelectedDaemon } from "../support/rpc/withSelectedDaemon";
 import { aHostPromptFeed, type HostPromptFeed } from "../support/rpc/hostPromptFeed";

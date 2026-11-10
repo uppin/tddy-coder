@@ -120,6 +120,31 @@ impl RecordingLauncher {
 
 #[async_trait::async_trait]
 impl CodingAgentLauncher for RecordingLauncher {
+    /// What a launcher holding the built-in specs answers: a managed launch's `acp_meta`
+    /// withdrawal of its agent's declared `acp.withdraw_native`.
+    async fn session_meta_for(
+        &self,
+        launch: &tddy_coding_subagent::CodingAgentLaunch,
+    ) -> Result<
+        Option<serde_json::Map<String, serde_json::Value>>,
+        tddy_discovery::subagent::SubagentError,
+    > {
+        let registry = tddy_coding_agent_specs::CodingAgentRegistry::builtin_cached();
+        let Some(spec) = registry.get(&launch.def.harness).filter(|_| launch.managed) else {
+            return Ok(None);
+        };
+        let withdrawn = spec
+            .acp()
+            .map(|acp| acp.withdraw_native.clone())
+            .unwrap_or_default();
+        match tddy_coding_agent_specs::slots::acp::acp_withdrawal(spec, &withdrawn)
+            .map_err(|e| tddy_discovery::subagent::SubagentError::from(e.to_string()))?
+        {
+            Some(tddy_coding_agent_specs::slots::acp::AcpWithdrawal::Meta(meta)) => Ok(Some(meta)),
+            _ => Ok(None),
+        }
+    }
+
     async fn command_for(
         &self,
         launch: &CodingAgentLaunch,
@@ -485,9 +510,17 @@ async fn an_acp_allowed_agent_is_listed_as_a_coding_agent_with_its_default_model
     let config_path = config_dir.path().join("daemon.yaml");
     std::fs::write(
         &config_path,
-        "users:\n  - github_user: \"u\"\n    os_user: \"u\"\nallowed_agents:\n  - id: claude-acp\n    label: \"Claude (ACP)\"\n  - id: cursor\n",
+        "allowed_agents:\n  - id: claude-acp\n    label: \"Claude (ACP)\"\n  - id: cursor\n",
     )
     .expect("write config");
+    std::fs::write(
+        std::path::Path::new(&(config_path))
+            .parent()
+            .expect("a config directory")
+            .join("users.yaml"),
+        "- github_user: \"u\"\n  os_user: \"u\"\n",
+    )
+    .unwrap();
     let config = DaemonConfig::load(&config_path).expect("load config");
     let tddy_home = tempfile::tempdir().expect("tddy home");
     let home = tddy_home.path().to_path_buf();
@@ -502,7 +535,9 @@ async fn an_acp_allowed_agent_is_listed_as_a_coding_agent_with_its_default_model
             tddy_session_lifecycle::peer_routing::PeerRouting::local_only(&config),
             Arc::new(tddy_daemon_kernel::operator_channel::NoOperatorChannel),
             Arc::new(tddy_session_lifecycle::claude_cli_session::CliSessionManager::new()),
-        ),
+            tddy_agent_launch::host_coding_agents::no_coding_agents(),
+        )
+        .with_coding_agents(tddy_session_lifecycle::test_util::builtin_coding_agents()),
     );
 
     // When

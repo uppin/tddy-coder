@@ -214,16 +214,19 @@ fn writes_nothing_outside_the_uploads_dir_when_the_name_is_rejected() {
 // ---------------------------------------------------------------------------
 
 fn test_config_for_os_user(os_user: &str) -> DaemonConfig {
-    let yaml = format!(
-        r#"
-users:
-  - github_user: "testuser"
-    os_user: "{os_user}"
-"#
-    );
+    let yaml = r#"
+"#;
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("config.yaml");
     std::fs::write(&path, yaml).unwrap();
+    std::fs::write(
+        std::path::Path::new(&(path))
+            .parent()
+            .expect("a config directory")
+            .join("users.yaml"),
+        format!("- github_user: \"testuser\"\n  os_user: \"{os_user}\"\n"),
+    )
+    .unwrap();
     DaemonConfig::load(&path).unwrap()
 }
 
@@ -241,20 +244,18 @@ fn test_service(
         Arc::new(move |_| Some(sessions_base.clone()));
     let user_resolver: UserResolver =
         Arc::new(|token| (token == TEST_TOKEN).then(|| "testuser".to_string()));
-    Arc::new(
-        DaemonSessionHost::new(
-            config.clone(),
-            sessions_base_resolver,
-            tddy_data_dir,
-            user_resolver,
-            None,
-            tddy_spawn::supervisor_client::SpawnBackendChoice::ForkedWorker,
-            tddy_session_lifecycle::peer_routing::PeerRouting::local_only(&config),
-            Arc::new(tddy_daemon_kernel::operator_channel::NoOperatorChannel),
-            Arc::new(tddy_session_lifecycle::claude_cli_session::CliSessionManager::new()),
-        )
-        .with_coding_agents_if_none(tddy_session_lifecycle::test_util::builtin_coding_agents()),
-    )
+    Arc::new(DaemonSessionHost::new(
+        config.clone(),
+        sessions_base_resolver,
+        tddy_data_dir,
+        user_resolver,
+        None,
+        tddy_spawn::supervisor_client::SpawnBackendChoice::ForkedWorker,
+        tddy_session_lifecycle::peer_routing::PeerRouting::local_only(&config),
+        Arc::new(tddy_daemon_kernel::operator_channel::NoOperatorChannel),
+        Arc::new(tddy_session_lifecycle::claude_cli_session::CliSessionManager::new()),
+        tddy_session_lifecycle::test_util::builtin_coding_agents(),
+    ))
     .session_files_service()
 }
 

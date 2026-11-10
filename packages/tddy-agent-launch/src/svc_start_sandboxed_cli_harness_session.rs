@@ -20,10 +20,10 @@ use tddy_session_agents::seed_codebase::{SeedCodebase, SeededAgentClones};
 use tddy_session_files::attachment_progress::AttachmentProgressSink;
 use tddy_worktree_service::branch_intent::BranchIntentRequest;
 
-use crate::cli_agent_steps::{
-    hooks_report_over_the_agent_tool_socket, refuse_a_role_the_agent_cannot_hold,
-    start_conversation, ConversationStart,
-};
+use crate::cli_agent_steps::conversation::refuse_a_role_the_agent_cannot_hold;
+use crate::cli_agent_steps::conversation::start_conversation;
+use crate::cli_agent_steps::conversation::ConversationStart;
+use crate::cli_agent_steps::hooks_report_over_the_agent_tool_socket;
 use crate::cli_harness_jail::{
     agent_tddy_tools, jail_route_config_env, prompt_ahead_of_slots, require_jail_route, CliJail,
     JailWiring, TDDY_TOOLS_ID,
@@ -293,6 +293,7 @@ impl LaunchSessions {
         let conversation = start_conversation(ConversationStart {
             spec: &session_agent.agent.spec,
             binary: &session_agent.agent.tool.binary,
+            env_base: &session_agent.agent.env_base,
             worktree: &worktree_path,
             env: &[],
             session_id,
@@ -395,14 +396,8 @@ fn write_jail_hooks(
         ))
     })?;
     let tddy_tools_path = tddy_tools.binary.to_string_lossy().into_owned();
-    let probe = crate::claude_cli_spawn_steps::claude_cli_hooks(
-        config,
-        Path::new("/"),
-        spec,
-        &tddy_tools_path,
-    );
     if !spec.has(tddy_coding_agent_specs::Capability::Hooks)
-        || !hooks_report_over_the_agent_tool_socket(spec, &probe)
+        || !hooks_report_over_the_agent_tool_socket(spec)
     {
         return Ok(None);
     }
@@ -416,9 +411,9 @@ fn write_jail_hooks(
         os_user,
         hook_token: &hook_token,
         daemon_socket: Some(&daemon_socket),
-        answer_wait_secs: probe.answer_wait_secs,
+        answer_wait_secs: spec.answer_wait_secs(),
     };
-    crate::claude_cli_spawn_steps::record_hook_answer_wait(session_dir, &probe)?;
+    crate::claude_cli_spawn_steps::record_answer_wait_secs(session_dir, spec.answer_wait_secs())?;
     let adapter = tddy_coding_agent_specs::slots::hooks::adapter(&spec.agent.hooks.adapter)
         .map_err(|e| Status::internal(e.to_string()))?;
     let (path, bytes) = adapter

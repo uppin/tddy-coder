@@ -44,7 +44,7 @@ fn test_binaries_of(crate_name: &str) -> BTreeSet<String> {
 /// kind cannot move at all, because `CARGO_MANIFEST_DIR` would then name whichever crate it landed
 /// in and the assertion would silently be about something else. `tddy-workflow-recipes`'
 /// `proto_workflow_contracts.rs` is the same shape and stays put for the same reason.
-const BELONGS_HERE: [&str; 34] = [
+const BELONGS_HERE: [&str; 36] = [
     "session_agent_remote_acceptance.rs",
     "remote_managed_worktree_cross_host_acceptance.rs",
     "split_session_resume_acceptance.rs",
@@ -66,6 +66,9 @@ const BELONGS_HERE: [&str; 34] = [
     "local_socket_family_wiring_acceptance.rs",
     // Mounts `runtime::build` for both hosts: which of them enrols a first login is its decision.
     "first_login_enrolment_acceptance.rs",
+    // Builds and starts this crate's own `runtime::build` for the binary host and dials the
+    // per-OS-user agent-tool socket it serves (`#agent-tools` 26/28).
+    "server_agent_tool_socket_acceptance.rs",
     // Mounts `runtime::build` and reads the vaults it shares through `DaemonRuntime`'s accessor.
     "accounts_stub_daemon_acceptance.rs",
     // Mounts `runtime::build` and asks its accounts service, which reads the registry the host
@@ -91,6 +94,9 @@ const BELONGS_HERE: [&str; 34] = [
     // Mounts `runtime::build` with a subscriber registered on its options, which is this crate's own
     // seam for an embedding host (`RuntimeOptions::with_notification_subscriber`).
     "runtime_notification_subscriber_acceptance.rs",
+    // Mounts `runtime::build`, whose one coding-agent registry load refuses a broken tool file, and
+    // reads the instance Telegram was given through this crate's `RuntimeTasks::telegram_coding_agents`.
+    "host_registry_load.rs",
     // Read this package's own `src/`, so they are about `tddy-daemon` wherever they sit.
     "local_socket_reachability_acceptance.rs",
     "unbundle_endpoint.rs",

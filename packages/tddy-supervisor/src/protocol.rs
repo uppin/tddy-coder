@@ -209,6 +209,7 @@ pub fn spawn_relayed_to_wire(
             .map(path_to_wire)
             .transpose()?,
         relay_socket: path_to_wire(&request.relay_socket)?,
+        scope: request.scope,
     })
 }
 
@@ -220,6 +221,7 @@ pub fn spawn_relayed_from_wire(request: wire::SpawnRelayedRequest) -> SpawnRelay
         env: request.env.into_iter().collect::<BTreeMap<_, _>>(),
         working_dir: request.working_dir.map(PathBuf::from),
         relay_socket: PathBuf::from(request.relay_socket),
+        scope: request.scope,
     }
 }
 

@@ -1,6 +1,6 @@
 # Session Files — Uploaded files in the Inspector, draggable to the terminal
 
-**Component:** `SessionInspectorDrawer` → new **Files** tab (`packages/tddy-web/src/components/sessions/`)
+**Component:** `SessionInspectorDrawer` → new **Files** tab (`packages/tddy-session-web/src/`)
 **Updated:** 2026-07-25
 **Status:** Implemented
 

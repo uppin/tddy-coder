@@ -94,8 +94,9 @@ the stage in git's words (`Counting objects`, `Receiving objects`, `Resolving de
 counts, bytes received and throughput. The events are throttled where git runs — at most four a second,
 plus every stage change and every 100% — so neither the spawn worker's pipe nor a relayed stream carries
 git's every redraw. A start whose project is already on the host reports no clone step. On a host run by
-`tddy-supervisor` the supervisor runs git and streams its progress back (`CloneRepository`), so the
-clone step looks the same, a failure carries git's own message, and the clone can be stopped.
+`tddy-supervisor` the supervisor runs the `tddy-git-clone` helper as the session user and streams its
+stderr back (`SpawnStreamed`); the daemon parses git's progress from it, so the clone step looks the
+same, a failure carries git's own message, and the clone can be stopped.
 
 **No deadline, and no half-written checkout.** A clone takes as long as its repository and network do;
 only the operator stopping it (or the client hanging up) ends it early. Git writes into a temporary
@@ -209,10 +210,11 @@ an ordinary, still read-only session, and main is set up once more.
   (`--mcp-config <session dir>/claude-mcp-config.json` and `--strict-mcp-config`). Its process
   environment names the main itself (`TDDY_REMOTE_SESSION_ID`) under a credential of its own
   (`TDDY_REMOTE_SESSION_TOKEN`): minted by this daemon from the **verified** caller of the ensure or
-  resume, with the 24 h agent lifetime, never the caller's own token; a resume mints afresh. On an
-  embedded daemon (Tddy Desktop) `TDDY_REMOTE_DAEMON_SOCKET` names its agent-tool socket, which
-  `tddy-tools` prefers; on a binary `tddy-daemon` the tools reach `TDDY_REMOTE_DAEMON_URL`, its local
-  HTTP URL. Because the main's record holds the home worktree, the daemon runs each call there, under
+  resume, with the 24 h agent lifetime, never the caller's own token; a resume mints afresh. `TDDY_REMOTE_DAEMON_SOCKET` names
+  the agent-tool socket of the main's OS user — Tddy Desktop's one socket, or a server daemon's
+  per-user one — which `tddy-tools` prefers over `TDDY_REMOTE_DAEMON_URL`, the daemon's local HTTP
+  URL. A main whose user the daemon cannot give a socket (under `tddy-supervisor`, one `users.yaml`
+  does not map) is refused at start. Because the main's record holds the home worktree, the daemon runs each call there, under
   the role guard above. A start or resume that cannot mint the credential, or cannot find the
   toolchain's `tddy-tools`, is refused and starts nothing. The main's MCP config and role prompt are
   written into its session directory only when its agent is spawned, so a refused start leaves

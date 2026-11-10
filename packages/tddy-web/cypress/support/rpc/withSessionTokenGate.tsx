@@ -9,7 +9,7 @@
  */
 
 import React, { useEffect, useState, type ReactNode } from "react";
-import { RpcTransportProvider, useAuthTokenGate } from "../../../src/rpc/transportProvider";
+import { RpcTransportProvider, useAuthTokenGate } from "../../../src/app/rpc/transportProvider";
 
 function InstallSessionToken({ token, children }: { token: string; children: ReactNode }) {
   const gate = useAuthTokenGate();

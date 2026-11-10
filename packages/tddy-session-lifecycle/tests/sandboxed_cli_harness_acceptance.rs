@@ -207,11 +207,12 @@ async fn a_sandboxed_opencode_session_runs_in_its_jail_on_the_provider_account()
     assert_eq!(meta.session_type.as_deref(), Some("opencode-cli"));
     assert_eq!(meta.sandbox, Some(true));
 
-    // And the jailed harness runs on the route's model, its config file and its key
+    // And the jailed harness runs on the route's model, its configuration inline in
+    // OPENCODE_CONFIG_CONTENT with no file named (`#agent-tools 29/32`), and its key
     let terminal = daemon
         .terminal_showing(
             &session_id,
-            &["ARGV:", "OPENCODE_CONFIG=/", &format!("KEY={META_KEY}")],
+            &["ARGV:", "OPENCODE_CONFIG=UNSET", &format!("KEY={META_KEY}")],
         )
         .await;
     assert!(terminal.contains("ARGV:"), "no harness output: {terminal}");
@@ -219,7 +220,11 @@ async fn a_sandboxed_opencode_session_runs_in_its_jail_on_the_provider_account()
         terminal.contains(&format!("--model tddy-route/{MUSE_MODEL}")),
         "{terminal}"
     );
-    assert!(terminal.contains("OPENCODE_CONFIG=/"), "{terminal}");
+    assert!(terminal.contains("OPENCODE_CONFIG=UNSET"), "{terminal}");
+    assert!(
+        terminal.contains(&format!(r#""model": "tddy-route/{MUSE_MODEL}""#)),
+        "{terminal}"
+    );
     assert!(terminal.contains(&format!("KEY={META_KEY}")), "{terminal}");
 }
 
@@ -297,7 +302,8 @@ async fn resuming_a_sandboxed_muse_session_relaunches_its_jail_continuing_on_the
 // Fixtures
 // ---------------------------------------------------------------------------
 
-/// A stub harness that prints its argv, `OPENCODE_CONFIG`, OpenCode's route key and Muse's
+/// A stub harness that prints its argv, `OPENCODE_CONFIG`, the inline `OPENCODE_CONFIG_CONTENT`
+/// (newlines removed), OpenCode's route key and Muse's
 /// `META_API_KEY` on its terminal, then waits on stdin so the session stays up.
 fn a_stub_harness_printing_its_launch(dir: &Path, name: &str) -> PathBuf {
     let path = dir.join(name);
@@ -305,7 +311,8 @@ fn a_stub_harness_printing_its_launch(dir: &Path, name: &str) -> PathBuf {
         &path,
         "#!/bin/sh\n\
          echo \"ARGV: $@\"\n\
-         echo \"OPENCODE_CONFIG=$OPENCODE_CONFIG\"\n\
+         echo \"OPENCODE_CONFIG=${OPENCODE_CONFIG-UNSET}\"\n\
+         echo \"INLINE=$(printf '%s' \"$OPENCODE_CONFIG_CONTENT\" | tr -d '\\n')\"\n\
          echo \"KEY=$OPENCODE_PROVIDER_KEY\"\n\
          echo \"META=$META_API_KEY\"\n\
          cat\n",
@@ -340,18 +347,21 @@ fn vaults_holding_a_meta_account(dir: &Path) -> Arc<SessionVaults> {
 
 fn a_daemon_config() -> (tempfile::TempDir, DaemonConfig) {
     let dir = tempfile::tempdir().unwrap();
-    let yaml = format!(
-        r#"
-users:
-  - github_user: "{OWNER}"
-    os_user: "{OWNER}"
+    let yaml = r#"
 allowed_tools:
   - path: /bin/true
     label: true
-"#
-    );
+"#;
     let config_path = dir.path().join("daemon.yaml");
     std::fs::write(&config_path, yaml).unwrap();
+    std::fs::write(
+        std::path::Path::new(&(config_path))
+            .parent()
+            .expect("a config directory")
+            .join("users.yaml"),
+        format!("- github_user: \"{OWNER}\"\n  os_user: \"{OWNER}\"\n"),
+    )
+    .unwrap();
     let config = DaemonConfig::load(&config_path).expect("config must parse");
     (dir, config)
 }
@@ -379,8 +389,8 @@ fn session_host(
         tddy_session_lifecycle::peer_routing::PeerRouting::local_only(&config),
         Arc::new(tddy_daemon_kernel::operator_channel::NoOperatorChannel),
         Arc::new(CliSessionManager::new()),
+        agents,
     )
-    .with_coding_agents(agents)
 }
 
 /// The coding agents a daemon keeping its state in `tddy_home` launches from, as the daemon runtime

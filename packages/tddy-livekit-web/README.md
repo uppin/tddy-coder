@@ -1,48 +1,26 @@
 # tddy-livekit-web
 
-ConnectRPC Transport over LiveKit data channels for browser-based TypeScript clients.
+LiveKit for the tddy web app. This package and `tddy-livekit-rpc-web` are the only ones that import
+`livekit-client`; every other web package reaches a room through `tddy-client-web`'s ports.
 
-## Overview
+- **Registration** — `livekitPorts()` builds the LiveKit implementations of the presence and room-RPC
+  ports once; `LiveKitPortsProvider` mounts them. That is the one call `tddy-web` makes.
+- **Connection** — `LiveKitConnectionProvider` / `LiveKitConnections` (the `ConnectionProvider` that
+  reaches a host over the common room), the session room connection, the room terminal feed and
+  `useDirectRoomTerminal`.
+- **Rooms and presence** — `useCommonRoom`, `useRoomParticipants`, the common-room directory source,
+  `HostPresenceRoom` / `useHostPresence`, `presenceIdentityForUser`.
+- **Screens** — `LiveKitRoomsContent` (the `#/livekit` body: `ParticipantList` + `LiveKitRoomsPanel`).
+- **Transport seam** — `LiveKitTransportProvider`: the app lends the factory that wraps every LiveKit
+  transport (auth gate, traffic meter); this package supplies the default (`createDefaultLiveKitTransport`).
+- **Testkit** — `tddy-livekit-web/testkit`: rooms a spec can seed (`aJoinedRoom`, `aDisconnectedRoom`,
+  `aFakeCommonRoom`) and rooms that cannot be joined. They return opaque `RoomHandle`s, so a spec
+  holding one imports nothing from `livekit-client`.
 
-Implements the ConnectRPC `Transport` interface over LiveKit data channels using the `tddy-rpc` envelope protocol. Enables any ConnectRPC client to call unary and streaming RPCs served by a Rust `LiveKitParticipant`.
+Not here yet: screen sharing, VNC, the presenter room and camera video — the media layer — which
+still sit in `tddy-web` until `feature/web-split/media` moves them behind `MediaPort`.
 
-## Features
+It imports nothing from `tddy-web`.
 
-- **LiveKitTransport** — ConnectRPC Transport with `unary()` and `stream()` methods
-- **AsyncQueue** — Backpressure-aware async channel for streaming responses
-- **Streaming support** — Unary, client streaming, server streaming, bidirectional streaming
-
-## Usage
-
-```typescript
-import { Room } from "livekit-client";
-import { createClient } from "@connectrpc/connect";
-import { createLiveKitTransport } from "tddy-livekit-web";
-import { EchoService } from "./gen/echo_pb.js";
-
-const room = new Room();
-await room.connect(url, token);
-
-const transport = createLiveKitTransport({
-  room,
-  targetIdentity: "server",
-});
-
-const client = createClient(EchoService, transport);
-const response = await client.echo({ message: "hello" });
-```
-
-## Dependencies
-
-- `livekit-client` — Room connection and data channel I/O
-- `@bufbuild/protobuf` — Protobuf serialization
-- `@connectrpc/connect` — Transport interface
-
-## Testing
-
-Cypress component tests run against a real Rust echo server. Requires `LIVEKIT_TESTKIT_WS_URL` and pre-built `target/debug/examples/echo_server`:
-
-```bash
-eval $(./run-livekit-testkit-server | grep '^export ')
-cd packages/tddy-livekit-web && bun run cypress:component
-```
+Tests: `bun test src` (hooks, session connection, boundary rule) and `bun run cypress:component`
+(`ParticipantList`, camera capability gating). Neither needs a LiveKit server.

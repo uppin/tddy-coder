@@ -521,20 +521,35 @@ environment the `claude-cli` launch produces:
 - **ssh checkout.** On an ssh checkout the slot files are written on the target over ssh (bounded by
   the 60 s slot-write deadline; a target that never answers refuses the start `DEADLINE_EXCEEDED`
   naming the host), never at that path on this host.
-- **No `TDDY_*` variable.** The agent process sees no `TDDY_*` variable: a host PTY runs under
-  `env -u` for each the daemon holds, and a tmux pane unsets every one it inherited from the tmux
-  server before it execs the agent. A managed workflow's or a main's `TDDY_*` pair is carried by the
-  agent's tool-server registration (`mcp` env), never the process.
+- **An allow-listed environment.** The agent process starts from an environment the daemon
+  computes, not from the daemon's own: the base set (`PATH`, `HOME`, `USER`, `LOGNAME`, `SHELL`,
+  `TERM`, `LANG`, `LC_*`, `TMPDIR`, `TZ`, `SSH_AUTH_SOCK`, proxy variables, `XDG_*`) read from the
+  daemon, the variables the spec's `pass_env` names, and what the launch sets on purpose. No other
+  daemon variable reaches it, so a `CLAUDE_CODE_*` marker or a CI token the daemon was started with
+  stays behind. A host PTY, a tmux pane (which keeps only its own `TERM`, `COLORTERM`, `TMUX` and
+  `TMUX_PANE` besides), a headless turn, an ACP agent, the conversation-id mint and a relayed
+  (supervisor-spawned) agent all start from it. An operator adds a variable in `pass_env` of
+  `tools/<agent>.yaml`, or replaces the base set with `tools/agent-env/base.yaml`
+  ([Harness profiles § The agent's environment](harness-profiles.md#the-agents-environment)).
+- **No `TDDY_*` variable.** The agent process sees no `TDDY_*` variable. A managed workflow's or a
+  main's `TDDY_*` pair is carried by the agent's tool-server registration (`mcp` env), never the
+  process.
 - **Session pointer.** So a `tddy-tools submit`, `transition`, `ask` or `notify` the agent runs from
   its own shell still reaches the session, the launch writes `<worktree>/.tddy/session.json` at every
   start and resume ([tddy-tools session resolution](../../../packages/tddy-tools/docs/session-resolution.md)):
-  the managed workflow's socket, session and repo directories, and the operator-notify session. It is
-  owner-only (`0600`), added to the repository's `info/exclude` when the worktree is in a git
-  checkout, replaced on resume, and removed when the agent exits (in tmux only when the launch has an
-  exit hook, which keeps the pane) and when the session is deleted. On an ssh checkout it is written
-  on the target through the bounded slot write, and is neither excluded nor removed there
-  ([todo](../../dev/todo/2026-11-06-ssh-session-pointer-exclude-and-removal.md)). A jailed session
-  writes none: its shell relay carries the session.
+  the managed workflow's socket, session and repo directories, the operator-notify session, and its
+  owner — the daemon's pid and host. It is owner-only (`0600`), added to the repository's
+  `info/exclude` when the worktree is in a git checkout, replaced on resume, and removed when the
+  agent exits (in tmux only when the launch has an exit hook, which keeps the pane; without one it is
+  replaced at the next resume and removed at the delete) and when the session is deleted. On an ssh
+  checkout the same holds on the target: one ssh command, bounded like the slot write, adds the
+  pointer to the target checkout's `info/exclude` and writes it owner-only, and the removals are a
+  bounded ssh command each. A `tddy-tools` on the daemon's host refuses a pointer whose owner has
+  exited or whose socket is gone, naming the pointer; one on the ssh target does not check an owner on
+  another host. The remote agent is not yet recorded as an ssh pointer's owner
+  ([todo](../../dev/todo/2026-11-07-ssh-agent-launch-remote-pointer-owner.md)). A jailed session
+  writes none: its shell relay carries the session, and a pointer copied into the jail would name a
+  host socket the jail cannot reach.
 - **Jail.** The generic jailed start and resume bind the same conversation, permission mode and
   session id, and carry a managed workflow for a spec declaring `managed_workflow`.
 - **Branch intent.** A `new_branch_from_base` start naming no branch is refused exactly when the
@@ -730,19 +745,20 @@ The `tddy-tools` binary is `binary.command` of `tools/tddy-tools.yaml` (default:
 
 ### Which transport a hook reports over
 
-| Host | Hook command carries | Reports go over |
-|---|---|---|
-| Binary daemon (`tddy-daemon`) | `--daemon <daemon_url>` | HTTP: `{daemon_url}/rpc/activity.ActivityService/<method>` |
-| Tddy Desktop (embedded daemon) | `--daemon <daemon_url> --daemon-socket '<path>'` | The daemon's **agent-tool socket** — the Unix socket an embedded daemon binds for co-located processes, serving its full RPC roster |
+Every hook command a host launch writes carries `--daemon <daemon_url> --daemon-socket '<path>'`, and
+`session-hook` reports over the socket alone (a jailed launch points it at the in-jail tool-IPC socket
+instead, which the runner relays). The path is the **agent-tool socket of the session's OS
+user** — a Unix socket the daemon serves its full RPC roster on for co-located processes:
 
-An embedded daemon serves no HTTP RPC: its `listen.web_port` is only where a GitHub sign-in returns,
-and answers `/rpc` with 404. The socket is passed exactly when one is **listening** at
-`agent_tool_socket_path(<resolved data dir>)` at session start (`embedded_host_agent_tool_socket`) —
-a live connect, not the file existing, because the embedded daemon does not unlink the socket on
-exit and a binary daemon later started on the same data dir must keep using HTTP. The data dir is the
-one the daemon resolved (`TDDY_DATA_DIR` wins over `tddy_data_dir` in the config), the same one it
-bound the socket under. When `--daemon-socket` is given, `session-hook` uses only the socket. Hooks
-are written at session start, so a session keeps the transport it started with until it restarts.
+| Host | `--daemon-socket` |
+|---|---|
+| Tddy Desktop (embedded daemon) | the daemon's one socket, `agent_tool_socket_path(<resolved data dir>)`. An embedded daemon serves no HTTP RPC (its `listen.web_port` only answers a GitHub sign-in and returns 404 for `/rpc`), and a session started before the runtime serves the socket is refused rather than pointed at it |
+| Server daemon (`tddy-daemon` binary) | `<data dir>/run/<os user>/daemon.sock`: a directory `0700` and a socket `0600`, both owned by that user, so only that user (and root) can connect. Bound when the user's first session starts; the data dir is the one the daemon resolved (`TDDY_DATA_DIR` wins over `tddy_data_dir`) |
+| Server daemon under `tddy-supervisor` | the socket the supervisor created for that user because `users.yaml` maps them (`/run/tddy-users/<os user>/daemon.sock`; the unprivileged daemon cannot `chown` one to another user). An unmapped user has the start **refused** (`FAILED_PRECONDITION`, naming `users.yaml`) — never started with hooks that report nowhere. See [tddy-supervisor § One socket per user](../supervisor/tddy-supervisor.md#one-socket-per-user-handed-to-the-daemon) |
+
+The socket path is resolved before anything of the start is created. Hooks are written at session
+start, so a session keeps the socket it started with until it restarts. A server daemon that stops
+removes the sockets it bound itself and leaves the supervisor's in place for the next daemon.
 
 Split agents' hooks are written the same way. Cursor-cli hooks report over the agent-tool socket on
 the host and over the tool-IPC bridge in a jail — see
@@ -778,11 +794,11 @@ The launch gives it two things, at start and again at resume:
   | `TDDY_SESSION_ID` | the session id |
   | `TDDY_OS_USER` | the OS user that owns the session |
   | `TDDY_HOOK_TOKEN` | the session's `hook_token` — the same credential its hooks present |
-  | `TDDY_DAEMON_SOCKET` | the embedded daemon's agent-tool socket, when one is listening (the same rule as the hooks' `--daemon-socket`) |
-  | `TDDY_DAEMON_URL` | otherwise, the hooks' daemon URL |
+  | `TDDY_DAEMON_SOCKET` | the session OS user's agent-tool socket — the hooks' `--daemon-socket` |
+  | `TDDY_DAEMON_URL` | the hooks' daemon URL, when no socket is given (never for a daemon-launched agent) |
 
-  Exactly one of the last two is given: an embedded daemon serves no HTTP RPC, so a URL there would
-  reach nothing.
+  Exactly one of the last two is given: a daemon-launched agent always gets the socket, which is how
+  an embedded daemon, which serves no HTTP RPC, is reached at all.
 - **One guidance paragraph** in its system prompt (`agent_notify_guidance.md`): the command exists,
   use it when long work finishes or something blocks while the operator is likely away, never for
   routine progress. `claude` takes a single `--append-system-prompt-file`, so the daemon writes
@@ -820,8 +836,8 @@ message StartSessionRequest {
 
 `activity.proto` — the activity-status hooks, on `activity.ActivityService` (served by
 `tddy-session-activity`; `#unbundle` node 7 moved them off `connection.ConnectionService`, so the
-hook calls `activity.ActivityService/ReportSessionStatus` — over HTTP at `{daemon_url}/rpc/…`, or over
-the agent-tool socket on Tddy Desktop):
+hook calls `activity.ActivityService/ReportSessionStatus` — over the session OS user's agent-tool socket; `{daemon_url}/rpc/…`
+over HTTP for a hook command given no socket):
 
 ```proto
 rpc ReportSessionStatus(ReportSessionStatusRequest) returns (ReportSessionStatusResponse);

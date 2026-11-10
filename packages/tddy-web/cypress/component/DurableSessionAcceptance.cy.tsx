@@ -10,11 +10,10 @@
  */
 
 import React, { useRef } from "react";
-import { AuthProvider, useAuthContext } from "../../src/hooks/authProvider";
-import { useDaemonClient } from "../../src/rpc/selectedDaemon";
-import { AuthService } from "../../src/gen/auth_pb";
-import { SessionService } from "../../src/gen/session_pb";
-import { TerminalSessionService } from "../../src/gen/terminal_session_pb";
+import { AuthProvider, useAuthContext } from "../../src/app/auth/authProvider";
+import { AuthService } from "tddy-client-web/gen/auth_pb";
+import { SessionService } from "tddy-client-web/gen/session_pb";
+import { TerminalSessionService } from "tddy-client-web/gen/terminal_session_pb";
 import { mountWithRpc } from "../support/rpc/inMemory";
 import { mountWithRecordingLiveKitRpc } from "../support/rpc/recordingLiveKitRpc";
 import { withSelectedDaemon } from "../support/rpc/withSelectedDaemon";
@@ -28,6 +27,7 @@ import {
   EXPIRED_REFRESH_TOKEN,
   REFRESHED_ACCESS_TOKEN,
 } from "../support/rpc/durableSessionBackend";
+import { useDaemonClient } from "tddy-client-web";
 
 // ---------------------------------------------------------------------------
 // Harness probes

@@ -34,6 +34,7 @@ fn minimal_service_with_tracker(tracker: Arc<IdleTimeoutTracker>) -> TestDaemon 
             tddy_session_lifecycle::peer_routing::PeerRouting::local_only(&DaemonConfig::default()),
             Arc::new(tddy_daemon_kernel::operator_channel::NoOperatorChannel),
             Arc::new(CliSessionManager::new()),
+            tddy_agent_launch::host_coding_agents::no_coding_agents(),
         )
         .with_idle_tracker(tracker),
     )

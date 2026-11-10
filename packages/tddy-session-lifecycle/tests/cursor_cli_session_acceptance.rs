@@ -37,18 +37,21 @@ fn write_config_with_cursor_cli_binary(
 
 fn load_cursor_cli_config(dir: &std::path::Path) -> DaemonConfig {
     let os_user = cursor_cli_support::current_os_user();
-    let yaml = format!(
-        r#"
-users:
-  - github_user: "testuser"
-    os_user: "{os_user}"
+    let yaml = r#"
 allowed_tools:
   - path: /bin/true
     label: true
-"#
-    );
+"#;
     let config_path = dir.join("daemon.yaml");
     std::fs::write(&config_path, yaml).unwrap();
+    std::fs::write(
+        std::path::Path::new(&(config_path))
+            .parent()
+            .expect("a config directory")
+            .join("users.yaml"),
+        format!("- github_user: \"testuser\"\n  os_user: \"{os_user}\"\n"),
+    )
+    .unwrap();
     DaemonConfig::load(&config_path).expect("config must parse")
 }
 
@@ -104,8 +107,8 @@ fn minimal_service(config: DaemonConfig, stub: &str, sessions_base: PathBuf) -> 
         tddy_session_lifecycle::peer_routing::PeerRouting::local_only(&config),
         Arc::new(tddy_daemon_kernel::operator_channel::NoOperatorChannel),
         Arc::new(CliSessionManager::new()),
+        agents,
     )
-    .with_coding_agents(agents)
 }
 
 fn create_test_repo_with_origin(dir: &std::path::Path) {

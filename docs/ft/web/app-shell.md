@@ -113,7 +113,11 @@ appears only where the connection also carries media.
 
 ## Theme
 
-Every screen uses the shared shadcn theme (`src/index.css` tokens, `.dark` navy palette).
+Every screen uses the shared shadcn theme (`.dark` navy palette), owned by the `tddy-ui-web`
+package (`tddy-ui-web/theme.css`, which `tddy-web/src/index.css` imports) together with the shadcn
+primitives (`Button`, `InlineError`, `ScrollArea`, `Select`, `Table`, `Toast`, `Tooltip`), `cn`,
+`useIsMobile` and `useVisualViewport`. The kit imports nothing from `tddy-web`, generated RPC code,
+ConnectRPC or LiveKit, so any web package can render the same look without depending on the app.
 The standalone `ConnectionForm` and `DaemonLoginScreen` in `src/index.tsx` use theme-token
 classes (`text-foreground`, `text-muted-foreground`, `text-destructive`, `border-input`,
 `bg-background`) instead of inline hex, matching the rest of the app.

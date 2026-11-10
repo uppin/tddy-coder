@@ -93,6 +93,8 @@ mod tests {
         let dir = tempfile::tempdir().expect("a temp dir for the daemon config");
         let path = dir.path().join("daemon.yaml");
         std::fs::write(&path, yaml).expect("writing the daemon config");
+        // Every load needs a users.yaml beside the config; this daemon maps nobody.
+        std::fs::write(dir.path().join("users.yaml"), "[]\n").expect("writing the users file");
         DaemonConfig::load(&path).expect("loading the daemon config")
     }
 

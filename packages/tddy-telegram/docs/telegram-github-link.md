@@ -6,7 +6,7 @@ Technical reference for **`tddy_telegram::telegram_github_link`**, moved out of 
 
 ## Purpose
 
-Binds a **Telegram user id** to a **GitHub login** using the same **`daemon.yaml`** **`users:`** mapping (**`github_user`** → **`os_user`**) as web clients after OAuth. Supports automated tests with **`StubGitHubProvider`** without live GitHub or Telegram.
+Binds a **Telegram user id** to a **GitHub login** using the same **`users.yaml`** mapping (**`github_user`** → **`os_user`**) as web clients after OAuth. Supports automated tests with **`StubGitHubProvider`** without live GitHub or Telegram.
 
 ## Components
 

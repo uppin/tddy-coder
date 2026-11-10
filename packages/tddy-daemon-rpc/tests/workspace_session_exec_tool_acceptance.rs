@@ -26,12 +26,17 @@ const TEST_PROJECT_ID: &str = "test-project";
 fn write_config() -> (tempfile::TempDir, DaemonConfig) {
     let dir = tempfile::tempdir().unwrap();
     let yaml = r#"
-users:
-  - github_user: "testuser"
-    os_user: "testuser"
 "#;
     let config_path = dir.path().join("daemon.yaml");
     std::fs::write(&config_path, yaml).unwrap();
+    std::fs::write(
+        std::path::Path::new(&(config_path))
+            .parent()
+            .expect("a config directory")
+            .join("users.yaml"),
+        "- github_user: \"testuser\"\n  os_user: \"testuser\"\n",
+    )
+    .unwrap();
     let config = DaemonConfig::load(&config_path).expect("config must parse");
     (dir, config)
 }
@@ -47,20 +52,18 @@ fn minimal_service(config: DaemonConfig, sessions_base: PathBuf) -> TestDaemon {
             None
         }
     });
-    TestDaemon::from_host(
-        DaemonSessionHost::new(
-            config.clone(),
-            sessions_base_resolver,
-            tddy_data_dir,
-            user_resolver,
-            None,
-            tddy_spawn::supervisor_client::SpawnBackendChoice::ForkedWorker,
-            tddy_session_lifecycle::peer_routing::PeerRouting::local_only(&config),
-            Arc::new(tddy_daemon_kernel::operator_channel::NoOperatorChannel),
-            Arc::new(tddy_session_lifecycle::claude_cli_session::CliSessionManager::new()),
-        )
-        .with_coding_agents_if_none(tddy_session_lifecycle::test_util::builtin_coding_agents()),
-    )
+    TestDaemon::from_host(DaemonSessionHost::new(
+        config.clone(),
+        sessions_base_resolver,
+        tddy_data_dir,
+        user_resolver,
+        None,
+        tddy_spawn::supervisor_client::SpawnBackendChoice::ForkedWorker,
+        tddy_session_lifecycle::peer_routing::PeerRouting::local_only(&config),
+        Arc::new(tddy_daemon_kernel::operator_channel::NoOperatorChannel),
+        Arc::new(tddy_session_lifecycle::claude_cli_session::CliSessionManager::new()),
+        tddy_session_lifecycle::test_util::builtin_coding_agents(),
+    ))
 }
 
 /// Create a bare git repo that can serve as an origin for worktree creation.

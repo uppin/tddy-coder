@@ -159,6 +159,7 @@ impl DaemonSessionHost {
             session_admissions: Arc::clone(&self.session_admissions),
             model_registry: self.model_registry.clone(),
             coding_agent_launcher: self.coding_agent_launcher.clone(),
+            coding_agents: self.launch_coding_agents().agents_shared(),
             host: Arc::new(self.clone()),
         }
     }
@@ -189,7 +190,12 @@ impl DaemonSessionHost {
                 })
             },
             session_tokens: self.session_tokens.clone(),
+            coding_agents: self.launch_coding_agents().agents_shared(),
+            session_pointers: Arc::new(
+                tddy_agent_launch::split_session_pointers::HostSplitSessionPointers,
+            ),
             agent_roster: self.agent_roster(),
+            agent_tool_sockets: Arc::clone(&self.agent_tool_sockets),
             host: Arc::new(self.clone()),
         }
     }
@@ -209,6 +215,7 @@ impl DaemonSessionHost {
             sandbox_manager: Arc::clone(&self.sandbox_manager),
             task_registry: self.task_registry.clone(),
             host_session_sockets: Arc::clone(&self.host_session_sockets),
+            agent_tool_sockets: Arc::clone(&self.agent_tool_sockets),
             agent_activity_hub: Arc::clone(&self.agent_activity_hub),
             agent_roster: self.agent_roster(),
             split_sessions: self.split_sessions(),

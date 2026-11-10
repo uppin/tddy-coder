@@ -61,8 +61,8 @@ serves `--workspace-tools`, and refuses anything else (`nothing to run`). It has
 Code, Cursor, OpenCode and Muse included, is a tool plan its launcher renders from the agent's spec
 (`tddy-coding-agent-specs`). A provider route's secrets reach the child through the
 `TDDY_SECRET_<NAME>` files, and its files are written owner-only into the scratch
-(`tddy-sandbox-recipes`, `route_files.rs`). `--model` is still accepted and read by nothing
-(`docs/dev/todo/2026-11-03-runner-model-flag-is-vestigial.md`).
+(`tddy-sandbox-recipes`, `route_files.rs`). The runner has no `--model` flag: the
+parser refuses one, since what a confined agent runs on is its exec plan's argv.
 
 **Shutdown.** A jail that runs one process (an exec plan or a confined action) shuts its server down
 about 300 ms after that process exits. The exit wait runs on a detached thread, not on a
@@ -223,7 +223,7 @@ Product behaviour is [sandboxed-codebase-mode.md](../../../docs/ft/coder/sandbox
 | `env` | Clean environment (`HOME`/`TMPDIR` redirected into scratch) |
 | `profile_path` | Rendered SBPL file path |
 | `loopback_allow_ports` | Loopback TCP ports allowed in SBPL (gRPC + egress shim) |
-| `ipc_socket` | Short out-of-tree AF_UNIX path for tool IPC |
+| `ipc_socket` | Short out-of-tree AF_UNIX path for tool IPC: `SandboxSpec::short_ipc_socket_path(session_id)` is `<canonical temp dir>/tddy-<FNV-1a 64 of the whole session id, 16 hex digits>-<daemon pid>.sock` — the whole id, since a UUIDv7's leading characters are its millisecond timestamp and two sessions started together share them; fixed-length, so any session id stays under macOS's 104-byte `sun_path` |
 
 ## Sandbox builder (explicit plan)
 

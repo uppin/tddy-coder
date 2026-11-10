@@ -15,10 +15,10 @@
 import React from "react";
 import { create } from "@bufbuild/protobuf";
 import { anInMemoryRpcBackend } from "tddy-connectrpc-testkit";
-import { HostRemoteDesktopSchema, ProbeOutcome } from "../../src/gen/host_pb";
-import { DesktopAuthMethod, Protocol, ScreenSharingService } from "../../src/gen/screen_sharing_pb";
-import { HostRowRemoteDesktop } from "../../src/components/hosts/HostRowRemoteDesktop";
-import { SessionsDrawerScreen } from "../../src/components/sessions/SessionsDrawerScreen";
+import { HostRemoteDesktopSchema, ProbeOutcome } from "tddy-client-web/gen/host_pb";
+import { DesktopAuthMethod, Protocol, ScreenSharingService } from "tddy-client-web/gen/screen_sharing_pb";
+import { HostRowRemoteDesktop } from "tddy-hosts-web";
+import { SessionsDrawerScreen } from "tddy-session-web";
 import { mountWithRecordingLiveKitRpc, type RecordedRpcCall } from "../support/rpc/recordingLiveKitRpc";
 import { withSelectedDaemon } from "../support/rpc/withSelectedDaemon";
 import { aSessionsDrawerBackend } from "../support/rpc/screenSharingBackend";

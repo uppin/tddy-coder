@@ -10,9 +10,9 @@ How the browser turns a watched desktop into a usable one: `useScreenSharingInpu
 
 | File | Holds |
 |---|---|
-| `src/components/sessions/screenSharingInput.ts` | `framebufferPointFor`, `keysymFor`, `rfbButtonMaskFor` — pure, total, unit-tested |
-| `src/components/sessions/useScreenSharingInput.ts` | the stream's lifetime, event capture, coalescing, the closing chord |
-| `src/components/sessions/ScreenSharingOverlay.tsx` | mounts the hook, renders the picture, the chord label and the unavailable notice |
+| `tddy-livekit-web` `src/media/screenSharingInput.ts` | `framebufferPointFor`, `keysymFor`, `rfbButtonMaskFor` — pure, total, unit-tested |
+| `tddy-livekit-web` `src/media/useScreenSharingInput.ts` (the `MediaPort`'s `useScreenSharingInput`) | the stream's lifetime, event capture, coalescing, the closing chord |
+| `tddy-hosts-web` `src/ScreenSharingOverlay.tsx` | mounts the hook, renders the picture, the chord label and the unavailable notice |
 
 One overlay serves both scopes — a host's desktop and a session's — so both get the same input
 behaviour from the same code. There is no host-scoped or session-scoped input path.
@@ -129,8 +129,8 @@ outside the element gives a framebuffer coordinate off the end of the desktop.
 
 | File | Holds |
 |---|---|
-| `src/lib/browserFullscreen.ts` | `requestElementFullscreen(el)` (any element; the terminal panes use it too), `exitDocumentFullscreen`, `isTargetInActiveFullscreen`, and `useElementFullscreen(ref)` |
-| `src/lib/keyboardLock.ts` | `isKeyboardLockSupported`, `lockKeyboard`, `unlockKeyboard` over `navigator.keyboard` |
+| `tddy-terminal-web` `src/lib/browserFullscreen.ts` | `requestElementFullscreen(el)` (any element; the terminal panes use it too), `exitDocumentFullscreen`, `isTargetInActiveFullscreen`, and `useElementFullscreen(ref)` |
+| `tddy-hosts-web` `src/keyboardLock.ts` | `isKeyboardLockSupported`, `lockKeyboard`, `unlockKeyboard` over `navigator.keyboard` |
 
 - `useElementFullscreen` follows `fullscreenchange`, so a leave the browser performed itself is
   reported as well as one asked for.
@@ -151,7 +151,7 @@ free: RFB expresses it as buttons 4 and 5, which `button_mask` already carries.
 
 ## Superseded neighbours
 
-`src/components/sessions/vncInput.ts` holds the same scaling and keysym logic for the retired
+`tddy-session-web`'s `src/vncInput.ts` holds the same scaling and keysym logic for the retired
 `VncOverlay` generation. It is imported only by its own test. The logic here was lifted from it
 deliberately rather than shared, because that generation is being retired and a shared module would
 tie the surviving surface to it. Deleting `vncInput.ts`, its test and `VncOverlay.tsx` is worth

@@ -74,7 +74,8 @@ The jail of a tool run from its definition — the sandboxed `claude-cli` sessio
   `env` is the definition's overlays plus `HOME`; `oauth_inbound` is the declared one and only on an
   unrouted session.
 - **The route's hosts.** `route_hosts(&HarnessRoute)` is the `host:port` of every `http(s)` URL in the
-  route's env and in its files (OpenCode's `opencode.json` names its provider's base URL there), the
+  route's env — found **inside** each value, so an inline JSON configuration's base URL counts
+  (OpenCode's `OPENCODE_CONFIG_CONTENT`, `#agent-tools 29/32`) — and in its files, the
   scheme's port when none is named. They join a `hosts` policy, become the whole
   policy of a `none` one, and leave `any` as it is.
 - `build_tool_jail_plan(SandboxRunnerSpawn, ToolJailGrants)` is `build_sandbox_plan` of the spawn

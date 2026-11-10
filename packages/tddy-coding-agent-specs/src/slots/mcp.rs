@@ -45,10 +45,15 @@ pub fn render_mcp(
         McpSlot::Unsupported => {
             unreachable!("an unsupported mcp slot registers no server: slots::render refuses it")
         }
-        McpSlot::Inline { flag, key_prefix } => Ok((
-            None,
-            headless_mcp::render_inline_mcp(flag, key_prefix, server),
-        )),
+        McpSlot::Inline { flag, key_prefix } => {
+            let mut argv = headless_mcp::render_inline_mcp(flag, key_prefix, server);
+            if let Some(cwd) = &server.cwd {
+                argv.extend(headless_mcp::render_inline_mcp_cwd(
+                    flag, key_prefix, server, cwd,
+                ));
+            }
+            Ok((None, argv))
+        }
         McpSlot::Argv { flag } => {
             let (file, argv) = headless_mcp::render_argv_mcp(flag, server, scratch_dir);
             Ok((Some(file), argv))
@@ -108,6 +113,7 @@ mod tests {
             command: PathBuf::from("/opt/tddy/bin/tddy-tools"),
             args: vec!["--mcp".to_string()],
             env,
+            cwd: None,
         }
     }
 

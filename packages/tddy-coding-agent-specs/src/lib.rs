@@ -8,6 +8,7 @@
 //! launcher renders the template with `tddy_actions::tool::render_argv` and the slots with
 //! [`slots::render`]; nothing in that path hard-codes an agent.
 
+mod agent_env_base;
 mod capability;
 pub mod claude_tools;
 pub mod headless;
@@ -20,15 +21,19 @@ use std::path::Path;
 
 use tddy_actions::tool::{ToolError, ToolRegistry, BUILTIN_SUPPORT_TOOLS, BUILTIN_TOOLS};
 
+pub use agent_env_base::{
+    AgentEnvBase, AgentEnvBaseError, AGENT_ENV_BASE_EMBEDDED_PATH, AGENT_ENV_BASE_OVERRIDE,
+    AGENT_ENV_BASE_YAML,
+};
 pub use capability::Capability;
 pub use registry::{CodingAgentRegistry, RegistryError, CLI_SESSION_TYPE_SUFFIX};
 pub use route::{ProviderKind, RouteShape, RouteSupport, RoutedAgent};
 pub use spec::{
     package_runner, routed_agent, AcpCommandError, AcpSection, AgentVariant, CodingAgentExtension,
-    CodingAgentSection, CodingAgentSpec, CuratedModel, FlagSlot, HeadlessSection, HooksSlot,
-    InstructionsSlot, McpFormat, McpSlot, ModelsSection, Placement, PlacementError, ResumeSlot,
-    RouteSlot, SpecError, ToolSlot, Unsupported, VariantError, CODING_AGENT_EXTENSION,
-    DEFAULT_ANSWER_WAIT_SECS, HOST_AGENT_VARIANT,
+    CodingAgentSection, CodingAgentSpec, CuratedModel, FlagSlot, HeadlessPermissionPolicy,
+    HeadlessSection, HooksSlot, InstructionsSlot, McpFormat, McpSlot, ModelsSection, Placement,
+    PlacementError, ResumeSlot, RouteSlot, SpecError, ToolSlot, Unsupported, VariantError,
+    CODING_AGENT_EXTENSION, DEFAULT_ANSWER_WAIT_SECS, HOST_AGENT_VARIANT,
 };
 
 /// `specs/cursor.yaml` (`#agent-tools 7/12`), embedded.
@@ -100,10 +105,9 @@ pub fn builtin_specs() -> Vec<(&'static str, &'static str)> {
 /// The built-in spec of agent `id`, as embedded — without the `<tddyhome>/tools` overrides
 /// [`load_agent_registry`] applies, and without resolving its binary.
 ///
-/// For a caller that renders one agent's slots and has no tool registry to hand
-/// (`tddy-session-split`). A caller that launches the agent loads the registry instead.
-// TODO(jail-agnostic): hand split sessions the daemon's registry so an operator's override of the
-// agent's spec reaches them (docs/dev/todo/2026-11-03-split-sessions-render-the-embedded-agent-spec.md).
+/// For a caller that renders one agent's slots and has no tool registry to hand. No production
+/// code is such a caller: a split session reads the host's registry, and a caller that launches the
+/// agent loads the registry too. What still calls this is test fixtures.
 pub fn embedded_spec(id: &str) -> Result<CodingAgentSpec, SpecError> {
     let (path, yaml) = builtin_specs()
         .into_iter()

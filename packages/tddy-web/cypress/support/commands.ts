@@ -85,14 +85,14 @@ Cypress.Commands.add(
 // ---------------------------------------------------------------------------
 
 /**
- * Navigate to a GhosttyTerminal Storybook iframe story with the given
+ * Navigate to a TerminalView Storybook iframe story with the given
  * LiveKit connection params encoded in the URL.
  *
  * Example:
- *   cy.visitGhosttyStory({ storyId: "components-ghosttyterminal--live-kit-connected", url, token, roomName })
+ *   cy.visitTerminalStory({ storyId: "components-terminal--live-kit-connected", url, token, roomName })
  */
 Cypress.Commands.add(
-  "visitGhosttyStory",
+  "visitTerminalStory",
   function (opts: {
     storyId: string;
     url: string;
@@ -119,7 +119,7 @@ Cypress.Commands.add(
  * Wait for the full LiveKit terminal connection handshake:
  *   1. connection-status-dot reaches data-connection-status="connected"
  *   2. livekit-status is hidden
- *   3. ghostty-terminal exists
+ *   3. terminal exists
  *   4. first-output-received exists
  */
 Cypress.Commands.add("connectAndWaitForTerminal", function (): void {
@@ -131,7 +131,7 @@ Cypress.Commands.add("connectAndWaitForTerminal", function (): void {
 
   cy.get("[data-testid='livekit-status']").should("not.be.visible");
 
-  cy.get("[data-testid='ghostty-terminal']", { timeout: 5000 }).should("exist");
+  cy.get("[data-testid='terminal']", { timeout: 5000 }).should("exist");
 
   cy.get("[data-testid='first-output-received']", {
     timeout: FIRST_OUTPUT_TIMEOUT_MS,

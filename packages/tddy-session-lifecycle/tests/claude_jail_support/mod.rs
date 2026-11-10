@@ -418,18 +418,18 @@ impl AJailedClaudeDaemon {
 
 fn a_daemon_config() -> (tempfile::TempDir, DaemonConfig) {
     let dir = tempfile::tempdir().unwrap();
-    let yaml = format!(
-        r#"
-users:
-  - github_user: "{OWNER}"
-    os_user: "{OWNER}"
+    let yaml = r#"
 allowed_tools:
   - path: /bin/true
     label: true
-"#
-    );
+"#;
     let config_path = dir.path().join("daemon.yaml");
     std::fs::write(&config_path, yaml).unwrap();
+    std::fs::write(
+        dir.path().join("users.yaml"),
+        format!("- github_user: \"{OWNER}\"\n  os_user: \"{OWNER}\"\n"),
+    )
+    .unwrap();
     let config = DaemonConfig::load(&config_path).expect("config must parse");
     (dir, config)
 }
@@ -446,6 +446,7 @@ fn a_session_host(config: DaemonConfig, tddy_home: PathBuf) -> DaemonSessionHost
         tddy_session_lifecycle::peer_routing::PeerRouting::local_only(&config),
         Arc::new(tddy_daemon_kernel::operator_channel::NoOperatorChannel),
         Arc::new(CliSessionManager::new()),
+        tddy_agent_launch::host_coding_agents::no_coding_agents(),
     )
 }
 

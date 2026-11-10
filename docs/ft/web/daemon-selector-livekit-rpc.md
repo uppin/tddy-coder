@@ -27,7 +27,7 @@ peer daemon needs a wire that is not the browser's origin model.
 A **host connection** is the name for that wire, and it is deliberately not spelled in any one
 transport's vocabulary. A call site asks for a connection to a host id; a registered
 `ConnectionProvider` supplies it. LiveKit is the provider today: ConnectRPC over LiveKit data
-channels (`tddy-livekit-web`'s `LiveKitTransport`) can address any daemon in the common room over
+channels (`tddy-livekit-rpc-web`'s `LiveKitTransport`) can address any daemon in the common room over
 the data channel it already publishes and subscribes on. A build that reaches a host some other way
 registers its own provider, and no screen learns which wire it got. The model, the registry and its
 hooks are described in
@@ -72,7 +72,7 @@ session's server identity in its own LiveKit room, exactly as today:
 
 - The terminal (`terminal.TerminalService`, `openRoomTerminalFeed`) — targets
   `daemon-{instanceId}-{sessionId}`.
-- The PR-Stack Chat Screen presenter stream (`usePresenterLiveKitRoom`) — targets the session's
+- The PR-Stack Chat Screen presenter stream (the media port's `usePresenterRoom`) — targets the session's
   presenter identity.
 - Session inspector streams (VNC, screen sharing).
 

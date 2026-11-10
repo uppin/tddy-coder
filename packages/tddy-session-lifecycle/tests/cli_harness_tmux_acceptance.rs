@@ -146,11 +146,17 @@ fn a_stub_harness(dir: &Path, launches: &Path, users: &Path, exits_with_banner: 
 fn a_config_running() -> (tempfile::TempDir, DaemonConfig) {
     let dir = tempfile::tempdir().unwrap();
     let user = this_os_user();
-    let yaml = format!(
-        "users:\n  - github_user: \"{user}\"\n    os_user: \"{user}\"\nallowed_tools:\n  - path: /bin/true\n    label: true\n"
-    );
+    let yaml = "allowed_tools:\n  - path: /bin/true\n    label: true\n";
     let path = dir.path().join("daemon.yaml");
     std::fs::write(&path, yaml).unwrap();
+    std::fs::write(
+        std::path::Path::new(&(path))
+            .parent()
+            .expect("a config directory")
+            .join("users.yaml"),
+        format!("- github_user: \"{user}\"\n  os_user: \"{user}\"\n"),
+    )
+    .unwrap();
     let config = DaemonConfig::load(&path).expect("config must parse");
     (dir, config)
 }
@@ -174,20 +180,18 @@ fn a_session_host(
     for command in ["agent", "opencode", "muse", "warp"] {
         cursor_cli_support::install_an_agent_as(&data_dir, command, stub.to_str().unwrap());
     }
-    let host = Arc::new(
-        DaemonSessionHost::new(
-            config.clone(),
-            sessions_base_resolver,
-            data_dir,
-            user_resolver,
-            None,
-            tddy_spawn::supervisor_client::SpawnBackendChoice::ForkedWorker,
-            tddy_session_lifecycle::peer_routing::PeerRouting::local_only(&config),
-            Arc::new(tddy_daemon_kernel::operator_channel::NoOperatorChannel),
-            manager,
-        )
-        .with_coding_agents(coding_agents),
-    );
+    let host = Arc::new(DaemonSessionHost::new(
+        config.clone(),
+        sessions_base_resolver,
+        data_dir,
+        user_resolver,
+        None,
+        tddy_spawn::supervisor_client::SpawnBackendChoice::ForkedWorker,
+        tddy_session_lifecycle::peer_routing::PeerRouting::local_only(&config),
+        Arc::new(tddy_daemon_kernel::operator_channel::NoOperatorChannel),
+        manager,
+        coding_agents,
+    ));
     host.install_sandbox_rpc_bridge();
     host
 }
@@ -288,6 +292,8 @@ impl HarnessTmuxDaemon {
 
     /// [`Self::restarted`], with the restarted daemon's terminal manager.
     fn restarted_with_its_manager(&self) -> (Arc<DaemonSessionHost>, Arc<CliSessionManager>) {
+        // The daemon that restarts is gone: nothing of it still listens on its agent-tool sockets.
+        self.host.agent_tool_sockets().stop_serving();
         let manager = Arc::new(CliSessionManager::new());
         let host = a_session_host(
             self.config.clone(),

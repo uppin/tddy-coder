@@ -1,0 +1,48 @@
+{
+  "name": "tddy-chat-web",
+  "version": "0.1.0",
+  "description": "Agent chat: live and transcript views, ACP session/replay/tool-call hooks, activity panes, subagent conversation and permission UI",
+  "private": true,
+  "type": "module",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "exports": {
+    ".": "./src/index.ts",
+    "./package.json": "./package.json"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "bun test src && bun run cypress:component",
+    "test:ci": "bun test src --reporter=junit --reporter-outfile=../../reports/junit/chat-web.xml",
+    "cypress:component": "CYPRESS_DISABLE_REACT_COMPILER=1 ELECTRON_EXTRA_LAUNCH_ARGS='--disable-gpu --no-sandbox' cypress run --component",
+    "cypress:component:ci": "bun run cypress:component -- --reporter junit --reporter-options 'mochaFile=../../reports/junit/chat-web-component-[hash].xml'"
+  },
+  "dependencies": {
+    "@bufbuild/protobuf": "^2.2.0",
+    "@connectrpc/connect": "^2.0.0",
+    "react-syntax-highlighter": "^16.1.1",
+    "tddy-client-web": "workspace:*",
+    "tddy-react-commons": "workspace:*",
+    "tddy-rpc-web": "workspace:*",
+    "tddy-ui-web": "workspace:*"
+  },
+  "peerDependencies": {
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0"
+  },
+  "devDependencies": {
+    "@tailwindcss/vite": "^4.2.2",
+    "@types/bun": "latest",
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
+    "@types/react-syntax-highlighter": "^15.5.13",
+    "@vitejs/plugin-react": "^4.3.0",
+    "babel-plugin-react-compiler": "^1.0.0",
+    "cypress": "^14.0.0",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
+    "tddy-connectrpc-testkit": "workspace:*",
+    "typescript": "^5.6.0",
+    "vite": "^6.0.0"
+  }
+}

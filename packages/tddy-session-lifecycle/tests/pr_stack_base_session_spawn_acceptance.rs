@@ -547,11 +547,7 @@ fn current_os_user() -> String {
 fn a_config() -> (tempfile::TempDir, DaemonConfig) {
     let dir = tempfile::tempdir().unwrap();
     let user = current_os_user();
-    let yaml = format!(
-        r#"
-users:
-  - github_user: "{user}"
-    os_user: "{user}"
+    let yaml = r#"
 allowed_tools:
   - path: /bin/true
     label: true
@@ -559,10 +555,14 @@ livekit:
   url: ws://127.0.0.1:7880
   api_key: devkey
   api_secret: devsecret
-"#
-    );
+"#;
     let config_path = dir.path().join("daemon.yaml");
     std::fs::write(&config_path, yaml).unwrap();
+    std::fs::write(
+        dir.path().join("users.yaml"),
+        format!("- github_user: \"{user}\"\n  os_user: \"{user}\"\n"),
+    )
+    .unwrap();
     (
         dir,
         DaemonConfig::load(&config_path).expect("config must parse"),
@@ -585,8 +585,8 @@ fn a_service(config: DaemonConfig, sessions_base: PathBuf) -> DaemonSessionHost 
         tddy_session_lifecycle::peer_routing::PeerRouting::local_only(&config),
         Arc::new(tddy_daemon_kernel::operator_channel::NoOperatorChannel),
         Arc::new(CliSessionManager::new()),
+        tddy_session_lifecycle::test_util::builtin_coding_agents(),
     )
-    .with_coding_agents_if_none(tddy_session_lifecycle::test_util::builtin_coding_agents())
 }
 
 /// A git repo the registered project points at, so project resolution is never what fails.

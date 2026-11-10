@@ -53,6 +53,39 @@ impl CliSessionManager {
         on_exit: Option<ExitHook>,
         tmux_session: Option<&str>,
     ) -> anyhow::Result<Arc<pty_handle::PtyHandle>> {
+        self.spawn_tool_on(
+            session_id,
+            terminal_id,
+            kind,
+            worktree_path,
+            model,
+            argv,
+            env,
+            tddy_pty::PtyEnvBase::Inherited,
+            os_user,
+            on_exit,
+            tmux_session,
+        )
+        .await
+    }
+
+    /// [`Self::spawn_tool`] whose child starts from `env_base` before `env` is applied: an agent
+    /// main starts from [`tddy_pty::PtyEnvBase::Cleared`] (`#agent-tools 28/28`).
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) async fn spawn_tool_on(
+        &self,
+        session_id: &str,
+        terminal_id: &str,
+        kind: &str,
+        worktree_path: PathBuf,
+        model: &str,
+        argv: Vec<String>,
+        env: Vec<(String, String)>,
+        env_base: tddy_pty::PtyEnvBase,
+        os_user: Option<&str>,
+        on_exit: Option<ExitHook>,
+        tmux_session: Option<&str>,
+    ) -> anyhow::Result<Arc<pty_handle::PtyHandle>> {
         let (ready_tx, ready_rx) = oneshot::channel();
         let spec = PtySpawnSpec {
             argv,
@@ -61,6 +94,7 @@ impl CliSessionManager {
             terminal_id: terminal_id.to_string(),
             kind: kind.to_string(),
             env,
+            env_base,
             os_user: os_user.map(str::to_string),
         };
 

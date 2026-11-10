@@ -32,7 +32,7 @@ async fn rejects_a_session_spawn_from_a_peer_that_owns_no_declared_service() {
     let tool = a_tool_that_records_its_parent();
     let supervisor = a_supervisor()
         .allowing_the_current_user()
-        .allowing_tool(tool.path())
+        .with_exec_root(tool.path())
         .start()
         .await;
 
@@ -54,7 +54,7 @@ async fn rejects_a_session_spawn_for_an_os_user_outside_the_allowlist() {
     let supervisor = a_supervisor()
         .managing(a_service("tddy-daemon").that_stays_alive())
         .allowing_session_user("someone-else")
-        .allowing_tool(tool.path())
+        .with_exec_root(tool.path())
         .start()
         .await;
 
@@ -77,7 +77,7 @@ async fn rejects_a_session_spawn_for_a_tool_path_outside_the_allowlist() {
     let supervisor = a_supervisor()
         .managing(a_service("tddy-daemon").that_stays_alive())
         .allowing_the_current_user()
-        .allowing_tool(allowlisted.path())
+        .with_exec_root(allowlisted.path())
         .start()
         .await;
 
@@ -102,7 +102,7 @@ async fn spawns_an_allowlisted_tool_for_an_allowlisted_user_as_a_child_of_the_su
     let supervisor = a_supervisor()
         .managing(a_service("tddy-daemon").that_stays_alive())
         .allowing_the_current_user()
-        .allowing_tool(tool.path())
+        .with_exec_root(tool.path())
         .start()
         .await;
 

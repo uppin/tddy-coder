@@ -130,7 +130,7 @@ async fn places_a_spawned_session_into_the_scope_it_asked_for() {
     let supervisor = a_supervisor()
         .managing(a_service("tddy-daemon").that_stays_alive())
         .allowing_the_current_user()
-        .allowing_tool(tool.path())
+        .with_exec_root(tool.path())
         .with_memory_ceiling(512 * MIB)
         .start()
         .await;

@@ -72,10 +72,15 @@ fn a_host_with_nothing_wired() -> AHostWithNothingWired {
     let user = os_user();
     std::fs::write(
         &config_path,
-        format!(
-            "users:\n  - github_user: \"{user}\"\n    os_user: \"{user}\"\n\
-             allowed_tools:\n  - path: /bin/true\n    label: true\n"
-        ),
+        "allowed_tools:\n  - path: /bin/true\n    label: true\n",
+    )
+    .unwrap();
+    std::fs::write(
+        std::path::Path::new(&(config_path))
+            .parent()
+            .expect("a config directory")
+            .join("users.yaml"),
+        format!("- github_user: \"{user}\"\n  os_user: \"{user}\"\n"),
     )
     .unwrap();
     let config = tddy_session_lifecycle::config::DaemonConfig::load(&config_path)
@@ -103,8 +108,6 @@ fn a_host_with_nothing_wired() -> AHostWithNothingWired {
         PeerRouting::local_only(&config),
         Arc::new(tddy_daemon_kernel::operator_channel::NoOperatorChannel),
         Arc::new(tddy_session_lifecycle::claude_cli_session::CliSessionManager::new()),
-    )
-    .with_coding_agents_if_none(
         tddy_session_lifecycle::test_util::coding_agents_with_binaries(&[(
             "claude",
             claude.as_path(),

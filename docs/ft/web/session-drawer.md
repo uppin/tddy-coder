@@ -1,7 +1,7 @@
 # Session Drawer Screen
 
 **Route:** `#/sessions` — also the **default** route (`#/` resolves here)
-**Component:** `SessionsDrawerScreen` (`packages/tddy-web/src/components/sessions/`)
+**Component:** `SessionsDrawerScreen` (`packages/tddy-session-web/src/`)
 
 ## Overview
 
@@ -70,8 +70,8 @@ project's name and the number of sessions in it, followed by the group's body.
 The collapsed 12px strip, bulk selection and delete, cross-host badges and deep links are unchanged
 by grouping.
 
-Implementation: `groupSessionsByProject` (`src/utils/sessionProjectGroups.ts`),
-`SessionProjectGroup` and `projectGroupCollapse.ts` (`src/components/sessions/`).
+Implementation: `groupSessionsByProject` (`packages/tddy-session-web/src/utils/sessionProjectGroups.ts`),
+`SessionProjectGroup` and `projectGroupCollapse.ts` (`packages/tddy-session-web/src/`).
 
 ### Pinned main entry
 
@@ -113,15 +113,15 @@ the entry acts on that host.
 
 Implementation: `ProjectHomeEntry`, `ProjectHomeSetupPane`, `useProjectHomeSetup`,
 `useProjectHomeStartSubmit`, `useEnsureProjectHome`, `useSessionsDrawerProjectHomes`
-(`src/components/sessions/`), `projectHomesOnHost`, `projectHomeSlot` and `withProjectHomeGroups`
-(`src/utils/projectHomeGroups.ts`), `sessionsProjectHomeSetupPath` and
+(`packages/tddy-session-web/src/`), `projectHomesOnHost`, `projectHomeSlot` and `withProjectHomeGroups`
+(`packages/tddy-session-web/src/utils/projectHomeGroups.ts`), `sessionsProjectHomeSetupPath` and
 `parseSessionsProjectHomeSetup` (`src/routing/appRoutes.ts`).
 
 ## Indicator Token
 
 The row's dot (`SessionIndicatorDot`, shared by the expanded list and the collapsed strip) shows one
 of **four** states, derived by `sessionIndicatorFor(entry, notificationState, nowMs)`
-(`src/lib/sessionIndicator.ts`) from the session's proto fields plus its live notification feed:
+(`packages/tddy-session-web/src/lib/sessionIndicator.ts`) from the session's proto fields plus its live notification feed:
 
 - `"disconnected"` — grey, steady. `isActive: false`, whatever else is recorded.
 - `"needs-input"` — yellow, steady. `pendingElicitation: true`, **or** an `ATTENTION_REQUIRED`
@@ -177,7 +177,7 @@ existing selection (insertion) order.
 Utility: `partitionSessionsByActivity(sessions)` in `utils/sessionStackGroups.ts` returns
 `{ active, remaining, activeCount, remainingCount }` where `active`/`remaining` are each a
 `SessionStackGroupResult` (`groups` + `flat`). Components: `SessionDrawerSeparator`
-(`components/sessions/SessionDrawerSeparator.tsx`) renders one collapsible header + its partition body.
+(`packages/tddy-session-web/src/SessionDrawerSeparator.tsx`) renders one collapsible header + its partition body.
 
 ## Cross-Host Active Sessions
 
@@ -222,7 +222,7 @@ during every page load. See
 ### `SessionManager`
 
 The merged list, its refresh, and its change events live in one place: `SessionManager`
-(`components/sessions/sessionManager.ts`), a plain observable store (no React/RPC dependency of its
+(`packages/tddy-session-web/src/sessionManager.ts`), a plain observable store (no React/RPC dependency of its
 own — those are injected). It unions the selected host's fetched sessions with the live participants,
 de-dupes by `sessionId` (a metadata-carrying fetched row wins over a synthesized one), and sorts
 newest-first. `useSessionManager` binds the RPC client, common-room participants, and selected host
@@ -283,7 +283,7 @@ terminal resize.
 
 Background attachments persist until **explicit disconnect** — there is no cap. Disconnect
 removes only that session's runtime. Memory therefore grows with the number of concurrently
-attached sessions (one connection + one Ghostty terminal each); this is intentional for the
+attached sessions (one connection + one terminal each); this is intentional for the
 fast-switching workflow.
 
 The registry **owns** each runtime's connection: evicting a runtime, replacing its connection on
@@ -336,7 +336,7 @@ The inspector **Details** tab shows bytes in, bytes out (both via `formatBytes`,
 and a "last data received: Ns ago" relative timestamp that advances while the inspector is open.
 The source is dual:
 
-- **Attached LiveKit session** — the session's `GhosttyTerminalSession` fires an `onBytes` event
+- **Attached LiveKit session** — the session's `TerminalSession` fires an `onBytes` event
   per terminal I/O unit: `bytesIn = output.data.length` per received output chunk, and
   `bytesOut = data.length` per batched input yield sent to the coder. These thread up through
   `SessionRuntime` (`onSessionBytes(sessionId, delta)`) → the screen,
@@ -694,7 +694,7 @@ creating a `<branch>-1` suffixed branch. See
 
 ### Component
 
-`CreateSessionPane` (`packages/tddy-web/src/components/sessions/CreateSessionPane.tsx`) — props:
+`CreateSessionPane` (`packages/tddy-session-create-web/src/CreateSessionPane.tsx`) — props:
 
 ```typescript
 interface CreateSessionPaneProps {
@@ -730,7 +730,7 @@ non-child sessions.
 
 ### Grouping Logic
 
-`groupSessionsByStack(sessions)` (in `src/utils/sessionStackGroups.ts`) partitions the
+`groupSessionsByStack(sessions)` (in `packages/tddy-session-web/src/utils/sessionStackGroups.ts`) partitions the
 session list:
 
 - **Group** — an orchestrator session paired with one or more children that reference it.
@@ -884,7 +884,7 @@ of its sub-agents stays visible only as the roster row's status badge and last-a
 tree** in every base-view case — shown, hidden behind a workflow view or a dormant session's
 transcript, or absent only because nothing is attached. React unmounts a subtree that moves, and
 unmounting a conversation's body cancels its conversation. See
-[session-agent-conversation.md](../../../packages/tddy-web/docs/session-agent-conversation.md) for
+[session-agent-conversation.md](../../../packages/tddy-session-web/docs/session-agent-conversation.md) for
 the invariant a refactor here has to preserve.
 
 #### Known limitations
@@ -949,7 +949,7 @@ const customView = resolveWorkflowView(selectedSession);
 if (customView) return customView;
 ```
 
-`resolveWorkflowView(session)` (`src/components/sessions/workflowViews.tsx`) is a small
+`resolveWorkflowView(session)` (`packages/tddy-session-web/src/workflowViews.tsx`) is a small
 registry keyed by `session.recipe` and `session.sessionType`:
 
 ```typescript
@@ -983,7 +983,7 @@ window** backed by a remote Presenter, plus a **Planned PRs panel** docked to it
 operator review a freshly-written stack plan, keep refining it by chatting with the agent, and start
 child sessions for each planned PR — all without leaving the orchestrator session.
 
-**Component:** `PrStackScreen` (`src/components/sessions/prstack/PrStackScreen.tsx`), with
+**Component:** `PrStackScreen` (`packages/tddy-prstack-web/src/PrStackScreen.tsx`), with
 `PlannedPrPanel` / `PlannedPrList` / `PlannedPrRow` subcomponents.
 
 > **Rewritten 2026-07-26** — the screen was a fixed 50/50 split (`w-1/2` columns, no toggle, no
@@ -1183,7 +1183,7 @@ control (`tddy-service/proto/tddy/v1/remote.proto`), not a new backend concept:
   re-reads `stackPlanJson` after a `WorkflowComplete` / `StateChanged` event so edits appear
   without a manual refresh.
 
-**Component:** the reusable **`AgentChat`** (`src/components/chat/AgentChat.tsx`) +
+**Component:** the reusable **`AgentChat`** (`packages/tddy-chat-web/src/AgentChat.tsx`) +
 `useAgentChat` hook — see [Agent Chat](#agent-chat) below. `PrStackScreen` mounts `AgentChat`
 with a pr-stack-appropriate placeholder; the component itself is recipe-agnostic.
 
@@ -1194,9 +1194,9 @@ The custom screen for every non-`pr-stack` tddy-coder `tool` workflow session (`
 full-screen chat window — no second pane. The operator drives the workflow entirely by prompting and
 answering clarifications, exactly as with pr-stack, minus the planned-PR list.
 
-**Component:** `WorkflowChatScreen` (`src/components/sessions/WorkflowChatScreen.tsx`) — a thin
+**Component:** `WorkflowChatScreen` (`packages/tddy-prstack-web/src/WorkflowChatScreen.tsx`) — a thin
 single-pane wrapper that derives its own presenter LiveKit room from the session's attachment
-(`usePresenterLiveKitRoom`, shared with `PrStackScreen`) and mounts the reusable [`AgentChat`](#agent-chat)
+(the media port's `usePresenterRoom`, shared with `PrStackScreen`) and mounts the reusable [`AgentChat`](#agent-chat)
 over the **ACP mirror** (`acp`), matching pr-stack's chat and tddy-coder's ACP-agent direction. Root
 marker: `data-testid="workflow-chat-screen"`.
 
@@ -1222,7 +1222,7 @@ behavior parity with the Presenter path.
   agent did and when, including where it paused for input. Works on both transports.
 - **Test ids:** `agent-chat-*` (e.g. `agent-chat-messages`, `agent-chat-message-<i>`,
   `agent-chat-input`, `agent-chat-option-<i>`, `agent-chat-export-btn`), centralized in
-  `cypress/support/testIds.ts`. Storybook: `AgentChat.stories.tsx` (empty / streaming / select /
+  `cypress/support/testIds.ts`. Storybook: `tddy-storybook`'s `src/tddy-chat-web/AgentChat.stories.tsx` (empty / streaming / select /
   multiSelect / error / connecting).
 
 **Hooks:** `useAgentChat(room, serverIdentity)` owns the `TddyRemote.Stream` bidi RPC;

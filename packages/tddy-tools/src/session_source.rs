@@ -16,6 +16,8 @@
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
+use tddy_core::session_pointer::SessionPointerOwner;
+
 /// Which of the three sources named the session.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SessionSource {
@@ -48,8 +50,42 @@ pub struct ResolvedSession {
 pub enum SessionNotFound {
     /// None of the three sources names one; `cwd` is where the pointer search started.
     Nowhere { cwd: PathBuf },
-    /// A pointer file exists but cannot be read — never skipped for the next source.
-    UnreadablePointer { path: PathBuf, reason: String },
+    /// A pointer file exists but cannot be used — never skipped for the next source.
+    UnreadablePointer {
+        path: PathBuf,
+        cause: UnreadablePointerCause,
+    },
+}
+
+/// Why a pointer file that exists names no session to report to (`#agent-tools 21/28`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum UnreadablePointerCause {
+    /// It could not be read, or does not parse.
+    Invalid(String),
+    /// Its owner runs on this host, and is no longer running.
+    OwnerGone { owner: SessionPointerOwner },
+    /// Its owner runs on this host, and the socket it names does not exist.
+    SocketMissing { socket: PathBuf },
+}
+
+impl std::fmt::Display for UnreadablePointerCause {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            UnreadablePointerCause::Invalid(reason) => f.write_str(reason),
+            UnreadablePointerCause::OwnerGone { owner } => write!(
+                f,
+                "the session that wrote it (pid {} on {}) is no longer running",
+                owner.pid, owner.host
+            ),
+            UnreadablePointerCause::SocketMissing { socket } => {
+                write!(
+                    f,
+                    "the socket it names, {}, does not exist",
+                    socket.display()
+                )
+            }
+        }
+    }
 }
 
 impl std::fmt::Display for SessionNotFound {
@@ -61,9 +97,9 @@ impl std::fmt::Display for SessionNotFound {
                  a .tddy/session.json (searched upward from {}), or set TDDY_SOCKET",
                 cwd.display()
             ),
-            SessionNotFound::UnreadablePointer { path, reason } => write!(
+            SessionNotFound::UnreadablePointer { path, cause } => write!(
                 f,
-                "the session pointer {} could not be read: {reason}",
+                "the session pointer {} could not be read: {cause}",
                 path.display()
             ),
         }
@@ -92,10 +128,13 @@ pub fn resolve_session(
     let pointer = tddy_core::session_pointer::find_session_pointer(cwd).map_err(|e| {
         SessionNotFound::UnreadablePointer {
             path: e.path,
-            reason: e.reason,
+            cause: UnreadablePointerCause::Invalid(e.reason),
         }
     })?;
     if let Some((path, pointer)) = pointer {
+        if let Some(cause) = unusable_on_this_host(&pointer) {
+            return Err(SessionNotFound::UnreadablePointer { path, cause });
+        }
         return Ok(ResolvedSession {
             socket: pointer.socket,
             repo_dir: Some(pointer.repo_dir),
@@ -122,6 +161,30 @@ pub fn resolve_session(
     }
 }
 
+/// Why `pointer` cannot be used from this host, when its owner runs here: the owner is gone, or
+/// the socket it names does not exist. An owner on another host (an ssh target) is not checked —
+/// its pid and its socket path are that host's — and neither is a pointer without an owner.
+fn unusable_on_this_host(
+    pointer: &tddy_core::session_pointer::SessionPointer,
+) -> Option<UnreadablePointerCause> {
+    let owner = pointer
+        .owner
+        .as_ref()
+        .filter(|owner| owner.is_on_this_host())?;
+    if !owner.is_running() {
+        return Some(UnreadablePointerCause::OwnerGone {
+            owner: owner.clone(),
+        });
+    }
+    pointer
+        .socket
+        .as_ref()
+        .filter(|socket| !socket.exists())
+        .map(|socket| UnreadablePointerCause::SocketMissing {
+            socket: socket.clone(),
+        })
+}
+
 /// The variable naming the session socket: the third source, for the daemon's own callers and tests.
 const SOCKET_VARIABLE: &str = "TDDY_SOCKET";
 
@@ -131,7 +194,9 @@ pub fn resolve_current_session(
 ) -> Result<ResolvedSession, SessionNotFound> {
     let cwd = std::env::current_dir().map_err(|e| SessionNotFound::UnreadablePointer {
         path: PathBuf::from("."),
-        reason: format!("the working directory cannot be read: {e}"),
+        cause: UnreadablePointerCause::Invalid(format!(
+            "the working directory cannot be read: {e}"
+        )),
     })?;
     resolve_session(explicit_socket, &cwd, &|name| std::env::var(name).ok())
 }

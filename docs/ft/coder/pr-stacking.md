@@ -315,7 +315,7 @@ GitHub PRs have a single base ref, so a node that depends on multiple unmerged p
 
 A planned PR with multiple non-merged parents (a diamond / merge node) used to base its child worktree off whichever parent the resolver walked **first** — `Stack::base_ref_for_spawn` / the web `resolveStackBase` iterate `node.parents` in list order and return the first non-merged ancestor's `origin/<branch>`. Every parent is a legitimate base ref, but the operator had no control to pick a different one, and the dialog's `baseBranchLabel` was display-only (never sent to the daemon).
 
-The Start-session dialog opened from a planned-PR row now renders a **"Base branch"** `<select>` (test id `create-session-base-branch-select`), shown when `initialValues.stackParent` is set and the option list is non-empty. Options and pre-selection are resolved together by **`baseBranchChoice(node, nodes, defaultBranch): { options, selected }`** (`packages/tddy-web/src/components/sessions/prstack/`), which orders the stack's own branches via the pure helper **`prioritiseBaseBranchOptions(node, nodes): string[]`**:
+The Start-session dialog opened from a planned-PR row now renders a **"Base branch"** `<select>` (test id `create-session-base-branch-select`), shown when `initialValues.stackParent` is set and the option list is non-empty. Options and pre-selection are resolved together by **`baseBranchChoice(node, nodes, defaultBranch): { options, selected }`** (`packages/tddy-prstack-web/src/`), which orders the stack's own branches via the pure helper **`prioritiseBaseBranchOptions(node, nodes): string[]`**:
 
 1. **Direct dependency branches** — walk `node.parents` in order; for each parent that is **not merged** and **owns a `branch`**, include that branch. Order the result by the dependency's own depth in the stack DAG (longest path from a root, deepest first), ties broken by the order in `node.parents` (stable). A merged parent contributes nothing (its ref may be gone and `effective_base_refs` collapses past it); a branchless parent contributes nothing (no ref to offer — the spawn gate would refuse it anyway).
 2. **Other materialized stack branches** — every node with a `branch`, excluding the node itself, its descendants (basing onto a descendant would create a cycle), merged nodes, and any branch already listed in step 1. Appended in stack node order. De-duplicated by branch name (first-seen wins).
@@ -359,7 +359,7 @@ The session's **context documents** are surfaced to the web via `SessionEntry` p
 
 ### New-session screen: recipe dropdown and parent picker
 
-`CreateSessionPane` (`packages/tddy-web/src/components/sessions/`) gains two changes for tool sessions:
+`CreateSessionPane` (`packages/tddy-session-web/src/`) gains two changes for tool sessions:
 
 - **Recipe dropdown** — the free-text recipe input is replaced with a `<select>` listing the canonical recipe set, including the unified **`pr-stack`** (the legacy `plan-pr-stack` / `orchestrate-pr-stack` entries are no longer offered in the dropdown — new sessions always start as `pr-stack` — though both CLI names still resolve if typed directly). `pr-stack` is included in the `--recipe` `value_parser` in `packages/tddy-coder/src/run.rs` alongside the two legacy aliases.
 - **Parent stack picker** — a new optional "Parent orchestrator" `<select>` (tool type only) that lists existing sessions identified as PR-stack orchestrators (sessions whose `recipe` is `pr-stack` — or a legacy alias — and that are not themselves children of another orchestrator; see `prStackOrchestrators()` in `packages/tddy-web/src/utils/stackParents.ts`). Selecting a parent passes `stack_parent` (proto `StartSessionRequest` field 15) to the daemon, which threads it through `SpawnOptions` → `--stack-parent <id>` CLI arg.
@@ -393,9 +393,9 @@ The "+ New planned PR" form carries two submits — **"Add planned PR"** (`pr-st
 
 ### Session drawer: children collapsed under the main stack session
 
-`SessionDrawer` (`packages/tddy-web/src/components/sessions/SessionDrawer.tsx`) renders PR-stack sessions in a collapsible group rather than a flat list.
+`SessionDrawer` (`packages/tddy-session-web/src/SessionDrawer.tsx`) renders PR-stack sessions in a collapsible group rather than a flat list.
 
-Grouping logic lives in `packages/tddy-web/src/utils/sessionStackGroups.ts`:
+Grouping logic lives in `packages/tddy-session-web/src/utils/sessionStackGroups.ts`:
 
 ```
 groupSessionsByStack(sessions) → { groups: { parent: SessionEntry, children: SessionEntry[] }[], flat: SessionEntry[] }

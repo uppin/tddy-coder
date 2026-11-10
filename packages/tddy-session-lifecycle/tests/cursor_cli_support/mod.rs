@@ -259,6 +259,9 @@ pub struct ADaemonSpec {
     pub probes: Vec<String>,
     /// Write this `cursor.yaml` override into `<tddyhome>/tools` before the registry loads.
     pub cursor_override: Option<serde_yaml::Value>,
+    /// An embedded daemon (Tddy Desktop): its sessions are told the runtime's one agent-tool
+    /// socket ([`AnAgentToolSocket`]) rather than a socket of their user's.
+    pub embedded: bool,
 }
 
 /// `specs/cursor.yaml`, parsed, for a test to edit into an override.
@@ -316,6 +319,15 @@ pub fn a_cursor_daemon(spec: ADaemonSpec) -> ACursorDaemon {
             }),
         ),
     ));
+    let host = if spec.embedded {
+        host.with_agent_tool_sockets(Arc::new(
+            tddy_daemon_kernel::agent_tool_sockets::AgentToolSockets::new(
+                tddy_daemon_kernel::agent_tool_sockets::AgentToolSocketPlacement::Embedded,
+            ),
+        ))
+    } else {
+        host
+    };
     let service = Arc::new(host);
     service.install_sandbox_rpc_bridge();
     ACursorDaemon {
@@ -567,18 +579,18 @@ pub fn tddy_names<'a>(names: impl IntoIterator<Item = &'a String>) -> BTreeSet<S
 fn a_daemon_config() -> (tempfile::TempDir, DaemonConfig) {
     let dir = tempfile::tempdir().unwrap();
     let user = current_os_user();
-    let yaml = format!(
-        r#"
-users:
-  - github_user: "{user}"
-    os_user: "{user}"
+    let yaml = r#"
 allowed_tools:
   - path: /bin/true
     label: true
-"#
-    );
+"#;
     let config_path = dir.path().join("daemon.yaml");
     std::fs::write(&config_path, yaml).unwrap();
+    std::fs::write(
+        dir.path().join("users.yaml"),
+        format!("- github_user: \"{user}\"\n  os_user: \"{user}\"\n"),
+    )
+    .unwrap();
     let config = DaemonConfig::load(&config_path).expect("config must parse");
     (dir, config)
 }
@@ -596,6 +608,7 @@ fn a_session_host(config: DaemonConfig, tddy_home: PathBuf) -> DaemonSessionHost
         tddy_session_lifecycle::peer_routing::PeerRouting::local_only(&config),
         Arc::new(tddy_daemon_kernel::operator_channel::NoOperatorChannel),
         Arc::new(CliSessionManager::new()),
+        tddy_agent_launch::host_coding_agents::no_coding_agents(),
     )
 }
 

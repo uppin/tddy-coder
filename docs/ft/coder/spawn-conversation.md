@@ -142,7 +142,7 @@ session's runtime derives its child tabs by filtering the session list on
   child handler).
 - **`tddy-workflow-recipes`** `grill_me/prompt.rs`: **Create plan** prompt gains a required final step
   to call `spawn_conversation` after the brief files exist (and to commit `plans/<slug>.md` first).
-- **`tddy-web`** `components/sessions/`: `useChildSessions` derives child tabs from the session list;
+- **`tddy-web`** `packages/tddy-session-web/src/`: `useChildSessions` derives child tabs from the session list;
   `SessionTerminalTabs` renders them; `SessionRuntime` mounts a selected child's runtime pane.
 
 ## Acceptance Criteria

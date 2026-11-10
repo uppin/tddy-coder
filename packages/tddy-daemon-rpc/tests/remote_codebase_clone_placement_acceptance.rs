@@ -133,12 +133,14 @@ fn a_daemon(
     let config_path = sessions_base.join("config.yaml");
     std::fs::write(
         &config_path,
-        format!(
-            "daemon_instance_id: \"{instance_id}\"\nusers:\n  - github_user: \"testuser\"\n    \
-             os_user: \"testdev\"\n"
-        ),
+        format!("daemon_instance_id: \"{instance_id}\"\n"),
     )
     .expect("write daemon config");
+    std::fs::write(
+        sessions_base.join("users.yaml"),
+        "- github_user: \"testuser\"\n  os_user: \"testdev\"\n",
+    )
+    .expect("write users.yaml");
     let config = DaemonConfig::load(&config_path).expect("config must parse");
     let routing = peers(&config);
     let base = sessions_base.to_path_buf();
@@ -155,8 +157,8 @@ fn a_daemon(
         routing,
         Arc::new(NoOperatorChannel),
         Arc::new(CliSessionManager::new()),
+        tddy_session_lifecycle::test_util::builtin_coding_agents(),
     )
-    .with_coding_agents_if_none(tddy_session_lifecycle::test_util::builtin_coding_agents())
 }
 
 /// The codebase host's session worktree holds a conversation's committed change, written through its
@@ -361,6 +363,16 @@ struct ALauncherRecordingTheLaunches {
 
 #[async_trait::async_trait]
 impl CodingAgentLauncher for ALauncherRecordingTheLaunches {
+    async fn session_meta_for(
+        &self,
+        _launch: &tddy_coding_subagent::CodingAgentLaunch,
+    ) -> Result<
+        Option<serde_json::Map<String, serde_json::Value>>,
+        tddy_discovery::subagent::SubagentError,
+    > {
+        Ok(None)
+    }
+
     async fn command_for(
         &self,
         launch: &CodingAgentLaunch,

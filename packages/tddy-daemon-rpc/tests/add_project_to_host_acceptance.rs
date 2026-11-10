@@ -64,9 +64,6 @@ fn test_config(os_user: &str, repos_base: &Path) -> DaemonConfig {
     let yaml = format!(
         r#"
 repos_base_path: "{repos}"
-users:
-  - github_user: "testuser"
-    os_user: "{os_user}"
 "#,
         repos = repos_base.display(),
     );
@@ -75,6 +72,14 @@ users:
     std::fs::write(&path, yaml).unwrap();
     // Keep the config tempdir alive for the process lifetime — leak is fine in a test binary.
     std::mem::forget(dir);
+    std::fs::write(
+        std::path::Path::new(&(path))
+            .parent()
+            .expect("a config directory")
+            .join("users.yaml"),
+        format!("- github_user: \"testuser\"\n  os_user: \"{os_user}\"\n"),
+    )
+    .unwrap();
     DaemonConfig::load(&path).unwrap()
 }
 
@@ -86,26 +91,24 @@ fn test_service(config: DaemonConfig, tddy_data_dir: PathBuf) -> TestDaemon {
         Arc::new(|token| (token == TEST_TOKEN).then(|| "testuser".to_string()));
     let eligible: Arc<dyn EligibleDaemonSource> =
         Arc::new(LocalOnlyEligibleDaemonSource::for_config(&config));
-    TestDaemon::from_host(
-        DaemonSessionHost::new(
-            config.clone(),
-            sessions_base_resolver,
-            tddy_data_dir,
-            user_resolver,
-            None,
-            tddy_spawn::supervisor_client::SpawnBackendChoice::ForkedWorker,
-            tddy_daemon_livekit::peer_routing::peer_routing_over(
-                &config,
-                Some(LiveKitDiscoveryHandles {
-                    eligible_daemon_source: eligible,
-                    common_room_livekit_room: Arc::new(tokio::sync::RwLock::new(None)),
-                }),
-            ),
-            Arc::new(tddy_daemon_kernel::operator_channel::NoOperatorChannel),
-            Arc::new(tddy_session_lifecycle::claude_cli_session::CliSessionManager::new()),
-        )
-        .with_coding_agents_if_none(tddy_session_lifecycle::test_util::builtin_coding_agents()),
-    )
+    TestDaemon::from_host(DaemonSessionHost::new(
+        config.clone(),
+        sessions_base_resolver,
+        tddy_data_dir,
+        user_resolver,
+        None,
+        tddy_spawn::supervisor_client::SpawnBackendChoice::ForkedWorker,
+        tddy_daemon_livekit::peer_routing::peer_routing_over(
+            &config,
+            Some(LiveKitDiscoveryHandles {
+                eligible_daemon_source: eligible,
+                common_room_livekit_room: Arc::new(tokio::sync::RwLock::new(None)),
+            }),
+        ),
+        Arc::new(tddy_daemon_kernel::operator_channel::NoOperatorChannel),
+        Arc::new(tddy_session_lifecycle::claude_cli_session::CliSessionManager::new()),
+        tddy_session_lifecycle::test_util::builtin_coding_agents(),
+    ))
 }
 
 fn a_request(project_id: &str, git_url: &str) -> AddProjectToHostRequest {

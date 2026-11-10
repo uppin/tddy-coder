@@ -27,7 +27,7 @@ v2.<base64url(json claims)>.<base64url(ed25519 signature)>
 |---|---|---|
 | `kid` | string | The key that signed this token — see [Key id](#key-id) |
 | `id` | u64 | GitHub user id (`0` for an identity the daemon resolved locally, e.g. over its Unix socket) |
-| `login` | string | GitHub login — what `users:` maps to an OS user |
+| `login` | string | GitHub login — what `users.yaml` maps to an OS user |
 | `avatar_url`, `name` | string | Display fields |
 | `iat`, `exp` | u64 | Issued-at and expiry, Unix seconds |
 | `kind` | `"access"` \| `"refresh"` | Which credential this is |

@@ -42,9 +42,13 @@ const BRANCH: &str = "feature/attach-docs/attach-store";
 fn a_service(sessions_base: PathBuf) -> TestDaemon {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("config.yaml");
+    std::fs::write(&path, "").unwrap();
     std::fs::write(
-        &path,
-        "users:\n  - github_user: \"u\"\n    os_user: \"u\"\n",
+        std::path::Path::new(&(path))
+            .parent()
+            .expect("a config directory")
+            .join("users.yaml"),
+        "- github_user: \"u\"\n  os_user: \"u\"\n",
     )
     .unwrap();
     let config = tddy_daemon_kernel::config::DaemonConfig::load(&path).unwrap();
@@ -52,20 +56,18 @@ fn a_service(sessions_base: PathBuf) -> TestDaemon {
     let sessions_base_resolver: SessionsBaseResolver = Arc::new(move |_| Some(base.clone()));
     let user_resolver: SessionUserResolver =
         Arc::new(|token| (token == TOKEN).then(|| "u".to_string()));
-    TestDaemon::from_host(
-        DaemonSessionHost::new(
-            config.clone(),
-            sessions_base_resolver,
-            sessions_base,
-            user_resolver,
-            None,
-            tddy_spawn::supervisor_client::SpawnBackendChoice::ForkedWorker,
-            tddy_session_lifecycle::peer_routing::PeerRouting::local_only(&config),
-            Arc::new(tddy_daemon_kernel::operator_channel::NoOperatorChannel),
-            Arc::new(CliSessionManager::new()),
-        )
-        .with_coding_agents_if_none(tddy_session_lifecycle::test_util::builtin_coding_agents()),
-    )
+    TestDaemon::from_host(DaemonSessionHost::new(
+        config.clone(),
+        sessions_base_resolver,
+        sessions_base,
+        user_resolver,
+        None,
+        tddy_spawn::supervisor_client::SpawnBackendChoice::ForkedWorker,
+        tddy_session_lifecycle::peer_routing::PeerRouting::local_only(&config),
+        Arc::new(tddy_daemon_kernel::operator_channel::NoOperatorChannel),
+        Arc::new(CliSessionManager::new()),
+        tddy_session_lifecycle::test_util::builtin_coding_agents(),
+    ))
 }
 
 fn write_changeset(sessions_base: &Path, session_id: &str, changeset: &Changeset) {

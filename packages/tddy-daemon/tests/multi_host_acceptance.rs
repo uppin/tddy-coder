@@ -77,10 +77,7 @@ fn write_livekit_daemon_yaml(
     let room = remote_acceptance_room();
     let yaml = format!(
         r#"
-{id_block}users:
-  - github_user: "testuser"
-    os_user: "{os_user}"
-allowed_tools:
+{id_block}allowed_tools:
   - path: {true_path}
     label: t
 livekit:
@@ -92,6 +89,11 @@ livekit:
 "#
     );
     std::fs::write(&path, yaml).unwrap();
+    std::fs::write(
+        dir.path().join("users.yaml"),
+        format!("- github_user: \"testuser\"\n  os_user: \"{os_user}\"\n"),
+    )
+    .unwrap();
     (dir, path)
 }
 
@@ -315,8 +317,8 @@ async fn start_session_remote_daemon_instance_id_routes_to_peer() {
         tddy_session_lifecycle::peer_routing::PeerRouting::local_only(&config_b),
         Arc::new(tddy_daemon_kernel::operator_channel::NoOperatorChannel),
         Arc::new(tddy_session_lifecycle::claude_cli_session::CliSessionManager::new()),
-    )
-    .with_coding_agents_if_none(tddy_session_lifecycle::test_util::builtin_coding_agents());
+        tddy_session_lifecycle::test_util::builtin_coding_agents(),
+    );
 
     // Daemon B's discovery participant: bare instance id, publishes the advertisement A discovers.
     tddy_daemon::runtime::spawn_common_room_discovery_task(
@@ -395,8 +397,8 @@ async fn start_session_remote_daemon_instance_id_routes_to_peer() {
         ),
         Arc::new(tddy_daemon_kernel::operator_channel::NoOperatorChannel),
         Arc::new(tddy_session_lifecycle::claude_cli_session::CliSessionManager::new()),
-    )
-    .with_coding_agents_if_none(tddy_session_lifecycle::test_util::builtin_coding_agents());
+        tddy_session_lifecycle::test_util::builtin_coding_agents(),
+    );
 
     tokio::time::timeout(Duration::from_secs(45), async {
         loop {

@@ -39,9 +39,17 @@ fn current_os_user() -> String {
 fn a_config_for_the_current_user() -> (tempfile::TempDir, DaemonConfig) {
     let dir = tempfile::tempdir().expect("a config directory");
     let user = current_os_user();
-    let yaml = format!("users:\n  - github_user: \"{user}\"\n    os_user: \"{user}\"\n");
+    let yaml = "";
     let path = dir.path().join("daemon.yaml");
     std::fs::write(&path, yaml).expect("write the config");
+    std::fs::write(
+        std::path::Path::new(&(path))
+            .parent()
+            .expect("a config directory")
+            .join("users.yaml"),
+        format!("- github_user: \"{user}\"\n  os_user: \"{user}\"\n"),
+    )
+    .unwrap();
     (dir, DaemonConfig::load(&path).expect("the config parses"))
 }
 
@@ -62,8 +70,6 @@ fn a_session_host(config: DaemonConfig, sessions_base: PathBuf) -> DaemonSession
         tddy_session_lifecycle::peer_routing::PeerRouting::local_only(&config),
         Arc::new(tddy_daemon_kernel::operator_channel::NoOperatorChannel),
         Arc::new(CliSessionManager::new()),
-    )
-    .with_coding_agents_if_none(
         tddy_session_lifecycle::test_util::coding_agents_with_binaries(&[(
             "claude",
             Path::new("/bin/cat"),

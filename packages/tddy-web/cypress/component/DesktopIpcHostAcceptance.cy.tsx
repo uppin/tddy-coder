@@ -1,3 +1,4 @@
+import type { RoomHandle } from "tddy-client-web";
 /**
  * Acceptance spec: the desktop reaches its own host over IPC, and LiveKit stays optional.
  *
@@ -16,45 +17,42 @@
  */
 
 import React from "react";
-import { Room } from "livekit-client";
+import { aDisconnectedRoom } from "tddy-livekit-web/testkit";
 import { create } from "@bufbuild/protobuf";
 import { anInMemoryRpcBackend, type InMemoryRpcBackend } from "tddy-connectrpc-testkit";
-import { GenerateTokenResponseSchema, TokenService } from "../../src/gen/token_pb";
+import { GenerateTokenResponseSchema, TokenService } from "tddy-client-web/gen/token_pb";
 import {
   DaemonConfigService,
   GetClientConfigResponseSchema,
-} from "../../src/gen/daemon_config_pb";
-import { App } from "../../src/index";
-import { AuthProvider } from "../../src/hooks/authProvider";
-import { RpcTransportProvider } from "../../src/rpc/transportProvider";
-import type { TauriHostWindow } from "../../src/rpc/daemonTransportFlavour";
+} from "tddy-client-web/gen/daemon_config_pb";
+import { App } from "../../src/app/App";
+import { AuthProvider } from "../../src/app/auth/authProvider";
+import { RpcTransportProvider } from "../../src/app/rpc/transportProvider";
+import type { TauriHostWindow } from "tddy-session-web";
 import {
   ACCESS_TOKEN_KEY,
   aDurableSessionBackend,
   CURRENT_ACCESS_TOKEN,
 } from "../support/rpc/durableSessionBackend";
-import { useLiveKitHostDirectorySource } from "../../src/rpc/hostDirectory/liveKitSource";
+import { useLiveKitHostDirectorySource } from "tddy-livekit-web";
 import { mountWithRpc } from "../support/rpc/inMemory";
 import {
   createIpcConnectionProvider,
   localHostRegistrationFor,
-} from "../../src/rpc/connections/localHost";
-import { LocalHostConnections } from "../../src/rpc/connections/localHostRegistration";
-import {
-  ConnectionProviderRegistry,
-  ConnectionProviders,
-  useConnectionProviders,
-  useHostConnection,
-} from "../../src/rpc/connections/registry";
-import type { ConnectionProvider } from "../../src/rpc/connections/types";
-import { LIVEKIT_SOURCE_ID } from "../../src/rpc/hostDirectory/liveKitSource";
-import type { HostDirectorySource } from "../../src/rpc/hostDirectory/types";
-import { useServingHostDirectorySource } from "../../src/rpc/hostDirectory/servingSource";
+} from "../../src/app/rpc/connections/localHost";
+import { LocalHostConnections } from "../../src/app/rpc/connections/localHostRegistration";
+import { ConnectionProviders, useConnectionProviders } from "../../src/app/rpc/connections/registry";
+import type { ConnectionProvider } from "tddy-client-web/connections/types";
+import { LIVEKIT_SOURCE_ID } from "tddy-livekit-web";
+import type { HostDirectorySource } from "tddy-client-web";
+import { useServingHostDirectorySource } from "../../src/app/rpc/hostDirectory/servingSource";
 import {
   HostDirectorySources,
   useHostDirectory,
-} from "../../src/rpc/hostDirectory/useHostDirectory";
+} from "tddy-client-web";
 import { byTestId } from "../support/testIds";
+import { useHostConnection } from "tddy-client-web";
+import { ConnectionProviderRegistry } from "tddy-client-web";
 
 // ---------------------------------------------------------------------------
 // Fixtures
@@ -182,7 +180,7 @@ function LiveKitStartupProbe({
   roomFactory,
 }: {
   config: { livekitUrl?: string; commonRoom?: string; enabled?: boolean };
-  roomFactory: () => Room;
+  roomFactory: () => RoomHandle;
 }) {
   const { source } = useLiveKitHostDirectorySource({
     ...config,
@@ -198,7 +196,7 @@ function aRoomFactoryTripwire() {
   return {
     construct: () => {
       constructed += 1;
-      return new Room();
+      return aDisconnectedRoom();
     },
     constructed: () => constructed,
   };

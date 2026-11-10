@@ -190,6 +190,7 @@ impl JailToolset {
                 command: tddy_tools,
                 args: vec!["--mcp".to_string()],
                 env: mcp_server_env(launch.jail.session_id, launch.dirs, &launch.env),
+                cwd: None,
             })
         };
         let (subagent_enabled, replaced) = withdrawn_tools(wiring.agents, &launch.env);

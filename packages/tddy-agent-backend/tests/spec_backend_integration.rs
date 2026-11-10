@@ -42,6 +42,7 @@ fn a_dropped_in_acp_agent() -> ADroppedInAcpAgent {
             product: "Acme Code".to_string(),
             support: RouteSupport::default(),
             key_env: None,
+            config_env: None,
         },
     }
 }

@@ -29,4 +29,4 @@ End-to-end capture requires **`BROWSER`** (or equivalent) routing to Tddy, daemo
 - **[Local web development](local-web-dev.md)** — daemon + Vite proxy for **`/rpc`**
 - **[Coder overview](../coder/1-OVERVIEW.md)** — backend selection
 - **[Codex ACP backend](../coder/codex-acp-backend.md)** — **`codex-acp`** and OAuth retry
-- **[`codex-oauth-dialog.md`](../../../packages/tddy-web/docs/codex-oauth-dialog.md)** — tddy-web component reference
+- **[`codex-oauth-dialog.md`](../../../packages/tddy-workspace-web/docs/codex-oauth-dialog.md)** — tddy-workspace-web component reference

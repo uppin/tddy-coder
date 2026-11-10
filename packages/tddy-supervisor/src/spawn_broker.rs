@@ -98,6 +98,8 @@ pub struct SpawnPlan {
     pub environment: EnvironmentBase,
     /// Jail to build around the child. `None` spawns a plain process in the host's namespaces.
     pub sandbox: Option<SandboxJail>,
+    /// The checked executable, held so its descriptor stays open until the exec.
+    pub checked: Option<crate::policy::CheckedExecutable>,
 }
 
 /// Where a child's stdout and stderr go.
@@ -137,14 +139,20 @@ pub enum EnvironmentBase {
     /// For a session, which runs as somebody else on a caller's behalf and has no claim on anything
     /// the supervisor was started with.
     Minimal,
+    /// The request's own variables, as the daemon computed them, and the account's
+    /// `HOME`/`USER`/`LOGNAME`. No supervisor `PATH`, no forwarded locale, nothing the supervisor
+    /// was started with (`#agent-tools 28/28`).
+    ///
+    /// For a relayed spawn: what the child sees is the caller's configuration, owned by the
+    /// daemon and its YAML; the supervisor knows only the OS user.
+    Exactly,
 }
 
 /// `PATH` for a session, whose caller does not get to choose one.
 ///
 /// Fixed rather than taken from the supervisor's own environment, so what a session resolves a
-/// command to does not depend on how the unit happened to be started. A host whose binaries live
-/// somewhere else grants `PATH` through `SpawnPolicy::allowed_env_keys`, which puts the decision in
-/// the root-owned policy file where the rest of them are.
+/// command to does not depend on how the unit happened to be started. The daemon's env passes
+/// whole under the one env rule, and this is the base it is laid over for a session.
 const SESSION_PATH: &str = "/usr/local/bin:/usr/bin:/bin";
 
 /// Variables a minimal environment still takes from the supervisor: they decide how text is rendered
@@ -916,6 +924,13 @@ unsafe fn bring_loopback_up() -> std::io::Result<()> {
 /// sandbox. Its presence is how `tddy-daemon` knows it was started by a supervisor.
 pub const SUPERVISOR_SOCKET_ENV: &str = "TDDY_SUPERVISOR_SOCKET";
 
+/// The variable a managed service that declares `serves_users: true` is told the path of
+/// `users.yaml` in (`#agent-tools` 31/32): the supervisor→daemon handover of the mapping, beside
+/// `LISTEN_FDNAMES`. Set after the service's `env:` overlay, like [`SUPERVISOR_SOCKET_ENV`], so
+/// `supervisor.yaml` can neither set nor forge it. The daemon spells it again
+/// (`tddy_daemon_kernel::users_file::USERS_FILE_ENV`); a test pins the two.
+pub const USERS_FILE_ENV: &str = "TDDY_USERS_FILE";
+
 /// Write our own pid into an `cgroup.procs`, allocation-free.
 ///
 /// `O_CREAT` is not an accommodation: on cgroupfs the file always exists and the flag is inert,
@@ -1004,6 +1019,7 @@ mod tests {
                 output: ChildOutput::Discard,
                 environment: EnvironmentBase::Minimal,
                 sandbox: None,
+                checked: None,
             },
         }
     }
@@ -1779,6 +1795,35 @@ mod tests {
     }
 
     #[test]
+    fn a_relayed_agent_starts_from_exactly_the_env_the_daemon_computed() {
+        // Given — a supervisor started with a locale of its own, and an agent env the daemon built
+        std::env::set_var("LANG", "supervisor-locale");
+        let mut plan = a_spawn_plan()
+            .with_requested_env("PATH", "/opt/agent/bin:/usr/bin:/bin")
+            .with_requested_env("LARK_API_KEY", "sk-lark")
+            .with_requested_env("ROUTE_BASE_URL", "https://route.example")
+            .build();
+        plan.environment = EnvironmentBase::Exactly;
+
+        // When
+        let environment = environment_of(&plan);
+
+        // Then — the daemon's variables and the account's identity; nothing the supervisor holds
+        let expected: BTreeMap<String, String> = [
+            ("HOME", "/home/alice"),
+            ("LARK_API_KEY", "sk-lark"),
+            ("LOGNAME", "alice"),
+            ("PATH", "/opt/agent/bin:/usr/bin:/bin"),
+            ("ROUTE_BASE_URL", "https://route.example"),
+            ("USER", "alice"),
+        ]
+        .into_iter()
+        .map(|(key, value)| (key.to_string(), value.to_string()))
+        .collect();
+        assert_eq!(environment, expected);
+    }
+
+    #[test]
     fn keeps_the_supervisors_own_environment_out_of_a_session() {
         // Given something in the supervisor's environment that an `EnvironmentFile=` would put there.
         std::env::set_var("TDDY_SUPERVISOR_UNIT_SECRET", "hunter2");
@@ -1918,11 +1963,11 @@ mod tests {
 
     #[test]
     fn announces_every_handed_over_listener_and_names_each_one() {
-        // Given a service socket and two host sockets
+        // Given a service socket and two mapped users' daemon sockets
         let directory = tempfile::TempDir::new().expect("create a directory");
         let handover = SocketHandover::new(a_listener_at(directory.path(), "svc.sock"))
-            .with_host_session_socket("alice", a_listener_at(directory.path(), "a.sock"))
-            .with_host_session_socket("bob", a_listener_at(directory.path(), "b.sock"));
+            .with_user_socket("alice", a_listener_at(directory.path(), "a.sock"))
+            .with_user_socket("bob", a_listener_at(directory.path(), "b.sock"));
 
         // When
         let environment = ChildEnvironment::build(&a_spawn_plan().build(), Some(&handover))
@@ -1936,7 +1981,7 @@ mod tests {
         // Then — the count covers every descriptor and the names say whose each one is
         assert!(variables.contains(&"LISTEN_FDS=3"), "{variables:?}");
         assert!(
-            variables.contains(&"LISTEN_FDNAMES=connection:host-session.alice:host-session.bob"),
+            variables.contains(&"LISTEN_FDNAMES=connection:user.alice:user.bob"),
             "{variables:?}"
         );
     }
@@ -1954,5 +1999,82 @@ mod tests {
         // Then
         assert_eq!(environment.get("LISTEN_FDNAMES"), None);
         assert_eq!(environment.get("LISTEN_FDS"), None);
+    }
+
+    // -----------------------------------------------------------------------------------------
+    // One environment rule for every spawn kind (`#agent-tools` 32/32)
+    // -----------------------------------------------------------------------------------------
+
+    /// An environment as the daemon computed it, including what a caller must never decide.
+    fn a_daemon_computed_env() -> BTreeMap<String, String> {
+        [
+            ("GIT_SSH_COMMAND", "ssh -o BatchMode=yes"),
+            ("ROUTE_BASE_URL", "https://route.example"),
+            ("HOME", "/root"),
+            ("USER", "root"),
+            ("LISTEN_FDS", "3"),
+            ("TDDY_SUPERVISOR_SOCKET", "/run/tddy-supervisor.sock"),
+        ]
+        .into_iter()
+        .map(|(key, value)| (key.to_string(), value.to_string()))
+        .collect()
+    }
+
+    #[rstest::rstest]
+    #[case::session(crate::policy::SpawnKind::Session, EnvironmentBase::Minimal)]
+    #[case::sandbox(crate::policy::SpawnKind::Sandbox, EnvironmentBase::Minimal)]
+    #[case::streamed(crate::policy::SpawnKind::Streamed, EnvironmentBase::Minimal)]
+    #[case::relayed(crate::policy::SpawnKind::Relayed, EnvironmentBase::Exactly)]
+    fn the_spawn_env_rule_passes_the_daemons_env_whole_and_forces_the_account(
+        #[case] kind: crate::policy::SpawnKind,
+        #[case] expected_base: EnvironmentBase,
+    ) {
+        // Given an env the daemon computed, which no supervisor key list names
+        let requested = a_daemon_computed_env();
+
+        // When the one rule resolves it, and the child's environment is built on it
+        let resolved = crate::policy::resolve_spawn_env(kind, &requested)
+            .expect("the daemon's env passes whole");
+        let mut plan = a_spawn_plan().build();
+        plan.env = resolved.variables.clone();
+        plan.environment = resolved.base.clone();
+        let environment = environment_of(&plan);
+
+        // Then the daemon's variables arrive, the account is the target's, and neither a socket
+        // activation nor the supervisor's socket leaks in
+        let value = |key: &str| environment.get(key).map(String::as_str);
+        assert_eq!(
+            (
+                resolved.base,
+                value("GIT_SSH_COMMAND"),
+                value("ROUTE_BASE_URL"),
+                (value("HOME"), value("USER"), value("LOGNAME")),
+                (value("LISTEN_FDS"), value("TDDY_SUPERVISOR_SOCKET")),
+            ),
+            (
+                expected_base,
+                Some("ssh -o BatchMode=yes"),
+                Some("https://route.example"),
+                (Some("/home/alice"), Some("alice"), Some("alice")),
+                (None, None),
+            )
+        );
+    }
+
+    #[rstest::rstest]
+    #[case::session(crate::policy::SpawnKind::Session)]
+    #[case::sandbox(crate::policy::SpawnKind::Sandbox)]
+    #[case::streamed(crate::policy::SpawnKind::Streamed)]
+    #[case::relayed(crate::policy::SpawnKind::Relayed)]
+    fn a_loader_variable_is_refused_for_every_spawn_kind(#[case] kind: crate::policy::SpawnKind) {
+        // Given
+        let mut requested = a_daemon_computed_env();
+        requested.insert("LD_PRELOAD".to_string(), "/tmp/evil.so".to_string());
+
+        // Then — it chooses what code runs, which is the supervisor's own concern
+        assert_eq!(
+            crate::policy::resolve_spawn_env(kind, &requested),
+            Err(crate::error::SupervisorError::Denied)
+        );
     }
 }

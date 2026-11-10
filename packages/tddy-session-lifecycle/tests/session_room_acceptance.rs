@@ -121,6 +121,34 @@ const A_GENEROUS_CONTEXT_CAP: u64 = 64 * 1024 * 1024;
 /// that rides along with it is another suite's subject (`context_sync_acceptance.rs`). A local
 /// source over an empty repo is the honest stand-in: the fetch really runs and really succeeds,
 /// and it has nothing to copy.
+/// The `env` block `wiring`'s MCP config registers `tddy-tools` with: where a split agent's tool
+/// transport is handed over, its own process being given none of it (`#agent-tools 25/28`).
+fn tool_server_env_of(
+    wiring: &tddy_session_lifecycle::split_session::SplitAgentWiring,
+) -> std::collections::HashMap<String, String> {
+    let config_path = wiring
+        .extra_args
+        .windows(2)
+        .find(|pair| pair[0] == "--mcp-config")
+        .map(|pair| std::path::PathBuf::from(&pair[1]))
+        .expect("the split wiring names an --mcp-config");
+    let config: serde_json::Value = serde_json::from_str(
+        &std::fs::read_to_string(&config_path).expect("the split wiring wrote its MCP config"),
+    )
+    .expect("the MCP config is JSON");
+    serde_json::from_value(config["mcpServers"]["tddy-tools"]["env"].clone())
+        .expect("tddy-tools is registered with a string env")
+}
+
+/// The split agent as a host with no operator overrides holds it.
+fn the_split_agent() -> tddy_coding_agent_specs::CodingAgentSpec {
+    tddy_session_lifecycle::split_session::split_agent_spec(
+        &tddy_coding_agent_specs::CodingAgentRegistry::builtin()
+            .expect("the built-in coding agents load"),
+    )
+    .expect("the built-in registry holds the split agent")
+}
+
 fn a_codebase_holding_no_agent_guidance() -> (
     tempfile::TempDir,
     tddy_session_files::context_sync::LocalWorktreeSource,
@@ -252,9 +280,6 @@ fn write_daemon_yaml(
     let yaml = format!(
         r#"
 daemon_instance_id: {INSTANCE_ID}
-users:
-  - github_user: "testuser"
-    os_user: "{os_user}"
 allowed_tools:
   - path: {true_path}
     label: t
@@ -263,6 +288,11 @@ session_room:
 {livekit}"#
     );
     std::fs::write(&path, yaml).unwrap();
+    std::fs::write(
+        dir.path().join("users.yaml"),
+        format!("- github_user: \"testuser\"\n  os_user: \"{os_user}\"\n"),
+    )
+    .unwrap();
     (dir, path)
 }
 
@@ -406,6 +436,14 @@ impl FacilitatingDaemon {
         let common_room = a_lobby_of_its_own();
         let (config_dir, config_path) =
             write_daemon_yaml(ws_url.as_deref(), &common_room, &os_user);
+        std::fs::write(
+            std::path::Path::new(&(config_path))
+                .parent()
+                .expect("a config directory")
+                .join("users.yaml"),
+            format!("- github_user: \"testuser\"\n  os_user: \"{os_user}\"\n"),
+        )
+        .unwrap();
         let config = DaemonConfig::load(&config_path).expect("daemon.yaml must load");
 
         let sessions = tempfile::tempdir().unwrap();
@@ -452,8 +490,6 @@ impl FacilitatingDaemon {
             tddy_session_lifecycle::peer_routing::PeerRouting::local_only(&config),
             Arc::new(tddy_daemon_kernel::operator_channel::NoOperatorChannel),
             Arc::clone(&agents),
-        )
-        .with_coding_agents_if_none(
             tddy_session_lifecycle::test_util::coding_agents_with_binaries(&[(
                 "claude",
                 claude_stub.as_path(),
@@ -831,6 +867,7 @@ async fn a_split_agent_is_wired_to_the_session_room_rather_than_the_lobby() {
 
     // When its agent's remote-tool wiring is prepared, with the checkout placed on another daemon
     let wiring = tddy_session_lifecycle::split_session::prepare_split_agent_wiring(
+        &the_split_agent(),
         daemon.split_rooms.as_ref(),
         &daemon.config,
         &daemon.tokens,
@@ -843,11 +880,12 @@ async fn a_split_agent_is_wired_to_the_session_room_rather_than_the_lobby() {
             session_token: &a_caller_token_signed_by(&daemon.tokens),
         },
         &[],
+        &[],
         CLAUDE_CONTEXT_GLOBS,
         &a_project_with_no_guidance.1,
     )
     .expect("split agent wiring must be preparable for an agent session");
-    let env: std::collections::HashMap<String, String> = wiring.env.into_iter().collect();
+    let env = tool_server_env_of(&wiring);
 
     // Then the agent is pointed at *this* session's room — the one this daemon hosts because it
     // runs the agent — and not at the lobby every daemon shares, nor at a room named after the
@@ -886,6 +924,7 @@ async fn a_split_agent_addresses_the_daemon_that_hosts_its_room() {
 
     // When its agent's remote-tool wiring is prepared, with the checkout placed on another daemon
     let wiring = tddy_session_lifecycle::split_session::prepare_split_agent_wiring(
+        &the_split_agent(),
         daemon.split_rooms.as_ref(),
         &daemon.config,
         &daemon.tokens,
@@ -898,11 +937,12 @@ async fn a_split_agent_addresses_the_daemon_that_hosts_its_room() {
             session_token: &a_caller_token_signed_by(&daemon.tokens),
         },
         &[],
+        &[],
         CLAUDE_CONTEXT_GLOBS,
         &a_project_with_no_guidance.1,
     )
     .expect("split agent wiring must be preparable for an agent session");
-    let env: std::collections::HashMap<String, String> = wiring.env.into_iter().collect();
+    let env = tool_server_env_of(&wiring);
 
     // Then the participant it is told to call is this daemon's — the one that opened the room and
     // serves its RPC surface. The codebase host holds the files, but it hosts no room and joins

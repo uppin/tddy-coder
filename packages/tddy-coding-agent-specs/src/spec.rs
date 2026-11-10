@@ -146,7 +146,89 @@ fn parse_section(
     let agent: CodingAgentSection =
         serde_yaml::from_value(section.clone()).map_err(|e| invalid(e.to_string()))?;
     hooks::adapter(&agent.hooks.adapter).map_err(|e| invalid(e.to_string()))?;
+    validate_env_entries(&agent.pass_env)
+        .map_err(|e| format!("pass_env: {e}"))
+        .map_err(invalid)?;
+    if let Some(route) = &agent.route {
+        route_slot_errors(route)
+            .map_err(|e| format!("route: {e}"))
+            .map_err(invalid)?;
+    }
     Ok(agent)
+}
+
+/// A `coding_agent.route` slot refused at load because its shape cannot be rendered as declared:
+/// `shape: inline_config` without a `config_env` to carry the configuration in, with a
+/// `config_env` matching `TDDY_*` (an agent never sees a daemon variable), or with a `files_dir`
+/// (an inline route writes no file). The message names the field.
+pub(crate) fn route_slot_errors(route: &RouteSlot) -> Result<(), String> {
+    if route.shape != RouteShape::InlineConfig {
+        return Ok(());
+    }
+    let Some(config_env) = route.config_env.as_deref() else {
+        return Err(
+            "shape `inline_config` needs a `config_env` naming the variable that carries the \
+             route's configuration inline"
+                .to_string(),
+        );
+    };
+    if admits_a_tddy_variable(config_env) {
+        return Err(format!(
+            "config_env '{config_env}' would hand the route's configuration over in a TDDY_* \
+             variable, which no agent sees"
+        ));
+    }
+    if route.files_dir.is_some() {
+        return Err(
+            "shape `inline_config` takes no `files_dir`: an inline route writes no file"
+                .to_string(),
+        );
+    }
+    Ok(())
+}
+
+/// Agent-env entries (`coding_agent.pass_env`, an agent-env base set) refused when one would let an
+/// agent inherit a `TDDY_*` variable — `TDDY_X`, `TDDY_*`, or a prefix pattern every `TDDY_*` name
+/// matches (`TDDY*`, `T*`, `*`) — or is not a variable name nor a `PREFIX_*` pattern. The message
+/// names the entry.
+pub(crate) fn validate_env_entries(entries: &[String]) -> Result<(), String> {
+    for entry in entries {
+        if admits_a_tddy_variable(entry) {
+            return Err(format!(
+                "env entry '{entry}' would admit a TDDY_* variable, which no agent inherits"
+            ));
+        }
+        if !is_an_env_entry(entry) {
+            return Err(format!(
+                "env entry '{entry}' is neither a variable name nor a PREFIX_* pattern"
+            ));
+        }
+    }
+    Ok(())
+}
+
+/// Whether `entry` (a name or a pattern) could name a `TDDY_*` variable.
+fn admits_a_tddy_variable(entry: &str) -> bool {
+    const TDDY: &str = tddy_agent_backend::agent_env::TDDY_ENV_PREFIX;
+    match entry.split_once('*') {
+        // A prefix pattern admits every name starting with its prefix.
+        Some((prefix, _)) => TDDY.starts_with(prefix) || prefix.starts_with(TDDY),
+        None => entry == TDDY.trim_end_matches('_') || entry.starts_with(TDDY),
+    }
+}
+
+/// Whether `entry` is a variable name (`PATH`) or a `PREFIX_*` pattern (`LC_*`).
+fn is_an_env_entry(entry: &str) -> bool {
+    let is_name = |text: &str| {
+        text.chars()
+            .next()
+            .is_some_and(|c| c.is_ascii_alphabetic() || c == '_')
+            && text.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
+    };
+    match entry.strip_suffix("_*") {
+        Some(prefix) => is_name(&format!("{prefix}_")),
+        None => is_name(entry),
+    }
 }
 
 /// Why a tool is not a usable coding agent.
@@ -237,6 +319,12 @@ pub struct CodingAgentSection {
     /// than naming the agent.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub transcript_usage: bool,
+    /// The daemon's variables this agent's process is also started with, on top of the base set
+    /// ([`crate::AgentEnvBase`]) — its provider keys and the agent-specific
+    /// variables it reads (`#agent-tools 28/28`). Each entry is a name or a `PREFIX_*` pattern; one
+    /// matching `TDDY_*` is refused at load. Empty for an agent that reads none.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub pass_env: Vec<String>,
 }
 
 /// How long an orchestrated session's permission hook waits for its orchestrator's answer when the
@@ -282,6 +370,30 @@ impl CodingAgentSpec {
             (None, Some(_)) => ConversationSlot::ResumeToken,
             (None, None) => ConversationSlot::Worktree,
         }
+    }
+
+    /// `coding_agent.pass_env`: the names and `PREFIX_*` patterns of the daemon variables the
+    /// agent's process is also started with.
+    pub fn pass_env(&self) -> &[String] {
+        &self.agent.pass_env
+    }
+
+    /// The variables of `parent` (the daemon's environment) that [`Self::pass_env`] names, in
+    /// `parent`'s order — what every host launch of this agent adds to its environment. A variable
+    /// whose name or value is not UTF-8 is not passed.
+    pub fn passed_env(
+        &self,
+        parent: impl IntoIterator<Item = (std::ffi::OsString, std::ffi::OsString)>,
+    ) -> Vec<(String, String)> {
+        parent
+            .into_iter()
+            .filter(|(name, _)| {
+                self.agent.pass_env.iter().any(|pattern| {
+                    tddy_agent_backend::agent_env::matches_env_pattern(pattern, name)
+                })
+            })
+            .filter_map(|(name, value)| Some((name.into_string().ok()?, value.into_string().ok()?)))
+            .collect()
     }
 
     /// `coding_agent.product`, or the agent id when the spec declares none.
@@ -417,7 +529,7 @@ impl CodingAgentSpec {
 }
 
 /// What a route body knows of `spec` (`#agent-tools 13/19`): its id, its product, its route
-/// support and its `route.key_env`. A spec without a `route` section gives an agent with no
+/// support, its `route.key_env` and its `route.config_env`. A spec without a `route` section gives an agent with no
 /// providers, which every route body refuses.
 pub fn routed_agent(spec: &CodingAgentSpec) -> RoutedAgent {
     RoutedAgent {
@@ -429,6 +541,11 @@ pub fn routed_agent(spec: &CodingAgentSpec) -> RoutedAgent {
             .route
             .as_ref()
             .and_then(|route| route.key_env.clone()),
+        config_env: spec
+            .agent
+            .route
+            .as_ref()
+            .and_then(|route| route.config_env.clone()),
     }
 }
 
@@ -447,8 +564,8 @@ pub struct AcpSection {
     #[serde(default)]
     pub env: BTreeMap<String, String>,
     /// The hooks adapter (`tddy_agent_backend::adapters::AcpHooksAdapters`) the driver runs with —
-    /// `codex-acp-login`, `opencode-route-file`; `None` runs it with no hooks. A name the registry
-    /// does not hold is refused at load.
+    /// `codex-acp-login`; `None` runs it with no hooks. A name the registry does not hold is
+    /// refused at load.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub hooks_adapter: Option<String>,
     /// Where an ACP launch registers its MCP server, when that differs from `coding_agent.mcp`
@@ -525,6 +642,8 @@ impl CodingAgentSpec {
             .ok_or_else(|| AcpCommandError::EmptyCommand {
                 agent: self.id.clone(),
             })?;
+        // `env` is the launch env (`acp.env`): the launcher computes the agent's whole
+        // environment from it with `AgentEnvBase::agent_env` (`#agent-tools 28/28`).
         Ok(AcpAgentCommand {
             program: PathBuf::from(program),
             args: args.to_vec(),
@@ -645,8 +764,10 @@ pub struct RouteSlot {
     /// agent's own (OpenCode, Muse).
     #[serde(default)]
     pub required_in_jail: bool,
-    /// The variable the route's first file is named in (`OPENCODE_CONFIG`); `None` for a route that
-    /// is environment only.
+    /// The variable the route's configuration reaches the agent in: for `shape: inline_config` the
+    /// configuration itself (`OPENCODE_CONFIG_CONTENT`), for `shape: json_config_file` the path of
+    /// the route's first file. `None` for a route that is environment only. An `inline_config` route
+    /// needs one, never a `TDDY_*` one, and takes no `files_dir` ([`route_slot_errors`]).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub config_env: Option<String>,
     /// The directory under the jail's scratch the route's files are written to owner-only
@@ -776,6 +897,56 @@ pub struct HeadlessSection {
     /// absent.
     #[serde(default)]
     pub scratch: ScratchDir,
+    /// Who answers a headless conversation's permission requests (`#agent-tools 27/28`):
+    /// `asks_caller`, or `{ fixed: <text> }` for a CLI that cannot ask mid-turn and runs under a
+    /// fixed policy, the text shown on its catalog row. `None` when the spec declares none.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub permission_policy: Option<HeadlessPermissionPolicy>,
+}
+
+/// `coding_agent.headless.permission_policy`: who answers a headless conversation's permission
+/// requests. Spelled `asks_caller` or `{ fixed: <text> }` (an untagged YAML shape, since YAML enums
+/// are otherwise tagged).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(from = "PermissionPolicyYaml", into = "PermissionPolicyYaml")]
+pub enum HeadlessPermissionPolicy {
+    /// The request yields to the caller (the main agent).
+    AsksCaller,
+    /// The CLI cannot ask mid-turn; it runs under this policy, described for the catalog row.
+    Fixed(String),
+}
+
+/// [`HeadlessPermissionPolicy`] as its YAML is written.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(untagged)]
+enum PermissionPolicyYaml {
+    Word(AsksCallerWord),
+    Fixed { fixed: String },
+}
+
+/// The one bare word `permission_policy` takes.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+enum AsksCallerWord {
+    AsksCaller,
+}
+
+impl From<PermissionPolicyYaml> for HeadlessPermissionPolicy {
+    fn from(yaml: PermissionPolicyYaml) -> Self {
+        match yaml {
+            PermissionPolicyYaml::Word(AsksCallerWord::AsksCaller) => Self::AsksCaller,
+            PermissionPolicyYaml::Fixed { fixed } => Self::Fixed(fixed),
+        }
+    }
+}
+
+impl From<HeadlessPermissionPolicy> for PermissionPolicyYaml {
+    fn from(policy: HeadlessPermissionPolicy) -> Self {
+        match policy {
+            HeadlessPermissionPolicy::AsksCaller => Self::Word(AsksCallerWord::AsksCaller),
+            HeadlessPermissionPolicy::Fixed(fixed) => Self::Fixed { fixed },
+        }
+    }
 }
 
 impl HeadlessSection {

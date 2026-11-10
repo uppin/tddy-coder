@@ -102,6 +102,7 @@ impl AStubAgent {
                 product: "Lark Code".to_string(),
                 support: RouteSupport::default(),
                 key_env: None,
+                config_env: None,
             },
         )
     }

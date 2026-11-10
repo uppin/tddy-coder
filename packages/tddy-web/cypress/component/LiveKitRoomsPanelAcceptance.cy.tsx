@@ -12,8 +12,8 @@
 
 import React from "react";
 import { LiveKitAppPage } from "../../src/components/livekit/LiveKitAppPage";
-import { LiveKitRoomsPanel } from "../../src/components/livekit/LiveKitRoomsPanel";
-import { TooltipProvider } from "../../src/components/ui/tooltip";
+import { LiveKitRoomsPanel } from "tddy-livekit-web";
+import { TooltipProvider } from "tddy-ui-web";
 import { mountWithRpc } from "../support/rpc/inMemory";
 import { DEFAULT_TEST_DAEMON, withSelectedDaemon } from "../support/rpc/withSelectedDaemon";
 import {

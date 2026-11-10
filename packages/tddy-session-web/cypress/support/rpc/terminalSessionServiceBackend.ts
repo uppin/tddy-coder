@@ -1,0 +1,354 @@
+/**
+ * In-memory `terminal_session.TerminalSessionService` backend — a session's terminals, their byte
+ * streams, their scrollback and the control lease that decides who may type into them.
+ *
+ * Split out of `daemonSessionHostBackend.ts` when the nine terminal RPCs left
+ * `session.SessionService` for `terminal_session.TerminalSessionService`: a fake is registered
+ * per service, so a screen's backend composes the two rather than one `.implement` covering both.
+ * `aTerminalSessionServiceFake` is the composable half (`handlers` spread into a caller's own
+ * `.implement(TerminalSessionService, …)`), `aTerminalSessionServiceBackend` the standalone one,
+ * mirroring `hostServiceBackend.ts`.
+ */
+
+import { create } from "@bufbuild/protobuf";
+import { Code, ConnectError, type ServiceImpl } from "@connectrpc/connect";
+import { anInMemoryRpcBackend, type InMemoryRpcBackend } from "tddy-connectrpc-testkit";
+import {
+  ClaimTerminalControlResponseSchema,
+  ListTerminalSessionsResponseSchema,
+  ListTmuxSessionsResponseSchema,
+  SessionTerminalOutputSchema,
+  StartTerminalSessionResponseSchema,
+  StopTerminalSessionResponseSchema,
+  TerminalControlEventSchema,
+  TerminalHistoryChunkSchema,
+  TerminalSessionInfoSchema,
+  TerminalSessionService,
+  TmuxSessionInfoSchema,
+  type SessionTerminalInput,
+  type SessionTerminalOutput,
+} from "tddy-client-web/gen/terminal_session_pb";
+
+/** The token every `ClaimTerminalControl` grants — the lease input must present once claimed. */
+const GRANTED_CONTROL_TOKEN = "ctrl-1";
+
+export interface TerminalSessionServiceScenario {
+  /** Initial `ListTerminalSessions` result — the bash terminals already open on the session.
+   *  Defaults to none (only the reserved "main"/Agent terminal, which is not listed here). */
+  terminals?: Array<{ terminalId: string; kind?: string; pid?: number }>;
+  /** The `terminal_id` handed out by the Nth (0-based) `StartTerminalSession`. Default `bash-<n+1>`. */
+  newTerminalId?: (index: number) => string;
+  /** Absolute `endOffset` carried by the opening frame of a terminal stream — the anchor for lazy
+   *  scroll-up history. When set (> 0n), the backend's stream emits its identifying frame tagged
+   *  with this offset (and `atOldest`), mirroring the daemon's snapshot frame. Default: 0n (no
+   *  offset metadata). */
+  terminalReplayEndOffset?: bigint;
+  /** How many terminal streams (`StreamSessionTerminalIO`, or the split `StreamTerminalOutput`) **end** after their first frame instead of
+   *  staying open — the daemon dropping a terminal feed (a closed data-channel stream, a `pty_done`).
+   *  The first `n` opened streams drop; every later one stays open, so a test can drop a feed once
+   *  and still observe what the screen does to recover. Default 0 (no stream ever ends). */
+  droppedTerminalStreams?: number;
+  /** The screen id of another screen that already holds every session's control lease: an
+   *  unstolen `ClaimTerminalControl` is refused naming it, and the lease feed reports it as the
+   *  holder. A steal (`steal: true`) is granted. Default: nobody holds it, so the first claim wins. */
+  leaseHeldBy?: string;
+  /** Older history chunks returned by `GetTerminalHistory`, in the order they should be yielded
+   *  across successive calls (one chunk per call). Each chunk's `startOffset`/`endOffset`/`atOldest`
+   *  is used verbatim. The backend pops one chunk per `getTerminalHistory` call. */
+  terminalHistory?: Array<{
+    data: Uint8Array;
+    startOffset: bigint;
+    endOffset: bigint;
+    atOldest: boolean;
+    atEnd?: boolean;
+  }>;
+  /** When set, `GetTerminalHistory` fails `NOT_FOUND` — a terminal that is neither running nor
+   *  recorded. */
+  terminalHistoryNotFound?: boolean;
+  /** `ListTmuxSessions` result — the tmux sessions on the session's host. Default: none. */
+  tmuxSessions?: Array<{ name: string; windows?: number; attached?: number }>;
+  /** When set, `ListTmuxSessions` fails `FAILED_PRECONDITION` with this message — a host without
+   *  tmux. */
+  tmuxUnavailable?: string;
+}
+
+export interface TerminalSessionServiceControls {
+  /** Every `sessionId` passed to `ClaimTerminalControl`, in call order. */
+  readonly claimedControlSessionIds: string[];
+  /** Every `sessionId` passed to `StartTerminalSession`, in call order. */
+  readonly startTerminalSessionIds: string[];
+  /** The `terminal_id` handed back by each `StartTerminalSession`, in call order. */
+  readonly startedTerminalIds: string[];
+  /** The `kind` each `StartTerminalSession` asked for (`""` for the login shell), in call order. */
+  readonly startedTerminalKinds: string[];
+  /** The `tmux_session` each `StartTerminalSession` named (`""` for a non-tmux kind), in call order. */
+  readonly startedTmuxSessions: string[];
+  /** Every `{ sessionId, terminalId }` passed to `StopTerminalSession`, in call order. */
+  readonly stoppedTerminals: { sessionId: string; terminalId: string }[];
+  /** Every `{ sessionId, terminalId, data }` passed to `SendTerminalInput`, in call order. */
+  readonly sentTerminalInput: { sessionId: string; terminalId: string; data: Uint8Array }[];
+  /** Every `{ sessionId, terminalId }` an output stream was opened for, in call order. */
+  readonly streamedTerminals: { sessionId: string; terminalId: string }[];
+  /** Every `{ sessionId, terminalId, fromOffset, untilOffset }` passed to `GetTerminalHistory`, in
+   *  call order — the forward fill's anchor chain. */
+  readonly getTerminalHistoryCalls: {
+    sessionId: string;
+    terminalId: string;
+    fromOffset: bigint;
+    untilOffset: bigint;
+  }[];
+}
+
+/** The terminal fake as handlers, so a screen's own backend can serve it too. */
+export interface TerminalSessionServiceFake extends TerminalSessionServiceControls {
+  handlers: Partial<ServiceImpl<typeof TerminalSessionService>>;
+}
+
+/**
+ * Build the `terminal_session.TerminalSessionService` handlers for `scenario`, plus the recorders a
+ * spec asserts on.
+ */
+export function aTerminalSessionServiceFake(
+  scenario: TerminalSessionServiceScenario = {},
+): TerminalSessionServiceFake {
+  const claimedControlSessionIds: string[] = [];
+  const startTerminalSessionIds: string[] = [];
+  const startedTerminalIds: string[] = [];
+  const startedTerminalKinds: string[] = [];
+  const startedTmuxSessions: string[] = [];
+  const stoppedTerminals: { sessionId: string; terminalId: string }[] = [];
+  const sentTerminalInput: { sessionId: string; terminalId: string; data: Uint8Array }[] = [];
+  const streamedTerminals: { sessionId: string; terminalId: string }[] = [];
+  const getTerminalHistoryCalls: {
+    sessionId: string;
+    terminalId: string;
+    fromOffset: bigint;
+    untilOffset: bigint;
+  }[] = [];
+
+  // Live bash-terminal list — mutated by Start/Stop so ListTerminalSessions stays consistent.
+  const liveTerminals: { terminalId: string; kind: string; pid: number; tmuxSession: string }[] = (
+    scenario.terminals ?? []
+  ).map((t, i) => ({
+    terminalId: t.terminalId,
+    kind: t.kind ?? "bash",
+    pid: t.pid ?? 8000 + i,
+    tmuxSession: "",
+  }));
+  const nextTerminalId = scenario.newTerminalId ?? ((index: number) => `bash-${index + 1}`);
+
+  // The lease each session's terminals are held under, once claimed. As on the daemon, a session
+  // nobody has claimed accepts input under any token (an empty one included), and a claimed one
+  // accepts it only under the holder's token.
+  const leaseHolders = new Map<string, string>();
+  // Sessions whose lease was stolen from `scenario.leaseHeldBy`, and by which screen.
+  const stolenBy = new Map<string, string>();
+  const mayWrite = (sessionId: string, controlToken: string): boolean => {
+    const holder = leaseHolders.get(sessionId);
+    return holder === undefined || holder === controlToken;
+  };
+
+  const handlers: Partial<ServiceImpl<typeof TerminalSessionService>> = {
+    claimTerminalControl: async (req) => {
+      claimedControlSessionIds.push(req.sessionId);
+      if (scenario.leaseHeldBy !== undefined && !req.steal) {
+        return create(ClaimTerminalControlResponseSchema, {
+          granted: false,
+          currentHolderScreenId: scenario.leaseHeldBy,
+        });
+      }
+      leaseHolders.set(req.sessionId, GRANTED_CONTROL_TOKEN);
+      if (req.steal) stolenBy.set(req.sessionId, req.screenId);
+      return create(ClaimTerminalControlResponseSchema, {
+        granted: true,
+        controlToken: GRANTED_CONTROL_TOKEN,
+      });
+    },
+    // The daemon's on-subscribe snapshot of the lease, then the stream completes. Its zero values
+    // say "no screen is named as the holder" — the claim above is what grants control; this feed
+    // only reports what the daemon holds.
+    watchTerminalControl: async function* (req) {
+      const thief = stolenBy.get(req.sessionId);
+      yield create(
+        TerminalControlEventSchema,
+        thief !== undefined
+          ? { holderScreenId: thief, youAreController: true }
+          : scenario.leaseHeldBy !== undefined
+            ? { holderScreenId: scenario.leaseHeldBy, youAreController: false }
+            : {},
+      );
+    },
+    // --- Multiple terminals per session ---
+    listTerminalSessions: async () =>
+      create(ListTerminalSessionsResponseSchema, {
+        terminals: liveTerminals.map((t) => create(TerminalSessionInfoSchema, t)),
+      }),
+    startTerminalSession: async (req) => {
+      const terminalId = nextTerminalId(startTerminalSessionIds.length);
+      startTerminalSessionIds.push(req.sessionId);
+      startedTerminalIds.push(terminalId);
+      startedTerminalKinds.push(req.kind);
+      startedTmuxSessions.push(req.tmuxSession);
+      liveTerminals.push({
+        terminalId,
+        kind: req.kind === "" ? "bash" : req.kind,
+        pid: 8000 + liveTerminals.length,
+        tmuxSession: req.tmuxSession,
+      });
+      return create(StartTerminalSessionResponseSchema, { terminalId });
+    },
+    listTmuxSessions: async () => {
+      if (scenario.tmuxUnavailable !== undefined) {
+        throw new ConnectError(scenario.tmuxUnavailable, Code.FailedPrecondition);
+      }
+      return create(ListTmuxSessionsResponseSchema, {
+        sessions: (scenario.tmuxSessions ?? []).map((t) =>
+          create(TmuxSessionInfoSchema, { name: t.name, windows: t.windows ?? 1, attached: t.attached ?? 0 }),
+        ),
+      });
+    },
+    stopTerminalSession: async (req) => {
+      stoppedTerminals.push({ sessionId: req.sessionId, terminalId: req.terminalId });
+      const at = liveTerminals.findIndex((t) => t.terminalId === req.terminalId);
+      if (at !== -1) liveTerminals.splice(at, 1);
+      return create(StopTerminalSessionResponseSchema, { ok: true, message: "" });
+    },
+    sendTerminalInput: async (req) => {
+      sentTerminalInput.push({
+        sessionId: req.sessionId,
+        terminalId: req.terminalId,
+        data: req.data,
+      });
+      return {};
+    },
+    // Server-streaming output — record the opened stream, emit one identifying frame, then stay
+    // open (a terminal stream that *completes* would signal disconnect and evict the runtime).
+    // When `scenario.terminalReplayEndOffset` is set, the frame is tagged with the absolute
+    // `endOffset` + `atOldest` so the lazy scroll-up loader can anchor older-history fetches.
+    // The frame carries the session and RESOLVED terminal id it came from, as the daemon stamps
+    // every frame — a pane drops frames that are not its own.
+    // `scenario.droppedTerminalStreams` makes the first n subscriptions *return* after that frame,
+    // which is how the daemon dropping the feed reaches the browser.
+    streamTerminalOutput: async function* (req) {
+      const openIndex = streamedTerminals.length;
+      streamedTerminals.push({ sessionId: req.sessionId, terminalId: req.terminalId });
+      const terminalId = req.terminalId || "main";
+      yield create(SessionTerminalOutputSchema, {
+        data: new TextEncoder().encode(`term:${terminalId}\r\n`),
+        endOffset: scenario.terminalReplayEndOffset ?? 0n,
+        atOldest: (scenario.terminalHistory ?? []).length === 0,
+        sessionId: req.sessionId,
+        terminalId,
+      });
+      if (openIndex < (scenario.droppedTerminalStreams ?? 0)) return;
+      await new Promise<never>(() => undefined);
+    },
+    // The bidi terminal stream the web opens for every host terminal: the same identifying frame as
+    // the split output stream above, and every later message's bytes recorded as sent input (one
+    // `sentTerminalInput` entry per message that carries any), so a spec asserting on typed bytes
+    // reads one recorder whichever wire carried them. Watching needs no lease, but writing does: a
+    // chunk under a token that does not hold the claimed lease is not recorded and is answered
+    // with a refusal frame, as the daemon answers it.
+    streamSessionTerminalIO: async function* (requests: AsyncIterable<SessionTerminalInput>) {
+      const openIndex = streamedTerminals.length;
+      const reader = requests[Symbol.asyncIterator]();
+      const first = await reader.next();
+      if (first.done) return;
+      const { sessionId, terminalId: requestedTerminalId } = first.value;
+      streamedTerminals.push({ sessionId, terminalId: requestedTerminalId });
+      const terminalId = requestedTerminalId || "main";
+      const refusals: SessionTerminalOutput[] = [];
+      let wakeOutput: (() => void) | null = null;
+      const accept = (message: SessionTerminalInput): void => {
+        if (message.data.length === 0) return;
+        if (!mayWrite(message.sessionId, message.controlToken)) {
+          refusals.push(
+            create(SessionTerminalOutputSchema, {
+              refusedInputOffset: message.inputOffset,
+              inputRefusal: "terminal controlled by another screen",
+              sessionId,
+              terminalId,
+            }),
+          );
+          wakeOutput?.();
+          return;
+        }
+        sentTerminalInput.push({
+          sessionId: message.sessionId,
+          terminalId: message.terminalId,
+          data: message.data,
+        });
+      };
+      accept(first.value);
+      void (async () => {
+        for (let next = await reader.next(); !next.done; next = await reader.next()) {
+          accept(next.value);
+        }
+      })();
+      yield create(SessionTerminalOutputSchema, {
+        data: new TextEncoder().encode(`term:${terminalId}\r\n`),
+        endOffset: scenario.terminalReplayEndOffset ?? 0n,
+        atOldest: (scenario.terminalHistory ?? []).length === 0,
+        sessionId,
+        terminalId,
+      });
+      if (openIndex < (scenario.droppedTerminalStreams ?? 0)) return;
+      for (;;) {
+        const refusal = refusals.shift();
+        if (refusal !== undefined) {
+          yield refusal;
+          continue;
+        }
+        await new Promise<void>((resolve) => {
+          wakeOutput = resolve;
+        });
+        wakeOutput = null;
+      }
+    },
+    // Lazy scroll-up history — yield one chunk per call from `scenario.terminalHistory` (popped
+    // in order), so a test can assert the loader chains anchors across successive calls.
+    getTerminalHistory: async function* (req) {
+      getTerminalHistoryCalls.push({
+        sessionId: req.sessionId,
+        terminalId: req.terminalId,
+        fromOffset: req.fromOffset,
+        untilOffset: req.untilOffset,
+      });
+      if (scenario.terminalHistoryNotFound) {
+        throw new ConnectError("terminal not found or not running", Code.NotFound);
+      }
+      const chunk = (scenario.terminalHistory ?? []).shift();
+      if (chunk) {
+        yield create(TerminalHistoryChunkSchema, chunk);
+      }
+    },
+  };
+
+  return {
+    handlers,
+    claimedControlSessionIds,
+    startTerminalSessionIds,
+    startedTerminalIds,
+    startedTerminalKinds,
+    startedTmuxSessions,
+    stoppedTerminals,
+    sentTerminalInput,
+    streamedTerminals,
+    getTerminalHistoryCalls,
+  };
+}
+
+export interface TerminalSessionServiceBackend extends TerminalSessionServiceControls {
+  backend: InMemoryRpcBackend;
+}
+
+/** The same fake as a backend of its own, for a spec that needs nothing but the terminal service. */
+export function aTerminalSessionServiceBackend(
+  scenario: TerminalSessionServiceScenario = {},
+): TerminalSessionServiceBackend {
+  const { handlers, ...controls } = aTerminalSessionServiceFake(scenario);
+  return {
+    backend: anInMemoryRpcBackend().implement(TerminalSessionService, handlers),
+    ...controls,
+  };
+}

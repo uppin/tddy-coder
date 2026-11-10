@@ -197,7 +197,13 @@ change what the running session's main agent is allowed to call; detaching and r
 ### Coding agents
 
 A host's coding agents are the specs of its coding-agent registry — the built-ins plus every
-`<tddyhome>/tools/<id>.yaml` that declares `coding_agent:` — so an agent that exists only as a YAML file is a
+`<tddyhome>/tools/<id>.yaml` that declares `coding_agent:` — loaded **once** at daemon start. A
+registry that does not load (an unparseable `tools/<id>.yaml`) stops the start with an error naming
+the file, whatever else is configured; no consumer ever falls back to an empty registry. That one
+instance serves the session host, Telegram, the reserved assistant ids and the model catalog: the
+`ListAgentModels` probe hands `tddy-tools list-models` the host's `<tddyhome>/tools`, so an
+operator's `models:` override in `tools/<id>.yaml` is the list the Create-session pane shows. An
+agent that exists only as a YAML file is a
 coding agent without a code change; what it may do is its spec's `coding_agent.capabilities`, not a
 session-type string. Its CLI session (`<id>-cli`) takes the generic spec launch, which serves every
 capability `claude.yaml` and `cursor.yaml` declare — a managed workflow with hooks for
@@ -232,6 +238,11 @@ transport.
 **Transport and permission policy.** Every coding-agent row says how its turns run and who answers
 its permission prompts: `SubagentInfo.transport` (10) / `.permission_policy` (11), snapshotted at
 attach into `SessionAgentEntry.transport` (16) / `.permission_policy` (17); both empty on a model row.
+Both are read from the agent's spec in the host's coding-agent registry, never from its name: an
+agent with a `coding_agent.acp` section is `acp` and asks its caller, one with a `coding_agent.headless`
+section is `headless` under its `headless.permission_policy` (`asks_caller` or `{ fixed: <text> }`). A
+headless agent whose spec declares no policy, and an id the registry does not declare, is not offered.
+The built-in specs declare:
 
 | Harness | `transport` | `permission_policy` |
 |---|---|---|
@@ -255,8 +266,9 @@ definition for it). Opening one starts the agent process for that conversation:
   checkout the main agent works, no separate clone;
 - on the profile's **provider account route**, resolved from the session owner's vault exactly as a
   tool session's is (environment and secret environment for every harness, `-c` overrides for
-  `codex-acp`, the route's config file as inline `OPENCODE_CONFIG_CONTENT` for `opencode`). A route
-  that does not resolve refuses the launch — it never falls back to the vendor's own login;
+  `codex-acp`, the route's configuration inline in `OPENCODE_CONFIG_CONTENT` for `opencode`, as
+  its `route.shape: inline_config` renders it). A route that carries a file is refused, naming its
+  shape; one that does not resolve refuses the launch — it never falls back to the vendor's own login;
 - in a **managed** session, with its native file-system and shell tools withdrawn (`claude-acp`:
   `disallowedTools` in `session/new`'s `_meta`; `opencode`: `tools` set to `false` in its inline
   config) and `tddy-tools --mcp` handed to it as its only MCP server, pointed at the session's exec
@@ -264,8 +276,8 @@ definition for it). Opening one starts the agent process for that conversation:
 
 How the process becomes the session's user depends on the host: the daemon's own user needs
 nothing; a privileged daemon runs it behind `setpriv`; a daemon under `tddy-supervisor` asks for a
-**relayed spawn** ([tddy-supervisor § Relayed spawns](../supervisor/tddy-supervisor.md#relayed-spawns-coding-agents)),
-which works only for harness binaries the operator listed in `allowed_relay_tool_paths`. Any other
+**relayed spawn** ([tddy-supervisor § Relayed spawns](../supervisor/tddy-supervisor.md#relayed-spawns)),
+which works only for a harness binary that resolves under the supervisor's `exec_roots`. Any other
 case is refused with the reason; a coding agent is never started as the daemon's user in place of
 the session's.
 
@@ -312,7 +324,7 @@ route** — none has a permission-prompt tool, so none asks:
 |---|---|
 | `cursor` | `<worktree>/.cursor/mcp.json` (`{"mcpServers": {...}}`, `0600`), listed in the repository's `info/exclude` before it is written so the credential is never offered to a commit. An existing `.cursor/mcp.json` in the worktree is refused by name, never overwritten; a worktree that is not a git checkout is refused |
 | `oz` | `--mcp <path>`, an owner-only file under `headless/<conversation>/` with the servers at the top level |
-| `codex` | `-c mcp_servers.tddy-tools.command=…`, `.args=[…]`, `.env_vars=[…]`: the variables' values are in the CLI's own environment and only their names are on the argv |
+| `codex` | `-c mcp_servers.tddy-tools.command=…`, `.args=[…]`, `.cwd="<conversation dir>"`, and no `env_vars`: the conversation id and its credential are in `headless/<conversation>/.tddy/session.json` (owner-only, removed with the directory), the session pointer the server finds from its `cwd`, so the CLI's environment carries no `TDDY_*` variable and no credential is on the argv |
 
 **What a headless conversation leaves on disk.** Each `headless/<conversation>/` directory is tagged
 with the creating daemon's durable instance id (`daemon-instance`; the configured
@@ -615,6 +627,29 @@ never blocks on another host's model warm-up.
 An unresolvable reference still fails the start with `INVALID_ARGUMENT` naming it. A session is never
 started with a silently dropped agent — which would also be a session whose main agent kept the tools
 that agent was meant to take away from it, with only an absent roster to say so.
+
+### A start has a deadline
+
+A whole session start — routing, provisioning, the clone, the worktree cut, seeding, the agent's
+launch — runs under `session_start_timeout_secs` in `daemon.yaml` (default **600**, `0` means one
+second). Every start on a daemon is bounded by it: the web's unary and streamed starts, a peer's
+forwarded start, and an operator start (Telegram).
+
+When it expires the start is cancelled exactly as a caller's cancel would cancel it, and given 30 s
+to stop at its next checkpoint. A start that comes back with a session in that time has the session
+and the branch it cut removed; one that does not come back is dropped. Either way the caller gets
+`DEADLINE_EXCEEDED` naming the deadline and the step it was on (`the session start did not finish
+within 600s; it was on its clone step`). A start that answers the cancel with `CANCELLED` is still
+reported `DEADLINE_EXCEEDED`. Its progress events reach the caller before the error does.
+
+An operator start carries no session token, and the split codebase half and the agent clones are
+deleted on their peers with one, so an operator start may not ask for either: one naming a codebase
+host, a sandboxed codebase, specialized agents or clone-placed agents is refused `INVALID_ARGUMENT`,
+naming the field, before anything is created. A session delete that a peer-held part would refuse
+for want of a common room is refused before the session's agent or pointer is touched.
+
+**Known limit.** A start dropped during the grace can leave a partially cut worktree
+(`TODO(start-cancel)`).
 
 ## Tool replacement, without behaviour
 

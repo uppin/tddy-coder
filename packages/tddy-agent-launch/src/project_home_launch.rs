@@ -17,8 +17,8 @@ use crate::spec_launch::{AgentToolset, McpRegistration};
 /// What a project-home (main) agent's launch is built from. See [`project_home_wiring`].
 pub(crate) struct ProjectHomeLaunch<'a> {
     pub(crate) config: &'a DaemonConfig,
-    /// The data dir the daemon *resolved*: an embedded host's agent-tool socket path digests it.
-    pub(crate) tddy_data_dir: &'a Path,
+    /// The main's OS user's agent-tool socket, which its tool calls reach this daemon over.
+    pub(crate) agent_tool_socket: &'a Path,
     /// Where the main's MCP config and role prompt are written.
     pub(crate) session_dir: &'a Path,
     /// The main's own session id, which its tool calls name.
@@ -85,6 +85,7 @@ impl MainAgentFlags {
             command: self.tddy_tools_path.clone(),
             args: vec!["--mcp".to_string()],
             env: tddy_session_split::agent_argv::tddy_tools_mcp_env(&self.session_dir),
+            cwd: None,
         };
         let toolset = AgentToolset {
             mcp: Some(McpRegistration {
@@ -124,7 +125,7 @@ impl StartRole<'static> {
 /// until [`Self::launch`], so a start refused before its agent is spawned leaves nothing on disk.
 pub(crate) struct MainLaunchPlan<'a> {
     config: &'a DaemonConfig,
-    tddy_data_dir: &'a Path,
+    agent_tool_socket: PathBuf,
     session_dir: PathBuf,
     session_id: &'a str,
     agent_session_token: String,
@@ -136,7 +137,7 @@ impl MainLaunchPlan<'_> {
     fn launch(self) -> Result<RoleWiring, Status> {
         project_home_wiring(ProjectHomeLaunch {
             config: self.config,
-            tddy_data_dir: self.tddy_data_dir,
+            agent_tool_socket: &self.agent_tool_socket,
             session_dir: &self.session_dir,
             session_id: self.session_id,
             agent_session_token: &self.agent_session_token,
@@ -149,7 +150,7 @@ impl MainLaunchPlan<'_> {
 }
 
 /// A main's wiring: `tddy-tools --mcp` as its only MCP server, reaching this daemon as the main
-/// (agent-tool socket on an embedded host, HTTP otherwise), every native filesystem and shell tool
+/// (over its OS user's agent-tool socket), every native filesystem and shell tool
 /// withdrawn, its tool set pre-approved, and the role prompt appended ([`MainAgentFlags`]). The
 /// role prompt is written now.
 ///
@@ -158,7 +159,7 @@ impl MainLaunchPlan<'_> {
 pub(crate) fn project_home_wiring(launch: ProjectHomeLaunch<'_>) -> Result<RoleWiring, Status> {
     let ProjectHomeLaunch {
         config,
-        tddy_data_dir,
+        agent_tool_socket,
         session_dir,
         session_id,
         agent_session_token,
@@ -173,12 +174,12 @@ pub(crate) fn project_home_wiring(launch: ProjectHomeLaunch<'_>) -> Result<RoleW
     })?;
 
     // The main's own id: its record holds the home worktree, so the daemon runs its tools there
-    // under the project-home role guard. The socket is set only where something serves it.
+    // under the project-home role guard.
     let env = tddy_session_split::split_session::colocated_jail_tool_env(
         &daemon_hook_urls::local_daemon_hook_url(config),
         session_id,
         agent_session_token,
-        tddy_daemon_kernel::embedded_host_agent_tool_socket(tddy_data_dir),
+        Some(agent_tool_socket.to_string_lossy().into_owned()),
     )
     .env_pairs();
     Ok(RoleWiring {
@@ -206,9 +207,16 @@ impl LaunchSessions {
         session_id: &'a str,
         sessions_base: &Path,
         session_token: &str,
+        agent_tool_socket: &Path,
     ) -> Result<StartRole<'a>, Status> {
         let session_dir = sessions_base.join(SESSIONS_SUBDIR).join(session_id);
-        let main = self.main_plan(Some(name), session_id, session_dir, session_token)?;
+        let main = self.main_plan(
+            Some(name),
+            session_id,
+            session_dir,
+            session_token,
+            agent_tool_socket,
+        )?;
         Ok(StartRole { name, main })
     }
 
@@ -221,6 +229,7 @@ impl LaunchSessions {
         session_id: &str,
         session_dir: &Path,
         session_token: &str,
+        agent_tool_socket: &Path,
     ) -> Result<RoleWiring, Status> {
         let role = meta.session_role.as_deref();
         RoleWiring::of(self.main_plan(
@@ -228,6 +237,7 @@ impl LaunchSessions {
             session_id,
             session_dir.to_path_buf(),
             session_token,
+            agent_tool_socket,
         )?)
     }
 
@@ -240,13 +250,14 @@ impl LaunchSessions {
         session_id: &'a str,
         session_dir: PathBuf,
         session_token: &str,
+        agent_tool_socket: &Path,
     ) -> Result<Option<MainLaunchPlan<'a>>, Status> {
         if role != Some(PROJECT_HOME_ROLE) {
             return Ok(None);
         }
         Ok(Some(MainLaunchPlan {
             config: &self.config,
-            tddy_data_dir: &self.tddy_data_dir,
+            agent_tool_socket: agent_tool_socket.to_path_buf(),
             session_dir,
             session_id,
             agent_session_token: self.split_sessions.agent_session_token_for(session_token)?,

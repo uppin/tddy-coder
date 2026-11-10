@@ -73,6 +73,19 @@ impl FirstLoginEnrolment {
                 );
                 Ok(())
             }
+            // A supervised daemon never writes the mapping (`#agent-tools` 31/32). Enrolment is
+            // assembled only for an embedded desktop host, so a supervised daemon does not reach
+            // here in production; if one somehow does, refuse rather than admit unrecorded.
+            Err(refusal @ EnrolmentRefusal::OwnedBySupervisor) => {
+                log::error!(
+                    target: crate::AUTH_LOG_TARGET,
+                    "could not enrol GitHub user {github_login}: {refusal}"
+                );
+                Err(Status::failed_precondition(format!(
+                    "could not enrol GitHub user \"{github_login}\": the user mapping is owned \
+                     by tddy-supervisor — map the user in users.yaml and restart the daemon"
+                )))
+            }
             // Refused rather than admitted unrecorded: a login that appeared to work and was
             // unknown after the next restart is worse than one that says why it failed. The file
             // is named because on a desktop the person reading this is the one who can fix it.
@@ -157,6 +170,8 @@ mod tests {
         let dir = tempfile::tempdir().expect("a temporary directory");
         let config_path = dir.path().join("desktop.yaml");
         std::fs::write(&config_path, AN_UNENROLLED_CONFIG).expect("the config is written");
+        // The empty mapping `./install --desktop` renders beside it, which enrolment fills.
+        std::fs::write(dir.path().join("users.yaml"), "[]\n").expect("users.yaml is written");
         AnUnenrolledDesktop {
             users: LiveUsers::default(),
             config_path,

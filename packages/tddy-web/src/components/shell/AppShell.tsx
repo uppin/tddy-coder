@@ -1,9 +1,9 @@
 import React from "react";
-import { useAuthContext } from "../../hooks/authProvider";
+import { useAuthContext } from "../../app/auth/authProvider";
 import { DaemonNavMenu } from "./DaemonNavMenu";
 import { DaemonSelectorConnected } from "./DaemonSelector";
 import { HostConnectionGate } from "./HostConnectionGate";
-import { UserAvatar } from "../UserAvatar";
+import { UserAvatar } from "tddy-workspace-web";
 
 const screenShellClassName =
   "min-h-svh w-full min-w-0 box-border px-4 py-6 sm:px-6 font-sans text-foreground";

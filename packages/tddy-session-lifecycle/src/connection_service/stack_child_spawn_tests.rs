@@ -66,11 +66,15 @@ fn a_pr_stack_orchestrator() -> Orchestrator {
 
     let config_dir = tempfile::tempdir().expect("config dir");
     let config_path = config_dir.path().join("daemon.yaml");
+    std::fs::write(&config_path, "").expect("write daemon config");
     std::fs::write(
-        &config_path,
-        format!("users:\n  - github_user: \"{os_user}\"\n    os_user: \"{os_user}\"\n"),
+        std::path::Path::new(&(config_path))
+            .parent()
+            .expect("a config directory")
+            .join("users.yaml"),
+        format!("- github_user: \"{os_user}\"\n  os_user: \"{os_user}\"\n"),
     )
-    .expect("write daemon config");
+    .unwrap();
     let config = crate::config::DaemonConfig::load(&config_path).expect("daemon config must parse");
 
     let sessions_base = sessions.path().to_path_buf();
@@ -88,10 +92,8 @@ fn a_pr_stack_orchestrator() -> Orchestrator {
         crate::peer_routing::PeerRouting::local_only(&config),
         Arc::new(tddy_daemon_kernel::operator_channel::NoOperatorChannel),
         Arc::new(CliSessionManager::new()),
-    )
-    .with_coding_agents_if_none(crate::test_util::coding_agents_with_binaries(&[(
-        "claude", &stub,
-    )]));
+        crate::test_util::coding_agents_with_binaries(&[("claude", &stub)]),
+    );
 
     let orchestrator = Orchestrator {
         service,

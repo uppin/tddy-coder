@@ -3,7 +3,7 @@
 **Location:** `packages/tddy-sandbox-app/src/spawn.rs`
 **Category:** oversized-file
 **Detected:** 2026-10-22 by `/pr-wrap` step 3.5 file-length gate on PR #670 (`#provider-route` 9/9)
-**Metrics:** **663 production lines** (2026-11-03, after #799) (counted to the first `#[cfg(test)]`) · budget 500
+**Metrics:** **668 production lines** (2026-11-07, after #832) (counted to the first `#[cfg(test)]`) · budget 500
 **Thresholds breached:** length 823 > 500
 **Restructure:** required — not designed, `/code-restructuring` territory
 **Status:** Open — **unclaimed**
@@ -14,6 +14,7 @@
 |---|---|---|
 | 2026-10-22 | 823 | first record; 788 at PR #670's merge-base (`655970c72`), already over budget. +35 in #670: `AgentKind::{OpenCode, Muse}`, their parsing, and `unstarted_agent_kind` (the refusal for both, see `docs/dev/todo/2026-10-22-sandbox-app-cannot-start-opencode-or-muse.md`). |
 | 2026-11-03 | 663 | **better** by 160 in PR #799 (`#agent-tools` 10/12): `AgentKind` and the per-agent home seeding are gone, and the jail is launched from the spec (`agent_exec_plan_for_jail`, `lower_tool_jail`). Rendering lives in the new `agent_spec.rs` (289 lines). Still 163 over |
+| 2026-11-07 | 668 | **better** by 2 over the 670 at #832's merge-base (`#agent-tools` 24/28): the runner argv no longer carries `--model`. Still 168 over. Not split: this PR did not grow it |
 
 ## What the tool found
 

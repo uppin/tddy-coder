@@ -199,7 +199,9 @@ a `livekit:` block and `NoSplitRooms` otherwise; the session host takes it throu
 ## Wiring the session host
 
 `DaemonSessionHost::new(config, sessions_base_for_user, tddy_data_dir, user_resolver, spawn_client,
-peer_routing, operator_channel, claude_cli_manager)` names no integration: it takes a
+peer_routing, operator_channel, claude_cli_manager, coding_agents)` names no integration: it takes the
+daemon's one coding-agent registry (`Arc<HostCodingAgents>`, loaded once by `runtime::build`; a host
+with none passes `no_coding_agents()`), a
 `tddy_host_service::peer_routing::PeerRouting` (`PeerRouting::local_only(&config)` for a machine
 with no peers) and a `SharedOperatorChannel` (`NoOperatorChannel` on a daemon with no chat surface),
 and installs every port's null object. A `with_*` builder replaces each:

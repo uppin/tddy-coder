@@ -18,10 +18,14 @@ use std::sync::Arc;
 
 use pretty_assertions::assert_eq;
 use tddy_actions::tool::ToolHost;
-use tddy_coder::acp_from_spec::{
-    claude_acp_backend_from_spec, codex_acp_backend_from_spec, opencode_acp_backend_from_spec,
+use tddy_coder::spec_backend_build::{build_spec_backend, spec_backend_for, SpecBackendRequest};
+use tddy_coding_agent_specs::{routed_agent, CodingAgentRegistry};
+use tddy_core::provider_route::{
+    opencode_config_for, resolve_route, HarnessRoute, RouteEndpoints, RouteSecret, RouteTarget,
 };
-use tddy_core::{CodingBackend, GoalHints, GoalId, InvokeRequest, PermissionHint, SessionMode};
+use tddy_core::{
+    CodingBackend, GoalHints, GoalId, InvokeRequest, PermissionHint, SessionMode, SpecTransport,
+};
 
 const PROMPT: &str = "Plan the feature";
 const ANSWER: &str = "The plan is ready.";
@@ -208,12 +212,27 @@ async fn one_turn(backend: &dyn CodingBackend, request: InvokeRequest) -> String
 async fn tddy_coder_agent_claude_acp_codex_acp_and_opencode_launch_from_specs() {
     // Given
     let workspace = a_workspace();
-    let claude_acp = claude_acp_backend_from_spec(&workspace.tools_dir(), workspace.host())
-        .expect("the claude-acp backend renders from its spec");
-    let codex_acp = codex_acp_backend_from_spec(&workspace.tools_dir(), workspace.host())
-        .expect("the codex-acp backend renders from its spec");
-    let opencode = opencode_acp_backend_from_spec(&workspace.tools_dir(), workspace.host())
-        .expect("the opencode backend renders from its spec");
+    let claude_acp = spec_backend_for(
+        &workspace.tools_dir(),
+        "claude-acp",
+        workspace.host(),
+        Some(SpecTransport::Acp),
+    )
+    .expect("the claude-acp backend renders from its spec");
+    let codex_acp = spec_backend_for(
+        &workspace.tools_dir(),
+        "codex-acp",
+        workspace.host(),
+        Some(SpecTransport::Acp),
+    )
+    .expect("the codex-acp backend renders from its spec");
+    let opencode = spec_backend_for(
+        &workspace.tools_dir(),
+        "opencode",
+        workspace.host(),
+        Some(SpecTransport::Acp),
+    )
+    .expect("the opencode backend renders from its spec");
 
     // When
     let answers = (
@@ -235,6 +254,126 @@ async fn tddy_coder_agent_claude_acp_codex_acp_and_opencode_launch_from_specs() 
             vec!["claude-agent-acp".to_string()],
             Vec::<String>::new(),
             vec!["acp".to_string()],
+        )
+    );
+}
+
+// ── `tddy-coder --agent opencode` on a provider route (`#agent-tools 29/32`) ────────────────────
+//
+// `opencode.yaml` declares `route.shape: inline_config` in `OPENCODE_CONFIG_CONTENT` and no route-file
+// adapter: the route's environment carries the configuration, and no file is written for
+// `OPENCODE_CONFIG` to name — a file named there would rank below a repository's own `opencode.json`.
+//
+// Changeset: `docs/dev/changesets/2026-11-09-opencode-route-inline.md`.
+
+/// The key the account below holds.
+const ROUTE_KEY: &str = "a-route-key";
+
+/// An OpenAI-compatible account serving Chat Completions.
+fn an_openai_compatible_account() -> RouteTarget {
+    RouteTarget {
+        preset: "openai-compatible".to_string(),
+        endpoints: RouteEndpoints {
+            openai_chat: Some("https://chat.example/v1".to_string()),
+            ..RouteEndpoints::default()
+        },
+        api_key: RouteSecret::new(ROUTE_KEY),
+        model: "kimi-k2".to_string(),
+    }
+}
+
+impl AWorkspace {
+    /// `bin/opencode` records the variables a route could reach it through — `OPENCODE_CONFIG`,
+    /// `OPENCODE_CONFIG_CONTENT` and `OPENCODE_PROVIDER_KEY`, one file each, `<unset>` when absent —
+    /// then answers a turn as the stub.
+    fn with_an_opencode_recording_its_route_env(self) -> Self {
+        let scenario = self.dir.path().join("scenario.json");
+        let record = |name: &str| {
+            self.dir
+                .path()
+                .join(format!("opencode.{name}"))
+                .display()
+                .to_string()
+        };
+        self.write_bin(
+            "opencode",
+            &format!(
+                r#"#!/bin/sh
+for a in "$@"; do printf '%s\n' "$a"; done > '{argv}'
+printf '%s' "${{OPENCODE_CONFIG-<unset>}}" > '{config}'
+printf '%s' "${{OPENCODE_CONFIG_CONTENT-<unset>}}" > '{content}'
+printf '%s' "${{OPENCODE_PROVIDER_KEY-<unset>}}" > '{key}'
+TDDY_ACP_SCENARIO='{scenario}' exec '{stub}'
+"#,
+                argv = self.record("opencode"),
+                config = record("OPENCODE_CONFIG"),
+                content = record("OPENCODE_CONFIG_CONTENT"),
+                key = record("OPENCODE_PROVIDER_KEY"),
+                scenario = scenario.display(),
+                stub = the_acp_stub().display(),
+            ),
+        );
+        self
+    }
+
+    /// What `bin/opencode` recorded for `name`.
+    fn opencode_saw(&self, name: &str) -> String {
+        let file = self.dir.path().join(format!("opencode.{name}"));
+        std::fs::read_to_string(&file)
+            .unwrap_or_else(|e| panic!("the opencode wrapper ran: {} {e}", file.display()))
+    }
+
+    /// The route the daemon resolves for `id` on `target` from the agent's own spec, as it writes
+    /// it for `--provider-route-path`.
+    fn a_route_for(&self, id: &str, target: &RouteTarget) -> HarnessRoute {
+        let registry = CodingAgentRegistry::load(&self.tools_dir()).expect("the registry loads");
+        let spec = registry.get(id).expect("declared");
+        resolve_route(&routed_agent(spec), target)
+            .unwrap_or_else(|refusal| panic!("{id} routes on the account: {refusal}"))
+    }
+}
+
+#[tokio::test]
+async fn tddy_coder_agent_opencode_on_a_route_carries_it_inline_and_writes_no_route_file() {
+    // Given
+    let workspace = a_workspace().with_an_opencode_recording_its_route_env();
+    let route = workspace.a_route_for("opencode", &an_openai_compatible_account());
+    let opencode = build_spec_backend(
+        &workspace.tools_dir(),
+        "opencode",
+        workspace.host(),
+        SpecBackendRequest {
+            transport: Some(SpecTransport::Acp),
+            provider_route: Some(route),
+        },
+    )
+    .expect("the opencode backend builds on the route");
+
+    // When
+    let answer = one_turn(&opencode, workspace.request("tddy-opencode-routed")).await;
+
+    // Then — the configuration inline and the key beside it; nothing names a route file
+    let expected: serde_json::Value = serde_json::from_str(
+        &opencode_config_for(&an_openai_compatible_account(), "OPENCODE_PROVIDER_KEY")
+            .expect("the account serves Chat Completions")
+            .contents,
+    )
+    .expect("JSON");
+    let inline: serde_json::Value =
+        serde_json::from_str(&workspace.opencode_saw("OPENCODE_CONFIG_CONTENT"))
+            .unwrap_or_else(|e| panic!("OPENCODE_CONFIG_CONTENT holds JSON: {e}"));
+    assert_eq!(
+        (
+            answer,
+            inline,
+            workspace.opencode_saw("OPENCODE_PROVIDER_KEY"),
+            workspace.opencode_saw("OPENCODE_CONFIG"),
+        ),
+        (
+            ANSWER.to_string(),
+            expected,
+            ROUTE_KEY.to_string(),
+            "<unset>".to_string(),
         )
     );
 }

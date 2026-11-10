@@ -11,6 +11,12 @@ what gives the launcher its relay — and hands it to the host with
 `DaemonSessionHost::with_coding_agent_launcher`; `tddy-session-agents` reaches it through
 `AgentRoster.coding_agent_launcher`.
 
+The launcher's plans live beside it: `coding_agent_launcher/headless.rs` (the headless plan from the
+agent's spec, its conversation files and session pointer, its approvals, and
+`sweep_headless_files_left_by_this_daemon`, re-exported from `coding_agent_launcher`) and
+`coding_agent_launcher/acp.rs` (the ACP plan from the spec: command, MCP servers, session meta,
+route and confinement).
+
 A coding agent can write, so a launch the daemon cannot honour **exactly** is refused with the reason
 — never started some weaker way.
 
@@ -29,36 +35,49 @@ override; `config_env` merged into `OPENCODE_CONFIG_CONTENT`). The specs give:
 | `codex-acp` | `codex-acp` beside the resolved `codex` dep (`sibling_of`), or `TDDY_CODEX_ACP_CLI` — never `PATH` |
 | `opencode` | `opencode acp` |
 
-The working directory is the session's worktree. Any other harness is refused. A launcher built
-without coding agents (`new`, `with_identity` — tests only) still plans the same three by hand
-(`harness_command`, `apply_route`); the `#agent-tools` sweep deletes that path
-([todo](../../../docs/dev/todo/2026-11-04-acp-hand-built-launch-path-for-agentless-launchers.md)).
-The OpenCode route config stays inline in `OPENCODE_CONFIG_CONTENT`, since a session has no owner for
-a route file ([todo](../../../docs/dev/todo/2026-11-04-opencode-acp-route-file-has-no-session-owner.md)).
+The working directory is the session's worktree. Any harness the host's registry does not declare an
+ACP agent is refused; nothing is planned by hand, and no launcher names an agent
+(`CodingAgentLauncher::session_meta_for` has no default). A route that carries a file is refused, naming its
+`route.shape`: a file the daemon writes cannot be read by an agent running as the session's OS user,
+so a routed ACP agent's spec declares `inline_config` (OpenCode) or `toml_args` (Codex).
 
 ## The provider route
 
 When the definition names a provider account, `route_from_vault` resolves it in the session owner's
 vault with `tddy_agent_launch::session_provider_route::resolve_session_route` — the call tool sessions
 use — and `apply_route` applies it: `env` and `secret_env` for every harness, `codex_acp_route_args`
-(`-c` overrides) for `codex-acp`, and the route's config file merged into inline
-`OPENCODE_CONFIG_CONTENT` for `opencode` (a non-JSON config, the route's or an inline one already
-set, is refused). A route that does not resolve refuses the launch.
+(`-c` overrides) for an agent whose spec's `route.shape` is `toml_args` (`codex-acp`) — keyed on the
+spec, never the harness name. An `inline_config` route (`opencode`) already carries its
+configuration in its plain environment (`OPENCODE_CONFIG_CONTENT`, the spec's `route.config_env`), so
+the planner has no code of its own for it; a managed launch's `config_env` withdrawal merges over that
+value (a non-JSON inline config is refused). A route carrying files is refused, naming its shape. A route that does not resolve refuses the launch.
 
 ## A managed session
 
-`refuse_unless_confinable` refuses a harness that cannot withdraw its native tools. For `opencode`
-the withdrawal config (`opencode_withdrawal_config`) is merged into `OPENCODE_CONFIG_CONTENT`; for
-`claude-acp` it travels as `session/new` `_meta` (set by `tddy-session-agents`). `mcp_servers_for`
+`refuse_unless_spec_confinable` refuses an agent whose spec cannot withdraw its native tools
+(`confinement_of_spec`), naming the registry's confinable ACP agents (`confinable_acp_agents`). A
+`config_env` withdrawal (`opencode`) is merged into `OPENCODE_CONFIG_CONTENT`; an `acp_meta` one
+(`claude-acp`) travels as `session/new` `_meta` (`session_meta_for`, set by `tddy-session-agents`). `mcp_servers_for`
 returns `tddy-tools --mcp` with the environment `tddy_session_split::coding_agent_wiring`'s
-`CodingAgentToolHost::tool_server` builds: the colocated jail's `TDDY_REMOTE_*` variables and a session
-token minted for the agent. A daemon that signs no tokens refuses. An unmanaged launch has no MCP
+`CodingAgentToolHost::tool_server` builds: the colocated jail's `TDDY_REMOTE_*` variables, with
+`TDDY_REMOTE_DAEMON_SOCKET` naming the session OS user's daemon socket
+(`DaemonLauncherDeps.agent_tool_sockets`), and a session token minted for the agent. A user the daemon
+cannot give a socket — under `tddy-supervisor`, one `users.yaml` does not map — is refused, naming
+`users.yaml`. A daemon that signs no tokens refuses. An unmanaged launch has no MCP
 servers.
 
 ## Becoming the session's user
 
-`launch_transport` is the production path; `command_for` covers only the case where the driver
-spawns the agent itself.
+`launch_agent` is the production path: `launch_transport` plus the hooks of the adapter the agent's
+spec declares (`coding_agent.acp.hooks_adapter`), prepared on the command before it is spawned or
+relayed — `codex-acp-login` hands back its one `codex login` retry on an auth-like `session/new`
+error, an agent declaring none gets `no_launch_hooks()`, and a name this build has no adapter for is
+refused. The adapter is handed **no route**: the plan already rendered it (`-c` overrides when the
+spec's `route.shape` is `toml_args`, the inline `OPENCODE_CONFIG_CONTENT` when it is
+`inline_config`), so `codex-acp-login` never appends a second override.
+The login runs as the daemon's user and writes its authorize URL into the worktree
+([`docs/dev/todo/2026-11-09-daemon-codex-acp-login-runs-as-the-daemon-user-in-the-worktree.md`](../../../docs/dev/todo/2026-11-09-daemon-codex-acp-login-runs-as-the-daemon-user-in-the-worktree.md)).
+`command_for` covers only the case where the driver spawns the agent itself.
 
 1. **The daemon's own user** — the command as built (`AgentTransport::Command`).
 2. **A privileged daemon** — `coding_agent_as_user::run_as_session_user` wraps the argv in `setpriv`
@@ -70,14 +89,16 @@ spawns the agent itself.
    narrowed to `0700`, a symlink or a foreign owner is refused), sends `SpawnRelayed` with the
    harness resolved to an absolute path, waits up to 15 s for the supervisor to connect, and returns
    the stream (`AgentTransport::Stream`), which the ACP driver serves with `AcpDriver::spawn_over`.
-   The socket file is removed once connected. The supervisor's opaque denial becomes an error naming
-   the three settings an operator can change: `allowed_relay_tool_paths`, `allowed_session_users`,
-   `allowed_env_keys`. Closing the stream stops the agent.
+   The socket file is removed once connected. No cgroup scope is named (`scope: None`; see
+   [the backlog entry](../../../docs/dev/todo/2026-11-09-daemon-creates-no-cgroup-scope-for-supervised-spawns.md)).
+   The supervisor's opaque denial becomes an error naming the three things an operator can change: the
+   harness under `exec_roots`, the user's mapping in `users.yaml`, and the launch's environment,
+   which passes whole but for a loader variable. Closing the stream stops the agent.
 4. **Anything else** — refused, naming the user.
 
-On a supervised host the program sent is what `allowed_relay_tool_paths` must list. Its arguments are
-not allowlisted, so allowlisting `bunx` lets the daemon run any npm package as the session user; set
-`TDDY_CLAUDE_AGENT_ACP_CLI` and allowlist that binary instead.
+On a supervised host the program sent must resolve under the supervisor's `exec_roots`. Its arguments
+are not checked, so admitting `bunx` lets the daemon run any npm package as the session user; set
+`TDDY_CLAUDE_AGENT_ACP_CLI` and name that binary's resolved file instead.
 
 ## A headless conversation
 
@@ -88,7 +109,8 @@ rather than starting anything weaker:
 - the launcher must be wired (`with_headless_wiring(config, <tddy_data_dir>/headless)`, which
   `for_daemon` does) and hold the host's coding agents (`with_coding_agents`; a tool file that does
   not load refuses every headless launch, and nothing is planned by hand), the harness confinable for
-  the session (`refuse_unless_confinable` — no headless CLI is, so a managed session refuses), and the
+  the session (`refuse_unless_registry_confinable` — no headless spec is, since a headless flag for its own tools
+  is not an ACP withdrawal, so a managed session refuses), and the
   launch must carry a plain conversation id;
 - `HostCodingAgents::resolve` names the agent's spec and binary; the command runs on the launch's
   worktree with the session's model, its argv rendered at each turn by a `SpecHeadlessRenderer` (the
@@ -105,8 +127,17 @@ rather than starting anything weaker:
     spec's `TDDY_REMOTE_SESSION_TOKEN`) in `ApprovalRoutes` (`with_approval_routes`) — **last**, once
     the plan is complete, so a plan that fails part-way leaves no route; a spec with no token is
     refused;
-  - an agent whose MCP slot is `inline` (`codex`) has the server's `env` added to the command's own,
-    since Codex forwards the variables to its server by name — only their names are on the argv;
+  - an agent whose MCP slot is `inline` (`codex`) registers the server on its argv, where no
+    credential may be: `write_conversation_pointer` moves the server's `env` (the conversation id and
+    the minted `TDDY_REMOTE_SESSION_TOKEN`) into the conversation's own session pointer,
+    `<conversation dir>/.tddy/session.json` — owner-only, written atomically, no socket, the
+    variables in its `remote` map, owned by this daemon (`SessionPointerOwner::this_process()`) and
+    removed with the directory — and sets the server's `cwd` to the conversation directory, which the
+    inline slot renders as `-c mcp_servers.tddy-tools.cwd="<dir>"`. The server's `env` is then empty,
+    so the slot renders no `env_vars` and the command's `env` carries no `TDDY_*` variable; the
+    `tddy-tools` Codex starts in that directory finds its session through the pointer
+    ([tddy-tools session resolution](../../tddy-tools/docs/session-resolution.md)). A pointer that
+    cannot be written refuses the launch, naming its path;
   - a slot that writes into the worktree (`cursor`'s `.cursor/mcp.json`) is recorded first
     (`record_written_files`): an existing file there is refused by name, the path is added to the
     repository's `info/exclude` (`tddy_agent_backend::turn_files::exclude_from_git`) before anything
@@ -125,5 +156,5 @@ start. Cursor's worktree file is not removed on close, and the start-up call has
 see the backlog.
 
 Approvals are bound for `claude` only: `cursor`, `codex` and `oz` have no permission-prompt tool.
-`confinement_for` still reports all three `CannotWithdraw`
+`refuse_unless_registry_confinable` still refuses all three in a managed session
 ([`docs/dev/todo/2026-10-25-headless-cursor-codex-oz-cannot-withdraw-native-tools.md`](../../../docs/dev/todo/2026-10-25-headless-cursor-codex-oz-cannot-withdraw-native-tools.md)).

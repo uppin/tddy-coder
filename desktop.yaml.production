@@ -91,7 +91,8 @@ github:
 # WHICH OS USER A LOGIN RUNS SESSIONS AS: nobody yet, on purpose.
 #
 # The FIRST GitHub login completed from this application's own window is enrolled here against the
-# OS user the application runs as, and persisted to this file (rewriting it drops these comments).
+# OS user the application runs as, and persisted to users.yaml beside this file (never to this file:
+# a `users:` key here fails loading).
 # From then on that row is an ordinary mapping: a different GitHub login is refused
 # `permission_denied: user not mapped to OS user` on every session RPC, and there is deliberately no
 # fallback to "whoever the daemon runs as". A login arriving over any other transport — a LiveKit
@@ -101,7 +102,7 @@ github:
 # NO `livekit:` BLOCK IS NEEDED TO SIGN IN. The daemon signs session tokens with its own key (see
 # `auth_storage` above); `livekit.api_secret` signs LiveKit room JWTs only, and is configured when
 # the application should join a common room.
-users: []
+# The mapping lives in users.yaml beside this file, which ./install --desktop renders empty.
 
 # Append `-<unix_ms>` to this daemon's LiveKit identity once per process, so the installed
 # application and a `./desktop-dev` run on the same machine do not collide with DuplicateIdentity.

@@ -21,21 +21,40 @@ pub const ARGV_MCP_FILE: &str = "mcp.json";
 
 /// `server` as `flag <key_prefix>.<name>.<field>=<value>` pairs for `command`, `args` and
 /// `env_vars`, in that order. Values are TOML (JSON's spelling of a string and a list of strings,
-/// which TOML reads the same); `env_vars` lists the environment's **names** only, never a value.
+/// which TOML reads the same); `env_vars` lists the environment's **names** only, never a value,
+/// and is left out when the server has none.
 pub fn render_inline_mcp(flag: &str, key_prefix: &str, server: &McpServerCommand) -> Vec<String> {
     let key = |field: &str| format!("{key_prefix}.{}.{field}", server.name);
     let env_names: Vec<&str> = server.env.keys().map(String::as_str).collect();
+    let env_vars = (!env_names.is_empty()).then(|| (key("env_vars"), toml_value(&env_names)));
     [
         (
             key("command"),
             toml_value(&server.command.to_string_lossy()),
         ),
         (key("args"), toml_value(&server.args)),
-        (key("env_vars"), toml_value(&env_names)),
     ]
     .into_iter()
+    .chain(env_vars)
     .flat_map(|(key, value)| [flag.to_string(), format!("{key}={value}")])
     .collect()
+}
+
+/// The `cwd` override of `server`'s inline registration: `flag <key_prefix>.<name>.cwd="<dir>"`.
+pub fn render_inline_mcp_cwd(
+    flag: &str,
+    key_prefix: &str,
+    server: &McpServerCommand,
+    dir: &Path,
+) -> Vec<String> {
+    vec![
+        flag.to_string(),
+        format!(
+            "{key_prefix}.{}.cwd={}",
+            server.name,
+            toml_value(&dir.to_string_lossy())
+        ),
+    ]
 }
 
 /// A string or a list of strings as a TOML value. JSON's spelling of both is valid TOML.
@@ -128,6 +147,7 @@ mod tests {
                 ("TDDY_CONVERSATION_ID".to_string(), "conv-1".to_string()),
                 ("TDDY_REMOTE_SESSION_TOKEN".to_string(), TOKEN.to_string()),
             ]),
+            cwd: None,
         }
     }
 

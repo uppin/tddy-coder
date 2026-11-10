@@ -11,9 +11,29 @@ honest measurement, not the gate's output.
 hand-splitting a root bash script mid-PR would delay review of an otherwise-small change. Recorded
 per the file-length gate's deferral contract.
 
+**Measurement history:**
+
+| Date | PR | Lines (`wc -l`) | Non-blank, non-comment | Note |
+|---|---|---|---|---|
+| 2026-11-01 | #803 | — | 1,408 → 1,503 (production lines) | detection |
+| 2026-11-09 | #859 (`#agent-tools` 31/32) | 1,700 → 1,600 | 1,053 → 977 | `survey_agent_tool_sockets` and `declare_agent_tool_sockets` (~190 lines) deleted; the one-time `migrate_user_mapping` and the desktop `users.yaml` render added. Still ~2× over budget; the account/identity split below is untouched |
+
+**Status:** Open — narrowed by #859 (the agent-tool-socket survey is gone); the account/identity
+handling and the desktop section are still in the one script.
+
 **What would close it:** `install` under 500 production lines. The natural seams, both already
 self-contained regions: (1) the account/identity handling (`read_daemon_service_key`, the
 derivation block, the useradd/usermod/chown branch — the part PR #803 grew), sourced as a helper
 file the way the script already sources nothing today; (2) the desktop install section, which is
 already documented as self-contained ("shares this script's helpers"). A bash split needs a
 sourcing convention plus the `install_contract` static checks updated to follow the files.
+
+## Measurement history
+
+| Date | PR | `wc -l install` | What grew it |
+|---|---|---|---|
+| 2026-11-09 | [#865](https://github.com/uppin/tddy-coder/pull/865) (`#agent-tools` 32/32) | 1,600 → 1,811 | `migrate_spawn_policy_keys` (the one-time move of `allowed_tool_paths` / `allowed_relay_tool_paths` to `exec_roots`), `resolved_git_path` and the live `exec_roots` render, `tddy-git-clone` in `INSTALLED_BINARIES`. Measured with `wc -l` (all lines, comments included), so not directly comparable with the production-line figures above |
+
+**Status:** Open — still over budget (500); the seams above are unchanged, and the spawn-policy
+migration is a third self-contained region a split could take out with the user-mapping migration
+it extends.

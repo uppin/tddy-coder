@@ -116,6 +116,7 @@ fn the_tool_server() -> HeadlessMcpServer {
         command: PathBuf::from(TDDY_TOOLS),
         args: vec!["--mcp".to_string()],
         env: BTreeMap::new(),
+        cwd: None,
     }
 }
 
@@ -247,6 +248,7 @@ fn a_backend_rendered_by(renderer: Arc<ARecordingRenderer>) -> SpecHeadlessBacke
             product: "Claude Code".to_string(),
             support: RouteSupport::default(),
             key_env: None,
+            config_env: None,
         },
     )
 }
@@ -445,6 +447,7 @@ fn a_rendered_driver(agent: &AFakeAgent, renderer: Arc<ARecordingRenderer>) -> H
             command: PathBuf::from(TDDY_TOOLS),
             args: vec!["--mcp".to_string()],
             env: vec![("TDDY_CONVERSATION_ID".to_string(), "conv-1".to_string())],
+            cwd: None,
         }),
         scratch_dir: Some(agent.path().join("conv-1")),
         ..HeadlessCommand::default()

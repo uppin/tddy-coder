@@ -14,7 +14,7 @@
 import React from "react";
 import type { InMemoryRpcBackend } from "tddy-connectrpc-testkit";
 import type { Transport } from "@connectrpc/connect";
-import { RpcTransportProvider } from "../../../src/rpc/transportProvider";
+import { RpcTransportProvider } from "../../../src/app/rpc/transportProvider";
 
 /** A recorded LiveKit RPC: which participant identity it targeted and the service method name. */
 export interface RecordedRpcCall {

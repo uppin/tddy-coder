@@ -178,9 +178,6 @@ fn write_livekit_daemon_yaml(
     let yaml = format!(
         r#"
 daemon_instance_id: {daemon_instance_id}
-users:
-  - github_user: "testuser"
-    os_user: "{os_user}"
 allowed_tools:
   - path: {true_path}
     label: t
@@ -193,6 +190,11 @@ livekit:
 "#
     );
     std::fs::write(&path, yaml).unwrap();
+    std::fs::write(
+        dir.path().join("users.yaml"),
+        format!("- github_user: \"testuser\"\n  os_user: \"{os_user}\"\n"),
+    )
+    .unwrap();
     (dir, path)
 }
 
@@ -290,8 +292,6 @@ async fn a_daemon(
         ),
         Arc::new(tddy_daemon_kernel::operator_channel::NoOperatorChannel),
         Arc::new(tddy_session_lifecycle::claude_cli_session::CliSessionManager::new()),
-    )
-    .with_coding_agents_if_none(
         tddy_session_lifecycle::test_util::coding_agents_with_binaries(&[(
             "claude",
             Path::new(claude_binary),

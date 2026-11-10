@@ -68,6 +68,7 @@ fn the_tool_server() -> HeadlessMcpServer {
         command: PathBuf::from(TDDY_TOOLS),
         args: vec!["--mcp".to_string()],
         env: BTreeMap::new(),
+        cwd: None,
     }
 }
 

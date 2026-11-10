@@ -93,11 +93,17 @@ type AConfigAndItsAgents = (
 fn a_config_running(stub_agent: &Path) -> (tempfile::TempDir, AConfigAndItsAgents) {
     let dir = tempfile::tempdir().unwrap();
     let user = this_os_user();
-    let yaml = format!(
-        "users:\n  - github_user: \"{user}\"\n    os_user: \"{user}\"\nallowed_tools:\n  - path: /bin/true\n    label: true\n"
-    );
+    let yaml = "allowed_tools:\n  - path: /bin/true\n    label: true\n";
     let path = dir.path().join("daemon.yaml");
     std::fs::write(&path, yaml).unwrap();
+    std::fs::write(
+        std::path::Path::new(&(path))
+            .parent()
+            .expect("a config directory")
+            .join("users.yaml"),
+        format!("- github_user: \"{user}\"\n  os_user: \"{user}\"\n"),
+    )
+    .unwrap();
     let config = DaemonConfig::load(&path).expect("config must parse");
     let agents =
         tddy_session_lifecycle::test_util::coding_agents_with_binaries(&[("claude", stub_agent)]);
@@ -115,20 +121,18 @@ fn a_session_host(
     let user = this_os_user();
     let user_resolver: UserResolver =
         Arc::new(move |token| (token == VALID_TOKEN).then(|| user.clone()));
-    let host = Arc::new(
-        DaemonSessionHost::new(
-            config.clone(),
-            sessions_base_resolver,
-            data_dir,
-            user_resolver,
-            None,
-            tddy_spawn::supervisor_client::SpawnBackendChoice::ForkedWorker,
-            tddy_session_lifecycle::peer_routing::PeerRouting::local_only(&config),
-            Arc::new(tddy_daemon_kernel::operator_channel::NoOperatorChannel),
-            manager,
-        )
-        .with_coding_agents_if_none(agents),
-    );
+    let host = Arc::new(DaemonSessionHost::new(
+        config.clone(),
+        sessions_base_resolver,
+        data_dir,
+        user_resolver,
+        None,
+        tddy_spawn::supervisor_client::SpawnBackendChoice::ForkedWorker,
+        tddy_session_lifecycle::peer_routing::PeerRouting::local_only(&config),
+        Arc::new(tddy_daemon_kernel::operator_channel::NoOperatorChannel),
+        manager,
+        agents,
+    ));
     host.install_sandbox_rpc_bridge();
     host
 }
@@ -228,6 +232,8 @@ fn a_process_is_alive(pid: u32) -> bool {
 impl TmuxAgentDaemon {
     /// A daemon restarted over the same sessions directory: no terminals registered, same tmux.
     fn restarted(&self) -> Arc<DaemonSessionHost> {
+        // The daemon that restarts is gone: nothing of it still listens on its agent-tool sockets.
+        self.host.agent_tool_sockets().stop_serving();
         a_session_host(
             self.config.clone(),
             self.sessions_base.clone(),
@@ -348,6 +354,53 @@ async fn a_fresh_daemon_reattaches_the_main_terminal_on_first_stream_without_res
     until_attached(&daemon.tmux, &name, 1).await;
     assert_eq!(daemon.launch_count(), 1, "claude was not relaunched");
     assert_eq!(daemon.metadata_of(&session_id).pid, Some(agent_pid));
+}
+
+#[tokio::test]
+#[serial_test::serial]
+async fn a_fresh_daemon_serves_the_reattached_agents_tool_socket_again() {
+    // Given a tmux-run session that outlived its daemon, whose agent reports over its user's
+    // agent-tool socket — which nothing serves once that daemon is gone
+    let daemon = a_daemon_with_a_private_tmux().await;
+    let (session_id, _agent_pid) = daemon.is_running_in_tmux().await;
+    daemon.host.shut_down_children().await;
+    let fresh = daemon.restarted();
+    let socket = tddy_daemon_kernel::agent_tool_sockets::user_socket_path_for_user(
+        &daemon.sessions_base,
+        &this_os_user(),
+    )
+    .expect("the user's socket path");
+    assert!(
+        std::os::unix::net::UnixStream::connect(&socket).is_err(),
+        "nothing serves {} before the re-attach",
+        socket.display()
+    );
+
+    // When a client first streams the session's main terminal from the fresh daemon
+    let streamed = fresh
+        .terminal_session_service()
+        .stream_terminal_output(Request::direct(StreamTerminalOutputRequest {
+            session_token: VALID_TOKEN.to_string(),
+            session_id: session_id.clone(),
+            terminal_id: MAIN_TERMINAL_ID.to_string(),
+            initial_cols: 0,
+            initial_rows: 0,
+            mode: StreamReplayMode::Tail as i32,
+            from_offset: 0,
+            control_token: String::new(),
+        }))
+        .await;
+
+    // Then the agent's reports reach the fresh daemon again
+    assert!(
+        streamed.is_ok(),
+        "the first stream re-attaches the main terminal"
+    );
+    assert!(
+        std::os::unix::net::UnixStream::connect(&socket).is_ok(),
+        "{} is served again after the re-attach",
+        socket.display()
+    );
 }
 
 #[tokio::test]

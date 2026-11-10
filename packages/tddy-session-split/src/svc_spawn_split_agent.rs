@@ -29,9 +29,6 @@ struct SplitAgentProcess<'a> {
     initial_prompt: String,
     tddy_tools_path: std::path::PathBuf,
     remote: tddy_core::RemoteToolEnv,
-    /// The roster the spawn read from the codebase host, handed to the agent's `tddy-tools` so it
-    /// is in force before the first `tools/list` (see [`crate::split_session::roster_seed_env_pairs`]).
-    roster_seed: Vec<(String, String)>,
     context_dir: std::path::PathBuf,
     extra_args: Vec<String>,
     /// The session's directory, where the hook wait its launch wrote is recorded.
@@ -81,13 +78,16 @@ impl SplitSessions {
         )
         .await?;
 
-        let (tddy_tools_path, remote) = self.split_agent_tool_wiring(
-            session_id,
-            codebase_instance_id,
-            codebase_session_id,
-            room,
-            req,
-        )?;
+        let (tddy_tools_path, remote) = self
+            .split_agent_tool_wiring(
+                os_user,
+                session_id,
+                codebase_instance_id,
+                codebase_session_id,
+                room,
+                req,
+            )
+            .await?;
         self.host_split_room(
             session_id,
             codebase_instance_id,
@@ -112,6 +112,14 @@ impl SplitSessions {
             .split_agent_roster(codebase_instance_id, codebase_session_id, req)
             .await?;
         let withdrawals = crate::split_session::wire_roster_withdrawals(&roster.agents);
+        let roster_seed = crate::split_session::roster_seed_env_pairs(&roster);
+        // What the agent's `tddy-tools --mcp` reaches the codebase session with: the transport and
+        // the roster seed, registered on that server alone.
+        let tool_server_env: Vec<(String, String)> = remote
+            .env_pairs()
+            .into_iter()
+            .chain(roster_seed.iter().cloned())
+            .collect();
         // The agent's working directory is populated **before** the agent process exists (AC23): a
         // split agent that starts, reads its cwd and finds only the notice has already missed the
         // project's rules for its first turn. A fetch that fails fails the start, and the caller
@@ -123,6 +131,7 @@ impl SplitSessions {
                 req,
                 &session_dir,
                 &tddy_tools_path,
+                &tool_server_env,
                 withdrawals,
             )
             .await?;
@@ -138,7 +147,6 @@ impl SplitSessions {
                 initial_prompt,
                 tddy_tools_path,
                 remote,
-                roster_seed: crate::split_session::roster_seed_env_pairs(&roster),
                 context_dir,
                 extra_args,
                 session_dir: &session_dir,
@@ -174,8 +182,9 @@ impl SplitSessions {
         }))
     }
 
-    fn split_agent_tool_wiring(
+    async fn split_agent_tool_wiring(
         &self,
+        os_user: &str,
         session_id: &str,
         codebase_instance_id: &str,
         codebase_session_id: &str,
@@ -202,7 +211,7 @@ impl SplitSessions {
                 &daemon_hook_urls::local_daemon_hook_url(&self.config),
                 codebase_session_id,
                 &self.agent_session_token_for(&req.session_token)?,
-                self.agent_tool_socket_for_embedded_host(),
+                Some(self.agent_tool_socket_of(os_user).await?),
             ),
         };
         // What this agent was actually wired to, on one line, on the path *every* placement takes.
@@ -242,7 +251,6 @@ impl SplitSessions {
             initial_prompt,
             tddy_tools_path,
             remote,
-            roster_seed,
             context_dir,
             extra_args,
             session_dir,
@@ -259,19 +267,18 @@ impl SplitSessions {
         .map_err(|e| Status::internal(format!("failed to record the answer wait: {e}")))?;
         // The hooks file is the one the split agent's spec's hooks slot renders, written
         // under the context dir the agent runs in.
-        let agent_tool_socket = self.agent_tool_socket_for_embedded_host();
+        let agent_tool_socket = self.agent_tool_socket_of(os_user).await?;
         let hook_params = tddy_core::HookCommandParams {
             tddy_tools_path: &tddy_tools_path.to_string_lossy(),
             daemon_url: &tddy_daemon_kernel::daemon_hook_urls::advertise_daemon_url(&self.config),
             session_id,
             os_user,
             hook_token: &hook_token,
-            // An embedded daemon serves no HTTP RPC; its hooks report over this socket.
-            daemon_socket: agent_tool_socket.as_deref(),
+            daemon_socket: Some(&agent_tool_socket),
             answer_wait_secs,
         };
         match tddy_coding_agent_specs::slots::render(
-            &crate::agent_argv::split_agent_spec()?,
+            &crate::agent_argv::split_agent_spec(&self.coding_agents)?,
             &tddy_coding_agent_specs::slots::SlotInputs {
                 workdir: context_dir.clone(),
                 scratch_dir: context_dir.clone(),
@@ -305,7 +312,7 @@ impl SplitSessions {
         // The launch argv is rendered from the split agent's spec — the same template a
         // spec-driven launch renders — with this start's model, session, permission mode and
         // prompt bound.
-        let spec = crate::agent_argv::split_agent_spec()?;
+        let spec = crate::agent_argv::split_agent_spec(&self.coding_agents)?;
         let argv = spec
             .render_run_argv(
                 std::path::Path::new(&(self.agent_binary)(&spec.id)?),
@@ -324,22 +331,39 @@ impl SplitSessions {
             )
             .map_err(|e| Status::internal(format!("rendering the split agent's argv: {e}")))?;
         let session_type = format!("{}-cli", spec.id);
-        let handle = self
-            .cli_manager
-            .start_with_options(
+        // The agent's `tddy-tools` finds its session through the pointer in the context dir (and
+        // through its own registration, `extra_args`): the agent process is given no `TDDY_*`
+        // variable. The pointer is removed when the agent exits.
+        let pointer =
+            crate::split_session::split_session_pointer(&remote, &context_dir, session_dir);
+        let on_exit = self.session_pointers.place(&pointer, &context_dir, None)?;
+        let argv = tddy_cli_sessions::cli_session_manager::CliSessionManager::with_launch_flags(
+            argv,
+            Some(initial_prompt.trim()).filter(|p| !p.is_empty()),
+            None,
+            &extra_args,
+        );
+        let pointer_dir = context_dir.clone();
+        let handle = spawn_split_agent_pty(
+            &self.cli_manager,
+            &spec,
+            self.coding_agents.agent_env_base(),
+            SplitAgentPty {
                 session_id,
+                session_type: &session_type,
                 context_dir,
-                req.model.trim(),
+                model: req.model.trim(),
                 argv,
-                &session_type,
-                Some(initial_prompt.trim()).filter(|p| !p.is_empty()),
-                None,
-                extra_args,
-                remote.env_pairs().into_iter().chain(roster_seed).collect(),
-                Some(os_user),
-            )
-            .await
-            .map_err(|e| Status::internal(format!("failed to spawn {session_type}: {e}")))?;
+                os_user: Some(os_user),
+                on_exit,
+            },
+        )
+        .await
+        .map_err(|e| {
+            // No agent exists whose exit would remove the pointer just placed.
+            self.session_pointers.remove(&pointer_dir);
+            Status::internal(format!("failed to spawn {session_type}: {e}"))
+        })?;
         Ok((hook_token, handle))
     }
 
@@ -402,6 +426,7 @@ impl SplitSessions {
         .await
     }
 
+    #[allow(clippy::too_many_arguments)]
     async fn split_agent_context_and_args(
         &self,
         codebase_instance_id: &str,
@@ -409,9 +434,10 @@ impl SplitSessions {
         req: &StartSessionRequest,
         session_dir: &std::path::Path,
         tddy_tools_path: &std::path::Path,
+        tool_server_env: &[(String, String)],
         withdrawals: Vec<(String, Vec<String>)>,
     ) -> Result<(std::path::PathBuf, Vec<String>), Status> {
-        let agent_spec = crate::agent_argv::split_agent_spec()?;
+        let agent_spec = crate::agent_argv::split_agent_spec(&self.coding_agents)?;
         let agent = agent_spec.id.as_str();
         let glob_refs: Vec<&str> = agent_spec
             .agent
@@ -429,14 +455,17 @@ impl SplitSessions {
             )
             .await?;
         let context_dir = crate::split_session::build_split_context_dir(
+            &agent_spec,
             session_dir,
             &withdrawals,
             &glob_refs,
             &context,
         )?;
         let extra_args = crate::split_session::split_claude_extra_args(
+            &agent_spec,
             session_dir,
             &tddy_tools_path.to_string_lossy(),
+            tool_server_env,
             &withdrawals,
         )?;
         Ok((context_dir, extra_args))
@@ -465,33 +494,11 @@ impl SplitSessions {
     }
 }
 
-fn write_split_agent_metadata(
-    session_id: &str,
-    codebase_instance_id: &str,
-    codebase_session_id: &str,
-    req: &StartSessionRequest,
-    session_dir: std::path::PathBuf,
-    hook_token: String,
-    handle: &Arc<tddy_cli_sessions::cli_session_manager::pty_handle::PtyHandle>,
-) -> Result<(), Status> {
-    let meta = tddy_core::SessionMetadata {
-        // No repository on this host — the pairing below is how the worktree is found.
-        repo_path: None,
-        pid: Some(handle.pid),
-        model: Some(req.model.trim().to_string()),
-        hook_token: Some(hook_token),
-        codebase_daemon_instance_id: Some(codebase_instance_id.to_string()),
-        codebase_session_id: Some(codebase_session_id.to_string()),
-        managed_codebase: req.managed_codebase,
-        ..crate::service_util::starting_session_metadata(
-            session_id,
-            req.project_id.trim(),
-            "claude-cli",
-        )
-    };
-    tddy_core::write_session_metadata(&session_dir, &meta)
-        .map_err(|e| Status::internal(format!("failed to write session metadata: {e}")))?;
-    Ok(())
-}
+mod split_agent_pty;
+#[cfg(test)]
+mod split_agent_pty_tests;
 
 pub use crate::svc_paired_codebase_teardown;
+use crate::svc_spawn_split_agent::split_agent_pty::spawn_split_agent_pty;
+use crate::svc_spawn_split_agent::split_agent_pty::SplitAgentPty;
+use crate::svc_split_agent_metadata::write_split_agent_metadata;

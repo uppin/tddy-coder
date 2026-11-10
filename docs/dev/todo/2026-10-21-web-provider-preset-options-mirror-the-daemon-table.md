@@ -3,7 +3,7 @@
 **Category:** Deferred from `#provider-route` 1/9 (#662)
 **Source:** `/validate-changes` on `feature/provider-route/accounts`
 
-`PROVIDER_PRESET_OPTIONS` in `packages/tddy-web/src/components/accounts/ConnectProviderAccountForm.tsx`
+`PROVIDER_PRESET_OPTIONS` in `packages/tddy-workspace-web/src/accounts/ConnectProviderAccountForm.tsx`
 restates, per preset, its label and whether it needs an OpenAI or an Anthropic base URL
 (`needsOpenAiBaseUrl` / `needsAnthropicBaseUrl`). The authority is
 `tddy_accounts::provider_account::presets()`. A drift is not dangerous — the daemon refuses an unknown

@@ -28,6 +28,8 @@ pub struct LiveUsers {
 #[derive(Default)]
 struct Inner {
     rows: RwLock<Vec<UserMapping>>,
+    /// Whether `tddy-supervisor` owns the mapping: enrolment is refused, never written here.
+    owned_by_supervisor: bool,
     /// Held across every rewrite of the config file these rows are persisted in.
     ///
     /// Two writers rewrite that file: enrolment, and `daemon_config.DaemonConfigService`'s
@@ -44,9 +46,28 @@ impl LiveUsers {
         Self {
             inner: Arc::new(Inner {
                 rows: RwLock::new(rows),
+                owned_by_supervisor: false,
                 file_writes: Mutex::new(()),
             }),
         }
+    }
+
+    /// A holder over rows `tddy-supervisor` owns (`#agent-tools` 31/32): lookups as usual, but
+    /// [`Self::enrol_first_login`] is refused [`EnrolmentRefusal::OwnedBySupervisor`] — a supervised
+    /// daemon never writes the mapping.
+    pub fn owned_by_supervisor(rows: Vec<UserMapping>) -> Self {
+        Self {
+            inner: Arc::new(Inner {
+                rows: RwLock::new(rows),
+                owned_by_supervisor: true,
+                file_writes: Mutex::new(()),
+            }),
+        }
+    }
+
+    /// Whether this mapping is the supervisor's to write, not this daemon's.
+    pub fn is_owned_by_supervisor(&self) -> bool {
+        self.inner.owned_by_supervisor
     }
 
     fn rows(&self) -> RwLockReadGuard<'_, Vec<UserMapping>> {
@@ -105,12 +126,32 @@ impl LiveUsers {
         os_user: &str,
     ) -> Result<UserMapping, EnrolmentRefusal> {
         let _file = self.lock_file_writes();
+        if self.inner.owned_by_supervisor {
+            return Err(EnrolmentRefusal::OwnedBySupervisor);
+        }
         if let Some(enrolled) = self.first_github_user() {
             return Err(EnrolmentRefusal::AlreadyEnrolled {
                 github_user: enrolled,
             });
         }
-        let mapping = enrol_first_login(config_path, github_user, os_user)?;
+        // `config_path` is the daemon's config file; the mapping it enrols into is the
+        // `users.yaml` beside it. A config file with no parent directory names no directory to
+        // enrol beside, which is a refusal — never a guess relative to the working directory.
+        let users_path = match config_path.parent() {
+            Some(directory) if !directory.as_os_str().is_empty() => {
+                directory.join(crate::users_file::USERS_FILE_NAME)
+            }
+            _ => {
+                return Err(EnrolmentRefusal::ConfigNotWritable {
+                    reason: format!(
+                        "the daemon config {} has no parent directory, so there is no \
+                         users.yaml beside it to enrol into",
+                        config_path.display()
+                    ),
+                })
+            }
+        };
+        let mapping = enrol_first_login(&users_path, github_user, os_user)?;
         self.inner
             .rows
             .write()
@@ -196,6 +237,23 @@ mod tests {
     }
 
     #[test]
+    fn a_supervised_daemon_refuses_to_enrol() {
+        // Given a daemon handed its mapping by the supervisor, which maps nobody yet, and a file
+        // it could write
+        let (_, path, _dir) = an_unenrolled_deployment();
+        let users = LiveUsers::owned_by_supervisor(Vec::new());
+
+        // When a first login tries to enrol
+        let refusal = users.enrol_first_login(&path, THE_OPERATOR, THE_OS_USER);
+
+        // Then it is refused as the supervisor's to map, and nobody is mapped
+        assert_eq!(
+            (refusal, users.os_user_for_github(THE_OPERATOR)),
+            (Err(EnrolmentRefusal::OwnedBySupervisor), None)
+        );
+    }
+
+    #[test]
     fn a_row_enrolled_through_one_clone_is_seen_by_every_other() {
         // Given two services holding clones of one deployment's users
         let (enrolling_service, path, _dir) = an_unenrolled_deployment();
@@ -233,11 +291,35 @@ mod tests {
         );
     }
 
-    /// A deployment with no `users:` row, as held in memory and as written in its config file.
+    #[test]
+    fn a_first_login_beside_a_missing_users_yaml_is_refused_and_writes_none() {
+        // Given an unenrolled deployment whose users.yaml has gone since the daemon started
+        let (users, path, dir) = an_unenrolled_deployment();
+        let users_yaml = dir.path().join(crate::users_file::USERS_FILE_NAME);
+        std::fs::remove_file(&users_yaml).expect("remove users.yaml");
+
+        // When a first login tries to enrol
+        let refusal = users.enrol_first_login(&path, THE_OPERATOR, THE_OS_USER);
+
+        // Then it is refused — a missing mapping is never read as an empty one — and no file is
+        // resurrected
+        assert_eq!(
+            (
+                matches!(refusal, Err(EnrolmentRefusal::ConfigNotWritable { .. })),
+                users_yaml.exists(),
+            ),
+            (true, false),
+            "got {refusal:?}"
+        );
+    }
+
+    /// A deployment with no mapped login, as held in memory and as written in its `users.yaml`.
     fn an_unenrolled_deployment() -> (LiveUsers, std::path::PathBuf, tempfile::TempDir) {
         let dir = tempfile::tempdir().expect("a temporary directory");
         let path = dir.path().join("config.yaml");
         std::fs::write(&path, "repos_base_path: \"/tmp/repos\"\n").expect("the config is written");
+        std::fs::write(dir.path().join(crate::users_file::USERS_FILE_NAME), "[]\n")
+            .expect("the empty users.yaml an installer renders is written");
         (LiveUsers::default(), path, dir)
     }
 }

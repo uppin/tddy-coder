@@ -320,6 +320,7 @@ fn the_generic_backend_is_named_by_its_specs_id() {
             product: "Lark Code".to_string(),
             support: RouteSupport::default(),
             key_env: None,
+            config_env: None,
         },
     );
 
@@ -370,6 +371,7 @@ fn a_pointer(checkout: &Path) -> SessionPointer {
         session_dir: Some(PathBuf::from("/var/tddy/sessions/s1")),
         remote: BTreeMap::new(),
         notify: BTreeMap::new(),
+        owner: None,
     }
 }
 

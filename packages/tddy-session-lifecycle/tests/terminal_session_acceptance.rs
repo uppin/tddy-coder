@@ -34,9 +34,17 @@ const SHELL: &str = "/bin/sh";
 
 fn test_config() -> (tempfile::TempDir, DaemonConfig) {
     let dir = tempfile::tempdir().unwrap();
-    let yaml = "users:\n  - github_user: \"testuser\"\n    os_user: \"testuser\"\n";
+    let yaml = "";
     let path = dir.path().join("daemon.yaml");
     std::fs::write(&path, yaml).unwrap();
+    std::fs::write(
+        std::path::Path::new(&(path))
+            .parent()
+            .expect("a config directory")
+            .join("users.yaml"),
+        "- github_user: \"testuser\"\n  os_user: \"testuser\"\n",
+    )
+    .unwrap();
     let config = DaemonConfig::load(&path).expect("config must parse");
     (dir, config)
 }
@@ -66,8 +74,8 @@ fn minimal_service_with_manager(
         tddy_session_lifecycle::peer_routing::PeerRouting::local_only(&config),
         Arc::new(tddy_daemon_kernel::operator_channel::NoOperatorChannel),
         manager,
+        tddy_session_lifecycle::test_util::builtin_coding_agents(),
     )
-    .with_coding_agents_if_none(tddy_session_lifecycle::test_util::builtin_coding_agents())
 }
 
 /// The terminal coordinate this daemon serves, wired to `manager`, with the temp-dir guards that

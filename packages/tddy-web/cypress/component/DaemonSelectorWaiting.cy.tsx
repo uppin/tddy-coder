@@ -6,7 +6,7 @@
 
 import React from "react";
 import { DaemonSelector } from "../../src/components/shell/DaemonSelector";
-import type { DaemonHost } from "../../src/lib/participantRole";
+import type { DaemonHost } from "tddy-client-web";
 import { daemonSelectorPage } from "../support/pages/daemonSelectorPage";
 
 const UDOO: DaemonHost = { instanceId: "udoo", label: "udoo (this daemon)" };

@@ -335,6 +335,8 @@ fn a_daemon_config_with_github(github: Option<&str>) -> DaemonConfig {
     let dir = tempfile::tempdir().expect("no temp directory for the config");
     let path = dir.path().join("daemon.yaml");
     std::fs::write(&path, github.unwrap_or("")).expect("the config file was not written");
+    // Every load needs a users.yaml beside the config; this daemon maps nobody
+    std::fs::write(dir.path().join("users.yaml"), "[]\n").expect("the users file was not written");
     DaemonConfig::load(&path).expect("the config fixture did not load")
 }
 

@@ -13,6 +13,24 @@ use crate::cli_route_launch::{
     cli_route_launch, launch_model_for, routed_launch_model, CliRouteLaunch,
 };
 
+/// OpenCode's spec as an operator override that routes through a JSON configuration file
+/// (`route.shape: json_config_file`) rather than inline, as the built-in does.
+fn opencode_routed_through_a_file() -> CodingAgentSpec {
+    let tools = tempfile::tempdir().expect("a tools directory");
+    let built_in_slot = "      shape: inline_config\n      config_env: OPENCODE_CONFIG_CONTENT\n";
+    assert!(tddy_coding_agent_specs::OPENCODE_SPEC_YAML.contains(built_in_slot));
+    std::fs::write(
+        tools.path().join("opencode.yaml"),
+        tddy_coding_agent_specs::OPENCODE_SPEC_YAML.replace(
+            built_in_slot,
+            "      shape: json_config_file\n      config_env: OPENCODE_CONFIG\n      files_dir: provider-route\n",
+        ),
+    )
+    .expect("write the override");
+    let registry = load_agent_registry(tools.path()).expect("the override loads");
+    CodingAgentSpec::of(registry.get("opencode").expect("registered")).expect("a coding agent")
+}
+
 /// The built-in spec of the coding agent `id`, as a host loads it.
 fn the_spec(id: &str) -> CodingAgentSpec {
     let tools = tempfile::tempdir().expect("a tools directory");
@@ -43,10 +61,10 @@ fn value_of<'a>(pairs: &'a [(String, String)], key: &str) -> Option<&'a str> {
 }
 
 #[test]
-fn an_opencode_session_on_fireworks_gets_a_config_naming_that_endpoint() {
-    // Given
+fn a_file_routed_session_on_fireworks_gets_a_config_file_naming_that_endpoint() {
+    // Given — guard: `route.shape: json_config_file` still writes its file and names it
     let session_dir = tempfile::tempdir().expect("a session directory");
-    let opencode = the_spec("opencode");
+    let opencode = opencode_routed_through_a_file();
 
     // When
     let launch = cli_route_launch(
@@ -174,4 +192,34 @@ fn an_unrouted_launch_keeps_the_sessions_model_whatever_the_agent() {
 
     // Then
     assert_eq!(routed_launch_model(&muse, None, "sonnet"), "sonnet");
+}
+
+#[test]
+fn an_inline_routed_opencode_session_writes_no_file_and_sets_no_opencode_config() {
+    // Given — the built-in spec: `route.shape: inline_config`, whose route carries its configuration
+    // in its environment (`#agent-tools 29/32`)
+    let session_dir = tempfile::tempdir().expect("a session directory");
+    let opencode = the_spec("opencode");
+    let route = HarnessRoute {
+        env: vec![(
+            "OPENCODE_CONFIG_CONTENT".to_string(),
+            r#"{"model":"tddy-route/kimi-k2"}"#.to_string(),
+        )],
+        files: Vec::new(),
+        ..a_fireworks_opencode_route()
+    };
+
+    // When
+    let launch =
+        cli_route_launch(&opencode, Some(&route), session_dir.path()).expect("the route applies");
+
+    // Then — guard: the configuration reaches the child inline, and nothing is written
+    assert_eq!(
+        (
+            value_of(&launch.env, "OPENCODE_CONFIG_CONTENT"),
+            value_of(&launch.env, "OPENCODE_CONFIG"),
+            std::fs::read_dir(session_dir.path()).expect("dir").count(),
+        ),
+        (Some(r#"{"model":"tddy-route/kimi-k2"}"#), None, 0)
+    );
 }

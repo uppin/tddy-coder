@@ -32,6 +32,7 @@ run:
   env: { CLAUDE_CODE_NO_FLICKER: "1" }
 extensions:
   coding_agent:
+    pass_env: [ANTHROPIC_API_KEY]
     product: Claude Code
     mcp: { kind: file, flag: --mcp-config, format: claude-mcp-json, strict_flag: --strict-mcp-config }
     tool_allow: { flag: --allowedTools }
@@ -89,6 +90,9 @@ extensions:
       # `--strict-mcp-config`, unlike the interactive session's `coding_agent.mcp`.
       mcp: { kind: file, flag: --mcp-config, format: claude-mcp-json }
       adapter: claude-stream-json
+      # Who answers a headless conversation's permission requests (`#agent-tools 27/28`): its
+      # prompts are routed to the caller through the approval tool.
+      permission_policy: asks_caller
       # `claude -p` can exit 1 after an ExitPlanMode despite a complete structured result.
       exit_ok_if_structured: true
       # --- The workflow turn's protocol (`#agent-tools 15/19`), read by `SpecHeadlessBackend`:

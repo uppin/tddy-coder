@@ -77,10 +77,7 @@ fn write_livekit_daemon_yaml(
     let room = room();
     let yaml = format!(
         r#"
-{id_block}users:
-  - github_user: "testuser"
-    os_user: "{os_user}"
-allowed_tools:
+{id_block}allowed_tools:
   - path: {true_path}
     label: t
 livekit:
@@ -92,6 +89,11 @@ livekit:
 "#
     );
     std::fs::write(&path, yaml).unwrap();
+    std::fs::write(
+        dir.path().join("users.yaml"),
+        format!("- github_user: \"testuser\"\n  os_user: \"{os_user}\"\n"),
+    )
+    .unwrap();
     (dir, path)
 }
 
@@ -182,8 +184,8 @@ async fn two_daemons() -> TwoDaemons {
         tddy_session_lifecycle::peer_routing::PeerRouting::local_only(&config_b),
         Arc::new(tddy_daemon_kernel::operator_channel::NoOperatorChannel),
         Arc::new(tddy_session_lifecycle::claude_cli_session::CliSessionManager::new()),
+        tddy_session_lifecycle::test_util::builtin_coding_agents(),
     )
-    .with_coding_agents_if_none(tddy_session_lifecycle::test_util::builtin_coding_agents())
     .with_staging_base_dir(staging_b.path().to_path_buf());
 
     // B's discovery participant: bare instance id, publishes the advertisement, serves no RPC.
@@ -258,8 +260,8 @@ async fn two_daemons() -> TwoDaemons {
         ),
         Arc::new(tddy_daemon_kernel::operator_channel::NoOperatorChannel),
         Arc::new(tddy_session_lifecycle::claude_cli_session::CliSessionManager::new()),
+        tddy_session_lifecycle::test_util::builtin_coding_agents(),
     )
-    .with_coding_agents_if_none(tddy_session_lifecycle::test_util::builtin_coding_agents())
     .with_staging_base_dir(staging_a.path().to_path_buf());
 
     // Wait until A discovers B, asked through `host.HostService` against A's own roster.

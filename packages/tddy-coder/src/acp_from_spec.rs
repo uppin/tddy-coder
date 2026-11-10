@@ -9,11 +9,11 @@ use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use anyhow::{anyhow, ensure, Context};
+use anyhow::{anyhow, Context};
 use tddy_actions::tool::ToolHost;
-use tddy_coding_agent_specs::{load_agent_registry, package_runner, routed_agent, CodingAgentSpec};
+use tddy_coding_agent_specs::{load_agent_registry, package_runner, AgentEnvBase, CodingAgentSpec};
 use tddy_core::adapters::{AcpHooksAdapter, AcpHooksAdapters};
-use tddy_core::{AcpAgentCommand, SpecAcpBackend};
+use tddy_core::AcpAgentCommand;
 
 /// `codex-acp.yaml`'s `binary.env`: the variable that names the `codex-acp` binary.
 pub const CODEX_ACP_BINARY_ENV: &str = "TDDY_CODEX_ACP_CLI";
@@ -29,8 +29,6 @@ pub(crate) struct AcpLaunch {
     pub(crate) hooks: Option<Arc<dyn AcpHooksAdapter>>,
     /// The agent's resolved deps, by tool id (`codex`, the binary a hooks adapter runs).
     pub(crate) deps: BTreeMap<String, PathBuf>,
-    /// What a route body knows of the agent, from its spec.
-    pub(crate) agent: tddy_coding_agent_specs::RoutedAgent,
 }
 
 /// The launch of agent `id` on `host`: the registry loaded with `tools_dir` applied, `id` and its
@@ -52,7 +50,9 @@ pub(crate) fn acp_launch(
     let tool = closure
         .pop()
         .ok_or_else(|| anyhow!("`{id}` resolved to no tool"))?;
-    let command = spec.acp_command(&tool, package_runner(def, host), Vec::new())?;
+    let mut command = spec.acp_command(&tool, package_runner(def, host), Vec::new())?;
+    command.env =
+        AgentEnvBase::load(tools_dir)?.agent_env(&spec, std::env::vars_os(), &command.env);
     let hooks = match spec.acp().and_then(|acp| acp.hooks_adapter.as_deref()) {
         Some(name) => Some(AcpHooksAdapters::builtin().get(name).ok_or_else(|| {
             anyhow!("`{id}` names the hooks adapter `{name}`, which this build does not have")
@@ -67,53 +67,5 @@ pub(crate) fn acp_launch(
         command,
         hooks,
         deps,
-        agent: routed_agent(&spec),
     })
-}
-
-/// A `claude-acp` backend from its declaration: the agent registry loaded with `tools_dir`
-/// (`<tddyhome>/tools`) applied, `claude-acp` and its deps resolved against `host`, and its
-/// `coding_agent.acp.command` rendered — `bunx claude-agent-acp`, or the binary
-/// `TDDY_CLAUDE_AGENT_ACP_CLI` names, alone. Refused when the registry does not load, `claude-acp`
-/// does not resolve, or its spec has no `acp` section.
-pub fn claude_acp_backend_from_spec(
-    tools_dir: &Path,
-    host: Arc<dyn ToolHost>,
-) -> anyhow::Result<SpecAcpBackend> {
-    let launch = acp_launch(tools_dir, host.as_ref(), "claude-acp")?;
-    ensure!(
-        launch.hooks.is_none(),
-        "claude-acp's spec names a hooks adapter, which its backend does not run"
-    );
-    Ok(SpecAcpBackend::new(launch.agent, launch.command))
-}
-
-/// A `codex-acp` backend from its declaration, as [`claude_acp_backend_from_spec`] for
-/// `codex-acp`: its binary resolved beside its `codex` dep (or named by `TDDY_CODEX_ACP_CLI`), and
-/// the `codex-acp-login` hooks running `codex login` with that dep's binary. A provider route is
-/// applied afterwards with `with_provider_route`, as today.
-pub fn codex_acp_backend_from_spec(
-    tools_dir: &Path,
-    host: Arc<dyn ToolHost>,
-) -> anyhow::Result<SpecAcpBackend> {
-    let launch = acp_launch(tools_dir, host.as_ref(), "codex-acp")?;
-    let hooks = launch.hooks.ok_or_else(|| {
-        anyhow!("codex-acp's spec names no hooks adapter, so it has no login retry")
-    })?;
-    Ok(SpecAcpBackend::new(launch.agent, launch.command).with_hooks(hooks, launch.deps))
-}
-
-/// An `opencode` backend from `opencode.yaml`'s `coding_agent.acp`, as
-/// [`claude_acp_backend_from_spec`]: `opencode acp`, its route's file written and held by the
-/// `opencode-route-file` hooks. `TDDY_OPENCODE_CLI` names the binary through the spec's
-/// `binary.env`.
-pub fn opencode_acp_backend_from_spec(
-    tools_dir: &Path,
-    host: Arc<dyn ToolHost>,
-) -> anyhow::Result<SpecAcpBackend> {
-    let launch = acp_launch(tools_dir, host.as_ref(), "opencode")?;
-    let hooks = launch.hooks.ok_or_else(|| {
-        anyhow!("opencode's spec names no hooks adapter, so its route file has no holder")
-    })?;
-    Ok(SpecAcpBackend::new(launch.agent, launch.command).with_hooks(hooks, launch.deps))
 }

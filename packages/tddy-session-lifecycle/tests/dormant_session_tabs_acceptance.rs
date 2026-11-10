@@ -275,9 +275,17 @@ type AConfigAndItsAgents = (
 
 fn a_config_naming_muse(muse: &Path) -> (tempfile::TempDir, AConfigAndItsAgents) {
     let dir = tempfile::tempdir().unwrap();
-    let yaml = "users:\n  - github_user: \"testuser\"\n    os_user: \"testuser\"\n";
+    let yaml = "";
     let path = dir.path().join("daemon.yaml");
     std::fs::write(&path, yaml).unwrap();
+    std::fs::write(
+        std::path::Path::new(&(path))
+            .parent()
+            .expect("a config directory")
+            .join("users.yaml"),
+        "- github_user: \"testuser\"\n  os_user: \"testuser\"\n",
+    )
+    .unwrap();
     let config = DaemonConfig::load(&path).expect("config must parse");
     let agents = tddy_session_lifecycle::test_util::coding_agents_with_binaries(&[("muse", muse)]);
     (dir, (config, agents))
@@ -303,6 +311,6 @@ fn session_host(
         tddy_session_lifecycle::peer_routing::PeerRouting::local_only(&config),
         Arc::new(tddy_daemon_kernel::operator_channel::NoOperatorChannel),
         manager,
+        agents,
     )
-    .with_coding_agents_if_none(agents)
 }

@@ -1,0 +1,49 @@
+{
+  "name": "tddy-livekit-rpc-web",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    }
+  },
+  "scripts": {
+    "build": "bun run generate && tsc",
+    "generate": "../../scripts/generated-code.sh write packages/tddy-livekit-rpc-web",
+    "test:ci": "bun test src --reporter=junit --reporter-outfile=../../reports/junit/livekit-rpc-web.xml",
+    "cypress:component": "ELECTRON_EXTRA_LAUNCH_ARGS='--disable-gpu --no-sandbox' cypress run --component",
+    "cypress:component:ci": "bun run cypress:component -- --reporter junit --reporter-options 'mochaFile=../../reports/junit/livekit-rpc-web-component-[hash].xml'",
+    "build:ci": "bun run build",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "livekit-client": "^2.17.0",
+    "@bufbuild/protobuf": "^2.2.0",
+    "@connectrpc/connect": "^2.0.0",
+    "debug": "^4.4.3",
+    "tddy-rpc-web": "workspace:*"
+  },
+  "devDependencies": {
+    "@bufbuild/buf": "^1.50.0",
+    "@bufbuild/protoc-gen-es": "^2.2.0",
+    "livekit-server-sdk": "^2.15.0",
+    "cypress": "^14.0.0",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
+    "@vitejs/plugin-react": "^4.3.0",
+    "typescript": "^5.6.0",
+    "vite": "^6.0.0"
+  },
+  "tddyCi": {
+    "needs": [
+      "echo-server",
+      "livekit-image"
+    ]
+  }
+}

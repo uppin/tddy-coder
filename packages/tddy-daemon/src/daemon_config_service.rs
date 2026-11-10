@@ -207,9 +207,10 @@ impl DaemonConfigServiceTrait for DaemonConfigServiceImpl {
         let mut config = self.config.lock().await;
         // Validated before the file is touched, so a refused update leaves it untouched.
         let update = apply_update(&config, &settings)?;
-        // The file carries `users:` too, re-serialised from the live rows every service authorizes
-        // by — so a row a first login enrolled is written back rather than erased. Serialised
-        // against enrolment, which rewrites the same file, so neither write loses the other's.
+        // Only this file is written. It never carries a `users:` key (the mapping is never
+        // serialised into it), and `UpdateConfig` writes no `users.yaml`: its wire message
+        // carries no mapping, so first-login enrolment is that file's one writer. Serialised
+        // against enrolment, so the two writers' files never interleave.
         update
             .config
             .users

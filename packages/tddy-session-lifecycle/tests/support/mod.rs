@@ -203,10 +203,11 @@ pub fn this_os_user() -> String {
 pub fn a_config_mapping_to_this_user() -> (tempfile::TempDir, DaemonConfig) {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("daemon.yaml");
+    std::fs::write(&path, "").unwrap();
     std::fs::write(
-        &path,
+        dir.path().join("users.yaml"),
         format!(
-            "users:\n  - github_user: \"testuser\"\n    os_user: \"{}\"\n",
+            "- github_user: \"testuser\"\n  os_user: \"{}\"\n",
             this_os_user()
         ),
     )
@@ -256,6 +257,6 @@ pub fn session_host(
         tddy_session_lifecycle::peer_routing::PeerRouting::local_only(&config),
         Arc::new(tddy_daemon_kernel::operator_channel::NoOperatorChannel),
         manager,
+        tddy_session_lifecycle::test_util::builtin_coding_agents(),
     )
-    .with_coding_agents_if_none(tddy_session_lifecycle::test_util::builtin_coding_agents())
 }

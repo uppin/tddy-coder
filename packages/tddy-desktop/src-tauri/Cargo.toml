@@ -68,6 +68,9 @@ wdio = ["dep:tauri-plugin-wdio-webdriver"]
 [dev-dependencies]
 # Already a workspace dependency; no new crate enters the tree.
 rstest = { workspace = true }
+# A directory of a test's own for a config and the users.yaml beside it, so no test writes into the
+# checkout. Already in the tree through tddy-daemon; no new crate enters.
+tempfile = "3"
 # Parses the target JSON a page actually sends, so the wire contract in `ipc.rs` is checked against
 # the spelling rather than assumed. Already in the tree via tauri; no crate enters.
 serde_json = "1"

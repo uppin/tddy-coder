@@ -59,9 +59,8 @@ impl BuildContext {
         // listed by `ListAgents` as a selectable `--agent`.
         // The coding agents this host's `--agent` answers to (built-ins and `<tddyhome>/tools`), so
         // an assistant cannot take the name of any of them.
-        let reserved_coding_agent_ids = tddy_coder::agent_registry_cli::reserved_agent_ids(
-            tddy_agent_launch::host_coding_agents::host_coding_agents(tddy_data_dir)?.agents(),
-        );
+        let reserved_coding_agent_ids =
+            tddy_coder::agent_registry_cli::reserved_agent_ids(self.coding_agents.agents());
         let model_registry = Arc::new(
             tddy_model_registry::ModelRegistryStore::open(
                 &tddy_data_dir.join("models.db"),
@@ -254,6 +253,14 @@ impl BuildContext {
         // One registry for the whole host: the launcher binds each headless conversation's approvals
         // into it, and the host answers those approvals through it.
         let approval_routes = Arc::default();
+        // The registry `runtime::build` loaded once, shared with Telegram and the reserved-ids step.
+        let coding_agents = Arc::clone(&self.coding_agents);
+        // The per-user daemon sockets the supervisor handed over (`user.<os user>`), read before
+        // the local socket server is spawned: adopting its own listener clears the `LISTEN_*`
+        // variables they are announced in.
+        self.agent_tool_sockets.adopt_inherited(
+            tddy_daemon_kernel::agent_tool_sockets::adopt_user_sockets_from_environment(),
+        );
         let connection_impl = tddy_session_lifecycle::connection_service::DaemonSessionHost::new(
             config.clone(),
             sessions_base_resolver.clone(),
@@ -264,17 +271,15 @@ impl BuildContext {
             tddy_daemon_livekit::peer_routing::peer_routing_over(config, livekit_discovery),
             self.operator_channel(),
             Arc::clone(shared_cli_manager),
+            coding_agents,
         );
 
-        let coding_agents =
-            tddy_agent_launch::host_coding_agents::host_coding_agents(tddy_data_dir)?;
-
         Ok(crate::livekit_host_ports::with_livekit_room_ports(
-        connection_impl,
-        Arc::clone(shared_session_rooms),
-        Arc::clone(shared_session_admissions),
-        Arc::clone(room_tokens),
-    )
+            connection_impl,
+            Arc::clone(shared_session_rooms),
+            Arc::clone(shared_session_admissions),
+            Arc::clone(room_tokens),
+        )
         .with_session_reach(
             Arc::clone(livekit_reach) as Arc<dyn tddy_daemon_extensions::SessionReach>
         )
@@ -293,6 +298,7 @@ impl BuildContext {
                     vaults: self.identity.credential_vaults.clone(),
                     user_resolver,
                     tokens: Some(session_tokens.clone()),
+                    agent_tool_sockets: Arc::clone(&self.agent_tool_sockets),
                 },
             )
             .with_approval_routes(Arc::clone(&approval_routes)),
@@ -302,12 +308,11 @@ impl BuildContext {
         .with_session_tokens(session_tokens.clone())
         .with_askpass_endpoint(askpass_endpoint)
         .with_approval_routes(approval_routes)
-        // Read here, before the local socket server is spawned: adopting its own listener
-        // clears the `LISTEN_*` variables the host sockets are announced in.
-        .with_inherited_host_session_sockets(
-            tddy_session_lifecycle::connection_service::inherited_host_sockets::adopt_from_environment(),
-        )
-        .with_coding_agents(coding_agents))
+        .with_agent_tool_sockets(Arc::clone(&self.agent_tool_sockets))
+        // The host-session service rides the merged per-user daemon socket (#agent-tools
+        // 31/32): an embedded host keeps binding its own host sockets, as its runtime serves
+        // its one socket itself.
+        .with_host_sessions_merged(options.host != RuntimeHost::Embedded))
     }
 
     pub(super) fn install_session_host(

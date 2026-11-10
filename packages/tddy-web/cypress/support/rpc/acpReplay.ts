@@ -10,14 +10,14 @@
 import { create, toBinary } from "@bufbuild/protobuf";
 import { Code, ConnectError } from "@connectrpc/connect";
 import { anInMemoryRpcBackend, type InMemoryRpcBackend } from "tddy-connectrpc-testkit";
-import { ActivityService } from "../../../src/gen/activity_pb";
-import { AcpReplayFrameSchema, StreamMode } from "../../../src/gen/activity_pb";
+import { ActivityService } from "tddy-client-web/gen/activity_pb";
+import { AcpReplayFrameSchema, StreamMode } from "tddy-client-web/gen/activity_pb";
 import {
   AcpAgentMessageSchema,
   ToolCallStatus,
   ToolKind,
   type AcpAgentMessage,
-} from "../../../src/gen/tddy/acp/v1/acp_pb";
+} from "tddy-client-web/gen/tddy/acp/v1/acp_pb";
 
 /** A replayed agent text chunk stamped at `atUnixMs` → an "agent" transcript bubble. */
 export function replayAgentText(text: string, atUnixMs: number): AcpAgentMessage {

@@ -14,6 +14,7 @@ pub mod svc_provision_workspace_tool_sandbox;
 pub mod svc_resolve_tddy_tools_path;
 pub mod svc_resume_split_wiring;
 pub mod svc_spawn_split_agent;
+mod svc_split_agent_metadata;
 pub mod svc_split_context_from_codebase_host;
 pub mod svc_start_sandboxed_codebase_session;
 pub mod workspace_session;

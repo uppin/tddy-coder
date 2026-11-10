@@ -41,9 +41,6 @@ const THE_OPERATOR: &str = "testuser";
 /// hostname of whatever machine runs the suite.
 const DAEMON_YAML: &str = r#"
 daemon_instance_id: "workstation-1"
-users:
-  - github_user: "testuser"
-    os_user: "testdev"
 allowed_agents:
   - id: claude
     label: Claude
@@ -152,6 +149,14 @@ async fn a_daemon_with_a_registry() -> Harness {
     let dir = tempfile::tempdir().expect("a tempdir for the daemon's data");
     let config_path = dir.path().join("daemon.yaml");
     std::fs::write(&config_path, DAEMON_YAML).expect("write the daemon config");
+    std::fs::write(
+        std::path::Path::new(&(config_path))
+            .parent()
+            .expect("a config directory")
+            .join("users.yaml"),
+        "- github_user: \"testuser\"\n  os_user: \"testdev\"\n",
+    )
+    .unwrap();
     let config = DaemonConfig::load(&config_path).expect("the daemon config must parse");
 
     // The registry's name space and the daemon's def resolution read the same `<tddyhome>/agents`,
@@ -194,8 +199,8 @@ async fn a_daemon_with_a_registry() -> Harness {
             tddy_session_lifecycle::peer_routing::PeerRouting::local_only(&config),
             Arc::new(tddy_daemon_kernel::operator_channel::NoOperatorChannel),
             Arc::new(tddy_session_lifecycle::claude_cli_session::CliSessionManager::new()),
+            tddy_session_lifecycle::test_util::builtin_coding_agents(),
         )
-        .with_coding_agents_if_none(tddy_session_lifecycle::test_util::builtin_coding_agents())
         .with_model_registry(Arc::clone(&store)),
     );
 

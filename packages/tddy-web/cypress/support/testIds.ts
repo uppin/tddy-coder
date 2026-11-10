@@ -8,7 +8,7 @@
  * constant is a prefix or a helper function — see the examples below.
  */
 
-import { safeTestIdPart } from "../../src/lib/testId";
+import { safeTestIdPart } from "tddy-client-web";
 
 // ---------------------------------------------------------------------------
 // Helper
@@ -86,7 +86,7 @@ export const TEST_IDS = {
   connectionError: "connection-error",
 
   // Terminal
-  ghosttyTerminal: "ghostty-terminal",
+  terminal: "terminal",
   terminalFullscreenButton: "terminal-fullscreen-button",
   terminalConnectionStatusBar: "terminal-connection-status-bar",
   mobileKeyboardButton: "mobile-keyboard-button",
@@ -110,14 +110,10 @@ export const TEST_IDS = {
   /** The overlay layer holding the older-history (scrollback>0) page terminal. */
   terminalPagePane: "terminal-page-pane",
   terminalOlderBufferText: "terminal-older-buffer-text",
-  /** Hidden, readable mirror of what the LIVE terminal has painted (the canvas is WebGL). */
+  /** Hidden, readable mirror of what the LIVE terminal has painted (the screen may be WebGL). */
   terminalBufferText: "terminal-buffer-text",
   /** Cover shown over the pane once the far end has ended the session. */
   terminalCoderUnavailable: "terminal-coder-unavailable",
-  /** Hidden mirror of the page terminal's viewportY (lines scrolled up from the bottom). */
-  terminalPageViewportY: "terminal-page-viewport-y",
-  /** Hidden mirror of the LIVE terminal's viewportY (lines scrolled up from the bottom). */
-  terminalLiveViewportY: "terminal-live-viewport-y",
   /** Hidden mirror of the LIVE terminal's scrollback length (history lines, excluding active screen). */
   terminalLiveScrollbackLength: "terminal-live-scrollback-length",
   /** Hidden mirror of the page terminal's native Scrollbar {total,offset,len} — "total,offset,len". */
@@ -628,9 +624,6 @@ export const TEST_IDS = {
   rpcPlaygroundParticipantSelect: "rpc-playground-participant-select",
   /** Replaces the participant picker when the connection carries no LiveKit presence. */
   rpcPlaygroundParticipantUnavailable: "rpc-playground-participant-unavailable",
-  rpcServiceTree: "rpc-service-tree",
-  rpcRequestEditor: "rpc-request-editor",
-  rpcInvokeButton: "rpc-invoke-button",
   rpcServiceTree: "rpc-service-tree",
   rpcRequestEditor: "rpc-request-editor",
   rpcRequestRawJson: "rpc-request-raw-json",

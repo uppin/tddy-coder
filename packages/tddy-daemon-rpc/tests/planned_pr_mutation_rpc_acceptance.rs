@@ -239,9 +239,13 @@ impl Orchestrator {
     fn service(&self) -> TestDaemon {
         let config_dir = tempfile::tempdir().unwrap();
         let config_path = config_dir.path().join("config.yaml");
-        fs::write(
-            &config_path,
-            "users:\n  - github_user: \"u\"\n    os_user: \"u\"\n",
+        fs::write(&config_path, "").unwrap();
+        std::fs::write(
+            std::path::Path::new(&(config_path))
+                .parent()
+                .expect("a config directory")
+                .join("users.yaml"),
+            "- github_user: \"u\"\n  os_user: \"u\"\n",
         )
         .unwrap();
         let config = tddy_daemon_kernel::config::DaemonConfig::load(&config_path).unwrap();
@@ -252,20 +256,18 @@ impl Orchestrator {
             Arc::new(move |_| Some(resolved.clone()));
         let user_resolver: SessionUserResolver =
             Arc::new(|token| (token == TOKEN).then(|| "u".to_string()));
-        TestDaemon::from_host(
-            DaemonSessionHost::new(
-                config.clone(),
-                sessions_base_resolver,
-                sessions_base,
-                user_resolver,
-                None,
-                tddy_spawn::supervisor_client::SpawnBackendChoice::ForkedWorker,
-                tddy_session_lifecycle::peer_routing::PeerRouting::local_only(&config),
-                Arc::new(tddy_daemon_kernel::operator_channel::NoOperatorChannel),
-                Arc::new(CliSessionManager::new()),
-            )
-            .with_coding_agents_if_none(tddy_session_lifecycle::test_util::builtin_coding_agents()),
-        )
+        TestDaemon::from_host(DaemonSessionHost::new(
+            config.clone(),
+            sessions_base_resolver,
+            sessions_base,
+            user_resolver,
+            None,
+            tddy_spawn::supervisor_client::SpawnBackendChoice::ForkedWorker,
+            tddy_session_lifecycle::peer_routing::PeerRouting::local_only(&config),
+            Arc::new(tddy_daemon_kernel::operator_channel::NoOperatorChannel),
+            Arc::new(CliSessionManager::new()),
+            tddy_session_lifecycle::test_util::builtin_coding_agents(),
+        ))
     }
 
     // --- reading the result back ---

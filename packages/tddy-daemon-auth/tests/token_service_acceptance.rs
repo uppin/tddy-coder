@@ -124,7 +124,7 @@ async fn mints_no_room_jwt_for_a_caller_whose_session_token_cannot_be_resolved()
 fn a_daemon_serving_a_common_room() -> (DaemonConfig, tempfile::TempDir) {
     let dir = tempfile::tempdir().expect("a temporary directory");
     let yaml = format!(
-        "users:\n  - github_user: \"{THE_LOGIN}\"\n    os_user: \"{THE_LOGIN}-os\"\n\
+        "\
          github:\n  stub: true\n\
          auth_storage: \"{}\"\n\
          livekit:\n  enabled: true\n  url: \"ws://livekit.internal:7880\"\n  \
@@ -134,6 +134,11 @@ fn a_daemon_serving_a_common_room() -> (DaemonConfig, tempfile::TempDir) {
     );
     let path = dir.path().join("config.yaml");
     std::fs::write(&path, yaml).expect("the config is written");
+    std::fs::write(
+        dir.path().join("users.yaml"),
+        format!("- github_user: \"{THE_LOGIN}\"\n  os_user: \"{THE_LOGIN}-os\"\n"),
+    )
+    .expect("the users file is written");
     (DaemonConfig::load(&path).expect("the config loads"), dir)
 }
 

@@ -80,6 +80,8 @@ pub struct SpecHeadlessRenderer {
     /// Its resolved [`TOOL_SERVER_DEP`], when it has one.
     tool_server: Option<ResolvedTool>,
     adapters: AdapterRegistry,
+    /// The base set a model listing's environment is computed from (`#agent-tools 28/28`).
+    env_base: crate::AgentEnvBase,
 }
 
 impl SpecHeadlessRenderer {
@@ -103,7 +105,16 @@ impl SpecHeadlessRenderer {
             tool,
             tool_server,
             adapters,
+            env_base: crate::AgentEnvBase::builtin(),
         })
+    }
+
+    /// This renderer with `base` as the base set its model listing's environment is computed
+    /// from: a host registry's, rather than the built-in (`#agent-tools 28/28`).
+    #[must_use]
+    pub fn with_env_base(mut self, base: crate::AgentEnvBase) -> Self {
+        self.env_base = base;
+        self
     }
     /// The agent's model listing (`#agent-tools 15/19`): `coding_agent.models.list_command`
     /// rendered with this renderer's resolved binary, and the launch adapter `models.adapter`
@@ -144,6 +155,9 @@ impl SpecHeadlessRenderer {
             program,
             argv,
             adapter,
+            env: self
+                .env_base
+                .agent_env(&self.spec, std::env::vars_os(), &[]),
         }))
     }
 
@@ -185,6 +199,7 @@ fn mcp_server_command(server: &HeadlessMcpServer) -> McpServerCommand {
         command: server.command.clone(),
         args: server.args.clone(),
         env: server.env.clone(),
+        cwd: server.cwd.clone(),
     }
 }
 
@@ -199,6 +214,7 @@ impl HeadlessRenderer for SpecHeadlessRenderer {
             command: dep.binary.clone(),
             args: vec!["--mcp".to_string()],
             env: BTreeMap::new(),
+            cwd: None,
         })
     }
 
@@ -261,14 +277,20 @@ impl HeadlessRenderer for SpecHeadlessRenderer {
             )));
         }
         let program = PathBuf::from(argv.remove(0));
+        let launch_env: Vec<(String, String)> = headless
+            .env
+            .iter()
+            .map(|(name, value)| (name.clone(), value.clone()))
+            .collect();
         Ok(HeadlessInvocation {
             program,
             argv,
-            env: headless
-                .env
-                .iter()
-                .map(|(name, value)| (name.clone(), value.clone()))
-                .collect(),
+            // The turn's whole environment (`#agent-tools 28/28`): the base set and the spec's
+            // `pass_env` values of this process, then the spec's `headless.env` (its values are
+            // rendered as templates by the caller, after this).
+            env: self
+                .env_base
+                .agent_env(&self.spec, std::env::vars_os(), &launch_env),
             files,
             adapter,
             exit_ok_if_structured: headless.exit_ok_if_structured,
@@ -299,6 +321,7 @@ mod tests {
             route_model: RouteModel::default(),
             fresh_session: FreshSession::default(),
             scratch: ScratchDir::default(),
+            permission_policy: None,
         }
     }
 

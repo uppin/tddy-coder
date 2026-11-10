@@ -35,7 +35,7 @@ The dev overlay **`HMR: N`** (bottom-left) only increments when the Vite client 
 
 1. **Daemon binary**: `target/debug/tddy-daemon` when present, otherwise `target/release/tddy-daemon`. Build with `cargo build -p tddy-daemon` when the binary is missing.
 2. **Config file**: `DAEMON_CONFIG` selects the YAML path; when unset, the script uses **`dev.daemon.yaml`** at the repo root. The script variable holding that path is named `CONFIG` in the shell; the generic `CONFIG` key from `.env` does **not** supply this path—set **`DAEMON_CONFIG`** for a custom file. That YAML defines **`allowed_tools`** (connection screen **Tool** dropdown via **`ListTools`**) and **`allowed_agents`** (connection screen **Backend** dropdown via **`ListAgents`**); see [Web terminal — Connection screen](web-terminal.md#daemon-mode-connection-screen-project-centric).
-3. **Temp config**: A copy of the YAML is written to a temp file with `CURRENT_USER` replaced by the login name (`sed` with `|` delimiters). The daemon receives `-c` pointing at that file.
+3. **Temp config**: A copy of the YAML is written into a per-run directory (`mktemp -d`) with `CURRENT_USER` replaced by the login name (`sed` with `|` delimiters), and a **`users.yaml`** is rendered beside it — the daemon reads its GitHub → OS-user mapping there, never from the config, and refuses to start without one. It maps `testuser` to `$USER` (and `uppin` to `mantasi`). The daemon receives `-c` pointing at the copy; the whole directory is removed on exit, so no run reads another's mapping.
 4. **Extra CLI**: Arguments after the script name pass through to `tddy-daemon`. If both the script and the user pass `-c`, the daemon receives two `-c` arguments; the effective config follows daemon rules. The Vite proxy targets this run's **`DAEMON_PORT`** — the port written into the temp config in step 3 — not a port from a second `-c` on the command line.
 5. **LiveKit**: after the build and before the daemon, `web-dev` brings up this run's LiveKit (see [LiveKit](#livekit)) and exports its `LIVEKIT_*` overrides for the daemon. Its port block is drawn clear of this run's daemon and Vite ports.
 6. **Vite**: After the daemon answers HTTP **200** on **`GET /api/config`** (not `GET /` — the static bundle under **`web_bundle_path`** may be missing until you run **`bun run build`**), the script starts Vite under `./dev` with `DAEMON_PORT` set for the proxy. A daemon that exits before answering ends the wait at once, as an error; one that runs but never answers is an error after 90s.
@@ -108,7 +108,7 @@ is still alive. See `scripts/dev-process.sh`. Works on macOS's `/bin/bash` 3.2.
 | `tddy:term:grpc` | gRPC terminal byte stream: recv length, ready/buffered state, hex preview, resize sequence |
 | `tddy:term:session` | The one session terminal's feed, whatever carries it: recv length, ready/buffered state, hex preview |
 | `tddy:term:life` | Terminal lifecycle (init, open, initial `cols`/`rows`) |
-| `tddy:term:mouse` | Mouse / SGR forwarding |
+| `tddy:term:mouse` | Touch input routed to the TUI: taps re-synthesised as clicks, touch-scroll notches |
 | `tddy:term:modes` | DEC private mode switches (`ESC[?…h/l`) in received output, and the mouse-tracking / alternate-screen state after the write — silent for chunks that switch nothing |
 | `tddy:term:chrome` | The session terminal's connection chrome on each render |
 

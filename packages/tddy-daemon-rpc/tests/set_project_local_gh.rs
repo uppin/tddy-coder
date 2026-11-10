@@ -130,35 +130,37 @@ fn a_daemon_with_a_project_row(
 fn a_daemon(os_user: &str, tddy_data_dir: PathBuf) -> TestDaemon {
     let config_dir = tempfile::tempdir().unwrap();
     let config_path = config_dir.path().join("config.yaml");
+    std::fs::write(&config_path, "").unwrap();
     std::fs::write(
-        &config_path,
-        format!("users:\n  - github_user: \"testuser\"\n    os_user: \"{os_user}\"\n"),
+        std::path::Path::new(&(config_path))
+            .parent()
+            .expect("a config directory")
+            .join("users.yaml"),
+        format!("- github_user: \"testuser\"\n  os_user: \"{os_user}\"\n"),
     )
     .unwrap();
     let config = DaemonConfig::load(&config_path).unwrap();
     let sessions_base = tddy_data_dir.clone();
     let eligible: Arc<dyn EligibleDaemonSource> =
         Arc::new(LocalOnlyEligibleDaemonSource::for_config(&config));
-    TestDaemon::from_host(
-        DaemonSessionHost::new(
-            config.clone(),
-            Arc::new(move |_| Some(sessions_base.clone())),
-            tddy_data_dir,
-            Arc::new(|token| (token == TEST_TOKEN).then(|| "testuser".to_string())),
-            None,
-            tddy_spawn::supervisor_client::SpawnBackendChoice::ForkedWorker,
-            tddy_daemon_livekit::peer_routing::peer_routing_over(
-                &config,
-                Some(LiveKitDiscoveryHandles {
-                    eligible_daemon_source: eligible,
-                    common_room_livekit_room: Arc::new(tokio::sync::RwLock::new(None)),
-                }),
-            ),
-            Arc::new(tddy_daemon_kernel::operator_channel::NoOperatorChannel),
-            Arc::new(tddy_session_lifecycle::claude_cli_session::CliSessionManager::new()),
-        )
-        .with_coding_agents_if_none(tddy_session_lifecycle::test_util::builtin_coding_agents()),
-    )
+    TestDaemon::from_host(DaemonSessionHost::new(
+        config.clone(),
+        Arc::new(move |_| Some(sessions_base.clone())),
+        tddy_data_dir,
+        Arc::new(|token| (token == TEST_TOKEN).then(|| "testuser".to_string())),
+        None,
+        tddy_spawn::supervisor_client::SpawnBackendChoice::ForkedWorker,
+        tddy_daemon_livekit::peer_routing::peer_routing_over(
+            &config,
+            Some(LiveKitDiscoveryHandles {
+                eligible_daemon_source: eligible,
+                common_room_livekit_room: Arc::new(tokio::sync::RwLock::new(None)),
+            }),
+        ),
+        Arc::new(tddy_daemon_kernel::operator_channel::NoOperatorChannel),
+        Arc::new(tddy_session_lifecycle::claude_cli_session::CliSessionManager::new()),
+        tddy_session_lifecycle::test_util::builtin_coding_agents(),
+    ))
 }
 
 impl World {

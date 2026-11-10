@@ -191,7 +191,8 @@ pub fn git(cwd: &Path, args: &[&str]) -> String {
     String::from_utf8_lossy(&out.stdout).trim().to_string()
 }
 
-fn current_os_user() -> String {
+/// The OS user the test process runs as, which the sessions run as.
+pub fn current_os_user() -> String {
     let pw = unsafe { libc::getpwuid(libc::getuid()) };
     assert!(!pw.is_null(), "current uid must resolve to a passwd entry");
     unsafe { std::ffi::CStr::from_ptr((*pw).pw_name) }
@@ -233,13 +234,15 @@ fn write_daemon_config(extra_yaml: &str) -> (tempfile::TempDir, DaemonConfig) {
     let user = current_os_user();
     let yaml = format!(
         r#"
-users:
-  - github_user: "{user}"
-    os_user: "{user}"
 {extra_yaml}"#
     );
     let config_path = dir.path().join("daemon.yaml");
     std::fs::write(&config_path, yaml).unwrap();
+    std::fs::write(
+        dir.path().join("users.yaml"),
+        format!("- github_user: \"{user}\"\n  os_user: \"{user}\"\n"),
+    )
+    .unwrap();
     let config = DaemonConfig::load(&config_path).expect("config must parse");
     (dir, config)
 }
@@ -265,6 +268,7 @@ fn minimal_service_with_manager(
         tddy_session_lifecycle::peer_routing::PeerRouting::local_only(&config),
         Arc::new(tddy_daemon_kernel::operator_channel::NoOperatorChannel),
         manager,
+        tddy_agent_launch::host_coding_agents::no_coding_agents(),
     )
     .with_session_tokens(this_daemons_session_tokens().clone())
 }

@@ -57,6 +57,7 @@ async fn a_paused_agent() -> (CodingAgentSession, String, tempfile::TempDir) {
             ..OpenSession::default()
         },
         "stub-model".to_string(),
+        tddy_coding_subagent::no_launch_hooks(),
     )
     .await
     .expect("start");

@@ -8,10 +8,10 @@
 
 import React from "react";
 import { createClient } from "@connectrpc/connect";
-import { ActivityService } from "../../src/gen/activity_pb";
-import { SessionEntrySchema } from "../../src/gen/session_pb";
+import { ActivityService } from "tddy-client-web/gen/activity_pb";
+import { SessionEntrySchema } from "tddy-client-web/gen/session_pb";
 import { create } from "@bufbuild/protobuf";
-import { SessionWithActivitySidebar } from "../../src/components/sessions/SessionWithActivitySidebar";
+import { SessionWithActivitySidebar } from "tddy-session-web";
 import { mountWithRpc } from "../support/rpc/inMemory";
 import { byTestId } from "../support/testIds";
 import {

@@ -110,7 +110,8 @@ describe("the repository's serial test-groups", () => {
     const stillSerialised = binariesStartingTheTestkit(REPO_ROOT).filter((binary) => isSerialised(config, binary));
 
     expect(binaryNames(stillSerialised)).toEqual([]);
-  });
+    // Scanning every package's tests/ tree has outlasted bun's 5 s default on a cold file cache.
+  }, 30_000);
 
   test("every_binary_a_serial_group_names_exists_in_the_package_it_names", () => {
     const references = serialGroupReferences(ciSerialisation(NEXTEST_CONFIG));

@@ -46,12 +46,23 @@ fn a_source_repo(dir: &Path) -> String {
     dir.to_str().unwrap().to_string()
 }
 
-fn load_config(yaml: &str) -> DaemonConfig {
+fn load_config(yaml: &str, os_user: &str) -> DaemonConfig {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("config.yaml");
     std::fs::write(&path, yaml).unwrap();
     // Keep the config tempdir alive for the process lifetime — leak is fine in a test binary.
     std::mem::forget(dir);
+    std::fs::write(
+        std::path::Path::new(&(path))
+            .parent()
+            .expect("a config directory")
+            .join("users.yaml"),
+        format!(
+            "- github_user: \"{MAPPED_GITHUB_USER}\"\n  os_user: \"{os_user}\"\n",
+            os_user = os_user
+        ),
+    )
+    .unwrap();
     DaemonConfig::load(&path).unwrap()
 }
 
@@ -90,16 +101,15 @@ impl Host {
     /// A daemon config that names no supervisor. Whether one brokers the clone is decided by how the
     /// daemon was started, which each test hands to [`Self::daemon_for`] directly.
     fn a_config(&self) -> DaemonConfig {
-        load_config(&format!(
-            r#"
+        load_config(
+            &format!(
+                r#"
 repos_base_path: "{repos}"
-users:
-  - github_user: "{MAPPED_GITHUB_USER}"
-    os_user: "{os_user}"
 "#,
-            repos = self.repos_base.path().display(),
-            os_user = self.os_user,
-        ))
+                repos = self.repos_base.path().display(),
+            ),
+            &self.os_user,
+        )
     }
 
     /// A socket no `tddy-supervisor` is listening on.
@@ -123,26 +133,24 @@ users:
             Arc::new(move |token| (token == TEST_TOKEN).then(|| github_user.to_string()));
         let eligible: Arc<dyn EligibleDaemonSource> =
             Arc::new(LocalOnlyEligibleDaemonSource::for_config(&config));
-        TestDaemon::from_host(
-            DaemonSessionHost::new(
-                config.clone(),
-                sessions_base_resolver,
-                tddy_data_dir,
-                user_resolver,
-                None,
-                spawn_backend,
-                tddy_daemon_livekit::peer_routing::peer_routing_over(
-                    &config,
-                    Some(LiveKitDiscoveryHandles {
-                        eligible_daemon_source: eligible,
-                        common_room_livekit_room: Arc::new(tokio::sync::RwLock::new(None)),
-                    }),
-                ),
-                Arc::new(tddy_daemon_kernel::operator_channel::NoOperatorChannel),
-                Arc::new(tddy_session_lifecycle::claude_cli_session::CliSessionManager::new()),
-            )
-            .with_coding_agents_if_none(tddy_session_lifecycle::test_util::builtin_coding_agents()),
-        )
+        TestDaemon::from_host(DaemonSessionHost::new(
+            config.clone(),
+            sessions_base_resolver,
+            tddy_data_dir,
+            user_resolver,
+            None,
+            spawn_backend,
+            tddy_daemon_livekit::peer_routing::peer_routing_over(
+                &config,
+                Some(LiveKitDiscoveryHandles {
+                    eligible_daemon_source: eligible,
+                    common_room_livekit_room: Arc::new(tokio::sync::RwLock::new(None)),
+                }),
+            ),
+            Arc::new(tddy_daemon_kernel::operator_channel::NoOperatorChannel),
+            Arc::new(tddy_session_lifecycle::claude_cli_session::CliSessionManager::new()),
+            tddy_session_lifecycle::test_util::builtin_coding_agents(),
+        ))
     }
 
     fn daemon(&self) -> TestDaemon {

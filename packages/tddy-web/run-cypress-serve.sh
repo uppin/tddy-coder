@@ -42,4 +42,4 @@ echo "To run Cypress against this server: CYPRESS_BASE_URL=http://${DISPLAY_HOST
 echo "=========================================="
 echo ""
 
-exec npx http-server storybook-static -p 9786 -a 0.0.0.0 -c-1 --cors
+exec npx http-server ../tddy-storybook/storybook-static -p 9786 -a 0.0.0.0 -c-1 --cors

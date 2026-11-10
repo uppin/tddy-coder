@@ -51,5 +51,5 @@ very first statement. On a LAN origin the whole drop handler threw
 (`TypeError: crypto.randomUUID is not a function`) before a single chunk was sent: no progress, no
 error strip, no path typed — dragging a file simply did nothing. The mobile Attach button shares the
 hook, so it failed identically. See
-[terminal-file-upload.md](terminal-file-upload.md) and
+[terminal-file-upload.md](../../tddy-terminal-web/docs/terminal-file-upload.md) and
 [web-terminal.md § File drop upload](../../../docs/ft/web/web-terminal.md#file-drop-upload).

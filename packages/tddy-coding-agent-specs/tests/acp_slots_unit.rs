@@ -50,6 +50,7 @@ fn the_tool_server() -> McpServerCommand {
             ("TDDY_CONVERSATION_ID".to_string(), "conv-1".to_string()),
             ("TDDY_REMOTE_SESSION_TOKEN".to_string(), TOKEN.to_string()),
         ]),
+        cwd: None,
     }
 }
 
@@ -89,6 +90,7 @@ fn an_acp_session_slot_hands_the_tool_server_as_session_new_mcp_servers() {
             ("TDDY_CONVERSATION_ID".to_string(), "conv-1".to_string()),
             ("TDDY_REMOTE_SESSION_TOKEN".to_string(), TOKEN.to_string()),
         ],
+        cwd: None,
     };
     assert_eq!(
         servers,
@@ -176,5 +178,54 @@ fn codex_acp_refuses_withdrawing_tools_through_its_unsupported_deny_slot_and_wit
             }),
             Ok(None),
         )
+    );
+}
+
+#[test]
+fn every_built_in_headless_spec_declares_who_answers_its_permission_requests() {
+    // Given — the `coding_agent.headless.permission_policy` slot (`#agent-tools 27/28`)
+    let ids = ["claude", "cursor", "codex", "oz"];
+
+    // When
+    let policies: Vec<(
+        &str,
+        Option<tddy_coding_agent_specs::HeadlessPermissionPolicy>,
+    )> = ids
+        .into_iter()
+        .map(|id| {
+            let spec = the_builtin_spec(id);
+            let policy = spec
+                .headless()
+                .expect("a headless section")
+                .permission_policy
+                .clone();
+            (id, policy)
+        })
+        .collect();
+
+    // Then
+    use tddy_coding_agent_specs::HeadlessPermissionPolicy::{AsksCaller, Fixed};
+    assert_eq!(
+        policies,
+        vec![
+            ("claude", Some(AsksCaller)),
+            (
+                "cursor",
+                Some(Fixed("read-only; the CLI cannot ask mid-turn".to_string()))
+            ),
+            (
+                "codex",
+                Some(Fixed(
+                    "workspace-write sandbox; the CLI cannot ask mid-turn".to_string()
+                ))
+            ),
+            (
+                "oz",
+                Some(Fixed(
+                    "the agent profile decides; its default profile auto-approves commands and edits"
+                        .to_string()
+                ))
+            ),
+        ]
     );
 }

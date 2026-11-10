@@ -170,9 +170,6 @@ fn a_daemon_in_the_common_room(write_sessions: impl Fn(&Path, &Path)) -> ADaemon
     let config_yaml = format!(
         r#"
 daemon_instance_id: "{THIS_HOST}"
-users:
-  - github_user: "{user}"
-    os_user: "{user}"
 livekit:
   url: ws://127.0.0.1:7880
   api_key: devkey
@@ -181,6 +178,14 @@ livekit:
     );
     let config_path = data_dir.path().join("daemon.yaml");
     std::fs::write(&config_path, config_yaml).expect("write daemon config");
+    std::fs::write(
+        std::path::Path::new(&(config_path))
+            .parent()
+            .expect("a config directory")
+            .join("users.yaml"),
+        format!("- github_user: \"{user}\"\n  os_user: \"{user}\"\n"),
+    )
+    .unwrap();
     let config =
         tddy_daemon_kernel::config::DaemonConfig::load(&config_path).expect("load daemon config");
 
@@ -207,15 +212,12 @@ livekit:
             ),
             Arc::new(tddy_daemon_kernel::operator_channel::NoOperatorChannel),
             Arc::new(CliSessionManager::new()),
-        )
-        // A claude-cli start resolves its agent before it asks for its stack parent: the stub keeps
-        // the host's own `claude` (or its absence, on CI) out of a test about the parent.
-        .with_coding_agents_if_none(
             tddy_session_lifecycle::test_util::coding_agents_with_binaries(&[(
                 "claude",
                 std::path::Path::new("/bin/cat"),
             )]),
-        ),
+        ), // A claude-cli start resolves its agent before it asks for its stack parent: the stub keeps
+           // the host's own `claude` (or its absence, on CI) out of a test about the parent.,
     );
 
     ADaemonInTheCommonRoom {

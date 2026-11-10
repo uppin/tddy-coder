@@ -56,15 +56,20 @@ fn demo_tui_binary() -> PathBuf {
 fn write_config() -> (tempfile::TempDir, DaemonConfig) {
     let dir = tempfile::tempdir().unwrap();
     let yaml = r#"
-users:
-  - github_user: "testuser"
-    os_user: "testuser"
 allowed_tools:
   - path: /bin/true
     label: true
 "#;
     let config_path = dir.path().join("daemon.yaml");
     std::fs::write(&config_path, yaml).unwrap();
+    std::fs::write(
+        std::path::Path::new(&(config_path))
+            .parent()
+            .expect("a config directory")
+            .join("users.yaml"),
+        "- github_user: \"testuser\"\n  os_user: \"testuser\"\n",
+    )
+    .unwrap();
     let config = DaemonConfig::load(&config_path).expect("config must parse");
     (dir, config)
 }
@@ -90,6 +95,7 @@ fn minimal_service(config: DaemonConfig, sessions_base: PathBuf) -> DaemonSessio
         tddy_session_lifecycle::peer_routing::PeerRouting::local_only(&config),
         Arc::new(tddy_daemon_kernel::operator_channel::NoOperatorChannel),
         Arc::new(CliSessionManager::new()),
+        tddy_agent_launch::host_coding_agents::no_coding_agents(),
     )
 }
 
