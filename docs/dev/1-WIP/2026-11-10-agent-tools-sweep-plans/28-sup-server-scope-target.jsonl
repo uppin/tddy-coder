@@ -1,0 +1,2 @@
+{"v":2,"files":{"packages/tddy-supervisor/src/server.rs":{"sha256":"sha256:eb6ca4728367dc22732e84ea60afbf9aebb938721df074cce5c1d3c908fcf329"}}}
+{"id": "op-1", "op": "extract_method", "anchor": {"kind": "item", "item": "tddy_supervisor::server::PrivilegedSurface::resolve_spawn", "file": "packages/tddy-supervisor/src/server.rs", "start": {"line": 20, "col": 9}, "end": {"line": 23, "col": 47}, "fingerprint": "sha256:62a5338cf2eda043ad28cdc030e4a32a42f1f18e466f0478103fe41371826ec7", "hint": {"line": 191, "col": 9}}, "name": "resolve_scope_and_target"}
