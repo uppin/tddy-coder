@@ -352,7 +352,7 @@ fn build_pty_spawn_spec(
     env_base: tddy_pty::PtyEnvBase,
     os_user: Option<&str>,
 ) -> PtySpawnSpec {
-    let spec = PtySpawnSpec {
+    PtySpawnSpec {
         argv,
         worktree_path: worktree_path.to_owned(),
         session_id: session_id.to_string(),
@@ -361,8 +361,7 @@ fn build_pty_spawn_spec(
         env,
         env_base,
         os_user: os_user.map(str::to_string),
-    };
-    spec
+    }
 }
 
 fn finish_spawned_terminal(
