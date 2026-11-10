@@ -93,16 +93,7 @@ impl LaunchSessions {
         session_id: &str,
         session_token: &str,
     ) -> Result<Response<DeleteSessionResponse>, Status> {
-        let sessions_base = tddy_daemon_kernel::user_paths::sessions_base_for_user(
-            os_user,
-            Some(&self.tddy_data_dir),
-        )
-        .ok_or_else(|| Status::internal("could not resolve sessions path"))?;
-        log::debug!(
-            "DeleteSession: resolved sessions_base={:?} for os_user={}",
-            sessions_base,
-            os_user
-        );
+        let sessions_base = self.sessions_base_for_delete(os_user)?;
         // Every part a peer holds is checked before anything here is torn down: a delete one of
         // them would refuse is refused with the session and its agent still running.
         self.refuse_a_delete_a_peer_would_refuse(&sessions_base, session_id)
@@ -147,6 +138,20 @@ impl LaunchSessions {
         )?;
         log::info!("DeleteSession: successfully removed session {}", session_id);
         Ok(Response::new(DeleteSessionResponse { ok: true }))
+    }
+
+    fn sessions_base_for_delete(&self, os_user: &str) -> Result<std::path::PathBuf, Status> {
+        let sessions_base = tddy_daemon_kernel::user_paths::sessions_base_for_user(
+            os_user,
+            Some(&self.tddy_data_dir),
+        )
+        .ok_or_else(|| Status::internal("could not resolve sessions path"))?;
+        log::debug!(
+            "DeleteSession: resolved sessions_base={:?} for os_user={}",
+            sessions_base,
+            os_user
+        );
+        Ok(sessions_base)
     }
 
     async fn forget_session_state(&self, session_id: &str) {
