@@ -113,11 +113,7 @@ pub(super) async fn launch(
     if run.in_tmux {
         let plan = plan_host_pty(agent, params, slots).map_err(failed)?;
         let env: Vec<(String, String)> = plan.env.into_iter().chain(env).collect();
-        let env = without_the_panes_terminal_variables(agent.env_base.agent_env(
-            &agent.spec,
-            std::env::vars_os(),
-            &env,
-        ));
+        let env = pane_agent_env(agent, env);
         let tmux_launch = crate::cli_harness_tmux::HarnessTmuxLaunch {
             os_user,
             session_id,
@@ -155,6 +151,15 @@ pub(super) async fn launch(
         pid: handle.pid,
         tmux_session: None,
     })
+}
+
+fn pane_agent_env(agent: &HostAgent, env: Vec<(String, String)>) -> Vec<(String, String)> {
+    let env = without_the_panes_terminal_variables(agent.env_base.agent_env(
+        &agent.spec,
+        std::env::vars_os(),
+        &env,
+    ));
+    env
 }
 
 async fn start_or_resume_in_tmux(
