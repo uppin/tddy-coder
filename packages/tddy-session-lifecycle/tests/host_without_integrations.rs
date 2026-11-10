@@ -72,10 +72,15 @@ fn a_host_with_nothing_wired() -> AHostWithNothingWired {
     let user = os_user();
     std::fs::write(
         &config_path,
-        format!(
-            "users:\n  - github_user: \"{user}\"\n    os_user: \"{user}\"\n\
-             allowed_tools:\n  - path: /bin/true\n    label: true\n"
-        ),
+        "allowed_tools:\n  - path: /bin/true\n    label: true\n",
+    )
+    .unwrap();
+    std::fs::write(
+        std::path::Path::new(&(config_path))
+            .parent()
+            .expect("a config directory")
+            .join("users.yaml"),
+        format!("- github_user: \"{user}\"\n  os_user: \"{user}\"\n"),
     )
     .unwrap();
     let config = tddy_session_lifecycle::config::DaemonConfig::load(&config_path)

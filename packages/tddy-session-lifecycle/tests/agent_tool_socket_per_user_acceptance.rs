@@ -1,6 +1,6 @@
 //! Acceptance (`#agent-tools` 26/28): on a **server** daemon, a host Cursor or Claude session's
 //! hooks report over the agent-tool socket of the OS user the session runs as —
-//! `<tddyhome>/run-agent-tools/<os user>/agent.sock` — and that socket is served.
+//! `<tddyhome>/run/<os user>/daemon.sock` — and that socket is served.
 //!
 //! Before: a Cursor session's `hooks.json` named the embedded host's digest-named socket under
 //! `$TMPDIR`, which a server never binds, so every report was dropped fail-quiet; a Claude
@@ -44,9 +44,9 @@ fn a_server_daemon_with_a_copy_of(builtin: &str) -> ARegistryDaemon {
 fn the_session_users_agent_tool_socket(daemon: &ARegistryDaemon) -> PathBuf {
     daemon
         .tddy_home
-        .join("run-agent-tools")
+        .join("run")
         .join(current_os_user())
-        .join("agent.sock")
+        .join("daemon.sock")
 }
 
 /// Every distinct `--daemon-socket` value in a hooks file's commands.

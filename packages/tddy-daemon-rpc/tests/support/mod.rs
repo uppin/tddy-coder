@@ -279,9 +279,13 @@ pub fn current_os_user() -> String {
 /// The test config, with [`TEST_USER`] mapped to `os_user` rather than the fixture's `testdev`.
 fn config_mapping_test_user_to(os_user: &str) -> tddy_daemon_kernel::config::DaemonConfig {
     let dir = tempfile::tempdir().unwrap();
-    let yaml = format!("users:\n  - github_user: \"{TEST_USER}\"\n    os_user: \"{os_user}\"\n");
     let path = dir.path().join("daemon.yaml");
-    std::fs::write(&path, yaml).unwrap();
+    std::fs::write(&path, "").unwrap();
+    std::fs::write(
+        dir.path().join("users.yaml"),
+        format!("- github_user: \"{TEST_USER}\"\n  os_user: \"{os_user}\"\n"),
+    )
+    .unwrap();
     tddy_daemon_kernel::config::DaemonConfig::load(&path).expect("config must parse")
 }
 

@@ -12,6 +12,7 @@
 #                                  (INSTALL_DAEMON_SOCKET_PATH); the same value goes into daemon.yaml
 #   __SOCKET_GROUP__             — group granted access to that socket (INSTALL_SOCKET_GROUP)
 #   __DAEMON_USER__              — unprivileged service user (INSTALL_DAEMON_USER)
+#   __USERS_FILE_PATH__          — users.yaml beside the configs (CONFIG_DIR/users.yaml)
 #   __DAEMON_GROUP__             — service group (INSTALL_DAEMON_GROUP)
 #
 # THIS FILE OWNS THE DAEMON'S OS IDENTITY. The `user:`/`group:` of the tddy-daemon service below are
@@ -32,6 +33,13 @@ socket:
   group: __SOCKET_GROUP__
   mode: "0660"
 
+# The GitHub → OS-user mapping: who it is read from, and where each mapped user's daemon socket
+# lives (`<sockets_dir>/<user>/daemon.sock`, under /run so every directory above a handed-over
+# socket is writable by root alone).
+users:
+  file: __USERS_FILE_PATH__
+  sockets_dir: /run/tddy-users
+
 # Processes the supervisor starts (in this order), reaps, restarts with backoff, and terminates on
 # shutdown. `user: root` is rejected at load — a root child would defeat the point of the supervisor.
 # Add `working_dir:` / `env:` per service if a service needs more than the supervisor's own cwd and
@@ -50,37 +58,15 @@ services:
       path: __DAEMON_SOCKET_PATH__
       group: __SOCKET_GROUP__
       mode: "0660"
-    # One socket per OS user, for that user's tool sessions to reach the daemon (`github_token`,
-    # `spawn_conversation`). The daemon is unprivileged and cannot chown a socket to somebody else,
-    # so the supervisor makes each one as root — directory and socket owned by `user`, modes 0700 and
-    # 0600, so ONLY that user (and root) can connect — and hands the listeners to the daemon after
-    # its own (fd 3): fd 4, 5, ... in the order written here, announced in LISTEN_FDNAMES as
-    # `connection:host-session.<user>:...`. The daemon serves them where they are; it never binds,
-    # replaces or removes them. An OS user NOT listed here gets no host-session socket (the daemon
-    # refuses, naming this setting) and so no GitHub token or conversation spawn inside its tool
-    # sessions. Each `user` must also be in spawn_policy.allowed_session_users (rejected at load
-    # otherwise), may not be `root`, and needs a directory of its own: `path`'s directory is handed
-    # to that user, so nothing else may live in it. Every directory above it must be writable by root
-    # alone (checked at startup), which is why these sit under /run rather than in the daemon's data
-    # dir. At most 15 entries; paths must fit a unix socket (about 100 bytes).
-    # host_sockets:
-    #   - {user: alice, path: /run/tddy-host-sessions/alice/host.sock}
-    #   - {user: bob, path: /run/tddy-host-sessions/bob/host.sock}
-    # One agent-tool socket per OS user, for that user's agents to report their hooks and make their
-    # tool calls over (`tddy-tools session-hook`, `tddy-tools notify`, the tool server). Made and
-    # handed over exactly like `host_sockets` — after them, announced as `agent-tools.<user>` — and
-    # served with the daemon's own RPC roster. Unlike a host-session socket, an OS user NOT listed
-    # here cannot start a session at all: the start is refused, naming this setting, rather than
-    # pointing the agent at a path it cannot reach (whose every report would be swallowed). List the
-    # same users as `host_sockets`, each in a directory of its own — never the host socket's — and
-    # note that both kinds together may hand over at most 15 descriptors. While this service declares
-    # no `agent_tool_sockets:`, every ./install run writes one live entry per
-    # spawn_policy.allowed_session_users user, at /run/tddy-agent-tools/<user>/agent.sock, directly
-    # under `- name: tddy-daemon`; once the block exists it is yours, and install only warns about a
-    # policy user it leaves out.
-    # agent_tool_sockets:
-    #   - {user: alice, path: /run/tddy-agent-tools/alice/agent.sock}
-    #   - {user: bob, path: /run/tddy-agent-tools/bob/agent.sock}
+    # One daemon socket per OS user, for that user's tool sessions and agents: the supervisor
+    # reads who maps to whom from users.yaml (the top-level `users:` block below), makes each
+    # socket as root — directory and socket owned by that user, modes 0700 and 0600 — and hands
+    # the listeners to the daemon after its own (fd 3), announced in LISTEN_FDNAMES as
+    # `connection:user.<user>:...`. The daemon serves them where they are; it never binds one.
+    # A GitHub login users.yaml maps to nobody is refused at the RPC it calls; an OS user with
+    # no row gets no socket. Edit users.yaml to change who is mapped: the supervisor picks a
+    # valid save up and restarts this service with the new sockets.
+    serves_users: true
     restart:
       max_retries: 5
       initial_backoff_ms: 500
@@ -96,7 +82,7 @@ shutdown_grace_secs: 20
 # Uncomment and fill in to enable multi-user sessions. Entries are matched verbatim (absolute paths,
 # no `..`, no symlink resolution), and `root` is rejected as a session user.
 # spawn_policy:
-#   allowed_session_users: [alice, bob]          # OS accounts a session may run as
+#   (OS accounts a session may run as live in users.yaml, above — not here)
 #   allowed_tool_paths:                          # tools a session may exec
 #     - __INSTALL_BIN_DIR__/tddy-coder
 #     - __INSTALL_BIN_DIR__/tddy-tools

@@ -110,12 +110,18 @@ fn a_served_worktree_capped_at(cap: u64) -> ServedWorktree {
 }
 
 fn a_service(data_dir: PathBuf, os_user: &str, max_attachment_bytes: u64) -> WorktreeServiceImpl {
-    let yaml = format!(
-        "users:\n  - github_user: \"testuser\"\n    os_user: \"{os_user}\"\nmax_attachment_bytes: {max_attachment_bytes}\n"
-    );
+    let yaml = format!("max_attachment_bytes: {max_attachment_bytes}\n");
     let config_dir = tempfile::tempdir().expect("config tempdir");
     let config_path = config_dir.path().join("config.yaml");
     std::fs::write(&config_path, yaml).expect("write config");
+    std::fs::write(
+        std::path::Path::new(&(config_path))
+            .parent()
+            .expect("a config directory")
+            .join("users.yaml"),
+        format!("- github_user: \"testuser\"\n  os_user: \"{os_user}\"\n"),
+    )
+    .unwrap();
     let config = DaemonConfig::load(&config_path).expect("load config");
 
     WorktreeServiceImpl::new(

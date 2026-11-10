@@ -234,6 +234,8 @@ impl Fleet {
             self.ws_url, self.room
         );
         std::fs::write(&path, yaml).expect("write daemon.yaml");
+        // Every load needs a users.yaml beside the config; these daemons map nobody
+        std::fs::write(self.homes.path().join("users.yaml"), "[]\n").expect("write users.yaml");
         DaemonConfig::load(&path).expect("daemon.yaml loads")
     }
 

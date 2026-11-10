@@ -41,9 +41,6 @@ const THE_OPERATOR: &str = "testuser";
 /// hostname of whatever machine runs the suite.
 const DAEMON_YAML: &str = r#"
 daemon_instance_id: "workstation-1"
-users:
-  - github_user: "testuser"
-    os_user: "testdev"
 allowed_agents:
   - id: claude
     label: Claude
@@ -152,6 +149,14 @@ async fn a_daemon_with_a_registry() -> Harness {
     let dir = tempfile::tempdir().expect("a tempdir for the daemon's data");
     let config_path = dir.path().join("daemon.yaml");
     std::fs::write(&config_path, DAEMON_YAML).expect("write the daemon config");
+    std::fs::write(
+        std::path::Path::new(&(config_path))
+            .parent()
+            .expect("a config directory")
+            .join("users.yaml"),
+        "- github_user: \"testuser\"\n  os_user: \"testdev\"\n",
+    )
+    .unwrap();
     let config = DaemonConfig::load(&config_path).expect("the daemon config must parse");
 
     // The registry's name space and the daemon's def resolution read the same `<tddyhome>/agents`,

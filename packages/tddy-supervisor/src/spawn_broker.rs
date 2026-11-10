@@ -924,6 +924,13 @@ unsafe fn bring_loopback_up() -> std::io::Result<()> {
 /// sandbox. Its presence is how `tddy-daemon` knows it was started by a supervisor.
 pub const SUPERVISOR_SOCKET_ENV: &str = "TDDY_SUPERVISOR_SOCKET";
 
+/// The variable a managed service that declares `serves_users: true` is told the path of
+/// `users.yaml` in (`#agent-tools` 31/32): the supervisor→daemon handover of the mapping, beside
+/// `LISTEN_FDNAMES`. Set after the service's `env:` overlay, like [`SUPERVISOR_SOCKET_ENV`], so
+/// `supervisor.yaml` can neither set nor forge it. The daemon spells it again
+/// (`tddy_daemon_kernel::users_file::USERS_FILE_ENV`); a test pins the two.
+pub const USERS_FILE_ENV: &str = "TDDY_USERS_FILE";
+
 /// Write our own pid into an `cgroup.procs`, allocation-free.
 ///
 /// `O_CREAT` is not an accommodation: on cgroupfs the file always exists and the flag is inert,
@@ -1955,11 +1962,11 @@ mod tests {
 
     #[test]
     fn announces_every_handed_over_listener_and_names_each_one() {
-        // Given a service socket and two host sockets
+        // Given a service socket and two mapped users' daemon sockets
         let directory = tempfile::TempDir::new().expect("create a directory");
         let handover = SocketHandover::new(a_listener_at(directory.path(), "svc.sock"))
-            .with_host_session_socket("alice", a_listener_at(directory.path(), "a.sock"))
-            .with_host_session_socket("bob", a_listener_at(directory.path(), "b.sock"));
+            .with_user_socket("alice", a_listener_at(directory.path(), "a.sock"))
+            .with_user_socket("bob", a_listener_at(directory.path(), "b.sock"));
 
         // When
         let environment = ChildEnvironment::build(&a_spawn_plan().build(), Some(&handover))
@@ -1973,7 +1980,7 @@ mod tests {
         // Then — the count covers every descriptor and the names say whose each one is
         assert!(variables.contains(&"LISTEN_FDS=3"), "{variables:?}");
         assert!(
-            variables.contains(&"LISTEN_FDNAMES=connection:host-session.alice:host-session.bob"),
+            variables.contains(&"LISTEN_FDNAMES=connection:user.alice:user.bob"),
             "{variables:?}"
         );
     }

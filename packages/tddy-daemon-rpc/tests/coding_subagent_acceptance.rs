@@ -510,9 +510,17 @@ async fn an_acp_allowed_agent_is_listed_as_a_coding_agent_with_its_default_model
     let config_path = config_dir.path().join("daemon.yaml");
     std::fs::write(
         &config_path,
-        "users:\n  - github_user: \"u\"\n    os_user: \"u\"\nallowed_agents:\n  - id: claude-acp\n    label: \"Claude (ACP)\"\n  - id: cursor\n",
+        "allowed_agents:\n  - id: claude-acp\n    label: \"Claude (ACP)\"\n  - id: cursor\n",
     )
     .expect("write config");
+    std::fs::write(
+        std::path::Path::new(&(config_path))
+            .parent()
+            .expect("a config directory")
+            .join("users.yaml"),
+        "- github_user: \"u\"\n  os_user: \"u\"\n",
+    )
+    .unwrap();
     let config = DaemonConfig::load(&config_path).expect("load config");
     let tddy_home = tempfile::tempdir().expect("tddy home");
     let home = tddy_home.path().to_path_buf();

@@ -182,9 +182,9 @@ login, and hands `build_auth_entries_admitting` the `LoginAdmission` it answers 
 
 | Host | Outcome |
 |---|---|
-| `RuntimeHost::Binary` (the `tddy-daemon` binary, under systemd or not) | no admission. `users:` is the installer's to write, and an empty one refuses every caller's RPCs |
+| `RuntimeHost::Binary` (the `tddy-daemon` binary, under systemd or not) | no admission. `users.yaml` is the installer's (or, supervised, `tddy-supervisor`'s) to write, and an empty one refuses every caller's RPCs |
 | `Embedded`, with a config path (`RuntimeOptions::with_config_path`) | `tddy_daemon_auth::FirstLoginEnrolment` over `config.users`, that path, and the OS user this process runs as (`this_process_os_user`, from `getuid`). Unresolvable, `build` fails |
-| `Embedded`, no config path, serving GitHub sign-in (`github_auth_flow` is `Some`) to an empty `users:` | **`build` refuses**: the operator's first login could never be written down, so every sign-in would appear to work and then be refused by every RPC |
+| `Embedded`, no config path, serving GitHub sign-in (`github_auth_flow` is `Some`) to an empty mapping | **`build` refuses**: the operator's first login could never be written down, so every sign-in would appear to work and then be refused by every RPC |
 | `Embedded`, no config path, otherwise | no admission |
 
 `config.users` is the `LiveUsers` holder every service built from `config` authorizes through, so the
@@ -283,18 +283,28 @@ daemon issued, so the handler's own first check is what answers, without dependi
 or project existing. `local_socket_reachability_acceptance.rs` reads `local_socket_server.rs` as text,
 and `local_token_uds.rs` mounts services it builds for itself; neither sees `runtime.rs`'s wiring.
 
-## Host-session sockets
+## Per-user daemon sockets
 
-A tool session reaches the daemon over one unix socket per OS user (`github_token`,
-`spawn_conversation`); the host binds them lazily
-([session identity](../../tddy-session-lifecycle/docs/session-identity.md)). Under `tddy-supervisor` the
-daemon cannot `chown` a socket to a session user, so the supervisor makes each declared socket and hands
-the listener to the daemon after the service socket (descriptor 3): `runtime::build` reads
-`LISTEN_FDNAMES` through `inherited_host_sockets::adopt_from_environment()` **before** the local socket
-server adopts its own listener, because adopting it clears the `LISTEN_*` variables, and passes the
-result to the host with `with_inherited_host_session_sockets`. The daemon serves an inherited socket where
-it is and never binds, replaces or removes it. See
-[host sockets](../../tddy-supervisor/docs/host-sockets.md).
+A tool session reaches the daemon over one unix socket per OS user — the hooks, `tddy-tools notify`,
+the tool server and the host-session services (`github_token`, `spawn_conversation`) all on the same
+one ([daemon kernel § Per-OS-user sockets](../../tddy-daemon-kernel/docs/daemon-kernel.md#per-os-user-sockets-owner_socket-agent_tool_sockets),
+[session identity](../../tddy-session-lifecycle/docs/session-identity.md)).
+
+- **Placement** (`runtime/build_context.rs`): an embedded host gets `AgentToolSocketPlacement::Embedded`;
+  the binary gets `Supervised` when `TDDY_USERS_FILE` is set — `tddy-supervisor` started it — and
+  `PerOsUser` otherwise, binding `<data dir>/run/<user>/daemon.sock` itself.
+- **Adoption** (`runtime/mount_host.rs`): `runtime::build` reads the `user.<os user>` listeners the
+  supervisor handed over through `agent_tool_sockets::adopt_user_sockets_from_environment()`
+  **before** the local socket server adopts its own listener, because adopting it clears the
+  `LISTEN_*` variables, and gives them to `AgentToolSockets::adopt_inherited`. The daemon serves an
+  inherited socket where it is and never binds, replaces or removes it.
+- **Host sessions on the same socket**: the host is built with
+  `with_host_sessions_merged(options.host != RuntimeHost::Embedded)`. For a binary host that serves the
+  host-session service on the per-user daemon sockets (`HostSessionSockets::serve_on`); an embedded
+  host serves its one agent-tool socket itself, so it keeps binding its own host-session sockets
+  (`<data dir>/run/<user>/host.sock`).
+
+See [host sockets](../../tddy-supervisor/docs/host-sockets.md) for the supervisor's half.
 
 ## Where subsystems live
 

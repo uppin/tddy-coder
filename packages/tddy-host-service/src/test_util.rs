@@ -18,17 +18,15 @@ pub const TEST_TOKEN: &str = "valid-token";
 /// OS user returned for [`TEST_TOKEN`] by [`test_service`].
 pub const TEST_USER: &str = "testuser";
 
-const CONFIG_YAML: &str = r#"
-users:
-  - github_user: "testuser"
-    os_user: "testdev"
-"#;
+const CONFIG_YAML: &str = r#""#;
+const USERS_YAML: &str = "- github_user: \"testuser\"\n  os_user: \"testdev\"\n";
 
 /// Build a minimal [`DaemonConfig`] suitable for unit/acceptance tests.
 pub fn test_config() -> DaemonConfig {
     let dir = tempfile::tempdir().expect("create temp dir for test config");
     let path = dir.path().join("config.yaml");
     std::fs::write(&path, CONFIG_YAML).expect("write test config");
+    std::fs::write(dir.path().join("users.yaml"), USERS_YAML).expect("write test users");
     DaemonConfig::load(&path).expect("load test config")
 }
 

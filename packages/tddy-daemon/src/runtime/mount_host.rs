@@ -255,10 +255,12 @@ impl BuildContext {
         let approval_routes = Arc::default();
         // The registry `runtime::build` loaded once, shared with Telegram and the reserved-ids step.
         let coding_agents = Arc::clone(&self.coding_agents);
-        // The agent-tool sockets the supervisor handed over, read before the local socket server
-        // is spawned: adopting its own listener clears the `LISTEN_*` variables they are announced in.
-        self.agent_tool_sockets
-            .adopt_inherited(tddy_daemon_kernel::agent_tool_sockets::adopt_from_environment());
+        // The per-user daemon sockets the supervisor handed over (`user.<os user>`), read before
+        // the local socket server is spawned: adopting its own listener clears the `LISTEN_*`
+        // variables they are announced in.
+        self.agent_tool_sockets.adopt_inherited(
+            tddy_daemon_kernel::agent_tool_sockets::adopt_user_sockets_from_environment(),
+        );
         let connection_impl = tddy_session_lifecycle::connection_service::DaemonSessionHost::new(
             config.clone(),
             sessions_base_resolver.clone(),
@@ -273,11 +275,11 @@ impl BuildContext {
         );
 
         Ok(crate::livekit_host_ports::with_livekit_room_ports(
-        connection_impl,
-        Arc::clone(shared_session_rooms),
-        Arc::clone(shared_session_admissions),
-        Arc::clone(room_tokens),
-    )
+            connection_impl,
+            Arc::clone(shared_session_rooms),
+            Arc::clone(shared_session_admissions),
+            Arc::clone(room_tokens),
+        )
         .with_session_reach(
             Arc::clone(livekit_reach) as Arc<dyn tddy_daemon_extensions::SessionReach>
         )
@@ -307,11 +309,10 @@ impl BuildContext {
         .with_askpass_endpoint(askpass_endpoint)
         .with_approval_routes(approval_routes)
         .with_agent_tool_sockets(Arc::clone(&self.agent_tool_sockets))
-        // Read here, before the local socket server is spawned: adopting its own listener
-        // clears the `LISTEN_*` variables the host sockets are announced in.
-        .with_inherited_host_session_sockets(
-            tddy_session_lifecycle::connection_service::inherited_host_sockets::adopt_from_environment(),
-        ))
+        // The host-session service rides the merged per-user daemon socket (#agent-tools
+        // 31/32): an embedded host keeps binding its own host sockets, as its runtime serves
+        // its one socket itself.
+        .with_host_sessions_merged(options.host != RuntimeHost::Embedded))
     }
 
     pub(super) fn install_session_host(

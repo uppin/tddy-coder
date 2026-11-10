@@ -52,11 +52,17 @@ fn current_os_user() -> String {
 fn a_config_with_a_one_second_start_deadline() -> (tempfile::TempDir, DaemonConfig) {
     let dir = tempfile::tempdir().expect("a config directory");
     let user = current_os_user();
-    let yaml = format!(
-        "users:\n  - github_user: \"{user}\"\n    os_user: \"{user}\"\nsession_start_timeout_secs: 1\n"
-    );
+    let yaml = "session_start_timeout_secs: 1\n";
     let path = dir.path().join("daemon.yaml");
     std::fs::write(&path, yaml).expect("write the config");
+    std::fs::write(
+        std::path::Path::new(&(path))
+            .parent()
+            .expect("a config directory")
+            .join("users.yaml"),
+        format!("- github_user: \"{user}\"\n  os_user: \"{user}\"\n"),
+    )
+    .unwrap();
     (dir, DaemonConfig::load(&path).expect("the config parses"))
 }
 

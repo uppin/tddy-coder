@@ -47,9 +47,17 @@ const MOUSE_TRACKING_PROLOGUE: &[u8] = b"\x1b[?1000h\x1b[?1002h\x1b[?1006h";
 
 fn test_config() -> (tempfile::TempDir, DaemonConfig) {
     let dir = tempfile::tempdir().unwrap();
-    let yaml = "users:\n  - github_user: \"testuser\"\n    os_user: \"testuser\"\n";
+    let yaml = "";
     let path = dir.path().join("daemon.yaml");
     std::fs::write(&path, yaml).unwrap();
+    std::fs::write(
+        std::path::Path::new(&(path))
+            .parent()
+            .expect("a config directory")
+            .join("users.yaml"),
+        "- github_user: \"testuser\"\n  os_user: \"testuser\"\n",
+    )
+    .unwrap();
     let config = DaemonConfig::load(&path).expect("config must parse");
     (dir, config)
 }

@@ -91,11 +91,7 @@ fn a_daemon(data_dir: &Path, vault_dir: &Path) -> DaemonSessionHost {
     let config_path = config_dir.path().join("daemon.yaml");
     std::fs::write(
         &config_path,
-        format!(
-            r#"
-users:
-  - github_user: "{OWNER}"
-    os_user: "{os_user}"
+        r#"
 livekit:
   url: ws://127.0.0.1:1
   api_key: dummy-key
@@ -103,7 +99,16 @@ livekit:
 spawn_startup_grace_period_ms: 300
 spawn_startup_poll_interval_ms: 10
 "#,
-            os_user = current_username()
+    )
+    .unwrap();
+    std::fs::write(
+        std::path::Path::new(&(config_path))
+            .parent()
+            .expect("a config directory")
+            .join("users.yaml"),
+        format!(
+            "- github_user: \"{OWNER}\"\n  os_user: \"{}\"\n",
+            current_username()
         ),
     )
     .unwrap();

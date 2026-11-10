@@ -5,9 +5,6 @@ use std::path::PathBuf;
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct SpawnPolicy {
-    /// OS users a session may run as. `root` is rejected at load time.
-    #[serde(default)]
-    pub allowed_session_users: Vec<String>,
     /// Absolute paths of tools a session may exec.
     #[serde(default)]
     pub allowed_tool_paths: Vec<PathBuf>,

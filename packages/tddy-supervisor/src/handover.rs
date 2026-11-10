@@ -1,22 +1,22 @@
 //! Handing the supervisor's listening sockets to a managed service it starts.
 //!
-//! A service's own listener goes to descriptor 3 and each per-OS-user host socket (see
-//! [`crate::host_socket`]) to the descriptor after it, announced in `LISTEN_FDS` and
+//! A service's own listener goes to descriptor 3 and each mapped OS user's daemon socket (see
+//! [`crate::user_sockets`]) to the descriptors after it, announced in `LISTEN_FDS` and
 //! `LISTEN_FDNAMES` (see [`crate::socket`]). The listeners are gathered before the fork; the
 //! descriptor placement runs between `fork` and `exec`, where only async-signal-safe calls are
 //! allowed.
 
 use std::os::fd::{AsRawFd, FromRawFd, OwnedFd, RawFd};
 use std::os::unix::net::UnixListener;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use crate::socket::{
-    agent_tools_fd_name, host_session_fd_name, MAX_HANDED_OVER_LISTENERS, SD_LISTEN_FDS_START,
-    SERVICE_SOCKET_FD_NAME,
+    user_socket_fd_name, MAX_HANDED_OVER_LISTENERS, SD_LISTEN_FDS_START, SERVICE_SOCKET_FD_NAME,
 };
 
 /// The listening sockets the supervisor created for a managed service, ready to be handed over:
-/// the service's own at descriptor 3, then one per OS user it was declared a host socket for.
+/// the service's own at descriptor 3, then one per OS user `users.yaml` maps.
 ///
 /// The supervisor keeps the listeners for as long as it runs, so a restarted service is handed the
 /// same ones. Rebinding per start would unlink and recreate the socket node, and a client that
@@ -27,6 +27,9 @@ use crate::socket::{
 pub struct SocketHandover {
     /// `LISTEN_FDNAMES` entry and listener, in descriptor order starting at [`SD_LISTEN_FDS_START`].
     listeners: Vec<(String, Arc<UnixListener>)>,
+    /// The `users.yaml` the service is told about in
+    /// [`USERS_FILE_ENV`](crate::spawn_broker::USERS_FILE_ENV), for a service that serves users.
+    users_file: Option<PathBuf>,
 }
 
 impl SocketHandover {
@@ -34,30 +37,32 @@ impl SocketHandover {
     pub fn new(listener: Arc<UnixListener>) -> SocketHandover {
         SocketHandover {
             listeners: vec![(SERVICE_SOCKET_FD_NAME.to_string(), listener)],
+            users_file: None,
         }
     }
 
-    /// Also hand over `os_user`'s host socket, at the next descriptor and under its own name.
-    pub fn with_host_session_socket(
+    /// Also hand over `os_user`'s one daemon socket (`#agent-tools` 31/32), at the next descriptor
+    /// and named `user.<os user>` — the one per-user socket, serving both the host-session
+    /// services and the agent-tool roster.
+    pub fn with_user_socket(
         mut self,
         os_user: &str,
         listener: Arc<UnixListener>,
     ) -> SocketHandover {
         self.listeners
-            .push((host_session_fd_name(os_user), listener));
+            .push((user_socket_fd_name(os_user), listener));
         self
     }
 
-    /// Also hand over `os_user`'s agent-tool socket (`#agent-tools` 26/28), at the next descriptor
-    /// and named `agent-tools.<os user>`.
-    pub fn with_agent_tool_socket(
-        mut self,
-        os_user: &str,
-        listener: Arc<UnixListener>,
-    ) -> SocketHandover {
-        self.listeners
-            .push((agent_tools_fd_name(os_user), listener));
+    /// Also tell the service where `users.yaml` is (`#agent-tools` 31/32).
+    pub fn with_users_file(mut self, path: &Path) -> SocketHandover {
+        self.users_file = Some(path.to_path_buf());
         self
+    }
+
+    /// The `users.yaml` path the service is told, if it serves users.
+    pub(crate) fn users_file(&self) -> Option<&Path> {
+        self.users_file.as_deref()
     }
 
     /// The descriptors to place at [`SD_LISTEN_FDS_START`] and after, in order. Borrowed, never
@@ -151,6 +156,33 @@ pub(crate) unsafe fn hand_over_listeners(listeners: &[RawFd]) -> std::io::Result
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_daemon_is_handed_the_users_file_and_one_named_listener_per_user_at_exec() {
+        // Given the daemon's own listener and one per mapped user
+        let directory = tempfile::TempDir::new().expect("create a directory");
+        let bind = |name: &str| {
+            Arc::new(UnixListener::bind(directory.path().join(name)).expect("bind a listener"))
+        };
+        let users_file = directory.path().join("users.yaml");
+
+        // When the handover is assembled for a service that serves users
+        let handover = SocketHandover::new(bind("daemon.sock"))
+            .with_user_socket("alice", bind("alice.sock"))
+            .with_user_socket("bob", bind("bob.sock"))
+            .with_users_file(&users_file);
+
+        // Then each user is one descriptor after the daemon's own, under one generic name, and the
+        // service is told the mapping's path — not the mapping, and no socket path
+        assert_eq!(
+            (handover.count(), handover.fd_names(), handover.users_file()),
+            (
+                3,
+                "connection:user.alice:user.bob".to_string(),
+                Some(users_file.as_path())
+            )
+        );
+    }
 
     /// `(dev, ino)` of an open descriptor.
     // `st_dev` and `st_ino` are different widths on Darwin and Linux; the casts spell one type.

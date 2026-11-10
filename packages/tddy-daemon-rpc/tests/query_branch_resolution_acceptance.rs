@@ -133,9 +133,10 @@ fn a_config(stub_github: bool) -> (tddy_daemon_kernel::config::DaemonConfig, tem
         ""
     };
     let path = dir.path().join("config.yaml");
+    std::fs::write(&path, github).unwrap();
     std::fs::write(
-        &path,
-        format!("users:\n  - github_user: \"u\"\n    os_user: \"u\"\n{github}"),
+        dir.path().join("users.yaml"),
+        "- github_user: \"u\"\n  os_user: \"u\"\n",
     )
     .unwrap();
     (

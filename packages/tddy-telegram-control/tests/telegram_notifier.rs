@@ -59,6 +59,8 @@ fn write_config(yaml: &str) -> DaemonConfig {
     let dir = tempfile::tempdir().unwrap();
     let path: PathBuf = dir.path().join("daemon.yaml");
     std::fs::write(&path, yaml).unwrap();
+    // Every load needs a users.yaml beside the config; this daemon maps nobody.
+    std::fs::write(dir.path().join("users.yaml"), "[]\n").unwrap();
     DaemonConfig::load(&path).unwrap()
 }
 

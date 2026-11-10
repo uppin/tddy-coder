@@ -31,8 +31,17 @@ what the Accounts screen and the Projects account pickers read; without `auth_st
 AccountsService is registered. Stub sign-ins get a vault too, and `github.dev_vault_without_passphrase`
 opens it without ever prompting for a passphrase
 ([auth-service.md](../../tddy-daemon-auth/docs/auth-service.md#development-vaults-without-a-passphrase)).
-`config_source`'s test `the_checkouts_desktop_dev_config_keeps_a_credential_vault` loads the real file
-and pins `auth_storage`.
+`config_source`'s test `the_checkouts_desktop_dev_config_keeps_a_credential_vault` loads a copy of
+the real file, beside a `users.yaml` of its own in a temporary directory so the checkout is never
+written, and pins `auth_storage`.
+
+**The mapping travels with the config.** Every daemon load needs a `users.yaml` beside its config. In a
+development build `CURRENT_USER` is substituted through a temporary copy of the config, and the
+`users.yaml` beside the original is copied next to it with the same substitution; a missing one is left
+missing, so the copy's load fails naming it, and any other read error is the load's own error.
+`./desktop-dev` renders the checkout-root `users.yaml` (mapping `testuser` to `$USER`) only when it
+picks the checkout's own `dev.desktop.yaml`; a config passed in `TDDY_DAEMON_CONFIG` brings its own
+`users.yaml`, which it never overwrites.
 
 ## What the rendered configuration has to contain
 
@@ -55,27 +64,30 @@ things about it are not obvious:
   the application starts, shows its settings, and offers no sessions, hosts or screen sharing. A
   `client_id` with **no** `client_secret` is a public client: `tddy-daemon-auth` registers the GitHub
   **device flow** for it, and the dashboard signs in by device code, so no secret ships in the
-  application. **`users:` is written by the first sign-in**, not by hand: an embedded host enrols
+  application. **The mapping is `~/.tddy/users.yaml`**, beside this file — a `users:` key here fails the
+  load, naming it — and it is **written by the first sign-in**, not by hand: an embedded host enrols
   the first GitHub login completed from its own window against the OS user the application runs as,
-  and persists the row into this file ([auth-service.md](../../tddy-daemon-auth/docs/auth-service.md#first-login-enrolment)).
+  and persists the row into `users.yaml` ([auth-service.md](../../tddy-daemon-auth/docs/auth-service.md#first-login-enrolment)).
   **No `livekit:` block is needed**: the daemon signs session tokens with an Ed25519 key it generates
   on first boot (`signing_key.pem`, mode `0600`, in `auth_storage`) and verifies them with the same
   key — a desktop has no peers, so its key directory is `StandaloneKeyDirectory`.
   `livekit.api_secret`, when present, signs room JWTs only.
 - **The desktop passes the file it loaded to the runtime** (`RuntimeOptions::with_config_path`),
-  because that is where the first login is enrolled into. `runtime::build` refuses to assemble an
-  embedded host that serves GitHub sign-in to an empty `users:` and names no config file — its first
+  because the first login is enrolled into the `users.yaml` beside it. `runtime::build` refuses to
+  assemble an embedded host that serves GitHub sign-in to an empty mapping and names no config file — its first
   login could never be written down, so every sign-in would appear to work and then be refused by
   every RPC.
 
 ### What a fresh install signs in with
 
 A daemon with no `livekit:` block signs its own tokens, a `client_id` alone serves the device flow,
-and the first sign-in writes `users:`. `desktop.yaml.production` renders the Tddy Desktop OAuth App's
+and the first sign-in writes `users.yaml`. `desktop.yaml.production` renders the Tddy Desktop OAuth App's
 public client id — `github: { client_id: "Ov23lioH6CfiaZR8ESr5" }`, **no** `client_secret` — so
 `github_auth_flow` is `Device` for every fresh install, and its identity comments describe the device
-flow and first-login enrolment. `users: []` stays in the template: enrolment writes its row there
-(and, rewriting the file, drops the template's comments). `listen.web_port` is still required by
+flow and first-login enrolment. The template carries no `users:` key — the
+daemon refuses one — and `./install --desktop` writes an empty `~/.tddy/users.yaml` (`[]`, `0644`)
+beside the rendered config when there is none, which enrolment fills; `desktop.yaml` keeps its
+comments. `listen.web_port` is still required by
 `runtime::build`; the device flow never returns through its `/auth/callback` listener.
 
 Coverage: `tddy-e2e` `install_script` pins the template's shape (no `web_bundle_path`, a `web_port`,

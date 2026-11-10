@@ -4,7 +4,7 @@ use crate::spawn_broker::accounts;
 use crate::spawn_broker::accounts::TargetUser;
 use crate::spawn_broker::{ChildOutput, EnvironmentBase, SocketHandover, SpawnPlan};
 use std::os::unix::net::UnixListener;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Instant;
 
@@ -17,12 +17,12 @@ pub(super) struct Slot {
     /// The listener created for a service that declared a socket, held for as long as the supervisor
     /// runs so every start — including every restart — is handed the same one.
     pub(super) listener: Option<Arc<UnixListener>>,
-    /// The per-OS-user host sockets this service declared, as `(os user, listener)`, created once
-    /// and handed to every start like [`Self::listener`].
-    pub(super) host_listeners: Vec<(String, Arc<UnixListener>)>,
-    /// The per-OS-user agent-tool sockets this service declared, as `(os user, listener)`, handed
-    /// after the host sockets (`#agent-tools` 26/28).
-    pub(super) agent_tool_listeners: Vec<(String, Arc<UnixListener>)>,
+    /// The one daemon socket per mapped OS user, for a service declaring `serves_users`: created
+    /// from `users.yaml` and handed to every start like [`Self::listener`]. Rebuilt (keeping
+    /// unchanged users' listeners) when the mapping changes.
+    pub(super) user_listeners: crate::user_sockets::UserListeners,
+    /// The `users.yaml` this service is told about, for a service declaring `serves_users`.
+    pub(super) users_file: Option<PathBuf>,
 }
 impl Slot {
     pub(super) fn spawn_plan(&self, supervisor_socket: &Path) -> SpawnPlan {
@@ -55,11 +55,11 @@ impl Slot {
     /// The listener this service's socket declaration created, ready to hand to the next start.
     pub(super) fn socket_handover(&self) -> Option<SocketHandover> {
         let mut handover = SocketHandover::new(self.listener.clone()?);
-        for (user, listener) in &self.host_listeners {
-            handover = handover.with_host_session_socket(user, Arc::clone(listener));
+        for (user, listener) in self.user_listeners.iter() {
+            handover = handover.with_user_socket(user, Arc::clone(listener));
         }
-        for (user, listener) in &self.agent_tool_listeners {
-            handover = handover.with_agent_tool_socket(user, Arc::clone(listener));
+        if let Some(users_file) = &self.users_file {
+            handover = handover.with_users_file(users_file);
         }
         Some(handover)
     }

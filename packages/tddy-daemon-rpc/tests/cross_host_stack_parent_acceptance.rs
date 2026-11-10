@@ -170,9 +170,6 @@ fn a_daemon_in_the_common_room(write_sessions: impl Fn(&Path, &Path)) -> ADaemon
     let config_yaml = format!(
         r#"
 daemon_instance_id: "{THIS_HOST}"
-users:
-  - github_user: "{user}"
-    os_user: "{user}"
 livekit:
   url: ws://127.0.0.1:7880
   api_key: devkey
@@ -181,6 +178,14 @@ livekit:
     );
     let config_path = data_dir.path().join("daemon.yaml");
     std::fs::write(&config_path, config_yaml).expect("write daemon config");
+    std::fs::write(
+        std::path::Path::new(&(config_path))
+            .parent()
+            .expect("a config directory")
+            .join("users.yaml"),
+        format!("- github_user: \"{user}\"\n  os_user: \"{user}\"\n"),
+    )
+    .unwrap();
     let config =
         tddy_daemon_kernel::config::DaemonConfig::load(&config_path).expect("load daemon config");
 

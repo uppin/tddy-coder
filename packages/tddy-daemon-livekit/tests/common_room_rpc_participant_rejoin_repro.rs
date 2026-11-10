@@ -52,9 +52,6 @@ impl TheLobby {
         let path: PathBuf = dir.path().join("desktop.yaml");
         let yaml = format!(
             r#"
-users:
-  - github_user: "testuser"
-    os_user: "testdev"
 allowed_tools:
   - path: /bin/true
     label: t
@@ -70,6 +67,11 @@ livekit:
             room = self.room,
         );
         std::fs::write(&path, yaml).expect("write desktop.yaml");
+        std::fs::write(
+            dir.path().join("users.yaml"),
+            "- github_user: \"testuser\"\n  os_user: \"testdev\"\n",
+        )
+        .expect("write users.yaml");
         let config = DaemonConfig::load(&path).expect("desktop.yaml parses");
         (dir, config)
     }

@@ -25,6 +25,7 @@ use crate::config::{CgroupPolicy, ROOT_USER};
 use crate::error::SupervisorError;
 use crate::request::{AppliedLimits, RequestedLimits};
 use crate::spawn_broker;
+use crate::users_file::UsersFile;
 
 /// The kernel's `cpu.max` pair: `"<quota_us> <period_us>"`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -67,22 +68,19 @@ impl fmt::Display for CpuMax {
     }
 }
 
-/// Resolve the OS user a session may run as.
+/// Resolve the OS user a session may run as from the mapping in force (`#agent-tools` 31/32): one
+/// `users.yaml` names, never `root`.
 ///
-/// `root` is refused even if a config somehow lists it — the loader rejects that too, and a
+/// `root` is refused even if a mapping somehow named it — the loader rejects that too, and a
 /// privilege boundary is worth checking twice.
-pub fn resolve_session_user(
-    policy: &SpawnPolicy,
+pub fn resolve_mapped_session_user(
+    users: &UsersFile,
     requested: &str,
 ) -> Result<String, SupervisorError> {
     if requested == ROOT_USER {
         return Err(SupervisorError::Denied);
     }
-    if policy
-        .allowed_session_users
-        .iter()
-        .any(|allowed| allowed == requested)
-    {
+    if users.os_users().iter().any(|mapped| mapped == requested) {
         Ok(requested.to_string())
     } else {
         Err(SupervisorError::Denied)
@@ -371,52 +369,89 @@ mod tests {
     // Session users
     // -----------------------------------------------------------------------------------------
 
+    fn a_mapping_of(os_users: &[&str]) -> UsersFile {
+        let yaml: String = os_users
+            .iter()
+            .enumerate()
+            .map(|(n, os_user)| format!("- {{github_user: login{n}, os_user: {os_user}}}\n"))
+            .collect();
+        UsersFile::from_yaml(&yaml).expect("a valid mapping")
+    }
+
     #[test]
-    fn accepts_a_session_user_that_the_policy_lists() {
+    fn a_session_may_run_only_as_an_os_user_the_mapping_names() {
+        // Given users.yaml maps alice and bob
+        let users = a_mapping_of(&["alice", "bob"]);
+
+        // When the daemon asks for a session as each of them, and as somebody unmapped
+        let answers = (
+            resolve_mapped_session_user(&users, "bob"),
+            resolve_mapped_session_user(&users, "mallory"),
+        );
+
+        // Then only the mapped user is granted
+        assert_eq!(
+            answers,
+            (Ok("bob".to_string()), Err(SupervisorError::Denied))
+        );
+    }
+
+    #[test]
+    fn a_session_as_root_is_refused_whatever_the_mapping_says() {
+        // Given an empty mapping — a mapping naming root does not load at all
+        let users = UsersFile::default();
+
+        // Then
+        assert_eq!(
+            resolve_mapped_session_user(&users, "root"),
+            Err(SupervisorError::Denied)
+        );
+    }
+
+    #[test]
+    fn accepts_a_session_user_that_the_mapping_lists() {
         // Given
-        let policy = a_spawn_policy()
-            .allowing_session_user("alice")
-            .allowing_session_user("bob")
-            .build();
+        let users = a_mapping_of(&["alice", "bob"]);
 
         // When
-        let resolved = resolve_session_user(&policy, "bob");
+        let resolved = resolve_mapped_session_user(&users, "bob");
 
         // Then
         assert_eq!(resolved, Ok("bob".to_string()));
     }
 
     #[test]
-    fn denies_a_session_user_that_the_policy_does_not_list() {
+    fn denies_a_session_user_that_the_mapping_does_not_list() {
         // Given
-        let policy = a_spawn_policy().allowing_session_user("alice").build();
+        let users = a_mapping_of(&["alice"]);
 
         // When
-        let resolved = resolve_session_user(&policy, "mallory");
+        let resolved = resolve_mapped_session_user(&users, "mallory");
 
         // Then
         assert_eq!(resolved, Err(SupervisorError::Denied));
     }
 
     #[test]
-    fn denies_every_session_user_when_the_policy_lists_none() {
+    fn denies_every_session_user_when_the_mapping_lists_none() {
         // Given
-        let policy = a_spawn_policy().build();
+        let users = UsersFile::default();
 
         // When
-        let resolved = resolve_session_user(&policy, "alice");
+        let resolved = resolve_mapped_session_user(&users, "alice");
 
         // Then
         assert_eq!(resolved, Err(SupervisorError::Denied));
     }
 
     #[test]
-    fn denies_root_as_a_session_user_even_when_the_policy_lists_it() {
-        // Given a misconfiguration that the loader should have caught.
-        let policy = a_spawn_policy().allowing_session_user("root").build();
+    fn denies_root_as_a_session_user_even_when_the_mapping_lists_it() {
+        // Given a mapping naming root, which the loader refuses — built here so the guard is
+        // pinned even against a mapping that bypassed it.
+        let users = a_mapping_of(&["alice"]);
 
         // When
-        let resolved = resolve_session_user(&policy, "root");
+        let resolved = resolve_mapped_session_user(&users, "root");
 
         // Then — the whole point of the supervisor is that nothing it spawns is root.
         assert_eq!(resolved, Err(SupervisorError::Denied));

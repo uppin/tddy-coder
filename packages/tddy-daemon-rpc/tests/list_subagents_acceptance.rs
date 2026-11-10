@@ -52,11 +52,16 @@ fn service_with_config(config: DaemonConfig, tddy_data_dir: PathBuf) -> TestDaem
 
 fn minimal_daemon_config() -> DaemonConfig {
     let yaml = r#"
-users:
-  - github_user: "u"
-    os_user: "u"
 "#;
     let (_dir, path) = write_config(yaml);
+    std::fs::write(
+        std::path::Path::new(&(path))
+            .parent()
+            .expect("a config directory")
+            .join("users.yaml"),
+        "- github_user: \"u\"\n  os_user: \"u\"\n",
+    )
+    .unwrap();
     DaemonConfig::load(&path).unwrap()
 }
 

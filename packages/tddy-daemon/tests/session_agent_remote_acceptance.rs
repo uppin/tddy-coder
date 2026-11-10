@@ -600,10 +600,7 @@ fn write_daemon_yaml(
         &path,
         format!(
             r#"
-{id_block}users:
-  - github_user: "testuser"
-    os_user: "{os_user}"
-repos_base_path: {repos_base_path}
+{id_block}repos_base_path: {repos_base_path}
 allowed_tools:
   - path: {true_path}
     label: t
@@ -617,6 +614,11 @@ livekit:
         ),
     )
     .expect("write daemon.yaml");
+    std::fs::write(
+        dir.path().join("users.yaml"),
+        format!("- github_user: \"testuser\"\n  os_user: \"{os_user}\"\n"),
+    )
+    .unwrap();
     (dir, path, cursor_binary)
 }
 

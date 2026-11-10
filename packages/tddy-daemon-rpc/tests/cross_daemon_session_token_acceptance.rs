@@ -22,9 +22,17 @@ fn a_daemon_config() -> (
     tempfile::TempDir,
 ) {
     let dir = tempfile::tempdir().unwrap();
-    let yaml = "users:\n  - github_user: \"u\"\n    os_user: \"u\"\ngithub:\n  stub: true\n";
+    let yaml = "github:\n  stub: true\n";
     let path = dir.path().join("config.yaml");
     std::fs::write(&path, yaml).unwrap();
+    std::fs::write(
+        std::path::Path::new(&(path))
+            .parent()
+            .expect("a config directory")
+            .join("users.yaml"),
+        "- github_user: \"u\"\n  os_user: \"u\"\n",
+    )
+    .unwrap();
     let config = tddy_session_lifecycle::config::DaemonConfig::load(&path).unwrap();
     (config, dir)
 }

@@ -315,21 +315,6 @@ fn installs_a_supervisor_config_declaring_the_daemon_as_an_unprivileged_service(
     assert_contains(&config, "user: tddy", "the supervisor config");
 }
 
-#[test]
-fn installs_a_supervisor_config_that_documents_the_per_user_agent_tool_sockets() {
-    // Given
-    let tree = an_install_tree();
-
-    // When
-    tree.install();
-
-    // Then — an operator finds the setting an unlisted session user is refused for, beside the
-    // host-session one, with the descriptor name the daemon reads it by
-    let config = tree.installed_config("supervisor.yaml");
-    assert_contains(&config, "# agent_tool_sockets:", "the supervisor config");
-    assert_contains(&config, "agent-tools.<user>", "the supervisor config");
-}
-
 /// The upgrade the 2026-11-07 decision is about: an operator's supervisor.yaml from before
 /// agent-tool sockets, whose policy lets sessions run as the `users` it names, and whose daemon
 /// service has its own listener (descriptor 3) and the whole restart policy, as every rendered
@@ -347,106 +332,6 @@ fn a_supervisor_config_allowing_sessions_as(users: &str) -> String {
                 "      max_retries: 5\n      initial_backoff_ms: 500\n      max_backoff_ms: 30000\n      stability_threshold_ms: 10000\n",
             )
     )
-}
-
-/// `(user, path)` of every agent-tool socket the tddy-daemon service of `yaml` declares, read by
-/// the supervisor's own loader — which also validates them against the rest of the file.
-fn agent_tool_sockets_the_supervisor_reads(yaml: &str) -> Vec<(String, PathBuf)> {
-    let config =
-        tddy_supervisor::config::SupervisorConfig::from_yaml(yaml).unwrap_or_else(|error| {
-            panic!("the supervisor refuses the installed config: {error}\n{yaml}")
-        });
-    let daemon = config
-        .services
-        .iter()
-        .find(|service| service.name == "tddy-daemon")
-        .expect("the installed config declares tddy-daemon");
-    daemon
-        .agent_tool_sockets
-        .iter()
-        .map(|socket| (socket.user.clone(), socket.path.clone()))
-        .collect()
-}
-
-#[rstest::rstest]
-#[case::flow_list("[alice, bob]")]
-#[case::block_list("\n    - alice\n    - bob")]
-fn an_upgrade_declares_a_live_agent_tool_socket_for_every_user_the_policy_allows_sessions_as(
-    #[case] users: &str,
-) {
-    // Given a host upgraded from before agent-tool sockets: its policy allows sessions as alice and
-    // bob, and no socket is declared for either — whose every session start is now refused
-    let tree = an_install_tree();
-    tree.install();
-    tree.overwrite_installed_config(
-        "supervisor.yaml",
-        &a_supervisor_config_allowing_sessions_as(users),
-    );
-
-    // When
-    tree.install();
-
-    // Then each of them has a live entry the supervisor accepts, beside the policy it came from
-    let config = tree.installed_config("supervisor.yaml");
-    pretty_assertions::assert_eq!(
-        agent_tool_sockets_the_supervisor_reads(&config),
-        vec![
-            (
-                "alice".to_string(),
-                PathBuf::from("/run/tddy-agent-tools/alice/agent.sock")
-            ),
-            (
-                "bob".to_string(),
-                PathBuf::from("/run/tddy-agent-tools/bob/agent.sock")
-            ),
-        ]
-    );
-    assert_contains(&config, "allowed_session_users:", "the supervisor config");
-
-    // And installing again declares nothing twice
-    tree.install();
-    pretty_assertions::assert_eq!(tree.installed_config("supervisor.yaml"), config);
-}
-
-#[test]
-fn an_operators_agent_tool_sockets_block_is_kept_and_each_policy_user_it_leaves_out_is_named() {
-    // Given an operator who declared alice's socket but not bob's, whom the policy also allows
-    let tree = an_install_tree();
-    tree.install();
-    let operator_config = a_supervisor_config_allowing_sessions_as("[alice, bob]").replace(
-        "    restart:\n",
-        "    agent_tool_sockets:\n      - {user: alice, path: /srv/agent-tools/alice/agent.sock}\n    restart:\n",
-    );
-    tree.overwrite_installed_config("supervisor.yaml", &operator_config);
-
-    // When
-    let output = tree.attempt_install_with(&[]);
-
-    // Then the block stays as written, and the install says whose starts will be refused
-    assert!(
-        output.status.success(),
-        "install failed: {}",
-        String::from_utf8_lossy(&output.stderr)
-    );
-    pretty_assertions::assert_eq!(tree.installed_config("supervisor.yaml"), operator_config);
-    assert_contains(
-        &String::from_utf8_lossy(&output.stderr),
-        "declares agent_tool_sockets: for tddy-daemon but not for: bob",
-        "the install narration",
-    );
-}
-
-#[test]
-fn a_fresh_install_declares_no_agent_tool_socket_while_the_policy_allows_no_session_user() {
-    // Given
-    let tree = an_install_tree();
-
-    // When
-    tree.install();
-
-    // Then — the rendered policy is empty, so there is no one to give a socket to
-    let config = tree.installed_config("supervisor.yaml");
-    pretty_assertions::assert_eq!(agent_tool_sockets_the_supervisor_reads(&config), vec![]);
 }
 
 #[test]
@@ -643,11 +528,8 @@ fn keeps_an_existing_supervisor_config_rather_than_overwriting_the_policy_in_it(
     let tree = an_install_tree();
     tree.install();
     let operator_policy = format!(
-        "{}spawn_policy:\n  allowed_session_users: [alice]\n",
-        a_supervisor_config_declaring_the_daemon_as("tddy", Some("tddy")).replace(
-            "    restart:\n",
-            "    agent_tool_sockets:\n      - {user: alice, path: /srv/agent-tools/alice/agent.sock}\n    restart:\n",
-        )
+        "{}spawn_policy:\n  allowed_tool_paths: [/usr/local/bin/tddy-coder]\n",
+        a_supervisor_config_declaring_the_daemon_as("tddy", Some("tddy"))
     );
     tree.overwrite_installed_config("supervisor.yaml", &operator_policy);
 
@@ -829,8 +711,7 @@ fn upgrading_removes_the_supervisor_block_from_an_existing_daemon_yaml_and_says_
         "the obsolete block is removed:\n{daemon_config}"
     );
     assert!(
-        declares_a_top_level(&daemon_config, "users")
-            && declares_a_top_level(&daemon_config, "allowed_tools"),
+        declares_a_top_level(&daemon_config, "allowed_tools"),
         "the operator's other settings are kept:\n{daemon_config}"
     );
     let narration = format!(
@@ -1044,4 +925,134 @@ fn a_fresh_install_renders_the_requested_daemon_identity_into_the_supervisor_con
     let config = tree.installed_config("supervisor.yaml");
     assert_contains(&config, "user: svc-tddy", "the supervisor config");
     assert_contains(&config, "group: svc-tddy", "the supervisor config");
+}
+
+// ---------------------------------------------------------------------------------------------
+// The user mapping lives in users.yaml (`#agent-tools` 31/32)
+// ---------------------------------------------------------------------------------------------
+
+/// The rows of the installed `users.yaml`, read by the supervisor's own loader.
+fn users_the_supervisor_reads(yaml: &str) -> Vec<(String, String)> {
+    tddy_supervisor::users_file::UsersFile::from_yaml(yaml)
+        .unwrap_or_else(|error| {
+            panic!("the supervisor refuses the installed users.yaml: {error}\n{yaml}")
+        })
+        .rows()
+        .iter()
+        .map(|row| (row.github_user.clone(), row.os_user.clone()))
+        .collect()
+}
+
+/// Whether `yaml` sets the top-level key `key` (a line starting `key:`, not a comment).
+fn has_top_level_key(yaml: &str, key: &str) -> bool {
+    yaml.lines()
+        .any(|line| line.starts_with(&format!("{key}:")))
+}
+
+#[test]
+fn install_moves_daemon_yaml_users_into_users_yaml_once_and_drops_the_old_keys() {
+    // Given a host installed before `#agent-tools` 31/32: daemon.yaml maps two logins, and
+    // supervisor.yaml names their OS users in its policy and in an agent-tool socket list
+    let tree = an_install_tree();
+    tree.install();
+    let daemon_yaml = format!(
+        "{}\nusers:\n  - github_user: alice-gh\n    os_user: alice\n  - github_user: bob-gh\n    os_user: bob\n",
+        tree.installed_config("daemon.yaml")
+    );
+    assert!(daemon_yaml.contains("alice-gh"), "the fixture maps alice");
+    tree.overwrite_installed_config("daemon.yaml", &daemon_yaml);
+    tree.overwrite_installed_config(
+        "supervisor.yaml",
+        &a_supervisor_config_allowing_sessions_as("[alice, bob]").replace(
+            "    restart:\n",
+            "    agent_tool_sockets:\n      - {user: alice, path: /run/tddy-agent-tools/alice/agent.sock}\n      - {user: bob, path: /run/tddy-agent-tools/bob/agent.sock}\n    restart:\n",
+        ),
+    );
+
+    // When install runs again
+    tree.install();
+
+    // Then the mapping is in users.yaml, daemon.yaml no longer maps anybody, and supervisor.yaml
+    // names no user by hand — a file the supervisor loads
+    let users = tree.installed_config("users.yaml");
+    let daemon = tree.installed_config("daemon.yaml");
+    let supervisor = tree.installed_config("supervisor.yaml");
+    pretty_assertions::assert_eq!(
+        (
+            users_the_supervisor_reads(&users),
+            has_top_level_key(&daemon, "users"),
+            [
+                "allowed_session_users",
+                "host_sockets",
+                "agent_tool_sockets"
+            ]
+            .into_iter()
+            .filter(|key| supervisor.contains(&format!("{key}:")))
+            .collect::<Vec<_>>(),
+        ),
+        (
+            vec![
+                ("alice-gh".to_string(), "alice".to_string()),
+                ("bob-gh".to_string(), "bob".to_string()),
+            ],
+            false,
+            Vec::<&str>::new(),
+        )
+    );
+    tddy_supervisor::config::SupervisorConfig::from_yaml(&supervisor).unwrap_or_else(|error| {
+        panic!("the supervisor refuses the migrated config: {error}\n{supervisor}")
+    });
+
+    // And a second run changes nothing
+    tree.install();
+    pretty_assertions::assert_eq!(
+        (
+            tree.installed_config("users.yaml"),
+            tree.installed_config("daemon.yaml"),
+            tree.installed_config("supervisor.yaml"),
+        ),
+        (users, daemon, supervisor)
+    );
+}
+
+#[test]
+fn install_declares_no_per_user_sockets_in_supervisor_yaml() {
+    // Given
+    let tree = an_install_tree();
+
+    // When a fresh host is installed
+    tree.install();
+
+    // Then supervisor.yaml lists no user and points at users.yaml, whose sockets the daemon is
+    // handed; users.yaml exists, maps nobody, and only root may write it
+    let supervisor = tree.installed_config("supervisor.yaml");
+    let config = tddy_supervisor::config::SupervisorConfig::from_yaml(&supervisor)
+        .unwrap_or_else(|error| panic!("the supervisor refuses the installed config: {error}"));
+    let daemon = config
+        .services
+        .iter()
+        .find(|service| service.name == "tddy-daemon")
+        .expect("the installed config declares tddy-daemon");
+    pretty_assertions::assert_eq!(
+        (
+            config.users.as_ref().map(|users| users.file.clone()),
+            daemon.serves_users,
+            [
+                "allowed_session_users",
+                "host_sockets",
+                "agent_tool_sockets"
+            ]
+            .into_iter()
+            .filter(|key| supervisor.contains(key))
+            .collect::<Vec<_>>(),
+            users_the_supervisor_reads(&tree.installed_config("users.yaml")),
+        ),
+        (
+            Some(tree.config_dir.join("users.yaml")),
+            true,
+            Vec::<&str>::new(),
+            Vec::new(),
+        )
+    );
+    assert_mode(&tree.config_dir.join("users.yaml"), 0o644);
 }

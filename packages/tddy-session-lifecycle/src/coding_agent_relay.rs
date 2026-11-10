@@ -7,8 +7,8 @@
 //! connected stream, which the ACP driver serves in place of a child process.
 //!
 //! The supervisor's refusal is opaque by design, so the typed error names the three things an
-//! operator can change: the harness in `allowed_relay_tool_paths`, the user in
-//! `allowed_session_users`, every environment variable in `allowed_env_keys`.
+//! operator can change: the harness in `allowed_relay_tool_paths`, the user in `users.yaml`,
+//! every environment variable in `allowed_env_keys`.
 
 use std::collections::BTreeMap;
 use std::os::unix::fs::DirBuilderExt;
@@ -102,8 +102,8 @@ fn relay_refusal_error(os_user: &str, program: &Path, error: SupervisorError) ->
     SubagentError::from(match error {
         SupervisorError::Denied => format!(
             "tddy-supervisor refused to run {} as '{os_user}' (its refusals are opaque): its \
-             spawn_policy must list the harness binary in allowed_relay_tool_paths, '{os_user}' in \
-             allowed_session_users, and every environment variable the launch sets in \
+             spawn_policy must list the harness binary in allowed_relay_tool_paths, '{os_user}' must be \
+             mapped in users.yaml, and every environment variable the launch sets in \
              allowed_env_keys",
             program.display()
         ),
@@ -323,12 +323,12 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn the_supervisors_opaque_refusal_names_the_session_user_allowlist() {
+    async fn the_supervisors_opaque_refusal_names_users_yaml_for_the_session_user() {
         // When
         let refusal = denied_by_the_supervisor().await;
 
         // Then
-        assert!(refusal.contains("allowed_session_users"), "{refusal}");
+        assert!(refusal.contains("users.yaml"), "{refusal}");
     }
 
     #[tokio::test]

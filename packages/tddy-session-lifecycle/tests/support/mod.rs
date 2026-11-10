@@ -203,10 +203,11 @@ pub fn this_os_user() -> String {
 pub fn a_config_mapping_to_this_user() -> (tempfile::TempDir, DaemonConfig) {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("daemon.yaml");
+    std::fs::write(&path, "").unwrap();
     std::fs::write(
-        &path,
+        dir.path().join("users.yaml"),
         format!(
-            "users:\n  - github_user: \"testuser\"\n    os_user: \"{}\"\n",
+            "- github_user: \"testuser\"\n  os_user: \"{}\"\n",
             this_os_user()
         ),
     )

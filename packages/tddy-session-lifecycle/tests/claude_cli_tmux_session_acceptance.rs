@@ -108,11 +108,17 @@ type AConfigAndItsAgents = (
 fn a_config_running(stub_agent: &Path) -> (tempfile::TempDir, AConfigAndItsAgents) {
     let dir = tempfile::tempdir().unwrap();
     let user = this_os_user();
-    let yaml = format!(
-        "users:\n  - github_user: \"{user}\"\n    os_user: \"{user}\"\nallowed_tools:\n  - path: /bin/true\n    label: true\n"
-    );
+    let yaml = "allowed_tools:\n  - path: /bin/true\n    label: true\n";
     let path = dir.path().join("daemon.yaml");
     std::fs::write(&path, yaml).unwrap();
+    std::fs::write(
+        std::path::Path::new(&(path))
+            .parent()
+            .expect("a config directory")
+            .join("users.yaml"),
+        format!("- github_user: \"{user}\"\n  os_user: \"{user}\"\n"),
+    )
+    .unwrap();
     let config = DaemonConfig::load(&path).expect("config must parse");
     let agents =
         tddy_session_lifecycle::test_util::coding_agents_with_binaries(&[("claude", stub_agent)]);

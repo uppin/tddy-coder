@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize};
 /// Spawn a tool as another OS user.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SpawnSessionRequest {
-    /// Must appear in `SpawnPolicy::allowed_session_users`.
+    /// Must be mapped in `users.yaml`.
     pub os_user: String,
     /// Must appear in `SpawnPolicy::allowed_tool_paths`.
     pub tool_path: PathBuf,
@@ -33,7 +33,7 @@ pub struct SpawnSessionRequest {
 /// (`SpawnPolicy::allowed_relay_tool_paths`), so enabling sessions never enables relayed stdio.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SpawnRelayedRequest {
-    /// Must appear in `SpawnPolicy::allowed_session_users`.
+    /// Must be mapped in `users.yaml`.
     pub os_user: String,
     /// Must appear in `SpawnPolicy::allowed_relay_tool_paths`.
     pub tool_path: PathBuf,
@@ -102,7 +102,7 @@ pub struct AppliedLimits {
 /// not.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SpawnSandboxRequest {
-    /// Must appear in `SpawnPolicy::allowed_session_users`.
+    /// Must be mapped in `users.yaml`.
     pub os_user: String,
     /// Must appear in `SpawnPolicy::allowed_tool_paths`.
     pub tool_path: PathBuf,

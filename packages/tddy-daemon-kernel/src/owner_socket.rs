@@ -44,10 +44,10 @@ impl OwnerSocketKind {
         setting: "host_sockets",
         noun: "host-session socket",
     };
-    /// The agent-tool socket (`agent_tool_sockets:`).
-    pub const AGENT_TOOL: OwnerSocketKind = OwnerSocketKind {
-        setting: "agent_tool_sockets",
-        noun: "agent-tool socket",
+    /// A mapped user's one daemon socket (`users.yaml`, `#agent-tools` 31/32).
+    pub const USER_DAEMON: OwnerSocketKind = OwnerSocketKind {
+        setting: "users.yaml",
+        noun: "daemon socket",
     };
 }
 
@@ -59,8 +59,8 @@ const MAX_LISTEN_FDS: usize = 16;
 
 /// `(os user, descriptor)` for each descriptor named `<prefix><os user>` — nothing at all unless the
 /// variables were set for this process (`LISTEN_PID`) and the names account for exactly
-/// `LISTEN_FDS` descriptors. The same reading `tddy_supervisor::resolve_host_session_fds` makes, on
-/// purpose.
+/// `LISTEN_FDS` descriptors: a descriptor adopted for the wrong user would serve one user's sessions
+/// on another's socket, so a mismatch has to mean "none".
 pub fn descriptors_named(
     prefix: &str,
     my_pid: u32,
@@ -127,13 +127,22 @@ pub fn bind_owner_only(
             .context("restrict the socket to its owner")?;
         if needs_chown {
             let not_privileged = || {
+                if kind == OwnerSocketKind::USER_DAEMON {
+                    return format!(
+                        "this daemon (uid {euid}) is not privileged to hand the socket to \
+                         {os_user} (uid {}) — as when it runs as tddy-supervisor's unprivileged \
+                         child, which cannot chown. Under the supervisor, map {os_user} in \
+                         users.yaml: the supervisor then creates their daemon socket and hands \
+                         it over. Until then a session of that user gets no {}",
+                        target.uid, kind.noun
+                    );
+                }
                 format!(
                     "this daemon (uid {euid}) is not privileged to hand the socket to {os_user} \
                      (uid {}) — as when it runs as tddy-supervisor's unprivileged child, which \
                      cannot chown. Under the supervisor, list {os_user} under `{}:` for \
-                     this daemon's service in supervisor.yaml (and in \
-                     spawn_policy.allowed_session_users): the supervisor then creates their socket \
-                     and hands it over. Until then a session of that user gets no {}",
+                     this daemon's service in supervisor.yaml: the supervisor then creates their \
+                     socket and hands it over. Until then a session of that user gets no {}",
                     target.uid, kind.setting, kind.noun
                 )
             };

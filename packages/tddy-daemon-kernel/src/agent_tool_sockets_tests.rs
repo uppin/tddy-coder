@@ -106,7 +106,7 @@ async fn a_call_over(path: &Path) -> Result<String, String> {
         .unwrap_or_else(|_| Err("the call was not answered in time".to_string()))
 }
 
-/// A listener shaped as the supervisor makes one — `<root>/<user>/agent.sock`, directory `0700`,
+/// A listener shaped as the supervisor makes one — `<root>/<user>/daemon.sock`, directory `0700`,
 /// socket `0600`, both this account's — outside any data dir.
 fn a_supervisor_made_socket(root: &Path, user: &str) -> InheritedAgentToolSocket {
     use std::os::unix::fs::DirBuilderExt;
@@ -115,7 +115,7 @@ fn a_supervisor_made_socket(root: &Path, user: &str) -> InheritedAgentToolSocket
         .mode(0o700)
         .create(&directory)
         .expect("the user's directory is created");
-    let path = directory.join(AGENT_TOOL_SOCKET_FILE);
+    let path = directory.join(USER_SOCKET_FILE);
     let listener = UnixListener::bind(&path).expect("the socket binds");
     std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600))
         .expect("the socket is restricted");
@@ -139,13 +139,9 @@ async fn a_users_socket_is_owner_only_inside_an_owner_only_directory_of_its_own(
         .await
         .map_err(|e| format!("{e:#}"));
 
-    // Then it is `<data>/run-agent-tools/<user>/agent.sock`: a 0600 socket in a 0700 directory,
+    // Then it is `<data>/run/<user>/daemon.sock`: a 0600 socket in a 0700 directory,
     // both the user's
-    let expected = data
-        .path()
-        .join(AGENT_TOOL_SOCKETS_RUN_DIR)
-        .join(&user)
-        .join(AGENT_TOOL_SOCKET_FILE);
+    let expected = data.path().join("run").join(&user).join(USER_SOCKET_FILE);
     let shape = path.as_ref().ok().map(|path| {
         let socket = std::fs::symlink_metadata(path).expect("stat the socket");
         let directory = path.parent().expect("a directory");
@@ -271,18 +267,12 @@ async fn an_unlisted_user_under_the_supervisor_is_refused_naming_the_setting() {
         .map(|path| path.display().to_string())
         .map_err(|e| format!("{e:#}"));
 
-    // Then it is refused, naming what to add to supervisor.yaml, and nothing is left behind
-    let names_the_setting = refusal
-        .as_ref()
-        .err()
-        .map(|why| why.contains("agent_tool_sockets") && why.contains("supervisor.yaml"));
+    // Then it is refused, naming the file to map the user in, and nothing is left behind
+    let names_the_setting = refusal.as_ref().err().map(|why| why.contains("users.yaml"));
     assert_eq!(
         (
             names_the_setting,
-            data.path()
-                .join(AGENT_TOOL_SOCKETS_RUN_DIR)
-                .join(another_account)
-                .exists()
+            data.path().join("run").join(another_account).exists()
         ),
         (Some(true), false),
         "{refusal:?}"
@@ -312,36 +302,8 @@ async fn an_inherited_socket_is_served_at_its_own_path_instead_of_binding_one() 
 
     // Then it is the supervisor's socket, serving the roster — nothing was bound under the data dir
     assert_eq!(
-        (
-            path,
-            answered,
-            data.path().join(AGENT_TOOL_SOCKETS_RUN_DIR).exists()
-        ),
+        (path, answered, data.path().join("run").exists()),
         (Ok(its_path), Ok(ITS_ANSWER.to_string()), false)
-    );
-}
-
-#[test]
-fn reads_the_agent_tool_descriptors_among_the_handed_over_ones() {
-    // Given the service's own socket at 3, alice's host socket at 4, alice's agent-tool socket at 5
-    let names = "connection:host-session.alice:agent-tools.alice";
-
-    // When
-    let descriptors = agent_tool_fds(7, Some("7"), Some("3"), Some(names));
-
-    // Then only the agent-tool one is this registry's
-    assert_eq!(descriptors, vec![("alice".to_string(), 5)]);
-}
-
-#[test]
-fn finds_no_agent_tool_descriptors_when_the_variables_describe_another_process() {
-    // Given a LISTEN_PID that is the parent's, not ours
-    let names = "connection:agent-tools.alice";
-
-    // Then — guard: a descriptor adopted for the wrong process would serve somebody else's socket
-    assert_eq!(
-        agent_tool_fds(7, Some("1"), Some("2"), Some(names)),
-        Vec::new()
     );
 }
 
@@ -351,7 +313,7 @@ fn a_user_name_that_could_escape_the_directory_names_no_socket() {
     let data = a_data_dir();
 
     // When
-    let path = agent_tool_socket_path_for_user(data.path(), "../elsewhere");
+    let path = user_socket_path_for_user(data.path(), "../elsewhere");
 
     // Then
     assert!(path.is_err(), "{path:?}");
@@ -363,7 +325,7 @@ fn a_data_dir_too_deep_for_a_unix_socket_names_no_socket() {
     let deep = a_data_dir().path().join("a".repeat(120));
 
     // When
-    let path = agent_tool_socket_path_for_user(&deep, &this_os_user());
+    let path = user_socket_path_for_user(&deep, &this_os_user());
 
     // Then
     assert!(path.is_err(), "{path:?}");
@@ -406,4 +368,65 @@ async fn an_embedded_host_whose_socket_nobody_serves_is_refused_not_pointed_at_i
 
     // Then the dead socket is not chosen: every report sent to it would be lost
     assert!(refusal.is_err(), "{refusal:?}");
+}
+
+// ---------------------------------------------------------------------------------------------
+// One daemon socket per mapped OS user (`#agent-tools` 31/32)
+// ---------------------------------------------------------------------------------------------
+
+#[test]
+fn an_unsupervised_daemon_derives_one_socket_per_user_under_its_run_dir() {
+    // Given
+    let data = a_data_dir();
+
+    // When
+    let path = user_socket_path_for_user(data.path(), "alice").expect("alice can have a socket");
+
+    // Then one generic socket, replacing both run/<user>/host.sock and run-agent-tools/<user>/
+    assert_eq!(
+        path,
+        data.path().join("run").join("alice").join(USER_SOCKET_FILE)
+    );
+}
+
+#[test]
+fn reads_each_user_socket_among_the_handed_over_ones() {
+    // Given the service's own socket at 3, then alice's and bob's one socket each
+    let names = "connection:user.alice:user.bob";
+
+    // When
+    let descriptors = user_socket_fds(7, Some("7"), Some("3"), Some(names));
+
+    // Then
+    assert_eq!(
+        descriptors,
+        vec![("alice".to_string(), 4), ("bob".to_string(), 5)]
+    );
+}
+
+#[tokio::test]
+async fn a_supervised_daemon_derives_no_socket_path_of_its_own() {
+    // Given a supervised daemon handed no socket for this account — which it could bind for itself
+    let data = a_data_dir();
+    let sockets = AgentToolSockets::new(AgentToolSocketPlacement::Supervised);
+    sockets.install_roster(Vec::new());
+
+    // When a session of this account asks for its socket
+    let refusal = sockets
+        .ensure_bound(&this_os_user(), data.path())
+        .await
+        .map(|path| path.display().to_string())
+        .map_err(|e| format!("{e:#}"));
+
+    // Then it is refused, naming the file the user must be mapped in, and nothing is bound
+    let names_users_yaml = refusal.as_ref().err().map(|why| why.contains("users.yaml"));
+    assert_eq!(
+        (
+            names_users_yaml,
+            data.path().join("run").exists(),
+            data.path().join("run").exists()
+        ),
+        (Some(true), false, false),
+        "{refusal:?}"
+    );
 }

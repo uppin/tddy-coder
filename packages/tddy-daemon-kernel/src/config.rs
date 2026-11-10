@@ -89,7 +89,7 @@ pub struct DaemonConfig {
     /// The GitHub-login → OS-user map every token-gated RPC authorizes by. A shared holder rather
     /// than a `Vec`: cloning this config shares these rows, so a row enrolled at run time is seen
     /// by every service built from it — see [`LiveUsers`].
-    #[serde(default, skip_serializing_if = "LiveUsers::is_empty")]
+    #[serde(default, skip_serializing)]
     pub users: LiveUsers,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub allowed_tools: Vec<AllowedTool>,
@@ -842,10 +842,12 @@ mod startup_and_warmup_timing_tests {
     }
 
     /// Writes `yaml` to a file and loads it the way the daemon does, so the load-time checks run.
+    /// Every load needs a `users.yaml` beside the config; this fixture's daemon maps nobody.
     fn a_daemon_loaded_from(yaml: &str) -> anyhow::Result<DaemonConfig> {
         let dir = tempfile::tempdir().expect("tempdir");
         let path = dir.path().join("daemon.yaml");
         std::fs::write(&path, yaml).expect("write daemon.yaml");
+        std::fs::write(dir.path().join("users.yaml"), "[]\n").expect("write users.yaml");
         DaemonConfig::load(&path)
     }
 
@@ -898,6 +900,54 @@ mod startup_and_warmup_timing_tests {
         assert!(
             message.contains("session_room.poll_interval_ms") && message.contains("100"),
             "the refusal must name the field and the floor; got {message}"
+        );
+    }
+
+    #[test]
+    fn the_running_mapping_is_never_written_into_daemon_yaml() {
+        // Given a running config that maps a login — read from users.yaml or enrolled
+        let mut config = DaemonConfig::default();
+        config.users = LiveUsers::new(vec![crate::config::access::UserMapping {
+            github_user: "operator".to_string(),
+            os_user: "ops".to_string(),
+        }]);
+
+        // When it is serialised, as UpdateConfig writes daemon.yaml
+        let written = serde_yaml::to_string(&config).expect("the config serialises");
+
+        // Then no `users:` key is written — the next start would refuse it
+        assert!(!written.contains("users:"), "got {written}");
+    }
+
+    #[test]
+    fn a_users_key_in_daemon_yaml_fails_loading_naming_users_yaml() {
+        // Given a daemon.yaml from before `#agent-tools` 31/32, still mapping a login itself
+        let refused = a_daemon_loaded_from("users:\n  - github_user: operator\n    os_user: ops\n")
+            .expect_err("a users: key must not load");
+
+        // Then the refusal points at the one file the mapping lives in now
+        let message = format!("{refused:#}");
+        assert!(
+            message.contains("`users:`") && message.contains("users.yaml"),
+            "the refusal must name the key and users.yaml; got {message}"
+        );
+    }
+
+    #[test]
+    fn a_missing_users_yaml_fails_loading_naming_it() {
+        // Given a daemon.yaml with no users.yaml beside it — a deployment no installer rendered
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("daemon.yaml");
+        std::fs::write(&path, "listen:\n  web_port: 8899\n").expect("write daemon.yaml");
+
+        // When it is loaded the way the daemon loads it
+        let refused = DaemonConfig::load(&path).expect_err("a missing users.yaml must not load");
+
+        // Then the failure names the missing file, never an empty mapping
+        let message = format!("{refused:#}");
+        assert!(
+            message.contains("users.yaml"),
+            "the refusal must name users.yaml; got {message}"
         );
     }
 

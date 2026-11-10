@@ -345,12 +345,17 @@ pub fn a_demo_daemon_configured_with(
 ) -> (DaemonConfig, tempfile::TempDir) {
     let dir = tempfile::tempdir().expect("a temporary directory");
     let yaml = format!(
-        "auth_storage: \"{}\"\nusers:\n  - github_user: \"{THE_LOGIN}\"\n    os_user: \"{THE_LOGIN}-os\"\n\
+        "auth_storage: \"{}\"\n\
          github:\n  stub: true\n  stub_codes: \"the-code:{THE_LOGIN}\"\n{github_lines}",
         storage.display()
     );
     let path = dir.path().join("config.yaml");
     std::fs::write(&path, yaml).expect("the config is written");
+    std::fs::write(
+        dir.path().join("users.yaml"),
+        format!("- github_user: \"{THE_LOGIN}\"\n  os_user: \"{THE_LOGIN}-os\"\n"),
+    )
+    .expect("the users file is written");
     (DaemonConfig::load(&path).expect("the config loads"), dir)
 }
 

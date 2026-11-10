@@ -98,6 +98,12 @@ impl BuildContext {
                 RuntimeHost::Embedded => {
                     tddy_daemon_kernel::agent_tool_sockets::AgentToolSocketPlacement::Embedded
                 }
+                RuntimeHost::Binary
+                    if std::env::var_os(tddy_daemon_kernel::users_file::USERS_FILE_ENV)
+                        .is_some() =>
+                {
+                    tddy_daemon_kernel::agent_tool_sockets::AgentToolSocketPlacement::Supervised
+                }
                 RuntimeHost::Binary => {
                     tddy_daemon_kernel::agent_tool_sockets::AgentToolSocketPlacement::PerOsUser
                 }

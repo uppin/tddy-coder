@@ -8,6 +8,7 @@
 mod service_restart;
 mod service_slot;
 mod session_table;
+mod users_change;
 
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
@@ -17,7 +18,6 @@ use std::time::{Duration, Instant};
 
 use crate::config::SupervisorConfig;
 use crate::error::SupervisorError;
-use crate::host_socket;
 use crate::reaper;
 use crate::service::ServiceStatus;
 use crate::services::ServiceRuntime;
@@ -64,6 +64,10 @@ pub struct Supervisor {
     /// ([`Self::wait_for_session_exit`]) is told instead of polling.
     session_exited: tokio::sync::Notify,
     shutting_down: AtomicBool,
+    /// The `users:` block (`users.yaml` and where its sockets live), when configured.
+    users_config: Option<crate::config::UsersConfig>,
+    /// The mapping in force: loaded at startup, replaced by a valid saved edit.
+    current_users: Mutex<crate::users_file::UsersFile>,
 }
 
 impl Supervisor {
@@ -78,6 +82,11 @@ impl Supervisor {
         config: &SupervisorConfig,
         forks: Arc<ForkBroker>,
     ) -> anyhow::Result<Arc<Supervisor>> {
+        let initial_users = match &config.users {
+            Some(users) => crate::users_file::UsersFile::load(&users.file)
+                .map_err(|error| anyhow::anyhow!("users.yaml {}: {error}", users.file.display()))?,
+            None => crate::users_file::UsersFile::default(),
+        };
         let mut slots = Vec::with_capacity(config.services.len());
         for service in &config.services {
             let mut target = accounts::resolve_target_user(&service.user).map_err(|error| {
@@ -109,30 +118,32 @@ impl Supervisor {
                 Some(socket) => Some(Arc::new(bind_service_listener(service, socket)?)),
                 None => None,
             };
-            let host_listeners = service
-                .host_sockets
-                .iter()
-                .map(|host| {
-                    let listener = host_socket::bind_host_socket(&service.name, host)?;
-                    Ok((host.user.clone(), Arc::new(listener)))
-                })
-                .collect::<anyhow::Result<Vec<_>>>()?;
-            let agent_tool_listeners = service
-                .agent_tool_sockets
-                .iter()
-                .map(|tools| {
-                    let listener = host_socket::bind_host_socket(&service.name, tools)?;
-                    Ok((tools.user.clone(), Arc::new(listener)))
-                })
-                .collect::<anyhow::Result<Vec<_>>>()?;
+            let (user_listeners, users_file) = if service.serves_users {
+                let users_config = config.users.as_ref().ok_or_else(|| {
+                    anyhow::anyhow!(
+                        "service `{}` declares serves_users but the config has no `users:` block",
+                        service.name
+                    )
+                })?;
+                (
+                    crate::user_sockets::UserListeners::bind(
+                        &service.name,
+                        &users_config.sockets_dir,
+                        &initial_users,
+                    )?,
+                    Some(users_config.file.clone()),
+                )
+            } else {
+                (crate::user_sockets::UserListeners::default(), None)
+            };
             slots.push(Slot {
                 runtime: ServiceRuntime::new(service),
                 service: service.clone(),
                 target,
                 started_at: None,
                 listener,
-                host_listeners,
-                agent_tool_listeners,
+                user_listeners,
+                users_file,
             });
         }
         Ok(Arc::new(Supervisor {
@@ -143,7 +154,30 @@ impl Supervisor {
             spawn_gate: tokio::sync::Mutex::new(()),
             session_exited: tokio::sync::Notify::new(),
             shutting_down: AtomicBool::new(false),
+            users_config: config.users.clone(),
+            current_users: Mutex::new(initial_users),
         }))
+    }
+
+    /// The mapping in force: the last valid `users.yaml` read.
+    pub fn current_users(&self) -> crate::users_file::UsersFile {
+        self.current_users
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .clone()
+    }
+
+    /// Replace the mapping in force (a valid saved edit, applied by the watch).
+    pub(crate) fn set_current_users(&self, users: crate::users_file::UsersFile) {
+        *self
+            .current_users
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner()) = users;
+    }
+
+    /// The `users:` block, when this supervisor reads a mapping at all.
+    pub fn users_config(&self) -> Option<&crate::config::UsersConfig> {
+        self.users_config.as_ref()
     }
 
     /// The uids that own a declared service — exactly the peers the privileged socket serves.
@@ -669,6 +703,7 @@ mod tests {
             spawn_policy: SpawnPolicy::default(),
             cgroup: crate::config::CgroupPolicy::default(),
             shutdown_grace_secs: 1,
+            users: None,
         };
         let forks = Arc::new(
             crate::spawn_broker::fork_broker::ForkBroker::start().expect("start the fork thread"),
@@ -830,6 +865,7 @@ mod tests {
             spawn_policy: SpawnPolicy::default(),
             cgroup: crate::config::CgroupPolicy::default(),
             shutdown_grace_secs: 20,
+            users: None,
         };
         let forks = Arc::new(
             crate::spawn_broker::fork_broker::ForkBroker::start().expect("start the fork thread"),
@@ -851,7 +887,7 @@ mod tests {
     }
 
     // -----------------------------------------------------------------------------------------
-    // Per-OS-user host sockets
+    // Per-OS-user daemon sockets (`#agent-tools` 31/32)
     // -----------------------------------------------------------------------------------------
 
     /// The account this test process runs as.
@@ -866,11 +902,15 @@ mod tests {
         }
     }
 
-    /// A supervisor config whose one service, running as this account, declares `host_sockets`.
-    fn a_config_declaring_host_sockets(
-        directory: &Path,
-        host_sockets: Vec<crate::config::HostSocket>,
-    ) -> SupervisorConfig {
+    /// A supervisor config whose one service, running as this account, serves users: it writes
+    /// `users.yaml` mapping this account in `directory` and points the config at it.
+    fn a_config_serving_users(directory: &Path, mapped_user: &str) -> SupervisorConfig {
+        let users_file = directory.join("users.yaml");
+        std::fs::write(
+            &users_file,
+            format!("- {{github_user: someone, os_user: {mapped_user}}}\n"),
+        )
+        .expect("write users.yaml");
         let service = ManagedService {
             user: this_account(),
             socket: Some(ServiceSocket {
@@ -878,7 +918,7 @@ mod tests {
                 group: None,
                 mode: "0660".to_string(),
             }),
-            host_sockets,
+            serves_users: true,
             ..a_managed_service().build()
         };
         SupervisorConfig {
@@ -891,21 +931,19 @@ mod tests {
             spawn_policy: SpawnPolicy::default(),
             cgroup: crate::config::CgroupPolicy::default(),
             shutdown_grace_secs: 1,
+            users: Some(crate::config::UsersConfig {
+                file: users_file,
+                sockets_dir: directory.join("user-sockets"),
+            }),
         }
     }
 
     #[test]
-    fn creates_every_declared_host_socket_when_it_is_built() {
-        // Given a service declaring a host socket for the account running the test
+    fn creates_every_mapped_users_daemon_socket_when_it_is_built() {
+        // Given a service serving users, mapping the account running the test
         let directory = tempfile::TempDir::new().expect("create a workspace");
-        let path = directory.path().join("run/user/host.sock");
-        let config = a_config_declaring_host_sockets(
-            directory.path(),
-            vec![crate::config::HostSocket {
-                user: this_account(),
-                path: path.clone(),
-            }],
-        );
+        let account = this_account();
+        let config = a_config_serving_users(directory.path(), &account);
         let forks = Arc::new(
             crate::spawn_broker::fork_broker::ForkBroker::start().expect("start the fork thread"),
         );
@@ -913,21 +951,20 @@ mod tests {
         // When the supervisor is built
         let _supervisor = Supervisor::new(&config, forks).expect("build the supervisor");
 
-        // Then the socket exists, before anything has been started
+        // Then the user's one socket exists at its derived path, before anything has been started
+        let path = directory
+            .path()
+            .join("user-sockets")
+            .join(&account)
+            .join("daemon.sock");
         assert!(path.exists(), "{} was not created", path.display());
     }
 
     #[test]
-    fn refuses_to_be_built_when_a_host_socket_cannot_be_created() {
-        // Given a host socket for an account the host does not have
+    fn refuses_to_be_built_when_a_mapped_users_socket_cannot_be_created() {
+        // Given a mapping for an account the host does not have
         let directory = tempfile::TempDir::new().expect("create a workspace");
-        let config = a_config_declaring_host_sockets(
-            directory.path(),
-            vec![crate::config::HostSocket {
-                user: "no-such-account-tddy".to_string(),
-                path: directory.path().join("run/ghost/host.sock"),
-            }],
-        );
+        let config = a_config_serving_users(directory.path(), "no-such-account-tddy");
         let forks = Arc::new(
             crate::spawn_broker::fork_broker::ForkBroker::start().expect("start the fork thread"),
         );
@@ -941,17 +978,11 @@ mod tests {
     }
 
     #[test]
-    fn hands_the_service_its_own_socket_first_and_every_host_socket_after_it() {
-        // Given a built supervisor with a host socket declared for this account
+    fn hands_the_service_its_own_socket_first_and_every_user_socket_after_it() {
+        // Given a built supervisor serving the account running the test
         let directory = tempfile::TempDir::new().expect("create a workspace");
         let account = this_account();
-        let config = a_config_declaring_host_sockets(
-            directory.path(),
-            vec![crate::config::HostSocket {
-                user: account.clone(),
-                path: directory.path().join("run/user/host.sock"),
-            }],
-        );
+        let config = a_config_serving_users(directory.path(), &account);
         let forks = Arc::new(
             crate::spawn_broker::fork_broker::ForkBroker::start().expect("start the fork thread"),
         );
@@ -962,84 +993,8 @@ mod tests {
 
         // Then
         assert_eq!(
-            handover.fd_names(),
-            format!("connection:host-session.{account}")
-        );
-    }
-
-    // -----------------------------------------------------------------------------------------
-    // Per-OS-user agent-tool sockets (`#agent-tools` 26/28)
-    // -----------------------------------------------------------------------------------------
-
-    /// [`a_config_declaring_host_sockets`] with this account's host socket and agent-tool socket,
-    /// each in a directory of its own.
-    fn a_config_declaring_both_sockets_for_this_account(directory: &Path) -> SupervisorConfig {
-        let account = this_account();
-        let mut config = a_config_declaring_host_sockets(
-            directory,
-            vec![crate::config::HostSocket {
-                user: account.clone(),
-                path: directory.join("run/user/host.sock"),
-            }],
-        );
-        config.services[0].agent_tool_sockets = vec![crate::config::HostSocket {
-            user: account,
-            path: directory.join("run-agent-tools/user/agent.sock"),
-        }];
-        config
-    }
-
-    #[test]
-    fn creates_every_declared_agent_tool_socket_when_it_is_built() {
-        // Given a service declaring an agent-tool socket for the account running the test
-        let directory = tempfile::TempDir::new().expect("create a workspace");
-        let config = a_config_declaring_both_sockets_for_this_account(directory.path());
-        let forks = Arc::new(
-            crate::spawn_broker::fork_broker::ForkBroker::start().expect("start the fork thread"),
-        );
-
-        // When the supervisor is built
-        let _supervisor = Supervisor::new(&config, forks).expect("build the supervisor");
-
-        // Then the socket exists, before anything has been started
-        let path = directory.path().join("run-agent-tools/user/agent.sock");
-        assert!(path.exists(), "{} was not created", path.display());
-    }
-
-    #[test]
-    fn agent_tool_listeners_are_announced_as_agent_tools_user() {
-        // Given a built supervisor declaring this account's host and agent-tool sockets
-        let directory = tempfile::TempDir::new().expect("create a workspace");
-        let account = this_account();
-        let config = a_config_declaring_both_sockets_for_this_account(directory.path());
-        let forks = Arc::new(
-            crate::spawn_broker::fork_broker::ForkBroker::start().expect("start the fork thread"),
-        );
-        let supervisor = Supervisor::new(&config, forks).expect("build the supervisor");
-
-        // When the handover for the service's next start is taken
-        let handover = supervisor.lock()[0].socket_handover().expect("a handover");
-
-        // Then the agent-tool socket follows the host sockets, under its own name
-        assert_eq!(
-            (handover.count(), handover.fd_names()),
-            (
-                3,
-                format!("connection:host-session.{account}:agent-tools.{account}")
-            )
-        );
-    }
-
-    #[test]
-    fn the_agent_tool_fd_name_prefix_is_not_the_host_session_one() {
-        // Then — guard: the daemon tells the two kinds apart by this prefix alone
-        assert_eq!(
-            (
-                crate::socket::agent_tools_fd_name("alice"),
-                crate::socket::host_session_fd_name("alice")
-                    == crate::socket::agent_tools_fd_name("alice"),
-            ),
-            ("agent-tools.alice".to_string(), false)
+            (handover.fd_names(), handover.users_file().is_some()),
+            (format!("connection:user.{account}"), true)
         );
     }
 }

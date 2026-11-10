@@ -50,7 +50,7 @@ when the property is removed:
 | Step | Failure |
 |------|---------|
 | `session_token` → GitHub login (same resolver as every other daemon RPC, `auth.rs`) | `UNAUTHENTICATED` |
-| login → OS user via the config's `users:` map | `PERMISSION_DENIED` |
+| login → OS user via the `users.yaml` mapping | `PERMISSION_DENIED` |
 | OS user → that user's `~/.tddy/projects/` | `INTERNAL` (a resolver that yields nothing is a fault, not a silent skip) |
 | `project_ref` → registry row, by `project_id` then `name` | `NOT_FOUND` |
 | row's `main_repo_path` exists | `FAILED_PRECONDITION` |

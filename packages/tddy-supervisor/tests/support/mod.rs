@@ -47,6 +47,7 @@ pub struct ServiceFixture {
     stability_threshold_ms: u64,
     declares_socket: bool,
     declares_host_socket: bool,
+    serves_users: bool,
     env: Vec<(String, String)>,
 }
 
@@ -60,6 +61,7 @@ pub fn a_service(name: &str) -> ServiceFixture {
         stability_threshold_ms: 10_000,
         declares_socket: false,
         declares_host_socket: false,
+        serves_users: false,
         env: Vec::new(),
     }
 }
@@ -85,10 +87,18 @@ impl ServiceFixture {
         self
     }
 
-    /// Also declares a host socket for the account running the tests, at descriptor 4. The
-    /// supervisor's `allowed_session_users` must list that account (`allowing_the_current_user`).
-    pub fn with_a_host_socket_for_the_current_user(mut self) -> Self {
-        self.declares_host_socket = true;
+    /// Also declares a host socket for the account running the tests, at descriptor 4.
+    /// Superseded by `serving_users` with a mapping (`#agent-tools` 31/32): the merged per-user
+    /// socket is derived from `users.yaml`, never declared.
+    pub fn with_a_host_socket_for_the_current_user(self) -> Self {
+        self.serving_users()
+    }
+
+    /// Declares `serves_users: true`: the service is handed one `user.<os user>` socket per user
+    /// `users.yaml` maps, and told the file's path (`#agent-tools` 31/32). Needs a listening socket
+    /// and a mapping (`mapping_the_current_user_as`).
+    pub fn serving_users(mut self) -> Self {
+        self.serves_users = true;
         self
     }
 
@@ -137,6 +147,8 @@ pub struct SupervisorFixture {
     pids_max_ceiling: Option<u64>,
     shutdown_grace_secs: u64,
     path_prefix: Option<PathBuf>,
+    /// GitHub logins `users.yaml` maps to the account running the tests; `None` writes no file.
+    current_user_logins: Option<Vec<String>>,
 }
 
 /// A supervisor with no declared services and an empty spawn policy — deny-everything defaults.
@@ -152,6 +164,7 @@ pub fn a_supervisor() -> SupervisorFixture {
         pids_max_ceiling: None,
         shutdown_grace_secs: 2,
         path_prefix: None,
+        current_user_logins: None,
     }
 }
 
@@ -209,6 +222,13 @@ impl SupervisorFixture {
         self
     }
 
+    /// Write a `users.yaml` mapping each of `logins` to the account running the tests, and point
+    /// `supervisor.yaml`'s `users:` block at it (`#agent-tools` 31/32).
+    pub fn mapping_the_current_user_as(mut self, logins: &[&str]) -> Self {
+        self.current_user_logins = Some(logins.iter().map(|login| login.to_string()).collect());
+        self
+    }
+
     /// Launch the real binary and wait until its socket accepts connections.
     pub async fn start(self) -> RunningSupervisor {
         let workspace = TempDir::new().expect("create supervisor test workspace");
@@ -231,7 +251,7 @@ impl SupervisorFixture {
                     "      initial_backoff_ms: {initial_backoff_ms}\n",
                     "      max_backoff_ms: 1000\n",
                     "      stability_threshold_ms: {stability_threshold_ms}\n",
-                    "{env}{socket}{host_sockets}",
+                    "{env}{socket}{host_sockets}{serves_users}",
                 ),
                 name = service.name,
                 script = script.display(),
@@ -265,8 +285,35 @@ impl SupervisorFixture {
                 } else {
                     String::new()
                 },
+                serves_users = if service.serves_users {
+                    "    serves_users: true\n".to_string()
+                } else {
+                    String::new()
+                },
             ));
         }
+
+        let mut user_rows: Vec<(String, String)> = Vec::new();
+        if let Some(logins) = &self.current_user_logins {
+            for login in logins {
+                user_rows.push((login.clone(), user.clone()));
+            }
+        }
+        for (index, allowed) in self.allowed_session_users.iter().enumerate() {
+            if !user_rows.iter().any(|(_, os_user)| os_user == allowed) {
+                user_rows.push((format!("session-user-{index}"), allowed.clone()));
+            }
+        }
+        let users_yaml = if !user_rows.is_empty() || self.current_user_logins.is_some() {
+            write_users_rows(&root, &user_rows);
+            format!(
+                "users:\n  file: {}\n  sockets_dir: {}\n",
+                users_file_path(&root).display(),
+                user_sockets_dir(&root).display()
+            )
+        } else {
+            String::new()
+        };
 
         let config_yaml = format!(
             concat!(
@@ -276,7 +323,6 @@ impl SupervisorFixture {
                 "shutdown_grace_secs: {grace}\n",
                 "services:\n{services}",
                 "spawn_policy:\n",
-                "  allowed_session_users: [{users}]\n",
                 "  allowed_tool_paths: [{tools}]\n",
                 "  allowed_relay_tool_paths: [{relay_tools}]\n",
                 "  allowed_mount_roots: [{mount_roots}]\n",
@@ -286,6 +332,7 @@ impl SupervisorFixture {
                 "  controllers: [memory, cpu, pids]\n",
                 "  supervisor_leaf: supervisor\n",
                 "{ceilings}",
+                "{users_yaml}",
             ),
             socket = socket_path.display(),
             grace = self.shutdown_grace_secs,
@@ -294,7 +341,6 @@ impl SupervisorFixture {
             } else {
                 service_yaml
             },
-            users = yaml_list(&self.allowed_session_users),
             tools = yaml_list(
                 &self
                     .allowed_tool_paths
@@ -318,6 +364,7 @@ impl SupervisorFixture {
             ),
             base = cgroup_base.display(),
             ceilings = self.ceilings_yaml(),
+            users_yaml = users_yaml,
         );
 
         let config_path = root.join("supervisor.yaml");
@@ -443,6 +490,29 @@ impl RunningSupervisor {
         if path.exists() {
             fs::remove_file(&path).expect("clear the handoff report");
         }
+    }
+
+    /// Rewrite `users.yaml` so it maps each of `logins` to the account running the tests.
+    pub fn remap_the_current_user_as(&self, logins: &[&str]) {
+        write_users_file(
+            self.workspace.path(),
+            &logins
+                .iter()
+                .map(|login| login.to_string())
+                .collect::<Vec<_>>(),
+        );
+    }
+
+    /// The `users.yaml` the supervisor was pointed at.
+    pub fn users_file_path(&self) -> PathBuf {
+        users_file_path(self.workspace.path())
+    }
+
+    /// Where the current user's daemon socket should have been derived: `<sockets_dir>/<user>/daemon.sock`.
+    pub fn derived_user_socket_path(&self) -> PathBuf {
+        user_sockets_dir(self.workspace.path())
+            .join(current_username())
+            .join("daemon.sock")
     }
 
     /// Path the named service's declared socket should have been bound at.
@@ -945,6 +1015,39 @@ fn host_socket_path(root: &Path, service: &str, user: &str) -> PathBuf {
         .join("host.sock")
 }
 
+fn users_file_path(root: &Path) -> PathBuf {
+    root.join("users.yaml")
+}
+
+fn user_sockets_dir(root: &Path) -> PathBuf {
+    root.join("user-sockets")
+}
+
+/// Write `users.yaml` rows atomically (rename), as an editor saving it would.
+fn write_users_rows(root: &Path, rows: &[(String, String)]) {
+    let body: String = rows
+        .iter()
+        .map(|(login, os_user)| format!("- {{github_user: {login}, os_user: {os_user}}}\n"))
+        .collect();
+    let staged = root.join("users.yaml.saving");
+    fs::write(&staged, body).expect("write users.yaml");
+    fs::set_permissions(&staged, fs::Permissions::from_mode(0o644)).expect("narrow users.yaml");
+    fs::rename(&staged, users_file_path(root)).expect("save users.yaml");
+}
+
+/// Write `users.yaml` atomically (rename), as an editor saving it would, owner-only writable.
+fn write_users_file(root: &Path, logins: &[String]) {
+    let user = current_username();
+    let rows: String = logins
+        .iter()
+        .map(|login| format!("- {{github_user: {login}, os_user: {user}}}\n"))
+        .collect();
+    let staged = root.join("users.yaml.saving");
+    fs::write(&staged, rows).expect("write users.yaml");
+    fs::set_permissions(&staged, fs::Permissions::from_mode(0o644)).expect("narrow users.yaml");
+    fs::rename(&staged, users_file_path(root)).expect("save users.yaml");
+}
+
 fn service_socket_path(root: &Path, service: &str) -> PathBuf {
     root.join(format!("{service}.sock"))
 }
@@ -960,6 +1063,8 @@ const HANDOFF_REPORT_BODY: &str = "\
   echo \"own_pid=$$\"
   echo \"listen_fdnames=${LISTEN_FDNAMES:-unset}\"
   echo \"supervisor_socket=${TDDY_SUPERVISOR_SOCKET:-unset}\"
+  echo \"users_file=${TDDY_USERS_FILE:-unset}\"
+  echo \"fd4_inode=$(stat -L -c %i /proc/self/fd/4 2>/dev/null || echo absent)\"
   if [ -S /proc/self/fd/4 ]; then echo \"fd4=socket\"; else echo \"fd4=absent\"; fi
   if [ -S /proc/self/fd/3 ]; then echo \"fd3=socket\"; else echo \"fd3=absent\"; fi
 } > __REPORT__

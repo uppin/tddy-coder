@@ -23,7 +23,6 @@
 use std::path::Path;
 
 use crate::config::access::UserMapping;
-use crate::config::DaemonConfig;
 
 /// Why a deployment cannot enrol a first login.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -35,6 +34,9 @@ pub enum EnrolmentRefusal {
     /// another account, or on a path that no longer exists. Reported rather than skipped: a login
     /// that appeared to work and vanished on restart is worse than one that refused.
     ConfigNotWritable { reason: String },
+    /// The mapping belongs to `tddy-supervisor` (`#agent-tools` 31/32): this daemon was handed
+    /// `users.yaml` read-only, and a login is mapped by its operator editing that file.
+    OwnedBySupervisor,
 }
 
 impl std::fmt::Display for EnrolmentRefusal {
@@ -48,30 +50,44 @@ impl std::fmt::Display for EnrolmentRefusal {
             Self::ConfigNotWritable { reason } => {
                 write!(f, "the daemon config cannot be rewritten: {reason}")
             }
+            Self::OwnedBySupervisor => write!(
+                f,
+                "this deployment's users.yaml belongs to tddy-supervisor; map a login by editing it"
+            ),
         }
     }
 }
 
 impl std::error::Error for EnrolmentRefusal {}
 
-/// Write the first `users:` row into the config file at `config_path`, mapping `github_user` to
-/// `os_user`, and return the row that was written.
+/// Write the first row into `users.yaml` at `users_path`, mapping `github_user` to `os_user`, and
+/// return the row that was written (`#agent-tools` 31/32: the mapping no longer lives in
+/// `daemon.yaml`, which enrolment leaves untouched).
 ///
-/// The file is rewritten in place, preserving everything else it holds, and the write is atomic —
-/// a half-written config is a daemon that will not start.
+/// The write is atomic — a half-written mapping is a daemon that will not start.
 pub fn enrol_first_login(
-    config_path: &Path,
+    users_path: &Path,
     github_user: &str,
     os_user: &str,
 ) -> Result<UserMapping, EnrolmentRefusal> {
     let not_writable = |reason: String| EnrolmentRefusal::ConfigNotWritable { reason };
 
-    // Re-read rather than trust the caller's snapshot: the file on disk is what decides whether
-    // this deployment has already enrolled somebody, including through a concurrent login.
-    let config = DaemonConfig::load(config_path).map_err(|e| not_writable(e.to_string()))?;
-    if let Some(enrolled) = config.users.first_github_user() {
+    // `users_path` is the `users.yaml` to write (its caller derives it beside the daemon's
+    // config). Re-read rather than trust a snapshot: the file on disk decides whether this
+    // deployment has already enrolled somebody, including through a concurrent login. A missing
+    // file is a refusal, never an empty mapping: the daemon loaded it at start, and the
+    // installers render one, so a file that has gone is not one to resurrect.
+    let contents = std::fs::read_to_string(users_path)
+        .map_err(|e| not_writable(format!("{}: {e}", users_path.display())))?;
+    let existing: Vec<UserMapping> = if contents.trim().is_empty() {
+        Vec::new()
+    } else {
+        serde_yaml::from_str(&contents)
+            .map_err(|e| not_writable(format!("{}: {e}", users_path.display())))?
+    };
+    if let Some(enrolled) = existing.first() {
         return Err(EnrolmentRefusal::AlreadyEnrolled {
-            github_user: enrolled,
+            github_user: enrolled.github_user.clone(),
         });
     }
 
@@ -79,31 +95,8 @@ pub fn enrol_first_login(
         github_user: github_user.to_string(),
         os_user: os_user.to_string(),
     };
-
-    // Edit the document rather than re-serialise the typed config, so every key the operator
-    // wrote stays exactly as they wrote it and only `users:` changes.
-    // TODO(docs/dev/todo/2026-09-05-from-2026-09-05-tauri-desktop-single-process-daemon.md):
-    // comments in the file are still lost — preserving them needs a comment-aware YAML editor,
-    // the same open question `DaemonConfigService`'s `write_config` records.
-    let contents = std::fs::read_to_string(config_path)
-        .map_err(|e| not_writable(format!("{}: {e}", config_path.display())))?;
-    let mut document: serde_yaml::Value = serde_yaml::from_str(&contents)
-        .map_err(|e| not_writable(format!("{}: {e}", config_path.display())))?;
-    let users = serde_yaml::to_value(std::slice::from_ref(&mapping))
+    let rewritten = serde_yaml::to_string(std::slice::from_ref(&mapping))
         .map_err(|e| not_writable(format!("failed to serialise the users row: {e}")))?;
-    match &mut document {
-        serde_yaml::Value::Mapping(root) => {
-            root.insert(serde_yaml::Value::String("users".to_string()), users);
-        }
-        _ => {
-            return Err(not_writable(format!(
-                "{} is not a YAML mapping",
-                config_path.display()
-            )))
-        }
-    }
-    let rewritten = serde_yaml::to_string(&document)
-        .map_err(|e| not_writable(format!("failed to serialise the config: {e}")))?;
-    tddy_core::atomic_file::write_atomic_labelled(config_path, rewritten).map_err(not_writable)?;
+    tddy_core::atomic_file::write_atomic_labelled(users_path, rewritten).map_err(not_writable)?;
     Ok(mapping)
 }

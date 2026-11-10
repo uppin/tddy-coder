@@ -30,11 +30,19 @@ type UserResolver = Arc<dyn Fn(&str) -> Option<String> + Send + Sync>;
 const PROJECT_ID: &str = "11111111-2222-4333-8444-555555555555";
 
 fn test_config(os_user: &str) -> DaemonConfig {
-    let yaml = format!("users:\n  - github_user: \"testuser\"\n    os_user: \"{os_user}\"\n");
+    let yaml = "";
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("config.yaml");
     std::fs::write(&path, yaml).unwrap();
     std::mem::forget(dir);
+    std::fs::write(
+        std::path::Path::new(&(path))
+            .parent()
+            .expect("a config directory")
+            .join("users.yaml"),
+        format!("- github_user: \"testuser\"\n  os_user: \"{os_user}\"\n"),
+    )
+    .unwrap();
     DaemonConfig::load(&path).unwrap()
 }
 

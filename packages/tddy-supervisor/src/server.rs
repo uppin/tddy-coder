@@ -221,8 +221,8 @@ impl PrivilegedSurface {
         env: BTreeMap<String, String>,
         environment: EnvironmentBase,
     ) -> Result<ResolvedSpawn, SupervisorError> {
-        let policy = &self.config.spawn_policy;
-        let os_user = policy::resolve_session_user(policy, os_user)?;
+        let os_user =
+            policy::resolve_mapped_session_user(&self.supervisor.current_users(), os_user)?;
         let scope_procs = match scope {
             Some(scope) => Some(self.cgroups.scope_procs_path(scope)?),
             None => None,
