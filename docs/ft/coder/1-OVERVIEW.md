@@ -80,6 +80,7 @@ its changeset wraps.
 | PRD | Affects |
 |-----|---------|
 | [Restructure refusal truth and authoring gates](1-WIP/PRD-2026-09-17-restructure-refusal-truth-and-authoring-gates.md) | [Rust code restructuring](rust-code-restructuring.md) — refusal classes, import restoration, a leftover-reference preflight, `restructure snapshot`, and the authoring gates |
+| [Declarative usage bindings, Claude first](1-WIP/PRD-2026-11-10-usage-binding-claude-transcript.md) | [Session token accounting](session-token-accounting.md) — `coding_agent.usage` bindings evaluated by the agent-agnostic `tddy-usage` engine; Claude transcripts deduplicated by `message.id`, cache and reasoning counters, recursive subagents (`#usage-binding 1/5`) |
 
 ## Integration Points
 
