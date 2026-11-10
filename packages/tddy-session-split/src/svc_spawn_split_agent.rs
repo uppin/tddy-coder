@@ -277,7 +277,7 @@ impl SplitSessions {
         // spec-driven launch renders — with this start's model, session, permission mode and
         // prompt bound.
         let (spec, argv) = self.render_split_argv(session_id, req, &initial_prompt)?;
-        let session_type = format!("{}-cli", spec.id);
+        let argv = split_argv_with_flags(initial_prompt, extra_args, argv);
         // The agent's `tddy-tools` finds its session through the pointer in the context dir (and
         // through its own registration, `extra_args`): the agent process is given no `TDDY_*`
         // variable. The pointer is removed when the agent exits.
@@ -285,12 +285,11 @@ impl SplitSessions {
             .place_pointer_and_spawn(
                 os_user,
                 session_id,
-                req,
+                req.model.trim(),
                 remote,
                 context_dir,
                 session_dir,
                 (spec, argv),
-                session_type,
             )
             .await?;
         Ok((hook_token, handle))
@@ -300,14 +299,14 @@ impl SplitSessions {
         &self,
         os_user: &str,
         session_id: &str,
-        req: &StartSessionRequest,
+        model: &str,
         remote: tddy_core::RemoteToolEnv,
         context_dir: std::path::PathBuf,
         session_dir: &Path,
         spec_and_argv: (tddy_coding_agent_specs::CodingAgentSpec, Vec<String>),
-        session_type: String,
     ) -> Result<Arc<tddy_cli_sessions::cli_session_manager::PtyHandle>, Status> {
         let (spec, argv) = spec_and_argv;
+        let session_type = format!("{}-cli", spec.id);
         let pointer =
             crate::split_session::split_session_pointer(&remote, &context_dir, session_dir);
         let on_exit = self.session_pointers.place(&pointer, &context_dir, None)?;
@@ -320,7 +319,7 @@ impl SplitSessions {
                 session_id,
                 session_type: &session_type,
                 context_dir,
-                model: req.model.trim(),
+                model,
                 argv,
                 os_user: Some(os_user),
                 on_exit,
