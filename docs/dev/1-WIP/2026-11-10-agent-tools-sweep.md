@@ -505,3 +505,21 @@ All answered by the user on 2026-11-10. See *Decisions & Trade-offs*.
 - [ ] `docs/dev/changesets/2026-11-10-agent-tools-sweep.md`: the change-history entry, with every closed record's final measurement
 - [ ] `packages/tddy-users-file/README.md` and a `docs/` changeset entry: the new crate. Also the supervisor and daemon-kernel docs that describe users.yaml validation (`packages/tddy-supervisor/docs/architecture.md`, `docs/ft/supervisor/tddy-supervisor.md`) name the shared crate and the daemon's new refusals
 - [ ] `git rm` the three oversized-file records and the B5 TODO
+
+## Execution notes (2026-11-10, #876)
+
+- Plans 09/10 not applied: deferred by the user, 2026-11-10 (#876 6e). `spawn_broker.rs` stands
+  at 534 production lines; the record is narrowed and the follow-up is
+  `docs/dev/todo/2026-11-10-spawn-broker-linux-only-moves.md`.
+- Plan 14's engine rename renamed the module declaration but did not move its file (E0583); the
+  file was moved to `user_socket_tests.rs` as the noted post-move completion, and verify with
+  `--repoint inherited_host_sockets_tests=user_socket_tests` accounts for every statement.
+- Engine-blocked Tier C/B4 seams (each tried at least twice): `build_session_host` (daemon) and
+  `DaemonSessionHost::new` are builder composition roots whose chain/alias seams name
+  `SplitRoomHosting`/`TerminalExposure`, which the files do not import; `spawn_tool_on`
+  (cli-sessions) names the exit hook's `Output`, likewise unimported; the streamed
+  `for_each_line`/`forward_lines_until_exit` ranges hold early `return`s the engine refuses.
+  Functions left at 61 lines by a signature-inclusive count: `delete_session_as`,
+  `spawn_split_agent_process`.
+- Three plan-only commits in the stack (`117cda382`, `72700a22f`, `ce545ab48`) hold re-anchored
+  or refused-attempt plan files; the code for their groups landed in the following commits.
