@@ -534,3 +534,21 @@ All answered by the user on 2026-11-10. See *Decisions & Trade-offs*.
   fifteen touched packages; `cargo fmt --check` clean. Linux-only tests
   (`supervisor_user_sockets`, the Linux cfg ranges in spawn_broker) compile-checked on macOS and
   run on CI only.
+
+## Round-two verification (2026-11-10)
+
+- Further extracts: `delete_session_as` 61 → 52, `spawn_split_agent_process` 61 → 59,
+  `spawn_tool_on` 92 → 79, `DaemonSessionHost::new` 101 → 97 (default socket/rosters fields),
+  `build_session_host` 82 → 80 (`daemon_launcher_deps`); `for_each_line`'s emitter is now the
+  free `emit_trimmed_line` (still depth >4: the per-chunk loop's `return` is refused on the
+  third attempt). Remaining over-budget, all engine-blocked as documented above:
+  `build_session_host` (80), `DaemonSessionHost::new` (97), `spawn_tool_on` (79),
+  `for_each_line` / `forward_lines_until_exit` depth.
+- Scoped tests: agent-launch+session-split+supervisor+cli-sessions 659/0; daemon 312 passed/1
+  failed (`reads_a_remote_agents_files_from_its_own_clone`, a Docker host-port collision; it
+  passes alone, 1/1); session-lifecycle 939 passed/2 failed, the two failures being the
+  recorded pre-existing `an_unsandboxed_claude_cli_start…` and
+  `jailed::…hook_reaches_the_daemon…`. Combined with the earlier batches (953/0, 663/0, daemon
+  313/0, coder+lifecycle 1175/2), no failure is attributable to this sweep.
+- Clippy (`./dev cargo clippy` over all 15 touched packages, `-D warnings`) and
+  `cargo fmt --check` clean. Linux-only tests compile-checked on macOS and run on CI only.
