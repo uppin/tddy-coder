@@ -552,3 +552,15 @@ All answered by the user on 2026-11-10. See *Decisions & Trade-offs*.
   313/0, coder+lifecycle 1175/2), no failure is attributable to this sweep.
 - Clippy (`./dev cargo clippy` over all 15 touched packages, `-D warnings`) and
   `cargo fmt --check` clean. Linux-only tests compile-checked on macOS and run on CI only.
+
+## Round-three verification (2026-11-10)
+
+- Further extracts: `spawn_tool_on` 79 → 75 (spawn spec build, cleanup-and-finish; its hook,
+  task and pending-exit seams name the hook's `Output` on every attempt, four in this round).
+  `build_session_host` 80 → 74 (`daemon_launcher_deps`). `for_each_line`'s per-chunk loop and
+  `forward_lines_until_exit`'s loop were retried: the first holds an early `return` (refused),
+  the second's loop extraction is refused because the generated signature names the generic
+  `S` without declaring it. `DaemonSessionHost::new` (97) offers only "extract into variable"
+  for its builder literal, in both extract variants.
+- Scoped test: `tddy-cli-sessions` 54/0. Clippy over all 15 touched packages and
+  `cargo fmt --check` clean.
