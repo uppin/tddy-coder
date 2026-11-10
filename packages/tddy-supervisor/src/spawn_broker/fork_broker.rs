@@ -262,6 +262,10 @@ impl PreExecSteps {
         }
 
         self.execute_pre_exec_steps()?;
+        self.keep_exec_descriptor_open()
+    }
+
+    fn keep_exec_descriptor_open(&mut self) -> std::io::Result<()> {
         if let Some(descriptor) = self.exec_descriptor {
             // SAFETY: `fcntl(F_SETFD)` is async-signal-safe and touches only the flags of a
             // descriptor inherited across the fork.
