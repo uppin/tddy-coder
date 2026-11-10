@@ -1,0 +1,2 @@
+{"v":1,"snapshot":{"packages/tddy-session-lifecycle/src/connection_service.rs":"sha256:b6fdf201c7756311e1d6fbb2076a7c9559bddb8c4ac6846cf67b1881d11b1525"}}
+{"id":"op-1","op":"rename_symbol","anchor":{"kind":"range","file":"packages/tddy-session-lifecycle/src/connection_service.rs","start":{"line":483,"col":5},"end":{"line":483,"col":33}},"name":"user_socket_tests"}

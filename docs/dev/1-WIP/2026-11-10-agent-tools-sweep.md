@@ -1,9 +1,9 @@
 # Changeset: refactor — the `#agent-tools` sweep pays down every code issue the stack added
 
 **Date**: 2026-11-10
-**Status**: 🚧 In Progress — plan (commit 1); awaiting the 6e review
+**Status**: 🚧 In Progress — contract (commit 2); 6e answered by the user 2026-11-10
 **Type**: Refactor
-**Complexity**: 5/5
+**Complexity**: 5/5 (re-scored at the contract: it rose further with the new `tddy-users-file` crate and the 14 Tier C extracts; already at the ceiling)
 **Stack**: `#agent-tools` 33/33, the sweep node. ⚠ **The stack merged while this node was being
 planned.** #835 → #865 were squash-merged into `master` on 2026-11-10 at 04:24Z (`862aae64e` …
 `65e6be1e2`). This branch is therefore cut from `origin/master` (`20f475576`) and its PR is based on
@@ -53,11 +53,11 @@ function-level findings that no wrap recorded.
 | Record | Verdict |
 |---|---|
 | `packages/tddy-coding-agent-specs/docs/code-issues/oversized-file-spec.md` | **fix here** (B1) |
-| `packages/tddy-supervisor/docs/code-issues/oversized-file-spawn-broker.md` | **fix here** (B2). Needs 6e Q2 |
+| `packages/tddy-supervisor/docs/code-issues/oversized-file-spawn-broker.md` | **fix here** (B2): cfg pairs moved as a group (user, 6e) |
 | `packages/tddy-supervisor/docs/code-issues/oversized-file-config.md` | **fix here** (B3) |
 | `packages/tddy-daemon-auth/docs/code-issues/oversized-file-auth.md` | out of scope: 579 → 579, the stack added only a row |
-| `packages/tddy-coding-subagent/docs/code-issues/complexity-subagent-session-take-turn.md` | out of scope: moved unchanged (78/5). See 6e Q1 |
-| `packages/tddy-agent-launch/docs/code-issues/complexity-*` (4 records the stack grew by 1 line) | reopened by the strict rule. Tier C, 6e Q1 |
+| `packages/tddy-coding-subagent/docs/code-issues/complexity-subagent-session-take-turn.md` | out of scope: moved unchanged (78/5) |
+| `packages/tddy-agent-launch/docs/code-issues/complexity-*` (4 records the stack grew by 1 line) | Tier C: a measurement row only, per the user's option (b) (B4′) |
 | `docs/dev/todo/2026-11-09-dead-inherited-host-session-socket-adoption.md` | **✅ RESOLVED HERE** (B5) |
 | other TODOs the stack added | the TODO gate, below |
 
@@ -68,7 +68,7 @@ the touched packages finds none in flight).
 
 - [ ] **Plan**: layout proposed, seam order fixed, plans anchored (`plans/`), the 6e answers folded in
 - [ ] **Apply**: `check --deep` clean per plan, each plan applied and committed on its own, `verify --against` after each
-- [ ] **Hand edits**: B2's cfg-pair merge (pending Q2), B5's deletion, B6's wording, the B7 test widening, each in its own commit
+- [ ] **Hand edits**: B5's deletion and refusal, B6's wording, B8's crate body and consumer wiring, each in its own commit. No hand edit in B2
 - [ ] **Baseline**: the scoped suites below, back to the recorded failing set by name
 - [ ] **Code quality**: `cargo fmt --check`; `cargo clippy -p <touched> --all-targets -- -D warnings`
 - [ ] **Re-measure**: `/analyze-code-issues` adds none and closes every backlog row. The records are deleted with their final numbers in the change-history entry
@@ -99,21 +99,37 @@ Closed when `spec.rs` ≤ 500 and no destination is > 500. Delete the record.
 
 ### B2 — `oversized-file-spawn-broker.md`: `spawn_broker.rs` 984 → ≈ 120
 
-1. `spawn_broker::spawn_plan` (`move_item`, about 320 lines): `SpawnPlan`, `ChildOutput`,
+**The cfg pairs move as a group, never hand-merged** (user, 6e, 2026-11-10). `move_item` cannot
+address a cfg-duplicated item at all: `anchors --items set_parent_death_signal` is refused with
+"names 2 items" on this branch. Each contiguous run of pairs is therefore one `extract_module` over
+the range that holds both definitions of every pair (`"group"`, `to_file: true`, `reexport: "glob"`),
+so every pair moves as a unit into the same destination. The ranges are applied bottom-up, so the
+ranges above stay valid. Each v1 plan is re-snapshotted after the one before it applies.
+
+1. `09-spawn-broker-namespaces`: lines 596–918 → `spawn_broker::namespaces` (about 325 lines):
+   `enter_{user,mount,network}_namespace`, `write_small_file`, `make_root_mount_private`,
+   `DESCRIPTOR_*`, `write_descriptor_path`, `bind_mount`, `bring_loopback_up`, and the
+   `/proc/self/*` consts.
+2. `10-spawn-broker-resolve`: lines 503–594 → `spawn_broker::resolve` (about 95 lines): the
+   `RESOLVE_*` pairs, `open_without_following_symlinks`, `open_directory_reference`, `open_resolved`.
+3. `11-spawn-broker-process-syscalls`: lines 311–427 → `spawn_broker::process_syscalls` (about 120
+   lines): `only_on_linux`, `set_parent_death_signal`, `lead_own_process_group`, `GroupCount`,
+   `drop_privilege`, `change_directory`. Then `-b` moves `join_cgroup_scope` (a single item) into it.
+4. `12-spawn-broker-spawn-plan` (`move_item`, about 320 lines): `SpawnPlan`, `ChildOutput`,
    `EnvironmentBase`, `SESSION_PATH`, `FORWARDED_VARIABLES`, `SandboxJail`, `JailMount`,
-   `PreExecStep`, `pre_exec_plan`, `privilege_to_drop`, `single_id_map`, `compile_bind_mount`,
-   `unresolvable_mount_source`. `reexport: "outside"` keeps `tddy_supervisor::spawn_broker::SpawnPlan`
-   and the others for the daemon's consumers.
-2. **The cfg pairs become one item each.** This is a hand edit and is pending **6e Q2**. Each
-   `#[cfg(target_os = "linux")] fn x` / `#[cfg(not(...))] fn x` pair becomes one `fn x` whose body
-   carries the two `#[cfg]` blocks. The same applies to the `type` and `const` pairs, as one item with
-   an inner cfg'd `const`/`type` or a `cfg_if`-free `#[cfg]` on the expression. No behaviour changes, and
-   both targets compile as before. The engine refuses these items today: see the record's *Why the
-   engine stops here*.
-3. `move_item` the merged syscall layer into three siblings:
-   - `spawn_broker::process_syscalls` (about 125 lines);
-   - `spawn_broker::resolve` (about 95 lines);
-   - `spawn_broker::namespaces` (about 325 lines).
+   `PreExecStep`, `pre_exec_plan`, `privilege_to_drop`. Then `-b` moves `single_id_map`,
+   `compile_bind_mount` and `unresolvable_mount_source`. `reexport: "outside"` keeps
+   `tddy_supervisor::spawn_broker::SpawnPlan` and the others for the daemon's consumers.
+
+⚠ **At plan time, on this macOS host, the engine runs step 3 and refuses steps 1 and 2.** `check --deep`
+on step 1 or step 2 refuses the whole group: *"no import rust-analyzer offered for `path` left fewer of
+its unresolved occurrence(s)"*. Those regions are mostly `#[cfg(target_os = "linux")]`, and
+rust-analyzer on Darwin does not analyse cfg'd-out code, so their names do not resolve. Step 3 passes
+`--deep` (5 widenings to `pub(crate)`).
+
+**Per the user, `[G]` does not hand-edit around this.** It first re-runs `check --deep` for 09/10 on a
+Linux host, or with rust-analyzer's `cargo.target` set to a Linux triple. If the group is still
+refused there, it **stops and asks**.
 
 Closed when every file in `spawn_broker/` is ≤ 500. Delete the record.
 
@@ -140,7 +156,7 @@ The extracts are ordered bottom-up within each function. No range holds an early
 | d | `client.rs` `open_event_stream` | 66 | extract the first-event read (`first_event`) and the forwarding task body (`forward_frames`) |
 | e | `streamed.rs` `for_each_line` | depth 6 | extract the per-chunk byte loop (`split_chunk`) |
 | f | `streamed.rs` `forward_lines_until_exit` | depth 5 | extract the `Some(line)` arm (`forward_line`) |
-| g | `tddy-daemon-kernel` `users_file.rs` `load_users_file` | 61/5 | extract the root-ownership check and the row checks (see 6e Q6 on the duplication) |
+| g | `tddy-daemon-kernel` `users_file.rs` `load_users_file` | 61/5 | the row checks go to `tddy-users-file` (B8). Extract the root-ownership check |
 | h | `owner_socket.rs` `bind_owner_only` | 74/5 | extract the stale-socket removal branch |
 | i | `tddy-cli-sessions` `pty_spawn.rs` `spawn_tool_on` | 104 | extract the env assembly and the command build |
 | j | `tddy-coding-subagent` `session.rs` `opened` | CRAP 42 (c 6) | extract the hooks-scoped open (`begin_open` → `open_session` → `end_open` → merge) into `open_under_hooks` |
@@ -152,16 +168,38 @@ The extracts are ordered bottom-up within each function. No range holds an early
 Each one also gets a short "detected and closed" row in the change-history entry, since none has a
 record. The sweep writes no record that it closes in the same PR.
 
-### B4′ — Tier C: pre-existing functions this stack made worse (discovery §2c, 18 functions)
+### B4′ — Tier C: pre-existing functions this stack made worse (discovery §2c)
 
-**Pending 6e Q1.** The yolo rule counts every row as reopened. Fourteen grew by 1–9 lines. Four grew
-by 9 or more: `lib.rs run`, which is B4a, then `Supervisor::new` 71 → 80, `ChildEnvironment::build`
-70 → 78, and `ensure_bound_blocking` 66 → 77.
+**Scope (user, 6e, 2026-11-10: option (b)).** Extract a function when the stack grew it by 5 or more
+lines, or when it has no record. Otherwise, add a fresh measurement row to its record and do not
+extract it.
 
-The plan's default is the rule: extract each back under the budget. Six of them are 140–303-line
-functions that already have records (`start_cli_harness_session` 303, `start_sandboxed_cli_harness_session`
-286, `open_pty_and_pump` 188/9, …), so closing them is a large carve of `tddy-agent-launch`,
-`tddy-pty` and `tddy-terminal-rpc` that the stack only brushed.
+**Extracted** (14), each brought to ≤ 60 lines and depth ≤ 4, anchored with `anchors --at` after
+B1–B3 apply:
+
+| Function | base → head | Why it is in scope |
+|---|---|---|
+| `tddy-agent-launch` `host_session_socket.rs` `ensure_bound` | 65 → 75 | +10, no record |
+| `tddy-agent-launch` `opencode_cli_spawn/harness_launch.rs` `launch` | 69 → 74 | +5, no record |
+| `tddy-agent-launch` `svc_signal_delete_session.rs` `delete_session_as` | 90 → 94 | no record |
+| `tddy-coder` `session_participant/terminal_manager.rs` `start_terminal` | 76 → 77 | no record |
+| `tddy-coding-agent-specs` `headless.rs` `render` | 66 → 72 | +6, no record |
+| `tddy-daemon-kernel` `agent_tool_sockets.rs` `ensure_bound_blocking` | 66 → 77 | +11, no record |
+| `tddy-daemon` `runtime/build_context.rs` `new` | 65 → 71 | +6, no record |
+| `tddy-daemon` `runtime/mount_host.rs` `build_session_host` | 89 → 90 | no record |
+| `tddy-pty` `runtime.rs` `open_pty_and_pump` | 179/9 → 188/9 | +9, no record — the largest |
+| `tddy-session-lifecycle` `connection_service/svc_host_builders.rs` `new` | 111 → 112 | no record |
+| `tddy-session-split` `svc_spawn_split_agent.rs` `spawn_split_agent_process` | 130 → 132 | no record |
+| `tddy-supervisor` `spawn_broker/child_environment.rs` `ChildEnvironment::build` | 70 → 78 | +8, no record |
+| `tddy-supervisor` `supervisor.rs` `Supervisor::new` | 71 → 80 | +9, no record |
+| `tddy-terminal-rpc` `local_pty_relay.rs` `run` | 140/8 → 141/8 | no record |
+
+**Measurement row added in this commit, not extracted** (4). Each one is +1 under an existing record:
+
+- `packages/tddy-agent-launch/docs/code-issues/complexity-opencode-cli-spawn-start-cli-harness-session.md` (302 → 303)
+- `packages/tddy-agent-launch/docs/code-issues/complexity-opencode-cli-spawn-resume-resume-cli-harness-session.md` (117 → 118)
+- `packages/tddy-agent-launch/docs/code-issues/complexity-svc-resume-sandboxed-cli-harness-session-relaunch-sandboxed-cli-harness.md` (139 → 140)
+- `packages/tddy-agent-launch/docs/code-issues/complexity-svc-start-sandboxed-cli-harness-session-start-sandboxed-cli-harness-session.md` (285 → 286)
 
 ### B5 — `docs/dev/todo/2026-11-09-dead-inherited-host-session-socket-adoption.md` ✅ RESOLVED HERE
 
@@ -173,9 +211,17 @@ A hand deletion, which the user approved on 2026-11-09. It deletes:
 - the adoption tests and helpers in `inherited_host_sockets_tests.rs` (lines 89–278), keeping the three
   merged-socket tests.
 
-The remaining test module is renamed to `user_socket_tests` by `rename_symbol` (6e Q4).
-`OwnerSocketKind::HOST_SESSION.setting` stops naming the removed `host_sockets:` key (6e Q4). The
-TODO file is deleted in the same commit.
+Then:
+
+- `14-session-lifecycle-user-socket-tests` (`rename_symbol`, passes `--deep`) renames the test module to
+  `user_socket_tests` (user, 6e). `[G]` confirms the file moved with the module, since rust-analyzer
+  renames a module's file.
+- **The refusal names no supervisor key** (user, 6e). `bind_owner_only`'s not-privileged closure
+  becomes `owner_socket::not_privileged_to_hand_over(kind, euid, os_user, target_uid)`: one wording
+  for both kinds, telling the operator to map the user in `users.yaml`. The `OwnerSocketKind::setting`
+  field, now read by nothing, is deleted. This changes a refusal string, pinned red by
+  `owner_socket::tests`.
+- The TODO file is deleted in the same commit.
 
 ### B6 — stale wording: `allowed_env_keys` / `allowed_relay_tool_paths`
 
@@ -192,20 +238,53 @@ The package-doc hit, `tddy-supervisor/docs/architecture.md:294–296`, is in the
 
 ### B7 — #857's `TODO(sweep)`: the route renderer keyed off its shape
 
-- `rename_symbol` `tddy_agent_backend::backend::routed::codex_acp_route_args` → `toml_args_route_args`
-  (6e Q3). The engine rewrites the re-exports (`backend/mod.rs:15`, `lib.rs:35`), the
+- `13-agent-backend-toml-route-overrides`: `rename_symbol` `tddy_agent_backend::backend::routed::codex_acp_route_args`
+  → `toml_route_overrides` (user, 6e). It passes `--deep`. The engine rewrites the re-exports (`backend/mod.rs:15`, `lib.rs:35`), the
   `tddy_core::` path in `coding_agent_launcher/acp.rs:51`, and `adapters/codex_acp_login.rs`.
-- `tests/launcher_names_no_agent.rs` scans for every shipped spec's tool id and product name, read from
-  `tddy-coding-agent-specs/specs/*.yaml`, not just `"opencode"`. This widens the pin and does not change
-  behaviour. It must be green after the rename. A failure means a launcher still names an agent, which
-  is a finding to fix here, not a reason to narrow the test.
+- `tests/launcher_names_no_agent.rs::the_daemon_acp_launcher_names_no_shipped_agent` (added in the
+  contract) scans the launcher for every shipped spec's id segments and product, read from
+  `tddy-coding-agent-specs/specs/*.yaml`. It matches whole identifier segments. It is red today on
+  exactly one line, `acp.rs:51 … tddy_core::codex_acp_route_args(route)`, and the rename turns it
+  green.
+
+### B8 — the users.yaml model and validation, shared (user, 6e, 2026-11-10)
+
+Two copies of the users.yaml row checks had drifted:
+
+- `tddy-supervisor::users_file::UsersFile::from_yaml` (B4c) checks shape, no root, no empty login,
+  a safe `os_user`, one OS user per login, and at most 15 OS users.
+- `tddy-daemon-kernel::users_file::load_users_file` (B4g) checks only root and the one-OS-user rule.
+  It accepts an `os_user` that cannot name a socket, more OS users than the supervisor can hand over,
+  and a row with no login.
+
+A new workspace crate, **`packages/tddy-users-file`**, holds the model (`MappedUser`, `UsersMapping`,
+`MAX_MAPPED_OS_USERS`, `is_one_safe_segment`) and the one validation, `UsersMapping::from_yaml`, which
+returns a `UsersFileRefusal`.
+
+- **Dependencies:** `serde` and `serde_yaml` only, both of which its two consumers already use. No
+  external dependency, so `Cargo.lock` gains only the crate itself.
+- **Supervisor:** `UsersFile` wraps `UsersMapping` and keeps reading only `os_users()`. The crate names
+  no coding agent and no daemon type.
+- **Trust check:** not shared. The readers trust different owners. The supervisor accepts root or its
+  own uid and walks every directory above the file (`config::trust`, B3). A supervised daemon accepts
+  root alone, for the file only. The only common part is a one-line mode mask, so each reader keeps its
+  own check (decision below).
+- **Behaviour change, daemon only:** the daemon now refuses the three mappings above, the same ones
+  the supervisor already refuses. Pinned red by the kernel tests in the contract.
+- **Kernel code:** `load_users_file` maps `UsersMapping::distinct_rows()` into its
+  `config::access::UserMapping`, and its row checks and hand-rolled dedup go. That also closes B4g.
+
+The contract commit adds the crate with its API surface stubbed (`unimplemented!`, marked
+`TODO(#agent-tools 33/33 green)`) and its tests, the path dependency in both consumers, and the
+consumer-side tests.
 
 ### Not in scope (verified, nothing to do)
 
 - `transport_of` / `permission_policy_of`: only test helpers remain (discovery §4).
 - b8d9b769c's O_PATH descriptor colliding with the handover slots: this cannot happen while
-  `reserve_handover_slots` holds fds 3..19 from `ForkBroker::start` (discovery §4). Whether to pin it
-  with a test is 6e Q5. It is not a TODO.
+  `reserve_handover_slots` holds fds 3–18 from `ForkBroker::start` (discovery §4). It is not a TODO.
+  It is now pinned by `handover::tests::a_descriptor_opened_while_the_slots_are_reserved_lands_above_every_slot`
+  (user, 6e), which is green.
 - `oversized-file-auth.md` (579 unchanged) and `complexity-subagent-session-take-turn.md` (moved
   unchanged).
 
@@ -218,7 +297,7 @@ The package-doc hit, `tddy-supervisor/docs/architecture.md:294–296`, is in the
 | `docs/dev/todo/2026-11-09-daemon-codex-acp-login-runs-as-the-daemon-user-in-the-worktree.md` | behaviour change: the login has to be spawned through the user switch, plus a per-conversation directory the session user owns | **defer**: its own feature node with an acceptance test. It is not a sweep-sized fix |
 | `docs/dev/todo/2026-11-09-daemon-creates-no-cgroup-scope-for-supervised-spawns.md` | feature work | already **deferred** by the user (2026-11-09). Not re-asked |
 | `docs/dev/todo/2026-11-09-restructure-move-item-defects-found-splitting-coding-subagent-session.md` | engine work in `tddy-code-restructuring`, not this stack's code | **defer**: this plan works around E1 (one plan per group), and E2 is caught by the compile gate. Continue only if B1–B3 hit it in a way the workaround cannot absorb |
-| `docs/dev/todo/2026-11-01-install-script-over-length-budget.md` | a bash split, which the Rust-only engine cannot do. It needs a sourcing convention and the `install_contract` checks updated | **continue as its own node**: the stack grew it 1,700 → 1,811, and it is stack-shared. A hand split by seam (account/identity, desktop, spawn-policy migration) is reviewable on its own. Or fold it into this node if the user prefers (6e Q8) |
+| `docs/dev/todo/2026-11-01-install-script-over-length-budget.md` | a bash split, which the Rust-only engine cannot do. It needs a sourcing convention and the `install_contract` checks updated | **deferred by the user** (6e, 2026-11-10). The consent line is recorded in the entry by this commit |
 
 ## Callers
 
@@ -264,6 +343,18 @@ Packages B4/B4′ reach that are not in the run above are `tddy-coding-subagent`
 `tddy-pty`, `tddy-terminal-rpc`, `tddy-session-split` and `tddy-coder`. Each one is baselined by
 `[G]` before its first plan touches it, and only if 6e keeps Tier C.
 
+Contract-commit run of the new tests (`./dev cargo test -p tddy-users-file`; `-p tddy-daemon-kernel --lib
+users_file owner_socket::tests`; `-p tddy-supervisor --lib the_shared_mapping_budget
+a_descriptor_opened_while_the_slots`; `-p tddy-session-lifecycle --test launcher_names_no_agent`):
+
+- tddy-users-file: 0 passed, 11 failed;
+- kernel: 4 passed, 5 failed (the 4 existing users_file tests are green);
+- supervisor: 2 passed;
+- launcher_names_no_agent: 1 passed, 1 failed.
+
+Each is exactly as the *Draft PR contract* table says. `cargo check --all-targets` over those four
+packages is clean.
+
 | Gate | Before | After |
 |---|---|---|
 | `cargo fmt --check` | not run at plan time (the restructure apply rustfmts what it writes) | |
@@ -293,8 +384,17 @@ cannot see a module that an earlier line of the same plan creates.
 | `07-config-trust` | `move_item` (3 items, `name: trust`) | ✅ |
 | `08-config-users` | `move_item` `UsersConfig`, `default_user_sockets_dir` (`name: users`) | ✅ |
 | `08-config-users-b` | `move_item` `refuse_old_user_list_keys` → `config::users` | ⏳ needs 08 |
-| `09-spawn-broker-spawn-plan` | `move_item` (10 items, `name: spawn_plan`), widens `SESSION_PATH`, `FORWARDED_VARIABLES` → `pub(super)` | ✅ |
-| `09-spawn-broker-spawn-plan-b` | `move_item` `single_id_map`, `compile_bind_mount`, `unresolvable_mount_source` → `spawn_broker::spawn_plan` | ⏳ needs 09 |
+| `09-spawn-broker-namespaces` | `extract_module` over the range 596–918 (every pair in it, as one `group`), `to_file` → `spawn_broker::namespaces` | 🔴 refused on macOS: cfg'd-out names unresolved (B2). Retry on a Linux target, then stop and ask |
+| `10-spawn-broker-resolve` | `extract_module` over the range 503–594, `group` → `spawn_broker::resolve` | 🔴 refused on macOS, the same way |
+| `11-spawn-broker-process-syscalls` | `extract_module` over the range 311–427, `group` → `spawn_broker::process_syscalls`, widens 5 fns → `pub(crate)` | ✅ |
+| `11-spawn-broker-process-syscalls-b` | `move_item` `join_cgroup_scope` → `spawn_broker::process_syscalls` | ⏳ needs 11 |
+| `12-spawn-broker-spawn-plan` | `move_item` (10 items, `name: spawn_plan`), widens `SESSION_PATH`, `FORWARDED_VARIABLES` → `pub(super)` | ✅ |
+| `12-spawn-broker-spawn-plan-b` | `move_item` `single_id_map`, `compile_bind_mount`, `unresolvable_mount_source` → `spawn_broker::spawn_plan` | ⏳ needs 12 |
+| `13-agent-backend-toml-route-overrides` | `rename_symbol` `codex_acp_route_args` → `toml_route_overrides` (range anchor on the name) | ✅ |
+| `14-session-lifecycle-user-socket-tests` | `rename_symbol` `mod inherited_host_sockets_tests` → `user_socket_tests` (after B5's deletion) | ✅ |
+
+09–11 are v1 range plans, applied bottom-up (09 → 10 → 11) so each range above stays at its line.
+Re-run `restructure snapshot` on the next one after each apply.
 
 ⚠ **Re-anchor before applying anything after 01.** Every applied plan rewrites `spec.rs`. Item anchors
 survive edits outside their item, but the `<CodingAgentSpec>#N` indices in `01-b`, `02` and `04` count
@@ -306,55 +406,89 @@ would collide with it (`E0428`, reported by `check --deep`).
 
 Not yet planned as JSONL, because each depends on the tree that the plans above leave:
 
-- B2 steps 2–3: the cfg-pair merge, pending Q2, then three `move_item`s;
-- B3 is complete above;
-- B4's `extract_method`s, which are `anchors --at` ranges taken after B1–B3 apply;
-- B7's `rename_symbol`.
+- B4/B4′'s `extract_method`s: `anchors --at` ranges, taken after B1–B3 apply;
+- B8's crate body and consumer wiring: hand-written green code, because the crate is new and the
+  engine moves only existing code. `is_one_safe_segment` and the checks are moved from the
+  supervisor by hand, since the engine cannot move code into a crate that is not yet in the graph.
+  `[G]` may instead try `move_item` into the stub crate once it compiles.
 
 ## Decisions & Trade-offs
 
-- **One plan file per group**, not one plan for each file. This works around E1: a chained plan's
-  anchor gets invalidated by an earlier move in the same file.
-- **B2 needs a hand edit before the engine can move anything** (Q2). The alternative is teaching the
-  engine to address a cfg-duplicated item by its predicate. That is real engine work, and it belongs in
-  `tddy-code-restructuring`'s own backlog rather than this stack.
+- **One plan file per operation.** This works around E1, where a chained plan's anchor is invalidated
+  by an earlier move in the same file. It also lets a deep check, which resolves every line against the
+  unchanged tree, prove each creating move on its own.
 - **No record is written for the B4 findings.** The sweep both finds and closes them, so the
   change-history entry carries each one's before → after numbers instead.
+- **2026-11-10, user, 6e: Tier C is option (b).** Extract the functions grown by 5 or more lines, or
+  with no record (14). The other 4 get a fresh measurement row only (B4′).
+- **2026-11-10, user, 6e: the spawn_broker cfg pairs are moved as a group, never hand-merged.** If the
+  engine cannot run a grouped plan for a pair, `[G]` stops and asks. Planned as one range
+  `extract_module` per contiguous run of pairs, since `move_item` cannot anchor a cfg-duplicated item
+  (B2). Steps 1–2 are refused on this macOS host (cfg'd-out code). `[G]` retries on a Linux target,
+  then stops and asks.
+- **2026-11-10, user, 6e: the install split is deferred**, and the consent is recorded in its TODO.
+  It is not in this node.
+- **2026-11-10, user, 6e: the users.yaml duplication is resolved here** with a new crate,
+  `tddy-users-file` (B8). No external dependency, and nothing agent- or daemon-specific reaches the
+  supervisor. **Trust check not shared**: the two readers trust different owners and scopes (B8),
+  and a shared function would take its policy as parameters while saving one mode mask.
+- **2026-11-10, user, 6e: the route helper is renamed `toml_route_overrides`** (B7).
+- **2026-11-10, user, 6e: the dead-module refusal names `users.yaml` and no supervisor key.** The test
+  module is renamed `user_socket_tests` (B5).
+- **2026-11-10, user, 6e: the O_PATH pin test is added** (green; it pins current behaviour).
+- **2026-11-10, user, 6e: test files over 500 lines are out of scope.**
+- **2026-11-10, user, 6e: seam names as planned:** `spec::{headless_section, acp, slot_shapes,
+  route_slot, pass_env, argv}`, `spawn_broker::{spawn_plan, process_syscalls, resolve, namespaces}`,
+  `config::{trust, users}`.
+
+## Draft PR contract
+
+What this PR owns, and what `[G]` must leave true:
+
+- **New crate `tddy-users-file`** (public API, stubbed in the contract):
+  - `MAX_MAPPED_OS_USERS: usize = 15`
+  - `MappedUser { github_user, os_user }` (serde, `deny_unknown_fields`)
+  - `UsersMapping::{from_yaml, rows, distinct_rows, os_users}`
+  - `UsersFileRefusal::{Malformed, NoGithubUser, MapsToRoot, UnsafeOsUser, TwoOsUsers, TooManyOsUsers}` + `Display` (the supervisor's current wording, no file prefix)
+  - `is_one_safe_segment`
+- **`tddy_daemon_kernel::owner_socket::not_privileged_to_hand_over(kind, euid, os_user, target_uid) -> String`**
+  (stubbed). `OwnerSocketKind::setting` is deleted at green.
+- **Renamed:** `tddy_agent_backend::toml_route_overrides`, which was `codex_acp_route_args`, and its
+  `tddy_core` re-export.
+- **Moved, with paths kept by re-exports:** the B1/B2/B3 modules listed above.
+- **Deleted:** `tddy_agent_launch::inherited_host_sockets`, `HostSessionSockets::adopt_inherited`.
+
+Tests in the contract (red pins new behaviour; green pins current behaviour that must stay):
+
+| Test | State at contract |
+|---|---|
+| `tddy-users-file` `tests::blank_text_is_an_empty_mapping` | 🔴 (stub) |
+| `tests::reads_each_row_in_order_and_the_distinct_os_users_it_names` | 🔴 |
+| `tests::an_identical_repeated_row_is_one_distinct_row` | 🔴 |
+| `tests::refuses_text_that_is_not_a_list_of_rows` | 🔴 |
+| `tests::refuses_a_row_with_no_github_user` | 🔴 |
+| `tests::refuses_a_mapping_to_root` | 🔴 |
+| `tests::refuses_an_os_user_that_cannot_name_a_socket` | 🔴 |
+| `tests::refuses_one_login_mapped_to_two_os_users` | 🔴 |
+| `tests::admits_fifteen_distinct_os_users_and_refuses_sixteen` | 🔴 |
+| `tests::a_refusal_reads_as_the_supervisor_words_it_today` | 🔴 |
+| `tests::a_safe_segment_is_plain_ascii_and_not_hidden` | 🔴 |
+| `tddy-daemon-kernel` `users_file::tests::a_daemon_refuses_a_users_yaml_whose_os_user_cannot_name_a_socket` | 🔴 (new daemon refusal) |
+| `users_file::tests::a_daemon_refuses_a_users_yaml_naming_more_os_users_than_the_supervisor_can_hand_over` | 🔴 |
+| `users_file::tests::a_daemon_refuses_a_users_yaml_row_that_names_no_github_user` | 🔴 |
+| `owner_socket::tests::a_refusal_to_hand_over_a_host_session_socket_names_users_yaml_and_no_supervisor_key` | 🔴 (stub; the renamed refusal) |
+| `owner_socket::tests::both_socket_kinds_give_the_same_remedy` | 🔴 |
+| `tddy-supervisor` `users_file::tests::the_shared_mapping_budget_is_every_handover_slot_but_the_daemons_own` | 🟢 |
+| `handover::tests::a_descriptor_opened_while_the_slots_are_reserved_lands_above_every_slot` | 🟢 (O_PATH pin) |
+| `tddy-session-lifecycle` `launcher_names_no_agent::the_daemon_acp_launcher_names_no_shipped_agent` | 🔴 (one line: `codex_acp_route_args` in `acp.rs:51`) |
+
+The existing users.yaml suites stay green throughout: the supervisor's `users_file::tests` and the
+kernel's four `users_file::tests` (green at the contract). So does the recorded baseline, with the same
+9 failing names.
 
 ## 6e questions for the user
 
-1. **Tier C scope** (B4′, 18 functions, mostly +1–5 lines). Options:
-   - (a) the strict rule: extract them all. This is a large carve of `tddy-agent-launch`, `tddy-pty`
-     and `tddy-terminal-rpc`;
-   - (b) close only the ones that grew by ≥ 5 lines or have no record, and append an "unchanged/+1"
-     measurement row to the records of the rest;
-   - (c) B4 only, with a row appended to each Tier C record.
-
-   **Recommendation: (b).**
-2. **`spawn_broker` cfg pairs** (B2 step 2). Either merge each `#[cfg]` pair into one item by hand (no
-   behaviour change, both targets compile), or stop and fix the engine first. **Recommendation:
-   merge.**
-3. **The rename's name** (B7). `toml_args_route_args` (after `RouteShape::TomlArgs`), or
-   `toml_route_overrides`?
-4. **B5 details.** Rename `inherited_host_sockets_tests.rs` → `user_socket_tests.rs`? And
-   `OwnerSocketKind::HOST_SESSION.setting`: drop the field for the embedded host (`setting: ""`, with the
-   refusal no longer naming a supervisor key), or point it at `users.yaml`? **Recommendation: the
-   rename, plus a refusal that names no supervisor key**, since an embedded host is never supervised.
-   This changes one refusal string.
-5. **O_PATH pin.** Add a unit test that a checked executable's descriptor opened after
-   `ForkBroker::start` is never in `SD_LISTEN_FDS_START..+MAX_HANDED_OVER_LISTENERS`? Recommendation:
-   yes. It is a pin of current behaviour, not a TODO.
-6. **The users.yaml checks duplicated across crates** (`tddy-supervisor::users_file::from_yaml` and
-   `tddy-daemon-kernel::users_file::load_users_file`). B4 c/g shrink both but keep two copies. Unifying
-   them needs a shared crate (the supervisor must not depend on daemon code). Leave it, or add a node?
-7. **`*_tests.rs` over 500.** `agent_activity_unit_tests.rs` 1293 → 1301 and three others. The gate's
-   path filter does not exclude `_tests.rs`, but step 3.5 calls a test file over budget "not a
-   decomposition". Treat them as out of scope? Recommendation: yes.
-8. **`install`** (1,811 lines): its own node after the sweep, or folded into this one?
-9. **Seam names in B1/B2/B3**: `spec::{headless_section, acp, slot_shapes, route_slot, pass_env,
-   argv}`, `spawn_broker::{spawn_plan, process_syscalls, resolve, namespaces}`, `config::{trust,
-   users}`. OK, or rename? (`headless_section` avoids a clash with the existing `crate::headless`
-   renderer module.)
+All answered by the user on 2026-11-10. See *Decisions & Trade-offs*.
 
 ## Final Checklist
 
@@ -369,4 +503,5 @@ Not yet planned as JSONL, because each depends on the tree that the plans above 
 - [ ] `packages/tddy-coding-agent-specs` docs (module map, if one lists `spec.rs` contents): the `spec/` submodules
 - [ ] `packages/tddy-agent-backend/docs/architecture.md:138`, `packages/tddy-session-lifecycle/docs/coding-agent-launcher.md:48`, `specs/codex-acp.yaml:13`: the renamed helper
 - [ ] `docs/dev/changesets/2026-11-10-agent-tools-sweep.md`: the change-history entry, with every closed record's final measurement
-- [ ] `git rm` the three oversized-file records, the B5 TODO, and the reconciled rows
+- [ ] `packages/tddy-users-file/README.md` and a `docs/` changeset entry: the new crate. Also the supervisor and daemon-kernel docs that describe users.yaml validation (`packages/tddy-supervisor/docs/architecture.md`, `docs/ft/supervisor/tddy-supervisor.md`) name the shared crate and the daemon's new refusals
+- [ ] `git rm` the three oversized-file records and the B5 TODO

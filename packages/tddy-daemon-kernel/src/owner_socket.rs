@@ -87,6 +87,20 @@ pub fn descriptors_named(
         .collect()
 }
 
+/// Why this daemon cannot hand `os_user` (uid `target_uid`) the `kind` socket it bound: it is not
+/// privileged to `chown`, as when it runs as `tddy-supervisor`'s unprivileged child. The remedy is the
+/// same for every kind — map the user in `users.yaml`, so the supervisor creates the socket — and it
+/// names no `supervisor.yaml` key (`#agent-tools` 33/33: `host_sockets:` is a load error since #859).
+pub fn not_privileged_to_hand_over(
+    _kind: OwnerSocketKind,
+    _euid: u32,
+    _os_user: &str,
+    _target_uid: u32,
+) -> String {
+    // TODO(#agent-tools 33/33 green): the closure in `bind_owner_only`, one wording for both kinds.
+    unimplemented!("contract only — implemented by the #agent-tools sweep's green phase")
+}
+
 /// Bind `path` for `os_user` with no window in which anyone else can reach it. See the module docs.
 pub fn bind_owner_only(
     path: &Path,
@@ -375,4 +389,36 @@ pub fn require_listening(listener: &UnixListener) -> Result<(), String> {
 #[cfg(not(target_os = "linux"))]
 pub fn require_listening(_listener: &UnixListener) -> Result<(), String> {
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_refusal_to_hand_over_a_host_session_socket_names_users_yaml_and_no_supervisor_key() {
+        // Given / When the embedded host's bind of alice's host-session socket cannot chown
+        let refusal =
+            not_privileged_to_hand_over(OwnerSocketKind::HOST_SESSION, 990, "alice", 1001);
+
+        // Then it points the operator at users.yaml, never at a key supervisor.yaml refuses
+        assert!(
+            refusal.contains("users.yaml")
+                && refusal.contains("alice")
+                && !refusal.contains("host_sockets")
+                && !refusal.contains("supervisor.yaml"),
+            "got {refusal}"
+        );
+    }
+
+    #[test]
+    fn both_socket_kinds_give_the_same_remedy() {
+        // Given / When
+        let remedies = [OwnerSocketKind::HOST_SESSION, OwnerSocketKind::USER_DAEMON].map(|kind| {
+            not_privileged_to_hand_over(kind, 990, "alice", 1001).replace(kind.noun, "<socket>")
+        });
+
+        // Then
+        assert_eq!(remedies[0], remedies[1]);
+    }
 }

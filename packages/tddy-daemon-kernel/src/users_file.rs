@@ -247,4 +247,56 @@ mod tests {
             "got {refusal:#}"
         );
     }
+
+    // `#agent-tools` 33/33 (the sweep): the daemon validates users.yaml through `tddy-users-file`,
+    // the same checks the supervisor makes, so a mapping one reader refuses the other refuses too.
+
+    fn the_refusal_of_a_desktop_mapping(rows: &str) -> String {
+        let deployment = ADeployment::with_daemon_yaml().mapping(rows);
+        let refusal = load_users_file(&UsersFileSource::BesideConfig(deployment.users_yaml()))
+            .expect_err("the mapping must be refused");
+        format!("{refusal:#}")
+    }
+
+    #[test]
+    fn a_daemon_refuses_a_users_yaml_whose_os_user_cannot_name_a_socket() {
+        // Given / When
+        let refusal =
+            the_refusal_of_a_desktop_mapping("- {github_user: operator, os_user: '../a:b'}\n");
+
+        // Then
+        assert!(
+            refusal.contains("users.yaml") && refusal.contains("../a:b"),
+            "got {refusal}"
+        );
+    }
+
+    #[test]
+    fn a_daemon_refuses_a_users_yaml_naming_more_os_users_than_the_supervisor_can_hand_over() {
+        // Given sixteen distinct OS users
+        let rows: String = (0..16)
+            .map(|n| format!("- {{github_user: login{n}, os_user: u{n}}}\n"))
+            .collect();
+
+        // When
+        let refusal = the_refusal_of_a_desktop_mapping(&rows);
+
+        // Then
+        assert!(
+            refusal.contains("users.yaml") && refusal.contains("15"),
+            "got {refusal}"
+        );
+    }
+
+    #[test]
+    fn a_daemon_refuses_a_users_yaml_row_that_names_no_github_user() {
+        // Given / When
+        let refusal = the_refusal_of_a_desktop_mapping("- {github_user: '', os_user: ops}\n");
+
+        // Then
+        assert!(
+            refusal.contains("users.yaml") && refusal.contains("github_user"),
+            "got {refusal}"
+        );
+    }
 }

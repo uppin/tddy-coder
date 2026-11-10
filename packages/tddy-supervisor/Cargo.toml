@@ -21,6 +21,9 @@ notify = "7"
 prost = "0.13"
 serde = { version = "1", features = ["derive"] }
 serde_yaml = "0.9"
+# users.yaml's model and validation, shared with the other reader (`#agent-tools` 33/33). An
+# internal crate depending on serde/serde_yaml only: nothing new in Cargo.lock but itself.
+tddy-users-file = { path = "../tddy-users-file" }
 # The wire protocol: `supervisor.proto` is owned by this crate (see build.rs) and rides tddy-rpc's
 # frame codec over AF_UNIX via tddy-stdio's duplex endpoint.
 tddy-rpc = { path = "../tddy-rpc" }

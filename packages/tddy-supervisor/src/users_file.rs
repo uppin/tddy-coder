@@ -309,4 +309,13 @@ mod tests {
             }]
         );
     }
+
+    /// `#agent-tools` 33/33: the shared users.yaml budget is the supervisor's own handover budget.
+    #[test]
+    fn the_shared_mapping_budget_is_every_handover_slot_but_the_daemons_own() {
+        assert_eq!(
+            (tddy_users_file::MAX_MAPPED_OS_USERS, MAX_MAPPED_OS_USERS),
+            (MAX_HANDED_OVER_LISTENERS - 1, MAX_HANDED_OVER_LISTENERS - 1)
+        );
+    }
 }

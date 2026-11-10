@@ -1,0 +1,2 @@
+{"v":2,"files":{"packages/tddy-supervisor/src/spawn_broker.rs":{"sha256":"sha256:5e4bb0fcaf8d93e71b7322e0111fbde9d761392c91817fd8d7f2494dd41a9b6a"}}}
+{"id":"op-1","op":"move_item","anchor":{"kind":"items","file":"packages/tddy-supervisor/src/spawn_broker.rs","items":["tddy_supervisor::spawn_broker::join_cgroup_scope"],"fingerprints":["sha256:4fab79b183681e3303961e5b7865a890d6ffa3cdf6d5f8ec5798f5a0f89f481a"]},"to":"tddy_supervisor::spawn_broker::process_syscalls","reexport":"outside"}

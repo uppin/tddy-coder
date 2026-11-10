@@ -1,0 +1,15 @@
+[package]
+name = "tddy-users-file"
+version = "0.1.0"
+edition = "2021"
+description = "The users.yaml model and its validation, shared by tddy-supervisor and the daemon: GitHub login to OS user rows, no root, one OS user per login, at most 15 distinct OS users, each one safe path and descriptor-name segment"
+
+[lib]
+name = "tddy_users_file"
+path = "src/lib.rs"
+
+# Only what both consumers (tddy-supervisor, tddy-daemon-kernel) already depend on. This crate names
+# no coding agent and no daemon type: the supervisor links it.
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_yaml = "0.9"

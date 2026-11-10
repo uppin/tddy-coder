@@ -212,3 +212,35 @@ one item first (6e Q2).
 - **`transport_of` / `permission_policy_of`.** The only matches are test helpers
   (`tddy-agent-backend/tests/spec_backend_unit.rs:41`, `tddy-coder/tests/spec_backend_build.rs:125`).
   No production wrapper remains.
+
+## 5. After the 6e review (2026-11-10)
+
+- **spawn_broker pairs as a group.** `anchors --items set_parent_death_signal` is refused ("names 2
+  items"), so a cfg pair cannot be the anchor of a `move_item`. The plan instead uses a range
+  `extract_module` over each contiguous run of pairs, written as a group:
+
+  | Run | Lines | `check --deep` |
+  |---|---|---|
+  | process | 311–427 | ✅ |
+  | resolve | 503–594 | 🔴 `no import rust-analyzer offered for path` |
+  | namespaces | 596–918 | 🔴 the same |
+
+  The two refusals happen because those runs are `#[cfg(target_os = "linux")]` code, which
+  rust-analyzer on Darwin does not analyse.
+- **Rename anchors.** An `items` anchor on `codex_acp_route_args` lands on its doc comment, where
+  rust-analyzer gives no hover, and `--deep` refuses it. A range anchor on the identifier passes. The
+  same holds for the `mod inherited_host_sockets_tests` rename.
+- **users.yaml checks, side by side.**
+
+  | Check | supervisor `from_yaml` | kernel `load_users_file` |
+  |---|---|---|
+  | shape (`deny_unknown_fields`) | ✅ | ✅ (`UserMapping` is `deny_unknown_fields`) |
+  | empty `github_user` | refused | **accepted** |
+  | `root` | refused | refused |
+  | unsafe `os_user` | refused | **accepted** |
+  | one login, two OS users | refused | refused |
+  | > 15 OS users | refused | **accepted** |
+  | identical repeated row | kept (`rows`) | deduplicated |
+  | trust | root or own uid, file and every ancestor directory | root only, file only, supervised source only |
+
+  The three **accepted** cells are the drift the shared crate closes.
