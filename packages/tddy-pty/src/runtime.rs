@@ -294,19 +294,7 @@ fn open_pty_and_pump(
         capture.resize(initial_size.rows, initial_size.cols);
     }
 
-    let master = Arc::new(Mutex::new(pair.master));
-    let current_size = Arc::new(Mutex::new(initial_size));
-    let (exit_tx, exit_rx) = oneshot::channel();
-    // Fires when the child exits so the writer thread can stop and release its master fd, rather
-    // than parking on `stdin_rx` forever (the child never reads/writes stdin once it is gone).
-    let (child_exited_tx, child_exited_rx) = oneshot::channel::<()>();
-
-    // Reader: start BEFORE child spawn so fast-exiting stubs cannot miss PTY output.
-    let master_for_reader = Arc::clone(&master);
-    let output_ch_reader = Arc::clone(&output_ch);
-    // Disconnects when the reader ends, which the exit monitor waits for (see below).
-    let (reader_done_tx, reader_done_rx) = std::sync::mpsc::channel::<()>();
-    spawn_pty_reader(master_for_reader, output_ch_reader, reader_done_tx);
+    let (master, current_size, exit_tx, exit_rx, child_exited_tx, child_exited_rx, reader_done_rx) = spawn_reader_with_master(output_ch, initial_size, pair.master);
 
     let cmd = build_pty_command(spec);
 
@@ -360,6 +348,23 @@ fn open_pty_and_pump(
     });
 
     Ok(())
+}
+
+fn spawn_reader_with_master(output_ch: Arc<TaskChannel>, initial_size: PtySize, pair_master: Box<dyn MasterPty + Send>) -> (Arc<Mutex<Box<dyn MasterPty + Send>>>, Arc<Mutex<PtySize>>, oneshot::Sender<TaskStatus>, oneshot::Receiver<TaskStatus>, oneshot::Sender<()>, oneshot::Receiver<()>, std::sync::mpsc::Receiver<()>) {
+    let master = Arc::new(Mutex::new(pair_master));
+    let current_size = Arc::new(Mutex::new(initial_size));
+    let (exit_tx, exit_rx) = oneshot::channel();
+    // Fires when the child exits so the writer thread can stop and release its master fd, rather
+    // than parking on `stdin_rx` forever (the child never reads/writes stdin once it is gone).
+    let (child_exited_tx, child_exited_rx) = oneshot::channel::<()>();
+
+    // Reader: start BEFORE child spawn so fast-exiting stubs cannot miss PTY output.
+    let master_for_reader = Arc::clone(&master);
+    let output_ch_reader = Arc::clone(&output_ch);
+    // Disconnects when the reader ends, which the exit monitor waits for (see below).
+    let (reader_done_tx, reader_done_rx) = std::sync::mpsc::channel::<()>();
+    spawn_pty_reader(master_for_reader, output_ch_reader, reader_done_tx);
+    (master, current_size, exit_tx, exit_rx, child_exited_tx, child_exited_rx, reader_done_rx)
 }
 
 fn wait_for_reader_drain(reader_done_rx: std::sync::mpsc::Receiver<()>, pid: u32) {
