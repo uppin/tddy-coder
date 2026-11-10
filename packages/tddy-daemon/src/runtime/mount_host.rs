@@ -261,16 +261,11 @@ impl BuildContext {
         self.agent_tool_sockets.adopt_inherited(
             tddy_daemon_kernel::agent_tool_sockets::adopt_user_sockets_from_environment(),
         );
-        let connection_impl = tddy_session_lifecycle::connection_service::DaemonSessionHost::new(
-            config.clone(),
-            sessions_base_resolver.clone(),
-            tddy_data_dir.clone(),
-            user_resolver.clone(),
-            options.spawn_client.clone(),
-            options.spawn_backend.clone(),
-            tddy_daemon_livekit::peer_routing::peer_routing_over(config, livekit_discovery),
-            self.operator_channel(),
-            Arc::clone(shared_cli_manager),
+        let connection_impl = self.build_connection_impl(
+            sessions_base_resolver,
+            &user_resolver,
+            livekit_discovery,
+            shared_cli_manager,
             coding_agents,
         );
 
@@ -313,6 +308,34 @@ impl BuildContext {
         // 31/32): an embedded host keeps binding its own host sockets, as its runtime serves
         // its one socket itself.
         .with_host_sessions_merged(options.host != RuntimeHost::Embedded))
+    }
+
+    fn build_connection_impl(
+        &self,
+        sessions_base_resolver: &Arc<dyn Fn(&str) -> Option<PathBuf> + Send + Sync>,
+        user_resolver: &Arc<dyn Fn(&str) -> Option<String> + Send + Sync>,
+        livekit_discovery: Option<
+            tddy_daemon_livekit::livekit_peer_discovery::LiveKitDiscoveryHandles,
+        >,
+        shared_cli_manager: &Arc<tddy_session_lifecycle::CliSessionManager>,
+        coding_agents: Arc<tddy_agent_launch::spec_launch::HostCodingAgents>,
+    ) -> DaemonSessionHost {
+        let config = &self.config;
+        let options = &self.options;
+        let tddy_data_dir = &self.identity.keys.tddy_data_dir;
+        let connection_impl = tddy_session_lifecycle::connection_service::DaemonSessionHost::new(
+            config.clone(),
+            sessions_base_resolver.clone(),
+            tddy_data_dir.to_owned(),
+            user_resolver.clone(),
+            options.spawn_client.clone(),
+            options.spawn_backend.clone(),
+            tddy_daemon_livekit::peer_routing::peer_routing_over(config, livekit_discovery),
+            self.operator_channel(),
+            Arc::clone(shared_cli_manager),
+            coding_agents,
+        );
+        connection_impl
     }
 
     pub(super) fn install_session_host(
