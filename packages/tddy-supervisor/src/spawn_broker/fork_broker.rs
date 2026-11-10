@@ -207,6 +207,10 @@ struct PreExecSteps {
     handover: Vec<RawFd>,
     /// [`pre_exec_plan`]'s output, compiled. Executed in this order and no other.
     steps: Vec<CompiledStep>,
+    /// The checked executable's descriptor the child execs through (`/proc/self/fd/<n>`), if any.
+    /// It is opened close-on-exec, and is made inheritable here, last: a script's interpreter is
+    /// handed `/proc/self/fd/<n>` to read, so the descriptor has to survive the exec.
+    exec_descriptor: Option<RawFd>,
 }
 
 impl PreExecSteps {
@@ -225,6 +229,10 @@ impl PreExecSteps {
             environment: ChildEnvironment::build(plan, handover)?,
             handover: handover.map(SocketHandover::raw_fds).unwrap_or_default(),
             steps,
+            exec_descriptor: plan
+                .checked
+                .as_ref()
+                .and_then(crate::policy::CheckedExecutable::exec_descriptor),
         })
     }
 
@@ -243,6 +251,13 @@ impl PreExecSteps {
 
         for step in &self.steps {
             step.execute(self.supervisor_pid)?;
+        }
+        if let Some(descriptor) = self.exec_descriptor {
+            // SAFETY: `fcntl(F_SETFD)` is async-signal-safe and touches only the flags of a
+            // descriptor inherited across the fork.
+            if unsafe { libc::fcntl(descriptor, libc::F_SETFD, 0) } == -1 {
+                return Err(std::io::Error::last_os_error());
+            }
         }
         Ok(())
     }

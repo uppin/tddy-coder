@@ -98,7 +98,8 @@ vouches for that directory itself, so its own owner and mode are not checked (`/
 operator opts in, per entry.
 
 On Linux the descriptor that was checked is what is exec'd (`/proc/self/fd/<n>`, with `argv[0]` the
-checked path), so a file swapped in after the check is not what runs. **macOS checks the path only**:
+checked path), so a file swapped in after the check is not what runs. The descriptor stays open in
+the child across the exec, because a script's interpreter reads the script through that path. **macOS checks the path only**:
 it has no exec through a descriptor, so a swap between check and exec is not closed there.
 
 A refusal is the opaque denial to the caller; the reason is logged under the `tddy_supervisor::policy`

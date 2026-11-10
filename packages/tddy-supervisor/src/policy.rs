@@ -108,6 +108,17 @@ impl CheckedExecutable {
         &self.path
     }
 
+    /// The descriptor [`Self::exec_path`] names, when the child execs through one (Linux).
+    ///
+    /// The child must clear its `FD_CLOEXEC` before the exec: for a script, the kernel hands the
+    /// interpreter `/proc/self/fd/<n>` as the file to read, and a descriptor closed by the exec
+    /// leaves the interpreter nothing to open.
+    pub fn exec_descriptor(&self) -> Option<std::os::fd::RawFd> {
+        self.descriptor
+            .as_ref()
+            .map(|descriptor| descriptor.as_raw_fd())
+    }
+
     /// What the child execs: the checked descriptor on Linux, the checked path elsewhere.
     pub fn exec_path(&self) -> PathBuf {
         match &self.descriptor {

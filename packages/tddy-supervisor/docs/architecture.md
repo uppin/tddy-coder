@@ -79,7 +79,9 @@ directory or one file, written bare or as `{ path, trusted_prefix: true }`:
 
 On Linux the check opens the file `O_PATH` (`open_resolved`) and `ForkBroker` execs that descriptor
 as `/proc/self/fd/<n>`, with `argv[0]` set to the checked path, so a file swapped in between the check
-and the exec is not what runs. **macOS is path-only**: there is no exec through a descriptor, so the
+and the exec is not what runs. The child clears the descriptor's `FD_CLOEXEC` as its last pre-exec
+step: for a script the kernel hands the interpreter `/proc/self/fd/<n>` to read, which a descriptor
+closed by the exec would leave it unable to open. **macOS is path-only**: there is no exec through a descriptor, so the
 checked path is exec'd and the swap window stays open; the tests say so. The reason for a refusal is
 logged under the `tddy_supervisor::policy` target.
 
