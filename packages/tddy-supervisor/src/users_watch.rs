@@ -71,31 +71,7 @@ impl UsersWatch {
                     return;
                 }
                 // A save may be observed mid-write; retry briefly (bounded) before refusing it.
-                let loaded = reload_settled(&callback_path);
-                match loaded {
-                    Ok(next) => {
-                        let changed = {
-                            let mut current =
-                                callback_current.lock().expect("users watch lock poisoned");
-                            if *current == next {
-                                false
-                            } else {
-                                *current = next.clone();
-                                true
-                            }
-                        };
-                        if changed {
-                            sink.changed(&next);
-                        }
-                    }
-                    Err(why) => {
-                        log::warn!(
-                            target: "tddy_supervisor::users_watch",
-                            "refusing a users.yaml edit, keeping the running mapping: {why}"
-                        );
-                        sink.refused(&why);
-                    }
-                }
+                on_users_event(&sink, &callback_path, &callback_current);
             })?;
         let directory = watched_path.parent().ok_or_else(|| {
             anyhow::anyhow!(
@@ -122,6 +98,34 @@ impl UsersWatch {
             .lock()
             .expect("users watch lock poisoned")
             .clone()
+    }
+}
+
+fn on_users_event(sink: &Arc<dyn UsersWatchSink>, callback_path: &Path, callback_current: &Arc<Mutex<UsersFile>>) {
+    let loaded = reload_settled(&callback_path);
+    match loaded {
+        Ok(next) => {
+            let changed = {
+                let mut current =
+                    callback_current.lock().expect("users watch lock poisoned");
+                if *current == next {
+                    false
+                } else {
+                    *current = next.clone();
+                    true
+                }
+            };
+            if changed {
+                sink.changed(&next);
+            }
+        }
+        Err(why) => {
+            log::warn!(
+                target: "tddy_supervisor::users_watch",
+                "refusing a users.yaml edit, keeping the running mapping: {why}"
+            );
+            sink.refused(&why);
+        }
     }
 }
 

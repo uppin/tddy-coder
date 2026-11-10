@@ -1,0 +1,2 @@
+{"v":2,"files":{"packages/tddy-supervisor/src/users_watch.rs":{"sha256":"sha256:1c2929ba510480f65001c8ef57e35490733caa45fd2dfe847f0f6d7450a1766c"}}}
+{"id": "op-1", "op": "extract_method", "anchor": {"kind": "item", "item": "tddy_supervisor::users_watch::UsersWatch::spawn", "file": "packages/tddy-supervisor/src/users_watch.rs", "start": {"line": 39, "col": 17}, "end": {"line": 63, "col": 18}, "fingerprint": "sha256:41a02778843b2212e33d2118a576cbd1d36d8ea842f54221a506c91aa5c0372d", "hint": {"line": 74, "col": 17}}, "name": "on_users_event"}
