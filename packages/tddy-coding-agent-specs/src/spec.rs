@@ -1,7 +1,7 @@
 //! The `coding_agent` extension: its schema, its owner, and the validated view of one agent.
 
 pub(crate) mod acp;
-mod argv;
+pub(crate) mod argv;
 pub(crate) mod headless_section;
 pub(crate) mod pass_env;
 pub(crate) mod route_slot;
@@ -10,7 +10,7 @@ pub(crate) mod slot_shapes;
 use std::collections::{BTreeMap, BTreeSet};
 
 use serde::{Deserialize, Serialize};
-use tddy_actions::tool::{ArgvItem, ExtensionOwner, RunSection, ToolDef};
+use tddy_actions::tool::{ExtensionOwner, RunSection, ToolDef};
 use tddy_agent_backend::adapters::{AcpHooksAdapters, AdapterRegistry, LaunchAdapters};
 use thiserror::Error;
 
@@ -374,50 +374,7 @@ use crate::spec::pass_env::validate_env_entries;
 use crate::spec::route_slot::route_slot_errors;
 pub use crate::spec::slot_shapes::{HooksSlot, McpSlot, ToolSlot};
 
-/// One curated model: its id, and the label a picker shows for it. Written in YAML either as the
-/// bare id (`opus`, whose label is the id) or as `{ id: opus, label: "Claude Opus (latest)" }`.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(untagged)]
-pub enum CuratedModel {
-    /// The bare id; its label is the id.
-    Id(String),
-    /// The id with its picker's label.
-    Labelled { id: String, label: String },
-}
-
-impl CuratedModel {
-    /// The model id passed to the agent.
-    pub fn id(&self) -> &str {
-        match self {
-            CuratedModel::Id(id) => id,
-            CuratedModel::Labelled { id, .. } => id,
-        }
-    }
-
-    /// The label a picker shows; the id for a bare entry.
-    pub fn label(&self) -> &str {
-        match self {
-            CuratedModel::Id(id) => id,
-            CuratedModel::Labelled { label, .. } => label,
-        }
-    }
-}
-
-/// The models an agent offers.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct ModelsSection {
-    pub default: String,
-    pub curated: Vec<CuratedModel>,
-    /// The command that lists the agent's models (`["{binary}", "models"]`), rendered with the run
-    /// grammar; `None` for an agent whose catalogue is `curated` (`#agent-tools 8/12`).
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub list_command: Option<Vec<ArgvItem>>,
-    /// The launch adapter (`tddy_agent_backend::adapters::LaunchAdapters`) that reads
-    /// `list_command`'s stdout — `opencode-models`. Set exactly when `list_command` is.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub adapter: Option<String>,
-}
+pub use crate::spec::argv::ModelsSection;
 
 #[cfg(test)]
 mod tool_slot_tests {

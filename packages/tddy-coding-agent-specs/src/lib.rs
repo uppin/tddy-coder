@@ -24,6 +24,8 @@ use tddy_actions::tool::{ToolError, ToolRegistry, BUILTIN_SUPPORT_TOOLS, BUILTIN
 pub use crate::spec::acp::package_runner;
 pub use crate::spec::acp::AcpCommandError;
 pub use crate::spec::acp::AcpSection;
+pub use crate::spec::argv::CuratedModel;
+pub use crate::spec::argv::ModelsSection;
 pub use crate::spec::headless_section::HeadlessPermissionPolicy;
 pub use crate::spec::headless_section::HeadlessSection;
 pub use crate::spec::route_slot::routed_agent;
@@ -46,9 +48,8 @@ pub use capability::Capability;
 pub use registry::{CodingAgentRegistry, RegistryError, CLI_SESSION_TYPE_SUFFIX};
 pub use route::{ProviderKind, RouteShape, RouteSupport, RoutedAgent};
 pub use spec::{
-    AgentVariant, CodingAgentExtension, CodingAgentSection, CodingAgentSpec, CuratedModel,
-    ModelsSection, SpecError, VariantError, CODING_AGENT_EXTENSION, DEFAULT_ANSWER_WAIT_SECS,
-    HOST_AGENT_VARIANT,
+    AgentVariant, CodingAgentExtension, CodingAgentSection, CodingAgentSpec, SpecError,
+    VariantError, CODING_AGENT_EXTENSION, DEFAULT_ANSWER_WAIT_SECS, HOST_AGENT_VARIANT,
 };
 
 /// `specs/cursor.yaml` (`#agent-tools 7/12`), embedded.

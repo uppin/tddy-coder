@@ -220,6 +220,7 @@ mod tests {
     use tddy_agent_backend::claude_hooks::{build_claude_hooks_settings, HookCommandParams};
 
     use super::*;
+    use crate::spec::argv::ModelsSection;
     use crate::spec::slot_shapes::FlagSlot;
     use crate::spec::slot_shapes::HooksSlot;
     use crate::spec::slot_shapes::InstructionsSlot;
@@ -227,7 +228,7 @@ mod tests {
     use crate::spec::slot_shapes::McpSlot;
     use crate::spec::slot_shapes::ToolSlot;
     use crate::spec::slot_shapes::Unsupported;
-    use crate::{CodingAgentSection, ModelsSection};
+    use crate::CodingAgentSection;
 
     const PREAMBLE: &str = "## Managed Codebase\n\nThe real codebase is managed.";
 
@@ -265,7 +266,7 @@ mod tests {
                 },
                 models: ModelsSection {
                     default: "opus".to_string(),
-                    curated: vec![crate::CuratedModel::Id("opus".to_string())],
+                    curated: vec![crate::spec::argv::CuratedModel::Id("opus".to_string())],
                     list_command: None,
                     adapter: None,
                 },

@@ -1,5 +1,6 @@
 use crate::spec::CodingAgentSpec;
 use crate::spec::SpecError;
+use serde::{Deserialize, Serialize};
 use tddy_actions::tool::{
     render_argv, ArgvItem, ResolvedTool, RunSection, TemplateParams, Transport,
 };
@@ -130,4 +131,49 @@ impl CodingAgentSpec {
             self.agent.models.default.clone(),
         )
     }
+}
+
+/// One curated model: its id, and the label a picker shows for it. Written in YAML either as the
+/// bare id (`opus`, whose label is the id) or as `{ id: opus, label: "Claude Opus (latest)" }`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum CuratedModel {
+    /// The bare id; its label is the id.
+    Id(String),
+    /// The id with its picker's label.
+    Labelled { id: String, label: String },
+}
+
+impl CuratedModel {
+    /// The model id passed to the agent.
+    pub fn id(&self) -> &str {
+        match self {
+            CuratedModel::Id(id) => id,
+            CuratedModel::Labelled { id, .. } => id,
+        }
+    }
+
+    /// The label a picker shows; the id for a bare entry.
+    pub fn label(&self) -> &str {
+        match self {
+            CuratedModel::Id(id) => id,
+            CuratedModel::Labelled { label, .. } => label,
+        }
+    }
+}
+
+/// The models an agent offers.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ModelsSection {
+    pub default: String,
+    pub curated: Vec<CuratedModel>,
+    /// The command that lists the agent's models (`["{binary}", "models"]`), rendered with the run
+    /// grammar; `None` for an agent whose catalogue is `curated` (`#agent-tools 8/12`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub list_command: Option<Vec<ArgvItem>>,
+    /// The launch adapter (`tddy_agent_backend::adapters::LaunchAdapters`) that reads
+    /// `list_command`'s stdout — `opencode-models`. Set exactly when `list_command` is.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub adapter: Option<String>,
 }
