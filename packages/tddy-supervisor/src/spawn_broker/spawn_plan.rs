@@ -1,5 +1,9 @@
 use crate::spawn_broker::accounts::TargetUser;
+use crate::spawn_broker::fork_broker::CompiledStep;
+use crate::spawn_broker::open_without_following_symlinks;
+use crate::spawn_broker::path_to_c_string;
 use std::collections::BTreeMap;
+use std::path::Path;
 use std::path::PathBuf;
 
 /// One fork/exec the supervisor performs on someone's behalf.
@@ -227,4 +231,78 @@ fn privilege_to_drop(target: &TargetUser) -> Option<(u32, u32)> {
         return None;
     }
     Some((target.uid, target.gid))
+}
+
+/// The map that makes a jail rootless: one id, the account the child has already become, mapped to
+/// root *inside* the new namespace and to nothing at all outside it.
+///
+/// Built from [`SpawnPlan::target`] and never from `geteuid()`, and that is the security property of
+/// the whole feature rather than a detail. `compile` runs before the fork, where the effective uid is
+/// still the supervisor's 0; a map written from it would name real host root as the child's outside
+/// identity, which is precisely what putting the namespace steps after `DropPrivilege` exists to
+/// prevent. The target *is* the effective id at the moment the step runs: either `DropPrivilege`
+/// preceded it, or [`privilege_to_drop`] found nothing to drop because the supervisor already runs as
+/// the target.
+///
+/// A single mapped id is also all the kernel will accept from an unprivileged writer — see
+/// [`enter_user_namespace`]. Which is the other reason the value cannot be read in the child: by then
+/// the `unshare` has happened, and an id read *inside* an unmapped namespace is the overflow uid
+/// (65534), which the kernel refuses to accept as a mapping with `EPERM`.
+pub(super) fn single_id_map(id: u32) -> Box<[u8]> {
+    format!("0 {id} 1\n").into_bytes().into_boxed_slice()
+}
+
+/// Refuse a bind mount whose source cannot be resolved, before a process exists to fail.
+///
+/// The resolution the *bind* uses happens in the child ([`bind_mount`]) and cannot happen here: a
+/// descriptor opened before `unshare(CLONE_NEWNS)` belongs to the mount namespace the child was
+/// cloned from, and `mount(2)` refuses a bind source from another namespace with `EINVAL`. So this is
+/// the same check made twice, deliberately — the habit `resolve_session_user` follows in refusing
+/// `root` that the loader already refused — and it earns its place twice over:
+///
+/// * the child cannot explain itself. `std` carries a `pre_exec` failure back to the parent as an
+///   errno and nothing else, so a symlinked or absent source would reach an operator as
+///   `No such file or directory` with no mention of which of a session's mounts it was.
+/// * a request that is already unbindable does not cost a fork.
+pub(super) fn compile_bind_mount(
+    source: &Path,
+    target: &Path,
+    readonly: bool,
+) -> std::io::Result<CompiledStep> {
+    let source_path = path_to_c_string(source)?;
+    // The descriptor is dropped with the statement: it is the answer that matters here, not the
+    // reference — the child opens one the mount will accept.
+    open_without_following_symlinks(&source_path)
+        .map_err(|error| unresolvable_mount_source(source, &error))?;
+    Ok(CompiledStep::BindMount {
+        source: source_path,
+        target: path_to_c_string(target)?,
+        readonly,
+    })
+}
+
+/// Why a bind mount source could not be pinned to one object, in terms an operator can act on.
+///
+/// Every outcome refuses the spawn. `ENOSYS` is named because it is not a bad request but a kernel
+/// with no `openat2(2)` (Linux 5.6) to ask, and `Function not implemented` against a path would tell
+/// nobody that. There is no path-based check to fall back to — that check *is* the race.
+pub(super) fn unresolvable_mount_source(source: &Path, error: &std::io::Error) -> std::io::Error {
+    if error.raw_os_error() == Some(libc::ENOSYS) {
+        return std::io::Error::new(
+            std::io::ErrorKind::Unsupported,
+            format!(
+                "this host has no openat2(2) (Linux 5.6 or newer), so bind mount source {} cannot \
+                 be resolved without a symlink race; the supervisor will not spawn a session it \
+                 cannot isolate",
+                source.display()
+            ),
+        );
+    }
+    std::io::Error::new(
+        error.kind(),
+        format!(
+            "bind mount source {} could not be resolved (symlinks are not followed): {error}",
+            source.display()
+        ),
+    )
 }
