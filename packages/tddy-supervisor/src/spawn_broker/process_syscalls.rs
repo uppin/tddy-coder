@@ -1,6 +1,4 @@
 use std::ffi::CStr;
-#[cfg(target_os = "linux")]
-use std::os::fd::{AsRawFd, FromRawFd};
 
 /// The answer every step below gives on a host whose kernel does not have the facility it needs.
 ///
