@@ -146,7 +146,14 @@ pub(super) async fn launch(
     })
 }
 
-fn host_pty_session<'a>(cli_manager: &'a Arc<CliSessionManager>, session_id: &'a str, os_user: &'a str, kind: &'a str, model: &'a str, env: Vec<(String, String)>) -> HostPtySession<'a> {
+fn host_pty_session<'a>(
+    cli_manager: &'a Arc<CliSessionManager>,
+    session_id: &'a str,
+    os_user: &'a str,
+    kind: &'a str,
+    model: &'a str,
+    env: Vec<(String, String)>,
+) -> HostPtySession<'a> {
     HostPtySession {
         manager: cli_manager,
         session_id,

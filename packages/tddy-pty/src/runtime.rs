@@ -368,7 +368,11 @@ struct PtyMasterSetup {
     reader_done_rx: std::sync::mpsc::Receiver<()>,
 }
 
-fn spawn_reader_with_master(output_ch: Arc<TaskChannel>, initial_size: PtySize, pair_master: Box<dyn MasterPty + Send>) -> PtyMasterSetup {
+fn spawn_reader_with_master(
+    output_ch: Arc<TaskChannel>,
+    initial_size: PtySize,
+    pair_master: Box<dyn MasterPty + Send>,
+) -> PtyMasterSetup {
     let master = Arc::new(Mutex::new(pair_master));
     let current_size = Arc::new(Mutex::new(initial_size));
     let (exit_tx, exit_rx) = oneshot::channel();

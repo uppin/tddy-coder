@@ -292,7 +292,8 @@ impl AgentToolSockets {
             inherited.get_mut(os_user).map(Option::take)
         };
         let supervised = self.placement == AgentToolSocketPlacement::Supervised;
-        let (path, listener, bound_here) = acquire_agent_tool_socket(os_user, data_dir, inherited, supervised)?;
+        let (path, listener, bound_here) =
+            acquire_agent_tool_socket(os_user, data_dir, inherited, supervised)?;
         let meta = std::fs::symlink_metadata(&path).context("stat the bound socket")?;
         let listener = tokio::net::UnixListener::from_std(listener)
             .context("hand the socket to the runtime")?;
@@ -320,7 +321,12 @@ impl AgentToolSockets {
     }
 }
 
-fn acquire_agent_tool_socket(os_user: &str, data_dir: &Path, inherited: Option<Option<InheritedAgentToolSocket>>, supervised: bool) -> anyhow::Result<(PathBuf, UnixListener, bool)> {
+fn acquire_agent_tool_socket(
+    os_user: &str,
+    data_dir: &Path,
+    inherited: Option<Option<InheritedAgentToolSocket>>,
+    supervised: bool,
+) -> anyhow::Result<(PathBuf, UnixListener, bool)> {
     let (path, listener, bound_here) = match inherited {
         Some(Some(socket)) => {
             socket

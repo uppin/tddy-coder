@@ -359,7 +359,6 @@ impl CliSessionManager {
     }
 }
 
-
 /// An exit hook, and the flag that tells [`CliSessionManager::exit_hook_settled`] it has finished.
 pub(crate) struct PendingExit {
     hook: ExitHook,

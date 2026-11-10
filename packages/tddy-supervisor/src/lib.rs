@@ -133,7 +133,10 @@ pub async fn run(config_path: &Path) -> anyhow::Result<()> {
 fn start_reaper_and_users_watch(
     mut child_exited: tokio::signal::unix::Signal,
     supervisor: &Arc<Supervisor>,
-) -> anyhow::Result<(tokio::task::JoinHandle<()>, Option<crate::users_watch::UsersWatch>)> {
+) -> anyhow::Result<(
+    tokio::task::JoinHandle<()>,
+    Option<crate::users_watch::UsersWatch>,
+)> {
     let reaper = tokio::spawn({
         let supervisor = Arc::clone(supervisor);
         async move {

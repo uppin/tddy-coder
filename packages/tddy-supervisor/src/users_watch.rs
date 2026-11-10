@@ -101,13 +101,16 @@ impl UsersWatch {
     }
 }
 
-fn on_users_event(sink: &Arc<dyn UsersWatchSink>, callback_path: &Path, callback_current: &Arc<Mutex<UsersFile>>) {
+fn on_users_event(
+    sink: &Arc<dyn UsersWatchSink>,
+    callback_path: &Path,
+    callback_current: &Arc<Mutex<UsersFile>>,
+) {
     let loaded = reload_settled(callback_path);
     match loaded {
         Ok(next) => {
             let changed = {
-                let mut current =
-                    callback_current.lock().expect("users watch lock poisoned");
+                let mut current = callback_current.lock().expect("users watch lock poisoned");
                 if *current == next {
                     false
                 } else {
