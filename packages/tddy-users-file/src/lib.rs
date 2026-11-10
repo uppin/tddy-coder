@@ -54,10 +54,34 @@ pub enum UsersFileRefusal {
 }
 
 impl std::fmt::Display for UsersFileRefusal {
-    fn fmt(&self, _f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        // TODO(#agent-tools 33/33 green): the wording tddy-supervisor's `UsersFile::from_yaml` uses
-        // today, without its `users.yaml: ` prefix.
-        unimplemented!("contract only — implemented by the #agent-tools sweep's green phase")
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            UsersFileRefusal::Malformed(error) => write!(f, "{error}"),
+            UsersFileRefusal::NoGithubUser => write!(f, "a row names no github_user"),
+            UsersFileRefusal::MapsToRoot => write!(
+                f,
+                "a mapping to `root` is refused; the supervisor never runs a session as root"
+            ),
+            UsersFileRefusal::UnsafeOsUser(os_user) => write!(
+                f,
+                "os_user `{os_user}` cannot name a socket: it is not one plain path and \
+                 descriptor-name segment"
+            ),
+            UsersFileRefusal::TwoOsUsers {
+                github_user,
+                first,
+                second,
+            } => write!(
+                f,
+                "github_user `{github_user}` is mapped to two OS users (`{first}` and \
+                 `{second}`); which one its sessions run as is ambiguous"
+            ),
+            UsersFileRefusal::TooManyOsUsers(count) => write!(
+                f,
+                "users.yaml names {count} distinct OS users; at most {MAX_MAPPED_OS_USERS} \
+                 fit the handed-over descriptors"
+            ),
+        }
     }
 }
 
@@ -71,9 +95,46 @@ pub struct UsersMapping {
 
 impl UsersMapping {
     /// Parse and validate `users.yaml` text. Blank text is an empty mapping.
-    pub fn from_yaml(_yaml: &str) -> Result<UsersMapping, UsersFileRefusal> {
-        // TODO(#agent-tools 33/33 green): the checks of tddy-supervisor's `UsersFile::from_yaml`.
-        unimplemented!("contract only — implemented by the #agent-tools sweep's green phase")
+    pub fn from_yaml(yaml: &str) -> Result<UsersMapping, UsersFileRefusal> {
+        let rows: Vec<MappedUser> = if yaml.trim().is_empty() {
+            Vec::new()
+        } else {
+            serde_yaml::from_str(yaml)
+                .map_err(|error| UsersFileRefusal::Malformed(error.to_string()))?
+        };
+        let mut by_login: std::collections::BTreeMap<&str, &str> =
+            std::collections::BTreeMap::new();
+        for row in &rows {
+            if row.github_user.is_empty() {
+                return Err(UsersFileRefusal::NoGithubUser);
+            }
+            if row.os_user == "root" {
+                return Err(UsersFileRefusal::MapsToRoot);
+            }
+            if !is_one_safe_segment(&row.os_user) {
+                return Err(UsersFileRefusal::UnsafeOsUser(row.os_user.clone()));
+            }
+            match by_login.entry(row.github_user.as_str()) {
+                std::collections::btree_map::Entry::Vacant(entry) => {
+                    entry.insert(row.os_user.as_str());
+                }
+                std::collections::btree_map::Entry::Occupied(entry) => {
+                    if *entry.get() != row.os_user {
+                        return Err(UsersFileRefusal::TwoOsUsers {
+                            github_user: row.github_user.clone(),
+                            first: (*entry.get()).to_string(),
+                            second: row.os_user.clone(),
+                        });
+                    }
+                }
+            }
+        }
+        let mapping = UsersMapping { rows };
+        let distinct = mapping.os_users().len();
+        if distinct > MAX_MAPPED_OS_USERS {
+            return Err(UsersFileRefusal::TooManyOsUsers(distinct));
+        }
+        Ok(mapping)
     }
 
     /// Every row, in file order, an identical repeated row included.
@@ -83,8 +144,13 @@ impl UsersMapping {
 
     /// The rows with each identical repeat dropped, first occurrence kept — what the daemon holds.
     pub fn distinct_rows(&self) -> Vec<MappedUser> {
-        // TODO(#agent-tools 33/33 green): the dedup `tddy_daemon_kernel::users_file` does today.
-        unimplemented!("contract only — implemented by the #agent-tools sweep's green phase")
+        let mut seen: std::collections::BTreeSet<(String, String)> =
+            std::collections::BTreeSet::new();
+        self.rows
+            .iter()
+            .filter(|row| seen.insert((row.github_user.clone(), row.os_user.clone())))
+            .cloned()
+            .collect()
     }
 
     /// The distinct OS users the mapping names, sorted.
@@ -94,9 +160,12 @@ impl UsersMapping {
 }
 
 /// Whether `name` can ride in a descriptor name and a path segment unchanged.
-pub fn is_one_safe_segment(_name: &str) -> bool {
-    // TODO(#agent-tools 33/33 green): moved from tddy-supervisor's `users_file.rs`.
-    unimplemented!("contract only — implemented by the #agent-tools sweep's green phase")
+pub fn is_one_safe_segment(name: &str) -> bool {
+    !name.is_empty()
+        && !name.starts_with('.')
+        && name
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '_' | '-' | '.'))
 }
 
 #[cfg(test)]

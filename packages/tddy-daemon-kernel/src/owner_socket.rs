@@ -28,25 +28,20 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{bail, Context};
 
-/// Which kind of per-OS-user socket is being bound or adopted: how a refusal names it and the
-/// `supervisor.yaml` setting that would have had the supervisor create it instead.
+/// Which kind of per-OS-user socket is being bound or adopted: how a refusal names it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct OwnerSocketKind {
-    /// The service's `supervisor.yaml` key listing the users the supervisor creates one for.
-    pub setting: &'static str,
     /// The socket, as a refusal names it.
     pub noun: &'static str,
 }
 
 impl OwnerSocketKind {
-    /// The host-session socket (`host_sockets:`).
+    /// The host-session socket.
     pub const HOST_SESSION: OwnerSocketKind = OwnerSocketKind {
-        setting: "host_sockets",
         noun: "host-session socket",
     };
     /// A mapped user's one daemon socket (`users.yaml`, `#agent-tools` 31/32).
     pub const USER_DAEMON: OwnerSocketKind = OwnerSocketKind {
-        setting: "users.yaml",
         noun: "daemon socket",
     };
 }
@@ -92,13 +87,18 @@ pub fn descriptors_named(
 /// same for every kind — map the user in `users.yaml`, so the supervisor creates the socket — and it
 /// names no `supervisor.yaml` key (`#agent-tools` 33/33: `host_sockets:` is a load error since #859).
 pub fn not_privileged_to_hand_over(
-    _kind: OwnerSocketKind,
-    _euid: u32,
-    _os_user: &str,
-    _target_uid: u32,
+    kind: OwnerSocketKind,
+    euid: u32,
+    os_user: &str,
+    target_uid: u32,
 ) -> String {
-    // TODO(#agent-tools 33/33 green): the closure in `bind_owner_only`, one wording for both kinds.
-    unimplemented!("contract only — implemented by the #agent-tools sweep's green phase")
+    format!(
+        "this daemon (uid {euid}) is not privileged to hand the socket to {os_user} \
+         (uid {target_uid}) — as when it runs as tddy-supervisor's unprivileged child, which \
+         cannot chown. Under the supervisor, map {os_user} in users.yaml: the supervisor then \
+         creates their {} and hands it over. Until then a session of that user gets no {}",
+        kind.noun, kind.noun
+    )
 }
 
 /// Bind `path` for `os_user` with no window in which anyone else can reach it. See the module docs.
@@ -140,26 +140,8 @@ pub fn bind_owner_only(
         std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600))
             .context("restrict the socket to its owner")?;
         if needs_chown {
-            let not_privileged = || {
-                if kind == OwnerSocketKind::USER_DAEMON {
-                    return format!(
-                        "this daemon (uid {euid}) is not privileged to hand the socket to \
-                         {os_user} (uid {}) — as when it runs as tddy-supervisor's unprivileged \
-                         child, which cannot chown. Under the supervisor, map {os_user} in \
-                         users.yaml: the supervisor then creates their daemon socket and hands \
-                         it over. Until then a session of that user gets no {}",
-                        target.uid, kind.noun
-                    );
-                }
-                format!(
-                    "this daemon (uid {euid}) is not privileged to hand the socket to {os_user} \
-                     (uid {}) — as when it runs as tddy-supervisor's unprivileged child, which \
-                     cannot chown. Under the supervisor, list {os_user} under `{}:` for \
-                     this daemon's service in supervisor.yaml: the supervisor then creates their \
-                     socket and hands it over. Until then a session of that user gets no {}",
-                    target.uid, kind.setting, kind.noun
-                )
-            };
+            let not_privileged =
+                || not_privileged_to_hand_over(kind, euid, os_user, target.uid);
             chown(path, target.uid, target.gid).with_context(not_privileged)?;
             chown(user_dir, target.uid, target.gid).with_context(not_privileged)?;
         }
