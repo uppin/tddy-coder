@@ -102,7 +102,7 @@ impl UsersWatch {
 }
 
 fn on_users_event(sink: &Arc<dyn UsersWatchSink>, callback_path: &Path, callback_current: &Arc<Mutex<UsersFile>>) {
-    let loaded = reload_settled(&callback_path);
+    let loaded = reload_settled(callback_path);
     match loaded {
         Ok(next) => {
             let changed = {
@@ -130,13 +130,13 @@ fn on_users_event(sink: &Arc<dyn UsersWatchSink>, callback_path: &Path, callback
 }
 
 fn reload_settled(callback_path: &Path) -> Result<UsersFile, ConfigError> {
-    let mut loaded = UsersFile::load(&callback_path);
+    let mut loaded = UsersFile::load(callback_path);
     for _ in 0..5 {
         if loaded.is_ok() {
             break;
         }
         std::thread::sleep(std::time::Duration::from_millis(20));
-        loaded = UsersFile::load(&callback_path);
+        loaded = UsersFile::load(callback_path);
     }
     loaded
 }
