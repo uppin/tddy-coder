@@ -1,0 +1,2 @@
+{"v":2,"files":{"packages/tddy-supervisor/src/lib.rs":{"sha256":"sha256:d410ca5a5b244a385965c8e82f7892dbc8282ec0bd1be0659d0ec1e9edaf6e99"}}}
+{"id": "op-1", "op": "extract_method", "anchor": {"kind": "item", "item": "tddy_supervisor::run", "file": "packages/tddy-supervisor/src/lib.rs", "start": {"line": 40, "col": 5}, "end": {"line": 92, "col": 7}, "fingerprint": "sha256:f2697cd82e52d09a9f1583c72509aa22ec73585ba2f2150547f1fbd92fbf3450", "hint": {"line": 121, "col": 5}}, "name": "start_reaper_and_users_watch"}
