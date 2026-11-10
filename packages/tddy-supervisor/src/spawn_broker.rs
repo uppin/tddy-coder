@@ -822,48 +822,6 @@ pub const SUPERVISOR_SOCKET_ENV: &str = "TDDY_SUPERVISOR_SOCKET";
 /// (`tddy_daemon_kernel::users_file::USERS_FILE_ENV`); a test pins the two.
 pub const USERS_FILE_ENV: &str = "TDDY_USERS_FILE";
 
-/// Write our own pid into an `cgroup.procs`, allocation-free.
-///
-/// `O_CREAT` is not an accommodation: on cgroupfs the file always exists and the flag is inert,
-/// while a delegated base that is a plain directory (a `base_override` pointing outside
-/// `/sys/fs/cgroup`) has no file to open yet.
-///
-/// # Safety
-///
-/// `procs_path` must remain valid for the duration of the call. Runs after `fork`, so it may only
-/// use async-signal-safe syscalls.
-unsafe fn join_cgroup_scope(procs_path: &CStr) -> std::io::Result<()> {
-    // 10 digits covers every u32 pid, plus the newline the kernel expects.
-    let mut buffer = [0u8; 11];
-    let mut start = buffer.len() - 1;
-    buffer[start] = b'\n';
-    let mut pid = libc::getpid() as u32;
-    loop {
-        start -= 1;
-        buffer[start] = b'0' + (pid % 10) as u8;
-        pid /= 10;
-        if pid == 0 {
-            break;
-        }
-    }
-    let digits = &buffer[start..];
-
-    let fd = libc::open(
-        procs_path.as_ptr(),
-        libc::O_WRONLY | libc::O_APPEND | libc::O_CREAT | libc::O_CLOEXEC,
-        0o644 as libc::c_int,
-    );
-    if fd < 0 {
-        return Err(std::io::Error::last_os_error());
-    }
-    let written = libc::write(fd, digits.as_ptr().cast(), digits.len());
-    libc::close(fd);
-    if written < 0 {
-        return Err(std::io::Error::last_os_error());
-    }
-    Ok(())
-}
-
 pub(crate) fn path_to_c_string(path: &Path) -> std::io::Result<CString> {
     CString::new(path.as_os_str().as_bytes()).map_err(|_| {
         std::io::Error::new(

@@ -9,7 +9,7 @@ use crate::spawn_broker::drop_privilege;
 use crate::spawn_broker::enter_mount_namespace;
 use crate::spawn_broker::enter_network_namespace;
 use crate::spawn_broker::enter_user_namespace;
-use crate::spawn_broker::join_cgroup_scope;
+use crate::spawn_broker::process_syscalls::join_cgroup_scope;
 use crate::spawn_broker::lead_own_process_group;
 use crate::spawn_broker::make_root_mount_private;
 use crate::spawn_broker::path_to_c_string;
