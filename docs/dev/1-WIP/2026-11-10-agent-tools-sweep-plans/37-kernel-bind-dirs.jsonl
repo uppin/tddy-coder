@@ -1,0 +1,2 @@
+{"v":2,"files":{"packages/tddy-daemon-kernel/src/owner_socket.rs":{"sha256":"sha256:2afe3ba784ed0dac6662ad4a833226828d5e04ddf473927f1cd40ce34acbb67b"}}}
+{"id": "op-1", "op": "extract_method", "anchor": {"kind": "item", "item": "tddy_daemon_kernel::owner_socket::bind_owner_only", "file": "packages/tddy-daemon-kernel/src/owner_socket.rs", "start": {"line": 10, "col": 5}, "end": {"line": 19, "col": 6}, "fingerprint": "sha256:ff8c4d5789270584f4cda82f4d621c908d0e55e7b21a07fcb34e59feaf82b6e7", "hint": {"line": 113, "col": 5}}, "name": "socket_parent_dirs"}

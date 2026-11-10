@@ -110,16 +110,7 @@ pub fn bind_owner_only(
     let target = crate::privilege_drop::resolve_pty_os_user(os_user).map_err(anyhow::Error::msg)?;
     let euid = unsafe { libc::geteuid() };
     let needs_chown = target.uid != euid;
-    let user_dir = path.parent().context("socket path has no directory")?;
-    let run_dir = user_dir
-        .parent()
-        .context("socket path has no run directory")?;
-    let data_dir = run_dir
-        .parent()
-        .context("socket path has no data directory")?;
-    if !data_dir.is_dir() {
-        bail!("data dir {} does not exist", data_dir.display());
-    }
+    let (user_dir, run_dir) = socket_parent_dirs(path)?;
 
     // Traversable but not listable by others: the user reaches its own subdirectory through it.
     let created_run = ensure_dir(run_dir, 0o711, &[euid, target.uid], false)?;
@@ -140,8 +131,7 @@ pub fn bind_owner_only(
         std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600))
             .context("restrict the socket to its owner")?;
         if needs_chown {
-            let not_privileged =
-                || not_privileged_to_hand_over(kind, euid, os_user, target.uid);
+            let not_privileged = || not_privileged_to_hand_over(kind, euid, os_user, target.uid);
             chown(path, target.uid, target.gid).with_context(not_privileged)?;
             chown(user_dir, target.uid, target.gid).with_context(not_privileged)?;
         }
@@ -157,6 +147,20 @@ pub fn bind_owner_only(
         )));
     }
     Ok(listener)
+}
+
+fn socket_parent_dirs(path: &Path) -> anyhow::Result<(&Path, &Path)> {
+    let user_dir = path.parent().context("socket path has no directory")?;
+    let run_dir = user_dir
+        .parent()
+        .context("socket path has no run directory")?;
+    let data_dir = run_dir
+        .parent()
+        .context("socket path has no data directory")?;
+    if !data_dir.is_dir() {
+        bail!("data dir {} does not exist", data_dir.display());
+    }
+    Ok((user_dir, run_dir))
 }
 
 /// Remove what a failed bind created, so a refusal leaves nothing a later start could trust.
