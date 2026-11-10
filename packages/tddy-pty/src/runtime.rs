@@ -294,6 +294,21 @@ fn open_pty_and_pump(
         capture.resize(initial_size.rows, initial_size.cols);
     }
 
+    let setup = spawn_reader_with_master(output_ch, initial_size, pair.master);
+
+    let cmd = build_pty_command(spec);
+
+    spawn_child_and_pump(stdin_rx, setup_tx, rt_handle, pair.slave, setup, cmd)
+}
+
+fn spawn_child_and_pump(
+    stdin_rx: mpsc::UnboundedReceiver<Bytes>,
+    setup_tx: oneshot::Sender<Result<SetupResult, String>>,
+    rt_handle: tokio::runtime::Handle,
+    slave: Box<dyn portable_pty::SlavePty + Send>,
+    setup: PtyMasterSetup,
+    cmd: CommandBuilder,
+) -> Result<(), String> {
     let PtyMasterSetup {
         master,
         current_size,
@@ -302,11 +317,8 @@ fn open_pty_and_pump(
         child_exited_tx,
         child_exited_rx,
         reader_done_rx,
-    } = spawn_reader_with_master(output_ch, initial_size, pair.master);
-
-    let cmd = build_pty_command(spec);
-
-    let child = match pair.slave.spawn_command(cmd) {
+    } = setup;
+    let child = match slave.spawn_command(cmd) {
         Ok(child) => child,
         Err(e) => {
             let msg = format!("spawn failed: {e}");
@@ -314,7 +326,6 @@ fn open_pty_and_pump(
             return Err(msg);
         }
     };
-    drop(pair.slave);
 
     let pid = match child.process_id() {
         Some(pid) => pid,

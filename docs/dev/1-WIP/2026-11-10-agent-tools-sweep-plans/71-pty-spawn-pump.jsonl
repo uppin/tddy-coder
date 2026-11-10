@@ -1,0 +1,2 @@
+{"v":2,"files":{"packages/tddy-pty/src/runtime.rs":{"sha256":"sha256:0f67c889c0ae0305d9f8275a20eeb080204c5e9c1ba6cdfd72fd1ddd26982154"}}}
+{"id": "op-1", "op": "extract_method", "anchor": {"kind": "item", "item": "tddy_pty::runtime::open_pty_and_pump", "file": "packages/tddy-pty/src/runtime.rs", "start": {"line": 49, "col": 5}, "end": {"line": 98, "col": 12}, "fingerprint": "sha256:7483ceb3adf2ca255583a6d4a7389deeb695108e000681bf03c2315df4d578c7", "hint": {"line": 309, "col": 5}}, "name": "spawn_child_and_pump"}
