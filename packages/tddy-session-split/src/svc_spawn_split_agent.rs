@@ -277,38 +277,7 @@ impl SplitSessions {
             daemon_socket: Some(&agent_tool_socket),
             answer_wait_secs,
         };
-        match tddy_coding_agent_specs::slots::render(
-            &crate::agent_argv::split_agent_spec(&self.coding_agents)?,
-            &tddy_coding_agent_specs::slots::SlotInputs {
-                workdir: context_dir.clone(),
-                scratch_dir: context_dir.clone(),
-                mcp_server: None,
-                allowed_tools: Vec::new(),
-                denied_tools: Vec::new(),
-                permission_prompt_tool: None,
-                preamble: None,
-                append_system_prompt_file: None,
-                hooks: Some(hook_params),
-                home: None,
-            },
-        ) {
-            Ok(rendered) => {
-                for (path, bytes) in &rendered.files {
-                    if let Some(parent) = path.parent() {
-                        let _ = std::fs::create_dir_all(parent);
-                    }
-                    if let Err(e) = std::fs::write(path, bytes) {
-                        log::warn!(
-                            "session {session_id}: failed to write {} — hooks will not fire: {e}",
-                            path.display()
-                        );
-                    }
-                }
-            }
-            Err(e) => {
-                log::warn!("session {session_id}: failed to render its hooks file: {e}");
-            }
-        }
+        self.render_and_write_split_hooks(session_id, &context_dir, hook_params)?;
         // The launch argv is rendered from the split agent's spec — the same template a
         // spec-driven launch renders — with this start's model, session, permission mode and
         // prompt bound.
@@ -348,6 +317,47 @@ impl SplitSessions {
             Status::internal(format!("failed to spawn {session_type}: {e}"))
         })?;
         Ok((hook_token, handle))
+    }
+
+    fn render_and_write_split_hooks(
+        &self,
+        session_id: &str,
+        context_dir: &std::path::Path,
+        hook_params: tddy_core::HookCommandParams<'_>,
+    ) -> Result<(), Status> {
+        match tddy_coding_agent_specs::slots::render(
+            &crate::agent_argv::split_agent_spec(&self.coding_agents)?,
+            &tddy_coding_agent_specs::slots::SlotInputs {
+                workdir: context_dir.to_owned(),
+                scratch_dir: context_dir.to_owned(),
+                mcp_server: None,
+                allowed_tools: Vec::new(),
+                denied_tools: Vec::new(),
+                permission_prompt_tool: None,
+                preamble: None,
+                append_system_prompt_file: None,
+                hooks: Some(hook_params),
+                home: None,
+            },
+        ) {
+            Ok(rendered) => {
+                for (path, bytes) in &rendered.files {
+                    if let Some(parent) = path.parent() {
+                        let _ = std::fs::create_dir_all(parent);
+                    }
+                    if let Err(e) = std::fs::write(path, bytes) {
+                        log::warn!(
+                            "session {session_id}: failed to write {} — hooks will not fire: {e}",
+                            path.display()
+                        );
+                    }
+                }
+            }
+            Err(e) => {
+                log::warn!("session {session_id}: failed to render its hooks file: {e}");
+            }
+        }
+        Ok(())
     }
 
     fn render_split_argv(
