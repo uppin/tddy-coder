@@ -2,6 +2,7 @@
 
 pub(crate) mod acp;
 pub(crate) mod headless_section;
+pub(crate) mod route_slot;
 pub(crate) mod slot_shapes;
 
 use std::collections::{BTreeMap, BTreeSet};
@@ -16,7 +17,7 @@ use thiserror::Error;
 
 use crate::capability::Capability;
 use crate::headless::validate_headless;
-use crate::route::{ProviderKind, RouteShape, RouteSupport, RoutedAgent};
+use crate::route::{RouteShape, RouteSupport, RoutedAgent};
 use crate::slots::conversation::ConversationSlot;
 use crate::slots::hooks;
 use crate::slots::tools::render_flag_per_value;
@@ -613,107 +614,7 @@ impl CodingAgentSpec {
     }
 }
 
-impl CodingAgentSpec {
-    /// `Ok` when the agent's `placements` include `placement`; otherwise the refusal, naming the
-    /// agent and every placement it declares — a sandboxed `warp-cli` start is refused with it
-    /// (`#agent-tools 8/12`).
-    pub fn require_placement(&self, placement: Placement) -> Result<(), PlacementError> {
-        if self.agent.placements.contains(&placement) {
-            return Ok(());
-        }
-        Err(PlacementError::NotPlaced {
-            tool: self.id.clone(),
-            placement,
-            placements: self.agent.placements.clone(),
-        })
-    }
-}
-
-/// `coding_agent.route`: what a provider route needs of the agent.
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct RouteSlot {
-    /// A jailed launch without a provider route is refused: the jail holds no credentials of the
-    /// agent's own (OpenCode, Muse).
-    #[serde(default)]
-    pub required_in_jail: bool,
-    /// The variable the route's configuration reaches the agent in: for `shape: inline_config` the
-    /// configuration itself (`OPENCODE_CONFIG_CONTENT`), for `shape: json_config_file` the path of
-    /// the route's first file. `None` for a route that is environment only. An `inline_config` route
-    /// needs one, never a `TDDY_*` one, and takes no `files_dir` ([`route_slot_errors`]).
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub config_env: Option<String>,
-    /// The directory under the jail's scratch the route's files are written to owner-only
-    /// (`provider-route`); `None` for a route with no files.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub files_dir: Option<String>,
-    /// The variable the route's key is handed in (`OPENCODE_PROVIDER_KEY`, `META_API_KEY`).
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub key_env: Option<String>,
-    /// The providers a route can point the agent at (`#agent-tools 12/12`); empty for an agent that
-    /// always runs on its own vendor. Read through [`CodingAgentSpec::route_support`].
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub providers: Vec<ProviderKind>,
-    /// How the route reaches the agent (`#agent-tools 12/12`): environment (the default),
-    /// `-c` TOML arguments (`toml_args`), or a JSON configuration file (`json_config_file`).
-    #[serde(default)]
-    pub shape: RouteShape,
-}
-
-/// `coding_agent.resume`: the launch adapter (`tddy_agent_backend::adapters::LaunchAdapters`) that
-/// reads a resume token off an exited session's terminal — `warp-resume-token`. A name the registry
-/// does not hold is refused at load.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct ResumeSlot {
-    pub adapter: String,
-}
-
-/// Where an agent may run.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
-#[serde(rename_all = "lowercase")]
-pub enum Placement {
-    /// A PTY on the daemon's host, as the session's OS user.
-    Host,
-    /// Inside a session jail, through `tddy-sandbox-runner`.
-    Jail,
-}
-
-impl Placement {
-    /// The placements of a spec that declares none: both.
-    pub fn anywhere() -> Vec<Placement> {
-        vec![Placement::Host, Placement::Jail]
-    }
-
-    /// The word a spec writes it as.
-    pub fn as_str(self) -> &'static str {
-        match self {
-            Placement::Host => "host",
-            Placement::Jail => "jail",
-        }
-    }
-}
-
-impl std::fmt::Display for Placement {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(self.as_str())
-    }
-}
-
-/// Why an agent cannot run where a launch asked.
-#[derive(Debug, Clone, PartialEq, Eq, Error)]
-pub enum PlacementError {
-    /// The spec's `placements` exclude the asked one.
-    #[error(
-        "{tool} cannot run in the {placement}: its spec's placements are [{}]",
-        placements.iter().map(|p| p.as_str()).collect::<Vec<_>>().join(", ")
-    )]
-    NotPlaced {
-        tool: String,
-        placement: Placement,
-        placements: Vec<Placement>,
-    },
-}
+pub use crate::spec::route_slot::{Placement, ResumeSlot, RouteSlot};
 
 pub use crate::spec::slot_shapes::{HooksSlot, McpSlot, ToolSlot};
 
@@ -809,7 +710,9 @@ mod placement_tests {
     use pretty_assertions::assert_eq;
     use tddy_actions::tool::RunSection;
 
-    use super::{CodingAgentSection, CodingAgentSpec, Placement, PlacementError};
+    use super::{CodingAgentSection, CodingAgentSpec};
+    use crate::spec::route_slot::Placement;
+    use crate::spec::route_slot::PlacementError;
 
     /// The coding-agent view of a built-in spec file, read straight from its YAML: its `run` and
     /// `extensions.coding_agent` sections deserialized as they are declared.

@@ -273,7 +273,7 @@ mod tests {
                 headless: None,
                 route: None,
                 resume: None,
-                placements: crate::Placement::anywhere(),
+                placements: crate::spec::route_slot::Placement::anywhere(),
                 variants: BTreeMap::new(),
                 acp: None,
                 capabilities: Default::default(),
