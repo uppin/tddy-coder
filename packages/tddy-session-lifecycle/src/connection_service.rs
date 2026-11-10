@@ -480,7 +480,7 @@ mod resume_agent_recipe_restore_tests;
 mod specialized_subagent_env_unit_tests;
 
 #[cfg(test)]
-mod inherited_host_sockets_tests;
+mod user_socket_tests;
 
 #[cfg(test)]
 mod seeded_roster_records_unit_tests;
