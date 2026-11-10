@@ -44,14 +44,14 @@ impl DaemonSessionHost {
     ) -> Self {
         let spawn_client = spawn_client.map(|(c, _pid)| Arc::new(c));
         // Declared tools resolve from `<tddyhome>/tools` at each jail start (`#agent-tools 1/12`).
-        let (
+        let HostStores {
             workspace_sandbox_provisioner,
             task_registry,
             demo_vm_state,
             host_session_sockets,
             session_agent_clones,
             worktree_size_calculator,
-        ) = build_host_stores(&tddy_data_dir, &cli_manager);
+        } = build_host_stores(&tddy_data_dir, &cli_manager);
         Self {
             config,
             sessions_base_for_user,
@@ -478,21 +478,24 @@ impl DaemonSessionHost {
     }
 }
 
-fn build_host_stores(
-    tddy_data_dir: &std::path::Path,
-    cli_manager: &Arc<CliSessionManager>,
-) -> (
-    tddy_daemon_sandbox::workspace_tool_sandbox::JailedWorkspaceSandboxProvisioner,
-    TaskRegistry,
-    Arc<
+struct HostStores {
+    workspace_sandbox_provisioner:
+        tddy_daemon_sandbox::workspace_tool_sandbox::JailedWorkspaceSandboxProvisioner,
+    task_registry: TaskRegistry,
+    demo_vm_state: Arc<
         tokio::sync::Mutex<
             std::collections::HashMap<String, tddy_demo_vm_service::activity_hub::DemoVmHandle>,
         >,
     >,
-    Arc<tddy_agent_launch::host_session_socket::HostSessionSockets>,
-    Arc<tddy_session_agents::session_agent_clone::SessionAgentCloneStore>,
-    Arc<tddy_worktree_service::worktrees::WorktreeSizeCalculator>,
-) {
+    host_session_sockets: Arc<tddy_agent_launch::host_session_socket::HostSessionSockets>,
+    session_agent_clones: Arc<tddy_session_agents::session_agent_clone::SessionAgentCloneStore>,
+    worktree_size_calculator: Arc<tddy_worktree_service::worktrees::WorktreeSizeCalculator>,
+}
+
+fn build_host_stores(
+    tddy_data_dir: &std::path::Path,
+    cli_manager: &Arc<CliSessionManager>,
+) -> HostStores {
     let workspace_sandbox_provisioner =
         tddy_daemon_sandbox::workspace_tool_sandbox::JailedWorkspaceSandboxProvisioner::for_tddy_home(
             tddy_data_dir,
@@ -510,14 +513,14 @@ fn build_host_stores(
             tddy_worktree_service::worktrees::DAEMON_SIZE_WALK_PERMITS,
         ),
     );
-    (
+    HostStores {
         workspace_sandbox_provisioner,
         task_registry,
         demo_vm_state,
         host_session_sockets,
         session_agent_clones,
         worktree_size_calculator,
-    )
+    }
 }
 
 mod rpc_activity;
