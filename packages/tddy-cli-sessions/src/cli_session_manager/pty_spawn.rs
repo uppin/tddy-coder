@@ -134,20 +134,8 @@ impl CliSessionManager {
             self.build_pty_handle(task, terminal_id, kind, worktree_path, model, ready)?;
         handle.tmux_session = tmux_session.map(str::to_string);
 
-        self.terminals
-            .write()
-            .await
-            .entry(session_id.to_string())
-            .or_default()
-            .insert(
-                terminal_id.to_string(),
-                TerminalEntry {
-                    task_id: handle.task_id.clone(),
-                    worktree_path: handle.worktree_path.clone(),
-                    model: handle.model.clone(),
-                    tmux_session: handle.tmux_session.clone(),
-                },
-            );
+        self.register_spawned_terminal(session_id, terminal_id, &handle)
+            .await;
 
         let on_exit = match on_exit {
             Some(hook) => Some(
@@ -175,6 +163,28 @@ impl CliSessionManager {
         );
 
         Ok(Arc::new(handle))
+    }
+
+    async fn register_spawned_terminal(
+        &self,
+        session_id: &str,
+        terminal_id: &str,
+        handle: &super::PtyHandle,
+    ) {
+        self.terminals
+            .write()
+            .await
+            .entry(session_id.to_string())
+            .or_default()
+            .insert(
+                terminal_id.to_string(),
+                TerminalEntry {
+                    task_id: handle.task_id.clone(),
+                    worktree_path: handle.worktree_path.clone(),
+                    model: handle.model.clone(),
+                    tmux_session: handle.tmux_session.clone(),
+                },
+            );
     }
 
     pub(crate) fn build_pty_handle(
