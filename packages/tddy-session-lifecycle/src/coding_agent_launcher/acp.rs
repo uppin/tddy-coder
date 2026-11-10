@@ -24,7 +24,7 @@ impl DaemonCodingAgentLauncher {
     /// `codex` dep — refused in a managed session when its
     /// spec cannot withdraw native tools ([`Self::confine`]), `coding_agent.acp.command` rendered
     /// with `{binary}`, `package_runner` (set when the binary was not named by `binary.env`) and
-    /// `route_args` (the route's, as `codex_acp_route_args` maps them when the spec's
+    /// `route_args` (the route's, as `toml_route_overrides` maps them when the spec's
     /// `route.shape` is `toml_args`), the process's working directory, the route's environment and secret
     /// environment, and on a managed launch a `config_env` withdrawal
     /// (`tddy_coding_agent_specs::slots::acp::acp_withdrawal`) merged into that variable's inline

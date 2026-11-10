@@ -3,10 +3,9 @@
 //!
 //! Two processes read the file: the root `tddy-supervisor`, which uses only the `os_user` column
 //! (which OS users sessions may run as, which per-user daemon sockets exist), and the daemon, which
-//! uses the logins. Before this crate each carried its own copy of the row checks and the copies had
-//! drifted: the daemon accepted an `os_user` that cannot name a socket, more OS users than the
-//! handed-over descriptors hold, and a row with no login. Both now parse through
-//! [`UsersMapping::from_yaml`].
+//! uses the logins. Both parse through [`UsersMapping::from_yaml`], so neither accepts a mapping the
+//! other refuses: an `os_user` that cannot name a socket, more OS users than the handed-over
+//! descriptors hold, or a row with no login.
 //!
 //! **What this crate is not.** It reads no file and checks no ownership: the two readers trust
 //! different owners (the supervisor accepts root or its own uid and checks every directory above the

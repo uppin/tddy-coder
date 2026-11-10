@@ -53,7 +53,7 @@ services:
 Validated at load (`host_socket_config.rs`, `validate`): a service that serves users needs the top-level
 `users:` block and its own `socket:` — descriptor 3 stays that. Both paths must be absolute.
 `spawn_policy.allowed_session_users`, `services[].host_sockets` and `services[].agent_tool_sockets` are
-refused before typed parsing (`refuse_old_user_list_keys` in `config.rs`), with an error naming
+refused before typed parsing (`refuse_old_user_list_keys` in `config/users.rs`), with an error naming
 `users.yaml` and the key to delete.
 
 A project that resolves to an account sends the four `GIT_AUTHOR_*` / `GIT_COMMITTER_*` keys with a

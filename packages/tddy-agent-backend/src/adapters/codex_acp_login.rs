@@ -37,7 +37,7 @@ impl AcpHooksAdapter for CodexAcpLogin {
     /// session directory the login writes its authorize URL to, and the login failure reported in
     /// place of the session error. Refused, naming the dep, when the launch resolved no `codex`.
     /// On a route the command gains the route's `-c` overrides as `codex-acp` takes them
-    /// ([`codex_acp_route_args`]).
+    /// ([`toml_route_overrides`]).
     fn prepare(&self, launch: AcpHooksLaunch<'_>) -> Result<PreparedAcpHooks, BackendError> {
         let codex_cli_path = launch.deps.get(CODEX_DEP).ok_or_else(|| {
             BackendError::InvocationFailed(format!(

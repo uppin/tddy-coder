@@ -290,10 +290,11 @@ it drops privilege; the daemon names none yet ([backlog](../../../docs/dev/todo/
 
 **A relayed agent's environment is the daemon's, whole.** The supervisor knows no coding-agent
 specifics: the daemon computes the agent's env (its base set, the spec's `pass_env`, what the launch
-sets) and a relayed spawn carries it as it is. `policy::resolve_relayed_env` applies no
-`allowed_env_keys` to it; the loader keys (`LD_*`, `MALLOC_*`, …) are still refused. The child is
-built on `EnvironmentBase::Exactly`: the request's env plus the account's `HOME`/`USER`/`LOGNAME`, and
-no supervisor `PATH` or locale. a spawn's env passes whole except the loader keys; `spawn_policy.exec_roots` gates which programs may be spawned.
+sets) and a relayed spawn carries it as it is: `policy::resolve_relayed_env` passes the env whole
+and refuses only the loader keys (`LD_*`, `MALLOC_*`, …); no key list gates it. What gates a spawn is
+`spawn_policy.exec_roots`, which names the programs that may be run. The child is built on
+`EnvironmentBase::Exactly`: the request's env plus the account's `HOME`/`USER`/`LOGNAME`, and no
+supervisor `PATH` or locale.
 
 The daemon side is `tddy-session-lifecycle`'s
 [coding-agent launcher](../../tddy-session-lifecycle/docs/coding-agent-launcher.md).
