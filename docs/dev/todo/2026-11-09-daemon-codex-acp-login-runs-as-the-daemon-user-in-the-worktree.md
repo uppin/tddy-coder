@@ -31,7 +31,7 @@ its uid and output directory.
 
 ## Why it stays
 
-Fixing it needs the login spawned through the user switch, which is the same session-user file
-ownership problem the OpenCode route-file follow-up node owns
-(`2026-11-04-opencode-acp-route-file-has-no-session-owner.md`). Recommended to be taken with that
-node.
+Fixing it needs the login spawned through the user switch, a session-user file ownership problem.
+The OpenCode route-file record that shared it was closed by `#agent-tools` 29/32 (#857) without
+solving it — OpenCode's route went inline, so no file needed an owner — and this one now stands
+alone.

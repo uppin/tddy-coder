@@ -61,7 +61,7 @@ run on the account follow.
 A session's harness can run on a provider account instead of its vendor. Which harness can run on
 which account is read from its coding-agent spec's `coding_agent.route` section — `providers`
 (`anthropic`, `openai_responses`, `openai_chat`, `meta`), `shape` (`env`, `toml_args`,
-`json_config_file`) and `key_env` — never from its name. The daemon answers that **capability
+`json_config_file`, `inline_config`), `key_env` and `config_env` — never from its name. The daemon answers that **capability
 matrix** from the coding agents its host loaded, once at start. For the built-in specs it is:
 
 | Harness (agent id / session type) | Runs on an account that |
@@ -76,8 +76,11 @@ matrix** from the coding agents its host loaded, once at start. For the built-in
 An unsupported pair is refused with the reason, never silently ignored. A route body is chosen by
 the spec's (shape, provider served): `(env, anthropic)` puts the Anthropic Messages endpoint and key
 in the environment, `(env, meta)` hands the key alone in the spec's `key_env`, `(toml_args,
-openai_responses)` declares a Responses provider through `-c` overrides, and `(json_config_file,
-openai_responses | openai_chat)` writes a JSON configuration file. So an agent dropped into
+openai_responses)` declares a Responses provider through `-c` overrides, `(json_config_file,
+openai_responses | openai_chat)` writes a JSON configuration file, and `(inline_config,
+openai_responses | openai_chat)` carries that configuration inline in the variable the spec's
+`config_env` names, writing no file. An `inline_config` route without a `config_env`, naming a
+`TDDY_*` one, or with a `files_dir` fails loading, naming the spec. So an agent dropped into
 `<tddyhome>/tools/` whose spec declares `route: { providers: [anthropic], shape: env }` runs on an
 Anthropic-serving account with that account's endpoint in its environment. A spec with no `route`
 section is refused, naming its product ("Acme Code cannot be pointed at another provider; it always
@@ -108,9 +111,9 @@ because the spawned process's environment carries no credential:
   declared as a Responses provider (`tddy-route`) through `-c` overrides and the model through `-m`
   (`codex exec`) or `-c model=` (`codex-acp`); the key is in the child's `CODEX_PROVIDER_KEY` (`codex.yaml`'s
   `route.key_env`), which the overrides name as the provider's `env_key`.
-- The OpenCode agent (`opencode acp`) gets the same generated `opencode.json` as an opencode-cli
-  session, written owner-only into a directory the agent's worker removes when it ends and named by
-  `OPENCODE_CONFIG`, with the key in `OPENCODE_PROVIDER_KEY` (`opencode.yaml`'s `route.key_env`). The route's `--model` is not passed:
+- The OpenCode agent (`opencode acp`) gets the same generated configuration as an opencode-cli
+  session, inline in `OPENCODE_CONFIG_CONTENT` (no file is written, `OPENCODE_CONFIG` is not set),
+  with the key in `OPENCODE_PROVIDER_KEY` (`opencode.yaml`'s `route.key_env`). The route's `--model` is not passed:
   the configuration selects the model ([OpenCode ACP backend](../coder/opencode-acp-backend.md)).
 - An account with no agent, a `cursor` agent, the `stub` or a specialized agent definition is
   refused with the reason. A tool session started from Telegram cannot choose an account

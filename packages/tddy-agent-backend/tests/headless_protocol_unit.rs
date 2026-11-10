@@ -320,6 +320,7 @@ fn the_generic_backend_is_named_by_its_specs_id() {
             product: "Lark Code".to_string(),
             support: RouteSupport::default(),
             key_env: None,
+            config_env: None,
         },
     );
 

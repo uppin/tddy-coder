@@ -43,13 +43,12 @@ OpenCode; the interactive OpenCode TUI is the **`opencode-cli`** terminal sessio
 
 ## Running on a provider account
 
-On a provider account the tool session's route file ([provider accounts § Tool
+On a provider account the tool session's route ([provider accounts § Tool
 sessions](../daemon/provider-accounts.md#tool-sessions)) is applied to the agent child:
 
-- The `opencode-route-file` hooks adapter `opencode.yaml` names writes the route's generated `opencode.json` (`0600`) into a fresh owner-only
-  (`0700`) directory under the temporary directory, and `OPENCODE_CONFIG` names it. The directory is
-  removed when the worker ends. A route file name that is not a bare file name is refused, so no route
-  writes outside that directory.
+- The route's generated OpenCode configuration is carried inline in `OPENCODE_CONFIG_CONTENT`
+  (`opencode.yaml`'s `route.shape: inline_config`). No file is written, `OPENCODE_CONFIG` is not set,
+  and `opencode.yaml` names no hooks adapter.
 - The account's key is in the child's environment (`OPENCODE_PROVIDER_KEY`, the spec's `route.key_env`), which the
   configuration reads; it is never an argument.
 - The route's `--model tddy-route/<model>` argument is **not** passed to `opencode acp`: the generated

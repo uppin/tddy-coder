@@ -266,8 +266,9 @@ definition for it). Opening one starts the agent process for that conversation:
   checkout the main agent works, no separate clone;
 - on the profile's **provider account route**, resolved from the session owner's vault exactly as a
   tool session's is (environment and secret environment for every harness, `-c` overrides for
-  `codex-acp`, the route's config file as inline `OPENCODE_CONFIG_CONTENT` for `opencode`). A route
-  that does not resolve refuses the launch — it never falls back to the vendor's own login;
+  `codex-acp`, the route's configuration inline in `OPENCODE_CONFIG_CONTENT` for `opencode`, as
+  its `route.shape: inline_config` renders it). A route that carries a file is refused, naming its
+  shape; one that does not resolve refuses the launch — it never falls back to the vendor's own login;
 - in a **managed** session, with its native file-system and shell tools withdrawn (`claude-acp`:
   `disallowedTools` in `session/new`'s `_meta`; `opencode`: `tools` set to `false` in its inline
   config) and `tddy-tools --mcp` handed to it as its only MCP server, pointed at the session's exec

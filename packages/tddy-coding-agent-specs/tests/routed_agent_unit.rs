@@ -88,6 +88,7 @@ fn a_routed_agent_carries_the_specs_id_product_route_support_and_key_env() {
                 shape: RouteShape::Env,
             },
             key_env: Some("LARK_API_KEY".to_string()),
+            config_env: None,
         }
     );
 }
@@ -108,6 +109,7 @@ fn a_spec_without_a_route_is_a_routed_agent_with_no_providers_named_by_its_id() 
             product: "lark".to_string(),
             support: RouteSupport::default(),
             key_env: None,
+            config_env: None,
         }
     );
 }

@@ -30,6 +30,7 @@ fn a_spec_backend(path: std::path::PathBuf) -> tddy_agent_backend::SpecAcpBacken
             product: "Claude".to_string(),
             support: tddy_agent_backend::provider_route::RouteSupport::default(),
             key_env: None,
+            config_env: None,
         },
         tddy_agent_backend::AcpAgentCommand {
             program: path,

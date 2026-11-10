@@ -160,7 +160,7 @@ fn an_override_using_a_removed_route_shape_word_is_refused_at_load_naming_the_ne
         the_load_refusal_of_an_override_of("codex", "shape: toml_args", "shape: args"),
         the_load_refusal_of_an_override_of(
             "opencode",
-            "shape: json_config_file",
+            "shape: inline_config",
             "shape: config_file",
         ),
     );

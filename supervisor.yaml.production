@@ -112,8 +112,8 @@ shutdown_grace_secs: 20
 #     #   Without that variable claude-acp runs as `bunx claude-agent-acp`, which needs bunx listed
 #     #   here — and arguments are not allowlisted, so listing bunx lets the daemon run ANY package
 #     #   bunx can fetch as the session user. Prefer the binary.
-#   # A coding agent's launch also sets its provider route's variables (per provider account) and,
-#   # for opencode, OPENCODE_CONFIG_CONTENT — list those in allowed_env_keys too, or it is refused.
+#   # A relayed coding agent's environment is the one the daemon computed, whole: its provider
+#   # route's variables (per provider account) are not gated by allowed_env_keys.
 #   allowed_mount_roots: [/home, /srv/repos]     # roots a sandbox bind-mount source must fall under
 #   allowed_env_keys: [RUST_LOG, TZ]             # env keys a caller may set on a session
 #   # A clone the daemon runs over SSH (as an OS user, through this supervisor) is spawned with

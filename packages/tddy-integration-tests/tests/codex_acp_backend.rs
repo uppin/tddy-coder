@@ -29,6 +29,7 @@ fn a_spec_backend(path: std::path::PathBuf) -> tddy_core::SpecAcpBackend {
             product: "Codex".to_string(),
             support: tddy_core::provider_route::RouteSupport::default(),
             key_env: None,
+            config_env: None,
         },
         tddy_core::AcpAgentCommand {
             program: path,

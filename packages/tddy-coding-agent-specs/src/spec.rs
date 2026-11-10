@@ -149,7 +149,42 @@ fn parse_section(
     validate_env_entries(&agent.pass_env)
         .map_err(|e| format!("pass_env: {e}"))
         .map_err(invalid)?;
+    if let Some(route) = &agent.route {
+        route_slot_errors(route)
+            .map_err(|e| format!("route: {e}"))
+            .map_err(invalid)?;
+    }
     Ok(agent)
+}
+
+/// A `coding_agent.route` slot refused at load because its shape cannot be rendered as declared:
+/// `shape: inline_config` without a `config_env` to carry the configuration in, with a
+/// `config_env` matching `TDDY_*` (an agent never sees a daemon variable), or with a `files_dir`
+/// (an inline route writes no file). The message names the field.
+pub(crate) fn route_slot_errors(route: &RouteSlot) -> Result<(), String> {
+    if route.shape != RouteShape::InlineConfig {
+        return Ok(());
+    }
+    let Some(config_env) = route.config_env.as_deref() else {
+        return Err(
+            "shape `inline_config` needs a `config_env` naming the variable that carries the \
+             route's configuration inline"
+                .to_string(),
+        );
+    };
+    if admits_a_tddy_variable(config_env) {
+        return Err(format!(
+            "config_env '{config_env}' would hand the route's configuration over in a TDDY_* \
+             variable, which no agent sees"
+        ));
+    }
+    if route.files_dir.is_some() {
+        return Err(
+            "shape `inline_config` takes no `files_dir`: an inline route writes no file"
+                .to_string(),
+        );
+    }
+    Ok(())
 }
 
 /// Agent-env entries (`coding_agent.pass_env`, an agent-env base set) refused when one would let an
@@ -494,7 +529,7 @@ impl CodingAgentSpec {
 }
 
 /// What a route body knows of `spec` (`#agent-tools 13/19`): its id, its product, its route
-/// support and its `route.key_env`. A spec without a `route` section gives an agent with no
+/// support, its `route.key_env` and its `route.config_env`. A spec without a `route` section gives an agent with no
 /// providers, which every route body refuses.
 pub fn routed_agent(spec: &CodingAgentSpec) -> RoutedAgent {
     RoutedAgent {
@@ -506,6 +541,11 @@ pub fn routed_agent(spec: &CodingAgentSpec) -> RoutedAgent {
             .route
             .as_ref()
             .and_then(|route| route.key_env.clone()),
+        config_env: spec
+            .agent
+            .route
+            .as_ref()
+            .and_then(|route| route.config_env.clone()),
     }
 }
 
@@ -524,8 +564,8 @@ pub struct AcpSection {
     #[serde(default)]
     pub env: BTreeMap<String, String>,
     /// The hooks adapter (`tddy_agent_backend::adapters::AcpHooksAdapters`) the driver runs with —
-    /// `codex-acp-login`, `opencode-route-file`; `None` runs it with no hooks. A name the registry
-    /// does not hold is refused at load.
+    /// `codex-acp-login`; `None` runs it with no hooks. A name the registry does not hold is
+    /// refused at load.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub hooks_adapter: Option<String>,
     /// Where an ACP launch registers its MCP server, when that differs from `coding_agent.mcp`
@@ -724,8 +764,10 @@ pub struct RouteSlot {
     /// agent's own (OpenCode, Muse).
     #[serde(default)]
     pub required_in_jail: bool,
-    /// The variable the route's first file is named in (`OPENCODE_CONFIG`); `None` for a route that
-    /// is environment only.
+    /// The variable the route's configuration reaches the agent in: for `shape: inline_config` the
+    /// configuration itself (`OPENCODE_CONFIG_CONTENT`), for `shape: json_config_file` the path of
+    /// the route's first file. `None` for a route that is environment only. An `inline_config` route
+    /// needs one, never a `TDDY_*` one, and takes no `files_dir` ([`route_slot_errors`]).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub config_env: Option<String>,
     /// The directory under the jail's scratch the route's files are written to owner-only

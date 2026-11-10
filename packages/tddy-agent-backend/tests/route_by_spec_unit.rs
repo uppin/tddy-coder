@@ -7,6 +7,7 @@
 
 use pretty_assertions::assert_eq;
 use rstest::rstest;
+use tddy_agent_backend::provider_route::opencode_config_for;
 use tddy_agent_backend::provider_route::{
     agent_routable, bodies_accept, resolve_route, route_supported, HarnessRoute, ProviderKind,
     RouteEndpoints, RouteFile, RouteRefusal, RouteSecret, RouteShape, RouteSupport, RouteTarget,
@@ -32,6 +33,7 @@ fn an_agent(
             shape,
         },
         key_env: key_env.map(str::to_string),
+        config_env: None,
     }
 }
 
@@ -66,6 +68,21 @@ fn opencode() -> RoutedAgent {
         &[ProviderKind::OpenaiResponses, ProviderKind::OpenaiChat],
         Some("OPENCODE_PROVIDER_KEY"),
     )
+}
+
+/// An agent whose spec routes Responses or Chat Completions as inline JSON configuration in
+/// `config_env` (OpenCode's is `OPENCODE_CONFIG_CONTENT`), its key in `OPENCODE_PROVIDER_KEY`.
+fn an_inline_config_agent(id: &str, config_env: Option<&str>) -> RoutedAgent {
+    RoutedAgent {
+        config_env: config_env.map(str::to_string),
+        ..an_agent(
+            id,
+            "Lark",
+            RouteShape::InlineConfig,
+            &[ProviderKind::OpenaiResponses, ProviderKind::OpenaiChat],
+            Some("OPENCODE_PROVIDER_KEY"),
+        )
+    }
 }
 
 /// Muse Code's spec: Meta only, its key alone in `META_API_KEY`.
@@ -125,6 +142,10 @@ fn secrets_of(route: &HarnessRoute) -> Vec<(String, String)> {
 #[case::toml_args(RouteShape::TomlArgs, &[ProviderKind::OpenaiResponses])]
 #[case::json_config_file(
     RouteShape::JsonConfigFile,
+    &[ProviderKind::OpenaiResponses, ProviderKind::OpenaiChat]
+)]
+#[case::inline_config(
+    RouteShape::InlineConfig,
     &[ProviderKind::OpenaiResponses, ProviderKind::OpenaiChat]
 )]
 fn a_shapes_bodies_accept_the_providers_a_body_exists_for(
@@ -395,5 +416,72 @@ fn a_json_config_file_route_reads_its_key_from_the_specs_key_env() {
             }],
             vec!["--model".to_string(), format!("tddy-route/{A_MODEL}")],
         )
+    );
+}
+
+// ── `route.shape: inline_config` (`#agent-tools 29/32`) ─────────────────────────────────────────
+//
+// The route body carries the configuration a `json_config_file` body writes as a file inline, in
+// the plain environment under the variable the spec names, so every launcher renders it as any
+// route variable. Changeset: `docs/dev/changesets/2026-11-09-opencode-route-inline.md`.
+
+#[test]
+fn an_inline_config_route_lands_in_whatever_variable_the_spec_names() {
+    // Given — a drop-in agent whose spec names its own variable
+    let lark = an_inline_config_agent("lark", Some("LARK_CONFIG_CONTENT"));
+
+    // When
+    let route = resolve_route(&lark, &a_chat_only_account()).expect("an inline agent routes");
+
+    // Then — the configuration a file route would write, in that variable; no file, the key a
+    // secret, the model on the generated provider
+    let config = opencode_config_for(&a_chat_only_account(), "OPENCODE_PROVIDER_KEY")
+        .expect("the account serves Chat Completions")
+        .contents;
+    assert_eq!(
+        (
+            route.env.clone(),
+            route.files.clone(),
+            secrets_of(&route),
+            route.args.clone()
+        ),
+        (
+            vec![("LARK_CONFIG_CONTENT".to_string(), config)],
+            Vec::<RouteFile>::new(),
+            vec![("OPENCODE_PROVIDER_KEY".to_string(), A_KEY.to_string())],
+            vec!["--model".to_string(), format!("tddy-route/{A_MODEL}")],
+        )
+    );
+}
+
+#[test]
+fn an_inline_config_route_carries_no_key_in_its_plain_environment() {
+    // When
+    let route = resolve_route(
+        &an_inline_config_agent("opencode", Some("OPENCODE_CONFIG_CONTENT")),
+        &a_meta_account(),
+    )
+    .expect("an inline agent routes");
+
+    // Then — the inline configuration names the key by variable; the key itself is secret only
+    assert!(
+        !route.env.is_empty() && route.env.iter().all(|(_, value)| !value.contains(A_KEY)),
+        "{:?}",
+        route.env
+    );
+}
+
+#[test]
+fn an_inline_config_agent_without_a_config_variable_is_not_yet_routable() {
+    // Given — an inline agent whose spec names no variable to carry the configuration in
+    let lark = an_inline_config_agent("lark", None);
+
+    // When
+    let routable = agent_routable(&lark);
+
+    // Then
+    assert!(
+        matches!(routable, Err(RouteRefusal::NotYetRoutable { .. })),
+        "{routable:?}"
     );
 }

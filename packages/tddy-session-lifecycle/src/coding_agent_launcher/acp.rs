@@ -11,7 +11,7 @@ use tddy_coding_agent_specs::slots::McpServerCommand;
 use tddy_coding_agent_specs::{CodingAgentSpec, RouteShape};
 use tddy_coding_subagent::{
     confinable_acp_agents, no_launch_hooks, refuse_unless_spec_confinable, transport_of_spec,
-    CodingAgentLaunch, Transport, OPENCODE_CONFIG_CONTENT,
+    CodingAgentLaunch, Transport,
 };
 use tddy_core::adapters::{AcpHooksAdapters, AcpHooksLaunch, PreparedAcpHooks};
 use tddy_core::provider_route::HarnessRoute;
@@ -31,10 +31,10 @@ impl DaemonCodingAgentLauncher {
     /// config. An `acp_meta` withdrawal travels in `session/new` `_meta` instead
     /// ([`Self::acp_session_meta_from_spec`]).
     ///
-    /// A route whose spec declares `route.shape: json_config_file` (OpenCode) stays inline here
-    /// (`OPENCODE_CONFIG_CONTENT`), never as a route file: a file the daemon writes cannot be read by
-    /// an agent started as the session's OS user, so the route file is a follow-up node's, with the
-    /// session user as its owner (`docs/dev/todo/2026-11-04-opencode-acp-route-file-has-no-session-owner.md`).
+    /// A route is applied through its plain and secret environment, as its body renders it: an
+    /// `inline_config` route already carries its configuration there. A route that carries files
+    /// is refused, naming its shape: no ACP launch can hand a route file to an agent started as
+    /// the session's OS user.
     pub(super) fn acp_plan_from_spec(
         &self,
         launch: &CodingAgentLaunch,
@@ -64,13 +64,17 @@ impl DaemonCodingAgentLauncher {
             .agent_env(&agent.spec, std::env::vars_os(), &command.env);
         command.cwd = Some(launch.worktree.clone());
         if let Some(route) = &route {
-            command.env.extend(harness_route_env(route));
-            if shape == RouteShape::JsonConfigFile {
-                if let Some(config) = Self::opencode_route_config(launch, route)? {
-                    merge_inline_config(&mut command, OPENCODE_CONFIG_CONTENT, config)
-                        .map_err(|reason| Self::refuse(launch, &reason))?;
-                }
+            if !route.files.is_empty() {
+                return Err(Self::refuse(
+                    launch,
+                    &format!(
+                        "its route (shape `{}`) carries a file, which no ACP launch \
+                         can hand to an agent started as the session's OS user",
+                        shape.word()
+                    ),
+                ));
             }
+            command.env.extend(harness_route_env(route));
         }
         let withdrawn = Self::withdrawn_tools(launch, &agent.spec)?;
         if let Some(AcpWithdrawal::ConfigEnv { env, config }) =
@@ -225,31 +229,14 @@ impl DaemonCodingAgentLauncher {
         Ok(&self.coding_agents)
     }
 
-    /// The route's OpenCode config file as JSON; `None` for a route that carries none.
-    fn opencode_route_config(
-        launch: &CodingAgentLaunch,
-        route: &HarnessRoute,
-    ) -> Result<Option<serde_json::Value>, SubagentError> {
-        let Some(file) = route.files.first() else {
-            return Ok(None);
-        };
-        serde_json::from_str(&file.contents).map(Some).map_err(|e| {
-            Self::refuse(
-                launch,
-                &format!("the route's OpenCode config is not JSON: {e}"),
-            )
-        })
-    }
-
     /// The hooks the adapter `launch`'s spec declares (`coding_agent.acp.hooks_adapter`) prepares on
     /// `command`, before it is spawned or relayed; [`no_launch_hooks`] for a spec that declares none.
     /// A name this build has no adapter for is refused, never run without it.
     ///
     /// The adapter is handed **no route**: [`Self::acp_plan_from_spec`] has already rendered the
-    /// route into the command (`-c` overrides by the spec's `route.shape`, OpenCode's config
-    /// inline), so an adapter that also applied it would apply it twice (`codex-acp-login`'s `-c`
-    /// overrides) or write the route file the session user cannot read (`opencode-route-file`, a
-    /// follow-up node's).
+    /// route into the command (`-c` overrides by the spec's `route.shape`, or its configuration
+    /// inline in its environment), so an adapter that also applied it would apply it twice
+    /// (`codex-acp-login`'s `-c` overrides).
     pub(crate) fn acp_hooks_from_spec(
         &self,
         launch: &CodingAgentLaunch,

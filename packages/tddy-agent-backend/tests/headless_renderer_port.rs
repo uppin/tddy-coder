@@ -248,6 +248,7 @@ fn a_backend_rendered_by(renderer: Arc<ARecordingRenderer>) -> SpecHeadlessBacke
             product: "Claude Code".to_string(),
             support: RouteSupport::default(),
             key_env: None,
+            config_env: None,
         },
     )
 }
