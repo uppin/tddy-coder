@@ -91,8 +91,8 @@ pub async fn run(config_path: &Path) -> anyhow::Result<()> {
     // `SIGCHLD` before anything was listening for it, and the supervisor would wait forever for a
     // notification it had already missed.
     let mut child_exited = signal(SignalKind::child())?;
-    let mut terminate = signal(SignalKind::terminate())?;
-    let mut interrupt = signal(SignalKind::interrupt())?;
+    let terminate = signal(SignalKind::terminate())?;
+    let interrupt = signal(SignalKind::interrupt())?;
 
     // Every fork in the process goes through this one thread, and it must outlive every child it
     // creates — see `spawn_broker::fork_broker::ForkBroker`.
@@ -178,6 +178,11 @@ pub async fn run(config_path: &Path) -> anyhow::Result<()> {
         Arc::clone(&surface),
     ));
 
+    wait_for_shutdown_and_stop(config, terminate, interrupt, supervisor, reaper, server).await;
+    Ok(())
+}
+
+async fn wait_for_shutdown_and_stop(config: Arc<SupervisorConfig>, mut terminate: tokio::signal::unix::Signal, mut interrupt: tokio::signal::unix::Signal, supervisor: Arc<Supervisor>, reaper: tokio::task::JoinHandle<()>, server: tokio::task::JoinHandle<()>) {
     tokio::select! {
         _ = terminate.recv() => log::info!(target: "tddy_supervisor", "SIGTERM received"),
         _ = interrupt.recv() => log::info!(target: "tddy_supervisor", "SIGINT received"),
@@ -190,5 +195,4 @@ pub async fn run(config_path: &Path) -> anyhow::Result<()> {
         .shutdown(Duration::from_secs(config.shutdown_grace_secs))
         .await;
     reaper.abort();
-    Ok(())
 }
