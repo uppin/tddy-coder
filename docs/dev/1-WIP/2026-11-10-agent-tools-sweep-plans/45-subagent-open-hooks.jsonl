@@ -1,0 +1,2 @@
+{"v":2,"files":{"packages/tddy-coding-subagent/src/session.rs":{"sha256":"sha256:4d821fd44465aa71bab6fee5ba1ca3a08b264a70db385664864fe78ce8e11a2a"}}}
+{"id": "op-1", "op": "extract_method", "anchor": {"kind": "item", "item": "tddy_coding_subagent::session::CodingAgentSession::opened", "file": "packages/tddy-coding-subagent/src/session.rs", "start": {"line": 12, "col": 9}, "end": {"line": 25, "col": 85}, "fingerprint": "sha256:e3c2a6fa3c8e9cde8505df8eecd65465e3f096d4cd4644c5a01775e5bd22f04d", "hint": {"line": 160, "col": 9}}, "name": "open_under_hooks"}
