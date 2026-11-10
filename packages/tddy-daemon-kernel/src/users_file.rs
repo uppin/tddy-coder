@@ -74,19 +74,7 @@ pub fn load_users_file(source: &UsersFileSource) -> anyhow::Result<LiveUsers> {
     let contents = std::fs::read_to_string(path).map_err(|error| {
         anyhow::anyhow!("could not read users.yaml at {}: {error}", path.display())
     })?;
-    if let UsersFileSource::HandedBySupervisor(_) = source {
-        let metadata = std::fs::metadata(path)
-            .map_err(|error| anyhow::anyhow!("users.yaml at {}: {error}", path.display()))?;
-        if metadata.uid() != 0 || metadata.mode() & 0o022 != 0 {
-            anyhow::bail!(
-                "users.yaml at {} is not root-owned and closed to group and others \
-                 (owner uid {}, mode {:o}); a supervised daemon trusts only a mapping root wrote",
-                path.display(),
-                metadata.uid(),
-                metadata.mode() & 0o7777
-            );
-        }
-    }
+    require_root_owned_users_file(source, path)?;
     let mapping = tddy_users_file::UsersMapping::from_yaml(&contents)
         .map_err(|refusal| anyhow::anyhow!("users.yaml at {}: {refusal}", path.display()))?;
     let rows: Vec<crate::config::access::UserMapping> = mapping
@@ -101,6 +89,25 @@ pub fn load_users_file(source: &UsersFileSource) -> anyhow::Result<LiveUsers> {
         UsersFileSource::HandedBySupervisor(_) => LiveUsers::owned_by_supervisor(rows),
         UsersFileSource::BesideConfig(_) => LiveUsers::new(rows),
     })
+}
+
+fn require_root_owned_users_file(source: &UsersFileSource, path: &Path) -> anyhow::Result<()> {
+    use std::os::unix::fs::MetadataExt;
+
+    if let UsersFileSource::HandedBySupervisor(_) = source {
+        let metadata = std::fs::metadata(path)
+            .map_err(|error| anyhow::anyhow!("users.yaml at {}: {error}", path.display()))?;
+        if metadata.uid() != 0 || metadata.mode() & 0o022 != 0 {
+            anyhow::bail!(
+                "users.yaml at {} is not root-owned and closed to group and others \
+                 (owner uid {}, mode {:o}); a supervised daemon trusts only a mapping root wrote",
+                path.display(),
+                metadata.uid(),
+                metadata.mode() & 0o7777
+            );
+        }
+    }
+    Ok(())
 }
 
 #[cfg(test)]
