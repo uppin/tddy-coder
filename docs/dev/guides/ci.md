@@ -362,7 +362,10 @@ Only the chain leg needs anything from CI, and only that leg waits for it — it
 polls for the `tddy-dist` artifact `Rust build` publishes for the same commit,
 failing if that build failed or never finished. Cancelled CI runs of the same
 trigger and commit — the stale twin a draft-gate race leaves behind — are
-ignored when it picks the run, since their `Rust build` never completes. The two cheap legs start
+ignored when it picks the run, since their `Rust build` never completes. So is a run whose `Rust
+build` was skipped or that finished without one — the `ready_for_review` run of a PR readied after
+its push, which is newer than the push's run and skips every Rust job: the candidates are tried
+newest-first, and the first that builds, or is still running and may, is the one waited on. The two cheap legs start
 immediately. The alternative is `workflow_run`, which would give a real
 dependency edge instead of a poll, but GitHub always takes a `workflow_run`
 workflow from the **default branch**: the file could not be changed and tested

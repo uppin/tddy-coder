@@ -40,6 +40,16 @@ struct RecordingLauncher {
 
 #[async_trait::async_trait]
 impl CodingAgentLauncher for RecordingLauncher {
+    async fn session_meta_for(
+        &self,
+        _launch: &tddy_coding_subagent::CodingAgentLaunch,
+    ) -> Result<
+        Option<serde_json::Map<String, serde_json::Value>>,
+        tddy_discovery::subagent::SubagentError,
+    > {
+        Ok(None)
+    }
+
     async fn command_for(
         &self,
         launch: &CodingAgentLaunch,

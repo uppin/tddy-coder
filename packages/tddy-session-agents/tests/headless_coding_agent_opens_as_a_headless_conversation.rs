@@ -33,6 +33,16 @@ struct AHeadlessCliLauncher {
 
 #[async_trait]
 impl CodingAgentLauncher for AHeadlessCliLauncher {
+    async fn session_meta_for(
+        &self,
+        _launch: &tddy_coding_subagent::CodingAgentLaunch,
+    ) -> Result<
+        Option<serde_json::Map<String, serde_json::Value>>,
+        tddy_discovery::subagent::SubagentError,
+    > {
+        Ok(None)
+    }
+
     async fn command_for(
         &self,
         _launch: &CodingAgentLaunch,
@@ -205,9 +215,13 @@ async fn a_headless_coding_agent_opens_as_a_headless_conversation() {
     let launch = a_claude_launch(claude.dir.path().to_path_buf());
 
     // When
-    let mut session = start_coding_agent_session(&launcher, &launch)
-        .await
-        .expect("the headless conversation opens");
+    let mut session = start_coding_agent_session(
+        &launcher,
+        &launch,
+        tddy_coding_agent_specs::CodingAgentRegistry::builtin_cached(),
+    )
+    .await
+    .expect("the headless conversation opens");
     let outcome = within_deadline(session.prompt("Run it.")).await;
 
     // Then

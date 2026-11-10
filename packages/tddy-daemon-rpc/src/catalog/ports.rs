@@ -176,6 +176,7 @@ impl tddy_discovery::catalog_service::CatalogHandler for CatalogRpcHandler {
             &self.config,
             &daemon_instance_id,
             &subagents,
+            &self.agents.coding_agents.agents_shared(),
         ));
         // An empty answer has three very different causes — this daemon has no defs, its registry
         // was never wired in, or a def was dropped on the way out — and "returning 0" told them

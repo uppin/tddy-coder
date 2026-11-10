@@ -35,27 +35,28 @@ override; `config_env` merged into `OPENCODE_CONFIG_CONTENT`). The specs give:
 | `codex-acp` | `codex-acp` beside the resolved `codex` dep (`sibling_of`), or `TDDY_CODEX_ACP_CLI` — never `PATH` |
 | `opencode` | `opencode acp` |
 
-The working directory is the session's worktree. Any other harness is refused. A launcher built
-without coding agents (`new`, `with_identity` — tests only) still plans the same three by hand
-(`harness_command`, `apply_route`); the `#agent-tools` sweep deletes that path
-([todo](../../../docs/dev/todo/2026-11-04-acp-hand-built-launch-path-for-agentless-launchers.md)).
-The OpenCode route config stays inline in `OPENCODE_CONFIG_CONTENT`, since a session has no owner for
-a route file ([todo](../../../docs/dev/todo/2026-11-04-opencode-acp-route-file-has-no-session-owner.md)).
+The working directory is the session's worktree. Any harness the host's registry does not declare an
+ACP agent is refused; nothing is planned by hand, and no launcher names an agent
+(`CodingAgentLauncher::session_meta_for` has no default). The OpenCode route config stays inline in
+`OPENCODE_CONFIG_CONTENT`, since a route file the daemon writes cannot be read by an agent running as
+the session's OS user ([todo](../../../docs/dev/todo/2026-11-04-opencode-acp-route-file-has-no-session-owner.md)).
 
 ## The provider route
 
 When the definition names a provider account, `route_from_vault` resolves it in the session owner's
 vault with `tddy_agent_launch::session_provider_route::resolve_session_route` — the call tool sessions
 use — and `apply_route` applies it: `env` and `secret_env` for every harness, `codex_acp_route_args`
-(`-c` overrides) for `codex-acp`, and the route's config file merged into inline
-`OPENCODE_CONFIG_CONTENT` for `opencode` (a non-JSON config, the route's or an inline one already
+(`-c` overrides) for an agent whose spec's `route.shape` is `toml_args` (`codex-acp`), and the route's
+config file merged into inline `OPENCODE_CONFIG_CONTENT` for one whose shape is `json_config_file`
+(`opencode`) — keyed on the spec, never the harness name (a non-JSON config, the route's or an inline one already
 set, is refused). A route that does not resolve refuses the launch.
 
 ## A managed session
 
-`refuse_unless_confinable` refuses a harness that cannot withdraw its native tools. For `opencode`
-the withdrawal config (`opencode_withdrawal_config`) is merged into `OPENCODE_CONFIG_CONTENT`; for
-`claude-acp` it travels as `session/new` `_meta` (set by `tddy-session-agents`). `mcp_servers_for`
+`refuse_unless_spec_confinable` refuses an agent whose spec cannot withdraw its native tools
+(`confinement_of_spec`), naming the registry's confinable ACP agents (`confinable_acp_agents`). A
+`config_env` withdrawal (`opencode`) is merged into `OPENCODE_CONFIG_CONTENT`; an `acp_meta` one
+(`claude-acp`) travels as `session/new` `_meta` (`session_meta_for`, set by `tddy-session-agents`). `mcp_servers_for`
 returns `tddy-tools --mcp` with the environment `tddy_session_split::coding_agent_wiring`'s
 `CodingAgentToolHost::tool_server` builds: the colocated jail's `TDDY_REMOTE_*` variables, with
 `TDDY_REMOTE_DAEMON_SOCKET` naming the session OS user's agent-tool socket
@@ -66,8 +67,18 @@ servers.
 
 ## Becoming the session's user
 
-`launch_transport` is the production path; `command_for` covers only the case where the driver
-spawns the agent itself.
+`launch_agent` is the production path: `launch_transport` plus the hooks of the adapter the agent's
+spec declares (`coding_agent.acp.hooks_adapter`), prepared on the command before it is spawned or
+relayed — `codex-acp-login` hands back its one `codex login` retry on an auth-like `session/new`
+error, an agent declaring none gets `no_launch_hooks()`, and a name this build has no adapter for is
+refused. The adapter is handed **no route**: the plan already rendered it (`-c` overrides when the
+spec's `route.shape` is `toml_args`, the inline `OPENCODE_CONFIG_CONTENT` when it is
+`json_config_file`), so `codex-acp-login` never appends a second override and `opencode-route-file`
+writes no route file a session user could not read
+([`docs/dev/todo/2026-11-04-opencode-acp-route-file-has-no-session-owner.md`](../../../docs/dev/todo/2026-11-04-opencode-acp-route-file-has-no-session-owner.md)).
+The login runs as the daemon's user and writes its authorize URL into the worktree
+([`docs/dev/todo/2026-11-09-daemon-codex-acp-login-runs-as-the-daemon-user-in-the-worktree.md`](../../../docs/dev/todo/2026-11-09-daemon-codex-acp-login-runs-as-the-daemon-user-in-the-worktree.md)).
+`command_for` covers only the case where the driver spawns the agent itself.
 
 1. **The daemon's own user** — the command as built (`AgentTransport::Command`).
 2. **A privileged daemon** — `coding_agent_as_user::run_as_session_user` wraps the argv in `setpriv`
@@ -97,7 +108,8 @@ rather than starting anything weaker:
 - the launcher must be wired (`with_headless_wiring(config, <tddy_data_dir>/headless)`, which
   `for_daemon` does) and hold the host's coding agents (`with_coding_agents`; a tool file that does
   not load refuses every headless launch, and nothing is planned by hand), the harness confinable for
-  the session (`refuse_unless_confinable` — no headless CLI is, so a managed session refuses), and the
+  the session (`refuse_unless_registry_confinable` — no headless spec is, since a headless flag for its own tools
+  is not an ACP withdrawal, so a managed session refuses), and the
   launch must carry a plain conversation id;
 - `HostCodingAgents::resolve` names the agent's spec and binary; the command runs on the launch's
   worktree with the session's model, its argv rendered at each turn by a `SpecHeadlessRenderer` (the
@@ -143,5 +155,5 @@ start. Cursor's worktree file is not removed on close, and the start-up call has
 see the backlog.
 
 Approvals are bound for `claude` only: `cursor`, `codex` and `oz` have no permission-prompt tool.
-`confinement_for` still reports all three `CannotWithdraw`
+`refuse_unless_registry_confinable` still refuses all three in a managed session
 ([`docs/dev/todo/2026-10-25-headless-cursor-codex-oz-cannot-withdraw-native-tools.md`](../../../docs/dev/todo/2026-10-25-headless-cursor-codex-oz-cannot-withdraw-native-tools.md)).

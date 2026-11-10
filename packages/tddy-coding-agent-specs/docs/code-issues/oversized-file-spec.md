@@ -3,9 +3,9 @@
 **Location:** `packages/tddy-coding-agent-specs/src/spec.rs`
 **Category:** oversized-file
 **Detected:** 2026-11-04 by `/pr-wrap` step 3.5 file-length gate on PR #800 (`#agent-tools` 11/12)
-**Metrics:** **981 production lines** (2026-11-06, counted to the first `#[cfg(test)]`) · budget 500 · **1.96× over**
-**Thresholds breached:** length 981 > 500
-**Status:** Open — regressed 2026-11-06 (815 → 981, #828), unclaimed
+**Metrics:** **1031 production lines** (2026-11-09, counted to the first `#[cfg(test)]`) · budget 500 · **2.06× over**
+**Thresholds breached:** length 1031 > 500
+**Status:** Open — regressed 2026-11-09 (981 → 1031, #835), unclaimed
 
 ## Measurement history
 
@@ -17,6 +17,7 @@
 | 2026-11-05 | 736 → 769 | **regressed** by #820 (`#agent-tools` 14/19): `CodingAgentSection.conversation`, `CodingAgentSpec::conversation()` (the derived default) and the two conversation load refusals in `CodingAgentExtension::validate`; measured on `origin/feature/agent-tools/route-support` (`3c29698cd`) and HEAD at #820's wrap. Not split: restructuring deferred to the `#agent-tools` sweep node (n20) by the developer (2026-11-04). The conversation accessor and its refusals would move with the `spec/capabilities.rs` sibling named below |
 | 2026-11-05 | 769 → 815 | **regressed** by #821 (`#agent-tools` 15/19): `HeadlessSection`'s seven protocol fields (`system_prompt`, `goal_params`, `approval_tool`, `workflow_mcp`, `route_model`, `fresh_session`, `scratch`) and `HeadlessSection::protocol()`, plus their load refusals; measured against `origin/feature/agent-tools/cli-spec-features` (`4552a851c`) at #821's wrap. Not split: restructuring deferred to the `#agent-tools` sweep node (n20) by the developer (2026-11-04). The headless section would move to a `spec/headless.rs` sibling the same way as the ACP one below |
 | 2026-11-06 | 815 → 981 | **regressed** by the sweep (#828, `#agent-tools` 20/28): the CLI-arg schema the deleted descriptor fields needed — `argv_params`, `binds_argv_param`, `render_run_argv`, `model_listing_argv`, `curated_models`, `CuratedModel`, `permission_modes`, `transcript_usage`. The sweep deleted metadata consumers, not this file's seams, and did not split it: the restructuring the 2026-11-04 deferral pointed at this node remains to be scheduled. Counted to the first `#[cfg(test)]` on the sweep branch |
+| 2026-11-09 | 981 → 1031 | **regressed** by #835 (`#agent-tools` 27/32): `HeadlessSection.permission_policy` and `HeadlessPermissionPolicy` with its untagged YAML shape (`PermissionPolicyYaml`, `AsksCallerWord`, the two `From` impls). Not split: stack-shared — #836 and #857 above it in the stack modify this file, so a split here would conflict through their diffs (`/pr-wrap` step 3.5's stack-branch rule); left for the `#agent-tools` sweep node to split. The policy type would move with the `spec/headless.rs` sibling named below |
 
 ## What would close it
 

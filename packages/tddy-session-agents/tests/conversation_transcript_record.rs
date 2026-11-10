@@ -377,6 +377,7 @@ fn a_daemon_serving_with(
         rosters: Arc::new(SessionAgentRosterStore::new(
             Arc::clone(&clones),
             Arc::new(SessionAgentActivityStore::new()),
+            Arc::new(tddy_coding_agent_specs::CodingAgentRegistry::empty()),
         )),
         clones,
         conversations: Arc::new(OpenAgentConversations::new()),
