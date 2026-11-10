@@ -294,7 +294,15 @@ fn open_pty_and_pump(
         capture.resize(initial_size.rows, initial_size.cols);
     }
 
-    let (master, current_size, exit_tx, exit_rx, child_exited_tx, child_exited_rx, reader_done_rx) = spawn_reader_with_master(output_ch, initial_size, pair.master);
+    let PtyMasterSetup {
+        master,
+        current_size,
+        exit_tx,
+        exit_rx,
+        child_exited_tx,
+        child_exited_rx,
+        reader_done_rx,
+    } = spawn_reader_with_master(output_ch, initial_size, pair.master);
 
     let cmd = build_pty_command(spec);
 
@@ -350,7 +358,17 @@ fn open_pty_and_pump(
     Ok(())
 }
 
-fn spawn_reader_with_master(output_ch: Arc<TaskChannel>, initial_size: PtySize, pair_master: Box<dyn MasterPty + Send>) -> (Arc<Mutex<Box<dyn MasterPty + Send>>>, Arc<Mutex<PtySize>>, oneshot::Sender<TaskStatus>, oneshot::Receiver<TaskStatus>, oneshot::Sender<()>, oneshot::Receiver<()>, std::sync::mpsc::Receiver<()>) {
+struct PtyMasterSetup {
+    master: Arc<Mutex<Box<dyn MasterPty + Send>>>,
+    current_size: Arc<Mutex<PtySize>>,
+    exit_tx: oneshot::Sender<TaskStatus>,
+    exit_rx: oneshot::Receiver<TaskStatus>,
+    child_exited_tx: oneshot::Sender<()>,
+    child_exited_rx: oneshot::Receiver<()>,
+    reader_done_rx: std::sync::mpsc::Receiver<()>,
+}
+
+fn spawn_reader_with_master(output_ch: Arc<TaskChannel>, initial_size: PtySize, pair_master: Box<dyn MasterPty + Send>) -> PtyMasterSetup {
     let master = Arc::new(Mutex::new(pair_master));
     let current_size = Arc::new(Mutex::new(initial_size));
     let (exit_tx, exit_rx) = oneshot::channel();
@@ -364,7 +382,15 @@ fn spawn_reader_with_master(output_ch: Arc<TaskChannel>, initial_size: PtySize, 
     // Disconnects when the reader ends, which the exit monitor waits for (see below).
     let (reader_done_tx, reader_done_rx) = std::sync::mpsc::channel::<()>();
     spawn_pty_reader(master_for_reader, output_ch_reader, reader_done_tx);
-    (master, current_size, exit_tx, exit_rx, child_exited_tx, child_exited_rx, reader_done_rx)
+    PtyMasterSetup {
+        master,
+        current_size,
+        exit_tx,
+        exit_rx,
+        child_exited_tx,
+        child_exited_rx,
+        reader_done_rx,
+    }
 }
 
 fn wait_for_reader_drain(reader_done_rx: std::sync::mpsc::Receiver<()>, pid: u32) {
