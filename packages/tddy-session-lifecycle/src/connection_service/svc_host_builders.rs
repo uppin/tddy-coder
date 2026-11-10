@@ -82,11 +82,7 @@ impl DaemonSessionHost {
             host_session_sockets,
             // A server daemon's placement; `runtime::build` replaces it on an embedded host
             // (`with_agent_tool_sockets`).
-            agent_tool_sockets: Arc::new(
-                tddy_daemon_kernel::agent_tool_sockets::AgentToolSockets::new(
-                    tddy_daemon_kernel::agent_tool_sockets::AgentToolSocketPlacement::PerOsUser,
-                ),
-            ),
+            agent_tool_sockets: default_agent_tool_sockets(),
             agent_activity_hub: Arc::new(tddy_daemon_kernel::AgentActivityHub::default()),
             agent_conversation_frames: Arc::new(
                 tddy_daemon_kernel::conversation_frames::ConversationFrames::default(),
@@ -476,6 +472,14 @@ impl DaemonSessionHost {
             Arc::clone(&self.user_resolver),
         )
     }
+}
+
+fn default_agent_tool_sockets() -> Arc<tddy_daemon_kernel::agent_tool_sockets::AgentToolSockets> {
+    Arc::new(
+        tddy_daemon_kernel::agent_tool_sockets::AgentToolSockets::new(
+            tddy_daemon_kernel::agent_tool_sockets::AgentToolSocketPlacement::PerOsUser,
+        ),
+    )
 }
 
 struct HostStores {
