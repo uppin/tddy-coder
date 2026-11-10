@@ -176,10 +176,8 @@ impl SpecHeadlessRenderer {
         &self,
         turn: &HeadlessTurn,
         spec: CodingAgentSpec,
-    ) -> Result<(Vec<String>, Vec<(PathBuf, Vec<u8>)>), AdapterError> {
-        let RenderedSlots {
-            argv_extra, files, ..
-        } = slots::render(
+    ) -> Result<RenderedSlots, AdapterError> {
+        slots::render(
             &spec,
             &SlotInputs {
                 workdir: turn.workdir.clone(),
@@ -202,8 +200,7 @@ impl SpecHeadlessRenderer {
                 home: None,
             },
         )
-        .map_err(|e| AdapterError::InvocationFailed(e.to_string()))?;
-        Ok((argv_extra, files))
+        .map_err(|e| AdapterError::InvocationFailed(e.to_string()))
     }
 }
 
@@ -278,7 +275,9 @@ impl HeadlessRenderer for SpecHeadlessRenderer {
         }
         // `written` is the paths of `files` (the MCP registrations): a launcher records them with
         // `mcp_written_paths` at plan time, before the turn renders, so nothing is written unrecorded.
-        let (argv_extra, files) = self.render_headless_slots(turn, spec)?;
+        let RenderedSlots {
+            argv_extra, files, ..
+        } = self.render_headless_slots(turn, spec)?;
         let params = turn_params(turn, argv_extra);
         let mut argv = render_argv(&headless.run_section(), &self.tool, &params)
             .map_err(|e| AdapterError::InvocationFailed(e.to_string()))?;
