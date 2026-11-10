@@ -12,7 +12,7 @@ pub mod spec_backend;
 pub mod spec_headless;
 pub use spec_headless::SpecHeadlessBackend;
 pub(crate) mod turn_process;
-pub use routed::codex_acp_route_args;
+pub use routed::toml_route_overrides;
 pub use turn_process::{kill_running_turns, RunningGroup};
 mod stub;
 mod tool_executor;

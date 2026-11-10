@@ -15,7 +15,7 @@ use crate::backend::acp_driver::{AcpAgentHooks, SessionErrorVerdict};
 use crate::backend::codex_acp::oauth::{
     acp_error_suggests_retry_oauth, run_oauth_login_via_codex_cli,
 };
-use crate::backend::codex_acp_route_args;
+use crate::backend::toml_route_overrides;
 use crate::error::BackendError;
 
 /// The adapter that runs `codex login` and retries once on an auth-like session error.
@@ -45,7 +45,7 @@ impl AcpHooksAdapter for CodexAcpLogin {
             ))
         })?;
         if let Some(route) = launch.route {
-            launch.command.args.extend(codex_acp_route_args(route));
+            launch.command.args.extend(toml_route_overrides(route));
         }
         let hooks = Arc::new(CodexLoginHooks::new(codex_cli_path.clone()));
         Ok(PreparedAcpHooks {

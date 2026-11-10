@@ -48,7 +48,7 @@ impl DaemonCodingAgentLauncher {
         let route = self.acp_route(launch)?;
         let shape = agent.spec.route_support().shape;
         let route_args = match &route {
-            Some(route) if shape == RouteShape::TomlArgs => tddy_core::codex_acp_route_args(route),
+            Some(route) if shape == RouteShape::TomlArgs => tddy_core::toml_route_overrides(route),
             _ => Vec::new(),
         };
         let def = agents
