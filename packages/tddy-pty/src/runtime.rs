@@ -362,6 +362,36 @@ fn open_pty_and_pump(
 
     // Writer: stdin mpsc → PTY master. Stops on stdin close, a write error, or child exit —
     // whichever comes first — so the dup'd writer fd and the master Arc are released promptly.
+    spawn_pty_writer(stdin_rx, rt_handle, master, child_exited_rx);
+
+    // Exit monitor: wait for child, report terminal status.
+    let mut child_monitor = child;
+    std::thread::spawn(move || {
+        let status = match child_monitor.wait() {
+            Ok(_) => TaskStatus::Completed { exit_code: Some(0) },
+            Err(e) => TaskStatus::Failed {
+                message: format!("child wait error: {e}"),
+            },
+        };
+        // Unblock the writer thread first so it drops its master fd.
+        let _ = child_exited_tx.send(());
+        // The reader ends once every holder of the slave side has closed it. Waiting for it means
+        // the capture holds everything the child wrote before it exited, by the time the terminal
+        // status is reported. A process the child left behind can hold the slave open for as long
+        // as it runs, so the wait is bounded: past it, the exit is reported without that output.
+        if let Err(RecvTimeoutError::Timeout) = reader_done_rx.recv_timeout(READER_DRAIN_GRACE) {
+            log::info!(
+                target: "tddy_pty::runtime",
+                "PTY child {pid} exited while another process still holds its terminal open"
+            );
+        }
+        let _ = exit_tx.send(status);
+    });
+
+    Ok(())
+}
+
+fn spawn_pty_writer(mut stdin_rx: mpsc::UnboundedReceiver<Bytes>, rt_handle: tokio::runtime::Handle, master: Arc<Mutex<Box<dyn MasterPty + Send>>>, child_exited_rx: oneshot::Receiver<()>) {
     let master_for_writer = Arc::clone(&master);
     std::thread::spawn(move || {
         let writer = {
@@ -395,32 +425,6 @@ fn open_pty_and_pump(
             }
         }
     });
-
-    // Exit monitor: wait for child, report terminal status.
-    let mut child_monitor = child;
-    std::thread::spawn(move || {
-        let status = match child_monitor.wait() {
-            Ok(_) => TaskStatus::Completed { exit_code: Some(0) },
-            Err(e) => TaskStatus::Failed {
-                message: format!("child wait error: {e}"),
-            },
-        };
-        // Unblock the writer thread first so it drops its master fd.
-        let _ = child_exited_tx.send(());
-        // The reader ends once every holder of the slave side has closed it. Waiting for it means
-        // the capture holds everything the child wrote before it exited, by the time the terminal
-        // status is reported. A process the child left behind can hold the slave open for as long
-        // as it runs, so the wait is bounded: past it, the exit is reported without that output.
-        if let Err(RecvTimeoutError::Timeout) = reader_done_rx.recv_timeout(READER_DRAIN_GRACE) {
-            log::info!(
-                target: "tddy_pty::runtime",
-                "PTY child {pid} exited while another process still holds its terminal open"
-            );
-        }
-        let _ = exit_tx.send(status);
-    });
-
-    Ok(())
 }
 
 fn spawn_pty_reader(
