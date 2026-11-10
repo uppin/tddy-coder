@@ -158,12 +158,11 @@ fn host_pty_session<'a>(cli_manager: &'a Arc<CliSessionManager>, session_id: &'a
 }
 
 fn pane_agent_env(agent: &HostAgent, env: Vec<(String, String)>) -> Vec<(String, String)> {
-    let env = without_the_panes_terminal_variables(agent.env_base.agent_env(
+    without_the_panes_terminal_variables(agent.env_base.agent_env(
         &agent.spec,
         std::env::vars_os(),
         &env,
-    ));
-    env
+    ))
 }
 
 async fn start_or_resume_in_tmux(

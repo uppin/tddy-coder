@@ -167,7 +167,7 @@ impl TerminalManager {
         stdin_tx: mpsc::UnboundedSender<Bytes>,
         pty_done_rx: watch::Receiver<bool>,
     ) -> Arc<PtyHandle> {
-        let handle = Arc::new(PtyHandle {
+        Arc::new(PtyHandle {
             terminal_id: terminal_id.to_owned(),
             kind: "bash".to_string(),
             pid: ready.pid,
@@ -178,8 +178,7 @@ impl TerminalManager {
             task_id: task.id.clone(),
             pty_registry: self.pty_registry.clone(),
             channel,
-        });
-        handle
+        })
     }
 
     /// Look up a started terminal by id.
