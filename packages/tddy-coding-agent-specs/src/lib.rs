@@ -26,6 +26,7 @@ pub use crate::spec::acp::AcpCommandError;
 pub use crate::spec::acp::AcpSection;
 pub use crate::spec::headless_section::HeadlessPermissionPolicy;
 pub use crate::spec::headless_section::HeadlessSection;
+pub use crate::spec::route_slot::routed_agent;
 pub use crate::spec::route_slot::Placement;
 pub use crate::spec::route_slot::PlacementError;
 pub use crate::spec::route_slot::ResumeSlot;
@@ -45,9 +46,9 @@ pub use capability::Capability;
 pub use registry::{CodingAgentRegistry, RegistryError, CLI_SESSION_TYPE_SUFFIX};
 pub use route::{ProviderKind, RouteShape, RouteSupport, RoutedAgent};
 pub use spec::{
-    routed_agent, AgentVariant, CodingAgentExtension, CodingAgentSection, CodingAgentSpec,
-    CuratedModel, ModelsSection, SpecError, VariantError, CODING_AGENT_EXTENSION,
-    DEFAULT_ANSWER_WAIT_SECS, HOST_AGENT_VARIANT,
+    AgentVariant, CodingAgentExtension, CodingAgentSection, CodingAgentSpec, CuratedModel,
+    ModelsSection, SpecError, VariantError, CODING_AGENT_EXTENSION, DEFAULT_ANSWER_WAIT_SECS,
+    HOST_AGENT_VARIANT,
 };
 
 /// `specs/cursor.yaml` (`#agent-tools 7/12`), embedded.

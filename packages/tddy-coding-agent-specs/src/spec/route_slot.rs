@@ -1,3 +1,4 @@
+use crate::route::RoutedAgent;
 use crate::route::{ProviderKind, RouteShape};
 use crate::spec::admits_a_tddy_variable;
 use crate::spec::CodingAgentSpec;
@@ -134,4 +135,25 @@ pub(crate) fn route_slot_errors(route: &RouteSlot) -> Result<(), String> {
         );
     }
     Ok(())
+}
+
+/// What a route body knows of `spec` (`#agent-tools 13/19`): its id, its product, its route
+/// support, its `route.key_env` and its `route.config_env`. A spec without a `route` section gives an agent with no
+/// providers, which every route body refuses.
+pub fn routed_agent(spec: &CodingAgentSpec) -> RoutedAgent {
+    RoutedAgent {
+        id: spec.id.clone(),
+        product: spec.product().to_string(),
+        support: spec.route_support(),
+        key_env: spec
+            .agent
+            .route
+            .as_ref()
+            .and_then(|route| route.key_env.clone()),
+        config_env: spec
+            .agent
+            .route
+            .as_ref()
+            .and_then(|route| route.config_env.clone()),
+    }
 }
