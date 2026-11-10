@@ -144,6 +144,19 @@ impl LaunchSessions {
         // after the delete must be refused, and `revoke_all_for_session` is the bulk revocation
         // that does it. (Per-daemon revocation on the last detach is in `tear_down_agent_clone`;
         // this is the session-wide sweep that catches admissions whose clones were already gone.)
+        self.forget_session_state(session_id).await;
+        session_deletion::close_session_room(&*self.session_rooms, session_id);
+        session_deletion::delete_session_directory(
+            &sessions_base,
+            session_id,
+            projects_dir_opt.as_deref(),
+            Some(self.coding_agents.agents()),
+        )?;
+        log::info!("DeleteSession: successfully removed session {}", session_id);
+        Ok(Response::new(DeleteSessionResponse { ok: true }))
+    }
+
+    async fn forget_session_state(&self, session_id: &str) {
         let revoked = self.session_admissions.revoke_all_for_session(session_id);
         if revoked > 0 {
             log::info!("revoked {revoked} admission(s) for session {session_id} on session delete");
@@ -171,15 +184,6 @@ impl LaunchSessions {
         if let Some(jail) = self.workspace_sandboxes.remove(session_id).await {
             jail.stop();
         }
-        session_deletion::close_session_room(&*self.session_rooms, session_id);
-        session_deletion::delete_session_directory(
-            &sessions_base,
-            session_id,
-            projects_dir_opt.as_deref(),
-            Some(self.coding_agents.agents()),
-        )?;
-        log::info!("DeleteSession: successfully removed session {}", session_id);
-        Ok(Response::new(DeleteSessionResponse { ok: true }))
     }
 
     /// Refuses a delete of `session_id` that one of its peer-held parts would refuse, before
