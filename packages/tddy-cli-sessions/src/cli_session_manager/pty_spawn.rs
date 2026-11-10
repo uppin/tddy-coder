@@ -86,16 +86,17 @@ impl CliSessionManager {
         on_exit: Option<ExitHook>,
         tmux_session: Option<&str>,
     ) -> anyhow::Result<Arc<pty_handle::PtyHandle>> {
-        let (ready_tx, ready_rx, spec) = build_tool_pty_spec(
-            session_id,
-            terminal_id,
-            kind,
-            &worktree_path,
+        let (ready_tx, ready_rx) = oneshot::channel();
+        let spec = PtySpawnSpec {
             argv,
+            worktree_path: worktree_path.clone(),
+            session_id: session_id.to_string(),
+            terminal_id: terminal_id.to_string(),
+            kind: kind.to_string(),
             env,
             env_base,
-            os_user,
-        );
+            os_user: os_user.map(str::to_string),
+        };
 
         // The main terminal's recording is finished by the PTY runtime itself, before the terminal
         // leaves the PTY registry: a stopped main must answer history from its recording the moment
@@ -358,33 +359,6 @@ impl CliSessionManager {
     }
 }
 
-fn build_tool_pty_spec(
-    session_id: &str,
-    terminal_id: &str,
-    kind: &str,
-    worktree_path: &std::path::Path,
-    argv: Vec<String>,
-    env: Vec<(String, String)>,
-    env_base: tddy_pty::PtyEnvBase,
-    os_user: Option<&str>,
-) -> (
-    oneshot::Sender<Result<PtyReady, String>>,
-    oneshot::Receiver<Result<PtyReady, String>>,
-    PtySpawnSpec,
-) {
-    let (ready_tx, ready_rx) = oneshot::channel();
-    let spec = PtySpawnSpec {
-        argv,
-        worktree_path: worktree_path.to_owned(),
-        session_id: session_id.to_string(),
-        terminal_id: terminal_id.to_string(),
-        kind: kind.to_string(),
-        env,
-        env_base,
-        os_user: os_user.map(str::to_string),
-    };
-    (ready_tx, ready_rx, spec)
-}
 
 /// An exit hook, and the flag that tells [`CliSessionManager::exit_hook_settled`] it has finished.
 pub(crate) struct PendingExit {
