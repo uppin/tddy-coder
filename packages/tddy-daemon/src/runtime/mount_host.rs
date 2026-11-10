@@ -283,15 +283,7 @@ impl BuildContext {
         .with_model_registry(Arc::clone(model_registry))
         .with_coding_agent_launcher(Arc::new(
             tddy_session_lifecycle::coding_agent_launcher::DaemonCodingAgentLauncher::for_daemon(
-                tddy_session_lifecycle::coding_agent_launcher::DaemonLauncherDeps {
-                    config: config.clone(),
-                    tddy_data_dir: tddy_data_dir.clone(),
-                    spawn_backend: options.spawn_backend.clone(),
-                    vaults: self.identity.credential_vaults.clone(),
-                    user_resolver,
-                    tokens: Some(session_tokens.clone()),
-                    agent_tool_sockets: Arc::clone(&self.agent_tool_sockets),
-                },
+                self.daemon_launcher_deps(user_resolver, session_tokens),
             )
             .with_approval_routes(Arc::clone(&approval_routes)),
         ))
@@ -305,6 +297,22 @@ impl BuildContext {
         // 31/32): an embedded host keeps binding its own host sockets, as its runtime serves
         // its one socket itself.
         .with_host_sessions_merged(options.host != RuntimeHost::Embedded))
+    }
+
+    fn daemon_launcher_deps(
+        &self,
+        user_resolver: tddy_daemon_kernel::SessionUserResolver,
+        session_tokens: &tddy_daemon_auth::SessionTokens,
+    ) -> tddy_session_lifecycle::coding_agent_launcher::DaemonLauncherDeps {
+        tddy_session_lifecycle::coding_agent_launcher::DaemonLauncherDeps {
+            config: self.config.clone(),
+            tddy_data_dir: self.identity.keys.tddy_data_dir.clone(),
+            spawn_backend: self.options.spawn_backend.clone(),
+            vaults: self.identity.credential_vaults.clone(),
+            user_resolver,
+            tokens: Some(session_tokens.clone()),
+            agent_tool_sockets: Arc::clone(&self.agent_tool_sockets),
+        }
     }
 
     fn adopt_and_build_connection(
