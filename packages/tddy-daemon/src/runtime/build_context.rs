@@ -196,7 +196,7 @@ impl BuildContext {
 fn agent_tool_sockets_for_host(
     options: &RuntimeOptions,
 ) -> Arc<tddy_daemon_kernel::agent_tool_sockets::AgentToolSockets> {
-    let agent_tool_sockets = Arc::new(
+    Arc::new(
         tddy_daemon_kernel::agent_tool_sockets::AgentToolSockets::new(match options.host {
             RuntimeHost::Embedded => {
                 tddy_daemon_kernel::agent_tool_sockets::AgentToolSocketPlacement::Embedded
@@ -210,6 +210,5 @@ fn agent_tool_sockets_for_host(
                 tddy_daemon_kernel::agent_tool_sockets::AgentToolSocketPlacement::PerOsUser
             }
         }),
-    );
-    agent_tool_sockets
+    )
 }

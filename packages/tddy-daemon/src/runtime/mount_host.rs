@@ -309,8 +309,8 @@ impl BuildContext {
 
     fn adopt_and_build_connection(
         &self,
-        sessions_base_resolver: &Arc<dyn Fn(&str) -> Option<PathBuf> + Send + Sync>,
-        user_resolver: &Arc<dyn Fn(&str) -> Option<String> + Send + Sync>,
+        sessions_base_resolver: &tddy_daemon_kernel::SessionsBaseResolver,
+        user_resolver: &tddy_daemon_kernel::SessionUserResolver,
         livekit_discovery: Option<
             tddy_daemon_livekit::livekit_peer_discovery::LiveKitDiscoveryHandles,
         >,
@@ -320,20 +320,19 @@ impl BuildContext {
         self.agent_tool_sockets.adopt_inherited(
             tddy_daemon_kernel::agent_tool_sockets::adopt_user_sockets_from_environment(),
         );
-        let connection_impl = self.build_connection_impl(
+        self.build_connection_impl(
             sessions_base_resolver,
             user_resolver,
             livekit_discovery,
             shared_cli_manager,
             coding_agents,
-        );
-        connection_impl
+        )
     }
 
     fn build_connection_impl(
         &self,
-        sessions_base_resolver: &Arc<dyn Fn(&str) -> Option<PathBuf> + Send + Sync>,
-        user_resolver: &Arc<dyn Fn(&str) -> Option<String> + Send + Sync>,
+        sessions_base_resolver: &tddy_daemon_kernel::SessionsBaseResolver,
+        user_resolver: &tddy_daemon_kernel::SessionUserResolver,
         livekit_discovery: Option<
             tddy_daemon_livekit::livekit_peer_discovery::LiveKitDiscoveryHandles,
         >,
@@ -343,7 +342,7 @@ impl BuildContext {
         let config = &self.config;
         let options = &self.options;
         let tddy_data_dir = &self.identity.keys.tddy_data_dir;
-        let connection_impl = tddy_session_lifecycle::connection_service::DaemonSessionHost::new(
+        tddy_session_lifecycle::connection_service::DaemonSessionHost::new(
             config.clone(),
             sessions_base_resolver.clone(),
             tddy_data_dir.to_owned(),
@@ -354,8 +353,7 @@ impl BuildContext {
             self.operator_channel(),
             Arc::clone(shared_cli_manager),
             coding_agents,
-        );
-        connection_impl
+        )
     }
 
     pub(super) fn install_session_host(
