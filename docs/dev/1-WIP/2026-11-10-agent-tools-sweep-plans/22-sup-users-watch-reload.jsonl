@@ -1,0 +1,2 @@
+{"v":2,"files":{"packages/tddy-supervisor/src/users_watch.rs":{"sha256":"sha256:6f2869a6de255aa0c3efbf586ee6f8344c7373a35fc8db2a39e828dce55a3764"}}}
+{"id": "op-1", "op": "extract_method", "anchor": {"kind": "item", "item": "tddy_supervisor::users_watch::UsersWatch::spawn", "file": "packages/tddy-supervisor/src/users_watch.rs", "start": {"line": 39, "col": 17}, "end": {"line": 46, "col": 19}, "fingerprint": "sha256:981dc2a3d1aa766d8745402173ee62bf0b105917c51d63f1b8a279bd3568b485", "hint": {"line": 74, "col": 17}}, "name": "reload_settled"}

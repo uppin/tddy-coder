@@ -71,14 +71,7 @@ impl UsersWatch {
                     return;
                 }
                 // A save may be observed mid-write; retry briefly (bounded) before refusing it.
-                let mut loaded = UsersFile::load(&callback_path);
-                for _ in 0..5 {
-                    if loaded.is_ok() {
-                        break;
-                    }
-                    std::thread::sleep(std::time::Duration::from_millis(20));
-                    loaded = UsersFile::load(&callback_path);
-                }
+                let loaded = reload_settled(&callback_path);
                 match loaded {
                     Ok(next) => {
                         let changed = {
@@ -130,6 +123,18 @@ impl UsersWatch {
             .expect("users watch lock poisoned")
             .clone()
     }
+}
+
+fn reload_settled(callback_path: &Path) -> Result<UsersFile, ConfigError> {
+    let mut loaded = UsersFile::load(&callback_path);
+    for _ in 0..5 {
+        if loaded.is_ok() {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(20));
+        loaded = UsersFile::load(&callback_path);
+    }
+    loaded
 }
 
 #[cfg(test)]
