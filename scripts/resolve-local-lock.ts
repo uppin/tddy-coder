@@ -16,7 +16,7 @@
  * Zero external dependencies — semver logic is inlined.
  */
 
-import { existsSync, readFileSync, writeFileSync, mkdirSync } from "fs";
+import { existsSync, readFileSync, writeFileSync, mkdirSync, rmSync } from "fs";
 import { join, dirname } from "path";
 import { loadLocalPackageCache, type CachedPackage } from "./local-package-cache";
 
@@ -496,7 +496,10 @@ async function main() {
   const output = JSON.stringify(newLockfile, null, 2) + "\n";
   writeFileSync(OUTPUT_PATH, output);
 
-  // Write patched package.json files for each workspace
+  // Write patched package.json files for each workspace. Cleared first: local-bun-install.sh copies
+  // every package.json it finds here over the real one, so a manifest an earlier run patched and
+  // this run did not (e.g. the root, once its deps were pinned) would be restored from a stale copy.
+  rmSync(LOCAL_PKG_DIR, { recursive: true, force: true });
   const patchedPkgJsons: string[] = [];
   for (const [wsKey, wsValue] of Object.entries(newWorkspaces)) {
     const wsDir = wsKey === "" ? PROJECT_ROOT : join(PROJECT_ROOT, wsKey);
