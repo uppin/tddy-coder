@@ -128,11 +128,7 @@ pub(super) async fn launch(
             env,
             on_exit,
         };
-        let launched = if run.resume {
-            crate::cli_harness_tmux::resume_harness_in_tmux(cli_manager, tmux_launch).await?
-        } else {
-            crate::cli_harness_tmux::start_harness_in_tmux(cli_manager, tmux_launch).await?
-        };
+        let launched = start_or_resume_in_tmux(cli_manager, run, tmux_launch).await?;
         return Ok(LaunchedHarness {
             pid: launched.pane_pid,
             tmux_session: Some(launched.tmux_session),
@@ -159,4 +155,17 @@ pub(super) async fn launch(
         pid: handle.pid,
         tmux_session: None,
     })
+}
+
+async fn start_or_resume_in_tmux(
+    cli_manager: &Arc<CliSessionManager>,
+    run: HarnessRun,
+    tmux_launch: crate::cli_harness_tmux::HarnessTmuxLaunch<'_>,
+) -> Result<crate::claude_cli_tmux::TmuxLaunched, Status> {
+    let launched = if run.resume {
+        crate::cli_harness_tmux::resume_harness_in_tmux(cli_manager, tmux_launch).await?
+    } else {
+        crate::cli_harness_tmux::start_harness_in_tmux(cli_manager, tmux_launch).await?
+    };
+    Ok(launched)
 }
