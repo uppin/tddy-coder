@@ -22,6 +22,11 @@ fn renders_a_per_agent_breakdown_with_a_total_row() {
             output_tokens: 500,
             total_tokens: 1500,
             turns: 3,
+            cache_read_tokens: 0,
+            cache_write_tokens: 0,
+            reasoning_tokens: 0,
+            cost_usd: None,
+            parent_id: None,
         },
         ConversationRecord {
             agent: "fastcontext".to_string(),
@@ -31,6 +36,11 @@ fn renders_a_per_agent_breakdown_with_a_total_row() {
             output_tokens: 45,
             total_tokens: 165,
             turns: 2,
+            cache_read_tokens: 0,
+            cache_write_tokens: 0,
+            reasoning_tokens: 0,
+            cost_usd: None,
+            parent_id: None,
         },
         ConversationRecord {
             agent: "codereview".to_string(),
@@ -40,6 +50,11 @@ fn renders_a_per_agent_breakdown_with_a_total_row() {
             output_tokens: 80,
             total_tokens: 280,
             turns: 1,
+            cache_read_tokens: 0,
+            cache_write_tokens: 0,
+            reasoning_tokens: 0,
+            cost_usd: None,
+            parent_id: None,
         },
     ];
 

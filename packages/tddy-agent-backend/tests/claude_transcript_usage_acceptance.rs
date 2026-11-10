@@ -89,6 +89,11 @@ fn sums_main_agent_tokens_from_a_claude_transcript_jsonl() {
             output_tokens: 130,
             total_tokens: 430,
             turns: 2,
+            cache_read_tokens: 0,
+            cache_write_tokens: 0,
+            reasoning_tokens: 0,
+            cost_usd: None,
+            parent_id: None,
         }
     );
 }
@@ -115,6 +120,11 @@ fn returns_zero_with_the_fallback_model_when_no_transcript_exists() {
             output_tokens: 0,
             total_tokens: 0,
             turns: 0,
+            cache_read_tokens: 0,
+            cache_write_tokens: 0,
+            reasoning_tokens: 0,
+            cost_usd: None,
+            parent_id: None,
         }
     );
 }
@@ -164,6 +174,11 @@ fn lists_each_claude_task_subagent_with_its_own_token_usage() {
                 output_tokens: 60,
                 total_tokens: 180,
                 turns: 2,
+                cache_read_tokens: 0,
+                cache_write_tokens: 0,
+                reasoning_tokens: 0,
+                cost_usd: None,
+                parent_id: None,
             },
             ConversationRecord {
                 agent: "general-purpose".to_string(),
@@ -173,6 +188,11 @@ fn lists_each_claude_task_subagent_with_its_own_token_usage() {
                 output_tokens: 80,
                 total_tokens: 280,
                 turns: 1,
+                cache_read_tokens: 0,
+                cache_write_tokens: 0,
+                reasoning_tokens: 0,
+                cost_usd: None,
+                parent_id: None,
             },
         ]
     );

@@ -653,6 +653,11 @@ mod gather_session_usage_tests {
                     output_tokens: 20,
                     total_tokens: 120,
                     turns: 1,
+                    cache_read_tokens: 0,
+                    cache_write_tokens: 0,
+                    reasoning_tokens: 0,
+                    cost_usd: None,
+                    parent_id: None,
                 },
                 ConversationRecord {
                     agent: "Explore".to_string(),
@@ -662,6 +667,11 @@ mod gather_session_usage_tests {
                     output_tokens: 8,
                     total_tokens: 48,
                     turns: 1,
+                    cache_read_tokens: 0,
+                    cache_write_tokens: 0,
+                    reasoning_tokens: 0,
+                    cost_usd: None,
+                    parent_id: None,
                 },
                 ConversationRecord {
                     agent: "explorer".to_string(),
@@ -671,6 +681,11 @@ mod gather_session_usage_tests {
                     output_tokens: 1,
                     total_tokens: 6,
                     turns: 1,
+                    cache_read_tokens: 0,
+                    cache_write_tokens: 0,
+                    reasoning_tokens: 0,
+                    cost_usd: None,
+                    parent_id: None,
                 },
             ]
         );
@@ -706,6 +721,11 @@ mod gather_session_usage_tests {
                 output_tokens: 1,
                 total_tokens: 6,
                 turns: 1,
+                cache_read_tokens: 0,
+                cache_write_tokens: 0,
+                reasoning_tokens: 0,
+                cost_usd: None,
+                parent_id: None,
             }]
         );
     }
@@ -736,6 +756,11 @@ mod gather_session_usage_tests {
                 output_tokens: 0,
                 total_tokens: 0,
                 turns: 0,
+                cache_read_tokens: 0,
+                cache_write_tokens: 0,
+                reasoning_tokens: 0,
+                cost_usd: None,
+                parent_id: None,
             }]
         );
     }

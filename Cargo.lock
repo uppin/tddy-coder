@@ -12228,6 +12228,7 @@ dependencies = [
  "tddy-sandbox",
  "tddy-session-store",
  "tddy-toolcall",
+ "tddy-usage",
  "tddy-workflow",
  "tempfile",
  "tokio",
@@ -12573,6 +12574,7 @@ dependencies = [
  "tddy-testing-commons",
  "tddy-tool-engine",
  "tddy-tui",
+ "tddy-usage",
  "tddy-workflow-recipes",
  "tempfile",
  "tokio",
@@ -12626,6 +12628,7 @@ dependencies = [
  "serde_yaml",
  "tddy-actions",
  "tddy-agent-backend",
+ "tddy-usage",
  "tddy-workflow",
  "tempfile",
  "thiserror 1.0.69",
@@ -13520,6 +13523,7 @@ dependencies = [
  "tddy-session-store",
  "tddy-session-worktree",
  "tddy-toolcall",
+ "tddy-usage",
  "tddy-workflow",
  "tddy-workflow-engine",
  "tempfile",
@@ -14615,6 +14619,19 @@ dependencies = [
  "tokio",
  "uuid",
  "vt100",
+]
+
+[[package]]
+name = "tddy-usage"
+version = "0.1.0"
+dependencies = [
+ "glob",
+ "log",
+ "pretty_assertions",
+ "serde",
+ "serde_json",
+ "serde_yaml",
+ "tempfile",
 ]
 
 [[package]]

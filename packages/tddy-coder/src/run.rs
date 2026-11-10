@@ -2125,17 +2125,27 @@ fn run_daemon(args: &Args, shutdown: Arc<AtomicBool>, host: ParticipantHost) -> 
             // channel, so a connected web Inspector sees live totals rather than only the
             // end-of-session summary.
             if let Some(usage_tx) = usage_event_tx.clone() {
+                // The agent's usage binding is spec data; this call site never interprets it.
+                let usage = tddy_coding_agent_specs::CodingAgentRegistry::builtin_cached()
+                    .get(agent_str)
+                    .and_then(|spec| spec.agent.usage.clone());
                 let usage_watcher_handle = spawn_session_usage_watcher(
                     SessionUsageWatchConfig {
-                        session_dir: session_artifact_dir.clone(),
-                        session_id: args.session_id.clone().unwrap_or_default(),
-                        claude_home: resolve_agent_home_dir(),
-                        agent: agent_str.to_string(),
-                        model: args
-                            .model
-                            .as_deref()
-                            .unwrap_or_else(|| crate::agent_registry_cli::default_model_for_agent(agent_str))
-                            .to_string(),
+                        usage,
+                        context: tddy_usage::UsageContext {
+                            agent_home: Some(resolve_agent_home_dir()),
+                            session_dir: session_artifact_dir.clone(),
+                            conversation_id: args.session_id.clone(),
+                            worktree: Some(agent_working_dir.clone()),
+                            agent_label: agent_str.to_string(),
+                            fallback_model: args
+                                .model
+                                .as_deref()
+                                .unwrap_or_else(|| {
+                                    crate::agent_registry_cli::default_model_for_agent(agent_str)
+                                })
+                                .to_string(),
+                        },
                         poll_interval: SESSION_USAGE_POLL_INTERVAL,
                     },
                     usage_tx,

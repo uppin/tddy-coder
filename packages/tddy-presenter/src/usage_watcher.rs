@@ -14,19 +14,20 @@
 //!   from disk each tick. Polling (not `notify`/inotify) keeps this dependency-free and robust to
 //!   the several files a session appends to.
 //! - [`spawn_session_usage_watcher`] is the session-level entry point `tddy-coder --daemon` calls:
-//!   it turns a session's agent/model + on-disk locations into a [`UsageWatchTarget`] (deriving
-//!   whether to include the Claude main agent) and delegates to [`spawn_usage_watcher`].
+//!   it turns the session's usage binding (from its agent's spec, passed as data) and the
+//!   [`UsageContext`] it resolves against into a [`UsageWatchTarget`], and delegates to
+//!   [`spawn_usage_watcher`]. Which agent the session runs is not this module's concern.
 //!
 //! TODO: A View that connects mid-session does not yet receive the latest usage snapshot on
 //! connect — only subsequent changes. Snapshot-on-connect replay (mirroring the
 //! snapshot-then-live pattern in `tddy-service` `service.rs`) is a separate presenter-snapshot
 //! change and is tracked as a follow-up.
 
-use std::path::PathBuf;
 use std::time::Duration;
 
 use crate::token_accounting::ConversationRecord;
 use crate::PresenterEvent;
+use tddy_usage::{UsageContext, UsageSection};
 use tokio::sync::broadcast;
 
 /// Broadcasts per-session token-usage snapshots to presenter subscribers, deduplicating against the
@@ -62,21 +63,15 @@ impl SessionUsageEmitter {
     }
 }
 
-/// Sources a usage watcher re-reads each tick: the session's egress dir plus the Claude home and
-/// session id used to locate the agent transcript(s). Mirrors the arguments
-/// [`crate::backend::gather_session_usage`] takes.
+/// What a usage watcher re-evaluates each tick: the session agent's usage binding and the session
+/// it resolves against. Mirrors the arguments [`tddy_usage::gather_session_usage`] takes.
 #[derive(Debug, Clone)]
 pub struct UsageWatchTarget {
-    /// Session directory whose `egress/accounting.json` carries tddy subagent conversations.
-    pub session_dir: PathBuf,
-    /// Session id used to locate the Claude transcript and subagent files.
-    pub session_id: String,
-    /// Claude home holding `.claude/projects/**`.
-    pub claude_home: PathBuf,
-    /// Model reported for a main-agent row when no transcript exists yet.
-    pub fallback_model: String,
-    /// Whether to include the main Claude agent + its Task subagents (vs. only the accounting file).
-    pub include_main_agent: bool,
+    /// The session agent's `usage:` binding. `None` for an agent that declares none — its snapshot
+    /// is then only the tddy subagent conversations of `context.session_dir`.
+    pub usage: Option<UsageSection>,
+    /// The session the binding's templates resolve against.
+    pub context: UsageContext,
 }
 
 /// Spawn a background task that polls `target`'s on-disk usage every `poll_interval` and feeds each
@@ -97,13 +92,7 @@ pub fn spawn_usage_watcher(
             ticker.tick().await;
             let target = target.clone();
             let gathered = tokio::task::spawn_blocking(move || {
-                crate::backend::gather_session_usage(
-                    &target.session_dir,
-                    &target.session_id,
-                    &target.claude_home,
-                    &target.fallback_model,
-                    target.include_main_agent,
-                )
+                tddy_usage::gather_session_usage(target.usage.as_ref(), &target.context)
             })
             .await;
             match gathered {
@@ -119,40 +108,28 @@ pub fn spawn_usage_watcher(
 }
 
 /// Configuration for the session-level usage watcher `tddy-coder --daemon` starts for a running
-/// session. It captures the session's on-disk locations plus the agent/model, from which
-/// [`spawn_session_usage_watcher`] derives the [`UsageWatchTarget`].
+/// session: the agent's usage binding, taken from its spec by the caller, and the session it
+/// resolves against.
 #[derive(Debug, Clone)]
 pub struct SessionUsageWatchConfig {
-    /// Session directory whose `egress/accounting.json` carries tddy subagent conversations.
-    pub session_dir: PathBuf,
-    /// Session id used to locate the Claude transcript and subagent files.
-    pub session_id: String,
-    /// Child agent HOME holding `.claude/projects/**` (where Claude Code writes its transcript).
-    pub claude_home: PathBuf,
-    /// Agent driving the session (`claude`, `cursor`, …). Claude sessions include the main agent.
-    pub agent: String,
-    /// Model reported for a main-agent row when no transcript exists yet.
-    pub model: String,
+    /// The session agent's `usage:` binding, or `None` when its spec declares none.
+    pub usage: Option<UsageSection>,
+    /// The session the binding resolves against — its `session_dir` also holds the tddy subagent
+    /// accounting file.
+    pub context: UsageContext,
     /// How often to re-read the on-disk usage sources.
     pub poll_interval: Duration,
 }
 
 /// Spawn the usage watcher for a running session, broadcasting live token usage on the session's
 /// presenter `event_tx`.
-///
-/// The main Claude agent (and its Task subagents) is included only for Claude sessions; other
-/// agents (e.g. Cursor) report their usage solely through the tddy accounting file, so their
-/// snapshot must not pick up a stray Claude transcript that may sit on disk.
 pub fn spawn_session_usage_watcher(
     config: SessionUsageWatchConfig,
     event_tx: broadcast::Sender<PresenterEvent>,
 ) -> tokio::task::JoinHandle<()> {
     let target = UsageWatchTarget {
-        session_dir: config.session_dir,
-        session_id: config.session_id,
-        claude_home: config.claude_home,
-        fallback_model: config.model,
-        include_main_agent: config.agent == "claude",
+        usage: config.usage,
+        context: config.context,
     };
     spawn_usage_watcher(target, config.poll_interval, event_tx)
 }

@@ -60,6 +60,29 @@ extensions:
     # in Rust — `tddy-tool-engine`'s schema and the web — and is agent metadata, so it lives here).
     permission_modes: [auto, default, acceptEdits, plan, bypassPermissions]
     transcript_usage: true
+    # Where this agent's token usage lives and how to read it (`#usage-binding`). The engine
+    # (`tddy-usage`) knows formats, not agents: everything Claude-specific is here. Claude Code
+    # writes one JSON line per content block, each repeating its API message's id and usage, so
+    # lines are deduplicated by `message.id`; Task-tool subagents sit under `<session>/subagents/`.
+    usage:
+      sources:
+        - format: jsonl
+          main:
+            path: "{agent_home}/.claude/projects/*/{conversation_id}.jsonl"
+          children:
+            path: "{dir}/{stem}/subagents/agent-*.jsonl"
+            id: "{stem}"
+            name: { sidecar: "{dir}/{stem}.meta.json", field: agentType, default: subagent }
+          record:
+            where: [{ field: type, equals: assistant }]
+            dedupe_by: message.id
+            aggregate: sum
+            model: message.model
+            tokens:
+              input: message.usage.input_tokens
+              cache_read: message.usage.cache_read_input_tokens
+              cache_write: message.usage.cache_creation_input_tokens
+              output: message.usage.output_tokens
     models:
       default: opus
       curated:

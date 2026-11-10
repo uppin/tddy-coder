@@ -7,6 +7,8 @@
 **Thresholds breached:** length 537 > 500
 **Restructure:** not designed
 **Status:** Open — partially fixed 2026-11-06 (850 → 537 by the `#agent-tools` sweep, #828, which deleted the curated-model and context-glob tables and the bespoke backends' dispatch); seams A–D remain — **unclaimed**
+**Claimed by:** #890 — `#usage-binding 1/5` (`gather_session_usage` moves to `tddy-usage`)
+**Lands after:** nothing — root of stack #895
 **Moved:** 2026-09-23 — from `packages/tddy-core/src/backend/mod.rs` by `#carve` 12/14 (PR #522), with `git mv`
 **Verified:** ⚠ **not hand-verified** — the line count is machine-measured; the seam table is a first reading of the item list
 

@@ -77,6 +77,11 @@ pub fn read_claude_transcript_usage(
         output_tokens: usage.output_tokens,
         total_tokens: usage.total(),
         turns,
+        cache_read_tokens: 0,
+        cache_write_tokens: 0,
+        reasoning_tokens: 0,
+        cost_usd: None,
+        parent_id: None,
     }
 }
 
@@ -137,6 +142,11 @@ pub fn read_claude_subagent_usages(
                 output_tokens: usage.output_tokens,
                 total_tokens: usage.total(),
                 turns,
+                cache_read_tokens: 0,
+                cache_write_tokens: 0,
+                reasoning_tokens: 0,
+                cost_usd: None,
+                parent_id: None,
             });
         }
     }

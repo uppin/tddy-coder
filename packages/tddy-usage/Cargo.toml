@@ -1,0 +1,19 @@
+[package]
+name = "tddy-usage"
+version = "0.1.0"
+edition = "2021"
+description = "Agent-agnostic per-conversation token accounting: usage bindings declared in a coding agent's spec, evaluated over the files the agent writes"
+
+[dependencies]
+glob = "0.3"
+log = "0.4"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+[dev-dependencies]
+pretty_assertions = { workspace = true }
+# The acceptance tests parse the built-in specs' `usage:` sections straight from their YAML files, so
+# what they prove is the shipped binding, not a hand-built struct. Not `tddy-coding-agent-specs`:
+# that crate depends on this one.
+serde_yaml = "0.9"
+tempfile = "3"

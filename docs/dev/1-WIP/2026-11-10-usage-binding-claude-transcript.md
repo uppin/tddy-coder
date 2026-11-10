@@ -4,7 +4,7 @@
 **Status**: 🚧 In Progress
 **Type**: Feature
 **Complexity**: 4 — four crates plus a new one, proto field additions, a spec-schema change with load-time refusals, a deleted reader
-**Branch**: `feature/usage-binding/claude-transcript`, base `master` (`bfccc2b6f`) — `#usage-binding 1/5`
+**Branch**: `feature/usage-binding/claude-transcript`, base `master` (`bfccc2b6f`) — `#usage-binding 1/5`, PR [#890](https://github.com/uppin/tddy-coder/pull/890), stack [#895](https://github.com/uppin/tddy-coder/stack/895)
 
 ## Initial Discovery
 
@@ -377,7 +377,41 @@ usage:
 
 ## Technical Debt & Production Readiness
 
-(Populated during development.)
+### Contract commit (pass 2, 2026-11-10)
+
+- **`TokenUsage` is not widened.** It has about 15 struct-literal sites in `tddy-discovery`,
+  `tddy-session-agents` and `tddy-coding-subagent`, all outside this node. Only `ConversationRecord`
+  gains `cache_read_tokens`, `cache_write_tokens`, `reasoning_tokens`, `cost_usd` and `parent_id`.
+  The *Responsibility* line naming `TokenUsage` is superseded.
+- **`ConversationRecord` drops `Eq`** (`cost_usd: Option<f64>`). Nothing in the workspace required it
+  (`cargo check --all-targets` over the 8 touched packages).
+- **Still present for `/green` to remove:**
+  - `transcript_usage` (red: `a_leftover_transcript_usage_flag_is_refused_at_load`);
+  - `backend/claude/transcript_usage.rs`, `backend::gather_session_usage` and its consumer in
+    `tddy-sandbox-app`;
+  - `tests/{claude_transcript_usage,token_accounting}_acceptance.rs` in `tddy-agent-backend`, whose
+    literals were only widened.
+- **Already wired in the contract** (trivial delegation, so the tests compile against real seams):
+  - the presenter watcher calls `tddy_usage::gather_session_usage`;
+  - `tddy-coder` passes `CodingAgentRegistry::builtin_cached().get(agent).usage` as data;
+  - the proto fields 8–12 and `convert.rs`;
+  - regenerated `remote_pb.ts` in `tddy-client-web` and `tddy-rust-typescript-tests`.
+- **Fixtures are builders, not a file cut from the transcript.** `tests/support/mod.rs` writes lines
+  the way Claude Code does: one per content block, repeating `message.id` and `usage`. The
+  measurement from session `01a1c71c-…` is reused as the cache test's numbers.
+- **Three spec-load acceptance tests pass at the contract**, because serde enforces them through the
+  surface: the built-ins bind; an unknown format is refused; a missing `main` is refused.
+- **`no_agent_vocabulary`** strips `TODO(<node>)` tags before matching, because this node's own branch
+  name (`claude-transcript`) is in every contract marker.
+- **`packages/tddy-workflow-recipes/generated/schema-manifest.json`** is included as build-script
+  output. Every fresh build rewrites it, and it was never committed in that form (developer,
+  2026-11-10).
+
+### Baseline (6c)
+
+`./test -p tddy-coding-agent-specs -p tddy-agent-backend -p tddy-presenter` on `bfccc2b6f` gave 48
+suites, 0 failures. `cargo build` was green for those three packages plus `tddy-service` and
+`tddy-sandbox-app`. There are no pre-existing failures to tell apart from this node's red.
 
 ## Decisions & Trade-offs
 
@@ -416,10 +450,10 @@ usage:
 - [x] Cross-check `packages/*/docs/code-issues/` and `docs/dev/todo/` for items this change touches (Step 2b)
 - [x] Create/update PRD documentation
 - [x] Create changeset (this document)
-- [ ] Create failing acceptance tests
-- [ ] Run acceptance tests (verify they fail)
-- [ ] USER REVIEW — acceptance tests
-- [ ] TDD Red — write failing unit/integration tests
+- [x] Create failing acceptance tests
+- [x] Run acceptance tests (verify they fail)
+- [x] USER REVIEW — acceptance tests
+- [x] TDD Red — write failing unit/integration tests
 - [ ] TDD Green — implement with quality code
 - [ ] Update documentation with progress
 - [ ] Repeat Red→Green→Update cycle until feature complete

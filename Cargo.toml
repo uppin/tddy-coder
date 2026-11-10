@@ -21,6 +21,7 @@ members = [
     "packages/tddy-session-worktree",
     "packages/tddy-session-actions",
     "packages/tddy-toolcall",
+    "packages/tddy-usage",
     "packages/tddy-agent-backend",
     "packages/tddy-workflow-engine",
     "packages/tddy-presenter",

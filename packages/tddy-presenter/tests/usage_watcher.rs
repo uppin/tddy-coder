@@ -23,6 +23,11 @@ fn a_record(id: &str, input: u64, output: u64) -> ConversationRecord {
         output_tokens: output,
         total_tokens: input + output,
         turns: 1,
+        cache_read_tokens: 0,
+        cache_write_tokens: 0,
+        reasoning_tokens: 0,
+        cost_usd: None,
+        parent_id: None,
     }
 }
 
