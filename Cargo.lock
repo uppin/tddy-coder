@@ -14634,6 +14634,7 @@ dependencies = [
  "glob",
  "log",
  "pretty_assertions",
+ "rusqlite",
  "serde",
  "serde_json",
  "serde_yaml",

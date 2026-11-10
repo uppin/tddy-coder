@@ -4,7 +4,7 @@
 **Status**: 🚧 In Progress
 **Type**: Feature
 **Complexity**: 3 — one engine crate plus a spec binding; a SQLite I/O seam (read-only, lock-tolerant); integration tests over a fixture database
-**Branch**: `feature/usage-binding/opencode-sqlite`, base `feature/usage-binding/codex-rollout` (#893) — `#usage-binding 5/5`
+**Branch**: `feature/usage-binding/opencode-sqlite`, base `feature/usage-binding/codex-rollout` (#893) — `#usage-binding 5/5`, PR [#894](https://github.com/uppin/tddy-coder/pull/894), stack [#895](https://github.com/uppin/tddy-coder/stack/895)
 
 ## Initial Discovery
 
@@ -172,7 +172,32 @@ binding. A lock test holds an `EXCLUSIVE` transaction on a second connection.
 
 ## Technical Debt & Production Readiness
 
-(Populated during development.)
+### Contract commit (pass 2, 2026-11-11)
+
+- **The reasoning overlap is unverified.** The only local `opencode.db` holds no sessions (`select
+  count(*) from session_v2` → 0). The binding maps `tokens_output` → `output` and
+  `tokens_reasoning` → `reasoning` with no subtraction. **A TODO for `/green` or the sweep**: check a
+  real store with a reasoning model, and subtract with `CounterExpr` (`#usage-binding 4/5`) if
+  `tokens_output` already includes reasoning.
+- **A missing database reports a zero main row**, as a missing Claude transcript does (1/5's rule).
+  That supersedes *State B*'s "a missing file means no rows". **A locked or busy database reports no
+  rows**, so the caller keeps its last snapshot.
+- **The counters are `CounterExpr` over column names.** A row is presented as a JSON object of its
+  columns, so 4/5's expressions apply unchanged. `cost`, `model` and `name` are `FieldPath`s of one
+  segment, a column name.
+- **`rusqlite = { version = "0.32", features = ["bundled"] }`** is now a `tddy-usage` dependency. It is
+  the version `tddy-semantic-index` already uses, and `Cargo.lock` gains no new crate version.
+- **The fixture DDL is copied from the real `session_v2`** (2026-11-10). The rows are synthesised.
+
+### Red (2026-11-11)
+
+- `opencode_binding_acceptance.rs`: 4 of 5 fail. The locked-store guard holds on the stub.
+- `usage_section_acceptance.rs`: the non-identifier refusal fails. `the_builtin_opencode_spec_binds_its_store`
+  passes, because the YAML is contract data.
+
+A scoped `./test -p tddy-coding-agent-specs -p tddy-usage` gives 20 suites green and 43 failing
+tests, every one a red test of this stack (1/5, 3/5, 4/5 or 5/5). Clippy `-D warnings
+--all-targets` is clean.
 
 ## Decisions & Trade-offs
 
@@ -200,10 +225,10 @@ binding. A lock test holds an `EXCLUSIVE` transaction on a second connection.
 - [x] Cross-check `packages/*/docs/code-issues/` and `docs/dev/todo/` for items this change touches (Step 2b)
 - [x] Create/update PRD documentation
 - [x] Create changeset (this document)
-- [ ] Create failing acceptance tests
-- [ ] Run acceptance tests (verify they fail)
-- [ ] USER REVIEW — acceptance tests
-- [ ] TDD Red — write failing unit/integration tests
+- [x] Create failing acceptance tests
+- [x] Run acceptance tests (verify they fail)
+- [x] USER REVIEW — acceptance tests
+- [x] TDD Red — write failing unit/integration tests
 - [ ] TDD Green — implement with quality code
 - [ ] Update documentation with progress
 - [ ] Repeat Red→Green→Update cycle until feature complete

@@ -16,6 +16,7 @@ mod gather;
 mod jsonl;
 mod registry;
 mod section;
+mod sqlite;
 mod template;
 pub mod token_accounting;
 mod tree;

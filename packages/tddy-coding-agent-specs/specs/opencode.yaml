@@ -62,6 +62,27 @@ extensions:
       list_command: ["{binary}", models]
       adapter: opencode-models
     context_globs: [AGENTS.md, ".agents/**", opencode.json, ".opencode/**"]
+    # Where this agent's token usage lives and how to read it (`#usage-binding 5/5`). OpenCode keeps a
+    # running total per session in `session_v2` of its XDG data store, a spawned session pointing at
+    # its spawner through `parent_id`; it keeps one conversation per worktree (`--continue`), so the
+    # main one is the newest root row in the session's worktree.
+    usage:
+      sources:
+        - format: sqlite
+          path: "{agent_home}/.local/share/opencode/opencode.db"
+          table: session_v2
+          id: id
+          parent: parent_id
+          root: { column: directory, equals: "{worktree}", newest_by: time_updated }
+          name: agent
+          model: model
+          cost: cost
+          tokens:
+            input: tokens_input
+            cache_read: tokens_cache_read
+            cache_write: tokens_cache_write
+            output: tokens_output
+            reasoning: tokens_reasoning
     # A jail's `$HOME` is the session's own scratch, so the person's own OpenCode setup is not in
     # it: a jailed start without a provider route is refused. Every launch — PTY, jailed, ACP from
     # the daemon or from `tddy-coder` — carries the route's configuration inline in

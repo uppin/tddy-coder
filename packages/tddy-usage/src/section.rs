@@ -19,6 +19,45 @@ pub struct UsageSection {
 pub enum UsageSource {
     /// Newline-delimited JSON files, one record per line.
     Jsonl(JsonlSource),
+    /// One row per conversation in a SQLite table, opened read-only (`#usage-binding 5/5`).
+    Sqlite(SqliteSource),
+}
+
+/// A `sqlite` source: the database, the table holding one row per conversation, and which columns
+/// say what. Every table and column name is checked to be a plain identifier when the spec loads,
+/// so a binding cannot carry SQL.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SqliteSource {
+    /// The database file, over the session variables.
+    pub path: PathTemplate,
+    pub table: String,
+    /// The column holding a conversation's id.
+    pub id: String,
+    /// The column holding the id of the conversation a row is nested under; rows whose parent is a
+    /// conversation's id are its children, recursively. `None` for a table with no nesting.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub parent: Option<String>,
+    pub root: RootMatch,
+    /// Counter expressions over the row's column names.
+    pub tokens: CounterMap,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cost: Option<FieldPath>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model: Option<FieldPath>,
+    /// The column naming a child conversation's agent; a child without one is named after its id.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name: Option<FieldPath>,
+}
+
+/// The main conversation: the root row (no parent) whose `column` equals the rendered `equals`,
+/// the newest by `newest_by` when several do.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RootMatch {
+    pub column: String,
+    pub equals: PathTemplate,
+    pub newest_by: String,
 }
 
 /// A `jsonl` source: the conversation's own files, how its children are found, and how a line is
