@@ -19,3 +19,5 @@ The supervisor's relayed path does not have this problem. `ChildEnvironment::bui
 
 Set `USER` and `LOGNAME` to the target account in `wrap_for_user`, beside `HOME`, and add a unit test next to
 the existing `HOME`/`PATH` override test. No other behaviour changes.
+
+**Deferred by the user, 2026-11-10** (#agent-tools TODO gate after the sweep #876): asked "continue the stack or defer?", the user answered "Defer". Left open for a later, separately planned node.
